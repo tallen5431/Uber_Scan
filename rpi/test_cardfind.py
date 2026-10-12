@@ -231,9 +231,12 @@ for _name, _pal in (('dark', TC.NIGHT_CARD), ('light', TC.DAY_CARD)):
     eq('a %s card on a phone turned 1.5\u00b0 inside its box is unsure, for its top'
        % _name, (_r['sure'], _r['why']), (False, _ROLL))
     # At two degrees the button itself is too far out of level to be one: its
-    # ends no longer sit in the card beside them.
+    # ends no longer sit in the card beside them. Named, because the module's
+    # docstring says which test refuses which roll.
     _r = find(TC.degrade(TC.early_look_screen(_pal), 'roll', strength=1.0))
-    ok_('...and at 2\u00b0 it is unsure too (%r)' % _r['why'], not _r['sure'])
+    eq('...and at 2\u00b0 it is unsure too, for its button', (_r['sure'], _r['why']),
+       (False, 'the band near the bottom is not set in a card \u2014 the card under '
+               'a button, not the button'))
 _r = find(TC.degrade(TC.early_look_screen(), 'roll', strength=0.25))
 ok_('...while half a degree is still square enough to be sure of (%r)' % (_r['box'],),
     _r['sure'] and near(_r['box'][1], top_of(TC.EARLY_TOP)))

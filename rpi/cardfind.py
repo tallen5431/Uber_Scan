@@ -30,9 +30,16 @@ picture in rpi/test_cardfind.py made to need it:
     at all, and the card is at least as wide as its bar.);
   - its body must be mostly background, and carry at least three text rows;
   - it must not run off the top of the screen box — then the top is unknown;
-  - its top edge must start abruptly and square to the box: a phone rolled two
-    degrees inside the box it was drawn round slants the edge across rows,
-    and a box placed from a slanted edge cuts one end of every line.
+  - its top edge must start abruptly and square to the box: a phone rolled
+    inside the box it was drawn round slants the edge across rows, and a box
+    placed from a slanted edge cuts one end of every line.
+
+A phone rolled inside its box is refused by one of two of these, depending on
+how far. Measured on the Early-look card, dark and light (testcards.degrade
+'roll'): at 1.5° the bar is still found and the top is refused as not square;
+at 2° the bar itself is refused — its ends have tilted out of the card rows
+beside them, and it reads as the card under a button, not the button. Half a
+degree is sure, at the card's own top.
 
 Glare is the one that shaped the method. Every comparison is against a
 reference taken from the card itself NEAR the pixels being judged — a block
@@ -61,7 +68,10 @@ import numpy as np
 # features: at 600 rows a text line is still several rows tall and the bar is
 # about thirty. Measured on the development box over 36 warped screens, a look
 # costs 27.5ms median against 309ms for the read it follows (8.9%), and is
-# only paid on a read that found a journey and no payout.
+# only paid on a read that found a journey and no payout. That is the look
+# alone: a sure one whose card starts above the box is followed by a whole
+# second read of that card, which costs several times the look (measured in
+# pipeline.Scanner._look and rpi/README.md).
 FIND_HEIGHT = 600
 
 # Where the bar is looked for: from this far above the drawn box's bottom to
@@ -202,8 +212,10 @@ def _bar(g, r0, r1):
     # edge is not quite level — a phone turned a degree or two inside its box —
     # still steps in most blocks at once. Over a single row, a 2° roll put the
     # edge in different rows in different blocks, no row had most of them, and
-    # the roll came back as "no button" rather than as the slanted top that
-    # the walk is built to refuse it for.
+    # the roll came back as "no button". Over SLANT rows the bar is found, and
+    # a roll is refused by what it actually breaks: at 1.5° the card's top,
+    # not square; at 2° the bar's ends, no longer set in the card beside
+    # them (see the module docstring).
     slant = max(2, int(round(SLANT * h)))
     step = np.zeros_like(med)
     step[slant:] = med[slant:] - med[:-slant]

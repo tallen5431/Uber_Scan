@@ -1855,6 +1855,7 @@ class Scanner:
         t3 = time.perf_counter()
         crop_from = 'drawn'
         rescued = 0
+        finder_said = None
 
         # A CARD TALLER THAN THE BOX IT IS READ THROUGH.
         #
@@ -1884,18 +1885,45 @@ class Scanner:
         #
         # The reading is kept only if rescue_refused finds nothing wrong with
         # it; what it found is said as `cropFrom` on everything downstream.
+        #
+        # What it costs is mostly the second read, not the finder. Measured on
+        # the development box (x86), 12 frames a screen: the finder 25-27ms
+        # median on the taller cards, then the found card read whole, 200ms
+        # (Early-look) and 243ms (two-order) median more on a 327-334ms read.
+        # And not only on offer cards: a navigation sheet whose "18 min 6.2 mi"
+        # line falls inside the box is sure of a card above it and pays that
+        # second read on every read, 228ms median on a 143ms read, to refuse
+        # it for no payout; a short sheet asks the finder on every read, 15ms,
+        # and finds the sheet inside the box. On the Pi this is an ESTIMATE,
+        # not measured: the same ratios on its 1.4s read, 0.8-1.0s more. No
+        # guard: a reading with no payout stops the verify beat (scan_pi's
+        # next_verify), so such a screen is read again only when its picture
+        # changes and settles — and the health line's median read time
+        # carries whatever it costs on the rig. See rpi/README.md.
+        #
+        # When it was asked and nothing came of it, why not is `finder`, which
+        # the loop's rate-limited sample line quotes beside the reader's text:
+        # a rescue that never happens otherwise looks exactly like the box
+        # reading "Pit." with no finder at all.
         if (g.card_finder and not g.whole and worth_a_second_look(got['parsed'])
                 and room_above(g.roi)):
             found = CF.find_card(to_grey(screen), g.roi)
-            if found['sure'] and found['box'][1] < float(g.roi[1]) - TALLER:
+            if not found['sure']:
+                finder_said = 'not sure: %s' % found['why']
+            elif found['box'][1] >= float(g.roi[1]) - TALLER:
+                finder_said = 'the card it found starts inside the drawn box'
+            else:
                 again = self._read_box(screen, found['box'], g, dark=g.dark_mode)
                 # A found read whose payout sits against the found top was
                 # emptied by money_is_clipped in _read_box, and has no payout
                 # for rescue_refused to take.
-                if rescue_refused(got['parsed'], again['parsed'], again['text']) is None:
+                refused = rescue_refused(got['parsed'], again['parsed'], again['text'])
+                if refused is None:
                     got = again
                     crop_from = 'found'
                     rescued = 1
+                else:
+                    finder_said = 'read the card found above the box and refused it: %s' % refused
         t4 = time.perf_counter()
         text, parsed, clipped = got['text'], got['parsed'], got['clipped']
         prepped, fitted = got['prepped'], got['fitted']
@@ -1929,6 +1957,11 @@ class Scanner:
             # reader.json and the health tally all say it from here.
             'rescued': rescued,
             'cropFrom': crop_from,
+            # ...and, when the finder was asked and the read is still the
+            # box's, why: its own `why` when it was not sure, or the reason
+            # the read of the card it found was refused. None when it was not
+            # asked or its read was kept.
+            'finder': finder_said,
             'crop': list(got['crop']),
             # The exact picture the reader was given, so a caller can measure how
             # bright it was and whether it was rippling.

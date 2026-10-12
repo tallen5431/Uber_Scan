@@ -2526,8 +2526,29 @@ ones this rig gave before it existed, byte for byte — measured against the
 reader as it stood before, on 240 rendered reads: the same text, parse, crop,
 clipped flag and both of the reader's pictures on all 240. With it on, the 200
 of those reads it did not rescue were identical too. The setup line says which
-it is. A look costs about a tenth of a read (27.5ms against 309ms median on the
-development box) and is paid only on a read that found a journey and no payout.
+it is.
+
+What it costs is mostly the second read, not the look. Measured on the
+development box (x86), 12 frames of each screen — two drawings of it, three
+mount distances, two seeds: the finder itself 25–27ms median on the taller cards, against
+a 327–334ms read; a sure find is then read again whole, 200ms median more
+(178–275) on the Early-look card and 243ms (215–290) on the two-order card. It
+is asked only on a read through a drawn box that found a journey and no payout
+— and that is not only offer cards. A short navigation sheet ("12 min 3.1 mi"
+over an Arrived button) asks it on every read, 15ms median (11–32), and is
+found inside the box, so nothing more is read. A tall sheet whose "18 min
+6.2 mi" line falls inside the box is sure of a card above it and pays the
+second read on every read — 228ms median (203–247) on a 143ms read — before
+refusing it for having no payout; the log's sample line says so (`Card finder:
+read the card found above the box and refused it: …`), as it says why the
+finder was unsure when it was. A trip planner, a tall sheet whose journey is
+above the box, and the short card the box was drawn on never ask it. On the Pi
+these are **estimates, not measurements**: the same ratios on its 1.4s read
+would make a second read 0.8–1.0s more. No guard was added: a reading with no
+payout stops the verify beat (`next_verify`), so a navigation sheet is read
+again only when its picture changes and settles, not on a beat, and how often
+that happens in a shift has not been measured; the health line's median read
+time carries whatever it costs.
 
 **⟳ Re-find is the way back.** With a hand-drawn box in force it looks for the
 screen on the next frame and, if it finds one, makes that the calibration and

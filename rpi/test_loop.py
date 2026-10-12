@@ -2645,6 +2645,34 @@ for _how, _cfg, _argv, _why in (
         % [l for l in _off['logs'] if 'card finder' in l][:1],
         any(l.startswith('setup: card finder OFF (%s)' % _why) for l in _off['logs']))
 
+# ...and when it was asked and nothing came of it, the log's sample line says
+# why beside what the reader saw: a taller card's payout that is never rescued
+# otherwise reads, in the log, exactly like a box that read "Pit." with no
+# finder at all. Unsure, on the Early-look card on a phone turned 1.5° inside
+# its box (testcards.degrade 'roll'); and sure, with the read of the card
+# found holding no payout either — what a navigation sheet whose journey line
+# falls inside the box gets on every read (rpi/README.md).
+for _what, _frame, _found_text, _said in (
+        ('unsure of the card', TC.mount(TC.degrade(TC.early_look_screen(), 'roll',
+                                                   strength=0.75), 720),
+         _EARLY_FOUND, "Card finder: not sure: the card's top edge is not square"),
+        ('refusing the read of the card it found', _EARLY_FRAME, _EARLY_BOX,
+         'Card finder: read the card found above the box and refused it: no payout '
+         'in the found card either')):
+    # The card there from the first frame, so the first sample line is its
+    # own: a blank mount's read asks the finder too and would spend the rate
+    # limit. Run for a fixed time rather than to a read count — with no payout
+    # the verify beat stops after that first round, and a count reached as
+    # the round begins stops the loop before the round is digested.
+    _fl = run(lambda n, k: '', real_look=(_EARLY_BOX, _found_text), offer=_frame,
+              config_extra=_EARLY_CFG, seconds=8.0, appear_at=0.0)
+    _sample = [l for l in _fl['logs'] if 'found nothing usable' in l]
+    ok_('a read the card finder was asked about, %s, says why in the log\'s sample '
+        'line (%r)' % (_what, (_sample or [None])[0]),
+        _fl['finder'] > 0 and any(_said in l for l in _sample))
+    eq('...and puts no payout in the journal',
+       [x.get('pay') for x in _fl['rows'] if not x.get('kind')], [])
+
 # --- a card that showed its payout and no journey keeps its picture ----------
 #
 # A layout the parser has not seen yet — a new Uber card, the first DoorDash

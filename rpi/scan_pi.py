@@ -3960,9 +3960,13 @@ def main():
         why = read_why(out, parsed)
         if why is not None and (now - last_sample) > SAMPLE_EVERY:
             last_sample = now
-            log('read %d found nothing usable (%s, %d in a row). Reader saw: %r'
+            # ...and, on a read the card finder was asked about, what it said:
+            # a taller card's payout that is never rescued looks, in the text
+            # alone, exactly like a box that read "Pit." with no finder at all.
+            log('read %d found nothing usable (%s, %d in a row). Reader saw: %r%s'
                 % (frames, why, failures,
-                   (out.get('text') or '').strip()[:220]))
+                   (out.get('text') or '').strip()[:220],
+                   '. Card finder: %s' % out['finder'] if out.get('finder') else ''))
         # ...and a card that showed its payout and no journey keeps its picture
         # and its text, once per card — per accumulator episode — whatever the
         # log's rate limit did. See UNPARSED_DIR. Not off a ⌖ read, and with
