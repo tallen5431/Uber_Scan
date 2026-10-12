@@ -1796,6 +1796,117 @@ eq('a planner nobody pressed for gives no address, not even the one find_address
    'would take off it', [((d[0] or {}).get('line'), d[1].get('asked'))
                          for d in rp5['dropoffs']], [])
 
+# --- a pickup's address is never the order's destination ---------------------
+#
+# Off a shift: "✓ Took $28.08" pressed with the Trip Planner up — two pickups,
+# each "Address / <street> NW, / Kennesaw, GA <ZIP>", over a closed "Dropoff •
+# 1 order" naming nobody's door. Nobody pressed ⌖, and the order in the car
+# came out holding `dropoff: 'Kennesaw, GA 30144', dropoffScanned: true` — the
+# first restaurant's town. The card box had caught the list scrolling, its top
+# edge between that pickup's street and town lines, and no stop header in the
+# read matched PLANNER_STOP, so nothing called it a planner and find_address
+# took the town line as the last address on the screen.
+#
+# The texts below are that screen's shapes with every address made up: the
+# crop as it cut the list, the header after it read with its bullet as a letter
+# (the reader turned the stop's icon into "Oo" in the very read on file), and
+# the same pickup block read whole under its own header.
+_PICKUP_CUT = ('Kennesaw, GA 30144\nView details\nPickup e 1 order\nFable Grill\n'
+               'Expected by 5:54 PM\nDropoff e 1 order\nPat Q.\nExpected by 6:37 PM\n'
+               'Waybill\nStop New Requests')
+_PICKUP_BLOCK = ('Pickup e 1 order\nFable Grill\nExpected by 5:46 PM\nAddress\n'
+                 '4100 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details\n'
+                 'Stop New Requests')
+for _name, _t in (('the cut list', _PICKUP_CUT), ('the pickup block', _PICKUP_BLOCK)):
+    ok_('the premise: %s is no planner to the reader, has no payout, and '
+        'find_address takes the pickup\'s ZIP off it' % _name,
+        OP.find_planner(_t) is None and OP.parse(_t)['pay'] is None
+        and not OP.parse(_t)['places']
+        and (OP.find_address(_t) or {}).get('zip') == '30144')
+# A card fragment first, so the resample window goes on reading every half
+# second over the planner that replaces it — a still screen otherwise gets one
+# read and the health line, which speaks only after reads, never comes round.
+rpk1 = run(lambda n, k: FRAG if n == 1 else _PICKUP_CUT, extra_argv=['--no-parallel'],
+           seconds=6.0, handoff=tempfile.mkdtemp(), health_every=0.2)
+ok_('the premise: the card box read the cut planner, unpressed (%d reads)'
+    % rpk1['calls'], rpk1['calls'] >= 3 and not any(rpk1['wholes']))
+eq('an address under no Dropoff label, unprompted, is not sent as the order\'s '
+   'destination', [((d[0] or {}).get('line'), d[1].get('asked'))
+                   for d in rpk1['dropoffs']], [])
+ok_('...and the refusal is said on the health line, not silent',
+    any(l.startswith('health') and 'refused for not being under a Dropoff label' in l
+        for l in rpk1['logs']))
+ok_('...and carried on the seen row the journal keeps (%r)'
+    % [x.get('addressNotDropoff') for x in rpk1['rows'] if x.get('kind') == 'seen'],
+    any((x.get('addressNotDropoff') or 0) >= 1
+        for x in rpk1['rows'] if x.get('kind') == 'seen'))
+rpk2 = run(lambda n, k: _PICKUP_BLOCK, extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=tempfile.mkdtemp())
+ok_('the premise: the card box read the pickup block, unpressed (%d reads)'
+    % rpk2['calls'], rpk2['calls'] >= 1)
+eq('an address under a Pickup label, unprompted, is not sent as the order\'s '
+   'destination', [((d[0] or {}).get('line'), d[1].get('asked'))
+                   for d in rpk2['dropoffs']], [])
+# ...and not under a press either. ⌖ says "this screen is the destination"; the
+# screen saying "Pickup" over the address is the screen disagreeing, and a
+# restaurant filed `asked: true` overrules whatever the card said.
+_hpk3 = tempfile.mkdtemp()
+rpk3 = run(_press_on_first_read(_hpk3, ''), extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=_hpk3, dropoff_window=1.0, whole_text=_PICKUP_BLOCK)
+ok_('the premise: the press read the pickup block whole', any(rpk3['wholes']))
+eq('an address under a Pickup label answers a press with nothing, not with the '
+   'restaurant', [((d[0] or {}).get('line'), d[1].get('asked'))
+                  for d in rpk3['dropoffs']], [(None, True)])
+# ...nor a planner whose headers did not read, pressed: the cut list again.
+_hpk4 = tempfile.mkdtemp()
+rpk4 = run(_press_on_first_read(_hpk4, ''), extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=_hpk4, dropoff_window=1.0, whole_text=_PICKUP_CUT)
+eq('an unlabelled address on a screen with the planner\'s furniture answers a '
+   'press with nothing', [((d[0] or {}).get('line'), d[1].get('asked'))
+                          for d in rpk4['dropoffs']], [(None, True)])
+# Each arm of the rule on its own, with the others out of the way: a Pickup
+# label with no planner furniture under a press, and an unlabelled address
+# with no furniture unprompted (refused) and pressed (answered, as it always
+# was — a press over a plain navigation screen needs no label).
+_PICKING = 'Picking up\n12 Fable St, Acworth, GA 30101\n4 min Start'
+_BARE_CUT = 'Kennesaw, GA 30144\nView details\nPickup e 1 order\nFable Grill'
+_BARE_NAV = '1234 Made Up Ln, Acworth, GA 30101 12 min Start'
+ok_('the premise: none of the three carries the planner\'s furniture or a payout',
+    not any(OP.planner_furniture(t) or OP.parse(t)['pay'] is not None
+            or OP.parse(t)['places'] for t in (_PICKING, _BARE_CUT, _BARE_NAV)))
+_hpk6 = tempfile.mkdtemp()
+rpk6 = run(_press_on_first_read(_hpk6, ''), extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=_hpk6, dropoff_window=1.0, whole_text=_PICKING)
+eq('a press over an address under a Pickup label, no planner in sight, is '
+   'answered with nothing', [((d[0] or {}).get('line'), d[1].get('asked'))
+                             for d in rpk6['dropoffs']], [(None, True)])
+rpk7 = run(lambda n, k: _BARE_CUT, extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=tempfile.mkdtemp())
+eq('an unlabelled town line nobody asked for, no planner furniture, is not sent',
+   [((d[0] or {}).get('line'), d[1].get('asked')) for d in rpk7['dropoffs']], [])
+_hpk8 = tempfile.mkdtemp()
+rpk8 = run(_press_on_first_read(_hpk8, ''), extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=_hpk8, dropoff_window=1.0, whole_text=_BARE_NAV)
+eq('...while a press over an unlabelled navigation screen still gets its address',
+   [((d[0] or {}).get('line'), d[1].get('asked')) for d in rpk8['dropoffs']],
+   [('1234 Made Up Ln, Acworth, GA 30101', True)])
+# The other side: the rule is the LABEL, not "a pickup is anywhere on the
+# screen". A screen with a Pickup label above the Dropoff one gives the
+# dropoff's address, unprompted — which is what a guard that refused every
+# screen mentioning a pickup would lose. No merchant under that Pickup: one
+# would make the screen an offer to the payout guard's second arm, which
+# refuses it for its own reason before this rule is asked.
+_BOTH_ENDS = ('Pickup e 1 order complete\n'
+              'Dropoff\n34 Made Up Rd, Acworth, GA 30102\n12 min Start')
+ok_('the premise: that screen names a pickup above the dropoff and is no offer',
+    OP.parse(_BOTH_ENDS)['places'] == [] and OP.parse(_BOTH_ENDS)['pay'] is None
+    and 'Pickup' in _BOTH_ENDS.split('Dropoff')[0])
+rpk5 = run(lambda n, k: _BOTH_ENDS, extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=tempfile.mkdtemp())
+eq('an address under a Dropoff label below a pickup is still the destination, '
+   'unprompted', [((d[0] or {}).get('line'), d[1].get('asked'))
+                  for d in rpk5['dropoffs']], [('34 Made Up Rd, Acworth, GA 30102', False)])
+
 # Whether the journal may keep the stops — names and front doors — is the
 # scanner's to say, because the server does not read its settings: not with
 # "keepPlaces": false, and not with no journal at all.

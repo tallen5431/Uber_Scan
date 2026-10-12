@@ -440,5 +440,41 @@ eq("find_places records the Est. delivery card's two places against no leg",
    _whose, [None, None])
 
 
+# --- which stop an address was printed under ---------------------------------
+#
+# address_stop reads backwards from find_address's answer to the nearest stop
+# label. Off a shift where a Trip Planner pickup's town line ("Kennesaw, GA
+# 30144" — every address below is made up) was filed as the held order's
+# destination; see digest() in scan_pi.py for what is refused on each answer.
+_PK = ('Pickup e 1 order\nFable Grill\nExpected by 5:46 PM\nAddress\n'
+       '4100 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details')
+eq('address_stop: an address under a Pickup label is a pickup',
+   P.address_stop(_PK), 'pickup')
+eq('address_stop: a town line cut off above its header is under no label',
+   P.address_stop('Kennesaw, GA 30144\nView details\nPickup e 1 order\nFable Grill'),
+   None)
+eq('address_stop: the nearest label wins — a dropoff after a pickup',
+   P.address_stop('Pickup\nFable Grill\n12 Fable St, Acworth, GA 30101\n'
+                  'Dropoff\n34 Made Up Rd, Acworth, GA 30102'), 'dropoff')
+eq('address_stop: ...and a pickup after a dropoff header',
+   P.address_stop('Dropoff - 1 order\nPat Q.\nPickup e 1 order\nAddress\n'
+                  '12 Fable St,\nAcworth, GA 30101'), 'pickup')
+eq('address_stop: a navigation screen\'s Dropoff is a dropoff',
+   P.address_stop('Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 12 min Start'),
+   'dropoff')
+eq('address_stop: "Picked up" is no pickup label, "Deliver to" is a dropoff one',
+   P.address_stop('Picked up\nDeliver to Pat Q.\n12 Fable St, Acworth, GA 30101'),
+   'dropoff')
+eq('address_stop: no address, no answer', P.address_stop('Dropoff - 1 order'), None)
+eq('planner_furniture: a planner block whose header did not read still has it',
+   P.planner_furniture('Kennesaw, GA 30144\nView details\nFable Grill\n'
+                       'Expected by 5:54 PM'), True)
+eq('planner_furniture: a navigation screen has none',
+   P.planner_furniture('Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 '
+                       '12 min Start'), False)
+eq('find_address is unchanged by the walk address_stop shares with it',
+   (P.find_address(_PK) or {}).get('line'), '4100 Fable Mill Pkwy NW, Kennesaw, GA 30144')
+
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)
 sys.exit(1 if bad else 0)

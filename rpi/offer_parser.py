@@ -2268,10 +2268,18 @@ def find_address(text):
     check later, against an offer that has not arrived yet. So a state that is
     not a state, or five digits that are not a plausible ZIP, is None.
     """
+    return _find_address(text)[0]
+
+
+def _find_address(text):
+    """find_address's answer, and where in normalize(text) its town ends —
+    which is what address_stop asks the labels in front of it about. One walk
+    for both, so the two can never disagree about which address is the one."""
     if not text:
-        return None
+        return None, None
     text = normalize(text)
     best = None
+    best_end = None
     after = 0          # where the previous address ended; see `head` below.
     for m in ADDRESS.finditer(text):
         state = m.group(2).upper()
@@ -2353,7 +2361,69 @@ def find_address(text):
         # — comes first. Same reasoning as find_dropoff, which takes the last
         # place a card names for the same reason.
         best = found
-    return best
+        best_end = m.end(1)
+    return best, best_end
+
+
+# WHICH STOP the screen printed an address under.
+#
+# find_address reads `, ST ZIP` out of free text and is blind to what the
+# screen calls the place. That was safe while the only screens with a ZIP and
+# no payout were navigation screens, which name one place and label it
+# "Dropoff". Uber's Trip Planner changed that: its PICKUP blocks print the
+# restaurant's address with a ZIP — "Address / <street> NW, / Kennesaw, GA
+# 30144" on the rig's own photograph of one, two pickups above "Dropoff • 1
+# order", the dropoff block closed and naming nobody's door.
+#
+# What happened on shift: the card box caught the planner scrolling, the crop's
+# top edge cut between the first pickup's street line and its town line, and no
+# stop header in that read matched PLANNER_STOP — so find_planner said "not a
+# planner", find_address took "Kennesaw, GA 30144" as the last address on the
+# screen, and it went out UNPROMPTED. The held order had no destination, an
+# unprompted sighting may fill a blank (server.js), and the panel and
+# /api/status then held a $28.08 order as ending at the restaurant's town with
+# `dropoffScanned: true` — a confidently wrong destination nobody asked for.
+#
+# The label is the grammar that says which end an address is. Read BACKWARDS
+# from the address, the nearest one wins: "Pickup ... Dropoff 12 Oak St, ..., GA
+# 30101" is a dropoff, "Dropoff ... Pickup ... Address ... GA 30144" is not.
+# Searched up to the end of the town, not to the start of the street, because
+# TOWN can swallow a word straight in front of it ("Dropoff Acworth, GA") and a
+# label it swallowed still came first.
+#
+# "Picked up" is not a pickup label — it is what a delivery screen says once the
+# food is in the car — and the pattern does not reach it. "Deliver by" is a
+# deadline, not a label, and is not a dropoff one.
+ADDRESS_STOP = re.compile(
+    r'\b(?:(pick ?-?up|picking up)|(drop ?-?off|deliver(?:ing)? to))\b',
+    re.IGNORECASE | ASCII)
+
+
+def address_stop(text):
+    """'pickup' or 'dropoff': the stop label nearest in front of the address
+    find_address takes off `text` — or None, when no label precedes it or there
+    is no address at all. What a caller does with None is its own policy; see
+    digest() in scan_pi.py, where an address nobody asked for needs 'dropoff'.
+    """
+    found, end = _find_address(text)
+    if found is None:
+        return None
+    kind = None
+    for m in ADDRESS_STOP.finditer(normalize(text)[:end]):
+        kind = 'pickup' if m.group(1) else 'dropoff'
+    return kind
+
+
+def planner_furniture(text):
+    """True when `text` carries a line only Uber's Trip Planner prints — its
+    title, an "Expected by" time, a line opening "Address" — whether or not a
+    stop header read. Those three and no more, because those are the three the
+    measurement behind PLANNER_STOP covers: over the owner's week, 6,657 frames
+    and stored texts, not one carries any of them. "Waybill" was not counted
+    there and is left out here."""
+    lines = _planner_lines(text)[0]
+    return any(PLANNER_TITLE.match(l) or PLANNER_ADDRESS.match(l)
+               or PLANNER_EXPECTED.search(l) for l in lines)
 
 
 # --- the stops on Uber's Trip Planner -----------------------------------------

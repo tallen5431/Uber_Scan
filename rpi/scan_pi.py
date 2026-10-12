@@ -1456,6 +1456,11 @@ class Health:
         # missing destination is find_address being strict on purpose.
         self.address_refused_as_offer = 0
         self.street_seen_no_address = 0
+        # `address_not_dropoff` is the label guard's firing rate: an address
+        # off a payout-free screen that was refused because the screen did not
+        # print it under a Dropoff label — under a Pickup one, or, unprompted,
+        # under none. See digest().
+        self.address_not_dropoff = 0
         # `screens_kept` is how many payout-free screens were recorded as
         # having followed a card — the corpus an accept-detector has to be
         # built on, and which does not exist yet. A run total for the same
@@ -1607,6 +1612,7 @@ class Health:
                 # Run totals, not window totals — see __init__.
                 'streetNoAddress': self.street_seen_no_address,
                 'addressAsOffer': self.address_refused_as_offer,
+                'addressNotDropoff': self.address_not_dropoff,
                 'screensKept': self.screens_kept,
                 'repeats': self.repeats,
                 'relocks': self.relocks, 'rebaselines': self.rebaselines,
@@ -1684,6 +1690,11 @@ class Health:
                         'offer card'
                         % (self.address_refused_as_offer,
                            '' if self.address_refused_as_offer == 1 else 'es'))
+        if self.address_not_dropoff:
+            bits.append('%d address%s since start refused for not being under '
+                        'a Dropoff label'
+                        % (self.address_not_dropoff,
+                           '' if self.address_not_dropoff == 1 else 'es'))
         if self.screens_kept:
             bits.append('%d screen%s since start recorded as following a card'
                         % (self.screens_kept,
@@ -3648,6 +3659,45 @@ def main():
             found, unfiled = (planner_destination(planner,
                                                   OP.planner_bounded(out.get('text')))
                               if answers else (None, None))
+        # AN ADDRESS THE SCREEN DID NOT LABEL A DROPOFF IS NOT A DESTINATION.
+        #
+        # On shift: "✓ Took $28.08" pressed with the Trip Planner up — two
+        # pickups, each with a restaurant address and a ZIP, above a closed
+        # "Dropoff • 1 order". Nobody pressed ⌖. The card box caught the list
+        # mid-scroll with its top edge between the first pickup's street and
+        # town lines, no stop header in that read matched PLANNER_STOP, so
+        # `planner` above was None and `found` was find_address's answer:
+        # "Kennesaw, GA 30144", the restaurant's town. It went out unprompted,
+        # server.js filled the held order's empty destination with it, and
+        # /api/status said `dropoff: 'Kennesaw, GA 30144', dropoffScanned:
+        # true` for an order going somewhere else — the stack line and the map
+        # then measured every offer against a restaurant.
+        #
+        # So the label in front of the address decides (OP.address_stop):
+        #   * printed under a PICKUP label — refused, asked or not. A press says
+        #     "this screen is the destination"; it does not make a restaurant
+        #     one when the screen itself says it is not.
+        #   * under no label at all — refused when nobody asked, because an
+        #     unprompted sighting is the rig filling a blank on its own say-so
+        #     and has nothing else to stand on; and refused under a press too
+        #     when the screen carries the planner's furniture, because that is
+        #     a planner whose headers did not read and its unlabelled addresses
+        #     are as likely pickups as not. A press over a plain navigation
+        #     screen with no label keeps the answer it always had.
+        # Refusing costs a blank the driver can fill with ⌖; taking it costs a
+        # wrong destination nothing on the panel flags. Not on a planner that
+        # read (`planner`), whose own grammar has already decided `found`.
+        if found and planner is None:
+            stop = OP.address_stop(out.get('text'))
+            if stop == 'pickup' or (stop != 'dropoff' and (
+                    not asked or OP.planner_furniture(out.get('text')))):
+                found = None
+                # Counted, like the payout guard's refusals, so a destination
+                # this throws away is a number on the health line and the `seen`
+                # row rather than a silence. No address in the log: it is a
+                # restaurant's or a customer's door, and the count is the
+                # question.
+                health.address_not_dropoff += 1
         # ...and KEPT, which is new, and is the one thing standing between this
         # rig and knowing which offers the driver took.
         #
@@ -4246,6 +4296,7 @@ def main():
             # adding them up.
             'streetNoAddress': tally.get('streetNoAddress'),
             'addressAsOffer': tally.get('addressAsOffer'),
+            'addressNotDropoff': tally.get('addressNotDropoff'),
             # ...and how the reading went in the window, which was the rest of
             # the health line and went no further than the log. See
             # Health._window. `reads` and `failed` were in the tally all along
