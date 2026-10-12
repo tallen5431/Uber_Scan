@@ -645,6 +645,50 @@
               background: rgba(11, 13, 16, .85); pointer-events: none; }
   #hereNote.grey { color: var(--muted); }
   #hereNote[hidden] { display: none; }
+  /* The key to drawHow's marks, one line across the map's foot, above
+     Leaflet's attribution (which keeps the bottom-right corner, 16px) and
+     clear of nothing else Leaflet draws. One line and never two: it is read
+     in a glance, and rpi/test_layout.py holds it to one row inside the map
+     at 800x480, 1024x600 and 480x320, nothing spilling. The glyphs carry the
+     colours drawHow uses, so the key is the marks themselves. */
+  #liveMap { position: relative; }
+  #mapKey { position: absolute; left: 8px; bottom: 18px; z-index: 1001;
+            max-width: calc(100% - 16px); box-sizing: border-box;
+            padding: 1px 7px; border-radius: 9px; font-size: 12px;
+            line-height: 1.35; white-space: nowrap; overflow: hidden;
+            color: var(--text); background: rgba(11, 13, 16, .85);
+            pointer-events: none; }
+  #mapKey[hidden] { display: none; }
+  #mapKey .k-disc { color: #7aa2f7; }
+  #mapKey .k-pin { color: #17c964; }
+  #mapKey .k-cand { color: #8a8f98; }
+  #mapKey .k-out { color: #8a8f98; }
+  /* What a mark of drawHow's says about itself, shown while the pointer is
+     on it (or it was tapped): ONE box across the map's foot, over the key,
+     wrapped to the map's width — never a Leaflet tooltip beside the mark. A
+     refusal with its disc is long (the suite's McDonald's outside a 9.4 mi
+     card's disc is 142 characters), and Leaflet puts a tooltip beside its
+     mark and lets the map clip it: wrapped at 200px, measured in DejaVu Sans
+     with Leaflet 1.9.4's own placement at the mark's every position along
+     the map's middle row, up to 92px of its 200 hidden on the 3.5" hat's
+     228px map and 12px on the 800x480 panel's 388px one. A box the map places rather than the mark is inside the map
+     wherever the mark is; rpi/test_layout.py holds it there, whole, at
+     every panel. */
+  #mapTip { position: absolute; left: 8px; right: 8px; bottom: 18px;
+            z-index: 1002; box-sizing: border-box; padding: 3px 7px;
+            border-radius: 6px; font-size: 12px; line-height: 1.35;
+            white-space: normal; overflow-wrap: anywhere; color: var(--text);
+            background: rgba(11, 13, 16, .92); pointer-events: none; }
+  #mapTip[hidden] { display: none; }
+  /* The 3.5" hat's map is 228px wide and the whole key 270px at this size,
+     so there it drops two words and two pixels of padding a side, and is
+     205px in a 216px room: "◯ reach · ● pin · ● found · ○ outside".
+     Measured in DejaVu Sans; rpi/test_layout.py holds both forms. */
+  @media (max-height: 380px) {
+    #mapKey { left: 6px; max-width: calc(100% - 12px); padding: 1px 5px; }
+    #mapKey .k-long { display: none; }
+    #mapTip { left: 6px; right: 6px; padding: 1px 5px; }
+  }
 
   /* Drawing the box to read. The scanner finds the phone by looking for it,
      which is right almost always and useless when it is not — a reflection, a
@@ -865,7 +909,13 @@
          the geocoder is asked about places customers live, so switching here
          is the press that decides it — the same gate as "Place them on a map"
          on the map page. -->
-    <div id="liveMap" hidden></div>
+    <!-- The key to how each place was found (drawHow): one line over the
+         map's bottom edge, inside the map so it is drawn only where the map
+         is. Shown only when there is something of that drawn. -->
+    <div id="liveMap" hidden><div id="mapKey" hidden><span class="k-all"><span class="k-item" data-k="disc"><span class="k-disc">◯</span> <span class="k-long">card's </span>reach</span><span
+      class="k-item" data-k="pin"><span class="k-sep"> · </span><span class="k-pin">●</span> pin</span><span
+      class="k-item" data-k="cand"><span class="k-sep"> · </span><span class="k-cand">●</span> <span class="k-long">also </span>found</span><span
+      class="k-item" data-k="out"><span class="k-sep"> · </span><span class="k-out">○</span> outside</span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
     <!-- What the "you are here" dot says about itself — "±12 m · 2 s old" —
          or why there is no dot: "GPS too rough here (±130 m)". Over the map's
          corner rather than in the caption below it, which is the detour's row
@@ -3925,6 +3975,10 @@
   var hereAnchor = null;
   var hereWanted = false;
   var hereNote = document.getElementById('hereNote');
+  // The key to how each place was found; see drawHow.
+  var mapKey = document.getElementById('mapKey');
+  // ...and what one of those marks says, while it is pointed at; see tipOn.
+  var mapTip = document.getElementById('mapTip');
   // What is drawn now — position, error and grey — so the once-a-second tick
   // that ages the label does not take the dot down and put it back each time,
   // closing its popup under the driver's pointer.
@@ -4066,7 +4120,11 @@
              // NucBox could not be asked at all (and the public map was) —
              // and how many it answered before that, so "public map used"
              // is never said of a pin the NucBox gave.
-             nbxWhy: {}, nbxDown: null, nbxAnswered: 0 };
+             nbxWhy: {}, nbxDown: null, nbxAnswered: 0,
+             // ...and every answer it gave, pinned or not, with its disc:
+             // what drawHow draws of how each place was found. The same
+             // objects the walk chose from, so drawing asks nothing.
+             nbxSeen: {} };
   }
 
   /* A place name, cut to what fits the caption's cap.
@@ -4185,6 +4243,11 @@
       if (!theMap) {
         theMap = L.map(liveMap, { zoomControl: true }).setView([33.94, -84.58], 11);
         watchHands(theMap);
+        // A tapped mark's words go when the map itself is tapped: on a touch
+        // panel there is no pointer to leave the mark. drawHow's marks do not
+        // pass their own taps on to the map (bubblingMouseEvents), so this is
+        // never the same tap that showed them.
+        theMap.on('click', function () { mapTip.hidden = true; });
         // The attribution stays. These tiles are given away on the condition
         // that it does, and a panel being small is not an exemption.
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -4291,6 +4354,7 @@
           }
           found[q] = got.at || null;
           want.nbxAnswered++;
+          want.nbxSeen[q] = { res: got, disc: disc, whose: whose };
           if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
           landed();
         }
@@ -4421,6 +4485,141 @@
   function clearMap() {
     if (theMap && mapLayer) { theMap.removeLayer(mapLayer); mapLayer = null; }
     lastBounds = null;
+    mapKey.hidden = true;
+    mapTip.hidden = true;
+  }
+
+  /* A mark's words, in the one box across the map's foot (#mapTip), while
+     the pointer is on it or after it was tapped — never beside the mark,
+     where the map clips them (see #mapTip's rule). The words are set as
+     text, so nothing in a place name is read as markup. Kept on the layer
+     as `mvTip` too, which is how the suite reads what each mark says. */
+  function tipOn(layer, text) {
+    layer.mvTip = text;
+    function show() { mapTip.textContent = text; mapTip.hidden = false; }
+    function hide() { if (mapTip.textContent === text) mapTip.hidden = true; }
+    return layer.on('mouseover', show).on('click', show).on('mouseout', hide);
+  }
+
+  /* HOW EACH PLACE WAS FOUND, drawn — the driver's words: "show on the map
+     how the rig located each place, so they can see at a glance that it is
+     working (or why it refused)".
+
+     Under the pins, faint, and deciding nothing: MV.discShape and MV.located
+     say what to draw, off what the walk already holds — the card's own fix
+     and distance, and each NucBox answer kept with what was chosen from it
+     (want.nbxSeen). No question is asked to draw any of it.
+
+       the card's disc    a dashed circle at the card's fix, its distance
+                          plus half a mile: the card's reach. Its PICKUP pin
+                          is refused past it (MV.cardRefuses, red), and the
+                          order in the car's end past ITS card's disc; the
+                          dropoff pin is held to no disc. With the NucBox
+                          answering, each of the card's places is searched
+                          inside it and a candidate past it is never used;
+                          with no NucBox (or one that could not be asked)
+                          they go to the public geocoder in the 60 mi box
+                          round the car, then with no box, and only the
+                          pickup's refusal above holds. Blue as the car it is
+                          drawn round; amber for the order in the car.
+       also found         a small grey dot for every candidate the NucBox
+                          sent (a corner: every meeting of its two streets),
+                          edged in the disc's colour; the pin in colour on
+                          top is what was chosen from them.
+       outside            a hollow dashed ring: sent, but past the disc.
+       a street           a numberless street's stretch inside the disc, as
+                          a line — solid in the disc's colour when it was
+                          pinned, grey and dashed when refused. Nothing
+                          outside the disc is drawn.
+
+     A refused place has no pin and its candidates carry the refusal as what
+     they say when pointed at (tipOn), word for word the caption's (MV.nbxRefusal, cut to the same
+     DISC_PLACE_SHOWN), so the map and the line under it cannot disagree.
+
+     None of it has a say in the view. drawMap's one fit is the car and the
+     pins, as it was before any of this was drawn, and a disc bigger than
+     that view runs past its edge. Fitted to the discs too, measured with
+     Leaflet 1.9.4's own getBoundsZoom and the fit's 34px padding, a 9.4 mi
+     card took the hat's 228px map from zoom 10 to 8 and a 20 mi card to 7,
+     to frame a circle that says only how far the card reaches; and a candidate outside its disc gets no say for the
+     reason a stray gets none on the map page. Returns whether anything was
+     drawn, which is whether the key under the map is shown. */
+  var HOW_COLOUR = { 'new': '#7aa2f7', held: '#f5a524' };
+  var HOW_GREY = '#8a8f98';
+
+  function drawHow(want) {
+    // Every layer made first and only then put on the map, all of them, so a
+    // throw part-way leaves nothing of it half drawn (see drawMap).
+    var made = [];
+    // Which marks of the key are on the map: the circle, the grey (a
+    // candidate dot, or a refused street's grey stretch) and the hollow. A
+    // pinned street's stretch, in the disc's colour, is the pin's own.
+    var kinds = { disc: false, cand: false, out: false };
+    var cards = [['new', MV.discFor(want.card)]];
+    if (want.held) cards.push(['held', MV.discFor(want.heldCard)]);
+    cards.forEach(function (c) {
+      var d = MV.discShape(c[1]);
+      if (!d) return;
+      kinds.disc = true;
+      made.push(L.circle([d.lat, d.lon], {
+        radius: d.metres, weight: 1.5, color: HOW_COLOUR[c[0]], opacity: .7,
+        dashArray: '5 6', fillColor: HOW_COLOUR[c[0]], fillOpacity: .04,
+        interactive: false, className: 'mv-how mv-disc mv-' + c[0]
+      }));
+    });
+    var seen = want.nbxSeen || {};
+    Object.keys(seen).forEach(function (q) {
+      var s = seen[q];
+      var how = MV.located(s.res, s.disc, shortPlace(q, DISC_PLACE_SHOWN), s.whose);
+      var colour = HOW_COLOUR[s.whose] || HOW_GREY;
+      how.lines.forEach(function (l) {
+        var chosen = l.kind === 'chosen';
+        if (!chosen) kinds.cand = true;
+        made.push(tipOn(L.polyline(l.pts, {
+          color: chosen ? colour : HOW_GREY, weight: chosen ? 5 : 4,
+          opacity: chosen ? .55 : .8, dashArray: chosen ? null : '6 5',
+          bubblingMouseEvents: false,
+          className: 'mv-how mv-street mv-' + l.kind + ' mv-' + s.whose
+        }), l.tip));
+      });
+      how.marks.forEach(function (m) {
+        var out = m.kind === 'outside';
+        kinds[out ? 'out' : 'cand'] = true;
+        made.push(tipOn(L.circleMarker([m.lat, m.lon], {
+          radius: 5, weight: 2, color: out ? HOW_GREY : colour,
+          dashArray: out ? '2 3' : null,
+          fillColor: HOW_GREY, fillOpacity: out ? 0 : .9,
+          bubblingMouseEvents: false,
+          className: 'mv-how ' + (out ? 'mv-out' : 'mv-cand') + ' mv-' + s.whose
+        }), m.tip));
+      });
+    });
+    // Under the pins, which drawMap put down first: each sent to the back in
+    // turn from the last made, so the discs end lowest and the candidates
+    // over them, as they were made.
+    for (var i = made.length - 1; i >= 0; i--) made[i].addTo(mapLayer).bringToBack();
+    return made.length ? kinds : false;
+  }
+
+  /* The key, for what drawHow did: the kinds it drew, and the key names
+     those and no others (plus "pin" when a pin is on the map); false,
+     nothing to explain and no key; null, it failed and the key says only
+     that — not the marks, which are not there. It named all four whatever
+     was drawn: "○ outside" over a map with no hollow ring on it. */
+  function showKey(drawn, pinned) {
+    mapKey.hidden = drawn === false;
+    mapKey.querySelector('.k-all').hidden = drawn === null;
+    mapKey.querySelector('.k-fail').hidden = drawn !== null;
+    if (!drawn) return;
+    var has = { disc: drawn.disc, pin: pinned, cand: drawn.cand, out: drawn.out };
+    var first = true;
+    [].forEach.call(mapKey.querySelectorAll('.k-item'), function (el) {
+      var on = !!has[el.getAttribute('data-k')];
+      el.hidden = !on;
+      var sep = el.querySelector('.k-sep');
+      if (sep) sep.hidden = first;
+      if (on) first = false;
+    });
   }
 
   /* What the pins are, and which of them cannot be right — asked once, by
@@ -4466,6 +4665,8 @@
 
     if (mapLayer) theMap.removeLayer(mapLayer);
     mapLayer = L.layerGroup().addTo(theMap);
+    // The marks the tip box spoke for are gone with the layer.
+    mapTip.hidden = true;
     var bounds = [];
     function put(at, colour, label, name, ring) {
       if (!at) return;
@@ -4539,6 +4740,25 @@
                  { color: '#c084fc', weight: 3, dashArray: '2 7',
                    opacity: .9 }).addTo(mapLayer);
     }
+
+    /* How each place was found, AFTER everything above and guarded, so that
+       any failure in it costs it alone: the car, the pins, the runs, the view
+       and the line under the map are already decided and are drawn the
+       same. Drawn first and unguarded it took all of them down — and the
+       likely throw is not a bug in it: sw.js revalidates each file on its
+       own, so this page can run against the map-view.js before it, where
+       MV.discShape is undefined. A failure leaves nothing of it half drawn
+       (drawHow puts its layers down only once all are made) and the key
+       says it was not drawn rather than naming marks that are not there.
+       Under the pins all the same: see drawHow. */
+    var drewHow;
+    try {
+      drewHow = drawHow(want);
+    } catch (e) {
+      drewHow = null;
+      if (window.console) console.error('drawing how each place was found:', e);
+    }
+    showKey(drewHow, !!(held || pick || drop));
 
     fitView(bounds);
     // Kept so coming back to this same card can put both of them back — the

@@ -1172,6 +1172,43 @@ ok_('...and rpi/cropbox.py, which says a drawn box is read exactly, names the on
     'read that is not',
     'cardfind' in open(os.path.join(ROOT, 'rpi', 'cropbox.py'), encoding='utf-8').read())
 
+# --- drawing how each place was found asks nothing ----------------------------
+#
+# The driver asked to see how the rig located each place. What is drawn is
+# what the walk already decided, off the answers it already holds (the
+# NucBox's list kept as `seen`, the public walk's `asked`): drawing must never
+# be the thing that asks. The browser suites count what reached the network
+# on the fixtures they drive; this holds the drawing code itself to calling
+# nothing that asks — a fetch, the geocoder, the NucBox — on any path.
+def _js_function(src, name):
+    """The body of `function name(` in src, by brace depth, or None."""
+    at = src.find('function %s(' % name)
+    if at < 0:
+        return None
+    i = src.index('{', at)
+    depth = 0
+    for j in range(i, len(src)):
+        if src[j] == '{':
+            depth += 1
+        elif src[j] == '}':
+            depth -= 1
+            if depth == 0:
+                return src[i:j + 1]
+    return None
+
+
+_ASKS = re.compile(r'\bfetch\(|\.place\(|\.lookup\(|\.walk\(|\.search\(|\.corner\('
+                   r'|\.stretch\(|\.road\(|\.detour\(|\.get\(|XMLHttpRequest|nbxSettings')
+_mv_src = open(os.path.join(ROOT, 'map-view.js'), encoding='utf-8').read()
+for _file, _src, _fn in (('live.html', _live_src, 'drawHow'),
+                         ('map-view.js', _mv_src, 'located'),
+                         ('map-view.js', _mv_src, 'discShape'),
+                         ('map-view.js', _mv_src, 'howFound')):
+    _body = _js_function(_src, _fn)
+    eq('%s\'s %s draws what was decided and asks nothing (%r)'
+       % (_file, _fn, _body and _ASKS.findall(_body)),
+       _body is not None and _ASKS.findall(_body), [])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)

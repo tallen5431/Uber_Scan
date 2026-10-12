@@ -427,10 +427,50 @@ all:
   rig's own server refuses is a bug in the page, said as one ("no pin for X
   — a bug: the rig refused the question"), and is never handed to the public
   map instead.
+* **How each place was found, drawn under the pins.** The card's disc as a
+  faint dashed circle round its fix (blue, the car's colour; the order in
+  the car's own card's disc in amber): the card's distance plus half a mile.
+  It is what the PICKUP pin is refused past (red), and the order in the
+  car's end past its own card's disc; the dropoff pin is held to no disc.
+  With the NucBox answering, each of the card's places is searched inside
+  it and a candidate past it is never used; with no NucBox, or one that
+  could not be asked, the places go to the public geocoder in the 60 mi box
+  round the car and then with no box, and only the pickup's refusal holds.
+  Every candidate the NucBox sent is a small grey dot, a corner's every
+  meeting the same; one past the disc's edge a hollow dashed ring; a
+  numberless street's stretch inside the disc a line, solid when pinned and
+  grey when refused, nothing of it outside the disc drawn. A refused place
+  has no pin and its candidates say the caption's own refusal: pointed at or
+  tapped, a mark's words show in one box across the map's foot, wrapped to
+  the map's width, never in a tooltip beside the mark that the map would
+  clip. A key across the map's foot names the marks that are on the map and
+  no others, from "◯ card's reach · ● pin · ● also found · ○ outside" ("◯
+  reach · ● pin · ● found · ○ outside" on the 3.5" hat); if drawing them
+  failed it says "how each was found: not drawn", and the car, pins, runs
+  and line under the map are drawn the same. It is drawn off the answers
+  the walk already holds and asks nothing. The view is fitted to the car
+  and the pins, never to the discs, which run past its edge when they are
+  bigger: at each draw of the card (the car at once, again as each place
+  lands, and once all are in), whenever the server sends a message while
+  that card is on the glass and Map view is up (the same fit again, so a
+  pan lasts until the next message), when ⛶ Map is pressed round to it,
+  and once to take in the "you are here" dot if there is one when Map view
+  opens; the dot moving never moves it. A card with no yardstick has no
+  disc drawn: its sixty miles are not the card's reach. The public
+  geocoder's one answer has no list behind it, so with no NucBox answering
+  only the discs are drawn.
 
 `map.html` and the offers page still use the public geocoder: they place a
 whole window of offers rather than one card's disc, and choosing among
-candidates there is a different question that has not been answered.
+candidates there is a different question that has not been answered. What
+`map.html` can show of how a place was found is its own walk: each pin's
+popup says whether it was found inside the box searched round where the car
+was (its size read off the box: the 60 miles widened by half a grid step,
+about 137 mi north–south by 134 east–west in Atlanta), asked with no box, or
+asked wide because the box found nothing — and a place answered wide and
+outside its box is RINGED, a dashed ring round its filled dot: it was used.
+Not hollow, which on the panel's Map view means a candidate that was not
+used. A one-line key across the map's foot names the marks on it.
 
 ## Files
 

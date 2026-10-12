@@ -83,6 +83,7 @@ only after a gpsd banner has actually been seen.
 
 import argparse
 import json
+import math
 import re
 import socket
 import sys
@@ -129,6 +130,83 @@ STALE_AFTER = 20.0
 # cannot see multipath. The parked-scatter check in the first week is what says
 # whether it is an honest bound on this receiver.
 FIX_ERR_MAX = 50.0
+
+# A POSITION THAT DOES NOT MOVE, WHICH IS WHAT THE OWNER'S RECEIVER SENT.
+#
+# gpsd switched the VK-162 into u-blox binary (its log says `"driver":"u-blox"`,
+# PROTVER 14.00) and from then on its TPV `lat`/`lon` stopped changing while
+# everything else on the same line went on updating. Five consecutive TPVs,
+# a second apart, carried bit-identical lat/lon while `ecefx` moved +0.11 m and
+# `ecefy` -2.65 m (the owner's coordinates are not repeated here, ECEF being
+# a coordinate too); an hour and a half of
+# driving later the heartbeat still carried the same point, 0.6 s old, gpsOk
+# true. A u-blox 7 has no NAV-PVT, so gpsd's lat/lon come from NAV-POSLLH, and
+# what this receiver plainly WAS sending is NAV-SOL — the receiver's solution
+# as an earth-centred x/y/z, which gpsd reports as `ecefx/y/z`. The frozen
+# point is not even where that solution put the car: the ECEF on those five
+# lines lies 3,048.6-3,048.8 m WEST of the reported lat/lon (the east-west
+# part alone, which needs no altitude and no `ecefz` to measure — measured
+# here from the two printed lines). Every fix the gate passed that day was a
+# number with a fresh age and a good error estimate, three kilometres from the
+# car: this project's worst fault in its plainest form.
+#
+# Two defences, both below. parse_line works lat/lon out of the line's own ECEF
+# and uses it when the two disagree (ECEF_AGREE); and Phone notices a lat/lon
+# that has not moved by one bit while the car plainly has, which usable()
+# refuses as `frozen` (FROZEN_AFTER, MOVING, ECEF_MOVED). The cure at the
+# source is gpsd's `-b`; see rpi/README.md, "A USB receiver on the Pi".
+
+# WGS84, which is the datum both gpsd's lat/lon and its ECEF are in.
+WGS84_A = 6378137.0
+WGS84_F = 1 / 298.257223563
+WGS84_E2 = WGS84_F * (2 - WGS84_F)
+
+# How far gpsd's lat/lon may be from its own ECEF, in metres, before the ECEF
+# is believed instead.
+#
+# When both are the receiver's, they are ONE navigation solution printed two
+# ways — NAV-POSLLH to 1e-7 degree (about a centimetre) and NAV-SOL to a
+# centimetre — so a working receiver's two agree to centimetres, and anything
+# larger is one of them not being this epoch's. Why 50 rather than one metre:
+# gpsd merges the messages of a cycle into one TPV, and a cycle split across
+# two epochs puts the halves one epoch apart, which at 1 Hz is the car's speed
+# in metres; 50 m is 112 mph for a second. And 50 is FIX_ERR_MAX: a
+# disagreement this file tolerates is never larger than an error the gate
+# already passes as usable, so keeping gpsd's figure inside it costs nothing
+# the gate had not agreed to. The owner's frozen fix disagreed by over 3 km.
+ECEF_AGREE = 50.0
+
+# How long a lat/lon may stay bit-identical while the car is moving, in
+# seconds, before usable() calls it `frozen`.
+#
+# A moving car cannot repeat a lat/lon to the last printed bit: gpsd prints
+# nine decimals (0.1 mm), and at MOVING the car covers two metres an epoch.
+# Five rather than one because gpsd can send more than one TPV for one epoch,
+# and a repeat of the same epoch is not a frozen receiver; five consecutive
+# identical TPVs is exactly what the owner's log showed, and five seconds is a
+# quarter of STALE_AFTER, so a frozen position is refused well before an old
+# one would have been.
+FROZEN_AFTER = 5.0
+
+# What counts as moving while the lat/lon stands still: the TPV's own `speed`,
+# or the speed of its ECEF velocity (`ecefvx/vy/vz`), over MOVING m/s — or its
+# ECEF position more than ECEF_MOVED metres from where it was when the lat/lon
+# last changed.
+#
+# MOVING is 2 m/s (4.5 mph): a parked receiver's speed is noise around zero,
+# and the owner's five frozen lines, taken two minutes after the rig booted,
+# moved their ECEF 2.65 m in four seconds — 0.66 m/s, a third of this (whether
+# the car was parked then is the owner's account, not measured here).
+# ECEF_MOVED is 25 m: over this receiver's own stated one-sigma figures,
+# measured indoors on the rig (epx 17.8, epy 12.8, ecefpAcc 15.7), so a parked
+# receiver wandering inside its own error is not read as a car driving; and
+# under ECEF_AGREE, so this is the arm that refuses a frozen lat/lon in the
+# stretch before its own ECEF has moved far enough to be used instead.
+#
+# A receiver PARKED in a real static hold — lat/lon held, ECEF inside that
+# jitter, speed near zero — passes, because it is right.
+MOVING = 2.0
+ECEF_MOVED = 25.0
 
 # Long enough that a phone which accepted the connection and then stopped
 # talking is noticed, short enough that stop() is honoured promptly.
@@ -233,6 +311,55 @@ def _number(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v
 
 
+def ecef_to_lla(x, y, z):
+    """Earth-centred x/y/z in metres -> (lat, lon, height above the
+    ellipsoid), WGS84, or None for a point nowhere near the earth's surface.
+
+    Longitude is exact (atan2). Latitude by Bowring's closed form, which
+    needs no iteration and is good to well under a millimetre at any height a
+    car can be at — rpi/test_gps.py holds it to half a metre against points
+    built the other way, from the Dead Sea shore to Everest and both poles.
+    Pure arithmetic, so a NaN in is a None out, not a position.
+    """
+    if not all(_number(v) for v in (x, y, z)):
+        return None
+    r = math.sqrt(x * x + y * y + z * z)
+    # A receiver with no solution sends zeros; one with a corrupt one can send
+    # anything. The ellipsoid's radius runs 6,356,752 m (pole) to 6,378,137 m
+    # (equator); outside 6,200-6,500 km it is not a car's position.
+    if not 6.2e6 < r < 6.5e6:
+        return None
+    a, e2 = WGS84_A, WGS84_E2
+    b = a * (1 - WGS84_F)
+    ep2 = (a * a - b * b) / (b * b)
+    p = math.hypot(x, y)
+    lon = math.atan2(y, x)
+    th = math.atan2(z * a, p * b)
+    lat = math.atan2(z + ep2 * b * math.sin(th) ** 3,
+                     p - e2 * a * math.cos(th) ** 3)
+    n = a / math.sqrt(1 - e2 * math.sin(lat) ** 2)
+    # Height off whichever of cos and sin is the larger, so that neither the
+    # equator nor a pole divides by nothing.
+    if abs(math.cos(lat)) > abs(math.sin(lat)):
+        h = p / math.cos(lat) - n
+    else:
+        h = z / math.sin(lat) - n * (1 - e2)
+    return math.degrees(lat), math.degrees(lon), h
+
+
+def metres_apart(lat1, lon1, lat2, lon2):
+    """Ground distance between two nearby points, in metres.
+
+    Equirectangular on a sphere of the WGS84 semi-major axis: at the distances
+    it is asked about here — tens of metres to a few kilometres — its error is
+    a small fraction of a percent, far inside any bound it is compared with.
+    """
+    k = math.pi / 180.0
+    dx = (lon2 - lon1) * k * math.cos((lat1 + lat2) / 2.0 * k)
+    dy = (lat2 - lat1) * k
+    return WGS84_A * math.hypot(dx, dy)
+
+
 def fresh(age, stale_after=STALE_AFTER):
     """The staleness rule, stated once: an age in seconds, on the local
     monotonic clock, no older than `stale_after` and not negative.
@@ -261,6 +388,12 @@ def usable(fix, age=None, stale_after=STALE_AFTER):
                none, or a TPV gpsd sent without `eph`
       nomode   no 2D or 3D mode stated
       rough    an error estimate over FIX_ERR_MAX
+      frozen   a lat/lon that has not changed by one bit for over
+               FROZEN_AFTER seconds (`heldFor`, which Phone puts on the fix)
+               while the car is moving: its `speed` or `ecefSpeed` over
+               MOVING, or its ECEF over ECEF_MOVED metres from where it was
+               when the lat/lon last changed (`heldMoved`). What the owner's
+               VK-162 did under gpsd's binary mode; see FROZEN_AFTER.
       stale    older than `stale_after` (or of no known age)
 
     Quality before age, deliberately. A stale fix is drawn grey where it was,
@@ -278,6 +411,14 @@ def usable(fix, age=None, stale_after=STALE_AFTER):
         return False, 'nomode'
     if err > FIX_ERR_MAX:
         return False, 'rough'
+    # A good error estimate says nothing here: the owner's frozen fix carried
+    # eph 27.8 m, well inside FIX_ERR_MAX, three kilometres from the car.
+    held = fix.get('heldFor')
+    if _number(held) and held > FROZEN_AFTER and any(
+            _number(fix.get(k)) and fix[k] > limit
+            for k, limit in (('speed', MOVING), ('ecefSpeed', MOVING),
+                             ('heldMoved', ECEF_MOVED))):
+        return False, 'frozen'
     if not fresh(fix.get('ageSeconds') if age is None else age, stale_after):
         return False, 'stale'
     return True, None
@@ -336,6 +477,7 @@ def parse_line(line):
         when = msg.get('time')
         if isinstance(when, str) and when:
             out['gpsTime'] = when
+        _ecef(msg, out)
         return out
 
     if not _NMEA.match(line):
@@ -394,6 +536,39 @@ def parse_line(line):
     return out
 
 
+def _ecef(msg, out):
+    """The TPV's own ECEF, checked against its lat/lon — and believed instead
+    of them when the two disagree by more than ECEF_AGREE metres.
+
+    Adds to `out`, in place: `ecef` ([x, y, z], metres) and `ecefGap` (metres
+    between gpsd's lat/lon and the ECEF's) whenever the line carries all
+    three; `ecefSpeed` (m/s) from `ecefvx/vy/vz`. On disagreement the fix's
+    lat/lon BECOME the ECEF's, `source` becomes 'ecef', gpsd's pair is kept as
+    `gpsdLat`/`gpsdLon`, and `note` says what was done — a fix that was
+    corrected says so on itself. The error estimate is left as gpsd sent it,
+    and the gate still asks it: whether that `eph` is the receiver's own
+    accuracy on this path or gpsd's HDOP model has not been measured.
+    A TPV with no ECEF is left exactly as it came.
+    """
+    v = [msg.get(k) for k in ('ecefvx', 'ecefvy', 'ecefvz')]
+    if all(_number(c) for c in v):
+        out['ecefSpeed'] = math.sqrt(sum(c * c for c in v))
+    xyz = [msg.get(k) for k in ('ecefx', 'ecefy', 'ecefz')]
+    got = ecef_to_lla(*xyz)
+    if got is None:
+        return
+    lat, lon = got[0], got[1]
+    out['ecef'] = [float(c) for c in xyz]
+    gap = metres_apart(out['lat'], out['lon'], lat, lon)
+    out['ecefGap'] = round(gap, 1)
+    if gap > ECEF_AGREE:
+        out['gpsdLat'], out['gpsdLon'] = out['lat'], out['lon']
+        out['lat'], out['lon'] = lat, lon
+        out['source'] = 'ecef'
+        out['note'] = ("gpsd's lat/lon were %.0f m from its own ECEF; "
+                       'the ECEF position is used' % gap)
+
+
 class Phone(object):
     """The phone's GPS, read on a thread, never in the way.
 
@@ -420,6 +595,10 @@ class Phone(object):
         self._state = 'off'
         self._error = None
         self._lines = 0
+        # When the lat/lon last changed, and where the ECEF put the car then:
+        # see _held().
+        self._held_at = None
+        self._held_from = None
         self._stop = threading.Event()
         self._thread = None
 
@@ -468,6 +647,32 @@ class Phone(object):
         got['freshFor'] = (round(self.stale_after - age, 1)
                            if fresh(age, self.stale_after) else 0.0)
         return got
+
+    def _held(self, got, now):
+        """Put on a fresh fix how long its lat/lon have stood bit-identical
+        (`heldFor`, seconds by this clock) and, when it carries ECEF, how far
+        the ECEF has moved over the ground meanwhile (`heldMoved`, metres).
+        Called holding the lock, with the fix about to be stored.
+
+        Reported, not judged: usable() decides whether a held position is a
+        parked car or a frozen receiver, from these and the speed. Bit-identical
+        because that is what a receiver repeating itself sends, and nothing
+        coarser is safe — a car at a light moves its lat/lon by millimetres.
+        Horizontal, because a parked receiver's height wanders further than
+        its position and a car does not drive upward.
+        """
+        prev = self._fix
+        here = got.get('ecef')
+        here = ecef_to_lla(*here) if here else None
+        if prev is None or got['lat'] != prev['lat'] \
+                or got['lon'] != prev['lon']:
+            self._held_at, self._held_from = now, here
+        elif self._held_from is None:
+            self._held_from = here
+        got['heldFor'] = round(now - self._held_at, 2)
+        if here is not None and self._held_from is not None:
+            got['heldMoved'] = round(metres_apart(
+                self._held_from[0], self._held_from[1], here[0], here[1]), 1)
 
     def state(self):
         """A word for the dashboard, and why, when there is a why.
@@ -590,8 +795,9 @@ class Phone(object):
                     if got is None:
                         continue
                     with self._lock:
-                        self._fix = got
                         self._at = self._clock()
+                        self._held(got, self._at)
+                        self._fix = got
                         self._state = 'fixed'
                         self._error = None
         finally:
@@ -630,6 +836,11 @@ def main(argv=None):
                     got['lat'], got['lon'], got['source'], got['ageSeconds'],
                     got.get('mode'), got.get('err'),
                     'usable' if got['ok'] else 'refused: %s' % got['why'])
+                # ...and a position worked out from the ECEF says so, every
+                # line: it means gpsd's own lat/lon are wrong; see -b in
+                # rpi/README.md.
+                if got.get('note'):
+                    line += ' — ' + got['note']
             else:
                 s = phone.state()
                 line = '%s%s' % (s['state'],

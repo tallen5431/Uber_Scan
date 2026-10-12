@@ -509,6 +509,8 @@ CAPTION_LINES = [
      'GPS on this card gave no accuracy to measure from'),
     ('this card, no mode',
      'GPS on this card had no 2D/3D fix to measure from'),
+    ('this card, a frozen fix',
+     'GPS on this card was stuck on one spot, so nothing to measure from'),
     ('this card, not judged',
      'GPS fix on this card was never judged, so nothing to measure from'),
     ('the held card, no fix',
@@ -523,6 +525,9 @@ CAPTION_LINES = [
      'GPS on the order in your car gave no accuracy to check its end'),
     ('the held card, no mode',
      'GPS on the order in your car had no 2D/3D fix to check its end'),
+    ('the held card, a frozen fix',
+     'GPS on the order in your car was stuck on one spot, so its end cannot '
+     'be checked'),
     ('the held card, not judged',
      'GPS fix on the order in your car was never judged, so its end cannot '
      'be checked'),
@@ -789,7 +794,7 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 76)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 78)
 eq('...and thirty of its entries declare a tail the clamp may eat',
    len(_DECLARED), 30)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
@@ -1424,6 +1429,48 @@ const SNAP_MEASURE = (fixture) => {
           note.hidden = true;
           return out;
         }, HERE_LINES);
+        // ...and its one-line key to the pins, every item of it shown (the
+        // widest it gets), put back from the page's own markup — fetched from
+        // this server, so it is the key the page ships — when the offline
+        // path has written over the map's box.
+        out[panel[0] + ' map key'] = await page.evaluate(async () => {
+          const box = document.getElementById('map');
+          let key = document.getElementById('mapKey');
+          if (!key) {
+            const src = await (await fetch('/map.html')).text();
+            const doc = new DOMParser().parseFromString(src, 'text/html');
+            box.appendChild(document.importNode(doc.getElementById('mapKey'), true));
+            key = document.getElementById('mapKey');
+          }
+          key.hidden = false;
+          key.querySelectorAll('[hidden]').forEach((e) => { e.hidden = false; });
+          const first = key.querySelector('.k-item .k-sep');
+          if (first && first.closest('.k-item') === key.querySelector('.k-item')) first.hidden = true;
+          const map = box.getBoundingClientRect();
+          const r = key.getBoundingClientRect();
+          const tops = {};
+          let text = '';
+          const walk = document.createTreeWalker(key, NodeFilter.SHOW_TEXT);
+          let n;
+          while ((n = walk.nextNode())) {
+            const rg = document.createRange();
+            for (let i = 0; i < n.length; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (c.width || c.height) { tops[Math.round(c.top)] = 1; text += n.data[i]; }
+            }
+          }
+          const out = {
+            inside: r.left >= map.left - 0.5 && r.right <= map.right + 0.5
+              && r.top >= map.top - 0.5 && r.bottom <= map.bottom + 0.5,
+            rows: Object.keys(tops).length,
+            spills: key.scrollWidth > key.clientWidth + 1,
+            text: text.replace(/\s+/g, ' ').trim(),
+            w: Math.round(r.width), mapW: Math.round(map.width) };
+          key.hidden = true;
+          return out;
+        });
       }
       // The thing this panel is mostly used for: reading the phone through it
       // and working it with a bluetooth mouse. That view is only worth having
@@ -1714,6 +1761,92 @@ const SNAP_MEASURE = (fixture) => {
           note.textContent = '';
           return out;
         }, LIVE_HERE_LINES);
+        // ...and the key to how each place was found (drawHow), across the
+        // map's foot: shown as the page's own rule draws it on this panel,
+        // and asked the same of — inside the map, below the zoom buttons
+        // (10px in, two 30px buttons and their 2px borders: 74px), ONE row,
+        // nothing cut — plus which of its two forms this panel gets.
+        // Both of its forms: what it says of the marks, and what it says
+        // when drawing them failed (showKey(null)).
+        const KEY_MEASURE = (failed) => {
+          const key = document.getElementById('mapKey');
+          const map = document.getElementById('liveMap').getBoundingClientRect();
+          key.hidden = false;
+          key.querySelector('.k-all').hidden = failed;
+          key.querySelector('.k-fail').hidden = !failed;
+          const r = key.getBoundingClientRect();
+          const tops = {};
+          const walk = document.createTreeWalker(key, NodeFilter.SHOW_TEXT);
+          let text = '', n;
+          while ((n = walk.nextNode())) {
+            const rg = document.createRange();
+            for (let i = 0; i < n.length; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (c.width || c.height) { tops[Math.round(c.top)] = 1; text += n.data[i]; }
+            }
+          }
+          const out = {
+            inside: r.left >= map.left - 0.5 && r.right <= map.right + 0.5
+              && r.top >= map.top - 0.5 && r.bottom <= map.bottom + 0.5,
+            belowZoom: r.top >= map.top + 74,
+            rows: Object.keys(tops).length,
+            spills: key.scrollWidth > key.clientWidth + 1
+              || key.scrollHeight > key.clientHeight + 1,
+            text: text.replace(/\s+/g, ' ').trim(),
+            w: Math.round(r.width), mapW: Math.round(map.width) };
+          key.hidden = true;
+          key.querySelector('.k-all').hidden = false;
+          key.querySelector('.k-fail').hidden = true;
+          return out;
+        };
+        shown.key = await page.evaluate(KEY_MEASURE, false);
+        shown.keyFailed = await page.evaluate(KEY_MEASURE, true);
+        // ...and what a mark of drawHow's says when pointed at (#mapTip):
+        // the longest the suite's marks say — a refused McDonald's with the
+        // branch outside its 9.9 mi disc, 142 characters — in the one box
+        // across the map's foot. The map places it, not the mark, so where
+        // the mark is does not move it; what is asked is what a screenshot
+        // shows: inside the map, every word in it (nothing cut), and its rows.
+        // It replaced a Leaflet tooltip beside the mark, which the map clipped
+        // by up to 92px on the hat (see #mapTip's rule).
+        shown.tip = await page.evaluate((text) => {
+          const tip = document.getElementById('mapTip');
+          const map = document.getElementById('liveMap').getBoundingClientRect();
+          tip.textContent = text;
+          tip.hidden = false;
+          const r = tip.getBoundingClientRect();
+          const tops = {};
+          let seen = '';
+          const n = tip.firstChild;
+          const rg = document.createRange();
+          for (let i = 0; i < n.length; i++) {
+            rg.setStart(n, i);
+            rg.setEnd(n, i + 1);
+            const c = rg.getBoundingClientRect();
+            if (!c.width && !c.height) { seen += n.data[i]; continue; }
+            if (c.left >= map.left - 0.5 && c.right <= map.right + 0.5
+                && c.top >= map.top - 0.5 && c.bottom <= map.bottom + 0.5
+                && c.right <= r.right + 0.5 && c.bottom <= r.bottom + 0.5) {
+              seen += n.data[i];
+              tops[Math.round(c.top)] = 1;
+            }
+          }
+          const out = {
+            inside: r.left >= map.left - 0.5 && r.right <= map.right + 0.5
+              && r.top >= map.top - 0.5 && r.bottom <= map.bottom + 0.5,
+            whole: seen === text,
+            spills: tip.scrollWidth > tip.clientWidth + 1
+              || tip.scrollHeight > tip.clientHeight + 1,
+            rows: Object.keys(tops).length,
+            h: Math.round(r.height), mapH: Math.round(map.height),
+            w: Math.round(r.width), mapW: Math.round(map.width) };
+          tip.hidden = true;
+          tip.textContent = '';
+          return out;
+        }, "no pin for McDonald's… — 2 fit the card and disagree · within 9.4 mi of you"
+           + " · this one 10.6 mi from the card's fix, outside the 9.9 mi searched");
         shown.captionStyle = await page.evaluate(() => {
           const cs = getComputedStyle(document.getElementById('viewNote'));
           return { overflow: cs.overflow,
@@ -3053,8 +3186,8 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say seventy-three things, so all
-                # seventy-three are put in it and measured. Three rules, and they are not the same
+                # occupant and it can say seventy-eight things, so all
+                # seventy-eight are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #
                 #   the cap    — no sentence may take more rows than the clamp
@@ -3130,6 +3263,35 @@ try:
                     ok_('...in two rows at most, nothing spilling, at %s (%r)'
                         % (panel, (m.get('rows'), m.get('spills'))),
                         (m.get('rows') or 9) <= 2 and not m.get('spills'))
+                # --- the key to how each place was found ----------------
+                #
+                # One line across the map's foot, in a glance: grey, colour,
+                # hollow and the circle. On the 3.5" hat the map is 228px
+                # wide and the whole key 270px, so there it drops two words;
+                # what has to hold on every panel is that the form it gets
+                # is one row, whole, on the map, below the zoom buttons.
+                key = phone.get('key') or {}
+                ok_('the map\'s key sits inside the map, below the zoom buttons, at %s (%r)'
+                    % (panel, key), key.get('inside') and key.get('belowZoom'))
+                ok_('...in one row, nothing cut, at %s (%r)'
+                    % (panel, (key.get('rows'), key.get('spills'), key.get('w'), key.get('mapW'))),
+                    key.get('rows') == 1 and not key.get('spills'))
+                eq('...saying the circle, the pin, the grey and the hollow at %s' % panel,
+                   key.get('text'),
+                   "◯ reach · ● pin · ● found · ○ outside" if h <= 380
+                   else "◯ card's reach · ● pin · ● also found · ○ outside")
+                key = phone.get('keyFailed') or {}
+                ok_('the key saying how each place was found was not drawn sits inside '
+                    'the map, below the zoom buttons, in one row, nothing cut, at %s (%r)'
+                    % (panel, key),
+                    key.get('inside') and key.get('belowZoom') and key.get('rows') == 1
+                    and not key.get('spills')
+                    and key.get('text') == 'how each was found: not drawn')
+                # --- what a mark says, pointed at -------------------------
+                tip = phone.get('tip') or {}
+                ok_('a mark\'s longest reason sits inside the map, every word of it '
+                    'readable, nothing spilling, at %s (%r)' % (panel, tip),
+                    tip.get('inside') and tip.get('whole') and not tip.get('spills'))
 
                 # ...and the way out. A cycle that cannot be completed is worse
                 # than a toggle: the driver pressed once for a look and cannot
@@ -3198,6 +3360,16 @@ try:
                         ok_('...inside it top to bottom, in two rows at most, at '
                             '%s (%r)' % (panel, (m.get('rows'), m.get('mapH'))),
                             m.get('inside') and (m.get('rows') or 9) <= 2)
+                # ...and its key to the pins, all four items shown: one row,
+                # nothing cut, across the map; inside it top to bottom where
+                # the page gives the map room (as for the label above).
+                mk = got.get('%s map key' % panel) or {}
+                ok_('map.html\'s key to its pins is one row, nothing cut, within the '
+                    'map\'s width, at %s (%r)' % (panel, mk),
+                    mk.get('rows') == 1 and not mk.get('spills')
+                    and (mk.get('w') or 999) <= (mk.get('mapW') or 0)
+                    and (h < 400 or mk.get('inside'))
+                    and mk.get('text') == '● pickup · ● dropoff · ● stray · ◉ outside its box')
 
             # A line of prose has a width past which it stops being readable.
             # Widening the across-the-screen breakpoint to all of landscape put

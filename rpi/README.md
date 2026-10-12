@@ -2469,7 +2469,8 @@ to its top. Only a **sure** answer whose top is above the box's is read, through
 the same helper as the box, the way up the box's read decided, and clipped the
 same way. The reading is kept only if it moves none of the minutes, miles or
 deadline the box read, its text holds one dollar figure and no second one (a
-found crop is one card; two figures are two cards), and its payout is printed
+found crop is one card; two figures are two cards; a "+$0.50 included" chip or
+a "+$2.00 promo"-style line about the card's own pay is not a figure), and its payout is printed
 as a card prints one (to the cent, or a whole dollar with its label straight
 after). Never on a ⌖ read,
 never with the box at the top of the screen box, never on a read that found a
@@ -2503,6 +2504,29 @@ either), and the same $9.40 card drawn on its own
 all six frames tried. What it cost the cards above:
 nothing — the 576 and 288 frames give the same tallies, rescue for rescue,
 with the rule and without it.
+
+What it cost a card that prints a second `$` line about its own pay was
+measured separately, on the Early-look card with one such line added, dark
+and light at four mount widths, 8 frames each. As the rule was first written,
+"Early look • +$2.00 promo", "Surge $1.50 extra" or "Boost +$3.00" in the
+header, or "$14.48 incl. $3 tip" as the pay line, refused the found read on
+**8 of 8** each: no payout, which fails safe — the same as the finder off —
+but loses the card. A "+$0.50 included" chip was never counted and was
+rescued on 8 of 8. The parser now knows those lines for what they are
+(`PAY_PART` in `offer_parser.py`, the same grammar as the chip), so they are
+not a second figure: all four, and "+$2.00 Peak Pay", are rescued at the
+card's own $14.48 on 8 of 8. A line outside that grammar still counts as a
+second card — "Tip $3.00" in the header is refused on 8 of 8.
+
+The same lines **inside** the drawn box, under a headline the box cut off,
+were worse, and that was older than the finder: the parser took them as the
+payout — "Includes $3.00 tip" $3.00, PASS at $5.1/hr; "+$2.00 promo" and
+"+$2.00 Peak Pay" $2.00, PASS at $3.4/hr; 8 of 8 each, with the finder never
+asked because the read had a payout. Now they are no payout, the finder is
+asked, and the card is rescued at $14.48 on 8 of 8. "Tip $3.00" there is
+still taken, $3.00 at $5.1/hr on 8 of 8: it has the word on one side only,
+and a grammar wide enough for it would also match "Includes expected tip
+$14.48" — a real headline, read with its label first.
 
 It says what it did, and says it of the payout shown rather than of the last
 read. The panel shows the merged reading, and a card read once off a card
@@ -4429,12 +4453,48 @@ verified there, on the rig.
 
 **What it was seen to do.** gpsd 3.22 on Raspberry Pi OS opened it with
 `"driver":"u-blox"`. Indoors, its TPV lines carried mode 3, `eph` 27.8 m,
-`epx` 17.8, `epy` 12.8 and `ecefpAcc` 15.7. And parked, it holds latitude and
-longitude **exactly** still — a static hold — so ten minutes in the driveway
-says nothing about how accurate it is: a scatter test needs the car moving, or
-a log long enough to see the hold let go. Whether gpsd's u-blox path reports
+`epx` 17.8, `epy` 12.8 and `ecefpAcc` 15.7. Whether gpsd's u-blox path reports
 this receiver's own accuracy as `eph` or works it out from HDOP has not been
 measured here.
+
+**What it then did, which was wrong for a whole shift.** The latitude and
+longitude this file used to call a parked static hold were not one. Under
+gpsd's binary mode (`"driver":"u-blox"`, PROTVER 14.00 — a u-blox 7, which has
+no NAV-PVT) the TPV's `lat`/`lon` **froze**: five consecutive TPVs a second
+apart carried the same nine decimals while the same lines' `ecefx`/`ecefy`
+moved (+0.11 m and −2.65 m), and an hour and a half of driving later the
+heartbeat still carried that point, 0.6 s old, `gpsOk` true, `gpsErr` 16.8 —
+so every position the panel showed or an offer stamped was the boot position,
+dressed as a fresh good fix. The ECEF on those lines, which is the receiver's
+own live solution (NAV-SOL), lay 3,049 m west of the frozen lat/lon. The likely
+cause is that gpsd's lat/lon come from NAV-POSLLH and the receiver, as gpsd
+configured it, was not sending that message, while NAV-SOL kept coming;
+"likely" because the UBX traffic itself was not captured.
+
+`gps.py` now defends against it twice, in the one gate. A TPV that carries
+`ecefx/y/z` has its lat/lon worked out from them too, and when gpsd's pair is
+more than 50 m from them (`ECEF_AGREE` — a working receiver's two agree to
+centimetres) the ECEF position is used, marked `source: "ecef"` with a note,
+gpsd's pair kept beside it. And a lat/lon that stays bit-identical for more
+than 5 s while the TPV's speed or ECEF velocity says over 2 m/s, or its ECEF
+has moved over 25 m, is refused as `frozen`: the panel's map says "GPS stuck
+on one spot" rather than drawing a dot where the car was minutes ago. A car
+parked in a real static hold — position still, ECEF inside its jitter, speed
+near zero — is not refused, because it is right. The reasoning for each figure
+is at `FROZEN_AFTER` in `gps.py`.
+
+**The cure at the source is `-b`.** gpsd's `-b` (read-only, "broken-device
+safety") stops it switching the receiver into binary, so the VK-162 stays on
+the NMEA it powers up talking, and gpsd's lat/lon come from GGA/RMC, which a
+u-blox 7 sends by default. A receiver gpsd has already switched stays switched
+until it loses power: after adding `-b`, **unplug the receiver and plug it back
+in** (or reboot with it unplugged) so it comes up in NMEA again, then check
+`gpspipe -w -n 10` shows `"driver":"NMEA0183"`, not `"u-blox"`. One thing
+changes with it: on the NMEA path gpsd's `eph` is its own HDOP model (HDOP ×
+19 m, measured in the design study), not the receiver's figure — the gate's
+`FIX_ERR_MAX` of 50 m still applies to it, and 50 m is HDOP 2.6 or better.
+NMEA TPVs carry no ECEF, so the frozen-position check is the defence that
+remains there.
 
 **Setting it up on the Pi:**
 
@@ -4442,7 +4502,9 @@ measured here.
 sudo apt install gpsd gpsd-clients
 # /etc/default/gpsd
 DEVICES="/dev/ttyACM0"
-GPSD_OPTIONS="-n"          # keep reading with no client, so a fix is warm when the scanner asks
+GPSD_OPTIONS="-n -b"       # -n: keep reading with no client, so a fix is warm when the scanner asks
+                           # -b: never switch the receiver to binary, whose lat/lon froze (above);
+                           #     unplug and replug the receiver once after adding it
 USBAUTO="true"
 sudo systemctl restart gpsd
 # ModemManager, where it is installed, opens new /dev/ttyACM* devices to see
@@ -4470,8 +4532,9 @@ inside the gate, and where it loses the sky — and nothing on the panel reads i
 **One gate, in one place.** Every fix carries what the receiver said about it
 — `mode`, and `err`, gpsd's `eph` in metres — and `gps.usable()` decides once
 whether it is good enough to show or compare: a 2D or 3D mode, an error
-estimate, at most `FIX_ERR_MAX` (50 m to start; the first week sets it), and
-inside the twenty-second staleness rule. Its answer travels on the fix as
+estimate, at most `FIX_ERR_MAX` (50 m to start; the first week sets it), a
+position that is not `frozen` (above), and inside the twenty-second staleness
+rule. Its answer travels on the fix as
 `ok`/`why` and on every row as `gpsOk`/`gpsWhy`, and nothing downstream asks
 again: the map boxes, the trail, the stray test and the panel's detour anchor
 all read `gpsOk`. Mode alone bounds nothing — real gpsd made a four-satellite

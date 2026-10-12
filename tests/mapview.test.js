@@ -120,6 +120,10 @@ eq('a rough fix is not drawn, and says why with the figure',
 eq('a fix with no error figure says so rather than vanishing',
    (MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsOk: false, gpsWhy: 'unrated' }, 0)
     || {}).line, MV.GPS_REFUSED.unrated);
+var stuck = MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 16.8,
+                         gpsMode: 3, gpsOk: false, gpsWhy: 'frozen' }, 0);
+eq('a frozen fix is not drawn as where the car is, and says it is stuck',
+   stuck && [stuck.lat, stuck.line].join('|'), '|GPS stuck on one spot');
 eq('no fix at all is nothing drawn and nothing said', MV.hereDot(null, 0), null);
 eq('...and a beat that says no fix is the same', MV.hereDot({ lat: null }, 0), null);
 eq('a fix with no time left on it is grey from the start',
@@ -253,6 +257,11 @@ eq('a fix with no 2D/3D mode says so',
    MV.fixLine(MV.cardFix(card({ gpsMode: null, gpsOk: false, gpsWhy: 'nomode' })),
               'new'),
    'GPS on this card had no 2D/3D fix to measure from');
+// The owner's VK-162 under gpsd's binary mode: one position repeated while
+// the car drove. rpi/gps.py refuses it as `frozen`.
+eq('a fix the GPS kept repeating while the car moved says it was stuck',
+   MV.fixLine(MV.cardFix(card({ gpsOk: false, gpsWhy: 'frozen' })), 'new'),
+   'GPS on this card was stuck on one spot, so nothing to measure from');
 eq('a coordinate nobody judged is not a fix either',
    MV.fixLine(MV.cardFix(card({ gpsOk: undefined, gpsWhy: undefined })), 'new'),
    'GPS fix on this card was never judged, so nothing to measure from');
@@ -279,6 +288,10 @@ eq('...and a rough one, with the figure',
    MV.fixLine(MV.cardFix(card({ gpsErr: 88.0, gpsOk: false, gpsWhy: 'rough' })),
               'held'),
    'GPS fix on the order in your car too rough to check its end (±88 m)');
+eq('...and a stuck one',
+   MV.fixLine(MV.cardFix(card({ gpsOk: false, gpsWhy: 'frozen' })), 'held'),
+   'GPS on the order in your car was stuck on one spot, so its end cannot be '
+   + 'checked');
 eq('a held order on a one-leg card has no yardstick yet for its end',
    MV.againstCard(card({ hasTotal: false }), SQUARE, HELD_END, 'X', 'held'),
    'the order in your car is a kind of card with no yardstick yet for its end');
@@ -1441,6 +1454,132 @@ async function nucbox() {
     eq('no NucBox line speaks of minutes', words.filter(function (w) {
       return /\bmin/.test(w);
     }).length, 0);
+
+    /* HOW EACH PLACE WAS FOUND, as Map view draws it (MV.discShape,
+       MV.located): what the NucBox sent kept beside what was chosen from it
+       (`seen`), so drawing it asks nobody anything. Each kind: a pin and the
+       candidates beside it, a refusal, candidates outside the disc, a door
+       answered by its street, a cut list, a corner's meetings, a street's
+       stretch — and the answers with no list behind them. */
+    var dS = MV.discShape(d94);
+    eq('the card\'s disc is drawn at its fix, its distance and the half mile, in metres',
+       [dS.lat, dS.lon, dS.metres.toFixed(3)].join(','),
+       [SQ.lat, SQ.lon, (9.9 * 1609.344).toFixed(3)].join(','));
+    eq('...none for a card with no yardstick (its sixty miles are no card\'s reach), '
+       + 'and none with no fix', [MV.discShape(MV.discFor(card({ legs: 1, hasTotal: false }))),
+                                 MV.discShape(null)].join(','), ',');
+
+    // The relay stubbed with all four McDonald's, unbounded, counting every
+    // question it is asked.
+    var stubAsked = 0;
+    var allMcd = hitsOf(FAKE.MCD);
+    var stubbed = new MV.NbxSearch({ gap: 0, fetch: function () {
+      stubAsked++;
+      return Promise.resolve({ ok: true, status: 200, json: function () {
+        return Promise.resolve({ ok: true, hits: allMcd });
+      } });
+    } });
+    var pinned = await stubbed.place("McDonald's", d30);
+    eq('the answer carries every candidate the NucBox sent, beside the one chosen',
+       JSON.stringify([pinned.at && pinned.at.lat, pinned.seen && pinned.seen.hits.length]),
+       JSON.stringify([33.983, 4]));
+    var lp = MV.located(pinned, d30, "McDonald's", 'new');
+    eq('a pin: the one inside drawn grey under it, the three past the disc hollow',
+       lp.marks.map(function (m) { return m.kind; }).join(','),
+       'candidate,outside,outside,outside');
+    eq('...the one inside saying it was the pin',
+       (lp.marks[0] || {}).tip, "McDonald's — the one inside the 3.5 mi searched, pinned");
+    eq('...and one outside saying how far out it was, and that it was not used',
+       (lp.marks[2] || {}).tip, "McDonald's — 10.6 mi from the card's fix, outside the 3.5 mi "
+       + 'searched, not used');
+    var refused = await stubbed.place("McDonald's", d94);
+    var lr = MV.located(refused, d94, "McDonald's", 'new');
+    eq('a refusal: no pin, the two inside drawn grey with the caption\'s own words',
+       [refused.at, lr.marks.filter(function (m) {
+         return m.kind === 'candidate' && m.tip === MV.nbxRefusal(refused, d94, "McDonald's", 'new');
+       }).length].join(','), ',2');
+    eq('...and the two past its edge hollow, the refusal and how far out',
+       lr.marks.filter(function (m) { return m.kind === 'outside'; })
+         .map(function (m) { return m.tip.split(' · this one ')[1]; }).join(' | '),
+       "10.6 mi from the card's fix, outside the 9.9 mi searched | 21.8 mi from the "
+       + "card's fix, outside the 9.9 mi searched");
+    var lnone = MV.located(far, MV.discFor(card({ lat: 33.97, lon: -84.565, miles: 0.6 })),
+                           "McDonald's", 'new');
+    eq('none inside: nothing drawn for an answer with no list behind it',
+       lnone.marks.length + lnone.lines.length, 0);
+    var noFix = await stubbed.place("McDonald's", null);
+    eq('with no fix to hold them to, all four are candidates: no disc, so none is outside',
+       MV.located(noFix, null, "McDonald's", 'new').marks
+         .filter(function (m) { return m.kind === 'candidate'; }).length, 4);
+    eq('drawing all of it asked the NucBox nothing: one question for each place',
+       stubAsked, 3);
+
+    // Through the real server.js and the fake NucBox.
+    var door = MV.located(await nbx.place('4821 Kestrel Dr, Marietta', d94), d94, 'Jimmy', 'new');
+    ok_('a door answered by its street: the street drawn, no pin, saying not that door ('
+        + (door.marks[0] || {}).tip + ')',
+        door.marks.length >= 1 && door.marks.every(function (m) {
+          return / — street found, not that door · this one its street, not door 4821$/.test(m.tip);
+        }));
+    var cutRes = await nbx.place('Starbucks', d30);
+    var cut = MV.located(cutRes, d30, 'Starbucks', 'new');
+    eq('a list cut at the limit: all ten drawn as sent, one inside, every one too many',
+       [cut.marks.length, cut.marks.filter(function (m) { return m.kind === 'candidate'; }).length,
+        cut.marks.every(function (m) { return m.tip.indexOf(MV.nbxRefusal(cutRes, d30, 'Starbucks', 'new')) === 0; })]
+         .join(','), '10,1,true');
+    var two2 = await nbxS.place('Juniper Cir & Northgate Dr, Marietta', d3, ST);
+    var corners = MV.located(two2, d3, 'Juniper', 'held');
+    eq('a corner refused for meeting twice: both meetings drawn, each with the refusal',
+       [corners.marks.length, corners.marks.every(function (m) {
+         return m.kind === 'candidate' && m.tip === MV.nbxRefusal(two2, d3, 'Juniper', 'held');
+       })].join(','), '2,true');
+    var fox = await nbxS.place('Foxglove Trl & Northgate Dr, Marietta', d3, ST);
+    var foxL = MV.located(fox, d3, 'Foxglove', 'held');
+    eq('...and a corner pinned: its meeting drawn under the pin, saying so',
+       foxL.marks.map(function (m) { return [m.lat, m.lon, m.tip].join(' '); }).join(' | '),
+       '33.96 -84.55 Foxglove — the one inside the 3.5 mi searched, pinned');
+    var lark3 = await nbxS.place('Larkspur Pkwy SE, Atlanta', d3, ST);
+    var larkL = MV.located(lark3, d3, 'Larkspur', 'held');
+    eq('a numberless street pinned: its stretch inside the disc drawn as the chosen line, '
+       + 'the very runs the pin carries, and no marks',
+       [larkL.lines.length, (larkL.lines[0] || {}).kind,
+        JSON.stringify((larkL.lines[0] || {}).pts) === JSON.stringify(lark3.at.stretch[0]),
+        larkL.marks.length].join(','),
+       '1,chosen,true,0');
+    var lark94 = await nbxS.place('Larkspur Pkwy SE, Atlanta', d94, ST);
+    var lark94L = MV.located(lark94, d94, 'Larkspur', 'held');
+    eq('...refused as two streets: both stretches drawn grey, with the refusal',
+       [lark94L.lines.length, lark94L.lines.every(function (l) {
+         return l.kind === 'candidate' && l.tip === MV.nbxRefusal(lark94, d94, 'Larkspur', 'held');
+       })].join(','), '2,true');
+    // A street through a 1.0 mi disc with its ends five miles out, refused:
+    // only the part inside is drawn.
+    var crossing = MV.located({ at: null, why: 'several', n: 2,
+                                seen: { lines: [[[SQ.lat, -84.60], [SQ.lat, -84.50]],
+                                                [[SQ.lat + 0.1, -84.6], [SQ.lat + 0.1, -84.5]]] } },
+                              d1, 'X', 'new');
+    ok_('...and of a street running out of the disc, only the part inside it is drawn',
+        crossing.lines.length === 1 && crossing.lines[0].pts.every(function (p) {
+          return MV.crowMiles(SQ, { lat: p[0], lon: p[1] }) <= 1.0 + 1e-9;
+        }));
+    // Not "a stretch too long to send whole": the index sends no lines for
+    // one (streets.js stretch empties them past its cap), so with or without
+    // NbxSearch.stretch's cutAt return there was nothing to draw, and a check
+    // of it could not fail.
+    eq('nothing drawn for an answer with no list behind it: no street index to ask, '
+       + 'a NucBox down',
+       [MV.located({ at: null, why: 'cross' }, d94, 'X', 'new'),
+        MV.located(await gone.place("McDonald's", d94), d94, 'X', 'new')]
+         .map(function (h) { return h.marks.length + h.lines.length; }).join(','), '0,0');
+    eq('...and an answer of a kind with no words is never drawn as a pin',
+       MV.located({ at: null, why: 'odd', n: 1, seen: { hits: [SQ] } }, d94, 'X', 'new')
+         .marks[0].tip, 'no pin for X');
+    var drawnWords = [lp, lr, door, cut, corners, foxL, larkL, lark94L].reduce(function (all, h) {
+      return all.concat(h.marks.map(function (m) { return m.tip; }),
+                        h.lines.map(function (l) { return l.tip; }));
+    }, []);
+    eq('...and nothing drawn speaks of minutes',
+       drawnWords.filter(function (w) { return /\bmin/.test(w); }).length, 0);
   } finally {
     on.stop(); off.stop(); down.stop(); nuc.stop(); nucShort.stop(); onShort.stop();
     idx.drop();
@@ -1725,6 +1864,36 @@ async function nucbox() {
       said.some(function (s) { return s.indexOf('not found near you') !== -1; }));
   ok_('...and the final line counts against what could be drawn',
       /1 of 2 drawn end to end/.test(run.done));
+  /* How each place was asked, kept for map.html's pins (MV.howFound): the
+     walk's own record, so saying it asks nothing. */
+  var sentBefore = E.sent.length;
+  eq('the run says which place its box found nothing for, so was asked wide',
+     JSON.stringify(Object.keys(run.asked).filter(function (q) { return run.asked[q].wide; })),
+     JSON.stringify(['Far Away Rd']));
+  ok_('...and the box every place was searched in',
+      Object.keys(run.asked).every(function (q) { return /^-?\d/.test(run.asked[q].box || ''); }));
+  // The box as searched, its size read off it: boxAround's 60 miles each
+  // way, widened by half a 0.25-degree grid step, round the grid point —
+  // 137 mi north–south by 134 east–west here, not "the 60 mi box".
+  eq('...so the far pin, answered in Chicago, is drawn ringed: found only outside its box',
+     JSON.stringify(MV.howFound(run.found['Far Away Rd'], run.asked['Far Away Rd'])),
+     JSON.stringify({ outside: true, line: 'nothing inside the box searched round where the '
+                      + 'car was, 137 mi north–south by 134 east–west, so asked without it — '
+                      + 'and found outside it' }));
+  eq('...and a pin its box found is not, and says so, with the box it searched',
+     JSON.stringify(MV.howFound(run.found['Chipotle'], run.asked['Chipotle'])),
+     JSON.stringify({ outside: false, line: 'found inside the box searched round where the car '
+                      + 'was, 137 mi north–south by 134 east–west' }));
+  eq('...one asked wide and answered inside its box after all is not called outside',
+     MV.howFound({ lat: 33.90, lon: -84.50 },
+                 { box: run.asked['Chipotle'].box, wide: true }).outside, false);
+  eq('...one with no box says it had none, and why',
+     MV.howFound({ lat: 33.9, lon: -84.5 }, { box: null, wide: false }).line,
+     'asked with no box — no row naming it knows where the car was');
+  eq('...and one the walk never asked, or never placed, has nothing to say',
+     [MV.howFound(null, run.asked['Chipotle']), MV.howFound({ lat: 1, lon: 1 }, undefined)]
+       .join(','), ',');
+  eq('...and saying all of it asked the geocoder nothing', E.sent.length, sentBefore);
 
   /* A run over nothing must not throw, say something false, or claim a
    * division it did not do. The offers page will call this on every load

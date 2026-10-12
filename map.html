@@ -83,6 +83,20 @@
               line-height: 1.35; color: var(--text);
               background: rgba(11, 15, 20, .85); pointer-events: none; }
   #hereNote.grey { color: var(--muted); }
+  /* The key to the pins, one line across the map's foot, above Leaflet's
+     attribution (16px) and clear of its zoom buttons at the top. Names only
+     the marks on the map (showKey); rpi/test_layout.py holds the whole of it
+     to one row inside the map on every panel. */
+  #mapKey { position: absolute; left: 8px; bottom: 18px; z-index: 1001;
+            max-width: calc(100% - 16px); box-sizing: border-box;
+            padding: 1px 7px; border-radius: 9px; font-size: 12px;
+            line-height: 1.35; white-space: nowrap; overflow: hidden;
+            color: var(--text); background: rgba(11, 13, 16, .85);
+            pointer-events: none; }
+  #mapKey[hidden] { display: none; }
+  #mapKey .k-pick { color: #17c964; }
+  #mapKey .k-drop { color: #f5a524; }
+  #mapKey .k-stray { color: #f31260; }
   #hereNote[hidden] { display: none; }
   #side { border-left: 1px solid var(--line); overflow: auto; padding: 10px 12px;
           font-size: 13px; }
@@ -243,7 +257,11 @@
   <div class="split">
     <!-- The "you are here" label lives inside the map's box so it sits over
          its corner; Leaflet adds its panes beside it and leaves it alone. -->
-    <div id="map"><div id="hereNote" hidden></div></div>
+    <div id="map"><div id="hereNote" hidden></div><div id="mapKey" hidden><span
+      class="k-item" data-k="pick"><span class="k-pick">●</span> pickup</span><span
+      class="k-item" data-k="drop"><span class="k-sep"> · </span><span class="k-drop">●</span> dropoff</span><span
+      class="k-item" data-k="stray"><span class="k-sep"> · </span><span class="k-stray">●</span> stray</span><span
+      class="k-item" data-k="wide"><span class="k-sep"> · </span><span class="k-wide">◉</span> outside its box</span></div></div>
     <div id="side">
       <div class="note" id="sideEmpty">Load a few days, then place them.</div>
       <div id="sideBody" hidden></div>
@@ -645,8 +663,11 @@
             + (fixes.length ? ' · ' + fixes.length + ' know where the car was'
                : refusedFixes ? ' · none carry a usable position'
                               : ' · none carry a position')
-            + (refusedFixes ? ' · ' + refusedFixes + ' the GPS called too rough '
-                              + 'to use' : '')
+            // Any of the gate's refusals, not only `rough`: a frozen or
+            // unrated fix is not "too rough", and saying so names a fault the
+            // receiver did not have.
+            + (refusedFixes ? ' · ' + refusedFixes + ' the GPS could not vouch '
+                              + 'for' : '')
             + whenNote(sub) + filled + short + lostLookups);
         el.place.disabled = withEnds.length === 0;
         redraw();
@@ -698,7 +719,7 @@
    * the arithmetic rather than found in the data. Accusations are inherited,
    * never invented. */
   function view() {
-    if (!lastRun) return { placed: [], strays: {}, found: {} };
+    if (!lastRun) return { placed: [], strays: {}, found: {}, asked: {} };
     var keep = lastRun.placed.filter(function (p) { return inBlock(p.offer); });
     var wanted = {};
     keep.forEach(function (p) {
@@ -709,12 +730,13 @@
     Object.keys(lastRun.strays || {}).forEach(function (name) {
       if (wanted[name]) strays[name] = lastRun.strays[name];
     });
-    return { placed: keep, strays: strays, found: lastRun.found };
+    return { placed: keep, strays: strays, found: lastRun.found,
+             asked: lastRun.asked || {} };
   }
 
   function redraw() {
     var v = view();
-    render(v.placed, v.strays, v.found);
+    render(v.placed, v.strays, v.found, v.asked);
   }
 
   /* Moving the box does not geocode. It cannot: the answer already on the page
@@ -728,7 +750,7 @@
     var v = view();
     var withEnds = sub.filter(function (o) { return o.pickup || o.dropoff; });
     el.place.disabled = withEnds.length === 0;
-    render(v.placed, v.strays, v.found);
+    render(v.placed, v.strays, v.found, v.asked);
     var missing = withEnds.length - v.placed.length;
     say(sub.length + ' offer' + (sub.length === 1 ? '' : 's') + ' here · '
         + v.placed.length + ' already looked up'
@@ -755,22 +777,49 @@
 
   /* A dot, with the number of jobs on it when there is more than one. The
      count is the point: a mount outside one restaurant is twelve offers, and
-     twelve identical pins stacked to the pixel look exactly like one. */
-  function dot(colour, count) {
+     twelve identical pins stacked to the pixel look exactly like one.
+     RINGED — the same filled dot with a dashed ring round it in its colour —
+     for a place the box round where the car was found nothing for, that was
+     then asked wide and answered outside that box (MV.howFound): the one
+     case the box exists to refuse, drawn so it is seen without opening every
+     popup. Filled, because it was used: this pin is on the map and in the
+     figures. It was hollow, which on the panel's Map view is the opposite —
+     a candidate outside its card's disc that was NOT used — so one mark
+     meant two things on two pages the driver reads. */
+  function dot(colour, count, wide) {
     var many = count > 1;
     var size = many ? 20 : 12;
-    return L.divIcon({ className: '', iconSize: [size, size],
+    return L.divIcon({ className: wide ? 'mv-wide' : '', iconSize: [size, size],
       html: '<div style="width:' + size + 'px;height:' + size + 'px;'
-          + 'border-radius:50%;background:' + colour + ';border:2px solid #0b0d10;'
-          + 'color:#0b0d10;font:700 11px/' + (size - 4) + 'px system-ui,sans-serif;'
+          + 'box-sizing:border-box;border-radius:50%;'
+          + 'background:' + colour + ';border:2px solid #0b0d10;color:#0b0d10;'
+          + (wide ? 'outline:2px dashed ' + colour + ';outline-offset:2px;' : '')
+          + 'font:700 11px/' + (size - 4) + 'px system-ui,sans-serif;'
           + 'text-align:center">' + (many ? count : '') + '</div>' });
+  }
+
+  /* The one-line key across the map's foot (#mapKey): the marks drawn, and
+     no others — green, amber, red and the ring — each named when a pin of it
+     is on the map. */
+  function showKey(has) {
+    var key = document.getElementById('mapKey');
+    if (!key) return;
+    var first = true, any = false;
+    [].forEach.call(key.querySelectorAll('.k-item'), function (el) {
+      var on = !!has[el.getAttribute('data-k')];
+      el.hidden = !on;
+      var sep = el.querySelector('.k-sep');
+      if (sep) sep.hidden = first;
+      if (on) { first = false; any = true; }
+    });
+    key.hidden = !any;
   }
 
   function when(at) {
     try { return new Date(at).toLocaleString(); } catch (e) { return String(at); }
   }
 
-  function render(placed, strays, found) {
+  function render(placed, strays, found, asked) {
     if (!ensureMap()) return;
     placedNow = placed || [];
     if (layer) { map.removeLayer(layer); }
@@ -778,6 +827,7 @@
     strays = strays || {};
     var bounds = [];
     marks = {};
+    var keyHas = { pick: false, drop: false, stray: false, wide: false };
 
     /* The ranking, once per draw, so a pin can say where its town stands
        without every popup running the test again. Null when the window has no
@@ -798,12 +848,20 @@
       var both = place.roles.pickup && place.roles.dropoff;
       var pays = place.jobs.map(function (p) { return p.offer.pay; })
                            .filter(function (v) { return typeof v === 'number'; });
+      // How the walk found it: inside the box round where the car was, or
+      // asked wide when that box found nothing (MV.howFound, off the walk's
+      // own record of what it asked — no question asked to say so).
+      var how = MV.howFound(place.point, (asked || {})[place.name]);
+      var wide = !!(how && how.outside);
+      keyHas[out ? 'stray' : place.roles.pickup ? 'pick' : 'drop'] = true;
+      if (wide) keyHas.wide = true;
       var marker = L.marker([place.point.lat, place.point.lon],
-                            { icon: dot(colour, place.jobs.length) })
+                            { icon: dot(colour, place.jobs.length, wide) })
         .bindPopup('<b>' + esc(place.name) + '</b>'
                    + (out ? '<br><b>' + out.toFixed(0) + ' mi from everything else '
                           + '— this pin is almost certainly wrong</b>' : '')
                    + '<br><span class="note">' + esc(place.point.name) + '</span>'
+                   + (how ? '<br><span class="note">' + esc(how.line) + '</span>' : '')
                    // OFFERS, not jobs. Most offers are turned down, so a pin
                    // reading 12 on a shop the driver took two from said they
                    // had worked there twelve times — a fact about the rig's
@@ -876,6 +934,7 @@
                     { padding: [30, 30] });
     }
     pinBounds = bounds;
+    showKey(keyHas);
     sidebar(placed, strays, found);
     // Redrawn with the rest, since the range may have changed under it. If it
     // was not showing it stays not showing — a toggle that turns itself back
@@ -1137,13 +1196,13 @@
     var fixes = sub.filter(function (o) { return !!MV.fixOf(o); }).length;
     // ...and the rows whose position the GPS gate refused, apart from the rows
     // that never had one. MV.fixOf drops both from the trail, and "carry none"
-    // said of a fix gps.py judged too rough is a dot gone with the wrong
+    // said of a fix gps.py refused (too rough, stuck, unrated) is a dot gone with the wrong
     // reason given for it.
     var refused = sub.filter(function (o) { return !!MV.fixRefused(o); }).length;
     var none = sub.length - fixes - refused;
     if (el.trail.getAttribute('aria-pressed') !== 'true') return;
     say(fixes + ' position' + (fixes === 1 ? '' : 's') + ' the rig recorded'
-        + (refused ? ' — ' + refused + ' more the GPS called too rough to use, '
+        + (refused ? ' — ' + refused + ' more the GPS could not vouch for, '
                      + 'and not drawn' : '')
         + (none > 0
            ? (refused ? ';' : ' —') + ' ' + none + ' of these offers carry none'

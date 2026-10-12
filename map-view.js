@@ -126,7 +126,7 @@
 
   /* Why a row that carries a coordinate is not a position, or null.
    *
-   * The gate's own word (`gpsWhy`: unrated, nomode, rough or stale) or
+   * The gate's own word (`gpsWhy`: unrated, nomode, rough, frozen or stale) or
    * 'unjudged' for a coordinate nobody judged. Null for a row with no
    * coordinate at all, which is the ordinary "did not know" and not a refusal.
    * For the counts beside what fixOf lets through, so a refused fix is a
@@ -171,11 +171,15 @@
      `stale`, which is a grey dot rather than none. Short, because they sit in
      the map's corner on a 228px column on the 3.5" hat; rpi/test_layout.py
      measures every one there, and rpi/test_lint.py holds this table to the
-     gate's own words. */
+     gate's own words. `frozen` is a receiver repeating one position while
+     the car moves — the owner's VK-162 under gpsd's binary mode did it for a
+     whole shift — and is no dot, because the dot would be where the car was
+     minutes ago drawn as where it is. */
   var GPS_REFUSED = {
     unrated: 'GPS gives no accuracy here',
     nomode: 'GPS reports no 2D/3D fix',
-    rough: 'GPS too rough here'
+    rough: 'GPS too rough here',
+    frozen: 'GPS stuck on one spot'
   };
 
   function spellSeconds(s) {
@@ -748,11 +752,17 @@
    * there is no tighter box that still holds the whole disc, and asking a
    * smaller one would leave part of the card's distance unsearched. One rule,
    * one question, and the driver is told it was too many. */
-  function pickInDisc(hits, disc, plan, cutAt) {
-    var all = (hits || []).filter(function (h) {
+  // The candidates that are points at all. pickInDisc chooses among these and
+  // Map view draws these (`seen`, below), so the two cannot be two lists.
+  function pointsAmong(hits) {
+    return (hits || []).filter(function (h) {
       return h && typeof h.lat === 'number' && typeof h.lon === 'number'
         && isFinite(h.lat) && isFinite(h.lon);
     });
+  }
+
+  function pickInDisc(hits, disc, plan, cutAt) {
+    var all = pointsAmong(hits);
     if (cutAt) return { at: null, why: 'capped', n: cutAt };
     if (plan && plan.door && all.length) {
       var doors = all.filter(function (h) { return hasDoor(h, plan.house); });
@@ -998,6 +1008,95 @@
              stated: hi < ON_WAY_MI || (lo >= ON_WAY_MI && hi - lo < ON_WAY_MI) };
   }
 
+  /* --- how each place was found, to draw ------------------------------------
+   *
+   * The driver's ask: "show on the map how the rig located each place, so I
+   * can see at a glance that it is working (or why it refused)". Everything
+   * below DRAWS what was already decided and decides nothing: the answers are
+   * the ones NbxSearch kept beside its choice (`seen` — the NucBox's own list,
+   * the corner's meetings, the street's lines), so drawing them asks nobody
+   * anything, and the words are nbxRefusal's, the same the caption says.
+   *
+   * The card's disc, as Map view draws it: the card's fix and its distance
+   * plus SLACK_MI (discFor) — what NbxSearch searches the card's places in,
+   * and what cardRefuses holds the pickup pin to. Not every pin: the dropoff
+   * is held to none, and with no NucBox the places are asked in the public
+   * box (BOX_MILES round the car) and then wide. Null for a card with no fix, and for one with no
+   * yardstick — that card's search is the sixty miles the public box stands
+   * for, which is not the card's reach, and a sixty-mile circle round the car
+   * would say nothing. It is drawn, never fitted to: Map view's view is the car
+   * and the pins (see drawHow). */
+  function discShape(disc) {
+    if (!disc || disc.card === null || disc.card === undefined) return null;
+    return { lat: disc.at.lat, lon: disc.at.lon, miles: disc.miles,
+             metres: disc.miles * METRES_PER_MILE };
+  }
+
+  /* What to draw of how ONE place was found, as plain data: `res` is what
+   * NbxSearch.place answered for it, `disc` the disc it was searched in, `name`
+   * the place as the caption shows it, `whose` 'new' or 'held'.
+   *
+   *   marks  every candidate the NucBox sent (a corner: every meeting), each
+   *          { lat, lon, kind, tip }: kind 'outside' past the disc's edge —
+   *          crowMiles against disc.miles, pickInDisc's own test — else
+   *          'candidate'. The pin itself is not here: the page already draws
+   *          it, in colour, and a second copy would be a second rule for
+   *          where it is.
+   *   lines  a numberless street's stretch INSIDE the disc, { pts, kind,
+   *          tip }: kind 'chosen' when it was pinned (the very runs the pin
+   *          carries), 'candidate' when it was refused. What lies outside the
+   *          disc is not drawn — it is not where the card can mean.
+   *
+   * `tip` says what the mark is in words: for a refused place, the refusal
+   * the caption gives (nbxRefusal), so the mark and the line under the map
+   * cannot disagree; for a pinned one, whether the candidate counted.
+   *
+   * Nothing for an answer with no `seen` — the public geocoder's one answer,
+   * a NucBox that could not be asked, a question the relay refused, a cross
+   * street with no index, a stretch past the index's cap (which sends no
+   * lines for one): there is no list behind those to show, and drawing
+   * nothing says no more than that. */
+  function located(res, disc, name, whose) {
+    var out = { marks: [], lines: [] };
+    if (!res || !res.seen) return out;
+    // A refusal nbxRefusal has no words for is still no pin, and is never
+    // drawn as "pinned".
+    var why = res.at ? null : (nbxRefusal(res, disc, name, whose) || 'no pin for ' + name);
+    var edge = disc ? ' the ' + disc.miles.toFixed(1) + ' mi searched' : '';
+    var hits = res.seen.hits || [];
+    var door = res.seen.door || null;
+    // For a pin, pickInDisc's `n` is how many candidates went into it.
+    var counted = res.n || 0;
+    hits.forEach(function (h) {
+      var away = disc ? crowMiles(disc.at, h) : null;
+      var outside = away !== null && away > disc.miles;
+      var notDoor = door && !hasDoor(h, door);
+      var said = outside ? away.toFixed(1) + ' mi from the card\'s fix, outside' + edge
+               : notDoor ? 'its street, not door ' + door
+               : null;
+      var tip = why !== null ? why + (said ? ' · this one ' + said : '')
+              : said ? name + ' — ' + said + ', not used'
+              : name + ' — ' + (counted > 1 ? 'one of ' + counted + ' that agree, pinned at their middle'
+                                            : disc ? 'the one inside' + edge + ', pinned'
+                                                   : 'pinned, with no card fix to hold it to');
+      out.marks.push({ lat: h.lat, lon: h.lon, kind: outside ? 'outside' : 'candidate',
+                       tip: tip });
+    });
+    if (res.at && res.at.stretch) {
+      res.at.stretch.forEach(function (run) {
+        out.lines.push({ pts: run, kind: 'chosen',
+                         tip: name + ' — its stretch inside' + edge
+                              + '; the pin is its point nearest you' });
+      });
+    } else if (res.seen.lines && disc && why !== null) {
+      clipToDisc(res.seen.lines, disc).forEach(function (run) {
+        out.lines.push({ pts: run.map(function (p) { return [p.lat, p.lon]; }),
+                         kind: 'candidate', tip: why });
+      });
+    }
+    return out;
+  }
+
   /* The words, for the two cards Map view measures with: this one ('new')
      and the one the order in the car came from ('held'). Each is the reason
      the figure is withheld, said instead of it, and each is reached by a
@@ -1010,6 +1109,8 @@
       rough: 'GPS fix on this card too rough to measure from',
       unrated: 'GPS on this card gave no accuracy to measure from',
       nomode: 'GPS on this card had no 2D/3D fix to measure from',
+      frozen: 'GPS on this card was stuck on one spot, so nothing to measure '
+        + 'from',
       other: 'GPS fix on this card was never judged, so nothing to measure from'
     },
     held: {
@@ -1020,6 +1121,8 @@
       rough: 'GPS fix on the order in your car too rough to check its end',
       unrated: 'GPS on the order in your car gave no accuracy to check its end',
       nomode: 'GPS on the order in your car had no 2D/3D fix to check its end',
+      frozen: 'GPS on the order in your car was stuck on one spot, so its end '
+        + 'cannot be checked',
       other: 'GPS fix on the order in your car was never judged, so its end '
         + 'cannot be checked'
     }
@@ -2008,13 +2111,24 @@
       var down = nbxDown(body);
       if (down) return down;
       if (!body.a.names.length || !body.b.names.length) return { at: null, why: 'nostreet', n: 0 };
-      if (body.cutAt) return { at: null, why: 'capped', n: body.cutAt };
       var called = body.a.names[0] + ' & ' + body.b.names[0];
-      var res = pickInDisc(body.meets.map(function (m) {
-        return { lat: m.lat, lon: m.lon, spanM: m.spanM, name: called };
-      }), disc, plan, null);
+      function meetsOf() {
+        return body.meets.map(function (m) {
+          return { lat: m.lat, lon: m.lon, spanM: m.spanM, name: called };
+        });
+      }
+      // Every meeting the index sent, kept beside the answer for Map view to
+      // draw (`seen`, see located): the same list, never asked for again.
+      if (body.cutAt) {
+        return { at: null, why: 'capped', n: body.cutAt,
+                 seen: { hits: pointsAmong(body.meets ? meetsOf() : []), corner: true } };
+      }
+      var meets = meetsOf();
+      var seen = { hits: pointsAmong(meets), corner: true };
+      var res = pickInDisc(meets, disc, plan, null);
       if (res.why === 'several') res.why = 'corners';
       else if (res.why === 'none') res.why = 'nomeet';
+      res.seen = seen;
       return res;
     });
   };
@@ -2029,8 +2143,12 @@
       var down = nbxDown(body);
       if (down) return down;
       if (!body.names.length) return { at: null, why: 'nostreet', n: 0 };
+      // Refused as too long to judge. Nothing of it to draw: past its cap
+      // the index sends no lines at all (streets.js stretch).
       if (body.cutAt) return { at: null, why: 'long', n: body.cutAt };
-      return stretchInDisc(body.lines, disc, car, body.names[0]);
+      var res = stretchInDisc(body.lines, disc, car, body.names[0]);
+      res.seen = { lines: body.lines };
+      return res;
     });
   };
 
@@ -2041,7 +2159,14 @@
                                                   : 'street=' + encodeURIComponent(plan.street))
              + (box ? '&viewbox=' + encodeURIComponent(box) : '');
     return this.get(path).then(function (body) {
-      return nbxDown(body) || pickInDisc(body.hits, disc, plan, body.cutAt);
+      var down = nbxDown(body);
+      if (down) return down;
+      var res = pickInDisc(body.hits, disc, plan, body.cutAt);
+      // What the NucBox answered, beside what was chosen from it, for Map view
+      // to draw — and the door asked for, so a street answered for a door is
+      // drawn as what it is (located).
+      res.seen = { hits: pointsAmong(body.hits), door: plan.door ? plan.house : null };
+      return res;
     });
   };
 
@@ -2122,6 +2247,45 @@
       }, function () { return { search: false, route: false, streets: false }; });
   }
 
+  /* How map.html found one place, for its pin: `point` the answer, `how` the
+   * walk's `asked` entry for it. map.html asks the PUBLIC geocoder for one
+   * answer a place, inside a box round where the car was when the rows naming
+   * it came up (boxAround, anchorFor) — never a card's disc, and there is no
+   * candidate list behind its pin to draw. So what it can show of how a place
+   * was found is that box, and whether the box found it:
+   *
+   *   { outside: false, line }  found inside its box, or asked with none
+   *   { outside: true,  line }  the box found nothing, it was asked wide, and
+   *                             the answer is outside the box — the case the
+   *                             box exists to refuse, drawn ringed (map.html)
+   *
+   * The box is said as it was searched: boxAround widens BOX_MILES by half a
+   * grid step and centres it on the grid point nearest the car, so "the 60
+   * mi box" was not the box. Its size in miles is read off the box itself,
+   * north–south and east–west (at its middle latitude).
+   *
+   * A box found nothing and the wide answer is inside it is possible (a
+   * bounded search and an unbounded one rank differently) and is said as
+   * asked wide, not as outside. Null for a place this walk did not ask. */
+  function howFound(point, how) {
+    if (!point || !how) return null;
+    if (!how.box) {
+      return { outside: false,
+               line: 'asked with no box — no row naming it knows where the car was' };
+    }
+    var b = how.box.split(',').map(Number);   // left, top, right, bottom
+    var ns = Math.abs(b[1] - b[3]) * 69.0;
+    var ew = Math.abs(b[2] - b[0]) * 69.0 * Math.cos((b[1] + b[3]) / 2 * Math.PI / 180);
+    var miles = 'box searched round where the car was, ' + Math.round(ns)
+              + ' mi north–south by ' + Math.round(ew) + ' east–west';
+    if (!how.wide) return { outside: false, line: 'found inside the ' + miles };
+    var outside = !(point.lon >= Math.min(b[0], b[2]) && point.lon <= Math.max(b[0], b[2])
+                    && point.lat >= Math.min(b[1], b[3]) && point.lat <= Math.max(b[1], b[3]));
+    return { outside: outside,
+             line: 'nothing inside the ' + miles + ', so asked without it'
+                   + (outside ? ' — and found outside it' : '') };
+  }
+
   /* Every place in one range, looked up near where the car was, judged, and
    * handed back ready to draw. The whole run, with no DOM in it.
    *
@@ -2179,6 +2343,14 @@
     var strays = straysAmong(found, opts.farMiles);
     var placed = judge(jobs, found, strays);
 
+    // How each place was asked, kept for the drawing (howFound): the box it
+    // was searched in and whether that box found nothing so it was asked
+    // wide. What this walk already decided, and no question more.
+    var asked = {};
+    distinct.forEach(function (q) {
+      asked[q] = { box: boxes[q], wide: refused.indexOf(q) >= 0 };
+    });
+
     // Out of the offers that named BOTH ends, which are the only ones that
     // could ever be drawn end to end. Counting against everything that named
     // anywhere would fold "the card never said where this went" into the same
@@ -2189,7 +2361,7 @@
       return p.from && p.to && !accused(p);
     }).length;
     return { placed: placed, strays: strays, found: found, distinct: distinct,
-             couldDraw: couldDraw, drawn: drawn,
+             asked: asked, couldDraw: couldDraw, drawn: drawn,
              done: drawn + ' of ' + couldDraw + ' drawn end to end' };
   }
 
@@ -2252,5 +2424,6 @@
            NbxSearch: NbxSearch, nbxSettings: nbxSettings,
            AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI,
            NBX_GAP_MS: NBX_GAP_MS, SNAP_MI: SNAP_MI, ROAD_SAME_MI: ROAD_SAME_MI,
-           hasDoor: hasDoor };
+           hasDoor: hasDoor, discShape: discShape, located: located,
+           howFound: howFound };
 }));
