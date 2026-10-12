@@ -8192,6 +8192,9 @@ python3 rpi/test_accumulate.py  # 309 on merging readings across frames, on a
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 231 on where to look, how big, what to log,
                                 #     and the two pictures the live view sends
+python3 rpi/test_cardfind.py    #  45 on finding a card taller than the card
+                                #     box from its button up, and on every
+                                #     reason it gives for not being sure
 python3 rpi/test_exposure.py    # 192 on flicker, brightness, gain and
                                 #     exposure, on both ends of running out,
                                 #     and on an empty mount in the sun never

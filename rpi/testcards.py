@@ -222,6 +222,237 @@ def planner_screen(pal=LIGHT, stops=PLANNER_STOPS):
     return _bgr(im)
 
 
+# --- cards of different heights under one hand-drawn card box ----------------
+#
+# The card box is drawn once, round the card on the phone at the time, and kept.
+# A TALLER card than that one puts its payout above the box: on 8 Oct an Uber
+# "Early look • Order in progress" card's $14.48 sat across the top edge of the
+# box the driver had drawn round a shorter "Exclusive" card, the reader got
+# "gg Pit." for it, and the panel said there was no offer. The real pictures are
+# gone, so these draw the two cards — and the shapes that must NOT be taken for a
+# taller card — the way that phone drew them: a dark card on a light map, a few
+# pixels in from either side, its button a bar near the bottom of the screen.
+#
+# In the phone's own pixels, like everything above. The two tops are placed so
+# that the 8 Oct box, drawn on the short card, runs through the middle of the
+# tall card's payout, as it did.
+
+# The box from 8 Oct, as fractions of the screen box: x, y, w, h.
+BOX_8OCT = [0.021, 0.544, 0.941, 0.456]
+
+# Dark card on a light map: the 8 Oct phone. The bars are the two buttons — a
+# dark Accept and a grey Match with light text.
+NIGHT_CARD = dict(DARK, above=LIGHT['above'], rule=LIGHT['rule'],
+                  accept=(56, 56, 60), accept_fg=(255, 255, 255),
+                  match=(92, 92, 96), match_fg=(235, 235, 235))
+DAY_CARD = dict(LIGHT, accept=(0, 0, 0), accept_fg=(255, 255, 255),
+                match=(150, 150, 150), match_fg=(255, 255, 255))
+# ...and a dark card on a dark map, the one nobody can see the edge of.
+NIGHT_ALL = dict(DARK, accept=NIGHT_CARD['accept'], accept_fg=(255, 255, 255),
+                 match=NIGHT_CARD['match'], match_fg=NIGHT_CARD['match_fg'])
+
+CARD_MARGIN = 24          # how far in from the screen's sides the card sits
+BAR_H = 110               # the button
+BAR_FROM_BOTTOM = 170     # its top, above the bottom of the card
+NAV_H = 126               # Android's own bar, full width, when it is drawn
+SHORT_TOP = 1290          # the "Exclusive" card the 8 Oct box was drawn on
+EARLY_TOP = 1038          # ...and the "Early look" card that box cut
+TWO_TOP = 840             # a card carrying two orders, taller again
+STACK_TOP = 560           # a card stacked above another, with no button
+
+
+def _sheet(pal, top, bottom, d):
+    # Square at the bottom, as a sheet is: the rounding is run off past the
+    # bottom and Android's own bar, when there is one, drawn over it.
+    d.rounded_rectangle([CARD_MARGIN, top, W - CARD_MARGIN, bottom + 60],
+                        radius=40, fill=pal['bg'])
+    if bottom < H:
+        d.rectangle([0, bottom, W, H], fill=(8, 8, 8))
+
+
+def _bar(pal, bottom, d, word, kind):
+    y = bottom - BAR_FROM_BOTTOM
+    d.rounded_rectangle([CARD_MARGIN + 30, y, W - CARD_MARGIN - 30, y + BAR_H],
+                        radius=26, fill=pal[kind])
+    d.text((W // 2 - 60, y + 30), word, font=font(42), fill=pal[kind + '_fg'])
+
+
+def _lines(pal, top, rows, d):
+    """Draw (offset, text, size, bold, sub) rows down a card from `top`."""
+    for off, text, size, bold, sub in rows:
+        d.text((CARD_MARGIN + 42, top + off), text, font=font(size, bold),
+               fill=pal['sub'] if sub else pal['fg'])
+
+
+def _chip(pal, x, y, text, d):
+    width = int(font(30).getlength(text)) + 52
+    d.rounded_rectangle([x, y, x + width, y + 50], radius=25, fill=pal['chip'])
+    d.text((x + 26, y + 8), text, font=font(30), fill=pal['chip_fg'])
+    return x + width + 14
+
+
+def _screen(pal, nav):
+    im, d = _canvas(pal)
+    return im, d, H - (NAV_H if nav else 0)
+
+
+EXCLUSIVE_ROWS = [(120, '$4.21', 86, True, False),
+                  (235, 'Guaranteed (incl. tip)', 32, False, True),
+                  (305, '23 min (5.2 mi) total', 40, True, False),
+                  (380, "McDonald's (2500 Cobb Pkwy)", 32, False, True),
+                  (430, 'Oak Rd, Marietta', 32, False, True)]
+
+
+def exclusive_screen(pal=NIGHT_CARD, nav=False, pay='$4.21'):
+    """The short Uber Eats card the 8 Oct box was drawn on: Exclusive, $4.21."""
+    im, d, bottom = _screen(pal, nav)
+    _sheet(pal, SHORT_TOP, bottom, d)
+    x = _chip(pal, CARD_MARGIN + 42, SHORT_TOP + 40, 'Uber Eats', d)
+    _chip(pal, x, SHORT_TOP + 40, 'Exclusive', d)
+    rows = [(EXCLUSIVE_ROWS[0][0], pay) + EXCLUSIVE_ROWS[0][2:]] + EXCLUSIVE_ROWS[1:]
+    _lines(pal, SHORT_TOP, rows, d)
+    _bar(pal, bottom, d, 'Accept', 'accept')
+    return _bgr(im)
+
+
+def early_rows(pay='$14.48', by='4:15 PM', miles='8.6'):
+    return [(40, 'Early look • Order in progress', 34, False, True),
+            (190, pay, 86, True, False),
+            (305, 'Includes expected tip', 32, False, True),
+            (375, 'Est. delivery %s • %s mi' % (by, miles), 40, True, False),
+            (450, "Dave's Hot Chicken (1985 Cobb", 32, False, True),
+            (495, 'Parkway NW, STE 100)', 32, False, True),
+            (560, 'Foothill Trl & Northwoods Dr,', 32, False, True),
+            (605, 'Marietta', 32, False, True),
+            (680, 'Matching may take longer', 32, False, True)]
+
+
+def early_look_screen(pal=NIGHT_CARD, nav=False, pay='$14.48', by='4:15 PM',
+                      miles='8.6', top=EARLY_TOP):
+    """The 8 Oct card: taller than the box, so the box's top cuts its payout.
+
+    Laid out as the driver described it — header "Early look • Order in
+    progress", a "Delivery" badge, the payout, "Includes expected tip", "Est.
+    delivery 4:15 PM • 8.6 mi", the restaurant and the cross streets over two
+    lines each, "Matching may take longer", and a Match button: light text on a
+    grey bar at the bottom.
+    """
+    im, d, bottom = _screen(pal, nav)
+    _sheet(pal, top, bottom, d)
+    _chip(pal, CARD_MARGIN + 42, top + 100, 'Delivery', d)
+    _lines(pal, top, early_rows(pay, by, miles), d)
+    _bar(pal, bottom, d, 'Match', 'match')
+    return _bgr(im)
+
+
+def two_order_screen(pal=NIGHT_CARD, nav=False):
+    """Two orders on one card: taller again, so its payout sits higher still."""
+    im, d, bottom = _screen(pal, nav)
+    top = TWO_TOP
+    _sheet(pal, top, bottom, d)
+    _chip(pal, CARD_MARGIN + 42, top + 100, 'Delivery (2)', d)
+    # The two pickups sit between the payout and the journey line, which is
+    # what puts the payout so far above a box drawn on a one-order card while
+    # the journey is still inside it.
+    _lines(pal, top, [
+        (40, 'Early look • 2 orders', 34, False, True),
+        (190, '$18.52', 86, True, False),
+        (305, 'Includes expected tip', 32, False, True),
+        (375, 'Chipotle (3625 Dallas Hwy)', 32, False, True),
+        (425, 'Panda Express (3605 Dallas Hwy)', 32, False, True),
+        (520, 'Est. delivery 4:40 PM • 11.2 mi', 40, True, False),
+        (595, 'Burnt Hickory Rd &', 32, False, True),
+        (640, 'Old Mountain Rd, Marietta', 32, False, True),
+        (710, 'Sandtown Rd & Sandy Plains,', 32, False, True),
+        (755, 'Marietta', 32, False, True),
+        (830, 'Matching may take longer', 32, False, True)], d)
+    _bar(pal, bottom, d, 'Match', 'match')
+    return _bgr(im)
+
+
+def stacked_screen(pal=NIGHT_CARD, nav=False):
+    """A card stacked above the Early-look card, with no button of its own.
+
+    One sheet, a hairline between the two, so nothing about the edges says
+    where the lower card starts: walking up from the Match bar goes straight
+    through to the top of the upper card. Its figures — 12 min, 3.1 mi — are
+    not the offer the bar belongs to.
+    """
+    im, d, bottom = _screen(pal, nav)
+    _sheet(pal, STACK_TOP, bottom, d)
+    _chip(pal, CARD_MARGIN + 42, STACK_TOP + 40, 'Exclusive', d)
+    _lines(pal, STACK_TOP, [
+        (120, '$6.50', 86, True, False),
+        (235, 'Guaranteed (incl. tip)', 32, False, True),
+        (305, '12 min (3.1 mi) total', 40, True, False),
+        (380, "Wendy's (55 Roswell St)", 32, False, True)], d)
+    d.line([(CARD_MARGIN + 30, EARLY_TOP - 20), (W - CARD_MARGIN - 30, EARLY_TOP - 20)],
+           fill=pal['rule'], width=3)
+    _chip(pal, CARD_MARGIN + 42, EARLY_TOP + 100, 'Delivery', d)
+    _lines(pal, EARLY_TOP, early_rows(), d)
+    _bar(pal, bottom, d, 'Match', 'match')
+    return _bgr(im)
+
+
+def degrade(screen, kind, seed=0, strength=1.0):
+    """What a windscreen and a car do to a screen, applied in the phone's pixels.
+
+    glare — a bright blob over part of the card; sheen — a band of glare level
+    across the screen; blur — defocus; banding — the
+    rolling stripes of a PWM-dimmed panel; dark — a dimmed phone; shadow — the
+    left-hand side in the shade of the pillar; roll — the phone turned a couple
+    of degrees inside the box that was drawn square round it.
+    """
+    rng = np.random.RandomState(seed)
+    img = screen.astype(np.float32)
+    h, w = img.shape[:2]
+    if kind == 'glare':
+        cx = rng.uniform(0.2, 0.8) * w
+        cy = rng.uniform(0.5, 0.85) * h
+        sigma = rng.uniform(250, 450)
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        blob = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * sigma ** 2))
+        img += (110 * strength * blob)[..., None]
+    elif kind == 'sheen':
+        # A band of glare straight across the screen — a windscreen's edge
+        # reflected — brightest over the lower card and fading up it. Level
+        # across, so whatever it does to a row it does to the whole row.
+        yy = np.arange(h, dtype=np.float32)
+        band = np.exp(-((yy - 0.80 * h) ** 2) / (2 * (0.12 * h) ** 2))
+        img += (90 * strength * band)[:, None, None]
+    elif kind == 'blur':
+        img = cv2.GaussianBlur(img, (0, 0), 2.5 * strength)
+    elif kind == 'banding':
+        yy = np.arange(h, dtype=np.float32)
+        img *= (1 + 0.12 * strength * np.sin(2 * np.pi * yy / 44.0 + seed))[:, None, None]
+    elif kind == 'dark':
+        img *= 0.38 / strength
+    elif kind == 'shadow':
+        ramp = np.clip(0.25 + 0.75 * np.arange(w, dtype=np.float32) / (0.45 * w), 0.25, 1.0)
+        img *= ramp[None, :, None]
+    elif kind == 'roll':
+        m = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), 2.0 * strength, 1.0)
+        img = cv2.warpAffine(img, m, (w, h), borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+    else:
+        raise ValueError('no such degradation: %r' % kind)
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
+def screen_corners(width, sensor=SENSOR):
+    """Where mount() puts the screen's corners, TL TR BR BL, in sensor pixels.
+
+    What a driver drawing ▣ Set box round the screen would give, exactly. Only
+    for a width at which the whole screen is in frame.
+    """
+    height = int(round(H * width / float(W)))
+    bottom = sensor[0] - 30
+    top = bottom - height
+    if top < 0:
+        raise ValueError('the screen runs off the frame at %dpx' % width)
+    x = (sensor[1] - width) // 2
+    return [[x, top], [x + width - 1, top], [x + width - 1, bottom - 1], [x, bottom - 1]]
+
+
 def mount(screen, width, seed=1, cabin=24, sensor=SENSOR):
     """Put the phone in the frame at a given closeness, with sensor noise.
 
