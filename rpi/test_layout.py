@@ -509,6 +509,8 @@ CAPTION_LINES = [
      'GPS on this card gave no accuracy to measure from'),
     ('this card, no mode',
      'GPS on this card had no 2D/3D fix to measure from'),
+    ('this card, a frozen fix',
+     'GPS on this card was stuck on one spot, so nothing to measure from'),
     ('this card, not judged',
      'GPS fix on this card was never judged, so nothing to measure from'),
     ('the held card, no fix',
@@ -523,6 +525,9 @@ CAPTION_LINES = [
      'GPS on the order in your car gave no accuracy to check its end'),
     ('the held card, no mode',
      'GPS on the order in your car had no 2D/3D fix to check its end'),
+    ('the held card, a frozen fix',
+     'GPS on the order in your car was stuck on one spot, so its end cannot '
+     'be checked'),
     ('the held card, not judged',
      'GPS fix on the order in your car was never judged, so its end cannot '
      'be checked'),
@@ -789,7 +794,7 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 76)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 78)
 eq('...and thirty of its entries declare a tail the clamp may eat',
    len(_DECLARED), 30)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
@@ -3038,8 +3043,8 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say seventy-three things, so all
-                # seventy-three are put in it and measured. Three rules, and they are not the same
+                # occupant and it can say seventy-eight things, so all
+                # seventy-eight are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #
                 #   the cap    — no sentence may take more rows than the clamp

@@ -1161,10 +1161,10 @@ try:
     # dots above — MV.fixOf reads `gpsOk` — and it is not silently absent.
     ok_('a position the GPS gate refused is not on the trail, and is counted (%r)'
         % (trail.get('status') or '')[:120],
-        '1 more the GPS called too rough to use' in (trail.get('status') or ''))
+        '1 more the GPS could not vouch for' in (trail.get('status') or ''))
     ok_('...and the load line counts it apart from the rows that had none (%r)'
         % (on_load.get('status') or '')[:160],
-        '1 the GPS called too rough to use' in (on_load.get('status') or ''))
+        '1 the GPS could not vouch for' in (on_load.get('status') or ''))
 
     # --- you are here --------------------------------------------------------
     here = got.get('here') or {}

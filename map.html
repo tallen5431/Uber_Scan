@@ -645,8 +645,11 @@
             + (fixes.length ? ' · ' + fixes.length + ' know where the car was'
                : refusedFixes ? ' · none carry a usable position'
                               : ' · none carry a position')
-            + (refusedFixes ? ' · ' + refusedFixes + ' the GPS called too rough '
-                              + 'to use' : '')
+            // Any of the gate's refusals, not only `rough`: a frozen or
+            // unrated fix is not "too rough", and saying so names a fault the
+            // receiver did not have.
+            + (refusedFixes ? ' · ' + refusedFixes + ' the GPS could not vouch '
+                              + 'for' : '')
             + whenNote(sub) + filled + short + lostLookups);
         el.place.disabled = withEnds.length === 0;
         redraw();
@@ -1137,13 +1140,13 @@
     var fixes = sub.filter(function (o) { return !!MV.fixOf(o); }).length;
     // ...and the rows whose position the GPS gate refused, apart from the rows
     // that never had one. MV.fixOf drops both from the trail, and "carry none"
-    // said of a fix gps.py judged too rough is a dot gone with the wrong
+    // said of a fix gps.py refused (too rough, stuck, unrated) is a dot gone with the wrong
     // reason given for it.
     var refused = sub.filter(function (o) { return !!MV.fixRefused(o); }).length;
     var none = sub.length - fixes - refused;
     if (el.trail.getAttribute('aria-pressed') !== 'true') return;
     say(fixes + ' position' + (fixes === 1 ? '' : 's') + ' the rig recorded'
-        + (refused ? ' — ' + refused + ' more the GPS called too rough to use, '
+        + (refused ? ' — ' + refused + ' more the GPS could not vouch for, '
                      + 'and not drawn' : '')
         + (none > 0
            ? (refused ? ';' : ' —') + ' ' + none + ' of these offers carry none'
