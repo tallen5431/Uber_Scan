@@ -638,8 +638,33 @@
    *
    * "Uber's abbreviations are fine" is measured too: Pkwy and SE are matched
    * by the real install, so the string goes as the card printed it. */
-  function searchPlan(place) {
+  /* What is SEARCHED for a place, which is not always what was read.
+   *
+   * A ⌖ read off a navigation screen can come back with OCR litter in front of
+   * the door: the rig held "ss be 4 1610 Ridenour Blvd, Kennesaw, GA 30144"
+   * as the end of the order in the car (the coordinator's /api/status, taken
+   * on shift after the pins went). searchPlan cut that at the comma and asked
+   * for a street called "ss be 4 1610 Ridenour Blvd" with no door, which no
+   * NucBox holds, and the public map was handed the whole string; either way
+   * the held end had no pin, and the next card took off the glass the one
+   * pin that had stood for it (see heldForPanel in server.js).
+   *
+   * The rule is a shape, not a place: a run of short tokens that do not
+   * start with a capital ("ss", "be", "4", "•"), at most three characters
+   * each, in front of a house number and a capitalised word, is dropped. A
+   * street that has a number in its NAME keeps it — "Hwy 92 Bypass", "US 41",
+   * "Old 41 Hwy" all start with a capital, so nothing is in front to drop.
+   * Applied to the search only: the place keeps its text as read, in the
+   * journal, on the hold and in the caption, and every place is searched by
+   * this one rule, the card's and the held order's alike. */
+  function searchText(place) {
     var s = String(place == null ? '' : place).replace(/\s+/g, ' ').trim();
+    var m = /^((?:[^A-Z\s]\S{0,2} )+)(\d+[A-Za-z]? [A-Z])/.exec(s);
+    return m ? s.slice(m[1].length) : s;
+  }
+
+  function searchPlan(place) {
+    var s = searchText(place);
     if (!s) return null;
     // A bracket that opens with a house number, closed or cut off by the
     // card's edge ("Culver's (1275 Hwy" is how the reader often leaves it).
@@ -1781,9 +1806,11 @@
    * A boxed place does not need the hint: the box already says where to look,
    * and it says it more precisely than a town name. */
   Geocoder.prototype.queryFor = function (place, box) {
-    if (box) return place;
+    // The public map is asked by the same rule as the NucBox: see searchText.
+    var q = searchText(place);
+    if (box) return q;
     var hint = (this.hint() || '').trim();
-    return hint ? place + ', ' + hint : place;
+    return hint ? q + ', ' + hint : q;
   };
 
   /* The cache key. It has to carry the box: the same place asked inside a box
@@ -2416,7 +2443,7 @@
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,
            BOX_MILES: BOX_MILES, ANCHOR_STEP: ANCHOR_STEP,
            FAR_MILES: FAR_MILES, GAP_MS: GAP_MS,
-           searchPlan: searchPlan, discFor: discFor, discBox: discBox,
+           searchPlan: searchPlan, searchText: searchText, discFor: discFor, discBox: discBox,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            clipToDisc: clipToDisc, stretchInDisc: stretchInDisc, nearestOn: nearestOn,
            stretchSpan: stretchSpan, spanRefusal: spanRefusal, ON_WAY_MI: ON_WAY_MI,

@@ -1464,6 +1464,12 @@ if shutil.which('python3'):
                       'dropoff': None}})
         eq('the order goes in the car', code, 200)
         ok_('...and the server says it is holding', reply.get('holding') is True)
+        # ...and says it as the stream does (heldForPanel), so Map view has
+        # the held order from the press and not from the next reading.
+        eq('held end: the mark reply carries the order in the car as the stream describes it',
+           sorted((reply.get('held') or {}).keys()), ['card', 'dropoff', 'minutes', 'pay'])
+        # Started after the mark, before the scanner's 2s sleep ends.
+        heard = listen(base, 4)
 
         # The address, once the scanner reports it. Polled rather than slept
         # on: the append is asynchronous and reading the file on the next line
@@ -1487,6 +1493,18 @@ if shutil.which('python3'):
         held = get(base, '/api/status').get('holding') or {}
         eq('...while the order really was still in the car',
            held.get('dropoff'), '77 Held Job Way, Kennesaw, GA 30144')
+        # The stream: the ⌖ read filed onto the hold goes out carrying that
+        # hold, with no `ready`, which is how Map view pins it between
+        # readings. Without it the panel learned the end only from the next
+        # reading, and the card on the map stood in for it until then.
+        for _ in range(60):
+            if [m for m in heard if m.get('dropoff')]:
+                break
+            time.sleep(0.05)
+        _said = [m for m in heard if m.get('dropoff')]
+        eq('held end: the ⌖ read filed onto the order in the car goes out carrying it',
+           [((m.get('holding') or {}).get('dropoff'), 'ready' in m) for m in _said],
+           [('77 Held Job Way, Kennesaw, GA 30144', False)])
         ok_('...and marked as read off the screen',
             held.get('dropoffScanned') is True)
         # ...and it survives a restart, which is the whole point of writing it.
