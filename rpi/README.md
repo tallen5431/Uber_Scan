@@ -6426,8 +6426,8 @@ gave it no town — measured, `area()` is `null` on it — and the geography wou
 have gone silent on the very address ⌖ was pressed for. The line is `4821
 Kestrel Dr, Marietta`; `state` is still a field.
 
-**What the scan loop does with it.** Only under a press, off the whole-screen
-read — the owner's words, and the existing rule followed rather than widened:
+**What the scan loop does with it.** Its destination only under a press, off the
+whole-screen read — the existing rule followed rather than widened:
 an unprompted sighting is taken only under the strict ZIP grammar, and this is
 the one place that grammar is loosened. A planner answers the press at once on
 its own `planner` line (no `ready`, no rate, no pay) and closes the window.
@@ -6458,6 +6458,21 @@ car's end, and when it is not, says why in a word on that line:
 
 Otherwise the address goes out as an ordinary `dropoff` line and is filed by
 the one path every destination takes.
+
+**Read without a press, while an order is held.** Asked for after a shift.
+server.js writes `.holding.json` (`{until}`, the moment its `holding()` lets
+go — `holdEnds`) whenever the order in the car changes, and removes it when
+none is; `order_held` in scan_pi.py reads it. While it says yes, a card-box read
+that shows the planner's stop grammar — the box on the rig is the bottom half
+of the screen and has never caught the title — asks for one whole-screen read,
+at most every `PLANNER_AUTO_EVERY` (10 s). That read answers only if a line of
+it is the `Trip Planner` title (`offer_parser.planner_titled`), and sends the
+stops on the same `planner` line with `asked: false` and the same `unfiled`
+word. It never sends a destination: no planner dropoff and no `find_address`
+answer off an unpressed whole screen, because a planner still up from the
+trip before would be filed against the order just taken. It is not an accept
+detector — it needs "✓ Took" pressed first — and it touches nothing on the
+phone.
 
 **Where it goes.** server.js puts the stops, with that word, on the order in
 the car (and so on `/api/status`, for a panel reloaded mid-delivery), and

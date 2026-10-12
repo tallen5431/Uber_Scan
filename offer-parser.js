@@ -1385,12 +1385,16 @@
    * stored texts, none carries one; the 367 that carry an order count all have
    * it in brackets, DoorDash's "Wasabi (2 orders)". The glue is the app's
    * bullet, read as a glyph ("Dropoff-1 order" on the rig's own reading) or
-   * lost, and never a bracket. See the
+   * lost, and never a bracket - or read as one lone letter, the misreading
+   * this reader is on record making of a mark that size. See the
    * same section of offer_parser.py for the measurements behind each rule. */
-  var PLANNER_STOP = new RegExp('^[^A-Za-z0-9]{0,3}(pick ?-?up|drop ?-?off) ?[^\\w\\s()]{0,3} ?'
+  var PLANNER_STOP = new RegExp('^[^A-Za-z0-9]{0,3}(pick ?-?up|drop ?-?off) ?'
+    + '(?:[^\\w\\s()]{0,3}|[A-Za-z]) ?'
     + '(' + DC + '{1,2}) ?orders?\\b', 'i');
   var PLANNER_EXPECTED = new RegExp('\\bexpected\\s*by\\s*' + CLOCK_TIME, 'i');
   var PLANNER_ADDRESS = /^[^A-Za-z0-9]{0,3}address\b/i;
+  // A bare ZIP on a line of its own, the end of a town line the screen wrapped.
+  var PLANNER_ZIP_LINE = new RegExp('^(' + ZIP_RX + ')(?: ?- ?' + DC + '{4})?$');
   var PLANNER_TOWN = new RegExp('^[^A-Za-z]{0,3}(' + TOWN + ') ?, ?([A-Za-z]{2})\\b ?(.*)$');
   var PLANNER_ZIP = new RegExp('^(' + ZIP_RX + ')(?: ?- ?' + DC + '{4})?(?![0-9A-Za-z])');
   // A line's furniture off both ends; a full stop is kept, "Pat Q." being how
@@ -1445,9 +1449,52 @@
   /* The text's lines, each normalized on its own and the empty ones gone, and
      where the stop headers among them are: one split for findPlanner and
      plannerBounded, so the two never disagree about which line is a stop. */
+  function plannerTown(line) {
+    var t = PLANNER_TOWN.exec(line || '');
+    return t && STATES[t[2].toUpperCase()] ? t : null;
+  }
+
+  /* The street line and the town line under the label at block[label]: the
+     town in the two lines under it, or split off a line that is a street and
+     a town at the last comma whose remainder is a town line, taking a bare ZIP
+     the screen wrapped onto the line under - the third under the label, and
+     no further. See _planner_address_lines. */
+  function plannerAddressLines(block, label) {
+    var under = block.slice(label + 1, label + 4);
+    var streetLine = null, townLine = null, townAt = -1;
+    for (var k = 0; k < Math.min(under.length, 2); k++) {
+      var l = under[k];
+      if (plannerTown(l)) {
+        townAt = k; townLine = l; streetLine = k ? under[0] : null;
+        break;
+      }
+      var cut = -1;
+      for (var c = l.indexOf(','); c !== -1; c = l.indexOf(',', c + 1)) {
+        if (plannerTown(l.slice(c + 1).trim())) cut = c;
+      }
+      if (cut !== -1 && /^\W{0,3}\d/.test(l)) {
+        townAt = k; streetLine = l.slice(0, cut); townLine = l.slice(cut + 1).trim();
+        break;
+      }
+    }
+    if (townAt === -1) return { street: under.length ? under[0] : null, town: null };
+    var t = plannerTown(townLine);
+    if (!t[3].trim() && townAt + 1 < under.length
+        && PLANNER_ZIP_LINE.test(under[townAt + 1])) {
+      townLine = townLine + ' ' + under[townAt + 1];
+    }
+    return { street: streetLine, town: townLine };
+  }
+
+  // The app's bar under the list, where the list ends. See PLANNER_BAR.
+  var PLANNER_BAR = /^[^A-Za-z0-9]{0,3}stop new requests\b/i;
+
   function plannerLines(text) {
     var lines = String(text || '').split(/[\r\n]+/).map(normalize)
       .filter(function (l) { return l; });
+    for (var b = 0; b < lines.length; b++) {
+      if (PLANNER_BAR.test(lines[b])) { lines = lines.slice(0, b); break; }
+    }
     var heads = [];
     lines.forEach(function (l, i) { if (PLANNER_STOP.test(l)) heads.push(i); });
     return { lines: lines, heads: heads };
@@ -1475,19 +1522,21 @@
         if (m) { due = timeOfDay(m[1], m[2], m[3]); break; }
       }
       // The street and then the town, looked for in the two lines after the
-      // label, so a lost street does not push the town out of reach.
+      // label, so a lost street does not push the town out of reach - and
+      // only THIS stop's label: a header the reader lost puts the next stop's
+      // lines in this block, and its "Expected by" is where that stop began.
+      // A dropoff whose address is off the screen is recorded with none, never
+      // with the pickup's. See find_planner.
       var streetLine = null, townLine = null, label = -1;
-      for (var j = 0; j < block.length; j++) {
-        if (PLANNER_ADDRESS.test(block[j])) { label = j; break; }
+      var times = [];
+      block.forEach(function (l, i) { if (PLANNER_EXPECTED.test(l)) times.push(i); });
+      var own = times.length > 1 ? block.slice(0, times[1]) : block;
+      for (var j = 0; j < own.length; j++) {
+        if (PLANNER_ADDRESS.test(own[j])) { label = j; break; }
       }
       if (label !== -1) {
-        var under = block.slice(label + 1, label + 3);
-        var townAt = -1;
-        for (var u = 0; u < under.length; u++) {
-          if (PLANNER_TOWN.test(under[u])) { townAt = u; break; }
-        }
-        townLine = townAt !== -1 ? under[townAt] : null;
-        streetLine = under.length && townAt !== 0 ? under[0] : null;
+        var found = plannerAddressLines(own, label);
+        streetLine = found.street; townLine = found.town;
       }
       var stop = { kind: /^p/i.test(head[1]) ? 'pickup' : 'dropoff',
                    orders: (count !== null && count >= 1 && count === Math.floor(count))

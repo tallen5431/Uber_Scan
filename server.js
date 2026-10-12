@@ -892,6 +892,7 @@ var DROPOFF_PATH = handoffPath('.dropoff');
 var CROP_PATH = handoffPath('.cropbox.json');
 var SETTINGS_PATH = handoffPath('.settings.json');
 var SNAP_ASK_PATH = handoffPath('.snap.json');
+var HOLDING_ASK_PATH = handoffPath('.holding.json');
 /* One counter for every temporary this process publishes through a rename, so
  * no two of them can pick the same name. It was `cropSeq` and served the one
  * endpoint that had the rule applied; three other sites wrote a fixed
@@ -1099,6 +1100,38 @@ function setHolding(h) {
     // is mid-shift.
     if (e && e.code !== 'ENOENT') console.error('holding: ' + e.message);
   }
+  tellScannerHeld(h);
+}
+
+/* Until when an order is in the car, for the scanner, which cannot ask.
+ *
+ * The scanner reads Uber's Trip Planner on its own while an order is held —
+ * see `planner_auto` in rpi/scan_pi.py — and "is an order held" is this
+ * process's question, answered by holding(). The scanner is sometimes this
+ * process's child and sometimes a systemd unit that has never heard of it, so
+ * it is told the way every other request is: a handoff file. What goes in it
+ * is the moment holding() itself stops answering yes — holdEnds, the one
+ * expression of that — so the scanner needs no word from here when the order
+ * runs out, and a server that died mid-delivery leaves a file that goes stale
+ * on its own clock rather than one that says "held" for ever.
+ *
+ * Through a rename, like every other file this process publishes, so the
+ * scanner never reads half of one. Gone when nothing is held. */
+function tellScannerHeld(h) {
+  var ends = h ? holdEnds(h) : null;
+  try {
+    if (ends === null) {
+      fs.unlinkSync(HOLDING_ASK_PATH);
+      return;
+    }
+    var tmp = partName(HOLDING_ASK_PATH);
+    fs.writeFileSync(tmp, JSON.stringify({ until: ends }));
+    fs.renameSync(tmp, HOLDING_ASK_PATH);
+  } catch (e) {
+    // Said, not thrown: the cost of a lost one is the automatic planner read
+    // and nothing else — ⌖ reads the planner exactly as before.
+    if (e && e.code !== 'ENOENT') console.error('holding handoff: ' + e.message);
+  }
 }
 
 /* ...and read back once, at startup, which is the only moment it means
@@ -1123,17 +1156,30 @@ function loadHolding() {
   // Through holding(), so an order that has outlived its own clock is put down
   // here rather than waiting to be noticed — and so the answer to "is there an
   // order in the car" is the same function at boot as it is everywhere else.
-  return holding(Date.now());
+  var still = holding(Date.now());
+  // ...and the scanner told, since a hold restored at boot is a hold.
+  if (still) tellScannerHeld(still);
+  return still;
+}
+
+/* The moment a hold stops being an order in the car: its stated time, half
+ * again, and the grace — or null for a hold with no stated time, which
+ * holding() never counts as carried. One expression, for holding() and for the
+ * scanner's handoff (tellScannerHeld), so the two cannot disagree about when an
+ * order ends. */
+function holdEnds(h) {
+  var stated = (typeof h.minutes === 'number' && isFinite(h.minutes) && h.minutes > 0)
+    ? h.minutes : null;
+  if (stated === null) return null;
+  return h.acceptedAt + stated * HOLD_OVERRUN * 60000 + HOLD_GRACE_MS;
 }
 
 function holding(now) {
   var h = scanner.holding;
   if (!h) return null;
-  var stated = (typeof h.minutes === 'number' && isFinite(h.minutes) && h.minutes > 0)
-    ? h.minutes : null;
-  if (stated === null) return null;
-  var over = (now - h.acceptedAt) - (stated * HOLD_OVERRUN * 60000) - HOLD_GRACE_MS;
-  if (over > 0) {
+  var ends = holdEnds(h);
+  if (ends === null) return null;
+  if (now > ends) {
     setHolding(null);
     return null;
   }
