@@ -3294,6 +3294,7 @@ const framed = (page) => page.waitForFunction(
       r.oneHow = await how();
       r.oneKey = await keyShown();
       r.oneFit = await page.evaluate(() => window.__fit);
+      r.oneMarks = await page.evaluate(() => (window.__marks || []).map((m) => m.ll));
       r.oneAsked = relayAsked.splice(0);
       // What the figure should be off the fake's own road (a quarter longer
       // than the straight line, leg by leg), worked out with the page's MV.
@@ -6202,15 +6203,14 @@ try:
     # getting from it back to where the car was already going.
     eq('...two of them empty, two of them paid',
        len([l for l in lines if l.get('dashed')]), 2)
-    # The four marks and both cards' discs (drawHow): the card printed 12 mi
-    # and the held one 9, each searched and held to its figure plus half a
-    # mile round the fix both came up at, 34.010, -84.600. The north edge of
-    # the bigger disc is in the fit, which the pins alone never reach.
+    # The four marks and nothing else: both cards' discs are drawn (below)
+    # and have no say in the view. The card printed 12 mi round 34.010,
+    # -84.600, and fitted to its disc too the hat's map went from zoom 10 to
+    # 8 on a 9.4 mi card (Leaflet 1.9.4's getBoundsZoom, the fit's padding).
     _fit = on.get('fit') or []
-    ok_('...and the view is fitted to all of it, and to both cards\' discs (%r)' % (_fit,),
-        len(_fit) == 8 and all(m.get('ll') in _fit for m in marks)
-        and any(abs(p[0] - (34.010 + 12.5 / 69.0)) < 1e-9 for p in _fit)
-        and any(abs(p[0] - (34.010 + 9.5 / 69.0)) < 1e-9 for p in _fit))
+    ok_('...and the view is fitted to the four marks and nothing else, never to '
+        'a card\'s disc (%r)' % (_fit,),
+        len(_fit) == 4 and all(m.get('ll') in _fit for m in marks))
     _how = on.get('how') or []
     eq('with no NucBox, how each place was found is the two cards\' discs and '
        'nothing else: the public map\'s one answer has no list behind it',
@@ -6471,11 +6471,13 @@ try:
                              'pinned at their middle' for c in _c))
     ok_('...with the key to them on the map', both.get('oneKey'))
     _fit = both.get('oneFit') or []
-    ok_('...and the one fit takes in both discs and every pin (%r)' % (_fit,),
-        len(_fit) == 8
-        and any(abs(p[0] - (33.9526 + 9.9 / 69.0)) < 1e-9 for p in _fit)
-        and any(abs(p[0] - (33.9526 + 3.5 / 69.0)) < 1e-9 for p in _fit)
-        and [33.983, -84.5499] in _fit and [33.9526, -84.5499] in _fit)
+    _pins = both.get('oneMarks') or []
+    ok_('...and the one fit is the car and the pins, each once, none of the '
+        'candidates and neither disc (%r against %r)' % (_fit, _pins),
+        sorted(map(tuple, _fit)) == sorted(map(tuple, _pins)) and len(_fit) >= 3
+        and [33.983, -84.5499] in _fit and [33.9526, -84.5499] in _fit
+        and not any(abs(p[0] - (33.9526 + 9.9 / 69.0)) < 1e-6
+                    or abs(p[0] - (33.9526 + 3.5 / 69.0)) < 1e-6 for p in _fit))
     # Zero requests to draw it. The walk asks the NucBox once per place and
     # the router twice; everything drawn above came out of those answers. A
     # drawing that asked for its candidates itself shows up here as a path

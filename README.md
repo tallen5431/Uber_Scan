@@ -440,7 +440,8 @@ all:
   foot says which is which ("◯ card's reach · ● pin · ● also found · ○
   outside"; "◯ reach · ● pin · ● found · ○ outside" on the 3.5" hat). It is
   drawn off the answers the walk already holds and asks nothing; the view is
-  fitted to the car, the discs and the pins when Map view opens or the card
+  fitted to the car and the pins, never to the discs, which run past its
+  edge when they are bigger, when Map view opens or the card
   changes, and never moves with the GPS. A card with no yardstick has no
   disc drawn: its sixty miles are not the card's reach. The public
   geocoder's one answer has no list behind it, so with the NucBox down only

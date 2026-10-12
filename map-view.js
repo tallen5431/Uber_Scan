@@ -1017,17 +1017,13 @@
    * place of that card was searched in and every pin of it is held to
    * (discFor, cardRefuses). Null for a card with no fix, and for one with no
    * yardstick — that card's search is the sixty miles the public box stands
-   * for, which is not the card's reach, and a sixty-mile circle framed would
-   * zoom the panel out to two counties to say nothing. `corners` is the box
-   * round it, for the one fit Map view makes. */
+   * for, which is not the card's reach, and a sixty-mile circle round the car
+   * would say nothing. It is drawn, never fitted to: Map view's view is the car
+   * and the pins (see drawHow). */
   function discShape(disc) {
     if (!disc || disc.card === null || disc.card === undefined) return null;
-    var dLat = disc.miles / 69.0;
-    var dLon = disc.miles / (69.0 * Math.max(0.2, Math.cos(disc.at.lat * Math.PI / 180)));
     return { lat: disc.at.lat, lon: disc.at.lon, miles: disc.miles,
-             metres: disc.miles * METRES_PER_MILE,
-             corners: [[disc.at.lat - dLat, disc.at.lon - dLon],
-                       [disc.at.lat + dLat, disc.at.lon + dLon]] };
+             metres: disc.miles * METRES_PER_MILE };
   }
 
   /* What to draw of how ONE place was found, as plain data: `res` is what

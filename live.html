@@ -4445,15 +4445,18 @@
      they say when pointed at (tipOn), word for word the caption's (MV.nbxRefusal, cut to the same
      DISC_PLACE_SHOWN), so the map and the line under it cannot disagree.
 
-     The discs join `bounds`, so the one fit drawMap makes takes in the car,
-     the discs and the pins — every pin the NucBox gave is inside a disc by
-     construction — and a candidate outside its disc gets no say in the view,
-     for the reason a stray gets none on the map page. Returns whether
-     anything was drawn, which is whether the key under the map is shown. */
+     None of it has a say in the view. drawMap's one fit is the car and the
+     pins, as it was before any of this was drawn, and a disc bigger than
+     that view runs past its edge. Fitted to the discs too, measured with
+     Leaflet 1.9.4's own getBoundsZoom and the fit's 34px padding, a 9.4 mi
+     card took the hat's 228px map from zoom 10 to 8 and a 20 mi card to 7,
+     to frame a circle that says only how far the card reaches; and a candidate outside its disc gets no say for the
+     reason a stray gets none on the map page. Returns whether anything was
+     drawn, which is whether the key under the map is shown. */
   var HOW_COLOUR = { 'new': '#7aa2f7', held: '#f5a524' };
   var HOW_GREY = '#8a8f98';
 
-  function drawHow(want, bounds) {
+  function drawHow(want) {
     var any = false;
     var cards = [['new', MV.discFor(want.card)]];
     if (want.held) cards.push(['held', MV.discFor(want.heldCard)]);
@@ -4466,7 +4469,6 @@
         dashArray: '5 6', fillColor: HOW_COLOUR[c[0]], fillOpacity: .04,
         interactive: false, className: 'mv-how mv-disc mv-' + c[0]
       }).addTo(mapLayer);
-      bounds.push(d.corners[0], d.corners[1]);
     });
     var seen = want.nbxSeen || {};
     Object.keys(seen).forEach(function (q) {
@@ -4550,8 +4552,8 @@
       bounds.push([at.lat, at.lon]);
     }
     // How each place was found, under the pins: drawn first so every pin
-    // sits on top of it. Its discs join the view; see drawHow.
-    mapKey.hidden = !drawHow(want, bounds);
+    // sits on top of it. None of it joins the view; see drawHow.
+    mapKey.hidden = !drawHow(want);
 
     // The car first, because every other mark here is a guess and this one is
     // not. A pickup pin a long way from it is a pin to distrust whatever the

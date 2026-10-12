@@ -1452,10 +1452,6 @@ async function nucbox() {
     eq('the card\'s disc is drawn at its fix, its distance and the half mile, in metres',
        [dS.lat, dS.lon, dS.metres.toFixed(3)].join(','),
        [SQ.lat, SQ.lon, (9.9 * 1609.344).toFixed(3)].join(','));
-    ok_('...and the box round it for the fit holds the whole disc',
-        Math.abs(dS.corners[1][0] - (SQ.lat + 9.9 / 69)) < 1e-9
-        && Math.abs(dS.corners[0][0] - (SQ.lat - 9.9 / 69)) < 1e-9
-        && MV.crowMiles(SQ, { lat: SQ.lat, lon: dS.corners[1][1] }) >= 9.9 - 1e-6);
     eq('...none for a card with no yardstick (its sixty miles are no card\'s reach), '
        + 'and none with no fix', [MV.discShape(MV.discFor(card({ legs: 1, hasTotal: false }))),
                                  MV.discShape(null)].join(','), ',');
