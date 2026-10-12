@@ -2464,12 +2464,27 @@ def planner_furniture(text):
 # renders as a glyph — "Dropoff-1 order" on the rig's own reading — or loses.
 # Up to three glyphs that are neither space nor word, the same allowance
 # DELIVER_BY gives Uber's bullet, and never a bracket.
+#
+# ...or ONE LETTER, standing alone between the word and the count. The bullet
+# is a dot a few pixels across, and this reader turns marks that size into
+# letters: the stop's icon came back as "Oo" and "oS" on the shift's reads of
+# a stacked trip's planner, and the scroll bar as "he", "S" and "E" (see
+# _planner_address). The whole-screen text of the read that lost that trip's
+# second pickup and its dropoff was not kept, so which glyph cost those two
+# headers is not known; a letter is the misreading this reader is on record
+# making of a mark that size, and a header that does not match is a stop that
+# vanishes with its lines filed under the stop above. A lone letter between
+# "Pickup" and a one- or two-digit count followed by "order" is still nothing
+# DoorDash prints: its count is in brackets, and the bracket is still refused.
 PLANNER_STOP = re.compile(
-    r'^[^A-Za-z0-9]{0,3}(pick ?-?up|drop ?-?off) ?[^\w\s()]{0,3} ?'
+    r'^[^A-Za-z0-9]{0,3}(pick ?-?up|drop ?-?off) ?(?:[^\w\s()]{0,3}|[A-Za-z]) ?'
     r'(' + DC + r'{1,2}) ?orders?\b', re.IGNORECASE | ASCII)
 PLANNER_EXPECTED = re.compile(r'\bexpected\s*by\s*' + CLOCK_TIME,
                               re.IGNORECASE | ASCII)
 PLANNER_ADDRESS = re.compile(r'^[^A-Za-z0-9]{0,3}address\b', re.IGNORECASE | ASCII)
+# A bare ZIP on a line of its own: the end of a town line the screen wrapped,
+# "…, Kennesaw, GA" over "30152" on the rig's own picture of a planner.
+PLANNER_ZIP_LINE = re.compile(r'^(' + ZIP + r')(?: ?- ?' + DC + r'{4})?$', ASCII)
 # "Marietta, GA", and whatever the line carries after the state. TOWN is
 # find_address's own idea of a town; the state is the check, as it is there.
 PLANNER_TOWN = re.compile(r'^[^A-Za-z]{0,3}(' + TOWN + r') ?, ?([A-Za-z]{2})\b ?(.*)$',
@@ -2542,12 +2557,78 @@ def _planner_address(street_line, town_line):
             'line': ', '.join(parts) or None}
 
 
+def _planner_town(line):
+    """`line` as a town line — "Town, ST" and whatever follows the state — when
+    it is one whose state is a state, else None."""
+    t = PLANNER_TOWN.match(line or '')
+    return t if t and t.group(2).upper() in STATES else None
+
+
+def _planner_address_lines(block, label):
+    """The street line and the town line under the "Address" label at
+    block[label], as _planner_address takes them; (None, None) for neither.
+
+    The app lays an address out three ways. The first is the planner this
+    reader was built on; the other two are both on the photographs of a
+    stacked trip, two pickups over a dropoff, that this was written from:
+
+        4821 Kestrel Dr            street, then "Town, ST"
+        Marietta, GA
+        1200 Fable Pkwy NW,        street with its comma, then town and ZIP
+        Kennesaw, GA 30144
+        1625 Fable Blvd NW, Kennesaw, GA     street AND town on one line, the
+        30152                                ZIP wrapped onto the next
+
+    The third was read as no address at all — measured on the photograph,
+    through the read path (fit_for_ocr, to_grey, preprocess, ocr_lines): no
+    line under the label was a town line, so the stop kept its name and lost
+    where it was. The town is
+    looked for in the two lines under the label, as before; a line that is a
+    street and a town is split at the last comma whose remainder is a town
+    line; and a town line with nothing after its state takes a bare ZIP on the
+    line under it — the third under the label, and no further.
+    """
+    under = block[label + 1:label + 4]
+    street_line = town_line = None
+    town_at = None
+    for j, l in enumerate(under[:2]):
+        if _planner_town(l):
+            town_at, town_line = j, l
+            street_line = under[0] if j else None
+            break
+        cut = None
+        for c in re.finditer(',', l):
+            if _planner_town(l[c.end():].strip()):
+                cut = c
+        if cut is not None and re.match(r'\W{0,3}\d', l):
+            town_at, street_line, town_line = j, l[:cut.start()], l[cut.end():].strip()
+            break
+    if town_at is None:
+        return (under[0] if under else None), None
+    t = _planner_town(town_line)
+    if not t.group(3).strip() and town_at + 1 < len(under) \
+            and PLANNER_ZIP_LINE.match(under[town_at + 1]):
+        town_line = town_line + ' ' + under[town_at + 1]
+    return street_line, town_line
+
+
+# The app's bar under the list, "Stop New Requests" beside its two icons, on
+# every read of a planner on file. It is where the list ENDS: a stop whose
+# header is the last thing above it — a dropoff scrolled down to its header, on
+# the photograph of a stacked trip — had the bar read as its name.
+PLANNER_BAR = re.compile(r'^[^A-Za-z0-9]{0,3}stop new requests\b', re.IGNORECASE | ASCII)
+
+
 def _planner_lines(text):
     """The text's lines, each normalize()d on its own and the empty ones gone,
     and where the stop headers among them are. One split for find_planner and
-    planner_bounded, so the two can never disagree about which line is a stop."""
+    planner_bounded, so the two can never disagree about which line is a stop.
+    Nothing from the app's bar down: see PLANNER_BAR."""
     lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
     lines = [l for l in lines if l]
+    bar = next((i for i, l in enumerate(lines) if PLANNER_BAR.match(l)), None)
+    if bar is not None:
+        lines = lines[:bar]
     return lines, [i for i, l in enumerate(lines) if PLANNER_STOP.match(l)]
 
 
@@ -2590,15 +2671,20 @@ def find_planner(text):
         # Under the label, the street and then the town. The town line is
         # looked for in the two lines after the label, so a street the reader
         # lost does not push the town out of reach — and a line that IS the
-        # town is never read as a street.
+        # town is never read as a street. See _planner_address_lines.
+        #
+        # ONLY THIS STOP'S LABEL. A block runs to the next header the reader
+        # found, and a header it lost puts the next stop's lines in this one —
+        # its name, its time, its address. The second "Expected by" in a block
+        # is where that next stop began, so the label is looked for above it:
+        # a dropoff whose own address is scrolled off, or closed, is recorded
+        # with none, and never with the pickup's under it.
         street_line = town_line = None
-        label = next((j for j, l in enumerate(block) if PLANNER_ADDRESS.match(l)), None)
+        times = [j for j, l in enumerate(block) if PLANNER_EXPECTED.search(l)]
+        own = block[:times[1]] if len(times) > 1 else block
+        label = next((j for j, l in enumerate(own) if PLANNER_ADDRESS.match(l)), None)
         if label is not None:
-            under = block[label + 1:label + 3]
-            town_at = next((j for j, l in enumerate(under) if PLANNER_TOWN.match(l)),
-                           None)
-            town_line = under[town_at] if town_at is not None else None
-            street_line = under[0] if under and town_at != 0 else None
+            street_line, town_line = _planner_address_lines(own, label)
         stop = {'kind': 'pickup' if head.group(1)[0] in 'pP' else 'dropoff',
                 'orders': int(count) if count is not None and count >= 1
                 and count == int(count) else None,

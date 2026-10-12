@@ -4352,6 +4352,96 @@
      "line": "4821 Kestrel Dr, Marietta"
     }
    ]
+  },
+  {
+   "name": "two pickups over a dropoff whose address is below the screen",
+   "_why": "The layout of the photograph off a shift, every word invented: two open pickups, the first with its street ending in a comma over 'Town, ST ZIP', the second with its street AND town on one line and the ZIP wrapped onto the next, and the dropoff's header the last thing above the app's bar. The second pickup was read with no address at all, because no line under its label was a town line; the dropoff has none on the screen and must not be given one. 'Stop New Requests' is the bar, not the dropoff's name. 5:46 PM is 1066, 5:58 PM 1078.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 5:46 PM\nAddress\n1200 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details\nPickup \u2022 1 order\nHeron Public House\nExpected by 5:58 PM\nAddress\n1625 Heron Blvd NW, Kennesaw, GA\n30152\nView details\nDropoff \u2022 1 order\nStop New Requests",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1066,
+     "street": "1200 Fable Mill Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "1200 Fable Mill Pkwy NW, Kennesaw, GA 30144"
+    },
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Heron Public House",
+     "expectedBy": 1078,
+     "street": "1625 Heron Blvd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30152",
+     "line": "1625 Heron Blvd NW, Kennesaw, GA 30152"
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": null,
+     "expectedBy": null,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null
+    }
+   ]
+  },
+  {
+   "name": "a header whose bullet read as a letter is still a stop",
+   "_why": "The bullet is a dot a few pixels across and this reader turns marks that size into letters - the stop's icon read as 'Oo' and 'oS' on the shift's reads of a planner. Read as 'e' here, invented. Without the letter allowance both headers fail, find_planner says this is no planner, and the pickup's address is loose on a screen with no stop to hold it. 6:37 PM is 1117.",
+   "text": "Pickup e 1 order\nFable Grill\nExpected by 5:46 PM\nAddress\n12 Fable St,\nAcworth, GA 30101\nView details\nDropoff e 1 order\nPat Q.\nExpected by 6:37 PM",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1066,
+     "street": "12 Fable St",
+     "city": "Acworth",
+     "state": "GA",
+     "zip": "30101",
+     "line": "12 Fable St, Acworth, GA 30101"
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 1117,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null
+    }
+   ]
+  },
+  {
+   "name": "a dropoff does not borrow the address of a stop whose header was lost under it",
+   "_why": "A header that does not read puts the next stop's lines in the block above it. Here the dropoff is closed and the pickup under it is open, its header lost ('Pick-up order', no count). The second 'Expected by' is where the lost stop began, so the dropoff's label is looked for above it and there is none: its five address fields are null, never the restaurant's. Invented.",
+   "text": "Dropoff \u2022 1 order\nPat Q.\nExpected by 6:37 PM\nPick-up order\nFable Grill\nExpected by 5:46 PM\nAddress\n12 Fable St\nAcworth, GA 30101\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 1117,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null
+    }
+   ]
   }
  ]
 }

@@ -1807,14 +1807,15 @@ eq('a planner nobody pressed for gives no address, not even the one find_address
 # read matched PLANNER_STOP, so nothing called it a planner and find_address
 # took the town line as the last address on the screen.
 #
-# The texts below are that screen's shapes with every address made up: the
-# crop as it cut the list, the header after it read with its bullet as a letter
-# (the reader turned the stop's icon into "Oo" in the very read on file), and
-# the same pickup block read whole under its own header.
-_PICKUP_CUT = ('Kennesaw, GA 30144\nView details\nPickup e 1 order\nFable Grill\n'
-               'Expected by 5:54 PM\nDropoff e 1 order\nPat Q.\nExpected by 6:37 PM\n'
+# The texts below are that screen's shapes with every address made up. The
+# read that did it was not kept, so which way its headers failed is not known;
+# here they are simply gone — the crop as it cut the list with no header read
+# under it, and the pickup block with its header down to the word "Pickup",
+# the count lost, which PLANNER_STOP does not take for a stop.
+_PICKUP_CUT = ('Kennesaw, GA 30144\nView details\nFable Grill\n'
+               'Expected by 5:54 PM\nPat Q.\nExpected by 6:37 PM\n'
                'Waybill\nStop New Requests')
-_PICKUP_BLOCK = ('Pickup e 1 order\nFable Grill\nExpected by 5:46 PM\nAddress\n'
+_PICKUP_BLOCK = ('Pickup\nFable Grill\nExpected by 5:46 PM\nAddress\n'
                  '4100 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details\n'
                  'Stop New Requests')
 for _name, _t in (('the cut list', _PICKUP_CUT), ('the pickup block', _PICKUP_BLOCK)):
@@ -1869,11 +1870,13 @@ eq('an unlabelled address on a screen with the planner\'s furniture answers a '
 # with no furniture unprompted (refused) and pressed (answered, as it always
 # was — a press over a plain navigation screen needs no label).
 _PICKING = 'Picking up\n12 Fable St, Acworth, GA 30101\n4 min Start'
-_BARE_CUT = 'Kennesaw, GA 30144\nView details\nPickup e 1 order\nFable Grill'
+_BARE_CUT = 'Kennesaw, GA 30144\nView details\nFable Grill'
 _BARE_NAV = '1234 Made Up Ln, Acworth, GA 30101 12 min Start'
-ok_('the premise: none of the three carries the planner\'s furniture or a payout',
+ok_('the premise: none of the three carries the planner\'s furniture, a stop '
+    'header or a payout',
     not any(OP.planner_furniture(t) or OP.parse(t)['pay'] is not None
-            or OP.parse(t)['places'] for t in (_PICKING, _BARE_CUT, _BARE_NAV)))
+            or OP.parse(t)['places'] or OP.find_planner(t) is not None
+            for t in (_PICKING, _BARE_CUT, _BARE_NAV)))
 _hpk6 = tempfile.mkdtemp()
 rpk6 = run(_press_on_first_read(_hpk6, ''), extra_argv=['--no-parallel'], seconds=4.0,
            handoff=_hpk6, dropoff_window=1.0, whole_text=_PICKING)
@@ -1896,10 +1899,12 @@ eq('...while a press over an unlabelled navigation screen still gets its address
 # screen mentioning a pickup would lose. No merchant under that Pickup: one
 # would make the screen an offer to the payout guard's second arm, which
 # refuses it for its own reason before this rule is asked.
-_BOTH_ENDS = ('Pickup e 1 order complete\n'
+_BOTH_ENDS = ('Pickup - 5:46 PM\n'
               'Dropoff\n34 Made Up Rd, Acworth, GA 30102\n12 min Start')
-ok_('the premise: that screen names a pickup above the dropoff and is no offer',
+ok_('the premise: that screen names a pickup above the dropoff and is no offer '
+    'and no planner',
     OP.parse(_BOTH_ENDS)['places'] == [] and OP.parse(_BOTH_ENDS)['pay'] is None
+    and OP.find_planner(_BOTH_ENDS) is None
     and 'Pickup' in _BOTH_ENDS.split('Dropoff')[0])
 rpk5 = run(lambda n, k: _BOTH_ENDS, extra_argv=['--no-parallel'], seconds=4.0,
            handoff=tempfile.mkdtemp())
