@@ -1152,6 +1152,26 @@ eq('live.html has words for every reason planner_destination gives, and no other
    sorted(_given))
 ok_('...and planner_destination gives some (%r)' % sorted(_given), len(_given) >= 3)
 
+# --- no text says the crop finds the card by its content ----------------------
+#
+# The crop stopped fitting itself to the card long ago (rpi/README.md, "The
+# crop stopped chasing the card"): it is placed from the card's measured share
+# of the quad, or it is the box the driver drew. Two texts went on saying
+# otherwise — scan_pi's setup line told the driver "the crop is fitted to the
+# card by content" on every close mount, and autopilot said "the crop finds
+# the card by content now" — and cropbox.py's "read exactly this" became half
+# true the day a read through the card box could be read again through a card
+# found above it (cardfind.py). Each now says what the code does; this keeps
+# the old sentences from coming back.
+_STALE_CROP = re.compile(r'by content|crop (?:is )?(?:found|fitted|finds|fits)\b', re.I)
+for _name in ('scan_pi.py', 'autopilot.py', 'cropbox.py'):
+    _src = open(os.path.join(ROOT, 'rpi', _name), encoding='utf-8').read()
+    eq('rpi/%s does not say the crop is found or fitted by content' % _name,
+       [m.group(0) for m in _STALE_CROP.finditer(_src)], [])
+ok_('...and rpi/cropbox.py, which says a drawn box is read exactly, names the one '
+    'read that is not',
+    'cardfind' in open(os.path.join(ROOT, 'rpi', 'cropbox.py'), encoding='utf-8').read())
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -214,7 +214,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         fail_after=None, phone_hold=None, gps_hold=None, phone=None,
         planners=None,
         freeze_at=None, stall_say=None, empty=None, noise=True, offer_dim=None,
-        ring=1, stall_again=None):
+        ring=1, stall_again=None, offer=None, real_look=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return — on the reader's thread only, with `hang_on_loop` False, so a read
@@ -238,12 +238,19 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     it darker.
     `offer_dim`: the card at that share of its brightness — lit, and short of
     the full well that makes the gain look again at once.
+    `offer`: the frame the mount shows once the card is up, instead of the
+    UberX card. `real_look`: (box_text, found_text) — the REAL Scanner._look
+    runs, card finder and all, on the frames the camera gives it, and only the
+    OCR engine is stubbed: it answers `box_text` for every crop of a read until
+    the card finder has been asked during that read, and `found_text` after.
+    `finder` in the result counts the times the finder was asked.
     Returns the journal rows, the announcements, the alive beats and what rode
     them, the log lines, how many reads were asked of the reader and how many
     it began, the exception main() raised, if any, and the handoff directory."""
     if not handoff:
         handoff = tempfile.mkdtemp()
-    offer = TC.mount(TC.uberx_screen(), 1200)
+    if offer is None:
+        offer = TC.mount(TC.uberx_screen(), 1200)
     quad = PL.detect_screen_quad(offer)
     work = tempfile.mkdtemp()
     config = os.path.join(work, 'config.json')
@@ -337,7 +344,33 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     SP.log = lambda m: logs.append(m)
     was_handoff = os.environ.get(HO.ENV_DIR)
     os.environ[HO.ENV_DIR] = handoff
-    PL.Scanner.look_many = look
+    finder = [0]
+    real_reading = (PL.CF.find_card, PL.Scanner._look, PL.ocr_lines)
+    if real_look is None:
+        PL.Scanner.look_many = look
+    else:
+        # The real read, card finder and all; only the engine is a stub, and
+        # it answers for whichever crop the read is on — see `real_look`.
+        box_text, found_text = real_look
+        mine = threading.local()
+
+        def find_card(grey, box):
+            finder[0] += 1
+            mine.asked = True
+            return real_reading[0](grey, box)
+
+        def one_look(self, frame, now=None, geom=None):
+            calls[0] += 1
+            mine.asked = False
+            return real_reading[1](self, frame, now, geom)
+
+        def engine(image, config=PL.OCR_CONFIG):
+            text = found_text if getattr(mine, 'asked', False) else box_text
+            return text, [{'text': t, 'top': 100 + 60 * i, 'bottom': 140 + 60 * i,
+                           'left': 10, 'right': 300}
+                          for i, t in enumerate(text.split('\n'))]
+
+        PL.CF.find_card, PL.Scanner._look, PL.ocr_lines = find_card, one_look, engine
     if health_every is not None:
         SP.HEALTH_EVERY = health_every
     if stuck_after is not None:
@@ -394,6 +427,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
          PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
          SP.emit_reading, SP.emit_dropoff, SP.emit_settings, SP.Reader.submit) = real
+        PL.CF.find_card, PL.Scanner._look, PL.ocr_lines = real_reading
         SP.emit_planner = was_planner
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
@@ -408,7 +442,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                 submitted=submitted[0], planners=said_planners,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
-                raised=raised, handoff=handoff)
+                raised=raised, handoff=handoff, finder=finder[0])
 
 
 def _stall_note_age(handoff):
@@ -2465,6 +2499,87 @@ ok_('...the prompt was recorded',
 ok_('...and the screen after the prompt was read', _rp3['nav_at'] is not None)
 eq('the screen after the zone prompt is not filed against the card before it',
    [x.get('after') for x in rp3['rows'] if x.get('kind') == 'screen'], [])
+
+# --- a card taller than the card box, through main() ---------------------------
+#
+# The 8 Oct card box, drawn round a short card, over the taller Early-look card
+# whose $14.48 sits across its top edge. The read is the real Scanner._look and
+# the card finder runs on the camera's own frames; only the engine is a stub,
+# answering what the box saw ("Pit." for the payout, the journey whole) until
+# the finder has been asked, and the whole card after.
+_EARLY_BOX = ('Pit. FO\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\n'
+              "Dave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\n"
+              'Foothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer')
+_EARLY_FOUND = ('Early look • Order in progress\nDelivery\n$14.48\n'
+                + _EARLY_BOX.split('\n', 1)[1])
+_EARLY_FRAME = TC.mount(TC.early_look_screen(), 720)
+_EARLY_CFG = {'quad': TC.screen_corners(720), 'manualBox': True,
+              'cropBox': list(TC.BOX_8OCT)}
+
+
+def _amber(path):
+    """How many pixels of the live view are the found card's amber outline."""
+    pic = cv2.imread(path) if path and os.path.exists(path) else None
+    if pic is None:
+        return 0
+    b, g, r = [pic[..., i].astype(int) for i in range(3)]
+    return int(np.count_nonzero((r > 200) & (g > 120) & (g < 220) & (b < 90)))
+
+
+_cf_ho, _cf_fold = tempfile.mkdtemp(), tempfile.mkdtemp()
+_cf_snap = os.path.join(tempfile.mkdtemp(), 'live.jpg')
+_cf_req = [None]
+
+
+def _snap_after_rescue(rows, ann, calls):
+    if _cf_req[0] is None and any(r.get('pay') == 14.48 for r in rows
+                                  if not r.get('kind')) and calls >= 4:
+        _cf_req[0] = _ask_snap(_cf_ho, _cf_fold)
+    return (_cf_req[0] is not None and os.path.exists(os.path.join(_cf_fold, 'reader.json'))
+            and any(r.get('kind') == 'seen' for r in rows))
+
+
+r20 = run(lambda n, k: '', real_look=(_EARLY_BOX, _EARLY_FOUND), offer=_EARLY_FRAME,
+          config_extra=_EARLY_CFG, handoff=_cf_ho, health_every=1.0, seconds=40.0,
+          extra_argv=['--snapshot', _cf_snap], until=_snap_after_rescue)
+ok_('with the card finder on, the taller card\'s payout reaches the journal '
+    '(finder asked %d times)' % r20['finder'],
+    r20['finder'] > 0 and any(x.get('pay') == 14.48 for x in r20['rows'] if not x.get('kind')))
+ok_('...and the line the panel is sent says the read came off a card found, '
+    'cropFrom "found" (%r)' % sorted(set(v[1].get('crop_from') for v in r20['verdicts'])),
+    any(v[1].get('crop_from') == 'found' for v in r20['verdicts']))
+_cf_said = (_json_or_none(os.path.join(_cf_fold, 'reader.json')) or {}).get('read') or {}
+eq('...a Snap\'s reader.json says so too', _cf_said.get('cropFrom'), 'found')
+ok_('...and so does the crop it reports, above the drawn box (%r)' % (_cf_said.get('crop'),),
+    (_cf_said.get('crop') or [0, 1])[1] < TC.BOX_8OCT[1])
+ok_('...the live view outlines the card found, in amber (%d pixels)' % _amber(_cf_snap),
+    _amber(_cf_snap) > 100)
+ok_('...the seen row counts it, beside the clipped ones (%r)'
+    % [(x.get('rescued'), x.get('clipped')) for x in r20['rows'] if x.get('kind') == 'seen'],
+    any((x.get('rescued') or 0) >= 1 for x in r20['rows'] if x.get('kind') == 'seen'))
+ok_('...and the setup line says the finder is on',
+    any(l.startswith('setup: card finder on') for l in r20['logs']))
+
+# ...and with it off, by config or by flag, the reads are the box as drawn: the
+# finder is never asked, nothing is rescued, and the setup line says why.
+for _how, _cfg, _argv, _why in (
+        ('config', dict(_EARLY_CFG, cardFinder=False), [], 'cardFinder is false in the config'),
+        ('flag', _EARLY_CFG, ['--no-card-find'], '--no-card-find')):
+    _off = run(lambda n, k: '', real_look=(_EARLY_BOX, _EARLY_FOUND), offer=_EARLY_FRAME,
+               config_extra=_cfg, extra_argv=['--snapshot', _cf_snap + '.off'] + _argv,
+               seconds=30.0, until=lambda rows, ann, calls: calls >= 3)
+    # Every one of those reads found the journey and no payout, which is the
+    # read the finder is asked about when it is on.
+    eq('with the card finder off by %s the finder is never asked, over %d reads'
+       % (_how, _off['calls']), (_off['finder'], _off['calls'] >= 3), (0, True))
+    eq('...every line says the box as drawn',
+       sorted(set(v[1].get('crop_from') for v in _off['verdicts'])), ['drawn'])
+    eq('...no payout reaches the journal',
+       [x.get('pay') for x in _off['rows'] if not x.get('kind')], [])
+    eq('...no amber on the live view', _amber(_cf_snap + '.off'), 0)
+    ok_('...and the setup line says it is off, and why (%r)'
+        % [l for l in _off['logs'] if 'card finder' in l][:1],
+        any(l.startswith('setup: card finder OFF (%s)' % _why) for l in _off['logs']))
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)

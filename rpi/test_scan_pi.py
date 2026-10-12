@@ -1451,7 +1451,7 @@ def payout_only(self, frames, now=None, geom=None):
     """
     p = OP2.parse('$16.05')
     return [{'parsed': dict(p), 'rate': OP2.rate(p, {}), 'locked': True,
-             'text': '$16.05', 'clipped': False, 'dropped': 0, 'recovered': 0,
+             'text': '$16.05', 'clipped': False, 'dropped': 0, 'recovered': 0, 'rescued': 0,
              'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
              'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
             for _ in frames]
@@ -2685,6 +2685,54 @@ eq('the oldest pictures go first', len(_left), 5)
 ok_('...and the ones kept are the newest',
     all('many-' in n for n in _left) and 'many-11' in _left[-1])
 shutil.rmtree(_scanwork, ignore_errors=True)
+
+# --- which crop a read came through ------------------------------------------
+#
+# A payout read off a card the rig went looking for above the drawn card box
+# is a different claim from one the driver's own box held (pipeline._look,
+# cardfind.py), and every place that reports a read says which it was.
+eq('a read through a card found above the box says so on the wire',
+   emitted(sample_rate, sample_parsed, True, crop_from='found').get('cropFrom'), 'found')
+eq('...and every other read says "drawn"',
+   emitted(sample_rate, sample_parsed, True).get('cropFrom'), 'drawn')
+
+_hr = SP.Health()
+_hr.reset(0.0)
+_hr.add({'ms': {'total': 900}, 'clipped': False, 'cropFrom': 'found'},
+        {'pay': 14.48, 'complete': True})
+_hr.add({'ms': {'total': 800}, 'clipped': True, 'cropFrom': 'drawn'},
+        {'pay': None, 'complete': False})
+_hr.saw = 1
+_said_hr = []
+try:
+    SP.log = _said_hr.append
+    _tr = _hr.report(SP.HEALTH_EVERY + 1.0, None, type('AScanner', (), {'crop_box': None})())
+finally:
+    SP.log = _real_log2
+eq('the tally counts reads rescued off a found card beside the clipped ones',
+   (_tr.get('rescued'), _tr.get('clipped')), (1, 1))
+ok_('...and the health line says it in words (%r)' % _said_hr[-1:],
+    any('1 read the payout off a taller card found above the card box' in l
+        for l in _said_hr))
+
+# --- the setup line says whether the finder will ever be asked ----------------
+_off_args = type('Args', (), {'no_card_find': True})()
+_on_args = type('Args', (), {'no_card_find': False})()
+eq('--no-card-find turns the finder off, and says so',
+   SP.card_finder_off({}, _off_args), '--no-card-find')
+eq('...as does "cardFinder": false in the config',
+   SP.card_finder_off({'cardFinder': False}, _on_args), 'cardFinder is false in the config')
+eq('...and nothing else does', SP.card_finder_off({'cardFinder': True}, _on_args), None)
+_drawn = type('S', (), {'roi': [0.021, 0.544, 0.941, 0.456]})()
+ok_('the setup line names the reason it is off',
+    SP.card_finder_says(_drawn, '--no-card-find').startswith('card finder OFF (--no-card-find)'))
+ok_('...says it is on, with a card box that has room above it',
+    SP.card_finder_says(_drawn, None).startswith('card finder on'))
+ok_('...and idle with no card box, or one from the top of the screen box',
+    SP.card_finder_says(type('S', (), {'roi': None})(), None).startswith('card finder idle')
+    and SP.card_finder_says(type('S', (), {'roi': [0, 0, 1, 0.5]})(), None)
+    .startswith('card finder idle: the card box starts at the top'))
+
 
 # --- "read the screen in front of you as a destination" --------------------
 #

@@ -21,6 +21,15 @@ read, because it knows the quad is a screen and cards differ in height. Nothing
 knows that about a hand-drawn box, and second-guessing the person looking at
 the picture is how a manual override stops being one.
 
+With one exception, which second-guesses nothing the box read. A card box is
+drawn round one card, and a taller card puts its payout above it. A read
+through the card box that comes back with a journey and NO payout may be read
+again through a card found above the box by its shape (cardfind.py); the
+reading is kept only if it agrees with every journey figure the box read, and
+it is said — cropFrom "found" on the panel's line, an amber outline on the live
+view. Every read that found a payout is the box, as drawn. config.json
+"cardFinder": false, or scan_pi --no-card-find, takes even that away.
+
 Deliberately free of numpy, cv2 and pytesseract: the web server writes these
 requests, the scanner and the autopilot read them, and a module three processes
 share should not need the OCR stack to be importable.

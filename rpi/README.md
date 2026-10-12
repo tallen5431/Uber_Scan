@@ -296,7 +296,12 @@ entirely. Nothing can do that now, because nothing needs to: the crop cannot
 slide off something it recomputes every read. What genuinely goes is the case where the
 card is *not* near the middle — a phone mounted so the offer sits in a corner
 now needs aiming rather than fixing itself. That is the trade, and it is the
-one the driver asked for.
+one the driver asked for. (One thing does look for a card now, and it is not
+this machine come back: a card box drawn by hand is the right height for the
+card it was drawn round and too short for a taller one, so a read through it
+that finds a journey and no payout may look above it for the card by its
+shape — once, that read only, and saying so. See **A card taller than the
+card box**, under ▣ Set box.)
 
 The one guard that survives is `money_is_clipped`: a payout hard against the
 cut edge of the crop is half a number, and half a number still reads as a
@@ -2447,6 +2452,49 @@ Three things change together, and they only make sense together:
   *screen*; left on, it would refuse everything or, once its stall watchdog
   fired, move the box back onto whatever it believes the screen is. Undoing the
   override is the one thing an override must not do.
+
+**A card taller than the card box.** The card box is drawn once, round
+whichever card was up, and a taller card puts its payout above it. On 8 Oct an
+Uber "Early look • Order in progress" card's $14.48 sat across the top edge of
+a box drawn round a shorter "Exclusive" card: the reader got "gg Pit." for the
+payout and the rest of the card whole, and the panel said there was no offer.
+Rendered the way that phone drew it (`testcards.early_look_screen`), the box
+reads "Pit." at all three mount distances tried.
+
+So a read through a **drawn** card box that comes back with a journey and no
+payout — after the second look and the clipping test have had their go — and
+with screen above the box to look in, asks `cardfind.find_card` where the card
+is: the Accept or Match bar near the box's bottom, the card's sides, then up
+to its top. Only a **sure** answer whose top is above the box's is read, through
+the same helper as the box, the way up the box's read decided, and clipped the
+same way. The reading is kept only if it moves none of the minutes, miles or
+deadline the box read, and its payout is printed as a card prints one (to the
+cent, or a whole dollar with its label straight after). Never on a ⌖ read,
+never with the box at the top of the screen box, never on a read that found a
+payout.
+
+Measured over 576 rendered screens — the Early-look card, a two-order card, a
+card stacked above it with no button of its own, and the short card the box
+was drawn on; dark-on-light, light and all-dark; with and without Android's
+bar; clean and under glare, a band of glare, blur, banding, a dimmed screen, a
+left-hand shadow and a 2° roll; at three mount distances — the Early-look card
+was rescued on 73 of 144 and the two-order card on 79 of 144, every one with
+the card's own figures; the stacked card on none of 144, and the short card
+never through a card found. **No rescued reading carried a wrong figure.**
+With the box drawn under the "Est. delivery" line, none of 288.
+
+It says what it did: the panel's line carries `cropFrom` — `found` for this,
+`drawn` for every other read (the card box, a ⌖ read's whole screen box and
+the centred crop alike) — and so does a 📷 Snap's `reader.json`; the health
+line and the `seen` row count it as `rescued` beside `clipped`; and the live
+view outlines the card found in **amber**. `"cardFinder": false` in
+`config.json`, or `--no-card-find`, turns it off, and the reads are then the
+ones this rig gave before it existed, byte for byte — measured against the
+reader as it stood before, on 240 rendered reads: the same text, parse, crop,
+clipped flag and both of the reader's pictures on all 240. With it on, the 200
+of those reads it did not rescue were identical too. The setup line says which
+it is. A look costs about a tenth of a read (27.5ms against 309ms median on the
+development box) and is paid only on a read that found a journey and no payout.
 
 **⟳ Re-find is the way back.** With a hand-drawn box in force it looks for the
 screen on the next frame and, if it finds one, makes that the calibration and

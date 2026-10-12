@@ -184,7 +184,9 @@ def aim(as_json, port, timeout, min_card=None):
             # the resolution is the thing that makes any of this work — so
             # clipping the map away is the right mount, not a broken one. What
             # used to depend on seeing the whole screen was the crop being a
-            # fraction of it, and the crop finds the card by content now.
+            # fraction of it, and it no longer is: the crop is placed from the
+            # card's measured share of whatever is in frame
+            # (pipeline.card_share_of_quad), or is the box drawn by hand.
             ok = bool(card_px and card_px >= floor and sharp and sharp >= PV.SHARP_FLOOR)
             good = good + 1 if ok else 0
 

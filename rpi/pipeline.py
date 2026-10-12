@@ -792,8 +792,35 @@ def screen_view(frame, quad, height):
     return view
 
 
+# The colour a card FOUND above the drawn card box is outlined in on the live
+# view, BGR: amber, against the screen's green. See outline_found.
+AMBER = (0, 176, 255)
+
+
+def outline_found(view, quad, box, colour=AMBER, thickness=2):
+    """Draw a box given as fractions of `quad` onto `view`, in place.
+
+    The card the last read was taken through, when the finder found it above
+    the drawn card box (Scanner._look) — so the driver can see on the live view
+    that the payout on the panel came off a card the rig went looking for, and
+    which one. `quad` is the screen's corners in the view's own pixels; the box
+    goes through the same perspective as the screen, so it sits on the card in
+    the scene view as well as on the flattened phone view.
+    """
+    if view is None or quad is None or not box:
+        return view
+    q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
+    unit = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float32)
+    m = cv2.getPerspectiveTransform(unit, q)
+    x, y, w, h = [float(v) for v in box]
+    pts = np.array([[[x, y]], [[x + w, y]], [[x + w, y + h]], [[x, y + h]]], dtype=np.float32)
+    drawn = cv2.perspectiveTransform(pts, m).reshape(-1, 2)
+    cv2.polylines(view, [np.round(drawn).astype(np.int32)], True, colour, thickness)
+    return view
+
+
 def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640, card=None,
-             warp_card=True):
+             warp_card=True, found=None):
     """One image that answers "is it looking at the right thing?".
 
     The whole frame with the calibrated corners drawn on it, and inset, the
@@ -820,6 +847,10 @@ def snapshot(frame, quad, roi, card_height=CARD_HEIGHT, width=640, card=None,
     if quad is not None:
         q = (np.asarray(quad, dtype=np.float32) * scale).astype(np.int32)
         cv2.polylines(view, [q], True, (100, 201, 23), 2)
+        # ...and the card the last read was taken through, when it was one the
+        # finder found above the drawn box. See outline_found.
+        if found:
+            outline_found(view, np.asarray(quad, dtype=np.float32) * scale, found)
 
     if quad is not None:
         if card is None:

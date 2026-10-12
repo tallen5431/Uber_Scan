@@ -820,6 +820,9 @@ def reader_record(last, now, offer_log=None, counters=None, beat=None,
                           # A ⌖ read of the whole screen box, not the card crop.
                           'wholeScreen': last['wholeScreen'],
                           'crop': last['crop'],
+                          # ...and whether that crop is the box the driver
+                          # drew or a card found above it. See emit().
+                          'cropFrom': last.get('cropFrom', 'drawn'),
                           'text': last['text'],
                           'parsed': last['parsed'],
                           'rate': last['rate']}
@@ -868,15 +871,56 @@ def answer_snap(folder, last, record):
     return True
 
 
+def card_finder_off(cfg, args):
+    """Why the card finder is off, or None when it is on.
+
+    Two ways to turn it off, and both give the reads this rig gave before it
+    existed: every read is the drawn box, as drawn (rpi/test_pipeline.py holds
+    them to that). The config key for a rig that should stay that way; the flag
+    for one run.
+    """
+    if getattr(args, 'no_card_find', False):
+        return '--no-card-find'
+    if cfg.get('cardFinder') is False:
+        return 'cardFinder is false in the config'
+    return None
+
+
+def card_finder_says(scanner, off, config_path=None):
+    """The setup line's account of looking above the card box. One sentence.
+
+    Off, and why; or on but with nothing to look for, and why; or on. "Nothing
+    to look for" is PL.room_above's answer — the same function _look asks
+    before it asks the finder, so the line cannot say the finder is looking
+    when the reader never would.
+    """
+    if off:
+        return ('card finder OFF (%s): a card taller than the card box loses its '
+                'payout, as it did before there was one' % off)
+    if not PL.drawn_card_box(scanner.roi):
+        return ('card finder idle: no card box is drawn, so no card can be taller '
+                'than one')
+    if not PL.room_above(scanner.roi):
+        return ('card finder idle: the card box starts at the top of the screen '
+                'box, so there is nothing above it to look in')
+    return ('card finder on: a read through the card box that finds a journey and '
+            'no payout looks above the box for a taller card, and says so as '
+            'cropFrom "found"%s' % (' (cardFinder: false in %s turns it off)'
+                                   % config_path if config_path else ''))
+
+
 def use_manual_box(scanner, quad_px, card=None):
     """Read exactly the box a person drew, and stop deriving one inside it.
 
     Three settings, and they only make sense together. The corners are the box.
     The crop is the card box the driver drew inside it, or all of the box when
     they drew none — never one derived, because that would trim the top off the
-    very thing the driver framed. And the card's share of the quad is the card
-    box's height (1.0 when the box *is* the card), which keeps the warp at the
-    height the reader wants instead of twice it.
+    very thing the driver framed. (One exception, and it is not a derived crop:
+    a read through the card box that comes back with a journey and no payout
+    may be read again through a taller card found above it — pipeline.py's
+    _look, cardfind.py — and says so as cropFrom "found".) And the card's share
+    of the quad is the card box's height (1.0 when the box *is* the card), which
+    keeps the warp at the height the reader wants instead of twice it.
     """
     scanner.quad = np.array(quad_px, dtype=np.float32)
     scanner.roi = list(card) if card else list(CX.PIN_WHOLE)
@@ -1108,7 +1152,7 @@ _snapshot_error = None
 
 
 def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None,
-                   view=VIEW_SCENE):
+                   view=VIEW_SCENE, found=None):
     """Write what the camera sees, for the live page. Never fatally.
 
     `quad` overrides the calibrated corners so the outline follows the tracker
@@ -1123,6 +1167,10 @@ def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None,
 
     `view` picks between aiming the camera and reading the phone through it.
     See SCREEN_HEIGHT.
+
+    `found` is the card the last read was taken through when the finder found
+    it above the drawn card box — fractions of the screen, outlined in amber in
+    either view (PL.outline_found), and None the rest of the time.
     """
     global _snapshot_error
     quality = SNAPSHOT_QUALITY
@@ -1141,6 +1189,10 @@ def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None,
             picture = PL.screen_view(frame, quad, SCREEN_HEIGHT)
             if picture is not None:
                 quality = SCREEN_QUALITY
+                if found:
+                    ph, pw = picture.shape[:2]
+                    PL.outline_found(picture, [[0, 0], [pw - 1, 0], [pw - 1, ph - 1],
+                                               [0, ph - 1]], found)
         if picture is None:
             # No corners, or corners nothing could be warped out of. Falling
             # back to the scene is the useful answer rather than the tidy one:
@@ -1150,7 +1202,7 @@ def write_snapshot(frame, cfg, path, quad=None, roi=None, card=None, scale=None,
             picture = PL.snapshot(frame, quad, roi,
                                   cfg.get('cardHeight', 900),
                                   width=SNAPSHOT_WIDTH, card=card,
-                                  warp_card=scale is None)
+                                  warp_card=scale is None, found=found)
     except Exception as e:
         message = str(e)
     else:
@@ -1192,7 +1244,6 @@ SCAN_QUALITY = 72         # ~40KB a card at the height the reader uses
 # their own with the same cap: 400 at ~40KB is ~16MB, about eight days of
 # this week's rate, the oldest going first.
 DOUBT_DIR = 'doubt'
-
 
 def doubted(row):
     """Is this journal row one the reader was unsure of? See DOUBT_DIR."""
@@ -1392,6 +1443,11 @@ class Health:
         # arrives, so the clock this is judged against is always the caller's.
         self.since = now
         self.reads = self.complete = self.no_pay = self.clipped = 0
+        # Reads whose payout came off a card found above the drawn card box —
+        # see pipeline.Scanner._look. Beside `clipped` because they answer the
+        # same question from the other side: how often the box the driver drew
+        # was the wrong height for the card in front of it.
+        self.rescued = 0
         # Reads that raised. Counted here so the health line can still appear
         # when every one of them did: the guard in report() used to be `not
         # self.reads`, which is exactly true when the reader is broken, so the
@@ -1435,6 +1491,8 @@ class Health:
             self.no_pay += 1
         if out.get('clipped'):
             self.clipped += 1
+        if out.get('cropFrom') == 'found':
+            self.rescued += 1
 
     def counters(self, now):
         """Every figure report() speaks of, as it stands, without saying it.
@@ -1448,7 +1506,7 @@ class Health:
         return {'over': None if self.since is None else int(now - self.since),
                 'reads': self.reads, 'complete': self.complete,
                 'failed': self.failed, 'noPay': self.no_pay,
-                'clipped': self.clipped,
+                'clipped': self.clipped, 'rescued': self.rescued,
                 'medianMs': (int(round(sorted(self.ms)[len(self.ms) // 2]))
                              if self.ms else None),
                 'saw': self.saw, 'kept': self.kept,
@@ -1507,6 +1565,9 @@ class Health:
             bits.append('%d found no payout' % self.no_pay)
         if self.clipped:
             bits.append('%d had the payout at the crop edge' % self.clipped)
+        if self.rescued:
+            bits.append('%d read the payout off a taller card found above the '
+                        'card box' % self.rescued)
         # Outside the tracker block on purpose: these say nothing about the
         # corners, and a rig started with --no-track is exactly the one whose
         # destination scan is worth watching.
@@ -2742,7 +2803,7 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None):
 
 
 def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
-         clipped=False):
+         clipped=False, crop_from='drawn'):
     """One JSON object per line, flushed, so a parent process sees reads live."""
     payload = {
         'track': tracker.status() if tracker is not None else None,
@@ -2873,6 +2934,14 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         # on 13 of 42 cards. Only ever on a reading with no verdict — the
         # empty parse cannot be rated — so it can never sit beside a number.
         'clipped': bool(clipped),
+        # Which crop this read was taken through: 'found' when the drawn card
+        # box read a journey and no payout and the payout came off a taller
+        # card found above it (pipeline.Scanner._look, cardfind.py); 'drawn'
+        # for every other read — the card box, a ⌖ read of the whole screen
+        # box, and the centred crop a detected screen is read through. A
+        # payout the rig went looking for is a different claim from one the
+        # driver's own box held, and the panel is told which this is.
+        'cropFrom': crop_from,
     }
     sys.stdout.write(json.dumps(payload) + '\n')
     sys.stdout.flush()
@@ -2963,6 +3032,10 @@ def main():
                     help='frames a second for the phone view (default %d); it '
                          'buys a full sensor frame each time, so raise it until '
                          'reads slow down' % round(1.0 / SNAPSHOT_SCREEN))
+    ap.add_argument('--no-card-find', action='store_true',
+                    help='never look above the drawn card box for a taller card; '
+                         'every read is the box as drawn, as config.json '
+                         '"cardFinder": false also asks')
     ap.add_argument('--no-thread', action='store_true',
                     help='read on the camera loop instead of beside it. The '
                          'default keeps the live view and the corner tracking '
@@ -3029,6 +3102,10 @@ def main():
         card_share=(CX.card_share(None if cfg.get('cropBox') == CX.PIN_WHOLE
                                   else cfg.get('cropBox'))
                     if manual else None),
+        # Whether a read through the card box that found a journey and no
+        # payout may look above the box for a taller card. See
+        # card_finder_off and pipeline.Scanner._look.
+        card_finder=card_finder_off(cfg, args) is None,
         # No `settings=` here any more. The Scanner priced every frame from a
         # copy of this block taken at startup, and digest() replaced that rate
         # with its own before anything read it — so the copy decided nothing,
@@ -3147,11 +3224,13 @@ def main():
                     'measure them, since a rung that bands is worse than a '
                     'card that is a little bright'))
     log('setup: corners %s' % [[int(x), int(y)] for x, y in quad])
+    log('setup: %s' % card_finder_says(scanner, card_finder_off(cfg, args), args.config))
     spill = PL.touches_edge(quad, frame_shape)
     if spill:
         log('setup: the screen runs off the %s of the frame. That is expected on a '
-            'close mount and is not a problem — the crop is fitted to the card by '
-            'content, not to the screen by fraction.' % ' and '.join(spill))
+            'close mount and is not a problem — the crop is placed from the '
+            'card\'s measured share of what is in frame (or is the box drawn by '
+            'hand), not as a fraction of a whole screen.' % ' and '.join(spill))
     accumulator = OfferAccumulator()
     last_sample = 0.0
     previous_card = None
@@ -3243,6 +3322,9 @@ def main():
     # from, and the beat is what the panel was told.
     last_read = None
     last_beat = None
+    # The card the last read found above the drawn card box, or None. See
+    # write_snapshot's `found`.
+    found_box = None
     # The card currently being watched, and what has become of it. See
     # Health.saw — an episode that ends having shown a payout but written
     # nothing is a card the rig saw and failed to keep.
@@ -3294,7 +3376,7 @@ def main():
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
-        nonlocal last_read
+        nonlocal last_read, found_box
         # Not merged when it was a whole-screen read — see collect().
         parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
@@ -3335,12 +3417,17 @@ def main():
         # it in - the driver who took a moment to get the destination up is
         # exactly the driver whose address arrives at the end of the window.
         started = read_at if read_at is not None else time.time()
+        # The card this read was taken through, for the live view to outline
+        # in amber, for as long as the last read is one that went looking for
+        # it. Any other read — the box as drawn, a ⌖ read — takes it down.
+        found_box = out.get('crop') if out.get('cropFrom') == 'found' else None
         # ...and kept for 📷 Snap, ⌖ reads included: the last card the reader
         # cut out — `fitted`, before preprocess() made tesseract's input from
         # it — is what "what was the reader looking at?" asks about. A
         # reference, not a copy — the reader makes a new crop every read.
         last_read = {'at': started, 'fitted': out.get('fitted'),
                      'wholeScreen': bool(whole), 'crop': out.get('crop'),
+                     'cropFrom': out.get('cropFrom', 'drawn'),
                      'text': out.get('text'), 'parsed': parsed, 'rate': rate}
         # WITH OR WITHOUT THE BUTTON.
         #
@@ -3790,7 +3877,8 @@ def main():
 
         if args.json:
             emit(rate, parsed, out['ms'], out['locked'], tracker, scanner, whole=whole,
-                 clipped=bool(out.get('clipped')))
+                 clipped=bool(out.get('clipped')),
+                 crop_from=out.get('cropFrom', 'drawn'))
         else:
             show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
 
@@ -4049,7 +4137,8 @@ def main():
             # and were the two fields of it this row dropped.
             'reads': tally.get('reads'), 'failed': tally.get('failed'),
             'complete': tally.get('complete'), 'noPay': tally.get('noPay'),
-            'clipped': tally.get('clipped'), 'medianMs': tally.get('medianMs'),
+            'clipped': tally.get('clipped'), 'rescued': tally.get('rescued'),
+            'medianMs': tally.get('medianMs'),
             'tooDim': tally.get('tooDim'), 'tooBright': tally.get('tooBright'),
             'corners': tally.get('corners'), 'relocks': tally.get('relocks'),
             # ...and how many preview frames since start were the same picture
@@ -4495,6 +4584,7 @@ def main():
                            'offers read in the card box [%.2f %.2f %.2f %.2f] of it and '
                            '⌖ reading all of it' % tuple(card) if card
                            else 'reading exactly that'))
+                    log(card_finder_says(scanner, card_finder_off(cfg, args), args.config))
 
                 if tracker is not None and scanner.settled:
                     was = tracker.status()
@@ -4910,7 +5000,7 @@ def main():
             if args.snapshot and (due or do_read):
                 write_snapshot(frame, cfg, args.snapshot, quad=scanner.quad,
                                roi=scanner.crop_box, card=previous_card,
-                               scale=preview_scale,
+                               scale=preview_scale, found=found_box,
                                # The phone view only when somebody is asking for
                                # it. A read composes a snapshot too, and one
                                # written on the reader's schedule to a page
