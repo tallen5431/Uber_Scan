@@ -120,6 +120,10 @@ eq('a rough fix is not drawn, and says why with the figure',
 eq('a fix with no error figure says so rather than vanishing',
    (MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsOk: false, gpsWhy: 'unrated' }, 0)
     || {}).line, MV.GPS_REFUSED.unrated);
+var stuck = MV.hereDot({ lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 16.8,
+                         gpsMode: 3, gpsOk: false, gpsWhy: 'frozen' }, 0);
+eq('a frozen fix is not drawn as where the car is, and says it is stuck',
+   stuck && [stuck.lat, stuck.line].join('|'), '|GPS stuck on one spot');
 eq('no fix at all is nothing drawn and nothing said', MV.hereDot(null, 0), null);
 eq('...and a beat that says no fix is the same', MV.hereDot({ lat: null }, 0), null);
 eq('a fix with no time left on it is grey from the start',
@@ -253,6 +257,11 @@ eq('a fix with no 2D/3D mode says so',
    MV.fixLine(MV.cardFix(card({ gpsMode: null, gpsOk: false, gpsWhy: 'nomode' })),
               'new'),
    'GPS on this card had no 2D/3D fix to measure from');
+// The owner's VK-162 under gpsd's binary mode: one position repeated while
+// the car drove. rpi/gps.py refuses it as `frozen`.
+eq('a fix the GPS kept repeating while the car moved says it was stuck',
+   MV.fixLine(MV.cardFix(card({ gpsOk: false, gpsWhy: 'frozen' })), 'new'),
+   'GPS on this card was stuck on one spot, so nothing to measure from');
 eq('a coordinate nobody judged is not a fix either',
    MV.fixLine(MV.cardFix(card({ gpsOk: undefined, gpsWhy: undefined })), 'new'),
    'GPS fix on this card was never judged, so nothing to measure from');
@@ -279,6 +288,10 @@ eq('...and a rough one, with the figure',
    MV.fixLine(MV.cardFix(card({ gpsErr: 88.0, gpsOk: false, gpsWhy: 'rough' })),
               'held'),
    'GPS fix on the order in your car too rough to check its end (±88 m)');
+eq('...and a stuck one',
+   MV.fixLine(MV.cardFix(card({ gpsOk: false, gpsWhy: 'frozen' })), 'held'),
+   'GPS on the order in your car was stuck on one spot, so its end cannot be '
+   + 'checked');
 eq('a held order on a one-leg card has no yardstick yet for its end',
    MV.againstCard(card({ hasTotal: false }), SQUARE, HELD_END, 'X', 'held'),
    'the order in your car is a kind of card with no yardstick yet for its end');
