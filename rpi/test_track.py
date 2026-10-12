@@ -384,8 +384,8 @@ ok_('...with the SIZE the gate judges against taken as out of date, '
     'so corrections still work',
     tr.looks_like_the_screen(quad_at(432, 202, size=SMALLER)))
 # ...and the calibration itself is NOT out of date, which is the half that was
-# being thrown away with it. Three things want the screen as the driver
-# calibrated it: the re-find button, `wander`, and the shape test.
+# being thrown away with it. Two things want the screen as the driver
+# calibrated it: `wander`, and the shape test.
 ok_('...while the calibration itself is untouched',
     T.distance(tr.calibrated, CAL) < 0.01)
 # The one number on the health line built to survive a save was being blinded
@@ -535,55 +535,6 @@ tr = T.QuadTracker(start, calibrated=start)
 settle(tr, strip, 40, step=0.5)
 eq('a strip across the centre is never adopted', tr.centred, 0)
 eq('...and moves nothing at all', tr.moves, 0)
-
-# --- and the driver can always start over -----------------------------------
-# The automatic rules cover what can be told apart by looking. Corners sitting
-# on the screen at the wrong size cannot: that is equally "the phone was
-# re-seated" and "the outline is on part of the screen". The person watching the
-# live view can see which, so they get a way to say so.
-tr = T.QuadTracker(start.copy(), calibrated=start.copy())
-settle(tr, frame_with_phone(460, 180), 10, step=0.5)
-ok_('the corners have moved away from the calibration',
-    T.distance(tr.quad, start) > 1.0)
-tr.start_over()
-eq('start_over puts them back', round(T.distance(tr.quad, start)), 0)
-eq('...and counts it', tr.resets, 1)
-eq('...and drops the evidence behind the old position', tr.agreeing, 0)
-ok_('...and reports no stall', not tr.status()['stalled'])
-# Having reset, it must still be able to follow the phone from there.
-settle(tr, frame_with_phone(460, 180), 10, t0=100.0, step=0.5)
-ok_('and it tracks again afterwards',
-    T.distance(tr.quad, quad_at(460, 180)) < 15.0)
-
-# ...and it undoes an automatic re-baseline, which is the case the button exists
-# for and the one it could not do.
-#
-# "Corners on the screen at the wrong size" is equally "the phone was re-seated"
-# and "the outline is on part of the screen" — that is this block's own opening
-# argument, and it is precisely the case the watchdog has already decided. So
-# the driver's override has to be able to overrule it. It could not: the
-# re-baseline moved the field start_over restores, so the press landed on the
-# box the watchdog had just adopted and the green box did not move.
-#
-# Measured on a 0.72x concentric re-seat, driving the real tracker: 242px from
-# the calibration and 0px from the adopted box before, the other way round now.
-tr = T.QuadTracker(CAL.copy(), calibrated=CAL.copy())
-settle(tr, frame_with_phone(400, 140, size=SMALLER), 12,
-       t0=0.0, step=T.RECOVER_AFTER / 4.0)
-eq('the watchdog has re-baselined onto the re-seated phone', tr.rebaselines, 1)
-adopted = tr.quad.copy()
-ok_('...and the corners are on it, away from the calibration',
-    T.distance(adopted, CAL) > 20.0)
-tr.start_over()
-ok_('re-find undoes the re-baseline, not just the drift (%.0fpx from CAL)'
-    % T.distance(tr.quad, CAL), T.distance(tr.quad, CAL) < 1.0)
-ok_('...landing off the box the watchdog had adopted (%.0fpx)'
-    % T.distance(tr.quad, adopted), T.distance(tr.quad, adopted) > 20.0)
-# And the size reference goes back with it, or the ordinary drift path eases
-# the corners onto the adopted box again within seconds — measured at 6.0s,
-# which is not an escape hatch.
-ok_('...and the re-seated screen is refused again, as it was at calibration',
-    not tr.looks_like_the_screen(quad_at(400, 140, size=SMALLER)))
 
 # --- the outline must never freeze silently ---------------------------------
 # A detector does not give the same answer twice. In bright light the threshold

@@ -1062,8 +1062,7 @@ const framed = (page) => page.waitForFunction(
      * found none produced no message, and the page's own timer repainted the
      * button exactly as it was — the driver tapped the address open on their
      * phone, pressed, waited, and got the same grey button whether it worked
-     * or not. Took says "· not saved", Drop says "Drop · failed", Re-find says
-     * "⟳ failed".
+     * or not. Took says "· not saved", Drop says "Drop · failed".
      *
      * Answered from the RIG, not from a timer here, which is why this is
      * driven as a message rather than by waiting. A read that started inside
@@ -1514,25 +1513,22 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
-  // --- Re-find, and the two things it may actually have done ---------------
-  stage = 'Re-find, and the two things it may actually have done';
+  // --- no ⟳ Re-find, and nothing left of it on the glass -------------------
+  stage = 'no Re-find, and nothing left of it on the glass';
   //
-  // Pressing Re-find is a driver saying the outline is wrong. The scanner may
-  // refuse — a hand-drawn box is only given up for a screen it can see, and
-  // with --no-track there are no corners to move — and the refusal used to go
-  // to the log and nowhere else, while this button went on to say
-  // "re-finding". So a refused press and a press that worked looked identical
-  // from the seat, and the driver went back to driving through corners they
-  // had just rejected.
+  // Re-find was taken off the bar at the owner's request: pressed with a box
+  // drawn it threw the boxes away and went back to finding the screen by
+  // itself, which on their mount finds the map. ▣ Set box is the way to fix
+  // the boxes. What is measured here is that the control is gone, and that a
+  // beat from a scanner one version behind — which may still carry the
+  // refusal sentence it used to send — puts nothing about re-finding on the
+  // glass: there is no button for it to be an answer to.
   {
     const ctx = await browser.newContext({
       viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
     });
     const page = await ctx.newPage();
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
-    await page.route('**/api/recalibrate', (route) => route.fulfill({
-      status: 200, contentType: 'application/json', body: '{"ok":true}',
-    }));
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
               .catch(() => {});
     await page.waitForFunction('window.__es !== undefined', null,
@@ -1541,47 +1537,16 @@ const framed = (page) => page.waitForFunction(
       { phase: 'scanning', message: '' }));
     await page.evaluate(() => window.__es.push(
       { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: null }));
-    await page.waitForTimeout(150);
-    out.refind = { before: await page.evaluate(LOOK, '#warn') };
-
-    await page.click('#reset');
-    await page.waitForTimeout(250);
-    // All the POST proves is that a file was touched. It has not reached the
-    // scanner and cannot speak for it.
-    out.refind.pressed = await page.evaluate(LOOK, '#reset');
-
-    // The scanner's answer, on the beat — which is the only channel that runs
-    // in this state, because "no screen to find" is also "no reading coming".
-    const REFUSED = 'Re-find found no screen — the box you drew is still in '
-                  + 'use. Try again with the phone lit and a darker border '
-                  + 'around it.';
-    await page.evaluate((m) => window.__es.push(
-      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: m }), REFUSED);
+        refindRefused: 'Re-find found no screen — the box you drew is still '
+                       + 'in use.' }));
     await page.waitForTimeout(200);
-    out.refind.refused = await page.evaluate(LOOK, '#warn');
-
-    // It is not a blip on one beat: it stands until a press actually works,
-    // because the state it describes — corners the driver rejected, still in
-    // use — stands until then too.
-    await page.evaluate((m) => window.__es.push(
-      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: m }), REFUSED);
-    await page.waitForTimeout(200);
-    out.refind.stillRefused = await page.evaluate(LOOK, '#warn');
-
-    // ...and a reading arriving does not bury it either: the notes on a
-    // reading are rendered by a different branch of the same function.
-    await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
-    await page.waitForTimeout(200);
-    out.refind.onReading = await page.evaluate(LOOK, '#warn');
-
-    await page.evaluate(() => window.__es.push(
-      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: null }));
-    await page.waitForTimeout(200);
-    out.refind.cleared = await page.evaluate(LOOK, '#warn');
+    out.refind = {
+      button: await page.evaluate(() => !!document.getElementById('reset')),
+      labels: await page.evaluate(() => [].slice.call(
+        document.querySelectorAll('.bottombar > *')).map(
+        (e) => (e.textContent || '').trim())),
+      warn: await page.evaluate(LOOK, '#warn'),
+    };
 
     // --- and the journal refusing to take writes --------------------------
     //
@@ -1615,7 +1580,7 @@ const framed = (page) => page.waitForFunction(
       { phase: 'scanning', message: '' }));
     await page.evaluate((m) => window.__es.push(
       { alive: true, at: Date.now(), tooBright: true, tooDim: false,
-        refindRefused: null, notSaving: m }), DEAD);
+        notSaving: m }), DEAD);
     await page.waitForTimeout(200);
     out.dead = { noReading: await page.evaluate(LOOK, '#warn'),
                  // The line that proves which branch drew this. Without it the
@@ -1627,7 +1592,7 @@ const framed = (page) => page.waitForFunction(
     out.dead.onReading = await page.evaluate(LOOK, '#warn');
     await page.evaluate(() => window.__es.push(
       { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: null, notSaving: null }));
+        notSaving: null }));
     await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
     await page.waitForTimeout(200);
     out.dead.cleared = await page.evaluate(LOOK, '#warn');
@@ -1643,7 +1608,7 @@ const framed = (page) => page.waitForFunction(
       { phase: 'scanning', message: 'starting scanner' }));
     await page.evaluate(() => window.__es.push(
       { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: null, notSaving: null }));
+        notSaving: null }));
     await page.evaluate((r) => window.__es.push(
       Object.assign({}, r, { ready: false, state: 'empty', perHour: null })),
       READINGS.deducted);
@@ -1963,7 +1928,7 @@ const framed = (page) => page.waitForFunction(
     // is a different fault with its own checks, and leaving them working keeps
     // this about the bar.
     for (const path of ['**/api/offers/mark', '**/api/delivered',
-                        '**/api/dropoff', '**/api/recalibrate', '**/api/crop']) {
+                        '**/api/dropoff', '**/api/crop']) {
       await page.route(path, () => { /* never fulfilled, never aborted */ });
     }
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -1976,7 +1941,7 @@ const framed = (page) => page.waitForFunction(
                  hidden: !!e.hidden };
       };
       return { took: one('took'), drop: one('drop'), dest: one('dest'),
-               reset: one('reset'), crop: one('drawUse') };
+               crop: one('drawUse') };
     });
     // Bounded, and the failure kept rather than thrown: a control that is not
     // there is a result, and an unbounded click on one spends the whole
@@ -2038,7 +2003,7 @@ const framed = (page) => page.waitForFunction(
       offer: { id: 'o-hang', pay: 10.0, minutes: 20.0, billedMinutes: 20.0,
                miles: 4.0, cost: 1.4 } }));
     await page.waitForTimeout(300);
-    for (const id of ['#took', '#drop', '#dest', '#reset']) {
+    for (const id of ['#took', '#drop', '#dest']) {
       out.hung.pressedOk[id] = await press(id);
     }
     await page.waitForTimeout(400);
@@ -4040,7 +4005,7 @@ const framed = (page) => page.waitForFunction(
     });
     const say = async (beat) => {
       await page.evaluate((b) => window.__es.push(Object.assign({ alive: true, at: 1,
-        tooBright: false, tooDim: false, refindRefused: null, notSaving: null }, b)), beat);
+        tooBright: false, tooDim: false, notSaving: null }, b)), beat);
       await page.waitForTimeout(150);
       return row();
     };
@@ -4320,7 +4285,7 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
     const beat = async (blind) => {
       await page.evaluate((b) => window.__es.push({ alive: true, at: 1, tooBright: false,
-        tooDim: false, refindRefused: null, notSaving: null, blind: b }), blind);
+        tooDim: false, notSaving: null, blind: b }), blind);
       await page.waitForTimeout(150);
       return page.evaluate(BLINDLOOK);
     };
@@ -4723,10 +4688,6 @@ try:
            pressed['dest']['text'], '⌖ reading…')
         eq('...and it offers itself again afterwards',
            after.get('dest', {}).get('text'), '⌖ Dropoff')
-
-        eq('pressing Re-find while nothing answers puts it to work',
-           pressed['reset']['off'], True)
-        ok_('...and it comes back', not after.get('reset', {}).get('off'))
 
         if hung.get('drew'):
             eq('sending a crop box while nothing answers puts it to work',
@@ -5333,39 +5294,24 @@ try:
     eq('...and a doubt about the TIME alone leaves it standing',
        ((dbt.get('time') or {}).get('text') or '').strip(), '$2.00')
 
-    # --- a Re-find the scanner refused -----------------------------------
+    # --- no ⟳ Re-find --------------------------------------------------------
     #
-    # The one state on this page where the DRIVER has acted and the rig has
-    # not. Everything else here is the rig reporting something it saw; this is
-    # the rig declining to do a thing it was told to, and until the refusal
-    # reached the glass the button said "re-finding" regardless and the driver
-    # went on reading offers through corners they had already rejected.
+    # Taken off the bar at the owner's request (AUDITS.md, Settled): pressed
+    # with a box drawn it threw the boxes away for the screen the rig found by
+    # itself, which on their mount is the map. ▣ Set box fixes the boxes.
     rf = got.get('refind') or {}
-    ok_('the refused re-find was measured', bool(rf))
+    ok_('the bar without Re-find was measured', bool(rf))
     if rf:
-        eq('nothing is said about re-finding before the button is pressed',
-           (rf.get('before') or {}).get('shown'), False)
-        # The POST's own promise knows only that a web handler touched a file.
-        # It has not spoken to the scanner, so it may not speak for it.
-        pressed = ((rf.get('pressed') or {}).get('text') or '').strip()
-        ok_('the button claims only what the press proved (%r)' % pressed,
-            'asked' in pressed)
-        ok_('...and not that anything has been re-found', 'find' not in pressed)
-        refused = ((rf.get('refused') or {}).get('text') or '')
-        ok_('the scanner\'s refusal reaches the glass (%r)' % refused[:60],
-            'no screen' in refused and 'box you drew' in refused)
-        ok_('...on the glass, not pushed off it',
-            (rf.get('refused') or {}).get('shown'))
-        ok_('...and it stands on the next beat, not just the one that brought it',
-            'no screen' in ((rf.get('stillRefused') or {}).get('text') or ''))
-        # Different branch of render(): the notes on a reading are built
-        # separately from the notes shown while there is no reading, and a
-        # refused re-find belongs in both. The offer that arrives while the
-        # corners are wrong is exactly the offer being read through them.
-        ok_('...and survives an offer arriving',
-            'no screen' in ((rf.get('onReading') or {}).get('text') or ''))
-        ok_('...and goes when the scanner says the next one worked',
-            'no screen' not in ((rf.get('cleared') or {}).get('text') or ''))
+        eq('there is no ⟳ Re-find control on the panel', rf.get('button'), False)
+        no_('...nor any control on the bar that says it (%r)' % rf.get('labels'),
+            any('Re-find' in l for l in (rf.get('labels') or [])))
+        ok_('...and ▣ Set box is there instead (%r)' % rf.get('labels'),
+            any('Set box' in l for l in (rf.get('labels') or [])))
+        # A scanner one version behind may still send the old refusal on its
+        # beat. It answers a press nobody can make any more, so it is not shown.
+        no_('a stale re-find refusal on the beat puts nothing on the glass (%r)'
+            % ((rf.get('warn') or {}).get('text') or '')[:60],
+            'Re-find' in ((rf.get('warn') or {}).get('text') or ''))
 
     # --- the journal refusing to take writes ------------------------------
     #

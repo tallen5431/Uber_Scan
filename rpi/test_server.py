@@ -1689,6 +1689,20 @@ if shutil.which('python3'):
         return h
 
     try:
+        # ⟳ Re-find is gone from the panel at the owner's request (AUDITS.md,
+        # Settled), and with nothing left to call it the door it knocked on
+        # went too. A press from a page one version behind is refused, and
+        # nothing is left in the handoff directory for the scanner to act on.
+        _rq = urllib.request.Request(base + '/api/recalibrate', data=b'',
+                                     method='POST')
+        try:
+            with urllib.request.urlopen(_rq, timeout=5) as _r:
+                _code = _r.status
+        except urllib.error.HTTPError as _e:
+            _code = _e.code
+        eq('there is no re-find endpoint any more', _code, 405)
+        eq('...and asking for one leaves no request for the scanner',
+           sorted(n for n in os.listdir(handoff) if 'recalibrate' in n), [])
         code, reply = post(base, '/api/offers/mark', {
             'id': 'o-carried', 'accepted': True,
             'offer': {'id': 'o-carried', 'pay': 14.0, 'minutes': 30.0,
@@ -4487,7 +4501,7 @@ with open(_bfake, 'w') as fh:
         'open(%r, "w").close()\n'
         'time.sleep(1.5)\n'
         'print(json.dumps({"alive": True, "at": 5, "tooBright": False,\n'
-        '    "tooDim": False, "refindRefused": None, "notSaving": None,\n'
+        '    "tooDim": False, "notSaving": None,\n'
         '    "gps": {"state": "stale", "ageSeconds": 312.0, "fix": %s},\n'
         '    "cpuC": 71.4, "cpuCWhy": None,\n'
         '    "throttled": {"now": ["under-voltage"], "sinceBoot": ["under-voltage"]},\n'

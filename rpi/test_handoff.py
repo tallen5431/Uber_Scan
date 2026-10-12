@@ -57,7 +57,7 @@ def ok_(name, cond):
 # the same path for it, and that a private directory moves it for both of them.
 # A request written where the reader is not looking is not a stale picture, it
 # is a button that does nothing.
-BASES = [HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.DROPOFF, HO.SETTINGS, HO.SNAP]
+BASES = [HO.VIEWING, HO.CROPBOX, HO.DROPOFF, HO.SETTINGS, HO.SNAP]
 
 # --- the rule --------------------------------------------------------------
 for base in BASES:
@@ -198,15 +198,15 @@ try:
     eq('...and nothing is left in either',
        [os.path.exists(p) for p in HO.candidates(HO.CROPBOX)], [False, False])
 
-    # `clear` is what the scanner's recalibrate check uses, and it has the same
+    # `clear` is what the scanner's dropoff check uses, and it has the same
     # job: leave nothing that could fire later.
-    for where in HO.candidates(HO.RECALIBRATE):
+    for where in HO.candidates(HO.DROPOFF):
         open(where, 'w').close()
-    HO.clear(HO.RECALIBRATE)
-    eq('a re-find request is cleared from everywhere it might be',
-       [os.path.exists(p) for p in HO.candidates(HO.RECALIBRATE)], [False, False])
+    HO.clear(HO.DROPOFF)
+    eq('a dropoff request is cleared from everywhere it might be',
+       [os.path.exists(p) for p in HO.candidates(HO.DROPOFF)], [False, False])
     # Clearing a request nobody made is not an error: this runs every frame.
-    HO.clear(HO.RECALIBRATE)
+    HO.clear(HO.DROPOFF)
     ok_('...and clearing nothing is fine', True)
 
     ok_('no staging files are left behind',

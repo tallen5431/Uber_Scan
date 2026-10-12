@@ -1800,8 +1800,8 @@ class Scanner:
         #
         # The card's share is accepted unless somebody *set* it while the read
         # was running. A read takes over a second, and in that second the driver
-        # can draw a box on the live view or press re-find — both of which pin
-        # the crop and the share deliberately. Folding a measurement taken
+        # can draw a box on the live view, which pins the crop and the share
+        # deliberately. Folding a measurement taken
         # against the old crop over the top of that would undo half of what the
         # button did, and leave the crop somewhere neither the driver nor the
         # code asked for.

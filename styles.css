@@ -479,10 +479,10 @@ html, body {
 
 /* Seven controls do not fit a narrow panel, and something has to give.
  *
- * Two of this bar's buttons only appear when there is something to do with
+ * Three of this bar's buttons only appear when there is something to do with
  * them — "Took $8.04" with an offer on the record, "Drop" with an order in the
- * car — so with both up the bar goes from five to seven. Measured across the
- * panels this ships on, with both showing:
+ * car, ⌖ Dropoff with an order held or a card being screened. Measured across
+ * the panels this ships on, with seven showing:
  *
  *   1280x800  bar 804px   7 give 107px, "Took $12.45?" wants ~110
  *   1024x600  bar 662px   7 give  88px
@@ -492,14 +492,6 @@ html, body {
  * Wrapping to a second row is the usual answer and there is no room for it on
  * the 3.5" panel: the verdict card is 222px of 320 and a second 44px row does
  * not fit under it.
- *
- * The one that stands down leads to the keypad. It comes back the moment a
- * conditional button goes away.
- *
- * It used to be two — the keypad AND the offer log, on the grounds that both
- * are read parked. That grouping is what made the offer log unreachable during
- * a shift, and undoing it is the change this rule is now paired with. See the
- * second rule below for where the seventh control comes from instead.
  *
  * Not one of them has room, so there is no width test here — a threshold that
  * every panel falls below is a threshold pretending to be a decision. The bar
@@ -513,87 +505,48 @@ html, body {
  * losing a control the driver can still see is a worse trade than a clipped
  * word, and at six the word is still most of the button.
  *
- * THE CONDITION, NOT ONE CASE OF IT.
- *
- * This rule used to be `:has(#took:not([hidden])):has(#drop:not([hidden]))` on
- * its own — which is not "the bar is full", it is one particular way of being
- * full. It was written when the only way to reach seven was a card on the
- * panel with an order already in the car, and it was exactly right for as long
- * as that stayed true.
- *
- * It stopped being true twice. ⌖ Dropoff appears whenever an order is held, so
- * an order carried past the point where the card goes stale already showed
- * drop and dest with took hidden: seven buttons, and the test silent. And ⌖
- * Dropoff now also appears during SCREENING — a card with no destination and
- * nothing in the car — which is took and dest with no drop. Neither said
- * anything. The labels simply clip, on the panel the driver reads while the
- * car is moving.
- *
- * Three of the buttons here are conditional (took, drop, dest) and three are
- * always on, so the bar overflows exactly when TWO of the three are showing:
- * 3 always + 2 conditional + ⌨ Type + ▤ Offers is seven. That is the
- * condition, and all three pairs of it are written out below.
- *
- * Shedding ⌨ Type alone brings that back to six. The third conditional button
- * makes it seven again and is handled by its own rule after this one, because
- * it needs a different control to stand down — not another link.
- *
- * Enumerated rather than counted because CSS cannot count — and enumerated
- * here rather than computed in the page because this has to follow the DOM
- * however the state arrives. A class set by live.html's own code is right only
- * while live.html's own code is what moved the buttons, and it is not: the
- * layout suite stages the fullest bar by setting `hidden` directly, which is
- * also what any future caller will do.
- *
- * A fourth conditional button means four more pairs. If that ever happens the
- * honest move is to stop enumerating and give the bar a scroll. */
-.bottombar:has(#took:not([hidden])):has(#drop:not([hidden])) .parked,
-.bottombar:has(#took:not([hidden])):has(#dest:not([hidden])) .parked,
-.bottombar:has(#drop:not([hidden])):has(#dest:not([hidden])) .parked {
-  display: none;
-}
-
-/* ...and ▤ Offers is no longer one of the two that stand down.
- *
- * THE BUG THIS FIXES IS A NAVIGATION ONE, NOT A LAYOUT ONE.
- *
- * The rule above fires when the bar is full, and the bar is full exactly when
- * an order is in the car or a card is being screened — which is to say
- * whenever the driver is working. So the only link to the offer log left the
- * screen for the whole of a shift and came back when the car was empty. The
- * driver's words were that they could not get to the offers page from here,
- * and they were right: it was there, and never when they looked.
- *
- * "Read parked" was the reason it was grouped with the keypad, and it is true
- * — but it answers a different question than the one that matters. The driver
- * pulls over BECAUSE they want the list; the way to it has to be on the screen
- * in front of them when they do, not conditional on having put the order down
- * first.
- *
  * THE ARITHMETIC, WHICH IS THE WHOLE CONSTRAINT.
  *
- * Six controls fit and seven do not — that is settled above, and at six some
- * labels already overrun on the 3.5" hat, a trade this file has taken
- * deliberately. Counting with Offers kept:
+ * Two controls are always on — ▣ Set box and the view toggle — and so is ▤
+ * Offers, which once stood down with the keypad on the grounds that both are
+ * read parked. That made the offer log unreachable for the whole of a shift:
+ * the bar is full exactly when an order is in the car or a card is being
+ * screened, which is to say whenever the driver is working, and the driver
+ * pulls over BECAUSE they want the list. So it stays.
  *
  *   conditionals showing   0     1     2     3
- *   always on              3     3     3     3
- *   ⌨ Type                 1     1     -     -
+ *   always on              2     2     2     2
  *   ▤ Offers               1     1     1     1
+ *   ⌨ Type                 1     1     1     -
  *                         ---   ---   ---   ---
- *                          5     6     6     7   <- one too many
+ *                          4     5     6     6
  *
- * So the fullest bar has to give up one more, and the honest candidate is ▣
- * Set box rather than the log: it re-draws the crop region, which is a thing
- * done once with the car stationary and the phone being seated in the mount,
- * not with a job in the car and a card on the screen. ⟳ Re-find stays, because
- * the tracker can lose the corners at any moment and that is a thing the
- * driver fixes where they are.
+ * So the one that stands down leads to the keypad, and only when all three
+ * conditionals show. It comes back the moment one of them goes.
  *
- * All three, not two of them — this is the one state the rule above does not
- * already cover the shedding for, and writing it as a third pair would shed
- * Set box whenever any two showed, which costs a control for nothing. */
-.bottombar:has(#took:not([hidden])):has(#drop:not([hidden])):has(#dest:not([hidden])) #setBox {
+ * There used to be a third always-on control, ⟳ Re-find. With it the bar
+ * reached seven at TWO conditionals, so ⌨ Type stood down for each of the
+ * three pairs, and at all three ▣ Set box stood down as well — the one control
+ * that fixes the boxes, gone from the glass in the fullest state of the bar.
+ * Re-find was taken off the bar at the owner's request (AUDITS.md, Settled),
+ * and both of those rules went with it: the pairs because the bar no longer
+ * overflows at two, and the Set box rule because it no longer overflows at
+ * all. ▣ Set box is on the glass in every state; rpi/test_layout.py holds that
+ * at every panel.
+ *
+ * All three, not a pair: a pair would shed ⌨ Type at six, which fits, and cost
+ * the driver a control for nothing.
+ *
+ * Enumerated rather than counted because CSS cannot count — and here rather
+ * than computed in the page because this has to follow the DOM however the
+ * state arrives. A class set by live.html's own code is right only while
+ * live.html's own code is what moved the buttons, and it is not: the layout
+ * suite stages the fullest bar by setting `hidden` directly, which is also what
+ * any future caller will do.
+ *
+ * A fourth conditional button makes the fullest bar seven again. If that ever
+ * happens the honest move is to stop enumerating and give the bar a scroll. */
+.bottombar:has(#took:not([hidden])):has(#drop:not([hidden])):has(#dest:not([hidden])) .parked {
   display: none;
 }
 .bottombar button, .bottombar .linkbtn {

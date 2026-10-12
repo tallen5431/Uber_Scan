@@ -810,12 +810,13 @@ function watchForSilence() {
   }
 }
 
-/* The three files this side leaves requests in for the camera side: somebody
- * is watching and which view they want, re-find the phone, read this box.
+/* The files this side leaves requests in for the camera side: somebody is
+ * watching and which view they want, read this box, read the destination, a
+ * cost per mile, what the reader last read.
  * Files, because the scanner is sometimes a child of this process and
  * sometimes a systemd unit that has never heard of it.
  *
- * In RAM where there is any. All three exist for seconds, none should survive
+ * In RAM where there is any. All of them exist for seconds, none should survive
  * a reboot, and `.viewing` is now rewritten about once a second for as long as
  * a browser is fetching frames — which is a second's worth of card wear for
  * something that is stale a second later. The live frame moved to /dev/shm for
@@ -869,7 +870,6 @@ function handoffPath(base) {
 }
 
 var WATCH_PATH = handoffPath('.viewing');
-var RESET_PATH = handoffPath('.recalibrate');
 var DROPOFF_PATH = handoffPath('.dropoff');
 var CROP_PATH = handoffPath('.cropbox.json');
 var SETTINGS_PATH = handoffPath('.settings.json');
@@ -5073,15 +5073,6 @@ function route(req, res) {
       // onto; answered off the raw slot it would promise one that no longer
       // exists, and the address would land somewhere nothing reads.
       send(res, 200, JSON.stringify({ ok: true, holding: !!holding(Date.now()) }),
-           { 'Content-Type': 'application/json; charset=utf-8' });
-    });
-  }
-
-  if (req.method === 'POST' && req.url.split('?')[0] === '/api/recalibrate') {
-    return fs.writeFile(RESET_PATH, '', function (err) {
-      if (err) return send(res, 500, JSON.stringify({ ok: false, error: err.message }),
-                           { 'Content-Type': 'application/json; charset=utf-8' });
-      send(res, 200, JSON.stringify({ ok: true }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
   }
