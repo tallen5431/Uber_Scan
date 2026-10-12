@@ -1057,6 +1057,17 @@ HERE_LINES = json.loads(subprocess.run(
     capture_output=True, text=True, timeout=60).stdout or '[]')
 eq('every "you are here" form is a sentence the page can say',
    [name for name, text in HERE_LINES if not text], [])
+# ...and on the panel only, each form with a dot once the driver has taken the
+# map and it has stopped following: the label, then live.html's own word for
+# that, read out of the page rather than copied here. map.html does not follow
+# and never says it.
+_live_src = open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read()
+_paused = re.search(r"var FOLLOW_PAUSED = '([^']+)';", _live_src)
+ok_('live.html says in words when its map has stopped following the dot',
+    _paused is not None)
+LIVE_HERE_LINES = HERE_LINES + [
+    [name + ', not following', text + _paused.group(1)]
+    for name, text in HERE_LINES if name.startswith('label') and _paused]
 env_probe = dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS))
 if subprocess.call(['node', '-e', 'require("playwright")'], env=env_probe,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
@@ -1066,12 +1077,15 @@ DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
        snapPanelsJson, noVerdictJson, noVerdictPanelsJson, plannerJson,
-       plannerPanelsJson, hereJson, foundPayJson] = process.argv.slice(2);
+       plannerPanelsJson, hereJson, foundPayJson, liveHereJson] = process.argv.slice(2);
 // A card's payout read off a card found above the box, and the same read
 // through the box; see FOUNDPAY on the Python side.
 const FOUNDPAY = JSON.parse(foundPayJson);
 // The "you are here" label's forms, made by MV.hereDot; see HERE_LINES.
 const HERE_LINES = JSON.parse(hereJson);
+// ...and the panel's, which adds each dot's label once it has stopped
+// following; see LIVE_HERE_LINES.
+const LIVE_HERE_LINES = JSON.parse(liveHereJson);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
 // The Trip Planner's stops and where they are measured; see PLANNER_STOPS.
 const PLANNER = JSON.parse(plannerJson);
@@ -1699,7 +1713,7 @@ const SNAP_MEASURE = (fixture) => {
           note.hidden = true;
           note.textContent = '';
           return out;
-        }, HERE_LINES);
+        }, LIVE_HERE_LINES);
         shown.captionStyle = await page.evaluate(() => {
           const cs = getComputedStyle(document.getElementById('viewNote'));
           return { overflow: cs.overflow,
@@ -2493,7 +2507,8 @@ try:
          json.dumps({'stops': PLANNER_STOPS, 'unfiled': PLANNER_UNFILED,
                      'notes': PLANNER_NOTES, 'notice': PLANNER_NOTICE,
                      'blind': PLANNER_BLIND}),
-         json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES), json.dumps(FOUNDPAY)],
+         json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES), json.dumps(FOUNDPAY),
+         json.dumps(LIVE_HERE_LINES)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -3105,8 +3120,8 @@ try:
                 # zoom buttons, whole, and short enough to read at a glance.
                 here = phone.get('here') or {}
                 eq('every "you are here" form was measured at %s' % panel,
-                   sorted(name for name, _t in HERE_LINES if name not in here), [])
-                for name, _t in HERE_LINES:
+                   sorted(name for name, _t in LIVE_HERE_LINES if name not in here), [])
+                for name, _t in LIVE_HERE_LINES:
                     m = here.get(name) or {}
                     ok_('the "you are here" %r sits inside the map at %s (%r)'
                         % (name, panel, m), m.get('inside'))
