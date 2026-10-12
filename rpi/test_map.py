@@ -486,17 +486,25 @@ const KNOWN = {
     // What each pin is: where, what colour, and the count drawn on it.
     pinDetail: window.__pins.map(function (m) {
       var html = (m.icon && m.icon.html) || '';
-      // A solid pin's colour is its background; a hollow one's (MV.howFound:
-      // found only outside the box round the car) is its dashed ring's.
-      var colour = (html.match(/background:(#[0-9a-f]{6})/i)
-                    || html.match(/dashed (#[0-9a-f]{6})/i) || [])[1] || '';
+      // A pin's colour is its background. RINGED (MV.howFound: found only
+      // outside the box round the car) is a dashed outline round the same
+      // filled dot, in its colour; HOLLOW (no fill) is the panel's mark for
+      // a candidate NOT used, and no pin on this page may be drawn so.
+      var colour = (html.match(/background:(#[0-9a-f]{6})/i) || [])[1] || '';
       var count = (html.match(/>(\d*)<\/div>/) || [])[1] || '';
       return { ll: m.ll, colour: colour, count: count,
-               hollow: /background:transparent/.test(html)
-                 && /\bmv-out\b/.test((m.icon && m.icon.className) || ''),
+               ringed: new RegExp('outline:2px dashed ' + colour).test(html)
+                 && /\bmv-wide\b/.test((m.icon && m.icon.className) || ''),
+               hollow: /background:transparent/.test(html),
                popup: String(m.popup || '').replace(/<[^>]*>/g, ' ')
                                            .replace(/\s+/g, ' ').trim() };
     }),
+    // The key across the map's foot, as drawn (innerText: what is hidden is
+    // not read).
+    keyText: (function () {
+      var k = document.getElementById('mapKey');
+      return !k || k.hidden ? null : k.innerText.replace(/\s+/g, ' ').trim();
+    })(),
     // Only the pins allowed to decide where the map looks.
     bounds: window.__bounds || [],
     lines: window.__lines.length,
@@ -1423,31 +1431,48 @@ try:
     # round where the car was (or with no box), and asks wide when that box
     # found nothing. So that is what each pin says of how it was found
     # (MV.howFound), and the one case the box exists to refuse — the wide
-    # answer landing outside it — is drawn hollow, the mark Map view gives a
-    # candidate outside its card's disc. Off the walk's own record of what it
-    # asked: no question more.
+    # answer landing outside it — is drawn RINGED: filled, because it was
+    # used, with a dashed ring round it. Not hollow, which on the panel's Map
+    # view is a candidate outside its card's disc that was NOT used. The box
+    # is said as it was searched, its size read off it: boxAround widens the
+    # 60 miles by half a 0.25-degree grid step and centres it on the grid
+    # point, so "the 60 mi box" was not the box. Off the walk's own record of
+    # what it asked: no question more.
+    _box_said = 'box searched round where the car was, 137 mi north–south by 134 east–west'
     ok_('a place the box round the car found nothing for, answered outside it '
-        'when asked wide, is drawn hollow and says so (%r)'
-        % ((boise_pin or [{}])[0],),
-        boise_pin and boise_pin[0].get('hollow') is True
+        'when asked wide, is drawn ringed, filled, and says so, with the box it '
+        'searched (%r)' % ((boise_pin or [{}])[0],),
+        boise_pin and boise_pin[0].get('ringed') is True
+        and boise_pin[0].get('hollow') is False
         and boise_pin[0].get('colour') == '#f31260'
-        and 'nothing inside the 60 mi box round where the car was, so asked '
-            'without it — and found outside it' in (boise_pin[0].get('popup') or ''))
+        and ('nothing inside the ' + _box_said + ', so asked without it — and found '
+             'outside it') in (boise_pin[0].get('popup') or ''))
     _ken = [p for p in (placed.get('pinDetail') or [])
             if (p.get('popup') or '').startswith('Cobb Pkwy NW, Kennesaw')]
-    ok_('...a place its box found is solid and says it was found inside the box (%r)'
+    ok_('...a place its box found is not ringed and says it was found inside the box (%r)'
         % ((_ken or [{}])[0],),
-        _ken and _ken[0].get('hollow') is False
-        and 'found inside the 60 mi box round where the car was' in (_ken[0].get('popup') or ''))
+        _ken and _ken[0].get('ringed') is False
+        and ('found inside the ' + _box_said) in (_ken[0].get('popup') or ''))
     _kro = [p for p in (placed.get('pinDetail') or [])
             if (p.get('popup') or '').startswith('Kroger (Chastain)')]
     ok_('...and one no row placed the car for says it was asked with no box (%r)'
         % ((_kro or [{}])[0],),
-        _kro and _kro[0].get('hollow') is False
+        _kro and _kro[0].get('ringed') is False
         and 'asked with no box — no row naming it knows where the car was'
             in (_kro[0].get('popup') or ''))
-    eq('...and only the one place answered outside its box is hollow',
-       len([p for p in (placed.get('pinDetail') or []) if p.get('hollow')]), 1)
+    eq('...and only the one place answered outside its box is ringed',
+       len([p for p in (placed.get('pinDetail') or []) if p.get('ringed')]), 1)
+    eq('no pin on this page is hollow, the panel\'s mark for a candidate not used',
+       [p.get('popup', '')[:40] for p in (placed.get('pinDetail') or []) if p.get('hollow')], [])
+    # The key names what is on the map: the colours of the pins drawn, and the
+    # ring because one is.
+    _cols = {p.get('colour') for p in (placed.get('pinDetail') or [])}
+    _want = ' · '.join(w for c, w in (('#17c964', '● pickup'), ('#f5a524', '● dropoff'),
+                                      ('#f31260', '● stray')) if c in _cols)
+    _want += ' · ◉ outside its box' if any(p.get('ringed') for p in
+                                           (placed.get('pinDetail') or [])) else ''
+    eq('the map has a one-line key naming the marks on it, the ring among them',
+       placed.get('keyText'), _want)
     # What the pins say of how each place was found is the walk's own record
     # (MV.placeAll's `asked`). A pin that asked again to find out would show
     # up here as a question past one for every place the rows name and one

@@ -1410,6 +1410,48 @@ const SNAP_MEASURE = (fixture) => {
           note.hidden = true;
           return out;
         }, HERE_LINES);
+        // ...and its one-line key to the pins, every item of it shown (the
+        // widest it gets), put back from the page's own markup — fetched from
+        // this server, so it is the key the page ships — when the offline
+        // path has written over the map's box.
+        out[panel[0] + ' map key'] = await page.evaluate(async () => {
+          const box = document.getElementById('map');
+          let key = document.getElementById('mapKey');
+          if (!key) {
+            const src = await (await fetch('/map.html')).text();
+            const doc = new DOMParser().parseFromString(src, 'text/html');
+            box.appendChild(document.importNode(doc.getElementById('mapKey'), true));
+            key = document.getElementById('mapKey');
+          }
+          key.hidden = false;
+          key.querySelectorAll('[hidden]').forEach((e) => { e.hidden = false; });
+          const first = key.querySelector('.k-item .k-sep');
+          if (first && first.closest('.k-item') === key.querySelector('.k-item')) first.hidden = true;
+          const map = box.getBoundingClientRect();
+          const r = key.getBoundingClientRect();
+          const tops = {};
+          let text = '';
+          const walk = document.createTreeWalker(key, NodeFilter.SHOW_TEXT);
+          let n;
+          while ((n = walk.nextNode())) {
+            const rg = document.createRange();
+            for (let i = 0; i < n.length; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (c.width || c.height) { tops[Math.round(c.top)] = 1; text += n.data[i]; }
+            }
+          }
+          const out = {
+            inside: r.left >= map.left - 0.5 && r.right <= map.right + 0.5
+              && r.top >= map.top - 0.5 && r.bottom <= map.bottom + 0.5,
+            rows: Object.keys(tops).length,
+            spills: key.scrollWidth > key.clientWidth + 1,
+            text: text.replace(/\s+/g, ' ').trim(),
+            w: Math.round(r.width), mapW: Math.round(map.width) };
+          key.hidden = true;
+          return out;
+        });
       }
       // The thing this panel is mostly used for: reading the phone through it
       // and working it with a bluetooth mouse. That view is only worth having
@@ -3298,6 +3340,16 @@ try:
                         ok_('...inside it top to bottom, in two rows at most, at '
                             '%s (%r)' % (panel, (m.get('rows'), m.get('mapH'))),
                             m.get('inside') and (m.get('rows') or 9) <= 2)
+                # ...and its key to the pins, all four items shown: one row,
+                # nothing cut, across the map; inside it top to bottom where
+                # the page gives the map room (as for the label above).
+                mk = got.get('%s map key' % panel) or {}
+                ok_('map.html\'s key to its pins is one row, nothing cut, within the '
+                    'map\'s width, at %s (%r)' % (panel, mk),
+                    mk.get('rows') == 1 and not mk.get('spills')
+                    and (mk.get('w') or 999) <= (mk.get('mapW') or 0)
+                    and (h < 400 or mk.get('inside'))
+                    and mk.get('text') == '● pickup · ● dropoff · ● stray · ◉ outside its box')
 
             # A line of prose has a width past which it stops being readable.
             # Widening the across-the-screen breakpoint to all of landscape put

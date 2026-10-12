@@ -83,6 +83,20 @@
               line-height: 1.35; color: var(--text);
               background: rgba(11, 15, 20, .85); pointer-events: none; }
   #hereNote.grey { color: var(--muted); }
+  /* The key to the pins, one line across the map's foot, above Leaflet's
+     attribution (16px) and clear of its zoom buttons at the top. Names only
+     the marks on the map (showKey); rpi/test_layout.py holds the whole of it
+     to one row inside the map on every panel. */
+  #mapKey { position: absolute; left: 8px; bottom: 18px; z-index: 1001;
+            max-width: calc(100% - 16px); box-sizing: border-box;
+            padding: 1px 7px; border-radius: 9px; font-size: 12px;
+            line-height: 1.35; white-space: nowrap; overflow: hidden;
+            color: var(--text); background: rgba(11, 13, 16, .85);
+            pointer-events: none; }
+  #mapKey[hidden] { display: none; }
+  #mapKey .k-pick { color: #17c964; }
+  #mapKey .k-drop { color: #f5a524; }
+  #mapKey .k-stray { color: #f31260; }
   #hereNote[hidden] { display: none; }
   #side { border-left: 1px solid var(--line); overflow: auto; padding: 10px 12px;
           font-size: 13px; }
@@ -243,7 +257,11 @@
   <div class="split">
     <!-- The "you are here" label lives inside the map's box so it sits over
          its corner; Leaflet adds its panes beside it and leaves it alone. -->
-    <div id="map"><div id="hereNote" hidden></div></div>
+    <div id="map"><div id="hereNote" hidden></div><div id="mapKey" hidden><span
+      class="k-item" data-k="pick"><span class="k-pick">●</span> pickup</span><span
+      class="k-item" data-k="drop"><span class="k-sep"> · </span><span class="k-drop">●</span> dropoff</span><span
+      class="k-item" data-k="stray"><span class="k-sep"> · </span><span class="k-stray">●</span> stray</span><span
+      class="k-item" data-k="wide"><span class="k-sep"> · </span><span class="k-wide">◉</span> outside its box</span></div></div>
     <div id="side">
       <div class="note" id="sideEmpty">Load a few days, then place them.</div>
       <div id="sideBody" hidden></div>
@@ -757,23 +775,41 @@
   /* A dot, with the number of jobs on it when there is more than one. The
      count is the point: a mount outside one restaurant is twelve offers, and
      twelve identical pins stacked to the pixel look exactly like one.
-     HOLLOW — a dashed ring in the pin's colour, nothing inside it — for a
-     place the box round where the car was found nothing for, that was then
-     asked wide and answered outside that box (MV.howFound): the one case the
-     box exists to refuse, drawn so it is seen without opening every popup.
-     The same mark Map view on the panel gives a candidate outside its card's
-     disc. */
-  function dot(colour, count, hollow) {
+     RINGED — the same filled dot with a dashed ring round it in its colour —
+     for a place the box round where the car was found nothing for, that was
+     then asked wide and answered outside that box (MV.howFound): the one
+     case the box exists to refuse, drawn so it is seen without opening every
+     popup. Filled, because it was used: this pin is on the map and in the
+     figures. It was hollow, which on the panel's Map view is the opposite —
+     a candidate outside its card's disc that was NOT used — so one mark
+     meant two things on two pages the driver reads. */
+  function dot(colour, count, wide) {
     var many = count > 1;
     var size = many ? 20 : 12;
-    return L.divIcon({ className: hollow ? 'mv-out' : '', iconSize: [size, size],
+    return L.divIcon({ className: wide ? 'mv-wide' : '', iconSize: [size, size],
       html: '<div style="width:' + size + 'px;height:' + size + 'px;'
           + 'box-sizing:border-box;border-radius:50%;'
-          + (hollow ? 'background:transparent;border:3px dashed ' + colour + ';color:'
-                      + colour + ';'
-                    : 'background:' + colour + ';border:2px solid #0b0d10;color:#0b0d10;')
+          + 'background:' + colour + ';border:2px solid #0b0d10;color:#0b0d10;'
+          + (wide ? 'outline:2px dashed ' + colour + ';outline-offset:2px;' : '')
           + 'font:700 11px/' + (size - 4) + 'px system-ui,sans-serif;'
           + 'text-align:center">' + (many ? count : '') + '</div>' });
+  }
+
+  /* The one-line key across the map's foot (#mapKey): the marks drawn, and
+     no others — green, amber, red and the ring — each named when a pin of it
+     is on the map. */
+  function showKey(has) {
+    var key = document.getElementById('mapKey');
+    if (!key) return;
+    var first = true, any = false;
+    [].forEach.call(key.querySelectorAll('.k-item'), function (el) {
+      var on = !!has[el.getAttribute('data-k')];
+      el.hidden = !on;
+      var sep = el.querySelector('.k-sep');
+      if (sep) sep.hidden = first;
+      if (on) { first = false; any = true; }
+    });
+    key.hidden = !any;
   }
 
   function when(at) {
@@ -788,6 +824,7 @@
     strays = strays || {};
     var bounds = [];
     marks = {};
+    var keyHas = { pick: false, drop: false, stray: false, wide: false };
 
     /* The ranking, once per draw, so a pin can say where its town stands
        without every popup running the test again. Null when the window has no
@@ -812,8 +849,11 @@
       // asked wide when that box found nothing (MV.howFound, off the walk's
       // own record of what it asked — no question asked to say so).
       var how = MV.howFound(place.point, (asked || {})[place.name]);
+      var wide = !!(how && how.outside);
+      keyHas[out ? 'stray' : place.roles.pickup ? 'pick' : 'drop'] = true;
+      if (wide) keyHas.wide = true;
       var marker = L.marker([place.point.lat, place.point.lon],
-                            { icon: dot(colour, place.jobs.length, !!(how && how.outside)) })
+                            { icon: dot(colour, place.jobs.length, wide) })
         .bindPopup('<b>' + esc(place.name) + '</b>'
                    + (out ? '<br><b>' + out.toFixed(0) + ' mi from everything else '
                           + '— this pin is almost certainly wrong</b>' : '')
@@ -891,6 +931,7 @@
                     { padding: [30, 30] });
     }
     pinBounds = bounds;
+    showKey(keyHas);
     sidebar(placed, strays, found);
     // Redrawn with the rest, since the range may have changed under it. If it
     // was not showing it stays not showing — a toggle that turns itself back

@@ -2249,20 +2249,28 @@
    *   { outside: false, line }  found inside its box, or asked with none
    *   { outside: true,  line }  the box found nothing, it was asked wide, and
    *                             the answer is outside the box — the case the
-   *                             box exists to refuse, drawn hollow
+   *                             box exists to refuse, drawn ringed (map.html)
+   *
+   * The box is said as it was searched: boxAround widens BOX_MILES by half a
+   * grid step and centres it on the grid point nearest the car, so "the 60
+   * mi box" was not the box. Its size in miles is read off the box itself,
+   * north–south and east–west (at its middle latitude).
    *
    * A box found nothing and the wide answer is inside it is possible (a
    * bounded search and an unbounded one rank differently) and is said as
    * asked wide, not as outside. Null for a place this walk did not ask. */
   function howFound(point, how) {
     if (!point || !how) return null;
-    var miles = BOX_MILES + ' mi box round where the car was';
     if (!how.box) {
       return { outside: false,
                line: 'asked with no box — no row naming it knows where the car was' };
     }
-    if (!how.wide) return { outside: false, line: 'found inside the ' + miles };
     var b = how.box.split(',').map(Number);   // left, top, right, bottom
+    var ns = Math.abs(b[1] - b[3]) * 69.0;
+    var ew = Math.abs(b[2] - b[0]) * 69.0 * Math.cos((b[1] + b[3]) / 2 * Math.PI / 180);
+    var miles = 'box searched round where the car was, ' + Math.round(ns)
+              + ' mi north–south by ' + Math.round(ew) + ' east–west';
+    if (!how.wide) return { outside: false, line: 'found inside the ' + miles };
     var outside = !(point.lon >= Math.min(b[0], b[2]) && point.lon <= Math.max(b[0], b[2])
                     && point.lat >= Math.min(b[1], b[3]) && point.lat <= Math.max(b[1], b[3]));
     return { outside: outside,

@@ -1859,13 +1859,18 @@ async function nucbox() {
      JSON.stringify(['Far Away Rd']));
   ok_('...and the box every place was searched in',
       Object.keys(run.asked).every(function (q) { return /^-?\d/.test(run.asked[q].box || ''); }));
-  eq('...so the far pin, answered in Chicago, is drawn hollow: found only outside its box',
+  // The box as searched, its size read off it: boxAround's 60 miles each
+  // way, widened by half a 0.25-degree grid step, round the grid point —
+  // 137 mi north–south by 134 east–west here, not "the 60 mi box".
+  eq('...so the far pin, answered in Chicago, is drawn ringed: found only outside its box',
      JSON.stringify(MV.howFound(run.found['Far Away Rd'], run.asked['Far Away Rd'])),
-     JSON.stringify({ outside: true, line: 'nothing inside the 60 mi box round where the car '
-                      + 'was, so asked without it — and found outside it' }));
-  eq('...and a pin its box found is solid, and says so',
+     JSON.stringify({ outside: true, line: 'nothing inside the box searched round where the '
+                      + 'car was, 137 mi north–south by 134 east–west, so asked without it — '
+                      + 'and found outside it' }));
+  eq('...and a pin its box found is not, and says so, with the box it searched',
      JSON.stringify(MV.howFound(run.found['Chipotle'], run.asked['Chipotle'])),
-     JSON.stringify({ outside: false, line: 'found inside the 60 mi box round where the car was' }));
+     JSON.stringify({ outside: false, line: 'found inside the box searched round where the car '
+                      + 'was, 137 mi north–south by 134 east–west' }));
   eq('...one asked wide and answered inside its box after all is not called outside',
      MV.howFound({ lat: 33.90, lon: -84.50 },
                  { box: run.asked['Chipotle'].box, wide: true }).outside, false);

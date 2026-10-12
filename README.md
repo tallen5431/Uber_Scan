@@ -464,9 +464,13 @@ all:
 whole window of offers rather than one card's disc, and choosing among
 candidates there is a different question that has not been answered. What
 `map.html` can show of how a place was found is its own walk: each pin's
-popup says whether it was found inside the 60 mi box round where the car
-was, asked with no box, or asked wide because the box found nothing — and
-a place answered wide and outside its box is a hollow ring.
+popup says whether it was found inside the box searched round where the car
+was (its size read off the box: the 60 miles widened by half a grid step,
+about 137 mi north–south by 134 east–west in Atlanta), asked with no box, or
+asked wide because the box found nothing — and a place answered wide and
+outside its box is RINGED, a dashed ring round its filled dot: it was used.
+Not hollow, which on the panel's Map view means a candidate that was not
+used. A one-line key across the map's foot names the marks on it.
 
 ## Files
 
