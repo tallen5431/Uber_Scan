@@ -2989,6 +2989,118 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  /* --- the held end, from the press --------------------------------------
+   *
+   * The driver's report: "I accepted a delivery, it mapped the drop off
+   * address but it did not hold those pins when it scanned a doordash card."
+   * The messages in the order the rig sends them — a reading, then its offer
+   * line with no `ready` — with the server's own shapes: the mark reply's
+   * `held` and a ⌖ read filed onto the hold carrying `holding` (heldForPanel
+   * in server.js; test_server holds the server to both). The ⌖ read is the
+   * shape the rig really held on shift, OCR litter in front of the door, on a
+   * made-up street: the stub answers only the clean address, as a geocoder
+   * does. Then a DoorDash card that names nowhere, a not-ready reading and a
+   * heartbeat: none of them may take the held pin off the glass. */
+  {
+    const HELD_AT = '1610 Pverel Blvd, Kestrelton, GA 30144';
+    const LITTER = 'ss be 4 ' + HELD_AT;
+    const ANSWERS = { "Chipotle (Barrett Pkwy)": [34.020, -84.580],
+                      "Powder Springs Rd": [33.900, -84.640] };
+    ANSWERS[HELD_AT] = [33.990, -84.620];
+    const run = async (name, cardDrop, script) => {
+      stage = 'the held end: ' + name;
+      const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                                .then((c) => c.newPage());
+      await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+      await page.addInitScript(MAPSTUB);
+      await page.route('**/api/status*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ last: null, lastAgeMs: null, heardAgeMs: 900,
+                               offer: null, holding: null }) }));
+      await page.route('**/api/journal*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
+      await page.route('**/api/today*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json', body: '{}' }));
+      const heldCard = { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+                         gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
+                         hasTotal: true, legs: 2, whole: true };
+      await page.route('**/api/offers/mark', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, holding: true,
+          held: { pay: 18.09, minutes: 38, dropoff: cardDrop, card: heldCard } }) }));
+      await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+        const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
+        const hit = ANSWERS[q];
+        return route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                        display_name: q }] : []) });
+      });
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(300);
+      const push = (m) => page.evaluate((x) => {
+        if (x.offer) Object.assign(x.offer, window.__CARD);
+        window.__es.push(x);
+      }, m);
+      // What a pin says it is, which is what the driver reads off it.
+      const pins = () => page.evaluate(() => window.__marks.map((m) =>
+        String(m.popup || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()));
+      const res = {};
+      await push({ ready: true, state: 'go', perHour: 30, grossPerHour: 36, pay: 18.09,
+                   minutes: 38, miles: 6, cost: 2.1, target: 25, band: 15,
+                   holding: null, stack: null });
+      await push({ offer: { id: 'took-me', pay: 18.09, minutes: 38, billedMinutes: 38,
+                            miles: 6, cost: 2.1, pickup: 'Chipotle (Barrett Pkwy)',
+                            dropoff: cardDrop } });
+      await page.click('#viewMode');
+      await page.waitForTimeout(150);
+      await page.click('#viewMode');
+      await page.waitForTimeout(3200);
+      await page.click('#took');
+      await page.waitForTimeout(2600);
+      res.took = await pins();
+      await script(push, pins, res, page);
+      await page.close();
+      return res;
+    };
+    const HOLD = (drop) => ({ pay: 18.09, minutes: 38, dropoff: drop,
+                              card: { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+                                      gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
+                                      hasTotal: true, legs: 2, whole: true } });
+    const dd = async (push, drop) => {
+      // A DoorDash card the reader rescued: a ready reading carrying the hold
+      // (withStack), then its offer line, naming nowhere.
+      await push({ ready: true, state: 'warn', perHour: 20, grossPerHour: 24, pay: 6.5,
+                   minutes: 25, miles: 3, cost: 1, target: 25, band: 15, cropFrom: 'card',
+                   holding: HOLD(drop), stack: null });
+      await push({ offer: { id: 'dd-next', pay: 6.5, minutes: 25, billedMinutes: 25,
+                            miles: 3, cost: 1, pickup: null, dropoff: null } });
+    };
+    // The card named nowhere; the end came off ⌖ after the accept.
+    out.heldPress = await run('a ⌖ read after ✓ Took', null, async (push, pins, res, page) => {
+      await push({ dropoff: { line: LITTER, asked: true }, holding: HOLD(LITTER) });
+      await page.waitForTimeout(2600);
+      res.read = await pins();
+      await dd(push, LITTER);
+      await page.waitForTimeout(2600);
+      res.dd = await pins();
+      await push({ ready: false, state: 'empty', track: null });
+      await push({ alive: true, gps: null });
+      await page.waitForTimeout(800);
+      res.after = await pins();
+      res.note = await page.evaluate(() => document.getElementById('viewNote').textContent.trim());
+    });
+    // The card named its end, and the next card's offer line is the first
+    // message after ✓ Took — the reply is the only thing that said the hold.
+    out.heldTook = await run('the card\'s own end', 'Powder Springs Rd',
+                             async (push, pins, res, page) => {
+      await push({ offer: { id: 'dd-bare', pay: null, minutes: null, miles: null,
+                            pickup: null, dropoff: null } });
+      await page.waitForTimeout(2600);
+      res.bare = await pins();
+    });
+  }
+
   /* --- you are here --------------------------------------------------------
    *
    * The heartbeat's newest fix, drawn on the map as a dot inside a circle the
@@ -6673,6 +6785,26 @@ try:
     # the check passed with the rule deleted. What distinguishes them is WHICH
     # pin is the pickup — the second card swaps the two ends, so the green one
     # moves from the Chipotle to the Canton Rd end.
+    # The held end, from the press: see the stage of that name. A pin is
+    # named by what it says, so the card's own "and drop it here" can never
+    # stand in for the order in the car.
+    _HELD = 'where the order in your car is going'
+    hp = got.get('heldPress') or {}
+    ok_('held end: a ⌖ read filed onto the order in the car is pinned as its end (%r)'
+        % (hp.get('read'),), any(_HELD in m and 'Pverel' in m for m in hp.get('read') or []))
+    ok_('held end: ...and a DoorDash card that names nowhere keeps it (%r)'
+        % (hp.get('dd'),), any(_HELD in m for m in hp.get('dd') or []))
+    ok_('held end: ...through a not-ready reading and a heartbeat (%r)'
+        % (hp.get('after'),), any(_HELD in m for m in hp.get('after') or []))
+    ok_('held end: ...whose pin says the address as read, litter and all (%r)'
+        % (hp.get('after'),),
+        any('ss be 4 1610 Pverel Blvd' in m for m in hp.get('after') or []))
+    ht = got.get('heldTook') or {}
+    ok_('held end: the ✓ Took reply\'s end is pinned as the held order\'s at once (%r)'
+        % (ht.get('took'),), any(_HELD in m and 'Powder Springs' in m
+                                 for m in ht.get('took') or []))
+    ok_('held end: ...and the next card\'s offer line does not take it down (%r)'
+        % (ht.get('bare'),), any(_HELD in m for m in ht.get('bare') or []))
     nxtMap = got.get('mapNext') or {}
     eq('a new card redraws the map rather than leaving the last one up',
        len(nxtMap.get('marks') or []), 4)

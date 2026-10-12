@@ -997,6 +997,23 @@ async function nucbox() {
   eq('a merchant is asked by name, its "(Plaza)" dropped',
      JSON.stringify(MV.searchPlan("McDonald's (Marietta Sq)")),
      JSON.stringify({ kind: 'name', q: "McDonald's" }));
+  // The shape the rig held as the order in the car's end on shift — OCR
+  // litter in front of the door — on a made-up street. Asked as written it
+  // was a street called "ss be 4 1610 Pverel Blvd" with no door, which no
+  // search holds, and the held end had no pin (see searchText).
+  eq('litter before a door ("ss be 4 1610 <Street> Blvd, <Town>, GA <zip>") is not searched',
+     JSON.stringify(MV.searchPlan('ss be 4 1610 Pverel Blvd, Kestrelton, GA 30144')),
+     JSON.stringify({ kind: 'street', street: '1610 Pverel Blvd', door: true,
+                      house: '1610' }));
+  eq('...and the public map is asked the same words, by the same rule',
+     new MV.Geocoder({ hint: function () { return ''; } })
+       .queryFor('ss be 4 1610 Pverel Blvd, Kestrelton, GA 30144', '1,2,3,4'),
+     '1610 Pverel Blvd, Kestrelton, GA 30144');
+  eq('...while a street with a number in its NAME keeps it (capitalised, nothing in front)',
+     JSON.stringify(['Hwy 92 Bypass, Woodstock', 'US 41, Marietta', 'Old 41 Hwy, Kennesaw',
+                     '1610 Pverel Blvd, Kestrelton'].map(MV.searchText)),
+     JSON.stringify(['Hwy 92 Bypass, Woodstock', 'US 41, Marietta', 'Old 41 Hwy, Kennesaw',
+                     '1610 Pverel Blvd, Kestrelton']));
 
   /* The disc: the card's fix, its distance plus the half mile. */
   var d94 = MV.discFor(card());

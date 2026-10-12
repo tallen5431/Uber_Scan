@@ -691,6 +691,24 @@ function startScanner() {
             });
           }
           if (!wasAsked && !kept) { delete read.dropoff; }
+          // ...and an address filed onto the order in the car goes to the
+          // panel AS that order's end, not only as the button's words.
+          //
+          // The driver's report: "I accepted a delivery, it mapped the drop
+          // off address but it did not hold those pins when it scanned a
+          // doordash card." The page learned where a held order ends only
+          // from a READING (withStack), so a ⌖ read after ✓ Took turned the
+          // button green and put nothing on Map view; what the map was
+          // showing was the accepted CARD's own dropoff, drawn as this card's
+          // "and drop it here", and the next card took it off the glass with
+          // the card it belonged to. Measured in rpi/test_dashboard.py's
+          // stage 'the held end, from the press': after the ⌖ read the map
+          // had the car and the pickup and no held pin.
+          //
+          // Only when it was kept on the HOLD: an address filed onto the card
+          // being screened, or read with nothing to file it on, is not where
+          // the order in the car is going.
+          if (kept && carrying) read.holding = heldForPanel(carrying);
           //
           // `scanner.dropoff` and `scanner.dropoffAt` were kept here for that
           // and are gone. They were written on every read and not one line in
@@ -1173,15 +1191,25 @@ function timedLikeTheHeldJob(read) {
  * Computed against the clock at the moment it is sent, so a reading replayed
  * ten minutes later is stacked against ten fewer minutes.
  */
-function withStack(read, now) {
-  if (!read || !read.ready) return read;
-  var held = holding(now);
-  read.holding = held
+/* The order in the car as the stream describes it to the panel: what Map view
+ * pins and the stack line weighs. One shape, said from three places — a
+ * reading (withStack), the mark reply that put the order in the car, and an
+ * address the ⌖ press filed onto it — because the page's map draws the held
+ * end from whichever of them spoke last, and two of them used not to say it at
+ * all: see the dropoff branch in startScanner and /api/offers/mark. */
+function heldForPanel(held) {
+  return held
     ? { pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null,
         // Its card's fix and size, so Map view can check this order's end
         // against them — see cardOf.
         card: held.card || null }
     : null;
+}
+
+function withStack(read, now) {
+  if (!read || !read.ready) return read;
+  var held = holding(now);
+  read.holding = heldForPanel(held);
   read.stack = held
     ? Advice.stack(held, timedLikeTheHeldJob(read),
                    { target: read.target, band: read.band,
@@ -4960,8 +4988,15 @@ function route(req, res) {
         //
         // Answered off the same question as everywhere else, so a hold the
         // server has already expired does not put a button back on the panel.
+        //
+        // ...and, beside the yes or no, the order as the stream describes it
+        // (heldForPanel), so Map view has the held end from this moment and
+        // not from the next reading. Until one arrived the page drew the
+        // accepted card's dropoff as that CARD's, and lost it with the card.
+        var heldAfter = holding(Date.now());
         send(res, 200, JSON.stringify({ ok: true, note: note,
-                                        holding: !!holding(Date.now()) }),
+                                        holding: !!heldAfter,
+                                        held: heldForPanel(heldAfter) }),
              { 'Content-Type': 'application/json; charset=utf-8' });
       });
     });
