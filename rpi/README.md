@@ -3570,7 +3570,11 @@ is built from pictures of it. Which reads count is one rule, `read_why` in
 `scan_pi.py`, shared with that log line (its "a payout but no journey"). Same
 cap as the doubt folder, 400 pictures, and the cap takes each `.txt` with its
 picture. Never off a ⌖ read — that is the whole screen box, a map or a planner
-round the card — and nothing with `--no-journal`.
+round the card — and nothing with `--no-journal`. Not only new layouts land
+there: a card whose first read found the payout and not the journey, and whose
+next read parsed, keeps that first read too — 59 of the 1,166 cards on the
+owner's measured week. It is written before the next read exists, and at its
+first read such a card looks the same as one that never parses.
 
 Everything else is off by default, because this writes to an SD card in a car
 and a feature that quietly fills one is worse than a feature nobody has. Bounded even when on: 400
