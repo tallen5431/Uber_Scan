@@ -1467,7 +1467,7 @@ if shutil.which('python3'):
         # ...and says it as the stream does (heldForPanel), so Map view has
         # the held order from the press and not from the next reading.
         eq('held end: the mark reply carries the order in the car as the stream describes it',
-           sorted((reply.get('held') or {}).keys()), ['card', 'dropoff', 'minutes', 'pay'])
+           sorted((reply.get('held') or {}).keys()), ['card', 'dropoff', 'holdId', 'minutes', 'pay'])
         # Started after the mark, before the scanner's 2s sleep ends.
         heard = listen(base, 4)
 
