@@ -139,13 +139,6 @@ eq('a card box becomes the crop inside the drawn corners',
    (carded['quad'], carded['cropBox']), (CX.in_pixels(quad, (2328, 1748)), [0.0, 0.4, 1.0, 0.5]))
 ok_('...and is still a person\'s choice', carded[CX.MANUAL_KEY])
 
-cleared = CX.clear_in_config(dict(config))
-ok_('re-finding drops the flag', CX.MANUAL_KEY not in cleared)
-ok_('...and the pin with it, or the derived crop never comes back',
-    'cropBox' not in cleared)
-eq('...leaving the corners as the place to start looking from',
-   cleared['quad'], config['quad'])
-
 # --- the handover file ------------------------------------------------------
 
 work = tempfile.mkdtemp()

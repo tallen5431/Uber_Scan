@@ -172,8 +172,8 @@
        exactly this card: the phone came out the same size to the pixel, the
        rest of its column went black, and the other half paid for it — the
        address sliced to 11px of its 17px line, the age line wrapped onto two,
-       and five controls sharing 388px instead of 559px close enough that "Set
-       box" and "Re-find" touch.
+       and five controls sharing 388px instead of 559px close enough that two
+       labels touched.
 
        So the column is sized to the picture and what is left goes to the
        verdict and the controls. Same phone, room for everything else. */
@@ -964,8 +964,8 @@
 
        HERE, and not on the bar. The bar holds six and a seventh sheds one —
        AUDITS.md's Settled has that, and styles.css does the arithmetic — so a
-       control there would cost the driver ⌨ Type or ▣ Set box in states where
-       they have them today. The two other places with room were measured and
+       control there would cost the driver ⌨ Type, or in the fullest state a
+       control they press at a red light. The two other places with room were measured and
        are worse. The caption under the picture (#viewNote) is `display: none`
        on every landscape panel unless the map is up, when it is the map's own
        two-row line with a budget already measured to the word; and the whole
@@ -1052,11 +1052,10 @@
          list has to be on the screen in front of them when they do, not
          conditional on them having put the order down first.
 
-         What stands down in its place is the keypad link, and — in the fullest
-         state only — ▣ Set box. See styles.css for the arithmetic. -->
+         What stands down in its place is the keypad link, in the fullest state
+         only. ▣ Set box never does. See styles.css for the arithmetic. -->
     <a class="linkbtn" href="journal.html">▤ Offers</a>
     <button type="button" class="linkbtn" id="setBox">▣ Set box</button>
-    <button type="button" class="linkbtn" id="reset">⟳ Re-find</button>
     <!-- Two things this picture gets used for, and they want opposite
          pictures. Aiming the mount wants the whole scene with the outline on
          it; working the phone through this screen — which is what a bluetooth
@@ -1110,7 +1109,7 @@
   // reach through. `loadShift` below knew this and guarded itself; the five
   // controls on the bar did not, and every one of them cleared its busy flag
   // only in the `.then()` after the fetch. So Took, Drop, ⌖ Dropoff, ⟳ Re-find
-  // and "✓ Read this box" each sat at "…", disabled, for the rest of the shift
+  // (since removed) and "✓ Read this box" each sat at "…", disabled, for the rest of the shift
   // — after ONE press on a bad connection, with nothing saying why and no way
   // back but reloading the page. The controls a driver uses at a red light are
   // the last place to leave that.
@@ -1290,24 +1289,11 @@
   // gain on its ceiling, already on the longest exposure, and the screen still
   // under target. The picture goes dark and the reads go with it.
   var tooDim = false;
-  // The scanner's own sentence for why the last Re-find did nothing, or null
-  // if the last one worked. Not a flag: the two reasons — nothing on the
-  // screen to find, and tracking switched off — want different things from the
-  // driver, and the end that knows which it was is the scanner.
-  //
-  // Pressing Re-find is a driver saying the outline is wrong, so the rig is
-  // reading through corners they have already judged bad. When the press is
-  // refused and nothing says so, they go back to driving believing it was
-  // fixed, and every read until they next look is warped through the same bad
-  // corners. This is the only state on this page where the driver has acted
-  // and the rig has not.
-  var refindRefused = null;
-
   // The journal has stopped taking writes, in the scanner's own words, or null.
   //
   // The only failure on this page that costs something which cannot be got
-  // back. A washed-out card can be re-read and a refused Re-find can be
-  // pressed again; an offer nobody wrote down is simply gone, and so is every
+  // back. A washed-out card can be re-read and a box drawn wrong can be
+  // drawn again; an offer nobody wrote down is simply gone, and so is every
   // one after it for as long as it lasts. A read-only SD card is the classic
   // Pi failure and it is completely silent from up here — the rig goes on
   // reading, pricing, speaking the verdict and painting a green ACCEPT, and
@@ -1615,8 +1601,8 @@
   // Whether the last press failed to reach the journal. It used to show
   // nothing: the label flickered to "…" and came straight back to "Took
   // $10.00?", and the driver either assumed it registered or pressed again.
-  // The Re-find button on the same bar already says "⟳ failed"; this says
-  // "not saved", and says it until the next press.
+  // Drop on the same bar already says "Drop · failed"; this says "not
+  // saved", and says it until the next press.
   var tookFailed = false;
 
   function showTook() {
@@ -1943,8 +1929,8 @@
    * amber is the only other sign of it. See unfiledNow.
    *
    * THE NOTICE FIRST. Between offers the card also holds the notice — the
-   * journal refusing writes, the phone too bright or too dim, a Re-find
-   * refused, the phase's own message — and the notice is the item that gives
+   * journal refusing writes, the phone too bright or too dim, the phase's
+   * own message — and the notice is the item that gives
    * way (see `#warn` in the stylesheet), while these lines are `flex: none`.
    * So on a small panel the stops took the notice's room, and it went with
    * nothing saying so: on the 3.5" hat's scene picture "Offers are NOT being
@@ -2054,7 +2040,7 @@
     el.dest.textContent = destBusy ? '⌖ reading…'
       : destFailed ? '⌖ not read' : '⌖ Dropoff';
     el.dest.classList.toggle('done', !destBusy && !!destSaid);
-    // The same class Re-find and Took already use for the same thing, so a
+    // The same class Drop and Took already use for the same thing, so a
     // failure looks like a failure on this bar whichever control it came from.
     el.dest.classList.toggle('failed', !destBusy && destFailed);
     // ...and asked for, in the one state where pressing it changes an answer.
@@ -2534,7 +2520,22 @@
       // both are what the driver is there to fix.
       var busy = readingAt && (Date.now() - readingAt) < READING_MS
                  && p.phase !== 'error' && p.phase !== 'aim';
+      // ...but "the card" only while there may be one. The motion gate fires
+      // on any picture that moves and settles, so a navigation map, DoorDash's
+      // "Finding offers" and a "Switch to dash in this busier zone" prompt are
+      // each read again and again — and every one of those reads put READING
+      // THE CARD, "working out the pay, the time and the distance", over a
+      // phone with no card on it, with the "no offer on screen" each one came
+      // to on the glass for the few milliseconds before the next read began.
+      // So when the last reading came to nothing offer-like, what is said is
+      // what it found and that the rig is looking again. A card that has just
+      // arrived over that screen gets the same true cue — the rig is reading
+      // the screen — and its verdict in the second and a half after. After a
+      // reading that had something of an offer on it, or before any reading
+      // at all, it is still READING THE CARD.
+      var again = busy && r && noVerdictSaid(r) === NO_OFFER_SAID;
       el.verdictLabel.textContent = blind ? BLIND_LABEL[blind] || 'CANNOT SEE'
+        : again ? 'READING THE SCREEN'
         : busy ? 'READING THE CARD'
         : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER');
       // Only while aiming, where the number means pixels and says so. On any
@@ -2558,10 +2559,6 @@
       // Ahead of the phase message, because it is the one the driver can act
       // on: a washed-out card between offers is exactly the state where there
       // is no reading to hang it off, which is why it is here as well as below.
-      // `refindRefused` matters more here than in the block below: a Re-find
-      // is refused when there is nothing on the screen to find, and nothing on
-      // the screen to find is precisely this branch — no reading, so the notes
-      // further down never render at all.
       // `notSaving` leads here as it does below, and it has to be here at all
       // for a reason the others only half share: between offers there is no
       // reading to hang it off, and the journal is just as dead between offers
@@ -2570,8 +2567,7 @@
       // a reading, and while it holds there is none coming.
       var setup = [blind ? BLIND_NOTE[blind] || '' : '',
                    notSaving || '', tooBright ? TOO_BRIGHT : '',
-                   tooDim ? TOO_DIM : '',
-                   refindRefused || '', p.message || ''].filter(Boolean);
+                   tooDim ? TOO_DIM : '', p.message || ''].filter(Boolean);
       el.warn.textContent = setup.join(' ');
       el.warn.hidden = !setup.length;
       // No card, no address. Leaving the last one up would have it read as
@@ -2597,6 +2593,7 @@
             // it would be said of is the last one before the word, too: the
             // word clears at the next read.
             : (blind ? ''
+               : again ? 'no offer on screen · reading again'
                : busy ? 'working out the pay, the time and the distance'
                : (r ? noVerdictSaid(r) + trackNote(r) : '')));
       el.verdict.classList.toggle('stale', quiet > STALE_MS);
@@ -2869,10 +2866,6 @@
                  + ', so these minutes are part of the trip, not all of it. '
                  + 'No rate is shown rather than one several times too high.');
     }
-    // Above the reading-quality notes below, because those describe a card the
-    // rig read and this describes the rig not having done a thing the driver
-    // asked for. It stands until a Re-find actually works.
-    if (refindRefused) notes.push(refindRefused);
     // A rate with no running cost taken off it is a CEILING, not the offer,
     // and the old wording — "pay shown before mileage cost" — described the
     // arithmetic without saying what it meant. On the owner's own shift 108 of
@@ -2960,7 +2953,7 @@
     if (t && t.lost) bits.push('screen not visible');
     // `t.jumps` used to sit here, printing 're-locked on the phone'. It is a
     // LIFETIME count — QuadTracker.jumps is incremented on every re-lock and
-    // reset nowhere, not even by start_over, the ⟳ Re-find path — so one
+    // reset nowhere — so one
     // re-lock at any point in a shift put that note on every reading after it,
     // and between offers too. The rig's own health log already carries the
     // same number correctly labelled, 're-locked %dx since start'.
@@ -3041,6 +3034,12 @@
   // Those are the frames kept on offer rows; the navigation screens between
   // offers are not among them. The card it was written for, a pay the box
   // cut off, is not in that week's frames at all; it is the 8 Oct one.
+  // What a reading with nothing offer-like on it is said as. Named, because
+  // render() asks whether that is what the last reading came to: a read
+  // starting over a screen that has just read as no offer is the rig
+  // looking again, not a card being priced.
+  var NO_OFFER_SAID = 'scanner running, no offer on screen';
+
   function noVerdictSaid(r) {
     if (r.clipped) return 'pay at the box edge — not trusted';
     if (typeof r.pay === 'number' && r.pay > 0) {
@@ -3055,7 +3054,7 @@
         || named.length) {
       return 'no pay read — box may cut it off';
     }
-    return 'scanner running, no offer on screen';
+    return NO_OFFER_SAID;
   }
 
   // What the dot means.
@@ -3224,10 +3223,6 @@
       // has to be read off the message before that happens.
       if (msg.tooBright !== undefined) tooBright = !!msg.tooBright;
       if (msg.tooDim !== undefined) tooDim = !!msg.tooDim;
-      // Same channel, same reason, and one more: a Re-find is refused most
-      // often when there is no screen to find, which is exactly when no
-      // reading is coming to carry the news.
-      if (msg.refindRefused !== undefined) refindRefused = msg.refindRefused || null;
       // Same channel again, and the one that most needs it: while the journal
       // is refusing writes every reading still arrives looking perfect, so a
       // channel that rode a reading would be carried by messages that
@@ -3385,7 +3380,7 @@
         // put the button back exactly as it was — the driver tapped the
         // address open on their phone, pressed, waited, and got the same grey
         // button whether it had worked or not. Took says "· not saved", Drop
-        // says "Drop · failed", Re-find says "⟳ failed".
+        // says "Drop · failed".
         //
         // It is answered from the RIG and not from a timer here, and that is
         // the whole reason this branch exists rather than a setTimeout. A read
@@ -3553,9 +3548,9 @@
    *   map    — where this offer's ends are, against where the car is and where
    *            the order already in it is going.
    *
-   * A mode on the existing control rather than a fourth button: the bottom bar
-   * holds six, and ▤ Offers already cost ▣ Set box its slot in the fullest
-   * state. A third mode costs no columns at all.
+   * A mode on the existing control rather than another button: the bottom bar
+   * holds six, and the fullest state already has six in it. A third mode costs
+   * no columns at all.
    *
    * The phone, unless the driver has said otherwise. During a shift the screen
    * is being used to read and work the phone through, and in the scene view
@@ -3711,33 +3706,13 @@
     startStream();
   });
 
-  // Ask the scanner to forget where it thinks the phone is. The automatic
-  // recovery handles the unambiguous case — corners off to one side while the
-  // card is in the middle — but corners sitting on the screen at the wrong size
-  // are equally "the phone moved" and "the outline is on part of it", and only
-  // the person looking at the picture can tell. So they get to say.
-  var resetBtn = document.getElementById('reset');
-  resetBtn.addEventListener('click', function () {
-    resetBtn.disabled = true;
-    resetBtn.textContent = '⟳ …';
-    ask('/api/recalibrate', { method: 'POST' })
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-      // "asked", not "re-finding". Everything this promise knows is that a web
-      // handler touched a file; it has not spoken to the scanner and cannot
-      // know whether the scanner will honour the request or refuse it for want
-      // of a screen to find. It claimed the stronger of the two, so a refused
-      // press read on this screen exactly like a press that worked, and the
-      // driver went back to driving through corners they had just rejected.
-      // What actually happened arrives on the heartbeat, as a note.
-      .then(function () { resetBtn.textContent = '⟳ asked'; })
-      .catch(function () { resetBtn.textContent = '⟳ failed'; })
-      .then(function () {
-        setTimeout(function () {
-          resetBtn.disabled = false;
-          resetBtn.textContent = '⟳ Re-find';
-        }, 2500);
-      });
-  });
+  // There was a ⟳ Re-find here: a press asked the scanner to forget where it
+  // thought the phone was and find it again — and, with a box drawn, to throw
+  // the drawn boxes away and go back to finding the screen by itself. On the
+  // owner's mount that finds the map, not the card, and they reported that it
+  // "tends to get stuck and not let me set it". It was taken off the bar at
+  // their request: ▣ Set box is the way to fix the boxes, and the scanner
+  // never second-guesses a box a person drew. See AUDITS.md's Settled list.
 
   // --- 📷 Snap ------------------------------------------------------------
   //
@@ -3765,8 +3740,8 @@
     snapBtn.textContent = '📷';
     snapBtn.appendChild(word);
   }
-  // How long the answer stays before the label comes back. Re-find gives its
-  // one word 2.5s; this can be a sentence, read from the driving seat. The
+  // How long the answer stays before the label comes back. This can be a
+  // sentence, read from the driving seat. The
   // last answer stays on the title after the words go, so a mouse resting on
   // the control can still ask what the last press kept.
   var SNAP_SAID_MS = 8000;

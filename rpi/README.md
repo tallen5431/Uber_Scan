@@ -1849,7 +1849,8 @@ chasing a card that was not there, and took a minute to climb down from just as
 the driver picked the phone up. The exposure is still given back in that state
 — measured, 2083us to 16667us, an eightfold recovery — so a rig that shortened
 itself into a hole climbs out of it. A phone so dim that the detector cannot
-find it even then stays dim until "⟳ Re-find" or a brighter screen.
+find it even then stays dim until a box is drawn with "▣ Set box" or the
+screen is brighter.
 
 ### Reading the phone *through* the live view
 
@@ -1915,7 +1916,7 @@ columns changes it. Splitting the panel 50/50 was tried and measured: the phone
 came out the same 269x468, the rest of its 400px column went black, and the
 other half paid for it — the address under the figures sliced to 11px of its
 17px line, the age line wrapped onto two, and the five controls went from 559px
-of bar to 388px, close enough that `▣ Set box` and `⟳ Re-find` touch. So the
+of bar to 388px, close enough that two of their labels touched. So the
 picture's column is sized to the picture and the rest of the panel goes to the
 verdict and the controls. The one lever that makes the phone bigger is
 `▣ Set box`: a tighter quad is a bigger warp of less phone.
@@ -2574,11 +2575,16 @@ again only when its picture changes and settles, not on a beat, and how often
 that happens in a shift has not been measured; the health line's median read
 time carries whatever it costs.
 
-**⟳ Re-find is the way back.** With a hand-drawn box in force it looks for the
-screen on the next frame and, if it finds one, makes that the calibration and
-turns tracking back on. If it finds nothing it says so and keeps your box —
-throwing it away first would leave the rig reading corners nobody has checked,
-which is the state you drew the box to escape.
+**▣ Set box again is the way to change them.** A box drawn by hand stays until
+another is drawn, and nothing on the panel throws it away. There used to be:
+⟳ Re-find, pressed with a box in force, looked for the screen on the next frame
+and, finding one, made that the calibration and turned tracking back on. On the
+owner's mount the screen it finds is the map, not the card, and their report was
+that it "tends to get stuck and not let me set it". It was taken off the panel
+at their request — AUDITS.md's Settled list has it, so it is not re-added — and
+the `/api/recalibrate` route and the scanner's handling of it went with it. A
+rig that should find the phone by itself again is re-calibrated without a box:
+`python3 rpi/autopilot.py --recalibrate`, or `calibrate.py` with no `--box`.
 
 Same thing from the command line, for a rig you are already ssh'd into — as
 fractions of the frame, `x,y,w,h`:
@@ -2600,7 +2606,7 @@ things.
   Only calibration writes it. The corner tracker judges every candidate's SHAPE
   against it always, and its SIZE against it until an automatic re-baseline
   moves the size reference for the rest of that run. The file is untouched
-  either way, which is what ⟳ Re-find restores.
+  either way, which is what `wander` on the health line is measured against.
 - **`trackedQuad`** is where the tracking has got to. Written while scanning so
   the next run resumes without re-converging; ignored by `--no-track`.
 - **`cropBox`** pins the crop. Normally absent, and then the crop is placed per
@@ -2609,7 +2615,8 @@ things.
   automatic placement ever misbehaves on a mount nobody anticipated.
 - **`manualBox`** says a person drew the corners. Written by ▣ Set box and by
   `calibrate.py --box`, and it turns corner tracking off for as long as it is
-  there. ⟳ Re-find removes it, along with the `cropBox` pin that came with it.
+  there. Calibrating without a box removes it, along with the `cropBox` pin
+  that came with it.
 
 Four more are about light, and only the first two are settings a person would
 ever edit.
@@ -3218,26 +3225,24 @@ exactly the state that used to leave the corners stuck with no way out.
 It cannot settle every case. Corners sitting *on* the screen at the wrong size
 still hold the centre, and that is equally "the phone was re-seated" and "the
 outline is on part of the screen"; no amount of looking separates them. That is
-what the timeout below and the **⟳ Re-find** button are for.
+what the timeout below is for, and what **▣ Set box** is for when the person
+watching can see the rig has it wrong.
 
-### Re-find, when it needs telling
+### Re-find, when it needed telling (removed)
 
-**⟳ Re-find** in the live view puts the corners back where calibration left them
-and drops every piece of accumulated evidence, so the next screen argues for
-itself from nothing — including undoing an automatic re-baseline, which is the
-case it exists for. "Corners on the screen at the wrong size" is equally "the
-phone was re-seated" and "the outline is on part of the screen", and that is
-exactly the call the watchdog has already made; the person watching the live
-view can see which it was, so they get to overrule it. For a while they could
-not: the re-baseline moved the same reference this button restores, so the press
-landed on the box the watchdog had just adopted and the green box did not move.
-If the phone really has been re-seated the rig will take the corners back about
-half a minute later, and the log says so rather than leaving a correct press
-looking like a failure. It is a POST to `/api/recalibrate`, which touches
-`rpi/.recalibrate`; the scanner notices within a check and deletes it. A file
-rather than a signal, for the same reason `.viewing` is one — the scanner is
-sometimes a child of the web server and sometimes a systemd unit that has never
-heard of it, and a file works identically either way.
+⟳ Re-find was taken off the panel at the owner's request; ▣ Set box is the way
+to fix the boxes. What it did, for the record: **⟳ Re-find** in the live view put
+the corners back where calibration left them
+and dropped every piece of accumulated evidence, so the next screen argued for
+itself from nothing — including undoing an automatic re-baseline. With a box
+drawn it did more: it threw the box away for whatever screen it could find.
+If the phone really had been re-seated the rig took the corners back about half
+a minute later. It was a POST to `/api/recalibrate`, which touched
+`.recalibrate` in the handoff directory. The route, the scanner's reading of the
+file, the tracker's `start_over`, `cropbox.clear_in_config` and the
+`refindRefused` notice are all gone with the button; a `.recalibrate` an older
+page leaves behind is inert, and `rpi/test_loop.py` holds that a drawn box
+survives one.
 
 ### When the corners get stuck
 
@@ -4812,7 +4817,7 @@ timeout of its own. A socket the far end accepts and never answers on — which 
 exactly what a car hotspot the Pi is associated with but cannot reach through
 produces — leaves the promise pending for ever, and nothing after it runs. Every
 control on the driving screen's bar cleared its busy flag in the `.then()` after
-the fetch. So Took, Drop, ⌖ Dropoff, ⟳ Re-find and "✓ Read this box" each sat at
+the fetch. So Took, Drop, ⌖ Dropoff, ⟳ Re-find (since removed) and "✓ Read this box" each sat at
 "…", disabled, from one press until the page was reloaded, with nothing saying
 why.
 
@@ -5582,6 +5587,9 @@ see. That is the hole the down-branch already has eleven lines explaining. The
 false sentence is fixed; the recovery is measured and left.
 
 ### A button that said it had done something it refused to do
+
+*Since removed with the button: ⟳ Re-find was taken off the panel at the
+owner's request, and the notice described here went with it.*
 
 Pressing **⟳ Re-find** is the driver saying the outline is wrong. From that press
 on, the rig is reading through corners they have already judged bad.
@@ -8022,10 +8030,11 @@ failed to draw.
 
 ### Three files, and where they live
 
-The browser asks the camera side for three things, and each is a file:
+The browser asked the camera side for three things, and each was a file:
 `.viewing` (somebody is watching, and which of the two views they want),
-`.recalibrate` (forget where you think the phone is), `.cropbox.json` (read
-this box, drawn by hand). Files rather than a socket or a signal, because the
+`.recalibrate` (forget where you think the phone is — gone with ⟳ Re-find),
+`.cropbox.json` (read this box, drawn by hand). rpi/handoff.py lists the ones
+there are now. Files rather than a socket or a signal, because the
 scanner is sometimes a child of the web server and sometimes a systemd unit
 that has never heard of it.
 
@@ -8034,8 +8043,8 @@ each exists for seconds, none should survive a reboot, and once `.viewing`
 started carrying which view the driver wants, the web side began rewriting it
 about once a second for as long as a browser was fetching frames. The live
 frame moved to `/dev/shm` for exactly this reason and these were left behind.
-They are there now — `uberscan-viewing`, `uberscan-recalibrate`,
-`uberscan-cropbox.json` — with the aiming picture and the OCR staging images.
+They are there now — `uberscan-viewing`, `uberscan-cropbox.json` and the
+later ones — with the aiming picture and the OCR staging images.
 
 **Found by a rule, not by a list.** The live frame can afford to be sloppy
 about this: `framePath` in `server.js` takes whichever candidate is freshest,

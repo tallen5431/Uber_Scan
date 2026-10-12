@@ -19,8 +19,8 @@ Each check here failed against the loop before its fix:
 - A read that never returned left the rig beating and silent, and the
   supervisor's silence watchdog could not see it.
 - The startup line counted journal lines and called them offers.
-- A Re-find the scanner refused was answered in the log and nowhere else,
-  while the button on the driving screen said it was re-finding.
+- ⟳ Re-find, pressed with a box drawn, threw the boxes away. It is gone; a
+  request an older page left behind must not do it either.
 
 One warning about the stubbed reader, because it cost an afternoon here: it
 answers with whatever text the check asked for WHETHER OR NOT THERE IS A CARD
@@ -208,7 +208,7 @@ def out_for(text, clipped=False, fitted=None):
 
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
         hang_from=None, stuck_after=None, handoff=None, alive_every=None,
-        refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
+        config_extra=None, appear_at=0.4, cam_out=None,
         clipped_for=None, dropoff_window=None, whole_text=None, fitted=None,
         fitted_for=None, hang_on_loop=True,
         fail_after=None, phone_hold=None, gps_hold=None, phone=None,
@@ -322,16 +322,21 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     # Every read handed to the reader, begun or not: one asked of a reader
     # stuck on the read before it never starts, so `calls` cannot count it.
     submitted = [0]
+    # ...whether each was a ⌖ read of the whole screen, and how many times the
+    # panel was told a read had started.
+    submitted_whole = []
+    readings = [0]
 
     def submit(self, frames, now, geom):
         submitted[0] += 1
+        submitted_whole.append(bool(getattr(geom, 'whole', False)))
         return real[12](self, frames, now, geom)
 
     SP.Reader.submit = submit
     # What the loop tells the server it is pricing a mile at, as a copy: the
     # loop hands over its live dict, which is exactly the thing that changes.
     SP.emit_settings = lambda settings: said_settings.append(dict(settings or {}))
-    SP.emit_reading = lambda *a, **k: None
+    SP.emit_reading = lambda *a, **k: readings.__setitem__(0, readings[0] + 1)
     # Captured rather than printed, like the offer line beside it. The empty
     # answer — a press that found no address — is only visible here.
     SP.emit_dropoff = lambda address, **k: dropoffs.append((address, k))
@@ -389,9 +394,6 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     was_window = SP.DROPOFF_WINDOW
     if dropoff_window is not None:
         SP.DROPOFF_WINDOW = dropoff_window
-    was_refind_s = SP.REFIND_NOTICE_S
-    if refind_notice_s is not None:
-        SP.REFIND_NOTICE_S = refind_notice_s
     was_holds = (SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY,
                  SP.STALL_AGAIN)
     if phone_hold is not None:
@@ -439,7 +441,6 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         SP.emit_planner = was_planner
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
-        SP.REFIND_NOTICE_S = was_refind_s
         SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY, SP.STALL_AGAIN = was_holds
         if was_handoff is None:
             os.environ.pop(HO.ENV_DIR, None)
@@ -447,7 +448,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, offer_kw=offer_kw,
                 beats=beats, calls=calls[0],
-                submitted=submitted[0], planners=said_planners,
+                submitted=submitted[0], submitted_whole=submitted_whole,
+                readings=readings[0], planners=said_planners,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
                 raised=raised, handoff=handoff, finder=finder[0])
@@ -643,98 +645,40 @@ ok_('...and the journal says the rig asked to be restarted, and why (%r)' % _stu
 eq('...and leaves no note holding back a stalled camera\'s restart',
    _stall_note_age(r['handoff']), None)
 
-# --- a Re-find the rig cannot honour has to say so on the beat ---------------
-# Pressing Re-find is the driver saying the outline is wrong, so from that press
-# on the rig is reading through corners they have already judged bad. With
-# --no-track there is nothing for the press to move, and the refusal went to the
-# log — which is not a place a driver looks. The button on the live page went on
-# to say "re-finding" either way, because the only thing it waits for is a web
-# handler that touches a file and has never spoken to the scanner.
-handoff = tempfile.mkdtemp()
-open(os.path.join(handoff, 'uberscan-recalibrate'), 'w').close()
-r = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=8.0,
-        handoff=handoff, alive_every=0.05,
-        until=lambda rows, ann, calls: calls >= 3)
-said = [b.get('refind_refused') for b in r['alive']]
-carried = [s for s in said if s]
-ok_('the refusal reaches the heartbeat (%r)' % (carried[:1],), bool(carried))
-ok_('...saying which refusal it was', carried and '--no-track' in carried[0])
-ok_('...and the log still has it too, for the day somebody reads one',
-    any('tracking is off' in l for l in r['logs']))
-ok_('...and the request was taken, not left to fire again on the next restart',
-    not any(os.path.exists(p) for p in HO.candidates(HO.RECALIBRATE)))
-
-# ...and a rig nobody has pressed anything on says nothing about re-finding.
-# Without this the check above passes on a flag that is simply always set.
-r = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=8.0,
-        handoff=tempfile.mkdtemp(), alive_every=0.05,
-        until=lambda rows, ann, calls: calls >= 3)
-ok_('an unpressed button is not a refusal',
-    r['alive'] and not any(b.get('refind_refused') for b in r['alive']))
-
-# ...and it goes away on its own, which is the part that only matters because
-# of --no-track: there the refusal is permanently true, the button can never do
-# anything on that rig, and a notice with no expiry would go up on the first
-# press and stay up for the whole shift. A notice that cannot be cleared is one
-# the driver stops reading, and it takes the ones that can be with it.
-handoff = tempfile.mkdtemp()
-open(os.path.join(handoff, 'uberscan-recalibrate'), 'w').close()
-# Run on the clock rather than on a read count: the thing being measured is a
-# notice ageing out, so the run has to outlive it.
-r = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=3.0,
-        handoff=handoff, alive_every=0.05, refind_notice_s=0.8)
-said = [bool(b.get('refind_refused')) for b in r['alive']]
-ok_('the refusal is on the beat to begin with (%d of %d beats)'
-    % (sum(said), len(said)), any(said))
-ok_('...and off it again once the press is old news', said and not said[-1])
-ok_('...having been there for several beats, not one', sum(said) > 1)
-
-# ...and a press that works takes the refusal down at once, rather than leaving
-# it to age out. Driven through the hand-drawn box, which is the only path where
-# both answers are reachable in one process: a rig with no tracker never gets a
-# press that works, and a rig with one never refuses.
-#
-# The card arrives partway through, so the first press — made against an empty
-# mount — is refused for want of a screen, and the second, dropped in once that
-# refusal has been seen, finds one.
-handoff = tempfile.mkdtemp()
-REQ = os.path.join(handoff, 'uberscan-recalibrate')
-open(REQ, 'w').close()
-pressed_again = [False]
-mount = []
+# --- ▣ Set box always takes, and nothing throws a drawn box away -------------
+# ⟳ Re-find was taken off the panel at the owner's request (AUDITS.md,
+# Settled). Pressed with a box drawn it threw the boxes away and went back to
+# finding the screen by itself — on their mount, the map — and they reported it
+# "tends to get stuck and not let me set it". The scanner no longer reads the
+# request at all, so a `.recalibrate` an older page left in the handoff
+# directory is inert: the drawn box stays, and a new one drawn on the panel
+# takes over it.
+_ho_rf = tempfile.mkdtemp()
+_stale_rf = os.path.join(_ho_rf, 'uberscan-recalibrate')
+open(_stale_rf, 'w').close()
 
 
-def press_again_once_refused(rows, ann, calls):
-    """Called from inside the loop, on its own sleep. Not a condition to stop
-    on — it returns False every time — but the only hook this harness has for
-    doing something to the rig mid-run.
-
-    Waits for the card to really be in the mount, asked of the camera rather
-    than inferred from the loop. Neither a read nor an announcement is evidence
-    here: the reader is stubbed and answers with a whole card on a blank frame,
-    so both happen on the first frame, and a press then is the same press
-    against the same empty mount the first one was refused for.
-    """
-    if (not pressed_again[0] and not os.path.exists(REQ)
-            and mount and mount[0].frame is mount[0].offer):
-        pressed_again[0] = True
-        open(REQ, 'w').close()
-    return False
+def _draw_on_third_read(n, k):
+    if n == 3 and k == 0:
+        with open(os.path.join(_ho_rf, 'uberscan-cropbox.json'), 'w') as fh:
+            json.dump({'quad': [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                       'card': [0.0, 0.3, 1.0, 0.45]}, fh)
+    return WHOLE
 
 
-r = run(lambda n, k: WHOLE, seconds=10.0, handoff=handoff, alive_every=0.05,
-        appear_at=1.0, cam_out=mount,
+# The phone is in the mount from the first frame, so a scanner that still read
+# the request would find a screen to throw the box away for.
+r = run(_draw_on_third_read, seconds=6.0, handoff=_ho_rf, appear_at=0.0,
         config_extra={'manualBox': True, 'cropBox': [0.0, 0.0, 1.0, 1.0]},
-        until=press_again_once_refused)
-ok_('the first press, against an empty mount, was refused',
-    any('no screen in view' in l for l in r['logs']))
-ok_('...and said so on the beat',
-    any('box you drew' in (b.get('refind_refused') or '') for b in r['alive']))
-ok_('the second press, with the card there, was honoured',
-    any('finding the phone automatically' in l for l in r['logs']))
-said = [bool(b.get('refind_refused')) for b in r['alive']]
-ok_('...and took the refusal down with it, without waiting for it to age out',
-    pressed_again[0] and said and not said[-1])
+        until=lambda rows, ann, calls: calls >= 6)
+eq('a drawn box is read as drawn while a stale re-find request lies there',
+   r['crops'][0], ([0.0, 0.0, 1.0, 1.0], 1.0))
+ok_('...and nothing goes back to finding the screen by itself',
+    not any('automatically' in l or 'outline reset' in l for l in r['logs']))
+ok_('▣ Set box takes over it, mid-shift (%r)' % r['crops'][-1:],
+    any(c == ([0.0, 0.3, 1.0, 0.45], 0.45) for c in r['crops']))
+ok_('...and the box is still a person\'s choice in the saved config',
+    json.load(open(r['config'])).get('manualBox') is True)
 
 # --- a card box inside the drawn box -------------------------------------------
 #
@@ -1488,21 +1432,6 @@ eq('...in the journal\'s own fields, and the time it has left inside the rule',
    sorted((_mbeat[-1] if _mbeat else {}).keys()),
    sorted(SP.JR.FIX_FIELDS + ('freshFor',)))
 
-# --- the Health object's own account of a Re-find ---------------------------
-# Reachable directly, and worth reaching: the loop above can only ever show one
-# of the two answers per run, because a rig with no tracker never gets a press
-# that works and a rig with one never refuses.
-h = SP.Health()
-eq('a rig nobody has pressed anything on has nothing to say', h.refind_notice(1000.0), None)
-h.refind_says('no screen to find', 1000.0)
-eq('...a refusal is said', h.refind_notice(1000.0), 'no screen to find')
-eq('...and goes on being said while the press is recent',
-   h.refind_notice(1000.0 + SP.REFIND_NOTICE_S - 1.0), 'no screen to find')
-eq('...and stops once it is not', h.refind_notice(1000.0 + SP.REFIND_NOTICE_S + 1.0), None)
-h.refind_says('no screen to find', 1000.0)
-h.refind_says(None, 1002.0)
-eq('a press that worked leaves nothing behind', h.refind_notice(1002.0), None)
-
 # --- which frame of one read gets published ----------------------------------
 #
 # A read hands back two frames 33ms apart, and the loop published the later one
@@ -1663,6 +1592,17 @@ ok_('...and the address outside the card box is the answer (%r)'
     % [(d[0] or {}).get('line') for d in r8['dropoffs']][:2],
     any(d[0] and 'Main St' in (d[0].get('line') or '') and d[1].get('asked')
         for d in r8['dropoffs']))
+# ...and the panel is not told a card is being priced while it happens. A ⌖
+# read answers with an address or nothing, never with `ready`, so the reading
+# cue it used to send stood on the panel as READING THE CARD, "working out the
+# pay, the time and the distance", for the page's whole READING_MS after each
+# one — over a navigation screen, through the whole window.
+_card_reads = r8['submitted_whole'].count(False)
+ok_('the premise: both kinds of read were handed over (%d whole, %d card)'
+    % (r8['submitted_whole'].count(True), _card_reads),
+    r8['submitted_whole'].count(True) >= 1 and _card_reads >= 1)
+eq('...and the panel is told a read began for the card reads only',
+   r8['readings'], _card_reads)
 
 # The whole-screen read sees a DIFFERENT payout here — a card under a map, a
 # planner listing two orders' totals. If it reached the offer, the panel would
@@ -2089,9 +2029,6 @@ def _crop_of(n):
 _snho = tempfile.mkdtemp()
 _snfold = tempfile.mkdtemp()
 _sreq = [None]
-# --no-track and a Re-find press, so the beat carries a refusal: the flags
-# reader.json reports are then something the beat said, not four Falses.
-open(os.path.join(_snho, 'uberscan-recalibrate'), 'w').close()
 
 
 def _snap_once_stuck(rows, ann, calls):
@@ -2130,9 +2067,8 @@ ok_('...and the card\'s episode (%r)' % _said.get('episode'),
 eq('...the health counters as they stand', ((_said.get('health') or {}).get('reads'),
                                               (_said.get('health') or {}).get('complete')), (3, 3))
 _beat = _said.get('heartbeat')
-ok_('...and the flags the last heartbeat carried, the refused Re-find among them (%r)'
-    % (_beat,), isinstance(_beat, dict) and
-    '--no-track' in (_beat.get('refindRefused') or '')
+ok_('...and the flags the last heartbeat carried (%r)'
+    % (_beat,), isinstance(_beat, dict) and 'refindRefused' not in _beat
     and (_beat.get('tooBright'), _beat.get('tooDim'), _beat.get('notSaving')) == (False, False, None)
     and isinstance(_beat.get('ageMs'), int))
 eq('...the camera\'s word among them, null while it can see',

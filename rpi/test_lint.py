@@ -175,7 +175,7 @@ for name in sorted(written):
 import handoff as HO                                          # noqa: E402
 # Every request handoff.py names, and the picture. `.dropoff` was missing from
 # this list while .gitignore covered it, so nothing would have noticed it go.
-FALLBACKS = (HO.VIEWING, HO.RECALIBRATE, HO.CROPBOX, HO.DROPOFF, HO.SETTINGS,
+FALLBACKS = (HO.VIEWING, HO.CROPBOX, HO.DROPOFF, HO.SETTINGS,
              HO.SNAP, HO.FRAME_LEGACY)
 for base in FALLBACKS:
     ok_('the fallback %s is ignored' % base, is_ignored(base))

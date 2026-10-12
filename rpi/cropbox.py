@@ -44,7 +44,7 @@ sys.path.insert(0, HERE)
 import handoff as HO                                          # noqa: E402
 
 # Where the web side leaves a box for the camera side to pick up. A file, for
-# the same reason .recalibrate and .viewing are files: the scanner is sometimes
+# the same reason .viewing is a file: the scanner is sometimes
 # a child of the web server and sometimes a systemd unit that has never heard of
 # it, and a file works identically either way. In RAM where there is any, and
 # read from the checkout as well — see handoff.py.
@@ -211,8 +211,8 @@ def take_request(path=None):
     frame for the rest of the shift, and never fatal: this runs inside the
     capture loop, where nothing is worth stopping reading offers for.
 
-    Both places are looked in and both are cleared, for the same reason
-    `reset_requested` does it: a web server a `git pull` behind this process
+    Both places are looked in and both are cleared, for the reason
+    handoff.clear gives: a web server a `git pull` behind this process
     writes to the other one, and a box left lying in either would be adopted
     whenever the scanner next restarted — moving the crop, hours later, with
     nothing on screen to explain why the reads stopped.
@@ -278,13 +278,5 @@ def apply_to_config(config, quad, size, card=None):
     config['quad'] = in_pixels(quad, size)
     config['cropBox'] = list(card) if card else list(PIN_WHOLE)
     config[MANUAL_KEY] = True
-    config.pop('trackedQuad', None)
-    return config
-
-
-def clear_in_config(config):
-    """Undo the above, leaving the corners as the starting point for a re-find."""
-    config.pop(MANUAL_KEY, None)
-    config.pop('cropBox', None)
     config.pop('trackedQuad', None)
     return config
