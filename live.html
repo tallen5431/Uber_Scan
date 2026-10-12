@@ -912,9 +912,10 @@
     <!-- The key to how each place was found (drawHow): one line over the
          map's bottom edge, inside the map so it is drawn only where the map
          is. Shown only when there is something of that drawn. -->
-    <div id="liveMap" hidden><div id="mapKey" hidden><span class="k-all"><span class="k-disc">◯</span> <span class="k-long">card's </span>reach
-      · <span class="k-pin">●</span> pin · <span class="k-cand">●</span> <span class="k-long">also </span>found
-      · <span class="k-out">○</span> outside</span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
+    <div id="liveMap" hidden><div id="mapKey" hidden><span class="k-all"><span class="k-item" data-k="disc"><span class="k-disc">◯</span> <span class="k-long">card's </span>reach</span><span
+      class="k-item" data-k="pin"><span class="k-sep"> · </span><span class="k-pin">●</span> pin</span><span
+      class="k-item" data-k="cand"><span class="k-sep"> · </span><span class="k-cand">●</span> <span class="k-long">also </span>found</span><span
+      class="k-item" data-k="out"><span class="k-sep"> · </span><span class="k-out">○</span> outside</span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
     <!-- What the "you are here" dot says about itself — "±12 m · 2 s old" —
          or why there is no dot: "GPS too rough here (±130 m)". Over the map's
          corner rather than in the caption below it, which is the detour's row
@@ -4427,10 +4428,17 @@
      (want.nbxSeen). No question is asked to draw any of it.
 
        the card's disc    a dashed circle at the card's fix, its distance
-                          plus half a mile: where every place of the card
-                          was searched and every pin of it is held to. Blue
-                          as the car it is drawn round; amber for the order
-                          in the car, whose end is held to ITS card's disc.
+                          plus half a mile: the card's reach. Its PICKUP pin
+                          is refused past it (MV.cardRefuses, red), and the
+                          order in the car's end past ITS card's disc; the
+                          dropoff pin is held to no disc. With the NucBox
+                          answering, each of the card's places is searched
+                          inside it and a candidate past it is never used;
+                          with no NucBox (or one that could not be asked)
+                          they go to the public geocoder in the 60 mi box
+                          round the car, then with no box, and only the
+                          pickup's refusal above holds. Blue as the car it is
+                          drawn round; amber for the order in the car.
        also found         a small grey dot for every candidate the NucBox
                           sent (a corner: every meeting of its two streets),
                           edged in the disc's colour; the pin in colour on
@@ -4460,11 +4468,16 @@
     // Every layer made first and only then put on the map, all of them, so a
     // throw part-way leaves nothing of it half drawn (see drawMap).
     var made = [];
+    // Which marks of the key are on the map: the circle, the grey (a
+    // candidate dot, or a refused street's grey stretch) and the hollow. A
+    // pinned street's stretch, in the disc's colour, is the pin's own.
+    var kinds = { disc: false, cand: false, out: false };
     var cards = [['new', MV.discFor(want.card)]];
     if (want.held) cards.push(['held', MV.discFor(want.heldCard)]);
     cards.forEach(function (c) {
       var d = MV.discShape(c[1]);
       if (!d) return;
+      kinds.disc = true;
       made.push(L.circle([d.lat, d.lon], {
         radius: d.metres, weight: 1.5, color: HOW_COLOUR[c[0]], opacity: .7,
         dashArray: '5 6', fillColor: HOW_COLOUR[c[0]], fillOpacity: .04,
@@ -4478,6 +4491,7 @@
       var colour = HOW_COLOUR[s.whose] || HOW_GREY;
       how.lines.forEach(function (l) {
         var chosen = l.kind === 'chosen';
+        if (!chosen) kinds.cand = true;
         made.push(tipOn(L.polyline(l.pts, {
           color: chosen ? colour : HOW_GREY, weight: chosen ? 5 : 4,
           opacity: chosen ? .55 : .8, dashArray: chosen ? null : '6 5',
@@ -4487,6 +4501,7 @@
       });
       how.marks.forEach(function (m) {
         var out = m.kind === 'outside';
+        kinds[out ? 'out' : 'cand'] = true;
         made.push(tipOn(L.circleMarker([m.lat, m.lon], {
           radius: 5, weight: 2, color: out ? HOW_GREY : colour,
           dashArray: out ? '2 3' : null,
@@ -4500,16 +4515,28 @@
     // turn from the last made, so the discs end lowest and the candidates
     // over them, as they were made.
     for (var i = made.length - 1; i >= 0; i--) made[i].addTo(mapLayer).bringToBack();
-    return made.length > 0;
+    return made.length ? kinds : false;
   }
 
-  /* The key, for what drawHow did: true, it drew something and the key says
-     what; false, nothing to explain and no key; null, it failed and the key
-     says only that — not the marks, which are not there. */
-  function showKey(drawn) {
+  /* The key, for what drawHow did: the kinds it drew, and the key names
+     those and no others (plus "pin" when a pin is on the map); false,
+     nothing to explain and no key; null, it failed and the key says only
+     that — not the marks, which are not there. It named all four whatever
+     was drawn: "○ outside" over a map with no hollow ring on it. */
+  function showKey(drawn, pinned) {
     mapKey.hidden = drawn === false;
     mapKey.querySelector('.k-all').hidden = drawn === null;
     mapKey.querySelector('.k-fail').hidden = drawn !== null;
+    if (!drawn) return;
+    var has = { disc: drawn.disc, pin: pinned, cand: drawn.cand, out: drawn.out };
+    var first = true;
+    [].forEach.call(mapKey.querySelectorAll('.k-item'), function (el) {
+      var on = !!has[el.getAttribute('data-k')];
+      el.hidden = !on;
+      var sep = el.querySelector('.k-sep');
+      if (sep) sep.hidden = first;
+      if (on) first = false;
+    });
   }
 
   /* What the pins are, and which of them cannot be right — asked once, by
@@ -4648,7 +4675,7 @@
       drewHow = null;
       if (window.console) console.error('drawing how each place was found:', e);
     }
-    showKey(drewHow);
+    showKey(drewHow, !!(held || pick || drop));
 
     fitView(bounds);
     // Kept so coming back to this same card can put both of them back — the

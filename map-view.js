@@ -1013,9 +1013,11 @@
    * the corner's meetings, the street's lines), so drawing them asks nobody
    * anything, and the words are nbxRefusal's, the same the caption says.
    *
-   * The card's disc, as Map view draws it: the card's fix and the radius every
-   * place of that card was searched in and every pin of it is held to
-   * (discFor, cardRefuses). Null for a card with no fix, and for one with no
+   * The card's disc, as Map view draws it: the card's fix and its distance
+   * plus SLACK_MI (discFor) — what NbxSearch searches the card's places in,
+   * and what cardRefuses holds the pickup pin to. Not every pin: the dropoff
+   * is held to none, and with no NucBox the places are asked in the public
+   * box (BOX_MILES round the car) and then wide. Null for a card with no fix, and for one with no
    * yardstick — that card's search is the sixty miles the public box stands
    * for, which is not the card's reach, and a sixty-mile circle round the car
    * would say nothing. It is drawn, never fitted to: Map view's view is the car

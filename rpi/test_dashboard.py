@@ -2723,6 +2723,7 @@ const framed = (page) => page.waitForFunction(
                  radius: (x.opts || {}).radius, colour: (x.opts || {}).color };
       }),
       keyShown: !document.getElementById('mapKey').hidden,
+      keyText: document.getElementById('mapKey').innerText.replace(/\s+/g, ' ').trim(),
       note: document.getElementById('viewNote').textContent.trim(),
       // The remembered view. A map mode written here would ask a public
       // geocoder on the next page load with nobody pressing anything.
@@ -3319,6 +3320,15 @@ const framed = (page) => page.waitForFunction(
         const k = document.getElementById('mapKey');
         return !!k && !k.hidden;
       });
+      // What the key says, as drawn (innerText: what is hidden is not read),
+      // and how many pins are on the map beside the car, for the check that
+      // it names the marks that are there and no others.
+      const keyNow = () => page.evaluate(() => {
+        const k = document.getElementById('mapKey');
+        return { text: k.hidden ? null : k.innerText.replace(/\s+/g, ' ').trim(),
+                 pins: (window.__marks || []).filter((m) => /pick this one up|drop it here|order in your car is going/
+                   .test(String(m.popup || ''))).length };
+      });
       // Every question this page put to its own server's NucBox relay, by
       // path and query, so a drawing that asked anything of its own shows up
       // as a path the walk never needed, or one asked twice.
@@ -3339,6 +3349,7 @@ const framed = (page) => page.waitForFunction(
       r.one = await note();
       r.onePick = await pick();
       r.oneHow = await how();
+      r.oneKeyNow = await keyNow();
       r.oneKey = await keyShown();
       r.oneFit = await page.evaluate(() => window.__fit);
       r.oneMarks = await page.evaluate(() => (window.__marks || []).map((m) => m.ll));
@@ -3357,6 +3368,7 @@ const framed = (page) => page.waitForFunction(
         r.several = await note();
         r.severalPick = await pick();
         r.severalHow = await how();
+        r.severalKeyNow = await keyNow();
         // Pointing at the hollow branch, as Leaflet would on the rig: the
         // handler the page gave the mark, fired, and what the map's tip box
         // then says — and again once the pointer leaves it.
@@ -3377,6 +3389,7 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(1500);
         r.none = await note();
         r.noneHow = await how();
+        r.noneKeyNow = await keyNow();
         // An Early look card whose bracketed door IS found: the card's own
         // refusal stands exactly as it does for the straight line.
         r.routesBefore = (await (await fetch(FAKE + '/__asked')).json())
@@ -3415,12 +3428,14 @@ const framed = (page) => page.waitForFunction(
         r.cut = await note();
         r.cutPick = await pick();
         r.cutHow = await how();
+        r.cutKeyNow = await keyNow();
         // A door the NucBox holds only the street of.
         await push({ id: 'n-door', pickup: "Jimmy John's (4821 Kestrel Dr)" });
         await page.waitForTimeout(1500);
         r.door = await note();
         r.doorPick = await pick();
         r.doorHow = await how();
+        r.doorKeyNow = await keyNow();
         // A place name longer than the relay will pass on: refused by this
         // rig's own server, which is a bug in the question, not a NucBox down.
         await push({ id: 'n-bug', pickup: 'Q'.repeat(121) });
@@ -3448,6 +3463,7 @@ const framed = (page) => page.waitForFunction(
         r.corner = await note();
         r.cornerHeld = await heldPin();
         r.cornerHow = await how();
+        r.cornerKeyNow = await keyNow();
         r.cornerWant = await page.evaluate(() => 1.25 * window.MapView.detour(
           { lat: 33.9526, lon: -84.5499 }, { lat: 33.9830, lon: -84.5499 },
           { lat: 33.96, lon: -84.55 }));
@@ -3458,6 +3474,7 @@ const framed = (page) => page.waitForFunction(
         r.twice = await note();
         r.twiceHeld = await heldPin();
         r.twiceHow = await how();
+        r.twiceKeyNow = await keyNow();
         // A numberless street the index holds: its stretch inside the held
         // card's disc, pinned at the point nearest the car, and the figure
         // the straight line's at every point of the stretch — worked out
@@ -3472,6 +3489,7 @@ const framed = (page) => page.waitForFunction(
         r.stretch = await note();
         r.stretchHeld = await heldPin();
         r.stretchHow = await how();
+        r.stretchKeyNow = await keyNow();
         r.stretchRoutesAfter = await routesAt();
         r.stretchWant = await page.evaluate(() => {
           const MV = window.MapView, C = { lat: 33.9526, lon: -84.5499 };
@@ -6269,7 +6287,9 @@ try:
         all(h.get('ll') == [34.010, -84.600] for h in _how)
         and {(h.get('cls'), h.get('colour')) for h in _how}
         == {('mv-how mv-disc mv-new', '#7aa2f7'), ('mv-how mv-disc mv-held', '#f5a524')})
-    ok_('...and the key to them is on the map', on.get('keyShown'))
+    eq('...and the key to them is on the map, naming the circle and the pins and '
+       'nothing the public map\'s answers do not have',
+       (on.get('keyShown'), on.get('keyText')), (True, "◯ card's reach · ● pin"))
 
     # THE figure, and the reason this mode exists. The driver's words: "if it
     # makes sense to pickup the second offer since it would be mostly along the
@@ -6610,6 +6630,29 @@ try:
         and all(_crow([33.9526, -84.5499], p) <= 3.5 + 1e-9 for p in _s[0]['pts'])
         and bool(st.get('stretchHeld'))
         and min(_crow(st['stretchHeld'], p) for p in _s[0]['pts']) < 0.01)
+    # The key names what is on the map and nothing else: the circle when a
+    # disc is drawn, "pin" when a pin is, the grey when a candidate (or a
+    # refused stretch) is, the hollow when one past its disc is. It named
+    # all four over every map, "○ outside" where nothing was outside.
+    def _want_key(how, pins):
+        cls = [h.get('cls') or '' for h in (how or [])]
+        parts = []
+        if any(' mv-disc ' in c + ' ' for c in cls): parts.append("◯ card's reach")
+        if pins: parts.append('● pin')
+        if any(' mv-cand ' in c + ' ' or ' mv-candidate ' in c + ' ' for c in cls):
+            parts.append('● also found')
+        if any(' mv-out ' in c + ' ' for c in cls): parts.append('○ outside')
+        return ' · '.join(parts) if cls else None
+    _keys = [(k[:-6], (v or {}).get('text'),
+              _want_key(r_.get(k[:-6] + 'How'), (v or {}).get('pins')))
+             for r_ in (both, st) for k, v in r_.items() if k.endswith('KeyNow')]
+    eq('the key names the marks that are on the map and no others, on every NucBox '
+       'map drawn', [(n, g) for n, g, w in _keys if g != w], [])
+    ok_('...and that is more than one form of it, one with no hollow ring among '
+        'them (%r)' % ([g for _n, g, _w in _keys],),
+        len(_keys) >= 6 and len({g for _n, g, _w in _keys}) >= 2
+        and any(g and '○ outside' not in g for _n, g, _w in _keys)
+        and any(g and '○ outside' in g for _n, g, _w in _keys))
     _bad = [h for r in (both, noroad, st) for k, v in r.items() if k.endswith('How')
             for h in (v or []) if not h.get('cls', '').startswith('mv-how mv-')]
     eq('every layer of it carries its kind as a class', _bad, [])
