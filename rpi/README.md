@@ -8310,7 +8310,7 @@ python3 rpi/test_parser.py      # 1060 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 309 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
-python3 rpi/test_pipeline.py    # 231 on where to look, how big, what to log,
+python3 rpi/test_pipeline.py    # 273 on where to look, how big, what to log,
                                 #     and the two pictures the live view sends
 python3 rpi/test_cardfind.py    #  45 on finding a card taller than the card
                                 #     box from its button up, and on every
@@ -8338,7 +8338,7 @@ python3 rpi/test_cropbox.py     #  45 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 492 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 517 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
@@ -8359,7 +8359,7 @@ python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      # 111 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 328 on the faults that only surface when a
+python3 rpi/test_lint.py        # 335 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #   75 on the three files the browser and the
@@ -8377,14 +8377,14 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 973 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 977 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
                                 #     words rather than a number whenever one
                                 #     would be wrong (skipped without
                                 #     Playwright)
-python3 rpi/test_layout.py      # 2055 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 2097 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 python3 rpi/test_offerspage.py  # 500 on the offers page as a driver reads it:
@@ -8423,7 +8423,7 @@ node tests/streets.test.js      #  71 on the NucBox's street index, from a
                                 #     another, corners at a shared node and at a
                                 #     bridge, a dual carriageway as one corner,
                                 #     and a stretch cut at the box's edge
-python3 rpi/test_loop.py        # 269 on the scan loop re-telling a card once
+python3 rpi/test_loop.py        # 300 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
