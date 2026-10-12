@@ -513,7 +513,10 @@ So the Pi scanner keeps one line per offer it was confident about, in
   phone too bright) comes first: the stops give way to it a line at a time and
   say how many they are. The planner prints no ZIP, so it is read by its own
   layout (the stop header, the name, “Expected by”, and the street and town
-  under “Address”), and only when you press. When the trip has exactly one
+  under “Address”). With an order marked taken it is also read without a
+  press whenever the card box shows a planner, at most once every ten seconds,
+  off a whole screen whose title reads “Trip Planner” — the stops only, never a
+  destination. When you press and the trip has exactly one
   dropoff — one on the screen, and both ends of the list in view: the title
   over the first stop and “Waybill” under the last — and its street and town
   read, that address becomes the order in the car's destination as any other

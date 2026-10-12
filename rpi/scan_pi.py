@@ -532,6 +532,29 @@ def reset_requested():
     return True
 
 
+def order_held(now=None):
+    """Whether the web side says an order is in the car right now.
+
+    server.js writes `.holding.json` holding `until`, the moment its own
+    holding() stops answering yes (holdEnds there), whenever the order in the
+    car changes, and removes it when there is none. Judged against `until`
+    here rather than by the file's presence, so a server that died mid-delivery
+    does not leave the scanner believing in an order for the rest of the shift.
+    Anything unreadable is no order: this decides only whether the rig reads
+    the planner without a press, and ⌖ reads it either way.
+    """
+    now = time.time() if now is None else now
+    for candidate in HO.candidates(HO.HOLDING):
+        try:
+            with open(candidate, encoding='utf-8') as fh:
+                until = json.load(fh).get('until')
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(until, (int, float)) and now * 1000.0 < until:
+            return True
+    return False
+
+
 def dropoff_requested(now=None):
     """Seconds left of a press's window, once per press; None when there is none.
 
@@ -614,6 +637,12 @@ def dropoff_requested(now=None):
 # reason: long enough to cover a person doing one thing on a phone, short enough
 # that the rig is not still hunting for an address when the next offer arrives.
 DROPOFF_WINDOW = 12.0
+# At most one Trip Planner read every this many seconds that nobody pressed for.
+# See `planner_auto` in main(). The owner's figure: "at most one read every
+# ~10 s". A whole-screen read is a second or more of the Pi's attention (1.8s
+# median on the rig), so this keeps the planner from crowding out the card box
+# while it sits on the phone for a whole delivery.
+PLANNER_AUTO_EVERY = 10.0
 
 
 def settings_requested():
@@ -2644,7 +2673,7 @@ def emit_dropoff(address, ms=None, asked=True):
         'at': int(time.time() * 1000)}}), flush=True)
 
 
-def emit_planner(stops, unfiled=None, keep=False, ms=None):
+def emit_planner(stops, unfiled=None, keep=False, ms=None, asked=True):
     """Uber's Trip Planner, read off the whole screen because ⌖ was pressed.
 
     Its own line, for the reason a dropoff is: the screen is a list of stops,
@@ -2664,12 +2693,13 @@ def emit_planner(stops, unfiled=None, keep=False, ms=None):
     have. server.js writes the planner row only when this is true. The panel
     is shown the stops either way: showing is not recording.
 
-    `asked` is always true, and is on the line so a row written from it says on
-    its face that it answered a press, as a dropoff mark does. The planner is
-    read only under one: see `planner` in main().
+    `asked` is on the line so a row written from it says on its face whether
+    it answered a press, as a dropoff mark does: True under ⌖, False for the
+    read the rig makes on its own while an order is held (`planner_auto` in
+    main()).
     """
     print(json.dumps({'planner': {'stops': stops, 'unfiled': unfiled,
-                                  'keep': bool(keep), 'asked': True, 'ms': ms,
+                                  'keep': bool(keep), 'asked': bool(asked), 'ms': ms,
                                   'at': int(time.time() * 1000)}}), flush=True)
 
 
@@ -3411,6 +3441,12 @@ def main():
     # minutes is reported once rather than on every read that happens to catch
     # it. A DIFFERENT address is a different job and is always sent.
     dropoff_said = None
+    # The Trip Planner read the rig makes WITHOUT a press, while an order is in
+    # the car. `planner_auto` is a whole-screen read wanted on the next pass;
+    # `planner_auto_at` is when the last one was asked for, which is the rate
+    # limit. See where digest() sets it.
+    planner_auto = False
+    planner_auto_at = None
     last_resample = 0.0
     last_verify = 0.0
     verify_every = VERIFY_EVERY
@@ -3484,6 +3520,7 @@ def main():
         # anything failing loudly enough to notice.
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
         nonlocal dropoff_until, dropoff_said, dropoff_asked
+        nonlocal planner_auto, planner_auto_at
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
@@ -3628,9 +3665,12 @@ def main():
         # prints no ZIP, so find_address returns None on it — measured on the
         # rig's own view of one. OP.find_planner reads it by its own grammar.
         #
-        # ONLY WHEN ASKED, AND ONLY OFF THE WHOLE SCREEN, which is what the
-        # owner asked for: "only while ⌖ is pressed". It is also the existing
-        # policy for destinations, followed rather than widened. An unprompted
+        # OFF THE WHOLE SCREEN, AND ONLY UNDER A PRESS FOR ITS DESTINATION. The
+        # owner first asked for "only while ⌖ is pressed"; after a shift, for
+        # the stops to be read on their own while an order is held, which
+        # `auto` below does — the stops, and never a destination off them. The
+        # rest of this is why the destination stays under the press: it is
+        # the existing policy for destinations, followed rather than widened. An unprompted
         # sighting is taken only under find_address's strict `, ST ZIP` grammar
         # — the reason it may be taken at all — and the planner's address is
         # the one place that grammar is loosened. A loosened rule belongs under
@@ -3654,11 +3694,59 @@ def main():
         # unprompted half: a planner nobody pressed for, with a ZIP on it.
         planner = None if an_offer else OP.find_planner(out.get('text'))
         answers = planner is not None and whole and asked
+        # ...AND, NOW, WITHOUT A PRESS, while an order is in the car.
+        #
+        # The owner, after a shift: the driver wants the planner read
+        # automatically. A whole-screen read that nobody asked for is the one
+        # `planner_auto` below requested — a press's reads are all `asked`,
+        # because the window is open from before they are handed over — and it
+        # answers only off a screen whose TITLE reads "Trip Planner": the stop
+        # grammar that started it was read in the card box, and the title is
+        # what says the whole screen is the planner and not a map round a card.
+        # It goes out as the press's does, `asked: false`, and only with a stop
+        # on it (find_planner is None without one), so a read that found no
+        # stop never replaces one that had them.
+        #
+        # THE STOPS ONLY. Its one dropoff is not sent, even where
+        # planner_destination would file it under a press: the planner's
+        # address is this file's one loosened grammar, and the reason given
+        # above for keeping it under the press holds for a read nobody made —
+        # a planner still up from the trip before is filed against the order
+        # just taken. `unfiled` still goes with the stops, so the panel says
+        # why ⌖ would not file one either; when ⌖ would, it says nothing, and
+        # the press files it.
+        #
+        # Not an accept detector and not a press: it runs only when the driver
+        # has already marked the order taken (order_held), and the rig still
+        # touches nothing on the phone.
+        auto = (planner is not None and whole and not asked
+                and OP.planner_titled(out.get('text')))
         unfiled = None
         if planner is not None:
             found, unfiled = (planner_destination(planner,
                                                   OP.planner_bounded(out.get('text')))
-                              if answers else (None, None))
+                              if answers or auto else (None, None))
+        # A whole-screen read nobody pressed for gives no destination at all:
+        # not its planner's one dropoff (see THE STOPS ONLY, above), and not
+        # the address find_address would take off the whole screen, which is
+        # the map's or a card's as often as the destination's.
+        if whole and not asked:
+            found = None
+        # ...and asked FOR, off a card-box read that shows the planner's grammar
+        # while an order is held. The card box on this rig is the bottom half of
+        # the screen — the shift's reads of a planner caught stop headers,
+        # "Address" and "Expected by" in it and never the title, which is at the
+        # top — so the grammar is what can start it, and the whole-screen read
+        # is where the title is checked. At most once per PLANNER_AUTO_EVERY, and
+        # not while a press is open: that window is already reading the whole
+        # screen and answers as ⌖.
+        if not whole and not an_offer and not asked and not planner_auto \
+                and (planner is not None or OP.planner_furniture(out.get('text'))) \
+                and (planner_auto_at is None
+                     or started - planner_auto_at >= PLANNER_AUTO_EVERY) \
+                and order_held(started):
+            planner_auto = True
+            planner_auto_at = started
         # AN ADDRESS THE SCREEN DID NOT LABEL A DROPOFF IS NOT A DESTINATION.
         #
         # On shift: "✓ Took $28.08" pressed with the Trip Planner up — two
@@ -3886,6 +3974,15 @@ def main():
                 % (', '.join(s['kind'] for s in planner),
                    'its one dropoff is the destination' if found
                    else 'the destination is left as it was (%s)' % unfiled))
+        elif auto:
+            # No window to close and no press to answer: the stops, to the
+            # panel and onto the order in the car, said as unasked.
+            if args.json:
+                emit_planner(planner, unfiled=unfiled,
+                             keep=offer_log is not None and offer_log.keep_places,
+                             ms=out.get('ms'), asked=False)
+            log('trip planner read, unpressed, an order being held: %s'
+                % ', '.join(s['kind'] for s in planner))
         if found:
             dropoff_said = found.get('line')
             # Closed the moment it is answered, and what that closes is the
@@ -4984,6 +5081,11 @@ def main():
                     do_read = True
                     last_dropoff_read = now
 
+                # ...and the Trip Planner read digest() asked for, whether the
+                # picture moved or not: the planner sits still on the phone.
+                if not do_read and planner_auto:
+                    do_read = True
+
                 # ...and a window that closes with nothing on it SAYS SO.
                 #
                 # The rig emitted only from inside `if found:`, so a press that
@@ -5209,10 +5311,13 @@ def main():
             # card box drawn by hand made that a blind spot — see
             # cropbox.parse_card. Only while asked: an unprompted read is
             # hunting offers and keeps the card crop.
+            # ...and for the planner read digest() asked for without a press
+            # (`planner_auto`), once: the request is spent by this hand-over.
+            whole_read = (dropoff_asked and time.time() < dropoff_until) or planner_auto
+            planner_auto = False
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(),
-                          scanner.geometry(whole=dropoff_asked
-                                           and time.time() < dropoff_until))
+                          scanner.geometry(whole=whole_read))
             looked = True
             # Before the read, not after it. The dashboard has nothing else to
             # go on for the second and a half this takes — see emit_reading.

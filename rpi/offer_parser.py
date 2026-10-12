@@ -2730,6 +2730,13 @@ PLANNER_TITLE = re.compile(r'^[^A-Za-z0-9]{0,3}trip ?planner\b', re.IGNORECASE |
 PLANNER_END = re.compile(r'^[^A-Za-z0-9]{0,3}way ?[A-Za-z]? ?bill\b', re.IGNORECASE | ASCII)
 
 
+def planner_titled(text):
+    """True when a line of `text` is the "Trip Planner" title, above the app's
+    bar. What the scanner's unpressed planner read asks of the whole screen
+    before it sends the stops: see `auto` in digest(), rpi/scan_pi.py."""
+    return any(PLANNER_TITLE.match(l) for l in _planner_lines(text)[0])
+
+
 def planner_bounded(text):
     """True when both ends of the Trip Planner's list are on the screen: the
     title with the first stop straight under it, and "Waybill" after the last.

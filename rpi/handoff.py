@@ -187,6 +187,15 @@ SETTINGS = '.settings.json'
 # server has stopped waiting on must not be written into later. See
 # snap_requested in scan_pi.py and askReader in server.js.
 SNAP = '.snap.json'
+# "An order is in the car until <ms>" — written by server.js whenever the order
+# in the car changes, as {"until": <the moment its holding() stops answering
+# yes>}, and removed when nothing is held. Not a request: a fact the web side
+# knows and the scanner cannot, which is whether the driver has marked an
+# order taken. The scanner reads Uber's Trip Planner without a press only while
+# it says so — see order_held in scan_pi.py. Judged by `until`, never by the
+# file being there, so a server that died mid-delivery leaves nothing that
+# says "held" past the order's own clock.
+HOLDING = '.holding.json'
 # "I went quiet to be restarted over a stalled camera" — not a request from the
 # web side but the scan loop's note to its own successor, the one thing it has
 # to remember across the SIGKILL that restarts it. Empty: its mtime is the

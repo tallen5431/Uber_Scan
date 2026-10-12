@@ -2284,6 +2284,21 @@ finally:
 _hdir = tempfile.mkdtemp()
 _hjournal = os.path.join(_hdir, 'offers.jsonl')
 _hold = os.path.join(_hdir, 'holding.json')
+# ...and the scanner's copy of "an order is in the car until <ms>", which is
+# what lets it read Uber's Trip Planner without a press (order_held in
+# rpi/scan_pi.py). A handoff directory of its own, so its one file can be
+# named and looked at.
+_hhand = os.path.join(_hdir, 'handoff')
+os.mkdir(_hhand)
+_hheld = os.path.join(_hhand, 'uberscan-holding.json')
+
+
+def _held_until():
+    try:
+        with open(_hheld) as fh:
+            return json.load(fh).get('until')
+    except (OSError, ValueError):
+        return None
 # A scanner of its own, because the hold is set from the SLOT — marking a row
 # in the journal does not put an order in the car, and with no scanner there is
 # no slot. This is the write half; everything after it is the read half.
@@ -2303,7 +2318,8 @@ with open(_hfake, 'w') as _fh:
         'time.sleep(600)\n')
 open(_hjournal, 'w').close()
 _hproc, _hbase = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
-                        'SCANNER_ARGS': _hfake}, _hjournal)
+                        'SCANNER_ARGS': _hfake, 'UBERSCAN_HANDOFF_DIR': _hhand},
+                       _hjournal)
 try:
     _on = None
     for _ in range(120):
@@ -2320,8 +2336,17 @@ try:
         (get(_hbase, '/api/status') or {}).get('holding'))
     ok_('...and it is written down, not only remembered',
         os.path.exists(_hold))
+    # Stated 30 minutes, half again, and the default ten-minute grace: the
+    # moment holding() stops answering yes, which is what the scanner is told.
+    _accepted = json.load(open(_hold)).get('acceptedAt')
+    eq('...and the scanner is told until when, the moment holding() lets go',
+       _held_until(), _accepted + 30 * 1.5 * 60000 + 10 * 60000)
 finally:
     stop(_hproc)
+# Taken away here, so the restart below has to write it again for the order it
+# restores — a hold brought back at boot is a hold the scanner must hear of.
+if os.path.exists(_hheld):
+    os.remove(_hheld)
 
 # The engine goes off and comes back on. Same journal, same file, new process.
 #
@@ -2347,11 +2372,14 @@ def _start_loud(env, journal):
     raise RuntimeError('the server never came up')
 
 
-_hproc2, _hbase2 = _start_loud({'SCANNER': '0'}, _hjournal)
+_hproc2, _hbase2 = _start_loud({'SCANNER': '0', 'UBERSCAN_HANDOFF_DIR': _hhand},
+                               _hjournal)
 try:
     _back = (get(_hbase2, '/api/status') or {}).get('holding')
     ok_('a restarted server still has the order in the car (%r)'
         % ((_back or {}).get('pay'),), bool(_back))
+    eq('...and the scanner is told of it again, until the same moment',
+       _held_until(), _accepted + 30 * 1.5 * 60000 + 10 * 60000)
     if _back:
         eq('...the same one', _back.get('pay'), 21.0)
         eq('...with where it ends, which is what the stack line needs',
@@ -2362,6 +2390,8 @@ try:
     no_('an order put down is gone from the panel',
         (get(_hbase2, '/api/status') or {}).get('holding'))
     no_('...and gone from the disk too', os.path.exists(_hold))
+    no_('...and the scanner is no longer told an order is held',
+        os.path.exists(_hheld))
 finally:
     _hproc2.terminate()
     try:
