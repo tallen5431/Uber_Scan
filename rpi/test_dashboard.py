@@ -4419,6 +4419,12 @@ const framed = (page) => page.waitForFunction(
                            throttled: { now: ['under-voltage', 'throttled'],
                                         sinceBoot: ['under-voltage', 'throttled'] },
                            throttledWhy: null });
+    // The GPS put the order down (server.js gpsArrival): said on this row for
+    // a minute, beside the widest Pi word.
+    await page.evaluate(() => window.__es.push({ gpsDrop: { at: 1, saidForMs: 60000 } }));
+    slot.gpsDrop = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 84.6, cpuCWhy: null,
+                               throttled: { now: ['temp limit'], sinceBoot: ['temp limit'] },
+                               throttledWhy: null });
     // The socket drops. The note is a word off a heartbeat, and with no
     // heartbeat it is a word about a minute that has passed.
     await page.evaluate(() => { if (window.__es && window.__es.onerror) window.__es.onerror(); });
@@ -5827,6 +5833,11 @@ try:
         ok_('[%s] ...whole as well (%dpx of %dpx)'
             % (_pn, _note('weak').get('w') or 0, _note('weak').get('sw') or 0),
             _note('weak').get('whole') and _note('weak').get('shown'))
+        eq('[%s] a GPS drop is said on the row, after the Pi' % _pn,
+           _note('gpsDrop').get('text'), 'Pi temp limit 85°C · dropped · left the dropoff')
+        ok_('[%s] ...whole (%dpx of %dpx)'
+            % (_pn, _note('gpsDrop').get('w') or 0, _note('gpsDrop').get('sw') or 0),
+            _note('gpsDrop').get('whole') and _note('gpsDrop').get('shown'))
         # The note is a word off a heartbeat. With the socket gone there is no
         # heartbeat, and the row says so instead of a GPS state from before.
         eq('[%s] a dropped socket takes the note down with it (%r)'
