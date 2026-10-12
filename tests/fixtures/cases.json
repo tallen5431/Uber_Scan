@@ -771,6 +771,116 @@
    }
   },
   {
+   "name": "a tip line under a headline the box cut off is no payout, not $3.00",
+   "_why": "The Early-look card rendered as 8 Oct's phone drew it, its $14.48 above a box drawn round a shorter card and 'Includes $3.00 tip' in place of 'Includes expected tip' inside it: the parser took the tip as the payout, $3.00, PASS at $5.1/hr, on 8 of 8 frames (dark and light, four mount widths). Refused, never guessed: see PAY_PART.",
+   "text": "Includes $3.00 tip\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer",
+   "expect": {
+    "pay": null,
+    "miles": 8.6,
+    "complete": false
+   }
+  },
+  {
+   "name": "...nor a promo line, which read $2.00 at $3.4/hr",
+   "text": "+$2.00 promo\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb\nParkway NW, STE 100)\nMatching may take longer",
+   "expect": {
+    "pay": null,
+    "miles": 8.6
+   }
+  },
+  {
+   "name": "...nor 'incl. $3 tip' on its own",
+   "text": "incl. $3 tip\n25 min (8.1 mi) total\nAmerican Deli",
+   "expect": {
+    "pay": null,
+    "minutes": 25
+   }
+  },
+  {
+   "name": "...nor a surge, with the word before it and 'extra' after",
+   "text": "Surge $1.50 extra\nEst. delivery 4:15 PM • 8.6 mi",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...nor a boost, the word then a plus",
+   "text": "Boost +$3.00\n18 min (6.2 mi) trip",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...nor a boost, the plus then the word",
+   "text": "+$1.50 Boost+\n18 min (6.2 mi) trip",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...nor a bonus",
+   "text": "+$5.00 bonus\n18 min (6.2 mi) trip",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...nor Peak Pay, which read $2.00 at $3.4/hr",
+   "text": "+$2.00 Peak Pay\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken (1985 Cobb",
+   "expect": {
+    "pay": null,
+    "miles": 8.6
+   }
+  },
+  {
+   "name": "...while a real Peak Pay offer keeps its headline",
+   "text": "$9.40 Guaranteed (incl. tips) +$2.00 Peak Pay 9.8 mi Deliver by 7:15 PM",
+   "expect": {
+    "pay": 9.4,
+    "miles": 9.8
+   }
+  },
+  {
+   "name": "a real headline with a tip line beside it is still the payout",
+   "text": "Delivery $14.48 incl. $3 tip\nEst. delivery 4:15 PM • 8.6 mi\nDave's Hot Chicken",
+   "expect": {
+    "pay": 14.48,
+    "miles": 8.6
+   }
+  },
+  {
+   "name": "...and with a promo in the header above it",
+   "text": "Early look • +$2.00 promo\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi",
+   "expect": {
+    "pay": 14.48,
+    "miles": 8.6
+   }
+  },
+  {
+   "name": "...and with a surge or a boost above it",
+   "text": "Surge $1.50 extra\nBoost +$3.00\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi",
+   "expect": {
+    "pay": 14.48
+   }
+  },
+  {
+   "name": "...and a boost bigger than a small headline does not outbid it",
+   "_why": "Before PAY_PART the largest-figure rule took the $5.00 here, over the card's own $4.21.",
+   "text": "Exclusive $4.21 Includes expected tip +$5.00 Boost 9 min (3.1 mi) Powers Ferry Rd SE, Atlanta",
+   "expect": {
+    "pay": 4.21,
+    "minutes": 9,
+    "miles": 3.1
+   }
+  },
+  {
+   "name": "...and 'Includes $3.00 tip' after a headline leaves it the payout",
+   "text": "$14.48\nIncludes $3.00 tip\nEst. delivery 4:15 PM • 8.6 mi",
+   "expect": {
+    "pay": 14.48
+   }
+  },
+  {
    "name": "...however the OCR spells the chip",
    "text": "% Tp RAGA \"= ere Paes aS he $6.08 *% 485 @ +$LO00included 4min (05 mi) Tech Square, Tech Square Bus Stop",
    "expect": {
