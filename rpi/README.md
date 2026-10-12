@@ -2469,7 +2469,8 @@ to its top. Only a **sure** answer whose top is above the box's is read, through
 the same helper as the box, the way up the box's read decided, and clipped the
 same way. The reading is kept only if it moves none of the minutes, miles or
 deadline the box read, its text holds one dollar figure and no second one (a
-found crop is one card; two figures are two cards), and its payout is printed
+found crop is one card; two figures are two cards; a "+$0.50 included" chip or
+a "+$2.00 promo"-style line about the card's own pay is not a figure), and its payout is printed
 as a card prints one (to the cent, or a whole dollar with its label straight
 after). Never on a ⌖ read,
 never with the box at the top of the screen box, never on a read that found a
@@ -2503,6 +2504,29 @@ either), and the same $9.40 card drawn on its own
 all six frames tried. What it cost the cards above:
 nothing — the 576 and 288 frames give the same tallies, rescue for rescue,
 with the rule and without it.
+
+What it cost a card that prints a second `$` line about its own pay was
+measured separately, on the Early-look card with one such line added, dark
+and light at four mount widths, 8 frames each. As the rule was first written,
+"Early look • +$2.00 promo", "Surge $1.50 extra" or "Boost +$3.00" in the
+header, or "$14.48 incl. $3 tip" as the pay line, refused the found read on
+**8 of 8** each: no payout, which fails safe — the same as the finder off —
+but loses the card. A "+$0.50 included" chip was never counted and was
+rescued on 8 of 8. The parser now knows those lines for what they are
+(`PAY_PART` in `offer_parser.py`, the same grammar as the chip), so they are
+not a second figure: all four, and "+$2.00 Peak Pay", are rescued at the
+card's own $14.48 on 8 of 8. A line outside that grammar still counts as a
+second card — "Tip $3.00" in the header is refused on 8 of 8.
+
+The same lines **inside** the drawn box, under a headline the box cut off,
+were worse, and that was older than the finder: the parser took them as the
+payout — "Includes $3.00 tip" $3.00, PASS at $5.1/hr; "+$2.00 promo" and
+"+$2.00 Peak Pay" $2.00, PASS at $3.4/hr; 8 of 8 each, with the finder never
+asked because the read had a payout. Now they are no payout, the finder is
+asked, and the card is rescued at $14.48 on 8 of 8. "Tip $3.00" there is
+still taken, $3.00 at $5.1/hr on 8 of 8: it has the word on one side only,
+and a grammar wide enough for it would also match "Includes expected tip
+$14.48" — a real headline, read with its label first.
 
 It says what it did, and says it of the payout shown rather than of the last
 read. The panel shows the merged reading, and a card read once off a card

@@ -1349,6 +1349,38 @@ if TC.available():
     eq('...while a cents chip on the one card is not',
        PL.OP.payout_figures('$14.48\n+$0.50 included\nEst. delivery 4:15 PM'), 1)
 
+    # ...nor a tip, promo, boost or surge line the card prints about its own
+    # pay (OP.PAY_PART). Counted as a second card, each refused a rescued
+    # Early-look card on 8 of 8 frames, dark and light over four mount widths:
+    # no payout, as with the finder off. And inside the drawn box, under a
+    # headline the box cut off, each was taken AS the payout — "Includes $3.00
+    # tip" $3.00, PASS at $5.1/hr; "+$2.00 promo" $2.00 at $3.4/hr — on 8 of
+    # 8, with the finder never asked because the read had a payout.
+    eq('...nor a tip, promo, boost or surge line on the one card',
+       [PL.OP.payout_figures('%s\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM' % _l)
+        for _l in ('Early look • +$2.00 promo', 'Surge $1.50 extra', 'Boost +$3.00',
+                   '+$2.00 Peak Pay', 'Includes $3.00 tip')]
+       + [PL.OP.payout_figures('$14.48 incl. $3 tip\nEst. delivery 4:15 PM')], [1] * 6)
+
+    def _early(rep, pal=TC.NIGHT_CARD):
+        _rows = [(r[0], rep.get(r[1], r[1])) + r[2:] for r in TC.early_rows()]
+        _orig = TC.early_rows
+        TC.early_rows = lambda *a, **k: _rows
+        try:
+            return TC.early_look_screen(pal)
+        finally:
+            TC.early_rows = _orig
+
+    for _what, _rep in (('a promo line in its header',
+                         {'Early look • Order in progress': 'Early look • +$2.00 promo'}),
+                        ('"Includes $3.00 tip" inside the box',
+                         {'Includes expected tip': 'Includes $3.00 tip'}),
+                        ('"+$2.00 promo" inside the box',
+                         {'Includes expected tip': '+$2.00 promo'})):
+        _pl = look(_early(_rep, TC.DAY_CARD))
+        eq('a taller card with %s gives its own $14.48, off the card found'
+           % _what, (_pl['parsed']['pay'], _pl['cropFrom']), (14.48, 'found'))
+
     # A payout is kept off a found card only as cards print one: to the cent,
     # or a whole dollar with its label straight after it.
     _whole = look(TC.early_look_screen(pay='$14'))

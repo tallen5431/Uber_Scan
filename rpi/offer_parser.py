@@ -163,6 +163,50 @@ PAY_CHIP = re.compile(
     r'\s*incl(?:uded)?\b',
     re.IGNORECASE | ASCII)
 
+# ...and the same for the other things a card says a part of its pay came from:
+# a tip, a promotion, a boost, a surge, a bonus, an extra, DoorDash's Peak Pay.
+#
+# Where the headline is in the text, these never mattered — it is the largest
+# figure. Where it is NOT, the largest figure left is one of these, and it was
+# taken as the payout. A card taller than the drawn box, rendered the way the
+# 8 Oct Early-look card was drawn, with the headline cut off by the box and
+# "Includes $3.00 tip" under it inside the box, read $3.00 and PASS at $5.1/hr
+# on 8 of 8 frames (dark and light, four mount widths); "+$2.00 promo" in the
+# same place read $2.00, PASS at $3.4/hr, on 8 of 8. A confident wrong number,
+# the worst thing the panel can show, and it predates the card finder: the box
+# alone did it, and the finder was never asked because the read had a payout.
+# "+$2.00 Peak Pay" there did the same, $2.00 at $3.4/hr on 8 of 8. ("Busy +
+# Peak Pay", the banner on fourteen of the week's offers, prints no amount and
+# is none of these.)
+#
+# Decided by grammar, as PAY_CHIP is: a figure is one of these when the card
+# says so around it, in one of four shapes —
+#
+#     +$2.00 promo     +$1.50 Boost+        a plus, the figure, the word
+#     Boost +$3.00                          the word, then a plus and figure
+#     Includes $3.00 tip    incl. $3 tip    "includes" right before, the word after
+#     Surge $1.50 extra                     the word before, "extra" after
+#
+# — never by a word on one side alone. A headline is followed by its label,
+# "$14.48 Includes expected tip" and "$11.42 Guaranteed (incl. tip)", and one
+# card in the corpus prints "$16.05 Promo" with no plus; none of those has the
+# word and the figure in any of the four shapes, and none of the corpus's
+# texts moves. The figure is refused, not the card: with no headline left the
+# reading has no payout, and the panel says so, as for a chip with no
+# headline. The same figures stop counting as a second card in a found crop
+# (payout_figures), which refused a rescued Early-look card printing any of
+# them on 8 of 8 frames — see rpi/README.md, A card taller than the card box.
+# A figure outside the four shapes — "Tip $3.00" with nothing after it — is
+# still a figure, and still a candidate.
+PART_WORD = r'(?:tips?|promo(?:tion)?s?|boost|surge|bonus|extra|peak\s*pay)\b'
+PART_AMOUNT = r'[$S5§]\s*(?:' + DC + r'|[.,])+'
+PAY_PART = re.compile(
+    r'\+\s*' + PART_AMOUNT + r'\s*' + PART_WORD
+    + r'|\b' + PART_WORD + r'\s*[:\-•]?\s*\+\s*' + PART_AMOUNT
+    + r'|\bincl(?:udes?|uded|\.)?\s*' + PART_AMOUNT + r'\s*(?:expected\s+)?' + PART_WORD
+    + r'|\b' + PART_WORD + r'\s*' + PART_AMOUNT + r'\s*extra\b',
+    re.IGNORECASE | ASCII)
+
 # The minute unit has to be spelled out. It was once allowed to be a bare "m",
 # and on a map full of street names that turns any two letters into a journey:
 # "ZIM" out of the road texture became a 21-minute leg, which is enough to make
@@ -942,6 +986,7 @@ def find_pay(text, where=None, printed=None, figures=None):
     CENTS and HEADLINE_LABEL.
     """
     chips = [m.span() for m in PAY_CHIP.finditer(text)]
+    chips += [m.span() for m in PAY_PART.finditer(text)]
     found = []
     units = [m.span() for m in PAY_IS_A_DURATION.finditer(text)]
     units += [m.span() for m in PAY_IS_PER_ORDER.finditer(text)]
@@ -949,7 +994,8 @@ def find_pay(text, where=None, printed=None, figures=None):
     def in_chip(m):
         # A figure inside a "+$0.50 included" chip is part of the payout, not a
         # candidate to be it. See PAY_CHIP: without this the largest-figure rule
-        # hands a green light to a chip whose decimal point did not read.
+        # hands a green light to a chip whose decimal point did not read. The
+        # same for "Includes $3.00 tip", "+$2.00 promo" and the rest: PAY_PART.
         return any(start <= m.start() and m.end() <= end for start, end in chips)
 
     matches = list(MONEY_STRICT.finditer(text)) or list(MONEY_LOOSE.finditer(text))
@@ -1044,7 +1090,7 @@ def payout_figures(text):
     """How many figures in this text could each have been an offer's payout.
 
     Every dollar figure find_pay would weigh — not inside a "+$0.50 included"
-    chip, not a duration, a distance or a bonus per order, with a real digit
+    chip or a "+$2.00 promo" / "Includes $3.00 tip" (PAY_PART), not a duration, a distance or a bonus per order, with a real digit
     in it — counted once per `$`, whether or not it is printed as a headline.
     Asked by pipeline.py of a reading taken through a crop it FOUND, and of
     nothing else: a found crop is one card, and a second figure in it means
