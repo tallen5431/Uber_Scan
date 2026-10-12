@@ -1459,11 +1459,28 @@
      a town at the last comma whose remainder is a town line, taking a bare ZIP
      the screen wrapped onto the line under - the third under the label, and
      no further. See _planner_address_lines. */
+  /* "Northwest, Marietta, GA 30060" under "4410 Fable W Lantern Parkway": the
+     street's quadrant, wrapped off its end onto the town line, where TOWN
+     cannot take "Northwest, Marietta" for a town and the stop lost its town
+     and ZIP on the driver's planner. The quadrant goes back on the street and
+     the rest is read as the town line. See PLANNER_QUADRANT_LEAD in
+     offer_parser.py. */
+  var PLANNER_QUADRANT_LEAD = new RegExp('^[^A-Za-z0-9]{0,3}((?:north|south) ?(?:east|west)'
+    + '|north|south|east|west|[NS][EW]) ?, ?(.+)$', 'i');
+
   function plannerAddressLines(block, label) {
     var under = block.slice(label + 1, label + 4);
     var streetLine = null, townLine = null, townAt = -1;
     for (var k = 0; k < Math.min(under.length, 2); k++) {
       var l = under[k];
+      // The street's quadrant wrapped onto the town line. See
+      // PLANNER_QUADRANT_LEAD.
+      var q = k ? PLANNER_QUADRANT_LEAD.exec(l) : null;
+      if (q && plannerTown(q[2])) {
+        townAt = k; townLine = q[2];
+        streetLine = under[0].replace(/[\s,]+$/, '') + ' ' + q[1];
+        break;
+      }
       if (plannerTown(l)) {
         townAt = k; townLine = l; streetLine = k ? under[0] : null;
         break;

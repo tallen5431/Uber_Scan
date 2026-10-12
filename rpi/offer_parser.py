@@ -2610,6 +2610,23 @@ def _planner_town(line):
     return t if t and t.group(2).upper() in STATES else None
 
 
+# A quadrant the screen wrapped off the end of the street onto the town line:
+#
+#     4410 Fable W Lantern Parkway         the street, then its quadrant
+#     Northwest, Marietta, GA 30060        heading the town line
+#
+# on the driver's Trip Planner for a restaurant pickup (the street invented,
+# the layout as read). The town line then opens with "Northwest" and TOWN
+# cannot take "Northwest, Marietta" for a town, so no line under the label was
+# a town line: the stop kept a bare street and no town or ZIP, and the map had
+# nothing to search it with but the street. The quadrant is the street's, and
+# goes back on the end of it; the rest of the line is read as the town line it
+# is. Spelled out or as the two letters, and the four single words too.
+PLANNER_QUADRANT_LEAD = re.compile(
+    r'^[^A-Za-z0-9]{0,3}((?:north|south) ?(?:east|west)|north|south|east|west'
+    r'|[NS][EW]) ?, ?(.+)$', re.IGNORECASE | ASCII)
+
+
 def _planner_address_lines(block, label):
     """The street line and the town line under the "Address" label at
     block[label], as _planner_address takes them; (None, None) for neither.
@@ -2638,6 +2655,14 @@ def _planner_address_lines(block, label):
     street_line = town_line = None
     town_at = None
     for j, l in enumerate(under[:2]):
+        # The street's own quadrant, wrapped onto the town line: see
+        # PLANNER_QUADRANT_LEAD. Only under a street line, and only when what
+        # follows the quadrant is a town line in its own right.
+        q = PLANNER_QUADRANT_LEAD.match(l) if j else None
+        if q and _planner_town(q.group(2)):
+            town_at, town_line = j, q.group(2)
+            street_line = under[0].rstrip(' ,') + ' ' + q.group(1)
+            break
         if _planner_town(l):
             town_at, town_line = j, l
             street_line = under[0] if j else None

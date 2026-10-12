@@ -4552,6 +4552,25 @@
      "line": null
     }
    ]
+  },
+  {
+   "name": "a street's quadrant wrapped onto the town line goes back on the street",
+   "_why": "Uber's Trip Planner split a restaurant pickup's address as the street over 'Northwest, Marietta, GA 30060'. TOWN cannot take 'Northwest, Marietta' for a town, so no line under the label was a town line: the stop was read with a bare street and no town or ZIP, and the map had only the street to search with. The quadrant is the street's and goes back on the end of it; the rest is read as the town line. The name keeps the 'oe' the reader made of the stop's icon: the stored text is what was read, and the panel strips it for display and search only. Street, number and restaurant invented; the layout as the driver's planner printed it.",
+   "text": "Trip Planner\nPickup • 1 order\noe Fable Crust Pizza – Marietta\nExpected by 7:49 PM\nAddress\n4410 Fable W Lantern Parkway\nNorthwest, Marietta, GA 30060\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "oe Fable Crust Pizza - Marietta",
+     "expectedBy": 1189,
+     "street": "4410 Fable W Lantern Parkway Northwest",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": "30060",
+     "line": "4410 Fable W Lantern Parkway Northwest, Marietta, GA 30060"
+    }
+   ]
   }
  ]
 }
