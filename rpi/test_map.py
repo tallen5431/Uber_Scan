@@ -1450,11 +1450,12 @@ try:
        len([p for p in (placed.get('pinDetail') or []) if p.get('hollow')]), 1)
     # What the pins say of how each place was found is the walk's own record
     # (MV.placeAll's `asked`). A pin that asked again to find out would show
-    # up here as the same question — the same words in the same box — asked
-    # a second time.
-    _qs = list(zip(asked_all, boxes))
-    eq('saying how each place was found asks nothing more: no question, words and '
-       'box, is asked twice', len(_qs) - len(set(_qs)), 0)
+    # up here as a question past one for every place the rows name and one
+    # more for the place its box refused.
+    _places = {p for r in ROWS for p in (r['pickup'], r['dropoff']) if p}
+    eq('saying how each place was found asks nothing more: one question a place, '
+       'and one more for the place its box found nothing for (%d places)' % len(_places),
+       len(asked_all), len(_places) + 1)
 
     # --- asking twice costs nothing, except what could not be asked --------
     #

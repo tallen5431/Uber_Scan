@@ -427,10 +427,30 @@ all:
   rig's own server refuses is a bug in the page, said as one ("no pin for X
   — a bug: the rig refused the question"), and is never handed to the public
   map instead.
+* **How each place was found, drawn under the pins.** The card's disc as a
+  faint dashed circle round its fix (blue, the car's colour; the order in
+  the car's own card's disc in amber); every candidate the NucBox sent as a
+  small grey dot, a corner's every meeting the same; one past the disc's
+  edge as a hollow dashed ring; a numberless street's stretch inside the
+  disc as a line, solid when pinned and grey when refused, nothing of it
+  outside the disc drawn. A refused place has no pin and its candidates
+  carry the caption's own refusal as their tooltip. A key across the map's
+  foot says which is which ("◯ card's reach · ● pin · ● also found · ○
+  outside"; "◯ reach · ● pin · ● found · ○ outside" on the 3.5" hat). It is
+  drawn off the answers the walk already holds and asks nothing; the view is
+  fitted to the car, the discs and the pins when Map view opens or the card
+  changes, and never moves with the GPS. A card with no yardstick has no
+  disc drawn: its sixty miles are not the card's reach. The public
+  geocoder's one answer has no list behind it, so with the NucBox down only
+  the discs are drawn.
 
 `map.html` and the offers page still use the public geocoder: they place a
 whole window of offers rather than one card's disc, and choosing among
-candidates there is a different question that has not been answered.
+candidates there is a different question that has not been answered. What
+`map.html` can show of how a place was found is its own walk: each pin's
+popup says whether it was found inside the 60 mi box round where the car
+was, asked with no box, or asked wide because the box found nothing — and
+a place answered wide and outside its box is a hollow ring.
 
 ## Files
 

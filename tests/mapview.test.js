@@ -1472,16 +1472,16 @@ async function nucbox() {
     } });
     var pinned = await stubbed.place("McDonald's", d30);
     eq('the answer carries every candidate the NucBox sent, beside the one chosen',
-       JSON.stringify([pinned.at && pinned.at.lat, pinned.seen.hits.length]),
+       JSON.stringify([pinned.at && pinned.at.lat, pinned.seen && pinned.seen.hits.length]),
        JSON.stringify([33.983, 4]));
     var lp = MV.located(pinned, d30, "McDonald's", 'new');
     eq('a pin: the one inside drawn grey under it, the three past the disc hollow',
        lp.marks.map(function (m) { return m.kind; }).join(','),
        'candidate,outside,outside,outside');
     eq('...the one inside saying it was the pin',
-       lp.marks[0].tip, "McDonald's — the one inside the 3.5 mi searched, pinned");
+       (lp.marks[0] || {}).tip, "McDonald's — the one inside the 3.5 mi searched, pinned");
     eq('...and one outside saying how far out it was, and that it was not used',
-       lp.marks[2].tip, "McDonald's — 10.6 mi from the card's fix, outside the 3.5 mi "
+       (lp.marks[2] || {}).tip, "McDonald's — 10.6 mi from the card's fix, outside the 3.5 mi "
        + 'searched, not used');
     var refused = await stubbed.place("McDonald's", d94);
     var lr = MV.located(refused, d94, "McDonald's", 'new');
@@ -1533,8 +1533,9 @@ async function nucbox() {
     var larkL = MV.located(lark3, d3, 'Larkspur', 'held');
     eq('a numberless street pinned: its stretch inside the disc drawn as the chosen line, '
        + 'the very runs the pin carries, and no marks',
-       [larkL.lines.length, larkL.lines[0].kind, JSON.stringify(larkL.lines[0].pts)
-          === JSON.stringify(lark3.at.stretch[0]), larkL.marks.length].join(','),
+       [larkL.lines.length, (larkL.lines[0] || {}).kind,
+        JSON.stringify((larkL.lines[0] || {}).pts) === JSON.stringify(lark3.at.stretch[0]),
+        larkL.marks.length].join(','),
        '1,chosen,true,0');
     var lark94 = await nbxS.place('Larkspur Pkwy SE, Atlanta', d94, ST);
     var lark94L = MV.located(lark94, d94, 'Larkspur', 'held');
