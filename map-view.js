@@ -1049,8 +1049,9 @@
    *
    * Nothing for an answer with no `seen` — the public geocoder's one answer,
    * a NucBox that could not be asked, a question the relay refused, a cross
-   * street with no index, a stretch too long to be sent whole: there is no
-   * list behind those to show, and drawing nothing says no more than that. */
+   * street with no index, a stretch past the index's cap (which sends no
+   * lines for one): there is no list behind those to show, and drawing
+   * nothing says no more than that. */
   function located(res, disc, name, whose) {
     var out = { marks: [], lines: [] };
     if (!res || !res.seen) return out;
@@ -2134,8 +2135,8 @@
       var down = nbxDown(body);
       if (down) return down;
       if (!body.names.length) return { at: null, why: 'nostreet', n: 0 };
-      // No `seen` for a stretch the NucBox would not send whole: what came is
-      // part of the street, and drawn it would read as all of it.
+      // Refused as too long to judge. Nothing of it to draw: past its cap
+      // the index sends no lines at all (streets.js stretch).
       if (body.cutAt) return { at: null, why: 'long', n: body.cutAt };
       var res = stretchInDisc(body.lines, disc, car, body.names[0]);
       res.seen = { lines: body.lines };

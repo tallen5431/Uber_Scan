@@ -1549,13 +1549,15 @@ async function nucbox() {
         crossing.lines.length === 1 && crossing.lines[0].pts.every(function (p) {
           return MV.crowMiles(SQ, { lat: p[0], lon: p[1] }) <= 1.0 + 1e-9;
         }));
+    // Not "a stretch too long to send whole": the index sends no lines for
+    // one (streets.js stretch empties them past its cap), so with or without
+    // NbxSearch.stretch's cutAt return there was nothing to draw, and a check
+    // of it could not fail.
     eq('nothing drawn for an answer with no list behind it: no street index to ask, '
-       + 'a NucBox down, a stretch too long to send whole',
+       + 'a NucBox down',
        [MV.located({ at: null, why: 'cross' }, d94, 'X', 'new'),
-        MV.located(await gone.place("McDonald's", d94), d94, 'X', 'new'),
-        MV.located(await new MV.NbxSearch({ base: onShort.base + '/api/nbx' })
-                     .place('Larkspur Pkwy SE, Atlanta', d3, ST), d3, 'X', 'held')]
-         .map(function (h) { return h.marks.length + h.lines.length; }).join(','), '0,0,0');
+        MV.located(await gone.place("McDonald's", d94), d94, 'X', 'new')]
+         .map(function (h) { return h.marks.length + h.lines.length; }).join(','), '0,0');
     eq('...and an answer of a kind with no words is never drawn as a pin',
        MV.located({ at: null, why: 'odd', n: 1, seen: { hits: [SQ] } }, d94, 'X', 'new')
          .marks[0].tip, 'no pin for X');
