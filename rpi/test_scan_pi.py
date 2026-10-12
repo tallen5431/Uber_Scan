@@ -851,6 +851,39 @@ eq('...the mark is " ?" after the payout, and nothing for the box\'s own',
 ok_('...and the loop hands the panel where the payout came from',
     'pay_from=pay_from)' in inspect.getsource(SP.main))
 
+# ...and the figures line ends inside the panel, mark and all, at its widest.
+#
+# A four-figure payout off a found card is what the doubt panel exists for, and
+# its line at its own size — "$1999.99 ?  120.0 min  45.3 mi" — ended at x=835
+# on the 800px panel: the miles went off the edge. Held to the same 40px margin
+# on the right as on the left; and a usual card's line is drawn exactly as
+# plain putText at the panel's own size draws it, so the fit costs nothing on
+# the cards that never needed it. Not asked of the go panel's line: at its
+# smaller size the same figures end at x=650, and even "$1999.99 ?  999.0 min
+# 999.9 mi" at x=676, so no figure the parser gives can make that check fail.
+# render_panel fits both through _put_line all the same.
+_wide = {'pay': 1999.99, 'minutes': 120.0, 'miles': 45.3}
+
+
+def _ink_right(panel, state, rows):
+    bg = np.array(SP.COLOURS[state], np.uint8)
+    cols = np.nonzero((panel[rows[0]:rows[1] + 1] != bg).any(axis=(0, 2)))[0]
+    return int(cols.max()) if len(cols) else None
+
+
+_right = _ink_right(SP.render_panel(_rate('doubt', 48.3, 'pay'), _wide, pay_from='found'),
+                    'doubt', (245, 312))
+ok_('the doubt panel\'s figures line for "$1999.99 ?  120.0 min  45.3 mi" ends inside '
+    'the panel\'s right margin (last ink at x=%s)' % _right,
+    _right is not None and _right < 800 - 40)
+_usual = SP.render_panel(_rate('doubt', 48.3, 'time'), _pf_card, pay_from='found')
+_plain = np.zeros_like(_usual)
+_plain[:] = SP.COLOURS['doubt']
+cv2.putText(_plain, '$14.48 ?  18.0 min  8.6 mi', (40, 300), cv2.FONT_HERSHEY_SIMPLEX,
+            1.8, (255, 255, 255), 4)
+ok_('...and a usual card\'s line is drawn at the panel\'s own size, untouched',
+    np.array_equal(_usual[245:313], _plain[245:313]))
+
 # --- where the payout a reading SHOWS came from -------------------------------
 #
 # payout_from, over the reads of one card as the loop meets them: off a card

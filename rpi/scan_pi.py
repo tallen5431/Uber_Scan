@@ -5251,6 +5251,26 @@ def _fig(value, places=1):
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         return '--'
     return ('%%.%df' % places) % value
+
+
+# A figures line, at its size or smaller, so that it ends inside the panel.
+#
+# cv2.putText draws past the edge without complaint, and what goes over is the
+# end of the line: the miles. The doubt panel's line at its own size, for a
+# four-figure payout off a found card — "$1999.99 ?  120.0 min  45.3 mi" — ended
+# at x=835 on the 800px panel, so the driver read "45.3" with the unit gone, or
+# less. A four-figure payout is what that panel is FOR (CHECK PAY). Smaller
+# rather than shorter: every figure on the line is one the driver may need to
+# hold against the card, and a usual card's line is not touched — the scale
+# only comes down when the line would not fit, by as much as it has to.
+def _put_line(panel, text, org, scale, thick):
+    room = panel.shape[1] - 2 * org[0]          # the left margin, kept on the right
+    while scale > 0.5 and cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX,
+                                          scale, thick)[0][0] > room:
+        scale -= 0.05
+    cv2.putText(panel, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (255, 255, 255), thick)
+
+
 def render_panel(rate, parsed, size=(800, 480), whole=True, pay_from='drawn'):
     """Big, flat, readable at a glance and at arm's length.
 
@@ -5294,10 +5314,9 @@ def render_panel(rate, parsed, size=(800, 480), whole=True, pay_from='drawn'):
                     (40, 150), cv2.FONT_HERSHEY_SIMPLEX, 2.6, (255, 255, 255), 6)
         # The card's own numbers here, deliberately — see above. What is not
         # deliberate is printing the word "None" where it said nothing.
-        cv2.putText(panel, '$%.2f%s  %s min  %s mi'
-                    % (parsed['pay'], _found_mark(pay_from), _fig(parsed['minutes']),
-                       _fig(parsed['miles'])),
-                    (40, 300), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (255, 255, 255), 4)
+        _put_line(panel, '$%.2f%s  %s min  %s mi'
+                  % (parsed['pay'], _found_mark(pay_from), _fig(parsed['minutes']),
+                     _fig(parsed['miles'])), (40, 300), 1.8, 4)
         cv2.putText(panel, 'that is not what a real offer looks like',
                     (40, 380), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (210, 210, 210), 2)
         return panel
@@ -5331,11 +5350,10 @@ def render_panel(rate, parsed, size=(800, 480), whole=True, pay_from='drawn'):
     # is why that screen has been right about these cards and this one has not:
     # a driver checking one against the other was reading two different fields
     # with the same label. Same source now.
-    cv2.putText(panel, '$%.2f%s  %s min  %s mi'
-                % (parsed['pay'], _found_mark(pay_from),
-                   _fig(rate.get('minutes', parsed.get('minutes'))),
-                   _fig(rate.get('miles', parsed.get('miles')))),
-                (40, 400), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
+    _put_line(panel, '$%.2f%s  %s min  %s mi'
+              % (parsed['pay'], _found_mark(pay_from),
+                 _fig(rate.get('minutes', parsed.get('minutes'))),
+                 _fig(rate.get('miles', parsed.get('miles')))), (40, 400), 1.4, 3)
     return panel
 
 
