@@ -1749,6 +1749,14 @@
   // same message, and read only while `heldEnds` names an end, so a stale one
   // can never be measured with.
   var heldCard = null;
+  // ...and the server's name for that order, which a door-level pin of its end
+  // is posted under (pinHeldEnd), so a pin can never land on the next order.
+  var heldId = null;
+  // The GPS drop's two words on the status row (healthNote): the car is at the
+  // held order's door now, per the last beat; and when the server put the
+  // order down because the car left it, until when to say so.
+  var atDropoff = false;
+  var gpsDropSaidUntil = 0;
   var dropBusy = false;
   var dropFailed = false;
   // What the failed press was about, so the failure can be forgotten when the
@@ -1773,6 +1781,30 @@
                   + 'again. It does not touch your phone.';
   }
 
+  /* Map view pinned the held order's end at DOOR level: tell the server, which
+     puts the order down once the car has stopped at that door and then left it
+     (gpsArrival in server.js). Only a door — the place names a house number
+     and the NucBox's answer carries it — and the server asks both again. A
+     street or a town is never sent. Fire and forget: a refused or lost post
+     costs only the GPS drop, and the timer and Drop still end the order. */
+  function pinHeldEnd(want, q, got) {
+    var plan = MV.searchPlan(q);
+    if (!want.heldId || !got.at || !plan || plan.kind !== 'street' || !plan.door
+        || !MV.hasDoor(got.at, plan.house)) return;
+    ask('/api/held-end', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ holdId: want.heldId, dropoff: q, lat: got.at.lat,
+                             lon: got.at.lon, name: got.at.name, doorLevel: true }) })
+      .catch(function () {});
+  }
+
+  // The order is down: Drop's reply, or the server's word that the GPS put it
+  // down (msg.gpsDrop). One function, so the two cannot forget different things.
+  function orderDown() {
+    holdingNow = false; forgetDest(); heldEnds = undefined; heldSig = null;
+    heldId = null; atDropoff = false;
+    showStack(null); showDest();
+  }
+
   el.drop.addEventListener('click', function () {
     if (dropBusy) return;
     dropBusy = true;
@@ -1782,10 +1814,7 @@
       // still in the car and the next offer must still be measured against it.
       dropFailed = !r.ok;
       dropFailedFor = r.ok ? null : heldSig;
-      if (r.ok) {
-        holdingNow = false; forgetDest(); heldEnds = undefined; heldSig = null;
-        showStack(null); showDest();
-      }
+      if (r.ok) orderDown();
     }).catch(function () {
       /* Left as it was: an order the server still holds is the truth. */
       dropFailed = true;
@@ -3181,6 +3210,10 @@
     } else if (g && g.state === 'lost') {
       bits.push('GPS: no fix since start');
     }
+    // Not a fault, and on this row anyway: it is about the order in the car,
+    // not the offer, and the bar beside Drop has no room (it holds six).
+    if (atDropoff && holdingNow) bits.push('at dropoff');
+    else if (Date.now() < gpsDropSaidUntil) bits.push('dropped \u00b7 left the dropoff');
     return bits.join(' \u00b7 ');
   }
 
@@ -3247,6 +3280,15 @@
       if (msg.gps !== undefined) {
         gpsNow = msg.gps || null;
         gpsAt = Date.now();
+      }
+      // The GPS drop (gpsArrival in server.js): at the held order's door, on
+      // this beat — and the order put down because the car left it, which is
+      // Drop's reply arriving with nobody having pressed it.
+      if (msg.atDropoff !== undefined) atDropoff = !!msg.atDropoff;
+      if (msg.gpsDrop) {
+        orderDown();
+        gpsDropSaidUntil = Date.now() + (msg.gpsDrop.saidForMs || 60000);
+        showDrop();
       }
       if (msg.cpuC !== undefined) cpuNow = typeof msg.cpuC === 'number' ? msg.cpuC : null;
       if (msg.throttled !== undefined) throttledNow = msg.throttled || null;
@@ -3362,6 +3404,7 @@
         heldSig = holdSignature(msg.holding);
         heldEnds = msg.holding ? (msg.holding.dropoff || null) : undefined;
         heldCard = msg.holding ? (msg.holding.card || null) : null;
+        heldId = msg.holding ? (msg.holding.holdId || null) : null;
         showDrop();
         showDest();
       }
@@ -3491,6 +3534,7 @@
     heldSig = holdSignature(s.holding);
     heldEnds = s.holding ? (s.holding.dropoff || null) : undefined;
     heldCard = s.holding ? (s.holding.card || null) : null;
+    heldId = s.holding ? (s.holding.holdId || null) : null;
     showDrop();
     // ...and what it was read as, so a panel opened or reloaded mid-delivery
     // shows the destination already scanned rather than offering to scan one
@@ -4033,6 +4077,7 @@
              // the car came from, whose own fix and distance its end is
              // checked against. See MV.againstCard.
              card: onRecord, heldCard: held ? heldCard : null,
+             heldId: held ? heldId : null,
              // The card is part of the key: two cards naming the same places
              // came up in two places, and the figure is measured from each
              // one's own fix.
@@ -4272,6 +4317,7 @@
           found[q] = got.at || null;
           want.nbxAnswered++;
           want.nbxSeen[q] = { res: got, disc: disc, whose: whose };
+          if (whose === 'held' && disc) pinHeldEnd(want, q, got);
           if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
           landed();
         }

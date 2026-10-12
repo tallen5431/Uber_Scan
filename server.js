@@ -36,6 +36,11 @@ var Advice = require('./advice.js');
 // The NucBox's street index (see "the NucBox's street index" below). Plain
 // CommonJS, no browser half: only this server and the suites read it.
 var Streets = require('./streets.js');
+// Map view's own rules for where a place is, so "door level" means one thing.
+// A UMD like advice.js that touches no browser global at load. Used here for
+// searchPlan, hasDoor and crowMiles only: the GPS drop (see gpsArrival) must
+// hold a pin to exactly the door rule the page chose it by.
+var MV = require('./map-view.js');
 
 var ROOT = __dirname;
 var PORT = parseInt(process.env.PORT, 10) || 8080;
@@ -751,7 +756,13 @@ function startScanner() {
         // status link beside the connection dot can show afterwards. The page
         // does not seed itself from it: like tooBright, it waits for the next
         // beat, which is ALIVE_EVERY (four seconds) away at most.
-        if (read.alive) scanner.beat = read;
+        if (read.alive) {
+          scanner.beat = read;
+          // ...and the GPS drop's one input: whether this beat's fix puts the
+          // car at the held order's door, or takes it away (gpsArrival). The
+          // answer rides the beat to the panel, which says "at dropoff".
+          read.atDropoff = gpsArrival(read, Date.now());
+        }
         broadcast(read);
       } catch (e) {
         console.log('scanner: ' + line);   // not JSON, so it is a log line
@@ -1122,6 +1133,149 @@ function holding(now) {
   return h;
 }
 
+/* The name a hold goes by on the wire: the card's id and when it was on the
+ * screen. The panel has no other handle on "the order in the car", and a pin
+ * posted for one hold must never land on the next (see /api/held-end). */
+function holdIdOf(h) {
+  return h ? String(h.id) + '@' + String(h.acceptedAt) : null;
+}
+
+/* ---------- the GPS drop: at the held order's door, then gone from it -------
+ *
+ * The driver's words: "It can be safe to assume I have completed the order if
+ * I am at the customer's address." So the order in the car is put down, by
+ * the same code Drop runs (putDown), once the car has been AT the held
+ * order's end and has then LEFT it. Never while it is still there.
+ *
+ * Not an accept detector, and it presses nothing: it only ends a hold the
+ * driver started with ✓ Took. It reads no silence — every step is a GPS fix
+ * the gate passed. And it turns no distance into minutes: the hold still
+ * expires on its own stated clock, this only ends it sooner, as Drop does.
+ *
+ * WHERE THE END IS comes from Map view and nowhere else: when the page pins
+ * the held end at DOOR level — searchPlan says the dropoff names a house
+ * number, and the NucBox answer it chose carries that number (MV.hasDoor),
+ * inside the held card's disc — it posts the pin to /api/held-end. A street
+ * or a town is never an end for this: a pin a few hundred metres off is a
+ * drop at the wrong house or no drop at all, and refusing is the cheap
+ * error — the timer and Drop still apply. With Map view never opened on
+ * that hold, there is no pin and nothing here happens.
+ *
+ * The numbers. The owner's VK-162 read eph 27.8 m on mode 3 indoors (gps.py,
+ * FIX_ERR_MAX), and the gate refuses anything over 50 m, so a fix that counts
+ * here is never rougher than 50. A door pin is the address node or the
+ * building's middle, and the car stops at the kerb or in the drive: tens of
+ * metres off it (an estimate, not measured). So ARRIVE_M is 75 m plus the
+ * fix's own error — at most 125 m with the gate's cap. LEAVE_M is 300 m:
+ * past the largest arrive radius by more than two worst-case errors
+ * (125 + 2 x 50 = 225), so a parked car's scatter cannot read as leaving,
+ * and it takes TWO consecutive good fixes out there. DWELL_S is 45 s inside,
+ * with no gap over GAP_S between counted fixes (gps.py's own 20 s staleness
+ * line): at 30 mph a car crosses a 250 m circle in 19 s, so driving past does
+ * not arrive; a crawl in stopped traffic beside the door can, and is what to
+ * watch for. Settable for the suite, like HOLD_GRACE_MS. */
+function envNumber(name, dflt) {
+  var v = Number(process.env[name]);
+  return (isFinite(v) && v >= 0 && process.env[name] !== undefined && process.env[name] !== '')
+    ? v : dflt;
+}
+var ARRIVE_M = 75;            // plus the fix's own error, which the gate caps at 50
+var ARRIVE_ERR_CAP_M = 50;    // gps.py FIX_ERR_MAX
+var LEAVE_M = 300;
+var LEAVE_FIXES = 2;
+var DWELL_MS = envNumber('GPS_DWELL_MS', 45000);
+var GAP_MS = envNumber('GPS_GAP_MS', 20000);
+// How long the panel says "dropped · left the dropoff" after one.
+var GPS_DROP_SAID_MS = 60000;
+
+// The live part of the arrival, which is not worth an SD write per fix: where
+// the dwell started and the last fix counted. `arrivedAt` and the pin ARE on
+// the hold, and so in holding.json, because those are the facts a restart in
+// the driveway must not forget.
+var arrival = { holdId: null, insideSince: null, lastFixAt: null, outCount: 0 };
+
+function resetArrival(id) {
+  arrival = { holdId: id || null, insideSince: null, lastFixAt: null, outCount: 0 };
+}
+
+/* A beat's fix as this file will count it, or null: the gate passed it, it is
+ * still inside gps.py's staleness rule (`freshFor`, which a scanner older than
+ * that field does not send — refused, not guessed), and it is a fix this file
+ * has not already counted. Its time is the server's arrival less its age. */
+function countableFix(beat, now) {
+  var g = beat && beat.gps;
+  var f = g && g.fix;
+  if (!f || f.gpsOk !== true) return null;
+  if (typeof f.freshFor !== 'number' || !(f.freshFor > 0)) return null;
+  if (typeof f.lat !== 'number' || typeof f.lon !== 'number'
+      || !isFinite(f.lat) || !isFinite(f.lon)) return null;
+  if (typeof f.gpsErr !== 'number' || !isFinite(f.gpsErr)) return null;
+  var age = (typeof f.gpsAge === 'number' && isFinite(f.gpsAge) && f.gpsAge >= 0)
+    ? f.gpsAge : null;
+  if (age === null) return null;
+  var at = now - age * 1000;
+  if (arrival.lastFixAt !== null && at <= arrival.lastFixAt) return null;
+  return { lat: f.lat, lon: f.lon, err: f.gpsErr, at: at };
+}
+
+/* The held end this file may arrive at, or null: a door-level pin made for
+ * this hold and for the dropoff it still names (a ⌖ press can change it). */
+function heldEndPin(h) {
+  var p = h && h.endPin;
+  if (!p || p.doorLevel !== true || p.dropoff !== h.dropoff) return null;
+  return p;
+}
+
+/* One heartbeat. Returns what the panel is told on that beat: whether the car
+ * is at the held order's dropoff now. Puts the order down on the departure. */
+function gpsArrival(beat, now) {
+  var h = holding(now);
+  var id = holdIdOf(h);
+  if (arrival.holdId !== id) resetArrival(id);
+  var pin = heldEndPin(h);
+  if (!pin) return false;
+  var fix = countableFix(beat, now);
+  if (!fix) return false;
+  var gap = arrival.lastFixAt === null ? Infinity : fix.at - arrival.lastFixAt;
+  arrival.lastFixAt = fix.at;
+  var metres = MV.crowMiles(fix, pin) * 1609.344;
+  if (!h.arrivedAt) {
+    var within = ARRIVE_M + Math.min(fix.err, ARRIVE_ERR_CAP_M);
+    if (metres > within) { arrival.insideSince = null; return false; }
+    if (arrival.insideSince === null || gap > GAP_MS) arrival.insideSince = fix.at;
+    if (fix.at - arrival.insideSince < DWELL_MS) return false;
+    h.arrivedAt = now;
+    setHolding(h);   // the arrival survives a restart in the driveway
+    return true;
+  }
+  if (metres <= LEAVE_M) { arrival.outCount = 0; return true; }
+  arrival.outCount += 1;
+  if (arrival.outCount < LEAVE_FIXES) return false;
+  putDown(now, 'gps', function () {
+    broadcast({ gpsDrop: { at: now, saidForMs: GPS_DROP_SAID_MS } });
+  });
+  return false;
+}
+
+/* Put the order in the car down, and write the drop row: the one path both
+ * Drop (/api/delivered) and the GPS take. `by` is 'gps' for the second and
+ * absent from the row for a press, so rows written before this are the shape
+ * they always were. `done(wasHolding)`. See /api/delivered for the row. */
+function putDown(now, by, done) {
+  // holding(), not the raw slot, and asked BEFORE setHolding(null).
+  var dropped = holding(now);
+  setHolding(null);
+  resetArrival(null);
+  if (!dropped) return done(false);
+  var row = { v: 1, kind: 'drop', at: now, id: dropped.id, seq: now,
+              acceptedAt: dropped.acceptedAt };
+  if (by) row.by = by;
+  appendLines(JSON.stringify(row) + '\n', function (err) {
+    if (err) console.error('journal: could not record a drop: ' + err.message);
+    done(true);
+  });
+}
+
 /* The offer as Advice.stack has to see it: timed the way the HELD job is timed.
  *
  * `stack` reads `offer.minutes`, and the two sides of the comparison were not
@@ -1178,6 +1332,8 @@ function withStack(read, now) {
   var held = holding(now);
   read.holding = held
     ? { pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null,
+        // What /api/held-end is told the pin is for. See holdIdOf.
+        holdId: holdIdOf(held),
         // Its card's fix and size, so Map view can check this order's end
         // against them — see cardOf.
         card: held.card || null }
@@ -2980,7 +3136,11 @@ function statusNow() {
     // here: the two machines' clocks are not the same clock.
     holding: (function () {
       var h = holding(Date.now());
-      return h ? { pay: h.pay, minutes: h.minutes,
+      return h ? { pay: h.pay, minutes: h.minutes, holdId: holdIdOf(h),
+                   // ...whether a door-level pin is on it and the GPS has
+                   // seen the car arrive there: the GPS drop's state, for
+                   // whoever is diagnosing one. See gpsArrival.
+                   endPinned: !!heldEndPin(h), arrived: !!h.arrivedAt,
                    // Where it ends, and whether that came off the card or
                    // off a scan of the screen after the accept. The panel
                    // needs the difference: a card-derived dropoff is a
@@ -5023,29 +5183,66 @@ function route(req, res) {
     //
     // Asked BEFORE setHolding(null), and kept: after it, holding() answers
     // null and the row would have no offer to name.
-    var droppedAt = Date.now();
-    var dropped = holding(droppedAt);
-    setHolding(null);
-    if (!dropped) {
-      return send(res, 200, JSON.stringify({ ok: true, wasHolding: false }),
-                  { 'Content-Type': 'application/json; charset=utf-8' });
-    }
-    return appendLines(JSON.stringify({
-      v: 1, kind: 'drop', at: droppedAt,
-      id: dropped.id, seq: droppedAt,
-      // Dated from the card, as the hold is — see acceptedAt in the mark
-      // handler — so this is the same clock holding() expires the job on.
-      acceptedAt: dropped.acceptedAt
-    }) + '\n', function (err) {
-      // The order is down whether or not the row landed, so the answer is
-      // still ok: the panel believes this reply about the HOLD (see the Drop
-      // handler in live.html) and the hold is gone. The lost row is said out
-      // loud like every other append on this server, because a collection
-      // that silently stopped would be read in a week as a driver who never
-      // pressed Drop.
-      if (err) console.error('journal: could not record a drop: ' + err.message);
-      send(res, 200, JSON.stringify({ ok: true, wasHolding: true }),
+    //
+    // The row: {v, kind: 'drop', at, id, seq, acceptedAt}, `acceptedAt` dated
+    // from the card as the hold is — see acceptedAt in the mark handler — so
+    // this is the same clock holding() expires the job on. putDown() writes
+    // it, for this press and for the GPS drop alike (which adds `by: 'gps'`).
+    //
+    // The order is down whether or not the row landed, so the answer is
+    // still ok: the panel believes this reply about the HOLD (see the Drop
+    // handler in live.html) and the hold is gone. The lost row is said out
+    // loud like every other append on this server, because a collection
+    // that silently stopped would be read in a week as a driver who never
+    // pressed Drop.
+    return putDown(Date.now(), null, function (was) {
+      send(res, 200, JSON.stringify({ ok: true, wasHolding: was }),
            { 'Content-Type': 'application/json; charset=utf-8' });
+    });
+  }
+
+  /* The held order's end, pinned at door level by Map view (live.html).
+   *
+   * Body: {holdId, dropoff, lat, lon, name, doorLevel: true}. Kept on the hold
+   * — and so in holding.json — only when every part of it is THIS hold's: the
+   * hold it names is the one in the car, the dropoff it was pinned for is the
+   * one the hold still names, and the door rule holds here too, asked of the
+   * same functions the page chose it by (MV.searchPlan's house number, found
+   * in the answer's name by MV.hasDoor). Anything else is refused with a
+   * reason and changes nothing: a pin for a previous order, a street, a town.
+   * See gpsArrival for what the pin is used for. */
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/held-end') {
+    return readBody(req, 4096, function (err, text) {
+      var json = { 'Content-Type': 'application/json; charset=utf-8' };
+      var body = null;
+      try { body = err ? null : JSON.parse(text); } catch (e) { body = null; }
+      if (!body || typeof body !== 'object') {
+        return send(res, 400, JSON.stringify({ ok: false, error: 'not JSON' }), json);
+      }
+      var h = holding(Date.now());
+      var why = null;
+      var plan = h && typeof h.dropoff === 'string' ? MV.searchPlan(h.dropoff) : null;
+      if (!h) why = 'nothing held';
+      else if (body.holdId !== holdIdOf(h)) why = 'not the order in the car';
+      else if (body.dropoff !== h.dropoff) why = 'not where that order ends';
+      else if (body.doorLevel !== true || !plan || plan.kind !== 'street' || !plan.door
+               || !MV.hasDoor({ name: body.name }, plan.house)) why = 'not door level';
+      else if (typeof body.lat !== 'number' || typeof body.lon !== 'number'
+               || !isFinite(body.lat) || !isFinite(body.lon)
+               || Math.abs(body.lat) > 90 || Math.abs(body.lon) > 180) why = 'no position';
+      if (why) return send(res, 409, JSON.stringify({ ok: false, error: why }), json);
+      var same = h.endPin && h.endPin.lat === body.lat && h.endPin.lon === body.lon
+        && h.endPin.dropoff === h.dropoff;
+      if (!same) {
+        h.endPin = { dropoff: h.dropoff, lat: body.lat, lon: body.lon,
+                     doorLevel: true, pinnedAt: Date.now() };
+        // A moved pin is a different end: whatever was learnt about being at
+        // the old one is not about this one.
+        delete h.arrivedAt;
+        resetArrival(holdIdOf(h));
+        setHolding(h);
+      }
+      send(res, 200, JSON.stringify({ ok: true }), json);
     });
   }
 
