@@ -3504,6 +3504,20 @@ the picture can answer. Same cap, 400 pictures (about 16MB, about eight days at
 that week's rate), oldest first, and the log says once when the folder reaches
 it.
 
+**And the cards that showed a payout and did not parse into a journey**, in
+`scans/unparsed/` beside it: the first such read of each card, the greyscale
+picture and, beside it under the same name, a `.txt` of the text the reader
+made of it. This is where a layout the parser has never seen lands — a new Uber
+card, and the first DoorDash cards this rig reads, which will arrive exactly
+like this: the payout is the one thing every card prints the same way, and the
+rest is in a grammar the parser does not have yet. The log's sample line quotes
+one such text every twenty seconds at most and nothing else was kept; a layout
+is built from pictures of it. Which reads count is one rule, `read_why` in
+`scan_pi.py`, shared with that log line (its "a payout but no journey"). Same
+cap as the doubt folder, 400 pictures, and the cap takes each `.txt` with its
+picture. Never off a ⌖ read — that is the whole screen box, a map or a planner
+round the card — and nothing with `--no-journal`.
+
 Everything else is off by default, because this writes to an SD card in a car
 and a feature that quietly fills one is worse than a feature nobody has. Bounded even when on: 400
 pictures, oldest first, about 40kB each. Written only on the reads that land a

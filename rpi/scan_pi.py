@@ -1245,6 +1245,42 @@ SCAN_QUALITY = 72         # ~40KB a card at the height the reader uses
 # this week's rate, the oldest going first.
 DOUBT_DIR = 'doubt'
 
+# ...and the cards that showed a payout and did not parse into a journey.
+#
+# A card the parser has never seen laid out — a new Uber layout, the first
+# DoorDash cards this rig reads — arrives exactly like that: the payout is the
+# one thing every card prints the same way, and everything after it is in a
+# grammar the parser does not have yet. The log quotes the reader's text for
+# one of them every SAMPLE_EVERY seconds, at most, and nothing else is kept;
+# a layout is built from pictures of it, and those were thrown away. So the
+# first such read of each card keeps its picture here, with the raw text the
+# reader made of it beside it as a .txt of the same name. Same machinery and
+# the same 400-picture cap as the doubt folder; the cap takes each .txt with
+# its picture. Never off a ⌖ read: that is the whole screen box, a map or a
+# planner round the card, and not a card the parser failed on.
+UNPARSED_DIR = 'unparsed'
+
+# Why a read was not usable, in the words the log uses — one rule for the log's
+# sample line and for which pictures go into UNPARSED_DIR. See read_why.
+NO_JOURNEY = 'a payout but no journey'
+
+
+def read_why(out, parsed):
+    """Why this read was not usable, or None when it was.
+
+    The sentence the log's sample line quotes, and the test for UNPARSED_DIR:
+    a picture is kept when this says NO_JOURNEY. One function, so the line in
+    the log and the folder on disk cannot disagree about which reads those are.
+    """
+    if parsed.get('complete'):
+        return None
+    if out.get('clipped'):
+        return 'the payout sat against the top edge of the crop'
+    if parsed.get('pay') is None:
+        return 'no payout in the crop'
+    return NO_JOURNEY
+
+
 def doubted(row):
     """Is this journal row one the reader was unsure of? See DOUBT_DIR."""
     return bool(row and (row.get('milesCorrected') or row.get('milesUncertain')
@@ -1277,6 +1313,13 @@ def prune_scans(where, keep=SCANS_KEEP):
             dropped += 1
         except OSError:
             pass
+        # ...and the reader's text beside it, where there is one (see
+        # UNPARSED_DIR): a .txt left after its picture is text nobody can put
+        # a card to, and it is not counted against the cap.
+        try:
+            os.remove(os.path.join(where, name[:-len('.jpg')] + '.txt'))
+        except OSError:
+            pass
     if dropped and where not in _pruning_said:
         _pruning_said.add(where)
         log('%s is at its %d-picture cap: the oldest are now deleted as new '
@@ -1284,13 +1327,16 @@ def prune_scans(where, keep=SCANS_KEEP):
     return dropped
 
 
-def save_scan(image, offer_id, where, at=None, keep=SCANS_KEEP):
+def save_scan(image, offer_id, where, at=None, keep=SCANS_KEEP, text=None):
     """Keep one card picture. Never fatally: this is evidence, not the job.
 
     Named by the offer it belongs to and stamped, so a row in the journal and a
     picture on disk can be put back together months later without a second index
     to go wrong. Sorting the names sorts them by time, which is what lets the
     pruning above be a slice.
+
+    `text`, when given, is written beside the picture under the same name as a
+    .txt — the reader's own text for it. See UNPARSED_DIR.
     """
     if image is None or not offer_id:
         return None
@@ -1302,6 +1348,9 @@ def save_scan(image, offer_id, where, at=None, keep=SCANS_KEEP):
         problem = PL.write_jpeg(path, image, quality=SCAN_QUALITY)
         if problem:
             return None
+        if text is not None:
+            with open(path[:-len('.jpg')] + '.txt', 'w', encoding='utf-8') as fh:
+                fh.write(text)
         prune_scans(where, keep)
         return path
     except Exception:
@@ -3241,6 +3290,8 @@ def main():
     # re-read throughout, and the page needs the id rather than a heartbeat.
     told_offer = None
     doubt_kept_for = None
+    # ...and the card whose unparsed picture has been kept. See UNPARSED_DIR.
+    unparsed_kept_for = None
     # ...and what that card read as when it was told. A later, fuller reading
     # of the same card — the second leg, the address a single frame lost —
     # is told again, because the first was what the panel, the order in the
@@ -3376,6 +3427,7 @@ def main():
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
+        nonlocal unparsed_kept_for
         nonlocal last_read, found_box
         # Not merged when it was a whole-screen read — see collect().
         parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
@@ -3863,15 +3915,24 @@ def main():
         # the reader actually saw. Rate limited, because a screen with no
         # offer on it fails constantly and correctly.
         now = time.time()
-        if not parsed['complete'] and (now - last_sample) > SAMPLE_EVERY:
+        why = read_why(out, parsed)
+        if why is not None and (now - last_sample) > SAMPLE_EVERY:
             last_sample = now
-            why = ('the payout sat against the top edge of the crop'
-                   if out.get('clipped') else
-                   'no payout in the crop' if parsed['pay'] is None else
-                   'a payout but no journey')
             log('read %d found nothing usable (%s, %d in a row). Reader saw: %r'
                 % (frames, why, failures,
                    (out.get('text') or '').strip()[:220]))
+        # ...and a card that showed its payout and no journey keeps its picture
+        # and its text, once per card — per accumulator episode — whatever the
+        # log's rate limit did. See UNPARSED_DIR. Not off a ⌖ read, and with
+        # no clause for it: a whole-screen read has returned above, before
+        # anything about an offer is judged.
+        if why == NO_JOURNEY and offer_log is not None \
+                and parsed.get('episode') is not None \
+                and parsed.get('episode') != unparsed_kept_for:
+            if save_scan(out.get('fitted'), 'ep%d' % parsed['episode'],
+                         os.path.join(scans_where, UNPARSED_DIR),
+                         text=out.get('text') or ''):
+                unparsed_kept_for = parsed['episode']
         tally = health.report(now, tracker, scanner)
         note_tally(tally)
 

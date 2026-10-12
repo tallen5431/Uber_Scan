@@ -2581,6 +2581,36 @@ for _how, _cfg, _argv, _why in (
         % [l for l in _off['logs'] if 'card finder' in l][:1],
         any(l.startswith('setup: card finder OFF (%s)' % _why) for l in _off['logs']))
 
+# --- a card that showed its payout and no journey keeps its picture ----------
+#
+# A layout the parser has not seen yet — a new Uber card, the first DoorDash
+# ones — reads as a payout and nothing it can use. The log quotes one such
+# text at most every SAMPLE_EVERY seconds; the picture and the text go to
+# scans/unparsed/, once per card.
+_NEW_LAYOUT = '$7.25\nGuaranteed (incl. tip)\nNew order type: 2 stops'
+r21 = run(lambda n, k: _NEW_LAYOUT, fitted=_crop, seconds=20.0,
+          until=lambda rows, ann, calls: calls >= 5)
+_ud = os.path.join(os.path.dirname(r21['config']), 'scans', SP.UNPARSED_DIR)
+_ukept = sorted(os.listdir(_ud)) if os.path.isdir(_ud) else []
+eq('a card with a payout and no journey keeps one picture and its text, '
+   'however many times it was read (%d reads)' % r21['calls'],
+   [n.rsplit('.', 1)[1] for n in _ukept], ['jpg', 'txt'])
+ok_('...the text beside the picture, under the same name',
+    len(_ukept) == 2 and _ukept[0].rsplit('.', 1)[0] == _ukept[1].rsplit('.', 1)[0])
+eq('...and it is what the reader read',
+   open(os.path.join(_ud, _ukept[1])).read() if len(_ukept) == 2 else None, _NEW_LAYOUT)
+
+# ...and not off a ⌖ read, whose whole screen box holds a payout and a map.
+# Every read here has a picture to keep, the whole-screen ones included.
+_hou = tempfile.mkdtemp()
+r22 = run(_press_on_first_read(_hou, WHOLE), extra_argv=['--no-parallel'], seconds=6.0,
+          handoff=_hou, dropoff_window=1.0, whole_text=_NEW_LAYOUT,
+          fitted_for=lambda n: _crop)
+_ud22 = os.path.join(os.path.dirname(r22['config']), 'scans', SP.UNPARSED_DIR)
+ok_('a ⌖ press was read whole', any(r22['wholes']))
+eq('...and a ⌖ read keeps no unparsed picture',
+   sorted(os.listdir(_ud22)) if os.path.isdir(_ud22) else [], [])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -2733,6 +2733,29 @@ ok_('...and idle with no card box, or one from the top of the screen box',
     and SP.card_finder_says(type('S', (), {'roi': [0, 0, 1, 0.5]})(), None)
     .startswith('card finder idle: the card box starts at the top'))
 
+# --- the reads that showed a payout and no journey ----------------------------
+eq('a read with a payout and no journey is the one the unparsed folder keeps',
+   SP.read_why({'clipped': False}, {'pay': 7.25, 'complete': False}), SP.NO_JOURNEY)
+eq('...not one with no payout', SP.read_why({}, {'pay': None, 'complete': False}),
+   'no payout in the crop')
+eq('...nor one whose payout was clipped',
+   SP.read_why({'clipped': True}, {'pay': None, 'complete': False}),
+   'the payout sat against the top edge of the crop')
+eq('...and a complete read has nothing to say', SP.read_why({}, {'pay': 7.25, 'complete': True}),
+   None)
+
+_uw = tempfile.mkdtemp()
+_pic = SP.save_scan(_card, 'ep3', _uw, at=1_700_000_000.0, text='$7.25\nTap to see more')
+ok_('a kept picture can have the reader\'s text beside it, under the same name',
+    _pic and open(_pic[:-4] + '.txt').read() == '$7.25\nTap to see more')
+for _i in range(4):
+    SP.save_scan(_card, 'ep%d' % (10 + _i), _uw, at=1_700_000_100.0 + _i, keep=2,
+                 text='card %d' % _i)
+eq('...and the cap takes each text with its picture',
+   sorted(os.listdir(_uw)),
+   sorted(['%013d-ep%d.%s' % (1_700_000_100_000 + 1000 * _i, 10 + _i, ext)
+           for _i in (2, 3) for ext in ('jpg', 'txt')]))
+shutil.rmtree(_uw, ignore_errors=True)
 
 # --- "read the screen in front of you as a destination" --------------------
 #
