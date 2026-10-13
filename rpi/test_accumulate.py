@@ -1608,6 +1608,22 @@ eq('a card outside the layout says nothing about its ends',
 eq('...and is read by the rules that were always there',
    _silent['pickup'], "Chuy's haa")
 
+# DoorDash's stops card, merged the way the rig merges it. All 21 DoorDash
+# offers of the 12 Oct shift journalled whole=0: the bracketed distance was a
+# distance no leg claimed, and `shortATime` travelled through the merge. Three
+# frames of one made-up card, the bullet and the icons read differently on each.
+acc = OfferAccumulator()
+for _k, (_dot, _icon) in enumerate((('«', '@'), ('-', '&'), ('+', 'f'))):
+    _dd = acc.add(P.parse(
+        '$7.75\n3 stops (7.8 mi) %s 30 min\n%s Corner Bagel Co\n'
+        '123 Maple Grove Road, Smallt...\n& Pine Noodle House\n'
+        '45 Birch Street Northwest, Sm...\n& Customer dropoff\n'
+        'Drop off 2 orders\nAccept 0:08' % (_dot, _icon)), now=600.0 + _k)
+eq('a DoorDash stops card merged across frames is whole, its stores and stop count kept',
+   (P.is_whole(_dd), _dd['miles'], _dd['minutes'], _dd['pickup'], _dd['dropoff'],
+    _dd['stops']),
+   (True, 7.8, 30.0, 'Corner Bagel Co', None, 3))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

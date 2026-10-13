@@ -3025,6 +3025,8 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         # beside a rate worked out over 2.4.
         'miles': rate.get('miles', parsed['miles']),
         'items': parsed['items'],
+        # DoorDash's printed stop count. See OP.parse's `stops`.
+        'stops': parsed.get('stops'),
         'milesCorrected': rate.get('milesCorrected', parsed['milesCorrected']),
         'milesUncertain': rate.get('milesUncertain', parsed['milesUncertain']),
         # What was taken off the top, and at what rate. Without these the page

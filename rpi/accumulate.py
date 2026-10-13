@@ -91,6 +91,7 @@ class OfferAccumulator:
                                 #   'labelled': bool, 'isApproach': bool,
                                 #   'lostSeen': n, 'seen': n}]
         self.items = []
+        self.stops = []         # DoorDash's printed stop count, per frame
         # Deadlines seen this window. A delivery card gives one instead of a
         # duration, so it is the denominator of the whole verdict — and it was
         # the only money-moving field taken from the last frame rather than
@@ -704,6 +705,8 @@ class OfferAccumulator:
 
         if parsed.get('items') is not None:
             self.items.append(parsed['items'])
+        if parsed.get('stops') is not None:
+            self.stops.append(parsed['stops'])
         if parsed.get('deliverBy') is not None:
             self.deadlines.append(parsed['deliverBy'])
         # Capped where the parser caps its own list, so a window of frames that
@@ -970,6 +973,9 @@ class OfferAccumulator:
         # 56-minute job to 41 minutes and $17.75/hr PASS to $24.25/hr, on two
         # frames out of three that said 12.
         merged['items'] = _consensus(self.items) if self.items else parsed.get('items')
+        # ...and the stop count the same way, for the same reason: the last
+        # frame alone would let one misread ("1 stops" for 4) stand.
+        merged['stops'] = _consensus(self.stops) if self.stops else parsed.get('stops')
         # Kept rather than voted on — see `self.places`. Everything above this
         # line is a number a verdict is computed from, where a misread has to be
         # outvoted; an address is read by a driver deciding whether they

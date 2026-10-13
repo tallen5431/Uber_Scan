@@ -120,6 +120,22 @@ PAY_SPLIT = re.compile(
     r'\s*(?=guarant|includ)',
     re.IGNORECASE | ASCII)
 
+# ...and the other place the reader cuts it: between the dollars and the
+# cents. "$12.68" came back as "$12 6 8" and "$12.78" as "$12. 78" on the
+# 12 Oct shift, and MONEY_STRICT read both as $12.00. Two real digits, the
+# second of them optionally a space away, and nothing after them that makes
+# them a number of their own: not a decimal point, not a third digit even a
+# space away — "$1 1 1 5" is $11.15 cut three times, and joining two of its
+# pieces gave $1.11 — and not a unit: "$12 68 min" is a payout beside a
+# duration, not $12.68. Measured over the 23,693 distinct texts on file, this
+# moves 15 texts of 7 payouts, each from a whole dollar up by under a dollar
+# ($12 to $12.68 and $12.78, $11 to $11.35, $10 to $10.77, $6 to $6.15, $5 to
+# $5.50, $4 to $4.20), and every one of those offers was journalled at the
+# whole dollar: the cut reading won its window each time.
+PAY_CENTS_SPLIT = re.compile(
+    r'\$\s*(' + DC + r'{1,3})[.,]?\s+(\d)\s?(\d)(?![.,])(?!\s?\d)(?!\s*m(?:i|[il1|]n))',
+    re.IGNORECASE | ASCII)
+
 # A component of the payout, printed beside it, and never the payout.
 #
 # Uber puts a chip under the headline — "+$0.50 included", "+$2.39 included for
@@ -267,6 +283,33 @@ LEG = re.compile(
     r'(?:[^(\d]{0,6}\(?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b'
     + NOT_THE_CHARGER + r'\s*\)?)?',
     re.IGNORECASE | ASCII)
+
+# DoorDash's newer card brackets the distance and counts the stops in front of
+# it, then puts the time after the card's bullet:
+#
+#     $7.75
+#     3 stops (7.8 mi) · 30 min
+#
+# LEG refuses a bracket as glue (see above), so it matched "30 min" alone and
+# the "(7.8 mi)" was left as a distance no leg claimed — `shortATime`, never
+# whole. All 21 DoorDash offers of the 12 Oct shift read that way: pay, miles
+# and minutes all right, `complete`, and every one journalled whole=0.
+#
+# So the bracket is allowed here and only here, where it closes on the card's
+# own word for the stops. Measured over the 23,693 distinct texts of the
+# journal on file: every bracketed distance followed by a bullet and a time
+# has `stops` (or a misread of it) in front — `stops` 1,089, `2stops` 6,
+# `_scops` 1, `ps` 1, 1,097 readings — and none is an Uber leg. The bullet
+# read as `-` 679 times, `«` 272, `+` 112, `»` 16, `*` 2, and as two glyphs
+# (`+»`, `-«`, `«-`, `»«`) 16 times. Anchored at the
+# end, because it is asked of the text just before a minutes token LEG found.
+STOPS_LEAD = re.compile(
+    r'[A-Za-z_]{0,3}ps\s*\(\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)'
+    r'\s*m(?:i|ile|iles)\b\s*\)\s*[^\s\w()]{1,3}\s*\Z',
+    re.IGNORECASE | ASCII)
+# ...and how many stops the card says, kept as the card printed it. Real digits
+# only: it is a count shown to the driver, not a figure anything is priced on.
+STOPS_COUNT = re.compile(r'(?:^|[^\d])(\d{1,2})\s*stops?\s*\(', re.IGNORECASE | ASCII)
 
 # ...and the number in front of it has to contain a real digit. "SI min" is two
 # guesses stacked, and stacked guesses are how noise becomes data.
@@ -1052,6 +1095,19 @@ def find_pay(text, where=None, printed=None, figures=None):
             found.append((v, m.start(), True))
             if best is None or v > best:
                 best = v
+    # The cents cut off by a space. See PAY_CENTS_SPLIT. The joined figure only
+    # ever exceeds its own dollars by under a dollar, so it beats them and no
+    # other figure it would not have lost to anyway.
+    for m in PAY_CENTS_SPLIT.finditer(text):
+        if in_chip(m) or not HAS_DIGIT.search(m.group(1)):
+            continue
+        if any(start <= m.start() and m.end() <= end for start, end in units):
+            continue
+        v = to_number(m.group(1) + '.' + m.group(2) + m.group(3))
+        if v is not None and 0 < v < 2000:
+            found.append((v, m.start(), True))
+            if best is None or v > best:
+                best = v
     if figures is not None:
         figures.extend(sorted(set(at for _, at, _ in found)))
     if printed is not None and best is not None:
@@ -1143,10 +1199,18 @@ def find_legs(text):
         # not preceded by a digit or a decimal point — without the second,
         # "1.9 mi" damaged to ".9 mi" reads as nine miles.
         lead = m.group(1)
+        start = m.start()
         if lead is not None and (
                 not HAS_DIGIT.search(lead)
                 or (m.start(1) > 0 and text[m.start(1) - 1] in '0123456789.,')):
             lead = None
+        # DoorDash's "3 stops (7.8 mi) · 30 min": the bracketed distance before
+        # the time. See STOPS_LEAD. The leg starts at the bracket, so the
+        # distance sits inside it and is not also an orphan.
+        if m.group(1) is None:
+            s = STOPS_LEAD.search(text, max(0, m.start() - 40), m.start())
+            if s and HAS_DIGIT.search(s.group(1)):
+                lead, start = s.group(1), text.rfind('(', 0, s.start(1))
         # The bracketed one wins when a card prints both: the bracket is the
         # card saying which time this distance belongs to.
         side = m.group(4) if m.group(4) is not None else lead
@@ -1179,6 +1243,22 @@ def find_legs(text):
         # reports 43 minutes. Checking each leg against its own time catches it
         # while it is still identifiable as the leg it came from.
         miles, leg_corrected = recover_decimal(minutes, miles, had_decimal)
+        # A bracketed distance with a leading zero and no point is a point the
+        # reader lost: no card prints "(09 mi)". "(+ 0.9 mi)" read once as
+        # "( 09 mi)" on the 12 Oct shift; 9 miles in 11 minutes is 49 mph, under
+        # MAX_MPH, so recover_decimal let it stand and the offer was journalled
+        # at 9.0 miles. Not put back as 0.9 — the leg is left without its
+        # distance, which `lostMiles` and legs_short_a_distance already make
+        # uncertain and not whole, and another frame supplies the real one.
+        # Only inside a bracket the reader saw: an unopened "027 mi)" is the
+        # bracket itself read as a 0, and is not this. Measured over the 23,693
+        # texts on file: 30 texts, every one a total leg, `( 09 mi)` included;
+        # the "4 min (06 mi)" approach legs recover_decimal already fixes are
+        # left to it.
+        if (not leg_corrected and miles is not None and m.group(4) is not None
+                and text[:m.start(4)].rstrip().endswith('(')
+                and re.match(r'[0Oo]\d', side) and not had_decimal):
+            miles = None
 
         tail = text[m.end():m.end() + 14].lower()
         legs.append({
@@ -1221,7 +1301,7 @@ def find_legs(text):
             'milesAfter': m.group(4) is not None,
             # Where this leg sat in the text, so the address printed after it
             # can be found without searching the whole card again.
-            'start': m.start(), 'end': m.end(),
+            'start': start, 'end': m.end(),
         })
     return legs
 
@@ -3111,6 +3191,91 @@ def _labelled_pickup(text, place):
     return bool(PICKUP_LABEL.search(text[:at]))
 
 
+# The stores on DoorDash's newer card, one block each under the stops line:
+#
+#     @ Corner Bagel Co                    <- an icon, then the store
+#     123 Maple Grove Road Northwest, Sm... <- its street, cut off by the card
+#     & Pine Noodle House
+#     45 Birch Street Northwest, Sm...
+#     Customer dropoff                     <- or "Multiple dropoffs (2 stops)"
+#
+# find_places reads these as name-and-street run together, and the first one
+# became the pickup with whatever the map put in front of it: the 12 Oct
+# shift's 21 DoorDash offers, re-parsed, gave 5 with no pickup at all and
+# others beginning with the map's glyphs (`S &, <store>`, `E 2 / @ <store> '`)
+# or running on into the street (`<STORE> ; 70 <street>…`).
+# The card's own lines say which line is a name: the one above a street.
+# A street begins with a house number, ends where the card cut it (`...`), or
+# carries a street word beside a comma — the 16:03 card lost its number to the
+# map (`. : <name> Parkway Northwest, <town>`). The icon in front is `@`, `&`,
+# `f` or map texture: a name starts at the first capitalised word among the
+# line's first four, and where there is none, a short token holding no letter,
+# or one letter alone, in the first three is cut with everything before it.
+STORE_STREET = re.compile(
+    r'^\W{0,4}\d{1,6}\s+[A-Za-z].*(?:' + PLACE_STREET.pattern + r'|,|\.\.)'
+    r'|(?:\.{2,}|…)\s*$|,.*' + PLACE_STREET.pattern + r'|'
+    + PLACE_STREET.pattern + r'.*,', re.IGNORECASE | ASCII)
+STORE_END = re.compile(r'custom[ea]r\s*drop|multiple\s*drop|\baccept\b|\bdecline\b',
+                       re.IGNORECASE | ASCII)
+STORE_CHIP = re.compile(r'\b(?:pick\s*up|drop\s*off)\s*\d|\bid\s*check\b|\bage\s*21',
+                        re.IGNORECASE | ASCII)
+STORES_LINE = re.compile(
+    r'ps\s*\(\s*' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?\s*m(?:i|iles?)\b\s*\)',
+    re.IGNORECASE | ASCII)
+
+
+def _store_name(line):
+    """A store line without the icon in front of it, or '' if no name is left."""
+    words = line.split()
+    cut = next((i for i, w in enumerate(words[:4])
+                if re.match(r'[A-Z]\S*[A-Za-z]', w)), None)
+    if cut is None:
+        cut = 0
+        for i, w in enumerate(words[:3]):
+            if not re.search(r'[A-Za-z]', w) or len(w) == 1 or (
+                    len(w) <= 3 and re.search(r"[^\w'’]", w, ASCII)):
+                cut = i + 1
+    words = words[cut:]
+    while words and not re.search(r'[A-Za-z0-9]', words[-1]):
+        words.pop()
+    name = ' '.join(words)
+    return name if re.search(r'[A-Za-z]{2}', name) else ''
+
+
+def find_stores(raw_text):
+    """The store names on DoorDash's stops card, in the order it lists them.
+
+    Empty on every other card: it reads nothing unless a `N stops (X mi)` line
+    is there to start from. A name is only kept once the street under it has
+    been seen, so a line of map texture with no street after it is not a store.
+    """
+    lines = (raw_text or '').split('\n')
+    at = next((i for i, l in enumerate(lines) if STORES_LINE.search(l)), None)
+    if at is None:
+        return []
+    out, pending = [], []
+    for line in lines[at + 1:]:
+        if STORE_END.search(line):
+            break
+        if STORE_CHIP.search(line):
+            continue
+        if STORE_STREET.search(line):
+            if pending:
+                out.append(' '.join(pending)[:MAX_PLACE])
+            pending = []
+            continue
+        name = _store_name(line)
+        if not name:
+            continue
+        # A name the card wrapped onto a second line — `Freddy's Frozen
+        # Custard &` / `Steakburgers` — starts with a letter and no icon.
+        if len(pending) == 1 and name == line.strip():
+            pending.append(name)
+        else:
+            pending = [name]
+    return out[:MAX_PLACES]
+
+
 def find_pickup(places, ends=None):
     """Where the job STARTS, or None when the card did not say.
 
@@ -3681,6 +3846,8 @@ def parse(raw_text):
     items = to_number(m.group(1)) if m else None
     if items is not None and not (0 <= items <= 200):
         items = None
+    m = STOPS_COUNT.search(mine)
+    stops = int(m.group(1)) if m else None
 
 
     # A delivery card states no duration and puts its distance on its own, so
@@ -3787,6 +3954,12 @@ def parse(raw_text):
     # pass's record of where they sat. Asked before the two ends, because it is
     # what decides them when the card stated it.
     ends = place_ends(legs, places, _whose)
+    # DoorDash's stops card names its stores itself, and they are all the
+    # pickup end: "Multiple dropoffs" prints no customer, so without the ends
+    # the second store would be offered as the destination. See find_stores.
+    stores = find_stores(raw_text)
+    if stores:
+        places, ends = stores, [0] * len(stores)
     pickup = find_pickup(places, ends)
     dropoff = find_dropoff(places, text, ends)
     # The card can name its approach leg in words or by where it printed the
@@ -3885,6 +4058,10 @@ def parse(raw_text):
         'toPickupMinutes': approach['minutes'] if approach else None,
         'toPickupMiles': approach['miles'] if approach else None,
         'items': items,
+        # DoorDash's "3 stops (7.8 mi)", as printed: every store and every
+        # dropoff. Shown, never priced, and not `legs` — the card times the
+        # whole job in one figure, so it is one leg however many stops it has.
+        'stops': stops,
         'legs': len(used),
         'milesCorrected': corrected,
         'milesUncertain': uncertain,
