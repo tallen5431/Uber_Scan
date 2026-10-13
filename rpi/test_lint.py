@@ -1209,6 +1209,34 @@ for _file, _src, _fn in (('live.html', _live_src, 'drawHow'),
        % (_file, _fn, _body and _ASKS.findall(_body)),
        _body is not None and _ASKS.findall(_body), [])
 
+# --- the screens a sighting can be typed as -----------------------------------
+#
+# offer_parser.screen_type and offer-parser.js's screenType each name the
+# screens in a SCREENS list, and server.js tallies a sighting under whatever
+# name arrives. Two lists in two languages that must be one list: a name one
+# port returns and the other never does is a count that moves on one side
+# only. Read out of both files, and held to what each classifier can return
+# — a name on the list that no branch returns is a branch no input reaches —
+# and to the shared corpus, which has a case for every one.
+_op_src = open(os.path.join(ROOT, 'rpi', 'offer_parser.py'), encoding='utf-8').read()
+_opjs_src = open(os.path.join(ROOT, 'offer-parser.js'), encoding='utf-8').read()
+_py_list = re.search(r'^SCREENS = \((.*?)\)', _op_src, re.S | re.M)
+_js_list = re.search(r'var SCREENS = \[(.*?)\];', _opjs_src, re.S)
+_py_screens = re.findall(r"'([A-Za-z.]+)'", _py_list.group(1)) if _py_list else None
+_js_screens = re.findall(r"'([A-Za-z.]+)'", _js_list.group(1)) if _js_list else None
+eq('the two ports\' screen lists are held equal', _py_screens, _js_screens)
+_py_body = _op_src[_op_src.index('\ndef _screen('):]
+_py_body = _py_body[:_py_body.index('\ndef ', 1)]
+_js_body = _js_function(_opjs_src, 'screenOf') or ''
+eq('...and every screen the Python classifier returns is on its list, and every '
+   'one on it is returned', sorted(set(re.findall(r"return '([A-Za-z.]+)'", _py_body))),
+   sorted(_py_screens or []))
+eq('...and the same of the JavaScript one',
+   sorted(set(re.findall(r"return '([A-Za-z.]+)'", _js_body))), sorted(_js_screens or []))
+eq('...and the shared corpus has a case for every one',
+   sorted(set(_c['expect']['screen'] for _c in _cases.get('screens', []))),
+   sorted(_py_screens or []))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)

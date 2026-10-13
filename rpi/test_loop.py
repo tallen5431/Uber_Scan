@@ -344,6 +344,11 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     was_planner = SP.emit_planner
     said_planners = planners if planners is not None else []
     SP.emit_planner = lambda stops, **k: said_planners.append((stops, k))
+    # ...and the sighting beside them, built by the scanner's own sighting()
+    # and kept rather than printed: the line's body as the server is sent it.
+    was_sighting = SP.emit_sighting
+    sightings = []
+    SP.emit_sighting = lambda *a, **k: sightings.append(SP.sighting(*a, **k))
     SP.start_camera = lambda *a, **k: cam
     # Stamped, so a check can ask how soon after something a verdict came.
     SP.emit = lambda *a, **k: verdicts.append((a, k, time.time()))
@@ -439,6 +444,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
          SP.emit_reading, SP.emit_dropoff, SP.emit_settings, SP.Reader.submit) = real
         PL.CF.find_card, PL.Scanner._look, PL.ocr_lines = real_reading
         SP.emit_planner = was_planner
+        SP.emit_sighting = was_sighting
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
         SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY, SP.STALL_AGAIN = was_holds
@@ -449,7 +455,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     return dict(rows=rows(), announced=announced, offer_kw=offer_kw,
                 beats=beats, calls=calls[0],
                 submitted=submitted[0], submitted_whole=submitted_whole,
-                readings=readings[0], planners=said_planners,
+                readings=readings[0], planners=said_planners, sightings=sightings,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
                 raised=raised, handoff=handoff, finder=finder[0])
@@ -1674,6 +1680,60 @@ eq('...and the planner reaches no reading the panel is sent',
     if len(v[0]) > 1 and 'Kestrel' in ((v[0][1] or {}).get('rawText') or '')], [])
 eq('...nor the journal as an offer', [x for x in rp1['rows'] if not x.get('kind')], [])
 
+# --- a sighting beside the planner line ---------------------------------------
+#
+# Stage 2 of the multi-order design: the read that answered the press goes out
+# as a sighting too, typed by its screen, filing nothing. Its stops are the
+# planner line's stops — the one list, said twice, never two readings of it.
+# Compared on every field the planner line carries, so a sighting that lost
+# the name, re-read the street or dropped a stop is named here.
+_PLANNER_FIELDS = ('kind', 'orders', 'name', 'expectedBy', 'street', 'city',
+                   'state', 'zip', 'line', 'place')
+_said_stops = [[[s.get(k) for k in _PLANNER_FIELDS] for s in p[0]]
+               for p in rp1['planners']]
+_seen_stops = [[[s.get(k) for k in _PLANNER_FIELDS] for s in x['stops']]
+               for x in rp1['sightings']]
+ok_('a planner read emits the planner line and a sighting with the same stops '
+    '(%r against %r)' % (_seen_stops, _said_stops),
+    len(_said_stops) == 1 and _seen_stops == _said_stops)
+eq('...the sighting typed as the planner, off the whole screen, under the press',
+   [(x['app'], x['screen'], x['whole'], x['asked'], x['page'], x['orderCount'], x['keep'])
+    for x in rp1['sightings']],
+   [('uber', 'uber.planner', True, True, {'top': True, 'bottom': True}, 1, True)])
+eq('...and each stop labelled by its own header, none of them cut',
+   [[(s['label'], s['partial']) for s in x['stops']] for x in rp1['sightings']],
+   [[('dropoff', None)]])
+# ...and nothing else: the card-box reads round the press found no planner and
+# were not of the whole screen, so they are not sightings. The panel and the
+# journal see nothing new — see "nor the journal as an offer" above.
+eq('...and the card-box reads round it are no sighting (%d reads)' % rp1['calls'],
+   len(rp1['sightings']), 1)
+
+# A page that begins in the middle of one stop and ends on the header of the
+# next: the layout of a read of a stacked trip's planner, scrolled (the corpus
+# case, invented street). The sighting keeps both cut stops and says where
+# each was cut; the planner line, and the destination, are given only the
+# headed stop and no mark, which is what they were given before there was a
+# sighting.
+_CUT_PAGE = _PLANNERS['a page that starts mid-stop keeps the address above the first '
+                      'header, of no kind, partial at the top']
+_hpc = tempfile.mkdtemp()
+rpc = run(_press_on_first_read(_hpc, ''), extra_argv=['--no-parallel'], seconds=4.0,
+          handoff=_hpc, whole_text=_CUT_PAGE)
+_cut = [s for x in rpc['sightings'] for s in x['stops']]
+ok_('a header at the foot of a page is kept, partial (%r)'
+    % [(s['kind'], s['partial']) for s in _cut],
+    len(_cut) == 2 and (_cut[-1]['kind'], _cut[-1]['label'], _cut[-1]['partial'],
+                        _cut[-1]['line']) == ('dropoff', 'dropoff', 'bottom', None))
+eq('...and the address above the first header is kept, of no kind, partial',
+   [(s['kind'], s['label'], s['partial'], s['line']) for s in _cut[:1]],
+   [(None, None, 'top', '1650 Fable Ridge Blvd NW, Kennesaw')])
+eq('...and the planner line is given the headed stop alone, unmarked, as before',
+   [[sorted(s) for s in p[0]] for p in rpc['planners']],
+   [[sorted(_PLANNER_FIELDS)]])
+eq('...and the address above it is filed as nobody\'s end',
+   [d[0] for d in rpc['dropoffs'] if d[0]], [])
+
 # The same planner as the WHOLE live view read it: "Waybill" lost, so the rig
 # cannot say the list ends under the one dropoff it can see. Two open stops
 # fill the list (OP.planner_bounded), and the one dropoff on the glass of a
@@ -1798,6 +1858,16 @@ ok_('the premise: the press read the pickup block whole', any(rpk3['wholes']))
 eq('an address under a Pickup label answers a press with nothing, not with the '
    'restaurant', [((d[0] or {}).get('line'), d[1].get('asked'))
                   for d in rpk3['dropoffs']], [(None, True)])
+# ...and the sighting of that read says what the screen said: an address under
+# a Pickup label, typed a pickup and nothing else.
+# Every whole read the window forced is a sighting of its own, so each is
+# asked, and at least one has to be there.
+_pk_seen = [[(s['kind'], s['label'], s['line']) for s in x['stops']]
+            for x in rpk3['sightings'] if x['whole']]
+ok_('a sighting types an address under a Pickup label as a pickup only (%r)' % _pk_seen,
+    bool(_pk_seen) and all(
+        v == [('pickup', 'pickup', '4100 Fable Mill Pkwy NW, Kennesaw, GA 30144')]
+        for v in _pk_seen))
 # ...nor a planner whose headers did not read, pressed: the cut list again.
 _hpk4 = tempfile.mkdtemp()
 rpk4 = run(_press_on_first_read(_hpk4, ''), extra_argv=['--no-parallel'], seconds=4.0,
@@ -2053,6 +2123,21 @@ eq('a planner with a payout on the screen is not answered as a planner',
    rp4['planners'], [])
 eq('...and the press is told it found nothing, as for any offer card',
    [d[0] for d in rp4['dropoffs'] if d[1].get('asked')], [None])
+
+# ...and a sighting off a frame with a payout on it carries no address, even
+# one printed under a Dropoff label: the refusal is the frame's, and stays in
+# the scanner with the frame.
+_PAID_NAV = 'Dropoff\n12 Fable St, Acworth, GA 30101\n$12.50\nAccept'
+ok_('the premise: that screen has a payout, and an address under a Dropoff label',
+    OP.parse(_PAID_NAV)['pay'] == 12.5
+    and (OP.find_address(_PAID_NAV) or {}).get('zip') == '30101'
+    and OP.address_under_dropoff(_PAID_NAV))
+_hp4b = tempfile.mkdtemp()
+rp4b = run(_press_on_first_read(_hp4b, ''), extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=_hp4b, dropoff_window=1.0, whole_text=_PAID_NAV)
+_paid_seen = [x['stops'] for x in rp4b['sightings'] if x['whole']]
+ok_('a sighting off a frame with a payout on it carries no address (%r)' % _paid_seen,
+    bool(_paid_seen) and all(v == [] for v in _paid_seen))
 
 # ...and a reading of the whole screen box is not one of the two card reads a
 # verdict waits for, in either direction. Scanner.settle ran the agreement

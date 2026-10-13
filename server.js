@@ -142,6 +142,9 @@ var scanner = {
   // /api/status always said none.
   wedged: 0,
   wedgedAt: null,      // when the last one happened, for the same reason
+  // The scanner's sightings, counted by screen type: see countSighting. A
+  // lifetime tally for the same reason as `wedged`.
+  screens: {},
   // What went wrong with the scanner process, and nothing else. See `stderr`
   // beside it, and the 'close' handler, which is the one place a process's own
   // words become this.
@@ -368,6 +371,14 @@ function startScanner() {
       try {
         var read = JSON.parse(line);
         read.at = Date.now();
+        // A sighting (rpi/scan_pi.py, emit_sighting): what a whole-screen or
+        // planner read saw, typed by its screen. Counted by that type for
+        // /api/status and NOTHING ELSE, before anything below can see it: the
+        // dropoff and planner lines still do all the filing, so it files no
+        // end and holds no stop; it writes no journal row; and it is not
+        // broadcast, because its stops are names and front doors and the
+        // stream is somewhere they have not been before. See countSighting.
+        if (read.sighting) { countSighting(read.sighting); return; }
         if (read.phase) {
           scanner.phase = read.phase;
           scanner.status = read;
@@ -1282,6 +1293,21 @@ function plannerPickup(held, dropoff) {
     if (a && b) return a === b;
     return !!norm(st.line) && norm(st.line) === norm(dropoff.line);
   });
+}
+
+/* One sighting, counted by its screen type (rpi/scan_pi.py's emit_sighting;
+ * the types are offer_parser.SCREENS). A run tally on the scanner's health
+ * block of /api/status, `screens`, kept like `fell` and `wedged` for the life
+ * of this process: how many of each screen the rig has seen since the server
+ * started is the question, and a count that reset with each scanner restart
+ * would answer a different one. Nothing else is read off the line — not its
+ * stops, not its address, not its app — and nothing is stored. A type that is
+ * not a short word is counted as 'unknown', never dropped, so a malformed
+ * line still shows as a sighting. */
+function countSighting(s) {
+  var type = s && typeof s.screen === 'string' && /^[A-Za-z.]{1,40}$/.test(s.screen)
+    ? s.screen : 'unknown';
+  scanner.screens[type] = (scanner.screens[type] || 0) + 1;
 }
 
 function holding(now) {
@@ -3633,6 +3659,9 @@ function statusNow() {
       // to times it fell over on its own. The two have different causes and
       // a count that merges them explains neither.
       wedged: scanner.wedged || 0,
+      // The sightings the scanner has sent, by screen type (countSighting),
+      // and only the counts: the lines themselves go nowhere.
+      screens: Object.assign({}, scanner.screens),
       // A successful restart clears `error`, as it should — there is no
       // current problem. This is what is left to say a camera went quiet at
       // all, which is the difference between "it is fine now" and "it is fine

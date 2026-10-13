@@ -112,9 +112,12 @@ PLANNER_KEYS = ('kind', 'orders', 'name', 'expectedBy', 'street', 'city',
                 'state', 'zip', 'line', 'place')
 
 
+# ...and `partial` last, which is the one key that is absent rather than None
+# on a stop the page shows whole: 'top' or 'bottom' only on the stop a page
+# edge cut. Compared as absent-is-None, so a case states it only where it is.
 def _stops(stops):
     return None if stops is None else [[s.get(k, '<missing>') for k in PLANNER_KEYS]
-                                       for s in stops]
+                                       + [s.get('partial')] for s in stops]
 
 
 for c in cases.get('planner', []):
@@ -123,6 +126,26 @@ for c in cases.get('planner', []):
     # lets the scanner take a planner's one dropoff for the trip's only one.
     # Every case says, and a case that does not is a KeyError, not a pass.
     eq('planner ends / ' + c['name'], P.planner_bounded(c['text']), c['bounded'])
+
+# ...and the two ends one at a time, which is what a sighting's `page` says.
+# `bounded` is both together and cannot see them swapped; these two cases have
+# one end each. tests/parser.test.js asks the same of plannerEnds.
+_PLANNER_TEXT = {c['name']: c['text'] for c in cases.get('planner', [])}
+eq('planner_ends: a list scrolled past its first stop shows its end and not its start',
+   P.planner_ends(_PLANNER_TEXT['a planner scrolled past its first stop does not show '
+                                'its start']), (False, True))
+eq('...and one running on below the screen its start and not its end',
+   P.planner_ends(_PLANNER_TEXT['a planner whose list runs on below the screen does not '
+                                'show its end']), (True, False))
+
+# What screen a reading is, for a sighting: the app and the screen as one pair,
+# because the app follows from the screen and a case that got one right and
+# the other wrong is one fault. tests/corpus.test.js runs the same cases. See
+# OP.screen_type.
+for c in cases.get('screens', []):
+    got = P.screen_type(c['text'])
+    eq('screens / ' + c['name'], [got['app'], got['screen']],
+       [c['expect']['app'], c['expect']['screen']])
 
 for c in cases.get('whole', []):
     eq('whole / ' + c['name'], P.is_whole(P.parse(c['text'])), c['expect'])
