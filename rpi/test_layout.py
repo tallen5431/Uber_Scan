@@ -1678,6 +1678,25 @@ const SNAP_MEASURE = (fixture) => {
         shown.mapOver = onMap.over;
         shown.mapNote = onMap.note;
         shown.mapNoteH = onMap.noteH;
+        // This harness has no offer on screen, so Map view lands between
+        // offers: the map across the whole width (live.html setBetween).
+        // Measured as it lands, then the class is taken off, so everything
+        // below measures the map beside a verdict — the narrow one, which is
+        // where every rule about its key, tip and caption is hardest.
+        shown.between = await page.evaluate(() => {
+          const r = (sel) => document.querySelector(sel).getBoundingClientRect();
+          const out = { on: document.body.classList.contains('between'),
+                        live: getComputedStyle(document.querySelector('.live')).display !== 'none',
+                        mapW: Math.round(r('#liveMap').width),
+                        barW: Math.round(r('.bottombar').width),
+                        over: document.documentElement.scrollWidth
+                              > document.documentElement.clientWidth + 1
+                              || document.documentElement.scrollHeight
+                              > document.documentElement.clientHeight + 1 };
+          document.body.classList.remove('between');
+          out.offerMapW = Math.round(r('#liveMap').width);
+          return out;
+        });
         // Every sentence the caption under the map can say, measured in the
         // row it is said in.
         //
@@ -3245,6 +3264,12 @@ try:
                 ok_('...without pushing anything off the glass at %s' % panel,
                     not phone['mapOver'])
                 if dashboard:
+                    _bw = phone.get('between') or {}
+                    ok_('between offers the map takes the whole width, the empty card '
+                        'gone, nothing pushed off the glass, at %s (%r)' % (panel, _bw),
+                        _bw.get('on') and not _bw.get('live') and not _bw.get('over')
+                        and _bw.get('mapW', 0) >= _bw.get('barW', 1) - 2
+                        and _bw.get('offerMapW', 9999) < _bw.get('mapW', 0))
                     ok_('...taking the row rather than a fixed 240px at %s '
                         '(%.0fpx of %.0f)'
                         % (panel, phone['mapH'], phone['mapRowH']),
@@ -3346,8 +3371,8 @@ try:
                     key.get('rows') == 1 and not key.get('spills'))
                 eq('...saying the circle, the pin, the grey and the hollow at %s' % panel,
                    key.get('text'),
-                   "◯ reach · ● pin · ● found · ○ outside" if h <= 380
-                   else "◯ card's reach · ● pin · ● also found · ○ outside")
+                   "◯ reach · PD · ● found · ○ outside" if h <= 380
+                   else "◯ card's reach · PD pin · ● also found · ○ outside")
                 # ...and with the held order's pickup in it: one row and the
                 # short words on every panel but the hat, which has 206px of
                 # room for 293px of words and takes two rows, and only there.
@@ -3359,7 +3384,8 @@ try:
                     key.get('inside') and key.get('belowZoom')
                     and key.get('rows') == (2 if h <= 380 else 1) and not key.get('spills'))
                 eq('...saying the held pickup with the rest at %s' % panel, key.get('text'),
-                   "◯ reach · ● pin · ● found · ○ outside · ◎ held pickup")
+                   "◯ reach · PD%s · ● found · ○ outside · P held pickup"
+                   % ('' if h <= 380 else ' pin'))
                 key = phone.get('keyFailed') or {}
                 ok_('the key saying how each place was found was not drawn sits inside '
                     'the map, below the zoom buttons, in one row, nothing cut, at %s (%r)'

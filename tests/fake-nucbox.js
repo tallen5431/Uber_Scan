@@ -21,6 +21,8 @@
  *                                                     Cobb Parkway, Kennesaw"
  *   q=Dave's Hot Chicken                              nothing: not in OSM
  *   route Marietta Square -> Five Points               31307.4 m, 1659.8 s
+ *                                                     (its shape is the
+ *                                                     fake's, geometryOf)
  *
  * The POINTS are invented round public places (Marietta Square, Cumberland,
  * Kennesaw), never the owner's or a customer's. The duration is kept in the
@@ -36,7 +38,8 @@
  * not the door, "Starbucks" is twelve branches cut at the limit, "Waffle
  * House" is a pickup the road by is shorter than the road direct, "Farm
  * Stand" is 450 m from a road, a point at 34.1, -84.6 is refused by the
- * router with a code that is not NoRoute, and GET /__asked lists every
+ * router with a code that is not NoRoute, a route touching 33.9, -84.7
+ * comes back with a shape that is not one, and GET /__asked lists every
  * question this fake was asked, so a suite can read exactly what left the
  * rig. */
 'use strict';
@@ -191,6 +194,9 @@ function route(coords) {
   if (pts.length === 2 && near(pts[0], -84.5499, 33.9526) && near(pts[1], -84.3880, 33.7490)) {
     return routeBody(pts, [31307.4], [1659.8]);
   }
+  // Any point at 33.9, -84.7 is a route whose shape is not one: a point of
+  // it with no latitude (for the relay's all-or-nothing check on the line).
+  var badShape = pts.some(function (p) { return near(p, -84.7, 33.9); });
   var legs = [], secs = [];
   for (var i = 1; i < pts.length; i++) {
     var m = Math.round(miles(pts[i - 1], pts[i]) * 1.25 * 1609.344 * 10) / 10;
@@ -203,7 +209,9 @@ function route(coords) {
     var direct = Math.round(miles(pts[0], pts[2]) * 1.25 * 1609.344 * 10) / 10;
     legs[1] = Math.round((direct - 400 - legs[0]) * 10) / 10;
   }
-  return routeBody(pts, legs, secs);
+  var body = routeBody(pts, legs, secs);
+  if (badShape) body.routes[0].geometry.coordinates[1] = [-84.7];
+  return body;
 }
 
 // How far OSRM moved each point to reach a road: 3.1 m, except Farm Stand.
@@ -212,11 +220,24 @@ function snapOf(p) {
     ? 450.0 : 3.1;
 }
 
+/* The road's shape, as OSRM's GeoJSON LineString ([lon, lat] pairs): each
+   leg drawn east-west first and then north-south, an L, so a suite can tell
+   a line drawn along this "road" from the straight line between the same
+   points by the corner it turns at. */
+function geometryOf(pts) {
+  var c = [pts[0]];
+  for (var i = 1; i < pts.length; i++) {
+    c.push([pts[i][0], pts[i - 1][1]], pts[i]);
+  }
+  return { type: 'LineString', coordinates: c };
+}
+
 function routeBody(pts, legs, secs) {
   var sum = function (xs) { return Math.round(xs.reduce(function (a, b) { return a + b; }, 0) * 10) / 10; };
   return {
     code: 'Ok',
     routes: [{
+      geometry: geometryOf(pts),
       legs: legs.map(function (d, i) {
         return { steps: [], summary: '', weight: secs[i], duration: secs[i], distance: d };
       }),

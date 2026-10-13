@@ -4776,8 +4776,11 @@ var nbxCache = new Map();
 /* The most an answer may be. Ten search results in jsonv2's shape, each with
  * the real install's "McDonald's, 2700, Windy Hill Road Southeast, ..." name,
  * are 4,891 bytes (measured on tests/fake-nucbox.js); a three-point route
- * with overview=false and 84-character waypoint hints is 786. Anything near
- * this is not one. */
+ * with overview=false and 84-character waypoint hints is 786. With the road's
+ * shape asked for too (overview=simplified, nbxRoute) a route carries one
+ * point per bend OSRM kept, about 23 bytes each as GeoJSON — an estimate,
+ * not measured on the real install — so NBX_LINE_MAX's 5,000 points is
+ * about 115 kB, inside this. Anything near this is not one. */
 var NBX_BODY_MAX = 256 * 1024;
 /* How many candidates a search asks for. Ten: enough for every branch of a
  * chain inside a disc the size of a card's distance, mostly — the real
@@ -4987,6 +4990,28 @@ function streetAnswer(which, body) {
   return { ok: true, names: s.names, how: s.how, cutAt: cut, lines: body.lines };
 }
 
+/* OSRM's GeoJSON route geometry as the page draws it, [[lat, lon], ...], or
+ * null for anything that is not one. Null and not a refusal of the whole
+ * answer: the metres are the figure the caption states and they stand on
+ * their own; without a shape the page draws the straight line it always
+ * drew, which is a line that looks like what it is. All or nothing, because a
+ * road with one point quietly missing is a line drawn through a field. */
+var NBX_LINE_MAX = 5000;
+function nbxLine(g) {
+  var c = g && g.type === 'LineString' && Array.isArray(g.coordinates) ? g.coordinates : null;
+  if (!c || c.length < 2 || c.length > NBX_LINE_MAX) return null;
+  var out = [];
+  for (var i = 0; i < c.length; i++) {
+    var p = c[i];
+    if (!Array.isArray(p) || p.length < 2 || typeof p[0] !== 'number' || typeof p[1] !== 'number'
+        || !isFinite(p[0]) || !isFinite(p[1]) || Math.abs(p[0]) > 180 || Math.abs(p[1]) > 90) {
+      return null;
+    }
+    out.push([p[1], p[0]]);
+  }
+  return out;
+}
+
 function nbxRoute(req, res) {
   var reply = function (code, body) {
     send(res, code, JSON.stringify(body), { 'Content-Type': 'application/json; charset=utf-8' });
@@ -5046,8 +5071,13 @@ function nbxRoute(req, res) {
     if (pts.length < 2 || pts.length > 3 || pts.some(function (x) { return !x; })) {
       return reply(400, { ok: false, error: 'points is two or three lon,lat pairs, ;-separated' });
     }
+    // The shape of the road as well as its length: simplified (OSRM thins
+    // it to the zoom that frames the whole route, which is the zoom Map view
+    // fits to) and as GeoJSON, so the page draws the route along the roads
+    // rather than as a straight line across them. Fixed here like the rest;
+    // the page still sends nothing but its points.
     target = NBX.route + '/route/v1/driving/'
-           + pts.join(';') + '?overview=false';
+           + pts.join(';') + '?overview=simplified&geometries=geojson';
   }
   if (nbxCache.has(target)) return reply(200, nbxCache.get(target));
   nbxAsk(target, function (err, body) {
@@ -5097,11 +5127,11 @@ function nbxRoute(req, res) {
       })) {
         return down('the NucBox router answered without how far it moved each point');
       }
-      // The distance ONLY. OSRM's `duration` is a free-flow estimate with
-      // no traffic in it, and minutes from a pace are refused outright
-      // (AUDITS.md, Settled: "Do not re-time an offer at a pace"), so it is
-      // dropped here, where no page can ever be handed it.
-      out = { ok: true, metres: r0.distance, snaps: snaps };
+      // The distance and the road's shape ONLY. OSRM's `duration` is a
+      // free-flow estimate with no traffic in it, and minutes from a pace are
+      // refused outright (AUDITS.md, Settled: "Do not re-time an offer at a
+      // pace"), so it is dropped here, where no page can ever be handed it.
+      out = { ok: true, metres: r0.distance, snaps: snaps, line: nbxLine(r0.geometry) };
     }
     nbxRemember(target, out);
     reply(200, out);

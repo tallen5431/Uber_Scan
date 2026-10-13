@@ -102,7 +102,7 @@
     /* `stretch`, not `center`, and this is the difference between a picture
        that fits and one that is cut.
        
-       `#viewWrap img { max-height: 100% }` resolves against the wrapper, and a
+       `#viewWrap > img { max-height: 100% }` resolves against the wrapper, and a
        wrapper that is `align-self: center` takes the height of its contents —
        so the percentage had nothing to measure against and was ignored. On the
        800x480 panel the phone drew 612px tall in a 468px row and `overflow:
@@ -120,7 +120,7 @@
        guess that is too big overflows the page — the whole reason the bottom
        bar ended up off the glass. `100%` is the row, and the row is what is
        actually left over. */
-    #viewWrap img { max-height: 100%; object-fit: contain; }
+    #viewWrap > img { max-height: 100%; object-fit: contain; }
     /* The map takes the row the same way, and takes what is LEFT of it rather
        than all of it: the caption under it is the line that says how far out
        of the way the pickup is, which is the whole reason a driver switched
@@ -147,6 +147,14 @@
        verdict is why the screen is bolted to the dashboard. */
     #app:has(#viewWrap.gone) { grid-template-columns: minmax(0, 1fr); }
     #viewWrap.gone { display: none; }
+    /* ...and the other way round, in Map view between offers: the card has
+       nothing on it but WAITING FOR AN OFFER (setBetween says when), and the
+       map takes its column. Measured on the 1024x600 panel in the driver's
+       photograph, the map was 500px of the 1008 across. The card comes back
+       in the render that brings an offer. */
+    body.between #app:has(#liveMap:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
+    body.between #app:has(#liveMap:not([hidden])) .live { display: none; }
+    body.between #app:has(#liveMap:not([hidden])) #viewWrap { grid-column: 1; }
 
     /* Reading the phone rather than aiming at it.
      *
@@ -190,7 +198,7 @@
     body.phoneview .bottombar { grid-column: 1; }
     body.phoneview #viewWrap { align-self: stretch; display: flex;
                                align-items: center; justify-content: center; }
-    body.phoneview #viewWrap img {
+    body.phoneview #viewWrap > img {
       /* Height first, and width whatever the phone's own shape makes it. The
          base rule is `width: 100%`, which on a portrait picture in a landscape
          cell is the wrong axis to pin. */
@@ -591,19 +599,28 @@
   #health { flex-shrink: 0.000001; }
   .dot.on { background: var(--go); }
   #viewWrap { margin: 0; }
-  #viewWrap img {
+  /* The camera's picture and nothing else: `>`, the one <img> that is the
+     pane's own child. Written `#viewWrap img`, every rule for the picture
+     reached into the map in the same pane too, and Leaflet draws its tiles
+     as <img>s: each 256px tile got this 1px border in --line and 14px round
+     corners. On the glass that was a grid of long slate lines across the
+     map, one tile apart, and a dark four-pointed star wherever four tiles'
+     rounded corners met — the "lines crossing the map" a driver read as
+     roads, with the star by the car. rpi/test_dashboard.py puts a tile in
+     the map and holds its border and corners at zero. */
+  #viewWrap > img {
     width: 100%; display: block; border-radius: 14px;
     border: 1px solid var(--line); background: var(--panel);
   }
-  #viewWrap img.stalefeed { opacity: .4; }
+  #viewWrap > img.stalefeed { opacity: .4; }
   /* `display: block` above is an author rule and the browser's own
      `[hidden] { display: none }` is not, so setting .hidden on the picture did
      nothing at all to it. In map mode the img went on taking the pane — it is
      `width: 100%` — and the map grew to the two pixels of its own border,
      which is a map-shaped border and no map. */
-  #viewWrap img[hidden] { display: none; }
+  #viewWrap > img[hidden] { display: none; }
   #viewNote { font-size: 11px; color: var(--muted); text-align: center; padding: 6px 0 0; }
-  #viewWrap.gone img { display: none; }
+  #viewWrap.gone > img { display: none; }
 
   /* The map mode, in the same pane and the same shape as the picture it
      replaces, so switching between them does not move the rest of the page.
@@ -627,6 +644,22 @@
   /* Leaflet's own default is white, which on this panel is a flash of daylight
      at a red light before the tiles land. */
   #liveMap .leaflet-container { background: var(--panel); }
+  /* The tiles muted, so what this page draws is what the eye lands on. OSM's
+     standard style is drawn to be read on its own, in full colour: motorways
+     red and orange, parks green, every road cased — and on it a 3px orange
+     run and a 9px pin were one more road and one more dot. Desaturated and
+     a little darker, they sit back on the dark panel as the ground under the
+     marks. The pane only: the marks, the key and Leaflet's own controls are
+     not filtered. The same tiles from the same host; nothing else asked. */
+  #liveMap .leaflet-tile-pane { filter: saturate(.3) brightness(.78) contrast(.9); }
+  /* P and D on the pins (drawMap's put): the letter centred on the dot,
+     bold, dark on a solid pin and white on a ring, deaf to the pointer so
+     the dot under it still opens its popup. */
+  #liveMap .mv-letter { display: flex; align-items: center; justify-content: center;
+                        font: 700 13px/1 'DejaVu Sans', sans-serif; color: #0b0d10;
+                        pointer-events: none; background: none; border: 0; }
+  #liveMap .mv-letter-ring { color: #fff;
+                             text-shadow: 0 0 2px #0b0d10, 0 0 2px #0b0d10; }
   /* Drawn for a driver, not for a desk: the popups on this panel are read at
      arm's length and dismissed with a bluetooth mouse. */
   #liveMap .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
@@ -660,10 +693,17 @@
             pointer-events: none; }
   #mapKey[hidden] { display: none; }
   #mapKey .k-disc { color: #7aa2f7; }
-  #mapKey .k-pin { color: #17c964; }
+  /* The pins' letters, as the pins draw them: a solid badge for this
+     offer's, an edged one for the order already in the car. */
+  #mapKey .k-pin, #mapKey .k-drop, #mapKey .k-hpick {
+    display: inline-block; min-width: 1.15em; padding: 0 1px; border-radius: 50%;
+    text-align: center; font-weight: 700; line-height: 1.15; box-sizing: border-box; }
+  #mapKey .k-pin { background: #17c964; color: #0b0d10; }
+  #mapKey .k-drop { background: #f5a524; color: #0b0d10; }
   #mapKey .k-cand { color: #8a8f98; }
   #mapKey .k-out { color: #8a8f98; }
-  #mapKey .k-hpick { color: #17c964; }
+  #mapKey .k-hpick { color: #fff; border: 2px solid #17c964;
+                     background: rgba(23, 201, 100, .35); }
   /* With the held pickup in it the long form is 388px of words in DejaVu
      Sans at 12px, past the 800x480 map's room: the two long words go
      whenever that item is shown, 320px. :has() rather than a class showKey
@@ -698,6 +738,11 @@
        there, and only then, rather than lose a word off its end. */
     #mapKey:has(.k-item[data-k="hpick"]:not([hidden])) { white-space: normal; }
     #mapKey .k-long { display: none; }
+    /* ...and the word after the pins' letters: with the P and D badges the
+       short key was 226px of words for the 214 the hat's map gives it
+       (measured, DejaVu Sans 12px), and the letters say what they are on
+       the pins themselves. */
+    #mapKey .k-pinword { display: none; }
     #mapTip { left: 6px; right: 6px; padding: 1px 5px; }
   }
 
@@ -707,7 +752,7 @@
      aiming your way out of those, so the person looking at the picture can say
      where the card is instead. */
   #viewWrap { position: relative; }
-  #viewWrap.drawing img { touch-action: none; cursor: crosshair; }
+  #viewWrap.drawing > img { touch-action: none; cursor: crosshair; }
   #drawn {
     position: absolute;
     border: 2px solid #17c964;          /* the outline the scanner draws, same green */
@@ -924,10 +969,10 @@
          map's bottom edge, inside the map so it is drawn only where the map
          is. Shown only when there is something of that drawn. -->
     <div id="liveMap" hidden><div id="mapKey" hidden><span class="k-all"><span class="k-item" data-k="disc"><span class="k-disc">◯</span> <span class="k-long">card's </span>reach</span><span
-      class="k-item" data-k="pin"><span class="k-sep"> · </span><span class="k-pin">●</span> pin</span><span
+      class="k-item" data-k="pin"><span class="k-sep"> · </span><span class="k-pin">P</span><span class="k-drop">D</span><span class="k-pinword"> pin</span></span><span
       class="k-item" data-k="cand"><span class="k-sep"> · </span><span class="k-cand">●</span> <span class="k-long">also </span>found</span><span
       class="k-item" data-k="out"><span class="k-sep"> · </span><span class="k-out">○</span> outside</span><span
-      class="k-item" data-k="hpick"><span class="k-sep"> · </span><span class="k-hpick">◎</span> held pickup</span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
+      class="k-item" data-k="hpick"><span class="k-sep"> · </span><span class="k-hpick">P</span> held pickup</span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
     <!-- What the "you are here" dot says about itself — "±12 m · 2 s old" —
          or why there is no dot: "GPS too rough here (±130 m)". Over the map's
          corner rather than in the caption below it, which is the detour's row
@@ -2562,6 +2607,22 @@
     return (n < 0 ? '-$' : '$') + Math.abs(Number(n)).toFixed(d);
   }
 
+  /* body.between: no offer, and the card has nothing to say but that. In
+     Map view the stylesheet then gives the map the verdict's column too
+     (the driver's photograph: half the panel an empty WAITING FOR AN OFFER
+     card beside a half-width map). The class flips inside render, so the
+     card is back in the same frame as the offer that brings it; the map is
+     told its new size there and then, or Leaflet goes on drawing tiles for
+     the width it had. */
+  function setBetween(on) {
+    if (document.body.classList.contains('between') === on) return;
+    document.body.classList.toggle('between', on);
+    if (theMap && viewMode === 'map') {
+      theMap.invalidateSize();
+      requestAnimationFrame(function () { if (theMap) theMap.invalidateSize(); });
+    }
+  }
+
   function render() {
     var r = last;
     // A rig that cannot see takes this branch with a reading on hand too. Its
@@ -2669,8 +2730,19 @@
       el.verdict.classList.toggle('stale', quiet > STALE_MS);
       el.working.hidden = true;
       showRaw(r && r.text);
+      /* Between offers, and nothing on the card but WAITING FOR AN OFFER:
+         Map view takes the whole width (see body.between in the stylesheet).
+         Only then — not while aiming, faulted, blind, reading a card, stale,
+         or with a notice or the Trip Planner's stops on the card, each of
+         which is the card saying something. */
+      // No phase is the ordinary shift (a `scanning` phase is cleared when
+      // the scanner first speaks), and its label is the same.
+      setBetween(!blind && (!p.phase || p.phase === 'scanning') && !busy && quiet <= STALE_MS
+                 && el.warn.hidden && el.stops.hidden);
       return;
     }
+    // An offer: the verdict back on the glass, in this same render.
+    setBetween(false);
 
     var stale = Date.now() - readAt > READ_STALE_MS;
     el.verdict.className = 'verdict ' + r.state + (stale ? ' stale' : '');
@@ -4336,6 +4408,9 @@
         // pass their own taps on to the map (bubblingMouseEvents), so this is
         // never the same tap that showed them.
         theMap.on('click', function () { mapTip.hidden = true; });
+        // A card's disc is shown only while it is no bigger than the view;
+        // every zoom and pan, the page's own fits included, ends here.
+        theMap.on('moveend', sizeDiscs);
         // The attribution stays. These tiles are given away on the condition
         // that it does, and a panel being small is not an exemption.
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -4496,7 +4571,29 @@
           }
         }
       }
-      drawMap(want, found, here, true, road);
+      /* The held order's run along the roads, to draw: the car, its pickups
+         with a pin, its end — the points heldRun draws straight. Drawing
+         only; no figure comes of it. Not when any of them is a pin the map
+         calls wrong (red) or a numberless street's point (its card names the
+         street, not where on it): a road to a point nobody vouches for is a
+         road drawn with more confidence than the pin under it. With no
+         held pickups this is car -> held end, the question detour already
+         asked, answered from the page's cache. Router down: null, and the
+         straight run as before. */
+      var heldRoad = null;
+      if (nbx.route && mapNbx) {
+        var hj = mapJudge(want, found, here);
+        var runPts = [here].concat(hj.heldPicks.filter(function (p) { return p.at; })
+          .map(function (p) { return p.at; }), [hj.held]).filter(Boolean);
+        var trusted = hj.held && !hj.off.held && !hj.wrong[want.held]
+          && hj.heldPicks.every(function (p) { return !p.at || (!p.off && !hj.wrong[p.q]); })
+          && runPts.every(function (p) { return !p.stretch; });
+        if (here && trusted && runPts.length >= 2) {
+          heldRoad = await mapNbx.runLine(runPts);
+          if (viewMode !== 'map' || mapFor !== key) return;
+        }
+      }
+      drawMap(want, found, here, true, road, heldRoad);
     } finally {
       mapBusy = false;
       /* A walk the driver walked away from leaves this card marked as drawn
@@ -4560,9 +4657,19 @@
     });
   }
 
-  function mapDot(at, colour, label, name, ring) {
+  /* Sized for the 3.5" hat as much as the 7" panel: a solid pin is 12px
+     round (24px across, the letter 13px bold inside it), a ring 13. They
+     were 9 and 11 with no letter, which on the muted tiles read as one more
+     coloured dot among the map's own. The car's ring keeps its 11 and its
+     blue: it carries no letter, and it is the one mark measured rather than
+     looked up. A ring with a letter — the order already in the car — is
+     edged in its own colour rather than in black, so "the order in my car"
+     and "this offer" differ at a glance by more than a shade of fill. */
+  function mapDot(at, colour, label, name, ring, letter) {
+    var held = ring && !!letter;
     return L.circleMarker([at.lat, at.lon], {
-      radius: ring ? 11 : 9, weight: 3, color: '#0b0d10',
+      radius: !ring ? 12 : held ? 13 : 11, weight: held ? 4 : 3,
+      color: held ? colour : '#0b0d10',
       fillColor: colour, fillOpacity: ring ? 0.35 : 1
     }).bindPopup('<b>' + esc(label) + '</b>'
                  // What the CARD called it. In map mode the verdict pane is
@@ -4578,6 +4685,7 @@
      nowhere, and a map that could not be loaded at all. */
   function clearMap() {
     if (theMap && mapLayer) { theMap.removeLayer(mapLayer); mapLayer = null; }
+    discLayers = [];
     lastBounds = null;
     mapKey.hidden = true;
     mapTip.hidden = true;
@@ -4641,10 +4749,49 @@
   var HOW_COLOUR = { 'new': '#7aa2f7', held: '#f5a524' };
   var HOW_GREY = '#8a8f98';
 
+  /* A card's disc whose radius is more than the view — the longer side of
+     the map, at the zoom it is at — is not drawn: what is on the glass of it
+     then is an arc or two running edge to edge, which says nothing about
+     reach and reads as a road. The driver's own case was a 21.6 mi held
+     card, a 22.1 mi radius, on a 500px map at zoom 11: about 560px of
+     radius (Leaflet's metres a pixel at that latitude, worked out, not
+     measured on the rig). Asked again at every moveend, so zooming out
+     brings it back once it fits and zooming in takes it away; the key
+     names it only while one is shown. */
+  var DISC_OPACITY = 0.6, DISC_FILL = 0.03;
+  var discLayers = [];
+  function sizeDiscs() {
+    if (!theMap) return false;
+    var size = theMap.getSize();
+    var room = Math.max(size.x, size.y);
+    var any = false;
+    discLayers.forEach(function (c) {
+      var d = c.mvDisc;
+      var mid = theMap.latLngToContainerPoint([d.lat, d.lon]);
+      var top = theMap.latLngToContainerPoint([d.lat + d.miles / 69.0, d.lon]);
+      var fits = room > 0 && Math.abs(mid.y - top.y) <= room;
+      c.setStyle({ opacity: fits ? DISC_OPACITY : 0, fillOpacity: fits ? DISC_FILL : 0 });
+      c.mvShown = fits;
+      if (fits) any = true;
+    });
+    var item = mapKey.querySelector('.k-item[data-k="disc"]');
+    if (item && item.mvWanted && discLayers.length) {
+      item.mvWanted.disc = any;
+      // A key with every item off is an empty box over the map: gone too.
+      if (!showKeyItems(item.mvWanted) && mapKey.querySelector('.k-fail').hidden) {
+        mapKey.hidden = true;
+      } else if (mapLayer) {
+        mapKey.hidden = false;
+      }
+    }
+    return any;
+  }
+
   function drawHow(want) {
     // Every layer made first and only then put on the map, all of them, so a
     // throw part-way leaves nothing of it half drawn (see drawMap).
     var made = [];
+    discLayers = [];
     // Which marks of the key are on the map: the circle, the grey (a
     // candidate dot, or a refused street's grey stretch) and the hollow. A
     // pinned street's stretch, in the disc's colour, is the pin's own.
@@ -4655,11 +4802,19 @@
       var d = MV.discShape(c[1]);
       if (!d) return;
       kinds.disc = true;
-      made.push(L.circle([d.lat, d.lon], {
-        radius: d.metres, weight: 1.5, color: HOW_COLOUR[c[0]], opacity: .7,
-        dashArray: '5 6', fillColor: HOW_COLOUR[c[0]], fillOpacity: .04,
+      // Thin and faint, a fine dashed edge and the barest tint: it is the
+      // card's reach, not a road. 1.25px at .6, down from 1.5px at .7; at
+      // 1px and .45 it did not show at all over the muted tiles (looked at
+      // in a browser, Leaflet 1.9.4). Shown only while it is no bigger than
+      // the view; see sizeDiscs.
+      var disc = L.circle([d.lat, d.lon], {
+        radius: d.metres, weight: 1.25, color: HOW_COLOUR[c[0]], opacity: DISC_OPACITY,
+        dashArray: '4 6', fillColor: HOW_COLOUR[c[0]], fillOpacity: DISC_FILL,
         interactive: false, className: 'mv-how mv-disc mv-' + c[0]
-      }));
+      });
+      disc.mvDisc = { lat: d.lat, lon: d.lon, miles: d.miles };
+      discLayers.push(disc);
+      made.push(disc);
     });
     var seen = want.nbxSeen || {};
     Object.keys(seen).forEach(function (q) {
@@ -4710,6 +4865,14 @@
     if (drawn === null) return;
     var has = drawn ? { disc: drawn.disc, pin: pinned, cand: drawn.cand, out: drawn.out } : {};
     has.hpick = !!heldPick;
+    // Kept for sizeDiscs, which takes the disc's item off while no disc is
+    // shown at the zoom the map is at.
+    mapKey.querySelector('.k-item[data-k="disc"]').mvWanted = has;
+    showKeyItems(has);
+  }
+
+  // Whether any item is on.
+  function showKeyItems(has) {
     var first = true;
     [].forEach.call(mapKey.querySelectorAll('.k-item'), function (el) {
       var on = !!has[el.getAttribute('data-k')];
@@ -4718,6 +4881,7 @@
       if (sep) sep.hidden = first;
       if (on) first = false;
     });
+    return !first;
   }
 
   /* What the pins are, and which of them cannot be right — asked once, by
@@ -4764,8 +4928,9 @@
   /* `settled` is false while places are still being asked about, and the tail
      of this function is the whole of what it changes: pins and lines go up as
      they land, and not one geocoded CLAIM is made until every answer is in.
-     `road` is the router's detour when one was asked for (see showMap). */
-  function drawMap(want, found, here, settled, road) {
+     `road` is the router's detour when one was asked for, and `heldRoad` the
+     held order's run along the roads, or null (see showMap). */
+  function drawMap(want, found, here, settled, road, heldRoad) {
     var j = mapJudge(want, found, here);
     var wrong = j.wrong, pick = j.pick, drop = j.drop, held = j.held, off = j.off;
 
@@ -4774,9 +4939,21 @@
     // The marks the tip box spoke for are gone with the layer.
     mapTip.hidden = true;
     var bounds = [];
-    function put(at, colour, label, name, ring) {
+    /* `letter` is what the pin says without being clicked: P where something
+       is picked up, D where it is dropped. A divIcon over the dot, not part
+       of it, and deaf to the pointer, so the dot's popup is still what a
+       press opens. Dark on a solid pin; white on a ring, haloed so it reads
+       over whatever the ring shows of the map. */
+    function put(at, colour, label, name, ring, letter) {
       if (!at) return;
-      mapDot(at, colour, label, name, ring).addTo(mapLayer);
+      mapDot(at, colour, label, name, ring, letter).addTo(mapLayer);
+      if (letter) {
+        L.marker([at.lat, at.lon], {
+          interactive: false, keyboard: false,
+          icon: L.divIcon({ className: 'mv-letter' + (ring ? ' mv-letter-ring' : ''),
+                            html: letter, iconSize: [26, 26], iconAnchor: [13, 13] })
+        }).addTo(mapLayer);
+      }
       bounds.push([at.lat, at.lon]);
     }
 
@@ -4819,9 +4996,9 @@
        inside a ring, which is exactly what that means. */
     put(held, colourFor(want.held, '#f5a524', off.held),
         sayFor(want.held, 'where the order in your car is going', off.held),
-        want.held, true);
+        want.held, true, 'D');
     put(pick, colourFor(want.pickup, '#17c964', off.pick),
-        sayFor(want.pickup, 'pick this one up', off.pick), want.pickup);
+        sayFor(want.pickup, 'pick this one up', off.pick), want.pickup, false, 'P');
     /* The held order's pickups: a GREEN RING, by the rule above — green for
        a pickup, ringed for the order already in hand — and in the key as
        "held pickup". Named as the planner listed it, less the icon's litter
@@ -4829,36 +5006,55 @@
     j.heldPicks.forEach(function (p) {
       put(p.at, colourFor(p.q, '#17c964', p.off),
           sayFor(p.q, 'pick up the order in your car', p.off),
-          [p.name, p.q.replace(/,$/, '')].filter(Boolean).join(' · '), true);
+          [p.name, p.q.replace(/,$/, '')].filter(Boolean).join(' · '), true, 'P');
     });
     put(drop, colourFor(want.dropoff, '#f5a524'),
-        sayFor(want.dropoff, 'and drop it here'), want.dropoff);
+        sayFor(want.dropoff, 'and drop it here'), want.dropoff, false, 'D');
 
     // The run already committed to, and the run this card would add. Dashed
     // for the detour, solid for the job, which is the same distinction the map
     // page draws: a dashed line is miles nobody pays for.
-    // The held order's run: the car, its pickups not yet visited, its end
-    // (MV.heldRun) — straight segments, as every line on this map is.
-    var heldAt = j.heldPicks.map(function (p) { return p.at; });
-    var run = MV.heldRun ? MV.heldRun(here, heldAt, held)
-      : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []);
-    if (run.length && (held || heldAt.some(Boolean))) {
-      L.polyline(run, { color: '#f5a524', weight: 3, opacity: .8,
-                        className: 'mv-held-run' }).addTo(mapLayer);
+    //
+    // 5px over a 9px dark casing, the way a road map draws a route over its
+    // roads: at 3px and no casing they were the same weight as the tiles' own
+    // streets and an orange run read as one more of them. Each casing is put
+    // down before its line, so the lines are over every casing they cross.
+    function runLine(pts, opts) {
+      L.polyline(pts, { color: '#0b0d10', weight: 9, opacity: .55, interactive: false,
+                        lineCap: 'round', lineJoin: 'round',
+                        className: 'mv-casing' }).addTo(mapLayer);
+      L.polyline(pts, Object.assign({ weight: 5, lineCap: 'round', lineJoin: 'round' }, opts))
+        .addTo(mapLayer);
     }
-    if (here && pick) {
-      L.polyline([[here.lat, here.lon], [pick.lat, pick.lon]],
-                 { color: '#c084fc', weight: 3, dashArray: '2 7',
-                   opacity: .9 }).addTo(mapLayer);
+    // The held order's run: the car, its pickups not yet visited, its end
+    // (MV.heldRun) — along the roads when the NucBox's router drew them
+    // (`heldRoad`, see showMap), straight otherwise.
+    var heldAt = j.heldPicks.map(function (p) { return p.at; });
+    var run = heldRoad || (MV.heldRun ? MV.heldRun(here, heldAt, held)
+      : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []));
+    if (run.length && (held || heldAt.some(Boolean))) {
+      runLine(run, { color: '#f5a524', opacity: .9,
+                     className: 'mv-held-run' + (heldRoad ? ' mv-road' : '') });
+    }
+    // The detour, car -> pickup -> held end, along the road the router
+    // measured it on when it did (`road.line`: only with a figure, see
+    // MV.NbxSearch.detour); the two straight legs otherwise.
+    var detourRoad = road && road.line && here && pick && held ? road.line : null;
+    if (detourRoad) {
+      runLine(detourRoad, { color: '#c084fc', dashArray: '2 9', opacity: .95,
+                            className: 'mv-detour mv-road' });
+    }
+    if (here && pick && !detourRoad) {
+      runLine([[here.lat, here.lon], [pick.lat, pick.lon]],
+              { color: '#c084fc', dashArray: '2 9', opacity: .95, className: 'mv-detour' });
     }
     if (pick && drop) {
-      L.polyline([[pick.lat, pick.lon], [drop.lat, drop.lon]],
-                 { color: '#17c964', weight: 3, opacity: .85 }).addTo(mapLayer);
+      runLine([[pick.lat, pick.lon], [drop.lat, drop.lon]],
+              { color: '#17c964', opacity: .9 });
     }
-    if (pick && held) {
-      L.polyline([[pick.lat, pick.lon], [held.lat, held.lon]],
-                 { color: '#c084fc', weight: 3, dashArray: '2 7',
-                   opacity: .9 }).addTo(mapLayer);
+    if (pick && held && !detourRoad) {
+      runLine([[pick.lat, pick.lon], [held.lat, held.lon]],
+              { color: '#c084fc', dashArray: '2 9', opacity: .95, className: 'mv-detour' });
     }
 
     /* How each place was found, AFTER everything above and guarded, so that
@@ -4881,6 +5077,9 @@
     showKey(drewHow, !!(held || pick || drop), heldAt.some(Boolean));
 
     fitView(bounds);
+    // Against the view as it stands; the fit's own moveend asks again at the
+    // zoom it lands on (see the map's moveend).
+    sizeDiscs();
     // Kept so coming back to this same card can put both of them back — the
     // words under the map and the view they describe.
     lastBounds = bounds;

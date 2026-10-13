@@ -4994,13 +4994,25 @@ try:
         # The route the driver measured on the real install.
         _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490')
         eq('a route answers the road metres OSRM gave (31307.4 m on the real '
-           'install), and how far it moved each point to reach a road',
-           (_s, _r), (200, {'ok': True, 'metres': 31307.4, 'snaps': [3.1, 3.1]}))
+           'install), how far it moved each point to reach a road, and the '
+           'road\'s shape to draw as [lat, lon]',
+           (_s, _r), (200, {'ok': True, 'metres': 31307.4, 'snaps': [3.1, 3.1],
+                            'line': [[33.9526, -84.5499], [33.9526, -84.388],
+                                     [33.749, -84.388]]}))
         no_('...and no duration in any form: minutes from a pace are refused',
             re.search(r'dur|second|minute|weight', json.dumps(_r)))
-        eq('...asked with overview off, the points as the page wrote them',
+        eq('...asked for the simplified shape as GeoJSON, fixed here, the points '
+           'as the page wrote them',
            _asked()[-1], '/route/v1/driving/-84.5499,33.9526;-84.3880,33.7490'
-                         '?overview=false')
+                         '?overview=simplified&geometries=geojson')
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490'
+                           '&overview=full')
+        eq('...and the page cannot choose the shape: any other parameter is refused',
+           (_s, _r.get('error')), (400, 'refused: overview'))
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.7,33.9')
+        ok_('a route whose shape is not one keeps its metres and sends no line: the '
+            'page draws it straight (%r)' % (_r,),
+            _s == 200 and isinstance(_r.get('metres'), (int, float)) and _r.get('line') is None)
         _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.5499,33.9830;'
                            '-84.3880,33.7490')
         ok_('...and three points is a route too (%r)' % (_r,),
