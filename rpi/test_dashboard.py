@@ -1038,6 +1038,48 @@ const framed = (page) => page.waitForFunction(
       };
     });
 
+    // THE HELD ORDER'S OWN CARD, BACK UNDER A NEW ID (heldOwnCard in
+    // server.js): the server sends it with `heldCard` and no stack, and the
+    // panel shows it as the order already taken — Took reads "in car" and
+    // pressing it records nothing — with a note saying it is not a new offer.
+    {
+      let marks = 0;
+      const countMarks = (route) => { marks += 1; route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, holding: true }) }); };
+      await page.route('**/api/offers/mark', countMarks);
+      await page.evaluate((r) => window.__es.push(r),
+        Object.assign({}, READINGS.deducted, {
+          offer: { id: 'o-again', pay: 9.5, minutes: 20, perHour: 18,
+                   heldCard: 'o-held@1' },
+          holding: { pay: 9.5, minutes: 20, dropoff: null, holdId: 'o-held@1' },
+          heldCard: 'o-held@1', stack: null }));
+      await page.waitForTimeout(250);
+      const tookNow = () => page.evaluate(() => {
+        const t = document.getElementById('took');
+        return { text: (t.textContent || '').trim(), on: t.classList.contains('on') };
+      });
+      const again = await tookNow();
+      again.warn = await page.evaluate(() => {
+        const w = document.getElementById('warn');
+        return w.hidden ? '' : (w.textContent || '');
+      });
+      await page.evaluate(() => document.getElementById('took').click());
+      await page.waitForTimeout(250);
+      again.marks = marks;
+      again.afterPress = await tookNow();
+      // ...and the same card with nothing held is an ordinary offer to tick.
+      await page.evaluate((r) => window.__es.push(r),
+        Object.assign({}, READINGS.deducted, {
+          offer: { id: 'o-again2', pay: 9.5, minutes: 20, perHour: 18,
+                   heldCard: 'o-held@1' },
+          holding: null, heldCard: null, stack: null }));
+      await page.waitForTimeout(250);
+      again.unheld = await tookNow();
+      await page.unroute('**/api/offers/mark', countMarks);
+      out['heldAgain ' + panel[0]] = again;
+    }
+
     // THE PAIR LINE MUST NOT OUTLIVE THE ORDER IT IS ABOUT.
     //
     // `render()` runs on the one-second tick and repainted `showStack(r.stack)`
@@ -4571,6 +4613,12 @@ const framed = (page) => page.waitForFunction(
                            throttled: { now: ['under-voltage', 'throttled'],
                                         sinceBoot: ['under-voltage', 'throttled'] },
                            throttledWhy: null });
+    // A Took that replaced the order in the car (server.js writes the old
+    // one's drop row `by: 'replaced'`): said on this row for a minute.
+    await page.evaluate(() => window.__es.push({ heldReplaced: { at: 1, saidForMs: 60000 } }));
+    slot.replaced = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 84.6, cpuCWhy: null,
+                                throttled: { now: ['temp limit'], sinceBoot: ['temp limit'] },
+                                throttledWhy: null });
     // The GPS put the order down (server.js gpsArrival): said on this row for
     // a minute, beside the widest Pi word.
     await page.evaluate(() => window.__es.push({ gpsDrop: { at: 1, saidForMs: 60000 } }));
@@ -5477,6 +5525,18 @@ try:
         eq('%s: ...and gone a tick after the order is put down' % panel,
            held.get('afterDropAndATick'), False)
 
+        ha = got.get('heldAgain ' + panel) or {}
+        eq('%s: the held order\'s own card come back reads as taken, in the car' % panel,
+           (ha.get('text'), ha.get('on')), ('✓ Took $9.50 · in car', True))
+        ok_('%s: ...with a note that it is not a new offer (%r)' % (panel, ha.get('warn')),
+            'not a new offer' in (ha.get('warn') or ''))
+        eq('%s: ...and pressing Took on it records nothing' % panel,
+           (ha.get('marks'), (ha.get('afterPress') or {}).get('text')),
+           (0, '✓ Took $9.50 · in car'))
+        eq('%s: ...while with nothing held the same card is an offer to tick' % panel,
+           ((ha.get('unheld') or {}).get('text'), (ha.get('unheld') or {}).get('on')),
+           ('Took $9.50?', False))
+
         link = row.get('link') or {}
         ok_('%s: the route link is inside its own box' % panel,
             link.get('inside'))
@@ -5985,6 +6045,11 @@ try:
         ok_('[%s] ...whole as well (%dpx of %dpx)'
             % (_pn, _note('weak').get('w') or 0, _note('weak').get('sw') or 0),
             _note('weak').get('whole') and _note('weak').get('shown'))
+        eq('[%s] a Took that replaced a hold says the previous order was put down' % _pn,
+           _note('replaced').get('text'), 'Pi temp limit 85°C · previous order put down')
+        ok_('[%s] ...whole (%dpx of %dpx)'
+            % (_pn, _note('replaced').get('w') or 0, _note('replaced').get('sw') or 0),
+            _note('replaced').get('whole') and _note('replaced').get('shown'))
         eq('[%s] a GPS drop is said on the row, after the Pi' % _pn,
            _note('gpsDrop').get('text'), 'Pi temp limit 85°C · dropped · left the dropoff')
         ok_('[%s] ...whole (%dpx of %dpx)'

@@ -416,6 +416,17 @@ function startScanner() {
             read.offer.dropoff = scanner.offer.dropoff;
             read.offer.dropoffScanned = true;
           }
+          // ...and whether this is the order already in the car, back on the
+          // phone under a new id (heldOwnCard). Decided once, on arrival, and
+          // carried across re-reads like the mark: the panel shows it as the
+          // order taken, and no pairing row is written for it below.
+          var carriedNow = holding(Date.now());
+          if (sameCard && scanner.offer.heldCard) {
+            read.offer.heldCard = scanner.offer.heldCard;
+          } else if (!sameCard && carriedNow && read.offer.id !== carriedNow.id
+                     && heldOwnCard(carriedNow, read.offer, Date.now(), false)) {
+            read.offer.heldCard = holdIdOf(carriedNow);
+          }
           scanner.offer = read.offer;
           if (!sameCard) scanner.offerAt = Date.now();
           // ...and the Trip Planner a press read goes, as it goes off the
@@ -440,7 +451,12 @@ function startScanner() {
           // that walks this file already knows to skip it — including the
           // scanner's own resume(), which must never mistake an annotation for
           // the last offer.
-          if (!sameCard) recordPairing(scanner.offer, Date.now(), scanner.last);
+          //
+          // Not for the held order's own card come back under a new id: that
+          // is one order measured against itself (heldOwnCard).
+          if (!sameCard && !scanner.offer.heldCard) {
+            recordPairing(scanner.offer, Date.now(), scanner.last);
+          }
         }
         // The destination, read off the screen that comes AFTER the accept.
         //
@@ -1272,6 +1288,65 @@ function holdIdOf(h) {
   return h ? String(h.id) + '@' + String(h.acceptedAt) : null;
 }
 
+/* ---------- the held order's own card, back under a new id -----------------
+ *
+ * After ✓ Took the same card can come back onto the phone and be logged again
+ * under a NEW id: the scanner's OfferLog keeps one card's identity, so a card
+ * paged away from and back to — or read again after anything else crossed the
+ * mount — is a new offer as far as the journal can tell (see the dupe-id note
+ * in the commit that added this). The server then judged it against the held
+ * order as a second job: a pair row in the append-only journal and a stack
+ * line on the panel, for one order measured against itself. Measured on the
+ * 12 Oct shift: 9 cards were logged under two ids each, one of them the card
+ * just taken, back 33 s after its last row; its pair row (19 s after the Took)
+ * reads stack `warn` under a PASS headline.
+ *
+ * The same card here is the card the driver pressed Took on, figure for
+ * figure: pay to the cent, the same miles and the same card minutes, and the
+ * same pickup and dropoff wherever both readings carry one (case, commas and
+ * spacing ignored). Uber's own re-offers that differ by a few cents ("Includes
+ * expected tip" against "Guaranteed") are different offers and stay paired.
+ * And only within HELD_CARD_MS of the press: the order is on its way after
+ * that, and a card the same to the cent is a new one.
+ *
+ * Not an accept detector. Nothing is marked and nothing is put in the car:
+ * the driver already said they took THIS card, and this only stops the rig
+ * from asking them about it a second time. */
+var HELD_CARD_MS = envNumber('HELD_CARD_MS', 3 * 60000);
+
+/* The figures a card is recognised by: what the offer line carries (its
+ * `minutes` is the card's own, see emit_offer) — or a reading, whose card
+ * minutes are `cardMinutes` where rate() found them, else `minutes`, the same
+ * fallback emit_offer takes. */
+function cardSeen(c, reading) {
+  if (!c) return null;
+  var mins = reading ? (c.cardMinutes || c.minutes) : c.minutes;
+  return { pay: numOrNull(c.pay), miles: numOrNull(c.miles), minutes: numOrNull(mins),
+           pickup: typeof c.pickup === 'string' ? c.pickup : null,
+           dropoff: typeof c.dropoff === 'string' ? c.dropoff : null };
+}
+
+function heldOwnCard(held, card, now, reading) {
+  var s = held && held.seenAs;
+  var c = cardSeen(card, reading);
+  if (!s || !c || s.pay === null || c.pay === null) return false;
+  // The window is on the card's ARRIVAL. A reading of a card already
+  // recognised (the slot says so) is still that card however long it sits on
+  // the phone; a new id after the window is judged as a new offer.
+  var recognised = reading && scanner.offer && scanner.offer.heldCard
+    && scanner.offer.heldCard === holdIdOf(held);
+  if (now - s.tookAt > HELD_CARD_MS && !recognised) return false;
+  if (Math.round(s.pay * 100) !== Math.round(c.pay * 100)) return false;
+  if (s.miles !== c.miles || s.minutes !== c.minutes) return false;
+  function norm(t) {
+    return t ? t.toLowerCase().replace(/[\s,.]+/g, ' ').trim() : '';
+  }
+  return ['pickup', 'dropoff'].every(function (k) {
+    var a = norm(s[k]), b = norm(c[k]);
+    return !a || !b || a === b;
+  });
+}
+
 /* ---------- the GPS drop: at the held order's door, then gone from it -------
  *
  * The driver's words: "It can be safe to assume I have completed the order if
@@ -1321,6 +1396,8 @@ var DWELL_MS = envNumber('GPS_DWELL_MS', 45000);
 var GAP_MS = envNumber('GPS_GAP_MS', 20000);
 // How long the panel says "dropped · left the dropoff" after one.
 var GPS_DROP_SAID_MS = 60000;
+// ...and "previous order put down" after a Took that replaced a hold.
+var HELD_REPLACED_SAID_MS = 60000;
 
 // The live part of the arrival, which is not worth an SD write per fix: where
 // the dwell started and the last fix counted. `arrivedAt` and the pin ARE on
@@ -1593,7 +1670,10 @@ function withStack(read, now) {
   if (!read || !read.ready) return read;
   var held = holding(now);
   read.holding = heldForPanel(held);
-  read.stack = held
+  // The order in the car, on the phone again: no pair to weigh, and the panel
+  // says what it is. See heldOwnCard.
+  read.heldCard = heldOwnCard(held, read, now, true) ? holdIdOf(held) : null;
+  read.stack = held && !read.heldCard
     ? Advice.stack(held, timedLikeTheHeldJob(read),
                    { target: read.target, band: read.band,
                                  costPerMile: read.costPerMile }, now)
@@ -5338,14 +5418,33 @@ function route(req, res) {
             marked = Object.assign({}, body.offer);
           }
         }
+        // The order a Took is about to put down, if it replaces one: see the
+        // drop row below.
+        var replacedHold = null;
         if (marked) {
           marked.accepted = note.accepted;
+          var before = holding(Date.now());
           // ...and it becomes the order in the car, which is what the next
           // offer gets measured against. Taking the mark back puts it down
           // again: the driver pressed it twice because they did not take it,
           // and stacking onto a job they refused is the same wrong number as
           // stacking onto one they already delivered.
-          if (note.accepted) {
+          //
+          // Except a Took on the held order's own card come back under a new
+          // id (heldOwnCard): the order in the car is the one the driver took
+          // already, and replacing it would restart its clock and write a
+          // drop for an order that is still in the car.
+          if (note.accepted && before && marked.heldCard
+              && marked.heldCard === holdIdOf(before)) {
+            // the mark is written; the hold stands as it is
+          } else if (note.accepted) {
+            // A second ✓ Took while an order is still held used to replace
+            // it in silence: the first order left the car with no drop row,
+            // and the journal could not say how it ended. Carrying two orders
+            // is not built (the stack math, Map view and the GPS drop all
+            // assume one), so the first is put down — and SAID: a drop row
+            // `by: 'replaced'`, and a note on the panel.
+            if (before && before.id !== marked.id) replacedHold = before;
             setHolding({
               id: marked.id,
               pay: marked.pay,
@@ -5407,8 +5506,13 @@ function route(req, res) {
               // ...and where the car was when its card came up, with the
               // card's own size: what live.html's Map view checks this
               // order's end against. See cardOf.
-              card: cardOf(marked)
+              card: cardOf(marked),
+              // The card as the driver took it, and when they pressed: what
+              // recognises it if it comes back under a new id. See
+              // heldOwnCard. Not `dropoff` above, which a ⌖ press rewrites.
+              seenAs: Object.assign(cardSeen(marked, false), { tookAt: Date.now() })
             });
+            if (replacedHold) resetArrival(null);
           } else {
             // Through holding() as well: taking the mark back off an order the
             // rest of the rig has already forgotten should not depend on which
@@ -5437,7 +5541,24 @@ function route(req, res) {
         // not from the next reading. Until one arrived the page drew the
         // accepted card's dropoff as that CARD's, and lost it with the card.
         var heldAfter = holding(Date.now());
+        // The replaced order's drop row, the same shape putDown writes, and
+        // the panel told — every panel, through the stream, and this one in
+        // the reply too in case its stream is down. Best-effort like every
+        // annotation: the mark is already on disk and is the driver's fact.
+        if (replacedHold) {
+          var dropNow = Date.now();
+          appendLines(JSON.stringify({ v: 1, kind: 'drop', at: dropNow, id: replacedHold.id,
+                                       seq: dropNow, acceptedAt: replacedHold.acceptedAt,
+                                       by: 'replaced' }) + '\n', function (dropErr) {
+            if (dropErr) console.error('journal: could not record a replaced hold: '
+                                       + dropErr.message);
+          });
+          broadcast({ heldReplaced: { at: dropNow, saidForMs: HELD_REPLACED_SAID_MS } });
+        }
         send(res, 200, JSON.stringify({ ok: true, note: note,
+                                        replaced: replacedHold
+                                          ? { at: Date.now(), saidForMs: HELD_REPLACED_SAID_MS }
+                                          : null,
                                         holding: !!heldAfter,
                                         held: heldForPanel(heldAfter) }),
              { 'Content-Type': 'application/json; charset=utf-8' });
@@ -5483,6 +5604,12 @@ function route(req, res) {
    * for the named job only when no other tick overlaps it; whoever reads these
    * rows checks the marks either side before trusting one.
    *
+   * The tick that takes the slot now says so: it writes a drop row for the
+   * order it put down, `by: 'replaced'` (see the mark handler), so a first job
+   * no longer leaves the record with nothing saying how its hold ended. Its
+   * `at - acceptedAt` is the time to the second tick, not to a delivery, and
+   * is never an elapsed time for anything.
+   *
    * `seq` is the press time, NOT 1. syncKey carries an unknown kind across on
    * `[kind, id, seq]`, so with a constant seq every drop row for one offer
    * collapses onto one key and the second is thrown away on the copy at home
@@ -5505,7 +5632,8 @@ function route(req, res) {
     // The row: {v, kind: 'drop', at, id, seq, acceptedAt}, `acceptedAt` dated
     // from the card as the hold is — see acceptedAt in the mark handler — so
     // this is the same clock holding() expires the job on. putDown() writes
-    // it, for this press and for the GPS drop alike (which adds `by: 'gps'`).
+    // it, for this press and for the GPS drop alike (which adds `by: 'gps'`);
+    // a Took that replaces a hold writes the same row with `by: 'replaced'`.
     //
     // The order is down whether or not the row landed, so the answer is
     // still ok: the panel believes this reply about the HOLD (see the Drop

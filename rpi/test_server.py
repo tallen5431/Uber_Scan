@@ -934,6 +934,128 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+# --- the held order's own card, back under a new id; a Took that replaces -----
+#
+# After ✓ Took the same card came back onto the phone and the scanner logged it
+# under a new id, and the server judged it against the held order as a second
+# job: a pair row and a stack line for one order measured against itself (one
+# such row on the 12 Oct shift, stack `warn`). And a second ✓ Took while an
+# order was held replaced it with no drop row. Made-up cards throughout.
+_HELD_FAKE = (
+    'import json, time\n'
+    'def say(i, pay, pickup="Test Kitchen", dropoff="Elm St & Oak Ave, Testville"):\n'
+    '    print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
+    '        "grossPerHour": 36.0, "pay": pay, "minutes": 30.0, "cardMinutes": 30.0,\n'
+    '        "miles": 5.0, "cost": 1.75, "billedMinutes": 34.0, "target": 25, "band": 15,\n'
+    '        "costPerMile": 0.35, "pickup": pickup, "dropoff": dropoff,\n'
+    '        "at": int(time.time() * 1000),\n'
+    '        "offer": {"id": i, "pay": pay, "minutes": 30.0, "billedMinutes": 34.0,\n'
+    '                  "miles": 5.0, "cost": 1.75, "perHour": 30.0, "state": "go",\n'
+    '                  "pickup": pickup, "dropoff": dropoff}}), flush=True)\n'
+    'say("h-1", 10.00)\n'
+    'time.sleep(2.5)\n'
+    'say("h-2", 10.00, pickup="test kitchen,")\n'
+    'time.sleep(1.5)\n'
+    'say("h-2", 10.00, pickup="test kitchen,")\n'
+    'time.sleep(1.5)\n'
+    'say("n-1", 10.03)\n'
+    'time.sleep(1.5)\n'
+    'say("n-2", 10.00, dropoff="Pine Rd & Birch Ln, Testville")\n'
+    'time.sleep(1.5)\n'
+    'say("h-3", 10.00, pickup=None, dropoff=None)\n'
+    'time.sleep(600)\n')
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'heldagain.py')
+    with open(fake, 'w') as fh:
+        fh.write(_HELD_FAKE)
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake, 'HOLD_GRACE_MS': '600000'}, journal)
+    try:
+        def offer_is(i, patience=8.0):
+            for _ in range(int(patience * 20)):
+                s = get(base, '/api/status')
+                if (s.get('offer') or {}).get('id') == i:
+                    return s
+                time.sleep(0.05)
+            return None
+
+        def drops():
+            return [(r.get('id'), r.get('by')) for r in lines(journal) if r.get('kind') == 'drop']
+
+        ok_('[held again] the card is on record', offer_is('h-1') is not None)
+        code, reply = post(base, '/api/offers/mark', {'id': 'h-1', 'accepted': True})
+        ok_('[held again] Took puts it in the car', reply.get('holding') is True)
+        code, reply = post(base, '/api/offers/mark', {'id': 'h-1', 'accepted': True})
+        eq('[held again] Took pressed again on the same card puts nothing down',
+           (drops(), reply.get('replaced')), ([], None))
+        _s = offer_is('h-2')
+        ok_('[held again] its own card under a new id is on record', _s is not None)
+        _s = _s or {}
+        ok_('[held again] the offer on record is named as the order in the car',
+            ((_s.get('offer') or {}).get('heldCard') or '').startswith('h-1@'))
+        eq('[held again] ...and its reading carries no stack line',
+           ((_s.get('last') or {}).get('stack'), bool((_s.get('last') or {}).get('heldCard'))),
+           (None, True))
+        ok_('[held again] the cards after it are on record', offer_is('h-3', 10.0) is not None)
+        time.sleep(0.5)
+        eq('[held again] no pairing row for the held card come back; '
+           'a few-cents re-offer and a different dropoff are paired',
+           [r['id'] for r in lines(journal) if r.get('kind') == 'pair'], ['n-1', 'n-2'])
+        _s = get(base, '/api/status')
+        ok_('[held again] a reading with no addresses matches on the figures',
+            ((_s.get('offer') or {}).get('heldCard') or '').startswith('h-1@'))
+        code, reply = post(base, '/api/offers/mark', {'id': 'h-3', 'accepted': True})
+        eq('[held again] Took on the held card come back keeps the order and drops nothing',
+           (drops(), ((get(base, '/api/status').get('holding') or {}).get('holdId') or '')[:4]),
+           ([], 'h-1@'))
+        _n2 = {'id': 'n-2', 'pay': 10.00, 'minutes': 30.0, 'billedMinutes': 34.0,
+               'miles': 5.0, 'cost': 1.75, 'state': 'go'}
+        _ev = listen(base, 3)
+        time.sleep(0.3)
+        code, reply = post(base, '/api/offers/mark',
+                           {'id': 'n-2', 'accepted': True, 'offer': _n2})
+        time.sleep(0.5)
+        eq('[replaced] a Took while holding another writes its drop row by replaced',
+           drops(), [('h-1', 'replaced')])
+        ok_('[replaced] ...and the reply says the previous order was put down',
+            (reply.get('replaced') or {}).get('saidForMs'))
+        ok_('[replaced] ...and so does the stream, for every panel',
+            any(m.get('heldReplaced') for m in _ev))
+        ok_('[replaced] ...and the new card is the order in the car',
+            ((get(base, '/api/status').get('holding') or {}).get('holdId') or '').startswith('n-2@'))
+        _row = [r for r in lines(journal) if r.get('kind') == 'drop'][:1] or [{}]
+        eq('[replaced] ...in the same shape as a pressed drop',
+           sorted(_row[0].keys()), ['acceptedAt', 'at', 'by', 'id', 'kind', 'seq', 'v'])
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
+    # The window: the same card arriving after HELD_CARD_MS is a new offer.
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'heldlate.py')
+    with open(fake, 'w') as fh:
+        fh.write(_HELD_FAKE)
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake, 'HOLD_GRACE_MS': '600000',
+                        'HELD_CARD_MS': '500'}, journal)
+    try:
+        for _ in range(160):
+            if (get(base, '/api/status').get('offer') or {}).get('id') == 'h-1':
+                break
+            time.sleep(0.05)
+        post(base, '/api/offers/mark', {'id': 'h-1', 'accepted': True})
+        time.sleep(3.0)
+        eq('[held again] past the window the same figures are a new offer, and paired',
+           [r['id'] for r in lines(journal) if r.get('kind') == 'pair'][:1], ['h-2'])
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
 # --- a card read twice, where only one reading saw the map --------------------
 #
 # The winner of the pay/minutes/miles vote is taken whole, and an address is not

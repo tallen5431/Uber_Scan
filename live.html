@@ -1674,6 +1674,17 @@
     // — and the one thing this rig must never do is press Accept.
     var what = (typeof onRecord.pay === 'number')
       ? '$' + onRecord.pay.toFixed(2) : 'the last one';
+    // The order in the car, back on the phone under a new id (heldOwnCard in
+    // server.js): shown as the order already taken, not as an offer to tick,
+    // and the press does nothing — the driver has said this once.
+    if (heldAgain()) {
+      el.took.textContent = '\u2713 Took ' + what + ' \u00b7 in car';
+      el.took.title = 'The order you already took, on the phone again. Nothing to record.';
+      el.took.classList.remove('failed');
+      el.took.classList.add('on');
+      el.took.setAttribute('aria-pressed', 'true');
+      return;
+    }
     // No "undo" in the label: at this width it overflowed the button by 20px
     // and the word was clipped off, which is worse than not offering it — an
     // affordance nobody can see is not an affordance. It is a toggle, styled
@@ -1691,8 +1702,13 @@
     el.took.setAttribute('aria-pressed', tookState ? 'true' : 'false');
   }
 
+  // Whether the card on record is the held order's own card come back.
+  function heldAgain() {
+    return !!(holdingNow && onRecord && onRecord.heldCard);
+  }
+
   el.took.addEventListener('click', function () {
-    if (!onRecord || !onRecord.id || tookBusy) return;
+    if (!onRecord || !onRecord.id || tookBusy || heldAgain()) return;
     var want = !tookState;
     tookBusy = true;
     showTook();
@@ -1737,6 +1753,11 @@
       // may have been refused, or the hold may already have expired on the
       // server's own clock, and a button for an order that is not there is
       // worse than no button.
+      // A Took that put another order down (server.js writes its drop row
+      // `by: 'replaced'`). Said on the status row like the GPS drop.
+      if (body && body.replaced) {
+        replacedSaidUntil = Date.now() + (body.replaced.saidForMs || 60000);
+      }
       if (body && typeof body.holding === 'boolean') {
         if (holdingNow && !body.holding) forgetDest();
         holdingNow = body.holding;
@@ -1809,6 +1830,8 @@
   // order down because the car left it, until when to say so.
   var atDropoff = false;
   var gpsDropSaidUntil = 0;
+  // ...and until when to say a Took put the previous order down.
+  var replacedSaidUntil = 0;
   var dropBusy = false;
   var dropFailed = false;
   // What the failed press was about, so the failure can be forgotten when the
@@ -1871,7 +1894,7 @@
   function orderDown() {
     holdingNow = false; forgetDest(); heldEnds = undefined; heldSig = null;
     heldId = null; atDropoff = false; heldPlan = null;
-    showStack(null); showDest();
+    showStack(null); showDest(); showTook();
   }
 
   el.drop.addEventListener('click', function () {
@@ -2260,7 +2283,7 @@
       // and pressing this photographed the phone for nothing.
       if (b && b.holding === false && holdingNow) {
         holdingNow = false; forgetDest(); heldEnds = undefined;
-        showDrop(); showStack(null);
+        showDrop(); showStack(null); showTook();
       }
     }).catch(function () {
       /* The scanner answers on its own stream; a failed ask just reads as one
@@ -2983,6 +3006,9 @@
     // be undone by looking again. A washed-out card can be re-read; an offer
     // nobody wrote down is gone.
     if (notSaving) notes.push(notSaving);
+    // The order in the car, read again under a new id: no pair is weighed
+    // (server.js sends no stack for it), and this says why.
+    if (holdingNow && r.heldCard) notes.push('The order you took, on the phone again \u2014 not a new offer.');
     // Then, because it is the note with a remedy in the driver's own hand, and
     // because the reading it is sitting on top of was taken through a
     // washed-out card.
@@ -3326,6 +3352,9 @@
     // not the offer, and the bar beside Drop has no room (it holds six).
     if (atDropoff && holdingNow) bits.push('at dropoff');
     else if (Date.now() < gpsDropSaidUntil) bits.push('dropped \u00b7 left the dropoff');
+    // ...and a Took that put the previous order down (server.js writes its
+    // drop row `by: 'replaced'`). One order word on this row at a time.
+    else if (Date.now() < replacedSaidUntil) bits.push('previous order put down');
     return bits.join(' \u00b7 ');
   }
 
@@ -3397,6 +3426,9 @@
         orderDown();
         gpsDropSaidUntil = Date.now() + (msg.gpsDrop.saidForMs || 60000);
         showDrop();
+      }
+      if (msg.heldReplaced) {
+        replacedSaidUntil = Date.now() + (msg.heldReplaced.saidForMs || 60000);
       }
       if (msg.cpuC !== undefined) cpuNow = typeof msg.cpuC === 'number' ? msg.cpuC : null;
       if (msg.throttled !== undefined) throttledNow = msg.throttled || null;
@@ -3522,6 +3554,8 @@
         heldId = msg.holding ? (msg.holding.holdId || null) : null;
         showDrop();
         showDest();
+        // ...and Took, whose "in car" face is about the hold (heldAgain).
+        showTook();
       }
       // The destination, arriving seconds after the button was pressed. Its own
       // message, carrying no verdict: there is no offer on the screen it was
@@ -3652,6 +3686,7 @@
     heldCard = s.holding ? (s.holding.card || null) : null;
     heldId = s.holding ? (s.holding.holdId || null) : null;
     showDrop();
+    showTook();
     // ...and what it was read as, so a panel opened or reloaded mid-delivery
     // shows the destination already scanned rather than offering to scan one
     // that is on the record. Only a SCANNED one: a dropoff that came off the
