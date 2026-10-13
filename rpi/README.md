@@ -4596,7 +4596,11 @@ and disagree · within 9.4 mi of you"). The figure becomes road miles from the
 NucBox's OSRM, labelled "+N road mi out of your way", over the same three
 points and behind every refusal above — still no minutes, still never through
 the new job's end, and not at all when it comes out below zero past its
-rounding or a point was moved more than 0.2 mi to a road. A
+rounding or a point was moved more than 0.2 mi to a road. While the order in
+the car's Trip Planner still lists its pickup, both figures are measured
+against the run car → that restaurant → its end, the new pickup before the
+restaurant or after it, whichever adds less, and say so ("+1.2 road mi incl.
+restaurant"); a restaurant with no pin is said, not measured past. A
 NucBox that does not answer leaves today's public geocoder and straight line,
 and the line's tail says so. With neither setting, nothing here changes.
 

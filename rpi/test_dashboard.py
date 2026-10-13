@@ -3595,7 +3595,12 @@ const framed = (page) => page.waitForFunction(
         publicAsked.push(q);
         const hit = { "McDonald's (Marietta Sq)": [33.9830, -84.5499],
                       'Shadowood Pkwy SE, Atlanta': [33.8779, -84.4600],
-                      'Church St, Marietta': [33.9580, -84.5520] }[q];
+                      'Church St, Marietta': [33.9580, -84.5520],
+                      // The held order's restaurants (heldRoute below): one
+                      // 21.8 mi north of its card's fix, past its 9.9 mi, and
+                      // one in Idaho. Invented.
+                      '12 Far Rd,': [34.2683, -84.5499],
+                      '9 Idaho Rd,': [43.6150, -116.2023] }[q];
         return route.fulfill({ status: 200, contentType: 'application/json',
           body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
                                         display_name: q }] : []) });
@@ -3837,6 +3842,90 @@ const framed = (page) => page.waitForFunction(
         r.downLater = await note();
         r.downLaterAsked = publicAsked.splice(askedBefore);
       }
+      /* THE HELD ORDER'S RESTAURANT IN THE FIGURE (MV.detourThrough): a
+         hold whose Trip Planner still lists its pickup, and this card's
+         pickup measured against the run car -> that restaurant -> its end.
+         Each case on a hold of its own, so no planner carries over. The
+         restaurant is the fake's door at 250 Example Road (invented), which
+         the router routes like any point. */
+      const heldRoute = async (id, stops, heldAt) => {
+        await page.evaluate((x) => {
+          window.__es.push({
+            ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+            minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
+            holding: { pay: 9.0, minutes: 18.0, holdId: 'h-' + x.id,
+                       dropoff: (x.heldAt || {}).end || 'Shadowood Pkwy SE, Atlanta',
+                       card: Object.assign({}, x.SQ, { miles: (x.heldAt || {}).miles || 9.4 }) },
+            offer: Object.assign({ id: x.id, pay: 14.25, minutes: 20.0,
+                                   billedMinutes: 20.0, cost: 1.4,
+                                   pickup: "McDonald's (Marietta Sq)",
+                                   dropoff: 'Church St, Marietta' }, x.SQ) });
+          window.__es.push({ planner: { stops: x.stops.map((s) => ({
+            kind: 'pickup', orders: 1, name: 'oe ' + s[0], expectedBy: 1189, street: s[1],
+            city: null, state: null, zip: null, line: s[1] })), unfiled: 'dropoffs',
+            asked: true, ms: null, at: 41 } });
+        }, { SQ: SQ, id: id, stops: stops, heldAt: heldAt || null });
+        await page.waitForTimeout(which === 'noSearch' ? 6000 : 3000);
+        return { note: await note(),
+                 lines: await page.evaluate(() => (window.__lines || []).map((l) => ({
+                   cls: String((l.opts || {}).className || ''), pts: l.pts,
+                   dashed: !!(l.opts || {}).dashArray }))) };
+      };
+      // What the figure should be off the fake's road (a quarter longer than
+      // the straight line, leg by leg) and in straight lines, worked out from
+      // the two runs' own lengths rather than by the page's MV.detourThrough.
+      const runWant = () => page.evaluate(() => {
+        const MV = window.MapView, C = { lat: 33.9526, lon: -84.5499 };
+        const A = { lat: 33.9830, lon: -84.5499 }, S = { lat: 33.8779, lon: -84.4600 };
+        const G = { lat: 33.9700, lon: -84.5300 };
+        const run = (pts) => pts.slice(1).reduce((m, p, i) => m + MV.crowMiles(pts[i], p), 0);
+        const before = run([C, A, G, S]), after = run([C, G, A, S]), base = run([C, G, S]);
+        return { crow: Math.min(before, after) - base, before: before <= after,
+                 alone: MV.detour(C, A, S) };
+      });
+      // What the public map was asked before these, which the checks below
+      // read as the places of the cards above; theirs are kept apart.
+      const askedBeforeRoute = publicAsked.length;
+      if (which === 'both' || which === 'noRoad') {
+        r.route = await heldRoute('n-route', [['Example Grill', '250 Example Road']]);
+        r.routeWant = await runWant();
+      }
+      if (which === 'both') {
+        // A restaurant the NucBox has no door for: no pin, and so no figure.
+        r.routeNone = (await heldRoute('n-route-none',
+                                       [['Example Wok', '77 Nowhere Rd']])).note;
+        // A map-view.js from before the figure through the restaurant, which
+        // sw.js can serve this page: its road detour would take the
+        // restaurant and measure to the end alone. Taken off the page's own
+        // MapView for one card, and put back.
+        const thruWas = await page.evaluate(() => {
+          window.__thru = window.MapView.detourThrough;
+          delete window.MapView.detourThrough;
+          return typeof window.__thru;
+        });
+        const stale = await heldRoute('n-route-stale', [['Example Grill', '250 Example Road']]);
+        r.routeStale = { was: thruWas, note: stale.note,
+                         pins: await page.evaluate(() => (window.__marks || []).filter(
+                           (k) => String(k.popup || '').indexOf('pick up the order in your car') >= 0)
+                           .length) };
+        await page.evaluate(() => { window.MapView.detourThrough = window.__thru; });
+      }
+      if (which === 'noSearch') {
+        // The public map, which the stub answers for these three: nothing,
+        // a branch 21.8 mi north of the held card's fix, and Idaho.
+        r.routeLost = (await heldRoute('n-route-lost', [['Example Wok', '77 Nowhere Rd']])).note;
+        r.routeOff = (await heldRoute('n-route-off', [['Example Pie', '12 Far Rd']])).note;
+        r.routeWrong = (await heldRoute('n-route-wrong', [['Example Taco', '9 Idaho Rd']])).note;
+      }
+      if (which === 'streets') {
+        // A restaurant on a numberless street the street index holds: its
+        // stretch, not a door — and the run goes through some point of it.
+        // A 3.0 mi held card, so only the stretch near the Square is inside,
+        // going to the corner the cards above pinned.
+        r.routeStreet = (await heldRoute('n-route-street', [['Example Deli', 'Larkspur Pkwy SE']],
+          { miles: 3.0, end: 'Foxglove Trl & Northgate Dr, Marietta' })).note;
+      }
+      r.routeAsked = publicAsked.splice(askedBeforeRoute);
       if (which === 'streets') {
         /* The street index, on the NucBox's own server, relayed. The held
            order going to a CORNER of the synthetic streets (tests/fixtures/
@@ -6861,10 +6950,18 @@ try:
     eq('...off the branch the disc kept: the 3.0 mi card\'s McDonald\'s is the '
        'one 2.1 mi north', both.get('onePick'), [33.983, -84.5499])
     _routes = [u for u in (got.get('nbxAsked') or []) if u.startswith('/route')]
+    # The new job's end is in one kind of question only: the job's own leg,
+    # its pickup -> its dropoff, two points, asked to DRAW it along the road
+    # (showMap's jobRoad). Never in a question of three, which is what a
+    # detour through it would have to ask (Settled: the detour ends at the
+    # held end).
+    _jobs = [u for u in _routes if '33.95800' in u]
     ok_('...and the router was asked about car, pickup and held end, never the '
-        'new job\'s end (%d routes)' % len(_routes),
+        'new job\'s end but for the job\'s own two-point leg (%d routes, %r)'
+        % (len(_routes), _jobs[:2]),
         _routes and all(len(u.split('?')[0].split(';')) <= 3 for u in _routes)
-        and not any('33.95800' in u for u in _routes))
+        and _jobs and all(re.match(r'^/route/v1/driving/-?[\d.]+,[\d.]+;-84\.55200,33\.95800\?',
+                                   u) for u in _jobs))
     # The routes along the roads: the fake's road turns east-west, then
     # north-south, so a line along it has the corner [car lat, pickup lon].
     _ol = {l.get('cls'): l for l in both.get('oneLines') or []}
@@ -6977,6 +7074,60 @@ try:
     eq('...and the pickup is never sent as the held order\'s end', both.get('heldPickPosts'), [])
     eq('...and it stays on the map under the next card while the order is held',
        both.get('heldPickNext'), 1)
+    # The held order's restaurant IN the figure: the run car -> restaurant ->
+    # its end, this card's pickup before the restaurant or after it, whichever
+    # is less, less that run — by road, and said to include the stop.
+    _rw = both.get('routeWant') or {}
+    _rt = both.get('route') or {}
+    _m = re.match(r'^\+(\d+\.\d) road mi incl\. restaurant$',
+                  _rt.get('note') or '')
+    ok_('[held route] with the held order\'s restaurant still ahead, the road figure is '
+        'the best run through it with this pickup, less the run without, and says the '
+        'restaurant stop is in it (%r, %.2f wanted, %.2f measured to the end alone)'
+        % (_rt.get('note'), 1.25 * (_rw.get('crow') or 0), 1.25 * (_rw.get('alone') or 0)),
+        _m and abs(float(_m.group(1)) - 1.25 * (_rw.get('crow') or 0)) < 0.051
+        and abs(1.25 * ((_rw.get('crow') or 0) - (_rw.get('alone') or 0))) > 0.1)
+    # The fake's road turns east-west, then north-south, leg by leg, so each
+    # line along it is its points with a corner after each one.
+    def _road(*pts):
+        out = [list(pts[0])]
+        for a, b in zip(pts, pts[1:]):
+            out += [[a[0], b[1]], list(b)]
+        return out
+    _C, _A, _G, _S = (33.9526, -84.5499), (33.983, -84.5499), (33.97, -84.53), (33.8779, -84.46)
+    _ln = {l.get('cls'): l.get('pts') for l in _rt.get('lines') or []}
+    eq('[held route] ...the detour drawn along the road where the figure put the pickup, '
+       'into it and back to the run, and the held run along the road through its restaurant',
+       (_ln.get('mv-detour mv-road'), _ln.get('mv-held-run mv-road')),
+       (_road(_C, _A, _G) if _rw.get('before') else _road(_G, _A, _S), _road(_C, _G, _S)))
+    eq('[held route] ...and this card\'s own job, pickup -> dropoff, along the road too',
+       _ln.get('mv-job mv-road'), _road(_A, (33.958, -84.552)))
+    _rn = noroad.get('route') or {}
+    _m = re.match(r'^\+(\d+\.\d) mi incl\. restaurant — straight lines, not roads'
+                  r' · NucBox router down$', _rn.get('note') or '')
+    ok_('[held route] ...and with no router, the straight-line figure is measured through the '
+        'restaurant the same way and says so (%r, %.2f wanted)'
+        % (_rn.get('note'), _rw.get('crow') or 0),
+        _m and abs(float(_m.group(1)) - (_rw.get('crow') or 0)) < 0.051)
+    eq('[held route] ...drawn as the two straight legs of the gap it chose',
+       sorted(tuple(map(tuple, l.get('pts'))) for l in _rn.get('lines') or []
+              if l.get('cls') == 'mv-detour'),
+       sorted([(_C, _A), (_A, _G)] if _rw.get('before') else [(_G, _A), (_A, _S)]))
+    _st = both.get('routeStale') or {}
+    eq('[held route] a map-view.js from before the figure through the restaurant is not '
+       'handed the restaurant: the figure to the end alone, as that file always gave it, '
+       'never "incl. restaurant" over it',
+       (_st.get('was'), _st.get('note'), _st.get('pins')), ('function', both.get('one'), 0))
+    eq('[held route] a restaurant the NucBox will not pin is no figure, in its disc\'s words',
+       both.get('routeNone'), 'no pin for 77 Nowhere… — none fit its card · within 9.4 mi')
+    eq('[held route] ...and one the public map found nothing for is no figure, said',
+       nosearch.get('routeLost'), 'the geocoder found nothing for where your order is collected')
+    eq('[held route] ...nor one past its card\'s reach, refused in the card\'s words',
+       nosearch.get('routeOff'), 'wrong pin for 12 Far Rd — 21.8 mi from your order\'s card, '
+       'past its 9.4 mi')
+    ok_('[held route] ...nor one that cannot be in this state (%r)' % nosearch.get('routeWrong'),
+        re.match(r'^9 Idaho Rd is \d+ mi away — almost certainly a misread name, so no distance$',
+                 nosearch.get('routeWrong') or ''))
     # The street index, relayed to the NucBox's own server.js. A held end
     # the index does not hold (Shadowood Parkway) is asked of the search as
     # before, so the first card's line is the one `both` drew.
@@ -7015,6 +7166,9 @@ try:
                  st.get('longStreet') or '') and st.get('longStreetHeld'))
     eq('...and with the NucBox answering, the public map is asked nothing',
        st.get('publicAsked'), [])
+    eq('[held route] a restaurant on a numberless street is no figure: the run goes '
+       'through a point of it the planner never named',
+       st.get('routeStreet'), 'no figure for Larkspur… — your order\'s pickup is a street')
 
     # HOW EACH PLACE WAS FOUND, drawn (drawHow): what the NucBox sent for
     # each place, beside what was chosen, off the answers the walk already
@@ -7051,16 +7205,19 @@ try:
         and not any(abs(p[0] - (33.9526 + 9.9 / 69.0)) < 1e-6
                     or abs(p[0] - (33.9526 + 3.5 / 69.0)) < 1e-6 for p in _fit))
     # Zero requests to draw it. The walk asks the NucBox once per place and
-    # the router twice; everything drawn above came out of those answers. A
-    # drawing that asked for its candidates itself shows up here as a path
-    # the walk never needed, or one asked twice.
+    # the router three times — the detour's two and the job's own leg, to
+    # draw it along the road; the held run car -> its end is the detour's
+    # second question, answered from the page's cache — and everything drawn
+    # above came out of those answers. A drawing that asked for its
+    # candidates itself shows up here as a path the walk never needed, or one
+    # asked twice.
     _asked = both.get('oneAsked') or []
-    ok_('drawing how each place was found asks nothing more: three places and two '
+    ok_('drawing how each place was found asks nothing more: three places and three '
         'routes, each once, and no other question (%r)' % (_asked,),
-        len(_asked) == 5 and len(set(_asked)) == 5
+        len(_asked) == 6 and len(set(_asked)) == 6
         and sorted(a.split('?')[0] for a in _asked)
-        == ['/api/nbx/route', '/api/nbx/route', '/api/nbx/search', '/api/nbx/search',
-            '/api/nbx/search'])
+        == ['/api/nbx/route', '/api/nbx/route', '/api/nbx/route', '/api/nbx/search',
+            '/api/nbx/search', '/api/nbx/search'])
     _sh = both.get('severalHow')
     _c = _of(_sh, 'mv-how mv-cand mv-new', [33.983, -84.5499]) \
         + _of(_sh, 'mv-how mv-cand mv-new', [33.901, -84.477])

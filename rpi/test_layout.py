@@ -750,11 +750,42 @@ CAPTION_LINES = [
      "no figure for " + WIDEST_DISC + " — the street runs 99.9 mi in the card"),
     ('no figure, a street that runs through the held card',
      "no figure for " + WIDEST_DISC + " — the street runs 99.9 mi in its card"),
+    # ...and the held order's restaurant, still ahead on its Trip Planner,
+    # measured INTO the figure (MV.detourThrough): the line says so before
+    # any tail, so whatever a clamp eats the figure is never read as one
+    # measured to the end alone. "incl. restaurant" takes the place of "out
+    # of your way" and "this pickup is": beside them, ", restaurant stop
+    # included" cut the longest of these short at 800x480. At its longest: a
+    # range, more than one stop, a place not asked, the NucBox down after it
+    # answered one.
+    ('the road figure, the restaurant in it',
+     '+13.2 road mi incl. restaurant'),
+    ('the road figure, the restaurants in it, at its longest',
+     'on your way by road incl. restaurants · 1 not found · NucBox down, public '
+     'map for the rest',
+     'on your way by road incl. restaurants'),
+    ('the figure, the restaurants in it, at its longest',
+     '+13.2–13.6 mi incl. restaurants — straight lines, not roads · 1 not asked '
+     '· NucBox down, public map for the rest',
+     '+13.2–13.6 mi incl. restaurants — straight lines, not roads'),
+    ('the figure on your way, the restaurants in it, at its longest',
+     'on your way incl. restaurants — straight lines, not roads · 1 not asked '
+     '· NucBox down, public map for the rest',
+     'on your way incl. restaurants — straight lines, not roads'),
+    # ...and why there is no figure with the restaurant in it: no pin for
+    # it (the NucBox's refusals and a pin a card contradicts are the lines
+    # above, in the held card's words), or a numberless street.
+    ('the geocoder was unreachable, held pickup',
+     'could not reach the geocoder for where your order is collected'),
+    ('the geocoder had nothing, held pickup',
+     'the geocoder found nothing for where your order is collected'),
+    ('no figure, a held pickup on a street',
+     "no figure for " + WIDEST_DISC + " — your order's pickup is a street"),
 ]
 
 # ...and the third field, where there is one, is the part that must stay
 # READABLE on every panel — the rest being a trailing clause the 3.5" hat may
-# ellipsise. THIRTY entries have one, and they are four judgements: the
+# ellipsise. THIRTY-THREE entries have one, and they are four judgements: the
 # count of places with no pin, whose tail is ` · 1 not asked` or ` · 1 not
 # found` depending on which it was, with one note after it: the NucBox's
 # search down (` · NucBox down, public map used`, or `...public map for the
@@ -794,9 +825,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 78)
-eq('...and thirty of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 30)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 85)
+eq('...and thirty-three of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 33)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:

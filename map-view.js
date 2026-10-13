@@ -102,6 +102,39 @@
     return crowMiles(from, via) + crowMiles(via, to) - crowMiles(from, to);
   }
 
+  /* ...and the same question when the order in the car still has a stop to
+     make before its end: its Trip Planner pickups not yet visited (`stops`,
+     heldPickups, in the planner's order). Measured to the end alone, the
+     figure ignored the held order's restaurant, and a pickup on the far side
+     of it read as a detour off a run the car was never going to drive.
+
+     The run already committed to is from -> stops... -> to. The new pickup
+     goes in ONE of its gaps — before the first stop, between two, or after
+     the last and before the end — and the figure is the best of those runs
+     less the run without it. Every leg the two runs share is the same leg in
+     both and cancels, so each gap's figure is detour(prev, via, next) and the
+     answer is the least of them: with no stops that is detour(from, via, to)
+     exactly, the figure this file always gave. The end stays last (Settled:
+     never a route through where the new job ends) and the stops keep their
+     order: the planner's, not one this file invents.
+
+     { miles, gap, from, to } — `gap` the index of the gap chosen and `from`,
+     `to` the two points either side of it, for Map view to draw the detour
+     where it is — or null when any point is missing: a stop with no point is
+     not a shorter run, it is a run nobody knows. */
+  function detourThrough(from, via, stops, to) {
+    var run = [from].concat(stops || [], [to]);
+    if (!via || run.some(function (p) { return !p; })) return null;
+    var best = null;
+    for (var i = 0; i + 1 < run.length; i++) {
+      var d = detour(run[i], via, run[i + 1]);
+      if (best === null || d < best.miles) {
+        best = { miles: d, gap: i, from: run[i], to: run[i + 1] };
+      }
+    }
+    return best;
+  }
+
   /* Where the car was when a card came up, off the row itself.
    *
    * `isFinite` and not merely `typeof`, because a row whose lat came back as
@@ -717,9 +750,11 @@
    * pickup with no pin is a gap the line goes straight across, not a vertex
    * at nowhere. Straight segments; with the NucBox's router set, Map view
    * draws the same points along the roads instead (NbxSearch.runLine) and
-   * falls back to these. Never a figure: one for this run would be a second
-   * distance the caption has no room for. [] when fewer than two points have
-   * a place. */
+   * falls back to these. Never a figure of its own: one for this run would be
+   * a second distance the caption has no room for. The caption's one figure
+   * is measured against this same run — the new pickup in the best of its
+   * gaps (detourThrough) — and only when every stop on it has a pin. [] when
+   * fewer than two points have a place. */
   function heldRun(car, pickups, end) {
     var pts = [car].concat(pickups || [], [end]).filter(function (p) {
       return p && isFinite(p.lat) && isFinite(p.lon);
@@ -746,7 +781,38 @@
       }
       return streetPlan(street);
     }
-    return { kind: 'name', q: s.replace(/\s*\([^()]*\)?\s*$/, '').trim() || s };
+    return { kind: 'name', q: storeName(s.replace(/\s*\([^()]*\)?\s*$/, '').trim() || s) };
+  }
+
+  /* A merchant's name as OSM would hold it, for the NucBox's search: less the
+   * store's own number, which no map carries. A card can print the merchant's
+   * label for one branch rather than its name — "Papa John's Store 3317" in
+   * the parser's corpus (tests/fixtures/cases.json), "Papa John's Store 181
+   * 4" with the number read in pieces, "AtHome - 0020-Kennesaw" — and asked
+   * for the whole of that, the name OSM holds ("Papa John's", "At Home") is
+   * not what was asked. The tail goes: " Store" and its number (in pieces or
+   * not, "#" or not), or " - " and a number with a town after it or none.
+   *
+   * ...and, only in a name that had such a tail, a capitalised two-letter
+   * word the label ran into the next ("AtHome") is split, as the shop's own
+   * sign writes it ("At Home"). Never "Mc": McDonald's is one word. Only
+   * with the tail, and only two letters, so a brand that writes itself as one
+   * word ("PetSmart", "QuikTrip") is never split, tail or not.
+   *
+   * The NucBox's search only (searchPlan's merchant name, which the disc
+   * chooses among: one branch inside it is pinned, several are refused). NOT
+   * searchText, which the public geocoder is asked by: that asks one answer a
+   * place with no disc to choose by, and handed "Papa John's" it pins
+   * whichever branch it ranks first — the wrong restaurant at the confidence
+   * of the right one — where the whole label is asked as it reads. And
+   * never the stored text: the place keeps its label as read, in the journal,
+   * on the hold and in the caption. */
+  function storeName(name) {
+    var s = String(name == null ? '' : name).replace(/\s+/g, ' ').trim();
+    var tail = /\s+(?:-\s*#?\d+(?:\s*-\s*[A-Za-z][A-Za-z .']*)?|store\s*#?\s*\d+(?:\s+\d+)*)$/i
+      .exec(s);
+    if (!tail || !tail.index) return s;
+    return s.slice(0, tail.index).replace(/^(?!Mc)([A-Z][a-z])(?=[A-Z][a-z])/, '$1 ');
   }
 
   // A street, and its house number when it opens with one ("1985", "12A").
@@ -1081,13 +1147,24 @@
     return { points: out, miles: miles };
   }
 
-  function stretchSpan(car, pick, held) {
+  /* `stops` are the held order's pickups still ahead, as detourThrough takes
+     them: the figure at every point is detourThrough's, the best gap for the
+     new pickup in the run car -> stops -> that point of the end. They are
+     POINTS — Map view refuses a stop that is itself a street before asking
+     this (three stretches against each other is no figure it can afford).
+     Only the last gap touches the end, so the gaps before it are worked out
+     once per pickup point rather than once per pair. */
+  function stretchSpan(car, pick, held, stops) {
     if (!car || !pick || !held || !(pick.stretch || held.stretch)) return null;
     var ps = spanPoints(pick), hs = spanPoints(held);
+    var run = [car].concat(stops || []);
+    var last = run[run.length - 1];
     var lo = Infinity, hi = -Infinity;
     ps.points.forEach(function (p) {
+      var before = Infinity;
+      for (var i = 0; i + 1 < run.length; i++) before = Math.min(before, detour(run[i], p, run[i + 1]));
       hs.points.forEach(function (h) {
-        var d = detour(car, p, h);
+        var d = Math.min(before, detour(last, p, h));
         if (d < lo) lo = d;
         if (d > hi) hi = d;
       });
@@ -2092,8 +2169,13 @@
    * No one-a-second rule: that is the public server's, and this one is the
    * driver's own. Still paced, at NBX_GAP_MS, so a page that one day loops by
    * mistake cannot flood a NucBox that is also serving the copy of the
-   * journal. A card asks at most five questions — three places and two
-   * routes — so the pacing costs a card at most four gaps, 0.4 s.
+   * journal. Counted off Map view's walk: a card with an order in the car
+   * asks six questions — three places, and three routes: the detour's two
+   * and the job's own leg (the held run, car -> its end, is the detour's
+   * second, from the cache). With the order's restaurant still ahead it is
+   * ten — four places, the detour's two a gap of the run (four), the run
+   * itself, the job's leg — so the pacing costs that card nine gaps, 0.9 s,
+   * and a few more for each further restaurant.
    *
    * Answers are kept in memory for the page's life, keyed on the question
    * actually sent. Not in the device's store and not in /api/places: those
@@ -2336,29 +2418,65 @@
      the new job ends (Settled). Resolves { miles } or { why }:
        'snap'        a point was moved more than SNAP_MI to reach a road
        'otherroads'  the figure came out below -ROAD_SAME_MI (see above)
-     besides the road's own unreachable / refused / noroute. */
-  NbxSearch.prototype.detour = function (from, via, to) {
-    if (!from || !via || !to) return Promise.resolve({ why: 'missing' });
+     besides the road's own unreachable / refused / noroute.
+
+     With `stops` — the held order's pickups still ahead, detourThrough's —
+     it is detourThrough by road: the run car -> stops -> end, the new
+     pickup in the best of its gaps, less the run without it. Asked gap by
+     gap, as the question above is for the one gap there is with no stops:
+     road(prev, pickup, next) less road(prev, next), each a question the
+     relay takes (three points at most). So the run without the new pickup is
+     road(car, stop) + ... + road(last stop, end), every held stop an END of
+     its question, and every run with it is that same sum with one leg
+     replaced: the legs the two share are the same questions, asked once and
+     answered from the cache, and cancel exactly. Not runLine's pieces of
+     three (car, stop, end as one question): OSRM's car profile goes on
+     through a point in the middle of a route rather than turning round at it
+     (continue_straight, the profile's default — OSRM's documentation, not
+     measured on the NucBox), so a held stop in the middle of one question
+     and at the end of another can be two different roads, and the
+     difference would be partly that. Every gap's figure must stand —
+     any refusal in any of them refuses the whole, since the best of the
+     ones that answered may not be the best. The line to draw is the chosen
+     gap's own road, prev -> pickup -> next. */
+  NbxSearch.prototype.detour = function (from, via, to, stops) {
+    var run = [from].concat(stops || [], [to]);
+    if (!via || run.some(function (p) { return !p; })) return Promise.resolve({ why: 'missing' });
     var self = this;
-    return this.road([from, via, to]).then(function (by) {
-      if (by.why) return by;
-      return self.road([from, to]).then(function (direct) {
-        if (direct.why) return direct;
-        // Five snaps, one per point asked; server.js answers no route
-        // without them, so a short list is a server from before this.
-        var snaps = (by.snaps || []).concat(direct.snaps || []);
-        if (snaps.length !== 5) {
-          return { why: 'unreachable', error: 'the router did not say how far it moved each point' };
-        }
-        if (!(Math.max.apply(null, snaps) / METRES_PER_MILE <= SNAP_MI)) return { why: 'snap' };
-        var miles = (by.metres - direct.metres) / METRES_PER_MILE;
-        if (miles < -ROAD_SAME_MI) return { why: 'otherroads' };
-        // ...and the road car -> pickup -> held end to draw, when the router
-        // sent its shape (null otherwise: drawn straight, as before). Only
-        // with a figure: every refusal above is a road the caption does not
-        // vouch for, and is drawn as the straight line it always was.
-        return { miles: miles, line: by.line || null };
+    var best = null;
+    // One gap, its two questions in turn, as this always asked them: a gap
+    // whose road through the pickup is refused asks nothing more.
+    function gap(i) {
+      var prev = run[i], next = run[i + 1];
+      return self.road([prev, via, next]).then(function (by) {
+        if (by.why) return by;
+        return self.road([prev, next]).then(function (direct) {
+          if (direct.why) return direct;
+          // Five snaps, one per point asked; server.js answers no route
+          // without them, so a short list is a server from before this.
+          var snaps = (by.snaps || []).concat(direct.snaps || []);
+          if (snaps.length !== 5) {
+            return { why: 'unreachable', error: 'the router did not say how far it moved each point' };
+          }
+          if (!(Math.max.apply(null, snaps) / METRES_PER_MILE <= SNAP_MI)) return { why: 'snap' };
+          var miles = (by.metres - direct.metres) / METRES_PER_MILE;
+          // ...and the road prev -> pickup -> next to draw, when the router
+          // sent its shape (null otherwise: drawn straight, as before).
+          if (best === null || miles < best.miles) best = { miles: miles, line: by.line || null };
+          return null;
+        });
       });
+    }
+    var chain = Promise.resolve(null);
+    run.slice(1).forEach(function (p, i) {
+      chain = chain.then(function (no) { return no || gap(i); });
+    });
+    return chain.then(function (no) {
+      if (no) return no;
+      if (best.miles < -ROAD_SAME_MI) return { why: 'otherroads' };
+      // Only with a figure: every refusal above is a road the caption does
+      // not vouch for, and is drawn as the straight line it always was.
+      return best;
     });
   };
 
@@ -2529,7 +2647,7 @@
   }
 
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
-           detour: detour, fixOf: fixOf, fixRefused: fixRefused,
+           detour: detour, detourThrough: detourThrough, fixOf: fixOf, fixRefused: fixRefused,
            cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,
            againstCard: againstCard, cardRefuses: cardRefuses,
            SLACK_MI: SLACK_MI,
@@ -2545,7 +2663,8 @@
            Geocoder: Geocoder, placeAll: placeAll, needLeaflet: needLeaflet,
            BOX_MILES: BOX_MILES, ANCHOR_STEP: ANCHOR_STEP,
            FAR_MILES: FAR_MILES, GAP_MS: GAP_MS,
-           searchPlan: searchPlan, searchText: searchText, discFor: discFor, discBox: discBox,
+           searchPlan: searchPlan, searchText: searchText, storeName: storeName,
+           discFor: discFor, discBox: discBox,
            plannerName: plannerName, heldPickups: heldPickups, heldRun: heldRun,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            clipToDisc: clipToDisc, stretchInDisc: stretchInDisc, nearestOn: nearestOn,

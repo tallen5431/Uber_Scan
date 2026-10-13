@@ -388,6 +388,17 @@ all:
   road it chose direct — "· router took different roads"), and one where
   OSRM had to move a point more than 0.2 mi to reach a road ("· a pin over
   0.2 mi off road").
+* **The order in the car's restaurant.** While its Trip Planner still lists
+  a pickup, the figure is measured against the run the car is committed to —
+  the car, that restaurant, then the order's end — with the new pickup put
+  before the restaurant or after it, whichever adds less, less the run
+  without it; in road miles or straight lines alike, and the line says so in
+  place of "out of your way": "+1.2 road mi incl. restaurant", "on your way
+  by road incl. restaurant". Asked of the router gap by gap, two or three
+  points a question. A restaurant with no pin, a pin its card refuses, or one
+  that is a street with no number is said, never measured past: a figure to
+  the end alone is the one that left the restaurant out. This card's own
+  job, pickup to dropoff, is drawn along the road too; no figure comes of it.
 * **Corners and streets, with the street index set.** A corner the card
   prints is asked as its two streets inside the card's disc, and pinned where
   they meet when one meeting is inside it, or every one inside is the same
