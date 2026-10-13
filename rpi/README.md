@@ -4534,6 +4534,23 @@ be put beside a journal row. The log is raw gpsd JSON and stays on the Pi; it
 is what the first week's numbers come from — how often a moving car stays
 inside the gate, and where it loses the sky — and nothing on the panel reads it.
 
+**Keeping the logs off the card's free space** takes one line in `Start.sh`,
+before gpspipe starts:
+
+```sh
+python3 tools/gpslog_tidy.py --apply ~/gpslog
+```
+
+Measured on the 12 Oct shift's 14 logs: 5.4 to 9.0 MB an hour while driving,
+58.4 MB for the day, 2.7 MB gzipped. The tool gzips every finished log in that
+directory — never the newest, never one written to in the last ten minutes —
+removing the original only once the `.gz` reads back byte for byte, and deletes
+compressed logs older than 60 days (`--days N` to change it). It touches
+nothing outside the directory it is given, does nothing on a clock that has not
+been set, and without `--apply` only says what it would do. A failure is
+printed and exits 1, so under `set -e` it would stop gpspipe starting: end the
+line with `|| true` there.
+
 **One gate, in one place.** Every fix carries what the receiver said about it
 — `mode`, and `err`, gpsd's `eph` in metres — and `gps.usable()` decides once
 whether it is good enough to show or compare: a 2D or 3D mode, an error
