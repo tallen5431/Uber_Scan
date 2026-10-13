@@ -244,6 +244,16 @@ SEQ.forEach(function (seq) {
      A.placements([{ kind: 'dropoff', name: null, expectedBy: null, street: '1 A St' }],
                   [{ kind: 'dropoff', name: null, expectedBy: null, street: '1 A St' }]), []);
   eq('a stop key is its kind, name and time', A.keyOf(B1[1]), 'dropoff|Mara T.|1202');
+  // Two orders for one customer at one time print two stops with one key, so
+  // a page showing one of them fits under the other page in two places.
+  var K = { kind: 'dropoff', name: 'Mara T.', expectedBy: 1202, street: '2 B St',
+            city: 'Acworth' };
+  var two = { at: 1000, app: 'uber', epoch: 0, top: true, bottom: false,
+              stops: [K, Object.assign({}, K)] };
+  var one = { at: 2000, app: 'uber', epoch: 0, top: false, bottom: true,
+              stops: [Object.assign({}, K)] };
+  eq('a page that fits in two places is not stitched at all',
+     A.linked([two, one], one).pages.length, 1);
 })();
 
 /* ---- the pool across a hold's end ---- */

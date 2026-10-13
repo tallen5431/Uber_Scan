@@ -122,7 +122,8 @@
     if (!next) return null;
     if (!cur) return 'blank';
     if (next.from === 'press') return 'press';
-    if (cur.from === 'press') return null;
+    // (A press already there falls through to null: nothing below lets a
+    // label, a planner or a sighting past one.)
     if (cur.from === 'card') return RANK[next.from] > RANK.card ? 'over the card' : null;
     if (next.from === cur.from && next.key && next.key === cur.key && next.conf > cur.conf) {
       return 'fuller';
