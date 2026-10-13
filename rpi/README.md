@@ -6323,7 +6323,7 @@ stacking advice can say nothing:
 **81% of the silence is "there is no address to work with."** No parser reaches
 an address that is not on the screen, and no geocoder does either — so the fix
 is to read the screen that comes *after* the accept. The driver presses
-**⌖ Dropoff** on the driving screen and the rig reads whatever the phone is
+**⌖ Scan** (called ⌖ Dropoff until it was renamed) on the driving screen and the rig reads whatever the phone is
 showing as an address.
 
 **The anchor is a state code followed by five digits,** and that choice is the

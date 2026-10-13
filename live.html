@@ -1047,7 +1047,7 @@
          are not in teaches people to ignore the bar. It stays available after
          a successful read, because the first thing a driver will want when it
          reads the wrong screen is to press it again. -->
-    <button type="button" class="linkbtn" id="dest" hidden>⌖ Dropoff</button>
+    <button type="button" class="linkbtn" id="dest" hidden>⌖ Scan</button>
     <a class="linkbtn parked" href="index.html">⌨ Type</a>
     <!-- NOT `parked`, which it used to be, and that was the whole of why the
          offers page was hard to reach.
@@ -2100,7 +2100,7 @@
     // needs 238px and arrived as "1234 Daffodil L…". That is not a control any
     // more - it neither says what pressing it does nor shows an address the
     // driver can check - and at 480x320 the column is 69px, where even
-    // "⌖ Dropoff" is a squeeze at 74px.
+    // "⌖ Dropoff", its label until it was renamed ⌖ Scan, was a squeeze at 74px.
     //
     // There is no width to win: the bar is full and every button shares it
     // equally. So the confirmation is a colour, which this panel already trusts
@@ -2108,7 +2108,7 @@
     // The address itself goes where there is room for it - the title, and the
     // stack line's own geography.
     el.dest.textContent = destBusy ? '⌖ reading…'
-      : destFailed ? '⌖ not read' : '⌖ Dropoff';
+      : destFailed ? '⌖ not read' : '⌖ Scan';
     el.dest.classList.toggle('done', !destBusy && !!destSaid);
     // The same class Drop and Took already use for the same thing, so a
     // failure looks like a failure on this bar whichever control it came from.
@@ -4303,7 +4303,7 @@
       // this same card has to be told again. Left as mapSay, re-entry would
       // restate the LAST card's detour over an empty map.
       mapDrew(onRecord
-        ? 'this card names nowhere yet — ⌖ Dropoff reads it off your phone'
+        ? 'this card names nowhere yet — ⌖ Scan reads it off your phone'
         : 'no card read yet — nothing to put on a map');
       return;
     }
@@ -4998,7 +4998,7 @@
     // to measure from. The line names which, with gpsd's own figure.
     if (!here) return MV.fixLine(MV.cardFix(want.card), 'new');
     if (!want.held) return holdingNow
-      ? 'the order in your car has no address on record — ⌖ Dropoff reads it '
+      ? 'the order in your car has no address on record — ⌖ Scan reads it '
         + 'off your phone'
       : 'nothing in the car to compare this against';
     // The card naming no pickup is not the geocoder failing to place one, and

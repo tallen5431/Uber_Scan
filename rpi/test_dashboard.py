@@ -5152,7 +5152,7 @@ try:
         eq('pressing Dropoff while nothing answers puts it to work',
            pressed['dest']['text'], '⌖ reading…')
         eq('...and it offers itself again afterwards',
-           after.get('dest', {}).get('text'), '⌖ Dropoff')
+           after.get('dest', {}).get('text'), '⌖ Scan')
 
         if hung.get('drew'):
             eq('sending a crop box while nothing answers puts it to work',
@@ -5200,14 +5200,14 @@ try:
         drop_now = got.get('dropAfterMark') or {}
         ok_('the destination button appears the moment the offer is marked',
             dest_now.get('shown'))
-        ok_('...saying what it reads', 'Dropoff' in (dest_now.get('text') or ''))
+        ok_('...saying what it reads', 'Scan' in (dest_now.get('text') or ''))
         ok_('...and so does the one that puts the order down',
             drop_now.get('shown'))
 
         # ...and once a destination is read, the control stays a control.
         scanned = got.get('destAfterScan') or {}
         ok_('the button still says what pressing it does after a scan',
-            'Dropoff' in (scanned.get('text') or ''))
+            'Scan' in (scanned.get('text') or ''))
         ok_('...rather than becoming the address it read',
             '1234' not in (scanned.get('text') or ''))
         ok_('...unclipped on the panel the rig actually uses',
@@ -7532,7 +7532,7 @@ try:
        (['2 dropoffs: end not guessed'], True))
     eq('...and the press is answered: no "reading…", and no failure',
        ((pl.get('four') or {}).get('label'), (pl.get('four') or {}).get('failed')),
-       ('⌖ Dropoff', False))
+       ('⌖ Scan', False))
     # ...and the moment the order HAS an end, whichever read gave it, the note
     # goes: "end not guessed" beside a green "Read as: …" was two answers to
     # one question on the glass at once. The stops stay; they are still the

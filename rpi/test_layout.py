@@ -464,7 +464,7 @@ CAPTION_LINES = [
     ('no map-view.js',
      'map-view.js did not load, so there is no map here.'),
     ('a card naming nowhere',
-     'this card names nowhere yet — ⌖ Dropoff reads it off your phone'),
+     'this card names nowhere yet — ⌖ Scan reads it off your phone'),
     ('no card at all',
      'no card read yet — nothing to put on a map'),
     ('loading',
@@ -573,7 +573,7 @@ CAPTION_LINES = [
      "past its 99.9 mi (rig-corrected)",
      "wrong pin for " + WIDEST_DISC + " — 74.9 mi from your order's card"),
     ('the held job has no address',
-     'the order in your car has no address on record — ⌖ Dropoff reads it '
+     'the order in your car has no address on record — ⌖ Scan reads it '
      'off your phone'),
     ('nothing in the car',
      'nothing in the car to compare this against'),
