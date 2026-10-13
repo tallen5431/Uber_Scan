@@ -5961,6 +5961,41 @@ try:
            (True, True, 'server'))
     finally:
         stop(_cp)
+
+    # A reason is said only of the dropoff it was given for (endWhyFor). The
+    # order's first dropoff refused, then the server restarted with no NucBox
+    # and a ⌖ read moving the end: nothing searched the new text, so nothing
+    # may be said about it — the old "no house number" was about the old one.
+    _dj = os.path.join(_adir, 'd', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_dj))
+    open(_dj, 'w').close()
+    _dp, _db = start({'SCANNER': '0', 'NUCBOX_SEARCH': _afake_base,
+                      'NUCBOX_TIMEOUT_MS': '800'}, _dj)
+    try:
+        _atook(_db, 'd-why', _KES)
+        _h = _settled(_db)
+        eq('[auto arm] (the premise: the order\'s first dropoff was refused)',
+           _h.get('endWhy'), 'no house number')
+    finally:
+        stop(_dp)
+    _dfake = os.path.join(_adir, 'd', 'scan.py')
+    with open(_dfake, 'w') as _fh:
+        _fh.write('import json, time\n'
+                  'time.sleep(0.5)\n'
+                  'print(json.dumps({"dropoff": {"line": "1985 Cobb Parkway, Kennesaw, GA 30152",\n'
+                  '    "street": "1985 Cobb Parkway", "city": "Kennesaw", "state": "GA",\n'
+                  '    "zip": "30152", "found": True, "asked": True,\n'
+                  '    "at": int(time.time() * 1000)}}), flush=True)\n'
+                  'time.sleep(600)\n')
+    _dp, _db = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                      'SCANNER_ARGS': _dfake}, _dj)
+    try:
+        _h = _settled(_db, lambda h: (h.get('dropoff') or '').startswith('1985'))
+        eq('[auto arm] a reason given for an earlier dropoff is not said of a new one',
+           (_h.get('dropoff'), _h.get('endPinned'), _h.get('endWhy')),
+           ('1985 Cobb Parkway, Kennesaw, GA 30152', False, None))
+    finally:
+        stop(_dp)
 finally:
     _afake.kill()
     _stub.shutdown()

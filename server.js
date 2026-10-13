@@ -1376,12 +1376,17 @@ function heldOwnCard(held, card, now, reading) {
  * 34.7 m at worst, while the receiver's own error estimate read 27.6 m at the
  * median — about eight times the real scatter — and no parked fix was ever
  * past 75 m from its stop. So ARRIVE_M is 75 m plus the fix's error capped at
- * 25 (ARRIVE_ERR_CAP_M): 100 m at most. It was 75 + the gate's 50 = 125, and
- * the replay is why that was too wide: a door placed 50-75 m from a
- * restaurant stop "arrived" 24 times of 24 while the car waited for the food,
- * and would have put the order down on leaving the restaurant, 19-43 min
- * early; at 100 m it arrived 1 time of 24. The restaurant guard below
- * (pickupNearEnd) takes the rest.
+ * 25 (ARRIVE_ERR_CAP_M): 100 m at most, where it was 75 + the gate's 50 =
+ * 125. What the cap does NOT do is keep the car's wait for the food from
+ * arriving at a door near the restaurant. Replayed with a door placed round
+ * each of the drive's three restaurant stops, eight directions each: 50 or
+ * 75 m away it arrived 24 times of 24 at 125 m AND at 100 m; 100 m away, 1 of
+ * 24 at 125 m and 0 at 100 m. A door at the restaurant would have put the
+ * order down as the car left with the food, 21 and 43 min early on the two
+ * orders whose wait came after the Took. The restaurant guard below
+ * (pickupNearEnd) is what stops that, not the radius. (Re-run in the
+ * verification pass; the first version of this paragraph had the 1 of 24 as
+ * the 50-75 m doors at 100 m.)
  *
  * DWELL_S is 60 s inside. The drive held 53 still stops of 45 s or more; 60 s
  * removes 7 of them, and the real doors held the car inside for 184, 243 and
@@ -1569,8 +1574,13 @@ function searchHeldEnd(key, attempt) {
   function answered(out) {
     var now = endHold(key);
     if (!now || heldEndPin(now)) return;    // moved on, or the page pinned first
+    // Door level is pickInDisc's own rule: with a house number in the plan
+    // (required above) it keeps only answers that carry it, and refuses with
+    // 'nodoor' when none does. A second hasDoor here could never refuse
+    // anything — undone, no check failed — and was a second place answering
+    // the same question.
     var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
-    if (!res.at || !MV.hasDoor(res.at, plan.house)) {
+    if (!res.at) {
       return refuseHeldEnd(now, END_WHY[res.why] || 'no house number');
     }
     // As /api/held-end keeps one, plus who chose it.
