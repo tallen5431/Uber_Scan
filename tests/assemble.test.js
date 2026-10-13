@@ -1,0 +1,279 @@
+/* The assembler. Run with: node tests/assemble.test.js
+ *
+ * assemble.js decides where the order in the car ends: an address the scanner
+ * read, a Trip Planner over one page or several, a lone dropoff on a
+ * single-trip card. This suite drives it the way server.js does — a sighting
+ * in, its candidates through Assemble.dropoff, the kept ones through
+ * Assemble.file — over tests/fixtures/sequences.json, and then holds the
+ * rules one at a time. A planner page in the fixtures is TEXT, made into the
+ * sighting rpi/scan_pi.py's sighting() would send by offer-parser.js's own
+ * findPlanner, plannerEnds, plannerTitled and screenType, so a page here is a
+ * page the reader could produce. Every name and street is invented.
+ */
+
+var A = require('../assemble.js');
+var OP = require('../offer-parser.js');
+var SEQ = require('./fixtures/sequences.json').sequences;
+
+var pass = 0, fail = 0;
+
+function eq(name, got, want) {
+  var g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g === w) pass++;
+  else { fail++; console.log('FAIL  ' + name + ': got ' + g + ' want ' + w); }
+}
+
+function ok_(name, cond) { eq(name, !!cond, true); }
+
+/* What rpi/scan_pi.py's sighting() sends for a whole-screen read of `text`. */
+function pageOf(text, at, asked, app) {
+  var stops = OP.findPlanner(text) || [];
+  var kind = OP.screenType(text);
+  return {
+    at: at, asked: !!asked, whole: true, titled: OP.plannerTitled(text),
+    app: app || kind.app, screen: kind.screen, page: OP.plannerEnds(text),
+    stops: stops.map(function (s) {
+      return { kind: s.kind, orders: s.orders, name: s.name, place: s.place,
+               expectedBy: s.expectedBy, street: s.street, city: s.city, state: s.state,
+               zip: s.zip, line: s.line, partial: s.partial || null, label: s.kind };
+    }),
+    orderCount: null, keep: true
+  };
+}
+
+function holdOf(seed, id) {
+  var h = { id: id || 'o-held', acceptedAt: seed.acceptedAt, minutes: 30,
+            dropoff: seed.dropoff || null, dropoffScanned: false,
+            card: seed.card || null };
+  if (seed.planner) h.planner = seed.planner;
+  h.fields = A.cardFields({ dropoff: h.dropoff, pickup: null }, h.acceptedAt);
+  return h;
+}
+
+/* One sequence, the way server.js runs one: returns the hold, the decisions
+ * made (each said.why, or 'not a single trip' for a dropped lone dropoff), and
+ * the reason each planner page's planner line would have carried. */
+function play(seq) {
+  var st = A.fresh();
+  var hold = holdOf(seq.hold);
+  A.took(st, hold);
+  var decisions = [], unfiled = [];
+  function arrive(d) {
+    var said = A.dropoff(hold, d, null);
+    if (said.drop) { decisions.push(said.why); return; }
+    A.file(hold, d, said, st);
+    decisions.push(said.why);
+  }
+  seq.events.forEach(function (e) {
+    if (e.took) {
+      hold = holdOf({ acceptedAt: e.t, dropoff: e.took.dropoff, card: e.took.card },
+                    e.took.id);
+      A.took(st, hold);
+    } else if (e.dropoff) {
+      arrive(Object.assign({ at: e.t }, e.dropoff));
+    } else if (e.page || e.sighting) {
+      var s = e.page ? pageOf(e.page, e.t, e.asked, e.app)
+        : Object.assign({ at: e.t }, e.sighting);
+      var r = A.sighting(st, hold, s, e.t);
+      r.candidates.forEach(arrive);
+      if (e.page) unfiled.push(A.verdictFor(st, e.t));
+    }
+  });
+  return { hold: hold, decisions: decisions, unfiled: unfiled, st: st };
+}
+
+function brief(f) {
+  return f ? { value: f.value, from: f.from } : null;
+}
+
+/* ---- the sequences ---- */
+SEQ.forEach(function (seq) {
+  var out = play(seq);
+  var x = seq.expect;
+  Object.keys(x.fields || {}).forEach(function (k) {
+    eq(seq.name + ' — ' + k, brief(out.hold.fields[k]), x.fields[k]);
+  });
+  if (x.dropoffScanned !== undefined) {
+    eq(seq.name + ' — dropoffScanned', out.hold.dropoffScanned, x.dropoffScanned);
+  }
+  if (x.fields && x.fields.dropoff !== undefined) {
+    eq(seq.name + ' — the hold\'s own dropoff is the field\'s',
+       out.hold.dropoff, x.fields.dropoff ? x.fields.dropoff.value : null);
+  }
+  if (x.pending) {
+    eq(seq.name + ' — pending pool',
+       A.pending(out.st).map(function (p) { return p.why; }), x.pending);
+  }
+  if (x.refused) {
+    eq(seq.name + ' — refused', out.st.refused.map(function (r) { return r.why; }), x.refused);
+  }
+  if (x.decisions) eq(seq.name + ' — decisions', out.decisions, x.decisions);
+  if (x.unfiled) eq(seq.name + ' — the planner line\'s reason', out.unfiled, x.unfiled);
+});
+
+/* ---- precedence, one rule at a time ---- */
+(function () {
+  function f(from, value, conf, key) {
+    return { value: value || 'x', from: from, conf: conf || 0, at: 1, screen: null, key: key };
+  }
+  ok_('a blank takes anything', A.outranks(f('seen'), null));
+  ok_('a press replaces what another press said', A.outranks(f('press', 'b'), f('press', 'a')));
+  ok_('...and a less complete press still replaces it: the button says what it read',
+      A.outranks(f('press', 'b', 1), f('press', 'a', 3)));
+  ok_('a label never replaces a press', !A.outranks(f('label'), f('press')));
+  ok_('a planner never replaces a press', !A.outranks(f('planner'), f('press')));
+  ok_('a label replaces what the card said', A.outranks(f('label'), f('card')));
+  ok_('a planner replaces what the card said', A.outranks(f('planner'), f('card')));
+  ok_('an unlabelled sighting does not replace what the card said',
+      !A.outranks(f('seen'), f('card')));
+  ok_('a second label does not replace the first', !A.outranks(f('label', 'b'), f('label', 'a')));
+  ok_('a label does not replace a planner value', !A.outranks(f('label'), f('planner')));
+  ok_('a fuller reading of the same planner stop replaces a thinner one',
+      A.outranks(f('planner', 'b', 2, 'dropoff|Mara T.|1202'),
+                 f('planner', 'a', 1, 'dropoff|Mara T.|1202')));
+  ok_('...a less complete one of the same rank does not',
+      !A.outranks(f('planner', 'b', 1, 'dropoff|Mara T.|1202'),
+                  f('planner', 'a', 2, 'dropoff|Mara T.|1202')));
+  ok_('...nor a fuller one of a different stop',
+      !A.outranks(f('planner', 'b', 2, 'dropoff|Orrin B.|1220'),
+                  f('planner', 'a', 1, 'dropoff|Mara T.|1202')));
+  eq('the ranks, highest first', Object.keys(A.RANK).sort(function (a, b) {
+    return A.RANK[b] - A.RANK[a];
+  }), ['press', 'label', 'planner', 'card', 'seen']);
+})();
+
+/* ---- one hold: the server's old dropoff branch, rule by rule ---- */
+(function () {
+  function hold(dropoff, scanned, extra) {
+    var h = Object.assign({ id: 'o', acceptedAt: 1000, dropoff: dropoff,
+                            dropoffScanned: !!scanned, card: { legs: 1, multiOrder: false } },
+                          extra || {});
+    A.fieldsOf(h);
+    return h;
+  }
+  function d(line, extra) {
+    return Object.assign({ found: true, line: line, street: line.split(',')[0],
+                           city: 'Acworth', state: 'GA', zip: '30101', at: 5000 }, extra);
+  }
+  var said = A.dropoff(hold('Oak Dr & Elm Dr, Acworth'), d('9 A St, Acworth', { asked: false }),
+                       null);
+  eq('an unlabelled sighting is not filed over the card\'s end', [said.to, said.kept], [null, false]);
+  said = A.dropoff(hold(null), d('9 A St, Acworth', { asked: false }), null);
+  eq('...while it fills a hold that names no end', [said.to, said.from], ['hold', 'seen']);
+  said = A.dropoff(hold('Oak Dr & Elm Dr, Acworth'),
+                   d('9 A St, Acworth', { asked: false, labelled: 'dropoff', at: 500 }), null);
+  eq('a labelled read from before the Took is not label-proven', [said.labelled, said.to],
+     [false, null]);
+  said = A.dropoff(hold('Oak Dr & Elm Dr, Acworth', false, { card: { legs: 1 } }),
+                   d('9 A St, Acworth', { asked: false, labelled: 'dropoff',
+                                          singleCardOnly: true }), null);
+  eq('a lone dropoff is dropped whole on a card that does not say it is one order',
+     [said.drop, said.why], [true, 'not a single trip']);
+  said = A.dropoff(null, d('9 A St, Acworth', { asked: false }), { id: 'c', dropoff: null });
+  eq('with nothing held, an unprompted address fills the screened card\'s blank',
+     [said.to, said.tally], ['card', false]);
+  said = A.dropoff(null, d('9 A St, Acworth', { asked: false }),
+                   { id: 'c', dropoff: 'Somewhere, Acworth' });
+  eq('...and does not move an end the screened card named', said.to, null);
+  said = A.dropoff(hold('x'), d('9 A St, Acworth', { asked: false }), null);
+  eq('an unprompted address while an order is held is owed a tally row', said.tally, true);
+
+  // Filing keeps the old fields in step, and says where it came from.
+  var h = hold('Oak Dr & Elm Dr, Acworth');
+  var line = d('9 A St, Acworth', { asked: false, labelled: 'dropoff' });
+  said = A.dropoff(h, line, null);
+  A.file(h, line, said);
+  eq('a label-proven address files over the card, and the hold says so in both shapes',
+     [h.dropoff, h.dropoffScanned, h.fields.dropoff.from, h.fields.dropoff.conf],
+     ['9 A St, Acworth', true, 'label', 3]);
+
+  // The card being screened keeps how its address was read, for the Took.
+  var card = { id: 'c', dropoff: null };
+  line = d('9 A St, Acworth', { asked: true });
+  A.fileCard(card, line, A.dropoff(null, line, card));
+  eq('a screened card keeps whether its address was pressed for',
+     [card.dropoff, card.dropoffScanned, card.dropoffFrom], ['9 A St, Acworth', true, 'press']);
+  eq('...and the hold made from it at Took starts from that provenance',
+     brief(A.cardFields(card, 1).dropoff), { value: '9 A St, Acworth', from: 'press' });
+  eq('a card with nothing read off the screen starts from the card',
+     brief(A.cardFields({ dropoff: 'Oak Dr & Elm Dr, Acworth' }, 1).dropoff),
+     { value: 'Oak Dr & Elm Dr, Acworth', from: 'card' });
+})();
+
+/* ---- the planner's one dropoff: moved from rpi/scan_pi.py, the same names ---- */
+(function () {
+  function stop(kind, street, city, line) {
+    return { kind: kind, orders: 1, name: 'Pat Q.', expectedBy: 978, street: street || null,
+             city: city || null, state: city ? 'GA' : null, zip: null, line: line || null };
+  }
+  var KESTREL = stop('dropoff', '4821 Kestrel Dr', 'Marietta', '4821 Kestrel Dr, Marietta');
+  var BIRCH = stop('dropoff', '77 Birch Ln NW', 'Roswell', '77 Birch Ln NW, Roswell');
+  var got = A.plannerDestination([stop('pickup'), KESTREL], true);
+  eq('one dropoff whose street and town read, on a list seen whole, is the order\'s '
+     + 'destination', [got.address && got.address.line, got.why],
+     ['4821 Kestrel Dr, Marietta', null]);
+  eq('...two dropoffs are not guessed between',
+     A.plannerDestination([KESTREL, BIRCH], true).why, 'dropoffs');
+  eq('...one dropoff on a list the rig could not see both ends of is not taken for '
+     + 'the trip\'s only one', A.plannerDestination([stop('pickup'), KESTREL], false).why, 'list');
+  eq('...a dropoff whose street did not read is not filed: a town alone is no address',
+     A.plannerDestination([stop('dropoff', null, 'Marietta', 'Marietta')], true).why, 'address');
+  eq('...and a planner of pickups gives no destination and has nothing to explain',
+     [A.plannerDestination([stop('pickup', '310 Mill St', 'Roswell')], true).address,
+      A.plannerDestination([stop('pickup', '310 Mill St', 'Roswell')], true).why], [null, null]);
+  eq('...and a stop of no kind is not counted',
+     A.plannerDestination([{ kind: null, partial: 'top', street: '1 A St', city: 'Acworth' },
+                           KESTREL], true).why, null);
+  eq('the lone dropoff is one order whose street and town read',
+     A.plannerLoneDropoff([stop('pickup'), KESTREL]).line, '4821 Kestrel Dr, Marietta');
+  eq('...and not one whose header says two orders',
+     A.plannerLoneDropoff([Object.assign({}, KESTREL, { orders: 2 })]), null);
+})();
+
+/* ---- false stitches ---- */
+(function () {
+  var A1 = [{ kind: 'pickup', name: 'Juniper Taqueria', expectedBy: 1180, partial: 'bottom' }];
+  var B1 = [{ kind: null, partial: 'top', expectedBy: null, street: '1 A St', city: 'Acworth' },
+            { kind: 'dropoff', name: 'Mara T.', expectedBy: 1202, street: '2 B St',
+              city: 'Acworth' }];
+  eq('a header cut at the foot joins the block at the top of the next page',
+     A.placements(A1, B1), [0]);
+  eq('...not when the block\'s own time says it is another stop',
+     A.placements(A1, [Object.assign({}, B1[0], { expectedBy: 1190 }), B1[1]]), []);
+  eq('...and a whole stop with no key never anchors a page',
+     A.placements([{ kind: 'dropoff', name: null, expectedBy: null, street: '1 A St' }],
+                  [{ kind: 'dropoff', name: null, expectedBy: null, street: '1 A St' }]), []);
+  eq('a stop key is its kind, name and time', A.keyOf(B1[1]), 'dropoff|Mara T.|1202');
+  // Two orders for one customer at one time print two stops with one key, so
+  // a page showing one of them fits under the other page in two places.
+  var K = { kind: 'dropoff', name: 'Mara T.', expectedBy: 1202, street: '2 B St',
+            city: 'Acworth' };
+  var two = { at: 1000, app: 'uber', epoch: 0, top: true, bottom: false,
+              stops: [K, Object.assign({}, K)] };
+  var one = { at: 2000, app: 'uber', epoch: 0, top: false, bottom: true,
+              stops: [Object.assign({}, K)] };
+  eq('a page that fits in two places is not stitched at all',
+     A.linked([two, one], one).pages.length, 1);
+})();
+
+/* ---- the pool across a hold's end ---- */
+(function () {
+  var st = A.fresh();
+  var h = { id: 'o', acceptedAt: 1000, card: { legs: 1, multiOrder: true },
+            dropoff: null, dropoffScanned: false };
+  A.fieldsOf(h);
+  A.sighting(st, h, pageOf('Trip Planner\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\n'
+                           + 'Address\n415 Ostrander Way NW\nKennesaw, GA\nView details',
+                           2000), 2000);
+  eq('a page that cannot file yet waits in the pool', A.pending(st).length, 1);
+  A.took(st, null);
+  eq('...and is refused when the hold ends, saying so',
+     [A.pending(st).length, st.refused.map(function (r) { return r.why; })],
+     [0, ['the hold ended']]);
+  eq('a card-box read is no page', A.sighting(st, h, Object.assign(
+    pageOf('Dropoff • 1 order\nMara T.', 3000), { whole: false }), 3000).candidates, []);
+})();
+
+console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
+  : '\nAll ' + pass + ' assembler checks passed');
+process.exit(fail ? 1 : 0);

@@ -1651,6 +1651,67 @@ _ONE_DROP = _PLANNERS["Uber's Trip Planner as the rig's live view read it"]
 _ONE_DROP_WHOLE = _PLANNERS["Uber's Trip Planner as the rig read it off the phone's glass"]
 _TWO_DROPS = _PLANNERS['two dropoffs are both listed, in the order the screen gives them']
 
+
+# --- the assembler, given what the loop sent ------------------------------------
+#
+# A Trip Planner's one dropoff, and the reason it gives none, are no longer
+# decided in this process: the scanner sends the sighting and server.js asks
+# assemble.js (Stage 3). So the checks below that used to read the dropoff
+# line off a planner hand the sightings the loop ACTUALLY SENT to the real
+# assembler, in node, and read its answer: the scanner's half and the
+# server's half of one decision, end to end, with nothing restated here.
+# `hold` is the order in the car, as server.js would have it, or None.
+import subprocess  # noqa: E402
+
+_ASSEMBLE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         'assemble.js')
+_ASSEMBLE_JS = r"""
+var A = require(process.argv[1]);
+var input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+var st = A.fresh(), hold = input.hold, out = [];
+input.sightings.forEach(function (s) {
+  var r = A.sighting(st, hold, s, s.at);
+  r.candidates.forEach(function (c) {
+    var said = A.dropoff(hold, c, null);
+    A.file(hold, c, said, st);
+    out.push({ line: c.line, street: c.street, city: c.city, state: c.state, zip: c.zip,
+               asked: said.asked, labelled: said.labelled,
+               singleCardOnly: c.singleCardOnly === true, kept: said.kept,
+               from: said.from });
+  });
+});
+process.stdout.write(JSON.stringify({
+  dropoffs: out,
+  unfiled: input.sightings.map(function (s) {
+    var v = A.verdictFor(st, s.at);
+    return v === undefined ? '<no verdict>' : v;
+  }),
+  byAt: input.sightings.reduce(function (m, s) {
+    var v = A.verdictFor(st, s.at);
+    m[s.at] = v === undefined ? '<no verdict>' : v;
+    return m;
+  }, {}),
+  hold: hold }));
+"""
+
+
+def assembled(sightings, hold=None):
+    """What assemble.js makes of `sightings`, against `hold`."""
+    done = subprocess.run(['node', '-e', _ASSEMBLE_JS, _ASSEMBLE],
+                          input=json.dumps({'sightings': sightings, 'hold': hold}),
+                          capture_output=True, text=True, timeout=60)
+    if done.returncode:
+        raise RuntimeError(done.stderr)
+    return json.loads(done.stdout)
+
+
+def _held(card=None):
+    """An order in the car since long before any of these reads, with the
+    card's own corner as its end."""
+    return {'id': 'o-held', 'acceptedAt': 0, 'minutes': 30,
+            'dropoff': 'Oak Dr & Elm Dr, Acworth', 'dropoffScanned': False,
+            'card': card or {'legs': 1, 'multiOrder': True}}
+
 _hp1, _pl1 = tempfile.mkdtemp(), []
 rp1 = run(_press_on_first_read(_hp1, ''), extra_argv=['--no-parallel'], seconds=5.0,
           handoff=_hp1, whole_text=_ONE_DROP_WHOLE, planners=_pl1)
@@ -1663,12 +1724,17 @@ if rp1['planners']:
     # The journal may hold them: this run keeps a journal, and keepPlaces is
     # not off. See the two runs further down for the other two answers.
     eq('...saying none was left unfiled, and that the journal may keep them',
-       (rp1['planners'][0][1].get('unfiled'), rp1['planners'][0][1].get('keep')),
-       (None, True))
+       (assembled(rp1['sightings'])['byAt'].get(str(rp1['planners'][0][1].get('at'))),
+        rp1['planners'][0][1].get('keep')), (None, True))
+    eq('...and the planner line carries the stamp of the sighting it follows',
+       [p[1].get('at') for p in rp1['planners']],
+       [x['at'] for x in rp1['sightings'] if x['screen'] == 'uber.planner'])
 eq('...and its one dropoff, on a list seen whole, is the address the press gets, '
-   'on the dropoff line', [((d[0] or {}).get('line'), d[1].get('asked'))
-                           for d in rp1['dropoffs']],
+   'off its sighting', [(d['line'], d['asked'])
+                        for d in assembled(rp1['sightings'])['dropoffs']],
    [('4821 Kestrel Dr, Marietta', True)])
+eq('...and the scanner sends no dropoff line of its own off a planner',
+   rp1['dropoffs'], [])
 eq('...off the first whole-screen read, then back to the card box (%r)' % rp1['wholes'],
    (sum(rp1['wholes']), rp1['wholes'][-1] if rp1['wholes'] else None), (1, False))
 # The `whole` early return in digest() is what keeps this off the offer path,
@@ -1744,12 +1810,14 @@ rp1b = run(_press_on_first_read(_hp1b, ''), extra_argv=['--no-parallel'], second
 ok_('the premise: that read has one dropoff and no end to its list',
     [s['kind'] for s in OP.find_planner(_ONE_DROP)] == ['dropoff']
     and not OP.planner_bounded(_ONE_DROP))
+_as1b = assembled(rp1b['sightings'], _held())
 eq('one dropoff on a list the rig could not see the end of is answered with the '
    'stop and the reason, once',
-   [([s['line'] for s in p[0]], p[1].get('unfiled')) for p in rp1b['planners']],
+   [([s['line'] for s in p[0]], _as1b['byAt'].get(str(p[1].get('at'))))
+    for p in rp1b['planners']],
    [(['4821 Kestrel Dr, Marietta'], 'list')])
 eq('...and is not filed as the order\'s end, nor told "not read" over the stop',
-   rp1b['dropoffs'], [])
+   (rp1b['dropoffs'], _as1b['dropoffs']), ([], []))
 
 # Two dropoffs, the second with a ZIP — so find_address, left to itself, would
 # have answered the press with that customer's door, chosen by layout.
@@ -1758,11 +1826,13 @@ ok_('the premise: find_address alone would answer this planner with its last '
 _hp2 = tempfile.mkdtemp()
 rp2 = run(_press_on_first_read(_hp2, ''), extra_argv=['--no-parallel'], seconds=5.0,
           handoff=_hp2, whole_text=_TWO_DROPS)
+_as2 = assembled(rp2['sightings'], _held())
 eq('a planner with two dropoffs is answered with both, once, and the reason',
-   [([s['name'] for s in p[0]], p[1].get('unfiled')) for p in rp2['planners']],
+   [([s['name'] for s in p[0]], _as2['byAt'].get(str(p[1].get('at'))))
+    for p in rp2['planners']],
    [(['Pat Q.', 'Lee M.'], 'dropoffs')])
 eq('...and the order in the car is given neither, and is not told "not read" '
-   'over the stops either', rp2['dropoffs'], [])
+   'over the stops either', (rp2['dropoffs'], _as2['dropoffs']), ([], []))
 eq('...and the window shuts on the answer, not twelve seconds later (%r)'
    % rp2['wholes'], sum(rp2['wholes']), 1)
 # ...and the reads the window was forcing stop with it. The whole-screen reads
@@ -2045,17 +2115,19 @@ eq('an unpressed whole-screen read sends no address under no label',
 _ha6, _pa6 = tempfile.mkdtemp(), []
 _hold(_ha6, time.time() + 3600)
 ok_('the premise: under a press that planner gives its dropoff as the destination',
-    SP.planner_destination(OP.find_planner(_ONE_DROP_WHOLE),
-                           OP.planner_bounded(_ONE_DROP_WHOLE))[0] is not None
-    and OP.planner_titled(_ONE_DROP_WHOLE))
+    [d['line'] for d in assembled(rp1['sightings'])['dropoffs']]
+    == ['4821 Kestrel Dr, Marietta'] and OP.planner_titled(_ONE_DROP_WHOLE))
 ra6 = run(lambda n, k: FRAG if n == 1 else _ONE_DROP, extra_argv=['--no-parallel'],
           seconds=4.0, handoff=_ha6, whole_text=_ONE_DROP_WHOLE, planners=_pa6)
 eq('an unpressed planner read sends the stops, unasked',
    [([s['line'] for s in p[0]], p[1].get('asked')) for p in _pa6],
    [(['4821 Kestrel Dr, Marietta'], False)])
 eq('...and its one dropoff as the order\'s destination, label-proven',
-   [((d[0] or {}).get('line'), d[1].get('asked'), d[1].get('labelled'))
-    for d in ra6['dropoffs']], [('4821 Kestrel Dr, Marietta', False, True)])
+   [(d['line'], d['asked'], d['labelled'], d['from'], d['kept'])
+    for d in assembled([x for x in ra6['sightings'] if x['whole']], _held())['dropoffs']],
+   [('4821 Kestrel Dr, Marietta', False, True, 'planner', True)])
+eq('...off the sighting alone: the scanner sends no dropoff line for it',
+   ra6['dropoffs'], [])
 
 # ...and so is a dropoff at a hotel: the hotel's name, the town bare, then the
 # street and town with no ZIP. On shift the card box read that block with its
@@ -2077,25 +2149,70 @@ ok_('the premise: the box read of the hotel dropoff has no stop header but the '
     and OP.planner_bounded(_HOTEL_WHOLE) and OP.planner_titled(_HOTEL_WHOLE))
 ra7 = run(lambda n, k: FRAG if n == 1 else _HOTEL_BOX, extra_argv=['--no-parallel'],
           seconds=4.0, handoff=_ha7, whole_text=_HOTEL_WHOLE, planners=_pa7)
+_as7 = assembled([x for x in ra7['sightings'] if x['whole']], _held())
 eq('a planner dropoff at a hotel, no ZIP, is filed as the held order\'s destination: '
    'its street and town, label-proven',
-   [((d[0] or {}).get('street'), (d[0] or {}).get('city'), (d[0] or {}).get('state'),
-     (d[0] or {}).get('zip'), d[1].get('asked'), d[1].get('labelled'))
-    for d in ra7['dropoffs']],
+   [(d['street'], d['city'], d['state'], d['zip'], d['asked'], d['labelled'])
+    for d in _as7['dropoffs']],
    [('1180 Wrenfield Rd NW', 'Kennesaw', 'GA', None, False, True)])
 eq('...said as filed on any held card, the list being seen whole',
-   [d[1].get('single_card_only') for d in ra7['dropoffs']], [False])
+   [(d['singleCardOnly'], d['kept']) for d in _as7['dropoffs']], [(False, True)])
 # ...and the shift's own screen, "Waybill" under the bar: the lone dropoff still
 # goes out, marked for server.js to file only onto a single-trip card.
 _ha8 = tempfile.mkdtemp()
 _hold(_ha8, time.time() + 3600)
 ra8 = run(lambda n, k: FRAG if n == 1 else _HOTEL_BOX, extra_argv=['--no-parallel'],
           seconds=4.0, handoff=_ha8, whole_text=_HOTEL)
+_seen8 = [x for x in ra8['sightings'] if x['whole']]
 eq('an unbounded planner\'s lone one-order dropoff is sent, unasked, label-proven '
    'and marked single-card-only',
-   [((d[0] or {}).get('line'), d[1].get('asked'), d[1].get('labelled'),
-     d[1].get('single_card_only')) for d in ra8['dropoffs']],
-   [('1180 Wrenfield Rd NW, Kennesaw', False, True, True)])
+   [(d['line'], d['asked'], d['labelled'], d['singleCardOnly'], d['kept'])
+    for d in assembled(_seen8, _held({'legs': 1, 'multiOrder': False}))['dropoffs']],
+   [('1180 Wrenfield Rd NW, Kennesaw', False, True, True, True)])
+eq('...and not filed onto a held card of two orders',
+   [d['kept'] for d in assembled(_seen8, _held())['dropoffs']], [False])
+
+# `dropoff_said` is forgotten when the order in the car changes, and only then.
+# It was never cleared, so an address the server refused for the order before
+# — a screen read before the Took — was never volunteered again for the order
+# it was about. server.js's note now names the order (`holds`); here it names
+# one, then another a few reads in, over one labelled navigation screen that
+# never moves. Invented address.
+_hds = tempfile.mkdtemp()
+_NAV_SAME = 'Dropoff\n61 Saddlebrook Ln, Acworth, GA 30101\n12 min Start'
+
+
+def _note(holds):
+    was = os.environ.get(HO.ENV_DIR)
+    os.environ[HO.ENV_DIR] = _hds
+    try:
+        with open(HO.path(HO.HOLDING), 'w') as fh:
+            json.dump({'until': int((time.time() + 3600) * 1000), 'holds': holds}, fh)
+    finally:
+        if was is None:
+            os.environ.pop(HO.ENV_DIR, None)
+        else:
+            os.environ[HO.ENV_DIR] = was
+
+
+_note('o-first@1')
+_switched = []
+
+
+def _switch_hold(rows, announced, calls):
+    if calls >= 4 and not _switched:
+        _switched.append(calls)
+        _note('o-second@2')
+    return False
+
+
+rds = run(lambda n, k: FRAG if n == 1 else _NAV_SAME, extra_argv=['--no-parallel'],
+          seconds=5.0, handoff=_hds, until=_switch_hold)
+ok_('the premise: the order changed part-way through (%r, %d reads)'
+    % (_switched, rds['calls']), _switched and rds['calls'] > _switched[0] + 1)
+eq('an unprompted address is said once per order in the car: again for the next one',
+   [((d[0] or {}).get('line'), d[1].get('asked')) for d in rds['dropoffs']],
+   [('61 Saddlebrook Ln, Acworth, GA 30101', False)] * 2)
 
 # Whether the journal may keep the stops — names and front doors — is the
 # scanner's to say, because the server does not read its settings: not with

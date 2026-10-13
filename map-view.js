@@ -734,8 +734,8 @@
    * nothing here follows the car to the door.
    *
    * A dropoff is never one of these, and a pickup is never anything else:
-   * the order's end comes from holding.dropoff alone (planner_destination in
-   * rpi/scan_pi.py files dropoffs only). */
+   * the order's end comes from holding.dropoff alone (plannerDestination in
+   * assemble.js files dropoffs only). */
   function heldPickups(stops) {
     return (Array.isArray(stops) ? stops : []).filter(function (s) {
       return s && s.kind === 'pickup' && s.street;

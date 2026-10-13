@@ -2908,10 +2908,10 @@ def find_planner(text):
         after it — a block cut by the foot of the page, as against a closed
         one, which the list's end under it shows is closed.
 
-    Neither is ever a destination. The scanner's planner line, its
-    planner_destination and planner_lone_dropoff are handed the headed stops
-    only, without the key, exactly as before; a sighting carries all of them.
-    See planner_stops in scan_pi.py.
+    Neither is ever a destination. The scanner's planner line is handed the
+    headed stops only, without the key, exactly as before; a sighting carries
+    all of them, and the assembler (assemble.js) counts only the headed ones
+    when it decides an end. See planner_stops in scan_pi.py.
     """
     lines, heads = _planner_lines(text)
     if not heads:
@@ -3038,8 +3038,8 @@ def _planner_orphan(lines, first):
 #     phone's glass, which is what the screen box is — four as "Waybill" and one
 #     as "Waypbill", so one stray letter inside the word is allowed.
 # Either end missing is False, and the stops are still every stop that read:
-# this decides only whether one of them may be filed, see planner_destination
-# in scan_pi.py.
+# this decides only whether one of them may be filed, see plannerDestination
+# in assemble.js, which is given both ends on each page of a sighting.
 PLANNER_TITLE = re.compile(r'^[^A-Za-z0-9]{0,3}trip ?planner\b', re.IGNORECASE | ASCII)
 PLANNER_END = re.compile(r'^[^A-Za-z0-9]{0,3}way ?[A-Za-z]? ?bill\b', re.IGNORECASE | ASCII)
 
