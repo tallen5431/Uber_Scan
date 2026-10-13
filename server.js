@@ -867,6 +867,13 @@ function startScanner() {
           // car at the held order's door, or takes it away (gpsArrival). The
           // answer rides the beat to the panel, which says "at dropoff".
           read.atDropoff = gpsArrival(read, Date.now());
+          // ...and the rest of the GPS drop's state, on the same beat. Between
+          // offers no reading arrives to carry heldForPanel, and that is when
+          // the panel's in-car line is the card's whole message: a pin armed
+          // or refused while the driver drives would otherwise reach the glass
+          // at the next offer. Null with nothing held. See heldEndState.
+          var heldBeat = holding(Date.now());
+          read.heldEnd = heldBeat ? heldEndState(heldBeat) : null;
         }
         broadcast(read);
       } catch (e) {
@@ -1882,14 +1889,33 @@ function timedLikeTheHeldJob(read) {
  * address the ⌖ press filed onto it — because the page's map draws the held
  * end from whichever of them spoke last, and two of them used not to say it at
  * all: see the dropoff branch in startScanner and /api/offers/mark. */
+/* The GPS drop's state for the order in the car, in the three fields the
+ * panel's in-car line says it from (live.html, gpsDropSaid): whether a
+ * door-level pin is on it, whether the GPS has seen the car arrive there, and,
+ * when it is not armed, why — a pin next to one of its pickups (pickupNearEnd),
+ * or this server's refusal of the dropoff text it still names (searchHeldEnd).
+ * ONE function, for /api/status, heldForPanel and the beat, so the status link
+ * and the panel cannot give two answers about one pin. */
+function heldEndState(h) {
+  var pin = heldEndPin(h);
+  return { endPinned: !!pin, arrived: !!h.arrivedAt,
+           endWhy: pin
+             ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : null)
+             : h.endWhyFor === h.dropoff ? (h.endWhy || null) : null };
+}
+
 function heldForPanel(held) {
   return held
-    ? { pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null,
+    ? Object.assign({ pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null,
         // What /api/held-end is told the pin is for. See holdIdOf.
         holdId: holdIdOf(held),
         // Its card's fix and size, so Map view can check this order's end
         // against them — see cardOf.
-        card: held.card || null }
+        card: held.card || null },
+        // ...and the GPS drop's state, which the in-car line on the panel
+        // says. It was on /api/status alone — fetched once, at load — so a
+        // panel left open never learned that a pin had armed or been refused.
+        heldEndState(held))
     : null;
 }
 
@@ -3708,18 +3734,11 @@ function statusNow() {
     // here: the two machines' clocks are not the same clock.
     holding: (function () {
       var h = holding(Date.now());
-      return h ? { pay: h.pay, minutes: h.minutes, holdId: holdIdOf(h),
-                   // ...whether a door-level pin is on it and the GPS has
-                   // seen the car arrive there: the GPS drop's state, for
-                   // whoever is diagnosing one. See gpsArrival.
-                   endPinned: !!heldEndPin(h), arrived: !!h.arrivedAt,
-                   // ...who pinned it ('server', or null for Map view), and
-                   // when it is not pinned, why not (searchHeldEnd).
+      return h ? Object.assign({ pay: h.pay, minutes: h.minutes, holdId: holdIdOf(h),
+                   // ...who pinned it ('server', or null for Map view). The
+                   // GPS drop's state beside it — pinned, arrived, and why
+                   // not armed — is heldEndState's, merged in below.
                    endBy: heldEndPin(h) ? (h.endPin.by || null) : null,
-                   // ...or, pinned, why the pin is not armed (pickupNearEnd).
-                   endWhy: heldEndPin(h)
-                     ? (pickupNearEnd(h, heldEndPin(h)) ? 'door next to the pickup' : null)
-                     : h.endWhyFor === h.dropoff ? (h.endWhy || null) : null,
                    // ...and how many of its pickups the guard holds, from Map
                    // view or this server's search (keepPickupPin).
                    pickupsPinned: Array.isArray(h.pickupPins) ? h.pickupPins.length : 0,
@@ -3740,7 +3759,9 @@ function statusNow() {
                    // ...and its card's fix and size, for Map view's check of
                    // where it ends. See cardOf.
                    card: h.card || null,
-                   heldMs: Math.max(0, Date.now() - h.acceptedAt) } : null;
+                   heldMs: Math.max(0, Date.now() - h.acceptedAt) },
+                   // endPinned, arrived, endWhy: see heldEndState.
+                   heldEndState(h)) : null;
     }()),
     lastAgeMs: (scanner.last && typeof scanner.last.at === 'number')
       ? Math.max(0, Date.now() - scanner.last.at) : null,

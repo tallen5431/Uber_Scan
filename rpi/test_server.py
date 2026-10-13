@@ -1630,9 +1630,11 @@ if shutil.which('python3'):
         eq('the order goes in the car', code, 200)
         ok_('...and the server says it is holding', reply.get('holding') is True)
         # ...and says it as the stream does (heldForPanel), so Map view has
-        # the held order from the press and not from the next reading.
+        # the held order from the press and not from the next reading — and
+        # the panel's in-car line its GPS drop's state (heldEndState).
         eq('held end: the mark reply carries the order in the car as the stream describes it',
-           sorted((reply.get('held') or {}).keys()), ['card', 'dropoff', 'holdId', 'minutes', 'pay'])
+           sorted((reply.get('held') or {}).keys()),
+           ['arrived', 'card', 'dropoff', 'endPinned', 'endWhy', 'holdId', 'minutes', 'pay'])
         # Started after the mark, before the scanner's 2s sleep ends.
         heard = listen(base, 4)
 
@@ -5674,7 +5676,27 @@ try:
        (_holding(_gb) or {}).get('endWhy'), 'door next to the pickup')
     _beats(_DWELL + _LEAVE)
     ok_('[gps drop] ...so waiting at the restaurant and leaving drops nothing', _holding(_gb))
+    # ...and the panel is told the same, on the stream: the beat carries the
+    # GPS drop's state (the panel's in-car line says it between offers, when
+    # no reading comes), and so does the order as heldForPanel describes it,
+    # here in the reply to a Took. /api/status was the only place it was said,
+    # and the panel fetches that once, at load.
+    _state = lambda h: {k: (h or {}).get(k) for k in ('endPinned', 'arrived', 'endWhy')}
+    eq('[gps drop] the beat carries the GPS drop\'s state for the panel',
+       (get(_gb, '/api/status').get('beat') or {}).get('heldEnd'),
+       {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup'})
+    eq('[gps drop] ...the same as /api/status says', _state(_holding(_gb)),
+       {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup'})
+    _r = post(_gb, '/api/offers/mark', {
+        'id': 'g-stream', 'accepted': True,
+        'offer': {'id': 'g-stream', 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': 'Kestrel Dr, Marietta'}})[1]
+    eq('[gps drop] ...and the order the stream describes carries it too',
+       _state(_r.get('held')), {'endPinned': False, 'arrived': False, 'endWhy': None})
     post(_gb, '/api/delivered', {})
+    _beats([_fix(_FAR)])
+    eq('[gps drop] ...and with nothing held the beat says so',
+       (get(_gb, '/api/status').get('beat') or {}).get('heldEnd', 'missing'), None)
 finally:
     stop(_gp)
 
