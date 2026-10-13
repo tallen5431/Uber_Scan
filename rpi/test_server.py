@@ -1583,7 +1583,7 @@ if shutil.which('python3'):
         return h.get('dropoff')
 
     def marks_for(i):
-        return [r for r in lines(journal)
+        return [r for r in (json.loads(l) for l in open(journal) if l.strip())
                 if r.get('kind') == 'mark' and r.get('id') == i and r.get('dropoff')]
 
     try:

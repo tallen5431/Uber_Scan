@@ -3056,6 +3056,22 @@ eq('...carrying what the driver reads to check it',
 eq('...and what the geography is decided on', _msg['dropoff']['zip'], '30127')
 eq('...and nothing that could be mistaken for a verdict',
    [k for k in ('ready', 'state', 'perHour', 'pay') if k in _msg], [])
+eq('...and a press carries no label', _msg['dropoff']['labelled'], None)
+# The label server.js files an unpressed address over the card's end by.
+_said[:] = []
+sys.stdout = _Catch()
+try:
+    SP.emit_dropoff({'line': '12 Made Up Way, Acworth, GA 30101'}, asked=False,
+                    labelled=True)
+    SP.emit_dropoff({'line': '12 Made Up Way, Acworth, GA 30101'}, asked=True,
+                    labelled=True)
+finally:
+    sys.stdout = _was_stdout
+eq('an unpressed address under a Dropoff label goes out labelled \'dropoff\'; a '
+   'press never does',
+   [(json.loads(l)['dropoff']['asked'], json.loads(l)['dropoff']['labelled'])
+    for l in ''.join(_said).splitlines() if l.strip()],
+   [(False, 'dropoff'), (True, None)])
 
 
 # --- ...and the same thing through the loop that has to do it ---------------

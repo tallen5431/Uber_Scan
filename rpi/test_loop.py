@@ -1852,7 +1852,7 @@ eq('an address under a Dropoff label below a pickup is still the destination, '
    'unprompted', [((d[0] or {}).get('line'), d[1].get('asked'))
                   for d in rpk5['dropoffs']], [('34 Made Up Rd, Acworth, GA 30102', False)])
 eq('...and sent as label-proven, so the server may file it over the card\'s own end',
-   [d[1].get('labelled') for d in rpk5['dropoffs']], ['dropoff'])
+   [d[1].get('labelled') for d in rpk5['dropoffs']], [True])
 
 # --- the Trip Planner, read without a press while an order is held ----------
 #
@@ -1954,7 +1954,7 @@ ok_('the premise: it was read whole (%r)' % ra5['wholes'], sum(ra5['wholes']) ==
 eq('an unpressed whole-screen read sends an address under a Dropoff label, '
    'label-proven', [((d[0] or {}).get('line'), d[1].get('asked'), d[1].get('labelled'))
                     for d in ra5['dropoffs']],
-   [('77 Made Up Ct, Acworth, GA 30101', False, 'dropoff')])
+   [('77 Made Up Ct, Acworth, GA 30101', False, True)])
 # ...and nothing off the same whole screen with no label over the address: the
 # label is what makes it the destination, not the whole-screen read.
 _ha5b = tempfile.mkdtemp()
@@ -1985,7 +1985,7 @@ eq('an unpressed planner read sends the stops, unasked',
    [(['4821 Kestrel Dr, Marietta'], False)])
 eq('...and its one dropoff as the order\'s destination, label-proven',
    [((d[0] or {}).get('line'), d[1].get('asked'), d[1].get('labelled'))
-    for d in ra6['dropoffs']], [('4821 Kestrel Dr, Marietta', False, 'dropoff')])
+    for d in ra6['dropoffs']], [('4821 Kestrel Dr, Marietta', False, True)])
 
 # Whether the journal may keep the stops — names and front doors — is the
 # scanner's to say, because the server does not read its settings: not with
