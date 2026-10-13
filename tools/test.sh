@@ -76,6 +76,11 @@ for f in rpi/test_*.py; do
     fi
     run "$base" "python3 '$f'"
 done
+# ...and the tools' own, which live beside what they test. gpslog_tidy.py
+# deletes files on the rig, unattended, from Start.sh.
+for f in tools/test_*.py; do
+    run "$(basename "$f")" "python3 '$f'"
+done
 
 echo "node"
 for f in tests/*.test.js; do

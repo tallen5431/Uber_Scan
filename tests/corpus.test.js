@@ -89,11 +89,13 @@ function sameList(a, b) {
    same cases in the same order. */
 var PLANNER_KEYS = ['kind', 'orders', 'name', 'expectedBy', 'street', 'city',
                     'state', 'zip', 'line', 'place'];
+/* ...and `partial` last, absent rather than null on a stop the page shows
+   whole, so compared as absent-is-null: see _stops in rpi/test_parser.py. */
 function stopFields(stops) {
   return stops === null ? null : stops.map(function (s) {
     return PLANNER_KEYS.map(function (k) {
       return Object.prototype.hasOwnProperty.call(s, k) ? s[k] : '<missing>';
-    });
+    }).concat([s.partial === undefined ? null : s.partial]);
   });
 }
 (cases.planner || []).forEach(function (c) {
@@ -106,6 +108,14 @@ function stopFields(stops) {
   var ends = P.plannerBounded(c.text);
   if (ends === c.bounded) ok++;
   else { bad++; console.log('FAIL  planner ends / ' + c.name + ': got ' + ends + ' want ' + c.bounded); }
+});
+
+/* What screen a reading is, for a sighting: app and screen as one pair. The
+   same cases rpi/test_parser.py runs. See screen_type in offer_parser.py. */
+(cases.screens || []).forEach(function (c) {
+  var s = P.screenType(c.text);
+  eq('screens / ' + c.name, JSON.stringify([s.app, s.screen]),
+     JSON.stringify([c.expect.app, c.expect.screen]));
 });
 
 (cases.whole || []).forEach(function (c) {

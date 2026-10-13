@@ -1602,10 +1602,50 @@
     return { lines: lines, heads: heads };
   }
 
+  /* The stop a page begins in the middle of, or null: an "Address" label
+     above the first header, with no "Trip Planner" title over it. Kind,
+     count and name null, its time only if an "Expected by" survived above
+     the label, and `partial: 'top'`. See _planner_orphan in offer_parser.py. */
+  function plannerOrphan(lines, first) {
+    var above = lines.slice(0, first);
+    if (above.some(function (l) { return PLANNER_TITLE.test(l); })) return null;
+    var label = -1;
+    for (var j = 0; j < above.length; j++) {
+      if (PLANNER_ADDRESS.test(above[j])) { label = j; break; }
+    }
+    if (label === -1) return null;
+    var due = null;
+    for (var i = 0; i < label; i++) {
+      var m = PLANNER_EXPECTED.exec(above[i]);
+      if (m) due = timeOfDay(m[1], m[2], m[3]);
+    }
+    var found = plannerAddressLines(above, label);
+    var stop = { kind: null, orders: null, name: null, expectedBy: due };
+    var where = plannerAddress(found.street, found.town);
+    Object.keys(where).forEach(function (key) { stop[key] = where[key]; });
+    stop.place = found.place;
+    stop.partial = 'top';
+    return stop;
+  }
+
+  /* ...and the page's two edges, said as `partial` on the one stop each cut
+     and on no other: 'top' for the stop above, 'bottom' for the last header
+     with no address under it and no "Waybill" after it. See find_planner. */
   function findPlanner(text) {
     var split = plannerLines(text);
     var lines = split.lines, heads = split.heads;
     if (!heads.length) return null;
+    var top = plannerOrphan(lines, heads[0]);
+    var stops = headedStops(lines, heads);
+    var last = stops[stops.length - 1];
+    if (!(last.street || last.city)
+        && !lines.slice(heads[heads.length - 1] + 1).some(function (l) { return PLANNER_END.test(l); })) {
+      last.partial = 'bottom';
+    }
+    return top ? [top].concat(stops) : stops;
+  }
+
+  function headedStops(lines, heads) {
     return heads.map(function (at, k) {
       var head = PLANNER_STOP.exec(lines[at]);
       var block = lines.slice(at + 1, k + 1 < heads.length ? heads[k + 1] : lines.length);
@@ -1665,18 +1705,91 @@
   var PLANNER_TITLE = /^[^A-Za-z0-9]{0,3}trip ?planner\b/i;
   var PLANNER_END = /^[^A-Za-z0-9]{0,3}way ?[A-Za-z]? ?bill\b/i;
 
+  /* Whether a line of `text` is the "Trip Planner" title, above the app's
+     bar: what a sighting says as `titled`, and what the assembler asks of a
+     page nobody pressed for. See planner_titled in offer_parser.py. */
+  function plannerTitled(text) {
+    return plannerLines(text).lines.some(function (l) { return PLANNER_TITLE.test(l); });
+  }
+
   function plannerBounded(text) {
+    var ends = plannerEnds(text);
+    return ends.top && ends.bottom;
+  }
+
+  /* {top, bottom}: plannerBounded's two tests one at a time, for a
+     sighting's `page`. See planner_ends in offer_parser.py. */
+  function plannerEnds(text) {
     var split = plannerLines(text);
     var lines = split.lines, heads = split.heads;
-    if (!heads.length) return false;
+    if (!heads.length) return { top: false, bottom: false };
     var title = -1;
     for (var i = 0; i < heads[0]; i++) if (PLANNER_TITLE.test(lines[i])) title = i;
-    if (title === -1) return false;
-    if (lines.slice(title + 1, heads[0]).some(function (l) { return /[A-Za-z]{2}/.test(l); })) {
-      return false;
-    }
-    return lines.slice(heads[heads.length - 1] + 1)
-      .some(function (l) { return PLANNER_END.test(l); });
+    var top = title !== -1 && !lines.slice(title + 1, heads[0])
+      .some(function (l) { return /[A-Za-z]{2}/.test(l); });
+    return { top: top,
+             bottom: lines.slice(heads[heads.length - 1] + 1)
+               .some(function (l) { return PLANNER_END.test(l); }) };
+  }
+
+  /* What screen a reading is, for a sighting: {app, screen}, `screen` one of
+     SCREENS and `app` 'uber', 'doordash', or null for 'unknown' alone.
+     Collection only, and kept apart from NOT_AN_OFFER, which decides. Each
+     recogniser, the order they are asked in and why, and what the 12 Oct
+     shift measured: see screen_type in offer_parser.py. rpi/test_lint.py
+     holds the two SCREENS lists equal. */
+  var SCREENS = ['uber.offer', 'uber.addon', 'uber.planner', 'uber.pickupNav',
+                 'uber.nav', 'uber.finding', 'tripRadar', 'dd.offer', 'dd.finding',
+                 'dd.switch', 'unknown'];
+  var SCREEN_DD_SWITCH = /switch to dash|busier zone|don.?t switch/i;
+  var SCREEN_PLANNER = /^[^A-Za-z0-9]{0,3}(?:trip ?planner|address|stop new requests|way ?[A-Za-z]? ?bill)\b/i;
+  var SCREEN_RADAR = /\btrip ?radar\b/i;
+  var SCREEN_DD_OFFER = new RegExp(
+    '\\bincl[.,]? ?tips\\b|\\d ?stops? ?\\(|custom[ea]r[ \\t\\r\\n]*drop'
+    + '|multiple[ \\t\\r\\n]*drop[ \\t\\r\\n]*-?[ \\t\\r\\n]*offs'
+    + '|all orders are picked up|deliver by|\\d ?mi ?[-+·•«] ?\\d{1,3} ?min', 'i');
+  var SCREEN_ADDON = /\+ ?\d{1,3} ?min\w* ?\( ?\+/i;
+  var SCREEN_UBER_OFFER = new RegExp(
+    '\\d ?min\\w* ?\\( ?\\d|\\bmi\\)? ?total\\b|includes expected tip|\\bincl[.,]? ?tip\\b'
+    + '|\\bexclusive\\b|est[.,]? ?delivery|\\bverified\\b|avg[.,]? ?wait time'
+    + '|early [lt]ook|fast charger|matching may take', 'i');
+  var SCREEN_DD_ELSEWHERE = new RegExp(
+    'pick ?up from\\b|current task|pause orders|decline this offer|this dash so far'
+    + '|dash summary|continue dashing', 'i');
+  var SCREEN_PICKUP_NAV = /note from business|pick ?up in store|pick ?up order/i;
+  var SCREEN_NAV = new RegExp(
+    '\\bdeliver(?:ing)? to\\b|dropoff type|meet at (?:the )?door|complete delivery'
+    + '|arriving soon|expected by \\d'
+    + '|(?:\\d|\\b[lLIO])[\\dlI]? ?min ?[©Oo0@] ?[\\dO]{0,3}(?:[.,]\\d)? ?mi\\b', 'i');
+  var SCREEN_LIMIT = /\blimit\b/i;
+  var SCREEN_MATCHING = /matching in progress/i;
+  var SCREEN_DD_FINDING = /finding offers|wait for offers|zone offer wait|likely to get offers/i;
+  var SCREEN_UBER_FINDING = /finding trips|\by?ou.?re online/i;
+
+  function screenType(text) {
+    var screen = screenOf(String(text || ''));
+    return { app: /^dd\./.test(screen) ? 'doordash' : screen === 'unknown' ? null : 'uber',
+             screen: screen };
+  }
+
+  function screenOf(text) {
+    if (SCREEN_DD_SWITCH.test(text)) return 'dd.switch';
+    if (SCREEN_MATCHING.test(text)) return 'unknown';
+    if (SCREEN_RADAR.test(text) && SCREEN_UBER_OFFER.test(text)) return 'tripRadar';
+    if (SCREEN_DD_OFFER.test(text)) return 'dd.offer';
+    if (SCREEN_ADDON.test(text)) return 'uber.addon';
+    if (SCREEN_UBER_OFFER.test(text)) return 'uber.offer';
+    // Every line, the bar's included: plannerLines stops above the bar.
+    var lines = text.split(/[\r\n]+/).map(normalize);
+    if (findPlanner(text) !== null
+        || lines.some(function (l) { return SCREEN_PLANNER.test(l); })) return 'uber.planner';
+    if (SCREEN_DD_ELSEWHERE.test(text)) return 'unknown';
+    if (SCREEN_PICKUP_NAV.test(text)) return 'uber.pickupNav';
+    if (SCREEN_NAV.test(text)) return 'uber.nav';
+    if (SCREEN_DD_FINDING.test(text)) return 'dd.finding';
+    if (SCREEN_UBER_FINDING.test(text) || SCREEN_RADAR.test(text)) return 'uber.finding';
+    if (SCREEN_LIMIT.test(text)) return 'uber.nav';
+    return 'unknown';
   }
 
   function labelledPickup(text, place) {
@@ -1721,8 +1834,15 @@
    * testing showed the other two were already covered by "finding offers", and
    * a pattern nothing can show is dead weight. Each of these is the ONLY
    * evidence against its own phantom — including the second frame of the idle
-   * screen, where most of the text did not survive the read. */
-  var NOT_AN_OFFER = /add\s*stops|finding\s*offers/i;
+   * screen, where most of the text did not survive the read.
+   *
+   * And Uber's own idle screen, which had none: the online map, its sheet
+   * saying "You're online" or "Finding trips" (124 and 54 screen rows on the
+   * journal on file, no offer row, never both on one), "You are online" in the
+   * corpus's map-noise frame. NOT "Trip Radar": the pill bleeds into offer
+   * cards read over the map, 308 offer rows of it. See NOT_AN_OFFER in
+   * rpi/offer_parser.py, which the shared corpus holds this to. */
+  var NOT_AN_OFFER = /add\s*stops|finding\s*offers|you(?:\W{0,3}re|\s*are)\s*online|finding\s*trips/i;
 
   var DROPOFF_NOT_STATED = /custom[ea]r\s*drop\s*-?\s*off/i;
 
@@ -3336,7 +3456,9 @@
            findPickup: findPickup, findDropoff: findDropoff,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner,
-           plannerBounded: plannerBounded,
+           plannerBounded: plannerBounded, plannerEnds: plannerEnds,
+           plannerTitled: plannerTitled,
+           screenType: screenType, SCREENS: SCREENS,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,
            /* Exported so the default can be checked directly. Everything that

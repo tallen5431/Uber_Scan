@@ -231,24 +231,39 @@ html, body {
  * never shrink because nothing else says them. */
 .stackline {
   display: flex;
+  /* ...and a second row for the chip and the link only where the range and
+     they cannot share one: the 3.5" hat. See .sum below. */
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 4px 8px;
   margin-top: 6px;
   font-size: clamp(12px, 3.2vw, 16px);
   font-weight: 700;
   color: var(--muted);
   text-align: center;
 }
-/* The half that gives way. `min-width: 0` is what allows it to: a flex item
-   will not shrink below its content's own width without it, which would put the
-   overflow back on the row and undo all of the above. */
+/* The half that gives way — but only its words. The range is first and
+   larger (`.range`), and it may not be cut: a range missing its top end reads
+   as a point estimate, which is worse than no range. So the sum is a grid of
+   two tracks, the range's `auto` and the words' `minmax(0, max-content)`, and
+   its smallest size is the range: the words' track can go to nothing and
+   ellipsise (`.more`), the range's cannot. `flex: 1 1 0` and `max-width:
+   max-content` so it is laid out at that smallest size when the row decides
+   what wraps — sized at its whole text it went onto a row of its own on every
+   panel narrower than the sentence — and grows back to its whole text where
+   there is room. */
 .stackline .sum {
-  min-width: 0;
+  flex: 1 1 0;
+  max-width: max-content;
+  display: grid;
+  grid-template-columns: auto minmax(0, max-content);
+  align-items: baseline;
+  column-gap: .3em;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
+.stackline .range { font-size: 1.3em; }
+.stackline .more { overflow: hidden; text-overflow: ellipsis; }
 /* ...and the half that does not.
  *
  * A CHIP rather than more words in the same run, because the complaint this

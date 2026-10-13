@@ -98,7 +98,9 @@
        there is no such thing as most of a line. */
     .live #verdict > .places,
     .live #verdict > .stackline,
-    .live #verdict > .stops { flex: none; }
+    .live #verdict > .stops,
+    .live #verdict > .heldnext,
+    .live #verdict > .heldline { flex: none; }
     /* `stretch`, not `center`, and this is the difference between a picture
        that fits and one that is cut.
        
@@ -431,6 +433,14 @@
     body.phoneview #viewWrap { grid-row: 1; }
     #perHour { font-size: min(12vw, calc((100cqw - 40px) / (var(--chars) * 0.62))); }
     .working { padding: 0 0 2px; }
+    /* The pair line leads with its range, larger, and here the range and the
+       ENDS chip and the route link cannot share a row: the link goes to a
+       second one. At its 34px that row put the word PASS 5px over the card's
+       top border beside the phone, so on this panel the link is as tall as
+       its words and their padding (24px) and the row gaps are halved. Still a
+       wide target, which is what a mouse at a light needs (see .maplink). */
+    .stackline { margin-top: 3px; row-gap: 2px; font-size: 13px; }
+    .stackline .maplink { min-height: 0; padding: 3px 8px; }
   }
 
   /* The number is sized to the panel and to how many characters it has to
@@ -827,6 +837,18 @@
   #setBox.on {
     background: #0d5c31; border-color: #17c964; color: #d7ffe6;
   }
+  /* How old the card on record is, once it has gone (tookAge). A tenth
+     smaller than the label: 15.3px, over the 15px floor rpi/test_layout.py
+     holds the panels to, and every letter of "Took $112.45? · 59 min ago"
+     inside its button wherever the bar has the width for six labels.
+
+     It costs the bar height, and only between offers, which is when the card
+     above has the room: measured with that label, the bar is 55px at 1024x600
+     beside the scene, as without it, 74px at 1024x600 beside the phone and at
+     800x480 beside the scene, and 93px at 800x480 beside the phone and on the
+     3.5" hat, where the button is 78px across (71px on the hat) and the label takes four rows.
+     The card with the order in the car still fits above it on all six. */
+  #took .ago { font-size: .9em; font-weight: 500; }
 
   /* What the reader actually saw. Folded away by default, because it is only
      ever wanted after a wrong answer — and after a wrong answer it is the only
@@ -855,6 +877,120 @@
   .stops { margin-top: 6px; font-size: clamp(12px, 3vw, 15px); line-height: 1.35; }
   .stops > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .stops[hidden] { display: none; }
+
+  /* The order in the car (showHeld). Between offers, where it goes next in
+   * the place WAITING FOR AN OFFER had: the kind and the time in the label's
+   * size, the name larger than anything else on the card, up to two lines and
+   * then cut, because a restaurant's name runs to fifty characters. Sized on
+   * the card (`cqw`, the verdict is the container), not the screen, because
+   * the card is half the screen or less. */
+  .heldnext { margin-top: 2px; }
+  .heldnext .when {
+    font-size: clamp(16px, 6cqw, 32px); font-weight: 800;
+    letter-spacing: .04em; color: var(--muted);
+  }
+  .heldnext .where {
+    font-size: clamp(20px, 9cqw, 48px); font-weight: 800; line-height: 1.15;
+    color: var(--text); overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .heldnext[hidden] { display: none; }
+  /* ...and its one line. While a card is being read, or the rig is blind,
+   * it is the card's last line, at the address line's size: the pay and the
+   * GPS drop's state whole (`flex: none`), the next stop the part that gives
+   * way, as the pair line's words do. (With a verdict up it is under the
+   * card instead: `#detail .held`.) Between offers it is under the name,
+   * larger, and may take a row each for the pay and the state where the card
+   * has the height and not the width — the 3.5" hat beside the scene, whose
+   * card is 228px across. */
+  .heldline {
+    display: flex; justify-content: center; gap: .35em; margin-top: 6px;
+    font-size: clamp(12px, 3.2cqw, 16px); font-weight: 700;
+    color: var(--muted); white-space: nowrap;
+  }
+  .heldline .pay { color: var(--text); }
+  .heldline .pay, .heldline .gps { flex: none; }
+  .heldline .stop { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .heldline .stop[hidden] { display: none; }
+  .heldline.between { font-size: clamp(15px, 4.4cqw, 22px); margin-top: 8px; flex-wrap: wrap; }
+  .heldline[hidden] { display: none; }
+  /* ...and the same line under an offer, after the reading's age in place of
+   * the diagnostics (showHeld says why it is not in the card). One row: the
+   * age, the pay and the GPS state whole, the stop the part that gives way. */
+  #detail.withheld { display: flex; justify-content: center; white-space: nowrap; }
+  #detail.withheld .age { flex: none; }
+  #detail.withheld .diag { display: none; }
+  #detail .held { display: flex; min-width: 0; gap: .3em; margin-left: .3em; }
+  #detail .held .pay { flex: none; color: var(--text); font-weight: 700; }
+  #detail .held .gps { flex: none; }
+  #detail .held .stop { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* TWO ORDERS IN THE CAR (carrying two on: carryTwo in server.js). One
+   * compact line each — "① $9.48 → Kestrel Dr · ● armed" — in the in-car
+   * line's own style (#heldLine is ①, #heldLine2 is ②), and under them, when
+   * the rig has read addresses it cannot give to either, how many: "2
+   * dropoffs read · whose?", in the doubt colour, because it is a question
+   * and not an answer. See showHeld. */
+  .whose { color: var(--doubt); }
+  .whose[hidden] { display: none; }
+
+  /* The chooser: whose is the address a ⌖ press read, or which order Drop
+   * puts down, when the rig will not guess (whoseDropoff, dropDecides in
+   * server.js). A sheet OVER THE VERDICT PANE — never a control on the bar,
+   * which holds six (AUDITS.md, Settled) — with a row per answer, 96px tall
+   * where the pane has the height (1024x600, 800x480) and no shorter than the
+   * bar's own 52px where it does not (the 3.5" hat), measured in
+   * rpi/test_layout.py. It closes on its own after ten seconds with nothing
+   * filed; that is the server's rule too (CHOOSER_MS). */
+  .chooser {
+    position: fixed; left: 8px; right: 8px; top: 8px; z-index: 40;
+    display: flex; flex-direction: column; gap: 6px; padding: 8px;
+    background: var(--panel); border: 2px solid var(--doubt); border-radius: 14px;
+    min-height: 0; overflow: hidden;
+  }
+  .chooser[hidden] { display: none; }
+  .chooser .ask {
+    flex: none; font-size: clamp(13px, 2.2vw, 19px); font-weight: 700; color: var(--doubt);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chooser button {
+    flex: 0 1 96px; min-height: 52px; padding: 0 14px; border-radius: 12px;
+    border: 2px solid var(--line); background: var(--panel-2); color: var(--text);
+    font: inherit; font-size: clamp(17px, 3.2vw, 30px); font-weight: 800;
+    display: flex; align-items: center; white-space: nowrap; overflow: hidden;
+  }
+  /* The number and the pay whole; the street is the part that gives way —
+   * it is what the driver already has on the phone, and "① $9.48" is the
+   * answer the row stands for. Measured in rpi/test_layout.py. */
+  .chooser button .who { flex: none; }
+  .chooser button .end { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                         margin-left: .3em; color: var(--muted); }
+  .chooser button.none { flex: 0 1 52px; font-size: clamp(15px, 2.4vw, 22px);
+                         font-weight: 700; color: var(--muted); }
+  /* ...and the Undo a Took that ADDED an order offers for five seconds: the
+   * same press the Took button makes pressed again (an untick), for the
+   * order the Took added and no other. Over the foot of the verdict pane. */
+  .undo {
+    position: fixed; left: 8px; right: 8px; bottom: 72px; z-index: 39;
+    min-height: 52px; padding: 0 14px; border-radius: 12px;
+    border: 2px solid var(--line); background: var(--panel-2); color: var(--text);
+    font: inherit; font-size: clamp(15px, 2.4vw, 22px); font-weight: 700;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .undo[hidden] { display: none; }
+  @media (orientation: landscape) {
+    /* In the verdict's own grid cell, over it: column one, row one. */
+    #app > .chooser, #app > .undo {
+      position: relative; left: auto; right: auto; top: auto; bottom: auto;
+      grid-column: 1; grid-row: 1; margin: 0;
+    }
+    #app > .undo { align-self: end; }
+  }
+  /* The pair line with two orders in the car: weighed against ① alone until
+   * the detour through both exists (Stage 6), and it says so. Whole, like
+   * the chip beside it: a range that does not say it ignores an order in the
+   * car is the confidently wrong number. */
+  .stackline .vs { flex: none; margin-left: .35em; color: var(--doubt); }
 
   /* ---------- Sizes for the driver's seat ----------
    *
@@ -886,6 +1022,10 @@
   <div class="live">
     <section id="verdict" class="verdict empty">
       <div class="verdict-label" id="verdictLabel">WAITING FOR AN OFFER</div>
+      <!-- The order in the car, between offers: where it goes next and by
+           when, large, in the place WAITING FOR AN OFFER had to itself. See
+           showHeld. -->
+      <div class="heldnext" id="heldNext" hidden><div class="when"></div><div class="where"></div></div>
       <div class="rate big">
         <span class="rate-value" id="perHour">--</span>
         <span class="rate-unit" id="rateUnit">/hr</span>
@@ -896,6 +1036,14 @@
            act on, and both halves are worth seeing — one is checkable against
            the offer, the other is the one that decides. -->
       <div class="working" id="working" hidden></div>
+      <!-- Both jobs at once, when there is already one in the car.
+           A RANGE, never a single figure: the low end is the two jobs sharing
+           nothing and the high end is the new one riding along inside the old,
+           and which it turns out to be is a fact about two maps that this rig
+           cannot see. Naming one number would be claiming that geography.
+           Above the figures, number first: at the bottom of the card it was
+           the row that ran past the border on the 1024x600 panel. -->
+      <div class="stackline" id="stack" hidden></div>
       <!-- As read off the card, so it can be checked against the phone in the
            two seconds before the offer times out. All four are deliberately
            the raw numbers: their whole job is to match what is on the screen.
@@ -914,12 +1062,15 @@
            figures, because it is what you scan to recognise a job rather than
            what you judge it by. -->
       <div class="places" id="places" hidden></div>
-      <!-- Both jobs at once, when there is already one in the car.
-           A RANGE, never a single figure: the low end is the two jobs sharing
-           nothing and the high end is the new one riding along inside the old,
-           and which it turns out to be is a fact about two maps that this rig
-           cannot see. Naming one number would be claiming that geography. -->
-      <div class="stackline" id="stack" hidden></div>
+      <!-- The order in the car, in one line: its pay, its next stop and the
+           GPS drop's state. Under an offer it is the card's last line; between
+           offers it sits under the next stop above, the rest of the card being
+           hidden. See showHeld. -->
+      <div class="heldline" id="heldLine" hidden><span class="pay"></span><span class="stop"></span><span class="gps"></span></div>
+      <!-- ...and the second order, with carrying two on, in the same shape,
+           and how many addresses are waiting for an owner. See showHeld. -->
+      <div class="heldline" id="heldLine2" hidden><span class="pay"></span><span class="stop"></span><span class="gps"></span></div>
+      <div class="heldline whose" id="whose" hidden></div>
       <!-- Uber's Trip Planner, as ⌖ Dropoff read it: every stop in order, one
            line each. Between offers only — when the card holds nothing but the
            phase and the notice, which it gives way to — and forgotten when the
@@ -1050,6 +1201,10 @@
        at a red light; this is pressed parked, with the mouse, to keep a
        picture, and the status link beside it is the same kind of target. -->
   <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="health" hidden></span><span id="shift" hidden></span><button type="button" id="snap" title="📷 Snap: keep a picture of the rig's own screen, on the rig, to share. They are listed on the offers page under 📷 Snaps.">📷<span class="word"> Snap</span></button></div>
+
+  <!-- The chooser and the Undo, over the verdict pane: see .chooser. -->
+  <div class="chooser" id="chooser" role="dialog" aria-label="Choose" hidden></div>
+  <button type="button" class="undo" id="undo" hidden></button>
 
   <nav class="bottombar">
     <!-- The one thing the rig cannot see: whether the driver pressed Accept.
@@ -1208,7 +1363,7 @@
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
    'working', 'places', 'spoken', 'took', 'shift', 'stack', 'drop', 'dest',
-   'health', 'stops']
+   'health', 'stops', 'heldNext', 'heldLine', 'heldLine2', 'whose', 'chooser', 'undo']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
   // Keep the headline number inside the panel whatever it says. The unit comes
@@ -1529,6 +1684,19 @@
     while (el.stack.firstChild) el.stack.removeChild(el.stack.firstChild);
     var sum = document.createElement('span');
     sum.className = 'sum';
+    // The range, first and larger, in an element of its own that never
+    // shrinks: the words after it are what the ellipsis eats (`.more`). Under
+    // the figures it was 16px of muted text at the foot of the card, and on
+    // the 1024x600 panel in a browser window the row ran out past the card's
+    // border (the driver's snap of 12 Oct, 17:19); above the figures and
+    // whole is where it is now, held by rpi/test_layout.py at 1024x600,
+    // 800x480 and 480x320.
+    var range = document.createElement('b');
+    range.className = 'range';
+    range.textContent = (Math.round(lo) === Math.round(hi)
+         ? dollars(lo) : dollars(lo) + ' to ' + dollars(hi)) + '/hr';
+    var more = document.createElement('span');
+    more.className = 'more';
     // The number first, because the ellipsis eats from the other end.
     //
     // This read "+ the one you have: $26\u201335/hr over 23\u201335 min", putting twenty
@@ -1541,10 +1709,7 @@
     // "to" rather than an en dash, because the dash cannot survive a minus
     // sign beside it and this is exactly the row where that happens: a pair
     // that loses money is the one a driver most needs to read correctly.
-    sum.textContent = '+ '
-      + (Math.round(lo) === Math.round(hi)
-         ? dollars(lo) : dollars(lo) + ' to ' + dollars(hi))
-      + '/hr with the one you have, over '
+    more.textContent = ' with the one you have, over '
       + (s.minMinutes === s.maxMinutes
          ? Math.round(s.minMinutes)
          : Math.round(s.minMinutes) + '\u2013' + Math.round(s.maxMinutes))
@@ -1585,6 +1750,8 @@
       // placed dropoffs are in Atlanta, which is 135 square miles, and a metro
       // ZIP is a few.
       ;
+    sum.appendChild(range);
+    sum.appendChild(more);
     el.stack.appendChild(sum);
     // ...and the half that does not give way. Its own element, so the ellipsis
     // above can never reach it: these words are the only place this claim is
@@ -1621,6 +1788,16 @@
     chip.title = s.ends ? '' :
       'Neither card printed enough for the rig to say whether these two jobs '
       + 'end near each other. It is not saying they do.';
+    // With two orders in the car the range is the pair with ① alone (see
+    // withStack in server.js): said beside the chip, whole.
+    if (s.vsFirst) {
+      var vs = document.createElement('span');
+      vs.className = 'vs';
+      vs.textContent = 'vs \u2460 only';
+      vs.title = 'Two orders are in the car. This weighs the new one against the '
+        + 'first you took, not against both.';
+      el.stack.appendChild(vs);
+    }
     el.stack.appendChild(chip);
     if (s.ends === 'elsewhere') el.stack.className += ' elsewhere';
     // ...and the same question handed to a map, which answers it in driving
@@ -1661,6 +1838,30 @@
   // Drop on the same bar already says "Drop · failed"; this says "not
   // saved", and says it until the next press.
   var tookFailed = false;
+  // When the offer on record was first recorded, on THIS page's clock — from
+  // the stream when a new id arrives, from /api/status's offerAgeMs at load —
+  // or null when nothing says. See tookAge.
+  var recordAt = null;
+
+  /* How long ago the card on record was recorded, once it has left the phone:
+   * "2 min ago", "just now", or '' while a verdict is on the glass.
+   *
+   * The Took button names the last offer on record, which is the right one in
+   * the moment after a decision and the wrong one minutes later: the phone has
+   * moved on, the next card was never written (a PASS screened off, or a
+   * reading that never settled), and "Took $5.00?" sits on the bar naming a
+   * card the driver no longer remembers. Shift snaps on 12 Oct show it over
+   * WAITING FOR AN OFFER with nothing on the glass to say which card it was.
+   * The age says it. Not while a card is up: the verdict beside it is that
+   * card or the next, and the age of either is not the question.
+   *
+   * Whole minutes, rounded DOWN, for the reason the GPS line gives: "1 min"
+   * at 119 seconds is true and "2 min" would not be. */
+  function tookAge() {
+    if (recordAt === null || (last && last.ready && !blind)) return '';
+    var s = Math.max(0, Date.now() - recordAt) / 1000;
+    return s < 60 ? 'just now' : Math.floor(s / 60) + '\u00a0min ago';
+  }
 
   function showTook() {
     if (!onRecord || !onRecord.id) {
@@ -1674,9 +1875,10 @@
     // — and the one thing this rig must never do is press Accept.
     var what = (typeof onRecord.pay === 'number')
       ? '$' + onRecord.pay.toFixed(2) : 'the last one';
-    // The order in the car, back on the phone under a new id (heldOwnCard in
-    // server.js): shown as the order already taken, not as an offer to tick,
-    // and the press does nothing — the driver has said this once.
+    // The order in the car, back on the phone under its own id or a new one
+    // (heldCard, see heldOwnCard in server.js): shown as the order already
+    // taken, not as an offer to tick, and the press does nothing — the driver
+    // has said this once.
     if (heldAgain()) {
       el.took.textContent = '\u2713 Took ' + what + ' \u00b7 in car';
       el.took.title = 'The order you already took, on the phone again. Nothing to record.';
@@ -1692,6 +1894,24 @@
     el.took.textContent = tookBusy ? '…'
       : tookFailed ? 'Took ' + what + ' · not saved'
       : (tookState ? '\u2713 Took ' + what : 'Took ' + what + '?');
+    // ...and how old that card is, once it has gone. "· 2 min" joined by
+    // no-break spaces, so a button too narrow for the label and the age
+    // breaks the age off whole, or at worst before "ago", and never between
+    // a number and its unit.
+    var ago = !tookBusy && !tookFailed ? tookAge() : '';
+    if (ago) {
+      // One run of text inside one span: the button is a flex box, and the
+      // label and the age as two children of it were two flex items side by
+      // side, the age painted past the button's edge rather than wrapped.
+      var label = document.createElement('span');
+      label.textContent = el.took.textContent + ' ';
+      var agoSpan = document.createElement('span');
+      agoSpan.className = 'ago';
+      agoSpan.textContent = '\u00b7\u00a0' + ago;
+      label.appendChild(agoSpan);
+      el.took.textContent = '';
+      el.took.appendChild(label);
+    }
     el.took.title = tookFailed
       ? 'The journal could not be written. Press again to retry.'
       : tookState
@@ -1705,6 +1925,210 @@
   // Whether the card on record is the held order's own card come back.
   function heldAgain() {
     return !!(holdingNow && onRecord && onRecord.heldCard);
+  }
+
+  // --- the order in the car, on the card -------------------------------------
+  //
+  // The order as the server last described it — heldForPanel on a reading or
+  // a mark reply, /api/status's `holding` at load — with the GPS drop's state
+  // brought up to date by every beat (`heldEnd`, heldEndState in server.js).
+  // Only what showHeld says from; holdingNow is still whether there is one.
+  var heldSaid = null;
+
+  // The server's reasons for not arming the GPS drop (heldEndState), in the
+  // two or three words the in-car line has room for. Keyed by the server's
+  // words; a reason this has no entry for is said in its first three words,
+  // so a new one is shortened rather than dropped.
+  var END_WHY_SHORT = {
+    'no house number': 'no house no.',
+    'not inside the card\'s reach': 'outside reach',
+    'several answers': 'several answers',
+    'too many answers': 'too many answers',
+    'no card fix': 'no card fix',
+    'NucBox down': 'NucBox down',
+    'door next to the pickup': 'door at pickup'
+  };
+
+  /* The GPS drop's state in a few words: "at door" once the car has arrived
+   * (the beat's atDropoff, or the hold's own arrival, which survives a reload),
+   * "● armed" with a door-level pin and nothing against it, the reason when
+   * there is one, and "○ not armed" when there is neither — no pin, and no
+   * refusal yet, which is also what a server with no NucBox search says. */
+  function gpsDropSaid() {
+    return gpsSaidOf(heldSaid || {}, atDropoff);
+  }
+
+  // ...for any one order in the car: `here` is the beat's word that the car
+  // is at a held door now, which with two orders is said per order by its own
+  // `arrived` instead.
+  function gpsSaidOf(h, here) {
+    if (here || h.arrived) return 'at door';
+    if (h.endWhy) {
+      return END_WHY_SHORT[h.endWhy] || String(h.endWhy).split(' ').slice(0, 3).join(' ');
+    }
+    return h.endPinned ? '● armed' : '○ not armed';
+  }
+
+  // A dropoff as the line has room for it: the street, without the town, the
+  // state or the ZIP, and without letters the reader made of an icon in front
+  // of it (MV.searchText).
+  function streetOf(text) {
+    if (!text) return null;
+    var s = MV && MV.searchText ? MV.searchText(text) : String(text).trim();
+    return s.split(',')[0].trim() || null;
+  }
+
+  /* Where the order in the car goes next: { kind, by, name }.
+   *
+   * A pickup the planner lists, the first of them, until the car is at the
+   * door — "not yet visited" is the rule MV.heldPickups already uses for the
+   * pins on Map view: the planner lists the stops still ahead, and a list read
+   * after the pickup no longer carries it. Then the dropoff, shortened, with
+   * the planner's expected-by time when the planner names one dropoff and so
+   * that time can only be this order's. Nothing is worked out from distance
+   * or speed: a time on this line is one the phone printed. */
+  function nextStop() {
+    var stops = heldPlan && heldPlan.of === heldOwner() ? heldPlan.stops : [];
+    var kind = function (k) {
+      return stops.filter(function (s) { return s && s.kind === k; });
+    };
+    var there = atDropoff || !!(heldSaid && heldSaid.arrived);
+    var pick = there ? null : kind('pickup')[0];
+    if (pick) {
+      return { kind: 'Pickup', by: pick.expectedBy,
+               name: (MV && MV.plannerName ? MV.plannerName(pick.name) : pick.name)
+                     || pick.street || null };
+    }
+    var drops = kind('dropoff');
+    var drop = drops.length === 1 ? drops[0] : null;
+    return { kind: 'Dropoff', by: drop ? drop.expectedBy : null,
+             name: streetOf(heldEnds) || (drop && drop.street) || null };
+  }
+
+  /* The order in the car, said on the panel. `mode` is 'between' when there
+   * is no offer and nothing else the card has to say, 'offer' with a verdict
+   * on the glass, and 'line' for the rest — a card being read, the rig blind
+   * or being aimed.
+   *
+   * Between offers the card held WAITING FOR AN OFFER and nothing else. Of
+   * the driver's 69 📷 Snaps of 8-12 Oct, 47 have no verdict on the glass and
+   * 24 of those an order in the car: half a panel of empty card, on the
+   * screen of the one job that is paying. So with an order held, the card says
+   * where it goes next and by when, large, and under it one line: what it
+   * pays and whether the GPS will put it down. With nothing held the card says
+   * what it said.
+   *
+   * With an offer up the same facts are one line, "In car $28.08 · ▸ Burger
+   * Barn · ● armed", and it is NOT in the card: it is the line under it,
+   * after the reading's age, in place of the read diagnostics. Two reasons.
+   * A line in the card costs the card a row it does not have: put at the
+   * card's foot, with a pair up, the card's contents ran past its box at both
+   * ends on the 800x480 panel beside the scene picture even with the headline
+   * made 20px smaller to pay for it, and on the 3.5" hat beside the phone the
+   * word PASS 11px above the card's edge and the line 10px below it. And a
+   * figure inside the verdict's colours reads as the offer's: the pay here is
+   * the held order's, and says "In car" in front of it for the same reason.
+   * The diagnostics it stands in for —
+   * costs, legs, reads — are questions for a parked driver, and are back the
+   * moment nothing is held. The pay and the GPS state never shrink; the stop
+   * is the part that gives way (`#detail .held` in the stylesheet).
+   *
+   * In Map view between offers the card is not drawn at all (setBetween), and
+   * the big block goes with it: the map is showing the same order's run. */
+  var heldMode = null;
+  function showHeld(mode) {
+    heldMode = mode;
+    var on = !!(holdingNow && mode);
+    var between = on && mode === 'between';
+    var inDetail = on && mode === 'offer';
+    // Two orders in the car: a line each, and no single "next stop" — which
+    // of two runs is next is the detour's question (Stage 6), not this one's.
+    var two = on && twoHeld();
+    var next = on && !two ? nextStop() : null;
+    el.heldNext.hidden = !between || two;
+    el.verdictLabel.hidden = between;
+    el.heldLine.hidden = !on || inDetail;
+    el.heldLine.classList.toggle('between', between);
+    el.heldLine2.hidden = !two || inDetail;
+    el.heldLine2.classList.toggle('between', between);
+    el.whose.hidden = !two || inDetail || !unownedNow;
+    el.whose.classList.toggle('between', between);
+    el.whose.textContent = unownedNow
+      ? unownedNow + (unownedNow === 1 ? ' dropoff' : ' dropoffs') + ' read \u00b7 whose?' : '';
+    var old = el.detail.querySelector('.held');
+    if (old) el.detail.removeChild(old);
+    el.detail.classList.toggle('withheld', inDetail);
+    if (!on) return;
+    if (two) return showTwoHeld(inDetail);
+    var pay = heldSaid && typeof heldSaid.pay === 'number' ? money(heldSaid.pay, 2) : '';
+    var line = inDetail ? document.createElement('span') : el.heldLine;
+    if (inDetail) {
+      line.className = 'held';
+      ['pay', 'stop', 'gps'].forEach(function (c) {
+        var part = document.createElement('span');
+        part.className = c;
+        line.appendChild(part);
+      });
+      el.detail.appendChild(line);
+    }
+    if (between) {
+      el.heldNext.firstChild.textContent = next.kind
+        + (typeof next.by === 'number' ? ' by ' + clockOf(next.by) : '');
+      el.heldNext.lastChild.textContent = next.name || 'address not read';
+      line.children[0].textContent = pay ? pay + ' in car' : 'In car';
+    } else {
+      line.children[0].textContent = (inDetail ? '· ' : '')
+        + 'In car' + (pay ? ' ' + pay : '');
+      line.children[1].textContent = '· ▸ ' + (next.name || next.kind);
+    }
+    line.children[1].hidden = between;
+    line.children[2].textContent = '· ' + gpsDropSaid();
+  }
+
+  // The circled number an order goes by on the panel: ① first-taken.
+  function circled(n) {
+    return String.fromCharCode(0x245f + n);
+  }
+
+  // One order's compact line: "① $9.48", "→ Kestrel Dr", "· ● armed"; its end
+  // as "?" when none is on record.
+  function orderLine(line, o, inDetail) {
+    line.children[0].textContent = circled(o.n) + ' '
+      + (typeof o.pay === 'number' ? money(o.pay, 2) : '?');
+    line.children[1].hidden = false;
+    line.children[1].textContent = '\u2192 ' + (streetOf(o.dropoff) || '?');
+    line.children[2].textContent = '\u00b7 ' + gpsSaidOf(o, false);
+    line.children[2].hidden = !!inDetail;
+  }
+
+  /* showHeld with two orders: ① on #heldLine, ② on #heldLine2; under an
+     offer, one line after the reading's age — "In car ① $9.48 · ② $28.08" —
+     since the row there has room for one, and the card above has the pair. */
+  function showTwoHeld(inDetail) {
+    var a = heldList[0], b = heldList[1];
+    if (inDetail) {
+      var line = document.createElement('span');
+      line.className = 'held';
+      ['pay', 'stop', 'gps'].forEach(function (c) {
+        var part = document.createElement('span');
+        part.className = c;
+        line.appendChild(part);
+      });
+      el.detail.appendChild(line);
+      line.children[0].textContent = '\u00b7 In car ' + circled(a.n) + ' '
+        + money(a.pay, 2);
+      line.children[1].textContent = '\u00b7 ' + circled(b.n) + ' ' + money(b.pay, 2);
+      line.children[2].hidden = true;
+      return;
+    }
+    orderLine(el.heldLine, a, false);
+    orderLine(el.heldLine2, b, false);
+  }
+
+  // Whether two orders are in the car, by the server's list (ordersForPanel),
+  // which only a server carrying two sends.
+  function twoHeld() {
+    return holdingNow && heldList.length >= 2;
   }
 
   el.took.addEventListener('click', function () {
@@ -1757,6 +2181,7 @@
       // `by: 'replaced'`). Said on the status row like the GPS drop.
       if (body && body.replaced) {
         replacedSaidUntil = Date.now() + (body.replaced.saidForMs || 60000);
+        replacedPay = typeof body.replaced.pay === 'number' ? body.replaced.pay : null;
       }
       if (body && typeof body.holding === 'boolean') {
         if (holdingNow && !body.holding) forgetDest();
@@ -1773,6 +2198,13 @@
         var held = body.holding ? body.held : null;
         heldEnds = held ? (held.dropoff || null) : undefined;
         heldCard = held ? (held.card || null) : null;
+        // ...and what the in-car line says of it (showHeld), from the same
+        // description.
+        heldSaid = held || null;
+        // ...and every order, with carrying two on, and the Undo for one
+        // this Took added beside another.
+        takeOrders(body);
+        if (body.added) offerUndo(body.added);
         showDrop();
         showDest();
         if (viewMode === 'map') showMap();
@@ -1830,8 +2262,16 @@
   // order down because the car left it, until when to say so.
   var atDropoff = false;
   var gpsDropSaidUntil = 0;
-  // ...and until when to say a Took put the previous order down.
+  // ...and until when to say a Took put the previous order down — and, when a
+  // Took past two put one down, its pay.
   var replacedSaidUntil = 0;
+  var replacedPay = null;
+  // Every order in the car as the server described them (ordersForPanel),
+  // first-taken first: sent only by a server carrying two, and [] otherwise.
+  // `holdingNow` and the names beside it are still ① alone.
+  var heldList = [];
+  // ...and how many addresses the rig read that it cannot give to either.
+  var unownedNow = 0;
   var dropBusy = false;
   var dropFailed = false;
   // What the failed press was about, so the failure can be forgotten when the
@@ -1867,7 +2307,9 @@
 
   function showDrop() {
     el.drop.hidden = !holdingNow;
-    el.drop.textContent = dropBusy ? '…' : dropFailed ? 'Drop · failed' : 'Drop';
+    // "Drop ▾" with two in the car: one tap may ask which (the chooser).
+    el.drop.textContent = dropBusy ? '…' : dropFailed ? 'Drop · failed'
+      : twoHeld() ? 'Drop \u25be' : 'Drop';
     el.drop.classList.toggle('failed', dropFailed);
     el.drop.title = 'Put the order down, so the next offer is judged on its own '
                   + 'again. It does not touch your phone.';
@@ -1891,7 +2333,9 @@
 
   /* ...and where one of its pickups is, found inside the held card's disc as
      its end is: the server does not arm a door within 150 m of one (the
-     restaurant guard, pickupNearEnd in server.js). Fire and forget, too. */
+     restaurant guard, pickupNearEnd in server.js). The server now searches
+     the planner's pickups itself (searchHeldPickup), so this is a second
+     opinion, kept by the same path. Fire and forget, too. */
   function pinHeldPickup(want, got) {
     if (!want.heldId || !got.at) return;
     ask('/api/held-pickup', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1903,8 +2347,9 @@
   // down (msg.gpsDrop). One function, so the two cannot forget different things.
   function orderDown() {
     holdingNow = false; forgetDest(); heldEnds = undefined; heldSig = null;
-    heldId = null; atDropoff = false; heldPlan = null;
-    showStack(null); showDest(); showTook();
+    heldId = null; atDropoff = false; heldPlan = null; heldSaid = null;
+    heldList = []; unownedNow = 0;
+    showStack(null); showDest(); showTook(); showHeld(heldMode);
   }
 
   el.drop.addEventListener('click', function () {
@@ -1916,7 +2361,13 @@
       // still in the car and the next offer must still be measured against it.
       dropFailed = !r.ok;
       dropFailedFor = r.ok ? null : heldSig;
-      if (r.ok) orderDown();
+      if (!r.ok) return null;
+      return r.json().catch(function () { return {}; }).then(function (body) {
+        // Two orders in the car and nothing to say which was delivered: the
+        // server put none down and sent the chooser (dropDecides).
+        if (body && body.choose) return openChooser(body.choose);
+        dropAnswered(body);
+      });
     }).catch(function () {
       /* Left as it was: an order the server still holds is the truth. */
       dropFailed = true;
@@ -1976,7 +2427,8 @@
   }
 
   /* Why the planner the last press read gave the order in the car no end, as
-   * the SCANNER decided it — see planner_destination in rpi/scan_pi.py — or ''.
+   * the ASSEMBLER decided it — see plannerDestination in assemble.js, whose
+   * word server.js puts on the planner line — or ''.
    *
    * Read off the line, not worked out here. This page used to count the
    * dropoffs itself, which was a second copy of half the scanner's rule: it
@@ -1994,8 +2446,8 @@
   // Each reason twice: the line under the stops, which has to survive the
   // thirty characters the 3.5" hat's scene picture gives a line, and the
   // sentence it stands for on the button's title. Keyed by the words
-  // planner_destination returns, and rpi/test_lint.py holds the two lists to
-  // each other: a reason the scanner gives that this has no words for would
+  // assemble.js's plannerDestination returns, and rpi/test_lint.py holds the
+  // two lists to each other: a reason it gives that this has no words for would
   // throw in the middle of drawing the driving screen.
   var UNFILED_THEN = ' so the order\'s destination is left as it was. Press this '
     + 'over the navigation screen for it instead.';
@@ -2095,7 +2547,7 @@
     var note = why ? unfiledSaid(why, stops).note : '';
     var k = stops.length > STOPS_SHOWN ? STOPS_SHOWN - 1 : stops.length;
     var drawn = drawStops(stopsLines(stops, k, note));
-    while (k && noticeCut()) {
+    while (k && (noticeCut() || stopsSpill())) {
       var fewer;
       do { k--; fewer = stopsLines(stops, k, note); } while (k && fewer.length >= drawn);
       drawn = drawStops(fewer);
@@ -2129,6 +2581,20 @@
   // after the lines above are drawn: its height is what the card had left.
   function noticeCut() {
     return !el.warn.hidden && el.warn.scrollHeight > el.warn.clientHeight + 1;
+  }
+
+  // ...or whether the stops run past the foot of the card themselves, with no
+  // notice to give way: the order in the car's next stop and its line above
+  // them (showHeld) are `flex: none` too, and on the 3.5" hat, with four stops
+  // read, the three together are taller than the card. The card centres what
+  // it cannot hold, so stops past its foot are the same height again cut off
+  // its top: with this switched off, the next stop's "Pickup by 11:52" was
+  // over the card's top border in both pictures (rpi/test_layout.py, HELD).
+  // Its bottom border is 2px (`.verdict`).
+  function stopsSpill() {
+    if (el.stops.hidden) return false;
+    return el.stops.getBoundingClientRect().bottom
+      > el.verdict.getBoundingClientRect().bottom - 2 + 0.5;
   }
 
   /* The other state this button is for, which it did not used to have.
@@ -2276,6 +2742,169 @@
         + 'gives no address.'
       : 'Read the dropoff off your phone');
   }
+
+  /* Drop's answer: the car empty, or — with carrying two on — the order left
+     in it, which the reply describes (holding, held, orders). */
+  function dropAnswered(body) {
+    if (body && body.holding && body.held) {
+      setHeldFrom(body.held, body);
+      showDrop(); showDest(); showTook(); showHeld(heldMode);
+      if (viewMode === 'map') showMap();
+      return;
+    }
+    orderDown();
+  }
+
+  /* The order in the car as a message describes it — `holding` on a reading,
+     `held` on a reply — in the five names this page keeps it under. */
+  function setHeldFrom(h, msg) {
+    holdingNow = !!h;
+    heldSig = holdSignature(h);
+    heldEnds = h ? (h.dropoff || null) : undefined;
+    heldCard = h ? (h.card || null) : null;
+    heldId = h ? (h.holdId || null) : null;
+    heldSaid = h || null;
+    takeOrders(msg);
+  }
+
+  // The list of orders and the count waiting for an owner, off any message
+  // that carries them (a server carrying two). Nothing held is no list.
+  function takeOrders(msg) {
+    if (!holdingNow) { heldList = []; unownedNow = 0; return; }
+    if (msg && Array.isArray(msg.orders)) heldList = msg.orders;
+    if (msg && typeof msg.unowned === 'number') unownedNow = msg.unowned;
+  }
+
+  /* ---------- the chooser ---------------------------------------------------
+   *
+   * {id, kind: 'scan'|'drop', line, rows: [{pick, n, pay, end}], card, closesInMs}:
+   * the server's (chooserForPanel, or Drop's reply). Rows "① $9.48 · Kestrel
+   * Dr", "② $28.08 · ?"; for a scan the card being screened as a third row and
+   * "Neither"; for Drop, "Both". A press answers it; nothing answers it in ten
+   * seconds and it closes, with nothing filed — the server's chooser closes on
+   * the same clock and refuses a late answer. */
+  var choosing = null;
+  var chooserTimer = null;
+
+  function openChooser(c) {
+    choosing = Object.assign({}, c, { until: Date.now() + (c.closesInMs || 10000) });
+    drawChooser();
+    clearTimeout(chooserTimer);
+    chooserTimer = setTimeout(closeChooser, Math.max(0, choosing.until - Date.now()));
+  }
+
+  function closeChooser() {
+    clearTimeout(chooserTimer);
+    choosing = null;
+    drawChooser();
+  }
+
+  // One row: what it is, whole (`who`), and where it ends, the part that
+  // gives way (`end`), when it has one.
+  function chooserRow(text, cls, pick, end) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    if (cls) b.className = cls;
+    var who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = text;
+    b.appendChild(who);
+    if (end !== undefined) {
+      var to = document.createElement('span');
+      to.className = 'end';
+      to.textContent = '\u00b7 ' + end;
+      b.appendChild(to);
+    }
+    b.addEventListener('click', function () { choose(pick); });
+    el.chooser.appendChild(b);
+  }
+
+  function drawChooser() {
+    while (el.chooser.firstChild) el.chooser.removeChild(el.chooser.firstChild);
+    el.chooser.hidden = !choosing;
+    if (!choosing) return;
+    var ask = document.createElement('div');
+    ask.className = 'ask';
+    ask.textContent = choosing.kind === 'drop' ? 'Which did you drop?'
+      : 'Whose is ' + (streetOf(choosing.line) || 'this') + '?';
+    el.chooser.appendChild(ask);
+    (choosing.rows || []).forEach(function (r) {
+      chooserRow(circled(r.n) + ' ' + (typeof r.pay === 'number' ? money(r.pay, 2) : '?'),
+                 'order', r.pick, streetOf(r.end) || '?');
+    });
+    if (choosing.kind !== 'drop' && choosing.card) {
+      chooserRow('This card ' + (typeof choosing.card.pay === 'number'
+                                 ? money(choosing.card.pay, 2) : ''), 'card', 'card');
+    }
+    if (choosing.kind === 'drop') chooserRow('Both', 'none', 'both');
+    else chooserRow('Neither', 'none', 'neither');
+  }
+
+  function choose(pick) {
+    var c = choosing;
+    closeChooser();
+    if (!c) return;
+    if (c.kind === 'drop') {
+      var ids = pick === 'both' ? (c.rows || []).map(function (r) { return r.pick; }) : [pick];
+      dropBusy = true;
+      showDrop();
+      ask('/api/delivered', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ holdIds: ids }) }).then(function (r) {
+        dropFailed = !r.ok;
+        dropFailedFor = r.ok ? null : heldSig;
+        return r.ok ? r.json().catch(function () { return {}; }).then(dropAnswered) : null;
+      }).catch(function () {
+        dropFailed = true;
+        dropFailedFor = heldSig;
+      }).then(function () {
+        dropBusy = false;
+        showDrop();
+      });
+      return;
+    }
+    // The address itself comes back on the stream when it is filed, as any
+    // address does; a refused or late answer files nothing, which is what the
+    // driver was told the chooser would do.
+    ask('/api/choose', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                         body: JSON.stringify({ id: c.id, pick: pick }) }).catch(function () {});
+  }
+
+  /* ---------- Undo, after a Took that added an order ------------------------ */
+  var undoing = null;
+  var undoTimer = null;
+
+  function offerUndo(added) {
+    undoing = added;
+    el.undo.textContent = 'Added ' + circled(heldList.length || 2) + ' '
+      + (typeof added.pay === 'number' ? money(added.pay, 2) : '') + ' \u00b7 Undo';
+    el.undo.hidden = false;
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(function () { undoing = null; el.undo.hidden = true; },
+                           added.undoForMs || 5000);
+  }
+
+  // The untick the Took button sends pressed again — `accepted: null`, from
+  // this panel — for the order the Took added. The server puts that order
+  // down and no other (the mark handler's untick).
+  el.undo.addEventListener('click', function () {
+    var u = undoing;
+    undoing = null;
+    clearTimeout(undoTimer);
+    el.undo.hidden = true;
+    if (!u) return;
+    ask('/api/offers/mark', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: u.id, accepted: null, via: 'panel', offer: { id: u.id } }) })
+      .then(function (r) { return r.ok ? r.json().catch(function () { return null; }) : null; })
+      .then(function (body) {
+        if (onRecord && onRecord.id === u.id) tookState = false;
+        if (body && typeof body.holding === 'boolean') {
+          if (body.holding) setHeldFrom(body.held, body);
+          else orderDown();
+        }
+        showDrop(); showDest(); showTook(); showHeld(heldMode);
+        if (viewMode === 'map') showMap();
+      }).catch(function () {});
+  });
 
   el.dest.addEventListener('click', function () {
     if (destBusy) return;
@@ -2658,6 +3287,9 @@
 
   function render() {
     var r = last;
+    // Took first: whether the card it names is still up is decided by this
+    // same reading, and its age changes with nothing arriving. See tookAge.
+    showTook();
     // A rig that cannot see takes this branch with a reading on hand too. Its
     // newest reading is from before it went blind — a dark box has made none
     // for a minute — or, from a camera frozen on a card, is that card read
@@ -2702,6 +3334,12 @@
         : again ? 'READING THE SCREEN'
         : busy ? 'READING THE CARD'
         : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER');
+      // ...and with an order in the car, where it goes next in that label's
+      // place when the label would be WAITING FOR AN OFFER — the card has
+      // nothing else to say — and its one line under anything else. Nothing
+      // held, nothing changes. See showHeld.
+      showHeld(!blind && !busy && (!p.phase || p.phase === 'scanning')
+               ? 'between' : 'line');
       // Only while aiming, where the number means pixels and says so. On any
       // other phase this put a four-digit camera measurement in the position
       // and size of the headline rate, under the label "/hr" — the single most
@@ -3016,7 +3654,7 @@
     // be undone by looking again. A washed-out card can be re-read; an offer
     // nobody wrote down is gone.
     if (notSaving) notes.push(notSaving);
-    // The order in the car, read again under a new id: no pair is weighed
+    // The order in the car, read again under either id: no pair is weighed
     // (server.js sends no stack for it), and this says why.
     if (holdingNow && r.heldCard) notes.push('The order you took, on the phone again \u2014 not a new offer.');
     // Then, because it is the note with a remedy in the driver's own hand, and
@@ -3120,6 +3758,9 @@
       + (r.items ? ' · ' + r.items + ' items' : '')
       + trackNote(r)));
     el.detail.appendChild(diag);
+    // ...and the order in the car, in one line after the age, once the line
+    // is built: see showHeld.
+    showHeld('offer');
     showRaw(r.text);
   }
 
@@ -3220,6 +3861,14 @@
 
   function noVerdictSaid(r) {
     if (r.clipped) return 'pay at the box edge — not trusted';
+    // The app's own idle screen, by its own words (OP.NOT_AN_OFFER, sent as
+    // `notAnOffer`). Whatever else the read picked off the map is not part of
+    // a card: the corpus's Uber online frame reads the day's takings, $142.60,
+    // as a payout and said "pay, no time", and 3 of the journal's 54 "Finding
+    // trips" screens read a time or a place off the map and said "no pay
+    // read" — each a READING THE CARD on the next read, over a phone saying
+    // it has no offers. Before the pay test, which is what it overrules.
+    if (r.notAnOffer) return NO_OFFER_SAID;
     if (typeof r.pay === 'number' && r.pay > 0) {
       return 'pay, no time — box may cut it off';
     }
@@ -3364,7 +4013,10 @@
     else if (Date.now() < gpsDropSaidUntil) bits.push('dropped \u00b7 left the dropoff');
     // ...and a Took that put the previous order down (server.js writes its
     // drop row `by: 'replaced'`). One order word on this row at a time.
-    else if (Date.now() < replacedSaidUntil) bits.push('previous order put down');
+    else if (Date.now() < replacedSaidUntil) {
+      bits.push(replacedPay !== null ? 'put down ' + money(replacedPay, 2)
+                                     : 'previous order put down');
+    }
     return bits.join(' \u00b7 ');
   }
 
@@ -3432,13 +4084,43 @@
       // this beat — and the order put down because the car left it, which is
       // Drop's reply arriving with nobody having pressed it.
       if (msg.atDropoff !== undefined) atDropoff = !!msg.atDropoff;
+      // ...and the rest of its state on the same beat: pinned, arrived, why
+      // not armed (heldEndState in server.js). Onto the order already
+      // described, never a hold of its own — whether there IS an order is
+      // said by the messages that always said it, and a beat says nothing
+      // about that.
+      if (msg.heldEnd && heldSaid && holdingNow) {
+        heldSaid.endPinned = !!msg.heldEnd.endPinned;
+        heldSaid.arrived = !!msg.heldEnd.arrived;
+        heldSaid.endWhy = msg.heldEnd.endWhy || null;
+      }
+      // ...and every order's, with two in the car.
+      if (msg.alive && Array.isArray(msg.orders) && holdingNow) heldList = msg.orders;
       if (msg.gpsDrop) {
-        orderDown();
+        // One of two put down: what is left comes on the same message, and
+        // the branch below takes it up.
+        if (!msg.holding) orderDown();
         gpsDropSaidUntil = Date.now() + (msg.gpsDrop.saidForMs || 60000);
         showDrop();
       }
       if (msg.heldReplaced) {
         replacedSaidUntil = Date.now() + (msg.heldReplaced.saidForMs || 60000);
+        replacedPay = typeof msg.heldReplaced.pay === 'number' ? msg.heldReplaced.pay : null;
+      }
+      if (msg.chooser !== undefined) {
+        // The chooser IS the press's answer: the button stops saying
+        // "reading…", and says what was read when a row files it.
+        if (msg.chooser) {
+          openChooser(msg.chooser);
+          destBusy = false;
+          showDest();
+        } else if (choosing && choosing.kind !== 'drop') {
+          closeChooser();
+        }
+      }
+      if (typeof msg.unowned === 'number' && holdingNow) {
+        unownedNow = msg.unowned;
+        showHeld(heldMode);
       }
       if (msg.cpuC !== undefined) cpuNow = typeof msg.cpuC === 'number' ? msg.cpuC : null;
       if (msg.throttled !== undefined) throttledNow = msg.throttled || null;
@@ -3458,6 +4140,9 @@
         if (!onRecord || onRecord.id !== msg.offer.id) {
           tookState = false;
           tookFailed = false;
+          // ...and its age starts here: server.js stamps offerAt at the same
+          // moment, a new id (see tookAge).
+          recordAt = Date.now();
           // ...and the destination read off the last card, which belongs to
           // that card and not to this one.
           //
@@ -3557,11 +4242,7 @@
           dropFailed = false;
           dropFailedFor = null;
         }
-        holdingNow = !!msg.holding;
-        heldSig = holdSignature(msg.holding);
-        heldEnds = msg.holding ? (msg.holding.dropoff || null) : undefined;
-        heldCard = msg.holding ? (msg.holding.card || null) : null;
-        heldId = msg.holding ? (msg.holding.holdId || null) : null;
+        setHeldFrom(msg.holding || null, msg);
         showDrop();
         showDest();
         // ...and Took, whose "in car" face is about the hold (heldAgain).
@@ -3685,16 +4366,17 @@
       // again while the count on the status row had already counted it — two
       // figures forty pixels apart disagreeing about the same act.
       tookState = !!s.offer.accepted;
+      // ...and how old it is, as a duration: see tookAge.
+      recordAt = typeof s.offerAgeMs === 'number' && s.offerAgeMs >= 0
+        ? Date.now() - s.offerAgeMs : null;
       showTook();
     }
     // ...and so does the order in the car. A panel opened mid-delivery — which
     // is exactly when a second app's offer arrives — would otherwise show no
     // way to put it down, and no sign that anything was being carried.
-    holdingNow = !!s.holding;
-    heldSig = holdSignature(s.holding);
-    heldEnds = s.holding ? (s.holding.dropoff || null) : undefined;
-    heldCard = s.holding ? (s.holding.card || null) : null;
-    heldId = s.holding ? (s.holding.holdId || null) : null;
+    setHeldFrom(s.holding || null, s);
+    // ...and a chooser the server has open, so a reload mid-question asks it.
+    if (s.chooser) openChooser(s.chooser);
     showDrop();
     showTook();
     // ...and what it was read as, so a panel opened or reloaded mid-delivery
@@ -4296,9 +4978,19 @@
        sw.js can serve this page (see drawHow). Never the order's end: that
        is `held`, off holding.dropoff, and nothing here writes it. */
     var plan = heldPlan && heldPlan.of === heldOwner() ? heldPlan.stops : null;
-    var heldPicks = (holdingNow && plan && MV && MV.heldPickups)
+    // ...and only from a map-view.js that measures the figure through them
+    // (MV.detourThrough): an older one, which sw.js can serve this page, has
+    // a road detour that would take them and measure to the end alone, under
+    // a caption saying the restaurant was in it.
+    var heldPicks = (holdingNow && plan && MV && MV.heldPickups && MV.detourThrough)
       ? MV.heldPickups(plan).filter(function (p) { return p.q !== held; }) : [];
-    var names = [o.pickup, o.dropoff, held]
+    // ...and with two orders in the car (carrying two on), the second one's
+    // end beside the first's, pinned D2 to the first's D1, in its own card's
+    // disc. The run and the figure stay the first order's alone until the
+    // detour through both exists (Stage 6).
+    var second = twoHeld() ? heldList[1] : null;
+    var held2 = second && second.dropoff && second.dropoff !== held ? second.dropoff : null;
+    var names = [o.pickup, o.dropoff, held, held2]
       .concat(heldPicks.map(function (p) { return p.q; })).filter(Boolean)
       .filter(function (v, i, all) { return all.indexOf(v) === i; });
     return { pickup: o.pickup || null, dropoff: o.dropoff || null,
@@ -4309,6 +5001,10 @@
              // checked against. See MV.againstCard.
              card: onRecord, heldCard: held ? heldCard : null,
              heldId: held ? heldId : null,
+             held2: held2, heldCard2: held2 ? (second.card || null) : null,
+             heldId2: held2 ? (second.holdId || null) : null,
+             // The number each order goes by on the pins: ① and ② by holdId.
+             heldNs: heldList.reduce(function (m, x) { m[x.holdId] = x.n; return m; }, {}),
              // The card is part of the key: two cards naming the same places
              // came up in two places, and the figure is measured from each
              // one's own fix.
@@ -4319,7 +5015,8 @@
              // did not move: the map kept the pin as the CARD's "and drop it
              // here", which the next card took away with it. Measured in
              // rpi/test_dashboard.py, 'held end: the ✓ Took reply's end...'.
-             key: names.join('|') + '#' + (o.id || '') + '@' + (held || ''),
+             key: names.join('|') + '#' + (o.id || '') + '@' + (held || '')
+               + (held2 ? '+' + held2 : ''),
              // What the NucBox said about these places on this walk: a
              // refusal per place, with the disc it was made in, and why the
              // NucBox could not be asked at all (and the public map was) —
@@ -4358,7 +5055,9 @@
 
   function shortPlace(name, cap) {
     var most = cap || PLACE_SHOWN;
-    var s = String(name == null ? '' : name).trim();
+    // A held pickup's planner line ends in a comma when its town did not read
+    // (MV.heldPickups' mark for "a street"); it is not part of the name.
+    var s = String(name == null ? '' : name).replace(/[\s,]+$/, '').trim();
     if (s.length <= most) return s;
     var cut = s.slice(0, most);
     var space = cut.lastIndexOf(' ');
@@ -4537,7 +5236,8 @@
            and dropoff, the held card's for where the order in the car is
            going. A refusal is kept with the disc it was made in, so the line
            under the map can say what was searched and what was found. */
-        var discs = { card: MV.discFor(want.card), held: MV.discFor(want.heldCard) };
+        var discs = { card: MV.discFor(want.card), held: MV.discFor(want.heldCard),
+                      held2: MV.discFor(want.heldCard2) };
         askPublic = [];
         for (var n = 0; n < want.names.length; n++) {
           var q = want.names[n];
@@ -4547,8 +5247,10 @@
           var heldsOwn = q === want.held
             || want.heldPicks.some(function (p) { return p.q === q; });
           var whose = (heldsOwn && q !== want.pickup && q !== want.dropoff)
-            ? 'held' : 'new';
-          var disc = whose === 'held' ? discs.held : discs.card;
+            ? 'held' : (q === want.held2 && q !== want.pickup && q !== want.dropoff)
+            ? 'held2' : 'new';
+          var disc = whose === 'held' ? discs.held : whose === 'held2' ? discs.held2
+            : discs.card;
           // `here` for a numberless street's pin: the point of its stretch
           // nearest the car (MV.stretchInDisc), when the street index is set.
           var got = await mapNbx.place(q, disc,        // eslint-disable-line no-await-in-loop
@@ -4569,6 +5271,8 @@
           want.nbxSeen[q] = { res: got, disc: disc, whose: whose };
           // The END only: a pickup's pin is never sent as the held end.
           if (whose === 'held' && q === want.held && disc) pinHeldEnd(want, q, got);
+          // ...the second order's end, under its own name.
+          else if (whose === 'held2' && disc) pinHeldEnd({ heldId: want.heldId2 }, q, got);
           // ...and a pickup's pin goes as a pickup, for the restaurant guard.
           else if (whose === 'held' && disc) pinHeldPickup(want, got);
           if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
@@ -4609,11 +5313,15 @@
           // one point, and the card says the street, not where on it. Its
           // figure is MV.stretchSpan's, over the whole stretch, in straight
           // lines, and the line says why there is no road figure.
-          if (MV.stretchSpan(here, j.pick, j.held)) {
+          // With the held order's pickups still ahead, through them: the
+          // run car -> restaurant -> held end, the new pickup in its best gap
+          // (MV.NbxSearch.detour) — two questions a gap, each three points at
+          // most, through the same relay and cache.
+          if (MV.stretchSpan(here, j.pick, j.held, heldStops(j))) {
             road = { why: 'street' };
           } else {
             mapSay('measuring the detour by road…');
-            road = await mapNbx.detour(here, j.pick, j.held);
+            road = await mapNbx.detour(here, j.pick, j.held, heldStops(j));
             if (viewMode !== 'map' || mapFor !== key) return;
           }
         }
@@ -4640,7 +5348,23 @@
           if (viewMode !== 'map' || mapFor !== key) return;
         }
       }
-      drawMap(want, found, here, true, road, heldRoad);
+      /* ...and this card's own job, pickup -> its dropoff, along the road:
+         one question of two points, drawing only. No figure comes of it, and
+         none could: the detour stops at where the order in the car ends
+         (Settled: never a route through where the new job ends), and this
+         line is the job, which the card's own miles already price. Under the
+         same trust as the held run — neither pin red or a card's refusal,
+         neither a numberless street's point — and straight otherwise. */
+      var jobRoad = null;
+      if (nbx.route && mapNbx) {
+        var jj = mapJudge(want, found, here);
+        if (jj.pick && jj.drop && !jj.off.pick && !jj.wrong[want.pickup]
+            && !jj.wrong[want.dropoff] && !jj.pick.stretch && !jj.drop.stretch) {
+          jobRoad = await mapNbx.runLine([jj.pick, jj.drop]);
+          if (viewMode !== 'map' || mapFor !== key) return;
+        }
+      }
+      drawMap(want, found, here, true, road, heldRoad, jobRoad);
     } finally {
       mapBusy = false;
       /* A walk the driver walked away from leaves this card marked as drawn
@@ -4948,6 +5672,7 @@
     var pick = want.pickup ? found[want.pickup] : null;
     var drop = want.dropoff ? found[want.dropoff] : null;
     var held = want.held ? found[want.held] : null;
+    var held2 = want.held2 ? found[want.held2] : null;
 
     /* ...and which pins a CARD refuses: farther from where that card came up
        than its own distance plus half a mile (MV.cardRefuses). Asked once
@@ -4960,24 +5685,35 @@
        disagree about which pin is wrong. */
     var off = { pick: MV.cardRefuses(want.card, here, pick),
                 held: MV.cardRefuses(want.heldCard,
-                                     MV.cardFix(want.heldCard).at, held) };
+                                     MV.cardFix(want.heldCard).at, held),
+                held2: MV.cardRefuses(want.heldCard2,
+                                      MV.cardFix(want.heldCard2).at, held2) };
     // The held order's pickups, each held to its card's disc as its end is.
     var heldPicks = (want.heldPicks || []).map(function (p) {
       var at = found[p.q] || null;
-      return { q: p.q, name: p.name, at: at,
+      return { q: p.q, name: p.name, at: at, of: p.of || null,
                off: at ? MV.cardRefuses(want.heldCard, MV.cardFix(want.heldCard).at, at)
                        : null };
     });
-    return { wrong: wrong, pick: pick, drop: drop, held: held, off: off,
+    return { wrong: wrong, pick: pick, drop: drop, held: held, held2: held2, off: off,
              heldPicks: heldPicks };
+  }
+
+  /* The held order's pickups still ahead, as the points of its run the
+     figure is measured through (MV.detourThrough's `stops`), in the planner's
+     order. Every one has a pin wherever this is used for a figure: mapRefusal
+     refuses one with none. */
+  function heldStops(j) {
+    return (j.heldPicks || []).map(function (p) { return p.at; });
   }
 
   /* `settled` is false while places are still being asked about, and the tail
      of this function is the whole of what it changes: pins and lines go up as
      they land, and not one geocoded CLAIM is made until every answer is in.
-     `road` is the router's detour when one was asked for, and `heldRoad` the
-     held order's run along the roads, or null (see showMap). */
-  function drawMap(want, found, here, settled, road, heldRoad) {
+     `road` is the router's detour when one was asked for, `heldRoad` the
+     held order's run along the roads and `jobRoad` this card's pickup ->
+     dropoff along them, each or null (see showMap). */
+  function drawMap(want, found, here, settled, road, heldRoad, jobRoad) {
     var j = mapJudge(want, found, here);
     var wrong = j.wrong, pick = j.pick, drop = j.drop, held = j.held, off = j.off;
 
@@ -5041,9 +5777,15 @@
        red disc. And where this card's dropoff IS the held order's destination,
        mapWants already dedupes the lookup and the two land as a solid disc
        inside a ring, which is exactly what that means. */
+    // D1 and D2 with two orders in the car (carrying two on), D with one.
+    var two = !!want.held2;
     put(held, colourFor(want.held, '#f5a524', off.held),
-        sayFor(want.held, 'where the order in your car is going', off.held),
-        want.held, true, 'D');
+        sayFor(want.held, two ? 'where order \u2460 in your car is going'
+                              : 'where the order in your car is going', off.held),
+        want.held, true, two ? 'D1' : 'D');
+    put(j.held2, colourFor(want.held2, '#f5a524', off.held2),
+        sayFor(want.held2, 'where order \u2461 in your car is going', off.held2),
+        want.held2, true, 'D2');
     put(pick, colourFor(want.pickup, '#17c964', off.pick),
         sayFor(want.pickup, 'pick this one up', off.pick), want.pickup, false, 'P');
     /* The held order's pickups: a GREEN RING, by the rule above — green for
@@ -5053,7 +5795,10 @@
     j.heldPicks.forEach(function (p) {
       put(p.at, colourFor(p.q, '#17c964', p.off),
           sayFor(p.q, 'pick up the order in your car', p.off),
-          [p.name, p.q.replace(/,$/, '')].filter(Boolean).join(' · '), true, 'P');
+          [p.name, p.q.replace(/,$/, '')].filter(Boolean).join(' · '), true,
+          // P1 / P2 for a pickup one order's card names (`of`), with two in
+          // the car; P otherwise.
+          two && p.of && want.heldNs[p.of] ? 'P' + want.heldNs[p.of] : 'P');
     });
     put(drop, colourFor(want.dropoff, '#f5a524'),
         sayFor(want.dropoff, 'and drop it here'), want.dropoff, false, 'D');
@@ -5085,22 +5830,38 @@
     }
     // The detour, car -> pickup -> held end, along the road the router
     // measured it on when it did (`road.line`: only with a figure, see
-    // MV.NbxSearch.detour); the two straight legs otherwise.
+    // MV.NbxSearch.detour); the two straight legs otherwise. With the held
+    // order's pickups still ahead it leaves the held run where the figure
+    // put the new pickup — before its restaurant (car -> pickup ->
+    // restaurant) or after it (restaurant -> pickup -> end) — and rejoins it
+    // there: the road of that gap, or MV.detourThrough's two straight legs
+    // over the stops that have a pin.
     var detourRoad = road && road.line && here && pick && held ? road.line : null;
     if (detourRoad) {
       runLine(detourRoad, { color: '#c084fc', dashArray: '2 9', opacity: .95,
                             className: 'mv-detour mv-road' });
     }
-    if (here && pick && !detourRoad) {
-      runLine([[here.lat, here.lon], [pick.lat, pick.lon]],
+    // With no stops the gap is the car and the held end, as it always was,
+    // either of them missing included — and so with a map-view.js from
+    // before MV.detourThrough, which is handed no stops (mapWants).
+    var stopsAt = heldAt.filter(Boolean);
+    var gap = !detourRoad && pick
+      ? (here && held && stopsAt.length && MV.detourThrough(here, pick, stopsAt, held))
+        || { from: here, to: held }
+      : {};
+    if (gap.from) {
+      runLine([[gap.from.lat, gap.from.lon], [pick.lat, pick.lon]],
               { color: '#c084fc', dashArray: '2 9', opacity: .95, className: 'mv-detour' });
     }
+    // The job itself, solid: along the road when the router drew it (see
+    // showMap), straight otherwise.
     if (pick && drop) {
-      runLine([[pick.lat, pick.lon], [drop.lat, drop.lon]],
-              { color: '#17c964', opacity: .9 });
+      runLine(jobRoad || [[pick.lat, pick.lon], [drop.lat, drop.lon]],
+              { color: '#17c964', opacity: .9,
+                className: 'mv-job' + (jobRoad ? ' mv-road' : '') });
     }
-    if (pick && held && !detourRoad) {
-      runLine([[pick.lat, pick.lon], [held.lat, held.lon]],
+    if (gap.to) {
+      runLine([[pick.lat, pick.lon], [gap.to.lat, gap.to.lon]],
               { color: '#c084fc', dashArray: '2 9', opacity: .95, className: 'mv-detour' });
     }
 
@@ -5166,8 +5927,12 @@
     // the order in the car is going, because that order HAS to be delivered;
     // where the new job ends after that is a further guess, and a parameter
     // nothing reads is a parameter that will one day be read by mistake. The
-    // router is asked about the same three points and no others.
-    return stop !== null ? stop : mapFigure(want, found, here, j.pick, j.held, road);
+    // router is asked about the same points and no others.
+    // The held order's own pickups ARE passed: they are where the order in
+    // the car goes before its end, which it has to, and the run the figure is
+    // measured against goes through them (mapFigure).
+    return stop !== null ? stop
+      : mapFigure(want, found, here, j.pick, j.held, road, heldStops(j));
   }
 
   /* Why the figure is not stated, in words, or null when it may be. showMap
@@ -5183,8 +5948,16 @@
        are still drawn and still marked — seeing them is how the driver knows
        what happened — but the arithmetic stops. */
     wrong = wrong || {};
+    /* The held order's pickups still ahead are points of the run the figure
+       is measured against (MV.detourThrough), so each is held to every rule
+       its end is, in the same place in the order, and named as it was
+       searched: its planner line. A figure measured past a stop with no pin,
+       or a wrong one, is the figure that ignored the restaurant. */
+    var heldPicks = j.heldPicks || [];
+    function firstPick(test) { return heldPicks.filter(test)[0] || null; }
     var badEnd = (want.pickup && wrong[want.pickup]) ? want.pickup
-               : (want.held && wrong[want.held]) ? want.held : null;
+               : (want.held && wrong[want.held]) ? want.held
+               : (firstPick(function (p) { return wrong[p.q]; }) || {}).q || null;
 
     // No detour to state, and WHICH of these it is matters: a driver told
     // nothing assumes the rig checked and found nothing worth saying.
@@ -5217,6 +5990,11 @@
                                         MV.cardFix(want.heldCard).at, held,
                                         shortPlace(want.held, DISC_PLACE_SHOWN),
                                         'held');
+    // ...and a held pickup, from the same card's fix, in the same words.
+    var offPick = firstPick(function (p) { return p.off; });
+    if (offPick) return MV.againstCard(want.heldCard, MV.cardFix(want.heldCard).at,
+                                       offPick.at, shortPlace(offPick.q, DISC_PLACE_SHOWN),
+                                       'held');
     /* ...and a pin the NucBox would not choose, for the same reason and in
        the same place in the order: it is the disc's refusal made before a
        pin was drawn instead of after (MV.pickInDisc) — none of its
@@ -5237,6 +6015,12 @@
       return MV.nbxRefusal(nbxNo[want.held].res, nbxNo[want.held].disc,
                            shortPlace(want.held, DISC_PLACE_SHOWN),
                            nbxNo[want.held].whose);
+    }
+    // ...and a held pickup the NucBox would not pin, in its disc's words.
+    var noPin = firstPick(function (p) { return nbxNo[p.q] && p.q !== want.pickup; });
+    if (noPin) {
+      return MV.nbxRefusal(nbxNo[noPin.q].res, nbxNo[noPin.q].disc,
+                           shortPlace(noPin.q, DISC_PLACE_SHOWN), nbxNo[noPin.q].whose);
     }
     // THIS card's fix, and why there is none: a card that came up with no
     // fix and one whose fix the gate refused are different states, and "no
@@ -5267,6 +6051,13 @@
     if (!held) return found[want.held] === undefined
       ? 'could not reach the geocoder for where your order is going'
       : 'the geocoder found nothing for where your order is going';
+    // ...and for where it is collected, while its planner says it still is.
+    // Not a figure measured to the end alone: that is the figure that left
+    // the restaurant out, which is what this line replaced.
+    var lost = firstPick(function (p) { return !p.at; });
+    if (lost) return found[lost.q] === undefined
+      ? 'could not reach the geocoder for where your order is collected'
+      : 'the geocoder found nothing for where your order is collected';
 
     /* Every pin is in and no card refused one. What is left is whether each
        card COULD have: MV.againstCard says which card may be held against a
@@ -5285,13 +6076,22 @@
     said = MV.againstCard(want.heldCard, heldFix.at, held,
                           shortPlace(want.held, DISC_PLACE_SHOWN), 'held');
     if (said) return said;
+    /* A held pickup that is a numberless street (MV.stretchInDisc): the run
+       goes through some point of it the planner did not name, and its span
+       against the new pickup's and the end's is no figure this panel can
+       work out at a glance, so none is stated. Said, never measured to the
+       point of it nearest the car — the error stretchSpan exists to refuse. */
+    var onStreet = firstPick(function (p) { return p.at.stretch; });
+    if (onStreet) return 'no figure for ' + shortPlace(onStreet.q, DISC_PLACE_SHOWN)
+                         + ' — your order\'s pickup is a street';
     /* ...and a numberless street whose figure depends on where along it the
        stop is: MV.stretchSpan measures the figure at every point of its
        stretch inside the card's disc, and where those are not one answer
        the line says how long the street runs there instead of choosing a
        point. Measured to the point nearest the car, this showed true +1.5
-       as +0.6 and true +0.4 as +5.1 (tests/mapview.test.js). */
-    var span = MV.stretchSpan(here, pick, held);
+       as +0.6 and true +0.4 as +5.1 (tests/mapview.test.js). With the held
+       order's pickups in the run, at every point (MV.detourThrough's). */
+    var span = MV.stretchSpan(here, pick, held, heldStops(j));
     if (span && !span.stated) {
       return MV.spanRefusal(span, shortPlace(span.whose === 'new' ? want.pickup : want.held,
                                              DISC_PLACE_SHOWN), span.whose);
@@ -5311,8 +6111,29 @@
      labelled "road mi", so the two figures are never mistaken for each
      other; otherwise in straight lines, labelled as it always was, with the
      reason the road is missing said in the tail where there was one. Same
-     half-mile cut for both. */
-  function mapFigure(want, found, here, pick, held, road) {
+     half-mile cut for both.
+
+     With the held order's pickups still ahead (`stops`, its Trip Planner's),
+     both figures are measured against its run through them — car -> its
+     restaurant -> its end — with the new pickup in the best gap of that run
+     (MV.detourThrough; MV.NbxSearch.detour), and the line SAYS so, inside
+     the part no clamp eats: the same number means a different thing when
+     the restaurant is in it, and a driver who collected the food since the
+     planner was read is told what the figure assumed.
+
+     "incl. restaurant" takes the place of "out of your way" and "this
+     pickup is" rather than going beside them, and that is measured, not
+     taste (rpi/test_layout.py): the longest straight-line line there is —
+     a range to a street, a place not asked, the NucBox down after it
+     answered one — already takes the two rows 800x480 gives it, and with
+     ", restaurant stop included" added it was cut short there, which a
+     panel the rig ships on may never do. "+1.2 road mi incl. restaurant"
+     is the same figure the same way round: what the pickup adds, here to
+     the run through the restaurant. */
+  function mapFigure(want, found, here, pick, held, road, stops) {
+    stops = stops || [];
+    var withStop = !stops.length ? ''
+      : stops.length > 1 ? ' incl. restaurants' : ' incl. restaurant';
     /* Why a place has no pin, in the three kinds this project keeps apart
        everywhere else — because only one of them is about the rig's reading.
        An empty answer is stored as null; a lookup that could not be MADE is
@@ -5356,6 +6177,11 @@
       : (road && road.why && roadDown[road.why]) || '';
     var cut = MV.ON_WAY_MI;
     if (road && isFinite(road.miles)) {
+      if (withStop) {
+        return (road.miles < cut ? 'on your way by road'
+                                 : '+' + road.miles.toFixed(1) + ' road mi')
+          + withStop + count + nucbox;
+      }
       return (road.miles < cut ? 'this pickup is on your way by road'
                                : '+' + road.miles.toFixed(1) + ' road mi out of your way')
         + count + nucbox;
@@ -5366,13 +6192,16 @@
        as a range, so nothing is measured to a point the card never named.
        The range needs no hedge after it: it IS the hedge, in the figure's
        own place, where no clamp reaches. */
-    var span = MV.stretchSpan(here, pick, held);
-    var lo = span ? span.lo : MV.detour(here, pick, held), hi = span ? span.hi : lo;
+    var span = MV.stretchSpan(here, pick, held, stops);
+    var lo = span ? span.lo
+      : stops.length ? MV.detourThrough(here, pick, stops, held).miles : MV.detour(here, pick, held);
+    var hi = span ? span.hi : lo;
     var most = hi.toFixed(1) === lo.toFixed(1) ? '' : '–' + hi.toFixed(1);
-    return (hi < cut ? 'this pickup is on your way'
-                     : '+' + lo.toFixed(1) + most + ' mi out of your way')
-      + ' — straight lines, not roads'
-      + count + nucbox;
+    var said = withStop
+      ? (hi < cut ? 'on your way' : '+' + lo.toFixed(1) + most + ' mi') + withStop
+      : (hi < cut ? 'this pickup is on your way'
+                  : '+' + lo.toFixed(1) + most + ' mi out of your way');
+    return said + ' — straight lines, not roads' + count + nucbox;
   }
 
   // Last, not beside the button it belongs to: it can put the pane into map

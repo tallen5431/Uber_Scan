@@ -37,7 +37,9 @@
  * a half seconds (for the timeout), "4821 Kestrel Dr" answers its street and
  * not the door, "Starbucks" is twelve branches cut at the limit, "Waffle
  * House" is a pickup the road by is shorter than the road direct, "Farm
- * Stand" is 450 m from a road, a point at 34.1, -84.6 is refused by the
+ * Stand" is 450 m from a road, "250 Example Road" is a restaurant's door (a
+ * held order's pickup) and "1975 Cobb Parkway" one 87 m from 1985's door, a
+ * point at 34.1, -84.6 is refused by the
  * router with a code that is not NoRoute, a route touching 33.9, -84.7
  * comes back with a shape that is not one, and GET /__asked lists every
  * question this fake was asked, so a suite can read exactly what left the
@@ -131,6 +133,20 @@ var WAFFLE = [place(71, 33.9300, -84.5100, 'amenity', 'restaurant', 'Waffle Hous
 var FARM = [place(72, 33.9650, -84.5350, 'shop', 'farm', 'Farm Stand',
                   'Farm Stand, Marietta, Cobb County, Georgia, 30060, United States')];
 
+/* A restaurant's door the router routes like any other point: the held
+   order's Trip Planner pickup in the suites (street=250 Example Road), 1.7 mi
+   north-east of the Square, inside a 9.4 mi card's disc. Invented. */
+var GRILL = [place(81, 33.9700, -84.5300, 'amenity', 'restaurant', 'Example Grill',
+                   'Example Grill, 250, Example Road, Marietta, Cobb County, Georgia, '
+                   + '30060, United States')];
+
+/* ...and one 87 m from the door at 1985 Cobb Parkway (street=1975 Cobb
+   Parkway): a restaurant next to a customer's door, which the GPS drop's
+   restaurant guard exists for. Invented. */
+var DINER = [place(82, 34.0004, -84.5554, 'amenity', 'restaurant', 'Example Diner',
+                   'Example Diner, 1975, Cobb Parkway, Kennesaw, Cobb County, Georgia, '
+                   + '30152, United States')];
+
 var CHURCH = [
   place(31, 33.9580, -84.5520, 'highway', 'tertiary', 'Church Street',
         'Church Street, Marietta, Cobb County, Georgia, 30060, United States'),
@@ -163,6 +179,8 @@ function search(q) {
     else if (/^1985 cobb (pkwy|parkway)/.test(term)) all = COBB_1985;
     else if (/^4821 kestrel (dr|drive)/.test(term)) all = KESTREL;
     else if (/^church st/.test(term)) all = CHURCH;
+    else if (/^250 example (rd|road)/.test(term)) all = GRILL;
+    else if (/^1975 cobb (pkwy|parkway)/.test(term)) all = DINER;
   }
   if (q.bounded === '1') all = all.filter(function (p) { return inBox(p, q.viewbox); });
   return all.slice(0, Number(q.limit) || 10);
@@ -303,7 +321,8 @@ function start(done) {
 
 module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    COBB_1985: COBB_1985, CHURCH: CHURCH, KESTREL: KESTREL,
-                   STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM };
+                   STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM, GRILL: GRILL,
+                   DINER: DINER };
 
 if (require.main === module) {
   start(function (f) { console.log(JSON.stringify({ port: f.port })); });

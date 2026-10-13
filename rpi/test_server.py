@@ -1099,6 +1099,49 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+    # ...and back under its OWN id. The scanner now gives a card paged away
+    # from and back to the id it had (rpi/journal.py, RECENT_CARDS), so the held
+    # card arrives after another one as the held order's id, not as the same
+    # slot. That is the order in the car by the journal's own word, past the
+    # window or not; the offer line tested `!==` and paired it with itself.
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'heldownid.py')
+    with open(fake, 'w') as fh:
+        fh.write(_HELD_FAKE.split('say("h-1", 10.00)\n')[0]
+                 + 'say("h-1", 10.00)\n'
+                 'time.sleep(2.5)\n'
+                 'say("n-9", 12.00, dropoff="Pine Rd & Birch Ln, Testville")\n'
+                 'time.sleep(1.5)\n'
+                 'say("h-1", 10.00)\n'
+                 'time.sleep(600)\n')
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake, 'HOLD_GRACE_MS': '600000',
+                        'HELD_CARD_MS': '500'}, journal)
+    try:
+        for _ in range(160):
+            if (get(base, '/api/status').get('offer') or {}).get('id') == 'h-1':
+                break
+            time.sleep(0.05)
+        post(base, '/api/offers/mark', {'id': 'h-1', 'accepted': True})
+        # Until the card in between has been paired and the held one is back.
+        for _ in range(160):
+            if any(r.get('kind') == 'pair' for r in lines(journal)) \
+                    and (get(base, '/api/status').get('offer') or {}).get('id') == 'h-1':
+                break
+            time.sleep(0.05)
+        time.sleep(0.5)
+        _s = get(base, '/api/status')
+        ok_('[held again] its own card back under its own id after another card is '
+            'the order in the car, past the window too',
+            ((_s.get('offer') or {}).get('heldCard') or '').startswith('h-1@'))
+        eq('[held again] ...and is not paired with itself',
+           [r['id'] for r in lines(journal) if r.get('kind') == 'pair'], ['n-9'])
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
 # --- a card read twice, where only one reading saw the map --------------------
 #
 # The winner of the pay/minutes/miles vote is taken whole, and an address is not
@@ -1630,9 +1673,11 @@ if shutil.which('python3'):
         eq('the order goes in the car', code, 200)
         ok_('...and the server says it is holding', reply.get('holding') is True)
         # ...and says it as the stream does (heldForPanel), so Map view has
-        # the held order from the press and not from the next reading.
+        # the held order from the press and not from the next reading — and
+        # the panel's in-car line its GPS drop's state (heldEndState).
         eq('held end: the mark reply carries the order in the car as the stream describes it',
-           sorted((reply.get('held') or {}).keys()), ['card', 'dropoff', 'holdId', 'minutes', 'pay'])
+           sorted((reply.get('held') or {}).keys()),
+           ['arrived', 'card', 'dropoff', 'endPinned', 'endWhy', 'holdId', 'minutes', 'pay'])
         # Started after the mark, before the scanner's 2s sleep ends.
         heard = listen(base, 4)
 
@@ -1883,6 +1928,253 @@ if shutil.which('python3'):
            'multi-order held card', held_end('1180 Wrenfield Rd NW, Kennesaw', 1.5),
            'Oak Dr & Elm Dr, Acworth')
         put_down('o-lone-two')
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
+
+# --- Stage 3: the assembler, with one hold ------------------------------------
+#
+# The decisions moved into assemble.js; the server keeps the writing and the
+# saying. With ONE order held every decision must be the one the old dropoff
+# branch made, and the one gain is a Trip Planner filed from more than one
+# page. Through the real server and a relay scanner, as above. Every name and
+# street invented.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    cmds = os.path.join(work, 'cmds.jsonl')
+    open(cmds, 'w').close()
+    fake = os.path.join(work, 'relay.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import sys, time\n'
+            'done = 0\n'
+            'while True:\n'
+            '    lines = open(%r).read().splitlines()\n'
+            '    for l in lines[done:]:\n'
+            '        print(l, flush=True)\n'
+            '    done = len(lines)\n'
+            '    time.sleep(0.05)\n' % cmds)
+    write(journal, [])
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake}, journal)
+
+    def say(msg):
+        with open(cmds, 'a') as fh:
+            fh.write(json.dumps(msg) + '\n')
+
+    def took(i, dropoff, **card):
+        code, reply = post(base, '/api/offers/mark', {
+            'id': i, 'accepted': True,
+            'offer': dict({'id': i, 'pay': 14.0, 'minutes': 30.0, 'billedMinutes': 30.0,
+                           'miles': 6.0, 'cost': 2.1, 'dropoff': dropoff}, **card)})
+        return code == 200 and reply.get('holding') is True
+
+    def put_down(i):
+        post(base, '/api/offers/mark', {'id': i, 'accepted': None})
+
+    def held(want=None, key='dropoff', patience=4.0):
+        h = {}
+        for _ in range(int(patience * 20)):
+            h = get(base, '/api/status').get('holding') or {}
+            if want is not None and h.get(key) == want:
+                return h
+            time.sleep(0.05)
+        return h
+
+    def marks_for(i):
+        return [(r.get('dropoff'), r.get('asked'), r.get('labelled'))
+                for r in (json.loads(l) for l in open(journal) if l.strip())
+                if r.get('kind') == 'mark' and r.get('id') == i and r.get('dropoff')]
+
+    _OSTRANDER = {'kind': 'dropoff', 'orders': 1, 'name': 'Mara T.', 'place': None,
+                  'expectedBy': 1202, 'street': '415 Ostrander Way NW', 'city': 'Kennesaw',
+                  'state': 'GA', 'zip': None, 'line': '415 Ostrander Way NW, Kennesaw',
+                  'partial': None, 'label': 'dropoff'}
+    _QUARRY = {'kind': 'pickup', 'orders': 1, 'name': 'Juniper Taqueria', 'place': None,
+               'expectedBy': 1180, 'street': '2210 Quarry Bend Rd NW', 'city': 'Kennesaw',
+               'state': 'GA', 'zip': '30144',
+               'line': '2210 Quarry Bend Rd NW, Kennesaw, GA 30144',
+               'partial': None, 'label': 'pickup'}
+
+    def page(stops, top, bottom, titled, at=None):
+        """A whole-screen planner read, unpressed: its sighting, then its
+        planner line under the same stamp, the order the scanner sends them."""
+        at = at if at is not None else int(time.time() * 1000)
+        say({'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': titled,
+                          'app': 'uber', 'screen': 'uber.planner',
+                          'page': {'top': top, 'bottom': bottom}, 'stops': stops,
+                          'orderCount': 1, 'keep': False}})
+        say({'planner': {'stops': [{k: v for k, v in s.items()
+                                    if k not in ('partial', 'label')} for s in stops],
+                         'keep': False, 'asked': False, 'ms': None, 'at': at}})
+        return at
+
+    try:
+        heard = listen(base, 40)
+        # The old road: the scanner decided the planner's one dropoff and sent
+        # it as a label-proven dropoff line.
+        ok_('the premise: an order with the card\'s corner is in the car (old road)',
+            took('o-asm-old', 'Larch Way & Teal Ct, Kennesaw', legs=1, multiOrder=True))
+        say({'dropoff': {'found': True, 'line': '415 Ostrander Way NW, Kennesaw',
+                         'street': '415 Ostrander Way NW', 'city': 'Kennesaw',
+                         'state': 'GA', 'zip': None, 'asked': False,
+                         'labelled': 'dropoff', 'ms': None,
+                         'at': int(time.time() * 1000)}})
+        _old = held('415 Ostrander Way NW, Kennesaw')
+        for _ in range(60):
+            if marks_for('o-asm-old'):
+                break
+            time.sleep(0.05)
+        _old_marks = [m[1:] for m in marks_for('o-asm-old')]
+        put_down('o-asm-old')
+        # The new road: the planner's sighting, and the assembler decides.
+        ok_('the premise: the same order is in the car (new road)',
+            took('o-asm-new', 'Larch Way & Teal Ct, Kennesaw', legs=1, multiOrder=True))
+        page([_QUARRY, _OSTRANDER], True, True, True)
+        _new = held('415 Ostrander Way NW, Kennesaw')
+        for _ in range(60):
+            if marks_for('o-asm-new'):
+                break
+            time.sleep(0.05)
+        eq('one hold: the assembler files what the old branch filed',
+           [(h.get('dropoff'), h.get('dropoffScanned')) for h in (_new,)]
+           + [m[1:] for m in marks_for('o-asm-new')],
+           [(_old.get('dropoff'), _old.get('dropoffScanned'))] + _old_marks)
+        ok_('the premise: the old road filed it, label-proven and unasked (%r)' % _old_marks,
+            _old.get('dropoff') == '415 Ostrander Way NW, Kennesaw'
+            and _old_marks == [(False, True)])
+        eq('...and the hold says where it came from',
+           ((_new.get('fields') or {}).get('dropoff') or {}).get('from'), 'planner')
+        eq('...and the planner line that followed says none was left unfiled',
+           (held(key='planner', patience=0.5).get('planner') or {}).get('unfiled', '<none>'),
+           None)
+        _told = [m for m in heard if (m.get('dropoff') or {}).get('line')
+                 == '415 Ostrander Way NW, Kennesaw' and m.get('holding')]
+        ok_('...and the panel is told it as a dropoff, carrying the order in the car',
+            any((m.get('holding') or {}).get('dropoff') == '415 Ostrander Way NW, Kennesaw'
+                for m in _told))
+        put_down('o-asm-new')
+
+        # A rival card on the slot: a different offer read after the Took, still
+        # what the driver is looking at. A label-proven address is filed onto the
+        # one hold all the same — the refused guard (AUDITS) is not written.
+        ok_('the premise: an order with the card\'s corner is in the car',
+            took('o-asm-rival', 'Larch Way & Teal Ct, Kennesaw'))
+        say({'offer': {'id': 'o-rival-card', 'pay': 9.5, 'minutes': 20, 'perHour': 18,
+                       'dropoff': None}})
+        for _ in range(60):
+            if (get(base, '/api/status').get('offer') or {}).get('id') == 'o-rival-card':
+                break
+            time.sleep(0.05)
+        ok_('the premise: the rival card is on the slot',
+            (get(base, '/api/status').get('offer') or {}).get('id') == 'o-rival-card')
+        say({'dropoff': {'found': True, 'line': '61 Saddlebrook Ln, Acworth, GA 30101',
+                         'street': '61 Saddlebrook Ln', 'city': 'Acworth', 'state': 'GA',
+                         'zip': '30101', 'asked': False, 'labelled': 'dropoff', 'ms': None,
+                         'at': int(time.time() * 1000)}})
+        eq('a labelled dropoff with a rival card on the slot is still filed onto the one hold',
+           (held('61 Saddlebrook Ln, Acworth, GA 30101').get('dropoff'),
+            (get(base, '/api/status').get('offer') or {}).get('dropoff')),
+           ('61 Saddlebrook Ln, Acworth, GA 30101', None))
+        put_down('o-asm-rival')
+
+        # The gain: a list whose "Waybill" is on the page below, on a card of
+        # two orders, so the first page alone files nothing.
+        ok_('the premise: a two-order card is in the car with the card\'s corner',
+            took('o-asm-pages', 'Larch Way & Teal Ct, Kennesaw', legs=1, multiOrder=True))
+        _p1 = page([_QUARRY, _OSTRANDER], True, False, True)
+        _h1 = held(patience=1.0)
+        eq('a planner page whose list runs off the screen files nothing alone, and says why',
+           (_h1.get('dropoff'), (_h1.get('planner') or {}).get('unfiled')),
+           ('Larch Way & Teal Ct, Kennesaw', 'list'))
+        page([_OSTRANDER], False, True, False, at=_p1 + 6000)
+        _h2 = held('415 Ostrander Way NW, Kennesaw')
+        eq('...and the page below it, with "Waybill", files the list\'s one dropoff',
+           (_h2.get('dropoff'), ((_h2.get('fields') or {}).get('dropoff') or {}).get('from'),
+            ((_h2.get('fields') or {}).get('customer') or {}).get('value')),
+           ('415 Ostrander Way NW, Kennesaw', 'planner', 'Mara T.'))
+        put_down('o-asm-pages')
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
+# --- a sighting is counted and goes nowhere ----------------------------------
+#
+# Stage 2 of the multi-order design: the scanner sends a `sighting` line for
+# every whole-screen and planner read (emit_sighting in rpi/scan_pi.py). The
+# server counts it by screen type on /api/status's scanner block, writes no
+# journal row for it and puts nothing of it on the event stream. Since Stage 3
+# a planner sighting is the assembler's to file from — see the next block —
+# and these are pages it files nothing off: the one planner page here carries
+# no `titled`, and an unpressed page is filed only under the "Trip Planner"
+# title, as the scanner's own unpressed read always required. One fake
+# scanner relaying whatever the test appends, as above; the order is held so a
+# sighting that filed would have somewhere to file. The address is invented.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    cmds = os.path.join(work, 'cmds.jsonl')
+    open(cmds, 'w').close()
+    fake = os.path.join(work, 'relay.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import sys, time\n'
+            'done = 0\n'
+            'while True:\n'
+            '    lines = open(%r).read().splitlines()\n'
+            '    for l in lines[done:]:\n'
+            '        print(l, flush=True)\n'
+            '    done = len(lines)\n'
+            '    time.sleep(0.05)\n' % cmds)
+    write(journal, [])
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake}, journal)
+    try:
+        code, reply = post(base, '/api/offers/mark', {
+            'id': 'o-sight', 'accepted': True,
+            'offer': {'id': 'o-sight', 'pay': 14.0, 'minutes': 30.0,
+                      'billedMinutes': 30.0, 'miles': 6.0, 'cost': 2.1, 'dropoff': None}})
+        ok_('the premise: an order with no end is held when the sightings arrive',
+            code == 200 and reply.get('holding') is True)
+        _stream = listen(base, 3.0)
+        time.sleep(0.3)
+        # Read here, not with lines(): that name is a list by this point.
+        _rows_before = open(journal).read()
+        _stop = {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'place': None,
+                 'expectedBy': 978, 'street': '4821 Kestrel Dr', 'city': 'Marietta',
+                 'state': 'GA', 'zip': None, 'line': '4821 Kestrel Dr, Marietta',
+                 'partial': None, 'label': 'dropoff'}
+        with open(cmds, 'a') as fh:
+            for _screen, _stops in (('uber.planner', [_stop]), ('uber.nav', [_stop]),
+                                    ('uber.planner', [_stop]), (None, [])):
+                fh.write(json.dumps({'sighting': {
+                    'at': int(time.time() * 1000), 'asked': False, 'whole': True,
+                    'app': 'uber', 'screen': _screen,
+                    'page': {'top': True, 'bottom': True}, 'stops': _stops,
+                    'orderCount': 1, 'keep': True}}) + '\n')
+            # ...and a heartbeat after them, so the stream is shown carrying
+            # the scanner's lines and the sightings are seen to be the ones
+            # left out, not the stream to be silent.
+            fh.write(json.dumps({'alive': True}) + '\n')
+        _screens = {}
+        for _ in range(80):
+            _screens = (get(base, '/api/status').get('scanner') or {}).get('screens') or {}
+            if sum(_screens.values()) >= 4:
+                break
+            time.sleep(0.05)
+        eq('a sighting is counted by its screen type on the scanner\'s status, '
+           'one without a type as unknown', _screens,
+           {'uber.planner': 2, 'uber.nav': 1, 'unknown': 1})
+        time.sleep(3.0)
+        ok_('the premise: the stream carried the scanner\'s heartbeat after them',
+            any(m.get('alive') for m in _stream))
+        eq('...and is not broadcast', [m for m in _stream if 'sighting' in m], [])
+        eq('...and writes no journal row', open(journal).read(), _rows_before)
+        eq('...and files nothing onto the order in the car',
+           ((get(base, '/api/status').get('holding') or {}).get('dropoff'),
+            (get(base, '/api/status').get('holding') or {}).get('planner')), (None, None))
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
@@ -2740,9 +3032,14 @@ try:
         os.path.exists(_hold))
     # Stated 30 minutes, half again, and the default ten-minute grace: the
     # moment holding() stops answering yes, which is what the scanner is told.
-    _accepted = json.load(open(_hold)).get('acceptedAt')
+    # (The file is a list of orders since Stage 4: `{v: 2, orders: [...]}`.)
+    _accepted = json.load(open(_hold))['orders'][0].get('acceptedAt')
     eq('...and the scanner is told until when, the moment holding() lets go',
        _held_until(), _accepted + 30 * 1.5 * 60000 + 10 * 60000)
+    # ...and WHICH order, so the scanner forgets the address it last
+    # volunteered when the order changes (held_signature in rpi/scan_pi.py).
+    eq('...and which order it is, by the name the panel knows it by',
+       json.load(open(_hheld)).get('holds'), ['h-1@%d' % _accepted])
 finally:
     stop(_hproc)
 # Taken away here, so the restart below has to write it again for the order it
@@ -2928,6 +3225,87 @@ except Exception:
     _herr5 = ''
 no_('...without a stack trace at boot (%r)' % (_herr5[:70].replace('\n', ' '),),
     'uncaught' in _herr5)
+
+# --- Stage 4: the order in the car is a list ---------------------------------
+#
+# holding.json is `{v: 2, orders: [Hold]}` now, capped at one order (MAX_HELD
+# in server.js), and every build before it wrote the one-slot object. Both
+# directions have to be safe: a v1 file left by the build before is ONE order,
+# its clock untouched — a different acceptedAt is a different expiry and a
+# different name for the pin to be posted under — and a v2 file read by the
+# build before holds nothing rather than something half-read. Invented order
+# and street.
+_v1at = int(time.time() * 1000) - 5 * 60000
+with open(_hold, 'w') as _fh:
+    json.dump({'id': 'h-v1', 'pay': 9.48, 'minutes': 40, 'acceptedAt': _v1at,
+               'dropoff': '12 Kestrel Dr, Marietta'}, _fh)
+if os.path.exists(_hheld):
+    os.remove(_hheld)
+_v4proc, _v4base = start({'SCANNER': '0', 'UBERSCAN_HANDOFF_DIR': _hhand}, _hjournal)
+try:
+    _v4held = (get(_v4base, '/api/status') or {}).get('holding') or {}
+    _v4note = json.load(open(_hheld)) if os.path.exists(_hheld) else {}
+    # A pin on it rewrites the file, which is then the list's shape.
+    post(_v4base, '/api/held-pickup', {'holdId': 'h-v1@%d' % _v1at,
+                                       'lat': 33.95, 'lon': -84.55})
+    _v4file = json.load(open(_hold))
+    eq('a v1 holding.json restores as one order, clock unchanged',
+       (_v4held.get('holdId'), _v4held.get('pay'), _v4note.get('until'),
+        _v4note.get('holds'), _v4file.get('v'), len(_v4file.get('orders') or []),
+        ((_v4file.get('orders') or [{}])[0]).get('acceptedAt')),
+       ('h-v1@%d' % _v1at, 9.48, _v1at + 40 * 1.5 * 60000 + 10 * 60000,
+        ['h-v1@%d' % _v1at], 2, 1, _v1at))
+finally:
+    stop(_v4proc)
+
+# ...and the build before the list, given the file this one now writes. Run as
+# that build, out of git, not as a copy of its rule written here: the rule is
+# `typeof h.acceptedAt === 'number'` on the file's top level, and the v2 file
+# has none, which only the real loader can be trusted to show. The premise
+# first — the same old build DOES restore a v1 file — so a refusal below is
+# about the shape and not a server that restores nothing.
+_OLD = '000c052'
+_oldtree = tempfile.mkdtemp()
+_oldok = subprocess.run('git -C "%s" archive %s | tar -x -C "%s"' % (ROOT, _OLD, _oldtree),
+                        shell=True, capture_output=True).returncode == 0
+ok_('(the build before the list is in this checkout\'s history: %s)' % _OLD, _oldok)
+
+
+def _old_restores(content):
+    jdir = tempfile.mkdtemp()
+    jpath = os.path.join(jdir, 'offers.jsonl')
+    open(jpath, 'w').close()
+    with open(os.path.join(jdir, 'holding.json'), 'w') as fh:
+        json.dump(content, fh)
+    hand = os.path.join(jdir, 'handoff')
+    os.mkdir(hand)
+    port = free_port()
+    proc = subprocess.Popen(
+        ['node', os.path.join(_oldtree, 'server.js')],
+        env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=jpath,
+                 SCANNER='0', UBERSCAN_HANDOFF_DIR=hand),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    base = 'http://127.0.0.1:%d' % port
+    try:
+        for _ in range(120):
+            try:
+                return (get(base, '/api/status') or {}).get('holding')
+            except Exception:
+                time.sleep(0.1)
+        return 'never came up'
+    finally:
+        stop(proc)
+        shutil.rmtree(jdir, ignore_errors=True)
+
+
+if _oldok:
+    _v1again = {'id': 'h-v1', 'pay': 9.48, 'minutes': 40,
+                'acceptedAt': int(time.time() * 1000) - 60000}
+    ok_('(the build before the list restores a v1 file)',
+        (_old_restores(_v1again) or {}).get('pay') == 9.48)
+    eq('...a v2 file read by the old loader holds nothing',
+       _old_restores(_v4file), None)
+shutil.rmtree(_oldtree, ignore_errors=True)
 shutil.rmtree(_hdir, ignore_errors=True)
 
 # --- Drop leaves a row saying when ------------------------------------------
@@ -2955,7 +3333,7 @@ try:
                           {'id': 'drop-1', 'accepted': True, 'offer': _doffer})
     ok_('a marked offer goes in the car', _dsaid.get('holding') is True)
     with open(os.path.join(_ddir, 'holding.json')) as _fh:
-        _dheld = json.load(_fh)
+        _dheld = json.load(_fh)['orders'][0]
     _dbefore = int(time.time() * 1000)
     _dcode, _dsaid = post(_dbase, '/api/delivered', {})
     _dafter = int(time.time() * 1000)
@@ -5666,7 +6044,27 @@ try:
        (_holding(_gb) or {}).get('endWhy'), 'door next to the pickup')
     _beats(_DWELL + _LEAVE)
     ok_('[gps drop] ...so waiting at the restaurant and leaving drops nothing', _holding(_gb))
+    # ...and the panel is told the same, on the stream: the beat carries the
+    # GPS drop's state (the panel's in-car line says it between offers, when
+    # no reading comes), and so does the order as heldForPanel describes it,
+    # here in the reply to a Took. /api/status was the only place it was said,
+    # and the panel fetches that once, at load.
+    _state = lambda h: {k: (h or {}).get(k) for k in ('endPinned', 'arrived', 'endWhy')}
+    eq('[gps drop] the beat carries the GPS drop\'s state for the panel',
+       (get(_gb, '/api/status').get('beat') or {}).get('heldEnd'),
+       {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup'})
+    eq('[gps drop] ...the same as /api/status says', _state(_holding(_gb)),
+       {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup'})
+    _r = post(_gb, '/api/offers/mark', {
+        'id': 'g-stream', 'accepted': True,
+        'offer': {'id': 'g-stream', 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': 'Kestrel Dr, Marietta'}})[1]
+    eq('[gps drop] ...and the order the stream describes carries it too',
+       _state(_r.get('held')), {'endPinned': False, 'arrived': False, 'endWhy': None})
     post(_gb, '/api/delivered', {})
+    _beats([_fix(_FAR)])
+    eq('[gps drop] ...and with nothing held the beat says so',
+       (get(_gb, '/api/status').get('beat') or {}).get('heldEnd', 'missing'), None)
 finally:
     stop(_gp)
 
@@ -6000,6 +6398,624 @@ finally:
     _afake.kill()
     _stub.shutdown()
     shutil.rmtree(_adir, ignore_errors=True)
+
+
+# --- the held order's pickups, searched for by the server --------------------
+#
+# The restaurant guard (pickupNearEnd) without Map view: when a Trip Planner
+# read lands on the hold and NUCBOX_SEARCH is set, server.js asks the NucBox
+# for each pickup that has a street (searchHeldPickup), inside the HELD card's
+# disc, and keeps the position as /api/held-pickup does (keepPickupPin). The
+# fake's "1975 Cobb Parkway" is a restaurant 87 m from the door at 1985 Cobb
+# Parkway, inside the guard's 150 m; "250 Example Road" one 1.66 mi from the
+# Square. Addresses and points invented.
+_hkfake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_hkfake_base = 'http://127.0.0.1:%d' % json.loads(_hkfake.stdout.readline())['port']
+
+
+def _hkasked(word):
+    return [a for a in json.loads(urllib.request.urlopen(
+        _hkfake_base + '/__asked', timeout=5).read()) if word in a]
+
+
+_hkdir = tempfile.mkdtemp()
+
+
+def _hksayer(name):
+    """A scanner of its own in _hkdir/name, saying each line of say-N.json in
+    turn a quarter of a second apart (a heartbeat's `at` made now): planner
+    reads and GPS beats alike. Returns its script and the function that has
+    it say a list of lines and waits until it has."""
+    d = os.path.join(_hkdir, name)
+    os.makedirs(d)
+    script = os.path.join(d, 'say.py')
+    with open(script, 'w') as fh:
+        fh.write(
+            'import json, os, time\n'
+            'd = os.path.dirname(os.path.abspath(__file__))\n'
+            'n = 0\n'
+            'end = time.time() + 600\n'
+            'while time.time() < end:\n'
+            '    p = os.path.join(d, "say-%d.json" % n)\n'
+            '    if not os.path.exists(p):\n'
+            '        time.sleep(0.05)\n'
+            '        continue\n'
+            '    for x in json.load(open(p)):\n'
+            '        if x.get("alive"):\n'
+            '            x["at"] = int(time.time() * 1000)\n'
+            '        print(json.dumps(x), flush=True)\n'
+            '        time.sleep(0.25)\n'
+            '    open(os.path.join(d, "done-%d" % n), "w").close()\n'
+            '    n += 1\n')
+    seq = [0]
+
+    def says(lines):
+        n = seq[0]
+        seq[0] += 1
+        path = os.path.join(d, 'say-%d.json' % n)
+        with open(path + '.tmp', 'w') as fh:
+            json.dump(lines, fh)
+        os.rename(path + '.tmp', path)
+        for _ in range(400):
+            if os.path.exists(os.path.join(d, 'done-%d' % n)):
+                break
+            time.sleep(0.05)
+        time.sleep(0.3)
+    open(os.path.join(d, 'offers.jsonl'), 'w').close()
+    return script, says, os.path.join(d, 'offers.jsonl')
+
+
+def _hkplanner(*picks):
+    """A Trip Planner read: each pickup (name, street or None), then a dropoff."""
+    stops = [{'kind': 'pickup', 'orders': 1, 'name': n, 'expectedBy': 1189, 'street': s,
+              'city': None, 'state': None, 'zip': None, 'line': s} for n, s in picks]
+    stops.append({'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'street': None,
+                  'city': None, 'state': None, 'zip': None, 'line': None})
+    return {'planner': {'stops': stops, 'unfiled': 'dropoffs', 'asked': False}}
+
+
+_HK_DOOR = (34.0010, -84.5560)    # the fake's three answers' middle
+
+
+def _hkbeat(dlat):
+    return {'alive': True, 'gps': {'state': 'ok', 'ageSeconds': 0.1, 'fix': {
+        'lat': _HK_DOOR[0] + dlat, 'lon': _HK_DOOR[1], 'gpsAge': 0.1, 'gpsErr': 25.0,
+        'gpsMode': 3, 'gpsOk': True, 'gpsWhy': None, 'freshFor': 10.0}}}
+
+
+class _HkDown(object):
+    """A NucBox that answers every search 503, counting them."""
+    searches = []
+
+
+def _hkdown_app():
+    import http.server
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            _HkDown.searches.append(self.path)
+            self.send_response(503)
+            self.end_headers()
+    srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+_hkdown = _hkdown_app()
+try:
+    _hks, _hksays, _hkj = _hksayer('a')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800',
+                        'GPS_DWELL_MS': '1000'}, _hkj)
+    try:
+        # The end armed by the server, then the planner read: no Map view.
+        _atook(_hkb, 'k-guard', _COBB)
+        _settled(_hkb, lambda h: h.get('endPinned'))
+        _hksays([_hkplanner(('Example Diner', '1975 Cobb Parkway'))])
+        _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
+        _q = _hkasked('street=1975')
+        ok_('[held pickups] a planner pickup with a street is searched on the NucBox inside '
+            'the held card\'s disc and kept for the guard, with no Map view (%r)' % _q[:1],
+            _h.get('pickupsPinned') == 1 and len(_q) == 1 and 'viewbox=' in _q[0]
+            and 'bounded=1' in _q[0])
+        eq('[held pickups] ...so the door the server armed 87 m from it is not armed, and '
+           'says why', (_h.get('endPinned'), _h.get('endWhy')), (True, 'door next to the pickup'))
+        post(_hkb, '/api/delivered', {})
+
+        # The end armed AND arrived at — the car waiting at the restaurant —
+        # before the planner read says where the restaurant is.
+        _atook(_hkb, 'k-late', _COBB)
+        _settled(_hkb, lambda h: h.get('endPinned'))
+        _hksays([_hkbeat(0.0002)] * 7)
+        ok_('[held pickups] (the premise: the car waiting there arrived at the door)',
+            (_holding(_hkb) or {}).get('arrived'))
+        _hksays([_hkplanner(('Example Diner', '1975 Cobb Parkway'))])
+        _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
+        eq('[held pickups] a pickup that lands after the end was armed asks the guard again: '
+           'the arrival counted at the restaurant is taken back',
+           (_h.get('arrived'), _h.get('endWhy'), _h.get('pickupsPinned')),
+           (False, 'door next to the pickup', 1))
+        post(_hkb, '/api/delivered', {})
+
+        # A held card of 1.0 mi: its disc is 1.5 mi, and the restaurant at
+        # 250 Example Road is 1.66 mi from its fix.
+        _atook(_hkb, 'k-far', _COBB, miles=1.0)
+        _settled(_hkb)
+        _n = len(_hkasked('street=250'))
+        _hksays([_hkplanner(('Example Grill', '250 Example Road'))])
+        for _ in range(60):
+            if len(_hkasked('street=250')) > _n:
+                break
+            time.sleep(0.05)
+        time.sleep(0.3)
+        eq('[held pickups] a pickup the NucBox places outside the held card\'s disc is asked '
+           'and not kept', (len(_hkasked('street=250')) - _n,
+                            (_holding(_hkb) or {}).get('pickupsPinned')), (1, 0))
+        post(_hkb, '/api/delivered', {})
+    finally:
+        stop(_hkp)
+
+    # A NucBox that is down, so nothing is cached and every question shows:
+    # the same planner read three times asks once (the retry is a minute off),
+    # and a pickup with no street is never asked.
+    _hks, _hksays, _hkj = _hksayer('b')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                        'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _hkdown.server_address[1],
+                        'NUCBOX_RETRY_MS': '60000'}, _hkj)
+    try:
+        _atook(_hkb, 'k-once', _COBB)
+        _settled(_hkb)
+        _n = len(_HkDown.searches)
+        _hksays([_hkplanner(('Example Diner', '1975 Cobb Parkway'))] * 3
+                + [_hkplanner(('Example Wok', None))])
+        time.sleep(0.5)
+        _new = _HkDown.searches[_n:]
+        eq('[held pickups] a pickup is asked once per hold, however often its planner is read, '
+           'and one with no street never (%r)' % _new,
+           (len(_new), all('street=1975' in u for u in _new),
+            (_holding(_hkb) or {}).get('pickupsPinned')), (1, True, 0))
+    finally:
+        stop(_hkp)
+
+    # A hold restored at boot with its planner on it and no pickup kept (the
+    # NucBox was not there when it was read), its end refused for good: the
+    # pickups are asked at boot, as the end is.
+    _hkr = os.path.join(_hkdir, 'r')
+    os.makedirs(_hkr)
+    open(os.path.join(_hkr, 'offers.jsonl'), 'w').close()
+    with open(os.path.join(_hkr, 'holding.json'), 'w') as _fh:
+        json.dump({'id': 'k-boot', 'acceptedAt': int(time.time() * 1000) - 60000,
+                   'pay': 12.0, 'minutes': 40.0, 'miles': 5.0,
+                   'dropoff': 'Kestrel Dr, Marietta', 'endWhy': 'no house number',
+                   'endWhyFor': 'Kestrel Dr, Marietta',
+                   'card': dict(_SQ, miles=5.0),
+                   'planner': {'stops': _hkplanner(('Example Diner', '1975 Cobb Parkway'))
+                               ['planner']['stops'], 'unfiled': 'dropoffs'}}, _fh)
+    _hkp, _hkb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base},
+                       os.path.join(_hkr, 'offers.jsonl'))
+    try:
+        _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
+        eq('[held pickups] a hold restored at boot has its planner pickups asked for',
+           (_h.get('holdId', '').startswith('k-boot'), _h.get('pickupsPinned')), (True, 1))
+    finally:
+        stop(_hkp)
+finally:
+    _hkfake.kill()
+    _hkdown.shutdown()
+    shutil.rmtree(_hkdir, ignore_errors=True)
+
+# --- Stage 5: carrying two orders ---------------------------------------------
+#
+# The driver asked to carry two orders, and AUDITS.md's Settled refused it as
+# plan 3.1 for one reason: with two in the car, the ⌖ press for the second was
+# filed onto the first — an asked:true dropoff on the wrong order's id, in a
+# file that cannot be corrected. The owner's decision puts a safeguard in place
+# of the refused rival-card guard: with two held, an address is filed onto one
+# of them only on a positive cue, or from the chooser the driver answers, and
+# otherwise nowhere. Behind the `carryTwo` setting (CARRY_TWO here); with it
+# off a second Took replaces, as before.
+#
+# A scanner of its own that says whatever the suite writes: `lines-N.json`, a
+# list of messages, each printed as one line, and `done-N` when they are out.
+# Every name, store and street is invented.
+_cdir = tempfile.mkdtemp()
+_cfake = os.path.join(_cdir, 'say.py')
+with open(_cfake, 'w') as _fh:
+    _fh.write(
+        'import json, os, time\n'
+        'd = os.path.dirname(os.path.abspath(__file__))\n'
+        'n = 0\n'
+        'end = time.time() + 900\n'
+        'while time.time() < end:\n'
+        '    p = os.path.join(d, "lines-%d.json" % n)\n'
+        '    if not os.path.exists(p):\n'
+        '        time.sleep(0.03)\n'
+        '        continue\n'
+        '    for m in json.load(open(p)):\n'
+        '        m.setdefault("at", int(time.time() * 1000))\n'
+        '        print(json.dumps(m), flush=True)\n'
+        '        time.sleep(0.05)\n'
+        '    open(os.path.join(d, "done-%d" % n), "w").close()\n'
+        '    n += 1\n')
+_cseq = [0]
+
+
+def _say(*msgs):
+    """The fake scanner says these, in order; returns once they are read."""
+    n = _cseq[0]
+    _cseq[0] += 1
+    path = os.path.join(_cdir, 'lines-%d.json' % n)
+    with open(path + '.tmp', 'w') as fh:
+        json.dump(list(msgs), fh)
+    os.rename(path + '.tmp', path)
+    for _ in range(300):
+        if os.path.exists(os.path.join(_cdir, 'done-%d' % n)):
+            break
+        time.sleep(0.03)
+    time.sleep(0.25)
+
+
+def _card(oid, pay, minutes=30.0, miles=5.0, app='uber', screen='uber.offer',
+          pickup=None, dropoff=None, deliver_by=None, **more):
+    o = {'id': oid, 'pay': pay, 'minutes': minutes, 'billedMinutes': minutes,
+         'miles': miles, 'cost': 1.5, 'perHour': 20.0, 'state': 'go',
+         'app': app, 'screen': screen, 'pickup': pickup, 'dropoff': dropoff,
+         'deliverBy': deliver_by, 'legs': 1, 'multiOrder': False}
+    o.update(more)
+    return {'offer': o}
+
+
+def _took2(base, card):
+    """The card on the slot, then ✓ Took on it; the reply — and a moment for
+    the rows the press appends after replying (a replaced order's drop row)."""
+    _say(card)
+    out = post(base, '/api/offers/mark', {'id': card['offer']['id'], 'accepted': True,
+                                         'via': 'panel'})[1]
+    time.sleep(0.3)
+    return out
+
+
+def _nav(line, street, city, asked=True, app='uber', expected=None, **more):
+    d = {'found': True, 'line': line, 'street': street, 'city': city, 'state': 'GA',
+         'zip': None, 'asked': asked, 'labelled': None if asked else 'dropoff',
+         'ms': 10, 'app': app, 'screen': 'uber.nav', 'expectedBy': expected}
+    d.update(more)
+    return {'dropoff': d}
+
+
+def _rows(journal_path, kind=None):
+    out = [json.loads(l) for l in open(journal_path) if l.strip()]
+    return [r for r in out if kind is None or r.get('kind') == kind]
+
+
+def _orders(base):
+    return get(base, '/api/status').get('orders') or []
+
+
+def _cserver(name, **env):
+    # A directory each: holding.json is kept beside the journal, and a server
+    # started on the last one's would restore its orders.
+    home = os.path.join(_cdir, name)
+    os.mkdir(home)
+    j = os.path.join(home, 'offers.jsonl')
+    open(j, 'w').close()
+    hand = os.path.join(home, 'hand')
+    os.mkdir(hand)
+    e = {'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _cfake,
+         'UBERSCAN_HANDOFF_DIR': hand, 'HOLD_GRACE_MS': '600000'}
+    e.update(env)
+    # The fake starts at lines-0 each time it is started: a fresh directory
+    # of lines per server.
+    for f in os.listdir(_cdir):
+        if f.startswith('lines-') or f.startswith('done-'):
+            os.remove(os.path.join(_cdir, f))
+    _cseq[0] = 0
+    proc, base = start(e, j)
+    return proc, base, j, hand
+
+
+_SN = time.localtime()
+_NOWMIN = _SN.tm_hour * 60 + _SN.tm_min
+_A = _card('c-a', 9.48, minutes=40.0, deliver_by=(_NOWMIN + 40) % 1440,
+           pickup='Wren Street Noodles')
+_B = _card('c-b', 28.08, minutes=55.0, deliver_by=(_NOWMIN + 75) % 1440,
+           pickup='Larkspur Tacos')
+_BNAV = ('77 Birch Ln, Roswell, GA 30075', '77 Birch Ln', 'Roswell')
+
+_cp, _cb, _cj, _ch = _cserver('two', CARRY_TWO='1', CHOOSER_MS='1500')
+try:
+    _ra = _took2(_cb, _A)
+    _rb = _took2(_cb, _B)
+    _two = _orders(_cb)
+    eq('[carry two] a second Took ADDS an order: two in the car, first-taken first',
+       [(o.get('n'), o.get('pay')) for o in _two], [(1, 9.48), (2, 28.08)])
+    ok_('[carry two] ...and the Took that added one offers to undo it',
+        (_rb.get('added') or {}).get('id') == 'c-b' and not _ra.get('added'))
+    eq('[carry two] ...the scanner is told of both, until the later end',
+       len(json.load(open(os.path.join(_ch, 'uberscan-holding.json'))).get('holds') or []), 2)
+
+    # Plan 3.1's own case: ⌖ over B's navigation screen, which prints B's
+    # deadline. The same app, so the app alone cannot decide it.
+    _seen = listen(_cb, 2.5)
+    _say(_nav(_BNAV[0], _BNAV[1], _BNAV[2], expected=(_NOWMIN + 76) % 1440))
+    _two = _orders(_cb)
+    _marks = [r for r in _rows(_cj, 'mark') if r.get('dropoff') == _BNAV[0]]
+    eq('plan 3.1: Took A, Took B, ⌖ over B\'s navigation lands on B, never A',
+       ([o.get('dropoff') for o in _two], [(r.get('id'), r.get('cue')) for r in _marks]),
+       ([None, _BNAV[0]], [('c-b', 'deadline')]))
+    time.sleep(0.4)
+    ok_('[carry two] ...and the panel is told, with ① still the first-taken',
+        any((m.get('dropoff') or {}).get('line') == _BNAV[0]
+            and (m.get('holding') or {}).get('pay') == 9.48 for m in _seen))
+
+    # The same press with nothing on the screen to say whose: the chooser.
+    _KNAV = ('4821 Kestrel Dr, Marietta, GA 30060', '4821 Kestrel Dr', 'Marietta')
+    _seen = listen(_cb, 2.0)
+    _say(_nav(_KNAV[0], _KNAV[1], _KNAV[2]))
+    _ch1 = get(_cb, '/api/status').get('chooser') or {}
+    time.sleep(0.3)
+    eq('...with no cue nothing is filed and the chooser is offered',
+       ([o.get('dropoff') for o in _orders(_cb)],
+        [r for r in _rows(_cj, 'mark') if r.get('dropoff') == _KNAV[0]],
+        [r.get('n') for r in _ch1.get('rows') or []], _ch1.get('line'),
+        # No card row: the card on the slot is B's own, the last Took's.
+        _ch1.get('card'),
+        bool(_ch1.get('id'))
+        and any((m.get('chooser') or {}).get('id') == _ch1.get('id') for m in _seen)),
+       ([None, _BNAV[0]], [], [1, 2], _KNAV[0], None, True))
+    # ...and left alone: it closes with nothing filed, and an answer after
+    # that is refused.
+    time.sleep(1.8)
+    _late = post(_cb, '/api/choose', {'id': _ch1.get('id'), 'pick': _two[0].get('holdId')})
+    eq('the chooser closing untouched files nothing',
+       (get(_cb, '/api/status').get('chooser'), _late[0],
+        [o.get('dropoff') for o in _orders(_cb)],
+        [r for r in _rows(_cj, 'mark') if r.get('dropoff') == _KNAV[0]]),
+       (None, 409, [None, _BNAV[0]], []))
+    # ...and the premise: a row picked in time files it, on that order, by
+    # the chooser.
+    _say(_nav(_KNAV[0], _KNAV[1], _KNAV[2]))
+    _ch2 = get(_cb, '/api/status').get('chooser') or {}
+    _picked = post(_cb, '/api/choose', {'id': _ch2.get('id'), 'pick': _two[0].get('holdId')})
+    time.sleep(0.3)     # its mark row is appended after the reply
+    eq('[carry two] ...a row picked in time files the address on that order, cue chooser',
+       (_picked[0], [o.get('dropoff') for o in _orders(_cb)],
+        [(r.get('id'), r.get('cue')) for r in _rows(_cj, 'mark')
+         if r.get('dropoff') == _KNAV[0]]),
+       (200, [_KNAV[0], _BNAV[0]], [('c-a', 'chooser')]))
+
+    # ...and a card being screened when the press comes is a row of its own,
+    # which files the address on that card.
+    _say(_card('c-s', 12.5, minutes=25.0, miles=3.0))
+    _SNAV = ('9 Elm Ct, Smyrna, GA 30080', '9 Elm Ct', 'Smyrna')
+    _say(_nav(_SNAV[0], _SNAV[1], _SNAV[2]))
+    _ch3 = get(_cb, '/api/status').get('chooser') or {}
+    _pc = post(_cb, '/api/choose', {'id': _ch3.get('id'), 'pick': 'card'})
+    time.sleep(0.3)
+    eq('[carry two] a card being screened is the chooser\'s third row, and picking it files '
+       'the address on that card',
+       (_ch3.get('card'), _pc[0],
+        [(r.get('id'), r.get('cue')) for r in _rows(_cj, 'mark') if r.get('dropoff') == _SNAV[0]],
+        [o.get('dropoff') for o in _orders(_cb)]),
+       ({'pick': 'card', 'pay': 12.5}, 200, [('c-s', 'chooser')], [_KNAV[0], _BNAV[0]]))
+
+    # A card offered while both are in the car: its pair row names the first
+    # as `held` and the second beside it, and the stack line says it is
+    # weighed against ① alone.
+    _say(_card('c-p', 14.0, minutes=25.0, miles=4.0))
+    _pair = [r for r in _rows(_cj, 'pair') if r.get('id') == 'c-p']
+    eq('[carry two] a pair row keeps held as the first-taken order and adds heldAlso and heldCount',
+       [((r.get('held') or {}).get('pay'), [h.get('pay') for h in r.get('heldAlso') or []],
+         r.get('heldCount')) for r in _pair], [(9.48, [28.08], 2)])
+    _say({'ready': True, 'state': 'go', 'perHour': 30.0, 'grossPerHour': 33.6,
+          'pay': 14.0, 'minutes': 25.0, 'billedMinutes': 25.0, 'cardMinutes': 25.0,
+          'miles': 4.0, 'cost': 1.4, 'target': 25, 'band': 15, 'costPerMile': 0.35})
+    _st = get(_cb, '/api/status')
+    ok_('[carry two] ...and the stack line on the reading says it is against ① only',
+        ((_st.get('last') or {}).get('stack') or {}).get('vsFirst') is True)
+
+    # A third Took: of the two orders already in the car, the one whose clock
+    # ends soonest goes, and its pay is said. A (40 min, taken first) ends
+    # before B (55 min).
+    _r3 = _took2(_cb, _card('c-c', 6.25, minutes=20.0, deliver_by=None))
+    # The drop row is appended after the reply is on its way: waited for.
+    for _ in range(40):
+        _drop3 = [r for r in _rows(_cj, 'drop') if r.get('id') == 'c-a']
+        if _drop3:
+            break
+        time.sleep(0.05)
+    eq('a third Took puts down the soonest-ending order',
+       ([o.get('pay') for o in _orders(_cb)],
+        [(r.get('by'), r.get('carried')) for r in _drop3],
+        (_r3.get('replaced') or {}).get('pay')),
+       ([28.08, 6.25], [('replaced', 2)], 9.48))
+finally:
+    stop(_cp)
+
+# Drop with two in the car, and the GPS drop at one door.
+_PA = (33.9100, -84.5100)
+_PB = (33.9400, -84.5400)
+_AD = '4821 Kestrel Dr, Marietta'
+_BD = '77 Birch Ln, Roswell'
+
+
+def _pin2(base, hid, dropoff, at, name):
+    return post(base, '/api/held-end', {'holdId': hid, 'dropoff': dropoff, 'lat': at[0],
+                                        'lon': at[1], 'name': name, 'doorLevel': True})
+
+
+def _beat(at, ok=True):
+    return {'alive': True, 'gps': {'state': 'ok', 'ageSeconds': 0.1,
+            'fix': {'lat': at[0], 'lon': at[1], 'gpsAge': 0.1, 'gpsErr': 10.0,
+                    'gpsMode': 3, 'gpsOk': ok, 'gpsWhy': None, 'freshFor': 10.0}}}
+
+
+def _pinned_pair(base):
+    _took2(base, _card('d-a', 11.0, minutes=40.0, dropoff=_AD))
+    _took2(base, _card('d-b', 17.5, minutes=50.0, dropoff=_BD))
+    o = _orders(base)
+    _pin2(base, o[0]['holdId'], _AD, _PA, '4821, Kestrel Drive, Marietta')
+    _pin2(base, o[1]['holdId'], _BD, _PB, '77, Birch Lane, Roswell')
+    return _orders(base)
+
+
+_dp, _db, _dj, _dh = _cserver('drop', CARRY_TWO='1', GPS_DWELL_MS='600')
+try:
+    _o = _pinned_pair(_db)
+    ok_('[carry two] (both doors pinned)', all(x.get('endPinned') for x in _o))
+    # Nowhere near either door: Drop does not guess.
+    _say(_beat((33.80, -84.40)))
+    _code, _rep = post(_db, '/api/delivered', {})
+    eq('[carry two] Drop with two in the car and no door to go by offers ①, ② and puts '
+       'nothing down',
+       (_code, [r.get('n') for r in (_rep.get('choose') or {}).get('rows') or []],
+        len(_orders(_db)), _rows(_dj, 'drop')), (200, [1, 2], 2, []))
+    # At ①'s door: one tap, ① only.
+    _say(_beat(_PA))
+    _code, _rep = post(_db, '/api/delivered', {})
+    eq('Drop at one door leaves the other',
+       (_code, _rep.get('choose'), [x.get('pay') for x in _orders(_db)],
+        [(r.get('id'), r.get('by'), r.get('carried')) for r in _rows(_dj, 'drop')]),
+       (200, None, [17.5], [('d-a', None, 2)]))
+    # ...and the chooser's answer, 'both': two rows, by the chooser.
+    _took2(_db, _card('d-c', 8.0, minutes=30.0))
+    _o = _orders(_db)
+    _code, _rep = post(_db, '/api/delivered', {'holdIds': [x['holdId'] for x in _o]})
+    eq('[carry two] the Drop chooser\'s Both puts both down, by the chooser, carried 2',
+       (_code, _orders(_db), sorted((r.get('id'), r.get('by'), r.get('carried'))
+                                    for r in _rows(_dj, 'drop') if r.get('id') != 'd-a')),
+       (200, [], [('d-b', 'chooser', 2), ('d-c', 'chooser', 2)]))
+
+    # The GPS drop: dwell at ①'s door, then leave it.
+    _o = _pinned_pair(_db)
+    _say(*([_beat(_PA)] * 16))
+    _say(*([_beat((_PA[0] + 0.006, _PA[1]))] * 3))
+    eq('a GPS drop at ①\'s door keeps ②',
+       ([x.get('pay') for x in _orders(_db)],
+        [(r.get('by'), r.get('carried')) for r in _rows(_dj, 'drop')
+         if r.get('id') == 'd-a' and r.get('by') == 'gps']),
+       ([17.5], [('gps', 2)]))
+finally:
+    stop(_dp)
+
+# A re-offer, a different card, an add-on, a two-order DoorDash card, and a
+# planner that grows with nobody pressing Took.
+_rp, _rb2, _rj, _rh = _cserver('reoffer', CARRY_TWO='1')
+try:
+    _X = dict(minutes=35.0, miles=6.2, pickup='Wren Street Noodles', dropoff='12 Oak St, Marietta')
+    _took2(_rb2, _card('r-1', 12.40, **_X))
+    _took2(_rb2, _card('r-2', 13.15, **_X))
+    _after_re = [x.get('pay') for x in _orders(_rb2)]
+    _took2(_rb2, _card('r-3', 7.80, minutes=22.0, miles=3.1, pickup='Larkspur Tacos',
+                       dropoff='9 Elm Ct, Smyrna'))
+    eq('a re-offer replaces, a different card adds',
+       (_after_re, [x.get('pay') for x in _orders(_rb2)],
+        [(r.get('id'), r.get('by')) for r in _rows(_rj, 'drop')]),
+       ([13.15], [13.15, 7.80], [('r-1', 'replaced')]))
+    post(_rb2, '/api/delivered', {'holdIds': [x['holdId'] for x in _orders(_rb2)]})
+
+    # The add-on: Uber's "+N min" card onto the Uber trip in the car.
+    _took2(_rb2, _card('r-base', 18.0, minutes=60.0))
+    _took2(_rb2, _card('r-add', 4.50, minutes=10.0, screen='uber.addon'))
+    _hf = json.load(open(os.path.join(os.path.dirname(_rj), 'holding.json')))['orders']
+    _base, _add = _hf[0], _hf[1]
+    _base_ends = _base['acceptedAt'] + 60 * 1.5 * 60000 + 600000
+    eq('the add-on expires with its base',
+       (_add.get('addOn'), _add.get('of'), _add.get('ofEnds'),
+        json.load(open(os.path.join(_rh, 'uberscan-holding.json'))).get('until')),
+       (True, _base['holdId'], _base_ends, _base_ends + 10 * 1.5 * 60000))
+    post(_rb2, '/api/delivered', {'holdIds': [x['holdId'] for x in _orders(_rb2)]})
+
+    # DoorDash's card for two orders is one card and one Took.
+    _took2(_rb2, _card('r-dd', 21.0, minutes=45.0, app='doordash', screen='dd.offer',
+                       multiOrder=True, legs=2))
+    eq('[carry two] one Took on a DoorDash "Drop off 2 orders" card stays one hold',
+       [x.get('pay') for x in _orders(_rb2)], [21.0])
+    _took2(_rb2, _card('r-ub', 9.10, minutes=30.0))
+    # A Trip Planner that grows by a stop, with no Took: no order is added.
+    def _plan(drops):
+        stops = [{'kind': 'pickup', 'orders': 1, 'name': 'Wren Street Noodles',
+                  'expectedBy': 700, 'street': '5 Mill St', 'city': 'Roswell', 'state': 'GA',
+                  'zip': None, 'line': '5 Mill St, Roswell', 'partial': None}]
+        for i, nm in enumerate(drops):
+            stops.append({'kind': 'dropoff', 'orders': 1, 'name': nm, 'expectedBy': 720 + i,
+                          'street': '%d Pine Rd' % (10 + i), 'city': 'Roswell',
+                          'state': 'GA', 'zip': None,
+                          'line': '%d Pine Rd, Roswell' % (10 + i), 'partial': None})
+        return {'sighting': {'asked': False, 'whole': True, 'titled': True, 'app': 'uber',
+                             'screen': 'uber.planner', 'page': {'top': True, 'bottom': True},
+                             'stops': stops, 'orderCount': None, 'keep': False}}
+    _say(_plan(['Mara T.']))
+    _say(_plan(['Mara T.', 'Jules K.']))
+    _say(_plan(['Mara T.', 'Jules K.', 'Ines V.']))
+    eq('a planner that grows with no Took adds no order',
+       [x.get('pay') for x in _orders(_rb2)], [21.0, 9.10])
+finally:
+    stop(_rp)
+
+# With the flag off: Stage 4, exactly — and the `would` it logs.
+_op, _ob, _oj, _oh = _cserver('off', CARRY_TWO='0')
+try:
+    _took2(_ob, _A)
+    _took2(_ob, _B)
+    _st = get(_ob, '/api/status')
+    eq('carryTwo off: a second Took replaces, as before',
+       ((_st.get('holding') or {}).get('pay'), 'orders' in _st,
+        [(r.get('id'), r.get('by')) for r in _rows(_oj, 'drop')]),
+       (28.08, False, [('c-a', 'replaced')]))
+    # ⌖ over the navigation of the order the Took put down: filed onto the
+    # one in the car, as Stage 4 files it — and the row says attribution
+    # would have given it to the other.
+    _say(_nav(_BNAV[0], _BNAV[1], _BNAV[2], expected=(_NOWMIN + 40) % 1440))
+    _m = [r for r in _rows(_oj, 'mark') if r.get('dropoff') == _BNAV[0]]
+    eq('[carry two] carryTwo off: the mark row is Stage 4\'s and says what attribution would have done',
+       [(r.get('id'), r.get('cue'), (r.get('would') or {}).get('cue')) for r in _m],
+       [('c-b', None, 'deadline')])
+    ok_('[carry two] ...naming the order put down, not the one in the car',
+        _m and str((_m[0].get('would') or {}).get('held') or '').startswith('c-a@'))
+finally:
+    stop(_op)
+
+# A cue that fits BOTH orders is a tie, and the map may break it — only it:
+# the address searched on the NucBox inside each card's disc and found at
+# door level inside exactly one. Both cards here print the same "Deliver by"
+# and the navigation screen that time: a tie. The first card came up at
+# Marietta Square, 5 mi; the second at Cumberland, 1 mi — and the fake
+# NucBox's 1985 Cobb Parkway door is 3.4 mi from the Square.
+_tfake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_tfake_base = 'http://127.0.0.1:%d' % json.loads(_tfake.stdout.readline())['port']
+_tp, _tb, _tj, _th = _cserver('tie', CARRY_TWO='1', NUCBOX_SEARCH=_tfake_base,
+                              NUCBOX_TIMEOUT_MS='800', CHOOSER_MS='8000')
+try:
+    _SQFIX = {'lat': 33.9526, 'lon': -84.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3,
+              'gpsAge': 0.5, 'hasTotal': True, 'whole': True}
+    _CUFIX = dict(_SQFIX, lat=33.9010, lon=-84.4770)
+    _due = (_NOWMIN + 50) % 1440
+    _took2(_tb, _card('t-a', 15.0, minutes=40.0, miles=5.0, deliver_by=_due, **_SQFIX))
+    _took2(_tb, _card('t-b', 11.0, minutes=40.0, miles=1.0, deliver_by=_due, **_CUFIX))
+    _say(_nav('1985 Cobb Parkway, Kennesaw, GA 30144', '1985 Cobb Parkway', 'Kennesaw',
+              expected=_due))
+    _tie = {}
+    for _ in range(80):
+        _tie = get(_tb, '/api/status')
+        if not _tie.get('chooser'):
+            break
+        time.sleep(0.05)
+    eq('[carry two] a tie is broken only by the card whose reach holds the door, under the '
+       'cue that tied',
+       (_tie.get('chooser'), [o.get('dropoff') for o in _tie.get('orders') or []],
+        [(r.get('id'), r.get('cue')) for r in _rows(_tj, 'mark')
+         if r.get('dropoff') == '1985 Cobb Parkway, Kennesaw, GA 30144']),
+       (None, ['1985 Cobb Parkway, Kennesaw, GA 30144', None], [('t-a', 'deadline')]))
+finally:
+    stop(_tp)
+    _tfake.kill()
+shutil.rmtree(_cdir, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
