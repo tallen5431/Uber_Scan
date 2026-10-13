@@ -943,14 +943,15 @@ if shutil.which('python3'):
 # order was held replaced it with no drop row. Made-up cards throughout.
 _HELD_FAKE = (
     'import json, time\n'
-    'def say(i, pay, pickup="Test Kitchen", dropoff="Elm St & Oak Ave, Testville"):\n'
+    'def say(i, pay, pickup="Test Kitchen", dropoff="Elm St & Oak Ave, Testville",\n'
+    '        miles=5.0, minutes=30.0):\n'
     '    print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
-    '        "grossPerHour": 36.0, "pay": pay, "minutes": 30.0, "cardMinutes": 30.0,\n'
-    '        "miles": 5.0, "cost": 1.75, "billedMinutes": 34.0, "target": 25, "band": 15,\n'
+    '        "grossPerHour": 36.0, "pay": pay, "minutes": minutes, "cardMinutes": minutes,\n'
+    '        "miles": miles, "cost": 1.75, "billedMinutes": 34.0, "target": 25, "band": 15,\n'
     '        "costPerMile": 0.35, "pickup": pickup, "dropoff": dropoff,\n'
     '        "at": int(time.time() * 1000),\n'
-    '        "offer": {"id": i, "pay": pay, "minutes": 30.0, "billedMinutes": 34.0,\n'
-    '                  "miles": 5.0, "cost": 1.75, "perHour": 30.0, "state": "go",\n'
+    '        "offer": {"id": i, "pay": pay, "minutes": minutes, "billedMinutes": 34.0,\n'
+    '                  "miles": miles, "cost": 1.75, "perHour": 30.0, "state": "go",\n'
     '                  "pickup": pickup, "dropoff": dropoff}}), flush=True)\n'
     'say("h-1", 10.00)\n'
     'time.sleep(2.5)\n'
@@ -961,6 +962,10 @@ _HELD_FAKE = (
     'say("n-1", 10.03)\n'
     'time.sleep(1.5)\n'
     'say("n-2", 10.00, dropoff="Pine Rd & Birch Ln, Testville")\n'
+    'time.sleep(1.5)\n'
+    'say("n-3", 10.00, miles=6.0)\n'
+    'time.sleep(1.5)\n'
+    'say("n-4", 10.00, minutes=31.0)\n'
     'time.sleep(1.5)\n'
     'say("h-3", 10.00, pickup=None, dropoff=None)\n'
     'time.sleep(600)\n')
@@ -1002,8 +1007,10 @@ if shutil.which('python3'):
         ok_('[held again] the cards after it are on record', offer_is('h-3', 10.0) is not None)
         time.sleep(0.5)
         eq('[held again] no pairing row for the held card come back; '
-           'a few-cents re-offer and a different dropoff are paired',
-           [r['id'] for r in lines(journal) if r.get('kind') == 'pair'], ['n-1', 'n-2'])
+           'a few-cents re-offer, a different dropoff, a different distance and a '
+           'different card time are paired',
+           [r['id'] for r in lines(journal) if r.get('kind') == 'pair'],
+           ['n-1', 'n-2', 'n-3', 'n-4'])
         _s = get(base, '/api/status')
         ok_('[held again] a reading with no addresses matches on the figures',
             ((_s.get('offer') or {}).get('heldCard') or '').startswith('h-1@'))
@@ -1052,6 +1059,42 @@ if shutil.which('python3'):
         time.sleep(3.0)
         eq('[held again] past the window the same figures are a new offer, and paired',
            [r['id'] for r in lines(journal) if r.get('kind') == 'pair'][:1], ['h-2'])
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
+    # ...but a card recognised on its ARRIVAL stays the held card however long
+    # it sits on the phone: its own card a second after the Took, then read
+    # again three seconds later, past a two-second window. The reading is
+    # still the order in the car, with no stack line.
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'heldstays.py')
+    with open(fake, 'w') as fh:
+        fh.write(_HELD_FAKE.split('say("h-1", 10.00)\n')[0]
+                 + 'say("h-1", 10.00)\n'
+                 'time.sleep(1.0)\n'
+                 'say("h-2", 10.00)\n'
+                 'time.sleep(3.0)\n'
+                 'say("h-2", 10.00)\n'
+                 'time.sleep(600)\n')
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake, 'HOLD_GRACE_MS': '600000',
+                        'HELD_CARD_MS': '2000'}, journal)
+    try:
+        for _ in range(160):
+            if (get(base, '/api/status').get('offer') or {}).get('id') == 'h-1':
+                break
+            time.sleep(0.05)
+        post(base, '/api/offers/mark', {'id': 'h-1', 'accepted': True})
+        time.sleep(5.0)
+        _s = get(base, '/api/status')
+        eq('[held again] a reading of the held card recognised on arrival, still on the '
+           'phone past the window, is still the order in the car: no stack line',
+           ((_s.get('last') or {}).get('stack'), bool((_s.get('last') or {}).get('heldCard')),
+            [r['id'] for r in lines(journal) if r.get('kind') == 'pair']),
+           (None, True, []))
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
@@ -1806,11 +1849,33 @@ if shutil.which('python3'):
                              'at': int(time.time() * 1000)}})
         ok_('the premise: a single-trip order is in the car with the card\'s corner',
             took('o-lone-one', 'Oak Dr & Elm Dr, Acworth', legs=1, multiOrder=False))
+        # The planner it comes off, as the scanner sends it first: its one
+        # dropoff left unfiled as 'list', the end of the list off the screen.
+        say({'planner': {'stops': [
+            {'kind': 'dropoff', 'orders': 1, 'name': 'Dana R.', 'expectedBy': 1325,
+             'street': '1180 Wrenfield Rd NW', 'city': 'Kennesaw', 'state': 'GA',
+             'zip': None, 'line': '1180 Wrenfield Rd NW, Kennesaw'}],
+            'unfiled': 'list', 'keep': False, 'asked': False, 'ms': None,
+            'at': int(time.time() * 1000)}})
+        for _ in range(60):
+            if (get(base, '/api/status').get('holding') or {}).get('planner'):
+                break
+            time.sleep(0.05)
         lone('1180 Wrenfield Rd NW, Kennesaw', '1180 Wrenfield Rd NW')
         eq('auto-dropoff: an unbounded planner\'s lone dropoff is filed onto a '
            'single-trip held card', held_end('1180 Wrenfield Rd NW, Kennesaw'),
            '1180 Wrenfield Rd NW, Kennesaw')
+        eq('auto-dropoff: ...and the planner it came off stops saying its dropoff was '
+           'not filed', (((get(base, '/api/status').get('holding') or {}).get('planner')
+                          or {}).get('unfiled', 'absent')), None)
         put_down('o-lone-one')
+        ok_('the premise: a two-leg card is in the car with the card\'s corner',
+            took('o-lone-legs', 'Oak Dr & Elm Dr, Acworth', legs=2, multiOrder=False))
+        lone('1180 Wrenfield Rd NW, Kennesaw', '1180 Wrenfield Rd NW')
+        eq('auto-dropoff: an unbounded planner\'s lone dropoff is not filed onto a held '
+           'card of two legs', held_end('1180 Wrenfield Rd NW, Kennesaw', 1.5),
+           'Oak Dr & Elm Dr, Acworth')
+        put_down('o-lone-legs')
         ok_('the premise: a two-order card is in the car with the card\'s corner',
             took('o-lone-two', 'Oak Dr & Elm Dr, Acworth', legs=1, multiOrder=True))
         lone('1180 Wrenfield Rd NW, Kennesaw', '1180 Wrenfield Rd NW')
@@ -5380,7 +5445,8 @@ finally:
 #
 # A scanner of its own that sends heartbeats on cue: the suite writes
 # `beats-N.json` (a list of fixes, one beat each, a quarter second apart) and
-# waits for `done-N`. Coordinates invented, in open country.
+# waits for `done-N`; an entry {"_line": {...}} is sent as that line instead,
+# for a ⌖ read in the middle of a hold. Coordinates invented, in open country.
 _gdir = tempfile.mkdtemp()
 _gjournal = os.path.join(_gdir, 'offers.jsonl')
 open(_gjournal, 'w').close()
@@ -5398,8 +5464,11 @@ with open(_gfake, 'w') as _fh:
         '        time.sleep(0.05)\n'
         '        continue\n'
         '    for fix in json.load(open(p)):\n'
-        '        print(json.dumps({"alive": True, "at": int(time.time() * 1000),\n'
-        '            "gps": {"state": "ok", "ageSeconds": 0.1, "fix": fix}}), flush=True)\n'
+        '        if "_line" in fix:\n'
+        '            print(json.dumps(fix["_line"]), flush=True)\n'
+        '        else:\n'
+        '            print(json.dumps({"alive": True, "at": int(time.time() * 1000),\n'
+        '                "gps": {"state": "ok", "ageSeconds": 0.1, "fix": fix}}), flush=True)\n'
         '        time.sleep(0.25)\n'
         '    open(os.path.join(d, "done-%d" % n), "w").close()\n'
         '    n += 1\n'
@@ -5477,10 +5546,21 @@ try:
     _beats([_fix(_IN)] * 2 + _LEAVE)
     ok_('[gps drop] passing by the door without dwelling does not drop', _holding(_gb))
     # Stopped at the door, and still there — or a little way along the street.
+    _ev = listen(_gb, 4)
+    time.sleep(0.3)
     _beats(_DWELL)
     ok_('[gps drop] dwelling at the door is an arrival', (_holding(_gb) or {}).get('arrived'))
+    # ...said on the beat itself, which is the panel's only word of it
+    # ("at dropoff"): /api/status above is not what live.html listens to.
+    ok_('[gps drop] ...and the beat that arrives tells the panel the car is at the dropoff',
+        any(m.get('atDropoff') is True for m in _ev if m.get('alive')))
     _beats([_fix(_MID)] * 4)
     ok_('[gps drop] dwelling then staying near does not drop', _holding(_gb))
+    # One good fix out past 300 m, then near again: not a departure. It takes
+    # LEAVE_FIXES (two) in a row, so one stray fix cannot end the order.
+    _beats([_fix(_FAR)] + [_fix(_MID)] * 2)
+    ok_('[gps drop] one fix past 300 m between near ones does not drop: it takes two '
+        'in a row', _holding(_gb))
     # Gone: two fixes past 300 m.
     _beats(_LEAVE)
     no_('[gps drop] dwelling then leaving puts the order down', _holding(_gb))
@@ -5508,19 +5588,21 @@ try:
     eq('[gps drop] a pin posted for a previous hold is refused',
        _pin(_gb, _old), (409, {'ok': False, 'error': 'not the order in the car'}))
 
-    # Drop by hand clears the arrival: arrived, Drop, the same card taken again
-    # and pinned again, and leaving straight away drops nothing.
+    # Drop by hand clears the arrival: arrived, Drop, and nothing of that order
+    # is left — asked straight after the press. It was asked after the same
+    # card had been taken and pinned again, and a Took builds its hold afresh,
+    # so the check passed with Drop doing nothing at all; and the "leaving
+    # afterwards drops nothing" that followed it could not fail by any change
+    # to Drop either, for the same reason, and is gone.
     _h = _took(_gb, 'g-hand')
     _pin(_gb, _h)
     _beats(_DWELL)
     ok_('[gps drop] (the premise: it had arrived)', (_holding(_gb) or {}).get('arrived'))
     post(_gb, '/api/delivered', {})
+    eq('[gps drop] Drop pressed by hand clears the arrival: the order, its pin and '
+       'its arrival are gone', _holding(_gb), None)
     _h = _took(_gb, 'g-hand')
     _pin(_gb, _h)
-    no_('[gps drop] Drop pressed by hand clears the arrival',
-        (_holding(_gb) or {}).get('arrived'))
-    _beats(_LEAVE)
-    ok_('[gps drop] ...so leaving afterwards drops nothing', _holding(_gb))
 
     # A new Took is a new end: the old pin does not come with it.
     ok_('[gps drop] (the premise: the old order was pinned)',
@@ -5528,9 +5610,34 @@ try:
     _took(_gb, 'g-next')
     no_('[gps drop] a new Took clears the old end', (_holding(_gb) or {}).get('endPinned'))
 
+    # A ⌖ read that moves the order's end: the pin was made for the old text,
+    # and the car stopping at that door and leaving it is not this order's.
+    _h = _took(_gb, 'g-moved')
+    _pin(_gb, _h)
+    ok_('[gps drop] (the premise: the order was pinned)',
+        (_holding(_gb) or {}).get('endPinned'))
+    _beats([{'_line': {'dropoff': {'found': True, 'line': '77 Elsewhere Ct, Marietta',
+                                   'street': '77 Elsewhere Ct', 'city': 'Marietta',
+                                   'state': 'GA', 'zip': None, 'asked': True,
+                                   'ms': None}}}])
+    eq('[gps drop] a ⌖ read that moves the order\'s end disarms the pin made for the '
+       'old one', ((_holding(_gb) or {}).get('dropoff'),
+                   (_holding(_gb) or {}).get('endPinned')),
+       ('77 Elsewhere Ct, Marietta', False))
+    _beats(_DWELL + _LEAVE)
+    ok_('[gps drop] ...so stopping at the old door and leaving drops nothing',
+        _holding(_gb))
+    post(_gb, '/api/delivered', {})
+
     # Pinned and arrived, then the server restarts in the driveway.
     _h = _took(_gb, 'g-boot')
     _pin(_gb, _h)
+    # The pin is on disk as soon as it is kept, not only once an arrival
+    # happens to write the hold: a restart between the two must keep it.
+    _hj = json.load(open(os.path.join(_gdir, 'holding.json')))
+    eq('[gps drop] the pin is written to holding.json the moment it is kept',
+       ((_hj.get('endPin') or {}).get('lat'), (_hj.get('endPin') or {}).get('doorLevel')),
+       (_PIN[0], True))
     _beats(_DWELL)
 finally:
     stop(_gp)
@@ -5547,6 +5654,11 @@ try:
     # disarms it, and /api/status says why.
     _h = _took(_gb, 'g-rest')
     _pin(_gb, _h)
+    eq('[gps drop] a held pickup pin for another order is refused, and changes nothing',
+       (post(_gb, '/api/held-pickup', {'holdId': 'g-other@1', 'lat': _PIN[0] + 0.0009,
+                                       'lon': _PIN[1]}),
+        (_holding(_gb) or {}).get('endWhy')),
+       ((409, {'ok': False, 'error': 'not the order in the car'}), None))
     eq('[gps drop] a held pickup pin is kept',
        post(_gb, '/api/held-pickup', {'holdId': _h.get('holdId'),
                                       'lat': _PIN[0] + 0.0009, 'lon': _PIN[1]})[0], 200)
@@ -5606,6 +5718,49 @@ try:
     _pin(_gb, _h)
     _beats(_aged(_IN, [110, 100, 90, 80, 70]) + _aged(_IN, [30, 20, 10, 0.1]))
     no_('[gps tune] ...but 40 s with no fixes at all resets it',
+        (_holding(_gb) or {}).get('arrived'))
+    post(_gb, '/api/delivered', {})
+
+    # The refused run's own time is not counted: 20 s good inside, 40 s of
+    # refused fixes, 10 s good inside — 30 s counted, short of 60. Counted, it
+    # would be 70 and arrive.
+    _h = _took(_gb, 'g-skip')
+    _pin(_gb, _h)
+    _beats(_aged(_IN, [70, 60, 50])
+           + _aged(_IN, [45, 35, 25, 15], ok=False, err=60.0)
+           + _aged(_IN, [10, 0.1]))
+    no_('[gps tune] ...and the time inside a refused run does not count toward the dwell',
+        (_holding(_gb) or {}).get('arrived'))
+    post(_gb, '/api/delivered', {})
+
+    # Silence inside a refused run resets as silence does: 40 s good, one
+    # refused fix, then 35 s of nothing before the next good one.
+    _h = _took(_gb, 'g-hush')
+    _pin(_gb, _h)
+    _beats(_aged(_IN, [110, 100, 90, 80, 70])
+           + _aged(_IN, [65], ok=False, err=60.0)
+           + _aged(_IN, [30, 20, 10, 0.1]))
+    no_('[gps tune] ...and 35 s of nothing after a refused fix resets it',
+        (_holding(_gb) or {}).get('arrived'))
+    post(_gb, '/api/delivered', {})
+
+    # A refused run longer than REJECTED_GAP_S (60 s) resets: 40 s good, 90 s
+    # from the last good fix to the next, refused fixes every 10 s, 40 s good.
+    _h = _took(_gb, 'g-long')
+    _pin(_gb, _h)
+    _beats(_aged(_IN, [170, 160, 150, 140, 130])
+           + _aged(_IN, [120, 110, 100, 90, 80, 70, 60, 50], ok=False, err=60.0)
+           + _aged(_IN, [40, 30, 20, 10, 0.1]))
+    no_('[gps tune] ...and a refused run of more than 60 s resets it',
+        (_holding(_gb) or {}).get('arrived'))
+    post(_gb, '/api/delivered', {})
+
+    # The radius is 75 m plus the fix's OWN error, capped at 25: a fix sure to
+    # 5 m is held to 80 m, so 90 m off for 70 s does not arrive.
+    _h = _took(_gb, 'g-tight')
+    _pin(_gb, _h)
+    _beats(_aged(0.00081, [70, 60, 50, 40, 30, 20, 10, 0.1], err=5.0))
+    no_('[gps tune] ...and a fix sure to 5 m is held to 80 m: 90 m off does not arrive',
         (_holding(_gb) or {}).get('arrived'))
     post(_gb, '/api/delivered', {})
 finally:
@@ -5792,6 +5947,18 @@ try:
         eq('[auto arm] with NUCBOX_SEARCH unset nothing is sent and nothing is said',
            ((len(_aasked('')), len(_Stub.searches)), _h.get('endPinned'), _h.get('endWhy')),
            (_n, False, None))
+    finally:
+        stop(_cp)
+    # ...and that same hold, restored at boot by a server that now has the
+    # NucBox set: searched for at once (armHeldEnd in loadHolding), with no
+    # Took, ⌖ or dropoff line to set it off.
+    _cp, _cb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _afake_base,
+                      'NUCBOX_TIMEOUT_MS': '800'}, _cj)
+    try:
+        _h = _settled(_cb)
+        eq('[auto arm] a hold restored at boot is searched for, and arms',
+           (_h.get('holdId', '').startswith('c-unset'), _h.get('endPinned'), _h.get('endBy')),
+           (True, True, 'server'))
     finally:
         stop(_cp)
 finally:
