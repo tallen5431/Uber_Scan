@@ -1851,6 +1851,8 @@ rpk5 = run(lambda n, k: _BOTH_ENDS, extra_argv=['--no-parallel'], seconds=4.0,
 eq('an address under a Dropoff label below a pickup is still the destination, '
    'unprompted', [((d[0] or {}).get('line'), d[1].get('asked'))
                   for d in rpk5['dropoffs']], [('34 Made Up Rd, Acworth, GA 30102', False)])
+eq('...and sent as label-proven, so the server may file it over the card\'s own end',
+   [d[1].get('labelled') for d in rpk5['dropoffs']], ['dropoff'])
 
 # --- the Trip Planner, read without a press while an order is held ----------
 #
@@ -1937,9 +1939,10 @@ ra4 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel
 ok_('the premise: it was read whole (%r)' % ra4['wholes'], sum(ra4['wholes']) == 1)
 eq('a whole screen with no "Trip Planner" title is not sent as the planner', _pa4, [])
 
-# ...and a whole-screen read that found no planner gives nothing at all — not
-# the address find_address would take off the whole screen, which nobody asked
-# for and which the label rule alone would have let through here.
+# ...and a whole-screen read that found no planner gives the address only when
+# the screen printed it under a Dropoff label in its own block — the driver's
+# ask, "set the destination whenever the screen shows an address directly under
+# a Dropoff label". Before that ask this read sent nothing.
 _ha5, _pa5 = tempfile.mkdtemp(), []
 _hold(_ha5, time.time() + 3600)
 _WHOLE_NAV = 'Trip Planner\nDropoff\n77 Made Up Ct, Acworth, GA 30101\n12 min Start'
@@ -1948,14 +1951,27 @@ ok_('the premise: that whole screen has a labelled address and no stop header',
 ra5 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
           seconds=4.0, handoff=_ha5, whole_text=_WHOLE_NAV, planners=_pa5)
 ok_('the premise: it was read whole (%r)' % ra5['wholes'], sum(ra5['wholes']) == 1)
-eq('an unpressed whole-screen read that found no planner sends no address',
-   ra5['dropoffs'], [])
+eq('an unpressed whole-screen read sends an address under a Dropoff label, '
+   'label-proven', [((d[0] or {}).get('line'), d[1].get('asked'), d[1].get('labelled'))
+                    for d in ra5['dropoffs']],
+   [('77 Made Up Ct, Acworth, GA 30101', False, 'dropoff')])
+# ...and nothing off the same whole screen with no label over the address: the
+# label is what makes it the destination, not the whole-screen read.
+_ha5b = tempfile.mkdtemp()
+_hold(_ha5b, time.time() + 3600)
+_WHOLE_BARE = 'Trip Planner\n77 Made Up Ct, Acworth, GA 30101\n12 min Start'
+ra5b = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
+           seconds=4.0, handoff=_ha5b, whole_text=_WHOLE_BARE)
+ok_('the premise: it was read whole (%r)' % ra5b['wholes'], sum(ra5b['wholes']) == 1)
+eq('an unpressed whole-screen read sends no address under no label',
+   ra5b['dropoffs'], [])
 
-# ...and the planner's own one dropoff is not sent either, on the list that
+# ...and the planner's own one dropoff is sent, label-proven, on the list that
 # would give it to a press: both ends in view, one dropoff, its street and town
-# read. Unpressed, the stops go to the panel and the destination stays the
-# press's to file — a planner still up from the trip before would otherwise be
-# filed against the order just taken.
+# read, under its own "Dropoff" header. It used to stay the press's to file for
+# fear of a planner still up from the trip before; server.js now answers that
+# (filed only when newer than the Took, and never as one of the hold's own
+# planner pickups), and the driver asked for it filed.
 _ha6, _pa6 = tempfile.mkdtemp(), []
 _hold(_ha6, time.time() + 3600)
 ok_('the premise: under a press that planner gives its dropoff as the destination',
@@ -1967,7 +1983,9 @@ ra6 = run(lambda n, k: FRAG if n == 1 else _ONE_DROP, extra_argv=['--no-parallel
 eq('an unpressed planner read sends the stops, unasked',
    [([s['line'] for s in p[0]], p[1].get('asked')) for p in _pa6],
    [(['4821 Kestrel Dr, Marietta'], False)])
-eq('...and not its one dropoff as the order\'s destination', ra6['dropoffs'], [])
+eq('...and its one dropoff as the order\'s destination, label-proven',
+   [((d[0] or {}).get('line'), d[1].get('asked'), d[1].get('labelled'))
+    for d in ra6['dropoffs']], [('4821 Kestrel Dr, Marietta', False, 'dropoff')])
 
 # Whether the journal may keep the stops — names and front doors — is the
 # scanner's to say, because the server does not read its settings: not with

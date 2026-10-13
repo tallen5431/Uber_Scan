@@ -2567,7 +2567,7 @@ class UpDown(object):
         return None if self.camera.word == 'seeing' else self.camera.word
 
 
-def emit_dropoff(address, ms=None, asked=True):
+def emit_dropoff(address, ms=None, asked=True, labelled=False):
     """The destination, once it has been read off the screen.
 
     Its own line, like the offer id and for the same reason: it is not part of a
@@ -2610,6 +2610,12 @@ def emit_dropoff(address, ms=None, asked=True):
         # — see server.js, which will not let one overwrite a destination the
         # card itself named.
         'asked': bool(asked),
+        # 'dropoff' when nobody asked and the screen printed this address under
+        # a Dropoff label in its own stop block (digest()); None otherwise. A
+        # press needs no label, so it never carries one. server.js lets a
+        # labelled sighting replace the card's own end on the held order, and
+        # nothing else.
+        'labelled': 'dropoff' if labelled and not asked else None,
         'ms': ms,
         'at': int(time.time() * 1000)}}), flush=True)
 
@@ -3668,8 +3674,31 @@ def main():
         # not its planner's one dropoff (see THE STOPS ONLY, above), and not
         # the address find_address would take off the whole screen, which is
         # the map's or a card's as often as the destination's.
+        #
+        # ...EXCEPT AN ADDRESS THE SCREEN PRINTS UNDER A DROPOFF LABEL, IN ITS
+        # OWN STOP BLOCK, which the driver then asked for: "while an order is
+        # held, set its destination whenever the screen shows an address
+        # directly under a Dropoff label", with no ⌖. A whole-screen read
+        # nobody pressed for happens only as `planner_auto`, which runs only
+        # while the driver's own ✓ Took is in force (order_held), so this is
+        # still not an accept detector and still touches nothing on the phone.
+        # Two shapes pass: the planner's one dropoff, by the same
+        # planner_destination a press files it by (one dropoff on the trip, the
+        # list seen whole, street and town read — its stop header is the
+        # label), and a screen with no planner whose address
+        # OP.address_under_dropoff says sits under "Dropoff" with no other
+        # address between. Each goes out `labelled`, which is what lets
+        # server.js file it over the card's own corner or town and never over
+        # a press. The planner still up from the trip before is server.js's to
+        # refuse: it files a labelled read only when it is newer than the Took
+        # and is not one of the held order's own planner pickups.
+        labelled = False
         if whole and not asked:
-            found = None
+            labelled = bool(found) and (
+                auto or (planner is None
+                         and OP.address_under_dropoff(out.get('text'))))
+            if not labelled:
+                found = None
         # ...and asked FOR, off a card-box read that shows the planner's grammar
         # while an order is held. The card box on this rig is the bottom half of
         # the screen — the shift's reads of a planner caught stop headers,
@@ -3724,6 +3753,15 @@ def main():
                 # restaurant's or a customer's door, and the count is the
                 # question.
                 health.address_not_dropoff += 1
+        # ...and a card-box read nobody pressed for whose address is under a
+        # Dropoff label in its own block is label-proven as the whole-screen
+        # one above is: a navigation screen's "Dropoff <address>" read while an
+        # order is held. The label is said, not acted on: whether it files is
+        # server.js's to decide, against the hold it has and the scanner does
+        # not.
+        if found and not asked and not labelled and planner is None \
+                and OP.address_under_dropoff(out.get('text')):
+            labelled = True
         # ...and KEPT, which is new, and is the one thing standing between this
         # rig and knowing which offers the driver took.
         #
@@ -3965,9 +4003,11 @@ def main():
             # one were both being sent for one press.
             dropoff_asked = False
             if args.json:
-                emit_dropoff(found, ms=out.get('ms'), asked=asked)
+                emit_dropoff(found, ms=out.get('ms'), asked=asked,
+                             labelled=labelled)
             log('destination read%s: %s'
-                % ('' if asked else ' (unprompted)', found.get('line')))
+                % ('' if asked else ' (unprompted, under a Dropoff label)'
+                   if labelled else ' (unprompted)', found.get('line')))
         # A whole-screen read has answered the only question it was taken for.
         # Everything below is about an offer — the failure count, the verdict,
         # the health tally, the journal row — and this reading is of the card

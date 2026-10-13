@@ -1517,6 +1517,163 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+# --- an address under a Dropoff label, filed onto the hold with no press -------
+#
+# The driver's ask: while ✓ Took is in force, set the held order's destination
+# whenever the screen shows an address directly under a "Dropoff" label, with
+# no ⌖. The scanner says so on the line (`labelled: 'dropoff'`, see digest() in
+# rpi/scan_pi.py); this is the server's half. A label-proven sighting fills a
+# blank and replaces an end the CARD gave (a corner, a town), and never one
+# that came off the screen — a press above all. Refused when it is older than
+# the Took, or is one of the hold's own planner pickups. One server, one fake
+# scanner that prints whatever line the test appends to its command file, so
+# each hold is driven in turn. Every address below is invented.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    cmds = os.path.join(work, 'cmds.jsonl')
+    open(cmds, 'w').close()
+    fake = os.path.join(work, 'relay.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import sys, time\n'
+            'done = 0\n'
+            'while True:\n'
+            '    lines = open(%r).read().splitlines()\n'
+            '    for l in lines[done:]:\n'
+            '        print(l, flush=True)\n'
+            '    done = len(lines)\n'
+            '    time.sleep(0.05)\n' % cmds)
+    # The rows the rig would have written for the card-cornered order, so the
+    # offers page can show what the fold makes of the mark.
+    write(journal, [dict(offer(1, NOW - 1000), id='o-lab-corner',
+                         dropoff='Oak Dr & Elm Dr, Acworth')])
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake}, journal)
+
+    def took(i, dropoff):
+        code, reply = post(base, '/api/offers/mark', {
+            'id': i, 'accepted': True,
+            'offer': {'id': i, 'pay': 14.0, 'minutes': 30.0, 'billedMinutes': 30.0,
+                      'miles': 6.0, 'cost': 2.1, 'dropoff': dropoff}})
+        return code == 200 and reply.get('holding') is True
+
+    def put_down(i):
+        post(base, '/api/offers/mark', {'id': i, 'accepted': None})
+
+    def say(msg):
+        with open(cmds, 'a') as fh:
+            fh.write(json.dumps(msg) + '\n')
+
+    def seen(line, street, asked=False, labelled='dropoff', at=None):
+        say({'dropoff': {'found': True, 'line': line, 'street': street,
+                         'city': 'Acworth', 'state': 'GA', 'zip': '30101',
+                         'asked': asked, 'labelled': labelled, 'ms': None,
+                         'at': at if at is not None else int(time.time() * 1000)}})
+
+    def held_end(want=None, patience=4.0):
+        """The hold's dropoff once it reads `want`, or after `patience` the
+        one it has — a refusal can only be shown by waiting it out."""
+        h = {}
+        for _ in range(int(patience * 20)):
+            h = get(base, '/api/status').get('holding') or {}
+            if want is not None and h.get('dropoff') == want:
+                return h.get('dropoff')
+            time.sleep(0.05)
+        return h.get('dropoff')
+
+    def marks_for(i):
+        return [r for r in lines(journal)
+                if r.get('kind') == 'mark' and r.get('id') == i and r.get('dropoff')]
+
+    try:
+        heard = listen(base, 30)
+        # A hold with no end: filed.
+        ok_('the premise: the first order is in the car with no end',
+            took('o-lab-blank', None))
+        seen('12 Made Up Way, Acworth, GA 30101', '12 Made Up Way')
+        eq('auto-dropoff: an address under a Dropoff label is filed onto a hold with '
+           'no dropoff', held_end('12 Made Up Way, Acworth, GA 30101'),
+           '12 Made Up Way, Acworth, GA 30101')
+        for _ in range(60):
+            if marks_for('o-lab-blank'):
+                break
+            time.sleep(0.05)
+        eq('...written down as a held-dropoff mark, unasked and label-proven',
+           [(m.get('asked'), m.get('labelled')) for m in marks_for('o-lab-blank')],
+           [(False, True)])
+        _said = [m for m in heard if (m.get('dropoff') or {}).get('labelled')]
+        eq('...and goes to the panel as a ⌖ read does, carrying the order in the car',
+           [((m.get('holding') or {}).get('dropoff'), m['dropoff'].get('line'))
+            for m in _said][:1],
+           [('12 Made Up Way, Acworth, GA 30101', '12 Made Up Way, Acworth, GA 30101')])
+        put_down('o-lab-blank')
+
+        # A hold whose end the card gave as a corner.
+        ok_('the premise: an order is in the car with the card\'s corner as its end',
+            took('o-lab-corner', 'Oak Dr & Elm Dr, Acworth'))
+        seen('99 Unlabelled Rd, Acworth, GA 30101', '99 Unlabelled Rd', labelled=None)
+        eq('auto-dropoff: an address under no label is not filed over the card\'s end',
+           held_end('99 Unlabelled Rd, Acworth, GA 30101', 1.5),
+           'Oak Dr & Elm Dr, Acworth')
+        seen('34 Made Up Rd, Acworth, GA 30101', '34 Made Up Rd')
+        eq('auto-dropoff: an address under a Dropoff label is filed over a card corner',
+           held_end('34 Made Up Rd, Acworth, GA 30101'), '34 Made Up Rd, Acworth, GA 30101')
+        seen('56 Second Label Ln, Acworth, GA 30101', '56 Second Label Ln')
+        eq('auto-dropoff: ...and a second label-proven one does not overwrite it',
+           held_end('56 Second Label Ln, Acworth, GA 30101', 1.5),
+           '34 Made Up Rd, Acworth, GA 30101')
+        page = get(base, '/api/journal?days=7')
+        eq('auto-dropoff: the offers page has the labelled end over the card\'s own',
+           [o.get('dropoff') for o in (page.get('offers') or [])
+            if o.get('id') == 'o-lab-corner'], ['34 Made Up Rd, Acworth, GA 30101'])
+        put_down('o-lab-corner')
+
+        # A hold the driver pressed ⌖ for.
+        ok_('the premise: a third order is in the car',
+            took('o-lab-press', 'Oak Dr & Elm Dr, Acworth'))
+        seen('77 Pressed Pl, Acworth, GA 30101', '77 Pressed Pl', asked=True, labelled=None)
+        ok_('the premise: the press is filed',
+            held_end('77 Pressed Pl, Acworth, GA 30101') == '77 Pressed Pl, Acworth, GA 30101')
+        seen('88 Late Label Ln, Acworth, GA 30101', '88 Late Label Ln')
+        eq('auto-dropoff: an address under a Dropoff label is not filed over a ⌖ press',
+           held_end('88 Late Label Ln, Acworth, GA 30101', 1.5),
+           '77 Pressed Pl, Acworth, GA 30101')
+        put_down('o-lab-press')
+
+        # A hold whose planner lists a pickup at the address read.
+        ok_('the premise: a fourth order is in the car with no end',
+            took('o-lab-pickup', None))
+        say({'planner': {'stops': [
+            {'kind': 'pickup', 'orders': 1, 'name': 'Fable Grill', 'expectedBy': 978,
+             'street': '4100 Fable Mill Pkwy NW', 'city': 'Kennesaw', 'state': 'GA',
+             'zip': None, 'line': '4100 Fable Mill Pkwy NW, Kennesaw'},
+            {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'expectedBy': 1001,
+             'street': None, 'city': None, 'state': None, 'zip': None, 'line': None}],
+            'unfiled': 'address', 'keep': False, 'asked': False, 'ms': None,
+            'at': int(time.time() * 1000)}})
+        for _ in range(60):
+            if (get(base, '/api/status').get('holding') or {}).get('planner'):
+                break
+            time.sleep(0.05)
+        seen('4100 Fable Mill Pkwy NW, Kennesaw, GA 30144', '4100 Fable Mill Pkwy NW')
+        eq('auto-dropoff: an address that is one of the hold\'s planner pickups is not '
+           'filed', held_end('4100 Fable Mill Pkwy NW, Kennesaw, GA 30144', 1.5), None)
+        put_down('o-lab-pickup')
+
+        # A read older than the Took.
+        ok_('the premise: a fifth order is in the car with the card\'s corner',
+            took('o-lab-stale', 'Oak Dr & Elm Dr, Acworth'))
+        seen('21 Old Screen Ct, Acworth, GA 30101', '21 Old Screen Ct',
+             at=int(time.time() * 1000) - 60000)
+        eq('auto-dropoff: a labelled read from before the Took is not filed over the '
+           'card\'s end', held_end('21 Old Screen Ct, Acworth, GA 30101', 1.5),
+           'Oak Dr & Elm Dr, Acworth')
+        put_down('o-lab-stale')
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
 # --- a ⌖ press that read Uber's Trip Planner ---------------------------------
 #
 # The scanner sends the planner's stops on a line of their own (emit_planner).

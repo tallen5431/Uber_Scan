@@ -466,6 +466,21 @@ eq('address_stop: "Picked up" is no pickup label, "Deliver to" is a dropoff one'
    P.address_stop('Picked up\nDeliver to Pat Q.\n12 Fable St, Acworth, GA 30101'),
    'dropoff')
 eq('address_stop: no address, no answer', P.address_stop('Dropoff - 1 order'), None)
+# address_under_dropoff: the label-proven test an unpressed address passes to be
+# filed over a held order's end (digest() in scan_pi.py, server.js).
+eq('address_under_dropoff: a navigation screen\'s Dropoff address is under it',
+   P.address_under_dropoff('Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 '
+                           '12 min Start'), True)
+eq('address_under_dropoff: ...and a name between the label and the address is '
+   'still its block',
+   P.address_under_dropoff('Picked up\nDeliver to Pat Q.\n12 Fable St, Acworth, GA 30101'),
+   True)
+eq('address_under_dropoff: not under a Pickup label', P.address_under_dropoff(_PK), False)
+eq('address_under_dropoff: not under no label',
+   P.address_under_dropoff('12 Fable St, Acworth, GA 30101\n12 min Start'), False)
+eq('address_under_dropoff: not a second address under the label\'s own one',
+   P.address_under_dropoff('Dropoff\n34 Made Up Rd, Acworth, GA 30102\nView details\n'
+                           '56 Other Made Up Rd, Acworth, GA 30101'), False)
 eq('planner_furniture: a planner block whose header did not read still has it',
    P.planner_furniture('Kennesaw, GA 30144\nView details\nFable Grill\n'
                        'Expected by 5:54 PM'), True)

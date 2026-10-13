@@ -503,7 +503,25 @@ function startScanner() {
           var wasAsked = read.dropoff.asked !== false;
           var carrying = holding(Date.now());
           var kept = false;
-          if (carrying && (wasAsked || !carrying.dropoff)) {
+          // ...and whether an unasked one is LABEL-PROVEN: the screen printed
+          // it under "Dropoff" in its own stop block (rpi/scan_pi.py, digest),
+          // which the driver asked to be enough, with no ⌖, while their own
+          // ✓ Took is in force. It may replace an end the CARD gave
+          // (`dropoffScanned` false) — a door beats the card's corner or town
+          // — and never one that came off the screen, pressed or seen.
+          //
+          // Two guards against a planner still up from the trip before. Seen
+          // after the Took: `at` is the scanner's clock when it read the
+          // screen, and a read older than the hold is not about it. And not
+          // one of the hold's own planner pickups: a restaurant's door filed
+          // as where the customer lives is the confidently wrong direction,
+          // so that one is refused outright, blank or not.
+          var labelled = !wasAsked && !!carrying && read.dropoff.labelled === 'dropoff'
+            && typeof read.dropoff.at === 'number'
+            && read.dropoff.at >= carrying.acceptedAt;
+          var aPickup = labelled && plannerPickup(carrying, read.dropoff);
+          if (carrying && !aPickup && (wasAsked || !carrying.dropoff
+                                       || (labelled && !carrying.dropoffScanned))) {
             carrying.dropoff = read.dropoff.line;
             carrying.dropoffScanned = true;
             kept = true;
@@ -530,7 +548,10 @@ function startScanner() {
                 v: 1, kind: 'mark', at: Date.now(),
                 id: carrying.id,
                 dropoff: read.dropoff.line,
-                asked: wasAsked
+                asked: wasAsked,
+                // Only on a label-proven one, so the fold can let it past the
+                // card's own end as the live path just did. See the marks fold.
+                labelled: labelled || undefined
               }) + '\n', function (err) {
                 // Said out loud for the same reason the screening branch says
                 // it: a read-only SD card mid-shift is the classic Pi failure,
@@ -1183,6 +1204,25 @@ function holdEnds(h) {
     ? h.minutes : null;
   if (stated === null) return null;
   return h.acceptedAt + stated * HOLD_OVERRUN * 60000 + HOLD_GRACE_MS;
+}
+
+/* Whether `dropoff` is one of the held order's own Trip Planner pickups — a
+ * restaurant's door, which a label-proven sighting must never be filed as.
+ * Compared on the street where both read one (the planner prints no ZIP, so
+ * its line and find_address's never match whole), else on the line; case,
+ * commas and spacing ignored. */
+function plannerPickup(held, dropoff) {
+  var stops = held && held.planner && Array.isArray(held.planner.stops)
+    ? held.planner.stops : [];
+  function norm(t) {
+    return typeof t === 'string' ? t.toLowerCase().replace(/[\s,.]+/g, ' ').trim() : '';
+  }
+  return stops.some(function (st) {
+    if (!st || st.kind !== 'pickup') return false;
+    var a = norm(st.street), b = norm(dropoff.street);
+    if (a && b) return a === b;
+    return !!norm(st.line) && norm(st.line) === norm(dropoff.line);
+  });
 }
 
 function holding(now) {
@@ -2312,6 +2352,10 @@ function latestPerOfferUncached(rows) {
           // arrived at the guard below as `undefined` and was let through as a
           // press.
           m.dropoffAsked = r.asked !== false;
+          // ...and whether an unasked one was label-proven, carried the same
+          // way and for the same reason: it is what lets this mark past the
+          // card's own end below, as the live path let it past the hold's.
+          m.dropoffLabelled = r.labelled === true;
         }
       }
       return;
@@ -2415,7 +2459,10 @@ function latestPerOfferUncached(rows) {
       // Absent means asked, so the rows already in this journal — and any
       // written by an older rig still reporting only presses — keep the
       // behaviour they were written under.
-      if (mark.dropoff && (mark.dropoffAsked || !o.dropoff)) {
+      // ...and a LABEL-PROVEN sighting may overwrite the card's own end too,
+      // the one rule the live path files it by: the marks fold above already
+      // keeps a press over it, so what is left to beat here is the card.
+      if (mark.dropoff && (mark.dropoffAsked || mark.dropoffLabelled || !o.dropoff)) {
         o.dropoff = mark.dropoff;
         o.dropoffScanned = true;
       }

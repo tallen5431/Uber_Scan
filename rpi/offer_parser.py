@@ -2318,14 +2318,17 @@ def find_address(text):
 
 
 def _find_address(text):
-    """find_address's answer, and where in normalize(text) its town ends —
-    which is what address_stop asks the labels in front of it about. One walk
-    for both, so the two can never disagree about which address is the one."""
+    """find_address's answer, where in normalize(text) its town ends — which is
+    what address_stop asks the labels in front of it about — and where the
+    address before it ended (0 when it is the first), which is what
+    address_under_dropoff asks. One walk for all three, so they can never
+    disagree about which address is the one."""
     if not text:
-        return None, None
+        return None, None, 0
     text = normalize(text)
     best = None
     best_end = None
+    best_after = 0
     after = 0          # where the previous address ended; see `head` below.
     for m in ADDRESS.finditer(text):
         state = m.group(2).upper()
@@ -2401,6 +2404,7 @@ def _find_address(text):
             else re.sub(r'\s+', ' ', m.group(0)).strip(' .,')
         found = {'line': line, 'street': street, 'city': city,
                  'state': state, 'zip': digits}
+        best_after = after
         after = m.end()
         # The LAST one on the screen. A navigation screen shows where you are
         # going, and anything above it — a pickup already made, a previous stop
@@ -2408,7 +2412,7 @@ def _find_address(text):
         # place a card names for the same reason.
         best = found
         best_end = m.end(1)
-    return best, best_end
+    return best, best_end, best_after
 
 
 # WHICH STOP the screen printed an address under.
@@ -2451,13 +2455,39 @@ def address_stop(text):
     is no address at all. What a caller does with None is its own policy; see
     digest() in scan_pi.py, where an address nobody asked for needs 'dropoff'.
     """
-    found, end = _find_address(text)
+    return _address_label(text)[0]
+
+
+def address_under_dropoff(text):
+    """True when the address find_address takes off `text` is printed under a
+    Dropoff label IN ITS OWN STOP BLOCK: the nearest label in front of it says
+    dropoff, and no other address sits between that label and this one.
+
+    The second half is what address_stop does not ask. "Dropoff / 12 A St,
+    Town, GA 30101 / ... / 34 B St, Town, GA 30102" puts the last address under
+    the same nearest label as the first, but the label's address is the first;
+    the second belongs to whatever block the screen has scrolled into that did
+    not print its header. This is the test an address nobody pressed ⌖ for has
+    to pass to be filed over the held order's own end — see digest() in
+    scan_pi.py and the dropoff branch in server.js.
+    """
+    kind, at, after = _address_label(text)
+    return kind == 'dropoff' and at >= after
+
+
+def _address_label(text):
+    """(kind, where the label starts, where the address before ended): the
+    nearest stop label in front of find_address's answer, for address_stop and
+    address_under_dropoff — (None, None, 0) with no label or no address."""
+    found, end, after = _find_address(text)
     if found is None:
-        return None
+        return None, None, 0
     kind = None
+    at = None
     for m in ADDRESS_STOP.finditer(normalize(text)[:end]):
         kind = 'pickup' if m.group(1) else 'dropoff'
-    return kind
+        at = m.start()
+    return kind, at, after
 
 
 def planner_furniture(text):
