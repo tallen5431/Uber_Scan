@@ -2608,7 +2608,10 @@ const framed = (page) => page.waitForFunction(
               var k = 256 * Math.pow(2, this.zoom) / 360;
               return { x: node.clientWidth / 2 + (ll[1] - this.centre[1]) * k,
                        y: node.clientHeight / 2 - (ll[0] - this.centre[0]) * k }; },
-            invalidateSize: function () { window.__sized = (window.__sized || 0) + 1; },
+            // ...and the map's width when it was asked: a call made before the
+            // pane changed size tells Leaflet nothing.
+            invalidateSize: function () { window.__sized = (window.__sized || 0) + 1;
+              window.__sizedW = (window.__sizedW || []).concat([node.clientWidth]); },
             removeLayer: function (g) {
               window.__marks = window.__marks.filter(function (m) { return m.group !== g; });
               window.__lines = window.__lines.filter(function (l) { return l.group !== g; });
@@ -2779,6 +2782,9 @@ const framed = (page) => page.waitForFunction(
         return { ll: m.ll, fill: m.opts && m.opts.fillColor,
                  radius: m.opts && m.opts.radius,
                  op: m.opts && m.opts.fillOpacity,
+                 // ...and the edge: the order in the car's ring is edged in
+                 // its own colour, every other mark in the dark.
+                 edge: m.opts && m.opts.color, weight: m.opts && m.opts.weight,
                  popup: String(m.popup || '').replace(/<[^>]*>/g, ' ')
                                              .replace(/\s+/g, ' ').trim() };
       }),
@@ -2850,6 +2856,7 @@ const framed = (page) => page.waitForFunction(
                label: document.getElementById('verdictLabel').textContent.trim() };
     });
     out.betweenOffer = await wide();
+    await page.evaluate(() => { window.__sizedW = []; });
     await page.evaluate(() => window.__es.push(
       { ready: false, state: 'empty', track: null,
         holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
@@ -2857,6 +2864,21 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(200);
     out.betweenNone = await wide();
     out.betweenSized = await page.evaluate(() => window.__sized || 0);
+    // The widths Leaflet was told on that message: the map is redrawn (and
+    // told) before render flips the page to between, so only setBetween's own
+    // call is made at the new width.
+    out.betweenSizedW = await page.evaluate(() => (window.__sizedW || []).slice());
+    // ...and not between while the card has something to say: the Trip
+    // Planner's stops on it give the verdict's column back. Then cleared.
+    await page.evaluate(() => window.__es.push({ planner: { stops: [
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 978, street: '4821 Kestrel Dr',
+        city: 'Marietta', state: 'GA', zip: null, line: '4821 Kestrel Dr, Marietta' }],
+      unfiled: null, asked: true, ms: null, at: 41 } }));
+    await page.waitForTimeout(200);
+    out.betweenStops = await wide();
+    await page.evaluate(() => window.__es.push({ planner: { stops: [], unfiled: null,
+                                                            asked: true, ms: null, at: 42 } }));
+    await page.waitForTimeout(200);
     // The offer, and in the same task as the push: no wait at all.
     out.betweenBack = await page.evaluate(() => {
       window.__es.push({
@@ -3946,6 +3968,19 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(1500);
         r.longStreet = await note();
         r.longStreetHeld = await heldPin();
+      }
+      if (which === 'noSearch') {
+        /* The router set and the held end a pin its own card refuses: the
+           public map's Shadowood Parkway, 7.3 mi from a held card that
+           printed 0.5. A road drawn to it would be a road to a red pin, so
+           the held run stays the straight line it always was. */
+        await push({ id: 'ns-off', heldCard: { miles: 0.5 } });
+        await page.waitForTimeout(4000);
+        r.offHeldLines = await page.evaluate(() => (window.__lines || []).map(
+          (l) => String((l.opts || {}).className || '')));
+        r.offHeldPin = await page.evaluate(() => (window.__marks || []).filter(
+          (k) => String(k.popup || '').indexOf('where the order in your car is going') >= 0)
+          .map((k) => (k.opts || {}).fillColor));
       }
       r.publicAsked = publicAsked;
       out.nbx[which] = r;
@@ -6719,6 +6754,16 @@ try:
         len(_ringed) == 1 and 'order in your car' in (_ringed[0].get('popup') or ''))
     ok_('...and the same ring on the car, so it is one rule and not two',
         _car and _car[0].get('radius') == 11 and _car[0].get('op') == 0.35)
+    # Sized for the hat as well as the panel, with the letter inside: this
+    # offer's pins 12 px solid, edged dark; the held order's end a 13 px ring
+    # edged 4 px in its own amber; the car's ring as it was. They were 9 and
+    # 11 with one dark edge, and nothing read the size or the edge.
+    eq('the pins are 12 px solid edged dark, the held order\'s end a 13 px ring edged '
+       '4 px in its own amber, the car\'s ring 11 px edged dark as before',
+       sorted((m.get('radius'), m.get('op'), m.get('edge'), m.get('weight'))
+              for m in marks),
+       sorted([(12, 1, '#0b0d10', 3), (12, 1, '#0b0d10', 3),
+               (13, 0.35, '#f5a524', 4), (11, 0.35, '#0b0d10', 3)]))
     ok_('each says which of the four it is (%r)'
         % ([m.get('popup') for m in marks],),
         any('order in your car' in (m.get('popup') or '') for m in marks)
@@ -6789,6 +6834,17 @@ try:
         and _bn.get('mapW', 0) >= _bn.get('barW', 1) - 2)
     ok_('...and Leaflet is told its new size (%r)' % got.get('betweenSized'),
         (got.get('betweenSized') or 0) > (got.get('mapOn') or {}).get('sized', 0))
+    # ...at the new width. Every message redraws the map, and that redraw
+    # tells Leaflet its size BEFORE render flips the page to between, so the
+    # count above passed with setBetween's own call taken out.
+    _sw = got.get('betweenSizedW') or []
+    ok_('...after the map has taken the whole width, not only before (%r, map %r)'
+        % (_sw, _bn.get('mapW')), _sw and _sw[-1] >= (_bn.get('mapW') or 0) - 2
+        and _sw[-1] > (_bo.get('mapW') or 0) + 2)
+    _bs = got.get('betweenStops') or {}
+    ok_('...but not while the card has something to say: the Trip Planner\'s stops '
+        'on it give the verdict its column back (%r)' % _bs,
+        _bs.get('live') and _bs.get('mapW', 0) < _bs.get('appW', 0) * 0.6)
     eq('...and the verdict is back in the same render as the next offer',
        (_bb.get('live'), (_bb.get('label') or '')[:6]), (True, 'ACCEPT'))
     _how = on.get('how') or []
@@ -6933,6 +6989,14 @@ try:
     ok_('...and with no router the same runs are the straight lines (%r)' % sorted(_nr),
         'mv-held-run' in _nr and 'mv-detour' in _nr
         and not any('mv-road' in c for c in _nr))
+    # ...and with the router set, a held end its own card refuses (red) keeps
+    # the straight run: nothing checked that a refused pin is not given a road.
+    ok_('...and a held end its card refuses is red and its run straight, not along a '
+        'road (%r, %r)' % (nosearch.get('offHeldPin'), nosearch.get('offHeldLines')),
+        nosearch.get('offHeldPin') == ['#f31260']
+        and 'mv-held-run' in (nosearch.get('offHeldLines') or [])
+        and not any('mv-held-run' in c and 'mv-road' in c
+                    for c in nosearch.get('offHeldLines') or []))
     _streets = [u for u in (got.get('nbxAsked') or []) if 'street=Shadowood' in u]
     ok_('the held end "Shadowood Pkwy SE, Atlanta" is asked as the street alone, '
         'the town left out (%r)' % _streets[:1],

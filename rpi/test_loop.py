@@ -1965,6 +1965,25 @@ ra5b = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-paralle
 ok_('the premise: it was read whole (%r)' % ra5b['wholes'], sum(ra5b['wholes']) == 1)
 eq('an unpressed whole-screen read sends no address under no label',
    ra5b['dropoffs'], [])
+# ...nor one under a Dropoff label that is not its own: the label's address
+# is the first, and the last one on the screen — the one find_address takes —
+# sits in a block whose header did not print. That address passes the
+# unprompted gate (the nearest label above it says dropoff); only
+# OP.address_under_dropoff, asked here, refuses it. With that test taken out
+# of this read, no check failed: the bare screen above never reaches it.
+_ha5c = tempfile.mkdtemp()
+_hold(_ha5c, time.time() + 3600)
+_WHOLE_SECOND = ('Trip Planner\nDropoff\n34 Made Up Rd, Acworth, GA 30102\nView details\n'
+                 '56 Other Made Up Rd, Acworth, GA 30101\n12 min Start')
+ok_('the premise: the last address on that screen is under a Dropoff label, and not '
+    'in its block', OP.find_planner(_WHOLE_SECOND) is None
+    and OP.address_stop(_WHOLE_SECOND) == 'dropoff'
+    and not OP.address_under_dropoff(_WHOLE_SECOND))
+ra5c = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
+           seconds=4.0, handoff=_ha5c, whole_text=_WHOLE_SECOND)
+ok_('the premise: it was read whole (%r)' % ra5c['wholes'], sum(ra5c['wholes']) == 1)
+eq('an unpressed whole-screen read sends no second address under another\'s label',
+   ra5c['dropoffs'], [])
 
 # ...and the planner's own one dropoff is sent, label-proven, on the list that
 # would give it to a press: both ends in view, one dropoff, its street and town
