@@ -5004,6 +5004,14 @@
     "app": "doordash",
     "screen": "dd.offer"
    }
+  },
+  {
+   "name": "...and the speed-limit sign alone, which Uber draws while it navigates",
+   "text": "45\nLIMIT v\nHILLS PARK\nHIGHLANDS",
+   "expect": {
+    "app": "uber",
+    "screen": "uber.nav"
+   }
   }
  ]
 }

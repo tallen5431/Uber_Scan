@@ -2655,6 +2655,110 @@ def emit_planner(stops, unfiled=None, keep=False, ms=None, asked=True):
                                   'at': int(time.time() * 1000)}}), flush=True)
 
 
+def planner_stops(stops):
+    """find_planner's stops as the planner line and every rule that files have
+    always had them: the headed stops only, without `partial`. None for None.
+
+    find_planner now also keeps the stop a page begins in the middle of (kind
+    None) and marks the stops a page edge cut. Those are for the sighting,
+    which files nothing; handed to planner_destination, planner_lone_dropoff,
+    the log or the panel's "▸ Dropoff" line, a stop of no kind would be one
+    more stop to count, a None to join, or a pickup drawn as a dropoff. So the
+    filing side is given exactly what it was given before, and the sighting is
+    given all of it."""
+    if stops is None:
+        return None
+    return [{k: v for k, v in s.items() if k != 'partial'}
+            for s in stops if s.get('kind')] or None
+
+
+# The fields of a stop on a sighting, in this order, whichever screen it came
+# off: a planner's stop has them all; an address off any other screen has the
+# address and its label, and None for the rest.
+SIGHTING_STOP = ('kind', 'orders', 'name', 'place', 'expectedBy', 'street', 'city',
+                 'state', 'zip', 'line', 'partial', 'label')
+
+
+def sighting_stops(text, stops, address):
+    """The stops a sighting carries, and the page's two ends, as
+    (stops, {'top', 'bottom'}).
+
+    Off a planner, `stops` is find_planner's whole list — the cut stops
+    included, each saying where it was cut — and each stop's `label` is the
+    word its header printed, which is its kind; the stop above the first
+    header printed none. The page's ends are planner_ends'.
+
+    Off any other screen, the one address the frame gave (`address`, already
+    None where the frame carried a payout or a merchant: digest()'s `an_offer`
+    refusal, unchanged), labelled by the stop label in front of it
+    (OP.address_stop). It is TYPED a pickup under a Pickup label and only a
+    pickup, a dropoff only where OP.address_under_dropoff says it sits in a
+    Dropoff label's own block, and otherwise of no kind. No page ends: only
+    the planner's list has them.
+    """
+    if stops is not None:
+        top, bottom = OP.planner_ends(text)
+        out = []
+        for s in stops:
+            one = {k: s.get(k) for k in SIGHTING_STOP}
+            one['label'] = s.get('kind')
+            out.append(one)
+        return out, {'top': top, 'bottom': bottom}
+    if not address:
+        return [], {'top': None, 'bottom': None}
+    label = OP.address_stop(text)
+    one = {k: address.get(k) for k in SIGHTING_STOP}
+    one['kind'] = ('pickup' if label == 'pickup' else
+                   'dropoff' if OP.address_under_dropoff(text) else None)
+    one['label'] = label
+    return [one], {'top': None, 'bottom': None}
+
+
+def order_count(stops):
+    """How many orders a planner's dropoffs say they are, summed — or None
+    when there is no dropoff on it, or one whose count did not read. A
+    count the screen did not finish saying is not a count."""
+    drops = [s for s in stops if s.get('kind') == 'dropoff']
+    if not drops or any(not isinstance(s.get('orders'), int) for s in drops):
+        return None
+    return sum(s['orders'] for s in drops)
+
+
+def emit_sighting(text, stops, address, asked, whole, keep=False):
+    """Stage 2 of the multi-order design: what a whole-screen read or a planner
+    read SAW, typed by its screen, and nothing more.
+
+        {sighting: {at, asked, whole, app, screen, page: {top, bottom},
+                    stops: [{kind, orders, name, place, expectedBy, street,
+                             city, state, zip, line, partial, label}],
+                    orderCount, keep}}
+
+    COLLECTION ONLY. The dropoff and planner lines beside it still do all the
+    filing, by exactly the rules they had; nothing reads this line to file,
+    hold, mark or judge anything. server.js counts it by `screen` and that is
+    all: it writes no journal row from it and sends no address on from it.
+
+    The frame-local refusals stay here, where the frame is: `address` is the
+    one digest() already refused on a payout or a merchant, and an address
+    under a Pickup label is typed a pickup only (sighting_stops). `keep` is
+    emit_planner's: whether the record may hold names and doors, said so a
+    later stage that does keep them has the answer the rig had.
+    """
+    print(json.dumps({'sighting': sighting(text, stops, address, asked, whole,
+                                           keep=keep)}), flush=True)
+
+
+def sighting(text, stops, address, asked, whole, keep=False):
+    """The sighting line's body, built: see emit_sighting, which prints it."""
+    kind = OP.screen_type(text)
+    listed, page = sighting_stops(text, stops, address)
+    return {'at': int(time.time() * 1000), 'asked': bool(asked), 'whole': bool(whole),
+            'app': kind['app'], 'screen': kind['screen'], 'page': page,
+            'stops': listed,
+            'orderCount': order_count(stops) if stops is not None else None,
+            'keep': bool(keep)}
+
+
 def planner_destination(stops, bounded):
     """The address a Trip Planner gives the order in the car, and why not.
 
@@ -3682,7 +3786,13 @@ def main():
         # for it and the trip has exactly one dropoff: one rule for "where is
         # this order going" on this screen, not two. rpi/test_loop.py holds the
         # unprompted half: a planner nobody pressed for, with a ZIP on it.
-        planner = None if an_offer else OP.find_planner(out.get('text'))
+        #
+        # `seen_stops` is everything find_planner kept, the stops a page edge
+        # cut included; `planner`, which everything below files by, is the
+        # headed stops alone, as it always was (planner_stops). Only the
+        # sighting is given the rest.
+        seen_stops = None if an_offer else OP.find_planner(out.get('text'))
+        planner = planner_stops(seen_stops)
         answers = planner is not None and whole and asked
         # ...AND, NOW, WITHOUT A PRESS, while an order is in the car.
         #
@@ -4012,6 +4122,16 @@ def main():
                              ms=out.get('ms'), asked=False)
             log('trip planner read, unpressed, an order being held: %s'
                 % ', '.join(s['kind'] for s in planner))
+        # ...and, beside those two lines, what the read SAW: every whole-screen
+        # read and every read with a planner on it, typed by its screen, filing
+        # nothing. See emit_sighting. Off the frame's own address — `found`
+        # above is the FILING answer, already narrowed by press, label and
+        # repeat — and that address is None wherever `an_offer` refused it.
+        if args.json and (whole or seen_stops is not None):
+            emit_sighting(out.get('text'), seen_stops,
+                          None if an_offer else shot.get('address'),
+                          asked, whole,
+                          keep=offer_log is not None and offer_log.keep_places)
         if found:
             dropoff_said = found.get('line')
             # Closed the moment it is answered, and what that closes is the

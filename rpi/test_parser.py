@@ -127,6 +127,17 @@ for c in cases.get('planner', []):
     # Every case says, and a case that does not is a KeyError, not a pass.
     eq('planner ends / ' + c['name'], P.planner_bounded(c['text']), c['bounded'])
 
+# ...and the two ends one at a time, which is what a sighting's `page` says.
+# `bounded` is both together and cannot see them swapped; these two cases have
+# one end each. tests/parser.test.js asks the same of plannerEnds.
+_PLANNER_TEXT = {c['name']: c['text'] for c in cases.get('planner', [])}
+eq('planner_ends: a list scrolled past its first stop shows its end and not its start',
+   P.planner_ends(_PLANNER_TEXT['a planner scrolled past its first stop does not show '
+                                'its start']), (False, True))
+eq('...and one running on below the screen its start and not its end',
+   P.planner_ends(_PLANNER_TEXT['a planner whose list runs on below the screen does not '
+                                'show its end']), (True, False))
+
 # What screen a reading is, for a sighting: the app and the screen as one pair,
 # because the app follows from the screen and a case that got one right and
 # the other wrong is one fault. tests/corpus.test.js runs the same cases. See

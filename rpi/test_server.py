@@ -1822,6 +1822,83 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+# --- a sighting is counted and goes nowhere ----------------------------------
+#
+# Stage 2 of the multi-order design: the scanner sends a `sighting` line for
+# every whole-screen and planner read (emit_sighting in rpi/scan_pi.py). The
+# server counts it by screen type on /api/status's scanner block and does
+# nothing else with it: no journal row, nothing on the event stream, nothing
+# filed onto an order in the car — the dropoff and planner lines still do all
+# of that. One fake scanner relaying whatever the test appends, as above; the
+# order is held so a sighting that filed would have somewhere to file. The
+# address is invented.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    cmds = os.path.join(work, 'cmds.jsonl')
+    open(cmds, 'w').close()
+    fake = os.path.join(work, 'relay.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import sys, time\n'
+            'done = 0\n'
+            'while True:\n'
+            '    lines = open(%r).read().splitlines()\n'
+            '    for l in lines[done:]:\n'
+            '        print(l, flush=True)\n'
+            '    done = len(lines)\n'
+            '    time.sleep(0.05)\n' % cmds)
+    write(journal, [])
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake}, journal)
+    try:
+        code, reply = post(base, '/api/offers/mark', {
+            'id': 'o-sight', 'accepted': True,
+            'offer': {'id': 'o-sight', 'pay': 14.0, 'minutes': 30.0,
+                      'billedMinutes': 30.0, 'miles': 6.0, 'cost': 2.1, 'dropoff': None}})
+        ok_('the premise: an order with no end is held when the sightings arrive',
+            code == 200 and reply.get('holding') is True)
+        _stream = listen(base, 3.0)
+        time.sleep(0.3)
+        # Read here, not with lines(): that name is a list by this point.
+        _rows_before = open(journal).read()
+        _stop = {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'place': None,
+                 'expectedBy': 978, 'street': '4821 Kestrel Dr', 'city': 'Marietta',
+                 'state': 'GA', 'zip': None, 'line': '4821 Kestrel Dr, Marietta',
+                 'partial': None, 'label': 'dropoff'}
+        with open(cmds, 'a') as fh:
+            for _screen, _stops in (('uber.planner', [_stop]), ('uber.nav', [_stop]),
+                                    ('uber.planner', [_stop]), (None, [])):
+                fh.write(json.dumps({'sighting': {
+                    'at': int(time.time() * 1000), 'asked': False, 'whole': True,
+                    'app': 'uber', 'screen': _screen,
+                    'page': {'top': True, 'bottom': True}, 'stops': _stops,
+                    'orderCount': 1, 'keep': True}}) + '\n')
+            # ...and a heartbeat after them, so the stream is shown carrying
+            # the scanner's lines and the sightings are seen to be the ones
+            # left out, not the stream to be silent.
+            fh.write(json.dumps({'alive': True}) + '\n')
+        _screens = {}
+        for _ in range(80):
+            _screens = (get(base, '/api/status').get('scanner') or {}).get('screens') or {}
+            if sum(_screens.values()) >= 4:
+                break
+            time.sleep(0.05)
+        eq('a sighting is counted by its screen type on the scanner\'s status, '
+           'one without a type as unknown', _screens,
+           {'uber.planner': 2, 'uber.nav': 1, 'unknown': 1})
+        time.sleep(3.0)
+        ok_('the premise: the stream carried the scanner\'s heartbeat after them',
+            any(m.get('alive') for m in _stream))
+        eq('...and is not broadcast', [m for m in _stream if 'sighting' in m], [])
+        eq('...and writes no journal row', open(journal).read(), _rows_before)
+        eq('...and files nothing onto the order in the car',
+           ((get(base, '/api/status').get('holding') or {}).get('dropoff'),
+            (get(base, '/api/status').get('holding') or {}).get('planner')), (None, None))
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
 # --- a ⌖ press that read Uber's Trip Planner ---------------------------------
 #
 # The scanner sends the planner's stops on a line of their own (emit_planner).

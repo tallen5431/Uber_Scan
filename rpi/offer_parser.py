@@ -3212,15 +3212,6 @@ def _screen(text):
     if SCREEN_LIMIT.search(text):
         return 'uber.nav'
     return 'unknown'
-    if SCREEN_PICKUP_NAV.search(text):
-        return 'uber.pickupNav'
-    if SCREEN_NAV.search(text):
-        return 'uber.nav'
-    if SCREEN_DD_FINDING.search(text):
-        return 'dd.finding'
-    if SCREEN_UBER_FINDING.search(text) or SCREEN_RADAR.search(text):
-        return 'uber.finding'
-    return 'unknown'
 
 
 # The card saying, in its own words, that it is not going to tell you where the
