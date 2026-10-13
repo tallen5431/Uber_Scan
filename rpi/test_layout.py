@@ -1773,13 +1773,16 @@ const SNAP_MEASURE = (fixture) => {
         // (10px in, two 30px buttons and their 2px borders: 74px), ONE row,
         // nothing cut — plus which of its two forms this panel gets.
         // Both of its forms: what it says of the marks, and what it says
-        // when drawing them failed (showKey(null)).
-        const KEY_MEASURE = (failed) => {
+        // when drawing them failed (showKey(null)) — and the marks' form
+        // with the held order's pickup ring in it too, which drops the long
+        // words everywhere and takes two rows on the hat (see #mapKey's rule).
+        const KEY_MEASURE = ([failed, hpick]) => {
           const key = document.getElementById('mapKey');
           const map = document.getElementById('liveMap').getBoundingClientRect();
           key.hidden = false;
           key.querySelector('.k-all').hidden = failed;
           key.querySelector('.k-fail').hidden = !failed;
+          key.querySelector('.k-item[data-k="hpick"]').hidden = !hpick;
           const r = key.getBoundingClientRect();
           const tops = {};
           const walk = document.createTreeWalker(key, NodeFilter.SHOW_TEXT);
@@ -1805,10 +1808,12 @@ const SNAP_MEASURE = (fixture) => {
           key.hidden = true;
           key.querySelector('.k-all').hidden = false;
           key.querySelector('.k-fail').hidden = true;
+          key.querySelector('.k-item[data-k="hpick"]').hidden = false;
           return out;
         };
-        shown.key = await page.evaluate(KEY_MEASURE, false);
-        shown.keyFailed = await page.evaluate(KEY_MEASURE, true);
+        shown.key = await page.evaluate(KEY_MEASURE, [false, false]);
+        shown.keyHeld = await page.evaluate(KEY_MEASURE, [false, true]);
+        shown.keyFailed = await page.evaluate(KEY_MEASURE, [true, false]);
         // ...and what a mark of drawHow's says when pointed at (#mapTip):
         // the longest the suite's marks say — a refused McDonald's with the
         // branch outside its 9.9 mi disc, 142 characters — in the one box
@@ -3343,6 +3348,18 @@ try:
                    key.get('text'),
                    "◯ reach · ● pin · ● found · ○ outside" if h <= 380
                    else "◯ card's reach · ● pin · ● also found · ○ outside")
+                # ...and with the held order's pickup in it: one row and the
+                # short words on every panel but the hat, which has 206px of
+                # room for 293px of words and takes two rows, and only there.
+                key = phone.get('keyHeld') or {}
+                ok_('the key with the held pickup in it sits inside the map, below the '
+                    'zoom buttons, in %s, nothing cut, at %s (%r)'
+                    % ('two rows' if h <= 380 else 'one row', panel,
+                       (key.get('rows'), key.get('spills'), key.get('w'), key.get('mapW'))),
+                    key.get('inside') and key.get('belowZoom')
+                    and key.get('rows') == (2 if h <= 380 else 1) and not key.get('spills'))
+                eq('...saying the held pickup with the rest at %s' % panel, key.get('text'),
+                   "◯ reach · ● pin · ● found · ○ outside · ◎ held pickup")
                 key = phone.get('keyFailed') or {}
                 ok_('the key saying how each place was found was not drawn sits inside '
                     'the map, below the zoom buttons, in one row, nothing cut, at %s (%r)'

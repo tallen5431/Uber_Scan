@@ -663,6 +663,68 @@
     return m ? s.slice(m[1].length) : s;
   }
 
+  /* A Trip Planner stop's name as shown, which is not always what was read.
+   *
+   * The stop's icon sits in front of the name and the reader makes letters of
+   * it: the driver's planner for a restaurant pickup came back as
+   * "oe <Restaurant> – <Town>" (holding.planner.stops on shift), the "oe" being
+   * the icon. The rule is a shape: ONE token of one or two lowercase letters,
+   * then a capitalised word, loses the token. A name that starts lowercase
+   * for real keeps it unless a capital follows it — "de Lima" would lose
+   * "de"; no such pickup is on file. Display only, as searchText is search
+   * only: the stop keeps its text as read on the hold and in the journal. */
+  function plannerName(name) {
+    var s = String(name == null ? '' : name).replace(/\s+/g, ' ').trim();
+    var m = /^[a-z]{1,2} (?=[A-Z])/.exec(s);
+    return m ? s.slice(m[0].length) : s;
+  }
+
+  /* The held order's pickups off its Trip Planner, in the order the planner
+   * lists them, as the places to pin: { q, name } each, `q` the stop's line
+   * (the street with its town, state and ZIP when they read), searched by the
+   * one rule every place is (searchPlan: a door is pinned only where the
+   * answer has its number, the town is never sent to the NucBox), `name` as
+   * shown (plannerName).
+   *
+   * THE STREET ALONE ends in a comma. With no town the planner's line is the
+   * bare street, and searchPlan reads a place with no comma as a merchant's
+   * NAME: "<n> <Street> Parkway", the driver's own pickup on shift, would
+   * have gone to the search as q= with no door rule. The comma is
+   * searchPlan's mark for "a street, then its town", and the town is the
+   * part it drops anyway. A pickup with no
+   * street is not a place and is left out — its name is never searched: a
+   * chain's name inside a disc finds whichever branch, and that is the wrong
+   * restaurant at the confidence of the right one.
+   *
+   * NOT YET VISITED means on the newest planner read. The planner lists the
+   * stops still ahead, and a press after the pickup reads a list without it;
+   * nothing here follows the car to the door.
+   *
+   * A dropoff is never one of these, and a pickup is never anything else:
+   * the order's end comes from holding.dropoff alone (planner_destination in
+   * rpi/scan_pi.py files dropoffs only). */
+  function heldPickups(stops) {
+    return (Array.isArray(stops) ? stops : []).filter(function (s) {
+      return s && s.kind === 'pickup' && s.street;
+    }).map(function (s) {
+      return { q: s.city && s.line ? s.line : s.street + ',',
+               name: plannerName(s.name) || null };
+    });
+  }
+
+  /* The held order's run as drawn: the car, its pickups not yet visited in
+   * the planner's order, then its end — each only where it has a point, so a
+   * pickup with no pin is a gap the line goes straight across, not a vertex
+   * at nowhere. Straight segments: the router answers metres, not a road's
+   * shape, and a figure for this run would be a second distance the caption
+   * has no room for. [] when fewer than two points have a place. */
+  function heldRun(car, pickups, end) {
+    var pts = [car].concat(pickups || [], [end]).filter(function (p) {
+      return p && isFinite(p.lat) && isFinite(p.lon);
+    }).map(function (p) { return [p.lat, p.lon]; });
+    return pts.length >= 2 ? pts : [];
+  }
+
   function searchPlan(place) {
     var s = searchText(place);
     if (!s) return null;
@@ -2444,6 +2506,7 @@
            BOX_MILES: BOX_MILES, ANCHOR_STEP: ANCHOR_STEP,
            FAR_MILES: FAR_MILES, GAP_MS: GAP_MS,
            searchPlan: searchPlan, searchText: searchText, discFor: discFor, discBox: discBox,
+           plannerName: plannerName, heldPickups: heldPickups, heldRun: heldRun,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            clipToDisc: clipToDisc, stretchInDisc: stretchInDisc, nearestOn: nearestOn,
            stretchSpan: stretchSpan, spanRefusal: spanRefusal, ON_WAY_MI: ON_WAY_MI,

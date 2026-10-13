@@ -663,6 +663,13 @@
   #mapKey .k-pin { color: #17c964; }
   #mapKey .k-cand { color: #8a8f98; }
   #mapKey .k-out { color: #8a8f98; }
+  #mapKey .k-hpick { color: #17c964; }
+  /* With the held pickup in it the long form is 388px of words in DejaVu
+     Sans at 12px, past the 800x480 map's room: the two long words go
+     whenever that item is shown, 320px. :has() rather than a class showKey
+     sets, so what rpi/test_layout.py measures — every item shown — is what
+     this rule sees. */
+  #mapKey:has(.k-item[data-k="hpick"]:not([hidden])) .k-long { display: none; }
   /* What a mark of drawHow's says about itself, shown while the pointer is
      on it (or it was tapped): ONE box across the map's foot, over the key,
      wrapped to the map's width — never a Leaflet tooltip beside the mark. A
@@ -686,6 +693,10 @@
      Measured in DejaVu Sans; rpi/test_layout.py holds both forms. */
   @media (max-height: 380px) {
     #mapKey { left: 6px; max-width: calc(100% - 12px); padding: 1px 5px; }
+    /* ...and on the hat no form of it with the held pickup fits one row:
+       293px of words for 206 (measured, DejaVu Sans 11px). It takes two
+       there, and only then, rather than lose a word off its end. */
+    #mapKey:has(.k-item[data-k="hpick"]:not([hidden])) { white-space: normal; }
     #mapKey .k-long { display: none; }
     #mapTip { left: 6px; right: 6px; padding: 1px 5px; }
   }
@@ -915,7 +926,8 @@
     <div id="liveMap" hidden><div id="mapKey" hidden><span class="k-all"><span class="k-item" data-k="disc"><span class="k-disc">◯</span> <span class="k-long">card's </span>reach</span><span
       class="k-item" data-k="pin"><span class="k-sep"> · </span><span class="k-pin">●</span> pin</span><span
       class="k-item" data-k="cand"><span class="k-sep"> · </span><span class="k-cand">●</span> <span class="k-long">also </span>found</span><span
-      class="k-item" data-k="out"><span class="k-sep"> · </span><span class="k-out">○</span> outside</span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
+      class="k-item" data-k="out"><span class="k-sep"> · </span><span class="k-out">○</span> outside</span><span
+      class="k-item" data-k="hpick"><span class="k-sep"> · </span><span class="k-hpick">◎</span> held pickup</span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
     <!-- What the "you are here" dot says about itself — "±12 m · 2 s old" —
          or why there is no dot: "GPS too rough here (±130 m)". Over the map's
          corner rather than in the caption below it, which is the detour's row
@@ -1764,6 +1776,23 @@
   // The order in the car as last described, so a failure can be tied to it.
   var heldSig = null;
 
+  /* The Trip Planner's stops as Map view's source for the held order's
+   * pickups — { of, stops }, `of` the order they were read for (heldOwner).
+   *
+   * Not `plannerSaid`, and on purpose a longer life. plannerSaid is the
+   * answer to a press, and goes when a different offer goes on the record
+   * (forgetDest): kept to that, the restaurant's pin would leave the map at
+   * the next card — the one moment Map view is opened to weigh a card
+   * against the order in the car. This is where that order is collected
+   * from, which a new card does not change: kept until the order goes, or
+   * until a newer planner read while it is held replaces it (the rig reads
+   * the planner unpressed while an order is marked taken, and a list read
+   * after the pickup no longer carries it). A reload has only what the
+   * server kept, which is plannerSaid's life (forgetPlanner in server.js). */
+  var heldPlan = null;
+
+  function heldOwner() { return holdingNow ? (heldId || heldSig) : null; }
+
   function holdSignature(holding) {
     return holding ? String(holding.pay) + '/' + String(holding.minutes) : null;
   }
@@ -1796,7 +1825,7 @@
   // down (msg.gpsDrop). One function, so the two cannot forget different things.
   function orderDown() {
     holdingNow = false; forgetDest(); heldEnds = undefined; heldSig = null;
-    heldId = null; atDropoff = false;
+    heldId = null; atDropoff = false; heldPlan = null;
     showStack(null); showDest();
   }
 
@@ -1941,7 +1970,10 @@
     var line = '▸ ' + (s.kind === 'pickup' ? 'Pickup' : 'Dropoff')
       + (typeof s.orders === 'number' && s.orders > 1 ? ' ×' + s.orders : '');
     if (typeof s.expectedBy === 'number') line += ' by ' + clockOf(s.expectedBy);
-    if (s.name) line += ' · ' + s.name;
+    // The name as shown: the stop's icon read as letters in front of it
+    // goes (MV.plannerName); the stop keeps it as read.
+    var name = s.name && MV && MV.plannerName ? MV.plannerName(s.name) : s.name;
+    if (name) line += ' · ' + name;
     if (s.line) line += ' · ' + s.line;
     return line;
   }
@@ -3464,6 +3496,7 @@
       // press is answered, so the button stops saying "reading…".
       if (msg.planner && Array.isArray(msg.planner.stops)) {
         plannerSaid = { stops: msg.planner.stops, unfiled: msg.planner.unfiled || null };
+        if (holdingNow) heldPlan = { of: heldOwner(), stops: msg.planner.stops };
         destFailed = false;
         destBusy = false;
         showDest();
@@ -3566,6 +3599,7 @@
     var heldPlanner = s.holding && s.holding.planner;
     if (heldPlanner && Array.isArray(heldPlanner.stops)) {
       plannerSaid = { stops: heldPlanner.stops, unfiled: heldPlanner.unfiled || null };
+      heldPlan = { of: heldOwner(), stops: heldPlanner.stops };
     }
     showDest();
     scannerState = s.scanner || null;
@@ -4137,10 +4171,21 @@
   function mapWants() {
     var o = onRecord || {};
     var held = holdingNow ? (heldEnds || null) : null;
-    var names = [o.pickup, o.dropoff, held].filter(Boolean)
+    /* ...and the held order's pickups off its Trip Planner, while it is held:
+       the restaurant the driver read with ⌖ was never on this map, so the
+       order and the place it is collected from were never seen together
+       (the driver: "even after scanning the restaurant it failed to
+       associate it"). Guarded for a map-view.js from before them, which
+       sw.js can serve this page (see drawHow). Never the order's end: that
+       is `held`, off holding.dropoff, and nothing here writes it. */
+    var plan = heldPlan && heldPlan.of === heldOwner() ? heldPlan.stops : null;
+    var heldPicks = (holdingNow && plan && MV && MV.heldPickups)
+      ? MV.heldPickups(plan).filter(function (p) { return p.q !== held; }) : [];
+    var names = [o.pickup, o.dropoff, held]
+      .concat(heldPicks.map(function (p) { return p.q; })).filter(Boolean)
       .filter(function (v, i, all) { return all.indexOf(v) === i; });
     return { pickup: o.pickup || null, dropoff: o.dropoff || null,
-             held: held, names: names,
+             held: held, heldPicks: heldPicks, names: names,
              // The two cards the line is measured with: this one, whose fix
              // is where the car was when it came up, and the one the order in
              // the car came from, whose own fix and distance its end is
@@ -4377,7 +4422,11 @@
         for (var n = 0; n < want.names.length; n++) {
           var q = want.names[n];
           if (want.nbxDown) { askPublic.push(q); continue; }
-          var whose = (q === want.held && q !== want.pickup && q !== want.dropoff)
+          // The held order's pickups are its card's places too, and are
+          // searched in its disc as its end is.
+          var heldsOwn = q === want.held
+            || want.heldPicks.some(function (p) { return p.q === q; });
+          var whose = (heldsOwn && q !== want.pickup && q !== want.dropoff)
             ? 'held' : 'new';
           var disc = whose === 'held' ? discs.held : discs.card;
           // `here` for a numberless street's pin: the point of its stretch
@@ -4398,7 +4447,8 @@
           found[q] = got.at || null;
           want.nbxAnswered++;
           want.nbxSeen[q] = { res: got, disc: disc, whose: whose };
-          if (whose === 'held' && disc) pinHeldEnd(want, q, got);
+          // The END only: a pickup's pin is never sent as the held end.
+          if (whose === 'held' && q === want.held && disc) pinHeldEnd(want, q, got);
           if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
           landed();
         }
@@ -4650,12 +4700,16 @@
      nothing to explain and no key; null, it failed and the key says only
      that — not the marks, which are not there. It named all four whatever
      was drawn: "○ outside" over a map with no hollow ring on it. */
-  function showKey(drawn, pinned) {
-    mapKey.hidden = drawn === false;
+  function showKey(drawn, pinned, heldPick) {
+    // A held pickup's ring is in the key whether or not drawHow drew
+    // anything: with no NucBox there is nothing of how it was found to
+    // explain, and a green ring beside the green pin is still a mark to name.
+    mapKey.hidden = drawn === false && !heldPick;
     mapKey.querySelector('.k-all').hidden = drawn === null;
     mapKey.querySelector('.k-fail').hidden = drawn !== null;
-    if (!drawn) return;
-    var has = { disc: drawn.disc, pin: pinned, cand: drawn.cand, out: drawn.out };
+    if (drawn === null) return;
+    var has = drawn ? { disc: drawn.disc, pin: pinned, cand: drawn.cand, out: drawn.out } : {};
+    has.hpick = !!heldPick;
     var first = true;
     [].forEach.call(mapKey.querySelectorAll('.k-item'), function (el) {
       var on = !!has[el.getAttribute('data-k')];
@@ -4696,7 +4750,15 @@
     var off = { pick: MV.cardRefuses(want.card, here, pick),
                 held: MV.cardRefuses(want.heldCard,
                                      MV.cardFix(want.heldCard).at, held) };
-    return { wrong: wrong, pick: pick, drop: drop, held: held, off: off };
+    // The held order's pickups, each held to its card's disc as its end is.
+    var heldPicks = (want.heldPicks || []).map(function (p) {
+      var at = found[p.q] || null;
+      return { q: p.q, name: p.name, at: at,
+               off: at ? MV.cardRefuses(want.heldCard, MV.cardFix(want.heldCard).at, at)
+                       : null };
+    });
+    return { wrong: wrong, pick: pick, drop: drop, held: held, off: off,
+             heldPicks: heldPicks };
   }
 
   /* `settled` is false while places are still being asked about, and the tail
@@ -4760,15 +4822,29 @@
         want.held, true);
     put(pick, colourFor(want.pickup, '#17c964', off.pick),
         sayFor(want.pickup, 'pick this one up', off.pick), want.pickup);
+    /* The held order's pickups: a GREEN RING, by the rule above — green for
+       a pickup, ringed for the order already in hand — and in the key as
+       "held pickup". Named as the planner listed it, less the icon's litter
+       (MV.plannerName), with the address searched under it. */
+    j.heldPicks.forEach(function (p) {
+      put(p.at, colourFor(p.q, '#17c964', p.off),
+          sayFor(p.q, 'pick up the order in your car', p.off),
+          [p.name, p.q.replace(/,$/, '')].filter(Boolean).join(' · '), true);
+    });
     put(drop, colourFor(want.dropoff, '#f5a524'),
         sayFor(want.dropoff, 'and drop it here'), want.dropoff);
 
     // The run already committed to, and the run this card would add. Dashed
     // for the detour, solid for the job, which is the same distinction the map
     // page draws: a dashed line is miles nobody pays for.
-    if (here && held) {
-      L.polyline([[here.lat, here.lon], [held.lat, held.lon]],
-                 { color: '#f5a524', weight: 3, opacity: .8 }).addTo(mapLayer);
+    // The held order's run: the car, its pickups not yet visited, its end
+    // (MV.heldRun) — straight segments, as every line on this map is.
+    var heldAt = j.heldPicks.map(function (p) { return p.at; });
+    var run = MV.heldRun ? MV.heldRun(here, heldAt, held)
+      : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []);
+    if (run.length && (held || heldAt.some(Boolean))) {
+      L.polyline(run, { color: '#f5a524', weight: 3, opacity: .8,
+                        className: 'mv-held-run' }).addTo(mapLayer);
     }
     if (here && pick) {
       L.polyline([[here.lat, here.lon], [pick.lat, pick.lon]],
@@ -4802,7 +4878,7 @@
       drewHow = null;
       if (window.console) console.error('drawing how each place was found:', e);
     }
-    showKey(drewHow, !!(held || pick || drop));
+    showKey(drewHow, !!(held || pick || drop), heldAt.some(Boolean));
 
     fitView(bounds);
     // Kept so coming back to this same card can put both of them back — the

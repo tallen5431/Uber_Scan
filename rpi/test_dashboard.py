@@ -3632,6 +3632,65 @@ const framed = (page) => page.waitForFunction(
         await push({ id: 'n-bug', pickup: 'Q'.repeat(121) });
         await page.waitForTimeout(1500);
         r.bug = await note();
+        /* The held order's restaurant, off its Trip Planner: the shape the
+           driver's ⌖ read on shift — a pickup whose town did not read, its
+           name behind the icon's "oe " — on the fake's door at 1985 Cobb
+           Parkway (invented), 3.4 mi from the held card's fix, inside its
+           9.9 mi disc. With a holdId, so a pickup sent as the held end would
+           be a POST to /api/held-end this records. */
+        const heldEndPosts = [];
+        page.on('request', (q) => {
+          if (/\/api\/held-end$/.test(new URL(q.url()).pathname)) heldEndPosts.push(q.postData());
+        });
+        await page.evaluate((SQ) => {
+          window.__es.push({
+            ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+            minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
+            holding: { pay: 9.0, minutes: 18.0, holdId: 'h-planner',
+                       dropoff: 'Shadowood Pkwy SE, Atlanta',
+                       card: Object.assign({}, SQ, { miles: 9.4 }) },
+            offer: Object.assign({ id: 'n-heldpick', pay: 14.25, minutes: 20.0,
+                                   billedMinutes: 20.0, cost: 1.4,
+                                   pickup: "McDonald's (Marietta Sq)",
+                                   dropoff: 'Church St, Marietta' }, SQ) });
+          window.__es.push({ planner: { stops: [
+            { kind: 'pickup', orders: 1, name: 'oe Fable Crust Pizza', expectedBy: 1189,
+              street: '1985 Cobb Parkway', city: null, state: null, zip: null,
+              line: '1985 Cobb Parkway' }], unfiled: 'dropoffs', asked: true, ms: null,
+            at: 41 } });
+        }, SQ);
+        await page.waitForTimeout(2500);
+        r.heldPick = await page.evaluate(() => {
+          const m = (window.__marks || []).filter(
+            (k) => String(k.popup || '').indexOf('pick up the order in your car') >= 0);
+          const run = (window.__lines || []).filter(
+            (l) => /mv-held-run/.test(String((l.opts || {}).className || '')));
+          const k = document.getElementById('mapKey');
+          return { pins: m.map((x) => ({ ll: x.ll, popup: x.popup,
+                                         ring: (x.opts || {}).fillOpacity < 1,
+                                         fill: (x.opts || {}).fillColor })),
+                   run: run.map((l) => l.pts),
+                   key: k.hidden ? null : k.innerText.replace(/\s+/g, ' ').trim() };
+        });
+        r.heldPickSeen = relayAsked.filter((u) => /street=1985/.test(u));
+        r.heldPickPosts = heldEndPosts;
+        // ...and the next card, the same order still held: the restaurant
+        // is where that order is collected from whatever card is up.
+        await page.evaluate((SQ) => {
+          window.__es.push({
+            ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+            minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
+            holding: { pay: 9.0, minutes: 18.0, holdId: 'h-planner',
+                       dropoff: 'Shadowood Pkwy SE, Atlanta',
+                       card: Object.assign({}, SQ, { miles: 9.4 }) },
+            offer: Object.assign({ id: 'n-heldpick-2', pay: 14.25, minutes: 20.0,
+                                   billedMinutes: 20.0, cost: 1.4,
+                                   pickup: "McDonald's (Marietta Sq)",
+                                   dropoff: 'Church St, Marietta' }, SQ) });
+        }, SQ);
+        await page.waitForTimeout(2000);
+        r.heldPickNext = await page.evaluate(() => (window.__marks || []).filter(
+          (k) => String(k.popup || '').indexOf('pick up the order in your car') >= 0).length);
         // The NucBox answering the pickup and then going quiet: "Slow Place"
         // answers past NUCBOX_TIMEOUT_MS, so the dropoff and the held end are
         // the public map's, and the pickup's pin is still the NucBox's. What
@@ -4446,7 +4505,7 @@ const framed = (page) => page.waitForFunction(
     const stop = (kind, orders, name, by, line) => ({ kind: kind, orders: orders,
       name: name, expectedBy: by, street: null, city: null, state: null, zip: null,
       line: line });
-    const FOUR = [stop('pickup', 1, 'Burger Barn', 712, '310 Mill St, Roswell'),
+    const FOUR = [stop('pickup', 1, 'oe Burger Barn', 712, '310 Mill St, Roswell'),
                   stop('pickup', 2, 'Taco Hut', 725, null),
                   stop('dropoff', 1, 'Lee M.', 751, '77 Birch Ln NW, Roswell, GA 30075'),
                   stop('dropoff', 1, 'Sam R.', 768, null)];
@@ -6673,6 +6732,28 @@ try:
         'NucBox down (%r)' % both.get('bug'),
         re.match(r'^no pin for Q+… — a bug: the rig refused the question$',
                  both.get('bug') or ''))
+    # The held order's restaurant off its Trip Planner (the driver's report:
+    # the planner was read and the map never put the restaurant with the order).
+    _hp = both.get('heldPick') or {}
+    _pins = _hp.get('pins') or []
+    ok_('the held order\'s planner pickup is pinned at its door, searched by the NucBox '
+        'as a door with no town, a green ring named without the icon\'s "oe " (%r, %r)'
+        % (_pins, both.get('heldPickSeen')),
+        len(_pins) == 1
+        and abs(_pins[0]['ll'][0] - 34.0010) < 0.001 and abs(_pins[0]['ll'][1] + 84.5560) < 0.001
+        and _pins[0]['ring'] and _pins[0]['fill'] == '#17c964'
+        and 'Fable Crust Pizza · 1985 Cobb Parkway<' in (_pins[0]['popup'] + '<')
+        and 'oe Fable' not in _pins[0]['popup']
+        and any(re.match(r'^/api/nbx/search\?street=1985(%20|\+)Cobb(%20|\+)Parkway&', u)
+                for u in both.get('heldPickSeen') or []))
+    _run = (_hp.get('run') or [[]])[0]
+    ok_('...and the held order\'s run is drawn car -> its pickup -> its end (%r)' % _run,
+        len(_hp.get('run') or []) == 1 and len(_run) == 3
+        and _run[0] == [33.9526, -84.5499] and _run[1] == _pins[0]['ll'] if _pins else False)
+    eq('...and the key names it', 'held pickup' in (_hp.get('key') or ''), True)
+    eq('...and the pickup is never sent as the held order\'s end', both.get('heldPickPosts'), [])
+    eq('...and it stays on the map under the next card while the order is held',
+       both.get('heldPickNext'), 1)
     # The street index, relayed to the NucBox's own server.js. A held end
     # the index does not hold (Shadowood Parkway) is asked of the search as
     # before, so the first card's line is the one `both` drew.
@@ -7438,6 +7519,9 @@ try:
         '▸ Pickup ×2 by 12:05 · Taco Hut',
         '▸ Dropoff by 12:31 · Lee M. · 77 Birch Ln NW, Roswell, GA 30075',
         '▸ Dropoff by 12:48 · Sam R.'])
+    eq('a stop read as "oe Burger Barn" — the stop\'s icon as letters — is shown '
+       'without the "oe "', ((pl.get('four') or {}).get('lines') or [''])[0],
+       '▸ Pickup by 11:52 · Burger Barn · 310 Mill St, Roswell')
     # The scanner refuses to guess which of two dropoffs is the order in the
     # car's, and the panel says so rather than leaving the driver to work out
     # why the button is still amber — under the stops, and in full on the
