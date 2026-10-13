@@ -1393,10 +1393,18 @@ if TC.available():
     _at = {'pay': 7.0, 'minutes': None, 'miles': 8.6, 'deliverBy': 975}
     eq('"$7 Guaranteed" is a payout as printed',
        PL.rescue_refused(_boxd, _at, '$7 Guaranteed (incl. tip)\nEst. delivery 4:15 PM'), None)
-    eq('...and "$14. 48" is not',
+    eq('...and "$14." is not',
        PL.rescue_refused(_boxd, dict(_at, pay=14.0),
-                         '$14. 48\nIncludes expected tip\nEst. delivery 4:15 PM'),
+                         '$14.\nIncludes expected tip\nEst. delivery 4:15 PM'),
        'its payout is not printed the way a card prints one')
+    # "$14. 48" was the other shape this clause was written for. find_pay now
+    # joins it (OP.PAY_CENTS_SPLIT), so it reads $14.48 to the cent and the
+    # found card's read is the right figure, not one to refuse.
+    eq('..."$14. 48" reads as the $14.48 it is, and is rescued',
+       (OP2.parse('$14. 48\nIncludes expected tip\nEst. delivery 4:15 PM')['pay'],
+        PL.rescue_refused(_boxd, dict(_at, pay=14.48),
+                          '$14. 48\nIncludes expected tip\nEst. delivery 4:15 PM')),
+       (14.48, None))
 
     # A left-hand shadow on the cards the finder cannot see the edge of ends
     # with no payout; on the one it can, with the card's own. Never another.

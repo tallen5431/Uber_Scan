@@ -216,6 +216,17 @@
     '\\$\\s*(' + DC + '{1,3})\\s+(' + DC + '{1,2}[.,]' + DC + '{2})'
     + '\\s*(?=guarant|includ)', 'gi');
 
+  /* ...and the other place the reader cuts it: between the dollars and the
+     cents. "$12 6 8" for $12.68 and "$12. 78" for $12.78, both read as $12.00
+     on the 12 Oct shift. Two real digits, the second optionally a space away,
+     and nothing after them that makes them a number of their own: no decimal
+     point, no third digit even a space away ("$1 1 1 5" is $11.15 cut three
+     times), and no unit ("$12 68 min" is a payout beside a duration). The
+     Python twin, PAY_CENTS_SPLIT, has the measurements. */
+  var PAY_CENTS_SPLIT = new RegExp(
+    '\\$\\s*(' + DC + '{1,3})[.,]?\\s+(\\d)\\s?(\\d)(?![.,])(?!\\s?\\d)'
+    + '(?!\\s*m(?:i|[il1|]n))', 'gi');
+
   /* A number that is a duration or a distance, wearing a dollar sign.
    *
    * The rig photographs whatever is on the phone, and between jobs that is the
@@ -302,6 +313,14 @@
     // standing of its own.
     var joined = collectPair(text, PAY_SPLIT);
     all = all.concat(joined);
+    // ...and the cents cut off by a space. See PAY_CENTS_SPLIT.
+    var m2;
+    PAY_CENTS_SPLIT.lastIndex = 0;
+    while ((m2 = PAY_CENTS_SPLIT.exec(text)) !== null) {
+      all.push({ value: m2[1] + '.' + m2[2] + m2[3], index: m2.index, match: m2[0],
+                 halves: [m2[1], m2[2] + m2[3]] });
+      if (m2.index === PAY_CENTS_SPLIT.lastIndex) PAY_CENTS_SPLIT.lastIndex++;
+    }
     if (!all.length) return null;
 
     // Cards can show a promo or a struck-through figure alongside the real
@@ -645,6 +664,18 @@
     + NOT_THE_CHARGER + '\\s*\\)?)?',
     'gi'
   );
+
+  /* DoorDash's newer card: "3 stops (7.8 mi) · 30 min". LEG refuses a bracket
+     as glue, so it matched "30 min" alone and the bracketed distance was an
+     orphan - `shortATime`, never whole, on all 21 DoorDash offers of the
+     12 Oct shift. The bracket is allowed only where it closes on the card's
+     own word for the stops. Asked of the text just before a minutes token LEG
+     found, hence the `$`. The Python twin, STOPS_LEAD, has the measurements. */
+  var STOPS_LEAD = new RegExp(
+    '[A-Za-z_]{0,3}ps\\s*\\(\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)'
+    + '\\s*m(?:i|ile|iles)\\b\\s*\\)\\s*[^\\s\\w()]{1,3}\\s*$', 'i');
+  // ...and how many stops the card says, as printed. Shown, never priced.
+  var STOPS_COUNT = /(?:^|[^\d])(\d{1,2})\s*stops?\s*\(/i;
 
   /* An hour unit sitting immediately in front of a leg whose hours group
      matched NOTHING: `Thr 21min`. See findLegs, which refuses such a leg.
@@ -1768,6 +1799,68 @@
 
   /* Where it STARTS - for showing rather than judging, because the driver does
    * not take a second order whose pickup is far away in the first place. */
+  /* The stores on DoorDash's stops card, one block each under the stops line:
+     an icon and the store, then its street cut off by the card ("..."), and
+     "Customer dropoff" or "Multiple dropoffs (2 stops)" after the last. A line
+     is a street when it starts with a house number, ends where the card cut
+     it, or carries a street word beside a comma. A name is only kept once the
+     street under it has been seen. The Python twin, find_stores, has the
+     shift this was read off. */
+  var STORE_STREET = new RegExp(
+    '^\\W{0,4}\\d{1,6}\\s+[A-Za-z].*(?:' + PLACE_STREET.source + '|,|\\.\\.)'
+    + '|(?:\\.{2,}|…)\\s*$|,.*' + PLACE_STREET.source + '|'
+    + PLACE_STREET.source + '.*,', 'i');
+  var STORE_END = /custom[ea]r\s*drop|multiple\s*drop|\baccept\b|\bdecline\b/i;
+  var STORE_CHIP = /\b(?:pick\s*up|drop\s*off)\s*\d|\bid\s*check\b|\bage\s*21/i;
+  var STORES_LINE = new RegExp(
+    'ps\\s*\\(\\s*' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?\\s*m(?:i|iles?)\\b\\s*\\)', 'i');
+
+  function storeName(line) {
+    var words = line.split(/\s+/).filter(function (w) { return w.length; });
+    var cut = null, i;
+    for (i = 0; i < Math.min(4, words.length); i++) {
+      if (/^[A-Z]\S*[A-Za-z]/.test(words[i])) { cut = i; break; }
+    }
+    if (cut === null) {
+      cut = 0;
+      for (i = 0; i < Math.min(3, words.length); i++) {
+        var w = words[i];
+        if (!/[A-Za-z]/.test(w) || w.length === 1
+            || (w.length <= 3 && /[^\w'’]/.test(w))) cut = i + 1;
+      }
+    }
+    words = words.slice(cut);
+    while (words.length && !/[A-Za-z0-9]/.test(words[words.length - 1])) words.pop();
+    var name = words.join(' ');
+    return /[A-Za-z]{2}/.test(name) ? name : '';
+  }
+
+  function findStores(rawText) {
+    var lines = String(rawText || '').split('\n'), at = -1, i;
+    for (i = 0; i < lines.length; i++) {
+      if (STORES_LINE.test(lines[i])) { at = i; break; }
+    }
+    if (at < 0) return [];
+    var out = [], pending = [];
+    for (i = at + 1; i < lines.length; i++) {
+      var line = lines[i];
+      if (STORE_END.test(line)) break;
+      if (STORE_CHIP.test(line)) continue;
+      if (STORE_STREET.test(line)) {
+        if (pending.length) out.push(pending.join(' ').slice(0, MAX_PLACE));
+        pending = [];
+        continue;
+      }
+      var name = storeName(line);
+      if (!name) continue;
+      // A name the card wrapped onto a second line starts with a letter and
+      // no icon.
+      if (pending.length === 1 && name === line.trim()) pending.push(name);
+      else pending = [name];
+    }
+    return out.slice(0, MAX_PLACES);
+  }
+
   function findPickup(places, ends) {
     /* The card's layout narrows both scans and replaces neither. Where it said
        nothing - every card that is not the two-leg shape, which is most of
@@ -2020,6 +2113,18 @@
           || (m.index > 0 && '0123456789.,'.indexOf(text.charAt(m.index - 1)) >= 0))) {
         lead = null;
       }
+      var start = m.index;
+      // DoorDash's "3 stops (7.8 mi) · 30 min": the bracketed distance before
+      // the time. See STOPS_LEAD. The leg starts at the bracket, so the
+      // distance sits inside it and is not also an orphan.
+      if (m[1] === undefined || m[1] === null) {
+        var before = text.slice(Math.max(0, m.index - 40), m.index);
+        var s = STOPS_LEAD.exec(before);
+        if (s && /\d/.test(s[1])) {
+          lead = s[1];
+          start = text.lastIndexOf('(', m.index - before.length + s.index + s[0].indexOf(s[1]));
+        }
+      }
       // The bracketed one wins when a card prints both: the bracket is the card
       // saying which time this distance belongs to.
       var side = (m[4] === undefined || m[4] === null) ? lead : m[4];
@@ -2045,6 +2150,18 @@
       // reports 43 minutes.
       var fixed = recoverDecimal(minutes, miles, hadDecimal);
       miles = fixed.miles;
+      // A bracketed distance with a leading zero and no point is a point the
+      // reader lost: no card prints "(09 mi)", and "( 09 mi)" for "(+ 0.9 mi)"
+      // is 49 mph over 11 minutes, which recoverDecimal lets stand. The leg is
+      // left without its distance - `lostMiles` makes it uncertain and not
+      // whole, and another frame supplies the real one. Only inside a bracket
+      // the reader saw: "027 mi)" is the bracket itself read as a 0. See the
+      // Python port for the measurements.
+      if (!fixed.corrected && miles !== null && m[4] !== undefined && m[4] !== null
+          && /\($/.test(text.slice(0, m.index + m[0].indexOf(m[4], m[0].indexOf('(') + 1)).replace(/\s+$/, ''))
+          && /^[0Oo]\d/.test(side) && !hadDecimal) {
+        miles = null;
+      }
 
       // Uber labels a combined figure "total"; a card that has one is not also
       // listing its legs, so mixing the two would double count the trip.
@@ -2081,7 +2198,7 @@
         milesAfter: m[4] !== undefined && m[4] !== null,
         // Where this leg sat in the text, so the address printed after it can
         // be found without searching the whole card again.
-        start: m.index, end: m.index + m[0].length
+        start: start, end: m.index + m[0].length
       });
 
       if (m.index === LEG.lastIndex) LEG.lastIndex++;
@@ -2636,6 +2753,8 @@
     var itemMatch = mine.match(ITEMS);
     var items = itemMatch ? toNumber(itemMatch[1]) : null;
     if (items !== null && (items < 0 || items > 200)) items = null;
+    var stopsMatch = STOPS_COUNT.exec(mine);
+    var stops = stopsMatch ? parseInt(stopsMatch[1], 10) : null;
 
 
     // A delivery card states no duration and puts its distance on its own, so
@@ -2727,6 +2846,14 @@
        pass's record of where they sat. Asked before the two ends, because it
        is what decides them when the card stated it. */
     var ends = placeEndsOf(legs, places, whose);
+    /* DoorDash's stops card names its stores itself, and they are all the
+       pickup end: "Multiple dropoffs" prints no customer, so without the ends
+       the second store would be offered as the destination. See findStores. */
+    var stores = findStores(rawText);
+    if (stores.length) {
+      places = stores;
+      ends = stores.map(function () { return 0; });
+    }
     var pickup = findPickup(places, ends);
     var dropoff = findDropoff(places, text, ends);
     /* The card can name its approach leg in words or by where it printed the
@@ -2810,6 +2937,9 @@
       toPickupMinutes: approach ? approach.minutes : null,
       toPickupMiles: approach ? approach.miles : null,
       items: items,
+      // DoorDash's "3 stops (7.8 mi)", as printed. Shown, never priced, and
+      // not `legs`: the card times the whole job in one figure.
+      stops: stops,
       legs: used.length,
       milesCorrected: dist.corrected,
       milesUncertain: dist.uncertain,

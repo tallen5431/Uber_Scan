@@ -1849,6 +1849,44 @@
     "deliverBy": 975,
     "complete": true
    }
+  },
+  {
+   "name": "DoorDash's stops card: pay, miles and minutes read, one leg, the first store the pickup",
+   "_why": "The newer DoorDash card brackets its distance after the stop count and prints the time after the bullet: `3 stops (7.8 mi) · 30 min`. LEG refused the bracket as glue, so it read `30 min` alone and the `(7.8 mi)` was a distance no leg claimed: `shortATime`, never whole, on all 21 DoorDash offers of the 12 Oct shift. The shape here is that shift's 16:03 card, with made-up stores and streets: Decline over a map label at the top, the bullet read as `«`, one block per store (icon, name, street cut off), the drop-off chip and the countdown on the Accept button.",
+   "text": "Decline\n\\ ¥ ] Kestrel Heights\n$7.75\n3 stops (7.8 mi) « 30 min\n@ Corner Bagel Co\n123 Maple Grove Road, Smallt...\n& Pine Noodle House\n45 Birch Street Northwest, Sm...\n& Customer dropoff\nDrop off 2 orders\nAccept 0:08",
+   "expect": {
+    "pay": 7.75,
+    "miles": 7.8,
+    "minutes": 30.0,
+    "complete": true,
+    "shortATime": false,
+    "milesUncertain": false,
+    "legs": 1,
+    "stops": 3,
+    "pickup": "Corner Bagel Co",
+    "dropoff": null
+   }
+  },
+  {
+   "name": "a headline whose cents the reader split off with spaces is the whole figure",
+   "_why": "`$12.68` came back as `$12 6 8` on the 12 Oct shift and was read as $12.00; `$12.78` came back as `$12. 78` the same way. A dollar figure followed by a space and exactly two digits, nothing numeric or a unit after them, is one figure. Card around it made up.",
+   "text": "x\n$12 6 8\nIncludes expected tip\n46 min (17.8 mi) total\nCorner Bagel Co (Maple Grove)\nOak St & Elm Ave, Smalltown",
+   "expect": {
+    "pay": 12.68,
+    "minutes": 46.0,
+    "miles": 17.8
+   }
+  },
+  {
+   "name": "a bracketed distance with a leading zero lost its point, and is doubted rather than charged",
+   "_why": "`(+ 0.9 mi)` read once as `( 09 mi)` on the 12 Oct shift. Nine miles in eleven minutes is 49 mph, under MAX_MPH, so recover_decimal let it stand and the offer was journalled at 9.0 miles, unflagged. No card prints `(09 mi)`: the leg is left without its distance, uncertain and not whole, for another frame to supply. Card around it made up.",
+   "text": "+ $4.70\nGuaranteed (incl. tip)\n© +11min( 09 mi) total\nCorner Bagel Co (Smalltown)\nOak St & Elm Ave,\nSmalltown",
+   "expect": {
+    "pay": 4.7,
+    "minutes": 11.0,
+    "miles": null,
+    "milesUncertain": true
+   }
   }
  ],
  "rate": [
@@ -3763,6 +3801,12 @@
   {
    "name": "...and so is one from a merchant whose name begins with From",
    "text": "Early look • Order in progress\nDelivery\n$14.48\nIncludes expected tip\nEst. delivery 4:15 PM • 8.6 mi\nFrom The Earth Brewing (1570\nHolcomb Bridge Rd)\nFoothill Trl & Northwoods Dr,\nMarietta\nMatching may take longer\nMatch",
+   "expect": true
+  },
+  {
+   "name": "DoorDash's stops card is finished when its one summary line reads",
+   "_why": "The card times the whole job in one line, `3 stops (7.8 mi) · 30 min`, and there is no second leg coming. All 21 DoorDash offers of the 12 Oct shift journalled whole=0 because the bracketed distance was left outside the leg.",
+   "text": "$5.00 incl. tips\n2 stops (4.1 mi) - 25 min\n& Corner Bagel Co\n305 Maple Grove Road North...\n& Customer dropoff\nAccept 0:08",
    "expect": true
   }
  ]
