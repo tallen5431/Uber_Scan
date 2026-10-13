@@ -1056,6 +1056,49 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+    # ...and back under its OWN id. The scanner now gives a card paged away
+    # from and back to the id it had (rpi/journal.py, RECENT_CARDS), so the held
+    # card arrives after another one as the held order's id, not as the same
+    # slot. That is the order in the car by the journal's own word, past the
+    # window or not; the offer line tested `!==` and paired it with itself.
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    fake = os.path.join(work, 'heldownid.py')
+    with open(fake, 'w') as fh:
+        fh.write(_HELD_FAKE.split('say("h-1", 10.00)\n')[0]
+                 + 'say("h-1", 10.00)\n'
+                 'time.sleep(2.5)\n'
+                 'say("n-9", 12.00, dropoff="Pine Rd & Birch Ln, Testville")\n'
+                 'time.sleep(1.5)\n'
+                 'say("h-1", 10.00)\n'
+                 'time.sleep(600)\n')
+    open(journal, 'w').close()
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake, 'HOLD_GRACE_MS': '600000',
+                        'HELD_CARD_MS': '500'}, journal)
+    try:
+        for _ in range(160):
+            if (get(base, '/api/status').get('offer') or {}).get('id') == 'h-1':
+                break
+            time.sleep(0.05)
+        post(base, '/api/offers/mark', {'id': 'h-1', 'accepted': True})
+        # Until the card in between has been paired and the held one is back.
+        for _ in range(160):
+            if any(r.get('kind') == 'pair' for r in lines(journal)) \
+                    and (get(base, '/api/status').get('offer') or {}).get('id') == 'h-1':
+                break
+            time.sleep(0.05)
+        time.sleep(0.5)
+        _s = get(base, '/api/status')
+        ok_('[held again] its own card back under its own id after another card is '
+            'the order in the car, past the window too',
+            ((_s.get('offer') or {}).get('heldCard') or '').startswith('h-1@'))
+        eq('[held again] ...and is not paired with itself',
+           [r['id'] for r in lines(journal) if r.get('kind') == 'pair'], ['n-9'])
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
 # --- a card read twice, where only one reading saw the map --------------------
 #
 # The winner of the pay/minutes/miles vote is taken whole, and an address is not

@@ -116,6 +116,23 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 # offer records it a second time under a new id.
 RESUME_WINDOW_MS = 90 * 1000
 
+# How many cards back one may come from and still keep its id. See
+# OfferLog._returning.
+#
+# The driver pages through offers, and a card he paged away from comes back:
+# on the 12 Oct shift 9 cards were each filed under two ids, and in 8 of them
+# another offer had been on screen in between. OfferLog only ever remembered
+# the card in front of it, so the card that came back was a stranger and got a
+# new id — one offer counted twice in every median on the offers page.
+#
+# The window above is what bounds this; the number only bounds the memory.
+# Replayed through consider() over every offer on file that carries its
+# fingerprint (5,199 ids, 27 Aug to 12 Oct), the old rule reproduces every id
+# and this one re-adopts 288 of them: remembering 4 cards catches 282, 8
+# catches 288, and 16 catches nothing 8 does not. The most cards between a card
+# and its return was 8, on 25 Sep, 77 seconds apart.
+RECENT_CARDS = 8
+
 # Bounds for a row that looks like a real ride rather than a fare summary or a
 # receipt left on the screen. Deliberately tighter than parse()'s own limits,
 # which are set to keep noise out of a spoken verdict, not to keep junk out of a
@@ -661,6 +678,14 @@ class OfferLog:
         # deliberately not restored by resume(): a scanner that comes back
         # mid-prompt writes it once more.
         self.promo_said = None
+        # The cards this process has left in the last RESUME_WINDOW_MS, newest
+        # last, so one the driver pages back to keeps the id it had. See
+        # _returning. Not restored by resume(): a restart forgets them, and the
+        # cost is what it was before this existed, one card under two ids.
+        self.recent = []
+        # (minutes, miles) of the last believable reading of the card on
+        # screen — what the card leaves on that list beside its payout.
+        self.figures = None
 
     def resume(self, now=None):
         """Adopt the last row if it is recent enough to be the card on screen.
@@ -708,6 +733,11 @@ class OfferLog:
         # come back to; leaving the anchor empty lets the first believable
         # reading after the restart adopt this id rather than start a new one.
         self.pay = None if row.get('suspect') else row.get('pay')
+        # ...and the figures it would be recognised by if the driver pages
+        # away from it and back, off the same stored fingerprint. See
+        # _returning. None with the payout, for the same reason.
+        self.figures = (tuple(stored[1:3]) if self.pay is not None
+                        and len(stored) >= 3 else None)
         # The episode is left as None so the next reading of this same card is
         # matched on content, not on a counter that restarted at zero with the
         # process.
@@ -783,7 +813,10 @@ class OfferLog:
             # whole file exists to prevent, arriving from the other direction.
             # The accumulator is the only thing in the rig that looks at the
             # legs, so it is the only thing that can tell a replacement card
-            # from a re-read; it says so in `newCard` and this believes it.
+            # from a re-read; it says so in `newCard` and this believes it —
+            # about the card it was comparing against. A reading identical in
+            # every figure to a card on the recent list is that card back,
+            # which is _returning's question and not this one.
             seen_at = self.last_at if self.last_at is not None else self.first_at
             same_pay = (impossible or self.pay is None
                         or parsed.get('pay') == self.pay)
@@ -793,14 +826,36 @@ class OfferLog:
                                and at - seen_at <= RESUME_WINDOW_MS)
             self.episode = episode
             if not same_card_again:
-                self.id = '%d-%s' % (at, _cents(parsed.get('pay')))
-                self.seq = 0
-                self.first_at = at
+                # Leaving this card, so it goes on the list before anything
+                # is looked up — the card just left is a card that can return.
+                # On 12 Oct one did: a $4.95 card filed under a second id 13.6
+                # seconds after its first, nothing between, every figure the
+                # same.
+                self._remember()
+                back = None if impossible else self._returning(parsed, at)
+                if back is not None:
+                    # Its id, and its seq carried on rather than restarted:
+                    # the sync keys an offer row on the pair, so a second seq 1
+                    # under one id is a row the copy at home throws away.
+                    self.id = back['id']
+                    self.seq = back['seq']
+                    self.first_at = back['firstAt']
+                    self.places = list(back['places'])
+                else:
+                    self.id = '%d-%s' % (at, _cents(parsed.get('pay')))
+                    self.seq = 0
+                    self.first_at = at
+                    # A different card is a different place. Reset with the
+                    # rest of the identity, or the next offer inherits this
+                    # one's address.
+                    self.places = []
+                # Emptied on a returning card too, so its first reading back is
+                # written: that row is the record that the card was on screen
+                # again, and a row landing is what points the screen slate back
+                # at it after another card had it (see _owe_screen).
                 self.content = None
                 self.pay = None
-                # A different card is a different place. Reset with the rest of
-                # the identity, or the next offer inherits this one's address.
-                self.places = []
+                self.figures = None
 
         self.last_at = at
         # Before anything decides whether to write. A reading that finally saw
@@ -819,6 +874,7 @@ class OfferLog:
         content = content_of(parsed, self.places)
         if not impossible and parsed.get('pay') is not None:
             self.pay = parsed.get('pay')
+            self.figures = (parsed.get('minutes'), parsed.get('miles'))
         if content == self.content:
             # Nothing new about the reading — but possibly something new about
             # how much to believe it.
@@ -865,6 +921,69 @@ class OfferLog:
             self.screen_wanted = self._owe_screen(at)
             self.landed_id = self.id
             return row
+        return None
+
+    def _remember(self):
+        """Put the card on screen on the recent list. A card with no believable
+        reading has no figures to be recognised by, and is not remembered.
+
+        Never two entries for one id: a card comes off the list when
+        _returning hands it back, so the entry here is the only one, with the
+        seq it has now."""
+        if self.figures is None:
+            return
+        self.recent.append({'id': self.id, 'seq': self.seq,
+                            'firstAt': self.first_at, 'at': self.last_at,
+                            'pay': self.pay, 'figures': self.figures,
+                            'places': list(self.places)})
+        del self.recent[:-RECENT_CARDS]
+
+    def _returning(self, parsed, at):
+        """The recent card this reading is, come back, or None — and off the
+        list if found, since it is the card on screen again.
+
+        Identical, not similar: the same payout to the cent, the same minutes
+        and the same miles as that card's last believable reading, and the same
+        places wherever both name any. Nothing looser is safe here, because
+        everything looser is a rule this file has already refused. The payout
+        alone is the guess consider() calls rare-but-real for two different
+        cards, and a payout a few cents apart is not a misreading: Uber
+        re-offers a trip a few cents different. On 12 Oct a $25.09 card had a
+        $25.08 one between its two visits, the same trip offered at two prices.
+        Two offers, and filed as two.
+
+        That $25.09 card is also the one of the shift's 9 this leaves under two
+        ids. Its address came back read differently enough that OP.same_place,
+        the rule the union across frames already trusts, scores the two
+        readings 0.875 against its 0.90 line. A merge missed costs a row
+        counted twice, which is where every one of the 9 was before; a merge
+        made wrongly would file one card's readings under another's verdict.
+
+        A reading with no distance is never matched: a payout and nothing else
+        is the guess again. A card whose minutes the card itself never stated
+        (the deadline card) compares as stated — no minutes on either side —
+        because its deadline moves with the clock: the $10.18 card read 7:12
+        then 7:13 PM thirty-five seconds apart.
+
+        Inside RESUME_WINDOW_MS of when that card was last seen, both ways, for
+        the reason resume() gives: a Pi's clock steps, and a card from the
+        far side of a step is not the card on screen.
+        """
+        miles = parsed.get('miles')
+        if miles is None:
+            return None
+        figures = (parsed.get('minutes'), miles)
+        cents = _cents(parsed.get('pay'))
+        for card in reversed(self.recent):
+            age = at - card['at']
+            if age > RESUME_WINDOW_MS or age < -RESUME_WINDOW_MS:
+                continue
+            if _cents(card['pay']) != cents or card['figures'] != figures:
+                continue
+            if not _places_agree(parsed.get('places') or [], card['places']):
+                continue
+            self.recent.remove(card)
+            return card
         return None
 
     def _owe_screen(self, at):
@@ -1469,6 +1588,23 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
 
 def _within(value, bounds):
     return isinstance(value, (int, float)) and bounds[0] <= value <= bounds[1]
+
+
+def _places_agree(read, kept):
+    """Whether two lists of places could be one card's, where both have any.
+
+    One list must be the other read again, each of its entries the same place
+    (OP.same_place, the rule the union across frames already uses) as one of
+    the other's. Either way round, because a frame that missed an address is
+    not evidence there was none — so a card read with its shop alone agrees
+    with the same card read with its shop and its dropoff, and two cards from
+    one shop going to two different doors do not. A side that named nothing
+    is covered by anything, which is "where both have any" without a branch
+    of its own.
+    """
+    def covered(xs, ys):
+        return all(any(OP.same_place(x, y) for y in ys) for x in xs)
+    return covered(read, kept) or covered(kept, read)
 
 
 def _cents(pay):

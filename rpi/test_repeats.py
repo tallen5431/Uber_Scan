@@ -184,6 +184,168 @@ ok_('...and the partial reading is marked as partial', rows[0]['whole'] is False
 ok_('...while the finished one is not', rows[-1]['whole'] is True)
 
 # =====================================================================
+# A card the driver pages back to.
+#
+# The driver pages through offers and a card he paged away from comes back.
+# The log only remembered the card in front of it, so the one that came back
+# was a stranger and got a second id: 9 cards on the 12 Oct shift, 8 of them
+# with another offer on screen in between. Every card below is made up.
+# =====================================================================
+
+OTHER = '$8.75 4 min (0.9 mi) away 16 min (5.2 mi) trip'
+THIRD = '$13.40 6 min (2.2 mi) away 21 min (9.0 mi) trip'
+
+rows = feed(fresh('paged-back.jsonl'), [GOOD, OTHER, GOOD])
+eq('a card paged back to is written again, the record it was on screen again',
+   len(rows), 3)
+eq('...under the id it had', rows[-1]['id'], rows[0]['id'])
+eq('...so one card and the one between are two offers, not three',
+   len({r['id'] for r in rows}), 2)
+eq('...its seq carried on, so the sync keeps the row (it keys on the pair)',
+   [r['seq'] for r in rows if r['id'] == rows[0]['id']], [1, 2])
+eq('...its first-seen time still the first visit\'s',
+   rows[-1]['firstAt'], rows[0]['firstAt'])
+
+rows = feed(fresh('paged-back-two.jsonl'), [GOOD, OTHER, THIRD, GOOD])
+eq('two cards between and it is still the same offer',
+   len({r['id'] for r in rows}), 3)
+
+# The window is the same ninety seconds a restart is given. GOOD last seen at
+# 0, back at 100.
+rows = feed(fresh('paged-back-late.jsonl'), [GOOD, OTHER, GOOD], step=50.0)
+eq('a card back after the window is a new offer',
+   len({r['id'] for r in rows}), 3)
+
+# Uber re-offers a trip a few cents different. That is a different offer, and
+# the card it interrupted coming back is still the first one.
+RE_OFFER = '$10.29 12 min (5.1 mi) away 19 min (10.0 mi) trip'
+rows = feed(fresh('re-offer.jsonl'), [GOOD, RE_OFFER, GOOD])
+ids = [r['id'] for r in rows]
+ok_('a re-offer a cent different is a different offer',
+    len(ids) == 3 and ids[1] != ids[0])
+eq('...and the card it interrupted, back, is the first one', ids[-1], ids[0])
+rows = feed(fresh('re-offer-after.jsonl'), [GOOD, OTHER, RE_OFFER])
+eq('...nor is a re-offer taken for the card come back',
+   len({r['id'] for r in rows}), 3)
+
+# The same payout on a different trip is not the card come back either.
+SAME_PAY_OTHER_TRIP = '$10.30 3 min (0.7 mi) away 11 min (3.1 mi) trip'
+rows = feed(fresh('same-pay-back.jsonl'), [GOOD, OTHER, SAME_PAY_OTHER_TRIP])
+eq('a different trip paying the same is not taken for the card come back',
+   len({r['id'] for r in rows}), 3)
+
+
+def offer(log, episode, pay, minutes, miles, at, places=None, **more):
+    """One reading straight into consider(), for what the parser cannot be
+    made to produce on demand: places, a deadline, the accumulator's flag."""
+    parsed = dict({'pay': pay, 'minutes': minutes, 'miles': miles,
+                   'places': places or [], 'episode': episode}, **more)
+    return log.consider(parsed, {}, now=at)
+
+
+T0 = 1_700_000_000.0
+SHOP = 'Maple Diner (12 Elm St)'
+DOOR = 'Birch Ln NW & Oak Ct, Springfield'
+OTHER_DOOR = 'Juniper Way & Cedar Dr, Shelbyville'
+
+log = fresh('places-missed.jsonl')
+offer(log, 1, 9.40, 26, 7.5, T0, [SHOP])
+offer(log, 2, 8.75, 20, 6.1, T0 + 10)
+offer(log, 3, 9.40, 26, 7.5, T0 + 20, [SHOP, DOOR])
+eq('an address one visit missed does not split the card',
+   len({r['id'] for r in log.journal.rows()}), 2)
+
+log = fresh('places-none.jsonl')
+offer(log, 1, 9.40, 26, 7.5, T0, [SHOP, DOOR])
+offer(log, 2, 8.75, 20, 6.1, T0 + 10)
+offer(log, 3, 9.40, 26, 7.5, T0 + 20)
+_rows = log.journal.rows()
+eq('a visit that read no address at all does not split the card',
+   len({r['id'] for r in _rows}), 2)
+eq('...and the row it writes keeps the address the first visit read',
+   _rows[-1]['places'], [SHOP, DOOR])
+
+log = fresh('places-differ.jsonl')
+offer(log, 1, 9.40, 26, 7.5, T0, [SHOP, DOOR])
+offer(log, 2, 8.75, 20, 6.1, T0 + 10)
+offer(log, 3, 9.40, 26, 7.5, T0 + 20, [SHOP, OTHER_DOOR])
+eq('the same figures to a different door are a different offer',
+   len({r['id'] for r in log.journal.rows()}), 3)
+
+log = fresh('no-distance.jsonl')
+offer(log, 1, 9.40, 26, None, T0)
+offer(log, 2, 8.75, 20, 6.1, T0 + 10)
+offer(log, 3, 9.40, 26, None, T0 + 20)
+eq('a card with no distance is not matched on its payout alone',
+   len({r['id'] for r in log.journal.rows()}), 3)
+
+# A delivery card states a deadline, not a duration, and the deadline moves
+# with the clock: one card read "by 7:12" and then "by 7:13" half a minute on.
+log = fresh('deadline.jsonl')
+offer(log, 1, 6.15, None, 4.4, T0, deliverBy=19 * 60 + 12)
+offer(log, 2, 8.75, 20, 6.1, T0 + 10)
+offer(log, 3, 6.15, None, 4.4, T0 + 35, deliverBy=19 * 60 + 13)
+eq('a deadline card keeps its id though its deadline moved a minute',
+   len({r['id'] for r in log.journal.rows()}), 2)
+
+# The ninth card of the shift: back with nothing in between, every figure the
+# same, and a new id all the same. Whatever opened the new episode, a reading
+# identical in every figure is the card it was.
+log = fresh('back-at-once.jsonl')
+offer(log, 1, 9.40, 26, 7.5, T0)
+offer(log, 2, 9.40, 26, 7.5, T0 + 14, newCard=True)
+eq('an identical card the accumulator called new is the card it was',
+   len({r['id'] for r in log.journal.rows()}), 1)
+# ...which is not a licence to merge a replacement card: the one the flag
+# exists for has its own legs, so its own figures.
+offer(log, 3, 9.40, 14, 3.8, T0 + 16, newCard=True)
+eq('...while a replacement paying the same is still a second offer',
+   len({r['id'] for r in log.journal.rows()}), 2)
+
+# A Pi's clock steps backwards when NTP corrects it, so "ninety seconds ago"
+# has to be ninety seconds either way.
+log = fresh('clock-step.jsonl')
+offer(log, 1, 9.40, 26, 7.5, T0)
+offer(log, 2, 8.75, 20, 6.1, T0 - 200)
+offer(log, 3, 9.40, 26, 7.5, T0 - 190)
+eq('a card from the far side of a clock step is not the card on screen',
+   len({r['id'] for r in log.journal.rows()}), 3)
+
+# Back twice, read differently in between. The card leaves the list when it is
+# taken back, so the only entry for it is the one with its current seq;
+# leaving the old one there hands a later return a seq already on disk, and
+# the sync keeps the first row of a pair and throws away the second.
+log = fresh('back-twice.jsonl')
+offer(log, 1, 9.40, 26, 7.5, T0)
+offer(log, 2, 8.75, 20, 6.1, T0 + 10)
+offer(log, 3, 9.40, 26, 7.5, T0 + 20)
+offer(log, 3, 9.40, 31, 9.0, T0 + 22)
+offer(log, 4, 8.75, 20, 6.1, T0 + 30)
+offer(log, 5, 9.40, 26, 7.5, T0 + 40)
+_keys = [(r['id'], r['seq']) for r in log.journal.rows()]
+eq('a card back twice never writes a seq it already used',
+   len(set(_keys)), len(_keys))
+
+# What a restart adopts can come back too.
+path = os.path.join(work, 'resume-back.jsonl')
+if os.path.exists(path):
+    os.remove(path)
+offer(JR.OfferLog(JR.Journal(path)), 1, 9.40, 26, 7.5, T0)
+back = JR.OfferLog(JR.Journal(path))
+back.resume(now=T0 + 5)
+offer(back, 1, 8.75, 20, 6.1, T0 + 10)
+offer(back, 2, 9.40, 26, 7.5, T0 + 20)
+eq('a card a restart adopted keeps its id when paged back to',
+   len({r['id'] for r in back.journal.rows()}), 2)
+
+# Bounded: the window decides, the list only has to hold what it covers.
+log = fresh('many.jsonl')
+for i in range(3 * JR.RECENT_CARDS):
+    offer(log, i + 1, 5.00 + i, 20 + i, 3.0 + i, T0 + i)
+ok_('the list of recent cards is bounded',
+    len(log.recent) <= JR.RECENT_CARDS)
+
+# =====================================================================
 # The reading side: which of them the journal page shows.
 # =====================================================================
 

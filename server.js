@@ -417,14 +417,23 @@ function startScanner() {
             read.offer.dropoffScanned = true;
           }
           // ...and whether this is the order already in the car, back on the
-          // phone under a new id (heldOwnCard). Decided once, on arrival, and
-          // carried across re-reads like the mark: the panel shows it as the
-          // order taken, and no pairing row is written for it below.
+          // phone (heldOwnCard). Decided once, on arrival, and carried across
+          // re-reads like the mark: the panel shows it as the order taken, and
+          // no pairing row is written for it below.
+          //
+          // Under its OWN id as well as under a new one. The scanner now keeps
+          // a card's id when the driver pages away and back (rpi/journal.py,
+          // RECENT_CARDS), so the held card returns after another card under
+          // the held order's id — which is that order by the journal's own
+          // word, however long after the Took. This tested `!==` for as long
+          // as a held id could only reappear as the same slot (sameCard), and
+          // with `!==` that return was paired with itself.
           var carriedNow = holding(Date.now());
           if (sameCard && scanner.offer.heldCard) {
             read.offer.heldCard = scanner.offer.heldCard;
-          } else if (!sameCard && carriedNow && read.offer.id !== carriedNow.id
-                     && heldOwnCard(carriedNow, read.offer, Date.now(), false)) {
+          } else if (!sameCard && carriedNow
+                     && (read.offer.id === carriedNow.id
+                         || heldOwnCard(carriedNow, read.offer, Date.now(), false))) {
             read.offer.heldCard = holdIdOf(carriedNow);
           }
           scanner.offer = read.offer;
@@ -452,8 +461,8 @@ function startScanner() {
           // scanner's own resume(), which must never mistake an annotation for
           // the last offer.
           //
-          // Not for the held order's own card come back under a new id: that
-          // is one order measured against itself (heldOwnCard).
+          // Not for the held order's own card come back, under its own id or
+          // a new one: that is one order measured against itself (above).
           if (!sameCard && !scanner.offer.heldCard) {
             recordPairing(scanner.offer, Date.now(), scanner.last);
           }
@@ -1291,10 +1300,14 @@ function holdIdOf(h) {
 /* ---------- the held order's own card, back under a new id -----------------
  *
  * After ✓ Took the same card can come back onto the phone and be logged again
- * under a NEW id: the scanner's OfferLog keeps one card's identity, so a card
- * paged away from and back to — or read again after anything else crossed the
- * mount — is a new offer as far as the journal can tell (see the dupe-id note
- * in the commit that added this). The server then judged it against the held
+ * under a NEW id. The scanner's OfferLog kept one card's identity, so a card
+ * paged away from and back to was a new offer as far as the journal could tell
+ * (see the dupe-id note in the commit that added this). It now remembers the
+ * last few cards and gives one back its id inside ninety seconds
+ * (rpi/journal.py, RECENT_CARDS), which the offer line's own-id test answers;
+ * a return it cannot recognise — after a restart, past the ninety seconds, an
+ * address read differently — still arrives under a new id, and this is for
+ * those. The server then judged it against the held
  * order as a second job: a pair row in the append-only journal and a stack
  * line on the panel, for one order measured against itself. Measured on the
  * 12 Oct shift: 9 cards were logged under two ids each, one of them the card

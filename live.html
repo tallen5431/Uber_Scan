@@ -1674,9 +1674,10 @@
     // — and the one thing this rig must never do is press Accept.
     var what = (typeof onRecord.pay === 'number')
       ? '$' + onRecord.pay.toFixed(2) : 'the last one';
-    // The order in the car, back on the phone under a new id (heldOwnCard in
-    // server.js): shown as the order already taken, not as an offer to tick,
-    // and the press does nothing — the driver has said this once.
+    // The order in the car, back on the phone under its own id or a new one
+    // (heldCard, see heldOwnCard in server.js): shown as the order already
+    // taken, not as an offer to tick, and the press does nothing — the driver
+    // has said this once.
     if (heldAgain()) {
       el.took.textContent = '\u2713 Took ' + what + ' \u00b7 in car';
       el.took.title = 'The order you already took, on the phone again. Nothing to record.';
@@ -3016,7 +3017,7 @@
     // be undone by looking again. A washed-out card can be re-read; an offer
     // nobody wrote down is gone.
     if (notSaving) notes.push(notSaving);
-    // The order in the car, read again under a new id: no pair is weighed
+    // The order in the car, read again under either id: no pair is weighed
     // (server.js sends no stack for it), and this says why.
     if (holdingNow && r.heldCard) notes.push('The order you took, on the phone again \u2014 not a new offer.');
     // Then, because it is the note with a remedy in the driver's own hand, and
