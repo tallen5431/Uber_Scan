@@ -2530,8 +2530,14 @@ const framed = (page) => page.waitForFunction(
       // what they always counted. Drawn without that class, a candidate
       // lands among the marks and those counts go wrong.
       window.__how = [];
+      // ...and a route's dark casing under it, and the P / D on a pin, kept
+      // apart the same way: the counts of lines and marks above are of the
+      // runs and the dots themselves.
+      window.__casings = []; window.__letters = [];
       var how = function (o) { return !!(o && /\\bmv-how\\b/.test(o.className || '')); };
-      var into = function (list, x) { (how(x.opts) ? window.__how : window[list]).push(x); };
+      var casing = function (o) { return !!(o && /\\bmv-casing\\b/.test(o.className || '')); };
+      var into = function (list, x) {
+        (how(x.opts) ? window.__how : casing(x.opts) ? window.__casings : window[list]).push(x); };
       window.L = {
         map: function (node) {
           // Where the view is and its zoom, so the follow's "is the dot in the
@@ -2566,6 +2572,8 @@ const framed = (page) => page.waitForFunction(
               window.__lines = window.__lines.filter(function (l) { return l.group !== g; });
               window.__circles = window.__circles.filter(function (c) { return c.group !== g; });
               window.__how = window.__how.filter(function (c) { return c.group !== g; });
+              window.__casings = window.__casings.filter(function (c) { return c.group !== g; });
+              window.__letters = window.__letters.filter(function (c) { return c.group !== g; });
             },
             // Framed on the bounds' middle at zoom 12, and a zoom: Leaflet
             // says zoomstart for the page's own fit as for a hand's.
@@ -2601,8 +2609,17 @@ const framed = (page) => page.waitForFunction(
           return l; },
         // The "you are here" accuracy circle, kept apart from the marks so the
         // checks on the four job marks count what they always counted.
+        // The letter on a pin: a divIcon on a marker, as drawMap makes it.
+        divIcon: function (o) { return o; },
+        marker: function (ll, opts) {
+          return { ll: ll, opts: opts, group: null,
+                   addTo: function (g) { this.group = g; window.__letters.push(this);
+                                         return this; } }; },
         circle: function (ll, opts) {
           var c = { ll: ll, opts: opts, group: null,
+                    // What sizeDiscs sets: a disc bigger than the view is
+                    // drawn at no opacity, and the last style set is kept.
+                    setStyle: function (st) { this.style = st; return this; },
                     bindTooltip: function (h) { this.leafletTip = h; return this; },
                     bringToBack: function () { this.atBack = true; return this; },
                     on: function (ev, fn) { (this.handlers = this.handlers || {})[ev] = fn;
@@ -2732,7 +2749,8 @@ const framed = (page) => page.waitForFunction(
       // answer has no list behind it, so only the two cards' discs.
       how: (window.__how || []).map(function (x) {
         return { cls: String((x.opts || {}).className || ''), ll: x.ll || null,
-                 radius: (x.opts || {}).radius, colour: (x.opts || {}).color };
+                 radius: (x.opts || {}).radius, colour: (x.opts || {}).color,
+                 shown: x.mvShown };
       }),
       keyShown: !document.getElementById('mapKey').hidden,
       keyText: document.getElementById('mapKey').innerText.replace(/\s+/g, ' ').trim(),
@@ -2740,6 +2758,77 @@ const framed = (page) => page.waitForFunction(
       // The remembered view. A map mode written here would ask a public
       // geocoder on the next page load with nobody pressing anything.
       stored: localStorage.getItem('uberscan.liveView') }));
+    /* Easier to read (the driver: "can the map be made easier to read?").
+       A Leaflet tile as Leaflet makes one — an <img class="leaflet-tile">
+       in the tile pane inside the map — styled by the page's own rules: the
+       camera picture's border and round corners reached it once, and drew
+       the tile grid across the map as slate lines with a star where four
+       corners met. And what drawMap put down: the letters on the pins, a
+       casing under every run, the runs' weight, and the discs' edge. */
+    out.readable = await page.evaluate(() => {
+      const map = document.getElementById('liveMap');
+      const pane = document.createElement('div');
+      pane.className = 'leaflet-pane leaflet-tile-pane';
+      const tile = document.createElement('img');
+      tile.className = 'leaflet-tile';
+      tile.style.width = tile.style.height = '256px';
+      pane.appendChild(tile);
+      map.appendChild(pane);
+      const ts = getComputedStyle(tile), ps = getComputedStyle(pane);
+      const res = {
+        tileBorder: ts.borderTopWidth, tileRadius: ts.borderTopLeftRadius,
+        paneFilter: ps.filter,
+        letters: (window.__letters || []).map((l) => ({
+          ll: l.ll, html: ((l.opts || {}).icon || {}).html,
+          cls: ((l.opts || {}).icon || {}).className,
+          deaf: (l.opts || {}).interactive === false })),
+        casings: (window.__casings || []).length,
+        weights: (window.__lines || []).map((l) => (l.opts || {}).weight),
+        discs: (window.__how || []).filter((h) => /mv-disc/.test((h.opts || {}).className))
+          .map((h) => ({ weight: h.opts.weight, opacity: h.opts.opacity,
+                         fill: h.opts.fillOpacity, style: h.style || null,
+                         // Its radius on the stub's projection at the zoom
+                         // the map is at, against the map's longer side.
+                         rpx: h.opts.radius / 1609.344 / 69.0 * 256
+                              * Math.pow(2, window.__lmap.zoom) / 360,
+                         room: Math.max(map.clientWidth, map.clientHeight) })),
+      };
+      map.removeChild(pane);
+      return res;
+    });
+    // Between offers, in Map view: the map takes the verdict's column, and
+    // the card is back in the same render as the next offer.
+    stage = 'the map mode: between offers';
+    const wide = () => page.evaluate(() => {
+      const app = document.getElementById('app').getBoundingClientRect();
+      return { live: getComputedStyle(document.querySelector('.live')).display !== 'none',
+               mapW: Math.round(document.getElementById('liveMap').getBoundingClientRect().width),
+               appW: Math.round(app.width),
+               barW: Math.round(document.querySelector('.bottombar').getBoundingClientRect().width),
+               label: document.getElementById('verdictLabel').textContent.trim() };
+    });
+    out.betweenOffer = await wide();
+    await page.evaluate(() => window.__es.push(
+      { ready: false, state: 'empty', track: null,
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                   card: window.__HELD } }));
+    await page.waitForTimeout(200);
+    out.betweenNone = await wide();
+    out.betweenSized = await page.evaluate(() => window.__sized || 0);
+    // The offer, and in the same task as the push: no wait at all.
+    out.betweenBack = await page.evaluate(() => {
+      window.__es.push({
+        ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+        minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                   card: window.__HELD },
+        offer: { id: 'o-map', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+                 miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+                 dropoff: 'Canton Rd, Marietta', ...window.__CARD } });
+      return { live: getComputedStyle(document.querySelector('.live')).display !== 'none',
+               label: document.getElementById('verdictLabel').textContent.trim() };
+    });
+    await page.waitForTimeout(600);
     // ...and the frames stop. Thirty a second down a phone hotspot for a
     // picture nobody can see is a cost that only shows up as a bill.
     stage = 'the map mode: the picture stops being fetched';
@@ -3506,6 +3595,7 @@ const framed = (page) => page.waitForFunction(
         cls: String((x.opts || {}).className || ''),
         ll: x.ll || null, pts: x.pts || null,
         radius: (x.opts || {}).radius, fill: (x.opts || {}).fillOpacity,
+        shown: x.mvShown,
         tip: x.mvTip || null, leafletTip: x.leafletTip || null })));
       const keyShown = () => page.evaluate(() => {
         const k = document.getElementById('mapKey');
@@ -3544,6 +3634,9 @@ const framed = (page) => page.waitForFunction(
       r.oneKey = await keyShown();
       r.oneFit = await page.evaluate(() => window.__fit);
       r.oneMarks = await page.evaluate(() => (window.__marks || []).map((m) => m.ll));
+      r.oneLines = await page.evaluate(() => (window.__lines || []).map((l) => ({
+        cls: String((l.opts || {}).className || ''), pts: l.pts,
+        dashed: !!(l.opts || {}).dashArray })));
       r.oneAsked = relayAsked.splice(0);
       // What the figure should be off the fake's own road (a quarter longer
       // than the straight line, leg by leg), worked out with the page's MV.
@@ -6504,7 +6597,7 @@ try:
         len(_amber) == 2
         and (_amber[0].get('radius'), _amber[0].get('op'))
             != (_amber[1].get('radius'), _amber[1].get('op')))
-    _ringed = [m for m in _amber if m.get('radius') == 11]
+    _ringed = [m for m in _amber if m.get('op') == 0.35]
     ok_('...with the ring on the order already in the car',
         len(_ringed) == 1 and 'order in your car' in (_ringed[0].get('popup') or ''))
     ok_('...and the same ring on the car, so it is one rule and not two',
@@ -6536,6 +6629,51 @@ try:
     ok_('...and the view is fitted to the four marks and nothing else, never to '
         'a card\'s disc (%r)' % (_fit,),
         len(_fit) == 4 and all(m.get('ll') in _fit for m in marks))
+    # Easier to read: the tile grid, the letters, the casings, the discs.
+    rd = got.get('readable') or {}
+    eq('a map tile has no border and no round corners: the camera picture\'s '
+       'rule drew the tile grid across the map as long slate lines with a star '
+       'where four tiles met', (rd.get('tileBorder'), rd.get('tileRadius')), ('0px', '0px'))
+    ok_('...and the tiles are muted, the tile pane alone desaturated and dimmed '
+        '(%r)' % rd.get('paneFilter'),
+        'saturate(0.3)' in (rd.get('paneFilter') or '')
+        and 'brightness(0.78)' in (rd.get('paneFilter') or ''))
+    _lt = sorted((l.get('html'), tuple(l.get('ll') or ())) for l in rd.get('letters') or [])
+    eq('every pin carries its letter, deaf to the pointer: P on the pickup, D on '
+       'the dropoff and on the held order\'s end, none on the car',
+       (_lt, all(l.get('deaf') for l in rd.get('letters') or [])),
+       (sorted([('D', tuple(m['ll'])) for m in marks
+                if re.search(r'drop it here|order in your car is going', m.get('popup') or '')]
+               + [('P', tuple(m['ll'])) for m in marks
+                  if 'pick this one up' in (m.get('popup') or '')]), True))
+    eq('...the held order\'s end lettered as a ring (white, haloed), this offer\'s '
+       'pins solid', sorted(l.get('cls') for l in rd.get('letters') or []),
+       ['mv-letter', 'mv-letter', 'mv-letter mv-letter-ring'])
+    eq('every run is 5px over a dark casing of its own',
+       (rd.get('weights'), rd.get('casings')), ([5, 5, 5, 5], 4))
+    eq('the cards\' discs are a 1.25px edge at .6 and a .03 tint, so they never read '
+       'as roads', sorted((d.get('weight'), d.get('opacity'), d.get('fill'))
+                          for d in rd.get('discs') or []),
+       [(1.25, 0.6, 0.03), (1.25, 0.6, 0.03)])
+    _dz = [(round(d.get('rpx') or 0), d.get('room'), (d.get('style') or {}).get('opacity'))
+           for d in rd.get('discs') or []]
+    ok_('...and a disc whose radius is more than the view is not drawn, one that '
+        'fits is (radius px, view px, opacity: %r)' % _dz,
+        len(_dz) == 2 and any(r > room for r, room, _o in _dz)
+        and all((o == 0) == (r > room) for r, room, o in _dz)
+        and all(o in (0, 0.6) for _r, _room, o in _dz))
+    _bo, _bn, _bb = (got.get('betweenOffer') or {}, got.get('betweenNone') or {},
+                     got.get('betweenBack') or {})
+    ok_('Map view with an offer on screen keeps the verdict beside a half-width '
+        'map (%r)' % _bo, _bo.get('live') and _bo.get('mapW', 0) < _bo.get('appW', 0) * 0.6)
+    ok_('between offers the map takes the whole width where the empty WAITING '
+        'FOR AN OFFER card was, as wide as the bar of controls under it (%r)' % _bn,
+        not _bn.get('live') and _bn.get('label') == 'WAITING FOR AN OFFER'
+        and _bn.get('mapW', 0) >= _bn.get('barW', 1) - 2)
+    ok_('...and Leaflet is told its new size (%r)' % got.get('betweenSized'),
+        (got.get('betweenSized') or 0) > (got.get('mapOn') or {}).get('sized', 0))
+    eq('...and the verdict is back in the same render as the next offer',
+       (_bb.get('live'), (_bb.get('label') or '')[:6]), (True, 'ACCEPT'))
     _how = on.get('how') or []
     eq('with no NucBox, how each place was found is the two cards\' discs and '
        'nothing else: the public map\'s one answer has no list behind it',
@@ -6547,9 +6685,13 @@ try:
         all(h.get('ll') == [34.010, -84.600] for h in _how)
         and {(h.get('cls'), h.get('colour')) for h in _how}
         == {('mv-how mv-disc mv-new', '#7aa2f7'), ('mv-how mv-disc mv-held', '#f5a524')})
-    eq('...and the key to them is on the map, naming the circle and the pins and '
-       'nothing the public map\'s answers do not have',
-       (on.get('keyShown'), on.get('keyText')), (True, "◯ card's reach · ● pin"))
+    # The circle only while a disc is shown: one bigger than the view is not
+    # drawn (sizeDiscs), and the key does not name a mark that is not there.
+    eq('...and the key to them is on the map, naming the circle (while one is '
+       'drawn) and the lettered pins, and nothing the public map\'s answers do '
+       'not have', (on.get('keyShown'), on.get('keyText')),
+       (True, ("◯ card's reach · " if any(h.get('shown') for h in _how) else '')
+        + 'PD pin'))
 
     # THE figure, and the reason this mode exists. The driver's words: "if it
     # makes sense to pickup the second offer since it would be mostly along the
@@ -6658,6 +6800,22 @@ try:
         'new job\'s end (%d routes)' % len(_routes),
         _routes and all(len(u.split('?')[0].split(';')) <= 3 for u in _routes)
         and not any('33.95800' in u for u in _routes))
+    # The routes along the roads: the fake's road turns east-west, then
+    # north-south, so a line along it has the corner [car lat, pickup lon].
+    _ol = {l.get('cls'): l for l in both.get('oneLines') or []}
+    _det, _run = _ol.get('mv-detour mv-road') or {}, _ol.get('mv-held-run mv-road') or {}
+    eq('with the router set, the detour is drawn along the road car -> pickup -> held '
+       'end, one dashed line with the road\'s corners, not two straight legs',
+       (_det.get('pts'), _det.get('dashed'),
+        len([l for l in both.get('oneLines') or [] if 'mv-detour' in l.get('cls')])),
+       ([[33.9526, -84.5499], [33.9526, -84.5499], [33.983, -84.5499],
+         [33.983, -84.46], [33.8779, -84.46]], True, 1))
+    eq('...and the held order\'s run car -> its end along the road too',
+       _run.get('pts'), [[33.9526, -84.5499], [33.9526, -84.46], [33.8779, -84.46]])
+    _nr = {l.get('cls') for l in noroad.get('oneLines') or []}
+    ok_('...and with no router the same runs are the straight lines (%r)' % sorted(_nr),
+        'mv-held-run' in _nr and 'mv-detour' in _nr
+        and not any('mv-road' in c for c in _nr))
     _streets = [u for u in (got.get('nbxAsked') or []) if 'street=Shadowood' in u]
     ok_('the held end "Shadowood Pkwy SE, Atlanta" is asked as the street alone, '
         'the town left out (%r)' % _streets[:1],
@@ -6919,8 +7077,9 @@ try:
     def _want_key(how, pins):
         cls = [h.get('cls') or '' for h in (how or [])]
         parts = []
-        if any(' mv-disc ' in c + ' ' for c in cls): parts.append("◯ card's reach")
-        if pins: parts.append('● pin')
+        if any(' mv-disc ' in (h.get('cls') or '') + ' ' and h.get('shown') is not False
+               for h in (how or [])): parts.append("◯ card's reach")
+        if pins: parts.append('PD pin')
         if any(' mv-cand ' in c + ' ' or ' mv-candidate ' in c + ' ' for c in cls):
             parts.append('● also found')
         if any(' mv-out ' in c + ' ' for c in cls): parts.append('○ outside')
