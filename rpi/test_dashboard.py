@@ -3150,7 +3150,7 @@ const framed = (page) => page.waitForFunction(
     const ANSWERS = { "Chipotle (Barrett Pkwy)": [34.020, -84.580],
                       "Powder Springs Rd": [33.900, -84.640] };
     ANSWERS[HELD_AT] = [33.990, -84.620];
-    const run = async (name, cardDrop, script) => {
+    const run = async (name, cardDrop, script, replyMore) => {
       stage = 'the held end: ' + name;
       const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                                 .then((c) => c.newPage());
@@ -3169,8 +3169,9 @@ const framed = (page) => page.waitForFunction(
                          hasTotal: true, legs: 2, whole: true };
       await page.route('**/api/offers/mark', (route) => route.fulfill({
         status: 200, contentType: 'application/json',
-        body: JSON.stringify({ ok: true, holding: true,
-          held: { pay: 18.09, minutes: 38, dropoff: cardDrop, card: heldCard } }) }));
+        body: JSON.stringify(Object.assign({ ok: true, holding: true,
+          held: { pay: 18.09, minutes: 38, dropoff: cardDrop, card: heldCard } },
+          replyMore || {})) }));
       await page.route('**/nominatim.openstreetmap.org/**', (route) => {
         const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
         const hit = ANSWERS[q];
@@ -3232,6 +3233,23 @@ const framed = (page) => page.waitForFunction(
       await page.waitForTimeout(800);
       res.after = await pins();
       res.note = await page.evaluate(() => document.getElementById('viewNote').textContent.trim());
+      /* The GPS drop, from the panel's side (gpsArrival in server.js): a beat
+         that says the car is at the held order's door, and then the server's
+         word that it put the order down because the car left it. */
+      const row = () => page.evaluate(() => ({
+        health: document.getElementById('health').textContent.replace(/\s+/g, ' ').trim(),
+        dropShown: !document.getElementById('drop').hidden }));
+      // The row is the heartbeat's, and says nothing over a socket that has
+      // not opened: open it, as the health stage does.
+      await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+      await push({ alive: true, gps: null, atDropoff: true });
+      await page.waitForTimeout(400);
+      res.atDoor = await row();
+      await push({ gpsDrop: { at: 1, saidForMs: 60000 } });
+      await push({ alive: true, gps: null });
+      await page.waitForTimeout(2600);
+      res.gpsDown = await row();
+      res.gpsDownPins = await pins();
     });
     // The card named its end, and the next card's offer line is the first
     // message after ✓ Took — the reply is the only thing that said the hold.
@@ -3241,7 +3259,15 @@ const framed = (page) => page.waitForFunction(
                             pickup: null, dropoff: null } });
       await page.waitForTimeout(2600);
       res.bare = await pins();
-    });
+      // This Took put another order down (server.js writes its drop row
+      // `by: 'replaced'`), which the mark reply says as well as the stream:
+      // on the status row at the next beat.
+      await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+      await push({ alive: true, gps: null });
+      await page.waitForTimeout(300);
+      res.health = await page.evaluate(
+        () => document.getElementById('health').textContent.replace(/\s+/g, ' ').trim());
+    }, { replaced: { at: 1, saidForMs: 60000 } });
   }
 
   /* --- you are here --------------------------------------------------------
@@ -3774,8 +3800,13 @@ const framed = (page) => page.waitForFunction(
            9.9 mi disc. With a holdId, so a pickup sent as the held end would
            be a POST to /api/held-end this records. */
         const heldEndPosts = [];
+        // ...and the pickup's own pin, which the server's restaurant guard
+        // (pickupNearEnd) is fed from: POST /api/held-pickup.
+        const heldPickupPosts = [];
         page.on('request', (q) => {
-          if (/\/api\/held-end$/.test(new URL(q.url()).pathname)) heldEndPosts.push(q.postData());
+          const p = new URL(q.url()).pathname;
+          if (/\/api\/held-end$/.test(p)) heldEndPosts.push(q.postData());
+          if (/\/api\/held-pickup$/.test(p)) heldPickupPosts.push(q.postData());
         });
         await page.evaluate((SQ) => {
           window.__es.push({
@@ -3808,7 +3839,8 @@ const framed = (page) => page.waitForFunction(
                    key: k.hidden ? null : k.innerText.replace(/\s+/g, ' ').trim() };
         });
         r.heldPickSeen = relayAsked.filter((u) => /street=1985/.test(u));
-        r.heldPickPosts = heldEndPosts;
+        r.heldPickPosts = heldEndPosts.slice();
+        r.heldPickupPosts = heldPickupPosts.map((p) => JSON.parse(p || 'null'));
         // ...and the next card, the same order still held: the restaurant
         // is where that order is collected from whatever card is up.
         await page.evaluate((SQ) => {
@@ -3826,6 +3858,26 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(2000);
         r.heldPickNext = await page.evaluate(() => (window.__marks || []).filter(
           (k) => String(k.popup || '').indexOf('pick up the order in your car') >= 0).length);
+        /* ...and a held order whose end is a DOOR: the fake's own at 1985
+           Cobb Parkway, inside the held card's 9.9 mi disc, the NucBox's
+           answer carrying the number. The page posts it to /api/held-end for
+           the GPS drop (pinHeldEnd). This server holds no order and refuses
+           it; what the page SENT is the point. The street-level end above
+           (Shadowood Pkwy SE) was never sent: heldPickPosts. */
+        await page.evaluate((SQ) => {
+          window.__es.push({
+            ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+            minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
+            holding: { pay: 9.0, minutes: 18.0, holdId: 'h-door',
+                       dropoff: '1985 Cobb Parkway, Kennesaw',
+                       card: Object.assign({}, SQ, { miles: 9.4 }) },
+            offer: Object.assign({ id: 'n-helddoor', pay: 14.25, minutes: 20.0,
+                                   billedMinutes: 20.0, cost: 1.4,
+                                   pickup: "McDonald's (Marietta Sq)",
+                                   dropoff: 'Church St, Marietta' }, SQ) });
+        }, SQ);
+        await page.waitForTimeout(2500);
+        r.heldDoorPosts = heldEndPosts.map((p) => JSON.parse(p || 'null'));
         // The NucBox answering the pickup and then going quiet: "Slow Place"
         // answers past NUCBOX_TIMEOUT_MS, so the dropoff and the held end are
         // the public map's, and the pickup's pin is still the NucBox's. What
@@ -6977,6 +7029,28 @@ try:
     eq('...and the pickup is never sent as the held order\'s end', both.get('heldPickPosts'), [])
     eq('...and it stays on the map under the next card while the order is held',
        both.get('heldPickNext'), 1)
+    # ...and its pin goes to the server as a PICKUP, which is what the GPS
+    # drop's restaurant guard (pickupNearEnd in server.js) is fed from: with
+    # no post, a door 50-75 m from the restaurant arms and drops the order as
+    # the car leaves with the food. Nothing checked that the page sent it.
+    _pp = [p for p in both.get('heldPickupPosts') or [] if p]
+    ok_('...and its pin is sent to the server as the held order\'s pickup, for the '
+        'restaurant guard (%r)' % (_pp,),
+        _pp and all(p.get('holdId') == 'h-planner'
+                    and abs(p.get('lat', 0) - 34.0010) < 0.001
+                    and abs(p.get('lon', 0) + 84.5560) < 0.001 for p in _pp))
+    # The GPS drop's end as the page finds it: a held end pinned at its DOOR
+    # (the dropoff names the number and the NucBox's answer carries it) is
+    # posted to /api/held-end, named by its hold and the text it was pinned
+    # for. The street-level end before it was not (heldPickPosts, above).
+    _dp = [p for p in both.get('heldDoorPosts') or [] if p]
+    ok_('a held order\'s end pinned at its door is sent to /api/held-end for the GPS '
+        'drop, named by its hold and the dropoff it was pinned for (%r)' % (_dp,),
+        _dp and all(p.get('holdId') == 'h-door'
+                    and p.get('dropoff') == '1985 Cobb Parkway, Kennesaw'
+                    and p.get('doorLevel') is True
+                    and abs(p.get('lat', 0) - 34.0010) < 0.001
+                    and abs(p.get('lon', 0) + 84.5560) < 0.001 for p in _dp))
     # The street index, relayed to the NucBox's own server.js. A held end
     # the index does not hold (Shadowood Parkway) is asked of the search as
     # before, so the first card's line is the one `both` drew.
@@ -7199,6 +7273,20 @@ try:
                                  for m in ht.get('took') or []))
     ok_('held end: ...and the next card\'s offer line does not take it down (%r)'
         % (ht.get('bare'),), any(_HELD in m for m in ht.get('bare') or []))
+    # The GPS drop's two words, off the stream (gpsArrival in server.js). The
+    # health stage below says them over no order; these are said over one.
+    ok_('held end: a beat that puts the car at the held order\'s door says '
+        '"at dropoff" on the status row (%r)' % (hp.get('atDoor'),),
+        'at dropoff' in ((hp.get('atDoor') or {}).get('health') or ''))
+    eq('held end: the server\'s GPS drop puts the order down on the panel: Drop '
+       'goes, and the row says why',
+       ((hp.get('gpsDown') or {}).get('dropShown'),
+        'dropped · left the dropoff' in ((hp.get('gpsDown') or {}).get('health') or ''),
+        'at dropoff' in ((hp.get('gpsDown') or {}).get('health') or '')),
+       (False, True, False))
+    ok_('held end: a Took the reply says replaced an order says "previous order put '
+        'down" on the status row (%r)' % (ht.get('health'),),
+        'previous order put down' in (ht.get('health') or ''))
     nxtMap = got.get('mapNext') or {}
     eq('a new card redraws the map rather than leaving the last one up',
        len(nxtMap.get('marks') or []), 4)
