@@ -1865,16 +1865,186 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
+
+# --- Stage 3: the assembler, with one hold ------------------------------------
+#
+# The decisions moved into assemble.js; the server keeps the writing and the
+# saying. With ONE order held every decision must be the one the old dropoff
+# branch made, and the one gain is a Trip Planner filed from more than one
+# page. Through the real server and a relay scanner, as above. Every name and
+# street invented.
+if shutil.which('python3'):
+    work = tempfile.mkdtemp()
+    journal = os.path.join(work, 'journal.jsonl')
+    cmds = os.path.join(work, 'cmds.jsonl')
+    open(cmds, 'w').close()
+    fake = os.path.join(work, 'relay.py')
+    with open(fake, 'w') as fh:
+        fh.write(
+            'import sys, time\n'
+            'done = 0\n'
+            'while True:\n'
+            '    lines = open(%r).read().splitlines()\n'
+            '    for l in lines[done:]:\n'
+            '        print(l, flush=True)\n'
+            '    done = len(lines)\n'
+            '    time.sleep(0.05)\n' % cmds)
+    write(journal, [])
+    proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                        'SCANNER_ARGS': fake}, journal)
+
+    def say(msg):
+        with open(cmds, 'a') as fh:
+            fh.write(json.dumps(msg) + '\n')
+
+    def took(i, dropoff, **card):
+        code, reply = post(base, '/api/offers/mark', {
+            'id': i, 'accepted': True,
+            'offer': dict({'id': i, 'pay': 14.0, 'minutes': 30.0, 'billedMinutes': 30.0,
+                           'miles': 6.0, 'cost': 2.1, 'dropoff': dropoff}, **card)})
+        return code == 200 and reply.get('holding') is True
+
+    def put_down(i):
+        post(base, '/api/offers/mark', {'id': i, 'accepted': None})
+
+    def held(want=None, key='dropoff', patience=4.0):
+        h = {}
+        for _ in range(int(patience * 20)):
+            h = get(base, '/api/status').get('holding') or {}
+            if want is not None and h.get(key) == want:
+                return h
+            time.sleep(0.05)
+        return h
+
+    def marks_for(i):
+        return [(r.get('dropoff'), r.get('asked'), r.get('labelled'))
+                for r in (json.loads(l) for l in open(journal) if l.strip())
+                if r.get('kind') == 'mark' and r.get('id') == i and r.get('dropoff')]
+
+    _OSTRANDER = {'kind': 'dropoff', 'orders': 1, 'name': 'Mara T.', 'place': None,
+                  'expectedBy': 1202, 'street': '415 Ostrander Way NW', 'city': 'Kennesaw',
+                  'state': 'GA', 'zip': None, 'line': '415 Ostrander Way NW, Kennesaw',
+                  'partial': None, 'label': 'dropoff'}
+    _QUARRY = {'kind': 'pickup', 'orders': 1, 'name': 'Juniper Taqueria', 'place': None,
+               'expectedBy': 1180, 'street': '2210 Quarry Bend Rd NW', 'city': 'Kennesaw',
+               'state': 'GA', 'zip': '30144',
+               'line': '2210 Quarry Bend Rd NW, Kennesaw, GA 30144',
+               'partial': None, 'label': 'pickup'}
+
+    def page(stops, top, bottom, titled, at=None):
+        """A whole-screen planner read, unpressed: its sighting, then its
+        planner line under the same stamp, the order the scanner sends them."""
+        at = at if at is not None else int(time.time() * 1000)
+        say({'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': titled,
+                          'app': 'uber', 'screen': 'uber.planner',
+                          'page': {'top': top, 'bottom': bottom}, 'stops': stops,
+                          'orderCount': 1, 'keep': False}})
+        say({'planner': {'stops': [{k: v for k, v in s.items()
+                                    if k not in ('partial', 'label')} for s in stops],
+                         'keep': False, 'asked': False, 'ms': None, 'at': at}})
+        return at
+
+    try:
+        heard = listen(base, 40)
+        # The old road: the scanner decided the planner's one dropoff and sent
+        # it as a label-proven dropoff line.
+        ok_('the premise: an order with the card\'s corner is in the car (old road)',
+            took('o-asm-old', 'Larch Way & Teal Ct, Kennesaw', legs=1, multiOrder=True))
+        say({'dropoff': {'found': True, 'line': '415 Ostrander Way NW, Kennesaw',
+                         'street': '415 Ostrander Way NW', 'city': 'Kennesaw',
+                         'state': 'GA', 'zip': None, 'asked': False,
+                         'labelled': 'dropoff', 'ms': None,
+                         'at': int(time.time() * 1000)}})
+        _old = held('415 Ostrander Way NW, Kennesaw')
+        for _ in range(60):
+            if marks_for('o-asm-old'):
+                break
+            time.sleep(0.05)
+        _old_marks = [m[1:] for m in marks_for('o-asm-old')]
+        put_down('o-asm-old')
+        # The new road: the planner's sighting, and the assembler decides.
+        ok_('the premise: the same order is in the car (new road)',
+            took('o-asm-new', 'Larch Way & Teal Ct, Kennesaw', legs=1, multiOrder=True))
+        page([_QUARRY, _OSTRANDER], True, True, True)
+        _new = held('415 Ostrander Way NW, Kennesaw')
+        for _ in range(60):
+            if marks_for('o-asm-new'):
+                break
+            time.sleep(0.05)
+        eq('one hold: the assembler files what the old branch filed',
+           [(h.get('dropoff'), h.get('dropoffScanned')) for h in (_new,)]
+           + [m[1:] for m in marks_for('o-asm-new')],
+           [(_old.get('dropoff'), _old.get('dropoffScanned'))] + _old_marks)
+        ok_('the premise: the old road filed it, label-proven and unasked (%r)' % _old_marks,
+            _old.get('dropoff') == '415 Ostrander Way NW, Kennesaw'
+            and _old_marks == [(False, True)])
+        eq('...and the hold says where it came from',
+           ((_new.get('fields') or {}).get('dropoff') or {}).get('from'), 'planner')
+        eq('...and the planner line that followed says none was left unfiled',
+           (held(key='planner', patience=0.5).get('planner') or {}).get('unfiled', '<none>'),
+           None)
+        _told = [m for m in heard if (m.get('dropoff') or {}).get('line')
+                 == '415 Ostrander Way NW, Kennesaw' and m.get('holding')]
+        ok_('...and the panel is told it as a dropoff, carrying the order in the car',
+            any((m.get('holding') or {}).get('dropoff') == '415 Ostrander Way NW, Kennesaw'
+                for m in _told))
+        put_down('o-asm-new')
+
+        # A rival card on the slot: a different offer read after the Took, still
+        # what the driver is looking at. A label-proven address is filed onto the
+        # one hold all the same — the refused guard (AUDITS) is not written.
+        ok_('the premise: an order with the card\'s corner is in the car',
+            took('o-asm-rival', 'Larch Way & Teal Ct, Kennesaw'))
+        say({'offer': {'id': 'o-rival-card', 'pay': 9.5, 'minutes': 20, 'perHour': 18,
+                       'dropoff': None}})
+        for _ in range(60):
+            if (get(base, '/api/status').get('offer') or {}).get('id') == 'o-rival-card':
+                break
+            time.sleep(0.05)
+        ok_('the premise: the rival card is on the slot',
+            (get(base, '/api/status').get('offer') or {}).get('id') == 'o-rival-card')
+        say({'dropoff': {'found': True, 'line': '61 Saddlebrook Ln, Acworth, GA 30101',
+                         'street': '61 Saddlebrook Ln', 'city': 'Acworth', 'state': 'GA',
+                         'zip': '30101', 'asked': False, 'labelled': 'dropoff', 'ms': None,
+                         'at': int(time.time() * 1000)}})
+        eq('a labelled dropoff with a rival card on the slot is still filed onto the one hold',
+           (held('61 Saddlebrook Ln, Acworth, GA 30101').get('dropoff'),
+            (get(base, '/api/status').get('offer') or {}).get('dropoff')),
+           ('61 Saddlebrook Ln, Acworth, GA 30101', None))
+        put_down('o-asm-rival')
+
+        # The gain: a list whose "Waybill" is on the page below, on a card of
+        # two orders, so the first page alone files nothing.
+        ok_('the premise: a two-order card is in the car with the card\'s corner',
+            took('o-asm-pages', 'Larch Way & Teal Ct, Kennesaw', legs=1, multiOrder=True))
+        _p1 = page([_QUARRY, _OSTRANDER], True, False, True)
+        _h1 = held(patience=1.0)
+        eq('a planner page whose list runs off the screen files nothing alone, and says why',
+           (_h1.get('dropoff'), (_h1.get('planner') or {}).get('unfiled')),
+           ('Larch Way & Teal Ct, Kennesaw', 'list'))
+        page([_OSTRANDER], False, True, False, at=_p1 + 6000)
+        _h2 = held('415 Ostrander Way NW, Kennesaw')
+        eq('...and the page below it, with "Waybill", files the list\'s one dropoff',
+           (_h2.get('dropoff'), ((_h2.get('fields') or {}).get('dropoff') or {}).get('from'),
+            ((_h2.get('fields') or {}).get('customer') or {}).get('value')),
+           ('415 Ostrander Way NW, Kennesaw', 'planner', 'Mara T.'))
+        put_down('o-asm-pages')
+    finally:
+        stop(proc)
+        shutil.rmtree(work, ignore_errors=True)
+
 # --- a sighting is counted and goes nowhere ----------------------------------
 #
 # Stage 2 of the multi-order design: the scanner sends a `sighting` line for
 # every whole-screen and planner read (emit_sighting in rpi/scan_pi.py). The
-# server counts it by screen type on /api/status's scanner block and does
-# nothing else with it: no journal row, nothing on the event stream, nothing
-# filed onto an order in the car — the dropoff and planner lines still do all
-# of that. One fake scanner relaying whatever the test appends, as above; the
-# order is held so a sighting that filed would have somewhere to file. The
-# address is invented.
+# server counts it by screen type on /api/status's scanner block, writes no
+# journal row for it and puts nothing of it on the event stream. Since Stage 3
+# a planner sighting is the assembler's to file from — see the next block —
+# and these are pages it files nothing off: the one planner page here carries
+# no `titled`, and an unpressed page is filed only under the "Trip Planner"
+# title, as the scanner's own unpressed read always required. One fake
+# scanner relaying whatever the test appends, as above; the order is held so a
+# sighting that filed would have somewhere to file. The address is invented.
 if shutil.which('python3'):
     work = tempfile.mkdtemp()
     journal = os.path.join(work, 'journal.jsonl')
@@ -2798,6 +2968,10 @@ try:
     _accepted = json.load(open(_hold)).get('acceptedAt')
     eq('...and the scanner is told until when, the moment holding() lets go',
        _held_until(), _accepted + 30 * 1.5 * 60000 + 10 * 60000)
+    # ...and WHICH order, so the scanner forgets the address it last
+    # volunteered when the order changes (held_signature in rpi/scan_pi.py).
+    eq('...and which order it is, by the name the panel knows it by',
+       json.load(open(_hheld)).get('holds'), 'h-1@%d' % _accepted)
 finally:
     stop(_hproc)
 # Taken away here, so the restart below has to write it again for the order it

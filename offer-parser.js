@@ -1705,6 +1705,13 @@
   var PLANNER_TITLE = /^[^A-Za-z0-9]{0,3}trip ?planner\b/i;
   var PLANNER_END = /^[^A-Za-z0-9]{0,3}way ?[A-Za-z]? ?bill\b/i;
 
+  /* Whether a line of `text` is the "Trip Planner" title, above the app's
+     bar: what a sighting says as `titled`, and what the assembler asks of a
+     page nobody pressed for. See planner_titled in offer_parser.py. */
+  function plannerTitled(text) {
+    return plannerLines(text).lines.some(function (l) { return PLANNER_TITLE.test(l); });
+  }
+
   function plannerBounded(text) {
     var ends = plannerEnds(text);
     return ends.top && ends.bottom;
@@ -3450,6 +3457,7 @@
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner,
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
+           plannerTitled: plannerTitled,
            screenType: screenType, SCREENS: SCREENS,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,

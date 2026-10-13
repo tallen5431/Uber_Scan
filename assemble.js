@@ -269,9 +269,16 @@
     }
     if (d.singleCardOnly === true) {
       if (held.planner) held.planner.unfiled = null;
-      // ...and the planner line that follows this read's sighting is told so.
+      // ...and the planner line that follows this read's sighting is told so,
+      // and the pages it came off leave the pool: the order has its end.
       if (st) {
         st.verdicts.forEach(function (v) { if (v.at === d.at) v.why = null; });
+        st.pages.forEach(function (p) {
+          if ((d.pageAts || []).indexOf(p.at) !== -1) {
+            p.pending = false;
+            p.why = null;
+          }
+        });
       }
     }
   }
@@ -494,10 +501,19 @@
         var near = inside.some(function (q) { return Math.abs(q.at - p.at) <= STITCH_MS; });
         if (!near) continue;
         var pv = pageView(p);
-        var under = placements(view.stops, pv.stops);    // p below (or over) the list
-        var over = placements(pv.stops, view.stops);     // the list below p
-        if (under.length + over.length !== 1) continue;
-        view = under.length ? join(view, pv, under[0]) : join(pv, view, over[0]);
+        // Where p's first stop sits against the list's: +k with p under the
+        // list from its k-th stop, -k with the list under p. The two searches
+        // both find a page that starts level with the list (0), which is one
+        // alignment, not two.
+        var offsets = [];
+        placements(view.stops, pv.stops).forEach(function (k) {
+          if (offsets.indexOf(k) === -1) offsets.push(k);
+        });
+        placements(pv.stops, view.stops).forEach(function (k) {
+          if (offsets.indexOf(-k) === -1) offsets.push(-k);
+        });
+        if (offsets.length !== 1) continue;
+        view = offsets[0] >= 0 ? join(view, pv, offsets[0]) : join(pv, view, -offsets[0]);
         inside.push(p);
         grew = true;
       }
@@ -618,6 +634,9 @@
       if (lone2) cand = candidate(lone2, verdict.stop, page, false, true);
     }
     if (cand && many) cand.pages = run.pages.length;
+    // The reads it was made from, so one that files can take them out of the
+    // pool (file()): a lone dropoff waits there until it is known to be kept.
+    if (cand) cand.pageAts = run.pages.map(function (p) { return p.at; });
     // Its one pickup, read whole on a list seen whole, rides with it.
     if (cand && view.top && view.bottom) {
       var picks = headed(view.stops).filter(function (x) { return x.kind === 'pickup'; });

@@ -1979,7 +1979,8 @@
   }
 
   /* Why the planner the last press read gave the order in the car no end, as
-   * the SCANNER decided it — see planner_destination in rpi/scan_pi.py — or ''.
+   * the ASSEMBLER decided it — see plannerDestination in assemble.js, whose
+   * word server.js puts on the planner line — or ''.
    *
    * Read off the line, not worked out here. This page used to count the
    * dropoffs itself, which was a second copy of half the scanner's rule: it
@@ -1997,8 +1998,8 @@
   // Each reason twice: the line under the stops, which has to survive the
   // thirty characters the 3.5" hat's scene picture gives a line, and the
   // sentence it stands for on the button's title. Keyed by the words
-  // planner_destination returns, and rpi/test_lint.py holds the two lists to
-  // each other: a reason the scanner gives that this has no words for would
+  // assemble.js's plannerDestination returns, and rpi/test_lint.py holds the
+  // two lists to each other: a reason it gives that this has no words for would
   // throw in the middle of drawing the driving screen.
   var UNFILED_THEN = ' so the order\'s destination is left as it was. Press this '
     + 'over the navigation screen for it instead.';

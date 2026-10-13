@@ -3734,6 +3734,13 @@ function statusNow() {
                    // once it has been answered.
                    dropoff: h.dropoff || null,
                    dropoffScanned: !!h.dropoffScanned,
+                   // ...and where each of its ends came from: the assembler's
+                   // `fields`, {value, from, conf, at, screen} each. See
+                   // Assemble.fieldsOf, which makes them for a hold restored
+                   // from a file written before they existed.
+                   fields: Assemble.fieldsOf(h),
+                   // ...and the planner pages it is still waiting on.
+                   pending: Assemble.pending(assembly),
                    // ...and the Trip Planner's stops, when ⌖ read one while
                    // this order was in the car, with the scanner's reason for
                    // filing none of them as its end: {stops, unfiled}. Kept

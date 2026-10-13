@@ -511,16 +511,34 @@ def order_held(now=None):
     Anything unreadable is no order: this decides only whether the rig reads
     the planner without a press, and ⌖ reads it either way.
     """
+    return held_signature(now) is not None
+
+
+def held_signature(now=None):
+    """Which order the web side says is in the car right now, or None.
+
+    The same note order_held reads, by the same rule — judged against
+    `until`, anything unreadable is no order — answering with the order's
+    name as server.js gives it (`holds`, holdIdOf there). A note from a server
+    older than that field names no order and answers '' while it is in force:
+    still an order, for order_held, and never a change, for the loop.
+
+    What it is for: `dropoff_said` in main() is forgotten when this changes,
+    so an address volunteered for — and refused for — the order before is
+    offered again for this one.
+    """
     now = time.time() if now is None else now
     for candidate in HO.candidates(HO.HOLDING):
         try:
             with open(candidate, encoding='utf-8') as fh:
-                until = json.load(fh).get('until')
+                note = json.load(fh)
+            until = note.get('until')
         except (OSError, ValueError, AttributeError):
             continue
         if isinstance(until, (int, float)) and now * 1000.0 < until:
-            return True
-    return False
+            holds = note.get('holds')
+            return holds if isinstance(holds, str) else ''
+    return None
 
 
 def dropoff_requested(now=None):
@@ -2567,7 +2585,7 @@ class UpDown(object):
         return None if self.camera.word == 'seeing' else self.camera.word
 
 
-def emit_dropoff(address, ms=None, asked=True, labelled=False, single_card_only=False):
+def emit_dropoff(address, ms=None, asked=True, labelled=False):
     """The destination, once it has been read off the screen.
 
     Its own line, like the offer id and for the same reason: it is not part of a
@@ -2612,20 +2630,16 @@ def emit_dropoff(address, ms=None, asked=True, labelled=False, single_card_only=
         'asked': bool(asked),
         # 'dropoff' when nobody asked and the screen printed this address under
         # a Dropoff label in its own stop block (digest()); None otherwise. A
-        # press needs no label, so it never carries one. server.js lets a
+        # press needs no label, so it never carries one. The assembler lets a
         # labelled sighting replace the card's own end on the held order, and
-        # nothing else.
+        # nothing else. A Trip Planner's addresses never come this way: they
+        # are the assembler's to file, off the sighting (emit_sighting).
         'labelled': 'dropoff' if labelled and not asked else None,
-        # True when this is a Trip Planner's lone dropoff off a list whose end
-        # the screen did not show (planner_lone_dropoff): server.js files it
-        # only onto a held order whose card was one order on one leg, which
-        # the server knows and the scanner does not.
-        'singleCardOnly': bool(single_card_only) or None,
         'ms': ms,
         'at': int(time.time() * 1000)}}), flush=True)
 
 
-def emit_planner(stops, unfiled=None, keep=False, ms=None, asked=True):
+def emit_planner(stops, keep=False, ms=None, asked=True, at=None):
     """Uber's Trip Planner, read off the whole screen because ⌖ was pressed.
 
     Its own line, for the reason a dropoff is: the screen is a list of stops,
@@ -2634,11 +2648,13 @@ def emit_planner(stops, unfiled=None, keep=False, ms=None, asked=True):
     in the order the screen gave it — every stop, the ones whose fields did not
     read included, so the panel shows what is there rather than what parsed.
 
-    `unfiled` is planner_destination's reason for giving the order in the car
-    no end off this screen, or None. It travels on the line so the panel says
-    the reason this decided, rather than working out a reason of its own from
-    the stops — which it did, counting dropoffs: a second copy of half this
-    rule, with nothing to say when the one dropoff did not read whole.
+    No `unfiled` any more: whether a planner gives the order in the car its
+    end, and the word for why not, is the assembler's (assemble.js,
+    plannerDestination), decided off the sighting this read sent just before
+    this line. server.js puts the reason on this line before the panel sees
+    it, so the panel still says the one reason that was decided rather than
+    working out its own. `at` is that read's, the same stamp the sighting
+    carries, which is how the server pairs the two.
 
     `keep` is whether the journal may hold the stops: names and front doors,
     which `"keepPlaces": false` and --no-journal both say the record is not to
@@ -2650,9 +2666,10 @@ def emit_planner(stops, unfiled=None, keep=False, ms=None, asked=True):
     read the rig makes on its own while an order is held (`planner_auto` in
     main()).
     """
-    print(json.dumps({'planner': {'stops': stops, 'unfiled': unfiled,
+    print(json.dumps({'planner': {'stops': stops,
                                   'keep': bool(keep), 'asked': bool(asked), 'ms': ms,
-                                  'at': int(time.time() * 1000)}}), flush=True)
+                                  'at': int(time.time() * 1000) if at is None else at}}),
+          flush=True)
 
 
 def planner_stops(stops):
@@ -2661,11 +2678,10 @@ def planner_stops(stops):
 
     find_planner now also keeps the stop a page begins in the middle of (kind
     None) and marks the stops a page edge cut. Those are for the sighting,
-    which files nothing; handed to planner_destination, planner_lone_dropoff,
-    the log or the panel's "▸ Dropoff" line, a stop of no kind would be one
-    more stop to count, a None to join, or a pickup drawn as a dropoff. So the
-    filing side is given exactly what it was given before, and the sighting is
-    given all of it."""
+    which the assembler stitches pages from; handed to the log or the panel's
+    "▸ Dropoff" line, a stop of no kind would be a None to join or a pickup
+    drawn as a dropoff. So the planner line is given exactly what it was given
+    before, and the sighting is given all of it."""
     if stops is None:
         return None
     return [{k: v for k, v in s.items() if k != 'partial'}
@@ -2724,19 +2740,24 @@ def order_count(stops):
     return sum(s['orders'] for s in drops)
 
 
-def emit_sighting(text, stops, address, asked, whole, keep=False):
+def emit_sighting(text, stops, address, asked, whole, keep=False, at=None):
     """Stage 2 of the multi-order design: what a whole-screen read or a planner
     read SAW, typed by its screen, and nothing more.
 
-        {sighting: {at, asked, whole, app, screen, page: {top, bottom},
+        {sighting: {at, asked, whole, titled, app, screen, page: {top, bottom},
                     stops: [{kind, orders, name, place, expectedBy, street,
                              city, state, zip, line, partial, label}],
                     orderCount, keep}}
 
-    COLLECTION ONLY. The dropoff and planner lines beside it still do all the
-    filing, by exactly the rules they had; nothing reads this line to file,
-    hold, mark or judge anything. server.js counts it by `screen` and that is
-    all: it writes no journal row from it and sends no address on from it.
+    Stage 3: THE TRIP PLANNER IS FILED FROM THIS LINE. server.js counts it by
+    `screen` and hands it to the assembler (assemble.js), which stitches a
+    planner's pages and decides whether its one dropoff is the order's end —
+    the decision planner_destination and planner_lone_dropoff made here
+    before. This side only types what it saw: `titled` is whether the "Trip
+    Planner" title is on the screen, which an unpressed planner read needs to
+    be filed. The server still writes no journal row from it and broadcasts it
+    to no one; an address filed off it goes to the panel as a dropoff line
+    does.
 
     The frame-local refusals stay here, where the frame is: `address` is the
     one digest() already refused on a payout or a merchant, and an address
@@ -2745,84 +2766,20 @@ def emit_sighting(text, stops, address, asked, whole, keep=False):
     later stage that does keep them has the answer the rig had.
     """
     print(json.dumps({'sighting': sighting(text, stops, address, asked, whole,
-                                           keep=keep)}), flush=True)
+                                           keep=keep, at=at)}), flush=True)
 
 
-def sighting(text, stops, address, asked, whole, keep=False):
+def sighting(text, stops, address, asked, whole, keep=False, at=None):
     """The sighting line's body, built: see emit_sighting, which prints it."""
     kind = OP.screen_type(text)
     listed, page = sighting_stops(text, stops, address)
-    return {'at': int(time.time() * 1000), 'asked': bool(asked), 'whole': bool(whole),
+    return {'at': int(time.time() * 1000) if at is None else at,
+            'asked': bool(asked), 'whole': bool(whole),
+            'titled': OP.planner_titled(text),
             'app': kind['app'], 'screen': kind['screen'], 'page': page,
             'stops': listed,
             'orderCount': order_count(stops) if stops is not None else None,
             'keep': bool(keep)}
-
-
-def planner_destination(stops, bounded):
-    """The address a Trip Planner gives the order in the car, and why not.
-
-    (address, None) when it gives one; (None, why) when it does not, `why`
-    being the word the panel says it with; (None, None) for a planner with no
-    dropoff on it at all, which has nothing to give and nothing to explain.
-
-    EXACTLY ONE DROPOFF ON THE TRIP. With two or more — orders stacked —
-    nothing on the screen says which one belongs to the order the driver marked
-    taken, and the planner lists them in the order they will be driven, not the
-    order they were accepted. Taking the last, the way find_address takes the
-    last address on a navigation screen, would file another customer's door as
-    this order's destination, into the append-only journal, with `asked: true`
-    on it. So the stops are shown and the order in the car keeps the end it
-    had: 'dropoffs'.
-
-    ...ON THE TRIP, NOT ON THE SCREEN, which is what this counted first. Two
-    open stops fill the list (OP.planner_bounded has the measurement), so the
-    one dropoff on the glass of a longer trip may be one of two with the other
-    under the bar of buttons — or above the title, scrolled off. One dropoff is
-    the trip's only one when the list is seen whole, `bounded`; otherwise
-    'list'.
-
-    ...AND BOTH THE STREET AND THE TOWN READ. With no ZIP on this screen the
-    street is the only precision there is: a town alone would go out as the
-    destination, and a map asked for "Marietta" puts a pin on the middle of
-    Marietta — a place that looks like an address and is not one. A stop that
-    did not read whole is still on the panel; it is only not filed: 'address'.
-
-    The same fields find_address returns, so it goes out through emit_dropoff
-    and server.js files it by the rule every other destination is filed by:
-    one message, one consumer.
-    """
-    drops = [s for s in stops if s.get('kind') == 'dropoff']
-    if not drops:
-        return None, None
-    if len(drops) > 1:
-        return None, 'dropoffs'
-    if not bounded:
-        return None, 'list'
-    if not (drops[0].get('street') and drops[0].get('city')):
-        return None, 'address'
-    return {k: drops[0].get(k) for k in ('line', 'street', 'city', 'state', 'zip')}, None
-
-
-def planner_lone_dropoff(stops):
-    """The address of the planner's one dropoff when the list's end is off the
-    screen ('list' above) and the screen still says this much: exactly one
-    Dropoff stop, its header "1 order", its street and town read. None
-    otherwise.
-
-    The owner's decision, after a hotel dropoff on a two-stop trip went
-    unfiled because "Waybill" was under the bar: trust a single-trip offer.
-    What is below the screen is still unseen, so this is only HALF the
-    answer — the other half is the held order's own card, one order on one
-    leg, which server.js has and this does not. It goes out marked
-    `singleCardOnly` and the server files it only on such a card.
-    """
-    drops = [s for s in stops if s.get('kind') == 'dropoff']
-    if len(drops) != 1 or drops[0].get('orders') != 1:
-        return None
-    if not (drops[0].get('street') and drops[0].get('city')):
-        return None
-    return {k: drops[0].get(k) for k in ('line', 'street', 'city', 'state', 'zip')}
 
 
 # Uber's "Early look • Order in progress" badge: an offer shown while the
@@ -2854,11 +2811,11 @@ def says_early_look(parsed):
 
 # A card for more than one order: "(2 orders)" after DoorDash's pickup, the
 # "+1 order" a stacked add-on shows, any count of two or more before "orders".
-# Said on the offer line beside `legs`, for the one reader that needs it:
-# server.js files a Trip Planner's lone dropoff off a list whose end is below
+# Said on the offer line beside `legs`, for the one reader that needs it: the
+# assembler files a Trip Planner's lone dropoff off a list whose end is below
 # the screen only onto a held order whose card was ONE order on ONE leg — see
-# planner_lone_dropoff. A card that says nothing of orders is not multi; a
-# read that lost the words is why `legs` is asked as well.
+# plannerLoneDropoff in assemble.js. A card that says nothing of orders is not
+# multi; a read that lost the words is why `legs` is asked as well.
 MULTI_ORDER = re.compile(r'\+\s*\d+\s*orders?\b|\b(?:[2-9]|[1-9]\d)\s*orders\b', re.I)
 
 
@@ -3547,6 +3504,9 @@ def main():
     # minutes is reported once rather than on every read that happens to catch
     # it. A DIFFERENT address is a different job and is always sent.
     dropoff_said = None
+    # ...and the order in the car when it was last looked at (held_signature),
+    # which is what forgets it.
+    held_seen = None
     # The Trip Planner read the rig makes WITHOUT a press, while an order is in
     # the car. `planner_auto` is a whole-screen read wanted on the next pass;
     # `planner_auto_at` is when the last one was asked for, which is the rate
@@ -3622,7 +3582,7 @@ def main():
         # is how a loop rewritten into a closure loses its memory without
         # anything failing loudly enough to notice.
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
-        nonlocal dropoff_until, dropoff_said, dropoff_asked
+        nonlocal dropoff_until, dropoff_said, dropoff_asked, held_seen
         nonlocal planner_auto, planner_auto_at
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
@@ -3786,20 +3746,23 @@ def main():
         # address answers to. Measured, it costs a planner nothing — parse()
         # finds no payout and no places on one, pickups and all.
         #
-        # A planner DECIDES the destination, asked or not. A screen listing
-        # stops can carry more than one address, and find_address would take
-        # the last one printed — on a planner with two dropoffs that is one of
-        # two customers, chosen by layout, and an unprompted read of the card
-        # box would send it as a sighting. So on a planner `found` is what
-        # planner_destination says, which is nothing unless the press asked
-        # for it and the trip has exactly one dropoff: one rule for "where is
-        # this order going" on this screen, not two. rpi/test_loop.py holds the
-        # unprompted half: a planner nobody pressed for, with a ZIP on it.
+        # A planner's addresses are NEVER this read's to send, asked or not. A
+        # screen listing stops can carry more than one address, and
+        # find_address would take the last one printed — on a planner with two
+        # dropoffs that is one of two customers, chosen by layout. Whether the
+        # planner gives the order in the car its end is the assembler's
+        # (assemble.js, plannerDestination and plannerLoneDropoff, which were
+        # planner_destination and planner_lone_dropoff here), decided off the
+        # sighting this read sends below: one page as this file decided it,
+        # or several pages stitched, which is what this file could not see. So
+        # on a planner `found` is None, and rpi/test_loop.py holds both halves:
+        # a planner nobody pressed for, with a ZIP on it, sends no address,
+        # and one pressed for sends its stops and its sighting.
         #
         # `seen_stops` is everything find_planner kept, the stops a page edge
-        # cut included; `planner`, which everything below files by, is the
-        # headed stops alone, as it always was (planner_stops). Only the
-        # sighting is given the rest.
+        # cut included; `planner`, the planner line's stops, is the headed
+        # stops alone, as it always was (planner_stops). The sighting is given
+        # all of it.
         seen_stops = None if an_offer else OP.find_planner(out.get('text'))
         planner = planner_stops(seen_stops)
         answers = planner is not None and whole and asked
@@ -3809,43 +3772,25 @@ def main():
         # automatically. A whole-screen read that nobody asked for is the one
         # `planner_auto` below requested — a press's reads are all `asked`,
         # because the window is open from before they are handed over — and it
-        # answers only off a screen whose TITLE reads "Trip Planner": the stop
-        # grammar that started it was read in the card box, and the title is
-        # what says the whole screen is the planner and not a map round a card.
-        # It goes out as the press's does, `asked: false`, and only with a stop
-        # on it (find_planner is None without one), so a read that found no
-        # stop never replaces one that had them.
-        #
-        # THE STOPS ONLY. Its one dropoff is not sent, even where
-        # planner_destination would file it under a press: the planner's
-        # address is this file's one loosened grammar, and the reason given
-        # above for keeping it under the press holds for a read nobody made —
-        # a planner still up from the trip before is filed against the order
-        # just taken. `unfiled` still goes with the stops, so the panel says
-        # why ⌖ would not file one either; when ⌖ would, it says nothing, and
-        # the press files it.
+        # sends the planner line only off a screen whose TITLE reads "Trip
+        # Planner": the stop grammar that started it was read in the card box,
+        # and the title is what says the whole screen is the planner and not a
+        # map round a card. It goes out as the press's does, `asked: false`,
+        # and only with a stop on it (find_planner is None without one), so a
+        # read that found no stop never replaces one that had them. The
+        # sighting says `titled` too, and the assembler asks it of an
+        # unpressed page before it files off one.
         #
         # Not an accept detector and not a press: it runs only when the driver
         # has already marked the order taken (order_held), and the rig still
         # touches nothing on the phone.
         auto = (planner is not None and whole and not asked
                 and OP.planner_titled(out.get('text')))
-        unfiled = None
         if planner is not None:
-            found, unfiled = (planner_destination(planner,
-                                                  OP.planner_bounded(out.get('text')))
-                              if answers or auto else (None, None))
-        # ...and, unpressed, the lone dropoff of a list whose end is off the
-        # screen, for server.js to file only onto a single-trip card: see
-        # planner_lone_dropoff. A press keeps the 'list' answer it had.
-        single_card_only = False
-        if auto and found is None and unfiled == 'list':
-            found = planner_lone_dropoff(planner)
-            single_card_only = found is not None
+            found = None
         # A whole-screen read nobody pressed for gives no destination at all:
-        # not its planner's one dropoff (see THE STOPS ONLY, above), and not
-        # the address find_address would take off the whole screen, which is
-        # the map's or a card's as often as the destination's.
+        # not the address find_address would take off the whole screen, which
+        # is the map's or a card's as often as the destination's.
         #
         # ...EXCEPT AN ADDRESS THE SCREEN PRINTS UNDER A DROPOFF LABEL, IN ITS
         # OWN STOP BLOCK, which the driver then asked for: "while an order is
@@ -3854,21 +3799,16 @@ def main():
         # nobody pressed for happens only as `planner_auto`, which runs only
         # while the driver's own ✓ Took is in force (order_held), so this is
         # still not an accept detector and still touches nothing on the phone.
-        # Two shapes pass: the planner's one dropoff, by the same
-        # planner_destination a press files it by (one dropoff on the trip, the
-        # list seen whole, street and town read — its stop header is the
-        # label), and a screen with no planner whose address
-        # OP.address_under_dropoff says sits under "Dropoff" with no other
-        # address between. Each goes out `labelled`, which is what lets
-        # server.js file it over the card's own corner or town and never over
-        # a press. The planner still up from the trip before is server.js's to
-        # refuse: it files a labelled read only when it is newer than the Took
-        # and is not one of the held order's own planner pickups.
+        # A screen with no planner whose address OP.address_under_dropoff says
+        # sits under "Dropoff" with no other address between goes out
+        # `labelled`: TYPED, and no more. Whether it files over the card's own
+        # corner or town — never over a press, never before the Took, never as
+        # one of the hold's own planner pickups — is the assembler's to say,
+        # against the hold it has and this process does not.
         labelled = False
         if whole and not asked:
-            labelled = bool(found) and (
-                auto or (planner is None
-                         and OP.address_under_dropoff(out.get('text'))))
+            labelled = (bool(found) and planner is None
+                        and OP.address_under_dropoff(out.get('text')))
             if not labelled:
                 found = None
         # ...and asked FOR, off a card-box read that shows the planner's grammar
@@ -4096,6 +4036,19 @@ def main():
         # address onto whatever card is on screen now, `dropoffScanned: true`.
         # Once per address is a stale answer; once per screened card is a
         # confidently wrong one.
+        #
+        # THE ORDER IN THE CAR IS the boundary, and it is the server's to say
+        # (held_signature: the note server.js leaves names the order). This was
+        # never cleared at all, so an address refused once — read before the
+        # driver pressed ✓ Took, and so not about the order then held — was
+        # never volunteered again for the delivery it was about, and only ⌖
+        # could rescue it (AUDITS: "Why that loss is permanent"). Forgotten
+        # when the order changes, and only then: one order's own navigation
+        # screen is still said once.
+        held_now = held_signature(started)
+        if held_now != held_seen:
+            held_seen = held_now
+            dropoff_said = None
         if found and not asked and (found.get('line') or None) == dropoff_said:
             found = None
         # The planner, when it answered a press, goes out on its own line and
@@ -4104,43 +4057,49 @@ def main():
         # that screen", and the panel shows its stops; a "nothing on that screen
         # read as an address" arriving after it, from the branch that closes an
         # unanswered window, would contradict the stops on the glass. So it is
-        # answered here, by the same two assignments `if found:` makes, and the
-        # one dropoff — when planner_destination gives it — goes on below
-        # through that branch to the consumer every destination has.
+        # answered here, by the same two assignments `if found:` makes. Its
+        # one dropoff, when it gives one, is the assembler's to file off the
+        # sighting, and reaches the panel from server.js as a dropoff line.
+        #
+        # What the read SAW, first: every whole-screen read and every read
+        # with a planner on it, typed by its screen. See emit_sighting. Off the
+        # frame's own address — `found` above is the dropoff line's answer,
+        # already narrowed by press, label and repeat — and that address is
+        # None wherever `an_offer` refused it. FIRST, and with the planner
+        # line's own stamp (`seen_at`), because a planner's one dropoff and the
+        # reason it gives none are the assembler's, off this line: server.js
+        # has decided them by the time the planner line below arrives, and
+        # puts the reason on it for the panel.
+        seen_at = int(time.time() * 1000)
+        if args.json and (whole or seen_stops is not None):
+            emit_sighting(out.get('text'), seen_stops,
+                          None if an_offer else shot.get('address'),
+                          asked, whole,
+                          keep=offer_log is not None and offer_log.keep_places,
+                          at=seen_at)
         if answers:
             dropoff_until = 0.0
             dropoff_asked = False
             if args.json:
                 # Kept in the journal only where offers' places are: the
                 # stops name people and their doors.
-                emit_planner(planner, unfiled=unfiled,
+                emit_planner(planner,
                              keep=offer_log is not None and offer_log.keep_places,
-                             ms=out.get('ms'))
+                             ms=out.get('ms'), at=seen_at)
             # The kinds, not the names: the log is the rig's, and the stops
-            # name people and their doors.
-            log('trip planner read: %s; %s'
-                % (', '.join(s['kind'] for s in planner),
-                   'its one dropoff is the destination' if found
-                   else 'the destination is left as it was (%s)' % unfiled))
+            # name people and their doors. Whether one was filed is the
+            # server's to say now.
+            log('trip planner read: %s; the server files from its sighting'
+                % ', '.join(s['kind'] for s in planner))
         elif auto:
             # No window to close and no press to answer: the stops, to the
             # panel and onto the order in the car, said as unasked.
             if args.json:
-                emit_planner(planner, unfiled=unfiled,
+                emit_planner(planner,
                              keep=offer_log is not None and offer_log.keep_places,
-                             ms=out.get('ms'), asked=False)
+                             ms=out.get('ms'), asked=False, at=seen_at)
             log('trip planner read, unpressed, an order being held: %s'
                 % ', '.join(s['kind'] for s in planner))
-        # ...and, beside those two lines, what the read SAW: every whole-screen
-        # read and every read with a planner on it, typed by its screen, filing
-        # nothing. See emit_sighting. Off the frame's own address — `found`
-        # above is the FILING answer, already narrowed by press, label and
-        # repeat — and that address is None wherever `an_offer` refused it.
-        if args.json and (whole or seen_stops is not None):
-            emit_sighting(out.get('text'), seen_stops,
-                          None if an_offer else shot.get('address'),
-                          asked, whole,
-                          keep=offer_log is not None and offer_log.keep_places)
         if found:
             dropoff_said = found.get('line')
             # Closed the moment it is answered, and what that closes is the
@@ -4186,8 +4145,7 @@ def main():
             dropoff_asked = False
             if args.json:
                 emit_dropoff(found, ms=out.get('ms'), asked=asked,
-                             labelled=labelled,
-                             single_card_only=single_card_only and labelled)
+                             labelled=labelled)
             log('destination read%s: %s'
                 % ('' if asked else ' (unprompted, under a Dropoff label)'
                    if labelled else ' (unprompted)', found.get('line')))

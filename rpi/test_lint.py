@@ -1135,16 +1135,17 @@ ok_('AUDITS.md keeps each entry in one section, not %s' % (_alike[:2] or 'two'),
 
 # --- the reasons a Trip Planner gives the order in the car no end -------------
 #
-# rpi/scan_pi.py's planner_destination decides, and says which reason in a word
-# on the planner line; live.html's UNFILED_SAID has the panel's words for each.
-# Two lists in two languages that have to be the same list: a reason the
-# scanner gives that the page has no entry for is a TypeError on the driving
-# screen, and an entry the scanner never gives is a branch no input reaches.
+# assemble.js's plannerDestination decides (it was rpi/scan_pi.py's
+# planner_destination until Stage 3), and server.js puts its word on the
+# planner line; live.html's UNFILED_SAID has the panel's words for each.
+# Two lists in two files that have to be the same list: a reason the
+# assembler gives that the page has no entry for is a TypeError on the driving
+# screen, and an entry it never gives is a branch no input reaches.
 # Read out of both files, as the doubt reasons above are.
-_sp_src = open(os.path.join(ROOT, 'rpi', 'scan_pi.py'), encoding='utf-8').read()
-_pd = _sp_src[_sp_src.index('\ndef planner_destination('):]
-_pd = _pd[:_pd.index('\ndef ', 1)]
-_given = set(re.findall(r"return None, '([a-z]+)'", _pd))
+_asm_src = open(os.path.join(ROOT, 'assemble.js'), encoding='utf-8').read()
+_pd = _asm_src[_asm_src.index('\n  function plannerDestination('):]
+_pd = _pd[:_pd.index('\n  function ', 1)]
+_given = set(re.findall(r"why: '([a-z]+)'", _pd))
 _live_src = open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read()
 _said = re.search(r'var UNFILED_SAID = \{(.*?)\n  \};', _live_src, re.S)
 eq('live.html has words for every reason planner_destination gives, and no other',
