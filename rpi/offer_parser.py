@@ -2895,11 +2895,31 @@ def find_planner(text):
     Line by line, because the planner's grammar IS its lines: which line
     follows the header is the name, which two follow the label are the address.
     normalize() is applied to each line on its own, as line_starts does.
+
+    THE PAGE'S TWO EDGES, which a stop can be cut by, each said on the stop
+    as `partial` and on no other stop — the key is absent from a stop the page
+    shows from its header down:
+
+      * 'top': a page that starts mid-stop, an "Address" block with no header
+        above it (see _planner_orphan). Kept as a stop of kind None: the
+        header that said pickup or dropoff is above the glass, so nothing says
+        which, and it is never guessed.
+      * 'bottom': the last header with no address under it and no "Waybill"
+        after it — a block cut by the foot of the page, as against a closed
+        one, which the list's end under it shows is closed.
+
+    Neither is ever a destination. The scanner's planner line, its
+    planner_destination and planner_lone_dropoff are handed the headed stops
+    only, without the key, exactly as before; a sighting carries all of them.
+    See planner_stops in scan_pi.py.
     """
     lines, heads = _planner_lines(text)
     if not heads:
         return None
     stops = []
+    top = _planner_orphan(lines, heads[0])
+    if top is not None:
+        stops.append(top)
     for k, at in enumerate(heads):
         head = PLANNER_STOP.match(lines[at])
         block = lines[at + 1:heads[k + 1] if k + 1 < len(heads) else len(lines)]
@@ -2945,7 +2965,47 @@ def find_planner(text):
         # shown, never searched, and never the street. See PLANNER_HOUSE.
         stop['place'] = place
         stops.append(stop)
+    last = stops[-1]
+    if not (last['street'] or last['city']) \
+            and not any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:]):
+        last['partial'] = 'bottom'
     return stops
+
+
+def _planner_orphan(lines, first):
+    """The stop a page begins in the middle of, or None: an "Address" label
+    above the first header, with no "Trip Planner" title over it.
+
+    Off the rig's own reads of a stacked trip's planner, with the list
+    scrolled: "Address / <street>, <town>, GA / View details" over
+    "Dropoff +1 order" — the first stop's header, name and time gone above the
+    glass, its address still on it. Read through the same lines a headed
+    stop's address is; its kind and count are None, its name too (whatever is
+    over the label may be the name or the time's own tail), and its time only
+    if an "Expected by" survived above the label.
+
+    A title above the first header means the page starts at the top of the
+    list, so nothing above that header is a stop. Without the label there is
+    no anchor: lines with no header and no label are not read as an address
+    here, as they are not anywhere in the planner's grammar.
+    """
+    above = lines[:first]
+    if any(PLANNER_TITLE.match(l) for l in above):
+        return None
+    label = next((j for j, l in enumerate(above) if PLANNER_ADDRESS.match(l)), None)
+    if label is None:
+        return None
+    due = None
+    for line in above[:label]:
+        m = PLANNER_EXPECTED.search(line)
+        if m:
+            due = time_of_day(m.group(1), m.group(2), m.group(3))
+    street_line, town_line, place = _planner_address_lines(above, label)
+    stop = {'kind': None, 'orders': None, 'name': None, 'expectedBy': due}
+    stop.update(_planner_address(street_line, town_line))
+    stop['place'] = place
+    stop['partial'] = 'top'
+    return stop
 
 
 # The two ends of the list, which is what "the planner has one dropoff" needs
@@ -2996,15 +3056,171 @@ def planner_bounded(text):
     title with the first stop straight under it, and "Waybill" after the last.
     False otherwise, and for a text that is no planner at all. See PLANNER_END.
     """
+    top, bottom = planner_ends(text)
+    return top and bottom
+
+
+def planner_ends(text):
+    """(top, bottom): whether each end of the Trip Planner's list is on the
+    screen, by planner_bounded's two tests taken one at a time — the title with
+    the first stop straight under it, and "Waybill" after the last header.
+    (False, False) for a text that is no planner. A sighting says the two
+    apart, as its `page`; planner_bounded is both."""
     lines, heads = _planner_lines(text)
     if not heads:
-        return False
+        return False, False
     titles = [i for i in range(heads[0]) if PLANNER_TITLE.match(lines[i])]
-    if not titles:
-        return False
-    if any(re.search(r'[A-Za-z]{2}', l) for l in lines[titles[-1] + 1:heads[0]]):
-        return False
-    return any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:])
+    top = bool(titles) and not any(re.search(r'[A-Za-z]{2}', l)
+                                   for l in lines[titles[-1] + 1:heads[0]])
+    return top, any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:])
+
+
+# --- what screen this is ------------------------------------------------------
+#
+# Stage 2 of the multi-order design: every whole-screen read and every planner
+# read goes out as a SIGHTING typed by the screen it was off, and nothing files
+# on it — the dropoff and planner lines still do all the filing. This is the
+# typing. Collection only: no verdict, no destination and no journal row is
+# decided by it, and it is kept apart from NOT_AN_OFFER below, which DOES
+# decide (a screen it names gets no verdict). The two may agree; neither asks
+# the other.
+#
+# Built from the 12 Oct shift's journal — its 1,237 `screen` rows (the
+# payout-free frames read after a card) and its offer rows' texts — and the
+# readings kept with that week's 📷 Snaps. Each recogniser is the app's own
+# furniture, as the reader renders it:
+#
+#   dd.switch      DoorDash's "Switch to dash in this busier zone" / "Don't
+#                  switch".
+#   uber.planner   Uber's Trip Planner: a stop header (find_planner), its
+#                  title, the "Address" label, "Waybill", or the bar's "Stop
+#                  New Requests" — the furniture planner_furniture names,
+#                  less "Expected by", which Uber's navigation bar prints too
+#                  ("4 min © 0.6 mi / Expected by 8:20 PM").
+#   tripRadar      Uber's Trip Radar list: its title over an offer.
+#   dd.offer       DoorDash's card: "Guaranteed (incl. tips)" over "5.0 mi +
+#                  25 min" (miles BEFORE minutes), the newer "$7.39 incl. tips /
+#                  2 stops (4.3 mi) · 22 min", "Customer dropoff", "Multiple
+#                  dropoffs", "All orders are picked up", "Deliver by".
+#   uber.addon     Uber's offer to add to the trip in progress: its leg in
+#                  plus signs, "+25 min (+ 9.6 mi) total".
+#   uber.offer     Uber's card: a leg "17 min (3.7 mi)" (minutes BEFORE a
+#                  bracketed distance), "Includes expected tip", "Guaranteed
+#                  (incl. tip)", "Exclusive", "Est. delivery", a rider's
+#                  "Verified", "Avg. wait time", "Early look", "fast charger".
+#   uber.pickupNav Uber's navigation to a store: "Note from business", "Pick
+#                  up in store", "Pick up order".
+#   uber.nav       Uber's navigation otherwise: "Deliver to <name>", "Dropoff
+#                  type", "Meet at door", "Complete delivery", "Arriving soon",
+#                  and the bar "6 min © 1.7 mi" (minutes, a dot, miles, no
+#                  bracket).
+#   dd.finding     DoorDash idle: "Finding offers", "wait for offers", "Zone
+#                  offer wait", "likely to get offers".
+#   uber.finding   Uber idle: "Finding trips", "You're online", and the map's
+#                  Trip Radar button with no offer under it.
+#   unknown        Anything else, including two screens the shift shows and
+#                  this list has no name for: DoorDash's "Pickup from <store> /
+#                  Directions" and its "Are you sure you want to decline this
+#                  offer?". Both are said `unknown`, not filed under the nearest
+#                  name.
+#
+# IN THAT ORDER, first match wins, and the order is the measurement. The
+# switch prompt and the planner come first because each is unmistakable and an
+# offer's furniture can sit behind either. Offers come before navigation and
+# idle because an offer card lands ON TOP of both — the map round a DoorDash
+# card prints "Finding offers" until the card covers it, and Uber's offer
+# slides up over the navigation bar — so a frame with both is the card. Of the
+# two apps' offers, DoorDash's is asked first: its "incl. tips" and miles-then-
+# minutes are its own, while "Guaranteed (incl. tip" is on both and decides
+# nothing alone.
+SCREENS = ('uber.offer', 'uber.addon', 'uber.planner', 'uber.pickupNav',
+           'uber.nav', 'uber.finding', 'tripRadar', 'dd.offer', 'dd.finding',
+           'dd.switch', 'unknown')
+SCREEN_DD_SWITCH = re.compile(r"switch to dash|busier zone|don.?t switch",
+                              re.IGNORECASE | ASCII)
+SCREEN_PLANNER = re.compile(r'^[^A-Za-z0-9]{0,3}(?:trip ?planner|address|stop new requests'
+                            r'|way ?[A-Za-z]? ?bill)\b', re.IGNORECASE | ASCII)
+SCREEN_RADAR = re.compile(r'\btrip ?radar\b', re.IGNORECASE | ASCII)
+SCREEN_DD_OFFER = re.compile(
+    r'\bincl[.,]? ?tips\b|\d ?stops? ?\(|custom[ea]r[ \t\r\n]*drop'
+    r'|multiple[ \t\r\n]*drop[ \t\r\n]*-?[ \t\r\n]*offs'
+    r'|all orders are picked up|deliver by|\d ?mi ?[-+·•«] ?\d{1,3} ?min',
+    re.IGNORECASE | ASCII)
+SCREEN_ADDON = re.compile(r'\+ ?\d{1,3} ?min\w* ?\( ?\+', re.IGNORECASE | ASCII)
+SCREEN_UBER_OFFER = re.compile(
+    r'\d ?min\w* ?\( ?\d|\bmi\)? ?total\b|includes expected tip|\bincl[.,]? ?tip\b'
+    r'|\bexclusive\b|est[.,]? ?delivery|\bverified\b|avg[.,]? ?wait time'
+    r'|early [lt]ook|fast charger|matching may take', re.IGNORECASE | ASCII)
+SCREEN_DD_ELSEWHERE = re.compile(
+    r'pick ?up from\b|current task|pause orders|decline this offer|this dash so far'
+    r'|dash summary|continue dashing', re.IGNORECASE | ASCII)
+SCREEN_PICKUP_NAV = re.compile(r'note from business|pick ?up in store|pick ?up order',
+                               re.IGNORECASE | ASCII)
+SCREEN_NAV = re.compile(
+    r'\bdeliver(?:ing)? to\b|dropoff type|meet at (?:the )?door|complete delivery'
+    r'|arriving soon|expected by \d'
+    r'|(?:\d|\b[lLIO])[\dlI]? ?min ?[©Oo0@] ?[\dO]{0,3}(?:[.,]\d)? ?mi\b',
+    re.IGNORECASE | ASCII)
+# The speed-limit sign, which Uber draws while it navigates: the last thing
+# asked, so the idle map's own words decide first.
+SCREEN_LIMIT = re.compile(r'\blimit\b', re.IGNORECASE | ASCII)
+# Uber's wait after an Early look is accepted: the card's badge is still on
+# it, and no offer is.
+SCREEN_MATCHING = re.compile(r'matching in progress', re.IGNORECASE | ASCII)
+SCREEN_DD_FINDING = re.compile(r'finding offers|wait for offers|zone offer wait'
+                               r'|likely to get offers', re.IGNORECASE | ASCII)
+SCREEN_UBER_FINDING = re.compile(r"finding trips|\by?ou.?re online", re.IGNORECASE | ASCII)
+
+
+def screen_type(text):
+    """{'app': 'uber'|'doordash'|None, 'screen': one of SCREENS} for `text`, a
+    reading of the phone's screen. `app` follows from the screen and is None
+    only for 'unknown'. See the table above for what each one is."""
+    screen = _screen(str(text or ''))
+    app = ('doordash' if screen.startswith('dd.') else
+           None if screen == 'unknown' else 'uber')
+    return {'app': app, 'screen': screen}
+
+
+def _screen(text):
+    if SCREEN_DD_SWITCH.search(text):
+        return 'dd.switch'
+    if SCREEN_MATCHING.search(text):
+        return 'unknown'
+    if SCREEN_RADAR.search(text) and SCREEN_UBER_OFFER.search(text):
+        return 'tripRadar'
+    if SCREEN_DD_OFFER.search(text):
+        return 'dd.offer'
+    if SCREEN_ADDON.search(text):
+        return 'uber.addon'
+    if SCREEN_UBER_OFFER.search(text):
+        return 'uber.offer'
+    # Every line, the bar's included: _planner_lines stops above the bar.
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', text)]
+    if find_planner(text) is not None or any(SCREEN_PLANNER.match(l) for l in lines):
+        return 'uber.planner'
+    if SCREEN_DD_ELSEWHERE.search(text):
+        return 'unknown'
+    if SCREEN_PICKUP_NAV.search(text):
+        return 'uber.pickupNav'
+    if SCREEN_NAV.search(text):
+        return 'uber.nav'
+    if SCREEN_DD_FINDING.search(text):
+        return 'dd.finding'
+    if SCREEN_UBER_FINDING.search(text) or SCREEN_RADAR.search(text):
+        return 'uber.finding'
+    if SCREEN_LIMIT.search(text):
+        return 'uber.nav'
+    return 'unknown'
+    if SCREEN_PICKUP_NAV.search(text):
+        return 'uber.pickupNav'
+    if SCREEN_NAV.search(text):
+        return 'uber.nav'
+    if SCREEN_DD_FINDING.search(text):
+        return 'dd.finding'
+    if SCREEN_UBER_FINDING.search(text) or SCREEN_RADAR.search(text):
+        return 'uber.finding'
+    return 'unknown'
 
 
 # The card saying, in its own words, that it is not going to tell you where the
