@@ -1026,7 +1026,7 @@ try:
     # otherwise silently omit: the card never said where the job ends.
     ok_('offers the card gave no destination for are counted', 'no dropoff at all' in side)
     ok_('...and the reason is given', 'Customer dropoff' in side)
-    ok_('...along with what fills them in', 'Dropoff button' in side)
+    ok_('...along with what fills them in', 'Scan button' in side)
 
     status2 = placed.get('status') or ''
     # Out of the three that named both ends, not out of the four that named
