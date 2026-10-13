@@ -827,6 +827,10 @@ function startScanner() {
           if (heldNow) {
             heldNow.planner = { stops: read.planner.stops,
                                 unfiled: read.planner.unfiled || null };
+            // ...and its pickups searched for on the NucBox, for the
+            // restaurant guard (searchHeldPickup); a no-op for one already
+            // asked about on this hold.
+            armHeldPickups(heldNow);
           }
           if (read.planner.keep === true) recordPlanner(read.planner, plannedAt);
         }
@@ -1185,6 +1189,7 @@ function setHolding(h) {
   }
   tellScannerHeld(h);
   armHeldEnd(h || null);
+  armHeldPickups(h || null);
 }
 
 /* Until when an order is in the car, for the scanner, which cannot ask.
@@ -1244,6 +1249,7 @@ function loadHolding() {
   // ...and the scanner told, since a hold restored at boot is a hold.
   if (still) tellScannerHeld(still);
   armHeldEnd(still);
+  armHeldPickups(still);
   return still;
 }
 
@@ -1614,6 +1620,121 @@ function searchHeldEnd(key, attempt) {
     nbxRemember(target, out);
     answered(out);
   });
+}
+
+/* ---------- the held order's pickups, searched for by this server ----------
+ *
+ * The restaurant guard (pickupNearEnd) is only as good as the pickups it is
+ * given, and until this only Map view gave them (/api/held-pickup): with Map
+ * view never opened on a hold the guard held nothing, and searchHeldEnd armed
+ * a door next to the restaurant all the same — the case the guard is there
+ * for (the 12 Oct replay, at PICKUP_GUARD_M). So when the hold carries its
+ * Trip Planner (the rig reads it unpressed while an order is held) and
+ * NUCBOX_SEARCH is set, this server asks the NucBox for each of its pickups
+ * the question Map view asks: each stop
+ * MV.heldPickups keeps (a pickup that has a street, its line as the place),
+ * searchPlan's street in discBox round the HELD card's disc, chosen by
+ * pickInDisc. Map view's own functions, as for the end. The position is kept
+ * as /api/held-pickup keeps one (keepPickupPin): one path, so the two cannot
+ * keep pickups two ways.
+ *
+ * Any pin pickInDisc chooses, not only a door: where the line has a house
+ * number the door rule is pickInDisc's own, and where it has none the street's
+ * agreeing answers are what Map view pins too (with no street index). The
+ * guard only ever WITHHOLDS the GPS drop, so a pickup kept a little off costs
+ * at most a drop the timer and Drop still make — the cheap error, as refusing
+ * the end is. A corner ("A & B") is the street index's question, which this
+ * server does not ask: no pin, as with no NucBox at all. NucBox only; with
+ * NUCBOX_SEARCH unset nothing here sends anything.
+ *
+ * ONE search per hold and pickup line (`pickSearch.asked`); a failure or a
+ * timeout is asked once more after END_RETRY_MS, as the end's is, and an
+ * answer that comes back after the hold changed is dropped. Nothing is kept
+ * of a refusal; /api/status says how many pickups the guard holds
+ * (`pickupsPinned`) beside the planner's own stops (`planner`), and Map view
+ * says why one has no pin. */
+var pickSearch = { holdId: null, asked: {}, timers: [] };
+
+/* The hook, beside armHeldEnd: after the hold is written, when a Trip Planner
+ * read lands on it, and at boot. A no-op for a pickup line already asked
+ * about on this hold. */
+function armHeldPickups(h) {
+  if (!NBX.search) return;
+  var id = holdIdOf(h);
+  if (id !== pickSearch.holdId) {
+    pickSearch.timers.forEach(clearTimeout);
+    pickSearch = { holdId: id, asked: {}, timers: [] };
+  }
+  if (!h || !h.planner || !MV.discFor(h.card || null)) return;
+  MV.heldPickups(h.planner.stops).forEach(function (p) {
+    if (pickSearch.asked[p.q]) return;
+    pickSearch.asked[p.q] = true;
+    searchHeldPickup(id, p.q, 1);
+  });
+}
+
+// The hold this search is still about, or null.
+function pickHold(id) {
+  var h = holding(Date.now());
+  return h && pickSearch.holdId === id && holdIdOf(h) === id ? h : null;
+}
+
+function searchHeldPickup(id, q, attempt) {
+  var h = pickHold(id);
+  if (!h) return;
+  var plan = MV.searchPlan(q);
+  var disc = MV.discFor(h.card || null);
+  var said = plan && plan.kind === 'street' ? nbxTerm(plan.street) : null;
+  if (!said || !disc) return;
+  var target = nbxSearchTarget('street', said, MV.discBox(disc));
+  function answered(out) {
+    var now = pickHold(id);
+    if (!now) return;
+    var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
+    if (res.at) keepPickupPin(now, res.at);
+  }
+  if (nbxCache.has(target)) return answered(nbxCache.get(target));
+  nbxAsk(target, function (err, body) {
+    if (!err && !Array.isArray(body)) err = 'not a list';
+    if (err) {
+      if (attempt === 1 && pickHold(id)) {
+        pickSearch.timers.push(setTimeout(function () {
+          searchHeldPickup(id, q, 2);
+        }, END_RETRY_MS));
+      }
+      return;
+    }
+    var out = nbxHits(body);
+    nbxRemember(target, out);
+    answered(out);
+  });
+}
+
+/* Keep one of the held order's pickups, from Map view (/api/held-pickup) or
+ * this server's own search: at most PICKUP_PINS_MAX, the newest, one per
+ * position.
+ *
+ * ...and the guard asked again there and then. A door armed before its
+ * restaurant was known may already have counted the car waiting at the
+ * restaurant as an arrival — in the 12 Oct replay a door 50-75 m from the
+ * restaurant "arrived" 1 time in 24 at today's 100 m, and 24 in 24 at the
+ * 125 m before it — and gpsArrival only stops counting from the next beat. Left on the hold, that arrival is "arrived" on
+ * /api/status for a door that is not armed, and should the guard stop holding
+ * (a newer pickup pushing this one out of the PICKUP_PINS_MAX kept) the next
+ * departure puts the order down on it. So a pickup that puts the armed door
+ * inside the guard takes the arrival and the dwell with it. */
+function keepPickupPin(h, at) {
+  var picks = (Array.isArray(h.pickupPins) ? h.pickupPins : []).filter(function (p) {
+    return p.lat !== at.lat || p.lon !== at.lon;
+  });
+  picks.push({ lat: at.lat, lon: at.lon });
+  h.pickupPins = picks.slice(-PICKUP_PINS_MAX);
+  var pin = heldEndPin(h);
+  if (pin && pickupNearEnd(h, pin)) {
+    delete h.arrivedAt;
+    resetArrival(holdIdOf(h));
+  }
+  setHolding(h);
 }
 
 /* One heartbeat. Returns what the panel is told on that beat: whether the car
@@ -3570,6 +3691,9 @@ function statusNow() {
                    endWhy: heldEndPin(h)
                      ? (pickupNearEnd(h, heldEndPin(h)) ? 'door next to the pickup' : null)
                      : h.endWhyFor === h.dropoff ? (h.endWhy || null) : null,
+                   // ...and how many of its pickups the guard holds, from Map
+                   // view or this server's search (keepPickupPin).
+                   pickupsPinned: Array.isArray(h.pickupPins) ? h.pickupPins.length : 0,
                    // Where it ends, and whether that came off the card or
                    // off a scan of the screen after the accept. The panel
                    // needs the difference: a card-derived dropoff is a
@@ -5781,7 +5905,9 @@ function route(req, res) {
    * the held card's disc. Body: {holdId, lat, lon}. Kept on the hold (at most
    * PICKUP_PINS_MAX, the newest) for the restaurant guard alone
    * (pickupNearEnd): a door within PICKUP_GUARD_M of one is not armed. A pin
-   * for another hold, or with no position, is refused and changes nothing. */
+   * for another hold, or with no position, is refused and changes nothing.
+   * This server searches for the same pickups itself (searchHeldPickup), so
+   * Map view need not be opened for the guard to hold. */
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/held-pickup') {
     return readBody(req, 1024, function (err, text) {
       var json = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -5798,12 +5924,9 @@ function route(req, res) {
                || !isFinite(body.lat) || !isFinite(body.lon)
                || Math.abs(body.lat) > 90 || Math.abs(body.lon) > 180) why = 'no position';
       if (why) return send(res, 409, JSON.stringify({ ok: false, error: why }), json);
-      var picks = (Array.isArray(h.pickupPins) ? h.pickupPins : []).filter(function (p) {
-        return p.lat !== body.lat || p.lon !== body.lon;
-      });
-      picks.push({ lat: body.lat, lon: body.lon });
-      h.pickupPins = picks.slice(-PICKUP_PINS_MAX);
-      setHolding(h);
+      // The one path this server's own search keeps a pickup by too, guard
+      // and all (keepPickupPin).
+      keepPickupPin(h, { lat: body.lat, lon: body.lon });
       send(res, 200, JSON.stringify({ ok: true }), json);
     });
   }

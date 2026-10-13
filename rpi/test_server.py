@@ -5842,6 +5842,215 @@ finally:
     _stub.shutdown()
     shutil.rmtree(_adir, ignore_errors=True)
 
+
+# --- the held order's pickups, searched for by the server --------------------
+#
+# The restaurant guard (pickupNearEnd) without Map view: when a Trip Planner
+# read lands on the hold and NUCBOX_SEARCH is set, server.js asks the NucBox
+# for each pickup that has a street (searchHeldPickup), inside the HELD card's
+# disc, and keeps the position as /api/held-pickup does (keepPickupPin). The
+# fake's "1975 Cobb Parkway" is a restaurant 87 m from the door at 1985 Cobb
+# Parkway, inside the guard's 150 m; "250 Example Road" one 1.66 mi from the
+# Square. Addresses and points invented.
+_hkfake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_hkfake_base = 'http://127.0.0.1:%d' % json.loads(_hkfake.stdout.readline())['port']
+
+
+def _hkasked(word):
+    return [a for a in json.loads(urllib.request.urlopen(
+        _hkfake_base + '/__asked', timeout=5).read()) if word in a]
+
+
+_hkdir = tempfile.mkdtemp()
+
+
+def _hksayer(name):
+    """A scanner of its own in _hkdir/name, saying each line of say-N.json in
+    turn a quarter of a second apart (a heartbeat's `at` made now): planner
+    reads and GPS beats alike. Returns its script and the function that has
+    it say a list of lines and waits until it has."""
+    d = os.path.join(_hkdir, name)
+    os.makedirs(d)
+    script = os.path.join(d, 'say.py')
+    with open(script, 'w') as fh:
+        fh.write(
+            'import json, os, time\n'
+            'd = os.path.dirname(os.path.abspath(__file__))\n'
+            'n = 0\n'
+            'end = time.time() + 600\n'
+            'while time.time() < end:\n'
+            '    p = os.path.join(d, "say-%d.json" % n)\n'
+            '    if not os.path.exists(p):\n'
+            '        time.sleep(0.05)\n'
+            '        continue\n'
+            '    for x in json.load(open(p)):\n'
+            '        if x.get("alive"):\n'
+            '            x["at"] = int(time.time() * 1000)\n'
+            '        print(json.dumps(x), flush=True)\n'
+            '        time.sleep(0.25)\n'
+            '    open(os.path.join(d, "done-%d" % n), "w").close()\n'
+            '    n += 1\n')
+    seq = [0]
+
+    def says(lines):
+        n = seq[0]
+        seq[0] += 1
+        path = os.path.join(d, 'say-%d.json' % n)
+        with open(path + '.tmp', 'w') as fh:
+            json.dump(lines, fh)
+        os.rename(path + '.tmp', path)
+        for _ in range(400):
+            if os.path.exists(os.path.join(d, 'done-%d' % n)):
+                break
+            time.sleep(0.05)
+        time.sleep(0.3)
+    open(os.path.join(d, 'offers.jsonl'), 'w').close()
+    return script, says, os.path.join(d, 'offers.jsonl')
+
+
+def _hkplanner(*picks):
+    """A Trip Planner read: each pickup (name, street or None), then a dropoff."""
+    stops = [{'kind': 'pickup', 'orders': 1, 'name': n, 'expectedBy': 1189, 'street': s,
+              'city': None, 'state': None, 'zip': None, 'line': s} for n, s in picks]
+    stops.append({'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'street': None,
+                  'city': None, 'state': None, 'zip': None, 'line': None})
+    return {'planner': {'stops': stops, 'unfiled': 'dropoffs', 'asked': False}}
+
+
+_HK_DOOR = (34.0010, -84.5560)    # the fake's three answers' middle
+
+
+def _hkbeat(dlat):
+    return {'alive': True, 'gps': {'state': 'ok', 'ageSeconds': 0.1, 'fix': {
+        'lat': _HK_DOOR[0] + dlat, 'lon': _HK_DOOR[1], 'gpsAge': 0.1, 'gpsErr': 25.0,
+        'gpsMode': 3, 'gpsOk': True, 'gpsWhy': None, 'freshFor': 10.0}}}
+
+
+class _HkDown(object):
+    """A NucBox that answers every search 503, counting them."""
+    searches = []
+
+
+def _hkdown_app():
+    import http.server
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            _HkDown.searches.append(self.path)
+            self.send_response(503)
+            self.end_headers()
+    srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+_hkdown = _hkdown_app()
+try:
+    _hks, _hksays, _hkj = _hksayer('a')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800',
+                        'GPS_DWELL_MS': '1000'}, _hkj)
+    try:
+        # The end armed by the server, then the planner read: no Map view.
+        _atook(_hkb, 'k-guard', _COBB)
+        _settled(_hkb, lambda h: h.get('endPinned'))
+        _hksays([_hkplanner(('Example Diner', '1975 Cobb Parkway'))])
+        _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
+        _q = _hkasked('street=1975')
+        ok_('[held pickups] a planner pickup with a street is searched on the NucBox inside '
+            'the held card\'s disc and kept for the guard, with no Map view (%r)' % _q[:1],
+            _h.get('pickupsPinned') == 1 and len(_q) == 1 and 'viewbox=' in _q[0]
+            and 'bounded=1' in _q[0])
+        eq('[held pickups] ...so the door the server armed 87 m from it is not armed, and '
+           'says why', (_h.get('endPinned'), _h.get('endWhy')), (True, 'door next to the pickup'))
+        post(_hkb, '/api/delivered', {})
+
+        # The end armed AND arrived at — the car waiting at the restaurant —
+        # before the planner read says where the restaurant is.
+        _atook(_hkb, 'k-late', _COBB)
+        _settled(_hkb, lambda h: h.get('endPinned'))
+        _hksays([_hkbeat(0.0002)] * 7)
+        ok_('[held pickups] (the premise: the car waiting there arrived at the door)',
+            (_holding(_hkb) or {}).get('arrived'))
+        _hksays([_hkplanner(('Example Diner', '1975 Cobb Parkway'))])
+        _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
+        eq('[held pickups] a pickup that lands after the end was armed asks the guard again: '
+           'the arrival counted at the restaurant is taken back',
+           (_h.get('arrived'), _h.get('endWhy'), _h.get('pickupsPinned')),
+           (False, 'door next to the pickup', 1))
+        post(_hkb, '/api/delivered', {})
+
+        # A held card of 1.0 mi: its disc is 1.5 mi, and the restaurant at
+        # 250 Example Road is 1.66 mi from its fix.
+        _atook(_hkb, 'k-far', _COBB, miles=1.0)
+        _settled(_hkb)
+        _n = len(_hkasked('street=250'))
+        _hksays([_hkplanner(('Example Grill', '250 Example Road'))])
+        for _ in range(60):
+            if len(_hkasked('street=250')) > _n:
+                break
+            time.sleep(0.05)
+        time.sleep(0.3)
+        eq('[held pickups] a pickup the NucBox places outside the held card\'s disc is asked '
+           'and not kept', (len(_hkasked('street=250')) - _n,
+                            (_holding(_hkb) or {}).get('pickupsPinned')), (1, 0))
+        post(_hkb, '/api/delivered', {})
+    finally:
+        stop(_hkp)
+
+    # A NucBox that is down, so nothing is cached and every question shows:
+    # the same planner read three times asks once (the retry is a minute off),
+    # and a pickup with no street is never asked.
+    _hks, _hksays, _hkj = _hksayer('b')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                        'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _hkdown.server_address[1],
+                        'NUCBOX_RETRY_MS': '60000'}, _hkj)
+    try:
+        _atook(_hkb, 'k-once', _COBB)
+        _settled(_hkb)
+        _n = len(_HkDown.searches)
+        _hksays([_hkplanner(('Example Diner', '1975 Cobb Parkway'))] * 3
+                + [_hkplanner(('Example Wok', None))])
+        time.sleep(0.5)
+        _new = _HkDown.searches[_n:]
+        eq('[held pickups] a pickup is asked once per hold, however often its planner is read, '
+           'and one with no street never (%r)' % _new,
+           (len(_new), all('street=1975' in u for u in _new),
+            (_holding(_hkb) or {}).get('pickupsPinned')), (1, True, 0))
+    finally:
+        stop(_hkp)
+
+    # A hold restored at boot with its planner on it and no pickup kept (the
+    # NucBox was not there when it was read), its end refused for good: the
+    # pickups are asked at boot, as the end is.
+    _hkr = os.path.join(_hkdir, 'r')
+    os.makedirs(_hkr)
+    open(os.path.join(_hkr, 'offers.jsonl'), 'w').close()
+    with open(os.path.join(_hkr, 'holding.json'), 'w') as _fh:
+        json.dump({'id': 'k-boot', 'acceptedAt': int(time.time() * 1000) - 60000,
+                   'pay': 12.0, 'minutes': 40.0, 'miles': 5.0,
+                   'dropoff': 'Kestrel Dr, Marietta', 'endWhy': 'no house number',
+                   'endWhyFor': 'Kestrel Dr, Marietta',
+                   'card': dict(_SQ, miles=5.0),
+                   'planner': {'stops': _hkplanner(('Example Diner', '1975 Cobb Parkway'))
+                               ['planner']['stops'], 'unfiled': 'dropoffs'}}, _fh)
+    _hkp, _hkb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base},
+                       os.path.join(_hkr, 'offers.jsonl'))
+    try:
+        _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
+        eq('[held pickups] a hold restored at boot has its planner pickups asked for',
+           (_h.get('holdId', '').startswith('k-boot'), _h.get('pickupsPinned')), (True, 1))
+    finally:
+        stop(_hkp)
+finally:
+    _hkfake.kill()
+    _hkdown.shutdown()
+    shutil.rmtree(_hkdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)
