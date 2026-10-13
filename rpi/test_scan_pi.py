@@ -481,6 +481,11 @@ eq('...and a finished reading as whole',
    emitted(sample_rate, sample_parsed, True)['whole'], True)
 eq('...and a caller that does not say leaves it unstated',
    emitted(sample_rate, sample_parsed, None)['whole'], None)
+# DoorDash's printed stop count ("3 stops (7.8 mi)"), carried on the reading as
+# parse and the accumulator's vote gave it; none on a card that prints none.
+eq('a DoorDash card\'s stop count goes out on the reading, and none where it printed '
+   'none', (emitted(sample_rate, dict(sample_parsed, stops=3), True).get('stops', 'absent'),
+            emitted(sample_rate, sample_parsed, True).get('stops', 'absent')), (3, None))
 
 # --- ...and when the box cut the card at its payout --------------------------
 # pipeline.read answers a payout flush against the top of the box with
@@ -3083,6 +3088,23 @@ eq('an unpressed address under a Dropoff label goes out labelled \'dropoff\'; a 
    [(json.loads(l)['dropoff']['asked'], json.loads(l)['dropoff']['labelled'])
     for l in ''.join(_said).splitlines() if l.strip()],
    [(False, 'dropoff'), (True, None)])
+# ...and the mark server.js files an unbounded planner's lone dropoff by, onto
+# a single-trip held card only (planner_lone_dropoff). rpi/test_loop.py sees
+# the keyword reach this function through a stub; only this sees it reach
+# the wire, where server.js reads `singleCardOnly`.
+_said[:] = []
+sys.stdout = _Catch()
+try:
+    SP.emit_dropoff({'line': '1180 Wrenfield Rd NW, Kennesaw'}, asked=False,
+                    labelled=True, single_card_only=True)
+    SP.emit_dropoff({'line': '1180 Wrenfield Rd NW, Kennesaw'}, asked=False,
+                    labelled=True)
+finally:
+    sys.stdout = _was_stdout
+eq('an unbounded planner\'s lone dropoff goes out marked singleCardOnly; any other '
+   'carries no mark', [json.loads(l)['dropoff'].get('singleCardOnly', 'absent')
+                       for l in ''.join(_said).splitlines() if l.strip()],
+   [True, None])
 
 
 # --- ...and the same thing through the loop that has to do it ---------------
@@ -3697,6 +3719,19 @@ eq('...a dropoff whose street did not read is not filed: a town alone is no '
 eq('...and a planner of pickups gives no destination and has nothing to explain',
    SP2.planner_destination([_stop('pickup', '310 Mill St', 'Roswell',
                                   '310 Mill St, Roswell')], True), (None, None))
+
+# planner_lone_dropoff: the half of an unbounded list's answer the screen can
+# give — exactly one Dropoff stop, "1 order", street and town read. The other
+# half, a single-trip held card, is server.js's.
+_TWO_ORDERS = dict(_KESTREL, orders=2)
+eq('an unbounded list\'s one dropoff of one order, street and town read, is sent '
+   'for a single-trip card; two dropoffs, two orders, or no town are not',
+   [(SP2.planner_lone_dropoff([_stop('pickup'), _KESTREL]) or {}).get('line'),
+    SP2.planner_lone_dropoff([_KESTREL, _BIRCH]),
+    SP2.planner_lone_dropoff([_stop('pickup'), _TWO_ORDERS]),
+    SP2.planner_lone_dropoff([_stop('dropoff', '4821 Kestrel Dr', None,
+                                    '4821 Kestrel Dr')])],
+   ['4821 Kestrel Dr, Marietta', None, None, None])
 
 # ...and the whole of it through the real reader. rpi/test_loop.py drives the
 # wiring with a stubbed one; this is the planner DRAWN and read through the

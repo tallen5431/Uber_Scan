@@ -1610,15 +1610,19 @@ eq('...and is read by the rules that were always there',
 
 # DoorDash's stops card, merged the way the rig merges it. All 21 DoorDash
 # offers of the 12 Oct shift journalled whole=0: the bracketed distance was a
-# distance no leg claimed, and `shortATime` travelled through the merge. Three
-# frames of one made-up card, the bullet and the icons read differently on each.
+# distance no leg claimed, and `shortATime` travelled through the merge. Four
+# frames of one made-up card, the bullet and the icons read differently on each,
+# and the last one misreading the count as "1 stops": the count is voted on
+# like `items`, so one frame cannot set it. With the last frame's taken, this
+# check passed while the vote was gone — every frame said 3.
 acc = OfferAccumulator()
-for _k, (_dot, _icon) in enumerate((('«', '@'), ('-', '&'), ('+', 'f'))):
+for _k, (_n, _dot, _icon) in enumerate(((3, '«', '@'), (3, '-', '&'), (3, '+', 'f'),
+                                        (1, '«', '@'))):
     _dd = acc.add(P.parse(
-        '$7.75\n3 stops (7.8 mi) %s 30 min\n%s Corner Bagel Co\n'
+        '$7.75\n%d stops (7.8 mi) %s 30 min\n%s Corner Bagel Co\n'
         '123 Maple Grove Road, Smallt...\n& Pine Noodle House\n'
         '45 Birch Street Northwest, Sm...\n& Customer dropoff\n'
-        'Drop off 2 orders\nAccept 0:08' % (_dot, _icon)), now=600.0 + _k)
+        'Drop off 2 orders\nAccept 0:08' % (_n, _dot, _icon)), now=600.0 + _k)
 eq('a DoorDash stops card merged across frames is whole, its stores and stop count kept',
    (P.is_whole(_dd), _dd['miles'], _dd['minutes'], _dd['pickup'], _dd['dropoff'],
     _dd['stops']),
