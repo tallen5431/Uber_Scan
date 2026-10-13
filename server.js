@@ -1370,44 +1370,69 @@ function heldOwnCard(held, card, now, reading) {
  * NucBox set and Map view never opened on that hold, there is no pin and
  * nothing here happens.
  *
- * The numbers. The owner's VK-162 read eph 27.8 m on mode 3 indoors (gps.py,
- * FIX_ERR_MAX), and the gate refuses anything over 50 m, so a fix that counts
- * here is never rougher than 50. A door pin is the address node or the
- * building's middle, and the car stops at the kerb or in the drive: tens of
- * metres off it (an estimate, not measured). So ARRIVE_M is 75 m plus the
- * fix's own error — at most 125 m with the gate's cap. LEAVE_M is 300 m:
- * past the largest arrive radius by more than two worst-case errors
- * (125 + 2 x 50 = 225), so a parked car's scatter cannot read as leaving,
- * and it takes TWO consecutive good fixes out there. DWELL_S is 45 s inside,
- * with no gap over GAP_S between counted fixes (gps.py's own 20 s staleness
- * line): at 30 mph a car crosses a 250 m circle in 19 s, so driving past does
- * not arrive; a crawl in stopped traffic beside the door can, and is what to
- * watch for. Settable for the suite, like HOLD_GRACE_MS. */
+ * The numbers, from a replay of the driver's real 12 Oct drive (385 min of
+ * fixes, replayed outside the repo). Parked, the car's fixes
+ * scattered 3.4 m from where it stood at the median, 22.7 m at p99 and
+ * 34.7 m at worst, while the receiver's own error estimate read 27.6 m at the
+ * median — about eight times the real scatter — and no parked fix was ever
+ * past 75 m from its stop. So ARRIVE_M is 75 m plus the fix's error capped at
+ * 25 (ARRIVE_ERR_CAP_M): 100 m at most. It was 75 + the gate's 50 = 125, and
+ * the replay is why that was too wide: a door placed 50-75 m from a
+ * restaurant stop "arrived" 24 times of 24 while the car waited for the food,
+ * and would have put the order down on leaving the restaurant, 19-43 min
+ * early; at 100 m it arrived 1 time of 24. The restaurant guard below
+ * (pickupNearEnd) takes the rest.
+ *
+ * DWELL_S is 60 s inside. The drive held 53 still stops of 45 s or more; 60 s
+ * removes 7 of them, and the real doors held the car inside for 184, 243 and
+ * 794 s, so none is lost. Between counted fixes there may be no silence over
+ * GAP_S (gps.py's own 20 s staleness line): at 30 mph a car crosses a 200 m
+ * circle in 15 s, so driving past does not arrive; a crawl in stopped
+ * traffic beside the door can, and is what to watch for. But a run of fixes
+ * the GATE refused (err over 50 m, `rough`) is not silence: the replay had
+ * runs of 21-45 s of them parked at a door, and resetting the dwell on them
+ * delayed one drop. Such a run, up to REJECTED_GAP_S (60 s) and with good
+ * fixes inside the circle on both sides of it, keeps the dwell; the time in
+ * it does not count toward it. A stretch of no fixes at all still resets
+ * after GAP_S.
+ *
+ * LEAVE_M is 300 m on TWO consecutive good fixes, unchanged: the replay found
+ * no false departure with it. Settable for the suite, like HOLD_GRACE_MS. */
 function envNumber(name, dflt) {
   var v = Number(process.env[name]);
   return (isFinite(v) && v >= 0 && process.env[name] !== undefined && process.env[name] !== '')
     ? v : dflt;
 }
-var ARRIVE_M = 75;            // plus the fix's own error, which the gate caps at 50
-var ARRIVE_ERR_CAP_M = 50;    // gps.py FIX_ERR_MAX
+var ARRIVE_M = 75;            // plus the fix's own error, capped below
+var ARRIVE_ERR_CAP_M = 25;    // so 100 m at most (the gate itself stops at 50)
 var LEAVE_M = 300;
 var LEAVE_FIXES = 2;
-var DWELL_MS = envNumber('GPS_DWELL_MS', 45000);
+var DWELL_MS = envNumber('GPS_DWELL_MS', 60000);
 var GAP_MS = envNumber('GPS_GAP_MS', 20000);
+var REJECTED_GAP_MS = 60000;
+// A door this close to one of the held order's pickups is not armed. See
+// pickupNearEnd.
+var PICKUP_GUARD_M = 150;
+var PICKUP_PINS_MAX = 4;
 // How long the panel says "dropped · left the dropoff" after one.
 var GPS_DROP_SAID_MS = 60000;
 // ...and "previous order put down" after a Took that replaced a hold.
 var HELD_REPLACED_SAID_MS = 60000;
 
 // The live part of the arrival, which is not worth an SD write per fix: where
-// the dwell started and the last fix counted. `arrivedAt` and the pin ARE on
-// the hold, and so in holding.json, because those are the facts a restart in
-// the driveway must not forget.
-var arrival = { holdId: null, insideSince: null, lastFixAt: null, outCount: 0 };
+// the dwell started and the last fix counted; `skippedMs`, the time in
+// gate-refused runs since then that does not count toward it; and
+// `refusedFrom`/`refusedTo`/`silentMs`, the run of refused fixes since the
+// last counted one (its first and last, and its longest stretch of nothing at
+// all). `arrivedAt` and the pin ARE on the hold, and so in holding.json,
+// because those are the facts a restart in the driveway must not forget.
+var arrival = null;
 
 function resetArrival(id) {
-  arrival = { holdId: id || null, insideSince: null, lastFixAt: null, outCount: 0 };
+  arrival = { holdId: id || null, insideSince: null, lastFixAt: null, outCount: 0,
+              skippedMs: 0, refusedFrom: null, refusedTo: null, silentMs: 0 };
 }
+resetArrival(null);
 
 /* A beat's fix as this file will count it, or null: the gate passed it, it is
  * still inside gps.py's staleness rule (`freshFor`, which a scanner older than
@@ -1416,7 +1441,8 @@ function resetArrival(id) {
 function countableFix(beat, now) {
   var g = beat && beat.gps;
   var f = g && g.fix;
-  if (!f || f.gpsOk !== true) return null;
+  if (!f) return null;
+  if (f.gpsOk !== true) { refusedFix(f, now); return null; }
   if (typeof f.freshFor !== 'number' || !(f.freshFor > 0)) return null;
   if (typeof f.lat !== 'number' || typeof f.lon !== 'number'
       || !isFinite(f.lat) || !isFinite(f.lon)) return null;
@@ -1429,12 +1455,41 @@ function countableFix(beat, now) {
   return { lat: f.lat, lon: f.lon, err: f.gpsErr, at: at };
 }
 
+/* A fix the gate refused as `rough` (err over FIX_ERR_MAX), kept only as a
+ * time: it proves the receiver was still talking, so a run of them is not the
+ * silence GAP_MS resets on. Its position is never used. Only a fresh one, and
+ * only after a counted fix (the run is measured from it). */
+function refusedFix(f, now) {
+  if (f.gpsWhy !== 'rough' || arrival.lastFixAt === null) return;
+  if (typeof f.freshFor !== 'number' || !(f.freshFor > 0)) return;
+  if (typeof f.gpsAge !== 'number' || !isFinite(f.gpsAge) || f.gpsAge < 0) return;
+  var at = now - f.gpsAge * 1000;
+  var last = arrival.refusedTo === null ? arrival.lastFixAt : arrival.refusedTo;
+  if (at <= last) return;
+  arrival.silentMs = Math.max(arrival.silentMs, at - last);
+  if (arrival.refusedFrom === null) arrival.refusedFrom = at;
+  arrival.refusedTo = at;
+}
+
 /* The held end this file may arrive at, or null: a door-level pin made for
  * this hold and for the dropoff it still names (a ⌖ press can change it). */
 function heldEndPin(h) {
   var p = h && h.endPin;
   if (!p || p.doorLevel !== true || p.dropoff !== h.dropoff) return null;
   return p;
+}
+
+/* The restaurant guard: whether one of the held order's pickups, pinned by
+ * Map view (/api/held-pickup), is within PICKUP_GUARD_M of its end. The 12 Oct
+ * replay: a door 50-75 m from a restaurant the car waited at arrived there 24
+ * times of 24, and would have dropped the order on leaving with the food,
+ * 19-43 min early. A door that close is not armed at all — the timer and Drop
+ * still end the order — and /api/status says why. */
+function pickupNearEnd(h, pin) {
+  var picks = h && Array.isArray(h.pickupPins) ? h.pickupPins : [];
+  return picks.some(function (p) {
+    return MV.crowMiles(p, pin) * 1609.344 <= PICKUP_GUARD_M;
+  });
 }
 
 /* ---------- the held end, searched for by this server --------------------
@@ -1555,17 +1610,29 @@ function gpsArrival(beat, now) {
   var id = holdIdOf(h);
   if (arrival.holdId !== id) resetArrival(id);
   var pin = heldEndPin(h);
-  if (!pin) return false;
+  if (!pin || pickupNearEnd(h, pin)) return false;
   var fix = countableFix(beat, now);
   if (!fix) return false;
   var gap = arrival.lastFixAt === null ? Infinity : fix.at - arrival.lastFixAt;
+  // A gap the gate's refusals filled: no silence in it over GAP_MS, from the
+  // last counted fix through the run to this one, and no longer than
+  // REJECTED_GAP_MS in all.
+  var refused = arrival.refusedTo !== null && gap <= REJECTED_GAP_MS
+    && Math.max(arrival.silentMs, fix.at - arrival.refusedTo) <= GAP_MS;
   arrival.lastFixAt = fix.at;
+  arrival.refusedFrom = arrival.refusedTo = null;
+  arrival.silentMs = 0;
   var metres = MV.crowMiles(fix, pin) * 1609.344;
   if (!h.arrivedAt) {
     var within = ARRIVE_M + Math.min(fix.err, ARRIVE_ERR_CAP_M);
     if (metres > within) { arrival.insideSince = null; return false; }
-    if (arrival.insideSince === null || gap > GAP_MS) arrival.insideSince = fix.at;
-    if (fix.at - arrival.insideSince < DWELL_MS) return false;
+    if (arrival.insideSince === null || (gap > GAP_MS && !refused)) {
+      arrival.insideSince = fix.at;
+      arrival.skippedMs = 0;
+    } else if (gap > GAP_MS) {
+      arrival.skippedMs += gap;       // inside on both sides; not counted
+    }
+    if (fix.at - arrival.insideSince - arrival.skippedMs < DWELL_MS) return false;
     h.arrivedAt = now;
     setHolding(h);   // the arrival survives a restart in the driveway
     return true;
@@ -3486,8 +3553,10 @@ function statusNow() {
                    // ...who pinned it ('server', or null for Map view), and
                    // when it is not pinned, why not (searchHeldEnd).
                    endBy: heldEndPin(h) ? (h.endPin.by || null) : null,
-                   endWhy: !heldEndPin(h) && h.endWhyFor === h.dropoff
-                     ? (h.endWhy || null) : null,
+                   // ...or, pinned, why the pin is not armed (pickupNearEnd).
+                   endWhy: heldEndPin(h)
+                     ? (pickupNearEnd(h, heldEndPin(h)) ? 'door next to the pickup' : null)
+                     : h.endWhyFor === h.dropoff ? (h.endWhy || null) : null,
                    // Where it ends, and whether that came off the card or
                    // off a scan of the screen after the accept. The panel
                    // needs the difference: a card-derived dropoff is a
@@ -5691,6 +5760,37 @@ function route(req, res) {
         resetArrival(holdIdOf(h));
         setHolding(h);
       }
+      send(res, 200, JSON.stringify({ ok: true }), json);
+    });
+  }
+
+  /* One of the held order's pickups, pinned by Map view (live.html) inside
+   * the held card's disc. Body: {holdId, lat, lon}. Kept on the hold (at most
+   * PICKUP_PINS_MAX, the newest) for the restaurant guard alone
+   * (pickupNearEnd): a door within PICKUP_GUARD_M of one is not armed. A pin
+   * for another hold, or with no position, is refused and changes nothing. */
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/held-pickup') {
+    return readBody(req, 1024, function (err, text) {
+      var json = { 'Content-Type': 'application/json; charset=utf-8' };
+      var body = null;
+      try { body = err ? null : JSON.parse(text); } catch (e) { body = null; }
+      if (!body || typeof body !== 'object') {
+        return send(res, 400, JSON.stringify({ ok: false, error: 'not JSON' }), json);
+      }
+      var h = holding(Date.now());
+      var why = null;
+      if (!h) why = 'nothing held';
+      else if (body.holdId !== holdIdOf(h)) why = 'not the order in the car';
+      else if (typeof body.lat !== 'number' || typeof body.lon !== 'number'
+               || !isFinite(body.lat) || !isFinite(body.lon)
+               || Math.abs(body.lat) > 90 || Math.abs(body.lon) > 180) why = 'no position';
+      if (why) return send(res, 409, JSON.stringify({ ok: false, error: why }), json);
+      var picks = (Array.isArray(h.pickupPins) ? h.pickupPins : []).filter(function (p) {
+        return p.lat !== body.lat || p.lon !== body.lon;
+      });
+      picks.push({ lat: body.lat, lon: body.lon });
+      h.pickupPins = picks.slice(-PICKUP_PINS_MAX);
+      setHolding(h);
       send(res, 200, JSON.stringify({ ok: true }), json);
     });
   }

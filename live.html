@@ -1889,6 +1889,16 @@
       .catch(function () {});
   }
 
+  /* ...and where one of its pickups is, found inside the held card's disc as
+     its end is: the server does not arm a door within 150 m of one (the
+     restaurant guard, pickupNearEnd in server.js). Fire and forget, too. */
+  function pinHeldPickup(want, got) {
+    if (!want.heldId || !got.at) return;
+    ask('/api/held-pickup', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ holdId: want.heldId, lat: got.at.lat, lon: got.at.lon }) })
+      .catch(function () {});
+  }
+
   // The order is down: Drop's reply, or the server's word that the GPS put it
   // down (msg.gpsDrop). One function, so the two cannot forget different things.
   function orderDown() {
@@ -4559,6 +4569,8 @@
           want.nbxSeen[q] = { res: got, disc: disc, whose: whose };
           // The END only: a pickup's pin is never sent as the held end.
           if (whose === 'held' && q === want.held && disc) pinHeldEnd(want, q, got);
+          // ...and a pickup's pin goes as a pickup, for the restaurant guard.
+          else if (whose === 'held' && disc) pinHeldPickup(want, got);
           if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
           landed();
         }
