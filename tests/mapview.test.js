@@ -1186,6 +1186,22 @@ async function nucbox() {
      JSON.stringify({ why: 'otherroads' }));
   eq('a point the router moved 321 m (under 0.2 mi) to reach a road leaves the figure',
      typeof (await stubRoad(3000, 2000, [3, 321, 3]).detour(P1, P2, P3)).miles, 'number');
+  function stubLine(snaps, line) {
+    return new MV.NbxSearch({ gap: 0, fetch: function () {
+      return Promise.resolve({ ok: true, status: 200, json: function () {
+        return Promise.resolve({ ok: true, metres: 1000, snaps: snaps, line: line });
+      } });
+    } });
+  }
+  var L2 = [[33.95, -84.55], [33.95, -84.54], [33.96, -84.54]];
+  eq('a run whose road starts 321 m from a pin is drawn along it',
+     JSON.stringify(await stubLine([3, 321], L2).runLine([P1, P2])), JSON.stringify(L2));
+  eq('...and one 323 m off (past SNAP_MI) is not: that road starts somewhere else',
+     await stubLine([3, 323], L2).runLine([P1, P2]), null);
+  eq('...nor one from a server that sends no shape (from before it)',
+     await stubLine([3, 3]).runLine([P1, P2]), null);
+  eq('the road detour carries no line from a server that sends none',
+     (await stubRoad(3000, 2000).detour(P1, P2, P3)).line, null);
   eq('...and one moved 323 m (over 0.2 mi) refuses it, on either route',
      JSON.stringify([await stubRoad(3000, 2000, [3, 323, 3]).detour(P1, P2, P3),
                      await stubRoad(3000, 2000, null, [323, 3]).detour(P1, P2, P3)]),
@@ -1466,8 +1482,34 @@ async function nucbox() {
        road.miles, (by.metres - direct.metres) / 1609.344);
     ok_('...a real figure off the router (' + (road.miles || 0).toFixed(2) + ' road mi)',
         road.miles > 0.5);
-    eq('...and nothing in it but miles: no minutes anywhere',
-       Object.keys(road).join(','), 'miles');
+    eq('...and nothing in it but miles and the road to draw: no minutes anywhere',
+       Object.keys(road).join(','), 'miles,line');
+    // The fake's road turns east-west first, then north-south, leg by leg
+    // (geometryOf), so a line drawn along it has a corner the straight line
+    // between the same points does not.
+    eq('...and the road to draw is the router\'s own shape, car -> pickup -> held end, '
+       + 'with its corners, as [lat, lon]',
+       JSON.stringify(road.line),
+       JSON.stringify([[SQ.lat, SQ.lon], [SQ.lat, A.lon], [A.lat, A.lon],
+                       [A.lat, S.lon], [S.lat, S.lon]]));
+    /* The held order's run, along the roads, in pieces the relay will take. */
+    var B = { lat: 33.96, lon: -84.52 };
+    var before4 = fake.asked.length;
+    var run4 = await nbx.runLine([SQ, A, B, S]);
+    var asked4 = fake.asked.slice(before4).filter(function (u) { return /^\/route/.test(u); });
+    eq('a run of four points is drawn along the road, asked as car-A-B then B-end, '
+       + 'joined at B once',
+       JSON.stringify(run4),
+       JSON.stringify([[SQ.lat, SQ.lon], [SQ.lat, A.lon], [A.lat, A.lon], [A.lat, B.lon],
+                       [B.lat, B.lon], [B.lat, S.lon], [S.lat, S.lon]]));
+    eq('...in two questions of at most three points (' + asked4.length + ')',
+       asked4.map(function (u) { return u.split('?')[0].split(';').length; }).join(','), '3,2');
+    eq('a run with a piece the router has no road for is not drawn along roads: '
+       + 'the straight run stands',
+       await nbx.runLine([SQ, { lat: 34.0010, lon: -84.5560 }, S]), null);
+    eq('...nor one the router refuses outright (router down)',
+       await nbx.runLine([SQ, { lat: 34.1, lon: -84.6 }]), null);
+    eq('...nor a run of one point', await nbx.runLine([SQ]), null);
     var asked = fake.asked.filter(function (u) { return /^\/route/.test(u); });
     ok_('...and the router was never asked about any fourth point (' + asked.length + ' routes)',
         asked.every(function (u) { return u.split('?')[0].split(';').length <= 3; }));

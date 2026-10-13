@@ -715,9 +715,11 @@
   /* The held order's run as drawn: the car, its pickups not yet visited in
    * the planner's order, then its end — each only where it has a point, so a
    * pickup with no pin is a gap the line goes straight across, not a vertex
-   * at nowhere. Straight segments: the router answers metres, not a road's
-   * shape, and a figure for this run would be a second distance the caption
-   * has no room for. [] when fewer than two points have a place. */
+   * at nowhere. Straight segments; with the NucBox's router set, Map view
+   * draws the same points along the roads instead (NbxSearch.runLine) and
+   * falls back to these. Never a figure: one for this run would be a second
+   * distance the caption has no room for. [] when fewer than two points have
+   * a place. */
   function heldRun(car, pickups, end) {
     var pts = [car].concat(pickups || [], [end]).filter(function (p) {
       return p && isFinite(p.lat) && isFinite(p.lon);
@@ -2259,9 +2261,12 @@
     });
   };
 
-  /* Road metres along points [{lat, lon}, ...] and how far OSRM moved each
-     point to reach a road ({ metres, snaps }), or { why } — never minutes:
-     server.js drops OSRM's duration before it reaches a page. */
+  /* Road metres along points [{lat, lon}, ...], how far OSRM moved each
+     point to reach a road, and the road's shape as [[lat, lon], ...] to draw
+     ({ metres, snaps, line }; `line` null from a server from before it, or
+     when the router's shape was not one — server.js nbxLine), or { why } —
+     never minutes: server.js drops OSRM's duration before it reaches a
+     page. */
   NbxSearch.prototype.road = function (points) {
     var path = '/route?points=' + points.map(function (p) {
       return Number(p.lon).toFixed(5) + ',' + Number(p.lat).toFixed(5);
@@ -2270,8 +2275,39 @@
       if (body.unreachable) return { why: 'unreachable', error: body.unreachable };
       if (body.refused) return { why: 'refused', error: body.refused };
       if (body.noRoute) return { why: 'noroute', error: body.error };
-      return { metres: body.metres, snaps: body.snaps };
+      return { metres: body.metres, snaps: body.snaps,
+               line: Array.isArray(body.line) && body.line.length >= 2 ? body.line : null };
     });
+  };
+
+  /* The road along a run of points to DRAW — the held order's car, its
+     pickups, its end — as [[lat, lon], ...], or null, and null is the
+     straight line the map always drew. The relay routes two or three points
+     a question, so a longer run is asked in pieces of three that share their
+     ends (car, A, B, then B, C, end...), every piece asked as the page
+     always asks, through the cache. Null when any piece has no road or no
+     shape, or moved a point past SNAP_MI to reach one: that road starts
+     somewhere else, and a straight line does not pretend to be a road. No
+     figure comes of it: the caption's one road figure is detour's. */
+  NbxSearch.prototype.runLine = function (points) {
+    var pts = (points || []).filter(function (p) {
+      return p && isFinite(p.lat) && isFinite(p.lon);
+    });
+    if (pts.length < 2) return Promise.resolve(null);
+    var pieces = [];
+    for (var i = 0; i < pts.length - 1; i += 2) pieces.push(pts.slice(i, i + 3));
+    var self = this;
+    return Promise.all(pieces.map(function (piece) { return self.road(piece); }))
+      .then(function (got) {
+        var line = [];
+        for (var k = 0; k < got.length; k++) {
+          var g = got[k];
+          if (g.why || !g.line || !Array.isArray(g.snaps)
+              || !(Math.max.apply(null, g.snaps) / METRES_PER_MILE <= SNAP_MI)) return null;
+          line = line.concat(k ? g.line.slice(1) : g.line);
+        }
+        return line;
+      });
   };
 
   var METRES_PER_MILE = 1609.344;
@@ -2317,7 +2353,11 @@
         if (!(Math.max.apply(null, snaps) / METRES_PER_MILE <= SNAP_MI)) return { why: 'snap' };
         var miles = (by.metres - direct.metres) / METRES_PER_MILE;
         if (miles < -ROAD_SAME_MI) return { why: 'otherroads' };
-        return { miles: miles };
+        // ...and the road car -> pickup -> held end to draw, when the router
+        // sent its shape (null otherwise: drawn straight, as before). Only
+        // with a figure: every refusal above is a road the caption does not
+        // vouch for, and is drawn as the straight line it always was.
+        return { miles: miles, line: by.line || null };
       });
     });
   };
