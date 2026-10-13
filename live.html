@@ -1891,7 +1891,9 @@
 
   /* ...and where one of its pickups is, found inside the held card's disc as
      its end is: the server does not arm a door within 150 m of one (the
-     restaurant guard, pickupNearEnd in server.js). Fire and forget, too. */
+     restaurant guard, pickupNearEnd in server.js). The server now searches
+     the planner's pickups itself (searchHeldPickup), so this is a second
+     opinion, kept by the same path. Fire and forget, too. */
   function pinHeldPickup(want, got) {
     if (!want.heldId || !got.at) return;
     ask('/api/held-pickup', { method: 'POST', headers: { 'Content-Type': 'application/json' },
