@@ -25,6 +25,14 @@
  * a Dropoff label, the planner's one dropoff on a list seen whole) and refused
  * when the screen says what it is not (a pickup, a read older than the Took),
  * and for no other reason.
+ *
+ * TWO ORDERS (Stage 5, behind server.js's `carryTwo`). The same holds with two
+ * orders in the car, and it is what decides between them: an address goes to
+ * one of two orders on a cue the screen gave (attribute(), below), and with no
+ * cue to neither — the driver is asked, or it waits. Elimination appears there
+ * as a cue, and only in the one shape the screen proves it: a list seen whole,
+ * two dropoffs, one already filed as one order's. "Another card is on the
+ * slot" is still never a reason.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -528,7 +536,8 @@
    * (bumped by every other screen type), the pending pool, what was refused,
    * and the unprompted candidates already decided for this hold. */
   function fresh() {
-    return { pages: [], epoch: {}, holdId: null, said: {}, refused: [], verdicts: [] };
+    return { pages: [], epoch: {}, holdId: null, said: {}, refused: [], verdicts: [],
+             views: [], unowned: [] };
   }
 
   function holdIdOf(h) {
@@ -554,6 +563,22 @@
    * order before and is refused; and the unprompted candidates decided for the
    * old hold are forgotten, so the new one is asked afresh. */
   function took(st, held) {
+    // A list of orders is the orders it holds: one is that one, none is none,
+    // and two are one hold whose pages run from the OLDER card.
+    if (Array.isArray(held)) {
+      if (held.length < 2) return took(st, held[0] || null);
+      var ids = held.map(holdIdOf).join(' ');
+      if (ids === st.holdId) return;
+      var since = Math.min.apply(null, held.map(function (o) { return o.acceptedAt; }));
+      st.holdId = ids;
+      st.said = {};
+      st.pages = st.pages.filter(function (p) {
+        if (p.at >= since) return true;
+        if (p.pending) refuse(st, p, 'before the Took');
+        return false;
+      });
+      return;
+    }
     var id = holdIdOf(held);
     if (id === st.holdId) return;
     st.holdId = id;
@@ -589,6 +614,12 @@
    * delivery from being filed every ten seconds, and the planner's address
    * no longer passes through it. */
   function sighting(st, held, s, now) {
+    // The orders in the car as a list: one is decided exactly as below, two
+    // by sightingMany.
+    if (Array.isArray(held)) {
+      return held.length < 2 ? sighting(st, held[0] || null, s, now)
+        : sightingMany(st, held, s, now);
+    }
     var out = { candidates: [], why: null, at: s && typeof s.at === 'number' ? s.at : null };
     if (!s || typeof s !== 'object') return out;
     took(st, held);
@@ -704,6 +735,310 @@
     return undefined;
   }
 
+  /* ---------- two orders in the car: whose is this address? ------------------
+   *
+   * Stage 5, behind server.js's `carryTwo`. With two orders held an address
+   * read off the screen belongs to one of them, and nothing on a navigation
+   * screen or a planner stop names the order it is for. The 3.1 refusal in
+   * AUDITS.md is about exactly this: with two jobs in the car the ⌖ press for
+   * the second attached to the first. So an address is given to an order on
+   * POSITIVE CUES or not at all, and with none the driver is asked (a ⌖ press:
+   * the chooser) or nothing is filed (an unprompted sighting: the pool below).
+   *
+   * HARD RULES, before any cue — an order they rule out cannot be chosen:
+   *   - the app must match, where both the screen and the card said one;
+   *   - a read older than an order's ✓ Took is not that order's.
+   * One order left: `only`. None: nobody's.
+   *
+   * CUES, each a vote for one order:
+   *   name        the store the screen names beside the stop, against each
+   *               card's pickup, normalised (storeKey) with one i/l slip
+   *   deadline    the stop's "Expected by" against each card's "Deliver by",
+   *               within DEADLINE_SLACK_MIN — 2 minutes, CHOSEN, not measured:
+   *               no file on this rig holds both readings of one order yet
+   *   growth      a whole list read after the newer Took that is a whole list
+   *               read before it plus exactly one dropoff: that dropoff is the
+   *               newer order's, and the ones it already had are the older's
+   *   elimination two orders of one app on a list seen whole with exactly two
+   *               dropoffs, one of them already filed as one order's end: the
+   *               other is the other order's
+   * A cue that fits BOTH orders is no vote, and is a TIE: the one place the
+   * cards' discs come in. With a tie and no vote the answer is 'tie', and
+   * server.js may break it on the map (discBreak): the address searched on the
+   * NucBox inside each card's disc, and found inside exactly one. Never alone
+   * — an address in one card's reach and not the other's is no reason to give
+   * it to either when the screen gave no cue at all. Votes for one order
+   * decide, under the first cue in that order of names; votes for both are a
+   * conflict and decide nothing. */
+  var DEADLINE_SLACK_MIN = 2;
+  var VIEWS_MAX = 12;
+  var UNOWNED_MAX = 4;
+
+  // The store a name means: the planner's icon letters off its front (as
+  // map-view.js plannerName), its " – Town" off its back, case and every mark
+  // that is not a letter or a digit ignored.
+  function storeKey(t) {
+    if (typeof t !== 'string') return '';
+    var s = t.replace(/\s+/g, ' ').trim();
+    var icon = /^[a-z]{1,2} (?=[A-Z])/.exec(s);
+    if (icon) s = s.slice(icon[0].length);
+    s = s.split(/ [–—-] /)[0];
+    return s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  // The same store, or the same with ONE i read as l or l as i — the slip
+  // this reader makes most in a name (Tesseract on the rig's font).
+  function sameStore(a, b) {
+    var x = storeKey(a), y = storeKey(b);
+    if (!x || !y) return false;
+    if (x === y) return true;
+    if (x.length !== y.length) return false;
+    var slips = 0;
+    for (var i = 0; i < x.length; i++) {
+      if (x[i] === y[i]) continue;
+      if (!((x[i] === 'i' && y[i] === 'l') || (x[i] === 'l' && y[i] === 'i'))) return false;
+      slips += 1;
+    }
+    return slips === 1;
+  }
+
+  // Two clock readings, minutes since midnight, within `slack` round midnight.
+  function clockNear(a, b, slack) {
+    if (typeof a !== 'number' || typeof b !== 'number') return false;
+    var d = Math.abs(a - b) % 1440;
+    return Math.min(d, 1440 - d) <= slack;
+  }
+
+  function streetKey(line) {
+    return norm(typeof line === 'string' ? line.split(',')[0] : '');
+  }
+
+  // An order's end as the SCREEN filed it — a press, a label, a planner —
+  // never as its card guessed it, which elimination cannot stand on.
+  function filedEnd(o) {
+    var f = o && o.fields && o.fields.dropoff;
+    return f && RANK[f.from] > RANK.card ? f.value : null;
+  }
+
+  /* A list seen whole, remembered for growth: when, which app, and the keys of
+   * its dropoffs. Called by sighting() for every bounded view. */
+  function noteView(st, app, at, stops) {
+    st.views = st.views || [];
+    var drops = headed(stops).filter(function (s) { return s.kind === 'dropoff'; })
+      .map(keyOf);
+    if (drops.some(function (k) { return !k; })) return;
+    st.views.push({ app: app, at: at, drops: drops });
+    while (st.views.length > VIEWS_MAX) st.views.shift();
+  }
+
+  function growthVote(st, older, newer, d) {
+    if (!d.key || !Array.isArray(d.listDrops)) return null;
+    var before = (st.views || []).filter(function (v) {
+      return v.app === d.app && v.at >= older.tookAt && v.at < newer.tookAt;
+    }).pop();
+    if (!before || d.at < newer.tookAt) return null;
+    var now = d.listDrops;
+    var kept = before.drops.every(function (k) { return now.indexOf(k) !== -1; });
+    if (!kept || now.length !== before.drops.length + 1) return null;
+    return before.drops.indexOf(d.key) === -1 ? newer : older;
+  }
+
+  /* `orders` is every order held, first-taken first; `d` a dropoff line or a
+   * candidate made off a planner. Returns {order, cue, why, votes}: `order`
+   * null when nothing decides, `why` then 'nobody' (the hard rules left none),
+   * 'no cue' or 'cues disagree'. */
+  function attribute(st, orders, d) {
+    var out = { order: null, cue: null, why: null, votes: [], ties: [] };
+    var live = (orders || []).filter(function (o) {
+      if (d.app && o.app && d.app !== o.app) return false;
+      if (typeof d.at === 'number' && typeof o.tookAt === 'number' && d.at < o.tookAt) {
+        return false;
+      }
+      return true;
+    });
+    if (!live.length) { out.why = 'nobody'; return out; }
+    if (live.length === 1) {
+      out.order = live[0];
+      out.cue = 'only';
+      return out;
+    }
+    var older = live[0], newer = live[live.length - 1];
+    function vote(cue, fits) {
+      var hit = live.filter(fits);
+      if (hit.length === 1) out.votes.push({ cue: cue, order: hit[0] });
+      else if (hit.length > 1) out.ties.push(cue);
+    }
+    if (d.store) vote('name', function (o) { return sameStore(d.store, o.pickup); });
+    if (typeof d.expectedBy === 'number') {
+      vote('deadline', function (o) {
+        return clockNear(d.expectedBy, o.deliverBy, DEADLINE_SLACK_MIN);
+      });
+    }
+    if (live.length === 2) {
+      var grown = growthVote(st, older, newer, d);
+      if (grown) out.votes.push({ cue: 'growth', order: grown });
+      if (d.bounded && Array.isArray(d.others) && d.others.length === 1
+          && older.app && older.app === newer.app) {
+        var other = streetKey(d.others[0]);
+        var took = live.filter(function (o) {
+          var end = filedEnd(o);
+          return end && streetKey(end) === other;
+        });
+        if (took.length === 1) {
+          out.votes.push({ cue: 'elimination', order: live[1 - live.indexOf(took[0])] });
+        }
+      }
+    }
+    var picked = [];
+    out.votes.forEach(function (v) { if (picked.indexOf(v.order) === -1) picked.push(v.order); });
+    if (picked.length === 1) {
+      out.order = picked[0];
+      out.cue = out.votes[0].cue;
+    } else {
+      out.why = picked.length ? 'cues disagree' : out.ties.length ? 'tie' : 'no cue';
+    }
+    return out;
+  }
+
+  /* ---------- the pool of addresses nobody owns yet -------------------------
+   *
+   * An unprompted address that two held orders could each own, and no cue
+   * decides: kept in memory (never written — it is a door), said on the panel
+   * as "N dropoffs read · whose?", and retried by retryUnowned() when a later
+   * read adds a cue. With `among`, the ids held when it was read: if either of
+   * them leaves the car the address is dropped, never handed to the one left
+   * as `only` — it may be the order just delivered. */
+  function park(st, d, orders) {
+    st.unowned = (st.unowned || []).filter(function (u) { return u.d.line !== d.line; });
+    st.unowned.push({ d: d, among: (orders || []).map(holdIdOf) });
+    while (st.unowned.length > UNOWNED_MAX) st.unowned.shift();
+  }
+
+  function unowned(st) {
+    return (st.unowned || []).length;
+  }
+
+  /* An address taken out of the pool, by its line: true when it was there.
+   * For a decision made outside the cues (server.js's disc tie-break). */
+  function unpark(st, line) {
+    var before = (st.unowned || []).length;
+    st.unowned = (st.unowned || []).filter(function (u) { return u.d.line !== line; });
+    return st.unowned.length !== before;
+  }
+
+  /* Each address in the pool asked again against `orders`: returns the ones a
+   * cue now decides, as [{d, order, cue}], and takes them out. One whose
+   * orders are not both still held is dropped — and that is what keeps `only`
+   * out of here: with the same two orders held, the hard rules leave both,
+   * as they did when it was parked, so only a cue can decide it. */
+  function retryUnowned(st, orders) {
+    var ids = (orders || []).map(holdIdOf);
+    var out = [];
+    st.unowned = (st.unowned || []).filter(function (u) {
+      if (!u.among.every(function (id) { return ids.indexOf(id) !== -1; })) return false;
+      var a = attribute(st, orders, u.d);
+      if (a.order) {
+        out.push({ d: u.d, order: a.order, cue: a.cue });
+        return false;
+      }
+      return true;
+    });
+    return out;
+  }
+
+  /* The planner with two orders held: every dropoff a list seen whole shows,
+   * read whole (street and town), as a candidate of its own — with what the
+   * cues need: its key and time, the store when the list is ONE pickup and
+   * ONE dropoff (then the two are one order's), the other dropoffs on the
+   * list, and whether the list was bounded. Asked only when the press read
+   * one dropoff: two addresses are not one answer. */
+  function plannerCandidates(view, page, bounded) {
+    var stops = headed(view.stops);
+    var drops = stops.filter(function (s) { return s.kind === 'dropoff'; });
+    var picks = stops.filter(function (s) { return s.kind === 'pickup'; });
+    var keys = drops.map(keyOf);
+    var out = [];
+    drops.forEach(function (s, i) {
+      if (!(s.street && s.city)) return;
+      var c = candidate(addressOf(s), s, page, page.asked && drops.length === 1, false);
+      c.app = page.app;
+      c.expectedBy = typeof s.expectedBy === 'number' ? s.expectedBy : null;
+      c.store = picks.length === 1 && drops.length === 1 ? (picks[0].name || null) : null;
+      c.others = drops.filter(function (x, j) { return j !== i; })
+        .map(function (x) { return x.line || null; });
+      c.listDrops = keys.every(Boolean) ? keys : null;
+      c.bounded = !!bounded;
+      out.push(c);
+    });
+    return out;
+  }
+
+  /* One sighting with two orders held (server.js passes the list when it holds
+   * two). A non-planner screen moves the epoch as it does with one. A planner
+   * read whole is linked as with one, over the pages read since the OLDER
+   * order's card; a list seen whole gives every dropoff it shows read whole as
+   * a candidate of its own (plannerCandidates), for server.js to attribute
+   * (attribute), and is remembered for growth (noteView). A list not seen
+   * whole gives nothing and waits in the pool, as with one order: its lone
+   * dropoff is a single-trip rule, and with two orders in the car there is no
+   * single trip. The reason the planner line carries is the planner's own,
+   * except that a list whose dropoffs are all handed over gives none — they
+   * are the attribution's now, and the panel says what came of them. */
+  function sightingMany(st, orders, s, now) {
+    var out = { candidates: [], why: null, at: s && typeof s.at === 'number' ? s.at : null };
+    if (!s || typeof s !== 'object') return out;
+    took(st, orders);
+    var app = typeof s.app === 'string' ? s.app : null;
+    if (s.screen !== 'uber.planner') {
+      if (app) st.epoch[app] = (st.epoch[app] || 0) + 1;
+      else Object.keys(st.epoch).forEach(function (a) { st.epoch[a] += 1; });
+      return out;
+    }
+    if (s.whole !== true || !Array.isArray(s.stops) || !headed(s.stops).length) return out;
+    var page = { at: out.at === null ? now : out.at, app: app,
+                 epoch: st.epoch[app] || 0, asked: s.asked === true,
+                 titled: s.titled === true,
+                 top: !!(s.page && s.page.top), bottom: !!(s.page && s.page.bottom),
+                 stops: s.stops.filter(function (x) { return x && typeof x === 'object'; }),
+                 pending: false, why: null };
+    st.pages.push(page);
+    while (st.pages.length > PAGES_MAX) st.pages.shift();
+    var since = Math.min.apply(null, orders.map(function (o) { return o.acceptedAt; }));
+    var pool = st.pages.filter(function (p) { return p.at >= since; });
+    var run = pool.indexOf(page) === -1 ? { view: pageView(page), pages: [page] }
+      : linked(pool, page);
+    var view = run.pages.length > 1 ? run.view : pageView(page);
+    var bounded = view.top && view.bottom;
+    var verdict = plannerDestination(view.stops, bounded);
+    var cands = [];
+    if (bounded) {
+      noteView(st, app, page.at, view.stops);
+      cands = plannerCandidates(view, page, true).filter(function (c) {
+        if (c.asked) return true;
+        var seen = c.line + '|many';
+        if (st.said[seen]) return false;
+        st.said[seen] = true;
+        return true;
+      });
+    }
+    run.pages.forEach(function (p) {
+      p.pending = false;
+      p.why = null;
+      if (p.at < since || bounded) return;
+      p.pending = true;
+      p.why = verdict.why || 'list';
+    });
+    cands.forEach(function (c) {
+      if (run.pages.length > 1) c.pages = run.pages.length;
+      c.pageAts = run.pages.map(function (p) { return p.at; });
+    });
+    out.candidates = cands;
+    out.why = bounded && verdict.why === 'dropoffs' ? null : verdict.why;
+    st.verdicts.push({ at: page.at, why: out.why });
+    while (st.verdicts.length > PAGES_MAX) st.verdicts.shift();
+    return out;
+  }
+
   /* ---------- the planner row in the journal ----------------------------------
    *
    * ONE ROW FOR ONE PLANNER: the same stops read again inside `sameMs` are not
@@ -753,6 +1088,28 @@
     });
   }
 
+  /* The card an order in the car was taken from, OFFERED AGAIN at a different
+   * pay — the platform re-sending a job with its tip moved, which the driver
+   * accepts a second time. Stage 5, with two orders carried: a Took on it
+   * replaces that order rather than adding a second one. Stricter than
+   * heldOwnCard on purpose, because the cost of a wrong yes is an order
+   * thrown out of the car: the same miles and the same card minutes, BOTH
+   * ends read on both cards and the same, and a pay that differs — inside
+   * `windowMs` (HELD_CARD_MS) of that order's Took. */
+  function reOffer(held, card, now, windowMs) {
+    var s = held && held.seenAs;
+    var c = cardSeen(card, false);
+    if (!s || !c || s.pay === null || c.pay === null) return false;
+    if (now - s.tookAt > windowMs) return false;
+    if (Math.round(s.pay * 100) === Math.round(c.pay * 100)) return false;
+    if (s.miles === null || s.miles !== c.miles) return false;
+    if (s.minutes === null || s.minutes !== c.minutes) return false;
+    return ['pickup', 'dropoff'].every(function (k) {
+      var a = norm(s[k]), b = norm(c[k]);
+      return !!a && a === b;
+    });
+  }
+
   return { RANK: RANK, FIELDS: FIELDS, STITCH_MS: STITCH_MS, PAGES_MAX: PAGES_MAX,
            cardFields: cardFields, fieldsOf: fieldsOf, outranks: outranks,
            plannerPickup: plannerPickup, forgetPlanner: forgetPlanner,
@@ -761,5 +1118,9 @@
            keyOf: keyOf, placements: placements, linked: linked,
            fresh: fresh, took: took, sighting: sighting, pending: pending,
            verdictFor: verdictFor, plannerRowDue: plannerRowDue,
-           cardSeen: cardSeen, heldOwnCard: heldOwnCard, holdIdOf: holdIdOf };
+           cardSeen: cardSeen, heldOwnCard: heldOwnCard, holdIdOf: holdIdOf,
+           DEADLINE_SLACK_MIN: DEADLINE_SLACK_MIN, storeKey: storeKey, sameStore: sameStore,
+           attribute: attribute, park: park, unpark: unpark, unowned: unowned,
+           retryUnowned: retryUnowned,
+           plannerCandidates: plannerCandidates, reOffer: reOffer };
 }));

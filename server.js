@@ -394,13 +394,17 @@ function startScanner() {
         if (read.sighting) {
           countSighting(read.sighting);
           var sightedNow = Date.now();
-          var assembled = Assemble.sighting(assembly, holding(sightedNow), read.sighting,
-                                            sightedNow);
+          // The orders in the car, as the assembler takes them: one is the
+          // order (Stage 3, unchanged), two only while carrying two is on.
+          var assembled = Assemble.sighting(assembly, assemblerHeld(sightedNow),
+                                            read.sighting, sightedNow);
           assembled.candidates.forEach(function (c) {
             var said = { dropoff: c, at: Date.now() };
             dropoffArrived(said);
             if (said.dropoff) broadcast(said);
           });
+          // ...and what waited for a cue asked again: this sighting may be it.
+          retryPool();
           return;
         }
         if (read.phase) {
@@ -466,12 +470,15 @@ function startScanner() {
           // word, however long after the Took. This tested `!==` for as long
           // as a held id could only reappear as the same slot (sameCard), and
           // with `!==` that return was paired with itself.
-          var carriedNow = holding(Date.now());
+          //
+          // ANY order in the car, first-taken first: with two held, the second
+          // one's card back on the phone is that order too.
+          var carriedNow = heldOrders(Date.now()).filter(function (h) {
+            return read.offer.id === h.id || heldOwnCard(h, read.offer, Date.now(), false);
+          })[0] || null;
           if (sameCard && scanner.offer.heldCard) {
             read.offer.heldCard = scanner.offer.heldCard;
-          } else if (!sameCard && carriedNow
-                     && (read.offer.id === carriedNow.id
-                         || heldOwnCard(carriedNow, read.offer, Date.now(), false))) {
+          } else if (!sameCard && carriedNow) {
             read.offer.heldCard = holdIdOf(carriedNow);
           }
           scanner.offer = read.offer;
@@ -509,6 +516,9 @@ function startScanner() {
         // see dropoffArrived, which is this branch moved out so an address the
         // assembler made off a planner's sighting takes the same road.
         dropoffArrived(read);
+        // ...and, with two orders in the car, what waited for a cue asked
+        // again: an address just filed may be the one that eliminates.
+        retryPool();
         // Uber's Trip Planner, read off the whole screen because ⌖ was
         // pressed: every stop of the trip in order. See emit_planner.
         //
@@ -542,6 +552,11 @@ function startScanner() {
             read.planner.unfiled = verdict === undefined ? null : verdict;
           }
           var heldNow = holding(plannedAt);
+          // With two orders in the car, a pickup whose name is ONE of their
+          // cards' pickups (Assemble.sameStore) is marked with that order's
+          // id, `of`, which Map view numbers its pin by (P1, P2). One that
+          // fits both, or neither, is no order's and stays a plain P.
+          ownPickups(read.planner.stops, plannedAt);
           if (heldNow) {
             heldNow.planner = { stops: read.planner.stops,
                                 unfiled: read.planner.unfiled || null };
@@ -581,6 +596,8 @@ function startScanner() {
           // at the next offer. Null with nothing held. See heldEndState.
           var heldBeat = holding(Date.now());
           read.heldEnd = heldBeat ? heldEndState(heldBeat) : null;
+          // ...and every order's, with carrying two on (ordersForPanel).
+          if (heldBeat && carryTwo()) read.orders = ordersForPanel(Date.now());
         }
         broadcast(read);
       } catch (e) {
@@ -903,8 +920,9 @@ function cardOf(offer) {
 /* ---------- the orders in the car: a list ----------------------------------
  *
  * Stage 4 of the multi-order design. The hold was one slot; it is now a list,
- * first-taken first, capped at MAX_HELD — and MAX_HELD is ONE, so every answer
- * this file gives is the one it gave with the slot. What changed is only the
+ * first-taken first, capped at MAX_HELD — maxHeld(), ONE unless carrying two is
+ * on (Stage 5, carryTwo below), so with the flag off every answer this file
+ * gives is the one it gave with the slot. What changed is only the
  * shape: holding.json is `{v: 2, orders: [Hold]}`, `.holding.json` names
  * every order (`holds: [ids]`) and is in force until the LATEST of their ends,
  * and the live part of each GPS arrival is kept per hold (`arrivals`).
@@ -917,12 +935,53 @@ function cardOf(offer) {
  *   deliverBy the card's "Deliver by", minutes since midnight, or null
  *   addOn     whether the card was Uber's offer to add to a trip in progress
  *   of        for an add-on, the holdId of the order it adds to; else null
+ *   ofEnds    for an add-on, when that order ended as it stood at the Took
+ *             (holdEnds), which the add-on outlives: see holdEnds
  *
  * Read through heldOrders(now) and holding(now), never off `scanner.held`:
  * those are the questions "which orders are being carried RIGHT NOW", and an
  * order past its own clock is not one. rpi/test_lint.py holds that nothing
  * reads the slot's old name. */
-var MAX_HELD = 1;
+function maxHeld() {
+  return carryTwo() ? 2 : 1;
+}
+
+/* ---------- carrying two orders: the flag ------------------------------------
+ *
+ * Stage 5. The driver asked to carry two orders, and AUDITS.md's Settled had
+ * refused it (plan 3.1) for one reason: with two in the car, the ⌖ press for
+ * the second attached to the first, in an append-only file. The owner's
+ * decision overrides that entry with a safeguard in place of the refused
+ * rival-card guard: with two held, an address is filed only on a positive cue
+ * (Assemble.attribute) or when the driver picks it from a chooser, and is
+ * otherwise filed nowhere.
+ *
+ * Behind `"carryTwo": true` in rpi/config.json's `settings`, false unless it
+ * says exactly true. Read where it is asked, not at boot: the scanner rewrites
+ * that file whole and keeps keys it does not know, and a restart mid-shift is
+ * an aim-and-calibrate cycle. CARRY_TWO=1 or 0 in the environment overrides
+ * it, for the suites. With it off, MAX_HELD is one and the server does what
+ * Stage 4 did — a second Took replaces — and only says, in a `would` field on
+ * rows it already writes, what attribution would have done. */
+function carryTwo() {
+  var env = process.env.CARRY_TWO;
+  if (env === '1') return true;
+  if (env === '0') return false;
+  try {
+    var cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'rpi', 'config.json'), 'utf8'));
+    return !!(cfg && cfg.settings && cfg.settings.carryTwo === true);
+  } catch (e) {
+    return false;
+  }
+}
+
+/* The orders in the car as the assembler is handed them: the first-taken
+ * alone — exactly what it had before the list — unless carrying two is on and
+ * two are held, when it is the list. */
+function assemblerHeld(now) {
+  var list = heldOrders(now);
+  return carryTwo() && list.length >= 2 ? list : (list[0] || null);
+}
 
 /* The name a hold goes by on the wire: the card's id and when it was on the
  * screen. The panel has no other handle on "the order in the car", and a pin
@@ -946,6 +1005,7 @@ function asHold(h) {
   if (h.deliverBy === undefined) h.deliverBy = null;
   if (h.addOn === undefined) h.addOn = false;
   if (h.of === undefined) h.of = null;
+  if (h.ofEnds === undefined) h.ofEnds = null;
   return h;
 }
 
@@ -1094,7 +1154,15 @@ function holdEnds(h) {
   var stated = (typeof h.minutes === 'number' && isFinite(h.minutes) && h.minutes > 0)
     ? h.minutes : null;
   if (stated === null) return null;
-  return h.acceptedAt + stated * HOLD_OVERRUN * 60000 + HOLD_GRACE_MS;
+  var own = h.acceptedAt + stated * HOLD_OVERRUN * 60000 + HOLD_GRACE_MS;
+  // An add-on (Uber's "+ $", "+N min" card, taken onto a trip in progress) is
+  // done no sooner than the trip it joins, and then its own added minutes,
+  // half again: the later of that and its own clock. Its card's minutes are
+  // the minutes it ADDS, so its own clock alone ends it before the trip.
+  if (h.addOn && typeof h.ofEnds === 'number' && isFinite(h.ofEnds)) {
+    return Math.max(own, h.ofEnds + stated * HOLD_OVERRUN * 60000);
+  }
+  return own;
 }
 
 /* One sighting, counted by its screen type (rpi/scan_pi.py's emit_sighting;
@@ -1141,13 +1209,291 @@ function heldById(id, now) {
   return null;
 }
 
+/* ---------- two orders in the car: whose address, and the chooser -----------
+ *
+ * Stage 5, with carrying two on (carryTwo). The safeguard the owner put in
+ * place of AUDITS.md's refused rival-card guard: with two orders held, an
+ * address read off the screen is filed onto one of them only when a POSITIVE
+ * cue says which (Assemble.attribute: the app, the Took, the store, the
+ * deadline, the list growing, elimination on a list seen whole). With none:
+ *
+ *   - a ⌖ press opens the CHOOSER on the panel — a sheet over the verdict pane,
+ *     not a control on the bar — and nothing is filed unless the driver picks
+ *     a row. It closes after CHOOSER_MS (10 s) with nothing filed;
+ *   - an unprompted sighting waits in the assembler's pool (Assemble.park),
+ *     unwritten, and the panel says how many are waiting ("2 dropoffs read ·
+ *     whose?"), until a later read gives it a cue (retryPool) or one of the
+ *     two orders leaves the car and it is dropped.
+ *
+ * With carrying two off, nothing here changes what is filed: whoseDropoff only
+ * works out what attribution WOULD have said, over the order in the car and
+ * the one a Took last replaced while its clock still runs (`shadows`), and
+ * that goes on the mark or tally row this already writes, as `would`. */
+var CHOOSER_MS = envNumber('CHOOSER_MS', 10000);
+var choosing = null;
+var chooseSeq = 0;
+// The orders a Took replaced with carrying two off, while their own clock
+// runs: memory only, for `would` and nothing else.
+var shadows = [];
+
+function shadowsNow(now) {
+  shadows = shadows.filter(function (h) {
+    var e = holdEnds(h);
+    return e !== null && now <= e;
+  });
+  return shadows;
+}
+
+/* {stop, order, cue, would} for one address arriving: `order` undefined to
+ * leave dropoffArrived's own choice (the first-taken) alone, an order or null
+ * to file onto that one or onto none; `stop` when nothing is to be filed at
+ * all. `force` is a decision already made — the chooser's row, or the pool's
+ * cue — and is taken as it is. */
+function whoseDropoff(read, force, now) {
+  var d = read.dropoff;
+  var out = { stop: false, order: undefined, cue: null, would: null };
+  if (force) {
+    out.order = force.order || null;
+    out.cue = force.cue || null;
+    return out;
+  }
+  if (!d || typeof d.line !== 'string') return out;
+  var orders = heldOrders(now);
+  if (!carryTwo()) {
+    if (!orders.length) return out;
+    var w = Assemble.attribute(assembly, shadowsNow(now).concat(orders), d);
+    out.would = { cue: w.cue, held: w.order ? holdIdOf(w.order) : null };
+    return out;
+  }
+  if (orders.length < 2) {
+    if (orders.length) out.cue = 'only';
+    return out;
+  }
+  var a = Assemble.attribute(assembly, orders, d);
+  if (a.order) {
+    out.order = a.order;
+    out.cue = a.cue;
+    return out;
+  }
+  out.stop = true;
+  if (d.asked !== false) {
+    console.log('dropoff read with two orders in the car, ' + a.why + ': the chooser is open');
+    openChooser('scan', d, orders, now);
+  } else {
+    console.log('dropoff seen with two orders in the car, ' + a.why + ': waiting for a cue');
+    Assemble.park(assembly, d, orders);
+    broadcast({ unowned: Assemble.unowned(assembly) });
+  }
+  // ...and a cue that fitted both may yet be broken on the map.
+  if (a.why === 'tie') discBreak(d, orders, a.ties[0]);
+  return out;
+}
+
+/* The tie-break, and only that (Assemble.attribute): a cue fitted both orders
+ * and none fitted one. The address is searched on the NucBox inside each
+ * order's card disc, by the rule the held end is pinned by (searchPlan's
+ * street, pickInDisc, a door — hasDoor); found at door level inside EXACTLY
+ * ONE of them, it is that order's, filed under the cue that tied, and the
+ * chooser it was waiting in closes — or it leaves the pool. Found in both,
+ * in neither, no NucBox, no door: nothing changes, and the driver's chooser
+ * or the pool stand as they were. The public geocoder is never asked. */
+function discBreak(d, orders, cue) {
+  if (!NBX.search) return;
+  var plan = MV.searchPlan(d.line);
+  if (!plan || plan.kind !== 'street' || !plan.door) return;
+  var term = nbxTerm(plan.street);
+  if (!term) return;
+  var inside = [];
+  var left = orders.length;
+  var one = function () {
+    left -= 1;
+    if (left > 0 || inside.length !== 1) return;
+    var o = heldById(holdIdOf(inside[0]), Date.now());
+    if (!o) return;
+    if (choosing && choosing.d === d) {
+      choosing = null;
+      broadcast({ chooser: null });
+    } else if (!Assemble.unpark(assembly, d.line)) {
+      return;
+    }
+    console.log('dropoff found inside one card\'s reach only: filed by ' + cue);
+    var said = { dropoff: d, at: Date.now() };
+    dropoffArrived(said, { order: o, cue: cue });
+    if (said.dropoff) broadcast(said);
+    broadcast({ unowned: Assemble.unowned(assembly) });
+  };
+  orders.forEach(function (o) {
+    var disc = MV.discFor(o.card || null);
+    if (!disc) return one();
+    var target = nbxSearchTarget('street', term, MV.discBox(disc));
+    var take = function (out) {
+      var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
+      if (res.at && MV.hasDoor(res.at, plan.house)) inside.push(o);
+      one();
+    };
+    if (nbxCache.has(target)) return take(nbxCache.get(target));
+    nbxAsk(target, function (err, body) {
+      if (err || !Array.isArray(body)) return one();
+      var out = nbxHits(body);
+      nbxRemember(target, out);
+      take(out);
+    });
+  });
+}
+
+/* The chooser, opened over the ⌖ press it answers: a row for each order in
+ * the car, and — while a card is being screened (screeningCard) that is not
+ * one of them — that card as a row of its own, since the press may have been
+ * about it. "Neither" is the panel's own row. One at a time: a second press
+ * replaces the first's. Said to every panel on the stream. */
+function openChooser(kind, d, orders, now) {
+  var card = screeningCard(now);
+  choosing = { id: 'choose-' + now + '-' + (++chooseSeq), kind: kind, d: d,
+               among: orders.map(holdIdOf),
+               // ...not a card that IS one of the orders in the car: the
+               // last Took's own card is usually still the one on the slot.
+               card: card && !card.heldCard
+                 && !orders.some(function (o) { return o.id === card.id; }) ? card.id : null,
+               until: now + CHOOSER_MS };
+  broadcast({ chooser: chooserForPanel(now) });
+}
+
+/* The open chooser as the panel draws it, or null: its rows ① and ② with each
+ * order's pay and end (null where none is filed — the panel says "?"), the
+ * card row, the address it is about, and how long it has left. */
+function chooserForPanel(now) {
+  var c = choosing;
+  if (!c || now > c.until) return null;
+  var rows = [];
+  heldOrders(now).forEach(function (o, i) {
+    if (c.among.indexOf(holdIdOf(o)) === -1) return;
+    rows.push({ pick: holdIdOf(o), n: i + 1, pay: numOrNull(o.pay), end: o.dropoff || null });
+  });
+  var card = c.card && scanner.offer && scanner.offer.id === c.card
+    ? { pick: 'card', pay: numOrNull(scanner.offer.pay) } : null;
+  return { id: c.id, kind: c.kind, line: c.d.line, rows: rows, card: card,
+           closesInMs: c.until - now };
+}
+
+/* The addresses in the pool asked again (Assemble.retryUnowned), and every one
+ * a cue now decides filed through the one road, with that cue. Called after a
+ * sighting, an address filed, a Took and a Drop. With carrying two off there
+ * is no pool. */
+function retryPool() {
+  if (!carryTwo()) return;
+  var before = Assemble.unowned(assembly);
+  var found = Assemble.retryUnowned(assembly, heldOrders(Date.now()));
+  found.forEach(function (f) {
+    var said = { dropoff: f.d, at: Date.now() };
+    dropoffArrived(said, { order: f.order, cue: f.cue });
+    if (said.dropoff) broadcast(said);
+  });
+  if (found.length || Assemble.unowned(assembly) !== before) {
+    broadcast({ unowned: Assemble.unowned(assembly) });
+  }
+}
+
+/* A Trip Planner's pickups, each marked with the order whose card names that
+ * store (`of`), when exactly one of the orders in the car does: Map view
+ * numbers that pin P1 or P2. Two orders from one store, or none, leave it a
+ * plain P. With one order there is nothing to number. */
+function ownPickups(stops, now) {
+  var orders = heldOrders(now);
+  if (!carryTwo() || orders.length < 2) return;
+  stops.forEach(function (st) {
+    if (!st || st.kind !== 'pickup') return;
+    var mine = orders.filter(function (o) { return Assemble.sameStore(st.name, o.pickup); });
+    if (mine.length === 1) st.of = holdIdOf(mine[0]);
+  });
+}
+
+/* Where a Took puts its order, and what it puts down. Returns {replaced,
+ * added, putDownPay}.
+ *
+ * Carrying two off: the order in the car, as Stage 4 had it — the Took
+ * replaces it (and the replaced one is kept as a shadow for `would`).
+ *
+ * Carrying two on:
+ *   - an add-on card (Uber's screen `uber.addon`: "+ $", "+N min") is held as
+ *     an add-on of the Uber order most recently taken, and runs no shorter
+ *     than that order does (holdEnds);
+ *   - the same card id again is a Took pressed twice: replaced in place, no
+ *     drop row, as before;
+ *   - a RE-OFFER of an order in the car — same miles, card minutes and both
+ *     ends, a different pay, inside HELD_CARD_MS of that order's Took
+ *     (Assemble.reOffer) — replaces it, `by: 'replaced'`;
+ *   - anything else is ADDED, and a Took past MAX_HELD puts down the order
+ *     whose clock ends soonest, `by: 'replaced'`, and the panel says its pay.
+ * A DoorDash card for two orders ("Drop off 2 orders") is one card and one
+ * Took, so one order here: nothing counts its stops. */
+function placeTook(took, marked, inCar, now) {
+  var out = { replaced: null, added: false, putDownPay: null };
+  if (!carryTwo()) {
+    var before = inCar[0] || null;
+    if (before && before.id !== took.id) {
+      out.replaced = before;
+      shadows = [before];
+    }
+    setHeld([took]);
+    return out;
+  }
+  if (marked.screen === 'uber.addon') {
+    var base = inCar.filter(function (o) { return o.app === 'uber' && !o.addOn; }).pop();
+    took.addOn = true;
+    if (base) {
+      took.of = holdIdOf(base);
+      took.ofEnds = holdEnds(base);
+    }
+  }
+  var same = inCar.filter(function (o) { return o.id === took.id; })[0];
+  var again = same || inCar.filter(function (o) {
+    return Assemble.reOffer(o, marked, now, HELD_CARD_MS);
+  })[0];
+  if (again) {
+    if (!same) out.replaced = again;
+    setHeld(inCar.map(function (o) { return o === again ? took : o; }));
+    return out;
+  }
+  var list = inCar.concat([took]);
+  if (list.length > maxHeld()) {
+    var soonest = inCar.slice().sort(function (a, b) { return holdEnds(a) - holdEnds(b); })[0];
+    out.replaced = soonest;
+    out.putDownPay = numOrNull(soonest.pay);
+    list = list.filter(function (o) { return o !== soonest; });
+  }
+  out.added = inCar.length >= 1;
+  setHeld(list);
+  return out;
+}
+
+/* Which orders one tap of Drop puts down with two in the car, or null for the
+ * chooser: the one order whose pinned door the latest good fix is at (the
+ * GPS drop's own arrival circle), else the one order the GPS has seen arrive.
+ * Nothing else decides — not which was taken first, not which ends sooner. */
+function dropDecides(orders, now) {
+  var beat = scanner.beat;
+  var f = beat && beat.gps && beat.gps.fix;
+  if (f && f.gpsOk === true && typeof f.freshFor === 'number' && f.freshFor > 0
+      && typeof f.lat === 'number' && typeof f.lon === 'number'
+      && typeof f.gpsErr === 'number' && isFinite(f.gpsErr)) {
+    var at = orders.filter(function (o) {
+      var pin = heldEndPin(o);
+      return pin && MV.crowMiles(f, pin) * 1609.344
+        <= ARRIVE_M + Math.min(f.gpsErr, ARRIVE_ERR_CAP_M);
+    });
+    if (at.length === 1) return at;
+  }
+  var arrived = orders.filter(function (o) { return !!o.arrivedAt; });
+  return arrived.length === 1 ? arrived : null;
+}
+
 /* An address the scanner read, or one the assembler made off a planner's
  * sighting: decided by Assemble.dropoff, then written and said here. This was
  * the dropoff branch of the scanner's line handler, moved out unchanged in
  * what it writes, so both roads end in one place. `read` is the message the
  * stream will be sent: `read.dropoff` is deleted when nothing should be said,
  * and `read.holding` set when the hold took it. */
-function dropoffArrived(read) {
+function dropoffArrived(read, force) {
   // The destination, read off the screen that comes AFTER the accept.
   //
   // It goes onto the order in the car and nowhere else. An offer card
@@ -1199,6 +1545,20 @@ function dropoffArrived(read) {
   // with this line in the log.
   var dNow = Date.now();
   var carrying = holding(dNow);
+  // WHOSE IT IS, with two orders in the car (Stage 5): see whoseDropoff. It
+  // names the order the rest of this function files onto, in place of the
+  // first-taken, or says nothing is to be filed — the chooser is open, or the
+  // address waits in the pool — and then nothing below runs. `cue` is how it
+  // was decided, for the mark row; `would`, with carrying two off, is what
+  // attribution would have decided, for the rows this already writes.
+  var who = whoseDropoff(read, force, dNow);
+  if (who.stop) {
+    delete read.dropoff;
+    return;
+  }
+  if (who.order !== undefined) carrying = who.order;
+  var cue = who.cue;
+  var would = who.would;
   var said = read.dropoff ? Assemble.dropoff(carrying, read.dropoff, screeningCard(dNow))
     : null;
   if (said && said.drop) {
@@ -1276,7 +1636,13 @@ function dropoffArrived(read) {
           asked: wasAsked,
           // Only on a label-proven one, so the fold can let it past the
           // card's own end as the live path just did. See the marks fold.
-          labelled: labelled || undefined
+          labelled: labelled || undefined,
+          // How the order was chosen, with carrying two on — `only`, a cue's
+          // name, or `chooser` — and, with it off, what attribution would
+          // have said ({cue, held}). Ids and a word: no address. See
+          // whoseDropoff.
+          cue: cue || undefined,
+          would: would || undefined
         }) + '\n', function (err) {
           // Said out loud for the same reason the screening branch says
           // it: a read-only SD card mid-shift is the classic Pi failure,
@@ -1327,7 +1693,10 @@ function dropoffArrived(read) {
         // Absent means asked, matching how the reading itself is read
         // above, so rows written before this field existed keep the
         // behaviour they were written under.
-        asked: wasAsked
+        asked: wasAsked,
+        // ...and `chooser` when the driver picked this card from the chooser
+        // over two orders in the car (whoseDropoff).
+        cue: cue || undefined
       }) + '\n', function (err) {
         // Said out loud, because every other write to this file says so
         // and this one is a deliberate press the driver expects to be
@@ -1427,7 +1796,11 @@ function dropoffArrived(read) {
         // driver is looking at — which is a different answer from "the
         // same card", and the count needs to tell those apart.
         slot: onSlot ? onSlot.id : null,
-        kept: !!kept
+        kept: !!kept,
+        // With carrying two off: what attribution would have said, {cue,
+        // held}, ids only. With it on: how this order was chosen.
+        would: would || undefined,
+        cue: cue || undefined
       }) + '\n', function (err) {
         // Said out loud like every other write on this path. A tally that
         // silently stopped being written would be read months later as a
@@ -1456,7 +1829,13 @@ function dropoffArrived(read) {
     // Only when it was kept on the HOLD: an address filed onto the card
     // being screened, or read with nothing to file it on, is not where
     // the order in the car is going.
-    if (kept && carrying) read.holding = heldForPanel(carrying);
+    //
+    // `holding` is the first-taken order, as on every message — with two in
+    // the car the address may have gone onto the second, which `orders` says.
+    if (kept && carrying) {
+      read.holding = heldForPanel(holding(Date.now()));
+      if (carryTwo()) read.orders = ordersForPanel(Date.now());
+    }
     //
     // `scanner.dropoff` and `scanner.dropoffAt` were kept here for that
     // and are gone. They were written on every read and not one line in
@@ -1589,6 +1968,8 @@ var PICKUP_PINS_MAX = 4;
 var GPS_DROP_SAID_MS = 60000;
 // ...and "previous order put down" after a Took that replaced a hold.
 var HELD_REPLACED_SAID_MS = 60000;
+// ...and how long the panel offers to undo a Took that added a second order.
+var UNDO_ADDED_MS = 5000;
 
 // The live part of the arrival, which is not worth an SD write per fix: where
 // the dwell started and the last fix counted; `skippedMs`, the time in
@@ -1981,7 +2362,17 @@ function arriveOne(h, beat, now) {
   arrival.outCount += 1;
   if (arrival.outCount < LEAVE_FIXES) return false;
   putDown(now, 'gps', function () {
-    broadcast({ gpsDrop: { at: now, saidForMs: GPS_DROP_SAID_MS } });
+    var left = holding(now);
+    var said = { gpsDrop: { at: now, saidForMs: GPS_DROP_SAID_MS } };
+    // With an order left in the car the panel is told which one went and what
+    // is left, on the same message: a gpsDrop alone means "nothing held".
+    if (left) {
+      said.gpsDrop.holdId = holdIdOf(h);
+      said.gpsDrop.pay = numOrNull(h.pay);
+      said.holding = heldForPanel(left);
+      said.orders = ordersForPanel(now);
+    }
+    broadcast(said);
   }, [h]);
   return false;
 }
@@ -1995,6 +2386,10 @@ function arriveOne(h, beat, now) {
 function putDown(now, by, done, which) {
   // heldOrders(), not the raw list, and asked BEFORE the list is rewritten.
   var live = heldOrders(now);
+  // How many orders were in the car at the moment: a drop row written with
+  // two held says so (`carried: 2`), because its `at - acceptedAt` is then an
+  // elapsed time for the named order only if the press named the right one.
+  var carried = live.length;
   var dropped = (which || live.slice(0, 1)).filter(function (h) {
     return live.indexOf(h) !== -1;
   });
@@ -2008,12 +2403,16 @@ function putDown(now, by, done, which) {
     var row = { v: 1, kind: 'drop', at: now, id: d.id, seq: now,
                 acceptedAt: d.acceptedAt };
     if (by) row.by = by;
+    if (carried >= 2) row.carried = carried;
     return JSON.stringify(row) + '\n';
   });
   appendLines(rows.join(''), function (err) {
     if (err) console.error('journal: could not record a drop: ' + err.message);
     done(true);
   });
+  // ...and an address waiting to be someone's is dropped if one of the orders
+  // it was waiting between has gone (Assemble.retryUnowned).
+  retryPool();
 }
 
 /* The offer as Advice.stack has to see it: timed the way the HELD job is timed.
@@ -2108,14 +2507,34 @@ function withStack(read, now) {
   var held = holding(now);
   read.holding = heldForPanel(held);
   // The order in the car, on the phone again: no pair to weigh, and the panel
-  // says what it is. See heldOwnCard.
-  read.heldCard = heldOwnCard(held, read, now, true) ? holdIdOf(held) : null;
+  // says what it is. See heldOwnCard. Any order in the car, first-taken first.
+  var own = heldOrders(now).filter(function (h) {
+    return heldOwnCard(h, read, now, true);
+  })[0];
+  read.heldCard = own ? holdIdOf(own) : null;
   read.stack = held && !read.heldCard
     ? Advice.stack(held, timedLikeTheHeldJob(read),
                    { target: read.target, band: read.band,
                                  costPerMile: read.costPerMile }, now)
     : null;
+  // With two in the car the pair is still weighed against the FIRST only —
+  // the detour through both is Stage 6 — and the line says so ("vs ① only").
+  if (read.stack && heldOrders(now).length >= 2) read.stack.vsFirst = true;
+  if (carryTwo()) {
+    read.orders = ordersForPanel(now);
+    read.unowned = Assemble.unowned(assembly);
+  }
   return read;
+}
+
+/* Every order in the car as the panel draws it: heldForPanel's shape, with its
+ * number (① first-taken), its app, and whether it is an add-on and to which.
+ * Said beside `holding` (the first) only while carrying two is on. */
+function ordersForPanel(now) {
+  return heldOrders(now).map(function (h, i) {
+    return Object.assign(heldForPanel(h), { n: i + 1, app: h.app || null,
+                                             addOn: !!h.addOn, of: h.of || null });
+  });
 }
 
 /* The pairing, written down at the moment it is made.
@@ -2172,6 +2591,7 @@ function recordPairing(offer, now, reading) {
   // already means "it said nothing", which is a different claim, so this is
   // said in its own field.
   var judged = typeof money.target === 'number';
+  var all = heldOrders(now);
   var row = {
     v: 1, kind: 'pair', at: now, id: offer.id,
     // The order already in the car.
@@ -2229,6 +2649,18 @@ function recordPairing(offer, now, reading) {
     // on has it as one they did not. Absent means the colour was on the panel.
     stackShown: false
   };
+  // ...and with carrying two on, every order in the car: `held` stays the
+  // first-taken, which is what the stack line weighed, and `heldAlso` the
+  // others in the same shape. `heldCount` is how many there were, so the
+  // offers page can leave a pair judged against one of two out of its grading.
+  if (carryTwo()) {
+    row.heldAlso = all.slice(1).map(function (o) {
+      return { pay: numOrNull(o.pay), minutes: numOrNull(o.minutes),
+               dropoff: o.dropoff || null, scanned: !!o.dropoffScanned,
+               heldMs: Math.max(0, now - o.acceptedAt) };
+    });
+    row.heldCount = all.length;
+  }
   appendLines(JSON.stringify(row) + '\n', function (err) {
     if (err) console.error('journal: could not record a pairing: ' + err.message);
   });
@@ -3953,6 +4385,13 @@ function statusNow() {
                    // endPinned, arrived, endWhy: see heldEndState.
                    heldEndState(h)) : null;
     }()),
+    // Every order in the car and the addresses waiting for an owner, while
+    // carrying two is on (ordersForPanel); and whether it is.
+    carryTwo: carryTwo(),
+    orders: carryTwo() ? ordersForPanel(Date.now()) : undefined,
+    unowned: carryTwo() ? Assemble.unowned(assembly) : undefined,
+    // ...and the chooser, if one is open (openChooser).
+    chooser: chooserForPanel(Date.now()),
     lastAgeMs: (scanner.last && typeof scanner.last.at === 'number')
       ? Math.max(0, Date.now() - scanner.last.at) : null,
     heardAgeMs: scanner.heardAt
@@ -5867,6 +6306,12 @@ function route(req, res) {
         // The order a Took is about to put down, if it replaces one: see the
         // drop row below.
         var replacedHold = null;
+        // ...and, with carrying two on, whether this Took ADDED an order
+        // beside one already in the car (the panel offers to undo that), and
+        // the pay of an order a Took past MAX_HELD put down (said).
+        var addedHold = null;
+        var putDownPay = null;
+        var carriedAtTook = 0;
         if (marked) {
           marked.accepted = note.accepted;
           var before = holding(Date.now());
@@ -5880,17 +6325,22 @@ function route(req, res) {
           // id (heldOwnCard): the order in the car is the one the driver took
           // already, and replacing it would restart its clock and write a
           // drop for an order that is still in the car.
+          //
+          // ANY order in the car's own card: with two carried, a Took on the
+          // second's card come back is that order too.
+          var inCar = heldOrders(Date.now());
+          carriedAtTook = inCar.length;
           if (note.accepted && before && marked.heldCard
-              && marked.heldCard === holdIdOf(before)) {
+              && inCar.some(function (h) { return holdIdOf(h) === marked.heldCard; })) {
             // the mark is written; the hold stands as it is
           } else if (note.accepted) {
             // A second ✓ Took while an order is still held used to replace
             // it in silence: the first order left the car with no drop row,
-            // and the journal could not say how it ended. Carrying two orders
-            // is not built (the stack math, Map view and the GPS drop all
-            // assume one), so the first is put down — and SAID: a drop row
-            // `by: 'replaced'`, and a note on the panel.
-            if (before && before.id !== marked.id) replacedHold = before;
+            // and the journal could not say how it ended. With carrying two
+            // off the first is put down — and SAID: a drop row `by:
+            // 'replaced'`, and a note on the panel. With it on, the second is
+            // ADDED, and only a re-offer or a Took past MAX_HELD puts one
+            // down, said the same way (placeTook).
             var tookAt = Date.now();
             var took = asHold({
               id: marked.id,
@@ -5971,13 +6421,17 @@ function route(req, res) {
               addOn: false,
               of: null
             });
-            // One order in the car is all MAX_HELD allows: the Took replaces
-            // whatever was there, as the slot did.
-            setHeld([took]);
+            // Placed by placeTook: replacing the order in the car, as the
+            // slot did, with carrying two off; added beside it with it on.
+            var placed = placeTook(took, marked, inCar, tookAt);
+            replacedHold = placed.replaced;
+            putDownPay = placed.putDownPay;
+            if (placed.added) addedHold = took;
             // ...and the assembler told: its pool of planner pages is retried
             // against this hold, where everything read before the Took is
             // about the order before and is refused.
-            Assemble.took(assembly, holding(Date.now()));
+            Assemble.took(assembly, assemblerHeld(Date.now()));
+            retryPool();
           } else {
             // Through holding() as well: taking the mark back off an order the
             // rest of the rig has already forgotten should not depend on which
@@ -6016,20 +6470,38 @@ function route(req, res) {
         // annotation: the mark is already on disk and is the driver's fact.
         if (replacedHold) {
           var dropNow = Date.now();
-          appendLines(JSON.stringify({ v: 1, kind: 'drop', at: dropNow, id: replacedHold.id,
-                                       seq: dropNow, acceptedAt: replacedHold.acceptedAt,
-                                       by: 'replaced' }) + '\n', function (dropErr) {
+          var dropRow = { v: 1, kind: 'drop', at: dropNow, id: replacedHold.id,
+                          seq: dropNow, acceptedAt: replacedHold.acceptedAt,
+                          by: 'replaced' };
+          // ...with two in the car at the press, as putDown says it.
+          if (carriedAtTook >= 2) dropRow.carried = carriedAtTook;
+          appendLines(JSON.stringify(dropRow) + '\n', function (dropErr) {
             if (dropErr) console.error('journal: could not record a replaced hold: '
                                        + dropErr.message);
           });
-          broadcast({ heldReplaced: { at: dropNow, saidForMs: HELD_REPLACED_SAID_MS } });
+          var replacedSaid = { at: dropNow, saidForMs: HELD_REPLACED_SAID_MS };
+          // A Took past MAX_HELD says WHICH order it put down, by its pay.
+          if (putDownPay !== null) replacedSaid.pay = putDownPay;
+          broadcast({ heldReplaced: replacedSaid });
         }
-        send(res, 200, JSON.stringify({ ok: true, note: note,
-                                        replaced: replacedHold
-                                          ? { at: Date.now(), saidForMs: HELD_REPLACED_SAID_MS }
-                                          : null,
-                                        holding: !!heldAfter,
-                                        held: heldForPanel(heldAfter) }),
+        var tookReply = { ok: true, note: note,
+                          replaced: replacedHold
+                            ? Object.assign({ at: Date.now(), saidForMs: HELD_REPLACED_SAID_MS },
+                                            putDownPay !== null ? { pay: putDownPay } : {})
+                            : null,
+                          holding: !!heldAfter,
+                          held: heldForPanel(heldAfter) };
+        // With carrying two on: every order, and the one this Took ADDED —
+        // the panel's Undo for it sends the untick this handler already
+        // takes (accepted: null), which puts that order down and no other.
+        if (carryTwo()) {
+          tookReply.orders = ordersForPanel(Date.now());
+          tookReply.added = addedHold && heldById(holdIdOf(addedHold), Date.now())
+            ? { holdId: holdIdOf(addedHold), id: addedHold.id,
+                pay: numOrNull(addedHold.pay), undoForMs: UNDO_ADDED_MS }
+            : null;
+        }
+        send(res, 200, JSON.stringify(tookReply),
              { 'Content-Type': 'application/json; charset=utf-8' });
       });
     });
@@ -6110,9 +6582,90 @@ function route(req, res) {
     // loud like every other append on this server, because a collection
     // that silently stopped would be read in a week as a driver who never
     // pressed Drop.
-    return putDown(Date.now(), null, function (was) {
-      send(res, 200, JSON.stringify({ ok: true, wasHolding: was }),
-           { 'Content-Type': 'application/json; charset=utf-8' });
+    //
+    // WITH TWO ORDERS IN THE CAR (carrying two on) a press names one of them,
+    // and the server does not guess which. One tap puts down the order the
+    // latest good fix is at the pinned door of, or the one the GPS has seen
+    // arrive (dropDecides); otherwise nothing is put down and the reply is a
+    // chooser for the panel — ①, ② or both — whose answer comes back as
+    // `holdIds`, and those rows say `by: 'chooser'`. Every row written with
+    // two in the car says `carried: 2` (putDown).
+    return readJsonBody(req, function (bodyErr, body) {
+      var asked = (!bodyErr && body) || {};
+      var now = Date.now();
+      var orders = heldOrders(now);
+      var json = { 'Content-Type': 'application/json; charset=utf-8' };
+      var answer = function (was, extra) {
+        var reply = { ok: true, wasHolding: was };
+        if (carryTwo()) {
+          var left = holding(Date.now());
+          reply.holding = !!left;
+          reply.held = heldForPanel(left);
+          reply.orders = ordersForPanel(Date.now());
+        }
+        send(res, 200, JSON.stringify(Object.assign(reply, extra || {})), json);
+      };
+      if (Array.isArray(asked.holdIds)) {
+        var picked = orders.filter(function (o) {
+          return asked.holdIds.indexOf(holdIdOf(o)) !== -1;
+        });
+        if (!picked.length) return answer(false);
+        return putDown(now, 'chooser', function (was) { answer(was); }, picked);
+      }
+      if (carryTwo() && orders.length >= 2) {
+        var one = dropDecides(orders, now);
+        if (!one) {
+          return answer(true, { choose: {
+            kind: 'drop', closesInMs: CHOOSER_MS,
+            rows: orders.map(function (o, i) {
+              return { pick: holdIdOf(o), n: i + 1, pay: numOrNull(o.pay),
+                       end: o.dropoff || null };
+            }) } });
+        }
+        return putDown(now, null, function (was) { answer(was); }, one);
+      }
+      return putDown(now, null, function (was) { answer(was); });
+    });
+  }
+
+  /* The chooser's answer (openChooser): {id, pick}, `pick` one of its rows —
+   * an order's holdId, 'card', or 'neither'. Filed by the one road
+   * (dropoffArrived) with `cue: 'chooser'`, onto the order or the card picked,
+   * and said on the stream as any filed address is. Refused, filing nothing,
+   * when the chooser it names has closed (CHOOSER_MS) or been replaced, or the
+   * row is not one of its own. 'neither' files nothing and closes it. */
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/choose') {
+    return readJsonBody(req, function (err, body) {
+      var json = { 'Content-Type': 'application/json; charset=utf-8' };
+      var now = Date.now();
+      var c = choosing;
+      if (err || !body || !c || body.id !== c.id || now > c.until) {
+        return send(res, 409, JSON.stringify({ ok: false, error: 'closed' }), json);
+      }
+      var said = { dropoff: c.d, at: now };
+      if (body.pick === 'neither') {
+        choosing = null;
+        broadcast({ chooser: null });
+        return send(res, 200, JSON.stringify({ ok: true, filed: null }), json);
+      }
+      if (body.pick === 'card') {
+        if (!c.card || !scanner.offer || scanner.offer.id !== c.card) {
+          return send(res, 409, JSON.stringify({ ok: false, error: 'not one of its rows' }), json);
+        }
+        choosing = null;
+        dropoffArrived(said, { order: null, cue: 'chooser' });
+      } else {
+        var order = c.among.indexOf(body.pick) !== -1 ? heldById(body.pick, now) : null;
+        if (!order) {
+          return send(res, 409, JSON.stringify({ ok: false, error: 'not one of its rows' }), json);
+        }
+        choosing = null;
+        dropoffArrived(said, { order: order, cue: 'chooser' });
+      }
+      broadcast({ chooser: null });
+      if (said.dropoff) broadcast(said);
+      retryPool();
+      send(res, 200, JSON.stringify({ ok: true, filed: said.dropoff ? body.pick : null }), json);
     });
   }
 

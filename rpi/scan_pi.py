@@ -2592,7 +2592,28 @@ class UpDown(object):
         return None if self.camera.word == 'seeing' else self.camera.word
 
 
-def emit_dropoff(address, ms=None, asked=True, labelled=False):
+def screen_said(text):
+    """What a screen says about WHOSE an address read off it is: {'app',
+    'screen', 'expectedBy'} — the app and screen type (OP.screen_type), and the
+    one "Expected by" time the screen prints, minutes since midnight, or None
+    where it prints none or more than one (a Trip Planner lists a time per
+    stop, and which is this address's is the assembler's question). Uber's
+    navigation bar prints the stop's time ("4 min · 0.6 mi / Expected by 8:20
+    PM"); with two orders in the car server.js holds it against each card's
+    "Deliver by" (Assemble.attribute, the deadline cue)."""
+    kind = OP.screen_type(text or '')
+    times = set()
+    for line in re.split(r'[\r\n]+', text or ''):
+        m = OP.PLANNER_EXPECTED.search(OP.normalize(line))
+        if m:
+            due = OP.time_of_day(m.group(1), m.group(2), m.group(3))
+            if due is not None:
+                times.add(due)
+    return {'app': kind['app'], 'screen': kind['screen'],
+            'expectedBy': times.pop() if len(times) == 1 else None}
+
+
+def emit_dropoff(address, ms=None, asked=True, labelled=False, text=None):
     """The destination, once it has been read off the screen.
 
     Its own line, like the offer id and for the same reason: it is not part of a
@@ -2643,6 +2664,9 @@ def emit_dropoff(address, ms=None, asked=True, labelled=False):
         # are the assembler's to file, off the sighting (emit_sighting).
         'labelled': 'dropoff' if labelled and not asked else None,
         'ms': ms,
+        # ...and what the screen says about whose it is, for server.js to
+        # attribute it with two orders in the car: see screen_said.
+        **screen_said(text),
         'at': int(time.time() * 1000)}}), flush=True)
 
 
@@ -2980,6 +3004,15 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None):
         'milesCorrected': bool(parsed.get('milesCorrected')),
         'earlyLook': says_early_look(parsed),
         'multiOrder': says_multi_order(parsed),
+        # ...and which app's card it is, and which screen (OP.screen_type, off
+        # the reading's own text): server.js keeps both on the order in the
+        # car, the app as attribution's first hard rule with two orders held,
+        # the screen to know Uber's add-on card (`uber.addon`, "+25 min (+ 9.6
+        # mi) total"), which is held as part of the trip it joins. And the
+        # card's "Deliver by", minutes since midnight, for the deadline cue.
+        'app': OP.screen_type(parsed.get('text') or '')['app'],
+        'screen': OP.screen_type(parsed.get('text') or '')['screen'],
+        'deliverBy': parsed.get('deliverBy'),
         # ...and where the car was when it came up, in the journal's own seven
         # fields — `lat`, `lon`, `gpsAge`, `gpsErr`, `gpsMode`, and the gate's
         # `gpsOk`/`gpsWhy` — built by the same function the row is, from the
@@ -4152,7 +4185,7 @@ def main():
             dropoff_asked = False
             if args.json:
                 emit_dropoff(found, ms=out.get('ms'), asked=asked,
-                             labelled=labelled)
+                             labelled=labelled, text=out.get('text'))
             log('destination read%s: %s'
                 % ('' if asked else ' (unprompted, under a Dropoff label)'
                    if labelled else ' (unprompted)', found.get('line')))

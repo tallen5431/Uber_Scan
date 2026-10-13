@@ -2758,6 +2758,153 @@ const SNAP_MEASURE = (fixture) => {
       await ctx.close();
     }
   }
+  // Two orders in the car (carrying two on): the chooser over the verdict
+  // pane, with two rows and with the screened card's as a third, and the two
+  // compact order lines between offers; and the pair line's "vs ① only". On
+  // the three panels and in both pictures. See CARRY on the Python side.
+  const measureCarry = (page) => page.evaluate(() => {
+    const shown = (el) => {
+      if (!el || el.hidden) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+    };
+    const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '');
+    const box = (el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    };
+    // Glyphs of `el` outside every one of `boxes`.
+    const outside = (el, boxes) => {
+      if (!el) return '';
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const rg = document.createRange();
+      let n, cut = '';
+      while ((n = walk.nextNode())) {
+        for (let i = 0; i < n.length; i++) {
+          rg.setStart(n, i); rg.setEnd(n, i + 1);
+          const c = rg.getBoundingClientRect();
+          if (!c.width && !c.height) continue;
+          if (boxes.some((b) => c.left < b.left - 0.5 || c.right > b.right + 0.5
+                                || c.top < b.top - 0.5 || c.bottom > b.bottom + 0.5)) {
+            cut += n.data[i];
+          }
+        }
+      }
+      return cut;
+    };
+    const glass = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+    const ch = document.getElementById('chooser');
+    const bar = document.querySelector('.bottombar');
+    const barKids = [].slice.call(bar.children).filter(shown);
+    const vr = document.getElementById('verdict').getBoundingClientRect();
+    const card = { left: vr.left + 2, right: vr.right - 2, top: vr.top + 2, bottom: vr.bottom - 2 };
+    // The verdict pane: the card's own column, from the top of the glass to
+    // the status row above the bar.
+    const live = document.querySelector('.live');
+    const conn = document.querySelector('.connbar').getBoundingClientRect();
+    const lines = ['heldLine', 'heldLine2', 'whose'].map((id) => document.getElementById(id));
+    const vs = document.querySelector('#stack .vs');
+    const d = document.documentElement;
+    return {
+      chooser: shown(ch) ? {
+        rows: [].slice.call(ch.querySelectorAll('button')).map((b) => ({
+          text: [].slice.call(b.children).map(text).join(' '),
+          h: Math.round(b.getBoundingClientRect().height),
+          // What the row stands for whole inside it — "① $9.48", "This card
+          // $12.50", "Neither" — where the street beside it may give way.
+          cut: outside(b.querySelector('.who'), [box(b), glass]) !== '',
+        })),
+        ask: text(ch.querySelector('.ask')),
+        // Over the verdict's column, above the status row and the bar.
+        inPane: (() => {
+          const r = ch.getBoundingClientRect();
+          const col = live && shown(live) ? live.getBoundingClientRect() : vr;
+          return r.left >= col.left - 1 && r.right <= col.right + 1 && r.top >= -0.5
+            && r.bottom <= Math.min(conn.top, bar.getBoundingClientRect().top) + 0.5;
+        })(),
+      } : null,
+      bar: { count: barKids.length, box: box(bar),
+             drop: text(document.getElementById('drop')) },
+      lines: lines.map((el) => shown(el) ? {
+        text: [].slice.call(el.children).length
+          ? [].slice.call(el.children).filter(shown).map(text).join(' ') : text(el),
+        cut: outside(el, [box(el), card, glass]),
+        rows: Math.round(el.getBoundingClientRect().height
+                         / (parseFloat(getComputedStyle(el).lineHeight)
+                            || parseFloat(getComputedStyle(el).fontSize) * 1.2)),
+      } : null),
+      vs: shown(vs) ? { text: text(vs), cut: outside(vs, [box(document.getElementById('stack')),
+                                                           card, glass]) } : null,
+      over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
+    };
+  });
+  for (const panel of PLANNER_PANELS) {
+    for (const view of ['screen', 'scene']) {
+      const ctx = await browser.newContext({
+        viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+      });
+      const page = await ctx.newPage();
+      await page.clock.install({ time: Date.now() });
+      await page.addInitScript((v) => {
+        try { localStorage.setItem('uberscan.liveView', v); } catch (e) {}
+        class FakeEventSource {
+          constructor(url) { this.url = url; window.__es = this; }
+          close() {}
+          push(obj) { if (this.onmessage) this.onmessage({ data: JSON.stringify(obj) }); }
+        }
+        window.EventSource = FakeEventSource;
+      }, view);
+      await page.route('**/api/frame.*', (route) => {
+        const v = /view=screen/.test(route.request().url()) ? 'screen' : 'scene';
+        route.fulfill({ status: 200, contentType: 'image/jpeg',
+                        body: Buffer.from(FRAMES[v], 'base64') });
+      });
+      await page.route('**/api/status*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ scanner: { enabled: true, running: true, error: null },
+                               status: { phase: 'scanning', message: '' },
+                               last: null, lastAgeMs: null, heardAgeMs: 400,
+                               offer: null, holding: null }) }));
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction(() => document.getElementById('view').naturalWidth > 2,
+                                 null, { timeout: 10000 }).catch(() => {});
+      await page.clock.runFor(600);
+      const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+      // The widest each line is asked to hold: three-figure pays, the longest
+      // street a real card printed, and the longest of the GPS drop's words.
+      const A = { n: 1, pay: 112.45, minutes: 55, holdId: 'l-a@1',
+                  dropoff: '4821 Kestrel Dr S, Powder Springs, GA 30127', card: null,
+                  endPinned: false, arrived: false, endWhy: 'too many answers', app: 'uber' };
+      const B = { n: 2, pay: 128.08, minutes: 60, holdId: 'l-b@2',
+                  dropoff: '1985 Cobb Pkwy NW, Kennesaw, GA 30152', card: null,
+                  endPinned: false, arrived: false, endWhy: 'too many answers', app: 'uber' };
+      await push({ alive: true, at: 1 });
+      await push({ holding: A, orders: [A, B], unowned: 2 });
+      await push({ ready: false, state: 'empty', track: null, places: [], text: '' });
+      await page.clock.runFor(1100);
+      const before = await measureCarry(page);
+      const rows = [{ pick: 'l-a@1', n: 1, pay: 112.45, end: A.dropoff },
+                    { pick: 'l-b@2', n: 2, pay: 128.08, end: null }];
+      await push({ chooser: { id: 'c1', kind: 'scan', line: A.dropoff, rows: rows, card: null,
+                              closesInMs: 10000 } });
+      await page.clock.runFor(300);
+      const two = await measureCarry(page);
+      await push({ chooser: { id: 'c2', kind: 'scan', line: A.dropoff, rows: rows,
+                              card: { pick: 'card', pay: 118.04 }, closesInMs: 10000 } });
+      await page.clock.runFor(300);
+      const three = await measureCarry(page);
+      await page.clock.runFor(10500);
+      // ...and the pair line with both in the car, under an offer.
+      await push(Object.assign({}, HELD.offer, { holding: A, orders: [A, B], unowned: 0,
+        stack: Object.assign({}, HELD.offer.stack, { vsFirst: true }) }));
+      await page.clock.runFor(1100);
+      const offer = await measureCarry(page);
+      out[panel[0] + ' ' + view + ' carry'] = { before: before, two: two, three: three,
+                                               offer: offer };
+      await page.close();
+      await ctx.close();
+    }
+  }
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -3162,6 +3309,62 @@ try:
                [('address', 'dropoff address unread', 1, ''),
                 ('dropoffs', '2 dropoffs: end not guessed', 1, ''),
                 ('list', 'list cut off: end not guessed', 1, '')])
+
+    # Two orders in the car (carrying two on), on the three panels and in both
+    # pictures: the two compact order lines between offers, whole — pay and
+    # GPS word inside the card — with "2 dropoffs read · whose?" under them;
+    # the chooser over the verdict pane, its rows 96px where the pane has the
+    # height and never under the bar's 52px where it does not, every row's
+    # words whole, the bar and its six controls where they were; and "vs ①
+    # only" whole on the pair line.
+    for panel, w, h in PLANNER_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            cm = got.get('%s %s carry' % (panel, view)) or {}
+            _bf, _tw, _th, _of = (cm.get('before') or {}, cm.get('two') or {},
+                                  cm.get('three') or {}, cm.get('offer') or {})
+            ok_('two orders in the car were measured at %s' % where, _bf and _tw and _th and _of)
+            if not (_bf and _tw and _th and _of):
+                continue
+            _ln = _bf.get('lines') or [None, None, None]
+            eq('the two-order lines are whole inside the card at %s' % where,
+               [((x or {}).get('text'), (x or {}).get('cut')) for x in _ln],
+               [('① $112.45 → 4821 Kestrel Dr S · too many answers', ''),
+                ('② $128.08 → 1985 Cobb Pkwy NW · too many answers', ''),
+                ('2 dropoffs read · whose?', '')])
+            eq('...with Drop ▾ on a bar of six at most, and nothing scrolling at %s' % where,
+               (_bf['bar']['drop'], _bf['bar']['count'] <= 6, _bf.get('over')),
+               ('Drop ▾', True, False))
+            _c2 = _tw.get('chooser') or {}
+            _rows2 = _c2.get('rows') or []
+            eq('the chooser\'s rows read whole at %s' % where,
+               [(r.get('text'), r.get('cut')) for r in _rows2],
+               [('① $112.45 · 4821 Kestrel Dr S', False), ('② $128.08 · ?', False),
+                ('Neither', False)])
+            eq('...over the verdict pane, the bar where it was and still its six at %s' % where,
+               (_c2.get('inPane'), _tw['bar']['box'] == _bf['bar']['box'],
+                _tw['bar']['count'] == _bf['bar']['count'], _tw.get('over')),
+               (True, True, True, False))
+            _hs = [r.get('h') for r in _rows2[:2]]
+            if h >= 480:
+                eq('...its two order rows 96px tall at %s' % where, _hs, [96, 96])
+            else:
+                ok_('...its order rows no shorter than the bar\'s 52px at %s (%r)' % (where, _hs),
+                    _hs and all(x >= 52 for x in _hs))
+            _c3 = _th.get('chooser') or {}
+            _rows3 = _c3.get('rows') or []
+            eq('...and with the screened card as a third row, still whole and in the pane at %s'
+               % where,
+               ([(r.get('text'), r.get('cut')) for r in _rows3], _c3.get('inPane'),
+                _th['bar']['box'] == _bf['bar']['box']),
+               ([('① $112.45 · 4821 Kestrel Dr S', False), ('② $128.08 · ?', False),
+                 ('This card $118.04', False), ('Neither', False)], True, True))
+            ok_('...every row no shorter than 52px at %s (%r)'
+                % (where, [r.get('h') for r in _rows3]),
+                _rows3 and all((r.get('h') or 0) >= 52 for r in _rows3))
+            _vs = _of.get('vs') or {}
+            eq('the pair line says "vs ① only", whole, with two in the car at %s' % where,
+               (_vs.get('text'), _vs.get('cut')), ('vs ① only', ''))
 
     # The order in the car, on the card, at the most each line is asked to
     # hold (HELD), on the three panels and in both pictures.

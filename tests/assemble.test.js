@@ -274,6 +274,137 @@ SEQ.forEach(function (seq) {
     pageOf('Dropoff • 1 order\nMara T.', 3000), { whole: false }), 3000).candidates, []);
 })();
 
+/* ---- two orders in the car: attribution (Stage 5) ----
+ *
+ * attribute() decides whose an address is from what the screen proves, and
+ * nothing else; with no cue, or cues that disagree, nobody's. Stores, people
+ * and streets invented. */
+(function () {
+  function order(id, at, more) {
+    var o = Object.assign({ id: id, acceptedAt: at, tookAt: at + 5, holdId: id + '@' + at,
+                            minutes: 40, app: 'uber', pickup: null, deliverBy: null,
+                            dropoff: null, dropoffScanned: false }, more || {});
+    A.fieldsOf(o);
+    return o;
+  }
+  var a = order('a', 1000, { pickup: 'Wren Street Noodles', deliverBy: 1170 });
+  var b = order('b', 5000, { pickup: 'Larkspur Tacos', deliverBy: 1205 });
+  var d = function (more) {
+    return Object.assign({ line: '12 Oak St, Marietta', at: 9000, app: 'uber' }, more || {});
+  };
+  var who = function (st, orders, x) {
+    var r = A.attribute(st, orders, x);
+    return [r.order ? r.order.id : null, r.cue, r.why];
+  };
+  var st = A.fresh();
+  eq('two orders, no cue: nobody\'s', who(st, [a, b], d()), [null, null, 'no cue']);
+  eq('the app is a hard rule: a DoorDash screen is not an Uber order\'s',
+     who(st, [a, order('dd', 5000, { app: 'doordash' })], d({ app: 'doordash' })),
+     ['dd', 'only', null]);
+  eq('a read older than an order\'s Took is not that order\'s',
+     who(st, [a, b], d({ at: 3000 })), ['a', 'only', null]);
+  eq('...and older than both is nobody\'s', who(st, [a, b], d({ at: 500 })),
+     [null, null, 'nobody']);
+  eq('the deadline cue: "Expected by" within 2 minutes of one card\'s "Deliver by"',
+     who(st, [a, b], d({ expectedBy: 1207 })), ['b', 'deadline', null]);
+  eq('...and not at 3 minutes', who(st, [a, b], d({ expectedBy: 1208 })),
+     [null, null, 'no cue']);
+  eq('...round midnight too',
+     who(st, [order('m', 1000, { deliverBy: 1439 }), b], d({ expectedBy: 1 })),
+     ['m', 'deadline', null]);
+  eq('the name cue: the store against the card\'s pickup, normalised',
+     who(st, [a, b], d({ store: 'oe Larkspur  TACOS – Roswell' })), ['b', 'name', null]);
+  eq('...with one i/l slip', who(st, [a, b], d({ store: 'Wren Street Noodies' })),
+     ['a', 'name', null]);
+  eq('...one i/l slip, not a different letter',
+     [A.sameStore('Wren Street Nood1es', 'Wren Street Noodles'),
+      A.sameStore('Wren Street Noodies', 'Wren Street Noodles'),
+      A.sameStore('Wren Street Noodiis', 'Wren Street Noodlls')], [false, true, false]);
+  eq('a cue that fits both orders is no vote: a tie, which only the map may break',
+     who(st, [a, order('b2', 5000, { pickup: 'Wren Street Noodles' })],
+         d({ store: 'Wren Street Noodles' })), [null, null, 'tie']);
+  eq('cues that disagree decide nothing',
+     who(st, [a, b], d({ store: 'Wren Street Noodles', expectedBy: 1205 })),
+     [null, null, 'cues disagree']);
+  eq('cues that agree decide, under the first',
+     who(st, [a, b], d({ store: 'Larkspur Tacos', expectedBy: 1205 })), ['b', 'name', null]);
+
+  // Growth: a list seen whole after B's Took that is the list seen whole
+  // before it plus one dropoff.
+  var g = A.fresh();
+  g.views = [{ app: 'uber', at: 3000, drops: ['dropoff|Mara T.|1170'] }];
+  var grown = ['dropoff|Mara T.|1170', 'dropoff|Jules K.|1205'];
+  eq('growth: the dropoff a list gained after the newer Took is the newer order\'s',
+     who(g, [a, b], d({ key: 'dropoff|Jules K.|1205', listDrops: grown })),
+     ['b', 'growth', null]);
+  eq('...and the one it already had is the older\'s',
+     who(g, [a, b], d({ key: 'dropoff|Mara T.|1170', listDrops: grown })),
+     ['a', 'growth', null]);
+  eq('...but not from a list that lost a stop it had (a misread key)',
+     who(g, [a, b], d({ key: 'dropoff|Jules K.|1205',
+                        listDrops: ['dropoff|Mara 7.|1170', 'dropoff|Jules K.|1205'] })),
+     [null, null, 'no cue']);
+
+  // Elimination: two same-app orders, a bounded list of two dropoffs, one
+  // already filed as A's.
+  var af = order('af', 1000);
+  A.file(af, { line: '4821 Kestrel Dr, Marietta', street: '4821 Kestrel Dr',
+               city: 'Marietta', at: 6000 },
+         { to: 'hold', from: 'press' }, null);
+  eq('elimination: the other dropoff on a list seen whole is the other order\'s',
+     who(st, [af, b], d({ bounded: true, others: ['4821 Kestrel Dr, Marietta, GA'] })),
+     ['b', 'elimination', null]);
+  eq('...never off a list not seen whole',
+     who(st, [af, b], d({ bounded: false, others: ['4821 Kestrel Dr, Marietta, GA'] })),
+     [null, null, 'no cue']);
+  eq('...nor off an end the CARD gave, which proves nothing',
+     who(st, [order('ac', 1000, { dropoff: '4821 Kestrel Dr, Marietta' }), b],
+         d({ bounded: true, others: ['4821 Kestrel Dr, Marietta'] })),
+     [null, null, 'no cue']);
+
+  // The pool: parked with no cue, filed when a cue comes, dropped when one of
+  // its two orders leaves the car.
+  var p = A.fresh();
+  A.park(p, d({ line: '9 Elm Ct, Smyrna' }), [a, b]);
+  A.park(p, d({ line: '3 Ash Way, Smyrna', expectedBy: null }), [a, b]);
+  eq('an address no cue decides waits, counted', A.unowned(p), 2);
+  eq('...and is never handed to the one order left when the other goes',
+     [A.retryUnowned(p, [a]).length, A.unowned(p)], [0, 0]);
+  A.park(p, d({ line: '9 Elm Ct, Smyrna', bounded: true,
+                others: ['4821 Kestrel Dr, Marietta'] }), [af, b]);
+  eq('...and a cue that arrives later files it',
+     A.retryUnowned(p, [af, b]).map(function (r) { return [r.d.line, r.order.id, r.cue]; }),
+     [['9 Elm Ct, Smyrna', 'b', 'elimination']]);
+
+  // The planner with two held: each dropoff of a list seen whole a
+  // candidate, the store only on a one-pickup one-dropoff list.
+  var s2 = A.fresh();
+  var page = pageOf('Trip Planner\nPickup • 1 order\nLarkspur Tacos\nExpected by 7:50 PM\n'
+                    + 'Address\n5 Mill St\nRoswell, GA\n'
+                    + 'Dropoff • 1 order\nMara T.\nExpected by 8:02 PM\n'
+                    + 'Address\n415 Ostrander Way NW\nKennesaw, GA\nWaybill', 9000);
+  var c2 = A.sighting(s2, [a, b], page, 9000).candidates;
+  eq('two held: a list seen whole gives its dropoff with the store of its one pickup',
+     c2.map(function (c) { return [c.line, c.store, c.expectedBy, c.bounded]; }),
+     [['415 Ostrander Way NW, Kennesaw', 'Larkspur Tacos', 1202, true]]);
+  eq('...which the name cue gives to B', who(s2, [a, b], c2[0]), ['b', 'name', null]);
+  eq('one order held is decided exactly as before (a list, not two orders)',
+     A.sighting(A.fresh(), [a], page, 9000).candidates.length,
+     A.sighting(A.fresh(), a, page, 9000).candidates.length);
+
+  // The re-offer, beside the held order's own card.
+  var held = { seenAs: { pay: 12.4, miles: 6.2, minutes: 35, pickup: 'Wren Street Noodles',
+                         dropoff: '12 Oak St, Marietta', tookAt: 1000 } };
+  var again = { pay: 13.15, miles: 6.2, minutes: 35, pickup: 'Wren Street Noodles',
+                dropoff: '12 Oak St, Marietta' };
+  eq('a re-offer: same miles, minutes and both ends, a different pay, inside the window',
+     [A.reOffer(held, again, 2000, 180000),
+      A.reOffer(held, Object.assign({}, again, { pay: 12.4 }), 2000, 180000),
+      A.reOffer(held, Object.assign({}, again, { dropoff: null }), 2000, 180000),
+      A.reOffer(held, again, 999999, 180000)],
+     [true, false, false, false]);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

@@ -740,8 +740,13 @@
     return (Array.isArray(stops) ? stops : []).filter(function (s) {
       return s && s.kind === 'pickup' && s.street;
     }).map(function (s) {
-      return { q: s.city && s.line ? s.line : s.street + ',',
-               name: plannerName(s.name) || null };
+      var p = { q: s.city && s.line ? s.line : s.street + ',',
+                name: plannerName(s.name) || null };
+      // ...and, with two orders in the car, the one whose card names this
+      // store (`of`, server.js ownPickups), for its pin's number. Absent
+      // when no one order's does.
+      if (s.of) p.of = s.of;
+      return p;
     });
   }
 

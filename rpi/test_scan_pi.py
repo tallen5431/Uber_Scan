@@ -3780,6 +3780,38 @@ eq('...and gives the order in the car no destination off it',
    ([(d[0] or {}).get('line') for d in run_cut['destinations']],
     assembled(run_cut['sightings'])['dropoffs']), ([], []))
 
+# --- whose an address is, and which app's card ------------------------------
+#
+# With two orders in the car (server.js, carrying two) an address is given to
+# one of them only on a cue the screen gave, and the first two cues are the
+# app and the stop's time. So the dropoff line says which app's screen it was
+# read off and the one "Expected by" the screen prints, and the offer line
+# says which app's card it is, which screen (Uber's add-on card is held as
+# part of the trip it joins) and its "Deliver by". Invented street.
+_nav_text = ('Deliver to Pat Q.\n4 min © 0.6 mi\nExpected by 8:20 PM\n'
+             '4821 Kestrel Dr, Marietta, GA 30060')
+_nav = said(lambda: SP.emit_dropoff({'line': '4821 Kestrel Dr, Marietta, GA 30060',
+                                     'street': '4821 Kestrel Dr', 'city': 'Marietta'},
+                                    asked=True, text=_nav_text))['dropoff']
+eq('a dropoff line says the app, the screen and the one time the screen prints',
+   (_nav.get('app'), _nav.get('screen'), _nav.get('expectedBy')),
+   ('uber', 'uber.nav', 20 * 60 + 20))
+eq('...and no time where the screen prints two (a planner: which is whose is the '
+   'assembler\'s question)',
+   SP.screen_said('Trip Planner\nDropoff • 1 order\nExpected by 8:02 PM\n'
+                  'Dropoff • 1 order\nExpected by 8:20 PM')['expectedBy'], None)
+_ao = said(lambda: SP.emit_offer('x', {'pay': 4.5, 'minutes': 10.0, 'deliverBy': None,
+                                       'text': '$4.50\n+10 min (+ 2.1 mi) total\nAccept'},
+                                 {'ready': True, 'perHour': 27.0, 'cardMinutes': 10.0}))['offer']
+eq('the offer line says which app\'s card, which screen, and its deadline',
+   (_ao.get('app'), _ao.get('screen'), _ao.get('deliverBy')), ('uber', 'uber.addon', None))
+_dd = said(lambda: SP.emit_offer('y', {'pay': 9.4, 'minutes': None, 'deliverBy': 1155,
+                                       'text': '$9.40 Guaranteed (incl. tips)\n'
+                                               '5.0 mi + 25 min\nDeliver by 7:15 PM'},
+                                 {'ready': True, 'perHour': 20.0, 'cardMinutes': 28.0}))['offer']
+eq('...a DoorDash card\'s with its "Deliver by"',
+   (_dd.get('app'), _dd.get('screen'), _dd.get('deliverBy')), ('doordash', 'dd.offer', 1155))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -386,6 +386,12 @@ NO_STATE_SENT = dict(PAIR, id='r6', at=NOW - 1800000,
 # answered. "no answer" on that row would contradict its own "Called it".
 NO_RANGE = dict(PAIR, id='r7', at=NOW - 2100000, stack=None,
                 said='go', stackShown=False)
+# ...and one judged with TWO orders already in the car (carrying two on): its
+# range is the card against the first order alone, so it is listed and not
+# graded. Its headline said 'go', which a tally that counted it would show.
+TWO_HELD = dict(PAIR, id='r9', at=NOW - 2400000, said='go', stackShown=False,
+                heldAlso=[{'pay': 28.08, 'minutes': 55, 'dropoff': None, 'scanned': False,
+                           'heldMs': 600000}], heldCount=2)
 
 # Dots and rankings. The newest row was judged at a lower target than the
 # rest, so re-judging a row against "today's" target would colour it
@@ -719,6 +725,12 @@ FEEDS = {
                  'unreadable': None,
                  'pairs': [GREEN_UNDER_PASS, NO_STATE_SENT, NO_RANGE],
                  'offers': TOOK_SIX},
+    # ...and the same three with one judged with two orders in the car.
+    'pair two held': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
+                      'hidden': 0, 'watched': {'saw': 12, 'kept': 12},
+                      'unreadable': None,
+                      'pairs': [GREEN_UNDER_PASS, NO_STATE_SENT, NO_RANGE, TWO_HELD],
+                      'offers': TOOK_SIX},
     'verdicts': {'count': len(VERDICTS), 'total': len(VERDICTS),
                  'truncated': False, 'days': 7, 'hidden': 1,
                  'watched': {'saw': 8, 'kept': 8},
@@ -2633,6 +2645,21 @@ try:
         len(_era) > 1 and re.search(r'Called it\s*not recorded', _era[1])
         and 'did not send its verdict' in _era[1])
     eq('...and its dot says nothing', (era.get('pairDots') or [None, None])[1], '')
+
+    # --- a pair judged with two orders in the car ----------------------------
+    #
+    # Its range is the card against the first order alone ("vs ① only" on the
+    # panel), so grading it against what the driver did would grade a
+    # question the panel did not answer. Listed, counted on its own, and left
+    # out of the tally: the tally is the one above's exactly.
+    two = got['pair two held']
+    eq('the offers page skips a pair judged with two orders in the car when grading',
+       (re.sub(r'<[^>]+>', '', era['pairsLead'] or '').split('. ')[0],
+        len(two.get('pairSaid') or [])),
+       (re.sub(r'<[^>]+>', '', two['pairsLead'] or '').split('. ')[0], 4))
+    ok_('...and says how many it left out (%r)' % (two['pairsLead'] or '')[:90],
+        re.search(r'(<b>)?1(</b>)? with two orders already in the car, not graded',
+                  two['pairsLead'] or '') is not None)
     ok_('a pair with no range under a headline that answered says what it said',
         len(_era) > 2 and re.search(r'Called it\s*take it', _era[2]))
     ok_('...and names the missing range rather than a missing answer',

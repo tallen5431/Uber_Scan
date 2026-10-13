@@ -5154,6 +5154,250 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  // --- two orders in the car (carrying two on) -------------------------------
+  stage = 'two orders in the car';
+  //
+  // The panel with the server carrying two: a line per order, "N dropoffs read
+  // · whose?", the chooser over the verdict pane — and closing after ten
+  // seconds of the page's own clock with nothing sent — Drop ▾ with the bar
+  // still six controls, the Undo after a Took that added an order, and the
+  // pair line saying it is against ① only. Messages as server.js sends them
+  // (ordersForPanel, chooserForPanel); the replies stubbed. Invented streets.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 1024, height: 600 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    const posted = [];
+    let markReply = null;
+    let dropReply = { ok: true, wasHolding: true };
+    await page.route('**/api/choose', (route) => {
+      posted.push({ url: '/api/choose', body: route.request().postData() });
+      route.fulfill({ status: 200, contentType: 'application/json',
+                      body: JSON.stringify({ ok: true }) });
+    });
+    await page.route('**/api/delivered', (route) => {
+      posted.push({ url: '/api/delivered', body: route.request().postData() });
+      route.fulfill({ status: 200, contentType: 'application/json',
+                      body: JSON.stringify(dropReply) });
+    });
+    await page.route('**/api/offers/mark', (route) => {
+      posted.push({ url: '/api/offers/mark', body: route.request().postData() });
+      route.fulfill({ status: 200, contentType: 'application/json',
+                      body: JSON.stringify(markReply || { ok: true }) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+              .catch(() => {});
+    const tick = (ms) => page.clock.runFor(ms);
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    // A reply is real network, not the page's clock: waited for on this side,
+    // until the page shows it (the Undo up), a second at most.
+    const undoUp = async () => {
+      for (let i = 0; i < 40; i++) {
+        if (await page.evaluate(() => !document.getElementById('undo').hidden)) return;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
+    // ...and a press's post, until it has reached the stub.
+    const sent = async (n) => {
+      for (let i = 0; i < 40 && posted.length < n; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
+    const look = () => page.evaluate(() => {
+      const shown = (el) => {
+        if (!el || el.hidden) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+      };
+      const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '');
+      const parts = (el) => [].slice.call(el.children).filter(shown).map(text)
+        .filter(Boolean).join(' ');
+      const ch = document.getElementById('chooser');
+      const bar = [].slice.call(document.querySelector('.bottombar').children).filter(shown);
+      const det = document.querySelector('#detail .held');
+      const vs = document.querySelector('#stack .vs');
+      return {
+        one: shown(document.getElementById('heldLine'))
+          ? parts(document.getElementById('heldLine')) : null,
+        two: shown(document.getElementById('heldLine2'))
+          ? parts(document.getElementById('heldLine2')) : null,
+        whose: shown(document.getElementById('whose'))
+          ? text(document.getElementById('whose')) : null,
+        detail: shown(det) ? parts(det) : null,
+        // Each row as it reads: its parts side by side.
+        chooser: shown(ch) ? [].slice.call(ch.children).map((c) => (c.children.length
+          ? [].slice.call(c.children).map(text).join(' ') : text(c))) : null,
+        drop: text(document.getElementById('drop')),
+        bar: bar.length,
+        undo: shown(document.getElementById('undo'))
+          ? text(document.getElementById('undo')) : null,
+        vs: shown(vs) ? text(vs) : null,
+        status: text(document.getElementById('health')),
+      };
+    });
+    const A = { n: 1, pay: 9.48, minutes: 40, holdId: 'c-a@1', dropoff: '4821 Kestrel Dr, Marietta',
+                card: null, endPinned: true, arrived: false, endWhy: null, app: 'uber',
+                addOn: false, of: null };
+    const B = { n: 2, pay: 28.08, minutes: 55, holdId: 'c-b@2', dropoff: null, card: null,
+                endPinned: false, arrived: false, endWhy: null, app: 'uber', addOn: false,
+                of: null };
+    await push({ phase: 'scanning', message: '' });
+    await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
+    // A card on the record, then ✓ Took on it: the reply says it ADDED ②.
+    await push({ offer: { id: 'c-b', pay: 28.08, minutes: 55, perHour: 20 }, at: 1 });
+    await push({ holding: A, orders: [A] });
+    markReply = { ok: true, holding: true, held: A, orders: [A, B], replaced: null,
+                  added: { holdId: 'c-b@2', id: 'c-b', pay: 28.08, undoForMs: 5000 } };
+    await page.evaluate(() => document.getElementById('took').click());
+    await undoUp();
+    await tick(300);
+    const added = await look();
+    await tick(5200);
+    const undoGone = await look();
+    // ...and the Undo itself, after another Took that added one, pressed:
+    // the untick, for the order that Took added.
+    await push({ offer: { id: 'c-c', pay: 6.25, minutes: 20, perHour: 18 }, at: 2 });
+    markReply = { ok: true, holding: true, held: A, orders: [A, B], replaced: null,
+                  added: { holdId: 'c-c@3', id: 'c-c', pay: 6.25, undoForMs: 5000 } };
+    await page.evaluate(() => document.getElementById('took').click());
+    await undoUp();
+    await tick(300);
+    markReply = { ok: true, holding: true, held: A, orders: [A], replaced: null };
+    posted.length = 0;
+    await page.evaluate(() => document.getElementById('undo').click());
+    await sent(1);
+    await tick(300);
+    const undone = { look: await look(), posted: posted.slice() };
+    // Two in the car again, between offers, with two addresses nobody owns.
+    await push({ holding: A, orders: [A, B], unowned: 2 });
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(1100);
+    const between = await look();
+    // A card up, and its pair line, with both in the car.
+    await push(Object.assign({}, READINGS.deducted, {
+      holding: A, orders: [A, B], unowned: 0,
+      stack: { pay: 40.0, worst: 18.2, best: 31.0, minMinutes: 55, maxMinutes: 80,
+               state: 'warn', sure: false, uncosted: false, ends: null, vsFirst: true } }));
+    await tick(300);
+    const offerUp = await look();
+    // ⌖ with no cue: the chooser, over the verdict pane.
+    await push({ chooser: { id: 'choose-1', kind: 'scan', line: '77 Birch Ln, Roswell, GA',
+                            rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
+                                   { pick: 'c-b@2', n: 2, pay: 28.08, end: null }],
+                            card: { pick: 'card', pay: 12.5 }, closesInMs: 10000 } });
+    await tick(300);
+    const chooser = await look();
+    posted.length = 0;
+    await tick(10000);
+    const closed = { look: await look(), posted: posted.slice() };
+    // ...answered: the row posts its pick.
+    await push({ chooser: { id: 'choose-2', kind: 'scan', line: '77 Birch Ln, Roswell, GA',
+                            rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
+                                   { pick: 'c-b@2', n: 2, pay: 28.08, end: null }],
+                            card: null, closesInMs: 10000 } });
+    await tick(200);
+    posted.length = 0;
+    await page.evaluate(() => document.querySelectorAll('#chooser button')[0].click());
+    await sent(1);
+    await tick(300);
+    const picked = { look: await look(), posted: posted.slice() };
+    // Drop with two in the car: the server says choose, and the chooser asks
+    // ①, ②, Both; Both sends both.
+    dropReply = { ok: true, wasHolding: true, holding: true, held: A, orders: [A, B],
+                  choose: { kind: 'drop', closesInMs: 10000,
+                            rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
+                                   { pick: 'c-b@2', n: 2, pay: 28.08, end: null }] } };
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    posted.length = 0;
+    await page.evaluate(() => document.getElementById('drop').click());
+    await sent(1);
+    for (let i = 0; i < 40; i++) {
+      if (await page.evaluate(() => !document.getElementById('chooser').hidden)) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    await tick(300);
+    const dropAsk = await look();
+    dropReply = { ok: true, wasHolding: true, holding: false, held: null, orders: [] };
+    await page.evaluate(() => {
+      const b = [].slice.call(document.querySelectorAll('#chooser button'));
+      b[b.length - 1].click();
+    });
+    await sent(2);
+    await tick(300);
+    const dropBoth = { look: await look(), posted: posted.slice() };
+    out.carryTwo = { added: added, undoGone: undoGone, undone: undone, between: between,
+                     offerUp: offerUp, chooser: chooser, closed: closed, picked: picked,
+                     dropAsk: dropAsk, dropBoth: dropBoth };
+    await page.close();
+    await ctx.close();
+  }
+
+  /* --- two orders in the car, on the map ------------------------------------
+   *
+   * With carrying two on: the first order's end pinned D1, the second's D2,
+   * and a held pickup one order's card names (`of`, ownPickups in server.js)
+   * P1 or P2 by that order. Invented places. */
+  {
+    stage = 'the map mode: two orders in the car';
+    const ANSWERS = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
+                      'Powder Springs Rd': [33.900, -84.640],
+                      'Canton Rd, Marietta': [33.980, -84.500],
+                      '310 Mill St, Roswell, GA 30075': [34.010, -84.610] };
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ last: null, lastAgeMs: null, heardAgeMs: 900,
+                             offer: null, holding: null }) }));
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{}' }));
+    await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+      const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
+      const hit = ANSWERS[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    const card = await page.evaluate(() => window.__HELD);
+    const A = { n: 1, pay: 9.48, minutes: 40, holdId: 'm-a@1', dropoff: 'Powder Springs Rd',
+                card: card, endPinned: false, arrived: false, endWhy: null };
+    const B = { n: 2, pay: 28.08, minutes: 55, holdId: 'm-b@2', dropoff: 'Canton Rd, Marietta',
+                card: card, endPinned: false, arrived: false, endWhy: null };
+    await page.evaluate((x) => window.__es.push(x), { holding: A, orders: [A, B] });
+    await page.evaluate((x) => window.__es.push(x), { planner: { stops: [
+      { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700,
+        street: '310 Mill St', city: 'Roswell', line: '310 Mill St, Roswell, GA 30075',
+        of: 'm-b@2' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
+        city: 'Marietta', line: 'Powder Springs Rd' }],
+      unfiled: null, asked: true, ms: null, at: 1 } });
+    await page.evaluate((x) => {
+      Object.assign(x.offer, window.__CARD);
+      window.__es.push(x);
+    }, { ready: true, state: 'go', perHour: 30, grossPerHour: 36, pay: 14.25, minutes: 20,
+         miles: 4, cost: 1.4, target: 25, band: 15, holding: A, orders: [A, B], stack: null,
+         offer: { id: 'o-two', pay: 14.25, minutes: 20, billedMinutes: 20, miles: 4, cost: 1.4,
+                  pickup: 'Chipotle (Barrett Pkwy)', dropoff: null } });
+    await page.click('#viewMode');
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');
+    await page.waitForTimeout(3500);
+    out.mapTwo = await page.evaluate(() => window.__letters.map((m) =>
+      String((m.opts && m.opts.icon && m.opts.icon.html) || '')).sort());
+    await page.close();
+  }
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -5503,6 +5747,56 @@ try:
                     re.search(r'\d+\s*ms\b', r['diag']['text']))
 
             ok_('%s: the panel still fits' % where, r['fits'])
+
+    # --- two orders in the car (carrying two on) ---------------------------
+    ct = got.get('carryTwo') or {}
+    ok_('the two-orders stage ran', bool(ct))
+    if ct:
+        _ad = ct.get('added') or {}
+        eq('[carry two] a Took that added an order offers to undo it, for five seconds',
+           (_ad.get('undo'), (ct.get('undoGone') or {}).get('undo')),
+           ('Added ② $28.08 · Undo', None))
+        _un = ct.get('undone') or {}
+        _ub = [json.loads(p['body']) for p in _un.get('posted') or []
+               if p.get('url') == '/api/offers/mark']
+        eq('[carry two] ...and Undo sends the untick the Took button sends, for that order',
+           [(b.get('id'), b.get('accepted'), b.get('via')) for b in _ub],
+           [('c-c', None, 'panel')])
+        _bt = ct.get('between') or {}
+        eq('[carry two] one compact line per order, and the addresses nobody owns',
+           (_bt.get('one'), _bt.get('two'), _bt.get('whose')),
+           ('① $9.48 → 4821 Kestrel Dr · ● armed', '② $28.08 → ? · ○ not armed',
+            '2 dropoffs read · whose?'))
+        _of = ct.get('offerUp') or {}
+        eq('[carry two] under an offer, both in one line, and the pair line says vs ① only',
+           (_of.get('detail'), _of.get('vs')), ('· In car ① $9.48 · ② $28.08', 'vs ① only'))
+        eq('[carry two] the chooser over the verdict pane: ①, ②, the card, neither',
+           (ct.get('chooser') or {}).get('chooser'),
+           ['Whose is 77 Birch Ln?', '① $9.48 · 4821 Kestrel Dr', '② $28.08 · ?',
+            'This card $12.50', 'Neither'])
+        _cl = ct.get('closed') or {}
+        eq('[carry two] the chooser left alone closes after ten seconds, sending nothing',
+           ((_cl.get('look') or {}).get('chooser'), _cl.get('posted')), (None, []))
+        _pk = ct.get('picked') or {}
+        eq('[carry two] a row pressed sends its pick, and the chooser closes',
+           ([json.loads(p['body']) for p in _pk.get('posted') or []],
+            (_pk.get('look') or {}).get('chooser')),
+           ([{'id': 'choose-2', 'pick': 'c-a@1'}], None))
+        _da = ct.get('dropAsk') or {}
+        eq('[carry two] Drop reads "Drop ▾" with two held, and the bar is still six controls',
+           ((ct.get('between') or {}).get('drop'), (ct.get('between') or {}).get('bar')),
+           ('Drop ▾', 6))
+        eq('[carry two] ...and when the server will not guess, the chooser asks ①, ② or both',
+           _da.get('chooser'),
+           ['Which did you drop?', '① $9.48 · 4821 Kestrel Dr', '② $28.08 · ?', 'Both'])
+        _db = ct.get('dropBoth') or {}
+        eq('[carry two] ...and Both sends both',
+           [json.loads(p['body']) for p in _db.get('posted') or []
+            if p.get('url') == '/api/delivered' and p.get('body')],
+           [{'holdIds': ['c-a@1', 'c-b@2']}])
+
+    eq('[carry two] Map view pins the two orders\' ends D1 and D2, and a pickup one '
+       'order\'s card names P2', got.get('mapTwo'), ['D1', 'D2', 'P', 'P2'])
 
     # --- the order in the car, on the card ---------------------------------
     hc = got.get('heldCard') or {}
