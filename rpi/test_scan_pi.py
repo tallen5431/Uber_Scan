@@ -2054,6 +2054,17 @@ eq('with no fix the line says so in every one of the seven, not by leaving them 
    [_nofix.get(k, 'absent') for k in SP.JR.FIX_FIELDS], [None] * len(SP.JR.FIX_FIELDS))
 eq('...and a card that never said Early look does not claim it',
    _nofix.get('earlyLook', 'absent'), False)
+eq('...nor to be more than one order',
+   _nofix.get('multiOrder', 'absent'), False)
+_two = said(lambda: SP.emit_offer('x', {'pay': 9.0, 'minutes': 21.0, 'text':
+                                        'Pickup Fable Grill (2 orders)\nCustomer dropoff'},
+                                  {'ready': False, 'state': 'empty'}))['offer']
+_plus = said(lambda: SP.emit_offer('x', {'pay': 9.0, 'minutes': 21.0, 'text':
+                                         '$9.00\n+1 order\n21 min (6 mi) total'},
+                                   {'ready': False, 'state': 'empty'}))['offer']
+eq('a card that says "(2 orders)" or "+1 order" says it is more than one order, '
+   'for server.js to keep an unbounded planner\'s dropoff off it',
+   (_two.get('multiOrder'), _plus.get('multiOrder')), (True, True))
 
 # The badge as the week's OCR actually spelled it, and the words near it that
 # are not it. Measured over 1,166 offers: 27 carry it, and this finds all 27

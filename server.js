@@ -482,6 +482,23 @@ function startScanner() {
         // already forgotten by the panel and by the stack line. Reading the
         // slot here would attach the address to a job everything else has
         // given up on.
+        // A Trip Planner's lone dropoff off a list whose end was below the
+        // screen (rpi/scan_pi.py, planner_lone_dropoff) is filed only onto a
+        // held order whose card was ONE order on ONE leg: what the screen did
+        // not show may be a second customer's door, and the card the driver
+        // took is the only witness that there is none. `multiOrder` must say
+        // false — a card from a scanner too old to say is refused — and
+        // `legs` must be 1. Every other rule below still applies to it.
+        if (read.dropoff && read.dropoff.singleCardOnly === true) {
+          var cardHeld = holding(Date.now());
+          var oneTrip = !!cardHeld && !!cardHeld.card && cardHeld.card.legs === 1
+            && cardHeld.card.multiOrder === false;
+          if (!oneTrip) {
+            console.log('planner dropoff not filed: the list ran off the screen and '
+                        + 'the held card is not a single trip');
+            delete read.dropoff;
+          }
+        }
         if (read.dropoff && typeof read.dropoff.line === 'string') {
           // Whether the driver ASKED for this one, or the rig simply saw it.
           //
@@ -526,6 +543,11 @@ function startScanner() {
             carrying.dropoff = read.dropoff.line;
             carrying.dropoffScanned = true;
             kept = true;
+            // The planner's stops said 'list', the reason none was filed; this
+            // one now is, and the panel must not go on saying it was not.
+            if (read.dropoff.singleCardOnly === true && carrying.planner) {
+              carrying.planner.unfiled = null;
+            }
             // ...and written down, which it was not.
             //
             // This is the case the button EXISTS for. An offer card does not
@@ -1114,7 +1136,7 @@ function holdPath() {
  * field allows (MapView.cardFix, MapView.cardYardstick). */
 var CARD_FIELDS = ['lat', 'lon', 'gpsAge', 'gpsErr', 'gpsMode', 'gpsOk', 'gpsWhy',
                    'miles', 'whole', 'hasTotal', 'legs', 'milesUncertain',
-                   'milesCorrected', 'earlyLook', 'doubt'];
+                   'milesCorrected', 'earlyLook', 'doubt', 'multiOrder'];
 
 function cardOf(offer) {
   var out = {};
