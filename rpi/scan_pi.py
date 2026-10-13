@@ -3062,6 +3062,15 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         # on 13 of 42 cards. Only ever on a reading with no verdict — the
         # empty parse cannot be rated — so it can never sit beside a number.
         'clipped': bool(clipped),
+        # Whether the reader knows this screen for the app's own furniture —
+        # Uber's online map, DoorDash's "Finding offers", the route planner
+        # (OP.NOT_AN_OFFER). rate() withholds a verdict for it once it has a
+        # rate to withhold, but a reading with no rate reached the panel with
+        # nothing to say what it was, and a payout or a leg read off the map
+        # was "a card" there: READING THE CARD on the next read, over the
+        # app saying in words that it has no offers. See noVerdictSaid in
+        # live.html.
+        'notAnOffer': bool(parsed.get('notAnOffer')),
         # Which crop the PAYOUT on this line was read through: 'found' when
         # the drawn card box read a journey and no payout and the payout came
         # off a taller card found above it (pipeline.Scanner._look,

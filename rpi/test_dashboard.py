@@ -482,6 +482,20 @@ const framed = (page) => page.waitForFunction(
       await page.waitForTimeout(120);
       slot.againCard = await page.evaluate(LOOK, '#verdictLabel');
       slot.againCardDetail = await page.evaluate(LOOK, '#detail');
+      // ...and against a reading the reader knew for the app's own idle
+      // screen: Uber's online map, its $0.00 takings pill read as $6. A
+      // payout alone is part of an offer (the case above); `notAnOffer` is
+      // the app saying it is waiting, and that outranks it.
+      await page.evaluate(() => window.__es.push(
+        { ready: false, state: 'empty', track: null, pay: 6, minutes: null,
+          notAnOffer: true }));
+      await page.waitForTimeout(120);
+      slot.idleScreen = await page.evaluate(LOOK, '#detail');
+      await page.evaluate(() => window.__es.push(
+        { reading: true, at: Date.now() }));
+      await page.waitForTimeout(120);
+      slot.againIdle = await page.evaluate(LOOK, '#verdictLabel');
+      slot.againIdleDetail = await page.evaluate(LOOK, '#detail');
       await page.evaluate((r) => window.__es.push(r), READINGS[key]);
       await page.waitForTimeout(150);
       slot.fits = await page.evaluate(() => {
@@ -5136,6 +5150,17 @@ try:
                ((r.get('againCard') or {}).get('text'),
                 (r.get('againCardDetail') or {}).get('text')),
                ('READING THE CARD', 'working out the pay, the time and the distance'))
+            # The app's own idle screen, which the reader names (notAnOffer):
+            # a payout read off Uber's online map is not a card short of its
+            # time, and a read over it is not the card being read again.
+            eq('%s: the app\'s idle screen with a payout read off it is no '
+               'offer, not a card short of its time' % where,
+               (r.get('idleScreen') or {}).get('text'),
+               'scanner running, no offer on screen')
+            eq('%s: ...and a read over it is the screen being read again' % where,
+               ((r.get('againIdle') or {}).get('text'),
+                (r.get('againIdleDetail') or {}).get('text')),
+               ('READING THE SCREEN', 'no offer on screen · reading again'))
             # The safety property. A message with no `ready` must not put a
             # number on the panel, because there is no number in it.
             eq('%s: ...without inventing a rate to go with it' % where,

@@ -498,6 +498,19 @@ eq('...over a reading with nothing else in it, which is why it has to',
 eq('...and a reading of a blank screen says it was not',
    emitted(_OP.rate(_empty), _empty, False).get('clipped'), False)
 
+# --- ...and when the screen is the app's own, in its own words ---------------
+# The reader knows Uber's online map and DoorDash's "Finding offers" for what
+# they are (OP.NOT_AN_OFFER), and rate() withholds a verdict for them once it
+# has one to withhold. A reading with no rate went out with nothing to say so,
+# and the panel called a payout read off the map a card. A made-up frame of the
+# map whose $0.00 takings pill read as $6.
+_idle = _OP.parse("$6.00\nTrip Radar 2\nYou're online")
+eq("the app's idle screen says so on the wire, with no rate to withhold",
+   (emitted(_OP.rate(_idle), _idle, False).get('notAnOffer'), _OP.rate(_idle)['ready']),
+   (True, False))
+eq('...and a card says it is not one',
+   emitted(sample_rate, sample_parsed, True).get('notAnOffer'), False)
+
 # --- the journal -----------------------------------------------------------
 rows = run_uberx['rows']
 ok_('the offer was written down', len(rows) >= 1)

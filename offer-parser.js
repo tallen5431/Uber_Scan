@@ -1721,8 +1721,15 @@
    * testing showed the other two were already covered by "finding offers", and
    * a pattern nothing can show is dead weight. Each of these is the ONLY
    * evidence against its own phantom — including the second frame of the idle
-   * screen, where most of the text did not survive the read. */
-  var NOT_AN_OFFER = /add\s*stops|finding\s*offers/i;
+   * screen, where most of the text did not survive the read.
+   *
+   * And Uber's own idle screen, which had none: the online map, its sheet
+   * saying "You're online" or "Finding trips" (124 and 54 screen rows on the
+   * journal on file, no offer row, never both on one), "You are online" in the
+   * corpus's map-noise frame. NOT "Trip Radar": the pill bleeds into offer
+   * cards read over the map, 308 offer rows of it. See NOT_AN_OFFER in
+   * rpi/offer_parser.py, which the shared corpus holds this to. */
+  var NOT_AN_OFFER = /add\s*stops|finding\s*offers|you(?:\W{0,3}re|\s*are)\s*online|finding\s*trips/i;
 
   var DROPOFF_NOT_STATED = /custom[ea]r\s*drop\s*-?\s*off/i;
 

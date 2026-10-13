@@ -262,6 +262,53 @@
    }
   },
   {
+   "name": "...and that frame is Uber's online screen, its takings read as a payout, not an offer",
+   "_why": "The same real frame: the day's takings, $142.60, read as the payout, with the sheet's “You are online” under it. It parsed as notAnOffer false, so the panel said “pay, no time” and READING THE CARD on the next read.",
+   "text": "Today $142.60 12 trips ZIM Sects eae You are online Marietta, GA",
+   "expect": {
+    "pay": 142.6,
+    "notAnOffer": true
+   }
+  },
+  {
+   "name": "Uber's online map with the Trip Radar pill is not an offer",
+   "_why": "Uber's idle map since the Trip Radar pill arrived: the takings pill, map labels, “Trip Radar 2” and the sheet's “You're online”. Seen on 124 screen rows of the journal and on no offer row. Text made up in that shape.",
+   "text": "$0.00\nHillcrest\nPine Ridge\nTrip Radar 2\nYou're online",
+   "expect": {
+    "pay": null,
+    "notAnOffer": true
+   }
+  },
+  {
+   "name": "...nor is the same sheet while it searches",
+   "_why": "“Finding trips” in place of “You're online”: 54 screen rows, no offer row, and never on a screen with the other phrase, so it is the only evidence on its own screens. Text made up.",
+   "text": "$0.00\nTrip Radar 2\nFinding trips",
+   "expect": {
+    "notAnOffer": true
+   }
+  },
+  {
+   "name": "Trip Radar bleeding into an offer card does not make it a screen",
+   "_why": "The pill sits over the map behind the card and is read with it: 308 offer rows on the journal carry it, two offers on 12 Oct. The card is read as the card. Made up in that shape.",
+   "text": "Trip Radar 2\nQ Early look · Order in progress\n$9.42\nIncludes expected tip\n© 24 min (7.9 mi) total\nMaple Diner (12 Elm St)\nBirch Ln & Oak Ct, Springfield",
+   "expect": {
+    "pay": 9.42,
+    "minutes": 24,
+    "miles": 7.9,
+    "notAnOffer": false
+   }
+  },
+  {
+   "name": "...nor does a Reserve card's “Be online by”",
+   "_why": "Why the phrase is “you're online” and not “online”: Uber's Reserve card asks the driver to be online by a time. Made up in that shape.",
+   "text": "$23.40\nToday at 6:35 PM\n36 min (17.6 mi) trip\nBe online by 6:05 PM",
+   "expect": {
+    "pay": 23.4,
+    "minutes": 36,
+    "notAnOffer": false
+   }
+  },
+  {
    "name": "nor is any bare number-plus-m",
    "text": "$8.00 Rau WeS 34 m AC a RRC",
    "expect": {
@@ -1908,6 +1955,20 @@
   "name": "...and the same screen read a second time, through the map behind it",
   "_why": "The other frame of the same screen, mangled differently — the phrase that gives it away survives where most of the text did not. Both frames have to be refused or the accumulator merges a refused one with an accepted one.",
   "text": "a @ 2*-@ om <\n9S $12.55 Easton” @\nng 2\nva PE (3\n® ie\nva Crom. @ te\n7 Hong Kong @Minesé SAS\nps Total Wine eindrert American LLC) - ce\nDey ESS\nee M S\neB | =\na SS\nSRY x\nSoa ,\nsat = oO NY\nvs 9 4 S\nal - . r-\ngas) Finding offers..\nPS .\n; ewes You're more likely to get offers at\nhy hotspots.\nAe Zone offer wait\nBRE 1-2 min\nRe",
+  "settings": {
+   "target": 25,
+   "band": 15,
+   "costPerMile": 0.3
+  },
+  "expect": {
+   "state": "doubt",
+   "doubt": "screen"
+  }
+ },
+ {
+  "name": "Uber's online map, its takings pill and a route off the map read as an offer",
+  "_why": "A frame of the idle map that reads a payout and a leg is a believable $19/hr card by the numbers alone — the unparsed scans of 12 Oct hold one of the map that read a $6 off it. The sheet's “You're online” is what says it is the app waiting. Made up in that shape.",
+  "text": "$6.00\nTrip Radar 2\n14 min (5.2 mi)\nYou're online",
   "settings": {
    "target": 25,
    "band": 15,

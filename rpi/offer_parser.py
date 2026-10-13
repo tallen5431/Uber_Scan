@@ -3052,9 +3052,27 @@ def planner_bounded(text):
 # These two are each the ONLY evidence against their own phantom: "add stops"
 # for the route planner, "finding offers" for the idle screen, including the
 # second frame of it where most of the text did not survive the read.
+#
+# And Uber's own idle screen, which had no phrase at all: the online map, with
+# its sheet saying "You're online" or "Finding trips", the day's takings in a
+# pill at the top ("$0.00") and, since the Trip Radar pill arrived, "Trip
+# Radar 2" over the map. It parsed as `notAnOffer: false`, so a frame of it that
+# read a payout or a leg off the map was a card as far as anything here could
+# say. Measured on the journal on file (12,367 offer rows, 1,237 screen rows):
+# "you're online" is on 124 screen rows and no offer row, "finding trips" on 54
+# screen rows and no offer row, and no screen row carries both — so, as with
+# the two above, each is the only evidence on its own screens. "You are online"
+# is the same sheet in the corpus's map-noise frame.
+#
+# NOT "Trip Radar", which is the obvious phrase and the wrong one. The pill
+# sits over the map behind an offer card too, and bleeds into the card's own
+# reading: it is on 308 offer rows, 169 offers, two of them on 12 Oct alone. Nor
+# a bare "online", which an Uber Reserve card prints as "Be online by".
 NOT_AN_OFFER = re.compile(
     r'add\s*stops'                 # Uber's route planner
-    r'|finding\s*offers',          # DoorDash, with no offers to show
+    r'|finding\s*offers'           # DoorDash, with no offers to show
+    r'|you(?:\W{0,3}re|\s*are)\s*online'   # Uber's online map, waiting
+    r'|finding\s*trips',           # ...and the same sheet while it searches
     re.IGNORECASE | ASCII)
 
 

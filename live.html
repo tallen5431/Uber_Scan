@@ -3221,6 +3221,14 @@
 
   function noVerdictSaid(r) {
     if (r.clipped) return 'pay at the box edge — not trusted';
+    // The app's own idle screen, by its own words (OP.NOT_AN_OFFER, sent as
+    // `notAnOffer`). Whatever else the read picked off the map is not part of
+    // a card: the corpus's Uber online frame reads the day's takings, $142.60,
+    // as a payout and said "pay, no time", and 3 of the journal's 54 "Finding
+    // trips" screens read a time or a place off the map and said "no pay
+    // read" — each a READING THE CARD on the next read, over a phone saying
+    // it has no offers. Before the pay test, which is what it overrules.
+    if (r.notAnOffer) return NO_OFFER_SAID;
     if (typeof r.pay === 'number' && r.pay > 0) {
       return 'pay, no time — box may cut it off';
     }
