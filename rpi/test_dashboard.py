@@ -765,6 +765,145 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // --- the order in the car, on the card -----------------------------------
+  stage = 'the order in the car, on the card';
+  //
+  // Between offers the card said WAITING FOR AN OFFER and nothing else, with
+  // an order in the car on 24 of the driver's 47 📷 Snaps that had no verdict
+  // on them (8-12 Oct). Now it says where that order goes next and by when,
+  // its pay, and the GPS drop's state; with an offer up, the same in one line
+  // under the card. Messages as the server sends them: the hold as
+  // heldForPanel describes it, the planner as a ⌖ read sends it, the GPS
+  // drop's state on the beat (heldEndState).
+  //
+  // ...and the Took button, which names the last offer on record after its
+  // card has gone and now says how long ago that was. The page's clock is
+  // moved, so "2 min ago" is two minutes of the page's own timers.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await phoneFrame(page);
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+    await framed(page);
+    const tick = (ms) => page.clock.runFor(ms);
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    // What the driver can read of the in-car parts, on the glass.
+    const held = () => page.evaluate(() => {
+      const shown = (el) => {
+        if (!el || el.hidden) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+      };
+      const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '');
+      // A line's parts as they read: side by side, with the gap the stylesheet
+      // puts between them, and only those drawn.
+      const parts = (el) => [].slice.call(el.children).filter(shown).map(text)
+        .filter(Boolean).join(' ');
+      const next = document.getElementById('heldNext');
+      const line = document.getElementById('heldLine');
+      const det = document.querySelector('#detail .held');
+      const lab = document.getElementById('verdictLabel');
+      // The detail line's own row: one row is no taller than its line box.
+      const detail = document.getElementById('detail');
+      const cs = getComputedStyle(detail);
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+      // Every glyph of the pay and the GPS state inside the detail line's box.
+      const whole = (el) => {
+        if (!el || !el.firstChild) return '';
+        const b = detail.getBoundingClientRect();
+        const n = el.firstChild, rg = document.createRange();
+        let got = '';
+        for (let i = 0; i < n.length; i++) {
+          rg.setStart(n, i); rg.setEnd(n, i + 1);
+          const c = rg.getBoundingClientRect();
+          if (!c.width && !c.height) continue;
+          if (c.left >= b.left - 0.5 && c.right <= b.right + 0.5) got += n.data[i];
+        }
+        return got;
+      };
+      return {
+        label: shown(lab) ? text(lab) : null,
+        when: shown(next) ? text(next.firstChild) : null,
+        where: shown(next) ? text(next.lastChild) : null,
+        line: shown(line) ? parts(line) : null,
+        detail: shown(det) ? parts(det) : null,
+        detailRows: shown(det) ? Math.round(det.getBoundingClientRect().height / lh) : 0,
+        detailPay: det ? whole(det.querySelector('.pay')) : '',
+        detailGps: det ? whole(det.querySelector('.gps')) : '',
+        diagShown: shown(document.querySelector('#detail .diag')),
+        took: text(document.getElementById('took')),
+      };
+    });
+    await push({ phase: 'scanning', message: '' });
+    await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
+    // A card on the phone, written to the record, then the driver accepts it
+    // on the phone and the card goes.
+    await push(Object.assign({}, READINGS.deducted, { pay: 5.0, holding: null, stack: null }));
+    await push({ offer: { id: 'o-held-age', pay: 5.0, minutes: 22, perHour: 14.71 }, at: 1 });
+    await tick(300);
+    const tookUp = await held();
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    const tookGoneNow = await held();
+    await tick(125000);
+    const tookGoneLater = await held();
+    // Nothing in the car: the card says what it always said.
+    const empty = await held();
+    // The order in the car, as a ⌖ read filed onto it sends it, and the Trip
+    // Planner that press read: a pickup, whose name the reader prefixed with
+    // the icon's letters, ahead of the one dropoff.
+    await push({ holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
+                            dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                            endPinned: true, endWhy: null, arrived: false } });
+    await push({ planner: { stops: [
+      { kind: 'pickup', orders: 1, name: 'oe Burger Barn', expectedBy: 1066,
+        street: '310 Mill St', city: 'Roswell',
+        line: '310 Mill St, Roswell, GA 30075' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 1105,
+        street: '4821 Kestrel Dr', city: 'Marietta', line: '4821 Kestrel Dr, Marietta' }],
+      unfiled: null, asked: true, ms: null, at: 1 } });
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    const between = await held();
+    // The server refuses the pin, and says so on the next beat.
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: false, arrived: false, endWhy: 'no house number' } });
+    await tick(300);
+    const refused = await held();
+    // ...and the car arrives at the door: the pickup is behind it.
+    await push({ alive: true, at: Date.now(), atDropoff: true,
+                 heldEnd: { endPinned: true, arrived: true, endWhy: null } });
+    await tick(300);
+    const arrived = await held();
+    // An offer comes up while the order is in the car.
+    await push(Object.assign({}, READINGS.deducted, {
+      holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
+                 dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                 endPinned: true, endWhy: null, arrived: false },
+      stack: null }));
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: true, arrived: false, endWhy: null } });
+    await tick(300);
+    const offerUp = await held();
+    // ...and the order goes, the card with it.
+    await push({ holding: null });
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    const gone = await held();
+    out.heldCard = { tookUp: tookUp, tookGoneNow: tookGoneNow, tookGoneLater: tookGoneLater,
+                     empty: empty, between: between, refused: refused, arrived: arrived,
+                     offerUp: offerUp, gone: gone };
+    await page.close();
+    await ctx.close();
+  }
+
   // --- both jobs at once, and the two things only that line can say --------
   stage = 'both jobs at once, and the two things only that line can say';
   //
@@ -839,8 +978,13 @@ const framed = (page) => page.waitForFunction(
           return r.bottom <= v.bottom - 1 && r.top >= v.top + 1;
         })(),
         // The half that is MEANT to give way, and it has to actually be doing
-        // so or the checks below prove nothing about priority.
-        sumEllipsised: !!sum && sum.scrollWidth > sum.clientWidth + 1,
+        // so or the checks below prove nothing about priority. The words after
+        // the range (`.more`): the range leads the row and does not give way
+        // (rpi/test_layout.py, 'the pair range sits above the figures').
+        sumEllipsised: (() => {
+          const more = document.querySelector('#stack .sum .more');
+          return !!more && more.scrollWidth > more.clientWidth + 1;
+        })(),
         // The other end of the same box. A pair is the tallest this card ever
         // gets, and the verdict centres what will not fit — so the row below
         // going over the bottom border and the headline going off the TOP are
@@ -5360,6 +5504,54 @@ try:
 
             ok_('%s: the panel still fits' % where, r['fits'])
 
+    # --- the order in the car, on the card ---------------------------------
+    hc = got.get('heldCard') or {}
+    ok_('the in-car stage ran', bool(hc))
+    if hc:
+        _b = hc.get('between') or {}
+        # Between offers, with an order in the car, the card names where it goes
+        # next and by when — the planner's first pickup, its icon's letters off
+        # the name — what it pays, and the GPS drop's state; and not WAITING
+        # FOR AN OFFER over it.
+        eq('the order in the car is named between offers',
+           (_b.get('when'), _b.get('where'), _b.get('label')),
+           ('Pickup by 5:46', 'Burger Barn', None))
+        eq('...with what it pays and whether the GPS will put it down (%r)' % _b.get('line'),
+           _b.get('line'), '$28.08 in car · ● armed')
+        eq('...and why not, said in a few words when the server refuses the pin',
+           (hc.get('refused') or {}).get('line'), '$28.08 in car · no house no.')
+        _a = hc.get('arrived') or {}
+        eq('...and at the door, the dropoff is next, with the planner\'s time for it',
+           (_a.get('when'), _a.get('where'), _a.get('line')),
+           ('Dropoff by 6:25', '4821 Kestrel Dr', '$28.08 in car · at door'))
+        # With nothing held the card says what it said.
+        eq('...and with nothing held the card still waits for an offer',
+           ((hc.get('empty') or {}).get('label'), (hc.get('empty') or {}).get('when'),
+            (hc.get('empty') or {}).get('line')),
+           ('WAITING FOR AN OFFER', None, None))
+        eq('...and again once the order is down',
+           ((hc.get('gone') or {}).get('label'), (hc.get('gone') or {}).get('when'),
+            (hc.get('gone') or {}).get('line'), (hc.get('gone') or {}).get('detail')),
+           ('WAITING FOR AN OFFER', None, None, None))
+        # With an offer up: one line, under the card, the pay and the GPS state
+        # whole, and the card's own verdict back where it was.
+        _o = hc.get('offerUp') or {}
+        eq('...and in one line while an offer is up',
+           (_o.get('detail'), _o.get('detailRows'), _o.get('when'), _o.get('line')),
+           ('· In car $28.08 · ▸ Burger Barn · ● armed', 1, None, None))
+        eq('...the pay and the GPS state whole on the glass',
+           (_o.get('detailPay'), _o.get('detailGps')), ('· In car $28.08', '· ● armed'))
+        eq('...under the offer\'s own verdict', _o.get('label'), 'PASS')
+        no_('...in place of the read diagnostics', _o.get('diagShown'))
+        # Took names the last offer on record after its card has gone. With
+        # the age, the driver can tell it is not the card they just screened.
+        eq('a Took for a card no longer on the phone says its age',
+           ((hc.get('tookGoneNow') or {}).get('took'),
+            (hc.get('tookGoneLater') or {}).get('took')),
+           ('Took $5.00? · just now', 'Took $5.00? · 2 min ago'))
+        eq('...and no age while its card is up',
+           (hc.get('tookUp') or {}).get('took'), 'Took $5.00?')
+
     # --- marking an offer as taken, from the driving screen --------------
     idle = got.get('tookIdle') or {}
     offered = got.get('tookOffered') or {}
@@ -5570,8 +5762,8 @@ try:
         # top of the glass instead. Both halves, or neither is a check.
         ok_('%s: ...with the headline and the word above it still on the glass'
             % panel, row.get('onGlass'))
-        # The priority has to be REAL, not just declared: the arithmetic is the
-        # half that gives way, and if it is not actually being cut here then the
+        # The priority has to be REAL, not just declared: the arithmetic's words
+        # are the half that gives way, and if they are not being cut here then the
         # two checks below are passing on a row with room to spare and would say
         # nothing about what happens when there is none.
         ok_('%s: ...with the arithmetic the part that gives way' % panel,
