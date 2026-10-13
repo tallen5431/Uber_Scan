@@ -2567,7 +2567,7 @@ class UpDown(object):
         return None if self.camera.word == 'seeing' else self.camera.word
 
 
-def emit_dropoff(address, ms=None, asked=True, labelled=False):
+def emit_dropoff(address, ms=None, asked=True, labelled=False, single_card_only=False):
     """The destination, once it has been read off the screen.
 
     Its own line, like the offer id and for the same reason: it is not part of a
@@ -2616,6 +2616,11 @@ def emit_dropoff(address, ms=None, asked=True, labelled=False):
         # labelled sighting replace the card's own end on the held order, and
         # nothing else.
         'labelled': 'dropoff' if labelled and not asked else None,
+        # True when this is a Trip Planner's lone dropoff off a list whose end
+        # the screen did not show (planner_lone_dropoff): server.js files it
+        # only onto a held order whose card was one order on one leg, which
+        # the server knows and the scanner does not.
+        'singleCardOnly': bool(single_card_only) or None,
         'ms': ms,
         'at': int(time.time() * 1000)}}), flush=True)
 
@@ -2695,6 +2700,27 @@ def planner_destination(stops, bounded):
     return {k: drops[0].get(k) for k in ('line', 'street', 'city', 'state', 'zip')}, None
 
 
+def planner_lone_dropoff(stops):
+    """The address of the planner's one dropoff when the list's end is off the
+    screen ('list' above) and the screen still says this much: exactly one
+    Dropoff stop, its header "1 order", its street and town read. None
+    otherwise.
+
+    The owner's decision, after a hotel dropoff on a two-stop trip went
+    unfiled because "Waybill" was under the bar: trust a single-trip offer.
+    What is below the screen is still unseen, so this is only HALF the
+    answer — the other half is the held order's own card, one order on one
+    leg, which server.js has and this does not. It goes out marked
+    `singleCardOnly` and the server files it only on such a card.
+    """
+    drops = [s for s in stops if s.get('kind') == 'dropoff']
+    if len(drops) != 1 or drops[0].get('orders') != 1:
+        return None
+    if not (drops[0].get('street') and drops[0].get('city')):
+        return None
+    return {k: drops[0].get(k) for k in ('line', 'street', 'city', 'state', 'zip')}
+
+
 # Uber's "Early look • Order in progress" badge: an offer shown while the
 # driver is still on a job, whose distance may be counted from where that job
 # ends rather than from the car. Said on the offer line so the next thing to
@@ -2720,6 +2746,23 @@ def says_early_look(parsed):
     the one that caught it."""
     texts = list(parsed.get('scans') or []) + [parsed.get('text') or '']
     return any(EARLY_LOOK.search(t or '') for t in texts)
+
+
+# A card for more than one order: "(2 orders)" after DoorDash's pickup, the
+# "+1 order" a stacked add-on shows, any count of two or more before "orders".
+# Said on the offer line beside `legs`, for the one reader that needs it:
+# server.js files a Trip Planner's lone dropoff off a list whose end is below
+# the screen only onto a held order whose card was ONE order on ONE leg — see
+# planner_lone_dropoff. A card that says nothing of orders is not multi; a
+# read that lost the words is why `legs` is asked as well.
+MULTI_ORDER = re.compile(r'\+\s*\d+\s*orders?\b|\b(?:[2-9]|[1-9]\d)\s*orders\b', re.I)
+
+
+def says_multi_order(parsed):
+    """Whether any text this reading was built from marks the card as more
+    than one order. Every frame the window kept, as says_early_look."""
+    texts = list(parsed.get('scans') or []) + [parsed.get('text') or '']
+    return any(MULTI_ORDER.search(t or '') for t in texts)
 
 
 def emit_offer(offer_id, parsed, rate, where=None, whole=None):
@@ -2868,6 +2911,7 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None):
         'milesUncertain': bool(parsed.get('milesUncertain')),
         'milesCorrected': bool(parsed.get('milesCorrected')),
         'earlyLook': says_early_look(parsed),
+        'multiOrder': says_multi_order(parsed),
         # ...and where the car was when it came up, in the journal's own seven
         # fields — `lat`, `lon`, `gpsAge`, `gpsErr`, `gpsMode`, and the gate's
         # `gpsOk`/`gpsWhy` — built by the same function the row is, from the
@@ -3670,6 +3714,13 @@ def main():
             found, unfiled = (planner_destination(planner,
                                                   OP.planner_bounded(out.get('text')))
                               if answers or auto else (None, None))
+        # ...and, unpressed, the lone dropoff of a list whose end is off the
+        # screen, for server.js to file only onto a single-trip card: see
+        # planner_lone_dropoff. A press keeps the 'list' answer it had.
+        single_card_only = False
+        if auto and found is None and unfiled == 'list':
+            found = planner_lone_dropoff(planner)
+            single_card_only = found is not None
         # A whole-screen read nobody pressed for gives no destination at all:
         # not its planner's one dropoff (see THE STOPS ONLY, above), and not
         # the address find_address would take off the whole screen, which is
@@ -4004,7 +4055,8 @@ def main():
             dropoff_asked = False
             if args.json:
                 emit_dropoff(found, ms=out.get('ms'), asked=asked,
-                             labelled=labelled)
+                             labelled=labelled,
+                             single_card_only=single_card_only and labelled)
             log('destination read%s: %s'
                 % ('' if asked else ' (unprompted, under a Dropoff label)'
                    if labelled else ' (unprompted)', found.get('line')))

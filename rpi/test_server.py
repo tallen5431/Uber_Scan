@@ -1551,11 +1551,11 @@ if shutil.which('python3'):
     proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
                         'SCANNER_ARGS': fake}, journal)
 
-    def took(i, dropoff):
+    def took(i, dropoff, **card):
         code, reply = post(base, '/api/offers/mark', {
             'id': i, 'accepted': True,
-            'offer': {'id': i, 'pay': 14.0, 'minutes': 30.0, 'billedMinutes': 30.0,
-                      'miles': 6.0, 'cost': 2.1, 'dropoff': dropoff}})
+            'offer': dict({'id': i, 'pay': 14.0, 'minutes': 30.0, 'billedMinutes': 30.0,
+                           'miles': 6.0, 'cost': 2.1, 'dropoff': dropoff}, **card)})
         return code == 200 and reply.get('holding') is True
 
     def put_down(i):
@@ -1670,6 +1670,32 @@ if shutil.which('python3'):
            'card\'s end', held_end('21 Old Screen Ct, Acworth, GA 30101', 1.5),
            'Oak Dr & Elm Dr, Acworth')
         put_down('o-lab-stale')
+
+        # A Trip Planner's lone dropoff off a list whose end was below the
+        # screen ("Waybill" under the bar): the scanner marks it
+        # `singleCardOnly`, and it is filed only onto a held card that was one
+        # order on one leg. The owner's decision, after a hotel dropoff on a
+        # two-stop trip was left unfiled as 'list'.
+        def lone(line, street):
+            say({'dropoff': {'found': True, 'line': line, 'street': street,
+                             'city': 'Kennesaw', 'state': 'GA', 'zip': None,
+                             'asked': False, 'labelled': 'dropoff',
+                             'singleCardOnly': True, 'ms': None,
+                             'at': int(time.time() * 1000)}})
+        ok_('the premise: a single-trip order is in the car with the card\'s corner',
+            took('o-lone-one', 'Oak Dr & Elm Dr, Acworth', legs=1, multiOrder=False))
+        lone('1180 Wrenfield Rd NW, Kennesaw', '1180 Wrenfield Rd NW')
+        eq('auto-dropoff: an unbounded planner\'s lone dropoff is filed onto a '
+           'single-trip held card', held_end('1180 Wrenfield Rd NW, Kennesaw'),
+           '1180 Wrenfield Rd NW, Kennesaw')
+        put_down('o-lone-one')
+        ok_('the premise: a two-order card is in the car with the card\'s corner',
+            took('o-lone-two', 'Oak Dr & Elm Dr, Acworth', legs=1, multiOrder=True))
+        lone('1180 Wrenfield Rd NW, Kennesaw', '1180 Wrenfield Rd NW')
+        eq('auto-dropoff: an unbounded planner\'s lone dropoff is not filed onto a '
+           'multi-order held card', held_end('1180 Wrenfield Rd NW, Kennesaw', 1.5),
+           'Oak Dr & Elm Dr, Acworth')
+        put_down('o-lone-two')
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)

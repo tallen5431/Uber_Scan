@@ -2013,6 +2013,19 @@ eq('a planner dropoff at a hotel, no ZIP, is filed as the held order\'s destinat
      (d[0] or {}).get('zip'), d[1].get('asked'), d[1].get('labelled'))
     for d in ra7['dropoffs']],
    [('1180 Wrenfield Rd NW', 'Kennesaw', 'GA', None, False, True)])
+eq('...said as filed on any held card, the list being seen whole',
+   [d[1].get('single_card_only') for d in ra7['dropoffs']], [False])
+# ...and the shift's own screen, "Waybill" under the bar: the lone dropoff still
+# goes out, marked for server.js to file only onto a single-trip card.
+_ha8 = tempfile.mkdtemp()
+_hold(_ha8, time.time() + 3600)
+ra8 = run(lambda n, k: FRAG if n == 1 else _HOTEL_BOX, extra_argv=['--no-parallel'],
+          seconds=4.0, handoff=_ha8, whole_text=_HOTEL)
+eq('an unbounded planner\'s lone one-order dropoff is sent, unasked, label-proven '
+   'and marked single-card-only',
+   [((d[0] or {}).get('line'), d[1].get('asked'), d[1].get('labelled'),
+     d[1].get('single_card_only')) for d in ra8['dropoffs']],
+   [('1180 Wrenfield Rd NW, Kennesaw', False, True, True)])
 
 # Whether the journal may keep the stops — names and front doors — is the
 # scanner's to say, because the server does not read its settings: not with
