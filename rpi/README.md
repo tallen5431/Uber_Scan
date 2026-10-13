@@ -8515,6 +8515,10 @@ python3 rpi/test_map.py         # 221 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
+node tests/assemble.test.js     # 109 on where the order in the car ends: one
+                                #     hold decided as before, and a Trip Planner
+                                #     filed from pages stitched only on the cues
+                                #     the screen gives
 node tests/mapview.test.js      # 391 on the deciding behind both maps, with
                                 #     no map: the geometry, the cache, and the
                                 #     one-request-a-second rule against a fake

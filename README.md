@@ -502,6 +502,7 @@ used. A one-line key across the map's foot names the marks on it.
 | `offer-parser.js` | Turns the text off a card into pay, minutes and miles — one corpus, shared with the Pi's port |
 | `vendor/` | The OCR engine the phone's scanner runs, kept here so the page works with no signal |
 | `advice.js` | What target the offers themselves argue for — shared, and tested on its own |
+| `assemble.js` | Where the order in the car ends: an address the scanner read, a Trip Planner over one page or several, a lone dropoff on a single-trip card — each value on the hold with where it came from (press, label, planner, card, seen). No I/O; `server.js` writes and says what it decides. Tested on its own over `tests/fixtures/sequences.json` |
 | `sw.js` | Offline cache — stale-while-revalidate, so a changed file is picked up on the next open. `SHELL` is a convenience to bump when a page changes; `BLOB` is the OCR engine, bumped only when that changes |
 | `manifest.webmanifest` | Home-screen install metadata |
 | `tools/make_icons.py` | Regenerates the icons in `icons/` |
