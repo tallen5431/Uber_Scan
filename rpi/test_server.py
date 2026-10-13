@@ -5230,6 +5230,192 @@ finally:
     shutil.rmtree(_gdir, ignore_errors=True)
 
 
+# --- the held end, searched for by the server --------------------------------
+#
+# The driver: GPS arrival should arm without opening Map view. When the hold
+# names a dropoff and NUCBOX_SEARCH is set, server.js asks the NucBox itself
+# (searchHeldEnd), by Map view's own rules — inside the HELD card's disc, door
+# level only — and says on /api/status why when it did not pin. Two NucBoxes:
+# tests/fake-nucbox.js for the answers, and a stand-in below that is down
+# (503) or slow on cue and counts every search it was sent. Card fixes at
+# Marietta Square, as the fake's own; addresses invented.
+_SQ = {'lat': 33.9526, 'lon': -84.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3,
+       'gpsAge': 0.5, 'hasTotal': True, 'whole': True}
+_COBB = '1985 Cobb Parkway, Kennesaw'      # three door answers, 3.4 mi from the Square
+_KES = '4821 Kestrel Dr, Marietta'         # its street only, no number
+
+
+class _Stub(object):
+    mode = 'down'
+    searches = []
+
+
+def _stub_app():
+    import http.server
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            _Stub.searches.append(self.path)
+            if _Stub.mode == 'down':
+                self.send_response(503)
+                self.end_headers()
+                return
+            time.sleep(1.0)
+            body = json.dumps([{'lat': '34.0010000', 'lon': '-84.5560000',
+                                'display_name': '1985, Cobb Parkway, Kennesaw, Cobb County'}])
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(body.encode('utf-8'))
+    srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def _atook(base, oid, dropoff, miles=5.0):
+    o = dict(_SQ, id=oid, pay=12.0, minutes=40.0, billedMinutes=40.0, miles=miles,
+             cost=1.75)
+    if dropoff:
+        o['dropoff'] = dropoff
+    post(base, '/api/offers/mark', {'id': oid, 'accepted': True, 'offer': o})
+
+
+def _settled(base, want=lambda h: h.get('endPinned') or h.get('endWhy'), seconds=6.0):
+    h = {}
+    for _ in range(int(seconds / 0.05)):
+        h = get(base, '/api/status').get('holding') or {}
+        if want(h):
+            break
+        time.sleep(0.05)
+    return h
+
+
+_afake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_afake_base = 'http://127.0.0.1:%d' % json.loads(_afake.stdout.readline())['port']
+_stub = _stub_app()
+_stub_base = 'http://127.0.0.1:%d' % _stub.server_address[1]
+
+
+def _aasked(word):
+    return [a for a in json.loads(urllib.request.urlopen(
+        _afake_base + '/__asked', timeout=5).read()) if word in a]
+
+
+_adir = tempfile.mkdtemp()
+# A scanner that says what the suite writes to say-N.json, one line each.
+_asay = os.path.join(_adir, 'say.py')
+with open(_asay, 'w') as _fh:
+    _fh.write(
+        'import json, os, time\n'
+        'd = os.path.dirname(os.path.abspath(__file__))\n'
+        'n = 0\n'
+        'end = time.time() + 600\n'
+        'while time.time() < end:\n'
+        '    p = os.path.join(d, "say-%d.json" % n)\n'
+        '    if not os.path.exists(p):\n'
+        '        time.sleep(0.05)\n'
+        '        continue\n'
+        '    for x in json.load(open(p)):\n'
+        '        x["dropoff"]["at"] = int(time.time() * 1000)\n'
+        '        print(json.dumps(x), flush=True)\n'
+        '    n += 1\n')
+try:
+    _aj = os.path.join(_adir, 'a', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_aj))
+    open(_aj, 'w').close()
+    _ap, _ab = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _asay,
+                      'NUCBOX_SEARCH': _afake_base, 'NUCBOX_TIMEOUT_MS': '800'}, _aj)
+    try:
+        _atook(_ab, 'a-door', _COBB)
+        _h = _settled(_ab)
+        eq('[auto arm] a door-level answer inside the held card\'s disc arms the GPS drop',
+           (_h.get('endPinned'), _h.get('endBy'), _h.get('endWhy')), (True, 'server', None))
+        _s, _r = post(_ab, '/api/held-end', {
+            'holdId': _h.get('holdId'), 'dropoff': _COBB, 'lat': 34.0, 'lon': -84.55,
+            'name': '1985, Cobb Parkway, Kennesaw', 'doorLevel': True})
+        eq('[auto arm] a later page pin for the same dropoff is a no-op: the first wins',
+           (_s, (_holding(_ab) or {}).get('endBy')), (200, 'server'))
+
+        _atook(_ab, 'a-street', _KES)
+        _h = _settled(_ab)
+        eq('[auto arm] a street-only answer does not arm, and says why',
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+        eq('[auto arm] ...asked once for that dropoff', len(_aasked('4821')), 1)
+
+        _atook(_ab, 'a-far', _COBB, miles=2.0)
+        _h = _settled(_ab)
+        eq('[auto arm] an answer outside the held card\'s disc does not arm',
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'not inside the card\'s reach'))
+
+        # The same order, its dropoff changed by a ⌖ Scan: asked again.
+        _atook(_ab, 'a-change', _KES, miles=6.0)
+        _settled(_ab)
+        _n = len(_aasked('1985'))
+        with open(os.path.join(_adir, 'say-0.json.tmp'), 'w') as _fh:
+            json.dump([{'dropoff': {'line': '1985 Cobb Parkway, Kennesaw, GA 30152',
+                                    'street': '1985 Cobb Parkway', 'city': 'Kennesaw',
+                                    'state': 'GA', 'zip': '30152', 'found': True,
+                                    'asked': True}}], _fh)
+        os.rename(os.path.join(_adir, 'say-0.json.tmp'), os.path.join(_adir, 'say-0.json'))
+        _h = _settled(_ab, lambda h: h.get('endPinned'))
+        eq('[auto arm] a changed dropoff is searched again, and arms',
+           (len(_aasked('1985')) - _n, _h.get('endPinned'), _h.get('endWhy')), (1, True, None))
+    finally:
+        stop(_ap)
+
+    _bj = os.path.join(_adir, 'b', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_bj))
+    open(_bj, 'w').close()
+    _bp, _bb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _stub_base,
+                      'NUCBOX_TIMEOUT_MS': '3000', 'NUCBOX_RETRY_MS': '1500'}, _bj)
+    try:
+        _Stub.mode = 'down'
+        _Stub.searches[:] = []
+        _atook(_bb, 'b-down', _COBB)
+        time.sleep(4.0)
+        _h = _holding(_bb) or {}
+        eq('[auto arm] NucBox down: no arm, said, and asked exactly once more',
+           (_h.get('endPinned'), _h.get('endWhy'), len(_Stub.searches)),
+           (False, 'NucBox down', 2))
+        post(_bb, '/api/delivered', {})
+
+        # The answer for an order already put down lands on nothing.
+        _Stub.mode = 'slow'
+        _atook(_bb, 'b-old', _COBB)
+        time.sleep(0.3)
+        post(_bb, '/api/delivered', {})
+        _atook(_bb, 'b-new', None)
+        time.sleep(2.0)
+        _h = _holding(_bb) or {}
+        eq('[auto arm] a pin searched for an old hold never applies to the next',
+           (_h.get('holdId', '').startswith('b-new'), _h.get('endPinned'), _h.get('endWhy')),
+           (True, False, None))
+    finally:
+        stop(_bp)
+
+    _cj = os.path.join(_adir, 'c', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_cj))
+    open(_cj, 'w').close()
+    _cp, _cb = start({'SCANNER': '0'}, _cj)
+    try:
+        _n = len(_aasked('')), len(_Stub.searches)
+        _atook(_cb, 'c-unset', _COBB)
+        time.sleep(1.0)
+        _h = _holding(_cb) or {}
+        eq('[auto arm] with NUCBOX_SEARCH unset nothing is sent and nothing is said',
+           ((len(_aasked('')), len(_Stub.searches)), _h.get('endPinned'), _h.get('endWhy')),
+           (_n, False, None))
+    finally:
+        stop(_cp)
+finally:
+    _afake.kill()
+    _stub.shutdown()
+    shutil.rmtree(_adir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)
