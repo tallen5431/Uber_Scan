@@ -5409,8 +5409,8 @@ _DOOR = '4821 Kestrel Dr, Marietta'
 _seq = [0]
 
 
-def _fix(dlat, ok=True, fresh=10.0, err=25.0):
-    return {'lat': _PIN[0] + dlat, 'lon': _PIN[1], 'gpsAge': 0.1, 'gpsErr': err,
+def _fix(dlat, ok=True, fresh=10.0, err=25.0, age=0.1):
+    return {'lat': _PIN[0] + dlat, 'lon': _PIN[1], 'gpsAge': age, 'gpsErr': err,
             'gpsMode': 3, 'gpsOk': ok, 'gpsWhy': None if ok else 'rough',
             'freshFor': fresh}
 
@@ -5542,6 +5542,72 @@ try:
     _beats(_LEAVE)
     eq('[gps drop] ...and leaving after it drops the order once',
        ([r.get('by') for r in _drops('g-boot')], _holding(_gb)), (['gps'], None))
+
+    # The restaurant guard: a pickup Map view pinned within 150 m of the door
+    # disarms it, and /api/status says why.
+    _h = _took(_gb, 'g-rest')
+    _pin(_gb, _h)
+    eq('[gps drop] a held pickup pin is kept',
+       post(_gb, '/api/held-pickup', {'holdId': _h.get('holdId'),
+                                      'lat': _PIN[0] + 0.0009, 'lon': _PIN[1]})[0], 200)
+    eq('[gps drop] a door within 150 m of a held pickup is not armed, and says why',
+       (_holding(_gb) or {}).get('endWhy'), 'door next to the pickup')
+    _beats(_DWELL + _LEAVE)
+    ok_('[gps drop] ...so waiting at the restaurant and leaving drops nothing', _holding(_gb))
+    post(_gb, '/api/delivered', {})
+finally:
+    stop(_gp)
+
+# The 12 Oct replay's numbers, at their real defaults (no GPS_DWELL_MS): the
+# dwell is 60 s and the arrive radius 75 m + min(err, 25). Real seconds are
+# made from each fix's age (gpsAge), 10 s apart, a new hold for each case.
+def _aged(dlat, ages, **kw):
+    return [_fix(dlat, age=a, **kw) for a in ages]
+
+
+_gp, _gb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                  'SCANNER_ARGS': _gfake}, _gjournal)
+try:
+    _h = _took(_gb, 'g-70s')
+    _pin(_gb, _h)
+    _beats(_aged(_IN, [70, 60, 50, 40, 30, 20, 10, 0.1]))
+    ok_('[gps tune] (the premise: a 70 s stop at the door arrives)',
+        (_holding(_gb) or {}).get('arrived'))
+    post(_gb, '/api/delivered', {})
+
+    _h = _took(_gb, 'g-50s')
+    _pin(_gb, _h)
+    _beats(_aged(_IN, [50, 40, 30, 20, 10, 0.1]))
+    no_('[gps tune] a 50 s stop no longer arrives (DWELL 60 s)',
+        (_holding(_gb) or {}).get('arrived'))
+    post(_gb, '/api/delivered', {})
+
+    # 110 m off with err 50: inside 75 + 50 = 125, outside 75 + 25 = 100.
+    _h = _took(_gb, 'g-cap')
+    _pin(_gb, _h)
+    _beats(_aged(0.00099, [70, 60, 50, 40, 30, 20, 10, 0.1], err=50.0))
+    no_('[gps tune] the arrive radius stops at 100 m however rough the fix',
+        (_holding(_gb) or {}).get('arrived'))
+    post(_gb, '/api/delivered', {})
+
+    # 40 s good inside, 40 s of gate-refused fixes, 30 s good inside: 70 s
+    # counted, the refused run kept but not counted.
+    _h = _took(_gb, 'g-rough')
+    _pin(_gb, _h)
+    _beats(_aged(_IN, [110, 100, 90, 80, 70])
+           + _aged(_IN, [65, 55, 45, 35], ok=False, err=60.0)
+           + _aged(_IN, [30, 20, 10, 0.1]))
+    ok_('[gps tune] a 40 s run of gate-refused fixes inside the radius keeps the dwell',
+        (_holding(_gb) or {}).get('arrived'))
+    post(_gb, '/api/delivered', {})
+
+    # The same with nothing at all in the 40 s: silence still resets.
+    _h = _took(_gb, 'g-silent')
+    _pin(_gb, _h)
+    _beats(_aged(_IN, [110, 100, 90, 80, 70]) + _aged(_IN, [30, 20, 10, 0.1]))
+    no_('[gps tune] ...but 40 s with no fixes at all resets it',
+        (_holding(_gb) or {}).get('arrived'))
+    post(_gb, '/api/delivered', {})
 finally:
     stop(_gp)
     shutil.rmtree(_gdir, ignore_errors=True)
