@@ -523,6 +523,11 @@ def held_signature(now=None):
     older than that field names no order and answers '' while it is in force:
     still an order, for order_held, and never a change, for the loop.
 
+    `holds` is a LIST of names since server.js carries orders as a list, and
+    one name from a server before that: either way the answer is one string,
+    the names joined in the server's order, so a second order taken — or one
+    of two put down — is a change of signature like any other.
+
     What it is for: `dropoff_said` in main() is forgotten when this changes,
     so an address volunteered for — and refused for — the order before is
     offered again for this one.
@@ -537,6 +542,8 @@ def held_signature(now=None):
             continue
         if isinstance(until, (int, float)) and now * 1000.0 < until:
             holds = note.get('holds')
+            if isinstance(holds, list):
+                return ' '.join(h for h in holds if isinstance(h, str))
             return holds if isinstance(holds, str) else ''
     return None
 
@@ -2861,7 +2868,7 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None):
         # would never have been reached.
         'minutes': rate.get('cardMinutes') or parsed.get('minutes'),
         'perHour': round(rate['perHour'], 2) if rate.get('ready') else None,
-        # Everything server.js builds `scanner.holding` out of when the driver
+        # Everything server.js builds the order in the car out of when the driver
         # marks this offer as taken. It read six fields off this object and was
         # sent four, so the order in the car had no distance, no running cost
         # and no ends.

@@ -1238,6 +1238,20 @@ eq('...and the shared corpus has a case for every one',
    sorted(set(_c['expect']['screen'] for _c in _cases.get('screens', []))),
    sorted(_py_screens or []))
 
+# The order in the car is a LIST since Stage 4 (MAX_HELD in server.js), read
+# through heldOrders() and holding(). The one-slot name it had, `scanner.holding`,
+# must be read nowhere: a reader of the old shape would answer "is an order in
+# the car" off a field nothing writes, and say no for the rest of the shift.
+# Asked of every JavaScript file the server and the panel run, comments
+# included, so the name cannot come back in a comment that then misleads.
+_slot_readers = []
+for _jsf in sorted(glob.glob(os.path.join(ROOT, '*.js')) + glob.glob(os.path.join(ROOT, '*.html'))):
+    _src = open(_jsf, encoding='utf-8').read()
+    for _n, _line in enumerate(_src.split('\n'), 1):
+        if 'scanner.holding' in _line:
+            _slot_readers.append('%s:%d' % (os.path.basename(_jsf), _n))
+eq('nothing reads the old single scanner.holding shape directly', _slot_readers, [])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)

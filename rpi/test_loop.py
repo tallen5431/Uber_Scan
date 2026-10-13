@@ -2214,6 +2214,31 @@ eq('an unprompted address is said once per order in the car: again for the next 
    [((d[0] or {}).get('line'), d[1].get('asked')) for d in rds['dropoffs']],
    [('61 Saddlebrook Ln, Acworth, GA 30101', False)] * 2)
 
+
+# ...and since server.js keeps the orders in the car as a list (Stage 4), the
+# note names them as one: `holds: [ids]`. One signature for the list, so a
+# second order taken — or one of two put down — is a change of order like any
+# other, and a note from a server before the list (one name) reads as it did.
+def _sig_now():
+    was = os.environ.get(HO.ENV_DIR)
+    os.environ[HO.ENV_DIR] = _hds
+    try:
+        return SP.held_signature()
+    finally:
+        if was is None:
+            os.environ.pop(HO.ENV_DIR, None)
+        else:
+            os.environ[HO.ENV_DIR] = was
+
+
+_note(['o-a@1'])
+_sig_one = _sig_now()
+_note(['o-a@1', 'o-b@2'])
+_sig_two = _sig_now()
+_note('o-a@1')
+eq('the held orders\' note is one signature, list or name, and a second order changes it',
+   (_sig_one, _sig_two, _sig_now()), ('o-a@1', 'o-a@1 o-b@2', 'o-a@1'))
+
 # Whether the journal may keep the stops — names and front doors — is the
 # scanner's to say, because the server does not read its settings: not with
 # "keepPlaces": false, and not with no journal at all.

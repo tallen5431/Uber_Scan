@@ -174,7 +174,9 @@ var scanner = {
   // startScanner() deliberately leaves them alone. See the note there.
   offer: null,         // the last offer read, so it can still be marked taken
   offerAt: null,
-  holding: null,       // the order being carried, if any. See holding().
+  // The orders being carried, first-taken first: a LIST, capped at MAX_HELD.
+  // Read through heldOrders() and holding(), never directly. See holding().
+  held: [],
   // What the running scanner says it is pricing a mile at — its own word, off
   // the stream, not a file on this machine. A fact about the PROCESS, so
   // startScanner() clears it: the next one reads config.json afresh and says
@@ -839,7 +841,7 @@ if (!isFinite(HOLD_GRACE_MS) || HOLD_GRACE_MS < 0) HOLD_GRACE_MS = 10 * 60000;
 
 /* The order in the car, kept where a power cut cannot take it.
  *
- * `scanner.holding` is process memory, and this is "a box velcroed into a car
+ * `scanner.held` is process memory, and this is "a box velcroed into a car
  * where the ignition is the power switch" — rpi/calibrate.py's own words. A
  * driver who presses Took, drives to the restaurant, switches the engine off
  * and walks in comes back to a rig with no order in the car: the stack line
@@ -898,11 +900,66 @@ function cardOf(offer) {
   return out;
 }
 
-function setHolding(h) {
-  scanner.holding = h || null;
+/* ---------- the orders in the car: a list ----------------------------------
+ *
+ * Stage 4 of the multi-order design. The hold was one slot; it is now a list,
+ * first-taken first, capped at MAX_HELD — and MAX_HELD is ONE, so every answer
+ * this file gives is the one it gave with the slot. What changed is only the
+ * shape: holding.json is `{v: 2, orders: [Hold]}`, `.holding.json` names
+ * every order (`holds: [ids]`) and is in force until the LATEST of their ends,
+ * and the live part of each GPS arrival is kept per hold (`arrivals`).
+ *
+ * A Hold is the object the slot held, plus:
+ *   holdId    its name on the wire (holdIdOf): `<id>@<acceptedAt>`
+ *   app       'uber' | 'doordash' | null, off the offer line
+ *   tookAt    when ✓ Took was pressed, which is not acceptedAt (the card's
+ *             own time: see the mark handler)
+ *   deliverBy the card's "Deliver by", minutes since midnight, or null
+ *   addOn     whether the card was Uber's offer to add to a trip in progress
+ *   of        for an add-on, the holdId of the order it adds to; else null
+ *
+ * Read through heldOrders(now) and holding(now), never off `scanner.held`:
+ * those are the questions "which orders are being carried RIGHT NOW", and an
+ * order past its own clock is not one. rpi/test_lint.py holds that nothing
+ * reads the slot's old name. */
+var MAX_HELD = 1;
+
+/* The name a hold goes by on the wire: the card's id and when it was on the
+ * screen. The panel has no other handle on "the order in the car", and a pin
+ * posted for one hold must never land on the next (see /api/held-end). Kept on
+ * the hold as `holdId` since the list, made the same way. */
+function holdIdOf(h) {
+  if (!h) return null;
+  return typeof h.holdId === 'string' && h.holdId
+    ? h.holdId : String(h.id) + '@' + String(h.acceptedAt);
+}
+
+/* The hold as it is written: the slot's object, its new fields filled in where
+ * it came from a file or a caller older than them. Changes nothing a reader of
+ * the old fields sees. */
+function asHold(h) {
+  if (!h.holdId) h.holdId = String(h.id) + '@' + String(h.acceptedAt);
+  if (h.app === undefined) h.app = null;
+  if (h.tookAt === undefined) {
+    h.tookAt = h.seenAs && typeof h.seenAs.tookAt === 'number' ? h.seenAs.tookAt : h.acceptedAt;
+  }
+  if (h.deliverBy === undefined) h.deliverBy = null;
+  if (h.addOn === undefined) h.addOn = false;
+  if (h.of === undefined) h.of = null;
+  return h;
+}
+
+/* The whole list, written: memory, holding.json, the scanner's handoff, and
+ * the per-hold searches. ONE function for every change — a Took, a Drop, a pin
+ * kept on one order — so the copies cannot disagree. */
+function setHeld(list) {
+  scanner.held = (list || []).filter(Boolean);
   try {
-    if (h) fs.writeFileSync(holdPath(), JSON.stringify(h));
-    else fs.unlinkSync(holdPath());
+    if (scanner.held.length) {
+      fs.writeFileSync(holdPath(), JSON.stringify({ v: 2, orders: scanner.held }));
+    } else {
+      fs.unlinkSync(holdPath());
+    }
   } catch (e) {
     // A hold that could not be written is a hold that will not survive a
     // reboot, which is where this started — said once rather than swallowed,
@@ -910,9 +967,19 @@ function setHolding(h) {
     // is mid-shift.
     if (e && e.code !== 'ENOENT') console.error('holding: ' + e.message);
   }
-  tellScannerHeld(h);
-  armHeldEnd(h || null);
-  armHeldPickups(h || null);
+  tellScannerHeld(scanner.held);
+  forgetHoldsGone(scanner.held);
+  scanner.held.forEach(function (h) {
+    armHeldEnd(h);
+    armHeldPickups(h);
+  });
+}
+
+/* One order changed in place — a pin, an arrival, a refusal — written with
+ * the rest. A no-op for an order no longer on the list. */
+function saveHold(h) {
+  if (scanner.held.indexOf(h) === -1) return;
+  setHeld(scanner.held);
 }
 
 /* Until when an order is in the car, for the scanner, which cannot ask.
@@ -922,26 +989,34 @@ function setHolding(h) {
  * process's question, answered by holding(). The scanner is sometimes this
  * process's child and sometimes a systemd unit that has never heard of it, so
  * it is told the way every other request is: a handoff file. What goes in it
- * is the moment holding() itself stops answering yes — holdEnds, the one
- * expression of that — so the scanner needs no word from here when the order
- * runs out, and a server that died mid-delivery leaves a file that goes stale
- * on its own clock rather than one that says "held" for ever.
+ * is the moment holding() itself stops answering yes — the LATEST of the
+ * orders' holdEnds, the one expression of that — so the scanner needs no word
+ * from here when the orders run out, and a server that died mid-delivery
+ * leaves a file that goes stale on its own clock rather than one that says
+ * "held" for ever.
  *
  * Through a rename, like every other file this process publishes, so the
  * scanner never reads half of one. Gone when nothing is held. */
-function tellScannerHeld(h) {
-  var ends = h ? holdEnds(h) : null;
+function tellScannerHeld(list) {
+  var ends = null;
+  var ids = [];
+  (list || []).forEach(function (h) {
+    var e = holdEnds(h);
+    if (e === null) return;
+    ids.push(holdIdOf(h));
+    if (ends === null || e > ends) ends = e;
+  });
   try {
     if (ends === null) {
       fs.unlinkSync(HOLDING_ASK_PATH);
       return;
     }
     var tmp = partName(HOLDING_ASK_PATH);
-    // ...and WHICH order, as holdIdOf names it: the scanner forgets the last
-    // address it volunteered when this changes (`dropoff_said` in
+    // ...and WHICH orders, as holdIdOf names them: the scanner forgets the
+    // last address it volunteered when this changes (`dropoff_said` in
     // rpi/scan_pi.py), so one refused for the order before — a screen read
     // before the Took — is offered again for this one.
-    fs.writeFileSync(tmp, JSON.stringify({ until: ends, holds: holdIdOf(h) }));
+    fs.writeFileSync(tmp, JSON.stringify({ until: ends, holds: ids }));
     fs.renameSync(tmp, HOLDING_ASK_PATH);
   } catch (e) {
     // Said, not thrown: the cost of a lost one is the automatic planner read
@@ -950,6 +1025,21 @@ function tellScannerHeld(h) {
   }
 }
 
+/* One order off the file, or null: a stamp that is a number and not after the
+ * clock reading it. */
+function heldFromFile(h) {
+  if (!h || typeof h !== 'object' || typeof h.acceptedAt !== 'number'
+      || !isFinite(h.acceptedAt)) return null;
+  if (h.acceptedAt > Date.now()) return null;
+  return asHold(h);
+}
+
+// The most orders a file is read with, whatever MAX_HELD is now: a file
+// holding more is cut to this many, first-taken first. Not MAX_HELD itself, so
+// a restart does not throw away an order already in the car — a Took is where
+// the cap applies, and it is said there.
+var MAX_HELD_FILE = 2;
+
 /* ...and read back once, at startup, which is the only moment it means
  * anything.
  *
@@ -957,27 +1047,42 @@ function tellScannerHeld(h) {
  * it: a Pi has no real-time clock, it boots in 1970 and jumps when the network
  * arrives. A hold stamped after the clock now reading it makes `over` in
  * holding() permanently negative, so the order would never expire and the
- * panel would offer a pair line against it for the rest of the shift. Refusing
- * is always available and costs one delivery's advice.
- */
+ * panel would offer a pair line against it for the rest of the shift.
+ * Refusing is always available and costs one delivery's advice.
+ *
+ * TWO SHAPES. `{v: 2, orders: [...]}` is this file's; an object with no `v`
+ * is the one-slot file every build before the list wrote, and is WRAPPED as
+ * one order, its clock untouched (asHold names it as it was named). The other
+ * way round is safe by construction: a v2 file has no `acceptedAt` of its own,
+ * so a build from before the list — which asks for exactly that — holds
+ * nothing, rather than a list read as one order. A `v` this build does not
+ * know is nothing either. Returns the first-taken order still carried, or
+ * null, for the boot line. */
 function loadHolding() {
   var raw;
   try { raw = fs.readFileSync(holdPath(), 'utf8'); } catch (e) { return null; }
-  var h;
-  try { h = JSON.parse(raw); } catch (e) { h = null; }
-  if (!h || typeof h !== 'object' || typeof h.acceptedAt !== 'number'
-      || !isFinite(h.acceptedAt)) return null;
-  if (h.acceptedAt > Date.now()) return null;
-  scanner.holding = h;
-  // Through holding(), so an order that has outlived its own clock is put down
-  // here rather than waiting to be noticed — and so the answer to "is there an
-  // order in the car" is the same function at boot as it is everywhere else.
-  var still = holding(Date.now());
+  var f;
+  try { f = JSON.parse(raw); } catch (e) { f = null; }
+  var list = [];
+  if (f && typeof f === 'object' && f.v === 2 && Array.isArray(f.orders)) {
+    list = f.orders.map(heldFromFile).filter(Boolean);
+  } else if (f && typeof f === 'object' && f.v === undefined) {
+    var one = heldFromFile(f);
+    if (one) list = [one];
+  }
+  scanner.held = list.slice(0, MAX_HELD_FILE);
+  // Through heldOrders(), so an order that has outlived its own clock is put
+  // down here rather than waiting to be noticed — and so the answer to "is
+  // there an order in the car" is the same function at boot as it is
+  // everywhere else.
+  var still = heldOrders(Date.now());
   // ...and the scanner told, since a hold restored at boot is a hold.
-  if (still) tellScannerHeld(still);
-  armHeldEnd(still);
-  armHeldPickups(still);
-  return still;
+  if (still.length) tellScannerHeld(still);
+  still.forEach(function (h) {
+    armHeldEnd(h);
+    armHeldPickups(h);
+  });
+  return still.length ? still[0] : null;
 }
 
 /* The moment a hold stops being an order in the car: its stated time, half
@@ -1007,16 +1112,33 @@ function countSighting(s) {
   scanner.screens[type] = (scanner.screens[type] || 0) + 1;
 }
 
-function holding(now) {
-  var h = scanner.holding;
-  if (!h) return null;
-  var ends = holdEnds(h);
-  if (ends === null) return null;
-  if (now > ends) {
-    setHolding(null);
-    return null;
+/* The orders being carried right now, first-taken first. One past its own
+ * clock is put down here (written, and the scanner told); one with no stated
+ * time is kept on the list and never counted, as the slot kept it. */
+function heldOrders(now) {
+  var gone = scanner.held.filter(function (h) {
+    var ends = holdEnds(h);
+    return ends !== null && now > ends;
+  });
+  if (gone.length) {
+    setHeld(scanner.held.filter(function (h) { return gone.indexOf(h) === -1; }));
   }
-  return h;
+  return scanner.held.filter(function (h) { return holdEnds(h) !== null; });
+}
+
+/* The first-taken order being carried, or null: what every one-order answer
+ * on this server is about — the stack line, the pair row's `held`, the panel's
+ * in-car line. */
+function holding(now) {
+  var list = heldOrders(now);
+  return list.length ? list[0] : null;
+}
+
+/* The order named `id` (holdIdOf) among those carried now, or null. */
+function heldById(id, now) {
+  var list = heldOrders(now);
+  for (var i = 0; i < list.length; i++) if (holdIdOf(list[i]) === id) return list[i];
+  return null;
 }
 
 /* An address the scanner read, or one the assembler made off a planner's
@@ -1059,8 +1181,8 @@ function dropoffArrived(read) {
   // card in front of the driver. With neither, nothing is stored, which
   // is exactly what happened before.
   //
-  // Asked through holding(), never off `scanner.holding` directly. That
-  // field is the raw slot; holding() is the question "is an order being
+  // Asked through holding(), never off `scanner.held` directly. That
+  // field is the raw list; holding() is the question "is an order being
   // carried RIGHT NOW", and it is not the same question - an order whose
   // stated time has run out, plus half again, plus ten minutes, is
   // already forgotten by the panel and by the stack line. Reading the
@@ -1350,14 +1472,7 @@ function dropoffArrived(read) {
   }
   // A dropoff filed onto the hold above is searched for on the NucBox
   // (searchHeldEnd); a no-op when nothing new was filed.
-  if (read.dropoff) armHeldEnd(holding(Date.now()));
-}
-
-/* The name a hold goes by on the wire: the card's id and when it was on the
- * screen. The panel has no other handle on "the order in the car", and a pin
- * posted for one hold must never land on the next (see /api/held-end). */
-function holdIdOf(h) {
-  return h ? String(h.id) + '@' + String(h.acceptedAt) : null;
+  if (read.dropoff) heldOrders(Date.now()).forEach(armHeldEnd);
 }
 
 /* ---------- the held order's own card, back under a new id -----------------
@@ -1482,23 +1597,32 @@ var HELD_REPLACED_SAID_MS = 60000;
 // last counted one (its first and last, and its longest stretch of nothing at
 // all). `arrivedAt` and the pin ARE on the hold, and so in holding.json,
 // because those are the facts a restart in the driveway must not forget.
-var arrival = null;
+//
+// One per order, by holdId (`arrivals`): two orders in the car are two doors,
+// and a dwell counted at one is not a dwell at the other. Memory only, as the
+// one was; an order put down takes its own with it (forgetHoldsGone).
+var arrivals = {};
 
 function resetArrival(id) {
-  arrival = { holdId: id || null, insideSince: null, lastFixAt: null, outCount: 0,
-              skippedMs: 0, refusedFrom: null, refusedTo: null, silentMs: 0 };
+  if (!id) return null;
+  arrivals[id] = { holdId: id, insideSince: null, lastFixAt: null, outCount: 0,
+                   skippedMs: 0, refusedFrom: null, refusedTo: null, silentMs: 0 };
+  return arrivals[id];
 }
-resetArrival(null);
+
+function arrivalOf(id) {
+  return arrivals[id] || resetArrival(id);
+}
 
 /* A beat's fix as this file will count it, or null: the gate passed it, it is
  * still inside gps.py's staleness rule (`freshFor`, which a scanner older than
  * that field does not send — refused, not guessed), and it is a fix this file
  * has not already counted. Its time is the server's arrival less its age. */
-function countableFix(beat, now) {
+function countableFix(beat, now, arrival) {
   var g = beat && beat.gps;
   var f = g && g.fix;
   if (!f) return null;
-  if (f.gpsOk !== true) { refusedFix(f, now); return null; }
+  if (f.gpsOk !== true) { refusedFix(f, now, arrival); return null; }
   if (typeof f.freshFor !== 'number' || !(f.freshFor > 0)) return null;
   if (typeof f.lat !== 'number' || typeof f.lon !== 'number'
       || !isFinite(f.lat) || !isFinite(f.lon)) return null;
@@ -1515,7 +1639,7 @@ function countableFix(beat, now) {
  * time: it proves the receiver was still talking, so a run of them is not the
  * silence GAP_MS resets on. Its position is never used. Only a fresh one, and
  * only after a counted fix (the run is measured from it). */
-function refusedFix(f, now) {
+function refusedFix(f, now, arrival) {
   if (f.gpsWhy !== 'rough' || arrival.lastFixAt === null) return;
   if (typeof f.freshFor !== 'number' || !(f.freshFor > 0)) return;
   if (typeof f.gpsAge !== 'number' || !isFinite(f.gpsAge) || f.gpsAge < 0) return;
@@ -1535,14 +1659,22 @@ function heldEndPin(h) {
   return p;
 }
 
-/* The restaurant guard: whether one of the held order's pickups, pinned by
+/* The restaurant guard: whether one of the held orders' pickups, pinned by
  * Map view (/api/held-pickup), is within PICKUP_GUARD_M of its end. The 12 Oct
  * replay: a door 50-75 m from a restaurant the car waited at arrived there 24
  * times of 24, and would have dropped the order on leaving with the food,
  * 19-43 min early. A door that close is not armed at all — the timer and Drop
- * still end the order — and /api/status says why. */
+ * still end the order — and /api/status says why.
+ *
+ * EVERY order's pickups, not only this one's: with two in the car the car
+ * waits at the second order's restaurant too, and a first order's door beside
+ * it would arrive there the same way. With one order it is that order's. */
 function pickupNearEnd(h, pin) {
-  var picks = h && Array.isArray(h.pickupPins) ? h.pickupPins : [];
+  var picks = [];
+  heldOrders(Date.now()).concat(h && scanner.held.indexOf(h) === -1 ? [h] : [])
+    .forEach(function (o) {
+      if (Array.isArray(o.pickupPins)) picks = picks.concat(o.pickupPins);
+    });
   return picks.some(function (p) {
     return MV.crowMiles(p, pin) * 1609.344 <= PICKUP_GUARD_M;
   });
@@ -1573,22 +1705,25 @@ function pickupNearEnd(h, pin) {
  * hold or its text changed is dropped. END_RETRY_MS is settable for the suite,
  * like GPS_DWELL_MS; 30 s is chosen, not measured. */
 var END_RETRY_MS = envNumber('NUCBOX_RETRY_MS', 30000);
-var endSearch = { key: null, timer: null };
+// One per order, by holdId: {key, timer}.
+var endSearch = {};
 
 function endKeyOf(h) {
   return h && typeof h.dropoff === 'string' && h.dropoff
     ? holdIdOf(h) + '\n' + h.dropoff : null;
 }
 
-/* The hook: called after the hold is written (setHolding), after a scanner
- * line may have filed a dropoff onto it, and at boot. A no-op unless the hold
- * names a dropoff this server has not yet searched for. */
+/* The hook: called for each order after the list is written (setHeld), after
+ * a scanner line may have filed a dropoff onto one, and at boot. A no-op
+ * unless the order names a dropoff this server has not yet searched for. */
 function armHeldEnd(h) {
-  if (!NBX.search) return;
+  if (!NBX.search || !h) return;
+  var id = holdIdOf(h);
   var key = endKeyOf(h);
-  if (key === endSearch.key) return;
-  if (endSearch.timer) clearTimeout(endSearch.timer);
-  endSearch = { key: key, timer: null };
+  var was = endSearch[id];
+  if (was && key === was.key) return;
+  if (was && was.timer) clearTimeout(was.timer);
+  endSearch[id] = { key: key, timer: null };
   // Nothing to search, already pinned, or already refused before a restart
   // for a reason another asking would not change (a NucBox down is asked).
   if (!key || heldEndPin(h)
@@ -1596,16 +1731,20 @@ function armHeldEnd(h) {
   searchHeldEnd(key, 1);
 }
 
-// The hold this search is still about, or null.
+// The order this search is still about, or null.
 function endHold(key) {
-  var h = holding(Date.now());
-  return h && endSearch.key === key && endKeyOf(h) === key ? h : null;
+  var hit = null;
+  heldOrders(Date.now()).forEach(function (h) {
+    var on = endSearch[holdIdOf(h)];
+    if (on && on.key === key && endKeyOf(h) === key) hit = h;
+  });
+  return hit;
 }
 
 function refuseHeldEnd(h, why) {
   h.endWhy = why;
   h.endWhyFor = h.dropoff;
-  setHolding(h);
+  saveHold(h);
 }
 
 // pickInDisc's refusals, in the panel's words.
@@ -1636,7 +1775,7 @@ function searchHeldEnd(key, attempt) {
     delete now.endWhy;
     delete now.endWhyFor;
     resetArrival(holdIdOf(now));
-    setHolding(now);
+    saveHold(now);
   }
   if (nbxCache.has(target)) return answered(nbxCache.get(target));
   nbxAsk(target, function (err, body) {
@@ -1645,9 +1784,10 @@ function searchHeldEnd(key, attempt) {
       var now = endHold(key);
       if (!now || heldEndPin(now)) return;
       refuseHeldEnd(now, 'NucBox down');
-      if (attempt === 1) {
-        endSearch.timer = setTimeout(function () {
-          endSearch.timer = null;
+      var on = endSearch[holdIdOf(now)];
+      if (attempt === 1 && on) {
+        on.timer = setTimeout(function () {
+          on.timer = null;
           searchHeldEnd(key, 2);
         }, END_RETRY_MS);
       }
@@ -1690,30 +1830,47 @@ function searchHeldEnd(key, attempt) {
  * of a refusal; /api/status says how many pickups the guard holds
  * (`pickupsPinned`) beside the planner's own stops (`planner`), and Map view
  * says why one has no pin. */
-var pickSearch = { holdId: null, asked: {}, timers: [] };
+// One per order, by holdId: {asked, timers}.
+var pickSearch = {};
 
-/* The hook, beside armHeldEnd: after the hold is written, when a Trip Planner
- * read lands on it, and at boot. A no-op for a pickup line already asked
- * about on this hold. */
+/* The hook, beside armHeldEnd: for each order after the list is written, when
+ * a Trip Planner read lands on one, and at boot. A no-op for a pickup line
+ * already asked about on that order. */
 function armHeldPickups(h) {
-  if (!NBX.search) return;
+  if (!NBX.search || !h) return;
   var id = holdIdOf(h);
-  if (id !== pickSearch.holdId) {
-    pickSearch.timers.forEach(clearTimeout);
-    pickSearch = { holdId: id, asked: {}, timers: [] };
-  }
-  if (!h || !h.planner || !MV.discFor(h.card || null)) return;
+  var on = pickSearch[id] || (pickSearch[id] = { asked: {}, timers: [] });
+  if (!h.planner || !MV.discFor(h.card || null)) return;
   MV.heldPickups(h.planner.stops).forEach(function (p) {
-    if (pickSearch.asked[p.q]) return;
-    pickSearch.asked[p.q] = true;
+    if (on.asked[p.q]) return;
+    on.asked[p.q] = true;
     searchHeldPickup(id, p.q, 1);
   });
 }
 
-// The hold this search is still about, or null.
+// The order this search is still about, or null.
 function pickHold(id) {
-  var h = holding(Date.now());
-  return h && pickSearch.holdId === id && holdIdOf(h) === id ? h : null;
+  return pickSearch[id] ? heldById(id, Date.now()) : null;
+}
+
+/* The per-order state of an order no longer on the list goes with it: its
+ * end search and its timer, its pickup searches and theirs, and its arrival.
+ * Called by setHeld, so every way an order leaves takes them. */
+function forgetHoldsGone(list) {
+  var ids = (list || []).map(holdIdOf);
+  Object.keys(endSearch).forEach(function (id) {
+    if (ids.indexOf(id) !== -1) return;
+    if (endSearch[id].timer) clearTimeout(endSearch[id].timer);
+    delete endSearch[id];
+  });
+  Object.keys(pickSearch).forEach(function (id) {
+    if (ids.indexOf(id) !== -1) return;
+    pickSearch[id].timers.forEach(clearTimeout);
+    delete pickSearch[id];
+  });
+  Object.keys(arrivals).forEach(function (id) {
+    if (ids.indexOf(id) === -1) delete arrivals[id];
+  });
 }
 
 function searchHeldPickup(id, q, attempt) {
@@ -1735,7 +1892,7 @@ function searchHeldPickup(id, q, attempt) {
     if (!err && !Array.isArray(body)) err = 'not a list';
     if (err) {
       if (attempt === 1 && pickHold(id)) {
-        pickSearch.timers.push(setTimeout(function () {
+        pickSearch[id].timers.push(setTimeout(function () {
           searchHeldPickup(id, q, 2);
         }, END_RETRY_MS));
       }
@@ -1766,23 +1923,35 @@ function keepPickupPin(h, at) {
   });
   picks.push({ lat: at.lat, lon: at.lon });
   h.pickupPins = picks.slice(-PICKUP_PINS_MAX);
-  var pin = heldEndPin(h);
-  if (pin && pickupNearEnd(h, pin)) {
-    delete h.arrivedAt;
-    resetArrival(holdIdOf(h));
-  }
-  setHolding(h);
+  // Every order's door, since the guard is every order's pickups (see
+  // pickupNearEnd): a second order's restaurant can sit beside the first's.
+  heldOrders(Date.now()).forEach(function (o) {
+    var pin = heldEndPin(o);
+    if (pin && pickupNearEnd(o, pin)) {
+      delete o.arrivedAt;
+      resetArrival(holdIdOf(o));
+    }
+  });
+  saveHold(h);
 }
 
 /* One heartbeat. Returns what the panel is told on that beat: whether the car
- * is at the held order's dropoff now. Puts the order down on the departure. */
+ * is at a held order's dropoff now. Puts an order down on the departure from
+ * its own door — each order by its own pin and its own arrival, so leaving
+ * one door puts down that order and no other. */
 function gpsArrival(beat, now) {
-  var h = holding(now);
-  var id = holdIdOf(h);
-  if (arrival.holdId !== id) resetArrival(id);
+  var at = false;
+  heldOrders(now).slice().forEach(function (h) {
+    if (arriveOne(h, beat, now)) at = true;
+  });
+  return at;
+}
+
+function arriveOne(h, beat, now) {
+  var arrival = arrivalOf(holdIdOf(h));
   var pin = heldEndPin(h);
   if (!pin || pickupNearEnd(h, pin)) return false;
-  var fix = countableFix(beat, now);
+  var fix = countableFix(beat, now, arrival);
   if (!fix) return false;
   var gap = arrival.lastFixAt === null ? Infinity : fix.at - arrival.lastFixAt;
   // A gap the gate's refusals filled: no silence in it over GAP_MS, from the
@@ -1805,7 +1974,7 @@ function gpsArrival(beat, now) {
     }
     if (fix.at - arrival.insideSince - arrival.skippedMs < DWELL_MS) return false;
     h.arrivedAt = now;
-    setHolding(h);   // the arrival survives a restart in the driveway
+    saveHold(h);   // the arrival survives a restart in the driveway
     return true;
   }
   if (metres <= LEAVE_M) { arrival.outCount = 0; return true; }
@@ -1813,24 +1982,35 @@ function gpsArrival(beat, now) {
   if (arrival.outCount < LEAVE_FIXES) return false;
   putDown(now, 'gps', function () {
     broadcast({ gpsDrop: { at: now, saidForMs: GPS_DROP_SAID_MS } });
-  });
+  }, [h]);
   return false;
 }
 
-/* Put the order in the car down, and write the drop row: the one path both
+/* Put orders in the car down, and write a drop row for each: the one path both
  * Drop (/api/delivered) and the GPS take. `by` is 'gps' for the second and
  * absent from the row for a press, so rows written before this are the shape
- * they always were. `done(wasHolding)`. See /api/delivered for the row. */
-function putDown(now, by, done) {
-  // holding(), not the raw slot, and asked BEFORE setHolding(null).
-  var dropped = holding(now);
-  setHolding(null);
-  resetArrival(null);
-  if (!dropped) return done(false);
-  var row = { v: 1, kind: 'drop', at: now, id: dropped.id, seq: now,
-              acceptedAt: dropped.acceptedAt };
-  if (by) row.by = by;
-  appendLines(JSON.stringify(row) + '\n', function (err) {
+ * they always were. `which` is the orders to put down, as heldOrders gave
+ * them; absent, the first-taken — the only one there is while one is all the
+ * car carries. `done(wasHolding)`. See /api/delivered for the row. */
+function putDown(now, by, done, which) {
+  // heldOrders(), not the raw list, and asked BEFORE the list is rewritten.
+  var live = heldOrders(now);
+  var dropped = (which || live.slice(0, 1)).filter(function (h) {
+    return live.indexOf(h) !== -1;
+  });
+  // ...and, asked for no order in particular, one with no stated time goes as
+  // well: it is never counted as carried, and Drop always cleared the slot.
+  setHeld(scanner.held.filter(function (h) {
+    return dropped.indexOf(h) === -1 && (which || holdEnds(h) !== null);
+  }));
+  if (!dropped.length) return done(false);
+  var rows = dropped.map(function (d) {
+    var row = { v: 1, kind: 'drop', at: now, id: d.id, seq: now,
+                acceptedAt: d.acceptedAt };
+    if (by) row.by = by;
+    return JSON.stringify(row) + '\n';
+  });
+  appendLines(rows.join(''), function (err) {
     if (err) console.error('journal: could not record a drop: ' + err.message);
     done(true);
   });
@@ -5711,7 +5891,8 @@ function route(req, res) {
             // assume one), so the first is put down — and SAID: a drop row
             // `by: 'replaced'`, and a note on the panel.
             if (before && before.id !== marked.id) replacedHold = before;
-            setHolding({
+            var tookAt = Date.now();
+            var took = asHold({
               id: marked.id,
               pay: marked.pay,
               minutes: typeof marked.billedMinutes === 'number'
@@ -5776,23 +5957,37 @@ function route(req, res) {
               // The card as the driver took it, and when they pressed: what
               // recognises it if it comes back under a new id. See
               // heldOwnCard. Not `dropoff` above, which a ⌖ press rewrites.
-              seenAs: Object.assign(cardSeen(marked, false), { tookAt: Date.now() }),
+              seenAs: Object.assign(cardSeen(marked, false), { tookAt: tookAt }),
               // Where each of its ends came from, and when: the assembler's
               // record (Assemble.cardFields), kept beside `dropoff` and
               // `dropoffScanned` above, which it keeps in step.
-              fields: Assemble.cardFields(marked, scanner.offerAt || Date.now())
+              fields: Assemble.cardFields(marked, scanner.offerAt || Date.now()),
+              // ...and the list's own fields (see MAX_HELD): which app, the
+              // press, the card's deadline. A scanner older than the offer
+              // line's `app` and `deliverBy` leaves them null.
+              app: typeof marked.app === 'string' ? marked.app : null,
+              tookAt: tookAt,
+              deliverBy: typeof marked.deliverBy === 'number' ? marked.deliverBy : null,
+              addOn: false,
+              of: null
             });
+            // One order in the car is all MAX_HELD allows: the Took replaces
+            // whatever was there, as the slot did.
+            setHeld([took]);
             // ...and the assembler told: its pool of planner pages is retried
             // against this hold, where everything read before the Took is
             // about the order before and is refused.
             Assemble.took(assembly, holding(Date.now()));
-            if (replacedHold) resetArrival(null);
           } else {
             // Through holding() as well: taking the mark back off an order the
             // rest of the rig has already forgotten should not depend on which
             // of the two ways of asking this line happens to use.
-            var carried = holding(Date.now());
-            if (carried && carried.id === note.id) setHolding(null);
+            var carried = heldOrders(Date.now()).filter(function (h) {
+              return h.id === note.id;
+            });
+            if (carried.length) {
+              setHeld(scanner.held.filter(function (h) { return carried.indexOf(h) === -1; }));
+            }
           }
         }
         // ...and whether there is now an order in the car, because marking is
@@ -5847,7 +6042,7 @@ function route(req, res) {
    * about the journal — this offer was taken — and dropping it off does not
    * make that untrue, so the mark is never touched here. The hold itself is
    * not in the journal either: it lives in holding.json beside it, written by
-   * setHolding() and read back by loadHolding() — see the comment above
+   * setHeld() and read back by loadHolding() — see the comment above
    * those, which answers what this one used to say ("memory only").
    *
    * WHAT IS APPENDED is a second fact, not an edit of the first: a `kind:
@@ -5900,8 +6095,8 @@ function route(req, res) {
     // the same thing here as it does on the panel, or the driver is told they
     // put down a job the rig stopped counting an hour ago.
     //
-    // Asked BEFORE setHolding(null), and kept: after it, holding() answers
-    // null and the row would have no offer to name.
+    // Asked BEFORE the list is rewritten, and kept: after it, holding()
+    // answers null and the row would have no offer to name (putDown).
     //
     // The row: {v, kind: 'drop', at, id, seq, acceptedAt}, `acceptedAt` dated
     // from the card as the hold is — see acceptedAt in the mark handler — so
@@ -5939,11 +6134,13 @@ function route(req, res) {
       if (!body || typeof body !== 'object') {
         return send(res, 400, JSON.stringify({ ok: false, error: 'not JSON' }), json);
       }
-      var h = holding(Date.now());
+      // The order the pin names, among those in the car: with more than one,
+      // a pin for one is not refused for not being the first.
+      var h = heldById(body.holdId, Date.now());
       var why = null;
       var plan = h && typeof h.dropoff === 'string' ? MV.searchPlan(h.dropoff) : null;
-      if (!h) why = 'nothing held';
-      else if (body.holdId !== holdIdOf(h)) why = 'not the order in the car';
+      if (!holding(Date.now())) why = 'nothing held';
+      else if (!h) why = 'not the order in the car';
       else if (body.dropoff !== h.dropoff) why = 'not where that order ends';
       else if (body.doorLevel !== true || !plan || plan.kind !== 'street' || !plan.door
                || !MV.hasDoor({ name: body.name }, plan.house)) why = 'not door level';
@@ -5963,7 +6160,7 @@ function route(req, res) {
         delete h.endWhy;
         delete h.endWhyFor;
         resetArrival(holdIdOf(h));
-        setHolding(h);
+        saveHold(h);
       }
       send(res, 200, JSON.stringify({ ok: true }), json);
     });
@@ -5984,10 +6181,10 @@ function route(req, res) {
       if (!body || typeof body !== 'object') {
         return send(res, 400, JSON.stringify({ ok: false, error: 'not JSON' }), json);
       }
-      var h = holding(Date.now());
+      var h = heldById(body.holdId, Date.now());
       var why = null;
-      if (!h) why = 'nothing held';
-      else if (body.holdId !== holdIdOf(h)) why = 'not the order in the car';
+      if (!holding(Date.now())) why = 'nothing held';
+      else if (!h) why = 'not the order in the car';
       else if (typeof body.lat !== 'number' || typeof body.lon !== 'number'
                || !isFinite(body.lat) || !isFinite(body.lon)
                || Math.abs(body.lat) > 90 || Math.abs(body.lon) > 180) why = 'no position';

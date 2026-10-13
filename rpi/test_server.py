@@ -2967,13 +2967,14 @@ try:
         os.path.exists(_hold))
     # Stated 30 minutes, half again, and the default ten-minute grace: the
     # moment holding() stops answering yes, which is what the scanner is told.
-    _accepted = json.load(open(_hold)).get('acceptedAt')
+    # (The file is a list of orders since Stage 4: `{v: 2, orders: [...]}`.)
+    _accepted = json.load(open(_hold))['orders'][0].get('acceptedAt')
     eq('...and the scanner is told until when, the moment holding() lets go',
        _held_until(), _accepted + 30 * 1.5 * 60000 + 10 * 60000)
     # ...and WHICH order, so the scanner forgets the address it last
     # volunteered when the order changes (held_signature in rpi/scan_pi.py).
     eq('...and which order it is, by the name the panel knows it by',
-       json.load(open(_hheld)).get('holds'), 'h-1@%d' % _accepted)
+       json.load(open(_hheld)).get('holds'), ['h-1@%d' % _accepted])
 finally:
     stop(_hproc)
 # Taken away here, so the restart below has to write it again for the order it
@@ -3159,6 +3160,87 @@ except Exception:
     _herr5 = ''
 no_('...without a stack trace at boot (%r)' % (_herr5[:70].replace('\n', ' '),),
     'uncaught' in _herr5)
+
+# --- Stage 4: the order in the car is a list ---------------------------------
+#
+# holding.json is `{v: 2, orders: [Hold]}` now, capped at one order (MAX_HELD
+# in server.js), and every build before it wrote the one-slot object. Both
+# directions have to be safe: a v1 file left by the build before is ONE order,
+# its clock untouched — a different acceptedAt is a different expiry and a
+# different name for the pin to be posted under — and a v2 file read by the
+# build before holds nothing rather than something half-read. Invented order
+# and street.
+_v1at = int(time.time() * 1000) - 5 * 60000
+with open(_hold, 'w') as _fh:
+    json.dump({'id': 'h-v1', 'pay': 9.48, 'minutes': 40, 'acceptedAt': _v1at,
+               'dropoff': '12 Kestrel Dr, Marietta'}, _fh)
+if os.path.exists(_hheld):
+    os.remove(_hheld)
+_v4proc, _v4base = start({'SCANNER': '0', 'UBERSCAN_HANDOFF_DIR': _hhand}, _hjournal)
+try:
+    _v4held = (get(_v4base, '/api/status') or {}).get('holding') or {}
+    _v4note = json.load(open(_hheld)) if os.path.exists(_hheld) else {}
+    # A pin on it rewrites the file, which is then the list's shape.
+    post(_v4base, '/api/held-pickup', {'holdId': 'h-v1@%d' % _v1at,
+                                       'lat': 33.95, 'lon': -84.55})
+    _v4file = json.load(open(_hold))
+    eq('a v1 holding.json restores as one order, clock unchanged',
+       (_v4held.get('holdId'), _v4held.get('pay'), _v4note.get('until'),
+        _v4note.get('holds'), _v4file.get('v'), len(_v4file.get('orders') or []),
+        ((_v4file.get('orders') or [{}])[0]).get('acceptedAt')),
+       ('h-v1@%d' % _v1at, 9.48, _v1at + 40 * 1.5 * 60000 + 10 * 60000,
+        ['h-v1@%d' % _v1at], 2, 1, _v1at))
+finally:
+    stop(_v4proc)
+
+# ...and the build before the list, given the file this one now writes. Run as
+# that build, out of git, not as a copy of its rule written here: the rule is
+# `typeof h.acceptedAt === 'number'` on the file's top level, and the v2 file
+# has none, which only the real loader can be trusted to show. The premise
+# first — the same old build DOES restore a v1 file — so a refusal below is
+# about the shape and not a server that restores nothing.
+_OLD = '000c052'
+_oldtree = tempfile.mkdtemp()
+_oldok = subprocess.run('git -C "%s" archive %s | tar -x -C "%s"' % (ROOT, _OLD, _oldtree),
+                        shell=True, capture_output=True).returncode == 0
+ok_('(the build before the list is in this checkout\'s history: %s)' % _OLD, _oldok)
+
+
+def _old_restores(content):
+    jdir = tempfile.mkdtemp()
+    jpath = os.path.join(jdir, 'offers.jsonl')
+    open(jpath, 'w').close()
+    with open(os.path.join(jdir, 'holding.json'), 'w') as fh:
+        json.dump(content, fh)
+    hand = os.path.join(jdir, 'handoff')
+    os.mkdir(hand)
+    port = free_port()
+    proc = subprocess.Popen(
+        ['node', os.path.join(_oldtree, 'server.js')],
+        env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=jpath,
+                 SCANNER='0', UBERSCAN_HANDOFF_DIR=hand),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    base = 'http://127.0.0.1:%d' % port
+    try:
+        for _ in range(120):
+            try:
+                return (get(base, '/api/status') or {}).get('holding')
+            except Exception:
+                time.sleep(0.1)
+        return 'never came up'
+    finally:
+        stop(proc)
+        shutil.rmtree(jdir, ignore_errors=True)
+
+
+if _oldok:
+    _v1again = {'id': 'h-v1', 'pay': 9.48, 'minutes': 40,
+                'acceptedAt': int(time.time() * 1000) - 60000}
+    ok_('(the build before the list restores a v1 file)',
+        (_old_restores(_v1again) or {}).get('pay') == 9.48)
+    eq('...a v2 file read by the old loader holds nothing',
+       _old_restores(_v4file), None)
+shutil.rmtree(_oldtree, ignore_errors=True)
 shutil.rmtree(_hdir, ignore_errors=True)
 
 # --- Drop leaves a row saying when ------------------------------------------
@@ -3186,7 +3268,7 @@ try:
                           {'id': 'drop-1', 'accepted': True, 'offer': _doffer})
     ok_('a marked offer goes in the car', _dsaid.get('holding') is True)
     with open(os.path.join(_ddir, 'holding.json')) as _fh:
-        _dheld = json.load(_fh)
+        _dheld = json.load(_fh)['orders'][0]
     _dbefore = int(time.time() * 1000)
     _dcode, _dsaid = post(_dbase, '/api/delivered', {})
     _dafter = int(time.time() * 1000)
