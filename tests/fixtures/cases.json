@@ -4673,6 +4673,66 @@
      "place": "Larksour Inn & Suites Kennesaw NW"
     }
    ]
+  },
+  {
+   "name": "a place's name over a street line that carries its own town is the stop's place, never its street",
+   "_why": "The hotel layout's other shape: the place's name, then the street and town on one line (the third layout's), with no bare town line between. The line over the street is the place, and the street is the line under it. Invented: the hotel case's names and streets with its bare town line taken out; no read of this exact block is on file.",
+   "text": "Trip Planner\nDropoff • 1 order\nDana R.\nExpected by 10:05 PM\nAddress\nLarksour Inn & Suites\n1180 Wrenfield Rd NW, Kennesaw, GA 30144\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Dana R.",
+     "expectedBy": 1325,
+     "street": "1180 Wrenfield Rd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "1180 Wrenfield Rd NW, Kennesaw, GA 30144",
+     "place": "Larksour Inn & Suites"
+    }
+   ]
+  },
+  {
+   "name": "the town said again on its own over a hotel's street is not the stop's place",
+   "_why": "The hotel case with its first line, the hotel's name, lost: what is left over the street is the bare town line, and a place named 'Kennesaw' in a Kennesaw street's block would be the town said twice, not where the customer is. The rule that passes over it held nothing in the hotel case, whose name comes first. Invented, from the hotel case.",
+   "text": "Trip Planner\nDropoff • 1 order\nDana R.\nExpected by 10:05 PM\nAddress\nKennesaw\n1180 Wrenfield Rd NW, Kennesaw, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Dana R.",
+     "expectedBy": 1325,
+     "street": "1180 Wrenfield Rd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "1180 Wrenfield Rd NW, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a hotel stop whose street did not read takes no address from past its View details",
+   "_why": "The hotel case with its street line lost, and under its View details the street and town of a block whose header and Expected by did not read either. The street is looked for down to View details and no further: past it is another stop's door, and filed as this one's it would be a confident address for the wrong customer. This stop keeps none. Invented, from the hotel case and the quadrant case's street.",
+   "text": "Trip Planner\nDropoff • 1 order\nDana R.\nExpected by 10:05 PM\nAddress\nLarksour Inn & Suites Kennesaw NW\nKennesaw\nView details\n4410 Fable W Lantern Parkway\nMarietta, GA 30060\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Dana R.",
+     "expectedBy": 1325,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null,
+     "place": null
+    }
+   ]
   }
  ]
 }
