@@ -38,8 +38,9 @@ var Advice = require('./advice.js');
 var Streets = require('./streets.js');
 // Map view's own rules for where a place is, so "door level" means one thing.
 // A UMD like advice.js that touches no browser global at load. Used here for
-// searchPlan, hasDoor and crowMiles only: the GPS drop (see gpsArrival) must
-// hold a pin to exactly the door rule the page chose it by.
+// the GPS drop (see gpsArrival) and the server's own search for its end (see
+// searchHeldEnd): searchPlan, hasDoor, discFor, discBox, pickInDisc and
+// crowMiles, so a pin is held to exactly the door rule the page chooses by.
 var MV = require('./map-view.js');
 
 var ROOT = __dirname;
@@ -748,6 +749,9 @@ function startScanner() {
           // `dropoffScanned`, and since this change so does the card on the
           // slot, both of which /api/status already sends.
         }
+        // A dropoff filed onto the hold above is searched for on the NucBox
+        // (searchHeldEnd); a no-op when nothing new was filed.
+        if (read.dropoff) armHeldEnd(holding(Date.now()));
         // Uber's Trip Planner, read off the whole screen because ⌖ was
         // pressed: every stop of the trip in order. See emit_planner.
         //
@@ -1133,6 +1137,7 @@ function setHolding(h) {
     if (e && e.code !== 'ENOENT') console.error('holding: ' + e.message);
   }
   tellScannerHeld(h);
+  armHeldEnd(h || null);
 }
 
 /* Until when an order is in the car, for the scanner, which cannot ask.
@@ -1191,6 +1196,7 @@ function loadHolding() {
   var still = holding(Date.now());
   // ...and the scanner told, since a hold restored at boot is a hold.
   if (still) tellScannerHeld(still);
+  armHeldEnd(still);
   return still;
 }
 
@@ -1256,14 +1262,16 @@ function holdIdOf(h) {
  * the gate passed. And it turns no distance into minutes: the hold still
  * expires on its own stated clock, this only ends it sooner, as Drop does.
  *
- * WHERE THE END IS comes from Map view and nowhere else: when the page pins
- * the held end at DOOR level — searchPlan says the dropoff names a house
+ * WHERE THE END IS comes from Map view's rule and nowhere else: this server
+ * searches the NucBox for it by that rule as soon as the hold names a dropoff
+ * (searchHeldEnd), and when the page pins the held end at DOOR level — searchPlan says the dropoff names a house
  * number, and the NucBox answer it chose carries that number (MV.hasDoor),
- * inside the held card's disc — it posts the pin to /api/held-end. A street
- * or a town is never an end for this: a pin a few hundred metres off is a
- * drop at the wrong house or no drop at all, and refusing is the cheap
- * error — the timer and Drop still apply. With Map view never opened on
- * that hold, there is no pin and nothing here happens.
+ * inside the held card's disc — it posts the pin to /api/held-end. The first
+ * pin for a dropoff wins. A street or a town is never an end for this: a pin
+ * a few hundred metres off is a drop at the wrong house or no drop at all,
+ * and refusing is the cheap error — the timer and Drop still apply. With no
+ * NucBox set and Map view never opened on that hold, there is no pin and
+ * nothing here happens.
  *
  * The numbers. The owner's VK-162 read eph 27.8 m on mode 3 indoors (gps.py,
  * FIX_ERR_MAX), and the gate refuses anything over 50 m, so a fix that counts
@@ -1328,6 +1336,117 @@ function heldEndPin(h) {
   var p = h && h.endPin;
   if (!p || p.doorLevel !== true || p.dropoff !== h.dropoff) return null;
   return p;
+}
+
+/* ---------- the held end, searched for by this server --------------------
+ *
+ * The driver: GPS arrival should arm without opening Map view. So when the
+ * hold's dropoff is set or changes (✓ Took with a card dropoff, ⌖ Scan, a
+ * sighting filed onto the hold) and NUCBOX_SEARCH is set, this server asks
+ * the NucBox the question Map view would — searchPlan's street, in discBox
+ * round the HELD card's disc (discFor: its fix, its distance plus SLACK_MI),
+ * chosen by pickInDisc (one answer, or every answer one place) — and keeps
+ * the pin only when it is DOOR level: the dropoff names a house number and
+ * the chosen answer carries it (hasDoor). Map view's own functions, so the
+ * page and the server cannot keep two rules for "door level".
+ *
+ * The public geocoder is never asked: it is the page's fallback, rationed and
+ * outside the VPN, and a pin the GPS ends a delivery on is the NucBox's or
+ * none. With NUCBOX_SEARCH unset nothing here sends anything.
+ *
+ * ONE search per hold and dropoff text (`endSearch.key`); a failure or a
+ * timeout is asked once more after END_RETRY_MS and then left. A refusal is
+ * kept on the hold as `endWhy` (with `endWhyFor`, the text it is about, so a
+ * changed dropoff does not wear the old reason) and /api/status says it, so
+ * the driver can see why the GPS drop is not armed. The first valid pin for a
+ * text wins, this one or the page's, and an answer that comes back after the
+ * hold or its text changed is dropped. END_RETRY_MS is settable for the suite,
+ * like GPS_DWELL_MS; 30 s is chosen, not measured. */
+var END_RETRY_MS = envNumber('NUCBOX_RETRY_MS', 30000);
+var endSearch = { key: null, timer: null };
+
+function endKeyOf(h) {
+  return h && typeof h.dropoff === 'string' && h.dropoff
+    ? holdIdOf(h) + '\n' + h.dropoff : null;
+}
+
+/* The hook: called after the hold is written (setHolding), after a scanner
+ * line may have filed a dropoff onto it, and at boot. A no-op unless the hold
+ * names a dropoff this server has not yet searched for. */
+function armHeldEnd(h) {
+  if (!NBX.search) return;
+  var key = endKeyOf(h);
+  if (key === endSearch.key) return;
+  if (endSearch.timer) clearTimeout(endSearch.timer);
+  endSearch = { key: key, timer: null };
+  // Nothing to search, already pinned, or already refused before a restart
+  // for a reason another asking would not change (a NucBox down is asked).
+  if (!key || heldEndPin(h)
+      || (h.endWhyFor === h.dropoff && h.endWhy !== 'NucBox down')) return;
+  searchHeldEnd(key, 1);
+}
+
+// The hold this search is still about, or null.
+function endHold(key) {
+  var h = holding(Date.now());
+  return h && endSearch.key === key && endKeyOf(h) === key ? h : null;
+}
+
+function refuseHeldEnd(h, why) {
+  h.endWhy = why;
+  h.endWhyFor = h.dropoff;
+  setHolding(h);
+}
+
+// pickInDisc's refusals, in the panel's words.
+var END_WHY = { nodoor: 'no house number', none: 'not inside the card\'s reach',
+                several: 'several answers', capped: 'too many answers' };
+
+function searchHeldEnd(key, attempt) {
+  var h = endHold(key);
+  if (!h) return;
+  var plan = MV.searchPlan(h.dropoff);
+  if (!plan || plan.kind !== 'street' || !plan.door) return refuseHeldEnd(h, 'no house number');
+  var disc = MV.discFor(h.card || null);
+  if (!disc) return refuseHeldEnd(h, 'no card fix');
+  var said = nbxTerm(plan.street);
+  if (!said) return refuseHeldEnd(h, 'no house number');
+  var target = nbxSearchTarget('street', said, MV.discBox(disc));
+  function answered(out) {
+    var now = endHold(key);
+    if (!now || heldEndPin(now)) return;    // moved on, or the page pinned first
+    var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
+    if (!res.at || !MV.hasDoor(res.at, plan.house)) {
+      return refuseHeldEnd(now, END_WHY[res.why] || 'no house number');
+    }
+    // As /api/held-end keeps one, plus who chose it.
+    now.endPin = { dropoff: now.dropoff, lat: res.at.lat, lon: res.at.lon,
+                   doorLevel: true, pinnedAt: Date.now(), by: 'server' };
+    delete now.arrivedAt;
+    delete now.endWhy;
+    delete now.endWhyFor;
+    resetArrival(holdIdOf(now));
+    setHolding(now);
+  }
+  if (nbxCache.has(target)) return answered(nbxCache.get(target));
+  nbxAsk(target, function (err, body) {
+    if (!err && !Array.isArray(body)) err = 'not a list';
+    if (err) {
+      var now = endHold(key);
+      if (!now || heldEndPin(now)) return;
+      refuseHeldEnd(now, 'NucBox down');
+      if (attempt === 1) {
+        endSearch.timer = setTimeout(function () {
+          endSearch.timer = null;
+          searchHeldEnd(key, 2);
+        }, END_RETRY_MS);
+      }
+      return;
+    }
+    var out = nbxHits(body);
+    nbxRemember(target, out);
+    answered(out);
+  });
 }
 
 /* One heartbeat. Returns what the panel is told on that beat: whether the car
@@ -3262,6 +3381,11 @@ function statusNow() {
                    // seen the car arrive there: the GPS drop's state, for
                    // whoever is diagnosing one. See gpsArrival.
                    endPinned: !!heldEndPin(h), arrived: !!h.arrivedAt,
+                   // ...who pinned it ('server', or null for Map view), and
+                   // when it is not pinned, why not (searchHeldEnd).
+                   endBy: heldEndPin(h) ? (h.endPin.by || null) : null,
+                   endWhy: !heldEndPin(h) && h.endWhyFor === h.dropoff
+                     ? (h.endWhy || null) : null,
                    // Where it ends, and whether that came off the card or
                    // off a scan of the screen after the accept. The panel
                    // needs the difference: a card-derived dropoff is a
@@ -4738,6 +4862,31 @@ function nbxAsk(target, done) {
   });
 }
 
+/* The one search question this rig asks the NucBox's Nominatim: `term` is
+ * 'q' or 'street', `said` the checked text, `vb` a checked viewbox or null.
+ * The relay below and the server's own held-end search (searchHeldEnd) both
+ * build it here, so the two cannot ask differently — or miss each other in
+ * nbxCache. */
+function nbxSearchTarget(term, said, vb) {
+  return NBX.search + '/search?format=jsonv2&limit=' + NBX_LIMIT + '&' + term + '='
+       + encodeURIComponent(said)
+       + (vb ? '&viewbox=' + encodeURIComponent(vb) + '&bounded=1' : '');
+}
+
+/* A Nominatim list as the page reads it: where, and what it is called (the
+ * name is where a house number shows, map-view.js hasDoor) — and the limit,
+ * as `cutAt`, when the list stopped at it (null when it did not). A full list
+ * is not "every one in the box": Nominatim ranks by importance, not by
+ * distance, so an eleventh inside the card's disc may be the one that was not
+ * sent, and "only one fits" cannot be said of a list that was cut. */
+function nbxHits(body) {
+  return { ok: true, cutAt: body.length >= NBX_LIMIT ? NBX_LIMIT : null,
+           hits: body.map(function (h) {
+             return { lat: Number(h.lat), lon: Number(h.lon),
+                      name: String(h.display_name || '') };
+           }).filter(function (h) { return isFinite(h.lat) && isFinite(h.lon); }) };
+}
+
 /* The query, or the reason it is refused. `allowed` is every key this
  * endpoint reads; a key outside it, or one given twice, refuses the request
  * whole rather than being dropped — a page that sent it is not this one. */
@@ -4884,13 +5033,12 @@ function nbxRoute(req, res) {
     }
     // NBX_LIMIT, fixed here, and the page decides among them — told
     // whether the list stopped at it (`cutAt` below).
-    target = NBX.search + '/search?format=jsonv2&limit=' + NBX_LIMIT + '&' + term + '='
-           + encodeURIComponent(said);
+    var vb = null;
     if (sq.q.viewbox !== undefined) {
-      var vb = nbxBox(sq.q.viewbox);
+      vb = nbxBox(sq.q.viewbox);
       if (!vb) return reply(400, { ok: false, error: 'viewbox is left,top,right,bottom' });
-      target += '&viewbox=' + encodeURIComponent(vb) + '&bounded=1';
     }
+    target = nbxSearchTarget(term, said, vb);
   } else {
     var rq = nbxQuery(req, ['points']);
     if (rq.error) return reply(400, { ok: false, error: rq.error });
@@ -4918,18 +5066,8 @@ function nbxRoute(req, res) {
       if (!Array.isArray(body)) {
         return down('the NucBox search answered something that is not a list');
       }
-      // What the page reads and nothing else: where, and what it is called
-      // (the name is where a house number shows, map-view.js hasDoor) — and
-      // the limit, as `cutAt`, when the list stopped at it (null when it did
-      // not). A full list is not "every one in the box": Nominatim ranks by
-      // importance, not by distance, so an eleventh inside the card's disc
-      // may be the one that was not sent, and "only one fits" cannot be said
-      // of a list that was cut.
-      out = { ok: true, cutAt: body.length >= NBX_LIMIT ? NBX_LIMIT : null,
-              hits: body.map(function (h) {
-        return { lat: Number(h.lat), lon: Number(h.lon),
-                 name: String(h.display_name || '') };
-      }).filter(function (h) { return isFinite(h.lat) && isFinite(h.lon); }) };
+      // What the page reads and nothing else: see nbxHits.
+      out = nbxHits(body);
     } else if (which === 'cross' || which === 'stretch') {
       out = streetAnswer(which, body);
       if (out.error) return down(out.error);
@@ -5359,14 +5497,17 @@ function route(req, res) {
                || !isFinite(body.lat) || !isFinite(body.lon)
                || Math.abs(body.lat) > 90 || Math.abs(body.lon) > 180) why = 'no position';
       if (why) return send(res, 409, JSON.stringify({ ok: false, error: why }), json);
-      var same = h.endPin && h.endPin.lat === body.lat && h.endPin.lon === body.lon
-        && h.endPin.dropoff === h.dropoff;
-      if (!same) {
+      // The first valid pin for this dropoff wins — the server's own search
+      // (searchHeldEnd) or an earlier post — and a later one is a no-op, so an
+      // arrival already counted is never reset by a second opinion.
+      if (!heldEndPin(h)) {
         h.endPin = { dropoff: h.dropoff, lat: body.lat, lon: body.lon,
                      doorLevel: true, pinnedAt: Date.now() };
-        // A moved pin is a different end: whatever was learnt about being at
-        // the old one is not about this one.
+        // A new end: whatever was learnt about being at an old one (for a
+        // dropoff the hold no longer names) is not about this one.
         delete h.arrivedAt;
+        delete h.endWhy;
+        delete h.endWhyFor;
         resetArrival(holdIdOf(h));
         setHolding(h);
       }
