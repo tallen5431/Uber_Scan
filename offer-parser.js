@@ -1443,7 +1443,7 @@
   }
 
   /* The stops on the Trip Planner in screen order: {kind, orders, name,
-     expectedBy, street, city, state, zip, line}, or null with no stop header.
+     expectedBy, street, city, state, zip, line, place}, or null with no stop header.
      Every field that does not read is null and never guessed. Line by line,
      each normalized on its own, as lineStarts does. See find_planner. */
   /* The text's lines, each normalized on its own and the empty ones gone, and
@@ -1468,9 +1468,59 @@
   var PLANNER_QUADRANT_LEAD = new RegExp('^[^A-Za-z0-9]{0,3}((?:north|south) ?(?:east|west)'
     + '|north|south|east|west|[NS][EW]) ?, ?(.+)$', 'i');
 
+  /* The last comma in `line` whose remainder is a town line, or -1. */
+  function plannerCut(line) {
+    var cut = -1;
+    for (var c = line.indexOf(','); c !== -1; c = line.indexOf(',', c + 1)) {
+      if (plannerTown(line.slice(c + 1).trim())) cut = c;
+    }
+    return cut;
+  }
+
+  /* The place's name among `lines`, the ones over a stop's street: the first
+     with two letters in a row that is not the town said again on its own. */
+  function plannerPlace(lines, townLine) {
+    var town = plannerTown(townLine)[1].trim().toLowerCase();
+    for (var i = 0; i < lines.length; i++) {
+      var name = lines[i].replace(PLANNER_EDGE, '');
+      if (/[A-Za-z]{2}/.test(name) && name.toLowerCase() !== town) return name;
+    }
+    return null;
+  }
+
+  /* The fourth layout, a dropoff at a hotel on the driver's planner: the
+     place's name, the town bare, then "<n> <street>, Town, ST" with no ZIP.
+     The street is the line opening with a house number, down to "View
+     details", with its town on it or under it; what is above it is the
+     place, unless it is the town again. Only when the two lines under the
+     label held no town line. See PLANNER_HOUSE in offer_parser.py. */
+  var PLANNER_HOUSE = new RegExp('^\\W{0,3}' + DC + '{1,6} [A-Za-z]');
+  var PLANNER_DETAILS = /^[^A-Za-z0-9]{0,3}view ?details\b/i;
+
+  function plannerUnderAPlace(block, label) {
+    var under = [];
+    var rest = block.slice(label + 1, label + 6);
+    for (var i = 0; i < rest.length && !PLANNER_DETAILS.test(rest[i]); i++) under.push(rest[i]);
+    for (var j = 0; j < under.length; j++) {
+      var l = under[j];
+      if (!PLANNER_HOUSE.test(l)) continue;
+      var cut = plannerCut(l), found;
+      if (cut !== -1) {
+        found = { at: j, street: l.slice(0, cut), town: l.slice(cut + 1).trim() };
+      } else if (j + 1 < under.length && plannerTown(under[j + 1])) {
+        found = { at: j + 1, street: l, town: under[j + 1] };
+      } else {
+        continue;
+      }
+      found.place = plannerPlace(under.slice(0, j), found.town);
+      return found;
+    }
+    return null;
+  }
+
   function plannerAddressLines(block, label) {
     var under = block.slice(label + 1, label + 4);
-    var streetLine = null, townLine = null, townAt = -1;
+    var streetLine = null, townLine = null, townAt = -1, place = null;
     for (var k = 0; k < Math.min(under.length, 2); k++) {
       var l = under[k];
       // The street's quadrant wrapped onto the town line. See
@@ -1485,22 +1535,26 @@
         townAt = k; townLine = l; streetLine = k ? under[0] : null;
         break;
       }
-      var cut = -1;
-      for (var c = l.indexOf(','); c !== -1; c = l.indexOf(',', c + 1)) {
-        if (plannerTown(l.slice(c + 1).trim())) cut = c;
-      }
+      var cut = plannerCut(l);
       if (cut !== -1 && /^\W{0,3}\d/.test(l)) {
         townAt = k; streetLine = l.slice(0, cut); townLine = l.slice(cut + 1).trim();
+        // A line over a street that carries its own town is the place's name.
+        place = plannerPlace(under.slice(0, k), townLine);
         break;
       }
     }
-    if (townAt === -1) return { street: under.length ? under[0] : null, town: null };
+    if (townAt === -1) {
+      var found = plannerUnderAPlace(block, label);
+      if (!found) return { street: under.length ? under[0] : null, town: null, place: null };
+      townAt = found.at; streetLine = found.street; townLine = found.town; place = found.place;
+      under = block.slice(label + 1);
+    }
     var t = plannerTown(townLine);
     if (!t[3].trim() && townAt + 1 < under.length
         && PLANNER_ZIP_LINE.test(under[townAt + 1])) {
       townLine = townLine + ' ' + under[townAt + 1];
     }
-    return { street: streetLine, town: townLine };
+    return { street: streetLine, town: townLine, place: place };
   }
 
   // The app's bar under the list, where the list ends. See PLANNER_BAR.
@@ -1544,7 +1598,7 @@
       // lines in this block, and its "Expected by" is where that stop began.
       // A dropoff whose address is off the screen is recorded with none, never
       // with the pickup's. See find_planner.
-      var streetLine = null, townLine = null, label = -1;
+      var streetLine = null, townLine = null, place = null, label = -1;
       var times = [];
       block.forEach(function (l, i) { if (PLANNER_EXPECTED.test(l)) times.push(i); });
       var own = times.length > 1 ? block.slice(0, times[1]) : block;
@@ -1553,7 +1607,7 @@
       }
       if (label !== -1) {
         var found = plannerAddressLines(own, label);
-        streetLine = found.street; townLine = found.town;
+        streetLine = found.street; townLine = found.town; place = found.place;
       }
       var stop = { kind: /^p/i.test(head[1]) ? 'pickup' : 'dropoff',
                    orders: (count !== null && count >= 1 && count === Math.floor(count))
@@ -1561,6 +1615,9 @@
                    name: name, expectedBy: due };
       var where = plannerAddress(streetLine, townLine);
       Object.keys(where).forEach(function (key) { stop[key] = where[key]; });
+      // The hotel or business the address is at, when the block names one:
+      // shown, never searched, and never the street. See PLANNER_HOUSE.
+      stop.place = place;
       return stop;
     });
   }

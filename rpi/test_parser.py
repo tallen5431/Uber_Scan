@@ -109,7 +109,7 @@ for c in cases.get('address', []):
 # of a field must not pass as one that read nothing. tests/corpus.test.js runs
 # the same cases in the same order. See OP.find_planner.
 PLANNER_KEYS = ('kind', 'orders', 'name', 'expectedBy', 'street', 'city',
-                'state', 'zip', 'line')
+                'state', 'zip', 'line', 'place')
 
 
 def _stops(stops):

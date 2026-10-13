@@ -1987,6 +1987,33 @@ eq('...and its one dropoff as the order\'s destination, label-proven',
    [((d[0] or {}).get('line'), d[1].get('asked'), d[1].get('labelled'))
     for d in ra6['dropoffs']], [('4821 Kestrel Dr, Marietta', False, True)])
 
+# ...and so is a dropoff at a hotel: the hotel's name, the town bare, then the
+# street and town with no ZIP. On shift the card box read that block with its
+# header lost ("rept hk VEU"), the whole-screen read listed the stop with no
+# street, town or line, and the order's corner stayed its destination with GPS
+# arrival never armed. The shared case's text, with "Waybill" under the list so
+# both ends are in view — on the shift's screen it was not (see the case).
+_HOTEL = next(c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'tests', 'fixtures', 'cases.json'), encoding='utf-8'))['planner']
+    if c['name'].startswith('a dropoff at a hotel'))
+_HOTEL_WHOLE = _HOTEL.replace('View details\noS CC Q', 'View details\nWaybill\noS CC Q')
+_HOTEL_BOX = _HOTEL[_HOTEL.index('Dropoff'):].replace('Dropoff • 1 order', 'rept hk VEU')
+_ha7, _pa7 = tempfile.mkdtemp(), []
+_hold(_ha7, time.time() + 3600)
+ok_('the premise: the box read of the hotel dropoff has no stop header but the '
+    'planner\'s furniture, and the whole screen is bounded',
+    OP.find_planner(_HOTEL_BOX) is None and OP.planner_furniture(_HOTEL_BOX)
+    and OP.planner_bounded(_HOTEL_WHOLE) and OP.planner_titled(_HOTEL_WHOLE))
+ra7 = run(lambda n, k: FRAG if n == 1 else _HOTEL_BOX, extra_argv=['--no-parallel'],
+          seconds=4.0, handoff=_ha7, whole_text=_HOTEL_WHOLE, planners=_pa7)
+eq('a planner dropoff at a hotel, no ZIP, is filed as the held order\'s destination: '
+   'its street and town, label-proven',
+   [((d[0] or {}).get('street'), (d[0] or {}).get('city'), (d[0] or {}).get('state'),
+     (d[0] or {}).get('zip'), d[1].get('asked'), d[1].get('labelled'))
+    for d in ra7['dropoffs']],
+   [('1180 Wrenfield Rd NW', 'Kennesaw', 'GA', None, False, True)])
+
 # Whether the journal may keep the stops — names and front doors — is the
 # scanner's to say, because the server does not read its settings: not with
 # "keepPlaces": false, and not with no journal at all.

@@ -4103,7 +4103,7 @@
    ]
   }
  ],
- "_planner_comment": "Uber's Trip Planner, read off the whole screen when the driver presses the dropoff button: every stop in the order the screen lists it. `expect` is the list of stops, each with all nine fields - kind, orders, name, expectedBy (minutes since midnight), street, city, state, zip, line - or null when the text is not a planner. Compared field by field in that order by both runners. And `bounded`: whether both ends of the list are on the screen - the title with the first stop under it, \"Waybill\" after the last - which is what lets the scanner take a planner's one dropoff for the trip's only one; false for a text that is no planner. Names, streets and house numbers are invented in every case; the layout, the OCR noise and the time in the cases marked Measured are a real reading's.",
+ "_planner_comment": "Uber's Trip Planner, read off the whole screen when the driver presses the dropoff button: every stop in the order the screen lists it. `expect` is the list of stops, each with all ten fields - kind, orders, name, expectedBy (minutes since midnight), street, city, state, zip, line, place (the hotel or business the address is at, when the block names one) - or null when the text is not a planner. Compared field by field in that order by both runners. And `bounded`: whether both ends of the list are on the screen - the title with the first stop under it, \"Waybill\" after the last - which is what lets the scanner take a planner's one dropoff for the trip's only one; false for a text that is no planner. Names, streets and house numbers are invented in every case; the layout, the OCR noise and the time in the cases marked Measured are a real reading's.",
  "planner": [
   {
    "name": "Uber's Trip Planner as the rig's live view read it",
@@ -4120,7 +4120,8 @@
      "city": "Marietta",
      "state": "GA",
      "zip": null,
-     "line": "4821 Kestrel Dr, Marietta"
+     "line": "4821 Kestrel Dr, Marietta",
+     "place": null
     }
    ]
   },
@@ -4138,7 +4139,8 @@
      "city": "Marietta",
      "state": "GA",
      "zip": null,
-     "line": "4821 Kestrel Dr, Marietta"
+     "line": "4821 Kestrel Dr, Marietta",
+     "place": null
     }
    ]
   },
@@ -4157,7 +4159,8 @@
      "city": "Roswell",
      "state": "GA",
      "zip": null,
-     "line": "310 Mill St, Roswell"
+     "line": "310 Mill St, Roswell",
+     "place": null
     },
     {
      "kind": "pickup",
@@ -4168,7 +4171,8 @@
      "city": null,
      "state": null,
      "zip": null,
-     "line": null
+     "line": null,
+     "place": null
     },
     {
      "kind": "dropoff",
@@ -4179,7 +4183,8 @@
      "city": "Roswell",
      "state": "GA",
      "zip": "30075",
-     "line": "77 Birch Ln NW, Roswell, GA 30075"
+     "line": "77 Birch Ln NW, Roswell, GA 30075",
+     "place": null
     }
    ]
   },
@@ -4198,7 +4203,8 @@
      "city": "Marietta",
      "state": "GA",
      "zip": null,
-     "line": "4821 Kestrel Dr, Marietta"
+     "line": "4821 Kestrel Dr, Marietta",
+     "place": null
     },
     {
      "kind": "dropoff",
@@ -4209,7 +4215,8 @@
      "city": "Roswell",
      "state": "GA",
      "zip": "30075",
-     "line": "77 Birch Ln NW, Roswell, GA 30075"
+     "line": "77 Birch Ln NW, Roswell, GA 30075",
+     "place": null
     }
    ]
   },
@@ -4228,7 +4235,8 @@
      "city": "Marietta",
      "state": "GA",
      "zip": null,
-     "line": "4821 Kestrel Dr S, Marietta"
+     "line": "4821 Kestrel Dr S, Marietta",
+     "place": null
     }
    ]
   },
@@ -4247,7 +4255,8 @@
      "city": null,
      "state": null,
      "zip": null,
-     "line": "4821 Kestrel Dr"
+     "line": "4821 Kestrel Dr",
+     "place": null
     }
    ]
   },
@@ -4265,7 +4274,8 @@
      "city": null,
      "state": null,
      "zip": null,
-     "line": null
+     "line": null,
+     "place": null
     }
    ]
   },
@@ -4283,7 +4293,8 @@
      "city": "Marietta",
      "state": "GA",
      "zip": null,
-     "line": "Marietta"
+     "line": "Marietta",
+     "place": null
     }
    ]
   },
@@ -4342,7 +4353,8 @@
      "city": "Marietta",
      "state": "GA",
      "zip": null,
-     "line": "4821 Kestrel Dr, Marietta"
+     "line": "4821 Kestrel Dr, Marietta",
+     "place": null
     }
    ]
   },
@@ -4361,7 +4373,8 @@
      "city": "Marietta",
      "state": "GA",
      "zip": null,
-     "line": "4821 Kestrel Dr, Marietta"
+     "line": "4821 Kestrel Dr, Marietta",
+     "place": null
     }
    ]
   },
@@ -4380,7 +4393,8 @@
      "city": "Roswell",
      "state": "GA",
      "zip": null,
-     "line": "310 Mill St, Roswell"
+     "line": "310 Mill St, Roswell",
+     "place": null
     },
     {
      "kind": "dropoff",
@@ -4391,7 +4405,8 @@
      "city": "Roswell",
      "state": "GA",
      "zip": "30075",
-     "line": "77 Birch Ln NW, Roswell, GA 30075"
+     "line": "77 Birch Ln NW, Roswell, GA 30075",
+     "place": null
     }
    ]
   },
@@ -4410,7 +4425,8 @@
      "city": "Marietta",
      "state": "GA",
      "zip": null,
-     "line": "4821 Kestrel Dr, Marietta"
+     "line": "4821 Kestrel Dr, Marietta",
+     "place": null
     }
    ]
   },
@@ -4429,7 +4445,8 @@
      "city": null,
      "state": null,
      "zip": null,
-     "line": null
+     "line": null,
+     "place": null
     },
     {
      "kind": "dropoff",
@@ -4440,7 +4457,8 @@
      "city": null,
      "state": null,
      "zip": null,
-     "line": null
+     "line": null,
+     "place": null
     }
    ]
   },
@@ -4459,7 +4477,8 @@
      "city": "Marietta",
      "state": "GA",
      "zip": null,
-     "line": "4821 Kestrel Dr, Marietta"
+     "line": "4821 Kestrel Dr, Marietta",
+     "place": null
     }
    ]
   },
@@ -4478,7 +4497,8 @@
      "city": "Kennesaw",
      "state": "GA",
      "zip": "30144",
-     "line": "1200 Fable Mill Pkwy NW, Kennesaw, GA 30144"
+     "line": "1200 Fable Mill Pkwy NW, Kennesaw, GA 30144",
+     "place": null
     },
     {
      "kind": "pickup",
@@ -4489,7 +4509,8 @@
      "city": "Kennesaw",
      "state": "GA",
      "zip": "30152",
-     "line": "1625 Heron Blvd NW, Kennesaw, GA 30152"
+     "line": "1625 Heron Blvd NW, Kennesaw, GA 30152",
+     "place": null
     },
     {
      "kind": "dropoff",
@@ -4500,7 +4521,8 @@
      "city": null,
      "state": null,
      "zip": null,
-     "line": null
+     "line": null,
+     "place": null
     }
    ]
   },
@@ -4519,7 +4541,8 @@
      "city": "Acworth",
      "state": "GA",
      "zip": "30101",
-     "line": "12 Fable St, Acworth, GA 30101"
+     "line": "12 Fable St, Acworth, GA 30101",
+     "place": null
     },
     {
      "kind": "dropoff",
@@ -4530,7 +4553,8 @@
      "city": null,
      "state": null,
      "zip": null,
-     "line": null
+     "line": null,
+     "place": null
     }
    ]
   },
@@ -4549,7 +4573,8 @@
      "city": null,
      "state": null,
      "zip": null,
-     "line": null
+     "line": null,
+     "place": null
     }
    ]
   },
@@ -4568,7 +4593,40 @@
      "city": "Marietta",
      "state": "GA",
      "zip": "30060",
-     "line": "4410 Fable W Lantern Parkway Northwest, Marietta, GA 30060"
+     "line": "4410 Fable W Lantern Parkway Northwest, Marietta, GA 30060",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a dropoff at a hotel: its name, the town bare, then the street and town with no ZIP",
+   "_why": "The dropoff block is Measured: the rig's box read of the lower half of the driver's planner, a dropoff at a hotel, with its noise - \"\u00a9\" the stop's icon, \"oS CC Q\" and \"\u2014O\" the bar of buttons - except its header, which that read lost as \"rept hk VEU\" and the whole-screen read caught (it filed the stop's name and time). The pickup above is laid out as the phone printed it. The hotel, the customer, the restaurant, the numbers and the streets are invented in place of the real ones; the noise in the hotel's name (\"Larksour\"), the bare town line and the street line with no ZIP are the read's. Nothing in the two lines under the label was a town line, so the stop kept its name and lost its address - street, town and line all null, exactly what the shift's whole-screen read sent. The street is the line opening with a house number, the hotel's name is the stop's place and never its street, and the bare town line is passed over. Not bounded: no Waybill on the screen, the two open stops fill the list - as on the shift, where it was left unfiled as 'list'.",
+   "text": "Trip Planner\nPickup • 1 order\nFable Grill\nExpected by 9:51 PM\nAddress\n3300 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\n© Dana R.\nExpected by 10:05 PM\nAddress\nLarksour Inn & Suites Kennesaw NW\nKennesaw\n1180 Wrenfield Rd NW, Kennesaw, GA\nView details\noS CC Q\n—O",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1311,
+     "street": "3300 Fable Mill Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "3300 Fable Mill Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Dana R.",
+     "expectedBy": 1325,
+     "street": "1180 Wrenfield Rd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "1180 Wrenfield Rd NW, Kennesaw",
+     "place": "Larksour Inn & Suites Kennesaw NW"
     }
    ]
   }

@@ -88,7 +88,7 @@ function sameList(a, b) {
    expected value here, "this field did not read". rpi/test_parser.py runs the
    same cases in the same order. */
 var PLANNER_KEYS = ['kind', 'orders', 'name', 'expectedBy', 'street', 'city',
-                    'state', 'zip', 'line'];
+                    'state', 'zip', 'line', 'place'];
 function stopFields(stops) {
   return stops === null ? null : stops.map(function (s) {
     return PLANNER_KEYS.map(function (k) {

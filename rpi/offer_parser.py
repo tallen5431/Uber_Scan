@@ -2658,8 +2658,10 @@ PLANNER_QUADRANT_LEAD = re.compile(
 
 
 def _planner_address_lines(block, label):
-    """The street line and the town line under the "Address" label at
-    block[label], as _planner_address takes them; (None, None) for neither.
+    """The street line, the town line and the place's name under the "Address"
+    label at block[label]: the first two as _planner_address takes them, each
+    None when it did not read, and the place None unless the fourth layout
+    (see PLANNER_HOUSE) or a line over a one-line street and town printed one.
 
     The app lays an address out three ways. The first is the planner this
     reader was built on; the other two are both on the photographs of a
@@ -2682,7 +2684,7 @@ def _planner_address_lines(block, label):
     line under it — the third under the label, and no further.
     """
     under = block[label + 1:label + 4]
-    street_line = town_line = None
+    street_line = town_line = place = None
     town_at = None
     for j, l in enumerate(under[:2]):
         # The street's own quadrant, wrapped onto the town line: see
@@ -2697,20 +2699,88 @@ def _planner_address_lines(block, label):
             town_at, town_line = j, l
             street_line = under[0] if j else None
             break
-        cut = None
-        for c in re.finditer(',', l):
-            if _planner_town(l[c.end():].strip()):
-                cut = c
+        cut = _planner_cut(l)
         if cut is not None and re.match(r'\W{0,3}\d', l):
             town_at, street_line, town_line = j, l[:cut.start()], l[cut.end():].strip()
+            # A line over a street that carries its own town is the place's
+            # name: see the fourth layout, below.
+            place = _planner_place(under[:j], town_line)
             break
     if town_at is None:
-        return (under[0] if under else None), None
+        found = _planner_under_a_place(block, label)
+        if found is None:
+            return (under[0] if under else None), None, None
+        town_at, street_line, town_line, place = found
+        under = block[label + 1:]
     t = _planner_town(town_line)
     if not t.group(3).strip() and town_at + 1 < len(under) \
             and PLANNER_ZIP_LINE.match(under[town_at + 1]):
         town_line = town_line + ' ' + under[town_at + 1]
-    return street_line, town_line
+    return street_line, town_line, place
+
+
+def _planner_cut(line):
+    """The last comma in `line` whose remainder is a town line, or None."""
+    cut = None
+    for c in re.finditer(',', line):
+        if _planner_town(line[c.end():].strip()):
+            cut = c
+    return cut
+
+
+# The fourth layout, off the driver's planner for a dropoff at a hotel:
+#
+#     Address
+#     Homez3 Stays by Fable Kennesaw NW     the place's name, with the reader's
+#     Kennesaw                              noise in it; the town, bare;
+#     1180 Wrenfield Rd NW, Kennesaw, GA    then the street and town, no ZIP
+#     View details
+#
+# (the place, the number and the street invented; the layout and the noise
+# the rig's own box read of it). Nothing in the two lines under the label is a
+# town line, so the stop kept its name and lost where it was: street, town and
+# line all None, the order's corner left as its destination, and GPS arrival
+# never armed ("no house number"). The street is the line that opens with a
+# house number — PLANNER_HOUSE — anywhere in the block down to "View details",
+# taken with its town either on its own line (split at its last comma, as the
+# third layout is) or on the line under it. What stands above it is the
+# place's name, unless it is the town again. Only when the two lines under the
+# label held no town line, so the three layouts above read as they did.
+PLANNER_HOUSE = re.compile(r'^\W{0,3}' + DC + r'{1,6} [A-Za-z]', ASCII)
+PLANNER_DETAILS = re.compile(r'^[^A-Za-z0-9]{0,3}view ?details\b', re.IGNORECASE | ASCII)
+
+
+def _planner_under_a_place(block, label):
+    """(where the town line sits under the label, the street line, the town
+    line, the place) for the fourth layout above, or None."""
+    under = []
+    for l in block[label + 1:label + 6]:
+        if PLANNER_DETAILS.match(l):
+            break
+        under.append(l)
+    for j, l in enumerate(under):
+        if not PLANNER_HOUSE.match(l):
+            continue
+        cut = _planner_cut(l)
+        if cut is not None:
+            town_at, street_line, town_line = j, l[:cut.start()], l[cut.end():].strip()
+        elif j + 1 < len(under) and _planner_town(under[j + 1]):
+            town_at, street_line, town_line = j + 1, l, under[j + 1]
+        else:
+            continue
+        return town_at, street_line, town_line, _planner_place(under[:j], town_line)
+    return None
+
+
+def _planner_place(lines, town_line):
+    """The place's name among `lines`, the ones over a stop's street: the first
+    with two letters in a row that is not the town said again on its own."""
+    town = _planner_town(town_line).group(1).strip().lower()
+    for l in lines:
+        name = PLANNER_EDGE.sub('', l)
+        if re.search(r'[A-Za-z]{2}', name) and name.lower() != town:
+            return name
+    return None
 
 
 # The app's bar under the list, "Stop New Requests" beside its two icons, on
@@ -2737,8 +2807,8 @@ def find_planner(text):
     """The stops on Uber's Trip Planner, in the order the screen lists them.
 
     A list of {'kind': 'pickup'|'dropoff', 'orders', 'name', 'expectedBy',
-    'street', 'city', 'state', 'zip', 'line'}, or None when the text carries no
-    stop header. `expectedBy` is minutes since midnight, through time_of_day.
+    'street', 'city', 'state', 'zip', 'line', 'place'}, or None when the text
+    carries no stop header. `expectedBy` is minutes since midnight, through time_of_day.
     Every field that does not read is None and is never guessed; a closed block
     has no address and says so with five Nones.
 
@@ -2780,17 +2850,20 @@ def find_planner(text):
         # is where that next stop began, so the label is looked for above it:
         # a dropoff whose own address is scrolled off, or closed, is recorded
         # with none, and never with the pickup's under it.
-        street_line = town_line = None
+        street_line = town_line = place = None
         times = [j for j, l in enumerate(block) if PLANNER_EXPECTED.search(l)]
         own = block[:times[1]] if len(times) > 1 else block
         label = next((j for j, l in enumerate(own) if PLANNER_ADDRESS.match(l)), None)
         if label is not None:
-            street_line, town_line = _planner_address_lines(own, label)
+            street_line, town_line, place = _planner_address_lines(own, label)
         stop = {'kind': 'pickup' if head.group(1)[0] in 'pP' else 'dropoff',
                 'orders': int(count) if count is not None and count >= 1
                 and count == int(count) else None,
                 'name': name, 'expectedBy': due}
         stop.update(_planner_address(street_line, town_line))
+        # The hotel or business the address is at, when the block names one:
+        # shown, never searched, and never the street. See PLANNER_HOUSE.
+        stop['place'] = place
         stops.append(stop)
     return stops
 
