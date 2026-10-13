@@ -464,6 +464,24 @@ const framed = (page) => page.waitForFunction(
         { ready: false, state: 'empty', track: null }));
       await page.waitForTimeout(150);
       slot.placesAfter = await page.evaluate(LOOK, '#places');
+      // ...and the rig reads the screen again, as it does over a navigation
+      // map or "Finding offers" whenever the picture moves and settles. The
+      // last reading found no offer, so "the card" would be a claim nothing
+      // has made.
+      await page.evaluate(() => window.__es.push(
+        { reading: true, at: Date.now() }));
+      await page.waitForTimeout(120);
+      slot.again = await page.evaluate(LOOK, '#verdictLabel');
+      slot.againDetail = await page.evaluate(LOOK, '#detail');
+      // ...against a reading that had part of an offer on it, where a second
+      // read is a card being read again.
+      await page.evaluate(() => window.__es.push(
+        { ready: false, state: 'empty', track: null, pay: null, minutes: 22 }));
+      await page.evaluate(() => window.__es.push(
+        { reading: true, at: Date.now() }));
+      await page.waitForTimeout(120);
+      slot.againCard = await page.evaluate(LOOK, '#verdictLabel');
+      slot.againCardDetail = await page.evaluate(LOOK, '#detail');
       await page.evaluate((r) => window.__es.push(r), READINGS[key]);
       await page.waitForTimeout(150);
       slot.fits = await page.evaluate(() => {
@@ -1062,8 +1080,7 @@ const framed = (page) => page.waitForFunction(
      * found none produced no message, and the page's own timer repainted the
      * button exactly as it was — the driver tapped the address open on their
      * phone, pressed, waited, and got the same grey button whether it worked
-     * or not. Took says "· not saved", Drop says "Drop · failed", Re-find says
-     * "⟳ failed".
+     * or not. Took says "· not saved", Drop says "Drop · failed".
      *
      * Answered from the RIG, not from a timer here, which is why this is
      * driven as a message rather than by waiting. A read that started inside
@@ -1514,25 +1531,22 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
-  // --- Re-find, and the two things it may actually have done ---------------
-  stage = 'Re-find, and the two things it may actually have done';
+  // --- no ⟳ Re-find, and nothing left of it on the glass -------------------
+  stage = 'no Re-find, and nothing left of it on the glass';
   //
-  // Pressing Re-find is a driver saying the outline is wrong. The scanner may
-  // refuse — a hand-drawn box is only given up for a screen it can see, and
-  // with --no-track there are no corners to move — and the refusal used to go
-  // to the log and nowhere else, while this button went on to say
-  // "re-finding". So a refused press and a press that worked looked identical
-  // from the seat, and the driver went back to driving through corners they
-  // had just rejected.
+  // Re-find was taken off the bar at the owner's request: pressed with a box
+  // drawn it threw the boxes away and went back to finding the screen by
+  // itself, which on their mount finds the map. ▣ Set box is the way to fix
+  // the boxes. What is measured here is that the control is gone, and that a
+  // beat from a scanner one version behind — which may still carry the
+  // refusal sentence it used to send — puts nothing about re-finding on the
+  // glass: there is no button for it to be an answer to.
   {
     const ctx = await browser.newContext({
       viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
     });
     const page = await ctx.newPage();
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
-    await page.route('**/api/recalibrate', (route) => route.fulfill({
-      status: 200, contentType: 'application/json', body: '{"ok":true}',
-    }));
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
               .catch(() => {});
     await page.waitForFunction('window.__es !== undefined', null,
@@ -1541,47 +1555,16 @@ const framed = (page) => page.waitForFunction(
       { phase: 'scanning', message: '' }));
     await page.evaluate(() => window.__es.push(
       { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: null }));
-    await page.waitForTimeout(150);
-    out.refind = { before: await page.evaluate(LOOK, '#warn') };
-
-    await page.click('#reset');
-    await page.waitForTimeout(250);
-    // All the POST proves is that a file was touched. It has not reached the
-    // scanner and cannot speak for it.
-    out.refind.pressed = await page.evaluate(LOOK, '#reset');
-
-    // The scanner's answer, on the beat — which is the only channel that runs
-    // in this state, because "no screen to find" is also "no reading coming".
-    const REFUSED = 'Re-find found no screen — the box you drew is still in '
-                  + 'use. Try again with the phone lit and a darker border '
-                  + 'around it.';
-    await page.evaluate((m) => window.__es.push(
-      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: m }), REFUSED);
+        refindRefused: 'Re-find found no screen — the box you drew is still '
+                       + 'in use.' }));
     await page.waitForTimeout(200);
-    out.refind.refused = await page.evaluate(LOOK, '#warn');
-
-    // It is not a blip on one beat: it stands until a press actually works,
-    // because the state it describes — corners the driver rejected, still in
-    // use — stands until then too.
-    await page.evaluate((m) => window.__es.push(
-      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: m }), REFUSED);
-    await page.waitForTimeout(200);
-    out.refind.stillRefused = await page.evaluate(LOOK, '#warn');
-
-    // ...and a reading arriving does not bury it either: the notes on a
-    // reading are rendered by a different branch of the same function.
-    await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
-    await page.waitForTimeout(200);
-    out.refind.onReading = await page.evaluate(LOOK, '#warn');
-
-    await page.evaluate(() => window.__es.push(
-      { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: null }));
-    await page.waitForTimeout(200);
-    out.refind.cleared = await page.evaluate(LOOK, '#warn');
+    out.refind = {
+      button: await page.evaluate(() => !!document.getElementById('reset')),
+      labels: await page.evaluate(() => [].slice.call(
+        document.querySelectorAll('.bottombar > *')).map(
+        (e) => (e.textContent || '').trim())),
+      warn: await page.evaluate(LOOK, '#warn'),
+    };
 
     // --- and the journal refusing to take writes --------------------------
     //
@@ -1615,7 +1598,7 @@ const framed = (page) => page.waitForFunction(
       { phase: 'scanning', message: '' }));
     await page.evaluate((m) => window.__es.push(
       { alive: true, at: Date.now(), tooBright: true, tooDim: false,
-        refindRefused: null, notSaving: m }), DEAD);
+        notSaving: m }), DEAD);
     await page.waitForTimeout(200);
     out.dead = { noReading: await page.evaluate(LOOK, '#warn'),
                  // The line that proves which branch drew this. Without it the
@@ -1627,7 +1610,7 @@ const framed = (page) => page.waitForFunction(
     out.dead.onReading = await page.evaluate(LOOK, '#warn');
     await page.evaluate(() => window.__es.push(
       { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: null, notSaving: null }));
+        notSaving: null }));
     await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
     await page.waitForTimeout(200);
     out.dead.cleared = await page.evaluate(LOOK, '#warn');
@@ -1643,7 +1626,7 @@ const framed = (page) => page.waitForFunction(
       { phase: 'scanning', message: 'starting scanner' }));
     await page.evaluate(() => window.__es.push(
       { alive: true, at: Date.now(), tooBright: false, tooDim: false,
-        refindRefused: null, notSaving: null }));
+        notSaving: null }));
     await page.evaluate((r) => window.__es.push(
       Object.assign({}, r, { ready: false, state: 'empty', perHour: null })),
       READINGS.deducted);
@@ -1963,7 +1946,7 @@ const framed = (page) => page.waitForFunction(
     // is a different fault with its own checks, and leaving them working keeps
     // this about the bar.
     for (const path of ['**/api/offers/mark', '**/api/delivered',
-                        '**/api/dropoff', '**/api/recalibrate', '**/api/crop']) {
+                        '**/api/dropoff', '**/api/crop']) {
       await page.route(path, () => { /* never fulfilled, never aborted */ });
     }
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -1976,7 +1959,7 @@ const framed = (page) => page.waitForFunction(
                  hidden: !!e.hidden };
       };
       return { took: one('took'), drop: one('drop'), dest: one('dest'),
-               reset: one('reset'), crop: one('drawUse') };
+               crop: one('drawUse') };
     });
     // Bounded, and the failure kept rather than thrown: a control that is not
     // there is a result, and an unbounded click on one spends the whole
@@ -2038,7 +2021,7 @@ const framed = (page) => page.waitForFunction(
       offer: { id: 'o-hang', pay: 10.0, minutes: 20.0, billedMinutes: 20.0,
                miles: 4.0, cost: 1.4 } }));
     await page.waitForTimeout(300);
-    for (const id of ['#took', '#drop', '#dest', '#reset']) {
+    for (const id of ['#took', '#drop', '#dest']) {
       out.hung.pressedOk[id] = await press(id);
     }
     await page.waitForTimeout(400);
@@ -2551,8 +2534,32 @@ const framed = (page) => page.waitForFunction(
       var into = function (list, x) { (how(x.opts) ? window.__how : window[list]).push(x); };
       window.L = {
         map: function (node) {
-          window.__lmap = { node: node && node.id,
-            setView: function (ll) { window.__view = ll; return this; },
+          // Where the view is and its zoom, so the follow's "is the dot in the
+          // middle" can be asked of it: a flat projection at Leaflet's own
+          // scale (256px a tile, 2^zoom tiles round the world), which is what
+          // the question needs and no more. Leaflet's events are kept and
+          // fired as Leaflet fires them: a zoom's zoomstart a moment AFTER
+          // the call that asked for it, then moveend; a pan's moveend after
+          // it; a drag only when the test fires one.
+          var hands = {};
+          window.__pans = [];
+          window.__lmap = { node: node && node.id, centre: [33.94, -84.58], zoom: 11,
+            on: function (ev, fn) { (hands[ev] = hands[ev] || []).push(fn); return this; },
+            fire: function (ev) { (hands[ev] || []).forEach(function (fn) { fn({}); }); return this; },
+            later: function (evs) { var m = this;
+              setTimeout(function () { evs.forEach(function (ev) { m.fire(ev); }); }, 40); },
+            setView: function (ll, z) { window.__view = ll; this.centre = ll;
+              if (typeof z === 'number' && z !== this.zoom) { this.zoom = z;
+                this.later(['zoomstart', 'moveend']); } else this.later(['moveend']);
+              return this; },
+            panTo: function (ll) { window.__pans.push([ll[0], ll[1], this.zoom]);
+              this.centre = ll; this.later(['moveend']); return this; },
+            getZoom: function () { return this.zoom; },
+            getSize: function () { return { x: node.clientWidth, y: node.clientHeight }; },
+            latLngToContainerPoint: function (ll) {
+              var k = 256 * Math.pow(2, this.zoom) / 360;
+              return { x: node.clientWidth / 2 + (ll[1] - this.centre[1]) * k,
+                       y: node.clientHeight / 2 - (ll[0] - this.centre[0]) * k }; },
             invalidateSize: function () { window.__sized = (window.__sized || 0) + 1; },
             removeLayer: function (g) {
               window.__marks = window.__marks.filter(function (m) { return m.group !== g; });
@@ -2560,8 +2567,13 @@ const framed = (page) => page.waitForFunction(
               window.__circles = window.__circles.filter(function (c) { return c.group !== g; });
               window.__how = window.__how.filter(function (c) { return c.group !== g; });
             },
-            on: function () { return this; },
-            fitBounds: function (b) { window.__fit = b; } };
+            // Framed on the bounds' middle at zoom 12, and a zoom: Leaflet
+            // says zoomstart for the page's own fit as for a hand's.
+            fitBounds: function (b) { window.__fit = b;
+              var la = b.map(function (p) { return p[0]; }), lo = b.map(function (p) { return p[1]; });
+              this.centre = [(Math.min.apply(null, la) + Math.max.apply(null, la)) / 2,
+                             (Math.min.apply(null, lo) + Math.max.apply(null, lo)) / 2];
+              this.zoom = 12; this.later(['zoomstart', 'moveend']); } };
           return window.__lmap;
         },
         tileLayer: function (url, o) { window.__tiles = { url: url, opts: o };
@@ -2989,14 +3001,127 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  /* --- the held end, from the press --------------------------------------
+   *
+   * The driver's report: "I accepted a delivery, it mapped the drop off
+   * address but it did not hold those pins when it scanned a doordash card."
+   * The messages in the order the rig sends them — a reading, then its offer
+   * line with no `ready` — with the server's own shapes: the mark reply's
+   * `held` and a ⌖ read filed onto the hold carrying `holding` (heldForPanel
+   * in server.js; test_server holds the server to both). The ⌖ read is the
+   * shape the rig really held on shift, OCR litter in front of the door, on a
+   * made-up street: the stub answers only the clean address, as a geocoder
+   * does. Then a DoorDash card that names nowhere, a not-ready reading and a
+   * heartbeat: none of them may take the held pin off the glass. */
+  {
+    const HELD_AT = '1610 Pverel Blvd, Kestrelton, GA 30144';
+    const LITTER = 'ss be 4 ' + HELD_AT;
+    const ANSWERS = { "Chipotle (Barrett Pkwy)": [34.020, -84.580],
+                      "Powder Springs Rd": [33.900, -84.640] };
+    ANSWERS[HELD_AT] = [33.990, -84.620];
+    const run = async (name, cardDrop, script) => {
+      stage = 'the held end: ' + name;
+      const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                                .then((c) => c.newPage());
+      await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+      await page.addInitScript(MAPSTUB);
+      await page.route('**/api/status*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ last: null, lastAgeMs: null, heardAgeMs: 900,
+                               offer: null, holding: null }) }));
+      await page.route('**/api/journal*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
+      await page.route('**/api/today*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json', body: '{}' }));
+      const heldCard = { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+                         gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
+                         hasTotal: true, legs: 2, whole: true };
+      await page.route('**/api/offers/mark', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, holding: true,
+          held: { pay: 18.09, minutes: 38, dropoff: cardDrop, card: heldCard } }) }));
+      await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+        const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
+        const hit = ANSWERS[q];
+        return route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                        display_name: q }] : []) });
+      });
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(300);
+      const push = (m) => page.evaluate((x) => {
+        if (x.offer) Object.assign(x.offer, window.__CARD);
+        window.__es.push(x);
+      }, m);
+      // What a pin says it is, which is what the driver reads off it.
+      const pins = () => page.evaluate(() => window.__marks.map((m) =>
+        String(m.popup || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()));
+      const res = {};
+      await push({ ready: true, state: 'go', perHour: 30, grossPerHour: 36, pay: 18.09,
+                   minutes: 38, miles: 6, cost: 2.1, target: 25, band: 15,
+                   holding: null, stack: null });
+      await push({ offer: { id: 'took-me', pay: 18.09, minutes: 38, billedMinutes: 38,
+                            miles: 6, cost: 2.1, pickup: 'Chipotle (Barrett Pkwy)',
+                            dropoff: cardDrop } });
+      await page.click('#viewMode');
+      await page.waitForTimeout(150);
+      await page.click('#viewMode');
+      await page.waitForTimeout(3200);
+      await page.click('#took');
+      await page.waitForTimeout(2600);
+      res.took = await pins();
+      await script(push, pins, res, page);
+      await page.close();
+      return res;
+    };
+    const HOLD = (drop) => ({ pay: 18.09, minutes: 38, dropoff: drop,
+                              card: { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+                                      gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
+                                      hasTotal: true, legs: 2, whole: true } });
+    const dd = async (push, drop) => {
+      // A DoorDash card the reader rescued: a ready reading carrying the hold
+      // (withStack), then its offer line, naming nowhere.
+      await push({ ready: true, state: 'warn', perHour: 20, grossPerHour: 24, pay: 6.5,
+                   minutes: 25, miles: 3, cost: 1, target: 25, band: 15, cropFrom: 'card',
+                   holding: HOLD(drop), stack: null });
+      await push({ offer: { id: 'dd-next', pay: 6.5, minutes: 25, billedMinutes: 25,
+                            miles: 3, cost: 1, pickup: null, dropoff: null } });
+    };
+    // The card named nowhere; the end came off ⌖ after the accept.
+    out.heldPress = await run('a ⌖ read after ✓ Took', null, async (push, pins, res, page) => {
+      await push({ dropoff: { line: LITTER, asked: true }, holding: HOLD(LITTER) });
+      await page.waitForTimeout(2600);
+      res.read = await pins();
+      await dd(push, LITTER);
+      await page.waitForTimeout(2600);
+      res.dd = await pins();
+      await push({ ready: false, state: 'empty', track: null });
+      await push({ alive: true, gps: null });
+      await page.waitForTimeout(800);
+      res.after = await pins();
+      res.note = await page.evaluate(() => document.getElementById('viewNote').textContent.trim());
+    });
+    // The card named its end, and the next card's offer line is the first
+    // message after ✓ Took — the reply is the only thing that said the hold.
+    out.heldTook = await run('the card\'s own end', 'Powder Springs Rd',
+                             async (push, pins, res, page) => {
+      await push({ offer: { id: 'dd-bare', pay: null, minutes: null, miles: null,
+                            pickup: null, dropoff: null } });
+      await page.waitForTimeout(2600);
+      res.bare = await pins();
+    });
+  }
+
   /* --- you are here --------------------------------------------------------
    *
    * The heartbeat's newest fix, drawn on the map as a dot inside a circle the
    * size of its own error, with "±N m · N s old" in the corner. The gate's
    * answer comes with the fix from rpi/gps.py and the page only reads it: a
-   * rough fix is no dot and a reason, a stale one is grey. And the map never
-   * follows it — tiles cost hotspot data nobody has measured — so the view is
-   * fitted to include it on the way in and then left alone. Marietta Square
+   * rough fix is no dot and a reason, a stale one is grey. The view is fitted
+   * to include it on the way in, and after that goes after a fresh dot only
+   * when it moves out of the middle of the map — at the zoom the map is at —
+   * until a hand on the map stops it and ⛶ Map round again starts it. Marietta Square
    * and points by it: public places, invented fixes. */
   {
     stage = 'the map mode: you are here';
@@ -3040,8 +3165,24 @@ const framed = (page) => page.waitForFunction(
         dots: (window.__marks || []).filter(function (m) {
           return /you are here/.test(String(m.popup || '')); })
           .map(function (m) { return m.ll; }),
-        fit: window.__fit, view: window.__view || null };
+        fit: window.__fit, view: window.__view || null,
+        pans: (window.__pans || []).slice(),
+        zoom: window.__lmap ? window.__lmap.zoom : null };
     };
+    // The view put where the test wants it, at zoom 14, and what moved it
+    // forgotten. Then a point `share` of the map's height north of the
+    // centre, measured on the page's own map: 0.2 is inside the middle
+    // three-fifths, 0.45 is outside it, whatever size the panel gives it.
+    const putView = (at) => {
+      window.__lmap.centre = at; window.__lmap.zoom = 14;
+      window.__pans = []; window.__fit = null; window.__view = null;
+    };
+    const north = (share) => {
+      const m = window.__lmap;
+      const k = 256 * Math.pow(2, m.zoom) / 360;
+      return m.centre[0] + share * document.getElementById('liveMap').clientHeight / k;
+    };
+    const FROM = [33.9526, -84.5499];
     // Before Map view: a beat with a fix draws nothing and says nothing.
     await page.waitForTimeout(300);
     out.hereBefore = await page.evaluate(look);
@@ -3050,12 +3191,30 @@ const framed = (page) => page.waitForFunction(
     await page.click('#viewMode');            // → map
     await page.waitForTimeout(3000);          // two lookups, a second apart
     out.hereOn = await page.evaluate(look);
-    // The car moves a kilometre north. The dot follows the car; the map does
-    // not follow the dot.
-    await page.evaluate(() => { window.__fit = null; window.__view = null; });
-    await page.evaluate(beat, Object.assign({}, GOOD, { lat: 33.9616 }));
+    // The car moves a little, inside the middle of the map: the dot moves,
+    // the map does not.
+    await page.evaluate(putView, FROM);
+    const near = await page.evaluate(north, 0.2);
+    await page.evaluate(beat, Object.assign({}, GOOD, { lat: near }));
     await page.waitForTimeout(300);
-    out.hereMoved = await page.evaluate(look);
+    out.hereInside = Object.assign(await page.evaluate(look), { lat: near });
+    // The same card read again, as the scanner sends it on every frame that
+    // still shows it: a message, and the same card, so nothing to fit.
+    await page.evaluate(() => { window.__fit = null; window.__view = null; });
+    await page.evaluate(() => window.__es.push({
+      ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+      minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+      offer: { id: 'o-here', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+               miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+               dropoff: 'Canton Rd, Marietta' } }));
+    await page.waitForTimeout(300);
+    out.hereSameCard = await page.evaluate(look);
+    // ...and then out of it: the map goes to the dot, at the zoom it was at.
+    const far = await page.evaluate(north, 0.45);
+    await page.evaluate(beat, Object.assign({}, GOOD, { lat: far }));
+    await page.waitForTimeout(300);
+    out.hereMoved = Object.assign(await page.evaluate(look), { lat: far });
+    await page.evaluate(() => { window.__pans = []; });
     // The gate refuses the next one for its quality: no dot, and why.
     await page.evaluate(beat, Object.assign({}, GOOD, { gpsErr: 129.2, gpsOk: false,
                                                         gpsWhy: 'rough' }));
@@ -3093,6 +3252,38 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(beat, Object.assign({}, GOOD, { lat: 33.9706 }));
     await page.waitForTimeout(300);
     out.hereLate = await page.evaluate(look);
+    // A hand on the map: the driver drags it. Leaflet says dragstart; the
+    // next beat out of the middle moves nothing, and the corner says so.
+    await page.evaluate(putView, [33.9706, -84.5499]);
+    await page.evaluate(() => window.__lmap.fire('dragstart'));
+    await page.evaluate(beat, Object.assign({}, GOOD, {
+      lat: await page.evaluate(north, 0.45) }));
+    await page.waitForTimeout(300);
+    out.hereDragged = await page.evaluate(look);
+    // ⛶ Map round again: fitted, and following.
+    await page.click('#viewMode');            // → phone
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');            // → scene
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');            // → map
+    await page.waitForTimeout(600);
+    const refit = await page.evaluate(() => window.__fit);
+    // Somewhere the dot has not been: the follow judges a dot that MOVED.
+    await page.evaluate(putView, [33.9706, -84.5499]);
+    await page.evaluate(beat, Object.assign({}, GOOD, {
+      lat: await page.evaluate(north, 0.4) }));
+    await page.waitForTimeout(300);
+    out.hereResumed = Object.assign(await page.evaluate(look), { refit: refit });
+    // A zoom by hand — the + button, the wheel — is a zoomstart that no move
+    // of the page's own is under: a second and more after the last one (the
+    // pan just above), which is live.html's OWN_MOVE_MS.
+    await page.waitForTimeout(1200);
+    await page.evaluate(putView, [33.9706, -84.5499]);
+    await page.evaluate(() => window.__lmap.fire('zoomstart'));
+    await page.evaluate(beat, Object.assign({}, GOOD, {
+      lat: await page.evaluate(north, -0.45) }));
+    await page.waitForTimeout(300);
+    out.hereZoomed = await page.evaluate(look);
     await page.close();
   }
 
@@ -3441,6 +3632,65 @@ const framed = (page) => page.waitForFunction(
         await push({ id: 'n-bug', pickup: 'Q'.repeat(121) });
         await page.waitForTimeout(1500);
         r.bug = await note();
+        /* The held order's restaurant, off its Trip Planner: the shape the
+           driver's ⌖ read on shift — a pickup whose town did not read, its
+           name behind the icon's "oe " — on the fake's door at 1985 Cobb
+           Parkway (invented), 3.4 mi from the held card's fix, inside its
+           9.9 mi disc. With a holdId, so a pickup sent as the held end would
+           be a POST to /api/held-end this records. */
+        const heldEndPosts = [];
+        page.on('request', (q) => {
+          if (/\/api\/held-end$/.test(new URL(q.url()).pathname)) heldEndPosts.push(q.postData());
+        });
+        await page.evaluate((SQ) => {
+          window.__es.push({
+            ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+            minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
+            holding: { pay: 9.0, minutes: 18.0, holdId: 'h-planner',
+                       dropoff: 'Shadowood Pkwy SE, Atlanta',
+                       card: Object.assign({}, SQ, { miles: 9.4 }) },
+            offer: Object.assign({ id: 'n-heldpick', pay: 14.25, minutes: 20.0,
+                                   billedMinutes: 20.0, cost: 1.4,
+                                   pickup: "McDonald's (Marietta Sq)",
+                                   dropoff: 'Church St, Marietta' }, SQ) });
+          window.__es.push({ planner: { stops: [
+            { kind: 'pickup', orders: 1, name: 'oe Fable Crust Pizza', expectedBy: 1189,
+              street: '1985 Cobb Parkway', city: null, state: null, zip: null,
+              line: '1985 Cobb Parkway' }], unfiled: 'dropoffs', asked: true, ms: null,
+            at: 41 } });
+        }, SQ);
+        await page.waitForTimeout(2500);
+        r.heldPick = await page.evaluate(() => {
+          const m = (window.__marks || []).filter(
+            (k) => String(k.popup || '').indexOf('pick up the order in your car') >= 0);
+          const run = (window.__lines || []).filter(
+            (l) => /mv-held-run/.test(String((l.opts || {}).className || '')));
+          const k = document.getElementById('mapKey');
+          return { pins: m.map((x) => ({ ll: x.ll, popup: x.popup,
+                                         ring: (x.opts || {}).fillOpacity < 1,
+                                         fill: (x.opts || {}).fillColor })),
+                   run: run.map((l) => l.pts),
+                   key: k.hidden ? null : k.innerText.replace(/\s+/g, ' ').trim() };
+        });
+        r.heldPickSeen = relayAsked.filter((u) => /street=1985/.test(u));
+        r.heldPickPosts = heldEndPosts;
+        // ...and the next card, the same order still held: the restaurant
+        // is where that order is collected from whatever card is up.
+        await page.evaluate((SQ) => {
+          window.__es.push({
+            ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+            minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
+            holding: { pay: 9.0, minutes: 18.0, holdId: 'h-planner',
+                       dropoff: 'Shadowood Pkwy SE, Atlanta',
+                       card: Object.assign({}, SQ, { miles: 9.4 }) },
+            offer: Object.assign({ id: 'n-heldpick-2', pay: 14.25, minutes: 20.0,
+                                   billedMinutes: 20.0, cost: 1.4,
+                                   pickup: "McDonald's (Marietta Sq)",
+                                   dropoff: 'Church St, Marietta' }, SQ) });
+        }, SQ);
+        await page.waitForTimeout(2000);
+        r.heldPickNext = await page.evaluate(() => (window.__marks || []).filter(
+          (k) => String(k.popup || '').indexOf('pick up the order in your car') >= 0).length);
         // The NucBox answering the pickup and then going quiet: "Slow Place"
         // answers past NUCBOX_TIMEOUT_MS, so the dropoff and the held end are
         // the public map's, and the pickup's pin is still the NucBox's. What
@@ -4196,7 +4446,7 @@ const framed = (page) => page.waitForFunction(
     });
     const say = async (beat) => {
       await page.evaluate((b) => window.__es.push(Object.assign({ alive: true, at: 1,
-        tooBright: false, tooDim: false, refindRefused: null, notSaving: null }, b)), beat);
+        tooBright: false, tooDim: false, notSaving: null }, b)), beat);
       await page.waitForTimeout(150);
       return row();
     };
@@ -4228,6 +4478,12 @@ const framed = (page) => page.waitForFunction(
                            throttled: { now: ['under-voltage', 'throttled'],
                                         sinceBoot: ['under-voltage', 'throttled'] },
                            throttledWhy: null });
+    // The GPS put the order down (server.js gpsArrival): said on this row for
+    // a minute, beside the widest Pi word.
+    await page.evaluate(() => window.__es.push({ gpsDrop: { at: 1, saidForMs: 60000 } }));
+    slot.gpsDrop = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 84.6, cpuCWhy: null,
+                               throttled: { now: ['temp limit'], sinceBoot: ['temp limit'] },
+                               throttledWhy: null });
     // The socket drops. The note is a word off a heartbeat, and with no
     // heartbeat it is a word about a minute that has passed.
     await page.evaluate(() => { if (window.__es && window.__es.onerror) window.__es.onerror(); });
@@ -4249,7 +4505,7 @@ const framed = (page) => page.waitForFunction(
     const stop = (kind, orders, name, by, line) => ({ kind: kind, orders: orders,
       name: name, expectedBy: by, street: null, city: null, state: null, zip: null,
       line: line });
-    const FOUR = [stop('pickup', 1, 'Burger Barn', 712, '310 Mill St, Roswell'),
+    const FOUR = [stop('pickup', 1, 'oe Burger Barn', 712, '310 Mill St, Roswell'),
                   stop('pickup', 2, 'Taco Hut', 725, null),
                   stop('dropoff', 1, 'Lee M.', 751, '77 Birch Ln NW, Roswell, GA 30075'),
                   stop('dropoff', 1, 'Sam R.', 768, null)];
@@ -4476,7 +4732,7 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
     const beat = async (blind) => {
       await page.evaluate((b) => window.__es.push({ alive: true, at: 1, tooBright: false,
-        tooDim: false, refindRefused: null, notSaving: null, blind: b }), blind);
+        tooDim: false, notSaving: null, blind: b }), blind);
       await page.waitForTimeout(150);
       return page.evaluate(BLINDLOOK);
     };
@@ -4721,6 +4977,24 @@ try:
                r['idle']['text'], 'WAITING FOR AN OFFER')
             eq('%s: a card under the reader says so instead' % where,
                r['reading']['text'], 'READING THE CARD')
+            # ...but not over a screen whose last reading found no offer: that
+            # is the rig looking again, and it says what it last found.
+            eq('%s: a read over a screen that just read as no offer is not '
+               'called a card' % where,
+               (r.get('again') or {}).get('text'), 'READING THE SCREEN')
+            eq('%s: ...and says what the last read found' % where,
+               (r.get('againDetail') or {}).get('text'),
+               'no offer on screen · reading again')
+            ok_('%s: ...on the glass, label and line (%r, %r)'
+                % (where, (r.get('again') or {}).get('shown'),
+                   (r.get('againDetail') or {}).get('shown')),
+                (r.get('again') or {}).get('shown')
+                and (r.get('againDetail') or {}).get('shown'))
+            eq('%s: a read after a reading with part of an offer on it is '
+               'still the card' % where,
+               ((r.get('againCard') or {}).get('text'),
+                (r.get('againCardDetail') or {}).get('text')),
+               ('READING THE CARD', 'working out the pay, the time and the distance'))
             # The safety property. A message with no `ready` must not put a
             # number on the panel, because there is no number in it.
             eq('%s: ...without inventing a rate to go with it' % where,
@@ -4878,11 +5152,7 @@ try:
         eq('pressing Dropoff while nothing answers puts it to work',
            pressed['dest']['text'], '⌖ reading…')
         eq('...and it offers itself again afterwards',
-           after.get('dest', {}).get('text'), '⌖ Dropoff')
-
-        eq('pressing Re-find while nothing answers puts it to work',
-           pressed['reset']['off'], True)
-        ok_('...and it comes back', not after.get('reset', {}).get('off'))
+           after.get('dest', {}).get('text'), '⌖ Scan')
 
         if hung.get('drew'):
             eq('sending a crop box while nothing answers puts it to work',
@@ -4930,14 +5200,14 @@ try:
         drop_now = got.get('dropAfterMark') or {}
         ok_('the destination button appears the moment the offer is marked',
             dest_now.get('shown'))
-        ok_('...saying what it reads', 'Dropoff' in (dest_now.get('text') or ''))
+        ok_('...saying what it reads', 'Scan' in (dest_now.get('text') or ''))
         ok_('...and so does the one that puts the order down',
             drop_now.get('shown'))
 
         # ...and once a destination is read, the control stays a control.
         scanned = got.get('destAfterScan') or {}
         ok_('the button still says what pressing it does after a scan',
-            'Dropoff' in (scanned.get('text') or ''))
+            'Scan' in (scanned.get('text') or ''))
         ok_('...rather than becoming the address it read',
             '1234' not in (scanned.get('text') or ''))
         ok_('...unclipped on the panel the rig actually uses',
@@ -5489,39 +5759,24 @@ try:
     eq('...and a doubt about the TIME alone leaves it standing',
        ((dbt.get('time') or {}).get('text') or '').strip(), '$2.00')
 
-    # --- a Re-find the scanner refused -----------------------------------
+    # --- no ⟳ Re-find --------------------------------------------------------
     #
-    # The one state on this page where the DRIVER has acted and the rig has
-    # not. Everything else here is the rig reporting something it saw; this is
-    # the rig declining to do a thing it was told to, and until the refusal
-    # reached the glass the button said "re-finding" regardless and the driver
-    # went on reading offers through corners they had already rejected.
+    # Taken off the bar at the owner's request (AUDITS.md, Settled): pressed
+    # with a box drawn it threw the boxes away for the screen the rig found by
+    # itself, which on their mount is the map. ▣ Set box fixes the boxes.
     rf = got.get('refind') or {}
-    ok_('the refused re-find was measured', bool(rf))
+    ok_('the bar without Re-find was measured', bool(rf))
     if rf:
-        eq('nothing is said about re-finding before the button is pressed',
-           (rf.get('before') or {}).get('shown'), False)
-        # The POST's own promise knows only that a web handler touched a file.
-        # It has not spoken to the scanner, so it may not speak for it.
-        pressed = ((rf.get('pressed') or {}).get('text') or '').strip()
-        ok_('the button claims only what the press proved (%r)' % pressed,
-            'asked' in pressed)
-        ok_('...and not that anything has been re-found', 'find' not in pressed)
-        refused = ((rf.get('refused') or {}).get('text') or '')
-        ok_('the scanner\'s refusal reaches the glass (%r)' % refused[:60],
-            'no screen' in refused and 'box you drew' in refused)
-        ok_('...on the glass, not pushed off it',
-            (rf.get('refused') or {}).get('shown'))
-        ok_('...and it stands on the next beat, not just the one that brought it',
-            'no screen' in ((rf.get('stillRefused') or {}).get('text') or ''))
-        # Different branch of render(): the notes on a reading are built
-        # separately from the notes shown while there is no reading, and a
-        # refused re-find belongs in both. The offer that arrives while the
-        # corners are wrong is exactly the offer being read through them.
-        ok_('...and survives an offer arriving',
-            'no screen' in ((rf.get('onReading') or {}).get('text') or ''))
-        ok_('...and goes when the scanner says the next one worked',
-            'no screen' not in ((rf.get('cleared') or {}).get('text') or ''))
+        eq('there is no ⟳ Re-find control on the panel', rf.get('button'), False)
+        no_('...nor any control on the bar that says it (%r)' % rf.get('labels'),
+            any('Re-find' in l for l in (rf.get('labels') or [])))
+        ok_('...and ▣ Set box is there instead (%r)' % rf.get('labels'),
+            any('Set box' in l for l in (rf.get('labels') or [])))
+        # A scanner one version behind may still send the old refusal on its
+        # beat. It answers a press nobody can make any more, so it is not shown.
+        no_('a stale re-find refusal on the beat puts nothing on the glass (%r)'
+            % ((rf.get('warn') or {}).get('text') or '')[:60],
+            'Re-find' in ((rf.get('warn') or {}).get('text') or ''))
 
     # --- the journal refusing to take writes ------------------------------
     #
@@ -5637,6 +5892,11 @@ try:
         ok_('[%s] ...whole as well (%dpx of %dpx)'
             % (_pn, _note('weak').get('w') or 0, _note('weak').get('sw') or 0),
             _note('weak').get('whole') and _note('weak').get('shown'))
+        eq('[%s] a GPS drop is said on the row, after the Pi' % _pn,
+           _note('gpsDrop').get('text'), 'Pi temp limit 85°C · dropped · left the dropoff')
+        ok_('[%s] ...whole (%dpx of %dpx)'
+            % (_pn, _note('gpsDrop').get('w') or 0, _note('gpsDrop').get('sw') or 0),
+            _note('gpsDrop').get('whole') and _note('gpsDrop').get('shown'))
         # The note is a word off a heartbeat. With the socket gone there is no
         # heartbeat, and the row says so instead of a GPS state from before.
         eq('[%s] a dropped socket takes the note down with it (%r)'
@@ -6472,6 +6732,28 @@ try:
         'NucBox down (%r)' % both.get('bug'),
         re.match(r'^no pin for Q+… — a bug: the rig refused the question$',
                  both.get('bug') or ''))
+    # The held order's restaurant off its Trip Planner (the driver's report:
+    # the planner was read and the map never put the restaurant with the order).
+    _hp = both.get('heldPick') or {}
+    _pins = _hp.get('pins') or []
+    ok_('the held order\'s planner pickup is pinned at its door, searched by the NucBox '
+        'as a door with no town, a green ring named without the icon\'s "oe " (%r, %r)'
+        % (_pins, both.get('heldPickSeen')),
+        len(_pins) == 1
+        and abs(_pins[0]['ll'][0] - 34.0010) < 0.001 and abs(_pins[0]['ll'][1] + 84.5560) < 0.001
+        and _pins[0]['ring'] and _pins[0]['fill'] == '#17c964'
+        and 'Fable Crust Pizza · 1985 Cobb Parkway<' in (_pins[0]['popup'] + '<')
+        and 'oe Fable' not in _pins[0]['popup']
+        and any(re.match(r'^/api/nbx/search\?street=1985(%20|\+)Cobb(%20|\+)Parkway&', u)
+                for u in both.get('heldPickSeen') or []))
+    _run = (_hp.get('run') or [[]])[0]
+    ok_('...and the held order\'s run is drawn car -> its pickup -> its end (%r)' % _run,
+        len(_hp.get('run') or []) == 1 and len(_run) == 3
+        and _run[0] == [33.9526, -84.5499] and _run[1] == _pins[0]['ll'] if _pins else False)
+    eq('...and the key names it', 'held pickup' in (_hp.get('key') or ''), True)
+    eq('...and the pickup is never sent as the held order\'s end', both.get('heldPickPosts'), [])
+    eq('...and it stays on the map under the next card while the order is held',
+       both.get('heldPickNext'), 1)
     # The street index, relayed to the NucBox's own server.js. A held end
     # the index does not hold (Shadowood Parkway) is asked of the search as
     # before, so the first card's line is the one `both` drew.
@@ -6673,6 +6955,26 @@ try:
     # the check passed with the rule deleted. What distinguishes them is WHICH
     # pin is the pickup — the second card swaps the two ends, so the green one
     # moves from the Chipotle to the Canton Rd end.
+    # The held end, from the press: see the stage of that name. A pin is
+    # named by what it says, so the card's own "and drop it here" can never
+    # stand in for the order in the car.
+    _HELD = 'where the order in your car is going'
+    hp = got.get('heldPress') or {}
+    ok_('held end: a ⌖ read filed onto the order in the car is pinned as its end (%r)'
+        % (hp.get('read'),), any(_HELD in m and 'Pverel' in m for m in hp.get('read') or []))
+    ok_('held end: ...and a DoorDash card that names nowhere keeps it (%r)'
+        % (hp.get('dd'),), any(_HELD in m for m in hp.get('dd') or []))
+    ok_('held end: ...through a not-ready reading and a heartbeat (%r)'
+        % (hp.get('after'),), any(_HELD in m for m in hp.get('after') or []))
+    ok_('held end: ...whose pin says the address as read, litter and all (%r)'
+        % (hp.get('after'),),
+        any('ss be 4 1610 Pverel Blvd' in m for m in hp.get('after') or []))
+    ht = got.get('heldTook') or {}
+    ok_('held end: the ✓ Took reply\'s end is pinned as the held order\'s at once (%r)'
+        % (ht.get('took'),), any(_HELD in m and 'Powder Springs' in m
+                                 for m in ht.get('took') or []))
+    ok_('held end: ...and the next card\'s offer line does not take it down (%r)'
+        % (ht.get('bare'),), any(_HELD in m for m in ht.get('bare') or []))
     nxtMap = got.get('mapNext') or {}
     eq('a new card redraws the map rather than leaving the last one up',
        len(nxtMap.get('marks') or []), 4)
@@ -6889,17 +7191,34 @@ try:
     _fit = _ho.get('fit') or []
     ok_('entering Map view fits the view to include the dot (%r)' % (_fit,),
         [33.9526, -84.5499] in _fit and len(_fit) > 1)
+    # --- ...and the map following it -------------------------------------
+    #
+    # The driver asked for it. At the edges only, at the zoom it is at, and
+    # not once a hand is on the map: every pan is tiles down the hotspot.
+    _hi = got.get('hereInside') or {}
+    eq('the dot moves with the next beat', _hi.get('dots'), [[_hi.get('lat'), -84.5499]])
+    eq('a dot that stays in the middle of the map does not move the map',
+       (_hi.get('pans'), _hi.get('fit'), _hi.get('view')), ([], None, None))
+    # Every message the scanner sends goes through showMap, and its
+    # same-card branch fitted the view to the pins on each one: a beat every
+    # four seconds undid any pan, the driver's or the follow's.
+    _hc = got.get('hereSameCard') or {}
+    eq('the same card in a new message does not fit the view again',
+       (_hc.get('fit'), _hc.get('view'), _hc.get('pans')), (None, None, []))
     _hm = got.get('hereMoved') or {}
-    eq('the dot moves with the next beat', _hm.get('dots'), [[33.9616, -84.5499]])
-    # The panel re-fits to the card's pins on every message while the map is
-    # up (showMap's same-card branch), so a fit may happen; what may not is a
-    # fit or a view that goes where the dot went.
-    _mfit = _hm.get('fit') or []
-    ok_('...and the map does not move with it (%r, %r)' % (_mfit, _hm.get('view')),
-        [33.9616, -84.5499] not in _mfit and _hm.get('view') != [33.9616, -84.5499])
+    eq('a dot that leaves the middle takes the map to it, at the zoom it was at',
+       (_hm.get('pans'), _hm.get('zoom'), _hm.get('fit'), _hm.get('view')),
+       ([[_hm.get('lat'), -84.5499, 14]], 14, None, None))
+    # Leaflet says zoomstart for the page's own fit on the way in as it does
+    # for a hand on the + button. Read as the driver's, it paused the follow
+    # before the follow had moved once.
+    ok_('the page\'s own fit is not the driver taking the map: it still follows '
+        '(%r, %r)' % (_ho.get('note'), _hm.get('pans')),
+        'not following' not in (_ho.get('note') or '') and len(_hm.get('pans') or []) == 1)
     _hr = got.get('hereRough') or {}
     eq('a fix the gate refused is not drawn',
        (len(_hr.get('dots') or []), len(_hr.get('circles') or [])), (0, 0))
+    eq('...and does not move the map', _hr.get('pans'), [])
     eq('...and the label says why, with the figure', _hr.get('note'),
        'GPS too rough here (±129 m)')
     _hs = got.get('hereStale') or {}
@@ -6908,6 +7227,10 @@ try:
         [c.get('colour') for c in (_hs.get('circles') or [])]),
        ([[33.9526, -84.5499]], True, ['#8a8f98']))
     eq('...saying how old', _hs.get('note'), '±28 m · 45 s old')
+    # Where the car WAS, half a map's height from the centre: out of the
+    # middle, and not a place to take the map.
+    eq('a grey dot out of the middle of the map does not move the map',
+       _hs.get('pans'), [])
     _hq = got.get('hereSilent') or {}
     ok_('a dot whose beats stopped greys on the page\'s own clock (%r)'
         % ((_hq.get('grey'), _hq.get('note')),),
@@ -6926,6 +7249,25 @@ try:
     ok_('...and the view is not fitted to it: the one fit was the entry\'s '
         '(%r, %r)' % (_lfit, _hl.get('view')),
         [33.9706, -84.5499] not in _lfit and _hl.get('view') != [33.9706, -84.5499])
+    # A hand on the map. Every message the scanner sends goes through
+    # showMap, and it used to re-fit the view to the pins on each one, so a
+    # drag lasted until the next beat; the fit, the pan and the view are all
+    # held to nothing here.
+    _hd = got.get('hereDragged') or {}
+    eq('a drag on the map stops it following: a dot out of the middle moves '
+       'nothing', (_hd.get('pans'), _hd.get('fit'), _hd.get('view')), ([], None, None))
+    ok_('...and the corner says it is not following (%r)' % _hd.get('note'),
+        re.match(r'^±28 m · \d+ s old · not following$', _hd.get('note') or ''))
+    _hz = got.get('hereZoomed') or {}
+    eq('a zoom by hand stops it following too',
+       (_hz.get('pans'), _hz.get('fit'), _hz.get('view')), ([], None, None))
+    _hu = got.get('hereResumed') or {}
+    ok_('⛶ Map round again follows the dot again (%r)' % (_hu.get('pans'),),
+        len(_hu.get('pans') or []) == 1 and (_hu.get('pans') or [[0, 0, 0]])[0][2] == 14)
+    ok_('...having fitted the view first, as the press always has (%r)'
+        % (_hu.get('refit'),), bool(_hu.get('refit')))
+    ok_('...and the corner stops saying it is not (%r)' % _hu.get('note'),
+        re.match(r'^±28 m · \d+ s old$', _hu.get('note') or ''))
 
     # --- 📷 Snap ----------------------------------------------------------
     #
@@ -7177,6 +7519,9 @@ try:
         '▸ Pickup ×2 by 12:05 · Taco Hut',
         '▸ Dropoff by 12:31 · Lee M. · 77 Birch Ln NW, Roswell, GA 30075',
         '▸ Dropoff by 12:48 · Sam R.'])
+    eq('a stop read as "oe Burger Barn" — the stop\'s icon as letters — is shown '
+       'without the "oe "', ((pl.get('four') or {}).get('lines') or [''])[0],
+       '▸ Pickup by 11:52 · Burger Barn · 310 Mill St, Roswell')
     # The scanner refuses to guess which of two dropoffs is the order in the
     # car's, and the panel says so rather than leaving the driver to work out
     # why the button is still amber — under the stops, and in full on the
@@ -7187,7 +7532,7 @@ try:
        (['2 dropoffs: end not guessed'], True))
     eq('...and the press is answered: no "reading…", and no failure',
        ((pl.get('four') or {}).get('label'), (pl.get('four') or {}).get('failed')),
-       ('⌖ Dropoff', False))
+       ('⌖ Scan', False))
     # ...and the moment the order HAS an end, whichever read gave it, the note
     # goes: "end not guessed" beside a green "Read as: …" was two answers to
     # one question on the glass at once. The stops stay; they are still the

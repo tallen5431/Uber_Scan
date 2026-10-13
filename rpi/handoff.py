@@ -1,10 +1,9 @@
 """The files the web side and the camera side pass requests through.
 
-Six of them, and they are all the same shape: the browser asks for something,
+Five of them, and they are all the same shape: the browser asks for something,
 the scanner notices within a frame or two and acts.
 
     .viewing        somebody is watching, and which of the two views they want
-    .recalibrate    forget where you think the phone is and find it again
     .cropbox.json   read this box, drawn by hand on the live picture
     .dropoff        read the screen in front of you as a destination
     .settings.json  a mile costs this much
@@ -148,8 +147,8 @@ def clear(base):
     """Drop the request everywhere it might be.
 
     Both places, always. A reader that removes only the copy it read leaves the
-    other to be picked up later — and a `.recalibrate` acted on an hour after it
-    was asked for is the scanner throwing away a good calibration mid-shift for
+    other to be picked up later — and a `.dropoff` acted on an hour after it
+    was asked for is the scanner reading a destination nobody asked about, for
     no reason the driver can see.
     """
     for candidate in candidates(base):
@@ -160,7 +159,6 @@ def clear(base):
 
 
 VIEWING = '.viewing'
-RECALIBRATE = '.recalibrate'
 CROPBOX = '.cropbox.json'
 # "The screen in front of you is the destination — read it as an address."
 #
@@ -187,6 +185,15 @@ SETTINGS = '.settings.json'
 # server has stopped waiting on must not be written into later. See
 # snap_requested in scan_pi.py and askReader in server.js.
 SNAP = '.snap.json'
+# "An order is in the car until <ms>" — written by server.js whenever the order
+# in the car changes, as {"until": <the moment its holding() stops answering
+# yes>}, and removed when nothing is held. Not a request: a fact the web side
+# knows and the scanner cannot, which is whether the driver has marked an
+# order taken. The scanner reads Uber's Trip Planner without a press only while
+# it says so — see order_held in scan_pi.py. Judged by `until`, never by the
+# file being there, so a server that died mid-delivery leaves nothing that
+# says "held" past the order's own clock.
+HOLDING = '.holding.json'
 # "I went quiet to be restarted over a stalled camera" — not a request from the
 # web side but the scan loop's note to its own successor, the one thing it has
 # to remember across the SIGKILL that restarts it. Empty: its mtime is the
@@ -196,7 +203,7 @@ SNAP = '.snap.json'
 STALLED = '.stalled'
 
 
-# The live picture is the seventh file the two sides share, and it moved here
+# The live picture is the sixth file the two sides share, and it moved here
 # first — twenty-five frames a second at ~50kB while somebody is watching, all
 # of it stale two frames later, none of it worth the one part of a Pi that
 # wears out. Its names predate this module and are kept exactly: server.js

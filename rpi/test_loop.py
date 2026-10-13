@@ -19,8 +19,8 @@ Each check here failed against the loop before its fix:
 - A read that never returned left the rig beating and silent, and the
   supervisor's silence watchdog could not see it.
 - The startup line counted journal lines and called them offers.
-- A Re-find the scanner refused was answered in the log and nowhere else,
-  while the button on the driving screen said it was re-finding.
+- ⟳ Re-find, pressed with a box drawn, threw the boxes away. It is gone; a
+  request an older page left behind must not do it either.
 
 One warning about the stubbed reader, because it cost an afternoon here: it
 answers with whatever text the check asked for WHETHER OR NOT THERE IS A CARD
@@ -208,7 +208,7 @@ def out_for(text, clipped=False, fitted=None):
 
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
         hang_from=None, stuck_after=None, handoff=None, alive_every=None,
-        refind_notice_s=None, config_extra=None, appear_at=0.4, cam_out=None,
+        config_extra=None, appear_at=0.4, cam_out=None,
         clipped_for=None, dropoff_window=None, whole_text=None, fitted=None,
         fitted_for=None, hang_on_loop=True,
         fail_after=None, phone_hold=None, gps_hold=None, phone=None,
@@ -322,16 +322,21 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     # Every read handed to the reader, begun or not: one asked of a reader
     # stuck on the read before it never starts, so `calls` cannot count it.
     submitted = [0]
+    # ...whether each was a ⌖ read of the whole screen, and how many times the
+    # panel was told a read had started.
+    submitted_whole = []
+    readings = [0]
 
     def submit(self, frames, now, geom):
         submitted[0] += 1
+        submitted_whole.append(bool(getattr(geom, 'whole', False)))
         return real[12](self, frames, now, geom)
 
     SP.Reader.submit = submit
     # What the loop tells the server it is pricing a mile at, as a copy: the
     # loop hands over its live dict, which is exactly the thing that changes.
     SP.emit_settings = lambda settings: said_settings.append(dict(settings or {}))
-    SP.emit_reading = lambda *a, **k: None
+    SP.emit_reading = lambda *a, **k: readings.__setitem__(0, readings[0] + 1)
     # Captured rather than printed, like the offer line beside it. The empty
     # answer — a press that found no address — is only visible here.
     SP.emit_dropoff = lambda address, **k: dropoffs.append((address, k))
@@ -389,9 +394,6 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     was_window = SP.DROPOFF_WINDOW
     if dropoff_window is not None:
         SP.DROPOFF_WINDOW = dropoff_window
-    was_refind_s = SP.REFIND_NOTICE_S
-    if refind_notice_s is not None:
-        SP.REFIND_NOTICE_S = refind_notice_s
     was_holds = (SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY,
                  SP.STALL_AGAIN)
     if phone_hold is not None:
@@ -439,7 +441,6 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         SP.emit_planner = was_planner
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
-        SP.REFIND_NOTICE_S = was_refind_s
         SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY, SP.STALL_AGAIN = was_holds
         if was_handoff is None:
             os.environ.pop(HO.ENV_DIR, None)
@@ -447,7 +448,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, offer_kw=offer_kw,
                 beats=beats, calls=calls[0],
-                submitted=submitted[0], planners=said_planners,
+                submitted=submitted[0], submitted_whole=submitted_whole,
+                readings=readings[0], planners=said_planners,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
                 raised=raised, handoff=handoff, finder=finder[0])
@@ -643,98 +645,40 @@ ok_('...and the journal says the rig asked to be restarted, and why (%r)' % _stu
 eq('...and leaves no note holding back a stalled camera\'s restart',
    _stall_note_age(r['handoff']), None)
 
-# --- a Re-find the rig cannot honour has to say so on the beat ---------------
-# Pressing Re-find is the driver saying the outline is wrong, so from that press
-# on the rig is reading through corners they have already judged bad. With
-# --no-track there is nothing for the press to move, and the refusal went to the
-# log — which is not a place a driver looks. The button on the live page went on
-# to say "re-finding" either way, because the only thing it waits for is a web
-# handler that touches a file and has never spoken to the scanner.
-handoff = tempfile.mkdtemp()
-open(os.path.join(handoff, 'uberscan-recalibrate'), 'w').close()
-r = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=8.0,
-        handoff=handoff, alive_every=0.05,
-        until=lambda rows, ann, calls: calls >= 3)
-said = [b.get('refind_refused') for b in r['alive']]
-carried = [s for s in said if s]
-ok_('the refusal reaches the heartbeat (%r)' % (carried[:1],), bool(carried))
-ok_('...saying which refusal it was', carried and '--no-track' in carried[0])
-ok_('...and the log still has it too, for the day somebody reads one',
-    any('tracking is off' in l for l in r['logs']))
-ok_('...and the request was taken, not left to fire again on the next restart',
-    not any(os.path.exists(p) for p in HO.candidates(HO.RECALIBRATE)))
-
-# ...and a rig nobody has pressed anything on says nothing about re-finding.
-# Without this the check above passes on a flag that is simply always set.
-r = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=8.0,
-        handoff=tempfile.mkdtemp(), alive_every=0.05,
-        until=lambda rows, ann, calls: calls >= 3)
-ok_('an unpressed button is not a refusal',
-    r['alive'] and not any(b.get('refind_refused') for b in r['alive']))
-
-# ...and it goes away on its own, which is the part that only matters because
-# of --no-track: there the refusal is permanently true, the button can never do
-# anything on that rig, and a notice with no expiry would go up on the first
-# press and stay up for the whole shift. A notice that cannot be cleared is one
-# the driver stops reading, and it takes the ones that can be with it.
-handoff = tempfile.mkdtemp()
-open(os.path.join(handoff, 'uberscan-recalibrate'), 'w').close()
-# Run on the clock rather than on a read count: the thing being measured is a
-# notice ageing out, so the run has to outlive it.
-r = run(lambda n, k: WHOLE, extra_argv=['--no-track'], seconds=3.0,
-        handoff=handoff, alive_every=0.05, refind_notice_s=0.8)
-said = [bool(b.get('refind_refused')) for b in r['alive']]
-ok_('the refusal is on the beat to begin with (%d of %d beats)'
-    % (sum(said), len(said)), any(said))
-ok_('...and off it again once the press is old news', said and not said[-1])
-ok_('...having been there for several beats, not one', sum(said) > 1)
-
-# ...and a press that works takes the refusal down at once, rather than leaving
-# it to age out. Driven through the hand-drawn box, which is the only path where
-# both answers are reachable in one process: a rig with no tracker never gets a
-# press that works, and a rig with one never refuses.
-#
-# The card arrives partway through, so the first press — made against an empty
-# mount — is refused for want of a screen, and the second, dropped in once that
-# refusal has been seen, finds one.
-handoff = tempfile.mkdtemp()
-REQ = os.path.join(handoff, 'uberscan-recalibrate')
-open(REQ, 'w').close()
-pressed_again = [False]
-mount = []
+# --- ▣ Set box always takes, and nothing throws a drawn box away -------------
+# ⟳ Re-find was taken off the panel at the owner's request (AUDITS.md,
+# Settled). Pressed with a box drawn it threw the boxes away and went back to
+# finding the screen by itself — on their mount, the map — and they reported it
+# "tends to get stuck and not let me set it". The scanner no longer reads the
+# request at all, so a `.recalibrate` an older page left in the handoff
+# directory is inert: the drawn box stays, and a new one drawn on the panel
+# takes over it.
+_ho_rf = tempfile.mkdtemp()
+_stale_rf = os.path.join(_ho_rf, 'uberscan-recalibrate')
+open(_stale_rf, 'w').close()
 
 
-def press_again_once_refused(rows, ann, calls):
-    """Called from inside the loop, on its own sleep. Not a condition to stop
-    on — it returns False every time — but the only hook this harness has for
-    doing something to the rig mid-run.
-
-    Waits for the card to really be in the mount, asked of the camera rather
-    than inferred from the loop. Neither a read nor an announcement is evidence
-    here: the reader is stubbed and answers with a whole card on a blank frame,
-    so both happen on the first frame, and a press then is the same press
-    against the same empty mount the first one was refused for.
-    """
-    if (not pressed_again[0] and not os.path.exists(REQ)
-            and mount and mount[0].frame is mount[0].offer):
-        pressed_again[0] = True
-        open(REQ, 'w').close()
-    return False
+def _draw_on_third_read(n, k):
+    if n == 3 and k == 0:
+        with open(os.path.join(_ho_rf, 'uberscan-cropbox.json'), 'w') as fh:
+            json.dump({'quad': [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                       'card': [0.0, 0.3, 1.0, 0.45]}, fh)
+    return WHOLE
 
 
-r = run(lambda n, k: WHOLE, seconds=10.0, handoff=handoff, alive_every=0.05,
-        appear_at=1.0, cam_out=mount,
+# The phone is in the mount from the first frame, so a scanner that still read
+# the request would find a screen to throw the box away for.
+r = run(_draw_on_third_read, seconds=6.0, handoff=_ho_rf, appear_at=0.0,
         config_extra={'manualBox': True, 'cropBox': [0.0, 0.0, 1.0, 1.0]},
-        until=press_again_once_refused)
-ok_('the first press, against an empty mount, was refused',
-    any('no screen in view' in l for l in r['logs']))
-ok_('...and said so on the beat',
-    any('box you drew' in (b.get('refind_refused') or '') for b in r['alive']))
-ok_('the second press, with the card there, was honoured',
-    any('finding the phone automatically' in l for l in r['logs']))
-said = [bool(b.get('refind_refused')) for b in r['alive']]
-ok_('...and took the refusal down with it, without waiting for it to age out',
-    pressed_again[0] and said and not said[-1])
+        until=lambda rows, ann, calls: calls >= 6)
+eq('a drawn box is read as drawn while a stale re-find request lies there',
+   r['crops'][0], ([0.0, 0.0, 1.0, 1.0], 1.0))
+ok_('...and nothing goes back to finding the screen by itself',
+    not any('automatically' in l or 'outline reset' in l for l in r['logs']))
+ok_('▣ Set box takes over it, mid-shift (%r)' % r['crops'][-1:],
+    any(c == ([0.0, 0.3, 1.0, 0.45], 0.45) for c in r['crops']))
+ok_('...and the box is still a person\'s choice in the saved config',
+    json.load(open(r['config'])).get('manualBox') is True)
 
 # --- a card box inside the drawn box -------------------------------------------
 #
@@ -1488,21 +1432,6 @@ eq('...in the journal\'s own fields, and the time it has left inside the rule',
    sorted((_mbeat[-1] if _mbeat else {}).keys()),
    sorted(SP.JR.FIX_FIELDS + ('freshFor',)))
 
-# --- the Health object's own account of a Re-find ---------------------------
-# Reachable directly, and worth reaching: the loop above can only ever show one
-# of the two answers per run, because a rig with no tracker never gets a press
-# that works and a rig with one never refuses.
-h = SP.Health()
-eq('a rig nobody has pressed anything on has nothing to say', h.refind_notice(1000.0), None)
-h.refind_says('no screen to find', 1000.0)
-eq('...a refusal is said', h.refind_notice(1000.0), 'no screen to find')
-eq('...and goes on being said while the press is recent',
-   h.refind_notice(1000.0 + SP.REFIND_NOTICE_S - 1.0), 'no screen to find')
-eq('...and stops once it is not', h.refind_notice(1000.0 + SP.REFIND_NOTICE_S + 1.0), None)
-h.refind_says('no screen to find', 1000.0)
-h.refind_says(None, 1002.0)
-eq('a press that worked leaves nothing behind', h.refind_notice(1002.0), None)
-
 # --- which frame of one read gets published ----------------------------------
 #
 # A read hands back two frames 33ms apart, and the loop published the later one
@@ -1663,6 +1592,17 @@ ok_('...and the address outside the card box is the answer (%r)'
     % [(d[0] or {}).get('line') for d in r8['dropoffs']][:2],
     any(d[0] and 'Main St' in (d[0].get('line') or '') and d[1].get('asked')
         for d in r8['dropoffs']))
+# ...and the panel is not told a card is being priced while it happens. A ⌖
+# read answers with an address or nothing, never with `ready`, so the reading
+# cue it used to send stood on the panel as READING THE CARD, "working out the
+# pay, the time and the distance", for the page's whole READING_MS after each
+# one — over a navigation screen, through the whole window.
+_card_reads = r8['submitted_whole'].count(False)
+ok_('the premise: both kinds of read were handed over (%d whole, %d card)'
+    % (r8['submitted_whole'].count(True), _card_reads),
+    r8['submitted_whole'].count(True) >= 1 and _card_reads >= 1)
+eq('...and the panel is told a read began for the card reads only',
+   r8['readings'], _card_reads)
 
 # The whole-screen read sees a DIFFERENT payout here — a card under a map, a
 # planner listing two orders' totals. If it reached the offer, the panel would
@@ -1795,6 +1735,239 @@ ok_('the premise: the card box read the two-dropoff planner, unpressed (%d reads
 eq('a planner nobody pressed for gives no address, not even the one find_address '
    'would take off it', [((d[0] or {}).get('line'), d[1].get('asked'))
                          for d in rp5['dropoffs']], [])
+
+# --- a pickup's address is never the order's destination ---------------------
+#
+# Off a shift: "✓ Took $28.08" pressed with the Trip Planner up — two pickups,
+# each "Address / <street> NW, / Kennesaw, GA <ZIP>", over a closed "Dropoff •
+# 1 order" naming nobody's door. Nobody pressed ⌖, and the order in the car
+# came out holding `dropoff: 'Kennesaw, GA 30144', dropoffScanned: true` — the
+# first restaurant's town. The card box had caught the list scrolling, its top
+# edge between that pickup's street and town lines, and no stop header in the
+# read matched PLANNER_STOP, so nothing called it a planner and find_address
+# took the town line as the last address on the screen.
+#
+# The texts below are that screen's shapes with every address made up. The
+# read that did it was not kept, so which way its headers failed is not known;
+# here they are simply gone — the crop as it cut the list with no header read
+# under it, and the pickup block with its header down to the word "Pickup",
+# the count lost, which PLANNER_STOP does not take for a stop.
+_PICKUP_CUT = ('Kennesaw, GA 30144\nView details\nFable Grill\n'
+               'Expected by 5:54 PM\nPat Q.\nExpected by 6:37 PM\n'
+               'Waybill\nStop New Requests')
+_PICKUP_BLOCK = ('Pickup\nFable Grill\nExpected by 5:46 PM\nAddress\n'
+                 '4100 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details\n'
+                 'Stop New Requests')
+for _name, _t in (('the cut list', _PICKUP_CUT), ('the pickup block', _PICKUP_BLOCK)):
+    ok_('the premise: %s is no planner to the reader, has no payout, and '
+        'find_address takes the pickup\'s ZIP off it' % _name,
+        OP.find_planner(_t) is None and OP.parse(_t)['pay'] is None
+        and not OP.parse(_t)['places']
+        and (OP.find_address(_t) or {}).get('zip') == '30144')
+# A card fragment first, so the resample window goes on reading every half
+# second over the planner that replaces it — a still screen otherwise gets one
+# read and the health line, which speaks only after reads, never comes round.
+rpk1 = run(lambda n, k: FRAG if n == 1 else _PICKUP_CUT, extra_argv=['--no-parallel'],
+           seconds=6.0, handoff=tempfile.mkdtemp(), health_every=0.2)
+ok_('the premise: the card box read the cut planner, unpressed (%d reads)'
+    % rpk1['calls'], rpk1['calls'] >= 3 and not any(rpk1['wholes']))
+eq('an address under no Dropoff label, unprompted, is not sent as the order\'s '
+   'destination', [((d[0] or {}).get('line'), d[1].get('asked'))
+                   for d in rpk1['dropoffs']], [])
+ok_('...and the refusal is said on the health line, not silent',
+    any(l.startswith('health') and 'refused for not being under a Dropoff label' in l
+        for l in rpk1['logs']))
+ok_('...and carried on the seen row the journal keeps (%r)'
+    % [x.get('addressNotDropoff') for x in rpk1['rows'] if x.get('kind') == 'seen'],
+    any((x.get('addressNotDropoff') or 0) >= 1
+        for x in rpk1['rows'] if x.get('kind') == 'seen'))
+rpk2 = run(lambda n, k: _PICKUP_BLOCK, extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=tempfile.mkdtemp())
+ok_('the premise: the card box read the pickup block, unpressed (%d reads)'
+    % rpk2['calls'], rpk2['calls'] >= 1)
+eq('an address under a Pickup label, unprompted, is not sent as the order\'s '
+   'destination', [((d[0] or {}).get('line'), d[1].get('asked'))
+                   for d in rpk2['dropoffs']], [])
+# ...and not under a press either. ⌖ says "this screen is the destination"; the
+# screen saying "Pickup" over the address is the screen disagreeing, and a
+# restaurant filed `asked: true` overrules whatever the card said.
+_hpk3 = tempfile.mkdtemp()
+rpk3 = run(_press_on_first_read(_hpk3, ''), extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=_hpk3, dropoff_window=1.0, whole_text=_PICKUP_BLOCK)
+ok_('the premise: the press read the pickup block whole', any(rpk3['wholes']))
+eq('an address under a Pickup label answers a press with nothing, not with the '
+   'restaurant', [((d[0] or {}).get('line'), d[1].get('asked'))
+                  for d in rpk3['dropoffs']], [(None, True)])
+# ...nor a planner whose headers did not read, pressed: the cut list again.
+_hpk4 = tempfile.mkdtemp()
+rpk4 = run(_press_on_first_read(_hpk4, ''), extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=_hpk4, dropoff_window=1.0, whole_text=_PICKUP_CUT)
+eq('an unlabelled address on a screen with the planner\'s furniture answers a '
+   'press with nothing', [((d[0] or {}).get('line'), d[1].get('asked'))
+                          for d in rpk4['dropoffs']], [(None, True)])
+# Each arm of the rule on its own, with the others out of the way: a Pickup
+# label with no planner furniture under a press, and an unlabelled address
+# with no furniture unprompted (refused) and pressed (answered, as it always
+# was — a press over a plain navigation screen needs no label).
+_PICKING = 'Picking up\n12 Fable St, Acworth, GA 30101\n4 min Start'
+_BARE_CUT = 'Kennesaw, GA 30144\nView details\nFable Grill'
+_BARE_NAV = '1234 Made Up Ln, Acworth, GA 30101 12 min Start'
+ok_('the premise: none of the three carries the planner\'s furniture, a stop '
+    'header or a payout',
+    not any(OP.planner_furniture(t) or OP.parse(t)['pay'] is not None
+            or OP.parse(t)['places'] or OP.find_planner(t) is not None
+            for t in (_PICKING, _BARE_CUT, _BARE_NAV)))
+_hpk6 = tempfile.mkdtemp()
+rpk6 = run(_press_on_first_read(_hpk6, ''), extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=_hpk6, dropoff_window=1.0, whole_text=_PICKING)
+eq('a press over an address under a Pickup label, no planner in sight, is '
+   'answered with nothing', [((d[0] or {}).get('line'), d[1].get('asked'))
+                             for d in rpk6['dropoffs']], [(None, True)])
+rpk7 = run(lambda n, k: _BARE_CUT, extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=tempfile.mkdtemp())
+eq('an unlabelled town line nobody asked for, no planner furniture, is not sent',
+   [((d[0] or {}).get('line'), d[1].get('asked')) for d in rpk7['dropoffs']], [])
+_hpk8 = tempfile.mkdtemp()
+rpk8 = run(_press_on_first_read(_hpk8, ''), extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=_hpk8, dropoff_window=1.0, whole_text=_BARE_NAV)
+eq('...while a press over an unlabelled navigation screen still gets its address',
+   [((d[0] or {}).get('line'), d[1].get('asked')) for d in rpk8['dropoffs']],
+   [('1234 Made Up Ln, Acworth, GA 30101', True)])
+# The other side: the rule is the LABEL, not "a pickup is anywhere on the
+# screen". A screen with a Pickup label above the Dropoff one gives the
+# dropoff's address, unprompted — which is what a guard that refused every
+# screen mentioning a pickup would lose. No merchant under that Pickup: one
+# would make the screen an offer to the payout guard's second arm, which
+# refuses it for its own reason before this rule is asked.
+_BOTH_ENDS = ('Pickup - 5:46 PM\n'
+              'Dropoff\n34 Made Up Rd, Acworth, GA 30102\n12 min Start')
+ok_('the premise: that screen names a pickup above the dropoff and is no offer '
+    'and no planner',
+    OP.parse(_BOTH_ENDS)['places'] == [] and OP.parse(_BOTH_ENDS)['pay'] is None
+    and OP.find_planner(_BOTH_ENDS) is None
+    and 'Pickup' in _BOTH_ENDS.split('Dropoff')[0])
+rpk5 = run(lambda n, k: _BOTH_ENDS, extra_argv=['--no-parallel'], seconds=4.0,
+           handoff=tempfile.mkdtemp())
+eq('an address under a Dropoff label below a pickup is still the destination, '
+   'unprompted', [((d[0] or {}).get('line'), d[1].get('asked'))
+                  for d in rpk5['dropoffs']], [('34 Made Up Rd, Acworth, GA 30102', False)])
+
+# --- the Trip Planner, read without a press while an order is held ----------
+#
+# Asked for after a shift: with "✓ Took" pressed, the rig reads Uber's Trip
+# Planner on its own whenever it is on the phone, the same whole-screen read ⌖
+# makes, at most once every PLANNER_AUTO_EVERY seconds. The card box on the rig
+# is the bottom half of the screen, so it sees the planner's stop grammar and
+# never its title; the whole-screen read is where the title is checked.
+#
+# "An order is held" is server.js's to say. It writes `.holding.json` with the
+# moment its holding() stops answering yes, and these runs write that file
+# into their own handoff directory the way the server would. Every address
+# below is invented.
+def _hold(handoff, until_s):
+    """Leave the web side's "an order is in the car until <until_s>" note."""
+    was = os.environ.get(HO.ENV_DIR)
+    os.environ[HO.ENV_DIR] = handoff
+    try:
+        with open(HO.path(HO.HOLDING), 'w') as fh:
+            json.dump({'until': int(until_s * 1000)}, fh)
+    finally:
+        if was is None:
+            os.environ.pop(HO.ENV_DIR, None)
+        else:
+            os.environ[HO.ENV_DIR] = was
+
+
+_AUTO_BOX = ('Address\n1625 Heron Blvd NW, Kennesaw, GA\n30152\nView details\n'
+             'Dropoff • 1 order\nStop New Requests')
+_AUTO_WHOLE = next(c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'tests', 'fixtures', 'cases.json'), encoding='utf-8'))['planner']
+    if c['name'] == 'two pickups over a dropoff whose address is below the screen')
+ok_('the premise: the card box shows the planner\'s grammar and not its title, '
+    'and the whole screen shows both',
+    OP.find_planner(_AUTO_BOX) is not None and not OP.planner_titled(_AUTO_BOX)
+    and OP.planner_titled(_AUTO_WHOLE) and len(OP.find_planner(_AUTO_WHOLE)) == 3)
+
+# A card fragment first, so the resample window keeps the card box reading
+# every half second for four seconds over the planner that follows — enough
+# reads to show the read is asked for once and not on every one of them.
+_ha1, _pa1 = tempfile.mkdtemp(), []
+_hold(_ha1, time.time() + 3600)
+ra1 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
+          seconds=6.0, handoff=_ha1, whole_text=_AUTO_WHOLE, planners=_pa1)
+ok_('the premise: the card box read the planner several times, unpressed (%d reads)'
+    % ra1['calls'], ra1['calls'] >= 4)
+eq('with an order held, the planner in the card box gets one whole-screen read, '
+   'unpressed (%r)' % ra1['wholes'], sum(ra1['wholes']), 1)
+eq('...and its stops go out as the planner, said to be unasked',
+   [([s['kind'] for s in p[0]], p[1].get('asked')) for p in _pa1],
+   [(['pickup', 'pickup', 'dropoff'], False)])
+eq('...with each pickup\'s own address and none for the dropoff',
+   [[s['line'] for s in p[0]] for p in _pa1],
+   [['1200 Fable Mill Pkwy NW, Kennesaw, GA 30144',
+     '1625 Heron Blvd NW, Kennesaw, GA 30152', None]])
+eq('...and gives the order in the car no destination off it',
+   ra1['dropoffs'], [])
+
+# With nothing held: no whole-screen read, nothing said. This is what makes it
+# not an accept detector — the driver has to have marked the order taken.
+_ha2, _pa2 = tempfile.mkdtemp(), []
+ra2 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
+          seconds=4.0, handoff=_ha2, whole_text=_AUTO_WHOLE, planners=_pa2)
+eq('with no order held, the planner in the card box is not read whole',
+   (sum(ra2['wholes']), _pa2), (0, []))
+# ...nor with a hold that has run out: the note says until when, and a server
+# that died mid-delivery must not leave the rig reading planners all shift.
+_ha3, _pa3 = tempfile.mkdtemp(), []
+_hold(_ha3, time.time() - 60)
+ra3 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
+          seconds=4.0, handoff=_ha3, whole_text=_AUTO_WHOLE, planners=_pa3)
+eq('...nor with a hold whose time ran out', (sum(ra3['wholes']), _pa3), (0, []))
+
+# The whole screen without the title is not answered as the planner: the stop
+# grammar in a box, under no title, is not evidence the screen is the planner.
+_ha4, _pa4 = tempfile.mkdtemp(), []
+_hold(_ha4, time.time() + 3600)
+_UNTITLED = _AUTO_WHOLE.replace('Trip Planner\n', '', 1)
+ok_('the premise: that whole screen is the planner without its title',
+    OP.find_planner(_UNTITLED) is not None and not OP.planner_titled(_UNTITLED))
+ra4 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
+          seconds=4.0, handoff=_ha4, whole_text=_UNTITLED, planners=_pa4)
+ok_('the premise: it was read whole (%r)' % ra4['wholes'], sum(ra4['wholes']) == 1)
+eq('a whole screen with no "Trip Planner" title is not sent as the planner', _pa4, [])
+
+# ...and a whole-screen read that found no planner gives nothing at all — not
+# the address find_address would take off the whole screen, which nobody asked
+# for and which the label rule alone would have let through here.
+_ha5, _pa5 = tempfile.mkdtemp(), []
+_hold(_ha5, time.time() + 3600)
+_WHOLE_NAV = 'Trip Planner\nDropoff\n77 Made Up Ct, Acworth, GA 30101\n12 min Start'
+ok_('the premise: that whole screen has a labelled address and no stop header',
+    OP.find_planner(_WHOLE_NAV) is None and OP.address_stop(_WHOLE_NAV) == 'dropoff')
+ra5 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
+          seconds=4.0, handoff=_ha5, whole_text=_WHOLE_NAV, planners=_pa5)
+ok_('the premise: it was read whole (%r)' % ra5['wholes'], sum(ra5['wholes']) == 1)
+eq('an unpressed whole-screen read that found no planner sends no address',
+   ra5['dropoffs'], [])
+
+# ...and the planner's own one dropoff is not sent either, on the list that
+# would give it to a press: both ends in view, one dropoff, its street and town
+# read. Unpressed, the stops go to the panel and the destination stays the
+# press's to file — a planner still up from the trip before would otherwise be
+# filed against the order just taken.
+_ha6, _pa6 = tempfile.mkdtemp(), []
+_hold(_ha6, time.time() + 3600)
+ok_('the premise: under a press that planner gives its dropoff as the destination',
+    SP.planner_destination(OP.find_planner(_ONE_DROP_WHOLE),
+                           OP.planner_bounded(_ONE_DROP_WHOLE))[0] is not None
+    and OP.planner_titled(_ONE_DROP_WHOLE))
+ra6 = run(lambda n, k: FRAG if n == 1 else _ONE_DROP, extra_argv=['--no-parallel'],
+          seconds=4.0, handoff=_ha6, whole_text=_ONE_DROP_WHOLE, planners=_pa6)
+eq('an unpressed planner read sends the stops, unasked',
+   [([s['line'] for s in p[0]], p[1].get('asked')) for p in _pa6],
+   [(['4821 Kestrel Dr, Marietta'], False)])
+eq('...and not its one dropoff as the order\'s destination', ra6['dropoffs'], [])
 
 # Whether the journal may keep the stops — names and front doors — is the
 # scanner's to say, because the server does not read its settings: not with
@@ -2089,9 +2262,6 @@ def _crop_of(n):
 _snho = tempfile.mkdtemp()
 _snfold = tempfile.mkdtemp()
 _sreq = [None]
-# --no-track and a Re-find press, so the beat carries a refusal: the flags
-# reader.json reports are then something the beat said, not four Falses.
-open(os.path.join(_snho, 'uberscan-recalibrate'), 'w').close()
 
 
 def _snap_once_stuck(rows, ann, calls):
@@ -2130,9 +2300,8 @@ ok_('...and the card\'s episode (%r)' % _said.get('episode'),
 eq('...the health counters as they stand', ((_said.get('health') or {}).get('reads'),
                                               (_said.get('health') or {}).get('complete')), (3, 3))
 _beat = _said.get('heartbeat')
-ok_('...and the flags the last heartbeat carried, the refused Re-find among them (%r)'
-    % (_beat,), isinstance(_beat, dict) and
-    '--no-track' in (_beat.get('refindRefused') or '')
+ok_('...and the flags the last heartbeat carried (%r)'
+    % (_beat,), isinstance(_beat, dict) and 'refindRefused' not in _beat
     and (_beat.get('tooBright'), _beat.get('tooDim'), _beat.get('notSaving')) == (False, False, None)
     and isinstance(_beat.get('ageMs'), int))
 eq('...the camera\'s word among them, null while it can see',

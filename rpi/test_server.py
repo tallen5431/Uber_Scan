@@ -1464,6 +1464,12 @@ if shutil.which('python3'):
                       'dropoff': None}})
         eq('the order goes in the car', code, 200)
         ok_('...and the server says it is holding', reply.get('holding') is True)
+        # ...and says it as the stream does (heldForPanel), so Map view has
+        # the held order from the press and not from the next reading.
+        eq('held end: the mark reply carries the order in the car as the stream describes it',
+           sorted((reply.get('held') or {}).keys()), ['card', 'dropoff', 'holdId', 'minutes', 'pay'])
+        # Started after the mark, before the scanner's 2s sleep ends.
+        heard = listen(base, 4)
 
         # The address, once the scanner reports it. Polled rather than slept
         # on: the append is asynchronous and reading the file on the next line
@@ -1487,6 +1493,18 @@ if shutil.which('python3'):
         held = get(base, '/api/status').get('holding') or {}
         eq('...while the order really was still in the car',
            held.get('dropoff'), '77 Held Job Way, Kennesaw, GA 30144')
+        # The stream: the ⌖ read filed onto the hold goes out carrying that
+        # hold, with no `ready`, which is how Map view pins it between
+        # readings. Without it the panel learned the end only from the next
+        # reading, and the card on the map stood in for it until then.
+        for _ in range(60):
+            if [m for m in heard if m.get('dropoff')]:
+                break
+            time.sleep(0.05)
+        _said = [m for m in heard if m.get('dropoff')]
+        eq('held end: the ⌖ read filed onto the order in the car goes out carrying it',
+           [((m.get('holding') or {}).get('dropoff'), 'ready' in m) for m in _said],
+           [('77 Held Job Way, Kennesaw, GA 30144', False)])
         ok_('...and marked as read off the screen',
             held.get('dropoffScanned') is True)
         # ...and it survives a restart, which is the whole point of writing it.
@@ -1689,6 +1707,20 @@ if shutil.which('python3'):
         return h
 
     try:
+        # ⟳ Re-find is gone from the panel at the owner's request (AUDITS.md,
+        # Settled), and with nothing left to call it the door it knocked on
+        # went too. A press from a page one version behind is refused, and
+        # nothing is left in the handoff directory for the scanner to act on.
+        _rq = urllib.request.Request(base + '/api/recalibrate', data=b'',
+                                     method='POST')
+        try:
+            with urllib.request.urlopen(_rq, timeout=5) as _r:
+                _code = _r.status
+        except urllib.error.HTTPError as _e:
+            _code = _e.code
+        eq('there is no re-find endpoint any more', _code, 405)
+        eq('...and asking for one leaves no request for the scanner',
+           sorted(n for n in os.listdir(handoff) if 'recalibrate' in n), [])
         code, reply = post(base, '/api/offers/mark', {
             'id': 'o-carried', 'accepted': True,
             'offer': {'id': 'o-carried', 'pay': 14.0, 'minutes': 30.0,
@@ -2284,6 +2316,21 @@ finally:
 _hdir = tempfile.mkdtemp()
 _hjournal = os.path.join(_hdir, 'offers.jsonl')
 _hold = os.path.join(_hdir, 'holding.json')
+# ...and the scanner's copy of "an order is in the car until <ms>", which is
+# what lets it read Uber's Trip Planner without a press (order_held in
+# rpi/scan_pi.py). A handoff directory of its own, so its one file can be
+# named and looked at.
+_hhand = os.path.join(_hdir, 'handoff')
+os.mkdir(_hhand)
+_hheld = os.path.join(_hhand, 'uberscan-holding.json')
+
+
+def _held_until():
+    try:
+        with open(_hheld) as fh:
+            return json.load(fh).get('until')
+    except (OSError, ValueError):
+        return None
 # A scanner of its own, because the hold is set from the SLOT — marking a row
 # in the journal does not put an order in the car, and with no scanner there is
 # no slot. This is the write half; everything after it is the read half.
@@ -2303,7 +2350,8 @@ with open(_hfake, 'w') as _fh:
         'time.sleep(600)\n')
 open(_hjournal, 'w').close()
 _hproc, _hbase = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
-                        'SCANNER_ARGS': _hfake}, _hjournal)
+                        'SCANNER_ARGS': _hfake, 'UBERSCAN_HANDOFF_DIR': _hhand},
+                       _hjournal)
 try:
     _on = None
     for _ in range(120):
@@ -2320,8 +2368,17 @@ try:
         (get(_hbase, '/api/status') or {}).get('holding'))
     ok_('...and it is written down, not only remembered',
         os.path.exists(_hold))
+    # Stated 30 minutes, half again, and the default ten-minute grace: the
+    # moment holding() stops answering yes, which is what the scanner is told.
+    _accepted = json.load(open(_hold)).get('acceptedAt')
+    eq('...and the scanner is told until when, the moment holding() lets go',
+       _held_until(), _accepted + 30 * 1.5 * 60000 + 10 * 60000)
 finally:
     stop(_hproc)
+# Taken away here, so the restart below has to write it again for the order it
+# restores — a hold brought back at boot is a hold the scanner must hear of.
+if os.path.exists(_hheld):
+    os.remove(_hheld)
 
 # The engine goes off and comes back on. Same journal, same file, new process.
 #
@@ -2347,11 +2404,14 @@ def _start_loud(env, journal):
     raise RuntimeError('the server never came up')
 
 
-_hproc2, _hbase2 = _start_loud({'SCANNER': '0'}, _hjournal)
+_hproc2, _hbase2 = _start_loud({'SCANNER': '0', 'UBERSCAN_HANDOFF_DIR': _hhand},
+                               _hjournal)
 try:
     _back = (get(_hbase2, '/api/status') or {}).get('holding')
     ok_('a restarted server still has the order in the car (%r)'
         % ((_back or {}).get('pay'),), bool(_back))
+    eq('...and the scanner is told of it again, until the same moment',
+       _held_until(), _accepted + 30 * 1.5 * 60000 + 10 * 60000)
     if _back:
         eq('...the same one', _back.get('pay'), 21.0)
         eq('...with where it ends, which is what the stack line needs',
@@ -2362,6 +2422,8 @@ try:
     no_('an order put down is gone from the panel',
         (get(_hbase2, '/api/status') or {}).get('holding'))
     no_('...and gone from the disk too', os.path.exists(_hold))
+    no_('...and the scanner is no longer told an order is held',
+        os.path.exists(_hheld))
 finally:
     _hproc2.terminate()
     try:
@@ -4487,7 +4549,7 @@ with open(_bfake, 'w') as fh:
         'open(%r, "w").close()\n'
         'time.sleep(1.5)\n'
         'print(json.dumps({"alive": True, "at": 5, "tooBright": False,\n'
-        '    "tooDim": False, "refindRefused": None, "notSaving": None,\n'
+        '    "tooDim": False, "notSaving": None,\n'
         '    "gps": {"state": "stale", "ageSeconds": 312.0, "fix": %s},\n'
         '    "cpuC": 71.4, "cpuCWhy": None,\n'
         '    "throttled": {"now": ["under-voltage"], "sinceBoot": ["under-voltage"]},\n'
@@ -4988,6 +5050,185 @@ try:
 finally:
     _fake.kill()
     shutil.rmtree(_ndir, ignore_errors=True)
+
+# --- the GPS drop: at the held order's door, then gone from it --------------
+#
+# The driver: "It can be safe to assume I have completed the order if I am at
+# the customer's address." server.js puts the order down — the same putDown()
+# Drop runs, its row marked `by: 'gps'` — once a door-level pin of the held end
+# is on the hold (POST /api/held-end, from Map view), the car has been inside
+# ARRIVE_M of it for the dwell (GPS_DWELL_MS, one second here), and then two
+# good fixes put it past LEAVE_M (300 m). Every case below is one way that must
+# NOT drop, or the one way that must, once.
+#
+# A scanner of its own that sends heartbeats on cue: the suite writes
+# `beats-N.json` (a list of fixes, one beat each, a quarter second apart) and
+# waits for `done-N`. Coordinates invented, in open country.
+_gdir = tempfile.mkdtemp()
+_gjournal = os.path.join(_gdir, 'offers.jsonl')
+open(_gjournal, 'w').close()
+_gfake = os.path.join(_gdir, 'beats.py')
+with open(_gfake, 'w') as _fh:
+    _fh.write(
+        'import json, os, sys, time\n'
+        'd = os.path.dirname(os.path.abspath(__file__))\n'
+        'q = os.path.join(d, "next")\n'
+        'n = int(open(q).read()) if os.path.exists(q) else 0\n'
+        'end = time.time() + 600\n'
+        'while time.time() < end:\n'
+        '    p = os.path.join(d, "beats-%d.json" % n)\n'
+        '    if not os.path.exists(p):\n'
+        '        time.sleep(0.05)\n'
+        '        continue\n'
+        '    for fix in json.load(open(p)):\n'
+        '        print(json.dumps({"alive": True, "at": int(time.time() * 1000),\n'
+        '            "gps": {"state": "ok", "ageSeconds": 0.1, "fix": fix}}), flush=True)\n'
+        '        time.sleep(0.25)\n'
+        '    open(os.path.join(d, "done-%d" % n), "w").close()\n'
+        '    n += 1\n'
+        '    open(q, "w").write(str(n))\n')
+_PIN = (33.9000, -84.5000)
+_DOOR = '4821 Kestrel Dr, Marietta'
+_seq = [0]
+
+
+def _fix(dlat, ok=True, fresh=10.0, err=25.0):
+    return {'lat': _PIN[0] + dlat, 'lon': _PIN[1], 'gpsAge': 0.1, 'gpsErr': err,
+            'gpsMode': 3, 'gpsOk': ok, 'gpsWhy': None if ok else 'rough',
+            'freshFor': fresh}
+
+
+_IN = 0.0003      # ~33 m north of the door
+_MID = 0.0018     # ~200 m: out of the door's circle, not yet 300 m away
+_FAR = 0.005      # ~556 m
+
+
+def _beats(fixes):
+    """Send these as heartbeats and wait until the last one has been read."""
+    n = _seq[0]
+    _seq[0] += 1
+    path = os.path.join(_gdir, 'beats-%d.json' % n)
+    with open(path + '.tmp', 'w') as fh:
+        json.dump(fixes, fh)
+    os.rename(path + '.tmp', path)
+    for _ in range(400):
+        if os.path.exists(os.path.join(_gdir, 'done-%d' % n)):
+            break
+        time.sleep(0.05)
+    time.sleep(0.2)
+
+
+def _took(base, oid, dropoff=_DOOR):
+    post(base, '/api/offers/mark', {
+        'id': oid, 'accepted': True,
+        'offer': {'id': oid, 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': dropoff}})
+    return (get(base, '/api/status').get('holding') or {})
+
+
+def _pin(base, held, dropoff=_DOOR, name='4821, Kestrel Drive, Marietta, Cobb County'):
+    return post(base, '/api/held-end', {
+        'holdId': held.get('holdId'), 'dropoff': dropoff, 'lat': _PIN[0],
+        'lon': _PIN[1], 'name': name, 'doorLevel': True})
+
+
+def _drops(oid):
+    rows = [json.loads(l) for l in open(_gjournal) if l.strip()]
+    return [r for r in rows if r.get('kind') == 'drop' and r.get('id') == oid]
+
+
+def _holding(base):
+    return get(base, '/api/status').get('holding')
+
+
+_GENV = {'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+         'SCANNER_ARGS': _gfake, 'GPS_DWELL_MS': '1000'}
+_DWELL = [_fix(_IN)] * 7          # 1.5 s inside
+_LEAVE = [_fix(_FAR)] * 3
+_gp, _gb = start(_GENV, _gjournal)
+try:
+    # A fix the gate refused never counts, however long it sits at the door.
+    _h = _took(_gb, 'g-gate')
+    eq('[gps drop] a door-level pin for the order in the car is kept',
+       _pin(_gb, _h)[0], 200)
+    _beats([_fix(_IN, ok=False)] * 7 + [_fix(_FAR, ok=False)] * 3)
+    ok_('[gps drop] fixes the gate refused never arrive nor leave', _holding(_gb))
+    # ...nor does one past gps.py's staleness rule (freshFor 0).
+    _beats([_fix(_IN, fresh=0.0)] * 7 + [_fix(_FAR, fresh=0.0)] * 3)
+    ok_('[gps drop] a stale fix never counts', _holding(_gb))
+    # Driving past: inside for half a second, then gone.
+    _beats([_fix(_IN)] * 2 + _LEAVE)
+    ok_('[gps drop] passing by the door without dwelling does not drop', _holding(_gb))
+    # Stopped at the door, and still there — or a little way along the street.
+    _beats(_DWELL)
+    ok_('[gps drop] dwelling at the door is an arrival', (_holding(_gb) or {}).get('arrived'))
+    _beats([_fix(_MID)] * 4)
+    ok_('[gps drop] dwelling then staying near does not drop', _holding(_gb))
+    # Gone: two fixes past 300 m.
+    _beats(_LEAVE)
+    no_('[gps drop] dwelling then leaving puts the order down', _holding(_gb))
+    _beats(_LEAVE)
+    eq('[gps drop] ...exactly once, as a drop row marked by the GPS',
+       [(r.get('by'), r.get('seq') == r.get('at'), 'acceptedAt' in r)
+        for r in _drops('g-gate')], [('gps', True, True)])
+
+    # A pin that is not a door is refused, and with none the GPS never drops.
+    _h = _took(_gb, 'g-street', dropoff='Kestrel Dr, Marietta')
+    eq('[gps drop] a street-level end is refused',
+       _pin(_gb, _h, dropoff='Kestrel Dr, Marietta', name='Kestrel Drive, Marietta'),
+       (409, {'ok': False, 'error': 'not door level'}))
+    _h = _took(_gb, 'g-street2')
+    eq('[gps drop] ...and so is a door the answer does not carry',
+       _pin(_gb, _h, name='Kestrel Drive, Marietta')[1].get('error'), 'not door level')
+    _beats(_DWELL + _LEAVE)
+    ok_('[gps drop] an end that is not door-level never drops', _holding(_gb))
+    post(_gb, '/api/delivered', {})
+
+    # A pin made for the previous order is refused.
+    _old = _took(_gb, 'g-old')
+    post(_gb, '/api/delivered', {})
+    _took(_gb, 'g-new')
+    eq('[gps drop] a pin posted for a previous hold is refused',
+       _pin(_gb, _old), (409, {'ok': False, 'error': 'not the order in the car'}))
+
+    # Drop by hand clears the arrival: arrived, Drop, the same card taken again
+    # and pinned again, and leaving straight away drops nothing.
+    _h = _took(_gb, 'g-hand')
+    _pin(_gb, _h)
+    _beats(_DWELL)
+    ok_('[gps drop] (the premise: it had arrived)', (_holding(_gb) or {}).get('arrived'))
+    post(_gb, '/api/delivered', {})
+    _h = _took(_gb, 'g-hand')
+    _pin(_gb, _h)
+    no_('[gps drop] Drop pressed by hand clears the arrival',
+        (_holding(_gb) or {}).get('arrived'))
+    _beats(_LEAVE)
+    ok_('[gps drop] ...so leaving afterwards drops nothing', _holding(_gb))
+
+    # A new Took is a new end: the old pin does not come with it.
+    ok_('[gps drop] (the premise: the old order was pinned)',
+        (_holding(_gb) or {}).get('endPinned'))
+    _took(_gb, 'g-next')
+    no_('[gps drop] a new Took clears the old end', (_holding(_gb) or {}).get('endPinned'))
+
+    # Pinned and arrived, then the server restarts in the driveway.
+    _h = _took(_gb, 'g-boot')
+    _pin(_gb, _h)
+    _beats(_DWELL)
+finally:
+    stop(_gp)
+_gp, _gb = start(_GENV, _gjournal)
+try:
+    _back = _holding(_gb) or {}
+    eq('[gps drop] the pin and the arrival survive a restart via holding.json',
+       (_back.get('endPinned'), _back.get('arrived')), (True, True))
+    _beats(_LEAVE)
+    eq('[gps drop] ...and leaving after it drops the order once',
+       ([r.get('by') for r in _drops('g-boot')], _holding(_gb)), (['gps'], None))
+finally:
+    stop(_gp)
+    shutil.rmtree(_gdir, ignore_errors=True)
+
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)

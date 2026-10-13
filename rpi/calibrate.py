@@ -357,7 +357,7 @@ def main():
     print('corners: %s' % config['quad'])
     if drawn:
         print('reading the box you gave ([%s] of the frame) and nothing else; '
-              'corner tracking is off until the scanner is asked to re-find'
+              'corner tracking is off until the scanner is calibrated without a box'
               % CX.describe(drawn))
     print('preview: %s  (%dx%d — the exact image tesseract will read)'
           % (preview_path, preview.shape[1], preview.shape[0]))

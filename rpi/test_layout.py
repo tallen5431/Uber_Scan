@@ -464,7 +464,7 @@ CAPTION_LINES = [
     ('no map-view.js',
      'map-view.js did not load, so there is no map here.'),
     ('a card naming nowhere',
-     'this card names nowhere yet — ⌖ Dropoff reads it off your phone'),
+     'this card names nowhere yet — ⌖ Scan reads it off your phone'),
     ('no card at all',
      'no card read yet — nothing to put on a map'),
     ('loading',
@@ -573,7 +573,7 @@ CAPTION_LINES = [
      "past its 99.9 mi (rig-corrected)",
      "wrong pin for " + WIDEST_DISC + " — 74.9 mi from your order's card"),
     ('the held job has no address',
-     'the order in your car has no address on record — ⌖ Dropoff reads it '
+     'the order in your car has no address on record — ⌖ Scan reads it '
      'off your phone'),
     ('nothing in the car',
      'nothing in the car to compare this against'),
@@ -926,6 +926,12 @@ for _said, _fields in NOVERDICT_SAID.items():
         NOVERDICT['%s/%s' % (_said, _track)] = dict(
             {'ready': False, 'state': 'empty', 'track': _t, 'places': [], 'text': ''},
             **_fields)
+# ...and a read starting over a screen whose last reading found no offer:
+# READING THE SCREEN and "no offer on screen · reading again", where it said
+# READING THE CARD and "working out the pay, the time and the distance" over a
+# navigation map. Two messages, pushed in order. No track note: the line while
+# a read is out never carries one.
+NOVERDICT['again/alone'] = [NOVERDICT['nothing/alone'], {'reading': True, 'at': 1}]
 # The rig's own display, and the two the panel is proven at.
 NOVERDICT_PANELS = [p for p in PANELS if p[0] in ('1024x600', '800x480', '480x320')]
 
@@ -1062,6 +1068,17 @@ HERE_LINES = json.loads(subprocess.run(
     capture_output=True, text=True, timeout=60).stdout or '[]')
 eq('every "you are here" form is a sentence the page can say',
    [name for name, text in HERE_LINES if not text], [])
+# ...and on the panel only, each form with a dot once the driver has taken the
+# map and it has stopped following: the label, then live.html's own word for
+# that, read out of the page rather than copied here. map.html does not follow
+# and never says it.
+_live_src = open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read()
+_paused = re.search(r"var FOLLOW_PAUSED = '([^']+)';", _live_src)
+ok_('live.html says in words when its map has stopped following the dot',
+    _paused is not None)
+LIVE_HERE_LINES = HERE_LINES + [
+    [name + ', not following', text + _paused.group(1)]
+    for name, text in HERE_LINES if name.startswith('label') and _paused]
 env_probe = dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS))
 if subprocess.call(['node', '-e', 'require("playwright")'], env=env_probe,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
@@ -1071,12 +1088,15 @@ DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
        snapPanelsJson, noVerdictJson, noVerdictPanelsJson, plannerJson,
-       plannerPanelsJson, hereJson, foundPayJson] = process.argv.slice(2);
+       plannerPanelsJson, hereJson, foundPayJson, liveHereJson] = process.argv.slice(2);
 // A card's payout read off a card found above the box, and the same read
 // through the box; see FOUNDPAY on the Python side.
 const FOUNDPAY = JSON.parse(foundPayJson);
 // The "you are here" label's forms, made by MV.hereDot; see HERE_LINES.
 const HERE_LINES = JSON.parse(hereJson);
+// ...and the panel's, which adds each dot's label once it has stopped
+// following; see LIVE_HERE_LINES.
+const LIVE_HERE_LINES = JSON.parse(liveHereJson);
 const PANELS = JSON.parse(panelsJson), PAGES = JSON.parse(pagesJson);
 // The Trip Planner's stops and where they are measured; see PLANNER_STOPS.
 const PLANNER = JSON.parse(plannerJson);
@@ -1579,7 +1599,7 @@ const SNAP_MEASURE = (fixture) => {
             };
           };
           // Four states, because the interesting comparison is not against an
-          // empty bar. `plain` is the five fixed controls; `before` adds the
+          // empty bar. `plain` is the four fixed controls; `before` adds the
           // "Took ..." button, which is the bar as it stood before an order in
           // the car was a thing this panel knew about; `full` adds "Drop" on
           // top. What has to hold is that `full` clips nothing `before` did not
@@ -1746,20 +1766,23 @@ const SNAP_MEASURE = (fixture) => {
           note.hidden = true;
           note.textContent = '';
           return out;
-        }, HERE_LINES);
+        }, LIVE_HERE_LINES);
         // ...and the key to how each place was found (drawHow), across the
         // map's foot: shown as the page's own rule draws it on this panel,
         // and asked the same of — inside the map, below the zoom buttons
         // (10px in, two 30px buttons and their 2px borders: 74px), ONE row,
         // nothing cut — plus which of its two forms this panel gets.
         // Both of its forms: what it says of the marks, and what it says
-        // when drawing them failed (showKey(null)).
-        const KEY_MEASURE = (failed) => {
+        // when drawing them failed (showKey(null)) — and the marks' form
+        // with the held order's pickup ring in it too, which drops the long
+        // words everywhere and takes two rows on the hat (see #mapKey's rule).
+        const KEY_MEASURE = ([failed, hpick]) => {
           const key = document.getElementById('mapKey');
           const map = document.getElementById('liveMap').getBoundingClientRect();
           key.hidden = false;
           key.querySelector('.k-all').hidden = failed;
           key.querySelector('.k-fail').hidden = !failed;
+          key.querySelector('.k-item[data-k="hpick"]').hidden = !hpick;
           const r = key.getBoundingClientRect();
           const tops = {};
           const walk = document.createTreeWalker(key, NodeFilter.SHOW_TEXT);
@@ -1785,10 +1808,12 @@ const SNAP_MEASURE = (fixture) => {
           key.hidden = true;
           key.querySelector('.k-all').hidden = false;
           key.querySelector('.k-fail').hidden = true;
+          key.querySelector('.k-item[data-k="hpick"]').hidden = false;
           return out;
         };
-        shown.key = await page.evaluate(KEY_MEASURE, false);
-        shown.keyFailed = await page.evaluate(KEY_MEASURE, true);
+        shown.key = await page.evaluate(KEY_MEASURE, [false, false]);
+        shown.keyHeld = await page.evaluate(KEY_MEASURE, [false, true]);
+        shown.keyFailed = await page.evaluate(KEY_MEASURE, [true, false]);
         // ...and what a mark of drawHow's says when pointed at (#mapTip):
         // the longest the suite's marks say — a refused McDonald's with the
         // branch outside its 9.9 mi disc, 142 characters — in the one box
@@ -2146,7 +2171,7 @@ const SNAP_MEASURE = (fixture) => {
       for (const [key, reading] of Object.entries(NOVERDICT)) {
         await page.evaluate((r) => {
           window.__es.push({ alive: true, at: 1 });
-          window.__es.push(r);
+          (Array.isArray(r) ? r : [r]).forEach((m) => window.__es.push(m));
         }, reading);
         await page.waitForTimeout(150);
         slot[key] = await page.evaluate(() => {
@@ -2187,8 +2212,31 @@ const SNAP_MEASURE = (fixture) => {
           // times over and a `white-space: nowrap` that ran it off the glass
           // both left the page's scroll size alone. The letters are what a
           // driver would miss, and `off` above is what asks after them.
+          // ...and the verdict's own label, whose words change for one of
+          // these: every letter inside the verdict card and on the glass.
+          const lab = document.getElementById('verdictLabel');
+          const card = document.getElementById('verdict').getBoundingClientRect();
+          const labOff = [];
+          const lw = document.createTreeWalker(lab, NodeFilter.SHOW_TEXT);
+          while ((n = lw.nextNode())) {
+            for (let i = 0; i < n.length; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (!c.width && !c.height) continue;
+              if (c.left < Math.max(0, card.left) - 0.5
+                  || c.right > Math.min(window.innerWidth, card.right) + 0.5
+                  || c.top < Math.max(0, card.top) - 0.5
+                  || c.bottom > Math.min(window.innerHeight, card.bottom) + 0.5) labOff.push(n.data[i]);
+            }
+          }
+          const labRange = document.createRange();
+          labRange.selectNodeContents(lab);
           return {
             text: d.textContent.trim(),
+            label: lab.textContent.trim(),
+            labelOff: labOff.join(''),
+            labelLines: Math.round(labRange.getClientRects().length),
             width: Math.round(all.getBoundingClientRect().width * 10) / 10,
             lines: Math.round(r.height / line),
             off: off.join(''),
@@ -2392,8 +2440,8 @@ const SNAP_MEASURE = (fixture) => {
     for (const view of ['screen', 'scene']) {
       const { ctx, page } = await plannerPage(panel, view);
       await page.evaluate((notice) => {
-        window.__es.push(Object.assign({ alive: true, at: 1, tooDim: false,
-                                         refindRefused: null }, notice));
+        window.__es.push(Object.assign({ alive: true, at: 1, tooDim: false },
+                                       notice));
         window.__es.push({ ready: false, state: 'empty', track: null, places: [], text: '' });
       }, PLANNER.notice);
       await page.waitForTimeout(150);
@@ -2412,7 +2460,7 @@ const SNAP_MEASURE = (fixture) => {
         const { ctx, page } = await plannerPage(panel, view);
         await page.evaluate((w) => {
           window.__es.push({ alive: true, at: 1, tooBright: false, tooDim: false,
-                             refindRefused: null, notSaving: null, blind: w });
+                             notSaving: null, blind: w });
           window.__es.push({ ready: false, state: 'empty', track: null, places: [], text: '' });
         }, word);
         await page.waitForTimeout(150);
@@ -2626,7 +2674,8 @@ try:
          json.dumps({'stops': PLANNER_STOPS, 'unfiled': PLANNER_UNFILED,
                      'notes': PLANNER_NOTES, 'notice': PLANNER_NOTICE,
                      'blind': PLANNER_BLIND}),
-         json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES), json.dumps(FOUNDPAY)],
+         json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES), json.dumps(FOUNDPAY),
+         json.dumps(LIVE_HERE_LINES)],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -2700,6 +2749,27 @@ try:
                was['phone'], view == 'screen')
             ok_('...against the line it replaced at %s (%r)' % (where, was['text']),
                 was['text'] == 'scanner running, no offer on screen')
+            # A read over a screen that just read as no offer: the label and
+            # the line say what it last found, and fit where the line and the
+            # label it stands in for did.
+            ag = nv['again/alone']
+            eq('a read over a no-offer screen is READING THE SCREEN at %s' % where,
+               (ag['label'], ag['text']),
+               ('READING THE SCREEN', 'no offer on screen · reading again'))
+            eq('...every letter of the label in the verdict card at %s' % where,
+               ag['labelOff'], '')
+            eq('...on one line, as WAITING FOR AN OFFER is, at %s (%d, %d)'
+               % (where, ag['labelLines'], was['labelLines']),
+               ag['labelLines'], was['labelLines'])
+            eq('...and every letter of the line on the glass at %s' % where,
+               ag['off'], '')
+            ok_('...on no more lines than the line it replaced at %s (%d, %d)'
+                % (where, ag['lines'], was['lines']),
+                1 <= ag['lines'] <= was['lines'])
+            # Everything but the label's own box, whose width is its words'.
+            _nolabel = lambda l: dict(l, label=l['label'][1:2] + l['label'][3:])
+            eq('...moving nothing else on the panel at %s' % where,
+               _nolabel(ag['layout']), _nolabel(was['layout']))
             for key, opens in (('nopay', 'no pay read'),
                                ('notime', 'pay, no time'),
                                ('clipped', 'pay at the box edge')):
@@ -2989,14 +3059,16 @@ try:
                 # while a job is already in the car.
                 bar = phone.get('bar') or {}
                 plain, full = bar.get('plain') or {}, bar.get('full') or {}
-                # With both conditional buttons up, the keypad link stands down
-                # — on every panel, because not one of them has room for seven.
-                # The six that stay are the ones wanted while the car is
-                # moving, and the way to the offer log is one of them.
-                eq('the crowded bar sheds the keypad link at %s (bar %spx)'
+                # With two conditional buttons up the bar holds six, which fits,
+                # so nothing stands down. It used to be seven here — ⟳ Re-find
+                # was a third always-on control — and the keypad link went for
+                # every pair. Re-find is gone at the owner's request, and a rule
+                # still shedding at six would cost the driver a control for
+                # nothing.
+                eq('a bar with two conditionals keeps all six at %s (bar %spx)'
                    % (panel, full.get('width')),
                    full.get('count'), 6)
-                no_('...which is the one that goes, at %s (%r)'
+                ok_('...the keypad link among them, at %s (%r)'
                     % (panel, full.get('labels')),
                     any('Type' in l for l in (full.get('labels') or [])))
                 ok_('...and still fits the glass at %s' % panel,
@@ -3019,11 +3091,11 @@ try:
                    % (panel, len(before.get('clipped') or []),
                       len(full.get('clipped') or [])),
                    fresh, [])
-                # ...and the five fixed controls are clean wherever the bar is
+                # ...and the four fixed controls are clean wherever the bar is
                 # not being squeezed, which is what says the squeeze is the
                 # cause rather than the labels being too long everywhere.
                 if (plain.get('width') or 0) >= 400:
-                    eq('...with the five fixed controls clipping nothing at %s'
+                    eq('...with the four fixed controls clipping nothing at %s'
                        % panel, plain.get('clipped'), [])
                 # The widest this bar ever gets, and an absolute claim rather
                 # than a comparative one.
@@ -3064,19 +3136,30 @@ try:
                     ok_('the way to the offers page is on the bar in "%s" at '
                         '%s (%r)' % (_state, panel, _labels),
                         any('Offers' in l for l in _labels))
-                # ...and what gives way instead, in the one state that needs a
-                # sixth thing to go: the control that re-draws the crop region,
-                # which is done with the car stationary and the phone being
-                # seated in the mount — not with a job in the car and a card on
-                # the screen. ⟳ Re-find stays; the tracker can lose the corners
-                # at any moment and that is fixed where the driver is.
+                # ...and what gives way in the one state that needs something
+                # to: the keypad link, and nothing else.
                 _crowded_labels = crowded.get('labels') or []
-                no_('...and ▣ Set box is what stands down for it at %s (%r)'
+                no_('...and ⌨ Type is what stands down for it at %s (%r)'
                     % (panel, _crowded_labels),
-                    any('Set box' in l for l in _crowded_labels))
-                ok_('...while Re-find stays, because corners are lost while '
-                    'moving at %s' % panel,
-                    any('Re-find' in l for l in _crowded_labels))
+                    any('Type' in l for l in _crowded_labels))
+                # ▣ SET BOX IS ON THE GLASS IN EVERY STATE OF THIS BAR.
+                #
+                # It was not. With ⟳ Re-find on the bar the fullest state was
+                # seven, and ▣ Set box was the control that stood down for it —
+                # so with a card on screen, an order in the car and ⌖ Dropoff
+                # up, the one control that fixes the boxes was not there to
+                # press. The owner's report was that the box "tends to get stuck
+                # and not let me set it". Re-find was taken off the bar at their
+                # request; Set box stays in all four states, and no state may
+                # bring Re-find back.
+                for _state in ('plain', 'before', 'full', 'crowded'):
+                    _labels = (bar.get(_state) or {}).get('labels') or []
+                    ok_('▣ Set box is on the bar in "%s" at %s (%r)'
+                        % (_state, panel, _labels),
+                        any('Set box' in l for l in _labels))
+                    no_('...and there is no ⟳ Re-find on it in "%s" at %s'
+                        % (_state, panel),
+                        any('Re-find' in l for l in _labels))
                 ok_('...each still 44px tall at %s (%.4gpx, bar %spx tall)'
                     % (panel, crowded.get('shortest') or 0, crowded.get('height')),
                     (crowded.get('shortest') or 0) >= 43.5)
@@ -3123,8 +3206,8 @@ try:
                    phone['scenePressed'], 'false')
                 # The cycle is screen → scene → map → screen, so what the scene
                 # offers next is the map. A third mode on this control rather
-                # than a seventh button in the bar: the bar holds six, and ▤
-                # Offers already cost ▣ Set box its slot in the fullest state.
+                # than another button in the bar: the bar holds six, and the
+                # fullest state already has six in it.
                 ok_('...and offers the map next at %s (%r)'
                     % (panel, phone['sceneLabel']),
                     'Map' in phone['sceneLabel'])
@@ -3238,8 +3321,8 @@ try:
                 # zoom buttons, whole, and short enough to read at a glance.
                 here = phone.get('here') or {}
                 eq('every "you are here" form was measured at %s' % panel,
-                   sorted(name for name, _t in HERE_LINES if name not in here), [])
-                for name, _t in HERE_LINES:
+                   sorted(name for name, _t in LIVE_HERE_LINES if name not in here), [])
+                for name, _t in LIVE_HERE_LINES:
                     m = here.get(name) or {}
                     ok_('the "you are here" %r sits inside the map at %s (%r)'
                         % (name, panel, m), m.get('inside'))
@@ -3265,6 +3348,18 @@ try:
                    key.get('text'),
                    "◯ reach · ● pin · ● found · ○ outside" if h <= 380
                    else "◯ card's reach · ● pin · ● also found · ○ outside")
+                # ...and with the held order's pickup in it: one row and the
+                # short words on every panel but the hat, which has 206px of
+                # room for 293px of words and takes two rows, and only there.
+                key = phone.get('keyHeld') or {}
+                ok_('the key with the held pickup in it sits inside the map, below the '
+                    'zoom buttons, in %s, nothing cut, at %s (%r)'
+                    % ('two rows' if h <= 380 else 'one row', panel,
+                       (key.get('rows'), key.get('spills'), key.get('w'), key.get('mapW'))),
+                    key.get('inside') and key.get('belowZoom')
+                    and key.get('rows') == (2 if h <= 380 else 1) and not key.get('spills'))
+                eq('...saying the held pickup with the rest at %s' % panel, key.get('text'),
+                   "◯ reach · ● pin · ● found · ○ outside · ◎ held pickup")
                 key = phone.get('keyFailed') or {}
                 ok_('the key saying how each place was found was not drawn sits inside '
                     'the map, below the zoom buttons, in one row, nothing cut, at %s (%r)'

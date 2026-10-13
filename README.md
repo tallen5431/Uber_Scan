@@ -540,11 +540,11 @@ So the Pi scanner keeps one line per offer it was confident about, in
 * **the destination you revealed on your phone, on the row.** An offer card
   often prints “Customer dropoff” and no address, so where the job ends is
   unknown at the moment it matters most. Tap the dropoff on your phone and
-  press **⌖ Dropoff** on the driving screen while the card is up, and the
+  press **⌖ Scan** on the driving screen while the card is up, and the
   address goes on that offer's row — labelled as read off the phone rather
   than printed on the card, because the two are different kinds of evidence.
   It is also what puts the job on the map.
-* **the stops on Uber's Trip Planner.** Press **⌖ Dropoff** with the planner
+* **the stops on Uber's Trip Planner.** Press **⌖ Scan** with the planner
   up on the phone and the driving screen lists its stops in order, one line
   each — `▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta` — between
   offers, until you press again, the order is put down or the next offer is
@@ -553,7 +553,10 @@ So the Pi scanner keeps one line per offer it was confident about, in
   phone too bright) comes first: the stops give way to it a line at a time and
   say how many they are. The planner prints no ZIP, so it is read by its own
   layout (the stop header, the name, “Expected by”, and the street and town
-  under “Address”), and only when you press. When the trip has exactly one
+  under “Address”). With an order marked taken it is also read without a
+  press whenever the card box shows a planner, at most once every ten seconds,
+  off a whole screen whose title reads “Trip Planner” — the stops only, never a
+  destination. When you press and the trip has exactly one
   dropoff — one on the screen, and both ends of the list in view: the title
   over the first stop and “Waybill” under the last — and its street and town
   read, that address becomes the order in the car's destination as any other

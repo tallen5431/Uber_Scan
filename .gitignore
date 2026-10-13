@@ -2,7 +2,7 @@
 *.pyc
 __pycache__/
 # Requests in flight between the web side and the camera side: someone is
-# looking, re-find the phone, read this box, read the destination, a cost per
+# looking, read this box, read the destination, a cost per
 # mile, what the reader last read. Every one exists for seconds and
 # lives in /dev/shm on any machine that has it — see rpi/handoff.py. These are
 # the fallback names, used where there is no RAM disk to write in, and still
@@ -14,6 +14,9 @@ __pycache__/
 # into one file. Named exactly, three of those temporaries were missed, and a
 # `git add -A` on the rig commits whatever was on disk at the time.
 rpi/.viewing*
+# Not written any more — ⟳ Re-find was taken off the panel at the owner's
+# request — and kept so a file an older version left in a checkout is not
+# committed.
 rpi/.recalibrate*
 rpi/.cropbox.json*
 # The fourth. Committed, it is worse than untidy: every checkout and pull

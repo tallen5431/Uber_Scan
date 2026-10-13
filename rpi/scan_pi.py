@@ -473,20 +473,6 @@ WATCH_PATH = HO.path(HO.VIEWING)
 WATCH_PATHS = HO.candidates(HO.VIEWING)
 WATCH_WINDOW = 10.0
 
-# Touched by the web side when the driver asks for the outline to be re-found.
-# A file rather than a signal or a socket, for the same reason .viewing is one:
-# the scanner is sometimes a child of the web server and sometimes a systemd
-# unit that has never heard of it, and a file works identically either way.
-#
-# It exists because the automatic recovery cannot always be sure. Corners that
-# have drifted off to one side are unambiguous — the card is in the middle of
-# the frame and they are not — but corners sitting concentric with the screen
-# at the wrong size are not: that is equally "the phone was re-seated" and "the
-# outline is on part of the screen", and no amount of looking tells them apart.
-# The driver can see which it is in one glance at the live view, so the honest
-# answer is to let them say.
-RESET_PATH = HO.path(HO.RECALIBRATE)
-
 
 # A Pi 4 has no real-time clock. With no network it boots somewhere in 1970 and
 # jumps forward whenever it first reaches an NTP server, which in a car can be
@@ -514,29 +500,37 @@ def clock_minutes(now=None):
     return local.tm_hour * 60 + local.tm_min
 
 
-def reset_requested():
-    """True once per request, and never fatal if the file cannot be removed.
+def order_held(now=None):
+    """Whether the web side says an order is in the car right now.
 
-    Both places are checked and both are cleared: a web server one `git pull`
-    behind this process writes to the other one, and a request left lying in
-    either would be acted on whenever the scanner next restarted — throwing
-    away a good calibration mid-shift for no reason the driver could see.
+    server.js writes `.holding.json` holding `until`, the moment its own
+    holding() stops answering yes (holdEnds there), whenever the order in the
+    car changes, and removes it when there is none. Judged against `until`
+    here rather than by the file's presence, so a server that died mid-delivery
+    does not leave the scanner believing in an order for the rest of the shift.
+    Anything unreadable is no order: this decides only whether the rig reads
+    the planner without a press, and ⌖ reads it either way.
     """
-    try:
-        asked = any(os.path.exists(p) for p in HO.candidates(HO.RECALIBRATE))
-    except OSError:
-        return False
-    if not asked:
-        return False
-    HO.clear(HO.RECALIBRATE)
-    return True
+    now = time.time() if now is None else now
+    for candidate in HO.candidates(HO.HOLDING):
+        try:
+            with open(candidate, encoding='utf-8') as fh:
+                until = json.load(fh).get('until')
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(until, (int, float)) and now * 1000.0 < until:
+            return True
+    return False
 
 
 def dropoff_requested(now=None):
     """Seconds left of a press's window, once per press; None when there is none.
 
-    Same shape as reset_requested, except that it answers with how much of the
-    window is left rather than True, for the reason at the foot of this.
+    Both places are looked in and both are cleared — see handoff.clear for why:
+    a web server one `git pull` behind this process writes to the other one,
+    and a request left lying in either would be acted on whenever the scanner
+    next restarted. Answers with how much of the window is left rather than
+    True, for the reason at the foot of this.
 
     Separate from the reading itself: this only says the driver asked. What it
     buys is a window — see DROPOFF_WINDOW — because the phone is showing a
@@ -614,13 +608,19 @@ def dropoff_requested(now=None):
 # reason: long enough to cover a person doing one thing on a phone, short enough
 # that the rig is not still hunting for an address when the next offer arrives.
 DROPOFF_WINDOW = 12.0
+# At most one Trip Planner read every this many seconds that nobody pressed for.
+# See `planner_auto` in main(). The owner's figure: "at most one read every
+# ~10 s". A whole-screen read is a second or more of the Pi's attention (1.8s
+# median on the rig), so this keeps the planner from crowding out the card box
+# while it sits on the phone for a whole delivery.
+PLANNER_AUTO_EVERY = 10.0
 
 
 def settings_requested():
     """A cost per mile the driver typed on a screen, once; None when there is none.
 
     Written by POST /api/settings, which answers only for a machine that runs a
-    scanner. Taken from both places for the reason reset_requested gives, and
+    scanner. Taken from both places for the reason handoff.clear gives, and
     never fatal.
 
     ONE KEY. The block this lands in is not a list of preferences: `keepPlaces`
@@ -647,7 +647,7 @@ def settings_requested():
     went on pricing at the figure before. Renaming the request to a name of
     this process's own takes exactly the file that was there; one renamed in
     after that is a new file under the old name, left for the next pass.
-    Both places are still emptied, for the reason reset_requested gives.
+    Both places are still emptied, for the reason handoff.clear gives.
     """
     raw = None
     for candidate in HO.candidates(HO.SETTINGS):
@@ -1431,12 +1431,6 @@ def log(message):
 HEALTH_EVERY = 120.0
 SAMPLE_EVERY = 20.0
 
-# How long a refused Re-find stays on the driving screen. Long enough to be
-# read at a glance from the seat several heartbeats running, short enough that
-# the one refusal that is permanently true — `--no-track`, where the button can
-# never do anything — does not leave a notice up for the rest of the shift.
-REFIND_NOTICE_S = 25.0
-
 
 class Health:
     """Counts what happened, and says so occasionally.
@@ -1467,6 +1461,11 @@ class Health:
         # missing destination is find_address being strict on purpose.
         self.address_refused_as_offer = 0
         self.street_seen_no_address = 0
+        # `address_not_dropoff` is the label guard's firing rate: an address
+        # off a payout-free screen that was refused because the screen did not
+        # print it under a Dropoff label — under a Pickup one, or, unprompted,
+        # under none. See digest().
+        self.address_not_dropoff = 0
         # `screens_kept` is how many payout-free screens were recorded as
         # having followed a card — the corpus an accept-detector has to be
         # built on, and which does not exist yet. A run total for the same
@@ -1507,41 +1506,6 @@ class Health:
         # thing that fixes it is a slider on the driver's phone.
         self.too_bright = False
         self.too_dim = False
-        # Why the last Re-find did nothing, or None if the last one worked.
-        #
-        # A press that is refused used to be answered with a log line, and a log
-        # line is not somewhere a driver looks — the button on the live page
-        # went on to say "re-finding" either way, because the only thing it
-        # waits for is a web handler that touches a file and has never spoken to
-        # the scanner. So the rig quietly kept reading through the corners the
-        # driver had just asked it to abandon, and the screen said it had not.
-        # Carried as the scanner's own sentence rather than a flag, so the page
-        # states the reason it was actually given instead of guessing at one.
-        self.refind_refused = None
-        self.refind_refused_at = None
-
-    def refind_says(self, why, now):
-        """Record what the last Re-find did, or None if it worked."""
-        self.refind_refused = why
-        self.refind_refused_at = now if why else None
-
-    def refind_notice(self, now):
-        """The refusal, while it is still an answer to something just pressed.
-
-        Time-bounded, and the reason is `--no-track`: on a rig started that way
-        the refusal is permanently true — there are never any corners for the
-        button to move — so a notice with no expiry would go up on the first
-        press and stay there for the rest of the shift. A notice that cannot be
-        cleared is one the driver stops reading, which costs the notices that
-        can be. This is an answer to something they just did, so it lives about
-        as long as they might still be waiting for one, and pressing again
-        brings it straight back.
-        """
-        if not self.refind_refused or self.refind_refused_at is None:
-            return None
-        if now - self.refind_refused_at > REFIND_NOTICE_S:
-            return None
-        return self.refind_refused
 
     def reset(self, now):
         # None rather than time.time(): the window starts when the first read
@@ -1618,6 +1582,7 @@ class Health:
                 # Run totals, not window totals — see __init__.
                 'streetNoAddress': self.street_seen_no_address,
                 'addressAsOffer': self.address_refused_as_offer,
+                'addressNotDropoff': self.address_not_dropoff,
                 'screensKept': self.screens_kept,
                 'repeats': self.repeats,
                 'relocks': self.relocks, 'rebaselines': self.rebaselines,
@@ -1695,6 +1660,11 @@ class Health:
                         'offer card'
                         % (self.address_refused_as_offer,
                            '' if self.address_refused_as_offer == 1 else 'es'))
+        if self.address_not_dropoff:
+            bits.append('%d address%s since start refused for not being under '
+                        'a Dropoff label'
+                        % (self.address_not_dropoff,
+                           '' if self.address_not_dropoff == 1 else 'es'))
         if self.screens_kept:
             bits.append('%d screen%s since start recorded as following a card'
                         % (self.screens_kept,
@@ -1745,8 +1715,8 @@ class Health:
                 bits.append('re-locked %dx since start' % self.relocks)
             if self.rebaselines:
                 # "the size it judges against", not "the calibration". The
-                # calibration itself is kept for the run — it is what re-find
-                # restores and what `wander` is measured against — and saying
+                # calibration itself is kept for the run — it is what `wander`
+                # is measured against — and saying
                 # otherwise sent a driver to re-calibrate over something the
                 # rig had already worked around.
                 bits.append('un-stuck %dx — the size the tracker judges against '
@@ -1894,7 +1864,7 @@ ALIVE_EVERY = 4.0
 def not_saving_notice(log):
     """The panel's sentence for a journal that is refusing writes, or None.
 
-    A sentence and not a flag, for the reason `refindRefused` is one: the end
+    A sentence and not a flag: the end
     that knows what went wrong is this one, and the page must not be in the
     business of guessing a driver's situation from an errno. The errno rides
     along all the same — on a Pi, "Read-only file system" is the entire
@@ -1913,8 +1883,8 @@ def not_saving_notice(log):
     return 'Offers are NOT being saved: %s' % why
 
 
-def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
-               not_saving=None, blind=None, gps=None, pi=None):
+def emit_alive(too_bright=False, too_dim=False, not_saving=None, blind=None,
+               gps=None, pi=None):
     """The beat, and the conditions that have to reach the driver without one.
 
     `tooBright` rides here rather than on a reading because the state it
@@ -1924,16 +1894,12 @@ def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
     clear it as soon as it goes away, and outside `ready` so it can never
     overwrite a verdict.
 
-    `refindRefused` rides here for the same reason and one more: a refused
-    Re-find is most likely when there is no screen to read, so a channel that
-    needs a reading to carry it would be silent in exactly the case it exists
-    for. It is a sentence or None, never a flag — the reason belongs to the
-    scanner, which is the only end that knows it.
-
-    `notSaving` is the third, and the one this rig had no channel for at all.
+    `notSaving` is the second, and the one this rig had no channel for at all.
     The journal refusing writes is the only failure here that costs something
-    which cannot be got back: a washed-out card can be re-read, a refused
-    Re-find can be pressed again, and an offer nobody wrote down is gone. It
+    which cannot be got back: a washed-out card can be re-read, a box drawn
+    wrong can be drawn again, and an offer nobody wrote down is gone. It
+    is a sentence or None, never a flag — the reason belongs to the scanner,
+    which is the only end that knows it. It
     rides the heartbeat rather than a reading because the whole point is that
     the readings go on looking perfect while it happens — server.js writes its
     own rows through a request and can answer 500, and the driver's tick
@@ -1951,7 +1917,7 @@ def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
     and that fix itself with its quality and the gate's answer (beat_fix), for
     the maps' "you are here" dot.
     `pi` is PiHealth.sample()'s four fields, spread onto the beat as names of
-    their own the way the four above are: the page reads `cpuC` and
+    their own the way the flags above are: the page reads `cpuC` and
     `throttled`, and the reason beside each null goes on to /api/status.
 
     `blind` is the camera's word when it cannot see — 'stalled' or 'dark',
@@ -1966,22 +1932,19 @@ def emit_alive(too_bright=False, too_dim=False, refind_refused=None,
     only the page knows how much room it has for each.
     """
     beat = {'alive': True, 'at': int(time.time() * 1000)}
-    beat.update(alive_flags(too_bright, too_dim, refind_refused, not_saving,
-                            blind))
+    beat.update(alive_flags(too_bright, too_dim, not_saving, blind))
     beat['gps'] = gps
     beat.update(pi or {})
     print(json.dumps(beat), flush=True)
 
 
-def alive_flags(too_bright=False, too_dim=False, refind_refused=None,
-                not_saving=None, blind=None):
-    """The beat's five conditions as the wire carries them.
+def alive_flags(too_bright=False, too_dim=False, not_saving=None, blind=None):
+    """The beat's four conditions as the wire carries them.
 
     Its own function so 📷 Snap's reader.json says the last beat in the words
-    the beat said it, rather than in a second spelling of the same five.
+    the beat said it, rather than in a second spelling of the same four.
     """
     return {'tooBright': bool(too_bright), 'tooDim': bool(too_dim),
-            'refindRefused': refind_refused or None,
             'notSaving': not_saving or None,
             'blind': blind or None}
 
@@ -1999,6 +1962,13 @@ def emit_reading():
     back, because the whole point is the gap between the two. Like the
     heartbeat, it carries no `ready` and no numbers, so it cannot overwrite a
     verdict or vouch for one — it says only that the wait has a reason.
+
+    Only for a read that is looking for an offer, which is the read whose end
+    is a message carrying `ready`. A ⌖ read of the whole screen is not one —
+    see where this is called. And "a card" is the panel's word, not this
+    message's: the loop does not know a card is there until the read says so,
+    so live.html says READING THE SCREEN instead when the last read found no
+    offer at all.
     """
     print(json.dumps({'reading': True, 'at': int(time.time() * 1000)}),
           flush=True)
@@ -2644,7 +2614,7 @@ def emit_dropoff(address, ms=None, asked=True):
         'at': int(time.time() * 1000)}}), flush=True)
 
 
-def emit_planner(stops, unfiled=None, keep=False, ms=None):
+def emit_planner(stops, unfiled=None, keep=False, ms=None, asked=True):
     """Uber's Trip Planner, read off the whole screen because ⌖ was pressed.
 
     Its own line, for the reason a dropoff is: the screen is a list of stops,
@@ -2664,12 +2634,13 @@ def emit_planner(stops, unfiled=None, keep=False, ms=None):
     have. server.js writes the planner row only when this is true. The panel
     is shown the stops either way: showing is not recording.
 
-    `asked` is always true, and is on the line so a row written from it says on
-    its face that it answered a press, as a dropoff mark does. The planner is
-    read only under one: see `planner` in main().
+    `asked` is on the line so a row written from it says on its face whether
+    it answered a press, as a dropoff mark does: True under ⌖, False for the
+    read the rig makes on its own while an order is held (`planner_auto` in
+    main()).
     """
     print(json.dumps({'planner': {'stops': stops, 'unfiled': unfiled,
-                                  'keep': bool(keep), 'asked': True, 'ms': ms,
+                                  'keep': bool(keep), 'asked': bool(asked), 'ms': ms,
                                   'at': int(time.time() * 1000)}}), flush=True)
 
 
@@ -3411,6 +3382,12 @@ def main():
     # minutes is reported once rather than on every read that happens to catch
     # it. A DIFFERENT address is a different job and is always sent.
     dropoff_said = None
+    # The Trip Planner read the rig makes WITHOUT a press, while an order is in
+    # the car. `planner_auto` is a whole-screen read wanted on the next pass;
+    # `planner_auto_at` is when the last one was asked for, which is the rate
+    # limit. See where digest() sets it.
+    planner_auto = False
+    planner_auto_at = None
     last_resample = 0.0
     last_verify = 0.0
     verify_every = VERIFY_EVERY
@@ -3421,9 +3398,6 @@ def main():
     # one. Remembered rather than dropped: the gate fires once, on the frame a
     # moving picture settles, so a trigger thrown away is a card never read.
     read_wanted = False
-    # When the driver last pressed ⟳ Re-find, so the stall watchdog can tell
-    # its own expected aftermath from a fault. See the stalled branch.
-    reset_at = None
     last_alive = 0.0
     # What 📷 Snap asks this process for — see reader_record. The read digest()
     # took last, crop and all, and the last beat with when it went. Kept, not
@@ -3484,6 +3458,7 @@ def main():
         # anything failing loudly enough to notice.
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
         nonlocal dropoff_until, dropoff_said, dropoff_asked
+        nonlocal planner_auto, planner_auto_at
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
@@ -3628,9 +3603,12 @@ def main():
         # prints no ZIP, so find_address returns None on it — measured on the
         # rig's own view of one. OP.find_planner reads it by its own grammar.
         #
-        # ONLY WHEN ASKED, AND ONLY OFF THE WHOLE SCREEN, which is what the
-        # owner asked for: "only while ⌖ is pressed". It is also the existing
-        # policy for destinations, followed rather than widened. An unprompted
+        # OFF THE WHOLE SCREEN, AND ONLY UNDER A PRESS FOR ITS DESTINATION. The
+        # owner first asked for "only while ⌖ is pressed"; after a shift, for
+        # the stops to be read on their own while an order is held, which
+        # `auto` below does — the stops, and never a destination off them. The
+        # rest of this is why the destination stays under the press: it is
+        # the existing policy for destinations, followed rather than widened. An unprompted
         # sighting is taken only under find_address's strict `, ST ZIP` grammar
         # — the reason it may be taken at all — and the planner's address is
         # the one place that grammar is loosened. A loosened rule belongs under
@@ -3654,11 +3632,98 @@ def main():
         # unprompted half: a planner nobody pressed for, with a ZIP on it.
         planner = None if an_offer else OP.find_planner(out.get('text'))
         answers = planner is not None and whole and asked
+        # ...AND, NOW, WITHOUT A PRESS, while an order is in the car.
+        #
+        # The owner, after a shift: the driver wants the planner read
+        # automatically. A whole-screen read that nobody asked for is the one
+        # `planner_auto` below requested — a press's reads are all `asked`,
+        # because the window is open from before they are handed over — and it
+        # answers only off a screen whose TITLE reads "Trip Planner": the stop
+        # grammar that started it was read in the card box, and the title is
+        # what says the whole screen is the planner and not a map round a card.
+        # It goes out as the press's does, `asked: false`, and only with a stop
+        # on it (find_planner is None without one), so a read that found no
+        # stop never replaces one that had them.
+        #
+        # THE STOPS ONLY. Its one dropoff is not sent, even where
+        # planner_destination would file it under a press: the planner's
+        # address is this file's one loosened grammar, and the reason given
+        # above for keeping it under the press holds for a read nobody made —
+        # a planner still up from the trip before is filed against the order
+        # just taken. `unfiled` still goes with the stops, so the panel says
+        # why ⌖ would not file one either; when ⌖ would, it says nothing, and
+        # the press files it.
+        #
+        # Not an accept detector and not a press: it runs only when the driver
+        # has already marked the order taken (order_held), and the rig still
+        # touches nothing on the phone.
+        auto = (planner is not None and whole and not asked
+                and OP.planner_titled(out.get('text')))
         unfiled = None
         if planner is not None:
             found, unfiled = (planner_destination(planner,
                                                   OP.planner_bounded(out.get('text')))
-                              if answers else (None, None))
+                              if answers or auto else (None, None))
+        # A whole-screen read nobody pressed for gives no destination at all:
+        # not its planner's one dropoff (see THE STOPS ONLY, above), and not
+        # the address find_address would take off the whole screen, which is
+        # the map's or a card's as often as the destination's.
+        if whole and not asked:
+            found = None
+        # ...and asked FOR, off a card-box read that shows the planner's grammar
+        # while an order is held. The card box on this rig is the bottom half of
+        # the screen — the shift's reads of a planner caught stop headers,
+        # "Address" and "Expected by" in it and never the title, which is at the
+        # top — so the grammar is what can start it, and the whole-screen read
+        # is where the title is checked. At most once per PLANNER_AUTO_EVERY, and
+        # not while a press is open: that window is already reading the whole
+        # screen and answers as ⌖.
+        if not whole and not an_offer and not asked and not planner_auto \
+                and (planner is not None or OP.planner_furniture(out.get('text'))) \
+                and (planner_auto_at is None
+                     or started - planner_auto_at >= PLANNER_AUTO_EVERY) \
+                and order_held(started):
+            planner_auto = True
+            planner_auto_at = started
+        # AN ADDRESS THE SCREEN DID NOT LABEL A DROPOFF IS NOT A DESTINATION.
+        #
+        # On shift: "✓ Took $28.08" pressed with the Trip Planner up — two
+        # pickups, each with a restaurant address and a ZIP, above a closed
+        # "Dropoff • 1 order". Nobody pressed ⌖. The card box caught the list
+        # mid-scroll with its top edge between the first pickup's street and
+        # town lines, no stop header in that read matched PLANNER_STOP, so
+        # `planner` above was None and `found` was find_address's answer:
+        # "Kennesaw, GA 30144", the restaurant's town. It went out unprompted,
+        # server.js filled the held order's empty destination with it, and
+        # /api/status said `dropoff: 'Kennesaw, GA 30144', dropoffScanned:
+        # true` for an order going somewhere else — the stack line and the map
+        # then measured every offer against a restaurant.
+        #
+        # So the label in front of the address decides (OP.address_stop):
+        #   * printed under a PICKUP label — refused, asked or not. A press says
+        #     "this screen is the destination"; it does not make a restaurant
+        #     one when the screen itself says it is not.
+        #   * under no label at all — refused when nobody asked, because an
+        #     unprompted sighting is the rig filling a blank on its own say-so
+        #     and has nothing else to stand on; and refused under a press too
+        #     when the screen carries the planner's furniture, because that is
+        #     a planner whose headers did not read and its unlabelled addresses
+        #     are as likely pickups as not. A press over a plain navigation
+        #     screen with no label keeps the answer it always had.
+        # Refusing costs a blank the driver can fill with ⌖; taking it costs a
+        # wrong destination nothing on the panel flags. Not on a planner that
+        # read (`planner`), whose own grammar has already decided `found`.
+        if found and planner is None:
+            stop = OP.address_stop(out.get('text'))
+            if stop == 'pickup' or (stop != 'dropoff' and (
+                    not asked or OP.planner_furniture(out.get('text')))):
+                found = None
+                # Counted, like the payout guard's refusals, so a destination
+                # this throws away is a number on the health line and the `seen`
+                # row rather than a silence. No address in the log: it is a
+                # restaurant's or a customer's door, and the count is the
+                # question.
+                health.address_not_dropoff += 1
         # ...and KEPT, which is new, and is the one thing standing between this
         # rig and knowing which offers the driver took.
         #
@@ -3847,6 +3912,15 @@ def main():
                 % (', '.join(s['kind'] for s in planner),
                    'its one dropoff is the destination' if found
                    else 'the destination is left as it was (%s)' % unfiled))
+        elif auto:
+            # No window to close and no press to answer: the stops, to the
+            # panel and onto the order in the car, said as unasked.
+            if args.json:
+                emit_planner(planner, unfiled=unfiled,
+                             keep=offer_log is not None and offer_log.keep_places,
+                             ms=out.get('ms'), asked=False)
+            log('trip planner read, unpressed, an order being held: %s'
+                % ', '.join(s['kind'] for s in planner))
         if found:
             dropoff_said = found.get('line')
             # Closed the moment it is answered, and what that closes is the
@@ -4257,6 +4331,7 @@ def main():
             # adding them up.
             'streetNoAddress': tally.get('streetNoAddress'),
             'addressAsOffer': tally.get('addressAsOffer'),
+            'addressNotDropoff': tally.get('addressNotDropoff'),
             # ...and how the reading went in the window, which was the rest of
             # the health line and went no further than the log. See
             # Health._window. `reads` and `failed` were in the tally all along
@@ -4481,7 +4556,6 @@ def main():
                     last_alive = now_alive
                     flags = {'too_bright': health.too_bright,
                              'too_dim': health.too_dim,
-                             'refind_refused': health.refind_notice(now_alive),
                              'not_saving': not_saving_notice(offer_log),
                              'blind': updown.blind()}
                     # ...and what the rig says about itself: whether the GPS
@@ -4533,99 +4607,6 @@ def main():
                 # dark-mode screen scores below the threshold — see _motion.
                 do_read = scanner.should_read(luma, track_scale)
                 moved = False           # did the corners shift on this frame?
-
-                # Re-find the phone on this same small frame. A mount is not a
-                # clamp, and corners a centimetre out slide the crop off the
-                # payout — which looks exactly like no offer being on screen.
-                #
-                # Done here, on the stream the motion gate already has, it costs
-                # about a millisecond and needs no full-resolution capture at
-                # all; finding the corners on a sensor frame costs seven times
-                # as much, almost entirely in shrinking the frame down to this
-                # size. Blurred frames are skipped: a smeared edge is a worse
-                # guess than the corners already held.
-                if reset_requested():
-                    if manual:
-                        # Re-find is also the way *out* of a hand-drawn box, and
-                        # it has to find something before it throws one away:
-                        # dropping the box first would leave the rig reading
-                        # corners nobody has checked, which is the state the
-                        # driver drew the box to escape.
-                        found = PL.detect_screen_quad(luma, work_width=PL.DETECT_WIDTH)
-                        if found is None:
-                            health.refind_says(
-                                'Re-find found no screen — the box you drew is '
-                                'still in use. Try again with the phone lit and '
-                                'a darker border around it.', now)
-                            log('re-find asked for, but there is no screen in view to '
-                                'find — the box you drew is still in use. Try again '
-                                'with the phone lit and a darker border around it.')
-                        else:
-                            health.refind_says(None, now)
-                            quad_px = (np.asarray(found, dtype=np.float32)
-                                       * np.asarray(track_scale, dtype=np.float32))
-                            manual = False
-                            scanner.quad = quad_px
-                            scanner.roi = None
-                            scanner.fixed_card_share = None
-                            cfg['quad'] = [[float(x), float(y)] for x, y in quad_px]
-                            CX.clear_in_config(cfg)
-                            save_config(args.config, cfg)
-                            tracker = None if args.no_track else TR.QuadTracker(
-                                quad_px, scale=track_scale, calibrated=quad_px)
-                            # Same reason as the box below: the corners and the
-                            # crop both just changed under a still picture.
-                            moved = do_read = True
-                            log('back to finding the phone automatically: the screen '
-                                'in view now is the calibration, the crop is derived '
-                                'from it again, and tracking is %s'
-                                % ('off (--no-track)' if tracker is None else 'on'))
-                    elif tracker is not None:
-                        # Nothing to clear here. A refusal can only have come
-                        # from the branch above (which clears its own, and sets
-                        # `manual` False in the same breath) or from --no-track
-                        # below, and --no-track means this branch is never
-                        # reached again. A clear written here would be a line
-                        # nothing can execute and no check can fail on.
-                        was = TR.distance(tracker.quad, tracker.calibrated)
-                        tracker.start_over()
-                        scanner.quad = tracker.quad
-                        cfg.pop('trackedQuad', None)
-                        save_config(args.config, cfg)
-                        # The same two lines the branch above sets, for the same
-                        # reason, and they were missing here because until the
-                        # tracker's two references were split this press could
-                        # not move anything: start_over restored the box an
-                        # automatic re-baseline had just adopted, so the corners
-                        # and the crop were already where they ended up. Now the
-                        # press moves them — measured at 241.9px on a 0.72x
-                        # re-seat — under a picture that has not changed, and
-                        # without this the rig waits for the phone to move
-                        # before reading through the corners the driver just
-                        # asked for.
-                        moved = do_read = True
-                        # When, so the stall watchdog below does not turn round
-                        # in six seconds and advise the driver to do the thing
-                        # they have just done. See there.
-                        reset_at = now
-                        log('outline reset: back to the calibrated corners, '
-                            '%.0fpx from where they were%s' %
-                            (was,
-                             # Said only when it is true. A re-baseline is the
-                             # thing this press exists to overrule, and saying
-                             # so is what stops a correct reset looking like a
-                             # failure when the watchdog takes the corners back
-                             # about thirty seconds later.
-                             ('; this undoes an automatic re-baseline, which '
-                              'will happen again in about half a minute if the '
-                              'phone really has been re-seated'
-                              if tracker.rebaselines or tracker.centred else '')))
-                    else:
-                        health.refind_says(
-                            'Re-find does nothing while tracking is off '
-                            '(--no-track) — the corners are already fixed.', now)
-                        log('outline reset asked for, but tracking is off '
-                            '(--no-track), so the corners are already fixed')
 
                 # "The screen in front of you is the destination."
                 #
@@ -4705,13 +4686,23 @@ def main():
                     # moves, which reads as the button not having worked.
                     moved = do_read = True
                     log('crop box set by hand to [%s] of the frame: %s, with corner '
-                        'tracking off until re-find is pressed'
+                        'tracking off — ▣ Set box again to change it'
                         % (CX.describe(drawn),
                            'offers read in the card box [%.2f %.2f %.2f %.2f] of it and '
                            '⌖ reading all of it' % tuple(card) if card
                            else 'reading exactly that'))
                     log(card_finder_says(scanner, card_finder_off(cfg, args), args.config))
 
+                # Follow the phone on this same small frame. A mount is not a
+                # clamp, and corners a centimetre out slide the crop off the
+                # payout — which looks exactly like no offer being on screen.
+                #
+                # Done here, on the stream the motion gate already has, it costs
+                # about a millisecond and needs no full-resolution capture at
+                # all; finding the corners on a sensor frame costs seven times
+                # as much, almost entirely in shrinking the frame down to this
+                # size. Blurred frames are skipped: a smeared edge is a worse
+                # guess than the corners already held.
                 if tracker is not None and scanner.settled:
                     was = tracker.status()
                     jumps_before, lost_before = tracker.jumps, was['lost']
@@ -4744,10 +4735,10 @@ def main():
                             'is not the size the stored calibration describes, and '
                             'has been steadily so for %ds, so the corners were '
                             'moved onto it and the SIZE the tracker judges against '
-                            'taken as out of date. The calibration itself is kept, '
-                            'so ⟳ Re-find undoes this. Reading carries on — but '
-                            're-run calibration when you can, or the next start '
-                            'will be stuck again.' % TR.RECOVER_AFTER)
+                            'taken as out of date. The calibration itself is kept. '
+                            'Reading carries on — but draw the boxes with ▣ Set '
+                            'box, or re-run calibration, when you can, or the '
+                            'next start will be stuck again.' % TR.RECOVER_AFTER)
                     elif tracker.jumps > jumps_before:
                         health.relocks += 1
                         log('corners re-locked: the phone is somewhere the stored '
@@ -4768,32 +4759,13 @@ def main():
                     # the box, only by the person who can see the screen.
                     stalled_now = tracker.status()['stalled']
                     if stalled_now != stalled_before:
-                        # Two different pieces of news, because after a reset
-                        # this is not a fault — it is the expected consequence
-                        # of the press.
-                        #
-                        # ⟳ Re-find puts the corners back on a screen the size
-                        # gate may well refuse: that is the whole point, since
-                        # the driver is overruling a re-baseline the rig made.
-                        # Measured on a 0.72x re-seat, the stall goes true about
-                        # six seconds after the press — so the rig was answering
-                        # the driver's override by telling them to press the
-                        # same button again, and then taking the corners back
-                        # about half a minute later anyway.
-                        just_reset = (reset_at is not None
-                                      and now - reset_at < TR.RECOVER_AFTER)
                         log(('outline stuck: the corners have been off the screen '
                              'the camera can see for %ds. If the box is drawn '
                              'round part of the offer card rather than the whole '
                              'phone, the screen is probably washed out — shade it '
-                             'or dim it. Otherwise press reset on the live page, '
-                             'or re-run calibration.' % TR.STALL_VISIBLE
-                             if not just_reset else
-                             'outline stuck, as expected after a reset: the '
-                             'corners are back at the calibration and the screen '
-                             'in view is not that size. If the phone really has '
-                             'been re-seated the rig will take them back in about '
-                             'half a minute; if it has not, re-run calibration.')
+                             'or dim it. Otherwise draw the boxes with ▣ Set box '
+                             'on the live page, or re-run calibration.'
+                             % TR.STALL_VISIBLE)
                             if stalled_now else 'outline unstuck: the corners are '
                             'back on the screen')
                     if tracker.needs_save(now):
@@ -4943,6 +4915,11 @@ def main():
                         and (now - last_dropoff_read) > RESAMPLE_EVERY:
                     do_read = True
                     last_dropoff_read = now
+
+                # ...and the Trip Planner read digest() asked for, whether the
+                # picture moved or not: the planner sits still on the phone.
+                if not do_read and planner_auto:
+                    do_read = True
 
                 # ...and a window that closes with nothing on it SAYS SO.
                 #
@@ -5169,14 +5146,25 @@ def main():
             # card box drawn by hand made that a blind spot — see
             # cropbox.parse_card. Only while asked: an unprompted read is
             # hunting offers and keeps the card crop.
+            # ...and for the planner read digest() asked for without a press
+            # (`planner_auto`), once: the request is spent by this hand-over.
+            whole_read = (dropoff_asked and time.time() < dropoff_until) or planner_auto
+            planner_auto = False
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(),
-                          scanner.geometry(whole=dropoff_asked
-                                           and time.time() < dropoff_until))
+                          scanner.geometry(whole=whole_read))
             looked = True
             # Before the read, not after it. The dashboard has nothing else to
             # go on for the second and a half this takes — see emit_reading.
-            if args.json:
+            #
+            # Not for a ⌖ read. It is a read of the whole screen for an
+            # address, digest() returns before emit() for it, so nothing
+            # carrying `ready` ever followed — and the panel said READING THE
+            # CARD, "working out the pay, the time and the distance", for its
+            # whole 8s READING_MS after every one, through the twelve-second
+            # window, over a navigation screen. The ⌖ button says "⌖ reading…"
+            # for that read itself.
+            if args.json and not whole_read:
                 emit_reading()
             if not reader.threaded and collect():
                 break

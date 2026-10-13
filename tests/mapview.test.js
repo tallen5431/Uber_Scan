@@ -997,6 +997,60 @@ async function nucbox() {
   eq('a merchant is asked by name, its "(Plaza)" dropped',
      JSON.stringify(MV.searchPlan("McDonald's (Marietta Sq)")),
      JSON.stringify({ kind: 'name', q: "McDonald's" }));
+  // The shape the rig held as the order in the car's end on shift — OCR
+  // litter in front of the door — on a made-up street. Asked as written it
+  // was a street called "ss be 4 1610 Pverel Blvd" with no door, which no
+  // search holds, and the held end had no pin (see searchText).
+  eq('litter before a door ("ss be 4 1610 <Street> Blvd, <Town>, GA <zip>") is not searched',
+     JSON.stringify(MV.searchPlan('ss be 4 1610 Pverel Blvd, Kestrelton, GA 30144')),
+     JSON.stringify({ kind: 'street', street: '1610 Pverel Blvd', door: true,
+                      house: '1610' }));
+  eq('...and the public map is asked the same words, by the same rule',
+     new MV.Geocoder({ hint: function () { return ''; } })
+       .queryFor('ss be 4 1610 Pverel Blvd, Kestrelton, GA 30144', '1,2,3,4'),
+     '1610 Pverel Blvd, Kestrelton, GA 30144');
+  eq('...while a street with a number in its NAME keeps it (capitalised, nothing in front)',
+     JSON.stringify(['Hwy 92 Bypass, Woodstock', 'US 41, Marietta', 'Old 41 Hwy, Kennesaw',
+                     '1610 Pverel Blvd, Kestrelton'].map(MV.searchText)),
+     JSON.stringify(['Hwy 92 Bypass, Woodstock', 'US 41, Marietta', 'Old 41 Hwy, Kennesaw',
+                     '1610 Pverel Blvd, Kestrelton']));
+
+  /* The held order's pickups off its Trip Planner (made-up restaurant and
+     street, the shape the driver's planner was read as on shift). */
+  eq('a planner name loses the icon read as "oe " in front of it, for display',
+     JSON.stringify(['oe Fable Crust Pizza - Kestrelton', 'Fable Grill', 'oe fable grill',
+                     'oS Fable Grill', 'ab cd Fable'].map(MV.plannerName)),
+     JSON.stringify(['Fable Crust Pizza - Kestrelton', 'Fable Grill', 'oe fable grill',
+                     'oS Fable Grill', 'ab cd Fable']));
+  var HELD_STOPS = [
+    { kind: 'pickup', name: 'oe Fable Crust Pizza', street: '4410 Fable W Lantern Parkway Northwest',
+      city: 'Kestrelton', zip: '30144',
+      line: '4410 Fable W Lantern Parkway Northwest, Kestrelton, GA 30144' },
+    { kind: 'pickup', name: 'oe Fable Grill', street: '12 Fable St', city: null, zip: null,
+      line: '12 Fable St' },
+    { kind: 'pickup', name: 'Fable Wok', street: null, city: null, zip: null, line: null },
+    { kind: 'dropoff', name: 'Pat Q.', street: '4821 Kestrel Dr', city: 'Kestrelton',
+      line: '4821 Kestrel Dr, Kestrelton' }];
+  eq('the held order\'s planner pickups with a street are its places to pin, in the '
+     + 'planner\'s order, searched with their town when it read and alone when not; '
+     + 'never a dropoff, never a name with no street',
+     JSON.stringify(MV.heldPickups(HELD_STOPS)),
+     JSON.stringify([{ q: '4410 Fable W Lantern Parkway Northwest, Kestrelton, GA 30144',
+                       name: 'Fable Crust Pizza' },
+                     { q: '12 Fable St,', name: 'Fable Grill' }]));
+  eq('...and each is a door, searched by the one rule every place is — the street '
+     + 'with no town too, never as a merchant\'s name',
+     JSON.stringify(MV.heldPickups(HELD_STOPS).map(function (p) { return MV.searchPlan(p.q); })),
+     JSON.stringify([{ kind: 'street', street: '4410 Fable W Lantern Parkway Northwest',
+                       door: true, house: '4410' },
+                     { kind: 'street', street: '12 Fable St', door: true, house: '12' }]));
+  eq('the held order\'s run is the car, its pickups not yet visited, then its end — '
+     + 'a pickup with no pin skipped, not a vertex at nowhere',
+     JSON.stringify(MV.heldRun({ lat: 1, lon: 2 }, [{ lat: 3, lon: 4 }, null, { lat: 5, lon: 6 }],
+                               { lat: 7, lon: 8 })),
+     JSON.stringify([[1, 2], [3, 4], [5, 6], [7, 8]]));
+  eq('...and nothing to draw with fewer than two points',
+     JSON.stringify(MV.heldRun(null, [null], { lat: 7, lon: 8 })), '[]');
 
   /* The disc: the card's fix, its distance plus the half mile. */
   var d94 = MV.discFor(card());

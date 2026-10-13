@@ -172,8 +172,8 @@
        exactly this card: the phone came out the same size to the pixel, the
        rest of its column went black, and the other half paid for it — the
        address sliced to 11px of its 17px line, the age line wrapped onto two,
-       and five controls sharing 388px instead of 559px close enough that "Set
-       box" and "Re-find" touch.
+       and five controls sharing 388px instead of 559px close enough that two
+       labels touched.
 
        So the column is sized to the picture and what is left goes to the
        verdict and the controls. Same phone, room for everything else. */
@@ -663,6 +663,13 @@
   #mapKey .k-pin { color: #17c964; }
   #mapKey .k-cand { color: #8a8f98; }
   #mapKey .k-out { color: #8a8f98; }
+  #mapKey .k-hpick { color: #17c964; }
+  /* With the held pickup in it the long form is 388px of words in DejaVu
+     Sans at 12px, past the 800x480 map's room: the two long words go
+     whenever that item is shown, 320px. :has() rather than a class showKey
+     sets, so what rpi/test_layout.py measures — every item shown — is what
+     this rule sees. */
+  #mapKey:has(.k-item[data-k="hpick"]:not([hidden])) .k-long { display: none; }
   /* What a mark of drawHow's says about itself, shown while the pointer is
      on it (or it was tapped): ONE box across the map's foot, over the key,
      wrapped to the map's width — never a Leaflet tooltip beside the mark. A
@@ -686,6 +693,10 @@
      Measured in DejaVu Sans; rpi/test_layout.py holds both forms. */
   @media (max-height: 380px) {
     #mapKey { left: 6px; max-width: calc(100% - 12px); padding: 1px 5px; }
+    /* ...and on the hat no form of it with the held pickup fits one row:
+       293px of words for 206 (measured, DejaVu Sans 11px). It takes two
+       there, and only then, rather than lose a word off its end. */
+    #mapKey:has(.k-item[data-k="hpick"]:not([hidden])) { white-space: normal; }
     #mapKey .k-long { display: none; }
     #mapTip { left: 6px; right: 6px; padding: 1px 5px; }
   }
@@ -915,7 +926,8 @@
     <div id="liveMap" hidden><div id="mapKey" hidden><span class="k-all"><span class="k-item" data-k="disc"><span class="k-disc">◯</span> <span class="k-long">card's </span>reach</span><span
       class="k-item" data-k="pin"><span class="k-sep"> · </span><span class="k-pin">●</span> pin</span><span
       class="k-item" data-k="cand"><span class="k-sep"> · </span><span class="k-cand">●</span> <span class="k-long">also </span>found</span><span
-      class="k-item" data-k="out"><span class="k-sep"> · </span><span class="k-out">○</span> outside</span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
+      class="k-item" data-k="out"><span class="k-sep"> · </span><span class="k-out">○</span> outside</span><span
+      class="k-item" data-k="hpick"><span class="k-sep"> · </span><span class="k-hpick">◎</span> held pickup</span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
     <!-- What the "you are here" dot says about itself — "±12 m · 2 s old" —
          or why there is no dot: "GPS too rough here (±130 m)". Over the map's
          corner rather than in the caption below it, which is the detour's row
@@ -964,8 +976,8 @@
 
        HERE, and not on the bar. The bar holds six and a seventh sheds one —
        AUDITS.md's Settled has that, and styles.css does the arithmetic — so a
-       control there would cost the driver ⌨ Type or ▣ Set box in states where
-       they have them today. The two other places with room were measured and
+       control there would cost the driver ⌨ Type, or in the fullest state a
+       control they press at a red light. The two other places with room were measured and
        are worse. The caption under the picture (#viewNote) is `display: none`
        on every landscape panel unless the map is up, when it is the map's own
        two-row line with a budget already measured to the word; and the whole
@@ -1035,7 +1047,7 @@
          are not in teaches people to ignore the bar. It stays available after
          a successful read, because the first thing a driver will want when it
          reads the wrong screen is to press it again. -->
-    <button type="button" class="linkbtn" id="dest" hidden>⌖ Dropoff</button>
+    <button type="button" class="linkbtn" id="dest" hidden>⌖ Scan</button>
     <a class="linkbtn parked" href="index.html">⌨ Type</a>
     <!-- NOT `parked`, which it used to be, and that was the whole of why the
          offers page was hard to reach.
@@ -1052,11 +1064,10 @@
          list has to be on the screen in front of them when they do, not
          conditional on them having put the order down first.
 
-         What stands down in its place is the keypad link, and — in the fullest
-         state only — ▣ Set box. See styles.css for the arithmetic. -->
+         What stands down in its place is the keypad link, in the fullest state
+         only. ▣ Set box never does. See styles.css for the arithmetic. -->
     <a class="linkbtn" href="journal.html">▤ Offers</a>
     <button type="button" class="linkbtn" id="setBox">▣ Set box</button>
-    <button type="button" class="linkbtn" id="reset">⟳ Re-find</button>
     <!-- Two things this picture gets used for, and they want opposite
          pictures. Aiming the mount wants the whole scene with the outline on
          it; working the phone through this screen — which is what a bluetooth
@@ -1110,7 +1121,7 @@
   // reach through. `loadShift` below knew this and guarded itself; the five
   // controls on the bar did not, and every one of them cleared its busy flag
   // only in the `.then()` after the fetch. So Took, Drop, ⌖ Dropoff, ⟳ Re-find
-  // and "✓ Read this box" each sat at "…", disabled, for the rest of the shift
+  // (since removed) and "✓ Read this box" each sat at "…", disabled, for the rest of the shift
   // — after ONE press on a bad connection, with nothing saying why and no way
   // back but reloading the page. The controls a driver uses at a red light are
   // the last place to leave that.
@@ -1290,24 +1301,11 @@
   // gain on its ceiling, already on the longest exposure, and the screen still
   // under target. The picture goes dark and the reads go with it.
   var tooDim = false;
-  // The scanner's own sentence for why the last Re-find did nothing, or null
-  // if the last one worked. Not a flag: the two reasons — nothing on the
-  // screen to find, and tracking switched off — want different things from the
-  // driver, and the end that knows which it was is the scanner.
-  //
-  // Pressing Re-find is a driver saying the outline is wrong, so the rig is
-  // reading through corners they have already judged bad. When the press is
-  // refused and nothing says so, they go back to driving believing it was
-  // fixed, and every read until they next look is warped through the same bad
-  // corners. This is the only state on this page where the driver has acted
-  // and the rig has not.
-  var refindRefused = null;
-
   // The journal has stopped taking writes, in the scanner's own words, or null.
   //
   // The only failure on this page that costs something which cannot be got
-  // back. A washed-out card can be re-read and a refused Re-find can be
-  // pressed again; an offer nobody wrote down is simply gone, and so is every
+  // back. A washed-out card can be re-read and a box drawn wrong can be
+  // drawn again; an offer nobody wrote down is simply gone, and so is every
   // one after it for as long as it lasts. A read-only SD card is the classic
   // Pi failure and it is completely silent from up here — the rig goes on
   // reading, pricing, speaking the verdict and painting a green ACCEPT, and
@@ -1615,8 +1613,8 @@
   // Whether the last press failed to reach the journal. It used to show
   // nothing: the label flickered to "…" and came straight back to "Took
   // $10.00?", and the driver either assumed it registered or pressed again.
-  // The Re-find button on the same bar already says "⟳ failed"; this says
-  // "not saved", and says it until the next press.
+  // Drop on the same bar already says "Drop · failed"; this says "not
+  // saved", and says it until the next press.
   var tookFailed = false;
 
   function showTook() {
@@ -1697,12 +1695,21 @@
       if (body && typeof body.holding === 'boolean') {
         if (holdingNow && !body.holding) forgetDest();
         holdingNow = body.holding;
-        // The mark reply says only whether an order is held, not where it
-        // ends. Cleared rather than kept: a stale end belonging to the last
-        // order would tint the button for a job that is finished.
-        heldEnds = undefined;
+        // ...and where it ends, which the reply now says (heldForPanel in
+        // server.js). It said only whether an order was held, and this was
+        // cleared to wait for the next reading — so from ✓ Took until then
+        // Map view drew the taken card's dropoff as that CARD's, and the
+        // next card's offer line took it off the glass with the card it
+        // belonged to: the driver's "it did not hold those pins". A server
+        // older than the field leaves it as it was, waiting for a reading;
+        // never a stale end from the last order, which would tint the
+        // button for a job that is finished.
+        var held = body.holding ? body.held : null;
+        heldEnds = held ? (held.dropoff || null) : undefined;
+        heldCard = held ? (held.card || null) : null;
         showDrop();
         showDest();
+        if (viewMode === 'map') showMap();
       }
     }).catch(function () {
       /* The record is the point; a failed write must not look like a success. */
@@ -1749,6 +1756,14 @@
   // same message, and read only while `heldEnds` names an end, so a stale one
   // can never be measured with.
   var heldCard = null;
+  // ...and the server's name for that order, which a door-level pin of its end
+  // is posted under (pinHeldEnd), so a pin can never land on the next order.
+  var heldId = null;
+  // The GPS drop's two words on the status row (healthNote): the car is at the
+  // held order's door now, per the last beat; and when the server put the
+  // order down because the car left it, until when to say so.
+  var atDropoff = false;
+  var gpsDropSaidUntil = 0;
   var dropBusy = false;
   var dropFailed = false;
   // What the failed press was about, so the failure can be forgotten when the
@@ -1760,6 +1775,23 @@
   var dropFailedFor = null;
   // The order in the car as last described, so a failure can be tied to it.
   var heldSig = null;
+
+  /* The Trip Planner's stops as Map view's source for the held order's
+   * pickups — { of, stops }, `of` the order they were read for (heldOwner).
+   *
+   * Not `plannerSaid`, and on purpose a longer life. plannerSaid is the
+   * answer to a press, and goes when a different offer goes on the record
+   * (forgetDest): kept to that, the restaurant's pin would leave the map at
+   * the next card — the one moment Map view is opened to weigh a card
+   * against the order in the car. This is where that order is collected
+   * from, which a new card does not change: kept until the order goes, or
+   * until a newer planner read while it is held replaces it (the rig reads
+   * the planner unpressed while an order is marked taken, and a list read
+   * after the pickup no longer carries it). A reload has only what the
+   * server kept, which is plannerSaid's life (forgetPlanner in server.js). */
+  var heldPlan = null;
+
+  function heldOwner() { return holdingNow ? (heldId || heldSig) : null; }
 
   function holdSignature(holding) {
     return holding ? String(holding.pay) + '/' + String(holding.minutes) : null;
@@ -1773,6 +1805,30 @@
                   + 'again. It does not touch your phone.';
   }
 
+  /* Map view pinned the held order's end at DOOR level: tell the server, which
+     puts the order down once the car has stopped at that door and then left it
+     (gpsArrival in server.js). Only a door — the place names a house number
+     and the NucBox's answer carries it — and the server asks both again. A
+     street or a town is never sent. Fire and forget: a refused or lost post
+     costs only the GPS drop, and the timer and Drop still end the order. */
+  function pinHeldEnd(want, q, got) {
+    var plan = MV.searchPlan(q);
+    if (!want.heldId || !got.at || !plan || plan.kind !== 'street' || !plan.door
+        || !MV.hasDoor(got.at, plan.house)) return;
+    ask('/api/held-end', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ holdId: want.heldId, dropoff: q, lat: got.at.lat,
+                             lon: got.at.lon, name: got.at.name, doorLevel: true }) })
+      .catch(function () {});
+  }
+
+  // The order is down: Drop's reply, or the server's word that the GPS put it
+  // down (msg.gpsDrop). One function, so the two cannot forget different things.
+  function orderDown() {
+    holdingNow = false; forgetDest(); heldEnds = undefined; heldSig = null;
+    heldId = null; atDropoff = false; heldPlan = null;
+    showStack(null); showDest();
+  }
+
   el.drop.addEventListener('click', function () {
     if (dropBusy) return;
     dropBusy = true;
@@ -1782,10 +1838,7 @@
       // still in the car and the next offer must still be measured against it.
       dropFailed = !r.ok;
       dropFailedFor = r.ok ? null : heldSig;
-      if (r.ok) {
-        holdingNow = false; forgetDest(); heldEnds = undefined; heldSig = null;
-        showStack(null); showDest();
-      }
+      if (r.ok) orderDown();
     }).catch(function () {
       /* Left as it was: an order the server still holds is the truth. */
       dropFailed = true;
@@ -1917,7 +1970,10 @@
     var line = '▸ ' + (s.kind === 'pickup' ? 'Pickup' : 'Dropoff')
       + (typeof s.orders === 'number' && s.orders > 1 ? ' ×' + s.orders : '');
     if (typeof s.expectedBy === 'number') line += ' by ' + clockOf(s.expectedBy);
-    if (s.name) line += ' · ' + s.name;
+    // The name as shown: the stop's icon read as letters in front of it
+    // goes (MV.plannerName); the stop keeps it as read.
+    var name = s.name && MV && MV.plannerName ? MV.plannerName(s.name) : s.name;
+    if (name) line += ' · ' + name;
     if (s.line) line += ' · ' + s.line;
     return line;
   }
@@ -1943,8 +1999,8 @@
    * amber is the only other sign of it. See unfiledNow.
    *
    * THE NOTICE FIRST. Between offers the card also holds the notice — the
-   * journal refusing writes, the phone too bright or too dim, a Re-find
-   * refused, the phase's own message — and the notice is the item that gives
+   * journal refusing writes, the phone too bright or too dim, the phase's
+   * own message — and the notice is the item that gives
    * way (see `#warn` in the stylesheet), while these lines are `flex: none`.
    * So on a small panel the stops took the notice's room, and it went with
    * nothing saying so: on the 3.5" hat's scene picture "Offers are NOT being
@@ -2044,7 +2100,7 @@
     // needs 238px and arrived as "1234 Daffodil L…". That is not a control any
     // more - it neither says what pressing it does nor shows an address the
     // driver can check - and at 480x320 the column is 69px, where even
-    // "⌖ Dropoff" is a squeeze at 74px.
+    // "⌖ Dropoff", its label until it was renamed ⌖ Scan, was a squeeze at 74px.
     //
     // There is no width to win: the bar is full and every button shares it
     // equally. So the confirmation is a colour, which this panel already trusts
@@ -2052,9 +2108,9 @@
     // The address itself goes where there is room for it - the title, and the
     // stack line's own geography.
     el.dest.textContent = destBusy ? '⌖ reading…'
-      : destFailed ? '⌖ not read' : '⌖ Dropoff';
+      : destFailed ? '⌖ not read' : '⌖ Scan';
     el.dest.classList.toggle('done', !destBusy && !!destSaid);
-    // The same class Re-find and Took already use for the same thing, so a
+    // The same class Drop and Took already use for the same thing, so a
     // failure looks like a failure on this bar whichever control it came from.
     el.dest.classList.toggle('failed', !destBusy && destFailed);
     // ...and asked for, in the one state where pressing it changes an answer.
@@ -2534,7 +2590,22 @@
       // both are what the driver is there to fix.
       var busy = readingAt && (Date.now() - readingAt) < READING_MS
                  && p.phase !== 'error' && p.phase !== 'aim';
+      // ...but "the card" only while there may be one. The motion gate fires
+      // on any picture that moves and settles, so a navigation map, DoorDash's
+      // "Finding offers" and a "Switch to dash in this busier zone" prompt are
+      // each read again and again — and every one of those reads put READING
+      // THE CARD, "working out the pay, the time and the distance", over a
+      // phone with no card on it, with the "no offer on screen" each one came
+      // to on the glass for the few milliseconds before the next read began.
+      // So when the last reading came to nothing offer-like, what is said is
+      // what it found and that the rig is looking again. A card that has just
+      // arrived over that screen gets the same true cue — the rig is reading
+      // the screen — and its verdict in the second and a half after. After a
+      // reading that had something of an offer on it, or before any reading
+      // at all, it is still READING THE CARD.
+      var again = busy && r && noVerdictSaid(r) === NO_OFFER_SAID;
       el.verdictLabel.textContent = blind ? BLIND_LABEL[blind] || 'CANNOT SEE'
+        : again ? 'READING THE SCREEN'
         : busy ? 'READING THE CARD'
         : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER');
       // Only while aiming, where the number means pixels and says so. On any
@@ -2558,10 +2629,6 @@
       // Ahead of the phase message, because it is the one the driver can act
       // on: a washed-out card between offers is exactly the state where there
       // is no reading to hang it off, which is why it is here as well as below.
-      // `refindRefused` matters more here than in the block below: a Re-find
-      // is refused when there is nothing on the screen to find, and nothing on
-      // the screen to find is precisely this branch — no reading, so the notes
-      // further down never render at all.
       // `notSaving` leads here as it does below, and it has to be here at all
       // for a reason the others only half share: between offers there is no
       // reading to hang it off, and the journal is just as dead between offers
@@ -2570,8 +2637,7 @@
       // a reading, and while it holds there is none coming.
       var setup = [blind ? BLIND_NOTE[blind] || '' : '',
                    notSaving || '', tooBright ? TOO_BRIGHT : '',
-                   tooDim ? TOO_DIM : '',
-                   refindRefused || '', p.message || ''].filter(Boolean);
+                   tooDim ? TOO_DIM : '', p.message || ''].filter(Boolean);
       el.warn.textContent = setup.join(' ');
       el.warn.hidden = !setup.length;
       // No card, no address. Leaving the last one up would have it read as
@@ -2597,6 +2663,7 @@
             // it would be said of is the last one before the word, too: the
             // word clears at the next read.
             : (blind ? ''
+               : again ? 'no offer on screen · reading again'
                : busy ? 'working out the pay, the time and the distance'
                : (r ? noVerdictSaid(r) + trackNote(r) : '')));
       el.verdict.classList.toggle('stale', quiet > STALE_MS);
@@ -2869,10 +2936,6 @@
                  + ', so these minutes are part of the trip, not all of it. '
                  + 'No rate is shown rather than one several times too high.');
     }
-    // Above the reading-quality notes below, because those describe a card the
-    // rig read and this describes the rig not having done a thing the driver
-    // asked for. It stands until a Re-find actually works.
-    if (refindRefused) notes.push(refindRefused);
     // A rate with no running cost taken off it is a CEILING, not the offer,
     // and the old wording — "pay shown before mileage cost" — described the
     // arithmetic without saying what it meant. On the owner's own shift 108 of
@@ -2960,7 +3023,7 @@
     if (t && t.lost) bits.push('screen not visible');
     // `t.jumps` used to sit here, printing 're-locked on the phone'. It is a
     // LIFETIME count — QuadTracker.jumps is incremented on every re-lock and
-    // reset nowhere, not even by start_over, the ⟳ Re-find path — so one
+    // reset nowhere — so one
     // re-lock at any point in a shift put that note on every reading after it,
     // and between offers too. The rig's own health log already carries the
     // same number correctly labelled, 're-locked %dx since start'.
@@ -3041,6 +3104,12 @@
   // Those are the frames kept on offer rows; the navigation screens between
   // offers are not among them. The card it was written for, a pay the box
   // cut off, is not in that week's frames at all; it is the 8 Oct one.
+  // What a reading with nothing offer-like on it is said as. Named, because
+  // render() asks whether that is what the last reading came to: a read
+  // starting over a screen that has just read as no offer is the rig
+  // looking again, not a card being priced.
+  var NO_OFFER_SAID = 'scanner running, no offer on screen';
+
   function noVerdictSaid(r) {
     if (r.clipped) return 'pay at the box edge — not trusted';
     if (typeof r.pay === 'number' && r.pay > 0) {
@@ -3055,7 +3124,7 @@
         || named.length) {
       return 'no pay read — box may cut it off';
     }
-    return 'scanner running, no offer on screen';
+    return NO_OFFER_SAID;
   }
 
   // What the dot means.
@@ -3181,6 +3250,10 @@
     } else if (g && g.state === 'lost') {
       bits.push('GPS: no fix since start');
     }
+    // Not a fault, and on this row anyway: it is about the order in the car,
+    // not the offer, and the bar beside Drop has no room (it holds six).
+    if (atDropoff && holdingNow) bits.push('at dropoff');
+    else if (Date.now() < gpsDropSaidUntil) bits.push('dropped \u00b7 left the dropoff');
     return bits.join(' \u00b7 ');
   }
 
@@ -3224,10 +3297,6 @@
       // has to be read off the message before that happens.
       if (msg.tooBright !== undefined) tooBright = !!msg.tooBright;
       if (msg.tooDim !== undefined) tooDim = !!msg.tooDim;
-      // Same channel, same reason, and one more: a Re-find is refused most
-      // often when there is no screen to find, which is exactly when no
-      // reading is coming to carry the news.
-      if (msg.refindRefused !== undefined) refindRefused = msg.refindRefused || null;
       // Same channel again, and the one that most needs it: while the journal
       // is refusing writes every reading still arrives looking perfect, so a
       // channel that rode a reading would be carried by messages that
@@ -3247,6 +3316,15 @@
       if (msg.gps !== undefined) {
         gpsNow = msg.gps || null;
         gpsAt = Date.now();
+      }
+      // The GPS drop (gpsArrival in server.js): at the held order's door, on
+      // this beat — and the order put down because the car left it, which is
+      // Drop's reply arriving with nobody having pressed it.
+      if (msg.atDropoff !== undefined) atDropoff = !!msg.atDropoff;
+      if (msg.gpsDrop) {
+        orderDown();
+        gpsDropSaidUntil = Date.now() + (msg.gpsDrop.saidForMs || 60000);
+        showDrop();
       }
       if (msg.cpuC !== undefined) cpuNow = typeof msg.cpuC === 'number' ? msg.cpuC : null;
       if (msg.throttled !== undefined) throttledNow = msg.throttled || null;
@@ -3341,7 +3419,14 @@
       // server's own clock can end one — see holding() — with nothing pressed
       // here to say so. Without this the button outlives the order it puts
       // down, and a driver presses it on nothing.
-      if (msg.ready) {
+      // ...and a ⌖ read the server filed onto the order in the car carries
+      // that order too, with no `ready` (see heldForPanel in server.js): it is
+      // where the held end reaches Map view between readings. Nothing else
+      // that lacks `ready` carries `holding`, so this widens the branch to
+      // that one message and leaves a heartbeat, a not-ready reading and an
+      // offer line exactly where they were — none of them says anything
+      // about the order in the car, so none of them may change it.
+      if (msg.ready || (msg.holding !== undefined && msg.ready === undefined)) {
         // An order ending is what clears the destination read for it. Without
         // this, `destSaid` outlived its order: press Drop, or let the server's
         // own clock expire the hold, accept the next job, and the button came
@@ -3362,6 +3447,7 @@
         heldSig = holdSignature(msg.holding);
         heldEnds = msg.holding ? (msg.holding.dropoff || null) : undefined;
         heldCard = msg.holding ? (msg.holding.card || null) : null;
+        heldId = msg.holding ? (msg.holding.holdId || null) : null;
         showDrop();
         showDest();
       }
@@ -3385,7 +3471,7 @@
         // put the button back exactly as it was — the driver tapped the
         // address open on their phone, pressed, waited, and got the same grey
         // button whether it had worked or not. Took says "· not saved", Drop
-        // says "Drop · failed", Re-find says "⟳ failed".
+        // says "Drop · failed".
         //
         // It is answered from the RIG and not from a timer here, and that is
         // the whole reason this branch exists rather than a setTimeout. A read
@@ -3410,6 +3496,7 @@
       // press is answered, so the button stops saying "reading…".
       if (msg.planner && Array.isArray(msg.planner.stops)) {
         plannerSaid = { stops: msg.planner.stops, unfiled: msg.planner.unfiled || null };
+        if (holdingNow) heldPlan = { of: heldOwner(), stops: msg.planner.stops };
         destFailed = false;
         destBusy = false;
         showDest();
@@ -3433,8 +3520,8 @@
        * A no-op unless the places actually changed, so a card re-read forty
        * times over is one drawing and no new lookups. */
       if (viewMode === 'map') showMap();
-      // ...and the dot, which moves with every beat while the pins do not. It
-      // moves on the map and the map does not move with it: see drawHere.
+      // ...and the dot, which moves with every beat while the pins do not.
+      // The map goes after it only at its edges: see drawHere.
       if (msg.gps !== undefined) drawHere();
       render();
       showConnection();
@@ -3491,6 +3578,7 @@
     heldSig = holdSignature(s.holding);
     heldEnds = s.holding ? (s.holding.dropoff || null) : undefined;
     heldCard = s.holding ? (s.holding.card || null) : null;
+    heldId = s.holding ? (s.holding.holdId || null) : null;
     showDrop();
     // ...and what it was read as, so a panel opened or reloaded mid-delivery
     // shows the destination already scanned rather than offering to scan one
@@ -3511,6 +3599,7 @@
     var heldPlanner = s.holding && s.holding.planner;
     if (heldPlanner && Array.isArray(heldPlanner.stops)) {
       plannerSaid = { stops: heldPlanner.stops, unfiled: heldPlanner.unfiled || null };
+      heldPlan = { of: heldOwner(), stops: heldPlanner.stops };
     }
     showDest();
     scannerState = s.scanner || null;
@@ -3553,9 +3642,9 @@
    *   map    — where this offer's ends are, against where the car is and where
    *            the order already in it is going.
    *
-   * A mode on the existing control rather than a fourth button: the bottom bar
-   * holds six, and ▤ Offers already cost ▣ Set box its slot in the fullest
-   * state. A third mode costs no columns at all.
+   * A mode on the existing control rather than another button: the bottom bar
+   * holds six, and the fullest state already has six in it. A third mode costs
+   * no columns at all.
    *
    * The phone, unless the driver has said otherwise. During a shift the screen
    * is being used to read and work the phone through, and in the scene view
@@ -3711,33 +3800,13 @@
     startStream();
   });
 
-  // Ask the scanner to forget where it thinks the phone is. The automatic
-  // recovery handles the unambiguous case — corners off to one side while the
-  // card is in the middle — but corners sitting on the screen at the wrong size
-  // are equally "the phone moved" and "the outline is on part of it", and only
-  // the person looking at the picture can tell. So they get to say.
-  var resetBtn = document.getElementById('reset');
-  resetBtn.addEventListener('click', function () {
-    resetBtn.disabled = true;
-    resetBtn.textContent = '⟳ …';
-    ask('/api/recalibrate', { method: 'POST' })
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-      // "asked", not "re-finding". Everything this promise knows is that a web
-      // handler touched a file; it has not spoken to the scanner and cannot
-      // know whether the scanner will honour the request or refuse it for want
-      // of a screen to find. It claimed the stronger of the two, so a refused
-      // press read on this screen exactly like a press that worked, and the
-      // driver went back to driving through corners they had just rejected.
-      // What actually happened arrives on the heartbeat, as a note.
-      .then(function () { resetBtn.textContent = '⟳ asked'; })
-      .catch(function () { resetBtn.textContent = '⟳ failed'; })
-      .then(function () {
-        setTimeout(function () {
-          resetBtn.disabled = false;
-          resetBtn.textContent = '⟳ Re-find';
-        }, 2500);
-      });
-  });
+  // There was a ⟳ Re-find here: a press asked the scanner to forget where it
+  // thought the phone was and find it again — and, with a box drawn, to throw
+  // the drawn boxes away and go back to finding the screen by itself. On the
+  // owner's mount that finds the map, not the card, and they reported that it
+  // "tends to get stuck and not let me set it". It was taken off the bar at
+  // their request: ▣ Set box is the way to fix the boxes, and the scanner
+  // never second-guesses a box a person drew. See AUDITS.md's Settled list.
 
   // --- 📷 Snap ------------------------------------------------------------
   //
@@ -3765,8 +3834,8 @@
     snapBtn.textContent = '📷';
     snapBtn.appendChild(word);
   }
-  // How long the answer stays before the label comes back. Re-find gives its
-  // one word 2.5s; this can be a sentence, read from the driving seat. The
+  // How long the answer stays before the label comes back. This can be a
+  // sentence, read from the driving seat. The
   // last answer stays on the title after the words go, so a mouse resting on
   // the control can still ask what the last press kept.
   var SNAP_SAID_MS = 8000;
@@ -3846,6 +3915,8 @@
       // A fresh Map view frames where the dot is NOW, once. See hereAnchor.
       hereAnchor = null;
       hereWanted = true;
+      // ...and follows it again, whatever a hand on the map did last time.
+      following = true;
       showMap();
     } else if (!viewWrap.classList.contains('gone')) {
       sawAFrame();
@@ -3942,13 +4013,33 @@
      to draw is MV.hereDot's decision, shared with map.html; the gate behind it
      is rpi/gps.py's, and nothing here asks it again.
 
-     THE MAP NEVER FOLLOWS THE DOT. Tiles come down the phone's hotspot and
-     what they cost has never been measured, so a view that panned with the
-     car would be spending an unknown amount of a 2GB month on every block
-     driven. Entering Map view fits the view to include where the dot was
-     then — `hereAnchor`, taken once — and after that the dot moves across a
-     map that stays where the driver left it. No control for it on the bar:
-     ⛶ Map is already the press that frames it. */
+     THE MAP FOLLOWS THE DOT AT ITS EDGES, NOT ON EVERY BEAT. The driver
+     asked for it ("visually it would be best for me to know it is working
+     right"), over the earlier rule that it never followed because nobody
+     had measured the tiles. Entering Map view fits the view to the pins
+     and where the dot was then (`hereAnchor`); after that a fresh dot that
+     leaves the middle FOLLOW_MIDDLE of the map in either direction is
+     panned back to the centre, at the zoom the map is at. Inside the middle
+     nothing moves, so the Pi redraws the map every half mile or so and not
+     on every beat. Measured with Leaflet 1.9.4 in the 1024x600 panel's map
+     (500x472), a beat every 0.05 mi (four seconds at 45 mph) along three
+     straight 10 mi lines out of Marietta Square: 5 to 7 pans at zoom 13, 10
+     to 14 at 14, 20 to 28 at 15, against 200 for a pan on every beat. The
+     TILES are nearly the same either way — 0.8 to 1.4 new tiles a mile at
+     zoom 13, 2.1 to 3.2 at 14, 3.0 to 6.0 at 15, plus 6 to 9 for the view
+     on the way in, where a pan on every beat is the same or at most 0.4 a
+     mile more — because a strip of map along the road is the same tiles
+     however it is panned through. What a tile weighs was not measured: this
+     machine's proxy refuses tile.openstreetmap.org. A grey dot is where the
+     car WAS and a refused fix is no position, so neither moves the map.
+
+     A hand on the map pauses it. Leaflet says `dragstart` only for a drag,
+     and `zoomstart` for every zoom, the page's own fits included, so the
+     page's moves go through moveMap and a zoom inside one is not the
+     driver's. Paused, the corner says FOLLOW_PAUSED after the age, and
+     nothing but ⛶ Map round again — the press that already re-frames the
+     view — starts it again. No control for it on the bar: there are six,
+     and a seventh is settled against. */
   var hereLayer = null;
   var hereAnchor = null;
   var hereWanted = false;
@@ -3961,23 +4052,75 @@
   // that ages the label does not take the dot down and put it back each time,
   // closing its popup under the driver's pointer.
   var hereKey = '';
+  // The share of the map's width and of its height, centred, a fresh dot may
+  // wander in before the view goes after it.
+  var FOLLOW_MIDDLE = 0.6;
+  var FOLLOW_PAUSED = ' · not following';
+  var following = true;
+  // Where the dot was when the follow last looked at it, or a fit last
+  // framed it. The follow asks only of a dot that has MOVED since: a fit
+  // that left the car near the edge of the pins is the frame the driver
+  // pressed for, and the once-a-second tick that ages the label is not the
+  // car going anywhere.
+  var herePos = '', judgedPos = '';
+  // Until when a zoomstart is the page's own: a second past its last fit or
+  // pan. Leaflet fires a fit's zoomstart a frame AFTER the call, inside a
+  // 250ms animation, so a flag cleared on moveend was not enough: entering
+  // Map view fits twice back to back, the first fit's moveend cleared the
+  // flag, and the second fit's zoomstart paused the follow before it had
+  // moved once. A deadline cannot be left standing by a move that never
+  // ends; the cost is that a hand zooming within a second of the page's
+  // own fit leaves the follow on.
+  var OWN_MOVE_MS = 1000;
+  var ownUntil = 0;
 
-  /* The pins, and the dot's position when this Map view was entered, if it
-     had one: the one fit every draw of this map makes. */
+  function moveMap(how) {
+    ownUntil = Date.now() + OWN_MOVE_MS;
+    how();
+  }
+
+  /* Once, when the map is made: what tells a hand on the map from the page. */
+  function watchHands(map) {
+    map.on('dragstart', function () { following = false; drawHere(); });
+    map.on('zoomstart', function () {
+      if (Date.now() > ownUntil) { following = false; drawHere(); }
+    });
+  }
+
+  /* The pins, and the dot's position when this Map view was entered (or
+     last followed), if it had one: the fit every new card's map makes, and
+     the one ⛶ Map makes on the way in. */
   function fitView(pins) {
     var b = hereAnchor ? pins.concat([hereAnchor]) : pins;
-    if (b.length > 1) theMap.fitBounds(b, { padding: [34, 34] });
-    else if (b.length) theMap.setView(b[0], 13);
+    judgedPos = herePos;
+    if (b.length > 1) moveMap(function () { theMap.fitBounds(b, { padding: [34, 34] }); });
+    else if (b.length) moveMap(function () { theMap.setView(b[0], 13); });
+  }
+
+  /* A fresh dot that moved outside the middle of the map, while nobody has
+     taken it: the view goes to the dot at the zoom it is at. */
+  function followDot(d) {
+    if (herePos === judgedPos) return;
+    judgedPos = herePos;
+    if (!following || d.grey) return;
+    var size = theMap.getSize();
+    var at = theMap.latLngToContainerPoint([d.lat, d.lon]);
+    var edge = (1 - FOLLOW_MIDDLE) / 2;
+    if (at.x >= size.x * edge && at.x <= size.x * (1 - edge)
+        && at.y >= size.y * edge && at.y <= size.y * (1 - edge)) return;
+    hereAnchor = [d.lat, d.lon];
+    moveMap(function () { theMap.panTo([d.lat, d.lon]); });
   }
 
   function drawHere() {
     var onMap = viewMode === 'map' && !!theMap;
     var d = onMap && MV && gpsNow ? MV.hereDot(gpsNow.fix, Date.now() - gpsAt) : null;
     hereNote.hidden = !d;
-    hereNote.textContent = d ? (d.line || d.label) : '';
+    hereNote.textContent = d ? (d.line || d.label + (following ? '' : FOLLOW_PAUSED)) : '';
     hereNote.classList.toggle('grey', !!(d && d.grey));
     if (!theMap) return;
     var key = d && !d.line ? [d.lat, d.lon, d.err, d.grey].join('|') : '';
+    herePos = key ? d.lat + ',' + d.lon : '';
     if (key !== hereKey) {
       hereKey = key;
       if (hereLayer) { theMap.removeLayer(hereLayer); hereLayer = null; }
@@ -4001,15 +4144,19 @@
        found. Waiting for a dot instead left hereWanted standing when the view
        was entered with no fix, so the first fix to come in — minutes later,
        after the driver had panned to look at something — pulled the view
-       back to it: a fit on a beat, which is the map moving with the GPS. With
-       no dot at entry there is nothing to include, and ⛶ Map round again is
-       the press that frames it. */
+       back to it: a fit on a beat, the pins and the zoom thrown away for the
+       car. With no dot at entry there is nothing to include, and ⛶ Map round
+       again is the press that frames it. Every draw after the first follows
+       the dot instead, at the edges and the zoom it finds — and not at all
+       once the driver has panned. */
     if (hereWanted) {
       hereWanted = false;
       if (key) {
         hereAnchor = [d.lat, d.lon];
         fitView(lastBounds || []);
       }
+    } else if (key && onMap) {
+      followDot(d);
     }
   }
 
@@ -4024,19 +4171,38 @@
   function mapWants() {
     var o = onRecord || {};
     var held = holdingNow ? (heldEnds || null) : null;
-    var names = [o.pickup, o.dropoff, held].filter(Boolean)
+    /* ...and the held order's pickups off its Trip Planner, while it is held:
+       the restaurant the driver read with ⌖ was never on this map, so the
+       order and the place it is collected from were never seen together
+       (the driver: "even after scanning the restaurant it failed to
+       associate it"). Guarded for a map-view.js from before them, which
+       sw.js can serve this page (see drawHow). Never the order's end: that
+       is `held`, off holding.dropoff, and nothing here writes it. */
+    var plan = heldPlan && heldPlan.of === heldOwner() ? heldPlan.stops : null;
+    var heldPicks = (holdingNow && plan && MV && MV.heldPickups)
+      ? MV.heldPickups(plan).filter(function (p) { return p.q !== held; }) : [];
+    var names = [o.pickup, o.dropoff, held]
+      .concat(heldPicks.map(function (p) { return p.q; })).filter(Boolean)
       .filter(function (v, i, all) { return all.indexOf(v) === i; });
     return { pickup: o.pickup || null, dropoff: o.dropoff || null,
-             held: held, names: names,
+             held: held, heldPicks: heldPicks, names: names,
              // The two cards the line is measured with: this one, whose fix
              // is where the car was when it came up, and the one the order in
              // the car came from, whose own fix and distance its end is
              // checked against. See MV.againstCard.
              card: onRecord, heldCard: held ? heldCard : null,
+             heldId: held ? heldId : null,
              // The card is part of the key: two cards naming the same places
              // came up in two places, and the figure is measured from each
              // one's own fix.
-             key: names.join('|') + '#' + (o.id || ''),
+             //
+             // ...and so is which of them is the order in the car. `names` is
+             // deduplicated, so a card whose dropoff becomes the held end at
+             // ✓ Took names the same places before and after, and the key
+             // did not move: the map kept the pin as the CARD's "and drop it
+             // here", which the next card took away with it. Measured in
+             // rpi/test_dashboard.py, 'held end: the ✓ Took reply's end...'.
+             key: names.join('|') + '#' + (o.id || '') + '@' + (held || ''),
              // What the NucBox said about these places on this walk: a
              // refusal per place, with the disc it was made in, and why the
              // NucBox could not be asked at all (and the public map was) —
@@ -4109,7 +4275,11 @@
          brought them back — this button is now that control. */
       mapSay(lastLine);
       theMap.invalidateSize();
-      if (lastBounds) fitView(lastBounds);
+      // On the press only. Every message the scanner sends comes through
+      // here — a beat every four seconds — and a fit on each pulled the view
+      // back over the driver's drag and over the follow's last pan, so the
+      // map went to the pins and back to the car on every beat.
+      if (lastBounds && hereWanted) fitView(lastBounds);
       drawHere();
       return;
     }
@@ -4133,7 +4303,7 @@
       // this same card has to be told again. Left as mapSay, re-entry would
       // restate the LAST card's detour over an empty map.
       mapDrew(onRecord
-        ? 'this card names nowhere yet — ⌖ Dropoff reads it off your phone'
+        ? 'this card names nowhere yet — ⌖ Scan reads it off your phone'
         : 'no card read yet — nothing to put on a map');
       return;
     }
@@ -4160,6 +4330,7 @@
 
       if (!theMap) {
         theMap = L.map(liveMap, { zoomControl: true }).setView([33.94, -84.58], 11);
+        watchHands(theMap);
         // A tapped mark's words go when the map itself is tapped: on a touch
         // panel there is no pointer to leave the mark. drawHow's marks do not
         // pass their own taps on to the map (bubblingMouseEvents), so this is
@@ -4251,7 +4422,11 @@
         for (var n = 0; n < want.names.length; n++) {
           var q = want.names[n];
           if (want.nbxDown) { askPublic.push(q); continue; }
-          var whose = (q === want.held && q !== want.pickup && q !== want.dropoff)
+          // The held order's pickups are its card's places too, and are
+          // searched in its disc as its end is.
+          var heldsOwn = q === want.held
+            || want.heldPicks.some(function (p) { return p.q === q; });
+          var whose = (heldsOwn && q !== want.pickup && q !== want.dropoff)
             ? 'held' : 'new';
           var disc = whose === 'held' ? discs.held : discs.card;
           // `here` for a numberless street's pin: the point of its stretch
@@ -4272,6 +4447,8 @@
           found[q] = got.at || null;
           want.nbxAnswered++;
           want.nbxSeen[q] = { res: got, disc: disc, whose: whose };
+          // The END only: a pickup's pin is never sent as the held end.
+          if (whose === 'held' && q === want.held && disc) pinHeldEnd(want, q, got);
           if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
           landed();
         }
@@ -4523,12 +4700,16 @@
      nothing to explain and no key; null, it failed and the key says only
      that — not the marks, which are not there. It named all four whatever
      was drawn: "○ outside" over a map with no hollow ring on it. */
-  function showKey(drawn, pinned) {
-    mapKey.hidden = drawn === false;
+  function showKey(drawn, pinned, heldPick) {
+    // A held pickup's ring is in the key whether or not drawHow drew
+    // anything: with no NucBox there is nothing of how it was found to
+    // explain, and a green ring beside the green pin is still a mark to name.
+    mapKey.hidden = drawn === false && !heldPick;
     mapKey.querySelector('.k-all').hidden = drawn === null;
     mapKey.querySelector('.k-fail').hidden = drawn !== null;
-    if (!drawn) return;
-    var has = { disc: drawn.disc, pin: pinned, cand: drawn.cand, out: drawn.out };
+    if (drawn === null) return;
+    var has = drawn ? { disc: drawn.disc, pin: pinned, cand: drawn.cand, out: drawn.out } : {};
+    has.hpick = !!heldPick;
     var first = true;
     [].forEach.call(mapKey.querySelectorAll('.k-item'), function (el) {
       var on = !!has[el.getAttribute('data-k')];
@@ -4569,7 +4750,15 @@
     var off = { pick: MV.cardRefuses(want.card, here, pick),
                 held: MV.cardRefuses(want.heldCard,
                                      MV.cardFix(want.heldCard).at, held) };
-    return { wrong: wrong, pick: pick, drop: drop, held: held, off: off };
+    // The held order's pickups, each held to its card's disc as its end is.
+    var heldPicks = (want.heldPicks || []).map(function (p) {
+      var at = found[p.q] || null;
+      return { q: p.q, name: p.name, at: at,
+               off: at ? MV.cardRefuses(want.heldCard, MV.cardFix(want.heldCard).at, at)
+                       : null };
+    });
+    return { wrong: wrong, pick: pick, drop: drop, held: held, off: off,
+             heldPicks: heldPicks };
   }
 
   /* `settled` is false while places are still being asked about, and the tail
@@ -4633,15 +4822,29 @@
         want.held, true);
     put(pick, colourFor(want.pickup, '#17c964', off.pick),
         sayFor(want.pickup, 'pick this one up', off.pick), want.pickup);
+    /* The held order's pickups: a GREEN RING, by the rule above — green for
+       a pickup, ringed for the order already in hand — and in the key as
+       "held pickup". Named as the planner listed it, less the icon's litter
+       (MV.plannerName), with the address searched under it. */
+    j.heldPicks.forEach(function (p) {
+      put(p.at, colourFor(p.q, '#17c964', p.off),
+          sayFor(p.q, 'pick up the order in your car', p.off),
+          [p.name, p.q.replace(/,$/, '')].filter(Boolean).join(' · '), true);
+    });
     put(drop, colourFor(want.dropoff, '#f5a524'),
         sayFor(want.dropoff, 'and drop it here'), want.dropoff);
 
     // The run already committed to, and the run this card would add. Dashed
     // for the detour, solid for the job, which is the same distinction the map
     // page draws: a dashed line is miles nobody pays for.
-    if (here && held) {
-      L.polyline([[here.lat, here.lon], [held.lat, held.lon]],
-                 { color: '#f5a524', weight: 3, opacity: .8 }).addTo(mapLayer);
+    // The held order's run: the car, its pickups not yet visited, its end
+    // (MV.heldRun) — straight segments, as every line on this map is.
+    var heldAt = j.heldPicks.map(function (p) { return p.at; });
+    var run = MV.heldRun ? MV.heldRun(here, heldAt, held)
+      : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []);
+    if (run.length && (held || heldAt.some(Boolean))) {
+      L.polyline(run, { color: '#f5a524', weight: 3, opacity: .8,
+                        className: 'mv-held-run' }).addTo(mapLayer);
     }
     if (here && pick) {
       L.polyline([[here.lat, here.lon], [pick.lat, pick.lon]],
@@ -4675,7 +4878,7 @@
       drewHow = null;
       if (window.console) console.error('drawing how each place was found:', e);
     }
-    showKey(drewHow, !!(held || pick || drop));
+    showKey(drewHow, !!(held || pick || drop), heldAt.some(Boolean));
 
     fitView(bounds);
     // Kept so coming back to this same card can put both of them back — the
@@ -4795,7 +4998,7 @@
     // to measure from. The line names which, with gpsd's own figure.
     if (!here) return MV.fixLine(MV.cardFix(want.card), 'new');
     if (!want.held) return holdingNow
-      ? 'the order in your car has no address on record — ⌖ Dropoff reads it '
+      ? 'the order in your car has no address on record — ⌖ Scan reads it '
         + 'off your phone'
       : 'nothing in the car to compare this against';
     // The card naming no pickup is not the geocoder failing to place one, and
