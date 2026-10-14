@@ -864,6 +864,18 @@
     max-height: 28vh; overflow: auto; font-size: 11px; line-height: 1.45;
   }
 
+  /* The notices as chips (showNotes in the script): each a rounded outline in
+     the notice's own amber, the words bold, so three of them read as three
+     things rather than one paragraph. A chip wraps inside itself only when it
+     is wider than the card (the 3.5" hat), never off its edge. Tapped open,
+     the notice is the sentences again, in the notice's own type. */
+  #warn { cursor: pointer; }
+  #warn .chip {
+    display: inline-block; max-width: 100%; margin: 2px 2px;
+    padding: 1px 8px; border: 1px solid currentColor; border-radius: 999px;
+    font-weight: 700; line-height: 1.3; white-space: normal;
+  }
+
   /* The Trip Planner's stops, one line each, after a ⌖ press.
    *
    * Only ever drawn between offers (see showStops), when the card holds the
@@ -1571,6 +1583,17 @@
     dark: 'The rig may miss an offer arriving in a box this dark — check the '
         + 'phone is in the mount with its screen on, and turn its brightness up.'
   };
+  // ...and the same two as the chip the glass shows (see showNotes), with the
+  // sentence above one tap away. Each keeps what is wrong and what the driver
+  // does about it. Not "RESTARTING": a stall within ten minutes of the last
+  // restart is sat out, and the sentence's "at most once in ten minutes" is
+  // the wording that stays true of both; it is one tap away. For the dark
+  // box, that an offer may be missed and BOTH remedies, because a phone
+  // turned down low reads the same as one out of the mount.
+  var BLIND_CHIP = {
+    stalled: 'SAME PICTURE · reseat its cable if this stays',
+    dark: 'MAY MISS OFFERS · phone in the mount, screen on, brightness up'
+  };
 
   // The GPS, as the scanner has settled it, and the Pi's own report on itself.
   // Off the heartbeat like the five above, for the same reason: every reading
@@ -1609,6 +1632,28 @@
                  + 'brightness down a notch.';
   var TOO_DIM = 'Phone screen too dim for the camera — turn its brightness up '
               + 'a notch, or move the mount out of the shade.';
+
+  // A notice, as the card shows it: a CHIP — a few words, the state in
+  // capitals and what it means or what to do after the dot — with the whole
+  // sentence one tap away (showNotes). The sentences were written to be read
+  // parked; at a glance from the seat a line of 14px prose is not read at
+  // all, and three of them were a block the eye skips. Every chip keeps the
+  // part a driver acts on: a refusal keeps its reason ("NO RATE · 7.8 mi
+  // untimed"), a hedge keeps its direction ("may look better"), a remedy
+  // keeps the remedy. Nothing is deleted — the sentence is on the chip's
+  // title for a mouse resting on it, and tapping the notice swaps every chip
+  // for its sentence.
+  function note(chip, full) { return { chip: chip, full: full || chip }; }
+  var TOO_BRIGHT_CHIP = 'PHONE TOO BRIGHT · turn it down a notch';
+  var TOO_DIM_CHIP = 'PHONE TOO DIM · turn it up, or out of the shade';
+  // The scanner's own sentence is "Offers are NOT being saved: <why>", and
+  // the why is the system's — "[Errno 30] Read-only file system". The chip
+  // keeps the why without the errno, which is a number for a log.
+  function notSavingChip(said) {
+    var why = String(said).replace(/^Offers are NOT being saved:?\s*/, '')
+      .replace(/^\[Errno \d+\]\s*/, '');
+    return 'OFFERS NOT SAVED' + (why && why !== said ? ' · ' + why : '');
+  }
 
   // Where the job goes, as the card wrote it.
   //
@@ -2595,6 +2640,55 @@
     return lines.length;
   }
 
+  // The notices, as chips (see `note`), or — tapped — as the sentences.
+  //
+  // Open stays open until the notices change or WARN_OPEN_MS passes: render()
+  // repaints every second, and a new card's notices are not the ones the
+  // driver asked to read, so they come up as chips again. A sentence left
+  // open on the glass by a tap a minute ago would be the long block this
+  // replaced, back for good.
+  var WARN_OPEN_MS = 20000;
+  var warnOpenAt = 0;
+  var warnSaid = '';
+
+  function showNotes(list) {
+    var said = list.map(function (n) { return n.full; }).join(' ');
+    if (said !== warnSaid) { warnSaid = said; warnOpenAt = 0; }
+    var open = !!warnOpenAt && Date.now() - warnOpenAt < WARN_OPEN_MS;
+    if (!open) warnOpenAt = 0;
+    el.warn.textContent = '';
+    if (open) {
+      el.warn.textContent = said;
+    } else {
+      list.forEach(function (n) {
+        var c = document.createElement('span');
+        c.className = 'chip';
+        c.textContent = n.chip;
+        c.title = n.full;
+        el.warn.appendChild(c);
+        el.warn.appendChild(document.createTextNode(' '));
+      });
+    }
+    el.warn.classList.toggle('open', open);
+    el.warn.title = said;
+    el.warn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    el.warn.hidden = !list.length;
+  }
+
+  // A tap on the notice is the "what does that mean" — and a second tap puts
+  // the chips back. It moves nothing a press on the bar decides: the notice
+  // is part of the card, not a control on the bar (which holds six).
+  el.warn.setAttribute('role', 'button');
+  el.warn.tabIndex = 0;
+  function toggleNotes() {
+    warnOpenAt = warnOpenAt ? 0 : Date.now();
+    render();
+  }
+  el.warn.addEventListener('click', toggleNotes);
+  el.warn.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleNotes(); }
+  });
+
   // Whether the notice is showing less than it says. Measured on the element,
   // after the lines above are drawn: its height is what the card had left.
   function noticeCut() {
@@ -3385,11 +3479,15 @@
       // as during one.
       // The camera's line before all of them: every other note here is about
       // a reading, and while it holds there is none coming.
-      var setup = [blind ? BLIND_NOTE[blind] || '' : '',
-                   notSaving || '', tooBright ? TOO_BRIGHT : '',
-                   tooDim ? TOO_DIM : '', p.message || ''].filter(Boolean);
-      el.warn.textContent = setup.join(' ');
-      el.warn.hidden = !setup.length;
+      // The phase message is the autopilot's own words, with no shorter form
+      // to give it: it is its own chip.
+      var setup = [blind && BLIND_NOTE[blind]
+                     ? note(BLIND_CHIP[blind], BLIND_NOTE[blind]) : null,
+                   notSaving ? note(notSavingChip(notSaving), notSaving) : null,
+                   tooBright ? note(TOO_BRIGHT_CHIP, TOO_BRIGHT) : null,
+                   tooDim ? note(TOO_DIM_CHIP, TOO_DIM) : null,
+                   p.message ? note(p.message) : null].filter(Boolean);
+      showNotes(setup);
       // No card, no address. Leaving the last one up would have it read as
       // belonging to whatever comes next.
       showPlaces(null);
@@ -3671,15 +3769,18 @@
     // it not being kept at all, and it is the only note here whose cost cannot
     // be undone by looking again. A washed-out card can be re-read; an offer
     // nobody wrote down is gone.
-    if (notSaving) notes.push(notSaving);
+    if (notSaving) notes.push(note(notSavingChip(notSaving), notSaving));
     // The order in the car, read again under either id: no pair is weighed
     // (server.js sends no stack for it), and this says why.
-    if (holdingNow && r.heldCard) notes.push('The order you took, on the phone again \u2014 not a new offer.');
+    if (holdingNow && r.heldCard) {
+      notes.push(note('YOUR ORDER · not a new offer',
+                      'The order you took, on the phone again \u2014 not a new offer.'));
+    }
     // Then, because it is the note with a remedy in the driver's own hand, and
     // because the reading it is sitting on top of was taken through a
     // washed-out card.
-    if (tooBright) notes.push(TOO_BRIGHT);
-    if (tooDim) notes.push(TOO_DIM);
+    if (tooBright) notes.push(note(TOO_BRIGHT_CHIP, TOO_BRIGHT));
+    if (tooDim) notes.push(note(TOO_DIM_CHIP, TOO_DIM));
     // The label above has room for three words. This is where the reason goes,
     // and it has to be here rather than only in the label, because "CHECK THE
     // TIME" on its own reads as "one number looks odd" — when what happened is
@@ -3688,17 +3789,24 @@
     // figure on it: when this fires there is no offer for any of the other
     // sentences to be about.
     if (r.doubt === 'screen') {
-      notes.push('This looks like the app itself rather than an offer — a '
-                 + 'route being planned, or a dash waiting for one. No rate is '
-                 + 'shown, because the figures are not a job.');
+      // The refusal and its reason: no rate, because these are not a job.
+      notes.push(note('NO RATE · the app, not a job',
+                      'This looks like the app itself rather than an offer — a '
+                      + 'route being planned, or a dash waiting for one. No rate is '
+                      + 'shown, because the figures are not a job.'));
     }
     if (r.doubt === 'leg') {
-      notes.push('The card shows a leg this reading could not time'
-                 + (typeof r.untimedMiles === 'number'
-                    ? ' — ' + r.untimedMiles.toFixed(1) + ' mi of it'
-                    : '')
-                 + ', so these minutes are part of the trip, not all of it. '
-                 + 'No rate is shown rather than one several times too high.');
+      // ...and here the reason is the leg nobody timed, with its miles when
+      // the card printed them: that figure is what the driver looks for.
+      var untimed = typeof r.untimedMiles === 'number'
+        ? r.untimedMiles.toFixed(1) + ' mi' : 'a leg';
+      notes.push(note('NO RATE · ' + untimed + ' untimed',
+                      'The card shows a leg this reading could not time'
+                      + (typeof r.untimedMiles === 'number'
+                         ? ' — ' + r.untimedMiles.toFixed(1) + ' mi of it'
+                         : '')
+                      + ', so these minutes are part of the trip, not all of it. '
+                      + 'No rate is shown rather than one several times too high.'));
     }
     // A rate with no running cost taken off it is a CEILING, not the offer,
     // and the old wording — "pay shown before mileage cost" — described the
@@ -3713,20 +3821,25 @@
       // which the layout checks caught. "Ceiling" is the word that matters —
       // it says the number may be anywhere below itself.
       notes.push(r.milesUncertain
-        ? 'Distance unreadable — rate is a ceiling.'
-        : 'No distance on the card — rate is a ceiling.');
-    } else if (r.milesUncertain) notes.push('Distance unreadable — check the miles.');
-    else if (r.milesCorrected) notes.push('Recovered a decimal in the distance — check the miles.');
+        ? note('CEILING · miles unreadable', 'Distance unreadable — rate is a ceiling.')
+        : note('CEILING · no distance', 'No distance on the card — rate is a ceiling.'));
+    } else if (r.milesUncertain) {
+      notes.push(note('CHECK MILES · unreadable', 'Distance unreadable — check the miles.'));
+    } else if (r.milesCorrected) {
+      notes.push(note('CHECK MILES · decimal recovered',
+                      'Recovered a decimal in the distance — check the miles.'));
+    }
     // Said out loud, because a fragment is not a small error in a safe
     // direction: the same pay divided by less time always looks better. The
     // scanner is still resampling when this is showing, so it is a "wait" and
     // not a "no".
     if (r.whole === false) {
-      notes.push('Still reading this card — the journey may not be all there yet, '
-                 + 'which makes it look better than it is.');
+      // The direction is the half that matters, so it is on the chip.
+      notes.push(note('STILL READING · may look better than it is',
+                      'Still reading this card — the journey may not be all there yet, '
+                      + 'which makes it look better than it is.'));
     }
-    el.warn.textContent = notes.join(' ');
-    el.warn.hidden = !notes.length;
+    showNotes(notes);
 
     // How old this offer is, always and first.
     //

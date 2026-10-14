@@ -978,6 +978,21 @@ _FOUNDPAY_CARD = {'ready': True, 'locked': True, 'whole': True, 'state': 'go',
                   'pay': 999.99, 'minutes': 60.0, 'cardMinutes': 60.0, 'miles': 99.9,
                   'cost': 0, 'costPerMile': 0, 'fromDeadline': True,
                   'deliverBy': 1155, 'track': None, 'places': [], 'text': ''}
+# The most notices one card writes in ordinary use, as chips (live.html
+# showNotes): the journal refusing writes, a washed-out phone, a rate with no
+# mileage off it and a card still being read — four chips, each with its
+# sentence one tap away. Measured on the same page as PAY ?, after it.
+CHIPS_BEAT = {'alive': True, 'at': 1, 'tooBright': True,
+              'notSaving': 'Offers are NOT being saved: [Errno 30] Read-only file system'}
+CHIPS_CARD = dict(_FOUNDPAY_CARD, state='warn', perHour=21.8, grossPerHour=21.8,
+                  pay=8.0, minutes=22.0, cardMinutes=22.0, miles=6.9,
+                  fromDeadline=False, deliverBy=None, whole=False,
+                  milesUncertain=True, uncosted=True, costPerMile=0.3,
+                  places=['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+CHIPS_WANT = ['OFFERS NOT SAVED · Read-only file system',
+              'PHONE TOO BRIGHT · turn it down a notch',
+              'CEILING · miles unreadable',
+              'STILL READING · may look better than it is']
 FOUNDPAY = {'drawn': dict(_FOUNDPAY_CARD, cropFrom='drawn', pay=99.99),
             'found': dict(_FOUNDPAY_CARD, cropFrom='found', pay=99.99),
             'drawn3': dict(_FOUNDPAY_CARD, cropFrom='drawn'),
@@ -1155,12 +1170,15 @@ DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
        snapPanelsJson, noVerdictJson, noVerdictPanelsJson, plannerJson,
-       plannerPanelsJson, hereJson, foundPayJson, liveHereJson, heldJson] = process.argv.slice(2);
+       plannerPanelsJson, hereJson, foundPayJson, liveHereJson, heldJson,
+       chipsJson] = process.argv.slice(2);
 // The order in the car and the offer beside it; see HELD on the Python side.
 const HELD = JSON.parse(heldJson);
 // A card's payout read off a card found above the box, and the same read
 // through the box; see FOUNDPAY on the Python side.
 const FOUNDPAY = JSON.parse(foundPayJson);
+// The notices as chips; see CHIPS_BEAT on the Python side.
+const CHIPS = JSON.parse(chipsJson);
 // The "you are here" label's forms, made by MV.hereDot; see HERE_LINES.
 const HERE_LINES = JSON.parse(hereJson);
 // ...and the panel's, which adds each dot's label once it has stopped
@@ -2384,6 +2402,63 @@ const SNAP_MEASURE = (fixture) => {
         });
       }
       out[panel[0] + ' ' + view + ' foundpay'] = fp;
+      // ...and the notices as chips, then tapped open to their sentences.
+      await page.evaluate((a) => {
+        window.__es.push(a[0]);
+        window.__es.push(a[1]);
+      }, [CHIPS.beat, CHIPS.card]);
+      await page.waitForTimeout(200);
+      const CHIPS_MEASURE = () => {
+        const w = document.getElementById('warn');
+        const vr = document.getElementById('verdict').getBoundingClientRect();
+        const card = { left: vr.left + 2, right: vr.right - 2, top: vr.top + 2, bottom: vr.bottom - 2 };
+        const off = [];
+        const walk = document.createTreeWalker(w, NodeFilter.SHOW_TEXT);
+        const rg = document.createRange();
+        let n;
+        while ((n = walk.nextNode())) {
+          for (let i = 0; i < n.length; i++) {
+            rg.setStart(n, i);
+            rg.setEnd(n, i + 1);
+            const c = rg.getBoundingClientRect();
+            if (!c.width && !c.height) continue;
+            const wr = w.getBoundingClientRect();
+            // On the glass, inside the card, and inside the notice's own box
+            // (what scrolls out of that box is reachable, not lost: asked below).
+            if (c.left < Math.max(0, card.left) - 0.5
+                || c.right > Math.min(window.innerWidth, card.right) + 0.5
+                || (c.top >= wr.top - 0.5 && c.bottom <= wr.bottom + 0.5
+                    && (c.top < Math.max(0, card.top) - 0.5
+                        || c.bottom > Math.min(window.innerHeight, card.bottom) + 0.5))) {
+              if (/\S/.test(n.data[i])) off.push(n.data[i]);
+            }
+          }
+        }
+        const inCard = (sel) => {
+          const b = document.querySelector(sel).getBoundingClientRect();
+          return b.height > 0 && b.top >= card.top - 0.5 && b.bottom <= card.bottom + 0.5;
+        };
+        const box = (sel) => {
+          const b = document.querySelector(sel).getBoundingClientRect();
+          return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
+        };
+        let reach = w.scrollHeight <= w.clientHeight + 1;
+        if (!reach) { w.scrollTop = 9999; reach = w.scrollTop > 0; w.scrollTop = 0; }
+        const d = document.documentElement;
+        return {
+          chips: [].slice.call(w.querySelectorAll('.chip')).map((c) => c.textContent),
+          text: w.textContent.replace(/\s+/g, ' ').trim(),
+          off: off.join(''), need: w.scrollHeight, reach: reach,
+          labelIn: inCard('#verdictLabel'), rateIn: inCard('.rate.big'),
+          layout: { bar: box('.bottombar'), row: box('.connbar'), view: box('#viewWrap') },
+          over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
+        };
+      };
+      const chipsAt = { chips: await page.evaluate(CHIPS_MEASURE) };
+      await page.click('#warn', { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(200);
+      chipsAt.open = await page.evaluate(CHIPS_MEASURE);
+      out[panel[0] + ' ' + view + ' chips'] = chipsAt;
       await page.close();
       await ctx.close();
     }
@@ -3105,7 +3180,8 @@ try:
                      'notes': PLANNER_NOTES, 'notice': PLANNER_NOTICE,
                      'blind': PLANNER_BLIND}),
          json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES), json.dumps(FOUNDPAY),
-         json.dumps(LIVE_HERE_LINES), json.dumps(HELD)],
+         json.dumps(LIVE_HERE_LINES), json.dumps(HELD),
+         json.dumps({'beat': CHIPS_BEAT, 'card': CHIPS_CARD})],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -3261,6 +3337,40 @@ try:
             ok_('...and at $999.99, no more of it off its cell than PAY at %s (%r, %r)'
                 % (where, fp['found3']['off'], fp['drawn3']['off']),
                 len(fp['found3']['off'].strip()) <= len(fp['drawn3']['off'].strip()))
+
+    # The notices as chips: four, the most one card writes in ordinary use.
+    # Every letter of every chip inside the card and on the glass, the verdict
+    # and its rate still inside the card, nothing past the glass, and the
+    # bar, the status row and the picture where the card without them left
+    # them. Tapped open, the sentences: every word of them reachable, and the
+    # verdict still in the card. The chips take less of the card than the
+    # sentences do, which is what they are for.
+    for panel, w, h in NOVERDICT_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            cm = got.get('%s %s chips' % (panel, view)) or {}
+            _c, _o = cm.get('chips') or {}, cm.get('open') or {}
+            _fp = (got.get('%s %s foundpay' % (panel, view)) or {}).get('drawn3') or {}
+            eq('the notices are four chips at %s' % where, _c.get('chips'), CHIPS_WANT)
+            eq('...every letter of them inside the card and on the glass at %s' % where,
+               _c.get('off'), '')
+            ok_('...with the verdict label and the rate inside the card at %s' % where,
+                _c.get('labelIn') and _c.get('rateIn'))
+            no_('...nothing past the glass at %s' % where, _c.get('over'))
+            eq('...the bar, the status row and the picture where they were at %s' % where,
+               _c.get('layout'), (_fp.get('layout') or {}) and {
+                   k: _fp['layout'][k] for k in ('bar', 'row', 'view')})
+            eq('tapped, the notice is the sentences at %s' % where,
+               (_o.get('chips'), 'Offers are NOT being saved' in (_o.get('text') or '')),
+               ([], True))
+            ok_('...every word of them reachable, whole or scrolled to, at %s' % where,
+                _o.get('reach'))
+            ok_('...with the verdict label still inside the card at %s' % where,
+                _o.get('labelIn'))
+            no_('...nothing past the glass at %s' % where, _o.get('over'))
+            ok_('...and the chips need less of the card than the sentences at %s '
+                '(%spx, %spx)' % (where, _c.get('need'), _o.get('need')),
+                (_c.get('need') or 1e9) < (_o.get('need') or 0))
 
     # The Trip Planner's stops between offers, at the most the block holds:
     # four stops and the line under them. Every one on a line of its own, its

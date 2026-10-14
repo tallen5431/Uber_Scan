@@ -333,6 +333,9 @@ const LOOK = (sel) => {
            && cs.visibility !== 'hidden' && Number(cs.opacity) > 0.05
            && r.top >= 0 && r.bottom <= window.innerHeight + 1,
     text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
+    // The notice's sentences, one tap away (live.html showNotes): the chip on
+    // the glass is `text`, and this is what a tap or a resting mouse shows.
+    title: el.title || '',
   };
 };
 
@@ -772,6 +775,87 @@ const framed = (page) => page.waitForFunction(
     out.tookPosted = posted;
     await page.close();
     await ctx.close();
+  }
+
+  // --- the notices as chips, and the sentence one tap away -----------------
+  stage = 'the notices as chips';
+  //
+  // The uncertain card writes two notices. They are drawn as chips — a few
+  // words each — and a tap on the notice shows the sentences; a second tap,
+  // a new set of notices, or WARN_OPEN_MS on the page's own clock puts the
+  // chips back. Measured on the rig's own panel and the two it is proven at,
+  // in the phone picture that is the one in the car.
+  out.chips = {};
+  {
+    const src = await (await fetch(base + '/live.html')).text();
+    const openMs = Number((/var WARN_OPEN_MS = (\d+);/.exec(src) || [])[1]);
+    out.chips.openMs = openMs;
+    for (const panel of [['1024x600', 1024, 600], ['800x480', 800, 480], ['480x320', 480, 320]]) {
+      const ctx = await browser.newContext({
+        viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+      });
+      const page = await ctx.newPage();
+      await page.clock.install({ time: Date.now() });
+      await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+      await phoneFrame(page);
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+                .catch(() => {});
+      await page.waitForFunction('window.__es !== undefined', null,
+                                 { timeout: 10000 }).catch(() => {});
+      await framed(page);
+      const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+      const chips = () => page.evaluate(() => {
+        const w = document.getElementById('warn');
+        const v = document.getElementById('verdict').getBoundingClientRect();
+        const inCard = (r) => r.width > 0 && r.height > 0
+          && r.top >= v.top - 0.5 && r.bottom <= v.bottom + 0.5
+          && r.left >= v.left - 0.5 && r.right <= v.right + 0.5
+          && r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5;
+        const list = [].slice.call(w.querySelectorAll('.chip')).map((c) => ({
+          text: c.textContent, title: c.title, inCard: inCard(c.getBoundingClientRect()),
+          border: getComputedStyle(c).borderTopStyle }));
+        // Reachable: whole, or the rest scrolled to for real.
+        let reach = w.scrollHeight <= w.clientHeight + 1;
+        if (!reach) {
+          w.scrollTop = 9999; reach = w.scrollTop > 0; w.scrollTop = 0;
+        }
+        return { shown: !w.hidden, chips: list,
+                 text: (w.textContent || '').replace(/\s+/g, ' ').trim(),
+                 title: w.title, open: w.classList.contains('open'),
+                 expanded: w.getAttribute('aria-expanded'), reach: reach,
+                 label: document.getElementById('verdictLabel').textContent.trim() };
+      });
+      await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
+      await push(READINGS.uncertain);
+      await page.clock.runFor(200);
+      const slot = { first: await chips() };
+      await page.click('#warn', { timeout: 5000 }).catch(() => {});
+      await page.clock.runFor(200);
+      slot.tapped = await chips();
+      // ...and a second render on the one-second tick does not close it.
+      await page.clock.runFor(1500);
+      slot.ticked = await chips();
+      await page.click('#warn', { timeout: 5000 }).catch(() => {});
+      await page.clock.runFor(200);
+      slot.again = await chips();
+      // Open, then left: back to chips once WARN_OPEN_MS has passed, and not
+      // before.
+      await page.click('#warn', { timeout: 5000 }).catch(() => {});
+      await page.clock.runFor(openMs - 1500);
+      slot.before = await chips();
+      await page.clock.runFor(2500);
+      slot.after = await chips();
+      // Open, then a different card's notices: chips.
+      await page.click('#warn', { timeout: 5000 }).catch(() => {});
+      await page.clock.runFor(200);
+      await push(Object.assign({}, READINGS.uncertain,
+                               { milesUncertain: false, whole: true }));
+      await page.clock.runFor(300);
+      slot.newCard = await chips();
+      out.chips[panel[0]] = slot;
+      await page.close();
+      await ctx.close();
+    }
   }
 
   // --- the order in the car, on the card -----------------------------------
@@ -5213,6 +5297,7 @@ const framed = (page) => page.waitForFunction(
       cls: v.className, label: lab.textContent.trim(),
       glyph: getComputedStyle(lab, '::before').content,
       note: warn.hidden ? '' : warn.textContent.trim(),
+      noteTitle: warn.hidden ? '' : warn.title,
       labelColor: ls.color, noteColor: getComputedStyle(warn).color,
       border: cs.borderTopStyle, borderColor: cs.borderTopColor,
       fill: cs.backgroundColor,
@@ -6492,8 +6577,15 @@ try:
         ok_('...and never an accept', 'ACCEPT' not in label)
         ok_('...and the number is still shown, because it is still evidence',
             ceiling.get('rate', {}).get('shown'))
-        ok_('...with a notice saying it is a ceiling',
-            'ceiling' in ((ceiling.get('warn') or {}).get('text') or ''))
+        # The chip says CEILING and why there is no mileage off; the
+        # sentence, "Distance unreadable — rate is a ceiling.", is one tap
+        # away. "Ceiling" was always the word that mattered (live.html), and
+        # it is the word the chip leads with.
+        ok_('...with a notice saying it is a ceiling (%r)'
+            % ((ceiling.get('warn') or {}).get('text') or ''),
+            'CEILING · miles unreadable' in ((ceiling.get('warn') or {}).get('text') or ''))
+        ok_('...and the sentence one tap away',
+            'rate is a ceiling' in ((ceiling.get('warn') or {}).get('title') or ''))
         ok_('...which is on the glass, not pushed off it',
             (ceiling.get('warn') or {}).get('shown'))
 
@@ -6564,12 +6656,62 @@ try:
         # "CHECK THE TIME" learns that a number looks odd, not that the rig is
         # holding a fraction of the job — so the reason goes where there is
         # room for it, with the size of the missing piece in it.
+        # A refusal keeps its reason on the chip: NO RATE, and the 7.8 mi
+        # leg nobody timed. The sentence that says it in full — "a leg this
+        # reading could not time ... part of the trip, not all of it" — is
+        # one tap away.
         warn = (ut.get('warn') or {}).get('text') or ''
         ok_('...saying in words what is missing (%r)' % warn[:70],
-            'could not time' in warn)
-        ok_('...and how much of the journey that was',
-            '7.8 mi' in warn)
+            'NO RATE · 7.8 mi untimed' in warn)
+        ok_('...and how much of the journey that was, in the sentence one tap away',
+            'could not time' in ((ut.get('warn') or {}).get('title') or '')
+            and '7.8 mi' in ((ut.get('warn') or {}).get('title') or ''))
         ok_('...on the glass, not pushed off it', (ut.get('warn') or {}).get('shown'))
+
+    # --- the notices as chips, the sentence one tap away ---------------------
+    #
+    # Each notice is a few words on the glass and its sentence on a tap. The
+    # uncertain card's two: a rate with no mileage off it, and a card still
+    # being read. What a chip may not lose is the part a driver acts on —
+    # CEILING and why, STILL READING and which way it errs.
+    _ch = got.get('chips') or {}
+    ok_('the notices as chips were measured', bool(_ch.get('openMs')))
+    _WANT_CHIPS = ['CEILING · miles unreadable', 'STILL READING · may look better than it is']
+    _WANT_SAID = ('Distance unreadable — rate is a ceiling. Still reading this card — '
+                  'the journey may not be all there yet, which makes it look better '
+                  'than it is.')
+    for _pn in ('1024x600', '800x480', '480x320'):
+        _c = _ch.get(_pn) or {}
+        _f = _c.get('first') or {}
+        eq('[%s] the notices are chips, one each' % _pn,
+           [c.get('text') for c in _f.get('chips') or []], _WANT_CHIPS)
+        eq('[%s] ...each with its sentence on its title' % _pn,
+           ' '.join(c.get('title') or '' for c in _f.get('chips') or []), _WANT_SAID)
+        ok_('[%s] ...outlined, every chip inside the card (%r)'
+            % (_pn, [c.get('inCard') for c in _f.get('chips') or []]),
+            _f.get('chips') and all(c.get('inCard') and c.get('border') == 'solid'
+                                    for c in _f.get('chips')))
+        eq('[%s] ...and the sentences on the notice\'s own title' % _pn,
+           _f.get('title'), _WANT_SAID)
+        eq('[%s] ...closed' % _pn, (_f.get('open'), _f.get('expanded')), (False, 'false'))
+        _t = _c.get('tapped') or {}
+        eq('[%s] a tap on the notice shows the sentences' % _pn,
+           (_t.get('text'), _t.get('chips'), _t.get('open'), _t.get('expanded')),
+           (_WANT_SAID, [], True, 'true'))
+        ok_('[%s] ...every word of them reachable, whole or scrolled to' % _pn,
+            _t.get('reach'))
+        eq('[%s] ...with the verdict where it was' % _pn, _t.get('label'), _f.get('label'))
+        eq('[%s] ...and still open after the one-second repaint' % _pn,
+           (_c.get('ticked') or {}).get('text'), _WANT_SAID)
+        eq('[%s] a second tap gives the chips back' % _pn,
+           [c.get('text') for c in (_c.get('again') or {}).get('chips') or []], _WANT_CHIPS)
+        eq('[%s] left open, the sentences stay until WARN_OPEN_MS (%sms)'
+           % (_pn, _ch.get('openMs')), (_c.get('before') or {}).get('open'), True)
+        eq('[%s] ...and then the chips come back' % _pn,
+           [c.get('text') for c in (_c.get('after') or {}).get('chips') or []], _WANT_CHIPS)
+        eq('[%s] a different card\'s notices come up as chips, not opened' % _pn,
+           [c.get('text') for c in (_c.get('newCard') or {}).get('chips') or []],
+           ['CEILING · no distance'])
 
     # --- the shift line's median says what it is the median of -----------
     #
@@ -6688,8 +6830,13 @@ try:
     ok_('the dead journal was measured', bool(dd))
     if dd:
         between = ((dd.get('noReading') or {}).get('text') or '')
+        # The chip keeps what is wrong and the system's own reason, less the
+        # errno; the scanner's sentence is one tap away.
         ok_('a dead journal reaches the glass between offers (%r)' % between[:60],
-            'NOT being saved' in between)
+            'OFFERS NOT SAVED · Read-only file system' in between)
+        ok_('...with the scanner\'s own sentence one tap away',
+            'Offers are NOT being saved: [Errno 30] Read-only file system'
+            in ((dd.get('noReading') or {}).get('title') or ''))
         # ...and that really is the between-offers branch. Without this the
         # check above passes on a page still showing the last offer, which is
         # the branch the check below is for.
@@ -6703,8 +6850,8 @@ try:
         # kept at all, and on a panel where a notice can scroll the order is
         # which one the driver reads first.
         ok_('...ahead of the note about the picture being poor',
-            'too bright' in between
-            and between.index('NOT being saved') < between.index('too bright'))
+            'PHONE TOO BRIGHT' in between
+            and between.index('OFFERS NOT SAVED') < between.index('PHONE TOO BRIGHT'))
         after_setup = ((dd.get('afterSetup') or {}).get('text') or '')
         ok_('the setup narration is not still on the strip between offers (%r)'
             % after_setup[:60], 'starting scanner' not in after_setup)
@@ -6715,15 +6862,16 @@ try:
             '41px' in old_relock)
         on_reading = ((dd.get('onReading') or {}).get('text') or '')
         ok_('...and it survives an offer arriving, which is the case it is about',
-            'NOT being saved' in on_reading)
+            'OFFERS NOT SAVED' in on_reading)
         # Both branches order it, and both have to be asked. They are separate
         # lists built by separate code, so an ordering checked in one says
         # nothing whatever about the other.
         ok_('...still ahead of the brightness note once a reading is up',
-            'too bright' in on_reading
-            and on_reading.index('NOT being saved') < on_reading.index('too bright'))
+            'PHONE TOO BRIGHT' in on_reading
+            and on_reading.index('OFFERS NOT SAVED') < on_reading.index('PHONE TOO BRIGHT'))
         ok_('...and goes when the journal takes a row again',
-            'NOT being saved' not in ((dd.get('cleared') or {}).get('text') or ''))
+            'NOT SAVED' not in ((dd.get('cleared') or {}).get('text') or '')
+            and 'NOT being saved' not in ((dd.get('cleared') or {}).get('title') or ''))
 
     # --- the GPS and the Pi, on the connection row --------------------------
     #
@@ -8749,16 +8897,23 @@ try:
             _st.get('fill')), (_red, 'dashed', _red, _black))
         eq('[%s] ...a warning sign where PASS has its cross' % _pn,
            _st.get('glyph'), '"⚠ "')
+        # The chip: what is wrong and the driver's remedy. How often the rig
+        # restarts it is in the sentence one tap away, below.
         ok_('[%s] ...and the line saying what to do, red as well (%r)'
             % (_pn, _st.get('note')),
-            'same picture' in (_st.get('note') or '') and _st.get('noteColor') == _red)
+            (_st.get('note') or '').startswith('SAME PICTURE')
+            and 'reseat its cable' in (_st.get('note') or '')
+            and _st.get('noteColor') == _red)
         # A stall within ten minutes of the last restart over one is sat out,
         # not restarted (STALL_AGAIN in scan_pi.py), and the beat cannot tell
         # the panel which this is. "The rig restarts it" was untrue for those
         # ten minutes; how often it does is true of both.
         ok_('[%s] ...saying how often the rig restarts it, which is true of a '
             'stall it is sitting out as well (%r)' % (_pn, _st.get('note')),
-            'at most once in ten minutes' in (_st.get('note') or ''))
+            'at most once in ten minutes' in (_st.get('noteTitle') or ''))
+        # Not "RESTARTING" on the chip: a stall inside STALL_AGAIN is sat out.
+        ok_('[%s] ...and the chip does not say it is restarting (%r)'
+            % (_pn, _st.get('note')), 'RESTART' not in (_st.get('note') or '').upper())
         ok_('[%s] ...the word and the line whole, inside the card, on the glass'
             % _pn, _st.get('labelIn') and _st.get('noteIn') and _st.get('noteWhole'))
         eq('[%s] ...and no rate: the frozen card\'s figure is not vouched for' % _pn,
@@ -8801,8 +8956,10 @@ try:
         # caught a card on.
         ok_('[%s] ...saying the rig may miss an offer, not that there is no lit '
             'screen (%r)' % (_pn, _dk.get('note')),
-            'may miss an offer' in (_dk.get('note') or '')
-            and 'lit screen' not in (_dk.get('note') or ''))
+            'MAY MISS OFFERS' in (_dk.get('note') or '')
+            and 'may miss an offer' in (_dk.get('noteTitle') or '')
+            and 'lit screen' not in (_dk.get('note') or '')
+            and 'lit screen' not in (_dk.get('noteTitle') or ''))
         eq('[%s] ...and the bar where it was' % _pn, _dk.get('bar'), _see.get('bar'))
         _bk = _b.get('back') or {}
         eq('[%s] seeing again gives the verdict back' % _pn,
