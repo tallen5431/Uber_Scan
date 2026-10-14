@@ -203,6 +203,63 @@ eq('...and a pickup behind the car goes before the restaurant',
 eq('...and a restaurant with no point is no figure, not a run without it',
    MV.detourThrough(HERE, NEW_NE, [null], AHEAD), null);
 
+/* ...and with TWO orders in the car (Stage 6): the run is the car, every
+   pickup not yet visited, then both ends — in the order a Trip Planner
+   listing both gives (MV.heldRuns, off server.js's `planAt`), or else both
+   ways round, with a figure only where the two ways give one answer
+   (MV.detourOrders, the street-stretch rule). Invented places. */
+var PLAN2 = [
+  { kind: 'pickup', name: 'Larkspur Tacos', street: '310 Mill St', city: 'Roswell',
+    line: '310 Mill St, Roswell, GA 30075', of: 'b@2' },
+  { kind: 'dropoff', name: 'Lee M.', street: '77 Birch Ln', city: 'Roswell',
+    line: '77 Birch Ln, Roswell' },
+  { kind: 'pickup', name: 'Wren Street Noodles', street: '12 Wren St', city: 'Marietta',
+    line: '12 Wren St, Marietta, GA 30060', of: 'a@1' },
+  { kind: 'dropoff', name: 'Pat Q.', street: '4821 Kestrel Dr', city: 'Marietta',
+    line: '4821 Kestrel Dr, Marietta' }];
+var ORD2 = [{ n: 1, holdId: 'a@1', end: '4821 Kestrel Dr, Marietta, GA 30060', planAt: 3 },
+            { n: 2, holdId: 'b@2', end: '77 Birch Ln, Roswell, GA 30075', planAt: 1 }];
+function runSaid(r) { return r.map(function (e) { return e.n ? 'D' + e.n : e.q.split(',')[0]; }).join(' > '); }
+var hr = MV.heldRuns(PLAN2, ORD2, []);
+eq('one planner listing both orders sets the run order',
+   JSON.stringify([hr.known, hr.runs.map(runSaid)]),
+   JSON.stringify([true, ['310 Mill St > D2 > 12 Wren St > D1']]));
+var hrDone = MV.heldRuns(PLAN2, ORD2, ['310 Mill St, Roswell, GA 30075']);
+eq('...less a pickup the car has visited',
+   hrDone.runs.map(runSaid).join(' | '), 'D2 > 12 Wren St > D1');
+// No planner that places both ends — two apps, or the planner of one order
+// — and the ends go both ways round after the pickups, in the planner's
+// order: nothing chooses between them.
+var cross = MV.heldRuns(PLAN2, [ORD2[0], Object.assign({}, ORD2[1], { planAt: null })], []);
+eq('...and with no planner placing both ends, both orderings of the two ends',
+   JSON.stringify([cross.known, cross.runs.map(runSaid)]),
+   JSON.stringify([false, ['310 Mill St > 12 Wren St > D1 > D2',
+                           '310 Mill St > 12 Wren St > D2 > D1']]));
+eq('...two "ends" at one stop of the list, or at a pickup, are no order either',
+   [MV.heldRuns(PLAN2, [ORD2[0], Object.assign({}, ORD2[1], { planAt: 3 })], []).known,
+    MV.heldRuns(PLAN2, [ORD2[0], Object.assign({}, ORD2[1], { planAt: 0 })], []).known].join(','),
+   'false,false');
+eq('...each order\'s own run, for the map when the order is not known: its pickups, its end',
+   cross.own.map(runSaid).join(' | '), '12 Wren St > D1 | 310 Mill St > D2');
+eq('...and an end nobody named is no run at all',
+   MV.heldRuns(PLAN2, [ORD2[0], Object.assign({}, ORD2[1], { end: null })], []), null);
+
+// The car at Marietta Square; ① ends 7 mi north, ② 9 mi east, and the new
+// pickup a few blocks off the road north. North first, it is on the way
+// (0.09 mi); east first it is 2.27 mi out of the way: two answers.
+var SQ2 = { lat: 33.95, lon: -84.55 }, N2 = { lat: 34.05, lon: -84.55 },
+    E2 = { lat: 33.95, lon: -84.40 }, P2 = { lat: 34.0, lon: -84.56 };
+var both = MV.detourOrders(SQ2, P2, [[N2, E2], [E2, N2]]);
+eq('cross-app orderings that disagree give no figure',
+   JSON.stringify([both.stated, both.lo.toFixed(2), both.hi.toFixed(2)]),
+   JSON.stringify([false, '0.09', '2.27']));
+var atCar = MV.detourOrders(SQ2, { lat: 33.9505, lon: -84.5505 }, [[N2, E2], [E2, N2]]);
+eq('...and orderings that agree, here both on the way, give one',
+   [atCar.stated, atCar.hi < MV.ON_WAY_MI].join(','), 'true,true');
+eq('...the order known is one run, its figure detourThrough\'s through both ends',
+   MV.detourOrders(SQ2, P2, [[N2, E2]]).lo, MV.detourThrough(SQ2, P2, [N2], E2).miles);
+eq('...and a point missing is no figure', MV.detourOrders(SQ2, P2, [[N2, null]]), null);
+
 /* ---- the card's own disc --------------------------------------------------
  *
  * The design study's wrong-branch case, in invented points round Marietta
@@ -1259,6 +1316,36 @@ async function nucbox() {
      JSON.stringify([await stubRoad(3000, 2000, [3, 323, 3]).detour(P1, P2, P3),
                      await stubRoad(3000, 2000, null, [323, 3]).detour(P1, P2, P3)]),
      JSON.stringify([{ why: 'snap' }, { why: 'snap' }]));
+
+  /* Two orders in the car by road (NbxSearch.detourOrders), off a stub
+     router whose road is the straight line, so the figures are
+     MV.detourOrders' and the question is only what is said of them — and
+     every question the relay is asked counted by its points. */
+  function crowRouter(sizes) {
+    return new MV.NbxSearch({ gap: 0, fetch: function (u) {
+      var pts = decodeURIComponent(u).split('points=')[1].split(';').map(function (x) {
+        var ll = x.split(',');
+        return { lat: Number(ll[1]), lon: Number(ll[0]) };
+      });
+      sizes.push(pts.length);
+      var m = 0;
+      for (var k = 0; k + 1 < pts.length; k++) m += MV.crowMiles(pts[k], pts[k + 1]) * 1609.344;
+      return Promise.resolve({ ok: true, status: 200, json: function () {
+        return Promise.resolve({ ok: true, metres: m, snaps: pts.map(function () { return 0; }) });
+      } });
+    } });
+  }
+  var SQ2r = { lat: 33.95, lon: -84.55 }, N2r = { lat: 34.05, lon: -84.55 },
+      E2r = { lat: 33.95, lon: -84.40 }, P2r = { lat: 34.0, lon: -84.56 };
+  var sizes = [];
+  var cr = crowRouter(sizes);
+  var twoWays = await cr.detourOrders(SQ2r, P2r, [[N2r, E2r], [E2r, N2r]]);
+  var oneWay = await cr.detourOrders(SQ2r, P2r, [[N2r, E2r]]);
+  eq('cross-app orderings that disagree give no figure by road either; one known order '
+     + 'gives one, and every question to the relay is three points at most',
+     JSON.stringify([twoWays, (oneWay.miles || 0).toFixed(2), Object.keys(oneWay).join(','),
+                     Math.max.apply(null, sizes)]),
+     JSON.stringify([{ why: 'order' }, '0.09', 'miles,hi,line', 3]));
 
   /* Through the real server.js and the fake NucBox. */
   /* A numberless street's stretch, kept inside the disc (MV.stretchInDisc).

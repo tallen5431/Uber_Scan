@@ -2860,10 +2860,40 @@ function addOnAsCarded(read) {
  * number (① first-taken), its app, and whether it is an add-on and to which.
  * Said beside `holding` (the first) only while carrying two is on. */
 function ordersForPanel(now) {
-  return heldOrders(now).map(function (h, i) {
-    return Object.assign(heldForPanel(h), { n: i + 1, app: h.app || null,
+  var list = heldOrders(now);
+  // The Trip Planner's stops are kept on the first-taken order (the planner
+  // branch in startScanner files them through holding()), and are the
+  // panel's `heldPlan`.
+  var stops = list[0] && list[0].planner && Array.isArray(list[0].planner.stops)
+    ? list[0].planner.stops : [];
+  return list.map(function (h, i) {
+    var o = Object.assign(heldForPanel(h), { n: i + 1, app: h.app || null,
                                              addOn: !!h.addOn, of: h.of || null });
+    // With two in the car, where on that planner this order's end is
+    // (planAt): Map view runs the car through both orders in the planner's
+    // order only when it places both ends (MV.heldRuns). Absent with one,
+    // whose shape is unchanged.
+    if (list.length >= 2) o.planAt = planAtOf(stops, h);
+    return o;
   });
+}
+
+/* The one dropoff stop of a Trip Planner that is this order's end, by its
+ * index, or null: the stop on the same street as the order's end as it
+ * stands (Assemble.sameStreet — the street before the first comma, case,
+ * commas and spacing ignored, the rule plannerPickup and elimination stand
+ * on), and only when exactly one stop is. Asked when the orders are sent,
+ * against the end as it stands then, so an end filed after the planner was
+ * read is asked again rather than remembered from before it. */
+function planAtOf(stops, h) {
+  if (!h || !h.dropoff) return null;
+  var at = [];
+  stops.forEach(function (s, i) {
+    if (s && s.kind === 'dropoff' && Assemble.sameStreet(s.line || s.street, h.dropoff)) {
+      at.push(i);
+    }
+  });
+  return at.length === 1 ? at[0] : null;
 }
 
 /* The pairing, written down at the moment it is made.

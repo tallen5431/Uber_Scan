@@ -6741,6 +6741,7 @@ _BNAV = ('77 Birch Ln, Roswell, GA 30075', '77 Birch Ln', 'Roswell')
 _cp, _cb, _cj, _ch = _cserver('two', CARRY_TWO='1', CHOOSER_MS='1500')
 try:
     _ra = _took2(_cb, _A)
+    _one = _orders(_cb)
     _rb = _took2(_cb, _B)
     _two = _orders(_cb)
     eq('[carry two] a second Took ADDS an order: two in the car, first-taken first',
@@ -6814,6 +6815,33 @@ try:
         [(r.get('id'), r.get('cue')) for r in _rows(_cj, 'mark') if r.get('dropoff') == _SNAV[0]],
         [o.get('dropoff') for o in _orders(_cb)]),
        ({'pick': 'card', 'pay': 12.5}, 200, [('c-s', 'chooser')], [_KNAV[0], _BNAV[0]]))
+
+    # A Trip Planner listing both orders — ②'s end, then ①'s — read now
+    # that both ends are filed: each order says where on it its end is
+    # (`planAt`, by Assemble.sameStreet against the order's own end), which
+    # is how Map view runs the car through both in the planner's order. A
+    # planner placing one end, or the same end twice, places neither. With
+    # one order in the car there is no planAt at all: its shape is the one
+    # it had.
+    def _plan(*stops):
+        return {'planner': {'stops': [dict({'orders': 1, 'expectedBy': None, 'city': None,
+                                            'state': None, 'zip': None}, **s) for s in stops],
+                            'unfiled': None, 'asked': True, 'ms': 10}}
+    _PU = {'kind': 'pickup', 'name': 'Larkspur Tacos', 'street': '310 Mill St',
+           'line': '310 Mill St, Roswell, GA 30075'}
+    _DB = {'kind': 'dropoff', 'name': 'Lee M.', 'street': '77 Birch Ln', 'line': '77 Birch Ln, Roswell'}
+    _DK = {'kind': 'dropoff', 'name': 'Pat Q.', 'street': '4821 Kestrel Dr',
+           'line': '4821 Kestrel Dr, Marietta'}
+    _say(_plan(_PU, _DB, _DK))
+    _both = [o.get('planAt') for o in _orders(_cb)]
+    _say(_plan(_PU, _DB))
+    _half = [o.get('planAt') for o in _orders(_cb)]
+    _say(_plan(_PU, _DB, dict(_DB, name='Lee M. again')))
+    _twice = [o.get('planAt') for o in _orders(_cb)]
+    eq('[carry two] one planner listing both orders sets the run order: each order says '
+       'where its end is on it, and only when it is there once',
+       (_both, _half, _twice, 'planAt' in (_one[0] if _one else {'planAt': 0})),
+       ([2, 1], [None, 1], [None, None], False))
 
     # A card offered while both are in the car: its pair row names the first
     # as `held` and the second beside it, and since Stage 6 its range is

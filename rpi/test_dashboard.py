@@ -5546,6 +5546,35 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(3500);
     out.mapTwo = await page.evaluate(() => window.__letters.map((m) =>
       String((m.opts && m.opts.icon && m.opts.icon.html) || '')).sort());
+    // ...and the run through both and its figure (Stage 6). No planner
+    // places both ends here — it lists ②'s pickup and ①'s end — so the ends
+    // go both ways round: Mill St, Powder Springs, Canton Rd puts Chipotle
+    // 2.62 mi out of the way, Mill St, Canton Rd, Powder Springs 0.57 mi
+    // (MV.detourOrders on these pins). Two answers: no figure, each order's
+    // own run drawn, and no detour line.
+    const runsNow = () => page.evaluate(() => ({
+      note: document.getElementById('viewNote').textContent.trim(),
+      runs: (window.__lines || []).filter((l) => /mv-held-run/.test(String((l.opts || {}).className || '')))
+        .map((l) => [String(l.opts.className), l.pts.length]),
+      detour: (window.__lines || []).filter((l) => /mv-detour/.test(String((l.opts || {}).className || ''))).length,
+    }));
+    out.mapTwoUnknown = await runsNow();
+    // ...then a planner that lists both orders, Canton Rd (②) before Powder
+    // Springs Rd (①), and the server saying so (`planAt`, ordersForPanel):
+    // one run in that order, and its figure, 0.57 mi.
+    const A2 = Object.assign({}, A, { planAt: 2 }), B2 = Object.assign({}, B, { planAt: 1 });
+    await page.evaluate((x) => window.__es.push(x), { holding: A2, orders: [A2, B2] });
+    await page.evaluate((x) => window.__es.push(x), { planner: { stops: [
+      { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700,
+        street: '310 Mill St', city: 'Roswell', line: '310 Mill St, Roswell, GA 30075',
+        of: 'm-b@2' },
+      { kind: 'dropoff', orders: 1, name: 'Lee M.', expectedBy: 710, street: 'Canton Rd',
+        city: 'Marietta', line: 'Canton Rd, Marietta' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
+        city: 'Marietta', line: 'Powder Springs Rd' }],
+      unfiled: null, asked: true, ms: null, at: 2 } });
+    await page.waitForTimeout(3500);
+    out.mapTwoKnown = await runsNow();
     await page.close();
   }
   await browser.close();
@@ -5961,6 +5990,16 @@ try:
 
     eq('[carry two] Map view pins the two orders\' ends D1 and D2, and a pickup one '
        'order\'s card names P2', got.get('mapTwo'), ['D1', 'D2', 'P', 'P2'])
+    _tu, _tk = got.get('mapTwoUnknown') or {}, got.get('mapTwoKnown') or {}
+    eq('[carry two] Map view with no planner placing both ends: "order of stops unknown", '
+       'one run per order, no detour drawn',
+       (_tu.get('note'), sorted(map(tuple, _tu.get('runs') or [])), _tu.get('detour')),
+       ('order of stops unknown — no figure',
+        [('mv-held-run mv-order-1', 2), ('mv-held-run mv-order-2', 3)], 0))
+    eq('[carry two] Map view with one planner listing both orders: one run in its order '
+       'and the figure through both',
+       (_tk.get('note'), _tk.get('runs'), _tk.get('detour')),
+       ('+0.6 mi incl. both orders — straight lines, not roads', [['mv-held-run', 4]], 2))
 
     # --- the order in the car, on the card ---------------------------------
     hc = got.get('heldCard') or {}

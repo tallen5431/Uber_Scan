@@ -781,11 +781,34 @@ CAPTION_LINES = [
      'the geocoder found nothing for where your order is collected'),
     ('no figure, a held pickup on a street',
      "no figure for " + WIDEST_DISC + " — your order's pickup is a street"),
+    # ...and with TWO orders in the car (Stage 6): the figure through both,
+    # said "incl. both orders" in "incl. restaurant"'s place and for its
+    # reason, at its longest — a range (the two orderings agreeing), a place
+    # not asked or not found, the NucBox down after it answered one; and
+    # why there is none: the orderings giving two answers, the second order
+    # with no end, a street anywhere in the run.
+    ('the road figure, both orders in it, at its longest',
+     '+13.2–13.6 road mi incl. both orders · 1 not found · NucBox down, public '
+     'map for the rest',
+     '+13.2–13.6 road mi incl. both orders'),
+    ('the road figure on your way, both orders in it, at its longest',
+     'on your way by road incl. both orders · 1 not found · NucBox down, public '
+     'map for the rest',
+     'on your way by road incl. both orders'),
+    ('the figure, both orders in it, at its longest',
+     '+13.2–13.6 mi incl. both orders — straight lines, not roads · 1 not asked '
+     '· NucBox down, public map for the rest',
+     '+13.2–13.6 mi incl. both orders — straight lines, not roads'),
+    ('the order of two orders\' stops unknown', 'order of stops unknown — no figure'),
+    ('the second order with no end on record',
+     '② has no address on record — ⌖ Scan reads it off your phone'),
+    ('no figure, a street with two orders',
+     "no figure for " + WIDEST_DISC + " — a street, with two orders"),
 ]
 
 # ...and the third field, where there is one, is the part that must stay
 # READABLE on every panel — the rest being a trailing clause the 3.5" hat may
-# ellipsise. THIRTY-THREE entries have one, and they are four judgements: the
+# ellipsise. THIRTY-SIX entries have one, and they are four judgements: the
 # count of places with no pin, whose tail is ` · 1 not asked` or ` · 1 not
 # found` depending on which it was, with one note after it: the NucBox's
 # search down (` · NucBox down, public map used`, or `...public map for the
@@ -825,9 +848,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 85)
-eq('...and thirty-three of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 33)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 91)
+eq('...and thirty-six of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 36)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:

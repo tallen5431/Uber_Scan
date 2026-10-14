@@ -5025,24 +5025,40 @@
        sw.js can serve this page (see drawHow). Never the order's end: that
        is `held`, off holding.dropoff, and nothing here writes it. */
     var plan = heldPlan && heldPlan.of === heldOwner() ? heldPlan.stops : null;
+    // ...and with two orders in the car (carrying two on), the second one's
+    // end beside the first's, pinned D2 to the first's D1, in its own card's
+    // disc.
+    var second = twoHeld() ? heldList[1] : null;
+    var held2 = second && second.dropoff && second.dropoff !== held ? second.dropoff : null;
     // ...and only from a map-view.js that measures the figure through them
     // (MV.detourThrough): an older one, which sw.js can serve this page, has
     // a road detour that would take them and measure to the end alone, under
     // a caption saying the restaurant was in it.
     var listed = (holdingNow && plan && MV && MV.heldPickups && MV.detourThrough)
-      ? MV.heldPickups(plan).filter(function (p) { return p.q !== held; }) : [];
+      ? MV.heldPickups(plan).filter(function (p) { return p.q !== held && p.q !== held2; })
+      : [];
     // ...less the ones the car has stopped at and left (visitPickups in
     // server.js): off the run and out of the figure, which is then measured
     // from the car to the end, and drawn apart as a faded ✓ (`donePicks`).
     var done = visitedNow();
     var heldPicks = listed.filter(function (p) { return done.indexOf(p.q) === -1; });
     var donePicks = listed.filter(function (p) { return done.indexOf(p.q) !== -1; });
-    // ...and with two orders in the car (carrying two on), the second one's
-    // end beside the first's, pinned D2 to the first's D1, in its own card's
-    // disc. The run and the figure stay the first order's alone until the
-    // detour through both exists (Stage 6).
-    var second = twoHeld() ? heldList[1] : null;
-    var held2 = second && second.dropoff && second.dropoff !== held ? second.dropoff : null;
+    // ...and the run the two commit the car to (Stage 6, MV.heldRuns): every
+    // pickup not yet visited and both ends, in the Trip Planner's own order
+    // when one planner places both ends (`planAt` on each order, server.js
+    // ordersForPanel), otherwise both ways round. Null with one order, and
+    // from a map-view.js from before it (sw.js may serve one): with two in
+    // the car that is no figure at all, never a figure through one of them.
+    var runs = held && held2 && MV && MV.heldRuns && MV.detourOrders
+      ? MV.heldRuns(plan, [{ n: 1, holdId: heldId, end: held,
+                             planAt: (heldList[0] || {}).planAt },
+                           { n: second.n, holdId: second.holdId, end: held2,
+                             planAt: second.planAt }], done)
+      : null;
+    // ...and the second order with no end on record: no run through both
+    // can be drawn, and one through the first alone ignores an order in the
+    // car (mapRefusal says so).
+    var noEnd2 = !!second && !second.dropoff;
     var names = [o.pickup, o.dropoff, held, held2]
       .concat(listed.map(function (p) { return p.q; })).filter(Boolean)
       .filter(function (v, i, all) { return all.indexOf(v) === i; });
@@ -5056,6 +5072,7 @@
              heldId: held ? heldId : null,
              held2: held2, heldCard2: held2 ? (second.card || null) : null,
              heldId2: held2 ? (second.holdId || null) : null,
+             runs: runs, noEnd2: noEnd2,
              // The number each order goes by on the pins: ① and ② by holdId.
              heldNs: heldList.reduce(function (m, x) { m[x.holdId] = x.n; return m; }, {}),
              // The card is part of the key: two cards naming the same places
@@ -5070,6 +5087,11 @@
              // rpi/test_dashboard.py, 'held end: the ✓ Took reply's end...'.
              key: names.join('|') + '#' + (o.id || '') + '@' + (held || '')
                + (held2 ? '+' + held2 : '')
+               // ...and the order of the run through both: a planner read
+               // that places both ends moves the run under the same places.
+               + (runs ? '>' + runs.runs.map(function (r) {
+                   return r.map(function (e) { return e.q; }).join('>');
+                 }).join('/') : '')
                // ...and which of its pickups are behind the car: a visit
                // moves the run and the figure under the same places.
                + (donePicks.length ? '~' + donePicks.map(function (p) { return p.q; }).join('|')
@@ -5374,7 +5396,15 @@
           // run car -> restaurant -> held end, the new pickup in its best gap
           // (MV.NbxSearch.detour) — two questions a gap, each three points at
           // most, through the same relay and cache.
-          if (MV.stretchSpan(here, j.pick, j.held, heldStops(j))) {
+          if (j.runs) {
+            // Two orders in the car: through the run that commits the car
+            // to both, each ordering of it when the planner gave none
+            // (NbxSearch.detourOrders) — two or three points a question,
+            // as ever. mapRefusal has refused a street anywhere in it.
+            mapSay('measuring the detour by road…');
+            road = await mapNbx.detourOrders(here, j.pick, j.runs.runs);
+            if (viewMode !== 'map' || mapFor !== key) return;
+          } else if (MV.stretchSpan(here, j.pick, j.held, heldStops(j))) {
             road = { why: 'street' };
           } else {
             mapSay('measuring the detour by road…');
@@ -5393,7 +5423,21 @@
          asked, answered from the page's cache. Router down: null, and the
          straight run as before. */
       var heldRoad = null;
-      if (nbx.route && mapNbx) {
+      if (nbx.route && mapNbx && want.runs) {
+        // Two orders: a road per line drawMap draws — the run through both,
+        // or each order's own — and only where the line would state a
+        // figure, so no road is drawn to a pin the map calls wrong.
+        var tj = mapJudge(want, found, here);
+        if (here && tj.runs && mapRefusal(want, found, here, tj) === null) {
+          var draws = tj.runs.known ? [tj.runs.runs[0]] : tj.runs.own;
+          heldRoad = { lines: [] };
+          for (var di = 0; di < draws.length; di++) {
+            heldRoad.lines.push(await mapNbx.runLine(   // eslint-disable-line no-await-in-loop
+              [here].concat(draws[di].filter(Boolean))));
+            if (viewMode !== 'map' || mapFor !== key) return;
+          }
+        }
+      } else if (nbx.route && mapNbx) {
         var hj = mapJudge(want, found, here);
         var runPts = [here].concat(hj.heldPicks.filter(function (p) { return p.at; })
           .map(function (p) { return p.at; }), [hj.held]).filter(Boolean);
@@ -5759,8 +5803,15 @@
     var donePicks = (want.donePicks || []).map(function (p) {
       return { q: p.q, name: p.name, at: found[p.q] || null };
     });
+    // ...and with two orders in the car, the run through both as points
+    // (want.runs, MV.heldRuns): one run when the planner gave the order, two
+    // otherwise, and each order's own for drawing. A place with no pin is a
+    // null in it, which MV.detourOrders refuses.
+    function pts(r) { return r.map(function (e) { return found[e.q] || null; }); }
+    var runs = want.runs ? { known: want.runs.known, runs: want.runs.runs.map(pts),
+                             own: want.runs.own.map(pts) } : null;
     return { wrong: wrong, pick: pick, drop: drop, held: held, held2: held2, off: off,
-             heldPicks: heldPicks, donePicks: donePicks };
+             heldPicks: heldPicks, donePicks: donePicks, runs: runs };
   }
 
   /* The held order's pickups still ahead, as the points of its run the
@@ -5898,11 +5949,29 @@
     // (MV.heldRun) — along the roads when the NucBox's router drew them
     // (`heldRoad`, see showMap), straight otherwise.
     var heldAt = j.heldPicks.map(function (p) { return p.at; });
-    var run = heldRoad || (MV.heldRun ? MV.heldRun(here, heldAt, held)
-      : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []));
-    if (run.length && (held || heldAt.some(Boolean))) {
-      runLine(run, { color: '#f5a524', opacity: .9,
-                     className: 'mv-held-run' + (heldRoad ? ' mv-road' : '') });
+    // With TWO orders in the car (j.runs, MV.heldRuns): ONE run through both
+    // when a planner gave their order — the car, then its stops and both
+    // ends as it lists them — and otherwise each order's own, car -> its
+    // pickups -> its end, two lines, because which end comes first is not
+    // known and one line through both would draw an order nobody gave.
+    // `heldRoad` is then { lines }, a road or null per line, in that order.
+    if (j.runs) {
+      (j.runs.known ? [j.runs.runs[0]] : j.runs.own).forEach(function (r, i) {
+        var line = heldRoad && heldRoad.lines ? heldRoad.lines[i] : null;
+        var pts = line || MV.heldRun(here, r.slice(0, -1), r[r.length - 1]);
+        if (pts.length) {
+          runLine(pts, { color: '#f5a524', opacity: .9,
+                         className: 'mv-held-run' + (j.runs.known ? '' : ' mv-order-' + (i + 1))
+                                    + (line ? ' mv-road' : '') });
+        }
+      });
+    } else {
+      var run = heldRoad || (MV.heldRun ? MV.heldRun(here, heldAt, held)
+        : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []));
+      if (run.length && (held || heldAt.some(Boolean))) {
+        runLine(run, { color: '#f5a524', opacity: .9,
+                       className: 'mv-held-run' + (heldRoad ? ' mv-road' : '') });
+      }
     }
     // The detour, car -> pickup -> held end, along the road the router
     // measured it on when it did (`road.line`: only with a figure, see
@@ -5921,9 +5990,16 @@
     // either of them missing included — and so with a map-view.js from
     // before MV.detourThrough, which is handed no stops (mapWants).
     var stopsAt = heldAt.filter(Boolean);
+    // ...and with two orders, the gap the figure put the new pickup in, of
+    // the first run (MV.detourOrders) — only where the line states a figure:
+    // with the order of the stops unknown and the orderings disagreeing, by
+    // road or in straight lines, nothing is drawn, as nothing is stated.
+    var twoFig = j.runs && here && pick && !(road && road.why === 'order')
+      ? MV.detourOrders(here, pick, j.runs.runs) : null;
     var gap = !detourRoad && pick
-      ? (here && held && stopsAt.length && MV.detourThrough(here, pick, stopsAt, held))
-        || { from: here, to: held }
+      ? (j.runs ? (twoFig && twoFig.stated ? twoFig.gap : {})
+         : (here && held && stopsAt.length && MV.detourThrough(here, pick, stopsAt, held))
+           || { from: here, to: held })
       : {};
     if (gap.from) {
       runLine([[gap.from.lat, gap.from.lon], [pick.lat, pick.lon]],
@@ -6007,8 +6083,9 @@
     // The held order's own pickups ARE passed: they are where the order in
     // the car goes before its end, which it has to, and the run the figure is
     // measured against goes through them (mapFigure).
+    // ...and with two orders in the car, the run through both (j.runs).
     return stop !== null ? stop
-      : mapFigure(want, found, here, j.pick, j.held, road, heldStops(j));
+      : mapFigure(want, found, here, j.pick, j.held, road, heldStops(j), j.runs);
   }
 
   /* Why the figure is not stated, in words, or null when it may be. showMap
@@ -6031,8 +6108,12 @@
        or a wrong one, is the figure that ignored the restaurant. */
     var heldPicks = j.heldPicks || [];
     function firstPick(test) { return heldPicks.filter(test)[0] || null; }
+    // The second order's end, with two in the car, is a point of the run
+    // the figure is measured through like the first's (MV.heldRuns), so
+    // every rule below that holds the first's holds it, in the same words.
     var badEnd = (want.pickup && wrong[want.pickup]) ? want.pickup
                : (want.held && wrong[want.held]) ? want.held
+               : (want.held2 && wrong[want.held2]) ? want.held2
                : (firstPick(function (p) { return wrong[p.q]; }) || {}).q || null;
 
     // No detour to state, and WHICH of these it is matters: a driver told
@@ -6066,6 +6147,10 @@
                                         MV.cardFix(want.heldCard).at, held,
                                         shortPlace(want.held, DISC_PLACE_SHOWN),
                                         'held');
+    if (off.held2) return MV.againstCard(want.heldCard2,
+                                         MV.cardFix(want.heldCard2).at, j.held2,
+                                         shortPlace(want.held2, DISC_PLACE_SHOWN),
+                                         'held');
     // ...and a held pickup, from the same card's fix, in the same words.
     var offPick = firstPick(function (p) { return p.off; });
     if (offPick) return MV.againstCard(want.heldCard, MV.cardFix(want.heldCard).at,
@@ -6092,6 +6177,11 @@
                            shortPlace(want.held, DISC_PLACE_SHOWN),
                            nbxNo[want.held].whose);
     }
+    if (want.held2 && want.held2 !== want.pickup && nbxNo[want.held2]) {
+      return MV.nbxRefusal(nbxNo[want.held2].res, nbxNo[want.held2].disc,
+                           shortPlace(want.held2, DISC_PLACE_SHOWN),
+                           nbxNo[want.held2].whose);
+    }
     // ...and a held pickup the NucBox would not pin, in its disc's words.
     var noPin = firstPick(function (p) { return nbxNo[p.q] && p.q !== want.pickup; });
     if (noPin) {
@@ -6107,6 +6197,12 @@
       ? 'the order in your car has no address on record — ⌖ Scan reads it '
         + 'off your phone'
       : 'nothing in the car to compare this against';
+    // ...and with two in the car, the second's end too: a figure through
+    // the first alone would leave an order in the car out of the run.
+    if (want.noEnd2) return '② has no address on record — ⌖ Scan reads it off your phone';
+    // ...and a map-view.js from before the run through both (sw.js may
+    // serve one), which has no way to put the two ends in an order.
+    if (want.held2 && !want.runs) return 'order of stops unknown — no figure';
     // The card naming no pickup is not the geocoder failing to place one, and
     // saying "could not be placed" for it blames the lookup for something the
     // card did. Uber prints the merchant on every offer, so this is rare — but
@@ -6125,6 +6221,9 @@
     // already known to be set by the time this is reached, so this one really
     // is the lookup and not the card.
     if (!held) return found[want.held] === undefined
+      ? 'could not reach the geocoder for where your order is going'
+      : 'the geocoder found nothing for where your order is going';
+    if (want.held2 && !j.held2) return found[want.held2] === undefined
       ? 'could not reach the geocoder for where your order is going'
       : 'the geocoder found nothing for where your order is going';
     // ...and for where it is collected, while its planner says it still is.
@@ -6152,6 +6251,13 @@
     said = MV.againstCard(want.heldCard, heldFix.at, held,
                           shortPlace(want.held, DISC_PLACE_SHOWN), 'held');
     if (said) return said;
+    if (want.held2) {
+      var heldFix2 = MV.cardFix(want.heldCard2);
+      if (!heldFix2.at) return MV.fixLine(heldFix2, 'held');
+      said = MV.againstCard(want.heldCard2, heldFix2.at, j.held2,
+                            shortPlace(want.held2, DISC_PLACE_SHOWN), 'held');
+      if (said) return said;
+    }
     /* A held pickup that is a numberless street (MV.stretchInDisc): the run
        goes through some point of it the planner did not name, and its span
        against the new pickup's and the end's is no figure this panel can
@@ -6160,6 +6266,16 @@
     var onStreet = firstPick(function (p) { return p.at.stretch; });
     if (onStreet) return 'no figure for ' + shortPlace(onStreet.q, DISC_PLACE_SHOWN)
                          + ' — your order\'s pickup is a street';
+    /* ...and with two orders in the car, an end or the new pickup that is
+       a numberless street: MV.stretchSpan measures one end over its
+       stretch, and two ends in an order nobody may know, each anywhere
+       along a street, is no figure this panel can stand behind. Said. */
+    if (j.runs) {
+      var street = [[want.pickup, pick], [want.held, held], [want.held2, j.held2]]
+        .filter(function (x) { return x[1] && x[1].stretch; })[0];
+      if (street) return 'no figure for ' + shortPlace(street[0], DISC_PLACE_SHOWN)
+                         + ' — a street, with two orders';
+    }
     /* ...and a numberless street whose figure depends on where along it the
        stop is: MV.stretchSpan measures the figure at every point of its
        stretch inside the card's disc, and where those are not one answer
@@ -6206,7 +6322,7 @@
      panel the rig ships on may never do. "+1.2 road mi incl. restaurant"
      is the same figure the same way round: what the pickup adds, here to
      the run through the restaurant. */
-  function mapFigure(want, found, here, pick, held, road, stops) {
+  function mapFigure(want, found, here, pick, held, road, stops, runs) {
     stops = stops || [];
     var withStop = !stops.length ? ''
       : stops.length > 1 ? ' incl. restaurants' : ' incl. restaurant';
@@ -6252,6 +6368,33 @@
                           : ' · NucBox down, public map used')
       : (road && road.why && roadDown[road.why]) || '';
     var cut = MV.ON_WAY_MI;
+    /* TWO ORDERS IN THE CAR (`runs`, MV.heldRuns): the figure through the
+       run that commits the car to both — every pickup still ahead and both
+       ends — the new pickup in its best gap. In the planner's order when a
+       planner gave one; otherwise both ways round, and stated only where
+       the two ways give one answer (MV.oneAnswer, the street-stretch rule),
+       as a range when they differ. Where they do not, the line says why
+       there is no figure rather than choosing an order. Road miles by the
+       router (NbxSearch.detourOrders) where it answered, straight lines
+       otherwise, labelled as for one order. "incl. both orders" in the
+       place "incl. restaurant" has, for the same reason: the same number
+       means a different thing with both orders in it. */
+    if (runs) {
+      var withBoth = ' incl. both orders';
+      if (road && road.why === 'order') return 'order of stops unknown — no figure';
+      if (road && isFinite(road.miles)) {
+        var rHi = isFinite(road.hi) ? road.hi : road.miles;
+        var rMost = rHi.toFixed(1) === road.miles.toFixed(1) ? '' : '–' + rHi.toFixed(1);
+        return (rHi < cut ? 'on your way by road'
+                          : '+' + road.miles.toFixed(1) + rMost + ' road mi')
+          + withBoth + count + nucbox;
+      }
+      var two = MV.detourOrders(here, pick, runs.runs);
+      if (!two || !two.stated) return 'order of stops unknown — no figure';
+      var tMost = two.hi.toFixed(1) === two.lo.toFixed(1) ? '' : '–' + two.hi.toFixed(1);
+      return (two.hi < cut ? 'on your way' : '+' + two.lo.toFixed(1) + tMost + ' mi')
+        + withBoth + ' — straight lines, not roads' + count + nucbox;
+    }
     if (road && isFinite(road.miles)) {
       if (withStop) {
         return (road.miles < cut ? 'on your way by road'
