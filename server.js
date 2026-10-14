@@ -2871,14 +2871,18 @@ function withStack(read, now) {
     return heldOwnCard(h, read, now, true);
   })[0];
   read.heldCard = own ? holdIdOf(own) : null;
+  // Against every order in the car while carrying two is on (Stage 6,
+  // Advice.stackMany), and the panel says which: "with ① + ②". With one
+  // order that is stack() to the byte.
   read.stack = held && !read.heldCard
-    ? Advice.stack(held, timedLikeTheHeldJob(read),
-                   { target: read.target, band: read.band,
-                                 costPerMile: read.costPerMile }, now)
+    ? Advice.stackMany(pairedWith(now, held), addOnAsCarded(timedLikeTheHeldJob(read)),
+                       { target: read.target, band: read.band,
+                         costPerMile: read.costPerMile }, now)
     : null;
-  // With two in the car the pair is still weighed against the FIRST only —
-  // the detour through both is Stage 6 — and the line says so ("vs ① only").
-  if (read.stack && heldOrders(now).length >= 2) read.stack.vsFirst = true;
+  // Carrying two OFF with two in the car — a holding.json written while it
+  // was on, read back at boot (MAX_HELD_FILE) — is weighed against the first
+  // alone, as before Stage 6, and the line still says so ("vs ① only").
+  if (read.stack && !carryTwo() && heldOrders(now).length >= 2) read.stack.vsFirst = true;
   if (carryTwo()) {
     read.orders = ordersForPanel(now);
     read.unowned = Assemble.unowned(assembly);
@@ -2886,14 +2890,73 @@ function withStack(read, now) {
   return read;
 }
 
+/* The orders an offer is weighed against, first-taken first: every one in
+ * the car while carrying two is on, and otherwise the first-taken alone, as
+ * it was before the list — so with the flag off the pair line and the pair
+ * row are what they were, whatever holding.json brought back. `held` is
+ * holding(now), which the callers have already asked. */
+function pairedWith(now, held) {
+  return carryTwo() ? heldOrders(now) : (held ? [held] : []);
+}
+
+/* A reading of an Uber add-on card, typed as one for Advice.stackMany.
+ * The screen is on the OFFER LINE (scan_pi.emit_offer, OP.screen_type off the
+ * card's whole text) and not on the reading, whose text is cut to 200
+ * characters; so it is taken from the card on record, and only when this
+ * reading IS that card — the same pay to the cent, card minutes and miles
+ * (Assemble.cardSeen, the figures heldOwnCard recognises a card by). A
+ * reading not proven to be that card is weighed as an ordinary offer, which
+ * is the WIDER range: an add-on's shortest time is the longer one. Only
+ * stackMany with two orders reads it (an add-on with one is drawn as it
+ * always was). */
+function addOnAsCarded(read) {
+  var o = scanner.offer;
+  if (!read || !o || o.screen !== 'uber.addon' || !carryTwo()) return read;
+  var c = Assemble.cardSeen(o, false), r = Assemble.cardSeen(read, true);
+  if (!c || !r || c.pay === null || r.pay === null
+      || Math.round(c.pay * 100) !== Math.round(r.pay * 100)
+      || c.minutes !== r.minutes || c.miles !== r.miles) return read;
+  return Object.assign({}, read, { screen: 'uber.addon' });
+}
+
 /* Every order in the car as the panel draws it: heldForPanel's shape, with its
  * number (① first-taken), its app, and whether it is an add-on and to which.
  * Said beside `holding` (the first) only while carrying two is on. */
 function ordersForPanel(now) {
-  return heldOrders(now).map(function (h, i) {
-    return Object.assign(heldForPanel(h), { n: i + 1, app: h.app || null,
+  var list = heldOrders(now);
+  // The Trip Planner's stops are kept on the first-taken order (the planner
+  // branch in startScanner files them through holding()), and are the
+  // panel's `heldPlan`.
+  var stops = list[0] && list[0].planner && Array.isArray(list[0].planner.stops)
+    ? list[0].planner.stops : [];
+  return list.map(function (h, i) {
+    var o = Object.assign(heldForPanel(h), { n: i + 1, app: h.app || null,
                                              addOn: !!h.addOn, of: h.of || null });
+    // With two in the car, where on that planner this order's end is
+    // (planAt): Map view runs the car through both orders in the planner's
+    // order only when it places both ends (MV.heldRuns). Absent with one,
+    // whose shape is unchanged.
+    if (list.length >= 2) o.planAt = planAtOf(stops, h);
+    return o;
   });
+}
+
+/* The one dropoff stop of a Trip Planner that is this order's end, by its
+ * index, or null: the stop on the same street as the order's end as it
+ * stands (Assemble.sameStreet — the street before the first comma, case,
+ * commas and spacing ignored, the rule plannerPickup and elimination stand
+ * on), and only when exactly one stop is. Asked when the orders are sent,
+ * against the end as it stands then, so an end filed after the planner was
+ * read is asked again rather than remembered from before it. */
+function planAtOf(stops, h) {
+  if (!h || !h.dropoff) return null;
+  var at = [];
+  stops.forEach(function (s, i) {
+    if (s && s.kind === 'dropoff' && Assemble.sameStreet(s.line || s.street, h.dropoff)) {
+      at.push(i);
+    }
+  });
+  return at.length === 1 ? at[0] : null;
 }
 
 /* The pairing, written down at the moment it is made.
@@ -2942,9 +3005,12 @@ function recordPairing(offer, now, reading) {
   // `withStack` two functions up has always read them off the reading. This is
   // the same three values from the same place.
   var money = reading || {};
-  var s = Advice.stack(held, timedLikeTheHeldJob(offer),
-                       { target: money.target, band: money.band,
-                         costPerMile: money.costPerMile }, now);
+  // Against what the pair line weighed it against (pairedWith): every order
+  // in the car while carrying two is on. The offer line carries its own
+  // screen, so an add-on is typed here without addOnAsCarded.
+  var s = Advice.stackMany(pairedWith(now, held), timedLikeTheHeldJob(offer),
+                           { target: money.target, band: money.band,
+                             costPerMile: money.costPerMile }, now);
   // ...and if there is no reading to take them from, the honest row says the
   // panel's verdict is unknown rather than inventing one. `stack: null`
   // already means "it said nothing", which is a different claim, so this is
@@ -3009,9 +3075,15 @@ function recordPairing(offer, now, reading) {
     stackShown: false
   };
   // ...and with carrying two on, every order in the car: `held` stays the
-  // first-taken, which is what the stack line weighed, and `heldAlso` the
-  // others in the same shape. `heldCount` is how many there were, so the
-  // offers page can leave a pair judged against one of two out of its grading.
+  // first-taken and `heldAlso` the others in the same shape. `heldCount` is
+  // how many there were.
+  //
+  // `stack.over`, with two or more, is how many orders the range was
+  // measured over — all of them, since Stage 6 (Advice.stackMany). A row
+  // with heldCount 2 and no `over` was written before that, when the range
+  // was the card against the first order alone ("vs ① only" on the panel);
+  // the journal is append-only, so the two kinds of row are told apart by
+  // this and nothing else. Absent with one order, whose row is unchanged.
   if (carryTwo()) {
     row.heldAlso = all.slice(1).map(function (o) {
       return { pay: numOrNull(o.pay), minutes: numOrNull(o.minutes),
@@ -3019,6 +3091,7 @@ function recordPairing(offer, now, reading) {
                heldMs: Math.max(0, now - o.acceptedAt) };
     });
     row.heldCount = all.length;
+    if (row.stack && all.length > 1) row.stack.over = all.length;
   }
   appendLines(JSON.stringify(row) + '\n', function (err) {
     if (err) console.error('journal: could not record a pairing: ' + err.message);

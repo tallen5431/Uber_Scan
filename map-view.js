@@ -1189,7 +1189,100 @@
     });
     return { lo: lo, hi: hi, miles: Math.max(ps.miles, hs.miles),
              whose: ps.miles >= hs.miles ? 'new' : 'held',
-             stated: hi < ON_WAY_MI || (lo >= ON_WAY_MI && hi - lo < ON_WAY_MI) };
+             stated: oneAnswer(lo, hi) };
+  }
+
+  /* --- two orders in the car: the run they commit the car to (Stage 6) ----
+   *
+   * With one order the run is the car, its pickups not yet visited, its end
+   * (heldRun, detourThrough). With two it is the car, every pickup not yet
+   * visited, then BOTH ends — and in what order is a fact about the trip
+   * this file cannot see. It is taken from one place only: a Trip Planner
+   * that lists both orders, which is the app's own plan for the car. Uber's
+   * planner prints one list for a trip with both orders on it; server.js
+   * says where on it each order's end is (`planAt` on each order, by
+   * Assemble.sameStreet against the order's own end — ordersForPanel), and
+   * the run is then that list as it reads, pickups and ends in its order.
+   *
+   * With no such planner — two apps, or a planner that does not list both
+   * ends — the run is the pickups as their planner lists them and then the
+   * two ends BOTH WAYS ROUND, and the figure is stated only where the two
+   * orderings give one answer (ordersAgree). Nothing here guesses an order:
+   * not first-taken first, not the end nearer the car.
+   *
+   * `stops` are the planner's stops as the panel holds them, `orders` the two
+   * as [{ n, holdId, end, planAt }] (`end` the place searched for its end),
+   * `visited` the pickup keys behind the car (pickupKey). Returns
+   *   { known, runs, own }
+   * `runs` one list (known) or two (both orderings), each [{ q, n }] — `q`
+   * the place, `n` the order's number on an end and absent on a pickup — and
+   * `own` each order's own run, its pickups (by `of`) then its end, which is
+   * what Map view draws when the order is not known. Null when either end is
+   * not a place: a run with an end nobody named is not a run. */
+  function heldRuns(stops, orders, visited) {
+    var two = (orders || []).filter(Boolean);
+    if (two.length !== 2 || !two[0].end || !two[1].end) return null;
+    var list = Array.isArray(stops) ? stops : [];
+    var done = visited || [];
+    var ends = [two[0].end, two[1].end];
+    var picks = heldPickups(list).filter(function (p) {
+      return done.indexOf(p.q) === -1 && ends.indexOf(p.q) === -1;
+    });
+    var at = two.map(function (o) { return o.planAt; });
+    var known = at.every(function (i) {
+      return typeof i === 'number' && i >= 0 && i < list.length
+        && list[i] && list[i].kind === 'dropoff';
+    }) && at[0] !== at[1];
+    var runs;
+    if (known) {
+      var run = [];
+      list.forEach(function (s, i) {
+        var k = at.indexOf(i);
+        if (k !== -1) { run.push({ q: two[k].end, n: two[k].n }); return; }
+        var q = pickupKey(s);
+        if (q && picks.some(function (p) { return p.q === q; })) run.push({ q: q });
+      });
+      runs = [run];
+    } else {
+      var before = picks.map(function (p) { return { q: p.q }; });
+      runs = [before.concat([{ q: ends[0], n: two[0].n }, { q: ends[1], n: two[1].n }]),
+              before.concat([{ q: ends[1], n: two[1].n }, { q: ends[0], n: two[0].n }])];
+    }
+    var own = two.map(function (o) {
+      return picks.filter(function (p) { return p.of && p.of === o.holdId; })
+        .map(function (p) { return { q: p.q }; }).concat([{ q: o.end, n: o.n }]);
+    });
+    return { known: known, runs: runs, own: own };
+  }
+
+  /* One answer, or none, out of several figures for the same question: the
+   * street-stretch rule (stretchSpan), stated once for both of its users.
+   * Under ON_WAY_MI everywhere is one answer ("on your way" is true of all
+   * of them); past it everywhere and less than ON_WAY_MI from least to most
+   * is one answer, said as the range; anything else is two answers, and a
+   * figure chosen from two answers is a guess at which is true. */
+  function oneAnswer(lo, hi) {
+    return hi < ON_WAY_MI || (lo >= ON_WAY_MI && hi - lo < ON_WAY_MI);
+  }
+
+  /* The figure through two orders when the order of their ends is not
+   * known: detourThrough over each ordering heldRuns gave, as points
+   * (`runs`, each [point, ...] ending in the last end), and one answer only
+   * where the orderings agree by oneAnswer. { lo, hi, stated, gap } — `gap`
+   * detourThrough's for the first ordering, for Map view to draw — or null
+   * when any point is missing. With one run (the order known) lo is hi. */
+  function detourOrders(from, via, runs) {
+    if (!runs || !runs.length) return null;
+    var figs = [];
+    for (var i = 0; i < runs.length; i++) {
+      var r = runs[i] || [];
+      var d = r.length ? detourThrough(from, via, r.slice(0, -1), r[r.length - 1]) : null;
+      if (!d) return null;
+      figs.push(d);
+    }
+    var miles = figs.map(function (f) { return f.miles; });
+    var lo = Math.min.apply(null, miles), hi = Math.max.apply(null, miles);
+    return { lo: lo, hi: hi, stated: oneAnswer(lo, hi), gap: figs[0] };
   }
 
   /* --- how each place was found, to draw ------------------------------------
@@ -2498,6 +2591,42 @@
     });
   };
 
+  /* The same with TWO orders in the car: detour() by road through each run
+     heldRuns gave (`runs`, each [point, ...] ending in its last end, the
+     ends before it held stops), one after another, and one answer only
+     where the runs agree (oneAnswer, the street-stretch rule). Every
+     question is still detour()'s — two or three points through the relay,
+     the legs the runs share asked once and answered from the cache. Road
+     miles and nothing else. Resolves { miles, hi, line } — `miles` the
+     least, `hi` the most, `line` the first run's chosen gap to draw — or
+     { why }: any run's refusal, which refuses the whole as any gap's does
+     in detour(), or 'order' where the runs give two answers, the order of
+     the stops deciding which and nobody knowing the order. */
+  NbxSearch.prototype.detourOrders = function (from, via, runs) {
+    var self = this;
+    if (!runs || !runs.length) return Promise.resolve({ why: 'missing' });
+    var got = [];
+    var chain = Promise.resolve(null);
+    runs.forEach(function (r) {
+      chain = chain.then(function (no) {
+        if (no) return no;
+        var pts = r || [];
+        return self.detour(from, via, pts[pts.length - 1], pts.slice(0, -1)).then(function (d) {
+          if (d.why) return d;
+          got.push(d);
+          return null;
+        });
+      });
+    });
+    return chain.then(function (no) {
+      if (no) return no;
+      var miles = got.map(function (d) { return d.miles; });
+      var lo = Math.min.apply(null, miles), hi = Math.max.apply(null, miles);
+      if (!oneAnswer(lo, hi)) return { why: 'order' };
+      return { miles: lo, hi: hi, line: got[0].line || null };
+    });
+  };
+
   /* Whether this rig's server has the NucBox set, as { search, route,
      streets }; all false when it says so, when it is a server from before
      this existed, or when it cannot be reached. Asked once per walk, at the
@@ -2630,6 +2759,87 @@
              done: drawn + ' of ' + couldDraw + ' drawn end to end' };
   }
 
+  /* --- dusk and dawn at the fix ---------------------------------------------
+   *
+   * The driving panel dims after civil dusk (live.html, nightFor), because a
+   * full-brightness panel in a dark car is a lamp pointed at the driver. When
+   * that is decided from the position and the date with no network: NOAA's
+   * general solar position (the fractional-year series for the declination
+   * and the equation of time), solved for the sun six degrees below the
+   * horizon, which is civil twilight. Twice round, so the declination and
+   * the equation of time are taken at the moment found rather than at noon.
+   *
+   * The DAY is the solar day at that longitude, not the UTC date: Atlanta's
+   * summer dusk is 01:20 UTC, so a UTC date would have called 20:30 EDT
+   * night (dawn of the next UTC day still ahead). Measured against the
+   * published tables in tests/mapview.test.js: within a minute in Atlanta.
+   *
+   * Not a figure on the panel and not from a lookup — the header's rule is
+   * about places; this is the sun at a fix the rig already has.
+   *
+   * Answers { dawn, dusk } in epoch ms, or { always: 'day' | 'night' } where
+   * the sun does not cross six degrees below on that day (far north in June
+   * or December); null for a position or a time that is not one. */
+  var TWILIGHT_ZENITH = 96;
+  var DAY_MS = 86400000;
+
+  function civilTwilight(lat, lon, when) {
+    if (typeof lat !== 'number' || typeof lon !== 'number' || !isFinite(lat)
+        || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180
+        || typeof when !== 'number' || !isFinite(when)) return null;
+    var rad = Math.PI / 180;
+    // Midnight UTC of the solar day `when` falls in, at this longitude.
+    var base = Math.floor((when + lon / 15 * 3600000) / DAY_MS) * DAY_MS;
+    var year = new Date(base).getUTCFullYear();
+    var y0 = Date.UTC(year, 0, 1);
+    var days = ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0) ? 366 : 365;
+    var sun = function (ms) {
+      var g = 2 * Math.PI / days * ((ms - y0) / DAY_MS);
+      return {
+        eq: 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g)
+                      - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g)),
+        dec: 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g)
+             - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g)
+             - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g) };
+    };
+    var always = null;
+    var edge = function (side) {
+      // First guess: six hours either side of solar noon.
+      var ms = base + (720 - 4 * lon + side * 360) * 60000;
+      for (var i = 0; i < 2; i++) {
+        var s = sun(ms);
+        var c = Math.cos(TWILIGHT_ZENITH * rad) / (Math.cos(lat * rad) * Math.cos(s.dec))
+          - Math.tan(lat * rad) * Math.tan(s.dec);
+        // Past 1, the sun never climbs to six below: night all day. Past -1,
+        // it never sinks to it: day all day.
+        if (c > 1) { always = 'night'; return null; }
+        if (c < -1) { always = 'day'; return null; }
+        ms = base + (720 - 4 * (lon - side * Math.acos(c) / rad) - s.eq) * 60000;
+      }
+      return ms;
+    };
+    var dawn = edge(-1), dusk = edge(1);
+    return always ? { always: always } : { dawn: dawn, dusk: dusk };
+  }
+
+  /* Night or day at `when`, at the first of `fixes` that is a position — the
+   * newest fix first, then the last one this page saw — or day when there is
+   * none, or when the clock is not a clock (a Pi with no RTC boots in 1970;
+   * `clockFrom` is the floor below which a time is not believed). Day is the
+   * side that cannot hide anything: a lit panel at night is glare, a dimmed
+   * one in sunlight is a panel that cannot be read. */
+  function nightFor(fixes, when, clockFrom) {
+    if (typeof when !== 'number' || !(when >= (clockFrom || 0))) return false;
+    for (var i = 0; i < (fixes || []).length; i++) {
+      var f = fixes[i];
+      var t = f ? civilTwilight(f.lat, f.lon, when) : null;
+      if (!t) continue;
+      if (t.always) return t.always === 'night';
+      return when < t.dawn || when >= t.dusk;
+    }
+    return false;
+  }
+
   /* --- the library itself --------------------------------------------------
    *
    * Leaflet is fetched from a CDN, which the offers page must not do on load:
@@ -2665,6 +2875,7 @@
   }
 
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
+           civilTwilight: civilTwilight, nightFor: nightFor,
            detour: detour, detourThrough: detourThrough, fixOf: fixOf, fixRefused: fixRefused,
            cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,
            againstCard: againstCard, cardRefuses: cardRefuses,
@@ -2688,6 +2899,7 @@
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            clipToDisc: clipToDisc, stretchInDisc: stretchInDisc, nearestOn: nearestOn,
            stretchSpan: stretchSpan, spanRefusal: spanRefusal, ON_WAY_MI: ON_WAY_MI,
+           heldRuns: heldRuns, oneAnswer: oneAnswer, detourOrders: detourOrders,
            SPAN_STEP_MI: SPAN_STEP_MI,
            NbxSearch: NbxSearch, nbxSettings: nbxSettings,
            AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI,

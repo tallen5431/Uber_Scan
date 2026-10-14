@@ -1436,6 +1436,9 @@
   return { RANK: RANK, FIELDS: FIELDS, STITCH_MS: STITCH_MS, PAGES_MAX: PAGES_MAX,
            cardFields: cardFields, fieldsOf: fieldsOf, outranks: outranks,
            plannerPickup: plannerPickup, forgetPlanner: forgetPlanner,
+           // ...and the street rule they stand on, for server.js's planAtOf
+           // (where on a planner each order's end is).
+           sameStreet: sameStreet,
            dropoff: dropoff, file: file, fileCard: fileCard,
            popup: popup, filePopup: filePopup, cardNames: cardNames,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,

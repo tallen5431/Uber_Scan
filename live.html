@@ -538,6 +538,32 @@
     padding: 4px 8px; margin: -4px 0; line-height: inherit;
     flex: none; white-space: nowrap; cursor: pointer;
   }
+  /* "…": the rest of the status row (fillMore). Drawn as 📷 is and costing
+     the row no height for the same reason; the one thing on the row that is
+     always drawn after the figures, so the row can be short. 48px wide where
+     the row has the room, which is every panel's rule for a glyph pressed in
+     a car. */
+  #more {
+    appearance: none; font: inherit; font-weight: 700; color: var(--text);
+    background: transparent; border: 0; box-shadow: inset 0 0 0 1px var(--line);
+    border-radius: 8px; padding: 4px 7px; margin: -4px 0; line-height: inherit;
+    flex: none; cursor: pointer;
+  }
+  #more[aria-expanded="true"] { box-shadow: inset 0 0 0 2px var(--text); }
+  /* "scanner reading" is said by the green dot (showConnection). */
+  #conn.steady { display: none; }
+  /* The separator before the shift line, when something stands before it. */
+  #shift::before { content: '\00b7\00a0'; }
+  .connbar:has(#conn.steady):has(#health[hidden]) #shift::before { content: none; }
+  .moresheet {
+    position: fixed; left: 8px; right: 8px; bottom: 72px; z-index: 38;
+    padding: 8px 12px; border-radius: 12px; border: 2px solid var(--line);
+    background: var(--panel-2); color: var(--text);
+    font-size: 15px; line-height: 1.4;
+  }
+  .moresheet[hidden] { display: none; }
+  .moresheet a { color: inherit; }
+  .moresheet .m-health, .moresheet .m-conn { color: var(--muted); }
   #snap .word { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
                 overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   /* What the press kept, said on the control itself. It can be a sentence —
@@ -559,28 +585,35 @@
 
      So the rule is the row's own width, asked of the row: it is a container,
      and the camera goes below the width at which it starts to cut the digits.
-     That is 476px of row in landscape, where the row is set at 15px, and
-     389px in portrait, at 12px — measured by widening the screen a pixel at a
-     time until the digits came clear (775 to 779 wide at 480 tall, 423 to 427
-     at 844). The screen's size was the rule before, as a stand-in, and it was
-     wrong both ways: it hid the camera from rows with room for it (a tablet
-     upright at 768x1024, 54px to spare; a phone on its side at 740x360, 220)
-     and drew it over digits it cut (700x400, by 30px); and it drew it on a
-     phone held on its side at 844x390 (115px to spare), which the words
-     beside it said it would not.
+     That is 464.5px of row in landscape, where the row is set at 15px, and
+     384.5px in portrait, at 12px — the row's content box, inside its 4px and
+     8px padding — measured by widening the screen a pixel at a time until
+     the digits came clear (765 to 766 wide at 480 tall, content boxes of
+     463.98 and 464.98px; 420 to 421 upright, 384 and 385). That is with the
+     row as it is since the rest went behind "…": the widest short line,
+     "✓10 $141 · -$17/hr an offer", beside "nothing from the scanner for
+     300s" and "…". (It was 476 and 389 with the whole line on the row and
+     no "…".) The screen's size was the rule before, as a stand-in, and it
+     was wrong both ways: it hid the camera from rows with room for it (a
+     tablet upright at 768x1024, 44px to spare now; a phone on its side at
+     740x360, whose median is not cut at all) and drew it over digits it cut
+     (700x400, by 19px now); and it drew it on a phone held on its side at
+     844x390, which the words beside it said it would not.
 
-     Measured: 800x480 keeps 22px to spare with it, 1024x768 80, 1024x600 174,
-     1280x800 220. The 3.5" hat (19px short) and a phone held upright (34
-     short) do not draw it; snaps.html carries the same press for them,
-     reached from the offers page. A phone on its side does draw it, and
-     what it photographs from there is the rig's display, not the phone's —
-     the same as snaps.html's press, and the control's title says so. */
+     Measured with the short line, the spare is to the end of the line where
+     nothing is cut: 800x480 keeps 32px to spare with it, 1024x768 14 (its
+     row is 18px there), 1024x600 and 1280x800 the whole of " an offer". The
+     3.5" hat (8px short) and a phone held upright (29 short) do not draw it;
+     snaps.html carries the same press for them, reached from the offers
+     page. A phone on its side does draw it, and what it photographs from
+     there is the rig's display, not the phone's — the same as snaps.html's
+     press, and the control's title says so. */
   .connbar { container: connrow / inline-size; }
   @media (orientation: landscape) {
-    @container connrow (width < 476px) { #snap { display: none; } }
+    @container connrow (width < 464.5px) { #snap { display: none; } }
   }
   @media (orientation: portrait) {
-    @container connrow (width < 389px) { #snap { display: none; } }
+    @container connrow (width < 384.5px) { #snap { display: none; } }
   }
   /* What the rig says about itself — the GPS, a throttling Pi — between the
      two. Same one-line rule as the shift line, and it outranks it: the shift
@@ -654,6 +687,30 @@
   /* Leaflet's own default is white, which on this panel is a flash of daylight
      at a red light before the tiles land. */
   #liveMap .leaflet-container { background: var(--panel); }
+  /* The night palette (showNight in the script): after civil dusk at the
+     car's position. The words and labels dimmer and closer to the page —
+     the words from #eef4fb to #c3cfdb (17.4:1 on the page to 13.3), the
+     labels from #9fb3c9 to #8ea0b4 (8.9 to 7.8) — the page black, the card
+     a shade darker, and the four verdict fills darker in the same order, so
+     the ladder that carries the verdict without colour still runs
+     brightest to darkest. The verdict words keep their colours: they are
+     the verdict. Every pair is held by rpi/test_layout.py to the day's own
+     readability floors, read out of this rule. */
+  html.night {
+    --bg: #000000;
+    --panel: #222e3d;
+    --panel-2: #263243;
+    --line: #4e637b;
+    --text: #c3cfdb;
+    --muted: #8ea0b4;
+    --go-dim: #0d5530;
+    --warn-dim: #5c3e06;
+    --no-dim: #3f0b14;
+    --doubt-dim: #30254a;
+  }
+  /* ...and the map's tiles darker again under the same filter, half the
+     day's brightness, so the map is not the brightest thing in the car. */
+  html.night #liveMap .leaflet-tile-pane { filter: saturate(.25) brightness(.45) contrast(.9); }
   /* The tiles muted, so what this page draws is what the eye lands on. OSM's
      standard style is drawn to be read on its own, in full colour: motorways
      red and orange, parks green, every road cased — and on it a 3px orange
@@ -684,8 +741,19 @@
      with the dot when the fix is older than gps.py's staleness rule.
      rpi/test_layout.py holds it inside the map at 800x480, 1024x600 and
      480x320. */
+  /* Leaflet's zoom buttons, which are pressed in the car: 48px square, where
+     Leaflet draws 30. Whole here — display, width, height and line height —
+     so the size is this rule's and not Leaflet's stylesheet's, which arrives
+     from the CDN with the map. The bar stays 10px in with Leaflet's 2px
+     border, so the column of two ends 62px across and 110px down; the
+     "you are here" label and the key are held clear of that, on every
+     panel and the 3.5" hat too (rpi/test_layout.py, beside the phone). */
+  #liveMap .leaflet-control-zoom a {
+    display: block; width: 48px; height: 48px; line-height: 48px;
+    font-size: 26px; text-align: center;
+  }
   #hereNote { position: absolute; top: 8px; right: 8px; z-index: 1001;
-              max-width: calc(100% - 64px); box-sizing: border-box;
+              max-width: calc(100% - 80px); box-sizing: border-box;
               padding: 2px 8px; border-radius: 10px; font-size: 13px;
               line-height: 1.35; color: var(--text);
               background: rgba(11, 13, 16, .85); pointer-events: none; }
@@ -864,6 +932,18 @@
     max-height: 28vh; overflow: auto; font-size: 11px; line-height: 1.45;
   }
 
+  /* The notices as chips (showNotes in the script): each a rounded outline in
+     the notice's own amber, the words bold, so three of them read as three
+     things rather than one paragraph. A chip wraps inside itself only when it
+     is wider than the card (the 3.5" hat), never off its edge. Tapped open,
+     the notice is the sentences again, in the notice's own type. */
+  #warn { cursor: pointer; }
+  #warn .chip {
+    display: inline-block; max-width: 100%; margin: 2px 2px;
+    padding: 1px 8px; border: 1px solid currentColor; border-radius: 999px;
+    font-weight: 700; line-height: 1.3; white-space: normal;
+  }
+
   /* The Trip Planner's stops, one line each, after a ⌖ press.
    *
    * Only ever drawn between offers (see showStops), when the card holds the
@@ -988,12 +1068,20 @@
       grid-column: 1; grid-row: 1; margin: 0;
     }
     #app > .undo { align-self: end; }
+    #app > .moresheet {
+      position: relative; left: auto; right: auto; bottom: auto;
+      grid-column: 1; grid-row: 1; margin: 0; align-self: end;
+    }
   }
-  /* The pair line with two orders in the car: weighed against ① alone until
-   * the detour through both exists (Stage 6), and it says so. Whole, like
-   * the chip beside it: a range that does not say it ignores an order in the
-   * car is the confidently wrong number. */
+  /* The pair line with two orders in the car and carrying two turned OFF
+   * (two read back from a hold file at boot): weighed against ① alone, and
+   * it says so. Whole, like the chip beside it: a range that does not say it
+   * ignores an order in the car is the confidently wrong number. With
+   * carrying two on the range is against both (Stage 6), "with ① + ②". */
   .stackline .vs { flex: none; margin-left: .35em; color: var(--doubt); }
+  /* ...and with it on, "with ① + ②": the same slot, whole, in the row's own
+   * colour — it names what the range covers and doubts nothing. */
+  .stackline .both { flex: none; margin-left: .35em; }
 
   /* ---------- Sizes for the driver's seat ----------
    *
@@ -1016,6 +1104,29 @@
     .bottombar button, .bottombar .linkbtn { font-size: 17px; padding: 8px 4px; }
     #drawTools button { font-size: 17px; }
     #drawHint { font-size: 15px; }
+  }
+  /* ...and a fifth larger again on the rig's own 1024x600 display and
+   * anything bigger. The sizes above were set on the 800x480 panel, and the
+   * 1024x600 one took them unchanged: measured there, the address line was
+   * 15px, the labels under the figures 16px over 20px figures and the line
+   * under the card 16px, in a card with 60px of black above its label. The
+   * address goes to 18 and the small type round it with it, by the same
+   * fifth, so the figures stay larger than their labels (24 over 19).
+   * Height-gated as well as width-gated: a wide panel only 480 tall is the
+   * 800x480's budget, not this one's. rpi/test_layout.py measures each size
+   * here and that the card, the bar and the row still fit.
+   *
+   * Not the notice. Its chips at 19px took 131px of the card on the
+   * four-notice card beside the phone, where the sentences they stand for
+   * took 110 — chips taller than the prose they shorten. At 16 they are the
+   * shorter of the two, which is what they are for. */
+  @media (orientation: landscape) and (min-width: 1000px) and (min-height: 560px) {
+    .places, .stops { font-size: 18px; }
+    .sub { font-size: 24px; }
+    .sub small { font-size: 19px; }
+    .pending { font-size: 19px; }
+    /* ...and the status row, now that it is short (fillMore): 15 to 18. */
+    .connbar { font-size: 18px; }
   }
 </style>
 </head>
@@ -1203,7 +1314,10 @@
        Not 52px, which every control on the bar is held to. Those are pressed
        at a red light; this is pressed parked, with the mouse, to keep a
        picture, and the status link beside it is the same kind of target. -->
-  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="health" hidden></span><span id="shift" hidden></span><button type="button" id="snap" title="📷 Snap: keep a picture of the rig's own screen, on the rig, to share. They are listed on the offers page under 📷 Snaps.">📷<span class="word"> Snap</span></button></div>
+  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="health" hidden></span><span id="shift" hidden></span><button type="button" id="snap" title="📷 Snap: keep a picture of the rig's own screen, on the rig, to share. They are listed on the offers page under 📷 Snaps.">📷<span class="word"> Snap</span></button><button type="button" id="more" aria-expanded="false" aria-controls="moreSheet" aria-label="Everything the status row has to say" title="Everything the status row has to say">…</button></div>
+  <!-- ...and what "…" opens: the status row in full, over the foot of the
+       verdict pane. See fillMore. -->
+  <div class="moresheet" id="moreSheet" hidden></div>
 
   <!-- The chooser and the Undo, over the verdict pane: see .chooser. -->
   <div class="chooser" id="chooser" role="dialog" aria-label="Choose" hidden></div>
@@ -1571,6 +1685,17 @@
     dark: 'The rig may miss an offer arriving in a box this dark — check the '
         + 'phone is in the mount with its screen on, and turn its brightness up.'
   };
+  // ...and the same two as the chip the glass shows (see showNotes), with the
+  // sentence above one tap away. Each keeps what is wrong and what the driver
+  // does about it. Not "RESTARTING": a stall within ten minutes of the last
+  // restart is sat out, and the sentence's "at most once in ten minutes" is
+  // the wording that stays true of both; it is one tap away. For the dark
+  // box, that an offer may be missed and BOTH remedies, because a phone
+  // turned down low reads the same as one out of the mount.
+  var BLIND_CHIP = {
+    stalled: 'SAME PICTURE · reseat its cable if this stays',
+    dark: 'MAY MISS OFFERS · phone in the mount, screen on, brightness up'
+  };
 
   // The GPS, as the scanner has settled it, and the Pi's own report on itself.
   // Off the heartbeat like the five above, for the same reason: every reading
@@ -1586,6 +1711,46 @@
   // does not leave "2 s old" on the glass. See MV.hereDot.
   var gpsAt = 0;
   var cpuNow = null;
+
+  // --- the panel at night ------------------------------------------------------
+  //
+  // After civil dusk at the car's position the panel goes to its night
+  // palette (`html.night` in the stylesheet): darker greys, less between
+  // them, and the map's tiles darker under their filter. A panel set for the
+  // day is a lamp in a dark car, and the driver's eyes are on the road
+  // between glances. Worked out here, on the Pi's own clock, from the fix on
+  // the beat: MV.nightFor, a few lines of solar arithmetic with no network.
+  //
+  // With no fix on the beat, the last one this page saw, kept in this
+  // browser so a reload after dark still knows where the car is — to two
+  // decimals, about a kilometre, which moves dusk by seconds and is all the
+  // position this needs. With neither, or a clock still in 1970, day: a
+  // panel too bright at night is glare; one dimmed in sunshine cannot be
+  // read. Nothing on the bar: the stylesheet and the sun decide it.
+  var FIX_KEY = 'uberscan.lastFix';
+  var lastFix = null;
+  try {
+    var keptFix = JSON.parse(localStorage.getItem(FIX_KEY) || 'null');
+    if (keptFix && typeof keptFix.lat === 'number' && typeof keptFix.lon === 'number') {
+      lastFix = { lat: keptFix.lat, lon: keptFix.lon };
+    }
+  } catch (e) { /* private mode, or nothing kept */ }
+
+  function rememberFix(g) {
+    var f = g && g.fix;
+    if (!f || typeof f.lat !== 'number' || typeof f.lon !== 'number'
+        || !isFinite(f.lat) || !isFinite(f.lon)) return;
+    var kept = { lat: Math.round(f.lat * 100) / 100, lon: Math.round(f.lon * 100) / 100 };
+    if (lastFix && lastFix.lat === kept.lat && lastFix.lon === kept.lon) return;
+    lastFix = kept;
+    try { localStorage.setItem(FIX_KEY, JSON.stringify(kept)); } catch (e) { /* as above */ }
+  }
+
+  function showNight() {
+    var now = gpsNow && gpsNow.fix;
+    var night = !!MV && MV.nightFor([now, lastFix], Date.now(), CLOCK_BELIEVABLE_AFTER);
+    document.documentElement.classList.toggle('night', night);
+  }
   var throttledNow = null;
 
   // A card is under the reader right now. The gap this fills is the one the
@@ -1609,6 +1774,28 @@
                  + 'brightness down a notch.';
   var TOO_DIM = 'Phone screen too dim for the camera — turn its brightness up '
               + 'a notch, or move the mount out of the shade.';
+
+  // A notice, as the card shows it: a CHIP — a few words, the state in
+  // capitals and what it means or what to do after the dot — with the whole
+  // sentence one tap away (showNotes). The sentences were written to be read
+  // parked; at a glance from the seat a line of 14px prose is not read at
+  // all, and three of them were a block the eye skips. Every chip keeps the
+  // part a driver acts on: a refusal keeps its reason ("NO RATE · 7.8 mi
+  // untimed"), a hedge keeps its direction ("may look better"), a remedy
+  // keeps the remedy. Nothing is deleted — the sentence is on the chip's
+  // title for a mouse resting on it, and tapping the notice swaps every chip
+  // for its sentence.
+  function note(chip, full) { return { chip: chip, full: full || chip }; }
+  var TOO_BRIGHT_CHIP = 'PHONE TOO BRIGHT · turn it down a notch';
+  var TOO_DIM_CHIP = 'PHONE TOO DIM · turn it up, or out of the shade';
+  // The scanner's own sentence is "Offers are NOT being saved: <why>", and
+  // the why is the system's — "[Errno 30] Read-only file system". The chip
+  // keeps the why without the errno, which is a number for a log.
+  function notSavingChip(said) {
+    var why = String(said).replace(/^Offers are NOT being saved:?\s*/, '')
+      .replace(/^\[Errno \d+\]\s*/, '');
+    return 'OFFERS NOT SAVED' + (why && why !== said ? ' · ' + why : '');
+  }
 
   // Where the job goes, as the card wrote it.
   //
@@ -1712,7 +1899,9 @@
     // "to" rather than an en dash, because the dash cannot survive a minus
     // sign beside it and this is exactly the row where that happens: a pair
     // that loses money is the one a driver most needs to read correctly.
-    more.textContent = ' with the one you have, over '
+    // ...and with two in the car (carrying two on) not "the one you have":
+    // which ones is said whole, beside the chip (`.both`, below).
+    more.textContent = (s.heldCount > 1 ? ' over ' : ' with the one you have, over ')
       + (s.minMinutes === s.maxMinutes
          ? Math.round(s.minMinutes)
          : Math.round(s.minMinutes) + '\u2013' + Math.round(s.maxMinutes))
@@ -1791,8 +1980,10 @@
     chip.title = s.ends ? '' :
       'Neither card printed enough for the rig to say whether these two jobs '
       + 'end near each other. It is not saying they do.';
-    // With two orders in the car the range is the pair with ① alone (see
-    // withStack in server.js): said beside the chip, whole.
+    // With two orders in the car and carrying two OFF — a hold file written
+    // while it was on, read back at boot — the range is the pair with ①
+    // alone (see withStack in server.js): said beside the chip, whole. With
+    // it on the range is against both, and the words above say so.
     if (s.vsFirst) {
       var vs = document.createElement('span');
       vs.className = 'vs';
@@ -1800,6 +1991,24 @@
       vs.title = 'Two orders are in the car. This weighs the new one against the '
         + 'first you took, not against both.';
       el.stack.appendChild(vs);
+    }
+    // With two in the car and carrying two on, the range is the card against
+    // BOTH (Advice.stackMany), and which two is said in the numbers the
+    // in-car lines go by: "with ① + ②". Whole, in the slot "vs ① only" had,
+    // and not in the words that give way: measured in rpi/test_layout.py at
+    // the widest pair line, those kept only "with ①" at 800x480 beside the
+    // scene picture and "with ① +" on the 3.5" hat — a range against two
+    // read as a range against one.
+    if (s.heldCount > 1) {
+      var both = document.createElement('span');
+      both.className = 'both';
+      both.textContent = 'with ' + Array.apply(null, Array(s.heldCount)).map(function (x, i) {
+        return circled(i + 1);
+      }).join(' + ');
+      both.title = 'Two orders are in the car. This weighs the new one against both: '
+        + 'the most time is all of them one after another, the least the longest '
+        + 'single one.';
+      el.stack.appendChild(both);
     }
     el.stack.appendChild(chip);
     if (s.ends === 'elsewhere') el.stack.className += ' elsewhere';
@@ -2595,6 +2804,55 @@
     return lines.length;
   }
 
+  // The notices, as chips (see `note`), or — tapped — as the sentences.
+  //
+  // Open stays open until the notices change or WARN_OPEN_MS passes: render()
+  // repaints every second, and a new card's notices are not the ones the
+  // driver asked to read, so they come up as chips again. A sentence left
+  // open on the glass by a tap a minute ago would be the long block this
+  // replaced, back for good.
+  var WARN_OPEN_MS = 20000;
+  var warnOpenAt = 0;
+  var warnSaid = '';
+
+  function showNotes(list) {
+    var said = list.map(function (n) { return n.full; }).join(' ');
+    if (said !== warnSaid) { warnSaid = said; warnOpenAt = 0; }
+    var open = !!warnOpenAt && Date.now() - warnOpenAt < WARN_OPEN_MS;
+    if (!open) warnOpenAt = 0;
+    el.warn.textContent = '';
+    if (open) {
+      el.warn.textContent = said;
+    } else {
+      list.forEach(function (n) {
+        var c = document.createElement('span');
+        c.className = 'chip';
+        c.textContent = n.chip;
+        c.title = n.full;
+        el.warn.appendChild(c);
+        el.warn.appendChild(document.createTextNode(' '));
+      });
+    }
+    el.warn.classList.toggle('open', open);
+    el.warn.title = said;
+    el.warn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    el.warn.hidden = !list.length;
+  }
+
+  // A tap on the notice is the "what does that mean" — and a second tap puts
+  // the chips back. It moves nothing a press on the bar decides: the notice
+  // is part of the card, not a control on the bar (which holds six).
+  el.warn.setAttribute('role', 'button');
+  el.warn.tabIndex = 0;
+  function toggleNotes() {
+    warnOpenAt = warnOpenAt ? 0 : Date.now();
+    render();
+  }
+  el.warn.addEventListener('click', toggleNotes);
+  el.warn.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleNotes(); }
+  });
+
   // Whether the notice is showing less than it says. Measured on the element,
   // after the lines above are drawn: its height is what the card had left.
   function noticeCut() {
@@ -3077,8 +3335,11 @@
   }
 
   function showShift(s) {
-    if (!s) { el.shift.hidden = true; return; }
+    if (!s) { el.shift.hidden = true; shiftFull = ''; fillMore(); return; }
     var bits;
+    // What the row itself carries, when the figures are there: the ticks and
+    // what they came to, and the median with its noun (see showStatus).
+    var short = null;
     if (s.clockSet === false) {
       // The rig's own clock has not been set, so it does not yet know what day
       // it is on. Every window over the journal is meaningless until NTP lands,
@@ -3191,6 +3452,17 @@
         bits.push((s.median < 0 ? '-$' : '$')
                   + Math.abs(Math.round(s.median)) + '/hr an offer');
       }
+      // The short form: "✓7 $86 · $13/hr an offer". The tick and its count
+      // run together and the "for" and "net" go behind "…" with the count of
+      // offers and the set-aside. The median keeps "an offer": a bare figure
+      // one dot after the takings reads as the rate of the jobs just named,
+      // which is the fault the noun was put there to end (AUDITS, "The shift
+      // row's median was the typical OFFER"), and on the owner's week it was
+      // pessimistic by 1.5x to 2.3x that way.
+      short = ['\u2713' + s.took
+               + (s.took > 0 && typeof s.earned === 'number'
+                  ? ' ' + (s.earned < 0 ? '-$' : '$') + Math.abs(Math.round(s.earned))
+                  : '')].concat(bits.slice(1));
       bits.push(s.offers + (s.offers === 1 ? ' offer' : ' offers'));
       if (s.setAside) bits.push(s.setAside + ' set aside');
       // `beforeClock` is deliberately NOT printed here. Offers the rig recorded
@@ -3202,9 +3474,68 @@
       // about the journal and a diagnostic may want it; it is not a figure for
       // this row.
     }
-    el.shift.textContent = '· ' + bits.join(' · ');
+    // The separator in front is the stylesheet's (#shift::before), because
+    // whether anything stands before this line is the connection's to say.
+    el.shift.textContent = (short || bits).join(' · ');
+    shiftFull = bits.join(' · ');
+    el.shift.title = shiftFull;
     el.shift.hidden = false;
+    fillMore();
   }
+
+  // --- the rest of the status row, behind "…" ------------------------------
+  //
+  // The row was "● scanner reading · ✓ 7 for $86 net · $13/hr an offer · 70
+  // offers · 13 set aside", 15px grey across the panel's foot, read at a
+  // glance for one thing: is it reading, and what has tonight come to. The
+  // dot answers the first in colour, so "scanner reading" — the steady state
+  // — is not written on the row (`steady`, showConnection); anything else the
+  // connection has to say still is, in words, beside the dot it turned red.
+  // The takings and the median stay; the rest is one press away on "…", a
+  // sheet over the foot of the card with the whole of what the row knows:
+  // the connection in words with the status link, the rig's own note, and
+  // the shift line in full. Not on the bar (it holds six): on the row, like
+  // 📷, at no height.
+  var shiftFull = '';
+  var MORE_MS = 10000;
+  var moreBack = null;
+  var moreBtn = document.getElementById('more');
+  var moreSheet = document.getElementById('moreSheet');
+
+  function fillMore() {
+    if (!moreSheet || moreSheet.hidden) return;
+    moreSheet.textContent = '';
+    var line = function (text, cls) {
+      var d = document.createElement('div');
+      if (cls) d.className = cls;
+      d.textContent = text;
+      moreSheet.appendChild(d);
+      return d;
+    };
+    var c = line('', 'm-conn');
+    var a = document.createElement('a');
+    a.href = '/api/status';
+    a.textContent = el.conn.textContent;
+    c.appendChild(a);
+    if (!el.health.hidden && el.health.textContent) line(el.health.textContent, 'm-health');
+    if (shiftFull) line(shiftFull, 'm-shift');
+  }
+
+  function showMore(on) {
+    clearTimeout(moreBack);
+    moreSheet.hidden = !on;
+    moreBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    if (on) {
+      fillMore();
+      moreBack = setTimeout(function () { showMore(false); }, MORE_MS);
+    }
+  }
+  moreBtn.addEventListener('click', function () { showMore(moreSheet.hidden); });
+  // A press on the sheet itself puts it away, except on the status link.
+  moreSheet.addEventListener('click', function (e) {
+    if (e.target && e.target.tagName === 'A') return;
+    showMore(false);
+  });
 
   // 1 Jan 2025, the same floor server.js applies. Below this a clock is not a
   // clock: the Pi has no RTC, boots in 1970 and jumps when NTP arrives.
@@ -3385,11 +3716,15 @@
       // as during one.
       // The camera's line before all of them: every other note here is about
       // a reading, and while it holds there is none coming.
-      var setup = [blind ? BLIND_NOTE[blind] || '' : '',
-                   notSaving || '', tooBright ? TOO_BRIGHT : '',
-                   tooDim ? TOO_DIM : '', p.message || ''].filter(Boolean);
-      el.warn.textContent = setup.join(' ');
-      el.warn.hidden = !setup.length;
+      // The phase message is the autopilot's own words, with no shorter form
+      // to give it: it is its own chip.
+      var setup = [blind && BLIND_NOTE[blind]
+                     ? note(BLIND_CHIP[blind], BLIND_NOTE[blind]) : null,
+                   notSaving ? note(notSavingChip(notSaving), notSaving) : null,
+                   tooBright ? note(TOO_BRIGHT_CHIP, TOO_BRIGHT) : null,
+                   tooDim ? note(TOO_DIM_CHIP, TOO_DIM) : null,
+                   p.message ? note(p.message) : null].filter(Boolean);
+      showNotes(setup);
       // No card, no address. Leaving the last one up would have it read as
       // belonging to whatever comes next.
       showPlaces(null);
@@ -3671,15 +4006,18 @@
     // it not being kept at all, and it is the only note here whose cost cannot
     // be undone by looking again. A washed-out card can be re-read; an offer
     // nobody wrote down is gone.
-    if (notSaving) notes.push(notSaving);
+    if (notSaving) notes.push(note(notSavingChip(notSaving), notSaving));
     // The order in the car, read again under either id: no pair is weighed
     // (server.js sends no stack for it), and this says why.
-    if (holdingNow && r.heldCard) notes.push('The order you took, on the phone again \u2014 not a new offer.');
+    if (holdingNow && r.heldCard) {
+      notes.push(note('YOUR ORDER · not a new offer',
+                      'The order you took, on the phone again \u2014 not a new offer.'));
+    }
     // Then, because it is the note with a remedy in the driver's own hand, and
     // because the reading it is sitting on top of was taken through a
     // washed-out card.
-    if (tooBright) notes.push(TOO_BRIGHT);
-    if (tooDim) notes.push(TOO_DIM);
+    if (tooBright) notes.push(note(TOO_BRIGHT_CHIP, TOO_BRIGHT));
+    if (tooDim) notes.push(note(TOO_DIM_CHIP, TOO_DIM));
     // The label above has room for three words. This is where the reason goes,
     // and it has to be here rather than only in the label, because "CHECK THE
     // TIME" on its own reads as "one number looks odd" — when what happened is
@@ -3688,17 +4026,24 @@
     // figure on it: when this fires there is no offer for any of the other
     // sentences to be about.
     if (r.doubt === 'screen') {
-      notes.push('This looks like the app itself rather than an offer — a '
-                 + 'route being planned, or a dash waiting for one. No rate is '
-                 + 'shown, because the figures are not a job.');
+      // The refusal and its reason: no rate, because these are not a job.
+      notes.push(note('NO RATE · the app, not a job',
+                      'This looks like the app itself rather than an offer — a '
+                      + 'route being planned, or a dash waiting for one. No rate is '
+                      + 'shown, because the figures are not a job.'));
     }
     if (r.doubt === 'leg') {
-      notes.push('The card shows a leg this reading could not time'
-                 + (typeof r.untimedMiles === 'number'
-                    ? ' — ' + r.untimedMiles.toFixed(1) + ' mi of it'
-                    : '')
-                 + ', so these minutes are part of the trip, not all of it. '
-                 + 'No rate is shown rather than one several times too high.');
+      // ...and here the reason is the leg nobody timed, with its miles when
+      // the card printed them: that figure is what the driver looks for.
+      var untimed = typeof r.untimedMiles === 'number'
+        ? r.untimedMiles.toFixed(1) + ' mi' : 'a leg';
+      notes.push(note('NO RATE · ' + untimed + ' untimed',
+                      'The card shows a leg this reading could not time'
+                      + (typeof r.untimedMiles === 'number'
+                         ? ' — ' + r.untimedMiles.toFixed(1) + ' mi of it'
+                         : '')
+                      + ', so these minutes are part of the trip, not all of it. '
+                      + 'No rate is shown rather than one several times too high.'));
     }
     // A rate with no running cost taken off it is a CEILING, not the offer,
     // and the old wording — "pay shown before mileage cost" — described the
@@ -3713,20 +4058,25 @@
       // which the layout checks caught. "Ceiling" is the word that matters —
       // it says the number may be anywhere below itself.
       notes.push(r.milesUncertain
-        ? 'Distance unreadable — rate is a ceiling.'
-        : 'No distance on the card — rate is a ceiling.');
-    } else if (r.milesUncertain) notes.push('Distance unreadable — check the miles.');
-    else if (r.milesCorrected) notes.push('Recovered a decimal in the distance — check the miles.');
+        ? note('CEILING · miles unreadable', 'Distance unreadable — rate is a ceiling.')
+        : note('CEILING · no distance', 'No distance on the card — rate is a ceiling.'));
+    } else if (r.milesUncertain) {
+      notes.push(note('CHECK MILES · unreadable', 'Distance unreadable — check the miles.'));
+    } else if (r.milesCorrected) {
+      notes.push(note('CHECK MILES · decimal recovered',
+                      'Recovered a decimal in the distance — check the miles.'));
+    }
     // Said out loud, because a fragment is not a small error in a safe
     // direction: the same pay divided by less time always looks better. The
     // scanner is still resampling when this is showing, so it is a "wait" and
     // not a "no".
     if (r.whole === false) {
-      notes.push('Still reading this card — the journey may not be all there yet, '
-                 + 'which makes it look better than it is.');
+      // The direction is the half that matters, so it is on the chip.
+      notes.push(note('STILL READING · may look better than it is',
+                      'Still reading this card — the journey may not be all there yet, '
+                      + 'which makes it look better than it is.'));
     }
-    el.warn.textContent = notes.join(' ');
-    el.warn.hidden = !notes.length;
+    showNotes(notes);
 
     // How old this offer is, always and first.
     //
@@ -3961,6 +4311,10 @@
     }
     el.health.textContent = note;
     el.health.hidden = !note;
+    // "scanner reading" is the steady state and the green dot says it; the
+    // words are behind "…". Every other state keeps its words on the row.
+    el.conn.classList.toggle('steady', el.conn.textContent === 'scanner reading');
+    fillMore();
     // ...and the dot with it. A rig that cannot see is not reading offers,
     // which is the one thing the dot is for; left green it said "reading"
     // beside the words saying it could not.
@@ -4097,6 +4451,8 @@
       if (msg.gps !== undefined) {
         gpsNow = msg.gps || null;
         gpsAt = Date.now();
+        rememberFix(gpsNow);
+        showNight();
       }
       // The GPS drop (gpsArrival in server.js): at the held order's door, on
       // this beat — and the order put down because the car left it, which is
@@ -4999,24 +5355,40 @@
        sw.js can serve this page (see drawHow). Never the order's end: that
        is `held`, off holding.dropoff, and nothing here writes it. */
     var plan = heldPlan && heldPlan.of === heldOwner() ? heldPlan.stops : null;
+    // ...and with two orders in the car (carrying two on), the second one's
+    // end beside the first's, pinned D2 to the first's D1, in its own card's
+    // disc.
+    var second = twoHeld() ? heldList[1] : null;
+    var held2 = second && second.dropoff && second.dropoff !== held ? second.dropoff : null;
     // ...and only from a map-view.js that measures the figure through them
     // (MV.detourThrough): an older one, which sw.js can serve this page, has
     // a road detour that would take them and measure to the end alone, under
     // a caption saying the restaurant was in it.
     var listed = (holdingNow && plan && MV && MV.heldPickups && MV.detourThrough)
-      ? MV.heldPickups(plan).filter(function (p) { return p.q !== held; }) : [];
+      ? MV.heldPickups(plan).filter(function (p) { return p.q !== held && p.q !== held2; })
+      : [];
     // ...less the ones the car has stopped at and left (visitPickups in
     // server.js): off the run and out of the figure, which is then measured
     // from the car to the end, and drawn apart as a faded ✓ (`donePicks`).
     var done = visitedNow();
     var heldPicks = listed.filter(function (p) { return done.indexOf(p.q) === -1; });
     var donePicks = listed.filter(function (p) { return done.indexOf(p.q) !== -1; });
-    // ...and with two orders in the car (carrying two on), the second one's
-    // end beside the first's, pinned D2 to the first's D1, in its own card's
-    // disc. The run and the figure stay the first order's alone until the
-    // detour through both exists (Stage 6).
-    var second = twoHeld() ? heldList[1] : null;
-    var held2 = second && second.dropoff && second.dropoff !== held ? second.dropoff : null;
+    // ...and the run the two commit the car to (Stage 6, MV.heldRuns): every
+    // pickup not yet visited and both ends, in the Trip Planner's own order
+    // when one planner places both ends (`planAt` on each order, server.js
+    // ordersForPanel), otherwise both ways round. Null with one order, and
+    // from a map-view.js from before it (sw.js may serve one): with two in
+    // the car that is no figure at all, never a figure through one of them.
+    var runs = held && held2 && MV && MV.heldRuns && MV.detourOrders
+      ? MV.heldRuns(plan, [{ n: 1, holdId: heldId, end: held,
+                             planAt: (heldList[0] || {}).planAt },
+                           { n: second.n, holdId: second.holdId, end: held2,
+                             planAt: second.planAt }], done)
+      : null;
+    // ...and the second order with no end on record: no run through both
+    // can be drawn, and one through the first alone ignores an order in the
+    // car (mapRefusal says so).
+    var noEnd2 = !!second && !second.dropoff;
     /* The store's door, when DoorDash's place popup gave this card one while
        it was being screened (server.js popupArrived): searched IN PLACE OF the
        card's name for it, which is a store's name with its street cut off
@@ -5044,6 +5416,7 @@
              heldId: held ? heldId : null,
              held2: held2, heldCard2: held2 ? (second.card || null) : null,
              heldId2: held2 ? (second.holdId || null) : null,
+             runs: runs, noEnd2: noEnd2,
              // The number each order goes by on the pins: ① and ② by holdId.
              heldNs: heldList.reduce(function (m, x) { m[x.holdId] = x.n; return m; }, {}),
              // The card is part of the key: two cards naming the same places
@@ -5058,6 +5431,11 @@
              // rpi/test_dashboard.py, 'held end: the ✓ Took reply's end...'.
              key: names.join('|') + '#' + (o.id || '') + '@' + (held || '')
                + (held2 ? '+' + held2 : '')
+               // ...and the order of the run through both: a planner read
+               // that places both ends moves the run under the same places.
+               + (runs ? '>' + runs.runs.map(function (r) {
+                   return r.map(function (e) { return e.q; }).join('>');
+                 }).join('/') : '')
                // ...and which of its pickups are behind the car: a visit
                // moves the run and the figure under the same places.
                + (donePicks.length ? '~' + donePicks.map(function (p) { return p.q; }).join('|')
@@ -5362,7 +5740,15 @@
           // run car -> restaurant -> held end, the new pickup in its best gap
           // (MV.NbxSearch.detour) — two questions a gap, each three points at
           // most, through the same relay and cache.
-          if (MV.stretchSpan(here, j.pick, j.held, heldStops(j))) {
+          if (j.runs) {
+            // Two orders in the car: through the run that commits the car
+            // to both, each ordering of it when the planner gave none
+            // (NbxSearch.detourOrders) — two or three points a question,
+            // as ever. mapRefusal has refused a street anywhere in it.
+            mapSay('measuring the detour by road…');
+            road = await mapNbx.detourOrders(here, j.pick, j.runs.runs);
+            if (viewMode !== 'map' || mapFor !== key) return;
+          } else if (MV.stretchSpan(here, j.pick, j.held, heldStops(j))) {
             road = { why: 'street' };
           } else {
             mapSay('measuring the detour by road…');
@@ -5381,7 +5767,21 @@
          asked, answered from the page's cache. Router down: null, and the
          straight run as before. */
       var heldRoad = null;
-      if (nbx.route && mapNbx) {
+      if (nbx.route && mapNbx && want.runs) {
+        // Two orders: a road per line drawMap draws — the run through both,
+        // or each order's own — and only where the line would state a
+        // figure, so no road is drawn to a pin the map calls wrong.
+        var tj = mapJudge(want, found, here);
+        if (here && tj.runs && mapRefusal(want, found, here, tj) === null) {
+          var draws = tj.runs.known ? [tj.runs.runs[0]] : tj.runs.own;
+          heldRoad = { lines: [] };
+          for (var di = 0; di < draws.length; di++) {
+            heldRoad.lines.push(await mapNbx.runLine(   // eslint-disable-line no-await-in-loop
+              [here].concat(draws[di].filter(Boolean))));
+            if (viewMode !== 'map' || mapFor !== key) return;
+          }
+        }
+      } else if (nbx.route && mapNbx) {
         var hj = mapJudge(want, found, here);
         var runPts = [here].concat(hj.heldPicks.filter(function (p) { return p.at; })
           .map(function (p) { return p.at; }), [hj.held]).filter(Boolean);
@@ -5747,8 +6147,15 @@
     var donePicks = (want.donePicks || []).map(function (p) {
       return { q: p.q, name: p.name, at: found[p.q] || null };
     });
+    // ...and with two orders in the car, the run through both as points
+    // (want.runs, MV.heldRuns): one run when the planner gave the order, two
+    // otherwise, and each order's own for drawing. A place with no pin is a
+    // null in it, which MV.detourOrders refuses.
+    function pts(r) { return r.map(function (e) { return found[e.q] || null; }); }
+    var runs = want.runs ? { known: want.runs.known, runs: want.runs.runs.map(pts),
+                             own: want.runs.own.map(pts) } : null;
     return { wrong: wrong, pick: pick, drop: drop, held: held, held2: held2, off: off,
-             heldPicks: heldPicks, donePicks: donePicks };
+             heldPicks: heldPicks, donePicks: donePicks, runs: runs };
   }
 
   /* The held order's pickups still ahead, as the points of its run the
@@ -5890,11 +6297,29 @@
     // (MV.heldRun) — along the roads when the NucBox's router drew them
     // (`heldRoad`, see showMap), straight otherwise.
     var heldAt = j.heldPicks.map(function (p) { return p.at; });
-    var run = heldRoad || (MV.heldRun ? MV.heldRun(here, heldAt, held)
-      : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []));
-    if (run.length && (held || heldAt.some(Boolean))) {
-      runLine(run, { color: '#f5a524', opacity: .9,
-                     className: 'mv-held-run' + (heldRoad ? ' mv-road' : '') });
+    // With TWO orders in the car (j.runs, MV.heldRuns): ONE run through both
+    // when a planner gave their order — the car, then its stops and both
+    // ends as it lists them — and otherwise each order's own, car -> its
+    // pickups -> its end, two lines, because which end comes first is not
+    // known and one line through both would draw an order nobody gave.
+    // `heldRoad` is then { lines }, a road or null per line, in that order.
+    if (j.runs) {
+      (j.runs.known ? [j.runs.runs[0]] : j.runs.own).forEach(function (r, i) {
+        var line = heldRoad && heldRoad.lines ? heldRoad.lines[i] : null;
+        var pts = line || MV.heldRun(here, r.slice(0, -1), r[r.length - 1]);
+        if (pts.length) {
+          runLine(pts, { color: '#f5a524', opacity: .9,
+                         className: 'mv-held-run' + (j.runs.known ? '' : ' mv-order-' + (i + 1))
+                                    + (line ? ' mv-road' : '') });
+        }
+      });
+    } else {
+      var run = heldRoad || (MV.heldRun ? MV.heldRun(here, heldAt, held)
+        : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []));
+      if (run.length && (held || heldAt.some(Boolean))) {
+        runLine(run, { color: '#f5a524', opacity: .9,
+                       className: 'mv-held-run' + (heldRoad ? ' mv-road' : '') });
+      }
     }
     // The detour, car -> pickup -> held end, along the road the router
     // measured it on when it did (`road.line`: only with a figure, see
@@ -5913,9 +6338,16 @@
     // either of them missing included — and so with a map-view.js from
     // before MV.detourThrough, which is handed no stops (mapWants).
     var stopsAt = heldAt.filter(Boolean);
+    // ...and with two orders, the gap the figure put the new pickup in, of
+    // the first run (MV.detourOrders) — only where the line states a figure:
+    // with the order of the stops unknown and the orderings disagreeing, by
+    // road or in straight lines, nothing is drawn, as nothing is stated.
+    var twoFig = j.runs && here && pick && !(road && road.why === 'order')
+      ? MV.detourOrders(here, pick, j.runs.runs) : null;
     var gap = !detourRoad && pick
-      ? (here && held && stopsAt.length && MV.detourThrough(here, pick, stopsAt, held))
-        || { from: here, to: held }
+      ? (j.runs ? (twoFig && twoFig.stated ? twoFig.gap : {})
+         : (here && held && stopsAt.length && MV.detourThrough(here, pick, stopsAt, held))
+           || { from: here, to: held })
       : {};
     if (gap.from) {
       runLine([[gap.from.lat, gap.from.lon], [pick.lat, pick.lon]],
@@ -5999,8 +6431,9 @@
     // The held order's own pickups ARE passed: they are where the order in
     // the car goes before its end, which it has to, and the run the figure is
     // measured against goes through them (mapFigure).
+    // ...and with two orders in the car, the run through both (j.runs).
     return stop !== null ? stop
-      : mapFigure(want, found, here, j.pick, j.held, road, heldStops(j));
+      : mapFigure(want, found, here, j.pick, j.held, road, heldStops(j), j.runs);
   }
 
   /* Why the figure is not stated, in words, or null when it may be. showMap
@@ -6023,8 +6456,12 @@
        or a wrong one, is the figure that ignored the restaurant. */
     var heldPicks = j.heldPicks || [];
     function firstPick(test) { return heldPicks.filter(test)[0] || null; }
+    // The second order's end, with two in the car, is a point of the run
+    // the figure is measured through like the first's (MV.heldRuns), so
+    // every rule below that holds the first's holds it, in the same words.
     var badEnd = (want.pickup && wrong[want.pickup]) ? want.pickup
                : (want.held && wrong[want.held]) ? want.held
+               : (want.held2 && wrong[want.held2]) ? want.held2
                : (firstPick(function (p) { return wrong[p.q]; }) || {}).q || null;
 
     // No detour to state, and WHICH of these it is matters: a driver told
@@ -6058,6 +6495,10 @@
                                         MV.cardFix(want.heldCard).at, held,
                                         shortPlace(want.held, DISC_PLACE_SHOWN),
                                         'held');
+    if (off.held2) return MV.againstCard(want.heldCard2,
+                                         MV.cardFix(want.heldCard2).at, j.held2,
+                                         shortPlace(want.held2, DISC_PLACE_SHOWN),
+                                         'held');
     // ...and a held pickup, from the same card's fix, in the same words.
     var offPick = firstPick(function (p) { return p.off; });
     if (offPick) return MV.againstCard(want.heldCard, MV.cardFix(want.heldCard).at,
@@ -6084,6 +6525,11 @@
                            shortPlace(want.held, DISC_PLACE_SHOWN),
                            nbxNo[want.held].whose);
     }
+    if (want.held2 && want.held2 !== want.pickup && nbxNo[want.held2]) {
+      return MV.nbxRefusal(nbxNo[want.held2].res, nbxNo[want.held2].disc,
+                           shortPlace(want.held2, DISC_PLACE_SHOWN),
+                           nbxNo[want.held2].whose);
+    }
     // ...and a held pickup the NucBox would not pin, in its disc's words.
     var noPin = firstPick(function (p) { return nbxNo[p.q] && p.q !== want.pickup; });
     if (noPin) {
@@ -6099,6 +6545,12 @@
       ? 'the order in your car has no address on record — ⌖ Scan reads it '
         + 'off your phone'
       : 'nothing in the car to compare this against';
+    // ...and with two in the car, the second's end too: a figure through
+    // the first alone would leave an order in the car out of the run.
+    if (want.noEnd2) return '② has no address on record — ⌖ Scan reads it off your phone';
+    // ...and a map-view.js from before the run through both (sw.js may
+    // serve one), which has no way to put the two ends in an order.
+    if (want.held2 && !want.runs) return 'order of stops unknown — no figure';
     // The card naming no pickup is not the geocoder failing to place one, and
     // saying "could not be placed" for it blames the lookup for something the
     // card did. Uber prints the merchant on every offer, so this is rare — but
@@ -6117,6 +6569,9 @@
     // already known to be set by the time this is reached, so this one really
     // is the lookup and not the card.
     if (!held) return found[want.held] === undefined
+      ? 'could not reach the geocoder for where your order is going'
+      : 'the geocoder found nothing for where your order is going';
+    if (want.held2 && !j.held2) return found[want.held2] === undefined
       ? 'could not reach the geocoder for where your order is going'
       : 'the geocoder found nothing for where your order is going';
     // ...and for where it is collected, while its planner says it still is.
@@ -6144,6 +6599,13 @@
     said = MV.againstCard(want.heldCard, heldFix.at, held,
                           shortPlace(want.held, DISC_PLACE_SHOWN), 'held');
     if (said) return said;
+    if (want.held2) {
+      var heldFix2 = MV.cardFix(want.heldCard2);
+      if (!heldFix2.at) return MV.fixLine(heldFix2, 'held');
+      said = MV.againstCard(want.heldCard2, heldFix2.at, j.held2,
+                            shortPlace(want.held2, DISC_PLACE_SHOWN), 'held');
+      if (said) return said;
+    }
     /* A held pickup that is a numberless street (MV.stretchInDisc): the run
        goes through some point of it the planner did not name, and its span
        against the new pickup's and the end's is no figure this panel can
@@ -6152,6 +6614,16 @@
     var onStreet = firstPick(function (p) { return p.at.stretch; });
     if (onStreet) return 'no figure for ' + shortPlace(onStreet.q, DISC_PLACE_SHOWN)
                          + ' — your order\'s pickup is a street';
+    /* ...and with two orders in the car, an end or the new pickup that is
+       a numberless street: MV.stretchSpan measures one end over its
+       stretch, and two ends in an order nobody may know, each anywhere
+       along a street, is no figure this panel can stand behind. Said. */
+    if (j.runs) {
+      var street = [[want.pickup, pick], [want.held, held], [want.held2, j.held2]]
+        .filter(function (x) { return x[1] && x[1].stretch; })[0];
+      if (street) return 'no figure for ' + shortPlace(street[0], DISC_PLACE_SHOWN)
+                         + ' — a street, with two orders';
+    }
     /* ...and a numberless street whose figure depends on where along it the
        stop is: MV.stretchSpan measures the figure at every point of its
        stretch inside the card's disc, and where those are not one answer
@@ -6198,7 +6670,7 @@
      panel the rig ships on may never do. "+1.2 road mi incl. restaurant"
      is the same figure the same way round: what the pickup adds, here to
      the run through the restaurant. */
-  function mapFigure(want, found, here, pick, held, road, stops) {
+  function mapFigure(want, found, here, pick, held, road, stops, runs) {
     stops = stops || [];
     var withStop = !stops.length ? ''
       : stops.length > 1 ? ' incl. restaurants' : ' incl. restaurant';
@@ -6253,8 +6725,37 @@
        street's range, or with the restaurant in it, ran past the two rows
        800x480 gives (rpi/test_layout.py, measured), so the note about the
        pins' source wins, as the search's does over the road's above. The
-       pickup pin's own words still say "addr from tap" (drawMap). */
+       pickup pin's own words still say "addr from tap" (drawMap). The same
+       with both orders in the car (`runs`, below): the pickup is the door
+       either way. */
     var tap = want.tapped && want.tapped.pickup && !nucbox ? ' · addr from tap' : '';
+    /* TWO ORDERS IN THE CAR (`runs`, MV.heldRuns): the figure through the
+       run that commits the car to both — every pickup still ahead and both
+       ends — the new pickup in its best gap. In the planner's order when a
+       planner gave one; otherwise both ways round, and stated only where
+       the two ways give one answer (MV.oneAnswer, the street-stretch rule),
+       as a range when they differ. Where they do not, the line says why
+       there is no figure rather than choosing an order. Road miles by the
+       router (NbxSearch.detourOrders) where it answered, straight lines
+       otherwise, labelled as for one order. "incl. both orders" in the
+       place "incl. restaurant" has, for the same reason: the same number
+       means a different thing with both orders in it. */
+    if (runs) {
+      var withBoth = ' incl. both orders';
+      if (road && road.why === 'order') return 'order of stops unknown — no figure';
+      if (road && isFinite(road.miles)) {
+        var rHi = isFinite(road.hi) ? road.hi : road.miles;
+        var rMost = rHi.toFixed(1) === road.miles.toFixed(1) ? '' : '–' + rHi.toFixed(1);
+        return (rHi < cut ? 'on your way by road'
+                          : '+' + road.miles.toFixed(1) + rMost + ' road mi')
+          + withBoth + tap + count + nucbox;
+      }
+      var two = MV.detourOrders(here, pick, runs.runs);
+      if (!two || !two.stated) return 'order of stops unknown — no figure';
+      var tMost = two.hi.toFixed(1) === two.lo.toFixed(1) ? '' : '–' + two.hi.toFixed(1);
+      return (two.hi < cut ? 'on your way' : '+' + two.lo.toFixed(1) + tMost + ' mi')
+        + withBoth + ' — straight lines, not roads' + tap + count + nucbox;
+    }
     if (road && isFinite(road.miles)) {
       if (withStop) {
         return (road.miles < cut ? 'on your way by road'
@@ -6566,9 +7067,12 @@
   // Keeps the "last seen" counter honest, and — since silence is exactly the
   // condition worth noticing — is the only thing that can ever discover the
   // scanner has gone quiet. Nothing arrives to trigger that discovery.
+  // Dusk arrives with nothing arriving to announce it.
+  showNight();
   setInterval(function () {
     render();
     showConnection();
+    showNight();
     // The dot's age and its grey, which change while nothing arrives — and a
     // beat that stopped coming is exactly when nothing does.
     drawHere();

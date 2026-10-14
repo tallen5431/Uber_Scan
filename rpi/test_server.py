@@ -6704,13 +6704,17 @@ def _orders(base):
     return get(base, '/api/status').get('orders') or []
 
 
-def _cserver(name, **env):
+def _cserver(name, hold=None, **env):
     # A directory each: holding.json is kept beside the journal, and a server
-    # started on the last one's would restore its orders.
+    # started on the last one's would restore its orders. `hold`, when given,
+    # is a holding.json to start with: the orders a restart brings back.
     home = os.path.join(_cdir, name)
     os.mkdir(home)
     j = os.path.join(home, 'offers.jsonl')
     open(j, 'w').close()
+    if hold is not None:
+        with open(os.path.join(home, 'holding.json'), 'w') as fh:
+            json.dump(hold, fh)
     hand = os.path.join(home, 'hand')
     os.mkdir(hand)
     e = {'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _cfake,
@@ -6737,6 +6741,7 @@ _BNAV = ('77 Birch Ln, Roswell, GA 30075', '77 Birch Ln', 'Roswell')
 _cp, _cb, _cj, _ch = _cserver('two', CARRY_TWO='1', CHOOSER_MS='1500')
 try:
     _ra = _took2(_cb, _A)
+    _one = _orders(_cb)
     _rb = _took2(_cb, _B)
     _two = _orders(_cb)
     eq('[carry two] a second Took ADDS an order: two in the car, first-taken first',
@@ -6811,20 +6816,73 @@ try:
         [o.get('dropoff') for o in _orders(_cb)]),
        ({'pick': 'card', 'pay': 12.5}, 200, [('c-s', 'chooser')], [_KNAV[0], _BNAV[0]]))
 
+    # A Trip Planner listing both orders — ②'s end, then ①'s — read now
+    # that both ends are filed: each order says where on it its end is
+    # (`planAt`, by Assemble.sameStreet against the order's own end), which
+    # is how Map view runs the car through both in the planner's order. A
+    # planner placing one end, or the same end twice, places neither. With
+    # one order in the car there is no planAt at all: its shape is the one
+    # it had.
+    def _plan(*stops):
+        return {'planner': {'stops': [dict({'orders': 1, 'expectedBy': None, 'city': None,
+                                            'state': None, 'zip': None}, **s) for s in stops],
+                            'unfiled': None, 'asked': True, 'ms': 10}}
+    _PU = {'kind': 'pickup', 'name': 'Larkspur Tacos', 'street': '310 Mill St',
+           'line': '310 Mill St, Roswell, GA 30075'}
+    _DB = {'kind': 'dropoff', 'name': 'Lee M.', 'street': '77 Birch Ln', 'line': '77 Birch Ln, Roswell'}
+    _DK = {'kind': 'dropoff', 'name': 'Pat Q.', 'street': '4821 Kestrel Dr',
+           'line': '4821 Kestrel Dr, Marietta'}
+    _say(_plan(_PU, _DB, _DK))
+    _both = [o.get('planAt') for o in _orders(_cb)]
+    _say(_plan(_PU, _DB))
+    _half = [o.get('planAt') for o in _orders(_cb)]
+    _say(_plan(_PU, _DB, dict(_DB, name='Lee M. again')))
+    _twice = [o.get('planAt') for o in _orders(_cb)]
+    eq('[carry two] one planner listing both orders sets the run order: each order says '
+       'where its end is on it, and only when it is there once',
+       (_both, _half, _twice, 'planAt' in (_one[0] if _one else {'planAt': 0})),
+       ([2, 1], [None, 1], [None, None], False))
+
     # A card offered while both are in the car: its pair row names the first
-    # as `held` and the second beside it, and the stack line says it is
-    # weighed against ① alone.
+    # as `held` and the second beside it, and since Stage 6 its range is
+    # against BOTH (Advice.stackMany) — every order's minutes left and the
+    # card's at the far end — and the row says so in `stack.over`.
     _say(_card('c-p', 14.0, minutes=25.0, miles=4.0))
     _pair = [r for r in _rows(_cj, 'pair') if r.get('id') == 'c-p']
     eq('[carry two] a pair row keeps held as the first-taken order and adds heldAlso and heldCount',
        [((r.get('held') or {}).get('pay'), [h.get('pay') for h in r.get('heldAlso') or []],
          r.get('heldCount')) for r in _pair], [(9.48, [28.08], 2)])
+    # A had 40 min and B 55, both taken moments ago: the far end is about
+    # 40 + 55 + 25 = 120, where against A alone it was about 65.
+    _ps = (_pair[0].get('stack') or {}) if _pair else {}
+    ok_('[carry two] the pair row\'s range is against both orders in the car, stack.over 2 (%r)'
+        % _ps, _ps.get('over') == 2 and 115 < (_ps.get('maxMinutes') or 0) <= 120
+        and 50 < (_ps.get('minMinutes') or 0) <= 55)
     _say({'ready': True, 'state': 'go', 'perHour': 30.0, 'grossPerHour': 33.6,
           'pay': 14.0, 'minutes': 25.0, 'billedMinutes': 25.0, 'cardMinutes': 25.0,
           'miles': 4.0, 'cost': 1.4, 'target': 25, 'band': 15, 'costPerMile': 0.35})
     _st = get(_cb, '/api/status')
-    ok_('[carry two] ...and the stack line on the reading says it is against ① only',
-        ((_st.get('last') or {}).get('stack') or {}).get('vsFirst') is True)
+    _ls = (_st.get('last') or {}).get('stack') or {}
+    eq('[carry two] ...and the stack line on the reading is against both, as the row is, '
+       'and says how many',
+       (_ls.get('heldCount'), 'vsFirst' in _ls, len(_ls.get('leftEach') or []),
+        round((_ls.get('maxMinutes') or 0) - sum(_ls.get('leftEach') or []), 1)),
+       (2, False, 2, 25.0))
+    # ...and an Uber add-on card ("+15 min (+ 3 mi) total") offered against
+    # the two: its 15 minutes are what the trip grows by, so the shortest
+    # time is the longest order's left AND those 15, on the row (the offer
+    # line's own screen) and on the panel (the reading of that same card,
+    # typed off the card on record — addOnAsCarded).
+    _say(_card('c-x', 6.0, minutes=15.0, miles=3.0, screen='uber.addon'))
+    _say({'ready': True, 'state': 'no', 'perHour': 18.0, 'grossPerHour': 24.0,
+          'pay': 6.0, 'minutes': 15.0, 'billedMinutes': 15.0, 'cardMinutes': 15.0,
+          'miles': 3.0, 'cost': 1.05, 'target': 25, 'band': 15, 'costPerMile': 0.35})
+    _px = ([r for r in _rows(_cj, 'pair') if r.get('id') == 'c-x'] or [{}])[0].get('stack') or {}
+    _lx = (get(_cb, '/api/status').get('last') or {}).get('stack') or {}
+    eq('[carry two] an add-on offered with two in the car: its range is its card\'s extension, '
+       'on the pair row and on the panel',
+       [round((x.get('minMinutes') or 0) - (x.get('leftMinutes') or 0), 1) for x in (_px, _lx)],
+       [15.0, 15.0])
 
     # A third Took: of the two orders already in the car, the one whose clock
     # ends soonest goes, and its pay is said. A (40 min, taken first) ends
@@ -7071,6 +7129,36 @@ try:
         _m and str((_m[0].get('would') or {}).get('held') or '').startswith('c-a@'))
 finally:
     stop(_op)
+
+# ...and with the flag off and TWO in the car — a holding.json written while
+# it was on, read back at boot (MAX_HELD_FILE) — Stage 6 changes nothing:
+# the pair is weighed against the first-taken alone and the line says so
+# ("vs ① only", vsFirst), and the pair row is the one-order row, no heldAlso,
+# no heldCount, no `over`.
+_fnow = int(time.time() * 1000)
+_fhold = {'v': 2, 'orders': [
+    {'id': 'f-a', 'acceptedAt': _fnow - 60000, 'pay': 9.48, 'minutes': 40.0, 'miles': 5.0,
+     'cost': 1.5, 'dropoff': None},
+    {'id': 'f-b', 'acceptedAt': _fnow - 30000, 'pay': 28.08, 'minutes': 55.0, 'miles': 9.0,
+     'cost': 1.5, 'dropoff': None}]}
+_fp, _fb, _fj, _fh = _cserver('offtwo', hold=_fhold, CARRY_TWO='0')
+try:
+    _say(_card('f-p', 14.0, minutes=25.0, miles=4.0))
+    _say({'ready': True, 'state': 'go', 'perHour': 30.0, 'grossPerHour': 33.6,
+          'pay': 14.0, 'minutes': 25.0, 'billedMinutes': 25.0, 'cardMinutes': 25.0,
+          'miles': 4.0, 'cost': 1.4, 'target': 25, 'band': 15, 'costPerMile': 0.35})
+    _fs = (get(_fb, '/api/status').get('last') or {}).get('stack') or {}
+    _fr = ([r for r in _rows(_fj, 'pair') if r.get('id') == 'f-p'] or [{}])[0]
+    _frs = _fr.get('stack') or {}
+    eq('carryTwo off: every output unchanged',
+       (_fs.get('vsFirst'), sorted(k for k in ('heldCount', 'leftEach') if k in _fs),
+        round((_fs.get('maxMinutes') or 0) - (_fs.get('leftMinutes') or 0), 1),
+        (_fr.get('held') or {}).get('pay'),
+        sorted(k for k in ('heldAlso', 'heldCount') if k in _fr), 'over' in _frs,
+        round((_frs.get('maxMinutes') or 0) - (_frs.get('leftMinutes') or 0), 1)),
+       (True, [], 25.0, 9.48, [], False, 25.0))
+finally:
+    stop(_fp)
 
 # A cue that fits BOTH orders is a tie, and the map may break it — only it:
 # the address searched on the NucBox inside each card's disc and found at
@@ -7434,6 +7522,11 @@ _PFAKE = (
     'popup("pickup", STORE, name="Lark Owl Pizza")\n'
     'wait("f6")\n'
     'card("dd-2", "Fable Bagel Co", pay=6.5)\n'
+    # A popup's frame is taken after its card is on the slot: a real tap
+    # follows the card by seconds (2.1 s at the least on file). Printed with no
+    # gap, its stamp can precede the server's receipt of the card line, which
+    # is "read before the card" and refused, rightly.
+    'time.sleep(0.5)\n'
     'popup("dropoff", "9 Heron Ct, Smyrna, GA 30080")\n'
     'time.sleep(600)\n')
 _pdir = tempfile.mkdtemp()

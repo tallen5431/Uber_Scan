@@ -2664,10 +2664,14 @@
     var took = { go: 0, warn: 0, no: 0, none: 0, unjudged: 0 };
     var marked = 0;
     // A pair judged with TWO orders already in the car (carrying two on,
-    // `heldCount` in server.js's recordPairing) is not graded: its range is
-    // the new card against the first order alone, and the second order's
-    // time and money are in neither end of it — "vs ① only", the panel said.
-    // Listed below like every pairing, counted here as what it is.
+    // `heldCount` in server.js's recordPairing) is not graded. Written before
+    // Stage 6 its range was the new card against the first order alone, and
+    // the second order's time and money were in neither end of it — "vs ①
+    // only", the panel said. Written since, its range is against both
+    // (Advice.stackMany) and the row says so in `stack.over`, so grading one
+    // of those is possible now; it is still left out, by the owner's word,
+    // until a grading of two-order pairs is decided on its own. Listed below
+    // like every pairing, counted here as what it is.
     var graded = pairs.filter(function (p) { return !(p.heldCount > 1); });
     var ungraded = pairs.length - graded.length;
     graded.forEach(function (p) {
@@ -2697,9 +2701,21 @@
     // record. Every pair row written before the target reached recordPairing
     // lands here.
     if (said.unjudged) parts.push('not recorded <b>' + said.unjudged + '</b>');
+    // ...and what each of those was weighed against, off the row itself
+    // (`stack.over`, see above): "against the first alone" was true of every
+    // one of them until Stage 6 and is not of a row written since.
+    var againstAll = pairs.filter(function (p) {
+      return p.heldCount > 1 && p.stack && p.stack.over > 1;
+    }).length;
+    var againstFirst = ungraded - againstAll;
     var lead = (parts.length ? 'The panel said: ' + parts.join(' · ') + '. ' : '')
       + (ungraded ? '<b>' + ungraded + '</b> with two orders already in the car, '
-                    + 'not graded: each was weighed against the first alone. ' : '');
+                    + 'not graded: '
+                    + (!againstAll ? 'each was weighed against the first alone. '
+                       : !againstFirst ? 'each was weighed against both, and pairs with '
+                                         + 'two in the car are not graded yet. '
+                       : againstFirst + ' weighed against the first alone, ' + againstAll
+                         + ' against both. ') : '');
     // Counted against what was marked, not against every pairing. Dividing by
     // the total would read as "you ignored the advice" on a shift where the
     // driver simply never pressed the button — the same unmarked row, told as

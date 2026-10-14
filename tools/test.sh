@@ -77,7 +77,8 @@ for f in rpi/test_*.py; do
     run "$base" "python3 '$f'"
 done
 # ...and the tools' own, which live beside what they test. gpslog_tidy.py
-# deletes files on the rig, unattended, from Start.sh.
+# deletes files on the rig, unattended, from Start.sh; shift_report.py reads
+# the journal and the GPS logs after a shift and must never print a place.
 for f in tools/test_*.py; do
     run "$(basename "$f")" "python3 '$f'"
 done
