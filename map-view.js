@@ -729,25 +729,38 @@
    * chain's name inside a disc finds whichever branch, and that is the wrong
    * restaurant at the confidence of the right one.
    *
-   * NOT YET VISITED means on the newest planner read. The planner lists the
-   * stops still ahead, and a press after the pickup reads a list without it;
-   * nothing here follows the car to the door.
+   * EVERY pickup on the newest planner read, visited or not: the planner
+   * lists the stops still ahead, and a press after the pickup reads a list
+   * without it. The app keeps listing one the car has already called at
+   * until the driver swipes it, so the server also marks a pickup visited
+   * when the car has stopped there and left (visitPickups in server.js), and
+   * the panel takes those out of the run itself, by pickupKey; nothing here
+   * follows the car.
    *
    * A dropoff is never one of these, and a pickup is never anything else:
    * the order's end comes from holding.dropoff alone (plannerDestination in
    * assemble.js files dropoffs only). */
   function heldPickups(stops) {
     return (Array.isArray(stops) ? stops : []).filter(function (s) {
-      return s && s.kind === 'pickup' && s.street;
+      return !!pickupKey(s);
     }).map(function (s) {
-      var p = { q: s.city && s.line ? s.line : s.street + ',',
-                name: plannerName(s.name) || null };
+      var p = { q: pickupKey(s), name: plannerName(s.name) || null };
       // ...and, with two orders in the car, the one whose card names this
       // store (`of`, server.js ownPickups), for its pin's number. Absent
       // when no one order's does.
       if (s.of) p.of = s.of;
       return p;
     });
+  }
+
+  /* One planner stop's `q` as heldPickups gives it, or null for a stop that
+     is not a pickup with a street. The name a pickup goes by everywhere it
+     is visited: the pin the server keeps (keepPickupPin), its `pickups`,
+     the `visited` list the panel is sent, and the panel's next stop, which
+     reads the raw stops — so the rule is here once. */
+  function pickupKey(s) {
+    if (!s || s.kind !== 'pickup' || !s.street) return null;
+    return s.city && s.line ? s.line : s.street + ',';
   }
 
   /* The held order's run as drawn: the car, its pickups not yet visited in
@@ -2670,7 +2683,8 @@
            FAR_MILES: FAR_MILES, GAP_MS: GAP_MS,
            searchPlan: searchPlan, searchText: searchText, storeName: storeName,
            discFor: discFor, discBox: discBox,
-           plannerName: plannerName, heldPickups: heldPickups, heldRun: heldRun,
+           plannerName: plannerName, heldPickups: heldPickups, pickupKey: pickupKey,
+           heldRun: heldRun,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            clipToDisc: clipToDisc, stretchInDisc: stretchInDisc, nearestOn: nearestOn,
            stretchSpan: stretchSpan, spanRefusal: spanRefusal, ON_WAY_MI: ON_WAY_MI,

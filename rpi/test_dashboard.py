@@ -872,6 +872,15 @@ const framed = (page) => page.waitForFunction(
     await push({ ready: false, state: 'empty', track: null });
     await tick(300);
     const between = await held();
+    // The car has called at the restaurant and left it (visitPickups in
+    // server.js): the beat says the pickup is behind it, by its planner line,
+    // while the planner on the panel still lists it, as the app does until
+    // the driver swipes it.
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: true, arrived: false, endWhy: null,
+                            visited: ['310 Mill St, Roswell, GA 30075'] } });
+    await tick(300);
+    const visited = await held();
     // The server refuses the pin, and says so on the next beat.
     await push({ alive: true, at: Date.now(), atDropoff: false,
                  heldEnd: { endPinned: false, arrived: false, endWhy: 'no house number' } });
@@ -898,7 +907,8 @@ const framed = (page) => page.waitForFunction(
     await tick(300);
     const gone = await held();
     out.heldCard = { tookUp: tookUp, tookGoneNow: tookGoneNow, tookGoneLater: tookGoneLater,
-                     empty: empty, between: between, refused: refused, arrived: arrived,
+                     empty: empty, between: between, visited: visited,
+                     refused: refused, arrived: arrived,
                      offerUp: offerUp, gone: gone };
     await page.close();
     await ctx.close();
@@ -4121,6 +4131,29 @@ const framed = (page) => page.waitForFunction(
       if (which === 'both' || which === 'noRoad') {
         r.route = await heldRoute('n-route', [['Example Grill', '250 Example Road']]);
         r.routeWant = await runWant();
+        /* ...and the car calls at that restaurant and leaves (visitPickups
+           in server.js): the beat says so, the planner still lists it. The
+           run and the figure go from the car to the end, and the restaurant
+           stays on the map, faded and ticked. */
+        await page.evaluate(() => window.__es.push({
+          alive: true, at: Date.now(), atDropoff: false,
+          heldEnd: { endPinned: false, arrived: false, endWhy: null,
+                     visited: ['250 Example Road,'] } }));
+        // Until the line has moved off the run through the restaurant.
+        await page.waitForFunction(() => {
+          const t = document.getElementById('viewNote').textContent;
+          return /out of your way/.test(t) && !/measuring/.test(t);
+        }, null, { timeout: 4000 }).catch(() => {});
+        await page.waitForTimeout(200);
+        r.routeVisited = {
+          note: await note(),
+          lines: await page.evaluate(() => (window.__lines || []).map((l) => ({
+            cls: String((l.opts || {}).className || ''), pts: l.pts }))),
+          done: await page.evaluate(() => (window.__marks || []).filter(
+            (k) => String(k.popup || '').indexOf('collected') >= 0).map((k) => ({
+              ll: k.ll, fill: (k.opts || {}).fillOpacity }))),
+          letters: await page.evaluate(() => (window.__letters || []).map((l) => (
+            ((l.opts || {}).icon || {}).html))) };
       }
       if (which === 'both') {
         // A restaurant the NucBox has no door for: no pin, and so no figure.
@@ -5899,6 +5932,10 @@ try:
            ('Pickup by 5:46', 'Burger Barn', None))
         eq('...with what it pays and whether the GPS will put it down (%r)' % _b.get('line'),
            _b.get('line'), '$28.08 in car · ● armed')
+        _vi = hc.get('visited') or {}
+        eq('[pickup visit] after the visit the next stop is the dropoff',
+           (_vi.get('when'), _vi.get('where'), _vi.get('line')),
+           ('Dropoff by 6:25', '4821 Kestrel Dr', '$28.08 in car · ● armed'))
         eq('...and why not, said in a few words when the server refuses the pin',
            (hc.get('refused') or {}).get('line'), '$28.08 in car · no house no.')
         _a = hc.get('arrived') or {}
@@ -7751,6 +7788,24 @@ try:
        (_road(_C, _A, _G) if _rw.get('before') else _road(_G, _A, _S), _road(_C, _G, _S)))
     eq('[held route] ...and this card\'s own job, pickup -> dropoff, along the road too',
        _ln.get('mv-job mv-road'), _road(_A, (33.958, -84.552)))
+    _rv = both.get('routeVisited') or {}
+    _m = re.match(r'^\+(\d+\.\d) road mi out of your way$', _rv.get('note') or '')
+    _vln = {l.get('cls'): l.get('pts') for l in _rv.get('lines') or []}
+    ok_('[pickup visit] the detour after the visit is measured from the car to the end '
+        '(%r, %.2f wanted)' % (_rv.get('note'), 1.25 * (_rw.get('alone') or 0)),
+        _m and abs(float(_m.group(1)) - 1.25 * (_rw.get('alone') or 0)) < 0.051
+        and _vln.get('mv-held-run mv-road') == _road(_C, _S))
+    _rnv = (noroad.get('routeVisited') or {}).get('note') or ''
+    _m = re.match(r'^\+(\d+\.\d) mi out of your way — straight lines, not roads'
+                  r' · NucBox router down$', _rnv)
+    ok_('[pickup visit] ...and in straight lines with no router (%r, %.2f wanted)'
+        % (_rnv, _rw.get('alone') or 0),
+        _m and abs(float(_m.group(1)) - (_rw.get('alone') or 0)) < 0.051)
+    eq('[pickup visit] ...and the restaurant stays on the map, faded and ticked',
+       ([d.get('ll') for d in _rv.get('done') or []],
+        [d.get('fill') for d in _rv.get('done') or []],
+        '\u2713' in (_rv.get('letters') or [])),
+       ([list(_G)], [0.12], True))
     _rn = noroad.get('route') or {}
     _m = re.match(r'^\+(\d+\.\d) mi incl\. restaurant — straight lines, not roads'
                   r' · NucBox router down$', _rn.get('note') or '')

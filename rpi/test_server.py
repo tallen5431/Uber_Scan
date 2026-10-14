@@ -1677,7 +1677,8 @@ if shutil.which('python3'):
         # the panel's in-car line its GPS drop's state (heldEndState).
         eq('held end: the mark reply carries the order in the car as the stream describes it',
            sorted((reply.get('held') or {}).keys()),
-           ['arrived', 'card', 'dropoff', 'endPinned', 'endWhy', 'holdId', 'minutes', 'pay'])
+           ['arrived', 'card', 'dropoff', 'endPinned', 'endWhy', 'holdId', 'minutes', 'pay',
+            'visited'])
         # Started after the mark, before the scanner's 2s sleep ends.
         heard = listen(base, 4)
 
@@ -6054,7 +6055,8 @@ try:
     _state = lambda h: {k: (h or {}).get(k) for k in ('endPinned', 'arrived', 'endWhy')}
     eq('[gps drop] the beat carries the GPS drop\'s state for the panel',
        (get(_gb, '/api/status').get('beat') or {}).get('heldEnd'),
-       {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup'})
+       {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup',
+        'visited': []})
     eq('[gps drop] ...the same as /api/status says', _state(_holding(_gb)),
        {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup'})
     _r = post(_gb, '/api/offers/mark', {
@@ -7018,6 +7020,229 @@ finally:
     stop(_tp)
     _tfake.kill()
 shutil.rmtree(_cdir, ignore_errors=True)
+
+# --- the held order's pickups, visited ----------------------------------------
+#
+# The driver: stopping at the held order's restaurant should mark that pickup
+# done, so the panel's next stop, Map view's run and the "on your way" figure
+# move on to the dropoff by themselves. server.js runs the door's own rule
+# (stepAt) at each held pickup pin that names its planner line — inside the
+# arrive radius for the dwell, then past 300 m on two good fixes — and marks
+# the pickup visited on LEAVING (visitPickups); a planner read that has moved
+# past a pickup marks it too, by the planner (plannerVisits). Real defaults
+# here (a 60 s dwell), with real seconds made from each fix's age, 10 s
+# apart. Places and points invented, in open country.
+_vdir = tempfile.mkdtemp()
+
+
+def _vsayer(name):
+    """A scanner of its own in _vdir/name that says each line of say-N.json a
+    quarter of a second apart, a heartbeat's `at` made now, and carries on
+    from where it was after a restart; returns its script, the function that
+    has it say lines and waits, and its journal."""
+    d = os.path.join(_vdir, name)
+    os.makedirs(d)
+    script = os.path.join(d, 'say.py')
+    with open(script, 'w') as fh:
+        fh.write(
+            'import json, os, time\n'
+            'd = os.path.dirname(os.path.abspath(__file__))\n'
+            'q = os.path.join(d, "next")\n'
+            'n = int(open(q).read()) if os.path.exists(q) else 0\n'
+            'end = time.time() + 600\n'
+            'while time.time() < end:\n'
+            '    p = os.path.join(d, "say-%d.json" % n)\n'
+            '    if not os.path.exists(p):\n'
+            '        time.sleep(0.05)\n'
+            '        continue\n'
+            '    for x in json.load(open(p)):\n'
+            '        if x.get("alive"):\n'
+            '            x["at"] = int(time.time() * 1000)\n'
+            '        print(json.dumps(x), flush=True)\n'
+            '        time.sleep(0.25)\n'
+            '    open(os.path.join(d, "done-%d" % n), "w").close()\n'
+            '    n += 1\n'
+            '    open(q, "w").write(str(n))\n')
+    seq = [0]
+
+    def says(lines):
+        n = seq[0]
+        seq[0] += 1
+        path = os.path.join(d, 'say-%d.json' % n)
+        with open(path + '.tmp', 'w') as fh:
+            json.dump(lines, fh)
+        os.rename(path + '.tmp', path)
+        for _ in range(600):
+            if os.path.exists(os.path.join(d, 'done-%d' % n)):
+                break
+            time.sleep(0.05)
+        time.sleep(0.3)
+    open(os.path.join(d, 'offers.jsonl'), 'w').close()
+    return script, says, os.path.join(d, 'offers.jsonl')
+
+
+_R1 = (33.9000, -84.5000)               # the held order's restaurant
+_R2 = (33.9300, -84.5000)               # another, 3.3 km north
+_R3 = (33.9011, -84.5000)               # a second store 122 m from _R1
+_Q1 = '310 Mill St, Roswell, GA 30075'
+_Q2 = '88 Example Way, Roswell, GA 30075'
+_Q3 = '312 Mill St, Roswell, GA 30075'
+
+
+def _vstop(q, street, of=None):
+    st = {'kind': 'pickup', 'orders': 1, 'name': 'oe Example', 'expectedBy': 1189,
+          'street': street, 'city': 'Roswell', 'state': 'GA', 'zip': '30075', 'line': q}
+    if of:
+        st['of'] = of
+    return st
+
+
+_VDROP = {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'expectedBy': 1230,
+          'street': '4821 Kestrel Dr', 'city': 'Marietta', 'state': None, 'zip': None,
+          'line': '4821 Kestrel Dr, Marietta'}
+
+
+def _vplanner(*stops):
+    return {'planner': {'stops': list(stops), 'unfiled': 'dropoffs', 'asked': False}}
+
+
+def _vbeat(at, dlat=0.0, age=0.1):
+    return {'alive': True, 'gps': {'state': 'ok', 'ageSeconds': 0.1, 'fix': {
+        'lat': at[0] + dlat, 'lon': at[1], 'gpsAge': age, 'gpsErr': 25.0, 'gpsMode': 3,
+        'gpsOk': True, 'gpsWhy': None, 'freshFor': 10.0}}}
+
+
+def _vwait(at, seconds, dlat=-0.0003):
+    """Parked ~33 m south of `at` for `seconds`, one fix every 10 s."""
+    return [_vbeat(at, dlat, age=a) for a in range(int(seconds), 0, -10)] + [_vbeat(at, dlat)]
+
+
+def _vleave(at):
+    return [_vbeat(at, 0.005)] * 2       # ~556 m: past LEAVE_M on two fixes
+
+
+def _vpin(base, h, at, q):
+    return post(base, '/api/held-pickup', {'holdId': h.get('holdId'), 'lat': at[0],
+                                           'lon': at[1], 'q': q})
+
+
+def _vvisited(base):
+    return (_holding(base) or {}).get('visited')
+
+
+def _vbeatsaid(base):
+    return ((get(base, '/api/status').get('beat') or {}).get('heldEnd') or {}).get('visited')
+
+
+def _vrows(journal):
+    rows = [json.loads(l) for l in open(journal) if l.strip()]
+    return [r for r in rows if r.get('kind') == 'visit']
+
+
+try:
+    _vs, _vsay, _vj = _vsayer('one')
+    _venv = {'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _vs}
+    _vp, _vb = start(_venv, _vj)
+    try:
+        # Driving past: inside the circle for 20 s, then gone.
+        _h = _took(_vb, 'v-past')
+        _vsay([_vplanner(_vstop(_Q1, '310 Mill St'), _VDROP)])
+        _vpin(_vb, _h, _R1, _Q1)
+        _vsay(_vwait(_R1, 20) + _vleave(_R1))
+        eq('[pickup visit] driving past the restaurant does not',
+           (_vvisited(_vb), _vrows(_vj)), ([], []))
+        post(_vb, '/api/delivered', {})
+
+        # Stopped at the restaurant for three minutes and still there: the
+        # restaurant is still where the car goes next, on the beat the panel
+        # reads it from and on /api/status.
+        _h = _took(_vb, 'v-stop')
+        _vsay([_vplanner(_vstop(_Q1, '310 Mill St'), _VDROP)])
+        eq('[pickup visit] (the premise: the pin is kept, named by its planner line)',
+           _vpin(_vb, _h, _R1, _Q1)[0], 200)
+        _vsay(_vwait(_R1, 180))
+        eq('[pickup visit] a waiting car keeps the restaurant as its next stop',
+           (_vvisited(_vb), _vbeatsaid(_vb)), ([], []))
+        # ...then it leaves.
+        _vsay(_vleave(_R1))
+        _vr = _vrows(_vj)
+        eq('[pickup visit] a 3-minute stop at the held pickup, then leaving, marks it visited',
+           (_vvisited(_vb), _vbeatsaid(_vb),
+            [(r.get('holdId'), r.get('pickup'), r.get('by')) for r in _vr]),
+           ([_Q1], [_Q1], [(_h.get('holdId'), 0, 'gps')]))
+        eq('[pickup visit] ...and its journal row says which and when, and nothing of where',
+           [sorted(r) for r in _vr],
+           [['at', 'by', 'holdId', 'id', 'kind', 'pickup', 'seq', 'v']])
+        # The app still lists the pickup until the driver swipes it.
+        _vsay([_vplanner(_vstop(_Q1, '310 Mill St'), _VDROP)])
+        eq('[pickup visit] a planner re-read does not un-visit',
+           (_vvisited(_vb), len(_vrows(_vj))), ([_Q1], 1))
+        _hj = json.load(open(os.path.join(os.path.dirname(_vj), 'holding.json')))
+        eq('[pickup visit] ...and the visit is in holding.json',
+           [[(e.get('q'), e.get('visited'), e.get('by')) for e in o.get('pickups') or []]
+            for o in _hj.get('orders') or []], [[(_Q1, True, 'gps')]])
+    finally:
+        stop(_vp)
+    _vp, _vb = start(_venv, _vj)
+    try:
+        eq('[pickup visit] survives a restart',
+           ((_holding(_vb) or {}).get('holdId'), _vvisited(_vb)), (_h.get('holdId'), [_Q1]))
+        post(_vb, '/api/delivered', {})
+
+        # The planner's own word: a read that has moved past a pickup.
+        _h = _took(_vb, 'v-plan')
+        _vsay([_vplanner(_vstop(_Q1, '310 Mill St'), _vstop(_Q2, '88 Example Way'), _VDROP)])
+        # ...but first one cut off below the first pickup, which says nothing
+        # about the second.
+        _vsay([_vplanner(_vstop(_Q1, '310 Mill St'))])
+        eq('[pickup visit] a planner read cut off above a pickup does not visit it',
+           (_vvisited(_vb), _vrows(_vj)[1:]), ([], []))
+        _vsay([_vplanner(_vstop(_Q2, '88 Example Way'), _VDROP)])
+        eq('[pickup visit] a planner re-read that drops a pickup marks it visited, by the planner',
+           (_vvisited(_vb), [(r.get('holdId'), r.get('pickup'), r.get('by'))
+                             for r in _vrows(_vj)[1:]]),
+           ([_Q1], [(_h.get('holdId'), 0, 'planner')]))
+        post(_vb, '/api/delivered', {})
+
+        # Two stores 122 m apart: parked at one, the car is 156 m from the
+        # other, outside its circle for the whole wait.
+        _h = _took(_vb, 'v-plaza')
+        _vsay([_vplanner(_vstop(_Q1, '310 Mill St'), _vstop(_Q3, '312 Mill St'), _VDROP)])
+        _vpin(_vb, _h, _R1, _Q1)
+        _vpin(_vb, _h, _R3, _Q3)
+        _vsay(_vwait(_R1, 180) + _vleave(_R1))
+        eq('[pickup visit] two held pickups within 150 m of each other are visited together',
+           sorted(_vvisited(_vb) or []), sorted([_Q1, _Q3]))
+        post(_vb, '/api/delivered', {})
+    finally:
+        stop(_vp)
+
+    # Two orders in the car (carrying two on): the planner, read for the
+    # first, lists both restaurants, each marked with its order (`of`); the
+    # car calls at the first order's and leaves.
+    _vs2, _vsay2, _vj2 = _vsayer('two')
+    _vp, _vb = start(dict(_venv, SCANNER_ARGS=_vs2, CARRY_TWO='1'), _vj2)
+    try:
+        _ha = _took(_vb, 'v-a')
+        post(_vb, '/api/offers/mark', {
+            'id': 'v-b', 'accepted': True,
+            'offer': {'id': 'v-b', 'pay': 9.0, 'minutes': 30.0, 'billedMinutes': 30.0,
+                      'miles': 3.0, 'cost': 1.0}})
+        _two = get(_vb, '/api/status').get('orders') or []
+        ok_('[pickup visit] (the premise: two orders in the car)', len(_two) == 2)
+        _vsay2([_vplanner(_vstop(_Q1, '310 Mill St', of=_two[0].get('holdId')),
+                          _vstop(_Q2, '88 Example Way', of=(_two[1:] or [{}])[0].get('holdId')),
+                          _VDROP)])
+        _vpin(_vb, _ha, _R1, _Q1)
+        _vpin(_vb, _ha, _R2, _Q2)
+        _vsay2(_vwait(_R1, 180) + _vleave(_R1))
+        eq('[pickup visit] two orders: visiting one order\'s restaurant leaves the other\'s',
+           (_vvisited(_vb), [(r.get('pickup'), r.get('by')) for r in _vrows(_vj2)]),
+           ([_Q1], [(0, 'gps')]))
+    finally:
+        stop(_vp)
+finally:
+    shutil.rmtree(_vdir, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)

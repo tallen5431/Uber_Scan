@@ -560,6 +560,9 @@ function startScanner() {
           if (heldNow) {
             heldNow.planner = { stops: read.planner.stops,
                                 unfiled: read.planner.unfiled || null };
+            // ...and a pickup it lists no longer marked visited, by the
+            // planner's word (plannerVisits).
+            plannerVisits(heldNow, read.planner.stops, plannedAt);
             // ...and its pickups searched for on the NucBox, for the
             // restaurant guard (searchHeldPickup); a no-op for one already
             // asked about on this hold.
@@ -585,6 +588,10 @@ function startScanner() {
         // beat, which is ALIVE_EVERY (four seconds) away at most.
         if (read.alive) {
           scanner.beat = read;
+          // ...and the held pickups: one the car has stopped at and left is
+          // visited, and off the run (visitPickups). Before the door, so the
+          // state the beat carries below has it.
+          visitPickups(read, Date.now());
           // ...and the GPS drop's one input: whether this beat's fix puts the
           // car at the held order's door, or takes it away (gpsArrival). The
           // answer rides the beat to the panel, which says "at dropoff".
@@ -1991,8 +1998,7 @@ var arrivals = {};
 
 function resetArrival(id) {
   if (!id) return null;
-  arrivals[id] = { holdId: id, insideSince: null, lastFixAt: null, outCount: 0,
-                   skippedMs: 0, refusedFrom: null, refusedTo: null, silentMs: 0 };
+  arrivals[id] = freshArrival(id);
   return arrivals[id];
 }
 
@@ -2262,6 +2268,10 @@ function forgetHoldsGone(list) {
   Object.keys(arrivals).forEach(function (id) {
     if (ids.indexOf(id) === -1) delete arrivals[id];
   });
+  // ...and the arrivals at its pickups (visitPickups).
+  Object.keys(pickArrivals).forEach(function (k) {
+    if (ids.indexOf(pickArrivals[k].holdId) === -1) delete pickArrivals[k];
+  });
 }
 
 function searchHeldPickup(id, q, attempt) {
@@ -2276,7 +2286,7 @@ function searchHeldPickup(id, q, attempt) {
     var now = pickHold(id);
     if (!now) return;
     var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
-    if (res.at) keepPickupPin(now, res.at);
+    if (res.at) keepPickupPin(now, res.at, q);
   }
   if (nbxCache.has(target)) return answered(nbxCache.get(target));
   nbxAsk(target, function (err, body) {
@@ -2308,11 +2318,21 @@ function searchHeldPickup(id, q, attempt) {
  * (a newer pickup pushing this one out of the PICKUP_PINS_MAX kept) the next
  * departure puts the order down on it. So a pickup that puts the armed door
  * inside the guard takes the arrival and the dwell with it. */
-function keepPickupPin(h, at) {
+function keepPickupPin(h, at, q) {
+  var was = null;
   var picks = (Array.isArray(h.pickupPins) ? h.pickupPins : []).filter(function (p) {
-    return p.lat !== at.lat || p.lon !== at.lon;
+    if (p.lat === at.lat && p.lon === at.lon) { was = p; return false; }
+    return true;
   });
-  picks.push({ lat: at.lat, lon: at.lon });
+  // ...named by the planner line it was searched for (`q`, MV.heldPickups'),
+  // which is what the GPS marks visited (visitPickups). A pin with no name —
+  // a page from before the field — still guards the door, and is never
+  // visited: there is no pickup to say it of. A second opinion at the same
+  // position without a name keeps the name it had.
+  var pin = { lat: at.lat, lon: at.lon };
+  if (typeof q === 'string' && q) pin.q = q;
+  else if (was && was.q) pin.q = was.q;
+  picks.push(pin);
   h.pickupPins = picks.slice(-PICKUP_PINS_MAX);
   // Every order's door, since the guard is every order's pickups (see
   // pickupNearEnd): a second order's restaurant can sit beside the first's.
@@ -2324,6 +2344,170 @@ function keepPickupPin(h, at) {
     }
   });
   saveHold(h);
+}
+
+/* ---------- the held order's pickups, visited -------------------------------
+ *
+ * The driver: stopping at the held order's restaurant should mark that pickup
+ * done, and the panel's next stop, Map view's run and the "on your way" figure
+ * move on to the dropoff by themselves. Until this the only way a pickup left
+ * them was a planner read that no longer listed it, and Uber's planner keeps
+ * a pickup until the driver swipes it in the app.
+ *
+ * So each held pickup pin that names its pickup (`q`, keepPickupPin) runs the
+ * door's own rule (stepAt): inside ARRIVE_M + min(err, 25) for DWELL_MS, then
+ * past LEAVE_M on LEAVE_FIXES good fixes. The pickup is marked on LEAVING,
+ * not when the dwell is met, and the 12 Oct replay is why (385 min of fixes,
+ * the stand-in for each order's restaurant being the longest still stop of
+ * 45 s or more between its Took and its door; replayed outside the repo). Of
+ * the three orders the drive can replay, two had their stand-in inside the
+ * hold: order 1's Took was pressed while the car waited there, order 2's
+ * stop was 6.2 min after its Took. Marked on leaving, they were marked 96 s
+ * and 56 s after the car left (on 4 s beats; 90 s and 50 s on every fix).
+ * Marked at the dwell, it would have been 20 s and 332 s BEFORE it left — the
+ * panel saying "Dropoff" for five and a half minutes over a car still waiting
+ * for the food. A stop late is the cheap error: the restaurant stays the next
+ * stop for a minute or so of driving away from it. Order 3's Took came 7.5
+ * min after the car left the longest stop before it, so the GPS has nothing
+ * to mark there; that is what the planner's own word is for (plannerVisits).
+ * A pin 50 or 75 m off the stand-in still visited in all 8 directions on both
+ * orders; 100 m off, in 3 of 8 and 0 of 8. Every other still stop in those
+ * holds was 1,987 m or more from the stand-in.
+ *
+ * Two pickups within SAME_SPOT_M of each other are visited together: two
+ * stores in one plaza are one stop for the car, and parked at one it may be
+ * outside the other's radius for the whole wait. 150 m is the owner's
+ * figure, the guard's (PICKUP_GUARD_M), chosen and not measured.
+ *
+ * Visited is for good: a later planner read that still lists the pickup does
+ * not take it back — the app keeps listing it until the swipe — and the
+ * order's end is still the order's end. The result is on the order, and so
+ * in holding.json (`pickups`); the dwell's live part is memory, as the
+ * door's is, and an arrival is kept on the pickup like the door's so a
+ * restart while waiting at the restaurant leaves with it. A journal row
+ * (`kind: 'visit'`) says which, never where. Nothing is turned into minutes:
+ * a visit moves a stop off the run and changes no time anywhere. */
+var SAME_SPOT_M = 150;
+// One per pin, by holdId and position: two pins are two circles.
+var pickArrivals = {};
+
+function freshArrival(id) {
+  return { holdId: id, insideSince: null, lastFixAt: null, outCount: 0,
+           skippedMs: 0, refusedFrom: null, refusedTo: null, silentMs: 0 };
+}
+
+function pickArrivalOf(h, pin) {
+  var key = holdIdOf(h) + '\n' + pin.lat + ',' + pin.lon;
+  return pickArrivals[key] || (pickArrivals[key] = freshArrival(holdIdOf(h)));
+}
+
+/* The order's own record of one pickup, by its planner line, made the first
+ * time either a planner read or a pin names it: `{q}`, and once visited
+ * `visited`, `visitedAt` and `by`. Its place in `h.pickups` is the index the
+ * journal row gives, so it is never reordered. */
+function pickupEntry(h, q) {
+  if (!Array.isArray(h.pickups)) h.pickups = [];
+  for (var i = 0; i < h.pickups.length; i++) if (h.pickups[i].q === q) return h.pickups[i];
+  var e = { q: q };
+  h.pickups.push(e);
+  return e;
+}
+
+/* Mark these pickups visited — [{h, e}] — write a row for each and save. The
+ * row: {v, kind: 'visit', at, id, seq, holdId, pickup, by}, `pickup` the
+ * index in that order's `pickups`. No address and no coordinate: what was
+ * visited is in holding.json for as long as the order is, and the journal
+ * holds only that one was and when. `id` is the order and the index, which
+ * can be visited once, so syncKey's [kind, id, seq] is one row's. */
+function markVisited(list, now, by) {
+  var rows = [];
+  var saved = [];
+  list.forEach(function (x) {
+    if (x.e.visited) return;
+    x.e.visited = true;
+    x.e.visitedAt = now;
+    x.e.by = by;
+    delete x.e.arrivedAt;
+    delete x.e.after;
+    var id = holdIdOf(x.h);
+    var i = x.h.pickups.indexOf(x.e);
+    rows.push(JSON.stringify({ v: 1, kind: 'visit', at: now, id: id + '#' + i, seq: now,
+                               holdId: id, pickup: i, by: by }) + '\n');
+    if (saved.indexOf(x.h) === -1) saved.push(x.h);
+  });
+  saved.forEach(saveHold);
+  if (!rows.length) return;
+  appendLines(rows.join(''), function (err) {
+    if (err) console.error('journal: could not record a pickup visit: ' + err.message);
+  });
+}
+
+/* One heartbeat, for the pickups: each named pin of each order in the car,
+ * stepped by stepAt, and on leaving one, every pickup pinned within
+ * SAME_SPOT_M of it marked visited with it, whichever order it is kept on. */
+function visitPickups(beat, now) {
+  var orders = heldOrders(now);
+  orders.forEach(function (h) {
+    (Array.isArray(h.pickupPins) ? h.pickupPins : []).forEach(function (pin) {
+      if (typeof pin.q !== 'string') return;
+      var e = pickupEntry(h, pin.q);
+      if (e.visited) return;
+      var step = stepAt(pickArrivalOf(h, pin), beat, now, pin, !!e.arrivedAt);
+      if (step === 'arrive') {
+        e.arrivedAt = now;
+        saveHold(h);
+      }
+      if (step !== 'left') return;
+      var here = [];
+      orders.forEach(function (o) {
+        (Array.isArray(o.pickupPins) ? o.pickupPins : []).forEach(function (p) {
+          if (typeof p.q !== 'string') return;
+          if (MV.crowMiles(p, pin) * 1609.344 > SAME_SPOT_M) return;
+          here.push({ h: o, e: pickupEntry(o, p.q) });
+        });
+      });
+      markVisited(here, now, 'gps');
+    });
+  });
+}
+
+/* A Trip Planner read landing on the order: its pickups recorded, and one it
+ * listed before and lists no longer marked visited, `by: 'planner'` — the
+ * app's own word that the stop is behind the car.
+ *
+ * "No longer lists" means the list has MOVED PAST it: this read shows a stop
+ * a read that listed the pickup showed after it (`after`). A read cut
+ * short above the pickup — the screen's foot, a stop block that grew — does
+ * not list it either, and that is not a visit; a pickup marked by that would
+ * put the dropoff next with the restaurant still ahead, and visited is for
+ * good. A read that lists the pickup leaves a visited one visited. */
+function stopKey(s) {
+  if (!s || !s.kind) return null;
+  var k = s.kind === 'pickup' ? MV.pickupKey(s) : (s.line || s.street || s.name || null);
+  return k ? s.kind + '\n' + k : null;
+}
+
+function plannerVisits(h, stops, now) {
+  var keys = stops.map(stopKey);
+  var listed = [];
+  stops.forEach(function (s, i) {
+    var q = s && s.kind === 'pickup' ? MV.pickupKey(s) : null;
+    if (!q) return;
+    listed.push(q);
+    var e = pickupEntry(h, q);
+    if (e.visited) return;
+    // Added to, never cut: a read showing less after the pickup is a read
+    // cut shorter, not evidence that what it no longer shows is gone.
+    e.after = (e.after || []).concat(keys.slice(i + 1).filter(function (k) {
+      return k && (e.after || []).indexOf(k) === -1;
+    }));
+  });
+  var gone = (h.pickups || []).filter(function (e) {
+    return !e.visited && listed.indexOf(e.q) === -1
+      && (e.after || []).some(function (k) { return keys.indexOf(k) !== -1; });
+  });
+  saveHold(h);
+  markVisited(gone.map(function (e) { return { h: h, e: e }; }), now, 'planner');
 }
 
 /* One heartbeat. Returns what the panel is told on that beat: whether the car
@@ -2338,12 +2522,21 @@ function gpsArrival(beat, now) {
   return at;
 }
 
-function arriveOne(h, beat, now) {
-  var arrival = arrivalOf(holdIdOf(h));
-  var pin = heldEndPin(h);
-  if (!pin || pickupNearEnd(h, pin)) return false;
+/* One beat's step at one pin, for whatever stands there — a held order's door
+ * (arriveOne) or one of its pickups (visitOne): ONE rule for "the car stopped
+ * here, then left", so a door and a restaurant cannot come to mean two things
+ * by it. `arrived` is whether that place's arrival is already counted.
+ * Returns null when the beat brings no fix to count, else what this fix did:
+ *   'out'    outside the arrive radius (the dwell, if any, is reset)
+ *   'in'     inside it, the dwell not yet met
+ *   'arrive' inside it, and the dwell met on this fix
+ *   'at'     arrived before, and still within LEAVE_M
+ *   'going'  arrived before, and past LEAVE_M on fewer than LEAVE_FIXES
+ *   'left'   arrived before, and past LEAVE_M on LEAVE_FIXES in a row
+ * The numbers are the 12 Oct replay's, at the head of this section. */
+function stepAt(arrival, beat, now, pin, arrived) {
   var fix = countableFix(beat, now, arrival);
-  if (!fix) return false;
+  if (!fix) return null;
   var gap = arrival.lastFixAt === null ? Infinity : fix.at - arrival.lastFixAt;
   // A gap the gate's refusals filled: no silence in it over GAP_MS, from the
   // last counted fix through the run to this one, and no longer than
@@ -2354,23 +2547,34 @@ function arriveOne(h, beat, now) {
   arrival.refusedFrom = arrival.refusedTo = null;
   arrival.silentMs = 0;
   var metres = MV.crowMiles(fix, pin) * 1609.344;
-  if (!h.arrivedAt) {
+  if (!arrived) {
     var within = ARRIVE_M + Math.min(fix.err, ARRIVE_ERR_CAP_M);
-    if (metres > within) { arrival.insideSince = null; return false; }
+    if (metres > within) { arrival.insideSince = null; return 'out'; }
     if (arrival.insideSince === null || (gap > GAP_MS && !refused)) {
       arrival.insideSince = fix.at;
       arrival.skippedMs = 0;
     } else if (gap > GAP_MS) {
       arrival.skippedMs += gap;       // inside on both sides; not counted
     }
-    if (fix.at - arrival.insideSince - arrival.skippedMs < DWELL_MS) return false;
+    return fix.at - arrival.insideSince - arrival.skippedMs < DWELL_MS ? 'in' : 'arrive';
+  }
+  if (metres <= LEAVE_M) { arrival.outCount = 0; return 'at'; }
+  arrival.outCount += 1;
+  return arrival.outCount < LEAVE_FIXES ? 'going' : 'left';
+}
+
+function arriveOne(h, beat, now) {
+  var arrival = arrivalOf(holdIdOf(h));
+  var pin = heldEndPin(h);
+  if (!pin || pickupNearEnd(h, pin)) return false;
+  var step = stepAt(arrival, beat, now, pin, !!h.arrivedAt);
+  if (step === 'arrive') {
     h.arrivedAt = now;
     saveHold(h);   // the arrival survives a restart in the driveway
     return true;
   }
-  if (metres <= LEAVE_M) { arrival.outCount = 0; return true; }
-  arrival.outCount += 1;
-  if (arrival.outCount < LEAVE_FIXES) return false;
+  if (step === 'at') return true;
+  if (step !== 'left') return false;
   putDown(now, 'gps', function () {
     var left = holding(now);
     var said = { gpsDrop: { at: now, saidForMs: GPS_DROP_SAID_MS } };
@@ -2487,6 +2691,7 @@ function timedLikeTheHeldJob(read) {
  * door-level pin is on it, whether the GPS has seen the car arrive there, and,
  * when it is not armed, why — a pin next to one of its pickups (pickupNearEnd),
  * or this server's refusal of the dropoff text it still names (searchHeldEnd).
+ * And a fourth, `visited`, the pickups behind the car.
  * ONE function, for /api/status, heldForPanel and the beat, so the status link
  * and the panel cannot give two answers about one pin. */
 function heldEndState(h) {
@@ -2494,7 +2699,15 @@ function heldEndState(h) {
   return { endPinned: !!pin, arrived: !!h.arrivedAt,
            endWhy: pin
              ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : null)
-             : h.endWhyFor === h.dropoff ? (h.endWhy || null) : null };
+             : h.endWhyFor === h.dropoff ? (h.endWhy || null) : null,
+           // ...and its pickups the car has called at (visitPickups,
+           // plannerVisits), by planner line (MV.pickupKey): the panel's next
+           // stop, Map view's run and the figure's stops leave them out. On
+           // the same three messages, for the same reason: a visit happens
+           // between offers.
+           visited: (Array.isArray(h.pickups) ? h.pickups : []).filter(function (e) {
+             return e.visited;
+           }).map(function (e) { return e.q; }) };
 }
 
 function heldForPanel(held) {
@@ -6730,9 +6943,11 @@ function route(req, res) {
   }
 
   /* One of the held order's pickups, pinned by Map view (live.html) inside
-   * the held card's disc. Body: {holdId, lat, lon}. Kept on the hold (at most
-   * PICKUP_PINS_MAX, the newest) for the restaurant guard alone
-   * (pickupNearEnd): a door within PICKUP_GUARD_M of one is not armed. A pin
+   * the held card's disc. Body: {holdId, lat, lon, q}. Kept on the hold (at
+   * most PICKUP_PINS_MAX, the newest) for the restaurant guard (pickupNearEnd):
+   * a door within PICKUP_GUARD_M of one is not armed; and, named by `q` — the
+   * planner line it was searched for — for the GPS to mark that pickup
+   * visited (visitPickups). A `q` that is not a string is no name. A pin
    * for another hold, or with no position, is refused and changes nothing.
    * This server searches for the same pickups itself (searchHeldPickup), so
    * Map view need not be opened for the guard to hold. */
@@ -6754,7 +6969,8 @@ function route(req, res) {
       if (why) return send(res, 409, JSON.stringify({ ok: false, error: why }), json);
       // The one path this server's own search keeps a pickup by too, guard
       // and all (keepPickupPin).
-      keepPickupPin(h, { lat: body.lat, lon: body.lon });
+      keepPickupPin(h, { lat: body.lat, lon: body.lon },
+                    typeof body.q === 'string' ? body.q : null);
       send(res, 200, JSON.stringify({ ok: true }), json);
     });
   }

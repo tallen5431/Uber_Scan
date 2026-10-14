@@ -670,6 +670,9 @@
                         pointer-events: none; background: none; border: 0; }
   #liveMap .mv-letter-ring { color: #fff;
                              text-shadow: 0 0 2px #0b0d10, 0 0 2px #0b0d10; }
+  /* ...and ✓ on a pickup the car has called at (visitPickups in server.js),
+     at the faded dot's strength. */
+  #liveMap .mv-done { opacity: .55; }
   /* Drawn for a driver, not for a desk: the popups on this panel are read at
      arm's length and dismissed with a bluetooth mouse. */
   #liveMap .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
@@ -1980,20 +1983,27 @@
 
   /* Where the order in the car goes next: { kind, by, name }.
    *
-   * A pickup the planner lists, the first of them, until the car is at the
-   * door — "not yet visited" is the rule MV.heldPickups already uses for the
-   * pins on Map view: the planner lists the stops still ahead, and a list read
-   * after the pickup no longer carries it. Then the dropoff, shortened, with
-   * the planner's expected-by time when the planner names one dropoff and so
-   * that time can only be this order's. Nothing is worked out from distance
-   * or speed: a time on this line is one the phone printed. */
+   * A pickup the planner lists, the first of them not yet visited, until the
+   * car is at the door. The planner lists the stops still ahead, and a list
+   * read after the pickup no longer carries it; but the app keeps listing it
+   * until the driver swipes it, so one the server has seen the car stop at
+   * and leave (`visited`, visitPickups in server.js) is behind the car too,
+   * named by the planner line MV.pickupKey gives it. Then the dropoff,
+   * shortened, with the planner's expected-by time when the planner names
+   * one dropoff and so that time can only be this order's. Nothing is worked
+   * out from distance or speed: a time on this line is one the phone
+   * printed, and a visit moves the stop on without moving any time. */
   function nextStop() {
     var stops = heldPlan && heldPlan.of === heldOwner() ? heldPlan.stops : [];
     var kind = function (k) {
       return stops.filter(function (s) { return s && s.kind === k; });
     };
     var there = atDropoff || !!(heldSaid && heldSaid.arrived);
-    var pick = there ? null : kind('pickup')[0];
+    var done = visitedNow();
+    var pick = there ? null : kind('pickup').filter(function (s) {
+      var q = MV && MV.pickupKey ? MV.pickupKey(s) : null;
+      return !q || done.indexOf(q) === -1;
+    })[0];
     if (pick) {
       return { kind: 'Pickup', by: pick.expectedBy,
                name: (MV && MV.plannerName ? MV.plannerName(pick.name) : pick.name)
@@ -2003,6 +2013,12 @@
     var drop = drops.length === 1 ? drops[0] : null;
     return { kind: 'Dropoff', by: drop ? drop.expectedBy : null,
              name: streetOf(heldEnds) || (drop && drop.street) || null };
+  }
+
+  // The held order's pickups the server says are behind the car, by planner
+  // line (heldEndState in server.js): [] when none are, or nothing is held.
+  function visitedNow() {
+    return holdingNow && heldSaid && Array.isArray(heldSaid.visited) ? heldSaid.visited : [];
   }
 
   /* The order in the car, said on the panel. `mode` is 'between' when there
@@ -2336,10 +2352,12 @@
      restaurant guard, pickupNearEnd in server.js). The server now searches
      the planner's pickups itself (searchHeldPickup), so this is a second
      opinion, kept by the same path. Fire and forget, too. */
-  function pinHeldPickup(want, got) {
+  function pinHeldPickup(want, q, got) {
     if (!want.heldId || !got.at) return;
+    // ...named by its planner line, which is what the server marks visited
+    // when the car has stopped there and left (visitPickups in server.js).
     ask('/api/held-pickup', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ holdId: want.heldId, lat: got.at.lat, lon: got.at.lon }) })
+      body: JSON.stringify({ holdId: want.heldId, lat: got.at.lat, lon: got.at.lon, q: q }) })
       .catch(function () {});
   }
 
@@ -4093,6 +4111,9 @@
         heldSaid.endPinned = !!msg.heldEnd.endPinned;
         heldSaid.arrived = !!msg.heldEnd.arrived;
         heldSaid.endWhy = msg.heldEnd.endWhy || null;
+        // ...and its pickups behind the car (visitPickups), which move the
+        // next stop on and take the restaurant out of Map view's run.
+        heldSaid.visited = Array.isArray(msg.heldEnd.visited) ? msg.heldEnd.visited : [];
       }
       // ...and every order's, with two in the car.
       if (msg.alive && Array.isArray(msg.orders) && holdingNow) heldList = msg.orders;
@@ -4982,8 +5003,14 @@
     // (MV.detourThrough): an older one, which sw.js can serve this page, has
     // a road detour that would take them and measure to the end alone, under
     // a caption saying the restaurant was in it.
-    var heldPicks = (holdingNow && plan && MV && MV.heldPickups && MV.detourThrough)
+    var listed = (holdingNow && plan && MV && MV.heldPickups && MV.detourThrough)
       ? MV.heldPickups(plan).filter(function (p) { return p.q !== held; }) : [];
+    // ...less the ones the car has stopped at and left (visitPickups in
+    // server.js): off the run and out of the figure, which is then measured
+    // from the car to the end, and drawn apart as a faded ✓ (`donePicks`).
+    var done = visitedNow();
+    var heldPicks = listed.filter(function (p) { return done.indexOf(p.q) === -1; });
+    var donePicks = listed.filter(function (p) { return done.indexOf(p.q) !== -1; });
     // ...and with two orders in the car (carrying two on), the second one's
     // end beside the first's, pinned D2 to the first's D1, in its own card's
     // disc. The run and the figure stay the first order's alone until the
@@ -4991,10 +5018,10 @@
     var second = twoHeld() ? heldList[1] : null;
     var held2 = second && second.dropoff && second.dropoff !== held ? second.dropoff : null;
     var names = [o.pickup, o.dropoff, held, held2]
-      .concat(heldPicks.map(function (p) { return p.q; })).filter(Boolean)
+      .concat(listed.map(function (p) { return p.q; })).filter(Boolean)
       .filter(function (v, i, all) { return all.indexOf(v) === i; });
     return { pickup: o.pickup || null, dropoff: o.dropoff || null,
-             held: held, heldPicks: heldPicks, names: names,
+             held: held, heldPicks: heldPicks, donePicks: donePicks, names: names,
              // The two cards the line is measured with: this one, whose fix
              // is where the car was when it came up, and the one the order in
              // the car came from, whose own fix and distance its end is
@@ -5016,7 +5043,11 @@
              // here", which the next card took away with it. Measured in
              // rpi/test_dashboard.py, 'held end: the ✓ Took reply's end...'.
              key: names.join('|') + '#' + (o.id || '') + '@' + (held || '')
-               + (held2 ? '+' + held2 : ''),
+               + (held2 ? '+' + held2 : '')
+               // ...and which of its pickups are behind the car: a visit
+               // moves the run and the figure under the same places.
+               + (donePicks.length ? '~' + donePicks.map(function (p) { return p.q; }).join('|')
+                                   : ''),
              // What the NucBox said about these places on this walk: a
              // refusal per place, with the disc it was made in, and why the
              // NucBox could not be asked at all (and the public map was) —
@@ -5245,7 +5276,7 @@
           // The held order's pickups are its card's places too, and are
           // searched in its disc as its end is.
           var heldsOwn = q === want.held
-            || want.heldPicks.some(function (p) { return p.q === q; });
+            || want.heldPicks.concat(want.donePicks).some(function (p) { return p.q === q; });
           var whose = (heldsOwn && q !== want.pickup && q !== want.dropoff)
             ? 'held' : (q === want.held2 && q !== want.pickup && q !== want.dropoff)
             ? 'held2' : 'new';
@@ -5274,7 +5305,7 @@
           // ...the second order's end, under its own name.
           else if (whose === 'held2' && disc) pinHeldEnd({ heldId: want.heldId2 }, q, got);
           // ...and a pickup's pin goes as a pickup, for the restaurant guard.
-          else if (whose === 'held' && disc) pinHeldPickup(want, got);
+          else if (whose === 'held' && disc) pinHeldPickup(want, q, got);
           if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
           landed();
         }
@@ -5436,12 +5467,14 @@
      looked up. A ring with a letter — the order already in the car — is
      edged in its own colour rather than in black, so "the order in my car"
      and "this offer" differ at a glance by more than a shade of fill. */
-  function mapDot(at, colour, label, name, ring, letter) {
+  // `faded`: a place already behind the car (a visited pickup), drawn at
+  // half strength so it reads as where the order came from, not a stop.
+  function mapDot(at, colour, label, name, ring, letter, faded) {
     var held = ring && !!letter;
     return L.circleMarker([at.lat, at.lon], {
       radius: !ring ? 12 : held ? 13 : 11, weight: held ? 4 : 3,
-      color: held ? colour : '#0b0d10',
-      fillColor: colour, fillOpacity: ring ? 0.35 : 1
+      color: held ? colour : '#0b0d10', opacity: faded ? 0.45 : 1,
+      fillColor: colour, fillOpacity: faded ? 0.12 : ring ? 0.35 : 1
     }).bindPopup('<b>' + esc(label) + '</b>'
                  // What the CARD called it. In map mode the verdict pane is
                  // not on the glass, so these popups are the only place the
@@ -5695,8 +5728,13 @@
                off: at ? MV.cardRefuses(want.heldCard, MV.cardFix(want.heldCard).at, at)
                        : null };
     });
+    // ...and the ones behind the car, where they were found: drawn, and
+    // nothing else (drawMap).
+    var donePicks = (want.donePicks || []).map(function (p) {
+      return { q: p.q, name: p.name, at: found[p.q] || null };
+    });
     return { wrong: wrong, pick: pick, drop: drop, held: held, held2: held2, off: off,
-             heldPicks: heldPicks };
+             heldPicks: heldPicks, donePicks: donePicks };
   }
 
   /* The held order's pickups still ahead, as the points of its run the
@@ -5727,13 +5765,15 @@
        of it, and deaf to the pointer, so the dot's popup is still what a
        press opens. Dark on a solid pin; white on a ring, haloed so it reads
        over whatever the ring shows of the map. */
-    function put(at, colour, label, name, ring, letter) {
+    function put(at, colour, label, name, ring, letter, how) {
       if (!at) return;
-      mapDot(at, colour, label, name, ring, letter).addTo(mapLayer);
+      var faded = !!(how && how.faded);
+      mapDot(at, colour, label, name, ring, letter, faded).addTo(mapLayer);
       if (letter) {
         L.marker([at.lat, at.lon], {
           interactive: false, keyboard: false,
-          icon: L.divIcon({ className: 'mv-letter' + (ring ? ' mv-letter-ring' : ''),
+          icon: L.divIcon({ className: 'mv-letter' + (ring ? ' mv-letter-ring' : '')
+                                       + (faded ? ' mv-done' : ''),
                             html: letter, iconSize: [26, 26], iconAnchor: [13, 13] })
         }).addTo(mapLayer);
       }
@@ -5799,6 +5839,16 @@
           // P1 / P2 for a pickup one order's card names (`of`), with two in
           // the car; P otherwise.
           two && p.of && want.heldNs[p.of] ? 'P' + want.heldNs[p.of] : 'P');
+    });
+    /* ...and the ones the car has stopped at and left (visitPickups in
+       server.js): still where the order was collected, so still on the map,
+       but faded and ticked, and off the run below — which is why the run
+       and the figure go from the car to the end once they are all behind
+       it. */
+    j.donePicks.forEach(function (p) {
+      put(p.at, colourFor(p.q, '#17c964'), 'collected — the order in your car was picked up here',
+          [p.name, p.q.replace(/,$/, '')].filter(Boolean).join(' · '), true, '\u2713',
+          { faded: true });
     });
     put(drop, colourFor(want.dropoff, '#f5a524'),
         sayFor(want.dropoff, 'and drop it here'), want.dropoff, false, 'D');
