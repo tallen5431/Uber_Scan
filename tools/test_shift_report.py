@@ -16,6 +16,7 @@ import io
 import json
 import math
 import os
+import subprocess
 import re
 import shutil
 import sys
@@ -357,22 +358,26 @@ eq('...and --gps left out is the same', code, 0)
 
 # --- nothing reads it ---------------------------------------------------------
 readers = []
-for base, _dirs, files in os.walk(ROOT):
-    if any(part in base for part in ('.git', 'node_modules', 'vendor')):
+# The files git tracks, not a walk of the directory: a walk also reads other
+# checkouts kept under the tree (.claude/worktrees/…), whose copies of this
+# very suite then count as readers of the report.
+_tracked = subprocess.run(['git', 'ls-files'], cwd=ROOT, capture_output=True,
+                          text=True, check=True).stdout.split()
+for rel in _tracked:
+    if any(part in rel.split('/') for part in ('node_modules', 'vendor')):
         continue
-    for f in files:
-        path = os.path.join(base, f)
-        rel = os.path.relpath(path, ROOT)
-        if rel in ('tools/shift_report.py', 'tools/test_shift_report.py'):
-            continue
-        if not f.endswith(('.js', '.html', '.py', '.sh')):
-            continue
-        with open(path, encoding='utf-8', errors='replace') as fh:
-            src = fh.read()
-        if f.endswith(('.js', '.html')) and 'shift_report' in src:
-            readers.append(rel)
-        elif f.endswith('.py') and re.search(r'^\s*(?:import|from)\s+shift_report\b', src, re.M):
-            readers.append(rel)
+    f = os.path.basename(rel)
+    path = os.path.join(ROOT, rel)
+    if rel in ('tools/shift_report.py', 'tools/test_shift_report.py'):
+        continue
+    if not f.endswith(('.js', '.html', '.py', '.sh')):
+        continue
+    with open(path, encoding='utf-8', errors='replace') as fh:
+        src = fh.read()
+    if f.endswith(('.js', '.html')) and 'shift_report' in src:
+        readers.append(rel)
+    elif f.endswith('.py') and re.search(r'^\s*(?:import|from)\s+shift_report\b', src, re.M):
+        readers.append(rel)
 eq('nothing on the rig reads the report (the rating, the target, advice.js, the pages)',
    readers, [])
 
