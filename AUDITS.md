@@ -1998,6 +1998,9 @@ README.md's".
 
 **GPS logs grew 5.4-9.0 MB an hour with nothing removing them.** tools/gpslog_tidy.py, run from Start.sh before gpspipe, gzips finished logs (4.6% of size) after reading the copy back, and deletes compressed logs past 60 days; dry run by default, confined to its directory, idle on an unset clock. Checks: tools/test_gpslog_tidy.py 45.
 
+
+**Nothing measured what an offer really took.** `tools/shift_report.py --journal … --gps ~/gpslog --day YYYY-MM-DD [--csv]` gives one row per order taken: card pay, minutes and miles beside actual minutes (Took to end) and GPS miles (gate-passed fixes through `gps.Phone.take`, the panel's own gate; gaps over 60 s bridged and flagged; steps under FIX_ERR_MAX not counted), stops before a visit and at the door, whether another order was carried, and card pay over actual hours; medians by app and card-minutes band over reliable rows. A report: nothing imports it, no cost, no $/mile, no minutes from distance, no recommendation, no place or coordinate printed (each checked). Replaced orders and orders with no drop row are unreliable. 12 Oct: 7 taken, 4 reliable; two Drops were pressed well before the door, so its medians flatter the day. Checks: tools/test_shift_report.py 61; 25 mutations, each killed by name. Open: an order that outlives its clock writes no row, so an expiry cannot be told from a lost hold.
+
 ### The phone's scanner
 
 **The MILES cell printed the distance from before the repair.** `scan.html`'s
@@ -3343,6 +3346,9 @@ instead of failing by name; all are fixed. Forty-five mutations across server.js
 and snaps.html, each caught by name. Still open: the build times are from the
 development box, and the Pi's need measuring.
 
+
+**The panel's small print was read at a glance from the seat, and most of it was not read at all.** Notices are chips — a state in capitals and what it means after the dot (`CEILING · miles unreadable`, `NO RATE · 7.8 mi untimed`, `SAME PICTURE · reseat its cable if this stays`), each sentence on its tooltip and one tap away, back on a second tap, a new card or 20 s; every refusal keeps its reason. On 1024x600 and larger the address and stops go 15→18px, labels 16→19 over figures 20→24, the line under the card and the status row 15/16→18/19; the notice stays at 16 (at 19 the chips took more of the card than the sentences). The status row is `● ✓7 $86 · $13/hr an offer 📷 …`; "an offer" stays, and "…" opens the rest for 10 s. Leaflet's zoom buttons are 48px on every panel. After civil dusk at the fix (MV.civilTwilight, within a minute of published Atlanta times) the page dims, falling back to the last kept fix, then day, and day on a 1970 clock; test_layout holds the night palette to the day's floors. 45 mutations, each killed by name. Open: map-caption sentences are not chipped; the night palette is live.html only; the "…" sheet and the Undo can overlap.
+
 ### The offers page
 
 **The cost sweep's footnote read a two-sided test as a one-sided one, and
@@ -3684,6 +3690,9 @@ mid-trip scan the old arithmetic was right, which is backwards: a row being
 ---
 
 ## Settled — do not re-propose
+
+
+**With two orders in the car the pair line weighed an offer against the first alone, and the detour measured the first's run alone (Stage 6).** `Advice.stackMany(held[], offer)` replaces `stack()`, now `stackMany([a])`, held identical to `stack()` as at bf6c403 over 527,472 corpus pairs and over the 12 Oct shift's 1,179 pair rows replayed. With two held: each order's net pro-rated by its own minutes left; the range from the larger of the longest order's minutes left and the offer's to the sum of all; `alone` over the longest single order; an Uber add-on's share is its card's extension; `ends` 'elsewhere' if any held end is; no minutes from distance. The panel says "with ① + ②" whole where "vs ① only" was (cut to "with ①" at 800x480 when it rode the words that give way). Pair rows gain `stack.over`. Detour: car → unvisited pickups → both ends, in the Trip Planner's order when one planner places both (`planAt`); otherwise both orderings, a figure only where they give one answer by the street-stretch rule, else "order of stops unknown — no figure". 33 mutations, each killed by name. Open: an Uber add-on against one held order is still drawn as an ordinary offer (6,780 of 527,472 corpus pairs would change); a two-order pair row's leftMinutes is the longest order's.
 
 ### The clock
 
