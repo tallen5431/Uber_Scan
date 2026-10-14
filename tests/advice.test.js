@@ -1083,6 +1083,195 @@ eq('...and says so when they end in the same place', near.ends, 'same-town');
 var blind = A.stack(heldFar, { pay: 10, minutes: 20, cost: 1 }, { target: 25 }, 0);
 eq('...and says nothing when the second card named nowhere', blind.ends, null);
 
+/* ---- every order in the car at once (stackMany, Stage 6) -----------------
+ *
+ * With one order in the car stackMany IS stack: the same fields, the same
+ * values, the same order, to the byte. Held against stack() AS IT STOOD before
+ * there was a stackMany (bf6c403, copied below with its comments taken out and
+ * nothing else changed), over every pair the parser's own corpus makes: each
+ * card tests/fixtures/cases.json holds that rate() scores, against every other
+ * as the order in the car, at three points into the held job and with and
+ * without a running cost. A frozen copy and not the live one, because "stack()
+ * equals stackMany([a])" is true by construction once one calls the other —
+ * the question is whether either moved. */
+(function () {
+  var P = require('../offer-parser.js');
+  var C = require('./fixtures/cases.json');
+  function num(v) { return (typeof v === 'number' && isFinite(v)) ? v : null; }
+  function stackAsItStood(active, offer, settings, now) {
+    if (!active || !offer) return null;
+    var target = (settings && typeof settings.target === 'number')
+      ? settings.target : 0;
+    if (active.doubt || offer.doubt) return null;
+    var totalA = num(active.minutes);
+    var payA = num(active.pay);
+    var minB = num(offer.minutes);
+    var payB = num(offer.pay);
+    if (totalA === null || payA === null || minB === null || payB === null) return null;
+    if (!(totalA > 0) || !(minB > 0)) return null;
+    var startedAt = num(active.acceptedAt);
+    var elapsed = (startedAt === null || typeof now !== 'number')
+      ? 0 : Math.max(0, (now - startedAt) / 60000);
+    var left = Math.max(0, totalA - elapsed);
+    if (left <= 0) return null;
+    var costA = num(active.cost) || 0;
+    var costB = num(offer.cost) || 0;
+    var netA = (payA - costA) * (left / totalA);
+    var netB = payB - costB;
+    var money = netA + netB;
+    var costPerMile = (settings && typeof settings.costPerMile === 'number')
+      ? settings.costPerMile : 0;
+    var uncosted = costPerMile > 0 && (costA === 0 || costB === 0);
+    var offerGross = costPerMile > 0 && costB === 0;
+    var maxMinutes = left + minB;
+    var minMinutes = Math.max(left, minB);
+    var worst = money / (maxMinutes / 60);
+    var best = money / (minMinutes / 60);
+    var alone = netA / (left / 60);
+    return {
+      leftMinutes: Math.round(left * 10) / 10,
+      minMinutes: Math.round(minMinutes * 10) / 10,
+      maxMinutes: Math.round(maxMinutes * 10) / 10,
+      pay: Math.round(money * 100) / 100,
+      worst: Math.round(worst * 100) / 100,
+      best: Math.round(best * 100) / 100,
+      alone: Math.round(alone * 100) / 100,
+      sure: offerGross ? null : worst >= alone,
+      ends: A.sameArea(active && active.dropoff, offer && offer.dropoff),
+      route: A.mapRoute(active && active.dropoff, offer && offer.dropoff),
+      uncosted: uncosted,
+      state: (uncosted && worst >= target) ? 'warn'
+           : worst >= target ? 'go'
+           : (best >= target ? 'warn' : 'no')
+    };
+  }
+  // Every card the corpus holds, read and scored as the scanner would, under
+  // a running cost and under none, and typed as its screen as the offer line
+  // is — an Uber add-on among them.
+  var sets = [{ target: 25, band: 15, costPerMile: 0.3 }, { target: 25, band: 15 }];
+  var cards = sets.map(function () { return []; });
+  Object.keys(C).forEach(function (k) {
+    if (!Array.isArray(C[k])) return;
+    C[k].forEach(function (c) {
+      if (!c || typeof c.text !== 'string') return;
+      sets.forEach(function (set, i) {
+        var p = P.parse(c.text);
+        var r = P.rate(p, set);
+        if (!r.ready) return;
+        cards[i].push(Object.assign({}, r, {
+          pay: p.pay, pickup: p.pickup || null, dropoff: p.dropoff || null,
+          screen: P.screenType(c.text).screen }));
+      });
+    });
+  });
+  var T0 = 1700000000000;
+  var compared = 0, said = 0, differ = [], addOns = 0;
+  cards.forEach(function (some, i) {
+    some.forEach(function (h) {
+      some.forEach(function (o) {
+        if (h === o) return;
+        if (o.screen === 'uber.addon') addOns++;
+        [0, 7, 25].forEach(function (into) {
+          var held = Object.assign({}, h, { acceptedAt: T0 });
+          var now = T0 + into * 60000;
+          var was = JSON.stringify(stackAsItStood(held, o, sets[i], now));
+          var one = JSON.stringify(A.stack(held, o, sets[i], now));
+          var many = JSON.stringify(A.stackMany([held], o, sets[i], now));
+          compared++;
+          if (was !== 'null') said++;
+          if (one !== was || many !== was) differ.push(was + ' / ' + many);
+        });
+      });
+    });
+  });
+  eq('stackMany of one held is stack, every field, over the corpus pairs',
+     differ.length + ' of ' + compared + (differ.length ? ': ' + differ[0] : ''),
+     '0 of ' + compared);
+  // ...and the corpus is a test of something: tens of thousands of pairs
+  // with a range, the add-on card among the offers, and both kinds of money.
+  ok_('...over enough pairs that say something (' + said + ' of ' + compared
+      + ', ' + addOns + ' against an add-on card)', said > 50000 && addOns > 0);
+})();
+
+/* Two in the car and a third card offered. A taken at T0, 30 min, $12 less
+   $2.40; B taken five minutes later, 40 min, $20 less $3; ten minutes in, A
+   has 20 min left and B 35. Nothing shared, the car does all of A, all of B
+   and the card one after another; the most shared, the longest of the three
+   — B's 35, or the card's own when it is longer. */
+(function () {
+  var SET = { target: 25, band: 15, costPerMile: 0.3 };
+  var T0 = 1700000000000;
+  var a = { pay: 12, minutes: 30, cost: 2.4, acceptedAt: T0 };
+  var b = { pay: 20, minutes: 40, cost: 3, acceptedAt: T0 + 5 * 60000 };
+  var now = T0 + 10 * 60000;
+  var short = A.stackMany([a, b], { pay: 9, minutes: 20, cost: 1.8 }, SET, now);
+  var long = A.stackMany([a, b], { pay: 9, minutes: 50, cost: 1.8 }, SET, now);
+  eq('a third offer against two held: the range is the sum and the larger single',
+     JSON.stringify([short.minMinutes, short.maxMinutes, long.minMinutes, long.maxMinutes]),
+     JSON.stringify([35, 75, 50, 105]));
+  // 9.60 x 20/30 = 6.40, 17 x 35/40 = 14.875, and the card's 7.20: 28.475.
+  // Alone is the two orders' 21.275 over the LONGER of their times left, 35
+  // min — $36.47/hr — not over the 55 they would take one after the other.
+  eq('with two held each order\'s money left is its net by its own share of minutes left, '
+     + 'and alone is over the longest',
+     JSON.stringify([short.pay, short.alone, short.leftMinutes, short.leftEach, short.heldCount]),
+     JSON.stringify([28.48, 36.47, 35, [20, 35], 2]));
+  // An order past its own minutes is still in the car and adds nothing; the
+  // pair is weighed against what is left. Both past theirs: nothing to weigh.
+  // Forty minutes in, A has none left and B five: 17 x 5/40 = 2.125 and the
+  // card's 7.20, 9.325, which rounds in binary to 9.32.
+  var late = A.stackMany([a, b], { pay: 9, minutes: 20, cost: 1.8 }, SET, T0 + 40 * 60000);
+  eq('...an order past its own minutes adds no time and no money',
+     JSON.stringify([late.minMinutes, late.maxMinutes, late.pay]),
+     JSON.stringify([20, 25, 9.32]));
+  eq('...and with both past theirs there is nothing to stack onto',
+     A.stackMany([a, b], { pay: 9, minutes: 20, cost: 1.8 }, SET, T0 + 50 * 60000), null);
+  eq('...a doubted order in the car, either of them, is no pair',
+     A.stackMany([a, Object.assign({}, b, { doubt: 'time' })], { pay: 9, minutes: 20 }, SET, now),
+     null);
+  // One gross order of the two makes the sum gross.
+  ok_('...and either order with no cost taken off makes the money a ceiling',
+      A.stackMany([a, Object.assign({}, b, { cost: 0 })], { pay: 9, minutes: 20, cost: 1.8 },
+                  SET, now).uncosted
+      && !A.stackMany([a, b], { pay: 9, minutes: 20, cost: 1.8 }, SET, now).uncosted);
+  // ...and no route between two ends: which one the car finishes at is the
+  // detour's question.
+  eq('...with no route link, which end is last being Map view\'s question',
+     A.stackMany([Object.assign({}, a, { dropoff: 'Canton Rd, Marietta' }), b],
+                 { pay: 9, minutes: 20, cost: 1.8, dropoff: 'Roswell Rd, Marietta' },
+                 SET, now).route, null);
+
+  /* Uber's add-on: "+15 min (+ 4.1 mi) total" is what the trip grows by,
+     stated, so its share of the range is exactly that — the longest order's
+     35 and 15 more, not "anywhere from 0 to 15 more". The most it can take
+     is unchanged: everything one after another. Typed by the offer line's
+     screen, or by the hold's own addOn. */
+  var plain = A.stackMany([a, b], { pay: 9, minutes: 15, cost: 1.8 }, SET, now);
+  var addOn = A.stackMany([a, b], { pay: 9, minutes: 15, cost: 1.8, screen: 'uber.addon' },
+                          SET, now);
+  var held = A.stackMany([a, b], { pay: 9, minutes: 15, cost: 1.8, addOn: true }, SET, now);
+  eq('an add-on\'s range is its card\'s extension',
+     JSON.stringify([addOn.minMinutes, addOn.maxMinutes, held.minMinutes,
+                     plain.minMinutes, plain.maxMinutes]),
+     JSON.stringify([50, 70, 50, 35, 70]));
+
+  /* Where they end. Hiram for A, Marietta for B, a card ending in Hiram: the
+     car goes to Marietta whatever A says, so the pair ends elsewhere. */
+  var hiram = 'Jewel Cole Rd, Hiram', marietta = 'Chastain Meadows Pkwy NW, Marietta';
+  var to = { pay: 9, minutes: 20, cost: 1.8, dropoff: 'Cochran Ridge Rd & Jewel Cole Rd, Hiram' };
+  function endsOf(x, y) {
+    return A.stackMany([Object.assign({}, a, { dropoff: x }), Object.assign({}, b, { dropoff: y })],
+                       to, SET, now).ends;
+  }
+  eq('ends elsewhere if either held end is elsewhere',
+     JSON.stringify([endsOf(hiram, marietta), endsOf(marietta, hiram)]),
+     JSON.stringify(['elsewhere', 'elsewhere']));
+  eq('...a same-* answer only when both held ends give it, and null otherwise',
+     JSON.stringify([endsOf(hiram, 'Jewel Cole Rd, Hiram'), endsOf(hiram, null),
+                     endsOf(null, hiram)]),
+     JSON.stringify(['same-town', null, null]));
+})();
+
 /* ---- which offers arrived while a ticked job was running -----------------
  *
  * The one measured piece of occupancy the record holds, as against replay()'s

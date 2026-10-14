@@ -942,8 +942,66 @@
     return (x.quadrant && y.quadrant) ? 'same-side' : 'same-town';
   }
 
+  /* The pair line with ONE order in the car: stackMany with a list of one,
+   * which is the function this was until two orders could be carried and
+   * gives every field it gave, to the byte (tests/advice.test.js holds it
+   * against this function as it stood, over every pair the corpus makes). */
   function stack(active, offer, settings, now) {
-    if (!active || !offer) return null;
+    return stackMany(active ? [active] : [], offer, settings, now);
+  }
+
+  /* An Uber add-on card: "+25 min (+ 9.6 mi) total", an offer to add a job to
+   * the trip in progress. Its minutes are what the trip GROWS by, stated, not
+   * a job of its own that might ride along inside another — so with two
+   * orders held its share of the range is not "anywhere from nothing to all
+   * of it" but exactly what the card says. Known by the screen the scanner
+   * typed it as (`screen`, the offer line's; OP.screen_type) or by the hold's
+   * own `addOn`. */
+  function addOnCard(offer) {
+    return !!offer && (offer.screen === 'uber.addon' || offer.addOn === true);
+  }
+
+  /* Every order in the car at once, first-taken first, and the offer against
+   * all of them. Stage 6 of the multi-order design: with one order this is
+   * stack() above, field for field; what follows is what changes with two,
+   * and only with two.
+   *
+   *   money   each order's net, pro-rated by the share of ITS OWN minutes
+   *           still left, as the one order always was, and summed.
+   *   worst   nothing shared: every order's minutes left, one after another,
+   *           and then the offer's. Still a real lower bound — any overlap
+   *           at all between any two of them makes it better.
+   *   best    the most that could be shared: the longest single order still
+   *           has to be driven, and so does the offer, so the time is the
+   *           larger of those two. Nothing can beat it.
+   *   alone   what the orders already in the car pay over the LONGEST of
+   *           their own times left, not the sum: the floor to beat is then as
+   *           high as it can honestly be, so `sure` ("beats finishing alone")
+   *           is harder to claim with two, never easier. The sum would put
+   *           the two orders' own sharing on the offer's side of the claim.
+   *   add-on  an Uber add-on (addOnCard) adds exactly its stated minutes, so
+   *           the shortest time is the longest order's plus that and not the
+   *           larger of the two. With ONE order it is left as stack() always
+   *           drew it — an add-on's range there was never worked out apart
+   *           and changing it is not this stage's to do; see AUDITS.md, Open.
+   *   ends    'elsewhere' when any order in the car ends elsewhere than the
+   *           offer; a same-* answer only when every order gives the SAME
+   *           one; anything else is null — "near one of them" is not near.
+   *   route   with one order, the drive between the two ends as it always
+   *           was. With two, null: which end the car finishes at is the
+   *           detour's question, answered on Map view (MV.detourOrders), and
+   *           a route from the first-taken's end would ask the wrong one.
+   *
+   * No minutes are worked out from a distance anywhere here: every figure is
+   * a card's stated time, the clock since the Took, or a sum of those
+   * (AUDITS.md, Settled: no re-timing at a pace).
+   *
+   * Returns stack()'s shape; with two or more orders it adds `heldCount` and
+   * `leftEach` (each order's minutes left, first-taken first), and
+   * `leftMinutes` is the longest of them, the time `alone` is over. */
+  function stackMany(held, offer, settings, now) {
+    var list = Array.isArray(held) ? held : [];
+    if (!list.length || !offer || list.some(function (h) { return !h; })) return null;
     var target = (settings && typeof settings.target === 'number')
       ? settings.target : 0;
     // A figure rate() refused to score cannot be re-scored here.
@@ -962,25 +1020,42 @@
     // Both sides, because a doubted order in the car poisons `netA` exactly as
     // a doubted offer poisons `netB`. Silence is already the right answer on
     // about half of real pairs; this is one more place it is the right answer.
-    if (active.doubt || offer.doubt) return null;
-    var totalA = num(active.minutes);
-    var payA = num(active.pay);
+    // ...and with two in the car, either of them: a doubted one's money is in
+    // the sum.
+    if (offer.doubt || list.some(function (h) { return h.doubt; })) return null;
     var minB = num(offer.minutes);
     var payB = num(offer.pay);
-    if (totalA === null || payA === null || minB === null || payB === null) return null;
-    if (!(totalA > 0) || !(minB > 0)) return null;
+    if (minB === null || payB === null) return null;
+    var parts = [];
+    for (var i = 0; i < list.length; i++) {
+      var totalA = num(list[i].minutes);
+      var payA = num(list[i].pay);
+      if (totalA === null || payA === null || !(totalA > 0)) return null;
+      parts.push({ total: totalA, pay: payA });
+    }
+    if (!(minB > 0)) return null;
 
-    var startedAt = num(active.acceptedAt);
-    var elapsed = (startedAt === null || typeof now !== 'number')
-      ? 0 : Math.max(0, (now - startedAt) / 60000);
-    var left = Math.max(0, totalA - elapsed);
+    list.forEach(function (h, k) {
+      var startedAt = num(h.acceptedAt);
+      var elapsed = (startedAt === null || typeof now !== 'number')
+        ? 0 : Math.max(0, (now - startedAt) / 60000);
+      parts[k].left = Math.max(0, parts[k].total - elapsed);
+      parts[k].cost = num(h.cost) || 0;
+    });
     // The old order is done, or as good as. There is nothing to stack onto and
     // saying otherwise would put a second job's time against a first job's pay.
-    if (left <= 0) return null;
+    // With two, an order past its own minutes is still in the car (holdEnds
+    // in server.js gives it half again) and simply adds no minutes and no
+    // money; only when every one of them is done is there nothing to weigh.
+    if (!parts.some(function (p) { return p.left > 0; })) return null;
 
-    var costA = num(active.cost) || 0;
     var costB = num(offer.cost) || 0;
-    var netA = (payA - costA) * (left / totalA);
+    var netA = 0, sumLeft = 0, longest = 0;
+    parts.forEach(function (p) {
+      if (p.left > 0) netA += (p.pay - p.cost) * (p.left / p.total);
+      sumLeft += p.left;
+      if (p.left > longest) longest = p.left;
+    });
     var netB = payB - costB;
     var money = netA + netB;
     // ...and whether "net" is what those two words mean here.
@@ -1000,10 +1075,12 @@
     //
     // Either side, because either one being gross makes `money` gross. Capped
     // and not withheld, for rate()'s reason: CLOSE CALL is the honest answer to
-    // "this might clear your line and I cannot tell".
+    // "this might clear your line and I cannot tell". Any order in the car,
+    // with two: one gross order makes the sum gross.
     var costPerMile = (settings && typeof settings.costPerMile === 'number')
       ? settings.costPerMile : 0;
-    var uncosted = costPerMile > 0 && (costA === 0 || costB === 0);
+    var uncosted = costPerMile > 0
+      && (parts.some(function (p) { return p.cost === 0; }) || costB === 0);
     /* ...and which SIDE is gross, because `sure` below is not symmetric the way
        `state` is.
        `sure` is `worst >= alone`, and `alone` is the held job's own net rate.
@@ -1016,17 +1093,20 @@
        costs nothing to allow. */
     var offerGross = costPerMile > 0 && costB === 0;
 
-    var maxMinutes = left + minB;              // nothing shared
-    var minMinutes = Math.max(left, minB);     // the new one rides along
+    var two = list.length > 1;
+    var maxMinutes = sumLeft + minB;                     // nothing shared
+    var minMinutes = (two && addOnCard(offer))
+      ? longest + minB                                   // the card's own extension
+      : Math.max(longest, minB);                         // the new one rides along
     var worst = money / (maxMinutes / 60);
     var best = money / (minMinutes / 60);
     // What the minutes already committed pay if this offer is declined. Not a
     // full picture of declining — something better may well arrive — but it is
     // the one alternative that is certain, and it is the floor to beat.
-    var alone = netA / (left / 60);
+    var alone = netA / (longest / 60);
 
-    return {
-      leftMinutes: Math.round(left * 10) / 10,
+    var out = {
+      leftMinutes: Math.round(longest * 10) / 10,
       minMinutes: Math.round(minMinutes * 10) / 10,
       maxMinutes: Math.round(maxMinutes * 10) / 10,
       pay: Math.round(money * 100) / 100,
@@ -1068,15 +1148,16 @@
       // `maxMinutes` assumes nothing is shared and `minMinutes` assumes the
       // new job rides along inside the old one, and which of those is true is
       // decided by geography. 'elsewhere' means the range above should be read
-      // from its worst end. See sameArea.
-      ends: sameArea(active && active.dropoff, offer && offer.dropoff),
+      // from its worst end. See sameArea, and endsOfAll for two in the car.
+      ends: endsOfAll(list, offer),
       // ...and the same question handed to a map, which can answer it in
       // driving minutes where `ends` can only answer it in the card's own
       // words. Both ends are DROPOFFS: this asks how far apart the two jobs
       // finish, which is the half the arithmetic above cannot reach and the
       // half the driver said decides it. Null when either end was not named,
-      // which is about half of real pairs. See mapRoute.
-      route: mapRoute(active && active.dropoff, offer && offer.dropoff),
+      // which is about half of real pairs. See mapRoute. Null with two in
+      // the car: see the header.
+      route: two ? null : mapRoute(list[0].dropoff, offer && offer.dropoff),
       // Whether the money above is the pair or only a ceiling on it, so a
       // display can say which it is showing — the same field, and the same
       // word, rate() returns for one offer.
@@ -1085,6 +1166,25 @@
            : worst >= target ? 'go'
            : (best >= target ? 'warn' : 'no')
     };
+    if (two) {
+      out.heldCount = list.length;
+      out.leftEach = parts.map(function (p) { return Math.round(p.left * 10) / 10; });
+    }
+    return out;
+  }
+
+  /* `ends` with every order in the car against the offer: sameArea for each,
+   * then the expensive mistake ruled out first. One 'elsewhere' is enough —
+   * the car goes to that order's door whatever the other says — and a same-*
+   * answer is said only when every order gives that one answer; a mixture,
+   * or any order whose end the cards do not place, is null. With one order
+   * it is sameArea's answer, unchanged. */
+  function endsOfAll(list, offer) {
+    var said = list.map(function (h) {
+      return sameArea(h && h.dropoff, offer && offer.dropoff);
+    });
+    if (said.indexOf('elsewhere') !== -1) return 'elsewhere';
+    return said.every(function (s) { return s === said[0]; }) ? said[0] : null;
   }
 
   function num(v) {
@@ -2088,7 +2188,8 @@
   return { advise: advise, usable: usable, runs: runs, replay: replay,
            busy: busy, freeAgain: freeAgain,
            bestAt: bestAt, trustworthy: trustworthy, grossRate: grossRate,
-           unexplained: unexplained, stack: stack, sameArea: sameArea, area: area,
+           unexplained: unexplained, stack: stack, stackMany: stackMany,
+           sameArea: sameArea, area: area,
            // The offer log's chart and the map's time filter ask one question
            // and must not each keep their own eight edges.
            BLOCK_NAMES: BLOCK_NAMES, blockOf: blockOf, daysIn: daysIn,
