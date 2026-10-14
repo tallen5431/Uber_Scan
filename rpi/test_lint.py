@@ -864,7 +864,10 @@ _blind_words = set(re.findall(r"return '([a-z]+)'", _sight_body)) - {'seeing'}
 ok_('sight_now() can say the camera cannot see (%r)' % sorted(_blind_words),
     len(_blind_words) >= 2)
 _live_src = open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read()
-for _table in ('BLIND_LABEL', 'BLIND_NOTE'):
+# ...and BLIND_CHIP, the same line as the chip the card shows with the
+# sentence one tap away (showNotes): a word with a sentence and no chip would
+# show nothing at all where the notice goes.
+for _table in ('BLIND_LABEL', 'BLIND_NOTE', 'BLIND_CHIP'):
     _m = re.search(r'var %s = \{(.*?)\};' % _table, _live_src, re.S)
     _named = set(re.findall(r'(?:\A|[{,])\s*([a-z]+)\s*:', _m.group(1))) if _m else set()
     eq('live.html\'s %s names every word the scanner can send' % _table,
