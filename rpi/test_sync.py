@@ -283,6 +283,18 @@ try:
     finally:
         rig.close()
 
+    # ...and the pickup visit, which server.js writes in the same way
+    # (markVisited): a kind row keyed by the fallback. Two pickups of one
+    # order visited on one beat share `at` and `seq`, and are two rows only
+    # because `id` names the pickup; the shape is the writer's own, which
+    # test_server.py holds it to.
+    visits = [{'v': 1, 'kind': 'visit', 'at': now, 'id': 'v-1@5#%d' % i, 'seq': now,
+               'holdId': 'v-1@5', 'pickup': i, 'by': 'gps'} for i in (0, 1)]
+    vsent = SY.send(far.base, visits)
+    eq('two pickups visited together both reach the copy, nothing refused',
+       (vsent['added'], vsent['malformed']), (2, 0))
+    eq('...and a second sync adds no visit twice', SY.send(far.base, visits)['added'], 0)
+
     # A mark with no offer to name cannot be de-duplicated or applied.
     eq('a mark naming nothing is still refused',
        SY.send(far.base, [{'v': 1, 'at': now, 'kind': 'mark', 'accepted': True}])['malformed'], 1)

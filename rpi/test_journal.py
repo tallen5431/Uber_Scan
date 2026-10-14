@@ -421,6 +421,12 @@ after.journal.append({'v': 1, 'kind': 'planner', 'id': 'planner-1700000007000',
                                  'line': '4821 Kestrel Dr, Marietta'}]})
 eq('a Trip Planner row last in the file is not the last offer',
    (after.journal.last() or {}).get('pay'), 12.45)
+# ...and a pickup visit (server.js markVisited), the newest kind of all.
+after.journal.append({'v': 1, 'kind': 'visit', 'at': JR.now_ms(),
+                      'id': 'o1@1700000000000#0', 'seq': JR.now_ms(),
+                      'holdId': 'o1@1700000000000', 'pickup': 0, 'by': 'gps'})
+eq('a pickup visit row last in the file is not the last offer',
+   (after.journal.last() or {}).get('pay'), 12.45)
 
 # --- "settled" means the reading stopped moving, so it has to be able to -----
 # A row is only ever written on the read where the reading *changed*, so at that

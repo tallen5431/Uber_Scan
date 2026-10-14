@@ -7164,6 +7164,7 @@ try:
         eq('[pickup visit] a waiting car keeps the restaurant as its next stop',
            (_vvisited(_vb), _vbeatsaid(_vb)), ([], []))
         # ...then it leaves.
+        _vcount = get(_vb, '/api/journal?days=0').get('count')
         _vsay(_vleave(_R1))
         _vr = _vrows(_vj)
         eq('[pickup visit] a 3-minute stop at the held pickup, then leaving, marks it visited',
@@ -7173,6 +7174,10 @@ try:
         eq('[pickup visit] ...and its journal row says which and when, and nothing of where',
            [sorted(r) for r in _vr],
            [['at', 'by', 'holdId', 'id', 'kind', 'pickup', 'seq', 'v']])
+        # The offers page reads the journal through the fold, which skips a
+        # kind it has no use for.
+        eq('[pickup visit] ...and the offers page counts what it did: a visit row is no offer',
+           (get(_vb, '/api/journal?days=0').get('count'), _vcount is not None), (_vcount, True))
         # The app still lists the pickup until the driver swipes it.
         _vsay([_vplanner(_vstop(_Q1, '310 Mill St'), _VDROP)])
         eq('[pickup visit] a planner re-read does not un-visit',
@@ -7213,6 +7218,10 @@ try:
         _vsay(_vwait(_R1, 180) + _vleave(_R1))
         eq('[pickup visit] two held pickups within 150 m of each other are visited together',
            sorted(_vvisited(_vb) or []), sorted([_Q1, _Q3]))
+        _vr = [r for r in _vrows(_vj) if r.get('holdId') == _h.get('holdId')]
+        eq('[pickup visit] ...as two rows the sync keeps apart: one beat, one seq, an id each',
+           (len(_vr), len({(r.get('id'), r.get('seq')) for r in _vr}),
+            sorted(r.get('pickup') for r in _vr)), (2, 2, [0, 1]))
         post(_vb, '/api/delivered', {})
     finally:
         stop(_vp)
