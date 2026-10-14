@@ -1029,6 +1029,27 @@
     #drawTools button { font-size: 17px; }
     #drawHint { font-size: 15px; }
   }
+  /* ...and a fifth larger again on the rig's own 1024x600 display and
+   * anything bigger. The sizes above were set on the 800x480 panel, and the
+   * 1024x600 one took them unchanged: measured there, the address line was
+   * 15px, the labels under the figures 16px over 20px figures and the line
+   * under the card 16px, in a card with 60px of black above its label. The
+   * address goes to 18 and the small type round it with it, by the same
+   * fifth, so the figures stay larger than their labels (24 over 19).
+   * Height-gated as well as width-gated: a wide panel only 480 tall is the
+   * 800x480's budget, not this one's. rpi/test_layout.py measures each size
+   * here and that the card, the bar and the row still fit.
+   *
+   * Not the notice. Its chips at 19px took 131px of the card on the
+   * four-notice card beside the phone, where the sentences they stand for
+   * took 110 — chips taller than the prose they shorten. At 16 they are the
+   * shorter of the two, which is what they are for. */
+  @media (orientation: landscape) and (min-width: 1000px) and (min-height: 560px) {
+    .places, .stops { font-size: 18px; }
+    .sub { font-size: 24px; }
+    .sub small { font-size: 19px; }
+    .pending { font-size: 19px; }
+  }
 </style>
 </head>
 <body>

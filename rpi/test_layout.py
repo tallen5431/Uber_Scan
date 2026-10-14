@@ -387,9 +387,12 @@ conditions = set()
 for name in SHEETS:
     for css in style_blocks(name):
         conditions |= set(re.findall(r'@media \(orientation: landscape\)([^{]*)\{', css))
+# The third is live.html's type step for the rig's own 1024x600 and larger,
+# which changes sizes and nothing about where anything goes: a squeeze the
+# other way, inside the wide layout as the 380px one is.
 eq('every file switches to the across-the-screen layout at the same point',
    sorted(c.strip() for c in conditions),
-   ['', 'and (max-height: 380px)'])
+   ['', 'and (max-height: 380px)', 'and (min-width: 1000px) and (min-height: 560px)'])
 # ...and the narrow-panel rules are an extra squeeze inside the wide layout,
 # not a third design. A file that only had the 380px block would be applying
 # them without the layout they adjust.
@@ -989,6 +992,17 @@ CHIPS_CARD = dict(_FOUNDPAY_CARD, state='warn', perHour=21.8, grossPerHour=21.8,
                   fromDeadline=False, deliverBy=None, whole=False,
                   milesUncertain=True, uncosted=True, costPerMile=0.3,
                   places=['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+# The small type on a card, in px, as each panel renders it: the address
+# line, a figure's label and the figure, the line under the card, the notice
+# and the status row. The rig's own 1024x600 takes a fifth more than the
+# 800x480 the sizes were set on (live.html, the min-width: 1000px block):
+# the address 15 to 18, the labels 16 to 19 over figures 20 to 24, the line
+# under the card 16 to 19. Not the notice, whose chips would be taller than
+# the sentences at 19 (that rule says how much). The 800x480 and the 3.5" hat
+# are where they were.
+SMALL_SIZES = {'1024x600': [18, 19, 24, 19, 16, 15],
+               '800x480': [15, 16, 20, 16, 16, 15],
+               '480x320': [14.4, 12, 15, 10, 16, 15]}
 CHIPS_WANT = ['OFFERS NOT SAVED · Read-only file system',
               'PHONE TOO BRIGHT · turn it down a notch',
               'CEILING · miles unreadable',
@@ -2450,6 +2464,10 @@ const SNAP_MEASURE = (fixture) => {
           text: w.textContent.replace(/\s+/g, ' ').trim(),
           off: off.join(''), need: w.scrollHeight, reach: reach,
           labelIn: inCard('#verdictLabel'), rateIn: inCard('.rate.big'),
+          // The small type on this card, as rendered (see SMALL_SIZES).
+          sizes: ['#places', '#lPay', '#vPay', '#detail', '#warn', '.connbar'].map(
+            (sel) => parseFloat(getComputedStyle(document.querySelector(sel)).fontSize)),
+          placesIn: inCard('#places'), subIn: inCard('.submetrics'),
           layout: { bar: box('.bottombar'), row: box('.connbar'), view: box('#viewWrap') },
           over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
         };
@@ -3351,6 +3369,14 @@ try:
             cm = got.get('%s %s chips' % (panel, view)) or {}
             _c, _o = cm.get('chips') or {}, cm.get('open') or {}
             _fp = (got.get('%s %s foundpay' % (panel, view)) or {}).get('drawn3') or {}
+            eq('the small type is %s at %s (address, label, figure, line under, '
+               'notice, status row)' % (SMALL_SIZES[panel], where),
+               _c.get('sizes'), SMALL_SIZES[panel])
+            # Not on the 3.5" hat, where a notice hides the figures on
+            # purpose (the rule under #verdict:has(#warn) in live.html).
+            if h > 380:
+                ok_('...with the address and the figures inside the card at %s' % where,
+                    _c.get('placesIn') and _c.get('subIn'))
             eq('the notices are four chips at %s' % where, _c.get('chips'), CHIPS_WANT)
             eq('...every letter of them inside the card and on the glass at %s' % where,
                _c.get('off'), '')
@@ -3405,6 +3431,9 @@ try:
                 now.get('labelIn'))
             ok_('...in type no smaller than the address line\'s floor at %s (%spx)'
                 % (where, now.get('fontPx')), (now.get('fontPx') or 0) >= 12)
+            # ...and the address line's size, which they take (SMALL_SIZES).
+            eq('...the stops at the address line\'s size at %s' % where,
+               now.get('fontPx'), SMALL_SIZES[panel][0])
             eq('...and the card, the picture, the status row and the bar where they '
                'were at %s' % where, now.get('layout'), was.get('layout'))
             no_('...and nothing scrolls at %s' % where, now.get('over'))
