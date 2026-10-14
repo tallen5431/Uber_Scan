@@ -7388,6 +7388,133 @@ try:
 finally:
     shutil.rmtree(_vdir, ignore_errors=True)
 
+# --- DoorDash's place popup, read while a card is screened -------------------
+#
+# The driver taps a stop on a DoorDash card before deciding and the phone shows
+# its address; the scanner sends it on its own `popup` line (emit_popup) and
+# the server files it onto the card being screened, or nowhere — never onto the
+# order in the car (Assemble.popup decides; popupArrived files). A fake scanner
+# steps through it, each step waiting on a file this suite writes, so every
+# answer below is read at a known point. Made-up stores, streets and doors.
+_PFAKE = (
+    'import json, os, time\n'
+    'D = os.path.dirname(os.path.abspath(__file__))\n'
+    'def wait(n):\n'
+    '    while not os.path.exists(os.path.join(D, n)):\n'
+    '        time.sleep(0.05)\n'
+    'def now():\n'
+    '    return int(time.time() * 1000)\n'
+    'def card(i, pickup, pay=7.75):\n'
+    '    print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
+    '        "grossPerHour": 36.0, "pay": pay, "minutes": 30.0, "cardMinutes": 30.0,\n'
+    '        "miles": 7.8, "cost": 2.34, "billedMinutes": 34.0, "target": 25, "band": 15,\n'
+    '        "costPerMile": 0.3, "pickup": pickup, "dropoff": None, "at": now(),\n'
+    '        "offer": {"id": i, "pay": pay, "minutes": 30.0, "billedMinutes": 34.0,\n'
+    '                  "miles": 7.8, "cost": 2.34, "perHour": 30.0, "state": "go",\n'
+    '                  "pickup": pickup, "dropoff": None, "app": "doordash",\n'
+    '                  "screen": "dd.offer", "manyDropoffs": False}}), flush=True)\n'
+    'def popup(role, line, name=None):\n'
+    '    print(json.dumps({"popup": {"role": role, "name": name, "line": line,\n'
+    '        "street": line.split(",")[0], "city": line.split(", ")[1], "state": "GA",\n'
+    '        "zip": line[-5:], "app": "doordash", "screen": "dd.placePopup",\n'
+    '        "at": now()}}), flush=True)\n'
+    'STORE = "1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144"\n'
+    'card("dd-1", "S &, Lark Owl Pizza ; 1200 Fable Parkway Nort")\n'
+    'wait("f1")\n'
+    'popup(None, "88 Quill Ln NE, Marietta, GA 30062")\n'
+    'popup("pickup", "500 Wren St NW, Atlanta, GA 30318", name="Wren Street Noodles")\n'
+    'wait("f2")\n'
+    'popup("pickup", STORE, name="Lark Owl Pizza")\n'
+    'wait("f3")\n'
+    'card("dd-1", "S &, Lark Owl Pizza ; 1200 Fable Parkway Nort")\n'
+    'wait("f4")\n'
+    'popup("dropoff", "412 Wrenfield Ct NE, Marietta, GA 30062")\n'
+    'wait("f5")\n'
+    'popup("dropoff", "77 Quill Ln NE, Marietta, GA 30062")\n'
+    'popup("pickup", STORE, name="Lark Owl Pizza")\n'
+    'wait("f6")\n'
+    'card("dd-2", "Fable Bagel Co", pay=6.5)\n'
+    'popup("dropoff", "9 Heron Ct, Smyrna, GA 30080")\n'
+    'time.sleep(600)\n')
+_pdir = tempfile.mkdtemp()
+try:
+    _pj = os.path.join(_pdir, 'journal.jsonl')
+    _pf = os.path.join(_pdir, 'popupfake.py')
+    with open(_pf, 'w') as fh:
+        fh.write(_PFAKE)
+    open(_pj, 'w').close()
+    _pp, _pb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _pf,
+                      'HOLD_GRACE_MS': '600000', 'CARRY_TWO': '0'}, _pj)
+
+    def _step(n, settle=0.8):
+        open(os.path.join(_pdir, n), 'w').close()
+        time.sleep(settle)
+        return get(_pb, '/api/status')
+
+    def _pmarks():
+        # Read here: `lines` is rebound to a list by a check above this one.
+        _rows = [json.loads(l) for l in open(_pj) if l.strip()]
+        return [(r.get('id'), r.get('dropoff'), r.get('from')) for r in _rows
+                if r.get('kind') == 'mark' and r.get('dropoff')]
+
+    try:
+        for _ in range(160):
+            if (get(_pb, '/api/status').get('offer') or {}).get('id') == 'dd-1':
+                break
+            time.sleep(0.05)
+        _pev = listen(_pb, 6.0)
+        time.sleep(0.3)
+        _s1 = (_step('f1').get('offer') or {})
+        eq('[popup] a popup with no role cue files nothing',
+           (_s1.get('dropoff'), _s1.get('dropoffScanned'), _pmarks()), (None, None, []))
+        eq('[popup] a popup for a different store files nothing', _s1.get('pickupAddr'), None)
+        _s2 = (_step('f2').get('offer') or {})
+        eq('[popup] a store popup read while a card is screened gives the card its pickup '
+           'address', [(_s2.get('pickupAddr') or {}).get(k) for k in ('value', 'from', 'name')],
+           ['1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144', 'popup', 'Lark Owl Pizza'])
+        _s3 = (_step('f3').get('offer') or {})
+        eq('[popup] ...and the next reading of the card keeps it',
+           (_s3.get('pickupAddr') or {}).get('value'),
+           '1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144')
+        _s4 = (_step('f4').get('offer') or {})
+        eq('[popup] a customer popup gives the dropoff',
+           (_s4.get('dropoff'), _s4.get('dropoffScanned'), _s4.get('dropoffFrom'), _pmarks()),
+           ('412 Wrenfield Ct NE, Marietta, GA 30062', True, 'popup',
+            [('dd-1', '412 Wrenfield Ct NE, Marietta, GA 30062', 'popup')]))
+        _code, _reply = post(_pb, '/api/offers/mark', {'id': 'dd-1', 'accepted': True})
+        time.sleep(0.3)
+        _hj = json.load(open(os.path.join(_pdir, 'holding.json')))
+        _f = ((_hj.get('orders') or [{}])[0].get('fields') or {})
+        eq('[popup] carried into the hold at Took',
+           [(_f.get('pickupAddr') or {}).get('value'), (_f.get('pickupAddr') or {}).get('from'),
+            (_f.get('dropoff') or {}).get('value'), (_f.get('dropoff') or {}).get('from'),
+            ((_hj.get('orders') or [{}])[0]).get('dropoff')],
+           ['1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144', 'popup',
+            '412 Wrenfield Ct NE, Marietta, GA 30062', 'popup',
+            '412 Wrenfield Ct NE, Marietta, GA 30062'])
+        _s5 = _step('f5')
+        _hj5 = json.load(open(os.path.join(_pdir, 'holding.json')))
+        eq('[popup] never onto the held order',
+           ((_s5.get('offer') or {}).get('dropoff'), (_s5.get('holding') or {}).get('dropoff'),
+            ((_hj5.get('orders') or [{}])[0]).get('dropoff'), len(_pmarks())),
+           ('412 Wrenfield Ct NE, Marietta, GA 30062', '412 Wrenfield Ct NE, Marietta, GA 30062',
+            '412 Wrenfield Ct NE, Marietta, GA 30062', 1))
+        _s6 = _step('f6')
+        eq('[popup] ...and the next card being screened takes its own, the order in the car '
+           'keeping its end',
+           ((_s6.get('offer') or {}).get('id'), (_s6.get('offer') or {}).get('dropoff'),
+            (_s6.get('holding') or {}).get('dropoff')),
+           ('dd-2', '9 Heron Ct, Smyrna, GA 30080', '412 Wrenfield Ct NE, Marietta, GA 30062'))
+        time.sleep(1.0)
+        ok_('[popup] ...and every panel is sent the card with what it now holds at once, not '
+            'at its next reading', any((m.get('popup') or {}).get('field') == 'pickupAddr'
+                                       and ((m.get('offer') or {}).get('pickupAddr') or {})
+                                       .get('from') == 'popup' for m in _pev))
+    finally:
+        stop(_pp)
+finally:
+    shutil.rmtree(_pdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

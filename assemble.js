@@ -52,6 +52,9 @@
    *            its own block, off the whole-screen read the scanner makes on
    *            its own while an order is held (navCandidate, below)
    *   planner  unprompted, the Trip Planner's one dropoff (one page or several)
+   *   popup    unprompted, off DoorDash's place popup while the card was being
+   *            screened, onto that card and carried here at ✓ Took (popup(),
+   *            below)
    *   card     what the offer card said, at ✓ Took
    *   seen     unprompted, off the screen with no label to stand on — or a
    *            screening read whose asking was not kept on the card
@@ -61,6 +64,18 @@
    * not in the plan's list of four, and naming it `card` would have been a
    * provenance that lies.
    *
+   * `popup` is above `card` and `seen` and below everything read after the
+   * Took. Above the card because it is the door where the card printed a
+   * store's name with its street cut off, or "Customer dropoff" and nothing,
+   * and it was proven to be this card's on its way in (the store's name
+   * against the card's pickup, or the card on the slot when the frame was
+   * taken); above `seen` because a popup carries its own role label and
+   * `seen` carries none. Below planner, nav, label and press because those
+   * are about the order IN THE CAR, read after the driver said they took it,
+   * where a popup was read about an offer before anyone decided anything — if
+   * the two disagree, the screen after the Took is the later and nearer
+   * witness.
+   *
    * `conf` is how much of the value read: for an address, how many of its
    * street, town and ZIP; for a name or a time, 1. `at` is the scanner's clock
    * when it read the screen (the Took for `card`), `screen` the screen type off
@@ -69,7 +84,7 @@
    * The hold's older fields — `dropoff`, `dropoffScanned` — are kept in step by
    * file() below, so the stack line, the pair rows, the map and the GPS drop
    * read exactly what they read before. */
-  var RANK = { seen: 0, card: 1, planner: 2, nav: 3, label: 4, press: 5 };
+  var RANK = { seen: 0, card: 1, popup: 2, planner: 3, nav: 4, label: 5, press: 6 };
   var FIELDS = ['dropoff', 'pickupAddr', 'customer', 'expectedBy'];
 
   function addressConf(a) {
@@ -94,9 +109,17 @@
     var o = offer || {};
     var from = o.dropoffScanned ? (RANK[o.dropoffFrom] !== undefined ? o.dropoffFrom : 'seen')
       : 'card';
+    // ...and the store's door a place popup filed on the card while it was
+    // screened (filePopup), at its own rank and with its own read's time, in
+    // place of the card's name for it.
+    var tapped = o.pickupAddr && typeof o.pickupAddr === 'object'
+      && typeof o.pickupAddr.value === 'string' && o.pickupAddr.from === 'popup'
+      ? o.pickupAddr : null;
     return {
       dropoff: field(o.dropoff || null, from, 0, at, null),
-      pickupAddr: field(o.pickup || null, 'card', 0, at, null),
+      pickupAddr: tapped
+        ? field(tapped.value, 'popup', tapped.conf || 0, tapped.at, tapped.screen)
+        : field(o.pickup || null, 'card', 0, at, null),
       customer: null,
       expectedBy: null
     };
@@ -149,6 +172,15 @@
     // (A press already there falls through to null: nothing below lets a
     // label, a planner, a navigation screen or a sighting past one.)
     if (cur.from === 'card') return RANK[next.from] > RANK.card ? 'over the card' : null;
+    // A place popup's address: over a sighting, which no label proved; and
+    // replaced by anything read after the Took (RANK), or by the same street
+    // read fuller off another popup.
+    if (next.from === 'popup' && cur.from === 'seen') return 'over a sighting';
+    if (cur.from === 'popup') {
+      if (RANK[next.from] > RANK.popup) return 'over a tap';
+      return next.from === 'popup' && next.conf > cur.conf && sameStreet(next.value, cur.value)
+        ? 'fuller' : null;
+    }
     if (next.from === 'nav' && cur.from === 'seen') return 'over a sighting';
     if (next.from === cur.from && next.key && next.key === cur.key && next.conf > cur.conf) {
       return 'fuller';
@@ -372,6 +404,124 @@
     card.dropoff = d.line;
     card.dropoffScanned = true;
     card.dropoffFrom = said.from;
+  }
+
+  /* ---------- a place popup, read while a card is screened -----------------
+   *
+   * DoorDash's place popup (offer_parser.place_popup): the driver taps a stop
+   * on an offer card before deciding, and the phone shows that stop's address.
+   * The scanner sends it on its own line (rpi/scan_pi.py, emit_popup), never
+   * as a dropoff line, because a dropoff line's road ends on the order in the
+   * car and this is never about the order in the car.
+   *
+   * `card` is the card being screened (server.js screeningCard) or null; `p`
+   * the popup line; `ctx` {held: the orders in the car, offerAt: when this
+   * card came onto the slot, seenAt: when it was last read, cardMs: how long
+   * after that a customer's popup may still be about it}. Positive cues only,
+   * as everything in this file:
+   *
+   *   1. A role, from the popup's own label — the reader refuses one without,
+   *      and so does this.
+   *   2. A card being screened, and not an order in the car: never onto the
+   *      held order, nor onto its card come back on the phone.
+   *   3. Read after the card came onto the slot: `p.at` is when the popup's
+   *      frame was TAKEN, so a card that replaced the one it was opened over
+   *      — or arrived while it was being read — is not given it.
+   *   4. The same app: the popup is DoorDash's, and so must the card be.
+   *   5. A store's popup names the card's pickup — sameStore over a run of the
+   *      card's words, so ONE i/l slip is allowed and nothing else — and where
+   *      the card printed a house number after the name, the popup's ends in
+   *      it (the card's street loses digits at its left as the navigation
+   *      sheet's does; see numberFuller). A name that matches, a number that
+   *      does not, is another branch of the same chain.
+   *   6. A customer's popup has no name to match, so the card has to be the
+   *      one still on the screen: read within `cardMs` before the popup's
+   *      frame. And the card must have ONE customer: "Multiple dropoffs"
+   *      (`manyDropoffs`) leaves which door this is undecided.
+   *   7. outranks() against what the card already holds for that end: a door
+   *      over the card's own words or a sighting, never over a press.
+   *
+   * {to: 'card'|null, field: 'pickupAddr'|'dropoff'|null, from: 'popup', why}.
+   * Nothing is changed here; filePopup() does that. */
+  function popup(card, p, ctx) {
+    var c = ctx || {};
+    var out = { to: null, field: null, from: 'popup', why: null };
+    if (!p || (p.role !== 'pickup' && p.role !== 'dropoff')) { out.why = 'no role'; return out; }
+    if (typeof p.line !== 'string' || !p.line) { out.why = 'no address'; return out; }
+    out.field = p.role === 'pickup' ? 'pickupAddr' : 'dropoff';
+    if (!card) { out.why = 'no card being screened'; return out; }
+    if (card.heldCard || (c.held || []).some(function (o) { return o && o.id === card.id; })) {
+      out.why = 'the order in the car';
+      return out;
+    }
+    if (typeof p.at !== 'number' || typeof c.offerAt !== 'number' || p.at < c.offerAt) {
+      out.why = 'before the card';
+      return out;
+    }
+    if (card.app !== (p.app || 'doordash')) { out.why = "another app's card"; return out; }
+    var cur, next = field(p.line, 'popup', addressConf(p), p.at, p.screen || 'dd.placePopup');
+    if (p.role === 'pickup') {
+      var named = cardNames(card.pickup, p.name);
+      if (!named) { out.why = 'a different store'; return out; }
+      var mine = /^(\d+) /.exec(p.street || p.line);
+      if (named.number && !(mine && mine[1].length >= named.number.length
+                            && mine[1].slice(-named.number.length) === named.number)) {
+        out.why = 'a different branch';
+        return out;
+      }
+      cur = card.pickupAddr || null;
+    } else {
+      if (card.manyDropoffs === true) { out.why = 'more than one customer'; return out; }
+      if (typeof c.seenAt !== 'number' || p.at - c.seenAt > (c.cardMs || 0)) {
+        out.why = 'the card not on the screen';
+        return out;
+      }
+      cur = !card.dropoff ? null
+        : field(card.dropoff, card.dropoffScanned
+          ? (RANK[card.dropoffFrom] !== undefined ? card.dropoffFrom : 'seen') : 'card',
+                0, null, null);
+    }
+    var why = outranks(next, cur);
+    if (!why) { out.why = 'outranked by ' + (cur ? cur.from : 'nothing'); return out; }
+    out.to = 'card';
+    out.why = why;
+    return out;
+  }
+
+  /* Whether the card's pickup line names the store `name`: a run of its words
+   * that is sameStore with it. {number} — the house number the card printed
+   * straight after the name, or null — when it does; null when it does not. */
+  function cardNames(pickup, name) {
+    if (typeof pickup !== 'string' || typeof name !== 'string' || !storeKey(name)) return null;
+    var words = pickup.split(/\s+/).filter(Boolean);
+    var want = storeKey(name).length;
+    for (var i = 0; i < words.length; i++) {
+      for (var j = i; j < words.length; j++) {
+        var run = words.slice(i, j + 1).join(' ');
+        if (storeKey(run).length > want) break;
+        if (!sameStore(run, name)) continue;
+        var after = words.slice(j + 1, j + 3).map(function (w) { return w.replace(/[^0-9A-Za-z]/g, ''); })
+          .filter(Boolean)[0] || '';
+        return { number: /^\d+$/.test(after) ? after : null };
+      }
+    }
+    return null;
+  }
+
+  /* What a kept popup changes on the card: the store's door as `pickupAddr`,
+   * the field cardFields() carries into the hold at ✓ Took; a customer's as
+   * the card's end, through the same three fields a screening ⌖ press sets,
+   * so the hold, the map and the journal's mark read it as they read that. */
+  function filePopup(card, p, said) {
+    if (!card || !said || said.to !== 'card') return;
+    if (said.field === 'pickupAddr') {
+      card.pickupAddr = { value: p.line, from: 'popup', conf: addressConf(p), at: p.at,
+                          screen: p.screen || 'dd.placePopup', name: p.name || null };
+    } else {
+      card.dropoff = p.line;
+      card.dropoffScanned = true;
+      card.dropoffFrom = 'popup';
+    }
   }
 
   /* ---------- the Trip Planner: one page ------------------------------------
@@ -1287,6 +1437,7 @@
            cardFields: cardFields, fieldsOf: fieldsOf, outranks: outranks,
            plannerPickup: plannerPickup, forgetPlanner: forgetPlanner,
            dropoff: dropoff, file: file, fileCard: fileCard,
+           popup: popup, filePopup: filePopup, cardNames: cardNames,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
            keyOf: keyOf, placements: placements, linked: linked,
            fresh: fresh, took: took, sighting: sighting, pending: pending,

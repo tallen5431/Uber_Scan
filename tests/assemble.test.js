@@ -139,7 +139,7 @@ SEQ.forEach(function (seq) {
                   f('planner', 'a', 1, 'dropoff|Mara T.|1202')));
   eq('the ranks, highest first', Object.keys(A.RANK).sort(function (a, b) {
     return A.RANK[b] - A.RANK[a];
-  }), ['press', 'label', 'nav', 'planner', 'card', 'seen']);
+  }), ['press', 'label', 'nav', 'planner', 'popup', 'card', 'seen']);
   // A navigation destination files as a label does, and the driver's words
   // for it add the sighting and the same address read fuller.
   ok_('a navigation destination replaces what the card said', A.outranks(f('nav'), f('card')));
@@ -522,6 +522,124 @@ SEQ.forEach(function (seq) {
       A.reOffer(held, Object.assign({}, again, { dropoff: null }), 2000, 180000),
       A.reOffer(held, again, 999999, 180000)],
      [true, false, false, false]);
+})();
+
+/* ---- DoorDash's place popup, read while a card is screened ----------------
+ *
+ * The driver taps a stop on a DoorDash card before deciding and the phone shows
+ * its address (offer_parser.place_popup). Assemble.popup decides whether it
+ * goes onto the card being screened, and filePopup puts it there; at ✓ Took
+ * cardFields carries it into the hold at rank `popup`. Every store, street and
+ * door invented. */
+(function () {
+  var CARD_AT = 1000;
+  function card(more) {
+    return Object.assign({ id: 'dd-1', app: 'doordash', screen: 'dd.offer', pay: 7.75,
+                           pickup: 'S &, Lark Owl Pizza ; 1200 Fable Parkway Nort',
+                           dropoff: null, manyDropoffs: false }, more || {});
+  }
+  function pop(more) {
+    return Object.assign({ role: 'pickup', name: 'Lark Owl Pizza',
+                           line: '1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144',
+                           street: '1200 Fable W Lantern Pkwy NW', city: 'Kennesaw',
+                           state: 'GA', zip: '30144', app: 'doordash',
+                           screen: 'dd.placePopup', at: 4000 }, more || {});
+  }
+  var CTX = { held: [], offerAt: CARD_AT, seenAt: 3000, cardMs: 16000 };
+  function decide(c, p, ctx) { return A.popup(c, p, Object.assign({}, CTX, ctx || {})); }
+
+  var c1 = card(), p1 = pop();
+  var said = decide(c1, p1);
+  A.filePopup(c1, p1, said);
+  eq('a store popup read while a card is screened gives the card its pickup address',
+     [said.to, said.field, c1.pickupAddr && c1.pickupAddr.value, c1.pickupAddr && c1.pickupAddr.from],
+     ['card', 'pickupAddr', '1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144', 'popup']);
+  eq('...and leaves its end and its own name for the store as they were',
+     [c1.dropoff, c1.pickup], [null, 'S &, Lark Owl Pizza ; 1200 Fable Parkway Nort']);
+
+  var c2 = card({ pickup: 'Lark Owl Pizza' });
+  var p2 = pop({ role: 'dropoff', name: null, line: '412 Wrenfield Ct NE, Marietta, GA 30062',
+                 street: '412 Wrenfield Ct NE', city: 'Marietta', zip: '30062' });
+  var said2 = decide(c2, p2);
+  A.filePopup(c2, p2, said2);
+  eq('a customer popup gives the dropoff',
+     [said2.to, said2.field, c2.dropoff, c2.dropoffScanned, c2.dropoffFrom],
+     ['card', 'dropoff', '412 Wrenfield Ct NE, Marietta, GA 30062', true, 'popup']);
+
+  var c3 = card();
+  var said3 = decide(c3, pop({ role: null }));
+  A.filePopup(c3, pop({ role: null }), said3);
+  eq('a popup with no role cue files nothing', [said3.to, said3.why, c3.pickupAddr, c3.dropoff],
+     [null, 'no role', undefined, null]);
+
+  var c4 = card();
+  var p4 = pop({ name: 'Wren Street Noodles' });
+  var said4 = decide(c4, p4);
+  A.filePopup(c4, p4, said4);
+  eq('a popup for a different store files nothing', [said4.to, said4.why, c4.pickupAddr],
+     [null, 'a different store', undefined]);
+  eq('...nor one for another branch of the same store: the card printed its number',
+     [decide(card(), pop({ street: '880 Fable W Lantern Pkwy NW',
+                           line: '880 Fable W Lantern Pkwy NW, Kennesaw, GA 30144' })).why],
+     ['a different branch']);
+  eq('...but a number the card cut at its left is the same door',
+     decide(card({ pickup: 'Lark Owl Pizza ; 00 Fable Parkway Nort' }), pop()).to, 'card');
+  eq('one i/l slip in the name is the same store, two are not',
+     [decide(card({ pickup: 'Lark Owi Pizza' }), pop()).to,
+      decide(card({ pickup: 'Iark Owi Pizza' }), pop()).why],
+     ['card', 'a different store']);
+
+  // Never onto the held order: not its card come back, not its id on the slot.
+  var held = { id: 'dd-1', acceptedAt: 500 };
+  var c5 = card({ heldCard: 'dd-1@500' });
+  var said5 = decide(c5, pop());
+  var c6 = card();
+  var said6 = decide(c6, pop(), { held: [held] });
+  var c7 = card();
+  var p7 = pop({ role: 'dropoff', name: null });
+  var said7 = decide(c7, p7, { held: [held] });
+  eq('never onto the held order',
+     [said5.to, said5.why, said6.to, said6.why, said7.to, said7.why],
+     [null, 'the order in the car', null, 'the order in the car', null, 'the order in the car']);
+  eq('...and nothing with no card being screened', decide(null, pop()).why,
+     'no card being screened');
+  eq('a popup read before the card came onto the slot is not about it',
+     decide(card(), pop({ at: 999 })).why, 'before the card');
+  eq("...nor one on another app's card", decide(card({ app: 'uber' }), pop()).why,
+     "another app's card");
+  eq("a customer's popup needs the card still on the screen when it was read",
+     [decide(card(), pop({ role: 'dropoff', at: 20000 })).why,
+      decide(card(), pop({ role: 'dropoff', at: 18000 })).to],
+     ['the card not on the screen', 'card']);
+  eq('...and a card with one customer: "Multiple dropoffs" is two doors',
+     decide(card({ manyDropoffs: true }), pop({ role: 'dropoff' })).why,
+     'more than one customer');
+  eq('a popup does not move a pressed end, and does move the card\'s own',
+     [decide(card({ dropoff: '9 A St, Acworth', dropoffScanned: true, dropoffFrom: 'press' }),
+             pop({ role: 'dropoff' })).why,
+      decide(card({ dropoff: 'Elm St & Oak Ave, Marietta' }), pop({ role: 'dropoff' })).why,
+      decide(card({ dropoff: '9 A St, Acworth', dropoffScanned: true, dropoffFrom: 'seen' }),
+             pop({ role: 'dropoff' })).why],
+     ['outranked by press', 'over the card', 'over a sighting']);
+
+  // ✓ Took: the card's popup addresses become the hold's fields, at their rank.
+  var taken = card();
+  A.filePopup(taken, pop(), decide(taken, pop()));
+  A.filePopup(taken, p2, decide(taken, p2));
+  var fields = A.cardFields(taken, 9000);
+  eq('carried into the hold at Took',
+     [fields.pickupAddr.value, fields.pickupAddr.from, fields.pickupAddr.at,
+      fields.dropoff.value, fields.dropoff.from],
+     ['1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144', 'popup', 4000,
+      '412 Wrenfield Ct NE, Marietta, GA 30062', 'popup']);
+  eq('...below press and label, above the card: each replaces it or is refused by it',
+     [!!A.outranks(Object.assign({}, fields.dropoff, { from: 'label' }), fields.dropoff),
+      !!A.outranks(Object.assign({}, fields.dropoff, { from: 'press' }), fields.dropoff),
+      !!A.outranks(Object.assign({}, fields.dropoff, { from: 'card' }), fields.dropoff),
+      !!A.outranks(Object.assign({}, fields.dropoff, { from: 'seen' }), fields.dropoff)],
+     [true, true, false, false]);
+  eq('...and a card with no popup is carried as it always was',
+     A.cardFields(card(), 9000).pickupAddr.from, 'card');
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
