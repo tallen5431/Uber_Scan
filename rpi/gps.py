@@ -631,6 +631,24 @@ class Phone(object):
         got, age = self._newest()
         return None if got is None else self._judged(got, age)
 
+    def take(self, got):
+        """Store one fix from parse_line as the newest, at this clock's now.
+
+        The one way a fix gets in: the session calls it for every position
+        the phone or gpsd sends, and tools/shift_report.py calls it for every
+        position in a `gpspipe -w -uu` log, with a clock that reads each
+        line's own stamp. So a logged shift is judged by the same `_held`
+        bookkeeping and the same usable() the live rig used — a frozen
+        lat/lon is refused in the log exactly as it was on the panel — and
+        there is no second copy of either to drift.
+        """
+        with self._lock:
+            self._at = self._clock()
+            self._held(got, self._at)
+            self._fix = got
+            self._state = 'fixed'
+            self._error = None
+
     def _newest(self):
         with self._lock:
             if self._fix is None:
@@ -794,12 +812,7 @@ class Phone(object):
                     got = parse_line(line)
                     if got is None:
                         continue
-                    with self._lock:
-                        self._at = self._clock()
-                        self._held(got, self._at)
-                        self._fix = got
-                        self._state = 'fixed'
-                        self._error = None
+                    self.take(got)
         finally:
             try:
                 sock.close()
