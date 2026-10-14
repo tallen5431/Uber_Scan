@@ -38,9 +38,18 @@ var Advice = require('./advice.js');
 var Streets = require('./streets.js');
 // Map view's own rules for where a place is, so "door level" means one thing.
 // A UMD like advice.js that touches no browser global at load. Used here for
-// searchPlan, hasDoor and crowMiles only: the GPS drop (see gpsArrival) must
-// hold a pin to exactly the door rule the page chose it by.
+// the GPS drop (see gpsArrival) and the server's own search for its end (see
+// searchHeldEnd): searchPlan, hasDoor, discFor, discBox, pickInDisc and
+// crowMiles, so a pin is held to exactly the door rule the page chooses by.
 var MV = require('./map-view.js');
+// The assembler: every decision about where the order in the car ends — an
+// address the scanner read, a Trip Planner over one page or several, the
+// planner's stops coming off the hold. A UMD like advice.js with no I/O; this
+// file keeps the writing and the saying. See assemble.js.
+var Assemble = require('./assemble.js');
+// ...and its memory: the planner pages seen, the pending pool, what the hold
+// was last told. Process memory, like the slot.
+var assembly = Assemble.fresh();
 
 var ROOT = __dirname;
 var PORT = parseInt(process.env.PORT, 10) || 8080;
@@ -141,6 +150,9 @@ var scanner = {
   // /api/status always said none.
   wedged: 0,
   wedgedAt: null,      // when the last one happened, for the same reason
+  // The scanner's sightings, counted by screen type: see countSighting. A
+  // lifetime tally for the same reason as `wedged`.
+  screens: {},
   // What went wrong with the scanner process, and nothing else. See `stderr`
   // beside it, and the 'close' handler, which is the one place a process's own
   // words become this.
@@ -162,7 +174,9 @@ var scanner = {
   // startScanner() deliberately leaves them alone. See the note there.
   offer: null,         // the last offer read, so it can still be marked taken
   offerAt: null,
-  holding: null,       // the order being carried, if any. See holding().
+  // The orders being carried, first-taken first: a LIST, capped at MAX_HELD.
+  // Read through heldOrders() and holding(), never directly. See holding().
+  held: [],
   // What the running scanner says it is pricing a mile at — its own word, off
   // the stream, not a file on this machine. A fact about the PROCESS, so
   // startScanner() clears it: the next one reads config.json afresh and says
@@ -367,6 +381,32 @@ function startScanner() {
       try {
         var read = JSON.parse(line);
         read.at = Date.now();
+        // A sighting (rpi/scan_pi.py, emit_sighting): what a whole-screen or
+        // planner read saw, typed by its screen. Counted by that type for
+        // /api/status, and — Stage 3 — handed to the assembler, which is now
+        // where a Trip Planner's one dropoff comes from: off one page as the
+        // scanner used to decide it, or off several pages stitched. What it
+        // offers goes through the one dropoff path below (dropoffArrived),
+        // exactly as a dropoff line from the scanner does, and is said to the
+        // panel as one. The sighting itself is still not broadcast and writes
+        // no row: its stops are names and front doors, and the stream is
+        // somewhere they have not been before. See countSighting.
+        if (read.sighting) {
+          countSighting(read.sighting);
+          var sightedNow = Date.now();
+          // The orders in the car, as the assembler takes them: one is the
+          // order (Stage 3, unchanged), two only while carrying two is on.
+          var assembled = Assemble.sighting(assembly, assemblerHeld(sightedNow),
+                                            read.sighting, sightedNow);
+          assembled.candidates.forEach(function (c) {
+            var said = { dropoff: c, at: Date.now() };
+            dropoffArrived(said);
+            if (said.dropoff) broadcast(said);
+          });
+          // ...and what waited for a cue asked again: this sighting may be it.
+          retryPool();
+          return;
+        }
         if (read.phase) {
           scanner.phase = read.phase;
           scanner.status = read;
@@ -414,6 +454,32 @@ function startScanner() {
           if (sameCard && scanner.offer.dropoffScanned && scanner.offer.dropoff) {
             read.offer.dropoff = scanner.offer.dropoff;
             read.offer.dropoffScanned = true;
+            // ...and whether it was pressed for, which the hold made from this
+            // card at ✓ Took takes as its provenance (Assemble.cardFields).
+            read.offer.dropoffFrom = scanner.offer.dropoffFrom;
+          }
+          // ...and whether this is the order already in the car, back on the
+          // phone (heldOwnCard). Decided once, on arrival, and carried across
+          // re-reads like the mark: the panel shows it as the order taken, and
+          // no pairing row is written for it below.
+          //
+          // Under its OWN id as well as under a new one. The scanner now keeps
+          // a card's id when the driver pages away and back (rpi/journal.py,
+          // RECENT_CARDS), so the held card returns after another card under
+          // the held order's id — which is that order by the journal's own
+          // word, however long after the Took. This tested `!==` for as long
+          // as a held id could only reappear as the same slot (sameCard), and
+          // with `!==` that return was paired with itself.
+          //
+          // ANY order in the car, first-taken first: with two held, the second
+          // one's card back on the phone is that order too.
+          var carriedNow = heldOrders(Date.now()).filter(function (h) {
+            return read.offer.id === h.id || heldOwnCard(h, read.offer, Date.now(), false);
+          })[0] || null;
+          if (sameCard && scanner.offer.heldCard) {
+            read.offer.heldCard = scanner.offer.heldCard;
+          } else if (!sameCard && carriedNow) {
+            read.offer.heldCard = holdIdOf(carriedNow);
           }
           scanner.offer = read.offer;
           if (!sameCard) scanner.offerAt = Date.now();
@@ -439,294 +505,20 @@ function startScanner() {
           // that walks this file already knows to skip it — including the
           // scanner's own resume(), which must never mistake an annotation for
           // the last offer.
-          if (!sameCard) recordPairing(scanner.offer, Date.now(), scanner.last);
-        }
-        // The destination, read off the screen that comes AFTER the accept.
-        //
-        // It goes onto the order in the car and nowhere else. An offer card
-        // does not name where a delivery ends - 106 of this driver's 604 cards
-        // print "Customer dropoff" and no address - so `holding.dropoff` was
-        // null on 18% of accepted jobs, which is what makes the stacking advice
-        // silent on 39% of the pairs it is asked about.
-        //
-        // It also goes onto the CARD ON THE PANEL, when there is no order in
-        // the car and there is a card.
-        //
-        // This paragraph used to say the opposite — "only when there IS an
-        // order in the car... nothing here touches `scanner.offer`" — and the
-        // reasoning behind it was sound for the flow it was written for. Read
-        // with nothing held and no card up, this is an address belonging to no
-        // job, and storing it would measure the next offer against wherever
-        // the driver happened to be pointing the camera.
-        //
-        // What that missed is the driver's actual habit: "for doordash orders
-        // I need to tap the customer drop off location to show the address
-        // when screening". They reveal the address BEFORE deciding, because
-        // where a job ends is half of whether it is worth taking. In that
-        // moment there is no held order — and there is a card, with an id, on
-        // the panel, which is not "wherever the camera happened to be
-        // pointing". The guard that matters was never "an order is held", it
-        // was "this address belongs to something identifiable".
-        //
-        // So: the held order first, because with one in the car that is the
-        // stronger claim — every pair judged against it is nonsense without an
-        // end. Otherwise the offer on the slot, and only while it is still the
-        // card in front of the driver. With neither, nothing is stored, which
-        // is exactly what happened before.
-        //
-        // Asked through holding(), never off `scanner.holding` directly. That
-        // field is the raw slot; holding() is the question "is an order being
-        // carried RIGHT NOW", and it is not the same question - an order whose
-        // stated time has run out, plus half again, plus ten minutes, is
-        // already forgotten by the panel and by the stack line. Reading the
-        // slot here would attach the address to a job everything else has
-        // given up on.
-        if (read.dropoff && typeof read.dropoff.line === 'string') {
-          // Whether the driver ASKED for this one, or the rig simply saw it.
           //
-          // The scanner now reports an address off any screen that has one and
-          // no payout, not only inside the window a button press opens — the
-          // driver taps the dropoff pin on their phone, which is a screen
-          // change the motion gate already reads, so the rig was looking
-          // straight at it and throwing it away for want of a second action.
-          //
-          // The two are not the same claim. A press is the driver saying "this
-          // screen is the destination", and it overrules what the card said.
-          // An unprompted sighting is the rig filling in a blank: it may fill
-          // one and may not overwrite one. Otherwise a navigation screen left
-          // up between offers would quietly rewrite the destination of a card
-          // that had named its own — a confidently wrong answer arrived at
-          // without anybody asking a question.
-          //
-          // Missing means asked, so a scanner older than this field keeps the
-          // behaviour it had.
-          var wasAsked = read.dropoff.asked !== false;
-          var carrying = holding(Date.now());
-          var kept = false;
-          if (carrying && (wasAsked || !carrying.dropoff)) {
-            carrying.dropoff = read.dropoff.line;
-            carrying.dropoffScanned = true;
-            kept = true;
-            // ...and written down, which it was not.
-            //
-            // This is the case the button EXISTS for. An offer card does not
-            // say where a delivery ends — Uber prints "Customer dropoff" and
-            // the address only appears on the screen after the accept — so the
-            // whole point is to capture it once the order is in the car. That
-            // path updated process memory and nothing else.
-            //
-            // It reached disk only if another card happened to arrive before
-            // the order ended, because the pairing row carries the held job's
-            // dropoff. Finish a delivery with no offer in between, or end the
-            // shift, or restart the server, and the address the driver had
-            // deliberately captured was simply gone — off the offers page, off
-            // the map, out of the stack line's reasoning, with nothing saying
-            // it had ever been there.
-            //
-            // Its own mark, the same shape and the same `asked` bit as the
-            // screening path writes, so the fold applies both by one rule.
-            if (carrying.id) {
-              appendLines(JSON.stringify({
-                v: 1, kind: 'mark', at: Date.now(),
-                id: carrying.id,
-                dropoff: read.dropoff.line,
-                asked: wasAsked
-              }) + '\n', function (err) {
-                // Said out loud for the same reason the screening branch says
-                // it: a read-only SD card mid-shift is the classic Pi failure,
-                // and the panel would otherwise go on confirming an address
-                // that reached nothing.
-                if (err) {
-                  console.error('journal: could not record a held dropoff: '
-                                + err.message);
-                }
-              });
-            }
-          } else if (carrying) {
-            // Held, already knows where it ends, and nobody asked. Nothing to
-            // do — and nothing to say either, because the driver did not ask a
-            // question to be answered.
-          } else if (screeningCard(Date.now())
-                     && (wasAsked || !scanner.offer.dropoff)) {
-            // Onto the card being screened, and onto its journal row.
-            //
-            // In memory first, because the panel and the stack line read
-            // `scanner.offer` and a destination that only reached the file
-            // would be invisible until the page was reloaded. `dropoffScanned`
-            // travels with it for the same reason it does on a held order: a
-            // destination the rig READ off a navigation screen and one the
-            // CARD stated are different degrees of evidence, and the row has
-            // to be able to say which it is holding.
-            scanner.offer.dropoff = read.dropoff.line;
-            scanner.offer.dropoffScanned = true;
-            kept = true;
-            // ...and appended, as its own line naming the offer. The same
-            // shape as a tick: the journal is append-only, so this is a note
-            // ABOUT a row rather than an edit to it, and the copy at home
-            // merges it by the same newest-wins rule as everything else.
-            appendLines(JSON.stringify({
-              v: 1, kind: 'mark', at: Date.now(),
-              id: scanner.offer.id,
-              dropoff: read.dropoff.line,
-              // Whether the driver ASKED, carried onto the row rather than
-              // being decided here and forgotten.
-              //
-              // The guard above is about the card on the slot AT THIS MOMENT;
-              // the fold that applies this mark is about the row on disk,
-              // which is merged newest-wins from every reading of that offer
-              // and can carry a dropoff the in-memory card has since lost —
-              // readings of one card differ, and `bestReading` borrows ends
-              // from whichever one had them. Without this field the fold has
-              // no way to tell a press from a sighting and overwrites either
-              // way, which is a wrong destination written into an append-only
-              // file that syncs to the NUC.
-              //
-              // Absent means asked, matching how the reading itself is read
-              // above, so rows written before this field existed keep the
-              // behaviour they were written under.
-              asked: wasAsked
-            }) + '\n', function (err) {
-              // Said out loud, because every other write to this file says so
-              // and this one is a deliberate press the driver expects to be
-              // kept. An SD card remounted read-only mid-shift is the classic
-              // Pi failure — rpi/journal.py names it — and the panel would go
-              // on confirming "Dropoff read as ..." off the stream, which is
-              // broadcast whether or not the row landed. The address would
-              // then be gone at the next restart with nothing anywhere having
-              // mentioned it, while the pairing row written seconds earlier
-              // logged ITS failure on the same file.
-              if (err) {
-                console.error('journal: could not record a dropoff: ' + err.message);
-              }
-            });
+          // Not for the held order's own card come back, under its own id or
+          // a new one: that is one order measured against itself (above).
+          if (!sameCard && !scanner.offer.heldCard) {
+            recordPairing(scanner.offer, Date.now(), scanner.last);
           }
-          // What was read is said to the panel over the stream, which is
-          // where it was always coming from: live.html listens for
-          // `msg.dropoff.line` and shows it on the button. A driver who
-          // presses this with nothing to attach an address to still sees what
-          // was read, and that is what they need.
-          //
-          // ...but only if they PRESSED, or if it was kept.
-          //
-          // That distinction did not exist when this was written: every
-          // dropoff message followed a press, so "say what was read" was
-          // always an answer to a question somebody asked. Unprompted
-          // sightings broke it. The branch above refuses to overwrite a
-          // destination the card itself stated and says so — "nothing to say
-          // either, because the driver did not ask a question to be answered"
-          // — and then the stream said it anyway, because the broadcast is
-          // outside all of this.
-          //
-          // What the driver saw: holding an order whose destination came off
-          // the card, a navigation screen for somewhere else catches one read,
-          // and the panel's ⌖ button turns green reading "Dropoff read as
-          // <the other address>". It is not the held job's destination, it is
-          // not on the record, and /api/status cannot correct it — the poll
-          // only rewrites `destSaid` when the held order is `dropoffScanned`
-          // or when there is no held order at all, and this is neither. It
-          // stands until the order ends.
-          //
-          // A press still shows what was read even when nothing could be
-          // attached to it, which is the case the paragraph above is about and
-          // is deliberately unchanged.
-          // One tally row per unprompted address that arrives while an order is
-          // in the car. It changes nothing and is here to answer one question.
-          //
-          // AUDITS.md refuses a guard on this path twice — refusing an
-          // unprompted address whenever a rival card had been read recently —
-          // because measured, it discards the HELD job's own destination, and
-          // permanently: `dropoff_said` in rpi/scan_pi.py is set on emit and
-          // never cleared, so an address refused once is never volunteered
-          // again for that delivery. The refusal is right, but it was argued
-          // from a firing rate nobody has measured, and that is the wrong way
-          // to leave it.
-          //
-          // The counters the reader already keeps cannot answer it.
-          // `addressAsOffer` and `streetNoAddress` describe the FRAME — was
-          // there a payout on it, was there a street with no address. The
-          // question here is about ATTRIBUTION, and only this process knows
-          // both halves of it: what is in the car, and what is on the slot.
-          //
-          // So: whether an order was carried (this row exists at all), which
-          // one, which card the driver was actually looking at, and what was
-          // done with the address. `slot !== held` on a row whose `kept` is
-          // true is a screening tap that may have been filed onto the wrong
-          // job — the population the guard would have been for. `kept` false
-          // is the other half, the tap that was discarded because the held
-          // order already knew where it was going, which is its own Open entry.
-          //
-          // NO ADDRESS ON THIS ROW, deliberately. It is a tally, not a record
-          // of where anybody lives, and the journal syncs to a second machine.
-          // Two ids and a boolean answer the question; the street does not.
-          //
-          // Cheap by construction: the reader emits an address only off a frame
-          // with no payout and no merchant on it, and suppresses a repeat of a
-          // line it has already said, so this is roughly once per distinct
-          // address seen rather than once per frame.
-          //
-          // `id` is stamped from the clock the way the reader's `seen` rows
-          // are, and carries the same caveat: two in one millisecond would be
-          // one key to the sync and one of them would be dropped. The reader
-          // cannot produce two distinct addresses that close together.
-          //
-          // A kind this build invented is safe on both the fold and the sync:
-          // the fold skips kinds it does not know ("something newer than this
-          // reader") and syncKey carries an unknown kind across on its id and
-          // seq, which is what the pair rows' own comment there is about.
-          if (!wasAsked && carrying) {
-            var sightedAt = Date.now();
-            var onSlot = screeningCard(sightedAt);
-            appendLines(JSON.stringify({
-              v: 1, kind: 'sighting', at: sightedAt,
-              id: 'sighting-' + sightedAt, seq: 1,
-              held: carrying.id || null,
-              // Null when the slot holds nothing recent enough to be what the
-              // driver is looking at — which is a different answer from "the
-              // same card", and the count needs to tell those apart.
-              slot: onSlot ? onSlot.id : null,
-              kept: !!kept
-            }) + '\n', function (err) {
-              // Said out loud like every other write on this path. A tally that
-              // silently stopped being written would be read months later as a
-              // rate of zero, which is the one wrong answer it can give.
-              if (err) {
-                console.error('journal: could not record a dropoff sighting: '
-                              + err.message);
-              }
-            });
-          }
-          if (!wasAsked && !kept) { delete read.dropoff; }
-          // ...and an address filed onto the order in the car goes to the
-          // panel AS that order's end, not only as the button's words.
-          //
-          // The driver's report: "I accepted a delivery, it mapped the drop
-          // off address but it did not hold those pins when it scanned a
-          // doordash card." The page learned where a held order ends only
-          // from a READING (withStack), so a ⌖ read after ✓ Took turned the
-          // button green and put nothing on Map view; what the map was
-          // showing was the accepted CARD's own dropoff, drawn as this card's
-          // "and drop it here", and the next card took it off the glass with
-          // the card it belonged to. Measured in rpi/test_dashboard.py's
-          // stage 'the held end, from the press': after the ⌖ read the map
-          // had the car and the pickup and no held pin.
-          //
-          // Only when it was kept on the HOLD: an address filed onto the card
-          // being screened, or read with nothing to file it on, is not where
-          // the order in the car is going.
-          if (kept && carrying) read.holding = heldForPanel(carrying);
-          //
-          // `scanner.dropoff` and `scanner.dropoffAt` were kept here for that
-          // and are gone. They were written on every read and not one line in
-          // this repository ever read them back — the comment above them said
-          // "so the page can say what was read", which the page does, from the
-          // stream, having never asked for these. State nothing consults is
-          // not a store, it is a claim in a comment.
-          //
-          // The reload case they would have covered is covered by the two
-          // fields that are real: a held order carries `dropoff` and
-          // `dropoffScanned`, and since this change so does the card on the
-          // slot, both of which /api/status already sends.
         }
+        // The destination, read off the screen that comes AFTER the accept:
+        // see dropoffArrived, which is this branch moved out so an address the
+        // assembler made off a planner's sighting takes the same road.
+        dropoffArrived(read);
+        // ...and, with two orders in the car, what waited for a cue asked
+        // again: an address just filed may be the one that eliminates.
+        retryPool();
         // Uber's Trip Planner, read off the whole screen because ⌖ was
         // pressed: every stop of the trip in order. See emit_planner.
         //
@@ -741,20 +533,37 @@ function startScanner() {
         // them as the order's end travel together, so a reloaded panel says
         // the same thing about the button as the live one did.
         //
-        // NOT a destination. The one dropoff of a planner the scanner can file
-        // arrives separately, as an ordinary `dropoff` line, and is filed by
-        // the branch above like every other; nothing here reads an address
-        // out of the stops, so there is one rule for where an order ends.
+        // NOT a destination. The one dropoff of a planner is the assembler's
+        // to give, off the `sighting` the scanner sends just before this line
+        // for the same read (the two carry the read's `at`), and it is filed by
+        // dropoffArrived like every other; nothing here reads an address out
+        // of the stops, so there is one rule for where an order ends. The
+        // reason none was filed is the assembler's too, and goes onto the line
+        // here so the panel says it: a scanner from before the assembler said
+        // its own on the line, and that is believed as it was.
         //
         // Into the journal only when the scanner says the record may hold
         // them — `keep`, which is `"keepPlaces"` and --no-journal: the stops
         // are customers' names and front doors.
         if (read.planner && Array.isArray(read.planner.stops)) {
           var plannedAt = Date.now();
+          if (!('unfiled' in read.planner)) {
+            var verdict = Assemble.verdictFor(assembly, read.planner.at);
+            read.planner.unfiled = verdict === undefined ? null : verdict;
+          }
           var heldNow = holding(plannedAt);
+          // With two orders in the car, a pickup whose name is ONE of their
+          // cards' pickups (Assemble.sameStore) is marked with that order's
+          // id, `of`, which Map view numbers its pin by (P1, P2). One that
+          // fits both, or neither, is no order's and stays a plain P.
+          ownPickups(read.planner.stops, plannedAt);
           if (heldNow) {
             heldNow.planner = { stops: read.planner.stops,
                                 unfiled: read.planner.unfiled || null };
+            // ...and its pickups searched for on the NucBox, for the
+            // restaurant guard (searchHeldPickup); a no-op for one already
+            // asked about on this hold.
+            armHeldPickups(heldNow);
           }
           if (read.planner.keep === true) recordPlanner(read.planner, plannedAt);
         }
@@ -780,6 +589,15 @@ function startScanner() {
           // car at the held order's door, or takes it away (gpsArrival). The
           // answer rides the beat to the panel, which says "at dropoff".
           read.atDropoff = gpsArrival(read, Date.now());
+          // ...and the rest of the GPS drop's state, on the same beat. Between
+          // offers no reading arrives to carry heldForPanel, and that is when
+          // the panel's in-car line is the card's whole message: a pin armed
+          // or refused while the driver drives would otherwise reach the glass
+          // at the next offer. Null with nothing held. See heldEndState.
+          var heldBeat = holding(Date.now());
+          read.heldEnd = heldBeat ? heldEndState(heldBeat) : null;
+          // ...and every order's, with carrying two on (ordersForPanel).
+          if (heldBeat && carryTwo()) read.orders = ordersForPanel(Date.now());
         }
         broadcast(read);
       } catch (e) {
@@ -1040,7 +858,7 @@ if (!isFinite(HOLD_GRACE_MS) || HOLD_GRACE_MS < 0) HOLD_GRACE_MS = 10 * 60000;
 
 /* The order in the car, kept where a power cut cannot take it.
  *
- * `scanner.holding` is process memory, and this is "a box velcroed into a car
+ * `scanner.held` is process memory, and this is "a box velcroed into a car
  * where the ignition is the power switch" — rpi/calibrate.py's own words. A
  * driver who presses Took, drives to the restaurant, switches the engine off
  * and walks in comes back to a rig with no order in the car: the stack line
@@ -1089,7 +907,7 @@ function holdPath() {
  * field allows (MapView.cardFix, MapView.cardYardstick). */
 var CARD_FIELDS = ['lat', 'lon', 'gpsAge', 'gpsErr', 'gpsMode', 'gpsOk', 'gpsWhy',
                    'miles', 'whole', 'hasTotal', 'legs', 'milesUncertain',
-                   'milesCorrected', 'earlyLook', 'doubt'];
+                   'milesCorrected', 'earlyLook', 'doubt', 'multiOrder'];
 
 function cardOf(offer) {
   var out = {};
@@ -1099,11 +917,109 @@ function cardOf(offer) {
   return out;
 }
 
-function setHolding(h) {
-  scanner.holding = h || null;
+/* ---------- the orders in the car: a list ----------------------------------
+ *
+ * Stage 4 of the multi-order design. The hold was one slot; it is now a list,
+ * first-taken first, capped at MAX_HELD — maxHeld(), ONE unless carrying two is
+ * on (Stage 5, carryTwo below), so with the flag off every answer this file
+ * gives is the one it gave with the slot. What changed is only the
+ * shape: holding.json is `{v: 2, orders: [Hold]}`, `.holding.json` names
+ * every order (`holds: [ids]`) and is in force until the LATEST of their ends,
+ * and the live part of each GPS arrival is kept per hold (`arrivals`).
+ *
+ * A Hold is the object the slot held, plus:
+ *   holdId    its name on the wire (holdIdOf): `<id>@<acceptedAt>`
+ *   app       'uber' | 'doordash' | null, off the offer line
+ *   tookAt    when ✓ Took was pressed, which is not acceptedAt (the card's
+ *             own time: see the mark handler)
+ *   deliverBy the card's "Deliver by", minutes since midnight, or null
+ *   addOn     whether the card was Uber's offer to add to a trip in progress
+ *   of        for an add-on, the holdId of the order it adds to; else null
+ *   ofEnds    for an add-on, when that order ended as it stood at the Took
+ *             (holdEnds), which the add-on outlives: see holdEnds
+ *
+ * Read through heldOrders(now) and holding(now), never off `scanner.held`:
+ * those are the questions "which orders are being carried RIGHT NOW", and an
+ * order past its own clock is not one. rpi/test_lint.py holds that nothing
+ * reads the slot's old name. */
+function maxHeld() {
+  return carryTwo() ? 2 : 1;
+}
+
+/* ---------- carrying two orders: the flag ------------------------------------
+ *
+ * Stage 5. The driver asked to carry two orders, and AUDITS.md's Settled had
+ * refused it (plan 3.1) for one reason: with two in the car, the ⌖ press for
+ * the second attached to the first, in an append-only file. The owner's
+ * decision overrides that entry with a safeguard in place of the refused
+ * rival-card guard: with two held, an address is filed only on a positive cue
+ * (Assemble.attribute) or when the driver picks it from a chooser, and is
+ * otherwise filed nowhere.
+ *
+ * Behind `"carryTwo": true` in rpi/config.json's `settings`, false unless it
+ * says exactly true. Read where it is asked, not at boot: the scanner rewrites
+ * that file whole and keeps keys it does not know, and a restart mid-shift is
+ * an aim-and-calibrate cycle. CARRY_TWO=1 or 0 in the environment overrides
+ * it, for the suites. With it off, MAX_HELD is one and the server does what
+ * Stage 4 did — a second Took replaces — and only says, in a `would` field on
+ * rows it already writes, what attribution would have done. */
+function carryTwo() {
+  var env = process.env.CARRY_TWO;
+  if (env === '1') return true;
+  if (env === '0') return false;
   try {
-    if (h) fs.writeFileSync(holdPath(), JSON.stringify(h));
-    else fs.unlinkSync(holdPath());
+    var cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'rpi', 'config.json'), 'utf8'));
+    return !!(cfg && cfg.settings && cfg.settings.carryTwo === true);
+  } catch (e) {
+    return false;
+  }
+}
+
+/* The orders in the car as the assembler is handed them: the first-taken
+ * alone — exactly what it had before the list — unless carrying two is on and
+ * two are held, when it is the list. */
+function assemblerHeld(now) {
+  var list = heldOrders(now);
+  return carryTwo() && list.length >= 2 ? list : (list[0] || null);
+}
+
+/* The name a hold goes by on the wire: the card's id and when it was on the
+ * screen. The panel has no other handle on "the order in the car", and a pin
+ * posted for one hold must never land on the next (see /api/held-end). Kept on
+ * the hold as `holdId` since the list, made the same way. */
+function holdIdOf(h) {
+  if (!h) return null;
+  return typeof h.holdId === 'string' && h.holdId
+    ? h.holdId : String(h.id) + '@' + String(h.acceptedAt);
+}
+
+/* The hold as it is written: the slot's object, its new fields filled in where
+ * it came from a file or a caller older than them. Changes nothing a reader of
+ * the old fields sees. */
+function asHold(h) {
+  if (!h.holdId) h.holdId = String(h.id) + '@' + String(h.acceptedAt);
+  if (h.app === undefined) h.app = null;
+  if (h.tookAt === undefined) {
+    h.tookAt = h.seenAs && typeof h.seenAs.tookAt === 'number' ? h.seenAs.tookAt : h.acceptedAt;
+  }
+  if (h.deliverBy === undefined) h.deliverBy = null;
+  if (h.addOn === undefined) h.addOn = false;
+  if (h.of === undefined) h.of = null;
+  if (h.ofEnds === undefined) h.ofEnds = null;
+  return h;
+}
+
+/* The whole list, written: memory, holding.json, the scanner's handoff, and
+ * the per-hold searches. ONE function for every change — a Took, a Drop, a pin
+ * kept on one order — so the copies cannot disagree. */
+function setHeld(list) {
+  scanner.held = (list || []).filter(Boolean);
+  try {
+    if (scanner.held.length) {
+      fs.writeFileSync(holdPath(), JSON.stringify({ v: 2, orders: scanner.held }));
+    } else {
+      fs.unlinkSync(holdPath());
+    }
   } catch (e) {
     // A hold that could not be written is a hold that will not survive a
     // reboot, which is where this started — said once rather than swallowed,
@@ -1111,7 +1027,19 @@ function setHolding(h) {
     // is mid-shift.
     if (e && e.code !== 'ENOENT') console.error('holding: ' + e.message);
   }
-  tellScannerHeld(h);
+  tellScannerHeld(scanner.held);
+  forgetHoldsGone(scanner.held);
+  scanner.held.forEach(function (h) {
+    armHeldEnd(h);
+    armHeldPickups(h);
+  });
+}
+
+/* One order changed in place — a pin, an arrival, a refusal — written with
+ * the rest. A no-op for an order no longer on the list. */
+function saveHold(h) {
+  if (scanner.held.indexOf(h) === -1) return;
+  setHeld(scanner.held);
 }
 
 /* Until when an order is in the car, for the scanner, which cannot ask.
@@ -1121,22 +1049,34 @@ function setHolding(h) {
  * process's question, answered by holding(). The scanner is sometimes this
  * process's child and sometimes a systemd unit that has never heard of it, so
  * it is told the way every other request is: a handoff file. What goes in it
- * is the moment holding() itself stops answering yes — holdEnds, the one
- * expression of that — so the scanner needs no word from here when the order
- * runs out, and a server that died mid-delivery leaves a file that goes stale
- * on its own clock rather than one that says "held" for ever.
+ * is the moment holding() itself stops answering yes — the LATEST of the
+ * orders' holdEnds, the one expression of that — so the scanner needs no word
+ * from here when the orders run out, and a server that died mid-delivery
+ * leaves a file that goes stale on its own clock rather than one that says
+ * "held" for ever.
  *
  * Through a rename, like every other file this process publishes, so the
  * scanner never reads half of one. Gone when nothing is held. */
-function tellScannerHeld(h) {
-  var ends = h ? holdEnds(h) : null;
+function tellScannerHeld(list) {
+  var ends = null;
+  var ids = [];
+  (list || []).forEach(function (h) {
+    var e = holdEnds(h);
+    if (e === null) return;
+    ids.push(holdIdOf(h));
+    if (ends === null || e > ends) ends = e;
+  });
   try {
     if (ends === null) {
       fs.unlinkSync(HOLDING_ASK_PATH);
       return;
     }
     var tmp = partName(HOLDING_ASK_PATH);
-    fs.writeFileSync(tmp, JSON.stringify({ until: ends }));
+    // ...and WHICH orders, as holdIdOf names them: the scanner forgets the
+    // last address it volunteered when this changes (`dropoff_said` in
+    // rpi/scan_pi.py), so one refused for the order before — a screen read
+    // before the Took — is offered again for this one.
+    fs.writeFileSync(tmp, JSON.stringify({ until: ends, holds: ids }));
     fs.renameSync(tmp, HOLDING_ASK_PATH);
   } catch (e) {
     // Said, not thrown: the cost of a lost one is the automatic planner read
@@ -1145,6 +1085,21 @@ function tellScannerHeld(h) {
   }
 }
 
+/* One order off the file, or null: a stamp that is a number and not after the
+ * clock reading it. */
+function heldFromFile(h) {
+  if (!h || typeof h !== 'object' || typeof h.acceptedAt !== 'number'
+      || !isFinite(h.acceptedAt)) return null;
+  if (h.acceptedAt > Date.now()) return null;
+  return asHold(h);
+}
+
+// The most orders a file is read with, whatever MAX_HELD is now: a file
+// holding more is cut to this many, first-taken first. Not MAX_HELD itself, so
+// a restart does not throw away an order already in the car — a Took is where
+// the cap applies, and it is said there.
+var MAX_HELD_FILE = 2;
+
 /* ...and read back once, at startup, which is the only moment it means
  * anything.
  *
@@ -1152,25 +1107,42 @@ function tellScannerHeld(h) {
  * it: a Pi has no real-time clock, it boots in 1970 and jumps when the network
  * arrives. A hold stamped after the clock now reading it makes `over` in
  * holding() permanently negative, so the order would never expire and the
- * panel would offer a pair line against it for the rest of the shift. Refusing
- * is always available and costs one delivery's advice.
- */
+ * panel would offer a pair line against it for the rest of the shift.
+ * Refusing is always available and costs one delivery's advice.
+ *
+ * TWO SHAPES. `{v: 2, orders: [...]}` is this file's; an object with no `v`
+ * is the one-slot file every build before the list wrote, and is WRAPPED as
+ * one order, its clock untouched (asHold names it as it was named). The other
+ * way round is safe by construction: a v2 file has no `acceptedAt` of its own,
+ * so a build from before the list — which asks for exactly that — holds
+ * nothing, rather than a list read as one order. A `v` this build does not
+ * know is nothing either. Returns the first-taken order still carried, or
+ * null, for the boot line. */
 function loadHolding() {
   var raw;
   try { raw = fs.readFileSync(holdPath(), 'utf8'); } catch (e) { return null; }
-  var h;
-  try { h = JSON.parse(raw); } catch (e) { h = null; }
-  if (!h || typeof h !== 'object' || typeof h.acceptedAt !== 'number'
-      || !isFinite(h.acceptedAt)) return null;
-  if (h.acceptedAt > Date.now()) return null;
-  scanner.holding = h;
-  // Through holding(), so an order that has outlived its own clock is put down
-  // here rather than waiting to be noticed — and so the answer to "is there an
-  // order in the car" is the same function at boot as it is everywhere else.
-  var still = holding(Date.now());
+  var f;
+  try { f = JSON.parse(raw); } catch (e) { f = null; }
+  var list = [];
+  if (f && typeof f === 'object' && f.v === 2 && Array.isArray(f.orders)) {
+    list = f.orders.map(heldFromFile).filter(Boolean);
+  } else if (f && typeof f === 'object' && f.v === undefined) {
+    var one = heldFromFile(f);
+    if (one) list = [one];
+  }
+  scanner.held = list.slice(0, MAX_HELD_FILE);
+  // Through heldOrders(), so an order that has outlived its own clock is put
+  // down here rather than waiting to be noticed — and so the answer to "is
+  // there an order in the car" is the same function at boot as it is
+  // everywhere else.
+  var still = heldOrders(Date.now());
   // ...and the scanner told, since a hold restored at boot is a hold.
-  if (still) tellScannerHeld(still);
-  return still;
+  if (still.length) tellScannerHeld(still);
+  still.forEach(function (h) {
+    armHeldEnd(h);
+    armHeldPickups(h);
+  });
+  return still.length ? still[0] : null;
 }
 
 /* The moment a hold stops being an order in the car: its stated time, half
@@ -1182,26 +1154,747 @@ function holdEnds(h) {
   var stated = (typeof h.minutes === 'number' && isFinite(h.minutes) && h.minutes > 0)
     ? h.minutes : null;
   if (stated === null) return null;
-  return h.acceptedAt + stated * HOLD_OVERRUN * 60000 + HOLD_GRACE_MS;
-}
-
-function holding(now) {
-  var h = scanner.holding;
-  if (!h) return null;
-  var ends = holdEnds(h);
-  if (ends === null) return null;
-  if (now > ends) {
-    setHolding(null);
-    return null;
+  var own = h.acceptedAt + stated * HOLD_OVERRUN * 60000 + HOLD_GRACE_MS;
+  // An add-on (Uber's "+ $", "+N min" card, taken onto a trip in progress) is
+  // done no sooner than the trip it joins, and then its own added minutes,
+  // half again: the later of that and its own clock. Its card's minutes are
+  // the minutes it ADDS, so its own clock alone ends it before the trip.
+  if (h.addOn && typeof h.ofEnds === 'number' && isFinite(h.ofEnds)) {
+    return Math.max(own, h.ofEnds + stated * HOLD_OVERRUN * 60000);
   }
-  return h;
+  return own;
 }
 
-/* The name a hold goes by on the wire: the card's id and when it was on the
- * screen. The panel has no other handle on "the order in the car", and a pin
- * posted for one hold must never land on the next (see /api/held-end). */
-function holdIdOf(h) {
-  return h ? String(h.id) + '@' + String(h.acceptedAt) : null;
+/* One sighting, counted by its screen type (rpi/scan_pi.py's emit_sighting;
+ * the types are offer_parser.SCREENS). A run tally on the scanner's health
+ * block of /api/status, `screens`, kept like `fell` and `wedged` for the life
+ * of this process: how many of each screen the rig has seen since the server
+ * started is the question, and a count that reset with each scanner restart
+ * would answer a different one. Nothing else is read off the line — not its
+ * stops, not its address, not its app — and nothing is stored. A type that is
+ * not a short word is counted as 'unknown', never dropped, so a malformed
+ * line still shows as a sighting. */
+function countSighting(s) {
+  var type = s && typeof s.screen === 'string' && /^[A-Za-z.]{1,40}$/.test(s.screen)
+    ? s.screen : 'unknown';
+  scanner.screens[type] = (scanner.screens[type] || 0) + 1;
+}
+
+/* The orders being carried right now, first-taken first. One past its own
+ * clock is put down here (written, and the scanner told); one with no stated
+ * time is kept on the list and never counted, as the slot kept it. */
+function heldOrders(now) {
+  var gone = scanner.held.filter(function (h) {
+    var ends = holdEnds(h);
+    return ends !== null && now > ends;
+  });
+  if (gone.length) {
+    setHeld(scanner.held.filter(function (h) { return gone.indexOf(h) === -1; }));
+  }
+  return scanner.held.filter(function (h) { return holdEnds(h) !== null; });
+}
+
+/* The first-taken order being carried, or null: what every one-order answer
+ * on this server is about — the stack line, the pair row's `held`, the panel's
+ * in-car line. */
+function holding(now) {
+  var list = heldOrders(now);
+  return list.length ? list[0] : null;
+}
+
+/* The order named `id` (holdIdOf) among those carried now, or null. */
+function heldById(id, now) {
+  var list = heldOrders(now);
+  for (var i = 0; i < list.length; i++) if (holdIdOf(list[i]) === id) return list[i];
+  return null;
+}
+
+/* ---------- two orders in the car: whose address, and the chooser -----------
+ *
+ * Stage 5, with carrying two on (carryTwo). The safeguard the owner put in
+ * place of AUDITS.md's refused rival-card guard: with two orders held, an
+ * address read off the screen is filed onto one of them only when a POSITIVE
+ * cue says which (Assemble.attribute: the app, the Took, the store, the
+ * deadline, the list growing, elimination on a list seen whole). With none:
+ *
+ *   - a ⌖ press opens the CHOOSER on the panel — a sheet over the verdict pane,
+ *     not a control on the bar — and nothing is filed unless the driver picks
+ *     a row. It closes after CHOOSER_MS (10 s) with nothing filed;
+ *   - an unprompted sighting waits in the assembler's pool (Assemble.park),
+ *     unwritten, and the panel says how many are waiting ("2 dropoffs read ·
+ *     whose?"), until a later read gives it a cue (retryPool) or one of the
+ *     two orders leaves the car and it is dropped.
+ *
+ * With carrying two off, nothing here changes what is filed: whoseDropoff only
+ * works out what attribution WOULD have said, over the order in the car and
+ * the one a Took last replaced while its clock still runs (`shadows`), and
+ * that goes on the mark or tally row this already writes, as `would`. */
+var CHOOSER_MS = envNumber('CHOOSER_MS', 10000);
+var choosing = null;
+var chooseSeq = 0;
+// The orders a Took replaced with carrying two off, while their own clock
+// runs: memory only, for `would` and nothing else.
+var shadows = [];
+
+function shadowsNow(now) {
+  shadows = shadows.filter(function (h) {
+    var e = holdEnds(h);
+    return e !== null && now <= e;
+  });
+  return shadows;
+}
+
+/* {stop, order, cue, would} for one address arriving: `order` undefined to
+ * leave dropoffArrived's own choice (the first-taken) alone, an order or null
+ * to file onto that one or onto none; `stop` when nothing is to be filed at
+ * all. `force` is a decision already made — the chooser's row, or the pool's
+ * cue — and is taken as it is. */
+function whoseDropoff(read, force, now) {
+  var d = read.dropoff;
+  var out = { stop: false, order: undefined, cue: null, would: null };
+  if (force) {
+    out.order = force.order || null;
+    out.cue = force.cue || null;
+    return out;
+  }
+  if (!d || typeof d.line !== 'string') return out;
+  var orders = heldOrders(now);
+  if (!carryTwo()) {
+    if (!orders.length) return out;
+    var w = Assemble.attribute(assembly, shadowsNow(now).concat(orders), d);
+    out.would = { cue: w.cue, held: w.order ? holdIdOf(w.order) : null };
+    return out;
+  }
+  if (orders.length < 2) {
+    if (orders.length) out.cue = 'only';
+    return out;
+  }
+  var a = Assemble.attribute(assembly, orders, d);
+  if (a.order) {
+    out.order = a.order;
+    out.cue = a.cue;
+    return out;
+  }
+  out.stop = true;
+  if (d.asked !== false) {
+    console.log('dropoff read with two orders in the car, ' + a.why + ': the chooser is open');
+    openChooser('scan', d, orders, now);
+  } else {
+    console.log('dropoff seen with two orders in the car, ' + a.why + ': waiting for a cue');
+    Assemble.park(assembly, d, orders);
+    broadcast({ unowned: Assemble.unowned(assembly) });
+  }
+  // ...and a cue that fitted both may yet be broken on the map.
+  if (a.why === 'tie') discBreak(d, orders, a.ties[0]);
+  return out;
+}
+
+/* The tie-break, and only that (Assemble.attribute): a cue fitted both orders
+ * and none fitted one. The address is searched on the NucBox inside each
+ * order's card disc, by the rule the held end is pinned by (searchPlan's
+ * street, pickInDisc, a door — hasDoor); found at door level inside EXACTLY
+ * ONE of them, it is that order's, filed under the cue that tied, and the
+ * chooser it was waiting in closes — or it leaves the pool. Found in both,
+ * in neither, no NucBox, no door: nothing changes, and the driver's chooser
+ * or the pool stand as they were. The public geocoder is never asked. */
+function discBreak(d, orders, cue) {
+  if (!NBX.search) return;
+  var plan = MV.searchPlan(d.line);
+  if (!plan || plan.kind !== 'street' || !plan.door) return;
+  var term = nbxTerm(plan.street);
+  if (!term) return;
+  var inside = [];
+  var left = orders.length;
+  var one = function () {
+    left -= 1;
+    if (left > 0 || inside.length !== 1) return;
+    var o = heldById(holdIdOf(inside[0]), Date.now());
+    if (!o) return;
+    if (choosing && choosing.d === d) {
+      choosing = null;
+      broadcast({ chooser: null });
+    } else if (!Assemble.unpark(assembly, d.line)) {
+      return;
+    }
+    console.log('dropoff found inside one card\'s reach only: filed by ' + cue);
+    var said = { dropoff: d, at: Date.now() };
+    dropoffArrived(said, { order: o, cue: cue });
+    if (said.dropoff) broadcast(said);
+    broadcast({ unowned: Assemble.unowned(assembly) });
+  };
+  orders.forEach(function (o) {
+    var disc = MV.discFor(o.card || null);
+    if (!disc) return one();
+    var target = nbxSearchTarget('street', term, MV.discBox(disc));
+    var take = function (out) {
+      var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
+      if (res.at && MV.hasDoor(res.at, plan.house)) inside.push(o);
+      one();
+    };
+    if (nbxCache.has(target)) return take(nbxCache.get(target));
+    nbxAsk(target, function (err, body) {
+      if (err || !Array.isArray(body)) return one();
+      var out = nbxHits(body);
+      nbxRemember(target, out);
+      take(out);
+    });
+  });
+}
+
+/* The chooser, opened over the ⌖ press it answers: a row for each order in
+ * the car, and — while a card is being screened (screeningCard) that is not
+ * one of them — that card as a row of its own, since the press may have been
+ * about it. "Neither" is the panel's own row. One at a time: a second press
+ * replaces the first's. Said to every panel on the stream. */
+function openChooser(kind, d, orders, now) {
+  var card = screeningCard(now);
+  choosing = { id: 'choose-' + now + '-' + (++chooseSeq), kind: kind, d: d,
+               among: orders.map(holdIdOf),
+               // ...not a card that IS one of the orders in the car: the
+               // last Took's own card is usually still the one on the slot.
+               card: card && !card.heldCard
+                 && !orders.some(function (o) { return o.id === card.id; }) ? card.id : null,
+               until: now + CHOOSER_MS };
+  broadcast({ chooser: chooserForPanel(now) });
+}
+
+/* The open chooser as the panel draws it, or null: its rows ① and ② with each
+ * order's pay and end (null where none is filed — the panel says "?"), the
+ * card row, the address it is about, and how long it has left. */
+function chooserForPanel(now) {
+  var c = choosing;
+  if (!c || now > c.until) return null;
+  var rows = [];
+  heldOrders(now).forEach(function (o, i) {
+    if (c.among.indexOf(holdIdOf(o)) === -1) return;
+    rows.push({ pick: holdIdOf(o), n: i + 1, pay: numOrNull(o.pay), end: o.dropoff || null });
+  });
+  var card = c.card && scanner.offer && scanner.offer.id === c.card
+    ? { pick: 'card', pay: numOrNull(scanner.offer.pay) } : null;
+  return { id: c.id, kind: c.kind, line: c.d.line, rows: rows, card: card,
+           closesInMs: c.until - now };
+}
+
+/* The addresses in the pool asked again (Assemble.retryUnowned), and every one
+ * a cue now decides filed through the one road, with that cue. Called after a
+ * sighting, an address filed, a Took and a Drop. With carrying two off there
+ * is no pool. */
+function retryPool() {
+  if (!carryTwo()) return;
+  var before = Assemble.unowned(assembly);
+  var found = Assemble.retryUnowned(assembly, heldOrders(Date.now()));
+  found.forEach(function (f) {
+    var said = { dropoff: f.d, at: Date.now() };
+    dropoffArrived(said, { order: f.order, cue: f.cue });
+    if (said.dropoff) broadcast(said);
+  });
+  if (found.length || Assemble.unowned(assembly) !== before) {
+    broadcast({ unowned: Assemble.unowned(assembly) });
+  }
+}
+
+/* A Trip Planner's pickups, each marked with the order whose card names that
+ * store (`of`), when exactly one of the orders in the car does: Map view
+ * numbers that pin P1 or P2. Two orders from one store, or none, leave it a
+ * plain P. With one order there is nothing to number. */
+function ownPickups(stops, now) {
+  var orders = heldOrders(now);
+  if (!carryTwo() || orders.length < 2) return;
+  stops.forEach(function (st) {
+    if (!st || st.kind !== 'pickup') return;
+    var mine = orders.filter(function (o) { return Assemble.sameStore(st.name, o.pickup); });
+    if (mine.length === 1) st.of = holdIdOf(mine[0]);
+  });
+}
+
+/* Where a Took puts its order, and what it puts down. Returns {replaced,
+ * added, putDownPay}.
+ *
+ * Carrying two off: the order in the car, as Stage 4 had it — the Took
+ * replaces it (and the replaced one is kept as a shadow for `would`).
+ *
+ * Carrying two on:
+ *   - an add-on card (Uber's screen `uber.addon`: "+ $", "+N min") is held as
+ *     an add-on of the Uber order most recently taken, and runs no shorter
+ *     than that order does (holdEnds);
+ *   - the same card id again is a Took pressed twice: replaced in place, no
+ *     drop row, as before;
+ *   - a RE-OFFER of an order in the car — same miles, card minutes and both
+ *     ends, a different pay, inside HELD_CARD_MS of that order's Took
+ *     (Assemble.reOffer) — replaces it, `by: 'replaced'`;
+ *   - anything else is ADDED, and a Took past MAX_HELD puts down the order
+ *     whose clock ends soonest, `by: 'replaced'`, and the panel says its pay.
+ * A DoorDash card for two orders ("Drop off 2 orders") is one card and one
+ * Took, so one order here: nothing counts its stops. */
+function placeTook(took, marked, inCar, now) {
+  var out = { replaced: null, added: false, putDownPay: null };
+  if (!carryTwo()) {
+    var before = inCar[0] || null;
+    if (before && before.id !== took.id) {
+      out.replaced = before;
+      shadows = [before];
+    }
+    setHeld([took]);
+    return out;
+  }
+  if (marked.screen === 'uber.addon') {
+    var base = inCar.filter(function (o) { return o.app === 'uber' && !o.addOn; }).pop();
+    took.addOn = true;
+    if (base) {
+      took.of = holdIdOf(base);
+      took.ofEnds = holdEnds(base);
+    }
+  }
+  var same = inCar.filter(function (o) { return o.id === took.id; })[0];
+  var again = same || inCar.filter(function (o) {
+    return Assemble.reOffer(o, marked, now, HELD_CARD_MS);
+  })[0];
+  if (again) {
+    if (!same) out.replaced = again;
+    setHeld(inCar.map(function (o) { return o === again ? took : o; }));
+    return out;
+  }
+  var list = inCar.concat([took]);
+  if (list.length > maxHeld()) {
+    var soonest = inCar.slice().sort(function (a, b) { return holdEnds(a) - holdEnds(b); })[0];
+    out.replaced = soonest;
+    out.putDownPay = numOrNull(soonest.pay);
+    list = list.filter(function (o) { return o !== soonest; });
+  }
+  out.added = inCar.length >= 1;
+  setHeld(list);
+  return out;
+}
+
+/* Which orders one tap of Drop puts down with two in the car, or null for the
+ * chooser: the one order whose pinned door the latest good fix is at (the
+ * GPS drop's own arrival circle), else the one order the GPS has seen arrive.
+ * Nothing else decides — not which was taken first, not which ends sooner. */
+function dropDecides(orders, now) {
+  var beat = scanner.beat;
+  var f = beat && beat.gps && beat.gps.fix;
+  if (f && f.gpsOk === true && typeof f.freshFor === 'number' && f.freshFor > 0
+      && typeof f.lat === 'number' && typeof f.lon === 'number'
+      && typeof f.gpsErr === 'number' && isFinite(f.gpsErr)) {
+    var at = orders.filter(function (o) {
+      var pin = heldEndPin(o);
+      return pin && MV.crowMiles(f, pin) * 1609.344
+        <= ARRIVE_M + Math.min(f.gpsErr, ARRIVE_ERR_CAP_M);
+    });
+    if (at.length === 1) return at;
+  }
+  var arrived = orders.filter(function (o) { return !!o.arrivedAt; });
+  return arrived.length === 1 ? arrived : null;
+}
+
+/* An address the scanner read, or one the assembler made off a planner's
+ * sighting: decided by Assemble.dropoff, then written and said here. This was
+ * the dropoff branch of the scanner's line handler, moved out unchanged in
+ * what it writes, so both roads end in one place. `read` is the message the
+ * stream will be sent: `read.dropoff` is deleted when nothing should be said,
+ * and `read.holding` set when the hold took it. */
+function dropoffArrived(read, force) {
+  // The destination, read off the screen that comes AFTER the accept.
+  //
+  // It goes onto the order in the car and nowhere else. An offer card
+  // does not name where a delivery ends - 106 of this driver's 604 cards
+  // print "Customer dropoff" and no address - so `holding.dropoff` was
+  // null on 18% of accepted jobs, which is what makes the stacking advice
+  // silent on 39% of the pairs it is asked about.
+  //
+  // It also goes onto the CARD ON THE PANEL, when there is no order in
+  // the car and there is a card.
+  //
+  // This paragraph used to say the opposite — "only when there IS an
+  // order in the car... nothing here touches `scanner.offer`" — and the
+  // reasoning behind it was sound for the flow it was written for. Read
+  // with nothing held and no card up, this is an address belonging to no
+  // job, and storing it would measure the next offer against wherever
+  // the driver happened to be pointing the camera.
+  //
+  // What that missed is the driver's actual habit: "for doordash orders
+  // I need to tap the customer drop off location to show the address
+  // when screening". They reveal the address BEFORE deciding, because
+  // where a job ends is half of whether it is worth taking. In that
+  // moment there is no held order — and there is a card, with an id, on
+  // the panel, which is not "wherever the camera happened to be
+  // pointing". The guard that matters was never "an order is held", it
+  // was "this address belongs to something identifiable".
+  //
+  // So: the held order first, because with one in the car that is the
+  // stronger claim — every pair judged against it is nonsense without an
+  // end. Otherwise the offer on the slot, and only while it is still the
+  // card in front of the driver. With neither, nothing is stored, which
+  // is exactly what happened before.
+  //
+  // Asked through holding(), never off `scanner.held` directly. That
+  // field is the raw list; holding() is the question "is an order being
+  // carried RIGHT NOW", and it is not the same question - an order whose
+  // stated time has run out, plus half again, plus ten minutes, is
+  // already forgotten by the panel and by the stack line. Reading the
+  // slot here would attach the address to a job everything else has
+  // given up on.
+  // What the assembler decides about it, every rule in one place: whether it
+  // goes onto the order in the car, onto the card being screened, or nowhere,
+  // and from which rank. See Assemble.dropoff. Below is what is written and
+  // said about the answer.
+  //
+  // A Trip Planner's lone dropoff off a list whose end was below the screen
+  // (`singleCardOnly`, Assemble.plannerLoneDropoff) is filed only onto a held
+  // order whose card was ONE order on ONE leg, and is otherwise dropped whole,
+  // with this line in the log.
+  var dNow = Date.now();
+  var carrying = holding(dNow);
+  // WHOSE IT IS, with two orders in the car (Stage 5): see whoseDropoff. It
+  // names the order the rest of this function files onto, in place of the
+  // first-taken, or says nothing is to be filed — the chooser is open, or the
+  // address waits in the pool — and then nothing below runs. `cue` is how it
+  // was decided, for the mark row; `would`, with carrying two off, is what
+  // attribution would have decided, for the rows this already writes.
+  var who = whoseDropoff(read, force, dNow);
+  if (who.stop) {
+    delete read.dropoff;
+    return;
+  }
+  if (who.order !== undefined) carrying = who.order;
+  var cue = who.cue;
+  var would = who.would;
+  var said = read.dropoff ? Assemble.dropoff(carrying, read.dropoff, screeningCard(dNow))
+    : null;
+  if (said && said.drop) {
+    console.log('planner dropoff not filed: the list ran off the screen and '
+                + 'the held card is not a single trip');
+    delete read.dropoff;
+  }
+  if (read.dropoff && typeof read.dropoff.line === 'string') {
+    // Whether the driver ASKED for this one, or the rig simply saw it.
+    //
+    // The scanner now reports an address off any screen that has one and
+    // no payout, not only inside the window a button press opens — the
+    // driver taps the dropoff pin on their phone, which is a screen
+    // change the motion gate already reads, so the rig was looking
+    // straight at it and throwing it away for want of a second action.
+    //
+    // The two are not the same claim. A press is the driver saying "this
+    // screen is the destination", and it overrules what the card said.
+    // An unprompted sighting is the rig filling in a blank: it may fill
+    // one and may not overwrite one. Otherwise a navigation screen left
+    // up between offers would quietly rewrite the destination of a card
+    // that had named its own — a confidently wrong answer arrived at
+    // without anybody asking a question.
+    //
+    // Missing means asked, so a scanner older than this field keeps the
+    // behaviour it had.
+    var wasAsked = said.asked;
+    var kept = said.kept;
+    // ...and whether an unasked one is LABEL-PROVEN: the screen printed
+    // it under "Dropoff" in its own stop block (rpi/scan_pi.py, digest),
+    // which the driver asked to be enough, with no ⌖, while their own
+    // ✓ Took is in force. It may replace an end the CARD gave
+    // (`dropoffScanned` false) — a door beats the card's corner or town
+    // — and never one that came off the screen, pressed or seen.
+    //
+    // Two guards against a planner still up from the trip before. Seen
+    // after the Took: `at` is the scanner's clock when it read the
+    // screen, and a read older than the hold is not about it. And not
+    // one of the hold's own planner pickups: a restaurant's door filed
+    // as where the customer lives is the confidently wrong direction,
+    // so that one is refused outright, blank or not.
+    //
+    // In Assemble.dropoff's words now: a press replaces anything; a label- or
+    // planner-proven one replaces the card's end; one with no label fills a
+    // blank; and nothing unprompted moves what the screen already said.
+    // `fields` on the hold says which of them each value is.
+    var labelled = said.labelled;
+    if (said.to === 'hold') {
+      // ...and the hold's `fields`, `dropoff` and `dropoffScanned` together;
+      // a planner lone dropoff that files clears the planner's 'list'.
+      Assemble.file(carrying, read.dropoff, said, assembly);
+      // ...and written down, which it was not.
+      //
+      // This is the case the button EXISTS for. An offer card does not
+      // say where a delivery ends — Uber prints "Customer dropoff" and
+      // the address only appears on the screen after the accept — so the
+      // whole point is to capture it once the order is in the car. That
+      // path updated process memory and nothing else.
+      //
+      // It reached disk only if another card happened to arrive before
+      // the order ended, because the pairing row carries the held job's
+      // dropoff. Finish a delivery with no offer in between, or end the
+      // shift, or restart the server, and the address the driver had
+      // deliberately captured was simply gone — off the offers page, off
+      // the map, out of the stack line's reasoning, with nothing saying
+      // it had ever been there.
+      //
+      // Its own mark, the same shape and the same `asked` bit as the
+      // screening path writes, so the fold applies both by one rule.
+      if (carrying.id) {
+        appendLines(JSON.stringify({
+          v: 1, kind: 'mark', at: Date.now(),
+          id: carrying.id,
+          dropoff: read.dropoff.line,
+          asked: wasAsked,
+          // Only on a label-proven one, so the fold can let it past the
+          // card's own end as the live path just did. See the marks fold.
+          labelled: labelled || undefined,
+          // How the order was chosen, with carrying two on — `only`, a cue's
+          // name, or `chooser` — and, with it off, what attribution would
+          // have said ({cue, held}). Ids and a word: no address. See
+          // whoseDropoff.
+          cue: cue || undefined,
+          would: would || undefined
+        }) + '\n', function (err) {
+          // Said out loud for the same reason the screening branch says
+          // it: a read-only SD card mid-shift is the classic Pi failure,
+          // and the panel would otherwise go on confirming an address
+          // that reached nothing.
+          if (err) {
+            console.error('journal: could not record a held dropoff: '
+                          + err.message);
+          }
+        });
+      }
+    } else if (carrying) {
+      // Held, already knows where it ends, and nobody asked. Nothing to
+      // do — and nothing to say either, because the driver did not ask a
+      // question to be answered.
+    } else if (said.to === 'card') {
+      // Onto the card being screened, and onto its journal row.
+      //
+      // In memory first, because the panel and the stack line read
+      // `scanner.offer` and a destination that only reached the file
+      // would be invisible until the page was reloaded. `dropoffScanned`
+      // travels with it for the same reason it does on a held order: a
+      // destination the rig READ off a navigation screen and one the
+      // CARD stated are different degrees of evidence, and the row has
+      // to be able to say which it is holding.
+      Assemble.fileCard(scanner.offer, read.dropoff, said);
+      // ...and appended, as its own line naming the offer. The same
+      // shape as a tick: the journal is append-only, so this is a note
+      // ABOUT a row rather than an edit to it, and the copy at home
+      // merges it by the same newest-wins rule as everything else.
+      appendLines(JSON.stringify({
+        v: 1, kind: 'mark', at: Date.now(),
+        id: scanner.offer.id,
+        dropoff: read.dropoff.line,
+        // Whether the driver ASKED, carried onto the row rather than
+        // being decided here and forgotten.
+        //
+        // The guard above is about the card on the slot AT THIS MOMENT;
+        // the fold that applies this mark is about the row on disk,
+        // which is merged newest-wins from every reading of that offer
+        // and can carry a dropoff the in-memory card has since lost —
+        // readings of one card differ, and `bestReading` borrows ends
+        // from whichever one had them. Without this field the fold has
+        // no way to tell a press from a sighting and overwrites either
+        // way, which is a wrong destination written into an append-only
+        // file that syncs to the NUC.
+        //
+        // Absent means asked, matching how the reading itself is read
+        // above, so rows written before this field existed keep the
+        // behaviour they were written under.
+        asked: wasAsked,
+        // ...and `chooser` when the driver picked this card from the chooser
+        // over two orders in the car (whoseDropoff).
+        cue: cue || undefined
+      }) + '\n', function (err) {
+        // Said out loud, because every other write to this file says so
+        // and this one is a deliberate press the driver expects to be
+        // kept. An SD card remounted read-only mid-shift is the classic
+        // Pi failure — rpi/journal.py names it — and the panel would go
+        // on confirming "Dropoff read as ..." off the stream, which is
+        // broadcast whether or not the row landed. The address would
+        // then be gone at the next restart with nothing anywhere having
+        // mentioned it, while the pairing row written seconds earlier
+        // logged ITS failure on the same file.
+        if (err) {
+          console.error('journal: could not record a dropoff: ' + err.message);
+        }
+      });
+    }
+    // What was read is said to the panel over the stream, which is
+    // where it was always coming from: live.html listens for
+    // `msg.dropoff.line` and shows it on the button. A driver who
+    // presses this with nothing to attach an address to still sees what
+    // was read, and that is what they need.
+    //
+    // ...but only if they PRESSED, or if it was kept.
+    //
+    // That distinction did not exist when this was written: every
+    // dropoff message followed a press, so "say what was read" was
+    // always an answer to a question somebody asked. Unprompted
+    // sightings broke it. The branch above refuses to overwrite a
+    // destination the card itself stated and says so — "nothing to say
+    // either, because the driver did not ask a question to be answered"
+    // — and then the stream said it anyway, because the broadcast is
+    // outside all of this.
+    //
+    // What the driver saw: holding an order whose destination came off
+    // the card, a navigation screen for somewhere else catches one read,
+    // and the panel's ⌖ button turns green reading "Dropoff read as
+    // <the other address>". It is not the held job's destination, it is
+    // not on the record, and /api/status cannot correct it — the poll
+    // only rewrites `destSaid` when the held order is `dropoffScanned`
+    // or when there is no held order at all, and this is neither. It
+    // stands until the order ends.
+    //
+    // A press still shows what was read even when nothing could be
+    // attached to it, which is the case the paragraph above is about and
+    // is deliberately unchanged.
+    // One tally row per unprompted address that arrives while an order is
+    // in the car. It changes nothing and is here to answer one question.
+    //
+    // AUDITS.md refuses a guard on this path twice — refusing an
+    // unprompted address whenever a rival card had been read recently —
+    // because measured, it discards the HELD job's own destination, and
+    // permanently: `dropoff_said` in rpi/scan_pi.py is set on emit and
+    // never cleared, so an address refused once is never volunteered
+    // again for that delivery. The refusal is right, but it was argued
+    // from a firing rate nobody has measured, and that is the wrong way
+    // to leave it.
+    //
+    // The counters the reader already keeps cannot answer it.
+    // `addressAsOffer` and `streetNoAddress` describe the FRAME — was
+    // there a payout on it, was there a street with no address. The
+    // question here is about ATTRIBUTION, and only this process knows
+    // both halves of it: what is in the car, and what is on the slot.
+    //
+    // So: whether an order was carried (this row exists at all), which
+    // one, which card the driver was actually looking at, and what was
+    // done with the address. `slot !== held` on a row whose `kept` is
+    // true is a screening tap that may have been filed onto the wrong
+    // job — the population the guard would have been for. `kept` false
+    // is the other half, the tap that was discarded because the held
+    // order already knew where it was going, which is its own Open entry.
+    //
+    // NO ADDRESS ON THIS ROW, deliberately. It is a tally, not a record
+    // of where anybody lives, and the journal syncs to a second machine.
+    // Two ids and a boolean answer the question; the street does not.
+    //
+    // Cheap by construction: the reader emits an address only off a frame
+    // with no payout and no merchant on it, and suppresses a repeat of a
+    // line it has already said, so this is roughly once per distinct
+    // address seen rather than once per frame.
+    //
+    // `id` is stamped from the clock the way the reader's `seen` rows
+    // are, and carries the same caveat: two in one millisecond would be
+    // one key to the sync and one of them would be dropped. The reader
+    // cannot produce two distinct addresses that close together.
+    //
+    // A kind this build invented is safe on both the fold and the sync:
+    // the fold skips kinds it does not know ("something newer than this
+    // reader") and syncKey carries an unknown kind across on its id and
+    // seq, which is what the pair rows' own comment there is about.
+    if (said.tally) {
+      var sightedAt = Date.now();
+      var onSlot = screeningCard(sightedAt);
+      appendLines(JSON.stringify({
+        v: 1, kind: 'sighting', at: sightedAt,
+        id: 'sighting-' + sightedAt, seq: 1,
+        held: carrying.id || null,
+        // Null when the slot holds nothing recent enough to be what the
+        // driver is looking at — which is a different answer from "the
+        // same card", and the count needs to tell those apart.
+        slot: onSlot ? onSlot.id : null,
+        kept: !!kept,
+        // With carrying two off: what attribution would have said, {cue,
+        // held}, ids only. With it on: how this order was chosen.
+        would: would || undefined,
+        cue: cue || undefined
+      }) + '\n', function (err) {
+        // Said out loud like every other write on this path. A tally that
+        // silently stopped being written would be read months later as a
+        // rate of zero, which is the one wrong answer it can give.
+        if (err) {
+          console.error('journal: could not record a dropoff sighting: '
+                        + err.message);
+        }
+      });
+    }
+    if (!wasAsked && !kept) { delete read.dropoff; }
+    // ...and an address filed onto the order in the car goes to the
+    // panel AS that order's end, not only as the button's words.
+    //
+    // The driver's report: "I accepted a delivery, it mapped the drop
+    // off address but it did not hold those pins when it scanned a
+    // doordash card." The page learned where a held order ends only
+    // from a READING (withStack), so a ⌖ read after ✓ Took turned the
+    // button green and put nothing on Map view; what the map was
+    // showing was the accepted CARD's own dropoff, drawn as this card's
+    // "and drop it here", and the next card took it off the glass with
+    // the card it belonged to. Measured in rpi/test_dashboard.py's
+    // stage 'the held end, from the press': after the ⌖ read the map
+    // had the car and the pickup and no held pin.
+    //
+    // Only when it was kept on the HOLD: an address filed onto the card
+    // being screened, or read with nothing to file it on, is not where
+    // the order in the car is going.
+    //
+    // `holding` is the first-taken order, as on every message — with two in
+    // the car the address may have gone onto the second, which `orders` says.
+    if (kept && carrying) {
+      read.holding = heldForPanel(holding(Date.now()));
+      if (carryTwo()) read.orders = ordersForPanel(Date.now());
+    }
+    //
+    // `scanner.dropoff` and `scanner.dropoffAt` were kept here for that
+    // and are gone. They were written on every read and not one line in
+    // this repository ever read them back — the comment above them said
+    // "so the page can say what was read", which the page does, from the
+    // stream, having never asked for these. State nothing consults is
+    // not a store, it is a claim in a comment.
+    //
+    // The reload case they would have covered is covered by the two
+    // fields that are real: a held order carries `dropoff` and
+    // `dropoffScanned`, and since this change so does the card on the
+    // slot, both of which /api/status already sends.
+  }
+  // A dropoff filed onto the hold above is searched for on the NucBox
+  // (searchHeldEnd); a no-op when nothing new was filed.
+  if (read.dropoff) heldOrders(Date.now()).forEach(armHeldEnd);
+}
+
+/* ---------- the held order's own card, back under a new id -----------------
+ *
+ * After ✓ Took the same card can come back onto the phone and be logged again
+ * under a NEW id. The scanner's OfferLog kept one card's identity, so a card
+ * paged away from and back to was a new offer as far as the journal could tell
+ * (see the dupe-id note in the commit that added this). It now remembers the
+ * last few cards and gives one back its id inside ninety seconds
+ * (rpi/journal.py, RECENT_CARDS), which the offer line's own-id test answers;
+ * a return it cannot recognise — after a restart, past the ninety seconds, an
+ * address read differently — still arrives under a new id, and this is for
+ * those. The server then judged it against the held
+ * order as a second job: a pair row in the append-only journal and a stack
+ * line on the panel, for one order measured against itself. Measured on the
+ * 12 Oct shift: 9 cards were logged under two ids each, one of them the card
+ * just taken, back 33 s after its last row; its pair row (19 s after the Took)
+ * reads stack `warn` under a PASS headline.
+ *
+ * The same card here is the card the driver pressed Took on, figure for
+ * figure: pay to the cent, the same miles and the same card minutes, and the
+ * same pickup and dropoff wherever both readings carry one (case, commas and
+ * spacing ignored). Uber's own re-offers that differ by a few cents ("Includes
+ * expected tip" against "Guaranteed") are different offers and stay paired.
+ * And only within HELD_CARD_MS of the press: the order is on its way after
+ * that, and a card the same to the cent is a new one.
+ *
+ * Not an accept detector. Nothing is marked and nothing is put in the car:
+ * the driver already said they took THIS card, and this only stops the rig
+ * from asking them about it a second time. */
+var HELD_CARD_MS = envNumber('HELD_CARD_MS', 3 * 60000);
+
+/* The figures a card is recognised by, and the test itself: moved to the
+ * assembler (Assemble.cardSeen, Assemble.heldOwnCard), which is handed the
+ * window and what the slot already says. Kept under these names so the call
+ * sites read as they did. */
+function cardSeen(c, reading) {
+  return Assemble.cardSeen(c, reading);
+}
+
+function heldOwnCard(held, card, now, reading) {
+  return Assemble.heldOwnCard(held, card, now, reading, HELD_CARD_MS,
+                              scanner.offer ? scanner.offer.heldCard : null);
 }
 
 /* ---------- the GPS drop: at the held order's door, then gone from it -------
@@ -1216,60 +1909,106 @@ function holdIdOf(h) {
  * the gate passed. And it turns no distance into minutes: the hold still
  * expires on its own stated clock, this only ends it sooner, as Drop does.
  *
- * WHERE THE END IS comes from Map view and nowhere else: when the page pins
- * the held end at DOOR level — searchPlan says the dropoff names a house
+ * WHERE THE END IS comes from Map view's rule and nowhere else: this server
+ * searches the NucBox for it by that rule as soon as the hold names a dropoff
+ * (searchHeldEnd), and when the page pins the held end at DOOR level — searchPlan says the dropoff names a house
  * number, and the NucBox answer it chose carries that number (MV.hasDoor),
- * inside the held card's disc — it posts the pin to /api/held-end. A street
- * or a town is never an end for this: a pin a few hundred metres off is a
- * drop at the wrong house or no drop at all, and refusing is the cheap
- * error — the timer and Drop still apply. With Map view never opened on
- * that hold, there is no pin and nothing here happens.
+ * inside the held card's disc — it posts the pin to /api/held-end. The first
+ * pin for a dropoff wins. A street or a town is never an end for this: a pin
+ * a few hundred metres off is a drop at the wrong house or no drop at all,
+ * and refusing is the cheap error — the timer and Drop still apply. With no
+ * NucBox set and Map view never opened on that hold, there is no pin and
+ * nothing here happens.
  *
- * The numbers. The owner's VK-162 read eph 27.8 m on mode 3 indoors (gps.py,
- * FIX_ERR_MAX), and the gate refuses anything over 50 m, so a fix that counts
- * here is never rougher than 50. A door pin is the address node or the
- * building's middle, and the car stops at the kerb or in the drive: tens of
- * metres off it (an estimate, not measured). So ARRIVE_M is 75 m plus the
- * fix's own error — at most 125 m with the gate's cap. LEAVE_M is 300 m:
- * past the largest arrive radius by more than two worst-case errors
- * (125 + 2 x 50 = 225), so a parked car's scatter cannot read as leaving,
- * and it takes TWO consecutive good fixes out there. DWELL_S is 45 s inside,
- * with no gap over GAP_S between counted fixes (gps.py's own 20 s staleness
- * line): at 30 mph a car crosses a 250 m circle in 19 s, so driving past does
- * not arrive; a crawl in stopped traffic beside the door can, and is what to
- * watch for. Settable for the suite, like HOLD_GRACE_MS. */
+ * The numbers, from a replay of the driver's real 12 Oct drive (385 min of
+ * fixes, replayed outside the repo). Parked, the car's fixes
+ * scattered 3.4 m from where it stood at the median, 22.7 m at p99 and
+ * 34.7 m at worst, while the receiver's own error estimate read 27.6 m at the
+ * median — about eight times the real scatter — and no parked fix was ever
+ * past 75 m from its stop. So ARRIVE_M is 75 m plus the fix's error capped at
+ * 25 (ARRIVE_ERR_CAP_M): 100 m at most, where it was 75 + the gate's 50 =
+ * 125. What the cap does NOT do is keep the car's wait for the food from
+ * arriving at a door near the restaurant. Replayed with a door placed round
+ * each of the drive's three restaurant stops, eight directions each: 50 or
+ * 75 m away it arrived 24 times of 24 at 125 m AND at 100 m; 100 m away, 1 of
+ * 24 at 125 m and 0 at 100 m. A door at the restaurant would have put the
+ * order down as the car left with the food, 21 and 43 min early on the two
+ * orders whose wait came after the Took. The restaurant guard below
+ * (pickupNearEnd) is what stops that, not the radius. (Re-run in the
+ * verification pass; the first version of this paragraph had the 1 of 24 as
+ * the 50-75 m doors at 100 m.)
+ *
+ * DWELL_S is 60 s inside. The drive held 53 still stops of 45 s or more; 60 s
+ * removes 7 of them, and the real doors held the car inside for 184, 243 and
+ * 794 s, so none is lost. Between counted fixes there may be no silence over
+ * GAP_S (gps.py's own 20 s staleness line): at 30 mph a car crosses a 200 m
+ * circle in 15 s, so driving past does not arrive; a crawl in stopped
+ * traffic beside the door can, and is what to watch for. But a run of fixes
+ * the GATE refused (err over 50 m, `rough`) is not silence: the replay had
+ * runs of 21-45 s of them parked at a door, and resetting the dwell on them
+ * delayed one drop. Such a run, up to REJECTED_GAP_S (60 s) and with good
+ * fixes inside the circle on both sides of it, keeps the dwell; the time in
+ * it does not count toward it. A stretch of no fixes at all still resets
+ * after GAP_S.
+ *
+ * LEAVE_M is 300 m on TWO consecutive good fixes, unchanged: the replay found
+ * no false departure with it. Settable for the suite, like HOLD_GRACE_MS. */
 function envNumber(name, dflt) {
   var v = Number(process.env[name]);
   return (isFinite(v) && v >= 0 && process.env[name] !== undefined && process.env[name] !== '')
     ? v : dflt;
 }
-var ARRIVE_M = 75;            // plus the fix's own error, which the gate caps at 50
-var ARRIVE_ERR_CAP_M = 50;    // gps.py FIX_ERR_MAX
+var ARRIVE_M = 75;            // plus the fix's own error, capped below
+var ARRIVE_ERR_CAP_M = 25;    // so 100 m at most (the gate itself stops at 50)
 var LEAVE_M = 300;
 var LEAVE_FIXES = 2;
-var DWELL_MS = envNumber('GPS_DWELL_MS', 45000);
+var DWELL_MS = envNumber('GPS_DWELL_MS', 60000);
 var GAP_MS = envNumber('GPS_GAP_MS', 20000);
+var REJECTED_GAP_MS = 60000;
+// A door this close to one of the held order's pickups is not armed. See
+// pickupNearEnd.
+var PICKUP_GUARD_M = 150;
+var PICKUP_PINS_MAX = 4;
 // How long the panel says "dropped · left the dropoff" after one.
 var GPS_DROP_SAID_MS = 60000;
+// ...and "previous order put down" after a Took that replaced a hold.
+var HELD_REPLACED_SAID_MS = 60000;
+// ...and how long the panel offers to undo a Took that added a second order.
+var UNDO_ADDED_MS = 5000;
 
 // The live part of the arrival, which is not worth an SD write per fix: where
-// the dwell started and the last fix counted. `arrivedAt` and the pin ARE on
-// the hold, and so in holding.json, because those are the facts a restart in
-// the driveway must not forget.
-var arrival = { holdId: null, insideSince: null, lastFixAt: null, outCount: 0 };
+// the dwell started and the last fix counted; `skippedMs`, the time in
+// gate-refused runs since then that does not count toward it; and
+// `refusedFrom`/`refusedTo`/`silentMs`, the run of refused fixes since the
+// last counted one (its first and last, and its longest stretch of nothing at
+// all). `arrivedAt` and the pin ARE on the hold, and so in holding.json,
+// because those are the facts a restart in the driveway must not forget.
+//
+// One per order, by holdId (`arrivals`): two orders in the car are two doors,
+// and a dwell counted at one is not a dwell at the other. Memory only, as the
+// one was; an order put down takes its own with it (forgetHoldsGone).
+var arrivals = {};
 
 function resetArrival(id) {
-  arrival = { holdId: id || null, insideSince: null, lastFixAt: null, outCount: 0 };
+  if (!id) return null;
+  arrivals[id] = { holdId: id, insideSince: null, lastFixAt: null, outCount: 0,
+                   skippedMs: 0, refusedFrom: null, refusedTo: null, silentMs: 0 };
+  return arrivals[id];
+}
+
+function arrivalOf(id) {
+  return arrivals[id] || resetArrival(id);
 }
 
 /* A beat's fix as this file will count it, or null: the gate passed it, it is
  * still inside gps.py's staleness rule (`freshFor`, which a scanner older than
  * that field does not send — refused, not guessed), and it is a fix this file
  * has not already counted. Its time is the server's arrival less its age. */
-function countableFix(beat, now) {
+function countableFix(beat, now, arrival) {
   var g = beat && beat.gps;
   var f = g && g.fix;
-  if (!f || f.gpsOk !== true) return null;
+  if (!f) return null;
+  if (f.gpsOk !== true) { refusedFix(f, now, arrival); return null; }
   if (typeof f.freshFor !== 'number' || !(f.freshFor > 0)) return null;
   if (typeof f.lat !== 'number' || typeof f.lon !== 'number'
       || !isFinite(f.lat) || !isFinite(f.lon)) return null;
@@ -1282,6 +2021,22 @@ function countableFix(beat, now) {
   return { lat: f.lat, lon: f.lon, err: f.gpsErr, at: at };
 }
 
+/* A fix the gate refused as `rough` (err over FIX_ERR_MAX), kept only as a
+ * time: it proves the receiver was still talking, so a run of them is not the
+ * silence GAP_MS resets on. Its position is never used. Only a fresh one, and
+ * only after a counted fix (the run is measured from it). */
+function refusedFix(f, now, arrival) {
+  if (f.gpsWhy !== 'rough' || arrival.lastFixAt === null) return;
+  if (typeof f.freshFor !== 'number' || !(f.freshFor > 0)) return;
+  if (typeof f.gpsAge !== 'number' || !isFinite(f.gpsAge) || f.gpsAge < 0) return;
+  var at = now - f.gpsAge * 1000;
+  var last = arrival.refusedTo === null ? arrival.lastFixAt : arrival.refusedTo;
+  if (at <= last) return;
+  arrival.silentMs = Math.max(arrival.silentMs, at - last);
+  if (arrival.refusedFrom === null) arrival.refusedFrom = at;
+  arrival.refusedTo = at;
+}
+
 /* The held end this file may arrive at, or null: a door-level pin made for
  * this hold and for the dropoff it still names (a ⌖ press can change it). */
 function heldEndPin(h) {
@@ -1290,54 +2045,384 @@ function heldEndPin(h) {
   return p;
 }
 
-/* One heartbeat. Returns what the panel is told on that beat: whether the car
- * is at the held order's dropoff now. Puts the order down on the departure. */
-function gpsArrival(beat, now) {
-  var h = holding(now);
+/* The restaurant guard: whether one of the held orders' pickups, pinned by
+ * Map view (/api/held-pickup), is within PICKUP_GUARD_M of its end. The 12 Oct
+ * replay: a door 50-75 m from a restaurant the car waited at arrived there 24
+ * times of 24, and would have dropped the order on leaving with the food,
+ * 19-43 min early. A door that close is not armed at all — the timer and Drop
+ * still end the order — and /api/status says why.
+ *
+ * EVERY order's pickups, not only this one's: with two in the car the car
+ * waits at the second order's restaurant too, and a first order's door beside
+ * it would arrive there the same way. With one order it is that order's. */
+function pickupNearEnd(h, pin) {
+  var picks = [];
+  heldOrders(Date.now()).concat(h && scanner.held.indexOf(h) === -1 ? [h] : [])
+    .forEach(function (o) {
+      if (Array.isArray(o.pickupPins)) picks = picks.concat(o.pickupPins);
+    });
+  return picks.some(function (p) {
+    return MV.crowMiles(p, pin) * 1609.344 <= PICKUP_GUARD_M;
+  });
+}
+
+/* ---------- the held end, searched for by this server --------------------
+ *
+ * The driver: GPS arrival should arm without opening Map view. So when the
+ * hold's dropoff is set or changes (✓ Took with a card dropoff, ⌖ Scan, a
+ * sighting filed onto the hold) and NUCBOX_SEARCH is set, this server asks
+ * the NucBox the question Map view would — searchPlan's street, in discBox
+ * round the HELD card's disc (discFor: its fix, its distance plus SLACK_MI),
+ * chosen by pickInDisc (one answer, or every answer one place) — and keeps
+ * the pin only when it is DOOR level: the dropoff names a house number and
+ * the chosen answer carries it (hasDoor). Map view's own functions, so the
+ * page and the server cannot keep two rules for "door level".
+ *
+ * The public geocoder is never asked: it is the page's fallback, rationed and
+ * outside the VPN, and a pin the GPS ends a delivery on is the NucBox's or
+ * none. With NUCBOX_SEARCH unset nothing here sends anything.
+ *
+ * ONE search per hold and dropoff text (`endSearch.key`); a failure or a
+ * timeout is asked once more after END_RETRY_MS and then left. A refusal is
+ * kept on the hold as `endWhy` (with `endWhyFor`, the text it is about, so a
+ * changed dropoff does not wear the old reason) and /api/status says it, so
+ * the driver can see why the GPS drop is not armed. The first valid pin for a
+ * text wins, this one or the page's, and an answer that comes back after the
+ * hold or its text changed is dropped. END_RETRY_MS is settable for the suite,
+ * like GPS_DWELL_MS; 30 s is chosen, not measured. */
+var END_RETRY_MS = envNumber('NUCBOX_RETRY_MS', 30000);
+// One per order, by holdId: {key, timer}.
+var endSearch = {};
+
+function endKeyOf(h) {
+  return h && typeof h.dropoff === 'string' && h.dropoff
+    ? holdIdOf(h) + '\n' + h.dropoff : null;
+}
+
+/* The hook: called for each order after the list is written (setHeld), after
+ * a scanner line may have filed a dropoff onto one, and at boot. A no-op
+ * unless the order names a dropoff this server has not yet searched for. */
+function armHeldEnd(h) {
+  if (!NBX.search || !h) return;
   var id = holdIdOf(h);
-  if (arrival.holdId !== id) resetArrival(id);
+  var key = endKeyOf(h);
+  var was = endSearch[id];
+  if (was && key === was.key) return;
+  if (was && was.timer) clearTimeout(was.timer);
+  endSearch[id] = { key: key, timer: null };
+  // Nothing to search, already pinned, or already refused before a restart
+  // for a reason another asking would not change (a NucBox down is asked).
+  if (!key || heldEndPin(h)
+      || (h.endWhyFor === h.dropoff && h.endWhy !== 'NucBox down')) return;
+  searchHeldEnd(key, 1);
+}
+
+// The order this search is still about, or null.
+function endHold(key) {
+  var hit = null;
+  heldOrders(Date.now()).forEach(function (h) {
+    var on = endSearch[holdIdOf(h)];
+    if (on && on.key === key && endKeyOf(h) === key) hit = h;
+  });
+  return hit;
+}
+
+function refuseHeldEnd(h, why) {
+  h.endWhy = why;
+  h.endWhyFor = h.dropoff;
+  saveHold(h);
+}
+
+// pickInDisc's refusals, in the panel's words.
+var END_WHY = { nodoor: 'no house number', none: 'not inside the card\'s reach',
+                several: 'several answers', capped: 'too many answers' };
+
+function searchHeldEnd(key, attempt) {
+  var h = endHold(key);
+  if (!h) return;
+  var plan = MV.searchPlan(h.dropoff);
+  if (!plan || plan.kind !== 'street' || !plan.door) return refuseHeldEnd(h, 'no house number');
+  var disc = MV.discFor(h.card || null);
+  if (!disc) return refuseHeldEnd(h, 'no card fix');
+  var said = nbxTerm(plan.street);
+  if (!said) return refuseHeldEnd(h, 'no house number');
+  var target = nbxSearchTarget('street', said, MV.discBox(disc));
+  function answered(out) {
+    var now = endHold(key);
+    if (!now || heldEndPin(now)) return;    // moved on, or the page pinned first
+    // Door level is pickInDisc's own rule: with a house number in the plan
+    // (required above) it keeps only answers that carry it, and refuses with
+    // 'nodoor' when none does. A second hasDoor here could never refuse
+    // anything — undone, no check failed — and was a second place answering
+    // the same question.
+    var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
+    if (!res.at) {
+      return refuseHeldEnd(now, END_WHY[res.why] || 'no house number');
+    }
+    // As /api/held-end keeps one, plus who chose it.
+    now.endPin = { dropoff: now.dropoff, lat: res.at.lat, lon: res.at.lon,
+                   doorLevel: true, pinnedAt: Date.now(), by: 'server' };
+    delete now.arrivedAt;
+    delete now.endWhy;
+    delete now.endWhyFor;
+    resetArrival(holdIdOf(now));
+    saveHold(now);
+  }
+  if (nbxCache.has(target)) return answered(nbxCache.get(target));
+  nbxAsk(target, function (err, body) {
+    if (!err && !Array.isArray(body)) err = 'not a list';
+    if (err) {
+      var now = endHold(key);
+      if (!now || heldEndPin(now)) return;
+      refuseHeldEnd(now, 'NucBox down');
+      var on = endSearch[holdIdOf(now)];
+      if (attempt === 1 && on) {
+        on.timer = setTimeout(function () {
+          on.timer = null;
+          searchHeldEnd(key, 2);
+        }, END_RETRY_MS);
+      }
+      return;
+    }
+    var out = nbxHits(body);
+    nbxRemember(target, out);
+    answered(out);
+  });
+}
+
+/* ---------- the held order's pickups, searched for by this server ----------
+ *
+ * The restaurant guard (pickupNearEnd) is only as good as the pickups it is
+ * given, and until this only Map view gave them (/api/held-pickup): with Map
+ * view never opened on a hold the guard held nothing, and searchHeldEnd armed
+ * a door next to the restaurant all the same — the case the guard is there
+ * for (the 12 Oct replay, at PICKUP_GUARD_M). So when the hold carries its
+ * Trip Planner (the rig reads it unpressed while an order is held) and
+ * NUCBOX_SEARCH is set, this server asks the NucBox for each of its pickups
+ * the question Map view asks: each stop
+ * MV.heldPickups keeps (a pickup that has a street, its line as the place),
+ * searchPlan's street in discBox round the HELD card's disc, chosen by
+ * pickInDisc. Map view's own functions, as for the end. The position is kept
+ * as /api/held-pickup keeps one (keepPickupPin): one path, so the two cannot
+ * keep pickups two ways.
+ *
+ * Any pin pickInDisc chooses, not only a door: where the line has a house
+ * number the door rule is pickInDisc's own, and where it has none the street's
+ * agreeing answers are what Map view pins too (with no street index). The
+ * guard only ever WITHHOLDS the GPS drop, so a pickup kept a little off costs
+ * at most a drop the timer and Drop still make — the cheap error, as refusing
+ * the end is. A corner ("A & B") is the street index's question, which this
+ * server does not ask: no pin, as with no NucBox at all. NucBox only; with
+ * NUCBOX_SEARCH unset nothing here sends anything.
+ *
+ * ONE search per hold and pickup line (`pickSearch.asked`); a failure or a
+ * timeout is asked once more after END_RETRY_MS, as the end's is, and an
+ * answer that comes back after the hold changed is dropped. Nothing is kept
+ * of a refusal; /api/status says how many pickups the guard holds
+ * (`pickupsPinned`) beside the planner's own stops (`planner`), and Map view
+ * says why one has no pin. */
+// One per order, by holdId: {asked, timers}.
+var pickSearch = {};
+
+/* The hook, beside armHeldEnd: for each order after the list is written, when
+ * a Trip Planner read lands on one, and at boot. A no-op for a pickup line
+ * already asked about on that order. */
+function armHeldPickups(h) {
+  if (!NBX.search || !h) return;
+  var id = holdIdOf(h);
+  var on = pickSearch[id] || (pickSearch[id] = { asked: {}, timers: [] });
+  if (!h.planner || !MV.discFor(h.card || null)) return;
+  MV.heldPickups(h.planner.stops).forEach(function (p) {
+    if (on.asked[p.q]) return;
+    on.asked[p.q] = true;
+    searchHeldPickup(id, p.q, 1);
+  });
+}
+
+// The order this search is still about, or null.
+function pickHold(id) {
+  return pickSearch[id] ? heldById(id, Date.now()) : null;
+}
+
+/* The per-order state of an order no longer on the list goes with it: its
+ * end search and its timer, its pickup searches and theirs, and its arrival.
+ * Called by setHeld, so every way an order leaves takes them. */
+function forgetHoldsGone(list) {
+  var ids = (list || []).map(holdIdOf);
+  Object.keys(endSearch).forEach(function (id) {
+    if (ids.indexOf(id) !== -1) return;
+    if (endSearch[id].timer) clearTimeout(endSearch[id].timer);
+    delete endSearch[id];
+  });
+  Object.keys(pickSearch).forEach(function (id) {
+    if (ids.indexOf(id) !== -1) return;
+    pickSearch[id].timers.forEach(clearTimeout);
+    delete pickSearch[id];
+  });
+  Object.keys(arrivals).forEach(function (id) {
+    if (ids.indexOf(id) === -1) delete arrivals[id];
+  });
+}
+
+function searchHeldPickup(id, q, attempt) {
+  var h = pickHold(id);
+  if (!h) return;
+  var plan = MV.searchPlan(q);
+  var disc = MV.discFor(h.card || null);
+  var said = plan && plan.kind === 'street' ? nbxTerm(plan.street) : null;
+  if (!said || !disc) return;
+  var target = nbxSearchTarget('street', said, MV.discBox(disc));
+  function answered(out) {
+    var now = pickHold(id);
+    if (!now) return;
+    var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
+    if (res.at) keepPickupPin(now, res.at);
+  }
+  if (nbxCache.has(target)) return answered(nbxCache.get(target));
+  nbxAsk(target, function (err, body) {
+    if (!err && !Array.isArray(body)) err = 'not a list';
+    if (err) {
+      if (attempt === 1 && pickHold(id)) {
+        pickSearch[id].timers.push(setTimeout(function () {
+          searchHeldPickup(id, q, 2);
+        }, END_RETRY_MS));
+      }
+      return;
+    }
+    var out = nbxHits(body);
+    nbxRemember(target, out);
+    answered(out);
+  });
+}
+
+/* Keep one of the held order's pickups, from Map view (/api/held-pickup) or
+ * this server's own search: at most PICKUP_PINS_MAX, the newest, one per
+ * position.
+ *
+ * ...and the guard asked again there and then. A door armed before its
+ * restaurant was known may already have counted the car waiting at the
+ * restaurant as an arrival — in the 12 Oct replay a door 50-75 m from the
+ * restaurant "arrived" 1 time in 24 at today's 100 m, and 24 in 24 at the
+ * 125 m before it — and gpsArrival only stops counting from the next beat. Left on the hold, that arrival is "arrived" on
+ * /api/status for a door that is not armed, and should the guard stop holding
+ * (a newer pickup pushing this one out of the PICKUP_PINS_MAX kept) the next
+ * departure puts the order down on it. So a pickup that puts the armed door
+ * inside the guard takes the arrival and the dwell with it. */
+function keepPickupPin(h, at) {
+  var picks = (Array.isArray(h.pickupPins) ? h.pickupPins : []).filter(function (p) {
+    return p.lat !== at.lat || p.lon !== at.lon;
+  });
+  picks.push({ lat: at.lat, lon: at.lon });
+  h.pickupPins = picks.slice(-PICKUP_PINS_MAX);
+  // Every order's door, since the guard is every order's pickups (see
+  // pickupNearEnd): a second order's restaurant can sit beside the first's.
+  heldOrders(Date.now()).forEach(function (o) {
+    var pin = heldEndPin(o);
+    if (pin && pickupNearEnd(o, pin)) {
+      delete o.arrivedAt;
+      resetArrival(holdIdOf(o));
+    }
+  });
+  saveHold(h);
+}
+
+/* One heartbeat. Returns what the panel is told on that beat: whether the car
+ * is at a held order's dropoff now. Puts an order down on the departure from
+ * its own door — each order by its own pin and its own arrival, so leaving
+ * one door puts down that order and no other. */
+function gpsArrival(beat, now) {
+  var at = false;
+  heldOrders(now).slice().forEach(function (h) {
+    if (arriveOne(h, beat, now)) at = true;
+  });
+  return at;
+}
+
+function arriveOne(h, beat, now) {
+  var arrival = arrivalOf(holdIdOf(h));
   var pin = heldEndPin(h);
-  if (!pin) return false;
-  var fix = countableFix(beat, now);
+  if (!pin || pickupNearEnd(h, pin)) return false;
+  var fix = countableFix(beat, now, arrival);
   if (!fix) return false;
   var gap = arrival.lastFixAt === null ? Infinity : fix.at - arrival.lastFixAt;
+  // A gap the gate's refusals filled: no silence in it over GAP_MS, from the
+  // last counted fix through the run to this one, and no longer than
+  // REJECTED_GAP_MS in all.
+  var refused = arrival.refusedTo !== null && gap <= REJECTED_GAP_MS
+    && Math.max(arrival.silentMs, fix.at - arrival.refusedTo) <= GAP_MS;
   arrival.lastFixAt = fix.at;
+  arrival.refusedFrom = arrival.refusedTo = null;
+  arrival.silentMs = 0;
   var metres = MV.crowMiles(fix, pin) * 1609.344;
   if (!h.arrivedAt) {
     var within = ARRIVE_M + Math.min(fix.err, ARRIVE_ERR_CAP_M);
     if (metres > within) { arrival.insideSince = null; return false; }
-    if (arrival.insideSince === null || gap > GAP_MS) arrival.insideSince = fix.at;
-    if (fix.at - arrival.insideSince < DWELL_MS) return false;
+    if (arrival.insideSince === null || (gap > GAP_MS && !refused)) {
+      arrival.insideSince = fix.at;
+      arrival.skippedMs = 0;
+    } else if (gap > GAP_MS) {
+      arrival.skippedMs += gap;       // inside on both sides; not counted
+    }
+    if (fix.at - arrival.insideSince - arrival.skippedMs < DWELL_MS) return false;
     h.arrivedAt = now;
-    setHolding(h);   // the arrival survives a restart in the driveway
+    saveHold(h);   // the arrival survives a restart in the driveway
     return true;
   }
   if (metres <= LEAVE_M) { arrival.outCount = 0; return true; }
   arrival.outCount += 1;
   if (arrival.outCount < LEAVE_FIXES) return false;
   putDown(now, 'gps', function () {
-    broadcast({ gpsDrop: { at: now, saidForMs: GPS_DROP_SAID_MS } });
-  });
+    var left = holding(now);
+    var said = { gpsDrop: { at: now, saidForMs: GPS_DROP_SAID_MS } };
+    // With an order left in the car the panel is told which one went and what
+    // is left, on the same message: a gpsDrop alone means "nothing held".
+    if (left) {
+      said.gpsDrop.holdId = holdIdOf(h);
+      said.gpsDrop.pay = numOrNull(h.pay);
+      said.holding = heldForPanel(left);
+      said.orders = ordersForPanel(now);
+    }
+    broadcast(said);
+  }, [h]);
   return false;
 }
 
-/* Put the order in the car down, and write the drop row: the one path both
+/* Put orders in the car down, and write a drop row for each: the one path both
  * Drop (/api/delivered) and the GPS take. `by` is 'gps' for the second and
  * absent from the row for a press, so rows written before this are the shape
- * they always were. `done(wasHolding)`. See /api/delivered for the row. */
-function putDown(now, by, done) {
-  // holding(), not the raw slot, and asked BEFORE setHolding(null).
-  var dropped = holding(now);
-  setHolding(null);
-  resetArrival(null);
-  if (!dropped) return done(false);
-  var row = { v: 1, kind: 'drop', at: now, id: dropped.id, seq: now,
-              acceptedAt: dropped.acceptedAt };
-  if (by) row.by = by;
-  appendLines(JSON.stringify(row) + '\n', function (err) {
+ * they always were. `which` is the orders to put down, as heldOrders gave
+ * them; absent, the first-taken — the only one there is while one is all the
+ * car carries. `done(wasHolding)`. See /api/delivered for the row. */
+function putDown(now, by, done, which) {
+  // heldOrders(), not the raw list, and asked BEFORE the list is rewritten.
+  var live = heldOrders(now);
+  // How many orders were in the car at the moment: a drop row written with
+  // two held says so (`carried: 2`), because its `at - acceptedAt` is then an
+  // elapsed time for the named order only if the press named the right one.
+  var carried = live.length;
+  var dropped = (which || live.slice(0, 1)).filter(function (h) {
+    return live.indexOf(h) !== -1;
+  });
+  // ...and, asked for no order in particular, one with no stated time goes as
+  // well: it is never counted as carried, and Drop always cleared the slot.
+  setHeld(scanner.held.filter(function (h) {
+    return dropped.indexOf(h) === -1 && (which || holdEnds(h) !== null);
+  }));
+  if (!dropped.length) return done(false);
+  var rows = dropped.map(function (d) {
+    var row = { v: 1, kind: 'drop', at: now, id: d.id, seq: now,
+                acceptedAt: d.acceptedAt };
+    if (by) row.by = by;
+    if (carried >= 2) row.carried = carried;
+    return JSON.stringify(row) + '\n';
+  });
+  appendLines(rows.join(''), function (err) {
     if (err) console.error('journal: could not record a drop: ' + err.message);
     done(true);
   });
+  // ...and an address waiting to be someone's is dropped if one of the orders
+  // it was waiting between has gone (Assemble.retryUnowned).
+  retryPool();
 }
 
 /* The offer as Advice.stack has to see it: timed the way the HELD job is timed.
@@ -1397,14 +2482,33 @@ function timedLikeTheHeldJob(read) {
  * address the ⌖ press filed onto it — because the page's map draws the held
  * end from whichever of them spoke last, and two of them used not to say it at
  * all: see the dropoff branch in startScanner and /api/offers/mark. */
+/* The GPS drop's state for the order in the car, in the three fields the
+ * panel's in-car line says it from (live.html, gpsDropSaid): whether a
+ * door-level pin is on it, whether the GPS has seen the car arrive there, and,
+ * when it is not armed, why — a pin next to one of its pickups (pickupNearEnd),
+ * or this server's refusal of the dropoff text it still names (searchHeldEnd).
+ * ONE function, for /api/status, heldForPanel and the beat, so the status link
+ * and the panel cannot give two answers about one pin. */
+function heldEndState(h) {
+  var pin = heldEndPin(h);
+  return { endPinned: !!pin, arrived: !!h.arrivedAt,
+           endWhy: pin
+             ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : null)
+             : h.endWhyFor === h.dropoff ? (h.endWhy || null) : null };
+}
+
 function heldForPanel(held) {
   return held
-    ? { pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null,
+    ? Object.assign({ pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null,
         // What /api/held-end is told the pin is for. See holdIdOf.
         holdId: holdIdOf(held),
         // Its card's fix and size, so Map view can check this order's end
         // against them — see cardOf.
-        card: held.card || null }
+        card: held.card || null },
+        // ...and the GPS drop's state, which the in-car line on the panel
+        // says. It was on /api/status alone — fetched once, at load — so a
+        // panel left open never learned that a pin had armed or been refused.
+        heldEndState(held))
     : null;
 }
 
@@ -1412,12 +2516,35 @@ function withStack(read, now) {
   if (!read || !read.ready) return read;
   var held = holding(now);
   read.holding = heldForPanel(held);
-  read.stack = held
+  // The order in the car, on the phone again: no pair to weigh, and the panel
+  // says what it is. See heldOwnCard. Any order in the car, first-taken first.
+  var own = heldOrders(now).filter(function (h) {
+    return heldOwnCard(h, read, now, true);
+  })[0];
+  read.heldCard = own ? holdIdOf(own) : null;
+  read.stack = held && !read.heldCard
     ? Advice.stack(held, timedLikeTheHeldJob(read),
                    { target: read.target, band: read.band,
                                  costPerMile: read.costPerMile }, now)
     : null;
+  // With two in the car the pair is still weighed against the FIRST only —
+  // the detour through both is Stage 6 — and the line says so ("vs ① only").
+  if (read.stack && heldOrders(now).length >= 2) read.stack.vsFirst = true;
+  if (carryTwo()) {
+    read.orders = ordersForPanel(now);
+    read.unowned = Assemble.unowned(assembly);
+  }
   return read;
+}
+
+/* Every order in the car as the panel draws it: heldForPanel's shape, with its
+ * number (① first-taken), its app, and whether it is an add-on and to which.
+ * Said beside `holding` (the first) only while carrying two is on. */
+function ordersForPanel(now) {
+  return heldOrders(now).map(function (h, i) {
+    return Object.assign(heldForPanel(h), { n: i + 1, app: h.app || null,
+                                             addOn: !!h.addOn, of: h.of || null });
+  });
 }
 
 /* The pairing, written down at the moment it is made.
@@ -1474,6 +2601,7 @@ function recordPairing(offer, now, reading) {
   // already means "it said nothing", which is a different claim, so this is
   // said in its own field.
   var judged = typeof money.target === 'number';
+  var all = heldOrders(now);
   var row = {
     v: 1, kind: 'pair', at: now, id: offer.id,
     // The order already in the car.
@@ -1531,6 +2659,18 @@ function recordPairing(offer, now, reading) {
     // on has it as one they did not. Absent means the colour was on the panel.
     stackShown: false
   };
+  // ...and with carrying two on, every order in the car: `held` stays the
+  // first-taken, which is what the stack line weighed, and `heldAlso` the
+  // others in the same shape. `heldCount` is how many there were, so the
+  // offers page can leave a pair judged against one of two out of its grading.
+  if (carryTwo()) {
+    row.heldAlso = all.slice(1).map(function (o) {
+      return { pay: numOrNull(o.pay), minutes: numOrNull(o.minutes),
+               dropoff: o.dropoff || null, scanned: !!o.dropoffScanned,
+               heldMs: Math.max(0, now - o.acceptedAt) };
+    });
+    row.heldCount = all.length;
+  }
   appendLines(JSON.stringify(row) + '\n', function (err) {
     if (err) console.error('journal: could not record a pairing: ' + err.message);
   });
@@ -1552,8 +2692,7 @@ function recordPairing(offer, now, reading) {
  * goes on being used by the stack line whatever the panel shows, so it is not
  * dropped here: only the answer to the press is. */
 function forgetPlanner(now) {
-  var h = holding(now);
-  if (h) delete h.planner;
+  Assemble.forgetPlanner(holding(now));
 }
 
 /* The Trip Planner, written down: collection only. Nothing reads these rows
@@ -1594,10 +2733,10 @@ if (!isFinite(PLANNER_SAME_MS) || PLANNER_SAME_MS < 0) PLANNER_SAME_MS = 5 * 600
 var plannerWritten = null;
 
 function recordPlanner(planner, now) {
-  var key = JSON.stringify(planner.stops);
-  if (plannerWritten && plannerWritten.key === key
-      && now - plannerWritten.at < PLANNER_SAME_MS) return;
-  plannerWritten = { key: key, at: now };
+  // Whether a row is due is Assemble.plannerRowDue's rule; the row is this.
+  var due = Assemble.plannerRowDue(plannerWritten, planner.stops, now, PLANNER_SAME_MS);
+  if (!due) return;
+  plannerWritten = due;
   appendLines(JSON.stringify({
     v: 1, kind: 'planner', id: 'planner-' + now, seq: 1, at: now,
     stops: planner.stops,
@@ -2312,6 +3451,10 @@ function latestPerOfferUncached(rows) {
           // arrived at the guard below as `undefined` and was let through as a
           // press.
           m.dropoffAsked = r.asked !== false;
+          // ...and whether an unasked one was label-proven, carried the same
+          // way and for the same reason: it is what lets this mark past the
+          // card's own end below, as the live path let it past the hold's.
+          m.dropoffLabelled = r.labelled === true;
         }
       }
       return;
@@ -2415,7 +3558,10 @@ function latestPerOfferUncached(rows) {
       // Absent means asked, so the rows already in this journal — and any
       // written by an older rig still reporting only presses — keep the
       // behaviour they were written under.
-      if (mark.dropoff && (mark.dropoffAsked || !o.dropoff)) {
+      // ...and a LABEL-PROVEN sighting may overwrite the card's own end too,
+      // the one rule the live path files it by: the marks fold above already
+      // keeps a press over it, so what is left to beat here is the card.
+      if (mark.dropoff && (mark.dropoffAsked || mark.dropoffLabelled || !o.dropoff)) {
         o.dropoff = mark.dropoff;
         o.dropoffScanned = true;
       }
@@ -3164,6 +4310,9 @@ function statusNow() {
       // to times it fell over on its own. The two have different causes and
       // a count that merges them explains neither.
       wedged: scanner.wedged || 0,
+      // The sightings the scanner has sent, by screen type (countSighting),
+      // and only the counts: the lines themselves go nowhere.
+      screens: Object.assign({}, scanner.screens),
       // A successful restart clears `error`, as it should — there is no
       // current problem. This is what is left to say a camera went quiet at
       // all, which is the difference between "it is fine now" and "it is fine
@@ -3210,11 +4359,14 @@ function statusNow() {
     // here: the two machines' clocks are not the same clock.
     holding: (function () {
       var h = holding(Date.now());
-      return h ? { pay: h.pay, minutes: h.minutes, holdId: holdIdOf(h),
-                   // ...whether a door-level pin is on it and the GPS has
-                   // seen the car arrive there: the GPS drop's state, for
-                   // whoever is diagnosing one. See gpsArrival.
-                   endPinned: !!heldEndPin(h), arrived: !!h.arrivedAt,
+      return h ? Object.assign({ pay: h.pay, minutes: h.minutes, holdId: holdIdOf(h),
+                   // ...who pinned it ('server', or null for Map view). The
+                   // GPS drop's state beside it — pinned, arrived, and why
+                   // not armed — is heldEndState's, merged in below.
+                   endBy: heldEndPin(h) ? (h.endPin.by || null) : null,
+                   // ...and how many of its pickups the guard holds, from Map
+                   // view or this server's search (keepPickupPin).
+                   pickupsPinned: Array.isArray(h.pickupPins) ? h.pickupPins.length : 0,
                    // Where it ends, and whether that came off the card or
                    // off a scan of the screen after the accept. The panel
                    // needs the difference: a card-derived dropoff is a
@@ -3223,6 +4375,13 @@ function statusNow() {
                    // once it has been answered.
                    dropoff: h.dropoff || null,
                    dropoffScanned: !!h.dropoffScanned,
+                   // ...and where each of its ends came from: the assembler's
+                   // `fields`, {value, from, conf, at, screen} each. See
+                   // Assemble.fieldsOf, which makes them for a hold restored
+                   // from a file written before they existed.
+                   fields: Assemble.fieldsOf(h),
+                   // ...and the planner pages it is still waiting on.
+                   pending: Assemble.pending(assembly),
                    // ...and the Trip Planner's stops, when ⌖ read one while
                    // this order was in the car, with the scanner's reason for
                    // filing none of them as its end: {stops, unfiled}. Kept
@@ -3232,8 +4391,17 @@ function statusNow() {
                    // ...and its card's fix and size, for Map view's check of
                    // where it ends. See cardOf.
                    card: h.card || null,
-                   heldMs: Math.max(0, Date.now() - h.acceptedAt) } : null;
+                   heldMs: Math.max(0, Date.now() - h.acceptedAt) },
+                   // endPinned, arrived, endWhy: see heldEndState.
+                   heldEndState(h)) : null;
     }()),
+    // Every order in the car and the addresses waiting for an owner, while
+    // carrying two is on (ordersForPanel); and whether it is.
+    carryTwo: carryTwo(),
+    orders: carryTwo() ? ordersForPanel(Date.now()) : undefined,
+    unowned: carryTwo() ? Assemble.unowned(assembly) : undefined,
+    // ...and the chooser, if one is open (openChooser).
+    chooser: chooserForPanel(Date.now()),
     lastAgeMs: (scanner.last && typeof scanner.last.at === 'number')
       ? Math.max(0, Date.now() - scanner.last.at) : null,
     heardAgeMs: scanner.heardAt
@@ -4605,8 +5773,11 @@ var nbxCache = new Map();
 /* The most an answer may be. Ten search results in jsonv2's shape, each with
  * the real install's "McDonald's, 2700, Windy Hill Road Southeast, ..." name,
  * are 4,891 bytes (measured on tests/fake-nucbox.js); a three-point route
- * with overview=false and 84-character waypoint hints is 786. Anything near
- * this is not one. */
+ * with overview=false and 84-character waypoint hints is 786. With the road's
+ * shape asked for too (overview=simplified, nbxRoute) a route carries one
+ * point per bend OSRM kept, about 23 bytes each as GeoJSON — an estimate,
+ * not measured on the real install — so NBX_LINE_MAX's 5,000 points is
+ * about 115 kB, inside this. Anything near this is not one. */
 var NBX_BODY_MAX = 256 * 1024;
 /* How many candidates a search asks for. Ten: enough for every branch of a
  * chain inside a disc the size of a card's distance, mostly — the real
@@ -4689,6 +5860,31 @@ function nbxAsk(target, done) {
   req.on('error', function (e) {
     end('the NucBox did not answer (' + (e.code || e.message) + ')');
   });
+}
+
+/* The one search question this rig asks the NucBox's Nominatim: `term` is
+ * 'q' or 'street', `said` the checked text, `vb` a checked viewbox or null.
+ * The relay below and the server's own held-end search (searchHeldEnd) both
+ * build it here, so the two cannot ask differently — or miss each other in
+ * nbxCache. */
+function nbxSearchTarget(term, said, vb) {
+  return NBX.search + '/search?format=jsonv2&limit=' + NBX_LIMIT + '&' + term + '='
+       + encodeURIComponent(said)
+       + (vb ? '&viewbox=' + encodeURIComponent(vb) + '&bounded=1' : '');
+}
+
+/* A Nominatim list as the page reads it: where, and what it is called (the
+ * name is where a house number shows, map-view.js hasDoor) — and the limit,
+ * as `cutAt`, when the list stopped at it (null when it did not). A full list
+ * is not "every one in the box": Nominatim ranks by importance, not by
+ * distance, so an eleventh inside the card's disc may be the one that was not
+ * sent, and "only one fits" cannot be said of a list that was cut. */
+function nbxHits(body) {
+  return { ok: true, cutAt: body.length >= NBX_LIMIT ? NBX_LIMIT : null,
+           hits: body.map(function (h) {
+             return { lat: Number(h.lat), lon: Number(h.lon),
+                      name: String(h.display_name || '') };
+           }).filter(function (h) { return isFinite(h.lat) && isFinite(h.lon); }) };
 }
 
 /* The query, or the reason it is refused. `allowed` is every key this
@@ -4791,6 +5987,28 @@ function streetAnswer(which, body) {
   return { ok: true, names: s.names, how: s.how, cutAt: cut, lines: body.lines };
 }
 
+/* OSRM's GeoJSON route geometry as the page draws it, [[lat, lon], ...], or
+ * null for anything that is not one. Null and not a refusal of the whole
+ * answer: the metres are the figure the caption states and they stand on
+ * their own; without a shape the page draws the straight line it always
+ * drew, which is a line that looks like what it is. All or nothing, because a
+ * road with one point quietly missing is a line drawn through a field. */
+var NBX_LINE_MAX = 5000;
+function nbxLine(g) {
+  var c = g && g.type === 'LineString' && Array.isArray(g.coordinates) ? g.coordinates : null;
+  if (!c || c.length < 2 || c.length > NBX_LINE_MAX) return null;
+  var out = [];
+  for (var i = 0; i < c.length; i++) {
+    var p = c[i];
+    if (!Array.isArray(p) || p.length < 2 || typeof p[0] !== 'number' || typeof p[1] !== 'number'
+        || !isFinite(p[0]) || !isFinite(p[1]) || Math.abs(p[0]) > 180 || Math.abs(p[1]) > 90) {
+      return null;
+    }
+    out.push([p[1], p[0]]);
+  }
+  return out;
+}
+
 function nbxRoute(req, res) {
   var reply = function (code, body) {
     send(res, code, JSON.stringify(body), { 'Content-Type': 'application/json; charset=utf-8' });
@@ -4837,13 +6055,12 @@ function nbxRoute(req, res) {
     }
     // NBX_LIMIT, fixed here, and the page decides among them — told
     // whether the list stopped at it (`cutAt` below).
-    target = NBX.search + '/search?format=jsonv2&limit=' + NBX_LIMIT + '&' + term + '='
-           + encodeURIComponent(said);
+    var vb = null;
     if (sq.q.viewbox !== undefined) {
-      var vb = nbxBox(sq.q.viewbox);
+      vb = nbxBox(sq.q.viewbox);
       if (!vb) return reply(400, { ok: false, error: 'viewbox is left,top,right,bottom' });
-      target += '&viewbox=' + encodeURIComponent(vb) + '&bounded=1';
     }
+    target = nbxSearchTarget(term, said, vb);
   } else {
     var rq = nbxQuery(req, ['points']);
     if (rq.error) return reply(400, { ok: false, error: rq.error });
@@ -4851,8 +6068,13 @@ function nbxRoute(req, res) {
     if (pts.length < 2 || pts.length > 3 || pts.some(function (x) { return !x; })) {
       return reply(400, { ok: false, error: 'points is two or three lon,lat pairs, ;-separated' });
     }
+    // The shape of the road as well as its length: simplified (OSRM thins
+    // it to the zoom that frames the whole route, which is the zoom Map view
+    // fits to) and as GeoJSON, so the page draws the route along the roads
+    // rather than as a straight line across them. Fixed here like the rest;
+    // the page still sends nothing but its points.
     target = NBX.route + '/route/v1/driving/'
-           + pts.join(';') + '?overview=false';
+           + pts.join(';') + '?overview=simplified&geometries=geojson';
   }
   if (nbxCache.has(target)) return reply(200, nbxCache.get(target));
   nbxAsk(target, function (err, body) {
@@ -4871,18 +6093,8 @@ function nbxRoute(req, res) {
       if (!Array.isArray(body)) {
         return down('the NucBox search answered something that is not a list');
       }
-      // What the page reads and nothing else: where, and what it is called
-      // (the name is where a house number shows, map-view.js hasDoor) — and
-      // the limit, as `cutAt`, when the list stopped at it (null when it did
-      // not). A full list is not "every one in the box": Nominatim ranks by
-      // importance, not by distance, so an eleventh inside the card's disc
-      // may be the one that was not sent, and "only one fits" cannot be said
-      // of a list that was cut.
-      out = { ok: true, cutAt: body.length >= NBX_LIMIT ? NBX_LIMIT : null,
-              hits: body.map(function (h) {
-        return { lat: Number(h.lat), lon: Number(h.lon),
-                 name: String(h.display_name || '') };
-      }).filter(function (h) { return isFinite(h.lat) && isFinite(h.lon); }) };
+      // What the page reads and nothing else: see nbxHits.
+      out = nbxHits(body);
     } else if (which === 'cross' || which === 'stretch') {
       out = streetAnswer(which, body);
       if (out.error) return down(out.error);
@@ -4912,11 +6124,11 @@ function nbxRoute(req, res) {
       })) {
         return down('the NucBox router answered without how far it moved each point');
       }
-      // The distance ONLY. OSRM's `duration` is a free-flow estimate with
-      // no traffic in it, and minutes from a pace are refused outright
-      // (AUDITS.md, Settled: "Do not re-time an offer at a pace"), so it is
-      // dropped here, where no page can ever be handed it.
-      out = { ok: true, metres: r0.distance, snaps: snaps };
+      // The distance and the road's shape ONLY. OSRM's `duration` is a
+      // free-flow estimate with no traffic in it, and minutes from a pace are
+      // refused outright (AUDITS.md, Settled: "Do not re-time an offer at a
+      // pace"), so it is dropped here, where no page can ever be handed it.
+      out = { ok: true, metres: r0.distance, snaps: snaps, line: nbxLine(r0.geometry) };
     }
     nbxRemember(target, out);
     reply(200, out);
@@ -5101,15 +6313,46 @@ function route(req, res) {
             marked = Object.assign({}, body.offer);
           }
         }
+        // The order a Took is about to put down, if it replaces one: see the
+        // drop row below.
+        var replacedHold = null;
+        // ...and, with carrying two on, whether this Took ADDED an order
+        // beside one already in the car (the panel offers to undo that), and
+        // the pay of an order a Took past MAX_HELD put down (said).
+        var addedHold = null;
+        var putDownPay = null;
+        var carriedAtTook = 0;
         if (marked) {
           marked.accepted = note.accepted;
+          var before = holding(Date.now());
           // ...and it becomes the order in the car, which is what the next
           // offer gets measured against. Taking the mark back puts it down
           // again: the driver pressed it twice because they did not take it,
           // and stacking onto a job they refused is the same wrong number as
           // stacking onto one they already delivered.
-          if (note.accepted) {
-            setHolding({
+          //
+          // Except a Took on the held order's own card come back under a new
+          // id (heldOwnCard): the order in the car is the one the driver took
+          // already, and replacing it would restart its clock and write a
+          // drop for an order that is still in the car.
+          //
+          // ANY order in the car's own card: with two carried, a Took on the
+          // second's card come back is that order too.
+          var inCar = heldOrders(Date.now());
+          carriedAtTook = inCar.length;
+          if (note.accepted && before && marked.heldCard
+              && inCar.some(function (h) { return holdIdOf(h) === marked.heldCard; })) {
+            // the mark is written; the hold stands as it is
+          } else if (note.accepted) {
+            // A second ✓ Took while an order is still held used to replace
+            // it in silence: the first order left the car with no drop row,
+            // and the journal could not say how it ended. With carrying two
+            // off the first is put down — and SAID: a drop row `by:
+            // 'replaced'`, and a note on the panel. With it on, the second is
+            // ADDED, and only a re-offer or a Took past MAX_HELD puts one
+            // down, said the same way (placeTook).
+            var tookAt = Date.now();
+            var took = asHold({
               id: marked.id,
               pay: marked.pay,
               minutes: typeof marked.billedMinutes === 'number'
@@ -5170,14 +6413,45 @@ function route(req, res) {
               // ...and where the car was when its card came up, with the
               // card's own size: what live.html's Map view checks this
               // order's end against. See cardOf.
-              card: cardOf(marked)
+              card: cardOf(marked),
+              // The card as the driver took it, and when they pressed: what
+              // recognises it if it comes back under a new id. See
+              // heldOwnCard. Not `dropoff` above, which a ⌖ press rewrites.
+              seenAs: Object.assign(cardSeen(marked, false), { tookAt: tookAt }),
+              // Where each of its ends came from, and when: the assembler's
+              // record (Assemble.cardFields), kept beside `dropoff` and
+              // `dropoffScanned` above, which it keeps in step.
+              fields: Assemble.cardFields(marked, scanner.offerAt || Date.now()),
+              // ...and the list's own fields (see MAX_HELD): which app, the
+              // press, the card's deadline. A scanner older than the offer
+              // line's `app` and `deliverBy` leaves them null.
+              app: typeof marked.app === 'string' ? marked.app : null,
+              tookAt: tookAt,
+              deliverBy: typeof marked.deliverBy === 'number' ? marked.deliverBy : null,
+              addOn: false,
+              of: null
             });
+            // Placed by placeTook: replacing the order in the car, as the
+            // slot did, with carrying two off; added beside it with it on.
+            var placed = placeTook(took, marked, inCar, tookAt);
+            replacedHold = placed.replaced;
+            putDownPay = placed.putDownPay;
+            if (placed.added) addedHold = took;
+            // ...and the assembler told: its pool of planner pages is retried
+            // against this hold, where everything read before the Took is
+            // about the order before and is refused.
+            Assemble.took(assembly, assemblerHeld(Date.now()));
+            retryPool();
           } else {
             // Through holding() as well: taking the mark back off an order the
             // rest of the rig has already forgotten should not depend on which
             // of the two ways of asking this line happens to use.
-            var carried = holding(Date.now());
-            if (carried && carried.id === note.id) setHolding(null);
+            var carried = heldOrders(Date.now()).filter(function (h) {
+              return h.id === note.id;
+            });
+            if (carried.length) {
+              setHeld(scanner.held.filter(function (h) { return carried.indexOf(h) === -1; }));
+            }
           }
         }
         // ...and whether there is now an order in the car, because marking is
@@ -5200,9 +6474,44 @@ function route(req, res) {
         // not from the next reading. Until one arrived the page drew the
         // accepted card's dropoff as that CARD's, and lost it with the card.
         var heldAfter = holding(Date.now());
-        send(res, 200, JSON.stringify({ ok: true, note: note,
-                                        holding: !!heldAfter,
-                                        held: heldForPanel(heldAfter) }),
+        // The replaced order's drop row, the same shape putDown writes, and
+        // the panel told — every panel, through the stream, and this one in
+        // the reply too in case its stream is down. Best-effort like every
+        // annotation: the mark is already on disk and is the driver's fact.
+        if (replacedHold) {
+          var dropNow = Date.now();
+          var dropRow = { v: 1, kind: 'drop', at: dropNow, id: replacedHold.id,
+                          seq: dropNow, acceptedAt: replacedHold.acceptedAt,
+                          by: 'replaced' };
+          // ...with two in the car at the press, as putDown says it.
+          if (carriedAtTook >= 2) dropRow.carried = carriedAtTook;
+          appendLines(JSON.stringify(dropRow) + '\n', function (dropErr) {
+            if (dropErr) console.error('journal: could not record a replaced hold: '
+                                       + dropErr.message);
+          });
+          var replacedSaid = { at: dropNow, saidForMs: HELD_REPLACED_SAID_MS };
+          // A Took past MAX_HELD says WHICH order it put down, by its pay.
+          if (putDownPay !== null) replacedSaid.pay = putDownPay;
+          broadcast({ heldReplaced: replacedSaid });
+        }
+        var tookReply = { ok: true, note: note,
+                          replaced: replacedHold
+                            ? Object.assign({ at: Date.now(), saidForMs: HELD_REPLACED_SAID_MS },
+                                            putDownPay !== null ? { pay: putDownPay } : {})
+                            : null,
+                          holding: !!heldAfter,
+                          held: heldForPanel(heldAfter) };
+        // With carrying two on: every order, and the one this Took ADDED —
+        // the panel's Undo for it sends the untick this handler already
+        // takes (accepted: null), which puts that order down and no other.
+        if (carryTwo()) {
+          tookReply.orders = ordersForPanel(Date.now());
+          tookReply.added = addedHold && heldById(holdIdOf(addedHold), Date.now())
+            ? { holdId: holdIdOf(addedHold), id: addedHold.id,
+                pay: numOrNull(addedHold.pay), undoForMs: UNDO_ADDED_MS }
+            : null;
+        }
+        send(res, 200, JSON.stringify(tookReply),
              { 'Content-Type': 'application/json; charset=utf-8' });
       });
     });
@@ -5215,7 +6524,7 @@ function route(req, res) {
    * about the journal — this offer was taken — and dropping it off does not
    * make that untrue, so the mark is never touched here. The hold itself is
    * not in the journal either: it lives in holding.json beside it, written by
-   * setHolding() and read back by loadHolding() — see the comment above
+   * setHeld() and read back by loadHolding() — see the comment above
    * those, which answers what this one used to say ("memory only").
    *
    * WHAT IS APPENDED is a second fact, not an edit of the first: a `kind:
@@ -5246,6 +6555,12 @@ function route(req, res) {
    * for the named job only when no other tick overlaps it; whoever reads these
    * rows checks the marks either side before trusting one.
    *
+   * The tick that takes the slot now says so: it writes a drop row for the
+   * order it put down, `by: 'replaced'` (see the mark handler), so a first job
+   * no longer leaves the record with nothing saying how its hold ended. Its
+   * `at - acceptedAt` is the time to the second tick, not to a delivery, and
+   * is never an elapsed time for anything.
+   *
    * `seq` is the press time, NOT 1. syncKey carries an unknown kind across on
    * `[kind, id, seq]`, so with a constant seq every drop row for one offer
    * collapses onto one key and the second is thrown away on the copy at home
@@ -5262,13 +6577,14 @@ function route(req, res) {
     // the same thing here as it does on the panel, or the driver is told they
     // put down a job the rig stopped counting an hour ago.
     //
-    // Asked BEFORE setHolding(null), and kept: after it, holding() answers
-    // null and the row would have no offer to name.
+    // Asked BEFORE the list is rewritten, and kept: after it, holding()
+    // answers null and the row would have no offer to name (putDown).
     //
     // The row: {v, kind: 'drop', at, id, seq, acceptedAt}, `acceptedAt` dated
     // from the card as the hold is — see acceptedAt in the mark handler — so
     // this is the same clock holding() expires the job on. putDown() writes
-    // it, for this press and for the GPS drop alike (which adds `by: 'gps'`).
+    // it, for this press and for the GPS drop alike (which adds `by: 'gps'`);
+    // a Took that replaces a hold writes the same row with `by: 'replaced'`.
     //
     // The order is down whether or not the row landed, so the answer is
     // still ok: the panel believes this reply about the HOLD (see the Drop
@@ -5276,9 +6592,90 @@ function route(req, res) {
     // loud like every other append on this server, because a collection
     // that silently stopped would be read in a week as a driver who never
     // pressed Drop.
-    return putDown(Date.now(), null, function (was) {
-      send(res, 200, JSON.stringify({ ok: true, wasHolding: was }),
-           { 'Content-Type': 'application/json; charset=utf-8' });
+    //
+    // WITH TWO ORDERS IN THE CAR (carrying two on) a press names one of them,
+    // and the server does not guess which. One tap puts down the order the
+    // latest good fix is at the pinned door of, or the one the GPS has seen
+    // arrive (dropDecides); otherwise nothing is put down and the reply is a
+    // chooser for the panel — ①, ② or both — whose answer comes back as
+    // `holdIds`, and those rows say `by: 'chooser'`. Every row written with
+    // two in the car says `carried: 2` (putDown).
+    return readJsonBody(req, function (bodyErr, body) {
+      var asked = (!bodyErr && body) || {};
+      var now = Date.now();
+      var orders = heldOrders(now);
+      var json = { 'Content-Type': 'application/json; charset=utf-8' };
+      var answer = function (was, extra) {
+        var reply = { ok: true, wasHolding: was };
+        if (carryTwo()) {
+          var left = holding(Date.now());
+          reply.holding = !!left;
+          reply.held = heldForPanel(left);
+          reply.orders = ordersForPanel(Date.now());
+        }
+        send(res, 200, JSON.stringify(Object.assign(reply, extra || {})), json);
+      };
+      if (Array.isArray(asked.holdIds)) {
+        var picked = orders.filter(function (o) {
+          return asked.holdIds.indexOf(holdIdOf(o)) !== -1;
+        });
+        if (!picked.length) return answer(false);
+        return putDown(now, 'chooser', function (was) { answer(was); }, picked);
+      }
+      if (carryTwo() && orders.length >= 2) {
+        var one = dropDecides(orders, now);
+        if (!one) {
+          return answer(true, { choose: {
+            kind: 'drop', closesInMs: CHOOSER_MS,
+            rows: orders.map(function (o, i) {
+              return { pick: holdIdOf(o), n: i + 1, pay: numOrNull(o.pay),
+                       end: o.dropoff || null };
+            }) } });
+        }
+        return putDown(now, null, function (was) { answer(was); }, one);
+      }
+      return putDown(now, null, function (was) { answer(was); });
+    });
+  }
+
+  /* The chooser's answer (openChooser): {id, pick}, `pick` one of its rows —
+   * an order's holdId, 'card', or 'neither'. Filed by the one road
+   * (dropoffArrived) with `cue: 'chooser'`, onto the order or the card picked,
+   * and said on the stream as any filed address is. Refused, filing nothing,
+   * when the chooser it names has closed (CHOOSER_MS) or been replaced, or the
+   * row is not one of its own. 'neither' files nothing and closes it. */
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/choose') {
+    return readJsonBody(req, function (err, body) {
+      var json = { 'Content-Type': 'application/json; charset=utf-8' };
+      var now = Date.now();
+      var c = choosing;
+      if (err || !body || !c || body.id !== c.id || now > c.until) {
+        return send(res, 409, JSON.stringify({ ok: false, error: 'closed' }), json);
+      }
+      var said = { dropoff: c.d, at: now };
+      if (body.pick === 'neither') {
+        choosing = null;
+        broadcast({ chooser: null });
+        return send(res, 200, JSON.stringify({ ok: true, filed: null }), json);
+      }
+      if (body.pick === 'card') {
+        if (!c.card || !scanner.offer || scanner.offer.id !== c.card) {
+          return send(res, 409, JSON.stringify({ ok: false, error: 'not one of its rows' }), json);
+        }
+        choosing = null;
+        dropoffArrived(said, { order: null, cue: 'chooser' });
+      } else {
+        var order = c.among.indexOf(body.pick) !== -1 ? heldById(body.pick, now) : null;
+        if (!order) {
+          return send(res, 409, JSON.stringify({ ok: false, error: 'not one of its rows' }), json);
+        }
+        choosing = null;
+        dropoffArrived(said, { order: order, cue: 'chooser' });
+      }
+      broadcast({ chooser: null });
+      if (said.dropoff) broadcast(said);
+      retryPool();
+      send(res, 200, JSON.stringify({ ok: true, filed: said.dropoff ? body.pick : null }), json);
     });
   }
 
@@ -5300,11 +6697,13 @@ function route(req, res) {
       if (!body || typeof body !== 'object') {
         return send(res, 400, JSON.stringify({ ok: false, error: 'not JSON' }), json);
       }
-      var h = holding(Date.now());
+      // The order the pin names, among those in the car: with more than one,
+      // a pin for one is not refused for not being the first.
+      var h = heldById(body.holdId, Date.now());
       var why = null;
       var plan = h && typeof h.dropoff === 'string' ? MV.searchPlan(h.dropoff) : null;
-      if (!h) why = 'nothing held';
-      else if (body.holdId !== holdIdOf(h)) why = 'not the order in the car';
+      if (!holding(Date.now())) why = 'nothing held';
+      else if (!h) why = 'not the order in the car';
       else if (body.dropoff !== h.dropoff) why = 'not where that order ends';
       else if (body.doorLevel !== true || !plan || plan.kind !== 'street' || !plan.door
                || !MV.hasDoor({ name: body.name }, plan.house)) why = 'not door level';
@@ -5312,17 +6711,50 @@ function route(req, res) {
                || !isFinite(body.lat) || !isFinite(body.lon)
                || Math.abs(body.lat) > 90 || Math.abs(body.lon) > 180) why = 'no position';
       if (why) return send(res, 409, JSON.stringify({ ok: false, error: why }), json);
-      var same = h.endPin && h.endPin.lat === body.lat && h.endPin.lon === body.lon
-        && h.endPin.dropoff === h.dropoff;
-      if (!same) {
+      // The first valid pin for this dropoff wins — the server's own search
+      // (searchHeldEnd) or an earlier post — and a later one is a no-op, so an
+      // arrival already counted is never reset by a second opinion.
+      if (!heldEndPin(h)) {
         h.endPin = { dropoff: h.dropoff, lat: body.lat, lon: body.lon,
                      doorLevel: true, pinnedAt: Date.now() };
-        // A moved pin is a different end: whatever was learnt about being at
-        // the old one is not about this one.
+        // A new end: whatever was learnt about being at an old one (for a
+        // dropoff the hold no longer names) is not about this one.
         delete h.arrivedAt;
+        delete h.endWhy;
+        delete h.endWhyFor;
         resetArrival(holdIdOf(h));
-        setHolding(h);
+        saveHold(h);
       }
+      send(res, 200, JSON.stringify({ ok: true }), json);
+    });
+  }
+
+  /* One of the held order's pickups, pinned by Map view (live.html) inside
+   * the held card's disc. Body: {holdId, lat, lon}. Kept on the hold (at most
+   * PICKUP_PINS_MAX, the newest) for the restaurant guard alone
+   * (pickupNearEnd): a door within PICKUP_GUARD_M of one is not armed. A pin
+   * for another hold, or with no position, is refused and changes nothing.
+   * This server searches for the same pickups itself (searchHeldPickup), so
+   * Map view need not be opened for the guard to hold. */
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/held-pickup') {
+    return readBody(req, 1024, function (err, text) {
+      var json = { 'Content-Type': 'application/json; charset=utf-8' };
+      var body = null;
+      try { body = err ? null : JSON.parse(text); } catch (e) { body = null; }
+      if (!body || typeof body !== 'object') {
+        return send(res, 400, JSON.stringify({ ok: false, error: 'not JSON' }), json);
+      }
+      var h = heldById(body.holdId, Date.now());
+      var why = null;
+      if (!holding(Date.now())) why = 'nothing held';
+      else if (!h) why = 'not the order in the car';
+      else if (typeof body.lat !== 'number' || typeof body.lon !== 'number'
+               || !isFinite(body.lat) || !isFinite(body.lon)
+               || Math.abs(body.lat) > 90 || Math.abs(body.lon) > 180) why = 'no position';
+      if (why) return send(res, 409, JSON.stringify({ ok: false, error: why }), json);
+      // The one path this server's own search keeps a pickup by too, guard
+      // and all (keepPickupPin).
+      keepPickupPin(h, { lat: body.lat, lon: body.lon });
       send(res, 200, JSON.stringify({ ok: true }), json);
     });
   }

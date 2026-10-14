@@ -21,6 +21,8 @@
  *                                                     Cobb Parkway, Kennesaw"
  *   q=Dave's Hot Chicken                              nothing: not in OSM
  *   route Marietta Square -> Five Points               31307.4 m, 1659.8 s
+ *                                                     (its shape is the
+ *                                                     fake's, geometryOf)
  *
  * The POINTS are invented round public places (Marietta Square, Cumberland,
  * Kennesaw), never the owner's or a customer's. The duration is kept in the
@@ -35,8 +37,11 @@
  * a half seconds (for the timeout), "4821 Kestrel Dr" answers its street and
  * not the door, "Starbucks" is twelve branches cut at the limit, "Waffle
  * House" is a pickup the road by is shorter than the road direct, "Farm
- * Stand" is 450 m from a road, a point at 34.1, -84.6 is refused by the
- * router with a code that is not NoRoute, and GET /__asked lists every
+ * Stand" is 450 m from a road, "250 Example Road" is a restaurant's door (a
+ * held order's pickup) and "1975 Cobb Parkway" one 87 m from 1985's door, a
+ * point at 34.1, -84.6 is refused by the
+ * router with a code that is not NoRoute, a route touching 33.9, -84.7
+ * comes back with a shape that is not one, and GET /__asked lists every
  * question this fake was asked, so a suite can read exactly what left the
  * rig. */
 'use strict';
@@ -128,6 +133,20 @@ var WAFFLE = [place(71, 33.9300, -84.5100, 'amenity', 'restaurant', 'Waffle Hous
 var FARM = [place(72, 33.9650, -84.5350, 'shop', 'farm', 'Farm Stand',
                   'Farm Stand, Marietta, Cobb County, Georgia, 30060, United States')];
 
+/* A restaurant's door the router routes like any other point: the held
+   order's Trip Planner pickup in the suites (street=250 Example Road), 1.7 mi
+   north-east of the Square, inside a 9.4 mi card's disc. Invented. */
+var GRILL = [place(81, 33.9700, -84.5300, 'amenity', 'restaurant', 'Example Grill',
+                   'Example Grill, 250, Example Road, Marietta, Cobb County, Georgia, '
+                   + '30060, United States')];
+
+/* ...and one 87 m from the door at 1985 Cobb Parkway (street=1975 Cobb
+   Parkway): a restaurant next to a customer's door, which the GPS drop's
+   restaurant guard exists for. Invented. */
+var DINER = [place(82, 34.0004, -84.5554, 'amenity', 'restaurant', 'Example Diner',
+                   'Example Diner, 1975, Cobb Parkway, Kennesaw, Cobb County, Georgia, '
+                   + '30152, United States')];
+
 var CHURCH = [
   place(31, 33.9580, -84.5520, 'highway', 'tertiary', 'Church Street',
         'Church Street, Marietta, Cobb County, Georgia, 30060, United States'),
@@ -160,6 +179,8 @@ function search(q) {
     else if (/^1985 cobb (pkwy|parkway)/.test(term)) all = COBB_1985;
     else if (/^4821 kestrel (dr|drive)/.test(term)) all = KESTREL;
     else if (/^church st/.test(term)) all = CHURCH;
+    else if (/^250 example (rd|road)/.test(term)) all = GRILL;
+    else if (/^1975 cobb (pkwy|parkway)/.test(term)) all = DINER;
   }
   if (q.bounded === '1') all = all.filter(function (p) { return inBox(p, q.viewbox); });
   return all.slice(0, Number(q.limit) || 10);
@@ -191,6 +212,9 @@ function route(coords) {
   if (pts.length === 2 && near(pts[0], -84.5499, 33.9526) && near(pts[1], -84.3880, 33.7490)) {
     return routeBody(pts, [31307.4], [1659.8]);
   }
+  // Any point at 33.9, -84.7 is a route whose shape is not one: a point of
+  // it with no latitude (for the relay's all-or-nothing check on the line).
+  var badShape = pts.some(function (p) { return near(p, -84.7, 33.9); });
   var legs = [], secs = [];
   for (var i = 1; i < pts.length; i++) {
     var m = Math.round(miles(pts[i - 1], pts[i]) * 1.25 * 1609.344 * 10) / 10;
@@ -203,7 +227,9 @@ function route(coords) {
     var direct = Math.round(miles(pts[0], pts[2]) * 1.25 * 1609.344 * 10) / 10;
     legs[1] = Math.round((direct - 400 - legs[0]) * 10) / 10;
   }
-  return routeBody(pts, legs, secs);
+  var body = routeBody(pts, legs, secs);
+  if (badShape) body.routes[0].geometry.coordinates[1] = [-84.7];
+  return body;
 }
 
 // How far OSRM moved each point to reach a road: 3.1 m, except Farm Stand.
@@ -212,11 +238,24 @@ function snapOf(p) {
     ? 450.0 : 3.1;
 }
 
+/* The road's shape, as OSRM's GeoJSON LineString ([lon, lat] pairs): each
+   leg drawn east-west first and then north-south, an L, so a suite can tell
+   a line drawn along this "road" from the straight line between the same
+   points by the corner it turns at. */
+function geometryOf(pts) {
+  var c = [pts[0]];
+  for (var i = 1; i < pts.length; i++) {
+    c.push([pts[i][0], pts[i - 1][1]], pts[i]);
+  }
+  return { type: 'LineString', coordinates: c };
+}
+
 function routeBody(pts, legs, secs) {
   var sum = function (xs) { return Math.round(xs.reduce(function (a, b) { return a + b; }, 0) * 10) / 10; };
   return {
     code: 'Ok',
     routes: [{
+      geometry: geometryOf(pts),
       legs: legs.map(function (d, i) {
         return { steps: [], summary: '', weight: secs[i], duration: secs[i], distance: d };
       }),
@@ -282,7 +321,8 @@ function start(done) {
 
 module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    COBB_1985: COBB_1985, CHURCH: CHURCH, KESTREL: KESTREL,
-                   STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM };
+                   STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM, GRILL: GRILL,
+                   DINER: DINER };
 
 if (require.main === module) {
   start(function (f) { console.log(JSON.stringify({ port: f.port })); });

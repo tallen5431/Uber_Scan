@@ -109,12 +109,15 @@ for c in cases.get('address', []):
 # of a field must not pass as one that read nothing. tests/corpus.test.js runs
 # the same cases in the same order. See OP.find_planner.
 PLANNER_KEYS = ('kind', 'orders', 'name', 'expectedBy', 'street', 'city',
-                'state', 'zip', 'line')
+                'state', 'zip', 'line', 'place')
 
 
+# ...and `partial` last, which is the one key that is absent rather than None
+# on a stop the page shows whole: 'top' or 'bottom' only on the stop a page
+# edge cut. Compared as absent-is-None, so a case states it only where it is.
 def _stops(stops):
     return None if stops is None else [[s.get(k, '<missing>') for k in PLANNER_KEYS]
-                                       for s in stops]
+                                       + [s.get('partial')] for s in stops]
 
 
 for c in cases.get('planner', []):
@@ -123,6 +126,26 @@ for c in cases.get('planner', []):
     # lets the scanner take a planner's one dropoff for the trip's only one.
     # Every case says, and a case that does not is a KeyError, not a pass.
     eq('planner ends / ' + c['name'], P.planner_bounded(c['text']), c['bounded'])
+
+# ...and the two ends one at a time, which is what a sighting's `page` says.
+# `bounded` is both together and cannot see them swapped; these two cases have
+# one end each. tests/parser.test.js asks the same of plannerEnds.
+_PLANNER_TEXT = {c['name']: c['text'] for c in cases.get('planner', [])}
+eq('planner_ends: a list scrolled past its first stop shows its end and not its start',
+   P.planner_ends(_PLANNER_TEXT['a planner scrolled past its first stop does not show '
+                                'its start']), (False, True))
+eq('...and one running on below the screen its start and not its end',
+   P.planner_ends(_PLANNER_TEXT['a planner whose list runs on below the screen does not '
+                                'show its end']), (True, False))
+
+# What screen a reading is, for a sighting: the app and the screen as one pair,
+# because the app follows from the screen and a case that got one right and
+# the other wrong is one fault. tests/corpus.test.js runs the same cases. See
+# OP.screen_type.
+for c in cases.get('screens', []):
+    got = P.screen_type(c['text'])
+    eq('screens / ' + c['name'], [got['app'], got['screen']],
+       [c['expect']['app'], c['expect']['screen']])
 
 for c in cases.get('whole', []):
     eq('whole / ' + c['name'], P.is_whole(P.parse(c['text'])), c['expect'])
@@ -466,6 +489,21 @@ eq('address_stop: "Picked up" is no pickup label, "Deliver to" is a dropoff one'
    P.address_stop('Picked up\nDeliver to Pat Q.\n12 Fable St, Acworth, GA 30101'),
    'dropoff')
 eq('address_stop: no address, no answer', P.address_stop('Dropoff - 1 order'), None)
+# address_under_dropoff: the label-proven test an unpressed address passes to be
+# filed over a held order's end (digest() in scan_pi.py, server.js).
+eq('address_under_dropoff: a navigation screen\'s Dropoff address is under it',
+   P.address_under_dropoff('Dropoff 1234 Daffodil Ln, Powder Springs, GA 30127 '
+                           '12 min Start'), True)
+eq('address_under_dropoff: ...and a name between the label and the address is '
+   'still its block',
+   P.address_under_dropoff('Picked up\nDeliver to Pat Q.\n12 Fable St, Acworth, GA 30101'),
+   True)
+eq('address_under_dropoff: not under a Pickup label', P.address_under_dropoff(_PK), False)
+eq('address_under_dropoff: not under no label',
+   P.address_under_dropoff('12 Fable St, Acworth, GA 30101\n12 min Start'), False)
+eq('address_under_dropoff: not a second address under the label\'s own one',
+   P.address_under_dropoff('Dropoff\n34 Made Up Rd, Acworth, GA 30102\nView details\n'
+                           '56 Other Made Up Rd, Acworth, GA 30101'), False)
 eq('planner_furniture: a planner block whose header did not read still has it',
    P.planner_furniture('Kennesaw, GA 30144\nView details\nFable Grill\n'
                        'Expected by 5:54 PM'), True)

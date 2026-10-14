@@ -2663,7 +2663,14 @@
     var said = { go: 0, warn: 0, no: 0, none: 0, unjudged: 0 };
     var took = { go: 0, warn: 0, no: 0, none: 0, unjudged: 0 };
     var marked = 0;
-    pairs.forEach(function (p) {
+    // A pair judged with TWO orders already in the car (carrying two on,
+    // `heldCount` in server.js's recordPairing) is not graded: its range is
+    // the new card against the first order alone, and the second order's
+    // time and money are in neither end of it — "vs ① only", the panel said.
+    // Listed below like every pairing, counted here as what it is.
+    var graded = pairs.filter(function (p) { return !(p.heldCount > 1); });
+    var ungraded = pairs.length - graded.length;
+    graded.forEach(function (p) {
       // A row whose verdict was never the panel's cannot be counted as one.
       // Counted in its own bucket instead of being dropped, because how many
       // of these there are is the measurement — see the comment on saidWords.
@@ -2690,7 +2697,9 @@
     // record. Every pair row written before the target reached recordPairing
     // lands here.
     if (said.unjudged) parts.push('not recorded <b>' + said.unjudged + '</b>');
-    var lead = 'The panel said: ' + parts.join(' · ') + '. ';
+    var lead = (parts.length ? 'The panel said: ' + parts.join(' · ') + '. ' : '')
+      + (ungraded ? '<b>' + ungraded + '</b> with two orders already in the car, '
+                    + 'not graded: each was weighed against the first alone. ' : '');
     // Counted against what was marked, not against every pairing. Dividing by
     // the total would read as "you ignored the advice" on a shift where the
     // driver simply never pressed the button — the same unmarked row, told as
@@ -2705,7 +2714,7 @@
     var tookAll = took.go + took.warn + took.no + took.none;
     lead += marked
       ? 'You marked <b>' + marked + '</b> of them'
-        + (marked === pairs.length ? '' : ' either way')
+        + (marked === graded.length ? '' : ' either way')
         + ' and took <b>' + tookAll + '</b>'
         + (tookAll
            ? ' — ' + took.go + ' the panel had cleared, '

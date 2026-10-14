@@ -393,5 +393,23 @@ check('largest dollar figure wins over a promo line',
      area && area.zip, '30075');
 })();
 
+/* ---- the two ends of a planner's list, one at a time ---- */
+/* A sighting's `page` says each end apart, where plannerBounded says both.
+   The corpus states only `bounded`, which is the two together and cannot see
+   them swapped; these two cases have one end each. rpi/test_parser.py asks
+   the same of planner_ends. */
+(function () {
+  var planner = require('./fixtures/cases.json').planner;
+  var ends = function (n) {
+    var e = P.plannerEnds(planner.filter(function (c) { return c.name === n; })[0].text);
+    return JSON.stringify([e.top, e.bottom]);
+  };
+  eq('plannerEnds: a list scrolled past its first stop shows its end and not its start',
+     ends('a planner scrolled past its first stop does not show its start'), '[false,true]');
+  eq('...and one running on below the screen its start and not its end',
+     ends('a planner whose list runs on below the screen does not show its end'),
+     '[true,false]');
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' parser checks passed');
 process.exit(fail ? 1 : 0);

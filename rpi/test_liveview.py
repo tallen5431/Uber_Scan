@@ -270,8 +270,29 @@ try:
     block = re.search(r'@media \(orientation: landscape\)\s*\{(.*?)\n  \}',
                       page, re.S)
     ok_('the across-the-screen block is still there', block is not None)
-    placed = set(re.findall(r'#([A-Za-z][\w-]*)[^{}]*\{[^{}]*grid-column',
-                            block.group(1) if block else ''))
+
+    # The id a rule PLACES is its selector's subject: the last compound, never
+    # an id named inside :has() or :not(), earlier in the chain, or in a
+    # comment above the rule. Taking the first `#id` in front of the brace read
+    # Map view's between-offers rule, `body.between #app:has(#liveMap:not(
+    # [hidden])) #viewWrap { grid-column: 1; }`, as placing #app — which has no
+    # parent in the markup — and this suite went red on a rule that places
+    # #viewWrap, a child of #app, exactly as it should.
+    def placed_ids(css):
+        css = re.sub(r'/\*.*?\*/', '', css, flags=re.S)
+        ids = set()
+        for sel, body in re.findall(r'([^{}]*)\{([^{}]*)\}', css):
+            if not re.search(r'(?:^|[;\s])grid-column\s*:', body):
+                continue
+            bare = None
+            while bare != sel:
+                bare, sel = sel, re.sub(r'\([^()]*\)', '', sel)
+            for one in sel.split(','):
+                subject = re.split(r'[\s>+~]+', one.strip())[-1]
+                ids.update(re.findall(r'#([A-Za-z][\w-]*)', subject))
+        return ids
+
+    placed = placed_ids(block.group(1) if block else '')
     ok_('...and it places things by id', placed)
     for name in sorted(placed):
         eq('%s is a child of the grid that places it' % name,

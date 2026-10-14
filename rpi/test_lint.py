@@ -1135,16 +1135,17 @@ ok_('AUDITS.md keeps each entry in one section, not %s' % (_alike[:2] or 'two'),
 
 # --- the reasons a Trip Planner gives the order in the car no end -------------
 #
-# rpi/scan_pi.py's planner_destination decides, and says which reason in a word
-# on the planner line; live.html's UNFILED_SAID has the panel's words for each.
-# Two lists in two languages that have to be the same list: a reason the
-# scanner gives that the page has no entry for is a TypeError on the driving
-# screen, and an entry the scanner never gives is a branch no input reaches.
+# assemble.js's plannerDestination decides (it was rpi/scan_pi.py's
+# planner_destination until Stage 3), and server.js puts its word on the
+# planner line; live.html's UNFILED_SAID has the panel's words for each.
+# Two lists in two files that have to be the same list: a reason the
+# assembler gives that the page has no entry for is a TypeError on the driving
+# screen, and an entry it never gives is a branch no input reaches.
 # Read out of both files, as the doubt reasons above are.
-_sp_src = open(os.path.join(ROOT, 'rpi', 'scan_pi.py'), encoding='utf-8').read()
-_pd = _sp_src[_sp_src.index('\ndef planner_destination('):]
-_pd = _pd[:_pd.index('\ndef ', 1)]
-_given = set(re.findall(r"return None, '([a-z]+)'", _pd))
+_asm_src = open(os.path.join(ROOT, 'assemble.js'), encoding='utf-8').read()
+_pd = _asm_src[_asm_src.index('\n  function plannerDestination('):]
+_pd = _pd[:_pd.index('\n  function ', 1)]
+_given = set(re.findall(r"why: '([a-z]+)'", _pd))
 _live_src = open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read()
 _said = re.search(r'var UNFILED_SAID = \{(.*?)\n  \};', _live_src, re.S)
 eq('live.html has words for every reason planner_destination gives, and no other',
@@ -1208,6 +1209,48 @@ for _file, _src, _fn in (('live.html', _live_src, 'drawHow'),
     eq('%s\'s %s draws what was decided and asks nothing (%r)'
        % (_file, _fn, _body and _ASKS.findall(_body)),
        _body is not None and _ASKS.findall(_body), [])
+
+# --- the screens a sighting can be typed as -----------------------------------
+#
+# offer_parser.screen_type and offer-parser.js's screenType each name the
+# screens in a SCREENS list, and server.js tallies a sighting under whatever
+# name arrives. Two lists in two languages that must be one list: a name one
+# port returns and the other never does is a count that moves on one side
+# only. Read out of both files, and held to what each classifier can return
+# — a name on the list that no branch returns is a branch no input reaches —
+# and to the shared corpus, which has a case for every one.
+_op_src = open(os.path.join(ROOT, 'rpi', 'offer_parser.py'), encoding='utf-8').read()
+_opjs_src = open(os.path.join(ROOT, 'offer-parser.js'), encoding='utf-8').read()
+_py_list = re.search(r'^SCREENS = \((.*?)\)', _op_src, re.S | re.M)
+_js_list = re.search(r'var SCREENS = \[(.*?)\];', _opjs_src, re.S)
+_py_screens = re.findall(r"'([A-Za-z.]+)'", _py_list.group(1)) if _py_list else None
+_js_screens = re.findall(r"'([A-Za-z.]+)'", _js_list.group(1)) if _js_list else None
+eq('the two ports\' screen lists are held equal', _py_screens, _js_screens)
+_py_body = _op_src[_op_src.index('\ndef _screen('):]
+_py_body = _py_body[:_py_body.index('\ndef ', 1)]
+_js_body = _js_function(_opjs_src, 'screenOf') or ''
+eq('...and every screen the Python classifier returns is on its list, and every '
+   'one on it is returned', sorted(set(re.findall(r"return '([A-Za-z.]+)'", _py_body))),
+   sorted(_py_screens or []))
+eq('...and the same of the JavaScript one',
+   sorted(set(re.findall(r"return '([A-Za-z.]+)'", _js_body))), sorted(_js_screens or []))
+eq('...and the shared corpus has a case for every one',
+   sorted(set(_c['expect']['screen'] for _c in _cases.get('screens', []))),
+   sorted(_py_screens or []))
+
+# The order in the car is a LIST since Stage 4 (MAX_HELD in server.js), read
+# through heldOrders() and holding(). The one-slot name it had, `scanner.holding`,
+# must be read nowhere: a reader of the old shape would answer "is an order in
+# the car" off a field nothing writes, and say no for the rest of the shift.
+# Asked of every JavaScript file the server and the panel run, comments
+# included, so the name cannot come back in a comment that then misleads.
+_slot_readers = []
+for _jsf in sorted(glob.glob(os.path.join(ROOT, '*.js')) + glob.glob(os.path.join(ROOT, '*.html'))):
+    _src = open(_jsf, encoding='utf-8').read()
+    for _n, _line in enumerate(_src.split('\n'), 1):
+        if 'scanner.holding' in _line:
+            _slot_readers.append('%s:%d' % (os.path.basename(_jsf), _n))
+eq('nothing reads the old single scanner.holding shape directly', _slot_readers, [])
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)

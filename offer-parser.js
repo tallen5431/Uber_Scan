@@ -216,6 +216,17 @@
     '\\$\\s*(' + DC + '{1,3})\\s+(' + DC + '{1,2}[.,]' + DC + '{2})'
     + '\\s*(?=guarant|includ)', 'gi');
 
+  /* ...and the other place the reader cuts it: between the dollars and the
+     cents. "$12 6 8" for $12.68 and "$12. 78" for $12.78, both read as $12.00
+     on the 12 Oct shift. Two real digits, the second optionally a space away,
+     and nothing after them that makes them a number of their own: no decimal
+     point, no third digit even a space away ("$1 1 1 5" is $11.15 cut three
+     times), and no unit ("$12 68 min" is a payout beside a duration). The
+     Python twin, PAY_CENTS_SPLIT, has the measurements. */
+  var PAY_CENTS_SPLIT = new RegExp(
+    '\\$\\s*(' + DC + '{1,3})[.,]?\\s+(\\d)\\s?(\\d)(?![.,])(?!\\s?\\d)'
+    + '(?!\\s*m(?:i|[il1|]n))', 'gi');
+
   /* A number that is a duration or a distance, wearing a dollar sign.
    *
    * The rig photographs whatever is on the phone, and between jobs that is the
@@ -302,6 +313,14 @@
     // standing of its own.
     var joined = collectPair(text, PAY_SPLIT);
     all = all.concat(joined);
+    // ...and the cents cut off by a space. See PAY_CENTS_SPLIT.
+    var m2;
+    PAY_CENTS_SPLIT.lastIndex = 0;
+    while ((m2 = PAY_CENTS_SPLIT.exec(text)) !== null) {
+      all.push({ value: m2[1] + '.' + m2[2] + m2[3], index: m2.index, match: m2[0],
+                 halves: [m2[1], m2[2] + m2[3]] });
+      if (m2.index === PAY_CENTS_SPLIT.lastIndex) PAY_CENTS_SPLIT.lastIndex++;
+    }
     if (!all.length) return null;
 
     // Cards can show a promo or a struck-through figure alongside the real
@@ -645,6 +664,18 @@
     + NOT_THE_CHARGER + '\\s*\\)?)?',
     'gi'
   );
+
+  /* DoorDash's newer card: "3 stops (7.8 mi) · 30 min". LEG refuses a bracket
+     as glue, so it matched "30 min" alone and the bracketed distance was an
+     orphan - `shortATime`, never whole, on all 21 DoorDash offers of the
+     12 Oct shift. The bracket is allowed only where it closes on the card's
+     own word for the stops. Asked of the text just before a minutes token LEG
+     found, hence the `$`. The Python twin, STOPS_LEAD, has the measurements. */
+  var STOPS_LEAD = new RegExp(
+    '[A-Za-z_]{0,3}ps\\s*\\(\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)'
+    + '\\s*m(?:i|ile|iles)\\b\\s*\\)\\s*[^\\s\\w()]{1,3}\\s*$', 'i');
+  // ...and how many stops the card says, as printed. Shown, never priced.
+  var STOPS_COUNT = /(?:^|[^\d])(\d{1,2})\s*stops?\s*\(/i;
 
   /* An hour unit sitting immediately in front of a leg whose hours group
      matched NOTHING: `Thr 21min`. See findLegs, which refuses such a leg.
@@ -1443,7 +1474,7 @@
   }
 
   /* The stops on the Trip Planner in screen order: {kind, orders, name,
-     expectedBy, street, city, state, zip, line}, or null with no stop header.
+     expectedBy, street, city, state, zip, line, place}, or null with no stop header.
      Every field that does not read is null and never guessed. Line by line,
      each normalized on its own, as lineStarts does. See find_planner. */
   /* The text's lines, each normalized on its own and the empty ones gone, and
@@ -1468,9 +1499,59 @@
   var PLANNER_QUADRANT_LEAD = new RegExp('^[^A-Za-z0-9]{0,3}((?:north|south) ?(?:east|west)'
     + '|north|south|east|west|[NS][EW]) ?, ?(.+)$', 'i');
 
+  /* The last comma in `line` whose remainder is a town line, or -1. */
+  function plannerCut(line) {
+    var cut = -1;
+    for (var c = line.indexOf(','); c !== -1; c = line.indexOf(',', c + 1)) {
+      if (plannerTown(line.slice(c + 1).trim())) cut = c;
+    }
+    return cut;
+  }
+
+  /* The place's name among `lines`, the ones over a stop's street: the first
+     with two letters in a row that is not the town said again on its own. */
+  function plannerPlace(lines, townLine) {
+    var town = plannerTown(townLine)[1].trim().toLowerCase();
+    for (var i = 0; i < lines.length; i++) {
+      var name = lines[i].replace(PLANNER_EDGE, '');
+      if (/[A-Za-z]{2}/.test(name) && name.toLowerCase() !== town) return name;
+    }
+    return null;
+  }
+
+  /* The fourth layout, a dropoff at a hotel on the driver's planner: the
+     place's name, the town bare, then "<n> <street>, Town, ST" with no ZIP.
+     The street is the line opening with a house number, down to "View
+     details", with its town on it or under it; what is above it is the
+     place, unless it is the town again. Only when the two lines under the
+     label held no town line. See PLANNER_HOUSE in offer_parser.py. */
+  var PLANNER_HOUSE = new RegExp('^\\W{0,3}' + DC + '{1,6} [A-Za-z]');
+  var PLANNER_DETAILS = /^[^A-Za-z0-9]{0,3}view ?details\b/i;
+
+  function plannerUnderAPlace(block, label) {
+    var under = [];
+    var rest = block.slice(label + 1, label + 6);
+    for (var i = 0; i < rest.length && !PLANNER_DETAILS.test(rest[i]); i++) under.push(rest[i]);
+    for (var j = 0; j < under.length; j++) {
+      var l = under[j];
+      if (!PLANNER_HOUSE.test(l)) continue;
+      var cut = plannerCut(l), found;
+      if (cut !== -1) {
+        found = { at: j, street: l.slice(0, cut), town: l.slice(cut + 1).trim() };
+      } else if (j + 1 < under.length && plannerTown(under[j + 1])) {
+        found = { at: j + 1, street: l, town: under[j + 1] };
+      } else {
+        continue;
+      }
+      found.place = plannerPlace(under.slice(0, j), found.town);
+      return found;
+    }
+    return null;
+  }
+
   function plannerAddressLines(block, label) {
     var under = block.slice(label + 1, label + 4);
-    var streetLine = null, townLine = null, townAt = -1;
+    var streetLine = null, townLine = null, townAt = -1, place = null;
     for (var k = 0; k < Math.min(under.length, 2); k++) {
       var l = under[k];
       // The street's quadrant wrapped onto the town line. See
@@ -1485,22 +1566,26 @@
         townAt = k; townLine = l; streetLine = k ? under[0] : null;
         break;
       }
-      var cut = -1;
-      for (var c = l.indexOf(','); c !== -1; c = l.indexOf(',', c + 1)) {
-        if (plannerTown(l.slice(c + 1).trim())) cut = c;
-      }
+      var cut = plannerCut(l);
       if (cut !== -1 && /^\W{0,3}\d/.test(l)) {
         townAt = k; streetLine = l.slice(0, cut); townLine = l.slice(cut + 1).trim();
+        // A line over a street that carries its own town is the place's name.
+        place = plannerPlace(under.slice(0, k), townLine);
         break;
       }
     }
-    if (townAt === -1) return { street: under.length ? under[0] : null, town: null };
+    if (townAt === -1) {
+      var found = plannerUnderAPlace(block, label);
+      if (!found) return { street: under.length ? under[0] : null, town: null, place: null };
+      townAt = found.at; streetLine = found.street; townLine = found.town; place = found.place;
+      under = block.slice(label + 1);
+    }
     var t = plannerTown(townLine);
     if (!t[3].trim() && townAt + 1 < under.length
         && PLANNER_ZIP_LINE.test(under[townAt + 1])) {
       townLine = townLine + ' ' + under[townAt + 1];
     }
-    return { street: streetLine, town: townLine };
+    return { street: streetLine, town: townLine, place: place };
   }
 
   // The app's bar under the list, where the list ends. See PLANNER_BAR.
@@ -1517,10 +1602,50 @@
     return { lines: lines, heads: heads };
   }
 
+  /* The stop a page begins in the middle of, or null: an "Address" label
+     above the first header, with no "Trip Planner" title over it. Kind,
+     count and name null, its time only if an "Expected by" survived above
+     the label, and `partial: 'top'`. See _planner_orphan in offer_parser.py. */
+  function plannerOrphan(lines, first) {
+    var above = lines.slice(0, first);
+    if (above.some(function (l) { return PLANNER_TITLE.test(l); })) return null;
+    var label = -1;
+    for (var j = 0; j < above.length; j++) {
+      if (PLANNER_ADDRESS.test(above[j])) { label = j; break; }
+    }
+    if (label === -1) return null;
+    var due = null;
+    for (var i = 0; i < label; i++) {
+      var m = PLANNER_EXPECTED.exec(above[i]);
+      if (m) due = timeOfDay(m[1], m[2], m[3]);
+    }
+    var found = plannerAddressLines(above, label);
+    var stop = { kind: null, orders: null, name: null, expectedBy: due };
+    var where = plannerAddress(found.street, found.town);
+    Object.keys(where).forEach(function (key) { stop[key] = where[key]; });
+    stop.place = found.place;
+    stop.partial = 'top';
+    return stop;
+  }
+
+  /* ...and the page's two edges, said as `partial` on the one stop each cut
+     and on no other: 'top' for the stop above, 'bottom' for the last header
+     with no address under it and no "Waybill" after it. See find_planner. */
   function findPlanner(text) {
     var split = plannerLines(text);
     var lines = split.lines, heads = split.heads;
     if (!heads.length) return null;
+    var top = plannerOrphan(lines, heads[0]);
+    var stops = headedStops(lines, heads);
+    var last = stops[stops.length - 1];
+    if (!(last.street || last.city)
+        && !lines.slice(heads[heads.length - 1] + 1).some(function (l) { return PLANNER_END.test(l); })) {
+      last.partial = 'bottom';
+    }
+    return top ? [top].concat(stops) : stops;
+  }
+
+  function headedStops(lines, heads) {
     return heads.map(function (at, k) {
       var head = PLANNER_STOP.exec(lines[at]);
       var block = lines.slice(at + 1, k + 1 < heads.length ? heads[k + 1] : lines.length);
@@ -1544,7 +1669,7 @@
       // lines in this block, and its "Expected by" is where that stop began.
       // A dropoff whose address is off the screen is recorded with none, never
       // with the pickup's. See find_planner.
-      var streetLine = null, townLine = null, label = -1;
+      var streetLine = null, townLine = null, place = null, label = -1;
       var times = [];
       block.forEach(function (l, i) { if (PLANNER_EXPECTED.test(l)) times.push(i); });
       var own = times.length > 1 ? block.slice(0, times[1]) : block;
@@ -1553,7 +1678,7 @@
       }
       if (label !== -1) {
         var found = plannerAddressLines(own, label);
-        streetLine = found.street; townLine = found.town;
+        streetLine = found.street; townLine = found.town; place = found.place;
       }
       var stop = { kind: /^p/i.test(head[1]) ? 'pickup' : 'dropoff',
                    orders: (count !== null && count >= 1 && count === Math.floor(count))
@@ -1561,6 +1686,9 @@
                    name: name, expectedBy: due };
       var where = plannerAddress(streetLine, townLine);
       Object.keys(where).forEach(function (key) { stop[key] = where[key]; });
+      // The hotel or business the address is at, when the block names one:
+      // shown, never searched, and never the street. See PLANNER_HOUSE.
+      stop.place = place;
       return stop;
     });
   }
@@ -1577,18 +1705,91 @@
   var PLANNER_TITLE = /^[^A-Za-z0-9]{0,3}trip ?planner\b/i;
   var PLANNER_END = /^[^A-Za-z0-9]{0,3}way ?[A-Za-z]? ?bill\b/i;
 
+  /* Whether a line of `text` is the "Trip Planner" title, above the app's
+     bar: what a sighting says as `titled`, and what the assembler asks of a
+     page nobody pressed for. See planner_titled in offer_parser.py. */
+  function plannerTitled(text) {
+    return plannerLines(text).lines.some(function (l) { return PLANNER_TITLE.test(l); });
+  }
+
   function plannerBounded(text) {
+    var ends = plannerEnds(text);
+    return ends.top && ends.bottom;
+  }
+
+  /* {top, bottom}: plannerBounded's two tests one at a time, for a
+     sighting's `page`. See planner_ends in offer_parser.py. */
+  function plannerEnds(text) {
     var split = plannerLines(text);
     var lines = split.lines, heads = split.heads;
-    if (!heads.length) return false;
+    if (!heads.length) return { top: false, bottom: false };
     var title = -1;
     for (var i = 0; i < heads[0]; i++) if (PLANNER_TITLE.test(lines[i])) title = i;
-    if (title === -1) return false;
-    if (lines.slice(title + 1, heads[0]).some(function (l) { return /[A-Za-z]{2}/.test(l); })) {
-      return false;
-    }
-    return lines.slice(heads[heads.length - 1] + 1)
-      .some(function (l) { return PLANNER_END.test(l); });
+    var top = title !== -1 && !lines.slice(title + 1, heads[0])
+      .some(function (l) { return /[A-Za-z]{2}/.test(l); });
+    return { top: top,
+             bottom: lines.slice(heads[heads.length - 1] + 1)
+               .some(function (l) { return PLANNER_END.test(l); }) };
+  }
+
+  /* What screen a reading is, for a sighting: {app, screen}, `screen` one of
+     SCREENS and `app` 'uber', 'doordash', or null for 'unknown' alone.
+     Collection only, and kept apart from NOT_AN_OFFER, which decides. Each
+     recogniser, the order they are asked in and why, and what the 12 Oct
+     shift measured: see screen_type in offer_parser.py. rpi/test_lint.py
+     holds the two SCREENS lists equal. */
+  var SCREENS = ['uber.offer', 'uber.addon', 'uber.planner', 'uber.pickupNav',
+                 'uber.nav', 'uber.finding', 'tripRadar', 'dd.offer', 'dd.finding',
+                 'dd.switch', 'unknown'];
+  var SCREEN_DD_SWITCH = /switch to dash|busier zone|don.?t switch/i;
+  var SCREEN_PLANNER = /^[^A-Za-z0-9]{0,3}(?:trip ?planner|address|stop new requests|way ?[A-Za-z]? ?bill)\b/i;
+  var SCREEN_RADAR = /\btrip ?radar\b/i;
+  var SCREEN_DD_OFFER = new RegExp(
+    '\\bincl[.,]? ?tips\\b|\\d ?stops? ?\\(|custom[ea]r[ \\t\\r\\n]*drop'
+    + '|multiple[ \\t\\r\\n]*drop[ \\t\\r\\n]*-?[ \\t\\r\\n]*offs'
+    + '|all orders are picked up|deliver by|\\d ?mi ?[-+·•«] ?\\d{1,3} ?min', 'i');
+  var SCREEN_ADDON = /\+ ?\d{1,3} ?min\w* ?\( ?\+/i;
+  var SCREEN_UBER_OFFER = new RegExp(
+    '\\d ?min\\w* ?\\( ?\\d|\\bmi\\)? ?total\\b|includes expected tip|\\bincl[.,]? ?tip\\b'
+    + '|\\bexclusive\\b|est[.,]? ?delivery|\\bverified\\b|avg[.,]? ?wait time'
+    + '|early [lt]ook|fast charger|matching may take', 'i');
+  var SCREEN_DD_ELSEWHERE = new RegExp(
+    'pick ?up from\\b|current task|pause orders|decline this offer|this dash so far'
+    + '|dash summary|continue dashing', 'i');
+  var SCREEN_PICKUP_NAV = /note from business|pick ?up in store|pick ?up order/i;
+  var SCREEN_NAV = new RegExp(
+    '\\bdeliver(?:ing)? to\\b|dropoff type|meet at (?:the )?door|complete delivery'
+    + '|arriving soon|expected by \\d'
+    + '|(?:\\d|\\b[lLIO])[\\dlI]? ?min ?[©Oo0@] ?[\\dO]{0,3}(?:[.,]\\d)? ?mi\\b', 'i');
+  var SCREEN_LIMIT = /\blimit\b/i;
+  var SCREEN_MATCHING = /matching in progress/i;
+  var SCREEN_DD_FINDING = /finding offers|wait for offers|zone offer wait|likely to get offers/i;
+  var SCREEN_UBER_FINDING = /finding trips|\by?ou.?re online/i;
+
+  function screenType(text) {
+    var screen = screenOf(String(text || ''));
+    return { app: /^dd\./.test(screen) ? 'doordash' : screen === 'unknown' ? null : 'uber',
+             screen: screen };
+  }
+
+  function screenOf(text) {
+    if (SCREEN_DD_SWITCH.test(text)) return 'dd.switch';
+    if (SCREEN_MATCHING.test(text)) return 'unknown';
+    if (SCREEN_RADAR.test(text) && SCREEN_UBER_OFFER.test(text)) return 'tripRadar';
+    if (SCREEN_DD_OFFER.test(text)) return 'dd.offer';
+    if (SCREEN_ADDON.test(text)) return 'uber.addon';
+    if (SCREEN_UBER_OFFER.test(text)) return 'uber.offer';
+    // Every line, the bar's included: plannerLines stops above the bar.
+    var lines = text.split(/[\r\n]+/).map(normalize);
+    if (findPlanner(text) !== null
+        || lines.some(function (l) { return SCREEN_PLANNER.test(l); })) return 'uber.planner';
+    if (SCREEN_DD_ELSEWHERE.test(text)) return 'unknown';
+    if (SCREEN_PICKUP_NAV.test(text)) return 'uber.pickupNav';
+    if (SCREEN_NAV.test(text)) return 'uber.nav';
+    if (SCREEN_DD_FINDING.test(text)) return 'dd.finding';
+    if (SCREEN_UBER_FINDING.test(text) || SCREEN_RADAR.test(text)) return 'uber.finding';
+    if (SCREEN_LIMIT.test(text)) return 'uber.nav';
+    return 'unknown';
   }
 
   function labelledPickup(text, place) {
@@ -1633,8 +1834,15 @@
    * testing showed the other two were already covered by "finding offers", and
    * a pattern nothing can show is dead weight. Each of these is the ONLY
    * evidence against its own phantom — including the second frame of the idle
-   * screen, where most of the text did not survive the read. */
-  var NOT_AN_OFFER = /add\s*stops|finding\s*offers/i;
+   * screen, where most of the text did not survive the read.
+   *
+   * And Uber's own idle screen, which had none: the online map, its sheet
+   * saying "You're online" or "Finding trips" (124 and 54 screen rows on the
+   * journal on file, no offer row, never both on one), "You are online" in the
+   * corpus's map-noise frame. NOT "Trip Radar": the pill bleeds into offer
+   * cards read over the map, 308 offer rows of it. See NOT_AN_OFFER in
+   * rpi/offer_parser.py, which the shared corpus holds this to. */
+  var NOT_AN_OFFER = /add\s*stops|finding\s*offers|you(?:\W{0,3}re|\s*are)\s*online|finding\s*trips/i;
 
   var DROPOFF_NOT_STATED = /custom[ea]r\s*drop\s*-?\s*off/i;
 
@@ -1711,6 +1919,68 @@
 
   /* Where it STARTS - for showing rather than judging, because the driver does
    * not take a second order whose pickup is far away in the first place. */
+  /* The stores on DoorDash's stops card, one block each under the stops line:
+     an icon and the store, then its street cut off by the card ("..."), and
+     "Customer dropoff" or "Multiple dropoffs (2 stops)" after the last. A line
+     is a street when it starts with a house number, ends where the card cut
+     it, or carries a street word beside a comma. A name is only kept once the
+     street under it has been seen. The Python twin, find_stores, has the
+     shift this was read off. */
+  var STORE_STREET = new RegExp(
+    '^\\W{0,4}\\d{1,6}\\s+[A-Za-z].*(?:' + PLACE_STREET.source + '|,|\\.\\.)'
+    + '|(?:\\.{2,}|…)\\s*$|,.*' + PLACE_STREET.source + '|'
+    + PLACE_STREET.source + '.*,', 'i');
+  var STORE_END = /custom[ea]r\s*drop|multiple\s*drop|\baccept\b|\bdecline\b/i;
+  var STORE_CHIP = /\b(?:pick\s*up|drop\s*off)\s*\d|\bid\s*check\b|\bage\s*21/i;
+  var STORES_LINE = new RegExp(
+    'ps\\s*\\(\\s*' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?\\s*m(?:i|iles?)\\b\\s*\\)', 'i');
+
+  function storeName(line) {
+    var words = line.split(/\s+/).filter(function (w) { return w.length; });
+    var cut = null, i;
+    for (i = 0; i < Math.min(4, words.length); i++) {
+      if (/^[A-Z]\S*[A-Za-z]/.test(words[i])) { cut = i; break; }
+    }
+    if (cut === null) {
+      cut = 0;
+      for (i = 0; i < Math.min(3, words.length); i++) {
+        var w = words[i];
+        if (!/[A-Za-z]/.test(w) || w.length === 1
+            || (w.length <= 3 && /[^\w'’]/.test(w))) cut = i + 1;
+      }
+    }
+    words = words.slice(cut);
+    while (words.length && !/[A-Za-z0-9]/.test(words[words.length - 1])) words.pop();
+    var name = words.join(' ');
+    return /[A-Za-z]{2}/.test(name) ? name : '';
+  }
+
+  function findStores(rawText) {
+    var lines = String(rawText || '').split('\n'), at = -1, i;
+    for (i = 0; i < lines.length; i++) {
+      if (STORES_LINE.test(lines[i])) { at = i; break; }
+    }
+    if (at < 0) return [];
+    var out = [], pending = [];
+    for (i = at + 1; i < lines.length; i++) {
+      var line = lines[i];
+      if (STORE_END.test(line)) break;
+      if (STORE_CHIP.test(line)) continue;
+      if (STORE_STREET.test(line)) {
+        if (pending.length) out.push(pending.join(' ').slice(0, MAX_PLACE));
+        pending = [];
+        continue;
+      }
+      var name = storeName(line);
+      if (!name) continue;
+      // A name the card wrapped onto a second line starts with a letter and
+      // no icon.
+      if (pending.length === 1 && name === line.trim()) pending.push(name);
+      else pending = [name];
+    }
+    return out.slice(0, MAX_PLACES);
+  }
+
   function findPickup(places, ends) {
     /* The card's layout narrows both scans and replaces neither. Where it said
        nothing - every card that is not the two-leg shape, which is most of
@@ -1963,6 +2233,18 @@
           || (m.index > 0 && '0123456789.,'.indexOf(text.charAt(m.index - 1)) >= 0))) {
         lead = null;
       }
+      var start = m.index;
+      // DoorDash's "3 stops (7.8 mi) · 30 min": the bracketed distance before
+      // the time. See STOPS_LEAD. The leg starts at the bracket, so the
+      // distance sits inside it and is not also an orphan.
+      if (m[1] === undefined || m[1] === null) {
+        var before = text.slice(Math.max(0, m.index - 40), m.index);
+        var s = STOPS_LEAD.exec(before);
+        if (s && /\d/.test(s[1])) {
+          lead = s[1];
+          start = text.lastIndexOf('(', m.index - before.length + s.index + s[0].indexOf(s[1]));
+        }
+      }
       // The bracketed one wins when a card prints both: the bracket is the card
       // saying which time this distance belongs to.
       var side = (m[4] === undefined || m[4] === null) ? lead : m[4];
@@ -1988,6 +2270,18 @@
       // reports 43 minutes.
       var fixed = recoverDecimal(minutes, miles, hadDecimal);
       miles = fixed.miles;
+      // A bracketed distance with a leading zero and no point is a point the
+      // reader lost: no card prints "(09 mi)", and "( 09 mi)" for "(+ 0.9 mi)"
+      // is 49 mph over 11 minutes, which recoverDecimal lets stand. The leg is
+      // left without its distance - `lostMiles` makes it uncertain and not
+      // whole, and another frame supplies the real one. Only inside a bracket
+      // the reader saw: "027 mi)" is the bracket itself read as a 0. See the
+      // Python port for the measurements.
+      if (!fixed.corrected && miles !== null && m[4] !== undefined && m[4] !== null
+          && /\($/.test(text.slice(0, m.index + m[0].indexOf(m[4], m[0].indexOf('(') + 1)).replace(/\s+$/, ''))
+          && /^[0Oo]\d/.test(side) && !hadDecimal) {
+        miles = null;
+      }
 
       // Uber labels a combined figure "total"; a card that has one is not also
       // listing its legs, so mixing the two would double count the trip.
@@ -2024,7 +2318,7 @@
         milesAfter: m[4] !== undefined && m[4] !== null,
         // Where this leg sat in the text, so the address printed after it can
         // be found without searching the whole card again.
-        start: m.index, end: m.index + m[0].length
+        start: start, end: m.index + m[0].length
       });
 
       if (m.index === LEG.lastIndex) LEG.lastIndex++;
@@ -2579,6 +2873,8 @@
     var itemMatch = mine.match(ITEMS);
     var items = itemMatch ? toNumber(itemMatch[1]) : null;
     if (items !== null && (items < 0 || items > 200)) items = null;
+    var stopsMatch = STOPS_COUNT.exec(mine);
+    var stops = stopsMatch ? parseInt(stopsMatch[1], 10) : null;
 
 
     // A delivery card states no duration and puts its distance on its own, so
@@ -2670,6 +2966,14 @@
        pass's record of where they sat. Asked before the two ends, because it
        is what decides them when the card stated it. */
     var ends = placeEndsOf(legs, places, whose);
+    /* DoorDash's stops card names its stores itself, and they are all the
+       pickup end: "Multiple dropoffs" prints no customer, so without the ends
+       the second store would be offered as the destination. See findStores. */
+    var stores = findStores(rawText);
+    if (stores.length) {
+      places = stores;
+      ends = stores.map(function () { return 0; });
+    }
     var pickup = findPickup(places, ends);
     var dropoff = findDropoff(places, text, ends);
     /* The card can name its approach leg in words or by where it printed the
@@ -2753,6 +3057,9 @@
       toPickupMinutes: approach ? approach.minutes : null,
       toPickupMiles: approach ? approach.miles : null,
       items: items,
+      // DoorDash's "3 stops (7.8 mi)", as printed. Shown, never priced, and
+      // not `legs`: the card times the whole job in one figure.
+      stops: stops,
       legs: used.length,
       milesCorrected: dist.corrected,
       milesUncertain: dist.uncertain,
@@ -3149,7 +3456,9 @@
            findPickup: findPickup, findDropoff: findDropoff,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner,
-           plannerBounded: plannerBounded,
+           plannerBounded: plannerBounded, plannerEnds: plannerEnds,
+           plannerTitled: plannerTitled,
+           screenType: screenType, SCREENS: SCREENS,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,
            /* Exported so the default can be checked directly. Everything that

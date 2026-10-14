@@ -299,6 +299,12 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     real_planner = SP.emit_planner
     SP.emit_planner = lambda *a, **k: (planners.append((a[0] if a else None, k)),
                                        real_planner(*a, **k))[1]
+    # ...and the sighting beside it, as the server is sent it: a planner's one
+    # dropoff is the assembler's to file off it (see `assembled` below).
+    sightings = []
+    real_sighting = SP.emit_sighting
+    SP.emit_sighting = lambda *a, **k: (sightings.append(SP.sighting(*a, **k)),
+                                        real_sighting(*a, **k))[1]
 
     # The button. Written before the loop starts, which is the same file the
     # server's /api/dropoff writes and the same one dropoff_requested() clears.
@@ -376,6 +382,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         SP.emit_offer = real_offer
         SP.emit_dropoff = real_dropoff
         SP.emit_planner = real_planner
+        SP.emit_sighting = real_sighting
         SP.Health = real_health_cls
         PL.Scanner.look_many = real_look
         PL.Scanner.should_read = real_should
@@ -404,7 +411,7 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     return dict(cam=cam, rows=rows, ups=ups, ready=ready, ready_kw=ready_kw,
                 announced=announced, gate_calls=gate_calls,
                 destinations=destinations, planners=planners, verdicts=verdicts,
-                config=config, journal=journal, started=len(started),
+                sightings=sightings, config=config, journal=journal, started=len(started),
                 health=(healths[-1] if healths else None))
 
 
@@ -481,6 +488,11 @@ eq('...and a finished reading as whole',
    emitted(sample_rate, sample_parsed, True)['whole'], True)
 eq('...and a caller that does not say leaves it unstated',
    emitted(sample_rate, sample_parsed, None)['whole'], None)
+# DoorDash's printed stop count ("3 stops (7.8 mi)"), carried on the reading as
+# parse and the accumulator's vote gave it; none on a card that prints none.
+eq('a DoorDash card\'s stop count goes out on the reading, and none where it printed '
+   'none', (emitted(sample_rate, dict(sample_parsed, stops=3), True).get('stops', 'absent'),
+            emitted(sample_rate, sample_parsed, True).get('stops', 'absent')), (3, None))
 
 # --- ...and when the box cut the card at its payout --------------------------
 # pipeline.read answers a payout flush against the top of the box with
@@ -497,6 +509,19 @@ eq('...over a reading with nothing else in it, which is why it has to',
     _clipped['places'], _clipped['text']), (False, None, None, None, [], ''))
 eq('...and a reading of a blank screen says it was not',
    emitted(_OP.rate(_empty), _empty, False).get('clipped'), False)
+
+# --- ...and when the screen is the app's own, in its own words ---------------
+# The reader knows Uber's online map and DoorDash's "Finding offers" for what
+# they are (OP.NOT_AN_OFFER), and rate() withholds a verdict for them once it
+# has one to withhold. A reading with no rate went out with nothing to say so,
+# and the panel called a payout read off the map a card. A made-up frame of the
+# map whose $0.00 takings pill read as $6.
+_idle = _OP.parse("$6.00\nTrip Radar 2\nYou're online")
+eq("the app's idle screen says so on the wire, with no rate to withhold",
+   (emitted(_OP.rate(_idle), _idle, False).get('notAnOffer'), _OP.rate(_idle)['ready']),
+   (True, False))
+eq('...and a card says it is not one',
+   emitted(sample_rate, sample_parsed, True).get('notAnOffer'), False)
 
 # --- the journal -----------------------------------------------------------
 rows = run_uberx['rows']
@@ -2054,6 +2079,17 @@ eq('with no fix the line says so in every one of the seven, not by leaving them 
    [_nofix.get(k, 'absent') for k in SP.JR.FIX_FIELDS], [None] * len(SP.JR.FIX_FIELDS))
 eq('...and a card that never said Early look does not claim it',
    _nofix.get('earlyLook', 'absent'), False)
+eq('...nor to be more than one order',
+   _nofix.get('multiOrder', 'absent'), False)
+_two = said(lambda: SP.emit_offer('x', {'pay': 9.0, 'minutes': 21.0, 'text':
+                                        'Pickup Fable Grill (2 orders)\nCustomer dropoff'},
+                                  {'ready': False, 'state': 'empty'}))['offer']
+_plus = said(lambda: SP.emit_offer('x', {'pay': 9.0, 'minutes': 21.0, 'text':
+                                         '$9.00\n+1 order\n21 min (6 mi) total'},
+                                   {'ready': False, 'state': 'empty'}))['offer']
+eq('a card that says "(2 orders)" or "+1 order" says it is more than one order, '
+   'for server.js to keep an unbounded planner\'s dropoff off it',
+   (_two.get('multiOrder'), _plus.get('multiOrder')), (True, True))
 
 # The badge as the week's OCR actually spelled it, and the words near it that
 # are not it. Measured over 1,166 offers: 27 carry it, and this finds all 27
@@ -3056,6 +3092,22 @@ eq('...carrying what the driver reads to check it',
 eq('...and what the geography is decided on', _msg['dropoff']['zip'], '30127')
 eq('...and nothing that could be mistaken for a verdict',
    [k for k in ('ready', 'state', 'perHour', 'pay') if k in _msg], [])
+eq('...and a press carries no label', _msg['dropoff']['labelled'], None)
+# The label server.js files an unpressed address over the card's end by.
+_said[:] = []
+sys.stdout = _Catch()
+try:
+    SP.emit_dropoff({'line': '12 Made Up Way, Acworth, GA 30101'}, asked=False,
+                    labelled=True)
+    SP.emit_dropoff({'line': '12 Made Up Way, Acworth, GA 30101'}, asked=True,
+                    labelled=True)
+finally:
+    sys.stdout = _was_stdout
+eq('an unpressed address under a Dropoff label goes out labelled \'dropoff\'; a '
+   'press never does',
+   [(json.loads(l)['dropoff']['asked'], json.loads(l)['dropoff']['labelled'])
+    for l in ''.join(_said).splitlines() if l.strip()],
+   [(False, 'dropoff'), (True, None)])
 
 
 # --- ...and the same thing through the loop that has to do it ---------------
@@ -3623,9 +3675,11 @@ if run_slow['destinations']:
 # --- ⌖ over Uber's Trip Planner ----------------------------------------------
 #
 # The pieces first. emit_planner is the line the panel and the journal are fed
-# from, so it carries the stops and nothing a verdict is made of; and
-# planner_destination is the whole of the rule for when a planner may give the
-# order in the car its end. Names and streets invented.
+# from, so it carries the stops and nothing a verdict is made of. Whether a
+# planner gives the order in the car its end is assemble.js's now
+# (plannerDestination, which was planner_destination here), and its checks
+# went with it to tests/assemble.test.js under the same names. Names and
+# streets invented.
 def _stop(kind, street=None, city=None, line=None):
     return {'kind': kind, 'orders': 1, 'name': 'Pat Q.', 'expectedBy': 978,
             'street': street, 'city': city, 'state': 'GA' if city else None,
@@ -3635,7 +3689,7 @@ def _stop(kind, street=None, city=None, line=None):
 _KESTREL = _stop('dropoff', '4821 Kestrel Dr', 'Marietta', '4821 Kestrel Dr, Marietta')
 _was_stdout, sys.stdout = sys.stdout, io.StringIO()
 try:
-    SP2.emit_planner([_KESTREL], unfiled='list', keep=True, ms={'total': 5})
+    SP2.emit_planner([_KESTREL], keep=True, ms={'total': 5}, at=1234)
     _planner_said = sys.stdout.getvalue()
 finally:
     sys.stdout = _was_stdout
@@ -3643,33 +3697,45 @@ _pmsg = json.loads(_planner_said)
 eq('a Trip Planner goes out on a line of its own', sorted(_pmsg), ['planner'])
 eq('...carrying the stops, and that it answered a press',
    (_pmsg['planner'].get('stops'), _pmsg['planner'].get('asked')), ([_KESTREL], True))
-eq('...and why none of them was filed, and whether the journal may keep them',
-   (_pmsg['planner'].get('unfiled'), _pmsg['planner'].get('keep')), ('list', True))
+eq('...and whether the journal may keep them, and the stamp of its read, and no '
+   'reason of its own: the server gives that',
+   (_pmsg['planner'].get('keep'), _pmsg['planner'].get('at'),
+    'unfiled' in _pmsg['planner']), (True, 1234, False))
 eq('...and nothing a verdict is made of',
    [k for k in ('ready', 'state', 'perHour', 'pay')
     if k in _pmsg or k in _pmsg['planner']], [])
+ok_('...and the scanner no longer carries the rule that is the assembler\'s',
+    not hasattr(SP2, 'planner_destination') and not hasattr(SP2, 'planner_lone_dropoff'))
 
-# (address, why): the address when there is one to file, and otherwise the word
-# the panel says why with. `True` is a list seen whole, both ends on the screen.
-_BIRCH = _stop('dropoff', '77 Birch Ln NW', 'Roswell', '77 Birch Ln NW, Roswell')
-_got = SP2.planner_destination([_stop('pickup'), _KESTREL], True)
-eq('one dropoff whose street and town read, on a list seen whole, is the order\'s '
-   'destination', ((_got[0] or {}).get('line'), _got[1]),
-   ('4821 Kestrel Dr, Marietta', None))
-eq('...two dropoffs are not guessed between',
-   SP2.planner_destination([_KESTREL, _BIRCH], True), (None, 'dropoffs'))
-# The count is of the dropoffs the screen shows, and two open stops fill the
-# list: on a list whose ends are not both on the glass, one dropoff may be one
-# of two, the other under the bar of buttons. See OP.planner_bounded.
-eq('...one dropoff on a list the rig could not see both ends of is not taken for '
-   'the trip\'s only one', SP2.planner_destination([_stop('pickup'), _KESTREL], False),
-   (None, 'list'))
-eq('...a dropoff whose street did not read is not filed: a town alone is no '
-   'address', SP2.planner_destination([_stop('dropoff', None, 'Marietta', 'Marietta')],
-                                      True), (None, 'address'))
-eq('...and a planner of pickups gives no destination and has nothing to explain',
-   SP2.planner_destination([_stop('pickup', '310 Mill St', 'Roswell',
-                                  '310 Mill St, Roswell')], True), (None, None))
+# What assemble.js makes of the sightings a run sent, in node: the scanner's
+# half and the server's half of one decision. Off a press, with no order held,
+# so the answer is what the press is told.
+import subprocess  # noqa: E402
+
+_ASSEMBLE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         'assemble.js')
+_ASSEMBLE_JS = r"""
+var A = require(process.argv[1]);
+var input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+var st = A.fresh(), lines = [], why = [], byAt = {};
+input.forEach(function (s) {
+  var r = A.sighting(st, null, s, s.at);
+  r.candidates.forEach(function (c) { lines.push([c.line, c.asked]); });
+  why.push(A.verdictFor(st, s.at));
+  byAt[s.at] = A.verdictFor(st, s.at);
+});
+process.stdout.write(JSON.stringify({ dropoffs: lines, unfiled: why, byAt: byAt }));
+"""
+
+
+def assembled(sightings):
+    done = subprocess.run(['node', '-e', _ASSEMBLE_JS, _ASSEMBLE],
+                          input=json.dumps([x for x in sightings if x['whole']]),
+                          capture_output=True, text=True, timeout=60)
+    if done.returncode:
+        raise RuntimeError(done.stderr)
+    return json.loads(done.stdout)
+
 
 # ...and the whole of it through the real reader. rpi/test_loop.py drives the
 # wiring with a stubbed one; this is the planner DRAWN and read through the
@@ -3688,16 +3754,17 @@ eq('...and a planner of pickups gives no destination and has nothing to explain'
 run_planner = run(TC.planner_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
                   appear_at=0.0, vanish_at=1e9, extra_argv=['--no-parallel'],
                   press_dropoff=True, mount_width=820,
-                  until=lambda st: st['planners'] >= 1 and st['destinations'] >= 1)
+                  until=lambda st: st['planners'] >= 1)
 eq('a drawn Trip Planner read through the real reader answers ⌖ with its stop',
    [[(s['kind'], s['expectedBy'], s['line']) for s in p[0]]
     for p in run_planner['planners']],
    [[('dropoff', 978, '4821 Kestrel Dr, Marietta')]])
+_asp = assembled(run_planner['sightings'])
 eq('...both ends of its list read, so nothing is left unfiled',
-   [p[1].get('unfiled', '<not passed>') for p in run_planner['planners']], [None])
+   [_asp['byAt'].get(str(p[1].get('at')), '<no verdict>')
+    for p in run_planner['planners']][:1], [None])
 eq('...and its one dropoff goes out as the order\'s destination, asked for',
-   [((d[0] or {}).get('line'), d[1].get('asked')) for d in run_planner['destinations']],
-   [('4821 Kestrel Dr, Marietta', True)])
+   [tuple(d) for d in _asp['dropoffs']][:1], [('4821 Kestrel Dr, Marietta', True)])
 eq('...and nothing on the screen was taken for an offer',
    (run_planner['ready'], run_planner['announced'],
     [r for r in run_planner['rows'] if not r.get('kind')]), ([], [], []))
@@ -3710,11 +3777,45 @@ run_cut = run(TC.planner_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
               press_dropoff=True, mount_width=900)
 eq('a drawn Trip Planner with its title off the top of the frame answers ⌖ with '
    'its stop, saying the list\'s ends were not both seen',
-   [([(s['kind'], s['line']) for s in p[0]], p[1].get('unfiled'))
+   [([(s['kind'], s['line']) for s in p[0]],
+     assembled(run_cut['sightings'])['byAt'].get(str(p[1].get('at'))))
     for p in run_cut['planners']],
    [([('dropoff', '4821 Kestrel Dr, Marietta')], 'list')])
 eq('...and gives the order in the car no destination off it',
-   [(d[0] or {}).get('line') for d in run_cut['destinations']], [])
+   ([(d[0] or {}).get('line') for d in run_cut['destinations']],
+    assembled(run_cut['sightings'])['dropoffs']), ([], []))
+
+# --- whose an address is, and which app's card ------------------------------
+#
+# With two orders in the car (server.js, carrying two) an address is given to
+# one of them only on a cue the screen gave, and the first two cues are the
+# app and the stop's time. So the dropoff line says which app's screen it was
+# read off and the one "Expected by" the screen prints, and the offer line
+# says which app's card it is, which screen (Uber's add-on card is held as
+# part of the trip it joins) and its "Deliver by". Invented street.
+_nav_text = ('Deliver to Pat Q.\n4 min © 0.6 mi\nExpected by 8:20 PM\n'
+             '4821 Kestrel Dr, Marietta, GA 30060')
+_nav = said(lambda: SP.emit_dropoff({'line': '4821 Kestrel Dr, Marietta, GA 30060',
+                                     'street': '4821 Kestrel Dr', 'city': 'Marietta'},
+                                    asked=True, text=_nav_text))['dropoff']
+eq('a dropoff line says the app, the screen and the one time the screen prints',
+   (_nav.get('app'), _nav.get('screen'), _nav.get('expectedBy')),
+   ('uber', 'uber.nav', 20 * 60 + 20))
+eq('...and no time where the screen prints two (a planner: which is whose is the '
+   'assembler\'s question)',
+   SP.screen_said('Trip Planner\nDropoff • 1 order\nExpected by 8:02 PM\n'
+                  'Dropoff • 1 order\nExpected by 8:20 PM')['expectedBy'], None)
+_ao = said(lambda: SP.emit_offer('x', {'pay': 4.5, 'minutes': 10.0, 'deliverBy': None,
+                                       'text': '$4.50\n+10 min (+ 2.1 mi) total\nAccept'},
+                                 {'ready': True, 'perHour': 27.0, 'cardMinutes': 10.0}))['offer']
+eq('the offer line says which app\'s card, which screen, and its deadline',
+   (_ao.get('app'), _ao.get('screen'), _ao.get('deliverBy')), ('uber', 'uber.addon', None))
+_dd = said(lambda: SP.emit_offer('y', {'pay': 9.4, 'minutes': None, 'deliverBy': 1155,
+                                       'text': '$9.40 Guaranteed (incl. tips)\n'
+                                               '5.0 mi + 25 min\nDeliver by 7:15 PM'},
+                                 {'ready': True, 'perHour': 20.0, 'cardMinutes': 28.0}))['offer']
+eq('...a DoorDash card\'s with its "Deliver by"',
+   (_dd.get('app'), _dd.get('screen'), _dd.get('deliverBy')), ('doordash', 'dd.offer', 1155))
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)

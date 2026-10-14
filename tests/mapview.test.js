@@ -170,6 +170,39 @@ eq('with nowhere to be going, there is no detour to state',
 eq('...nor with nothing to go by way of', MV.detour(HERE, null, AHEAD), null);
 eq('...nor with no idea where the car is', MV.detour(null, HERE, AHEAD), null);
 
+/* ...and with the held order's restaurant still ahead (MV.detourThrough):
+   the run already committed to is car -> restaurant -> its end, and the new
+   pickup goes before the restaurant or after it, whichever is less. Worked
+   out here as the two runs' own lengths, leg by leg — never through
+   MV.detour — so the check is the definition, not the code again. */
+function runMi(pts) {
+  var m = 0;
+  for (var k = 0; k + 1 < pts.length; k++) m += MV.crowMiles(pts[k], pts[k + 1]);
+  return m;
+}
+var REST_N = { lat: 33.97, lon: -84.50 };          // the restaurant, ahead
+var NEW_NE = { lat: 33.985, lon: -84.47 };         // the new pickup, past it
+var NEW_S = { lat: 33.89, lon: -84.53 };           // ...or behind the car
+eq('with no restaurant ahead, the figure through the held run is MV.detour\'s exactly',
+   MV.detourThrough(HERE, NEW_NE, [], AHEAD).miles, MV.detour(HERE, NEW_NE, AHEAD));
+var thruAfter = MV.detourThrough(HERE, NEW_NE, [REST_N], AHEAD);
+var baseRun = runMi([HERE, REST_N, AHEAD]);
+eq('with the restaurant ahead, the figure is the run with the new pickup in its best '
+   + 'place, less car -> restaurant -> end: here after the restaurant',
+   [thruAfter.gap, thruAfter.miles.toFixed(4)].join(','),
+   [1, (Math.min(runMi([HERE, NEW_NE, REST_N, AHEAD]),
+                 runMi([HERE, REST_N, NEW_NE, AHEAD])) - baseRun).toFixed(4)].join(','));
+ok_('...which is not the figure measured to the end alone (' + thruAfter.miles.toFixed(2)
+    + ' against ' + MV.detour(HERE, NEW_NE, AHEAD).toFixed(2) + ')',
+    Math.abs(thruAfter.miles - MV.detour(HERE, NEW_NE, AHEAD)) > 0.1);
+var thruBefore = MV.detourThrough(HERE, NEW_S, [REST_N], AHEAD);
+eq('...and a pickup behind the car goes before the restaurant',
+   [thruBefore.gap, thruBefore.miles.toFixed(4)].join(','),
+   [0, (Math.min(runMi([HERE, NEW_S, REST_N, AHEAD]),
+                 runMi([HERE, REST_N, NEW_S, AHEAD])) - baseRun).toFixed(4)].join(','));
+eq('...and a restaurant with no point is no figure, not a run without it',
+   MV.detourThrough(HERE, NEW_NE, [null], AHEAD), null);
+
 /* ---- the card's own disc --------------------------------------------------
  *
  * The design study's wrong-branch case, in invented points round Marietta
@@ -1014,6 +1047,26 @@ async function nucbox() {
                      '1610 Pverel Blvd, Kestrelton'].map(MV.searchText)),
      JSON.stringify(['Hwy 92 Bypass, Woodstock', 'US 41, Marietta', 'Old 41 Hwy, Kennesaw',
                      '1610 Pverel Blvd, Kestrelton']));
+  /* A merchant's label for one branch (MV.storeName): its store number is
+     no part of the name OSM holds, so the NucBox is asked the name. */
+  eq('a merchant\'s store-number tail is not searched: "AtHome - 0020-Kennesaw" is asked '
+     + 'as At Home, "Papa John\'s Store 181 4" and "...Store 3317" as Papa John\'s',
+     JSON.stringify(['AtHome - 0020-Kennesaw', "Papa John's Store 181 4",
+                     "Papa John's Store 3317", 'Papa Johns Store #414']
+       .map(function (p) { return MV.searchPlan(p).q; })),
+     JSON.stringify(['At Home', "Papa John's", "Papa John's", 'Papa Johns']));
+  eq('...a two-letter word run into the next is split only with such a tail, never '
+     + '"Mc", never a longer first word, and a name with no tail is asked as it reads',
+     JSON.stringify(["McDonald's - 1234-Marietta", 'PetSmart Store 12', 'AtHome',
+                     'Waffle House', 'Shell - 24', 'Kroger (Shiloh Square)']
+       .map(function (p) { return MV.searchPlan(p).q; })),
+     JSON.stringify(["McDonald's", 'PetSmart', 'AtHome', 'Waffle House', 'Shell', 'Kroger']));
+  eq('...the NucBox\'s search only: the public map, which pins its one answer with no '
+     + 'disc to choose by, is asked the label as read, and the label is kept',
+     [new MV.Geocoder({ hint: function () { return ''; } })
+        .queryFor('AtHome - 0020-Kennesaw', '1,2,3,4'),
+      MV.searchText("Papa John's Store 181 4")].join(' | '),
+     "AtHome - 0020-Kennesaw | Papa John's Store 181 4");
 
   /* The held order's pickups off its Trip Planner (made-up restaurant and
      street, the shape the driver's planner was read as on shift). */
@@ -1186,6 +1239,22 @@ async function nucbox() {
      JSON.stringify({ why: 'otherroads' }));
   eq('a point the router moved 321 m (under 0.2 mi) to reach a road leaves the figure',
      typeof (await stubRoad(3000, 2000, [3, 321, 3]).detour(P1, P2, P3)).miles, 'number');
+  function stubLine(snaps, line) {
+    return new MV.NbxSearch({ gap: 0, fetch: function () {
+      return Promise.resolve({ ok: true, status: 200, json: function () {
+        return Promise.resolve({ ok: true, metres: 1000, snaps: snaps, line: line });
+      } });
+    } });
+  }
+  var L2 = [[33.95, -84.55], [33.95, -84.54], [33.96, -84.54]];
+  eq('a run whose road starts 321 m from a pin is drawn along it',
+     JSON.stringify(await stubLine([3, 321], L2).runLine([P1, P2])), JSON.stringify(L2));
+  eq('...and one 323 m off (past SNAP_MI) is not: that road starts somewhere else',
+     await stubLine([3, 323], L2).runLine([P1, P2]), null);
+  eq('...nor one from a server that sends no shape (from before it)',
+     await stubLine([3, 3]).runLine([P1, P2]), null);
+  eq('the road detour carries no line from a server that sends none',
+     (await stubRoad(3000, 2000).detour(P1, P2, P3)).line, null);
   eq('...and one moved 323 m (over 0.2 mi) refuses it, on either route',
      JSON.stringify([await stubRoad(3000, 2000, [3, 323, 3]).detour(P1, P2, P3),
                      await stubRoad(3000, 2000, null, [323, 3]).detour(P1, P2, P3)]),
@@ -1303,6 +1372,34 @@ async function nucbox() {
      [across.stated, across.lo.toFixed(1), across.hi.toFixed(1)].join(','), 'false,0.0,0.6');
   eq('no stretch at either end is no span: the figure is the pins\' own',
      MV.stretchSpan(CAR, mi(0, 1), mi(0, 2)), null);
+  // ...and with the held order's restaurant still ahead, the figure at every
+  // point of the street is MV.detourThrough's: the run car -> restaurant ->
+  // that point, the new pickup in its best gap. Worked out here at a
+  // thousand points along the street, not by stretchSpan's own sampling.
+  // The restaurant 2 mi west of the car, the new pickup 1 mi east, the end a
+  // street 2 mi long 2 mi ahead: before the restaurant is the better gap at
+  // the street's east end and after it at the west, so both are in the range.
+  var restAt = mi(-2, 0), pickAt = mi(1, 0);
+  var heldSt = heldOn(-1, 1);
+  var thruSpan = MV.stretchSpan(CAR, pickAt, heldSt, [restAt]);
+  var thruLo = Infinity, thruHi = -Infinity, thruGaps = {};
+  for (var ti = 0; ti <= 1000; ti++) {
+    var tp = mi(-1 + 2 * ti / 1000, 2);
+    var tt = MV.detourThrough(CAR, pickAt, [restAt], tp);
+    thruLo = Math.min(thruLo, tt.miles); thruHi = Math.max(thruHi, tt.miles);
+    thruGaps[tt.gap] = true;
+  }
+  ok_('a numberless held end with the restaurant ahead: the range along the street is '
+      + 'the figure through the restaurant at every point of it, both gaps among them ('
+      + Object.keys(thruGaps).join('+') + ': ' + thruSpan.lo.toFixed(3)
+      + '-' + thruSpan.hi.toFixed(3) + ' against ' + thruLo.toFixed(3) + '-'
+      + thruHi.toFixed(3) + ')',
+      Object.keys(thruGaps).length === 2
+      && Math.abs(thruSpan.lo - thruLo) < 0.005 && Math.abs(thruSpan.hi - thruHi) < 0.005);
+  var noRest = MV.stretchSpan(CAR, pickAt, heldSt);
+  ok_('...which is not the range measured to the street alone (' + noRest.lo.toFixed(2)
+      + '-' + noRest.hi.toFixed(2) + ')',
+      Math.abs(noRest.lo - thruSpan.lo) > 0.1 && Math.abs(noRest.hi - thruSpan.hi) > 0.1);
 
   /* The words for a corner. */
   eq('a corner whose streets meet twice in the card',
@@ -1466,8 +1563,38 @@ async function nucbox() {
        road.miles, (by.metres - direct.metres) / 1609.344);
     ok_('...a real figure off the router (' + (road.miles || 0).toFixed(2) + ' road mi)',
         road.miles > 0.5);
-    eq('...and nothing in it but miles: no minutes anywhere',
-       Object.keys(road).join(','), 'miles');
+    eq('...and nothing in it but miles and the road to draw: no minutes anywhere',
+       Object.keys(road).join(','), 'miles,line');
+    // The fake's road turns east-west first, then north-south, leg by leg
+    // (geometryOf), so a line drawn along it has a corner the straight line
+    // between the same points does not.
+    eq('...and the road to draw is the router\'s own shape, car -> pickup -> held end, '
+       + 'with its corners, as [lat, lon]',
+       JSON.stringify(road.line),
+       JSON.stringify([[SQ.lat, SQ.lon], [SQ.lat, A.lon], [A.lat, A.lon],
+                       [A.lat, S.lon], [S.lat, S.lon]]));
+    /* The held order's run, along the roads, in pieces the relay will take. */
+    var B = { lat: 33.96, lon: -84.52 };
+    var before4 = fake.asked.length;
+    var run4 = await nbx.runLine([SQ, A, B, S]);
+    var asked4 = fake.asked.slice(before4).filter(function (u) { return /^\/route/.test(u); });
+    eq('a run of four points is drawn along the road, asked as car-A-B then B-end, '
+       + 'joined at B once',
+       JSON.stringify(run4),
+       JSON.stringify([[SQ.lat, SQ.lon], [SQ.lat, A.lon], [A.lat, A.lon], [A.lat, B.lon],
+                       [B.lat, B.lon], [B.lat, S.lon], [S.lat, S.lon]]));
+    // Sorted: runLine asks its pieces at once (Promise.all), and which one
+    // reaches the fake first is the event loop's to decide — the merged run
+    // of wip/verify-exp saw "2,3" once in three.
+    eq('...in two questions of at most three points (' + asked4.length + ')',
+       asked4.map(function (u) { return u.split('?')[0].split(';').length; })
+         .sort().join(','), '2,3');
+    eq('a run with a piece the router has no road for is not drawn along roads: '
+       + 'the straight run stands',
+       await nbx.runLine([SQ, { lat: 34.0010, lon: -84.5560 }, S]), null);
+    eq('...nor one the router refuses outright (router down)',
+       await nbx.runLine([SQ, { lat: 34.1, lon: -84.6 }]), null);
+    eq('...nor a run of one point', await nbx.runLine([SQ]), null);
     var asked = fake.asked.filter(function (u) { return /^\/route/.test(u); });
     ok_('...and the router was never asked about any fourth point (' + asked.length + ' routes)',
         asked.every(function (u) { return u.split('?')[0].split(';').length <= 3; }));
@@ -1482,6 +1609,56 @@ async function nucbox() {
     var Fm = { lat: Number(FAKE.FARM[0].lat), lon: Number(FAKE.FARM[0].lon) };
     eq('...and a pickup the router moved 450 m to reach a road is no figure either',
        JSON.stringify(await nbx.detour(SQ, Fm, S)), JSON.stringify({ why: 'snap' }));
+    /* ...and with the held order's restaurant still ahead: the run car ->
+       restaurant -> held end, the new pickup before the restaurant or after
+       it, by road. Worked out here from the router's own legs, each asked
+       alone through the same relay, as the definition says: the best run
+       with the pickup less the run without it. */
+    var R = { lat: 33.97, lon: -84.53 };
+    var beforeR = fake.asked.length;
+    var thru = await nbx.detour(SQ, A, S, [R]);
+    var askedR = fake.asked.slice(beforeR).filter(function (u) { return /^\/route/.test(u); });
+    async function legsOf(pts) {
+      var m = 0;
+      for (var li = 0; li + 1 < pts.length; li++) m += (await nbx.road([pts[li], pts[li + 1]])).metres;
+      return m;
+    }
+    var viaBy = async function (prev, next) {
+      return (await nbx.road([prev, A, next])).metres;
+    };
+    async function byDefinition(rest) {
+      var base = (await legsOf([SQ, rest])) + (await legsOf([rest, S]));
+      var before = (await viaBy(SQ, rest)) + (await legsOf([rest, S]));
+      var after = (await legsOf([SQ, rest])) + (await viaBy(rest, S));
+      return { miles: (Math.min(before, after) - base) / 1609.344, before: before <= after };
+    }
+    var defR = await byDefinition(R);
+    ok_('the road figure with the restaurant ahead is the better of the pickup before it '
+        + 'and after it, less road(car, restaurant) + road(restaurant, end), in miles — '
+        + 'here before it (' + (thru.miles || 0).toFixed(3) + ', ' + defR.miles.toFixed(3) + ')',
+        defR.before && Math.abs(thru.miles - defR.miles) < 1e-9);
+    // A restaurant west of the car, a little south: the pickup is better
+    // collected after it.
+    var R2 = { lat: 33.96, lon: -84.56 };
+    var defR2 = await byDefinition(R2);
+    var thru2 = await nbx.detour(SQ, A, S, [R2]);
+    ok_('...and here after it (' + (thru2.miles || 0).toFixed(3) + ', ' + defR2.miles.toFixed(3) + ')',
+        !defR2.before && Math.abs(thru2.miles - defR2.miles) < 1e-9);
+    ok_('...not the road figure to the end alone (' + (thru.miles || 0).toFixed(2) + ' against '
+        + road.miles.toFixed(2) + ' road mi)', Math.abs(thru.miles - road.miles) > 0.1);
+    eq('...every question two or three points, through the relay',
+       askedR.length && askedR.every(function (u) {
+         var n = u.split('?')[0].split(';').length;
+         return n === 2 || n === 3;
+       }), true);
+    var bestPrev = defR.before ? SQ : R, bestNext = defR.before ? R : S;
+    eq('...and the road to draw is the chosen gap\'s, into the pickup and back to the run',
+       JSON.stringify(thru.line), JSON.stringify((await nbx.road([bestPrev, A, bestNext])).line));
+    // An end the router has no road to (the fake's NoRoute point): the gap
+    // before the restaurant answers, the gap after it does not.
+    eq('a gap the router has no road for refuses the whole figure, though the other '
+       + 'answered: the best of the gaps that answered may not be the best',
+       (await nbx.detour(SQ, A, { lat: 34.0010, lon: -84.5560 }, [R])).why, 'noroute');
     eq('the real install\'s own route, Marietta Square to Five Points: 31307.4 m',
        (await nbx.road([SQ, { lat: 33.7490, lon: -84.3880 }])).metres, 31307.4);
 

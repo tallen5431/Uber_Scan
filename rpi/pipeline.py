@@ -1497,7 +1497,9 @@ def rescue_refused(box, found, found_text):
         priced. (None of the 288 rendered frames of the two taller cards read
         that way on their own; the card has to be drawn so. The rule was
         written for "$14." and "$14. 48", each priced $14.00 where the card
-        said $14.48, on frames lost with the machine they were measured on.)
+        said $14.48, on frames lost with the machine they were measured on.
+        find_pay now joins "$14. 48" to $14.48 — OP.PAY_CENTS_SPLIT — so
+        that one is printed to the cent and passes.)
       - its text holds a second dollar figure (OP.payout_figures). A found
         crop is one card from its button up; two figures in it are two cards,
         and the larger one — the one find_pay takes — need not be this

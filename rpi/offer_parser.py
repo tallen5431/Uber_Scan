@@ -120,6 +120,22 @@ PAY_SPLIT = re.compile(
     r'\s*(?=guarant|includ)',
     re.IGNORECASE | ASCII)
 
+# ...and the other place the reader cuts it: between the dollars and the
+# cents. "$12.68" came back as "$12 6 8" and "$12.78" as "$12. 78" on the
+# 12 Oct shift, and MONEY_STRICT read both as $12.00. Two real digits, the
+# second of them optionally a space away, and nothing after them that makes
+# them a number of their own: not a decimal point, not a third digit even a
+# space away — "$1 1 1 5" is $11.15 cut three times, and joining two of its
+# pieces gave $1.11 — and not a unit: "$12 68 min" is a payout beside a
+# duration, not $12.68. Measured over the 23,693 distinct texts on file, this
+# moves 15 texts of 7 payouts, each from a whole dollar up by under a dollar
+# ($12 to $12.68 and $12.78, $11 to $11.35, $10 to $10.77, $6 to $6.15, $5 to
+# $5.50, $4 to $4.20), and every one of those offers was journalled at the
+# whole dollar: the cut reading won its window each time.
+PAY_CENTS_SPLIT = re.compile(
+    r'\$\s*(' + DC + r'{1,3})[.,]?\s+(\d)\s?(\d)(?![.,])(?!\s?\d)(?!\s*m(?:i|[il1|]n))',
+    re.IGNORECASE | ASCII)
+
 # A component of the payout, printed beside it, and never the payout.
 #
 # Uber puts a chip under the headline — "+$0.50 included", "+$2.39 included for
@@ -267,6 +283,33 @@ LEG = re.compile(
     r'(?:[^(\d]{0,6}\(?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b'
     + NOT_THE_CHARGER + r'\s*\)?)?',
     re.IGNORECASE | ASCII)
+
+# DoorDash's newer card brackets the distance and counts the stops in front of
+# it, then puts the time after the card's bullet:
+#
+#     $7.75
+#     3 stops (7.8 mi) · 30 min
+#
+# LEG refuses a bracket as glue (see above), so it matched "30 min" alone and
+# the "(7.8 mi)" was left as a distance no leg claimed — `shortATime`, never
+# whole. All 21 DoorDash offers of the 12 Oct shift read that way: pay, miles
+# and minutes all right, `complete`, and every one journalled whole=0.
+#
+# So the bracket is allowed here and only here, where it closes on the card's
+# own word for the stops. Measured over the 23,693 distinct texts of the
+# journal on file: every bracketed distance followed by a bullet and a time
+# has `stops` (or a misread of it) in front — `stops` 1,089, `2stops` 6,
+# `_scops` 1, `ps` 1, 1,097 readings — and none is an Uber leg. The bullet
+# read as `-` 679 times, `«` 272, `+` 112, `»` 16, `*` 2, and as two glyphs
+# (`+»`, `-«`, `«-`, `»«`) 16 times. Anchored at the
+# end, because it is asked of the text just before a minutes token LEG found.
+STOPS_LEAD = re.compile(
+    r'[A-Za-z_]{0,3}ps\s*\(\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)'
+    r'\s*m(?:i|ile|iles)\b\s*\)\s*[^\s\w()]{1,3}\s*\Z',
+    re.IGNORECASE | ASCII)
+# ...and how many stops the card says, kept as the card printed it. Real digits
+# only: it is a count shown to the driver, not a figure anything is priced on.
+STOPS_COUNT = re.compile(r'(?:^|[^\d])(\d{1,2})\s*stops?\s*\(', re.IGNORECASE | ASCII)
 
 # ...and the number in front of it has to contain a real digit. "SI min" is two
 # guesses stacked, and stacked guesses are how noise becomes data.
@@ -1052,6 +1095,19 @@ def find_pay(text, where=None, printed=None, figures=None):
             found.append((v, m.start(), True))
             if best is None or v > best:
                 best = v
+    # The cents cut off by a space. See PAY_CENTS_SPLIT. The joined figure only
+    # ever exceeds its own dollars by under a dollar, so it beats them and no
+    # other figure it would not have lost to anyway.
+    for m in PAY_CENTS_SPLIT.finditer(text):
+        if in_chip(m) or not HAS_DIGIT.search(m.group(1)):
+            continue
+        if any(start <= m.start() and m.end() <= end for start, end in units):
+            continue
+        v = to_number(m.group(1) + '.' + m.group(2) + m.group(3))
+        if v is not None and 0 < v < 2000:
+            found.append((v, m.start(), True))
+            if best is None or v > best:
+                best = v
     if figures is not None:
         figures.extend(sorted(set(at for _, at, _ in found)))
     if printed is not None and best is not None:
@@ -1143,10 +1199,18 @@ def find_legs(text):
         # not preceded by a digit or a decimal point — without the second,
         # "1.9 mi" damaged to ".9 mi" reads as nine miles.
         lead = m.group(1)
+        start = m.start()
         if lead is not None and (
                 not HAS_DIGIT.search(lead)
                 or (m.start(1) > 0 and text[m.start(1) - 1] in '0123456789.,')):
             lead = None
+        # DoorDash's "3 stops (7.8 mi) · 30 min": the bracketed distance before
+        # the time. See STOPS_LEAD. The leg starts at the bracket, so the
+        # distance sits inside it and is not also an orphan.
+        if m.group(1) is None:
+            s = STOPS_LEAD.search(text, max(0, m.start() - 40), m.start())
+            if s and HAS_DIGIT.search(s.group(1)):
+                lead, start = s.group(1), text.rfind('(', 0, s.start(1))
         # The bracketed one wins when a card prints both: the bracket is the
         # card saying which time this distance belongs to.
         side = m.group(4) if m.group(4) is not None else lead
@@ -1179,6 +1243,22 @@ def find_legs(text):
         # reports 43 minutes. Checking each leg against its own time catches it
         # while it is still identifiable as the leg it came from.
         miles, leg_corrected = recover_decimal(minutes, miles, had_decimal)
+        # A bracketed distance with a leading zero and no point is a point the
+        # reader lost: no card prints "(09 mi)". "(+ 0.9 mi)" read once as
+        # "( 09 mi)" on the 12 Oct shift; 9 miles in 11 minutes is 49 mph, under
+        # MAX_MPH, so recover_decimal let it stand and the offer was journalled
+        # at 9.0 miles. Not put back as 0.9 — the leg is left without its
+        # distance, which `lostMiles` and legs_short_a_distance already make
+        # uncertain and not whole, and another frame supplies the real one.
+        # Only inside a bracket the reader saw: an unopened "027 mi)" is the
+        # bracket itself read as a 0, and is not this. Measured over the 23,693
+        # texts on file: 30 texts, every one a total leg, `( 09 mi)` included;
+        # the "4 min (06 mi)" approach legs recover_decimal already fixes are
+        # left to it.
+        if (not leg_corrected and miles is not None and m.group(4) is not None
+                and text[:m.start(4)].rstrip().endswith('(')
+                and re.match(r'[0Oo]\d', side) and not had_decimal):
+            miles = None
 
         tail = text[m.end():m.end() + 14].lower()
         legs.append({
@@ -1221,7 +1301,7 @@ def find_legs(text):
             'milesAfter': m.group(4) is not None,
             # Where this leg sat in the text, so the address printed after it
             # can be found without searching the whole card again.
-            'start': m.start(), 'end': m.end(),
+            'start': start, 'end': m.end(),
         })
     return legs
 
@@ -2318,14 +2398,17 @@ def find_address(text):
 
 
 def _find_address(text):
-    """find_address's answer, and where in normalize(text) its town ends —
-    which is what address_stop asks the labels in front of it about. One walk
-    for both, so the two can never disagree about which address is the one."""
+    """find_address's answer, where in normalize(text) its town ends — which is
+    what address_stop asks the labels in front of it about — and where the
+    address before it ended (0 when it is the first), which is what
+    address_under_dropoff asks. One walk for all three, so they can never
+    disagree about which address is the one."""
     if not text:
-        return None, None
+        return None, None, 0
     text = normalize(text)
     best = None
     best_end = None
+    best_after = 0
     after = 0          # where the previous address ended; see `head` below.
     for m in ADDRESS.finditer(text):
         state = m.group(2).upper()
@@ -2401,6 +2484,7 @@ def _find_address(text):
             else re.sub(r'\s+', ' ', m.group(0)).strip(' .,')
         found = {'line': line, 'street': street, 'city': city,
                  'state': state, 'zip': digits}
+        best_after = after
         after = m.end()
         # The LAST one on the screen. A navigation screen shows where you are
         # going, and anything above it — a pickup already made, a previous stop
@@ -2408,7 +2492,7 @@ def _find_address(text):
         # place a card names for the same reason.
         best = found
         best_end = m.end(1)
-    return best, best_end
+    return best, best_end, best_after
 
 
 # WHICH STOP the screen printed an address under.
@@ -2451,13 +2535,39 @@ def address_stop(text):
     is no address at all. What a caller does with None is its own policy; see
     digest() in scan_pi.py, where an address nobody asked for needs 'dropoff'.
     """
-    found, end = _find_address(text)
+    return _address_label(text)[0]
+
+
+def address_under_dropoff(text):
+    """True when the address find_address takes off `text` is printed under a
+    Dropoff label IN ITS OWN STOP BLOCK: the nearest label in front of it says
+    dropoff, and no other address sits between that label and this one.
+
+    The second half is what address_stop does not ask. "Dropoff / 12 A St,
+    Town, GA 30101 / ... / 34 B St, Town, GA 30102" puts the last address under
+    the same nearest label as the first, but the label's address is the first;
+    the second belongs to whatever block the screen has scrolled into that did
+    not print its header. This is the test an address nobody pressed ⌖ for has
+    to pass to be filed over the held order's own end — see digest() in
+    scan_pi.py and the dropoff branch in server.js.
+    """
+    kind, at, after = _address_label(text)
+    return kind == 'dropoff' and at >= after
+
+
+def _address_label(text):
+    """(kind, where the label starts, where the address before ended): the
+    nearest stop label in front of find_address's answer, for address_stop and
+    address_under_dropoff — (None, None, 0) with no label or no address."""
+    found, end, after = _find_address(text)
     if found is None:
-        return None
+        return None, None, 0
     kind = None
+    at = None
     for m in ADDRESS_STOP.finditer(normalize(text)[:end]):
         kind = 'pickup' if m.group(1) else 'dropoff'
-    return kind
+        at = m.start()
+    return kind, at, after
 
 
 def planner_furniture(text):
@@ -2628,8 +2738,10 @@ PLANNER_QUADRANT_LEAD = re.compile(
 
 
 def _planner_address_lines(block, label):
-    """The street line and the town line under the "Address" label at
-    block[label], as _planner_address takes them; (None, None) for neither.
+    """The street line, the town line and the place's name under the "Address"
+    label at block[label]: the first two as _planner_address takes them, each
+    None when it did not read, and the place None unless the fourth layout
+    (see PLANNER_HOUSE) or a line over a one-line street and town printed one.
 
     The app lays an address out three ways. The first is the planner this
     reader was built on; the other two are both on the photographs of a
@@ -2652,7 +2764,7 @@ def _planner_address_lines(block, label):
     line under it — the third under the label, and no further.
     """
     under = block[label + 1:label + 4]
-    street_line = town_line = None
+    street_line = town_line = place = None
     town_at = None
     for j, l in enumerate(under[:2]):
         # The street's own quadrant, wrapped onto the town line: see
@@ -2667,20 +2779,88 @@ def _planner_address_lines(block, label):
             town_at, town_line = j, l
             street_line = under[0] if j else None
             break
-        cut = None
-        for c in re.finditer(',', l):
-            if _planner_town(l[c.end():].strip()):
-                cut = c
+        cut = _planner_cut(l)
         if cut is not None and re.match(r'\W{0,3}\d', l):
             town_at, street_line, town_line = j, l[:cut.start()], l[cut.end():].strip()
+            # A line over a street that carries its own town is the place's
+            # name: see the fourth layout, below.
+            place = _planner_place(under[:j], town_line)
             break
     if town_at is None:
-        return (under[0] if under else None), None
+        found = _planner_under_a_place(block, label)
+        if found is None:
+            return (under[0] if under else None), None, None
+        town_at, street_line, town_line, place = found
+        under = block[label + 1:]
     t = _planner_town(town_line)
     if not t.group(3).strip() and town_at + 1 < len(under) \
             and PLANNER_ZIP_LINE.match(under[town_at + 1]):
         town_line = town_line + ' ' + under[town_at + 1]
-    return street_line, town_line
+    return street_line, town_line, place
+
+
+def _planner_cut(line):
+    """The last comma in `line` whose remainder is a town line, or None."""
+    cut = None
+    for c in re.finditer(',', line):
+        if _planner_town(line[c.end():].strip()):
+            cut = c
+    return cut
+
+
+# The fourth layout, off the driver's planner for a dropoff at a hotel:
+#
+#     Address
+#     Homez3 Stays by Fable Kennesaw NW     the place's name, with the reader's
+#     Kennesaw                              noise in it; the town, bare;
+#     1180 Wrenfield Rd NW, Kennesaw, GA    then the street and town, no ZIP
+#     View details
+#
+# (the place, the number and the street invented; the layout and the noise
+# the rig's own box read of it). Nothing in the two lines under the label is a
+# town line, so the stop kept its name and lost where it was: street, town and
+# line all None, the order's corner left as its destination, and GPS arrival
+# never armed ("no house number"). The street is the line that opens with a
+# house number — PLANNER_HOUSE — anywhere in the block down to "View details",
+# taken with its town either on its own line (split at its last comma, as the
+# third layout is) or on the line under it. What stands above it is the
+# place's name, unless it is the town again. Only when the two lines under the
+# label held no town line, so the three layouts above read as they did.
+PLANNER_HOUSE = re.compile(r'^\W{0,3}' + DC + r'{1,6} [A-Za-z]', ASCII)
+PLANNER_DETAILS = re.compile(r'^[^A-Za-z0-9]{0,3}view ?details\b', re.IGNORECASE | ASCII)
+
+
+def _planner_under_a_place(block, label):
+    """(where the town line sits under the label, the street line, the town
+    line, the place) for the fourth layout above, or None."""
+    under = []
+    for l in block[label + 1:label + 6]:
+        if PLANNER_DETAILS.match(l):
+            break
+        under.append(l)
+    for j, l in enumerate(under):
+        if not PLANNER_HOUSE.match(l):
+            continue
+        cut = _planner_cut(l)
+        if cut is not None:
+            town_at, street_line, town_line = j, l[:cut.start()], l[cut.end():].strip()
+        elif j + 1 < len(under) and _planner_town(under[j + 1]):
+            town_at, street_line, town_line = j + 1, l, under[j + 1]
+        else:
+            continue
+        return town_at, street_line, town_line, _planner_place(under[:j], town_line)
+    return None
+
+
+def _planner_place(lines, town_line):
+    """The place's name among `lines`, the ones over a stop's street: the first
+    with two letters in a row that is not the town said again on its own."""
+    town = _planner_town(town_line).group(1).strip().lower()
+    for l in lines:
+        name = PLANNER_EDGE.sub('', l)
+        if re.search(r'[A-Za-z]{2}', name) and name.lower() != town:
+            return name
+    return None
 
 
 # The app's bar under the list, "Stop New Requests" beside its two icons, on
@@ -2707,19 +2887,39 @@ def find_planner(text):
     """The stops on Uber's Trip Planner, in the order the screen lists them.
 
     A list of {'kind': 'pickup'|'dropoff', 'orders', 'name', 'expectedBy',
-    'street', 'city', 'state', 'zip', 'line'}, or None when the text carries no
-    stop header. `expectedBy` is minutes since midnight, through time_of_day.
+    'street', 'city', 'state', 'zip', 'line', 'place'}, or None when the text
+    carries no stop header. `expectedBy` is minutes since midnight, through time_of_day.
     Every field that does not read is None and is never guessed; a closed block
     has no address and says so with five Nones.
 
     Line by line, because the planner's grammar IS its lines: which line
     follows the header is the name, which two follow the label are the address.
     normalize() is applied to each line on its own, as line_starts does.
+
+    THE PAGE'S TWO EDGES, which a stop can be cut by, each said on the stop
+    as `partial` and on no other stop — the key is absent from a stop the page
+    shows from its header down:
+
+      * 'top': a page that starts mid-stop, an "Address" block with no header
+        above it (see _planner_orphan). Kept as a stop of kind None: the
+        header that said pickup or dropoff is above the glass, so nothing says
+        which, and it is never guessed.
+      * 'bottom': the last header with no address under it and no "Waybill"
+        after it — a block cut by the foot of the page, as against a closed
+        one, which the list's end under it shows is closed.
+
+    Neither is ever a destination. The scanner's planner line is handed the
+    headed stops only, without the key, exactly as before; a sighting carries
+    all of them, and the assembler (assemble.js) counts only the headed ones
+    when it decides an end. See planner_stops in scan_pi.py.
     """
     lines, heads = _planner_lines(text)
     if not heads:
         return None
     stops = []
+    top = _planner_orphan(lines, heads[0])
+    if top is not None:
+        stops.append(top)
     for k, at in enumerate(heads):
         head = PLANNER_STOP.match(lines[at])
         block = lines[at + 1:heads[k + 1] if k + 1 < len(heads) else len(lines)]
@@ -2750,19 +2950,62 @@ def find_planner(text):
         # is where that next stop began, so the label is looked for above it:
         # a dropoff whose own address is scrolled off, or closed, is recorded
         # with none, and never with the pickup's under it.
-        street_line = town_line = None
+        street_line = town_line = place = None
         times = [j for j, l in enumerate(block) if PLANNER_EXPECTED.search(l)]
         own = block[:times[1]] if len(times) > 1 else block
         label = next((j for j, l in enumerate(own) if PLANNER_ADDRESS.match(l)), None)
         if label is not None:
-            street_line, town_line = _planner_address_lines(own, label)
+            street_line, town_line, place = _planner_address_lines(own, label)
         stop = {'kind': 'pickup' if head.group(1)[0] in 'pP' else 'dropoff',
                 'orders': int(count) if count is not None and count >= 1
                 and count == int(count) else None,
                 'name': name, 'expectedBy': due}
         stop.update(_planner_address(street_line, town_line))
+        # The hotel or business the address is at, when the block names one:
+        # shown, never searched, and never the street. See PLANNER_HOUSE.
+        stop['place'] = place
         stops.append(stop)
+    last = stops[-1]
+    if not (last['street'] or last['city']) \
+            and not any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:]):
+        last['partial'] = 'bottom'
     return stops
+
+
+def _planner_orphan(lines, first):
+    """The stop a page begins in the middle of, or None: an "Address" label
+    above the first header, with no "Trip Planner" title over it.
+
+    Off the rig's own reads of a stacked trip's planner, with the list
+    scrolled: "Address / <street>, <town>, GA / View details" over
+    "Dropoff +1 order" — the first stop's header, name and time gone above the
+    glass, its address still on it. Read through the same lines a headed
+    stop's address is; its kind and count are None, its name too (whatever is
+    over the label may be the name or the time's own tail), and its time only
+    if an "Expected by" survived above the label.
+
+    A title above the first header means the page starts at the top of the
+    list, so nothing above that header is a stop. Without the label there is
+    no anchor: lines with no header and no label are not read as an address
+    here, as they are not anywhere in the planner's grammar.
+    """
+    above = lines[:first]
+    if any(PLANNER_TITLE.match(l) for l in above):
+        return None
+    label = next((j for j, l in enumerate(above) if PLANNER_ADDRESS.match(l)), None)
+    if label is None:
+        return None
+    due = None
+    for line in above[:label]:
+        m = PLANNER_EXPECTED.search(line)
+        if m:
+            due = time_of_day(m.group(1), m.group(2), m.group(3))
+    street_line, town_line, place = _planner_address_lines(above, label)
+    stop = {'kind': None, 'orders': None, 'name': None, 'expectedBy': due}
+    stop.update(_planner_address(street_line, town_line))
+    stop['place'] = place
+    stop['partial'] = 'top'
+    return stop
 
 
 # The two ends of the list, which is what "the planner has one dropoff" needs
@@ -2795,8 +3038,8 @@ def find_planner(text):
 #     phone's glass, which is what the screen box is — four as "Waybill" and one
 #     as "Waypbill", so one stray letter inside the word is allowed.
 # Either end missing is False, and the stops are still every stop that read:
-# this decides only whether one of them may be filed, see planner_destination
-# in scan_pi.py.
+# this decides only whether one of them may be filed, see plannerDestination
+# in assemble.js, which is given both ends on each page of a sighting.
 PLANNER_TITLE = re.compile(r'^[^A-Za-z0-9]{0,3}trip ?planner\b', re.IGNORECASE | ASCII)
 PLANNER_END = re.compile(r'^[^A-Za-z0-9]{0,3}way ?[A-Za-z]? ?bill\b', re.IGNORECASE | ASCII)
 
@@ -2813,15 +3056,162 @@ def planner_bounded(text):
     title with the first stop straight under it, and "Waybill" after the last.
     False otherwise, and for a text that is no planner at all. See PLANNER_END.
     """
+    top, bottom = planner_ends(text)
+    return top and bottom
+
+
+def planner_ends(text):
+    """(top, bottom): whether each end of the Trip Planner's list is on the
+    screen, by planner_bounded's two tests taken one at a time — the title with
+    the first stop straight under it, and "Waybill" after the last header.
+    (False, False) for a text that is no planner. A sighting says the two
+    apart, as its `page`; planner_bounded is both."""
     lines, heads = _planner_lines(text)
     if not heads:
-        return False
+        return False, False
     titles = [i for i in range(heads[0]) if PLANNER_TITLE.match(lines[i])]
-    if not titles:
-        return False
-    if any(re.search(r'[A-Za-z]{2}', l) for l in lines[titles[-1] + 1:heads[0]]):
-        return False
-    return any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:])
+    top = bool(titles) and not any(re.search(r'[A-Za-z]{2}', l)
+                                   for l in lines[titles[-1] + 1:heads[0]])
+    return top, any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:])
+
+
+# --- what screen this is ------------------------------------------------------
+#
+# Stage 2 of the multi-order design: every whole-screen read and every planner
+# read goes out as a SIGHTING typed by the screen it was off, and nothing files
+# on it — the dropoff and planner lines still do all the filing. This is the
+# typing. Collection only: no verdict, no destination and no journal row is
+# decided by it, and it is kept apart from NOT_AN_OFFER below, which DOES
+# decide (a screen it names gets no verdict). The two may agree; neither asks
+# the other.
+#
+# Built from the 12 Oct shift's journal — its 1,237 `screen` rows (the
+# payout-free frames read after a card) and its offer rows' texts — and the
+# readings kept with that week's 📷 Snaps. Each recogniser is the app's own
+# furniture, as the reader renders it:
+#
+#   dd.switch      DoorDash's "Switch to dash in this busier zone" / "Don't
+#                  switch".
+#   uber.planner   Uber's Trip Planner: a stop header (find_planner), its
+#                  title, the "Address" label, "Waybill", or the bar's "Stop
+#                  New Requests" — the furniture planner_furniture names,
+#                  less "Expected by", which Uber's navigation bar prints too
+#                  ("4 min © 0.6 mi / Expected by 8:20 PM").
+#   tripRadar      Uber's Trip Radar list: its title over an offer.
+#   dd.offer       DoorDash's card: "Guaranteed (incl. tips)" over "5.0 mi +
+#                  25 min" (miles BEFORE minutes), the newer "$7.39 incl. tips /
+#                  2 stops (4.3 mi) · 22 min", "Customer dropoff", "Multiple
+#                  dropoffs", "All orders are picked up", "Deliver by".
+#   uber.addon     Uber's offer to add to the trip in progress: its leg in
+#                  plus signs, "+25 min (+ 9.6 mi) total".
+#   uber.offer     Uber's card: a leg "17 min (3.7 mi)" (minutes BEFORE a
+#                  bracketed distance), "Includes expected tip", "Guaranteed
+#                  (incl. tip)", "Exclusive", "Est. delivery", a rider's
+#                  "Verified", "Avg. wait time", "Early look", "fast charger".
+#   uber.pickupNav Uber's navigation to a store: "Note from business", "Pick
+#                  up in store", "Pick up order".
+#   uber.nav       Uber's navigation otherwise: "Deliver to <name>", "Dropoff
+#                  type", "Meet at door", "Complete delivery", "Arriving soon",
+#                  and the bar "6 min © 1.7 mi" (minutes, a dot, miles, no
+#                  bracket).
+#   dd.finding     DoorDash idle: "Finding offers", "wait for offers", "Zone
+#                  offer wait", "likely to get offers".
+#   uber.finding   Uber idle: "Finding trips", "You're online", and the map's
+#                  Trip Radar button with no offer under it.
+#   unknown        Anything else, including two screens the shift shows and
+#                  this list has no name for: DoorDash's "Pickup from <store> /
+#                  Directions" and its "Are you sure you want to decline this
+#                  offer?". Both are said `unknown`, not filed under the nearest
+#                  name.
+#
+# IN THAT ORDER, first match wins, and the order is the measurement. The
+# switch prompt and the planner come first because each is unmistakable and an
+# offer's furniture can sit behind either. Offers come before navigation and
+# idle because an offer card lands ON TOP of both — the map round a DoorDash
+# card prints "Finding offers" until the card covers it, and Uber's offer
+# slides up over the navigation bar — so a frame with both is the card. Of the
+# two apps' offers, DoorDash's is asked first: its "incl. tips" and miles-then-
+# minutes are its own, while "Guaranteed (incl. tip" is on both and decides
+# nothing alone.
+SCREENS = ('uber.offer', 'uber.addon', 'uber.planner', 'uber.pickupNav',
+           'uber.nav', 'uber.finding', 'tripRadar', 'dd.offer', 'dd.finding',
+           'dd.switch', 'unknown')
+SCREEN_DD_SWITCH = re.compile(r"switch to dash|busier zone|don.?t switch",
+                              re.IGNORECASE | ASCII)
+SCREEN_PLANNER = re.compile(r'^[^A-Za-z0-9]{0,3}(?:trip ?planner|address|stop new requests'
+                            r'|way ?[A-Za-z]? ?bill)\b', re.IGNORECASE | ASCII)
+SCREEN_RADAR = re.compile(r'\btrip ?radar\b', re.IGNORECASE | ASCII)
+SCREEN_DD_OFFER = re.compile(
+    r'\bincl[.,]? ?tips\b|\d ?stops? ?\(|custom[ea]r[ \t\r\n]*drop'
+    r'|multiple[ \t\r\n]*drop[ \t\r\n]*-?[ \t\r\n]*offs'
+    r'|all orders are picked up|deliver by|\d ?mi ?[-+·•«] ?\d{1,3} ?min',
+    re.IGNORECASE | ASCII)
+SCREEN_ADDON = re.compile(r'\+ ?\d{1,3} ?min\w* ?\( ?\+', re.IGNORECASE | ASCII)
+SCREEN_UBER_OFFER = re.compile(
+    r'\d ?min\w* ?\( ?\d|\bmi\)? ?total\b|includes expected tip|\bincl[.,]? ?tip\b'
+    r'|\bexclusive\b|est[.,]? ?delivery|\bverified\b|avg[.,]? ?wait time'
+    r'|early [lt]ook|fast charger|matching may take', re.IGNORECASE | ASCII)
+SCREEN_DD_ELSEWHERE = re.compile(
+    r'pick ?up from\b|current task|pause orders|decline this offer|this dash so far'
+    r'|dash summary|continue dashing', re.IGNORECASE | ASCII)
+SCREEN_PICKUP_NAV = re.compile(r'note from business|pick ?up in store|pick ?up order',
+                               re.IGNORECASE | ASCII)
+SCREEN_NAV = re.compile(
+    r'\bdeliver(?:ing)? to\b|dropoff type|meet at (?:the )?door|complete delivery'
+    r'|arriving soon|expected by \d'
+    r'|(?:\d|\b[lLIO])[\dlI]? ?min ?[©Oo0@] ?[\dO]{0,3}(?:[.,]\d)? ?mi\b',
+    re.IGNORECASE | ASCII)
+# The speed-limit sign, which Uber draws while it navigates: the last thing
+# asked, so the idle map's own words decide first.
+SCREEN_LIMIT = re.compile(r'\blimit\b', re.IGNORECASE | ASCII)
+# Uber's wait after an Early look is accepted: the card's badge is still on
+# it, and no offer is.
+SCREEN_MATCHING = re.compile(r'matching in progress', re.IGNORECASE | ASCII)
+SCREEN_DD_FINDING = re.compile(r'finding offers|wait for offers|zone offer wait'
+                               r'|likely to get offers', re.IGNORECASE | ASCII)
+SCREEN_UBER_FINDING = re.compile(r"finding trips|\by?ou.?re online", re.IGNORECASE | ASCII)
+
+
+def screen_type(text):
+    """{'app': 'uber'|'doordash'|None, 'screen': one of SCREENS} for `text`, a
+    reading of the phone's screen. `app` follows from the screen and is None
+    only for 'unknown'. See the table above for what each one is."""
+    screen = _screen(str(text or ''))
+    app = ('doordash' if screen.startswith('dd.') else
+           None if screen == 'unknown' else 'uber')
+    return {'app': app, 'screen': screen}
+
+
+def _screen(text):
+    if SCREEN_DD_SWITCH.search(text):
+        return 'dd.switch'
+    if SCREEN_MATCHING.search(text):
+        return 'unknown'
+    if SCREEN_RADAR.search(text) and SCREEN_UBER_OFFER.search(text):
+        return 'tripRadar'
+    if SCREEN_DD_OFFER.search(text):
+        return 'dd.offer'
+    if SCREEN_ADDON.search(text):
+        return 'uber.addon'
+    if SCREEN_UBER_OFFER.search(text):
+        return 'uber.offer'
+    # Every line, the bar's included: _planner_lines stops above the bar.
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', text)]
+    if find_planner(text) is not None or any(SCREEN_PLANNER.match(l) for l in lines):
+        return 'uber.planner'
+    if SCREEN_DD_ELSEWHERE.search(text):
+        return 'unknown'
+    if SCREEN_PICKUP_NAV.search(text):
+        return 'uber.pickupNav'
+    if SCREEN_NAV.search(text):
+        return 'uber.nav'
+    if SCREEN_DD_FINDING.search(text):
+        return 'dd.finding'
+    if SCREEN_UBER_FINDING.search(text) or SCREEN_RADAR.search(text):
+        return 'uber.finding'
+    if SCREEN_LIMIT.search(text):
+        return 'uber.nav'
+    return 'unknown'
 
 
 # The card saying, in its own words, that it is not going to tell you where the
@@ -2869,9 +3259,27 @@ def planner_bounded(text):
 # These two are each the ONLY evidence against their own phantom: "add stops"
 # for the route planner, "finding offers" for the idle screen, including the
 # second frame of it where most of the text did not survive the read.
+#
+# And Uber's own idle screen, which had no phrase at all: the online map, with
+# its sheet saying "You're online" or "Finding trips", the day's takings in a
+# pill at the top ("$0.00") and, since the Trip Radar pill arrived, "Trip
+# Radar 2" over the map. It parsed as `notAnOffer: false`, so a frame of it that
+# read a payout or a leg off the map was a card as far as anything here could
+# say. Measured on the journal on file (12,367 offer rows, 1,237 screen rows):
+# "you're online" is on 124 screen rows and no offer row, "finding trips" on 54
+# screen rows and no offer row, and no screen row carries both — so, as with
+# the two above, each is the only evidence on its own screens. "You are online"
+# is the same sheet in the corpus's map-noise frame.
+#
+# NOT "Trip Radar", which is the obvious phrase and the wrong one. The pill
+# sits over the map behind an offer card too, and bleeds into the card's own
+# reading: it is on 308 offer rows, 169 offers, two of them on 12 Oct alone. Nor
+# a bare "online", which an Uber Reserve card prints as "Be online by".
 NOT_AN_OFFER = re.compile(
     r'add\s*stops'                 # Uber's route planner
-    r'|finding\s*offers',          # DoorDash, with no offers to show
+    r'|finding\s*offers'           # DoorDash, with no offers to show
+    r'|you(?:\W{0,3}re|\s*are)\s*online'   # Uber's online map, waiting
+    r'|finding\s*trips',           # ...and the same sheet while it searches
     re.IGNORECASE | ASCII)
 
 
@@ -3006,6 +3414,91 @@ def _labelled_pickup(text, place):
     # 604 cards the two agree exactly, so the number was a second thing to get
     # wrong rather than a second guard.
     return bool(PICKUP_LABEL.search(text[:at]))
+
+
+# The stores on DoorDash's newer card, one block each under the stops line:
+#
+#     @ Corner Bagel Co                    <- an icon, then the store
+#     123 Maple Grove Road Northwest, Sm... <- its street, cut off by the card
+#     & Pine Noodle House
+#     45 Birch Street Northwest, Sm...
+#     Customer dropoff                     <- or "Multiple dropoffs (2 stops)"
+#
+# find_places reads these as name-and-street run together, and the first one
+# became the pickup with whatever the map put in front of it: the 12 Oct
+# shift's 21 DoorDash offers, re-parsed, gave 5 with no pickup at all and
+# others beginning with the map's glyphs (`S &, <store>`, `E 2 / @ <store> '`)
+# or running on into the street (`<STORE> ; 70 <street>…`).
+# The card's own lines say which line is a name: the one above a street.
+# A street begins with a house number, ends where the card cut it (`...`), or
+# carries a street word beside a comma — the 16:03 card lost its number to the
+# map (`. : <name> Parkway Northwest, <town>`). The icon in front is `@`, `&`,
+# `f` or map texture: a name starts at the first capitalised word among the
+# line's first four, and where there is none, a short token holding no letter,
+# or one letter alone, in the first three is cut with everything before it.
+STORE_STREET = re.compile(
+    r'^\W{0,4}\d{1,6}\s+[A-Za-z].*(?:' + PLACE_STREET.pattern + r'|,|\.\.)'
+    r'|(?:\.{2,}|…)\s*$|,.*' + PLACE_STREET.pattern + r'|'
+    + PLACE_STREET.pattern + r'.*,', re.IGNORECASE | ASCII)
+STORE_END = re.compile(r'custom[ea]r\s*drop|multiple\s*drop|\baccept\b|\bdecline\b',
+                       re.IGNORECASE | ASCII)
+STORE_CHIP = re.compile(r'\b(?:pick\s*up|drop\s*off)\s*\d|\bid\s*check\b|\bage\s*21',
+                        re.IGNORECASE | ASCII)
+STORES_LINE = re.compile(
+    r'ps\s*\(\s*' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?\s*m(?:i|iles?)\b\s*\)',
+    re.IGNORECASE | ASCII)
+
+
+def _store_name(line):
+    """A store line without the icon in front of it, or '' if no name is left."""
+    words = line.split()
+    cut = next((i for i, w in enumerate(words[:4])
+                if re.match(r'[A-Z]\S*[A-Za-z]', w)), None)
+    if cut is None:
+        cut = 0
+        for i, w in enumerate(words[:3]):
+            if not re.search(r'[A-Za-z]', w) or len(w) == 1 or (
+                    len(w) <= 3 and re.search(r"[^\w'’]", w, ASCII)):
+                cut = i + 1
+    words = words[cut:]
+    while words and not re.search(r'[A-Za-z0-9]', words[-1]):
+        words.pop()
+    name = ' '.join(words)
+    return name if re.search(r'[A-Za-z]{2}', name) else ''
+
+
+def find_stores(raw_text):
+    """The store names on DoorDash's stops card, in the order it lists them.
+
+    Empty on every other card: it reads nothing unless a `N stops (X mi)` line
+    is there to start from. A name is only kept once the street under it has
+    been seen, so a line of map texture with no street after it is not a store.
+    """
+    lines = (raw_text or '').split('\n')
+    at = next((i for i, l in enumerate(lines) if STORES_LINE.search(l)), None)
+    if at is None:
+        return []
+    out, pending = [], []
+    for line in lines[at + 1:]:
+        if STORE_END.search(line):
+            break
+        if STORE_CHIP.search(line):
+            continue
+        if STORE_STREET.search(line):
+            if pending:
+                out.append(' '.join(pending)[:MAX_PLACE])
+            pending = []
+            continue
+        name = _store_name(line)
+        if not name:
+            continue
+        # A name the card wrapped onto a second line — `Freddy's Frozen
+        # Custard &` / `Steakburgers` — starts with a letter and no icon.
+        if len(pending) == 1 and name == line.strip():
+            pending.append(name)
+        else:
+            pending = [name]
+    return out[:MAX_PLACES]
 
 
 def find_pickup(places, ends=None):
@@ -3578,6 +4071,8 @@ def parse(raw_text):
     items = to_number(m.group(1)) if m else None
     if items is not None and not (0 <= items <= 200):
         items = None
+    m = STOPS_COUNT.search(mine)
+    stops = int(m.group(1)) if m else None
 
 
     # A delivery card states no duration and puts its distance on its own, so
@@ -3684,6 +4179,12 @@ def parse(raw_text):
     # pass's record of where they sat. Asked before the two ends, because it is
     # what decides them when the card stated it.
     ends = place_ends(legs, places, _whose)
+    # DoorDash's stops card names its stores itself, and they are all the
+    # pickup end: "Multiple dropoffs" prints no customer, so without the ends
+    # the second store would be offered as the destination. See find_stores.
+    stores = find_stores(raw_text)
+    if stores:
+        places, ends = stores, [0] * len(stores)
     pickup = find_pickup(places, ends)
     dropoff = find_dropoff(places, text, ends)
     # The card can name its approach leg in words or by where it printed the
@@ -3782,6 +4283,10 @@ def parse(raw_text):
         'toPickupMinutes': approach['minutes'] if approach else None,
         'toPickupMiles': approach['miles'] if approach else None,
         'items': items,
+        # DoorDash's "3 stops (7.8 mi)", as printed: every store and every
+        # dropoff. Shown, never priced, and not `legs` — the card times the
+        # whole job in one figure, so it is one leg however many stops it has.
+        'stops': stops,
         'legs': len(used),
         'milesCorrected': corrected,
         'milesUncertain': uncertain,

@@ -482,6 +482,20 @@ const framed = (page) => page.waitForFunction(
       await page.waitForTimeout(120);
       slot.againCard = await page.evaluate(LOOK, '#verdictLabel');
       slot.againCardDetail = await page.evaluate(LOOK, '#detail');
+      // ...and against a reading the reader knew for the app's own idle
+      // screen: Uber's online map, its $0.00 takings pill read as $6. A
+      // payout alone is part of an offer (the case above); `notAnOffer` is
+      // the app saying it is waiting, and that outranks it.
+      await page.evaluate(() => window.__es.push(
+        { ready: false, state: 'empty', track: null, pay: 6, minutes: null,
+          notAnOffer: true }));
+      await page.waitForTimeout(120);
+      slot.idleScreen = await page.evaluate(LOOK, '#detail');
+      await page.evaluate(() => window.__es.push(
+        { reading: true, at: Date.now() }));
+      await page.waitForTimeout(120);
+      slot.againIdle = await page.evaluate(LOOK, '#verdictLabel');
+      slot.againIdleDetail = await page.evaluate(LOOK, '#detail');
       await page.evaluate((r) => window.__es.push(r), READINGS[key]);
       await page.waitForTimeout(150);
       slot.fits = await page.evaluate(() => {
@@ -751,6 +765,145 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // --- the order in the car, on the card -----------------------------------
+  stage = 'the order in the car, on the card';
+  //
+  // Between offers the card said WAITING FOR AN OFFER and nothing else, with
+  // an order in the car on 24 of the driver's 47 📷 Snaps that had no verdict
+  // on them (8-12 Oct). Now it says where that order goes next and by when,
+  // its pay, and the GPS drop's state; with an offer up, the same in one line
+  // under the card. Messages as the server sends them: the hold as
+  // heldForPanel describes it, the planner as a ⌖ read sends it, the GPS
+  // drop's state on the beat (heldEndState).
+  //
+  // ...and the Took button, which names the last offer on record after its
+  // card has gone and now says how long ago that was. The page's clock is
+  // moved, so "2 min ago" is two minutes of the page's own timers.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await phoneFrame(page);
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+    await framed(page);
+    const tick = (ms) => page.clock.runFor(ms);
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    // What the driver can read of the in-car parts, on the glass.
+    const held = () => page.evaluate(() => {
+      const shown = (el) => {
+        if (!el || el.hidden) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+      };
+      const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '');
+      // A line's parts as they read: side by side, with the gap the stylesheet
+      // puts between them, and only those drawn.
+      const parts = (el) => [].slice.call(el.children).filter(shown).map(text)
+        .filter(Boolean).join(' ');
+      const next = document.getElementById('heldNext');
+      const line = document.getElementById('heldLine');
+      const det = document.querySelector('#detail .held');
+      const lab = document.getElementById('verdictLabel');
+      // The detail line's own row: one row is no taller than its line box.
+      const detail = document.getElementById('detail');
+      const cs = getComputedStyle(detail);
+      const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+      // Every glyph of the pay and the GPS state inside the detail line's box.
+      const whole = (el) => {
+        if (!el || !el.firstChild) return '';
+        const b = detail.getBoundingClientRect();
+        const n = el.firstChild, rg = document.createRange();
+        let got = '';
+        for (let i = 0; i < n.length; i++) {
+          rg.setStart(n, i); rg.setEnd(n, i + 1);
+          const c = rg.getBoundingClientRect();
+          if (!c.width && !c.height) continue;
+          if (c.left >= b.left - 0.5 && c.right <= b.right + 0.5) got += n.data[i];
+        }
+        return got;
+      };
+      return {
+        label: shown(lab) ? text(lab) : null,
+        when: shown(next) ? text(next.firstChild) : null,
+        where: shown(next) ? text(next.lastChild) : null,
+        line: shown(line) ? parts(line) : null,
+        detail: shown(det) ? parts(det) : null,
+        detailRows: shown(det) ? Math.round(det.getBoundingClientRect().height / lh) : 0,
+        detailPay: det ? whole(det.querySelector('.pay')) : '',
+        detailGps: det ? whole(det.querySelector('.gps')) : '',
+        diagShown: shown(document.querySelector('#detail .diag')),
+        took: text(document.getElementById('took')),
+      };
+    });
+    await push({ phase: 'scanning', message: '' });
+    await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
+    // A card on the phone, written to the record, then the driver accepts it
+    // on the phone and the card goes.
+    await push(Object.assign({}, READINGS.deducted, { pay: 5.0, holding: null, stack: null }));
+    await push({ offer: { id: 'o-held-age', pay: 5.0, minutes: 22, perHour: 14.71 }, at: 1 });
+    await tick(300);
+    const tookUp = await held();
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    const tookGoneNow = await held();
+    await tick(125000);
+    const tookGoneLater = await held();
+    // Nothing in the car: the card says what it always said.
+    const empty = await held();
+    // The order in the car, as a ⌖ read filed onto it sends it, and the Trip
+    // Planner that press read: a pickup, whose name the reader prefixed with
+    // the icon's letters, ahead of the one dropoff.
+    await push({ holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
+                            dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                            endPinned: true, endWhy: null, arrived: false } });
+    await push({ planner: { stops: [
+      { kind: 'pickup', orders: 1, name: 'oe Burger Barn', expectedBy: 1066,
+        street: '310 Mill St', city: 'Roswell',
+        line: '310 Mill St, Roswell, GA 30075' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 1105,
+        street: '4821 Kestrel Dr', city: 'Marietta', line: '4821 Kestrel Dr, Marietta' }],
+      unfiled: null, asked: true, ms: null, at: 1 } });
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    const between = await held();
+    // The server refuses the pin, and says so on the next beat.
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: false, arrived: false, endWhy: 'no house number' } });
+    await tick(300);
+    const refused = await held();
+    // ...and the car arrives at the door: the pickup is behind it.
+    await push({ alive: true, at: Date.now(), atDropoff: true,
+                 heldEnd: { endPinned: true, arrived: true, endWhy: null } });
+    await tick(300);
+    const arrived = await held();
+    // An offer comes up while the order is in the car.
+    await push(Object.assign({}, READINGS.deducted, {
+      holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
+                 dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                 endPinned: true, endWhy: null, arrived: false },
+      stack: null }));
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: true, arrived: false, endWhy: null } });
+    await tick(300);
+    const offerUp = await held();
+    // ...and the order goes, the card with it.
+    await push({ holding: null });
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    const gone = await held();
+    out.heldCard = { tookUp: tookUp, tookGoneNow: tookGoneNow, tookGoneLater: tookGoneLater,
+                     empty: empty, between: between, refused: refused, arrived: arrived,
+                     offerUp: offerUp, gone: gone };
+    await page.close();
+    await ctx.close();
+  }
+
   // --- both jobs at once, and the two things only that line can say --------
   stage = 'both jobs at once, and the two things only that line can say';
   //
@@ -825,8 +978,13 @@ const framed = (page) => page.waitForFunction(
           return r.bottom <= v.bottom - 1 && r.top >= v.top + 1;
         })(),
         // The half that is MEANT to give way, and it has to actually be doing
-        // so or the checks below prove nothing about priority.
-        sumEllipsised: !!sum && sum.scrollWidth > sum.clientWidth + 1,
+        // so or the checks below prove nothing about priority. The words after
+        // the range (`.more`): the range leads the row and does not give way
+        // (rpi/test_layout.py, 'the pair range sits above the figures').
+        sumEllipsised: (() => {
+          const more = document.querySelector('#stack .sum .more');
+          return !!more && more.scrollWidth > more.clientWidth + 1;
+        })(),
         // The other end of the same box. A pair is the tallest this card ever
         // gets, and the verdict centres what will not fit — so the row below
         // going over the bottom border and the headline going off the TOP are
@@ -1037,6 +1195,48 @@ const framed = (page) => page.waitForFunction(
               <= document.documentElement.clientHeight + 1,
       };
     });
+
+    // THE HELD ORDER'S OWN CARD, BACK UNDER A NEW ID (heldOwnCard in
+    // server.js): the server sends it with `heldCard` and no stack, and the
+    // panel shows it as the order already taken — Took reads "in car" and
+    // pressing it records nothing — with a note saying it is not a new offer.
+    {
+      let marks = 0;
+      const countMarks = (route) => { marks += 1; route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, holding: true }) }); };
+      await page.route('**/api/offers/mark', countMarks);
+      await page.evaluate((r) => window.__es.push(r),
+        Object.assign({}, READINGS.deducted, {
+          offer: { id: 'o-again', pay: 9.5, minutes: 20, perHour: 18,
+                   heldCard: 'o-held@1' },
+          holding: { pay: 9.5, minutes: 20, dropoff: null, holdId: 'o-held@1' },
+          heldCard: 'o-held@1', stack: null }));
+      await page.waitForTimeout(250);
+      const tookNow = () => page.evaluate(() => {
+        const t = document.getElementById('took');
+        return { text: (t.textContent || '').trim(), on: t.classList.contains('on') };
+      });
+      const again = await tookNow();
+      again.warn = await page.evaluate(() => {
+        const w = document.getElementById('warn');
+        return w.hidden ? '' : (w.textContent || '');
+      });
+      await page.evaluate(() => document.getElementById('took').click());
+      await page.waitForTimeout(250);
+      again.marks = marks;
+      again.afterPress = await tookNow();
+      // ...and the same card with nothing held is an ordinary offer to tick.
+      await page.evaluate((r) => window.__es.push(r),
+        Object.assign({}, READINGS.deducted, {
+          offer: { id: 'o-again2', pay: 9.5, minutes: 20, perHour: 18,
+                   heldCard: 'o-held@1' },
+          holding: null, heldCard: null, stack: null }));
+      await page.waitForTimeout(250);
+      again.unheld = await tookNow();
+      await page.unroute('**/api/offers/mark', countMarks);
+      out['heldAgain ' + panel[0]] = again;
+    }
 
     // THE PAIR LINE MUST NOT OUTLIVE THE ORDER IT IS ABOUT.
     //
@@ -2530,8 +2730,14 @@ const framed = (page) => page.waitForFunction(
       // what they always counted. Drawn without that class, a candidate
       // lands among the marks and those counts go wrong.
       window.__how = [];
+      // ...and a route's dark casing under it, and the P / D on a pin, kept
+      // apart the same way: the counts of lines and marks above are of the
+      // runs and the dots themselves.
+      window.__casings = []; window.__letters = [];
       var how = function (o) { return !!(o && /\\bmv-how\\b/.test(o.className || '')); };
-      var into = function (list, x) { (how(x.opts) ? window.__how : window[list]).push(x); };
+      var casing = function (o) { return !!(o && /\\bmv-casing\\b/.test(o.className || '')); };
+      var into = function (list, x) {
+        (how(x.opts) ? window.__how : casing(x.opts) ? window.__casings : window[list]).push(x); };
       window.L = {
         map: function (node) {
           // Where the view is and its zoom, so the follow's "is the dot in the
@@ -2560,12 +2766,17 @@ const framed = (page) => page.waitForFunction(
               var k = 256 * Math.pow(2, this.zoom) / 360;
               return { x: node.clientWidth / 2 + (ll[1] - this.centre[1]) * k,
                        y: node.clientHeight / 2 - (ll[0] - this.centre[0]) * k }; },
-            invalidateSize: function () { window.__sized = (window.__sized || 0) + 1; },
+            // ...and the map's width when it was asked: a call made before the
+            // pane changed size tells Leaflet nothing.
+            invalidateSize: function () { window.__sized = (window.__sized || 0) + 1;
+              window.__sizedW = (window.__sizedW || []).concat([node.clientWidth]); },
             removeLayer: function (g) {
               window.__marks = window.__marks.filter(function (m) { return m.group !== g; });
               window.__lines = window.__lines.filter(function (l) { return l.group !== g; });
               window.__circles = window.__circles.filter(function (c) { return c.group !== g; });
               window.__how = window.__how.filter(function (c) { return c.group !== g; });
+              window.__casings = window.__casings.filter(function (c) { return c.group !== g; });
+              window.__letters = window.__letters.filter(function (c) { return c.group !== g; });
             },
             // Framed on the bounds' middle at zoom 12, and a zoom: Leaflet
             // says zoomstart for the page's own fit as for a hand's.
@@ -2601,8 +2812,17 @@ const framed = (page) => page.waitForFunction(
           return l; },
         // The "you are here" accuracy circle, kept apart from the marks so the
         // checks on the four job marks count what they always counted.
+        // The letter on a pin: a divIcon on a marker, as drawMap makes it.
+        divIcon: function (o) { return o; },
+        marker: function (ll, opts) {
+          return { ll: ll, opts: opts, group: null,
+                   addTo: function (g) { this.group = g; window.__letters.push(this);
+                                         return this; } }; },
         circle: function (ll, opts) {
           var c = { ll: ll, opts: opts, group: null,
+                    // What sizeDiscs sets: a disc bigger than the view is
+                    // drawn at no opacity, and the last style set is kept.
+                    setStyle: function (st) { this.style = st; return this; },
                     bindTooltip: function (h) { this.leafletTip = h; return this; },
                     bringToBack: function () { this.atBack = true; return this; },
                     on: function (ev, fn) { (this.handlers = this.handlers || {})[ev] = fn;
@@ -2720,6 +2940,9 @@ const framed = (page) => page.waitForFunction(
         return { ll: m.ll, fill: m.opts && m.opts.fillColor,
                  radius: m.opts && m.opts.radius,
                  op: m.opts && m.opts.fillOpacity,
+                 // ...and the edge: the order in the car's ring is edged in
+                 // its own colour, every other mark in the dark.
+                 edge: m.opts && m.opts.color, weight: m.opts && m.opts.weight,
                  popup: String(m.popup || '').replace(/<[^>]*>/g, ' ')
                                              .replace(/\s+/g, ' ').trim() };
       }),
@@ -2732,7 +2955,8 @@ const framed = (page) => page.waitForFunction(
       // answer has no list behind it, so only the two cards' discs.
       how: (window.__how || []).map(function (x) {
         return { cls: String((x.opts || {}).className || ''), ll: x.ll || null,
-                 radius: (x.opts || {}).radius, colour: (x.opts || {}).color };
+                 radius: (x.opts || {}).radius, colour: (x.opts || {}).color,
+                 shown: x.mvShown };
       }),
       keyShown: !document.getElementById('mapKey').hidden,
       keyText: document.getElementById('mapKey').innerText.replace(/\s+/g, ' ').trim(),
@@ -2740,6 +2964,93 @@ const framed = (page) => page.waitForFunction(
       // The remembered view. A map mode written here would ask a public
       // geocoder on the next page load with nobody pressing anything.
       stored: localStorage.getItem('uberscan.liveView') }));
+    /* Easier to read (the driver: "can the map be made easier to read?").
+       A Leaflet tile as Leaflet makes one — an <img class="leaflet-tile">
+       in the tile pane inside the map — styled by the page's own rules: the
+       camera picture's border and round corners reached it once, and drew
+       the tile grid across the map as slate lines with a star where four
+       corners met. And what drawMap put down: the letters on the pins, a
+       casing under every run, the runs' weight, and the discs' edge. */
+    out.readable = await page.evaluate(() => {
+      const map = document.getElementById('liveMap');
+      const pane = document.createElement('div');
+      pane.className = 'leaflet-pane leaflet-tile-pane';
+      const tile = document.createElement('img');
+      tile.className = 'leaflet-tile';
+      tile.style.width = tile.style.height = '256px';
+      pane.appendChild(tile);
+      map.appendChild(pane);
+      const ts = getComputedStyle(tile), ps = getComputedStyle(pane);
+      const res = {
+        tileBorder: ts.borderTopWidth, tileRadius: ts.borderTopLeftRadius,
+        paneFilter: ps.filter,
+        letters: (window.__letters || []).map((l) => ({
+          ll: l.ll, html: ((l.opts || {}).icon || {}).html,
+          cls: ((l.opts || {}).icon || {}).className,
+          deaf: (l.opts || {}).interactive === false })),
+        casings: (window.__casings || []).length,
+        weights: (window.__lines || []).map((l) => (l.opts || {}).weight),
+        discs: (window.__how || []).filter((h) => /mv-disc/.test((h.opts || {}).className))
+          .map((h) => ({ weight: h.opts.weight, opacity: h.opts.opacity,
+                         fill: h.opts.fillOpacity, style: h.style || null,
+                         // Its radius on the stub's projection at the zoom
+                         // the map is at, against the map's longer side.
+                         rpx: h.opts.radius / 1609.344 / 69.0 * 256
+                              * Math.pow(2, window.__lmap.zoom) / 360,
+                         room: Math.max(map.clientWidth, map.clientHeight) })),
+      };
+      map.removeChild(pane);
+      return res;
+    });
+    // Between offers, in Map view: the map takes the verdict's column, and
+    // the card is back in the same render as the next offer.
+    stage = 'the map mode: between offers';
+    const wide = () => page.evaluate(() => {
+      const app = document.getElementById('app').getBoundingClientRect();
+      return { live: getComputedStyle(document.querySelector('.live')).display !== 'none',
+               mapW: Math.round(document.getElementById('liveMap').getBoundingClientRect().width),
+               appW: Math.round(app.width),
+               barW: Math.round(document.querySelector('.bottombar').getBoundingClientRect().width),
+               label: document.getElementById('verdictLabel').textContent.trim() };
+    });
+    out.betweenOffer = await wide();
+    await page.evaluate(() => { window.__sizedW = []; });
+    await page.evaluate(() => window.__es.push(
+      { ready: false, state: 'empty', track: null,
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                   card: window.__HELD } }));
+    await page.waitForTimeout(200);
+    out.betweenNone = await wide();
+    out.betweenSized = await page.evaluate(() => window.__sized || 0);
+    // The widths Leaflet was told on that message: the map is redrawn (and
+    // told) before render flips the page to between, so only setBetween's own
+    // call is made at the new width.
+    out.betweenSizedW = await page.evaluate(() => (window.__sizedW || []).slice());
+    // ...and not between while the card has something to say: the Trip
+    // Planner's stops on it give the verdict's column back. Then cleared.
+    await page.evaluate(() => window.__es.push({ planner: { stops: [
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 978, street: '4821 Kestrel Dr',
+        city: 'Marietta', state: 'GA', zip: null, line: '4821 Kestrel Dr, Marietta' }],
+      unfiled: null, asked: true, ms: null, at: 41 } }));
+    await page.waitForTimeout(200);
+    out.betweenStops = await wide();
+    await page.evaluate(() => window.__es.push({ planner: { stops: [], unfiled: null,
+                                                            asked: true, ms: null, at: 42 } }));
+    await page.waitForTimeout(200);
+    // The offer, and in the same task as the push: no wait at all.
+    out.betweenBack = await page.evaluate(() => {
+      window.__es.push({
+        ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+        minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15,
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                   card: window.__HELD },
+        offer: { id: 'o-map', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+                 miles: 4.0, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+                 dropoff: 'Canton Rd, Marietta', ...window.__CARD } });
+      return { live: getComputedStyle(document.querySelector('.live')).display !== 'none',
+               label: document.getElementById('verdictLabel').textContent.trim() };
+    });
+    await page.waitForTimeout(600);
     // ...and the frames stop. Thirty a second down a phone hotspot for a
     // picture nobody can see is a cost that only shows up as a bill.
     stage = 'the map mode: the picture stops being fetched';
@@ -3019,7 +3330,7 @@ const framed = (page) => page.waitForFunction(
     const ANSWERS = { "Chipotle (Barrett Pkwy)": [34.020, -84.580],
                       "Powder Springs Rd": [33.900, -84.640] };
     ANSWERS[HELD_AT] = [33.990, -84.620];
-    const run = async (name, cardDrop, script) => {
+    const run = async (name, cardDrop, script, replyMore) => {
       stage = 'the held end: ' + name;
       const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
                                 .then((c) => c.newPage());
@@ -3038,8 +3349,9 @@ const framed = (page) => page.waitForFunction(
                          hasTotal: true, legs: 2, whole: true };
       await page.route('**/api/offers/mark', (route) => route.fulfill({
         status: 200, contentType: 'application/json',
-        body: JSON.stringify({ ok: true, holding: true,
-          held: { pay: 18.09, minutes: 38, dropoff: cardDrop, card: heldCard } }) }));
+        body: JSON.stringify(Object.assign({ ok: true, holding: true,
+          held: { pay: 18.09, minutes: 38, dropoff: cardDrop, card: heldCard } },
+          replyMore || {})) }));
       await page.route('**/nominatim.openstreetmap.org/**', (route) => {
         const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
         const hit = ANSWERS[q];
@@ -3101,6 +3413,23 @@ const framed = (page) => page.waitForFunction(
       await page.waitForTimeout(800);
       res.after = await pins();
       res.note = await page.evaluate(() => document.getElementById('viewNote').textContent.trim());
+      /* The GPS drop, from the panel's side (gpsArrival in server.js): a beat
+         that says the car is at the held order's door, and then the server's
+         word that it put the order down because the car left it. */
+      const row = () => page.evaluate(() => ({
+        health: document.getElementById('health').textContent.replace(/\s+/g, ' ').trim(),
+        dropShown: !document.getElementById('drop').hidden }));
+      // The row is the heartbeat's, and says nothing over a socket that has
+      // not opened: open it, as the health stage does.
+      await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+      await push({ alive: true, gps: null, atDropoff: true });
+      await page.waitForTimeout(400);
+      res.atDoor = await row();
+      await push({ gpsDrop: { at: 1, saidForMs: 60000 } });
+      await push({ alive: true, gps: null });
+      await page.waitForTimeout(2600);
+      res.gpsDown = await row();
+      res.gpsDownPins = await pins();
     });
     // The card named its end, and the next card's offer line is the first
     // message after ✓ Took — the reply is the only thing that said the hold.
@@ -3110,7 +3439,15 @@ const framed = (page) => page.waitForFunction(
                             pickup: null, dropoff: null } });
       await page.waitForTimeout(2600);
       res.bare = await pins();
-    });
+      // This Took put another order down (server.js writes its drop row
+      // `by: 'replaced'`), which the mark reply says as well as the stream:
+      // on the status row at the next beat.
+      await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+      await push({ alive: true, gps: null });
+      await page.waitForTimeout(300);
+      res.health = await page.evaluate(
+        () => document.getElementById('health').textContent.replace(/\s+/g, ' ').trim());
+    }, { replaced: { at: 1, saidForMs: 60000 } });
   }
 
   /* --- you are here --------------------------------------------------------
@@ -3464,7 +3801,12 @@ const framed = (page) => page.waitForFunction(
         publicAsked.push(q);
         const hit = { "McDonald's (Marietta Sq)": [33.9830, -84.5499],
                       'Shadowood Pkwy SE, Atlanta': [33.8779, -84.4600],
-                      'Church St, Marietta': [33.9580, -84.5520] }[q];
+                      'Church St, Marietta': [33.9580, -84.5520],
+                      // The held order's restaurants (heldRoute below): one
+                      // 21.8 mi north of its card's fix, past its 9.9 mi, and
+                      // one in Idaho. Invented.
+                      '12 Far Rd,': [34.2683, -84.5499],
+                      '9 Idaho Rd,': [43.6150, -116.2023] }[q];
         return route.fulfill({ status: 200, contentType: 'application/json',
           body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
                                         display_name: q }] : []) });
@@ -3506,6 +3848,7 @@ const framed = (page) => page.waitForFunction(
         cls: String((x.opts || {}).className || ''),
         ll: x.ll || null, pts: x.pts || null,
         radius: (x.opts || {}).radius, fill: (x.opts || {}).fillOpacity,
+        shown: x.mvShown,
         tip: x.mvTip || null, leafletTip: x.leafletTip || null })));
       const keyShown = () => page.evaluate(() => {
         const k = document.getElementById('mapKey');
@@ -3544,6 +3887,9 @@ const framed = (page) => page.waitForFunction(
       r.oneKey = await keyShown();
       r.oneFit = await page.evaluate(() => window.__fit);
       r.oneMarks = await page.evaluate(() => (window.__marks || []).map((m) => m.ll));
+      r.oneLines = await page.evaluate(() => (window.__lines || []).map((l) => ({
+        cls: String((l.opts || {}).className || ''), pts: l.pts,
+        dashed: !!(l.opts || {}).dashArray })));
       r.oneAsked = relayAsked.splice(0);
       // What the figure should be off the fake's own road (a quarter longer
       // than the straight line, leg by leg), worked out with the page's MV.
@@ -3639,8 +3985,13 @@ const framed = (page) => page.waitForFunction(
            9.9 mi disc. With a holdId, so a pickup sent as the held end would
            be a POST to /api/held-end this records. */
         const heldEndPosts = [];
+        // ...and the pickup's own pin, which the server's restaurant guard
+        // (pickupNearEnd) is fed from: POST /api/held-pickup.
+        const heldPickupPosts = [];
         page.on('request', (q) => {
-          if (/\/api\/held-end$/.test(new URL(q.url()).pathname)) heldEndPosts.push(q.postData());
+          const p = new URL(q.url()).pathname;
+          if (/\/api\/held-end$/.test(p)) heldEndPosts.push(q.postData());
+          if (/\/api\/held-pickup$/.test(p)) heldPickupPosts.push(q.postData());
         });
         await page.evaluate((SQ) => {
           window.__es.push({
@@ -3673,7 +4024,8 @@ const framed = (page) => page.waitForFunction(
                    key: k.hidden ? null : k.innerText.replace(/\s+/g, ' ').trim() };
         });
         r.heldPickSeen = relayAsked.filter((u) => /street=1985/.test(u));
-        r.heldPickPosts = heldEndPosts;
+        r.heldPickPosts = heldEndPosts.slice();
+        r.heldPickupPosts = heldPickupPosts.map((p) => JSON.parse(p || 'null'));
         // ...and the next card, the same order still held: the restaurant
         // is where that order is collected from whatever card is up.
         await page.evaluate((SQ) => {
@@ -3691,6 +4043,26 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(2000);
         r.heldPickNext = await page.evaluate(() => (window.__marks || []).filter(
           (k) => String(k.popup || '').indexOf('pick up the order in your car') >= 0).length);
+        /* ...and a held order whose end is a DOOR: the fake's own at 1985
+           Cobb Parkway, inside the held card's 9.9 mi disc, the NucBox's
+           answer carrying the number. The page posts it to /api/held-end for
+           the GPS drop (pinHeldEnd). This server holds no order and refuses
+           it; what the page SENT is the point. The street-level end above
+           (Shadowood Pkwy SE) was never sent: heldPickPosts. */
+        await page.evaluate((SQ) => {
+          window.__es.push({
+            ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+            minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
+            holding: { pay: 9.0, minutes: 18.0, holdId: 'h-door',
+                       dropoff: '1985 Cobb Parkway, Kennesaw',
+                       card: Object.assign({}, SQ, { miles: 9.4 }) },
+            offer: Object.assign({ id: 'n-helddoor', pay: 14.25, minutes: 20.0,
+                                   billedMinutes: 20.0, cost: 1.4,
+                                   pickup: "McDonald's (Marietta Sq)",
+                                   dropoff: 'Church St, Marietta' }, SQ) });
+        }, SQ);
+        await page.waitForTimeout(2500);
+        r.heldDoorPosts = heldEndPosts.map((p) => JSON.parse(p || 'null'));
         // The NucBox answering the pickup and then going quiet: "Slow Place"
         // answers past NUCBOX_TIMEOUT_MS, so the dropoff and the held end are
         // the public map's, and the pickup's pin is still the NucBox's. What
@@ -3702,6 +4074,90 @@ const framed = (page) => page.waitForFunction(
         r.downLater = await note();
         r.downLaterAsked = publicAsked.splice(askedBefore);
       }
+      /* THE HELD ORDER'S RESTAURANT IN THE FIGURE (MV.detourThrough): a
+         hold whose Trip Planner still lists its pickup, and this card's
+         pickup measured against the run car -> that restaurant -> its end.
+         Each case on a hold of its own, so no planner carries over. The
+         restaurant is the fake's door at 250 Example Road (invented), which
+         the router routes like any point. */
+      const heldRoute = async (id, stops, heldAt) => {
+        await page.evaluate((x) => {
+          window.__es.push({
+            ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
+            minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
+            holding: { pay: 9.0, minutes: 18.0, holdId: 'h-' + x.id,
+                       dropoff: (x.heldAt || {}).end || 'Shadowood Pkwy SE, Atlanta',
+                       card: Object.assign({}, x.SQ, { miles: (x.heldAt || {}).miles || 9.4 }) },
+            offer: Object.assign({ id: x.id, pay: 14.25, minutes: 20.0,
+                                   billedMinutes: 20.0, cost: 1.4,
+                                   pickup: "McDonald's (Marietta Sq)",
+                                   dropoff: 'Church St, Marietta' }, x.SQ) });
+          window.__es.push({ planner: { stops: x.stops.map((s) => ({
+            kind: 'pickup', orders: 1, name: 'oe ' + s[0], expectedBy: 1189, street: s[1],
+            city: null, state: null, zip: null, line: s[1] })), unfiled: 'dropoffs',
+            asked: true, ms: null, at: 41 } });
+        }, { SQ: SQ, id: id, stops: stops, heldAt: heldAt || null });
+        await page.waitForTimeout(which === 'noSearch' ? 6000 : 3000);
+        return { note: await note(),
+                 lines: await page.evaluate(() => (window.__lines || []).map((l) => ({
+                   cls: String((l.opts || {}).className || ''), pts: l.pts,
+                   dashed: !!(l.opts || {}).dashArray }))) };
+      };
+      // What the figure should be off the fake's road (a quarter longer than
+      // the straight line, leg by leg) and in straight lines, worked out from
+      // the two runs' own lengths rather than by the page's MV.detourThrough.
+      const runWant = () => page.evaluate(() => {
+        const MV = window.MapView, C = { lat: 33.9526, lon: -84.5499 };
+        const A = { lat: 33.9830, lon: -84.5499 }, S = { lat: 33.8779, lon: -84.4600 };
+        const G = { lat: 33.9700, lon: -84.5300 };
+        const run = (pts) => pts.slice(1).reduce((m, p, i) => m + MV.crowMiles(pts[i], p), 0);
+        const before = run([C, A, G, S]), after = run([C, G, A, S]), base = run([C, G, S]);
+        return { crow: Math.min(before, after) - base, before: before <= after,
+                 alone: MV.detour(C, A, S) };
+      });
+      // What the public map was asked before these, which the checks below
+      // read as the places of the cards above; theirs are kept apart.
+      const askedBeforeRoute = publicAsked.length;
+      if (which === 'both' || which === 'noRoad') {
+        r.route = await heldRoute('n-route', [['Example Grill', '250 Example Road']]);
+        r.routeWant = await runWant();
+      }
+      if (which === 'both') {
+        // A restaurant the NucBox has no door for: no pin, and so no figure.
+        r.routeNone = (await heldRoute('n-route-none',
+                                       [['Example Wok', '77 Nowhere Rd']])).note;
+        // A map-view.js from before the figure through the restaurant, which
+        // sw.js can serve this page: its road detour would take the
+        // restaurant and measure to the end alone. Taken off the page's own
+        // MapView for one card, and put back.
+        const thruWas = await page.evaluate(() => {
+          window.__thru = window.MapView.detourThrough;
+          delete window.MapView.detourThrough;
+          return typeof window.__thru;
+        });
+        const stale = await heldRoute('n-route-stale', [['Example Grill', '250 Example Road']]);
+        r.routeStale = { was: thruWas, note: stale.note,
+                         pins: await page.evaluate(() => (window.__marks || []).filter(
+                           (k) => String(k.popup || '').indexOf('pick up the order in your car') >= 0)
+                           .length) };
+        await page.evaluate(() => { window.MapView.detourThrough = window.__thru; });
+      }
+      if (which === 'noSearch') {
+        // The public map, which the stub answers for these three: nothing,
+        // a branch 21.8 mi north of the held card's fix, and Idaho.
+        r.routeLost = (await heldRoute('n-route-lost', [['Example Wok', '77 Nowhere Rd']])).note;
+        r.routeOff = (await heldRoute('n-route-off', [['Example Pie', '12 Far Rd']])).note;
+        r.routeWrong = (await heldRoute('n-route-wrong', [['Example Taco', '9 Idaho Rd']])).note;
+      }
+      if (which === 'streets') {
+        // A restaurant on a numberless street the street index holds: its
+        // stretch, not a door — and the run goes through some point of it.
+        // A 3.0 mi held card, so only the stretch near the Square is inside,
+        // going to the corner the cards above pinned.
+        r.routeStreet = (await heldRoute('n-route-street', [['Example Deli', 'Larkspur Pkwy SE']],
+          { miles: 3.0, end: 'Foxglove Trl & Northgate Dr, Marietta' })).note;
+      }
+      r.routeAsked = publicAsked.splice(askedBeforeRoute);
       if (which === 'streets') {
         /* The street index, on the NucBox's own server, relayed. The held
            order going to a CORNER of the synthetic streets (tests/fixtures/
@@ -3759,6 +4215,19 @@ const framed = (page) => page.waitForFunction(
         await page.waitForTimeout(1500);
         r.longStreet = await note();
         r.longStreetHeld = await heldPin();
+      }
+      if (which === 'noSearch') {
+        /* The router set and the held end a pin its own card refuses: the
+           public map's Shadowood Parkway, 7.3 mi from a held card that
+           printed 0.5. A road drawn to it would be a road to a red pin, so
+           the held run stays the straight line it always was. */
+        await push({ id: 'ns-off', heldCard: { miles: 0.5 } });
+        await page.waitForTimeout(4000);
+        r.offHeldLines = await page.evaluate(() => (window.__lines || []).map(
+          (l) => String((l.opts || {}).className || '')));
+        r.offHeldPin = await page.evaluate(() => (window.__marks || []).filter(
+          (k) => String(k.popup || '').indexOf('where the order in your car is going') >= 0)
+          .map((k) => (k.opts || {}).fillColor));
       }
       r.publicAsked = publicAsked;
       out.nbx[which] = r;
@@ -4478,6 +4947,12 @@ const framed = (page) => page.waitForFunction(
                            throttled: { now: ['under-voltage', 'throttled'],
                                         sinceBoot: ['under-voltage', 'throttled'] },
                            throttledWhy: null });
+    // A Took that replaced the order in the car (server.js writes the old
+    // one's drop row `by: 'replaced'`): said on this row for a minute.
+    await page.evaluate(() => window.__es.push({ heldReplaced: { at: 1, saidForMs: 60000 } }));
+    slot.replaced = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 84.6, cpuCWhy: null,
+                                throttled: { now: ['temp limit'], sinceBoot: ['temp limit'] },
+                                throttledWhy: null });
     // The GPS put the order down (server.js gpsArrival): said on this row for
     // a minute, beside the widest Pi word.
     await page.evaluate(() => window.__es.push({ gpsDrop: { at: 1, saidForMs: 60000 } }));
@@ -4766,6 +5241,250 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  // --- two orders in the car (carrying two on) -------------------------------
+  stage = 'two orders in the car';
+  //
+  // The panel with the server carrying two: a line per order, "N dropoffs read
+  // · whose?", the chooser over the verdict pane — and closing after ten
+  // seconds of the page's own clock with nothing sent — Drop ▾ with the bar
+  // still six controls, the Undo after a Took that added an order, and the
+  // pair line saying it is against ① only. Messages as server.js sends them
+  // (ordersForPanel, chooserForPanel); the replies stubbed. Invented streets.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 1024, height: 600 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    const posted = [];
+    let markReply = null;
+    let dropReply = { ok: true, wasHolding: true };
+    await page.route('**/api/choose', (route) => {
+      posted.push({ url: '/api/choose', body: route.request().postData() });
+      route.fulfill({ status: 200, contentType: 'application/json',
+                      body: JSON.stringify({ ok: true }) });
+    });
+    await page.route('**/api/delivered', (route) => {
+      posted.push({ url: '/api/delivered', body: route.request().postData() });
+      route.fulfill({ status: 200, contentType: 'application/json',
+                      body: JSON.stringify(dropReply) });
+    });
+    await page.route('**/api/offers/mark', (route) => {
+      posted.push({ url: '/api/offers/mark', body: route.request().postData() });
+      route.fulfill({ status: 200, contentType: 'application/json',
+                      body: JSON.stringify(markReply || { ok: true }) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+              .catch(() => {});
+    const tick = (ms) => page.clock.runFor(ms);
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    // A reply is real network, not the page's clock: waited for on this side,
+    // until the page shows it (the Undo up), a second at most.
+    const undoUp = async () => {
+      for (let i = 0; i < 40; i++) {
+        if (await page.evaluate(() => !document.getElementById('undo').hidden)) return;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
+    // ...and a press's post, until it has reached the stub.
+    const sent = async (n) => {
+      for (let i = 0; i < 40 && posted.length < n; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
+    const look = () => page.evaluate(() => {
+      const shown = (el) => {
+        if (!el || el.hidden) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+      };
+      const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '');
+      const parts = (el) => [].slice.call(el.children).filter(shown).map(text)
+        .filter(Boolean).join(' ');
+      const ch = document.getElementById('chooser');
+      const bar = [].slice.call(document.querySelector('.bottombar').children).filter(shown);
+      const det = document.querySelector('#detail .held');
+      const vs = document.querySelector('#stack .vs');
+      return {
+        one: shown(document.getElementById('heldLine'))
+          ? parts(document.getElementById('heldLine')) : null,
+        two: shown(document.getElementById('heldLine2'))
+          ? parts(document.getElementById('heldLine2')) : null,
+        whose: shown(document.getElementById('whose'))
+          ? text(document.getElementById('whose')) : null,
+        detail: shown(det) ? parts(det) : null,
+        // Each row as it reads: its parts side by side.
+        chooser: shown(ch) ? [].slice.call(ch.children).map((c) => (c.children.length
+          ? [].slice.call(c.children).map(text).join(' ') : text(c))) : null,
+        drop: text(document.getElementById('drop')),
+        bar: bar.length,
+        undo: shown(document.getElementById('undo'))
+          ? text(document.getElementById('undo')) : null,
+        vs: shown(vs) ? text(vs) : null,
+        status: text(document.getElementById('health')),
+      };
+    });
+    const A = { n: 1, pay: 9.48, minutes: 40, holdId: 'c-a@1', dropoff: '4821 Kestrel Dr, Marietta',
+                card: null, endPinned: true, arrived: false, endWhy: null, app: 'uber',
+                addOn: false, of: null };
+    const B = { n: 2, pay: 28.08, minutes: 55, holdId: 'c-b@2', dropoff: null, card: null,
+                endPinned: false, arrived: false, endWhy: null, app: 'uber', addOn: false,
+                of: null };
+    await push({ phase: 'scanning', message: '' });
+    await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
+    // A card on the record, then ✓ Took on it: the reply says it ADDED ②.
+    await push({ offer: { id: 'c-b', pay: 28.08, minutes: 55, perHour: 20 }, at: 1 });
+    await push({ holding: A, orders: [A] });
+    markReply = { ok: true, holding: true, held: A, orders: [A, B], replaced: null,
+                  added: { holdId: 'c-b@2', id: 'c-b', pay: 28.08, undoForMs: 5000 } };
+    await page.evaluate(() => document.getElementById('took').click());
+    await undoUp();
+    await tick(300);
+    const added = await look();
+    await tick(5200);
+    const undoGone = await look();
+    // ...and the Undo itself, after another Took that added one, pressed:
+    // the untick, for the order that Took added.
+    await push({ offer: { id: 'c-c', pay: 6.25, minutes: 20, perHour: 18 }, at: 2 });
+    markReply = { ok: true, holding: true, held: A, orders: [A, B], replaced: null,
+                  added: { holdId: 'c-c@3', id: 'c-c', pay: 6.25, undoForMs: 5000 } };
+    await page.evaluate(() => document.getElementById('took').click());
+    await undoUp();
+    await tick(300);
+    markReply = { ok: true, holding: true, held: A, orders: [A], replaced: null };
+    posted.length = 0;
+    await page.evaluate(() => document.getElementById('undo').click());
+    await sent(1);
+    await tick(300);
+    const undone = { look: await look(), posted: posted.slice() };
+    // Two in the car again, between offers, with two addresses nobody owns.
+    await push({ holding: A, orders: [A, B], unowned: 2 });
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(1100);
+    const between = await look();
+    // A card up, and its pair line, with both in the car.
+    await push(Object.assign({}, READINGS.deducted, {
+      holding: A, orders: [A, B], unowned: 0,
+      stack: { pay: 40.0, worst: 18.2, best: 31.0, minMinutes: 55, maxMinutes: 80,
+               state: 'warn', sure: false, uncosted: false, ends: null, vsFirst: true } }));
+    await tick(300);
+    const offerUp = await look();
+    // ⌖ with no cue: the chooser, over the verdict pane.
+    await push({ chooser: { id: 'choose-1', kind: 'scan', line: '77 Birch Ln, Roswell, GA',
+                            rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
+                                   { pick: 'c-b@2', n: 2, pay: 28.08, end: null }],
+                            card: { pick: 'card', pay: 12.5 }, closesInMs: 10000 } });
+    await tick(300);
+    const chooser = await look();
+    posted.length = 0;
+    await tick(10000);
+    const closed = { look: await look(), posted: posted.slice() };
+    // ...answered: the row posts its pick.
+    await push({ chooser: { id: 'choose-2', kind: 'scan', line: '77 Birch Ln, Roswell, GA',
+                            rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
+                                   { pick: 'c-b@2', n: 2, pay: 28.08, end: null }],
+                            card: null, closesInMs: 10000 } });
+    await tick(200);
+    posted.length = 0;
+    await page.evaluate(() => document.querySelectorAll('#chooser button')[0].click());
+    await sent(1);
+    await tick(300);
+    const picked = { look: await look(), posted: posted.slice() };
+    // Drop with two in the car: the server says choose, and the chooser asks
+    // ①, ②, Both; Both sends both.
+    dropReply = { ok: true, wasHolding: true, holding: true, held: A, orders: [A, B],
+                  choose: { kind: 'drop', closesInMs: 10000,
+                            rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
+                                   { pick: 'c-b@2', n: 2, pay: 28.08, end: null }] } };
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    posted.length = 0;
+    await page.evaluate(() => document.getElementById('drop').click());
+    await sent(1);
+    for (let i = 0; i < 40; i++) {
+      if (await page.evaluate(() => !document.getElementById('chooser').hidden)) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    await tick(300);
+    const dropAsk = await look();
+    dropReply = { ok: true, wasHolding: true, holding: false, held: null, orders: [] };
+    await page.evaluate(() => {
+      const b = [].slice.call(document.querySelectorAll('#chooser button'));
+      b[b.length - 1].click();
+    });
+    await sent(2);
+    await tick(300);
+    const dropBoth = { look: await look(), posted: posted.slice() };
+    out.carryTwo = { added: added, undoGone: undoGone, undone: undone, between: between,
+                     offerUp: offerUp, chooser: chooser, closed: closed, picked: picked,
+                     dropAsk: dropAsk, dropBoth: dropBoth };
+    await page.close();
+    await ctx.close();
+  }
+
+  /* --- two orders in the car, on the map ------------------------------------
+   *
+   * With carrying two on: the first order's end pinned D1, the second's D2,
+   * and a held pickup one order's card names (`of`, ownPickups in server.js)
+   * P1 or P2 by that order. Invented places. */
+  {
+    stage = 'the map mode: two orders in the car';
+    const ANSWERS = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
+                      'Powder Springs Rd': [33.900, -84.640],
+                      'Canton Rd, Marietta': [33.980, -84.500],
+                      '310 Mill St, Roswell, GA 30075': [34.010, -84.610] };
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ last: null, lastAgeMs: null, heardAgeMs: 900,
+                             offer: null, holding: null }) }));
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{}' }));
+    await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+      const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
+      const hit = ANSWERS[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    const card = await page.evaluate(() => window.__HELD);
+    const A = { n: 1, pay: 9.48, minutes: 40, holdId: 'm-a@1', dropoff: 'Powder Springs Rd',
+                card: card, endPinned: false, arrived: false, endWhy: null };
+    const B = { n: 2, pay: 28.08, minutes: 55, holdId: 'm-b@2', dropoff: 'Canton Rd, Marietta',
+                card: card, endPinned: false, arrived: false, endWhy: null };
+    await page.evaluate((x) => window.__es.push(x), { holding: A, orders: [A, B] });
+    await page.evaluate((x) => window.__es.push(x), { planner: { stops: [
+      { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700,
+        street: '310 Mill St', city: 'Roswell', line: '310 Mill St, Roswell, GA 30075',
+        of: 'm-b@2' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
+        city: 'Marietta', line: 'Powder Springs Rd' }],
+      unfiled: null, asked: true, ms: null, at: 1 } });
+    await page.evaluate((x) => {
+      Object.assign(x.offer, window.__CARD);
+      window.__es.push(x);
+    }, { ready: true, state: 'go', perHour: 30, grossPerHour: 36, pay: 14.25, minutes: 20,
+         miles: 4, cost: 1.4, target: 25, band: 15, holding: A, orders: [A, B], stack: null,
+         offer: { id: 'o-two', pay: 14.25, minutes: 20, billedMinutes: 20, miles: 4, cost: 1.4,
+                  pickup: 'Chipotle (Barrett Pkwy)', dropoff: null } });
+    await page.click('#viewMode');
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');
+    await page.waitForTimeout(3500);
+    out.mapTwo = await page.evaluate(() => window.__letters.map((m) =>
+      String((m.opts && m.opts.icon && m.opts.icon.html) || '')).sort());
+    await page.close();
+  }
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -4995,6 +5714,17 @@ try:
                ((r.get('againCard') or {}).get('text'),
                 (r.get('againCardDetail') or {}).get('text')),
                ('READING THE CARD', 'working out the pay, the time and the distance'))
+            # The app's own idle screen, which the reader names (notAnOffer):
+            # a payout read off Uber's online map is not a card short of its
+            # time, and a read over it is not the card being read again.
+            eq('%s: the app\'s idle screen with a payout read off it is no '
+               'offer, not a card short of its time' % where,
+               (r.get('idleScreen') or {}).get('text'),
+               'scanner running, no offer on screen')
+            eq('%s: ...and a read over it is the screen being read again' % where,
+               ((r.get('againIdle') or {}).get('text'),
+                (r.get('againIdleDetail') or {}).get('text')),
+               ('READING THE SCREEN', 'no offer on screen · reading again'))
             # The safety property. A message with no `ready` must not put a
             # number on the panel, because there is no number in it.
             eq('%s: ...without inventing a rate to go with it' % where,
@@ -5104,6 +5834,104 @@ try:
                     re.search(r'\d+\s*ms\b', r['diag']['text']))
 
             ok_('%s: the panel still fits' % where, r['fits'])
+
+    # --- two orders in the car (carrying two on) ---------------------------
+    ct = got.get('carryTwo') or {}
+    ok_('the two-orders stage ran', bool(ct))
+    if ct:
+        _ad = ct.get('added') or {}
+        eq('[carry two] a Took that added an order offers to undo it, for five seconds',
+           (_ad.get('undo'), (ct.get('undoGone') or {}).get('undo')),
+           ('Added ② $28.08 · Undo', None))
+        _un = ct.get('undone') or {}
+        _ub = [json.loads(p['body']) for p in _un.get('posted') or []
+               if p.get('url') == '/api/offers/mark']
+        eq('[carry two] ...and Undo sends the untick the Took button sends, for that order',
+           [(b.get('id'), b.get('accepted'), b.get('via')) for b in _ub],
+           [('c-c', None, 'panel')])
+        _bt = ct.get('between') or {}
+        eq('[carry two] one compact line per order, and the addresses nobody owns',
+           (_bt.get('one'), _bt.get('two'), _bt.get('whose')),
+           ('① $9.48 → 4821 Kestrel Dr · ● armed', '② $28.08 → ? · ○ not armed',
+            '2 dropoffs read · whose?'))
+        _of = ct.get('offerUp') or {}
+        eq('[carry two] under an offer, both in one line, and the pair line says vs ① only',
+           (_of.get('detail'), _of.get('vs')), ('· In car ① $9.48 · ② $28.08', 'vs ① only'))
+        eq('[carry two] the chooser over the verdict pane: ①, ②, the card, neither',
+           (ct.get('chooser') or {}).get('chooser'),
+           ['Whose is 77 Birch Ln?', '① $9.48 · 4821 Kestrel Dr', '② $28.08 · ?',
+            'This card $12.50', 'Neither'])
+        _cl = ct.get('closed') or {}
+        eq('[carry two] the chooser left alone closes after ten seconds, sending nothing',
+           ((_cl.get('look') or {}).get('chooser'), _cl.get('posted')), (None, []))
+        _pk = ct.get('picked') or {}
+        eq('[carry two] a row pressed sends its pick, and the chooser closes',
+           ([json.loads(p['body']) for p in _pk.get('posted') or []],
+            (_pk.get('look') or {}).get('chooser')),
+           ([{'id': 'choose-2', 'pick': 'c-a@1'}], None))
+        _da = ct.get('dropAsk') or {}
+        eq('[carry two] Drop reads "Drop ▾" with two held, and the bar is still six controls',
+           ((ct.get('between') or {}).get('drop'), (ct.get('between') or {}).get('bar')),
+           ('Drop ▾', 6))
+        eq('[carry two] ...and when the server will not guess, the chooser asks ①, ② or both',
+           _da.get('chooser'),
+           ['Which did you drop?', '① $9.48 · 4821 Kestrel Dr', '② $28.08 · ?', 'Both'])
+        _db = ct.get('dropBoth') or {}
+        eq('[carry two] ...and Both sends both',
+           [json.loads(p['body']) for p in _db.get('posted') or []
+            if p.get('url') == '/api/delivered' and p.get('body')],
+           [{'holdIds': ['c-a@1', 'c-b@2']}])
+
+    eq('[carry two] Map view pins the two orders\' ends D1 and D2, and a pickup one '
+       'order\'s card names P2', got.get('mapTwo'), ['D1', 'D2', 'P', 'P2'])
+
+    # --- the order in the car, on the card ---------------------------------
+    hc = got.get('heldCard') or {}
+    ok_('the in-car stage ran', bool(hc))
+    if hc:
+        _b = hc.get('between') or {}
+        # Between offers, with an order in the car, the card names where it goes
+        # next and by when — the planner's first pickup, its icon's letters off
+        # the name — what it pays, and the GPS drop's state; and not WAITING
+        # FOR AN OFFER over it.
+        eq('the order in the car is named between offers',
+           (_b.get('when'), _b.get('where'), _b.get('label')),
+           ('Pickup by 5:46', 'Burger Barn', None))
+        eq('...with what it pays and whether the GPS will put it down (%r)' % _b.get('line'),
+           _b.get('line'), '$28.08 in car · ● armed')
+        eq('...and why not, said in a few words when the server refuses the pin',
+           (hc.get('refused') or {}).get('line'), '$28.08 in car · no house no.')
+        _a = hc.get('arrived') or {}
+        eq('...and at the door, the dropoff is next, with the planner\'s time for it',
+           (_a.get('when'), _a.get('where'), _a.get('line')),
+           ('Dropoff by 6:25', '4821 Kestrel Dr', '$28.08 in car · at door'))
+        # With nothing held the card says what it said.
+        eq('...and with nothing held the card still waits for an offer',
+           ((hc.get('empty') or {}).get('label'), (hc.get('empty') or {}).get('when'),
+            (hc.get('empty') or {}).get('line')),
+           ('WAITING FOR AN OFFER', None, None))
+        eq('...and again once the order is down',
+           ((hc.get('gone') or {}).get('label'), (hc.get('gone') or {}).get('when'),
+            (hc.get('gone') or {}).get('line'), (hc.get('gone') or {}).get('detail')),
+           ('WAITING FOR AN OFFER', None, None, None))
+        # With an offer up: one line, under the card, the pay and the GPS state
+        # whole, and the card's own verdict back where it was.
+        _o = hc.get('offerUp') or {}
+        eq('...and in one line while an offer is up',
+           (_o.get('detail'), _o.get('detailRows'), _o.get('when'), _o.get('line')),
+           ('· In car $28.08 · ▸ Burger Barn · ● armed', 1, None, None))
+        eq('...the pay and the GPS state whole on the glass',
+           (_o.get('detailPay'), _o.get('detailGps')), ('· In car $28.08', '· ● armed'))
+        eq('...under the offer\'s own verdict', _o.get('label'), 'PASS')
+        no_('...in place of the read diagnostics', _o.get('diagShown'))
+        # Took names the last offer on record after its card has gone. With
+        # the age, the driver can tell it is not the card they just screened.
+        eq('a Took for a card no longer on the phone says its age',
+           ((hc.get('tookGoneNow') or {}).get('took'),
+            (hc.get('tookGoneLater') or {}).get('took')),
+           ('Took $5.00? · just now', 'Took $5.00? · 2 min ago'))
+        eq('...and no age while its card is up',
+           (hc.get('tookUp') or {}).get('took'), 'Took $5.00?')
 
     # --- marking an offer as taken, from the driving screen --------------
     idle = got.get('tookIdle') or {}
@@ -5315,8 +6143,8 @@ try:
         # top of the glass instead. Both halves, or neither is a check.
         ok_('%s: ...with the headline and the word above it still on the glass'
             % panel, row.get('onGlass'))
-        # The priority has to be REAL, not just declared: the arithmetic is the
-        # half that gives way, and if it is not actually being cut here then the
+        # The priority has to be REAL, not just declared: the arithmetic's words
+        # are the half that gives way, and if they are not being cut here then the
         # two checks below are passing on a row with room to spare and would say
         # nothing about what happens when there is none.
         ok_('%s: ...with the arithmetic the part that gives way' % panel,
@@ -5383,6 +6211,18 @@ try:
             held.get('shown'))
         eq('%s: ...and gone a tick after the order is put down' % panel,
            held.get('afterDropAndATick'), False)
+
+        ha = got.get('heldAgain ' + panel) or {}
+        eq('%s: the held order\'s own card come back reads as taken, in the car' % panel,
+           (ha.get('text'), ha.get('on')), ('✓ Took $9.50 · in car', True))
+        ok_('%s: ...with a note that it is not a new offer (%r)' % (panel, ha.get('warn')),
+            'not a new offer' in (ha.get('warn') or ''))
+        eq('%s: ...and pressing Took on it records nothing' % panel,
+           (ha.get('marks'), (ha.get('afterPress') or {}).get('text')),
+           (0, '✓ Took $9.50 · in car'))
+        eq('%s: ...while with nothing held the same card is an offer to tick' % panel,
+           ((ha.get('unheld') or {}).get('text'), (ha.get('unheld') or {}).get('on')),
+           ('Took $9.50?', False))
 
         link = row.get('link') or {}
         ok_('%s: the route link is inside its own box' % panel,
@@ -5892,6 +6732,11 @@ try:
         ok_('[%s] ...whole as well (%dpx of %dpx)'
             % (_pn, _note('weak').get('w') or 0, _note('weak').get('sw') or 0),
             _note('weak').get('whole') and _note('weak').get('shown'))
+        eq('[%s] a Took that replaced a hold says the previous order was put down' % _pn,
+           _note('replaced').get('text'), 'Pi temp limit 85°C · previous order put down')
+        ok_('[%s] ...whole (%dpx of %dpx)'
+            % (_pn, _note('replaced').get('w') or 0, _note('replaced').get('sw') or 0),
+            _note('replaced').get('whole') and _note('replaced').get('shown'))
         eq('[%s] a GPS drop is said on the row, after the Pi' % _pn,
            _note('gpsDrop').get('text'), 'Pi temp limit 85°C · dropped · left the dropoff')
         ok_('[%s] ...whole (%dpx of %dpx)'
@@ -6504,11 +7349,21 @@ try:
         len(_amber) == 2
         and (_amber[0].get('radius'), _amber[0].get('op'))
             != (_amber[1].get('radius'), _amber[1].get('op')))
-    _ringed = [m for m in _amber if m.get('radius') == 11]
+    _ringed = [m for m in _amber if m.get('op') == 0.35]
     ok_('...with the ring on the order already in the car',
         len(_ringed) == 1 and 'order in your car' in (_ringed[0].get('popup') or ''))
     ok_('...and the same ring on the car, so it is one rule and not two',
         _car and _car[0].get('radius') == 11 and _car[0].get('op') == 0.35)
+    # Sized for the hat as well as the panel, with the letter inside: this
+    # offer's pins 12 px solid, edged dark; the held order's end a 13 px ring
+    # edged 4 px in its own amber; the car's ring as it was. They were 9 and
+    # 11 with one dark edge, and nothing read the size or the edge.
+    eq('the pins are 12 px solid edged dark, the held order\'s end a 13 px ring edged '
+       '4 px in its own amber, the car\'s ring 11 px edged dark as before',
+       sorted((m.get('radius'), m.get('op'), m.get('edge'), m.get('weight'))
+              for m in marks),
+       sorted([(12, 1, '#0b0d10', 3), (12, 1, '#0b0d10', 3),
+               (13, 0.35, '#f5a524', 4), (11, 0.35, '#0b0d10', 3)]))
     ok_('each says which of the four it is (%r)'
         % ([m.get('popup') for m in marks],),
         any('order in your car' in (m.get('popup') or '') for m in marks)
@@ -6536,6 +7391,62 @@ try:
     ok_('...and the view is fitted to the four marks and nothing else, never to '
         'a card\'s disc (%r)' % (_fit,),
         len(_fit) == 4 and all(m.get('ll') in _fit for m in marks))
+    # Easier to read: the tile grid, the letters, the casings, the discs.
+    rd = got.get('readable') or {}
+    eq('a map tile has no border and no round corners: the camera picture\'s '
+       'rule drew the tile grid across the map as long slate lines with a star '
+       'where four tiles met', (rd.get('tileBorder'), rd.get('tileRadius')), ('0px', '0px'))
+    ok_('...and the tiles are muted, the tile pane alone desaturated and dimmed '
+        '(%r)' % rd.get('paneFilter'),
+        'saturate(0.3)' in (rd.get('paneFilter') or '')
+        and 'brightness(0.78)' in (rd.get('paneFilter') or ''))
+    _lt = sorted((l.get('html'), tuple(l.get('ll') or ())) for l in rd.get('letters') or [])
+    eq('every pin carries its letter, deaf to the pointer: P on the pickup, D on '
+       'the dropoff and on the held order\'s end, none on the car',
+       (_lt, all(l.get('deaf') for l in rd.get('letters') or [])),
+       (sorted([('D', tuple(m['ll'])) for m in marks
+                if re.search(r'drop it here|order in your car is going', m.get('popup') or '')]
+               + [('P', tuple(m['ll'])) for m in marks
+                  if 'pick this one up' in (m.get('popup') or '')]), True))
+    eq('...the held order\'s end lettered as a ring (white, haloed), this offer\'s '
+       'pins solid', sorted(l.get('cls') for l in rd.get('letters') or []),
+       ['mv-letter', 'mv-letter', 'mv-letter mv-letter-ring'])
+    eq('every run is 5px over a dark casing of its own',
+       (rd.get('weights'), rd.get('casings')), ([5, 5, 5, 5], 4))
+    eq('the cards\' discs are a 1.25px edge at .6 and a .03 tint, so they never read '
+       'as roads', sorted((d.get('weight'), d.get('opacity'), d.get('fill'))
+                          for d in rd.get('discs') or []),
+       [(1.25, 0.6, 0.03), (1.25, 0.6, 0.03)])
+    _dz = [(round(d.get('rpx') or 0), d.get('room'), (d.get('style') or {}).get('opacity'))
+           for d in rd.get('discs') or []]
+    ok_('...and a disc whose radius is more than the view is not drawn, one that '
+        'fits is (radius px, view px, opacity: %r)' % _dz,
+        len(_dz) == 2 and any(r > room for r, room, _o in _dz)
+        and all((o == 0) == (r > room) for r, room, o in _dz)
+        and all(o in (0, 0.6) for _r, _room, o in _dz))
+    _bo, _bn, _bb = (got.get('betweenOffer') or {}, got.get('betweenNone') or {},
+                     got.get('betweenBack') or {})
+    ok_('Map view with an offer on screen keeps the verdict beside a half-width '
+        'map (%r)' % _bo, _bo.get('live') and _bo.get('mapW', 0) < _bo.get('appW', 0) * 0.6)
+    ok_('between offers the map takes the whole width where the empty WAITING '
+        'FOR AN OFFER card was, as wide as the bar of controls under it (%r)' % _bn,
+        not _bn.get('live') and _bn.get('label') == 'WAITING FOR AN OFFER'
+        and _bn.get('mapW', 0) >= _bn.get('barW', 1) - 2)
+    ok_('...and Leaflet is told its new size (%r)' % got.get('betweenSized'),
+        (got.get('betweenSized') or 0) > (got.get('mapOn') or {}).get('sized', 0))
+    # ...at the new width. Every message redraws the map, and that redraw
+    # tells Leaflet its size BEFORE render flips the page to between, so the
+    # count above passed with setBetween's own call taken out.
+    _sw = got.get('betweenSizedW') or []
+    ok_('...after the map has taken the whole width, not only before (%r, map %r)'
+        % (_sw, _bn.get('mapW')), _sw and _sw[-1] >= (_bn.get('mapW') or 0) - 2
+        and _sw[-1] > (_bo.get('mapW') or 0) + 2)
+    _bs = got.get('betweenStops') or {}
+    ok_('...but not while the card has something to say: the Trip Planner\'s stops '
+        'on it give the verdict its column back (%r)' % _bs,
+        _bs.get('live') and _bs.get('mapW', 0) < _bs.get('appW', 0) * 0.6)
+    eq('...and the verdict is back in the same render as the next offer',
+       (_bb.get('live'), (_bb.get('label') or '')[:6]), (True, 'ACCEPT'))
     _how = on.get('how') or []
     eq('with no NucBox, how each place was found is the two cards\' discs and '
        'nothing else: the public map\'s one answer has no list behind it',
@@ -6547,9 +7458,13 @@ try:
         all(h.get('ll') == [34.010, -84.600] for h in _how)
         and {(h.get('cls'), h.get('colour')) for h in _how}
         == {('mv-how mv-disc mv-new', '#7aa2f7'), ('mv-how mv-disc mv-held', '#f5a524')})
-    eq('...and the key to them is on the map, naming the circle and the pins and '
-       'nothing the public map\'s answers do not have',
-       (on.get('keyShown'), on.get('keyText')), (True, "◯ card's reach · ● pin"))
+    # The circle only while a disc is shown: one bigger than the view is not
+    # drawn (sizeDiscs), and the key does not name a mark that is not there.
+    eq('...and the key to them is on the map, naming the circle (while one is '
+       'drawn) and the lettered pins, and nothing the public map\'s answers do '
+       'not have', (on.get('keyShown'), on.get('keyText')),
+       (True, ("◯ card's reach · " if any(h.get('shown') for h in _how) else '')
+        + 'PD pin'))
 
     # THE figure, and the reason this mode exists. The driver's words: "if it
     # makes sense to pickup the second offer since it would be mostly along the
@@ -6654,10 +7569,42 @@ try:
     eq('...off the branch the disc kept: the 3.0 mi card\'s McDonald\'s is the '
        'one 2.1 mi north', both.get('onePick'), [33.983, -84.5499])
     _routes = [u for u in (got.get('nbxAsked') or []) if u.startswith('/route')]
+    # The new job's end is in one kind of question only: the job's own leg,
+    # its pickup -> its dropoff, two points, asked to DRAW it along the road
+    # (showMap's jobRoad). Never in a question of three, which is what a
+    # detour through it would have to ask (Settled: the detour ends at the
+    # held end).
+    _jobs = [u for u in _routes if '33.95800' in u]
     ok_('...and the router was asked about car, pickup and held end, never the '
-        'new job\'s end (%d routes)' % len(_routes),
+        'new job\'s end but for the job\'s own two-point leg (%d routes, %r)'
+        % (len(_routes), _jobs[:2]),
         _routes and all(len(u.split('?')[0].split(';')) <= 3 for u in _routes)
-        and not any('33.95800' in u for u in _routes))
+        and _jobs and all(re.match(r'^/route/v1/driving/-?[\d.]+,[\d.]+;-84\.55200,33\.95800\?',
+                                   u) for u in _jobs))
+    # The routes along the roads: the fake's road turns east-west, then
+    # north-south, so a line along it has the corner [car lat, pickup lon].
+    _ol = {l.get('cls'): l for l in both.get('oneLines') or []}
+    _det, _run = _ol.get('mv-detour mv-road') or {}, _ol.get('mv-held-run mv-road') or {}
+    eq('with the router set, the detour is drawn along the road car -> pickup -> held '
+       'end, one dashed line with the road\'s corners, not two straight legs',
+       (_det.get('pts'), _det.get('dashed'),
+        len([l for l in both.get('oneLines') or [] if 'mv-detour' in l.get('cls')])),
+       ([[33.9526, -84.5499], [33.9526, -84.5499], [33.983, -84.5499],
+         [33.983, -84.46], [33.8779, -84.46]], True, 1))
+    eq('...and the held order\'s run car -> its end along the road too',
+       _run.get('pts'), [[33.9526, -84.5499], [33.9526, -84.46], [33.8779, -84.46]])
+    _nr = {l.get('cls') for l in noroad.get('oneLines') or []}
+    ok_('...and with no router the same runs are the straight lines (%r)' % sorted(_nr),
+        'mv-held-run' in _nr and 'mv-detour' in _nr
+        and not any('mv-road' in c for c in _nr))
+    # ...and with the router set, a held end its own card refuses (red) keeps
+    # the straight run: nothing checked that a refused pin is not given a road.
+    ok_('...and a held end its card refuses is red and its run straight, not along a '
+        'road (%r, %r)' % (nosearch.get('offHeldPin'), nosearch.get('offHeldLines')),
+        nosearch.get('offHeldPin') == ['#f31260']
+        and 'mv-held-run' in (nosearch.get('offHeldLines') or [])
+        and not any('mv-held-run' in c and 'mv-road' in c
+                    for c in nosearch.get('offHeldLines') or []))
     _streets = [u for u in (got.get('nbxAsked') or []) if 'street=Shadowood' in u]
     ok_('the held end "Shadowood Pkwy SE, Atlanta" is asked as the street alone, '
         'the town left out (%r)' % _streets[:1],
@@ -6754,6 +7701,82 @@ try:
     eq('...and the pickup is never sent as the held order\'s end', both.get('heldPickPosts'), [])
     eq('...and it stays on the map under the next card while the order is held',
        both.get('heldPickNext'), 1)
+    # ...and its pin goes to the server as a PICKUP, which is what the GPS
+    # drop's restaurant guard (pickupNearEnd in server.js) is fed from: with
+    # no post, a door 50-75 m from the restaurant arms and drops the order as
+    # the car leaves with the food. Nothing checked that the page sent it.
+    _pp = [p for p in both.get('heldPickupPosts') or [] if p]
+    ok_('...and its pin is sent to the server as the held order\'s pickup, for the '
+        'restaurant guard (%r)' % (_pp,),
+        _pp and all(p.get('holdId') == 'h-planner'
+                    and abs(p.get('lat', 0) - 34.0010) < 0.001
+                    and abs(p.get('lon', 0) + 84.5560) < 0.001 for p in _pp))
+    # The GPS drop's end as the page finds it: a held end pinned at its DOOR
+    # (the dropoff names the number and the NucBox's answer carries it) is
+    # posted to /api/held-end, named by its hold and the text it was pinned
+    # for. The street-level end before it was not (heldPickPosts, above).
+    _dp = [p for p in both.get('heldDoorPosts') or [] if p]
+    ok_('a held order\'s end pinned at its door is sent to /api/held-end for the GPS '
+        'drop, named by its hold and the dropoff it was pinned for (%r)' % (_dp,),
+        _dp and all(p.get('holdId') == 'h-door'
+                    and p.get('dropoff') == '1985 Cobb Parkway, Kennesaw'
+                    and p.get('doorLevel') is True
+                    and abs(p.get('lat', 0) - 34.0010) < 0.001
+                    and abs(p.get('lon', 0) + 84.5560) < 0.001 for p in _dp))
+    # The held order's restaurant IN the figure: the run car -> restaurant ->
+    # its end, this card's pickup before the restaurant or after it, whichever
+    # is less, less that run — by road, and said to include the stop.
+    _rw = both.get('routeWant') or {}
+    _rt = both.get('route') or {}
+    _m = re.match(r'^\+(\d+\.\d) road mi incl\. restaurant$',
+                  _rt.get('note') or '')
+    ok_('[held route] with the held order\'s restaurant still ahead, the road figure is '
+        'the best run through it with this pickup, less the run without, and says the '
+        'restaurant stop is in it (%r, %.2f wanted, %.2f measured to the end alone)'
+        % (_rt.get('note'), 1.25 * (_rw.get('crow') or 0), 1.25 * (_rw.get('alone') or 0)),
+        _m and abs(float(_m.group(1)) - 1.25 * (_rw.get('crow') or 0)) < 0.051
+        and abs(1.25 * ((_rw.get('crow') or 0) - (_rw.get('alone') or 0))) > 0.1)
+    # The fake's road turns east-west, then north-south, leg by leg, so each
+    # line along it is its points with a corner after each one.
+    def _road(*pts):
+        out = [list(pts[0])]
+        for a, b in zip(pts, pts[1:]):
+            out += [[a[0], b[1]], list(b)]
+        return out
+    _C, _A, _G, _S = (33.9526, -84.5499), (33.983, -84.5499), (33.97, -84.53), (33.8779, -84.46)
+    _ln = {l.get('cls'): l.get('pts') for l in _rt.get('lines') or []}
+    eq('[held route] ...the detour drawn along the road where the figure put the pickup, '
+       'into it and back to the run, and the held run along the road through its restaurant',
+       (_ln.get('mv-detour mv-road'), _ln.get('mv-held-run mv-road')),
+       (_road(_C, _A, _G) if _rw.get('before') else _road(_G, _A, _S), _road(_C, _G, _S)))
+    eq('[held route] ...and this card\'s own job, pickup -> dropoff, along the road too',
+       _ln.get('mv-job mv-road'), _road(_A, (33.958, -84.552)))
+    _rn = noroad.get('route') or {}
+    _m = re.match(r'^\+(\d+\.\d) mi incl\. restaurant — straight lines, not roads'
+                  r' · NucBox router down$', _rn.get('note') or '')
+    ok_('[held route] ...and with no router, the straight-line figure is measured through the '
+        'restaurant the same way and says so (%r, %.2f wanted)'
+        % (_rn.get('note'), _rw.get('crow') or 0),
+        _m and abs(float(_m.group(1)) - (_rw.get('crow') or 0)) < 0.051)
+    eq('[held route] ...drawn as the two straight legs of the gap it chose',
+       sorted(tuple(map(tuple, l.get('pts'))) for l in _rn.get('lines') or []
+              if l.get('cls') == 'mv-detour'),
+       sorted([(_C, _A), (_A, _G)] if _rw.get('before') else [(_G, _A), (_A, _S)]))
+    _st = both.get('routeStale') or {}
+    eq('[held route] a map-view.js from before the figure through the restaurant is not '
+       'handed the restaurant: the figure to the end alone, as that file always gave it, '
+       'never "incl. restaurant" over it',
+       (_st.get('was'), _st.get('note'), _st.get('pins')), ('function', both.get('one'), 0))
+    eq('[held route] a restaurant the NucBox will not pin is no figure, in its disc\'s words',
+       both.get('routeNone'), 'no pin for 77 Nowhere… — none fit its card · within 9.4 mi')
+    eq('[held route] ...and one the public map found nothing for is no figure, said',
+       nosearch.get('routeLost'), 'the geocoder found nothing for where your order is collected')
+    eq('[held route] ...nor one past its card\'s reach, refused in the card\'s words',
+       nosearch.get('routeOff'), 'wrong pin for 12 Far Rd — 21.8 mi from your order\'s card, '
+       'past its 9.4 mi')
+    ok_('[held route] ...nor one that cannot be in this state (%r)' % nosearch.get('routeWrong'),
+        re.match(r'^9 Idaho Rd is \d+ mi away — almost certainly a misread name, so no distance$',
+                 nosearch.get('routeWrong') or ''))
     # The street index, relayed to the NucBox's own server.js. A held end
     # the index does not hold (Shadowood Parkway) is asked of the search as
     # before, so the first card's line is the one `both` drew.
@@ -6792,6 +7815,9 @@ try:
                  st.get('longStreet') or '') and st.get('longStreetHeld'))
     eq('...and with the NucBox answering, the public map is asked nothing',
        st.get('publicAsked'), [])
+    eq('[held route] a restaurant on a numberless street is no figure: the run goes '
+       'through a point of it the planner never named',
+       st.get('routeStreet'), 'no figure for Larkspur… — your order\'s pickup is a street')
 
     # HOW EACH PLACE WAS FOUND, drawn (drawHow): what the NucBox sent for
     # each place, beside what was chosen, off the answers the walk already
@@ -6828,16 +7854,19 @@ try:
         and not any(abs(p[0] - (33.9526 + 9.9 / 69.0)) < 1e-6
                     or abs(p[0] - (33.9526 + 3.5 / 69.0)) < 1e-6 for p in _fit))
     # Zero requests to draw it. The walk asks the NucBox once per place and
-    # the router twice; everything drawn above came out of those answers. A
-    # drawing that asked for its candidates itself shows up here as a path
-    # the walk never needed, or one asked twice.
+    # the router three times — the detour's two and the job's own leg, to
+    # draw it along the road; the held run car -> its end is the detour's
+    # second question, answered from the page's cache — and everything drawn
+    # above came out of those answers. A drawing that asked for its
+    # candidates itself shows up here as a path the walk never needed, or one
+    # asked twice.
     _asked = both.get('oneAsked') or []
-    ok_('drawing how each place was found asks nothing more: three places and two '
+    ok_('drawing how each place was found asks nothing more: three places and three '
         'routes, each once, and no other question (%r)' % (_asked,),
-        len(_asked) == 5 and len(set(_asked)) == 5
+        len(_asked) == 6 and len(set(_asked)) == 6
         and sorted(a.split('?')[0] for a in _asked)
-        == ['/api/nbx/route', '/api/nbx/route', '/api/nbx/search', '/api/nbx/search',
-            '/api/nbx/search'])
+        == ['/api/nbx/route', '/api/nbx/route', '/api/nbx/route', '/api/nbx/search',
+            '/api/nbx/search', '/api/nbx/search'])
     _sh = both.get('severalHow')
     _c = _of(_sh, 'mv-how mv-cand mv-new', [33.983, -84.5499]) \
         + _of(_sh, 'mv-how mv-cand mv-new', [33.901, -84.477])
@@ -6919,8 +7948,9 @@ try:
     def _want_key(how, pins):
         cls = [h.get('cls') or '' for h in (how or [])]
         parts = []
-        if any(' mv-disc ' in c + ' ' for c in cls): parts.append("◯ card's reach")
-        if pins: parts.append('● pin')
+        if any(' mv-disc ' in (h.get('cls') or '') + ' ' and h.get('shown') is not False
+               for h in (how or [])): parts.append("◯ card's reach")
+        if pins: parts.append('PD pin')
         if any(' mv-cand ' in c + ' ' or ' mv-candidate ' in c + ' ' for c in cls):
             parts.append('● also found')
         if any(' mv-out ' in c + ' ' for c in cls): parts.append('○ outside')
@@ -6975,6 +8005,20 @@ try:
                                  for m in ht.get('took') or []))
     ok_('held end: ...and the next card\'s offer line does not take it down (%r)'
         % (ht.get('bare'),), any(_HELD in m for m in ht.get('bare') or []))
+    # The GPS drop's two words, off the stream (gpsArrival in server.js). The
+    # health stage below says them over no order; these are said over one.
+    ok_('held end: a beat that puts the car at the held order\'s door says '
+        '"at dropoff" on the status row (%r)' % (hp.get('atDoor'),),
+        'at dropoff' in ((hp.get('atDoor') or {}).get('health') or ''))
+    eq('held end: the server\'s GPS drop puts the order down on the panel: Drop '
+       'goes, and the row says why',
+       ((hp.get('gpsDown') or {}).get('dropShown'),
+        'dropped · left the dropoff' in ((hp.get('gpsDown') or {}).get('health') or ''),
+        'at dropoff' in ((hp.get('gpsDown') or {}).get('health') or '')),
+       (False, True, False))
+    ok_('held end: a Took the reply says replaced an order says "previous order put '
+        'down" on the status row (%r)' % (ht.get('health'),),
+        'previous order put down' in (ht.get('health') or ''))
     nxtMap = got.get('mapNext') or {}
     eq('a new card redraws the map rather than leaving the last one up',
        len(nxtMap.get('marks') or []), 4)
