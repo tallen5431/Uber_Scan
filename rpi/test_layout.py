@@ -377,6 +377,36 @@ ladder = [relative_luminance(palette[v]) for v in
 eq('the verdict panels still run brightest to darkest',
    ladder, sorted(ladder, reverse=True))
 
+# ...and the same again at night. After civil dusk live.html swaps the greys
+# and the verdict fills for darker ones (`html.night`, showNight); the panel
+# it paints then is held to exactly the day's floors, read out of that rule
+# over the day's palette, so a night token that drops a label below 4.5:1 or
+# turns the ladder over fails here by name.
+_night_rule = re.search(r'html\.night\s*\{([^}]*)\}',
+                        open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read())
+_night = dict(re.findall(r'(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;',
+                         _night_rule.group(1))) if _night_rule else {}
+ok_('live.html has a night palette, and it darkens the page, the words and the labels',
+    all(k in _night for k in ('--bg', '--text', '--muted', '--panel'))
+    and all(relative_luminance(_night[k]) < relative_luminance(palette[k])
+            for k in ('--bg', '--text', '--muted', '--panel')))
+night = dict(palette, **_night)
+for fg, bg, floor, what in READABILITY:
+    got = contrast(night[fg], night[bg])
+    ok_('at night, %s reads against what it sits on (%.2f:1, needs %.1f)'
+        % (what, got, floor), got >= floor)
+for fill, floor, what in (('--panel', 1.45, 'a card against the page'),
+                          ('--panel-2', 1.45, 'a key against the page')):
+    got = contrast(night[fill], night['--bg'])
+    ok_('at night, %s is visible as a shape (%.2f:1)' % (what, got), got >= floor)
+for on in ('--panel', '--panel-2'):
+    got = contrast(night['--line'], night[on])
+    ok_('at night, a border reads against %s (%.2f:1)' % (on, got), got >= 1.9)
+ladder = [relative_luminance(night[v]) for v in
+          ('--go-dim', '--warn-dim', '--doubt-dim', '--no-dim')]
+eq('at night, the verdict panels still run brightest to darkest',
+   ladder, sorted(ladder, reverse=True))
+
 # Every file has to agree about when the page lays itself out across the screen
 # rather than down it, or a page spends a range of sizes half in one design and
 # half in the other.
@@ -2594,6 +2624,22 @@ const SNAP_MEASURE = (fixture) => {
       rowAt.open = await page.evaluate(ROW_MEASURE);
       await page.click('#more', { timeout: 5000 }).catch(() => {});
       out[panel[0] + ' ' + view + ' row'] = rowAt;
+      // ...and the night palette (html.night) on the same card: colours only.
+      out[panel[0] + ' ' + view + ' night'] = await page.evaluate(() => {
+        const boxes = () => JSON.stringify(['#verdict', '#verdictLabel', '.rate.big',
+          '.submetrics', '#places', '#warn', '#detail', '.connbar', '.bottombar',
+          '#viewWrap'].map((sel) => {
+            const b = document.querySelector(sel).getBoundingClientRect();
+            return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
+          }));
+        const day = boxes();
+        const dayBg = getComputedStyle(document.body).backgroundColor;
+        document.documentElement.classList.add('night');
+        const out = { same: boxes() === day, dayBg: dayBg,
+                      nightBg: getComputedStyle(document.body).backgroundColor };
+        document.documentElement.classList.remove('night');
+        return out;
+      });
       await page.close();
       await ctx.close();
     }
@@ -3546,6 +3592,16 @@ try:
             eq('...and the row and the bar where they were at %s' % where,
                _o.get('layout'), _r.get('layout'))
             no_('...nothing past the glass at %s' % where, _o.get('over'))
+
+    # The night palette moves nothing: the card, its words, the row, the bar
+    # and the picture where the day's palette left them, the page black.
+    for panel, w, h in NOVERDICT_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            nm = got.get('%s %s night' % (panel, view)) or {}
+            ok_('the night palette moves nothing on the panel at %s' % where, nm.get('same'))
+            eq('...and paints the page black at %s' % where,
+               (nm.get('dayBg'), nm.get('nightBg')), ('rgb(11, 15, 20)', 'rgb(0, 0, 0)'))
 
     # The Trip Planner's stops between offers, at the most the block holds:
     # four stops and the line under them. Every one on a line of its own, its

@@ -687,6 +687,30 @@
   /* Leaflet's own default is white, which on this panel is a flash of daylight
      at a red light before the tiles land. */
   #liveMap .leaflet-container { background: var(--panel); }
+  /* The night palette (showNight in the script): after civil dusk at the
+     car's position. The words and labels dimmer and closer to the page —
+     the words from #eef4fb to #c3cfdb (17.4:1 on the page to 13.3), the
+     labels from #9fb3c9 to #8ea0b4 (8.9 to 7.8) — the page black, the card
+     a shade darker, and the four verdict fills darker in the same order, so
+     the ladder that carries the verdict without colour still runs
+     brightest to darkest. The verdict words keep their colours: they are
+     the verdict. Every pair is held by rpi/test_layout.py to the day's own
+     readability floors, read out of this rule. */
+  html.night {
+    --bg: #000000;
+    --panel: #222e3d;
+    --panel-2: #263243;
+    --line: #4e637b;
+    --text: #c3cfdb;
+    --muted: #8ea0b4;
+    --go-dim: #0d5530;
+    --warn-dim: #5c3e06;
+    --no-dim: #3f0b14;
+    --doubt-dim: #30254a;
+  }
+  /* ...and the map's tiles darker again under the same filter, half the
+     day's brightness, so the map is not the brightest thing in the car. */
+  html.night #liveMap .leaflet-tile-pane { filter: saturate(.25) brightness(.45) contrast(.9); }
   /* The tiles muted, so what this page draws is what the eye lands on. OSM's
      standard style is drawn to be read on its own, in full colour: motorways
      red and orange, parks green, every road cased — and on it a 3px orange
@@ -1683,6 +1707,46 @@
   // does not leave "2 s old" on the glass. See MV.hereDot.
   var gpsAt = 0;
   var cpuNow = null;
+
+  // --- the panel at night ------------------------------------------------------
+  //
+  // After civil dusk at the car's position the panel goes to its night
+  // palette (`html.night` in the stylesheet): darker greys, less between
+  // them, and the map's tiles darker under their filter. A panel set for the
+  // day is a lamp in a dark car, and the driver's eyes are on the road
+  // between glances. Worked out here, on the Pi's own clock, from the fix on
+  // the beat: MV.nightFor, a few lines of solar arithmetic with no network.
+  //
+  // With no fix on the beat, the last one this page saw, kept in this
+  // browser so a reload after dark still knows where the car is — to two
+  // decimals, about a kilometre, which moves dusk by seconds and is all the
+  // position this needs. With neither, or a clock still in 1970, day: a
+  // panel too bright at night is glare; one dimmed in sunshine cannot be
+  // read. Nothing on the bar: the stylesheet and the sun decide it.
+  var FIX_KEY = 'uberscan.lastFix';
+  var lastFix = null;
+  try {
+    var keptFix = JSON.parse(localStorage.getItem(FIX_KEY) || 'null');
+    if (keptFix && typeof keptFix.lat === 'number' && typeof keptFix.lon === 'number') {
+      lastFix = { lat: keptFix.lat, lon: keptFix.lon };
+    }
+  } catch (e) { /* private mode, or nothing kept */ }
+
+  function rememberFix(g) {
+    var f = g && g.fix;
+    if (!f || typeof f.lat !== 'number' || typeof f.lon !== 'number'
+        || !isFinite(f.lat) || !isFinite(f.lon)) return;
+    var kept = { lat: Math.round(f.lat * 100) / 100, lon: Math.round(f.lon * 100) / 100 };
+    if (lastFix && lastFix.lat === kept.lat && lastFix.lon === kept.lon) return;
+    lastFix = kept;
+    try { localStorage.setItem(FIX_KEY, JSON.stringify(kept)); } catch (e) { /* as above */ }
+  }
+
+  function showNight() {
+    var now = gpsNow && gpsNow.fix;
+    var night = !!MV && MV.nightFor([now, lastFix], Date.now(), CLOCK_BELIEVABLE_AFTER);
+    document.documentElement.classList.toggle('night', night);
+  }
   var throttledNow = null;
 
   // A card is under the reader right now. The gap this fills is the one the
@@ -4361,6 +4425,8 @@
       if (msg.gps !== undefined) {
         gpsNow = msg.gps || null;
         gpsAt = Date.now();
+        rememberFix(gpsNow);
+        showNight();
       }
       // The GPS drop (gpsArrival in server.js): at the held order's door, on
       // this beat — and the order put down because the car left it, which is
@@ -6801,9 +6867,12 @@
   // Keeps the "last seen" counter honest, and — since silence is exactly the
   // condition worth noticing — is the only thing that can ever discover the
   // scanner has gone quiet. Nothing arrives to trigger that discovery.
+  // Dusk arrives with nothing arriving to announce it.
+  showNight();
   setInterval(function () {
     render();
     showConnection();
+    showNight();
     // The dot's age and its grey, which change while nothing arrives — and a
     // beat that stopped coming is exactly when nothing does.
     drawHere();

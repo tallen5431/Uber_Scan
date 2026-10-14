@@ -2405,6 +2405,71 @@ async function nucbox() {
 
   await nucbox();
 
+  /* ---- dusk and dawn at the fix (civilTwilight, nightFor) -----------------
+   *
+   * Against published civil twilight times for Atlanta (33.749, -84.388),
+   * looked up for this check on 14 Oct 2026 and quoted to the minute the
+   * tables give. Two tables disagree by a minute on the same evening, so a
+   * figure within two minutes of the published one is the same answer; a
+   * wrong day, a wrong sign on the longitude or the sun's zenith at 90.833
+   * (sunset, not civil dusk) is half an hour or more out.
+   *
+   *   21 Jun 2026  civil dusk 21:20 EDT  thetimeandplace.info/us/atlanta-ga
+   *                                      (sunset 20:51, dusk 21:20; MyWild,
+   *                                      mywild.report/daylight-georgia, 21:21)
+   *   13 Jun 2026  civil dawn 05:58 EDT  timeanddate.com/sun/usa/atlanta?month=6
+   *    1 Dec 2026  civil dusk 17:56 EST  surf-life.blue/us/sunrisesunset/atlanta-ga/202612
+   */
+  var ATL = { lat: 33.749, lon: -84.388 };
+  var atNY = function (iso) { return Date.parse(iso); };
+  var offBy = function (ms, iso) { return Math.abs(ms - Date.parse(iso)) / 60000; };
+  var jun21 = MV.civilTwilight(ATL.lat, ATL.lon, atNY('2026-06-21T12:00:00-04:00'));
+  ok_('Atlanta, 21 Jun 2026: civil dusk at 21:20 EDT, as published (' +
+      new Date(jun21.dusk).toISOString() + ')',
+      offBy(jun21.dusk, '2026-06-21T21:20:00-04:00') <= 2);
+  var jun13 = MV.civilTwilight(ATL.lat, ATL.lon, atNY('2026-06-13T12:00:00-04:00'));
+  ok_('Atlanta, 13 Jun 2026: civil dawn at 05:58 EDT, as published (' +
+      new Date(jun13.dawn).toISOString() + ')',
+      offBy(jun13.dawn, '2026-06-13T05:58:00-04:00') <= 2);
+  var dec1 = MV.civilTwilight(ATL.lat, ATL.lon, atNY('2026-12-01T12:00:00-05:00'));
+  ok_('Atlanta, 1 Dec 2026: civil dusk at 17:56 EST, as published (' +
+      new Date(dec1.dusk).toISOString() + ')',
+      offBy(dec1.dusk, '2026-12-01T17:56:00-05:00') <= 2);
+  // The day is the solar day at the fix, not the UTC date. 20:30 EDT on 21
+  // Jun is 00:30 UTC on the 22nd, before that evening's dusk: still day.
+  var late = MV.civilTwilight(ATL.lat, ATL.lon, atNY('2026-06-21T20:30:00-04:00'));
+  ok_('...20:30 EDT is weighed against that evening\'s dusk, not the next UTC day\'s',
+      offBy(late.dusk, '2026-06-21T21:20:00-04:00') <= 2);
+  var CLOCK = 1735689600000;
+  eq('night at the fix after civil dusk (21:30 EDT, 21 Jun)',
+     MV.nightFor([ATL], atNY('2026-06-21T21:30:00-04:00'), CLOCK), true);
+  eq('...day before it (21:10 EDT)',
+     MV.nightFor([ATL], atNY('2026-06-21T21:10:00-04:00'), CLOCK), false);
+  eq('...night before civil dawn (05:50 EDT, 13 Jun)',
+     MV.nightFor([ATL], atNY('2026-06-13T05:50:00-04:00'), CLOCK), true);
+  eq('...and day after it (06:05 EDT)',
+     MV.nightFor([ATL], atNY('2026-06-13T06:05:00-04:00'), CLOCK), false);
+  eq('...and at 20:30 EDT, still day',
+     MV.nightFor([ATL], atNY('2026-06-21T20:30:00-04:00'), CLOCK), false);
+  // No fix this beat: the last known one decides, in the order given.
+  eq('with no fix now, the last known fix decides',
+     MV.nightFor([null, ATL], atNY('2026-12-01T18:30:00-05:00'), CLOCK), true);
+  // A fix half a world away: 18:30 EST is 23:30 UTC, mid-morning in Sydney.
+  eq('...the newest fix ahead of the last known one',
+     MV.nightFor([{ lat: -33.87, lon: 151.21 }, ATL], atNY('2026-12-01T18:30:00-05:00'), CLOCK),
+     false);
+  eq('no fix at all is day', MV.nightFor([null, null], atNY('2026-12-01T23:00:00-05:00'), CLOCK),
+     false);
+  eq('...and so is a clock still in 1970, whatever the fix',
+     MV.nightFor([ATL], 3 * 3600000, CLOCK), false);
+  eq('a position that is not one is no fix (lat 120)',
+     MV.civilTwilight(120, -84.388, atNY('2026-06-21T12:00:00-04:00')), null);
+  // Where the sun does not cross six below that day.
+  eq('midsummer in Svalbard (78N) has no civil dusk: day all day',
+     JSON.stringify(MV.civilTwilight(78, 15, Date.UTC(2026, 5, 21, 12))), '{"always":"day"}');
+  eq('...midwinter has no civil dawn: night all day',
+     MV.nightFor([{ lat: 78, lon: 15 }], Date.UTC(2026, 11, 21, 12), CLOCK), true);
+
   console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
                    : '\nAll ' + pass + ' map-view checks passed');
   process.exit(fail ? 1 : 0);

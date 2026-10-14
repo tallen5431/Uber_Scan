@@ -870,6 +870,77 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // --- the panel at night ----------------------------------------------------
+  stage = 'the panel at night';
+  //
+  // After civil dusk at the fix the page takes its night palette
+  // (`html.night`): MV.nightFor on the page's own clock. Each case on a page
+  // whose clock is set to the moment it is about, in Atlanta (published
+  // civil dusk 21:20 EDT on 21 Jun 2026; see tests/mapview.test.js).
+  out.night = {};
+  {
+    const ATL = { lat: 33.7491, lon: -84.3880, gpsOk: true, gpsErr: 8, gpsAge: 1,
+                  gpsMode: 3, freshFor: 20 };
+    const night = async (name, iso, beats, kept, runMs) => {
+      const ctx = await browser.newContext({
+        viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+      });
+      const page = await ctx.newPage();
+      await page.clock.install({ time: iso === null ? 3 * 3600000 : Date.parse(iso) });
+      if (kept) {
+        await page.addInitScript((k) => {
+          try { localStorage.setItem('uberscan.lastFix', JSON.stringify(k)); } catch (e) {}
+        }, kept);
+      }
+      await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+                .catch(() => {});
+      await page.waitForFunction('window.__es !== undefined', null,
+                                 { timeout: 10000 }).catch(() => {});
+      for (const b of beats) {
+        await page.evaluate((m) => window.__es.push(m), b);
+      }
+      await page.clock.runFor(1200);
+      const look = () => page.evaluate(() => {
+        // A stand-in tile pane in the map, for the filter the page puts on it.
+        const map = document.getElementById('liveMap');
+        const pane = document.createElement('div');
+        pane.className = 'leaflet-pane leaflet-tile-pane';
+        map.appendChild(pane);
+        const filter = getComputedStyle(pane).filter;
+        pane.remove();
+        let kept = null;
+        try { kept = JSON.parse(localStorage.getItem('uberscan.lastFix') || 'null'); } catch (e) {}
+        return { night: document.documentElement.classList.contains('night'),
+                 bg: getComputedStyle(document.body).backgroundColor,
+                 card: getComputedStyle(document.getElementById('verdict')).backgroundColor,
+                 muted: getComputedStyle(document.getElementById('detail')).color,
+                 filter: filter, kept: kept };
+      });
+      // Real time as well: the card's colour changes under a .12s CSS
+      // transition, which the page's fake clock does not run.
+      await page.waitForTimeout(400);
+      const r = await look();
+      if (runMs) {
+        await page.clock.runFor(runMs);
+        await page.waitForTimeout(400);
+        r.later = await look();
+      }
+      out.night[name] = r;
+      await page.close();
+      await ctx.close();
+    };
+    const beat = (fix) => ({ alive: true, at: 1, gps: fix ? { state: 'ok', fix: fix } : null });
+    await night('afterDusk', '2026-06-21T21:30:00-04:00', [beat(ATL)], null, 0);
+    await night('afternoon', '2026-06-21T15:00:00-04:00', [beat(ATL)], null, 0);
+    // Dusk arriving with nothing arriving: 21:15, then ten minutes of ticks.
+    await night('crossing', '2026-06-21T21:15:00-04:00', [beat(ATL)], null, 600000);
+    await night('lastFix', '2026-06-21T22:00:00-04:00', [beat(null)],
+                { lat: 33.75, lon: -84.39 }, 0);
+    await night('noFix', '2026-06-21T22:00:00-04:00', [beat(null)], null, 0);
+    await night('clock1970', null, [beat(ATL)], null, 0);
+  }
+
   // --- the notices as chips, and the sentence one tap away -----------------
   stage = 'the notices as chips';
   //
@@ -6761,6 +6832,31 @@ try:
             'could not time' in ((ut.get('warn') or {}).get('title') or '')
             and '7.8 mi' in ((ut.get('warn') or {}).get('title') or ''))
         ok_('...on the glass, not pushed off it', (ut.get('warn') or {}).get('shown'))
+
+    # --- the panel at night -------------------------------------------------
+    _n = got.get('night') or {}
+    ok_('the panel at night was measured (%r)' % sorted(_n), len(_n) == 6)
+    _ad = _n.get('afterDusk') or {}
+    eq('after civil dusk at the fix the panel takes its night palette',
+       (_ad.get('night'), _ad.get('bg')), (True, 'rgb(0, 0, 0)'))
+    eq('...its card a shade darker and its greys dimmer',
+       (_ad.get('card'), _ad.get('muted')), ('rgb(34, 46, 61)', 'rgb(142, 160, 180)'))
+    ok_('...and the map\'s tiles darker under their filter (%r)' % _ad.get('filter'),
+        'brightness(0.45)' in (_ad.get('filter') or ''))
+    eq('...and the fix kept for after a reload, to two decimals',
+       _ad.get('kept'), {'lat': 33.75, 'lon': -84.39})
+    _af = _n.get('afternoon') or {}
+    eq('in the afternoon at the same fix, the day palette and the day\'s tiles',
+       (_af.get('night'), _af.get('bg'), 'brightness(0.78)' in (_af.get('filter') or '')),
+       (False, 'rgb(11, 15, 20)', True))
+    _cr = _n.get('crossing') or {}
+    eq('dusk arriving with no message arriving still dims the panel (21:15, then 21:25)',
+       (_cr.get('night'), (_cr.get('later') or {}).get('night')), (False, True))
+    eq('with no fix on the beat, the last fix kept decides', (_n.get('lastFix') or {}).get('night'),
+       True)
+    eq('...and with none kept either, day', (_n.get('noFix') or {}).get('night'), False)
+    eq('a clock still in 1970 is day, whatever the fix', (_n.get('clock1970') or {}).get('night'),
+       False)
 
     # --- the status row, short, and the rest behind "…" --------------------
     _sr = got.get('statusRow') or {}

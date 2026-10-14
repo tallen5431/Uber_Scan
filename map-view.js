@@ -2630,6 +2630,87 @@
              done: drawn + ' of ' + couldDraw + ' drawn end to end' };
   }
 
+  /* --- dusk and dawn at the fix ---------------------------------------------
+   *
+   * The driving panel dims after civil dusk (live.html, nightFor), because a
+   * full-brightness panel in a dark car is a lamp pointed at the driver. When
+   * that is decided from the position and the date with no network: NOAA's
+   * general solar position (the fractional-year series for the declination
+   * and the equation of time), solved for the sun six degrees below the
+   * horizon, which is civil twilight. Twice round, so the declination and
+   * the equation of time are taken at the moment found rather than at noon.
+   *
+   * The DAY is the solar day at that longitude, not the UTC date: Atlanta's
+   * summer dusk is 01:20 UTC, so a UTC date would have called 20:30 EDT
+   * night (dawn of the next UTC day still ahead). Measured against the
+   * published tables in tests/mapview.test.js: within a minute in Atlanta.
+   *
+   * Not a figure on the panel and not from a lookup — the header's rule is
+   * about places; this is the sun at a fix the rig already has.
+   *
+   * Answers { dawn, dusk } in epoch ms, or { always: 'day' | 'night' } where
+   * the sun does not cross six degrees below on that day (far north in June
+   * or December); null for a position or a time that is not one. */
+  var TWILIGHT_ZENITH = 96;
+  var DAY_MS = 86400000;
+
+  function civilTwilight(lat, lon, when) {
+    if (typeof lat !== 'number' || typeof lon !== 'number' || !isFinite(lat)
+        || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180
+        || typeof when !== 'number' || !isFinite(when)) return null;
+    var rad = Math.PI / 180;
+    // Midnight UTC of the solar day `when` falls in, at this longitude.
+    var base = Math.floor((when + lon / 15 * 3600000) / DAY_MS) * DAY_MS;
+    var year = new Date(base).getUTCFullYear();
+    var y0 = Date.UTC(year, 0, 1);
+    var days = ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0) ? 366 : 365;
+    var sun = function (ms) {
+      var g = 2 * Math.PI / days * ((ms - y0) / DAY_MS);
+      return {
+        eq: 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g)
+                      - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g)),
+        dec: 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g)
+             - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g)
+             - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g) };
+    };
+    var always = null;
+    var edge = function (side) {
+      // First guess: six hours either side of solar noon.
+      var ms = base + (720 - 4 * lon + side * 360) * 60000;
+      for (var i = 0; i < 2; i++) {
+        var s = sun(ms);
+        var c = Math.cos(TWILIGHT_ZENITH * rad) / (Math.cos(lat * rad) * Math.cos(s.dec))
+          - Math.tan(lat * rad) * Math.tan(s.dec);
+        // Past 1, the sun never climbs to six below: night all day. Past -1,
+        // it never sinks to it: day all day.
+        if (c > 1) { always = 'night'; return null; }
+        if (c < -1) { always = 'day'; return null; }
+        ms = base + (720 - 4 * (lon - side * Math.acos(c) / rad) - s.eq) * 60000;
+      }
+      return ms;
+    };
+    var dawn = edge(-1), dusk = edge(1);
+    return always ? { always: always } : { dawn: dawn, dusk: dusk };
+  }
+
+  /* Night or day at `when`, at the first of `fixes` that is a position — the
+   * newest fix first, then the last one this page saw — or day when there is
+   * none, or when the clock is not a clock (a Pi with no RTC boots in 1970;
+   * `clockFrom` is the floor below which a time is not believed). Day is the
+   * side that cannot hide anything: a lit panel at night is glare, a dimmed
+   * one in sunlight is a panel that cannot be read. */
+  function nightFor(fixes, when, clockFrom) {
+    if (typeof when !== 'number' || !(when >= (clockFrom || 0))) return false;
+    for (var i = 0; i < (fixes || []).length; i++) {
+      var f = fixes[i];
+      var t = f ? civilTwilight(f.lat, f.lon, when) : null;
+      if (!t) continue;
+      if (t.always) return t.always === 'night';
+      return when < t.dawn || when >= t.dusk;
+    }
+    return false;
+  }
+
   /* --- the library itself --------------------------------------------------
    *
    * Leaflet is fetched from a CDN, which the offers page must not do on load:
@@ -2665,6 +2746,7 @@
   }
 
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
+           civilTwilight: civilTwilight, nightFor: nightFor,
            detour: detour, detourThrough: detourThrough, fixOf: fixOf, fixRefused: fixRefused,
            cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,
            againstCard: againstCard, cardRefuses: cardRefuses,
