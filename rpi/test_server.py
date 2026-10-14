@@ -7089,12 +7089,9 @@ _Q2 = '88 Example Way, Roswell, GA 30075'
 _Q3 = '312 Mill St, Roswell, GA 30075'
 
 
-def _vstop(q, street, of=None):
-    st = {'kind': 'pickup', 'orders': 1, 'name': 'oe Example', 'expectedBy': 1189,
-          'street': street, 'city': 'Roswell', 'state': 'GA', 'zip': '30075', 'line': q}
-    if of:
-        st['of'] = of
-    return st
+def _vstop(q, street, name='oe Example'):
+    return {'kind': 'pickup', 'orders': 1, 'name': name, 'expectedBy': 1189,
+            'street': street, 'city': 'Roswell', 'state': 'GA', 'zip': '30075', 'line': q}
 
 
 _VDROP = {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'expectedBy': 1230,
@@ -7104,6 +7101,19 @@ _VDROP = {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'expectedBy': 1230,
 
 def _vplanner(*stops):
     return {'planner': {'stops': list(stops), 'unfiled': 'dropoffs', 'asked': False}}
+
+
+def _vread(*stops, **kw):
+    """One unpressed planner read as the scanner sends it: the sighting, its
+    page's ends (`top`: planner_ends' title over the first stop) and then the
+    planner line, the two carrying the read's `at`."""
+    at = int(time.time() * 1000)
+    seen = [dict(st, label=st['kind'], place=None, partial=None) for st in stops]
+    return [{'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': False,
+                          'app': 'uber', 'screen': 'uber.planner',
+                          'page': {'top': kw.get('top', True), 'bottom': False},
+                          'stops': seen, 'orderCount': None, 'keep': False}},
+            {'planner': {'stops': list(stops), 'asked': False, 'at': at}}]
 
 
 def _vbeat(at, dlat=0.0, age=0.1):
@@ -7194,15 +7204,22 @@ try:
            ((_holding(_vb) or {}).get('holdId'), _vvisited(_vb)), (_h.get('holdId'), [_Q1]))
         post(_vb, '/api/delivered', {})
 
-        # The planner's own word: a read that has moved past a pickup.
+        # The planner's own word: a read that has moved past a pickup. Every
+        # read here shows the top of the list unless it says otherwise.
         _h = _took(_vb, 'v-plan')
-        _vsay([_vplanner(_vstop(_Q1, '310 Mill St'), _vstop(_Q2, '88 Example Way'), _VDROP)])
+        _vsay(_vread(_vstop(_Q1, '310 Mill St'), _vstop(_Q2, '88 Example Way'), _VDROP))
         # ...but first one cut off below the first pickup, which says nothing
         # about the second.
-        _vsay([_vplanner(_vstop(_Q1, '310 Mill St'))])
+        _vsay(_vread(_vstop(_Q1, '310 Mill St')))
         eq('[pickup visit] a planner read cut off above a pickup does not visit it',
            (_vvisited(_vb), _vrows(_vj)[1:]), ([], []))
-        _vsay([_vplanner(_vstop(_Q2, '88 Example Way'), _VDROP)])
+        # ...and one scrolled down: the stops after the first pickup without
+        # it, which is what "moved past" looks like, off a page that does not
+        # show the top of the list.
+        _vsay(_vread(_vstop(_Q2, '88 Example Way'), _VDROP, top=False))
+        eq('[pickup visit] a planner read that starts below the top of the list marks nothing',
+           (_vvisited(_vb), _vrows(_vj)[1:]), ([], []))
+        _vsay(_vread(_vstop(_Q2, '88 Example Way'), _VDROP))
         eq('[pickup visit] a planner re-read that drops a pickup marks it visited, by the planner',
            (_vvisited(_vb), [(r.get('holdId'), r.get('pickup'), r.get('by'))
                              for r in _vrows(_vj)[1:]]),
@@ -7226,28 +7243,49 @@ try:
     finally:
         stop(_vp)
 
-    # Two orders in the car (carrying two on): the planner, read for the
-    # first, lists both restaurants, each marked with its order (`of`); the
-    # car calls at the first order's and leaves.
+    # Two orders in the car (carrying two on), each card naming its store.
+    # The planner, read for the first, lists both restaurants and a third
+    # store neither card names; Map view pins all three for the first order,
+    # as it does (want.heldId). The car calls at the SECOND order's
+    # restaurant and leaves, then at the store nobody's card names.
     _vs2, _vsay2, _vj2 = _vsayer('two')
     _vp, _vb = start(dict(_venv, SCANNER_ARGS=_vs2, CARRY_TWO='1'), _vj2)
     try:
-        _ha = _took(_vb, 'v-a')
-        post(_vb, '/api/offers/mark', {
-            'id': 'v-b', 'accepted': True,
-            'offer': {'id': 'v-b', 'pay': 9.0, 'minutes': 30.0, 'billedMinutes': 30.0,
-                      'miles': 3.0, 'cost': 1.0}})
+        def _vcard(oid, pay, store, miles, end):
+            post(_vb, '/api/offers/mark', {
+                'id': oid, 'accepted': True,
+                'offer': {'id': oid, 'pay': pay, 'minutes': 40.0, 'billedMinutes': 40.0,
+                          'miles': miles, 'cost': 1.75, 'pickup': store, 'dropoff': end}})
+        _vcard('v-a', 12.0, 'Example Diner', 5.0, '4821 Kestrel Dr, Marietta')
+        _vcard('v-b', 9.0, 'Example Grill', 3.0, '77 Birch Ln, Roswell')
         _two = get(_vb, '/api/status').get('orders') or []
         ok_('[pickup visit] (the premise: two orders in the car)', len(_two) == 2)
-        _vsay2([_vplanner(_vstop(_Q1, '310 Mill St', of=_two[0].get('holdId')),
-                          _vstop(_Q2, '88 Example Way', of=(_two[1:] or [{}])[0].get('holdId')),
-                          _VDROP)])
-        _vpin(_vb, _ha, _R1, _Q1)
-        _vpin(_vb, _ha, _R2, _Q2)
-        _vsay2(_vwait(_R1, 180) + _vleave(_R1))
+        _ha, _hb = (_two + [{}, {}])[:2]
+        _Q4 = '9 Other Pl, Roswell, GA 30075'
+        _R4 = (33.9600, -84.5000)            # 6.7 km north of _R1
+        _vsay2(_vread(_vstop(_Q1, '310 Mill St', 'oe Example Diner'),
+                      _vstop(_Q2, '88 Example Way', 'oe Example Grill'),
+                      _vstop(_Q4, '9 Other Pl', 'oe Other Place'), _VDROP))
+        for _at, _q in ((_R1, _Q1), (_R2, _Q2), (_R4, _Q4)):
+            _vpin(_vb, _ha, _at, _q)
+        _vsay2(_vwait(_R2, 180) + _vleave(_R2))
+        _orders = {o.get('holdId'): o.get('visited')
+                   for o in get(_vb, '/api/status').get('orders') or []}
         eq('[pickup visit] two orders: visiting one order\'s restaurant leaves the other\'s',
-           (_vvisited(_vb), [(r.get('pickup'), r.get('by')) for r in _vrows(_vj2)]),
-           ([_Q1], [(0, 'gps')]))
+           _orders.get(_ha.get('holdId')), [])
+        _hj = json.load(open(os.path.join(os.path.dirname(_vj2), 'holding.json')))
+        _pins = {o.get('holdId'): sorted(p.get('q') for p in o.get('pickupPins') or [])
+                 for o in _hj.get('orders') or []}
+        eq('[pickup visit] two orders: the pin and the visit are filed under the order whose '
+           'card names that store',
+           (_orders.get(_hb.get('holdId')), _Q2 in _pins.get(_hb.get('holdId'), []),
+            [(r.get('holdId'), r.get('pickup'), r.get('by')) for r in _vrows(_vj2)]),
+           ([_Q2], True, [(_hb.get('holdId'), 0, 'gps')]))
+        _vsay2(_vwait(_R4, 180) + _vleave(_R4))
+        eq('[pickup visit] two orders and no cue for a pickup: nothing is marked, not even '
+           'under the first order',
+           ([o.get('visited') for o in get(_vb, '/api/status').get('orders') or []],
+            len(_vrows(_vj2))), ([[], [_Q2]], 1))
     finally:
         stop(_vp)
 finally:

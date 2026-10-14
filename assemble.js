@@ -735,6 +735,20 @@
     return undefined;
   }
 
+  /* The page the planner read at `at` was, as the sighting before its planner
+   * line described it — {top, bottom, app} — or null when no whole planner
+   * page of that read was seen. `top` is planner_ends' (rpi/offer_parser.py):
+   * the title with the first stop straight under it, so the list is seen
+   * from its first stop. server.js asks it before reading a pickup's absence
+   * as the app's word that the pickup is behind the car (plannerVisits). */
+  function pageOf(st, at) {
+    for (var i = st.pages.length - 1; i >= 0; i--) {
+      var p = st.pages[i];
+      if (p.at === at) return { top: p.top, bottom: p.bottom, app: p.app };
+    }
+    return null;
+  }
+
   /* ---------- two orders in the car: whose is this address? ------------------
    *
    * Stage 5, behind server.js's `carryTwo`. With two orders held an address
@@ -1117,7 +1131,7 @@
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
            keyOf: keyOf, placements: placements, linked: linked,
            fresh: fresh, took: took, sighting: sighting, pending: pending,
-           verdictFor: verdictFor, plannerRowDue: plannerRowDue,
+           verdictFor: verdictFor, pageOf: pageOf, plannerRowDue: plannerRowDue,
            cardSeen: cardSeen, heldOwnCard: heldOwnCard, holdIdOf: holdIdOf,
            DEADLINE_SLACK_MIN: DEADLINE_SLACK_MIN, storeKey: storeKey, sameStore: sameStore,
            attribute: attribute, park: park, unpark: unpark, unowned: unowned,
