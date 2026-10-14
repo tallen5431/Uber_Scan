@@ -153,6 +153,9 @@ for c in cases.get('screens', []):
 # tests/corpus.test.js holds the screen, the line and the offer test; the two
 # label answers are this port's alone. See the section's comment for the 12
 # Oct layouts these are.
+for c in cases.get('sheets', []):
+    eq('sheets / ' + c['name'], P.sheet_dropoff(c['text']), c['expect'])
+
 for c in cases.get('navStops', []):
     _p = P.parse(c['text'])
     eq('navStops / ' + c['name'],

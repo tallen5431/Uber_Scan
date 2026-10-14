@@ -6498,9 +6498,15 @@ its end is the assembler's, off the sighting — the planner's one dropoff
 `navCandidate` in assemble.js: never over a ⌖ press or an end the screen gave
 before unless it is the same street read fuller, never read before the Took,
 never off a store's navigation or as any held order's pickup, and with two
-orders in the car only on a cue). On the 12 Oct shift's 179 navigation reads
-no address sat under either label, so on those screens it files nothing; see
-`navStops` in tests/fixtures/cases.json. It is not an accept detector — it
+orders in the car only on a cue). Uber's opened navigation sheet — the
+customer's name, the street, the town and `Dropoff type` under them — counts
+as labelled (the owner, 14 Oct; `sheet_dropoff` in both parser ports), and on a
+frame typed `uber.nav` with no payout the bar ("6 min · 1.7 mi") is taken out
+before the frame may be called an offer (`screen_address`). Replayed over the
+12 Oct shift's screen rows against the orders ticked, 4 of the 18 orders held
+while navigation was read got their destination this way; no explicit "Deliver
+to"/"Dropoff" label sat over an address. See `navStops` and `sheets` in
+tests/fixtures/cases.json. It is not an accept detector — it
 needs "✓ Took" pressed first — and it touches nothing on the phone.
 
 **Where it goes.** server.js puts the stops, with that word, on the order in

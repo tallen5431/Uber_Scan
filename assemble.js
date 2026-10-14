@@ -136,7 +136,12 @@
    *     it (label, planner, nav) it is taken only as the SAME address read
    *     fuller — the same street (sameStreet), more of street, town and ZIP
    *     read. A planner stop has a key to say "the same"; a navigation
-   *     screen has only its street. */
+   *     screen has only its street. ...or the same street with a longer
+   *     house number that ENDS in the one filed (numberFuller): the opened
+   *     sheet loses a number's first digits at the left of the line, and on
+   *     12 Oct one delivery's sheet read a four-digit number with its first
+   *     two digits gone, twice, before it read all four, the street and town
+   *     the same. */
   function outranks(next, cur) {
     if (!next) return null;
     if (!cur) return 'blank';
@@ -148,8 +153,9 @@
     if (next.from === cur.from && next.key && next.key === cur.key && next.conf > cur.conf) {
       return 'fuller';
     }
-    if (next.from === 'nav' && cur.from !== 'press' && next.conf > cur.conf
-        && sameStreet(next.value, cur.value)) {
+    if (next.from === 'nav' && cur.from !== 'press'
+        && ((next.conf > cur.conf && sameStreet(next.value, cur.value))
+            || (next.conf >= cur.conf && numberFuller(next.value, cur.value)))) {
       return 'fuller';
     }
     return null;
@@ -160,6 +166,18 @@
   function sameStreet(a, b) {
     var x = streetKey(a), y = streetKey(b);
     return !!x && x === y;
+  }
+
+  /* Whether `a` is `b` with digits read that `b` lost off the front of its
+   * house number: the same street after the number, the same town, and a's
+   * number longer and ending in b's ("4416 Fable Dr NW" over "16 Fable Dr
+   * NW"). Never the other way: a number does not lose digits by being read
+   * better. */
+  function numberFuller(a, b) {
+    var x = /^(\d+) (.+)$/.exec(streetKey(a)), y = /^(\d+) (.+)$/.exec(streetKey(b));
+    var townA = norm(String(a).split(',')[1] || ''), townB = norm(String(b).split(',')[1] || '');
+    return !!x && !!y && x[2] === y[2] && townA === townB && x[1].length > y[1].length
+      && x[1].slice(-y[1].length) === y[1];
   }
 
   /* ---------- the order's own planner pickups --------------------------------
@@ -805,7 +823,11 @@
    *     'a pickup screen';
    *   - the address is typed a dropoff. Under a Pickup label it is 'a pickup';
    *     under no label at all it is 'no label' — AUDITS.md's Settled rule that
-   *     an address nobody asked for and no label proves is not a destination;
+   *     an address nobody asked for and no label proves is not a destination.
+   *     The opened navigation sheet's address over "Dropoff type", with the
+   *     customer's name above it, is typed a dropoff by the scanner
+   *     (offer_parser.sheet_dropoff): the owner's decision of 14 Oct 2026
+   *     that the sheet's label, read upwards, is a label;
    *   - it is not a pickup of ANY order in the car by any word on record
    *     (heldPickup): 'a pickup'. With two orders the other one's store is as
    *     wrong an end as this one's.
@@ -813,17 +835,22 @@
    * for this hold, as a planner's is: a navigation screen sits in front of
    * the camera for a whole delivery and is read every ten seconds.
    *
-   * WHAT THE 12 OCT SHIFT SAYS IT WILL FIND, measured by putting each of its
-   * 1,237 `screen` rows through rpi/scan_pi.py's sighting() and this: no
-   * candidate at all, and none of the 179 typed uber.nav carries an address
-   * under either label. The 36 that print "Deliver to" print a customer's
-   * name after it and no address; the 18 that show the opened sheet print the
-   * street and town under the name (14 with a house number read), never with
-   * a ZIP, and the sheet's one label, "Dropoff type", BELOW them; 10 read as
-   * an offer, the bar taken for a card's leg. Those are card-box reads — the
-   * shift has no whole-screen read of a navigation screen on file — so this
-   * is what the bottom of the screen says, and the rule is held to the shapes
-   * the corpus keeps (tests/fixtures/cases.json, navStops). */
+   * WHAT THE 12 OCT SHIFT SAYS IT WILL FIND, measured by replaying its 1,237
+   * `screen` rows through rpi/scan_pi.py's screen_address and sighting() and
+   * this, each as if it were the whole-screen read, against the orders the
+   * driver ticked. None of the 179 typed uber.nav carries an address under
+   * "Deliver to" or "Dropoff": the 36 with "Deliver to" print a name after
+   * it. 18 show the opened sheet, and 10 of those read as one (name, a street
+   * with a house number, a town); the other 8 lost the number, the name or
+   * half the town. 18 ticked orders were held while a navigation screen was
+   * read, 4 of them showed a readable sheet, and all 4 were given their
+   * destination this way: 4 of 18. One of the 4 read its house number with
+   * the first two of four digits lost, twice, and then whole, and ends on the
+   * whole one (numberFuller).
+   * Those are card-box reads — the shift has no whole-screen read of a
+   * navigation screen on file — so this is what the bottom of the screen
+   * says, and the rule is held to the shapes the corpus keeps
+   * (tests/fixtures/cases.json, navStops and sheets). */
   function navCandidate(st, orders, s, at) {
     if (!orders.length || s.whole !== true || s.asked === true) return null;
     var stops = Array.isArray(s.stops) ? s.stops.filter(function (x) {

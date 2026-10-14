@@ -2189,6 +2189,27 @@ ok_('the premise: card-box reads of the navigation screen came after the planner
 eq('the auto reads keep one every 10 s across kinds (%r)' % rn3['wholes'],
    sum(rn3['wholes']), 1)
 
+# ...and the opened navigation sheet: the customer's name, the street, the town
+# and "Dropoff type" under them, which the owner decided (14 Oct) is the
+# dropoff while an order is held. The 12 Oct layout, under the bar that parse()
+# takes for a card's leg; invented name and street.
+_SHEET = next(c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'tests', 'fixtures', 'cases.json'), encoding='utf-8'))['sheets']
+    if c['name'].startswith('...under the bar'))
+_hn4 = tempfile.mkdtemp()
+_hold(_hn4, time.time() + 3600)
+rn4 = run(lambda n, k: FRAG if n == 1 else _SHEET, extra_argv=['--no-parallel'],
+          seconds=4.0, handoff=_hn4, whole_text=_SHEET)
+ok_('the premise: the sheet was read whole (%r)' % rn4['wholes'], sum(rn4['wholes']) == 1)
+eq('an opened navigation sheet\'s address over "Dropoff type" is the held order\'s '
+   'destination with no press',
+   [(d['line'], d['asked'], d['from'], d['kept'])
+    for d in assembled([x for x in rn4['sightings'] if x['whole']], _held())['dropoffs']],
+   [('4416 Wrenfield Dr NW, Kennesaw', False, 'nav', True)])
+eq('...and no dropoff line is sent for it, off the card box or the whole screen',
+   rn4['dropoffs'], [])
+
 # ...and the planner's own one dropoff is sent, label-proven, on the list that
 # would give it to a press: both ends in view, one dropoff, its street and town
 # read, under its own "Dropoff" header. It used to stay the press's to file for

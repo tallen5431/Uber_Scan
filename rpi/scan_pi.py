@@ -654,8 +654,9 @@ def auto_read_for(text, planner=None):
       nav      Uber's navigation (OP.screen_type 'uber.nav'). On the 12 Oct
                shift 179 of the 1,237 payout-free card-box reads were this.
                The box holds the bottom sheet, which reads "Deliver to <name>"
-               collapsed or the name, street and town opened, so the whole
-               screen is where any label above an address would be.
+               collapsed, or opened the name, street, town and "Dropoff type"
+               that OP.sheet_dropoff reads; the whole-screen read is where the
+               assembler takes either from.
       label    any other screen whose address sits under a "Deliver to" or
                "Dropoff" label in its own block (OP.address_under_dropoff):
                DoorDash's "Dropoff <address> 12 min Start" is typed 'unknown',
@@ -2625,6 +2626,37 @@ class UpDown(object):
         return None if self.camera.word == 'seeing' else self.camera.word
 
 
+def screen_address(shot, text):
+    """(an_offer, address, sheet) for one frame: whether it is to be taken for
+    an offer — digest()'s payout-or-merchant test — the address find_address
+    gave it, and the address on Uber's opened navigation sheet (OP.sheet_dropoff),
+    None on a frame taken for an offer.
+
+    ONE EXCEPTION to the merchant arm. Uber's navigation bar, "6 min © 1.7
+    mi", is minutes and miles like a card's leg, and parse() reads the lines
+    under it as the leg's place: 10 of the 12 Oct shift's 179 reads typed
+    uber.nav came out with a place and no payout, every one with the bar on
+    it, 7 of them the opened sheet. So on a frame typed uber.nav with no
+    payout, the text is parsed again with the bar's lines out
+    (OP.nav_without_bar), and only if THAT still finds a payout or a place is
+    the frame an offer; its address is the bar-free parse's, so the bar can
+    never be read into the street ("7 mi - 2950 …"). A payout always makes an
+    offer, and a screen typed anything else keeps both arms: an offer card is
+    typed by its own furniture ahead of navigation (OP.screen_type). Measured
+    on the journal copied with the 12 Oct shift: over its 10,991 offer rows'
+    texts and their 36,118 frames this changes the answer for none (8 of them
+    type uber.nav, and every one still reads as an offer), and for exactly
+    the 10 screen rows above."""
+    an_offer = shot.get('pay') is not None or bool(shot.get('places'))
+    address = shot.get('address')
+    if an_offer and shot.get('pay') is None \
+            and OP.screen_type(text or '')['screen'] == 'uber.nav':
+        bare = OP.parse(OP.nav_without_bar(text))
+        if bare.get('pay') is None and not bare.get('places'):
+            an_offer, address = False, bare.get('address')
+    return an_offer, address, (None if an_offer else OP.sheet_dropoff(text))
+
+
 def screen_said(text):
     """What a screen says about WHOSE an address read off it is: {'app',
     'screen', 'expectedBy'} — the app and screen type (OP.screen_type), and the
@@ -2759,7 +2791,7 @@ SIGHTING_STOP = ('kind', 'orders', 'name', 'place', 'expectedBy', 'street', 'cit
                  'state', 'zip', 'line', 'partial', 'label')
 
 
-def sighting_stops(text, stops, address):
+def sighting_stops(text, stops, address, sheet=None):
     """The stops a sighting carries, and the page's two ends, as
     (stops, {'top', 'bottom'}).
 
@@ -2784,6 +2816,16 @@ def sighting_stops(text, stops, address):
             one['label'] = s.get('kind')
             out.append(one)
         return out, {'top': top, 'bottom': bottom}
+    # Uber's opened navigation sheet, its address over "Dropoff type" with the
+    # customer's name above (OP.sheet_dropoff; `sheet` is None wherever
+    # digest() took the frame for an offer). The owner's decision: that is the
+    # dropoff, typed so, its label the words the sheet printed.
+    if sheet:
+        one = {k: sheet.get(k) for k in SIGHTING_STOP}
+        one['kind'] = 'dropoff'
+        one['label'] = 'dropoff type'
+        one['expectedBy'] = screen_said(text)['expectedBy']
+        return [one], {'top': None, 'bottom': None}
     if not address:
         return [], {'top': None, 'bottom': None}
     label = OP.address_stop(text)
@@ -2809,7 +2851,7 @@ def order_count(stops):
     return sum(s['orders'] for s in drops)
 
 
-def emit_sighting(text, stops, address, asked, whole, keep=False, at=None):
+def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None):
     """Stage 2 of the multi-order design: what a whole-screen read or a planner
     read SAW, typed by its screen, and nothing more.
 
@@ -2835,13 +2877,13 @@ def emit_sighting(text, stops, address, asked, whole, keep=False, at=None):
     later stage that does keep them has the answer the rig had.
     """
     print(json.dumps({'sighting': sighting(text, stops, address, asked, whole,
-                                           keep=keep, at=at)}), flush=True)
+                                           keep=keep, at=at, sheet=sheet)}), flush=True)
 
 
-def sighting(text, stops, address, asked, whole, keep=False, at=None):
+def sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None):
     """The sighting line's body, built: see emit_sighting, which prints it."""
     kind = OP.screen_type(text)
-    listed, page = sighting_stops(text, stops, address)
+    listed, page = sighting_stops(text, stops, address, sheet)
     return {'at': int(time.time() * 1000) if at is None else at,
             'asked': bool(asked), 'whole': bool(whole),
             'titled': OP.planner_titled(text),
@@ -3801,8 +3843,11 @@ def main():
         # anchor at all, with or without its payout, so none of them can reach
         # this branch either way. The guard is for the corpus the parser
         # documents, not for the export.
-        an_offer = shot.get('pay') is not None or bool(shot.get('places'))
-        found = None if an_offer else shot.get('address')
+        #
+        # ...EXCEPT Uber's navigation bar, which is not a merchant: see
+        # screen_address, which also reads the opened navigation sheet.
+        an_offer, frame_address, sheet = screen_address(shot, out.get('text'))
+        found = None if an_offer else frame_address
         # UBER'S TRIP PLANNER, which lists every stop of the trip in order and
         # prints no ZIP, so find_address returns None on it — measured on the
         # rig's own view of one. OP.find_planner reads it by its own grammar.
@@ -3875,10 +3920,12 @@ def main():
         # in its own stop block, is still a destination the driver asked to
         # have filed with no ⌖ ("while an order is held, set its destination
         # whenever the screen shows an address directly under a Dropoff
-        # label"). It goes out on the SIGHTING this read sends below, typed a
-        # dropoff by sighting_stops (OP.address_under_dropoff), and the
-        # assembler files it as a navigation destination, rank `nav`
-        # (assemble.js, navCandidate) — never over a press or an earlier
+        # label"), and so is the opened navigation sheet's address over
+        # "Dropoff type" with the customer's name above (the owner, 14 Oct:
+        # OP.sheet_dropoff). It goes out on the SIGHTING this read sends below,
+        # typed a dropoff by sighting_stops, and the assembler files it as a
+        # navigation destination, rank `nav` (assemble.js, navCandidate) —
+        # never over a press or an earlier
         # screen-read end, never read before the Took, never off a pickup
         # screen or as one of the orders' own pickups, and with two orders in
         # the car only on a cue. This read used to send it as a labelled
@@ -4080,9 +4127,9 @@ def main():
         # arms now, and a counter that watched only one of them would make the
         # other a silent refusal — which is the thing this counter exists to
         # stop being possible.
-        if an_offer and shot.get('address'):
+        if an_offer and frame_address:
             health.address_refused_as_offer += 1
-        elif not an_offer and not shot.get('address') \
+        elif not an_offer and not frame_address \
                 and OP.STREET_ENDS.search(out.get('text') or ''):
             health.street_seen_no_address += 1
         # ...and said ONCE, not on every read that catches the same screen.
@@ -4156,10 +4203,10 @@ def main():
         seen_at = int(time.time() * 1000)
         if args.json and (whole or seen_stops is not None):
             emit_sighting(out.get('text'), seen_stops,
-                          None if an_offer else shot.get('address'),
+                          None if an_offer else frame_address,
                           asked, whole,
                           keep=offer_log is not None and offer_log.keep_places,
-                          at=seen_at)
+                          at=seen_at, sheet=sheet)
         if answers:
             dropoff_until = 0.0
             dropoff_asked = False

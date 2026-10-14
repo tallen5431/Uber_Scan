@@ -3832,6 +3832,55 @@ _nav_seen = SP.sighting(_nav_text, None, {'line': '4821 Kestrel Dr, Marietta, GA
 eq('a navigation screen\'s sighting carries the screen\'s one "Expected by" on its stop',
    [(s['kind'], s['expectedBy']) for s in _nav_seen['stops']], [('dropoff', 20 * 60 + 20)])
 
+# --- Uber's navigation bar is not a card's leg, and the opened sheet ----------
+#
+# screen_address: on a frame typed uber.nav with no payout, the bar ("6 min ©
+# 1.7 mi") is taken out and the text parsed again before the merchant arm may
+# call the frame an offer; and the opened sheet's address over "Dropoff type"
+# is read (OP.sheet_dropoff). Invented names and streets, the 12 Oct layouts.
+_SHEETS = {c['name']: c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'tests', 'fixtures', 'cases.json'), encoding='utf-8'))['sheets']}
+_SHEET_BAR = next(t for n, t in _SHEETS.items() if n.startswith('...under the bar'))
+ok_('the premise: parse() takes that sheet under the bar for an offer\'s place',
+    OP2.parse(_SHEET_BAR)['pay'] is None and OP2.parse(_SHEET_BAR)['places'] != [])
+
+
+def _framed(text):
+    an_offer, address, sheet = SP.screen_address(OP2.parse(text), text)
+    return an_offer, (address or {}).get('line'), (sheet or {}).get('line')
+
+
+eq('screen_address: Uber\'s bar over the opened sheet is not an offer, and the sheet '
+   'is read', _framed(_SHEET_BAR), (False, None, '4416 Wrenfield Dr NW, Kennesaw'))
+eq('screen_address: ...and an address straight under the bar is read without the bar '
+   'in its street', _framed('o= 6 min © 1.7 mi —\n2950 Kestrel Dr\nWoodstock, GA 30188'),
+   (False, '2950 Kestrel Dr, Woodstock, GA 30188', None))
+eq('screen_address: a payout is an offer, navigation or not',
+   _framed('o= 6 min © 1.7 mi —\nDeliver to\n2950 Kestrel Dr\nWoodstock, GA 30188\n'
+           '$12.50\nAccept')[0], True)
+eq('screen_address: a frame with a payout reads no sheet',
+   _framed(_SHEET_BAR + '\n$12.50\nAccept'), (True, None, None))
+# Uber's card slides up over the navigation bar, so a card that lost its payout
+# can carry the bar too; it is typed by its own furniture, and its merchant
+# still makes it an offer. Taken out with the bar, the merchant's door would go
+# out as a destination.
+_CARD_OVER_BAR = ('o= 6 min © 1.7 mi —\nFable Grill\n1200 Lantern Rd, Acworth, GA 30101\n'
+                  'Exclusive')
+ok_('the premise: that card is typed an offer, and without the bar it shows no place',
+    OP2.screen_type(_CARD_OVER_BAR)['screen'] == 'uber.offer'
+    and OP2.parse(OP2.nav_without_bar(_CARD_OVER_BAR))['places'] == [])
+eq('screen_address: a card over the navigation bar that lost its payout is still an offer',
+   _framed(_CARD_OVER_BAR), (True, '1200 Lantern Rd, Acworth, GA 30101', None))
+eq('screen_address: a card that lost its payout is still an offer by its merchant',
+   _framed('Guaranteed (incl. tip)\n© 29 min (8.7 mi) total\nFable Grill (3295 Lantern '
+           'Pkwy Nw)\n| Birch Dr NW & Kestrel Ln NW, Acworth'), (True, None, None))
+_sheet_seen = SP.sighting(_SHEET_BAR, None, None, False, True,
+                          sheet=OP2.sheet_dropoff(_SHEET_BAR))
+eq('the opened sheet\'s sighting types its address a dropoff, under the label it printed',
+   [(s['kind'], s['label'], s['line']) for s in _sheet_seen['stops']],
+   [('dropoff', 'dropoff type', '4416 Wrenfield Dr NW, Kennesaw')])
+
 # --- what in the card box asks for an unpressed whole-screen read ------------
 #
 # auto_read_for: the planner's grammar, Uber's navigation, or an address under a

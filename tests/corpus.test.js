@@ -118,6 +118,13 @@ function stopFields(stops) {
      JSON.stringify([c.expect.app, c.expect.screen]));
 });
 
+/* Uber's opened navigation sheet: its address over "Dropoff type", with the
+   customer's name above, or null. The same cases rpi/test_parser.py runs.
+   See sheet_dropoff in offer_parser.py. */
+(cases.sheets || []).forEach(function (c) {
+  eq('sheets / ' + c.name, JSON.stringify(P.sheetDropoff(c.text)), JSON.stringify(c.expect));
+});
+
 /* What a navigation or "Deliver to" screen gives as a destination nobody
    pressed for. `expect` is [screen, line, stop, under, asOffer]; this port has
    no address_stop, so it holds the screen, findAddress's line and the offer

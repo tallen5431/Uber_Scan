@@ -155,6 +155,19 @@ SEQ.forEach(function (seq) {
   ok_('...and not the same address read no fuller',
       !A.outranks(f('nav', '9 A St, Acworth', 2), f('nav', '9 A St, Acworth, GA', 2)));
   ok_('a label never replaces a navigation destination', !A.outranks(f('label'), f('nav')));
+  // The opened sheet loses a house number's first digits at the left of the
+  // line: the number read whole afterwards is the same door read fuller.
+  ok_('a navigation destination whose house number gains the digits a read lost '
+      + 'replaces it', A.outranks(f('nav', '4416 Wren Dr NW, Kennesaw', 2),
+                                  f('nav', '16 Wren Dr NW, Kennesaw', 2)));
+  ok_('...never the other way', !A.outranks(f('nav', '16 Wren Dr NW, Kennesaw', 2),
+                                            f('nav', '4416 Wren Dr NW, Kennesaw', 2)));
+  ok_('...nor a number that does not end in the one filed',
+      !A.outranks(f('nav', '4417 Wren Dr NW, Kennesaw', 2), f('nav', '16 Wren Dr NW, Kennesaw', 2)));
+  ok_('...nor in another town', !A.outranks(f('nav', '4416 Wren Dr NW, Marietta', 2),
+                                            f('nav', '16 Wren Dr NW, Kennesaw', 2)));
+  ok_('...nor over a press', !A.outranks(f('nav', '4416 Wren Dr NW, Kennesaw', 2),
+                                         f('press', '16 Wren Dr NW, Kennesaw', 2)));
 })();
 
 /* ---- a navigation screen, read whole without a press ----
