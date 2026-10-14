@@ -7281,6 +7281,15 @@ try:
            (_orders.get(_hb.get('holdId')), _Q2 in _pins.get(_hb.get('holdId'), []),
             [(r.get('holdId'), r.get('pickup'), r.get('by')) for r in _vrows(_vj2)]),
            ([_Q2], True, [(_hb.get('holdId'), 0, 'gps')]))
+    finally:
+        stop(_vp)
+    # Restarted between the two stops: every named pin is stepped on every
+    # beat, so the store's pin has already counted the fixes above, and this
+    # suite's fixes are made by age — a wait replayed after them would read as
+    # older than the last fix it counted. A car's real fixes only move on. The
+    # orders come back from holding.json; the dwell's live part is memory.
+    _vp, _vb = start(dict(_venv, SCANNER_ARGS=_vs2, CARRY_TWO='1'), _vj2)
+    try:
         _vsay2(_vwait(_R4, 180) + _vleave(_R4))
         eq('[pickup visit] two orders and no cue for a pickup: nothing is marked, not even '
            'under the first order',

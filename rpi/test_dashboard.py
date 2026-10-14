@@ -364,11 +364,20 @@ const framed = (page) => page.waitForFunction(
   // that is not there waits thirty seconds; a page that never answers waits
   // for ever — is reported as a skip naming the section, rather than as a
   // suite that hung until the runner's own timeout killed it in silence.
+  //
+  // 480 s. It was 300 s, and the driver had grown to take about 290 of them
+  // on this machine (the whole suite 296 s), so one more wait in any section
+  // turned a failed check into "the driver hung in <the last section>" —
+  // which is what undoing a pickup-visit check did. The suite's own
+  // subprocess timeout below is 900 s, past this, so the watchdog is what
+  // speaks. How close the run came is a check of its own: '[harness] ...'.
   let stage = 'start';
+  const STARTED = Date.now();
+  const WATCHDOG_MS = 480000;
   setTimeout(() => {
     console.log(JSON.stringify({ __hung: stage }));
     process.exit(2);
-  }, 300000).unref();
+  }, WATCHDOG_MS).unref();
   for (const panel of PANELS) {
     const ctx = await browser.newContext({
       viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
@@ -5523,6 +5532,7 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
   await browser.close();
+  out.__ran = { ms: Date.now() - STARTED, watchdogMs: WATCHDOG_MS };
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
   // A throw anywhere in this driver is a FAULT, not a machine that
@@ -5687,7 +5697,7 @@ try:
                  ]),
                  # Where 📷 Snaps' downloads are kept, for the checks to read.
                  SNAP_SAVE_DIR=work),
-        capture_output=True, text=True, timeout=600)
+        capture_output=True, text=True, timeout=900)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
         got = json.loads(line)
@@ -5711,6 +5721,14 @@ try:
         crashed(got['__crashed'])
     if got.get('skip'):
         skip(got['skip'])
+    # Headroom: the driver finished with at least a quarter of its watchdog
+    # left. At 300 s it ran within about 4 s of it, and the next wait added
+    # anywhere would have read as a hang, not as the check that failed.
+    _ran = got.get('__ran') or {}
+    ok_('[harness] the driver finished with a quarter of its watchdog to spare (%.0f s of %.0f s)'
+        % ((_ran.get('ms') or 0) / 1000.0, (_ran.get('watchdogMs') or 0) / 1000.0),
+        _ran.get('ms') and _ran.get('watchdogMs')
+        and _ran['ms'] <= 0.75 * _ran['watchdogMs'])
 
     for panel, _w, _h in PANELS:
         for key in ('uncertain', 'deducted', 'deadline'):
