@@ -5369,6 +5369,12 @@ const framed = (page) => page.waitForFunction(
         undo: shown(document.getElementById('undo'))
           ? text(document.getElementById('undo')) : null,
         vs: shown(vs) ? text(vs) : null,
+        // The pair line's words after its range (`.more`), and with two in
+        // the car, against both, which two (`.both`).
+        more: shown(document.getElementById('stack'))
+          ? text(document.querySelector('#stack .more')) : null,
+        both: shown(document.querySelector('#stack .both'))
+          ? text(document.querySelector('#stack .both')) : null,
         status: text(document.getElementById('health')),
       };
     });
@@ -5410,13 +5416,23 @@ const framed = (page) => page.waitForFunction(
     await push({ ready: false, state: 'empty', track: null });
     await tick(1100);
     const between = await look();
-    // A card up, and its pair line, with both in the car.
+    // A card up, and its pair line, with both in the car: against both
+    // (Advice.stackMany, which says how many, `heldCount`).
+    await push(Object.assign({}, READINGS.deducted, {
+      holding: A, orders: [A, B], unowned: 0,
+      stack: { pay: 40.0, worst: 18.2, best: 31.0, minMinutes: 55, maxMinutes: 120,
+               leftMinutes: 55, state: 'warn', sure: false, uncosted: false, ends: null,
+               heldCount: 2, leftEach: [40, 55] } }));
+    await tick(300);
+    const offerUp = await look();
+    // ...and the same with carrying two OFF and two read back at boot: the
+    // server weighs the card against ① alone and says so, `vsFirst`.
     await push(Object.assign({}, READINGS.deducted, {
       holding: A, orders: [A, B], unowned: 0,
       stack: { pay: 40.0, worst: 18.2, best: 31.0, minMinutes: 55, maxMinutes: 80,
                state: 'warn', sure: false, uncosted: false, ends: null, vsFirst: true } }));
     await tick(300);
-    const offerUp = await look();
+    const offerFirst = await look();
     // ⌖ with no cue: the chooser, over the verdict pane.
     await push({ chooser: { id: 'choose-1', kind: 'scan', line: '77 Birch Ln, Roswell, GA',
                             rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
@@ -5464,7 +5480,8 @@ const framed = (page) => page.waitForFunction(
     await tick(300);
     const dropBoth = { look: await look(), posted: posted.slice() };
     out.carryTwo = { added: added, undoGone: undoGone, undone: undone, between: between,
-                     offerUp: offerUp, chooser: chooser, closed: closed, picked: picked,
+                     offerUp: offerUp, offerFirst: offerFirst, chooser: chooser,
+                     closed: closed, picked: picked,
                      dropAsk: dropAsk, dropBoth: dropBoth };
     await page.close();
     await ctx.close();
@@ -5910,8 +5927,13 @@ try:
            ('① $9.48 → 4821 Kestrel Dr · ● armed', '② $28.08 → ? · ○ not armed',
             '2 dropoffs read · whose?'))
         _of = ct.get('offerUp') or {}
-        eq('[carry two] under an offer, both in one line, and the pair line says vs ① only',
-           (_of.get('detail'), _of.get('vs')), ('· In car ① $9.48 · ② $28.08', 'vs ① only'))
+        eq('[carry two] under an offer, both in one line, and the pair line says it is with ① + ②',
+           (_of.get('detail'), _of.get('vs'), _of.get('both'), _of.get('more')),
+           ('· In car ① $9.48 · ② $28.08', None, 'with ① + ②', 'over 55–120 min'))
+        _ff = ct.get('offerFirst') or {}
+        eq('[carry two] carrying two off with two read back: the pair line still says vs ① only',
+           (_ff.get('vs'), _ff.get('both'), _ff.get('more')),
+           ('vs ① only', None, 'with the one you have, over 55–80 min'))
         eq('[carry two] the chooser over the verdict pane: ①, ②, the card, neither',
            (ct.get('chooser') or {}).get('chooser'),
            ['Whose is 77 Birch Ln?', '① $9.48 · 4821 Kestrel Dr', '② $28.08 · ?',

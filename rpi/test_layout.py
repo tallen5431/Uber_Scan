@@ -2835,6 +2835,17 @@ const SNAP_MEASURE = (fixture) => {
       } : null),
       vs: shown(vs) ? { text: text(vs), cut: outside(vs, [box(document.getElementById('stack')),
                                                            card, glass]) } : null,
+      // The pair line with two in the car, against both: its range and
+      // "with ① + ②" (`.both`), each with what of it is cut — outside its
+      // own box, the line's, the card or the glass.
+      pair: (() => {
+        const st = document.getElementById('stack');
+        if (!shown(st)) return null;
+        const rg = st.querySelector('.range'), bo = st.querySelector('.both');
+        const cutOf = (el) => outside(el, [box(el), box(st), card, glass]);
+        return { range: text(rg), rangeCut: cutOf(rg),
+                 both: shown(bo) ? text(bo) : null, bothCut: shown(bo) ? cutOf(bo) : null };
+      })(),
       over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
     };
   });
@@ -2894,13 +2905,22 @@ const SNAP_MEASURE = (fixture) => {
       await page.clock.runFor(300);
       const three = await measureCarry(page);
       await page.clock.runFor(10500);
-      // ...and the pair line with both in the car, under an offer.
+      // ...and the pair line with both in the car, under an offer: against
+      // both (Advice.stackMany: `heldCount`, and no route link, which end is
+      // last being Map view's question), at the most the row holds.
+      await push(Object.assign({}, HELD.offer, { holding: A, orders: [A, B], unowned: 0,
+        stack: Object.assign({}, HELD.offer.stack, { heldCount: 2, leftEach: [55, 60],
+                                                     maxMinutes: 137, route: null }) }));
+      await page.clock.runFor(1100);
+      const offer = await measureCarry(page);
+      // ...and with carrying two off and two read back at boot: ① alone, and
+      // "vs ① only" beside the chip.
       await push(Object.assign({}, HELD.offer, { holding: A, orders: [A, B], unowned: 0,
         stack: Object.assign({}, HELD.offer.stack, { vsFirst: true }) }));
       await page.clock.runFor(1100);
-      const offer = await measureCarry(page);
+      const offerFirst = await measureCarry(page);
       out[panel[0] + ' ' + view + ' carry'] = { before: before, two: two, three: three,
-                                               offer: offer };
+                                               offer: offer, offerFirst: offerFirst };
       await page.close();
       await ctx.close();
     }
@@ -3315,8 +3335,9 @@ try:
     # GPS word inside the card — with "2 dropoffs read · whose?" under them;
     # the chooser over the verdict pane, its rows 96px where the pane has the
     # height and never under the bar's 52px where it does not, every row's
-    # words whole, the bar and its six controls where they were; and "vs ①
-    # only" whole on the pair line.
+    # words whole, the bar and its six controls where they were; and on the
+    # pair line "with ① + ②" whole beside its whole range (the card against
+    # both, Stage 6), or "vs ① only" with carrying two off and two read back.
     for panel, w, h in PLANNER_PANELS:
         for view in ('screen', 'scene'):
             where = '%s, %s view' % (panel, view)
@@ -3362,8 +3383,22 @@ try:
             ok_('...every row no shorter than 52px at %s (%r)'
                 % (where, [r.get('h') for r in _rows3]),
                 _rows3 and all((r.get('h') or 0) >= 52 for r in _rows3))
-            _vs = _of.get('vs') or {}
-            eq('the pair line says "vs ① only", whole, with two in the car at %s' % where,
+            # The pair line against both orders, at the most it holds: the
+            # range whole, and "with ① + ②" whole in the slot "vs ① only"
+            # had. In the words that give way it was cut to "with ①" at
+            # 800x480 beside the scene picture and "with ① +" on the hat,
+            # which reads as a range against one order.
+            _pr = _of.get('pair') or {}
+            eq('the two-order pair line keeps its range whole, and says "with ① + ②" whole, '
+               'at %s' % where,
+               (_pr.get('range'), _pr.get('rangeCut'), _pr.get('both'), _pr.get('bothCut'),
+                _of.get('vs')),
+               ('-$16 to $133/hr', '', 'with ① + ②', '', None))
+            # ...and with carrying two off and two read back, "vs ① only"
+            # beside the chip, whole, as before.
+            _vs = (cm.get('offerFirst') or {}).get('vs') or {}
+            eq('the pair line says "vs ① only", whole, with carrying two off and two '
+               'read back at %s' % where,
                (_vs.get('text'), _vs.get('cut')), ('vs ① only', ''))
 
     # The order in the car, on the card, at the most each line is asked to

@@ -392,6 +392,11 @@ NO_RANGE = dict(PAIR, id='r7', at=NOW - 2100000, stack=None,
 TWO_HELD = dict(PAIR, id='r9', at=NOW - 2400000, said='go', stackShown=False,
                 heldAlso=[{'pay': 28.08, 'minutes': 55, 'dropoff': None, 'scanned': False,
                            'heldMs': 600000}], heldCount=2)
+# ...and one written since Stage 6, whose range is against BOTH orders and
+# says so in `stack.over`. Still not graded (journal.html, showPairs); what
+# changes is what the page says it was weighed against.
+TWO_HELD_BOTH = dict(TWO_HELD, id='r10', at=NOW - 2700000,
+                     stack=dict(PAIR['stack'], over=2))
 
 # Dots and rankings. The newest row was judged at a lower target than the
 # rest, so re-judging a row against "today's" target would colour it
@@ -731,6 +736,19 @@ FEEDS = {
                       'unreadable': None,
                       'pairs': [GREEN_UNDER_PASS, NO_STATE_SENT, NO_RANGE, TWO_HELD],
                       'offers': TOOK_SIX},
+    # ...the same with one written since Stage 6 in its place, and with both.
+    'pair two held both': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
+                           'hidden': 0, 'watched': {'saw': 12, 'kept': 12},
+                           'unreadable': None,
+                           'pairs': [GREEN_UNDER_PASS, NO_STATE_SENT, NO_RANGE,
+                                     TWO_HELD_BOTH],
+                           'offers': TOOK_SIX},
+    'pair two held mixed': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
+                            'hidden': 0, 'watched': {'saw': 12, 'kept': 12},
+                            'unreadable': None,
+                            'pairs': [GREEN_UNDER_PASS, NO_STATE_SENT, NO_RANGE,
+                                      TWO_HELD, TWO_HELD_BOTH],
+                            'offers': TOOK_SIX},
     'verdicts': {'count': len(VERDICTS), 'total': len(VERDICTS),
                  'truncated': False, 'days': 7, 'hidden': 1,
                  'watched': {'saw': 8, 'kept': 8},
@@ -2660,6 +2678,25 @@ try:
     ok_('...and says how many it left out (%r)' % (two['pairsLead'] or '')[:90],
         re.search(r'(<b>)?1(</b>)? with two orders already in the car, not graded',
                   two['pairsLead'] or '') is not None)
+    # ...and since Stage 6 a row's range is against both orders (`stack.over`
+    # on the row), so "weighed against the first alone" is no longer true of
+    # every such row. The grading is unchanged — still left out, still the
+    # same tally — and the sentence says which each was.
+    both = got['pair two held both']
+    mixed = got['pair two held mixed']
+    _lead = lambda g: re.sub(r'<[^>]+>', '', g.get('pairsLead') or '')
+    eq('a two-order pair written since Stage 6 is still not graded, and the page says it '
+       'was weighed against both',
+       (_lead(both).split('. ')[0], len(both.get('pairSaid') or []),
+        re.search(r'1 with two orders already in the car, not graded: each was weighed '
+                  r'against both', _lead(both)) is not None,
+        'first alone' in _lead(both)),
+       (_lead(era).split('. ')[0], 4, True, False))
+    eq('...and with both kinds of row on the page it says how many of each',
+       (_lead(mixed).split('. ')[0],
+        re.search(r'2 with two orders already in the car, not graded: 1 weighed against '
+                  r'the first alone, 1 against both', _lead(mixed)) is not None),
+       (_lead(era).split('. ')[0], True))
     ok_('a pair with no range under a headline that answered says what it said',
         len(_era) > 2 and re.search(r'Called it\s*take it', _era[2]))
     ok_('...and names the missing range rather than a missing answer',

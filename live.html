@@ -989,11 +989,15 @@
     }
     #app > .undo { align-self: end; }
   }
-  /* The pair line with two orders in the car: weighed against ① alone until
-   * the detour through both exists (Stage 6), and it says so. Whole, like
-   * the chip beside it: a range that does not say it ignores an order in the
-   * car is the confidently wrong number. */
+  /* The pair line with two orders in the car and carrying two turned OFF
+   * (two read back from a hold file at boot): weighed against ① alone, and
+   * it says so. Whole, like the chip beside it: a range that does not say it
+   * ignores an order in the car is the confidently wrong number. With
+   * carrying two on the range is against both (Stage 6), "with ① + ②". */
   .stackline .vs { flex: none; margin-left: .35em; color: var(--doubt); }
+  /* ...and with it on, "with ① + ②": the same slot, whole, in the row's own
+   * colour — it names what the range covers and doubts nothing. */
+  .stackline .both { flex: none; margin-left: .35em; }
 
   /* ---------- Sizes for the driver's seat ----------
    *
@@ -1712,7 +1716,9 @@
     // "to" rather than an en dash, because the dash cannot survive a minus
     // sign beside it and this is exactly the row where that happens: a pair
     // that loses money is the one a driver most needs to read correctly.
-    more.textContent = ' with the one you have, over '
+    // ...and with two in the car (carrying two on) not "the one you have":
+    // which ones is said whole, beside the chip (`.both`, below).
+    more.textContent = (s.heldCount > 1 ? ' over ' : ' with the one you have, over ')
       + (s.minMinutes === s.maxMinutes
          ? Math.round(s.minMinutes)
          : Math.round(s.minMinutes) + '\u2013' + Math.round(s.maxMinutes))
@@ -1791,8 +1797,10 @@
     chip.title = s.ends ? '' :
       'Neither card printed enough for the rig to say whether these two jobs '
       + 'end near each other. It is not saying they do.';
-    // With two orders in the car the range is the pair with ① alone (see
-    // withStack in server.js): said beside the chip, whole.
+    // With two orders in the car and carrying two OFF — a hold file written
+    // while it was on, read back at boot — the range is the pair with ①
+    // alone (see withStack in server.js): said beside the chip, whole. With
+    // it on the range is against both, and the words above say so.
     if (s.vsFirst) {
       var vs = document.createElement('span');
       vs.className = 'vs';
@@ -1800,6 +1808,24 @@
       vs.title = 'Two orders are in the car. This weighs the new one against the '
         + 'first you took, not against both.';
       el.stack.appendChild(vs);
+    }
+    // With two in the car and carrying two on, the range is the card against
+    // BOTH (Advice.stackMany), and which two is said in the numbers the
+    // in-car lines go by: "with ① + ②". Whole, in the slot "vs ① only" had,
+    // and not in the words that give way: measured in rpi/test_layout.py at
+    // the widest pair line, those kept only "with ①" at 800x480 beside the
+    // scene picture and "with ① +" on the 3.5" hat — a range against two
+    // read as a range against one.
+    if (s.heldCount > 1) {
+      var both = document.createElement('span');
+      both.className = 'both';
+      both.textContent = 'with ' + Array.apply(null, Array(s.heldCount)).map(function (x, i) {
+        return circled(i + 1);
+      }).join(' + ');
+      both.title = 'Two orders are in the car. This weighs the new one against both: '
+        + 'the most time is all of them one after another, the least the longest '
+        + 'single one.';
+      el.stack.appendChild(both);
     }
     el.stack.appendChild(chip);
     if (s.ends === 'elsewhere') el.stack.className += ' elsewhere';
