@@ -599,6 +599,9 @@ const framed = (page) => page.waitForFunction(
       // whole nowrap/ellipsis rule unguarded.
       const line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
       return { hidden: s.hidden, text: (s.textContent || '').trim(),
+               // The whole line, behind "…" (live.html fillMore) and on the
+               // row's title; the row itself carries the short form.
+               full: s.title || '',
                shown: !s.hidden && r.width > 0 && r.height > 0
                       && r.top >= 0 && r.bottom <= window.innerHeight + 1,
                size: Math.round(parseFloat(cs.fontSize)),
@@ -773,6 +776,96 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(200);
     out.tookUndone = await look();
     out.tookPosted = posted;
+    await page.close();
+    await ctx.close();
+  }
+
+  // --- the status row, short, and the rest behind "…" ----------------------
+  stage = 'the status row, short, and the rest behind …';
+  //
+  // In the steady state the row is the dot, the ticks and what they came
+  // to, the median, 📷 and "…": "scanner reading" is the green dot's to say.
+  // "…" opens the whole of it over the card's foot; a second press, a press
+  // on the sheet, or MORE_MS on the page's own clock puts it away. When the
+  // scanner goes quiet the words come back on the row beside the red dot.
+  {
+    const src = await (await fetch(base + '/live.html')).text();
+    const moreMs = Number((/var MORE_MS = (\d+);/.exec(src) || [])[1]);
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: 70, counted: 57, setAside: 13, took: 7,
+                             median: 13.2, earned: 86.2, earnedCost: 20,
+                             beforeClock: 0, unreadable: null, rolled: false,
+                             clockSet: true }) }));
+    // A rig with its scanner running: this server is started without one.
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, status: 'scanning',
+        scanner: { enabled: true, running: true, error: null },
+        last: { ready: false, state: 'empty', locked: false, text: '' },
+        lastAgeMs: 30000, heardAgeMs: 900, offer: null, holding: null }) }));
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await phoneFrame(page);
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+    await page.evaluate(() => { if (window.__es.onopen) window.__es.onopen(); });
+    await page.evaluate(() => window.__es.push({ alive: true, at: Date.now() }));
+    await page.clock.runFor(1500);
+    const row = () => page.evaluate(() => {
+      const shown = (el) => {
+        if (!el || el.hidden) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+      };
+      const sheet = document.getElementById('moreSheet');
+      const more = document.getElementById('more');
+      const shift = document.getElementById('shift');
+      return {
+        conn: shown(document.getElementById('conn')),
+        connText: document.getElementById('conn').textContent.trim(),
+        dot: document.getElementById('dot').classList.contains('on'),
+        shift: shift.textContent.trim(),
+        sep: getComputedStyle(shift, '::before').content,
+        more: shown(more) && !!more.closest('.connbar') && !more.closest('.bottombar'),
+        expanded: more.getAttribute('aria-expanded'),
+        sheet: shown(sheet),
+        lines: [].slice.call(sheet.children).map((d) => d.textContent.trim()),
+        link: (sheet.querySelector('a') || {}).getAttribute
+          ? sheet.querySelector('a').getAttribute('href') : null,
+        bar: [].slice.call(document.querySelector('.bottombar').children)
+          .filter(shown).length,
+      };
+    });
+    const st = { moreMs: moreMs, steady: await row() };
+    await page.click('#more', { timeout: 5000 }).catch(() => {});
+    await page.clock.runFor(100);
+    st.open = await row();
+    await page.click('#more', { timeout: 5000 }).catch(() => {});
+    await page.clock.runFor(100);
+    st.closed = await row();
+    await page.click('#more', { timeout: 5000 }).catch(() => {});
+    await page.clock.runFor(100);
+    await page.click('#moreSheet', { timeout: 5000 }).catch(() => {});
+    await page.clock.runFor(100);
+    st.sheetPressed = await row();
+    await page.click('#more', { timeout: 5000 }).catch(() => {});
+    await page.evaluate(() => window.__es.push({ alive: true, at: Date.now() }));
+    await page.clock.runFor(moreMs - 1000);
+    st.before = await row();
+    await page.evaluate(() => window.__es.push({ alive: true, at: Date.now() }));
+    await page.clock.runFor(1500);
+    st.after = await row();
+    // ...and the scanner goes quiet: no beat for longer than STALE_MS.
+    await page.clock.runFor(14000);
+    st.quiet = await row();
+    out.statusRow = st;
     await page.close();
     await ctx.close();
   }
@@ -2520,7 +2613,8 @@ const framed = (page) => page.waitForFunction(
     soon.inBurst = await tick(0);
     soon.fourSeconds = await tick(4000);
     soon.fiveSeconds = await tick(1200);
-    soon.row = await page.evaluate(() => document.getElementById('shift').textContent);
+    // The whole line: the count of offers is behind "…" now (fillMore).
+    soon.row = await page.evaluate(() => document.getElementById('shift').title);
     soon.later = await tick(10000);
     // A mark inside the window: it asks, and the ask the offer left pending is
     // answered by it rather than made as well.
@@ -2626,7 +2720,7 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(300);
     out['shift_' + key] = await page.evaluate(() => {
       const s = document.getElementById('shift');
-      return { hidden: s.hidden, text: (s.textContent || '').trim() };
+      return { hidden: s.hidden, text: (s.textContent || '').trim(), full: s.title || '' };
     });
     await page.close();
     await ctx.close();
@@ -2674,7 +2768,7 @@ const framed = (page) => page.waitForFunction(
                                { timeout: 10000 }).catch(() => {});
     const peek = () => page.evaluate(() => {
       const s = document.getElementById('shift');
-      return { hidden: s.hidden, text: (s.textContent || '').trim() };
+      return { hidden: s.hidden, text: (s.textContent || '').trim(), full: s.title || '' };
     });
     await page.evaluate((r) => window.__es.push(r), READINGS.deducted);
     await page.evaluate(() => window.__es.push(
@@ -6668,6 +6762,39 @@ try:
             and '7.8 mi' in ((ut.get('warn') or {}).get('title') or ''))
         ok_('...on the glass, not pushed off it', (ut.get('warn') or {}).get('shown'))
 
+    # --- the status row, short, and the rest behind "…" --------------------
+    _sr = got.get('statusRow') or {}
+    ok_('the short status row was measured', bool(_sr.get('moreMs')))
+    _s = _sr.get('steady') or {}
+    eq('the status row, steady, is the dot and the figures: no words for the '
+       'connection (%r)' % _s.get('connText'),
+       (_s.get('conn'), _s.get('connText'), _s.get('dot')), (False, 'scanner reading', True))
+    eq('...the ticks, what they came to and the median, nothing else',
+       _s.get('shift'), '\u27137 $86 \u00b7 $13/hr an offer')
+    eq('...with no separator in front of nothing', _s.get('sep'), 'none')
+    ok_('..."…" on the row, not on the bar', _s.get('more'))
+    eq('...and the bar as it was', _s.get('bar'), 4)
+    _o = _sr.get('open') or {}
+    eq('"…" opens the whole of the row: the connection, as a link, and the '
+       'shift line in full',
+       (_o.get('sheet'), _o.get('expanded'), _o.get('lines'), _o.get('link')),
+       (True, 'true', ['scanner reading',
+                       '\u2713 7 for $86 net \u00b7 $13/hr an offer \u00b7 70 offers '
+                       '\u00b7 13 set aside'], '/api/status'))
+    eq('...a second press puts it away', ((_sr.get('closed') or {}).get('sheet'),
+                                          (_sr.get('closed') or {}).get('expanded')),
+       (False, 'false'))
+    eq('...and so does a press on the sheet', (_sr.get('sheetPressed') or {}).get('sheet'), False)
+    eq('...left open, it stays until MORE_MS (%sms)' % _sr.get('moreMs'),
+       (_sr.get('before') or {}).get('sheet'), True)
+    eq('...and then goes', (_sr.get('after') or {}).get('sheet'), False)
+    _q = _sr.get('quiet') or {}
+    ok_('a scanner gone quiet is said in words on the row again, beside the red dot (%r)'
+        % _q.get('connText'),
+        _q.get('conn') and (_q.get('connText') or '').startswith('nothing from the scanner')
+        and not _q.get('dot'))
+    eq('...with the separator back in front of the figures', _q.get('sep'), '"\u00b7\u00a0"')
+
     # --- the notices as chips, the sentence one tap away ---------------------
     #
     # Each notice is a few words on the glass and its sentence on a tap. The
@@ -7198,16 +7325,24 @@ try:
         # It is not about the offer on screen, so it must not wait for one:
         # this is read before any card has arrived.
         ok_('the shift shows before any card has', first.get('shown'))
-        ok_('...saying how many offers', '9 offers' in (first.get('text') or ''))
+        # The row carries the ticks, what they came to and the median, and
+        # the rest is behind "…": the same figures, fewer words. "for" and
+        # "net" are the day header's words for the same two numbers, and
+        # the count of offers and the set-aside were already what a small
+        # screen lost first (see the ordering checks below).
+        eq('...the row saying the ticks, what they came to and the median',
+           first.get('text'), '\u27132 $48 \u00b7 $21/hr an offer')
+        ok_('...and the whole line behind "…", saying how many offers',
+            '9 offers' in (first.get('full') or ''))
         ok_('...how many were set aside rather than dropping them',
-            'set aside' in (first.get('text') or ''))
-        ok_('...how many were marked taken', '\u2713 2' in (first.get('text') or ''))
+            'set aside' in (first.get('full') or ''))
+        ok_('...how many were marked taken', '\u2713 2' in (first.get('full') or ''))
         # ...as ticks. `took` is the count of offers the driver MARKED, and on
         # the real week's two busiest days that was 10 against 41 green cards
         # and 12 against 54. "took 10 for $140" reads as the evening's
         # takings; the tick is the glyph the button and the offers page use.
         no_('...as ticks, never as the word "took"',
-            'took' in (first.get('text') or ''))
+            'took' in (first.get('text') or '') + (first.get('full') or ''))
         ok_('...and the median rate', '$21/hr' in (first.get('text') or ''))
         # What the taken ones were worth. This check used to forbid any dollar
         # total here, and its reason still stands: `pay` is what the card
@@ -7217,11 +7352,12 @@ try:
         # from, the same rule as the offers page's "✓ 6 for $48.00" — and
         # says so. "Offered" is still the word that must not appear.
         ok_('...and what they were worth, net, in the day header\'s own words',
-            '\u2713 2 for $48 net' in (first.get('text') or ''))
+            '\u2713 2 for $48 net' in (first.get('full') or ''))
         ok_('...never as what was offered',
-            'offered' not in (first.get('text') or ''))
-        ok_('...and still only one rate on the line',
-            (first.get('text') or '').count('/hr') == 1)
+            'offered' not in (first.get('text') or '') + (first.get('full') or ''))
+        ok_('...and still only one rate on the line, and behind "…"',
+            (first.get('text') or '').count('/hr') == 1
+            and (first.get('full') or '').count('/hr') == 1)
         # The money before the count. The line is one line, cut with an
         # ellipsis where it does not fit, and it does not fit on the 480px
         # hat or a phone: measured against a fortnight of offers, 392px of
@@ -7229,7 +7365,7 @@ try:
         # was cut was the tail — "took 2 for $27 net · median $20/hr", the two
         # figures a driver glances down for. They lead now, so what the
         # ellipsis takes is the count of offers and the set-aside figure.
-        text = first.get('text') or ''
+        text = first.get('full') or ''
         ok_('...with what was taken before how many offers there were',
             '\u2713' in text and 'offers' in text
             and text.index('\u2713') < text.index('offers'))
@@ -7252,9 +7388,9 @@ try:
         eq('...and the count is asked for again when an offer is marked',
            got.get('shiftAsked'), 2)
         ok_('...so the taken figure follows the button',
-            '\u2713 3' in (after.get('text') or ''))
-        ok_('...and the money with it',
-            '\u2713 3 for $62 net' in (after.get('text') or ''))
+            (after.get('text') or '').startswith('\u27133 $62'))
+        ok_('...and the money with it, behind "…" too',
+            '\u2713 3 for $62 net' in (after.get('full') or ''))
 
     # A number that cannot be right is not printed. Each of these is a state
     # where the count would look perfectly plausible and be wrong.
@@ -7267,7 +7403,7 @@ try:
             ok_('...and says so rather than counting (%s)' % key,
                 must in (slot.get('text') or ''))
             ok_('...and prints no offer count (%s)' % key,
-                'offer' not in (slot.get('text') or ''))
+                'offer' not in (slot.get('text') or '') + (slot.get('full') or ''))
 
     # An older build has no such route and answers text/plain, so .json()
     # rejects. Asserting a hidden line on a page that never got an answer proves
@@ -7276,7 +7412,7 @@ try:
     before, lost = got.get('shiftBefore') or {}, got.get('shiftLost') or {}
     ok_('the shift line was on the panel first', bool(before))
     if before:
-        ok_('...showing a shift', '7 offers' in (before.get('text') or ''))
+        ok_('...showing a shift', '7 offers' in (before.get('full') or ''))
         # A request that FAILED says so. The row used to be hidden here too,
         # and at three minutes a poll one dropped request blanked the only
         # takings figure on the panel — a blank that reads exactly like a
@@ -7287,9 +7423,9 @@ try:
             failed.get('hidden'))
         ok_('...naming the failure (%r)' % (failed.get('text') or ''),
             'could not be fetched' in (failed.get('text') or ''))
-        no_('...without the old figures standing beside it',
-            'offer' in (failed.get('text') or '')
-            or '$' in (failed.get('text') or ''))
+        no_('...without the old figures standing beside it, or behind "…"',
+            'offer' in (failed.get('text') or '') + (failed.get('full') or '')
+            or '$' in (failed.get('text') or '') + (failed.get('full') or ''))
         eq('...and the 404 ask really happened', got.get('shiftLostAsks'), 3)
         ok_('...and it comes off when the figures can no longer be had',
             lost.get('hidden'))
@@ -7303,16 +7439,17 @@ try:
     ok_('the pre-clock state was measured', bool(early))
     if early:
         ok_('...and an all-time tally is not printed on a line about today',
-            'before the clock' not in (early.get('text') or ''))
+            'before the clock' not in (early.get('text') or '') + (early.get('full') or ''))
         ok_('...while today\'s own figures still are',
-            '3 offers' in (early.get('text') or ''))
+            '3 offers' in (early.get('full') or ''))
         # This stub carries no `earned` — it is the shape a server one release
         # behind answers with — and the count has to stand alone as it always
         # did, not print "for $undefined" or "for $NaN".
         ok_('...and a server that sends no total leaves the count alone (%r)'
             % (early.get('text') or '')[-30:],
-            '\u2713 1' in (early.get('text') or '')
-            and ' for $' not in (early.get('text') or ''))
+            (early.get('text') or '').startswith('\u27131')
+            and '$' not in (early.get('text') or '').split('\u00b7')[0]
+            and ' for $' not in (early.get('full') or ''))
 
     # A net below zero, signed the way every other figure on these pages is.
     # The first version printed "$-1".
@@ -7320,8 +7457,9 @@ try:
     ok_('the negative-net state was measured', bool(neg))
     if neg:
         ok_('...and prints the sign before the dollar (%r)' % (neg.get('text') or '')[-24:],
-            '\u2713 1 for -$1 net' in (neg.get('text') or ''))
-        ok_('...never as $-1', '$-' not in (neg.get('text') or ''))
+            '\u2713 1 for -$1 net' in (neg.get('full') or '')
+            and (neg.get('text') or '').startswith('\u27131 -$1'))
+        ok_('...never as $-1', '$-' not in (neg.get('text') or '') + (neg.get('full') or ''))
 
     # ...and the median, which had its own copy of the same slip. A shift of
     # short, far offers with a running cost set puts this below zero.

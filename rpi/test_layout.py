@@ -78,6 +78,16 @@ SNAP_PANELS = [
     ('740x360', 740, 360),    # a smaller phone on its side, in the hat's layout
     ('700x400', 700, 400),    # landscape, but a row too narrow for it
     ('768x1024', 768, 1024),  # a tablet held upright
+    # ...and the pixel either side of where the room runs out, with the row
+    # as it is since the rest of it went behind "…": 765 wide cuts the
+    # median by 0.67px with the camera, 766 leaves it 0.27, at 480 tall; 420
+    # cuts it by 0.3 and 421 leaves 0.64 held upright. Upright at 920 tall,
+    # not 844: at 844 the phone picture of a screen that wide runs the page
+    # past the glass whatever the row says, which is not this question.
+    ('765x480', 765, 480),
+    ('766x480', 766, 480),
+    ('420x920', 420, 920),
+    ('421x920', 421, 920),
 ]
 
 # journal.html is one continuous list — a week of offers is fourteen thousand
@@ -910,13 +920,15 @@ def caption_strings(page_src):
 #
 # What the status row is given to carry while 📷 Snap's place on it is
 # measured. The shift line is the widest real one — the shape
-# rpi/test_dashboard.py stages for the hat, as live.html writes it — and the
+# rpi/test_dashboard.py stages for the hat, as live.html writes it on the row
+# since the rest went behind "…" (fillMore): the ticks, what they came to and
+# the median, with the separator the stylesheet puts in front — and the
 # connection line is the longest that row says in ordinary use: five minutes
 # of silence from the scanner. Longer is possible ("for 3000s", or "scanner not
 # running:" with an error after it) and cuts the median with or without this
 # control; that is the row's own documented trade, not this control's.
 SNAP_FIXTURE = {
-    'shift': '· ✓ 10 for $141 net · -$17/hr an offer · 435 offers · 7 set aside',
+    'shift': '✓10 $141 · -$17/hr an offer',
     'figure': '-$17/hr',
     'conn': 'nothing from the scanner for 300s',
     # The longest line a press answers with: the tool failing with what it
@@ -997,10 +1009,11 @@ CHIPS_CARD = dict(_FOUNDPAY_CARD, state='warn', perHour=21.8, grossPerHour=21.8,
 # and the status row. The rig's own 1024x600 takes a fifth more than the
 # 800x480 the sizes were set on (live.html, the min-width: 1000px block):
 # the address 15 to 18, the labels 16 to 19 over figures 20 to 24, the line
-# under the card 16 to 19. Not the notice, whose chips would be taller than
+# under the card 16 to 19, and the status row 15 to 18 since the rest of it
+# went behind "…" (fillMore). Not the notice, whose chips would be taller than
 # the sentences at 19 (that rule says how much). The 800x480 and the 3.5" hat
 # are where they were.
-SMALL_SIZES = {'1024x600': [18, 19, 24, 19, 16, 15],
+SMALL_SIZES = {'1024x600': [18, 19, 24, 19, 16, 18],
                '800x480': [15, 16, 20, 16, 16, 15],
                '480x320': [14.4, 12, 15, 10, 16, 15]}
 CHIPS_WANT = ['OFFERS NOT SAVED · Read-only file system',
@@ -1851,11 +1864,29 @@ const SNAP_MEASURE = (fixture) => {
         // sentences fit TODAY; this proves the page is the thing holding them,
         // so a stylesheet edit that drops the rule fails here rather than
         // waiting for a sentence long enough to notice.
+        // Leaflet's zoom buttons, as the page's own rule sizes them: a
+        // stand-in with Leaflet's classes in the map, measured and removed.
+        // Leaflet's stylesheet comes from the CDN this box cannot reach, so
+        // the size is the page's rule alone (#liveMap .leaflet-control-zoom
+        // a), which is the point: that rule is what makes them 48px. Leaflet
+        // puts the bar 10px in with a 2px border, so the column of two ends
+        // 10 + 2 + w + 2 across and 10 + 2 + 2h + 2 down.
+        shown.zoom = await page.evaluate(() => {
+          const z = document.createElement('div');
+          z.className = 'leaflet-control-zoom leaflet-bar leaflet-control';
+          z.innerHTML = '<a class="leaflet-control-zoom-in" href="#">+</a>'
+            + '<a class="leaflet-control-zoom-out" href="#">\u2212</a>';
+          document.getElementById('liveMap').appendChild(z);
+          const a = z.querySelector('a').getBoundingClientRect();
+          z.remove();
+          return { w: Math.round(a.width), h: Math.round(a.height),
+                   right: 10 + 2 + a.width + 2, bottom: 10 + 2 + 2 * a.height + 2 };
+        });
         // ...and the "you are here" label in the map's corner, in every form
-        // it can take: inside the map, clear of Leaflet's zoom buttons (10px
-        // in, 30px wide, a 2px border: 44px), in no more than two rows, and
-        // nothing spilling out of its own box.
-        shown.here = await page.evaluate((lines) => {
+        // it can take: inside the map, clear of Leaflet's zoom buttons (as
+        // measured above), in no more than two rows, and nothing spilling out
+        // of its own box.
+        shown.here = await page.evaluate(([lines, zoomRight]) => {
           const note = document.getElementById('hereNote');
           const map = document.getElementById('liveMap').getBoundingClientRect();
           const out = {};
@@ -1877,7 +1908,7 @@ const SNAP_MEASURE = (fixture) => {
             out[pair[0]] = {
               inside: r.left >= map.left - 0.5 && r.right <= map.right + 0.5
                 && r.top >= map.top - 0.5 && r.bottom <= map.bottom + 0.5,
-              clearOfZoom: r.left >= map.left + 44,
+              clearOfZoom: r.left >= map.left + zoomRight,
               rows: Object.keys(tops).length,
               spills: note.scrollWidth > note.clientWidth + 1
                 || note.scrollHeight > note.clientHeight + 1,
@@ -1886,17 +1917,17 @@ const SNAP_MEASURE = (fixture) => {
           note.hidden = true;
           note.textContent = '';
           return out;
-        }, LIVE_HERE_LINES);
+        }, [LIVE_HERE_LINES, shown.zoom.right]);
         // ...and the key to how each place was found (drawHow), across the
         // map's foot: shown as the page's own rule draws it on this panel,
         // and asked the same of — inside the map, below the zoom buttons
-        // (10px in, two 30px buttons and their 2px borders: 74px), ONE row,
+        // (as measured above), ONE row,
         // nothing cut — plus which of its two forms this panel gets.
         // Both of its forms: what it says of the marks, and what it says
         // when drawing them failed (showKey(null)) — and the marks' form
         // with the held order's pickup ring in it too, which drops the long
         // words everywhere and takes two rows on the hat (see #mapKey's rule).
-        const KEY_MEASURE = ([failed, hpick]) => {
+        const KEY_MEASURE = ([failed, hpick, zoomBottom]) => {
           const key = document.getElementById('mapKey');
           const map = document.getElementById('liveMap').getBoundingClientRect();
           key.hidden = false;
@@ -1919,7 +1950,7 @@ const SNAP_MEASURE = (fixture) => {
           const out = {
             inside: r.left >= map.left - 0.5 && r.right <= map.right + 0.5
               && r.top >= map.top - 0.5 && r.bottom <= map.bottom + 0.5,
-            belowZoom: r.top >= map.top + 74,
+            belowZoom: r.top >= map.top + zoomBottom,
             rows: Object.keys(tops).length,
             spills: key.scrollWidth > key.clientWidth + 1
               || key.scrollHeight > key.clientHeight + 1,
@@ -1931,9 +1962,9 @@ const SNAP_MEASURE = (fixture) => {
           key.querySelector('.k-item[data-k="hpick"]').hidden = false;
           return out;
         };
-        shown.key = await page.evaluate(KEY_MEASURE, [false, false]);
-        shown.keyHeld = await page.evaluate(KEY_MEASURE, [false, true]);
-        shown.keyFailed = await page.evaluate(KEY_MEASURE, [true, false]);
+        shown.key = await page.evaluate(KEY_MEASURE, [false, false, shown.zoom.bottom]);
+        shown.keyHeld = await page.evaluate(KEY_MEASURE, [false, true, shown.zoom.bottom]);
+        shown.keyFailed = await page.evaluate(KEY_MEASURE, [true, false, shown.zoom.bottom]);
         // ...and what a mark of drawHow's says when pointed at (#mapTip):
         // the longest the suite's marks say — a refused McDonald's with the
         // branch outside its 9.9 mi disc, 142 characters — in the one box
@@ -2283,6 +2314,13 @@ const SNAP_MEASURE = (fixture) => {
                                status: { phase: 'scanning', message: '' },
                                last: null, lastAgeMs: null, heardAgeMs: 400,
                                offer: null, holding: null }) }));
+      // The widest real shift (the shape SNAP_FIXTURE carries), for the row.
+      await page.route('**/api/today*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ offers: 435, counted: 428, setAside: 7, took: 10,
+                               median: -17, earned: 140.5, earnedCost: 31.0,
+                               beforeClock: 0, unreadable: null, rolled: false,
+                               clockSet: true }) }));
       await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.waitForFunction(() => document.getElementById('view').naturalWidth > 2,
                                  null, { timeout: 10000 }).catch(() => {});
@@ -2477,6 +2515,85 @@ const SNAP_MEASURE = (fixture) => {
       await page.waitForTimeout(200);
       chipsAt.open = await page.evaluate(CHIPS_MEASURE);
       out[panel[0] + ' ' + view + ' chips'] = chipsAt;
+      // ...and the status row in the steady state, short, with "…" opened.
+      await page.click('#warn', { timeout: 5000 }).catch(() => {});
+      await page.evaluate(() => {
+        if (window.__es.onopen) window.__es.onopen();
+        window.__es.push({ alive: true, at: 1, notSaving: null, tooBright: false });
+      });
+      await page.waitForTimeout(200);
+      const ROW_MEASURE = () => {
+        const d = document.documentElement;
+        const row = document.querySelector('.connbar');
+        const more = document.getElementById('more');
+        const shift = document.getElementById('shift');
+        const sheet = document.getElementById('moreSheet');
+        const box = (el) => {
+          const b = el.getBoundingClientRect();
+          return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
+        };
+        const glyphsOut = (el, r) => {
+          let out = '';
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          const rg = document.createRange();
+          let n;
+          while ((n = walk.nextNode())) {
+            for (let i = 0; i < n.length; i++) {
+              rg.setStart(n, i);
+              rg.setEnd(n, i + 1);
+              const c = rg.getBoundingClientRect();
+              if (!c.width && !c.height) continue;
+              if (c.left < Math.max(0, r.left) - 0.5 || c.right > Math.min(window.innerWidth, r.right) + 0.5
+                  || c.top < Math.max(0, r.top) - 0.5
+                  || c.bottom > Math.min(window.innerHeight, r.bottom) + 0.5) out += n.data[i];
+            }
+          }
+          return out;
+        };
+        const sr = shift.getBoundingClientRect();
+        // The median's digits, found by shape (as test_dashboard's hat check).
+        const m = /(-?\$\d+\/hr)/.exec(shift.textContent);
+        let figureIn = false;
+        if (m && shift.firstChild) {
+          const at = shift.firstChild.nodeValue.indexOf(m[1]);
+          const rg = document.createRange();
+          rg.setStart(shift.firstChild, at);
+          rg.setEnd(shift.firstChild, at + m[1].length);
+          const fr = rg.getBoundingClientRect();
+          figureIn = fr.right <= sr.right + 0.5 && fr.right <= window.innerWidth + 0.5;
+        }
+        const layout = () => JSON.stringify({ row: box(row), bar: [].slice.call(
+          document.querySelector('.bottombar').children).map(box) });
+        const withIt = layout();
+        more.style.display = 'none';
+        const without = layout();
+        more.style.display = '';
+        const mr = more.getBoundingClientRect();
+        const live = document.querySelector('.live').getBoundingClientRect();
+        const shR = sheet.getBoundingClientRect();
+        return {
+          conn: getComputedStyle(document.getElementById('conn')).display !== 'none',
+          shift: shift.textContent, shiftWhole: shift.scrollWidth <= shift.clientWidth + 1,
+          figureIn: figureIn,
+          more: mr.width > 0 && mr.left >= -0.5 && mr.right <= window.innerWidth + 0.5
+                && mr.bottom <= window.innerHeight + 0.5 && !!more.closest('.connbar'),
+          moreOut: glyphsOut(more, mr), moreW: Math.round(mr.width),
+          moreCostsNothing: withIt === without,
+          sheet: !sheet.hidden && shR.height > 0,
+          sheetOut: sheet.hidden ? '' : glyphsOut(sheet, shR),
+          sheetInPane: sheet.hidden || (shR.left >= live.left - 1 && shR.right <= live.right + 1
+                                        && shR.top >= -0.5
+                                        && shR.bottom <= row.getBoundingClientRect().top + 0.5),
+          layout: layout(),
+          over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
+        };
+      };
+      const rowAt = { closed: await page.evaluate(ROW_MEASURE) };
+      await page.click('#more', { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(150);
+      rowAt.open = await page.evaluate(ROW_MEASURE);
+      await page.click('#more', { timeout: 5000 }).catch(() => {});
+      out[panel[0] + ' ' + view + ' row'] = rowAt;
       await page.close();
       await ctx.close();
     }
@@ -3398,6 +3515,38 @@ try:
                 '(%spx, %spx)' % (where, _c.get('need'), _o.get('need')),
                 (_c.get('need') or 1e9) < (_o.get('need') or 0))
 
+    # The status row, steady: the dot, the ticks, what they came to and the
+    # median, 📷 and "…", with "scanner reading" left to the green dot. The
+    # widest real figures whole on the rig's panel and the 800x480, and the
+    # median's digits on the glass on the 3.5" hat; "…" on the glass, its
+    # glyph in its box, costing the row and the bar nothing. Opened, the
+    # sheet sits over the verdict's column above the row, every letter in
+    # it, and the row and the bar where they were.
+    for panel, w, h in NOVERDICT_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            rm = got.get('%s %s row' % (panel, view)) or {}
+            _r, _o = rm.get('closed') or {}, rm.get('open') or {}
+            eq('the status row is short at %s, with no words for the steady connection'
+               % where, (_r.get('shift'), _r.get('conn')),
+               ('\u271310 $141 \u00b7 -$17/hr an offer', False))
+            if h > 380:
+                ok_('...whole at %s' % where, _r.get('shiftWhole'))
+            ok_('...the median\'s digits on the glass at %s' % where, _r.get('figureIn'))
+            ok_('..."…" on the row and the glass at %s (%spx)' % (where, _r.get('moreW')),
+                _r.get('more'))
+            eq('...its glyph inside its box at %s' % where, _r.get('moreOut'), '')
+            ok_('...costing the row and the bar nothing at %s' % where,
+                _r.get('moreCostsNothing'))
+            no_('...nothing past the glass at %s' % where, _r.get('over'))
+            ok_('"…" opens the whole row at %s' % where, _o.get('sheet'))
+            ok_('...over the verdict\'s column, above the row, at %s' % where,
+                _o.get('sheetInPane'))
+            eq('...every letter of it inside it at %s' % where, _o.get('sheetOut'), '')
+            eq('...and the row and the bar where they were at %s' % where,
+               _o.get('layout'), _r.get('layout'))
+            no_('...nothing past the glass at %s' % where, _o.get('over'))
+
     # The Trip Planner's stops between offers, at the most the block holds:
     # four stops and the line under them. Every one on a line of its own, its
     # kind and time on the glass and its name begun, with only the rest of the
@@ -4028,6 +4177,12 @@ try:
                 # none of its rows and the map none of its floor. What has to
                 # hold is that every form of it is on the map, clear of the
                 # zoom buttons, whole, and short enough to read at a glance.
+                # Leaflet's zoom buttons, pressed at a red light: 48px on
+                # every panel, the hat's map included (see the rule in
+                # live.html), with the label and the key held clear below.
+                _zm = phone.get('zoom') or {}
+                eq('Leaflet\'s zoom buttons are 48px at %s' % panel,
+                   (_zm.get('w'), _zm.get('h')), (48, 48))
                 here = phone.get('here') or {}
                 eq('every "you are here" form was measured at %s' % panel,
                    sorted(name for name, _t in LIVE_HERE_LINES if name not in here), [])

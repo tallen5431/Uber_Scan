@@ -538,6 +538,32 @@
     padding: 4px 8px; margin: -4px 0; line-height: inherit;
     flex: none; white-space: nowrap; cursor: pointer;
   }
+  /* "…": the rest of the status row (fillMore). Drawn as 📷 is and costing
+     the row no height for the same reason; the one thing on the row that is
+     always drawn after the figures, so the row can be short. 48px wide where
+     the row has the room, which is every panel's rule for a glyph pressed in
+     a car. */
+  #more {
+    appearance: none; font: inherit; font-weight: 700; color: var(--text);
+    background: transparent; border: 0; box-shadow: inset 0 0 0 1px var(--line);
+    border-radius: 8px; padding: 4px 7px; margin: -4px 0; line-height: inherit;
+    flex: none; cursor: pointer;
+  }
+  #more[aria-expanded="true"] { box-shadow: inset 0 0 0 2px var(--text); }
+  /* "scanner reading" is said by the green dot (showConnection). */
+  #conn.steady { display: none; }
+  /* The separator before the shift line, when something stands before it. */
+  #shift::before { content: '\00b7\00a0'; }
+  .connbar:has(#conn.steady):has(#health[hidden]) #shift::before { content: none; }
+  .moresheet {
+    position: fixed; left: 8px; right: 8px; bottom: 72px; z-index: 38;
+    padding: 8px 12px; border-radius: 12px; border: 2px solid var(--line);
+    background: var(--panel-2); color: var(--text);
+    font-size: 15px; line-height: 1.4;
+  }
+  .moresheet[hidden] { display: none; }
+  .moresheet a { color: inherit; }
+  .moresheet .m-health, .moresheet .m-conn { color: var(--muted); }
   #snap .word { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
                 overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   /* What the press kept, said on the control itself. It can be a sentence —
@@ -559,28 +585,35 @@
 
      So the rule is the row's own width, asked of the row: it is a container,
      and the camera goes below the width at which it starts to cut the digits.
-     That is 476px of row in landscape, where the row is set at 15px, and
-     389px in portrait, at 12px — measured by widening the screen a pixel at a
-     time until the digits came clear (775 to 779 wide at 480 tall, 423 to 427
-     at 844). The screen's size was the rule before, as a stand-in, and it was
-     wrong both ways: it hid the camera from rows with room for it (a tablet
-     upright at 768x1024, 54px to spare; a phone on its side at 740x360, 220)
-     and drew it over digits it cut (700x400, by 30px); and it drew it on a
-     phone held on its side at 844x390 (115px to spare), which the words
-     beside it said it would not.
+     That is 464.5px of row in landscape, where the row is set at 15px, and
+     384.5px in portrait, at 12px — the row's content box, inside its 4px and
+     8px padding — measured by widening the screen a pixel at a time until
+     the digits came clear (765 to 766 wide at 480 tall, content boxes of
+     463.98 and 464.98px; 420 to 421 upright, 384 and 385). That is with the
+     row as it is since the rest went behind "…": the widest short line,
+     "✓10 $141 · -$17/hr an offer", beside "nothing from the scanner for
+     300s" and "…". (It was 476 and 389 with the whole line on the row and
+     no "…".) The screen's size was the rule before, as a stand-in, and it
+     was wrong both ways: it hid the camera from rows with room for it (a
+     tablet upright at 768x1024, 44px to spare now; a phone on its side at
+     740x360, whose median is not cut at all) and drew it over digits it cut
+     (700x400, by 19px now); and it drew it on a phone held on its side at
+     844x390, which the words beside it said it would not.
 
-     Measured: 800x480 keeps 22px to spare with it, 1024x768 80, 1024x600 174,
-     1280x800 220. The 3.5" hat (19px short) and a phone held upright (34
-     short) do not draw it; snaps.html carries the same press for them,
-     reached from the offers page. A phone on its side does draw it, and
-     what it photographs from there is the rig's display, not the phone's —
-     the same as snaps.html's press, and the control's title says so. */
+     Measured with the short line, the spare is to the end of the line where
+     nothing is cut: 800x480 keeps 32px to spare with it, 1024x768 14 (its
+     row is 18px there), 1024x600 and 1280x800 the whole of " an offer". The
+     3.5" hat (8px short) and a phone held upright (29 short) do not draw it;
+     snaps.html carries the same press for them, reached from the offers
+     page. A phone on its side does draw it, and what it photographs from
+     there is the rig's display, not the phone's — the same as snaps.html's
+     press, and the control's title says so. */
   .connbar { container: connrow / inline-size; }
   @media (orientation: landscape) {
-    @container connrow (width < 476px) { #snap { display: none; } }
+    @container connrow (width < 464.5px) { #snap { display: none; } }
   }
   @media (orientation: portrait) {
-    @container connrow (width < 389px) { #snap { display: none; } }
+    @container connrow (width < 384.5px) { #snap { display: none; } }
   }
   /* What the rig says about itself — the GPS, a throttling Pi — between the
      two. Same one-line rule as the shift line, and it outranks it: the shift
@@ -684,8 +717,19 @@
      with the dot when the fix is older than gps.py's staleness rule.
      rpi/test_layout.py holds it inside the map at 800x480, 1024x600 and
      480x320. */
+  /* Leaflet's zoom buttons, which are pressed in the car: 48px square, where
+     Leaflet draws 30. Whole here — display, width, height and line height —
+     so the size is this rule's and not Leaflet's stylesheet's, which arrives
+     from the CDN with the map. The bar stays 10px in with Leaflet's 2px
+     border, so the column of two ends 62px across and 110px down; the
+     "you are here" label and the key are held clear of that, on every
+     panel and the 3.5" hat too (rpi/test_layout.py, beside the phone). */
+  #liveMap .leaflet-control-zoom a {
+    display: block; width: 48px; height: 48px; line-height: 48px;
+    font-size: 26px; text-align: center;
+  }
   #hereNote { position: absolute; top: 8px; right: 8px; z-index: 1001;
-              max-width: calc(100% - 64px); box-sizing: border-box;
+              max-width: calc(100% - 80px); box-sizing: border-box;
               padding: 2px 8px; border-radius: 10px; font-size: 13px;
               line-height: 1.35; color: var(--text);
               background: rgba(11, 13, 16, .85); pointer-events: none; }
@@ -1000,6 +1044,10 @@
       grid-column: 1; grid-row: 1; margin: 0;
     }
     #app > .undo { align-self: end; }
+    #app > .moresheet {
+      position: relative; left: auto; right: auto; bottom: auto;
+      grid-column: 1; grid-row: 1; margin: 0; align-self: end;
+    }
   }
   /* The pair line with two orders in the car: weighed against ① alone until
    * the detour through both exists (Stage 6), and it says so. Whole, like
@@ -1049,6 +1097,8 @@
     .sub { font-size: 24px; }
     .sub small { font-size: 19px; }
     .pending { font-size: 19px; }
+    /* ...and the status row, now that it is short (fillMore): 15 to 18. */
+    .connbar { font-size: 18px; }
   }
 </style>
 </head>
@@ -1236,7 +1286,10 @@
        Not 52px, which every control on the bar is held to. Those are pressed
        at a red light; this is pressed parked, with the mouse, to keep a
        picture, and the status link beside it is the same kind of target. -->
-  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="health" hidden></span><span id="shift" hidden></span><button type="button" id="snap" title="📷 Snap: keep a picture of the rig's own screen, on the rig, to share. They are listed on the offers page under 📷 Snaps.">📷<span class="word"> Snap</span></button></div>
+  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="health" hidden></span><span id="shift" hidden></span><button type="button" id="snap" title="📷 Snap: keep a picture of the rig's own screen, on the rig, to share. They are listed on the offers page under 📷 Snaps.">📷<span class="word"> Snap</span></button><button type="button" id="more" aria-expanded="false" aria-controls="moreSheet" aria-label="Everything the status row has to say" title="Everything the status row has to say">…</button></div>
+  <!-- ...and what "…" opens: the status row in full, over the foot of the
+       verdict pane. See fillMore. -->
+  <div class="moresheet" id="moreSheet" hidden></div>
 
   <!-- The chooser and the Undo, over the verdict pane: see .chooser. -->
   <div class="chooser" id="chooser" role="dialog" aria-label="Choose" hidden></div>
@@ -3192,8 +3245,11 @@
   }
 
   function showShift(s) {
-    if (!s) { el.shift.hidden = true; return; }
+    if (!s) { el.shift.hidden = true; shiftFull = ''; fillMore(); return; }
     var bits;
+    // What the row itself carries, when the figures are there: the ticks and
+    // what they came to, and the median with its noun (see showStatus).
+    var short = null;
     if (s.clockSet === false) {
       // The rig's own clock has not been set, so it does not yet know what day
       // it is on. Every window over the journal is meaningless until NTP lands,
@@ -3306,6 +3362,17 @@
         bits.push((s.median < 0 ? '-$' : '$')
                   + Math.abs(Math.round(s.median)) + '/hr an offer');
       }
+      // The short form: "✓7 $86 · $13/hr an offer". The tick and its count
+      // run together and the "for" and "net" go behind "…" with the count of
+      // offers and the set-aside. The median keeps "an offer": a bare figure
+      // one dot after the takings reads as the rate of the jobs just named,
+      // which is the fault the noun was put there to end (AUDITS, "The shift
+      // row's median was the typical OFFER"), and on the owner's week it was
+      // pessimistic by 1.5x to 2.3x that way.
+      short = ['\u2713' + s.took
+               + (s.took > 0 && typeof s.earned === 'number'
+                  ? ' ' + (s.earned < 0 ? '-$' : '$') + Math.abs(Math.round(s.earned))
+                  : '')].concat(bits.slice(1));
       bits.push(s.offers + (s.offers === 1 ? ' offer' : ' offers'));
       if (s.setAside) bits.push(s.setAside + ' set aside');
       // `beforeClock` is deliberately NOT printed here. Offers the rig recorded
@@ -3317,9 +3384,68 @@
       // about the journal and a diagnostic may want it; it is not a figure for
       // this row.
     }
-    el.shift.textContent = '· ' + bits.join(' · ');
+    // The separator in front is the stylesheet's (#shift::before), because
+    // whether anything stands before this line is the connection's to say.
+    el.shift.textContent = (short || bits).join(' · ');
+    shiftFull = bits.join(' · ');
+    el.shift.title = shiftFull;
     el.shift.hidden = false;
+    fillMore();
   }
+
+  // --- the rest of the status row, behind "…" ------------------------------
+  //
+  // The row was "● scanner reading · ✓ 7 for $86 net · $13/hr an offer · 70
+  // offers · 13 set aside", 15px grey across the panel's foot, read at a
+  // glance for one thing: is it reading, and what has tonight come to. The
+  // dot answers the first in colour, so "scanner reading" — the steady state
+  // — is not written on the row (`steady`, showConnection); anything else the
+  // connection has to say still is, in words, beside the dot it turned red.
+  // The takings and the median stay; the rest is one press away on "…", a
+  // sheet over the foot of the card with the whole of what the row knows:
+  // the connection in words with the status link, the rig's own note, and
+  // the shift line in full. Not on the bar (it holds six): on the row, like
+  // 📷, at no height.
+  var shiftFull = '';
+  var MORE_MS = 10000;
+  var moreBack = null;
+  var moreBtn = document.getElementById('more');
+  var moreSheet = document.getElementById('moreSheet');
+
+  function fillMore() {
+    if (!moreSheet || moreSheet.hidden) return;
+    moreSheet.textContent = '';
+    var line = function (text, cls) {
+      var d = document.createElement('div');
+      if (cls) d.className = cls;
+      d.textContent = text;
+      moreSheet.appendChild(d);
+      return d;
+    };
+    var c = line('', 'm-conn');
+    var a = document.createElement('a');
+    a.href = '/api/status';
+    a.textContent = el.conn.textContent;
+    c.appendChild(a);
+    if (!el.health.hidden && el.health.textContent) line(el.health.textContent, 'm-health');
+    if (shiftFull) line(shiftFull, 'm-shift');
+  }
+
+  function showMore(on) {
+    clearTimeout(moreBack);
+    moreSheet.hidden = !on;
+    moreBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    if (on) {
+      fillMore();
+      moreBack = setTimeout(function () { showMore(false); }, MORE_MS);
+    }
+  }
+  moreBtn.addEventListener('click', function () { showMore(moreSheet.hidden); });
+  // A press on the sheet itself puts it away, except on the status link.
+  moreSheet.addEventListener('click', function (e) {
+    if (e.target && e.target.tagName === 'A') return;
+    showMore(false);
+  });
 
   // 1 Jan 2025, the same floor server.js applies. Below this a clock is not a
   // clock: the Pi has no RTC, boots in 1970 and jumps when NTP arrives.
@@ -4095,6 +4221,10 @@
     }
     el.health.textContent = note;
     el.health.hidden = !note;
+    // "scanner reading" is the steady state and the green dot says it; the
+    // words are behind "…". Every other state keeps its words on the row.
+    el.conn.classList.toggle('steady', el.conn.textContent === 'scanner reading');
+    fillMore();
     // ...and the dot with it. A rig that cannot see is not reading offers,
     // which is the one thing the dot is for; left green it said "reading"
     // beside the words saying it could not.
