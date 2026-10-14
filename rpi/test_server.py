@@ -6012,7 +6012,9 @@ try:
     _pin(_gb, _h)
     # The pin is on disk as soon as it is kept, not only once an arrival
     # happens to write the hold: a restart between the two must keep it.
+    # holding.json is {v: 2, orders: [hold]} since two orders can be carried.
     _hj = json.load(open(os.path.join(_gdir, 'holding.json')))
+    _hj = ([o for o in _hj.get('orders') or [] if o.get('id') == 'g-boot'] or [{}])[0]
     eq('[gps drop] the pin is written to holding.json the moment it is kept',
        ((_hj.get('endPin') or {}).get('lat'), (_hj.get('endPin') or {}).get('doorLevel')),
        (_PIN[0], True))

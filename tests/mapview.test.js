@@ -1583,8 +1583,12 @@ async function nucbox() {
        JSON.stringify(run4),
        JSON.stringify([[SQ.lat, SQ.lon], [SQ.lat, A.lon], [A.lat, A.lon], [A.lat, B.lon],
                        [B.lat, B.lon], [B.lat, S.lon], [S.lat, S.lon]]));
+    // Sorted: runLine asks its pieces at once (Promise.all), and which one
+    // reaches the fake first is the event loop's to decide — the merged run
+    // of wip/verify-exp saw "2,3" once in three.
     eq('...in two questions of at most three points (' + asked4.length + ')',
-       asked4.map(function (u) { return u.split('?')[0].split(';').length; }).join(','), '3,2');
+       asked4.map(function (u) { return u.split('?')[0].split(';').length; })
+         .sort().join(','), '2,3');
     eq('a run with a piece the router has no road for is not drawn along roads: '
        + 'the straight run stands',
        await nbx.runLine([SQ, { lat: 34.0010, lon: -84.5560 }, S]), null);
