@@ -556,13 +556,18 @@ function startScanner() {
           // cards' pickups (Assemble.sameStore) is marked with that order's
           // id, `of`, which Map view numbers its pin by (P1, P2). One that
           // fits both, or neither, is no order's and stays a plain P.
-          ownPickups(read.planner.stops, plannedAt);
+          // The page this read was, off its sighting (same `at`): its app
+          // for ownPickups, and whether it shows the top of the list.
+          var plannerPage = Assemble.pageOf(assembly, read.planner.at);
+          ownPickups(read.planner.stops, plannedAt, plannerPage, read.planner.at);
           if (heldNow) {
             heldNow.planner = { stops: read.planner.stops,
                                 unfiled: read.planner.unfiled || null };
             // ...and a pickup it lists no longer marked visited, by the
-            // planner's word (plannerVisits).
-            plannerVisits(heldNow, read.planner.stops, plannedAt);
+            // planner's word (plannerVisits) — only off a read that shows
+            // the list from its top.
+            plannerVisits(heldNow, read.planner.stops, plannedAt,
+                          !!(plannerPage && plannerPage.top === true));
             // ...and its pickups searched for on the NucBox, for the
             // restaurant guard (searchHeldPickup); a no-op for one already
             // asked about on this hold.
@@ -1400,17 +1405,28 @@ function retryPool() {
   }
 }
 
-/* A Trip Planner's pickups, each marked with the order whose card names that
- * store (`of`), when exactly one of the orders in the car does: Map view
- * numbers that pin P1 or P2. Two orders from one store, or none, leave it a
- * plain P. With one order there is nothing to number. */
-function ownPickups(stops, now) {
+/* A Trip Planner's pickups, each marked with the order it is for (`of`),
+ * when the assembler's own cues decide one (Assemble.attribute): the app —
+ * Uber's planner is no DoorDash order's — the Took — a read older than an
+ * order's Took is not that order's — and the store the stop names against
+ * each card's pickup (MV.plannerName, less the icon's letters). Never the
+ * deadline, growth or elimination, which are about a dropoff. Map view
+ * numbers that pin P1 or P2, and a held pickup is filed, pinned and visited
+ * under that order (pickupOwner). Two orders from one store, or no cue,
+ * leave it no order's: a plain P, and nothing ever marked of it. With one
+ * order there is nothing to decide. `page` is the read's (Assemble.pageOf),
+ * for its app; `at` the read's own time. */
+function ownPickups(stops, now, page, at) {
   var orders = heldOrders(now);
+  stops.forEach(function (st) { if (st) delete st.of; });
   if (!carryTwo() || orders.length < 2) return;
   stops.forEach(function (st) {
     if (!st || st.kind !== 'pickup') return;
-    var mine = orders.filter(function (o) { return Assemble.sameStore(st.name, o.pickup); });
-    if (mine.length === 1) st.of = holdIdOf(mine[0]);
+    var a = Assemble.attribute(assembly, orders, {
+      app: page && page.app ? page.app : null,
+      at: typeof at === 'number' ? at : null,
+      store: MV.plannerName(st.name) || null });
+    if (a.order) st.of = holdIdOf(a.order);
   });
 }
 
@@ -2319,6 +2335,13 @@ function searchHeldPickup(id, q, attempt) {
  * departure puts the order down on it. So a pickup that puts the armed door
  * inside the guard takes the arrival and the dwell with it. */
 function keepPickupPin(h, at, q) {
+  // With two orders in the car, onto the order the pickup is (pickupOwner);
+  // one that is nobody's stays where it was asked for, for the guard, which
+  // reads every order's pins.
+  if (typeof q === 'string' && q && heldOrders(Date.now()).length >= 2) {
+    var own = entryOf(q, Date.now());
+    if (own) h = own.h;
+  }
   var was = null;
   var picks = (Array.isArray(h.pickupPins) ? h.pickupPins : []).filter(function (p) {
     if (p.lat === at.lat && p.lon === at.lon) { was = p; return false; }
@@ -2413,6 +2436,34 @@ function pickupEntry(h, q) {
   return e;
 }
 
+/* The one order in the car already holding a record of this pickup, as
+ * {h, e}, or null — none, or (never made, but never guessed between) two. */
+function entryOf(q, now) {
+  var hit = null;
+  var many = false;
+  heldOrders(now).forEach(function (o) {
+    (Array.isArray(o.pickups) ? o.pickups : []).forEach(function (e) {
+      if (e.q !== q) return;
+      if (hit) many = true;
+      hit = { h: o, e: e };
+    });
+  });
+  return many ? null : hit;
+}
+
+/* Whose pickup this is, by its planner line: {h, e}, or null for nobody's.
+ * With one order in the car, that order's, its record made if it is new.
+ * With two, the order that holds a record of it — made when it was the only
+ * order, or by a planner read whose cues gave the stop to one order
+ * (ownPickups' `of`, in plannerVisits) — and otherwise NOBODY's: a pickup no
+ * cue gave an order is never filed under the first one, so its pin guards a
+ * door and nothing is ever marked of it. */
+function pickupOwner(q, now) {
+  var orders = heldOrders(now);
+  if (orders.length === 1) return { h: orders[0], e: pickupEntry(orders[0], q) };
+  return entryOf(q, now);
+}
+
 /* Mark these pickups visited — [{h, e}] — write a row for each and save. The
  * row: {v, kind: 'visit', at, id, seq, holdId, pickup, by}, `pickup` the
  * index in that order's `pickups`. No address and no coordinate: what was
@@ -2444,18 +2495,19 @@ function markVisited(list, now, by) {
 
 /* One heartbeat, for the pickups: each named pin of each order in the car,
  * stepped by stepAt, and on leaving one, every pickup pinned within
- * SAME_SPOT_M of it marked visited with it, whichever order it is kept on. */
+ * SAME_SPOT_M of it marked visited with it — each under the order it is
+ * (pickupOwner), and one that is nobody's not at all. */
 function visitPickups(beat, now) {
   var orders = heldOrders(now);
   orders.forEach(function (h) {
     (Array.isArray(h.pickupPins) ? h.pickupPins : []).forEach(function (pin) {
       if (typeof pin.q !== 'string') return;
-      var e = pickupEntry(h, pin.q);
-      if (e.visited) return;
-      var step = stepAt(pickArrivalOf(h, pin), beat, now, pin, !!e.arrivedAt);
+      var own = pickupOwner(pin.q, now);
+      if (!own || own.e.visited) return;
+      var step = stepAt(pickArrivalOf(h, pin), beat, now, pin, !!own.e.arrivedAt);
       if (step === 'arrive') {
-        e.arrivedAt = now;
-        saveHold(h);
+        own.e.arrivedAt = now;
+        saveHold(own.h);
       }
       if (step !== 'left') return;
       var here = [];
@@ -2463,7 +2515,8 @@ function visitPickups(beat, now) {
         (Array.isArray(o.pickupPins) ? o.pickupPins : []).forEach(function (p) {
           if (typeof p.q !== 'string') return;
           if (MV.crowMiles(p, pin) * 1609.344 > SAME_SPOT_M) return;
-          here.push({ h: o, e: pickupEntry(o, p.q) });
+          var other = pickupOwner(p.q, now);
+          if (other) here.push(other);
         });
       });
       markVisited(here, now, 'gps');
@@ -2480,34 +2533,54 @@ function visitPickups(beat, now) {
  * short above the pickup — the screen's foot, a stop block that grew — does
  * not list it either, and that is not a visit; a pickup marked by that would
  * put the dropoff next with the restaurant still ahead, and visited is for
- * good. A read that lists the pickup leaves a visited one visited. */
+ * good. A read that lists the pickup leaves a visited one visited.
+ *
+ * ...and only off a read that shows the list from its TOP (`top`: the
+ * sighting's page.top, planner_ends' title-over-the-first-stop, found by the
+ * read's `at`, Assemble.pageOf). A read scrolled down shows the stops after
+ * the first pickup without it, which is the shape of "moved past" exactly;
+ * it marks nothing. A planner line with no sighting of its read is not
+ * known to show the top, and marks nothing either.
+ *
+ * With two orders in the car each pickup is recorded under the order its
+ * cues give it (ownPickups' `of`), and one they give neither is recorded
+ * under nobody (pickupOwner). */
 function stopKey(s) {
   if (!s || !s.kind) return null;
   var k = s.kind === 'pickup' ? MV.pickupKey(s) : (s.line || s.street || s.name || null);
   return k ? s.kind + '\n' + k : null;
 }
 
-function plannerVisits(h, stops, now) {
+function plannerVisits(h, stops, now, top) {
   var keys = stops.map(stopKey);
   var listed = [];
+  var orders = heldOrders(now);
   stops.forEach(function (s, i) {
     var q = s && s.kind === 'pickup' ? MV.pickupKey(s) : null;
     if (!q) return;
     listed.push(q);
-    var e = pickupEntry(h, q);
-    if (e.visited) return;
+    var own = orders.length < 2 ? h : (s.of ? heldById(s.of, now) : null);
+    var had = entryOf(q, now);
+    var e = had ? had.e : own ? pickupEntry(own, q) : null;
+    if (!e || e.visited) return;
     // Added to, never cut: a read showing less after the pickup is a read
     // cut shorter, not evidence that what it no longer shows is gone.
     e.after = (e.after || []).concat(keys.slice(i + 1).filter(function (k) {
       return k && (e.after || []).indexOf(k) === -1;
     }));
   });
-  var gone = (h.pickups || []).filter(function (e) {
-    return !e.visited && listed.indexOf(e.q) === -1
-      && (e.after || []).some(function (k) { return keys.indexOf(k) !== -1; });
-  });
   saveHold(h);
-  markVisited(gone.map(function (e) { return { h: h, e: e }; }), now, 'planner');
+  if (!top) return;
+  var gone = [];
+  orders.forEach(function (o) {
+    (Array.isArray(o.pickups) ? o.pickups : []).forEach(function (e) {
+      if (!e.visited && listed.indexOf(e.q) === -1
+          && (e.after || []).some(function (k) { return keys.indexOf(k) !== -1; })) {
+        gone.push({ h: o, e: e });
+      }
+    });
+  });
+  markVisited(gone, now, 'planner');
 }
 
 /* One heartbeat. Returns what the panel is told on that beat: whether the car
