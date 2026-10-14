@@ -4139,12 +4139,16 @@ const framed = (page) => page.waitForFunction(
           alive: true, at: Date.now(), atDropoff: false,
           heldEnd: { endPinned: false, arrived: false, endWhy: null,
                      visited: ['250 Example Road,'] } }));
-        // Until the line has moved off the run through the restaurant.
+        // Until the map has redrawn for the visit (the ✓ is up) and the line
+        // under it is a settled figure, whichever figure it is: waiting for
+        // the right one would sit out the timeout whenever it is wrong, and
+        // this driver runs close to its watchdog, which would report a
+        // hang instead of the check that failed.
         await page.waitForFunction(() => {
           const t = document.getElementById('viewNote').textContent;
-          return /out of your way/.test(t) && !/measuring/.test(t);
+          return (window.__letters || []).some((l) => ((l.opts || {}).icon || {}).html === '✓')
+            && /out of your way|on your way|incl\. restaurant/.test(t) && !/measuring/.test(t);
         }, null, { timeout: 4000 }).catch(() => {});
-        await page.waitForTimeout(200);
         r.routeVisited = {
           note: await note(),
           lines: await page.evaluate(() => (window.__lines || []).map((l) => ({
