@@ -147,6 +147,19 @@ for c in cases.get('screens', []):
     eq('screens / ' + c['name'], [got['app'], got['screen']],
        [c['expect']['app'], c['expect']['screen']])
 
+# What a navigation or "Deliver to" screen gives as a destination nobody pressed
+# for: [screen, find_address's line, the stop label in front of it, whether it
+# is in that Dropoff label's own block, whether the frame reads as an offer].
+# tests/corpus.test.js holds the screen, the line and the offer test; the two
+# label answers are this port's alone. See the section's comment for the 12
+# Oct layouts these are.
+for c in cases.get('navStops', []):
+    _p = P.parse(c['text'])
+    eq('navStops / ' + c['name'],
+       [P.screen_type(c['text'])['screen'], (P.find_address(c['text']) or {}).get('line'),
+        P.address_stop(c['text']), P.address_under_dropoff(c['text']),
+        _p['pay'] is not None or bool(_p['places'])], c['expect'])
+
 for c in cases.get('whole', []):
     eq('whole / ' + c['name'], P.is_whole(P.parse(c['text'])), c['expect'])
 

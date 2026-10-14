@@ -633,12 +633,45 @@ def dropoff_requested(now=None):
 # reason: long enough to cover a person doing one thing on a phone, short enough
 # that the rig is not still hunting for an address when the next offer arrives.
 DROPOFF_WINDOW = 12.0
-# At most one Trip Planner read every this many seconds that nobody pressed for.
-# See `planner_auto` in main(). The owner's figure: "at most one read every
-# ~10 s". A whole-screen read is a second or more of the Pi's attention (1.8s
-# median on the rig), so this keeps the planner from crowding out the card box
-# while it sits on the phone for a whole delivery.
-PLANNER_AUTO_EVERY = 10.0
+# At most one whole-screen read every this many seconds that nobody pressed for,
+# WHATEVER asked for it — a planner, a navigation screen, a Dropoff label (see
+# auto_read_for). One clock for all of them, `screen_auto_at` in main(): the
+# owner's figure is "at most one read every ~10 s", and a driver who flicks
+# between the planner and the map is still one phone in front of one Pi. A
+# whole-screen read is a second or more of the Pi's attention (1.8s median on
+# the rig), so this keeps the screen after the accept from crowding out the
+# card box while it sits on the phone for a whole delivery.
+SCREEN_AUTO_EVERY = 10.0
+
+
+def auto_read_for(text, planner=None):
+    """What in a card-box read asks for an unpressed whole-screen read while an
+    order is held: 'planner', 'nav', 'label', or None for nothing.
+
+      planner  the planner's stop grammar (`planner`, find_planner's headed
+               stops) or its furniture: the card box on the rig is the bottom
+               half of the screen and has never caught the planner's title.
+      nav      Uber's navigation (OP.screen_type 'uber.nav'). On the 12 Oct
+               shift 179 of the 1,237 payout-free card-box reads were this.
+               The box holds the bottom sheet, which reads "Deliver to <name>"
+               collapsed or the name, street and town opened, so the whole
+               screen is where any label above an address would be.
+      label    any other screen whose address sits under a "Deliver to" or
+               "Dropoff" label in its own block (OP.address_under_dropoff):
+               DoorDash's "Dropoff <address> 12 min Start" is typed 'unknown',
+               and is the shape that rule was built on.
+
+    Only ASKS. Not uber.pickupNav as a kind of its own: a store's navigation
+    asks only if it shows one of the three, and what the read then gives is the
+    assembler's, which files nothing off a pickup screen or from under a Pickup
+    label (assemble.js, navCandidate)."""
+    if planner is not None or OP.planner_furniture(text):
+        return 'planner'
+    if OP.screen_type(text)['screen'] == 'uber.nav':
+        return 'nav'
+    if OP.address_under_dropoff(text):
+        return 'label'
+    return None
 
 
 def settings_requested():
@@ -2694,7 +2727,7 @@ def emit_planner(stops, keep=False, ms=None, asked=True, at=None):
 
     `asked` is on the line so a row written from it says on its face whether
     it answered a press, as a dropoff mark does: True under ⌖, False for the
-    read the rig makes on its own while an order is held (`planner_auto` in
+    read the rig makes on its own while an order is held (`screen_auto` in
     main()).
     """
     print(json.dumps({'planner': {'stops': stops,
@@ -2721,7 +2754,7 @@ def planner_stops(stops):
 
 # The fields of a stop on a sighting, in this order, whichever screen it came
 # off: a planner's stop has them all; an address off any other screen has the
-# address and its label, and None for the rest.
+# address, its label and the screen's one "Expected by", and None for the rest.
 SIGHTING_STOP = ('kind', 'orders', 'name', 'place', 'expectedBy', 'street', 'city',
                  'state', 'zip', 'line', 'partial', 'label')
 
@@ -2758,6 +2791,11 @@ def sighting_stops(text, stops, address):
     one['kind'] = ('pickup' if label == 'pickup' else
                    'dropoff' if OP.address_under_dropoff(text) else None)
     one['label'] = label
+    # ...and the one "Expected by" the screen prints, as the dropoff line
+    # carries it (screen_said): Uber's navigation bar prints the stop's time,
+    # and with two orders in the car it is the deadline cue the assembler
+    # attributes a navigation destination by.
+    one['expectedBy'] = screen_said(text)['expectedBy']
     return [one], {'top': None, 'bottom': None}
 
 
@@ -3547,12 +3585,13 @@ def main():
     # ...and the order in the car when it was last looked at (held_signature),
     # which is what forgets it.
     held_seen = None
-    # The Trip Planner read the rig makes WITHOUT a press, while an order is in
-    # the car. `planner_auto` is a whole-screen read wanted on the next pass;
-    # `planner_auto_at` is when the last one was asked for, which is the rate
-    # limit. See where digest() sets it.
-    planner_auto = False
-    planner_auto_at = None
+    # The whole-screen read the rig makes WITHOUT a press, while an order is in
+    # the car: of a planner, a navigation screen, a Dropoff label
+    # (auto_read_for). `screen_auto` is a whole-screen read wanted on the next
+    # pass; `screen_auto_at` is when the last one was asked for, whichever
+    # kind asked, which is the rate limit. See where digest() sets it.
+    screen_auto = False
+    screen_auto_at = None
     last_resample = 0.0
     last_verify = 0.0
     verify_every = VERIFY_EVERY
@@ -3623,7 +3662,7 @@ def main():
         # anything failing loudly enough to notice.
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
         nonlocal dropoff_until, dropoff_said, dropoff_asked, held_seen
-        nonlocal planner_auto, planner_auto_at
+        nonlocal screen_auto, screen_auto_at
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
@@ -3810,7 +3849,7 @@ def main():
         #
         # The owner, after a shift: the driver wants the planner read
         # automatically. A whole-screen read that nobody asked for is the one
-        # `planner_auto` below requested — a press's reads are all `asked`,
+        # `screen_auto` below requested — a press's reads are all `asked`,
         # because the window is open from before they are handed over — and it
         # sends the planner line only off a screen whose TITLE reads "Trip
         # Planner": the stop grammar that started it was read in the card box,
@@ -3828,44 +3867,48 @@ def main():
                 and OP.planner_titled(out.get('text')))
         if planner is not None:
             found = None
-        # A whole-screen read nobody pressed for gives no destination at all:
+        # A whole-screen read nobody pressed for sends NO dropoff line at all:
         # not the address find_address would take off the whole screen, which
         # is the map's or a card's as often as the destination's.
         #
-        # ...EXCEPT AN ADDRESS THE SCREEN PRINTS UNDER A DROPOFF LABEL, IN ITS
-        # OWN STOP BLOCK, which the driver then asked for: "while an order is
-        # held, set its destination whenever the screen shows an address
-        # directly under a Dropoff label", with no ⌖. A whole-screen read
-        # nobody pressed for happens only as `planner_auto`, which runs only
-        # while the driver's own ✓ Took is in force (order_held), so this is
-        # still not an accept detector and still touches nothing on the phone.
-        # A screen with no planner whose address OP.address_under_dropoff says
-        # sits under "Dropoff" with no other address between goes out
-        # `labelled`: TYPED, and no more. Whether it files over the card's own
-        # corner or town — never over a press, never before the Took, never as
-        # one of the hold's own planner pickups — is the assembler's to say,
-        # against the hold it has and this process does not.
+        # An address the screen prints under a "Deliver to" or "Dropoff" label,
+        # in its own stop block, is still a destination the driver asked to
+        # have filed with no ⌖ ("while an order is held, set its destination
+        # whenever the screen shows an address directly under a Dropoff
+        # label"). It goes out on the SIGHTING this read sends below, typed a
+        # dropoff by sighting_stops (OP.address_under_dropoff), and the
+        # assembler files it as a navigation destination, rank `nav`
+        # (assemble.js, navCandidate) — never over a press or an earlier
+        # screen-read end, never read before the Took, never off a pickup
+        # screen or as one of the orders' own pickups, and with two orders in
+        # the car only on a cue. This read used to send it as a labelled
+        # dropoff line instead; one road for it, so the sighting and the line
+        # cannot both file one screen.
+        #
+        # A whole-screen read nobody pressed for happens only as
+        # `screen_auto`, which runs only while the driver's own ✓ Took is in
+        # force (order_held), so this is not an accept detector, and the rig
+        # still touches nothing on the phone.
         labelled = False
         if whole and not asked:
-            labelled = (bool(found) and planner is None
-                        and OP.address_under_dropoff(out.get('text')))
-            if not labelled:
-                found = None
-        # ...and asked FOR, off a card-box read that shows the planner's grammar
-        # while an order is held. The card box on this rig is the bottom half of
-        # the screen — the shift's reads of a planner caught stop headers,
-        # "Address" and "Expected by" in it and never the title, which is at the
-        # top — so the grammar is what can start it, and the whole-screen read
-        # is where the title is checked. At most once per PLANNER_AUTO_EVERY, and
+            found = None
+        # ...and asked FOR, off a card-box read that shows what auto_read_for
+        # names while an order is held: the planner's grammar, Uber's
+        # navigation, or an address under a Dropoff label. The card box on this
+        # rig is the bottom half of the screen — the shift's reads of a planner
+        # caught stop headers, "Address" and "Expected by" in it and never the
+        # title, which is at the top — so what the box sees is what can start
+        # it, and the whole-screen read is where the title or the label is
+        # checked. At most once per SCREEN_AUTO_EVERY, whichever kind asks, and
         # not while a press is open: that window is already reading the whole
         # screen and answers as ⌖.
-        if not whole and not an_offer and not asked and not planner_auto \
-                and (planner is not None or OP.planner_furniture(out.get('text'))) \
-                and (planner_auto_at is None
-                     or started - planner_auto_at >= PLANNER_AUTO_EVERY) \
+        if not whole and not an_offer and not asked and not screen_auto \
+                and (screen_auto_at is None
+                     or started - screen_auto_at >= SCREEN_AUTO_EVERY) \
+                and auto_read_for(out.get('text'), planner) is not None \
                 and order_held(started):
-            planner_auto = True
-            planner_auto_at = started
+            screen_auto = True
+            screen_auto_at = started
         # AN ADDRESS THE SCREEN DID NOT LABEL A DROPOFF IS NOT A DESTINATION.
         #
         # On shift: "✓ Took $28.08" pressed with the Trip Planner up — two
@@ -5137,9 +5180,10 @@ def main():
                     do_read = True
                     last_dropoff_read = now
 
-                # ...and the Trip Planner read digest() asked for, whether the
-                # picture moved or not: the planner sits still on the phone.
-                if not do_read and planner_auto:
+                # ...and the whole-screen read digest() asked for, whether the
+                # picture moved or not: a planner or a navigation screen sits
+                # still on the phone.
+                if not do_read and screen_auto:
                     do_read = True
 
                 # ...and a window that closes with nothing on it SAYS SO.
@@ -5367,10 +5411,11 @@ def main():
             # card box drawn by hand made that a blind spot — see
             # cropbox.parse_card. Only while asked: an unprompted read is
             # hunting offers and keeps the card crop.
-            # ...and for the planner read digest() asked for without a press
-            # (`planner_auto`), once: the request is spent by this hand-over.
-            whole_read = (dropoff_asked and time.time() < dropoff_until) or planner_auto
-            planner_auto = False
+            # ...and for the whole-screen read digest() asked for without a
+            # press (`screen_auto`), once: the request is spent by this
+            # hand-over.
+            whole_read = (dropoff_asked and time.time() < dropoff_until) or screen_auto
+            screen_auto = False
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(),
                           scanner.geometry(whole=whole_read))

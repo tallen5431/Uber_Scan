@@ -139,7 +139,113 @@ SEQ.forEach(function (seq) {
                   f('planner', 'a', 1, 'dropoff|Mara T.|1202')));
   eq('the ranks, highest first', Object.keys(A.RANK).sort(function (a, b) {
     return A.RANK[b] - A.RANK[a];
-  }), ['press', 'label', 'planner', 'card', 'seen']);
+  }), ['press', 'label', 'nav', 'planner', 'card', 'seen']);
+  // A navigation destination files as a label does, and the driver's words
+  // for it add the sighting and the same address read fuller.
+  ok_('a navigation destination replaces what the card said', A.outranks(f('nav'), f('card')));
+  ok_('...and an address no label proved', A.outranks(f('nav'), f('seen')));
+  ok_('...never a press', !A.outranks(f('nav', '9 A St, Acworth, GA 30101', 3),
+                                       f('press', '9 A St, Acworth', 2)));
+  ok_('...never a different address an earlier screen read gave',
+      !A.outranks(f('nav', '9 A St, Acworth, GA 30101', 3), f('label', '7 B St, Acworth', 2)));
+  ok_('...but the same address read fuller, over a label',
+      A.outranks(f('nav', '9 A St, Acworth, GA 30101', 3), f('label', '9 A St, Acworth', 2)));
+  ok_('...or over a planner stop', A.outranks(f('nav', '9 A St, Acworth, GA 30101', 3),
+                                              f('planner', '9 A St, Acworth', 2, 'dropoff|P.|1')));
+  ok_('...and not the same address read no fuller',
+      !A.outranks(f('nav', '9 A St, Acworth', 2), f('nav', '9 A St, Acworth, GA', 2)));
+  ok_('a label never replaces a navigation destination', !A.outranks(f('label'), f('nav')));
+})();
+
+/* ---- a navigation screen, read whole without a press ----
+ *
+ * The sighting rpi/scan_pi.py's sighting() sends for a whole-screen read of a
+ * screen that is not the planner: one stop, the frame's one address, typed by
+ * the label in front of it. Streets invented. */
+(function () {
+  function navSight(at, line, more, stop) {
+    var parts = line.split(', ');
+    return Object.assign({
+      at: at, asked: false, whole: true, titled: false, app: 'uber', screen: 'uber.nav',
+      page: { top: null, bottom: null },
+      stops: [Object.assign({ kind: 'dropoff', orders: null, name: null, place: null,
+                              expectedBy: null, street: parts[0], city: parts[1] || null,
+                              state: 'GA', zip: '30101', line: line, partial: null,
+                              label: 'dropoff' }, stop || {})],
+      orderCount: null, keep: true }, more || {});
+  }
+  function hold(extra) {
+    var h = Object.assign({ id: 'o', acceptedAt: 1000, dropoff: 'Oak Dr & Elm Dr, Acworth',
+                            dropoffScanned: false, card: { legs: 1, multiOrder: false } },
+                          extra || {});
+    A.fieldsOf(h);
+    return h;
+  }
+  function run(h, s) {
+    var st = A.fresh();
+    var r = A.sighting(st, h, s, s.at);
+    var said = r.candidates.map(function (c) {
+      var d = A.dropoff(h, c, null);
+      A.file(h, c, d, st);
+      return [c.line, d.from, d.why];
+    });
+    return { said: said, refused: st.refused.map(function (x) { return x.why; }), st: st };
+  }
+  var LINE = '12 Wren Hollow Ct, Acworth, GA 30101';
+  var h = hold();
+  var got = run(h, navSight(5000, LINE));
+  eq('a navigation screen\'s address under "Deliver to" is filed over the card\'s end, '
+     + 'rank nav', [got.said, h.dropoff, h.fields.dropoff.from],
+     [[[LINE, 'nav', 'over the card']], LINE, 'nav']);
+  var bare = run(hold(), navSight(5000, LINE, null, { kind: null, label: null }));
+  eq('...an unlabelled one is refused, and says so', [bare.said, bare.refused],
+     [[], ['no label']]);
+  eq('...one under a Pickup label is a pickup',
+     run(hold(), navSight(5000, LINE, null, { kind: 'pickup', label: 'pickup' })).refused,
+     ['a pickup']);
+  eq('...a store\'s navigation files nothing, whatever label its address is under',
+     run(hold(), navSight(5000, LINE, { screen: 'uber.pickupNav' })).refused,
+     ['a pickup screen']);
+  eq('...one that is the held card\'s pickup is refused',
+     run(hold({ pickup: '12 Wren Hollow Ct, Acworth' }), navSight(5000, LINE)).refused,
+     ['a pickup']);
+  var hp = hold();
+  hp.fields.pickupAddr = { value: '12 Wren Hollow Ct, Acworth', from: 'planner', conf: 2 };
+  eq('...and one that is the pickup a planner filed on it', run(hp, navSight(5000, LINE)).refused,
+     ['a pickup']);
+  eq('...a read older than the Took is nothing, not a sighting that may fill a blank',
+     run(hold({ dropoff: null }), navSight(500, LINE)).said, [[LINE, 'nav', 'before the Took']]);
+  eq('...and with the order gone, nothing',
+     A.dropoff(null, { line: LINE, asked: false, labelled: 'dropoff', nav: true, at: 5000 },
+               { id: 'c', dropoff: null }).to, null);
+  eq('a card-box read, a pressed read, or no order held makes no navigation destination',
+     [A.sighting(A.fresh(), hold(), navSight(5000, LINE, { whole: false }), 5000).candidates,
+      A.sighting(A.fresh(), hold(), navSight(5000, LINE, { asked: true }), 5000).candidates,
+      A.sighting(A.fresh(), null, navSight(5000, LINE), 5000).candidates], [[], [], []]);
+  var st = A.fresh(), h2 = hold();
+  A.sighting(st, h2, navSight(5000, LINE), 5000);
+  eq('...and one screen read every ten seconds is offered once per order in the car',
+     A.sighting(st, h2, navSight(15000, LINE), 15000).candidates, []);
+
+  // Two orders: the candidate carries what attribute() needs, and a store of
+  // EITHER order is no destination.
+  function order(id, at, more) {
+    var o = Object.assign({ id: id, acceptedAt: at, tookAt: at + 5, minutes: 40,
+                            app: 'uber', pickup: null, deliverBy: null, dropoff: null,
+                            dropoffScanned: false }, more || {});
+    A.fieldsOf(o);
+    return o;
+  }
+  var a = order('a', 1000, { pickup: '40 Larkspur Way, Acworth' }), b = order('b', 2000);
+  var c2 = A.sighting(A.fresh(), [a, b], navSight(9000, LINE, null, { expectedBy: 1205 }), 9000)
+    .candidates;
+  eq('two held: a navigation destination carries its app, time and read for the cues',
+     c2.map(function (c) { return [c.line, c.app, c.expectedBy, c.at, c.asked]; }),
+     [[LINE, 'uber', 1205, 9000, false]]);
+  var s2 = A.fresh();
+  A.sighting(s2, [a, b], navSight(9000, '40 Larkspur Way, Acworth, GA 30101'), 9000);
+  eq('...and one that is either order\'s pickup is refused',
+     s2.refused.map(function (x) { return x.why; }), ['a pickup']);
 })();
 
 /* ---- one hold: the server's old dropoff branch, rule by rule ---- */

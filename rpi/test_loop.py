@@ -1998,7 +1998,7 @@ eq('...and sent as label-proven, so the server may file it over the card\'s own 
 #
 # Asked for after a shift: with "✓ Took" pressed, the rig reads Uber's Trip
 # Planner on its own whenever it is on the phone, the same whole-screen read ⌖
-# makes, at most once every PLANNER_AUTO_EVERY seconds. The card box on the rig
+# makes, at most once every SCREEN_AUTO_EVERY seconds. The card box on the rig
 # is the bottom half of the screen, so it sees the planner's stop grammar and
 # never its title; the whole-screen read is where the title is checked.
 #
@@ -2082,38 +2082,48 @@ eq('a whole screen with no "Trip Planner" title is not sent as the planner', _pa
 # ...and a whole-screen read that found no planner gives the address only when
 # the screen printed it under a Dropoff label in its own block — the driver's
 # ask, "set the destination whenever the screen shows an address directly under
-# a Dropoff label". Before that ask this read sent nothing.
+# a Dropoff label". Before that ask this read sent nothing. It now goes on the
+# read's SIGHTING, typed a dropoff, and the assembler files it as a navigation
+# destination (rank `nav`); the read sends no dropoff line of its own, so one
+# screen is never filed down two roads. DoorDash's layout, typed 'unknown'.
 _ha5, _pa5 = tempfile.mkdtemp(), []
 _hold(_ha5, time.time() + 3600)
-_WHOLE_NAV = 'Trip Planner\nDropoff\n77 Made Up Ct, Acworth, GA 30101\n12 min Start'
+_WHOLE_NAV = 'Dropoff\n77 Made Up Ct, Acworth, GA 30101\n12 min Start'
 ok_('the premise: that whole screen has a labelled address and no stop header',
     OP.find_planner(_WHOLE_NAV) is None and OP.address_stop(_WHOLE_NAV) == 'dropoff')
 ra5 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
           seconds=4.0, handoff=_ha5, whole_text=_WHOLE_NAV, planners=_pa5)
 ok_('the premise: it was read whole (%r)' % ra5['wholes'], sum(ra5['wholes']) == 1)
-eq('an unpressed whole-screen read sends an address under a Dropoff label, '
-   'label-proven', [((d[0] or {}).get('line'), d[1].get('asked'), d[1].get('labelled'))
-                    for d in ra5['dropoffs']],
-   [('77 Made Up Ct, Acworth, GA 30101', False, True)])
+eq('an unpressed whole-screen read files an address under a Dropoff label off its '
+   'sighting, as a navigation destination',
+   [(d['line'], d['asked'], d['labelled'], d['from'], d['kept'])
+    for d in assembled([x for x in ra5['sightings'] if x['whole']], _held())['dropoffs']],
+   [('77 Made Up Ct, Acworth, GA 30101', False, True, 'nav', True)])
+eq('...and sends no dropoff line for it', ra5['dropoffs'], [])
 # ...and nothing off the same whole screen with no label over the address: the
 # label is what makes it the destination, not the whole-screen read.
 _ha5b = tempfile.mkdtemp()
 _hold(_ha5b, time.time() + 3600)
-_WHOLE_BARE = 'Trip Planner\n77 Made Up Ct, Acworth, GA 30101\n12 min Start'
+_WHOLE_BARE = '77 Made Up Ct, Acworth, GA 30101\n12 min Start'
 ra5b = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
            seconds=4.0, handoff=_ha5b, whole_text=_WHOLE_BARE)
-ok_('the premise: it was read whole (%r)' % ra5b['wholes'], sum(ra5b['wholes']) == 1)
-eq('an unpressed whole-screen read sends no address under no label',
-   ra5b['dropoffs'], [])
+ok_('the premise: it was read whole, and its sighting carries the address (%r)'
+    % ra5b['wholes'], sum(ra5b['wholes']) == 1
+    and [s['line'] for x in ra5b['sightings'] if x['whole'] for s in x['stops']]
+    == ['77 Made Up Ct, Acworth, GA 30101'])
+eq('an unpressed whole-screen read files no address under no label',
+   (ra5b['dropoffs'],
+    assembled([x for x in ra5b['sightings'] if x['whole']], _held())['dropoffs']), ([], []))
 # ...nor one under a Dropoff label that is not its own: the label's address
 # is the first, and the last one on the screen — the one find_address takes —
 # sits in a block whose header did not print. That address passes the
 # unprompted gate (the nearest label above it says dropoff); only
-# OP.address_under_dropoff, asked here, refuses it. With that test taken out
-# of this read, no check failed: the bare screen above never reaches it.
+# OP.address_under_dropoff, asked where sighting_stops types it, refuses it.
+# With that test taken out, no check failed: the bare screen above never
+# reaches it.
 _ha5c = tempfile.mkdtemp()
 _hold(_ha5c, time.time() + 3600)
-_WHOLE_SECOND = ('Trip Planner\nDropoff\n34 Made Up Rd, Acworth, GA 30102\nView details\n'
+_WHOLE_SECOND = ('Dropoff\n34 Made Up Rd, Acworth, GA 30102\nView details\n'
                  '56 Other Made Up Rd, Acworth, GA 30101\n12 min Start')
 ok_('the premise: the last address on that screen is under a Dropoff label, and not '
     'in its block', OP.find_planner(_WHOLE_SECOND) is None
@@ -2122,8 +2132,62 @@ ok_('the premise: the last address on that screen is under a Dropoff label, and 
 ra5c = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX, extra_argv=['--no-parallel'],
            seconds=4.0, handoff=_ha5c, whole_text=_WHOLE_SECOND)
 ok_('the premise: it was read whole (%r)' % ra5c['wholes'], sum(ra5c['wholes']) == 1)
-eq('an unpressed whole-screen read sends no second address under another\'s label',
-   ra5c['dropoffs'], [])
+eq('an unpressed whole-screen read files no second address under another\'s label',
+   (ra5c['dropoffs'],
+    assembled([x for x in ra5c['sightings'] if x['whole']], _held())['dropoffs']), ([], []))
+
+# --- the navigation screen, read without a press while an order is held -------
+#
+# The driver's ask, after the planner: read the navigation and "Deliver to"
+# screens on their own too. The card box sees Uber's bottom sheet — on the 12
+# Oct shift "Deliver to <name>" under the bar, never an address — so the
+# navigation screen in the box asks for the whole-screen read, and the
+# assembler decides off its sighting. The whole screen here prints an address
+# straight under "Deliver to", which the shift never showed (the corpus case
+# says so); the collapsed bar is the shift's own layout, with an invented name.
+_NAV_CASES = {c['name']: c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'tests', 'fixtures', 'cases.json'), encoding='utf-8'))['navStops']}
+_NAV_BOX = _NAV_CASES["Uber's collapsed bar: 'Deliver to' a name, and no address"]
+_NAV_WHOLE = _NAV_CASES["not seen on 12 Oct: Uber's navigation with an address straight "
+                        "under 'Deliver to'"]
+ok_('the premise: the card box is Uber\'s navigation with no address, and the whole '
+    'screen has one under "Deliver to" and no offer',
+    OP.screen_type(_NAV_BOX)['screen'] == 'uber.nav' and OP.find_address(_NAV_BOX) is None
+    and OP.address_under_dropoff(_NAV_WHOLE) and OP.parse(_NAV_WHOLE)['places'] == []
+    and not OP.planner_furniture(_NAV_BOX))
+_hn1 = tempfile.mkdtemp()
+_hold(_hn1, time.time() + 3600)
+rn1 = run(lambda n, k: FRAG if n == 1 else _NAV_BOX, extra_argv=['--no-parallel'],
+          seconds=6.0, handoff=_hn1, whole_text=_NAV_WHOLE)
+ok_('the premise: the card box read the navigation screen several times, unpressed '
+    '(%d reads)' % rn1['calls'], rn1['calls'] >= 4)
+eq('with an order held, a navigation screen in the card box gets one whole-screen read, '
+   'unpressed (%r)' % rn1['wholes'], sum(rn1['wholes']), 1)
+eq('...and its address under "Deliver to" is the held order\'s destination with no press',
+   [(d['line'], d['asked'], d['from'], d['kept'])
+    for d in assembled([x for x in rn1['sightings'] if x['whole']], _held())['dropoffs']],
+   [('2950 Kestrel Dr, Woodstock, GA 30188', False, 'nav', True)])
+eq('...off the sighting alone: no dropoff line for it', rn1['dropoffs'], [])
+_hn2 = tempfile.mkdtemp()
+rn2 = run(lambda n, k: FRAG if n == 1 else _NAV_BOX, extra_argv=['--no-parallel'],
+          seconds=4.0, handoff=_hn2, whole_text=_NAV_WHOLE)
+eq('with no order held, a navigation screen in the card box is not read whole',
+   sum(rn2['wholes']), 0)
+
+# ONE clock for every kind: a planner in the box, then the navigation screen,
+# each of which would ask on its own. The owner's figure is one unpressed read
+# every ~10 s, and it is one phone in front of one Pi whichever screen is up.
+_hn3 = tempfile.mkdtemp()
+_hold(_hn3, time.time() + 3600)
+rn3 = run(lambda n, k: FRAG if n == 1 else _AUTO_BOX if n == 2 else _NAV_BOX,
+          extra_argv=['--no-parallel'], seconds=6.0, handoff=_hn3, whole_text=_NAV_WHOLE)
+_after = [w for i, w in enumerate(rn3['wholes']) if i >= 2]
+ok_('the premise: card-box reads of the navigation screen came after the planner\'s '
+    'whole-screen read (%r)' % rn3['wholes'],
+    rn3['wholes'][:3] == [False, False, True] and _after.count(False) >= 2)
+eq('the auto reads keep one every 10 s across kinds (%r)' % rn3['wholes'],
+   sum(rn3['wholes']), 1)
 
 # ...and the planner's own one dropoff is sent, label-proven, on the list that
 # would give it to a press: both ends in view, one dropoff, its street and town

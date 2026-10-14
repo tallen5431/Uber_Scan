@@ -5133,6 +5133,139 @@
     "app": "uber",
     "screen": "uber.nav"
    }
+  },
+  {
+   "name": "Uber's navigation to the customer under a road the map names in capitals",
+   "_why": "On the 12 Oct shift the map's own street names come through in capitals beside the speed-limit sign (\"KESTREL MOUNTAIN OR SW\", invented here). They are labels on a map, not where the job goes, and the screen is still navigation.",
+   "text": "f.\n30 KESTREL MOUNTAIN DR SW\nLIMIT\no= 4min © 2mi —\nDeliver to Pat Q.",
+   "expect": {
+    "app": "uber",
+    "screen": "uber.nav"
+   }
+  },
+  {
+   "name": "...and its sheet opened with the bar still over the name",
+   "text": "o= 4min O16 mi =\nPat Q.\n412 Wrenfield Dr NW P &\nKennesaw, GA\nHouse\nDropoff type",
+   "expect": {
+    "app": "uber",
+    "screen": "uber.nav"
+   }
+  }
+ ],
+ "_navStops_comment": "What a navigation or \"Deliver to\" screen gives as the order's destination when nobody pressed ⌖: the screen type, find_address's line (null for none), the stop label in front of it (address_stop: 'dropoff', 'pickup' or null), whether it sits in that Dropoff label's own block (address_under_dropoff), and whether the frame reads as an offer (a payout or a place: the scanner's `an_offer`, which refuses the address before any label is asked). `expect` is [screen, line, stop, under, asOffer]; tests/corpus.test.js holds screen, line and asOffer, the two label answers having no JavaScript port. The layouts are the 12 Oct shift's card-box reads of Uber's navigation, 179 of its 1,237 screen rows: the collapsed bar prints \"Deliver to\" over a NAME (36 reads), the opened sheet prints the name, the street and the town with no ZIP and its one label, \"Dropoff type\", BELOW them (18 reads), and a store's navigation prints its address with a ZIP under no label. Not one of the 179 has an address under either label. The cases that do are marked as shapes the shift did not show. Every name, street, number and store is invented.",
+ "navStops": [
+  {
+   "name": "Uber's collapsed bar: 'Deliver to' a name, and no address",
+   "text": "45\nLIMIT v\no= 6 min © 1.7 mi —\nDeliver to Pat Q.",
+   "expect": [
+    "uber.nav",
+    null,
+    null,
+    false,
+    false
+   ]
+  },
+  {
+   "name": "Uber's opened sheet: a street and a town under the name, no ZIP, 'Dropoff type' below",
+   "text": "25 Arriving soon =\nPat Q.\n2950 Kestrel Dr Pp &\nWoodstock, GA\nHouse\nDropoff type\nMeet at door",
+   "expect": [
+    "uber.nav",
+    null,
+    null,
+    false,
+    false
+   ]
+  },
+  {
+   "name": "...the same sheet with a ZIP read is still under no label: its one label is below it",
+   "_why": "Not seen on 12 Oct (no opened sheet printed a ZIP). The shape the refusal is for: an address with nothing above it saying it is the dropoff, which AUDITS.md's Settled rule refuses unprompted.",
+   "text": "25 Arriving soon =\nPat Q.\n2950 Kestrel Dr\nWoodstock, GA 30188\nHouse\nDropoff type\nMeet at door",
+   "expect": [
+    "uber.nav",
+    "2950 Kestrel Dr, Woodstock, GA 30188",
+    null,
+    false,
+    false
+   ]
+  },
+  {
+   "name": "Uber's navigation to the store: its address under no label, and its 'Pick up in store' read as a place",
+   "text": "2 Arriving soon =\nFable Grill\n1840 Lantern Dr, Woodstock,\nGA 30189\nNote from business\nPick up in store",
+   "expect": [
+    "uber.pickupNav",
+    "1840 Lantern Dr, Woodstock, GA 30189",
+    null,
+    false,
+    true
+   ]
+  },
+  {
+   "name": "DoorDash's current task: 'Deliver to' a name, and no address",
+   "text": "Pickup for Pat Q.\nby 7:09 PM - Fable Grill\nCurrent task\nDeliver to Pat Q.\n9 min to complete\nPause orders after delivery",
+   "expect": [
+    "unknown",
+    null,
+    null,
+    false,
+    false
+   ]
+  },
+  {
+   "name": "DoorDash's navigation: 'Dropoff' over its address",
+   "text": "Dropoff\n61 Saddlebrook Ln, Acworth, GA 30101\n12 min Start",
+   "expect": [
+    "unknown",
+    "61 Saddlebrook Ln, Acworth, GA 30101",
+    "dropoff",
+    true,
+    false
+   ]
+  },
+  {
+   "name": "not seen on 12 Oct: Uber's navigation with an address straight under 'Deliver to'",
+   "text": "Turn right onto Kestrel Dr\n45\nLIMIT\nDeliver to\n2950 Kestrel Dr\nWoodstock, GA 30188\nComplete delivery",
+   "expect": [
+    "uber.nav",
+    "2950 Kestrel Dr, Woodstock, GA 30188",
+    "dropoff",
+    true,
+    false
+   ]
+  },
+  {
+   "name": "...and with the bar straight above 'Deliver to', the bar reads as a leg and the address as an offer's place",
+   "_why": "Where the collapsed bar sits on 12 Oct: '6 min © 1.7 mi' over 'Deliver to'. parse() takes the bar for a card's leg and the lines under it for a place, so the scanner's `an_offer` refuses the address before its label is asked.",
+   "text": "45\nLIMIT\no= 6 min © 1.7 mi —\nDeliver to\n2950 Kestrel Dr\nWoodstock, GA 30188",
+   "expect": [
+    "uber.nav",
+    "2950 Kestrel Dr, Woodstock, GA 30188",
+    "dropoff",
+    true,
+    true
+   ]
+  },
+  {
+   "name": "not seen on 12 Oct: a store's navigation naming the next stop under 'Deliver to' is the store's screen",
+   "_why": "The label is a dropoff's and the screen is uber.pickupNav; the assembler refuses a navigation destination off a store's screen whatever its label (assemble.js, navCandidate).",
+   "text": "25 Arriving soon =\nFable Grill\nPick up order\nDeliver to\n2950 Kestrel Dr\nWoodstock, GA 30188",
+   "expect": [
+    "uber.pickupNav",
+    "2950 Kestrel Dr, Woodstock, GA 30188",
+    "dropoff",
+    true,
+    false
+   ]
+  },
+  {
+   "name": "an address under a Pickup label is a pickup's, and parse() reads it as a card's pickup place as well",
+   "text": "Pickup\n1840 Lantern Dr, Woodstock, GA 30189\n4 min Start",
+   "expect": [
+    "unknown",
+    "1840 Lantern Dr, Woodstock, GA 30189",
+    "pickup",
+    false,
+    true
+   ]
   }
  ]
 }

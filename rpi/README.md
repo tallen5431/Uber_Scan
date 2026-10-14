@@ -6480,20 +6480,28 @@ car's end, and when it is not, says why in a word on that line:
 Otherwise the address goes out as an ordinary `dropoff` line and is filed by
 the one path every destination takes.
 
-**Read without a press, while an order is held.** Asked for after a shift.
-server.js writes `.holding.json` (`{until}`, the moment its `holding()` lets
-go — `holdEnds`) whenever the order in the car changes, and removes it when
-none is; `order_held` in scan_pi.py reads it. While it says yes, a card-box read
-that shows the planner's stop grammar — the box on the rig is the bottom half
-of the screen and has never caught the title — asks for one whole-screen read,
-at most every `PLANNER_AUTO_EVERY` (10 s). That read answers only if a line of
-it is the `Trip Planner` title (`offer_parser.planner_titled`), and sends the
-stops on the same `planner` line with `asked: false` and the same `unfiled`
-word. It never sends a destination: no planner dropoff and no `find_address`
-answer off an unpressed whole screen, because a planner still up from the
-trip before would be filed against the order just taken. It is not an accept
-detector — it needs "✓ Took" pressed first — and it touches nothing on the
-phone.
+**Read without a press, while an order is held.** Asked for after a shift,
+and for navigation screens after that. server.js writes `.holding.json`
+(`{until}`, the moment its `holding()` lets go — `holdEnds`) whenever the order
+in the car changes, and removes it when none is; `order_held` in scan_pi.py
+reads it. While it says yes, a card-box read that shows what `auto_read_for`
+names — the planner's stop grammar or furniture (the box on the rig is the
+bottom half of the screen and has never caught the title), Uber's navigation
+(`uber.nav`), or an address under a "Deliver to" or "Dropoff" label in its own
+block — asks for one whole-screen read, at most one every `SCREEN_AUTO_EVERY`
+(10 s) whichever kind asks. That read sends its `sighting`, and the planner
+line too if a line of it is the `Trip Planner` title
+(`offer_parser.planner_titled`), with `asked: false` and the same `unfiled`
+word. It sends no `dropoff` line of its own: whether the read gives the order
+its end is the assembler's, off the sighting — the planner's one dropoff
+(`planner`), or an address under a "Deliver to" or "Dropoff" label (`nav`,
+`navCandidate` in assemble.js: never over a ⌖ press or an end the screen gave
+before unless it is the same street read fuller, never read before the Took,
+never off a store's navigation or as any held order's pickup, and with two
+orders in the car only on a cue). On the 12 Oct shift's 179 navigation reads
+no address sat under either label, so on those screens it files nothing; see
+`navStops` in tests/fixtures/cases.json. It is not an accept detector — it
+needs "✓ Took" pressed first — and it touches nothing on the phone.
 
 **Where it goes.** server.js puts the stops, with that word, on the order in
 the car (and so on `/api/status`, for a panel reloaded mid-delivery), and

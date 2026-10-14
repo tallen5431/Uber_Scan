@@ -118,6 +118,20 @@ function stopFields(stops) {
      JSON.stringify([c.expect.app, c.expect.screen]));
 });
 
+/* What a navigation or "Deliver to" screen gives as a destination nobody
+   pressed for. `expect` is [screen, line, stop, under, asOffer]; this port has
+   no address_stop, so it holds the screen, findAddress's line and the offer
+   test (a payout or a place: the scanner's `an_offer`), and
+   rpi/test_parser.py holds all five. */
+(cases.navStops || []).forEach(function (c) {
+  var p = P.parse(c.text);
+  var a = P.findAddress(c.text);
+  eq('navStops / ' + c.name,
+     JSON.stringify([P.screenType(c.text).screen, a ? a.line : null,
+                     p.pay !== null || p.places.length > 0]),
+     JSON.stringify([c.expect[0], c.expect[1], c.expect[4]]));
+});
+
 (cases.whole || []).forEach(function (c) {
   var got = P.isWhole(P.parse(c.text));
   if (got === c.expect) ok++;
