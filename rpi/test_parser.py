@@ -156,6 +156,12 @@ for c in cases.get('screens', []):
 for c in cases.get('sheets', []):
     eq('sheets / ' + c['name'], P.sheet_dropoff(c['text']), c['expect'])
 
+# DoorDash's place popup, opened from a stop on an offer card: its role, the
+# store's name and the address, or None. The same cases tests/corpus.test.js
+# runs. See place_popup in offer_parser.py.
+for c in cases.get('popups', []):
+    eq('popups / ' + c['name'], P.place_popup(c['text']), c['expect'])
+
 for c in cases.get('navStops', []):
     _p = P.parse(c['text'])
     eq('navStops / ' + c['name'],

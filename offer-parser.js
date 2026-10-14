@@ -1809,6 +1809,74 @@
              zip: town[2] };
   }
 
+  /* DoorDash's place popup, opened from a stop on an offer card before the
+     driver decides: the role label ("Pickup from"), the store's name, the
+     street with a house number, the town, and "Directions" under them.
+     {role: 'pickup'|'dropoff', name, line, street, city, state, zip} or null;
+     `name` is the store's for a pickup, else null. Every rule, which of the two
+     layouts on file it reads and why the other (a bare street in a pill over
+     the map) is refused, and the measurement behind POPUP_REACH and POPUP_TAIL,
+     are at place_popup in offer_parser.py; tests/fixtures/cases.json `popups`
+     holds the two ports to one answer. */
+  var POPUP_END = /^[^A-Za-z]{0,3}directions\b/i;
+  var POPUP_ICON = '(?:[A-Za-z]{1,2}[^A-Za-z0-9\\s]?\\s+)?';
+  var POPUP_HOUSE = new RegExp('^[^A-Za-z0-9]{0,3}' + POPUP_ICON + '(\\d{1,6} [A-Za-z].*)$');
+  var POPUP_PICKUP = new RegExp('^[^A-Za-z]{0,3}' + POPUP_ICON + 'pick ?-?up from\\b', 'i');
+  var POPUP_DROPOFF = new RegExp('^[^A-Za-z]{0,3}' + POPUP_ICON
+    + '(?:custom[ea]r(?: ?drop ?-?off)?|drop ?-?off|deliver(?:ing)? to)\\b', 'i');
+  var POPUP_STATE_ZIP = /^\s*,?\s*([A-Za-z]{2})\s+(\S{5})(?![0-9A-Za-z])/;
+  var POPUP_NAME_JUNK = /(?:\s+(?:[a-z]{1,2}|[^A-Za-z0-9\s]+))+$/;
+  var POPUP_REACH = 4;
+  var POPUP_TAIL = 4;
+
+  function placePopup(text) {
+    var lines = String(text || '').split(/[\r\n]+/).map(normalize)
+      .filter(function (l) { return l; });
+    var e = -1;
+    lines.forEach(function (l, i) { if (POPUP_END.test(l)) e = i; });
+    if (e === -1) return null;
+    var s = -1, i;
+    for (i = e - 1; i >= 0 && i > e - 1 - POPUP_TAIL; i--) {
+      if (POPUP_HOUSE.test(lines[i])) { s = i; break; }
+    }
+    if (s === -1) return null;
+    var st = sheetStreet(POPUP_HOUSE.exec(lines[s])[1]);
+    if (!st) return null;
+    var town = null;
+    var tail = /^\s*,\s*(.+)$/.exec(st[1]);
+    var bare = POPUP_STATE_ZIP.exec(st[1]);
+    if (tail && sheetTown(tail[1])) {
+      town = sheetTown(tail[1]);
+    } else if (bare && STATES[bare[1].toUpperCase()] && aZip(bare[2])) {
+      town = [null, bare[1].toUpperCase(), aZip(bare[2])];
+    } else if (s + 1 < e) {
+      town = sheetTown(lines[s + 1]);
+    }
+    if (!town) return null;
+    var r = -1;
+    for (i = s - 1; i >= 0 && i > s - 1 - POPUP_REACH; i--) {
+      if (POPUP_PICKUP.test(lines[i]) || POPUP_DROPOFF.test(lines[i])) { r = i; break; }
+    }
+    if (r === -1) return null;
+    var role = POPUP_PICKUP.test(lines[r]) ? 'pickup' : 'dropoff';
+    var other = role === 'pickup' ? POPUP_DROPOFF : POPUP_PICKUP;
+    for (i = Math.max(0, s - POPUP_REACH); i <= e; i++) {
+      if (other.test(lines[i])) return null;
+      if (i > r && i < e && i !== s && POPUP_HOUSE.test(lines[i])) return null;
+    }
+    var name = null;
+    if (role === 'pickup') {
+      name = lines.slice(r + 1, s).map(function (l) {
+        return l.replace(PLANNER_EDGE, '').replace(POPUP_NAME_JUNK, '');
+      }).filter(function (w) { return /[A-Za-z]{2}/.test(w); }).join(' ') || null;
+    }
+    var parts = [st[0]];
+    if (town[0]) parts.push(town[0]);
+    if (town[2]) parts.push(town[1] + ' ' + town[2]);
+    return { role: role, name: name, line: parts.join(', '), street: st[0],
+             city: town[0], state: town[1], zip: town[2] };
+  }
+
   /* What screen a reading is, for a sighting: {app, screen}, `screen` one of
      SCREENS and `app` 'uber', 'doordash', or null for 'unknown' alone.
      Collection only, and kept apart from NOT_AN_OFFER, which decides. Each
@@ -1817,7 +1885,7 @@
      holds the two SCREENS lists equal. */
   var SCREENS = ['uber.offer', 'uber.addon', 'uber.planner', 'uber.pickupNav',
                  'uber.nav', 'uber.finding', 'tripRadar', 'dd.offer', 'dd.finding',
-                 'dd.switch', 'unknown'];
+                 'dd.switch', 'dd.placePopup', 'unknown'];
   var SCREEN_DD_SWITCH = /switch to dash|busier zone|don.?t switch/i;
   var SCREEN_PLANNER = /^[^A-Za-z0-9]{0,3}(?:trip ?planner|address|stop new requests|way ?[A-Za-z]? ?bill)\b/i;
   var SCREEN_RADAR = /\btrip ?radar\b/i;
@@ -1853,6 +1921,7 @@
     if (SCREEN_DD_SWITCH.test(text)) return 'dd.switch';
     if (SCREEN_MATCHING.test(text)) return 'unknown';
     if (SCREEN_RADAR.test(text) && SCREEN_UBER_OFFER.test(text)) return 'tripRadar';
+    if (placePopup(text) !== null) return 'dd.placePopup';
     if (SCREEN_DD_OFFER.test(text)) return 'dd.offer';
     if (SCREEN_ADDON.test(text)) return 'uber.addon';
     if (SCREEN_UBER_OFFER.test(text)) return 'uber.offer';
@@ -3533,6 +3602,7 @@
            findPickup: findPickup, findDropoff: findDropoff,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner, sheetDropoff: sheetDropoff,
+           placePopup: placePopup,
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
            plannerTitled: plannerTitled,
            screenType: screenType, SCREENS: SCREENS,

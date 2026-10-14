@@ -3203,6 +3203,131 @@ def sheet_dropoff(text):
             'state': state, 'zip': zipcode}
 
 
+# DOORDASH'S PLACE POPUP: what the phone shows when the driver taps a stop on an
+# offer card BEFORE deciding (the driver, 12 Oct: "I can tap the icons of the
+# customer and business to get the address"). Two layouts are on file, and
+# only one of them can be read:
+#
+#     <q Pickup from                 the role, the popup's own label
+#     Fable Stone Chinese  t         the store, the icon at its right read as
+#     Cuisine                        a letter or two, the name wrapped
+#     @ 840 Fable W Lantern Pkwy NW  the street, the pin icon read in front of
+#     Kennesaw, GA 30144, USA        it; the town, or "GA 30144" on the street
+#     Apt/Suite: 100                 line itself; a suite line sometimes
+#     Directions                     the sheet's one button, BELOW the address
+#
+# (Names and streets invented; the layout and the OCR's marks are the journal
+# copied with the 12 Oct shift: five card-box reads of this sheet, over four
+# DoorDash cards, each read 2.1 to 28.5 s after its card's last row and every
+# one with no payout on it — the sheet covers the bottom of the screen, which
+# is where the card box sits, so the card-box read the motion gate already
+# makes is the read that sees it. Over that journal's 1,237 `screen` rows,
+# "Directions" is on these five and no other.)
+#
+# The other layout is the one the 12 Oct snaps 16-03-08 and 16-03-17 show: a
+# dark pill over the MAP, above the card box, holding a street and nothing
+# else — no role, no name, no button ("4069 Fable Street North..." over the
+# store icon it was tapped from). Its text has never been read: the map is
+# outside the card box, and no whole-screen read runs while a card is being
+# screened. It carries no role cue, so it is refused here whatever reads it.
+#
+# So the rules, all of them the measured sheet's:
+#   - "Directions" on a line; the last one on the screen is the one read;
+#   - the street: the nearest line above it opening with a HOUSE NUMBER
+#     (SHEET_NUMBER's real digits), behind at most the pin icon read as a
+#     mark or one or two letters ("@", "Gy", "G?"), within POPUP_TAIL lines,
+#     cut after its first street suffix and quadrant as the navigation
+#     sheet's street is;
+#   - the town: after the street on its line ("..., Town, ST ZIP" or a bare
+#     "ST ZIP"), or the line under it as "Town, ST ZIP" — a state that is a
+#     state, as everywhere else;
+#   - the ROLE: the nearest line above the street, within POPUP_REACH, that
+#     opens with the popup's own label behind at most an icon's marks.
+#     "Pickup from" is the store's (measured). The customer's is INFERRED and
+#     unmeasured — no customer popup has been read — so POPUP_DROPOFF names
+#     the words DoorDash uses for that stop elsewhere ("Customer dropoff",
+#     "Dropoff", "Deliver to") and will need its own snap before it is
+#     trusted. No role line: None, whatever else reads;
+#   - the store's name: the lines between the role and the street, the icon
+#     at their right (a lone lowercase letter or two, or marks) taken off;
+#   - nothing that is a second answer: no label of the OTHER role within
+#     POPUP_REACH above the street or below it, and no second house-number
+#     line between the role and "Directions".
+# Refusing costs the driver a card with the address it already printed; a
+# popup taken for the wrong stop costs a pin at the wrong door.
+POPUP_END = re.compile(r'^[^A-Za-z]{0,3}directions\b', re.IGNORECASE | ASCII)
+# An icon read in front of a line: up to three marks, then one or two letters
+# and a mark ("<q", "YJ", "G?"). In front of the label a mark may be a digit
+# ("4 Pickup from"); in front of the street it may not, or the number would
+# be the icon's.
+POPUP_ICON = r'(?:[A-Za-z]{1,2}[^A-Za-z0-9\s]?\s+)?'
+POPUP_HOUSE = re.compile(r'^[^A-Za-z0-9]{0,3}' + POPUP_ICON + r'(\d{1,6} [A-Za-z].*)$',
+                         ASCII)
+POPUP_PICKUP = re.compile(r'^[^A-Za-z]{0,3}' + POPUP_ICON + r'pick ?-?up from\b',
+                          re.IGNORECASE | ASCII)
+POPUP_DROPOFF = re.compile(r'^[^A-Za-z]{0,3}' + POPUP_ICON
+                           + r'(?:custom[ea]r(?: ?drop ?-?off)?|drop ?-?off'
+                           r'|deliver(?:ing)? to)\b', re.IGNORECASE | ASCII)
+POPUP_STATE_ZIP = re.compile(r'^\s*,?\s*([A-Za-z]{2})\s+(\S{5})(?![0-9A-Za-z])', ASCII)
+POPUP_NAME_JUNK = re.compile(r'(?:\s+(?:[a-z]{1,2}|[^A-Za-z0-9\s]+))+$', ASCII)
+# How far below the role line the street may sit, and how far above
+# "Directions", in lines. Measured on the five sheets: the street 2 to 3 lines
+# under "Pickup from" (the name, a wrapped name or the reader's marks between)
+# and 1 to 3 above "Directions" (the town and a suite line between). 4 is that
+# and one more, CHOSEN, as SHEET_REACH is.
+POPUP_REACH = 4
+POPUP_TAIL = 4
+
+
+def place_popup(text):
+    """The address on DoorDash's place popup — {'role': 'pickup'|'dropoff',
+    'name', 'line', 'street', 'city', 'state', 'zip'} — or None. `name` is the
+    store's for a pickup, else None. See the layout above."""
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
+    lines = [l for l in lines if l]
+    ends = [i for i, l in enumerate(lines) if POPUP_END.match(l)]
+    if not ends:
+        return None
+    e = ends[-1]
+    s = next((i for i in range(e - 1, max(-1, e - 1 - POPUP_TAIL), -1)
+              if POPUP_HOUSE.match(lines[i])), None)
+    if s is None:
+        return None
+    street = _sheet_street(POPUP_HOUSE.match(lines[s]).group(1))
+    if street is None:
+        return None
+    street, rest = street
+    town = None
+    tail = re.match(r'^\s*,\s*(.+)$', rest)
+    bare = POPUP_STATE_ZIP.match(rest)
+    if tail and _sheet_town(tail.group(1)):
+        town = _sheet_town(tail.group(1))
+    elif bare and bare.group(1).upper() in STATES and a_zip(bare.group(2)):
+        town = (None, bare.group(1).upper(), a_zip(bare.group(2)))
+    elif s + 1 < e:
+        town = _sheet_town(lines[s + 1])
+    if town is None:
+        return None
+    r = next((i for i in range(s - 1, max(-1, s - 1 - POPUP_REACH), -1)
+              if POPUP_PICKUP.match(lines[i]) or POPUP_DROPOFF.match(lines[i])), None)
+    if r is None:
+        return None
+    role = 'pickup' if POPUP_PICKUP.match(lines[r]) else 'dropoff'
+    other = POPUP_DROPOFF if role == 'pickup' else POPUP_PICKUP
+    if any(other.match(l) for l in lines[max(0, s - POPUP_REACH):e + 1]) \
+            or any(POPUP_HOUSE.match(lines[i]) for i in range(r + 1, e) if i != s):
+        return None
+    name = None
+    if role == 'pickup':
+        words = [POPUP_NAME_JUNK.sub('', PLANNER_EDGE.sub('', l)) for l in lines[r + 1:s]]
+        name = ' '.join(w for w in words if re.search(r'[A-Za-z]{2}', w)) or None
+    city, state, zipcode = town
+    parts = [street] + ([city] if city else []) \
+        + (['%s %s' % (state, zipcode)] if zipcode else [])
+    return {'role': role, 'name': name, 'line': ', '.join(parts), 'street': street,
+            'city': city, 'state': state, 'zip': zipcode}
+
+
 # Stage 2 of the multi-order design: every whole-screen read and every planner
 # read goes out as a SIGHTING typed by the screen it was off, and nothing files
 # on it — the dropoff and planner lines still do all the filing. This is the
@@ -3224,6 +3349,9 @@ def sheet_dropoff(text):
 #                  less "Expected by", which Uber's navigation bar prints too
 #                  ("4 min © 0.6 mi / Expected by 8:20 PM").
 #   tripRadar      Uber's Trip Radar list: its title over an offer.
+#   dd.placePopup  DoorDash's place popup, opened from a stop on an offer card:
+#                  place_popup reads it — a role label, an address, and
+#                  "Directions" under them.
 #   dd.offer       DoorDash's card: "Guaranteed (incl. tips)" over "5.0 mi +
 #                  25 min" (miles BEFORE minutes), the newer "$7.39 incl. tips /
 #                  2 stops (4.3 mi) · 22 min", "Customer dropoff", "Multiple
@@ -3244,15 +3372,17 @@ def sheet_dropoff(text):
 #                  offer wait", "likely to get offers".
 #   uber.finding   Uber idle: "Finding trips", "You're online", and the map's
 #                  Trip Radar button with no offer under it.
-#   unknown        Anything else, including two screens the shift shows and
-#                  this list has no name for: DoorDash's "Pickup from <store> /
-#                  Directions" and its "Are you sure you want to decline this
-#                  offer?". Both are said `unknown`, not filed under the nearest
-#                  name.
+#   unknown        Anything else, including screens the shift shows and this
+#                  list has no name for: DoorDash's "Are you sure you want to
+#                  decline this offer?", and a "Pickup from <store> /
+#                  Directions" that place_popup cannot read whole. Said
+#                  `unknown`, not filed under the nearest name.
 #
 # IN THAT ORDER, first match wins, and the order is the measurement. The
 # switch prompt and the planner come first because each is unmistakable and an
-# offer's furniture can sit behind either. Offers come before navigation and
+# offer's furniture can sit behind either. The place popup comes before the
+# offers because it is drawn ON TOP of DoorDash's card, as a card is drawn on
+# top of the map: a frame with both is the popup. Offers come before navigation and
 # idle because an offer card lands ON TOP of both — the map round a DoorDash
 # card prints "Finding offers" until the card covers it, and Uber's offer
 # slides up over the navigation bar — so a frame with both is the card. Of the
@@ -3261,7 +3391,7 @@ def sheet_dropoff(text):
 # nothing alone.
 SCREENS = ('uber.offer', 'uber.addon', 'uber.planner', 'uber.pickupNav',
            'uber.nav', 'uber.finding', 'tripRadar', 'dd.offer', 'dd.finding',
-           'dd.switch', 'unknown')
+           'dd.switch', 'dd.placePopup', 'unknown')
 SCREEN_DD_SWITCH = re.compile(r"switch to dash|busier zone|don.?t switch",
                               re.IGNORECASE | ASCII)
 SCREEN_PLANNER = re.compile(r'^[^A-Za-z0-9]{0,3}(?:trip ?planner|address|stop new requests'
@@ -3331,6 +3461,8 @@ def _screen(text):
         return 'unknown'
     if SCREEN_RADAR.search(text) and SCREEN_UBER_OFFER.search(text):
         return 'tripRadar'
+    if place_popup(text) is not None:
+        return 'dd.placePopup'
     if SCREEN_DD_OFFER.search(text):
         return 'dd.offer'
     if SCREEN_ADDON.search(text):
