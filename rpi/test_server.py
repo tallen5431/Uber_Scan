@@ -2110,7 +2110,10 @@ if shutil.which('python3'):
 # a planner sighting is the assembler's to file from — see the next block —
 # and these are pages it files nothing off: the one planner page here carries
 # no `titled`, and an unpressed page is filed only under the "Trip Planner"
-# title, as the scanner's own unpressed read always required. One fake
+# title, as the scanner's own unpressed read always required; and the
+# navigation screen's address is under no label, and a navigation screen
+# files only one under a "Deliver to" or "Dropoff" label (the navigation
+# block further down). One fake
 # scanner relaying whatever the test appends, as above; the order is held so a
 # sighting that filed would have somewhere to file. The address is invented.
 if shutil.which('python3'):
@@ -2147,8 +2150,9 @@ if shutil.which('python3'):
                  'expectedBy': 978, 'street': '4821 Kestrel Dr', 'city': 'Marietta',
                  'state': 'GA', 'zip': None, 'line': '4821 Kestrel Dr, Marietta',
                  'partial': None, 'label': 'dropoff'}
+        _bare = dict(_stop, kind=None, orders=None, name=None, expectedBy=None, label=None)
         with open(cmds, 'a') as fh:
-            for _screen, _stops in (('uber.planner', [_stop]), ('uber.nav', [_stop]),
+            for _screen, _stops in (('uber.planner', [_stop]), ('uber.nav', [_bare]),
                                     ('uber.planner', [_stop]), (None, [])):
                 fh.write(json.dumps({'sighting': {
                     'at': int(time.time() * 1000), 'asked': False, 'whole': True,
@@ -6839,6 +6843,90 @@ try:
        ([28.08, 6.25], [('replaced', 2)], 9.48))
 finally:
     stop(_cp)
+
+
+# --- the navigation screen, read on its own while an order is held -----------
+#
+# The driver's ask: while an order is held the rig reads the navigation and
+# "Deliver to" screens on its own, as it reads the Trip Planner, and the
+# destination fills in with no ⌖. The scanner sends the whole-screen read as a
+# sighting (rpi/scan_pi.py, sighting); the assembler makes the navigation
+# destination (assemble.js, navCandidate) and files it at rank `nav`. Through
+# the real server and a scanner that says what the suite writes. Every name,
+# store and street invented.
+def _navsight(line, street, city, zip_=None, kind='dropoff', screen='uber.nav',
+              expected=None, app='uber'):
+    return {'sighting': {
+        'asked': False, 'whole': True, 'titled': False, 'app': app, 'screen': screen,
+        'page': {'top': None, 'bottom': None},
+        'stops': [{'kind': kind, 'orders': None, 'name': None, 'place': None,
+                   'expectedBy': expected, 'street': street, 'city': city, 'state': 'GA',
+                   'zip': zip_, 'line': line, 'partial': None,
+                   'label': 'dropoff' if kind == 'dropoff' else kind}],
+        'orderCount': None, 'keep': True}}
+
+
+def _held_end(base):
+    h = get(base, '/api/status').get('holding') or {}
+    return (h.get('dropoff'), ((h.get('fields') or {}).get('dropoff') or {}).get('from'))
+
+
+_CORNER = 'Oak Dr & Elm Dr, Acworth'
+_np, _nb, _nj, _nh = _cserver('nav', CARRY_TWO='1')
+try:
+    _took2(_nb, _card('n-a', 12.0, dropoff=_CORNER))
+    _L1 = ('2950 Kestrel Dr, Woodstock, GA 30188', '2950 Kestrel Dr', 'Woodstock', '30188')
+    _say(_navsight(*_L1))
+    eq('a navigation screen under "Deliver to" fills the held order\'s destination with no '
+       'press', _held_end(_nb), (_L1[0], 'nav'))
+    eq('...written down as a held-dropoff mark, unasked and label-proven',
+       [(r.get('asked'), r.get('labelled')) for r in _rows(_nj, 'mark')
+        if r.get('id') == 'n-a' and r.get('dropoff') == _L1[0]], [(False, True)])
+    # A press, then the screen again: a different address, and the pressed one
+    # read fuller. Neither moves it.
+    _say(_nav('77 Birch Ln, Woodstock', '77 Birch Ln', 'Woodstock'))
+    ok_('the premise: the press is filed', _held_end(_nb) == ('77 Birch Ln, Woodstock', 'press'))
+    _say(_navsight('77 Birch Ln, Woodstock, GA 30188', '77 Birch Ln', 'Woodstock', '30188'),
+         _navsight('9 Fable Ct, Woodstock, GA 30188', '9 Fable Ct', 'Woodstock', '30188'))
+    eq('...never over a ⌖ press', _held_end(_nb), ('77 Birch Ln, Woodstock', 'press'))
+    post(_nb, '/api/offers/mark', {'id': 'n-a', 'accepted': None})
+
+    # A store's navigation — even one that names the next stop under
+    # "Deliver to" — and an address under no label, each over the card's own
+    # corner, which a navigation destination would replace.
+    _took2(_nb, _card('n-b', 15.0, dropoff=_CORNER))
+    _say(_navsight('2950 Kestrel Dr, Woodstock, GA 30188', '2950 Kestrel Dr', 'Woodstock',
+                   '30188', screen='uber.pickupNav'))
+    eq('a pickup navigation screen files nothing', _held_end(_nb), (_CORNER, 'card'))
+    _say(_navsight('31 Larch Way, Woodstock, GA 30188', '31 Larch Way', 'Woodstock', '30188',
+                   kind=None))
+    eq('an unlabelled navigation address files nothing', _held_end(_nb), (_CORNER, 'card'))
+    _say(_navsight('31 Larch Way, Woodstock, GA 30188', '31 Larch Way', 'Woodstock', '30188'))
+    eq('...and the premise: the same address under its label is filed',
+       _held_end(_nb), ('31 Larch Way, Woodstock, GA 30188', 'nav'))
+
+    # Two orders in the car: the existing cues, and with none it waits.
+    _took2(_nb, _card('n-c', 22.0, minutes=50.0, dropoff=_CORNER,
+                      deliver_by=(_NOWMIN + 70) % 1440))
+    ok_('the premise: two orders in the car', len(_orders(_nb)) == 2)
+    _L4 = ('4 Heron Bend, Smyrna, GA 30080', '4 Heron Bend', 'Smyrna', '30080')
+    _say(_navsight(*_L4))
+    eq('[carry two] auto-nav: with two orders held, a navigation destination no cue decides '
+       'files nothing and waits', ([o.get('dropoff') for o in _orders(_nb)],
+                                   get(_nb, '/api/status').get('unowned'),
+                                   get(_nb, '/api/status').get('chooser')),
+       (['31 Larch Way, Woodstock, GA 30188', _CORNER], 1, None))
+    _say(_navsight('8 Wren Pl, Smyrna, GA 30080', '8 Wren Pl', 'Smyrna', '30080',
+                   expected=(_NOWMIN + 71) % 1440))
+    eq('[carry two] auto-nav: ...and one whose bar\'s "Expected by" is one card\'s "Deliver by" '
+       'files on that order, by the deadline cue',
+       ([o.get('dropoff') for o in _orders(_nb)],
+        [(r.get('id'), r.get('cue')) for r in _rows(_nj, 'mark')
+         if r.get('dropoff') == '8 Wren Pl, Smyrna, GA 30080']),
+       (['31 Larch Way, Woodstock, GA 30188', '8 Wren Pl, Smyrna, GA 30080'],
+        [('n-c', 'deadline')]))
+finally:
+    stop(_np)
 
 # Drop with two in the car, and the GPS drop at one door.
 _PA = (33.9100, -84.5100)

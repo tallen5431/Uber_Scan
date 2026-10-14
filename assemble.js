@@ -46,7 +46,11 @@
    * `{value, from, conf, at, screen}` or null. `from` is one of, highest first:
    *
    *   press    the driver pressed ⌖ and this is what the screen showed
-   *   label    unprompted, printed under a Dropoff label in its own block
+   *   label    unprompted, printed under a Dropoff label in its own block,
+   *            off the card box (the scanner's dropoff line)
+   *   nav      unprompted, printed under a "Deliver to" or "Dropoff" label in
+   *            its own block, off the whole-screen read the scanner makes on
+   *            its own while an order is held (navCandidate, below)
    *   planner  unprompted, the Trip Planner's one dropoff (one page or several)
    *   card     what the offer card said, at ✓ Took
    *   seen     unprompted, off the screen with no label to stand on — or a
@@ -65,7 +69,7 @@
    * The hold's older fields — `dropoff`, `dropoffScanned` — are kept in step by
    * file() below, so the stack line, the pair rows, the map and the GPS drop
    * read exactly what they read before. */
-  var RANK = { seen: 0, card: 1, planner: 2, label: 3, press: 4 };
+  var RANK = { seen: 0, card: 1, planner: 2, nav: 3, label: 4, press: 5 };
   var FIELDS = ['dropoff', 'pickupAddr', 'customer', 'expectedBy'];
 
   function addressConf(a) {
@@ -125,18 +129,55 @@
    *     or by a FULLER reading of the same planner stop at the same rank
    *     (another page that showed more of it). Never by a less complete one,
    *     and never by a different stop: that is today's `dropoffScanned` rule,
-   *     which a second label-proven address does not get past. */
+   *     which a second label-proven address does not get past.
+   *   - A navigation destination (`nav`) files as a label does, and the
+   *     driver's words for it say two things more: it also replaces `seen`,
+   *     an address no label proved; and over an end the screen gave before
+   *     it (label, planner, nav) it is taken only as the SAME address read
+   *     fuller — the same street (sameStreet), more of street, town and ZIP
+   *     read. A planner stop has a key to say "the same"; a navigation
+   *     screen has only its street. ...or the same street with a longer
+   *     house number that ENDS in the one filed (numberFuller): the opened
+   *     sheet loses a number's first digits at the left of the line, and on
+   *     12 Oct one delivery's sheet read a four-digit number with its first
+   *     two digits gone, twice, before it read all four, the street and town
+   *     the same. */
   function outranks(next, cur) {
     if (!next) return null;
     if (!cur) return 'blank';
     if (next.from === 'press') return 'press';
     // (A press already there falls through to null: nothing below lets a
-    // label, a planner or a sighting past one.)
+    // label, a planner, a navigation screen or a sighting past one.)
     if (cur.from === 'card') return RANK[next.from] > RANK.card ? 'over the card' : null;
+    if (next.from === 'nav' && cur.from === 'seen') return 'over a sighting';
     if (next.from === cur.from && next.key && next.key === cur.key && next.conf > cur.conf) {
       return 'fuller';
     }
+    if (next.from === 'nav' && cur.from !== 'press'
+        && ((next.conf > cur.conf && sameStreet(next.value, cur.value))
+            || (next.conf >= cur.conf && numberFuller(next.value, cur.value)))) {
+      return 'fuller';
+    }
     return null;
+  }
+
+  /* Two address lines on the same street: the part before the first comma,
+   * case, commas and spacing ignored, and something there to compare. */
+  function sameStreet(a, b) {
+    var x = streetKey(a), y = streetKey(b);
+    return !!x && x === y;
+  }
+
+  /* Whether `a` is `b` with digits read that `b` lost off the front of its
+   * house number: the same street after the number, the same town, and a's
+   * number longer and ending in b's ("4416 Fable Dr NW" over "16 Fable Dr
+   * NW"). Never the other way: a number does not lose digits by being read
+   * better. */
+  function numberFuller(a, b) {
+    var x = /^(\d+) (.+)$/.exec(streetKey(a)), y = /^(\d+) (.+)$/.exec(streetKey(b));
+    var townA = norm(String(a).split(',')[1] || ''), townB = norm(String(b).split(',')[1] || '');
+    return !!x && !!y && x[2] === y[2] && townA === townB && x[1].length > y[1].length
+      && x[1].slice(-y[1].length) === y[1];
   }
 
   /* ---------- the order's own planner pickups --------------------------------
@@ -158,6 +199,21 @@
       var a = norm(st.street), b = norm(dropoff.street);
       if (a && b) return a === b;
       return !!norm(st.line) && norm(st.line) === norm(dropoff.line);
+    });
+  }
+
+  /* Whether `dropoff` is a pickup of the held order by ANY word on record:
+   * one of its planner pickups (above), the pickup address a planner filed
+   * on it (`fields.pickupAddr`), or the pickup its card named — on the street,
+   * as sameStreet. What a navigation destination is held to: a store's door
+   * read off a navigation screen is the confidently wrong end, so a nav
+   * destination that is any held order's pickup is refused outright. */
+  function heldPickup(held, dropoff) {
+    if (!held || !dropoff) return false;
+    if (plannerPickup(held, dropoff)) return true;
+    var f = fieldsOf(held).pickupAddr;
+    return [f ? f.value : null, held.pickup].some(function (p) {
+      return typeof p === 'string' && sameStreet(p, dropoff.line);
     });
   }
 
@@ -196,9 +252,14 @@
    *      Took — `at` is the scanner's clock, and a read older than the hold
    *      is not about it. One that fails the second half is no longer
    *      label-proven, and is `seen`: it may still fill a blank.
+   *      ...except a navigation destination (`nav`, navCandidate): it is
+   *      label-proven after the Took or nothing — it never falls to `seen` —
+   *      and with nothing held it is nothing too.
    *   4. Not one of the hold's own planner pickups, when label-proven: a
    *      restaurant's door filed as where the customer lives is the
    *      confidently wrong direction, so it is refused outright, blank or not.
+   *      A navigation destination was held to every pickup on record, of
+   *      every order in the car, before it got here (navCandidate).
    *   5. Onto the hold when outranks() says so; held and not outranked is
    *      nothing, and nothing said.
    *   6. With nothing held, onto the card being screened when it is asked, or
@@ -223,13 +284,25 @@
     var wasAsked = d.asked !== false;
     var labelled = !wasAsked && !!held && d.labelled === 'dropoff'
       && typeof d.at === 'number' && d.at >= held.acceptedAt;
-    var aPickup = labelled && plannerPickup(held, d);
+    var nav = !wasAsked && d.nav === true;
+    // (A navigation destination was held to every order's pickups when it was
+    // made, navCandidate: with two in the car only that sees them all.)
+    var aPickup = labelled && !nav && plannerPickup(held, d);
     out.asked = wasAsked;
     out.labelled = labelled;
     out.from = wasAsked ? 'press'
+      : nav ? 'nav'
       : labelled ? (d.planner === true || d.singleCardOnly === true ? 'planner' : 'label')
       : 'seen';
     out.tally = !wasAsked && !!held;
+    // A navigation destination is never `seen` and never the screened card's:
+    // the scanner reads one only while an order is held, so one that is not
+    // label-proven is a read older than the Took — or arrived with the order
+    // already gone — and is nothing.
+    if (nav && !labelled) {
+      out.why = held ? 'before the Took' : 'nothing held';
+      return out;
+    }
     if (held) {
       if (aPickup) {
         out.why = 'a pickup';
@@ -373,7 +446,7 @@
    *
    * HOW LONG A PAGE WAITS FOR ITS NEIGHBOUR: STITCH_MS, 20 s. CHOSEN, NOT
    * MEASURED — no file on this rig holds two pages of one planner yet. It is
-   * twice PLANNER_AUTO_EVERY (rpi/scan_pi.py), so the unpressed read that
+   * twice SCREEN_AUTO_EVERY (rpi/scan_pi.py), so the unpressed read that
    * follows a scroll can still reach the page before it.
    *
    * WHAT LIMITS A FALSE STITCH, all three required:
@@ -603,6 +676,9 @@
    *     scanner makes on its own while an order is held): the same address,
    *     label-proven, from 'planner'; and on a list whose end it does not show,
    *     the lone dropoff, `singleCardOnly`;
+   *   - any other screen read whole and unpressed while an order is held:
+   *     its address under a "Deliver to" or "Dropoff" label, as a navigation
+   *     destination (navCandidate);
    *   - anything else: nothing.
    * SEVERAL PAGES, linked as above, with an order held and every page read
    * after its Took: the list's one dropoff once the list is bounded, from
@@ -627,6 +703,8 @@
     if (s.screen !== 'uber.planner') {
       if (app) st.epoch[app] = (st.epoch[app] || 0) + 1;
       else Object.keys(st.epoch).forEach(function (a) { st.epoch[a] += 1; });
+      var nav = navCandidate(st, held ? [held] : [], s, out.at === null ? now : out.at);
+      if (nav) out.candidates.push(nav);
       return out;
     }
     if (s.whole !== true || !Array.isArray(s.stops) || !headed(s.stops).length) return out;
@@ -723,6 +801,81 @@
                             expectedBy: stop.expectedBy === undefined ? null : stop.expectedBy }
                : null,
              ms: null, at: page.at };
+  }
+
+  /* ---------- a navigation screen, read whole without a press ----------------
+   *
+   * The driver's ask: while an order is held, the rig reads the navigation
+   * screen and the "Deliver to" screen on its own, as it reads the planner,
+   * and the destination fills in with no ⌖. The scanner makes the read
+   * (rpi/scan_pi.py, auto_read_for and `screen_auto`) and only TYPES what it
+   * saw: the one address the frame gave, a dropoff where it sits under a
+   * "Deliver to" or "Dropoff" label in its own block (sighting_stops,
+   * offer_parser.address_under_dropoff). This decides whether it is a
+   * candidate at all; dropoff() then files it as `nav` by outranks().
+   *
+   * A candidate only when, all of them:
+   *   - an order is held — `orders` is every order in the car;
+   *   - the read was of the whole screen and nobody pressed: a press's answer
+   *     is the dropoff line's, and a card-box read is the dropoff line's too
+   *     (rank `label`);
+   *   - the screen is not Uber's navigation to a store (uber.pickupNav):
+   *     'a pickup screen';
+   *   - the address is typed a dropoff. Under a Pickup label it is 'a pickup';
+   *     under no label at all it is 'no label' — AUDITS.md's Settled rule that
+   *     an address nobody asked for and no label proves is not a destination.
+   *     The opened navigation sheet's address over "Dropoff type", with the
+   *     customer's name above it, is typed a dropoff by the scanner
+   *     (offer_parser.sheet_dropoff): the owner's decision of 14 Oct 2026
+   *     that the sheet's label, read upwards, is a label;
+   *   - it is not a pickup of ANY order in the car by any word on record
+   *     (heldPickup): 'a pickup'. With two orders the other one's store is as
+   *     wrong an end as this one's.
+   * Each refusal is kept (st.refused) with its reason. And once per address
+   * for this hold, as a planner's is: a navigation screen sits in front of
+   * the camera for a whole delivery and is read every ten seconds.
+   *
+   * WHAT THE 12 OCT SHIFT SAYS IT WILL FIND, measured by replaying its 1,237
+   * `screen` rows through rpi/scan_pi.py's screen_address and sighting() and
+   * this, each as if it were the whole-screen read, against the orders the
+   * driver ticked. None of the 179 typed uber.nav carries an address under
+   * "Deliver to" or "Dropoff": the 36 with "Deliver to" print a name after
+   * it. 18 show the opened sheet, and 10 of those read as one (name, a street
+   * with a house number, a town); the other 8 lost the number, the name or
+   * half the town. 18 ticked orders were held while a navigation screen was
+   * read, 4 of them showed a readable sheet, and all 4 were given their
+   * destination this way: 4 of 18. One of the 4 read its house number with
+   * the first two of four digits lost, twice, and then whole, and ends on the
+   * whole one (numberFuller).
+   * Those are card-box reads — the shift has no whole-screen read of a
+   * navigation screen on file — so this is what the bottom of the screen
+   * says, and the rule is held to the shapes the corpus keeps
+   * (tests/fixtures/cases.json, navStops and sheets). */
+  function navCandidate(st, orders, s, at) {
+    if (!orders.length || s.whole !== true || s.asked === true) return null;
+    var stops = Array.isArray(s.stops) ? s.stops.filter(function (x) {
+      return x && typeof x === 'object';
+    }) : [];
+    if (stops.length !== 1 || typeof stops[0].line !== 'string' || !stops[0].line) return null;
+    var a = stops[0];
+    var why = s.screen === 'uber.pickupNav' ? 'a pickup screen'
+      : a.kind === 'pickup' ? 'a pickup'
+      : a.kind !== 'dropoff' ? 'no label'
+      : orders.some(function (o) { return heldPickup(o, a); }) ? 'a pickup'
+      : null;
+    if (why) {
+      refuse(st, { at: at }, why);
+      return null;
+    }
+    var seen = a.line + '|nav';
+    if (st.said[seen]) return null;
+    st.said[seen] = true;
+    return { found: true, line: a.line, street: a.street || null, city: a.city || null,
+             state: a.state || null, zip: a.zip || null, asked: false, labelled: 'dropoff',
+             nav: true, screen: typeof s.screen === 'string' ? s.screen : null,
+             app: typeof s.app === 'string' ? s.app : null,
+             expectedBy: typeof a.expectedBy === 'number' ? a.expectedBy : null,
+             ms: null, at: at };
   }
 
   /* The reason the planner read at `at` gives the order no end, for the
@@ -974,7 +1127,8 @@
   }
 
   /* One sighting with two orders held (server.js passes the list when it holds
-   * two). A non-planner screen moves the epoch as it does with one. A planner
+   * two). A non-planner screen moves the epoch as it does with one, and gives
+   * its navigation destination as with one (navCandidate). A planner
    * read whole is linked as with one, over the pages read since the OLDER
    * order's card; a list seen whole gives every dropoff it shows read whole as
    * a candidate of its own (plannerCandidates), for server.js to attribute
@@ -992,6 +1146,11 @@
     if (s.screen !== 'uber.planner') {
       if (app) st.epoch[app] = (st.epoch[app] || 0) + 1;
       else Object.keys(st.epoch).forEach(function (a) { st.epoch[a] += 1; });
+      // ...and a navigation destination, as with one: whose it is, server.js
+      // asks attribute() — the app, the Took, the bar's "Expected by" against
+      // each card's "Deliver by" — and with no cue it waits in the pool.
+      var nav = navCandidate(st, orders, s, out.at === null ? now : out.at);
+      if (nav) out.candidates.push(nav);
       return out;
     }
     if (s.whole !== true || !Array.isArray(s.stops) || !headed(s.stops).length) return out;

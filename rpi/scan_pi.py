@@ -633,12 +633,46 @@ def dropoff_requested(now=None):
 # reason: long enough to cover a person doing one thing on a phone, short enough
 # that the rig is not still hunting for an address when the next offer arrives.
 DROPOFF_WINDOW = 12.0
-# At most one Trip Planner read every this many seconds that nobody pressed for.
-# See `planner_auto` in main(). The owner's figure: "at most one read every
-# ~10 s". A whole-screen read is a second or more of the Pi's attention (1.8s
-# median on the rig), so this keeps the planner from crowding out the card box
-# while it sits on the phone for a whole delivery.
-PLANNER_AUTO_EVERY = 10.0
+# At most one whole-screen read every this many seconds that nobody pressed for,
+# WHATEVER asked for it — a planner, a navigation screen, a Dropoff label (see
+# auto_read_for). One clock for all of them, `screen_auto_at` in main(): the
+# owner's figure is "at most one read every ~10 s", and a driver who flicks
+# between the planner and the map is still one phone in front of one Pi. A
+# whole-screen read is a second or more of the Pi's attention (1.8s median on
+# the rig), so this keeps the screen after the accept from crowding out the
+# card box while it sits on the phone for a whole delivery.
+SCREEN_AUTO_EVERY = 10.0
+
+
+def auto_read_for(text, planner=None):
+    """What in a card-box read asks for an unpressed whole-screen read while an
+    order is held: 'planner', 'nav', 'label', or None for nothing.
+
+      planner  the planner's stop grammar (`planner`, find_planner's headed
+               stops) or its furniture: the card box on the rig is the bottom
+               half of the screen and has never caught the planner's title.
+      nav      Uber's navigation (OP.screen_type 'uber.nav'). On the 12 Oct
+               shift 179 of the 1,237 payout-free card-box reads were this.
+               The box holds the bottom sheet, which reads "Deliver to <name>"
+               collapsed, or opened the name, street, town and "Dropoff type"
+               that OP.sheet_dropoff reads; the whole-screen read is where the
+               assembler takes either from.
+      label    any other screen whose address sits under a "Deliver to" or
+               "Dropoff" label in its own block (OP.address_under_dropoff):
+               DoorDash's "Dropoff <address> 12 min Start" is typed 'unknown',
+               and is the shape that rule was built on.
+
+    Only ASKS. Not uber.pickupNav as a kind of its own: a store's navigation
+    asks only if it shows one of the three, and what the read then gives is the
+    assembler's, which files nothing off a pickup screen or from under a Pickup
+    label (assemble.js, navCandidate)."""
+    if planner is not None or OP.planner_furniture(text):
+        return 'planner'
+    if OP.screen_type(text)['screen'] == 'uber.nav':
+        return 'nav'
+    if OP.address_under_dropoff(text):
+        return 'label'
+    return None
 
 
 def settings_requested():
@@ -2592,6 +2626,37 @@ class UpDown(object):
         return None if self.camera.word == 'seeing' else self.camera.word
 
 
+def screen_address(shot, text):
+    """(an_offer, address, sheet) for one frame: whether it is to be taken for
+    an offer — digest()'s payout-or-merchant test — the address find_address
+    gave it, and the address on Uber's opened navigation sheet (OP.sheet_dropoff),
+    None on a frame taken for an offer.
+
+    ONE EXCEPTION to the merchant arm. Uber's navigation bar, "6 min © 1.7
+    mi", is minutes and miles like a card's leg, and parse() reads the lines
+    under it as the leg's place: 10 of the 12 Oct shift's 179 reads typed
+    uber.nav came out with a place and no payout, every one with the bar on
+    it, 7 of them the opened sheet. So on a frame typed uber.nav with no
+    payout, the text is parsed again with the bar's lines out
+    (OP.nav_without_bar), and only if THAT still finds a payout or a place is
+    the frame an offer; its address is the bar-free parse's, so the bar can
+    never be read into the street ("7 mi - 2950 …"). A payout always makes an
+    offer, and a screen typed anything else keeps both arms: an offer card is
+    typed by its own furniture ahead of navigation (OP.screen_type). Measured
+    on the journal copied with the 12 Oct shift: over its 10,991 offer rows'
+    texts and their 36,118 frames this changes the answer for none (8 of them
+    type uber.nav, and every one still reads as an offer), and for exactly
+    the 10 screen rows above."""
+    an_offer = shot.get('pay') is not None or bool(shot.get('places'))
+    address = shot.get('address')
+    if an_offer and shot.get('pay') is None \
+            and OP.screen_type(text or '')['screen'] == 'uber.nav':
+        bare = OP.parse(OP.nav_without_bar(text))
+        if bare.get('pay') is None and not bare.get('places'):
+            an_offer, address = False, bare.get('address')
+    return an_offer, address, (None if an_offer else OP.sheet_dropoff(text))
+
+
 def screen_said(text):
     """What a screen says about WHOSE an address read off it is: {'app',
     'screen', 'expectedBy'} — the app and screen type (OP.screen_type), and the
@@ -2694,7 +2759,7 @@ def emit_planner(stops, keep=False, ms=None, asked=True, at=None):
 
     `asked` is on the line so a row written from it says on its face whether
     it answered a press, as a dropoff mark does: True under ⌖, False for the
-    read the rig makes on its own while an order is held (`planner_auto` in
+    read the rig makes on its own while an order is held (`screen_auto` in
     main()).
     """
     print(json.dumps({'planner': {'stops': stops,
@@ -2721,12 +2786,12 @@ def planner_stops(stops):
 
 # The fields of a stop on a sighting, in this order, whichever screen it came
 # off: a planner's stop has them all; an address off any other screen has the
-# address and its label, and None for the rest.
+# address, its label and the screen's one "Expected by", and None for the rest.
 SIGHTING_STOP = ('kind', 'orders', 'name', 'place', 'expectedBy', 'street', 'city',
                  'state', 'zip', 'line', 'partial', 'label')
 
 
-def sighting_stops(text, stops, address):
+def sighting_stops(text, stops, address, sheet=None):
     """The stops a sighting carries, and the page's two ends, as
     (stops, {'top', 'bottom'}).
 
@@ -2751,6 +2816,16 @@ def sighting_stops(text, stops, address):
             one['label'] = s.get('kind')
             out.append(one)
         return out, {'top': top, 'bottom': bottom}
+    # Uber's opened navigation sheet, its address over "Dropoff type" with the
+    # customer's name above (OP.sheet_dropoff; `sheet` is None wherever
+    # digest() took the frame for an offer). The owner's decision: that is the
+    # dropoff, typed so, its label the words the sheet printed.
+    if sheet:
+        one = {k: sheet.get(k) for k in SIGHTING_STOP}
+        one['kind'] = 'dropoff'
+        one['label'] = 'dropoff type'
+        one['expectedBy'] = screen_said(text)['expectedBy']
+        return [one], {'top': None, 'bottom': None}
     if not address:
         return [], {'top': None, 'bottom': None}
     label = OP.address_stop(text)
@@ -2758,6 +2833,11 @@ def sighting_stops(text, stops, address):
     one['kind'] = ('pickup' if label == 'pickup' else
                    'dropoff' if OP.address_under_dropoff(text) else None)
     one['label'] = label
+    # ...and the one "Expected by" the screen prints, as the dropoff line
+    # carries it (screen_said): Uber's navigation bar prints the stop's time,
+    # and with two orders in the car it is the deadline cue the assembler
+    # attributes a navigation destination by.
+    one['expectedBy'] = screen_said(text)['expectedBy']
     return [one], {'top': None, 'bottom': None}
 
 
@@ -2771,7 +2851,7 @@ def order_count(stops):
     return sum(s['orders'] for s in drops)
 
 
-def emit_sighting(text, stops, address, asked, whole, keep=False, at=None):
+def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None):
     """Stage 2 of the multi-order design: what a whole-screen read or a planner
     read SAW, typed by its screen, and nothing more.
 
@@ -2797,13 +2877,13 @@ def emit_sighting(text, stops, address, asked, whole, keep=False, at=None):
     later stage that does keep them has the answer the rig had.
     """
     print(json.dumps({'sighting': sighting(text, stops, address, asked, whole,
-                                           keep=keep, at=at)}), flush=True)
+                                           keep=keep, at=at, sheet=sheet)}), flush=True)
 
 
-def sighting(text, stops, address, asked, whole, keep=False, at=None):
+def sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None):
     """The sighting line's body, built: see emit_sighting, which prints it."""
     kind = OP.screen_type(text)
-    listed, page = sighting_stops(text, stops, address)
+    listed, page = sighting_stops(text, stops, address, sheet)
     return {'at': int(time.time() * 1000) if at is None else at,
             'asked': bool(asked), 'whole': bool(whole),
             'titled': OP.planner_titled(text),
@@ -3547,12 +3627,13 @@ def main():
     # ...and the order in the car when it was last looked at (held_signature),
     # which is what forgets it.
     held_seen = None
-    # The Trip Planner read the rig makes WITHOUT a press, while an order is in
-    # the car. `planner_auto` is a whole-screen read wanted on the next pass;
-    # `planner_auto_at` is when the last one was asked for, which is the rate
-    # limit. See where digest() sets it.
-    planner_auto = False
-    planner_auto_at = None
+    # The whole-screen read the rig makes WITHOUT a press, while an order is in
+    # the car: of a planner, a navigation screen, a Dropoff label
+    # (auto_read_for). `screen_auto` is a whole-screen read wanted on the next
+    # pass; `screen_auto_at` is when the last one was asked for, whichever
+    # kind asked, which is the rate limit. See where digest() sets it.
+    screen_auto = False
+    screen_auto_at = None
     last_resample = 0.0
     last_verify = 0.0
     verify_every = VERIFY_EVERY
@@ -3623,7 +3704,7 @@ def main():
         # anything failing loudly enough to notice.
         nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
         nonlocal dropoff_until, dropoff_said, dropoff_asked, held_seen
-        nonlocal planner_auto, planner_auto_at
+        nonlocal screen_auto, screen_auto_at
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
@@ -3762,8 +3843,11 @@ def main():
         # anchor at all, with or without its payout, so none of them can reach
         # this branch either way. The guard is for the corpus the parser
         # documents, not for the export.
-        an_offer = shot.get('pay') is not None or bool(shot.get('places'))
-        found = None if an_offer else shot.get('address')
+        #
+        # ...EXCEPT Uber's navigation bar, which is not a merchant: see
+        # screen_address, which also reads the opened navigation sheet.
+        an_offer, frame_address, sheet = screen_address(shot, out.get('text'))
+        found = None if an_offer else frame_address
         # UBER'S TRIP PLANNER, which lists every stop of the trip in order and
         # prints no ZIP, so find_address returns None on it — measured on the
         # rig's own view of one. OP.find_planner reads it by its own grammar.
@@ -3810,7 +3894,7 @@ def main():
         #
         # The owner, after a shift: the driver wants the planner read
         # automatically. A whole-screen read that nobody asked for is the one
-        # `planner_auto` below requested — a press's reads are all `asked`,
+        # `screen_auto` below requested — a press's reads are all `asked`,
         # because the window is open from before they are handed over — and it
         # sends the planner line only off a screen whose TITLE reads "Trip
         # Planner": the stop grammar that started it was read in the card box,
@@ -3828,44 +3912,50 @@ def main():
                 and OP.planner_titled(out.get('text')))
         if planner is not None:
             found = None
-        # A whole-screen read nobody pressed for gives no destination at all:
+        # A whole-screen read nobody pressed for sends NO dropoff line at all:
         # not the address find_address would take off the whole screen, which
         # is the map's or a card's as often as the destination's.
         #
-        # ...EXCEPT AN ADDRESS THE SCREEN PRINTS UNDER A DROPOFF LABEL, IN ITS
-        # OWN STOP BLOCK, which the driver then asked for: "while an order is
-        # held, set its destination whenever the screen shows an address
-        # directly under a Dropoff label", with no ⌖. A whole-screen read
-        # nobody pressed for happens only as `planner_auto`, which runs only
-        # while the driver's own ✓ Took is in force (order_held), so this is
-        # still not an accept detector and still touches nothing on the phone.
-        # A screen with no planner whose address OP.address_under_dropoff says
-        # sits under "Dropoff" with no other address between goes out
-        # `labelled`: TYPED, and no more. Whether it files over the card's own
-        # corner or town — never over a press, never before the Took, never as
-        # one of the hold's own planner pickups — is the assembler's to say,
-        # against the hold it has and this process does not.
+        # An address the screen prints under a "Deliver to" or "Dropoff" label,
+        # in its own stop block, is still a destination the driver asked to
+        # have filed with no ⌖ ("while an order is held, set its destination
+        # whenever the screen shows an address directly under a Dropoff
+        # label"), and so is the opened navigation sheet's address over
+        # "Dropoff type" with the customer's name above (the owner, 14 Oct:
+        # OP.sheet_dropoff). It goes out on the SIGHTING this read sends below,
+        # typed a dropoff by sighting_stops, and the assembler files it as a
+        # navigation destination, rank `nav` (assemble.js, navCandidate) —
+        # never over a press or an earlier
+        # screen-read end, never read before the Took, never off a pickup
+        # screen or as one of the orders' own pickups, and with two orders in
+        # the car only on a cue. This read used to send it as a labelled
+        # dropoff line instead; one road for it, so the sighting and the line
+        # cannot both file one screen.
+        #
+        # A whole-screen read nobody pressed for happens only as
+        # `screen_auto`, which runs only while the driver's own ✓ Took is in
+        # force (order_held), so this is not an accept detector, and the rig
+        # still touches nothing on the phone.
         labelled = False
         if whole and not asked:
-            labelled = (bool(found) and planner is None
-                        and OP.address_under_dropoff(out.get('text')))
-            if not labelled:
-                found = None
-        # ...and asked FOR, off a card-box read that shows the planner's grammar
-        # while an order is held. The card box on this rig is the bottom half of
-        # the screen — the shift's reads of a planner caught stop headers,
-        # "Address" and "Expected by" in it and never the title, which is at the
-        # top — so the grammar is what can start it, and the whole-screen read
-        # is where the title is checked. At most once per PLANNER_AUTO_EVERY, and
+            found = None
+        # ...and asked FOR, off a card-box read that shows what auto_read_for
+        # names while an order is held: the planner's grammar, Uber's
+        # navigation, or an address under a Dropoff label. The card box on this
+        # rig is the bottom half of the screen — the shift's reads of a planner
+        # caught stop headers, "Address" and "Expected by" in it and never the
+        # title, which is at the top — so what the box sees is what can start
+        # it, and the whole-screen read is where the title or the label is
+        # checked. At most once per SCREEN_AUTO_EVERY, whichever kind asks, and
         # not while a press is open: that window is already reading the whole
         # screen and answers as ⌖.
-        if not whole and not an_offer and not asked and not planner_auto \
-                and (planner is not None or OP.planner_furniture(out.get('text'))) \
-                and (planner_auto_at is None
-                     or started - planner_auto_at >= PLANNER_AUTO_EVERY) \
+        if not whole and not an_offer and not asked and not screen_auto \
+                and (screen_auto_at is None
+                     or started - screen_auto_at >= SCREEN_AUTO_EVERY) \
+                and auto_read_for(out.get('text'), planner) is not None \
                 and order_held(started):
-            planner_auto = True
-            planner_auto_at = started
+            screen_auto = True
+            screen_auto_at = started
         # AN ADDRESS THE SCREEN DID NOT LABEL A DROPOFF IS NOT A DESTINATION.
         #
         # On shift: "✓ Took $28.08" pressed with the Trip Planner up — two
@@ -4037,9 +4127,9 @@ def main():
         # arms now, and a counter that watched only one of them would make the
         # other a silent refusal — which is the thing this counter exists to
         # stop being possible.
-        if an_offer and shot.get('address'):
+        if an_offer and frame_address:
             health.address_refused_as_offer += 1
-        elif not an_offer and not shot.get('address') \
+        elif not an_offer and not frame_address \
                 and OP.STREET_ENDS.search(out.get('text') or ''):
             health.street_seen_no_address += 1
         # ...and said ONCE, not on every read that catches the same screen.
@@ -4113,10 +4203,10 @@ def main():
         seen_at = int(time.time() * 1000)
         if args.json and (whole or seen_stops is not None):
             emit_sighting(out.get('text'), seen_stops,
-                          None if an_offer else shot.get('address'),
+                          None if an_offer else frame_address,
                           asked, whole,
                           keep=offer_log is not None and offer_log.keep_places,
-                          at=seen_at)
+                          at=seen_at, sheet=sheet)
         if answers:
             dropoff_until = 0.0
             dropoff_asked = False
@@ -5137,9 +5227,10 @@ def main():
                     do_read = True
                     last_dropoff_read = now
 
-                # ...and the Trip Planner read digest() asked for, whether the
-                # picture moved or not: the planner sits still on the phone.
-                if not do_read and planner_auto:
+                # ...and the whole-screen read digest() asked for, whether the
+                # picture moved or not: a planner or a navigation screen sits
+                # still on the phone.
+                if not do_read and screen_auto:
                     do_read = True
 
                 # ...and a window that closes with nothing on it SAYS SO.
@@ -5367,10 +5458,11 @@ def main():
             # card box drawn by hand made that a blind spot — see
             # cropbox.parse_card. Only while asked: an unprompted read is
             # hunting offers and keeps the card crop.
-            # ...and for the planner read digest() asked for without a press
-            # (`planner_auto`), once: the request is spent by this hand-over.
-            whole_read = (dropoff_asked and time.time() < dropoff_until) or planner_auto
-            planner_auto = False
+            # ...and for the whole-screen read digest() asked for without a
+            # press (`screen_auto`), once: the request is spent by this
+            # hand-over.
+            whole_read = (dropoff_asked and time.time() < dropoff_until) or screen_auto
+            screen_auto = False
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(),
                           scanner.geometry(whole=whole_read))

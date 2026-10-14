@@ -310,10 +310,18 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
     # server's /api/dropoff writes and the same one dropoff_requested() clears.
     # Confined to this run's own directory so a scanner running on the same
     # machine cannot eat the request or leave one behind — see handoff.ENV_DIR.
+    #
+    # ...and every run in its own directory, pressed or not: the loop also
+    # READS a note there, `.holding.json` (order_held), and on a navigation
+    # screen or an address under a Dropoff label it reads it on every pass.
+    # Seen: with another checkout's test server writing /dev/shm's note while
+    # this suite ran, the unpressed run below said its one address twice, and
+    # passed in its own directory. (A note whose order changes forgets
+    # `dropoff_said`, which is the likely road; not traced further.)
     import handoff as HOF
     had_dir = os.environ.get(HOF.ENV_DIR)
+    os.environ[HOF.ENV_DIR] = workdir
     if press_dropoff:
-        os.environ[HOF.ENV_DIR] = workdir
         HOF.clear(HOF.DROPOFF)
         for where in HOF.candidates(HOF.DROPOFF):
             open(where, 'w').close()
@@ -390,10 +398,10 @@ def run(screen, seconds=9.0, extra_argv=(), appear_at=0.6, vanish_at=6.0,
         HOF.age = real_age
         if press_dropoff:
             HOF.clear(HOF.DROPOFF)
-            if had_dir is None:
-                os.environ.pop(HOF.ENV_DIR, None)
-            else:
-                os.environ[HOF.ENV_DIR] = had_dir
+        if had_dir is None:
+            os.environ.pop(HOF.ENV_DIR, None)
+        else:
+            os.environ[HOF.ENV_DIR] = had_dir
 
     rows, ups = [], []
     if os.path.exists(journal):
@@ -3816,6 +3824,82 @@ _dd = said(lambda: SP.emit_offer('y', {'pay': 9.4, 'minutes': None, 'deliverBy':
                                  {'ready': True, 'perHour': 20.0, 'cardMinutes': 28.0}))['offer']
 eq('...a DoorDash card\'s with its "Deliver by"',
    (_dd.get('app'), _dd.get('screen'), _dd.get('deliverBy')), ('doordash', 'dd.offer', 1155))
+# ...and a navigation screen's sighting carries that time on its one stop, so
+# the assembler can attribute a navigation destination read with no press.
+_nav_seen = SP.sighting(_nav_text, None, {'line': '4821 Kestrel Dr, Marietta, GA 30060',
+                                          'street': '4821 Kestrel Dr', 'city': 'Marietta',
+                                          'state': 'GA', 'zip': '30060'}, False, True)
+eq('a navigation screen\'s sighting carries the screen\'s one "Expected by" on its stop',
+   [(s['kind'], s['expectedBy']) for s in _nav_seen['stops']], [('dropoff', 20 * 60 + 20)])
+
+# --- Uber's navigation bar is not a card's leg, and the opened sheet ----------
+#
+# screen_address: on a frame typed uber.nav with no payout, the bar ("6 min ©
+# 1.7 mi") is taken out and the text parsed again before the merchant arm may
+# call the frame an offer; and the opened sheet's address over "Dropoff type"
+# is read (OP.sheet_dropoff). Invented names and streets, the 12 Oct layouts.
+_SHEETS = {c['name']: c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'tests', 'fixtures', 'cases.json'), encoding='utf-8'))['sheets']}
+_SHEET_BAR = next(t for n, t in _SHEETS.items() if n.startswith('...under the bar'))
+ok_('the premise: parse() takes that sheet under the bar for an offer\'s place',
+    OP2.parse(_SHEET_BAR)['pay'] is None and OP2.parse(_SHEET_BAR)['places'] != [])
+
+
+def _framed(text):
+    an_offer, address, sheet = SP.screen_address(OP2.parse(text), text)
+    return an_offer, (address or {}).get('line'), (sheet or {}).get('line')
+
+
+eq('screen_address: Uber\'s bar over the opened sheet is not an offer, and the sheet '
+   'is read', _framed(_SHEET_BAR), (False, None, '4416 Wrenfield Dr NW, Kennesaw'))
+eq('screen_address: ...and an address straight under the bar is read without the bar '
+   'in its street', _framed('o= 6 min © 1.7 mi —\n2950 Kestrel Dr\nWoodstock, GA 30188'),
+   (False, '2950 Kestrel Dr, Woodstock, GA 30188', None))
+eq('screen_address: a payout is an offer, navigation or not',
+   _framed('o= 6 min © 1.7 mi —\nDeliver to\n2950 Kestrel Dr\nWoodstock, GA 30188\n'
+           '$12.50\nAccept')[0], True)
+eq('screen_address: a frame with a payout reads no sheet',
+   _framed(_SHEET_BAR + '\n$12.50\nAccept'), (True, None, None))
+# Uber's card slides up over the navigation bar, so a card that lost its payout
+# can carry the bar too; it is typed by its own furniture, and its merchant
+# still makes it an offer. Taken out with the bar, the merchant's door would go
+# out as a destination.
+_CARD_OVER_BAR = ('o= 6 min © 1.7 mi —\nFable Grill\n1200 Lantern Rd, Acworth, GA 30101\n'
+                  'Exclusive')
+ok_('the premise: that card is typed an offer, and without the bar it shows no place',
+    OP2.screen_type(_CARD_OVER_BAR)['screen'] == 'uber.offer'
+    and OP2.parse(OP2.nav_without_bar(_CARD_OVER_BAR))['places'] == [])
+eq('screen_address: a card over the navigation bar that lost its payout is still an offer',
+   _framed(_CARD_OVER_BAR), (True, '1200 Lantern Rd, Acworth, GA 30101', None))
+eq('screen_address: a card that lost its payout is still an offer by its merchant',
+   _framed('Guaranteed (incl. tip)\n© 29 min (8.7 mi) total\nFable Grill (3295 Lantern '
+           'Pkwy Nw)\n| Birch Dr NW & Kestrel Ln NW, Acworth'), (True, None, None))
+_sheet_seen = SP.sighting(_SHEET_BAR, None, None, False, True,
+                          sheet=OP2.sheet_dropoff(_SHEET_BAR))
+eq('the opened sheet\'s sighting types its address a dropoff, under the label it printed',
+   [(s['kind'], s['label'], s['line']) for s in _sheet_seen['stops']],
+   [('dropoff', 'dropoff type', '4416 Wrenfield Dr NW, Kennesaw')])
+
+# --- what in the card box asks for an unpressed whole-screen read ------------
+#
+# auto_read_for: the planner's grammar, Uber's navigation, or an address under a
+# Dropoff label, each asking under its own name; anything else asks nothing.
+# The navigation bar and the store's screen are the 12 Oct shift's layouts;
+# every name and street is invented.
+eq('auto_read_for: the planner in the card box asks as the planner',
+   SP.auto_read_for('Address\n1625 Heron Blvd NW, Kennesaw, GA\n30152\nView details\n'
+                    'Dropoff • 1 order\nStop New Requests'), 'planner')
+eq('auto_read_for: Uber\'s navigation bar asks as navigation',
+   SP.auto_read_for('45\nLIMIT v\no= 6 min © 1.7 mi —\nDeliver to Pat Q.'), 'nav')
+eq('auto_read_for: DoorDash\'s "Dropoff" over an address asks as a label',
+   SP.auto_read_for('Dropoff\n61 Saddlebrook Ln, Acworth, GA 30101\n12 min Start'), 'label')
+eq('auto_read_for: a store\'s navigation, an address under no label, and the idle map ask '
+   'nothing',
+   [SP.auto_read_for('2 Arriving soon =\nFable Grill\n1840 Lantern Dr, Woodstock,\n'
+                     'GA 30189\nNote from business\nPick up in store'),
+    SP.auto_read_for('77 Made Up Ct, Acworth, GA 30101\n12 min Start'),
+    SP.auto_read_for('© Trip Radar @\n5 Finding trips =')], [None, None, None])
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)

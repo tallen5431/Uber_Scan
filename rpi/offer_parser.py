@@ -3077,6 +3077,132 @@ def planner_ends(text):
 
 # --- what screen this is ------------------------------------------------------
 #
+# UBER'S NAVIGATION SHEET, OPENED: the customer's name, the street with its
+# house number, the town (no ZIP), and under them "Dropoff type".
+#
+#     Pat Q.                       the name the collapsed bar printed after
+#     1572 Larkspur Dr  P  &       "Deliver to"; the street, with the sheet's
+#     Woodstock, GA                icons read as letters after it; the town
+#     House                        what kind of door
+#     Dropoff type                 the sheet's one label, BELOW the address
+#     Meet at door
+#
+# (Name and street invented; the layout is the 12 Oct shift's card-box reads
+# of 18 opened sheets.) find_address cannot read it — no ZIP — and
+# address_stop finds no label above it, so on that shift no destination came
+# off it. The owner's decision, 14 Oct 2026: on this sheet, an address
+# followed by "Dropoff type", with the customer's name above it, is the
+# dropoff while an order is held. So the label here is "Dropoff type" read
+# UPWARDS, and the rest of the block has to be the sheet's own:
+#
+#   - "Dropoff type" on a line; the last one on the screen is the one read;
+#   - the street: the nearest line above it opening with a HOUSE NUMBER — real
+#     digits, not the letters this reader turns digits into elsewhere (DC): an
+#     "S" where the number was is a lost number, not the number 5 — and not
+#     opening with 0, which no house number does and the shift read once off
+#     a number whose first digit was lost; within SHEET_REACH lines, cut after
+#     its first street suffix and quadrant, which is where the sheet's icons
+#     begin;
+#   - the town: after a comma on the street line ("917 Fable Rd NW,
+#     Kennesaw"), or the line under it as "Town, ST", every word capitalised
+#     after the icon row's stray letters are taken off: "nnesaw, GA" is a town
+#     cut in half and is no town;
+#   - the name: one of the two lines above the street, "First L." with the
+#     full stop optional, as the app writes a customer;
+#   - nothing between the name and "Dropoff type" that is another address: no
+#     second house-number line and no second "Town, ST" line.
+# Anything else is None. A street with no suffix is None too: the cut is what
+# keeps "Pp &" off the end, and a refusal costs a blank where a wrong door
+# costs the map.
+SHEET_TYPE = re.compile(r'\bdrop ?-?off ?type\b', re.IGNORECASE | ASCII)
+SHEET_HOUSE = re.compile(r'^\W{0,3}(\d{1,6} [A-Za-z].*)$', ASCII)
+SHEET_NUMBER = re.compile(r'^[1-9]\d{0,5} ', ASCII)
+SHEET_STREET_END = re.compile(
+    r'\b(?:' + STREET_SUFFIX + r')\b\.?(?:\s+(?:NW|NE|SW|SE|N|S|E|W)\b)?',
+    re.IGNORECASE | ASCII)
+SHEET_NAME = re.compile(r"^\W{0,3}[A-Z][A-Za-z'’-]+ [A-Z]\.?(?:\s|$)")
+SHEET_CAPS_JUNK = re.compile(r'^(?:[A-Z]{1,2}\s+)+(?=[A-Z][a-z])', ASCII)
+SHEET_TOWN_WORDS = re.compile(r"^[A-Z][a-z'’.-]+(?: [A-Z][a-z'’.-]+){0,3}$")
+# How far above "Dropoff type" the street may sit, in lines. On the 12 Oct
+# sheets that read a name, a street and a town it sat 2 to 7 lines above (the
+# town line, "House" and the reader's marks between); 8 is that and one more,
+# CHOSEN. A block that long with no other address in it is still one stop.
+SHEET_REACH = 8
+
+
+def _sheet_town(line):
+    """(town, state, zip) off a "Town, ST" line, or None — the town every
+    word capitalised once the icon row's letters are off its front."""
+    t = _planner_town(line)
+    if not t:
+        return None
+    town = CITY_JUNK.sub('', re.sub(r'\s+', ' ', t.group(1)).strip(' .,'))
+    town = SHEET_CAPS_JUNK.sub('', town)
+    if not SHEET_TOWN_WORDS.match(town):
+        return None
+    rest = t.group(3).strip()
+    z = PLANNER_ZIP.match(rest)
+    return town, t.group(2).upper(), (a_zip(z.group(1)) if z else None)
+
+
+def _sheet_street(line):
+    """(street, what follows it on the line) for a house-number line, or None
+    without a street suffix to end the street at."""
+    h = SHEET_HOUSE.match(line)
+    if not h:
+        return None
+    body = h.group(1)
+    if not SHEET_NUMBER.match(body):
+        return None
+    end = SHEET_STREET_END.search(body)
+    if not end:
+        return None
+    return re.sub(r'\s+', ' ', body[:end.end()]).strip(' .,'), body[end.end():]
+
+
+def sheet_dropoff(text):
+    """The address on Uber's opened navigation sheet — {'line', 'street',
+    'city', 'state', 'zip'} — or None. See the layout above."""
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
+    lines = [l for l in lines if l]
+    types = [i for i, l in enumerate(lines) if SHEET_TYPE.search(l)]
+    if not types:
+        return None
+    d = types[-1]
+    s = next((i for i in range(d - 1, max(-1, d - 1 - SHEET_REACH), -1)
+              if SHEET_HOUSE.match(lines[i])), None)
+    if s is None:
+        return None
+    street = _sheet_street(lines[s])
+    if street is None:
+        return None
+    street, rest = street
+    town = None
+    tail = re.match(r'^\s*,\s*(.+)$', rest)
+    if tail:
+        town = _sheet_town(tail.group(1))
+        if town is None:
+            bare = PLANNER_EDGE.sub('', tail.group(1))
+            town = (bare, None, None) if SHEET_TOWN_WORDS.match(bare) else None
+        town_at = s
+    elif s + 1 < d:
+        town = _sheet_town(lines[s + 1])
+        town_at = s + 1
+    if town is None:
+        return None
+    # Nothing else that is an address down to "Dropoff type"...
+    if any(_planner_town(l) for l in lines[town_at + 1:d]):
+        return None
+    # ...and the customer's name over the street, with no address between.
+    n = next((i for i in (s - 1, s - 2) if i >= 0 and SHEET_NAME.match(lines[i])), None)
+    if n is None or any(SHEET_HOUSE.match(l) or _planner_town(l) for l in lines[n + 1:s]):
+        return None
+    city, state, zipcode = town
+    parts = [street, city] + (['%s %s' % (state, zipcode)] if zipcode else [])
+    return {'line': ', '.join(parts), 'street': street, 'city': city,
+            'state': state, 'zip': zipcode}
+
+
 # Stage 2 of the multi-order design: every whole-screen read and every planner
 # read goes out as a SIGHTING typed by the screen it was off, and nothing files
 # on it — the dropoff and planner lines still do all the filing. This is the
@@ -3156,10 +3282,15 @@ SCREEN_DD_ELSEWHERE = re.compile(
     r'|dash summary|continue dashing', re.IGNORECASE | ASCII)
 SCREEN_PICKUP_NAV = re.compile(r'note from business|pick ?up in store|pick ?up order',
                                re.IGNORECASE | ASCII)
+# Uber's navigation bar, "6 min © 1.7 mi": minutes, a dot, miles, no bracket.
+# Named on its own as well because parse() takes it for an offer's leg and the
+# lines under it for a place; see nav_without_bar.
+NAV_BAR = r'(?:\d|\b[lLIO])[\dlI]? ?min ?[©Oo0@] ?[\dO]{0,3}(?:[.,]\d)? ?mi\b'
+NAV_BAR_LINE = re.compile(NAV_BAR, re.IGNORECASE | ASCII)
 SCREEN_NAV = re.compile(
     r'\bdeliver(?:ing)? to\b|dropoff type|meet at (?:the )?door|complete delivery'
     r'|arriving soon|expected by \d'
-    r'|(?:\d|\b[lLIO])[\dlI]? ?min ?[©Oo0@] ?[\dO]{0,3}(?:[.,]\d)? ?mi\b',
+    r'|' + NAV_BAR,
     re.IGNORECASE | ASCII)
 # The speed-limit sign, which Uber draws while it navigates: the last thing
 # asked, so the idle map's own words decide first.
@@ -3170,6 +3301,17 @@ SCREEN_MATCHING = re.compile(r'matching in progress', re.IGNORECASE | ASCII)
 SCREEN_DD_FINDING = re.compile(r'finding offers|wait for offers|zone offer wait'
                                r'|likely to get offers', re.IGNORECASE | ASCII)
 SCREEN_UBER_FINDING = re.compile(r"finding trips|\by?ou.?re online", re.IGNORECASE | ASCII)
+
+
+def nav_without_bar(text):
+    """`text` with every line carrying Uber's navigation bar (NAV_BAR) taken
+    out. The bar is minutes and miles like a card's leg, and parse() reads it
+    as one: on the 12 Oct shift 10 of the 179 reads typed uber.nav came out
+    with a place and no payout, every one with the bar on it. What the bar
+    is, is the scanner's question to ask of a navigation screen (digest()'s
+    `an_offer`, rpi/scan_pi.py); this only takes it out."""
+    return '\n'.join(l for l in re.split(r'[\r\n]+', str(text or ''))
+                     if not NAV_BAR_LINE.search(l))
 
 
 def screen_type(text):

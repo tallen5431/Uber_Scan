@@ -1732,6 +1732,83 @@
                .some(function (l) { return PLANNER_END.test(l); }) };
   }
 
+  /* Uber's navigation sheet, opened: the customer's name, the street with its
+     house number, the town with no ZIP, and "Dropoff type" under them — which
+     the owner decided (14 Oct 2026) is the dropoff's label, read upwards.
+     {line, street, city, state, zip} or null. Every rule, and the 12 Oct
+     measurement behind SHEET_REACH, is at sheet_dropoff in offer_parser.py;
+     tests/fixtures/cases.json `sheets` holds the two ports to one answer. */
+  var SHEET_TYPE = /\bdrop ?-?off ?type\b/i;
+  var SHEET_HOUSE = /^\W{0,3}(\d{1,6} [A-Za-z].*)$/;
+  var SHEET_NUMBER = /^[1-9]\d{0,5} /;
+  var SHEET_STREET_END = new RegExp('\\b(?:' + STREET_SUFFIX + ')\\b\\.?'
+    + '(?:\\s+(?:NW|NE|SW|SE|N|S|E|W)\\b)?', 'i');
+  var SHEET_NAME = /^\W{0,3}[A-Z][A-Za-z'’-]+ [A-Z]\.?(?:\s|$)/;
+  var SHEET_CAPS_JUNK = /^(?:[A-Z]{1,2}\s+)+(?=[A-Z][a-z])/;
+  var SHEET_TOWN_WORDS = /^[A-Z][a-z'’.-]+(?: [A-Z][a-z'’.-]+){0,3}$/;
+  var SHEET_REACH = 8;
+
+  function sheetTown(line) {
+    var t = plannerTown(line);
+    if (!t) return null;
+    var town = t[1].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '')
+      .replace(CITY_JUNK, '').replace(SHEET_CAPS_JUNK, '');
+    if (!SHEET_TOWN_WORDS.test(town)) return null;
+    var z = PLANNER_ZIP.exec(t[3].trim());
+    return [town, t[2].toUpperCase(), z ? aZip(z[1]) : null];
+  }
+
+  function sheetStreet(line) {
+    var h = SHEET_HOUSE.exec(line);
+    if (!h || !SHEET_NUMBER.test(h[1])) return null;
+    var end = SHEET_STREET_END.exec(h[1]);
+    if (!end) return null;
+    var cut = end.index + end[0].length;
+    return [h[1].slice(0, cut).replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, ''),
+            h[1].slice(cut)];
+  }
+
+  function sheetDropoff(text) {
+    var lines = String(text || '').split(/[\r\n]+/).map(normalize)
+      .filter(function (l) { return l; });
+    var d = -1;
+    lines.forEach(function (l, i) { if (SHEET_TYPE.test(l)) d = i; });
+    if (d === -1) return null;
+    var s = -1;
+    for (var i = d - 1; i >= 0 && i >= d - SHEET_REACH; i--) {
+      if (SHEET_HOUSE.test(lines[i])) { s = i; break; }
+    }
+    if (s === -1) return null;
+    var st = sheetStreet(lines[s]);
+    if (!st) return null;
+    var town = null, townAt = -1;
+    var tail = /^\s*,\s*(.+)$/.exec(st[1]);
+    if (tail) {
+      town = sheetTown(tail[1]);
+      if (!town) {
+        var bare = tail[1].replace(PLANNER_EDGE, '');
+        town = SHEET_TOWN_WORDS.test(bare) ? [bare, null, null] : null;
+      }
+      townAt = s;
+    } else if (s + 1 < d) {
+      town = sheetTown(lines[s + 1]);
+      townAt = s + 1;
+    }
+    if (!town) return null;
+    if (lines.slice(townAt + 1, d).some(function (l) { return plannerTown(l); })) return null;
+    var n = -1;
+    [s - 1, s - 2].forEach(function (k) {
+      if (n === -1 && k >= 0 && SHEET_NAME.test(lines[k])) n = k;
+    });
+    if (n === -1 || lines.slice(n + 1, s).some(function (l) {
+      return SHEET_HOUSE.test(l) || plannerTown(l);
+    })) return null;
+    var parts = [st[0], town[0]];
+    if (town[2]) parts.push(town[1] + ' ' + town[2]);
+    return { line: parts.join(', '), street: st[0], city: town[0], state: town[1],
+             zip: town[2] };
+  }
+
   /* What screen a reading is, for a sighting: {app, screen}, `screen` one of
      SCREENS and `app` 'uber', 'doordash', or null for 'unknown' alone.
      Collection only, and kept apart from NOT_AN_OFFER, which decides. Each
@@ -3455,7 +3532,7 @@
            findPlaces: findPlaces, trimPlace: trimPlace,
            findPickup: findPickup, findDropoff: findDropoff,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
-           findAddress: findAddress, findPlanner: findPlanner,
+           findAddress: findAddress, findPlanner: findPlanner, sheetDropoff: sheetDropoff,
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
            plannerTitled: plannerTitled,
            screenType: screenType, SCREENS: SCREENS,

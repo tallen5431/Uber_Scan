@@ -1051,16 +1051,16 @@ function saveHold(h) {
 
 /* Until when an order is in the car, for the scanner, which cannot ask.
  *
- * The scanner reads Uber's Trip Planner on its own while an order is held —
- * see `planner_auto` in rpi/scan_pi.py — and "is an order held" is this
- * process's question, answered by holding(). The scanner is sometimes this
- * process's child and sometimes a systemd unit that has never heard of it, so
- * it is told the way every other request is: a handoff file. What goes in it
- * is the moment holding() itself stops answering yes — the LATEST of the
- * orders' holdEnds, the one expression of that — so the scanner needs no word
- * from here when the orders run out, and a server that died mid-delivery
- * leaves a file that goes stale on its own clock rather than one that says
- * "held" for ever.
+ * The scanner reads Uber's Trip Planner and navigation screens on its own
+ * while an order is held — see `screen_auto` in rpi/scan_pi.py — and "is an
+ * order held" is this process's question, answered by holding(). The scanner
+ * is sometimes this process's child and sometimes a systemd unit that has
+ * never heard of it, so it is told the way every other request is: a handoff
+ * file. What goes in it is the moment holding() itself stops answering yes —
+ * the LATEST of the orders' holdEnds, the one expression of that — so the
+ * scanner needs no word from here when the orders run out, and a server that
+ * died mid-delivery leaves a file that goes stale on its own clock rather than
+ * one that says "held" for ever.
  *
  * Through a rename, like every other file this process publishes, so the
  * scanner never reads half of one. Gone when nothing is held. */

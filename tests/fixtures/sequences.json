@@ -235,6 +235,189 @@
         "refused": [ "dropoffs", "dropoffs" ],
         "unfiled": [ "list", "dropoffs" ]
       }
+    },
+    {
+      "name": "planner, then nav, then press: a navigation screen fills in the planner's stop read fuller, never a different address and never a pickup, and a press replaces it and is never replaced by one",
+      "hold": {
+        "acceptedAt": 1000,
+        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "card": {
+          "legs": 1,
+          "multiOrder": true
+        }
+      },
+      "events": [
+        {
+          "t": 2000,
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+        },
+        {
+          "t": 4000,
+          "sighting": {
+            "asked": false,
+            "whole": true,
+            "titled": false,
+            "app": "uber",
+            "screen": "uber.nav",
+            "page": {
+              "top": null,
+              "bottom": null
+            },
+            "stops": [
+              {
+                "kind": "dropoff",
+                "orders": null,
+                "name": null,
+                "place": null,
+                "expectedBy": 1202,
+                "street": "415 Ostrander Way NW",
+                "city": "Kennesaw",
+                "state": "GA",
+                "zip": "30144",
+                "line": "415 Ostrander Way NW, Kennesaw, GA 30144",
+                "partial": null,
+                "label": "dropoff"
+              }
+            ],
+            "orderCount": null,
+            "keep": true
+          }
+        },
+        {
+          "t": 5000,
+          "sighting": {
+            "asked": false,
+            "whole": true,
+            "titled": false,
+            "app": "uber",
+            "screen": "uber.nav",
+            "page": {
+              "top": null,
+              "bottom": null
+            },
+            "stops": [
+              {
+                "kind": "dropoff",
+                "orders": null,
+                "name": null,
+                "place": null,
+                "expectedBy": null,
+                "street": "88 Wren Hollow Ct",
+                "city": "Kennesaw",
+                "state": "GA",
+                "zip": "30144",
+                "line": "88 Wren Hollow Ct, Kennesaw, GA 30144",
+                "partial": null,
+                "label": "dropoff"
+              }
+            ],
+            "orderCount": null,
+            "keep": true
+          }
+        },
+        {
+          "t": 5500,
+          "sighting": {
+            "asked": false,
+            "whole": true,
+            "titled": false,
+            "app": "uber",
+            "screen": "uber.nav",
+            "page": {
+              "top": null,
+              "bottom": null
+            },
+            "stops": [
+              {
+                "kind": "dropoff",
+                "orders": null,
+                "name": null,
+                "place": null,
+                "expectedBy": null,
+                "street": "2210 Quarry Bend Rd NW",
+                "city": "Kennesaw",
+                "state": "GA",
+                "zip": "30144",
+                "line": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+                "partial": null,
+                "label": "dropoff"
+              }
+            ],
+            "orderCount": null,
+            "keep": true
+          }
+        },
+        {
+          "t": 6000,
+          "dropoff": {
+            "found": true,
+            "line": "77 Birch Ln, Kennesaw",
+            "street": "77 Birch Ln",
+            "city": "Kennesaw",
+            "state": "GA",
+            "zip": null,
+            "asked": true
+          }
+        },
+        {
+          "t": 7000,
+          "sighting": {
+            "asked": false,
+            "whole": true,
+            "titled": false,
+            "app": "uber",
+            "screen": "uber.nav",
+            "page": {
+              "top": null,
+              "bottom": null
+            },
+            "stops": [
+              {
+                "kind": "dropoff",
+                "orders": null,
+                "name": null,
+                "place": null,
+                "expectedBy": null,
+                "street": "77 Birch Ln",
+                "city": "Kennesaw",
+                "state": "GA",
+                "zip": "30144",
+                "line": "77 Birch Ln, Kennesaw, GA 30144",
+                "partial": null,
+                "label": "dropoff"
+              }
+            ],
+            "orderCount": null,
+            "keep": true
+          }
+        }
+      ],
+      "expect": {
+        "fields": {
+          "dropoff": {
+            "value": "77 Birch Ln, Kennesaw",
+            "from": "press"
+          },
+          "pickupAddr": {
+            "value": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+            "from": "planner"
+          }
+        },
+        "dropoffScanned": true,
+        "decisions": [
+          "over the card",
+          "fuller",
+          "outranked by nav",
+          "press",
+          "outranked by press"
+        ],
+        "refused": [
+          "a pickup"
+        ],
+        "unfiled": [
+          null
+        ]
+      }
     }
   ]
 }
