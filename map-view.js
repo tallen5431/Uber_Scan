@@ -2874,7 +2874,157 @@
     return loading;
   }
 
+  /* The map caption's refusals as CHIPS, the way live.html's notices are
+     (showNotes there): the state in capitals and the reason after the dot —
+     "NO FIGURE · card names no pickup", "NO PIN · McDonald's, none fit the
+     card" — with the whole sentence one tap away. The sentences were written
+     to be read parked; under a map, at a glance from the seat, a line of
+     15px prose saying why there is no figure is not read at all. Every chip
+     keeps its reason, and the place it is about where the sentence names one;
+     a figure goes on a chip only where it is the reason (a fix's error),
+     because a number pulled out of a sentence leaves its hedge behind.
+
+     Read off the sentence, not written beside it at each of the dozen places
+     that word one: those are tested where they are (tests/mapview.test.js)
+     and return the sentence, and the caption is the one place that shows it.
+     A sentence no row below matches is shown whole — never dropped, never
+     a chip that says less than it — and rpi/test_layout.py holds every form
+     the caption can take to the chip it is expected to make, or to none.
+     The figure, and the lines that say a figure is coming, are not refusals
+     and stay as they are written. */
+  var FIX_CHIPS = {
+    'new': { none: 'NO FIX · on this card', rough: 'ROUGH FIX · on this card',
+             unrated: 'NO FIX · no accuracy on this card',
+             nomode: 'NO FIX · no 2D/3D on this card', frozen: 'STUCK FIX · on this card',
+             other: 'NO FIX · never judged on this card' },
+    held: { nocard: 'NO CARD KEPT · for your order, end unchecked',
+            none: 'NO FIX · on your order\'s card',
+            rough: 'ROUGH FIX · on your order\'s card',
+            unrated: 'NO FIX · no accuracy on your order\'s card',
+            nomode: 'NO FIX · no 2D/3D on your order\'s card',
+            frozen: 'STUCK FIX · on your order\'s card',
+            other: 'NO FIX · never judged on your order\'s card' }
+  };
+  var YARD_CHIPS = {
+    'new': { none: 'UNCHECKED · card states no distance',
+             untrusted: 'UNCHECKED · card\'s distance untrusted',
+             early: 'UNCHECKED · Early look card',
+             shape: 'UNCHECKED · card may not count the drive' },
+    held: { none: 'UNCHECKED · your order\'s card states no distance',
+            untrusted: 'UNCHECKED · your order\'s distance untrusted',
+            early: 'UNCHECKED · your order\'s Early look card',
+            shape: 'UNCHECKED · your order\'s kind of card' }
+  };
+  var PIN_SHORT = {
+    'the NucBox found nothing for it': 'nothing found',
+    'no street index to ask': 'no street index',
+    'a street name not on the NucBox': 'street not on the NucBox',
+    'a bug: the rig refused the question': 'a bug: question refused'
+  };
+  // The sentences live.html words itself, each with its chip.
+  var LINE_CHIPS = [
+    [/^this card names nowhere yet — /, function () {
+      return 'NO PLACES · ⌖ Scan reads them'; }],
+    [/^no card read yet — /, function () { return 'NO CARD YET · nothing to map'; }],
+    [/^no signal — /, function () { return 'NO SIGNAL · ⛶ Phone for the picture'; }],
+    [/^(.+) is \d+ mi away — almost certainly a misread name/, function (m) {
+      return 'MISREAD PIN · ' + m[1] + ', far off'; }],
+    [/^wrong pin for (.+?) — [\d.]+ mi from you, past /, function (m) {
+      return 'WRONG PIN · ' + m[1] + ', past the card\'s distance'; }],
+    [/^wrong pin for (.+?) — [\d.]+ mi from your order's card, past /, function (m) {
+      return 'WRONG PIN · ' + m[1] + ', past its card\'s distance'; }],
+    // The NucBox's refusal and a figure the street withholds: the reason is
+    // the words after the dash, to the disc's tail (NBX_WORDS, nbxRefusal),
+    // in fewer words where the sentence's own are most of the chip. Not for
+    // the one whose reason IS the tail: several found, and no fix to choose
+    // between them by, which "10 found" alone would not say. The count goes
+    // (it is in the sentence): with it, "50 corners" and "on its card" took
+    // the 3.5" hat's caption to a fourth row.
+    [/^no pin for (.+?) — \d+(?: corners)? found · no GPS fix (on your order's card )?to /,
+     function (m) {
+       return 'NO PIN · ' + m[1] + ', no fix ' + (m[2] ? 'on its card' : 'to choose'); }],
+    [/^no pin for (.+?) — (.+?)(?: · .*)?$/, function (m) {
+      return 'NO PIN · ' + m[1] + ', ' + (PIN_SHORT[m[2]] || m[2]); }],
+    [/^no figure for (.+?) — the street runs ([\d.]+) mi in /, function (m) {
+      return 'NO FIGURE · ' + m[1] + ', street runs ' + m[2] + ' mi'; }],
+    [/^no figure for (.+?) — your order's pickup is a street$/, function (m) {
+      return 'NO FIGURE · ' + m[1] + ', a street pickup'; }],
+    [/^no figure for (.+?) — a street, with two orders$/, function (m) {
+      return 'NO FIGURE · ' + m[1] + ', a street, 2 orders'; }],
+    [/^the order in your car has no address on record — /, function () {
+      return 'NO FIGURE · your order\'s end unknown, ⌖ Scan'; }],
+    [/^② has no address on record — /, function () {
+      return 'NO FIGURE · ②\'s end unknown, ⌖ Scan'; }],
+    [/^nothing in the car to compare this against$/, function () {
+      return 'NO FIGURE · nothing in the car'; }],
+    [/^order of stops unknown — no figure$/, function () {
+      return 'NO FIGURE · order of stops unknown'; }],
+    [/^this card does not say where to collect it$/, function () {
+      return 'NO FIGURE · card names no pickup'; }],
+    [/^could not reach the geocoder for the pickup/, function () {
+      return 'NOT ASKED · pickup, no network or busy'; }],
+    [/^the geocoder found nothing for the pickup/, function () {
+      return 'NOT FOUND · pickup, likely misread'; }],
+    [/^(could not reach|the geocoder found nothing for) (?:the geocoder for )?where your order is (going|collected)$/,
+     function (m) {
+       return (m[1] === 'could not reach' ? 'NOT ASKED' : 'NOT FOUND') + ' · your order\'s '
+         + (m[2] === 'going' ? 'end' : 'pickup'); }]
+  ];
+
+  function captionChip(text) {
+    if (typeof text !== 'string' || !text) return null;
+    var whose, k, m;
+    for (whose in FIX_WORDS) {
+      for (k in FIX_WORDS[whose]) {
+        var line = FIX_WORDS[whose][k];
+        if (text === line) return FIX_CHIPS[whose][k];
+        m = k === 'rough' && text.indexOf(line + ' (±') === 0
+          ? /\(±(\d+) m\)$/.exec(text) : null;
+        if (m) return FIX_CHIPS[whose][k] + ' ±' + m[1] + ' m';
+      }
+    }
+    for (whose in YARD_WORDS) {
+      for (k in YARD_WORDS[whose]) {
+        if (text === YARD_WORDS[whose][k]) return YARD_CHIPS[whose][k];
+      }
+    }
+    for (var i = 0; i < LINE_CHIPS.length; i++) {
+      m = LINE_CHIPS[i][0].exec(text);
+      if (m) return LINE_CHIPS[i][1](m);
+    }
+    return null;
+  }
+
+  /* The caption drawn: its chip, or — `open`, or no chip — the sentence. The
+     sentence is the element's title either way, for a mouse resting on it.
+     Returns the chip, or null. live.html's mapSay is the one caller on the
+     panel; rpi/test_layout.py draws every form through it. */
+  function sayCaption(el, text, open) {
+    var chip = captionChip(text);
+    el.textContent = '';
+    if (chip && !open) {
+      var c = el.ownerDocument.createElement('span');
+      c.className = 'chip';
+      c.textContent = chip;
+      el.appendChild(c);
+    } else {
+      el.textContent = text;
+    }
+    el.title = chip ? text : '';
+    el.classList.toggle('chipped', !!chip);
+    el.classList.toggle('open', !!chip && !!open);
+    if (chip) {
+      el.setAttribute('role', 'button');
+      el.setAttribute('aria-expanded', open ? 'true' : 'false');
+    } else {
+      el.removeAttribute('role');
+      el.removeAttribute('aria-expanded');
+    }
+    return chip;
+  }
+
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
+           captionChip: captionChip, sayCaption: sayCaption,
            civilTwilight: civilTwilight, nightFor: nightFor,
            detour: detour, detourThrough: detourThrough, fixOf: fixOf, fixRefused: fixRefused,
            cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,

@@ -290,6 +290,11 @@ def _emitted_keys():
     body = src[start:src.index('\ndef ', start + 10)]
     return set(re.findall(r"^\s{8}'([a-zA-Z_]+)':", body, re.M))
 
+# Map view's caption is read as the SENTENCE it says. A refusal under the map is
+# drawn as a chip with the sentence on its title, one tap away (MV.captionChip,
+# live.html mapSay), so every read below takes the title of a chipped caption
+# and the words of any other; what the chip itself looks like is
+# rpi/test_layout.py's question.
 DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, panelsJson, readingsJson, framesJson, nbxJson] = process.argv.slice(2);
@@ -2737,7 +2742,7 @@ const framed = (page) => page.waitForFunction(
       verdictW: Math.round(document.getElementById('verdict').getBoundingClientRect().width),
       imgW: document.getElementById('view').naturalWidth,
       imgH: document.getElementById('view').naturalHeight,
-      note: document.getElementById('viewNote').textContent.trim() }));
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim() }));
     await page.close();
   }
 
@@ -3184,7 +3189,7 @@ const framed = (page) => page.waitForFunction(
     // has not been sent. A sample taken later would be reading a finished map.
     await page.waitForTimeout(350);
     out.mapWhileLoading = await page.evaluate(() => ({
-      note: document.getElementById('viewNote').textContent.trim(),
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim(),
       mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none' }));
     // Two lookups at a second apart, plus the journal fetch and the draw.
     await page.waitForTimeout(4200);
@@ -3228,7 +3233,7 @@ const framed = (page) => page.waitForFunction(
       }),
       keyShown: !document.getElementById('mapKey').hidden,
       keyText: document.getElementById('mapKey').innerText.replace(/\s+/g, ' ').trim(),
-      note: document.getElementById('viewNote').textContent.trim(),
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim(),
       // The remembered view. A map mode written here would ask a public
       // geocoder on the next page load with nobody pressing anything.
       stored: localStorage.getItem('uberscan.liveView') }));
@@ -3349,7 +3354,7 @@ const framed = (page) => page.waitForFunction(
     out.mapOnError = await page.evaluate(() => ({
       gone: document.getElementById('viewWrap').classList.contains('gone'),
       mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
-      note: document.getElementById('viewNote').textContent.trim(),
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim(),
       marks: (window.__marks || []).length }));
     // A NEW card, while the map is up. The pins must follow it.
     stage = 'the map mode: the next card';
@@ -3375,7 +3380,7 @@ const framed = (page) => page.waitForFunction(
       // answers are remembered on the device and that is what makes a map free
       // to re-check.
       asked: window.__asked.slice(),
-      note: document.getElementById('viewNote').textContent.trim() }));
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim() }));
     /* Why a pin is missing, in the kinds this project keeps apart everywhere
        else. "The card named nowhere to collect it" is about the CARD; "the
        geocoder found nothing" is about the rig's reading; "the geocoder could
@@ -3413,7 +3418,7 @@ const framed = (page) => page.waitForFunction(
     })()`)
     await page.waitForTimeout(2600);
     out.mapUnplaceable = await page.evaluate(
-      () => document.getElementById('viewNote').textContent.trim());
+      () => ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim());
 
     stage = 'the map mode: a card that names no pickup';
     await page.evaluate(() => window.__es.push({
@@ -3426,7 +3431,7 @@ const framed = (page) => page.waitForFunction(
                ...window.__CARD } }));
     await page.waitForTimeout(1800);
     out.mapNoPickup = await page.evaluate(
-      () => document.getElementById('viewNote').textContent.trim());
+      () => ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim());
 
     /* A pickup the geocoder answered two states away. Nothing about that answer
        says it is wrong — it has a name, a type and coordinates like any other —
@@ -3450,7 +3455,7 @@ const framed = (page) => page.waitForFunction(
                ...window.__CARD } }));
     await page.waitForTimeout(2600);
     out.mapStray = await page.evaluate(() => ({
-      note: document.getElementById('viewNote').textContent.trim(),
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim(),
       marks: (window.__marks || []).length,
       reds: (window.__marks || []).filter(function (m) {
         return m.opts && m.opts.fillColor === '#f31260'; }).length,
@@ -3488,7 +3493,7 @@ const framed = (page) => page.waitForFunction(
     out.mapWentBlank = await page.evaluate(() => ({
       marks: (window.__marks || []).length,
       lines: (window.__lines || []).length,
-      note: document.getElementById('viewNote').textContent.trim() }));
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim() }));
 
     /* ...and BACK to the map on the same card. Leaving is three presses round
        the cycle, and on the way out sawAFrame rewrites this row to "camera
@@ -3508,7 +3513,7 @@ const framed = (page) => page.waitForFunction(
                ...window.__CARD } }));
     await page.waitForTimeout(2600);
     out.mapBeforeRound = await page.evaluate(
-      () => document.getElementById('viewNote').textContent.trim());
+      () => ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim());
     await page.click('#viewMode');          // map -> phone
     await page.waitForTimeout(250);
     await page.click('#viewMode');          // phone -> scene
@@ -3517,7 +3522,7 @@ const framed = (page) => page.waitForFunction(
     await page.click('#viewMode');          // scene -> map again
     await page.waitForTimeout(700);
     out.mapRoundTrip = await page.evaluate(() => ({
-      note: document.getElementById('viewNote').textContent.trim(),
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim(),
       marks: (window.__marks || []).length,
       // A driver who nudged the map with the mouse and lost the pins had no
       // control anywhere that brought them back. This button is now that
@@ -3561,7 +3566,7 @@ const framed = (page) => page.waitForFunction(
         lines: (window.__lines || []).length,
         how: (window.__how || []).length,
         fit: (window.__fit || []).length,
-        note: document.getElementById('viewNote').textContent.trim(),
+        note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim(),
         key: key.hidden ? null
           : [].slice.call(key.querySelectorAll('.k-all, .k-fail'))
               .filter((e) => !e.hidden).map((e) => e.textContent.replace(/\s+/g, ' ').trim()),
@@ -3680,7 +3685,7 @@ const framed = (page) => page.waitForFunction(
       await push({ alive: true, gps: null });
       await page.waitForTimeout(800);
       res.after = await pins();
-      res.note = await page.evaluate(() => document.getElementById('viewNote').textContent.trim());
+      res.note = await page.evaluate(() => ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim());
       /* The GPS drop, from the panel's side (gpsArrival in server.js): a beat
          that says the car is at the held order's door, and then the server's
          word that it put the order down because the car left it. */
@@ -3782,7 +3787,7 @@ const framed = (page) => page.waitForFunction(
       asked: window.__asked.slice(),
       pins: window.__marks.map((m) => String(m.popup || '').replace(/<[^>]*>/g, ' ')
         .replace(/\s+/g, ' ').trim()),
-      note: document.getElementById('viewNote').textContent.trim() }));
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim() }));
     await page.close();
   }
 
@@ -4020,7 +4025,7 @@ const framed = (page) => page.waitForFunction(
                                dropoff: 'Roswell St, Marietta' }, card) });
     }, args);
     const note = () => page.evaluate(
-      () => document.getElementById('viewNote').textContent.trim());
+      () => ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim());
     // The colour and the words of the pin the panel names, so the map and the
     // line under it are seen to keep one rule for "this pin is wrong".
     const pinOf = (popupHas) => page.evaluate((h) => {
@@ -4166,7 +4171,7 @@ const framed = (page) => page.waitForFunction(
                                  dropoff: x.dropoff || 'Church St, Marietta' }, card) });
       }, Object.assign({ SQ: SQ }, a));
       const note = () => page.evaluate(
-        () => document.getElementById('viewNote').textContent.trim());
+        () => ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim());
       const pick = () => page.evaluate(() => {
         const m = (window.__marks || []).filter(
           (k) => String(k.popup || '').indexOf('pick this one up') >= 0)[0];
@@ -4471,7 +4476,7 @@ const framed = (page) => page.waitForFunction(
         // this driver runs close to its watchdog, which would report a
         // hang instead of the check that failed.
         await page.waitForFunction(() => {
-          const t = document.getElementById('viewNote').textContent;
+          const t = ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote'));
           return (window.__letters || []).some((l) => ((l.opts || {}).icon || {}).html === '✓')
             && /out of your way|on your way|incl\. restaurant/.test(t) && !/measuring/.test(t);
         }, null, { timeout: 4000 }).catch(() => {});
@@ -4635,7 +4640,7 @@ const framed = (page) => page.waitForFunction(
     await page.click('#viewMode');
     await page.waitForTimeout(1200);
     out.mapNowhere = await page.evaluate(() => ({
-      note: document.getElementById('viewNote').textContent.trim(),
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim(),
       mapShown: getComputedStyle(document.getElementById('liveMap')).display !== 'none',
       gone: document.getElementById('viewWrap').classList.contains('gone') }));
     out.mapNowhere.asked = askedHere;
@@ -5871,7 +5876,7 @@ const framed = (page) => page.waitForFunction(
     // (MV.detourOrders on these pins). Two answers: no figure, each order's
     // own run drawn, and no detour line.
     const runsNow = () => page.evaluate(() => ({
-      note: document.getElementById('viewNote').textContent.trim(),
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim(),
       runs: (window.__lines || []).filter((l) => /mv-held-run/.test(String((l.opts || {}).className || '')))
         .map((l) => [String(l.opts.className), l.pts.length]),
       detour: (window.__lines || []).filter((l) => /mv-detour/.test(String((l.opts || {}).className || ''))).length,

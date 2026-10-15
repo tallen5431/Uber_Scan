@@ -943,6 +943,29 @@
     padding: 1px 8px; border: 1px solid currentColor; border-radius: 999px;
     font-weight: 700; line-height: 1.3; white-space: normal;
   }
+  /* ...and the map caption's refusals the same way (mapSay, MV.captionChip):
+     one chip in the caption's own colour, the sentence a tap away. Inline,
+     with its outline cloned onto each row it wraps to, so the caption's row
+     clamp counts its rows as it counts a sentence's, and holds a chip to the
+     same two rows (three on the hat) — rpi/test_layout.py measures every
+     chip there, whole, with the map over its 120px floor. */
+  /* Measured without the two rules below, a chip's outline ran out of the
+     caption's box, which clips: where a place name in bold is one word wider
+     than the column (it may break anywhere instead), and where the padding
+     and outline cloned onto a row's end stand past its last glyph (the
+     caption keeps their width clear at each side while it holds a chip; the
+     sentence, opened, is as it always was). The selector is the clamp's own
+     and one class more, or the clamp's padding wins. */
+  #viewNote.chipped { cursor: pointer; }
+  #viewNote .chip { overflow-wrap: anywhere; }
+  #viewNote.chipped:not(.open),
+  #viewWrap:has(#liveMap:not([hidden])) #viewNote.chipped:not(.open) {
+    padding-left: 8px; padding-right: 8px;
+  }
+  #viewNote .chip {
+    padding: 0 7px; border: 1px solid currentColor; border-radius: 999px;
+    font-weight: 700; -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  }
 
   /* The Trip Planner's stops, one line each, after a ⌖ press.
    *
@@ -4891,10 +4914,10 @@
   function sawAFrame() {
     viewWrap.classList.remove('gone');
     var portrait = layoutForFrame();
-    viewNote.textContent = viewMode === 'screen'
+    plainNote(viewMode === 'screen'
       ? (portrait ? "the phone's screen, flattened"
                   : 'camera view while the rig finds the phone')
-      : 'camera view · inset is what the reader sees';
+      : 'camera view · inset is what the reader sees');
     clearTimeout(watchdog);
     watchdog = null;
   }
@@ -4907,7 +4930,7 @@
     // empty half of screen.
     if (viewMode === 'map') return;
     viewWrap.classList.add('gone');
-    viewNote.textContent = 'no camera view yet — the scanner writes one every few seconds';
+    plainNote('no camera view yet — the scanner writes one every few seconds');
   }
 
   function startStream() {
@@ -5360,7 +5383,54 @@
     }
   }
 
-  function mapSay(text) { viewNote.textContent = text; }
+  /* The caption's words. A refusal under the map is a CHIP, the way the
+     notices are (showNotes): MV.captionChip makes it off the sentence, and a
+     tap on the caption swaps it for the sentence and back — back on its own
+     after WARN_OPEN_MS, or when the line changes, so a sentence opened for one
+     card is not left on the glass for the next. The figure and the lines that
+     say one is coming are written as they are. Without map-view.js there is
+     no chip to make and the sentence is the line, as before. */
+  var captionSaid = '';
+  var captionOpenAt = 0;
+  var captionBack = null;
+
+  function mapSay(text) {
+    if (text !== captionSaid) { captionSaid = text; captionOpenAt = 0; }
+    var open = !!captionOpenAt && Date.now() - captionOpenAt < WARN_OPEN_MS;
+    if (!open) captionOpenAt = 0;
+    clearTimeout(captionBack);
+    if (!MV || !MV.sayCaption) { plainNote(text); return; }
+    MV.sayCaption(viewNote, text, open);
+    if (open) {
+      captionBack = setTimeout(function () {
+        if (captionSaid === text) { captionOpenAt = 0; mapSay(text); }
+      }, WARN_OPEN_MS - (Date.now() - captionOpenAt));
+    }
+  }
+
+  // ...and the caption's other writers, the picture's labels: plain words,
+  // and nothing left of a chip that was on the row before them.
+  function plainNote(text) {
+    captionSaid = '';
+    captionOpenAt = 0;
+    clearTimeout(captionBack);
+    viewNote.textContent = text;
+    viewNote.title = '';
+    viewNote.classList.remove('chipped', 'open');
+    viewNote.removeAttribute('role');
+    viewNote.removeAttribute('aria-expanded');
+  }
+
+  function toggleCaption() {
+    if (!viewNote.classList.contains('chipped') || !captionSaid) return;
+    captionOpenAt = captionOpenAt ? 0 : Date.now();
+    mapSay(captionSaid);
+  }
+  viewNote.tabIndex = 0;
+  viewNote.addEventListener('click', toggleCaption);
+  viewNote.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCaption(); }
+  });
 
   function mapDrew(text) { lastLine = text; mapSay(text); }
 

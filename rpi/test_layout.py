@@ -960,6 +960,155 @@ for _name, _text, _keep in CAPTION_LINES:
         ok_('...and what the clamp keeps of %r opens with the refusal' % _name,
             _keep.startswith('no pin for '))
 
+# ...and the chip each one is drawn as (MV.captionChip, map-view.js), or none.
+# A refusal under the map is a chip the way a notice is — the state in
+# capitals and the reason after the dot, the sentence a tap away — and the
+# figure, and a line saying one is coming, are not refusals and are drawn as
+# written. Every row of the table above is held to exactly this: a row not
+# named here must draw no chip, and a row named here that the page draws as
+# its sentence, or as another chip, fails by name. So a refusal written
+# without a chip, or a chip that drops the reason, is caught where it is
+# measured. The place is the page's own cut, as above.
+CAPTION_CHIPS = {
+    "a card naming nowhere":
+        "NO PLACES · ⌖ Scan reads them",
+    "no card at all":
+        "NO CARD YET · nothing to map",
+    "no signal":
+        "NO SIGNAL · ⛶ Phone for the picture",
+    "a pin in the wrong state":
+        "MISREAD PIN · " + WIDEST_PLACE + ", far off",
+    "this card, no fix":
+        "NO FIX · on this card",
+    "this card, a rough fix":
+        "ROUGH FIX · on this card ±9999 m",
+    "this card, no accuracy":
+        "NO FIX · no accuracy on this card",
+    "this card, no mode":
+        "NO FIX · no 2D/3D on this card",
+    "this card, a frozen fix":
+        "STUCK FIX · on this card",
+    "this card, not judged":
+        "NO FIX · never judged on this card",
+    "the held card, no fix":
+        "NO FIX · on your order's card",
+    "the held order, no card kept":
+        "NO CARD KEPT · for your order, end unchecked",
+    "the held card, a rough fix":
+        "ROUGH FIX · on your order's card ±9999 m",
+    "the held card, no accuracy":
+        "NO FIX · no accuracy on your order's card",
+    "the held card, no mode":
+        "NO FIX · no 2D/3D on your order's card",
+    "the held card, a frozen fix":
+        "STUCK FIX · on your order's card",
+    "the held card, not judged":
+        "NO FIX · never judged on your order's card",
+    "this card, no distance":
+        "UNCHECKED · card states no distance",
+    "this card, untrusted":
+        "UNCHECKED · card's distance untrusted",
+    "this card, Early look":
+        "UNCHECKED · Early look card",
+    "this card, one leg":
+        "UNCHECKED · card may not count the drive",
+    "the held card, no distance":
+        "UNCHECKED · your order's card states no distance",
+    "the held card, untrusted":
+        "UNCHECKED · your order's distance untrusted",
+    "the held card, Early look":
+        "UNCHECKED · your order's Early look card",
+    "the held card, one leg":
+        "UNCHECKED · your order's kind of card",
+    "a pickup this card contradicts":
+        "WRONG PIN · " + WIDEST_DISC + ", past the card's distance",
+    "a held end its card contradicts":
+        "WRONG PIN · " + WIDEST_DISC + ", past its card's distance",
+    "the held job has no address":
+        "NO FIGURE · your order's end unknown, ⌖ Scan",
+    "nothing in the car":
+        "NO FIGURE · nothing in the car",
+    "the card says no pickup":
+        "NO FIGURE · card names no pickup",
+    "the geocoder was unreachable, pickup":
+        "NOT ASKED · pickup, no network or busy",
+    "the geocoder had nothing, pickup":
+        "NOT FOUND · pickup, likely misread",
+    "the geocoder was unreachable, held":
+        "NOT ASKED · your order's end",
+    "the geocoder had nothing, held":
+        "NOT FOUND · your order's end",
+    "no pin, none in this card":
+        "NO PIN · " + WIDEST_DISC + ", none fit the card",
+    "no pin, none in the held card":
+        "NO PIN · " + WIDEST_DISC + ", none fit its card",
+    "no pin, none in sixty miles of the held card":
+        "NO PIN · " + WIDEST_DISC + ", none found",
+    "no pin, nothing at all":
+        "NO PIN · " + WIDEST_DISC + ", nothing found",
+    "no pin, several in this card":
+        "NO PIN · " + WIDEST_DISC + ", 10 fit the card and disagree",
+    "no pin, several in the held card":
+        "NO PIN · " + WIDEST_DISC + ", 10 fit its card and disagree",
+    "no pin, several in sixty miles of the held card":
+        "NO PIN · " + WIDEST_DISC + ", 10 found and they disagree",
+    "no pin, several with no fix":
+        "NO PIN · " + WIDEST_DISC + ", no fix to choose",
+    "no pin, several with no fix on the held card":
+        "NO PIN · " + WIDEST_DISC + ", no fix on its card",
+    "no pin, a cross street with no street index":
+        "NO PIN · " + WIDEST_DISC + ", no street index",
+    "no pin, a corner in several places in this card":
+        "NO PIN · " + WIDEST_DISC + ", 50 corners fit the card",
+    "no pin, a corner in several places in the held card":
+        "NO PIN · " + WIDEST_DISC + ", 50 corners fit its card",
+    "no pin, a corner in several places in sixty miles of the held card":
+        "NO PIN · " + WIDEST_DISC + ", 50 corners found",
+    "no pin, a corner in several places with no fix on the held card":
+        "NO PIN · " + WIDEST_DISC + ", no fix on its card",
+    "no pin, a corner not in sixty miles of the held card":
+        "NO PIN · " + WIDEST_DISC + ", its streets do not meet",
+    "no pin, a corner that never meets":
+        "NO PIN · " + WIDEST_DISC + ", its streets do not meet",
+    "no pin, a corner whose streets run together":
+        "NO PIN · " + WIDEST_DISC + ", its streets run together",
+    "no pin, a street not on the NucBox":
+        "NO PIN · " + WIDEST_DISC + ", street not on the NucBox",
+    "no pin, not two street names":
+        "NO PIN · " + WIDEST_DISC + ", not two street names",
+    "no pin, a stretch too long to send":
+        "NO PIN · " + WIDEST_DISC + ", street too long to be sure",
+    "no pin, a door the map does not hold":
+        "NO PIN · " + WIDEST_DISC + ", street found, not that door",
+    "no pin, a list cut at the limit":
+        "NO PIN · " + WIDEST_DISC + ", too many to be sure",
+    "no pin, the rig refused the question":
+        "NO PIN · " + WIDEST_DISC + ", a bug: question refused",
+    "no figure, a street that runs through this card":
+        "NO FIGURE · " + WIDEST_DISC + ", street runs 99.9 mi",
+    "no figure, a street that runs through the held card":
+        "NO FIGURE · " + WIDEST_DISC + ", street runs 99.9 mi",
+    "the geocoder was unreachable, held pickup":
+        "NOT ASKED · your order's pickup",
+    "the geocoder had nothing, held pickup":
+        "NOT FOUND · your order's pickup",
+    "no figure, a held pickup on a street":
+        "NO FIGURE · " + WIDEST_DISC + ", a street pickup",
+    "the order of two orders' stops unknown":
+        "NO FIGURE · order of stops unknown",
+    "the second order with no end on record":
+        "NO FIGURE · ②'s end unknown, ⌖ Scan",
+    "no figure, a street with two orders":
+        "NO FIGURE · " + WIDEST_DISC + ", a street, 2 orders",
+}
+_CHIP_SHAPE = re.compile(r'^[A-Z][A-Z0-9 ]+ · \S')
+for _name, _chip in CAPTION_CHIPS.items():
+    ok_('the caption chip for %r is a state in capitals and its reason (%r)'
+        % (_name, _chip), _CHIP_SHAPE.match(_chip))
+    _sent = [row[1] for row in CAPTION_LINES if row[0] == _name]
+    ok_('...and is a caption form this file measures, said in fewer characters (%r)'
+        % _name, _sent and len(_chip) <= len(_sent[0]))
+
 # ...and the list above has to stay the whole list, or a tenth sentence is
 # written and measured by nothing. So the page is read for every string the
 # caption can be handed, and each one has to appear in something above.
@@ -1919,23 +2068,32 @@ const SNAP_MEASURE = (fixture) => {
         // strings of the same length come out one row and two depending on
         // where the spaces fall, and a place name of wide glyphs takes half
         // again the width of an ordinary one.
+        // Each sentence is drawn by the page's own MV.sayCaption, the one
+        // thing live.html's mapSay draws with: opened, which is the sentence,
+        // and closed, which is its chip where it is a refusal (`chip`, then
+        // measured the same way as `chipShot`) and the sentence again where
+        // it is not.
         shown.caption = await page.evaluate((lines) => {
           const note = document.getElementById('viewNote');
           const liveMap = document.getElementById('liveMap');
-          const was = note.textContent;
+          // What the page drew, put back whole afterwards: its words, its
+          // chip and the state on the element that says which it is.
+          const was = { html: note.innerHTML, cls: note.className, title: note.title,
+                        role: note.getAttribute('role'),
+                        exp: note.getAttribute('aria-expanded') };
           const out = {};
-          for (const pair of lines) {
-            note.textContent = pair[1];
+          const shot = () => {
             const box = note.getBoundingClientRect();
             // Row count and readable text taken off the characters themselves.
             // `scrollHeight` says a clamp cut something; only the per-character
             // rects say WHAT, and the rule this is here to hold is about which
             // half of a sentence survives.
-            let visible = '', rows = 0;
-            const n = note.firstChild;
-            if (n) {
-              const rg = document.createRange();
-              const tops = {};
+            let visible = '';
+            const tops = {};
+            const walk = document.createTreeWalker(note, NodeFilter.SHOW_TEXT);
+            const rg = document.createRange();
+            let n;
+            while ((n = walk.nextNode())) {
               for (let i = 0; i < n.length; i++) {
                 rg.setStart(n, i);
                 rg.setEnd(n, i + 1);
@@ -1946,15 +2104,43 @@ const SNAP_MEASURE = (fixture) => {
                   tops[Math.round(c.top)] = 1;
                 }
               }
-              rows = Object.keys(tops).length;
             }
-            out[pair[0]] = {
-              h: Math.round(box.height), rows: rows, visible: visible,
-              clipped: note.scrollHeight > note.clientHeight + 1,
+            // ...and a chip's own outline inside the row: what is drawn of it
+            // past the caption's box, or past the glass, is a chip cut.
+            const ch = note.querySelector('.chip');
+            let chipOut = false;
+            if (ch) {
+              for (const r of ch.getClientRects()) {
+                if (r.left < box.left - 0.5 || r.right > box.right + 0.5
+                    || r.right > window.innerWidth + 0.5 || r.bottom > box.bottom + 1) {
+                  chipOut = true;
+                }
+              }
+            }
+            return {
+              h: Math.round(box.height), rows: Object.keys(tops).length, visible: visible,
+              clipped: note.scrollHeight > note.clientHeight + 1, chipOut: chipOut,
               mapH: Math.round(liveMap.getBoundingClientRect().height),
             };
+          };
+          for (const pair of lines) {
+            window.MapView.sayCaption(note, pair[1], true);
+            const one = shot();
+            one.chip = window.MapView.sayCaption(note, pair[1], false);
+            if (one.chip) {
+              one.chipShot = shot();
+              one.chipTitle = note.title;
+            }
+            out[pair[0]] = one;
           }
-          note.textContent = was;
+          note.innerHTML = was.html;
+          note.className = was.cls;
+          note.title = was.title;
+          ['role', 'exp'].forEach((k) => {
+            const attr = k === 'exp' ? 'aria-expanded' : k;
+            if (was[k] === null) note.removeAttribute(attr);
+            else note.setAttribute(attr, was[k]);
+          });
           return out;
         }, CAPTION_LINES);
         // The clamp itself, not just its effect. Measuring rows proves the
@@ -3350,6 +3536,44 @@ const SNAP_MEASURE = (fixture) => {
       await ctx.close();
     }
   }
+  // The map caption's chip, tapped: the sentence, and the chip back on a
+  // second tap, after 20 s (WARN_OPEN_MS, the notices' own), and when the
+  // line changes. Off the page's own mapSay, in Map view over no card (a
+  // refusal: "no card read yet"), on a clock this harness turns.
+  {
+    const { ctx, page, push } = await carryPage(['1024x600', 1024, 600], 'scene');
+    await page.click('#viewMode', { timeout: 5000 }).catch(() => {});
+    await page.clock.runFor(300);
+    const look = () => page.evaluate(() => {
+      const note = document.getElementById('viewNote');
+      return { chip: (note.querySelector('.chip') || {}).textContent || null,
+               text: note.textContent, title: note.title,
+               expanded: note.getAttribute('aria-expanded') };
+    });
+    const tap = async () => {
+      await page.click('#viewNote', { timeout: 5000 }).catch(() => {});
+      await page.clock.runFor(100);
+    };
+    const tapped = { before: await look() };
+    await tap();
+    tapped.opened = await look();
+    await page.clock.runFor(20100);
+    tapped.after20s = await look();
+    await tap();
+    await tap();
+    tapped.secondTap = await look();
+    await tap();
+    tapped.reopened = await look();
+    // A card that names nowhere: a different refusal, so a new line.
+    await push({ ready: true, state: 'go', perHour: 30, pay: 9.0, minutes: 18,
+                 miles: 3.1, places: [], text: '', track: null,
+                 offer: { id: 'o-layout-caption', pay: 9.0, minutes: 18 } });
+    await page.clock.runFor(1100);
+    tapped.newLine = await look();
+    out['caption tap'] = tapped;
+    await page.close();
+    await ctx.close();
+  }
   await browser.close();
   console.log(JSON.stringify(out));
 })().catch((e) => { console.log(JSON.stringify(
@@ -3948,6 +4172,28 @@ try:
                (_ub.get('box') == _ua.get('box'), bool(_bo.get('over')) and not _al.get('over'),
                 bool(_bo.get('over')) and w > h), (True, False, False))
 
+    # The map caption's chip under the driver's tap, off the page's own mapSay
+    # in Map view over no card (a refusal): the sentence on a tap, the chip
+    # back after 20 s (the notices' WARN_OPEN_MS), on a second tap, and when
+    # the line changes to another.
+    _ct = got.get('caption tap') or {}
+    _no_card = 'no card read yet — nothing to put on a map'
+    _nowhere = 'this card names nowhere yet — ⌖ Scan reads it off your phone'
+    eq('the map caption\'s refusal is a chip, its sentence on its title',
+       [(_ct.get('before') or {}).get(k) for k in ('chip', 'title', 'expanded')],
+       [CAPTION_CHIPS['no card at all'], _no_card, 'false'])
+    eq('...a tap swaps the chip for the sentence',
+       [(_ct.get('opened') or {}).get(k) for k in ('chip', 'text', 'expanded')],
+       [None, _no_card, 'true'])
+    eq('...which goes back to the chip on its own after 20 s',
+       (_ct.get('after20s') or {}).get('chip'), CAPTION_CHIPS['no card at all'])
+    eq('...and on a second tap', (_ct.get('secondTap') or {}).get('chip'),
+       CAPTION_CHIPS['no card at all'])
+    eq('...and when the line changes, the new refusal comes up as its chip',
+       [(_ct.get(k) or {}).get('chip') for k in ('reopened', 'newLine')]
+       + [(_ct.get('newLine') or {}).get('title')],
+       [None, CAPTION_CHIPS['a card naming nowhere'], _nowhere])
+
     # The order in the car, on the card, at the most each line is asked to
     # hold (HELD), on the three panels and in both pictures.
     #
@@ -4465,6 +4711,27 @@ try:
                     ok_('...and %r is readable as far as its last hedge at %s '
                         '(%r)' % (name, panel, shots[name]['visible'][-28:]),
                         shots[name]['visible'].startswith(keep))
+                # ...and each refusal as the chip the page draws it as
+                # (CAPTION_CHIPS): that chip and no other, every other form
+                # none; the chip whole — every word on the glass, nothing
+                # clamped, its outline inside the row — inside the same cap,
+                # the map keeping its floor under it, and the sentence on its
+                # title.
+                eq('every caption form draws the chip it is expected to, or none, at %s'
+                   % panel,
+                   sorted((row[0], shots[row[0]].get('chip')) for row in CAPTION_LINES
+                          if row[0] in shots
+                          and shots[row[0]].get('chip') != CAPTION_CHIPS.get(row[0])), [])
+                for name, text, _keep in CAPTION_LINES:
+                    if name not in CAPTION_CHIPS or name not in shots:
+                        continue
+                    _cs = shots[name].get('chipShot') or {}
+                    eq('...the chip for %r whole, in %d rows at most, the map over 120px, '
+                       'the sentence on its title, at %s' % (name, cap, panel),
+                       (_cs.get('visible'), _cs.get('clipped'), _cs.get('chipOut'),
+                        (_cs.get('rows') or 99) <= cap, (_cs.get('mapH') or 0) > 120,
+                        shots[name].get('chipTitle')),
+                       (CAPTION_CHIPS[name], False, False, True, True, text))
                 # --- the "you are here" label ---------------------------
                 #
                 # Over the map's top-right corner, so it costs the caption
