@@ -8423,15 +8423,15 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 1159 checks, the shared corpus
-node tests/parser.test.js       # 105 on the browser side alone
+node tests/corpus.test.js       # 1171 checks, the shared corpus
+node tests/parser.test.js       # 107 on the browser side alone
 node tests/advice.test.js       # 449 on what line to tell a driver to draw
 node tests/crop.test.js         #  22 on the trip from a drag to a crop box
 node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-python3 rpi/test_parser.py      # 1224 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 1238 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 310 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
@@ -8509,7 +8509,7 @@ python3 rpi/test_dashboard.py   # 1231 on what the driving screen shows while a
                                 #     words rather than a number whenever one
                                 #     would be wrong (skipped without
                                 #     Playwright)
-python3 rpi/test_layout.py      # 2862 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 3435 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
@@ -8517,7 +8517,7 @@ python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 794 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 802 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8532,7 +8532,7 @@ python3 rpi/test_map.py         # 228 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
-node tests/assemble.test.js     # 185 on where the order in the car ends: one
+node tests/assemble.test.js     # 235 on where the order in the car ends: one
                                 #     hold decided as before, and a Trip Planner
                                 #     filed from pages stitched only on the cues
                                 #     the screen gives
