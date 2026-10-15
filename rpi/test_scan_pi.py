@@ -2314,16 +2314,19 @@ eq('...and the panel stops being told',
 page = open(os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), 'live.html')).read()
 for field in ('tooBright', 'tooDim', 'notSaving', 'blind',
-              'gps', 'cpuC', 'throttled'):
+              'gps', 'cpuC', 'throttled', 'heatGuard'):
     ok_('live.html reads %s off the heartbeat' % field,
         'msg.%s' % field in page)
-# ...and the one throttle word it names, which is the one it keeps the
-# temperature off. Renamed here and not there, the number would come back
-# beside a weak supply and, on the 3.5" hat, push the GPS's "min" off the end.
-_named = re.findall(r"t\.now\[0\] !== '([^']*)'", page)
-ok_('the throttle word live.html keeps the temperature off is one the scanner '
-    'sends (%r)' % (_named,),
-    bool(_named) and all(w in [x for _, x in SP.THROTTLE_BITS] for w in _named))
+# ...and the throttle words it names: the one it keeps the temperature off,
+# and the ones its heat chip says in its own words (heatNote's HEAT_WORDS).
+# Renamed here and not there, the number would come back beside a weak supply
+# and a weak supply would be called HOT.
+_named = re.findall(r"word !== '([^']*)'", page)
+_heat_words = re.search(r'var HEAT_WORDS = \{([^}]*)\}', page)
+_named += re.findall(r"'?([a-z][a-z -]*)'?\s*:", _heat_words.group(1)) if _heat_words else []
+ok_('the throttle words live.html names are ones the scanner sends (%r)' % (_named,),
+    _heat_words is not None and 'under-voltage' in _named
+    and all(w in [x for _, x in SP.THROTTLE_BITS] for w in _named))
 
 # --- the GPS and the Pi on the beat -----------------------------------------
 #
@@ -2350,6 +2353,12 @@ eq('a Pi that cannot be asked says null for both (%r, %r)'
    (_gn.get('cpuC'), _gn.get('throttled')), (None, None))
 eq('...and why, for each', (_gn.get('cpuCWhy'), _gn.get('throttledWhy')),
    ('no thermal zone', 'no vcgencmd on this machine'))
+# ...and the heat guard, true or false and never absent: a beat that left it
+# out would read on the page and the status link as a guard that is off.
+eq('the beat says whether the heat guard is on, false unless told (%r, %r)'
+   % (beat().get('heatGuard', 'absent'), beat(heat_guard=True).get('heatGuard', 'absent')),
+   (beat().get('heatGuard', 'absent'), beat(heat_guard=True).get('heatGuard', 'absent')),
+   (False, True))
 
 # vcgencmd's own answer, bit by bit. 0x50005 is what a Pi on a weak supply
 # says: under-voltage and throttled now (bits 0 and 2), and both since boot
@@ -2428,6 +2437,84 @@ eq('the Pi is asked once in its interval, however often the beat comes',
    len(_asked), 1)
 _ph.sample(130.0)
 eq('...and again once the interval is up', len(_asked), 2)
+
+# --- the heat guard -----------------------------------------------------------
+#
+# The whole-screen reads the rig makes on its own while an order is held are
+# put off — SCREEN_AUTO_HOT apart instead of SCREEN_AUTO_EVERY — while the Pi is
+# hot: on at 75°C or any throttle word now, off below 70 with none, as it was in
+# between. Judged off PiHealth's own samples, so the temperature here is the
+# one the beat carries as `cpuC`, and it comes from a fake source: this machine
+# has no thermal zone. That the loop spaces its reads by it is test_loop.py's.
+_heat = {'c': 60.0, 'now': [], 'since': []}
+_hph = SP.PiHealth(every=30.0, temp=lambda: (_heat['c'], None),
+                   throttle=lambda: ({'now': list(_heat['now']),
+                                      'sinceBoot': list(_heat['since'])}, None))
+_hclock = [0.0]
+
+
+def _heat_at(c, now=(), since=()):
+    """The guard after a sample at `c`°C with those throttle words."""
+    _heat.update(c=c, now=list(now), since=list(since))
+    _hclock[0] += SP.PI_EVERY
+    _hph.sample(_hclock[0])
+    return _hph.guard.on
+
+
+eq('the heat guard is off on a Pi at 60°C, and the reads nobody pressed for are '
+   '10 s apart', (_heat_at(60.0), SP.screen_auto_every(_hph.guard.on)), (False, 10.0))
+eq('...on at 76°C, where they are 30 s apart',
+   (_heat_at(76.0), SP.screen_auto_every(_hph.guard.on)), (True, 30.0))
+# The band, both ways: a guard that is off stays off in it, and one that is on
+# stays on. Without the band the guard would follow every sample across one
+# threshold, and the reads it put off could switch it off at the next.
+_band = [_heat_at(60.0), _heat_at(72.0), _heat_at(74.9), _heat_at(76.0),
+         _heat_at(74.9), _heat_at(72.0), _heat_at(70.0), _heat_at(69.9),
+         _heat_at(72.0), _heat_at(74.9)]
+eq('between 70 and 75 the guard keeps its last state (60 72 74.9 76 74.9 72 70 69.9 '
+   '72 74.9: %r)' % (_band,),
+   _band, [False, False, False, True, True, True, True, False, False, False])
+eq('...and the thresholds are the ones its comment justifies', (SP.HEAT_ON_C, SP.HEAT_OFF_C),
+   (75.0, 70.0))
+eq('...on at 75.0 exactly', (_heat_at(60.0), _heat_at(75.0)), (False, True))
+# Any word the firmware says is happening NOW, at a temperature that would
+# never turn it on — and off again once the word has gone, below 70.
+_words = []
+for _w in [w for _, w in SP.THROTTLE_BITS]:
+    _heat_at(50.0)
+    _words.append((_w, _heat_at(50.0, now=[_w]), _heat_at(50.0)))
+eq('a throttle flag now turns the guard on at 50°C, each word, and off once it is gone '
+   '(%r)' % (_words,), _words, [(w, True, False) for _, w in SP.THROTTLE_BITS])
+# 0x80000, the owner's own: the soft limit reached since boot, nothing now.
+eq('...but not a word since boot alone, which is the owner\'s 0x80000 at 50°C',
+   (_heat_at(50.0), _heat_at(50.0, since=['temp limit'])), (False, False))
+# A temperature that cannot be read: the words decide alone, and a guard that
+# was on for heat goes off rather than holding a figure it can no longer see.
+_hnone = SP.PiHealth(every=30.0, temp=lambda: (None, 'no thermal zone'),
+                     throttle=lambda: (None, 'no vcgencmd on this machine'))
+_hnone.sample(0.0)
+eq('a Pi that cannot be asked has the guard off', _hnone.guard.on, False)
+_hlost = {'c': 80.0}
+_hgone = SP.PiHealth(every=30.0, temp=lambda: ((_hlost['c'], None) if _hlost['c'] is not None
+                                               else (None, 'gone')),
+                     throttle=lambda: ({'now': [], 'sinceBoot': []}, None))
+_hgone.sample(0.0)
+_hlost['c'] = None
+_hgone.sample(30.0)
+eq('...and one whose thermal zone goes away after it was hot turns it off', _hgone.guard.on,
+   False)
+# Off the SAMPLE, not off a second read of the thermal zone: inside the sample's
+# interval nothing is asked again and the guard does not move, however the
+# temperature has.
+_heat_at(60.0)
+_heat['c'] = 90.0
+_hph.sample(_hclock[0] + 1.0)
+eq('...and it moves only when PiHealth samples, the reading the beat carries',
+   _hph.guard.on, False)
+# The seen row's four Pi fields are the journal's, and the guard's state is not
+# one of them: nothing new is written.
+eq('...and the sample the journal is handed is still the four fields',
+   sorted(_hph.sample(_hclock[0] + 2.0)), ['cpuC', 'cpuCWhy', 'throttled', 'throttledWhy'])
 
 # --- a state that has to last before it is news ------------------------------
 _h = SP.Held('back', 60.0, quick=('back',))

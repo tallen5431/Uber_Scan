@@ -4870,7 +4870,8 @@ function statusNow() {
       ? Math.max(0, Date.now() - scanner.heardAt) : null,
     // The last heartbeat, as the scanner sent it: the GPS's state and the
     // age of its newest fix, the Pi's temperature and throttling with the
-    // reason for either one that could not be read, and the five notices
+    // reason for either one that could not be read, whether the heat guard
+    // is putting off the reads nobody pressed for, and the five notices
     // that already rode it. Without this every one of them was on the event
     // stream and nowhere else, so the status link — the one place a person
     // diagnosing a rig is sent — could not say whether the GPS had a fix or

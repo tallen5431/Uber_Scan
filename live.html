@@ -640,6 +640,15 @@
   }
   #health[hidden] { display: none; }
   #health { flex-shrink: 0.000001; }
+  /* The heat guard's chip, at the front of the note (heatNote): the
+     notices' outline and weight in the row's own grey, a fact for the next
+     stop like the rest of the row. Inline, as the map caption's chips are, so
+     its outline is drawn round the text and the row is not one pixel taller
+     for it; rpi/test_layout.py holds the row and the bar where they were. */
+  #health .chip {
+    padding: 0 6px; border: 1px solid currentColor; border-radius: 999px;
+    font-weight: 700;
+  }
   .dot.on { background: var(--go); }
   #viewWrap { margin: 0; }
   /* The camera's picture and nothing else: `>`, the one <img> that is the
@@ -1787,7 +1796,8 @@
   // timed out costs every offer row from then on its position, and on the
   // owner's week 0 of 1,166 rows carried one with nothing anywhere saying
   // whether that was a choice or a fault. A throttling Pi reads slower and
-  // said so nowhere. See healthNote() for what reaches the glass.
+  // said so nowhere. See heatNote() and healthNote() for what reaches the
+  // glass.
   var gpsNow = null;
   // ...and when the beat that carried it arrived, on THIS page's clock. The
   // beat's `gps.fix` is the newest position with gps.py's judgement on it;
@@ -3610,7 +3620,9 @@
     a.href = '/api/status';
     a.textContent = el.conn.textContent;
     c.appendChild(a);
-    if (!el.health.hidden && el.health.textContent) line(el.health.textContent, 'm-health');
+    // The note's own lines: the heat chip's sentence, which the row has no
+    // room for, and the words beside it (showHealth).
+    if (!el.health.hidden) healthLines.forEach(function (h) { line(h, 'm-health'); });
     if (shiftFull) line(shiftFull, 'm-shift');
   }
 
@@ -4365,8 +4377,9 @@
     if (img) img.classList.toggle('stalefeed', quiet > STALE_MS);
     // Set in one branch only, below. Every other branch is the scanner not
     // being heard from, and a GPS word off a heartbeat that has stopped is a
-    // word about a minute that has passed.
-    var note = '';
+    // word about a minute that has passed — and so is the heat guard's.
+    var heat = null;
+    var bits = [];
     if (!socketUp) {
       el.conn.textContent = 'reconnecting to the server…';
     } else if (scannerState && !scannerState.enabled) {
@@ -4400,10 +4413,10 @@
       // was turning and reading nothing; with the camera's word on the beat it
       // says what is true, beside the red word where the verdict goes.
       el.conn.textContent = blind ? 'scanner running, cannot see' : 'scanner reading';
-      note = healthNote();
+      heat = heatNote();
+      bits = healthNote();
     }
-    el.health.textContent = note;
-    el.health.hidden = !note;
+    showHealth(heat, bits);
     // "scanner reading" is the steady state and the green dot says it; the
     // words are behind "…". Every other state keeps its words on the row.
     el.conn.classList.toggle('steady', el.conn.textContent === 'scanner reading');
@@ -4427,35 +4440,10 @@
   // Nothing for a working GPS either: "GPS ok" on every glance is a word the
   // driver learns to skip, and then skips the one that is not ok.
   //
-  // The Pi first, because it is about the readings — a throttled Pi reads
-  // slower — and the GPS is about the rows. Only what the Pi itself reports
-  // as happening NOW: its temperature alone is not a warning, because no
-  // threshold here would be the Pi's, and the firmware already acts on its
-  // own. The words are the scanner's; this page does not know the bits.
-  //
-  // ONE word of them, the first, which the scanner lists cause first (see
-  // THROTTLE_BITS). Every word was tried and does not fit: a weak supply says
-  // "under-voltage, throttled", and with a stale GPS beside it the note needed
-  // 370px where the 3.5" hat has 315 and the rig's own panel, beside the
-  // phone, 357 — so the tail was cut, and the tail is the GPS's minutes. The
-  // rest are on the status link and in every `seen` row.
-  //
-  // ...and the temperature beside every word but `under-voltage`. Heat is
-  // what the temperature explains: beside "temp limit" it says how far over,
-  // and beside "throttled" or "capped" whether heat is why. A weak supply's
-  // remedy is the power lead, and the number beside it told the driver
-  // nothing to act on — while it cost the GPS its unit: on the 3.5" hat
-  // "Pi under-voltage 61°C · GPS: no fix for 123 min" needed 315px of a 313px
-  // span, and the ellipsis took "min". Without it, 278px. The widest left is
-  // "Pi temp limit 85°C · GPS: no fix for 1000 min", 296px.
+  // The Pi first, because it is about the readings and the GPS is about the
+  // rows: heatNote, the heat guard's chip, and then these words.
   function healthNote() {
     var bits = [];
-    var t = throttledNow;
-    if (t && t.now && t.now.length) {
-      bits.push('Pi ' + t.now[0]
-                + (cpuNow !== null && t.now[0] !== 'under-voltage'
-                  ? ' ' + Math.round(cpuNow) + '\u00b0C' : ''));
-    }
     var g = gpsNow;
     if (g && g.state === 'stale') {
       // Whole minutes, rounded DOWN: "no fix for 1 min" at 119 seconds is true
@@ -4482,7 +4470,90 @@
       bits.push(replacedPay !== null ? 'put down ' + money(replacedPay, 2)
                                      : 'previous order put down');
     }
-    return bits.join(' \u00b7 ');
+    return bits;
+  }
+
+  // The Pi, on this row: the heat guard's chip (scan_pi.HeatGuard), or
+  // nothing.
+  //
+  // The guard is the scanner's. It is on at 75°C or at any throttle word the
+  // firmware says is happening NOW, and off below 70 with none; while it is on
+  // the whole-screen reads the rig makes by itself while an order is held —
+  // the planner, the navigation screen, a labelled dropoff — are at most one
+  // every 30 s instead of every 10, and nothing else is slowed: an offer, a ⌖ press and a 📷 Snap are
+  // read as they always were. The beat says `heatGuard`, judged off its own
+  // `cpuC` and `throttled`, so this page holds no threshold of its own and does
+  // not work the state out again from the figures.
+  //
+  // There was a line here for the firmware's words alone, "Pi temp limit
+  // 85°C". A word now always turns the guard on, at the same sample, so no
+  // beat the scanner sends could reach that line any more; the chip says what
+  // it said, and what the rig is doing about it.
+  //
+  // A CHIP, the notices' kind (`note` in this file): the state in capitals,
+  // and what it means after the dot, the sentence on its title and in the
+  // "…" sheet. The state is the CAUSE, the one with a remedy, out of the
+  // first word the scanner lists (THROTTLE_BITS lists cause first): HOT for
+  // the temperature limit, or for no word at all, which is the guard on for
+  // the temperature alone; LOW POWER for under-voltage, whose remedy is the
+  // power lead; SLOWED for a throttled or capped clock with neither cause
+  // beside it. Not "HOT" for all of them: under-voltage at 61°C is not hot.
+  // The temperature beside every one but LOW POWER, the rule this row has
+  // kept since a number beside a weak supply told the driver nothing to act
+  // on.
+  //
+  // Short, because this is the row's widest note. Measured at 800x480 and
+  // 480x320 (the row at 15px), with a GPS sixteen hours stale beside it:
+  // "HOT 85°C · GPS: no fix for 1000 min" is 260px where "Pi temp limit 85°C
+  // · …" was 296, the widest the row held before; "LOW POWER · GPS: no fix
+  // for 123 min" 278, as "Pi under-voltage · …" was; "SLOWED 82°C · …" 294.
+  // "TEMP LIMIT 85°C" in its place was 313, "UNDER-VOLTAGE" 311 and
+  // "THROTTLED 82°C" 319, each wider than anything the row held before. And
+  // "· fewer auto reads" only when the chip is alone on the row: "HOT 76°C ·
+  // fewer auto reads" is 216px and leaves a 170px shift line whole, where
+  // "· fewer screen reads" (233) cut 10px off it — and beside the GPS note
+  // the tail left that shift line 10px of its 170. Not "reading slower",
+  // which was the first wording asked for: the offers are not read slower,
+  // and a driver told they are would be told something the rig does not do.
+  var heatGuardNow = false;
+  var HEAT_WORDS = { 'under-voltage': 'LOW POWER', throttled: 'SLOWED', capped: 'SLOWED' };
+  var HEAT_ALONE = ' \u00b7 fewer auto reads';
+
+  function heatNote() {
+    if (!heatGuardNow) return null;
+    var t = throttledNow;
+    var word = t && t.now && t.now.length ? t.now[0] : null;
+    var temp = cpuNow !== null ? Math.round(cpuNow) + '\u00b0C' : null;
+    var hot = temp && word !== 'under-voltage' ? ' ' + temp : '';
+    var why = word === 'under-voltage' ? 'The Pi\'s supply is under-voltage \u2014 check '
+                                         + 'the power lead'
+      : word === 'temp limit' ? 'The Pi is at its temperature limit'
+                                + (temp ? ' (' + temp + ')' : '')
+      : word ? 'The Pi has ' + word + ' its own clock' + (temp ? ' (' + temp + ')' : '')
+      : 'The Pi is hot' + (temp ? ' (' + temp + ')' : '');
+    return { chip: (HEAT_WORDS[word] || 'HOT') + hot,
+             full: why + ', so the rig reads the planner and navigation screens on '
+                   + 'its own less often until it recovers. Offers, \u2316 and \ud83d\udcf7 '
+                   + 'Snap are read as fast as ever.' };
+  }
+
+  // The row's note: the chip, then the words, one line. What "…" shows is
+  // the chip's sentence and the words, a line each (`healthLines`).
+  var healthLines = [];
+  function showHealth(heat, bits) {
+    var rest = bits.join(' \u00b7 ');
+    el.health.textContent = '';
+    if (heat) {
+      var c = document.createElement('span');
+      c.className = 'chip';
+      c.textContent = heat.chip + (rest ? '' : HEAT_ALONE);
+      c.title = heat.full;
+      el.health.appendChild(c);
+    }
+    if (rest) el.health.appendChild(document.createTextNode((heat ? ' \u00b7 ' : '') + rest));
+    healthLines = (heat ? [heat.full] : []).concat(rest ? [rest] : []);
+    el.health.title = healthLines.join(' ');
+    el.health.hidden = !healthLines.length;
   }
 
   function connect() {
@@ -4594,6 +4665,9 @@
       }
       if (msg.cpuC !== undefined) cpuNow = typeof msg.cpuC === 'number' ? msg.cpuC : null;
       if (msg.throttled !== undefined) throttledNow = msg.throttled || null;
+      // ...and the heat guard the same beat's figures put the scanner in
+      // (heatNote), which only the beat carries, like the two above.
+      if (msg.heatGuard !== undefined) heatGuardNow = !!msg.heatGuard;
       // A new offer on the record. `tookState` resets with it — the mark
       // belongs to the offer, not to the button.
       //
