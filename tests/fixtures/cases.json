@@ -5079,8 +5079,24 @@
    }
   },
   {
-   "name": "...nor its pickup screen, which is not Uber's",
+   "name": "DoorDash's place popup, opened from a stop on its offer card, which is not Uber's",
    "text": "Pickup from\nFable Pasta\n2080 Lantern Ave NW #100\nAtlanta, GA 30318, USA\nDirections",
+   "expect": {
+    "app": "doordash",
+    "screen": "dd.placePopup"
+   }
+  },
+  {
+   "name": "...over the card it was opened from, which is the popup: it is drawn on top",
+   "text": "$7.75\n3 stops (7.8 mi) · 30 min\n<q Pickup from\nFable Pasta %\nGy 2080 Lantern Ave NW #100\nAtlanta, GA 30318, USA\nDirections",
+   "expect": {
+    "app": "doordash",
+    "screen": "dd.placePopup"
+   }
+  },
+  {
+   "name": "...and one with no role on it is not read, so not the popup",
+   "text": "Fable Pasta\n2080 Lantern Ave NW #100\nAtlanta, GA 30318, USA\nDirections",
    "expect": {
     "app": null,
     "screen": "unknown"
@@ -5363,6 +5379,114 @@
   {
    "name": "'Dropoff type' ABOVE the address is not the sheet's label",
    "text": "Dropoff type\nMeet at door\nPat Q.\n2950 Kestrel Dr\nWoodstock, GA",
+   "expect": null
+  }
+ ],
+ "_popups_comment": "DoorDash's place popup, opened from a stop on an offer card before the driver decides: place_popup / placePopup. The role label, the store's name, the street with a house number, the town, and 'Directions' under them. `expect` is {role, name, line, street, city, state, zip}, or null when the popup does not read as one. The store's layout and the OCR's marks are the five reads of it in the journal copied with the 12 Oct shift, all five of which read; the customer's is INFERRED (no customer popup has been read) and its cases say so; the pill over the map is the 12 Oct snaps' 16-03-08 and 16-03-17, whose text was never read. Every name, street and number is invented.",
+ "popups": [
+  {
+   "name": "the store popup as it arrives: an icon read as marks before the label, its letters after the name, the pin icon before the street, the town with USA",
+   "text": "mY\n)\nJ i\n:\nyl leley, ‘,\nbi)\n4 Pickup from tu A)\nLark Owl Pizza hs\n».\n@ 1200 Fable W Lantern Pkwy NW A\nKennesaw, GA 30144, USA me\nDirections nA\n©). Make this delivery count",
+   "expect": {
+    "role": "pickup",
+    "name": "Lark Owl Pizza",
+    "line": "1200 Fable W Lantern Pkwy NW, Kennesaw, GA 30144",
+    "street": "1200 Fable W Lantern Pkwy NW",
+    "city": "Kennesaw",
+    "state": "GA",
+    "zip": "30144"
+   }
+  },
+  {
+   "name": "...the name wrapped onto two lines, and the state and ZIP on the street line with no town",
+   "text": "me\n<q Pickup from\nFable Stone Chinese t\nCuisine\n@ 840 Lantern W Quill Pkwy NW GA 30144\nDirections",
+   "expect": {
+    "role": "pickup",
+    "name": "Fable Stone Chinese Cuisine",
+    "line": "840 Lantern W Quill Pkwy NW, GA 30144",
+    "street": "840 Lantern W Quill Pkwy NW",
+    "city": null,
+    "state": "GA",
+    "zip": "30144"
+   }
+  },
+  {
+   "name": "...a suite after the street and a line of its own, and the pin icon read as two letters",
+   "text": "meiner @\n<q Pickup from\nFable Pasta %\nGy 2080 Lantern Ave NW #100\nAtlanta, GA 30318, USA\nApt/Suite: 100\nDirections\nOy 2 Sanne ow",
+   "expect": {
+    "role": "pickup",
+    "name": "Fable Pasta",
+    "line": "2080 Lantern Ave NW, Atlanta, GA 30318",
+    "street": "2080 Lantern Ave NW",
+    "city": "Atlanta",
+    "state": "GA",
+    "zip": "30318"
+   }
+  },
+  {
+   "name": "...the pin icon read as a letter and a mark, and the item count below",
+   "text": ". cyv F ‘\nyaneTp icra) a .\nYJ Pickup from\nThe Fable Orient %\nG? 3050 Quill Hill Rd SE\nAtlanta, GA 30339, USA\nDirections\n\") 4items v\naaa,",
+   "expect": {
+    "role": "pickup",
+    "name": "The Fable Orient",
+    "line": "3050 Quill Hill Rd SE, Atlanta, GA 30339",
+    "street": "3050 Quill Hill Rd SE",
+    "city": "Atlanta",
+    "state": "GA",
+    "zip": "30339"
+   }
+  },
+  {
+   "name": "the customer's popup, INFERRED and unmeasured: 'Customer dropoff' over the address",
+   "text": "Customer dropoff\n412 Wrenfield Ct NE\nMarietta, GA 30062, USA\nDirections",
+   "expect": {
+    "role": "dropoff",
+    "name": null,
+    "line": "412 Wrenfield Ct NE, Marietta, GA 30062",
+    "street": "412 Wrenfield Ct NE",
+    "city": "Marietta",
+    "state": "GA",
+    "zip": "30062"
+   }
+  },
+  {
+   "name": "the pill over the map, a street and nothing else, has no role: refused",
+   "text": "4069 Fable Street North...",
+   "expect": null
+  },
+  {
+   "name": "...and read off the whole screen with the card under it, still no role: refused",
+   "text": "Uber\n4069 Fable Street North...\nDecline\n$7.75\n3 stops (7.8 mi) · 30 min\nLark Owl Pizza\n2770 Fable Parkway Northwest, Kenn...\nStarbright\n4069 Fable Street Northwest, Ke...\nCustomer dropoff\nDrop off 2 orders\nAccept 0:08",
+   "expect": null
+  },
+  {
+   "name": "the sheet with no label above its address has no role: refused",
+   "text": "Fable Pasta\n2080 Lantern Ave NW #100\nAtlanta, GA 30318, USA\nDirections",
+   "expect": null
+  },
+  {
+   "name": "a pickup label and a dropoff label in one popup is two answers: refused",
+   "text": "Pickup from\nFable Pasta\nCustomer dropoff\n2080 Lantern Ave NW\nAtlanta, GA 30318\nDirections",
+   "expect": null
+  },
+  {
+   "name": "two addresses under the label is two answers: refused",
+   "text": "Pickup from\nFable Pasta\n2080 Lantern Ave NW\n17 Quill St\nAtlanta, GA 30318\nDirections",
+   "expect": null
+  },
+  {
+   "name": "no 'Directions' under it is no popup",
+   "text": "Pickup from\nFable Pasta\n2080 Lantern Ave NW\nAtlanta, GA 30318, USA",
+   "expect": null
+  },
+  {
+   "name": "a town whose state is no state is no address",
+   "text": "Pickup from\nFable Pasta\n2080 Lantern Ave NW\nAtlanta, GX 30318\nDirections",
+   "expect": null
+  },
+  {
+   "name": "DoorDash's stops card itself, its stores' streets printed under their names, is no popup",
+   "text": "$7.75\n3 stops (7.8 mi) · 30 min\n@ Fable Bagel Co\n123 Lantern Grove Road Northwest, Sm...\n& Pine Noodle House\n45 Birch Street Northwest, Sm...\n& Customer dropoff\nDrop off 2 orders",
    "expect": null
   }
  ]

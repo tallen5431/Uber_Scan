@@ -448,6 +448,20 @@ if _ad and _lv:
     eq('...and the two agree about when a driver\'s day starts '
        '(advice %s, panel %s)' % (_ad.group(1), _lv.group(1)),
        int(_ad.group(1)), int(_lv.group(1)))
+# ...and the same for how long a card stays "the one on the screen": the panel
+# stops treating a verdict as the card in front of the driver at READ_STALE_MS,
+# and server.js files a customer's place popup onto the card being screened
+# only while the card was read that recently (POPUP_CARD_MS). One question, two
+# files that cannot import each other: the copy is allowed and the drift is not.
+_srv_src = open(os.path.join(ROOT, 'server.js')).read()
+_pc = re.search(r'\bvar\s+POPUP_CARD_MS\s*=\s*([0-9]+)\s*;', _srv_src)
+_rs = re.search(r'\bvar\s+READ_STALE_MS\s*=\s*([0-9]+)\s*;', _live)
+ok_('POPUP_CARD_MS is a named constant in the server', _pc is not None)
+ok_('...and READ_STALE_MS in the driving screen', _rs is not None)
+if _pc and _rs:
+    eq('...and the two agree about how long a card is the one on the screen '
+       '(server %s, panel %s)' % (_pc.group(1), _rs.group(1)),
+       int(_pc.group(1)), int(_rs.group(1)))
 # And the pages that CAN import it still do, rather than quietly growing a
 # third copy. `var DAY_STARTS_AT = 4` in either of these would pass the check
 # above and be exactly the drift it is written to stop.

@@ -2735,6 +2735,27 @@ def emit_dropoff(address, ms=None, asked=True, labelled=False, text=None):
         'at': int(time.time() * 1000)}}), flush=True)
 
 
+def emit_popup(popup, at=None):
+    """DoorDash's place popup, read off the screen while a card is being
+    screened: the address the driver tapped a stop on the card to show, and
+    which stop it was (OP.place_popup).
+
+    Its own line, for the reason the dropoff line has one: it carries no
+    verdict and must not stand in for one. And not a dropoff line, because
+    that line's road ends on the order in the car when there is one, and this
+    is never about the order in the car: server.js files it onto the card on
+    the slot or nowhere (Assemble.popup). `at` is when the frame was TAKEN,
+    which is what "read after the card appeared" is asked of. The store's
+    name rides along because the server matches it to the card's pickup; no
+    customer's name is read."""
+    print(json.dumps({'popup': {
+        'role': popup.get('role'), 'name': popup.get('name'),
+        'line': popup.get('line'), 'street': popup.get('street'),
+        'city': popup.get('city'), 'state': popup.get('state'),
+        'zip': popup.get('zip'), 'app': 'doordash', 'screen': 'dd.placePopup',
+        'at': at if at is not None else int(time.time() * 1000)}}), flush=True)
+
+
 def emit_planner(stops, keep=False, ms=None, asked=True, at=None):
     """Uber's Trip Planner, read off the whole screen because ⌖ was pressed.
 
@@ -2928,6 +2949,20 @@ def says_early_look(parsed):
 # plannerLoneDropoff in assemble.js. A card that says nothing of orders is not
 # multi; a read that lost the words is why `legs` is asked as well.
 MULTI_ORDER = re.compile(r'\+\s*\d+\s*orders?\b|\b(?:[2-9]|[1-9]\d)\s*orders\b', re.I)
+# ...and a card for more than one CUSTOMER, which is a different thing:
+# DoorDash's "Multiple dropoffs (2 stops)". "Drop off 2 orders" under one
+# "Customer dropoff" is two orders to one door and is not this. Said on the
+# offer line for the one reader that needs it: a customer's place popup is
+# filed onto the card only when the card has one customer to be about
+# (Assemble.popup).
+MANY_DROPOFFS = re.compile(r'multiple\s*drop\s*-?\s*offs', re.I)
+
+
+def says_many_dropoffs(parsed):
+    """Whether any text this reading was built from names more than one
+    dropoff. Every frame the window kept, as says_early_look."""
+    texts = list(parsed.get('scans') or []) + [parsed.get('text') or '']
+    return any(MANY_DROPOFFS.search(t or '') for t in texts)
 
 
 def says_multi_order(parsed):
@@ -3084,6 +3119,7 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None):
         'milesCorrected': bool(parsed.get('milesCorrected')),
         'earlyLook': says_early_look(parsed),
         'multiOrder': says_multi_order(parsed),
+        'manyDropoffs': says_many_dropoffs(parsed),
         # ...and which app's card it is, and which screen (OP.screen_type, off
         # the reading's own text): server.js keeps both on the order in the
         # car, the app as attribution's first hard rule with two orders held,
@@ -3568,6 +3604,10 @@ def main():
     # is told again, because the first was what the panel, the order in the
     # car and the pair row were built from. See below.
     told_as = None
+    # ...and the place popup last said for that card, as (offer, role, line):
+    # said once per card and address, like the dropoff line's repeat rule, and
+    # again for the next card. See emit_popup.
+    popup_said = None
     # Whether the loop has already said why it went quiet. See where it goes.
     quiet_said = False
     # The last few preview frames, and whether the newest was the same picture
@@ -3709,7 +3749,7 @@ def main():
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
         nonlocal unparsed_kept_for
-        nonlocal last_read, found_box, found_kept
+        nonlocal last_read, found_box, found_kept, popup_said
         # Not merged when it was a whole-screen read — see collect().
         parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
@@ -4175,6 +4215,19 @@ def main():
         # could rescue it (AUDITS: "Why that loss is permanent"). Forgotten
         # when the order changes, and only then: one order's own navigation
         # screen is still said once.
+        # DOORDASH'S PLACE POPUP is not a destination either, whatever its
+        # label: it is about the card being screened, and goes to the server
+        # on its own line (emit_popup, below), where it is filed onto that
+        # card and NEVER onto the order in the car. A customer's popup reads
+        # as an address under a Dropoff label, so without this it would also
+        # go out as a labelled dropoff line, which the assembler files onto a
+        # held order — the order this popup is not about. A store's is
+        # already refused above as an address under a Pickup label. Not under
+        # a press: a press says "this screen is the destination" and keeps
+        # the answer it always had.
+        popup = OP.place_popup(out.get('text'))
+        if popup is not None and not asked:
+            found = None
         held_now = held_signature(started)
         if held_now != held_seen:
             held_seen = held_now
@@ -4207,6 +4260,17 @@ def main():
                           asked, whole,
                           keep=offer_log is not None and offer_log.keep_places,
                           at=seen_at, sheet=sheet)
+        # ...and the popup, once per card and address, stamped with when its
+        # frame was TAKEN: the server files it only onto a card on the slot
+        # from before that moment. The role, not the address, in the log.
+        if popup is not None:
+            said_key = (told_offer, popup['role'], popup['line'])
+            if said_key != popup_said:
+                popup_said = said_key
+                if args.json:
+                    emit_popup(popup, at=int(started * 1000))
+                log('place popup read: the %s\'s address' % (
+                    'store' if popup['role'] == 'pickup' else 'customer'))
         if answers:
             dropoff_until = 0.0
             dropoff_asked = False

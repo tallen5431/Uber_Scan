@@ -5389,10 +5389,24 @@
     // can be drawn, and one through the first alone ignores an order in the
     // car (mapRefusal says so).
     var noEnd2 = !!second && !second.dropoff;
-    var names = [o.pickup, o.dropoff, held, held2]
+    /* The store's door, when DoorDash's place popup gave this card one while
+       it was being screened (server.js popupArrived): searched IN PLACE OF the
+       card's name for it, which is a store's name with its street cut off
+       ("Fable Pizza ; 1200 Fable Parkway Nort"), so the pin and the figure are
+       the door's. A customer's popup needs nothing here: it is the card's
+       `dropoff`, filed there as a screening ⌖ press files one, and
+       `dropoffFrom` says so. Either one is said as "addr from tap". */
+    var tapped = o.pickupAddr && o.pickupAddr.from === 'popup'
+      && typeof o.pickupAddr.value === 'string' && o.pickupAddr.value
+      ? o.pickupAddr.value : null;
+    var pickQ = tapped || o.pickup || null;
+    var names = [pickQ, o.dropoff, held, held2]
       .concat(listed.map(function (p) { return p.q; })).filter(Boolean)
       .filter(function (v, i, all) { return all.indexOf(v) === i; });
-    return { pickup: o.pickup || null, dropoff: o.dropoff || null,
+    return { pickup: pickQ, dropoff: o.dropoff || null,
+             // Which of this card's two ends came off a tap, for the pins'
+             // words and the figure's.
+             tapped: { pickup: !!tapped, dropoff: !!o.dropoff && o.dropoffFrom === 'popup' },
              held: held, heldPicks: heldPicks, donePicks: donePicks, names: names,
              // The two cards the line is measured with: this one, whose fix
              // is where the car was when it came up, and the one the order in
@@ -6233,8 +6247,11 @@
     put(j.held2, colourFor(want.held2, '#f5a524', off.held2),
         sayFor(want.held2, 'where order \u2461 in your car is going', off.held2),
         want.held2, true, 'D2');
+    // A door a tap gave says so under its name, as the figure does.
+    var tapped = want.tapped || {};
     put(pick, colourFor(want.pickup, '#17c964', off.pick),
-        sayFor(want.pickup, 'pick this one up', off.pick), want.pickup, false, 'P');
+        sayFor(want.pickup, 'pick this one up', off.pick),
+        tapped.pickup ? want.pickup + ' · addr from tap' : want.pickup, false, 'P');
     /* The held order's pickups: a GREEN RING, by the rule above — green for
        a pickup, ringed for the order already in hand — and in the key as
        "held pickup". Named as the planner listed it, less the icon's litter
@@ -6258,7 +6275,8 @@
           { faded: true });
     });
     put(drop, colourFor(want.dropoff, '#f5a524'),
-        sayFor(want.dropoff, 'and drop it here'), want.dropoff, false, 'D');
+        sayFor(want.dropoff, 'and drop it here'),
+        tapped.dropoff ? want.dropoff + ' · addr from tap' : want.dropoff, false, 'D');
 
     // The run already committed to, and the run this card would add. Dashed
     // for the detour, solid for the job, which is the same distinction the map
@@ -6698,6 +6716,19 @@
                           : ' · NucBox down, public map used')
       : (road && road.why && roadDown[road.why]) || '';
     var cut = MV.ON_WAY_MI;
+    /* ...and where the pickup's door came from, when it came off DoorDash's
+       place popup rather than off the card (mapWants): first in the tail,
+       because it is about the pin the figure is measured to, and a tail, not
+       a hedge, because the figure is the door's either way — the popup is the
+       better witness than the card it replaces. And only with no NucBox
+       note after the count: with one, the straight-line figure to a held
+       street's range, or with the restaurant in it, ran past the two rows
+       800x480 gives (rpi/test_layout.py, measured), so the note about the
+       pins' source wins, as the search's does over the road's above. The
+       pickup pin's own words still say "addr from tap" (drawMap). The same
+       with both orders in the car (`runs`, below): the pickup is the door
+       either way. */
+    var tap = want.tapped && want.tapped.pickup && !nucbox ? ' · addr from tap' : '';
     /* TWO ORDERS IN THE CAR (`runs`, MV.heldRuns): the figure through the
        run that commits the car to both — every pickup still ahead and both
        ends — the new pickup in its best gap. In the planner's order when a
@@ -6717,23 +6748,23 @@
         var rMost = rHi.toFixed(1) === road.miles.toFixed(1) ? '' : '–' + rHi.toFixed(1);
         return (rHi < cut ? 'on your way by road'
                           : '+' + road.miles.toFixed(1) + rMost + ' road mi')
-          + withBoth + count + nucbox;
+          + withBoth + tap + count + nucbox;
       }
       var two = MV.detourOrders(here, pick, runs.runs);
       if (!two || !two.stated) return 'order of stops unknown — no figure';
       var tMost = two.hi.toFixed(1) === two.lo.toFixed(1) ? '' : '–' + two.hi.toFixed(1);
       return (two.hi < cut ? 'on your way' : '+' + two.lo.toFixed(1) + tMost + ' mi')
-        + withBoth + ' — straight lines, not roads' + count + nucbox;
+        + withBoth + ' — straight lines, not roads' + tap + count + nucbox;
     }
     if (road && isFinite(road.miles)) {
       if (withStop) {
         return (road.miles < cut ? 'on your way by road'
                                  : '+' + road.miles.toFixed(1) + ' road mi')
-          + withStop + count + nucbox;
+          + withStop + tap + count + nucbox;
       }
       return (road.miles < cut ? 'this pickup is on your way by road'
                                : '+' + road.miles.toFixed(1) + ' road mi out of your way')
-        + count + nucbox;
+        + tap + count + nucbox;
     }
     /* An end that is a numberless street: the figure wherever on it the stop
        is (MV.stretchSpan; mapRefusal refused it where that is not one
@@ -6750,7 +6781,7 @@
       ? (hi < cut ? 'on your way' : '+' + lo.toFixed(1) + most + ' mi') + withStop
       : (hi < cut ? 'this pickup is on your way'
                   : '+' + lo.toFixed(1) + most + ' mi out of your way');
-    return said + ' — straight lines, not roads' + count + nucbox;
+    return said + ' — straight lines, not roads' + tap + count + nucbox;
   }
 
   // Last, not beside the button it belongs to: it can put the pane into map

@@ -125,6 +125,13 @@ function stopFields(stops) {
   eq('sheets / ' + c.name, JSON.stringify(P.sheetDropoff(c.text)), JSON.stringify(c.expect));
 });
 
+/* DoorDash's place popup, opened from a stop on an offer card: its role, the
+   store's name and the address, or null. The same cases rpi/test_parser.py
+   runs. See place_popup in offer_parser.py. */
+(cases.popups || []).forEach(function (c) {
+  eq('popups / ' + c.name, JSON.stringify(P.placePopup(c.text)), JSON.stringify(c.expect));
+});
+
 /* What a navigation or "Deliver to" screen gives as a destination nobody
    pressed for. `expect` is [screen, line, stop, under, asOffer]; this port has
    no address_stop, so it holds the screen, findAddress's line and the offer

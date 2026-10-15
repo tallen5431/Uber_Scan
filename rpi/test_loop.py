@@ -348,6 +348,10 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     # and kept rather than printed: the line's body as the server is sent it.
     was_sighting = SP.emit_sighting
     sightings = []
+    # ...and the place popup's own line, as (popup, at).
+    was_popup = SP.emit_popup
+    popups = []
+    SP.emit_popup = lambda popup, at=None: popups.append((dict(popup), at))
     SP.emit_sighting = lambda *a, **k: sightings.append(SP.sighting(*a, **k))
     SP.start_camera = lambda *a, **k: cam
     # Stamped, so a check can ask how soon after something a verdict came.
@@ -445,6 +449,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         PL.CF.find_card, PL.Scanner._look, PL.ocr_lines = real_reading
         SP.emit_planner = was_planner
         SP.emit_sighting = was_sighting
+        SP.emit_popup = was_popup
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
         SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY, SP.STALL_AGAIN = was_holds
@@ -456,6 +461,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                 beats=beats, calls=calls[0],
                 submitted=submitted[0], submitted_whole=submitted_whole,
                 readings=readings[0], planners=said_planners, sightings=sightings,
+                popups=popups,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
                 raised=raised, handoff=handoff, finder=finder[0])
@@ -1865,6 +1871,45 @@ ok_('the premise: the card box read the two-dropoff planner, unpressed (%d reads
 eq('a planner nobody pressed for gives no address, not even the one find_address '
    'would take off it', [((d[0] or {}).get('line'), d[1].get('asked'))
                          for d in rp5['dropoffs']], [])
+
+# --- DoorDash's place popup, read while its card is screened -----------------
+#
+# The driver taps a stop on a DoorDash card before deciding, and the phone
+# opens a sheet over the bottom of the screen: "Pickup from", the store, its
+# street and town, "Directions" (offer_parser.place_popup has the five reads of
+# it on file). The card box is the bottom of the screen, so the card-box read
+# the loop already makes is the one that sees it. Said on its own line, once
+# per card and address, stamped with when its frame was taken — and a
+# customer's never as a dropoff line, which would file it onto an order in the
+# car. Made-up store, street and door.
+_DD_CARD = ('$7.75\n3 stops (7.8 mi) · 30 min\n@ Fable Bagel Co\n'
+            '123 Lantern Grove Road Northwest, Sm...\n& Customer dropoff')
+_STORE_POPUP = ('<q Pickup from\nFable Bagel Co %\nGy 123 Lantern Grove Rd NW\n'
+                'Smyrna, GA 30080, USA\nDirections')
+_CUSTOMER_POPUP = ('Customer dropoff\n412 Wrenfield Ct NE\nMarietta, GA 30062, USA\n'
+                   'Directions')
+_t0 = time.time() * 1000
+rpop = run(lambda n, k: _DD_CARD if n <= 2 else _STORE_POPUP,
+           extra_argv=['--no-parallel'], seconds=5.0, handoff=tempfile.mkdtemp())
+_t1 = time.time() * 1000
+ok_('the premise: the card was announced and the popup read more than once (%d reads)'
+    % rpop['calls'], rpop['announced'] and rpop['calls'] >= 4)
+eq('a store popup read off the card box is said once, on its own line, with its '
+   'role, the store and the address',
+   [(p['role'], p['name'], p['line']) for p, _ in rpop['popups']],
+   [('pickup', 'Fable Bagel Co', '123 Lantern Grove Rd NW, Smyrna, GA 30080')])
+ok_("...stamped with its frame's own clock, inside the run (%r)"
+    % [a for _, a in rpop['popups']],
+    rpop['popups'] and all(isinstance(a, int) and _t0 <= a <= _t1 for _, a in rpop['popups']))
+eq('...and the log names the role and not the place',
+   [l for l in rpop['logs'] if l.startswith('place popup')], ["place popup read: the store's address"])
+rcus = run(lambda n, k: _DD_CARD if n <= 2 else _CUSTOMER_POPUP,
+           extra_argv=['--no-parallel'], seconds=5.0, handoff=tempfile.mkdtemp())
+ok_('the premise: a customer popup is an address under a Dropoff label, which a '
+    'dropoff line would carry', OP.address_under_dropoff(_CUSTOMER_POPUP))
+eq("a customer's popup goes out on its own line and never as a dropoff line",
+   ([(p['role'], p['line']) for p, _ in rcus['popups']], rcus['dropoffs']),
+   ([('dropoff', '412 Wrenfield Ct NE, Marietta, GA 30062')], []))
 
 # --- a pickup's address is never the order's destination ---------------------
 #

@@ -847,13 +847,57 @@ CAPTION_LINES = [
      '② has no address on record — ⌖ Scan reads it off your phone'),
     ('no figure, a street with two orders',
      "no figure for " + WIDEST_DISC + " — a street, with two orders"),
+    # ...and the pickup's door off DoorDash's place popup rather than off the
+    # card (live.html mapWants): said first in the tail, " · addr from tap", at
+    # every length the figure comes in — straight and by road, to a door and
+    # to a held street's range, with the restaurant in it — each at its
+    # longest with a place not asked. Never beside a NucBox note: with " ·
+    # NucBox down, public map for the rest" after it, three of the straight
+    # forms ran past two rows at 800x480, so the page drops the tap note
+    # there and the pickup pin says it instead.
+    ('the figure from a tapped door',
+     '+3.2 mi out of your way — straight lines, not roads · addr from tap',
+     '+3.2 mi out of your way — straight lines, not roads'),
+    ('the figure from a tapped door, at its longest',
+     'this pickup is on your way — straight lines, not roads · addr from tap · 1 not '
+     'asked',
+     'this pickup is on your way — straight lines, not roads'),
+    ('the road figure from a tapped door, at its longest',
+     'this pickup is on your way by road · addr from tap · 1 not found',
+     'this pickup is on your way by road'),
+    ('the figure from a tapped door to a held street, at its longest',
+     '+13.2–13.6 mi out of your way — straight lines, not roads · addr from tap · 1 not '
+     'asked',
+     '+13.2–13.6 mi out of your way — straight lines, not roads'),
+    ('the figure from a tapped door, the restaurants in it, at its longest',
+     '+13.2–13.6 mi incl. restaurants — straight lines, not roads · addr from tap · 1 not '
+     'asked',
+     '+13.2–13.6 mi incl. restaurants — straight lines, not roads'),
+    ('the road figure from a tapped door, the restaurants in it, at its longest',
+     'on your way by road incl. restaurants · addr from tap · 1 not found',
+     'on your way by road incl. restaurants'),
+    # ...and the tapped door with both orders in the car: the same tail, at
+    # the longest each two-order figure comes in with a place not asked or not
+    # found, and never beside a NucBox note.
+    ('the road figure from a tapped door, both orders in it, at its longest',
+     '+13.2–13.6 road mi incl. both orders · addr from tap · 1 not found',
+     '+13.2–13.6 road mi incl. both orders'),
+    ('the road figure on your way from a tapped door, both orders in it, at its longest',
+     'on your way by road incl. both orders · addr from tap · 1 not found',
+     'on your way by road incl. both orders'),
+    ('the figure from a tapped door, both orders in it, at its longest',
+     '+13.2–13.6 mi incl. both orders — straight lines, not roads · addr from tap · 1 not '
+     'asked',
+     '+13.2–13.6 mi incl. both orders — straight lines, not roads'),
 ]
 
 # ...and the third field, where there is one, is the part that must stay
 # READABLE on every panel — the rest being a trailing clause the 3.5" hat may
-# ellipsise. THIRTY-SIX entries have one, and they are four judgements: the
+# ellipsise. FORTY-FIVE entries have one, and they are four judgements: the
 # count of places with no pin, whose tail is ` · 1 not asked` or ` · 1 not
-# found` depending on which it was, with one note after it: the NucBox's
+# found` depending on which it was — behind ` · addr from tap` when the
+# pickup's door came off DoorDash's place popup and no note follows — with one
+# note after it: the NucBox's
 # search down (` · NucBox down, public map used`, or `...public map for the
 # rest` when it answered a place first), else why the road was not stated
 # (` · NucBox router down`, ` · no road found`, ` · a pin over 0.2 mi off
@@ -891,9 +935,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 91)
-eq('...and thirty-six of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 36)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 100)
+eq('...and forty-five of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 45)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:
@@ -4226,8 +4270,8 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say seventy-eight things, so all
-                # seventy-eight are put in it and measured. Three rules, and they are not the same
+                # occupant and it can say a hundred things, so all
+                # of them are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #
                 #   the cap    — no sentence may take more rows than the clamp

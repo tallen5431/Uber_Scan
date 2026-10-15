@@ -174,6 +174,10 @@ var scanner = {
   // startScanner() deliberately leaves them alone. See the note there.
   offer: null,         // the last offer read, so it can still be marked taken
   offerAt: null,
+  // ...and when it was last READ, which offerAt is not: offerAt is when the
+  // card came onto the slot and does not move while it is re-read. What a
+  // customer's place popup is held to (popupArrived).
+  offerSeenAt: null,
   // The orders being carried, first-taken first: a LIST, capped at MAX_HELD.
   // Read through heldOrders() and holding(), never directly. See holding().
   held: [],
@@ -407,6 +411,14 @@ function startScanner() {
           retryPool();
           return;
         }
+        // DoorDash's place popup (rpi/scan_pi.py, emit_popup): an address the
+        // driver tapped a stop on the card being screened to show. Filed onto
+        // that card or nowhere, by the assembler; never onto the order in the
+        // car. See popupArrived.
+        if (read.popup) {
+          popupArrived(read.popup, Date.now());
+          return;
+        }
         if (read.phase) {
           scanner.phase = read.phase;
           scanner.status = read;
@@ -458,6 +470,12 @@ function startScanner() {
             // card at ✓ Took takes as its provenance (Assemble.cardFields).
             read.offer.dropoffFrom = scanner.offer.dropoffFrom;
           }
+          // ...and the store's door a place popup gave it, for the same
+          // reason: the next reading of the card is seconds away and knows
+          // nothing of the tap.
+          if (sameCard && scanner.offer.pickupAddr) {
+            read.offer.pickupAddr = scanner.offer.pickupAddr;
+          }
           // ...and whether this is the order already in the car, back on the
           // phone (heldOwnCard). Decided once, on arrival, and carried across
           // re-reads like the mark: the panel shows it as the order taken, and
@@ -483,6 +501,7 @@ function startScanner() {
           }
           scanner.offer = read.offer;
           if (!sameCard) scanner.offerAt = Date.now();
+          scanner.offerSeenAt = Date.now();
           // ...and the Trip Planner a press read goes, as it goes off the
           // panel at this moment. See forgetPlanner.
           if (!sameCard) forgetPlanner(Date.now());
@@ -832,6 +851,50 @@ function screeningCard(now) {
   if (!o || typeof o.id !== 'string' || !o.id) return null;
   if (!scanner.offerAt) return null;
   return (now - scanner.offerAt) <= SCREENING_MS ? o : null;
+}
+
+/* How long after its card was last read a CUSTOMER'S place popup may still be
+ * about it. A store's popup names its store and is matched to the card's
+ * pickup (Assemble.popup); a customer's names nobody, so the only witness is
+ * that the card was on the screen around the tap. Sixteen seconds is the
+ * panel's own figure for that question — live.html's READ_STALE_MS, past which
+ * it stops treating the verdict as the card in front of the driver — and
+ * rpi/test_lint.py holds the two equal. Measured on the five store popups on
+ * file: read 2.1, 2.8, 3.9, 4.4 and 28.5 s after their card's last row; the
+ * last would be refused for a customer, and is filed for a store by its
+ * name. */
+var POPUP_CARD_MS = 16000;
+
+/* DoorDash's place popup, arrived from the scanner: Assemble.popup decides,
+ * and this files, writes and says. A store's door goes onto the card as
+ * `pickupAddr`, which Map view searches and ✓ Took carries into the hold; a
+ * customer's becomes the card's end, written to the journal as a screening
+ * sighting's end is, with `labelled` (the popup's own role label is what lets
+ * it past the card's own end in the marks fold, as it was let past it here)
+ * and `from: 'popup'`, which nothing folds on and is there to say where it came
+ * from. No address in the log: the role and the reason. The card goes back to
+ * every panel at once with what it now holds — the card is under the popup,
+ * so the reading that would have carried it is not coming. */
+function popupArrived(p, now) {
+  var card = screeningCard(now);
+  var said = Assemble.popup(card, p, { held: heldOrders(now), offerAt: scanner.offerAt,
+                                       seenAt: scanner.offerSeenAt, cardMs: POPUP_CARD_MS });
+  var whose = p && p.role === 'pickup' ? "store's" : "customer's";
+  if (said.to !== 'card') {
+    console.log('place popup: the ' + whose + ' address not filed: ' + said.why);
+    return;
+  }
+  Assemble.filePopup(card, p, said);
+  console.log('place popup: the ' + whose + ' address filed on the card being screened');
+  if (said.field === 'dropoff') {
+    appendLines(JSON.stringify({
+      v: 1, kind: 'mark', at: Date.now(), id: card.id, dropoff: p.line,
+      asked: false, labelled: true, from: 'popup'
+    }) + '\n', function (err) {
+      if (err) console.error('journal: could not record a popup dropoff: ' + err.message);
+    });
+  }
+  broadcast({ offer: card, popup: { role: p.role, field: said.field, line: p.line } });
 }
 
 /* The order the driver is currently carrying, or null.
