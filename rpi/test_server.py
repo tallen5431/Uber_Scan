@@ -5393,7 +5393,7 @@ with open(_bfake, 'w') as fh:
         '    "gps": {"state": "stale", "ageSeconds": 312.0, "fix": %s},\n'
         '    "cpuC": 71.4, "cpuCWhy": None,\n'
         '    "throttled": {"now": ["under-voltage"], "sinceBoot": ["under-voltage"]},\n'
-        '    "throttledWhy": None}), flush=True)\n'
+        '    "throttledWhy": None, "heatGuard": True}), flush=True)\n'
         'time.sleep(4.0)\n'
         'sys.exit(1)\n' % (_bonce, _bonce, repr(_BFIX)))
 _bproc, _bbase = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
@@ -5419,6 +5419,9 @@ try:
        (_bb.get('cpuC'), _bb.get('throttled')),
        (71.4, {'now': ['under-voltage'], 'sinceBoot': ['under-voltage']}))
     eq('...and the notices that already rode it', _bb.get('notSaving', 'absent'), None)
+    # ...and the heat guard's state (scan_pi.HeatGuard), so the status link
+    # says whether the reads nobody pressed for are being put off.
+    eq('/api/status says whether the heat guard is on', _bb.get('heatGuard', 'absent'), True)
     # An age, never a timestamp — the rule for everything on this endpoint,
     # because whatever reads it does not share this server's clock.
     ok_('...with its own age instead of a timestamp (%r)'
@@ -5430,7 +5433,8 @@ try:
     ok_('the stream carries the same heartbeat to the panel (%d)' % len(_bstream),
         _bstream and (_bstream[0].get('gps') or {}).get('state') == 'stale'
         and _bstream[0].get('cpuC') == 71.4
-        and (_bstream[0].get('throttled') or {}).get('now') == ['under-voltage'])
+        and (_bstream[0].get('throttled') or {}).get('now') == ['under-voltage']
+        and _bstream[0].get('heatGuard') is True)
     eq('...and the same fix, whole', (_bstream[0].get('gps') or {}).get('fix')
        if _bstream else None, _BFIX)
     # The fake exits four seconds after its beat and is started again; the

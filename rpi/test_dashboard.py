@@ -5274,7 +5274,10 @@ const framed = (page) => page.waitForFunction(
                         && r.top >= 0 && r.bottom <= window.innerHeight + 1,
                  // Whole: nothing ellipsised off the end.
                  whole: e.scrollWidth <= e.clientWidth + 1,
-                 w: Math.round(r.width), sw: e.scrollWidth };
+                 w: Math.round(r.width), sw: e.scrollWidth,
+                 // ...and the heat guard's chip in it, with its sentence.
+                 chip: e.querySelector('.chip') ? e.querySelector('.chip').textContent : null,
+                 title: e.title || '' };
       };
       const d = document.documentElement;
       return { conn: m('conn'), health: m('health'), shift: m('shift'),
@@ -5287,26 +5290,40 @@ const framed = (page) => page.waitForFunction(
       await page.waitForTimeout(150);
       return row();
     };
+    // Every beat says whether the heat guard is on, as the scanner sends it
+    // (scan_pi.HeatGuard): on with any throttle word now, at 75°C and over,
+    // and off below 70 with none.
     const NOPI = { cpuC: null, cpuCWhy: 'no thermal zone', throttled: null,
-                   throttledWhy: 'no vcgencmd on this machine' };
+                   throttledWhy: 'no vcgencmd on this machine', heatGuard: false };
     const slot = {};
     slot.off = await say(Object.assign({ gps: { state: 'off', ageSeconds: null } }, NOPI));
     slot.notYet = await say(Object.assign({ gps: { state: null, ageSeconds: null } }, NOPI));
     // A dip in the supply at 6pm that is over: since-boot only, nothing now.
     slot.ok = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 52.1, cpuCWhy: null,
-                          throttled: { now: [], sinceBoot: ['under-voltage'] }, throttledWhy: null });
+                          throttled: { now: [], sinceBoot: ['under-voltage'] }, throttledWhy: null,
+                          heatGuard: false });
     slot.stale = await say(Object.assign({ gps: { state: 'stale', ageSeconds: 119.6 } }, NOPI));
     slot.lost = await say(Object.assign({ gps: { state: 'lost', ageSeconds: null } }, NOPI));
     slot.hot = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 84.6, cpuCWhy: null,
                            throttled: { now: ['temp limit', 'throttled', 'capped'],
                                         sinceBoot: ['temp limit', 'throttled', 'capped'] },
-                           throttledWhy: null });
-    // The widest the row is asked to hold: the widest Pi word with its
-    // temperature, and a GPS stale for longer than a sixteen-hour day, so four
-    // digits of minutes. Measured, 296px; the span has 313 on the 3.5" hat.
+                           throttledWhy: null, heatGuard: true });
+    // The guard held on through the band as the Pi cools, and off again in
+    // it: the page says what the beat says, and holds no threshold of its own.
+    slot.cooling = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 72.3, cpuCWhy: null,
+                               throttled: { now: [], sinceBoot: ['temp limit'] },
+                               throttledWhy: null, heatGuard: true });
+    slot.cooled = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 72.3, cpuCWhy: null,
+                              throttled: { now: [], sinceBoot: ['temp limit'] },
+                              throttledWhy: null, heatGuard: false });
+    // The widest the row was asked to hold before the chip: the widest Pi
+    // word with its temperature, and a GPS stale for longer than a sixteen-
+    // hour day, so four digits of minutes. Measured, 296px of 456 on the
+    // 3.5" hat; with the chip in the word's place, 260.
     slot.both = await say({ gps: { state: 'stale', ageSeconds: 60000 }, cpuC: 84.6, cpuCWhy: null,
                             throttled: { now: ['temp limit', 'throttled', 'capped'],
-                                         sinceBoot: ['temp limit'] }, throttledWhy: null });
+                                         sinceBoot: ['temp limit'] }, throttledWhy: null,
+                            heatGuard: true });
     // ...and the shape a weak car supply gives, the commonest of them, with
     // the GPS two hours gone — the app's timer having run out mid-shift. With
     // the temperature beside the supply this was 315px and the ellipsis took
@@ -5314,19 +5331,19 @@ const framed = (page) => page.waitForFunction(
     slot.weak = await say({ gps: { state: 'stale', ageSeconds: 7380 }, cpuC: 61.0, cpuCWhy: null,
                            throttled: { now: ['under-voltage', 'throttled'],
                                         sinceBoot: ['under-voltage', 'throttled'] },
-                           throttledWhy: null });
+                           throttledWhy: null, heatGuard: true });
     // A Took that replaced the order in the car (server.js writes the old
     // one's drop row `by: 'replaced'`): said on this row for a minute.
     await page.evaluate(() => window.__es.push({ heldReplaced: { at: 1, saidForMs: 60000 } }));
     slot.replaced = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 84.6, cpuCWhy: null,
                                 throttled: { now: ['temp limit'], sinceBoot: ['temp limit'] },
-                                throttledWhy: null });
+                                throttledWhy: null, heatGuard: true });
     // The GPS put the order down (server.js gpsArrival): said on this row for
     // a minute, beside the widest Pi word.
     await page.evaluate(() => window.__es.push({ gpsDrop: { at: 1, saidForMs: 60000 } }));
     slot.gpsDrop = await say({ gps: { state: 'ok', ageSeconds: 0.4 }, cpuC: 84.6, cpuCWhy: null,
                                throttled: { now: ['temp limit'], sinceBoot: ['temp limit'] },
-                               throttledWhy: null });
+                               throttledWhy: null, heatGuard: true });
     // The socket drops. The note is a word off a heartbeat, and with no
     // heartbeat it is a word about a minute that has passed.
     await page.evaluate(() => { if (window.__es && window.__es.onerror) window.__es.onerror(); });
@@ -7376,12 +7393,23 @@ try:
             _note('stale').get('shown') and _note('stale').get('whole'))
         eq('[%s] a GPS that has never answered says so' % _pn,
            _note('lost').get('text'), 'GPS: no fix since start')
-        eq('[%s] a hot Pi names the cause, with its temperature' % _pn,
-           _note('hot').get('text'), 'Pi temp limit 85°C')
+        # The heat guard, as a chip: the cause and its temperature, and alone on
+        # the row what the rig is doing about it.
+        eq('[%s] a Pi at its temperature limit says the heat guard is on: a chip, the '
+           'cause and its temperature, and what it means' % _pn,
+           (_note('hot').get('chip'), _note('hot').get('text')),
+           ('HOT 85°C · fewer auto reads', 'HOT 85°C · fewer auto reads'))
+        ok_('[%s] ...its sentence on the note\'s title (%r)' % (_pn, _note('hot').get('title')),
+            _note('hot').get('title', '').startswith('The Pi is at its temperature limit (85°C), '
+                                                    'so the rig reads the planner'))
+        eq('[%s] ...held on as the Pi cools, as the beat says it, with no threshold of '
+           'the page\'s own' % _pn,
+           (_note('cooling').get('text'), _note('cooled').get('hidden')),
+           ('HOT 72°C · fewer auto reads', True))
         # The widest the row is asked to hold, and it has to hold it whole: a
         # cut here falls on the GPS's minutes.
         eq('[%s] the Pi and the GPS together, the Pi first' % _pn,
-           _note('both').get('text'), 'Pi temp limit 85°C · GPS: no fix for 1000 min')
+           _note('both').get('text'), 'HOT 85°C · GPS: no fix for 1000 min')
         ok_('[%s] ...whole on this panel (%dpx of %dpx)'
             % (_pn, _note('both').get('w') or 0, _note('both').get('sw') or 0),
             _note('both').get('whole') and _note('both').get('shown'))
@@ -7403,17 +7431,17 @@ try:
         # the GPS's unit off the end of this very note.
         eq('[%s] a weak supply and a stale fix, the commonest pair, with no '
            'temperature beside the supply' % _pn,
-           _note('weak').get('text'), 'Pi under-voltage · GPS: no fix for 123 min')
+           _note('weak').get('text'), 'LOW POWER · GPS: no fix for 123 min')
         ok_('[%s] ...whole as well (%dpx of %dpx)'
             % (_pn, _note('weak').get('w') or 0, _note('weak').get('sw') or 0),
             _note('weak').get('whole') and _note('weak').get('shown'))
         eq('[%s] a Took that replaced a hold says the previous order was put down' % _pn,
-           _note('replaced').get('text'), 'Pi temp limit 85°C · previous order put down')
+           _note('replaced').get('text'), 'HOT 85°C · previous order put down')
         ok_('[%s] ...whole (%dpx of %dpx)'
             % (_pn, _note('replaced').get('w') or 0, _note('replaced').get('sw') or 0),
             _note('replaced').get('whole') and _note('replaced').get('shown'))
         eq('[%s] a GPS drop is said on the row, after the Pi' % _pn,
-           _note('gpsDrop').get('text'), 'Pi temp limit 85°C · dropped · left the dropoff')
+           _note('gpsDrop').get('text'), 'HOT 85°C · dropped · left the dropoff')
         ok_('[%s] ...whole (%dpx of %dpx)'
             % (_pn, _note('gpsDrop').get('w') or 0, _note('gpsDrop').get('sw') or 0),
             _note('gpsDrop').get('whole') and _note('gpsDrop').get('shown'))

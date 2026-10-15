@@ -642,6 +642,20 @@ DROPOFF_WINDOW = 12.0
 # the rig), so this keeps the screen after the accept from crowding out the
 # card box while it sits on the phone for a whole delivery.
 SCREEN_AUTO_EVERY = 10.0
+# ...and this many while the Pi is hot (HeatGuard): the same reads, at most a
+# third as often. At the 1.8s median that caps them at 18% of the Pi's time
+# through a delivery, and at 6% while hot — arithmetic on that median, for a
+# screen that asks at every chance, not a measurement of the rig. These are the
+# only reads it touches: an offer, a ⌖ press and a 📷 Snap are read when they
+# always were.
+SCREEN_AUTO_HOT = 30.0
+
+
+def screen_auto_every(hot):
+    """The least time between two whole-screen reads nobody pressed for: the
+    one interval digest() asks before it wants one, which the heat guard's
+    state chooses between."""
+    return SCREEN_AUTO_HOT if hot else SCREEN_AUTO_EVERY
 
 
 def auto_read_for(text, planner=None):
@@ -835,8 +849,8 @@ def age_ms(stamp, now):
 
 def beat_extra(beat):
     """The rest of a kept beat as the wire carried it: `gps` (is the fix fresh,
-    and the fix the maps drew) and the Pi's fields, spread the way emit_alive
-    spreads them.
+    and the fix the maps drew), the Pi's fields, spread the way emit_alive
+    spreads them, and `heatGuard`.
 
     `gps` here is what the panel was shown, as of that beat; reader.json's own
     `gps` beside it is the link to gpsd or the phone's app and the fix as it
@@ -845,6 +859,7 @@ def beat_extra(beat):
     extra = beat[2] if len(beat) > 2 else {}
     out = {'gps': extra.get('gps')}
     out.update(extra.get('pi') or {})
+    out['heatGuard'] = bool(extra.get('heat_guard'))
     return out
 
 
@@ -1943,7 +1958,7 @@ def not_saving_notice(log):
 
 
 def emit_alive(too_bright=False, too_dim=False, not_saving=None, blind=None,
-               gps=None, pi=None):
+               gps=None, pi=None, heat_guard=False):
     """The beat, and the conditions that have to reach the driver without one.
 
     `tooBright` rides here rather than on a reading because the state it
@@ -1989,11 +2004,18 @@ def emit_alive(too_bright=False, too_dim=False, not_saving=None, blind=None,
     `tooDim`, because the page needs two things from it — a label short enough
     to stand where the verdict stands, and the line saying what to do — and
     only the page knows how much room it has for each.
+
+    `heatGuard` is whether the heat guard (HeatGuard) has the reads nobody
+    pressed for SCREEN_AUTO_HOT apart instead of SCREEN_AUTO_EVERY: true or
+    false, never null, and judged off this beat's own `cpuC` and `throttled`.
+    The guard's thresholds are the scanner's, so the page is told the state
+    and does not work it out again from the figures beside it.
     """
     beat = {'alive': True, 'at': int(time.time() * 1000)}
     beat.update(alive_flags(too_bright, too_dim, not_saving, blind))
     beat['gps'] = gps
     beat.update(pi or {})
+    beat['heatGuard'] = bool(heat_guard)
     print(json.dumps(beat), flush=True)
 
 
@@ -2225,6 +2247,43 @@ STALL_AGAIN = 600.0
 # seconds can lose WHEN a supply sagged, never WHETHER it did.
 PI_EVERY = 30.0
 
+# The heat guard: the whole-screen reads nobody pressed for, put off while the Pi
+# is hot (SCREEN_AUTO_HOT in place of SCREEN_AUTO_EVERY), and nothing else.
+#
+# The owner reports their Pi 4 at 60-80°C on a shift, and vcgencmd's 0x80000 —
+# the soft temperature limit, reached since boot. Past that limit the firmware
+# cuts the clock, and while it does every read is slower, the offers' included.
+# On top of the offers the rig now reads the planner, the navigation screen and
+# labelled dropoffs on its own every SCREEN_AUTO_EVERY while an order is held:
+# load nobody asked for at that moment, and the one load that can wait.
+#
+# ON at 75°C, or at any throttle word NOW (THROTTLE_BITS). Raspberry Pi's own
+# figures for the Pi 4, not measured on this rig: the soft limit is 80°C, and
+# the clock is cut from there to the hard limit at 85°C. 75 puts the reads off
+# before the firmware has to step in, inside the 60-80 the owner reports and
+# below the limit the rig has already hit. A word NOW is the firmware already
+# acting, or about to — a capped or throttled clock, the soft limit, or the
+# under-voltage that is the other reason it caps one (see THROTTLE_BITS) — so
+# the temperature no longer decides: every read is slower whatever the figure,
+# and a sagging supply is asked for less. The since-boot words never turn it
+# on: 0x80000 is since-boot only, and one hot minute at 6pm would slow these
+# reads for the rest of the boot.
+#
+# OFF below 70°C with no word now, and between the two as it was. The band is so
+# that what the slower reads save cannot switch it off at one sample and the
+# heat bring it back at the next; how many degrees they save on the rig has not
+# been measured. It changes at most once a PI_EVERY, the sample it is handed,
+# and from the same sample the beat carries as `cpuC` — no second reader.
+#
+# Not the card finder's second read, though it was the obvious other thing to
+# put off: README "A card taller than the card box" measures it at 200ms
+# median (178-275) on the development box, and it is how a payout above the
+# drawn box is read at all — the Early-look card's $14.48 on 73 of 144 frames,
+# and the panel said no offer before it. Skipping it while hot loses that
+# payout, and it is an offer read.
+HEAT_ON_C = 75.0
+HEAT_OFF_C = 70.0
+
 # The words gps.Phone.state() uses, in the words the beat and the journal use.
 # `looking` is a phone asked for that has not handed over one position since the
 # rig started — lost from the start, as far as the rows are concerned; `stale`
@@ -2321,17 +2380,46 @@ def throttling(run=subprocess.run):
             'sinceBoot': [w for b, w in THROTTLE_BITS if bits >> (b + 16) & 1]}, None
 
 
+class HeatGuard(object):
+    """Whether the Pi is too hot for the reads nobody pressed for: `on` at
+    HEAT_ON_C or any throttle word now, off below HEAT_OFF_C with none, and
+    as it was in between. See HEAT_ON_C.
+
+    A temperature that cannot be read leaves the words to decide alone, which
+    is off with none: a guard that held on to a figure it can no longer see
+    would slow the reads for the rest of the run on nobody's say-so.
+    """
+
+    def __init__(self):
+        self.on = False
+
+    def see(self, pi):
+        cpu = pi.get('cpuC')
+        now = (pi.get('throttled') or {}).get('now')
+        if now or (cpu is not None and cpu >= HEAT_ON_C):
+            self.on = True
+        elif cpu is None or cpu < HEAT_OFF_C:
+            self.on = False
+        return self.on
+
+
 class PiHealth(object):
     """The Pi's temperature and throttling, asked at most every PI_EVERY.
 
     Four fields, each figure beside the reason it is missing when it is: a
     null that does not say why reads the same as a Pi that was never asked.
+
+    ...and `guard`, the heat guard, shown each sample as it is taken, so it
+    judges the very figures the beat and the `seen` row carry, whichever of
+    them asked. Not one of the four: the row is the journal's, and the guard's
+    state rides the beat alone.
     """
 
     def __init__(self, every=PI_EVERY, temp=cpu_temp, throttle=throttling):
         self.every, self._temp, self._throttle = every, temp, throttle
         self.at = None
         self.last = None
+        self.guard = HeatGuard()
 
     def sample(self, now):
         if self.at is None or now - self.at >= self.every:
@@ -2340,6 +2428,7 @@ class PiHealth(object):
             self.last = {'cpuC': cpu, 'cpuCWhy': cpu_why,
                          'throttled': thr, 'throttledWhy': thr_why}
             self.at = now
+            self.guard.see(self.last)
         return dict(self.last)
 
 
@@ -3986,12 +4075,13 @@ def main():
         # caught stop headers, "Address" and "Expected by" in it and never the
         # title, which is at the top — so what the box sees is what can start
         # it, and the whole-screen read is where the title or the label is
-        # checked. At most once per SCREEN_AUTO_EVERY, whichever kind asks, and
-        # not while a press is open: that window is already reading the whole
-        # screen and answers as ⌖.
+        # checked. At most once per SCREEN_AUTO_EVERY, whichever kind asks —
+        # SCREEN_AUTO_HOT while the heat guard is on (HeatGuard), and this is
+        # the one place the guard reaches — and not while a press is open: that
+        # window is already reading the whole screen and answers as ⌖.
         if not whole and not an_offer and not asked and not screen_auto \
                 and (screen_auto_at is None
-                     or started - screen_auto_at >= SCREEN_AUTO_EVERY) \
+                     or started - screen_auto_at >= screen_auto_every(pi.guard.on)) \
                 and auto_read_for(out.get('text'), planner) is not None \
                 and order_held(started):
             screen_auto = True
@@ -4939,8 +5029,13 @@ def main():
                     # the panel was told, not five of its seven things. The
                     # newest position rides inside `gps`, on the beat that
                     # already travels to the panel and /api/status.
+                    #
+                    # ...and the heat guard, after the sample, which is the
+                    # one that may have just moved it: the beat says the state
+                    # its own `cpuC` and `throttled` put the guard in.
+                    pi_now = pi.sample(time.monotonic())
                     extra = {'gps': updown.beat(beat_fix(phone)),
-                             'pi': pi.sample(time.monotonic())}
+                             'pi': pi_now, 'heat_guard': pi.guard.on}
                     emit_alive(**dict(flags, **extra))
                     last_beat = (now_alive, flags, extra)
                     stall_told = flags['blind'] == 'stalled'
