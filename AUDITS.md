@@ -1339,6 +1339,9 @@ test_server, test_journal, test_dashboard, test_layout, test_lint.
 
 **A planner page with no stop header was unread.** Both parser ports return a page holding only an address block with Waybill under it as one stop `{kind:null, partial:'top'}` (no header anywhere, the address read, no title); `assemble.js` joins it under the previous page's `partial:'bottom'` header by the existing rules (same app, no screen between, within STITCH_MS, equal times where printed, one placement). Alone it files nothing; the planner line and every filing rule still count headed stops only. Corpus 6 cases, sequences 8. 14 mutations, each killed by name.
 
+
+**With an order in the car, a ⌖ press while screening another card went onto the order and replaced its end.** Measured at b337a44 against the real server, one order held with its end on record and a different DoorDash card being screened, carrying two off and on alike: a press filed onto the held order whatever the phone showed; over the card's own customer popup the popup line had already filed that address on the card, so one address became both jobs' end; and the unpressed whole-screen read that popup asks for also made it the held order's end over an end its card printed. Now `Assemble.pressBetween` decides a press when one order is held and another card is screened (not the order's own card, not one already taken): to the card on the card's own place popup; to the order on Uber navigation or the Trip Planner read since its Took, of its app, naming its store; otherwise the Stage 5 chooser with ①, "This card" and Neither, filing nothing unless picked, closing after `CHOOSER_MS`, refusing a late answer. With two held, `whoseDropoff` first asks whether the screened card could own the press; while it could, `only` (elimination by app and Took) does not choose an order, and the chooser asks ①, ②, This card or Neither. A card given its end this way carries `dropoffFrom: 'press'` or `'chooser'`, becomes press rank at Took, and says "END · from ⌖"; the ⌖ button stays the held order's; `navCandidate` refuses a place popup. Nothing held: unchanged. 33 mutations, each killed by name. The flaky "key with the held pickup" check at 480x320 was the page's one-second repaint putting `between` back mid-measurement; the class is now removed inside each narrow-map measurement.
+
 ### The maps, again
 
 **The map could not say where the money was, and the obvious way to make it
@@ -3361,6 +3364,13 @@ development box, and the Pi's need measuring.
 
 **The "…" sheet and the carry-two Undo overlapped, and the map caption's refusals were sentences.** With both up the sheet's centre landed on the Undo at every size; the sheet now sits above the Undo's fixed 52px by that height plus 6px, measured whole and apart at 1024x600, 800x480, 480x320 and the phone. Map caption refusals are chips in the notices' style ("NO FIGURE · card names no pickup", "NO PIN · <place>, none fit the card"), the sentence on the title and one tap away, back after 20 s, a second tap or a new line; figures and progress lines are unchanged. `MV.captionChip` reads the chip off the sentence and shows an unknown sentence whole; test_layout holds all 100 caption forms to their chip (65) or none (35) on six panels. 11 mutations killed by name; one that failed nothing was removed.
 
+
+**A Pi at its soft temperature limit was read every 10 s for screens nobody pressed for.** `scan_pi.HeatGuard` puts the automatic whole-screen reads, and only those, at SCREEN_AUTO_HOT = 30 s: on at 75°C or any vcgencmd word NOW, off below 70°C with none, held between (Raspberry Pi's Pi 4 figures, not measured on the rig); since-boot words never turn it on. It reads the beat's own PiHealth sample. The beat and /api/status say `heatGuard`; the `seen` row is unchanged. Not done: skipping card-rescue's second read while hot, which recovers a payout above the drawn box. The Pi's words on the status row became the guard's chip, cause first (HOT 85°C, LOW POWER, SLOWED 82°C), with "· fewer auto reads" alone on the row; the plain "Pi temp limit" line could no longer be reached and was deleted. 27 mutations, each killed by name.
+
+**The driving bar changed height twice per offer.** The Took age rode on the end of its label, so with six controls up the bar went from 55px to 74 or 93 and back when the next card came up. The controls now have a fixed height of two label lines (55.4px at 17px on every landscape panel, the hat included); the age, "not saved" and "in car" are a second line, short ("59m ago"). Checks: 'the bar is the same height with and without the Took age, at <panel>', 'the Took age is whole inside its button'. 6 mutations, each killed by name.
+
+**The panel showed the whole card while the car was moving.** rpi/gps.py decides on every fix: driving from 2 consecutive usable fixes at 3 m/s or more; stopped after 5 s of usable fixes under 1 m/s; the band between holds; a refused fix never starts driving mode, and while driving a refused or stale fix holds the state for up to 10 s (or the staleness rule, if shorter), after which it ends. Replayed through Phone.take() over the 12 Oct logs (7.9 h): 86 entries, 12 stops under 10 s, 3-5 one-beat flickers, 35.8% of the shift driving (from 123, 43 and 14-23 before the hold). The beat carries `speed` and `driving`. The card side keeps the verdict, pay, $/hr, the pair line's range and the in-car line, larger, with the first notice and "+N more"; everything else waits for a stop; a tap shows the whole card for 10 s; no button; the map, picture, row and bar do not move. 32 mutations, each killed by name. Open: with the beats stopped altogether the page holds the last driving state until that fix's freshFor (about 20 s), not 10.
+
 ### The offers page
 
 **The cost sweep's footnote read a two-sided test as a one-sided one, and
@@ -4204,28 +4214,13 @@ what would actually move these 64 rows is a merchant test — something that
 knows `Zaxbys` is a shop and `Canton Rd` is not. `PLACE_IS_A_SHOP` is not that
 test. It wants a trailing bracket, and it finds one on 10 of the 474.
 
-**While an order with a known destination is in the car, the ⌖ button cannot
-serve the card being screened at all.** The owner's stated habit is to tap the
-customer dropoff open to read the address *while screening* a DoorDash offer.
-Measured against the real server, carrying a job whose end is already on
-record and a different card on the slot:
+**No DoorDash screen is typed as one after an accept.** Its delivery screens type 'unknown', so a ⌖ press over a held DoorDash order's own screen while another card is up always asks the driver.
 
-| the driver | what happens |
-|---|---|
-| taps the address open, no press | discarded — the empty `else if (carrying)` branch. The screened card gets nothing, and nothing says so. |
-| taps it open and presses ⌖ | the address lands on the **held** job, replacing the destination it already had. |
+**An address under a Dropoff label read while another card is screened still files onto the held order** over an end its card printed (the label rule, kept). The sighting tally counts it: `kept: true` with `slot` not `held`.
 
-So one route silently does nothing and the other quietly rewrites where the
-order in the car is going — which feeds `MV.detour` and the "+N mi out of your
-way" figure on the panel. The screening branch below is unreachable whenever
-anything is carried.
+**handoff.age reads the clock before it stats the request, so a request written between the two is dropped as "stamped 0s ahead of the clock".** Under six spinning processes 2 of 4 snaps were dropped; on the rig the writer is server.js and the window is microseconds, and it fails safe (no answer, press again). It also ages ⌖ presses and settings.
 
-Deliberately not fixed here, because the fix is the same ambiguity the refused
-guard above is about: an address seen while carrying one job and screening
-another may belong to either, and the rig cannot tell from the frame. The
-`kind: 'sighting'` rows described under Settled are now counting it: the `kept:
-false` half of that tally is this entry's population, and it should be read
-before anything is built.
+**The heat guard's effect on the Pi's temperature is unmeasured;** a shift's `seen` rows (cpuC, throttled, medianMs) would say whether 30 s is enough.
 
 **A wrong remembered lookup can only be fixed by wiping every good one.**
 `map.html` is the one surface that can *identify* a bad geocode — the stray rows
