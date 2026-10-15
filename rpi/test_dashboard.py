@@ -6589,7 +6589,12 @@ try:
            (True, (True, True, False), True, (True, True, True)))
         _s = dv.get('stopped') or {}
         _form = lambda m: {k: v for k, v in m.items() if k != 'view'}
-        eq('stopped: everything is back', _form(_s), _form(_p))
+        # Not driving, the detail drawn, and the card as it was parked: the
+        # last alone could pass against a parked card that never left the
+        # driving form either.
+        eq('stopped: everything is back',
+           (_s.get('driving'), _sh(_s, *_DETAIL), _form(_s)),
+           (False, (True,) * len(_DETAIL), _form(_p)))
         eq('a tap shows the detail for 10 s while moving',
            [(dv.get(k) or {}).get('driving') for k in ('tapped', 'tapped9', 'tapped10')]
            + [_sh(dv.get('tapped') or {}, *_DETAIL)],
