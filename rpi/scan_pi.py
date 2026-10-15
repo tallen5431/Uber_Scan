@@ -2342,9 +2342,22 @@ def beat_fix(phone):
     its staleness rule. A beat that stops coming — the scanner gone, the link
     down — leaves the page holding a fix nobody will re-judge, and this is
     what lets the page grey it on its own clock without a copy of the rule.
+
+    ...and `speed` (m/s, to a tenth, None where the receiver gave none) and
+    `driving`, gps.py's answer to whether the car is being driven as of this
+    fix (DRIVING_SPEED there): the panel's driving form reads it and asks
+    nothing again. Beside the journal's seven fields rather than among them:
+    JR.FIX_FIELDS are what an offer row is written with, and a row says where
+    its card was read, not how fast.
     """
     got = phone.latest() if phone is not None else None
-    return dict(JR.fix_fields(got), freshFor=got.get('freshFor')) if got else None
+    if not got:
+        return None
+    speed = got.get('speed')
+    return dict(JR.fix_fields(got), freshFor=got.get('freshFor'),
+                speed=(round(speed, 1) if isinstance(speed, (int, float))
+                       and not isinstance(speed, bool) else None),
+                driving=got.get('driving') is True)
 
 
 def cpu_temp(path=THERMAL):

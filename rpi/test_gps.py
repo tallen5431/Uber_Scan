@@ -901,6 +901,64 @@ _v = G.parse_line(frozen_tpv(_base, lat=_car[0], lon=_car[1], ecefvx=3.0,
                              ecefvy=-4.0, ecefvz=12.0))
 eq('ECEF velocity is read as a speed', _v and _v.get('ecefSpeed'), 13.0)
 
+# --- whether the car is being driven ------------------------------------------
+#
+# The panel's driving form asks this of the fix the beat carries, and gps.py
+# answers it on every fix as it arrives (DRIVING_SPEED). Driven here through
+# Phone.take(), the one way a fix gets in, on a clock this file turns: each
+# speed one TPV a second apart, the car moving north at it so its lat/lon
+# never stand still long enough to be `frozen`, and what latest() — the beat's
+# view — says after each.
+
+
+def drive(fixes, step=1.0):
+    """`fixes` are speeds in m/s, or dicts of TPV fields; latest()'s
+    `driving` after each, and the Phone, for a later look."""
+    clock = Clock()
+    it = G.Phone('127.0.0.1:9', stale_after=20.0, clock=clock)
+    out, north_m = [], 0.0
+    for i, f in enumerate(fixes):
+        if i:
+            clock.now += step
+        f = f if isinstance(f, dict) else {'speed': f}
+        north_m += step * (f.get('speed') or 0.0) + 1.0
+        la, lo = north(SQ[0], SQ[1], north_m)
+        line = dict({'mode': 3, 'eph': 12.0, 'lat': round(la, 9), 'lon': round(lo, 9)}, **f)
+        it.take(G.parse_line(tpv(**line)))
+        out.append((it.latest() or {}).get('driving', 'absent'))
+    return out, it, clock
+
+
+ROUGH = {'speed': 15.0, 'eph': 129.2}
+eq('two usable fixes at 3 m/s are driving', drive([3.0, 3.0])[0], [False, True])
+eq('one fast fix is not driving: alone, between slow fixes, or between refused '
+   'ones', [drive([0.0, 15.0, 0.0])[0], drive([ROUGH, 15.0, ROUGH])[0],
+            drive([2.9, 3.0, 2.9])[0]],
+   [[False] * 3] * 3)
+eq('...nor two that are not in a row', drive([15.0, 0.5, 15.0, 2.0, 15.0])[0], [False] * 5)
+eq('driving ends after 5 s under 1 m/s, and not before',
+   drive([15.0, 15.0] + [0.5] * 6)[0], [False] + [True] * 6 + [False])
+eq('...and a fix between 1 and 3 m/s holds it, and starts the 5 s again',
+   drive([15.0, 15.0, 0.5, 0.5, 0.5, 0.5, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])[0],
+   [False] + [True] * 11 + [False])
+eq('...and does not start it', drive([2.9] * 6)[0], [False] * 6)
+_r, _it, _clock = drive([15.0, 15.0, ROUGH, 15.0, 15.0])
+_frozen = [{'speed': 15.0, 'lat': SQ[0], 'lon': SQ[1]}] * 8
+eq('a stale or refused fix is never driving: a rough one ends it at once, and '
+   'two usable fixes start it again', _r, [False, True, False, False, True])
+_clock.now += 20.5
+eq('...a stale one, past the staleness rule, ends it',
+   ((_it.latest() or {}).get('driving'), (_it.latest() or {}).get('why')), (False, 'stale'))
+eq('...a lat/lon stuck while the car says 15 m/s is refused as frozen, and is '
+   'not driving', drive(_frozen)[0], [False] + [True] * 5 + [False] * 2)
+eq('...nor is a fix that says no speed', drive([15.0, 15.0, {'speed': None}])[0],
+   [False, True, False])
+eq('...nor any NMEA fix, which the gate refuses as unrated',
+   [(_x.take(G.parse_line(RMC)), (_x.latest() or {}).get('driving'))[1]
+    for _x in [G.Phone('127.0.0.1:9')] for _ in range(3)], [False] * 3)
+eq('fix() hands out the same answer as latest() while the fix is fresh',
+   (drive([15.0, 15.0])[1].fix() or {}).get('driving'), True)
+
 # The wall clock leaping, as NTP makes it do at the start of every shift on a
 # Pi that booted in 1970. Every other check here hands Phone a clock; this one
 # leaves it the default, because the default is what the rig runs on and the

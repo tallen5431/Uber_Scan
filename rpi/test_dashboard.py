@@ -988,10 +988,13 @@ const framed = (page) => page.waitForFunction(
         if (!reach) {
           w.scrollTop = 9999; reach = w.scrollTop > 0; w.scrollTop = 0;
         }
+        // ...and scrollable by a hand, not only by this probe: a script can
+        // set scrollTop on an `overflow: hidden` box, and nothing else can.
         return { shown: !w.hidden, chips: list,
                  text: (w.textContent || '').replace(/\s+/g, ' ').trim(),
                  title: w.title, open: w.classList.contains('open'),
                  expanded: w.getAttribute('aria-expanded'), reach: reach,
+                 scrolls: ['auto', 'scroll'].indexOf(getComputedStyle(w).overflowY) !== -1,
                  label: document.getElementById('verdictLabel').textContent.trim() };
       });
       await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
@@ -1040,7 +1043,7 @@ const framed = (page) => page.waitForFunction(
   //
   // ...and the Took button, which names the last offer on record after its
   // card has gone and now says how long ago that was. The page's clock is
-  // moved, so "2 min ago" is two minutes of the page's own timers.
+  // moved, so "2m ago" is two minutes of the page's own timers.
   {
     const ctx = await browser.newContext({
       viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
@@ -1172,6 +1175,151 @@ const framed = (page) => page.waitForFunction(
                      empty: empty, between: between, visited: visited,
                      refused: refused, arrived: arrived,
                      offerUp: offerUp, gone: gone };
+    await page.close();
+    await ctx.close();
+  }
+
+  // --- driving: the card at a glance while the car moves --------------------
+  stage = 'driving: the card at a glance while the car moves';
+  //
+  // While the car is moving the card shows the verdict, the pay, the rate,
+  // the pair line's range and the order in the car, larger, and the rest
+  // waits until it stops. Moving is gps.py's word on the beat's fix
+  // (`driving`, DRIVING_SPEED there); this holds what the page does with it:
+  // the form, everything back when it stops, a tap for the detail for ten
+  // seconds, and a fix the page can no longer vouch for never driving. On
+  // the page's own clock, at 800x480 beside the phone.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await phoneFrame(page);
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
+              .catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null,
+                               { timeout: 10000 }).catch(() => {});
+    await framed(page);
+    const tick = (ms) => page.clock.runFor(ms);
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    // A beat as the scanner sends it, its fix as beat_fix builds it, with
+    // gps.py's word on whether the car is being driven.
+    const FIX = { lat: 33.9526, lon: -84.5499, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3,
+                  gpsOk: true, gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false };
+    const beat = (fix) => push({ alive: true, at: Date.now(), tooBright: true,
+                                 notSaving: 'Offers are NOT being saved: disk full',
+                                 gps: { state: 'ok', ageSeconds: 0.4,
+                                        fix: fix && Object.assign({}, FIX, fix) } });
+    // What is on the card side, and how big: every part the driving form
+    // keeps or hides, with its type size.
+    const look = () => page.evaluate(() => {
+      const shown = (el) => {
+        if (!el || el.hidden) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+      };
+      const px = (el) => (el ? parseFloat(getComputedStyle(el).fontSize) : null);
+      const part = (sel) => {
+        const el = document.querySelector(sel);
+        return { shown: shown(el), px: shown(el) ? px(el) : null };
+      };
+      const chips = [].slice.call(document.querySelectorAll('#warn .chip'))
+        .filter(shown).map((c) => c.textContent);
+      return {
+        driving: document.querySelector('.live').classList.contains('driving'),
+        label: part('#verdictLabel'), rate: part('#perHour'), pay: part('#vPay'),
+        minutes: part('#vMin'), miles: part('#vMile'), perMile: part('#vPerMile'),
+        working: part('#working'), places: part('#places'), range: part('#stack .range'),
+        route: part('#stack .maplink'), held: part('#detail .held'),
+        diag: part('#detail .diag'), age: part('#detail .age'),
+        heldLine: part('#heldLine'), heldNext: part('#heldNext'), stops: part('#stops'),
+        chips: chips,
+        view: (() => {
+          const r = document.getElementById('viewWrap').getBoundingClientRect();
+          return [r.left, r.top, r.width, r.height].map((n) => Math.round(n * 10) / 10);
+        })(),
+      };
+    });
+    await push({ phase: 'scanning', message: '' });
+    await beat({});
+    // An offer with nothing in the car, whose line under the card carries the
+    // read diagnostics (with an order held the in-car line takes their place).
+    await push(Object.assign({}, READINGS.deducted, { holding: null, stack: null }));
+    await tick(1100);
+    const alone = await look();
+    await beat({ speed: 13.4, driving: true });
+    await tick(1100);
+    const aloneMoving = await look();
+    await beat({ speed: 0.2, driving: false });
+    // The order in the car, a ⌖ read's Trip Planner, and an offer up beside
+    // it with its pair line.
+    const HOLD = { pay: 28.08, minutes: 40, holdId: 'h-drive@1',
+                   dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                   endPinned: true, endWhy: null, arrived: false };
+    await push({ holding: HOLD });
+    await push({ planner: { stops: [
+      { kind: 'pickup', orders: 1, name: 'Burger Barn', expectedBy: 1066,
+        street: '310 Mill St', city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 1105,
+        street: '4821 Kestrel Dr', city: 'Marietta', line: '4821 Kestrel Dr, Marietta' }],
+      unfiled: null, asked: true, ms: null, at: 1 } });
+    const OFFER = Object.assign({}, READINGS.deducted, {
+      holding: HOLD, places: ['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'],
+      stack: { pay: 40.08, minMinutes: 40, maxMinutes: 62, worst: 21.4, best: 33.1,
+               state: 'warn', sure: true, uncosted: false, ends: 'same-town',
+               route: 'https://www.google.com/maps/dir/?api=1&origin=A&destination=B' } });
+    await push(OFFER);
+    await tick(1100);
+    const parked = await look();
+    // Moving: gps.py says so on the next beat.
+    await beat({ speed: 13.4, driving: true });
+    await tick(1100);
+    const moving = await look();
+    // A tap on the card, while moving: the detail, for ten seconds.
+    await page.evaluate(() => document.getElementById('verdict').click());
+    await tick(200);
+    const tapped = await look();
+    await beat({ speed: 13.4, driving: true });
+    await tick(9000);
+    const tapped9 = await look();
+    await beat({ speed: 13.4, driving: true });
+    await tick(1500);
+    const tapped10 = await look();
+    // Stopped: under 1 m/s for 5 s, gps.py's word again.
+    await beat({ speed: 0.2, driving: false });
+    await tick(1100);
+    const stopped = await look();
+    // Moving again, between offers: the order in the car, not its stops.
+    await beat({ speed: 13.4, driving: true });
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(1100);
+    const between = await look();
+    await beat({ speed: 0.2, driving: false });
+    await tick(1100);
+    const betweenStopped = await look();
+    await push(OFFER);
+    // A fix the page can no longer vouch for: the beats stop coming, and
+    // the one it holds outruns its freshFor on this page's clock.
+    await beat({ speed: 13.4, driving: true, freshFor: 6.0 });
+    await tick(1100);
+    const fresh = await look();
+    await tick(6000);
+    const outrun = await look();
+    // ...a fix the gate refused, which gps.py never calls driving, and a
+    // beat with no fix at all.
+    await beat({ speed: 13.4, driving: false, gpsOk: false, gpsWhy: 'rough', gpsErr: 129.2 });
+    await tick(1100);
+    const refused = await look();
+    await beat(null);
+    await tick(1100);
+    const noFix = await look();
+    out.driving = { alone: alone, aloneMoving: aloneMoving,
+                    parked: parked, moving: moving, tapped: tapped, tapped9: tapped9,
+                    tapped10: tapped10, stopped: stopped, between: between,
+                    betweenStopped: betweenStopped, fresh: fresh, outrun: outrun,
+                    refused: refused, noFix: noFix };
     await page.close();
     await ctx.close();
   }
@@ -1552,7 +1700,7 @@ const framed = (page) => page.waitForFunction(
      * found none produced no message, and the page's own timer repainted the
      * button exactly as it was — the driver tapped the address open on their
      * phone, pressed, waited, and got the same grey button whether it worked
-     * or not. Took says "· not saved", Drop says "Drop · failed".
+     * or not. Took says "not saved", Drop says "Drop · failed".
      *
      * Answered from the RIG, not from a timer here, which is why this is
      * driven as a message rather than by waiting. A read that started inside
@@ -6500,9 +6648,72 @@ try:
         eq('a Took for a card no longer on the phone says its age',
            ((hc.get('tookGoneNow') or {}).get('took'),
             (hc.get('tookGoneLater') or {}).get('took')),
-           ('Took $5.00? · just now', 'Took $5.00? · 2 min ago'))
+           ('Took $5.00? just now', 'Took $5.00? 2m ago'))
         eq('...and no age while its card is up',
            (hc.get('tookUp') or {}).get('took'), 'Took $5.00?')
+
+    # --- driving: the card at a glance while the car moves -------------------
+    #
+    # gps.py's `driving` on the beat's fix puts the card side in its driving
+    # form: the verdict, the pay and the rate, larger; the pair line's range
+    # and the order in the car kept; the other figures, the working, the
+    # address, the read diagnostics, the route link and every notice but the
+    # first (counted on a chip) out of sight until the car stops. A tap on the
+    # card brings the detail back for ten seconds. The picture's column does
+    # not move.
+    dv = got.get('driving') or {}
+    ok_('the driving form was measured', bool(dv.get('moving')))
+    if dv.get('moving'):
+        _p, _m = dv.get('parked') or {}, dv['moving']
+        _sh = lambda m, *ks: tuple(bool((m.get(k) or {}).get('shown')) for k in ks)
+        _px = lambda m, k: (m.get(k) or {}).get('px') or 0
+        _DETAIL = ('minutes', 'miles', 'perMile', 'working', 'places', 'route')
+        _a, _am = dv.get('alone') or {}, dv.get('aloneMoving') or {}
+        eq('parked, the card is the whole card',
+           (_p.get('driving'), _sh(_p, *_DETAIL), len(_p.get('chips') or []),
+            _sh(_a, 'diag')),
+           (False, (True,) * len(_DETAIL), 2, (True,)))
+        eq('moving: the card shows the verdict, pay and $/hr large, and hides the detail '
+           '(label %spx→%spx, pay %spx→%spx, rate %spx→%spx)'
+           % (_px(_p, 'label'), _px(_m, 'label'), _px(_p, 'pay'), _px(_m, 'pay'),
+              _px(_p, 'rate'), _px(_m, 'rate')),
+           (_m.get('driving'), _sh(_m, 'label', 'pay', 'rate'),
+            _px(_m, 'label') > _px(_p, 'label'), _px(_m, 'pay') > _px(_p, 'pay'),
+            _px(_m, 'rate') >= _px(_p, 'rate'), _sh(_m, *_DETAIL),
+            _am.get('driving'), _sh(_am, 'diag', 'age')),
+           (True, (True, True, True), True, True, True, (False,) * len(_DETAIL),
+            True, (False, True)))
+        eq('...the first notice only, and a chip counting the rest (%r)' % (_m.get('chips'),),
+           _m.get('chips'), ['OFFERS NOT SAVED · disk full', '+1 more'])
+        eq('...and the picture beside it where it was', _m.get('view'), _p.get('view'))
+        eq('driving mode keeps the in-car line and the take-another figure, larger '
+           '(range %spx→%spx, in-car %spx→%spx)'
+           % (_px(_p, 'range'), _px(_m, 'range'), _px(_p, 'held'), _px(_m, 'held')),
+           (_sh(_m, 'range', 'held', 'age'), _px(_m, 'range') > _px(_p, 'range'),
+            _px(_m, 'held') > _px(_p, 'held')),
+           ((True, True, True), True, True))
+        _b, _bs = dv.get('between') or {}, dv.get('betweenStopped') or {}
+        eq('...and between offers, where the order in the car goes next and its line, '
+           'its stops back once the car stops',
+           (_b.get('driving'), _sh(_b, 'heldNext', 'heldLine', 'stops'),
+            _px(_b, 'heldLine') > _px(_bs, 'heldLine'), _sh(_bs, 'heldNext', 'heldLine', 'stops')),
+           (True, (True, True, False), True, (True, True, True)))
+        _s = dv.get('stopped') or {}
+        _form = lambda m: {k: v for k, v in m.items() if k != 'view'}
+        # Not driving, the detail drawn, and the card as it was parked: the
+        # last alone could pass against a parked card that never left the
+        # driving form either.
+        eq('stopped: everything is back',
+           (_s.get('driving'), _sh(_s, *_DETAIL), _form(_s)),
+           (False, (True,) * len(_DETAIL), _form(_p)))
+        eq('a tap shows the detail for 10 s while moving',
+           [(dv.get(k) or {}).get('driving') for k in ('tapped', 'tapped9', 'tapped10')]
+           + [_sh(dv.get('tapped') or {}, *_DETAIL)],
+           [False, False, True, (True,) * len(_DETAIL)])
+        eq('a stale or refused fix is never driving: a fix outrun on the page\'s own '
+           'clock, a refused one, none',
+           [(dv.get(k) or {}).get('driving') for k in ('fresh', 'outrun', 'refused', 'noFix')],
+           [True, False, False, False])
 
     # --- marking an offer as taken, from the driving screen --------------
     idle = got.get('tookIdle') or {}
@@ -6785,12 +6996,12 @@ try:
 
         ha = got.get('heldAgain ' + panel) or {}
         eq('%s: the held order\'s own card come back reads as taken, in the car' % panel,
-           (ha.get('text'), ha.get('on')), ('✓ Took $9.50 · in car', True))
+           (ha.get('text'), ha.get('on')), ('✓ Took $9.50 in car', True))
         ok_('%s: ...with a note that it is not a new offer (%r)' % (panel, ha.get('warn')),
             'not a new offer' in (ha.get('warn') or ''))
         eq('%s: ...and pressing Took on it records nothing' % panel,
            (ha.get('marks'), (ha.get('afterPress') or {}).get('text')),
-           (0, '✓ Took $9.50 · in car'))
+           (0, '✓ Took $9.50 in car'))
         eq('%s: ...while with nothing held the same card is an offer to tick' % panel,
            ((ha.get('unheld') or {}).get('text'), (ha.get('unheld') or {}).get('on')),
            ('Took $9.50?', False))
@@ -7172,10 +7383,19 @@ try:
            [c.get('text') for c in _f.get('chips') or []], _WANT_CHIPS)
         eq('[%s] ...each with its sentence on its title' % _pn,
            ' '.join(c.get('title') or '' for c in _f.get('chips') or []), _WANT_SAID)
-        ok_('[%s] ...outlined, every chip inside the card (%r)'
-            % (_pn, [c.get('inCard') for c in _f.get('chips') or []]),
-            _f.get('chips') and all(c.get('inCard') and c.get('border') == 'solid'
-                                    for c in _f.get('chips')))
+        # On the 3.5" hat the notice is the item that gives way and scrolls
+        # (live.html, under `#verdict:has(#warn...) .submetrics`): there the
+        # first chip is in the card and the second is scrolled to. This held
+        # whole on the hat only while the bar was its 44px, with no offer on
+        # record; the bar is 55.4px there in every state now, which is what
+        # it was whenever an offer was on record, and that is most of a shift.
+        _in = [c.get('inCard') for c in _f.get('chips') or []]
+        ok_('[%s] ...outlined, every chip inside the card%s (%r)'
+            % (_pn, ', or past the first on the 3.5" hat, scrolled to'
+               if _pn == '480x320' else '', _in),
+            _f.get('chips') and all(c.get('border') == 'solid' for c in _f.get('chips'))
+            and (all(_in) if _pn != '480x320'
+                 else _in[0] and _f.get('reach') and _f.get('scrolls')))
         eq('[%s] ...and the sentences on the notice\'s own title' % _pn,
            _f.get('title'), _WANT_SAID)
         eq('[%s] ...closed' % _pn, (_f.get('open'), _f.get('expanded')), (False, 'false'))
