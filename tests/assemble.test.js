@@ -768,15 +768,17 @@ SEQ.forEach(function (seq) {
       'outranked by press']);
 
   // Two orders held: whether the card screened could own a press at all —
-  // not on an order's own navigation or planner, not another app's, not a
-  // card already taken or an order's own, not a sighting.
+  // not on an order's own navigation or planner (asked of an Uber card, so
+  // the screen alone says no), not another app's, not a card already taken
+  // or an order's own, not a sighting.
   var two = [held(), held({ id: 'o-two', acceptedAt: 1100, tookAt: 1300, app: 'doordash' })];
   eq('cardCandidate: a screened card can own a press, but not over an order\'s navigation or '
      + 'planner, of another app, taken, an order\'s own, or unpressed',
      [A.cardCandidate(two, card(), d1),
       A.cardCandidate(two, card(), press('9 Heron Ct, Smyrna', 'unknown')),
-      A.cardCandidate(two, card(), press('77 Birch Ln, Roswell', 'uber.nav', { app: 'uber' })),
-      A.cardCandidate(two, card(), planned(held(), 5000)),
+      A.cardCandidate(two, card({ app: 'uber' }),
+                      press('77 Birch Ln, Roswell', 'uber.nav', { app: 'uber' })),
+      A.cardCandidate(two, card({ app: 'uber' }), planned(held(), 5000)),
       A.cardCandidate(two, card({ app: 'uber' }), d1),
       A.cardCandidate(two, card({ accepted: true }), d1),
       A.cardCandidate(two, card({ id: 'o-two' }), d1),
