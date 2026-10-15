@@ -1221,6 +1221,87 @@
     /* ...and the status row, now that it is short (fillMore): 15 to 18. */
     .connbar { font-size: 18px; }
   }
+
+  /* ---------- Driving: the card at a glance ----------
+   *
+   * While the car is being driven (showDriving: gps.py's `driving` on the
+   * beat's fix) the card side shows what a glance takes in and no more: the
+   * verdict, the pay, the rate, the pair line's range with what qualifies it,
+   * the order in the car, and the first notice with a count of the rest. The
+   * other figures, the working, the address, the Trip Planner's stops, the
+   * read diagnostics and the route link wait until the car stops, or a tap
+   * on the card brings them back for ten seconds. Only `.live` — the picture,
+   * the map and its caption, the status row and the bar are where they were,
+   * which rpi/test_layout.py holds.
+   *
+   * What is kept is larger, sized on the card (`cqw`; the verdict is a
+   * container, and so is the card side while driving) so a narrow card is
+   * not handed a wide card's type. Every form, measured in rpi/test_layout.py
+   * at 1024x600, 800x480 and 480x320 in both pictures: whole, larger than the
+   * same card parked, nothing cut. Where a size below stops short of what
+   * the room seems to allow, it is because the measurement said so. */
+  .live.driving { container-type: inline-size; }
+  .live.driving #working,
+  .live.driving .submetrics .sub:not(:first-child),
+  .live.driving #places,
+  .live.driving #stops,
+  .live.driving #detail .diag,
+  .live.driving #stack .maplink { display: none; }
+  /* The pay alone, across the card, its label beside it rather than under
+     it, and no rule over it: the figures the rule divided it from are gone.
+     Beside, because under it the label is a row of its own, and the pair
+     against two orders at 800x480 beside the phone has no room for that row:
+     measured with the label under, that card ran over its own top and foot,
+     the verdict word cut. */
+  .live.driving .submetrics { grid-template-columns: minmax(0, 1fr); border-top: 0;
+                              padding-top: 0; }
+  .live.driving .sub { flex-direction: row; align-items: baseline;
+                       justify-content: center; gap: .3em;
+                       font-size: clamp(22px, 8cqw, 44px); }
+  /* 20px at the floor, two over the hat's parked 18: "≈ CLOSE CALL ?" is
+     201px there at 20 and 221 at 22, against the 208 inside the hat's scene
+     card, and on two rows it squeezed the first notice out of that card. */
+  .live.driving .verdict-label { font-size: clamp(20px, 7.5cqw, 40px); }
+  .live.driving .stackline { font-size: clamp(15px, 5cqw, 22px); }
+  .live.driving .heldline { font-size: clamp(14px, 4cqw, 20px); }
+  /* 16px at the floor, not 18: the 3.5" hat's scene card is 228px, and at 18
+     each order's line took three rows there and pushed "2 dropoffs read ·
+     whose?" out of the card. */
+  .live.driving .heldline.between { font-size: clamp(16px, 5.5cqw, 27px); }
+  /* The in-car line under an offer, after the reading's age: on the card
+     side's width (`cqw` here is `.live`'s), because it is one row whose pay
+     and GPS state may not shrink. At a flat 20px it ran its last letter off
+     the 800x480 scene card's 388px, where 4.8% of the column is 18.6px. */
+  .live.driving #detail.withheld { font-size: clamp(11px, 4.8cqw, 20px); }
+  @media (orientation: landscape) {
+    /* The rate takes back what a notice or a pair line cost it, and on the
+       panels some of the room the hidden rows leave: its height term 34% of
+       the screen where the parked card's is 26. Wherever its width holds it —
+       the scene picture's half-width card — it stays as it was. */
+    .live.driving #perHour,
+    .live.driving #verdict:has(#warn:not([hidden])) #perHour,
+    .live.driving #verdict:has(#stack:not([hidden])) #perHour {
+      font-size: min(20vw, 34dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
+  }
+  @media (orientation: landscape) and (min-width: 1000px) and (min-height: 560px) {
+    .live.driving #detail.withheld { font-size: clamp(11px, 4.8cqw, 23px); }
+  }
+  @media (orientation: landscape) and (max-height: 380px) {
+    /* The hat's card is 191px tall, and the rate there is the parked hat's
+       own (12vw) without what a notice or a pair cost it. At the panels'
+       size, 88.5px beside the phone, the first notice was squeezed out of
+       the card and the pair against two orders ran over its top. */
+    .live.driving #perHour,
+    .live.driving #verdict:has(#warn:not([hidden])) #perHour,
+    .live.driving #verdict:has(#stack:not([hidden])) #perHour {
+      font-size: min(12vw, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
+    /* The pay is one of the four things a glance needs, and on the hat a
+       notice hides the figures (the rule under `#verdict:has(#warn...)`
+       above). Driving, the other three are gone and the pay stays. */
+    .live.driving #verdict:not(.novalue):has(#warn:not([hidden])) .submetrics { display: grid; }
+  }
 </style>
 </head>
 <body>
@@ -1805,6 +1886,50 @@
   // does not leave "2 s old" on the glass. See MV.hereDot.
   var gpsAt = 0;
   var cpuNow = null;
+
+  // --- driving: the card at a glance ------------------------------------------
+  //
+  // While the car is being driven the card side takes its driving form (the
+  // stylesheet's `.live.driving`): the verdict, the pay, the rate, the pair
+  // line and the order in the car, larger, and the rest out of sight until
+  // the car stops. Whether it is being driven is rpi/gps.py's answer, put on
+  // the beat's fix as `driving` (DRIVING_SPEED there, with the 12 Oct shift's
+  // measurements): this page asks nothing again but whether it can still
+  // vouch for that fix. A beat that stops coming leaves the last one
+  // standing, and once it has outrun the `freshFor` it came with, on this
+  // page's own clock, it is a fix nobody has judged — the rule the "you are
+  // here" dot greys on (MV.hereDot). No fix, a refused one, a stale one: the
+  // whole card, which is what a driver sees when nothing is known.
+  //
+  // No control for it. A tap on the card side shows the whole card for
+  // PEEK_MS, moving or not, and the driving form comes back on its own.
+  var PEEK_MS = 10000;
+  var peekUntil = 0;
+  var drivingShown = false;
+  var liveSide = document.querySelector('.live');
+
+  function drivingNow() {
+    var f = gpsNow && gpsNow.fix;
+    if (!f || f.driving !== true) return false;
+    var fresh = typeof f.freshFor === 'number' ? f.freshFor : 0;
+    return Date.now() - gpsAt <= fresh * 1000;
+  }
+
+  function showDriving() {
+    drivingShown = drivingNow() && Date.now() >= peekUntil;
+    liveSide.classList.toggle('driving', drivingShown);
+  }
+
+  // Captured on the way down, so while the driving form is up the tap is
+  // the peek and nothing under it — a chip's sentence, the route link —
+  // takes it too. Parked, or peeking, it passes straight through.
+  liveSide.addEventListener('click', function (e) {
+    if (!drivingShown) return;
+    e.preventDefault();
+    e.stopPropagation();
+    peekUntil = Date.now() + PEEK_MS;
+    render();
+  }, true);
 
   // --- the panel at night ------------------------------------------------------
   //
@@ -2921,9 +3046,16 @@
   function showNotes(list) {
     var said = list.map(function (n) { return n.full; }).join(' ');
     if (said !== warnSaid) { warnSaid = said; warnOpenAt = 0; }
-    var open = !!warnOpenAt && Date.now() - warnOpenAt < WARN_OPEN_MS;
+    // Driving, never the sentences: they are read parked.
+    var open = !drivingShown && !!warnOpenAt && Date.now() - warnOpenAt < WARN_OPEN_MS;
     if (!open) warnOpenAt = 0;
     el.warn.textContent = '';
+    // ...and the first chip only, with a chip saying how many more there
+    // are, so the rest are put away rather than gone with nothing saying so.
+    // Every sentence stays on the notice's title.
+    if (drivingShown && list.length > 1) {
+      list = [list[0], note('+' + (list.length - 1) + ' more', said)];
+    }
     if (open) {
       el.warn.textContent = said;
     } else {
@@ -3741,6 +3873,9 @@
 
   function render() {
     var r = last;
+    // The card's form before anything is drawn in it: the notices are
+    // counted differently while it is driving (showNotes).
+    showDriving();
     // Took first: whether the card it names is still up is decided by this
     // same reading, and its age changes with nothing arriving. See tookAge.
     showTook();

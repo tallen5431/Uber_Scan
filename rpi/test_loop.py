@@ -1456,9 +1456,10 @@ eq('...and the line is told whether the card was whole, as the row was',
 _mbeat = [b['gps'].get('fix') for b in _m['alive'] if (b.get('gps') or {}).get('fix')]
 eq('the beat carries the newest fix with its quality and the gate\'s answer',
    (_mbeat[-1] if _mbeat else {}).get('lat'), 34.0001)
-eq('...in the journal\'s own fields, and the time it has left inside the rule',
+eq('...in the journal\'s own fields, the time it has left inside the rule, '
+   'its speed and whether the car is being driven',
    sorted((_mbeat[-1] if _mbeat else {}).keys()),
-   sorted(SP.JR.FIX_FIELDS + ('freshFor',)))
+   sorted(SP.JR.FIX_FIELDS + ('freshFor', 'speed', 'driving')))
 
 # --- which frame of one read gets published ----------------------------------
 #

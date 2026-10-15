@@ -1385,6 +1385,46 @@ HELD = {
     # card prints and an age of two figures. See tookAge.
     'took': {'id': 'o-layout-took', 'pay': 112.45, 'minutes': 55, 'perHour': 99.9},
 }
+# The card side's driving forms (live.html, `.live.driving`): what the card
+# shows while gps.py says the car is being driven, every form it takes, each
+# measured against the same card parked. The most each is asked to hold: the
+# four notices CHIPS_CARD writes; the pair at its widest with the order in the
+# car (HELD); the pair against two orders, "with ① + ②"; a card the reader
+# refused, its rate withheld; between offers with one order in the car and
+# its stops read, and with two; and nothing at all. `larger` names the parts
+# that must come out strictly larger driving than parked; every part both
+# forms draw must come out no smaller.
+_DA = {'n': 1, 'pay': 112.45, 'minutes': 55, 'holdId': 'l-a@1',
+       'dropoff': '4821 Kestrel Dr S, Powder Springs, GA 30127', 'card': None,
+       'endPinned': False, 'arrived': False, 'endWhy': 'too many answers', 'app': 'uber'}
+_DB = dict(_DA, n=2, pay=128.08, minutes=60, holdId='l-b@2',
+           dropoff='1985 Cobb Pkwy NW, Kennesaw, GA 30152')
+_EMPTY = {'ready': False, 'state': 'empty', 'track': None, 'places': [], 'text': ''}
+DRIVE_FORMS = {
+    'offer': {'beat': {'tooBright': True,
+                       'notSaving': CHIPS_BEAT['notSaving']},
+              'msgs': [CHIPS_CARD], 'larger': ['label', 'pay']},
+    'pair': {'msgs': [{'holding': HELD['hold']},
+                      dict(HELD['offer'], holding=HELD['hold'])],
+             'larger': ['label', 'pay', 'range', 'held']},
+    'two': {'msgs': [dict(HELD['offer'], holding=_DA, orders=[_DA, _DB], unowned=0,
+                          stack=dict(HELD['offer']['stack'], heldCount=2,
+                                     leftEach=[55, 60], maxMinutes=137, route=None))],
+            'larger': ['label', 'pay', 'range', 'held']},
+    'refused': {'msgs': [dict(HELD['offer'], state='doubt', doubt='rate', pay=136.0,
+                              minutes=10.0, cardMinutes=10.0, billedMinutes=10.0,
+                              perHour=816.0, grossPerHour=816.0, stack=None,
+                              holding=None)],
+                'larger': ['label', 'pay']},
+    'between': {'msgs': [{'holding': HELD['hold']},
+                         {'planner': {'stops': HELD['stops'], 'unfiled': 'list',
+                                      'asked': True, 'ms': None, 'at': 1}}, _EMPTY],
+                'larger': ['line']},
+    'between two': {'msgs': [{'holding': _DA, 'orders': [_DA, _DB], 'unowned': 2}, _EMPTY],
+                    'larger': ['line', 'line2']},
+    'waiting': {'msgs': [_EMPTY], 'larger': ['label']},
+}
+
 # ...and the two strings that fixture copies have to still be the page's, or it
 # measures a line the page no longer writes.
 ok_('live.html still writes the median as "/hr an offer"', "'/hr an offer'" in live_src)
@@ -1478,7 +1518,7 @@ const { chromium } = require('playwright');
 const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
        snapPanelsJson, noVerdictJson, noVerdictPanelsJson, plannerJson,
        plannerPanelsJson, hereJson, foundPayJson, liveHereJson, heldJson,
-       chipsJson, heatJson] = process.argv.slice(2);
+       chipsJson, heatJson, driveJson] = process.argv.slice(2);
 // The heat guard's beats, and the widest note the row held before its chip;
 // see HEAT_BEATS on the Python side.
 const HEAT_BEATS = JSON.parse(heatJson).beats;
@@ -1490,6 +1530,8 @@ const HELD = JSON.parse(heldJson);
 const FOUNDPAY = JSON.parse(foundPayJson);
 // The notices as chips; see CHIPS_BEAT on the Python side.
 const CHIPS = JSON.parse(chipsJson);
+// The card side's driving forms; see DRIVE_FORMS on the Python side.
+const DRIVE = JSON.parse(driveJson);
 // The "you are here" label's forms, made by MV.hereDot; see HERE_LINES.
 const HERE_LINES = JSON.parse(hereJson);
 // ...and the panel's, which adds each dot's label once it has stopped
@@ -3716,6 +3758,113 @@ const SNAP_MEASURE = (fixture) => {
       await ctx.close();
     }
   }
+  // The driving form (live.html, .live.driving): every form the card side
+  // takes while gps.py says the car is being driven, against the same form
+  // parked. Measured part by part — the verdict word, the rate, the pay,
+  // the pair line's range, the order in the car on whichever line carries
+  // it, and the first notice — for its type size and for every glyph of it
+  // inside the card and on the glass; the line under the card inside its
+  // own row; the card's children inside the card; and the bar, the status
+  // row and the picture's column where the parked form left them. See
+  // DRIVE_FORMS on the Python side.
+  const DRIVE_MEASURE = () => {
+    const shown = (el) => {
+      if (!el || el.hidden) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+    };
+    const vr = document.getElementById('verdict').getBoundingClientRect();
+    const card = { left: vr.left + 2, right: vr.right - 2, top: vr.top + 2, bottom: vr.bottom - 2 };
+    const glass = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+    const detail = document.getElementById('detail');
+    const dr = detail.getBoundingClientRect();
+    const row = { left: dr.left, right: dr.right, top: dr.top - 1, bottom: dr.bottom + 1 };
+    const outside = (el, boxes) => {
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const rg = document.createRange();
+      let n, cut = '';
+      while ((n = walk.nextNode())) {
+        if (!shown(n.parentElement)) continue;
+        for (let i = 0; i < n.length; i++) {
+          rg.setStart(n, i); rg.setEnd(n, i + 1);
+          const c = rg.getBoundingClientRect();
+          if (!c.width && !c.height) continue;
+          if (boxes.some((b) => c.left < b.left - 0.5 || c.right > b.right + 0.5
+                                || c.top < b.top - 0.5 || c.bottom > b.bottom + 0.5)) {
+            cut += n.data[i];
+          }
+        }
+      }
+      return cut;
+    };
+    // Each part: drawn or not, its type size, and what of it is cut. The
+    // line under the card is held to its own row, the rest to the card.
+    const part = (sel, inDetail) => {
+      const el = document.querySelector(sel);
+      if (!shown(el)) return null;
+      // The size of the words: a line of parts is measured at its first
+      // drawn part, which is the pay on the in-car line.
+      const first = el.children.length ? [].slice.call(el.children).filter(shown)[0] || el : el;
+      return { px: parseFloat(getComputedStyle(first).fontSize),
+               text: (el.textContent || '').replace(/\s+/g, ' ').trim(),
+               cut: outside(el, inDetail ? [row, glass] : [card, glass]) };
+    };
+    const box = (sel) => {
+      const r = document.querySelector(sel).getBoundingClientRect();
+      return [r.left, r.top, r.width, r.height].map((v) => Math.round(v * 10) / 10);
+    };
+    const d = document.documentElement;
+    const lh = parseFloat(getComputedStyle(detail).lineHeight)
+      || parseFloat(getComputedStyle(detail).fontSize) * 1.2;
+    return {
+      driving: document.querySelector('.live').classList.contains('driving'),
+      parts: {
+        label: part('#verdictLabel'), rate: part('#perHour'), pay: part('#vPay'),
+        range: part('#stack .range'), both: part('#stack .both'), ends: part('#stack .ends'),
+        next: part('#heldNext .where'), nextWhen: part('#heldNext .when'),
+        line: part('#heldLine'), line2: part('#heldLine2'), whose: part('#whose'),
+        held: part('#detail .held', true), age: part('#detail .age', true),
+        chip: part('#warn .chip'),
+      },
+      // What the driving form puts out of sight, by name, drawn or not.
+      detail: ['#vMin', '#vMile', '#vPerMile', '#working', '#places', '#stops',
+               '#detail .diag', '#stack .maplink'].filter((s) => shown(document.querySelector(s))),
+      chips: [].slice.call(document.querySelectorAll('#warn .chip')).filter(shown)
+        .map((c) => c.textContent),
+      detailRows: Math.round(dr.height / lh),
+      spill: [].slice.call(document.getElementById('verdict').children).filter(shown)
+        .filter((e) => {
+          const r = e.getBoundingClientRect();
+          return r.top < card.top - 0.5 || r.bottom > card.bottom + 0.5;
+        }).map((e) => e.id || e.className),
+      layout: { bar: box('.bottombar'), row: box('.connbar'), view: box('#viewWrap') },
+      over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
+    };
+  };
+  const DRIVE_FIX = { lat: 33.9526, lon: -84.5499, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3,
+                      gpsOk: true, gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false };
+  for (const panel of PLANNER_PANELS) {
+    for (const view of ['screen', 'scene']) {
+      for (const form of Object.keys(DRIVE.forms)) {
+        const f = DRIVE.forms[form];
+        const { ctx, page, push } = await carryPage(panel, view);
+        const beat = (driving) => push(Object.assign({ alive: true, at: 1 }, f.beat || {}, {
+          gps: { state: 'ok', ageSeconds: 0.4, fix: Object.assign({}, DRIVE_FIX,
+            driving ? { speed: 13.4, driving: true } : {}) } }));
+        await beat(false);
+        for (const m of f.msgs) await push(m);
+        // Past the page's tick, which renders again and folds the stops.
+        await page.clock.runFor(1100);
+        const parked = await page.evaluate(DRIVE_MEASURE);
+        await beat(true);
+        await page.clock.runFor(1100);
+        const driving = await page.evaluate(DRIVE_MEASURE);
+        out[panel[0] + ' ' + view + ' drive ' + form] = { parked: parked, driving: driving };
+        await page.close();
+        await ctx.close();
+      }
+    }
+  }
   // The map caption's chip, tapped: the sentence, and the chip back on a
   // second tap, after 20 s (WARN_OPEN_MS, the notices' own), and when the
   // line changes. Off the page's own mapSay, in Map view over no card (a
@@ -3956,7 +4105,8 @@ try:
          json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES), json.dumps(FOUNDPAY),
          json.dumps(LIVE_HERE_LINES), json.dumps(HELD),
          json.dumps({'beat': CHIPS_BEAT, 'card': CHIPS_CARD}),
-         json.dumps({'beats': HEAT_BEATS, 'was': HEAT_WAS})],
+         json.dumps({'beats': HEAT_BEATS, 'was': HEAT_WAS}),
+         json.dumps({'forms': DRIVE_FORMS})],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -4518,6 +4668,49 @@ try:
                 (hm.get('notSaved') or {}).get('rowsOut'), (hm.get('inCar') or {}).get('rowsOut')),
                ([_hs[0]] * 2, 'Took $112.45 not saved', '✓ Took $112.45 in car',
                 '', '', '', ''))
+
+    # The driving form, every form of it (DRIVE_FORMS), on the three panels in
+    # both pictures: whole — every glyph of every part it keeps inside the
+    # card and on the glass, the line under the card inside its row, no child
+    # of the card over its edge, nothing scrolling; larger than the same card
+    # parked; the detail out of sight, the first notice kept with a chip
+    # counting the rest; and the bar, the status row and the picture's column
+    # — the map, in Map view — exactly where the parked card left them.
+    for panel, w, h in PLANNER_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            for form, spec in DRIVE_FORMS.items():
+                dm = got.get('%s %s drive %s' % (panel, view, form)) or {}
+                _pk, _dr = dm.get('parked') or {}, dm.get('driving') or {}
+                ok_('the driving form "%s" was measured at %s' % (form, where),
+                    _pk and _dr and _dr.get('driving') and not _pk.get('driving'))
+                if not (_pk and _dr):
+                    continue
+                _pp, _dp = _pk.get('parts') or {}, _dr.get('parts') or {}
+                _cut = {k: v['cut'] for k, v in _dp.items() if v and v.get('cut')}
+                eq('the driving form "%s" is whole, nothing clipped, at %s' % (form, where),
+                   (_cut, _dr.get('spill'), (_dr.get('detailRows') or 0) <= 1, _dr.get('over')),
+                   ({}, [], True, False))
+                _px = lambda m, k: (m.get(k) or {}).get('px')
+                _smaller = sorted(k for k in _dp if _dp[k] and _pp.get(k)
+                                  and _px(_dp, k) < _px(_pp, k) - 0.05)
+                # A part the parked card does not draw counts as larger where
+                # the driving one does: on the 3.5" hat a notice hides the
+                # parked figures, the pay with them, and driving it is back.
+                _not = sorted(k for k in spec['larger']
+                              if not (_dp.get(k) and (not _pp.get(k)
+                                                      or _px(_dp, k) > _px(_pp, k) + 0.05)))
+                eq('...larger than the normal form at %s (%s)'
+                   % (where, ', '.join('%s %s→%s' % (k, _px(_pp, k), _px(_dp, k))
+                                       for k in spec['larger'])),
+                   (_not, _smaller), ([], []))
+                _chips = _pk.get('chips') or []
+                eq('...the detail out of sight, the first notice and a count of the rest '
+                   'kept, at %s' % where,
+                   (_dr.get('detail'), _dr.get('chips')),
+                   ([], _chips[:1] + (['+%d more' % (len(_chips) - 1)] if len(_chips) > 1 else [])))
+                eq('...and the bar, the status row and the picture where they were at %s'
+                   % where, _dr.get('layout'), _pk.get('layout'))
 
     # ...and with the notice up as well: the journal dead and the phone too
     # bright, which between offers is the card's other occupant and the item

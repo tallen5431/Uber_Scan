@@ -2823,7 +2823,15 @@ _stale_fix = {'lat': 33.9526, 'lon': -84.5499, 'ageSeconds': 45.0, 'mode': 3,
 eq('the beat carries the newest fix even once it is stale, judged so',
    SP.beat_fix(_Latest(_stale_fix)),
    {'lat': 33.9526, 'lon': -84.5499, 'gpsAge': 45.0, 'gpsErr': 12.0,
-    'gpsMode': 3, 'gpsOk': False, 'gpsWhy': 'stale', 'freshFor': 0.0})
+    'gpsMode': 3, 'gpsOk': False, 'gpsWhy': 'stale', 'freshFor': 0.0,
+    'speed': None, 'driving': False})
+# ...and the speed and gps.py's word on whether the car is being driven, for
+# the panel's driving form, which asks nothing again.
+eq('...with its speed, to a tenth, and whether the car is being driven',
+   {k: (SP.beat_fix(_Latest(dict(_stale_fix, ok=True, why=None, speed=13.4123,
+                                 driving=True))) or {}).get(k, 'absent')
+    for k in ('speed', 'driving')},
+   {'speed': 13.4, 'driving': True})
 eq('...and a fresh one says how long it has left inside the rule',
    (SP.beat_fix(_Latest(dict(_stale_fix, ageSeconds=6.5, ok=True, why=None,
                              freshFor=13.5))) or {}).get('freshFor', 'absent'),
