@@ -3208,9 +3208,49 @@ const SNAP_MEASURE = (fixture) => {
     });
     const d = document.documentElement;
     const ago = t.querySelector('.ago');
-    return { text: (t.textContent || '').replace(/\s+/g, ' ').trim(), cut: cut,
+    // ...and of the age alone, every glyph of it inside the button's border
+    // rather than its outer edge: three lines spilling a few pixels into the
+    // padding at each end end with the top of "Took" and the foot of the age
+    // drawn over the border line itself, which the outer edge lets past.
+    let agoCut = null;
+    const cs = getComputedStyle(t);
+    const inner = { left: r.left + parseFloat(cs.borderLeftWidth),
+                    right: r.right - parseFloat(cs.borderRightWidth),
+                    top: r.top + parseFloat(cs.borderTopWidth),
+                    bottom: r.bottom - parseFloat(cs.borderBottomWidth) };
+    // ...and every line of the button, label and all, between its top and
+    // bottom borders: the lines the age shares the bar's height with are
+    // the ones it pushes out. (Across, the label is the bar's own question —
+    // "$112.45?" is wider than the hat's button — and 'cut' above asks it.)
+    let rowsOut = '';
+    const tw = document.createTreeWalker(t, NodeFilter.SHOW_TEXT);
+    while ((n = tw.nextNode())) {
+      for (let i = 0; i < n.length; i++) {
+        rg.setStart(n, i); rg.setEnd(n, i + 1);
+        const c = rg.getBoundingClientRect();
+        if (!c.width && !c.height) continue;
+        if (c.top < inner.top - 0.5 || c.bottom > inner.bottom + 0.5) rowsOut += n.data[i];
+      }
+    }
+    if (ago) {
+      agoCut = '';
+      const aw = document.createTreeWalker(ago, NodeFilter.SHOW_TEXT);
+      while ((n = aw.nextNode())) {
+        for (let i = 0; i < n.length; i++) {
+          rg.setStart(n, i); rg.setEnd(n, i + 1);
+          const c = rg.getBoundingClientRect();
+          if (!c.width && !c.height) continue;
+          if (c.left < inner.left - 0.5 || c.right > inner.right + 0.5
+              || c.top < inner.top - 0.5 || c.bottom > inner.bottom + 0.5) agoCut += n.data[i];
+        }
+      }
+    }
+    return { text: (t.hidden ? '' : (t.textContent || '')).replace(/\s+/g, ' ').trim(),
+             cut: cut, agoCut: agoCut, rowsOut: rowsOut,
              agoPx: ago ? parseFloat(getComputedStyle(ago).fontSize) : null,
-             barH: Math.round(bar.getBoundingClientRect().height),
+             // To a tenth: the bar is 55.4px, and a row grown by a fraction
+             // of a pixel still moves every control under the finger.
+             barH: Math.round(bar.getBoundingClientRect().height * 10) / 10,
              count: kids.length, width: Math.round(bar.getBoundingClientRect().width),
              over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1 };
   });
@@ -3247,6 +3287,10 @@ const SNAP_MEASURE = (fixture) => {
       await page.clock.runFor(600);
       const push = (m) => page.evaluate((x) => window.__es.push(x), m);
       await push({ alive: true, at: 1 });
+      // The bar before any offer is on record: no Took on it at all.
+      await push({ ready: false, state: 'empty', track: null, places: [], text: '' });
+      await page.clock.runFor(1100);
+      const noTook = await measureTook(page);
       await push({ offer: HELD.took, at: 1 });
       await push({ holding: HELD.hold });
       await push({ planner: { stops: HELD.stops, unfiled: 'list', asked: true, ms: null, at: 1 } });
@@ -3262,7 +3306,27 @@ const SNAP_MEASURE = (fixture) => {
       await push(Object.assign({}, HELD.offer, { holding: HELD.hold }));
       await page.clock.runFor(1100);
       const offer = await measureHeld(page);
-      out[panel[0] + ' ' + view + ' held'] = { between: between, offer: offer, took: took };
+      // ...the Took button with its card up, which says no age,
+      const tookUp = await measureTook(page);
+      // ...after a press the journal refused, which says "not saved" — the
+      // reply comes back over the routed fetch on the real clock, so it is
+      // waited for in this script's time,
+      await page.route('**/api/offers/mark', (route) => route.fulfill({
+        status: 500, contentType: 'application/json', body: '{"ok":false}' }));
+      await page.evaluate(() => document.getElementById('took').click());
+      for (let i = 0; i < 40; i++) {
+        if (await page.evaluate(() => /not saved/.test(document.getElementById('took').textContent))) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      await page.clock.runFor(300);
+      const notSaved = await measureTook(page);
+      // ...and for the order already in the car, back on the phone: "in car".
+      await push({ offer: Object.assign({}, HELD.took, { heldCard: true }), at: 1 });
+      await page.clock.runFor(1100);
+      const inCar = await measureTook(page);
+      out[panel[0] + ' ' + view + ' held'] = { between: between, offer: offer, took: took,
+                                               noTook: noTook, tookUp: tookUp,
+                                               notSaved: notSaved, inCar: inCar };
       await page.close();
       await ctx.close();
     }
@@ -4257,20 +4321,42 @@ try:
                 '· too many answers', 1, '', None))
             no_('...and nothing scrolls with the offer up at %s' % where, _o.get('over'))
             # The Took button once its card has gone, with the widest age it
-            # says before an hour: the bar keeps its six, and every letter of
+            # says, "59m ago": the bar keeps its six, and every letter of
             # the label and the age is inside the button wherever the bar has
             # the width for six labels (see 'the fullest bar carries six
             # controls': 470px).
             eq('a Took that says its age keeps the bar at six controls at %s (%r)'
                % (where, _t.get('text')), (_t.get('count'), _t.get('over')), (6, False))
             ok_('...saying the age (%r) at %s' % (_t.get('text'), where),
-                (_t.get('text') or '').endswith('· 59 min ago'))
+                (_t.get('text') or '').endswith('59m ago'))
             ok_('...in type no smaller than the panel\'s floor at %s (%spx; bar %spx tall)'
                 % (where, _t.get('agoPx'), _t.get('barH')),
                 (_t.get('agoPx') or 0) >= (15 if h >= 400 else 12) - 0.05)
             if (_t.get('width') or 0) >= 470:
                 eq('...every letter of it inside the button at %s (bar %spx)'
                    % (where, _t.get('width')), _t.get('cut'), '')
+            # The age on a line of its own, and the bar one height whatever
+            # the button says. On the end of the label it took the bar from
+            # 55px to 74 or 93 between offers and back when a card came up,
+            # every control on it moving under the driver's finger.
+            # Inside its border, and pushing no line of the label above it
+            # past the border either: glyphs outside it, the age's and then
+            # any line's, top or bottom.
+            eq('the Took age is whole inside its button at %s (%r)' % (where, _t.get('text')),
+               (_t.get('agoCut'), _t.get('rowsOut')), ('', ''))
+            _hs = [(hm.get(k) or {}).get('barH') for k in ('noTook', 'tookUp', 'took')]
+            ok_('the bar is the same height with and without the Took age, at %s '
+                '(none, card up, 59m: %r)' % (where, _hs),
+                _hs[0] is not None and len(set(_hs)) == 1)
+            _hs2 = [(hm.get(k) or {}).get('barH') for k in ('notSaved', 'inCar')]
+            eq('...and when the Took says "not saved" or "in car", at %s (%r, %r)'
+               % (where, (hm.get('notSaved') or {}).get('text'),
+                  (hm.get('inCar') or {}).get('text')),
+               (_hs2, (hm.get('notSaved') or {}).get('text'), (hm.get('inCar') or {}).get('text'),
+                (hm.get('notSaved') or {}).get('cut'), (hm.get('inCar') or {}).get('cut'),
+                (hm.get('notSaved') or {}).get('rowsOut'), (hm.get('inCar') or {}).get('rowsOut')),
+               ([_hs[0]] * 2, 'Took $112.45 not saved', '✓ Took $112.45 in car',
+                '', '', '', ''))
 
     # ...and with the notice up as well: the journal dead and the phone too
     # bright, which between offers is the card's other occupant and the item

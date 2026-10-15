@@ -988,10 +988,13 @@ const framed = (page) => page.waitForFunction(
         if (!reach) {
           w.scrollTop = 9999; reach = w.scrollTop > 0; w.scrollTop = 0;
         }
+        // ...and scrollable by a hand, not only by this probe: a script can
+        // set scrollTop on an `overflow: hidden` box, and nothing else can.
         return { shown: !w.hidden, chips: list,
                  text: (w.textContent || '').replace(/\s+/g, ' ').trim(),
                  title: w.title, open: w.classList.contains('open'),
                  expanded: w.getAttribute('aria-expanded'), reach: reach,
+                 scrolls: ['auto', 'scroll'].indexOf(getComputedStyle(w).overflowY) !== -1,
                  label: document.getElementById('verdictLabel').textContent.trim() };
       });
       await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
@@ -1040,7 +1043,7 @@ const framed = (page) => page.waitForFunction(
   //
   // ...and the Took button, which names the last offer on record after its
   // card has gone and now says how long ago that was. The page's clock is
-  // moved, so "2 min ago" is two minutes of the page's own timers.
+  // moved, so "2m ago" is two minutes of the page's own timers.
   {
     const ctx = await browser.newContext({
       viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
@@ -1552,7 +1555,7 @@ const framed = (page) => page.waitForFunction(
      * found none produced no message, and the page's own timer repainted the
      * button exactly as it was — the driver tapped the address open on their
      * phone, pressed, waited, and got the same grey button whether it worked
-     * or not. Took says "· not saved", Drop says "Drop · failed".
+     * or not. Took says "not saved", Drop says "Drop · failed".
      *
      * Answered from the RIG, not from a timer here, which is why this is
      * driven as a message rather than by waiting. A read that started inside
@@ -6372,7 +6375,7 @@ try:
         eq('a Took for a card no longer on the phone says its age',
            ((hc.get('tookGoneNow') or {}).get('took'),
             (hc.get('tookGoneLater') or {}).get('took')),
-           ('Took $5.00? · just now', 'Took $5.00? · 2 min ago'))
+           ('Took $5.00? just now', 'Took $5.00? 2m ago'))
         eq('...and no age while its card is up',
            (hc.get('tookUp') or {}).get('took'), 'Took $5.00?')
 
@@ -6657,12 +6660,12 @@ try:
 
         ha = got.get('heldAgain ' + panel) or {}
         eq('%s: the held order\'s own card come back reads as taken, in the car' % panel,
-           (ha.get('text'), ha.get('on')), ('✓ Took $9.50 · in car', True))
+           (ha.get('text'), ha.get('on')), ('✓ Took $9.50 in car', True))
         ok_('%s: ...with a note that it is not a new offer (%r)' % (panel, ha.get('warn')),
             'not a new offer' in (ha.get('warn') or ''))
         eq('%s: ...and pressing Took on it records nothing' % panel,
            (ha.get('marks'), (ha.get('afterPress') or {}).get('text')),
-           (0, '✓ Took $9.50 · in car'))
+           (0, '✓ Took $9.50 in car'))
         eq('%s: ...while with nothing held the same card is an offer to tick' % panel,
            ((ha.get('unheld') or {}).get('text'), (ha.get('unheld') or {}).get('on')),
            ('Took $9.50?', False))
@@ -7044,10 +7047,19 @@ try:
            [c.get('text') for c in _f.get('chips') or []], _WANT_CHIPS)
         eq('[%s] ...each with its sentence on its title' % _pn,
            ' '.join(c.get('title') or '' for c in _f.get('chips') or []), _WANT_SAID)
-        ok_('[%s] ...outlined, every chip inside the card (%r)'
-            % (_pn, [c.get('inCard') for c in _f.get('chips') or []]),
-            _f.get('chips') and all(c.get('inCard') and c.get('border') == 'solid'
-                                    for c in _f.get('chips')))
+        # On the 3.5" hat the notice is the item that gives way and scrolls
+        # (live.html, under `#verdict:has(#warn...) .submetrics`): there the
+        # first chip is in the card and the second is scrolled to. This held
+        # whole on the hat only while the bar was its 44px, with no offer on
+        # record; the bar is 55.4px there in every state now, which is what
+        # it was whenever an offer was on record, and that is most of a shift.
+        _in = [c.get('inCard') for c in _f.get('chips') or []]
+        ok_('[%s] ...outlined, every chip inside the card%s (%r)'
+            % (_pn, ', or past the first on the 3.5" hat, scrolled to'
+               if _pn == '480x320' else '', _in),
+            _f.get('chips') and all(c.get('border') == 'solid' for c in _f.get('chips'))
+            and (all(_in) if _pn != '480x320'
+                 else _in[0] and _f.get('reach') and _f.get('scrolls')))
         eq('[%s] ...and the sentences on the notice\'s own title' % _pn,
            _f.get('title'), _WANT_SAID)
         eq('[%s] ...closed' % _pn, (_f.get('open'), _f.get('expanded')), (False, 'false'))

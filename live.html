@@ -901,25 +901,54 @@
    *
    * `line-height: 1.1` rather than the default: two lines at 1.2 make the bar
    * 59px and there is no reason to spend the extra four. Held by
-   * rpi/test_layout.py, which measures what a screenshot would show. */
+   * rpi/test_layout.py, which measures what a screenshot would show.
+   *
+   * ...and THE BAR IS ONE HEIGHT IN EVERY STATE: two of those lines and the
+   * padding, set as a height rather than left to the tallest label. Left to
+   * the label, the bar was 52px with the four fixed controls (44 on the 3.5"
+   * hat), 55px once a "Took $112.45?" wrapped, and 74 or 93px once that
+   * button said how old its card was — and back to 55 when the next card
+   * came up, so every control on it, and the card above it, moved under the
+   * driver's finger twice per offer. Measured on the unchanged page with the
+   * widest pay and six controls up: 74px at 1024x600 beside the phone and at
+   * 800x480 beside the scene, 93px at 800x480 beside the phone and on the
+   * hat in both pictures. So no label here may take a third line at the
+   * bar's own size; the Took button, the one with something to add, says it
+   * on a smaller line of its own (#took .status, below). On a phone held
+   * upright the 52px floor is the taller of the two and holds it instead. */
   .bottombar button, .bottombar .linkbtn {
     font-size: 13px; padding: 10px 4px; line-height: 1.1;
+    height: calc(2.2em + 22px);
   }
   #setBox.on {
     background: #0d5c31; border-color: #17c964; color: #d7ffe6;
   }
-  /* How old the card on record is, once it has gone (tookAge). A tenth
-     smaller than the label: 15.3px, over the 15px floor rpi/test_layout.py
-     holds the panels to, and every letter of "Took $112.45? · 59 min ago"
-     inside its button wherever the bar has the width for six labels.
+  /* What has become of the card on record, on a line of its own under the
+     label (showTook): how long ago it was recorded once it has left the
+     phone (tookAge), "not saved" after a press the journal refused, "in car"
+     for the order already taken. It used to ride on the end of the label
+     ("Took $112.45? · 59 min ago"), which in a 78px button (71px on the 3.5"
+     hat) is four rows, and the bar grew to hold them.
 
-     It costs the bar height, and only between offers, which is when the card
-     above has the room: measured with that label, the bar is 55px at 1024x600
-     beside the scene, as without it, 74px at 1024x600 beside the phone and at
-     800x480 beside the scene, and 93px at 800x480 beside the phone and on the
-     3.5" hat, where the button is 78px across (71px on the hat) and the label takes four rows.
-     The card with the order in the car still fits above it on all six. */
-  #took .ago { font-size: .9em; font-weight: 500; }
+     A tenth smaller than the label: 15.3px, over the 15px floor
+     rpi/test_layout.py holds the panels to. Its own line, so it never wraps
+     into the label's: the age is written short for it — "59m ago", 59.5px,
+     where "59 min ago" was 75.7 against the 67.8px inside the narrowest
+     panel's button (60.7 on the hat) — and in hours and days past those, so
+     no age is wider. Measured in DejaVu Sans.
+
+     One line, never wrapped: "not saved" is 66.3px against the hat's 60.7
+     and takes the padding either side, where wrapped it was a fourth line
+     and pushed "Took" and "saved" out of the button.
+
+     Three lines in the bar's height, at line-height 1 with a pixel of padding:
+     17 + 17 + 15.3px is 49.3 inside the 53.4 the button has between its
+     borders, every glyph inside them (rpi/test_layout.py, at 1024x600,
+     800x480 and 480x320 in both pictures). Only while there is such a line;
+     the label alone keeps the bar's own spacing. */
+  #took .status { display: block; font-size: .9em; font-weight: 500;
+                  white-space: nowrap; }
+  #took:has(.status) { line-height: 1; padding-top: 1px; padding-bottom: 1px; }
 
   /* What the reader actually saw. Folded away by default, because it is only
      ever wanted after a wrong answer — and after a wrong answer it is the only
@@ -1148,7 +1177,15 @@
     .pending { font-size: 16px; }
     .connbar { font-size: 15px; padding: 4px; }
     .dot { width: 11px; height: 11px; }
-    .bottombar button, .bottombar .linkbtn { font-size: 17px; padding: 8px 4px; }
+    /* Two lines and this padding: 55.4px at 17px, on every landscape panel.
+       On the 3.5" hat too, where the four fixed controls alone were 44:
+       55.4 is what its bar already was whenever an offer was on record,
+       which is most of a shift. Held at 44 there, the phone picture beside
+       the card grew 6px wider and the card's four figures wrapped to two
+       rows, running the pair offer 4px over the card's top and 2px over its
+       foot (measured, held in rpi/test_layout.py). */
+    .bottombar button, .bottombar .linkbtn { font-size: 17px; padding: 8px 4px;
+                                             height: calc(2.2em + 18px); }
     #drawTools button { font-size: 17px; }
     #drawHint { font-size: 15px; }
   }
@@ -2103,7 +2140,7 @@
   var recordAt = null;
 
   /* How long ago the card on record was recorded, once it has left the phone:
-   * "2 min ago", "just now", or '' while a verdict is on the glass.
+   * "2m ago", "just now", or '' while a verdict is on the glass.
    *
    * The Took button names the last offer on record, which is the right one in
    * the moment after a decision and the wrong one minutes later: the phone has
@@ -2114,12 +2151,16 @@
    * The age says it. Not while a card is up: the verdict beside it is that
    * card or the next, and the age of either is not the question.
    *
-   * Whole minutes, rounded DOWN, for the reason the GPS line gives: "1 min"
-   * at 119 seconds is true and "2 min" would not be. */
+   * Whole minutes, rounded DOWN, for the reason the GPS line gives: "1m" at
+   * 119 seconds is true and "2m" would not be. Short, because it has a line
+   * of its own in a button 71px across on the 3.5" hat (see #took .status):
+   * past an hour it is hours, past a day days, rounded down the same way, so
+   * no age is wider than "59m ago". */
   function tookAge() {
     if (recordAt === null || (last && last.ready && !blind)) return '';
-    var s = Math.max(0, Date.now() - recordAt) / 1000;
-    return s < 60 ? 'just now' : Math.floor(s / 60) + '\u00a0min ago';
+    var m = Math.floor(Math.max(0, Date.now() - recordAt) / 60000);
+    return m < 1 ? 'just now' : m < 60 ? m + 'm ago'
+      : m < 1440 ? Math.floor(m / 60) + 'h ago' : Math.floor(m / 1440) + 'd ago';
   }
 
   function showTook() {
@@ -2139,7 +2180,7 @@
     // taken, not as an offer to tick, and the press does nothing — the driver
     // has said this once.
     if (heldAgain()) {
-      el.took.textContent = '\u2713 Took ' + what + ' \u00b7 in car';
+      tookSays('\u2713 Took ' + what, 'in car');
       el.took.title = 'The order you already took, on the phone again. Nothing to record.';
       el.took.classList.remove('failed');
       el.took.classList.add('on');
@@ -2150,27 +2191,12 @@
     // and the word was clipped off, which is worse than not offering it — an
     // affordance nobody can see is not an affordance. It is a toggle, styled
     // when set, exactly as the same control on the offers page behaves.
-    el.took.textContent = tookBusy ? '…'
-      : tookFailed ? 'Took ' + what + ' · not saved'
-      : (tookState ? '\u2713 Took ' + what : 'Took ' + what + '?');
-    // ...and how old that card is, once it has gone. "· 2 min" joined by
-    // no-break spaces, so a button too narrow for the label and the age
-    // breaks the age off whole, or at worst before "ago", and never between
-    // a number and its unit.
-    var ago = !tookBusy && !tookFailed ? tookAge() : '';
-    if (ago) {
-      // One run of text inside one span: the button is a flex box, and the
-      // label and the age as two children of it were two flex items side by
-      // side, the age painted past the button's edge rather than wrapped.
-      var label = document.createElement('span');
-      label.textContent = el.took.textContent + ' ';
-      var agoSpan = document.createElement('span');
-      agoSpan.className = 'ago';
-      agoSpan.textContent = '\u00b7\u00a0' + ago;
-      label.appendChild(agoSpan);
-      el.took.textContent = '';
-      el.took.appendChild(label);
-    }
+    // ...and how old that card is, once it has gone, or that the press was
+    // not saved: on the line under the label, never on the end of it.
+    tookSays(tookBusy ? '…'
+             : tookFailed ? 'Took ' + what
+             : (tookState ? '\u2713 Took ' + what : 'Took ' + what + '?'),
+             tookBusy ? '' : tookFailed ? 'not saved' : tookAge(), !tookFailed);
     el.took.title = tookFailed
       ? 'The journal could not be written. Press again to retry.'
       : tookState
@@ -2179,6 +2205,26 @@
     el.took.classList.toggle('failed', tookFailed);
     el.took.classList.toggle('on', tookState);
     el.took.setAttribute('aria-pressed', tookState ? 'true' : 'false');
+  }
+
+  /* The Took button's label, and under it, when there is one, its status
+   * line: the card's age, "not saved" or "in car" (#took .status). One run
+   * of text inside one span: the button is a flex box, and the label and a
+   * second span as two children of it were two flex items side by side, the
+   * second painted past the button's edge rather than under the first. The
+   * space between them is for a screen reader, which reads the two as one
+   * name; a block line after it draws none. `age` marks the line as the age,
+   * which rpi/test_layout.py measures at its widest. */
+  function tookSays(label, status, age) {
+    el.took.textContent = status ? '' : label;
+    if (!status) return;
+    var both = document.createElement('span');
+    both.textContent = label + ' ';
+    var line = document.createElement('span');
+    line.className = 'status' + (age ? ' ago' : '');
+    line.textContent = status;
+    both.appendChild(line);
+    el.took.appendChild(both);
   }
 
   // Whether the card on record is the held order's own card come back.
@@ -4691,7 +4737,7 @@
         // that found none produced no message at all, and the page's own timer
         // put the button back exactly as it was — the driver tapped the
         // address open on their phone, pressed, waited, and got the same grey
-        // button whether it had worked or not. Took says "· not saved", Drop
+        // button whether it had worked or not. Took says "not saved", Drop
         // says "Drop · failed".
         //
         // It is answered from the RIG and not from a timer here, and that is

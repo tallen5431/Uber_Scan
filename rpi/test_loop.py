@@ -1525,7 +1525,7 @@ ok_('the empty dropoff answer waits for a read that could still answer it',
 # address produced no line at all and the panel's own timer repainted the
 # button exactly as it was. The driver tapped the address open on their phone,
 # pressed, waited, and got the same grey button whether it had worked or not.
-# Every other control on that bar names its failure: "Took … · not saved",
+# Every other control on that bar names its failure: "Took …" over "not saved",
 # "Drop · failed", "⟳ failed", "could not set the box: …".
 #
 # Answered from HERE and not from a timer on the page. `asked` is
