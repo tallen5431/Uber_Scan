@@ -1250,6 +1250,40 @@ CHIPS_CARD = dict(_FOUNDPAY_CARD, state='warn', perHour=21.8, grossPerHour=21.8,
                   fromDeadline=False, deliverBy=None, whole=False,
                   milesUncertain=True, uncosted=True, costPerMile=0.3,
                   places=['Cobb Pkwy NW, Acworth', 'Canton Rd, Marietta'])
+# The heat guard's chip on the status row (live.html heatNote), as the beat
+# brings it: `off`, the guard off at 76°C, which is the row with no note and
+# what the others' layout is held to; `alone`, on at 76°C with nothing else
+# to say, the chip with what it means after the dot; `slowed`, the widest
+# lone chip, a throttled clock with no cause beside it; and the three widest
+# notes with a GPS gone stale for longer than a day of driving beside them.
+# HEAT_WAS is the widest note the row held before the chip, set on the same
+# row as plain words, so "no wider than before" is a measurement and not a
+# number copied in here.
+_HEAT_STALE = {'state': 'stale', 'ageSeconds': 60000}
+_HEAT_OK = {'state': 'ok', 'ageSeconds': 0.4}
+HEAT_BEATS = {
+    'off': {'heatGuard': False, 'cpuC': 76.2, 'gps': _HEAT_OK,
+            'throttled': {'now': [], 'sinceBoot': []}},
+    'alone': {'heatGuard': True, 'cpuC': 76.2, 'gps': _HEAT_OK,
+              'throttled': {'now': [], 'sinceBoot': []}},
+    'slowed': {'heatGuard': True, 'cpuC': 82.4, 'gps': _HEAT_OK,
+               'throttled': {'now': ['throttled'], 'sinceBoot': ['throttled']}},
+    'hot gps': {'heatGuard': True, 'cpuC': 84.6, 'gps': _HEAT_STALE,
+                'throttled': {'now': ['temp limit', 'throttled', 'capped'],
+                              'sinceBoot': ['temp limit']}},
+    'slowed gps': {'heatGuard': True, 'cpuC': 82.4, 'gps': _HEAT_STALE,
+                   'throttled': {'now': ['throttled'], 'sinceBoot': ['throttled']}},
+    'low power gps': {'heatGuard': True, 'cpuC': 61.0,
+                      'gps': {'state': 'stale', 'ageSeconds': 7380},
+                      'throttled': {'now': ['under-voltage', 'throttled'],
+                                    'sinceBoot': ['under-voltage', 'throttled']}},
+}
+HEAT_WAS = 'Pi temp limit 85°C · GPS: no fix for 1000 min'
+HEAT_SAYS = {'off': '', 'alone': 'HOT 76°C · fewer auto reads',
+             'slowed': 'SLOWED 82°C · fewer auto reads',
+             'hot gps': 'HOT 85°C · GPS: no fix for 1000 min',
+             'slowed gps': 'SLOWED 82°C · GPS: no fix for 1000 min',
+             'low power gps': 'LOW POWER · GPS: no fix for 123 min'}
 # The small type on a card, in px, as each panel renders it: the address
 # line, a figure's label and the figure, the line under the card, the notice
 # and the status row. The rig's own 1024x600 takes a fifth more than the
@@ -1444,7 +1478,11 @@ const { chromium } = require('playwright');
 const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
        snapPanelsJson, noVerdictJson, noVerdictPanelsJson, plannerJson,
        plannerPanelsJson, hereJson, foundPayJson, liveHereJson, heldJson,
-       chipsJson] = process.argv.slice(2);
+       chipsJson, heatJson] = process.argv.slice(2);
+// The heat guard's beats, and the widest note the row held before its chip;
+// see HEAT_BEATS on the Python side.
+const HEAT_BEATS = JSON.parse(heatJson).beats;
+const HEAT_WAS = JSON.parse(heatJson).was;
 // The order in the car and the offer beside it; see HELD on the Python side.
 const HELD = JSON.parse(heldJson);
 // A card's payout read off a card found above the box, and the same read
@@ -2877,6 +2915,84 @@ const SNAP_MEASURE = (fixture) => {
       rowAt.open = await page.evaluate(ROW_MEASURE);
       await page.click('#more', { timeout: 5000 }).catch(() => {});
       out[panel[0] + ' ' + view + ' row'] = rowAt;
+      // ...and the heat guard's chip on the same row (live.html heatNote),
+      // beat by beat, beside the widest real shift line staged above. See
+      // HEAT_BEATS on the Python side.
+      const heatAt = {};
+      for (const [key, beat] of Object.entries(HEAT_BEATS)) {
+        await page.evaluate((b) => window.__es.push(Object.assign(
+          { alive: true, at: 1, notSaving: null, tooBright: false, tooDim: false,
+            cpuCWhy: null, throttledWhy: null }, b)), beat);
+        await page.waitForTimeout(150);
+        heatAt[key] = await page.evaluate((fixture) => {
+          const d = document.documentElement;
+          const h = document.getElementById('health');
+          const shift = document.getElementById('shift');
+          const chip = h.querySelector('.chip');
+          const box = (el) => {
+            const b = el.getBoundingClientRect();
+            return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
+          };
+          const hr = h.getBoundingClientRect();
+          const cr = chip ? chip.getBoundingClientRect() : null;
+          // The median's digits, found by shape, as ROW_MEASURE finds them.
+          const m = /(-?\$\d+\/hr)/.exec(shift.textContent);
+          let figureIn = false;
+          if (m && shift.firstChild) {
+            const at = shift.firstChild.nodeValue.indexOf(m[1]);
+            const rg = document.createRange();
+            rg.setStart(shift.firstChild, at);
+            rg.setEnd(shift.firstChild, at + m[1].length);
+            const fr = rg.getBoundingClientRect();
+            figureIn = fr.right <= shift.getBoundingClientRect().right + 0.5
+                       && fr.right <= window.innerWidth + 0.5;
+          }
+          const out = {
+            text: h.hidden ? '' : h.textContent,
+            chip: chip ? chip.textContent : null,
+            title: chip ? chip.title : null,
+            shown: !h.hidden && hr.width > 0 && hr.left >= -0.5
+                   && hr.right <= window.innerWidth + 0.5,
+            whole: h.scrollWidth <= h.clientWidth + 1,
+            chipIn: !!cr && cr.left >= hr.left - 0.5 && cr.right <= hr.right + 0.5,
+            w: Math.round(hr.width * 10) / 10,
+            figureIn: figureIn,
+            layout: JSON.stringify({ row: box(document.querySelector('.connbar')),
+                                     bar: [].slice.call(document.querySelector('.bottombar')
+                                       .children).map(box) }),
+            over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
+          };
+          // ...and the widest note the row held before the chip, as plain
+          // words on this same row: what "no wider than before" is held to.
+          if (!h.hidden) {
+            const keep = [].slice.call(h.childNodes);
+            h.textContent = fixture;
+            out.wasW = Math.round(h.getBoundingClientRect().width * 10) / 10;
+            h.textContent = '';
+            keep.forEach((n) => h.appendChild(n));
+          }
+          return out;
+        }, HEAT_WAS);
+        if (key === 'alone') {
+          // The sentence, one press away on "…", and on the glass.
+          await page.click('#more', { timeout: 5000 }).catch(() => {});
+          await page.waitForTimeout(150);
+          heatAt.sheet = await page.evaluate(() => {
+            const s = document.getElementById('moreSheet');
+            const r = s.getBoundingClientRect();
+            return { lines: [].slice.call(s.querySelectorAll('.m-health')).map((n) => n.textContent),
+                     onGlass: !s.hidden && r.left >= -0.5 && r.top >= -0.5
+                              && r.right <= window.innerWidth + 0.5
+                              && r.bottom <= window.innerHeight + 0.5 };
+          });
+          await page.click('#more', { timeout: 5000 }).catch(() => {});
+          await page.waitForTimeout(100);
+        }
+      }
+      out[panel[0] + ' ' + view + ' heat'] = heatAt;
+      await page.evaluate(() => window.__es.push({ alive: true, at: 1, heatGuard: false,
+                                                   gps: null, throttled: null, cpuC: null }));
+      await page.waitForTimeout(100);
       // ...and the night palette (html.night) on the same card: colours only.
       out[panel[0] + ' ' + view + ' night'] = await page.evaluate(() => {
         const boxes = () => JSON.stringify(['#verdict', '#verdictLabel', '.rate.big',
@@ -3775,7 +3891,8 @@ try:
                      'blind': PLANNER_BLIND}),
          json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES), json.dumps(FOUNDPAY),
          json.dumps(LIVE_HERE_LINES), json.dumps(HELD),
-         json.dumps({'beat': CHIPS_BEAT, 'card': CHIPS_CARD})],
+         json.dumps({'beat': CHIPS_BEAT, 'card': CHIPS_CARD}),
+         json.dumps({'beats': HEAT_BEATS, 'was': HEAT_WAS})],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -4005,6 +4122,50 @@ try:
             eq('...and the row and the bar where they were at %s' % where,
                _o.get('layout'), _r.get('layout'))
             no_('...nothing past the glass at %s' % where, _o.get('over'))
+
+    # The heat guard's chip on the status row (live.html heatNote): said, in
+    # the notices' kind of chip, at the front of the note; whole and on the
+    # glass at the rig's 1024x600, the 800x480 and the 3.5" hat, in both
+    # pictures, beside the widest real shift line. Alone, what it means after
+    # the dot, the median's digits still on the glass and the sentence on "…".
+    # Beside a GPS a day stale, no wider than the widest note the row held
+    # before it — "Pi temp limit 85°C · GPS: no fix for 1000 min" — measured on
+    # the same row. And the row and the bar where a row with no note left them.
+    for panel, w, h in NOVERDICT_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            hm = got.get('%s %s heat' % (panel, view)) or {}
+            _ha, _hoff = hm.get('alone') or {}, hm.get('off') or {}
+            eq('the panel says it at %s: the heat guard\'s chip on the status row (%r)'
+               % (where, _ha.get('chip')), (_ha.get('chip'), _ha.get('shown'), _ha.get('whole'),
+                                             _ha.get('chipIn')),
+               (HEAT_SAYS['alone'], True, True, True))
+            ok_('...the sentence on its title at %s (%r)' % (where, _ha.get('title')),
+                'less often' in (_ha.get('title') or '')
+                and 'Offers, ⌖ and 📷 Snap are read as fast as ever' in (_ha.get('title') or ''))
+            eq('...and on "…", on the glass, at %s' % where,
+               (((hm.get('sheet') or {}).get('lines') or [None])[0], (hm.get('sheet') or {}).get('onGlass')),
+               (_ha.get('title'), True))
+            eq('...and nothing with the guard off at 76°C, at %s' % where,
+               (_hoff.get('text'), _hoff.get('chip')), ('', None))
+            ok_('...the median\'s digits on the glass beside it at %s' % where,
+                _ha.get('figureIn') and (hm.get('slowed') or {}).get('figureIn'))
+            for key in ('slowed', 'hot gps', 'slowed gps', 'low power gps'):
+                _hk = hm.get(key) or {}
+                eq('...%s says %r at %s, whole and on the glass' % (key, HEAT_SAYS[key], where),
+                   (_hk.get('text'), _hk.get('shown'), _hk.get('whole')),
+                   (HEAT_SAYS[key], True, True))
+            for key in ('hot gps', 'slowed gps', 'low power gps'):
+                _hk = hm.get(key) or {}
+                ok_('...%s no wider than the widest note before the chip at %s (%spx, was %spx)'
+                    % (key, where, _hk.get('w'), _hk.get('wasW')),
+                    _hk.get('w') is not None and _hk.get('wasW') is not None
+                    and _hk['w'] <= _hk['wasW'])
+            eq('...the row and the bar where a row with no note left them at %s' % where,
+               sorted(set((hm.get(k) or {}).get('layout') for k in HEAT_SAYS)),
+               [_hoff.get('layout')])
+            no_('...nothing past the glass at %s' % where,
+                any((hm.get(k) or {}).get('over') for k in HEAT_SAYS))
 
     # The night palette moves nothing: the card, its words, the row, the bar
     # and the picture where the day's palette left them, the page black.

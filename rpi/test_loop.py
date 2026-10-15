@@ -214,7 +214,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         fail_after=None, phone_hold=None, gps_hold=None, phone=None,
         planners=None,
         freeze_at=None, stall_say=None, empty=None, noise=True, offer_dim=None,
-        ring=1, stall_again=None, offer=None, real_look=None, found_for=None):
+        ring=1, stall_again=None, offer=None, real_look=None, found_for=None,
+        pi=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return — on the reader's thread only, with `hang_on_loop` False, so a read
@@ -247,9 +248,14 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     `found_for(n, k)`: with the stubbed reader, a crop (x, y, w, h) when frame
     k of read call n is to come back as a read off a card found above the box
     — cropFrom "found", that crop, rescued — and None for the box as drawn.
+    `pi`: what main() builds in place of scan_pi.PiHealth() — the Pi's
+    temperature and throttling from a fake source, since this machine has
+    neither, for the heat guard.
     Returns the journal rows, the announcements, the alive beats and what rode
     them, the log lines, how many reads were asked of the reader and how many
-    it began, the exception main() raised, if any, and the handoff directory."""
+    it began, the exception main() raised, if any, and the handoff directory —
+    and `stamps`, each read handed over as (when, whole screen or not), on the
+    clock the loop stamped it with."""
     if not handoff:
         handoff = tempfile.mkdtemp()
     if offer is None:
@@ -325,11 +331,13 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     # ...whether each was a ⌖ read of the whole screen, and how many times the
     # panel was told a read had started.
     submitted_whole = []
+    stamps = []
     readings = [0]
 
     def submit(self, frames, now, geom):
         submitted[0] += 1
         submitted_whole.append(bool(getattr(geom, 'whole', False)))
+        stamps.append((now, bool(getattr(geom, 'whole', False))))
         return real[12](self, frames, now, geom)
 
     SP.Reader.submit = submit
@@ -415,6 +423,9 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         SP.STALL_AGAIN = stall_again
     if phone is not None:
         SP.GPS.Phone = lambda address: phone
+    was_pi = SP.PiHealth
+    if pi is not None:
+        SP.PiHealth = pi
     deadline = time.time() + seconds
 
     def rows():
@@ -453,13 +464,14 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         SP.DROPOFF_WINDOW = was_window
         SP.ALIVE_EVERY = was_alive_every
         SP.PHONE_HOLD, SP.GPS_HOLD, SP.GPS.Phone, SP.STALL_SAY, SP.STALL_AGAIN = was_holds
+        SP.PiHealth = was_pi
         if was_handoff is None:
             os.environ.pop(HO.ENV_DIR, None)
         else:
             os.environ[HO.ENV_DIR] = was_handoff
     return dict(rows=rows(), announced=announced, offer_kw=offer_kw,
                 beats=beats, calls=calls[0],
-                submitted=submitted[0], submitted_whole=submitted_whole,
+                submitted=submitted[0], submitted_whole=submitted_whole, stamps=stamps,
                 readings=readings[0], planners=said_planners, sightings=sightings,
                 popups=popups,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
@@ -913,6 +925,10 @@ eq('...as off, for a rig not asked for a position',
 eq('...and the Pi, with all four of its fields',
    sorted((_clean['alive'][-1].get('pi') or {}).keys()) if _clean['alive'] else [],
    ['cpuC', 'cpuCWhy', 'throttled', 'throttledWhy'])
+# ...and the heat guard on every beat, off on a machine that has neither a
+# temperature nor a throttle word to give it.
+eq('...and the heat guard, on every beat and off here',
+   sorted(set(repr(b.get('heat_guard', 'absent')) for b in _clean['alive'])), ['False'])
 
 # A camera that dies mid-run, then the supervisor's restart onto the same
 # journal. The first run leaves a start and no stop; that unpaired start IS the
@@ -2740,6 +2756,9 @@ ok_('...and the flags the last heartbeat carried (%r)'
     and isinstance(_beat.get('ageMs'), int))
 eq('...the camera\'s word among them, null while it can see',
    (_beat or {}).get('blind', 'absent'), None)
+# ...and the heat guard's state, which the panel was told on that beat.
+eq('...and whether the heat guard was on, as the panel was told it',
+   (_beat or {}).get('heatGuard', 'absent'), False)
 eq('...and "gps off", with no --gps given', _said.get('gps'), 'gps off')
 ok_('the request is taken, so it is answered once',
     _sreq[0] is not None and not os.path.exists(_sreq[0]))
@@ -3275,6 +3294,163 @@ for _what, _frame, _found_text, _said in (
         _fl['finder'] > 0 and any(_said in l for l in _sample))
     eq('...and puts no payout in the journal',
        [x.get('pay') for x in _fl['rows'] if not x.get('kind')], [])
+
+# --- the heat guard: the reads nobody pressed for, put off while the Pi is hot
+#
+# The owner's Pi 4 runs at 60-80°C on a shift and has hit its soft limit, and
+# the reads above add a whole-screen read every SCREEN_AUTO_EVERY while an order
+# is held. At 75°C, or with any throttle word NOW, they are SCREEN_AUTO_HOT
+# apart until the Pi is below 70 (scan_pi.HeatGuard); an offer, a ⌖ press and
+# a 📷 Snap are read as they always were.
+#
+# The real loop and the real guard, handed the Pi's temperature by a fake
+# source — this machine has no thermal zone — sampled every 0.1s on a 0.05s
+# beat, so a change reaches the guard within a beat or two. And a tenth of the
+# clock: SCREEN_AUTO_EVERY and SCREEN_AUTO_HOT run at 1s and 3s, so a run is
+# seconds and not minutes. The card box sees the navigation screen on every
+# half-second resample (the window held open for the run), which is a screen
+# asking for the read at every chance — so how far apart the reads land is the
+# rate limit's doing and nothing else's.
+_PiHealth = SP.PiHealth
+
+
+def _heat_pi(schedule, made):
+    """What run() builds in place of PiHealth(): the Pi at `schedule(t)` — (°C,
+    the throttle words now) at t seconds after main() asked for it, which is
+    put in `made` on the reads' own clock."""
+    def build():
+        t0 = time.time()
+        made.append(t0)
+        return _PiHealth(every=0.1,
+                         temp=lambda: (schedule(time.time() - t0)[0], None),
+                         throttle=lambda: ({'now': list(schedule(time.time() - t0)[1]),
+                                            'sinceBoot': []}, None))
+    return build
+
+
+def _auto_reads(schedule, seconds):
+    """The whole-screen reads nobody pressed for over a held order's navigation
+    screen, at a tenth of the clock: when each was handed over, in seconds
+    after the Pi was first asked, and the run."""
+    ho, made = tempfile.mkdtemp(), []
+    _hold(ho, time.time() + 3600)
+    was = SP.SCREEN_AUTO_EVERY, SP.SCREEN_AUTO_HOT, SP.RESAMPLE_WINDOW
+    SP.SCREEN_AUTO_EVERY, SP.SCREEN_AUTO_HOT, SP.RESAMPLE_WINDOW = 1.0, 3.0, seconds + 5.0
+    try:
+        got = run(lambda n, k: FRAG if n == 1 else _NAV_BOX, extra_argv=['--no-parallel'],
+                  seconds=seconds, handoff=ho, whole_text=_NAV_WHOLE, alive_every=0.05,
+                  pi=_heat_pi(schedule, made))
+    finally:
+        SP.SCREEN_AUTO_EVERY, SP.SCREEN_AUTO_HOT, SP.RESAMPLE_WINDOW = was
+    t0 = made[0] if made else 0.0
+    return [round(t - t0, 2) for t, whole in got['stamps'] if whole], got
+
+
+def _gaps(at):
+    return [round(b - a, 2) for a, b in zip(at, at[1:])]
+
+
+# 76°C for eight seconds, then 69.
+_hot_until = 8.0
+_ah, _rah = _auto_reads(lambda t: (76.0 if t < _hot_until else 69.0, []), 12.5)
+_hot_gaps = [round(b - a, 2) for a, b in zip(_ah, _ah[1:]) if b < _hot_until]
+_cool_gaps = [round(b - a, 2) for a, b in zip(_ah, _ah[1:]) if a > _hot_until + 0.3]
+ok_('the premise: the card box asked at every chance, a read every half second '
+    '(%d card-box reads in %.1fs)' % (_rah['submitted_whole'].count(False), 12.5),
+    _rah['submitted_whole'].count(False) >= 20)
+eq('at 76°C the automatic reads are 30 s apart (read at %r s, a tenth of the clock: '
+   'gaps %r)' % (_ah, _hot_gaps),
+   (SP.SCREEN_AUTO_HOT, len(_hot_gaps) >= 2 and all(2.9 <= g <= 4.0 for g in _hot_gaps)),
+   (30.0, True))
+eq('below 70°C they are 10 s apart again (gaps %r)' % (_cool_gaps,),
+   (SP.SCREEN_AUTO_EVERY, len(_cool_gaps) >= 2 and all(0.9 <= g < 2.0 for g in _cool_gaps)),
+   (10.0, True))
+# ...and the beat says which, from the same sample: the guard on the beats
+# while the source said 76, off after it said 69.
+_hb = [(b.get('pi') or {}).get('cpuC') for b in _rah['alive'] if b.get('heat_guard')]
+_cb = [(b.get('pi') or {}).get('cpuC') for b in _rah['alive']
+       if b.get('heat_guard') is False]
+eq('...and the beat says the guard is on over the 76°C samples and off over the 69°C '
+   'ones (%r on, %r off)' % (sorted(set(_hb)), sorted(set(_cb))),
+   (sorted(set(_hb)), sorted(set(_cb))), ([76.0], [69.0]))
+
+# Any throttle word NOW, at a temperature that would never turn it on alone.
+_af, _raf = _auto_reads(lambda t: (50.0, ['throttled']), 9.0)
+eq('a throttle flag now turns it on at any temperature (50°C, "throttled": gaps %r)'
+   % (_gaps(_af),), len(_gaps(_af)) >= 2 and all(2.9 <= g <= 4.0 for g in _gaps(_af)), True)
+
+# Never an offer, a ⌖ press or a 📷 Snap. The same run twice — the Pi at 90°C
+# at its soft limit, and at 50°C with nothing to say — over a card that arrives
+# a second in, is read, read again by the resample burst and again on the
+# verify beat; a ⌖ press made in that third read, over a navigation screen
+# with no address on it, so its window reads the whole screen until it shuts;
+# and a snap asked for in the second. Compared run against run rather than
+# against figures, so what is held is that the heat changes none of it.
+#
+# Reads before the card is in the mount see a blank screen: the stubbed reader
+# would otherwise answer with the card on the very first frame (see the note
+# at the top), and the burst and the beat would be timed from a card nobody
+# had put there.
+def _unslowed(schedule):
+    ho, fold, made, asked, cams, card_reads = (tempfile.mkdtemp(), tempfile.mkdtemp(),
+                                               [], [], [], [0])
+
+    def texts(n, k):
+        if not cams or cams[0].frame is not cams[0].offer:
+            return ''
+        if k == 0:
+            card_reads[0] += 1
+            if card_reads[0] == 2:
+                asked.append((time.time(), _ask_snap(ho, fold)))
+            if card_reads[0] == 3:
+                open(os.path.join(ho, 'uberscan-dropoff'), 'w').close()
+        return WHOLE
+
+    got = run(texts, extra_argv=['--no-parallel'], seconds=8.5, handoff=ho, appear_at=1.0,
+              cam_out=cams, dropoff_window=3.0, whole_text=_NAV_BOX, alive_every=0.05,
+              pi=_heat_pi(schedule, made))
+    calls = [(t, whole) for t, whole in got['stamps']]
+    # From the card's first read, which the burst and the beat are timed from.
+    up = cams[0].started + cams[0].appear_at if cams else 0.0
+    first = next((t for t, whole in calls if not whole and t >= up), 0.0)
+    card = [round(t - first, 2) for t, whole in calls if not whole and t >= first]
+    pressed = [round(t - first, 2) for t, whole in calls if whole]
+    said = os.path.join(fold, 'reader.json')
+    snap = (round(os.path.getmtime(said) - asked[0][0], 2)
+            if asked and os.path.exists(said) else None)
+    got['said'] = _json_or_none(said) or {}
+    return card, pressed, snap, got
+
+
+_uh = _unslowed(lambda t: (90.0, ['temp limit']))
+_uc = _unslowed(lambda t: (50.0, []))
+ok_('the premise: the guard was on through the hot run and off through the cool one',
+    all(b.get('heat_guard') for b in _uh[3]['alive'])
+    and not any(b.get('heat_guard') for b in _uc[3]['alive']))
+ok_('the premise: the card was read three times before the press, the press read the '
+    'whole screen until its window shut, and the verify beat came after it (cool: card '
+    '%r, ⌖ %r)' % (_uc[0], _uc[1]),
+    len(_uc[0]) >= 4 and len(_uc[1]) >= 4 and _uc[0][2] < _uc[1][0] < _uc[1][-1] < _uc[0][3])
+# Every read of the card — the ones its arrival set off and the verify beat's,
+# backed off to its ceiling, after the press — as many hot as cool and none
+# later; and the press's reads as many, give or take the one a run's end can
+# cut, the first no later.
+_card_same = (len(_uc[0]) >= 4 and len(_uh[0]) >= len(_uc[0])
+              and all(h <= c + 0.5 for h, c in zip(_uh[0], _uc[0])))
+_press_same = (bool(_uh[1]) and bool(_uc[1]) and len(_uh[1]) >= len(_uc[1]) - 1
+               and _uh[1][0] <= _uc[1][0] + 0.3)
+eq('offer reads and ⌖ are never slowed (s after the card\'s first read; hot: card %r, '
+   '⌖ %r; cool: card %r, ⌖ %r)' % (_uh[0], _uh[1], _uc[0], _uc[1]),
+   (_card_same, _press_same), (True, True))
+ok_('...nor a 📷 Snap, answered at once either way (hot %r s, cool %r s)'
+    % (_uh[2], _uc[2]), _uh[2] is not None and _uc[2] is not None
+    and _uh[2] <= _uc[2] + 0.3 and _uh[2] < 1.0)
+# ...and the snap's reader.json says the guard was on, as the beat the panel
+# was shown did: everything the panel was told, not all of it but one.
+eq('...and its reader.json says the heat guard was on, as the panel was told',
+   ((_uh[3]['said'].get('heartbeat') or {}).get('heatGuard', 'absent'),
+    (_uc[3]['said'].get('heartbeat') or {}).get('heatGuard', 'absent')), (True, False))
+
 
 # --- a card that showed its payout and no journey keeps its picture ----------
 #
