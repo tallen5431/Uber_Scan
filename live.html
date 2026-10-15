@@ -1898,8 +1898,10 @@
   // vouch for that fix. A beat that stops coming leaves the last one
   // standing, and once it has outrun the `freshFor` it came with, on this
   // page's own clock, it is a fix nobody has judged — the rule the "you are
-  // here" dot greys on (MV.hereDot). No fix, a refused one, a stale one: the
-  // whole card, which is what a driver sees when nothing is known.
+  // here" dot greys on (MV.hereDot). No fix, or a stale one: the whole card,
+  // which is what a driver sees when nothing is known. A fix the gate refused
+  // is gps.py's to judge: mid-drive it holds the state (DRIVING_HOLD), so the
+  // page does not ask `gpsOk` again.
   //
   // No control for it. A tap on the card side shows the whole card for
   // PEEK_MS, moving or not, and the driving form comes back on its own.

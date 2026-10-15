@@ -911,11 +911,11 @@ eq('ECEF velocity is read as a speed', _v and _v.get('ecefSpeed'), 13.0)
 # view — says after each.
 
 
-def drive(fixes, step=1.0):
+def drive(fixes, step=1.0, stale_after=20.0):
     """`fixes` are speeds in m/s, or dicts of TPV fields; latest()'s
     `driving` after each, and the Phone, for a later look."""
     clock = Clock()
-    it = G.Phone('127.0.0.1:9', stale_after=20.0, clock=clock)
+    it = G.Phone('127.0.0.1:9', stale_after=stale_after, clock=clock)
     out, north_m = [], 0.0
     for i, f in enumerate(fixes):
         if i:
@@ -942,17 +942,42 @@ eq('...and a fix between 1 and 3 m/s holds it, and starts the 5 s again',
    drive([15.0, 15.0, 0.5, 0.5, 0.5, 0.5, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])[0],
    [False] + [True] * 11 + [False])
 eq('...and does not start it', drive([2.9] * 6)[0], [False] * 6)
-_r, _it, _clock = drive([15.0, 15.0, ROUGH, 15.0, 15.0])
+# While driving, a fix the gate refuses holds the state rather than ending
+# it (DRIVING_HOLD): ended at the first refused fix, the 12 Oct replay put a
+# full card on the panel for one beat mid-drive 14-23 times in 7.9 hours.
 _frozen = [{'speed': 15.0, 'lat': SQ[0], 'lon': SQ[1]}] * 8
-eq('a stale or refused fix is never driving: a rough one ends it at once, and '
-   'two usable fixes start it again', _r, [False, True, False, False, True])
+eq('a refused fix mid-drive keeps driving mode: rough ones, a lat/lon frozen '
+   'while the car says 15 m/s, a fix with no speed',
+   [drive([15.0, 15.0, ROUGH, 15.0, ROUGH, ROUGH, 15.0])[0], drive(_frozen)[0],
+    drive([15.0, 15.0, {'speed': None}, 15.0])[0]],
+   [[False] + [True] * 6, [False] + [True] * 7, [False] + [True] * 3])
+eq('...and neither counts toward the stop nor breaks it: still for 5 s of '
+   'usable fixes, a rough one among them, and it ends',
+   drive([15.0, 15.0, 0.5, 0.5, ROUGH, 0.5, 0.5, 0.5])[0],
+   [False] + [True] * 6 + [False])
+eq('...but 10 s with no usable fix ends it: refused fixes for 11 s',
+   drive([15.0, 15.0] + [ROUGH] * 11)[0], [False] + [True] * 11 + [False])
+_r, _it, _clock = drive([15.0, 15.0])
+_clock.now += 10.0
+_at10 = (_it.latest() or {}).get('driving')
+_clock.now += 0.5
+eq('...and so do 10 s with no fix at all, asked of latest() between fixes',
+   (_at10, (_it.latest() or {}).get('driving')), (True, False))
+_clock.now += 1.5
+_it.take(G.parse_line(tpv(mode=3, eph=12.0, speed=15.0, lat=34.0, lon=-84.5)))
+eq('...after which one fast fix is the first of two again, not a continuation',
+   (_it.latest() or {}).get('driving'), False)
+eq('...and the hold is this Phone\'s staleness rule where that is shorter than '
+   '10 s: 5 s', drive([15.0, 15.0] + [ROUGH] * 6, stale_after=5.0)[0],
+   [False] + [True] * 6 + [False])
+_r, _it, _clock = drive([15.0, 15.0])
 _clock.now += 20.5
-eq('...a stale one, past the staleness rule, ends it',
-   ((_it.latest() or {}).get('driving'), (_it.latest() or {}).get('why')), (False, 'stale'))
-eq('...a lat/lon stuck while the car says 15 m/s is refused as frozen, and is '
-   'not driving', drive(_frozen)[0], [False] + [True] * 5 + [False] * 2)
-eq('...nor is a fix that says no speed', drive([15.0, 15.0, {'speed': None}])[0],
-   [False, True, False])
+eq('a refused fix never starts driving mode, and a stale one is never driving: '
+   'refused fixes alone, fast fixes split by refused ones, a fix past the '
+   'staleness rule',
+   (drive([ROUGH] * 4)[0], drive([ROUGH, 15.0, ROUGH, 15.0, ROUGH])[0],
+    (_it.latest() or {}).get('driving'), (_it.latest() or {}).get('why')),
+   ([False] * 4, [False] * 5, False, 'stale'))
 eq('...nor any NMEA fix, which the gate refuses as unrated',
    [(_x.take(G.parse_line(RMC)), (_x.latest() or {}).get('driving'))[1]
     for _x in [G.Phone('127.0.0.1:9')] for _ in range(3)], [False] * 3)
