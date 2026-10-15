@@ -219,35 +219,46 @@ ECEF_MOVED = 25.0
 # Driving once DRIVING_FIXES consecutive usable fixes read DRIVING_SPEED or
 # more; not driving once usable fixes have read under STOPPED_SPEED for
 # STOPPED_FOR seconds; between the two speeds the state holds. A refused fix
-# ends it at once, and so does a stale one (latest() past stale_after): a car
-# this file cannot place is not one it can say is moving, and the full card is
-# what a driver sees when nothing is known. All of it measured by replaying the
-# 12 Oct shift's gpspipe logs — 31,140 fixes over 7.9 hours, 836 of them
-# refused (818 rough, 18 frozen) — through this rule:
+# (or one with no speed) never starts it and breaks a run of fast fixes, and
+# while driving it changes nothing: the state is HELD until no usable fix has
+# come for DRIVING_HOLD seconds, and then it ends. A stale fix is past that by
+# construction, so a car this file cannot place is never said to be moving for
+# longer than the hold, and the full card is what a driver sees when nothing
+# is known. All of it measured by replaying the 12 Oct shift's gpspipe logs —
+# 31,140 fixes over 7.9 hours, 836 of them refused (818 rough, 18 frozen) —
+# through Phone.take() itself:
 #
 #   3 m/s (6.7 mph) to start. Over the minutes the car stood still (60 s
 #   windows whose median speed was under 0.2 m/s: 15,846 fixes) the receiver
 #   read p50 0.04 m/s, p99 0.42 — noise well under it.
-#   Two fixes in a row. Of the shift's 11 runs of exactly ONE usable fix at
-#   3 m/s or more, 8 sat between two refused fixes at 11-28 m/s and 3 on the
-#   line (2.9, 3.0, 2.9): a one-fix rule enters on each and leaves on the next
-#   second. None was a parked receiver's spike.
+#   Two fixes in a row, so one stray reading cannot start it. This shift
+#   sent no such reading: its 11 runs of exactly ONE usable fix at 3 m/s or
+#   more were 8 between two refused fixes at 11-28 m/s and 3 on the line
+#   (2.9, 3.0, 2.9), none a parked receiver's spike, and with the hold below
+#   a one-fix rule differs little here (84 entries against 86). It costs at
+#   most a second at the start of a drive.
 #   Under 1 m/s for 5 s to stop. 19 of those 15,846 still fixes read 1 m/s or
 #   more. Of the 213 stretches under 1 m/s, 58 lasted under 5 s — a slowdown
 #   for a turn, a stop sign rolled — and keep the driving form; 97 lasted 5 s
 #   to a minute — a light — and give the driver the card back while stopped.
 #   The band between holds. Without it (in and out at 3 m/s) the shift had
-#   142 entries to driving and 59 stops under 10 s; with it 123 and 43.
+#   106 entries to driving and 29 stops under 10 s; with it 86 and 12.
+#   A 10 s hold through refused fixes. Ending the state at the first refused
+#   fix, as this did first, gave 123 entries, 43 of them ended by a refused
+#   fix rather than a stop, 43 stops under 10 s, and a full card for one beat
+#   mid-drive 14-23 times in the 7.9 hours (by the beat's phase). Held, 86
+#   entries, 83 of the 85 ends a stop and 2 the hold running out, 12 stops
+#   under 10 s (11 of them real: 5 s still, then away), and 3-5 such beats.
+#   Ten seconds, or this Phone's stale_after where that is shorter (_hold()):
+#   on the rig the staleness rule is 20 s, so the hold is the 10.
 #
-# What it costs, measured the same way: 35% of the shift in the driving form,
-# and the panel changing form about 29 times an hour on a 4 s beat. 43 of the
-# 123 entries ended on a refused fix rather than a stop, and a beat lands in
-# that gap 14-23 times in the 7.9 hours (by the beat's phase): a full card for
-# one beat mid-drive, which is the rule saying it cannot place the car.
+# What it costs, measured the same way: 35.8% of the shift in the driving
+# form, and the panel changing form about 21 times an hour on a 4 s beat.
 DRIVING_SPEED = 3.0
 DRIVING_FIXES = 2
 STOPPED_SPEED = 1.0
 STOPPED_FOR = 5.0
+DRIVING_HOLD = 10.0
 
 # Long enough that a phone which accepted the connection and then stopped
 # talking is noticed, short enough that stop() is honoured promptly.
@@ -640,11 +651,13 @@ class Phone(object):
         # see _held().
         self._held_at = None
         self._held_from = None
-        # Whether the car is being driven, and the two counts that decide it:
-        # see DRIVING_SPEED and _moving().
+        # Whether the car is being driven, the two counts that decide it, and
+        # when the last usable fix came, which the hold runs from: see
+        # DRIVING_SPEED, DRIVING_HOLD and _moving().
         self._driving = False
         self._fast = 0
         self._slow_since = None
+        self._good_at = None
         self._stop = threading.Event()
         self._thread = None
 
@@ -701,16 +714,13 @@ class Phone(object):
             if self._fix is None:
                 return None, None
             got = dict(self._fix)
-            got['driving'] = self._driving
-            return got, self._clock() - self._at
+            now = self._clock()
+            got['driving'] = self._still_driving(now)
+            return got, now - self._at
 
     def _judged(self, got, age):
         got['ageSeconds'] = round(age, 2) if age >= 0 else None
         got['ok'], got['why'] = usable(got, age=age, stale_after=self.stale_after)
-        # ...and whether the car is being driven, as of this fix and only
-        # while the gate passes it at this age: stale, as refused, is never
-        # driving (see DRIVING_SPEED).
-        got['driving'] = got['driving'] and got['ok']
         # ...and how many more seconds it stays inside the staleness rule, for
         # whoever is handed it and keeps it: the panel ages a beat's fix on its
         # own clock once the beat stops coming, and greys it when this runs
@@ -745,20 +755,41 @@ class Phone(object):
             got['heldMoved'] = round(metres_apart(
                 self._held_from[0], self._held_from[1], here[0], here[1]), 1)
 
+    def _hold(self):
+        """How long a driving state outlives its last usable fix, in seconds:
+        DRIVING_HOLD, or this Phone's staleness rule where that is shorter, so
+        the state never outlives the fix it stands on."""
+        return min(DRIVING_HOLD, self.stale_after)
+
+    def _still_driving(self, now):
+        """Whether the car is being driven as of `now`: the state, while the
+        last usable fix is no older than the hold. Asked as a fix is handed
+        out as well as when one arrives, because a receiver that has gone
+        quiet sends nothing that would end it."""
+        return (self._driving and self._good_at is not None
+                and now - self._good_at <= self._hold())
+
     def _moving(self, got, now):
         """Move the driving state on by one fix, as it arrives: the rule under
         DRIVING_SPEED. Called holding the lock, after _held(), whose `heldFor`
-        the gate's `frozen` needs. The fix is judged at its arrival, age 0;
-        _judged() asks again at the age it is handed out at.
+        the gate's `frozen` needs. The fix is judged at its arrival, age 0.
 
-        A fix with no speed — GGA says none — counts as one this rule cannot
-        read, and so as refused: the car is not said to be moving on a
-        sentence that does not say so."""
+        A refused fix, or one with no speed — GGA says none — is one this rule
+        cannot read. It starts nothing and breaks a run of fast fixes; while
+        driving it holds the state, and the stop's five seconds with it, until
+        no usable fix has come for the hold (DRIVING_HOLD)."""
         speed = got.get('speed')
+        if self._driving and not self._still_driving(now):
+            # The hold ran out before this fix: the state ends here, so a
+            # fast fix after a long silence is the first of two, not a
+            # continuation.
+            self._driving, self._fast, self._slow_since = False, 0, None
         if not usable(got, age=0.0, stale_after=self.stale_after)[0] \
                 or not _number(speed):
-            self._driving, self._fast, self._slow_since = False, 0, None
-        elif speed >= DRIVING_SPEED:
+            self._fast = 0
+            return
+        self._good_at = now
+        if speed >= DRIVING_SPEED:
             self._fast += 1
             self._slow_since = None
             if self._fast >= DRIVING_FIXES:

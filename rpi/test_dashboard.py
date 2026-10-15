@@ -1307,8 +1307,14 @@ const framed = (page) => page.waitForFunction(
     const fresh = await look();
     await tick(6000);
     const outrun = await look();
-    // ...a fix the gate refused, which gps.py never calls driving, and a
-    // beat with no fix at all.
+    // ...a fix the gate refused mid-drive, which gps.py holds as driving for
+    // up to DRIVING_HOLD and the page must not overrule by asking the gate
+    // itself; the same once gps.py has let it go; and a beat with no fix.
+    await beat({ speed: 13.4, driving: true });
+    await tick(1100);
+    await beat({ speed: 13.4, driving: true, gpsOk: false, gpsWhy: 'rough', gpsErr: 129.2 });
+    await tick(1100);
+    const held = await look();
     await beat({ speed: 13.4, driving: false, gpsOk: false, gpsWhy: 'rough', gpsErr: 129.2 });
     await tick(1100);
     const refused = await look();
@@ -1319,7 +1325,7 @@ const framed = (page) => page.waitForFunction(
                     parked: parked, moving: moving, tapped: tapped, tapped9: tapped9,
                     tapped10: tapped10, stopped: stopped, between: between,
                     betweenStopped: betweenStopped, fresh: fresh, outrun: outrun,
-                    refused: refused, noFix: noFix };
+                    held: held, refused: refused, noFix: noFix };
     await page.close();
     await ctx.close();
   }
@@ -6710,10 +6716,12 @@ try:
            [(dv.get(k) or {}).get('driving') for k in ('tapped', 'tapped9', 'tapped10')]
            + [_sh(dv.get('tapped') or {}, *_DETAIL)],
            [False, False, True, (True,) * len(_DETAIL)])
-        eq('a stale or refused fix is never driving: a fix outrun on the page\'s own '
-           'clock, a refused one, none',
+        eq('a stale fix is never driving, nor one gps.py lets go: a fix outrun on '
+           'the page\'s own clock, a refused one past its hold, none',
            [(dv.get(k) or {}).get('driving') for k in ('fresh', 'outrun', 'refused', 'noFix')],
            [True, False, False, False])
+        eq('a refused fix mid-drive keeps driving mode on the page too, while gps.py '
+           'holds it', (dv.get('held') or {}).get('driving'), True)
 
     # --- marking an offer as taken, from the driving screen --------------
     idle = got.get('tookIdle') or {}
