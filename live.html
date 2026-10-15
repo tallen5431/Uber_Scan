@@ -1052,10 +1052,24 @@
                          font-weight: 700; color: var(--muted); }
   /* ...and the Undo a Took that ADDED an order offers for five seconds: the
    * same press the Took button makes pressed again (an untick), for the
-   * order the Took added and no other. Over the foot of the verdict pane. */
+   * order the Took added and no other. Over the foot of the verdict pane.
+   *
+   * The status row's "…" sheet sits over the same foot, and the two were
+   * drawn one on top of the other: "…" pressed in the five seconds after a
+   * Took that added an order put the sheet under the Undo, and measured
+   * that way the centre of the sheet and of every line in it landed on the
+   * Undo, at 1024x600, 800x480 and 480x320 in both pictures and on the
+   * phone — the sheet unreadable where they crossed and untappable, with
+   * nothing saying so. Now they STACK: the Undo keeps its place, where the
+   * thumb that pressed Took finds it, and the sheet rides above it by the
+   * Undo's height and a gap while the Undo shows. One fixed height,
+   * --undo-h, so the offset is the box and not an estimate of it.
+   * rpi/test_layout.py measures both whole, apart, and each the element its
+   * own centre hits, on those four. */
+  :root { --undo-h: 52px; --undo-gap: 6px; }
   .undo {
     position: fixed; left: 8px; right: 8px; bottom: 72px; z-index: 39;
-    min-height: 52px; padding: 0 14px; border-radius: 12px;
+    height: var(--undo-h); padding: 0 14px; border-radius: 12px;
     border: 2px solid var(--line); background: var(--panel-2); color: var(--text);
     font: inherit; font-size: clamp(15px, 2.4vw, 22px); font-weight: 700;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1071,6 +1085,16 @@
     #app > .moresheet {
       position: relative; left: auto; right: auto; bottom: auto;
       grid-column: 1; grid-row: 1; margin: 0; align-self: end;
+    }
+    /* ...above the Undo while it shows (see .undo). */
+    #app:has(> .undo:not([hidden])) > .moresheet {
+      margin-bottom: calc(var(--undo-h) + var(--undo-gap));
+    }
+  }
+  /* Upright, both are fixed to the glass: the same offset as a lift. */
+  @media (orientation: portrait) {
+    body:has(#undo:not([hidden])) .moresheet {
+      bottom: calc(72px + var(--undo-h) + var(--undo-gap));
     }
   }
   /* The pair line with two orders in the car and carrying two turned OFF

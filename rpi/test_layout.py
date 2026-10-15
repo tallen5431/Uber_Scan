@@ -3172,46 +3172,54 @@ const SNAP_MEASURE = (fixture) => {
       over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
     };
   });
+  // The panel the two-order measurements are made on: live.html over a fake
+  // event stream, a fake status and the two pictures. Shared by the carry
+  // block and the foot block below it.
+  const carryPage = async (panel, view) => {
+    const ctx = await browser.newContext({
+      viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript((v) => {
+      try { localStorage.setItem('uberscan.liveView', v); } catch (e) {}
+      class FakeEventSource {
+        constructor(url) { this.url = url; window.__es = this; }
+        close() {}
+        push(obj) { if (this.onmessage) this.onmessage({ data: JSON.stringify(obj) }); }
+      }
+      window.EventSource = FakeEventSource;
+    }, view);
+    await page.route('**/api/frame.*', (route) => {
+      const v = /view=screen/.test(route.request().url()) ? 'screen' : 'scene';
+      route.fulfill({ status: 200, contentType: 'image/jpeg',
+                      body: Buffer.from(FRAMES[v], 'base64') });
+    });
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ scanner: { enabled: true, running: true, error: null },
+                             status: { phase: 'scanning', message: '' },
+                             last: null, lastAgeMs: null, heardAgeMs: 400,
+                             offer: null, holding: null }) }));
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction(() => document.getElementById('view').naturalWidth > 2,
+                               null, { timeout: 10000 }).catch(() => {});
+    await page.clock.runFor(600);
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    return { ctx: ctx, page: page, push: push };
+  };
+  // The widest each line is asked to hold: three-figure pays, the longest
+  // street a real card printed, and the longest of the GPS drop's words.
+  const CARRY_A = { n: 1, pay: 112.45, minutes: 55, holdId: 'l-a@1',
+                    dropoff: '4821 Kestrel Dr S, Powder Springs, GA 30127', card: null,
+                    endPinned: false, arrived: false, endWhy: 'too many answers', app: 'uber' };
+  const CARRY_B = { n: 2, pay: 128.08, minutes: 60, holdId: 'l-b@2',
+                    dropoff: '1985 Cobb Pkwy NW, Kennesaw, GA 30152', card: null,
+                    endPinned: false, arrived: false, endWhy: 'too many answers', app: 'uber' };
   for (const panel of PLANNER_PANELS) {
     for (const view of ['screen', 'scene']) {
-      const ctx = await browser.newContext({
-        viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
-      });
-      const page = await ctx.newPage();
-      await page.clock.install({ time: Date.now() });
-      await page.addInitScript((v) => {
-        try { localStorage.setItem('uberscan.liveView', v); } catch (e) {}
-        class FakeEventSource {
-          constructor(url) { this.url = url; window.__es = this; }
-          close() {}
-          push(obj) { if (this.onmessage) this.onmessage({ data: JSON.stringify(obj) }); }
-        }
-        window.EventSource = FakeEventSource;
-      }, view);
-      await page.route('**/api/frame.*', (route) => {
-        const v = /view=screen/.test(route.request().url()) ? 'screen' : 'scene';
-        route.fulfill({ status: 200, contentType: 'image/jpeg',
-                        body: Buffer.from(FRAMES[v], 'base64') });
-      });
-      await page.route('**/api/status*', (route) => route.fulfill({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({ scanner: { enabled: true, running: true, error: null },
-                               status: { phase: 'scanning', message: '' },
-                               last: null, lastAgeMs: null, heardAgeMs: 400,
-                               offer: null, holding: null }) }));
-      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
-      await page.waitForFunction(() => document.getElementById('view').naturalWidth > 2,
-                                 null, { timeout: 10000 }).catch(() => {});
-      await page.clock.runFor(600);
-      const push = (m) => page.evaluate((x) => window.__es.push(x), m);
-      // The widest each line is asked to hold: three-figure pays, the longest
-      // street a real card printed, and the longest of the GPS drop's words.
-      const A = { n: 1, pay: 112.45, minutes: 55, holdId: 'l-a@1',
-                  dropoff: '4821 Kestrel Dr S, Powder Springs, GA 30127', card: null,
-                  endPinned: false, arrived: false, endWhy: 'too many answers', app: 'uber' };
-      const B = { n: 2, pay: 128.08, minutes: 60, holdId: 'l-b@2',
-                  dropoff: '1985 Cobb Pkwy NW, Kennesaw, GA 30152', card: null,
-                  endPinned: false, arrived: false, endWhy: 'too many answers', app: 'uber' };
+      const { ctx, page, push } = await carryPage(panel, view);
+      const A = CARRY_A, B = CARRY_B;
       await push({ alive: true, at: 1 });
       await push({ holding: A, orders: [A, B], unowned: 2 });
       await push({ ready: false, state: 'empty', track: null, places: [], text: '' });
@@ -3244,6 +3252,100 @@ const SNAP_MEASURE = (fixture) => {
       const offerFirst = await measureCarry(page);
       out[panel[0] + ' ' + view + ' carry'] = { before: before, two: two, three: three,
                                                offer: offer, offerFirst: offerFirst };
+      await page.close();
+      await ctx.close();
+    }
+  }
+  // The foot of the verdict pane with two things over it at once: the Undo a
+  // Took that ADDED an order offers for five seconds, and the "…" sheet the
+  // status row opens for ten. They were drawn one on top of the other. Driven
+  // the way the driver gets there: a card up with ① in the car, ✓ Took
+  // pressed and the server's reply naming the order it added (offerUndo),
+  // then "…" pressed inside the five seconds. Each is measured whole (no
+  // glyph outside its own box, the verdict pane above the status row, or the
+  // glass), the two boxes apart, and each the element its own centre — and
+  // the centre of each of the sheet's lines — hits. On the three panels in
+  // both pictures, and on the phone, where both are fixed to the glass.
+  const FOOT_MEASURE = () => {
+    const shown = (el) => !!el && !el.hidden && getComputedStyle(el).display !== 'none'
+      && el.getBoundingClientRect().height > 0;
+    const rect = (el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    };
+    const conn = document.querySelector('.connbar').getBoundingClientRect();
+    const bar = document.querySelector('.bottombar').getBoundingClientRect();
+    const live = document.querySelector('.live').getBoundingClientRect();
+    // The pane: the verdict's column, from the top of the glass down to the
+    // status row (or the bar, if that is higher).
+    const pane = { left: Math.max(0, live.left), right: Math.min(window.innerWidth, live.right),
+                   top: 0, bottom: Math.min(conn.top, bar.top) };
+    const cut = (el) => {
+      const own = rect(el);
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const rg = document.createRange();
+      let n, out = '';
+      while ((n = walk.nextNode())) {
+        for (let i = 0; i < n.length; i++) {
+          rg.setStart(n, i); rg.setEnd(n, i + 1);
+          const c = rg.getBoundingClientRect();
+          if (!c.width && !c.height) continue;
+          if ([own, pane].some((b) => c.left < b.left - 0.5 || c.right > b.right + 0.5
+                                    || c.top < b.top - 0.5 || c.bottom > b.bottom + 0.5)) {
+            out += n.data[i];
+          }
+        }
+      }
+      return out;
+    };
+    const hits = (el, r) => {
+      const h = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+      return !!h && (h === el || el.contains(h));
+    };
+    const one = (el) => shown(el) ? {
+      text: el.textContent.replace(/\s+/g, ' ').trim(), cut: cut(el), box: rect(el),
+      hit: hits(el, rect(el)),
+    } : null;
+    const u = document.getElementById('undo'), s = document.getElementById('moreSheet');
+    const undo = one(u), sheet = one(s);
+    if (sheet) sheet.lines = [].slice.call(s.children).map((c) => hits(s, rect(c)));
+    const apart = !!(undo && sheet) && (undo.box.bottom <= sheet.box.top + 0.5
+                                         || sheet.box.bottom <= undo.box.top + 0.5);
+    const d = document.documentElement;
+    return { undo: undo, sheet: sheet, apart: apart,
+             over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1 };
+  };
+  for (const panel of PLANNER_PANELS.concat([['390x844', 390, 844]])) {
+    for (const view of (panel[1] > panel[2] ? ['screen', 'scene'] : ['screen'])) {
+      const { ctx, page, push } = await carryPage(panel, view);
+      // A status row with something for the sheet to say beside the
+      // connection: the scanner's note that it is not saving.
+      await push({ alive: true, at: 1, notSaving: 'Offers are NOT being saved: disk full',
+                   tooBright: false });
+      await push(Object.assign({}, HELD.offer, {
+        offer: { id: 'o-layout-foot', pay: 18.04, minutes: 22.0 },
+        holding: CARRY_A, orders: [CARRY_A], unowned: 0 }));
+      await page.clock.runFor(1100);
+      await page.route('**/api/offers/mark', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, holding: true, held: CARRY_A,
+                               orders: [CARRY_A, CARRY_B],
+                               added: { id: 'o-layout-foot', pay: 128.08,
+                                        undoForMs: 5000 } }) }));
+      await page.evaluate(() => document.getElementById('took').click());
+      // The reply comes back over the routed fetch on the real clock, not the
+      // page's installed one, so it is waited for — in this script's time —
+      // until the Undo it brings is up (two seconds at most).
+      for (let i = 0; i < 40; i++) {
+        if (await page.evaluate(() => !document.getElementById('undo').hidden)) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      await page.clock.runFor(300);
+      const alone = await page.evaluate(FOOT_MEASURE);
+      await page.click('#more', { timeout: 5000 }).catch(() => {});
+      await page.clock.runFor(200);
+      const both = await page.evaluate(FOOT_MEASURE);
+      out[panel[0] + ' ' + view + ' foot'] = { alone: alone, both: both };
       await page.close();
       await ctx.close();
     }
@@ -3811,6 +3913,40 @@ try:
             eq('the pair line says "vs ① only", whole, with carrying two off and two '
                'read back at %s' % where,
                (_vs.get('text'), _vs.get('cut')), ('vs ① only', ''))
+
+    # The foot of the verdict pane with the Undo a Took that added an order
+    # offers and the status row's "…" sheet both up: they were drawn one on
+    # top of the other. Stacked, the Undo where it was and the sheet above it,
+    # each whole and each the element its own centre (and each of the sheet's
+    # lines' centres) hits. On the three panels in both pictures, and the
+    # phone, where both are fixed to the glass rather than to the grid.
+    for panel, w, h in list(PLANNER_PANELS) + [('390x844', 390, 844)]:
+        for view in (('screen', 'scene') if w > h else ('screen',)):
+            where = '%s, %s view' % (panel, view)
+            fm = got.get('%s %s foot' % (panel, view)) or {}
+            _al, _bo = fm.get('alone') or {}, fm.get('both') or {}
+            _ua, _ub, _sb = _al.get('undo') or {}, _bo.get('undo') or {}, _bo.get('sheet') or {}
+            ok_('the Undo and the "…" sheet were both up together at %s' % where,
+                _ua and _ub and _sb)
+            if not (_ua and _ub and _sb):
+                continue
+            eq('the Undo says what it undoes, whole and tappable, at %s' % where,
+               (_ua.get('text'), _ua.get('cut'), _ua.get('hit')),
+               ('Added ② $128.08 · Undo', '', True))
+            ok_('...and the "…" sheet opened inside its five seconds does not overlap it at %s'
+                % where, _bo.get('apart'))
+            eq('...both whole: no glyph outside its own box, the verdict pane or the glass, '
+               'at %s' % where, (_ub.get('cut'), _sb.get('cut')), ('', ''))
+            eq('...and both tappable: the Undo\'s centre and every line of the sheet hit '
+               'their own at %s' % where,
+               (_ub.get('hit'), _sb.get('hit'), bool(_sb.get('lines'))
+                and all(_sb.get('lines'))), (True, True, True))
+            # Scrolling as it did before "…" (the phone may scroll down; the
+            # dashboard panels do not, here or anywhere): the sheet adds none.
+            eq('...the Undo where it was before "…" was pressed, and the sheet adds no '
+               'scrolling, at %s' % where,
+               (_ub.get('box') == _ua.get('box'), bool(_bo.get('over')) and not _al.get('over'),
+                bool(_bo.get('over')) and w > h), (True, False, False))
 
     # The order in the car, on the card, at the most each line is asked to
     # hold (HELD), on the three panels and in both pictures.
