@@ -739,10 +739,11 @@ SEQ.forEach(function (seq) {
      A.pressBetween(held({ pickup: 'Wren Street Noodles' }), card(), planned(held(), 5000)).why,
      'another store');
 
-  // No cue: nothing decided, for every screen that is not one.
+  // No cue: nothing decided, for every screen that is not one — read after
+  // the Took and of the order's own app, so the screen alone is asked.
   eq('pressBetween: with no cue nobody is given it',
      ['unknown', 'uber.pickupNav', 'dd.offer', undefined].map(function (s) {
-       return A.pressBetween(held(), card(), press('9 Heron Ct, Smyrna', s)).to;
+       return A.pressBetween(held(), card(), press('9 Heron Ct, Smyrna', s, { app: 'uber' })).to;
      }), [null, null, null, null]);
 
   // Not the question at all: dropoff() decides as it always has.
