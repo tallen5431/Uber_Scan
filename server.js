@@ -1393,7 +1393,19 @@ function whoseDropoff(read, force, now) {
     }
     return out;
   }
-  var a = Assemble.attribute(assembly, orders, d);
+  // Two orders and a press while a card is being screened that it could
+  // belong to (Assemble.cardCandidate): the card's on the card's own place
+  // popup, as pressBetween has it with one order; and otherwise no order is
+  // given it by the hard rules alone — `only` — but on a cue that names it,
+  // or the chooser asks: ①, ②, This card, Neither.
+  var screened = d.asked !== false
+    && Assemble.cardCandidate(orders, screeningCard(now), d);
+  if (screened && Assemble.ownPopup(screeningCard(now), d)) {
+    out.order = null;
+    out.cue = 'popup';
+    return out;
+  }
+  var a = Assemble.attribute(assembly, orders, d, screened ? { card: true } : null);
   if (a.order) {
     out.order = a.order;
     out.cue = a.cue;

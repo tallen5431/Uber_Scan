@@ -7462,6 +7462,50 @@ eq('...a press never replaces the held end without a cue or a pick',
 eq('nothing held: ⌖ behaves exactly as before', _scr.get('none'), _SCR_WANT['none'])
 eq('carryTwo off: the same', _screened('0'), _SCR_WANT)
 
+# ...and with TWO orders in the car (carrying two on), ① an Uber order and ②
+# a DoorDash order with its end on record, and a DoorDash card screened.
+# Measured at 657bc18: ⌖ over that card's customer popup was filed onto ② by
+# `only` — the app ruled ① out and nothing considered the card — replacing
+# ②'s end while the popup's own line gave the card the same address. Now the
+# card's own popup is the card's, as with one order, and with no cue the hard
+# rules choose no order on their own while the card could own the press: the
+# chooser asks ①, ②, This card or Neither.
+_S2_END = '77 Birch Ln, Roswell, GA 30075'
+_tp2, _tb2, _tj2, _th2 = _cserver('two-screened', CARRY_TWO='1', CHOOSER_MS='1500')
+try:
+    def _t2marks(line):
+        return [(r.get('id'), r.get('asked'), r.get('cue') or r.get('from'))
+                for r in _rows(_tj2, 'mark') if r.get('dropoff') == line]
+
+    _took2(_tb2, _card('t-u', 9.48, minutes=40.0, pickup='Larkspur Tacos', dropoff=_SH_CARD))
+    _took2(_tb2, _card('t-d', 11.0, minutes=35.0, app='doordash', screen='dd.offer',
+                       pickup='Wren Street Noodles', dropoff=_S2_END))
+    _say(_card('t-s', 12.5, minutes=25.0, miles=3.0, app='doordash', screen='dd.offer',
+               pickup='Lark Owl Pizza'))
+    _say(_spop(_SC_END))
+    _say(_ssight(True, 'dd.placePopup', 'doordash', [_sstop('dropoff', _SC_END)]),
+         _sline(_SC_END, 'dd.placePopup'))
+    _st2 = get(_tb2, '/api/status')
+    eq('two held, a card screened: ⌖ over the card\'s own popup files onto the card, never ②',
+       ([o.get('dropoff') for o in _st2.get('orders') or []],
+        ((_st2.get('offer') or {}).get('id'), (_st2.get('offer') or {}).get('dropoff'),
+         (_st2.get('offer') or {}).get('dropoffFrom')),
+        _t2marks(_SC_END), _st2.get('chooser')),
+       ([_SH_CARD, _S2_END], ('t-s', _SC_END, 'press'),
+        [('t-s', False, 'popup'), ('t-s', True, 'popup')], None))
+    # ...and a press no cue decides, of DoorDash's app: ② is the one order the
+    # app leaves, which is no reason while the card could be the press's.
+    _say(_sline(_SX, 'unknown'))
+    _ch2 = get(_tb2, '/api/status').get('chooser') or {}
+    post(_tb2, '/api/choose', {'id': _ch2.get('id'), 'pick': 'neither'})
+    time.sleep(0.3)
+    eq('...and with no cue the chooser asks ①, ②, This card or Neither, and `only` files nothing',
+       ([r.get('n') for r in _ch2.get('rows') or []], _ch2.get('card'),
+        [o.get('dropoff') for o in _orders(_tb2)], _t2marks(_SX)),
+       ([1, 2], {'pick': 'card', 'pay': 12.5}, [_SH_CARD, _S2_END], []))
+finally:
+    stop(_tp2)
+
 shutil.rmtree(_cdir, ignore_errors=True)
 
 # --- the held order's pickups, visited ----------------------------------------

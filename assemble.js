@@ -473,10 +473,7 @@
     if (card.heldCard || card.id === held.id || card.accepted === true) return null;
     var out = { to: null, cue: null, why: null };
     if (d.screen === 'dd.placePopup') {
-      var mine = typeof card.dropoff === 'string'
-        && (cardRank(card) === 'popup' || cardRank(card) === 'press')
-        && sameStreet(card.dropoff, d.line);
-      if (mine) {
+      if (ownPopup(card, d)) {
         out.to = 'card';
         out.cue = 'popup';
       } else {
@@ -499,6 +496,33 @@
     }
     out.why = 'no cue';
     return out;
+  }
+
+  /* The card cue, on its own: `d`, a press, read DoorDash's place popup on the
+   * street this card's end already came off the screen as — a popup popup()
+   * filed there, or an earlier press. pressBetween's, and with two orders
+   * held server.js's whoseDropoff asks it before attribute(). */
+  function ownPopup(card, d) {
+    return !!card && !!d && d.screen === 'dd.placePopup' && typeof d.line === 'string'
+      && typeof card.dropoff === 'string'
+      && (cardRank(card) === 'popup' || cardRank(card) === 'press')
+      && sameStreet(card.dropoff, d.line);
+  }
+
+  /* Whether the card being screened is a third owner a press could belong
+   * to with two orders held — so that no order is chosen for it by the
+   * hard rules alone (attribute(), `card`): a press, a card that is no order
+   * in the car (not its id, not its card back) and not one already marked
+   * taken, of the press's app where both say one, and a screen that is not
+   * one of an order taken — Uber's navigation and Trip Planner (`screen`
+   * uber.nav, uber.planner) show only orders accepted, which an offer being
+   * screened is not. */
+  function cardCandidate(orders, card, d) {
+    if (!card || !d || d.asked === false) return false;
+    if (card.heldCard || card.accepted === true) return false;
+    if ((orders || []).some(function (o) { return o && o.id === card.id; })) return false;
+    if (d.app && card.app && d.app !== card.app) return false;
+    return d.screen !== 'uber.nav' && d.screen !== 'uber.planner';
   }
 
   /* ---------- a place popup, read while a card is screened -----------------
@@ -1290,8 +1314,19 @@
   /* `orders` is every order held, first-taken first; `d` a dropoff line or a
    * candidate made off a planner. Returns {order, cue, why, votes}: `order`
    * null when nothing decides, `why` then 'nobody' (the hard rules left none),
-   * 'no cue' or 'cues disagree'. */
-  function attribute(st, orders, d) {
+   * 'no cue' or 'cues disagree'.
+   *
+   * `ctx.card`: a card being screened could own this press too
+   * (cardCandidate). The hard rules then decide nothing on their own — they
+   * rule orders out and never the card, so `only` would be elimination over
+   * two owners of three — and the one order they leave is chosen on a cue
+   * that names it, or not at all. Measured at 657bc18, carrying two on, ① an
+   * Uber order, ② a DoorDash order with its end on record and a DoorDash card
+   * screened: ⌖ over that card's customer popup was filed onto ② by `only`,
+   * replacing its end, as the popup's own line gave the card the same
+   * address. Elimination proper needs a planner's list seen whole, and a
+   * planner is never a card's screen, so it does not arise here. */
+  function attribute(st, orders, d, ctx) {
     var out = { order: null, cue: null, why: null, votes: [], ties: [] };
     var live = (orders || []).filter(function (o) {
       if (d.app && o.app && d.app !== o.app) return false;
@@ -1301,7 +1336,7 @@
       return true;
     });
     if (!live.length) { out.why = 'nobody'; return out; }
-    if (live.length === 1) {
+    if (live.length === 1 && !(ctx && ctx.card)) {
       out.order = live[0];
       out.cue = 'only';
       return out;
@@ -1567,7 +1602,7 @@
            // (where on a planner each order's end is).
            sameStreet: sameStreet,
            dropoff: dropoff, file: file, fileCard: fileCard, cardRank: cardRank,
-           pressBetween: pressBetween,
+           pressBetween: pressBetween, ownPopup: ownPopup, cardCandidate: cardCandidate,
            popup: popup, filePopup: filePopup, cardNames: cardNames,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
            keyOf: keyOf, placements: placements, linked: linked,

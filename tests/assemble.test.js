@@ -767,6 +767,33 @@ SEQ.forEach(function (seq) {
      ['chooser', 'press', { value: '9 Heron Ct, Smyrna, GA 30080', from: 'press' },
       'outranked by press']);
 
+  // Two orders held: whether the card screened could own a press at all —
+  // not on an order's own navigation or planner, not another app's, not a
+  // card already taken or an order's own, not a sighting.
+  var two = [held(), held({ id: 'o-two', acceptedAt: 1100, tookAt: 1300, app: 'doordash' })];
+  eq('cardCandidate: a screened card can own a press, but not over an order\'s navigation or '
+     + 'planner, of another app, taken, an order\'s own, or unpressed',
+     [A.cardCandidate(two, card(), d1),
+      A.cardCandidate(two, card(), press('9 Heron Ct, Smyrna', 'unknown')),
+      A.cardCandidate(two, card(), press('77 Birch Ln, Roswell', 'uber.nav', { app: 'uber' })),
+      A.cardCandidate(two, card(), planned(held(), 5000)),
+      A.cardCandidate(two, card({ app: 'uber' }), d1),
+      A.cardCandidate(two, card({ accepted: true }), d1),
+      A.cardCandidate(two, card({ id: 'o-two' }), d1),
+      A.cardCandidate(two, card(), press(OWN, 'dd.placePopup', { asked: false }))],
+     [true, true, false, false, false, false, false, false]);
+  // ...and while it could, the one order the hard rules leave is not chosen
+  // on that alone; a cue that names it still chooses it.
+  var dd = press('9 Heron Ct, Smyrna', 'unknown');
+  var due = press('9 Heron Ct, Smyrna', 'unknown', { expectedBy: 1200 });
+  var twoDue = [two[0], Object.assign({}, two[1], { deliverBy: 1201 })];
+  eq('attribute with a screened card: no order by `only`, one by a cue that names it',
+     [A.attribute(A.fresh(), two, dd).cue,
+      [A.attribute(A.fresh(), two, dd, { card: true }).order,
+       A.attribute(A.fresh(), two, dd, { card: true }).why],
+      A.attribute(A.fresh(), twoDue, due, { card: true }).cue],
+     ['only', [null, 'no cue'], 'deadline']);
+
   // The customer's popup read on its own, unpressed, on the whole screen: the
   // popup's own line files it on the card; this read files it on no order.
   var popSight = { at: 5000, asked: false, whole: true, titled: false, app: 'doordash',
