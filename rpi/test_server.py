@@ -3231,6 +3231,87 @@ except Exception:
 no_('...without a stack trace at boot (%r)' % (_herr5[:70].replace('\n', ' '),),
     'uncaught' in _herr5)
 
+# --- an order that outlives its own clock leaves a drop row ------------------
+#
+# holding() put such an order down and wrote nothing, so tools/shift_report.py
+# could not tell an expiry from a hold the server lost: both were "no end". It
+# now writes `kind: 'drop'`, `by: 'expiry'`, dated at holdEnds — the moment
+# the server stopped counting the order — and not at whichever call noticed,
+# which after a restart is the boot. Once per order. Invented ids; no place.
+_xdir = tempfile.mkdtemp()
+_xjournal = os.path.join(_xdir, 'offers.jsonl')
+_xhold = os.path.join(_xdir, 'holding.json')
+open(_xjournal, 'w').close()
+
+
+def _xdrops():
+    rows = [json.loads(l) for l in open(_xjournal) if l.strip()]
+    return [(r.get('id'), r.get('by'), r.get('at'), r.get('seq'), r.get('acceptedAt'))
+            for r in rows if r.get('kind') == 'drop']
+
+
+# Two orders the server was down for, past their clocks by a day, each with
+# its own minutes so the two rows cannot share a date by accident.
+_xa = NOW - 86400000
+with open(_xhold, 'w') as _fh:
+    json.dump({'v': 2, 'orders': [
+        {'id': 'x-1', 'pay': 11.0, 'minutes': 30, 'acceptedAt': _xa},
+        {'id': 'x-2', 'pay': 7.0, 'minutes': 12, 'acceptedAt': _xa + 60000}]}, _fh)
+_xend1 = _xa + 30 * 1.5 * 60000 + 10 * 60000
+_xend2 = _xa + 60000 + 12 * 1.5 * 60000 + 10 * 60000
+_xproc, _xbase = start({'SCANNER': '0'}, _xjournal)
+try:
+    no_('(the premise: an order past its clock at boot is not carried)',
+        (get(_xbase, '/api/status') or {}).get('holding'))
+    for _ in range(3):
+        get(_xbase, '/api/status')
+    time.sleep(0.3)
+    eq('an order past its own clock at boot leaves one drop row by expiry, each',
+       sorted((r[0], r[1]) for r in _xdrops()), [('x-1', 'expiry'), ('x-2', 'expiry')])
+    eq('...dated at the moment its clock ran out, not at the boot that noticed',
+       sorted((r[0], r[2], r[3]) for r in _xdrops()),
+       [('x-1', _xend1, _xend1), ('x-2', _xend2, _xend2)])
+    eq('...carrying when its card was on the screen, as every drop row does',
+       sorted((r[0], r[4]) for r in _xdrops()), [('x-1', _xa), ('x-2', _xa + 60000)])
+finally:
+    stop(_xproc)
+# ...and a second restart finds nothing to write: the file it boots from no
+# longer names them.
+_xproc, _xbase = start({'SCANNER': '0'}, _xjournal)
+try:
+    get(_xbase, '/api/status')
+    time.sleep(0.3)
+    eq('...exactly once: a second restart writes no second row',
+       sorted(r[0] for r in _xdrops()), ['x-1', 'x-2'])
+finally:
+    stop(_xproc)
+
+# And on a server that is up when the clock runs out: an order carried at boot,
+# with a grace of nothing and minutes of a few seconds (0.0625 min, so the
+# half again is 5,625 ms exactly in both languages), asked about after its end
+# and then asked about again — the beat asks on every fix.
+_xb = int(time.time() * 1000) - 1000
+with open(_xhold, 'w') as _fh:
+    json.dump({'v': 2, 'orders': [
+        {'id': 'x-3', 'pay': 9.0, 'minutes': 0.0625, 'acceptedAt': _xb}]}, _fh)
+_xend3 = _xb + 5625
+_xproc, _xbase = start({'SCANNER': '0', 'HOLD_GRACE_MS': '0'}, _xjournal)
+try:
+    ok_('(the premise: the order is carried before its clock runs out)',
+        int(time.time() * 1000) < _xend3
+        and (get(_xbase, '/api/status') or {}).get('holding'))
+    time.sleep(max(0, (_xend3 - time.time() * 1000) / 1000.0) + 0.5)
+    for _ in range(4):
+        get(_xbase, '/api/status')
+    time.sleep(0.3)
+    eq('an order that runs out while the server is up leaves one row by expiry',
+       [(r[0], r[1]) for r in _xdrops() if r[0] == 'x-3'], [('x-3', 'expiry')])
+    eq('...dated at its end, not at the request that noticed',
+       [r[2] for r in _xdrops() if r[0] == 'x-3'], [_xend3])
+finally:
+    stop(_xproc)
+shutil.rmtree(_xdir, ignore_errors=True)
+
 # --- Stage 4: the order in the car is a list ---------------------------------
 #
 # holding.json is `{v: 2, orders: [Hold]}` now, capped at one order (MAX_HELD

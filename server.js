@@ -1256,8 +1256,13 @@ function countSighting(s) {
 }
 
 /* The orders being carried right now, first-taken first. One past its own
- * clock is put down here (written, and the scanner told); one with no stated
- * time is kept on the list and never counted, as the slot kept it. */
+ * clock is put down here (written, and the scanner told, and a drop row
+ * journaled: see expiredRows); one with no stated time is kept on the list and
+ * never counted, as the slot kept it.
+ *
+ * Asked on every beat, so the filter is all an ordinary call pays: the write
+ * below runs only on the call that finds an order gone, and that call is once
+ * per order, because the same call takes the order off the list. */
 function heldOrders(now) {
   var gone = scanner.held.filter(function (h) {
     var ends = holdEnds(h);
@@ -1265,8 +1270,43 @@ function heldOrders(now) {
   });
   if (gone.length) {
     setHeld(scanner.held.filter(function (h) { return gone.indexOf(h) === -1; }));
+    expiredRows(gone);
   }
   return scanner.held.filter(function (h) { return holdEnds(h) !== null; });
+}
+
+/* A drop row for each order put down by its own clock, `by: 'expiry'`.
+ *
+ * Before this an expiry wrote nothing, so the shift report (tools/) read an
+ * order that ran out exactly as it read one the server lost — "no end" — and
+ * the two are different faults. The row is DATED AT holdEnds, the moment the
+ * server stopped counting the order, not at the call that noticed: that call
+ * is the next beat or request, and after a restart it is the boot, possibly
+ * hours later. `seq` is the same moment, so the sync keys one expiry as one
+ * row.
+ *
+ * ONCE PER ORDER, including across a restart, because of the order of the two
+ * writes: the list (holding.json) is rewritten first, synchronously, by
+ * setHeld in heldOrders, and the row is appended after. An order found
+ * already expired at boot is still on the file, so loadHolding's heldOrders
+ * finds it gone and this writes its row then; the file it rewrites no longer
+ * names it, so the next boot does not write it again. The writes the other way
+ * round would write the row twice after a power cut between them; this way
+ * round loses it in that window instead, which is the cost appendLines already
+ * names for a power cut, and an append that fails is said like any other.
+ *
+ * `acceptedAt` as the other drop rows carry it. Its `at - acceptedAt` is the
+ * card's own minutes, half again, plus the grace — the card again, not a
+ * measurement — and the shift report says so rather than timing it. */
+function expiredRows(gone) {
+  var rows = gone.map(function (h) {
+    var ends = holdEnds(h);
+    return JSON.stringify({ v: 1, kind: 'drop', at: ends, id: h.id, seq: ends,
+                            acceptedAt: h.acceptedAt, by: 'expiry' }) + '\n';
+  });
+  appendLines(rows.join(''), function (err) {
+    if (err) console.error('journal: could not record an expiry: ' + err.message);
+  });
 }
 
 /* The first-taken order being carried, or null: what every one-order answer
@@ -6963,8 +7003,10 @@ function route(req, res) {
    * It is data to be held against the card's own stated minutes, by hand, once
    * a week of it exists. And it is censored: a row exists only for a press
    * made while holding() still held the job, so a delivery that ran past its
-   * stated time × HOLD_OVERRUN + HOLD_GRACE_MS leaves no row at all. Absence is
-   * not "never delivered".
+   * stated time × HOLD_OVERRUN + HOLD_GRACE_MS leaves no press row. It leaves
+   * a `by: 'expiry'` row instead (expiredRows), dated when that clock ran out:
+   * when the rig stopped counting the job, not when the job ended. Absence of
+   * a press is not "never delivered".
    *
    * And it names the order the RIG was holding, which is not always the one
    * just delivered. The hold is one slot and the last tick takes it, so with
@@ -7006,7 +7048,9 @@ function route(req, res) {
     // from the card as the hold is — see acceptedAt in the mark handler — so
     // this is the same clock holding() expires the job on. putDown() writes
     // it, for this press and for the GPS drop alike (which adds `by: 'gps'`);
-    // a Took that replaces a hold writes the same row with `by: 'replaced'`.
+    // a Took that replaces a hold writes the same row with `by: 'replaced'`,
+    // and an order that outlives its own clock `by: 'expiry'`, dated when the
+    // clock ran out (expiredRows).
     //
     // The order is down whether or not the row landed, so the answer is
     // still ok: the panel believes this reply about the HOLD (see the Drop

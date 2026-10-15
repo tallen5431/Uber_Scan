@@ -68,6 +68,9 @@ def at(h, m, s=0, day=3):
 #   G  uber       marked taken on the offers page only; never pressed
 #   H  uber       Took, then taken back from the panel (null)
 #   I  uber       Took, then an old page's bare `false`: a take-back too
+#   M  uber       $9.00  20 min card  Took 21:30  expired 21:55, by the row
+#                 (the rig's grace shorter than the default: the row, not
+#                 this report's reckoning of holdEnds, 21:30 + 40 = 22:10)
 #   L  uber       Took 22:00, ended by a drop row from a newer build
 #   J  uber       Took at 03:30 on the 3rd: the day before's shift
 #   K  uber       $6.00  10 min card  Took 03:30 on the 4th: still the 3rd's
@@ -127,6 +130,8 @@ ROWS = [
     mark('I', at(21, 20, 20), False, via=None),
     offer('L', at(21, 59, 50), 5.00, 12, 2.0), mark('L', at(22, 0), True),
     drop('L', at(22, 20), by='teleport'),
+    offer('M', at(21, 29, 50), 9.00, 20, 4.0), mark('M', at(21, 30), True),
+    drop('M', at(21, 55), by='expiry'),
     offer('J', at(3, 29, 50), 5.00, 12, 2.0), mark('J', at(3, 30), True), drop('J', at(3, 45)),
     offer('K', at(3, 29, 50, day=4), 6.00, 10, 2.0), mark('K', at(3, 30, day=4), True),
     drop('K', at(3, 50, day=4)),
@@ -234,7 +239,7 @@ by = {o['id']: o for o in rep['orders']}
 
 # --- which orders ---------------------------------------------------------------
 eq('orders taken: every Took on the day, by Took, then the one never pressed',
-   [o['id'] for o in rep['orders']], ['A', 'B', 'C', 'D', 'E', 'F', 'L', 'K', 'G'])
+   [o['id'] for o in rep['orders']], ['A', 'B', 'C', 'D', 'E', 'F', 'M', 'L', 'K', 'G'])
 ok_('a Took taken back from the panel is not an order', 'H' not in by)
 ok_("...nor one an old page took back with a bare false", 'I' not in by)
 ok_("the day is the driver's: 03:30 on the 3rd is the shift before", 'J' not in by)
@@ -270,6 +275,23 @@ eq('a drop row this build does not know is unreliable, and named (L)',
    (by['L']['reliable'], by['L']['how']), (False, 'drop by teleport'))
 eq('an order with no end has no actual minutes, not the card\'s clock',
    by['E']['actualMinutes'], None)
+
+# --- an expiry row ------------------------------------------------------------
+# server.js's expiredRows: an order that outlived its own clock is written
+# `by: 'expiry'`, dated when the server stopped counting it.
+eq('an expiry row is an end that is "expired", not "no end" (M)',
+   (by['M']['how'], by['M']['reliable']), ('expired', False))
+eq('...whose minutes are not measured: no actual minutes, no $/hr, no end clock',
+   (by['M']['actualMinutes'], by['M']['perHour'], by['M']['end']), (None, None, None))
+ok_('...and the row says it expired, and why it is not timed',
+    any(n.startswith('unreliable: expired on its own clock at 21:55') for n in by['M']['notes']))
+ok_('...not the note for an order with no row at all',
+    not any('lost the hold' in n for n in by['M']['notes'])
+    and any('lost the hold' in n for n in by['E']['notes']))
+eq('...and its row bounds what rode with it: L, taken at 22:00, after the expiry '
+   'at 21:55 and before 22:10',
+   (by['M']['alongside'], by['L']['alongside']), ('no', 'no'))
+eq('...nor is GPS measured over it', by['M']['gpsMiles'], None)
 eq('replaced or expired orders are unreliable: no $/hr off a replaced order\'s 10 minutes',
    by['C']['perHour'], None)
 
@@ -309,8 +331,8 @@ eq("...while E is '?': F was taken inside the 40 min the server would count E",
 
 # --- the summary ------------------------------------------------------------
 s = rep['summary']
-eq('the summary is over the reliable rows: A, B, D, F, K of 9',
-   (s['reliable'], s['of']), (5, 9))
+eq('the summary is over the reliable rows: A, B, D, F, K of 10',
+   (s['reliable'], s['of']), (5, 10))
 apps = {g['group']: g for g in s['byApp']}
 near('uber: median actual/card minutes over A 1.0, D 0.75, K 2.0',
      apps['uber']['ratio'], 1.0, 1e-9)
@@ -332,9 +354,14 @@ for name, got in (('text', out), ('CSV', out_csv)):
     eq('no address or coordinate in the output: no coordinate in the %s' % name, coords, [])
 rows = list(csv.DictReader(io.StringIO(out_csv)))
 eq('the CSV has a row per order', [r['id'] for r in rows],
-   ['A', 'B', 'C', 'D', 'E', 'F', 'L', 'K', 'G'])
+   ['A', 'B', 'C', 'D', 'E', 'F', 'M', 'L', 'K', 'G'])
 eq('...and marks the unreliable ones', [r['reliable'] for r in rows],
-   ['yes', 'yes', 'no', 'yes', 'no', 'yes', 'no', 'yes', 'no'])
+   ['yes', 'yes', 'no', 'yes', 'no', 'yes', 'no', 'no', 'yes', 'no'])
+eq('...and an expiry is "expired" with no end clock in it',
+   [(r['how'], r['ended'], r['actual_minutes']) for r in rows if r['id'] == 'M'],
+   [('expired', '', '')])
+ok_('the text summary names expired orders among those left out',
+    'replaced, expired or with no end is left out' in out)
 ok_('the text says the 1 unreadable journal line was skipped', '1 unreadable line skipped' in out)
 summary_text = out[out.index('Over the '):]
 said = re.findall(r'\b(should|recommend\w*|avoid|worth|better|prefer\w*|target|take more|skip)\b',

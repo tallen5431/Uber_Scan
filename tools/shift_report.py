@@ -45,14 +45,16 @@ car, so an order marked only there has no Took and no times, and says so.
 HOW AN ORDER ENDED is its first drop row at or after the Took: a press of Drop
 (the row has no `by`), `gps` (the server saw the car leave the pinned door),
 `chooser` (Drop with two in the car, the driver picking which), or `replaced`
-(a later Took put it down — its time is the next Took, not a delivery). The
-server writes NO row when an order outlives its own clock (holding() just
-stops counting it; see /api/delivered's comment), so an order with no drop row
-has no end on record: it expired, or the server lost the hold. Both
-`replaced` and no-row are UNRELIABLE, marked on the row, and left out of the
-summary: a replaced order's minutes are the gap to the next Took, and an
-expired one's would be the card's own minutes x 1.5 + 10, which is the card
-again, not a measurement.
+(a later Took put it down — its time is the next Took, not a delivery), or
+`expiry` (the order outlived its own clock and the server stopped counting it;
+server.js's expiredRows dates the row at that moment, holdEnds). An expired
+order is printed "expired", and its minutes are NOT measured: Took to that row
+is the card's own minutes x 1.5 + 10, which is the card again, not a
+measurement. Its row is still worth having, because it is when the order left
+the server's count, which bounds the orders carried alongside it. An order
+with no drop row at all has no end on record: the server lost the hold, or it
+expired before the server wrote expiry rows. `replaced`, `expiry` and no-row
+are all UNRELIABLE, marked on the row, and left out of the summary.
 
 THE GPS LOG is `gpspipe -w -uu` output in one directory, `.jsonl` or the
 `.jsonl.gz` tools/gpslog_tidy.py leaves. `-uu` stamps every line with the
@@ -255,6 +257,15 @@ def _order(oid, took, readings, drops, visits):
         elif d.get('by') == 'replaced':
             o['how'] = 'replaced'
             o['notes'].append('unreliable: put down by the next Took, so its end is that Took, not a delivery')
+        elif d.get('by') == 'expiry':
+            # An end, but not a delivery: no `end`, so nothing is timed off it
+            # (actual minutes, GPS miles, door time). `expiredAt` is the bound
+            # _alongside uses in place of its own reckoning of holdEnds.
+            o['end'] = None
+            o['expiredAt'] = d['at']
+            o['how'] = 'expired'
+            o['notes'].append('unreliable: expired on its own clock at %s; the card\'s minutes '
+                              'x 1.5 + 10, not a measurement, so not timed' % _clock(d['at']))
         else:
             # A newer build's word, printed short: it is a server field, never
             # a place, and no row can make this line run on.
@@ -262,7 +273,8 @@ def _order(oid, took, readings, drops, visits):
             o['notes'].append('unreliable: a drop row this report does not know')
     else:
         o['how'] = 'no end'
-        o['notes'].append('unreliable: no drop row; it expired on its own clock, or the server lost it')
+        o['notes'].append('unreliable: no drop row; the server lost the hold, or it expired '
+                          'before the server wrote expiry rows')
     o['visits'] = sorted(v['at'] for v in visits
                          if v['at'] >= took and (o['end'] is None or v['at'] <= o['end']))
     o['actualMinutes'] = (o['end'] - took) / 60000.0 if o['end'] is not None else None
@@ -292,17 +304,21 @@ def _alongside(out):
     """'yes', 'no' or '?' on each order: was another order in the car with it.
 
     Yes when its drop row says two were carried, or when its Took-to-end
-    overlaps another's. An order with no end on record has only a bound: the
-    server stops counting it at holdEnds (hold_span from the Took, which is no
-    earlier than the card's own time the server counts from, so the bound
-    errs long), or with no card minutes, at the end of its driver's day. An
-    overlap inside a bound is '?', never 'yes' — it may have gone sooner.
+    overlaps another's. An order with no measured end has only a bound: an
+    expired order's is its expiry row, the moment the server stopped counting
+    it; one with no row stops at holdEnds as reckoned here (hold_span from the
+    Took, which is no earlier than the card's own time the server counts from,
+    so the bound errs long), or with no card minutes, at the end of its
+    driver's day. An overlap inside a bound is '?', never 'yes' — it may have
+    gone sooner.
     No Took at all is '?'."""
     for o in out:
         if o['took'] is None:
             o['last'] = None
         elif o['end'] is not None:
             o['last'] = o['end']
+        elif o.get('expiredAt') is not None:
+            o['last'] = o['expiredAt']
         else:
             minutes = _num(o.get('billedMinutes')) or o['cardMinutes']
             if minutes:
@@ -596,7 +612,7 @@ def text(rep):
         out.extend('  #%d %s' % n for n in notes)
     s = rep['summary']
     out.append('')
-    out.append('Over the %d reliable order%s of %d (an order replaced or with no end is left out):'
+    out.append('Over the %d reliable order%s of %d (an order replaced, expired or with no end is left out):'
                % (s['reliable'], '' if s['reliable'] == 1 else 's', s['of']))
     for key, title in (('byApp', 'by app'), ('byBand', 'by card minutes')):
         out.append('  %s' % title)
