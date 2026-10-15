@@ -1340,10 +1340,13 @@ function heldById(id, now) {
  *     whose?"), until a later read gives it a cue (retryPool) or one of the
  *     two orders leaves the car and it is dropped.
  *
- * With carrying two off, nothing here changes what is filed: whoseDropoff only
- * works out what attribution WOULD have said, over the order in the car and
- * the one a Took last replaced while its clock still runs (`shadows`), and
- * that goes on the mark or tally row this already writes, as `would`. */
+ * With carrying two off, nothing here changes what is filed between ORDERS:
+ * whoseDropoff only works out what attribution WOULD have said, over the order
+ * in the car and the one a Took last replaced while its clock still runs
+ * (`shadows`), and that goes on the mark or tally row this already writes, as
+ * `would`. What it does change, on and off alike, is a ⌖ press with one order
+ * in the car and another card being screened: the order against the card,
+ * by a cue or the chooser (pressBetween). */
 var CHOOSER_MS = envNumber('CHOOSER_MS', 10000);
 var choosing = null;
 var chooseSeq = 0;
@@ -1360,10 +1363,11 @@ function shadowsNow(now) {
 }
 
 /* {stop, order, cue, would} for one address arriving: `order` undefined to
- * leave dropoffArrived's own choice (the first-taken) alone, an order or null
- * to file onto that one or onto none; `stop` when nothing is to be filed at
- * all. `force` is a decision already made — the chooser's row, or the pool's
- * cue — and is taken as it is. */
+ * leave dropoffArrived's own choice (the first-taken) alone, an order to file
+ * onto that one, or null for none — and so the card being screened, where
+ * Assemble.dropoff gives it one; `stop` when nothing is to be filed at all.
+ * `force` is a decision already made — the chooser's row, or the pool's cue —
+ * and is taken as it is. */
 function whoseDropoff(read, force, now) {
   var d = read.dropoff;
   var out = { stop: false, order: undefined, cue: null, would: null };
@@ -1378,10 +1382,15 @@ function whoseDropoff(read, force, now) {
     if (!orders.length) return out;
     var w = Assemble.attribute(assembly, shadowsNow(now).concat(orders), d);
     out.would = { cue: w.cue, held: w.order ? holdIdOf(w.order) : null };
-    return out;
+    // ...and a press with a card being screened: the order in the car, the
+    // first-taken, against that card (pressBetween).
+    return pressBetween(out, d, orders[0], now);
   }
   if (orders.length < 2) {
-    if (orders.length) out.cue = 'only';
+    if (orders.length) {
+      out.cue = 'only';
+      return pressBetween(out, d, orders[0], now);
+    }
     return out;
   }
   var a = Assemble.attribute(assembly, orders, d);
@@ -1401,6 +1410,38 @@ function whoseDropoff(read, force, now) {
   }
   // ...and a cue that fitted both may yet be broken on the map.
   if (a.why === 'tie') discBreak(d, orders, a.ties[0]);
+  return out;
+}
+
+/* A ⌖ press with ONE order in the car and another card being screened
+ * (screeningCard): whose it is, the order's or the card's, is decided on a cue
+ * the screen gave (Assemble.pressBetween) — the card's own place popup, or
+ * the order's navigation or Trip Planner read since its Took — and otherwise
+ * by the driver, from the chooser: rows ①, "this card" and Neither, filing
+ * nothing unless one is picked, closing after CHOOSER_MS, a late answer
+ * refused. With carrying two off as well as on. AUDITS.md's Open entry on
+ * the ⌖ button while an order is in the car: measured at b337a44 against
+ * this server, a press here replaced the held order's end whatever the
+ * screen showed. `out` is whoseDropoff's, given back with the decision on it:
+ * `order` null for the card (dropoffArrived then files it there, as a
+ * screening press), the order for the order, or `stop` with the chooser
+ * open. Nothing changes for a sighting, with no card, or over the order's own
+ * card. */
+function pressBetween(out, d, held, now) {
+  var said = Assemble.pressBetween(held, screeningCard(now), d);
+  if (!said) return out;
+  if (said.to === 'card') {
+    out.order = null;
+    out.cue = said.cue;
+  } else if (said.to === 'hold') {
+    out.order = held;
+    out.cue = said.cue;
+  } else {
+    out.stop = true;
+    console.log('dropoff read with an order in the car and a card on the slot, '
+                + said.why + ': the chooser is open');
+    openChooser('scan', d, [held], now);
+  }
   return out;
 }
 
@@ -1653,6 +1694,12 @@ function dropoffArrived(read, force) {
   // card in front of the driver. With neither, nothing is stored, which
   // is exactly what happened before.
   //
+  // ...except a PRESS with both there: an order in the car and another card
+  // being screened. "The held order first" gave the press to the order
+  // whatever the phone showed, and replaced the end it had — so a press is
+  // now the order's or the card's on a cue the screen gave, or the
+  // driver's pick from the chooser (whoseDropoff, pressBetween).
+  //
   // Asked through holding(), never off `scanner.held` directly. That
   // field is the raw list; holding() is the question "is an order being
   // carried RIGHT NOW", and it is not the same question - an order whose
@@ -1794,7 +1841,14 @@ function dropoffArrived(read, force) {
       // destination the rig READ off a navigation screen and one the
       // CARD stated are different degrees of evidence, and the row has
       // to be able to say which it is holding.
-      Assemble.fileCard(scanner.offer, read.dropoff, said);
+      Assemble.fileCard(scanner.offer, read.dropoff, said, cue);
+      // ...and, decided over an order in the car (`cue`: the card's own
+      // popup, or the chooser — pressBetween), the card goes to every panel
+      // with the end it now holds, as a popup's does: the panel's chip for
+      // an end from a press is the card's, and the card's reading that would
+      // carry it is not coming while the phone shows the address. Not with
+      // nothing held, where the screening press is answered as it was.
+      if (cue) read.offer = scanner.offer;
       // ...and appended, as its own line naming the offer. The same
       // shape as a tick: the journal is append-only, so this is a note
       // ABOUT a row rather than an edit to it, and the copy at home
@@ -1820,8 +1874,9 @@ function dropoffArrived(read, force) {
         // above, so rows written before this field existed keep the
         // behaviour they were written under.
         asked: wasAsked,
-        // ...and `chooser` when the driver picked this card from the chooser
-        // over two orders in the car (whoseDropoff).
+        // ...and how it was given this card over the order(s) in the car:
+        // `chooser` when the driver picked it, `popup` when the press read
+        // the card's own place popup (whoseDropoff, pressBetween).
         cue: cue || undefined
       }) + '\n', function (err) {
         // Said out loud, because every other write to this file says so

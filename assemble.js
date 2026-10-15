@@ -33,6 +33,11 @@
  * as a cue, and only in the one shape the screen proves it: a list seen whole,
  * two dropoffs, one already filed as one order's. "Another card is on the
  * slot" is still never a reason.
+ *
+ * ONE ORDER AND A CARD. A ⌖ press with one order in the car and another card
+ * being screened is the same question between the order and the card, and is
+ * answered the same way, with carrying two off as well as on (pressBetween):
+ * a cue the screen gave, or the chooser.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -101,14 +106,23 @@
     return f;
   }
 
+  /* The rank a card being screened holds its end at: what it printed
+   * (`card`), or — read off the screen while it was screened — the provenance
+   * the screening branch kept on it (`dropoffFrom`), else `seen`. A row the
+   * driver picked from the chooser (`chooser`, pressBetween below) stands as
+   * the press it answered: it is one, given to this card by the driver. */
+  function cardRank(o) {
+    if (!o || !o.dropoffScanned) return 'card';
+    if (o.dropoffFrom === 'chooser') return 'press';
+    return RANK[o.dropoffFrom] !== undefined ? o.dropoffFrom : 'seen';
+  }
+
   /* The fields a hold starts with, at ✓ Took: what the card said, or — when
    * the card already carried an address read off the screen while it was
-   * being screened — that, with the provenance the screening branch kept on
-   * the card (`dropoffFrom`), else `seen`. */
+   * being screened — that, at the rank it was read at (cardRank). */
   function cardFields(offer, at) {
     var o = offer || {};
-    var from = o.dropoffScanned ? (RANK[o.dropoffFrom] !== undefined ? o.dropoffFrom : 'seen')
-      : 'card';
+    var from = cardRank(o);
     // ...and the store's door a place popup filed on the card while it was
     // screened (filePopup), at its own rank and with its own read's time, in
     // place of the card's name for it.
@@ -398,12 +412,93 @@
   }
 
   /* ...and onto the card being screened. `dropoffFrom` rides with it, so the
-   * hold made from this card at ✓ Took knows a press from a sighting. */
-  function fileCard(card, d, said) {
+   * hold made from this card at ✓ Took knows a press from a sighting — and a
+   * press the driver gave this card from the chooser (`cue` 'chooser',
+   * pressBetween) says so, `chooser`, which cardRank carries as a press. */
+  function fileCard(card, d, said, cue) {
     if (!card || !said || said.to !== 'card') return;
     card.dropoff = d.line;
     card.dropoffScanned = true;
-    card.dropoffFrom = said.from;
+    card.dropoffFrom = said.from === 'press' && cue === 'chooser' ? 'chooser' : said.from;
+  }
+
+  /* ---------- a ⌖ press between the order in the car and a card -----------
+   *
+   * The owner's habit: screening a DoorDash offer, tap the customer's dropoff
+   * open on the phone to read where it goes — with an order already in the
+   * car. A press then may be about either job, and dropoff() gives a press to
+   * the order in the car whatever is on the slot. Measured against the real
+   * server at b337a44, one order held with its end on record and a different
+   * card being screened, carrying two off and on alike: a press replaced the
+   * held order's end every time; and over the card's own customer popup, whose
+   * line had already filed that address on the card, one address became both
+   * jobs' end.
+   *
+   * Stage 5's rule (AUDITS.md, Settled, plan 3.1), with one order: positive
+   * cues only, otherwise the driver picks. {to, cue, why}:
+   *
+   *   card   the press read DoorDash's place popup (`screen` dd.placePopup),
+   *          which the app draws over an offer card and never over an order
+   *          taken, on the street the card's end already came off the screen
+   *          as: a popup popup() filed there — its role label, read after the
+   *          card came onto the slot and inside the card's window, the same
+   *          app, one customer — or an earlier press. Cue 'popup'.
+   *          A store's popup sends no address under a press: the scanner
+   *          refuses one under a Pickup label, asked or not, so its door
+   *          reaches the card through popup() alone and this is not asked.
+   *   hold   the press read a screen of an order taken, not offered: Uber's
+   *          navigation or Trip Planner (`screen` uber.nav, uber.planner),
+   *          read at or after the order's ✓ Took, of its app where both say
+   *          one, and naming its store where the screen names one and the
+   *          card printed one (cardNames). Cue 'nav' or 'planner'.
+   *   null   neither — `why` says which half failed — and server.js opens
+   *          the chooser over the order and the card, filing nothing unless
+   *          the driver picks.
+   *
+   * No DoorDash screen is typed as one after an accept (offer_parser
+   * screen_type: its delivery screens are 'unknown'), so a DoorDash order in
+   * the car has no screen cue here, and a press over its own screen while a
+   * card is up is the driver's to answer.
+   *
+   * Null, not this question at all, when `d` was not pressed for, when nothing
+   * is held, when no card is being screened, or when the card IS the order in
+   * the car (its card back on the phone, or its id on the slot): dropoff()
+   * then decides exactly as it did. ...and when the card on the slot is one
+   * the driver already marked taken (`accepted`): that is an order, not an
+   * offer being screened — the slot keeps it after its order is put down, and
+   * a Took sent with the panel's own copy of a card leaves it there — and a
+   * press is not about it. */
+  function pressBetween(held, card, d) {
+    if (!held || !card || !d || d.asked === false || typeof d.line !== 'string') return null;
+    if (card.heldCard || card.id === held.id || card.accepted === true) return null;
+    var out = { to: null, cue: null, why: null };
+    if (d.screen === 'dd.placePopup') {
+      var mine = typeof card.dropoff === 'string'
+        && (cardRank(card) === 'popup' || cardRank(card) === 'press')
+        && sameStreet(card.dropoff, d.line);
+      if (mine) {
+        out.to = 'card';
+        out.cue = 'popup';
+      } else {
+        out.why = "not the card's own popup";
+      }
+      return out;
+    }
+    if (d.screen === 'uber.nav' || d.screen === 'uber.planner') {
+      var since = typeof held.tookAt === 'number' ? held.tookAt : held.acceptedAt;
+      out.why = typeof d.at !== 'number' || d.at < since ? 'before the Took'
+        : d.app && held.app && d.app !== held.app ? 'another app'
+        : d.store && typeof held.pickup === 'string' && held.pickup
+          && !cardNames(held.pickup, d.store) ? 'another store'
+        : null;
+      if (!out.why) {
+        out.to = 'hold';
+        out.cue = d.screen === 'uber.nav' ? 'nav' : 'planner';
+      }
+      return out;
+    }
+    out.why = 'no cue';
+    return out;
   }
 
   /* ---------- a place popup, read while a card is screened -----------------
@@ -476,10 +571,7 @@
         out.why = 'the card not on the screen';
         return out;
       }
-      cur = !card.dropoff ? null
-        : field(card.dropoff, card.dropoffScanned
-          ? (RANK[card.dropoffFrom] !== undefined ? card.dropoffFrom : 'seen') : 'card',
-                0, null, null);
+      cur = !card.dropoff ? null : field(card.dropoff, cardRank(card), 0, null, null);
     }
     var why = outranks(next, cur);
     if (!why) { out.why = 'outranked by ' + (cur ? cur.from : 'nothing'); return out; }
@@ -896,7 +988,17 @@
     var cand = null;
     if (!many) {
       if (page.asked) {
-        if (verdict.address) cand = candidate(verdict.address, verdict.stop, page, true, false);
+        if (verdict.address) {
+          cand = candidate(verdict.address, verdict.stop, page, true, false);
+          // ...with what says whose it is, for a press made while a card is
+          // being screened (pressBetween): the app, and the store when the
+          // list is ONE pickup and ONE dropoff, as plannerCandidates gives
+          // them with two orders held.
+          cand.app = page.app;
+          var one = headed(view.stops);
+          var shops = one.filter(function (x) { return x.kind === 'pickup'; });
+          cand.store = shops.length === 1 && one.length === 2 ? (shops[0].name || null) : null;
+        }
       } else if (page.titled) {
         if (verdict.address) cand = candidate(verdict.address, verdict.stop, page, false, false);
         else if (verdict.why === 'list') {
@@ -987,7 +1089,8 @@
    *     is the dropoff line's, and a card-box read is the dropoff line's too
    *     (rank `label`);
    *   - the screen is not Uber's navigation to a store (uber.pickupNav):
-   *     'a pickup screen';
+   *     'a pickup screen'; nor DoorDash's place popup (dd.placePopup), which
+   *     is the card's being screened: 'a place popup';
    *   - the address is typed a dropoff. Under a Pickup label it is 'a pickup';
    *     under no label at all it is 'no label' — AUDITS.md's Settled rule that
    *     an address nobody asked for and no label proves is not a destination.
@@ -1026,6 +1129,13 @@
     if (stops.length !== 1 || typeof stops[0].line !== 'string' || !stops[0].line) return null;
     var a = stops[0];
     var why = s.screen === 'uber.pickupNav' ? 'a pickup screen'
+      // DoorDash's place popup is about the card being screened and never
+      // about an order taken (popup(), rule 2): its own line files it on the
+      // card. A customer's prints its address under its role label, so the
+      // whole-screen read it asks for (rpi/scan_pi.py, auto_read_for 'label')
+      // typed it a dropoff, and at b337a44 this made it the HELD order's end
+      // as well — one address on both jobs, measured against the real server.
+      : s.screen === 'dd.placePopup' ? 'a place popup'
       : a.kind === 'pickup' ? 'a pickup'
       : a.kind !== 'dropoff' ? 'no label'
       : orders.some(function (o) { return heldPickup(o, a); }) ? 'a pickup'
@@ -1456,7 +1566,8 @@
            // ...and the street rule they stand on, for server.js's planAtOf
            // (where on a planner each order's end is).
            sameStreet: sameStreet,
-           dropoff: dropoff, file: file, fileCard: fileCard,
+           dropoff: dropoff, file: file, fileCard: fileCard, cardRank: cardRank,
+           pressBetween: pressBetween,
            popup: popup, filePopup: filePopup, cardNames: cardNames,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
            keyOf: keyOf, placements: placements, linked: linked,

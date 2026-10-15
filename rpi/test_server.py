@@ -1776,10 +1776,11 @@ if shutil.which('python3'):
         with open(cmds, 'a') as fh:
             fh.write(json.dumps(msg) + '\n')
 
-    def seen(line, street, asked=False, labelled='dropoff', at=None):
+    def seen(line, street, asked=False, labelled='dropoff', at=None, screen=None):
         say({'dropoff': {'found': True, 'line': line, 'street': street,
                          'city': 'Acworth', 'state': 'GA', 'zip': '30101',
                          'asked': asked, 'labelled': labelled, 'ms': None,
+                         'screen': screen,
                          'at': at if at is not None else int(time.time() * 1000)}})
 
     def held_end(want=None, patience=4.0):
@@ -1840,10 +1841,15 @@ if shutil.which('python3'):
             if o.get('id') == 'o-lab-corner'], ['34 Made Up Rd, Acworth, GA 30101'])
         put_down('o-lab-corner')
 
-        # A hold the driver pressed ⌖ for.
+        # A hold the driver pressed ⌖ for — over its own navigation, because
+        # the first order's card is still on the slot here (each Took above
+        # came with the panel's copy of its card), and with another card being
+        # screened a press is the order's only on a cue the screen gives
+        # (Assemble.pressBetween).
         ok_('the premise: a third order is in the car',
             took('o-lab-press', 'Oak Dr & Elm Dr, Acworth'))
-        seen('77 Pressed Pl, Acworth, GA 30101', '77 Pressed Pl', asked=True, labelled=None)
+        seen('77 Pressed Pl, Acworth, GA 30101', '77 Pressed Pl', asked=True, labelled=None,
+             screen='uber.nav')
         ok_('the premise: the press is filed',
             held_end('77 Pressed Pl, Acworth, GA 30101') == '77 Pressed Pl, Acworth, GA 30101')
         seen('88 Late Label Ln, Acworth, GA 30101', '88 Late Label Ln')
@@ -7276,6 +7282,182 @@ try:
 finally:
     stop(_tp)
     _tfake.kill()
+
+# --- one order in the car and a card being screened: whose is a ⌖ press? ----
+#
+# AUDITS.md's Open entry on the ⌖ button while an order is in the car. Measured
+# at b337a44 against this server, one order held with its end on record and a
+# different card on the slot, carrying two off and on alike: a press went onto
+# the HELD order and replaced its end, whatever the phone showed — and over the
+# card's own customer popup, whose line had already filed that address on the
+# card, one address became both jobs' end; and the whole-screen read a
+# customer's popup asks for made it the held order's end unpressed as well.
+# Now a press there is the card's on its own place popup, the order's on its
+# navigation or Trip Planner read since its Took, and otherwise nobody's until
+# the driver picks from the chooser (Assemble.pressBetween), carrying two off
+# as well as on; and a place popup is never an order's end. The same run on a
+# server each way, held to one set of answers. Invented stores, streets, doors.
+_SN_END = '9 Heron Ct, Smyrna, GA 30080'
+_SH_CARD = 'Pine St & Elm St, Roswell'
+_SC_END = '412 Wrenfield Ct NE, Marietta, GA 30062'
+_SP_END = '15 Alder Ct, Roswell'
+_SX, _SY = '61 Saddlebrook Ln, Acworth, GA 30101', '8 Gallant Rise Ct, Acworth, GA 30101'
+_SZ = ('310 Mill St, Roswell, GA 30075', '88 Quill Ln NE, Marietta, GA 30062',
+       '4821 Kestrel Dr, Marietta, GA 30060')
+
+
+def _sline(line, screen, app='doordash', at=None):
+    """A press's dropoff line, as emit_dropoff sends it (screen_said's type)."""
+    return {'dropoff': {'found': True, 'line': line, 'street': line.split(',')[0],
+                        'city': line.split(', ')[1], 'state': 'GA', 'zip': None,
+                        'asked': True, 'labelled': None, 'ms': 10, 'app': app,
+                        'screen': screen, 'expectedBy': None,
+                        'at': int(time.time() * 1000) if at is None else at}}
+
+
+def _sstop(kind, line, name=None, due=None):
+    return {'kind': kind, 'orders': 1, 'name': name, 'place': None, 'expectedBy': due,
+            'street': line.split(',')[0], 'city': line.split(', ')[1], 'state': 'GA',
+            'zip': None, 'line': line, 'partial': None, 'label': kind}
+
+
+def _ssight(asked, screen, app, stops, ends=(None, None), titled=False):
+    """A whole-screen read's sighting, as rpi/scan_pi.py's sighting() sends it."""
+    return {'sighting': {'at': int(time.time() * 1000), 'asked': asked, 'whole': True,
+                         'titled': titled, 'app': app, 'screen': screen,
+                         'page': {'top': ends[0], 'bottom': ends[1]}, 'stops': stops,
+                         'orderCount': None, 'keep': False}}
+
+
+def _spop(line):
+    return {'popup': {'role': 'dropoff', 'name': None, 'line': line,
+                      'street': line.split(',')[0], 'city': line.split(', ')[1],
+                      'state': 'GA', 'zip': line[-5:], 'app': 'doordash',
+                      'screen': 'dd.placePopup', 'at': int(time.time() * 1000)}}
+
+
+def _screened(carry):
+    """The run, on a server with carrying two `carry` ('1' or '0'): what each
+    step left, by step."""
+    sp, sb, sj, _sh = _cserver('screened-' + carry, CARRY_TWO=carry, CHOOSER_MS='1500')
+    out = {}
+
+    def marks(line):
+        return [(r.get('id'), r.get('asked'), r.get('cue') or r.get('from'))
+                for r in _rows(sj, 'mark') if r.get('dropoff') == line]
+
+    def ends():
+        st = get(sb, '/api/status')
+        o = st.get('offer') or {}
+        return ((st.get('holding') or {}).get('dropoff'),
+                (o.get('id'), o.get('dropoff'), o.get('dropoffFrom')))
+
+    try:
+        # Nothing held: a DoorDash card, ⌖ over its customer's address.
+        _say(_card('n-1', 7.75, app='doordash', screen='dd.offer', pickup='Lark Owl Pizza'))
+        heard = listen(sb, 2.0)
+        _say(_sline(_SN_END, 'unknown'))
+        time.sleep(0.3)
+        st = get(sb, '/api/status')
+        o = st.get('offer') or {}
+        out['none'] = (o.get('dropoff'), o.get('dropoffScanned'), o.get('dropoffFrom'),
+                       st.get('chooser'), marks(_SN_END),
+                       [sorted(m) for m in heard if (m.get('dropoff') or {}).get('line') == _SN_END])
+        # One order in the car, its end the one its card printed.
+        _took2(sb, _card('h-1', 9.48, minutes=40.0, pickup='Larkspur Tacos', dropoff=_SH_CARD))
+        tookAt = int(time.time() * 1000)
+        # Another card being screened, and its customer's popup tapped open
+        # with no press: the popup's line and the whole-screen read it asks
+        # for (auto_read_for 'label'), typed a dropoff.
+        _say(_card('s-1', 12.5, minutes=25.0, miles=3.0, app='doordash', screen='dd.offer',
+                   pickup='Lark Owl Pizza'))
+        _say(_spop(_SC_END),
+             _ssight(False, 'dd.placePopup', 'doordash', [_sstop('dropoff', _SC_END)]))
+        out['unpressed'] = (ends(), marks(_SC_END))
+        # ⌖ over that popup: the press's sighting and its dropoff line.
+        _say(_ssight(True, 'dd.placePopup', 'doordash', [_sstop('dropoff', _SC_END)]),
+             _sline(_SC_END, 'dd.placePopup'))
+        out['popup'] = (ends(), marks(_SC_END), get(sb, '/api/status').get('chooser'))
+        # ⌖ over the held order's Trip Planner: its store and its one dropoff,
+        # the list seen whole.
+        _say(_ssight(True, 'uber.planner', 'uber',
+                     [_sstop('pickup', '310 Mill St, Roswell', 'Larkspur Tacos', 1180),
+                      _sstop('dropoff', _SP_END, 'Lee M.', 1202)], (True, True), True))
+        out['planner'] = (ends(), marks(_SP_END), get(sb, '/api/status').get('chooser'))
+        # ⌖ over a screen that says nothing of whose — DoorDash's own delivery
+        # screen types 'unknown' — left alone, and answered late.
+        _say(_sline(_SX, 'unknown'))
+        ch = get(sb, '/api/status').get('chooser') or {}
+        time.sleep(1.8)
+        late = post(sb, '/api/choose', {'id': ch.get('id'), 'pick': 'card'})
+        out['nocue'] = ([(r.get('n'), r.get('pay')) for r in ch.get('rows') or []],
+                        ch.get('card'), ch.get('line'), get(sb, '/api/status').get('chooser'),
+                        late[0], ends(), marks(_SX))
+        # ...and again, "this card" picked in time.
+        _say(_sline(_SY, 'unknown'))
+        ch = get(sb, '/api/status').get('chooser') or {}
+        heard = listen(sb, 1.5)
+        time.sleep(0.2)
+        picked = post(sb, '/api/choose', {'id': ch.get('id'), 'pick': 'card'})
+        time.sleep(0.5)
+        out['card'] = (picked[0], ends(), marks(_SY),
+                       [((m.get('offer') or {}).get('id'), (m.get('offer') or {}).get('dropoffFrom'))
+                        for m in heard if (m.get('dropoff') or {}).get('line') == _SY])
+        # Three presses no cue decides: a store's navigation, a place popup
+        # the card was never given, and the order's navigation read before its
+        # Took. Neither, left alone, Neither.
+        seq = []
+        for line, screen, app, at, pick in ((_SZ[0], 'uber.pickupNav', 'uber', None, 'neither'),
+                                            (_SZ[1], 'dd.placePopup', 'doordash', None, None),
+                                            (_SZ[2], 'uber.nav', 'uber', tookAt - 5000,
+                                             'neither')):
+            _say(_sline(line, screen, app, at))
+            ch = get(sb, '/api/status').get('chooser') or {}
+            if pick:
+                post(sb, '/api/choose', {'id': ch.get('id'), 'pick': pick})
+            else:
+                time.sleep(1.8)
+            time.sleep(0.3)
+            seq.append((bool(ch.get('id')), ends()[0], marks(line)))
+        # ...and every end the held order was ever given, with how.
+        out['never'] = (seq, [(r.get('dropoff'), r.get('asked'), r.get('cue'))
+                              for r in _rows(sj, 'mark')
+                              if r.get('id') == 'h-1' and r.get('dropoff')])
+    finally:
+        stop(sp)
+    return out
+
+
+_SCR_WANT = {
+    'none': (_SN_END, True, 'press', None, [('n-1', True, None)],
+             [['at', 'dropoff']]),
+    'unpressed': ((_SH_CARD, ('s-1', _SC_END, 'popup')), [('s-1', False, 'popup')]),
+    'popup': ((_SH_CARD, ('s-1', _SC_END, 'press')),
+              [('s-1', False, 'popup'), ('s-1', True, 'popup')], None),
+    'planner': ((_SP_END, ('s-1', _SC_END, 'press')), [('h-1', True, 'planner')], None),
+    'nocue': ([(1, 9.48)], {'pick': 'card', 'pay': 12.5}, _SX, None, 409,
+              (_SP_END, ('s-1', _SC_END, 'press')), []),
+    'card': (200, (_SP_END, ('s-1', _SY, 'chooser')), [('s-1', True, 'chooser')],
+             [('s-1', 'chooser')]),
+    'never': ([(True, _SP_END, []), (True, _SP_END, []), (True, _SP_END, [])],
+              [(_SP_END, True, 'planner')]),
+}
+_scr = _screened('1')
+eq('one held, a card screened: the card\'s own popup read unpressed files onto the card and '
+   'never the held order', _scr.get('unpressed'), _SCR_WANT['unpressed'])
+eq('one held, a card screened: ⌖ over the card\'s own popup files onto the card',
+   _scr.get('popup'), _SCR_WANT['popup'])
+eq('...⌖ over the held order\'s planner files onto the held order',
+   _scr.get('planner'), _SCR_WANT['planner'])
+eq('...no cue opens the chooser and files nothing untouched',
+   _scr.get('nocue'), _SCR_WANT['nocue'])
+eq('...picking "this card" gives the card its end and leaves the held order\'s',
+   _scr.get('card'), _SCR_WANT['card'])
+eq('...a press never replaces the held end without a cue or a pick',
+   _scr.get('never'), _SCR_WANT['never'])
+eq('nothing held: ⌖ behaves exactly as before', _scr.get('none'), _SCR_WANT['none'])
+eq('carryTwo off: the same', _screened('0'), _SCR_WANT)
+
 shutil.rmtree(_cdir, ignore_errors=True)
 
 # --- the held order's pickups, visited ----------------------------------------

@@ -665,6 +665,120 @@ SEQ.forEach(function (seq) {
      [['415 Ostrander Way NW, Kennesaw', true, 2]]);
 })();
 
+/* ---- a ⌖ press between the order in the car and a card being screened ---- */
+/* One order held, its end on record, and another card on the slot: a press is
+   the card's on its own place popup, the order's on its navigation or Trip
+   Planner read since its Took, and otherwise nobody's until the driver picks
+   (pressBetween; server.js opens the chooser). Invented stores and streets. */
+(function () {
+  var PLAN = 'Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\n'
+    + 'Address\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\n'
+    + 'Dropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\n'
+    + 'Kennesaw, GA\nView details\nWaybill';
+  function held(more) {
+    var h = Object.assign({ id: 'o-held', acceptedAt: 1000, tookAt: 1200, app: 'uber',
+                            pickup: 'Juniper Taqueria', minutes: 30,
+                            dropoff: '77 Birch Ln, Roswell, GA 30075', dropoffScanned: true },
+                          more || {});
+    h.fields = A.cardFields({ dropoff: h.dropoff, dropoffScanned: true, dropoffFrom: 'press' },
+                            h.acceptedAt);
+    return h;
+  }
+  function card(more) {
+    return Object.assign({ id: 'c-screened', app: 'doordash', pickup: 'Lark Owl Pizza',
+                           dropoff: '412 Wrenfield Ct NE, Marietta, GA 30062',
+                           dropoffScanned: true, dropoffFrom: 'popup' }, more || {});
+  }
+  function press(line, screen, more) {
+    return Object.assign({ found: true, line: line, street: line.split(',')[0],
+                           city: 'Marietta', state: 'GA', zip: null, asked: true,
+                           labelled: null, ms: 10, app: 'doordash', screen: screen,
+                           expectedBy: null, at: 5000 }, more || {});
+  }
+  function planned(h, at) {
+    return A.sighting(A.fresh(), h, pageOf(PLAN, at, true), at).candidates[0];
+  }
+  var OWN = '412 Wrenfield Ct NE, Marietta, GA 30062';
+
+  // The card's own popup: the press files on the card, at press rank, and
+  // the order in the car keeps its end.
+  var h1 = held(), c1 = card(), d1 = press(OWN, 'dd.placePopup');
+  var said1 = A.pressBetween(h1, c1, d1);
+  var filed1 = A.dropoff(null, d1, c1);
+  A.fileCard(c1, d1, filed1, said1.cue);
+  eq('pressBetween: over the card\'s own popup, the card',
+     [said1.to, said1.cue, c1.dropoff, c1.dropoffFrom, h1.dropoff, h1.fields.dropoff.value],
+     ['card', 'popup', OWN, 'press', '77 Birch Ln, Roswell, GA 30075',
+      '77 Birch Ln, Roswell, GA 30075']);
+  eq('...carried into the hold at Took at press rank',
+     brief(A.cardFields(c1, 9000).dropoff), { value: OWN, from: 'press' });
+  eq('...and a popup the card was never given is no cue: the driver picks',
+     [A.pressBetween(held(), card({ dropoff: null, dropoffScanned: false }), d1).to,
+      A.pressBetween(held(), card({ dropoffFrom: 'seen' }), d1).to,
+      A.pressBetween(held(), card(), press('9 Heron Ct, Smyrna, GA 30080', 'dd.placePopup')).why],
+     [null, null, "not the card's own popup"]);
+
+  // The held order's own planner, pressed for after its Took: the order.
+  var h2 = held(), cand = planned(h2, 5000);
+  var said2 = A.pressBetween(h2, card(), cand);
+  var filed2 = A.dropoff(h2, cand, card());
+  A.file(h2, cand, filed2);
+  eq('pressBetween: over the held order\'s planner, the order',
+     [said2.to, said2.cue, cand.app, cand.store, h2.dropoff, h2.fields.dropoff.from],
+     ['hold', 'planner', 'uber', 'Juniper Taqueria', '415 Ostrander Way NW, Kennesaw', 'press']);
+  eq('...and over its navigation, the order',
+     A.pressBetween(held(), card(), press('77 Birch Ln, Roswell', 'uber.nav', { app: 'uber' })),
+     { to: 'hold', cue: 'nav', why: null });
+  // ...but each of its three conditions holds or the screen is no cue.
+  eq('...not one read before the order\'s Took',
+     A.pressBetween(held(), card(), planned(held(), 1100)).why, 'before the Took');
+  eq('...nor another app\'s',
+     A.pressBetween(held({ app: 'doordash' }), card(), planned(held(), 5000)).why,
+     'another app');
+  eq('...nor one naming another store than the order\'s card',
+     A.pressBetween(held({ pickup: 'Wren Street Noodles' }), card(), planned(held(), 5000)).why,
+     'another store');
+
+  // No cue: nothing decided, for every screen that is not one.
+  eq('pressBetween: with no cue nobody is given it',
+     ['unknown', 'uber.pickupNav', 'dd.offer', undefined].map(function (s) {
+       return A.pressBetween(held(), card(), press('9 Heron Ct, Smyrna', s)).to;
+     }), [null, null, null, null]);
+
+  // Not the question at all: dropoff() decides as it always has.
+  eq('pressBetween: not asked with nothing held, no card, its own card, a card already taken, '
+     + 'or a sighting',
+     [A.pressBetween(null, card(), d1), A.pressBetween(held(), null, d1),
+      A.pressBetween(held(), card({ id: 'o-held' }), d1),
+      A.pressBetween(held(), card({ heldCard: 'o-held@1000' }), d1),
+      A.pressBetween(held(), card({ accepted: true }), d1),
+      A.pressBetween(held(), card(), press(OWN, 'dd.placePopup', { asked: false }))],
+     [null, null, null, null, null, null]);
+
+  // A row picked from the chooser: said so on the card, and a press after.
+  var c3 = card({ dropoff: null, dropoffScanned: false, dropoffFrom: undefined });
+  var d3 = press('9 Heron Ct, Smyrna, GA 30080', 'unknown');
+  A.fileCard(c3, d3, A.dropoff(null, d3, c3), 'chooser');
+  eq('a chooser pick on the card says so, and stands as a press',
+     [c3.dropoffFrom, A.cardRank(c3), brief(A.cardFields(c3, 9000).dropoff),
+      A.popup(c3, { role: 'dropoff', line: OWN, at: 4000, app: 'doordash' },
+              { held: [], offerAt: 1000, seenAt: 3000, cardMs: 16000 }).why],
+     ['chooser', 'press', { value: '9 Heron Ct, Smyrna, GA 30080', from: 'press' },
+      'outranked by press']);
+
+  // The customer's popup read on its own, unpressed, on the whole screen: the
+  // popup's own line files it on the card; this read files it on no order.
+  var popSight = { at: 5000, asked: false, whole: true, titled: false, app: 'doordash',
+                   screen: 'dd.placePopup', page: { top: null, bottom: null },
+                   stops: [{ kind: 'dropoff', line: OWN, street: '412 Wrenfield Ct NE',
+                             city: 'Marietta', label: 'dropoff' }], orderCount: null, keep: false };
+  eq('the card\'s own popup read unpressed on the whole screen is no order\'s end, one held or two',
+     [A.sighting(A.fresh(), held(), popSight, 5000).candidates.length,
+      A.sighting(A.fresh(), [held(), held({ id: 'o-two', acceptedAt: 1100 })], popSight,
+                 5000).candidates.length],
+     [0, 0]);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);
