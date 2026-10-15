@@ -130,8 +130,30 @@ def age(base, now=None):
 
     The freshest of the copies, because either may be the one the driver just
     wrote — see `candidates` for why there are two.
+
+    THE STAT, THEN THE CLOCK. That measurement read the age straight after the
+    write, so the clock always came after it. This read the clock first and
+    stat'd the copies after, and on the rig the writer is another process —
+    server.js — which nothing orders against this one. A request written
+    between the two reads carried an mtime later than the `now` it was
+    measured against, came back negative, and its reader dropped it as
+    "stamped 0s ahead of the clock": 2 of 4 snaps in rpi/test_loop.py with six
+    processes spinning beside the suite. Measured on a 4-core development
+    machine, not the Pi, with one process renaming a request into /dev/shm as
+    fast as it could while another aged it 200,000 times a run: clock first,
+    7 to 25 negative ages a run (worst -0.0025s, six processes spinning);
+    stat first, 0 in 800,000. Whatever the stat saw was written before the
+    clock is read, so a negative age is again only a clock that stepped back;
+    a write that lands after the stat is not seen this pass and is aged on
+    the next. It is also the order `watching` in scan_pi.py reads `.viewing`
+    in.
+
+    A `now` handed in was read before this call, and so before the stat: the
+    race is back for a request another process can write in between. The
+    loop's two request readers, dropoff_requested and snap_requested, hand in
+    none. The stall note's reader hands in the beat's clock, and that note is
+    written by this process's predecessor before it went quiet, never between.
     """
-    now = time.time() if now is None else now
     stamps = []
     for candidate in candidates(base):
         try:
@@ -140,6 +162,7 @@ def age(base, now=None):
             continue
     if not stamps:
         return None
+    now = time.time() if now is None else now
     return now - max(stamps)
 
 

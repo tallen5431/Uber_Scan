@@ -3109,6 +3109,75 @@ finally:
     SP.log = _real_log
     _HO.clear(_HO.DROPOFF)
 
+# ...and a press written WHILE the loop ages it is the driver's too. server.js
+# writes it when the driver presses and the loop ages whatever is there when it
+# passes, and nothing orders the two. handoff.age read the clock and then
+# stat'd, so a press landing between the two came back negative and was
+# refused here as "stamped 0s ahead of the clock": cleared, logged, and the ⌖
+# did nothing. Put exactly there on demand, as test_handoff.py puts it: the
+# press is written straight after the first thing age() reads, the clock or
+# the stat, a millisecond after the clock's moment, and the loop's next pass
+# is half a second on. Asked the way main() asks, with no `now`.
+class _Beside(object):
+    """The process beside the loop: it writes the press straight after the
+    first of age()'s reads."""
+
+    def __init__(self, where, at):
+        self.where, self.at, self.passes, self.wrote = where, at, 0, False
+
+    def _then_write(self):
+        if not self.wrote:
+            self.wrote = True
+            open(self.where, 'w').close()
+            os.utime(self.where, (self.at + 0.001, self.at + 0.001))
+
+    def time(self):                                     # handoff's time.time
+        now = self.at + 0.5 * self.passes
+        self._then_write()
+        return now
+
+    def stat(self, where):                              # handoff's os.stat
+        try:
+            return os.stat(where)
+        finally:
+            self._then_write()
+
+
+class _OsBut(object):
+    """`os` as handoff sees it, with the stat swapped for `stat`."""
+
+    def __init__(self, stat):
+        self.stat = stat
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+_racedir, _racehere = tempfile.mkdtemp(), tempfile.mkdtemp()
+_wasdir = os.environ.get(_HO.ENV_DIR)
+_realhere, _realtime, _realos, _real_log = _HO.HERE, _HO.time, _HO.os, SP.log
+_said, _raced = [], []
+try:
+    os.environ[_HO.ENV_DIR] = _racedir
+    _HO.HERE = _racehere
+    _beside = _Beside(_HO.path(_HO.DROPOFF), 1790000000.0)
+    _HO.time, _HO.os, SP.log = _beside, _OsBut(_beside.stat), _said.append
+    for _pass in (0, 1):
+        _beside.passes = _pass
+        _left = SP.dropoff_requested()
+        _raced.append(None if _left is None else round(_left, 3))
+finally:
+    _HO.HERE, _HO.time, _HO.os, SP.log = _realhere, _realtime, _realos, _real_log
+    if _wasdir is None:
+        os.environ.pop(_HO.ENV_DIR, None)
+    else:
+        os.environ[_HO.ENV_DIR] = _wasdir
+    shutil.rmtree(_racedir, ignore_errors=True)
+    shutil.rmtree(_racehere, ignore_errors=True)
+eq('a ⌖ press written while the loop ages it is taken on the next pass, with '
+   'what is left of its window, not dropped as stamped ahead of the clock',
+   (_raced, _said), ([None, round(SP.DROPOFF_WINDOW - 0.499, 3)], []))
+
 # --- a cost per mile typed on a screen, taken once and never lost -----------
 #
 # POST /api/settings renames its request onto one name. The taker used to read
