@@ -4405,6 +4405,74 @@
    ]
   },
   {
+   "name": "a page holding only an address block and Waybill is the foot of the list",
+   "_why": "A lone dropoff scrolled so that its header falls on the page above and its address on this one: no stop header here, an address block, and \"Waybill\" under it. Read as no planner, the address was lost, and the assembler could join the two pages only when this one also showed a header. Now the one stop of kind null, partial 'top', which assemble.js's stitch joins under the page above's cut header. Street and town invented.",
+   "text": "Address\n4821 Wrenmoor Ct\nMarietta, GA\nView details\nWaybill\nStop New Requests",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": null,
+     "orders": null,
+     "name": null,
+     "expectedBy": null,
+     "street": "4821 Wrenmoor Ct",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "4821 Wrenmoor Ct, Marietta",
+     "place": null,
+     "partial": "top"
+    }
+   ]
+  },
+  {
+   "name": "...with its time above the label when one survived, and Waybill read with a stray letter",
+   "_why": "4:18 PM is 978. The street and town on one line, split at the comma as under a header. Invented.",
+   "text": "Expected by 4:18 PM\nAddress\n77 Quillfeather Ln NW, Kennesaw, GA\nView details\nWaypbill",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": null,
+     "orders": null,
+     "name": null,
+     "expectedBy": 978,
+     "street": "77 Quillfeather Ln NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "77 Quillfeather Ln NW, Kennesaw",
+     "place": null,
+     "partial": "top"
+    }
+   ]
+  },
+  {
+   "name": "an address block with no header and no Waybill is not read",
+   "_why": "Nothing says it is the foot of a list: it may be the middle of one whose headers did not read. Invented.",
+   "text": "Address\n4821 Wrenmoor Ct\nMarietta, GA\nView details\nStop New Requests",
+   "bounded": false,
+   "expect": null
+  },
+  {
+   "name": "a label and Waybill with no address read between them is not a stop",
+   "text": "Address\nView details\nWaybill",
+   "bounded": false,
+   "expect": null
+  },
+  {
+   "name": "a headless block under the title is not read",
+   "_why": "The title says the page starts at the top of the list, so there is no stop above for this block to be the end of. Invented.",
+   "text": "Trip Planner\nAddress\n4821 Wrenmoor Ct\nMarietta, GA\nWaybill",
+   "bounded": false,
+   "expect": null
+  },
+  {
+   "name": "a Waybill above the address block is not its foot",
+   "text": "Waybill\nAddress\n4821 Wrenmoor Ct\nMarietta, GA\nView details",
+   "bounded": false,
+   "expect": null
+  },
+  {
    "name": "the title alone is not a planner",
    "_why": "It is the one line the planner shares with no stop, and alone it says nothing worth showing.",
    "text": "Trip Planner\nWaybill\nStop New Requests",

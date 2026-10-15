@@ -137,6 +137,14 @@ eq('planner_ends: a list scrolled past its first stop shows its end and not its 
 eq('...and one running on below the screen its start and not its end',
    P.planner_ends(_PLANNER_TEXT['a planner whose list runs on below the screen does not '
                                 'show its end']), (True, False))
+# A headless page (_planner_headless) is the foot of the list and not its head,
+# so a list stitched from a titled page over it is bounded.
+eq('planner_ends: a headless page shows the end of the list and not its start',
+   P.planner_ends(_PLANNER_TEXT['a page holding only an address block and Waybill is '
+                                'the foot of the list']), (False, True))
+eq('...and an address block with no Waybill under it shows neither',
+   P.planner_ends(_PLANNER_TEXT['an address block with no header and no Waybill is not '
+                                'read']), (False, False))
 
 # What screen a reading is, for a sighting: the app and the screen as one pair,
 # because the app follows from the screen and a case that got one right and

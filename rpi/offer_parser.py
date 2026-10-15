@@ -2888,7 +2888,8 @@ def find_planner(text):
 
     A list of {'kind': 'pickup'|'dropoff', 'orders', 'name', 'expectedBy',
     'street', 'city', 'state', 'zip', 'line', 'place'}, or None when the text
-    carries no stop header. `expectedBy` is minutes since midnight, through time_of_day.
+    carries no stop header and is not a headless page (below). `expectedBy` is
+    minutes since midnight, through time_of_day.
     Every field that does not read is None and is never guessed; a closed block
     has no address and says so with five Nones.
 
@@ -2912,10 +2913,19 @@ def find_planner(text):
     headed stops only, without the key, exactly as before; a sighting carries
     all of them, and the assembler (assemble.js) counts only the headed ones
     when it decides an end. See planner_stops in scan_pi.py.
+
+    A HEADLESS PAGE — no stop header at all, an address block and "Waybill"
+    under it — is the one stop of kind None, `partial: 'top'`, and nothing
+    else (see _planner_headless). It is the foot of a list whose last header
+    the page above cut: a lone dropoff scrolled so that its header and its
+    address fall on two pages. Read as None, the address was lost, and the
+    stitch in assemble.js could join the two pages only when the lower one
+    also showed a header.
     """
     lines, heads = _planner_lines(text)
     if not heads:
-        return None
+        headless = _planner_headless(lines)
+        return [headless] if headless is not None else None
     stops = []
     top = _planner_orphan(lines, heads[0])
     if top is not None:
@@ -3008,6 +3018,29 @@ def _planner_orphan(lines, first):
     return stop
 
 
+def _planner_headless(lines):
+    """The one stop on a page with no stop header, or None: an "Address"
+    label with "Waybill" under it, read as _planner_orphan reads the block
+    above a first header — the lines down to "Waybill" in place of the lines
+    down to the header. Kind, count and name None, `partial: 'top'`.
+
+    Only with the address read (a street or a town): a label and the list's
+    end with nothing between them say nothing about where anything is. And
+    only with "Waybill" under the label, which is what says this is the foot
+    of the list and not a page of some other screen that prints "Address";
+    "Waybill" above the label is not this shape. The title over it is refused
+    by _planner_orphan, as there: a page that starts at the top of the list
+    with no header under the title has no stop on it to be the end of.
+    """
+    end = next((i for i, l in enumerate(lines) if PLANNER_END.match(l)), None)
+    if end is None:
+        return None
+    stop = _planner_orphan(lines, end)
+    if stop is None or not (stop['street'] or stop['city']):
+        return None
+    return stop
+
+
 # The two ends of the list, which is what "the planner has one dropoff" needs
 # and what counting the dropoffs on the SCREEN does not give.
 #
@@ -3065,10 +3098,14 @@ def planner_ends(text):
     screen, by planner_bounded's two tests taken one at a time — the title with
     the first stop straight under it, and "Waybill" after the last header.
     (False, False) for a text that is no planner. A sighting says the two
-    apart, as its `page`; planner_bounded is both."""
+    apart, as its `page`; planner_bounded is both.
+
+    A headless page (_planner_headless) shows the list's foot and not its
+    head: (False, True), so a list stitched from a page with the title over
+    it and this one under it is bounded, as one with a header on each is."""
     lines, heads = _planner_lines(text)
     if not heads:
-        return False, False
+        return False, _planner_headless(lines) is not None
     titles = [i for i in range(heads[0]) if PLANNER_TITLE.match(lines[i])]
     top = bool(titles) and not any(re.search(r'[A-Za-z]{2}', l)
                                    for l in lines[titles[-1] + 1:heads[0]])

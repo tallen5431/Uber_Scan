@@ -409,6 +409,13 @@ check('largest dollar figure wins over a promo line',
   eq('...and one running on below the screen its start and not its end',
      ends('a planner whose list runs on below the screen does not show its end'),
      '[true,false]');
+  // A headless page (plannerHeadless) is the foot of the list and not its
+  // head, so a list stitched from a titled page over it is bounded.
+  eq('plannerEnds: a headless page shows the end of the list and not its start',
+     ends('a page holding only an address block and Waybill is the foot of the list'),
+     '[false,true]');
+  eq('...and an address block with no Waybill under it shows neither',
+     ends('an address block with no header and no Waybill is not read'), '[false,false]');
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' parser checks passed');

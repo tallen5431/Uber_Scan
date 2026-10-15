@@ -560,6 +560,23 @@
     return (stops || []).filter(function (s) { return s && s.kind; });
   }
 
+  /* Whether a planner sighting is a page the stitch may hold: one with a
+   * headed stop, or a HEADLESS page — its one stop of no kind, `partial:
+   * 'top'`, an address read (find_planner's _planner_headless: an address
+   * block with "Waybill" under it and no header anywhere). The second is the
+   * foot of a list whose last header the page above cut, and it is held only
+   * so that the stitch can join it under that header (fits, below: same app,
+   * no other screen between, within STITCH_MS, equal times where both print
+   * one). Alone it decides nothing: every rule that files counts headed()
+   * stops, and it has none, so it waits in the pool as 'no dropoff'. */
+  function pageStops(stops) {
+    if (!Array.isArray(stops)) return false;
+    if (headed(stops).length) return true;
+    var s = stops.length === 1 ? stops[0] : null;
+    return !!(s && typeof s === 'object' && !s.kind && s.partial === 'top'
+              && (s.street || s.city));
+  }
+
   function plannerDestination(stops, bounded) {
     var drops = headed(stops).filter(function (s) { return s.kind === 'dropoff'; });
     if (!drops.length) return { address: null, why: null, stop: null };
@@ -857,7 +874,7 @@
       if (nav) out.candidates.push(nav);
       return out;
     }
-    if (s.whole !== true || !Array.isArray(s.stops) || !headed(s.stops).length) return out;
+    if (s.whole !== true || !pageStops(s.stops)) return out;
     var page = { at: out.at === null ? now : out.at, app: app,
                  epoch: st.epoch[app] || 0, asked: s.asked === true,
                  titled: s.titled === true,
@@ -1317,7 +1334,7 @@
       if (nav) out.candidates.push(nav);
       return out;
     }
-    if (s.whole !== true || !Array.isArray(s.stops) || !headed(s.stops).length) return out;
+    if (s.whole !== true || !pageStops(s.stops)) return out;
     var page = { at: out.at === null ? now : out.at, app: app,
                  epoch: st.epoch[app] || 0, asked: s.asked === true,
                  titled: s.titled === true,

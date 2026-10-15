@@ -99,6 +99,340 @@
       }
     },
     {
+      "name": "a lone dropoff's header cut at the foot of one page joins the address on a headless page under it",
+      "_why": "The lower page holds only the dropoff's address block and Waybill, no header (find_planner's headless page). Before, the stitch could not hold it and the list stayed unbounded with its dropoff unread.",
+      "hold": {
+        "acceptedAt": 1000,
+        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "card": {
+          "legs": 1,
+          "multiOrder": true
+        }
+      },
+      "events": [
+        {
+          "t": 2000,
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+        },
+        {
+          "t": 9000,
+          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+        }
+      ],
+      "expect": {
+        "fields": {
+          "dropoff": {
+            "value": "415 Ostrander Way NW, Kennesaw",
+            "from": "planner"
+          },
+          "pickupAddr": {
+            "value": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+            "from": "planner"
+          },
+          "customer": {
+            "value": "Mara T.",
+            "from": "planner"
+          },
+          "expectedBy": {
+            "value": 1202,
+            "from": "planner"
+          }
+        },
+        "dropoffScanned": true,
+        "pending": [],
+        "decisions": [
+          "over the card"
+        ],
+        "unfiled": [
+          "list",
+          null
+        ]
+      }
+    },
+    {
+      "name": "...and the same two pages scrolling up",
+      "hold": {
+        "acceptedAt": 1000,
+        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "card": {
+          "legs": 1,
+          "multiOrder": true
+        }
+      },
+      "events": [
+        {
+          "t": 2000,
+          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+        },
+        {
+          "t": 9000,
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+        }
+      ],
+      "expect": {
+        "fields": {
+          "dropoff": {
+            "value": "415 Ostrander Way NW, Kennesaw",
+            "from": "planner"
+          },
+          "pickupAddr": {
+            "value": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+            "from": "planner"
+          },
+          "customer": {
+            "value": "Mara T.",
+            "from": "planner"
+          },
+          "expectedBy": {
+            "value": 1202,
+            "from": "planner"
+          }
+        },
+        "pending": [],
+        "decisions": [
+          "over the card"
+        ],
+        "unfiled": [
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "name": "a headless page whose time differs from the cut header is not joined",
+      "hold": {
+        "acceptedAt": 1000,
+        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "card": {
+          "legs": 1,
+          "multiOrder": true
+        }
+      },
+      "events": [
+        {
+          "t": 2000,
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+        },
+        {
+          "t": 9000,
+          "page": "Expected by 8:20 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+        }
+      ],
+      "expect": {
+        "fields": {
+          "dropoff": {
+            "value": "Larch Way & Teal Ct, Kennesaw",
+            "from": "card"
+          },
+          "customer": null
+        },
+        "pending": [
+          "list",
+          "no dropoff"
+        ],
+        "decisions": []
+      }
+    },
+    {
+      "name": "a headless page with a navigation screen between is not joined",
+      "hold": {
+        "acceptedAt": 1000,
+        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "card": {
+          "legs": 1,
+          "multiOrder": true
+        }
+      },
+      "events": [
+        {
+          "t": 2000,
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+        },
+        {
+          "t": 5000,
+          "sighting": {
+            "app": "uber",
+            "screen": "uber.nav",
+            "whole": true,
+            "asked": false,
+            "titled": false,
+            "page": {
+              "top": false,
+              "bottom": false
+            },
+            "stops": []
+          }
+        },
+        {
+          "t": 9000,
+          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+        }
+      ],
+      "expect": {
+        "fields": {
+          "dropoff": {
+            "value": "Larch Way & Teal Ct, Kennesaw",
+            "from": "card"
+          },
+          "customer": null
+        },
+        "pending": [
+          "list",
+          "no dropoff"
+        ],
+        "decisions": []
+      }
+    },
+    {
+      "name": "a headless page further than STITCH_MS from the cut header is not joined",
+      "hold": {
+        "acceptedAt": 1000,
+        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "card": {
+          "legs": 1,
+          "multiOrder": true
+        }
+      },
+      "events": [
+        {
+          "t": 2000,
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+        },
+        {
+          "t": 22001,
+          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+        }
+      ],
+      "expect": {
+        "fields": {
+          "dropoff": {
+            "value": "Larch Way & Teal Ct, Kennesaw",
+            "from": "card"
+          },
+          "customer": null
+        },
+        "pending": [
+          "list",
+          "no dropoff"
+        ],
+        "decisions": []
+      }
+    },
+    {
+      "name": "a headless page from another app is not joined",
+      "hold": {
+        "acceptedAt": 1000,
+        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "card": {
+          "legs": 1,
+          "multiOrder": true
+        }
+      },
+      "events": [
+        {
+          "t": 2000,
+          "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
+        },
+        {
+          "t": 9000,
+          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill",
+          "app": "doordash"
+        }
+      ],
+      "expect": {
+        "fields": {
+          "dropoff": {
+            "value": "Larch Way & Teal Ct, Kennesaw",
+            "from": "card"
+          },
+          "customer": null
+        },
+        "pending": [
+          "list",
+          "no dropoff"
+        ],
+        "decisions": []
+      }
+    },
+    {
+      "name": "a headless page is joined only under a header the page above cut, never under a whole stop",
+      "_why": "The page above ends on a dropoff with its own address read, so the block below is some other stop's and nothing says whose.",
+      "hold": {
+        "acceptedAt": 1000,
+        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "card": {
+          "legs": 1,
+          "multiOrder": true
+        }
+      },
+      "events": [
+        {
+          "t": 2000,
+          "page": "Trip Planner\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n92 Kittering Ct\nKennesaw, GA\nView details"
+        },
+        {
+          "t": 9000,
+          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+        }
+      ],
+      "expect": {
+        "fields": {
+          "dropoff": {
+            "value": "Larch Way & Teal Ct, Kennesaw",
+            "from": "card"
+          },
+          "customer": null
+        },
+        "pending": [
+          "list",
+          "no dropoff"
+        ],
+        "decisions": [
+          "not a single trip"
+        ]
+      }
+    },
+    {
+      "name": "a headless page alone files nothing, pressed or not, even on a single-trip card",
+      "hold": {
+        "acceptedAt": 1000,
+        "dropoff": "Larch Way & Teal Ct, Kennesaw",
+        "card": {
+          "legs": 1,
+          "multiOrder": false
+        }
+      },
+      "events": [
+        {
+          "t": 2000,
+          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
+        },
+        {
+          "t": 30000,
+          "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill",
+          "asked": true
+        }
+      ],
+      "expect": {
+        "fields": {
+          "dropoff": {
+            "value": "Larch Way & Teal Ct, Kennesaw",
+            "from": "card"
+          },
+          "customer": null
+        },
+        "pending": [
+          "no dropoff",
+          "no dropoff"
+        ],
+        "decisions": [],
+        "unfiled": [
+          null,
+          null
+        ]
+      }
+    },
+    {
       "name": "a planner from the trip before, refused",
       "hold": { "acceptedAt": 100000, "dropoff": "Larch Way & Teal Ct, Kennesaw",
                 "card": { "legs": 1, "multiOrder": true } },

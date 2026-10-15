@@ -642,6 +642,29 @@ SEQ.forEach(function (seq) {
      A.cardFields(card(), 9000).pickupAddr.from, 'card');
 })();
 
+/* ---- a headless page with two orders in the car ---- */
+/* sightingMany holds the page as sighting does (pageStops): the cut header on
+   a titled page over the address block and Waybill on the next is a list
+   seen whole, and its one dropoff a candidate for the cues to attribute. The
+   headless page alone gives none. Invented streets, as the sequences'. */
+(function () {
+  var UPPER = 'Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\n'
+    + 'Address\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\n'
+    + 'Dropoff • 1 order\nMara T.\nExpected by 8:02 PM';
+  var HEADLESS = 'Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill';
+  var a = holdOf({ acceptedAt: 1000 }, 'o-a'), b = holdOf({ acceptedAt: 1500 }, 'o-b');
+  var st = A.fresh();
+  var alone = A.sighting(st, [a, b], pageOf(HEADLESS, 2000), 2000);
+  eq('two orders: a headless page alone gives no candidate', alone.candidates.length, 0);
+  var st2 = A.fresh();
+  A.sighting(st2, [a, b], pageOf(UPPER, 2000), 2000);
+  var joined = A.sighting(st2, [a, b], pageOf(HEADLESS, 9000), 9000);
+  eq('...and under the cut header of the page before, its dropoff is a candidate, '
+     + 'on a list seen whole',
+     joined.candidates.map(function (c) { return [c.line, c.bounded, c.pages]; }),
+     [['415 Ostrander Way NW, Kennesaw', true, 2]]);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

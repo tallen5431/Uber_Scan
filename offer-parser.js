@@ -1474,7 +1474,8 @@
   }
 
   /* The stops on the Trip Planner in screen order: {kind, orders, name,
-     expectedBy, street, city, state, zip, line, place}, or null with no stop header.
+     expectedBy, street, city, state, zip, line, place}, or null with no stop header
+     (unless the page is headless: see plannerHeadless).
      Every field that does not read is null and never guessed. Line by line,
      each normalized on its own, as lineStarts does. See find_planner. */
   /* The text's lines, each normalized on its own and the empty ones gone, and
@@ -1628,13 +1629,31 @@
     return stop;
   }
 
+  /* The one stop on a page with no stop header, or null: an "Address" label
+     with "Waybill" under it, read as plannerOrphan reads the block above a
+     first header, the address read (a street or a town). Kind null,
+     `partial: 'top'`. See _planner_headless in offer_parser.py. */
+  function plannerHeadless(lines) {
+    var end = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (PLANNER_END.test(lines[i])) { end = i; break; }
+    }
+    if (end === -1) return null;
+    var stop = plannerOrphan(lines, end);
+    if (!stop || !(stop.street || stop.city)) return null;
+    return stop;
+  }
+
   /* ...and the page's two edges, said as `partial` on the one stop each cut
      and on no other: 'top' for the stop above, 'bottom' for the last header
      with no address under it and no "Waybill" after it. See find_planner. */
   function findPlanner(text) {
     var split = plannerLines(text);
     var lines = split.lines, heads = split.heads;
-    if (!heads.length) return null;
+    if (!heads.length) {
+      var headless = plannerHeadless(lines);
+      return headless ? [headless] : null;
+    }
     var top = plannerOrphan(lines, heads[0]);
     var stops = headedStops(lines, heads);
     var last = stops[stops.length - 1];
@@ -1722,7 +1741,8 @@
   function plannerEnds(text) {
     var split = plannerLines(text);
     var lines = split.lines, heads = split.heads;
-    if (!heads.length) return { top: false, bottom: false };
+    // A headless page shows the list's foot and not its head.
+    if (!heads.length) return { top: false, bottom: !!plannerHeadless(lines) };
     var title = -1;
     for (var i = 0; i < heads[0]; i++) if (PLANNER_TITLE.test(lines[i])) title = i;
     var top = title !== -1 && !lines.slice(title + 1, heads[0])
