@@ -4123,6 +4123,20 @@
                       'Still reading this card — the journey may not be all there yet, '
                       + 'which makes it look better than it is.'));
     }
+    // ...and where this card ENDS, when that came off the phone under a ⌖
+    // press — the card's own place popup read with it, or the row the driver
+    // picked from the chooser (server.js pressBetween, the card's
+    // `dropoffFrom`) — and not off the card. The end the map pins and the
+    // pair line weighs is then one the driver asked for, and with an order
+    // in the car it went onto this card and left that order's alone. Last:
+    // it is about where the job goes, not about a figure on it.
+    var endFrom = onRecord && onRecord.dropoffScanned && onRecord.dropoff
+      ? onRecord.dropoffFrom : null;
+    if (endFrom === 'press' || endFrom === 'chooser') {
+      notes.push(note('END · from ⌖', endFrom === 'chooser'
+        ? 'Where this job ends was read off your phone with ⌖, and you gave it to this card.'
+        : 'Where this job ends was read off your phone with ⌖.'));
+    }
     showNotes(notes);
 
     // How old this offer is, always and first.
@@ -4678,7 +4692,15 @@
       // in for a reading. `line` is what the driver reads to tell whether the
       // scan caught the right screen.
       if (msg.dropoff && msg.dropoff.line) {
-        destSaid = msg.dropoff.line;
+        // ...except one filed onto the CARD being screened with an order in
+        // the car (server.js pressBetween), which comes with that card: the
+        // card's own chip says where it went ("END · from ⌖"), and the button
+        // stays the order's. Green here says the order in the car has its
+        // end; taken from a press the card was given, it would go green over
+        // an order with none and stop asking for one — `wants` is gated on
+        // !destSaid — until the next card cleared it.
+        var ontoCard = holdingNow && msg.offer && msg.offer.dropoff === msg.dropoff.line;
+        if (!ontoCard) destSaid = msg.dropoff.line;
         destFailed = false;
         destBusy = false;
         showDest();

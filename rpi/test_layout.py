@@ -1241,10 +1241,16 @@ _FOUNDPAY_CARD = {'ready': True, 'locked': True, 'whole': True, 'state': 'go',
                   'deliverBy': 1155, 'track': None, 'places': [], 'text': ''}
 # The most notices one card writes in ordinary use, as chips (live.html
 # showNotes): the journal refusing writes, a washed-out phone, a rate with no
-# mileage off it and a card still being read — four chips, each with its
-# sentence one tap away. Measured on the same page as PAY ?, after it.
+# mileage off it, a card still being read and an end the driver read off the
+# phone with ⌖ — five chips, each with its sentence one tap away. Measured on
+# the same page as PAY ?, after it. The fifth is the card's on record, sent
+# on its own line as server.js sends a card given an end over an order in the
+# car (pressBetween), before its reading.
 CHIPS_BEAT = {'alive': True, 'at': 1, 'tooBright': True,
               'notSaving': 'Offers are NOT being saved: [Errno 30] Read-only file system'}
+CHIPS_OFFER = {'offer': {'id': 'chips-1', 'pay': 8.0, 'minutes': 22.0, 'perHour': 21.8,
+                         'state': 'warn', 'dropoff': 'Canton Rd, Marietta',
+                         'dropoffScanned': True, 'dropoffFrom': 'press'}}
 CHIPS_CARD = dict(_FOUNDPAY_CARD, state='warn', perHour=21.8, grossPerHour=21.8,
                   pay=8.0, minutes=22.0, cardMinutes=22.0, miles=6.9,
                   fromDeadline=False, deliverBy=None, whole=False,
@@ -1265,7 +1271,8 @@ SMALL_SIZES = {'1024x600': [18, 19, 24, 19, 16, 18],
 CHIPS_WANT = ['OFFERS NOT SAVED · Read-only file system',
               'PHONE TOO BRIGHT · turn it down a notch',
               'CEILING · miles unreadable',
-              'STILL READING · may look better than it is']
+              'STILL READING · may look better than it is',
+              'END · from ⌖']
 FOUNDPAY = {'drawn': dict(_FOUNDPAY_CARD, cropFrom='drawn', pay=99.99),
             'found': dict(_FOUNDPAY_CARD, cropFrom='found', pay=99.99),
             'drawn3': dict(_FOUNDPAY_CARD, cropFrom='drawn'),
@@ -2738,11 +2745,6 @@ const SNAP_MEASURE = (fixture) => {
       }
       out[panel[0] + ' ' + view + ' foundpay'] = fp;
       // ...and the notices as chips, then tapped open to their sentences.
-      await page.evaluate((a) => {
-        window.__es.push(a[0]);
-        window.__es.push(a[1]);
-      }, [CHIPS.beat, CHIPS.card]);
-      await page.waitForTimeout(200);
       const CHIPS_MEASURE = () => {
         const w = document.getElementById('warn');
         const vr = document.getElementById('verdict').getBoundingClientRect();
@@ -2793,7 +2795,27 @@ const SNAP_MEASURE = (fixture) => {
           over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
         };
       };
-      const chipsAt = { chips: await page.evaluate(CHIPS_MEASURE) };
+      // The fifth chip is about the card on record, and a card on record puts
+      // ✓ Took on the bar, which moves it: so what the chips are held to is
+      // that card on record with no notice at all — its end the card's own,
+      // not one read with ⌖ — and the bar, the row and the picture where it
+      // left them.
+      await page.evaluate((a) => {
+        window.__es.push({ alive: true, at: 1, notSaving: null, tooBright: false });
+        window.__es.push({ offer: Object.assign({}, a[0].offer, { dropoffScanned: false,
+                                                                  dropoffFrom: null }) });
+        window.__es.push(a[1]);
+      }, [CHIPS.offer, FOUNDPAY.drawn3]);
+      await page.waitForTimeout(200);
+      const chipsBase = await page.evaluate(CHIPS_MEASURE);
+      await page.evaluate((a) => {
+        window.__es.push(a[0]);
+        window.__es.push(a[2]);
+        window.__es.push(a[1]);
+      }, [CHIPS.beat, CHIPS.card, CHIPS.offer]);
+      await page.waitForTimeout(200);
+      const chipsAt = { chips: await page.evaluate(CHIPS_MEASURE),
+                        base: { chips: chipsBase.chips, layout: chipsBase.layout } };
       await page.click('#warn', { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(200);
       chipsAt.open = await page.evaluate(CHIPS_MEASURE);
@@ -3421,6 +3443,14 @@ const SNAP_MEASURE = (fixture) => {
                               card: { pick: 'card', pay: 118.04 }, closesInMs: 10000 } });
       await page.clock.runFor(300);
       const three = await measureCarry(page);
+      // ...and with ONE order in the car and another card being screened
+      // (server.js pressBetween, carrying two off as well as on): ①, the
+      // card, and Neither.
+      await push({ holding: A, orders: [A], unowned: 0 });
+      await push({ chooser: { id: 'c3', kind: 'scan', line: A.dropoff, rows: rows.slice(0, 1),
+                              card: { pick: 'card', pay: 118.04 }, closesInMs: 10000 } });
+      await page.clock.runFor(300);
+      const one = await measureCarry(page);
       await page.clock.runFor(10500);
       // ...and the pair line with both in the car, under an offer: against
       // both (Advice.stackMany: `heldCount`, and no route link, which end is
@@ -3437,7 +3467,8 @@ const SNAP_MEASURE = (fixture) => {
       await page.clock.runFor(1100);
       const offerFirst = await measureCarry(page);
       out[panel[0] + ' ' + view + ' carry'] = { before: before, two: two, three: three,
-                                               offer: offer, offerFirst: offerFirst };
+                                               one: one, offer: offer,
+                                               offerFirst: offerFirst };
       await page.close();
       await ctx.close();
     }
@@ -3775,7 +3806,7 @@ try:
                      'blind': PLANNER_BLIND}),
          json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES), json.dumps(FOUNDPAY),
          json.dumps(LIVE_HERE_LINES), json.dumps(HELD),
-         json.dumps({'beat': CHIPS_BEAT, 'card': CHIPS_CARD})],
+         json.dumps({'beat': CHIPS_BEAT, 'card': CHIPS_CARD, 'offer': CHIPS_OFFER})],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -3932,7 +3963,7 @@ try:
                 % (where, fp['found3']['off'], fp['drawn3']['off']),
                 len(fp['found3']['off'].strip()) <= len(fp['drawn3']['off'].strip()))
 
-    # The notices as chips: four, the most one card writes in ordinary use.
+    # The notices as chips: five, the most one card writes in ordinary use.
     # Every letter of every chip inside the card and on the glass, the verdict
     # and its rate still inside the card, nothing past the glass, and the
     # bar, the status row and the picture where the card without them left
@@ -3944,7 +3975,6 @@ try:
             where = '%s, %s view' % (panel, view)
             cm = got.get('%s %s chips' % (panel, view)) or {}
             _c, _o = cm.get('chips') or {}, cm.get('open') or {}
-            _fp = (got.get('%s %s foundpay' % (panel, view)) or {}).get('drawn3') or {}
             eq('the small type is %s at %s (address, label, figure, line under, '
                'notice, status row)' % (SMALL_SIZES[panel], where),
                _c.get('sizes'), SMALL_SIZES[panel])
@@ -3953,15 +3983,18 @@ try:
             if h > 380:
                 ok_('...with the address and the figures inside the card at %s' % where,
                     _c.get('placesIn') and _c.get('subIn'))
-            eq('the notices are four chips at %s' % where, _c.get('chips'), CHIPS_WANT)
+            eq('the notices are five chips, the end read with ⌖ last, at %s' % where,
+               _c.get('chips'), CHIPS_WANT)
             eq('...every letter of them inside the card and on the glass at %s' % where,
                _c.get('off'), '')
             ok_('...with the verdict label and the rate inside the card at %s' % where,
                 _c.get('labelIn') and _c.get('rateIn'))
             no_('...nothing past the glass at %s' % where, _c.get('over'))
+            # ...against the same card on record with no notice: the fifth
+            # chip's card puts ✓ Took on the bar.
+            _cb = cm.get('base') or {}
             eq('...the bar, the status row and the picture where they were at %s' % where,
-               _c.get('layout'), (_fp.get('layout') or {}) and {
-                   k: _fp['layout'][k] for k in ('bar', 'row', 'view')})
+               (_c.get('layout'), _cb.get('chips')), (_cb.get('layout'), []))
             eq('tapped, the notice is the sentences at %s' % where,
                (_o.get('chips'), 'Offers are NOT being saved' in (_o.get('text') or '')),
                ([], True))
@@ -4120,6 +4153,26 @@ try:
             ok_('...every row no shorter than 52px at %s (%r)'
                 % (where, [r.get('h') for r in _rows3]),
                 _rows3 and all((r.get('h') or 0) >= 52 for r in _rows3))
+            # ...and with one order in the car and a card being screened:
+            # ①, the card and Neither, each whole, in the pane, the bar where
+            # it was; the two answers 96px where the pane has the height, and
+            # never under the bar's 52px where it does not.
+            _one = cm.get('one') or {}
+            _c1 = _one.get('chooser') or {}
+            _rows1 = _c1.get('rows') or []
+            eq('the chooser with one order in the car and a card screened: ①, the card and '
+               'Neither, whole and in the pane at %s' % where,
+               ([(r.get('text'), r.get('cut')) for r in _rows1], _c1.get('inPane'),
+                (_one.get('bar') or {}).get('box') == _bf['bar']['box'], _one.get('over')),
+               ([('① $112.45 · 4821 Kestrel Dr S', False), ('This card $118.04', False),
+                 ('Neither', False)], True, True, False))
+            _hs1 = [r.get('h') for r in _rows1[:2]]
+            if h >= 480:
+                eq('...① and the card 96px tall at %s' % where, _hs1, [96, 96])
+            else:
+                ok_('...every row no shorter than the bar\'s 52px at %s (%r)'
+                    % (where, [r.get('h') for r in _rows1]),
+                    _rows1 and all((r.get('h') or 0) >= 52 for r in _rows1))
             # The pair line against both orders, at the most it holds: the
             # range whole, and "with ① + ②" whole in the slot "vs ① only"
             # had. In the words that give way it was cut to "with ①" at

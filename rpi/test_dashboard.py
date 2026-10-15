@@ -5810,6 +5810,92 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // --- one order in the car and a card being screened -------------------------
+  stage = 'one order in the car and a card being screened';
+  //
+  // A ⌖ press with an order in the car and another card on the slot that no
+  // cue gives either (server.js pressBetween, carrying two off as well as on):
+  // the chooser over the verdict pane with the order, the card and Neither;
+  // "This card" sends the card; and the card, sent back holding the end the
+  // driver gave it, says so in a chip — and did not before. Messages as
+  // server.js sends them (chooserForPanel; the card on the dropoff line,
+  // dropoffArrived); /api/choose stubbed. Invented streets.
+  {
+    const ctx = await browser.newContext({
+      viewport: { width: 1024, height: 600 }, deviceScaleFactor: 1,
+    });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    const posted = [];
+    await page.route('**/api/choose', (route) => {
+      posted.push({ url: '/api/choose', body: route.request().postData() });
+      route.fulfill({ status: 200, contentType: 'application/json',
+                      body: JSON.stringify({ ok: true, filed: 'card' }) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+              .catch(() => {});
+    const tick = (ms) => page.clock.runFor(ms);
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    const look = () => page.evaluate(() => {
+      const ch = document.getElementById('chooser');
+      return {
+        chooser: ch.hidden ? null : [].slice.call(ch.children).map((c) => (c.children.length
+          ? [].slice.call(c.children).map((x) => x.textContent.replace(/\s+/g, ' ').trim())
+            .join(' ')
+          : c.textContent.replace(/\s+/g, ' ').trim())),
+        chips: [].slice.call(document.querySelectorAll('#warn .chip'))
+          .map((c) => [c.textContent, c.title]),
+        // The ⌖ button: green ('done') says the order in the car has its end.
+        dest: ['done', 'wanted'].filter((k) => document.getElementById('dest')
+          .classList.contains(k)),
+      };
+    });
+    const A = { pay: 9.48, minutes: 40, holdId: 'h-1@1', dropoff: '4821 Kestrel Dr, Marietta',
+                dropoffScanned: false, card: null, endPinned: false, arrived: false,
+                endWhy: null, app: 'uber' };
+    const CARD = { id: 's-1', pay: 12.5, minutes: 25, perHour: 30, state: 'go' };
+    await push({ phase: 'scanning', message: '' });
+    await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
+    await push({ holding: A });
+    await push({ offer: CARD, at: 1 });
+    await push(Object.assign({}, READINGS.deducted, { holding: A }));
+    await tick(1100);
+    const before = await look();
+    await push({ chooser: { id: 'choose-1', kind: 'scan', line: '9 Heron Ct, Smyrna, GA 30080',
+                            rows: [{ pick: 'h-1@1', n: 1, pay: 9.48, end: A.dropoff }],
+                            card: { pick: 'card', pay: 12.5 }, closesInMs: 10000 } });
+    await tick(300);
+    const asked = await look();
+    await page.evaluate(() => document.querySelectorAll('#chooser button')[1].click());
+    for (let i = 0; i < 40 && !posted.length; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    await tick(300);
+    const picked = { look: await look(), posted: posted.slice() };
+    // The server's answer: the chooser shut, and the address on the stream
+    // with the card that now holds it.
+    await push({ chooser: null });
+    await push({ dropoff: { line: '9 Heron Ct, Smyrna, GA 30080', asked: true },
+                 offer: Object.assign({}, CARD, { dropoff: '9 Heron Ct, Smyrna, GA 30080',
+                                                  dropoffScanned: true,
+                                                  dropoffFrom: 'chooser' }) });
+    await push(Object.assign({}, READINGS.deducted, { holding: A }));
+    await tick(1100);
+    const filed = await look();
+    // ...and a card whose end its own popup gave it under the press.
+    await push({ offer: Object.assign({}, CARD, { dropoffFrom: 'press',
+                                                  dropoff: '9 Heron Ct, Smyrna, GA 30080',
+                                                  dropoffScanned: true }) });
+    await tick(1100);
+    const pressed = await look();
+    out.oneAndCard = { before: before, asked: asked, picked: picked, filed: filed,
+                       pressed: pressed };
+    await page.close();
+    await ctx.close();
+  }
+
   /* --- two orders in the car, on the map ------------------------------------
    *
    * With carrying two on: the first order's end pinned D1, the second's D2,
@@ -6310,6 +6396,31 @@ try:
            [json.loads(p['body']) for p in _db.get('posted') or []
             if p.get('url') == '/api/delivered' and p.get('body')],
            [{'holdIds': ['c-a@1', 'c-b@2']}])
+
+    # --- one order in the car and a card being screened ----------------------
+    oc = got.get('oneAndCard') or {}
+    ok_('the one-order-and-a-card stage ran', bool(oc))
+    if oc:
+        eq('[one held] the chooser over a card being screened: ①, this card, neither',
+           (oc.get('asked') or {}).get('chooser'),
+           ['Whose is 9 Heron Ct?', '① $9.48 · 4821 Kestrel Dr', 'This card $12.50',
+            'Neither'])
+        _op = oc.get('picked') or {}
+        eq('[one held] picking "This card" sends the card, and the chooser closes',
+           ([json.loads(p['body']) for p in _op.get('posted') or []],
+            (_op.get('look') or {}).get('chooser')),
+           ([{'id': 'choose-1', 'pick': 'card'}], None))
+        _end = lambda k: [c for c in (oc.get(k) or {}).get('chips') or []
+                          if c[0].startswith('END')]
+        eq('the card whose end came from ⌖ says so in a chip, and not before',
+           (_end('before'), _end('filed'), _end('pressed')),
+           ([], [['END · from ⌖', 'Where this job ends was read off your phone with '
+                  '⌖, and you gave it to this card.']],
+            [['END · from ⌖', 'Where this job ends was read off your phone with '
+                  '⌖.']]))
+        eq('[one held] a ⌖ answer given to the card leaves the button the order\'s: not green '
+           'for an end the order in the car was not given',
+           ((oc.get('before') or {}).get('dest'), (oc.get('filed') or {}).get('dest')), ([], []))
 
     eq('[carry two] Map view pins the two orders\' ends D1 and D2, and a pickup one '
        'order\'s card names P2', got.get('mapTwo'), ['D1', 'D2', 'P', 'P2'])

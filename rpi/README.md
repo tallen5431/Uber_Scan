@@ -3860,6 +3860,15 @@ held", it was "this belongs to something identifiable" — so it became
 `screeningCard()`, an id and a two-minute clock. An address read long after the
 card left the screen still lands nowhere.
 
+**With an order already in the car** the same press went onto that order
+whatever the phone showed, and replaced the end it had — measured against the
+real server at b337a44, with carrying two off and on. It is now the card's only
+when the press reads the card's own place popup, the order's only when it reads
+that order's navigation or Trip Planner since its ✓ Took, and otherwise the
+chooser asks — ①, this card, or Neither — and files nothing unless one is
+picked (`Assemble.pressBetween`). A card given its end that way says so in a
+chip, `END · from ⌖`.
+
 `map.html` is where to look at all of this: it pins what it can, joins the two
 ends of each job, and — the half that matters for checking — lists what it could
 not place and why. Four things were wrong with the first draft of it, and they
