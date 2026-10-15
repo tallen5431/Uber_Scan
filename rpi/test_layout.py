@@ -2088,6 +2088,18 @@ const SNAP_MEASURE = (fixture) => {
         // Measured as it lands, then the class is taken off, so everything
         // below measures the map beside a verdict — the narrow one, which is
         // where every rule about its key, tip and caption is hardest.
+        //
+        // ...and taken off again at the top of each measurement below, inside
+        // the same evaluate. The page's own one-second repaint (render(),
+        // setBetween) puts the class back while nothing is on screen, and the
+        // measurements below take longer than a second: on whichever ran
+        // after a tick the map was across the whole width again. That is what
+        // failed "the key with the held pickup in it ... in two rows ... at
+        // 480x320" in 2 of 3 runs at b337a44 — one row, measured on a 464px
+        // map instead of the hat's narrow one. A 1.1 s wait put before the key
+        // failed it the same way; with the class taken off here, the same
+        // wait passes. The fit was never wrong; the map it was measured on
+        // was the wide one.
         shown.between = await page.evaluate(() => {
           const r = (sel) => document.querySelector(sel).getBoundingClientRect();
           const out = { on: document.body.classList.contains('between'),
@@ -2119,6 +2131,7 @@ const SNAP_MEASURE = (fixture) => {
         // measured the same way as `chipShot`) and the sentence again where
         // it is not.
         shown.caption = await page.evaluate((lines) => {
+          document.body.classList.remove('between');
           const note = document.getElementById('viewNote');
           const liveMap = document.getElementById('liveMap');
           // What the page drew, put back whole afterwards: its words, its
@@ -2200,6 +2213,7 @@ const SNAP_MEASURE = (fixture) => {
         // puts the bar 10px in with a 2px border, so the column of two ends
         // 10 + 2 + w + 2 across and 10 + 2 + 2h + 2 down.
         shown.zoom = await page.evaluate(() => {
+          document.body.classList.remove('between');
           const z = document.createElement('div');
           z.className = 'leaflet-control-zoom leaflet-bar leaflet-control';
           z.innerHTML = '<a class="leaflet-control-zoom-in" href="#">+</a>'
@@ -2215,6 +2229,7 @@ const SNAP_MEASURE = (fixture) => {
         // measured above), in no more than two rows, and nothing spilling out
         // of its own box.
         shown.here = await page.evaluate(([lines, zoomRight]) => {
+          document.body.classList.remove('between');
           const note = document.getElementById('hereNote');
           const map = document.getElementById('liveMap').getBoundingClientRect();
           const out = {};
@@ -2256,6 +2271,7 @@ const SNAP_MEASURE = (fixture) => {
         // with the held order's pickup ring in it too, which drops the long
         // words everywhere and takes two rows on the hat (see #mapKey's rule).
         const KEY_MEASURE = ([failed, hpick, zoomBottom]) => {
+          document.body.classList.remove('between');
           const key = document.getElementById('mapKey');
           const map = document.getElementById('liveMap').getBoundingClientRect();
           key.hidden = false;
@@ -2302,6 +2318,7 @@ const SNAP_MEASURE = (fixture) => {
         // It replaced a Leaflet tooltip beside the mark, which the map clipped
         // by up to 92px on the hat (see #mapTip's rule).
         shown.tip = await page.evaluate((text) => {
+          document.body.classList.remove('between');
           const tip = document.getElementById('mapTip');
           const map = document.getElementById('liveMap').getBoundingClientRect();
           tip.textContent = text;
@@ -2338,6 +2355,7 @@ const SNAP_MEASURE = (fixture) => {
         }, "no pin for McDonald's… — 2 fit the card and disagree · within 9.4 mi of you"
            + " · this one 10.6 mi from the card's fix, outside the 9.9 mi searched");
         shown.captionStyle = await page.evaluate(() => {
+          document.body.classList.remove('between');
           const cs = getComputedStyle(document.getElementById('viewNote'));
           return { overflow: cs.overflow,
                    clamp: cs.getPropertyValue('-webkit-line-clamp') };
