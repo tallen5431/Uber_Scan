@@ -832,8 +832,9 @@ _TABLES = [
     ('the Pi\'s panel', 'rpi/scan_pi.py', r'DOUBT_LABELS = \{(.*?)\n\n', _REASONS),
     ('the Pi\'s voice', 'rpi/scan_pi.py',
      r"if rate\['state'\] == 'doubt':(.*?)\n\n", _REASONS),
+    # Written through setText there (a write that lands only when it changes).
     ('the driving screen', 'live.html',
-     r"el\.verdictLabel\.textContent =\s*\{(.*?)\}\[r\.doubt\]", _REASONS),
+     r"setText\(el\.verdictLabel,\s*\{(.*?)\}\[r\.doubt\]", _REASONS),
     ('what the rig says out loud', 'live.html',
      r"var say = r\.state === 'doubt'(.*?)\[r\.doubt\]", _REASONS),
     ('the phone scanner', 'scan.js',
@@ -996,7 +997,7 @@ ok_('...and no longer says that answer is the rig\'s alone',
 # not time" that "name the figure to check", which is true of `leg` alone:
 # `screen` reads NOT AN OFFER, and there is no figure on a route planner to
 # check against anything.
-_live_tbl = re.search(r"el\.verdictLabel\.textContent =\s*\{(.*?)\}\[r\.doubt\]",
+_live_tbl = re.search(r"setText\(el\.verdictLabel,\s*\{(.*?)\}\[r\.doubt\]",
                       open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read(), re.S)
 _cam = dict(re.findall(r"([a-z]+): '([A-Z ]+)'", _live_tbl.group(1))) if _live_tbl else {}
 _cam = {_k: _v for _k, _v in _cam.items() if _k not in _OP_L.TYPED_DOUBT_REASONS}

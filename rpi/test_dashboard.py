@@ -379,9 +379,15 @@ const framed = (page) => page.waitForFunction(
   // which is what undoing a pickup-visit check did. The suite's own
   // subprocess timeout below is 900 s, past this, so the watchdog is what
   // speaks. How close the run came is a check of its own: '[harness] ...'.
+  //
+  // 600 s. At 480 the driver had grown to 341 s of the 360 the harness
+  // check allows (16 Oct, this machine, with other suites running beside
+  // it), and the panel's checks of that day — an unchanged card's layouts,
+  // the route link under a press, Leaflet that will not load, the view
+  // between offers — needed more than the 19 s left.
   let stage = 'start';
   const STARTED = Date.now();
-  const WATCHDOG_MS = 480000;
+  const WATCHDOG_MS = 600000;
   setTimeout(() => {
     console.log(JSON.stringify({ __hung: stage }));
     process.exit(2);
@@ -6320,6 +6326,104 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // --- an unchanged card read again, and a press across a message -----------
+  stage = 'an unchanged card read again';
+  //
+  // The scanner sends the card again and again while it is on the phone, and
+  // render() runs on every message and on the one-second tick. It wrote every
+  // element of the card each time, and the browser laid the card out again
+  // for words that had not changed. Ten readings of one card with an order
+  // in the car, its pair line and its notices, and the layouts counted
+  // (CDP's LayoutCount, a frame after each). Then the two links on this
+  // panel a driver presses — ⤳ route on the pair line, and the status link
+  // in "…" — pressed down, a message or the tick landing, and let go: a
+  // link made new between the two was a press that went nowhere.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1024, height: 600 },
+                                           deviceScaleFactor: 1 });
+    await ctx.route('https://www.google.com/**', (route) => route.fulfill({
+      status: 200, contentType: 'text/html', body: 'route' }));
+    const page = await ctx.newPage();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, scanner: { enabled: true, running: true, error: null },
+                             last: null, heardAgeMs: 0, offer: null, holding: null }) }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ offers: 3, counted: 3, setAside: 0, took: 1, median: 20,
+                             beforeClock: 0, unreadable: null, rolled: false, clockSet: true }) }));
+    await phoneFrame(page);
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+              .catch(() => {});
+    await page.evaluate(() => { if (window.__es.onopen) window.__es.onopen(); });
+    await framed(page);
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    const held = { pay: 12.5, minutes: 31, dropoff: '210 Birch Ln, Plainview', holdId: 'u-1@1',
+                   card: null, endPinned: false, arrived: false, endWhy: null, visited: [] };
+    const stack = { worst: 18.2, best: 26.4, minMinutes: 31, maxMinutes: 55, sure: true,
+                    uncosted: false, ends: 'same-town', heldCount: 1, state: 'warn',
+                    route: 'https://www.google.com/maps/dir/a/b' };
+    const reading = Object.assign({}, READINGS.uncertain, { holding: held, stack: stack,
+      places: ['Store 3 (103 Elm St)', '220 Birch Ln, Plainview'] });
+    await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
+    await push(reading);
+    await page.waitForTimeout(600);
+    const frame = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(
+      () => requestAnimationFrame(r))));
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Performance.enable');
+    const layouts = async () => (await cdp.send('Performance.getMetrics')).metrics
+      .filter((m) => m.name === 'LayoutCount')[0].value;
+    await frame();
+    const l0 = await layouts();
+    for (let i = 0; i < 10; i++) { await push(reading); await frame(); }
+    out.unchanged = { readings: 10, layouts: (await layouts()) - l0 };
+    // ⤳ route, pressed across a reading of the same card, a reading that
+    // moves the line's range, and the tick.
+    let popups = 0;
+    ctx.on('page', (p) => { popups++; p.close().catch(() => {}); });
+    const across = async (sel, between, landed) => {
+      const before = await landed();
+      const box = await page.locator(sel).boundingBox().catch(() => null);
+      if (!box) return 'no ' + sel;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await between();
+      await page.mouse.up();
+      for (let i = 0; i < 20 && (await landed()) === before; i++) await page.waitForTimeout(50);
+      return (await landed()) - before;
+    };
+    const opened = async () => popups;
+    out.routePress = {
+      reading: await across('#stack .maplink', () => push(reading), opened),
+      moved: await across('#stack .maplink', () => push(Object.assign({}, reading, {
+        stack: Object.assign({}, stack, { best: 29.1 }) })), opened),
+      tick: await across('#stack .maplink', () => page.waitForTimeout(1100), opened),
+    };
+    // ...and the status link in "…", counted at the document before the
+    // page sees the click, and kept from navigating the panel away.
+    await page.click('#more', { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(150);
+    await page.evaluate(() => {
+      window.__statusClicks = 0;
+      document.addEventListener('click', (e) => {
+        if (e.target && e.target.closest && e.target.closest('#moreSheet a')) {
+          window.__statusClicks++;
+          e.preventDefault();
+        }
+      }, true);
+    });
+    const clicked = () => page.evaluate(() => window.__statusClicks);
+    out.statusPress = {
+      beat: await across('#moreSheet a', () => push({ alive: true, at: Date.now() }), clicked),
+      tick: await across('#moreSheet a', () => page.waitForTimeout(1100), clicked),
+    };
+    await page.close();
+    await ctx.close();
+  }
+
   /* --- two orders in the car, on the map ------------------------------------
    *
    * With carrying two on: the first order's end pinned D1, the second's D2,
@@ -6878,6 +6982,16 @@ try:
            (1, ['not filed \u2014 press \u2316 again']))
         eq('...and the sheet goes after a few seconds',
            (oc.get('refusedLater') or {}).get('chooser'), None)
+
+    # --- an unchanged card read again, and a press across a message --------
+    _un = got.get('unchanged') or {}
+    ok_('ten readings of an unchanged card cost at most one layout (%r)' % _un.get('layouts'),
+        isinstance(_un.get('layouts'), (int, float)) and _un.get('layouts') <= 1)
+    eq('⤳ route pressed across a reading, a reading that moves the line, and the tick: '
+       'each press opens the route', got.get('routePress'),
+       {'reading': 1, 'moved': 1, 'tick': 1})
+    eq('the status link in "…" pressed across a beat and the tick: each press arrives',
+       got.get('statusPress'), {'beat': 1, 'tick': 1})
 
     eq('[carry two] Map view pins the two orders\' ends D1 and D2, and a pickup one '
        'order\'s card names P2', got.get('mapTwo'), ['D1', 'D2', 'P', 'P2'])

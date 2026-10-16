@@ -1660,6 +1660,36 @@
    'health', 'stops', 'heldNext', 'heldLine', 'heldLine2', 'whose', 'chooser', 'undo']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
+  /* Every write to the card lands only when what it says has changed.
+   *
+   * render() runs on every message — a reading every third of a second while
+   * a card is read, a beat every four — and on the one-second tick, and it
+   * wrote every element of the card each time: the same words over the same
+   * words, the working rebuilt from its HTML, the pair line, the notices, the
+   * detail line and the status row taken down and put back. A text or a
+   * class written with its own value is still a change to the page, and the
+   * next frame lays the card out again for it. Measured at 6x CPU throttle in
+   * the 1024x600 panel, Map view up and an order in the car: 20 readings of
+   * one unchanged card cost 47 layouts and 758 ms of main thread, 2.35
+   * layouts and 38 ms a reading, for a card that looked the same after as
+   * before. rpi/test_dashboard.py counts the layouts.
+   *
+   * The plain ones compare with what is there. A part built of elements is
+   * drawn again only when the key of what it says moves (`drawnAs`), and
+   * every writer of such a part goes through its key: one that wrote round
+   * it would leave the key saying something the glass does not. */
+  // A number reads back as a string, so it is compared as one.
+  function setText(node, s) { s = String(s); if (node.textContent !== s) node.textContent = s; }
+  function setHidden(node, on) { if (node.hidden !== on) node.hidden = on; }
+  function setClass(node, c) { if (node.className !== c) node.className = c; }
+  function setTitle(node, t) { if (node.title !== t) node.title = t; }
+  function setAttr(node, k, v) { if (node.getAttribute(k) !== v) node.setAttribute(k, v); }
+  function drawnAs(node, key) {
+    if (node.drawnKey === key) return false;
+    node.drawnKey = key;
+    return true;
+  }
+
   // Keep the headline number inside the panel whatever it says. The unit comes
   // with it: while aiming, that number is a pixel count, and labelling a pixel
   // count "/hr" made a mount measurement read as a fantastic offer.
@@ -1674,9 +1704,12 @@
   var RATE_CHARS = 5;
 
   function setRate(text, unit, keepLayout) {
-    el.rateUnit.textContent = unit || '/hr';
-    el.perHour.textContent = text;
-    el.perHour.style.setProperty('--chars', Math.max(RATE_CHARS, text.length));
+    setText(el.rateUnit, unit || '/hr');
+    setText(el.perHour, text);
+    var chars = String(Math.max(RATE_CHARS, text.length));
+    if (el.perHour.style.getPropertyValue('--chars') !== chars) {
+      el.perHour.style.setProperty('--chars', chars);
+    }
     el.verdict.classList.toggle('novalue', text === '--' && !keepLayout);
   }
 
@@ -1724,8 +1757,8 @@
 
   function showRaw(text) {
     var body = (text || '').trim();
-    el.raw.hidden = !body;
-    if (body) el.rawText.textContent = body;
+    setHidden(el.raw, !body);
+    if (body) setText(el.rawText, body);
   }
 
   var last = null;
@@ -2049,8 +2082,8 @@
   // resemblance two files have to keep up by hand.
   function showPlaces(list) {
     var where = (list || []).filter(function (p) { return !!p; });
-    el.places.textContent = where.join(' \u2192 ');
-    el.places.hidden = !where.length;
+    setText(el.places, where.join(' \u2192 '));
+    setHidden(el.places, !where.length);
   }
 
   // Both jobs at once, when there is already one in the car.
@@ -2100,7 +2133,7 @@
   }
 
   function showStack(s) {
-    if (!s) { el.stack.hidden = true; el.stack.className = 'stackline'; return; }
+    if (!s) { setHidden(el.stack, true); setClass(el.stack, 'stackline'); return; }
     // Ordered by value, not by which field they came from. `worst` divides the
     // pair's money by the LONGER time and `best` by the shorter, so on money
     // above zero worst is the smaller — and below zero that reverses, because
@@ -2108,12 +2141,23 @@
     // pair therefore printed its range backwards, low end first and larger.
     var lo = Math.min(s.worst, s.best), hi = Math.max(s.worst, s.best);
     // The base colour, whatever the state. See NO VERDICT COLOUR above.
-    el.stack.className = 'stackline';
+    setClass(el.stack, 'stackline' + (s.ends === 'elsewhere' ? ' elsewhere' : ''));
+    showRoute(s.route);
+    setHidden(el.stack, false);
+    // The rest only when what it says has moved, and never the route link
+    // with it (showRoute).
+    if (!drawnAs(el.stack, JSON.stringify([lo, hi, s.heldCount, s.minMinutes, s.maxMinutes,
+                                           s.sure, s.uncosted, s.ends, s.vsFirst]))) return;
     // Built from parts rather than one string, because the parts have different
     // priorities when the row runs out of room. See .stackline in styles.css:
     // this is the half that gives way, and it can because the same figures are
     // on the panel above it.
-    while (el.stack.firstChild) el.stack.removeChild(el.stack.firstChild);
+    [].slice.call(el.stack.childNodes).forEach(function (n) {
+      if (n !== routeLink) el.stack.removeChild(n);
+    });
+    var put = function (part) {
+      el.stack.insertBefore(part, routeLink && routeLink.parentNode === el.stack ? routeLink : null);
+    };
     var sum = document.createElement('span');
     sum.className = 'sum';
     // The range, first and larger, in an element of its own that never
@@ -2186,7 +2230,7 @@
       ;
     sum.appendChild(range);
     sum.appendChild(more);
-    el.stack.appendChild(sum);
+    put(sum);
     // ...and the half that does not give way. Its own element, so the ellipsis
     // above can never reach it: these words are the only place this claim is
     // made, and losing them leaves the driver a range with nothing to say
@@ -2232,7 +2276,7 @@
       vs.textContent = 'vs \u2460 only';
       vs.title = 'Two orders are in the car. This weighs the new one against the '
         + 'first you took, not against both.';
-      el.stack.appendChild(vs);
+      put(vs);
     }
     // With two in the car and carrying two on, the range is the card against
     // BOTH (Advice.stackMany), and which two is said in the numbers the
@@ -2250,31 +2294,44 @@
       both.title = 'Two orders are in the car. This weighs the new one against both: '
         + 'the most time is all of them one after another, the least the longest '
         + 'single one.';
-      el.stack.appendChild(both);
+      put(both);
     }
-    el.stack.appendChild(chip);
-    if (s.ends === 'elsewhere') el.stack.className += ' elsewhere';
-    // ...and the same question handed to a map, which answers it in driving
-    // minutes with live traffic where the line above can only answer it in the
-    // card's own words. Appended as a real link rather than folded into the
-    // text, because it is the one thing on this panel a driver is meant to
-    // press — and only when both ends were named, which is about half the time.
-    //
-    // Opened in another tab so the driving screen is still there behind it. It
-    // is also the panel's browser, not the phone's: the phone keeps showing the
-    // offer and the rig does not lose the card while the map is up.
-    if (s.route) {
-      var a = document.createElement('a');
-      a.className = 'maplink';
-      a.href = s.route;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.textContent = '\u2933 route';
-      a.title = 'Open the drive from where the order you have ends to where '
-              + 'this one ends, with current traffic.';
-      el.stack.appendChild(a);
+    put(chip);
+  }
+
+  // ...and the same question handed to a map, which answers it in driving
+  // minutes with live traffic where the line above can only answer it in the
+  // card's own words. Appended as a real link rather than folded into the
+  // text, because it is the one thing on this panel a driver is meant to
+  // press — and only when both ends were named, which is about half the time.
+  //
+  // Opened in another tab so the driving screen is still there behind it. It
+  // is also the panel's browser, not the phone's: the phone keeps showing the
+  // offer and the rig does not lose the card while the map is up.
+  //
+  // Made once and kept, last on the line. It was a new element on every
+  // render, and a press is a mousedown and a mouseup on the SAME element: a
+  // reading or the one-second tick landing between the two took the link
+  // away under the pointer and the press opened nothing. Measured: 5 of 5
+  // presses opened the route with nothing between, 0 of 5 with a reading
+  // between, 0 of 5 across the tick. Now its href changes in place.
+  var routeLink = null;
+  function showRoute(href) {
+    if (!href) {
+      if (routeLink && routeLink.parentNode) routeLink.parentNode.removeChild(routeLink);
+      return;
     }
-    el.stack.hidden = false;
+    if (!routeLink) {
+      routeLink = document.createElement('a');
+      routeLink.className = 'maplink';
+      routeLink.target = '_blank';
+      routeLink.rel = 'noopener noreferrer';
+      routeLink.textContent = '\u2933 route';
+      routeLink.title = 'Open the drive from where the order you have ends to where '
+                      + 'this one ends, with current traffic.';
+    }
+    setAttr(routeLink, 'href', href);
+    if (routeLink.parentNode !== el.stack) el.stack.appendChild(routeLink);
   }
 
   // The last offer the scanner wrote to the journal, and whether the driver has
@@ -2323,10 +2380,10 @@
 
   function showTook() {
     if (!onRecord || !onRecord.id) {
-      el.took.hidden = true;
+      setHidden(el.took, true);
       return;
     }
-    el.took.hidden = false;
+    setHidden(el.took, false);
     // Past tense, and the amount. "Took $8.04" is a note about a decision
     // already made; anything in the imperative could be read, on a screen
     // bolted to a dashboard next to a verdict, as doing something to the offer
@@ -2339,10 +2396,10 @@
     // has said this once.
     if (heldAgain()) {
       tookSays('\u2713 Took ' + what, 'in car');
-      el.took.title = 'The order you already took, on the phone again. Nothing to record.';
+      setTitle(el.took, 'The order you already took, on the phone again. Nothing to record.');
       el.took.classList.remove('failed');
       el.took.classList.add('on');
-      el.took.setAttribute('aria-pressed', 'true');
+      setAttr(el.took, 'aria-pressed', 'true');
       return;
     }
     // No "undo" in the label: at this width it overflowed the button by 20px
@@ -2355,14 +2412,14 @@
              : tookFailed ? 'Took ' + what
              : (tookState ? '\u2713 Took ' + what : 'Took ' + what + '?'),
              tookBusy ? '' : tookFailed ? 'not saved' : tookAge(), !tookFailed);
-    el.took.title = tookFailed
+    setTitle(el.took, tookFailed
       ? 'The journal could not be written. Press again to retry.'
       : tookState
       ? 'Recorded as taken. Press again if that was wrong.'
-      : 'Record that you accepted this offer. It does not touch your phone.';
+      : 'Record that you accepted this offer. It does not touch your phone.');
     el.took.classList.toggle('failed', tookFailed);
     el.took.classList.toggle('on', tookState);
-    el.took.setAttribute('aria-pressed', tookState ? 'true' : 'false');
+    setAttr(el.took, 'aria-pressed', tookState ? 'true' : 'false');
   }
 
   /* The Took button's label, and under it, when there is one, its status
@@ -2374,6 +2431,7 @@
    * name; a block line after it draws none. `age` marks the line as the age,
    * which rpi/test_layout.py measures at its widest. */
   function tookSays(label, status, age) {
+    if (!drawnAs(el.took, JSON.stringify([label, status, !!age]))) return;
     el.took.textContent = status ? '' : label;
     if (!status) return;
     var both = document.createElement('span');
@@ -2521,44 +2579,59 @@
     // of two runs is next is the detour's question (Stage 6), not this one's.
     var two = on && twoHeld();
     var next = on && !two ? nextStop() : null;
-    el.heldNext.hidden = !between || two;
-    el.verdictLabel.hidden = between;
-    el.heldLine.hidden = !on || inDetail;
+    setHidden(el.heldNext, !between || two);
+    setHidden(el.verdictLabel, between);
+    setHidden(el.heldLine, !on || inDetail);
     el.heldLine.classList.toggle('between', between);
-    el.heldLine2.hidden = !two || inDetail;
+    setHidden(el.heldLine2, !two || inDetail);
     el.heldLine2.classList.toggle('between', between);
-    el.whose.hidden = !two || inDetail || !unownedNow;
+    setHidden(el.whose, !two || inDetail || !unownedNow);
     el.whose.classList.toggle('between', between);
-    el.whose.textContent = unownedNow
-      ? unownedNow + (unownedNow === 1 ? ' dropoff' : ' dropoffs') + ' read \u00b7 whose?' : '';
-    var old = el.detail.querySelector('.held');
-    if (old) el.detail.removeChild(old);
+    setText(el.whose, unownedNow
+      ? unownedNow + (unownedNow === 1 ? ' dropoff' : ' dropoffs') + ' read \u00b7 whose?' : '');
     el.detail.classList.toggle('withheld', inDetail);
-    if (!on) return;
+    if (!on) return heldInDetail(null);
     if (two) return showTwoHeld(inDetail);
     var pay = heldSaid && typeof heldSaid.pay === 'number' ? money(heldSaid.pay, 2) : '';
-    var line = inDetail ? document.createElement('span') : el.heldLine;
     if (inDetail) {
-      line.className = 'held';
-      ['pay', 'stop', 'gps'].forEach(function (c) {
-        var part = document.createElement('span');
-        part.className = c;
-        line.appendChild(part);
-      });
-      el.detail.appendChild(line);
+      return heldInDetail(['· In car' + (pay ? ' ' + pay : ''),
+                           '· ▸ ' + (next.name || next.kind), '· ' + gpsDropSaid()]);
     }
+    heldInDetail(null);
+    var line = el.heldLine;
     if (between) {
-      el.heldNext.firstChild.textContent = next.kind
-        + (typeof next.by === 'number' ? ' by ' + clockOf(next.by) : '');
-      el.heldNext.lastChild.textContent = next.name || 'address not read';
-      line.children[0].textContent = pay ? pay + ' in car' : 'In car';
+      setText(el.heldNext.firstChild, next.kind
+        + (typeof next.by === 'number' ? ' by ' + clockOf(next.by) : ''));
+      setText(el.heldNext.lastChild, next.name || 'address not read');
+      setText(line.children[0], pay ? pay + ' in car' : 'In car');
     } else {
-      line.children[0].textContent = (inDetail ? '· ' : '')
-        + 'In car' + (pay ? ' ' + pay : '');
-      line.children[1].textContent = '· ▸ ' + (next.name || next.kind);
+      setText(line.children[0], 'In car' + (pay ? ' ' + pay : ''));
+      setText(line.children[1], '· ▸ ' + (next.name || next.kind));
     }
-    line.children[1].hidden = between;
-    line.children[2].textContent = '· ' + gpsDropSaid();
+    setHidden(line.children[1], between);
+    setText(line.children[2], '· ' + gpsDropSaid());
+  }
+
+  /* The order in the car as the one line after the reading's age, under an
+     offer: its three parts' words, the third hidden where it is null, or
+     null for no line. Drawn again only when the words move. */
+  function heldInDetail(parts) {
+    var old = el.detail.querySelector('.held');
+    var key = JSON.stringify(parts);
+    if (old && old.drawnKey === key) return;
+    if (old) el.detail.removeChild(old);
+    if (!parts) return;
+    var line = document.createElement('span');
+    line.className = 'held';
+    line.drawnKey = key;
+    ['pay', 'stop', 'gps'].forEach(function (c, i) {
+      var part = document.createElement('span');
+      part.className = c;
+      if (parts[i] === null) part.hidden = true;
+      else part.textContent = parts[i];
+      line.appendChild(part);
+    });
+    el.detail.appendChild(line);
   }
 
   // The circled number an order goes by on the panel: ① first-taken.
@@ -2569,12 +2642,12 @@
   // One order's compact line: "① $9.48", "→ Kestrel Dr", "· ● armed"; its end
   // as "?" when none is on record.
   function orderLine(line, o, inDetail) {
-    line.children[0].textContent = circled(o.n) + ' '
-      + (typeof o.pay === 'number' ? money(o.pay, 2) : '?');
-    line.children[1].hidden = false;
-    line.children[1].textContent = '\u2192 ' + (streetOf(o.dropoff) || '?');
-    line.children[2].textContent = '\u00b7 ' + gpsSaidOf(o, false);
-    line.children[2].hidden = !!inDetail;
+    setText(line.children[0], circled(o.n) + ' '
+      + (typeof o.pay === 'number' ? money(o.pay, 2) : '?'));
+    setHidden(line.children[1], false);
+    setText(line.children[1], '\u2192 ' + (streetOf(o.dropoff) || '?'));
+    setText(line.children[2], '\u00b7 ' + gpsSaidOf(o, false));
+    setHidden(line.children[2], !!inDetail);
   }
 
   /* showHeld with two orders: ① on #heldLine, ② on #heldLine2; under an
@@ -2583,20 +2656,10 @@
   function showTwoHeld(inDetail) {
     var a = heldList[0], b = heldList[1];
     if (inDetail) {
-      var line = document.createElement('span');
-      line.className = 'held';
-      ['pay', 'stop', 'gps'].forEach(function (c) {
-        var part = document.createElement('span');
-        part.className = c;
-        line.appendChild(part);
-      });
-      el.detail.appendChild(line);
-      line.children[0].textContent = '\u00b7 In car ' + circled(a.n) + ' '
-        + money(a.pay, 2);
-      line.children[1].textContent = '\u00b7 ' + circled(b.n) + ' ' + money(b.pay, 2);
-      line.children[2].hidden = true;
-      return;
+      return heldInDetail(['\u00b7 In car ' + circled(a.n) + ' ' + money(a.pay, 2),
+                           '\u00b7 ' + circled(b.n) + ' ' + money(b.pay, 2), null]);
     }
+    heldInDetail(null);
     orderLine(el.heldLine, a, false);
     orderLine(el.heldLine2, b, false);
   }
@@ -2782,13 +2845,13 @@
   }
 
   function showDrop() {
-    el.drop.hidden = !holdingNow;
+    setHidden(el.drop, !holdingNow);
     // "Drop ▾" with two in the car: one tap may ask which (the chooser).
-    el.drop.textContent = dropBusy ? '…' : dropFailed ? 'Drop · failed'
-      : twoHeld() ? 'Drop \u25be' : 'Drop';
+    setText(el.drop, dropBusy ? '…' : dropFailed ? 'Drop · failed'
+      : twoHeld() ? 'Drop \u25be' : 'Drop');
     el.drop.classList.toggle('failed', dropFailed);
-    el.drop.title = 'Put the order down, so the next offer is judged on its own '
-                  + 'again. It does not touch your phone.';
+    setTitle(el.drop, 'Put the order down, so the next offer is judged on its own '
+                    + 'again. It does not touch your phone.');
   }
 
   /* Map view pinned the held order's end at DOOR level: tell the server, which
@@ -3045,13 +3108,14 @@
   }
 
   function drawStops(lines) {
+    setHidden(el.stops, !lines.length);
+    if (!drawnAs(el.stops, JSON.stringify(lines))) return lines.length;
     while (el.stops.firstChild) el.stops.removeChild(el.stops.firstChild);
     lines.forEach(function (text) {
       var div = document.createElement('div');
       div.textContent = text;
       el.stops.appendChild(div);
     });
-    el.stops.hidden = !lines.length;
     return lines.length;
   }
 
@@ -3072,13 +3136,15 @@
     // Driving, never the sentences: they are read parked.
     var open = !drivingShown && !!warnOpenAt && Date.now() - warnOpenAt < WARN_OPEN_MS;
     if (!open) warnOpenAt = 0;
-    el.warn.textContent = '';
     // ...and the first chip only, with a chip saying how many more there
     // are, so the rest are put away rather than gone with nothing saying so.
     // Every sentence stays on the notice's title.
     if (drivingShown && list.length > 1) {
       list = [list[0], note('+' + (list.length - 1) + ' more', said)];
     }
+    setHidden(el.warn, !list.length);
+    if (!drawnAs(el.warn, JSON.stringify([open, list]))) return;
+    el.warn.textContent = '';
     if (open) {
       el.warn.textContent = said;
     } else {
@@ -3094,7 +3160,6 @@
     el.warn.classList.toggle('open', open);
     el.warn.title = said;
     el.warn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    el.warn.hidden = !list.length;
   }
 
   // A tap on the notice is the "what does that mean" — and a second tap puts
@@ -3169,7 +3234,7 @@
 
   function showDest() {
     var screening = screeningEnd();
-    el.dest.hidden = !holdingNow && !screening;
+    setHidden(el.dest, !holdingNow && !screening);
     // A LABEL, always, and the answer said in colour instead.
     //
     // This used to become the address itself once one had been read. The bar is
@@ -3185,8 +3250,8 @@
     // a driver to read before they read words, and it costs no width at all.
     // The address itself goes where there is room for it - the title, and the
     // stack line's own geography.
-    el.dest.textContent = destBusy ? '⌖ reading…'
-      : destFailed ? '⌖ not read' : '⌖ Scan';
+    setText(el.dest, destBusy ? '⌖ reading…'
+      : destFailed ? '⌖ not read' : '⌖ Scan');
     el.dest.classList.toggle('done', !destBusy && !!destSaid);
     // The same class Drop and Took already use for the same thing, so a
     // failure looks like a failure on this bar whichever control it came from.
@@ -3242,7 +3307,7 @@
     // is the sentence that stands for. One reason, read off the line, for
     // both. See unfiledNow.
     var unfiled = unfiledNow();
-    el.dest.title = destSaid
+    setTitle(el.dest, destSaid
       ? 'Read as: ' + destSaid + '. Press again to read it afresh.'
       : destFailed
       ? 'Nothing on that screen read as an address. Get the destination up on '
@@ -3260,10 +3325,10 @@
       : holdingNow
       ? 'Read the destination off your phone, so the next offer can be judged '
         + 'on where it ends as well as what it pays. It does not touch your phone.'
-      : 'Read where this card goes off your phone. It does not touch your phone.';
+      : 'Read where this card goes off your phone. It does not touch your phone.');
     // ...and said out loud, because the colour is the only thing on screen that
     // changed and a screen reader cannot see it.
-    el.dest.setAttribute('aria-label', destSaid
+    setAttr(el.dest, 'aria-label', destSaid
       ? 'Dropoff read as ' + destSaid + '. Press again to read it afresh.'
       : destFailed
       ? 'Nothing on that screen read as an address. Press again once the '
@@ -3820,25 +3885,35 @@
   var moreBtn = document.getElementById('more');
   var moreSheet = document.getElementById('moreSheet');
 
+  // The connection's line, with its link to /api/status, made once and kept
+  // first on the sheet: fillMore runs on every message and every tick, and a
+  // link made new each time was gone between a press and its release — the
+  // same fault as the pair line's route link (showRoute). Its words change in
+  // place; the lines after it are drawn again when what they say moves.
+  var moreConn = null, moreLink = null;
   function fillMore() {
     if (!moreSheet || moreSheet.hidden) return;
-    moreSheet.textContent = '';
-    var line = function (text, cls) {
-      var d = document.createElement('div');
-      if (cls) d.className = cls;
-      d.textContent = text;
-      moreSheet.appendChild(d);
-      return d;
-    };
-    var c = line('', 'm-conn');
-    var a = document.createElement('a');
-    a.href = '/api/status';
-    a.textContent = el.conn.textContent;
-    c.appendChild(a);
+    if (!moreConn) {
+      moreConn = document.createElement('div');
+      moreConn.className = 'm-conn';
+      moreLink = document.createElement('a');
+      moreLink.href = '/api/status';
+      moreConn.appendChild(moreLink);
+    }
+    if (moreSheet.firstChild !== moreConn) moreSheet.insertBefore(moreConn, moreSheet.firstChild);
+    setText(moreLink, el.conn.textContent);
     // The note's own lines: the heat chip's sentence, which the row has no
     // room for, and the words beside it (showHealth).
-    if (!el.health.hidden) healthLines.forEach(function (h) { line(h, 'm-health'); });
-    if (shiftFull) line(shiftFull, 'm-shift');
+    var lines = (!el.health.hidden ? healthLines : []).map(function (h) { return [h, 'm-health']; })
+      .concat(shiftFull ? [[shiftFull, 'm-shift']] : []);
+    if (!drawnAs(moreSheet, JSON.stringify(lines))) return;
+    while (moreConn.nextSibling) moreSheet.removeChild(moreConn.nextSibling);
+    lines.forEach(function (l) {
+      var d = document.createElement('div');
+      d.className = l[1];
+      d.textContent = l[0];
+      moreSheet.appendChild(d);
+    });
   }
 
   function showMore(on) {
@@ -3945,6 +4020,13 @@
      card is back in the same frame as the offer that brings it; the map is
      told its new size there and then, or Leaflet goes on drawing tiles for
      the width it had. */
+  // The verdict box's class: its state, and stale when it is. `novalue` is
+  // setRate's to say and is carried over as it stands, so a render that
+  // changes nothing writes nothing.
+  function verdictClass(c) {
+    setClass(el.verdict, c + (el.verdict.classList.contains('novalue') ? ' novalue' : ''));
+  }
+
   function setBetween(on) {
     if (document.body.classList.contains('between') === on) return;
     document.body.classList.toggle('between', on);
@@ -3980,8 +4062,9 @@
       // sign where the verdict's mark goes, and words that are not PASS. It is
       // the one state here where the rig is not working at all, and the muted
       // grey of a fault is how a whole shift went past unread.
-      el.verdict.className = 'verdict ' + (blind ? 'blind'
-        : p.phase === 'error' ? 'fault' : 'empty');
+      verdictClass('verdict ' + (blind ? 'blind'
+        : p.phase === 'error' ? 'fault' : 'empty')
+        + (Date.now() - seenAt > STALE_MS ? ' stale' : ''));
       // A card under the reader is not "waiting for an offer", and saying so
       // was the panel's least honest second and a half. Not while aiming or
       // faulted: both of those are about the rig rather than about a card, and
@@ -4002,10 +4085,10 @@
       // reading that had something of an offer on it, or before any reading
       // at all, it is still READING THE CARD.
       var again = busy && r && noVerdictSaid(r) === NO_OFFER_SAID;
-      el.verdictLabel.textContent = blind ? BLIND_LABEL[blind] || 'CANNOT SEE'
+      setText(el.verdictLabel, blind ? BLIND_LABEL[blind] || 'CANNOT SEE'
         : again ? 'READING THE SCREEN'
         : busy ? 'READING THE CARD'
-        : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER');
+        : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER'));
       // ...and with an order in the car, where it goes next in that label's
       // place when the label would be WAITING FOR AN OFFER — the card has
       // nothing else to say — and its one line under anything else. Nothing
@@ -4019,16 +4102,16 @@
       var aimingNow = p.phase === 'aim';
       setRate(aimingNow && p.cardPixels ? String(p.cardPixels) : '--',
               aimingNow ? 'px' : '/hr');
-      el.vPay.textContent = el.vMin.textContent = el.vMile.textContent = '--';
+      setText(el.vPay, '--'); setText(el.vMin, '--'); setText(el.vMile, '--');
 
       var aiming = p.phase === 'aim';
-      el.lPay.textContent = aiming ? 'card px' : 'pay';
-      el.lMin.textContent = aiming ? 'sharpness' : 'minutes';
-      el.lMile.textContent = aiming ? 'steady' : 'miles';
+      setText(el.lPay, aiming ? 'card px' : 'pay');
+      setText(el.lMin, aiming ? 'sharpness' : 'minutes');
+      setText(el.lMile, aiming ? 'steady' : 'miles');
       if (aiming) {
-        el.vPay.textContent = p.cardPixels ? p.cardPixels + 'px' : '--';
-        el.vMin.textContent = p.sharpness !== null && p.sharpness !== undefined ? p.sharpness : '--';
-        el.vMile.textContent = (p.stable || 0) + '/' + (p.need || 6);
+        setText(el.vPay, p.cardPixels ? p.cardPixels + 'px' : '--');
+        setText(el.vMin, p.sharpness !== null && p.sharpness !== undefined ? p.sharpness : '--');
+        setText(el.vMile, (p.stable || 0) + '/' + (p.need || 6));
       }
       // Ahead of the phase message, because it is the one the driver can act
       // on: a washed-out card between offers is exactly the state where there
@@ -4057,7 +4140,7 @@
       // the mount's own measurements.
       showStops(p.phase !== 'aim');
       var quiet = Date.now() - seenAt;
-      el.detail.textContent = aiming
+      var detailSaid = aiming
         ? 'the view below is live — move the mount until this says good'
         : (quiet > STALE_MS
             ? 'nothing from the scanner for ' + Math.round(quiet / 1000)
@@ -4074,8 +4157,9 @@
                : again ? 'no offer on screen · reading again'
                : busy ? 'working out the pay, the time and the distance'
                : (r ? noVerdictSaid(r) + trackNote(r) : '')));
+      if (drawnAs(el.detail, '\n' + detailSaid)) el.detail.textContent = detailSaid;
       el.verdict.classList.toggle('stale', quiet > STALE_MS);
-      el.working.hidden = true;
+      setHidden(el.working, true);
       showRaw(r && r.text);
       /* Between offers, and nothing on the card but WAITING FOR AN OFFER:
          Map view takes the whole width (see body.between in the stylesheet).
@@ -4092,7 +4176,7 @@
     setBetween(false);
 
     var stale = Date.now() - readAt > READ_STALE_MS;
-    el.verdict.className = 'verdict ' + r.state + (stale ? ' stale' : '');
+    verdictClass('verdict ' + r.state + (stale ? ' stale' : ''));
     // `whole` and `locked` are two different claims and only one of them is the
     // one to act on. `locked` means two consecutive frames parsed the same —
     // and two frames that both lose the pickup leg to the same glare agree
@@ -4113,8 +4197,7 @@
     // wrong. The numbers stay on screen underneath — the driver is holding the
     // same card and is the one who can see which of them is off.
     if (r.state === 'doubt') {
-      el.verdictLabel.textContent =
-        { pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
+      setText(el.verdictLabel, { pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
           speed: 'CHECK THE DISTANCE',
           // The time, because that is what is wrong with it: the reading is
           // over one leg of a journey the card printed two of, so the minutes
@@ -4129,11 +4212,10 @@
           // own panel has named this since the reason was added; this screen,
           // which is the same decision shown larger, fell through to READ
           // AGAIN and sent the driver looking for a card that is not there.
-          screen: 'NOT AN OFFER' }[r.doubt] || 'READ AGAIN';
+          screen: 'NOT AN OFFER' }[r.doubt] || 'READ AGAIN');
     } else {
-      el.verdictLabel.textContent =
-        ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '')
-        + (settled ? '' : ' ?');
+      setText(el.verdictLabel, ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '')
+        + (settled ? '' : ' ?'));
     }
     // The headline is net of running costs when a cost per mile is set, and
     // saying so is not optional: a driver who checks 7.09 over 34 minutes gets
@@ -4166,17 +4248,17 @@
     // there, as "MIN LEFT" does beside it. rpi/test_layout.py holds it inside
     // its cell and on the glass, moving nothing but the figure a few pixels
     // sideways, at 1024x600, 800x480 and 480x320 in both pictures.
-    el.lPay.textContent = r.cropFrom === 'found' ? 'pay ?' : 'pay';
-    el.vPay.textContent = money(r.pay, 2);
+    setText(el.lPay, r.cropFrom === 'found' ? 'pay ?' : 'pay');
+    setText(el.vPay, money(r.pay, 2));
     // The card's own minutes where it states them, the time left to a delivery
     // deadline where it does not. Not the billed minutes: this row is what a
     // driver checks against the phone in front of them, and a figure with
     // their own pad added to it would never match.
     var shown = (typeof r.cardMinutes === 'number') ? r.cardMinutes : r.minutes;
-    el.vMin.textContent = (shown === null || shown === undefined)
-      ? '--' : Math.round(shown);
-    el.lMin.textContent = r.fromDeadline ? 'min left' : 'minutes';
-    el.vMile.textContent = r.miles === null ? '--' : Number(r.miles).toFixed(1);
+    setText(el.vMin, (shown === null || shown === undefined)
+      ? '--' : Math.round(shown));
+    setText(el.lMin, r.fromDeadline ? 'min left' : 'minutes');
+    setText(el.vMile, r.miles === null ? '--' : Number(r.miles).toFixed(1));
     // Secondary on purpose: $/hr is what decides an offer, because an hour is
     // the thing actually being spent. $/mi is the cross-check, for the case
     // the driver named — "some apps have very bad time estimates but the $/mi
@@ -4225,9 +4307,9 @@
     // pay that is not a number cannot arrive here.
     var rawPerMile = r.milesUncertain ? null : r.pay / r.miles;
     var mileStands = r.state !== 'doubt' || r.doubt === 'time';
-    el.vPerMile.textContent = (rawPerMile === null || !mileStands)
-      ? '--' : money(rawPerMile, 2);
-    el.lPerMile.textContent = '$/mi';
+    setText(el.vPerMile, (rawPerMile === null || !mileStands)
+      ? '--' : money(rawPerMile, 2));
+    setText(el.lPerMile, '$/mi');
 
     // The working, in the panel rather than in the small print, and in two
     // steps so both rates are on screen at once: what the offer itself pays
@@ -4318,10 +4400,11 @@
     // mark reply, the Drop reply, the event stream and the status poll, and the
     // whole fault is that the READING is the one thing that has not heard.
     showStack(holdingNow ? r.stack : null);
-    el.working.innerHTML = rows.map(function (row) {
+    var working = rows.map(function (row) {
       return '<div class="' + row[0] + '">' + row[1] + '</div>';
     }).join('');
-    el.working.hidden = false;
+    if (drawnAs(el.working, working)) el.working.innerHTML = working;
+    setHidden(el.working, false);
 
     var notes = [];
     // Before the brightness notes, which used to be first. Those are about the
@@ -4434,35 +4517,38 @@
     // indistinguishable at a glance from "1517ms". The age is the only part of
     // it a driver acts on.
     var age = Math.max(0, Math.round((Date.now() - readAt) / 1000));
-    var when = document.createElement('b');
-    when.className = 'age';
-    when.textContent = age < 1 ? 'just now' : age + 's ago';
-    // Nodes rather than innerHTML: every fragment below is built from the
-    // scanner's own JSON, and `trackNote` in particular quotes what the
-    // tracker reported.
-    el.detail.textContent = '';
-    el.detail.appendChild(when);
+    var ageSaid = age < 1 ? 'just now' : age + 's ago';
     // The diagnostics get an element of their own so the 3.5" hat can drop them
     // and keep the age. They used to be bare text nodes, which CSS cannot
     // address, so the hat's only way to reclaim the line was to hide all of
     // #detail — and that took the age with it, on the one screen where the
     // driver is furthest from being able to work it out for themselves. See the
     // `max-height: 380px` block.
-    var diag = document.createElement('span');
-    diag.className = 'diag';
     // No read time. "· 1800ms" sat here on every reading: how long the Pi
     // took over the card, which is the rig's telemetry and nothing a driver
     // can act on. It is on the reading /api/status serves and in the CSV's
     // `ms` column, which is where anyone tuning the reader looks. On this
     // line it was a four-digit number set beside the age, the one figure in
     // the line that is for the driver.
-    diag.appendChild(document.createTextNode(
-      (deducted ? ' · after $' + Number(r.costPerMile).toFixed(2) + '/mi costs' : '')
+    var diagSaid = (deducted ? ' · after $' + Number(r.costPerMile).toFixed(2) + '/mi costs' : '')
       + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
       + (r.mergedFrom > 1 ? ' · ' + r.mergedFrom + ' reads' : '')
       + (r.items ? ' · ' + r.items + ' items' : '')
-      + trackNote(r)));
-    el.detail.appendChild(diag);
+      + trackNote(r);
+    // Nodes rather than innerHTML: every fragment here is built from the
+    // scanner's own JSON, and `trackNote` in particular quotes what the
+    // tracker reported.
+    if (drawnAs(el.detail, ageSaid + '\n' + diagSaid)) {
+      el.detail.textContent = '';
+      var when = document.createElement('b');
+      when.className = 'age';
+      when.textContent = ageSaid;
+      el.detail.appendChild(when);
+      var diag = document.createElement('span');
+      diag.className = 'diag';
+      diag.appendChild(document.createTextNode(diagSaid));
+      el.detail.appendChild(diag);
+    }
     // ...and the order in the car, in one line after the age, once the line
     // is built: see showHeld.
     showHeld('offer');
@@ -4613,15 +4699,15 @@
     var heat = null;
     var bits = [];
     if (!socketUp) {
-      el.conn.textContent = 'reconnecting to the server…';
+      setText(el.conn, 'reconnecting to the server…');
     } else if (scannerState && !scannerState.enabled) {
-      el.conn.textContent = 'no Pi scanner on this machine';
+      setText(el.conn, 'no Pi scanner on this machine');
     } else if (scannerState && !scannerState.running) {
-      el.conn.textContent = 'scanner not running'
-        + (scannerState.error ? ': ' + scannerState.error : '');
+      setText(el.conn, 'scanner not running'
+        + (scannerState.error ? ': ' + scannerState.error : ''));
     } else if (quiet > STALE_MS) {
-      el.conn.textContent = 'nothing from the scanner for '
-        + Math.round(quiet / 1000) + 's';
+      setText(el.conn, 'nothing from the scanner for '
+        + Math.round(quiet / 1000) + 's');
     } else {
       // There was a branch above this: "the loop is running but nothing has
       // been read for Ns", whenever the last READING was more than
@@ -4644,7 +4730,7 @@
       // said it for the whole of the owner's blind 9.4 days, over a loop that
       // was turning and reading nothing; with the camera's word on the beat it
       // says what is true, beside the red word where the verdict goes.
-      el.conn.textContent = blind ? 'scanner running, cannot see' : 'scanner reading';
+      setText(el.conn, blind ? 'scanner running, cannot see' : 'scanner reading');
       heat = heatNote();
       bits = healthNote();
     }
@@ -4774,6 +4860,9 @@
   var healthLines = [];
   function showHealth(heat, bits) {
     var rest = bits.join(' \u00b7 ');
+    healthLines = (heat ? [heat.full] : []).concat(rest ? [rest] : []);
+    setHidden(el.health, !healthLines.length);
+    if (!drawnAs(el.health, JSON.stringify([heat, rest]))) return;
     el.health.textContent = '';
     if (heat) {
       var c = document.createElement('span');
@@ -4783,9 +4872,7 @@
       el.health.appendChild(c);
     }
     if (rest) el.health.appendChild(document.createTextNode((heat ? ' \u00b7 ' : '') + rest));
-    healthLines = (heat ? [heat.full] : []).concat(rest ? [rest] : []);
     el.health.title = healthLines.join(' ');
-    el.health.hidden = !healthLines.length;
   }
 
   function connect() {
@@ -5713,8 +5800,8 @@
   function drawHere() {
     var onMap = viewMode === 'map' && !!theMap;
     var d = onMap && MV && gpsNow ? MV.hereDot(gpsNow.fix, Date.now() - gpsAt) : null;
-    hereNote.hidden = !d;
-    hereNote.textContent = d ? (d.line || d.label + (following ? '' : FOLLOW_PAUSED)) : '';
+    setHidden(hereNote, !d);
+    setText(hereNote, d ? (d.line || d.label + (following ? '' : FOLLOW_PAUSED)) : '');
     hereNote.classList.toggle('grey', !!(d && d.grey));
     if (!theMap) return;
     var key = d && !d.line ? [d.lat, d.lon, d.err, d.grey].join('|') : '';
@@ -5775,7 +5862,9 @@
     if (!open) captionOpenAt = 0;
     clearTimeout(captionBack);
     if (!MV || !MV.sayCaption) { plainNote(text); return; }
-    MV.sayCaption(viewNote, text, open);
+    // Drawn again only when the words or their state move: every message in
+    // Map view comes through here with the line it already shows.
+    if (drawnAs(viewNote, 'chip\n' + open + '\n' + text)) MV.sayCaption(viewNote, text, open);
     if (open) {
       captionBack = setTimeout(function () {
         if (captionSaid === text) { captionOpenAt = 0; mapSay(text); }
@@ -5789,6 +5878,8 @@
     captionSaid = '';
     captionOpenAt = 0;
     clearTimeout(captionBack);
+    // ...and these on every frame of the stills the pane falls back to.
+    if (!drawnAs(viewNote, 'plain\n' + text)) return;
     viewNote.textContent = text;
     viewNote.title = '';
     viewNote.classList.remove('chipped', 'open');
