@@ -1768,6 +1768,33 @@ eq('so the file holds three cards, one prompt and no screen',
 
 shutil.rmtree(_pr_dir, ignore_errors=True)
 
+# --- a row is on the card before append() says it landed ---------------------------
+# Closing the file hands the row to the page cache; a power cut before writeback
+# lost it while append() had already said True. The fsync is asked of the
+# journal's own file, with the row already in it.
+_fs_dir = tempfile.mkdtemp()
+_fs_path = os.path.join(_fs_dir, 'offers.jsonl')
+_synced, _real_fsync = [], os.fsync
+
+
+def _watch_fsync(fd):
+    _synced.append((os.fstat(fd).st_ino, os.fstat(fd).st_size))
+    return _real_fsync(fd)
+
+
+JR.os.fsync = _watch_fsync
+try:
+    _fj = JR.Journal(_fs_path)
+    _landed = [_fj.append({'v': 1, 'id': 'f%d' % i, 'seq': 1, 'at': 1000 + i}) for i in range(3)]
+finally:
+    JR.os.fsync = _real_fsync
+_st = os.stat(_fs_path)
+eq('every row appended is fsynced before append() says it landed (%r)' % (_landed,),
+   (_landed, len(_synced)), ([True, True, True], 3))
+eq('...on the journal\'s own file, with the row already in it',
+   _synced[-1:], [(_st.st_ino, _st.st_size)])
+shutil.rmtree(_fs_dir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
 sys.exit(1 if bad else 0)
