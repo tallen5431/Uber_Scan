@@ -1317,6 +1317,34 @@ async function nucbox() {
                      await stubRoad(3000, 2000, null, [323, 3]).detour(P1, P2, P3)]),
      JSON.stringify([{ why: 'snap' }, { why: 'snap' }]));
 
+  /* The answers kept: at most NBX_KEEP, the least recently asked going
+     first. They were kept for the page's life, and the panel's page lives
+     for the shift. N + 1 distinct questions, the first asked again before
+     the last, off a stub that counts what reaches it. */
+  var asked = 0;
+  var kept = new MV.NbxSearch({ gap: 0, fetch: function () {
+    asked++;
+    return Promise.resolve({ ok: true, status: 200, json: function () {
+      return Promise.resolve({ ok: true, hits: [] });
+    } });
+  } });
+  ok_('a number of answers to keep is set (%r)'.replace('%r', MV.NBX_KEEP),
+      MV.NBX_KEEP > 0 && MV.NBX_KEEP < 1000);
+  await kept.get('/search?q=0');
+  for (var ki = 1; ki < MV.NBX_KEEP; ki++) await kept.get('/search?q=' + ki);
+  await kept.get('/search?q=0');
+  await kept.get('/search?q=' + MV.NBX_KEEP);
+  eq('N + 1 distinct questions leave at most N answers kept',
+     Object.keys(kept.cache).length, MV.NBX_KEEP);
+  ok_('...the least recently asked let go, and the one asked again kept',
+      !Object.prototype.hasOwnProperty.call(kept.cache, '/search?q=1')
+      && Object.prototype.hasOwnProperty.call(kept.cache, '/search?q=0'));
+  asked = 0;
+  await kept.get('/search?q=0');
+  await kept.get('/search?q=1');
+  eq('...so the kept one is answered from memory and the dropped one asked again',
+     asked, 1);
+
   /* Two orders in the car by road (NbxSearch.detourOrders), off a stub
      router whose road is the straight line, so the figures are
      MV.detourOrders' and the question is only what is said of them — and

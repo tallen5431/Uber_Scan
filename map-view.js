@@ -2288,11 +2288,20 @@
    * itself, the job's leg — so the pacing costs that card nine gaps, 0.9 s,
    * and a few more for each further restaurant.
    *
-   * Answers are kept in memory for the page's life, keyed on the question
-   * actually sent. Not in the device's store and not in /api/places: those
-   * hold the PUBLIC geocoder's one-answer-per-string, and a pin chosen inside
-   * one card's disc is a different answer to a different question. */
+   * Answers are kept in memory, keyed on the question actually sent. Not in
+   * the device's store and not in /api/places: those hold the PUBLIC
+   * geocoder's one-answer-per-string, and a pin chosen inside one card's disc
+   * is a different answer to a different question.
+   *
+   * ...and at most NBX_KEEP of them, the least recently asked going first,
+   * as server.js keeps its own copy (nbxRemember, NBX_CACHE_MAX). They were
+   * kept for the page's life, and the panel's page lives for the shift: a
+   * route answer carries the road's shape, every card's walk asks new ones,
+   * and nothing was ever let go. A hundred is the last ten cards' walks or
+   * so (six to ten questions each, above), so coming back to a card asks
+   * nobody anything, which is what the cache is for. */
   var NBX_GAP_MS = 100;
+  var NBX_KEEP = 100;
 
   function NbxSearch(opts) {
     opts = opts || {};
@@ -2325,16 +2334,13 @@
   NbxSearch.prototype.get = function (path) {
     var self = this;
     if (Object.prototype.hasOwnProperty.call(this.cache, path)) {
-      return Promise.resolve(this.cache[path]);
+      return Promise.resolve(this.keep(path, this.cache[path]));
     }
     return this.paced(function () {
       return self.fetch(self.base + path, { headers: { 'Accept': 'application/json' } });
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (body) {
-        if (r.ok && body && body.ok !== undefined) {
-          self.cache[path] = body;
-          return body;
-        }
+        if (r.ok && body && body.ok !== undefined) return self.keep(path, body);
         var why = (body && body.error) || ('the server said ' + r.status);
         if (body && (body.unreachable === true || body.configured === false)) {
           return { unreachable: why };
@@ -2344,6 +2350,17 @@
     }, function (e) {
       return { unreachable: 'this rig\'s server did not answer (' + ((e && e.message) || e) + ')' };
     });
+  };
+
+  /* An answer kept, as the newest: moved to the end of the cache's order
+     (a string key keeps its insertion order) and the oldest past NBX_KEEP
+     let go. Returns the answer. */
+  NbxSearch.prototype.keep = function (path, body) {
+    delete this.cache[path];
+    this.cache[path] = body;
+    var keys = Object.keys(this.cache);
+    for (var i = 0; i < keys.length - NBX_KEEP; i++) delete this.cache[keys[i]];
+    return body;
   };
 
   /* One place, inside its disc: pickInDisc's answer, or { why: 'cross' },
@@ -3053,7 +3070,7 @@
            SPAN_STEP_MI: SPAN_STEP_MI,
            NbxSearch: NbxSearch, nbxSettings: nbxSettings,
            AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI,
-           NBX_GAP_MS: NBX_GAP_MS, SNAP_MI: SNAP_MI, ROAD_SAME_MI: ROAD_SAME_MI,
+           NBX_GAP_MS: NBX_GAP_MS, NBX_KEEP: NBX_KEEP, SNAP_MI: SNAP_MI, ROAD_SAME_MI: ROAD_SAME_MI,
            hasDoor: hasDoor, discShape: discShape, located: located,
            howFound: howFound };
 }));
