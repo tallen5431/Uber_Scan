@@ -4546,11 +4546,14 @@ be put beside a journal row. The log is raw gpsd JSON and stays on the Pi; it
 is what the first week's numbers come from — how often a moving car stays
 inside the gate, and where it loses the sky — and nothing on the panel reads it.
 
-**Keeping the logs off the card's free space** takes one line in `Start.sh`,
-before gpspipe starts:
+**Keeping the logs off the card's free space** needs nothing in `Start.sh`:
+server.js runs `tools/gpslog_tidy.py --apply` on `~/gpslog` once each time it
+starts (`GPSLOG_DIR` names another directory; `GPSLOG_DIR=` with nothing turns
+it off), and says what it did on a `gps logs:` line. By hand:
 
 ```sh
-python3 tools/gpslog_tidy.py --apply ~/gpslog
+python3 tools/gpslog_tidy.py ~/gpslog            # what it would do
+python3 tools/gpslog_tidy.py --apply ~/gpslog    # do it
 ```
 
 Measured on the 12 Oct shift's 14 logs: 5.4 to 9.0 MB an hour while driving,
@@ -4560,8 +4563,9 @@ removing the original only once the `.gz` reads back byte for byte, and deletes
 compressed logs older than 60 days (`--days N` to change it). It touches
 nothing outside the directory it is given, does nothing on a clock that has not
 been set, and without `--apply` only says what it would do. A failure is
-printed and exits 1, so under `set -e` it would stop gpspipe starting: end the
-line with `|| true` there.
+printed and exits 1; run from the server, a failure is said once and the
+server carries on. A line still in an older `Start.sh` is harmless: the second
+run finds nothing to do.
 
 **One gate, in one place.** Every fix carries what the receiver said about it
 — `mode`, and `err`, gpsd's `eph` in metres — and `gps.usable()` decides once
@@ -8533,7 +8537,7 @@ python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 854 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 858 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that

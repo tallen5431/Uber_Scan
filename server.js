@@ -8918,7 +8918,48 @@ listen(http.createServer(handler), PORT, 'http', true, function () {
                 + (back.dropoff ? ' to ' + back.dropoff : '')
                 + '\n  press Drop on the panel if it has already been delivered');
   }
+  tidyGpsLogs();
 });
+
+/* The GPS logs, tidied once each time the server starts.
+ *
+ * tools/gpslog_tidy.py was a line the driver had to add to an untracked
+ * Start.sh by hand, so a `git pull` never brought it; the logs went on filling
+ * the card (5.4-9.0 MB an hour while driving). Run from here it arrives with
+ * the pull. The tool's own rules decide everything: it skips the newest log
+ * and anything written in the last ten minutes (gpspipe may be writing either),
+ * does nothing on a clock that is not yet set, and never leaves the directory
+ * it is given. A second run from a Start.sh that still has the line is the
+ * same run again and finds nothing to do.
+ *
+ * GPSLOG_DIR names the directory (default ~/gpslog, where the README's gpspipe
+ * line writes); GPSLOG_DIR= with nothing turns it off. A missing directory is
+ * a rig without GPS logging and says nothing. The tidy runs beside the server,
+ * never in its way: a failure is said once and the server carries on. */
+var GPSLOG_DIR = process.env.GPSLOG_DIR !== undefined
+  ? process.env.GPSLOG_DIR : path.join(os.homedir(), 'gpslog');
+
+function tidyGpsLogs() {
+  if (!GPSLOG_DIR) return;
+  var st;
+  try { st = fs.statSync(GPSLOG_DIR); } catch (e) { return; }
+  if (!st.isDirectory()) return;
+  var said = '';
+  var child = spawn('python3',
+                    [path.join(ROOT, 'tools', 'gpslog_tidy.py'), '--apply', GPSLOG_DIR],
+                    { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  function keep(d) { said = (said + d).slice(-4096); }
+  child.stdout.on('data', keep);
+  child.stderr.on('data', keep);
+  child.on('error', function (e) {
+    console.error('gps logs: the tidy could not run: ' + e.message);
+  });
+  child.on('close', function (code) {
+    var last = said.trim().split('\n').pop() || '';
+    if (code) console.error('gps logs: the tidy failed (exit ' + code + '): ' + last);
+    else if (last) console.log('gps logs: ' + last);
+  });
+}
 
 if (tls) {
   listen(https.createServer({ cert: tls.cert, key: tls.key }, handler),

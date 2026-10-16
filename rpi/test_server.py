@@ -30,6 +30,10 @@ import urllib.error
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Every server this suite starts would otherwise tidy the GPS logs of whoever
+# runs it (server.js's tidyGpsLogs, ~/gpslog by default). Off for all of them;
+# the section that checks the tidy names its own directory.
+os.environ['GPSLOG_DIR'] = ''
 ok = bad = 0
 
 
@@ -8744,6 +8748,66 @@ try:
             _q16.gone()
 finally:
     _nf.kill()
+
+# --- the GPS logs are tidied when the server starts ---------------------------
+#
+# tools/gpslog_tidy.py had to be added to an untracked Start.sh by hand, so a
+# pull never brought it. server.js now runs it once at start on GPSLOG_DIR.
+def _glog(d, name, age_s, body='{"class":"TPV"}\n'):
+    p = os.path.join(d, name)
+    with open(p, 'w') as fh:
+        fh.write(body * 50)
+    t = time.time() - age_s
+    os.utime(p, (t, t))
+    return p
+
+
+def _gtidied(d, want, seconds=15):
+    for _ in range(int(seconds * 10)):
+        if want(sorted(os.listdir(d))):
+            return sorted(os.listdir(d))
+        time.sleep(0.1)
+    return sorted(os.listdir(d))
+
+
+_gd = tempfile.mkdtemp()
+_glog(_gd, '2026-10-12_1510.jsonl', 3 * 3600)
+_glog(_gd, '2026-10-12_2114.jsonl', 2 * 3600)
+_gproc, _gbase = _start_loud({'SCANNER': '0', 'GPSLOG_DIR': _gd}, os.path.join(_gd, 'j.jsonl'))
+try:
+    _gafter = _gtidied(_gd, lambda names: '2026-10-12_1510.jsonl.gz' in names
+                       and '2026-10-12_1510.jsonl' not in names)
+    eq('the server tidies the GPS logs when it starts: the finished log is compressed, '
+       'the newest left for gpspipe', [n for n in _gafter if n.startswith('2026')],
+       ['2026-10-12_1510.jsonl.gz', '2026-10-12_2114.jsonl'])
+    # The line is said when the tidy exits, a moment after its last rename.
+    time.sleep(1.5)
+finally:
+    stop(_gproc)
+_gsaid = _gproc.stdout.read() if _gproc.stdout else ''
+ok_('...and says what it did on its own line', 'gps logs: ' in _gsaid)
+
+_gd2 = tempfile.mkdtemp()
+_glog(_gd2, '2026-10-12_1510.jsonl', 3 * 3600)
+_glog(_gd2, '2026-10-12_2114.jsonl', 2 * 3600)
+_gproc2, _gbase2 = start({'SCANNER': '0', 'GPSLOG_DIR': ''}, os.path.join(_gd2, 'j.jsonl'))
+try:
+    time.sleep(2)
+    eq('GPSLOG_DIR set empty turns the tidy off',
+       sorted(n for n in os.listdir(_gd2) if n.startswith('2026')),
+       ['2026-10-12_1510.jsonl', '2026-10-12_2114.jsonl'])
+finally:
+    stop(_gproc2)
+
+_gproc3, _gbase3 = start({'SCANNER': '0', 'GPSLOG_DIR': os.path.join(_gd2, 'nowhere')},
+                         os.path.join(_gd2, 'j3.jsonl'))
+try:
+    ok_('...and a GPSLOG_DIR that is not there leaves the server up',
+        get(_gbase3, '/api/status') is not None)
+finally:
+    stop(_gproc3)
+shutil.rmtree(_gd, ignore_errors=True)
+shutil.rmtree(_gd2, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
