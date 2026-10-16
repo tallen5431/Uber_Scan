@@ -282,6 +282,9 @@ BACKOFF = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
 NULL_ISLAND = 0.0001
 
 _NMEA = re.compile(r'^\$(G[A-Z]RMC|G[A-Z]GGA),')
+# A gpsd SKY report, by its class, as gpsd writes it ("class":"SKY") or as a
+# JSON encoder with spaces would. See parse_line.
+_SKY = re.compile(r'"class"\s*:\s*"SKY"')
 
 
 def parse_host(text, default_port=DEFAULT_PORT):
@@ -497,6 +500,13 @@ def parse_line(line):
         return None
 
     if line.startswith('{'):
+        # gpsd's satellite report, refused before it is parsed: 1,216 SKY
+        # lines to 1,217 TPV in the first 3 MB of one of the 12 Oct shift's
+        # logs, and each went through json.loads only to be refused by `class`
+        # below. A TPV line cannot match this: it has one "class", and it says
+        # "TPV".
+        if _SKY.search(line):
+            return None
         try:
             msg = json.loads(line)
         except ValueError:

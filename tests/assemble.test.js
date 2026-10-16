@@ -809,6 +809,48 @@ SEQ.forEach(function (seq) {
      [0, 0]);
 })();
 
+/* ---- a stop header the reader lost ----
+ *
+ * tests/fixtures/cases.json's planner cases with a header deleted (invented
+ * streets): a page whose list was not read whole files nothing, pressed or
+ * not, with one order held or two. The first is the one the parsers now call
+ * unbounded; the third reads as bounded on the glass, and the pickups' count
+ * against the dropoffs' is what refuses it (listShort). Before either, both
+ * filed the second customer's door, 903 Brindle Ct, as the order's end. */
+(function () {
+  var byName = {};
+  require('./fixtures/cases.json').planner.forEach(function (c) { byName[c.name] = c.text; });
+  var lost = [
+    'a dropoff header the reader lost leaves the list unbounded, and its other dropoff unfiled',
+    '...and on a single trip, the one dropoff\'s header lost, the pickup keeps no address of '
+      + 'the customer\'s',
+    'a dropoff header lost with its time leaves the list bounded on the glass, and the '
+      + 'pickups\' count says a dropoff is missing'];
+  function single(id, at) {
+    var h = { id: id || 'o', acceptedAt: at || 1000, card: { legs: 1, multiOrder: false },
+              app: 'uber', dropoff: null, dropoffScanned: false };
+    A.fieldsOf(h);
+    return h;
+  }
+  lost.forEach(function (name) {
+    var text = byName[name];
+    ok_('the premise: the case is there (' + name.slice(0, 40) + '…)', !!text);
+    if (!text) return;
+    var filed = [
+      A.sighting(A.fresh(), single(), pageOf(text, 2000, true), 2000).candidates.length,
+      A.sighting(A.fresh(), single(), pageOf(text, 2000, false), 2000).candidates.length,
+      A.sighting(A.fresh(), [single('a', 1000), single('b', 1500)], pageOf(text, 2000, true),
+                 2000).candidates.length];
+    eq('a lost stop header files nothing, pressed, unpressed or with two orders held — '
+       + name.slice(0, 60) + '…', filed, [0, 0, 0]);
+  });
+  var st = A.fresh();
+  A.sighting(st, single(), pageOf(byName[lost[2]], 2000, true), 2000);
+  eq('...and the bounded one says the list was not seen whole', A.verdictFor(st, 2000), 'list');
+  eq('...and its lone dropoff is not a single trip either',
+     A.plannerLoneDropoff(OP.findPlanner(byName[lost[2]])), null);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

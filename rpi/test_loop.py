@@ -669,6 +669,114 @@ ok_('...and the journal says the rig asked to be restarted, and why (%r)' % _stu
 eq('...and leaves no note holding back a stalled camera\'s restart',
    _stall_note_age(r['handoff']), None)
 
+# --- a wall clock stepped an hour ---------------------------------------------
+#
+# A Pi has no real-time clock and NTP corrects it by STEPPING it, back as often
+# as forward (AUDITS.md, Settled: the clock — and a stamp is never corrected
+# here; only the intervals moved). Every interval the loop times was taken off
+# the wall clock, so a step moved all of them at once. Measured through this
+# harness before the fix, the scanner's own modules on a clock stepped mid-run
+# and this suite's clock left alone:
+#
+#   back an hour      no heartbeat for the rest of the run (0 in 15.8 s, 4
+#                     without the step); a second ⌖ press got 1 whole-screen
+#                     read in its 3 s window, 7 without the step
+#   forward an hour   a read 0.6 s in flight at the step was "in flight for
+#                     3600s — the reader is stuck", and the journal got a
+#                     restart row for a reader that was working
+#
+# The step is taken from INSIDE a read, so that read is in flight across it,
+# and a second ⌖ press comes after it, once the first press's window has run.
+class _SteppedWall(type(sys)):
+    """The `time` module, with the wall clock moved by `offset`; monotonic not."""
+
+    offset = 0.0
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def time(self):
+        return _REAL_TIME() + _SteppedWall.offset
+
+
+_REAL_TIME, _REAL_SLEEP = time.time, time.sleep
+_WALL = _SteppedWall('time')
+import accumulate as _AC                                     # noqa: E402
+import journal as _JR                                        # noqa: E402
+import track as _TR                                          # noqa: E402
+_CLOCKED = (SP, HO, _TR, _AC, _JR)
+
+
+def _stepped_run(step):
+    """A card up, ⌖ pressed, the clock stepped by `step` mid-read, ⌖ again."""
+    hand = tempfile.mkdtemp()
+    seen = {'t0': None, 'p1': False, 'stepped_at': None, 'p2': None}
+
+    def press():
+        os.environ[HO.ENV_DIR] = hand
+        where = HO.path(HO.DROPOFF)
+        open(where, 'w').close()
+        stamp = _WALL.time()
+        os.utime(where, (stamp, stamp))
+        return stamp
+
+    def texts(n, k):
+        # The first card read after the first window has run is the one the
+        # clock steps inside. Really asleep, not the harness's bounded sleep,
+        # so the loop sees it in flight.
+        if k == 0 and seen['stepped_at'] is None and seen['t0'] is not None \
+                and _REAL_TIME() - seen['t0'] > 5.0:
+            _REAL_SLEEP(0.6)
+            _SteppedWall.offset = step
+            seen['stepped_at'] = _REAL_TIME()
+            _REAL_SLEEP(1.4)
+        return WHOLE
+
+    def hook(rows, ann, calls):
+        now = _REAL_TIME()
+        if seen['t0'] is None:
+            seen['t0'] = now
+        if now - seen['t0'] > 1.5 and not seen['p1']:
+            press()
+            seen['p1'] = True
+        if seen['stepped_at'] is not None and seen['p2'] is None \
+                and now - seen['stepped_at'] > 1.6:
+            seen['p2'] = press()
+        return seen['p2'] is not None and _WALL.time() - seen['p2'] > 3.5
+
+    _SteppedWall.offset = 0.0
+    was = [m.time for m in _CLOCKED]
+    for m in _CLOCKED:
+        m.time = _WALL
+    try:
+        r = run(texts, seconds=30.0, until=hook, handoff=hand, whole_text=NAV_TEXT,
+                dropoff_window=3.0)
+    finally:
+        for m, t in zip(_CLOCKED, was):
+            m.time = t
+        _SteppedWall.offset = 0.0
+    r['seen'] = seen
+    return r
+
+
+NAV_TEXT = 'Deliver to Pat Q.\n6 min © 1.7 mi\nTurn right onto Ab St'
+for _step, _way in ((-3600.0, 'back'), (3600.0, 'forward')):
+    _sr = _stepped_run(_step)
+    _s = _sr['seen']
+    ok_('the premise, %s: the clock stepped inside a read, and ⌖ was pressed after it'
+        % _way, _s['stepped_at'] is not None and _s['p2'] is not None)
+    _after = [b for b in _sr['beats'] if _s['stepped_at'] and b > _s['stepped_at']]
+    ok_('a wall clock stepped an hour %s: beats continue (%d after the step)'
+        % (_way, len(_after)), len(_after) >= 1)
+    _second = [st for st in _sr['stamps'] if st[1] and _s['p2'] is not None
+               and -0.05 <= st[0] - _s['p2'] < 3.0]
+    ok_('a wall clock stepped an hour %s: ⌖ gets its forced reads (%d whole-screen '
+        'reads in the second press\'s 3 s window)' % (_way, len(_second)),
+        len(_second) >= 4)
+    _rs = [x.get('why') for x in _sr['rows']
+           if x.get('kind') == 'up' and x.get('state') == 'restart']
+    eq('a wall clock stepped an hour %s: no restart row is written' % _way, _rs, [])
+
 # --- ▣ Set box always takes, and nothing throws a drawn box away -------------
 # ⟳ Re-find was taken off the panel at the owner's request (AUDITS.md,
 # Settled). Pressed with a box drawn it threw the boxes away and went back to
@@ -1546,7 +1654,7 @@ ok_('the empty dropoff answer waits for a read that could still answer it',
 # "Drop · failed", "⟳ failed", "could not set the box: …".
 #
 # Answered from HERE and not from a timer on the page. `asked` is
-# `started < dropoff_until`, so a read that began before the deadline still
+# `began < dropoff_until`, so a read that began before the deadline still
 # counts and still emits when it lands — 1.8s median on this Pi and 5.9s at
 # worst measured. A page giving up on its own clock would print "not read" and
 # then be corrected by a green address a moment later, which is this project's
@@ -3130,6 +3238,30 @@ ok_('...the prompt was recorded',
 ok_('...and the screen after the prompt was read', _rp3['nav_at'] is not None)
 eq('the screen after the zone prompt is not filed against the card before it',
    [x.get('after') for x in rp3['rows'] if x.get('kind') == 'screen'], [])
+
+# --- an idle screen showing the dash's earnings ----------------------------------
+#
+# DoorDash's idle screen prints the dash's earnings and Uber's prints the day's,
+# so each reads with a payout and the parser calls it no offer (NOT_AN_OFFER).
+# The loop asked only for the payout, so the resample burst and then the verify
+# beat went on reading a still phone nobody had offered anything on — measured
+# over 30 s of the DoorDash one: 15 reads, against 2 for the same screen with
+# the earnings out of the box. Counted here over 12 s each, against the screen
+# without them. Every word but the app's is invented.
+IDLE_DD = ("$12.55\nThis dash\nAb Cd Chinese\nFinding offers.\n"
+           "You're in a good place to wait for offers")
+IDLE_UBER = "$45.67\nYou're online\nFinding trips"
+IDLE_NONE = "This dash\nAb Cd Chinese\nFinding offers.\nYou're in a good place to wait for offers"
+ok_('the premise: both idle screens read with a payout and as no offer',
+    all(OP.parse(t)['pay'] is not None and OP.parse(t).get('notAnOffer')
+        for t in (IDLE_DD, IDLE_UBER)) and OP.parse(IDLE_NONE)['pay'] is None)
+_idle = {}
+for _name, _text in (('none', IDLE_NONE), ('dd', IDLE_DD), ('uber', IDLE_UBER)):
+    _idle[_name] = run(lambda n, k, t=_text: t, seconds=12.0)['submitted']
+for _name, _what in (('dd', 'the dash\'s earnings'), ('uber', 'the day\'s earnings, online')):
+    ok_('an idle screen showing %s is read no more than one without them (%d reads '
+        'against %d in 12 s of a still screen)' % (_what, _idle[_name], _idle['none']),
+        _idle[_name] <= _idle['none'] + 1)
 
 # --- a card taller than the card box, through main() ---------------------------
 #
