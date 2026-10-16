@@ -209,6 +209,22 @@
     /* The caption sits under a picture that is now as tall as the row, so it
        has nowhere to be. The picture says what it is. */
     body.phoneview #viewNote { display: none; }
+    /* ...and the line ▣ Set box leaves up for six seconds once a box is
+       read ("boxes sent — offers are read in the card box, …"). In this
+       column it was a flex item beside the picture, and the column is as
+       wide as what is in it (`auto`, above): the sentence on one line took it
+       to 640-776px at 800x480 against the picture's 269, every control on the
+       bar went to 10-16px for those six seconds (by what else was on it), and
+       a click on Set box landed on ⛶ Scene. Over the picture instead, the column's width and wrapping
+       inside it, so it sizes nothing. Over its top and not its foot: the offer
+       card sits on its button bar at the bottom of the phone's screen
+       (rpi/cardfind.py), and that is what the six seconds should not hide.
+       rpi/test_layout.py holds every control on the bar to its width with the
+       line up. */
+    body.phoneview #drawHint {
+      position: absolute; left: 0; right: 0; top: 0; z-index: 2;
+      padding: 6px 8px; background: var(--bg);
+    }
     /* The rate is sized against the panel it sits in, and that panel is now a
        column rather than the whole width.
        Four limits, and whichever bites first wins: the panel's width, the

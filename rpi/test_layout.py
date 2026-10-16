@@ -2114,6 +2114,30 @@ const SNAP_MEASURE = (fixture) => {
           return { plain: plain, before: before, full: full, crowded: crowded,
                    over: d.scrollWidth > d.clientWidth + 1 };
         });
+        // The line ▣ Set box leaves up for six seconds once a box is read,
+        // in the page's own words, over the bar as it stands: each control's
+        // width with the line up against its width without. The line widened
+        // the phone's column by its own length and took the bar's controls
+        // down to 16px at 800x480 while it showed.
+        const pageSrc = await (await fetch(base + '/live.html')).text();
+        const boxesSent = (/'(boxes sent — [^']*)'/.exec(pageSrc) || [])[1] || '';
+        shown.sentHint = await page.evaluate((said) => {
+          const bar = document.querySelector('.bottombar');
+          const hint = document.getElementById('drawHint');
+          const widths = () => [].slice.call(bar.children)
+            .filter((el) => el.getBoundingClientRect().width > 0)
+            .map((el) => [el.id || (el.textContent || '').trim(),
+                          Math.round(el.getBoundingClientRect().width * 10) / 10]);
+          const was = widths();
+          const keep = [hint.hidden, hint.textContent];
+          hint.hidden = false;
+          hint.textContent = said;
+          const now = widths();
+          const phone = document.body.classList.contains('phoneview');
+          hint.hidden = keep[0];
+          hint.textContent = keep[1];
+          return { said: said, phone: phone, was: was, now: now };
+        }, boxesSent);
         // 📷 Snap, on the status row and off the bar — measured with the bar at
         // its fullest, which is where the block above leaves it.
         //
@@ -5155,6 +5179,17 @@ try:
                 ok_('...with every control still 44px tall at %s (%.4gpx)'
                     % (panel, full.get('shortest') or 0),
                     (full.get('shortest') or 0) >= 43.5)
+                # The "boxes sent" line, up over the phone view: every control
+                # on the bar keeps the width it has without it — that width is
+                # its floor here, whatever the panel gives it.
+                _sh = phone.get('sentHint') or {}
+                _was = dict(_sh.get('was') or [])
+                _narrowed = [(k, _was.get(k), w) for k, w in (_sh.get('now') or [])
+                             if k in _was and w < _was[k] - 0.5]
+                ok_('the "boxes sent" hint never narrows a bar control below its floor, '
+                    'at %s (%r)' % (panel, _narrowed or _sh.get('now')),
+                    _sh.get('said', '').startswith('boxes sent') and _sh.get('phone')
+                    and len(_sh.get('now') or []) == len(_was) and not _narrowed)
                 # Against the bar as it stood before, not against an empty one.
                 #
                 # Some labels already overrun their buttons on the narrowest

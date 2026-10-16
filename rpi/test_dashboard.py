@@ -2664,13 +2664,13 @@ const framed = (page) => page.waitForFunction(
     // line stays up: the drawing's own instruction must outlive that line's
     // timer, which used to hide it mid-drawing.
     stage = 'snap: set box again inside the sent line\'s six seconds';
-    // Pressed in script, and that is a finding of its own, not a shortcut:
-    // in the phone view at 800x480 the "boxes sent — …" line widens the
-    // picture's column while it shows (640px against the picture's 269), and
-    // every control on the bar is 16px wide for those six seconds — a click
-    // at Set box's centre lands on ⛶ Scene. What is checked here is the
-    // timer, which the same press reaches on any panel where the bar is whole.
-    await page.evaluate(() => document.getElementById('setBox').click());
+    // A real click, with the "boxes sent — …" line up. In the phone view at
+    // 800x480 that line used to widen the picture's column while it showed
+    // (640px against the picture's 269), every control on this bar went to
+    // 16px for those six seconds, and a click at Set box's centre landed on
+    // ⛶ Scene: this press was made in script until the line was moved over
+    // the picture. rpi/test_layout.py holds the bar's widths with it up.
+    await page.click('#setBox');
     await page.waitForTimeout(6300);
     out.snap.two.again = await page.evaluate(() => ({
       drawing: document.getElementById('viewWrap').classList.contains('drawing'),
