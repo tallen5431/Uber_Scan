@@ -5978,11 +5978,13 @@ def _beats(fixes):
     time.sleep(0.2)
 
 
-def _took(base, oid, dropoff=_DOOR):
+def _took(base, oid, dropoff=_DOOR, multi=False):
+    # One customer, as every offer line from a current scanner says it
+    # (`multiOrder`): only such a card arms the GPS drop (notOneCustomer).
     post(base, '/api/offers/mark', {
         'id': oid, 'accepted': True,
         'offer': {'id': oid, 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
-                  'miles': 5.0, 'cost': 1.75, 'dropoff': dropoff}})
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': dropoff, 'multiOrder': multi}})
     return (get(base, '/api/status').get('holding') or {})
 
 
@@ -6053,6 +6055,27 @@ try:
        _pin(_gb, _h, name='Kestrel Drive, Marietta')[1].get('error'), 'not door level')
     _beats(_DWELL + _LEAVE)
     ok_('[gps drop] an end that is not door-level never drops', _holding(_gb))
+    post(_gb, '/api/delivered', {})
+
+    # A card for two customers ("Drop off 2 orders", a batched trip) is one
+    # order with two doors: the car stops at the first and leaves for the
+    # second with the order still half in the car. Only a card that says one
+    # customer arms (notOneCustomer) — and one too old to say does not either.
+    _h = _took(_gb, 'g-two', multi=True)
+    _pin(_gb, _h)
+    _beats(_DWELL + _LEAVE)
+    eq('a two-customer card\'s first door does not put it down',
+       (bool(_holding(_gb)), _drops('g-two')), (True, []))
+    eq('...and the panel is told why the GPS drop is not armed',
+       {k: (_holding(_gb) or {}).get(k) for k in ('endPinned', 'endWhy')},
+       {'endPinned': True, 'endWhy': 'two customers'})
+    post(_gb, '/api/delivered', {})
+    _h = _took(_gb, 'g-unsaid', multi=None)
+    _pin(_gb, _h)
+    _beats(_DWELL + _LEAVE)
+    eq('...nor does a card that never said how many customers',
+       (bool(_holding(_gb)), _drops('g-unsaid'), (_holding(_gb) or {}).get('endWhy')),
+       (True, [], 'customer count unread'))
     post(_gb, '/api/delivered', {})
 
     # A pin made for the previous order is refused.
@@ -6157,7 +6180,8 @@ try:
     _r = post(_gb, '/api/offers/mark', {
         'id': 'g-stream', 'accepted': True,
         'offer': {'id': 'g-stream', 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
-                  'miles': 5.0, 'cost': 1.75, 'dropoff': 'Kestrel Dr, Marietta'}})[1]
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': 'Kestrel Dr, Marietta',
+                  'multiOrder': False}})[1]
     eq('[gps drop] ...and the order the stream describes carries it too',
        _state(_r.get('held')), {'endPinned': False, 'arrived': False, 'endWhy': None})
     post(_gb, '/api/delivered', {})
@@ -6275,7 +6299,7 @@ finally:
 # (503) or slow on cue and counts every search it was sent. Card fixes at
 # Marietta Square, as the fake's own; addresses invented.
 _SQ = {'lat': 33.9526, 'lon': -84.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3,
-       'gpsAge': 0.5, 'hasTotal': True, 'whole': True}
+       'gpsAge': 0.5, 'hasTotal': True, 'whole': True, 'multiOrder': False}
 _COBB = '1985 Cobb Parkway, Kennesaw'      # three door answers, 3.4 mi from the Square
 _KES = '4821 Kestrel Dr, Marietta'         # its street only, no number
 
@@ -7742,7 +7766,8 @@ try:
             post(_vb, '/api/offers/mark', {
                 'id': oid, 'accepted': True,
                 'offer': {'id': oid, 'pay': pay, 'minutes': 40.0, 'billedMinutes': 40.0,
-                          'miles': miles, 'cost': 1.75, 'pickup': store, 'dropoff': end}})
+                          'miles': miles, 'cost': 1.75, 'pickup': store, 'dropoff': end,
+                          'multiOrder': False}})
         _vcard('v-a', 12.0, 'Example Diner', 5.0, '4821 Kestrel Dr, Marietta')
         _vcard('v-b', 9.0, 'Example Grill', 3.0, '77 Birch Ln, Roswell')
         _two = get(_vb, '/api/status').get('orders') or []
@@ -7954,7 +7979,7 @@ class _Q(object):
     """One server on the queue fake. `dir` holds its journal, holding.json and
     log; `emit` sends a line; `card` puts an offer on the slot and waits for it."""
 
-    def __init__(self, carry=False, env=None, holding=None, config=None):
+    def __init__(self, carry=False, env=None, holding=None, root=None):
         self.dir = tempfile.mkdtemp()
         self.journal = os.path.join(self.dir, 'journal.jsonl')
         open(self.journal, 'w').close()
@@ -7970,14 +7995,14 @@ class _Q(object):
         e = {'SCANNER': '1', 'SCANNER_CMD': sys.executable,
              'SCANNER_ARGS': fake + ' ' + self.queue, 'SCANNER_SILENT_MS': '600000',
              'UBERSCAN_HANDOFF_DIR': self.dir}
-        if carry is not None:
-            e['CARRY_TWO'] = '1' if carry else '0'
+        # None: no override, so the flag is read off <root>/rpi/config.json.
+        e['CARRY_TWO'] = '' if carry is None else '1' if carry else '0'
         e.update(env or {})
         self.logpath = os.path.join(self.dir, 'server.log')
         self._log = open(self.logpath, 'w')
         port = free_port()
         self.proc = subprocess.Popen(
-            ['node', os.path.join(ROOT, 'server.js')],
+            ['node', os.path.join(root or ROOT, 'server.js')],
             env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=self.journal, **e),
             stdout=self._log, stderr=self._log)
         self.base = 'http://127.0.0.1:%d' % port
@@ -8302,6 +8327,88 @@ try:
 finally:
     _q10.stop()
     _q10.gone()
+
+# --- carrying two, turned off with two in the car -----------------------------
+#
+# The flag is read off <root>/rpi/config.json (no CARRY_TWO here), so this
+# server runs from a copy of the five files it is made of, beside a config of
+# its own. Two orders are taken with it on; the owner turns it off. Neither
+# order leaves the car for that — each stays until its own end, or Drop — and a
+# Took with it off replaces the first-taken, as one order's Took always did,
+# with a row, and leaves the other where it is.
+_croot = tempfile.mkdtemp()
+_q11 = None
+try:
+    for _f in ('server.js', 'advice.js', 'streets.js', 'map-view.js', 'assemble.js'):
+        shutil.copy(os.path.join(ROOT, _f), _croot)
+    os.mkdir(os.path.join(_croot, 'rpi'))
+    # scannerEnabled() asks only that the autopilot is there; SCANNER_CMD runs
+    # the fake in its place.
+    open(os.path.join(_croot, 'rpi', 'autopilot.py'), 'w').close()
+    _cfg11 = os.path.join(_croot, 'rpi', 'config.json')
+
+    def _carry11(on):
+        # Replaced through a rename, as the scanner writes it (save_config).
+        with open(_cfg11 + '.part', 'w') as fh:
+            json.dump({'settings': {'target': 25, 'carryTwo': on}}, fh)
+        os.replace(_cfg11 + '.part', _cfg11)
+
+    _carry11(True)
+    _q11 = _Q(carry=None, root=_croot)
+    _q11.card('A', 12.0, 120, 'uber')
+    _q11.took('A')
+    _q11.card('B', 9.0, 120, 'doordash')
+    _q11.took('B')
+    _two11 = [o.get('holdId', '').split('@')[0] for o in _q11.status().get('orders') or []]
+    _carry11(False)
+    _q11.emit({'alive': True, 'at': int(time.time() * 1000)})
+    _settle(0.3)
+    _st11 = _q11.status()
+    eq('(carrying two turned off: both orders still held, and nothing put down)',
+       (_two11, _st11.get('carryTwo'),
+        [o.get('id') for o in json.load(open(_q11.hold)).get('orders')], _q11.rows('drop')),
+       (['A', 'B'], False, ['A', 'B'], []))
+    # ...and a Took with it off, which is where an order left: it replaces
+    # the first-taken, as one order's Took always did, with its row, and the
+    # other order stays.
+    _q11.card('C', 8.0, 60, 'uber')
+    _q11.took('C')
+    _settle(0.3)
+    eq('turning carryTwo off with two held keeps both until their own ends, and a Took '
+       'then replaces only the first-taken',
+       ([o.get('id') for o in json.load(open(_q11.hold)).get('orders')],
+        [(r.get('id'), r.get('by'), r.get('carried')) for r in _q11.rows('drop')]),
+       (['B', 'C'], [('A', 'replaced', 2)]))
+finally:
+    if _q11:
+        _q11.stop()
+        _q11.gone()
+    shutil.rmtree(_croot, ignore_errors=True)
+
+# --- two orders restored from holding.json, and a Took -------------------------
+#
+# The car of the carrying-two section above, after a restart, with the flag
+# off: a Took put down the first with a row, and the second with none. With it
+# on, the one ending soonest goes, with its row, as before.
+_now12 = int(time.time() * 1000)
+_held12 = json.dumps({'v': 2, 'orders': [
+    {'id': 'P', 'pay': 10.0, 'minutes': 120, 'acceptedAt': _now12 - 60000},
+    {'id': 'Q', 'pay': 11.0, 'minutes': 120, 'acceptedAt': _now12 - 30000}]})
+for _carry in (False, True):
+    _q12 = _Q(carry=_carry, holding=_held12)
+    try:
+        _was12 = [o.get('id') for o in json.load(open(_q12.hold)).get('orders')]
+        _q12.card('R', 9.0, 25, 'uber')
+        _q12.took('R')
+        _settle(0.3)
+        _now_held = [o.get('id') for o in json.load(open(_q12.hold)).get('orders')]
+        eq('every order a Took puts down gets a row%s' % (' (carrying two)' if _carry else ''),
+           (sorted(set(_was12) - set(_now_held)),
+            sorted(r.get('id') for r in _q12.rows('drop'))),
+           (['P'], ['P']))
+    finally:
+        _q12.stop()
+        _q12.gone()
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)

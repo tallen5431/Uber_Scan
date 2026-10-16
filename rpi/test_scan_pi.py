@@ -3996,6 +3996,56 @@ eq('auto_read_for: a store\'s navigation, an address under no label, and the idl
     SP.auto_read_for('77 Made Up Ct, Acworth, GA 30101\n12 min Start'),
     SP.auto_read_for('© Trip Radar @\n5 Finding trips =')], [None, None, None])
 
+# --- the scanner's save keeps what it did not write --------------------------
+#
+# save_config wrote the whole start-up copy back, so a key the owner added to
+# rpi/config.json after the scanner started was gone at its next save —
+# `"carryTwo": true` among them, which server.js reads off this file mid-shift.
+# Now only what the scanner itself set, altered or removed goes onto the file
+# as it stands.
+_cdir = tempfile.mkdtemp()
+try:
+    _cpath = os.path.join(_cdir, 'config.json')
+    with open(_cpath, 'w') as _fh:
+        json.dump({'quad': [[1, 2], [3, 4]], 'trackedQuad': [[5, 6], [7, 8]],
+                   'settings': {'target': 25, 'band': 15, 'costPerMile': 0.3}}, _fh)
+    _cfg = SP.load_config(_cpath)
+    # The owner, mid-shift: carrying two on, and the target moved.
+    with open(_cpath) as _fh:
+        _disk = json.load(_fh)
+    _disk['settings']['carryTwo'] = True
+    _disk['settings']['target'] = 30
+    with open(_cpath, 'w') as _fh:
+        json.dump(_disk, _fh)
+    # The scanner: a cost per mile from a screen, and a box drawn (which takes
+    # the tracked corners away).
+    _cfg['settings']['costPerMile'] = 0.42
+    _cfg['quad'] = [[9, 9], [8, 8]]
+    _cfg.pop('trackedQuad')
+    SP.save_config(_cpath, _cfg)
+    with open(_cpath) as _fh:
+        _saved = json.load(_fh)
+    eq('a carryTwo added after start survives the scanner\'s next save',
+       _saved['settings'].get('carryTwo'), True)
+    eq('...and so does a value the owner changed that the scanner did not',
+       _saved['settings'].get('target'), 30)
+    eq('...while what the scanner changed, and took away, is written',
+       (_saved['settings'].get('costPerMile'), _saved.get('quad'), 'trackedQuad' in _saved),
+       (0.42, [[9, 9], [8, 8]], False))
+    # A second save, with the scanner's copy still knowing nothing of the
+    # owner's keys: still kept.
+    _cfg['quad'] = [[7, 7], [6, 6]]
+    SP.save_config(_cpath, _cfg)
+    with open(_cpath) as _fh:
+        _saved2 = json.load(_fh)
+    eq('...and again at the save after that',
+       (_saved2['settings'].get('carryTwo'), _saved2['settings'].get('target'),
+        _saved2.get('quad')), (True, 30, [[7, 7], [6, 6]]))
+    eq('...through a temporary that does not stay behind', sorted(os.listdir(_cdir)),
+       ['config.json'])
+finally:
+    shutil.rmtree(_cdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

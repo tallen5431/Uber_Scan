@@ -1050,16 +1050,33 @@ function maxHeld() {
  * it, for the suites. With it off, MAX_HELD is one and the server does what
  * Stage 4 did — a second Took replaces — and only says, in a `would` field on
  * rows it already writes, what attribution would have done. */
+/* ...and read again only when the file has changed (its mtime, size and
+ * inode), not on every call: it is asked on every beat, reading and planner
+ * line, and a shift's worth of those read and parsed the file 16,599 times
+ * (measured at f80d0c2 over a simulated shift of 5,000 beats, two orders held;
+ * once, with this). A stat is all an unchanged file costs now. The scanner
+ * replaces the file through a rename, which a new inode says even inside one
+ * mtime tick. */
+var carryTwoSeen = null;
+
 function carryTwo() {
   var env = process.env.CARRY_TWO;
   if (env === '1') return true;
   if (env === '0') return false;
+  var file = path.join(ROOT, 'rpi', 'config.json');
+  var st;
+  try { st = fs.statSync(file); } catch (e) { carryTwoSeen = null; return false; }
+  var c = carryTwoSeen;
+  if (c && c.mtime === st.mtimeMs && c.size === st.size && c.ino === st.ino) return c.on;
+  var on = false;
   try {
-    var cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'rpi', 'config.json'), 'utf8'));
-    return !!(cfg && cfg.settings && cfg.settings.carryTwo === true);
+    var cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+    on = !!(cfg && cfg.settings && cfg.settings.carryTwo === true);
   } catch (e) {
-    return false;
+    on = false;
   }
+  carryTwoSeen = { mtime: st.mtimeMs, size: st.size, ino: st.ino, on: on };
+  return on;
 }
 
 /* The orders in the car as the assembler is handed them: the first-taken
@@ -1639,7 +1656,9 @@ function ownPickups(stops, now, page, at) {
  * added, putDownPay}.
  *
  * Carrying two off: the order in the car, as Stage 4 had it — the Took
- * replaces it (and the replaced one is kept as a shadow for `would`).
+ * replaces it (and the replaced one is kept as a shadow for `would`). With
+ * two in the car already, it replaces the first-taken, and the other stays
+ * until its own end: the flag going off never puts down an order it held.
  *
  * Carrying two on:
  *   - an add-on card (Uber's screen `uber.addon`: "+ $", "+N min") is held as
@@ -1657,12 +1676,22 @@ function ownPickups(stops, now, page, at) {
 function placeTook(took, marked, inCar, now) {
   var out = { replaced: null, added: false, putDownPay: null };
   if (!carryTwo()) {
-    var before = inCar[0] || null;
-    if (before && before.id !== took.id) {
+    // The same card again is replaced where it stands; any other Took
+    // replaces the first-taken, with its drop row — and every OTHER order in
+    // the car stays, until its own clock or Drop. With two held and the flag
+    // read off (turned off mid-shift, or two restored from holding.json) this
+    // kept the Took alone: the second order left the car with no row, and
+    // nothing said it had. Measured at f80d0c2: two orders restored at boot,
+    // carrying two off, one Took — holding.json named only the new order and
+    // the journal had a drop row for the first alone.
+    var same = inCar.filter(function (o) { return o.id === took.id; })[0] || null;
+    var before = same ? null : (inCar[0] || null);
+    if (before) {
       out.replaced = before;
       shadows = [before];
     }
-    setHeld([took]);
+    setHeld(same ? inCar.map(function (o) { return o === same ? took : o; })
+      : inCar.filter(function (o) { return o !== before; }).concat([took]));
     return out;
   }
   if (marked.screen === 'uber.addon') {
@@ -2315,6 +2344,24 @@ function pickupNearEnd(h, pin) {
   });
 }
 
+/* The customer guard: why an order's card does not let the GPS drop arm on
+ * its pinned door, or null when it does. A card for more than one order
+ * ("Drop off 2 orders", a batched Uber trip — scan_pi.says_multi_order) is
+ * one Took and one hold with TWO customers' doors, and the pin is whichever
+ * the ⌖ read: the car stops there and leaves for the second with the order
+ * still half in the car. Measured at f80d0c2: a two-customer DoorDash card
+ * held, its first customer's door pinned, the car stopped there and left, and
+ * a drop row `by: 'gps'` put the order down. Only a card that SAYS one order
+ * arms — `multiOrder: false`, as every offer line from a current scanner
+ * carries — the rule Assemble.dropoff already keeps for a planner's lone
+ * dropoff, and for the reason it gives: a card from a scanner too old to say
+ * is no witness that there is one door. The timer and Drop still end it. */
+function notOneCustomer(h) {
+  var c = h && h.card;
+  if (c && c.multiOrder === false) return null;
+  return c && c.multiOrder === true ? 'two customers' : 'customer count unread';
+}
+
 /* ---------- the held end, searched for by this server --------------------
  *
  * The driver: GPS arrival should arm without opening Map view. So when the
@@ -2872,7 +2919,7 @@ function stepAt(arrival, beat, now, pin, arrived) {
 function arriveOne(h, beat, now) {
   var arrival = arrivalOf(holdIdOf(h));
   var pin = heldEndPin(h);
-  if (!pin || pickupNearEnd(h, pin)) return false;
+  if (!pin || pickupNearEnd(h, pin) || notOneCustomer(h)) return false;
   var step = stepAt(arrival, beat, now, pin, !!h.arrivedAt);
   if (step === 'arrive') {
     h.arrivedAt = now;
@@ -2996,15 +3043,16 @@ function timedLikeTheHeldJob(read) {
  * panel's in-car line says it from (live.html, gpsDropSaid): whether a
  * door-level pin is on it, whether the GPS has seen the car arrive there, and,
  * when it is not armed, why — a pin next to one of its pickups (pickupNearEnd),
- * or this server's refusal of the dropoff text it still names (searchHeldEnd).
- * And a fourth, `visited`, the pickups behind the car.
+ * a card that does not say one customer (notOneCustomer), or this server's
+ * refusal of the dropoff text it still names (searchHeldEnd). And a fourth,
+ * `visited`, the pickups behind the car.
  * ONE function, for /api/status, heldForPanel and the beat, so the status link
  * and the panel cannot give two answers about one pin. */
 function heldEndState(h) {
   var pin = heldEndPin(h);
   return { endPinned: !!pin, arrived: !!h.arrivedAt,
            endWhy: pin
-             ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : null)
+             ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : notOneCustomer(h))
              : h.endWhyFor === h.dropoff ? (h.endWhy || null) : null,
            // ...and its pickups the car has called at (visitPickups,
            // plannerVisits), by planner line (MV.pickupKey): the panel's next
