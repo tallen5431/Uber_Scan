@@ -1325,7 +1325,18 @@
    * screened: ⌖ over that card's customer popup was filed onto ② by `only`,
    * replacing its end, as the popup's own line gave the card the same
    * address. Elimination proper needs a planner's list seen whole, and a
-   * planner is never a card's screen, so it does not arise here. */
+   * planner is never a card's screen, so it does not arise here.
+   *
+   * A LIST WITH MORE DROPOFFS THAN ORDERS LEFT. The hard rules rule orders
+   * out; they say nothing about whose the other dropoffs on a list are. A
+   * list seen whole with two dropoffs and one order left standing (the other
+   * order DoorDash's, or taken after the read) has a dropoff that is no order
+   * of ours, or two of that one order's — a batched card's two customers —
+   * and `only` filed the first of them as its end. Measured at f80d0c2,
+   * carrying two on, a two-customer Uber card and a DoorDash order held, an
+   * unpressed two-dropoff planner: mark row {cue: 'only'} with the first
+   * customer's door as the Uber order's end. So `only` is not allowed there,
+   * and a cue that names the order (the store, the deadline) still is. */
   function attribute(st, orders, d, ctx) {
     var out = { order: null, cue: null, why: null, votes: [], ties: [] };
     var live = (orders || []).filter(function (o) {
@@ -1336,7 +1347,9 @@
       return true;
     });
     if (!live.length) { out.why = 'nobody'; return out; }
-    if (live.length === 1 && !(ctx && ctx.card)) {
+    var crowded = d.bounded === true && Array.isArray(d.others)
+      && d.others.length + 1 > live.length;
+    if (live.length === 1 && !(ctx && ctx.card) && !crowded) {
       out.order = live[0];
       out.cue = 'only';
       return out;

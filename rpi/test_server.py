@@ -7919,6 +7919,221 @@ try:
 finally:
     shutil.rmtree(_pdir, ignore_errors=True)
 
+# --- a scanner that says what the suite tells it, when it tells it ------------
+#
+# The sections below each start a server on a fake scanner that prints every
+# line the suite appends to its queue, as it arrives — a card, a beat, a
+# sighting, a dropoff — so a check puts each one exactly where its fault needs
+# it. The server's own output is kept in a file beside the journal, for the
+# checks about what it says. Every store, street and customer invented.
+_QFAKE = (
+    'import sys, time\n'
+    'q = sys.argv[1]\n'
+    'pos = 0\n'
+    'buf = ""\n'
+    'while True:\n'
+    '    try:\n'
+    '        with open(q) as fh:\n'
+    '            fh.seek(pos)\n'
+    '            data = fh.read()\n'
+    '            pos = fh.tell()\n'
+    '    except OSError:\n'
+    '        data = ""\n'
+    '    if data:\n'
+    '        buf += data\n'
+    '        got = buf.split("\\n")\n'
+    '        buf = got.pop()\n'
+    '        for line in got:\n'
+    '            if line:\n'
+    '                print(line, flush=True)\n'
+    '    else:\n'
+    '        time.sleep(0.01)\n')
+
+
+class _Q(object):
+    """One server on the queue fake. `dir` holds its journal, holding.json and
+    log; `emit` sends a line; `card` puts an offer on the slot and waits for it."""
+
+    def __init__(self, carry=False, env=None, holding=None, config=None):
+        self.dir = tempfile.mkdtemp()
+        self.journal = os.path.join(self.dir, 'journal.jsonl')
+        open(self.journal, 'w').close()
+        self.queue = os.path.join(self.dir, 'queue')
+        open(self.queue, 'w').close()
+        self.hold = os.path.join(self.dir, 'holding.json')
+        if holding is not None:
+            with open(self.hold, 'w') as fh:
+                fh.write(holding)
+        fake = os.path.join(self.dir, 'qfake.py')
+        with open(fake, 'w') as fh:
+            fh.write(_QFAKE)
+        e = {'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+             'SCANNER_ARGS': fake + ' ' + self.queue, 'SCANNER_SILENT_MS': '600000',
+             'UBERSCAN_HANDOFF_DIR': self.dir}
+        if carry is not None:
+            e['CARRY_TWO'] = '1' if carry else '0'
+        e.update(env or {})
+        self.logpath = os.path.join(self.dir, 'server.log')
+        self._log = open(self.logpath, 'w')
+        port = free_port()
+        self.proc = subprocess.Popen(
+            ['node', os.path.join(ROOT, 'server.js')],
+            env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=self.journal, **e),
+            stdout=self._log, stderr=self._log)
+        self.base = 'http://127.0.0.1:%d' % port
+        for _ in range(120):
+            try:
+                urllib.request.urlopen(self.base + '/api/status', timeout=1).read()
+                return
+            except Exception:
+                time.sleep(0.1)
+        self.stop()
+        raise RuntimeError('the server never came up')
+
+    def emit(self, obj):
+        with open(self.queue, 'a') as fh:
+            fh.write(json.dumps(obj) + '\n')
+
+    def status(self):
+        return get(self.base, '/api/status')
+
+    def card(self, oid, pay, minutes, app, **extra):
+        o = {'id': oid, 'pay': pay, 'minutes': minutes, 'billedMinutes': minutes,
+             'miles': 6.0, 'cost': 1.8, 'perHour': 20.0, 'state': 'warn', 'app': app,
+             'screen': app + '.offer', 'pickup': 'Store ' + oid, 'dropoff': None,
+             'whole': True, 'legs': 2, 'multiOrder': False}
+        o.update(extra)
+        self.emit({'offer': o})
+        for _ in range(200):
+            if (self.status().get('offer') or {}).get('id') == oid:
+                return o
+            time.sleep(0.02)
+        raise RuntimeError('the card never landed: ' + oid)
+
+    def took(self, oid, via='panel', **extra):
+        body = {'id': oid, 'accepted': True}
+        if via is not None:
+            body['via'] = via
+        body.update(extra)
+        return post(self.base, '/api/offers/mark', body)[1]
+
+    def rows(self, kind=None):
+        out = [json.loads(l) for l in open(self.journal) if l.strip()]
+        return [r for r in out if kind is None or r.get('kind') == kind]
+
+    def log(self):
+        self._log.flush()
+        return open(self.logpath).read()
+
+    def stop(self):
+        stop(self.proc)
+        self._log.close()
+
+    def gone(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def _settle(seconds=0.6):
+    time.sleep(seconds)
+
+
+# --- two orders in the car: a list with more dropoffs than orders left --------
+#
+# Carrying two on. An Uber card for two customers is taken, and a DoorDash
+# order beside it; the Trip Planner is read whole, unpressed, with the two
+# customers' doors on it. The hard rules leave one order (the app rules the
+# DoorDash order out) and the list has two dropoffs, so `only` would be a guess
+# between that order's two customers — or a customer of no order of ours.
+# assemble.js attribute(): `only` is not allowed there. The same list read just
+# before a second Uber Took lands, so that order is ruled out by the read's own
+# time, is the same shape.
+_PLAN2 = [
+    {'kind': 'pickup', 'orders': 2, 'name': 'Wren Street Noodles', 'expectedBy': 1100,
+     'line': '1 Mill St, Roswell', 'street': '1 Mill St', 'city': 'Roswell',
+     'state': None, 'zip': None},
+    {'kind': 'dropoff', 'orders': 1, 'name': 'Mara T.', 'expectedBy': 1130,
+     'line': '20 Larch Way, Kennesaw', 'street': '20 Larch Way', 'city': 'Kennesaw',
+     'state': None, 'zip': None},
+    {'kind': 'dropoff', 'orders': 1, 'name': 'Jules K.', 'expectedBy': 1150,
+     'line': '30 Teal Ct, Smyrna', 'street': '30 Teal Ct', 'city': 'Smyrna',
+     'state': None, 'zip': None}]
+
+
+def _planner2(q, at):
+    q.emit({'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': True,
+                         'app': 'uber', 'screen': 'uber.planner',
+                         'page': {'top': True, 'bottom': True}, 'stops': _PLAN2,
+                         'orderCount': 2, 'keep': True}})
+    q.emit({'planner': {'at': at, 'stops': _PLAN2, 'asked': False, 'keep': True}})
+
+
+def _endmarks(q):
+    return [(r.get('id'), r.get('dropoff'), r.get('cue')) for r in q.rows('mark')
+            if r.get('dropoff')]
+
+
+_q1 = _Q(carry=True)
+try:
+    _q1.card('U1', 14.0, 300, 'uber', multiOrder=True)
+    _q1.took('U1')
+    _q1.card('D1', 9.0, 300, 'doordash')
+    _q1.took('D1')
+    _settle(0.1)
+    _planner2(_q1, int(time.time() * 1000))
+    _settle()
+    _st1 = _q1.status()
+    eq('Uber planner with two dropoffs and a DoorDash order held: nothing filed',
+       (_endmarks(_q1), [o.get('dropoff') for o in _st1.get('orders') or []]),
+       ([], [None, None]))
+finally:
+    _q1.stop()
+    _q1.gone()
+
+_q2 = _Q(carry=True)
+try:
+    _q2.card('U1', 14.0, 300, 'uber', multiOrder=True)
+    _q2.took('U1')
+    _q2.card('U2', 8.0, 300, 'uber')
+    _read = int(time.time() * 1000)
+    _settle(0.05)
+    _q2.took('U2')
+    _settle(0.05)
+    _planner2(_q2, _read)
+    _settle()
+    _st2 = _q2.status()
+    eq('...nor when the second Took lands during the planner read',
+       (_endmarks(_q2), [o.get('dropoff') for o in _st2.get('orders') or []]),
+       ([], [None, None]))
+finally:
+    _q2.stop()
+    _q2.gone()
+
+# --- an address no order in the car can own ----------------------------------
+#
+# Two DoorDash orders held; an Uber navigation screen read unprompted. The hard
+# rules (the app) leave it no order, and no later cue can change that, so it is
+# not kept — parked, it said "1 dropoff read · whose?" for as long as both were
+# carried.
+_q3 = _Q(carry=True)
+try:
+    _q3.card('D1', 9.0, 120, 'doordash')
+    _q3.took('D1')
+    _q3.card('D2', 8.0, 120, 'doordash')
+    _q3.took('D2')
+    _settle(0.1)
+    _q3.emit({'sighting': {'at': int(time.time() * 1000), 'asked': False, 'whole': True,
+                           'app': 'uber', 'screen': 'uber.nav',
+                           'stops': [{'kind': 'dropoff', 'line': '5 Heron Ct, Smyrna',
+                                      'street': '5 Heron Ct', 'city': 'Smyrna'}]}})
+    _settle()
+    eq('an address no order can own is not waiting',
+       (_q3.status().get('unowned'), _endmarks(_q3)), (0, []))
+    ok_('...and the log says it was not kept',
+        "nobody's: not kept" in _q3.log())
+finally:
+    _q3.stop()
+    _q3.gone()
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

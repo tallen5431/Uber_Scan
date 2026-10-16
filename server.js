@@ -1338,7 +1338,8 @@ function heldById(id, now) {
  *   - an unprompted sighting waits in the assembler's pool (Assemble.park),
  *     unwritten, and the panel says how many are waiting ("2 dropoffs read ·
  *     whose?"), until a later read gives it a cue (retryPool) or one of the
- *     two orders leaves the car and it is dropped.
+ *     two orders leaves the car and it is dropped. One the hard rules leave
+ *     to no order (`nobody`) is not parked: no later cue can give it one.
  *
  * With carrying two off, nothing here changes what is filed between ORDERS:
  * whoseDropoff only works out what attribution WOULD have said, over the order
@@ -1415,6 +1416,15 @@ function whoseDropoff(read, force, now) {
   if (d.asked !== false) {
     console.log('dropoff read with two orders in the car, ' + a.why + ': the chooser is open');
     openChooser('scan', d, orders, now);
+  } else if (a.why === 'nobody') {
+    // ...not one an order in the car can own at all: another app's screen, or
+    // a read from before both Tooks. The pool is for an address a LATER cue
+    // may decide, and no cue moves the hard rules — retryUnowned asks the
+    // same two orders the same question — so parked it said "1 dropoff read ·
+    // whose?" until one of them left the car. Measured at f80d0c2: two
+    // DoorDash orders held, an Uber navigation screen read unprompted, and
+    // `unowned: 1` on /api/status for as long as both were carried.
+    console.log('dropoff seen with two orders in the car, nobody\'s: not kept');
   } else {
     console.log('dropoff seen with two orders in the car, ' + a.why + ': waiting for a cue');
     Assemble.park(assembly, d, orders);

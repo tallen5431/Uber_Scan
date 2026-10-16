@@ -424,6 +424,19 @@ SEQ.forEach(function (seq) {
      who(st, [a, b], d({ at: 3000 })), ['a', 'only', null]);
   eq('...and older than both is nobody\'s', who(st, [a, b], d({ at: 500 })),
      [null, null, 'nobody']);
+  // A list seen whole with more dropoffs than the hard rules leave orders: the
+  // other dropoff may be the one order's too (a two-customer card), so the
+  // hard rules alone file neither.
+  var two = { bounded: true, others: ['30 Larch Way, Kennesaw'] };
+  var dd = order('dd', 5000, { app: 'doordash' });
+  eq('a two-dropoff list, one Uber order and a DoorDash order held: no `only`',
+     who(st, [a, dd], d(two)), [null, null, 'no cue']);
+  eq('...nor with a Took that landed during the read',
+     who(st, [a, b], d(Object.assign({ at: 3000 }, two))), [null, null, 'no cue']);
+  eq('...but a cue that names the one order left still decides',
+     who(st, [a, dd], d(Object.assign({ expectedBy: 1171 }, two))), ['a', 'deadline', null]);
+  eq('...and a list of one dropoff is that order\'s, as before',
+     who(st, [a, dd], d({ bounded: true, others: [] })), ['a', 'only', null]);
   eq('the deadline cue: "Expected by" within 2 minutes of one card\'s "Deliver by"',
      who(st, [a, b], d({ expectedBy: 1207 })), ['b', 'deadline', null]);
   eq('...and not at 3 minutes', who(st, [a, b], d({ expectedBy: 1208 })),
