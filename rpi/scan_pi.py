@@ -2349,6 +2349,12 @@ def beat_fix(phone):
     nothing again. Beside the journal's seven fields rather than among them:
     JR.FIX_FIELDS are what an offer row is written with, and a row says where
     its card was read, not how fast.
+
+    ...and `drivingFor`, the seconds that answer has left of gps.py's hold
+    (DRIVING_HOLD), for the same reason as `freshFor`: a beat that stops
+    coming leaves the page holding a driving state nobody will end, and this
+    is when gps.py would have ended it. Without it the page went by
+    `freshFor`: up to 20 s on the rig against the hold's 10.
     """
     got = phone.latest() if phone is not None else None
     if not got:
@@ -2357,7 +2363,8 @@ def beat_fix(phone):
     return dict(JR.fix_fields(got), freshFor=got.get('freshFor'),
                 speed=(round(speed, 1) if isinstance(speed, (int, float))
                        and not isinstance(speed, bool) else None),
-                driving=got.get('driving') is True)
+                driving=got.get('driving') is True,
+                drivingFor=got.get('drivingFor'))
 
 
 def cpu_temp(path=THERMAL):

@@ -1457,9 +1457,9 @@ _mbeat = [b['gps'].get('fix') for b in _m['alive'] if (b.get('gps') or {}).get('
 eq('the beat carries the newest fix with its quality and the gate\'s answer',
    (_mbeat[-1] if _mbeat else {}).get('lat'), 34.0001)
 eq('...in the journal\'s own fields, the time it has left inside the rule, '
-   'its speed and whether the car is being driven',
+   'its speed, whether the car is being driven and for how long that holds',
    sorted((_mbeat[-1] if _mbeat else {}).keys()),
-   sorted(SP.JR.FIX_FIELDS + ('freshFor', 'speed', 'driving')))
+   sorted(SP.JR.FIX_FIELDS + ('freshFor', 'speed', 'driving', 'drivingFor')))
 
 # --- which frame of one read gets published ----------------------------------
 #

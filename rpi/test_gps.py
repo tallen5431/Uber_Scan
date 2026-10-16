@@ -984,6 +984,48 @@ eq('...nor any NMEA fix, which the gate refuses as unrated',
 eq('fix() hands out the same answer as latest() while the fix is fresh',
    (drive([15.0, 15.0])[1].fix() or {}).get('driving'), True)
 
+# ...and how much longer that answer holds, as `drivingFor`. The panel keeps
+# the last beat's driving state on its own clock once the beats stop coming,
+# and ends it when this runs out — the moment this file would end it. It used
+# the fix's freshFor, the staleness rule's 20 s, against this hold's 10.
+
+
+def _left(it):
+    got = it.latest() or {}
+    return got.get('drivingFor', 'absent'), got.get('driving')
+
+
+_r, _it, _clock = drive([15.0, 15.0])
+_dl = [_left(_it)]
+for _step in (6.5, 3.5, 0.5):
+    _clock.now += _step
+    _dl.append(_left(_it))
+eq('a driving fix says how long its hold has left, counting down on the clock: '
+   '10 s as it arrives, 3.5 at 6.5 s, none at 10 s, and none and not driving past it',
+   _dl, [(10.0, True), (3.5, True), (0.0, True), (0.0, False)])
+_r, _it, _clock = drive([15.0, 15.0, ROUGH, ROUGH, ROUGH])
+eq('...a refused fix mid-drive does not refill it, though the fix it rides is new: '
+   '7 s left after three rough ones, the fix 20 s inside the rule',
+   (_left(_it), (_it.latest() or {}).get('freshFor')), ((7.0, True), 20.0))
+eq('...nothing while not driving, and the shorter staleness rule where that is '
+   'the hold (5 s)',
+   [_left(drive([0.5, 0.5])[1]), _left(drive([15.0, 15.0], stale_after=5.0)[1])],
+   [(0.0, False), (5.0, True)])
+# The page asks drivingFor and not freshFor because it can never be the
+# longer: the hold is no longer than the rule and runs from the last usable
+# fix, no later than the last fix. Held at every quarter second of a drive
+# that ends in refused fixes and then hears nothing, under both rules.
+_over = []
+for _rule in (20.0, 5.0):
+    _r, _it, _clock = drive([15.0, 15.0, ROUGH, 15.0, ROUGH, ROUGH], stale_after=_rule)
+    for _ in range(100):
+        _g = _it.latest() or {}
+        if not _g.get('drivingFor', 0.0) <= _g.get('freshFor', 0.0):
+            _over.append((_rule, _g.get('drivingFor'), _g.get('freshFor')))
+        _clock.now += 0.25
+eq('...and is never more than the fix\'s freshFor, so the page needs no other '
+   'clock (25 s at every quarter second, under a 20 s and a 5 s rule)', _over, [])
+
 # The wall clock leaping, as NTP makes it do at the start of every shift on a
 # Pi that booted in 1970. Every other check here hands Phone a clock; this one
 # leaves it the default, because the default is what the rig runs on and the

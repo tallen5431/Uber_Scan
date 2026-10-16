@@ -1187,8 +1187,8 @@ const framed = (page) => page.waitForFunction(
   // waits until it stops. Moving is gps.py's word on the beat's fix
   // (`driving`, DRIVING_SPEED there); this holds what the page does with it:
   // the form, everything back when it stops, a tap for the detail for ten
-  // seconds, and a fix the page can no longer vouch for never driving. On
-  // the page's own clock, at 800x480 beside the phone.
+  // seconds, and a state whose hold (`drivingFor`) has run out never
+  // driving. On the page's own clock, at 800x480 beside the phone.
   {
     const ctx = await browser.newContext({
       viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
@@ -1205,9 +1205,13 @@ const framed = (page) => page.waitForFunction(
     const tick = (ms) => page.clock.runFor(ms);
     const push = (m) => page.evaluate((x) => window.__es.push(x), m);
     // A beat as the scanner sends it, its fix as beat_fix builds it, with
-    // gps.py's word on whether the car is being driven.
+    // gps.py's word on whether the car is being driven. MOVING is that word
+    // on a beat 0.4 s after a usable fix: 9.6 s of DRIVING_HOLD left, and
+    // 19.6 s of the staleness rule.
     const FIX = { lat: 33.9526, lon: -84.5499, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3,
-                  gpsOk: true, gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false };
+                  gpsOk: true, gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false,
+                  drivingFor: 0.0 };
+    const MOVING = { speed: 13.4, driving: true, drivingFor: 9.6 };
     const beat = (fix) => push({ alive: true, at: Date.now(), tooBright: true,
                                  notSaving: 'Offers are NOT being saved: disk full',
                                  gps: { state: 'ok', ageSeconds: 0.4,
@@ -1249,7 +1253,7 @@ const framed = (page) => page.waitForFunction(
     await push(Object.assign({}, READINGS.deducted, { holding: null, stack: null }));
     await tick(1100);
     const alone = await look();
-    await beat({ speed: 13.4, driving: true });
+    await beat(MOVING);
     await tick(1100);
     const aloneMoving = await look();
     await beat({ speed: 0.2, driving: false });
@@ -1274,17 +1278,17 @@ const framed = (page) => page.waitForFunction(
     await tick(1100);
     const parked = await look();
     // Moving: gps.py says so on the next beat.
-    await beat({ speed: 13.4, driving: true });
+    await beat(MOVING);
     await tick(1100);
     const moving = await look();
     // A tap on the card, while moving: the detail, for ten seconds.
     await page.evaluate(() => document.getElementById('verdict').click());
     await tick(200);
     const tapped = await look();
-    await beat({ speed: 13.4, driving: true });
+    await beat(MOVING);
     await tick(9000);
     const tapped9 = await look();
-    await beat({ speed: 13.4, driving: true });
+    await beat(MOVING);
     await tick(1500);
     const tapped10 = await look();
     // Stopped: under 1 m/s for 5 s, gps.py's word again.
@@ -1292,7 +1296,7 @@ const framed = (page) => page.waitForFunction(
     await tick(1100);
     const stopped = await look();
     // Moving again, between offers: the order in the car, not its stops.
-    await beat({ speed: 13.4, driving: true });
+    await beat(MOVING);
     await push({ ready: false, state: 'empty', track: null });
     await tick(1100);
     const between = await look();
@@ -1300,32 +1304,49 @@ const framed = (page) => page.waitForFunction(
     await tick(1100);
     const betweenStopped = await look();
     await push(OFFER);
-    // A fix the page can no longer vouch for: the beats stop coming, and
-    // the one it holds outruns its freshFor on this page's clock.
-    await beat({ speed: 13.4, driving: true, freshFor: 6.0 });
+    // The beats stop coming mid-drive — the scanner gone quiet, the link
+    // down — and the last one is all the page has: 9.6 s of gps.py's hold
+    // left on it and 19.6 s of the staleness rule. Looked at 9.0 s after it,
+    // and at 10.7 s, a whole tick of the page's one-second render past the
+    // 9.6, so a render after the hold ran out is certain to have happened.
+    await beat(MOVING);
     await tick(1100);
     const fresh = await look();
-    await tick(6000);
+    await tick(7900);
+    const inHold = await look();
+    await tick(1700);
     const outrun = await look();
     // ...a fix the gate refused mid-drive, which gps.py holds as driving for
     // up to DRIVING_HOLD and the page must not overrule by asking the gate
-    // itself; the same once gps.py has let it go; and a beat with no fix.
-    await beat({ speed: 13.4, driving: true });
+    // itself (8.6 s of it left: the refused fix came a second after the last
+    // usable one); the same once gps.py has let it go; a beat from a scanner
+    // that does not say how long its hold has left, from before it did; and
+    // a beat with no fix.
+    await beat(MOVING);
     await tick(1100);
-    await beat({ speed: 13.4, driving: true, gpsOk: false, gpsWhy: 'rough', gpsErr: 129.2 });
+    await beat(Object.assign({}, MOVING, { drivingFor: 8.6, gpsOk: false, gpsWhy: 'rough',
+                                           gpsErr: 129.2 }));
     await tick(1100);
     const held = await look();
     await beat({ speed: 13.4, driving: false, gpsOk: false, gpsWhy: 'rough', gpsErr: 129.2 });
     await tick(1100);
     const refused = await look();
+    await beat(MOVING);
+    await tick(1100);
+    const unsaidFix = Object.assign({}, FIX, MOVING);
+    delete unsaidFix.drivingFor;
+    await push({ alive: true, at: Date.now(), gps: { state: 'ok', ageSeconds: 0.4, fix: unsaidFix } });
+    await tick(1100);
+    const unsaid = await look();
     await beat(null);
     await tick(1100);
     const noFix = await look();
     out.driving = { alone: alone, aloneMoving: aloneMoving,
                     parked: parked, moving: moving, tapped: tapped, tapped9: tapped9,
                     tapped10: tapped10, stopped: stopped, between: between,
-                    betweenStopped: betweenStopped, fresh: fresh, outrun: outrun,
-                    held: held, refused: refused, noFix: noFix };
+                    betweenStopped: betweenStopped, fresh: fresh, inHold: inHold,
+                    outrun: outrun, held: held, refused: refused, unsaid: unsaid,
+                    noFix: noFix };
     await page.close();
     await ctx.close();
   }
@@ -6716,12 +6737,19 @@ try:
            [(dv.get(k) or {}).get('driving') for k in ('tapped', 'tapped9', 'tapped10')]
            + [_sh(dv.get('tapped') or {}, *_DETAIL)],
            [False, False, True, (True,) * len(_DETAIL)])
-        eq('a stale fix is never driving, nor one gps.py lets go: a fix outrun on '
-           'the page\'s own clock, a refused one past its hold, none',
-           [(dv.get(k) or {}).get('driving') for k in ('fresh', 'outrun', 'refused', 'noFix')],
-           [True, False, False, False])
+        eq('a fix gps.py lets go is never driving: a refused one past its hold, one '
+           'from a scanner that does not say how long its hold has left, none',
+           [(dv.get(k) or {}).get('driving') for k in ('refused', 'unsaid', 'noFix')],
+           [False, False, False])
         eq('a refused fix mid-drive keeps driving mode on the page too, while gps.py '
            'holds it', (dv.get('held') or {}).get('driving'), True)
+        # The beat says 9.6 s of the hold and 19.6 s of the fix; the page went
+        # by the second, and held a quiet rig's driving form to about 20 s.
+        eq('...with the beats stopped, the page leaves driving mode after the hold, '
+           'not the fix\'s freshFor (driving 1.1 s and 9.0 s after the last beat, '
+           'the whole card at 10.7 s with 8.9 s of freshFor left)',
+           [(dv.get(k) or {}).get('driving') for k in ('fresh', 'inHold', 'outrun')],
+           [True, True, False])
 
     # --- marking an offer as taken, from the driving screen --------------
     idle = got.get('tookIdle') or {}

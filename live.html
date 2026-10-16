@@ -1894,14 +1894,22 @@
   // line and the order in the car, larger, and the rest out of sight until
   // the car stops. Whether it is being driven is rpi/gps.py's answer, put on
   // the beat's fix as `driving` (DRIVING_SPEED there, with the 12 Oct shift's
-  // measurements): this page asks nothing again but whether it can still
-  // vouch for that fix. A beat that stops coming leaves the last one
-  // standing, and once it has outrun the `freshFor` it came with, on this
-  // page's own clock, it is a fix nobody has judged — the rule the "you are
-  // here" dot greys on (MV.hereDot). No fix, or a stale one: the whole card,
-  // which is what a driver sees when nothing is known. A fix the gate refused
-  // is gps.py's to judge: mid-drive it holds the state (DRIVING_HOLD), so the
-  // page does not ask `gpsOk` again.
+  // measurements): this page asks nothing again but how long it may go on
+  // believing it. gps.py holds a driving state for DRIVING_HOLD (10 s) past
+  // its last usable fix and then ends it, and the beat carries what is left
+  // of that as `drivingFor`. A beat that stops coming leaves the last one
+  // standing, and once its `drivingFor` has run out on this page's own clock
+  // the state is one gps.py has already ended. No fix, a beat that does not
+  // say (a scanner from before it did), or the hold run out: the whole card,
+  // which is what a driver sees when nothing is known.
+  //
+  // This asked the fix's `freshFor` instead — the staleness rule, 20 s on the
+  // rig — so a rig that went quiet mid-drive kept the driving form for up to
+  // twice the hold. `drivingFor` is never more than `freshFor` (the hold is
+  // the shorter, and runs from the last usable fix, no later than the last
+  // fix), so it is the one clock asked. A fix the gate refused is gps.py's
+  // to judge: mid-drive it holds the state, so the page does not ask `gpsOk`
+  // again.
   //
   // No control for it. A tap on the card side shows the whole card for
   // PEEK_MS, moving or not, and the driving form comes back on its own.
@@ -1913,8 +1921,8 @@
   function drivingNow() {
     var f = gpsNow && gpsNow.fix;
     if (!f || f.driving !== true) return false;
-    var fresh = typeof f.freshFor === 'number' ? f.freshFor : 0;
-    return Date.now() - gpsAt <= fresh * 1000;
+    var held = typeof f.drivingFor === 'number' ? f.drivingFor : 0;
+    return Date.now() - gpsAt <= held * 1000;
   }
 
   function showDriving() {

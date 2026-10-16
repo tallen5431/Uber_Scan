@@ -2819,12 +2819,13 @@ class _Latest(object):
 
 
 _stale_fix = {'lat': 33.9526, 'lon': -84.5499, 'ageSeconds': 45.0, 'mode': 3,
-              'err': 12.0, 'ok': False, 'why': 'stale', 'freshFor': 0.0}
+              'err': 12.0, 'ok': False, 'why': 'stale', 'freshFor': 0.0,
+              'drivingFor': 0.0}
 eq('the beat carries the newest fix even once it is stale, judged so',
    SP.beat_fix(_Latest(_stale_fix)),
    {'lat': 33.9526, 'lon': -84.5499, 'gpsAge': 45.0, 'gpsErr': 12.0,
     'gpsMode': 3, 'gpsOk': False, 'gpsWhy': 'stale', 'freshFor': 0.0,
-    'speed': None, 'driving': False})
+    'speed': None, 'driving': False, 'drivingFor': 0.0})
 # ...and the speed and gps.py's word on whether the car is being driven, for
 # the panel's driving form, which asks nothing again.
 eq('...with its speed, to a tenth, and whether the car is being driven',
@@ -2832,6 +2833,12 @@ eq('...with its speed, to a tenth, and whether the car is being driven',
                                  driving=True))) or {}).get(k, 'absent')
     for k in ('speed', 'driving')},
    {'speed': 13.4, 'driving': True})
+# ...and how long gps.py's hold has left on that answer, which the panel ends
+# its driving form by once the beats stop coming.
+eq('...and how long that answer holds, as gps.py says',
+   (SP.beat_fix(_Latest(dict(_stale_fix, ageSeconds=0.4, ok=True, why=None,
+                             freshFor=19.6, driving=True, drivingFor=9.6)))
+    or {}).get('drivingFor', 'absent'), 9.6)
 eq('...and a fresh one says how long it has left inside the rule',
    (SP.beat_fix(_Latest(dict(_stale_fix, ageSeconds=6.5, ok=True, why=None,
                              freshFor=13.5))) or {}).get('freshFor', 'absent'),
