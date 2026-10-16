@@ -2819,12 +2819,13 @@ class _Latest(object):
 
 
 _stale_fix = {'lat': 33.9526, 'lon': -84.5499, 'ageSeconds': 45.0, 'mode': 3,
-              'err': 12.0, 'ok': False, 'why': 'stale', 'freshFor': 0.0}
+              'err': 12.0, 'ok': False, 'why': 'stale', 'freshFor': 0.0,
+              'drivingFor': 0.0}
 eq('the beat carries the newest fix even once it is stale, judged so',
    SP.beat_fix(_Latest(_stale_fix)),
    {'lat': 33.9526, 'lon': -84.5499, 'gpsAge': 45.0, 'gpsErr': 12.0,
     'gpsMode': 3, 'gpsOk': False, 'gpsWhy': 'stale', 'freshFor': 0.0,
-    'speed': None, 'driving': False})
+    'speed': None, 'driving': False, 'drivingFor': 0.0})
 # ...and the speed and gps.py's word on whether the car is being driven, for
 # the panel's driving form, which asks nothing again.
 eq('...with its speed, to a tenth, and whether the car is being driven',
@@ -2832,6 +2833,12 @@ eq('...with its speed, to a tenth, and whether the car is being driven',
                                  driving=True))) or {}).get(k, 'absent')
     for k in ('speed', 'driving')},
    {'speed': 13.4, 'driving': True})
+# ...and how long gps.py's hold has left on that answer, which the panel ends
+# its driving form by once the beats stop coming.
+eq('...and how long that answer holds, as gps.py says',
+   (SP.beat_fix(_Latest(dict(_stale_fix, ageSeconds=0.4, ok=True, why=None,
+                             freshFor=19.6, driving=True, drivingFor=9.6)))
+    or {}).get('drivingFor', 'absent'), 9.6)
 eq('...and a fresh one says how long it has left inside the rule',
    (SP.beat_fix(_Latest(dict(_stale_fix, ageSeconds=6.5, ok=True, why=None,
                              freshFor=13.5))) or {}).get('freshFor', 'absent'),
@@ -3108,6 +3115,75 @@ try:
 finally:
     SP.log = _real_log
     _HO.clear(_HO.DROPOFF)
+
+# ...and a press written WHILE the loop ages it is the driver's too. server.js
+# writes it when the driver presses and the loop ages whatever is there when it
+# passes, and nothing orders the two. handoff.age read the clock and then
+# stat'd, so a press landing between the two came back negative and was
+# refused here as "stamped 0s ahead of the clock": cleared, logged, and the ⌖
+# did nothing. Put exactly there on demand, as test_handoff.py puts it: the
+# press is written straight after the first thing age() reads, the clock or
+# the stat, a millisecond after the clock's moment, and the loop's next pass
+# is half a second on. Asked the way main() asks, with no `now`.
+class _Beside(object):
+    """The process beside the loop: it writes the press straight after the
+    first of age()'s reads."""
+
+    def __init__(self, where, at):
+        self.where, self.at, self.passes, self.wrote = where, at, 0, False
+
+    def _then_write(self):
+        if not self.wrote:
+            self.wrote = True
+            open(self.where, 'w').close()
+            os.utime(self.where, (self.at + 0.001, self.at + 0.001))
+
+    def time(self):                                     # handoff's time.time
+        now = self.at + 0.5 * self.passes
+        self._then_write()
+        return now
+
+    def stat(self, where):                              # handoff's os.stat
+        try:
+            return os.stat(where)
+        finally:
+            self._then_write()
+
+
+class _OsBut(object):
+    """`os` as handoff sees it, with the stat swapped for `stat`."""
+
+    def __init__(self, stat):
+        self.stat = stat
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+_racedir, _racehere = tempfile.mkdtemp(), tempfile.mkdtemp()
+_wasdir = os.environ.get(_HO.ENV_DIR)
+_realhere, _realtime, _realos, _real_log = _HO.HERE, _HO.time, _HO.os, SP.log
+_said, _raced = [], []
+try:
+    os.environ[_HO.ENV_DIR] = _racedir
+    _HO.HERE = _racehere
+    _beside = _Beside(_HO.path(_HO.DROPOFF), 1790000000.0)
+    _HO.time, _HO.os, SP.log = _beside, _OsBut(_beside.stat), _said.append
+    for _pass in (0, 1):
+        _beside.passes = _pass
+        _left = SP.dropoff_requested()
+        _raced.append(None if _left is None else round(_left, 3))
+finally:
+    _HO.HERE, _HO.time, _HO.os, SP.log = _realhere, _realtime, _realos, _real_log
+    if _wasdir is None:
+        os.environ.pop(_HO.ENV_DIR, None)
+    else:
+        os.environ[_HO.ENV_DIR] = _wasdir
+    shutil.rmtree(_racedir, ignore_errors=True)
+    shutil.rmtree(_racehere, ignore_errors=True)
+eq('a ⌖ press written while the loop ages it is taken on the next pass, with '
+   'what is left of its window, not dropped as stamped ahead of the clock',
+   (_raced, _said), ([None, round(SP.DROPOFF_WINDOW - 0.499, 3)], []))
 
 # --- a cost per mile typed on a screen, taken once and never lost -----------
 #

@@ -254,6 +254,12 @@ ECEF_MOVED = 25.0
 #
 # What it costs, measured the same way: 35.8% of the shift in the driving
 # form, and the panel changing form about 21 times an hour on a 4 s beat.
+#
+# ...and the hold is the panel's too. The beat carries what is left of it as
+# the fix's `drivingFor`, and a panel whose beats stop coming ends the driving
+# form on its own clock when that runs out, the moment this file would. It
+# went by the fix's `freshFor` instead, the staleness rule, and held a quiet
+# rig's driving form for up to 20 s on the rig against this hold's 10.
 DRIVING_SPEED = 3.0
 DRIVING_FIXES = 2
 STOPPED_SPEED = 1.0
@@ -716,6 +722,14 @@ class Phone(object):
             got = dict(self._fix)
             now = self._clock()
             got['driving'] = self._still_driving(now)
+            # ...and how many more seconds of the hold that answer has, for
+            # whoever keeps it once the fixes stop reaching them: the panel
+            # holds driving mode on its own clock until this runs out, as
+            # `freshFor` greys its dot. Zero when not driving. Never more
+            # than `freshFor`: the hold is the shorter (_hold()) and runs
+            # from the last usable fix, which is no later than the last fix.
+            got['drivingFor'] = (round(self._hold() - (now - self._good_at), 1)
+                                 if got['driving'] else 0.0)
             return got, now - self._at
 
     def _judged(self, got, age):

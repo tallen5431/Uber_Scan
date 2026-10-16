@@ -268,6 +268,77 @@ try:
     finally:
         HO.HERE = _realhere
         shutil.rmtree(_agehere, ignore_errors=True)
+
+    # ...and a request written WHILE it is being aged. server.js writes one
+    # when the driver presses, the scan loop ages whatever is there when it
+    # passes, and nothing orders the two. age() read the clock and then
+    # stat'd, so a request written between those two reads carried an mtime
+    # later than the `now` it was measured against and came back negative —
+    # which every reader refuses as a clock that stepped back, "stamped 0s
+    # ahead of the clock", and the press is lost. Seen 2 times in 4 in
+    # test_loop.py with six processes spinning; never on demand.
+    #
+    # On demand here. The clock and the stat age() reads are both this
+    # suite's, and the request is written straight after the FIRST of them,
+    # whichever that is, stamped a millisecond after the clock's moment; the
+    # next pass's clock is half a second on. Read in either order the write
+    # lands between age()'s reads or after both, and only clock-first can
+    # call it ahead of the clock.
+    for _p in HO.candidates(HO.DROPOFF):
+        try:
+            os.remove(_p)
+        except OSError:
+            pass
+
+    class _Beside(object):
+        """The process beside this one: it writes the request straight after
+        the first of age()'s reads, the clock or the stat."""
+
+        def __init__(self, where):
+            self.where, self.passes, self.wrote = where, 0, False
+
+        def _then_write(self):
+            if not self.wrote:
+                self.wrote = True
+                open(self.where, 'w').close()
+                os.utime(self.where, (_t + 0.001, _t + 0.001))
+
+        def time(self):                                 # handoff's time.time
+            now = _t + 0.5 * self.passes
+            self._then_write()
+            return now
+
+        def stat(self, where):                          # handoff's os.stat
+            try:
+                return os.stat(where)
+            finally:
+                self._then_write()
+
+    class _OsBut(object):
+        """`os` as handoff sees it, with the stat swapped for `stat`."""
+
+        def __init__(self, stat):
+            self.stat = stat
+
+        def __getattr__(self, name):
+            return getattr(os, name)
+
+    _racehere = tempfile.mkdtemp()
+    _realhere, _realtime, _realos = HO.HERE, HO.time, HO.os
+    _beside = _Beside(HO.path(HO.DROPOFF))
+    _raced = []
+    try:
+        HO.HERE = _racehere
+        HO.time, HO.os = _beside, _OsBut(_beside.stat)
+        for _pass in (0, 1):
+            _beside.passes = _pass
+            _a = HO.age(HO.DROPOFF)
+            _raced.append(None if _a is None else round(_a, 3))
+    finally:
+        HO.HERE, HO.time, HO.os = _realhere, _realtime, _realos
+        shutil.rmtree(_racehere, ignore_errors=True)
+    eq('a request written between age()\'s clock and its stat is aged on the '
+       'pass that sees it, never stamped ahead of the clock', _raced, [None, 0.499])
 finally:
     for _p in HO.candidates(HO.DROPOFF):
         if _p.startswith(_agedir):

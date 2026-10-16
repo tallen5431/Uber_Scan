@@ -4011,8 +4011,10 @@ const SNAP_MEASURE = (fixture) => {
     }
     return out;
   };
+  // Moving, gps.py's hold has 9.6 s left on a beat 0.4 s after a usable fix.
   const DRIVE_FIX = { lat: 33.9526, lon: -84.5499, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3,
-                      gpsOk: true, gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false };
+                      gpsOk: true, gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false,
+                      drivingFor: 0.0 };
   for (const panel of PLANNER_PANELS) {
     for (const view of ['screen', 'scene']) {
       for (const form of Object.keys(DRIVE.forms)) {
@@ -4020,7 +4022,7 @@ const SNAP_MEASURE = (fixture) => {
         const { ctx, page, push } = await carryPage(panel, view);
         const beat = (driving) => push(Object.assign({ alive: true, at: 1 }, f.beat || {}, {
           gps: { state: 'ok', ageSeconds: 0.4, fix: Object.assign({}, DRIVE_FIX,
-            driving ? { speed: 13.4, driving: true } : {}) } }));
+            driving ? { speed: 13.4, driving: true, drivingFor: 9.6 } : {}) } }));
         await beat(false);
         for (const m of f.msgs) await push(m);
         // Past the page's tick, which renders again and folds the stops.

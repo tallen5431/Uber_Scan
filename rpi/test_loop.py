@@ -1457,9 +1457,9 @@ _mbeat = [b['gps'].get('fix') for b in _m['alive'] if (b.get('gps') or {}).get('
 eq('the beat carries the newest fix with its quality and the gate\'s answer',
    (_mbeat[-1] if _mbeat else {}).get('lat'), 34.0001)
 eq('...in the journal\'s own fields, the time it has left inside the rule, '
-   'its speed and whether the car is being driven',
+   'its speed, whether the car is being driven and for how long that holds',
    sorted((_mbeat[-1] if _mbeat else {}).keys()),
-   sorted(SP.JR.FIX_FIELDS + ('freshFor', 'speed', 'driving')))
+   sorted(SP.JR.FIX_FIELDS + ('freshFor', 'speed', 'driving', 'drivingFor')))
 
 # --- which frame of one read gets published ----------------------------------
 #
@@ -3417,9 +3417,11 @@ eq('a throttle flag now turns it on at any temperature (50°C, "throttled": gaps
 # The snap is asked from the loop's own thread, between two of its passes, as
 # r14 above asks it. Asked from the reader's thread, while the loop was in
 # snap_requested(), it was dropped as "stamped 0s ahead of the clock" in 2 of
-# 4 runs with six processes spinning beside the suite: handoff.age reads the
-# clock before it stats the file, so a request written between the two reads
-# as a negative age.
+# 4 runs with six processes spinning beside the suite: handoff.age read the
+# clock before it stat'd the file, so a request written between the two read
+# as a negative age. It stats first now, and test_handoff.py and
+# test_scan_pi.py put a write between the two on demand; this run asks where
+# it did so that what it measures is the heat and nothing else.
 def _unslowed(schedule):
     ho, fold, made, asked, cams, card_reads = (tempfile.mkdtemp(), tempfile.mkdtemp(),
                                                [], [], [], [0])
