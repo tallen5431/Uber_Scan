@@ -8134,6 +8134,103 @@ finally:
     _q3.stop()
     _q3.gone()
 
+# --- holding.json: what is filed onto the order reaches it, whole -------------
+#
+# A ⌖ end filed onto the order in the car reached holding.json only through the
+# NucBox search's save, so with NUCBOX_SEARCH unset (these servers) a restart
+# brought the order back with its card's end. And the file was written in
+# place, so a power cut mid-write left it cut short — read at boot as nothing
+# held, with nothing said. And a planner read wrote it whether or not the read
+# changed anything.
+_PRESSED = {'found': True, 'line': '61 Wrenfield Ln, Kennesaw, GA 30144',
+            'street': '61 Wrenfield Ln', 'city': 'Kennesaw', 'state': 'GA', 'zip': '30144',
+            'asked': True}
+_q4 = _Q(carry=False)
+try:
+    _q4.card('A', 12.0, 60, 'uber', dropoff='Birch Ln & Alder Ct, Kennesaw')
+    _q4.took('A')
+    _settle(0.1)
+    _q4.emit({'dropoff': dict(_PRESSED, at=int(time.time() * 1000))})
+    _settle()
+    _live = _q4.status().get('holding') or {}
+    eq('a ⌖ end is on the order in the car', (_live.get('dropoff'),
+       ((_live.get('fields') or {}).get('dropoff') or {}).get('from')),
+       (_PRESSED['line'], 'press'))
+    _held4 = open(_q4.hold).read()
+finally:
+    _q4.stop()
+    _q4.gone()
+_q5 = _Q(carry=False, holding=_held4)
+try:
+    _back5 = _q5.status().get('holding') or {}
+    eq('a ⌖ end survives a restart with no NucBox',
+       (_back5.get('dropoff'), ((_back5.get('fields') or {}).get('dropoff') or {}).get('from')),
+       (_PRESSED['line'], 'press'))
+finally:
+    _q5.stop()
+    _q5.gone()
+
+_whole6 = json.dumps({'v': 2, 'orders': [
+    {'id': 'T', 'pay': 10.0, 'minutes': 120, 'acceptedAt': int(time.time() * 1000) - 60000}]})
+_torn6 = _whole6[:-9]
+_q6 = _Q(carry=False, holding=_torn6)
+try:
+    _st6 = _q6.status()
+    _settle(0.2)
+    eq('a torn holding.json is said at boot and kept aside',
+       (_st6.get('holding'), 'could not be read' in _q6.log(),
+        open(_q6.hold + '.bad').read() if os.path.exists(_q6.hold + '.bad') else None,
+        os.path.exists(_q6.hold)),
+       (None, True, _torn6, False))
+    # ...and the next Took writes a whole file, through a temporary that does
+    # not stay behind.
+    _q6.card('B', 9.0, 30, 'uber')
+    _q6.took('B')
+    _settle(0.1)
+    eq('...and the next Took writes a whole one, and leaves no temporary',
+       ([o.get('id') for o in json.load(open(_q6.hold)).get('orders')],
+        sorted(n for n in os.listdir(_q6.dir) if n.startswith('holding.json'))),
+       (['B'], ['holding.json', 'holding.json.bad']))
+finally:
+    _q6.stop()
+    _q6.gone()
+
+
+def _plan1(q, name):
+    stops = [{'kind': 'pickup', 'orders': 1, 'name': 'Larkspur Tacos', 'expectedBy': 1100,
+              'line': '5 Mill St, Roswell', 'street': '5 Mill St', 'city': 'Roswell',
+              'state': None, 'zip': None},
+             {'kind': 'dropoff', 'orders': 1, 'name': name, 'expectedBy': 1130,
+              'line': None, 'street': None, 'city': None, 'state': None, 'zip': None}]
+    q.emit({'planner': {'at': int(time.time() * 1000), 'stops': stops, 'asked': False,
+                        'keep': False}})
+    _settle()
+
+
+def _written(path):
+    s = os.stat(path)
+    return (s.st_ino, s.st_mtime_ns)
+
+
+_q7 = _Q(carry=False)
+try:
+    _q7.card('A', 12.0, 60, 'uber')
+    _q7.took('A')
+    _settle(0.1)
+    _plan1(_q7, 'Mara T.')
+    _w1 = _written(_q7.hold)
+    _plan1(_q7, 'Mara T.')
+    eq('a planner read that changes nothing writes nothing', _written(_q7.hold), _w1)
+    _plan1(_q7, 'Jules K.')
+    eq('...and one that changes the stops writes them',
+       (_written(_q7.hold) != _w1,
+        [s.get('name') for s in (json.load(open(_q7.hold))['orders'][0].get('planner')
+                                 or {}).get('stops', [])]),
+       (True, ['Larkspur Tacos', 'Jules K.']))
+finally:
+    _q7.stop()
+    _q7.gone()
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -580,13 +580,15 @@ function startScanner() {
           var plannerPage = Assemble.pageOf(assembly, read.planner.at);
           ownPickups(read.planner.stops, plannedAt, plannerPage, read.planner.at);
           if (heldNow) {
+            var heldWas = JSON.stringify(scanner.held);
             heldNow.planner = { stops: read.planner.stops,
                                 unfiled: read.planner.unfiled || null };
             // ...and a pickup it lists no longer marked visited, by the
             // planner's word (plannerVisits) — only off a read that shows
-            // the list from its top.
+            // the list from its top. It writes the orders when this changed
+            // them (`heldWas`).
             plannerVisits(heldNow, read.planner.stops, plannedAt,
-                          !!(plannerPage && plannerPage.top === true));
+                          !!(plannerPage && plannerPage.top === true), heldWas);
             // ...and its pickups searched for on the NucBox, for the
             // restaurant guard (searchHeldPickup); a no-op for one already
             // asked about on this hold.
@@ -1089,9 +1091,18 @@ function asHold(h) {
  * kept on one order — so the copies cannot disagree. */
 function setHeld(list) {
   scanner.held = (list || []).filter(Boolean);
+  var tmp = null;
   try {
     if (scanner.held.length) {
-      fs.writeFileSync(holdPath(), JSON.stringify({ v: 2, orders: scanner.held }));
+      // Through a temporary and a rename, like every other file this process
+      // publishes. Written in place, a power cut mid-write — this box's
+      // ordinary way of stopping — left a file cut short, and loadHolding
+      // read that as nothing held: the order in the car gone at the next boot
+      // with no word said. A rename is all or nothing. No fsync, as the
+      // journal's own appends take none (appendLines).
+      tmp = partName(holdPath());
+      fs.writeFileSync(tmp, JSON.stringify({ v: 2, orders: scanner.held }));
+      fs.renameSync(tmp, holdPath());
     } else {
       fs.unlinkSync(holdPath());
     }
@@ -1101,6 +1112,7 @@ function setHeld(list) {
     // and never fatal: the panel works from memory either way and the driver
     // is mid-shift.
     if (e && e.code !== 'ENOENT') console.error('holding: ' + e.message);
+    if (tmp) { try { fs.unlinkSync(tmp); } catch (e2) { /* never written */ } }
   }
   tellScannerHeld(scanner.held);
   forgetHoldsGone(scanner.held);
@@ -1197,7 +1209,24 @@ function loadHolding() {
   var raw;
   try { raw = fs.readFileSync(holdPath(), 'utf8'); } catch (e) { return null; }
   var f;
-  try { f = JSON.parse(raw); } catch (e) { f = null; }
+  try {
+    f = JSON.parse(raw);
+  } catch (e) {
+    f = null;
+    // A file that does not parse — cut short by a power cut when it was
+    // written in place, or damaged since — was read as nothing held and said
+    // nothing: the order in the car gone at boot, the stack line judging the
+    // next card alone, and no line anywhere. Measured at f80d0c2 with the
+    // file's last nine bytes cut off: /api/status `holding: null`, and not a
+    // word in the log. Said now, and the file kept aside rather than
+    // overwritten by the next Took, so what it held can still be read.
+    var aside = holdPath() + '.bad';
+    var kept = true;
+    try { fs.renameSync(holdPath(), aside); } catch (e2) { kept = false; }
+    console.error('holding: ' + holdPath() + ' could not be read (' + e.message
+                  + '), so no order in the car is restored'
+                  + (kept ? '; it is kept as ' + aside : ''));
+  }
   var list = [];
   if (f && typeof f === 'object' && f.v === 2 && Array.isArray(f.orders)) {
     list = f.orders.map(heldFromFile).filter(Boolean);
@@ -1805,6 +1834,14 @@ function dropoffArrived(read, force) {
       // ...and the hold's `fields`, `dropoff` and `dropoffScanned` together;
       // a planner lone dropoff that files clears the planner's 'list'.
       Assemble.file(carrying, read.dropoff, said, assembly);
+      // ...and into holding.json, which it reached only by way of the NucBox
+      // search (armHeldEnd, searchHeldEnd's save) — so with NUCBOX_SEARCH
+      // unset, a ⌖ end the driver pressed for lived in memory alone, and a
+      // restart in the driveway brought the order back with the card's end.
+      // Measured at f80d0c2: a ⌖ end filed and on the panel, holding.json
+      // still holding the card's end, and /api/status saying the card's end
+      // (`from: 'card'`) after a restart.
+      saveHold(carrying);
       // ...and written down, which it was not.
       //
       // This is the case the button EXISTS for. An offer card does not
@@ -2731,7 +2768,7 @@ function stopKey(s) {
   return k ? s.kind + '\n' + k : null;
 }
 
-function plannerVisits(h, stops, now, top) {
+function plannerVisits(h, stops, now, top, heldWas) {
   var keys = stops.map(stopKey);
   var listed = [];
   var orders = heldOrders(now);
@@ -2749,7 +2786,13 @@ function plannerVisits(h, stops, now, top) {
       return k && (e.after || []).indexOf(k) === -1;
     }));
   });
-  saveHold(h);
+  // Written when this read changed the orders — its stops, a pickup's record,
+  // the stops seen after one — and not otherwise. `heldWas` is the list as
+  // text before the caller put this read's stops on the order. It wrote
+  // holding.json on every planner line, and the scanner reads the planner on
+  // its own as often as SCREEN_AUTO_EVERY (rpi/scan_pi.py, 10 s) while an
+  // order is held: the same bytes onto the SD card, over and over.
+  if (JSON.stringify(scanner.held) !== heldWas) saveHold(h);
   if (!top) return;
   var gone = [];
   orders.forEach(function (o) {

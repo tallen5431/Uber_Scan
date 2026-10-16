@@ -264,6 +264,18 @@ for _f, _mark in (('server.js', 'process.pid'), ('rpi/sync.py', 'getpid')):
         ok_('%s:%d builds its temporary a name of its own' % (_f, _i),
             _mark in _code)
 
+# ...and holding.json, the order in the car, is one of the files published that
+# way. It was written in place, so a power cut mid-write — this box's ordinary
+# way of stopping — left a file cut short, which loadHolding read as nothing
+# held. Textual, like the rule above: no line writes holdPath() directly, and
+# the one write of it renames its temporary into place.
+_hold_direct = [_i for _i, _line in enumerate(_server.splitlines(), 1)
+                if re.search(r'writeFile(Sync)?\(\s*holdPath\(\)', _line.split('//')[0])]
+eq('holding.json is never written in place, only through a temporary and a rename',
+   _hold_direct, [])
+ok_('...and setHeld renames its temporary onto it',
+    'fs.renameSync(tmp, holdPath());' in _server)
+
 # --- nothing big rides along that the rig cannot use ------------------------
 #
 # Four Python wheels sat at the root of this repository for a while: 48MB,
