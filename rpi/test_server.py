@@ -8385,6 +8385,59 @@ finally:
         _q11.gone()
     shutil.rmtree(_croot, ignore_errors=True)
 
+# ...and the flag itself, read off the file once while the file is unchanged.
+# It is asked on every beat, reading and planner line, and was read and parsed
+# each time. carryTwo() taken out of server.js's source text, with a file
+# system that counts what it reads.
+_CTJS = r'''
+var fs = require('fs'), vm = require('vm'), path = require('path');
+var src = fs.readFileSync(path.join(process.argv[2], 'server.js'), 'utf8');
+var root = process.argv[3];
+function grab(name) {
+  var i = src.indexOf('\nfunction ' + name + '(');
+  if (i === -1) throw new Error('server.js has no function ' + name);
+  return src.slice(i, src.indexOf('\n}\n', i) + 3);
+}
+var reads = 0;
+var cfs = Object.assign({}, fs, { readFileSync: function () {
+  reads += 1; return fs.readFileSync.apply(fs, arguments); } });
+var ctx = { fs: cfs, path: path, ROOT: root, JSON: JSON, process: { env: {} } };
+vm.createContext(ctx);
+var m = /\nvar carryTwoSeen = [^\n]*\n/.exec(src);
+if (m) vm.runInContext(m[0], ctx);
+vm.runInContext(grab('carryTwo'), ctx);
+var file = path.join(root, 'rpi', 'config.json');
+function put(on) {
+  fs.writeFileSync(file + '.part', JSON.stringify({ settings: { carryTwo: on } }));
+  fs.renameSync(file + '.part', file);
+}
+put(true);
+var out = { on: [], reads: [] };
+for (var i = 0; i < 50; i++) out.on.push(ctx.carryTwo());
+out.reads.push(reads);
+put(false);
+for (i = 0; i < 50; i++) out.on.push(ctx.carryTwo());
+out.reads.push(reads);
+out.on = [out.on[0], out.on[49], out.on[50], out.on[99]];
+console.log(JSON.stringify(out));
+'''
+_ctdir = tempfile.mkdtemp()
+try:
+    os.mkdir(os.path.join(_ctdir, 'rpi'))
+    with open(os.path.join(_ctdir, 'ct.js'), 'w') as fh:
+        fh.write(_CTJS)
+    _ctr = subprocess.run(['node', os.path.join(_ctdir, 'ct.js'), ROOT, _ctdir],
+                          capture_output=True, text=True, timeout=60)
+    try:
+        _cto = json.loads(_ctr.stdout)
+    except ValueError:
+        _cto = {'error': (_ctr.stderr or _ctr.stdout)[-400:]}
+    eq('the carryTwo flag is read off the file once while it is unchanged, and again '
+       'when it changes', (_cto.get('on'), _cto.get('reads')),
+       ([True, True, False, False], [1, 2]))
+finally:
+    shutil.rmtree(_ctdir, ignore_errors=True)
+
 # --- two orders restored from holding.json, and a Took -------------------------
 #
 # The car of the carrying-two section above, after a restart, with the flag
