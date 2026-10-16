@@ -1975,9 +1975,19 @@
     try { localStorage.setItem(FIX_KEY, JSON.stringify(kept)); } catch (e) { /* as above */ }
   }
 
+  // ...and only from a map-view.js that has the arithmetic. sw.js can hand
+  // this page the one from before it, as it can for the other MV functions
+  // this file guards one by one (drawHow, mapWants), and called bare there
+  // it threw: at boot, before the one-second tick, loadShift and the service
+  // worker were set going, and then on every beat, before render(). The card
+  // never went stale and the dot stayed green over a rig that had stopped —
+  // measured on the panel with nightFor deleted from MV: no interval set,
+  // "just now" and "scanner reading" eighteen seconds after the last word.
+  // Without it, day, which is what this says with no fix.
   function showNight() {
     var now = gpsNow && gpsNow.fix;
-    var night = !!MV && MV.nightFor([now, lastFix], Date.now(), CLOCK_BELIEVABLE_AFTER);
+    var night = !!MV && typeof MV.nightFor === 'function'
+      && MV.nightFor([now, lastFix], Date.now(), CLOCK_BELIEVABLE_AFTER);
     document.documentElement.classList.toggle('night', night);
   }
   var throttledNow = null;
@@ -5198,13 +5208,17 @@
     return portrait;
   }
 
-  function sawAFrame() {
+  function pictureCaption() {
     viewWrap.classList.remove('gone');
     var portrait = layoutForFrame();
     plainNote(viewMode === 'screen'
       ? (portrait ? "the phone's screen, flattened"
                   : 'camera view while the rig finds the phone')
       : 'camera view · inset is what the reader sees');
+  }
+
+  function sawAFrame() {
+    pictureCaption();
     clearTimeout(watchdog);
     watchdog = null;
   }
@@ -5429,7 +5443,14 @@
       following = true;
       showMap();
     } else if (!viewWrap.classList.contains('gone')) {
-      sawAFrame();
+      // The picture's caption, and not sawAFrame: that is a frame's own news,
+      // and it stands the stream's watchdog down. Called here at boot, before
+      // the stream had sent anything, it cleared the four-second fallback
+      // startStream() had just set, so a stream that never delivered — a
+      // proxy that buffers it — never fell back to stills and the pane stayed
+      // empty. Measured with the stream left unanswered: one stream request
+      // in eight seconds and no still.
+      pictureCaption();
     }
     drawHere();
   }
@@ -7445,30 +7466,41 @@
   }
 
   connect();
+  // Each step of the tick on its own, so one that throws costs that step and
+  // not the rest. They were one function, and a throw in the first of them
+  // took every one after it down for that second and every second after:
+  // showNight against a map-view.js from before nightFor stopped render(),
+  // which is the one thing that dims a verdict nobody has refreshed. The
+  // throw still reaches the console, which is where it is a bug report.
+  function step(f) {
+    try { f(); } catch (e) { if (window.console) console.error(e); }
+  }
   // Keeps the "last seen" counter honest, and — since silence is exactly the
   // condition worth noticing — is the only thing that can ever discover the
   // scanner has gone quiet. Nothing arrives to trigger that discovery.
   // Dusk arrives with nothing arriving to announce it.
-  showNight();
+  step(showNight);
   setInterval(function () {
-    render();
-    showConnection();
-    showNight();
+    step(render);
+    step(showConnection);
+    step(showNight);
     // The dot's age and its grey, which change while nothing arrives — and a
     // beat that stopped coming is exactly when nothing does.
-    drawHere();
+    step(drawHere);
     // The screening state ages out on a clock and nothing arrives to announce
     // it: between cards the scanner can be silent for minutes, which is the
     // whole reason this tick exists. Without it ⌖ Dropoff would stay lit over
     // a card that left the screen long ago.
-    showDest();
+    step(showDest);
     // The shift figures ride the one-second tick rather than adding a timer of
     // their own, on an elapsed check so the cadence is three minutes however
     // many ticks it took. `document.hidden` because this tick keeps running in
     // a background tab — only the camera stream is stopped on visibilitychange
     // — and an unattended tab has no reason to keep asking the rig to parse its
     // journal. The next visible tick catches up.
-    if (!document.hidden && Date.now() - shiftAt >= SHIFT_EVERY_MS) loadShift();
+    step(function () {
+      if (!document.hidden && Date.now() - shiftAt >= SHIFT_EVERY_MS) loadShift();
+    });
   }, 1000);
   loadShift();
 

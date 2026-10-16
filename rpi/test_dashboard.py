@@ -946,6 +946,77 @@ const framed = (page) => page.waitForFunction(
     await night('clock1970', null, [beat(ATL)], null, 0);
   }
 
+  // --- a map-view.js from before nightFor, and a tick step that throws -------
+  stage = 'a map-view.js from before nightFor';
+  //
+  // sw.js can hand the panel a map-view.js older than it, and nightFor was
+  // called bare: boot threw before the one-second tick was set going, and
+  // every beat threw before render(), so a rig that had stopped looked
+  // alive — "just now", "scanner reading", the dot green. Staged here as the
+  // real file with nightFor taken off it; and, separately, one whose
+  // nightFor and ends throw, which is a step of the tick failing at boot and
+  // at its head: the rest of the tick must still run. Eighteen seconds of
+  // the page's own clock with nothing arriving, past READ_STALE_MS (16 s)
+  // and STALE_MS (12 s).
+  out.oldMapView = {};
+  {
+    const mvSrc = await (await fetch(base + '/map-view.js')).text();
+    const ATL = { lat: 33.7491, lon: -84.3880, gpsOk: true, gpsErr: 8, gpsAge: 1,
+                  gpsMode: 3, freshFor: 20 };
+    const staged = async (name, tail) => {
+      const ctx = await browser.newContext({
+        viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
+      });
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(String(e.message || e)));
+      await page.clock.install({ time: Date.parse('2026-06-21T15:00:00-04:00') });
+      await page.route('**/map-view.js', (route) => route.fulfill({
+        status: 200, contentType: 'application/javascript', body: mvSrc + '\n' + tail + '\n' }));
+      await page.route('**/api/status*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, scanner: { enabled: true, running: true, error: null },
+                               last: null, heardAgeMs: 0, offer: null, holding: null }) }));
+      await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+                .catch(() => {});
+      await page.evaluate(() => { if (window.__es.onopen) window.__es.onopen(); });
+      const beat = { alive: true, at: 1, gps: { state: 'ok', fix: ATL } };
+      const look = () => page.evaluate(() => ({
+        verdict: document.getElementById('verdict').className,
+        age: ((document.querySelector('#detail .age') || {}).textContent || ''),
+        conn: document.getElementById('conn').textContent.trim(),
+        dot: document.getElementById('dot').classList.contains('on'),
+      }));
+      const push = (m) => page.evaluate((x) => window.__es.push(x), m)
+        .catch((e) => errors.push('push: ' + String(e.message || e).split('\n')[0]));
+      // A timer that throws makes runFor reject once it has run them all
+      // (Playwright's clock), and a throw is what one of these stages: the
+      // clock has moved either way, so the page is looked at either way.
+      const run = (ms) => page.clock.runFor(ms)
+        .catch((e) => errors.push('tick: ' + String(e.message || e).split('\n')[0]));
+      await push(beat);
+      await push(READINGS.deducted);
+      await run(300);
+      const fresh = await look();
+      await run(18000);
+      const quiet = await look();
+      // ...and the beat that comes back: read whole, to the dot, in the
+      // same message — not on the next tick.
+      await push(beat);
+      const back = await look();
+      out.oldMapView[name] = { fresh: fresh, quiet: quiet, back: back, errors: errors };
+      await page.close();
+      await ctx.close();
+    };
+    await staged('missing', 'delete window.MapView.nightFor;');
+    // Two steps that throw, one at boot and one at the head of the tick:
+    // nightFor, and the reading's ends (MV.ends, which render() asks).
+    await staged('throws', 'window.MapView.nightFor = function () { throw new Error("staged"); };'
+                 + ' window.MapView.ends = function () { throw new Error("staged"); };');
+  }
+
   // --- the notices as chips, and the sentence one tap away -----------------
   stage = 'the notices as chips';
   //
@@ -2919,6 +2990,40 @@ const framed = (page) => page.waitForFunction(
       imgH: document.getElementById('view').naturalHeight,
       note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim() }));
     await page.close();
+  }
+
+  // --- a stream that never delivers falls back to stills ----------------------
+  stage = 'a stream that never delivers';
+  //
+  // The stream is answered by nothing — a proxy that buffers it — and the
+  // still is there. startStream's watchdog moves the pane to stills after
+  // four seconds of no picture; applyViewMode at boot used to stand it down
+  // before any frame arrived, so the pane stayed empty. The page's own clock
+  // runs the four seconds; the still that follows is real network.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 800, height: 480 } });
+    const page = await ctx.newPage();
+    await page.clock.install({ time: Date.now() });
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    const asked = { stream: 0, still: 0 };
+    await page.route('**/api/frame.mjpeg*', () => { asked.stream++; /* never answered */ });
+    await page.route('**/api/frame.jpg*', (route) => {
+      asked.still++;
+      return route.fulfill({ status: 200, contentType: 'image/jpeg',
+                             body: Buffer.from(FRAMES.portrait, 'base64') });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+              .catch(() => {});
+    await page.clock.runFor(4500);
+    await page.waitForFunction(() => document.getElementById('view').naturalWidth > 0,
+                               null, { timeout: 5000 }).catch(() => {});
+    out.deadStream = Object.assign({ asked: Object.assign({}, asked) }, await page.evaluate(() => ({
+      src: document.getElementById('view').getAttribute('src') || '',
+      w: document.getElementById('view').naturalWidth,
+      gone: document.getElementById('viewWrap').classList.contains('gone') })));
+    await page.close();
+    await ctx.close();
   }
 
   // --- the shift line when the figures cannot be trusted -------------------
@@ -7367,6 +7472,31 @@ try:
     eq('a clock still in 1970 is day, whatever the fix', (_n.get('clock1970') or {}).get('night'),
        False)
 
+    # --- a map-view.js from before nightFor --------------------------------
+    _om = got.get('oldMapView') or {}
+    _omm = _om.get('missing') or {}
+    eq('[old map-view.js] a reading lands as on any panel (%r)' % (_omm.get('fresh') or {}),
+       ((_omm.get('fresh') or {}).get('verdict'), (_omm.get('fresh') or {}).get('age')),
+       ('verdict no', 'just now'))
+    ok_('[old map-view.js] eighteen seconds of nothing: the card goes stale (%r)'
+        % (_omm.get('quiet') or {}).get('verdict'),
+        'stale' in ((_omm.get('quiet') or {}).get('verdict') or '').split())
+    _omq = _omm.get('quiet') or {}
+    ok_('[old map-view.js] ...the tick says how long it has been (%r)' % _omq,
+        (_omq.get('conn') or '').startswith('nothing from the scanner for')
+        and re.match(r'^(1[89]|2\d)s ago$', _omq.get('age') or '')
+        and _omq.get('dot') is False)
+    ok_('[old map-view.js] ...and the next beat is read to the end, dot and all (%r)'
+        % (_omm.get('back') or {}),
+        (_omm.get('back') or {}).get('dot')
+        and (_omm.get('back') or {}).get('conn') == 'scanner reading')
+    eq('[old map-view.js] ...with nothing thrown, at boot or on a beat', _omm.get('errors'), [])
+    _omt = _om.get('throws') or {}
+    ok_('[a tick step that throws] the steps after it still run: the card goes stale and the '
+        'row says the scanner went quiet (%r)' % (_omt.get('quiet') or {}),
+        'stale' in ((_omt.get('quiet') or {}).get('verdict') or '').split()
+        and ((_omt.get('quiet') or {}).get('conn') or '').startswith('nothing from the scanner for'))
+
     # --- the status row, short, and the rest behind "…" --------------------
     _sr = got.get('statusRow') or {}
     ok_('the short status row was measured', bool(_sr.get('moreMs')))
@@ -7853,6 +7983,15 @@ try:
             'finds the phone' in (land.get('note') or ''))
         ok_('a portrait phone is laid out as one', port.get('phoneLayout'))
         ok_('...with the flattened-phone caption', 'flattened' in (port.get('note') or ''))
+
+    # --- a stream that never delivers ---------------------------------------
+    _ds = got.get('deadStream') or {}
+    eq('[dead stream] the stream was asked for once, and never answered',
+       (_ds.get('asked') or {}).get('stream'), 1)
+    ok_('[dead stream] ...so after four seconds the pane asks for stills (%r)' % _ds,
+        (_ds.get('asked') or {}).get('still', 0) >= 1
+        and '/api/frame.jpg' in (_ds.get('src') or ''))
+    ok_('[dead stream] ...and a picture is on it', (_ds.get('w') or 0) > 0 and not _ds.get('gone'))
 
     # --- a reading with no verdict, and what it did read -----------------
     #
