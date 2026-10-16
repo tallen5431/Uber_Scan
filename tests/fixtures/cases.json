@@ -3404,6 +3404,30 @@
     "City Barbeque (Peachtree City)",
     "Willowbend Rd & Robinson Rd, Peachtree City"
    ]
+  },
+  {
+   "name": "a store name the reader broke with U+001C, which Python calls a space and JavaScript does not is one name in both ports",
+   "text": "$8.45 incl. tips\n2 stops (8.8 mi) - 45 min\n@ Fable\u001cGrill\n12 Ab Rd, Marietta, 30066.\n@ Wren\u001cNoodles\n40 Cd Ln, Marietta, 30066.\nCustomer dropoff",
+   "expect": [
+    "Fable Grill",
+    "Wren Noodles"
+   ]
+  },
+  {
+   "name": "a store name the reader broke with U+FEFF, which JavaScript calls a space and Python does not is one name in both ports",
+   "text": "$8.45 incl. tips\n2 stops (8.8 mi) - 45 min\n@ Fable\ufeffGrill\n12 Ab Rd, Marietta, 30066.\n@ Wren\ufeffNoodles\n40 Cd Ln, Marietta, 30066.\nCustomer dropoff",
+   "expect": [
+    "Fable Grill",
+    "Wren Noodles"
+   ]
+  },
+  {
+   "name": "a wrapped store name whose second line ends in U+FEFF or U+001C is still one name in both ports",
+   "text": "$8.45 incl. tips\n2 stops (8.8 mi) - 45 min\n@ Fable Grill &\nNoodle House\ufeff\n12 Ab Rd, Marietta, 30066.\n@ Wren Deli &\nTaproom\u001c\n40 Cd Ln, Marietta, 30066.\nCustomer dropoff",
+   "expect": [
+    "Fable Grill Noodle House",
+    "Wren Deli Taproom"
+   ]
   }
  ],
  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day — so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",
@@ -5532,6 +5556,17 @@
    "name": "'Dropoff type' ABOVE the address is not the sheet's label",
    "text": "Dropoff type\nMeet at door\nPat Q.\n2950 Kestrel Dr\nWoodstock, GA",
    "expect": null
+  },
+  {
+   "name": "a mark read as an accented letter in front of the name is a mark in both ports",
+   "text": "Deliver to Pat Q.\n\u00e9Pat Q.\n2208 Wrenfield Dr  P  &\nWoodstock, GA\nHouse\nDropoff type\nMeet at door",
+   "expect": {
+    "line": "2208 Wrenfield Dr, Woodstock",
+    "street": "2208 Wrenfield Dr",
+    "city": "Woodstock",
+    "state": "GA",
+    "zip": null
+   }
   }
  ],
  "_popups_comment": "DoorDash's place popup, opened from a stop on an offer card before the driver decides: place_popup / placePopup. The role label, the store's name, the street with a house number, the town, and 'Directions' under them. `expect` is {role, name, line, street, city, state, zip}, or null when the popup does not read as one. The store's layout and the OCR's marks are the five reads of it in the journal copied with the 12 Oct shift, all five of which read; the customer's is INFERRED (no customer popup has been read) and its cases say so; the pill over the map is the 12 Oct snaps' 16-03-08 and 16-03-17, whose text was never read. Every name, street and number is invented.",

@@ -3195,9 +3195,15 @@ SHEET_NUMBER = re.compile(r'^[1-9]\d{0,5} ', ASCII)
 SHEET_STREET_END = re.compile(
     r'\b(?:' + STREET_SUFFIX + r')\b\.?(?:\s+(?:NW|NE|SW|SE|N|S|E|W)\b)?',
     re.IGNORECASE | ASCII)
-SHEET_NAME = re.compile(r"^\W{0,3}[A-Z][A-Za-z'’-]+ [A-Z]\.?(?:\s|$)")
+# ASCII, as every pattern the two ports share is (see the README's note on the
+# corpus): without it `\W` here was Unicode's, which takes an accented letter
+# for a word character, so a mark the reader turned into "é" in front of the
+# name refused the sheet on the rig and the browser read it. tests/fixtures/
+# cases.json `sheets` has the case; SHEET_TOWN_WORDS asks nothing the flag
+# changes and carries it so that no pattern here is the odd one out.
+SHEET_NAME = re.compile(r"^\W{0,3}[A-Z][A-Za-z'’-]+ [A-Z]\.?(?:\s|$)", ASCII)
 SHEET_CAPS_JUNK = re.compile(r'^(?:[A-Z]{1,2}\s+)+(?=[A-Z][a-z])', ASCII)
-SHEET_TOWN_WORDS = re.compile(r"^[A-Z][a-z'’.-]+(?: [A-Z][a-z'’.-]+){0,3}$")
+SHEET_TOWN_WORDS = re.compile(r"^[A-Z][a-z'’.-]+(?: [A-Z][a-z'’.-]+){0,3}$", ASCII)
 # How far above "Dropoff type" the street may sit, in lines. On the 12 Oct
 # sheets that read a name, a street and a town it sat 2 to 7 lines above (the
 # town line, "House" and the reader's marks between); 8 is that and one more,
@@ -3814,8 +3820,14 @@ STORES_LINE = re.compile(
 
 
 def _store_name(line):
-    """A store line without the icon in front of it, or '' if no name is left."""
-    words = line.split()
+    """A store line without the icon in front of it, or '' if no name is left.
+
+    Split on WHITESPACE, the union of what the two languages call a space, and
+    not on str.split()'s idea of one: that splits on U+001C-U+001F and U+0085,
+    which JavaScript's \\s does not, and not on U+FEFF, which it does, so the
+    two ports stored "Fable Grill" against "Fable\\x1cGrill" off one card
+    (tests/fixtures/cases.json `places`). See normalize()."""
+    words = [w for w in WHITESPACE.split(line) if w]
     cut = next((i for i, w in enumerate(words[:4])
                 if re.match(r'[A-Z]\S*[A-Za-z]', w)), None)
     if cut is None:
@@ -3829,6 +3841,11 @@ def _store_name(line):
         words.pop()
     name = ' '.join(words)
     return name if re.search(r'[A-Za-z]{2}', name) else ''
+
+
+# A line's space at either end, as WHITESPACE has it — the strip that goes with
+# _store_name's split, for the same reason.
+_STORE_EDGES = re.compile(r'^%s|%s\Z' % (WHITESPACE.pattern, WHITESPACE.pattern))
 
 
 def find_stores(raw_text):
@@ -3858,7 +3875,7 @@ def find_stores(raw_text):
             continue
         # A name the card wrapped onto a second line — `Freddy's Frozen
         # Custard &` / `Steakburgers` — starts with a letter and no icon.
-        if len(pending) == 1 and name == line.strip():
+        if len(pending) == 1 and name == _STORE_EDGES.sub('', line):
             pending.append(name)
         else:
             pending = [name]

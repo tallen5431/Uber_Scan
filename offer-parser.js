@@ -2122,8 +2122,15 @@
   var STORES_LINE = new RegExp(
     'ps\\s*\\(\\s*' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?\\s*m(?:i|iles?)\\b\\s*\\)', 'i');
 
+  // The union of what the two languages call a space, as normalize() has it:
+  // split and trimmed on this rather than on \s and trim(), which leave
+  // U+001C-U+001F and U+0085 in a store's name where Python's split takes
+  // them out. See _store_name in offer_parser.py.
+  var STORE_SPACE = /[\s\u001c-\u001f\u0085]+/;
+  var STORE_EDGES = /^[\s\u001c-\u001f\u0085]+|[\s\u001c-\u001f\u0085]+$/g;
+
   function storeName(line) {
-    var words = line.split(/\s+/).filter(function (w) { return w.length; });
+    var words = line.split(STORE_SPACE).filter(function (w) { return w.length; });
     var cut = null, i;
     for (i = 0; i < Math.min(4, words.length); i++) {
       if (/^[A-Z]\S*[A-Za-z]/.test(words[i])) { cut = i; break; }
@@ -2162,7 +2169,7 @@
       if (!name) continue;
       // A name the card wrapped onto a second line starts with a letter and
       // no icon.
-      if (pending.length === 1 && name === line.trim()) pending.push(name);
+      if (pending.length === 1 && name === line.replace(STORE_EDGES, '')) pending.push(name);
       else pending = [name];
     }
     return out.slice(0, MAX_PLACES);
