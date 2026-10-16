@@ -315,8 +315,11 @@ if _np is not None:
             sys.modules.pop('camera', None)
         else:
             sys.modules['camera'] = _was_cam
+    # The time is the claim: on the wall clock a step gave up three frames into
+    # the timeout. How many frames fit in it is the machine's load, not the
+    # rule; a loaded full run read one frame in 1.89 s and failed on the count.
     ok_('aiming waits out its timeout however the wall clock steps (%d frames, %.2f s '
-        'of a 1.0 s timeout)' % (_frames[0], _took), _took >= 0.95 and _frames[0] > 5)
+        'of a 1.0 s timeout)' % (_frames[0], _took), _took >= 0.95 and _frames[0] >= 1)
     eq('...and an empty mount still never comes good', _got, (None, None))
 
 shutil.rmtree(work, ignore_errors=True)
