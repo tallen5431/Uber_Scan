@@ -5065,6 +5065,8 @@
       if (msg.ready !== undefined) {
         readAt = msg.replay ? Date.now() - age(msg.ageMs) : Date.now();
       }
+      // ...and the card's: the last reading that carried one (cardOnMap).
+      if (msg.ready) cardReadAt = readAt;
       if (msg.phase) phase = msg;
       // ...and a phase is a MOMENT, not a state. `scanning` is autopilot
       // saying it is about to exec into the scanner, and it is the last phase
@@ -5220,6 +5222,7 @@
     if (s.last) {
       last = s.last;
       readAt = Date.now() - age(s.lastAgeMs);
+      if (s.last.ready) cardReadAt = readAt;
     }
     // ...and the same for having heard from the scanner at all. Without this a
     // page loaded against a stopped scanner showed a live connection dot over
@@ -5593,6 +5596,10 @@
       // A fresh Map view frames where the dot is NOW, once. See hereAnchor.
       hereAnchor = null;
       hereWanted = true;
+      // ...and the pins, whatever card they are (fitWanted), and asks for
+      // a Leaflet that would not load again now (leafletFailedAt).
+      fitWanted = true;
+      leafletFailedAt = 0;
       // ...and follows it again, whatever a hand on the map did last time.
       following = true;
       showMap();
@@ -5685,6 +5692,47 @@
   // heading.
   var mapFor = null;
   var mapBusy = false;
+
+  /* WHEN the view is fitted to the pins: for a new card, and on ⛶ Map, and
+     not otherwise. Every walk fitted, and a walk follows every change of
+     the key — a pickup visited, a Trip Planner read, a second order taken —
+     so between offers, following the car, a visit pulled the view back to
+     the last card's pins and the follow pulled it back to the car: measured
+     at zoom 14 on the car, then at zoom 12 about 1.4 mi off on the beat
+     after the visit. `fitFor` is the card the view was last fitted to;
+     `fitWanted` is the press, until a walk or the same-key path below has
+     answered it. */
+  var fitFor = null;
+  var fitWanted = false;
+
+  /* Leaflet that would not load, and when to ask for it again: on ⛶ Map, or
+     once LEAFLET_AGAIN_MS has passed. Every message used to ask — a beat
+     every four seconds, a reading three times a second — and with the CDN
+     unreachable 60 beats made 120 requests (MV.needLeaflet now takes its
+     tags out of <head> again). A minute is chosen, not measured: a dead
+     spot at a red light is over by then, and the press is always there. */
+  var LEAFLET_AGAIN_MS = 60000;
+  var leafletFailedAt = 0;
+  var NO_LEAFLET = 'no signal — the map needs it for both its code and its '
+                   + 'tiles. ⛶ Phone puts the picture back.';
+
+  /* Whether the card on the record is still Map view's to draw: while its
+     reading is fresh by the verdict's own rule, READ_STALE_MS since the last
+     reading that carried it (`cardReadAt`). Between offers the full-width
+     map went on showing the last card's pins and its figure for as long as
+     nothing replaced it, with no age on either — a detour measured from
+     where the car WAS when that card came up, read at a glance as one about
+     now. Dropped rather than aged: the caption's two rows are spent on the
+     figure and its hedges, and an age on them would be a third thing for a
+     glance to read; the card's age is on the Took button already. What
+     stays is the order in the car, whose run is the map's job between
+     offers, and the caption says the card has gone. */
+  var cardReadAt = 0;
+  function cardOnMap() {
+    return !!onRecord && Date.now() - cardReadAt <= READ_STALE_MS;
+  }
+  var NO_CARD_UP = 'no card up — nothing to put on a map';
+  var NO_CARD_HELD = 'no card up — only the order in your car';
 
   /* The words under the map, and the last of them that described what is
      drawn. `lastLine` is not simply the last thing said: "looking up 3
@@ -5905,7 +5953,8 @@
      what was drawn is how a map ends up showing the last card under this
      card's numbers. */
   function mapWants() {
-    var o = onRecord || {};
+    var card = cardOnMap() ? onRecord : null;
+    var o = card || {};
     var held = holdingNow ? (heldEnds || null) : null;
     /* ...and the held order's pickups off its Trip Planner, while it is held:
        the restaurant the driver read with ⌖ was never on this map, so the
@@ -5972,7 +6021,7 @@
              // is where the car was when it came up, and the one the order in
              // the car came from, whose own fix and distance its end is
              // checked against. See MV.againstCard.
-             card: onRecord, heldCard: held ? heldCard : null,
+             card: card, heldCard: held ? heldCard : null,
              heldId: held ? heldId : null,
              held2: held2, heldCard2: held2 ? (second.card || null) : null,
              heldId2: held2 ? (second.holdId || null) : null,
@@ -6079,10 +6128,15 @@
       // back over the driver's drag and over the follow's last pan, so the
       // map went to the pins and back to the car on every beat.
       if (lastBounds && hereWanted) fitView(lastBounds);
+      // ...which answers the press: a key that moves later is not a press.
+      fitWanted = false;
       drawHere();
       return;
     }
     mapFor = key;
+    // Fitted on this walk: a new card, or the press (fitFor, above).
+    var cardId = want.card ? want.card.id || null : null;
+    want.refit = fitWanted || (!!cardId && cardId !== fitFor);
 
     if (!want.names.length) {
       // The last card's pins must not stay on the glass under this card's
@@ -6101,14 +6155,18 @@
       // the glass as truly as a detour does, and it is what coming back to
       // this same card has to be told again. Left as mapSay, re-entry would
       // restate the LAST card's detour over an empty map.
-      mapDrew(onRecord
+      mapDrew(want.card
         ? 'this card names nowhere yet — ⌖ Scan reads it off your phone'
-        : 'no card read yet — nothing to put on a map');
+        : onRecord ? NO_CARD_UP : 'no card read yet — nothing to put on a map');
       return;
     }
 
     mapBusy = true;
     try {
+      if (!theMap && leafletFailedAt && Date.now() - leafletFailedAt < LEAFLET_AGAIN_MS) {
+        mapSay(NO_LEAFLET);
+        return;
+      }
       mapSay('loading the map…');
       var ready = await MV.needLeaflet(document, {
         css: 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
@@ -6121,10 +6179,11 @@
         // Shortened to the cap, not to taste: at its old length this was four
         // rows on the 3.5" hat and lost "the picture back" to the clamp, which
         // is the half that says what to press.
-        mapSay('no signal — the map needs it for both its code and its '
-               + 'tiles. ⛶ Phone puts the picture back.');
+        leafletFailedAt = Date.now();
+        mapSay(NO_LEAFLET);
         return;
       }
+      leafletFailedAt = 0;
       if (viewMode !== 'map' || mapFor !== key) return;
 
       if (!theMap) {
@@ -6370,6 +6429,7 @@
         }
       }
       drawMap(want, found, here, true, road, heldRoad, jobRoad);
+      if (want.refit) { fitFor = cardId; fitWanted = false; }
     } finally {
       mapBusy = false;
       /* A walk the driver walked away from leaves this card marked as drawn
@@ -6944,7 +7004,7 @@
     }
     showKey(drewHow, !!(held || pick || drop), heldAt.some(Boolean));
 
-    fitView(bounds);
+    if (want.refit) fitView(bounds);
     // Against the view as it stands; the fit's own moveend asks again at the
     // zoom it lands on (see the map's moveend).
     sizeDiscs();
@@ -7100,6 +7160,9 @@
     // fix and one whose fix the gate refused are different states, and "no
     // position" would say the GPS never answered when it answered too roughly
     // to measure from. The line names which, with gpsd's own figure.
+    // No card up (cardOnMap): the order in the car is drawn and there is
+    // nothing to measure — not "this card came up without a fix".
+    if (!want.card) return NO_CARD_HELD;
     if (!here) return MV.fixLine(MV.cardFix(want.card), 'new');
     if (!want.held) return holdingNow
       ? 'the order in your car has no address on record — ⌖ Scan reads it '
@@ -7656,6 +7719,11 @@
     // whole reason this tick exists. Without it ⌖ Dropoff would stay lit over
     // a card that left the screen long ago.
     step(showDest);
+    // ...and Map view, whose card goes stale on the same clock (cardOnMap):
+    // drawn again when what it should show has moved.
+    step(function () {
+      if (viewMode === 'map' && !mapBusy && mapFor !== null && mapFor !== mapWants().key) showMap();
+    });
     // The shift figures ride the one-second tick rather than adding a timer of
     // their own, on an elapsed check so the cadence is three minutes however
     // many ticks it took. `document.hidden` because this tick keeps running in

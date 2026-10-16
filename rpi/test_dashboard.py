@@ -6424,6 +6424,155 @@ const framed = (page) => page.waitForFunction(
     await ctx.close();
   }
 
+  // --- Leaflet that will not load ---------------------------------------------
+  stage = 'Leaflet that will not load';
+  //
+  // Map view with the CDN unreachable. Every message used to ask for Leaflet
+  // again and leave another <link> and <script> in <head>: 60 beats, 120
+  // requests. A failed load is asked again on ⛶ Map, or after a minute.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 800, height: 480 } });
+    const page = await ctx.newPage();
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    let cdn = 0;
+    await page.route('https://unpkg.com/**', (route) => { cdn++; return route.abort('internetdisconnected'); });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
+              .catch(() => {});
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    const said = () => page.evaluate(() => ((n) => (n.classList.contains('chipped') ? n.title
+      : n.textContent))(document.getElementById('viewNote')).trim());
+    const noSignal = () => page.waitForFunction(() => /^no signal/.test(((n) => (n.title
+      || n.textContent))(document.getElementById('viewNote'))), null, { timeout: 5000 }).catch(() => {});
+    await push(Object.assign({}, READINGS.deducted, { places: ['Chipotle (Barrett Pkwy)', 'Canton Rd, Marietta'] }));
+    await push({ offer: { id: 'l-1', pay: 8.0, minutes: 22, pickup: 'Chipotle (Barrett Pkwy)',
+                          dropoff: 'Canton Rd, Marietta' } });
+    await page.click('#viewMode');
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');
+    await noSignal();
+    const asked = cdn;
+    const head = await page.evaluate(() => document.head.children.length);
+    for (let i = 0; i < 30; i++) {
+      await push({ alive: true, at: Date.now() });
+      await page.waitForTimeout(30);
+    }
+    await page.waitForTimeout(300);
+    out.noLeaflet = { first: asked, beats: cdn - asked, head: head,
+                      headAfter: await page.evaluate(() => document.head.children.length),
+                      said: await said() };
+    // ⛶ Map round again asks again.
+    const beforePress = cdn;
+    for (let i = 0; i < 3; i++) { await page.click('#viewMode'); await page.waitForTimeout(150); }
+    await noSignal();
+    await page.waitForTimeout(300);
+    out.noLeaflet.pressed = cdn - beforePress;
+    out.noLeaflet.headPressed = await page.evaluate(() => document.head.children.length);
+    await page.close();
+    await ctx.close();
+  }
+
+  // --- the view between offers ------------------------------------------------
+  stage = 'the map mode: the view between offers';
+  //
+  // Following the car with an order in it, between offers. A pickup the car
+  // has called at moves the run and so the map's key, and every redraw used
+  // to fit the view to the last card's pins again, against the follow. Only a
+  // new card, or ⛶ Map, fits it now. And once that card's reading is stale
+  // (READ_STALE_MS, the verdict's rule) its pins and figure go, and the map
+  // is the order in the car. Leaflet is stubbed; the places are answered at
+  // the network. Invented places.
+  {
+    const PLACES = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
+                     'Canton Rd, Marietta': [33.980, -84.500],
+                     'Powder Springs Rd': [33.900, -84.600],
+                     '310 Mill St, Roswell, GA 30075': [34.010, -84.610],
+                     'Zaxbys (Cobb Pkwy)': [34.040, -84.560] };
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
+    await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+      const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
+      const hit = PLACES[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    const card = await page.evaluate(() => window.__CARD);
+    const heldCard = await page.evaluate(() => window.__HELD);
+    const A = { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd', holdId: 'v-a@1',
+                card: heldCard, endPinned: false, arrived: false, endWhy: null, visited: [] };
+    const GOOD = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8, gpsMode: 3,
+                   gpsOk: true, gpsWhy: null, freshFor: 19.4 };
+    const beat = (visited) => ({ alive: true, at: Date.now(),
+      gps: { state: 'ok', ageSeconds: 0.6, fix: GOOD },
+      heldEnd: { endPinned: false, arrived: false, endWhy: null, visited: visited } });
+    const offer = (id, pickup) => ({ ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0,
+      pay: 14.25, minutes: 20.0, miles: 4.0, cost: 1.4, target: 25, band: 15, holding: A,
+      offer: Object.assign({ id: id, pay: 14.25, minutes: 20.0, billedMinutes: 20.0, miles: 4.0,
+                             cost: 1.4, pickup: pickup, dropoff: 'Canton Rd, Marietta' }, card) });
+    const settled = () => page.waitForFunction(() => {
+      const n = document.getElementById('viewNote');
+      const t = n.title || n.textContent;
+      return t && !/placing|loading|measuring/.test(t);
+    }, null, { timeout: 15000 }).catch(() => {});
+    const look = () => page.evaluate(() => ({
+      fit: window.__fit, view: window.__view || null, pans: (window.__pans || []).length,
+      letters: (window.__letters || []).map((l) => String(((l.opts || {}).icon || {}).html || ''))
+        .filter(Boolean).sort(),
+      // Where the pins are, to tell the card's from the order's.
+      pins: (window.__marks || []).map((m) => (m.ll || []).map((x) => Math.round(x * 1000) / 1000)),
+      said: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(
+        document.getElementById('viewNote')).trim() }));
+    await push(beat([]));
+    await push({ holding: A });
+    await push({ planner: { stops: [
+      { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700, street: '310 Mill St',
+        city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
+        city: 'Marietta', line: 'Powder Springs Rd' }], unfiled: null, asked: true, ms: null, at: 1 } });
+    await push(offer('v-1', 'Chipotle (Barrett Pkwy)'));
+    await page.click('#viewMode');
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');
+    await page.waitForTimeout(1500);
+    await settled();
+    await page.waitForTimeout(300);
+    const first = await look();
+    // The restaurant behind the car, on a beat; the view and what moved it
+    // forgotten first.
+    await page.evaluate(() => { window.__fit = null; window.__view = null; window.__pans = []; });
+    await push(beat(['310 Mill St, Roswell, GA 30075']));
+    await page.waitForTimeout(800);
+    await settled();
+    const visited = await look();
+    // A new card: fitted to its pins.
+    await page.evaluate(() => { window.__fit = null; window.__view = null; });
+    await push(offer('v-2', 'Zaxbys (Cobb Pkwy)'));
+    await page.waitForTimeout(1500);
+    await settled();
+    await page.waitForTimeout(300);
+    const newCard = await look();
+    // The card leaves the phone, and its reading goes stale: the page's clock
+    // moved past READ_STALE_MS, and the one-second tick redraws the map.
+    await push({ ready: false, state: 'empty', track: null, holding: A });
+    await page.waitForTimeout(300);
+    const left = await look();
+    await page.clock.install();
+    await page.clock.fastForward(17000);
+    await page.waitForTimeout(1500);
+    await settled();
+    const stale = await look();
+    out.between = { first: first, visited: visited, newCard: newCard, left: left, stale: stale };
+    await page.close();
+  }
+
   /* --- two orders in the car, on the map ------------------------------------
    *
    * With carrying two on: the first order's end pinned D1, the second's D2,
@@ -6992,6 +7141,41 @@ try:
        {'reading': 1, 'moved': 1, 'tick': 1})
     eq('the status link in "…" pressed across a beat and the tick: each press arrives',
        got.get('statusPress'), {'beat': 1, 'tick': 1})
+
+    # --- Leaflet that will not load ----------------------------------------
+    _nl = got.get('noLeaflet') or {}
+    eq('[no Leaflet] Map view asks the CDN once, for the stylesheet and the script',
+       _nl.get('first'), 2)
+    eq('[no Leaflet] ...thirty beats after it ask nothing more, and leave <head> as it was',
+       (_nl.get('beats'), _nl.get('headAfter')), (0, _nl.get('head')))
+    ok_('[no Leaflet] ...and the caption says there is no signal (%r)' % _nl.get('said'),
+        (_nl.get('said') or '').startswith('no signal'))
+    eq('[no Leaflet] ⛶ Map round again asks again, and <head> still holds no leftovers',
+       (_nl.get('pressed'), _nl.get('headPressed')), (2, _nl.get('head')))
+
+    # --- the view between offers ---------------------------------------------
+    _bw = got.get('between') or {}
+    _bf = _bw.get('first') or {}
+    ok_('[between offers] set up: the card, its pickup and the order in the car drawn (%r)'
+        % _bf.get('letters'), 'P' in (_bf.get('letters') or []) and bool(_bf.get('fit')))
+    _bv = _bw.get('visited') or {}
+    eq('a visit beat while following does not move the view: no fit, no view set',
+       (_bv.get('fit'), _bv.get('view')), (None, None))
+    ok_('...though the visit is drawn (%r)' % _bv.get('letters'),
+        '✓' in (_bv.get('letters') or []))
+    ok_('a new card is still fitted to its pins', bool((_bw.get('newCard') or {}).get('fit')))
+    # The second card's pickup (Zaxbys) and its dropoff (Canton Rd), and the
+    # order in the car's end (Powder Springs Rd), by where they are pinned.
+    _zax, _canton, _held = [34.04, -84.56], [33.98, -84.5], [33.9, -84.6]
+    _bl = _bw.get('left') or {}
+    ok_('[between offers] the card just gone is still drawn while its reading is fresh (%r)'
+        % _bl.get('pins'), _zax in (_bl.get('pins') or []) and _canton in (_bl.get('pins') or []))
+    _bs = _bw.get('stale') or {}
+    eq('once the card\'s reading is stale its pins and its figure go: the order in the car, '
+       'and the caption says the card has gone',
+       (_zax in (_bs.get('pins') or []), _canton in (_bs.get('pins') or []),
+        _held in (_bs.get('pins') or []), _bs.get('said')),
+       (False, False, True, 'no card up — only the order in your car'))
 
     eq('[carry two] Map view pins the two orders\' ends D1 and D2, and a pickup one '
        'order\'s card names P2', got.get('mapTwo'), ['D1', 'D2', 'P', 'P2'])

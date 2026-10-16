@@ -510,6 +510,13 @@ CAPTION_LINES = [
      'this card names nowhere yet — ⌖ Scan reads it off your phone'),
     ('no card at all',
      'no card read yet — nothing to put on a map'),
+    # ...and a card that has gone: its reading stale (cardOnMap), its pins and
+    # figure dropped, with nothing in the car, or with an order whose run is
+    # what the map then shows.
+    ('no card up',
+     'no card up — nothing to put on a map'),
+    ('no card up, an order in the car',
+     'no card up — only the order in your car'),
     ('loading',
      'loading the map…'),
     ('no signal',
@@ -935,7 +942,7 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 100)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 102)
 eq('...and forty-five of its entries declare a tail the clamp may eat',
    len(_DECLARED), 45)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
@@ -974,6 +981,10 @@ CAPTION_CHIPS = {
         "NO PLACES · ⌖ Scan reads them",
     "no card at all":
         "NO CARD YET · nothing to map",
+    "no card up":
+        "NO CARD UP · nothing to map",
+    "no card up, an order in the car":
+        "NO CARD UP · your order only",
     "no signal":
         "NO SIGNAL · ⛶ Phone for the picture",
     "a pin in the wrong state":
@@ -5165,7 +5176,7 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say a hundred things, so all
+                # occupant and it can say a hundred and two things, so all
                 # of them are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #

@@ -2585,6 +2585,28 @@ async function nucbox() {
   eq('...midwinter has no civil dawn: night all day',
      MV.nightFor([{ lat: 78, lon: 15 }], Date.UTC(2026, 11, 21, 12), CLOCK), true);
 
+  /* ---- Leaflet that will not load (needLeaflet) ----------------------------
+   *
+   * A document of the page's shape, whose script never arrives: what a failed
+   * load leaves in <head>, twice over. It used to leave its <link> and
+   * <script> and the next attempt added two more. */
+  var head = { kids: [],
+               appendChild: function (el) {
+                 el.parentNode = this; this.kids.push(el);
+                 if (el.tag === 'script') setTimeout(function () { el.onerror(); }, 0);
+               },
+               removeChild: function (el) {
+                 this.kids.splice(this.kids.indexOf(el), 1); el.parentNode = null;
+               } };
+  var noCdn = { defaultView: {}, head: head,
+                createElement: function (tag) { return { tag: tag }; } };
+  var urls = { css: 'https://cdn.invalid/l.css', js: 'https://cdn.invalid/l.js' };
+  var firstTry = await MV.needLeaflet(noCdn, urls);
+  var secondTry = await MV.needLeaflet(noCdn, urls);
+  eq('a Leaflet that does not load says so, each time it is asked',
+     [firstTry, secondTry].join(','), 'false,false');
+  eq('...and leaves nothing of itself in <head>', head.kids.length, 0);
+
   console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
                    : '\nAll ' + pass + ' map-view checks passed');
   process.exit(fail ? 1 : 0);

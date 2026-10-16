@@ -2868,24 +2868,34 @@
    *
    * A FAILED load is not kept. Being offline once is the ordinary case here,
    * and a page that remembered the failure would refuse to draw a map for the
-   * rest of the session after one dead moment at a red light. */
+   * rest of the session after one dead moment at a red light.
+   *
+   * ...and neither is what it put in <head>. A failed load used to leave its
+   * <link> and <script> behind, and the next attempt added two more: the
+   * driving panel asked on every message, and with the CDN unreachable 60
+   * beats made 120 requests and took <head> from 12 nodes to 132 (measured).
+   * Taken out again, a failed load leaves the page as it found it; WHEN to
+   * try again is the caller's (live.html, showMap). */
   var loading = null;
 
   function needLeaflet(doc, urls) {
     if (typeof doc.defaultView.L !== 'undefined') return Promise.resolve(true);
     if (loading) return loading;
+    var css = doc.createElement('link');
+    var s = doc.createElement('script');
     loading = new Promise(function (done) {
-      var css = doc.createElement('link');
       css.rel = 'stylesheet';
       css.href = urls.css;
       doc.head.appendChild(css);
-      var s = doc.createElement('script');
       s.src = urls.js;
       s.onload = function () { done(typeof doc.defaultView.L !== 'undefined'); };
-      s.onerror = function () { loading = null; done(false); };
+      s.onerror = function () { done(false); };
       doc.head.appendChild(s);
     }).then(function (got) {
-      if (!got) loading = null;
+      if (!got) {
+        loading = null;
+        [css, s].forEach(function (el) { if (el.parentNode) el.parentNode.removeChild(el); });
+      }
       return got;
     });
     return loading;
@@ -2943,6 +2953,9 @@
     [/^this card names nowhere yet — /, function () {
       return 'NO PLACES · ⌖ Scan reads them'; }],
     [/^no card read yet — /, function () { return 'NO CARD YET · nothing to map'; }],
+    [/^no card up — nothing to put on a map$/, function () { return 'NO CARD UP · nothing to map'; }],
+    [/^no card up — only the order in your car$/, function () {
+      return 'NO CARD UP · your order only'; }],
     [/^no signal — /, function () { return 'NO SIGNAL · ⛶ Phone for the picture'; }],
     [/^(.+) is \d+ mi away — almost certainly a misread name/, function (m) {
       return 'MISREAD PIN · ' + m[1] + ', far off'; }],
