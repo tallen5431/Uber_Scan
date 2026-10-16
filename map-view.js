@@ -148,6 +148,24 @@
     return best;
   }
 
+  /* The order the car would call at the stops, with the new pickup in the
+     gap the figure chose: what Map view writes on the pins, 1, 2, 3...
+     `count` is how many stops the run has after the car (its pickups still
+     ahead and its end, or with two orders the run through both), `gap`
+     detourThrough's index — 0 before the first stop, count - 1 before the
+     last. Returns { pickup, stops } — the new pickup's number and each of
+     the run's stops' in the run's order — or null for a gap that is not one
+     of the run's: nothing is numbered where the order is not known. The
+     new job's own end is not a stop of the run (Settled: never a route
+     through where the new job ends) and is never numbered. */
+  function stopOrder(count, gap) {
+    if (!(count >= 1) || typeof gap !== 'number' || gap % 1 !== 0
+        || gap < 0 || gap >= count) return null;
+    var stops = [];
+    for (var k = 1; k <= count; k++) stops.push(k <= gap ? k : k + 1);
+    return { pickup: gap + 1, stops: stops };
+  }
+
   /* Where the car was when a card came up, off the row itself.
    *
    * `isFinite` and not merely `typeof`, because a row whose lat came back as
@@ -2608,7 +2626,9 @@
      difference would be partly that. Every gap's figure must stand —
      any refusal in any of them refuses the whole, since the best of the
      ones that answered may not be the best. The line to draw is the chosen
-     gap's own road, prev -> pickup -> next. */
+     gap's own road, prev -> pickup -> next, and `gap` which gap it is
+     (detourThrough's index), for Map view to number the stops in the order
+     the car would call at them (stopOrder). */
   NbxSearch.prototype.detour = function (from, via, to, stops) {
     var run = [from].concat(stops || [], [to]);
     if (!via || run.some(function (p) { return !p; })) return Promise.resolve({ why: 'missing' });
@@ -2632,7 +2652,9 @@
           var miles = (by.metres - direct.metres) / METRES_PER_MILE;
           // ...and the road prev -> pickup -> next to draw, when the router
           // sent its shape (null otherwise: drawn straight, as before).
-          if (best === null || miles < best.miles) best = { miles: miles, line: by.line || null };
+          if (best === null || miles < best.miles) {
+            best = { miles: miles, line: by.line || null, gap: i };
+          }
           return null;
         });
       });
@@ -2656,8 +2678,9 @@
      where the runs agree (oneAnswer, the street-stretch rule). Every
      question is still detour()'s — two or three points through the relay,
      the legs the runs share asked once and answered from the cache. Road
-     miles and nothing else. Resolves { miles, hi, line } — `miles` the
-     least, `hi` the most, `line` the first run's chosen gap to draw — or
+     miles and nothing else. Resolves { miles, hi, line, gap } — `miles` the
+     least, `hi` the most, `line` the first run's chosen gap to draw and
+     `gap` which gap of that run it is — or
      { why }: any run's refusal, which refuses the whole as any gap's does
      in detour(), or 'order' where the runs give two answers, the order of
      the stops deciding which and nobody knowing the order. */
@@ -2682,7 +2705,7 @@
       var miles = got.map(function (d) { return d.miles; });
       var lo = Math.min.apply(null, miles), hi = Math.max.apply(null, miles);
       if (!oneAnswer(lo, hi)) return { why: 'order' };
-      return { miles: lo, hi: hi, line: got[0].line || null };
+      return { miles: lo, hi: hi, line: got[0].line || null, gap: got[0].gap };
     });
   };
 
@@ -3217,7 +3240,8 @@
            captionChip: captionChip, sayCaption: sayCaption,
            wayLine: wayLine, sayWay: sayWay,
            civilTwilight: civilTwilight, nightFor: nightFor,
-           detour: detour, detourThrough: detourThrough, fixOf: fixOf, fixRefused: fixRefused,
+           detour: detour, detourThrough: detourThrough, stopOrder: stopOrder,
+           fixOf: fixOf, fixRefused: fixRefused,
            cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,
            againstCard: againstCard, cardRefuses: cardRefuses,
            SLACK_MI: SLACK_MI,

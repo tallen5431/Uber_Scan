@@ -1373,7 +1373,19 @@ async function nucbox() {
      + 'gives one, and every question to the relay is three points at most',
      JSON.stringify([twoWays, (oneWay.miles || 0).toFixed(2), Object.keys(oneWay).join(','),
                      Math.max.apply(null, sizes)]),
-     JSON.stringify([{ why: 'order' }, '0.09', 'miles,hi,line', 3]));
+     JSON.stringify([{ why: 'order' }, '0.09', 'miles,hi,line,gap', 3]));
+
+  /* Which gap the road figure put the new pickup in (`gap`), for Map view
+     to number the stops by: detourThrough's own answer over the same
+     points, off a router whose road is the straight line. */
+  var thruRoad = await crowRouter([]).detour(SQ2r, P2r, E2r, [N2r]);
+  var thruCrow = MV.detourThrough(SQ2r, P2r, [N2r], E2r);
+  eq('the road figure says which gap of the run it chose, the one detourThrough chose '
+     + 'over the same points (' + thruCrow.gap + ')',
+     JSON.stringify([thruRoad.gap, (await crowRouter([]).detour(SQ2r, P2r, E2r)).gap]),
+     JSON.stringify([thruCrow.gap, 0]));
+  eq('...and with two orders the first run\'s', oneWay.gap,
+     MV.detourOrders(SQ2r, P2r, [[N2r, E2r]]).gap.gap);
 
   /* Two walks on one NbxSearch: live.html's card line asks the figure's
      questions as a card comes up (wayWalk), and Map view asks the same ones
@@ -1440,6 +1452,17 @@ async function nucbox() {
      JSON.stringify(MV.wayLine({ said: 'whole sentence',
                                  chip: 'NUCBOX DOWN · ⛶ Map looks it up' }).parts),
      JSON.stringify(['NUCBOX DOWN', '⛶ Map looks it up']));
+  /* The stops in the order the car calls at them (MV.stopOrder), the new
+     pickup in the gap the figure chose: what Map view writes on the pins. */
+  eq('stops are numbered in visiting order with the new pickup in its slot: before '
+     + 'the only stop, between two, before the end of three',
+     JSON.stringify([MV.stopOrder(1, 0), MV.stopOrder(2, 1), MV.stopOrder(3, 2)]),
+     JSON.stringify([{ pickup: 1, stops: [2] }, { pickup: 2, stops: [1, 3] },
+                     { pickup: 3, stops: [1, 2, 4] }]));
+  eq('...and nothing is numbered for a gap the run does not have, or none',
+     JSON.stringify([MV.stopOrder(2, 2), MV.stopOrder(2, null), MV.stopOrder(2, 0.5),
+                     MV.stopOrder(0, 0)]),
+     JSON.stringify([null, null, null, null]));
   eq('a card with its walk still out is said to be checking, with nothing to open',
      JSON.stringify(MV.wayLine({ pending: true })),
      JSON.stringify({ kind: 'wait', call: 'CHECKING THE ROUTE', parts: [], keep: 0, said: '' }));
@@ -1747,8 +1770,8 @@ async function nucbox() {
        road.miles, (by.metres - direct.metres) / 1609.344);
     ok_('...a real figure off the router (' + (road.miles || 0).toFixed(2) + ' road mi)',
         road.miles > 0.5);
-    eq('...and nothing in it but miles and the road to draw: no minutes anywhere',
-       Object.keys(road).join(','), 'miles,line');
+    eq('...and nothing in it but miles, the road to draw and the gap it is: no minutes '
+       + 'anywhere', Object.keys(road).join(','), 'miles,line,gap');
     // The fake's road turns east-west first, then north-south, leg by leg
     // (geometryOf), so a line drawn along it has a corner the straight line
     // between the same points does not.

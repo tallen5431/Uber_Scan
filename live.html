@@ -821,12 +821,28 @@
   #mapKey .k-out { color: #8a8f98; }
   #mapKey .k-hpick { color: #fff; border: 2px solid #17c964;
                      background: rgba(23, 201, 100, .35); }
+  /* ...and the lines and the numbers, with an order in the car and a card
+     on the map: the run already committed to, solid in the order's amber;
+     the miles this card adds to it, dashed in violet; and the stops in the
+     order the car would call at them, as the pins carry them. */
+  #mapKey .k-run { color: #f5a524; font-weight: 700; }
+  #mapKey .k-extra { color: #c084fc; font-weight: 700; }
+  #mapKey .k-num { display: inline-block; min-width: 1.15em; margin-right: 1px;
+                   border: 1px solid var(--text); border-radius: 50%; text-align: center;
+                   font-weight: 700; line-height: 1.15; box-sizing: border-box; }
   /* With the held pickup in it the long form is 388px of words in DejaVu
      Sans at 12px, past the 800x480 map's room: the two long words go
      whenever that item is shown, 320px. :has() rather than a class showKey
      sets, so what rpi/test_layout.py measures — every item shown — is what
      this rule sees. */
   #mapKey:has(.k-item[data-k="hpick"]:not([hidden])) .k-long { display: none; }
+  /* ...and with the order's run, the extra and the numbered stops in it
+     (drawMap) the short words too, and a second row where the first is full:
+     every item at once is past one row of the 800x480 map (two there,
+     ending 357 and 116px in). Measured in rpi/test_layout.py, held to two
+     rows on every panel, the hat's two included (see its rule below). */
+  #mapKey:has(.k-item[data-k="run"]:not([hidden])) .k-long { display: none; }
+  #mapKey:has(.k-item[data-k="run"]:not([hidden])) { white-space: normal; }
   /* What a mark of drawHow's says about itself, shown while the pointer is
      on it (or it was tapped): ONE box across the map's foot, over the key,
      wrapped to the map's width — never a Leaflet tooltip beside the mark. A
@@ -858,8 +874,15 @@
     /* ...and the word after the pins' letters: with the P and D badges the
        short key was 226px of words for the 214 the hat's map gives it
        (measured, DejaVu Sans 12px), and the letters say what they are on
-       the pins themselves. */
+       the pins themselves. The same for the word after the numbered
+       stops' 1 2. */
     #mapKey .k-pinword { display: none; }
+    /* ...and with the order's run, the extra and the numbered stops in it
+       as well that is still three rows (ending 209, 190 and 15px in), the
+       last the 1 2 alone: with the spaces round its dots drawn in, two,
+       ending 204 and 174px in of 209 (measured, DejaVu Sans 12px) — the two
+       it already took, at the size the rest of the hat is held to. */
+    #mapKey:has(.k-item[data-k="run"]:not([hidden])) .k-sep { word-spacing: -.2em; }
     #mapTip { left: 6px; right: 6px; padding: 1px 5px; }
   }
 
@@ -1524,7 +1547,10 @@
       class="k-item" data-k="pin"><span class="k-sep"> · </span><span class="k-pin">P</span><span class="k-drop">D</span><span class="k-pinword"> pin</span></span><span
       class="k-item" data-k="cand"><span class="k-sep"> · </span><span class="k-cand">●</span> <span class="k-long">also </span>found</span><span
       class="k-item" data-k="out"><span class="k-sep"> · </span><span class="k-out">○</span> outside</span><span
-      class="k-item" data-k="hpick"><span class="k-sep"> · </span><span class="k-hpick">P</span> held pickup</span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
+      class="k-item" data-k="hpick"><span class="k-sep"> · </span><span class="k-hpick">P</span> held pickup</span><span
+      class="k-item" data-k="run" hidden><span class="k-sep"> · </span><span class="k-run">━</span> run</span><span
+      class="k-item" data-k="extra" hidden><span class="k-sep"> · </span><span class="k-extra">┅</span> extra</span><span
+      class="k-item" data-k="order" hidden><span class="k-sep"> · </span><span class="k-num">1</span><span class="k-num">2</span><span class="k-pinword"> order</span></span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
     <!-- What the "you are here" dot says about itself — "±12 m · 2 s old" —
          or why there is no dot: "GPS too rough here (±130 m)". Over the map's
          corner rather than in the caption below it, which is the detour's row
@@ -7014,17 +7040,24 @@
      those and no others (plus "pin" when a pin is on the map); false,
      nothing to explain and no key; null, it failed and the key says only
      that — not the marks, which are not there. It named all four whatever
-     was drawn: "○ outside" over a map with no hollow ring on it. */
-  function showKey(drawn, pinned, heldPick) {
+     was drawn: "○ outside" over a map with no hollow ring on it. `lines`
+     says which of the order in the car's marks drawMap drew — its run, the
+     miles this card adds, the stops numbered — and those are named too. */
+  function showKey(drawn, pinned, heldPick, lines) {
+    lines = lines || {};
     // A held pickup's ring is in the key whether or not drawHow drew
     // anything: with no NucBox there is nothing of how it was found to
     // explain, and a green ring beside the green pin is still a mark to name.
-    mapKey.hidden = drawn === false && !heldPick;
+    // The same for the lines and the numbers.
+    mapKey.hidden = drawn === false && !heldPick && !lines.run && !lines.extra && !lines.order;
     mapKey.querySelector('.k-all').hidden = drawn === null;
     mapKey.querySelector('.k-fail').hidden = drawn !== null;
     if (drawn === null) return;
     var has = drawn ? { disc: drawn.disc, pin: pinned, cand: drawn.cand, out: drawn.out } : {};
     has.hpick = !!heldPick;
+    has.run = !!lines.run;
+    has.extra = !!lines.extra;
+    has.order = !!lines.order;
     // Kept for sizeDiscs, which takes the disc's item off while no disc is
     // shown at the zoom the map is at.
     mapKey.querySelector('.k-item[data-k="disc"]').mvWanted = has;
@@ -7122,7 +7155,31 @@
     mapLayer = L.layerGroup().addTo(theMap);
     // The marks the tip box spoke for are gone with the layer.
     mapTip.hidden = true;
+    /* The answer, once every place is in: the line under the map (and the
+       card's), and the order the car would call at the stops, which the pins
+       carry as 1, 2, 3 — the held order's run (its pickups still ahead, then
+       its end; with two orders the run through both, in the planner's order)
+       with the new pickup in the gap the figure chose (fig.gap,
+       MV.stopOrder). Only where the figure is stated and that order is
+       known: a refusal, two orders both ways round or an end that is a
+       stretch of street are numbered nothing, and keep their letters. */
+    var ans = settled ? mapLine(want, found, here, j, road) : null;
+    var runKeys = j.runs ? (j.runs.known ? want.runs.runs[0].map(function (e) { return e.q; })
+                                         : null)
+      : held ? j.heldPicks.map(function (p) { return p.q; }).concat([want.held]) : null;
+    var order = ans && ans.fig && runKeys && MV.stopOrder
+      ? MV.stopOrder(runKeys.length, ans.fig.gap) : null;
+    var numberOf = {};
+    if (order) runKeys.forEach(function (q, i) { numberOf[q] = String(order.stops[i]); });
     var bounds = [];
+    /* ...and what the view frames: the car and every stop of the run with
+       the new pickup among them — the question the driver opened the map
+       to see. Not the new job's own end, which is past where the figure
+       stops (Settled) and can sit miles off the run, nor a pickup the car
+       has already left behind. With nothing in the car, the car and this
+       job's two ends, as it always was. */
+    var frame = [];
+    var inCar = !!(held || j.held2 || j.heldPicks.length);
     /* `letter` is what the pin says without being clicked: P where something
        is picked up, D where it is dropped. A divIcon over the dot, not part
        of it, and deaf to the pointer, so the dot's popup is still what a
@@ -7131,6 +7188,7 @@
     function put(at, colour, label, name, ring, letter, how) {
       if (!at) return;
       var faded = !!(how && how.faded);
+      if (!(how && how.aside)) frame.push([at.lat, at.lon]);
       mapDot(at, colour, label, name, ring, letter, faded).addTo(mapLayer);
       if (letter) {
         L.marker([at.lat, at.lon], {
@@ -7185,15 +7243,16 @@
     put(held, colourFor(want.held, '#f5a524', off.held),
         sayFor(want.held, two ? 'where order \u2460 in your car is going'
                               : 'where the order in your car is going', off.held),
-        want.held, true, two ? 'D1' : 'D');
+        want.held, true, numberOf[want.held] || (two ? 'D1' : 'D'));
     put(j.held2, colourFor(want.held2, '#f5a524', off.held2),
         sayFor(want.held2, 'where order \u2461 in your car is going', off.held2),
-        want.held2, true, 'D2');
+        want.held2, true, numberOf[want.held2] || 'D2');
     // A door a tap gave says so under its name, as the figure does.
     var tapped = want.tapped || {};
     put(pick, colourFor(want.pickup, '#17c964', off.pick),
         sayFor(want.pickup, 'pick this one up', off.pick),
-        tapped.pickup ? want.pickup + ' · addr from tap' : want.pickup, false, 'P');
+        tapped.pickup ? want.pickup + ' · addr from tap' : want.pickup, false,
+        order ? String(order.pickup) : 'P');
     /* The held order's pickups: a GREEN RING, by the rule above — green for
        a pickup, ringed for the order already in hand — and in the key as
        "held pickup". Named as the planner listed it, less the icon's litter
@@ -7203,8 +7262,8 @@
           sayFor(p.q, 'pick up the order in your car', p.off),
           [p.name, p.q.replace(/,$/, '')].filter(Boolean).join(' · '), true,
           // P1 / P2 for a pickup one order's card names (`of`), with two in
-          // the car; P otherwise.
-          two && p.of && want.heldNs[p.of] ? 'P' + want.heldNs[p.of] : 'P');
+          // the car; P otherwise; its number where the run is numbered.
+          numberOf[p.q] || (two && p.of && want.heldNs[p.of] ? 'P' + want.heldNs[p.of] : 'P'));
     });
     /* ...and the ones the car has stopped at and left (visitPickups in
        server.js): still where the order was collected, so still on the map,
@@ -7214,11 +7273,12 @@
     j.donePicks.forEach(function (p) {
       put(p.at, colourFor(p.q, '#17c964'), 'collected — the order in your car was picked up here',
           [p.name, p.q.replace(/,$/, '')].filter(Boolean).join(' · '), true, '\u2713',
-          { faded: true });
+          { faded: true, aside: true });
     });
     put(drop, colourFor(want.dropoff, '#f5a524'),
         sayFor(want.dropoff, 'and drop it here'),
-        tapped.dropoff ? want.dropoff + ' · addr from tap' : want.dropoff, false, 'D');
+        tapped.dropoff ? want.dropoff + ' · addr from tap' : want.dropoff, false, 'D',
+        { aside: inCar });
 
     // The run already committed to, and the run this card would add. Dashed
     // for the detour, solid for the job, which is the same distinction the map
@@ -7239,6 +7299,9 @@
     // (MV.heldRun) — along the roads when the NucBox's router drew them
     // (`heldRoad`, see showMap), straight otherwise.
     var heldAt = j.heldPicks.map(function (p) { return p.at; });
+    // What of the lines below was drawn, for the key: the run, solid in the
+    // order's amber, and the miles this card adds to it, dashed in violet.
+    var drewRun = false, drewExtra = false;
     // With TWO orders in the car (j.runs, MV.heldRuns): ONE run through both
     // when a planner gave their order — the car, then its stops and both
     // ends as it lists them — and otherwise each order's own, car -> its
@@ -7253,6 +7316,7 @@
           runLine(pts, { color: '#f5a524', opacity: .9,
                          className: 'mv-held-run' + (j.runs.known ? '' : ' mv-order-' + (i + 1))
                                     + (line ? ' mv-road' : '') });
+          drewRun = true;
         }
       });
     } else {
@@ -7261,6 +7325,7 @@
       if (run.length && (held || heldAt.some(Boolean))) {
         runLine(run, { color: '#f5a524', opacity: .9,
                        className: 'mv-held-run' + (heldRoad ? ' mv-road' : '') });
+        drewRun = true;
       }
     }
     // The detour, car -> pickup -> held end, along the road the router
@@ -7275,6 +7340,7 @@
     if (detourRoad) {
       runLine(detourRoad, { color: '#c084fc', dashArray: '2 9', opacity: .95,
                             className: 'mv-detour mv-road' });
+      drewExtra = true;
     }
     // With no stops the gap is the car and the held end, as it always was,
     // either of them missing included — and so with a map-view.js from
@@ -7294,6 +7360,7 @@
     if (gap.from) {
       runLine([[gap.from.lat, gap.from.lon], [pick.lat, pick.lon]],
               { color: '#c084fc', dashArray: '2 9', opacity: .95, className: 'mv-detour' });
+      drewExtra = true;
     }
     // The job itself, solid: along the road when the router drew it (see
     // showMap), straight otherwise.
@@ -7324,15 +7391,30 @@
       drewHow = null;
       if (window.console) console.error('drawing how each place was found:', e);
     }
-    showKey(drewHow, !!(held || pick || drop), heldAt.some(Boolean));
+    showKey(drewHow, !!(held || pick || drop), heldAt.some(Boolean),
+            // The lines only with an order in the car: with none the dashed
+            // leg is the drive to the pickup, the key's as it always was.
+            { run: drewRun, extra: drewExtra && inCar, order: !!order });
 
-    if (want.refit) fitView(bounds);
+    /* THE VIEW: the car and the stops (`frame`), once per card — on the
+       settled draw, which a walk makes once, when the card's answer is in —
+       and not as each place lands, which moved the map under the driver six
+       times on rpi/test_dashboard.py's card with an order in the car (the
+       car alone, then each pin as it landed), nor on a later walk for the
+       same card: a pickup visited, a Trip Planner read, a second order each
+       move the key and walk again, and fitted there they pulled the view off
+       the follow (`want.refit`, set in showMap: a new card, or ⛶ Map). Every
+       other move is the follow's (followDot), at the edges, at the zoom this
+       left, and a hand on the map stops that; ⛶ Map pressed on the same card
+       frames it again (showMap, `lastBounds`). Until the answer is in the
+       view is the entry's own fit to the dot (drawHere). */
+    if (settled && want.refit) fitView(frame);
     // Against the view as it stands; the fit's own moveend asks again at the
     // zoom it lands on (see the map's moveend).
     sizeDiscs();
     // Kept so coming back to this same card can put both of them back — the
     // words under the map and the view they describe.
-    lastBounds = bounds;
+    lastBounds = settled ? frame : bounds;
     // The dot over a new set of pins, redrawn last so it is on top of them.
     hereKey = '';
     drawHere();
@@ -7354,7 +7436,6 @@
       return;
     }
 
-    var ans = mapLine(want, found, here, j, road);
     mapDrew(ans.said);
     // ...and the card's line, off the same answer: with the press behind it
     // this walk may have asked the public map too, which the card's own walk
@@ -7700,9 +7781,14 @@
     /* Each sentence below goes out with the figure it states (`fig`, see
        mapLine): its least and most, by road or not, and whether it called it
        on your way — the decision made here, once, with the caption's own
-       `cut`. The card says that same figure in its own line (showWay). */
-    function stated(said, lo, hi, byRoad) {
-      return { said: said, fig: { lo: lo, hi: hi, road: byRoad, onWay: hi < cut } };
+       `cut`. The card says that same figure in its own line (showWay).
+       ...and `gap`, the gap of the run the figure put the new pickup in
+       (detourThrough's index; NbxSearch.detour's), which drawMap numbers the
+       stops by — or null where the order the car calls at them is not known:
+       two orders both ways round, or an end that is a stretch of street. */
+    function stated(said, lo, hi, byRoad, gap) {
+      return { said: said, fig: { lo: lo, hi: hi, road: byRoad, onWay: hi < cut,
+                                  gap: gap == null ? null : gap } };
     }
     if (runs) {
       var withBoth = ' incl. both orders';
@@ -7712,24 +7798,25 @@
         var rMost = rHi.toFixed(1) === road.miles.toFixed(1) ? '' : '–' + rHi.toFixed(1);
         return stated((rHi < cut ? 'on your way by road'
                                  : '+' + road.miles.toFixed(1) + rMost + ' road mi')
-          + withBoth + tap + count + nucbox, road.miles, rHi, true);
+          + withBoth + tap + count + nucbox, road.miles, rHi, true,
+          runs.known ? road.gap : null);
       }
       var two = MV.detourOrders(here, pick, runs.runs);
       if (!two || !two.stated) return { said: 'order of stops unknown — no figure' };
       var tMost = two.hi.toFixed(1) === two.lo.toFixed(1) ? '' : '–' + two.hi.toFixed(1);
       return stated((two.hi < cut ? 'on your way' : '+' + two.lo.toFixed(1) + tMost + ' mi')
         + withBoth + ' — straight lines, not roads' + tap + count + nucbox,
-        two.lo, two.hi, false);
+        two.lo, two.hi, false, runs.known && two.gap ? two.gap.gap : null);
     }
     if (road && isFinite(road.miles)) {
       if (withStop) {
         return stated((road.miles < cut ? 'on your way by road'
                                         : '+' + road.miles.toFixed(1) + ' road mi')
-          + withStop + tap + count + nucbox, road.miles, road.miles, true);
+          + withStop + tap + count + nucbox, road.miles, road.miles, true, road.gap);
       }
       return stated((road.miles < cut ? 'this pickup is on your way by road'
                                       : '+' + road.miles.toFixed(1) + ' road mi out of your way')
-        + tap + count + nucbox, road.miles, road.miles, true);
+        + tap + count + nucbox, road.miles, road.miles, true, road.gap);
     }
     /* An end that is a numberless street: the figure wherever on it the stop
        is (MV.stretchSpan; mapRefusal refused it where that is not one
@@ -7738,15 +7825,16 @@
        The range needs no hedge after it: it IS the hedge, in the figure's
        own place, where no clamp reaches. */
     var span = MV.stretchSpan(here, pick, held, stops);
-    var lo = span ? span.lo
-      : stops.length ? MV.detourThrough(here, pick, stops, held).miles : MV.detour(here, pick, held);
+    var thru = !span && stops.length ? MV.detourThrough(here, pick, stops, held) : null;
+    var lo = span ? span.lo : thru ? thru.miles : MV.detour(here, pick, held);
     var hi = span ? span.hi : lo;
     var most = hi.toFixed(1) === lo.toFixed(1) ? '' : '–' + hi.toFixed(1);
     var said = withStop
       ? (hi < cut ? 'on your way' : '+' + lo.toFixed(1) + most + ' mi') + withStop
       : (hi < cut ? 'this pickup is on your way'
                   : '+' + lo.toFixed(1) + most + ' mi out of your way');
-    return stated(said + ' — straight lines, not roads' + tap + count + nucbox, lo, hi, false);
+    return stated(said + ' — straight lines, not roads' + tap + count + nucbox, lo, hi, false,
+                  span ? null : thru ? thru.gap : 0);
   }
 
   // Last, not beside the button it belongs to: it can put the pane into map
