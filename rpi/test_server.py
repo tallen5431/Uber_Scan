@@ -8439,6 +8439,61 @@ finally:
     _q14.stop()
     _q14.gone()
 
+# --- a scanner line the server fails on ---------------------------------------
+#
+# One try round the parse and the handling both: a throw anywhere in the
+# handling was logged as `scanner: <the line>`, as if the scanner had printed
+# it. A line whose `phase` cannot be made a string (the log line built from
+# it throws) stands in for any fault of this process's own.
+_q15 = _Q(carry=False)
+try:
+    with open(_q15.queue, 'a') as fh:
+        fh.write('a line of the scanner\'s own\n')
+    _q15.emit({'phase': {'toString': 0, 'valueOf': 0}, 'message': 'x'})
+    _q15.card('A', 12.0, 30, 'uber')
+    _log15 = _q15.log()
+    ok_('a scanner line the server fails on is said as the server\'s fault, with its stack',
+        'a scanner line could not be handled: TypeError' in _log15
+        and 'server.js:' in _log15 and 'scanner: {"phase"' not in _log15)
+    ok_('...and a line that is not JSON is still the scanner\'s own words',
+        'scanner: a line of the scanner\'s own' in _log15)
+finally:
+    _q15.stop()
+    _q15.gone()
+
+# --- an order run out on its own clock, said on the beat ----------------------
+#
+# Nobody pressed anything and no reading comes between offers, so the beat
+# is the panel's only word that the car is empty: it carries `holding` on the
+# first beat after what is held changed, and not otherwise. A card of 0.05
+# minutes, no grace: its clock ends 4.5 s after it came up.
+_q13 = _Q(carry=False, env={'HOLD_GRACE_MS': '0'})
+try:
+    _q13.card('A', 12.0, 0.05, 'uber')
+    _q13.took('A')
+    _ev13 = listen(_q13.base, 9)
+    time.sleep(0.3)
+
+    def _beat13():
+        _q13.emit({'alive': True, 'at': int(time.time() * 1000)})
+        time.sleep(0.3)
+
+    _beat13()
+    time.sleep(5.0)
+    _beat13()
+    _beat13()
+    time.sleep(0.3)
+    _b13 = [m for m in _ev13 if m.get('alive')]
+    eq('an order expiring on its own clock is said on the next beat, as nothing held, and '
+       'the beat after says nothing of it',
+       [('holding' in b, b.get('holding') is None) for b in _b13],
+       [(True, False), (True, True), (False, True)])
+    eq('...and its drop row is the expiry\'s', [r.get('by') for r in _q13.rows('drop')],
+       ['expiry'])
+finally:
+    _q13.stop()
+    _q13.gone()
+
 # --- the window a fold reads, carried across appends --------------------------
 #
 # rowsFor kept every kind row in the file and walked the whole file again

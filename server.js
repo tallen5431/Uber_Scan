@@ -194,6 +194,9 @@ var scanner = {
 };
 
 var listeners = [];    // open server-sent-event responses
+// The orders in the car as the last beat said them (holdIds, space-joined), or
+// null before the first: the beat carries `holding` when this changes.
+var beatHeldSaid = null;
 
 // How long a scanner has to stay up before its next exit counts as a fresh
 // problem rather than another rung of the same one. Comfortably longer than the
@@ -387,8 +390,24 @@ function startScanner() {
     lines.forEach(function (line) {
       line = line.trim();
       if (!line) return;
+      var read;
       try {
-        var read = JSON.parse(line);
+        read = JSON.parse(line);
+      } catch (e) {
+        console.log('scanner: ' + line);   // not JSON, so it is a log line
+        return;
+      }
+      if (!read || typeof read !== 'object') {
+        console.log('scanner: ' + line);   // JSON, but no message: a log line too
+        return;
+      }
+      // ...and a message this process then fails on is ITS fault, said as one
+      // with the stack that names where. One try round both used to log a
+      // throw anywhere below as `scanner: <the line>`, the shape of a
+      // library's chatter on the scanner's stdout: a planner line whose stops
+      // held a null was printed as if the scanner had said it, with nothing
+      // pointing at this file.
+      try {
         read.at = Date.now();
         // A sighting (rpi/scan_pi.py, emit_sighting): what a whole-screen or
         // planner read saw, typed by its screen. Counted by that type for
@@ -641,10 +660,23 @@ function startScanner() {
           read.heldEnd = heldBeat ? heldEndState(heldBeat) : null;
           // ...and every order's, with carrying two on (ordersForPanel).
           if (heldBeat && carryTwo()) read.orders = ordersForPanel(Date.now());
+          // ...and the hold itself, heldForPanel's shape as a reading carries
+          // it, on the first beat after what is held changed. An order put
+          // down on its own clock (heldOrders, holdEnds) was said to no
+          // panel: no press made it, and no reading comes between offers to
+          // carry `holding` — so Drop and the in-car line stayed up over an
+          // empty car until the next card. Only on a change, so a beat is
+          // the size it was.
+          var heldNowSig = heldOrders(Date.now()).map(holdIdOf).join(' ');
+          if (heldNowSig !== beatHeldSaid) {
+            beatHeldSaid = heldNowSig;
+            read.holding = heldForPanel(heldBeat);
+          }
         }
         broadcast(read);
       } catch (e) {
-        console.log('scanner: ' + line);   // not JSON, so it is a log line
+        console.error('server: a scanner line could not be handled: '
+                      + (e && e.stack ? e.stack : String(e)));
       }
     });
   });

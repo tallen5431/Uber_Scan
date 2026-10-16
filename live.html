@@ -4776,8 +4776,7 @@
       // ...and the rest of its state on the same beat: pinned, arrived, why
       // not armed (heldEndState in server.js). Onto the order already
       // described, never a hold of its own — whether there IS an order is
-      // said by the messages that always said it, and a beat says nothing
-      // about that.
+      // said by `holding`, which a beat carries only when it changed.
       if (msg.heldEnd && heldSaid && holdingNow) {
         heldSaid.endPinned = !!msg.heldEnd.endPinned;
         heldSaid.arrived = !!msg.heldEnd.arrived;
@@ -4788,6 +4787,10 @@
       }
       // ...and every order's, with two in the car.
       if (msg.alive && Array.isArray(msg.orders) && holdingNow) heldList = msg.orders;
+      // ...and the order gone on its own clock, which nobody pressed and no
+      // reading says: the beat after what is held changed carries `holding`
+      // (server.js), and null is the car empty — put down as Drop's reply is.
+      if (msg.alive && msg.holding === null && holdingNow) orderDown();
       if (msg.gpsDrop) {
         // One of two put down: what is left comes on the same message, and
         // the branch below takes it up.
@@ -4916,9 +4919,10 @@
       // ...and a ⌖ read the server filed onto the order in the car carries
       // that order too, with no `ready` (see heldForPanel in server.js): it is
       // where the held end reaches Map view between readings. Nothing else
-      // that lacks `ready` carries `holding`, so this widens the branch to
-      // that one message and leaves a heartbeat, a not-ready reading and an
-      // offer line exactly where they were — none of them says anything
+      // that lacks `ready` carries `holding` — but the one beat after what is
+      // held changed, which says it like a reading — so this widens the
+      // branch to those and leaves every other heartbeat, a not-ready reading
+      // and an offer line exactly where they were: none of them says anything
       // about the order in the car, so none of them may change it.
       if (msg.ready || (msg.holding !== undefined && msg.ready === undefined)) {
         // An order ending is what clears the destination read for it. Without
