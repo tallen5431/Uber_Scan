@@ -727,10 +727,25 @@
    * alone — and nor does the stop a page begins in the middle of, which has
    * no kind.
    *
-   * HOW LONG A PAGE WAITS FOR ITS NEIGHBOUR: STITCH_MS, 20 s. CHOSEN, NOT
+   * HOW LONG A PAGE WAITS FOR ITS NEIGHBOUR: STITCH_MS, 60 s. CHOSEN, NOT
    * MEASURED — no file on this rig holds two pages of one planner yet. It is
-   * twice SCREEN_AUTO_EVERY (rpi/scan_pi.py), so the unpressed read that
-   * follows a scroll can still reach the page before it.
+   * twice SCREEN_AUTO_HOT (rpi/scan_pi.py, 30 s), the spacing of the
+   * unpressed reads while the heat guard is on, so the read that follows a
+   * scroll can still reach the page before it when the Pi is hot. It was
+   * twice SCREEN_AUTO_EVERY (10 s), 20 s, and with the guard on two unpressed
+   * pages are never nearer than 30 s: replayed at that spacing, the five
+   * fixture sequences that stitch (tests/fixtures/sequences.json) all filed
+   * the card's end in place of the planner's. rpi/test_lint.py holds the two
+   * constants together.
+   *
+   * The longer window does not loosen what a stitch needs. Time is the
+   * weakest of the guards: two pages a minute apart join only when no other
+   * screen was sighted for that app between them (a navigation screen — the
+   * epoch), and when every position both show is the same stop by
+   * kind, name and "Expected by", with one alignment only: another trip's
+   * list would have to repeat this one's stops, names and times to join it.
+   * And the planner from the trip before is refused on the Took (refuse()),
+   * which the window does not touch.
    *
    * WHAT LIMITS A FALSE STITCH, all three required:
    *   - the same app;
@@ -749,7 +764,7 @@
    * (the title with the first stop's header straight under it) sits at the
    * top of the linked list, and one whose `page.bottom` is true ("Waybill"
    * after its last header) sits at the foot. Each may be a different page. */
-  var STITCH_MS = 20000;
+  var STITCH_MS = 60000;
   // How many planner pages are remembered at once. Chosen, not measured: at
   // one unpressed read every 10 s it is two minutes of planner.
   var PAGES_MAX = 12;

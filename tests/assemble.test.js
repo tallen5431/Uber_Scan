@@ -111,6 +111,43 @@ SEQ.forEach(function (seq) {
   if (x.unfiled) eq(seq.name + ' — the planner line\'s reason', out.unfiled, x.unfiled);
 });
 
+/* ---- the same pages, read hot ----
+ *
+ * With the heat guard on, the scanner reads the screen unpressed no nearer
+ * than SCREEN_AUTO_HOT apart (rpi/scan_pi.py, read off the file rather than
+ * copied). Each sequence again, every unpressed page moved to at least that
+ * long after the page before it (and everything after moved with it), must
+ * end where it ends at its own pace: a planner over two pages files as it
+ * does cool. At a STITCH_MS of 20 s, the five that stitch filed the card's
+ * end instead. */
+(function () {
+  var src = require('fs').readFileSync(require('path').join(__dirname, '..', 'rpi',
+                                                            'scan_pi.py'), 'utf8');
+  var hotMs = Number((/^SCREEN_AUTO_HOT = ([\d.]+)/m.exec(src) || [])[1]) * 1000;
+  ok_('(SCREEN_AUTO_HOT read off rpi/scan_pi.py: ' + hotMs + ' ms)', hotMs > 0);
+  var stitched = 0;
+  var moved = SEQ.filter(function (seq) {
+    var last = null, shift = 0;
+    var events = seq.events.map(function (e0) {
+      var e = Object.assign({}, e0, { t: e0.t + shift });
+      if (e.page && !e.asked && last !== null && e.t - last < hotMs) {
+        shift += hotMs - (e.t - last);
+        e.t = last + hotMs;
+      }
+      if (e.page) last = e.t;
+      return e;
+    });
+    var cool = play(seq).hold.fields.dropoff;
+    var hot = play(Object.assign({}, seq, { events: events })).hold.fields.dropoff;
+    if (cool && cool.from === 'planner' && seq.events.filter(function (e) {
+      return e.page;
+    }).length > 1) stitched += 1;
+    return JSON.stringify(brief(cool)) !== JSON.stringify(brief(hot));
+  }).map(function (seq) { return seq.name; });
+  eq('read at the heat guard\'s pace, a planner over two pages still files (' + stitched
+     + ' sequences stitch cool)', moved, []);
+})();
+
 /* ---- precedence, one rule at a time ---- */
 (function () {
   function f(from, value, conf, key) {
