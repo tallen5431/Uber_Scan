@@ -1628,6 +1628,43 @@ eq('a DoorDash stops card merged across frames is whole, its stores and stop cou
     _dd['stops']),
    (True, 7.8, 30.0, 'Corner Bagel Co', None, 3))
 
+# --- the wall clock stepping --------------------------------------------------
+# add() times only gaps — QUIET, and the window that closes after `window`
+# seconds of nothing — so its own clock is the monotonic one. It was the wall
+# clock, which NTP steps. Driven here the way the loop drives it, without a
+# `now`, on a clock whose wall half steps and whose monotonic half does not.
+import accumulate as _AC                                     # noqa: E402
+
+
+class _Stepped(object):
+    def __init__(self):
+        self.mono, self.step = 100.0, 0.0
+
+    def monotonic(self):
+        return self.mono
+
+    def time(self):
+        return 1_790_000_000.0 + self.mono + self.step
+
+
+_clk, _was_time = _Stepped(), _AC.time
+_AC.time = _clk
+try:
+    _card = P.parse('$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip')
+    _w = OfferAccumulator()
+    _first = _w.add(dict(_card))['episode']
+    _clk.step, _clk.mono = 3600.0, _clk.mono + 0.5
+    eq('the wall clock stepping forward an hour between two reads of one card '
+       'does not close its window', _w.add(dict(_card))['episode'], _first)
+    _w = OfferAccumulator()
+    _clk.step = 0.0
+    _first = _w.add(dict(_card))['episode']
+    _clk.step, _clk.mono = -3600.0, _clk.mono + _AC.WINDOW + 1.0
+    ok_('...and stepping back an hour does not hold it open past its window of '
+        'nothing', _w.add(dict(_card))['episode'] != _first)
+finally:
+    _AC.time = _was_time
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

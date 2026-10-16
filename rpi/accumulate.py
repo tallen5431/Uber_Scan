@@ -490,7 +490,14 @@ class OfferAccumulator:
         Returns a dict shaped like a parse result, so callers can hand it
         straight to rate() without caring how many frames it came from.
         """
-        now = time.time() if now is None else now
+        # The monotonic clock: `now` only ever measures the gap since the last
+        # reading (QUIET, the stale window), never a moment anything is stamped
+        # with. On the wall clock an NTP step forward between two reads of one
+        # card made the gap an hour and closed the window on it, a new episode
+        # for the same card; a step back made every gap negative, so neither
+        # QUIET nor the window could close it again until the clock caught up
+        # (rpi/test_accumulate.py, "the wall clock stepping").
+        now = time.monotonic() if now is None else now
         pay = parsed.get('pay')
 
         # Nothing to key on, or nothing to add: pass it through untouched.

@@ -333,7 +333,12 @@ class Reader:
         self._done = queue.Queue()
         self._stop = threading.Event()
         self._thread = None
-        # When the read in flight was submitted; None when none is.
+        # When the read in flight was submitted, on the MONOTONIC clock; None
+        # when none is. It is only ever subtracted from — "stuck for how long",
+        # "begun inside the ⌖ window" — and a wall clock NTP steps forward an
+        # hour turned a read in flight into one an hour old, so the loop wrote
+        # a restart row for a reader that was working (rpi/test_loop.py, "a
+        # wall clock stepped an hour").
         self.since = None
         if threaded:
             self._thread = threading.Thread(target=self._serve, name='reader',
@@ -347,13 +352,17 @@ class Reader:
         the far end can honestly use. A read is over a second on a Pi, so
         anything decided by `time.time()` after it lands is asking about a
         moment more than a second later than the picture it is judging.
+
+        ...and `since` comes back on it as `began`: the same moment on the
+        monotonic clock, for the intervals digest() times off it. `at` is a
+        stamp for the wire and the journal; `began` is never written anywhere.
         """
         self.busy = True
-        self.since = time.time()
+        self.since = time.monotonic()
         if not self.threaded:
-            self._done.put(self._job(frames, now, geom))
+            self._done.put(self._job(frames, now, geom, self.since))
             return
-        self._work.put((frames, now, geom))
+        self._work.put((frames, now, geom, self.since))
 
     def take(self):
         """The finished read, or None if there is not one yet.
@@ -374,10 +383,11 @@ class Reader:
             done['outs'] = self.scanner.settle(done['outs'], done['geom'])
         return done
 
-    def _job(self, frames, now, geom):
+    def _job(self, frames, now, geom, began=None):
         try:
             return {'outs': self.scanner.look_many(frames, now, geom=geom),
-                    'geom': geom, 'frames': frames, 'at': now, 'error': None}
+                    'geom': geom, 'frames': frames, 'at': now, 'began': began,
+                    'error': None}
         except BaseException as e:                 # noqa: BLE001 — see take()
             # ...except the two that are not a failed read at all.
             #
@@ -399,7 +409,7 @@ class Reader:
             if not self.threaded and not isinstance(e, Exception):
                 raise
             return {'outs': None, 'geom': geom, 'frames': frames, 'at': now,
-                    'error': e}
+                    'began': began, 'error': e}
 
     def _serve(self):
         while not self._stop.is_set():
@@ -3832,7 +3842,7 @@ def main():
     # says so for both. --no-journal writes none of them, which is what it asks.
     updown = UpDown(offer_log.journal if offer_log is not None else None,
                     asked_gps=bool(args.gps))
-    def digest(out, frame, read_at=None, whole=False):
+    def digest(out, frame, read_at=None, whole=False, began=None):
         """Everything a read means, once the reading itself is done.
 
         On the loop's thread, always — the accumulator, the journal, the voice
@@ -3892,6 +3902,13 @@ def main():
         # it in - the driver who took a moment to get the destination up is
         # exactly the driver whose address arrives at the end of the window.
         started = read_at if read_at is not None else time.time()
+        # ...and the same moment on the monotonic clock (Reader.submit), which
+        # is what every interval below is timed on: the ⌖ window, the rate
+        # limit on unpressed whole-screen reads, the resample burst. `started`
+        # stays the wall clock, because it is a stamp — on the popup line, on
+        # 📷 Snap's reader.json, against server.js's note of the order held —
+        # and a stamp is never corrected here (AUDITS, Settled: the clock).
+        began = began if began is not None else time.monotonic()
         # Where the payout this reading shows came from, which is not always
         # where this read came from — see payout_from. One answer, for the
         # panel's line, a Snap's reader.json and the live view's outline.
@@ -3931,7 +3948,7 @@ def main():
         # The window still closes on the first answer inside it — see below —
         # because that is about stopping two dozen forced reads, not about
         # stopping a second address.
-        asked = started < dropoff_until
+        asked = began < dropoff_until
         shot = out['parsed'] or {}
         # A SCREEN WITH A PAYOUT ON IT IS AN OFFER, NOT A DESTINATION.
         #
@@ -4094,11 +4111,11 @@ def main():
         # window is already reading the whole screen and answers as ⌖.
         if not whole and not an_offer and not asked and not screen_auto \
                 and (screen_auto_at is None
-                     or started - screen_auto_at >= screen_auto_every(pi.guard.on)) \
+                     or began - screen_auto_at >= screen_auto_every(pi.guard.on)) \
                 and auto_read_for(out.get('text'), planner) is not None \
                 and order_held(started):
             screen_auto = True
-            screen_auto_at = started
+            screen_auto_at = began
         # AN ADDRESS THE SCREEN DID NOT LABEL A DROPOFF IS NOT A DESTINATION.
         #
         # On shift: "✓ Took $28.08" pressed with the Trip Planner up — two
@@ -4421,7 +4438,7 @@ def main():
             # asked for — which is what this said first, and it was wrong on
             # the glass.
             #
-            # `asked` is `started < dropoff_until`, so a read that begins after
+            # `asked` is `began < dropoff_until`, so a read that begins after
             # the deadline is an unprompted sighting however close behind the
             # press it is. On this rig a read is 1.8s and the window is twelve,
             # so one can straddle the deadline: the press goes unanswered, the
@@ -4518,15 +4535,16 @@ def main():
             resample_for = None
         elif parsed.get('pay') and parsed.get('episode') != resample_for:
             resample_for = parsed.get('episode')
-            resample_until = time.time() + RESAMPLE_WINDOW
+            resample_until = time.monotonic() + RESAMPLE_WINDOW
         settled_on = signature
         health.add(out, parsed, out.get('card'), previous_card)
         previous_card = out.get('card')
 
         # When a read comes back wrong, the one thing worth having is what
         # the reader actually saw. Rate limited, because a screen with no
-        # offer on it fails constantly and correctly.
-        now = time.time()
+        # offer on it fails constantly and correctly. On the monotonic clock,
+        # with the health window below: both are intervals.
+        now = time.monotonic()
         why = read_why(out, parsed)
         if why is not None and (now - last_sample) > SAMPLE_EVERY:
             last_sample = now
@@ -4853,7 +4871,7 @@ def main():
             # Counted so the two-minute health line can still appear when every
             # read is failing — see Health.report.
             health.failed += 1
-            note_tally(health.report(time.time(), tracker, scanner))
+            note_tally(health.report(time.monotonic(), tracker, scanner))
             return False
         batch = done['outs']
         # WHICH frame to publish: the last one that actually read the money.
@@ -4892,7 +4910,8 @@ def main():
             for i, other in enumerate(batch):
                 if i != chosen:
                     accumulator.add(other['parsed'])
-        return digest(batch[chosen], done['frames'][0], done.get('at'), whole=whole)
+        return digest(batch[chosen], done['frames'][0], done.get('at'), whole=whole,
+                      began=done.get('began'))
 
     # What the server answers GET /api/settings with, from the moment the loop
     # runs. See emit_settings.
@@ -4967,14 +4986,23 @@ def main():
             # stopped delivering frames stops this too — which is exactly the
             # fault worth showing.
             if args.json:
+                # Two clocks, for two questions. `now_alive` is a stamp: the
+                # stall note's age is a file's mtime against it, and 📷 Snap's
+                # reader.json gives the last beat's age off it. `beat_now` times
+                # the intervals — the beat and a read in flight — which the wall
+                # clock cannot: NTP stepping it back an hour stopped the beat
+                # for that hour, and forward an hour wrote a restart row for a
+                # reader that was working (rpi/test_loop.py, "a wall clock
+                # stepped an hour").
                 now_alive = time.time()
+                beat_now = time.monotonic()
                 quiet = None
                 # Whether it is a stall going quiet, which leaves a note.
                 over_stall = False
                 if reader.busy and reader.since is not None \
-                        and now_alive - reader.since > READ_STUCK_S:
+                        and beat_now - reader.since > READ_STUCK_S:
                     quiet = ('a read has been in flight for %ds — the reader is '
-                             'stuck' % int(now_alive - reader.since))
+                             'stuck' % int(beat_now - reader.since))
                 elif updown.blind() == 'stalled' and stall_told:
                     # The same way out, for the same reason. A camera that hands
                     # over one picture for ever is not cured by waiting — the
@@ -5024,14 +5052,14 @@ def main():
                             except (IOError, OSError) as e:
                                 log('could not leave the note that holds back '
                                     'the next restart over a stall (%s)' % e)
-                elif now_alive - last_alive > ALIVE_EVERY or sight:
+                elif beat_now - last_alive > ALIVE_EVERY or sight:
                     # ...and at once, not on the beat, when what the camera can
                     # see has changed. The panel puts a blind rig's word where
                     # the verdict goes, and a card arriving as the phone goes
                     # back in the mount must not wait four seconds behind the
                     # word that it cannot see.
                     quiet_said = False
-                    last_alive = now_alive
+                    last_alive = beat_now
                     flags = {'too_bright': health.too_bright,
                              'too_dim': health.too_dim,
                              'not_saving': not_saving_notice(offer_log),
@@ -5062,7 +5090,9 @@ def main():
                 now_snap = time.time()
                 answer_snap(snap_to, last_read, reader_record(
                     last_read, now_snap, offer_log=offer_log,
-                    counters=health.counters(now_snap), beat=last_beat,
+                    # The health window is timed on the monotonic clock
+                    # (Health.report's callers), and so is how long it has run.
+                    counters=health.counters(time.monotonic()), beat=last_beat,
                     phone=phone))
             request = cam.capture_request()
             try:
@@ -5078,7 +5108,17 @@ def main():
                 # this camera ever does.
                 frozen = repeats.seen(luma)
                 health.repeats += frozen
-                now = time.time()
+                # The frame's clock for every INTERVAL below — the camera's
+                # tick, the ⌖ window, the resample and verify beats, the
+                # tracker's recheck and dispute, the gain's beat, the live
+                # view's period — and so the monotonic one. On the wall clock a
+                # backward NTP step held every one of them shut until the clock
+                # caught up again: measured through main() with the clock put
+                # back an hour, a second ⌖ press got 1 whole-screen read in its
+                # 3 s window against 7, the one its own pass makes. Nothing
+                # here is written anywhere; the read's own stamp is taken off
+                # the wall clock where it is handed over, below.
+                now = time.monotonic()
                 if last_tick is not None:
                     gap = now - last_tick
                     # A gap of a second is a stall, not a frame rate.
@@ -5633,7 +5673,7 @@ def main():
             # ...and for the whole-screen read digest() asked for without a
             # press (`screen_auto`), once: the request is spent by this
             # hand-over.
-            whole_read = (dropoff_asked and time.time() < dropoff_until) or screen_auto
+            whole_read = (dropoff_asked and time.monotonic() < dropoff_until) or screen_auto
             screen_auto = False
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(),
