@@ -847,6 +847,96 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     return n;
   })();
 
+  // Two builds of the shell, one after the other, and which pair of files
+  // the panel then runs. live.html and map-view.js are one program in two
+  // files, and the offers page and the map page load map-view.js alone. A
+  // server of its own, here, serving this checkout with each build's name
+  // stamped into those two files, so a deploy and a dead server are two
+  // lines rather than two machines: build A, the worker in control; build B
+  // and map.html opened before the panel; build C, map.html opened, and
+  // then the server gone. The real sw.js throughout.
+  out.twoBuilds = await (async () => {
+    const http = require('http');
+    const src = process.env.SHELL_ROOT;
+    let build = 'A', up = true;
+    const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript',
+                    '.css': 'text/css', '.png': 'image/png',
+                    '.webmanifest': 'application/manifest+json' };
+    const srv = http.createServer((req, res) => {
+      if (!up) { req.socket.destroy(); return; }
+      const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
+      const file = path.join(src, rel);
+      if (rel.startsWith('api/') || !file.startsWith(src + path.sep)
+          || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('not found');
+        return;
+      }
+      let body = fs.readFileSync(file);
+      if (rel === 'live.html') {
+        body = Buffer.from(body.toString('utf8').replace('<head>',
+          '<head><script>window.__liveBuild = "' + build + '";</script>'));
+      } else if (rel === 'map-view.js') {
+        body = Buffer.from(body.toString('utf8') + '\n;window.__mvBuild = "' + build + '";\n');
+      }
+      res.writeHead(200, { 'Content-Type': TYPES[path.extname(rel)] || 'application/octet-stream',
+                           'Cache-Control': 'no-cache' });
+      res.end(body);
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const at = 'http://127.0.0.1:' + srv.address().port;
+    const ctx = await browser.newContext({ viewport: { width: 800, height: 480 } });
+    const p = await ctx.newPage();
+    const pair = async (url) => {
+      await p.goto(at + url, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await p.waitForFunction(() => window.__mvBuild !== undefined, null, { timeout: 8000 })
+             .catch(() => {});
+      return p.evaluate(() => [window.__liveBuild || null, window.__mvBuild || null])
+              .catch(() => [null, null]);
+    };
+    // Settled: a new build's whole shell is fetched in the background, and
+    // the next step must not race it. Asked of the cache itself, and polled
+    // from here: an async predicate handed to waitForFunction is a Promise,
+    // which is truthy, so it answered yes before it had looked — this check
+    // passed against the old worker until it was asked this way.
+    const cached = async (want) => {
+      for (let i = 0; i < 80; i++) {
+        const got = await p.evaluate(async (w) => {
+          for (const k of await caches.keys()) {
+            if (!/shell/.test(k)) continue;
+            const c = await caches.open(k);
+            const live = await c.match('live.html');
+            const mv = await c.match('map-view.js');
+            if (!live || !mv) return false;
+            return (await live.text()).indexOf('__liveBuild = "' + w + '"') !== -1
+              && (await mv.text()).indexOf('__mvBuild = "' + w + '"') !== -1;
+          }
+          return false;
+        }, want).catch(() => false);
+        if (got) return true;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return false;
+    };
+    const r = {};
+    await pair('/live.html');
+    await p.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 10000 })
+           .catch(() => {});
+    r.controlled = await p.evaluate(() => !!navigator.serviceWorker.controller).catch(() => false);
+    r.a = await pair('/live.html');
+    build = 'B';
+    r.bMap = (await pair('/map.html'))[1];
+    r.b = await pair('/live.html');
+    build = 'C';
+    r.cMap = (await pair('/map.html'))[1];
+    r.cCached = await cached('C');
+    up = false;
+    r.cOffline = await pair('/live.html');
+    await ctx.close();
+    srv.close();
+    return r;
+  })();
+
   // The reader failing to load, as a language file that never arrives would
   // have it: the deadline passes with no reader.
   out.engineDown = await (async () => {
@@ -1049,7 +1139,8 @@ try:
     ) if p and os.path.exists(p)]
     run = subprocess.run(
         ['node', driver, base, work],
-        env=dict(env, PW_EXES=json.dumps(exes), FIT_CASES=json.dumps(FIT_CASES)),
+        env=dict(env, PW_EXES=json.dumps(exes), FIT_CASES=json.dumps(FIT_CASES),
+                 SHELL_ROOT=ROOT),
         capture_output=True, timeout=600)
     tail = (run.stdout or b'').decode('utf-8', 'replace').strip().splitlines()
     if not tail:
@@ -1247,6 +1338,21 @@ try:
     # it was the one page not asking for the shell.
     eq('live.html registers the offline shell on its own',
        got.get('panelSw'), 1)
+    # Two builds of the shell: whatever was opened before the panel, and
+    # whether the server is there, the panel runs live.html and map-view.js
+    # from ONE build.
+    tb = got.get('twoBuilds') or {}
+    ok_('[two builds] the worker controls the panel before the builds change',
+        tb.get('controlled'))
+    eq('[two builds] build A: the pair is A\'s', tb.get('a'), ['A', 'A'])
+    eq('[two builds] build B, the map page opened first: it ran B\'s map-view.js',
+       tb.get('bMap'), 'B')
+    eq('[two builds] ...and the panel after it runs B\'s pair, never A\'s live.html with B\'s '
+       'map-view.js', tb.get('b'), ['B', 'B'])
+    eq('[two builds] build C, the map page opened: the whole shell is kept as C',
+       (tb.get('cMap'), tb.get('cCached')), ('C', True))
+    eq('[two builds] ...and with the server gone the panel comes up from the cache as one '
+       'build, C\'s pair', tb.get('cOffline'), ['C', 'C'])
     ed = got.get('engineDown') or {}
     ok_('a reader that never loads is called failed (%r)' % (ed.get('status') or '')[:50],
         'failed to load' in (ed.get('status') or '') and ed.get('failed') is True)

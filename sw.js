@@ -10,10 +10,11 @@
  * not move. A rule that has to be remembered on every commit is a rule that
  * gets forgotten on some commit.
  *
- * So the shell is stale-while-revalidate now: served from cache at once, then
- * re-fetched in the background and the entry replaced. Forgetting to bump costs
- * one page load instead of costing everything, and the version is a convenience
- * rather than the mechanism.
+ * So the shell was made stale-while-revalidate: served from cache at once, then
+ * re-fetched in the background and the entry replaced. Forgetting to bump cost
+ * one page load instead of costing everything, and the version became a
+ * convenience rather than the mechanism. It still is: the shell is now asked
+ * of the network first, and kept as one build — see the fetch handler.
  *
  * The two caches are separate for a reason that would have bitten the obvious
  * fix. `vendor/` — the OCR engine and its language data, about 15MB — was never
@@ -73,6 +74,53 @@ function isVendor(pathname) {
   return pathname.indexOf('/vendor/') !== -1;
 }
 
+/* How long the network has to answer for a shell file before the cache does.
+ * The server is this rig's own, on localhost, where a file comes back in
+ * milliseconds; a phone on the hotspot pays a round trip, and a link that
+ * opens and never answers — car wifi does exactly that — costs this much
+ * before the cached copy is served. Three seconds is chosen, not measured. */
+var SHELL_WAIT_MS = 3000;
+
+// The network's answer, or a refusal once SHELL_WAIT_MS has passed. Raced
+// rather than aborted: a navigation's own Request cannot be re-made with a
+// signal on it, and a fetch that lands late is simply not used.
+function within(req, ms) {
+  return Promise.race([
+    fetch(req),
+    new Promise(function (_, refuse) {
+      setTimeout(function () { refuse(new Error('no answer in ' + ms + 'ms')); }, ms);
+    })
+  ]);
+}
+
+// Whether a path is one of the shell's own files.
+function inShell(pathname) {
+  return ASSETS.some(function (a) {
+    return new URL(a, self.location).pathname === pathname;
+  });
+}
+
+/* A shell file the network has just answered, kept. The same as the cached
+ * copy: nothing to do. Different: a new build is on the server, and the
+ * WHOLE shell is fetched into the cache together — Cache.addAll stores all of
+ * it or none of it — so the copy an offline load comes up from is one build,
+ * never this file new beside the rest old. Not cached yet, or not one of the
+ * shell's files: kept on its own, as before. */
+function keepShell(req, url, res) {
+  // Query strings are cache-busters here, and storing them accumulates
+  // entries nothing will ever ask for again.
+  if (!res || !res.ok || res.type !== 'basic' || url.search) return null;
+  return caches.open(SHELL).then(function (c) {
+    return c.match(req).then(function (old) {
+      if (!old || !inShell(url.pathname)) return c.put(req, res);
+      return Promise.all([old.text(), res.clone().text()]).then(function (both) {
+        if (both[0] === both[1]) return null;
+        return c.addAll(ASSETS);
+      });
+    });
+  });
+}
+
 self.addEventListener('install', function (e) {
   e.waitUntil(
     caches.open(SHELL)
@@ -130,7 +178,9 @@ self.addEventListener('fetch', function (e) {
         return fetch(e.request).then(function (res) {
           if (res && res.ok && res.type === 'basic' && !url.search) {
             var copy = res.clone();
-            caches.open(BLOB).then(function (c) { c.put(e.request, copy); });
+            // Waited for, so the browser does not stop the worker before
+            // the engine is stored (see the shell's below).
+            e.waitUntil(caches.open(BLOB).then(function (c) { return c.put(e.request, copy); }));
           }
           return res;
         });
@@ -139,24 +189,36 @@ self.addEventListener('fetch', function (e) {
     return;
   }
 
-  /* Everything else: answer from cache immediately if it is there, and refresh
-   * the entry in the background either way. The driver sees the cached page at
-   * cache-first speed and the next load has the new code — which is the whole
-   * difference between shipping a fix late and not shipping it.
+  /* Everything else: the NETWORK first, inside SHELL_WAIT_MS, and the cache
+   * when it does not answer in time or at all.
    *
-   * A background fetch that fails must leave the cached copy alone, which is
-   * what the empty catch is for: offline is the case this file exists for. */
+   * This was stale-while-revalidate — the cached copy at once, and each file
+   * refreshed in the background on its own — and "on its own" is what went
+   * wrong. live.html and map-view.js are one program in two files, and the
+   * offers page and the map page load map-view.js without live.html, so after
+   * a deploy the panel ran one build's live.html against the other's
+   * map-view.js: rpi/test_scanjs.py serves two builds one after the other
+   * and measured it. Every `MV && MV.x` guard in live.html is there because
+   * of that pairing, and the one that was missing (nightFor) stopped the
+   * panel's clock. Asked of the server first, the pair is whatever the
+   * server has; the cache, which is what an offline load comes up from, is
+   * kept as one build (keepShell). The cost is a round trip per file, which
+   * on localhost is the milliseconds the Pi's own panel pays.
+   *
+   * Every write to the cache is inside e.waitUntil. They were fired and
+   * forgotten, so the worker could be stopped with a write half done — the
+   * three-line fix AUDITS.md recorded under Done ("The background refresh is
+   * fired and forgotten") and that was never applied.
+   *
+   * A fetch that fails or is late leaves the cache alone: offline is the case
+   * this file exists for. */
+  var fresh = within(e.request, SHELL_WAIT_MS);
+  e.waitUntil(fresh.then(function (res) {
+    return keepShell(e.request, url, res.clone());
+  }).catch(function () {}));
   e.respondWith(
-    caches.match(e.request).then(function (hit) {
-      var fresh = fetch(e.request).then(function (res) {
-        // Query strings are skipped: they are cache-busters here, and storing
-        // them accumulates entries nothing will ever ask for again.
-        if (res && res.ok && res.type === 'basic' && !url.search) {
-          var copy = res.clone();
-          caches.open(SHELL).then(function (c) { c.put(e.request, copy); });
-        }
-        return res;
-      }).catch(function () {
+    fresh.catch(function () {
+      return caches.match(e.request).then(function (hit) {
         // Nothing cached and no network. A navigation can still be answered
         // with the app shell; anything else has to fail as itself, because
         // handing back index.html in place of a script is a stranger failure
@@ -186,7 +248,6 @@ self.addEventListener('fetch', function (e) {
           + '<p><a style="color:#7aa2f7" href="./">Open the app</a></p>',
           { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
       });
-      return hit || fresh;
     })
   );
 });
