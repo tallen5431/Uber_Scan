@@ -8439,19 +8439,19 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 1171 checks, the shared corpus
-node tests/parser.test.js       # 107 on the browser side alone
+node tests/corpus.test.js       # 1181 checks, the shared corpus
+node tests/parser.test.js       # 111 on the browser side alone
 node tests/advice.test.js       # 449 on what line to tell a driver to draw
 node tests/crop.test.js         #  22 on the trip from a drag to a crop box
 node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-python3 rpi/test_parser.py      # 1238 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  # 310 on merging readings across frames, on a
+python3 rpi/test_parser.py      # 1259 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  # 315 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
-python3 rpi/test_pipeline.py    # 278 on where to look, how big, what to log,
+python3 rpi/test_pipeline.py    # 280 on where to look, how big, what to log,
                                 #     and the two pictures the live view sends
 python3 rpi/test_cardfind.py    #  45 on finding a card taller than the card
                                 #     box from its button up, and on every
@@ -8460,14 +8460,14 @@ python3 rpi/test_exposure.py    # 192 on flicker, brightness, gain and
                                 #     exposure, on both ends of running out,
                                 #     and on an empty mount in the sun never
                                 #     being reported as a phone
-python3 rpi/test_track.py       # 133 on following the phone as it drifts, and
+python3 rpi/test_track.py       # 137 on following the phone as it drifts, and
                                 #     on the centre recovery that never fired
-python3 rpi/test_gps.py         # 186 on the position stamped beside a card:
+python3 rpi/test_gps.py         # 192 on the position stamped beside a card:
                                 #     that a fix too old to mean anything is
                                 #     refused rather than rounded, and that a
                                 #     row written before the rig had a GPS
                                 #     still reads
-python3 rpi/test_journal.py     # 406 on keeping one row per offer, on a
+python3 rpi/test_journal.py     # 409 on keeping one row per offer, on a
                                 #     distrusted distance always saying so twice,
                                 #     and on the row agreeing with the screen
                                 #     about why a verdict was withheld
@@ -8479,13 +8479,13 @@ python3 rpi/test_cropbox.py     #  42 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 555 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 562 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
-python3 rpi/test_sync.py        # 204 on getting the offers off the car, and
+python3 rpi/test_sync.py        # 187 on getting the offers off the car, and
                                 #     on a far end that cannot read its own copy
-python3 rpi/test_scanjs.py      # 203 on the phone's own scanner, through a
+python3 rpi/test_scanjs.py      # 209 on the phone's own scanner, through a
                                 #     real browser (skipped without Playwright)
 python3 rpi/test_liveview.py    # 111 on the picture the driver watches, on
                                 #     nothing else being served with it, on the
@@ -8495,15 +8495,15 @@ python3 rpi/test_liveview.py    # 111 on the picture the driver watches, on
                                 #     on one shift's figures being counted the
                                 #     way the offers page counts them
 python3 rpi/test_watchdog.py    #  22 on a scanner that runs without working
-python3 rpi/test_autopilot.py   #  45 on the one command that takes the rig
+python3 rpi/test_autopilot.py   #  47 on the one command that takes the rig
                                 #     from nothing to scanning, and on the
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      # 111 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 349 on the faults that only surface when a
+python3 rpi/test_lint.py        # 353 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
-python3 rpi/test_handoff.py     #   75 on the three files the browser and the
+python3 rpi/test_handoff.py     #   76 on the three files the browser and the
                                 #     camera pass requests through, and on both
                                 #     sides finding them in the same place
 python3 rpi/test_service.py     #  58 on the systemd units BOTH installers
@@ -8518,14 +8518,14 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 1251 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 1303 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
                                 #     words rather than a number whenever one
                                 #     would be wrong (skipped without
                                 #     Playwright)
-python3 rpi/test_layout.py      # 3759 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 3890 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
@@ -8533,14 +8533,14 @@ python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 813 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 854 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
                                 #     is not one — and on the CSV export, which
                                 #     is the one thing here that leaves the
                                 #     machine and had no check at all
-python3 rpi/test_map.py         # 228 on the map check page: that it asks
+python3 rpi/test_map.py         # 231 on the map check page: that it asks
                                 #     nobody anything until told to, that it
                                 #     keeps to one geocoder request a second,
                                 #     that it shows what it could not place —
@@ -8548,11 +8548,11 @@ python3 rpi/test_map.py         # 228 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
-node tests/assemble.test.js     # 249 on where the order in the car ends: one
+node tests/assemble.test.js     # 263 on where the order in the car ends: one
                                 #     hold decided as before, and a Trip Planner
                                 #     filed from pages stitched only on the cues
                                 #     the screen gives
-node tests/mapview.test.js      # 484 on the deciding behind both maps, with
+node tests/mapview.test.js      # 505 on the deciding behind both maps, with
                                 #     no map: the geometry, the cache, and the
                                 #     one-request-a-second rule against a fake
                                 #     clock, which is what makes the awkward
@@ -8568,7 +8568,7 @@ node tests/streets.test.js      #  71 on the NucBox's street index, from a
                                 #     another, corners at a shared node and at a
                                 #     bridge, a dual carriageway as one corner,
                                 #     and a stretch cut at the box's edge
-python3 rpi/test_loop.py        # 382 on the scan loop re-telling a card once
+python3 rpi/test_loop.py        # 393 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
