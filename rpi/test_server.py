@@ -8410,6 +8410,35 @@ for _carry in (False, True):
         _q12.stop()
         _q12.gone()
 
+# --- a card paged away from and back to ---------------------------------------
+#
+# The scanner keeps a card's id when the driver pages away and back
+# (rpi/journal.py, RECENT_CARDS); with an order in the car its return wrote a
+# second pair row for one decision.
+_q14 = _Q(carry=False)
+try:
+    _q14.card('HELD', 12.0, 120, 'uber')
+    _q14.took('HELD')
+    _q14.card('A', 9.0, 20, 'doordash')
+    _q14.card('B', 7.0, 18, 'uber')
+    _q14.card('A', 9.0, 20, 'doordash')
+    _settle(0.3)
+    eq('a card paged back to is one pair row', [r.get('id') for r in _q14.rows('pair')],
+       ['A', 'B'])
+    eq('...and one pairing on the offers page',
+       [p.get('id') for p in get(_q14.base, '/api/journal?days=1').get('pairs') or []],
+       ['B', 'A'])
+    post(_q14.base, '/api/delivered', {})
+    _q14.card('HELD2', 11.0, 120, 'uber')
+    _q14.took('HELD2')
+    _q14.card('A', 9.0, 20, 'doordash')
+    _settle(0.3)
+    eq('...while the same card against a different order in the car is a pairing of its own',
+       [r.get('id') for r in _q14.rows('pair')], ['A', 'B', 'A'])
+finally:
+    _q14.stop()
+    _q14.gone()
+
 # --- the window a fold reads, carried across appends --------------------------
 #
 # rowsFor kept every kind row in the file and walked the whole file again

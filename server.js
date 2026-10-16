@@ -3197,10 +3197,25 @@ function planAtOf(stops, h) {
  *
  * Best-effort. A journal that cannot be written must never stop the panel from
  * answering — the advice is the product, this is the notebook.
+ *
+ * ONE ROW PER PAIRING: the same card against the same order(s) in the car is
+ * one decision, however often it comes back. The scanner keeps a card's id
+ * when the driver pages away from it and back (rpi/journal.py, RECENT_CARDS),
+ * and its return is a new card on the slot here (not `sameCard`), so it was
+ * written again. Measured at f80d0c2: an order held, card A, card B, A paged
+ * back to — pair rows A, B, A, and the offers page listed three pairings for
+ * two. Kept in memory for the last PAIRED_MAX pairings, as process memory
+ * like the slot: a restart may write one twice.
  */
+var PAIRED_MAX = 32;
+var paired = [];
+
 function recordPairing(offer, now, reading) {
   var held = holding(now);
   if (!held || !offer || typeof offer.id !== 'string') return;
+  var pairKey = pairedWith(now, held).map(holdIdOf).join(' ') + '\n' + offer.id;
+  if (paired.indexOf(pairKey) !== -1) return;
+  paired = paired.concat([pairKey]).slice(-PAIRED_MAX);
   // The driver's money, off the READING — not off the offer line.
   //
   // The offer line is what scan_pi.emit_offer() prints, and it has never
