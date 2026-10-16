@@ -734,7 +734,7 @@ ok_('the driving screen has a dropoff button', 'id="dest"' in _page)
 # their phone. What must not change is that it is conditional at all — a
 # control for a state you are not in teaches people to ignore the bar.
 ok_('...and it is hidden unless there is something to attach one to',
-    re.search(r'el\.dest\.hidden\s*=\s*!holdingNow\s*&&\s*!screening', _page)
+    re.search(r'setHidden\(el\.dest,\s*!holdingNow\s*&&\s*!screening\)', _page)
     is not None)
 ok_('...where screening means a card that is still up and has no destination',
     re.search(r'function screeningEnd\(\)[\s\S]{0,400}?onRecord\.dropoff',
@@ -789,17 +789,21 @@ ok_('the stack line can say the two ends share a ZIP',
 # place at a glance.
 ok_('the stack line offers a route between the two ends', 's.route' in _page)
 ok_('...as a real link, so it can be pressed',
-    re.search(r"a\.className\s*=\s*'maplink'", _page) is not None)
+    re.search(r"routeLink\.className\s*=\s*'maplink'", _page) is not None)
 ok_('...opened away from the driving screen, which stays up',
-    re.search(r"a\.target\s*=\s*'_blank'", _page) is not None)
+    re.search(r"routeLink\.target\s*=\s*'_blank'", _page) is not None)
 ok_('...without handing the new tab a grip on this one',
-    re.search(r"a\.rel\s*=\s*'noopener", _page) is not None)
+    re.search(r"routeLink\.rel\s*=\s*'noopener", _page) is not None)
 
 # Only when there is a route. Half of real pairs name one end or neither, and a
 # control that opens a map of the wrong thing costs a press and a moment's
 # belief - which on this screen is the expensive thing.
+# The link is made once and kept (showRoute in live.html), so the test is
+# that the pair line hands it the route and that no route takes it away.
 ok_('...and only when both ends were named',
-    re.search(r'if\s*\(s\.route\)', _page) is not None)
+    re.search(r'showRoute\(s\.route\)', _page) is not None
+    and re.search(r'if \(!href\) \{\s*if \(routeLink && routeLink\.parentNode\)', _page)
+    is not None)
 
 # The style is shared with the offers page rather than written twice, so the two
 # screens cannot drift about what a map link looks like.
