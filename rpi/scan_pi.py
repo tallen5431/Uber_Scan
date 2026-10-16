@@ -14,6 +14,7 @@ mid-offer costs more time than the OCR does.
 """
 
 import argparse
+import copy
 import json
 import math
 import os
@@ -1119,10 +1120,36 @@ def load_config(path):
     if not os.path.exists(path):
         sys.exit('no %s — run calibrate.py first' % path)
     with open(path) as fh:
-        return json.load(fh)
+        cfg = json.load(fh)
+    _config_base[path] = copy.deepcopy(cfg)
+    return cfg
 
 
 _config_error = None
+# The config as this process last read or wrote it, by path: what save_config
+# measures its own changes against.
+_config_base = {}
+_MISSING = object()
+
+
+def _changes_onto(disk, base, cfg):
+    """`disk` with what this process changed — `cfg` against `base` — put onto
+    it: a key it set or altered takes its value, a key it removed goes, and a
+    key it never touched keeps whatever the file now says. Dicts are merged a
+    level at a time, so a setting added beside one this process changed
+    survives too."""
+    for key, value in cfg.items():
+        was = base.get(key, _MISSING)
+        if was == value:
+            continue
+        if isinstance(value, dict) and isinstance(disk.get(key), dict):
+            _changes_onto(disk[key], was if isinstance(was, dict) else {}, value)
+        else:
+            disk[key] = copy.deepcopy(value)
+    for key in base:
+        if key not in cfg:
+            disk.pop(key, None)
+    return disk
 
 
 def save_config(path, cfg):
@@ -1133,13 +1160,35 @@ def save_config(path, cfg):
     is a convenience — it saves the next run rediscovering what this one already
     knows — and a read-only card or a full disk is no reason to stop reading
     offers. The scanner keeps the corrected values in memory either way.
+
+    ONLY WHAT THIS PROCESS CHANGED, onto the file as it is now. It wrote its
+    whole start-up copy back, so a key the owner put into the file after the
+    scanner started was gone at its next save — `"carryTwo": true` in
+    `settings` among them, which server.js reads off this file mid-shift, so
+    carrying two turned itself off under two orders in the car. The tracker
+    saves on its own clock (needs_save), so that was minutes, not a restart.
+    Now the file is read again and only the keys this process set, altered or
+    removed since it last read or wrote it are put onto it.
     """
     global _config_error
     try:
+        base = _config_base.get(path)
+        try:
+            with open(path) as fh:
+                disk = json.load(fh)
+        except (OSError, ValueError):
+            disk = None
+        if base is None or not isinstance(disk, dict):
+            # Nothing to merge onto, or nothing known of what was read: the
+            # whole copy, as before.
+            out = cfg
+        else:
+            out = _changes_onto(disk, base, cfg)
         tmp = path + '.part'
         with open(tmp, 'w') as fh:
-            json.dump(cfg, fh, indent=2)
+            json.dump(out, fh, indent=2)
         os.replace(tmp, path)
+        _config_base[path] = copy.deepcopy(cfg)
         _config_error = None
     except Exception as e:
         message = str(e)

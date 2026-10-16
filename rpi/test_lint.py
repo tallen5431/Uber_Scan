@@ -264,6 +264,18 @@ for _f, _mark in (('server.js', 'process.pid'), ('rpi/sync.py', 'getpid')):
         ok_('%s:%d builds its temporary a name of its own' % (_f, _i),
             _mark in _code)
 
+# ...and holding.json, the order in the car, is one of the files published that
+# way. It was written in place, so a power cut mid-write — this box's ordinary
+# way of stopping — left a file cut short, which loadHolding read as nothing
+# held. Textual, like the rule above: no line writes holdPath() directly, and
+# the one write of it renames its temporary into place.
+_hold_direct = [_i for _i, _line in enumerate(_server.splitlines(), 1)
+                if re.search(r'writeFile(Sync)?\(\s*holdPath\(\)', _line.split('//')[0])]
+eq('holding.json is never written in place, only through a temporary and a rename',
+   _hold_direct, [])
+ok_('...and setHeld renames its temporary onto it',
+    'fs.renameSync(tmp, holdPath());' in _server)
+
 # --- nothing big rides along that the rig cannot use ------------------------
 #
 # Four Python wheels sat at the root of this repository for a while: 48MB,
@@ -1280,6 +1292,20 @@ _consts = re.search(r'^SNAPSHOT_SCREEN = 1 / ([0-9.]+)$', _sp_src, re.M), \
 eq("the loop's note gives the phone view's rate and the scene view's as the constants do",
    _rates and _rates.groups(),
    tuple(_WORDS.get(round(float(c.group(1)))) for c in _consts) if all(_consts) else None)
+
+# The planner's stitch window (STITCH_MS in assemble.js) against the spacing of
+# the scanner's unpressed reads with the heat guard on (SCREEN_AUTO_HOT in
+# rpi/scan_pi.py): two pages of one list read a scroll apart must fall inside
+# it, with one read missed between them. It was 20 s against 30 s, so a hot Pi
+# never stitched a planner at all. Two constants in two languages, held
+# together here because nothing else would notice one move.
+_stitch = re.search(r'var STITCH_MS = (\d+);',
+                    open(os.path.join(ROOT, 'assemble.js'), encoding='utf-8').read())
+_hot = re.search(r'^SCREEN_AUTO_HOT = ([\d.]+)',
+                 open(os.path.join(ROOT, 'rpi', 'scan_pi.py'), encoding='utf-8').read(), re.M)
+ok_('assemble.js STITCH_MS (%s ms) is at least twice rpi/scan_pi.py SCREEN_AUTO_HOT (%s s)'
+    % (_stitch and _stitch.group(1), _hot and _hot.group(1)),
+    _stitch and _hot and int(_stitch.group(1)) >= 2 * float(_hot.group(1)) * 1000)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)

@@ -111,6 +111,43 @@ SEQ.forEach(function (seq) {
   if (x.unfiled) eq(seq.name + ' — the planner line\'s reason', out.unfiled, x.unfiled);
 });
 
+/* ---- the same pages, read hot ----
+ *
+ * With the heat guard on, the scanner reads the screen unpressed no nearer
+ * than SCREEN_AUTO_HOT apart (rpi/scan_pi.py, read off the file rather than
+ * copied). Each sequence again, every unpressed page moved to at least that
+ * long after the page before it (and everything after moved with it), must
+ * end where it ends at its own pace: a planner over two pages files as it
+ * does cool. At a STITCH_MS of 20 s, the five that stitch filed the card's
+ * end instead. */
+(function () {
+  var src = require('fs').readFileSync(require('path').join(__dirname, '..', 'rpi',
+                                                            'scan_pi.py'), 'utf8');
+  var hotMs = Number((/^SCREEN_AUTO_HOT = ([\d.]+)/m.exec(src) || [])[1]) * 1000;
+  ok_('(SCREEN_AUTO_HOT read off rpi/scan_pi.py: ' + hotMs + ' ms)', hotMs > 0);
+  var stitched = 0;
+  var moved = SEQ.filter(function (seq) {
+    var last = null, shift = 0;
+    var events = seq.events.map(function (e0) {
+      var e = Object.assign({}, e0, { t: e0.t + shift });
+      if (e.page && !e.asked && last !== null && e.t - last < hotMs) {
+        shift += hotMs - (e.t - last);
+        e.t = last + hotMs;
+      }
+      if (e.page) last = e.t;
+      return e;
+    });
+    var cool = play(seq).hold.fields.dropoff;
+    var hot = play(Object.assign({}, seq, { events: events })).hold.fields.dropoff;
+    if (cool && cool.from === 'planner' && seq.events.filter(function (e) {
+      return e.page;
+    }).length > 1) stitched += 1;
+    return JSON.stringify(brief(cool)) !== JSON.stringify(brief(hot));
+  }).map(function (seq) { return seq.name; });
+  eq('read at the heat guard\'s pace, a planner over two pages still files (' + stitched
+     + ' sequences stitch cool)', moved, []);
+})();
+
 /* ---- precedence, one rule at a time ---- */
 (function () {
   function f(from, value, conf, key) {
@@ -424,6 +461,19 @@ SEQ.forEach(function (seq) {
      who(st, [a, b], d({ at: 3000 })), ['a', 'only', null]);
   eq('...and older than both is nobody\'s', who(st, [a, b], d({ at: 500 })),
      [null, null, 'nobody']);
+  // A list seen whole with more dropoffs than the hard rules leave orders: the
+  // other dropoff may be the one order's too (a two-customer card), so the
+  // hard rules alone file neither.
+  var two = { bounded: true, others: ['30 Larch Way, Kennesaw'] };
+  var dd = order('dd', 5000, { app: 'doordash' });
+  eq('a two-dropoff list, one Uber order and a DoorDash order held: no `only`',
+     who(st, [a, dd], d(two)), [null, null, 'no cue']);
+  eq('...nor with a Took that landed during the read',
+     who(st, [a, b], d(Object.assign({ at: 3000 }, two))), [null, null, 'no cue']);
+  eq('...but a cue that names the one order left still decides',
+     who(st, [a, dd], d(Object.assign({ expectedBy: 1171 }, two))), ['a', 'deadline', null]);
+  eq('...and a list of one dropoff is that order\'s, as before',
+     who(st, [a, dd], d({ bounded: true, others: [] })), ['a', 'only', null]);
   eq('the deadline cue: "Expected by" within 2 minutes of one card\'s "Deliver by"',
      who(st, [a, b], d({ expectedBy: 1207 })), ['b', 'deadline', null]);
   eq('...and not at 3 minutes', who(st, [a, b], d({ expectedBy: 1208 })),
