@@ -137,12 +137,17 @@ SCREEN_QUALITY = 78
 # The phone view costs what the scene view was written to avoid: it needs the
 # sensor frame, which is the 12MB copy that branch exists to skip.
 #
-# Measured on a development machine against a synthetic rig frame: the warp is
-# 1.8ms and the JPEG 3.2ms on worst-case noise, so composing one is about 5ms —
-# genuinely cheaper than the scene view, whose expense was never the shrink but
-# the card inset warped out of the sensor. The sensor copy on top is the real
-# price, and it is the one thing here that is much dearer on a Pi than on this
-# machine.
+# Measured on a development machine against a synthetic rig frame with sensor
+# noise on it (testcards' UberX card, ±12 levels): write_snapshot's phone view
+# is 5.2 to 5.7ms with OpenCV on its four threads — warp 2.2ms, JPEG 2.0ms — and
+# 9.1 to 9.5ms on one (warp 5.5ms, JPEG 2.5ms), which is what it gets when the
+# reader has the other cores. The 12MB sensor copy is 1.0ms on top here, and it
+# is the one thing here that is much dearer on a Pi than on this machine; none
+# of it has been timed on the Pi. Keeping the warp's transform and output
+# buffer between frames was tried and measured no faster (within the noise of
+# four runs either way), and every cheaper warp tried (remap on kept maps, 27%
+# faster on one thread) moves pixels, so the picture is the warp the reader
+# uses, at the cost above.
 #
 # It does not need 25 a second either way. The scene view is watched for motion
 # — is the phone still in the box, has the mount slipped — and a slide show
@@ -152,8 +157,9 @@ SCREEN_QUALITY = 78
 # A cursor at ten frames a second feels attached to the hand; below that it
 # does not.
 #
-# Fifteen, then, rather than the first cautious ten — the compose is ~5ms and
-# the sensor copy is the rest, so this is a fraction of one core even on a Pi.
+# Fifteen, then, rather than the first cautious ten. At the costs above that is
+# 9 to 16% of one core here, compose and copy, while somebody watches; on a Pi
+# it is more, by an amount not measured.
 # It is also a flag, `--screen-fps`, because the right number is a property of
 # the machine rather than of this code: raise it until the reads slow down, or
 # drop it on a busy rig. Nothing else on this loop depends on it.
@@ -5608,8 +5614,9 @@ def main():
                 # picture of the phone's screen made to be read, and the preview
                 # stream does not contain the text: warping 640x480 luma up to a
                 # 1000px screen invents every pixel of it. So that view buys the
-                # sensor frame, and pays for it by composing eight times a
-                # second instead of twenty-five — see SNAPSHOT_SCREEN. Only
+                # sensor frame, and pays for it by composing fifteen times a
+                # second instead of the scene view's thirty — SNAPSHOT_SCREEN,
+                # or what --screen-fps asks, against SNAPSHOT_FAST. Only
                 # while somebody is actually looking at it; the moment they stop
                 # asking, `watching()` says so and this goes back to the
                 # preview.

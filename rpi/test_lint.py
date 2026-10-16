@@ -1269,6 +1269,18 @@ for _jsf in sorted(glob.glob(os.path.join(ROOT, '*.js')) + glob.glob(os.path.joi
             _slot_readers.append('%s:%d' % (os.path.basename(_jsf), _n))
 eq('nothing reads the old single scanner.holding shape directly', _slot_readers, [])
 
+# The loop's note on the phone view said it composed "eight times a second
+# instead of twenty-five" while SNAPSHOT_SCREEN was fifteen and SNAPSHOT_FAST
+# thirty. Held to the two constants, in words, as the note gives them.
+_WORDS = {8: 'eight', 10: 'ten', 15: 'fifteen', 20: 'twenty', 25: 'twenty-five', 30: 'thirty'}
+_rates = re.search(r"composing (\S+) times a\s+#?\s*second instead of the scene view's (\S+?)\W",
+                   _sp_src)
+_consts = re.search(r'^SNAPSHOT_SCREEN = 1 / ([0-9.]+)$', _sp_src, re.M), \
+    re.search(r'^SNAPSHOT_FAST = 1 / ([0-9.]+)$', _sp_src, re.M)
+eq("the loop's note gives the phone view's rate and the scene view's as the constants do",
+   _rates and _rates.groups(),
+   tuple(_WORDS.get(round(float(c.group(1)))) for c in _consts) if all(_consts) else None)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)
