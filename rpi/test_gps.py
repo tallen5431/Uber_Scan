@@ -118,6 +118,24 @@ ok_('a TPV with no mode stated is still a fix',
 eq('the VERSION banner is not a fix',
    G.parse_line('{"class":"VERSION","release":"3.22"}'), None)
 eq('nor a SKY record', G.parse_line('{"class":"SKY","satellites":[]}'), None)
+# ...and refused before it is parsed: there is a SKY line for every TPV in a
+# gpspipe log, and json.loads on each was most of what they cost (12.7 us a
+# line against 0.3, measured on a 1,200-byte one). A TPV is still parsed, as
+# gpsd writes it and with spaces in it.
+_loads, _asked = G.json.loads, []
+G.json.loads = lambda s, *a, **k: (_asked.append(s), _loads(s, *a, **k))[1]
+try:
+    _sky = [G.parse_line('{"class":"SKY","device":"/dev/ttyACM0","satellites":[]}'),
+            G.parse_line('{"class": "SKY", "satellites": []}')]
+    _skied = len(_asked)
+    _tpv = [G.parse_line('{"class":"TPV","mode":3,"lat":34.0,"lon":-84.6}'),
+            G.parse_line('{"class": "TPV", "mode": 3, "lat": 34.0, "lon": -84.6}')]
+finally:
+    G.json.loads = _loads
+eq('a SKY record is refused before it is parsed (%d parsed)' % _skied, (_sky, _skied),
+   ([None, None], 0))
+eq('...and a TPV, either way it is spaced, is still read',
+   [t and t['lat'] for t in _tpv], [34.0, 34.0])
 eq('nor half a line of JSON', G.parse_line('{"class":"TPV","lat":34'), None)
 eq('nor a blank', G.parse_line(''), None)
 eq('nor a None', G.parse_line(None), None)
