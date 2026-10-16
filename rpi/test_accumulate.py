@@ -1665,6 +1665,29 @@ try:
 finally:
     _AC.time = _was_time
 
+# --- a card read 10,000 times ---------------------------------------------------
+# A card can sit on the phone for as long as the driver leaves it, and every
+# vote here was a list that grew by one a frame and was walked on every add —
+# 24.3 ms an add at 7,200 frames, measured. They are tallies now, one entry per
+# value read. Three readings of one card, in turn, as OCR gives them.
+import time as _time                                           # noqa: E402
+
+_reads = [P.parse('$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip 123 Ab St, Acworth'),
+          P.parse('$12.45 5 min (1.2 mi) away 28 min (8.4 mi) trip 123 Ab St, Acworth'),
+          P.parse('$12.45 5 min (1.2 mi) away 23 min (3.4 mi) trip 123 Ab St, Acworth')]
+_long = OfferAccumulator()
+for _i in range(10000):
+    _last = _long.add(dict(_reads[_i % 3]), now=1000.0 + _i * 0.5)
+eq('the premise: 10,000 reads of one card are one episode', _last['mergedFrom'], 10000)
+_sizes = sorted(len(slot[k]) for slot in _long.legs for k in ('minutes', 'miles'))
+ok_('a card read 10,000 times keeps one entry per value read, not one per frame (%r)'
+    % _sizes, _sizes and max(_sizes) <= 3)
+_t0 = _time.perf_counter()
+for _i in range(50):
+    _long.add(dict(_reads[_i % 3]), now=6000.0 + _i * 0.5)
+_ms = (_time.perf_counter() - _t0) / 50 * 1e3
+ok_('...and an add after them still costs under 2 ms (%.2f ms)' % _ms, _ms < 2.0)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)
