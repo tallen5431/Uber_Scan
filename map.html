@@ -1265,8 +1265,22 @@
      status link reads — rather than a stream of its own. `beat.ageMs` is how
      long ago the server heard that beat, so the age is two durations and the
      page never subtracts another machine's clock from its own. */
+  /* ...each with a deadline, the way live.html's ask() puts one on every
+     request it makes. Without one, a link that opens and never closes left
+     every ten-second ask pending at once, and they could come back in any
+     order: an answer from a minute ago landing after the one from now put
+     the dot back where the car WAS, with its age. An ask that has not
+     answered inside HERE_ASK_MS is given up — aborted, so its answer never
+     lands — and since that is under HERE_EVERY_MS, the next ask never finds
+     one still out: one in flight at a time follows from the two numbers,
+     and rpi/test_map.py counts it rather than a guard nothing could reach.
+     Eight seconds is chosen, not measured. */
+  var HERE_ASK_MS = 8000;
+
   function askWhere() {
-    return fetch('/api/status')
+    var stop = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = stop ? setTimeout(function () { stop.abort(); }, HERE_ASK_MS) : null;
+    return fetch('/api/status', stop ? { signal: stop.signal } : {})
       .then(function (r) { return r.json(); })
       .then(function (s) {
         var beat = s && s.beat;
@@ -1279,7 +1293,8 @@
         // A page off the network keeps what it had, aging — and an answer
         // that never came is still the one this page had to fit to.
         hereWanted = false;
-      });
+      })
+      .then(function () { clearTimeout(timer); });
   }
 
   function esc(s) {

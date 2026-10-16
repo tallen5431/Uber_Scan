@@ -727,6 +727,49 @@ const KNOWN = {
     await hp.close();
   }
 
+  // An ask that never answers, and the next one that does. The first is
+  // held at the network until after the second has landed, and then let
+  // go: its answer — where the car was a minute ago — must not land over
+  // the newer one, and no two asks may be out at once. On the page's own
+  // clock; the answers are real network.
+  stage = 'you are here: a late answer';
+  {
+    const hp = await browser.newContext({ viewport: { width: 1200, height: 820 } })
+      .then((c) => c.newPage());
+    await hp.clock.install({ time: Date.now() });
+    await hp.addInitScript(STUB);
+    await hp.route('**/tile.openstreetmap.org/**', (r) => r.fulfill({ status: 200, body: '' }));
+    const WAS = GOOD, NOW = Object.assign({}, GOOD, { lat: 33.9616 });
+    const answer = (fix) => ({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ beat: { gps: { state: 'ok', ageSeconds: 0.6, fix: fix }, ageMs: 900 } }) });
+    let asks = 0, out_ = 0, most = 0, release = null;
+    hp.on('request', (r) => {
+      if (/\/api\/status$/.test(r.url())) { out_++; most = Math.max(most, out_); }
+    });
+    const gone = (r) => { if (/\/api\/status$/.test(r.url())) out_--; };
+    hp.on('requestfinished', gone);
+    hp.on('requestfailed', gone);
+    await hp.route('**/api/status', (route) => {
+      asks++;
+      if (asks === 1) {
+        release = () => route.fulfill(answer(WAS)).catch(() => {});
+        return;
+      }
+      return route.fulfill(answer(NOW));
+    });
+    await hp.goto(base + '/map.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await hp.waitForTimeout(300);
+    await hp.clock.runFor(10500);
+    await hp.waitForFunction(() => window.__dots.some(function (d) {
+      return /you are here/.test(String(d.popup || '')); }), null, { timeout: 5000 }).catch(() => {});
+    const newer = await hp.evaluate(lookHere);
+    if (release) await release();
+    await hp.waitForTimeout(500);
+    await hp.clock.runFor(1100);
+    out.here.late = { asks: asks, most: most, newer: newer, after: await hp.evaluate(lookHere) };
+    await hp.close();
+  }
+
   console.log(JSON.stringify(out));
   await browser.close();
 })().catch((e) => { console.log(JSON.stringify(
@@ -1208,6 +1251,12 @@ try:
        [[33.9526, -84.5499]])
     eq('...and the view is not fitted to it: the one fit was the first answer\'s',
        (_hl.get('view'), _hl.get('bounds')), (None, None))
+    _ht = here.get('late') or {}
+    eq('an ask that never answers is given up, and the next one draws the car (%r asks)'
+       % _ht.get('asks'), (_ht.get('newer') or {}).get('dots'), [[33.9616, -84.5499]])
+    eq('a late answer does not overwrite a newer one: the dot stays where the car is now',
+       (_ht.get('after') or {}).get('dots'), [[33.9616, -84.5499]])
+    eq('...and never two asks out at once', _ht.get('most'), 1)
 
     # --- the miles nobody paid for ------------------------------------------
     #
