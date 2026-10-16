@@ -1418,6 +1418,56 @@ if TC.available():
                 'another figure (%r)' % (_name, (_p['pay'], _p['miles'], _p['deliverBy'])),
                 _p['pay'] is None or (_p['pay'], _p['miles'], _p['deliverBy']) == (14.48, 8.6, 975))
 
+# --- a read that hangs does not hold the process open ----------------------------
+# The read pool's threads were a ThreadPoolExecutor's, which the interpreter
+# joins on the way out: a read stuck inside the engine kept the scanner alive
+# after it had stopped, for as long as the read lasted (30.4 s for a read held
+# 30 s, measured through scan_pi.Reader) — for ever for one that never returns.
+# A real paired read, in its own interpreter, with the read held 60 s; the
+# process must be gone well before that.
+import subprocess                                              # noqa: E402
+import time as _time                                           # noqa: E402
+
+_HUNG = '''
+import sys, threading, time
+sys.path.insert(0, %r)
+import numpy as np
+import pipeline as PL
+PL.Scanner._look = lambda self, frame, now=None, geom=None: time.sleep(60)
+sc = PL.Scanner(quad=np.array([[0, 0], [99, 0], [99, 199], [0, 199]], np.float32))
+frame = np.zeros((200, 100, 3), np.uint8)
+threading.Thread(target=sc.look_many, args=([frame, frame],), daemon=True).start()
+time.sleep(0.5)
+''' % os.path.dirname(os.path.abspath(__file__))
+_t0 = _time.monotonic()
+try:
+    _left = subprocess.run([sys.executable, '-c', _HUNG], capture_output=True, timeout=90,
+                           env=dict(os.environ, OMP_THREAD_LIMIT='1')).returncode
+except subprocess.TimeoutExpired:
+    _left = 'still running at 90 s'
+_took = _time.monotonic() - _t0
+ok_('a hung paired read does not delay exit past ~4 s (exited %r after %.1f s)'
+    % (_left, _took), _left == 0 and _took < 4.0)
+
+# ...and the engine a hung read is still inside is not ended under it at exit.
+class _Engine(object):
+    def __init__(self, reading):
+        self.reading, self.closed = reading, False
+
+    def close(self):
+        self.closed = True
+
+
+_held = PL._TESS_OPEN[:]
+_busy, _idle = _Engine(True), _Engine(False)
+PL._TESS_OPEN[:] = [_busy, _idle]
+try:
+    PL._close_engines()
+finally:
+    PL._TESS_OPEN[:] = _held
+eq('at exit an engine a read is still inside is left alone, and an idle one is closed',
+   (_busy.closed, _idle.closed), (False, True))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d pipeline checks passed' % ok)
 sys.exit(1 if bad else 0)
