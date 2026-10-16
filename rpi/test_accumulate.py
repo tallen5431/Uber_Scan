@@ -1628,6 +1628,66 @@ eq('a DoorDash stops card merged across frames is whole, its stores and stop cou
     _dd['stops']),
    (True, 7.8, 30.0, 'Corner Bagel Co', None, 3))
 
+# --- the wall clock stepping --------------------------------------------------
+# add() times only gaps — QUIET, and the window that closes after `window`
+# seconds of nothing — so its own clock is the monotonic one. It was the wall
+# clock, which NTP steps. Driven here the way the loop drives it, without a
+# `now`, on a clock whose wall half steps and whose monotonic half does not.
+import accumulate as _AC                                     # noqa: E402
+
+
+class _Stepped(object):
+    def __init__(self):
+        self.mono, self.step = 100.0, 0.0
+
+    def monotonic(self):
+        return self.mono
+
+    def time(self):
+        return 1_790_000_000.0 + self.mono + self.step
+
+
+_clk, _was_time = _Stepped(), _AC.time
+_AC.time = _clk
+try:
+    _card = P.parse('$16.05 3 min (1.1 mi) away 20 min (7.3 mi) trip')
+    _w = OfferAccumulator()
+    _first = _w.add(dict(_card))['episode']
+    _clk.step, _clk.mono = 3600.0, _clk.mono + 0.5
+    eq('the wall clock stepping forward an hour between two reads of one card '
+       'does not close its window', _w.add(dict(_card))['episode'], _first)
+    _w = OfferAccumulator()
+    _clk.step = 0.0
+    _first = _w.add(dict(_card))['episode']
+    _clk.step, _clk.mono = -3600.0, _clk.mono + _AC.WINDOW + 1.0
+    ok_('...and stepping back an hour does not hold it open past its window of '
+        'nothing', _w.add(dict(_card))['episode'] != _first)
+finally:
+    _AC.time = _was_time
+
+# --- a card read 10,000 times ---------------------------------------------------
+# A card can sit on the phone for as long as the driver leaves it, and every
+# vote here was a list that grew by one a frame and was walked on every add —
+# 24.3 ms an add at 7,200 frames, measured. They are tallies now, one entry per
+# value read. Three readings of one card, in turn, as OCR gives them.
+import time as _time                                           # noqa: E402
+
+_reads = [P.parse('$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip 123 Ab St, Acworth'),
+          P.parse('$12.45 5 min (1.2 mi) away 28 min (8.4 mi) trip 123 Ab St, Acworth'),
+          P.parse('$12.45 5 min (1.2 mi) away 23 min (3.4 mi) trip 123 Ab St, Acworth')]
+_long = OfferAccumulator()
+for _i in range(10000):
+    _last = _long.add(dict(_reads[_i % 3]), now=1000.0 + _i * 0.5)
+eq('the premise: 10,000 reads of one card are one episode', _last['mergedFrom'], 10000)
+_sizes = sorted(len(slot[k]) for slot in _long.legs for k in ('minutes', 'miles'))
+ok_('a card read 10,000 times keeps one entry per value read, not one per frame (%r)'
+    % _sizes, _sizes and max(_sizes) <= 3)
+_t0 = _time.perf_counter()
+for _i in range(50):
+    _long.add(dict(_reads[_i % 3]), now=6000.0 + _i * 0.5)
+_ms = (_time.perf_counter() - _t0) / 50 * 1e3
+ok_('...and an add after them still costs under 2 ms (%.2f ms)' % _ms, _ms < 2.0)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d accumulator checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -90,15 +90,23 @@ class OfferAccumulator:
         self.legs = []          # [{'minutes': [...], 'miles': [...], 'isTotal': bool,
                                 #   'labelled': bool, 'isApproach': bool,
                                 #   'lostSeen': n, 'seen': n}]
-        self.items = []
-        self.stops = []         # DoorDash's printed stop count, per frame
+        # Every vote below is a TALLY, {value: frames that read it}, not a list
+        # of what each frame read. A list grew by one a frame for as long as a
+        # card sat there, and the slot lookups and votes walked all of it on
+        # every add: 24.3 ms an add once a ride card had been read 7,200 times
+        # (0.23 ms at 10), measured on this machine, on a Pi loop that adds
+        # twice a read. _consensus only ever
+        # asks how many frames read each value, so the tallies give it exactly
+        # the same answer (rpi/test_accumulate.py, "a card read 10,000 times").
+        self.items = {}
+        self.stops = {}         # DoorDash's printed stop count, per frame
         # Deadlines seen this window. A delivery card gives one instead of a
         # duration, so it is the denominator of the whole verdict — and it was
         # the only money-moving field taken from the last frame rather than
         # voted on. One frame reading "7:15" as "9:15" moved a 46-minute job to
         # 166 minutes, and the other way round it moves it the other way, which
         # is a PASS shown as an ACCEPT.
-        self.deadlines = []
+        self.deadlines = {}
         # Where the card said the job goes, from every frame of this window
         # rather than from the last one.
         #
@@ -261,13 +269,13 @@ class OfferAccumulator:
         # nothing reads it — see `merged['milesHadDecimal']`.
         self.had_decimal = False
         # A distance no leg carried, and whether the frame that read it printed
-        # a decimal point: [(miles, had_decimal), ...]. Kept as pairs, not as
+        # a decimal point: {(miles, had_decimal): frames}. Kept as pairs, not as
         # two lists, because the flag is a fact about the reading and not about
         # the card — see `merged['milesHadDecimal']` for why that distinction is
         # the whole point. Voted on like everything else that moves money: 19
         # cards on file take this path, the "Add a delivery" shape, where a plus
         # inside the bracket defeats the leg's own distance group.
-        self.lone_miles = []
+        self.lone_miles = {}
         # Whether the best reading so far still has a distance it could not
         # attribute to a leg.
         #
@@ -365,7 +373,7 @@ class OfferAccumulator:
         found = self._find_slot(leg, taken)
         if found is not None:
             return found
-        self.legs.append({'minutes': [], 'miles': [], 'isTotal': False,
+        self.legs.append({'minutes': {}, 'miles': {}, 'isTotal': False,
                           'labelled': False, 'isApproach': False,
                           'lostSeen': 0, 'seen': 0})
         return len(self.legs) - 1
@@ -476,7 +484,7 @@ class OfferAccumulator:
         deadline = parsed.get('deliverBy')
         miles = parsed.get('miles')
         seen_by = _consensus(self.deadlines) if self.deadlines else None
-        seen_miles = (_consensus([v for v, _ in self.lone_miles])
+        seen_miles = (_consensus(_values(self.lone_miles))
                       if self.lone_miles else None)
         moved_by = (deadline is not None and seen_by is not None
                     and deadline != seen_by)
@@ -490,7 +498,14 @@ class OfferAccumulator:
         Returns a dict shaped like a parse result, so callers can hand it
         straight to rate() without caring how many frames it came from.
         """
-        now = time.time() if now is None else now
+        # The monotonic clock: `now` only ever measures the gap since the last
+        # reading (QUIET, the stale window), never a moment anything is stamped
+        # with. On the wall clock an NTP step forward between two reads of one
+        # card made the gap an hour and closed the window on it, a new episode
+        # for the same card; a step back made every gap negative, so neither
+        # QUIET nor the window could close it again until the clock caught up
+        # (rpi/test_accumulate.py, "the wall clock stepping").
+        now = time.monotonic() if now is None else now
         pay = parsed.get('pay')
 
         # Nothing to key on, or nothing to add: pass it through untouched.
@@ -541,8 +556,8 @@ class OfferAccumulator:
         self.had_decimal = self.had_decimal or bool(parsed.get('milesHadDecimal'))
         if parsed.get('miles') is not None and not any(
                 l.get('miles') is not None for l in detail):
-            self.lone_miles.append((parsed['miles'],
-                                    bool(parsed.get('milesHadDecimal'))))
+            _tally(self.lone_miles, (parsed['miles'],
+                                     bool(parsed.get('milesHadDecimal'))))
         _timed_here = len(detail)
         if _timed_here > self.most_timed:
             # A fuller reading than anything before it, so its answer governs
@@ -622,9 +637,9 @@ class OfferAccumulator:
             taken.add(index)
             slot = self.legs[index]
             slot['seen'] += 1
-            slot['minutes'].append(leg['minutes'])
+            _tally(slot['minutes'], leg['minutes'])
             if leg.get('miles') is not None:
-                slot['miles'].append(leg['miles'])
+                _tally(slot['miles'], leg['miles'])
             # One frame calling it a total is enough; the word is rarely
             # hallucinated and missing it is the common failure.
             slot['isTotal'] = slot['isTotal'] or bool(leg.get('isTotal'))
@@ -704,11 +719,11 @@ class OfferAccumulator:
             self.max_other = max(self.max_other, len(_touched) - _here)
 
         if parsed.get('items') is not None:
-            self.items.append(parsed['items'])
+            _tally(self.items, parsed['items'])
         if parsed.get('stops') is not None:
-            self.stops.append(parsed['stops'])
+            _tally(self.stops, parsed['stops'])
         if parsed.get('deliverBy') is not None:
-            self.deadlines.append(parsed['deliverBy'])
+            _tally(self.deadlines, parsed['deliverBy'])
         # Capped where the parser caps its own list, so a window of frames that
         # each read the map slightly differently cannot grow one.
         # The parser's own rule, on this frame's own text, before the union
@@ -859,7 +874,7 @@ class OfferAccumulator:
         had_decimal = self.had_decimal
         lone_uncertain = False
         if miles is None and self.lone_miles:
-            miles = _consensus([v for v, _ in self.lone_miles])
+            miles = _consensus(_values(self.lone_miles))
             # ...and the decimal point travels WITH the winning reading, rather
             # than being ORed across the window like the flags above it. The
             # difference is the whole case this flag exists for. "2.4 mi" read
@@ -1216,8 +1231,26 @@ def _consensus(values):
     """
     if not values:
         return 0
-    counts = {}
-    for v in values:
-        counts[v] = counts.get(v, 0) + 1
+    # A tally ({value: frames}, see reset) is the counts already.
+    if isinstance(values, dict):
+        counts = values
+    else:
+        counts = {}
+        for v in values:
+            counts[v] = counts.get(v, 0) + 1
     best = max(counts.values())
     return max(v for v, c in counts.items() if c == best)
+
+
+def _tally(counts, value):
+    """One more frame read `value`. See reset: every vote is a tally."""
+    counts[value] = counts.get(value, 0) + 1
+
+
+def _values(pairs):
+    """The tally of distances out of `lone_miles`' tally of (miles, decimal)
+    pairs, in the order each distance was first read."""
+    counts = {}
+    for (value, _), n in pairs.items():
+        counts[value] = counts.get(value, 0) + n
+    return counts

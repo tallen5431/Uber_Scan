@@ -28,6 +28,7 @@ to 88.3ms. See _Tesseract.
 import atexit
 import ctypes
 import os
+import queue
 import shlex
 import tempfile
 import threading
@@ -1076,6 +1077,9 @@ class _Tesseract:
             lib.TessBaseAPISetVariable(self.api, key.encode(), str(value).encode())
         _TESS_OPEN.append(self)
 
+    # True while a read is inside the engine. See _close_engines.
+    reading = False
+
     def read(self, image, psm, tsv):
         # Greyscale and contiguous, which is what SetImage is being told it is.
         # A picture that is neither would be read as noise rather than refused.
@@ -1083,17 +1087,21 @@ class _Tesseract:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         buf = np.ascontiguousarray(image, dtype=np.uint8)
         height, width = buf.shape[:2]
-        self.lib.TessBaseAPISetPageSegMode(self.api, int(psm))
-        self.lib.TessBaseAPISetImage(self.api, buf.ctypes.data,
-                                     width, height, 1, width)
-        got = (self.lib.uberscan_tsv(self.api, 0) if tsv
-               else self.lib.TessBaseAPIGetUTF8Text(self.api))
-        if not got:
-            return ''
+        self.reading = True
         try:
-            return ctypes.string_at(got).decode('utf-8', 'replace')
+            self.lib.TessBaseAPISetPageSegMode(self.api, int(psm))
+            self.lib.TessBaseAPISetImage(self.api, buf.ctypes.data,
+                                         width, height, 1, width)
+            got = (self.lib.uberscan_tsv(self.api, 0) if tsv
+                   else self.lib.TessBaseAPIGetUTF8Text(self.api))
+            if not got:
+                return ''
+            try:
+                return ctypes.string_at(got).decode('utf-8', 'replace')
+            finally:
+                self.lib.TessDeleteText(ctypes.c_void_p(got))
         finally:
-            self.lib.TessDeleteText(ctypes.c_void_p(got))
+            self.reading = False
 
     def close(self):
         if self.api:
@@ -1114,13 +1122,51 @@ _READ_POOL = None
 _READ_POOL_LOCK = threading.Lock()
 
 
+class _DaemonPool(object):
+    """A fixed pair of DAEMON threads with ThreadPoolExecutor.map's answer.
+
+    It was a ThreadPoolExecutor, whose workers are not daemons: the interpreter
+    joins them on the way out, so a read hung inside the engine kept the
+    process alive after the loop had stopped and Reader.close had given up on
+    it (3 s) — the scanner did not exit, and only the supervisor's SIGKILL
+    ended it. Measured with a read held 30 s: the process left at 30.4 s, and a
+    read that never returns holds it for ever. A daemon thread is not waited
+    for (rpi/test_pipeline.py, "a hung paired read does not delay exit").
+
+    The same two threads for the life of the process, as before, because the
+    engine belongs to the thread (see _in_process); and the answer in frame
+    order, raising the first frame's exception in that order, as map() did.
+    """
+
+    def __init__(self, workers, name):
+        self._jobs = queue.Queue()
+        for i in range(workers):
+            threading.Thread(target=self._serve, name='%s_%d' % (name, i),
+                             daemon=True).start()
+
+    def _serve(self):
+        while True:
+            done, fn, arg = self._jobs.get()
+            try:
+                done.set_result(fn(arg))
+            except BaseException as e:            # noqa: BLE001 — handed back
+                done.set_exception(e)
+
+    def map(self, fn, items):
+        pending = []
+        for item in items:
+            done = futures.Future()
+            self._jobs.put((done, fn, item))
+            pending.append(done)
+        return [done.result() for done in pending]
+
+
 def _read_pool():
     global _READ_POOL
     if _READ_POOL is None:
         with _READ_POOL_LOCK:
             if _READ_POOL is None:
-                _READ_POOL = futures.ThreadPoolExecutor(
-                    max_workers=_READ_WORKERS, thread_name_prefix='ocr')
+                _READ_POOL = _DaemonPool(_READ_WORKERS, 'ocr')
     return _READ_POOL
 
 
@@ -1136,6 +1182,12 @@ MAX_ENGINES = 4
 
 def _close_engines():
     for engine in list(_TESS_OPEN):
+        # Not one a read is still inside. The read threads are daemons now (see
+        # _DaemonPool), so the process can reach here with a hung read still in
+        # the engine; ending the engine under it is freeing memory the read is
+        # using, at exit. Left open, the process ends and takes it anyway.
+        if getattr(engine, 'reading', False):
+            continue
         try:
             engine.close()
         except Exception:

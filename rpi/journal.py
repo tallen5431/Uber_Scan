@@ -286,6 +286,23 @@ class Journal:
                 if _ends_mid_line(fh):
                     fh.write('\n')
                 fh.write(line)
+                # ...and on the card before this says it landed. Closing a file
+                # hands its bytes to the page cache, not to the SD card: with
+                # ext4's delayed allocation an appended row can wait for
+                # writeback, up to the kernel's 30 s dirty expiry and its 5 s
+                # writeback beat (defaults, not measured on the rig), so a
+                # power cut — the car switched off — lost every row of the last
+                # half minute, with `landed` already saying they were kept.
+                # Per row rather than once a second: a bound needs a timer or a
+                # loop hook for the row nothing follows, and still loses up to
+                # its second. Measured on the development box's ext4 disk:
+                # 0.21 ms median a row, 0.33-0.44 ms p90, 6 ms worst of 300,
+                # against 0.008 ms without; the Pi's card is not measured. The
+                # wear is one small synced write per row, and the busiest day
+                # on record is about 1,300 rows (WEEK_BYTES' busiest day over
+                # its 1,752-byte row).
+                fh.flush()
+                os.fsync(fh.fileno())
             self.written += 1
             self._error = None
             return True
@@ -588,7 +605,10 @@ class Journal:
     def _complain(self, e):
         """Say it once, then again every few minutes for as long as it lasts."""
         message = str(e)
-        now = time.time()
+        # The monotonic clock: this is an interval, and on the wall clock an NTP
+        # step back of an hour silenced a journal that was still failing for
+        # that hour (rpi/test_journal.py, "...however the wall clock steps").
+        now = time.monotonic()
         fresh = message != self._error
         due = (self._said_at is None
                or now - self._said_at >= self.REPEAT_AFTER_S)

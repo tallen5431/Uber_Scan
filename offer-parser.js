@@ -954,7 +954,9 @@
    *
    * Capitalised words only, and at most four each side, so this anchors on a
    * street name rather than on the first ampersand in a line of icon sludge. */
-  var PLACE_JUNCTION_AT = /(?:[A-Z][A-Za-z'.]*\s+){0,3}[A-Z][A-Za-z'.]*\s*&\s*(?:[A-Z][A-Za-z'.]*\s+){0,3}[A-Z][A-Za-z'.]*/g;
+  // Not from a capital with a capital before it: the same seam, found from the
+  // capital before. See PLACE_JUNCTION_AT in offer_parser.py.
+  var PLACE_JUNCTION_AT = /(?<![A-Z])(?:[A-Z][A-Za-z'.]*\s+){0,3}[A-Z][A-Za-z'.]*\s*&\s*(?:[A-Z][A-Za-z'.]*\s+){0,3}[A-Z][A-Za-z'.]*/g;
 
   /* The longest thing that may be stored as one place. Named because two rules
    * consult it: `keep` refuses anything over it, and the junction seam only
@@ -1287,8 +1289,12 @@
   /* TOWN is the town's own words, named so the Trip Planner's "Marietta, GA"
      line (PLANNER_TOWN) is held to the same idea of a town as this. */
   var TOWN = '[A-Za-z][A-Za-z.\'’-]*(?:\\s+[A-Za-z][A-Za-z.\'’-]*){0,3}';
+  // ...and only where a word begins: every letter of a run was a start, each
+  // re-reading the run to its end, n²/2. See ADDRESS in offer_parser.py for the
+  // measurement and the one shape it could move a match on, which nothing on
+  // file has.
   var ADDRESS = new RegExp(
-    '(' + TOWN + ')' +
+    '(?<![A-Za-z])(' + TOWN + ')' +
     '\\s*,\\s*([A-Za-z]{2})\\s+(' + ZIP_RX + ')' +
     '(?:\\s*-\\s*[\\dOoQlIiSsBbZz]{4})?(?!\\d)', 'g');
 
@@ -1743,6 +1749,15 @@
     var lines = split.lines, heads = split.heads;
     // A headless page shows the list's foot and not its head.
     if (!heads.length) return { top: false, bottom: !!plannerHeadless(lines) };
+    // ...and a header the reader lost is neither end: a block holding two
+    // "Expected by" lines is two stops under one header, and the list between
+    // the ends was not read whole. See planner_ends in offer_parser.py.
+    for (var k = 0; k < heads.length; k++) {
+      var block = lines.slice(heads[k] + 1, k + 1 < heads.length ? heads[k + 1] : lines.length);
+      if (block.filter(function (l) { return PLANNER_EXPECTED.test(l); }).length > 1) {
+        return { top: false, bottom: false };
+      }
+    }
     var title = -1;
     for (var i = 0; i < heads[0]; i++) if (PLANNER_TITLE.test(lines[i])) title = i;
     var top = title !== -1 && !lines.slice(title + 1, heads[0])
@@ -1844,7 +1859,8 @@
   var POPUP_PICKUP = new RegExp('^[^A-Za-z]{0,3}' + POPUP_ICON + 'pick ?-?up from\\b', 'i');
   var POPUP_DROPOFF = new RegExp('^[^A-Za-z]{0,3}' + POPUP_ICON
     + '(?:custom[ea]r(?: ?drop ?-?off)?|drop ?-?off|deliver(?:ing)? to)\\b', 'i');
-  var POPUP_STATE_ZIP = /^\s*,?\s*([A-Za-z]{2})\s+(\S{5})(?![0-9A-Za-z])/;
+  // `\s*(?:,\s*)?` is `\s*,?\s*` without two runs sharing one stretch of space.
+  var POPUP_STATE_ZIP = /^\s*(?:,\s*)?([A-Za-z]{2})\s+(\S{5})(?![0-9A-Za-z])/;
   var POPUP_NAME_JUNK = /(?:\s+(?:[a-z]{1,2}|[^A-Za-z0-9\s]+))+$/;
   var POPUP_REACH = 4;
   var POPUP_TAIL = 4;
@@ -2092,17 +2108,29 @@
      it, or carries a street word beside a comma. A name is only kept once the
      street under it has been seen. The Python twin, find_stores, has the
      shift this was read off. */
+  // Two arms anchored for time, not meaning — see STORE_STREET in
+  // offer_parser.py. The comma arm starts at the first comma of a stretch `.`
+  // can cross, which here also stops at \r, U+2028 and U+2029, where
+  // Python's stops only at \n.
   var STORE_STREET = new RegExp(
     '^\\W{0,4}\\d{1,6}\\s+[A-Za-z].*(?:' + PLACE_STREET.source + '|,|\\.\\.)'
-    + '|(?:\\.{2,}|…)\\s*$|,.*' + PLACE_STREET.source + '|'
+    + '|(?:(?<!\\.)\\.{2,}|…)\\s*$|(?:^|[\\r\\u2028\\u2029])[^,\\r\\u2028\\u2029]*,.*'
+    + PLACE_STREET.source + '|'
     + PLACE_STREET.source + '.*,', 'i');
   var STORE_END = /custom[ea]r\s*drop|multiple\s*drop|\baccept\b|\bdecline\b/i;
   var STORE_CHIP = /\b(?:pick\s*up|drop\s*off)\s*\d|\bid\s*check\b|\bage\s*21/i;
   var STORES_LINE = new RegExp(
     'ps\\s*\\(\\s*' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?\\s*m(?:i|iles?)\\b\\s*\\)', 'i');
 
+  // The union of what the two languages call a space, as normalize() has it:
+  // split and trimmed on this rather than on \s and trim(), which leave
+  // U+001C-U+001F and U+0085 in a store's name where Python's split takes
+  // them out. See _store_name in offer_parser.py.
+  var STORE_SPACE = /[\s\u001c-\u001f\u0085]+/;
+  var STORE_EDGES = /^[\s\u001c-\u001f\u0085]+|[\s\u001c-\u001f\u0085]+$/g;
+
   function storeName(line) {
-    var words = line.split(/\s+/).filter(function (w) { return w.length; });
+    var words = line.split(STORE_SPACE).filter(function (w) { return w.length; });
     var cut = null, i;
     for (i = 0; i < Math.min(4, words.length); i++) {
       if (/^[A-Z]\S*[A-Za-z]/.test(words[i])) { cut = i; break; }
@@ -2141,7 +2169,7 @@
       if (!name) continue;
       // A name the card wrapped onto a second line starts with a letter and
       // no icon.
-      if (pending.length === 1 && name === line.trim()) pending.push(name);
+      if (pending.length === 1 && name === line.replace(STORE_EDGES, '')) pending.push(name);
       else pending = [name];
     }
     return out.slice(0, MAX_PLACES);

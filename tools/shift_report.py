@@ -57,7 +57,9 @@ expired before the server wrote expiry rows. `replaced`, `expiry` and no-row
 are all UNRELIABLE, marked on the row, and left out of the summary.
 
 THE GPS LOG is `gpspipe -w -uu` output in one directory, `.jsonl` or the
-`.jsonl.gz` tools/gpslog_tidy.py leaves. `-uu` stamps every line with the
+`.jsonl.gz` tools/gpslog_tidy.py leaves; of those, the logs whose names say
+they can hold the day's fixes (_logs_for), and the header says how many others
+it left unread. `-uu` stamps every line with the
 Pi's clock, the same clock the server stamps the journal with, which is what
 lets a fix be put beside a Took. Every TPV goes through gps.parse_line and
 gps.Phone.take, the path the live rig uses, with a clock reading the line's own
@@ -353,16 +355,61 @@ def _open(path):
     return open(path, encoding='utf-8', errors='replace')
 
 
-def load_fixes(directory):
+# When a log began, off its own name: gpspipe -o ~/gpslog/$(date +%F).jsonl as
+# the README has it, or with the minute after the date (2026-10-12_1934), as the
+# rig's are named. Local time, as the day is.
+_LOG_NAME = re.compile(r'^(\d{4})-(\d\d)-(\d\d)(?:_(\d\d)(\d\d))?\.jsonl(?:\.gz)?$')
+
+
+def _log_began(name):
+    """(earliest, latest) the log `name` can have begun, ms, or None when its
+    name says nothing: a date alone is the whole of that date."""
+    m = _LOG_NAME.match(name)
+    if not m:
+        return None
+    y, mo, d = (int(m.group(i)) for i in (1, 2, 3))
+    try:
+        if m.group(4) is None:
+            return (time.mktime((y, mo, d, 0, 0, 0, 0, 0, -1)) * 1000.0,
+                    time.mktime((y, mo, d + 1, 0, 0, 0, 0, 0, -1)) * 1000.0)
+        t = time.mktime((y, mo, d, int(m.group(4)), int(m.group(5)), 0, 0, 0, -1))
+    except (OverflowError, ValueError):
+        return None
+    return t * 1000.0, (t + 60.0) * 1000.0
+
+
+def _logs_for(names, window):
+    """The logs among `names` that can hold a fix in [lo, hi) ms: every one
+    that may have begun inside it, and the newest that began before it — the
+    one running across the day's start (or midnight) — and any whose name
+    gives no date. A log older than that neighbour ended before it began, as
+    gpspipe is started once per run."""
+    lo, hi = window
+    began = {n: _log_began(n) for n in names}
+    before = [n for n in names if began[n] is not None and began[n][1] <= lo]
+    neighbour = max(before, key=lambda n: began[n][0]) if before else None
+    return [n for n in names if began[n] is None or n == neighbour
+            or (began[n][1] > lo and began[n][0] < hi)]
+
+
+def load_fixes(directory, window=None):
     """(fixes, info). `fixes` is [(t, lat, lon)] for every fix gps.usable()
     passed, sorted by t (seconds, the Pi's clock), or None when there is no
-    log at all. `info` counts what was read and what was refused, and why."""
+    log at all. `info` counts what was read and what was refused, and why.
+
+    `window`, [lo, hi) in ms: read only the logs that can hold a fix in it, by
+    their names (_logs_for); `info['otherDays']` counts the ones left unread.
+    Every log, as before, without it."""
     info = {'files': 0, 'positions': 0, 'passed': 0, 'refused': collections.Counter(),
-            'unstamped': 0, 'beforeClock': 0}
+            'unstamped': 0, 'beforeClock': 0, 'otherDays': 0}
     if not directory or not os.path.isdir(directory):
         return None, info
     names = sorted(n for n in os.listdir(directory)
                    if n.endswith('.jsonl') or n.endswith('.jsonl.gz'))
+    if window is not None:
+        keep = _logs_for(names, window)
+        info['otherDays'] = len(names) - len(keep)
+        names = keep
     fixes = []
     for name in names:
         info['files'] += 1
@@ -495,7 +542,6 @@ def report(journal, gps_dir, day):
     rows, bad = read_journal(journal)
     start, end = day_window(day)
     every = orders(rows)
-    fixes, info = load_fixes(gps_dir)
     mine = []
     for o in every:
         when = o['took']
@@ -503,16 +549,27 @@ def report(journal, gps_dir, day):
             continue
         if start <= when < end:
             mine.append(o)
-    # Orders marked taken with no Took are placed by their card's own time.
+    # Orders marked taken with no Took are placed by their card's own time:
+    # the first reading of it in the file. One pass for all of them — this
+    # walked the journal once per such order: 0.54 s for 189 of them over a
+    # 45 MB journal's 43,291 rows, and 0.023 s as one pass (measured).
+    first = {}
+    for r in rows:
+        if r.get('kind') is None and r.get('id') and _num(r.get('at')):
+            first.setdefault(r['id'], r['at'])
     for o in every:
         if o['took'] is None:
-            at = None
-            for r in rows:
-                if r.get('kind') is None and r.get('id') == o['id'] and _num(r.get('at')):
-                    at = r['at']
-                    break
+            at = first.get(o['id'])
             if at is not None and start <= at < end:
                 mine.append(o)
+    # ...and only the GPS logs that can hold a fix those orders are measured
+    # over: from the day's start to its end, or to the last of its orders'
+    # ends and the NEAR_S a stop is looked for past it, if later. Every log in
+    # the directory was read, which on the rig is up to KEEP_DAYS of them
+    # (tools/gpslog_tidy.py) for one day's report.
+    reach = max([end] + [(o['end'] if o['end'] is not None else o['took']) + NEAR_S * 1000.0
+                         for o in mine if o['took'] is not None])
+    fixes, info = load_fixes(gps_dir, (start, reach))
     for o in mine:
         measure(o, fixes)
         # Only over a delivery. A replaced order's minutes run to the next
@@ -597,7 +654,10 @@ def text(rep):
                       ''.join('; not used: %d %s' % (info[k], w) for k, w in
                               (('unstamped', 'with no -uu stamp'),
                                ('beforeClock', 'stamped before the clock was set'))
-                              if info[k])))
+                              if info[k])
+                      + (('; %d log%s of other days not read'
+                          % (info['otherDays'], '' if info['otherDays'] == 1 else 's'))
+                         if info.get('otherDays') else '')))
     if info['unreadable']:
         out.append('Journal: %d unreadable line%s skipped'
                    % (info['unreadable'], '' if info['unreadable'] == 1 else 's'))

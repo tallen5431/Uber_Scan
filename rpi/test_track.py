@@ -754,6 +754,73 @@ eq('a phone the corners are already on is left alone',
 eq('an empty mount adopts nothing',
    _watch(np.full((_CH, _CW), 18, np.uint8)).centred, 0)
 
+# --- the wall clock stepping back --------------------------------------------
+# Everything the tracker times is an interval, so its own clock is the
+# monotonic one. It was the wall clock, which NTP steps: an hour back, and the
+# recheck (`now - _last_check < recheck`) stopped for the hour, while a dispute
+# open across the step stayed open for the hour too — and the loop puts off
+# every read it wants while one is open. Driven here the way the loop drives
+# it, without a `now`, on a clock whose wall half steps and whose monotonic
+# half does not, as on a Pi that NTP has just corrected.
+class _SteppedClock(object):
+    """time.time() and time.monotonic(), moved by hand; the wall one steps."""
+
+    def __init__(self):
+        self.mono = 5000.0
+        self.step = 0.0
+
+    def monotonic(self):
+        return self.mono
+
+    def time(self):
+        return 1_790_000_000.0 + self.mono + self.step
+
+
+_clock = _SteppedClock()
+_real_clock, _real_detect = T.time, T.PL.detect_screen_quad
+_detects = [0]
+
+
+def _counted(*a, **k):
+    _detects[0] += 1
+    return _real_detect(*a, **k)
+
+
+T.time, T.PL.detect_screen_quad = _clock, _counted
+try:
+    _st = T.QuadTracker(start.copy(), calibrated=start.copy())
+    _home = frame_with_phone(400, 140)
+    for _i in range(10):
+        _clock.mono += 0.1
+        _st.update(_home)
+    _before = _detects[0]
+    _clock.step = -3600.0
+    for _i in range(100):                 # the next 10 s, a frame every 0.1 s
+        _clock.mono += 0.1
+        _st.update(_home)
+    _after = _detects[0] - _before
+    ok_('the tracker goes on rechecking after the wall clock steps back an hour '
+        '(%d rechecks in the next 10 s, one every %.1f s due)' % (_after, T.RECHECK_EVERY),
+        _after >= int(10.0 / T.RECHECK_EVERY) - 1)
+
+    # A dispute open when the clock steps: the phone well away from the corners.
+    _clock.step = 0.0
+    _st = T.QuadTracker(start.copy(), calibrated=start.copy())
+    _st.update(frame_with_phone(*far))
+    ok_('the premise: a screen well away from the corners opens a dispute', _st.disputing())
+    _clock.step = -3600.0
+    _clock.mono += T.DISPUTE_PATIENCE + 0.1
+    ok_('...and a dispute open across a step back ends after its patience, not an '
+        'hour later', not _st.disputing())
+    _clock.step = 0.0
+    _st = T.QuadTracker(start.copy(), calibrated=start.copy())
+    _st.update(frame_with_phone(*far))
+    _clock.step = 3600.0
+    _clock.mono += 0.1
+    ok_('...nor is one cut short by a step forward', _st.disputing())
+finally:
+    T.time, T.PL.detect_screen_quad = _real_clock, _real_detect
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d tracker checks passed' % ok)
 sys.exit(1 if bad else 0)

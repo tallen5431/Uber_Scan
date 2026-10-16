@@ -5978,11 +5978,13 @@ def _beats(fixes):
     time.sleep(0.2)
 
 
-def _took(base, oid, dropoff=_DOOR):
+def _took(base, oid, dropoff=_DOOR, multi=False):
+    # One customer, as every offer line from a current scanner says it
+    # (`multiOrder`): only such a card arms the GPS drop (notOneCustomer).
     post(base, '/api/offers/mark', {
         'id': oid, 'accepted': True,
         'offer': {'id': oid, 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
-                  'miles': 5.0, 'cost': 1.75, 'dropoff': dropoff}})
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': dropoff, 'multiOrder': multi}})
     return (get(base, '/api/status').get('holding') or {})
 
 
@@ -6053,6 +6055,27 @@ try:
        _pin(_gb, _h, name='Kestrel Drive, Marietta')[1].get('error'), 'not door level')
     _beats(_DWELL + _LEAVE)
     ok_('[gps drop] an end that is not door-level never drops', _holding(_gb))
+    post(_gb, '/api/delivered', {})
+
+    # A card for two customers ("Drop off 2 orders", a batched trip) is one
+    # order with two doors: the car stops at the first and leaves for the
+    # second with the order still half in the car. Only a card that says one
+    # customer arms (notOneCustomer) — and one too old to say does not either.
+    _h = _took(_gb, 'g-two', multi=True)
+    _pin(_gb, _h)
+    _beats(_DWELL + _LEAVE)
+    eq('a two-customer card\'s first door does not put it down',
+       (bool(_holding(_gb)), _drops('g-two')), (True, []))
+    eq('...and the panel is told why the GPS drop is not armed',
+       {k: (_holding(_gb) or {}).get(k) for k in ('endPinned', 'endWhy')},
+       {'endPinned': True, 'endWhy': 'two customers'})
+    post(_gb, '/api/delivered', {})
+    _h = _took(_gb, 'g-unsaid', multi=None)
+    _pin(_gb, _h)
+    _beats(_DWELL + _LEAVE)
+    eq('...nor does a card that never said how many customers',
+       (bool(_holding(_gb)), _drops('g-unsaid'), (_holding(_gb) or {}).get('endWhy')),
+       (True, [], 'customer count unread'))
     post(_gb, '/api/delivered', {})
 
     # A pin made for the previous order is refused.
@@ -6157,7 +6180,8 @@ try:
     _r = post(_gb, '/api/offers/mark', {
         'id': 'g-stream', 'accepted': True,
         'offer': {'id': 'g-stream', 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
-                  'miles': 5.0, 'cost': 1.75, 'dropoff': 'Kestrel Dr, Marietta'}})[1]
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': 'Kestrel Dr, Marietta',
+                  'multiOrder': False}})[1]
     eq('[gps drop] ...and the order the stream describes carries it too',
        _state(_r.get('held')), {'endPinned': False, 'arrived': False, 'endWhy': None})
     post(_gb, '/api/delivered', {})
@@ -6275,7 +6299,7 @@ finally:
 # (503) or slow on cue and counts every search it was sent. Card fixes at
 # Marietta Square, as the fake's own; addresses invented.
 _SQ = {'lat': 33.9526, 'lon': -84.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3,
-       'gpsAge': 0.5, 'hasTotal': True, 'whole': True}
+       'gpsAge': 0.5, 'hasTotal': True, 'whole': True, 'multiOrder': False}
 _COBB = '1985 Cobb Parkway, Kennesaw'      # three door answers, 3.4 mi from the Square
 _KES = '4821 Kestrel Dr, Marietta'         # its street only, no number
 
@@ -7742,7 +7766,8 @@ try:
             post(_vb, '/api/offers/mark', {
                 'id': oid, 'accepted': True,
                 'offer': {'id': oid, 'pay': pay, 'minutes': 40.0, 'billedMinutes': 40.0,
-                          'miles': miles, 'cost': 1.75, 'pickup': store, 'dropoff': end}})
+                          'miles': miles, 'cost': 1.75, 'pickup': store, 'dropoff': end,
+                          'multiOrder': False}})
         _vcard('v-a', 12.0, 'Example Diner', 5.0, '4821 Kestrel Dr, Marietta')
         _vcard('v-b', 9.0, 'Example Grill', 3.0, '77 Birch Ln, Roswell')
         _two = get(_vb, '/api/status').get('orders') or []
@@ -7918,6 +7943,807 @@ try:
         stop(_pp)
 finally:
     shutil.rmtree(_pdir, ignore_errors=True)
+
+# --- a scanner that says what the suite tells it, when it tells it ------------
+#
+# The sections below each start a server on a fake scanner that prints every
+# line the suite appends to its queue, as it arrives — a card, a beat, a
+# sighting, a dropoff — so a check puts each one exactly where its fault needs
+# it. The server's own output is kept in a file beside the journal, for the
+# checks about what it says. Every store, street and customer invented.
+_QFAKE = (
+    'import sys, time\n'
+    'q = sys.argv[1]\n'
+    'pos = 0\n'
+    'buf = ""\n'
+    'while True:\n'
+    '    try:\n'
+    '        with open(q) as fh:\n'
+    '            fh.seek(pos)\n'
+    '            data = fh.read()\n'
+    '            pos = fh.tell()\n'
+    '    except OSError:\n'
+    '        data = ""\n'
+    '    if data:\n'
+    '        buf += data\n'
+    '        got = buf.split("\\n")\n'
+    '        buf = got.pop()\n'
+    '        for line in got:\n'
+    '            if line:\n'
+    '                print(line, flush=True)\n'
+    '    else:\n'
+    '        time.sleep(0.01)\n')
+
+
+class _Q(object):
+    """One server on the queue fake. `dir` holds its journal, holding.json and
+    log; `emit` sends a line; `card` puts an offer on the slot and waits for it."""
+
+    def __init__(self, carry=False, env=None, holding=None, root=None):
+        self.dir = tempfile.mkdtemp()
+        self.journal = os.path.join(self.dir, 'journal.jsonl')
+        open(self.journal, 'w').close()
+        self.queue = os.path.join(self.dir, 'queue')
+        open(self.queue, 'w').close()
+        self.hold = os.path.join(self.dir, 'holding.json')
+        if holding is not None:
+            with open(self.hold, 'w') as fh:
+                fh.write(holding)
+        fake = os.path.join(self.dir, 'qfake.py')
+        with open(fake, 'w') as fh:
+            fh.write(_QFAKE)
+        e = {'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+             'SCANNER_ARGS': fake + ' ' + self.queue, 'SCANNER_SILENT_MS': '600000',
+             'UBERSCAN_HANDOFF_DIR': self.dir}
+        # None: no override, so the flag is read off <root>/rpi/config.json.
+        e['CARRY_TWO'] = '' if carry is None else '1' if carry else '0'
+        e.update(env or {})
+        self.logpath = os.path.join(self.dir, 'server.log')
+        self._log = open(self.logpath, 'w')
+        port = free_port()
+        self.proc = subprocess.Popen(
+            ['node', os.path.join(root or ROOT, 'server.js')],
+            env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=self.journal, **e),
+            stdout=self._log, stderr=self._log)
+        self.base = 'http://127.0.0.1:%d' % port
+        for _ in range(120):
+            try:
+                urllib.request.urlopen(self.base + '/api/status', timeout=1).read()
+                return
+            except Exception:
+                time.sleep(0.1)
+        self.stop()
+        raise RuntimeError('the server never came up')
+
+    def emit(self, obj):
+        with open(self.queue, 'a') as fh:
+            fh.write(json.dumps(obj) + '\n')
+
+    def status(self):
+        return get(self.base, '/api/status')
+
+    def card(self, oid, pay, minutes, app, **extra):
+        o = {'id': oid, 'pay': pay, 'minutes': minutes, 'billedMinutes': minutes,
+             'miles': 6.0, 'cost': 1.8, 'perHour': 20.0, 'state': 'warn', 'app': app,
+             'screen': app + '.offer', 'pickup': 'Store ' + oid, 'dropoff': None,
+             'whole': True, 'legs': 2, 'multiOrder': False}
+        o.update(extra)
+        self.emit({'offer': o})
+        for _ in range(200):
+            if (self.status().get('offer') or {}).get('id') == oid:
+                return o
+            time.sleep(0.02)
+        raise RuntimeError('the card never landed: ' + oid)
+
+    def took(self, oid, via='panel', **extra):
+        body = {'id': oid, 'accepted': True}
+        if via is not None:
+            body['via'] = via
+        body.update(extra)
+        return post(self.base, '/api/offers/mark', body)[1]
+
+    def rows(self, kind=None):
+        out = [json.loads(l) for l in open(self.journal) if l.strip()]
+        return [r for r in out if kind is None or r.get('kind') == kind]
+
+    def log(self):
+        self._log.flush()
+        return open(self.logpath).read()
+
+    def stop(self):
+        stop(self.proc)
+        self._log.close()
+
+    def gone(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def _settle(seconds=0.6):
+    time.sleep(seconds)
+
+
+# --- two orders in the car: a list with more dropoffs than orders left --------
+#
+# Carrying two on. An Uber card for two customers is taken, and a DoorDash
+# order beside it; the Trip Planner is read whole, unpressed, with the two
+# customers' doors on it. The hard rules leave one order (the app rules the
+# DoorDash order out) and the list has two dropoffs, so `only` would be a guess
+# between that order's two customers — or a customer of no order of ours.
+# assemble.js attribute(): `only` is not allowed there. The same list read just
+# before a second Uber Took lands, so that order is ruled out by the read's own
+# time, is the same shape.
+_PLAN2 = [
+    {'kind': 'pickup', 'orders': 2, 'name': 'Wren Street Noodles', 'expectedBy': 1100,
+     'line': '1 Mill St, Roswell', 'street': '1 Mill St', 'city': 'Roswell',
+     'state': None, 'zip': None},
+    {'kind': 'dropoff', 'orders': 1, 'name': 'Mara T.', 'expectedBy': 1130,
+     'line': '20 Larch Way, Kennesaw', 'street': '20 Larch Way', 'city': 'Kennesaw',
+     'state': None, 'zip': None},
+    {'kind': 'dropoff', 'orders': 1, 'name': 'Jules K.', 'expectedBy': 1150,
+     'line': '30 Teal Ct, Smyrna', 'street': '30 Teal Ct', 'city': 'Smyrna',
+     'state': None, 'zip': None}]
+
+
+def _planner2(q, at):
+    q.emit({'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': True,
+                         'app': 'uber', 'screen': 'uber.planner',
+                         'page': {'top': True, 'bottom': True}, 'stops': _PLAN2,
+                         'orderCount': 2, 'keep': True}})
+    q.emit({'planner': {'at': at, 'stops': _PLAN2, 'asked': False, 'keep': True}})
+
+
+def _endmarks(q):
+    return [(r.get('id'), r.get('dropoff'), r.get('cue')) for r in q.rows('mark')
+            if r.get('dropoff')]
+
+
+_q1 = _Q(carry=True)
+try:
+    _q1.card('U1', 14.0, 300, 'uber', multiOrder=True)
+    _q1.took('U1')
+    _q1.card('D1', 9.0, 300, 'doordash')
+    _q1.took('D1')
+    _settle(0.1)
+    _planner2(_q1, int(time.time() * 1000))
+    _settle()
+    _st1 = _q1.status()
+    eq('Uber planner with two dropoffs and a DoorDash order held: nothing filed',
+       (_endmarks(_q1), [o.get('dropoff') for o in _st1.get('orders') or []]),
+       ([], [None, None]))
+finally:
+    _q1.stop()
+    _q1.gone()
+
+_q2 = _Q(carry=True)
+try:
+    _q2.card('U1', 14.0, 300, 'uber', multiOrder=True)
+    _q2.took('U1')
+    _q2.card('U2', 8.0, 300, 'uber')
+    _read = int(time.time() * 1000)
+    _settle(0.05)
+    _q2.took('U2')
+    _settle(0.05)
+    _planner2(_q2, _read)
+    _settle()
+    _st2 = _q2.status()
+    eq('...nor when the second Took lands during the planner read',
+       (_endmarks(_q2), [o.get('dropoff') for o in _st2.get('orders') or []]),
+       ([], [None, None]))
+finally:
+    _q2.stop()
+    _q2.gone()
+
+# --- an address no order in the car can own ----------------------------------
+#
+# Two DoorDash orders held; an Uber navigation screen read unprompted. The hard
+# rules (the app) leave it no order, and no later cue can change that, so it is
+# not kept — parked, it said "1 dropoff read · whose?" for as long as both were
+# carried.
+_q3 = _Q(carry=True)
+try:
+    _q3.card('D1', 9.0, 120, 'doordash')
+    _q3.took('D1')
+    _q3.card('D2', 8.0, 120, 'doordash')
+    _q3.took('D2')
+    _settle(0.1)
+    _q3.emit({'sighting': {'at': int(time.time() * 1000), 'asked': False, 'whole': True,
+                           'app': 'uber', 'screen': 'uber.nav',
+                           'stops': [{'kind': 'dropoff', 'line': '5 Heron Ct, Smyrna',
+                                      'street': '5 Heron Ct', 'city': 'Smyrna'}]}})
+    _settle()
+    eq('an address no order can own is not waiting',
+       (_q3.status().get('unowned'), _endmarks(_q3)), (0, []))
+    ok_('...and the log says it was not kept',
+        "nobody's: not kept" in _q3.log())
+finally:
+    _q3.stop()
+    _q3.gone()
+
+# --- holding.json: what is filed onto the order reaches it, whole -------------
+#
+# A ⌖ end filed onto the order in the car reached holding.json only through the
+# NucBox search's save, so with NUCBOX_SEARCH unset (these servers) a restart
+# brought the order back with its card's end. And the file was written in
+# place, so a power cut mid-write left it cut short — read at boot as nothing
+# held, with nothing said. And a planner read wrote it whether or not the read
+# changed anything.
+_PRESSED = {'found': True, 'line': '61 Wrenfield Ln, Kennesaw, GA 30144',
+            'street': '61 Wrenfield Ln', 'city': 'Kennesaw', 'state': 'GA', 'zip': '30144',
+            'asked': True}
+_q4 = _Q(carry=False)
+try:
+    _q4.card('A', 12.0, 60, 'uber', dropoff='Birch Ln & Alder Ct, Kennesaw')
+    _q4.took('A')
+    _settle(0.1)
+    _q4.emit({'dropoff': dict(_PRESSED, at=int(time.time() * 1000))})
+    _settle()
+    _live = _q4.status().get('holding') or {}
+    eq('a ⌖ end is on the order in the car', (_live.get('dropoff'),
+       ((_live.get('fields') or {}).get('dropoff') or {}).get('from')),
+       (_PRESSED['line'], 'press'))
+    _held4 = open(_q4.hold).read()
+finally:
+    _q4.stop()
+    _q4.gone()
+_q5 = _Q(carry=False, holding=_held4)
+try:
+    _back5 = _q5.status().get('holding') or {}
+    eq('a ⌖ end survives a restart with no NucBox',
+       (_back5.get('dropoff'), ((_back5.get('fields') or {}).get('dropoff') or {}).get('from')),
+       (_PRESSED['line'], 'press'))
+finally:
+    _q5.stop()
+    _q5.gone()
+
+_whole6 = json.dumps({'v': 2, 'orders': [
+    {'id': 'T', 'pay': 10.0, 'minutes': 120, 'acceptedAt': int(time.time() * 1000) - 60000}]})
+_torn6 = _whole6[:-9]
+_q6 = _Q(carry=False, holding=_torn6)
+try:
+    _st6 = _q6.status()
+    _settle(0.2)
+    eq('a torn holding.json is said at boot and kept aside',
+       (_st6.get('holding'), 'could not be read' in _q6.log(),
+        open(_q6.hold + '.bad').read() if os.path.exists(_q6.hold + '.bad') else None,
+        os.path.exists(_q6.hold)),
+       (None, True, _torn6, False))
+    # ...and the next Took writes a whole file, through a temporary that does
+    # not stay behind.
+    _q6.card('B', 9.0, 30, 'uber')
+    _q6.took('B')
+    _settle(0.1)
+    eq('...and the next Took writes a whole one, and leaves no temporary',
+       ([o.get('id') for o in json.load(open(_q6.hold)).get('orders')],
+        sorted(n for n in os.listdir(_q6.dir) if n.startswith('holding.json'))),
+       (['B'], ['holding.json', 'holding.json.bad']))
+finally:
+    _q6.stop()
+    _q6.gone()
+
+
+def _plan1(q, name):
+    stops = [{'kind': 'pickup', 'orders': 1, 'name': 'Larkspur Tacos', 'expectedBy': 1100,
+              'line': '5 Mill St, Roswell', 'street': '5 Mill St', 'city': 'Roswell',
+              'state': None, 'zip': None},
+             {'kind': 'dropoff', 'orders': 1, 'name': name, 'expectedBy': 1130,
+              'line': None, 'street': None, 'city': None, 'state': None, 'zip': None}]
+    q.emit({'planner': {'at': int(time.time() * 1000), 'stops': stops, 'asked': False,
+                        'keep': False}})
+    _settle()
+
+
+def _written(path):
+    s = os.stat(path)
+    return (s.st_ino, s.st_mtime_ns)
+
+
+_q7 = _Q(carry=False)
+try:
+    _q7.card('A', 12.0, 60, 'uber')
+    _q7.took('A')
+    _settle(0.1)
+    _plan1(_q7, 'Mara T.')
+    _w1 = _written(_q7.hold)
+    _plan1(_q7, 'Mara T.')
+    eq('a planner read that changes nothing writes nothing', _written(_q7.hold), _w1)
+    _plan1(_q7, 'Jules K.')
+    eq('...and one that changes the stops writes them',
+       (_written(_q7.hold) != _w1,
+        [s.get('name') for s in (json.load(open(_q7.hold))['orders'][0].get('planner')
+                                 or {}).get('stops', [])]),
+       (True, ['Larkspur Tacos', 'Jules K.']))
+finally:
+    _q7.stop()
+    _q7.gone()
+
+# --- a tick for the record is not a Took --------------------------------------
+#
+# The offers page's ✓ and Close the shift's Took and Passed answer for a card
+# after the fact (via 'offers', 'review'); only the driving panel's Took (via
+# 'panel', or no via from a page older than the field) puts an order in the car
+# or takes one out. A review tick of the card still on the slot used to do
+# both.
+for _carry in (False, True):
+    _q8 = _Q(carry=_carry)
+    try:
+        _q8.card('A', 12.0, 30, 'uber')
+        _q8.took('A')
+        post(_q8.base, '/api/delivered', {})
+        _q8.card('B', 9.0, 25, 'doordash')
+        _r8 = _q8.took('B', via='review')
+        _settle(0.2)
+        eq('a review tick of the card on the slot puts nothing in the car%s'
+           % (' (carrying two)' if _carry else ''),
+           (_r8.get('holding'), _q8.status().get('holding'),
+            [(r.get('id'), r.get('via')) for r in _q8.rows('mark')]),
+           (False, None, [('A', 'panel'), ('B', 'review')]))
+    finally:
+        _q8.stop()
+        _q8.gone()
+
+    _q9 = _Q(carry=_carry)
+    try:
+        _q9.card('A', 12.0, 60, 'uber', dropoff='Birch Ln & Alder Ct, Kennesaw')
+        _q9.took('A')
+        _settle(0.1)
+        _q9.emit({'dropoff': dict(_PRESSED, at=int(time.time() * 1000))})
+        _settle()
+        _q9.took('A', via='offers')
+        _h9 = _q9.status().get('holding') or {}
+        eq('...nor rebuilds the order in the car%s' % (' (carrying two)' if _carry else ''),
+           (_h9.get('dropoff'), ((_h9.get('fields') or {}).get('dropoff') or {}).get('from'),
+            [r.get('by') for r in _q9.rows('drop')]),
+           (_PRESSED['line'], 'press', []))
+        post(_q9.base, '/api/offers/mark', {'id': 'A', 'accepted': None, 'via': 'offers'})
+        _settle(0.1)
+        eq('...and an offers-page Undo of it does not put it down%s'
+           % (' (carrying two)' if _carry else ''),
+           (str((_q9.status().get('holding') or {}).get('holdId')).split('@')[0],
+            _q9.rows('drop')), ('A', []))
+    finally:
+        _q9.stop()
+        _q9.gone()
+
+# --- a Took from a panel behind the slot --------------------------------------
+#
+# The panel still shows card X when the slot has moved on to Y (its socket
+# dropped and came back; /api/events replays readings, never the offer), and
+# the driver ticks X: the order goes in the car from the panel's copy of X, and
+# its clock starts when X came up, not when Y did.
+_q10 = _Q(carry=False)
+try:
+    _x10 = _q10.card('X', 12.0, 30, 'uber')
+    _xat = int(time.time() * 1000)
+    time.sleep(1.5)
+    _q10.card('Y', 8.0, 20, 'uber')
+    _q10.took('X', offer=_x10)
+    _h10 = _q10.status().get('holding') or {}
+    _id10, _at10 = (str(_h10.get('holdId') or 'none@0').split('@') + ['0'])[:2]
+    ok_('Took for the previous card dates the order from that card (%r ms before the Took)'
+        % _h10.get('heldMs'),
+        _id10 == 'X' and abs(int(_at10) - _xat) < 400 and (_h10.get('heldMs') or 0) >= 1400)
+    eq('...and the card on the slot is still the newer one',
+       (_q10.status().get('offer') or {}).get('id'), 'Y')
+finally:
+    _q10.stop()
+    _q10.gone()
+
+# --- carrying two, turned off with two in the car -----------------------------
+#
+# The flag is read off <root>/rpi/config.json (no CARRY_TWO here), so this
+# server runs from a copy of the five files it is made of, beside a config of
+# its own. Two orders are taken with it on; the owner turns it off. Neither
+# order leaves the car for that — each stays until its own end, or Drop — and a
+# Took with it off replaces the first-taken, as one order's Took always did,
+# with a row, and leaves the other where it is.
+_croot = tempfile.mkdtemp()
+_q11 = None
+try:
+    for _f in ('server.js', 'advice.js', 'streets.js', 'map-view.js', 'assemble.js'):
+        shutil.copy(os.path.join(ROOT, _f), _croot)
+    os.mkdir(os.path.join(_croot, 'rpi'))
+    # scannerEnabled() asks only that the autopilot is there; SCANNER_CMD runs
+    # the fake in its place.
+    open(os.path.join(_croot, 'rpi', 'autopilot.py'), 'w').close()
+    _cfg11 = os.path.join(_croot, 'rpi', 'config.json')
+
+    def _carry11(on):
+        # Replaced through a rename, as the scanner writes it (save_config).
+        with open(_cfg11 + '.part', 'w') as fh:
+            json.dump({'settings': {'target': 25, 'carryTwo': on}}, fh)
+        os.replace(_cfg11 + '.part', _cfg11)
+
+    _carry11(True)
+    _q11 = _Q(carry=None, root=_croot)
+    _q11.card('A', 12.0, 120, 'uber')
+    _q11.took('A')
+    _q11.card('B', 9.0, 120, 'doordash')
+    _q11.took('B')
+    _two11 = [o.get('holdId', '').split('@')[0] for o in _q11.status().get('orders') or []]
+    _carry11(False)
+    _q11.emit({'alive': True, 'at': int(time.time() * 1000)})
+    _settle(0.3)
+    _st11 = _q11.status()
+    eq('(carrying two turned off: both orders still held, and nothing put down)',
+       (_two11, _st11.get('carryTwo'),
+        [o.get('id') for o in json.load(open(_q11.hold)).get('orders')], _q11.rows('drop')),
+       (['A', 'B'], False, ['A', 'B'], []))
+    # ...and a Took with it off, which is where an order left: it replaces
+    # the first-taken, as one order's Took always did, with its row, and the
+    # other order stays.
+    _q11.card('C', 8.0, 60, 'uber')
+    _q11.took('C')
+    _settle(0.3)
+    eq('turning carryTwo off with two held keeps both until their own ends, and a Took '
+       'then replaces only the first-taken',
+       ([o.get('id') for o in json.load(open(_q11.hold)).get('orders')],
+        [(r.get('id'), r.get('by'), r.get('carried')) for r in _q11.rows('drop')]),
+       (['B', 'C'], [('A', 'replaced', 2)]))
+finally:
+    if _q11:
+        _q11.stop()
+        _q11.gone()
+    shutil.rmtree(_croot, ignore_errors=True)
+
+# ...and the flag itself, read off the file once while the file is unchanged.
+# It is asked on every beat, reading and planner line, and was read and parsed
+# each time. carryTwo() taken out of server.js's source text, with a file
+# system that counts what it reads.
+_CTJS = r'''
+var fs = require('fs'), vm = require('vm'), path = require('path');
+var src = fs.readFileSync(path.join(process.argv[2], 'server.js'), 'utf8');
+var root = process.argv[3];
+function grab(name) {
+  var i = src.indexOf('\nfunction ' + name + '(');
+  if (i === -1) throw new Error('server.js has no function ' + name);
+  return src.slice(i, src.indexOf('\n}\n', i) + 3);
+}
+var reads = 0;
+var cfs = Object.assign({}, fs, { readFileSync: function () {
+  reads += 1; return fs.readFileSync.apply(fs, arguments); } });
+var ctx = { fs: cfs, path: path, ROOT: root, JSON: JSON, process: { env: {} } };
+vm.createContext(ctx);
+var m = /\nvar carryTwoSeen = [^\n]*\n/.exec(src);
+if (m) vm.runInContext(m[0], ctx);
+vm.runInContext(grab('carryTwo'), ctx);
+var file = path.join(root, 'rpi', 'config.json');
+function put(on) {
+  fs.writeFileSync(file + '.part', JSON.stringify({ settings: { carryTwo: on } }));
+  fs.renameSync(file + '.part', file);
+}
+put(true);
+var out = { on: [], reads: [] };
+for (var i = 0; i < 50; i++) out.on.push(ctx.carryTwo());
+out.reads.push(reads);
+put(false);
+for (i = 0; i < 50; i++) out.on.push(ctx.carryTwo());
+out.reads.push(reads);
+out.on = [out.on[0], out.on[49], out.on[50], out.on[99]];
+console.log(JSON.stringify(out));
+'''
+_ctdir = tempfile.mkdtemp()
+try:
+    os.mkdir(os.path.join(_ctdir, 'rpi'))
+    with open(os.path.join(_ctdir, 'ct.js'), 'w') as fh:
+        fh.write(_CTJS)
+    _ctr = subprocess.run(['node', os.path.join(_ctdir, 'ct.js'), ROOT, _ctdir],
+                          capture_output=True, text=True, timeout=60)
+    try:
+        _cto = json.loads(_ctr.stdout)
+    except ValueError:
+        _cto = {'error': (_ctr.stderr or _ctr.stdout)[-400:]}
+    eq('the carryTwo flag is read off the file once while it is unchanged, and again '
+       'when it changes', (_cto.get('on'), _cto.get('reads')),
+       ([True, True, False, False], [1, 2]))
+finally:
+    shutil.rmtree(_ctdir, ignore_errors=True)
+
+# --- two orders restored from holding.json, and a Took -------------------------
+#
+# The car of the carrying-two section above, after a restart, with the flag
+# off: a Took put down the first with a row, and the second with none. With it
+# on, the one ending soonest goes, with its row, as before.
+_now12 = int(time.time() * 1000)
+_held12 = json.dumps({'v': 2, 'orders': [
+    {'id': 'P', 'pay': 10.0, 'minutes': 120, 'acceptedAt': _now12 - 60000},
+    {'id': 'Q', 'pay': 11.0, 'minutes': 120, 'acceptedAt': _now12 - 30000}]})
+for _carry in (False, True):
+    _q12 = _Q(carry=_carry, holding=_held12)
+    try:
+        _was12 = [o.get('id') for o in json.load(open(_q12.hold)).get('orders')]
+        _q12.card('R', 9.0, 25, 'uber')
+        _q12.took('R')
+        _settle(0.3)
+        _now_held = [o.get('id') for o in json.load(open(_q12.hold)).get('orders')]
+        eq('every order a Took puts down gets a row%s' % (' (carrying two)' if _carry else ''),
+           (sorted(set(_was12) - set(_now_held)),
+            sorted(r.get('id') for r in _q12.rows('drop'))),
+           (['P'], ['P']))
+    finally:
+        _q12.stop()
+        _q12.gone()
+
+# --- a card paged away from and back to ---------------------------------------
+#
+# The scanner keeps a card's id when the driver pages away and back
+# (rpi/journal.py, RECENT_CARDS); with an order in the car its return wrote a
+# second pair row for one decision.
+_q14 = _Q(carry=False)
+try:
+    _q14.card('HELD', 12.0, 120, 'uber')
+    _q14.took('HELD')
+    _q14.card('A', 9.0, 20, 'doordash')
+    _q14.card('B', 7.0, 18, 'uber')
+    _q14.card('A', 9.0, 20, 'doordash')
+    _settle(0.3)
+    eq('a card paged back to is one pair row', [r.get('id') for r in _q14.rows('pair')],
+       ['A', 'B'])
+    eq('...and one pairing on the offers page',
+       [p.get('id') for p in get(_q14.base, '/api/journal?days=1').get('pairs') or []],
+       ['B', 'A'])
+    post(_q14.base, '/api/delivered', {})
+    _q14.card('HELD2', 11.0, 120, 'uber')
+    _q14.took('HELD2')
+    _q14.card('A', 9.0, 20, 'doordash')
+    _settle(0.3)
+    eq('...while the same card against a different order in the car is a pairing of its own',
+       [r.get('id') for r in _q14.rows('pair')], ['A', 'B', 'A'])
+finally:
+    _q14.stop()
+    _q14.gone()
+
+# --- a scanner line the server fails on ---------------------------------------
+#
+# One try round the parse and the handling both: a throw anywhere in the
+# handling was logged as `scanner: <the line>`, as if the scanner had printed
+# it. A line whose `phase` cannot be made a string (the log line built from
+# it throws) stands in for any fault of this process's own.
+_q15 = _Q(carry=False)
+try:
+    with open(_q15.queue, 'a') as fh:
+        fh.write('a line of the scanner\'s own\n')
+    _q15.emit({'phase': {'toString': 0, 'valueOf': 0}, 'message': 'x'})
+    _q15.card('A', 12.0, 30, 'uber')
+    _log15 = _q15.log()
+    ok_('a scanner line the server fails on is said as the server\'s fault, with its stack',
+        'a scanner line could not be handled: TypeError' in _log15
+        and 'server.js:' in _log15 and 'scanner: {"phase"' not in _log15)
+    ok_('...and a line that is not JSON is still the scanner\'s own words',
+        'scanner: a line of the scanner\'s own' in _log15)
+finally:
+    _q15.stop()
+    _q15.gone()
+
+# --- an order run out on its own clock, said on the beat ----------------------
+#
+# Nobody pressed anything and no reading comes between offers, so the beat
+# is the panel's only word that the car is empty: it carries `holding` on the
+# first beat after what is held changed, and not otherwise. A card of 0.05
+# minutes, no grace: its clock ends 4.5 s after it came up.
+_q13 = _Q(carry=False, env={'HOLD_GRACE_MS': '0'})
+try:
+    _q13.card('A', 12.0, 0.05, 'uber')
+    _q13.took('A')
+    _ev13 = listen(_q13.base, 9)
+    time.sleep(0.3)
+
+    def _beat13():
+        _q13.emit({'alive': True, 'at': int(time.time() * 1000)})
+        time.sleep(0.3)
+
+    _beat13()
+    time.sleep(5.0)
+    _beat13()
+    _beat13()
+    time.sleep(0.3)
+    _b13 = [m for m in _ev13 if m.get('alive')]
+    eq('an order expiring on its own clock is said on the next beat, as nothing held, and '
+       'the beat after says nothing of it',
+       [('holding' in b, b.get('holding') is None) for b in _b13],
+       [(True, False), (True, True), (False, True)])
+    eq('...and its drop row is the expiry\'s', [r.get('by') for r in _q13.rows('drop')],
+       ['expiry'])
+finally:
+    _q13.stop()
+    _q13.gone()
+
+# --- the window a fold reads, carried across appends --------------------------
+#
+# rowsFor kept every kind row in the file and walked the whole file again
+# after every append, so /api/today's cost grew with the journal; and
+# latestPerOffer kept one fold per floor, and /api/journal?days= asks from a
+# floor that moves every millisecond. The functions themselves, taken out of
+# server.js's source text into a context of their own (the file starts a
+# server when it is run), against the rule they replace, written out here:
+# every kind row kept, every reading of a card with one in the window.
+_FOLDJS = r'''
+var fs = require('fs'), vm = require('vm'), path = require('path');
+var ROOT = process.argv[2];
+var src = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+function grab(name) {
+  var i = src.indexOf('\nfunction ' + name + '(');
+  if (i === -1) throw new Error('server.js has no function ' + name);
+  return src.slice(i, src.indexOf('\n}\n', i) + 3);
+}
+function grabVar(name) {
+  var m = new RegExp('\\nvar ' + name + ' = [^\\n]*\\n').exec(src);
+  if (!m) throw new Error('server.js has no var ' + name);
+  return m[0];
+}
+var ctx = { Advice: require(path.join(ROOT, 'advice.js')), Set: Set, Date: Date, JSON: JSON,
+            Object: Object, console: console };
+vm.createContext(ctx);
+['CLOCK_BELIEVABLE_AFTER', 'WINDOWS_MAX', 'windows', 'latestCache'].forEach(function (n) {
+  vm.runInContext(grabVar(n), ctx);
+});
+['inWindow', 'foldReads', 'windowTakes', 'windowOver', 'rowsFor', 'dayFloor', 'latestPerOffer',
+ 'bestReading', 'latestPerOfferUncached'].forEach(function (n) { vm.runInContext(grab(n), ctx); });
+function whole(rows, floor) {
+  var inR = function (r) {
+    var at = (typeof r.at === 'number' && isFinite(r.at)) ? r.at : 0;
+    return at >= floor || at < ctx.CLOCK_BELIEVABLE_AFTER;
+  };
+  var wanted = {};
+  rows.forEach(function (r) { if (!r.kind && r.id && inR(r)) wanted[r.id] = true; });
+  return rows.filter(function (r) {
+    return r.kind ? true : r.id ? !!wanted[r.id] : inR(r);
+  });
+}
+var NOW = Date.now(), H = 3600000, floor = NOW - 2 * H;
+function card(id, at, pay) {
+  return { v: 1, id: id, seq: 1, at: at, firstAt: at, pay: pay, minutes: 20, miles: 4,
+           perHour: 30, grossPerHour: 36, cost: 1.2, billedMinutes: 20, state: 'go',
+           target: 25, band: 15, costPerMile: 0.3, legs: 2, whole: true };
+}
+var rows = [
+  card('old', NOW - 50 * H, 9), card('cross', floor - 60000, 11),
+  { v: 1, kind: 'mark', at: NOW - 49 * H, id: 'cross', accepted: true },
+  { v: 1, kind: 'rule', at: NOW - 48 * H, match: { pay: 13, minutes: 20, miles: 4 }, hidden: true },
+  { v: 1, kind: 'seen', at: NOW - 47 * H, id: 'seen-1', saw: 3, kept: 2 },
+  { v: 1, kind: 'pair', at: NOW - 46 * H, id: 'old', held: {}, offer: {} },
+  { v: 1, kind: 'screen', at: NOW - 45 * H, id: 'screen-1', text: 'x' },
+  { v: 1, kind: 'drop', at: NOW - 44 * H, id: 'old', seq: 1 },
+  card('cross', floor + 60000, 11.5), card('new', NOW - H, 13),
+  { v: 1, kind: 'seen', at: NOW - H, id: 'seen-2', saw: 4, kept: 3 },
+  { v: 1, kind: 'pair', at: NOW - H, id: 'new', held: {}, offer: {} },
+  { v: 1, kind: 'sighting', at: NOW - H, id: 'sighting-1' },
+  { v: 1, kind: 'visit', at: NOW - H, id: 'x#0' }, { v: 1, kind: 'planner', at: NOW - H, id: 'p' },
+  { v: 1, kind: 'snap', at: NOW - H, id: 's' }, { v: 1, kind: 'newer', at: NOW - H, id: 'n' },
+  { v: 1, kind: 'mark', at: NOW - H, id: 'new', accepted: false, via: 'review' }];
+var out = {};
+out.kinds = ctx.rowsFor(rows, floor).filter(function (r) { return r.kind; })
+  .map(function (r) { return r.kind + (r.at >= floor ? '+' : '-'); });
+function seenAs(f) {
+  return JSON.stringify({ offers: f.filter(function (o) { return (o.at || 0) >= floor; }),
+                          pairs: f.pairs.filter(function (p) { return (p.at || 0) >= floor; }),
+                          seen: f.seen.filter(function (s) { return (s.at || 0) >= floor; }) });
+}
+// ...and across appends, as readJournal hands them over: a new array, the
+// same row objects, and the new ones after. The second append is a reading
+// of a card whose only reading so far was before the floor — half a card,
+// which loses the vote to the whole reading only if that reading is there.
+var steps = [[card('new2', NOW - 30000, 8), { v: 1, kind: 'pair', at: NOW, id: 'new2' }],
+             [Object.assign(card('old', NOW - 20000, 9.25), { whole: false }),
+              card('cross', floor - 30000, 11)],
+             [{ v: 1, kind: 'mark', at: NOW, id: 'old', accepted: true }]];
+var cur = rows;
+var built = 0, over = ctx.windowOver;
+ctx.windowOver = function (r, f) { built += 1; return over(r, f); };
+vm.runInContext('windows = [];', ctx);
+out.same = [seenAs(ctx.latestPerOfferUncached(ctx.rowsFor(cur, floor)))
+            === seenAs(ctx.latestPerOfferUncached(whole(cur, floor)))];
+out.built = [built];
+steps.forEach(function (add) {
+  cur = cur.concat(add);
+  out.same.push(seenAs(ctx.latestPerOfferUncached(ctx.rowsFor(cur, floor)))
+                === seenAs(ctx.latestPerOfferUncached(whole(cur, floor))));
+  out.built.push(built);
+});
+ctx.windowOver = over;
+// Two days=30 loads, a few milliseconds apart, with no append between.
+var real = ctx.latestPerOfferUncached, folds = 0;
+ctx.latestPerOfferUncached = function (r) { folds += 1; return real(r); };
+ctx.latestPerOffer(cur, NOW - 30 * 24 * H);
+ctx.latestPerOffer(cur, NOW - 30 * 24 * H + 5);
+out.folds = folds;
+for (var k = 1; k <= 10; k++) ctx.latestPerOffer(cur, NOW - k * 24 * H);
+out.kept = vm.runInContext('latestCache.byFloor.length', ctx);
+console.log(JSON.stringify(out));
+'''
+_fdir = tempfile.mkdtemp()
+try:
+    with open(os.path.join(_fdir, 'fold.js'), 'w') as fh:
+        fh.write(_FOLDJS)
+    _fr = subprocess.run(['node', os.path.join(_fdir, 'fold.js'), ROOT], capture_output=True,
+                         text=True, timeout=60)
+    try:
+        _fo = json.loads(_fr.stdout)
+    except ValueError:
+        _fo = {'error': (_fr.stderr or _fr.stdout)[-400:]}
+    eq('rowsFor keeps no kind row the fold does not read',
+       _fo.get('kinds'), ['mark-', 'rule-', 'seen+', 'pair+', 'mark+'])
+    eq('...and the fold over it answers as over every kind row, before and after each '
+       'of three appends', _fo.get('same'), [True, True, True, True])
+    eq('rowsFor carries its window across an append, and works it out afresh only when a '
+       'card it left out comes back', _fo.get('built'), [1, 1, 2, 2])
+    eq('two days=30 loads fold once', _fo.get('folds'), 1)
+    eq('...and the folds kept are the last three', _fo.get('kept'), 3)
+finally:
+    shutil.rmtree(_fdir, ignore_errors=True)
+
+# ...and through the server: /api/journal's window against All, filtered by
+# hand to the same floor, before and after rows are appended under it.
+_wdir = tempfile.mkdtemp()
+try:
+    _wj = os.path.join(_wdir, 'journal.jsonl')
+    _WN = int(time.time() * 1000)
+    _wfloor = _WN - 2 * 3600000
+    write(_wj, [offer(1, _WN - 50 * 3600000), offer(2, _wfloor - 60000),
+                {'v': 1, 'kind': 'screen', 'at': _WN - 40 * 3600000, 'id': 'screen-1'},
+                {'v': 1, 'kind': 'seen', 'at': _WN - 30 * 3600000, 'id': 'seen-1', 'saw': 5,
+                 'kept': 4},
+                offer(3, _WN - 3600000), offer(2, _wfloor + 60000, pay=12.5),
+                {'v': 1, 'kind': 'seen', 'at': _WN - 3600000, 'id': 'seen-2', 'saw': 2,
+                 'kept': 1}])
+    _wp, _wb = start({'SCANNER': '0'}, _wj)
+    try:
+        def _wsame():
+            w = get(_wb, '/api/journal?since=%d&limit=0' % _wfloor)
+            a = get(_wb, '/api/journal?days=0&limit=0')
+            mine = [o for o in a.get('offers') or [] if (o.get('at') or 0) >= _wfloor]
+            return (w.get('offers') == mine and len(mine) > 0,
+                    w.get('watched'))
+        _w1 = _wsame()
+        write(_wj, [offer(4, _WN - 1000), offer(1, _WN - 500, pay=11.75, whole=False),
+                    {'v': 1, 'kind': 'mark', 'at': _WN, 'id': 'off1', 'accepted': True}], 'a')
+        _w2 = _wsame()
+        eq('the windowed journal answers as All does over the same floor, before and after '
+           'appends that bring an old card into it', (_w1, _w2),
+           ((True, {'saw': 2, 'kept': 1}), (True, {'saw': 2, 'kept': 1})))
+    finally:
+        stop(_wp)
+finally:
+    shutil.rmtree(_wdir, ignore_errors=True)
+
+# --- the NucBox's answers, kept by their size --------------------------------
+#
+# The cache held 500 answers whatever their size, and a route with the road's
+# shape is up to 5,000 points. It is bounded in bytes now (NBX_CACHE_BYTES),
+# oldest out first; here a bound a little over two of the fake's routes, so a
+# third puts the first out and the first is asked of the NucBox again.
+import urllib.parse                                            # noqa: E402
+_nf = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_nfb ='http://127.0.0.1:%d' % json.loads(_nf.stdout.readline())['port']
+_nroutes = ['-84.5499,33.9526;-84.3880,33.7490', '-84.5499,33.9526;-84.5499,33.9830',
+            '-84.5499,33.9526;-84.4500,33.8800']
+
+
+def _nasks(pts):
+    _all = json.loads(urllib.request.urlopen(_nfb + '/__asked', timeout=5).read())
+    return len([a for a in _all if pts in urllib.parse.unquote(a)])
+
+
+try:
+    for _cap, _want in (('', (1, 1)), ('300', (2, 1))):
+        _q16 = _Q(carry=False, env={'NUCBOX_ROUTER': _nfb, 'NUCBOX_CACHE_BYTES': _cap})
+        try:
+            _n0 = [_nasks(p) for p in _nroutes]
+            _sizes = []
+            for _p16 in _nroutes + _nroutes[:1] + _nroutes[2:]:
+                _s16, _b16, _h16 = raw(_q16.base, '/api/nbx/route?points=' + _p16)
+                _sizes.append(len(_b16.encode('utf-8')))
+            _got16 = (_nasks(_nroutes[0]) - _n0[0], _nasks(_nroutes[2]) - _n0[2])
+            if _cap:
+                eq('the NucBox cache lets its oldest answer go past its size in bytes, as past '
+                   'its count (answers of %s bytes)' % _sizes[:3], _got16, _want)
+            else:
+                eq('...and at its own size, 8 MB, keeps them all', _got16, _want)
+        finally:
+            _q16.stop()
+            _q16.gone()
+finally:
+    _nf.kill()
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)

@@ -77,7 +77,7 @@
                 "card": { "legs": 1, "multiOrder": true } },
       "events": [
         { "t": 2000, "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM" },
-        { "t": 22001, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill" }
+        { "t": 62001, "page": "Expected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill" }
       ],
       "expect": {
         "fields": { "dropoff": { "value": "Larch Way & Teal Ct, Kennesaw", "from": "card" } },
@@ -299,7 +299,7 @@
           "page": "Trip Planner\nPickup • 1 order\nJuniper Taqueria\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\nMara T.\nExpected by 8:02 PM"
         },
         {
-          "t": 22001,
+          "t": 62001,
           "page": "Address\n415 Ostrander Way NW\nKennesaw, GA\nView details\nWaybill"
         }
       ],

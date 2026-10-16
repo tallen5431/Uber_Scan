@@ -370,11 +370,42 @@ with _ctx.redirect_stdout(buf):
 eq('fifty failures in a row are one line, not fifty',
    buf.getvalue().count('could not use the offer journal'), 1)
 buf = _io.StringIO()
-quiet._said_at = time.time() - JR.Journal.REPEAT_AFTER_S - 1
+quiet._said_at = time.monotonic() - JR.Journal.REPEAT_AFTER_S - 1
 with _ctx.redirect_stdout(buf):
     quiet.append({'id': 'x'})
 eq('...and it is said again once the interval has passed',
    buf.getvalue().count('could not use the offer journal'), 1)
+
+
+# ...on the monotonic clock: the wall clock stepped back an hour by NTP does
+# not silence a journal that goes on failing.
+class _Stepped(object):
+    def __init__(self):
+        self.mono, self.step = 5000.0, 0.0
+
+    def monotonic(self):
+        return self.mono
+
+    def time(self):
+        return 1_790_000_000.0 + self.mono + self.step
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+_clk, _was_clock = _Stepped(), JR.time
+JR.time = _clk
+try:
+    stuck = JR.Journal(os.path.join(work, 'no', 'such', 'other.jsonl'))
+    buf = _io.StringIO()
+    with _ctx.redirect_stdout(buf):
+        stuck.append({'id': 'x'})
+        _clk.step, _clk.mono = -3600.0, _clk.mono + JR.Journal.REPEAT_AFTER_S + 1
+        stuck.append({'id': 'x'})
+finally:
+    JR.time = _was_clock
+eq('...however the wall clock steps: said again after the interval with the clock put '
+   'back an hour', buf.getvalue().count('could not use the offer journal'), 2)
 
 # --- annotations from the web side must not be mistaken for offers ----------
 # The file is written by two things now: the scanner adds offers, and the web
@@ -1767,6 +1798,33 @@ eq('so the file holds three cards, one prompt and no screen',
    ['offer', 'offer', 'offer', 'promo'])
 
 shutil.rmtree(_pr_dir, ignore_errors=True)
+
+# --- a row is on the card before append() says it landed ---------------------------
+# Closing the file hands the row to the page cache; a power cut before writeback
+# lost it while append() had already said True. The fsync is asked of the
+# journal's own file, with the row already in it.
+_fs_dir = tempfile.mkdtemp()
+_fs_path = os.path.join(_fs_dir, 'offers.jsonl')
+_synced, _real_fsync = [], os.fsync
+
+
+def _watch_fsync(fd):
+    _synced.append((os.fstat(fd).st_ino, os.fstat(fd).st_size))
+    return _real_fsync(fd)
+
+
+JR.os.fsync = _watch_fsync
+try:
+    _fj = JR.Journal(_fs_path)
+    _landed = [_fj.append({'v': 1, 'id': 'f%d' % i, 'seq': 1, 'at': 1000 + i}) for i in range(3)]
+finally:
+    JR.os.fsync = _real_fsync
+_st = os.stat(_fs_path)
+eq('every row appended is fsynced before append() says it landed (%r)' % (_landed,),
+   (_landed, len(_synced)), ([True, True, True], 3))
+eq('...on the journal\'s own file, with the row already in it',
+   _synced[-1:], [(_st.st_ino, _st.st_size)])
+shutil.rmtree(_fs_dir, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)

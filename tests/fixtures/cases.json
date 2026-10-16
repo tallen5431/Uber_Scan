@@ -3404,6 +3404,30 @@
     "City Barbeque (Peachtree City)",
     "Willowbend Rd & Robinson Rd, Peachtree City"
    ]
+  },
+  {
+   "name": "a store name the reader broke with U+001C, which Python calls a space and JavaScript does not is one name in both ports",
+   "text": "$8.45 incl. tips\n2 stops (8.8 mi) - 45 min\n@ Fable\u001cGrill\n12 Ab Rd, Marietta, 30066.\n@ Wren\u001cNoodles\n40 Cd Ln, Marietta, 30066.\nCustomer dropoff",
+   "expect": [
+    "Fable Grill",
+    "Wren Noodles"
+   ]
+  },
+  {
+   "name": "a store name the reader broke with U+FEFF, which JavaScript calls a space and Python does not is one name in both ports",
+   "text": "$8.45 incl. tips\n2 stops (8.8 mi) - 45 min\n@ Fable\ufeffGrill\n12 Ab Rd, Marietta, 30066.\n@ Wren\ufeffNoodles\n40 Cd Ln, Marietta, 30066.\nCustomer dropoff",
+   "expect": [
+    "Fable Grill",
+    "Wren Noodles"
+   ]
+  },
+  {
+   "name": "a wrapped store name whose second line ends in U+FEFF or U+001C is still one name in both ports",
+   "text": "$8.45 incl. tips\n2 stops (8.8 mi) - 45 min\n@ Fable Grill &\nNoodle House\ufeff\n12 Ab Rd, Marietta, 30066.\n@ Wren Deli &\nTaproom\u001c\n40 Cd Ln, Marietta, 30066.\nCustomer dropoff",
+   "expect": [
+    "Fable Grill Noodle House",
+    "Wren Deli Taproom"
+   ]
   }
  ],
  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day — so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",
@@ -4208,7 +4232,7 @@
    ]
   }
  ],
- "_planner_comment": "Uber's Trip Planner, read off the whole screen when the driver presses the dropoff button: every stop in the order the screen lists it. `expect` is the list of stops, each with all ten fields - kind, orders, name, expectedBy (minutes since midnight), street, city, state, zip, line, place (the hotel or business the address is at, when the block names one) - or null when the text is not a planner. Compared field by field in that order by both runners. A stop a page edge cut carries an eleventh, `partial`: 'top' for an address block above the first header (its kind null), 'bottom' for a last header with no address and no Waybill after it; absent on every other stop, and compared as absent-is-null. And `bounded`: whether both ends of the list are on the screen - the title with the first stop under it, \"Waybill\" after the last - which is what lets the scanner take a planner's one dropoff for the trip's only one; false for a text that is no planner. Names, streets and house numbers are invented in every case; the layout, the OCR noise and the time in the cases marked Measured are a real reading's.",
+ "_planner_comment": "Uber's Trip Planner, read off the whole screen when the driver presses the dropoff button: every stop in the order the screen lists it. `expect` is the list of stops, each with all ten fields - kind, orders, name, expectedBy (minutes since midnight), street, city, state, zip, line, place (the hotel or business the address is at, when the block names one) - or null when the text is not a planner. Compared field by field in that order by both runners. A stop a page edge cut carries an eleventh, `partial`: 'top' for an address block above the first header (its kind null), 'bottom' for a last header with no address and no Waybill after it; absent on every other stop, and compared as absent-is-null. And `bounded`: whether both ends of the list are on the screen - the title with the first stop under it, \"Waybill\" after the last - which is what lets the scanner take a planner's one dropoff for the trip's only one; false for a text that is no planner, and false when a block holds two \"Expected by\" lines, a stop header the reader lost between the two ends. Names, streets and house numbers are invented in every case; the layout, the OCR noise and the time in the cases marked Measured are a real reading's.",
  "planner": [
   {
    "name": "Uber's Trip Planner as the rig's live view read it",
@@ -4966,6 +4990,90 @@
      "place": null
     }
    ]
+  },
+  {
+   "name": "a dropoff header the reader lost leaves the list unbounded, and its other dropoff unfiled",
+   "_why": "Two dropoffs under a pickup of 2 orders, the first dropoff's header lost to OCR, both ends of the list on the glass. Its lines fall into the pickup's block; the label above the second \"Expected by\" is not looked for, so that stop is filed under nobody and ONE dropoff is left, the other customer's. It read as bounded, and plannerDestination filed 903 Brindle Ct as the order's end. A block holding two \"Expected by\" lines is two stops under one header: neither end is vouched for. tests/assemble.test.js holds that nothing is filed. Invented.",
+   "text": "Trip Planner\nPickup • 2 orders\nFable Grill\nExpected by 4:02 PM\nAddress\n12 Ab St\nKennesaw, GA\nView details\nPat Q.\nExpected by 4:18 PM\nAddress\n17 Quillon Way\nMarietta, GA\nView details\nDropoff • 1 order\nLee R.\nExpected by 4:31 PM\nAddress\n903 Brindle Ct\nAcworth, GA\nView details\nWaybill",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 2,
+     "name": "Fable Grill",
+     "expectedBy": 962,
+     "street": "12 Ab St",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "12 Ab St, Kennesaw",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 991,
+     "street": "903 Brindle Ct",
+     "city": "Acworth",
+     "state": "GA",
+     "zip": null,
+     "line": "903 Brindle Ct, Acworth",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and on a single trip, the one dropoff's header lost, the pickup keeps no address of the customer's",
+   "_why": "One pickup, one dropoff, the dropoff's header lost: its name, time and address fall into the pickup's block. The pickup takes no address from above that second time, and the page is not bounded. Invented.",
+   "text": "Trip Planner\nPickup • 1 order\nFable Grill\nExpected by 4:02 PM\nPat Q.\nExpected by 4:18 PM\nAddress\n17 Quillon Way\nMarietta, GA\nView details\nWaybill",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 962,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null,
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a dropoff header lost with its time leaves the list bounded on the glass, and the pickups' count says a dropoff is missing",
+   "_why": "The first case with the lost stop's \"Expected by\" gone too: one time per block, so nothing on the page says a header went, and it reads as bounded with one dropoff, the second customer's. What does say so is the counts: the pickup carries 2 orders and the dropoffs read add up to 1. assemble.js refuses that list (listShort), and tests/assemble.test.js holds that nothing is filed. Invented.",
+   "text": "Trip Planner\nPickup • 2 orders\nFable Grill\nExpected by 4:02 PM\nAddress\n12 Ab St\nKennesaw, GA\nView details\nPat Q.\nAddress\n17 Quillon Way\nMarietta, GA\nView details\nDropoff • 1 order\nLee R.\nExpected by 4:31 PM\nAddress\n903 Brindle Ct\nAcworth, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 2,
+     "name": "Fable Grill",
+     "expectedBy": 962,
+     "street": "12 Ab St",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "12 Ab St, Kennesaw",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 991,
+     "street": "903 Brindle Ct",
+     "city": "Acworth",
+     "state": "GA",
+     "zip": null,
+     "line": "903 Brindle Ct, Acworth",
+     "place": null
+    }
+   ]
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",
@@ -5448,6 +5556,17 @@
    "name": "'Dropoff type' ABOVE the address is not the sheet's label",
    "text": "Dropoff type\nMeet at door\nPat Q.\n2950 Kestrel Dr\nWoodstock, GA",
    "expect": null
+  },
+  {
+   "name": "a mark read as an accented letter in front of the name is a mark in both ports",
+   "text": "Deliver to Pat Q.\n\u00e9Pat Q.\n2208 Wrenfield Dr  P  &\nWoodstock, GA\nHouse\nDropoff type\nMeet at door",
+   "expect": {
+    "line": "2208 Wrenfield Dr, Woodstock",
+    "street": "2208 Wrenfield Dr",
+    "city": "Woodstock",
+    "state": "GA",
+    "zip": null
+   }
   }
  ],
  "_popups_comment": "DoorDash's place popup, opened from a stop on an offer card before the driver decides: place_popup / placePopup. The role label, the store's name, the street with a house number, the town, and 'Directions' under them. `expect` is {role, name, line, street, city, state, zip}, or null when the popup does not read as one. The store's layout and the OCR's marks are the five reads of it in the journal copied with the 12 Oct shift, all five of which read; the customer's is INFERRED (no customer popup has been read) and its cases say so; the pill over the map is the 12 Oct snaps' 16-03-08 and 16-03-17, whose text was never read. Every name, street and number is invented.",

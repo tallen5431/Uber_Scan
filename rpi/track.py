@@ -256,8 +256,17 @@ class QuadTracker:
     # --- the loop calls these -------------------------------------------
 
     def update(self, frame, now=None):
-        """Re-find the screen if it is time to. True when the corners moved."""
-        now = time.time() if now is None else now
+        """Re-find the screen if it is time to. True when the corners moved.
+
+        `now` is the MONOTONIC clock, here and in every method below, and the
+        loop passes it so. Everything this class times is an interval — the
+        recheck, the dispute's patience, the stall watch, the save interval —
+        and none of it is a stamp. On the wall clock an NTP step back of an
+        hour stopped the rechecks for that hour, and a dispute open across it
+        stayed open for the hour too, putting off every read the loop asked
+        for (rpi/test_track.py, "the wall clock stepping back").
+        """
+        now = time.monotonic() if now is None else now
         if self._last_check is not None and now - self._last_check < self.recheck:
             return False
         self._last_check = now
@@ -499,7 +508,7 @@ class QuadTracker:
         """
         if self._disputed_since is None:
             return False
-        now = time.time() if now is None else now
+        now = time.monotonic() if now is None else now
         return now - self._disputed_since < self.dispute_patience
 
     def _forget_stall(self):
@@ -628,13 +637,13 @@ class QuadTracker:
                 and same_shape(candidate, self.calibrated))
     def needs_save(self, now=None):
         """True when what is on disk is stale enough to be worth rewriting."""
-        now = time.time() if now is None else now
+        now = time.monotonic() if now is None else now
         if now - self._last_save < self.save_every:
             return False
         return distance(self.quad, self.saved) > self.save_drift
 
     def mark_saved(self, now=None):
-        self._last_save = time.time() if now is None else now
+        self._last_save = time.monotonic() if now is None else now
         self.saved = self.quad.copy()
 
     @property

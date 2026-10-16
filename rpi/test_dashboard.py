@@ -4053,6 +4053,30 @@ const framed = (page) => page.waitForFunction(
       res.health = await page.evaluate(
         () => document.getElementById('health').textContent.replace(/\s+/g, ' ').trim());
     }, { replaced: { at: 1, saidForMs: 60000 } });
+    // The order runs out on its own clock (holdEnds in server.js): nobody
+    // pressed anything and no reading comes, and the first beat after says
+    // `holding: null`, as the server's beat does when what is held changed.
+    out.heldExpiry = await run('the order expiring on its own clock', 'Powder Springs Rd',
+                               async (push, pins, res, page) => {
+      const row = () => page.evaluate(() => ({
+        dropShown: !document.getElementById('drop').hidden,
+        stackShown: !document.getElementById('stack').hidden
+          && document.getElementById('stack').textContent.trim() !== '' }));
+      await page.evaluate(() => { if (window.__es && window.__es.onopen) window.__es.onopen(); });
+      await push({ ready: true, state: 'go', perHour: 30, grossPerHour: 36, pay: 9.5,
+                   minutes: 20, miles: 4, cost: 1.2, target: 25, band: 15,
+                   holding: HOLD('Powder Springs Rd'),
+                   stack: { pay: 27.59, worst: 21.1, best: 28.4, minMinutes: 38,
+                            maxMinutes: 58, leftMinutes: 20, state: 'warn', sure: true,
+                            ends: 'near' } });
+      await page.waitForTimeout(600);
+      res.before = await row();
+      res.pinsBefore = await pins();
+      await push({ alive: true, gps: null, atDropoff: false, heldEnd: null, holding: null });
+      await page.waitForTimeout(600);
+      res.after = await row();
+      res.pinsAfter = await pins();
+    });
   }
 
   /* --- a door from a tap ---------------------------------------------------
@@ -10007,6 +10031,17 @@ try:
     ok_('held end: a Took the reply says replaced an order says "previous order put '
         'down" on the status row (%r)' % (ht.get('health'),),
         'previous order put down' in (ht.get('health') or ''))
+    # The order run out on its own clock: the beat's `holding: null` is the
+    # car empty (server.js says it on the first beat after the change).
+    hx = got.get('heldExpiry') or {}
+    ok_('held end: (the premise: Drop, the pair line and the held pin are up) (%r)'
+        % (hx.get('before'),),
+        (hx.get('before') or {}).get('dropShown') and (hx.get('before') or {}).get('stackShown')
+        and any(_HELD in m for m in hx.get('pinsBefore') or []))
+    eq('an order expiring on its own clock takes Drop off the panel within a beat',
+       ((hx.get('after') or {}).get('dropShown'), (hx.get('after') or {}).get('stackShown'),
+        any(_HELD in m for m in hx.get('pinsAfter') or [])),
+       (False, False, False))
     nxtMap = got.get('mapNext') or {}
     eq('a new card redraws the map rather than leaving the last one up',
        len(nxtMap.get('marks') or []), 4)
