@@ -1431,6 +1431,37 @@ DRIVE_FORMS = {
                     'larger': ['line', 'line2']},
     'waiting': {'msgs': [_EMPTY], 'larger': ['label']},
 }
+# ...and over the two pair forms, the answer on the card (live.html showWay,
+# MV.wayLine) in every form it takes, drawn by the page's own MV.sayWay over
+# the pair at its widest: ON THE WAY and OUT OF THE WAY at the widest figure
+# each can carry (a range from two orders, two figures before the point) and
+# the widest ends; the line still checking; and CAN'T TELL with every chip
+# the caption can refuse with, at its widest place (CAPTION_CHIPS), and the
+# one only the card makes (the NucBox down), read off live.html.
+DRIVE_FORMS['pair']['way'] = DRIVE_FORMS['two']['way'] = True
+DRIVE_FORMS['pair']['larger'].append('way')
+DRIVE_FORMS['two']['larger'].append('way')
+_card_only = re.findall(r"chip: '([A-Z ]+ · [^']+)'",
+                        live_src[live_src.index('  function wayNucBoxDown('):
+                                 live_src.index('  function wayAnswered(')])
+eq("live.html words the card's own refusal as a chip", len(_card_only), 1)
+_said = {row[0]: row[1] for row in CAPTION_LINES}
+WAY_FORMS = [
+    ('on the way, a range', {'said': 'on your way by road incl. both orders',
+                             'fig': {'lo': 0.1, 'hi': 0.4, 'road': True, 'onWay': True}},
+     'same-side'),
+    ('out of the way, a range', {'said': '+18.8–19.2 road mi incl. both orders',
+                                 'fig': {'lo': 18.8, 'hi': 19.2, 'road': True,
+                                         'onWay': False}}, 'same-side'),
+    ('out of the way, straight lines', {'said': '+18.8–19.2 mi incl. both orders — straight '
+                                                'lines, not roads',
+                                        'fig': {'lo': 18.8, 'hi': 19.2, 'road': False,
+                                                'onWay': False}}, 'elsewhere'),
+    ('checking', {'pending': True}, 'same-side'),
+] + [('cant: ' + name, {'said': _said[name], 'chip': chip}, 'same-side')
+     for name, chip in sorted(CAPTION_CHIPS.items())] \
+  + [('cant: the card\'s own, ' + chip, {'said': 'the sentence', 'chip': chip}, 'same-side')
+     for chip in _card_only]
 
 # ...and the two strings that fixture copies have to still be the page's, or it
 # measures a line the page no longer writes.
@@ -3649,6 +3680,13 @@ const SNAP_MEASURE = (fixture) => {
                              status: { phase: 'scanning', message: '' },
                              last: null, lastAgeMs: null, heardAgeMs: 400,
                              offer: null, holding: null }) }));
+    // A NucBox set, as on the owner's rig, so a pair's card carries the
+    // answer on the card (live.html showWay) and is measured with it; its
+    // questions are not answered, since nothing here asks one but a card
+    // with an offer line.
+    await page.route('**/api/nbx', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ search: true, route: true, streets: false }) }));
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
     await page.waitForFunction(() => document.getElementById('view').naturalWidth > 2,
                                null, { timeout: 10000 }).catch(() => {});
@@ -3870,6 +3908,7 @@ const SNAP_MEASURE = (fixture) => {
       parts: {
         label: part('#verdictLabel'), rate: part('#perHour'), pay: part('#vPay'),
         range: part('#stack .range'), both: part('#stack .both'), ends: part('#stack .ends'),
+        way: part('#way .call'),
         next: part('#heldNext .where'), nextWhen: part('#heldNext .when'),
         line: part('#heldLine'), line2: part('#heldLine2'), whose: part('#whose'),
         held: part('#detail .held', true), age: part('#detail .age', true),
@@ -3890,6 +3929,79 @@ const SNAP_MEASURE = (fixture) => {
       over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
     };
   };
+  // The answer on the card, every form of it (WAY_FORMS), drawn into the
+  // card by the page's own MV.sayWay and measured where it is: the call and
+  // the part that may not be cut (the figure, or the refusal's state) whole
+  // and inside the card, the line one row, its type size, what of the part
+  // that may be cut is on the glass, and every child of the card inside the
+  // card. The page draws its real line again on its next tick.
+  const WAY_MEASURE = (forms) => {
+    const MV = window.MapView;
+    const w = document.getElementById('way');
+    const shown = (el) => {
+      if (!el || el.hidden) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
+    };
+    // How far the card's children run past its border, in px: 0 when none
+    // does. Asked of each form, and of the same card with the line put away,
+    // which is the card as it was before there was a line.
+    const overBy = () => {
+      const vr = document.getElementById('verdict').getBoundingClientRect();
+      let o = 0;
+      [].slice.call(document.getElementById('verdict').children).filter(shown).forEach((e) => {
+        const r = e.getBoundingClientRect();
+        o = Math.max(o, vr.top + 2 - r.top, r.bottom - (vr.bottom - 2));
+      });
+      return Math.round(o * 2) / 2;
+    };
+    w.hidden = true;
+    const without = overBy();
+    w.hidden = false;
+    const out = { __without: without };
+    for (const f of forms) {
+      MV.sayWay(w, MV.wayLine(f[1], f[2]), false);
+      const vr = document.getElementById('verdict').getBoundingClientRect();
+      const card = { left: vr.left + 2, right: vr.right - 2, top: vr.top + 2,
+                     bottom: vr.bottom - 2 };
+      const inCard = (r) => r.left >= card.left - 0.5 && r.right <= card.right + 0.5
+        && r.top >= card.top - 0.5 && r.bottom <= card.bottom + 0.5
+        && r.right <= window.innerWidth + 0.5;
+      const wr = w.getBoundingClientRect();
+      const lh = parseFloat(getComputedStyle(w).lineHeight)
+        || parseFloat(getComputedStyle(w).fontSize) * 1.2;
+      // Every part that may not be cut: its words, whole (nothing ellipsised
+      // or clipped inside it) and inside the card.
+      const kept = [].slice.call(w.querySelectorAll('.call, .fig, .why')).map((e) => {
+        const r = e.getBoundingClientRect();
+        return { text: e.textContent, whole: e.scrollWidth <= e.clientWidth + 1 && inCard(r) };
+      });
+      // ...and what is on the glass of the part that may: the characters
+      // inside its own box, which is where its ellipsis cuts.
+      const more = [].slice.call(w.querySelectorAll('.more')).map((e) => {
+        const box = e.getBoundingClientRect();
+        let seen = '';
+        const walk = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
+        const rg = document.createRange();
+        let n;
+        while ((n = walk.nextNode())) {
+          for (let i = 0; i < n.length; i++) {
+            rg.setStart(n, i); rg.setEnd(n, i + 1);
+            const c = rg.getBoundingClientRect();
+            if (c.right <= box.right + 0.5) seen += n.data[i];
+          }
+        }
+        return { text: e.textContent, seen: seen, inCard: inCard(box) };
+      });
+      out[f[0]] = {
+        text: w.textContent, kept: kept, more: more,
+        rows: Math.round(wr.height / lh), inCard: inCard(wr),
+        px: parseFloat(getComputedStyle(w.querySelector('.call') || w).fontSize),
+        over: overBy(),
+      };
+    }
+    return out;
+  };
   const DRIVE_FIX = { lat: 33.9526, lon: -84.5499, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3,
                       gpsOk: true, gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false };
   for (const panel of PLANNER_PANELS) {
@@ -3905,10 +4017,14 @@ const SNAP_MEASURE = (fixture) => {
         // Past the page's tick, which renders again and folds the stops.
         await page.clock.runFor(1100);
         const parked = await page.evaluate(DRIVE_MEASURE);
+        const wayParked = f.way ? await page.evaluate(WAY_MEASURE, DRIVE.way) : null;
         await beat(true);
         await page.clock.runFor(1100);
         const driving = await page.evaluate(DRIVE_MEASURE);
-        out[panel[0] + ' ' + view + ' drive ' + form] = { parked: parked, driving: driving };
+        const wayDriving = f.way ? await page.evaluate(WAY_MEASURE, DRIVE.way) : null;
+        out[panel[0] + ' ' + view + ' drive ' + form] = { parked: parked, driving: driving,
+                                                          wayParked: wayParked,
+                                                          wayDriving: wayDriving };
         await page.close();
         await ctx.close();
       }
@@ -4155,7 +4271,7 @@ try:
          json.dumps(LIVE_HERE_LINES), json.dumps(HELD),
          json.dumps({'beat': CHIPS_BEAT, 'card': CHIPS_CARD, 'offer': CHIPS_OFFER}),
          json.dumps({'beats': HEAT_BEATS, 'was': HEAT_WAS}),
-         json.dumps({'forms': DRIVE_FORMS})],
+         json.dumps({'forms': DRIVE_FORMS, 'way': WAY_FORMS})],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -4782,6 +4898,44 @@ try:
                    ([], _chips[:1] + (['+%d more' % (len(_chips) - 1)] if len(_chips) > 1 else [])))
                 eq('...and the bar, the status row and the picture where they were at %s'
                    % where, _dr.get('layout'), _pk.get('layout'))
+                if not spec.get('way'):
+                    continue
+                # The answer on the card over this pair, every form of it
+                # (WAY_FORMS), parked and driving: the call and the part that
+                # may not be cut whole and in the card, one row — and the card
+                # run no further past its border than the same card with the
+                # line put away. That is "nothing past it" wherever the card
+                # fitted without the line, which is every form but the pair
+                # beside the scene picture on the 3.5" hat, parked: that card
+                # was over by 17px before there was a line (the open entry on
+                # the pair line in AUDITS.md, "about 9 px past the card"), and
+                # the line may not make it worse.
+                _wp, _wd = dm.get('wayParked') or {}, dm.get('wayDriving') or {}
+                for _state, _ws in (('parked', _wp), ('driving', _wd)):
+                    _was = _ws.pop('__without', None)
+                    eq('every form of the card line was measured over "%s", %s, at %s'
+                       % (form, _state, where), sorted(_ws),
+                       sorted(n for n, _a, _e in WAY_FORMS))
+                    _bad = sorted(
+                        n for n, m in _ws.items()
+                        if not m.get('kept') or m['kept'][0]['text'] not in (
+                            'ON THE WAY', 'OUT OF THE WAY', "CAN'T TELL", 'CHECKING THE ROUTE')
+                        or not all(k['whole'] for k in m['kept']) or not m.get('inCard')
+                        or m.get('rows') != 1
+                        or not all(x.get('inCard') for x in m.get('more') or []))
+                    eq('the card line is whole where it must be — the call, and the figure or '
+                       'the refusal\'s state — and one row, in every form over "%s", %s, at %s'
+                       % (form, _state, where), _bad, [])
+                    _past = sorted((n, m.get('over')) for n, m in _ws.items()
+                                   if _was is None or (m.get('over') or 0) > _was + 0.5)
+                    eq('...and the card runs no further past its border with it than without '
+                       'it (%spx), every form, over "%s", %s, at %s'
+                       % (_was, form, _state, where), _past, [])
+                _small = sorted(n for n in _wp if n in _wd
+                                and not (_wd[n].get('px') or 0) > (_wp[n].get('px') or 0) + 0.05)
+                eq('...and every form larger driving than parked, over "%s" at %s (%s→%s)'
+                   % (form, where, (_wp.get('checking') or {}).get('px'),
+                      (_wd.get('checking') or {}).get('px')), _small, [])
 
     # ...and with the notice up as well: the journal dead and the phone too
     # bright, which between offers is the card's other occupant and the item

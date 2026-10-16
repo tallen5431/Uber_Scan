@@ -1197,12 +1197,24 @@ const framed = (page) => page.waitForFunction(
     await page.clock.install({ time: Date.now() });
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
     await phoneFrame(page);
+    // A NucBox set and not answering, so the answer on the card (live.html
+    // showWay) is said, and is the same every time: CAN'T TELL, the NucBox
+    // down. The offer line that makes it this card's is OFFER_LINE below.
+    await page.route('**/api/nbx', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ search: true, route: true, streets: false }) }));
+    await page.route('**/api/nbx/**', (route) => route.fulfill({
+      status: 502, contentType: 'application/json',
+      body: JSON.stringify({ ok: false, unreachable: true, error: 'no answer' }) }));
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
               .catch(() => {});
     await page.waitForFunction('window.__es !== undefined', null,
                                { timeout: 10000 }).catch(() => {});
     await framed(page);
     const tick = (ms) => page.clock.runFor(ms);
+    const OFFER_LINE = { id: 'o-drive', pay: READINGS.deducted.pay, minutes: 22.0,
+                         miles: READINGS.deducted.miles, pickup: 'Cobb Pkwy NW, Acworth',
+                         dropoff: 'Canton Rd, Marietta' };
     const push = (m) => page.evaluate((x) => window.__es.push(x), m);
     // A beat as the scanner sends it, its fix as beat_fix builds it, with
     // gps.py's word on whether the car is being driven.
@@ -1236,6 +1248,8 @@ const framed = (page) => page.waitForFunction(
         diag: part('#detail .diag'), age: part('#detail .age'),
         heldLine: part('#heldLine'), heldNext: part('#heldNext'), stops: part('#stops'),
         chips: chips,
+        // ...and the answer on the card, with what it says.
+        way: part('#way'), wayText: document.getElementById('way').textContent,
         view: (() => {
           const r = document.getElementById('viewWrap').getBoundingClientRect();
           return [r.left, r.top, r.width, r.height].map((n) => Math.round(n * 10) / 10);
@@ -1259,6 +1273,9 @@ const framed = (page) => page.waitForFunction(
                    dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
                    endPinned: true, endWhy: null, arrived: false };
     await push({ holding: HOLD });
+    // The offer's line before the planner: a new offer on record forgets the
+    // last card's destination and the stops with it (forgetDest).
+    await push({ offer: OFFER_LINE });
     await push({ planner: { stops: [
       { kind: 'pickup', orders: 1, name: 'Burger Barn', expectedBy: 1066,
         street: '310 Mill St', city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
@@ -1271,6 +1288,8 @@ const framed = (page) => page.waitForFunction(
                state: 'warn', sure: true, uncosted: false, ends: 'same-town',
                route: 'https://www.google.com/maps/dir/?api=1&origin=A&destination=B' } });
     await push(OFFER);
+    // The card's own walk answers off the routes above, on the real clock.
+    await page.waitForTimeout(500);
     await tick(1100);
     const parked = await look();
     // Moving: gps.py says so on the next beat.
@@ -4756,6 +4775,192 @@ const framed = (page) => page.waitForFunction(
       await page.close();
     }
     out.nbxAsked = await (await fetch(FAKE + '/__asked')).json();
+
+    /* --- the answer on the card --------------------------------------------
+     *
+     * With an order in the car and an offer screened, the card says whether
+     * the offer is along the way the car is already going: Map view's caption
+     * figure, the same one, in one line (live.html showWay, MV.wayLine), with
+     * no press — the card's own walk asks the NucBox, never the public map.
+     * On the `both` server, the cards at Marietta Square: the 3.0 mi card's
+     * McDonald's is the fake's one 2.1 mi north, and the order in the car
+     * goes to 1985 Cobb Parkway (the fake's door, 3.4 mi on, past it to the
+     * north: on the way) or to Shadowood Parkway (7.3 mi south-east: not). */
+    {
+      stage = 'the answer on the card';
+      const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                                .then((c) => c.newPage());
+      await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+      await page.addInitScript(MAPSTUB);
+      const publicAsked = [];
+      await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+        publicAsked.push(route.request().url());
+        return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+      });
+      const relayAsked = [];
+      page.on('request', (q) => {
+        const u = new URL(q.url());
+        if (/^\/api\/nbx\//.test(u.pathname)) relayAsked.push(u.pathname + u.search);
+      });
+      await page.goto(NBX.both + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+      const SQ = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 12.0, gpsMode: 3,
+                   gpsOk: true, gpsWhy: null, miles: 3.0, hasTotal: true, legs: 2, whole: true };
+      // A reading and its offer line in one message, as a card that has
+      // landed is: the same pay and miles on both (live.html onRecordIs).
+      const card = (a) => page.evaluate((x) => {
+        const c = Object.assign({}, x.SQ, x.card || {});
+        window.__es.push({
+          ready: true, locked: true, whole: true, state: 'no', perHour: 18.0,
+          grossPerHour: 22.0, pay: x.pay || 14.25, minutes: 20.0, miles: c.miles, cost: 1.4,
+          target: 25, band: 15,
+          stack: { pay: 23.25, minMinutes: 20, maxMinutes: 38, worst: 18.2, best: 26.4,
+                   state: 'warn', sure: true, uncosted: false, ends: x.ends || null },
+          holding: { pay: 9.0, minutes: 18.0, holdId: 'w-hold-' + x.id,
+                     dropoff: x.held, card: Object.assign({}, x.SQ, { miles: 9.4 }) },
+          offer: x.noOffer ? undefined
+            : Object.assign({ id: x.id, pay: x.pay || 14.25, minutes: 20.0,
+                              billedMinutes: 20.0, cost: 1.4,
+                              pickup: x.pickup || "McDonald's (Marietta Sq)",
+                              dropoff: 'Church St, Marietta' }, c) });
+      }, Object.assign({ SQ: SQ }, a));
+      // The line as drawn: its words, its sentence, its form, and every
+      // colour on it (the element and each part, text, outline and fill).
+      const way = () => page.evaluate(() => {
+        const w = document.getElementById('way');
+        const cs = (e) => { const s = getComputedStyle(e);
+          return [s.color, s.borderTopColor, s.backgroundColor]; };
+        return { shown: !w.hidden && w.getBoundingClientRect().height > 0,
+                 text: w.textContent, said: w.title, cls: w.className,
+                 colours: [w].concat([].slice.call(w.querySelectorAll('*'))).map(cs) };
+      });
+      const caption = () => page.evaluate(() => ((n) => (n.classList.contains('chipped')
+        ? n.title : n.textContent))(document.getElementById('viewNote')).trim());
+      // Until the line is an answer (not "CHECKING THE ROUTE"), or 4 s.
+      const settled = () => page.waitForFunction(() => {
+        const w = document.getElementById('way');
+        return !w.hidden && !/CHECKING/.test(w.textContent);
+      }, null, { timeout: 4000 }).catch(() => {});
+      const r = {};
+      // The order in the car going on past the pickup: on the way.
+      await card({ id: 'w-on', held: '1985 Cobb Parkway, Kennesaw', ends: 'same-side' });
+      r.first = await way();
+      await settled();
+      r.on = await way();
+      r.onMapMade = await page.evaluate(() => !!window.__lmap);
+      r.onRelay = relayAsked.slice();
+      r.onWant = await page.evaluate(() => window.MapView.detour(
+        { lat: 33.9526, lon: -84.5499 }, { lat: 33.9830, lon: -84.5499 },
+        { lat: 34.0010, lon: -84.5560 }));
+      // ...and Map view opened on it now: its caption and what it asked.
+      await page.click('#viewMode');            // → scene
+      await page.waitForTimeout(150);
+      await page.click('#viewMode');            // → map
+      await page.waitForFunction(() => /road mi|your way|no pin/.test(((n) => (n.classList
+        .contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote'))),
+        null, { timeout: 4000 }).catch(() => {});
+      r.onCaption = await caption();
+      r.onAfterMap = await way();
+      r.onRelayMap = relayAsked.slice();
+      // The order in the car going the other way: out of the way, in Map view.
+      await card({ id: 'w-out', held: 'Shadowood Pkwy SE, Atlanta', ends: 'elsewhere' });
+      await page.waitForFunction(() => /out of your way/.test(((n) => (n.classList
+        .contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote'))),
+        null, { timeout: 4000 }).catch(() => {});
+      await settled();
+      r.out = await way();
+      r.outCaption = await caption();
+      // A 0.6 mi card whose nearest McDonald's is 1.2 mi off: no pin, no figure.
+      await card({ id: 'w-cant', held: 'Shadowood Pkwy SE, Atlanta', pickup: "McDonald's",
+                   card: { lat: 33.9700, lon: -84.5650, miles: 0.6 } });
+      await page.waitForFunction(() => /no pin/.test(((n) => (n.classList
+        .contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote'))),
+        null, { timeout: 4000 }).catch(() => {});
+      await settled();
+      r.cant = await way();
+      r.cantCaption = await caption();
+      // ...its whole sentence one tap away, and back on a second.
+      await page.click('#way');
+      r.cantOpen = await way();
+      await page.click('#way');
+      r.cantClosed = await way();
+      // A new card read before its offer line has come: the record is still
+      // the card before, and its answer is not this card's.
+      await card({ id: 'w-next', held: 'Shadowood Pkwy SE, Atlanta', pay: 9.99, noOffer: true });
+      await page.waitForTimeout(400);
+      r.notYet = await way();
+      // The night palette: the same line, no verdict colour in it either.
+      await card({ id: 'w-out', held: 'Shadowood Pkwy SE, Atlanta', ends: 'elsewhere' });
+      await settled();
+      await page.evaluate(() => document.documentElement.classList.add('night'));
+      r.outNight = await way();
+      await page.evaluate(() => document.documentElement.classList.remove('night'));
+      // The verdict's own colours, as the stylesheet defines them, day and
+      // night, to hold the line's colours against.
+      r.verdictColours = await page.evaluate(() => {
+        const out = [];
+        const probe = document.createElement('i');
+        document.body.appendChild(probe);
+        for (const night of [false, true]) {
+          document.documentElement.classList.toggle('night', night);
+          for (const v of ['--go', '--go-dim', '--warn', '--warn-dim', '--no', '--no-dim',
+                           '--doubt', '--doubt-dim']) {
+            probe.style.color = 'var(' + v + ')';
+            out.push(getComputedStyle(probe).color);
+          }
+        }
+        document.documentElement.classList.remove('night');
+        probe.remove();
+        return out;
+      });
+      r.publicAsked = publicAsked;
+      await page.close();
+      /* ...and a rig with no NucBox set (the main server): nothing the card
+         may ask without the press, so no line — until Map view, pressed, has
+         answered for the card off the public map, and then that answer. */
+      const bare = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                                .then((c) => c.newPage());
+      await bare.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+      await bare.addInitScript(MAPSTUB);
+      await bare.route('**/nominatim.openstreetmap.org/**', (route) => {
+        const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
+        const hit = { "McDonald's (Marietta Sq)": [33.9830, -84.5499],
+                      'Shadowood Pkwy SE, Atlanta': [33.8779, -84.4600],
+                      'Church St, Marietta': [33.9580, -84.5520] }[q];
+        return route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                        display_name: q }] : []) });
+      });
+      await bare.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await bare.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+      await bare.evaluate((SQ) => window.__es.push({
+        ready: true, locked: true, whole: true, state: 'no', perHour: 18.0, grossPerHour: 22.0,
+        pay: 14.25, minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
+        stack: { pay: 23.25, minMinutes: 20, maxMinutes: 38, worst: 18.2, best: 26.4,
+                 state: 'warn', sure: true, uncosted: false, ends: null },
+        holding: { pay: 9.0, minutes: 18.0, holdId: 'w-bare', dropoff: 'Shadowood Pkwy SE, Atlanta',
+                   card: Object.assign({}, SQ, { miles: 9.4 }) },
+        offer: Object.assign({ id: 'w-bare-card', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+                               cost: 1.4, pickup: "McDonald's (Marietta Sq)",
+                               dropoff: 'Church St, Marietta' }, SQ) }), SQ);
+      await bare.waitForTimeout(800);
+      r.bareShut = await bare.evaluate(() => {
+        const w = document.getElementById('way');
+        return { hidden: w.hidden, text: w.textContent };
+      });
+      await bare.click('#viewMode');            // → scene
+      await bare.waitForTimeout(150);
+      await bare.click('#viewMode');            // → map
+      await bare.waitForFunction(() => /out of your way|on your way/.test(
+        document.getElementById('viewNote').textContent), null, { timeout: 8000 }).catch(() => {});
+      r.bareMap = await bare.evaluate(() => {
+        const w = document.getElementById('way');
+        return { hidden: w.hidden, text: w.textContent, said: w.title,
+                 caption: document.getElementById('viewNote').textContent.trim() };
+      });
+      await bare.close();
+      out.wayCard = r;
+    }
   }
 
   /* --- the map over a card that names nowhere ------------------------------
@@ -6698,6 +6903,12 @@ try:
            (_sh(_m, 'range', 'held', 'age'), _px(_m, 'range') > _px(_p, 'range'),
             _px(_m, 'held') > _px(_p, 'held')),
            ((True, True, True), True, True))
+        eq('driving mode keeps the card line, larger, saying what it said parked '
+           '(%spx→%spx, %r)' % (_px(_p, 'way'), _px(_m, 'way'), _m.get('wayText')),
+           (_sh(_p, 'way'), _sh(_m, 'way'), _px(_m, 'way') > _px(_p, 'way'),
+            _m.get('wayText') == _p.get('wayText'),
+            (_m.get('wayText') or '').startswith("CAN'T TELL · NUCBOX DOWN")),
+           ((True,), (True,), True, True, True))
         _b, _bs = dv.get('between') or {}, dv.get('betweenStopped') or {}
         eq('...and between offers, where the order in the car goes next and its line, '
            'its stops back once the car stops',
@@ -9192,6 +9403,72 @@ try:
         'Scene' in (off.get('label') or ''))
     ok_('...with the map put away', not off.get('mapShown'))
     ok_('...and the picture back', off.get('imgShown'))
+
+    # --- the answer on the card -------------------------------------------
+    #
+    # Map view's caption figure on the card, as one line under the pair line,
+    # while an order is held and an offer screened: the SAME answer (mapLine's,
+    # through MV.wayLine), worked out with no press by asking the NucBox alone.
+    wc = got.get('wayCard') or {}
+    ok_('the answer-on-the-card stage ran', bool(wc))
+    if wc:
+        _on, _out, _cant = wc.get('on') or {}, wc.get('out') or {}, wc.get('cant') or {}
+        # The fake's router has no road to 1985 Cobb Parkway (its NoRoute),
+        # so this figure is the straight line's, and both say so.
+        _m = re.match(r'^ON THE WAY · \+(\d+\.\d) mi · same side of town$',
+                      _on.get('text') or '')
+        ok_('the card says ON THE WAY with the same figure as the map caption '
+            '(%r, the caption %r, %.2f wanted)'
+            % (_on.get('text'), wc.get('onCaption'), wc.get('onWant') or 0),
+            _m and abs(float(_m.group(1)) - (wc.get('onWant') or 0)) < 0.051
+            and wc.get('onCaption') == 'this pickup is on your way — straight lines, '
+                                       'not roads · no road found'
+            and _on.get('said') == wc.get('onCaption')
+            and (wc.get('onAfterMap') or {}).get('text') == _on.get('text'))
+        _m = re.match(r'^OUT OF THE WAY · (\+\d+\.\d road mi) · ends elsewhere$',
+                      _out.get('text') or '')
+        ok_('...OUT OF THE WAY beyond the cut-off, the caption\'s own figure '
+            '(%r, the caption %r)' % (_out.get('text'), wc.get('outCaption')),
+            _m and float(_m.group(1)[1:].split()[0]) >= 0.5
+            and wc.get('outCaption') == _m.group(1) + ' out of your way'
+            and _out.get('said') == wc.get('outCaption'))
+        eq('...CAN\'T TELL with the reason when there is no figure: the caption\'s chip, '
+           'its whole sentence one tap away and back',
+           (_cant.get('text'), _cant.get('said') == wc.get('cantCaption'),
+            (wc.get('cantOpen') or {}).get('text'), (wc.get('cantClosed') or {}).get('text')),
+           ("CAN'T TELL · NO PIN · McDonald's, none fit the card", True,
+            wc.get('cantCaption'), "CAN'T TELL · NO PIN · McDonald's, none fit the card"))
+        _relay = wc.get('onRelay') or []
+        eq('the card line is there without Map view ever opened: said while it was '
+           'shut, off the NucBox alone, the public map never asked',
+           ((wc.get('first') or {}).get('text'), _on.get('shown'), wc.get('onMapMade'),
+            sorted(a.split('?')[0] for a in _relay), wc.get('publicAsked')),
+           ('CHECKING THE ROUTE', True, False,
+            ['/api/nbx/route', '/api/nbx/search', '/api/nbx/search'], []))
+        # The questions the figure needed — the pickup, the held end, and
+        # the road car -> pickup -> held end, which the fake has none for —
+        # and Map view opened on the same card afterwards asked none of them
+        # again: the new job's end and the job's own road are its, to draw.
+        _map = (wc.get('onRelayMap') or [])[len(_relay):]
+        ok_('...and Map view opened on it afterwards asks the NucBox nothing the card '
+            'already asked (%r)' % (_map,),
+            not any(a in _relay for a in _map) and len(set(_relay)) == len(_relay))
+        eq('the card line is never the card before\'s: a card read before its offer '
+           'line says it is checking', (wc.get('notYet') or {}).get('text'),
+           'CHECKING THE ROUTE')
+        _bs, _bm = wc.get('bareShut') or {}, wc.get('bareMap') or {}
+        eq('with no NucBox set the card has no line until Map view, pressed, has '
+           'answered for the card, and then the map\'s own answer (%r)' % (_bm,),
+           (_bs.get('hidden'), _bm.get('hidden'), _bm.get('said') == _bm.get('caption'),
+            bool(re.match(r'^OUT OF THE WAY · \+\d+\.\d mi$', _bm.get('text') or ''))),
+           (True, False, True, True))
+        _verdict = set(wc.get('verdictColours') or [])
+        _used = [c for f in ('on', 'out', 'cant', 'outNight')
+                 for e in (wc.get(f) or {}).get('colours') or [] for c in e]
+        ok_('no verdict colour on the card line, day or night, in any form (%r)'
+            % sorted(set(_used) & _verdict),
+            len(wc.get('verdictColours') or []) == 16 and _used
+            and not (set(_used) & _verdict))
 
     # --- you are here ------------------------------------------------------
     _hb = got.get('hereBefore') or {}
