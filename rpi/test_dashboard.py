@@ -1289,7 +1289,14 @@ const framed = (page) => page.waitForFunction(
                route: 'https://www.google.com/maps/dir/?api=1&origin=A&destination=B' } });
     await push(OFFER);
     // The card's own walk answers off the routes above, on the real clock.
+    // The installed clock runs on through a real wait, which moves the
+    // page's one-second render off the phase the tap below is timed to (its
+    // ten seconds then ended after the 10.7 s look in 3 runs of 10 on this
+    // box); the rest of the second puts it back (0 runs of 10).
+    const before = await page.evaluate(() => Date.now());
     await page.waitForTimeout(500);
+    const waited = await page.evaluate(() => Date.now()) - before;
+    await tick(1000 - (waited % 1000));
     await tick(1100);
     const parked = await look();
     // Moving: gps.py says so on the next beat.
@@ -3226,7 +3233,9 @@ const framed = (page) => page.waitForFunction(
             },
             // Framed on the bounds' middle at zoom 12, and a zoom: Leaflet
             // says zoomstart for the page's own fit as for a hand's.
+            // ...every one of them kept, in order, so a check can count fits.
             fitBounds: function (b) { window.__fit = b;
+              window.__fits = (window.__fits || []).concat([b]);
               var la = b.map(function (p) { return p[0]; }), lo = b.map(function (p) { return p[1]; });
               this.centre = [(Math.min.apply(null, la) + Math.max.apply(null, la)) / 2,
                              (Math.min.apply(null, lo) + Math.max.apply(null, lo)) / 2];
@@ -4371,11 +4380,18 @@ const framed = (page) => page.waitForFunction(
       // What the key says, as drawn (innerText: what is hidden is not read),
       // and how many pins are on the map beside the car, for the check that
       // it names the marks that are there and no others.
+      // ...and the order in the car's own marks: its run, the extra, and
+      // whether the stops carry numbers (drawMap).
       const keyNow = () => page.evaluate(() => {
         const k = document.getElementById('mapKey');
+        const cls = (window.__lines || []).map((l) => String((l.opts || {}).className || ''));
         return { text: k.hidden ? null : k.innerText.replace(/\s+/g, ' ').trim(),
                  pins: (window.__marks || []).filter((m) => /pick this one up|drop it here|order in your car is going/
-                   .test(String(m.popup || ''))).length };
+                   .test(String(m.popup || ''))).length,
+                 run: cls.some((c) => /mv-held-run/.test(c)),
+                 extra: cls.some((c) => /mv-detour/.test(c)),
+                 numbered: (window.__letters || []).some((l) => /^\d+$/.test(
+                   String(((l.opts || {}).icon || {}).html || ''))) };
       });
       // Every question this page put to its own server's NucBox relay, by
       // path and query, so a drawing that asked anything of its own shows up
@@ -4961,6 +4977,101 @@ const framed = (page) => page.waitForFunction(
       await bare.close();
       out.wayCard = r;
     }
+
+    /* --- the map shows the difference --------------------------------------
+     *
+     * An offer screened while an order is held, in Map view, on the `both`
+     * server: the held run — the car, the order's restaurant (the fake's
+     * Example Grill, 250 Example Road, 1.7 mi north-east of the Square), its
+     * end on Shadowood Parkway — solid in its amber; the miles this card adds,
+     * dashed in violet along the gap the figure chose; the stops numbered in
+     * the order the car would call at them, the new pickup in its slot; and
+     * the view framed on the car and those stops once per card, and not again
+     * on the beats and the same card's messages after it. */
+    {
+      stage = 'the map shows the difference';
+      const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                                .then((c) => c.newPage());
+      await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+      await page.addInitScript(MAPSTUB);
+      await page.route('**/nominatim.openstreetmap.org/**', (route) => route.fulfill({
+        status: 200, contentType: 'application/json', body: '[]' }));
+      await page.goto(NBX.both + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+      const SQ = { lat: 33.9526, lon: -84.5499, gpsAge: 0.6, gpsErr: 12.0, gpsMode: 3,
+                   gpsOk: true, gpsWhy: null, miles: 3.0, hasTotal: true, legs: 2, whole: true };
+      // The car's dot, where the card came up, moved north by `dLat` degrees.
+      const beat = (dLat) => page.evaluate((f) => window.__es.push({
+        alive: true, gps: { state: 'ok', ageSeconds: 0.5, fix: f } }),
+        { lat: 33.9526 + (dLat || 0), lon: -84.5499, gpsAge: 0.5, gpsErr: 12.0, gpsMode: 3,
+          gpsOk: true, gpsWhy: null, freshFor: 19.6 });
+      const card = (id, pay) => page.evaluate((x) => window.__es.push({
+        ready: true, locked: true, whole: true, state: 'no', perHour: 18.0, grossPerHour: 22.0,
+        pay: x.pay, minutes: 20.0, miles: 3.0, cost: 1.4, target: 25, band: 15,
+        holding: { pay: 9.0, minutes: 18.0, holdId: 'h-diff', dropoff: 'Shadowood Pkwy SE, Atlanta',
+                   card: Object.assign({}, x.SQ, { miles: 9.4 }) },
+        offer: Object.assign({ id: x.id, pay: x.pay, minutes: 20.0, billedMinutes: 20.0, cost: 1.4,
+                               pickup: "McDonald's (Marietta Sq)",
+                               dropoff: 'Church St, Marietta' }, x.SQ) }),
+        { SQ: SQ, id: id, pay: pay });
+      const look = () => page.evaluate(() => {
+        const by = (s) => ((window.__marks || []).filter(
+          (m) => String(m.popup || '').indexOf(s) >= 0)[0] || {}).ll || null;
+        const p = (ll) => ll && { lat: ll[0], lon: ll[1] };
+        const at = { C: by('where you were'), A: by('pick this one up'),
+                     G: by('pick up the order in your car'),
+                     S: by('where the order in your car is going'), drop: by('drop it here') };
+        const t = at.C && at.A && at.G && at.S
+          ? window.MapView.detourThrough(p(at.C), p(at.A), [p(at.G)], p(at.S)) : null;
+        const k = document.getElementById('mapKey');
+        return {
+          note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(
+            document.getElementById('viewNote')).trim(),
+          at: at, gap: t ? t.gap : null,
+          letters: (window.__letters || []).map((l) => [String(((l.opts || {}).icon || {}).html || ''),
+                                                        l.ll]),
+          lines: (window.__lines || []).map((l) => ({
+            cls: String((l.opts || {}).className || ''), dashed: !!(l.opts || {}).dashArray,
+            colour: (l.opts || {}).color, pts: l.pts })),
+          fits: (window.__fits || []).slice(),
+          key: k.hidden ? null : k.innerText.replace(/\s+/g, ' ').trim() };
+      });
+      const settled = () => page.waitForFunction(() => {
+        const n = document.getElementById('viewNote');
+        const t = n.classList.contains('chipped') ? n.title : n.textContent;
+        return /incl\. restaurant/.test(t) && !/measuring|placing/.test(t);
+      }, null, { timeout: 6000 }).catch(() => {});
+      const r = {};
+      await beat(0);
+      await card('d-1', 14.25);
+      await page.evaluate(() => window.__es.push({ planner: { stops: [
+        { kind: 'pickup', orders: 1, name: 'oe Example Grill', expectedBy: 1189,
+          street: '250 Example Road', city: null, state: null, zip: null,
+          line: '250 Example Road' }], unfiled: 'dropoffs', asked: true, ms: null, at: 41 } }));
+      await page.click('#viewMode');            // → scene
+      await page.waitForTimeout(150);
+      await page.click('#viewMode');            // → map
+      await settled();
+      r.first = await look();
+      // The next card, in Map view: its frame, once, and nothing after it
+      // while the car moves a little and the scanner says the card again.
+      await page.evaluate(() => { window.__fits = []; });
+      await card('d-2', 15.5);
+      await page.waitForFunction(() => (window.__fits || []).length > 0, null,
+                                 { timeout: 6000 }).catch(() => {});
+      await page.waitForTimeout(300);
+      r.next = await look();
+      for (const d of [0.0004, 0.0008, 0.0012]) {
+        await beat(d);
+        await page.waitForTimeout(150);
+      }
+      await card('d-2', 15.5);
+      await card('d-2', 15.5);
+      await page.waitForTimeout(1200);
+      r.later = await look();
+      out.mapDiff = r;
+      await page.close();
+    }
   }
 
   /* --- the map over a card that names nowhere ------------------------------
@@ -5225,9 +5336,11 @@ const framed = (page) => page.waitForFunction(
        must SURVIVE this: nulling it here re-enters showMap from the line under
        the guard, and that re-entry throws again. */
     stage = 'the map mode: a draw that throws under a live map';
+    // Both of the moves drawMap makes, since the view is framed once a card's
+    // answer is in, and on one point by setView rather than fitBounds.
     await page.evaluate(() => {
       window.__drawThrew = 0;
-      window.__lmap.fitBounds = function () {
+      window.__lmap.fitBounds = window.__lmap.setView = function () {
         window.__drawThrew += 1;
         throw new Error('Leaflet threw while drawing');
       };
@@ -6280,6 +6393,8 @@ const framed = (page) => page.waitForFunction(
   {
     stage = 'the map mode: two orders in the car';
     const ANSWERS = { 'Chipotle (Barrett Pkwy)': [34.020, -84.580],
+                      // Halfway from the car's fix to Mill St, on the line.
+                      'Larkspur Bagels (Mill St)': [34.010, -84.605],
                       'Powder Springs Rd': [33.900, -84.640],
                       'Canton Rd, Marietta': [33.980, -84.500],
                       '310 Mill St, Roswell, GA 30075': [34.010, -84.610] };
@@ -6342,8 +6457,42 @@ const framed = (page) => page.waitForFunction(
       runs: (window.__lines || []).filter((l) => /mv-held-run/.test(String((l.opts || {}).className || '')))
         .map((l) => [String(l.opts.className), l.pts.length]),
       detour: (window.__lines || []).filter((l) => /mv-detour/.test(String((l.opts || {}).className || ''))).length,
+      // ...what each pin says on it, and where it is; and the gap the run
+      // through both, in the planner's order (Mill St, Canton Rd, Powder
+      // Springs Rd), puts Chipotle in, worked out here off the pins.
+      letters: (window.__letters || []).map((l) => [String(((l.opts || {}).icon || {}).html || ''), l.ll]),
+      want: (() => {
+        const by = (s) => ((window.__marks || []).filter(
+          (m) => String(m.popup || '').indexOf(s) >= 0)[0] || {}).ll || null;
+        const p = (ll) => ll && { lat: ll[0], lon: ll[1] };
+        const at = { C: by('where you were'), A: by('pick this one up'),
+                     M: by('pick up the order in your car'),
+                     K: by('order ② in your car is going'),
+                     W: by('order ① in your car is going') };
+        const t = at.C && at.A && at.M && at.K && at.W
+          ? window.MapView.detourThrough(p(at.C), p(at.A), [p(at.M), p(at.K)], p(at.W)) : null;
+        return Object.assign(at, { gap: t ? t.gap : null });
+      })(),
     }));
     out.mapTwoUnknown = await runsNow();
+    // ...and a card whose pickup is on the way to Mill St, which both ways
+    // round start with: the same figure either way, so it is stated — and
+    // the order the car calls at the two ends after it is still unknown, so
+    // nothing is numbered. Then the first card back.
+    const OFFER_TWO = { ready: true, state: 'go', perHour: 30, grossPerHour: 36, pay: 14.25,
+                        minutes: 20, miles: 4, cost: 1.4, target: 25, band: 15, holding: A,
+                        orders: [A, B], stack: null };
+    const offerTwo = (id, pickup) => page.evaluate((x) => {
+      Object.assign(x.offer, window.__CARD);
+      window.__es.push(x);
+    }, Object.assign({}, OFFER_TWO, { offer: { id: id, pay: 14.25, minutes: 20, billedMinutes: 20,
+                                               miles: 4, cost: 1.4, pickup: pickup,
+                                               dropoff: null } }));
+    await offerTwo('o-two-agree', 'Larkspur Bagels (Mill St)');
+    await page.waitForTimeout(3500);
+    out.mapTwoAgree = await runsNow();
+    await offerTwo('o-two', 'Chipotle (Barrett Pkwy)');
+    await page.waitForTimeout(1500);
     // ...then a planner that lists both orders, Canton Rd (②) before Powder
     // Springs Rd (①), and the server saying so (`planAt`, ordersForPanel):
     // one run in that order, and its figure, 0.57 mi.
@@ -8536,14 +8685,18 @@ try:
     # getting from it back to where the car was already going.
     eq('...two of them empty, two of them paid',
        len([l for l in lines if l.get('dashed')]), 2)
-    # The four marks and nothing else: both cards' discs are drawn (below)
-    # and have no say in the view. The card printed 12 mi round 34.010,
-    # -84.600, and fitted to its disc too the hat's map went from zoom 10 to
-    # 8 on a 9.4 mi card (Leaflet 1.9.4's getBoundsZoom, the fit's padding).
+    # The car and the stops — the pickup and where the order in the car is
+    # going — and nothing else: not the new job's own end, which is past where
+    # the figure stops (drawMap's `frame`), and neither card's disc, which is
+    # drawn (below) and has no say in the view. The card printed 12 mi round
+    # 34.010, -84.600, and fitted to its disc too the hat's map went from zoom
+    # 10 to 8 on a 9.4 mi card (Leaflet 1.9.4's getBoundsZoom, the fit's
+    # padding).
     _fit = on.get('fit') or []
-    ok_('...and the view is fitted to the four marks and nothing else, never to '
-        'a card\'s disc (%r)' % (_fit,),
-        len(_fit) == 4 and all(m.get('ll') in _fit for m in marks))
+    _stops = [m for m in marks if 'drop it here' not in (m.get('popup') or '')]
+    ok_('...and the view is fitted to the car and the stops and nothing else: not the '
+        'new job\'s end, never a card\'s disc (%r)' % (_fit,),
+        len(_fit) == 3 and len(_stops) == 3 and all(m.get('ll') in _fit for m in _stops))
     # Easier to read: the tile grid, the letters, the casings, the discs.
     rd = got.get('readable') or {}
     eq('a map tile has no border and no round corners: the camera picture\'s '
@@ -8554,12 +8707,18 @@ try:
         'saturate(0.3)' in (rd.get('paneFilter') or '')
         and 'brightness(0.78)' in (rd.get('paneFilter') or ''))
     _lt = sorted((l.get('html'), tuple(l.get('ll') or ())) for l in rd.get('letters') or [])
-    eq('every pin carries its letter, deaf to the pointer: P on the pickup, D on '
-       'the dropoff and on the held order\'s end, none on the car',
+    # With the order in the car and the figure stated, the pickup and the
+    # order's end carry the order the car would call at them — the pickup
+    # first here, before the end (MV.stopOrder) — and the new job's own end,
+    # which is no stop of the run, keeps its D.
+    eq('every pin carries its letter or its number, deaf to the pointer: the pickup 1 '
+       'and the held order\'s end 2, D on the new job\'s end, none on the car',
        (_lt, all(l.get('deaf') for l in rd.get('letters') or [])),
        (sorted([('D', tuple(m['ll'])) for m in marks
-                if re.search(r'drop it here|order in your car is going', m.get('popup') or '')]
-               + [('P', tuple(m['ll'])) for m in marks
+                if 'drop it here' in (m.get('popup') or '')]
+               + [('2', tuple(m['ll'])) for m in marks
+                  if 'order in your car is going' in (m.get('popup') or '')]
+               + [('1', tuple(m['ll'])) for m in marks
                   if 'pick this one up' in (m.get('popup') or '')]), True))
     eq('...the held order\'s end lettered as a ring (white, haloed), this offer\'s '
        'pins solid', sorted(l.get('cls') for l in rd.get('letters') or []),
@@ -8613,11 +8772,13 @@ try:
         == {('mv-how mv-disc mv-new', '#7aa2f7'), ('mv-how mv-disc mv-held', '#f5a524')})
     # The circle only while a disc is shown: one bigger than the view is not
     # drawn (sizeDiscs), and the key does not name a mark that is not there.
+    # ...and with the order in the car, its run, the extra and the numbered
+    # stops as well, in the short words (drawMap, showKey).
     eq('...and the key to them is on the map, naming the circle (while one is '
-       'drawn) and the lettered pins, and nothing the public map\'s answers do '
-       'not have', (on.get('keyShown'), on.get('keyText')),
-       (True, ("◯ card's reach · " if any(h.get('shown') for h in _how) else '')
-        + 'PD pin'))
+       'drawn), the lettered pins, the run, the extra and the numbers, and nothing '
+       'the public map\'s answers do not have', (on.get('keyShown'), on.get('keyText')),
+       (True, ("◯ reach · " if any(h.get('shown') for h in _how) else '')
+        + 'PD pin · ━ run · ┅ extra · 12 order'))
 
     # THE figure, and the reason this mode exists. The driver's words: "if it
     # makes sense to pickup the second offer since it would be mostly along the
@@ -9017,10 +9178,13 @@ try:
                              'pinned at their middle' for c in _c))
     ok_('...with the key to them on the map', both.get('oneKey'))
     _fit = both.get('oneFit') or []
-    _pins = both.get('oneMarks') or []
-    ok_('...and the one fit is the car and the pins, each once, none of the '
-        'candidates and neither disc (%r against %r)' % (_fit, _pins),
+    # ...the pins but the new job's own end, Church St at 33.958, -84.552,
+    # which the view leaves out with an order in the car (drawMap's frame).
+    _pins = [p for p in both.get('oneMarks') or [] if p != [33.958, -84.552]]
+    ok_('...and the one fit is the car and the stops, each once, none of the '
+        'candidates, neither disc and not the new job\'s end (%r against %r)' % (_fit, _pins),
         sorted(map(tuple, _fit)) == sorted(map(tuple, _pins)) and len(_fit) >= 3
+        and len(_pins) == len(both.get('oneMarks') or []) - 1
         and [33.983, -84.5499] in _fit and [33.9526, -84.5499] in _fit
         and not any(abs(p[0] - (33.9526 + 9.9 / 69.0)) < 1e-6
                     or abs(p[0] - (33.9526 + 3.5 / 69.0)) < 1e-6 for p in _fit))
@@ -9116,18 +9280,26 @@ try:
     # disc is drawn, "pin" when a pin is, the grey when a candidate (or a
     # refused stretch) is, the hollow when one past its disc is. It named
     # all four over every map, "○ outside" where nothing was outside.
-    def _want_key(how, pins):
+    # ...and the order in the car's: its run, the extra and the numbered stops
+    # when they are drawn, the short words with the run in it.
+    def _want_key(how, now):
         cls = [h.get('cls') or '' for h in (how or [])]
+        short = bool(now.get('run'))
         parts = []
         if any(' mv-disc ' in (h.get('cls') or '') + ' ' and h.get('shown') is not False
-               for h in (how or [])): parts.append("◯ card's reach")
-        if pins: parts.append('PD pin')
+               for h in (how or [])): parts.append("◯ reach" if short else "◯ card's reach")
+        if now.get('pins'): parts.append('PD pin')
         if any(' mv-cand ' in c + ' ' or ' mv-candidate ' in c + ' ' for c in cls):
-            parts.append('● also found')
+            parts.append('● found' if short else '● also found')
         if any(' mv-out ' in c + ' ' for c in cls): parts.append('○ outside')
+        if now.get('run'): parts.append('━ run')
+        # The dashed leg is the run's extra only where there is a run to add
+        # it to: with the order's end unpinned it is the drive to the pickup.
+        if now.get('extra') and now.get('run'): parts.append('┅ extra')
+        if now.get('numbered'): parts.append('12 order')
         return ' · '.join(parts) if cls else None
     _keys = [(k[:-6], (v or {}).get('text'),
-              _want_key(r_.get(k[:-6] + 'How'), (v or {}).get('pins')))
+              _want_key(r_.get(k[:-6] + 'How'), v or {}))
              for r_ in (both, st) for k, v in r_.items() if k.endswith('KeyNow')]
     eq('the key names the marks that are on the map and no others, on every NucBox '
        'map drawn', [(n, g) for n, g, w in _keys if g != w], [])
@@ -9356,9 +9528,11 @@ try:
     # older map-view.js with no discShape throws) costs that drawing and
     # nothing else.
     _t = got.get('mapHowThrew') or {}
+    # The fit is the car and the stops: the new job's own end, the fourth pin,
+    # is no stop of the run (drawMap's frame).
     eq('when drawing how places were found throws, the car and the pins are still '
-       'drawn, with their runs, and the view fitted to them',
-       (len(_t.get('marks') or []), _t.get('lines'), _t.get('fit')), (4, 4, 4))
+       'drawn, with their runs, and the view fitted to the car and the stops',
+       (len(_t.get('marks') or []), _t.get('lines'), _t.get('fit')), (4, 4, 3))
     ok_('...and the line under the map is the same card\'s line as before (%r)'
         % _t.get('note'), bool(was) and _t.get('note') == was)
     eq('...with nothing of it half drawn, and the key saying it was not drawn '
@@ -9469,6 +9643,71 @@ try:
             % sorted(set(_used) & _verdict),
             len(wc.get('verdictColours') or []) == 16 and _used
             and not (set(_used) & _verdict))
+
+    # --- the map shows the difference ---------------------------------------
+    #
+    # An offer screened with an order in the car: the run solid, the miles the
+    # card adds dashed along the gap the figure chose, the stops numbered in
+    # the order the car would call at them, and the view framed on the car and
+    # those stops once per card (drawMap).
+    md = got.get('mapDiff') or {}
+    ok_('the map-shows-the-difference stage ran', bool(md))
+    if md:
+        _f = md.get('first') or {}
+        _at, _gap = _f.get('at') or {}, _f.get('gap')
+        _ls = _f.get('lines') or []
+        _run = [l for l in _ls if 'mv-held-run' in l['cls']]
+        _ext = [l for l in _ls if 'mv-detour' in l['cls']]
+        # The gap's own two ends: the car and the restaurant (gap 0), or the
+        # restaurant and the order's end (gap 1).
+        _ends = {0: [_at.get('C'), _at.get('G')], 1: [_at.get('G'), _at.get('S')]}.get(_gap)
+        ok_('the extra leg is drawn dashed and the held run solid: the run in the order\'s '
+            'amber, the extra in violet along the chosen gap, prev -> new pickup -> next '
+            '(gap %r, %r)' % (_gap, [(l['cls'], l['dashed'], l['colour']) for l in _ls]),
+            _run and all(not l['dashed'] and l['colour'] == '#f5a524' for l in _run)
+            and len(_ext) == 1 and _ext[0]['dashed'] and _ext[0]['colour'] == '#c084fc'
+            and _ends and _ext[0]['pts'][0] == _ends[0] and _ext[0]['pts'][-1] == _ends[1]
+            and _at.get('A') in _ext[0]['pts'])
+        _lt = {tuple(ll): h for h, ll in _f.get('letters') or [] if ll}
+        _want = None if _gap is None else (
+            str(_gap + 1), '1' if _gap >= 1 else '2', '3', 'D')
+        _two = got.get('mapTwoKnown') or {}
+        _tw = _two.get('want') or {}
+        _tl = {tuple(ll): h for h, ll in _two.get('letters') or [] if ll}
+        _tg = _tw.get('gap')
+        _tso = None if _tg is None else [k if k <= _tg else k + 1 for k in (1, 2, 3)]
+        eq('stops are numbered in visiting order, the new pickup in its slot: with the '
+           'restaurant ahead (gap %r), and with two orders in the planner\'s order (gap %r)'
+           % (_gap, _tg),
+           ((_lt.get(tuple(_at.get('A') or ())), _lt.get(tuple(_at.get('G') or ())),
+             _lt.get(tuple(_at.get('S') or ())), _lt.get(tuple(_at.get('drop') or ()))),
+            (_tl.get(tuple(_tw.get('A') or ())), _tl.get(tuple(_tw.get('M') or ())),
+             _tl.get(tuple(_tw.get('K') or ())), _tl.get(tuple(_tw.get('W') or ())))),
+           (_want, None if _tg is None else (str(_tg + 1),) + tuple(str(n) for n in _tso)))
+        _tu = got.get('mapTwoUnknown') or {}
+        eq('...and none where the order of the stops is unknown: two orders both ways '
+           'round keep their letters',
+           sorted(h for h, _ll in _tu.get('letters') or []), ['D1', 'D2', 'P', 'P2'])
+        _ta = got.get('mapTwoAgree') or {}
+        eq('...nor where both ways round give one figure: the figure stated, the order '
+           'of the two ends after it still unknown (%r)' % _ta.get('note'),
+           ((_ta.get('note') or '').startswith('on your way incl. both orders'),
+            sorted(h for h, _ll in _ta.get('letters') or [])),
+           (True, ['D1', 'D2', 'P', 'P2']))
+        ok_('the key names the run, the extra and the numbered stops when they are drawn '
+            '(%r)' % _f.get('key'),
+            '━ run' in (_f.get('key') or '') and '┅ extra' in (_f.get('key') or '')
+            and '12 order' in (_f.get('key') or ''))
+        _n, _l = md.get('next') or {}, md.get('later') or {}
+        _na = _n.get('at') or {}
+        _fr = set(map(tuple, (_n.get('fits') or [[]])[0]))
+        eq('the view frames car and stops once per card and not on every beat: one fit '
+           'for the new card, the car, the pickup, the restaurant and the order\'s end, '
+           'not the new job\'s end, and none for three beats and the card said twice '
+           'more (%r)' % (_n.get('fits'),),
+           (len(_n.get('fits') or []), _fr == {tuple(_na.get(k) or ()) for k in 'CAGS'},
+            tuple(_na.get('drop') or ()) in _fr, len(_l.get('fits') or [])),
+           (1, True, False, 1))
 
     # --- you are here ------------------------------------------------------
     _hb = got.get('hereBefore') or {}

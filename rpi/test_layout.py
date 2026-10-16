@@ -2343,7 +2343,9 @@ const SNAP_MEASURE = (fixture) => {
         // when drawing them failed (showKey(null)) — and the marks' form
         // with the held order's pickup ring in it too, which drops the long
         // words everywhere and takes two rows on the hat (see #mapKey's rule).
-        const KEY_MEASURE = ([failed, hpick, zoomBottom]) => {
+        // ...and, `lines`, with the order in the car's own marks in it too:
+        // its run, the extra and the numbered stops (drawMap, showKey).
+        const KEY_MEASURE = ([failed, hpick, zoomBottom, lines]) => {
           document.body.classList.remove('between');
           const key = document.getElementById('mapKey');
           const map = document.getElementById('liveMap').getBoundingClientRect();
@@ -2351,6 +2353,9 @@ const SNAP_MEASURE = (fixture) => {
           key.querySelector('.k-all').hidden = failed;
           key.querySelector('.k-fail').hidden = !failed;
           key.querySelector('.k-item[data-k="hpick"]').hidden = !hpick;
+          ['run', 'extra', 'order'].forEach((k) => {
+            key.querySelector('.k-item[data-k="' + k + '"]').hidden = !lines;
+          });
           const r = key.getBoundingClientRect();
           const tops = {};
           const walk = document.createTreeWalker(key, NodeFilter.SHOW_TEXT);
@@ -2377,11 +2382,15 @@ const SNAP_MEASURE = (fixture) => {
           key.querySelector('.k-all').hidden = false;
           key.querySelector('.k-fail').hidden = true;
           key.querySelector('.k-item[data-k="hpick"]').hidden = false;
+          ['run', 'extra', 'order'].forEach((k) => {
+            key.querySelector('.k-item[data-k="' + k + '"]').hidden = true;
+          });
           return out;
         };
         shown.key = await page.evaluate(KEY_MEASURE, [false, false, shown.zoom.bottom]);
         shown.keyHeld = await page.evaluate(KEY_MEASURE, [false, true, shown.zoom.bottom]);
         shown.keyFailed = await page.evaluate(KEY_MEASURE, [true, false, shown.zoom.bottom]);
+        shown.keyRun = await page.evaluate(KEY_MEASURE, [false, true, shown.zoom.bottom, true]);
         // ...and what a mark of drawHow's says when pointed at (#mapTip):
         // the longest the suite's marks say — a refused McDonald's with the
         // branch outside its 9.9 mi disc, 142 characters — in the one box
@@ -5451,6 +5460,21 @@ try:
                 eq('...saying the held pickup with the rest at %s' % panel, key.get('text'),
                    "◯ reach · PD%s · ● found · ○ outside · P held pickup"
                    % ('' if h <= 380 else ' pin'))
+                # ...and with the order in the car's own marks in it as well —
+                # its run, the extra, the numbered stops (drawMap) — beside the
+                # held pickup: every item it can name at once. Two rows at
+                # most, on every panel: the hat's measured two with the held
+                # pickup are not exceeded.
+                key = phone.get('keyRun') or {}
+                ok_('the key with the run, the extra and the numbered stops in it sits '
+                    'inside the map, below the zoom buttons, in two rows at most, nothing '
+                    'cut, at %s (%r)'
+                    % (panel, (key.get('rows'), key.get('spills'), key.get('w'), key.get('mapW'))),
+                    key.get('inside') and key.get('belowZoom')
+                    and 1 <= (key.get('rows') or 9) <= 2 and not key.get('spills'))
+                eq('...saying them after the rest at %s' % panel, key.get('text'),
+                   "◯ reach · PD%s · ● found · ○ outside · P held pickup · ━ run · ┅ extra "
+                   "· 12%s" % (('', '') if h <= 380 else (' pin', ' order')))
                 key = phone.get('keyFailed') or {}
                 ok_('the key saying how each place was found was not drawn sits inside '
                     'the map, below the zoom buttons, in one row, nothing cut, at %s (%r)'
