@@ -2661,6 +2661,43 @@ PLANNER_STOP = re.compile(
 PLANNER_EXPECTED = re.compile(r'\bexpected\s*by\s*' + CLOCK_TIME,
                               re.IGNORECASE | ASCII)
 PLANNER_ADDRESS = re.compile(r'^[^A-Za-z0-9]{0,3}address\b', re.IGNORECASE | ASCII)
+
+
+# THE LABEL MISREAD. The driver's planner for a single trip, read whole-screen
+# on shift (names and streets invented here, the layout and the slips the
+# reading's): the dropoff's label came back "Addres", and the block had no
+# label, so the stop kept its name and lost its street; the held order kept
+# the card's corner as its end and GPS arrival never armed ("no house
+# number"). The pickup's label on the same page read whole. So the label is
+# also taken one edit from "Address" — a letter lost, added or changed:
+# "Addres", "Adress", "Addreess", "Addross" — but only as a line of its own,
+# nothing on it but the word and the screen's furniture at its ends. A word
+# one letter off "Address" inside a line of text is not this label, and
+# PLANNER_ADDRESS keeps the exact word's reach (with the scroll bar's tail,
+# "Address he") as it was. planner_furniture still asks for the exact word:
+# that is what its measurement counted.
+def _one_edit(a, b):
+    """True when `a` and `b` are one insertion, deletion or substitution
+    apart (Levenshtein distance exactly 1)."""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) > len(b):
+        a, b = b, a
+    i = 0
+    while i < len(a) and a[i] == b[i]:
+        i += 1
+    return a[i + (len(a) == len(b)):] == b[i + 1:]
+
+
+def _planner_label(line):
+    """True when `line` is a stop's "Address" label: PLANNER_ADDRESS, or the
+    word alone on its line one edit away from it (see _one_edit)."""
+    if PLANNER_ADDRESS.match(line):
+        return True
+    word = re.sub(r'^[^A-Za-z0-9]+|[^A-Za-z0-9]+$', '', line)
+    return _one_edit(word.lower(), 'address')
+
+
 # A bare ZIP on a line of its own: the end of a town line the screen wrapped,
 # "…, Kennesaw, GA" over "30152" on the rig's own picture of a planner.
 PLANNER_ZIP_LINE = re.compile(r'^(' + ZIP + r')(?: ?- ?' + DC + r'{4})?$', ASCII)
@@ -2668,6 +2705,27 @@ PLANNER_ZIP_LINE = re.compile(r'^(' + ZIP + r')(?: ?- ?' + DC + r'{4})?$', ASCII
 # find_address's own idea of a town; the state is the check, as it is there.
 PLANNER_TOWN = re.compile(r'^[^A-Za-z]{0,3}(' + TOWN + r') ?, ?([A-Za-z]{2})\b ?(.*)$',
                           ASCII)
+# ...and the comma misread. On the same shift's planner the dropoff's town line
+# came back "<Town>. GA": the comma read as a full stop, so no line under the
+# label was a town line and the town went with it. The comma can be lost
+# outright too ("Marietta GA"). Either is taken, but only in the shape a town
+# line has and other lines under a label do not: every word of the town
+# capitalised, the state two CAPITALS, and the line opening on the town's
+# letter — never on a digit, so "28 Oak St NE" (a short house number inside
+# the three glyphs of furniture PLANNER_TOWN allows) is not a town. "NE" is
+# refused here as well: it is the only quadrant that is also a state, and a
+# street whose number the reader lost ("Quillon St NE") is otherwise a town
+# called "Quillon St" in Nebraska, on a driver who works Georgia.
+# A full stop inside the town is taken only after a word ("St. Marys"), so the
+# one in front of the state is the separator's to take and no word's.
+# The shape is loose, and only the label makes it safe: on the 12 Oct journal's
+# 12,229 texts, 70 lines anywhere on the screen match it (a pizza shop's "NY",
+# "East Point PA", OCR noise like "We KS") and do not match PLANNER_TOWN; none
+# sits under an "Address" label, and no find_planner answer there, nor on the
+# shared corpus, changed with it.
+PLANNER_TOWN_LOOSE = re.compile(
+    r'^[^A-Za-z0-9]{0,3}([A-Z][A-Za-z\'’-]*(?:\.?\s+[A-Z][A-Za-z\'’-]*){0,3})'
+    r'(?: ?\. ?| )([A-Z]{2})\b ?(.*)$', ASCII)
 PLANNER_ZIP = re.compile(r'(' + ZIP + r')(?: ?- ?' + DC + r'{4})?(?![0-9A-Za-z])', ASCII)
 # A line's own furniture, off both ends: the stop's icon read as "©" in front
 # of the name, a chevron or a stray mark after it. A full stop is kept at the
@@ -2710,8 +2768,8 @@ def _planner_address(street_line, town_line):
     """
     city = state = zipcode = None
     tail = False
-    t = PLANNER_TOWN.match(town_line or '')
-    if t and t.group(2).upper() in STATES:
+    t = _planner_town(town_line)
+    if t:
         town = CITY_JUNK.sub('', re.sub(r'\s+', ' ', t.group(1)).strip(' .,'))
         if len(town) >= 3:
             city, state = town, t.group(2).upper()
@@ -2738,9 +2796,13 @@ def _planner_address(street_line, town_line):
 
 def _planner_town(line):
     """`line` as a town line — "Town, ST" and whatever follows the state — when
-    it is one whose state is a state, else None."""
+    it is one whose state is a state, else None. The comma may be a full stop
+    or missing, in the narrower shape PLANNER_TOWN_LOOSE allows."""
     t = PLANNER_TOWN.match(line or '')
-    return t if t and t.group(2).upper() in STATES else None
+    if t and t.group(2).upper() in STATES:
+        return t
+    t = PLANNER_TOWN_LOOSE.match(line or '')
+    return t if t and t.group(2) in STATES and t.group(2) != 'NE' else None
 
 
 # A quadrant the screen wrapped off the end of the street onto the town line:
@@ -2962,7 +3024,7 @@ def find_planner(text):
         # whatever came next into it. Two letters in a row, or it is a mark.
         name = None
         if block and not PLANNER_EXPECTED.search(block[0]) \
-                and not PLANNER_ADDRESS.match(block[0]):
+                and not _planner_label(block[0]):
             name = PLANNER_EDGE.sub('', block[0])
             if not re.search(r'[A-Za-z]{2}', name):
                 name = None
@@ -2986,7 +3048,7 @@ def find_planner(text):
         street_line = town_line = place = None
         times = [j for j, l in enumerate(block) if PLANNER_EXPECTED.search(l)]
         own = block[:times[1]] if len(times) > 1 else block
-        label = next((j for j, l in enumerate(own) if PLANNER_ADDRESS.match(l)), None)
+        label = next((j for j, l in enumerate(own) if _planner_label(l)), None)
         if label is not None:
             street_line, town_line, place = _planner_address_lines(own, label)
         stop = {'kind': 'pickup' if head.group(1)[0] in 'pP' else 'dropoff',
@@ -3025,7 +3087,7 @@ def _planner_orphan(lines, first):
     above = lines[:first]
     if any(PLANNER_TITLE.match(l) for l in above):
         return None
-    label = next((j for j, l in enumerate(above) if PLANNER_ADDRESS.match(l)), None)
+    label = next((j for j, l in enumerate(above) if _planner_label(l)), None)
     if label is None:
         return None
     due = None

@@ -1430,9 +1430,34 @@
     + '(' + DC + '{1,2}) ?orders?\\b', 'i');
   var PLANNER_EXPECTED = new RegExp('\\bexpected\\s*by\\s*' + CLOCK_TIME, 'i');
   var PLANNER_ADDRESS = /^[^A-Za-z0-9]{0,3}address\b/i;
+  /* The label misread, on the driver's planner on shift: the dropoff's came
+     back "Addres", the block had no label, and the stop lost its street - the
+     held order kept the card's corner as its end and GPS arrival never armed.
+     So the label is also the word one edit from "Address" ("Addres", "Adress",
+     "Addreess", "Addross"), but only alone on its line with the screen's
+     furniture at its ends; PLANNER_ADDRESS keeps the exact word's reach. See
+     _planner_label in offer_parser.py. */
+  function oneEdit(a, b) {
+    if (a === b || Math.abs(a.length - b.length) > 1) return false;
+    if (a.length > b.length) { var x = a; a = b; b = x; }
+    var i = 0;
+    while (i < a.length && a[i] === b[i]) i++;
+    return a.slice(i + (a.length === b.length ? 1 : 0)) === b.slice(i + 1);
+  }
+  function plannerLabel(line) {
+    if (PLANNER_ADDRESS.test(line)) return true;
+    return oneEdit(line.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '').toLowerCase(), 'address');
+  }
   // A bare ZIP on a line of its own, the end of a town line the screen wrapped.
   var PLANNER_ZIP_LINE = new RegExp('^(' + ZIP_RX + ')(?: ?- ?' + DC + '{4})?$');
   var PLANNER_TOWN = new RegExp('^[^A-Za-z]{0,3}(' + TOWN + ') ?, ?([A-Za-z]{2})\\b ?(.*)$');
+  /* ...and the comma read as a full stop ("<Town>. GA", the same planner) or
+     lost ("Marietta GA"): taken only with every word of the town capitalised,
+     the state two capitals and not "NE" (a street's quadrant far more often
+     here), and the line opening on a letter, never a short house number. See
+     PLANNER_TOWN_LOOSE in offer_parser.py. */
+  var PLANNER_TOWN_LOOSE = new RegExp('^[^A-Za-z0-9]{0,3}([A-Z][A-Za-z\'’-]*(?:\\.?\\s+[A-Z][A-Za-z\'’-]*){0,3})'
+    + '(?: ?\\. ?| )([A-Z]{2})\\b ?(.*)$');
   var PLANNER_ZIP = new RegExp('^(' + ZIP_RX + ')(?: ?- ?' + DC + '{4})?(?![0-9A-Za-z])');
   // A line's furniture off both ends; a full stop is kept, "Pat Q." being how
   // the app writes a name.
@@ -1452,8 +1477,8 @@
      town off its end. See _planner_address in offer_parser.py. */
   function plannerAddress(streetLine, townLine) {
     var city = null, state = null, zip = null, tail = false;
-    var t = PLANNER_TOWN.exec(townLine || '');
-    if (t && STATES[t[2].toUpperCase()]) {
+    var t = plannerTown(townLine);
+    if (t) {
       var town = t[1].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '')
                      .replace(CITY_JUNK, '');
       if (town.length >= 3) {
@@ -1489,7 +1514,9 @@
      plannerBounded, so the two never disagree about which line is a stop. */
   function plannerTown(line) {
     var t = PLANNER_TOWN.exec(line || '');
-    return t && STATES[t[2].toUpperCase()] ? t : null;
+    if (t && STATES[t[2].toUpperCase()]) return t;
+    t = PLANNER_TOWN_LOOSE.exec(line || '');
+    return t && STATES[t[2]] && t[2] !== 'NE' ? t : null;
   }
 
   /* The street line and the town line under the label at block[label]: the
@@ -1618,7 +1645,7 @@
     if (above.some(function (l) { return PLANNER_TITLE.test(l); })) return null;
     var label = -1;
     for (var j = 0; j < above.length; j++) {
-      if (PLANNER_ADDRESS.test(above[j])) { label = j; break; }
+      if (plannerLabel(above[j])) { label = j; break; }
     }
     if (label === -1) return null;
     var due = null;
@@ -1679,7 +1706,7 @@
       // name must not promote whatever came next into it.
       var name = null;
       if (block.length && !PLANNER_EXPECTED.test(block[0])
-          && !PLANNER_ADDRESS.test(block[0])) {
+          && !plannerLabel(block[0])) {
         name = block[0].replace(PLANNER_EDGE, '');
         if (!/[A-Za-z]{2}/.test(name)) name = null;
       }
@@ -1699,7 +1726,7 @@
       block.forEach(function (l, i) { if (PLANNER_EXPECTED.test(l)) times.push(i); });
       var own = times.length > 1 ? block.slice(0, times[1]) : block;
       for (var j = 0; j < own.length; j++) {
-        if (PLANNER_ADDRESS.test(own[j])) { label = j; break; }
+        if (plannerLabel(own[j])) { label = j; break; }
       }
       if (label !== -1) {
         var found = plannerAddressLines(own, label);

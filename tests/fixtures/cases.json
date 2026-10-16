@@ -5074,6 +5074,326 @@
      "place": null
     }
    ]
+  },
+  {
+   "name": "a dropoff label read one letter off \"Address\" on its own line is the label",
+   "_why": "Measured shape: the 16 Oct shift's planner read the dropoff's label \"Addres\", and with no label in the block the stop kept no street. One edit from the word, alone on its line: a letter lost (\"Adress\" here), added (\"Addreess\") or changed (\"Addross\"). Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAdress\n283 Quillon St NW\nSmyrna, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": "283 Quillon St NW",
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "283 Quillon St NW, Smyrna",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...a letter added to the label",
+   "_why": "As above, \"Addreess\". Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddreess\n283 Quillon St NW\nSmyrna, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": "283 Quillon St NW",
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "283 Quillon St NW, Smyrna",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...a letter changed in the label",
+   "_why": "As above, \"Addross\". Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddross\n283 Quillon St NW\nSmyrna, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": "283 Quillon St NW",
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "283 Quillon St NW, Smyrna",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...but not with anything else on its line",
+   "_why": "The one-edit label is taken only alone on its line: \"Addres Book\" is not it, and the block has no label, so its stop keeps no address, as before. The exact word keeps its reach (\"Address he\", the scroll bar). Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddres Book\n283 Quillon St NW\nSmyrna, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null,
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a town line whose comma read as a full stop is still the town line",
+   "_why": "Measured shape: the same planner read the dropoff's town line \"<Town>. GA\"; no line under the label was a town line, and the town went. Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddress\n283 Quillon St NW\nSmyrna. GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": "283 Quillon St NW",
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "283 Quillon St NW, Smyrna",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and one whose comma was lost",
+   "_why": "\"Smyrna GA\", no separator at all. Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddress\n283 Quillon St NW\nSmyrna GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": "283 Quillon St NW",
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "283 Quillon St NW, Smyrna",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and a street line carrying its town still splits at its comma when the town's comma was lost",
+   "_why": "Street and town on one line, \"283 Quillon St NW, Smyrna GA\": the remainder after the comma is a town line in the loose shape. Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddress\n283 Quillon St NW, Smyrna GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": "283 Quillon St NW",
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "283 Quillon St NW, Smyrna",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...but a line opening on a house number is never a comma-less town line",
+   "_why": "\"12 Quillon St Smyrna GA\", both commas lost: read as a town line it would make \"Quillon St Smyrna\" the town. A comma-less town line opens on the town's capital, never a digit, so no town is made of the street: the line is kept as the street it was read as before this rule, town None. Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddress\n12 Quillon St Smyrna GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": "12 Quillon St Smyrna GA",
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": "12 Quillon St Smyrna GA",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor is a street ending NE whose house number the reader lost",
+   "_why": "\"Quillon St NE\" over \"Smyrna, GA\": with the number lost, the street line reads as a comma-less town \"Quillon St\" in Nebraska unless NE is refused there. It is: the town line under it is the town. Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddress\nQuillon St NE\nSmyrna, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": null,
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "Smyrna",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "Measured: the single trip's planner with both slips, its title misread and the bar under it",
+   "_why": "The whole-screen text of the 16 Oct shift's planner, structure and OCR marks as read, every name and street invented: the title read \"ny. mS\", the dropoff's label \"Addres\", its town line \"<Town>. GA\". Read with neither slip fixed, the dropoff had street and town None, the card's corner stayed the order's end and GPS arrival never armed (\"no house number\"). No title and no Waybill: not bounded.",
+   "text": "ny. mS\nPickup - 1 order\n\u00a9 Fable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy Nw\nKennesaw, GA 30144\nView details\nDropoff - 1 order\noO Lee R. H\nExpected by 7:45 PM\nAddres\n283 Quillon St NW\nSmyrna. GA\nView details\nS Q\n=o\nStop New Requests\nit Cc) Z +",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy Nw",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy Nw, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "oO Lee R. H",
+     "expectedBy": 1185,
+     "street": "283 Quillon St NW",
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "283 Quillon St NW, Smyrna",
+     "place": null
+    }
+   ]
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",
