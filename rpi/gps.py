@@ -494,10 +494,11 @@ def parse_line(line):
         return None
 
     if line.startswith('{'):
-        # gpsd's satellite report, refused before it is parsed: one SKY line
-        # for every TPV in the 12 Oct shift's logs, and each went through
-        # json.loads only to be refused by `class` below. A TPV line cannot
-        # match this: it has one "class", and it says "TPV".
+        # gpsd's satellite report, refused before it is parsed: 1,216 SKY
+        # lines to 1,217 TPV in the first 3 MB of one of the 12 Oct shift's
+        # logs, and each went through json.loads only to be refused by `class`
+        # below. A TPV line cannot match this: it has one "class", and it says
+        # "TPV".
         if _SKY.search(line):
             return None
         try:
