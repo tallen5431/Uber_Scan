@@ -3102,10 +3102,25 @@ def planner_ends(text):
 
     A headless page (_planner_headless) shows the list's foot and not its
     head: (False, True), so a list stitched from a page with the title over
-    it and this one under it is bounded, as one with a header on each is."""
+    it and this one under it is bounded, as one with a header on each is.
+
+    A HEADER THE READER LOST: (False, False), whatever is at the two ends. A
+    block holding two "Expected by" lines is two stops under one header — the
+    second's header went to OCR, and with it the stop: find_planner files that
+    stop's time and address under the one above (or, above its second time,
+    under nobody). Both ends were on the glass and the list between them was
+    not read whole, so the one dropoff left could be another customer's door:
+    on a trip of two dropoffs whose first header was lost, the page read as
+    bounded with ONE dropoff, the second customer's, and plannerDestination
+    filed it. Invented streets, the shape in tests/fixtures/cases.json ("a
+    dropoff header the reader lost …")."""
     lines, heads = _planner_lines(text)
     if not heads:
         return False, _planner_headless(lines) is not None
+    for k, at in enumerate(heads):
+        block = lines[at + 1:heads[k + 1] if k + 1 < len(heads) else len(lines)]
+        if sum(1 for l in block if PLANNER_EXPECTED.search(l)) > 1:
+            return False, False
     titles = [i for i in range(heads[0]) if PLANNER_TITLE.match(lines[i])]
     top = bool(titles) and not any(re.search(r'[A-Za-z]{2}', l)
                                    for l in lines[titles[-1] + 1:heads[0]])

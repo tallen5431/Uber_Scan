@@ -693,11 +693,29 @@
               && (s.street || s.city));
   }
 
+  /* Whether the pickups' "N orders" add up to more than the dropoffs' do. A
+   * trip delivers what it picks up, so on a list read whole the two are equal;
+   * more picked up than dropped off is a dropoff the reader did not read — its
+   * header lost to OCR, its lines filed under the stop above (find_planner) —
+   * and the dropoff that is left may be another customer's door. A count that
+   * did not read (`orders` null) counts nothing on either side. Said as 'list',
+   * the list not seen whole, which is what it is, and a later read that gets
+   * the header back can still file: 'dropoffs' would refuse the pages for good
+   * over a misread. */
+  function listShort(stops) {
+    var sum = function (kind) {
+      return headed(stops).reduce(function (n, s) {
+        return n + (s.kind === kind && typeof s.orders === 'number' ? s.orders : 0);
+      }, 0);
+    };
+    return sum('pickup') > sum('dropoff');
+  }
+
   function plannerDestination(stops, bounded) {
     var drops = headed(stops).filter(function (s) { return s.kind === 'dropoff'; });
     if (!drops.length) return { address: null, why: null, stop: null };
     if (drops.length > 1) return { address: null, why: 'dropoffs', stop: null };
-    if (!bounded) return { address: null, why: 'list', stop: drops[0] };
+    if (!bounded || listShort(stops)) return { address: null, why: 'list', stop: drops[0] };
     if (!(drops[0].street && drops[0].city)) return { address: null, why: 'address', stop: drops[0] };
     return { address: addressOf(drops[0]), why: null, stop: drops[0] };
   }
@@ -715,6 +733,9 @@
   function plannerLoneDropoff(stops) {
     var drops = headed(stops).filter(function (s) { return s.kind === 'dropoff'; });
     if (drops.length !== 1 || drops[0].orders !== 1) return null;
+    // ...and not when the pickups say the trip carries more than it drops off:
+    // that is not a single trip, whatever is left on the glass (listShort).
+    if (listShort(stops)) return null;
     if (!(drops[0].street && drops[0].city)) return null;
     return addressOf(drops[0]);
   }
@@ -1493,7 +1514,10 @@
     var run = pool.indexOf(page) === -1 ? { view: pageView(page), pages: [page] }
       : linked(pool, page);
     var view = run.pages.length > 1 ? run.view : pageView(page);
-    var bounded = view.top && view.bottom;
+    // Seen whole only with as many dropped off as picked up (listShort): every
+    // dropoff below is handed over for attribution, and one the reader lost
+    // would leave the others to be told apart by elimination.
+    var bounded = view.top && view.bottom && !listShort(view.stops);
     var verdict = plannerDestination(view.stops, bounded);
     var cands = [];
     if (bounded) {

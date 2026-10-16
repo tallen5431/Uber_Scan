@@ -4966,6 +4966,90 @@
      "place": null
     }
    ]
+  },
+  {
+   "name": "a dropoff header the reader lost leaves the list unbounded, and its other dropoff unfiled",
+   "_why": "Two dropoffs under a pickup of 2 orders, the first dropoff's header lost to OCR, both ends of the list on the glass. Its lines fall into the pickup's block; the label above the second \"Expected by\" is not looked for, so that stop is filed under nobody and ONE dropoff is left, the other customer's. It read as bounded, and plannerDestination filed 903 Brindle Ct as the order's end. A block holding two \"Expected by\" lines is two stops under one header: neither end is vouched for. tests/assemble.test.js holds that nothing is filed. Invented.",
+   "text": "Trip Planner\nPickup • 2 orders\nFable Grill\nExpected by 4:02 PM\nAddress\n12 Ab St\nKennesaw, GA\nView details\nPat Q.\nExpected by 4:18 PM\nAddress\n17 Quillon Way\nMarietta, GA\nView details\nDropoff • 1 order\nLee R.\nExpected by 4:31 PM\nAddress\n903 Brindle Ct\nAcworth, GA\nView details\nWaybill",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 2,
+     "name": "Fable Grill",
+     "expectedBy": 962,
+     "street": "12 Ab St",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "12 Ab St, Kennesaw",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 991,
+     "street": "903 Brindle Ct",
+     "city": "Acworth",
+     "state": "GA",
+     "zip": null,
+     "line": "903 Brindle Ct, Acworth",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and on a single trip, the one dropoff's header lost, the pickup keeps no address of the customer's",
+   "_why": "One pickup, one dropoff, the dropoff's header lost: its name, time and address fall into the pickup's block. The pickup takes no address from above that second time, and the page is not bounded. Invented.",
+   "text": "Trip Planner\nPickup • 1 order\nFable Grill\nExpected by 4:02 PM\nPat Q.\nExpected by 4:18 PM\nAddress\n17 Quillon Way\nMarietta, GA\nView details\nWaybill",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 962,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null,
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a dropoff header lost with its time leaves the list bounded on the glass, and the pickups' count says a dropoff is missing",
+   "_why": "The first case with the lost stop's \"Expected by\" gone too: one time per block, so nothing on the page says a header went, and it reads as bounded with one dropoff, the second customer's. What does say so is the counts: the pickup carries 2 orders and the dropoffs read add up to 1. assemble.js refuses that list (listShort), and tests/assemble.test.js holds that nothing is filed. Invented.",
+   "text": "Trip Planner\nPickup • 2 orders\nFable Grill\nExpected by 4:02 PM\nAddress\n12 Ab St\nKennesaw, GA\nView details\nPat Q.\nAddress\n17 Quillon Way\nMarietta, GA\nView details\nDropoff • 1 order\nLee R.\nExpected by 4:31 PM\nAddress\n903 Brindle Ct\nAcworth, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 2,
+     "name": "Fable Grill",
+     "expectedBy": 962,
+     "street": "12 Ab St",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "12 Ab St, Kennesaw",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 991,
+     "street": "903 Brindle Ct",
+     "city": "Acworth",
+     "state": "GA",
+     "zip": null,
+     "line": "903 Brindle Ct, Acworth",
+     "place": null
+    }
+   ]
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",

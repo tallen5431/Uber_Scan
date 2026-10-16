@@ -1743,6 +1743,15 @@
     var lines = split.lines, heads = split.heads;
     // A headless page shows the list's foot and not its head.
     if (!heads.length) return { top: false, bottom: !!plannerHeadless(lines) };
+    // ...and a header the reader lost is neither end: a block holding two
+    // "Expected by" lines is two stops under one header, and the list between
+    // the ends was not read whole. See planner_ends in offer_parser.py.
+    for (var k = 0; k < heads.length; k++) {
+      var block = lines.slice(heads[k] + 1, k + 1 < heads.length ? heads[k + 1] : lines.length);
+      if (block.filter(function (l) { return PLANNER_EXPECTED.test(l); }).length > 1) {
+        return { top: false, bottom: false };
+      }
+    }
     var title = -1;
     for (var i = 0; i < heads[0]; i++) if (PLANNER_TITLE.test(lines[i])) title = i;
     var top = title !== -1 && !lines.slice(title + 1, heads[0])
