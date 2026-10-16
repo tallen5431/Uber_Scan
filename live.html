@@ -1093,6 +1093,9 @@
     min-height: 0; overflow: hidden;
   }
   .chooser[hidden] { display: none; }
+  /* ...and holding one line, what became of the press (chooserSays): as
+     tall as the line, at the top of the pane, not over the whole verdict. */
+  .chooser.said { align-self: start; }
   .chooser .ask {
     flex: none; font-size: clamp(13px, 2.2vw, 19px); font-weight: 700; color: var(--doubt);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -3318,7 +3321,10 @@
   var chooserTimer = null;
 
   function openChooser(c) {
-    choosing = Object.assign({}, c, { until: Date.now() + (c.closesInMs || 10000) });
+    choosing = Object.assign({}, c, { until: Date.now() + (c.closesInMs || 10000),
+                                      // The card "This card" means: the one on
+                                      // the record as the chooser opened.
+                                      cardOf: onRecord ? onRecord.id : null });
     drawChooser();
     clearTimeout(chooserTimer);
     chooserTimer = setTimeout(closeChooser, Math.max(0, choosing.until - Date.now()));
@@ -3352,6 +3358,7 @@
 
   function drawChooser() {
     while (el.chooser.firstChild) el.chooser.removeChild(el.chooser.firstChild);
+    el.chooser.classList.remove('said');
     el.chooser.hidden = !choosing;
     if (!choosing) return;
     var ask = document.createElement('div');
@@ -3363,7 +3370,12 @@
       chooserRow(circled(r.n) + ' ' + (typeof r.pay === 'number' ? money(r.pay, 2) : '?'),
                  'order', r.pick, streetOf(r.end) || '?');
     });
-    if (choosing.kind !== 'drop' && choosing.card) {
+    // "This card" only while it is still the card on the record. The server
+    // stops offering it the moment its card leaves (chooserForPanel) and
+    // refuses it after; the sheet went on offering it, under the next
+    // card's verdict, a row whose press could only be refused.
+    if (choosing.kind !== 'drop' && choosing.card
+        && (onRecord ? onRecord.id : null) === choosing.cardOf) {
       chooserRow('This card ' + (typeof choosing.card.pay === 'number'
                                  ? money(choosing.card.pay, 2) : ''), 'card', 'card');
     }
@@ -3396,18 +3408,51 @@
     // The address itself comes back on the stream when it is filed, as any
     // address does; a refused or late answer files nothing, which is what the
     // driver was told the chooser would do.
+    //
+    // ...and SAYS so. The server refuses a row the chooser no longer has —
+    // "This card" after the card left, an answer past its ten seconds — and
+    // the sheet had already closed on the press, so the refusal closed
+    // silently: the driver had picked, and nothing on the glass said the
+    // address went nowhere. The sheet says it in the place the press was
+    // made, for CHOOSER_SAID_MS, and the answer is the same press again.
+    var refused = function () { chooserSays('not filed — press ⌖ again'); };
     ask('/api/choose', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                         body: JSON.stringify({ id: c.id, pick: pick }) }).catch(function () {});
+                         body: JSON.stringify({ id: c.id, pick: pick }) })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (b) {
+          if (!r.ok || !b || b.ok === false) refused();
+        });
+      }, refused).catch(function () {});
+  }
+
+  /* The chooser's sheet holding one line and no rows: what became of the
+     press made on it. Gone after CHOOSER_SAID_MS, or as soon as another
+     chooser opens over it. Four seconds, chosen and not measured: long
+     enough to read at a glance, short enough not to stand over the verdict. */
+  var CHOOSER_SAID_MS = 4000;
+  function chooserSays(text) {
+    clearTimeout(chooserTimer);
+    choosing = null;
+    drawChooser();
+    var line = document.createElement('div');
+    line.className = 'ask';
+    line.textContent = text;
+    el.chooser.appendChild(line);
+    el.chooser.classList.add('said');
+    el.chooser.hidden = false;
+    chooserTimer = setTimeout(closeChooser, CHOOSER_SAID_MS);
   }
 
   /* ---------- Undo, after a Took that added an order ------------------------ */
   var undoing = null;
   var undoTimer = null;
 
-  function offerUndo(added) {
+  // `said`: the bar's words in place of "Added \u2461 \u2026 \u00b7 Undo" \u2014 an Undo that was
+  // not saved, offered again for the same order (see the press below).
+  function offerUndo(added, said) {
     undoing = added;
-    el.undo.textContent = 'Added ' + circled(heldList.length || 2) + ' '
-      + (typeof added.pay === 'number' ? money(added.pay, 2) : '') + ' \u00b7 Undo';
+    el.undo.textContent = said || ('Added ' + circled(heldList.length || 2) + ' '
+      + (typeof added.pay === 'number' ? money(added.pay, 2) : '') + ' \u00b7 Undo');
     el.undo.hidden = false;
     clearTimeout(undoTimer);
     undoTimer = setTimeout(function () { undoing = null; el.undo.hidden = true; },
@@ -3423,18 +3468,29 @@
     clearTimeout(undoTimer);
     el.undo.hidden = true;
     if (!u) return;
+    // Believing the server, as Took does: the untick is only taken back when
+    // the journal took it. A refused one (the journal not writing, a
+    // deadline) used to read "Took $9.25?" on the bar all the same, while the
+    // order stayed in the car and on the record as taken — two answers to
+    // one press, and the wrong one on the glass. Refused, it says so on the
+    // bar it was pressed on, and a press there tries again.
+    var notSaved = function () {
+      offerUndo(u, 'Undo not saved · press to try again');
+    };
     ask('/api/offers/mark', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: u.id, accepted: null, via: 'panel', offer: { id: u.id } }) })
-      .then(function (r) { return r.ok ? r.json().catch(function () { return null; }) : null; })
-      .then(function (body) {
-        if (onRecord && onRecord.id === u.id) tookState = false;
-        if (body && typeof body.holding === 'boolean') {
-          if (body.holding) setHeldFrom(body.held, body);
-          else orderDown();
-        }
-        showDrop(); showDest(); showTook(); showHeld(heldMode);
-        if (viewMode === 'map') showMap();
-      }).catch(function () {});
+      .then(function (r) {
+        if (!r.ok) return notSaved();
+        return r.json().catch(function () { return null; }).then(function (body) {
+          if (onRecord && onRecord.id === u.id) tookState = false;
+          if (body && typeof body.holding === 'boolean') {
+            if (body.holding) setHeldFrom(body.held, body);
+            else orderDown();
+          }
+          showDrop(); showDest(); showTook(); showHeld(heldMode);
+          if (viewMode === 'map') showMap();
+        });
+      }, notSaved).catch(function () {});
   });
 
   el.dest.addEventListener('click', function () {
@@ -3451,9 +3507,16 @@
       // pressed here, and between offers no reading arrives to say so — so
       // Drop and ⌖ Dropoff stayed lit for an order that no longer existed,
       // and pressing this photographed the phone for nothing.
+      //
+      // ...and ALL of it down, through the one function that knows what an
+      // order is. Four names were cleared here and the rest stayed: the hold's
+      // id, its planner's stops, the two-order list and the GPS's "at the
+      // door". The next ✓ Took then started under them — a reply that names
+      // one order kept the old list, so the bar said "Drop ▾" and the card
+      // drew a second order that had gone, beside "at dropoff".
       if (b && b.holding === false && holdingNow) {
-        holdingNow = false; forgetDest(); heldEnds = undefined;
-        showDrop(); showStack(null); showTook();
+        orderDown();
+        showDrop();
       }
     }).catch(function () {
       /* The scanner answers on its own stream; a failed ask just reads as one
@@ -4850,7 +4913,8 @@
       // card writes a real mark and a real pairing row into a journal whose
       // history cannot be regenerated.
       if (msg.offer && msg.offer.id) {
-        if (!onRecord || onRecord.id !== msg.offer.id) {
+        var newCard = !onRecord || onRecord.id !== msg.offer.id;
+        if (newCard) {
           tookState = false;
           tookFailed = false;
           // ...and its age starts here: server.js stamps offerAt at the same
@@ -4887,6 +4951,9 @@
         }
         onRecord = msg.offer;
         showTook();
+        // ...and the chooser, whose "This card" is about the card on the
+        // record when it opened: with another one there, drawn without it.
+        if (newCard && choosing) drawChooser();
         // ...and the dropoff button, whose whole screening condition is a
         // property of THIS offer: whether it named a destination and whether
         // the card refused one. The tick below would get there within a
@@ -7210,6 +7277,10 @@
   var drawSkip = document.getElementById('drawSkip');
   var drawCancel = document.getElementById('drawCancel');
   var drawHint = document.getElementById('drawHint');
+  // The timer that puts the "box sent" line away, so a press of ▣ Set box
+  // inside its six seconds can stop it: left running it hid the NEXT
+  // drawing's instruction under the driver's finger. See setBox.
+  var hintBack = null;
   var drawnScreen = document.getElementById('drawnScreen');
   var box = null;             // {x, y, w, h} as fractions, or null
   var dragFrom = null;
@@ -7365,6 +7436,7 @@
   view.addEventListener('load', showBox);
 
   setBox.addEventListener('click', function () {
+    clearTimeout(hintBack);
     var on = !viewWrap.classList.contains('drawing');
     // The box is drawn on the picture, so there has to be one. Without this the
     // hidden image measures zero and every drag is silently ignored, which
@@ -7456,7 +7528,8 @@
       drawHint.textContent = card
         ? 'boxes sent — offers are read in the card box, and ⌖ reads the whole screen box'
         : 'box sent — the green outline moves onto it in a moment';
-      setTimeout(function () { drawHint.hidden = true; }, 6000);
+      clearTimeout(hintBack);
+      hintBack = setTimeout(function () { drawHint.hidden = true; }, 6000);
     }).catch(function (e) {
       drawUse.disabled = false;
       drawSkip.disabled = false;

@@ -2628,6 +2628,24 @@ const framed = (page) => page.waitForFunction(
     await page.click('#drawSkip');
     await page.waitForTimeout(250);
     out.snap.two.bodies = cropBodies;
+    // ...and ▣ Set box pressed again inside the six seconds the "box sent"
+    // line stays up: the drawing's own instruction must outlive that line's
+    // timer, which used to hide it mid-drawing.
+    stage = 'snap: set box again inside the sent line\'s six seconds';
+    // Pressed in script, and that is a finding of its own, not a shortcut:
+    // in the phone view at 800x480 the "boxes sent — …" line widens the
+    // picture's column while it shows (640px against the picture's 269), and
+    // every control on the bar is 16px wide for those six seconds — a click
+    // at Set box's centre lands on ⛶ Scene. What is checked here is the
+    // timer, which the same press reaches on any panel where the bar is whole.
+    await page.evaluate(() => document.getElementById('setBox').click());
+    await page.waitForTimeout(6300);
+    out.snap.two.again = await page.evaluate(() => ({
+      drawing: document.getElementById('viewWrap').classList.contains('drawing'),
+      hint: document.getElementById('drawHint').hidden ? null
+        : document.getElementById('drawHint').textContent }));
+    await page.click('#drawCancel');
+    await page.waitForTimeout(150);
     await page.unroute('**/api/crop');
     await page.close();
   }
@@ -5924,7 +5942,14 @@ const framed = (page) => page.waitForFunction(
     await page.clock.install({ time: Date.now() });
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
     const posted = [];
+    // A rig with its scanner running, so the status row can carry the GPS
+    // drop's words once the socket is up (the ⌖ step at the end).
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, scanner: { enabled: true, running: true, error: null },
+                             last: null, heardAgeMs: 0, offer: null, holding: null }) }));
     let markReply = null;
+    let markStatus = 200;
     let dropReply = { ok: true, wasHolding: true };
     await page.route('**/api/choose', (route) => {
       posted.push({ url: '/api/choose', body: route.request().postData() });
@@ -5938,7 +5963,7 @@ const framed = (page) => page.waitForFunction(
     });
     await page.route('**/api/offers/mark', (route) => {
       posted.push({ url: '/api/offers/mark', body: route.request().postData() });
-      route.fulfill({ status: 200, contentType: 'application/json',
+      route.fulfill({ status: markStatus, contentType: 'application/json',
                       body: JSON.stringify(markReply || { ok: true }) });
     });
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -6031,6 +6056,30 @@ const framed = (page) => page.waitForFunction(
     await sent(1);
     await tick(300);
     const undone = { look: await look(), posted: posted.slice() };
+    // ...and an Undo the journal refuses: the order it was for stays in the
+    // car and on the record as taken, so ✓ Took stays — and the bar says the
+    // Undo was not saved, where it was pressed.
+    await push({ offer: { id: 'c-e', pay: 9.25, minutes: 24, perHour: 23 }, at: 5 });
+    markReply = { ok: true, holding: true, held: A, orders: [A, B], replaced: null,
+                  added: { holdId: 'c-e@5', id: 'c-e', pay: 9.25, undoForMs: 5000 } };
+    await page.evaluate(() => document.getElementById('took').click());
+    await undoUp();
+    await tick(300);
+    const tookNow = () => page.evaluate(() => ({
+      label: document.getElementById('took').textContent.replace(/\s+/g, ' ').trim(),
+      pressed: document.getElementById('took').getAttribute('aria-pressed') }));
+    const beforeRefused = await tookNow();
+    markStatus = 500;
+    markReply = { ok: false, error: 'read-only file system' };
+    posted.length = 0;
+    await page.evaluate(() => document.getElementById('undo').click());
+    await sent(1);
+    await undoUp();
+    await tick(300);
+    const refusedUndo = Object.assign({ before: beforeRefused, posted: posted.length },
+                                      await tookNow(), { look: await look() });
+    markStatus = 200;
+    await tick(5200);
     // Two in the car again, between offers, with two addresses nobody owns.
     await push({ holding: A, orders: [A, B], unowned: 2 });
     await push({ ready: false, state: 'empty', track: null });
@@ -6099,10 +6148,60 @@ const framed = (page) => page.waitForFunction(
     await sent(2);
     await tick(300);
     const dropBoth = { look: await look(), posted: posted.slice() };
+    // ⌖ pressed with two in the car, at ①'s door, ①'s planner read — and the
+    // reply says nothing is held: the server's clock ended the orders. Then
+    // ✓ Took on the next card, from a server that names one order. Every
+    // trace of the two that went must have gone with them: the list, the
+    // door, ①'s id and its planner's stops.
+    await push({ holding: A, orders: [A, B], unowned: 0 });
+    await push({ planner: { stops: [
+      { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700,
+        street: '310 Mill St', city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720,
+        street: '4821 Kestrel Dr', city: 'Marietta', line: '4821 Kestrel Dr, Marietta' }],
+      unfiled: null, asked: true, ms: null, at: 3 } });
+    // The socket open, so the status row says what the rig says rather than
+    // "reconnecting to the server…".
+    await page.evaluate(() => { if (window.__es.onopen) window.__es.onopen(); });
+    await push({ alive: true, at: Date.now(), atDropoff: true });
+    await tick(300);
+    const atDoor = await look();
+    await page.route('**/api/dropoff', (route) => {
+      posted.push({ url: '/api/dropoff', body: null });
+      route.fulfill({ status: 200, contentType: 'application/json',
+                      body: JSON.stringify({ ok: true, holding: false }) });
+    });
+    posted.length = 0;
+    await page.evaluate(() => document.getElementById('dest').click());
+    await sent(1);
+    for (let i = 0; i < 40; i++) {
+      if (await page.evaluate(() => document.getElementById('drop').hidden)) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    await tick(300);
+    const C = { pay: 11.5, minutes: 30, holdId: 'c-d@4', dropoff: '12 Wren Way, Smyrna',
+                card: null, endPinned: false, arrived: false, endWhy: null };
+    await push({ offer: { id: 'c-d', pay: 11.5, minutes: 30, perHour: 23 }, at: 4 });
+    markReply = { ok: true, holding: true, held: C };
+    posted.length = 0;
+    await page.evaluate(() => document.getElementById('took').click());
+    await sent(1);
+    for (let i = 0; i < 40; i++) {
+      if (await page.evaluate(() => !document.getElementById('drop').hidden)) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    const nothingHeld = Object.assign(await look(), await page.evaluate(() => ({
+      next: document.getElementById('heldNext').hidden ? null
+        : [].slice.call(document.getElementById('heldNext').children)
+          .map((c) => c.textContent.trim()).join(' ') })));
     out.carryTwo = { added: added, undoGone: undoGone, undone: undone, between: between,
                      offerUp: offerUp, offerFirst: offerFirst, chooser: chooser,
                      closed: closed, picked: picked,
-                     dropAsk: dropAsk, dropBoth: dropBoth };
+                     dropAsk: dropAsk, dropBoth: dropBoth, atDoor: atDoor,
+                     refusedUndo: refusedUndo,
+                     nothingHeld: nothingHeld };
     await page.close();
     await ctx.close();
   }
@@ -6125,10 +6224,11 @@ const framed = (page) => page.waitForFunction(
     await page.clock.install({ time: Date.now() });
     await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
     const posted = [];
+    let chooseStatus = 200, chooseReply = { ok: true, filed: 'card' };
     await page.route('**/api/choose', (route) => {
       posted.push({ url: '/api/choose', body: route.request().postData() });
-      route.fulfill({ status: 200, contentType: 'application/json',
-                      body: JSON.stringify({ ok: true, filed: 'card' }) });
+      route.fulfill({ status: chooseStatus, contentType: 'application/json',
+                      body: JSON.stringify(chooseReply) });
     });
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
     await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 })
@@ -6187,8 +6287,35 @@ const framed = (page) => page.waitForFunction(
                                                   dropoffScanned: true }) });
     await tick(1100);
     const pressed = await look();
+    // A second press's chooser, and the card leaves the phone while it is
+    // up: "This card" goes with it — the server stops offering that row the
+    // moment its card leaves, and refuses it after — and the order and
+    // Neither stay.
+    await push({ chooser: { id: 'choose-2', kind: 'scan', line: '9 Heron Ct, Smyrna, GA 30080',
+                            rows: [{ pick: 'h-1@1', n: 1, pay: 9.48, end: A.dropoff }],
+                            card: { pick: 'card', pay: 12.5 }, closesInMs: 10000 } });
+    await tick(200);
+    const askedAgain = await look();
+    await push({ offer: Object.assign({}, CARD, { id: 's-2', pay: 17 }), at: 2 });
+    await tick(200);
+    const cardLeft = await look();
+    // ...and a pick the server refuses (past its ten seconds, or a row it no
+    // longer has): said where the press was made, and gone after a while.
+    chooseStatus = 409;
+    chooseReply = { ok: false, error: 'closed' };
+    posted.length = 0;
+    await page.evaluate(() => document.querySelectorAll('#chooser button')[0].click());
+    for (let i = 0; i < 40; i++) {
+      if (await page.evaluate(() => /not filed/.test(document.getElementById('chooser').textContent))) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    await tick(100);
+    const refused = { look: await look(), posted: posted.length };
+    await tick(4200);
+    const refusedLater = await look();
     out.oneAndCard = { before: before, asked: asked, picked: picked, filed: filed,
-                       pressed: pressed };
+                       pressed: pressed, askedAgain: askedAgain, cardLeft: cardLeft,
+                       refused: refused, refusedLater: refusedLater };
     await page.close();
     await ctx.close();
   }
@@ -6656,6 +6783,16 @@ try:
         eq('[carry two] ...and Undo sends the untick the Took button sends, for that order',
            [(b.get('id'), b.get('accepted'), b.get('via')) for b in _ub],
            [('c-c', None, 'panel')])
+        _ru = ct.get('refusedUndo') or {}
+        ok_('[carry two] set up: ✓ Took on the card whose Took added ② (%r)' % _ru.get('before'),
+            ((_ru.get('before') or {}).get('label') or '').startswith('\u2713 Took $9.25'))
+        eq('a refused Undo leaves ✓ Took, and the order in the car',
+           ((_ru.get('label') or '').startswith('\u2713 Took $9.25'), _ru.get('pressed'),
+            (_ru.get('look') or {}).get('drop')),
+           (True, 'true', 'Drop \u25be'))
+        eq('...and says on its bar that it was not saved, to be pressed again',
+           (_ru.get('posted'), (_ru.get('look') or {}).get('undo')),
+           (1, 'Undo not saved \u00b7 press to try again'))
         _bt = ct.get('between') or {}
         eq('[carry two] one compact line per order, and the addresses nobody owns',
            (_bt.get('one'), _bt.get('two'), _bt.get('whose')),
@@ -6693,6 +6830,17 @@ try:
            [json.loads(p['body']) for p in _db.get('posted') or []
             if p.get('url') == '/api/delivered' and p.get('body')],
            [{'holdIds': ['c-a@1', 'c-b@2']}])
+        # ⌖ answered "nothing held": every part of the two orders goes, so the
+        # next ✓ Took — one order — starts clean.
+        _door = ct.get('atDoor') or {}
+        ok_('[⌖ nothing held] set up: two in the car, at ①\'s door (%r)' % _door.get('status'),
+            _door.get('drop') == 'Drop ▾' and 'at dropoff' in (_door.get('status') or ''))
+        _nh = ct.get('nothingHeld') or {}
+        eq('[⌖ nothing held] the whole hold goes: the next Took is one order, its own end next, '
+           'no "at dropoff", no old list',
+           (_nh.get('drop'), _nh.get('two'), _nh.get('next'),
+            'at dropoff' in (_nh.get('status') or '')),
+           ('Drop', None, 'Dropoff 12 Wren Way', False))
 
     # --- one order in the car and a card being screened ----------------------
     oc = got.get('oneAndCard') or {}
@@ -6718,6 +6866,18 @@ try:
         eq('[one held] a ⌖ answer given to the card leaves the button the order\'s: not green '
            'for an end the order in the car was not given',
            ((oc.get('before') or {}).get('dest'), (oc.get('filed') or {}).get('dest')), ([], []))
+        eq('[one held] set up: a second chooser offers the card again',
+           (oc.get('askedAgain') or {}).get('chooser'),
+           ['Whose is 9 Heron Ct?', '① $9.48 · 4821 Kestrel Dr', 'This card $12.50', 'Neither'])
+        eq('the chooser stops offering "This card" when the card on the record changes',
+           (oc.get('cardLeft') or {}).get('chooser'),
+           ['Whose is 9 Heron Ct?', '① $9.48 · 4821 Kestrel Dr', 'Neither'])
+        _rf = oc.get('refused') or {}
+        eq('a choice the server refuses is said where it was pressed: not filed, press ⌖ again',
+           (_rf.get('posted'), (_rf.get('look') or {}).get('chooser')),
+           (1, ['not filed \u2014 press \u2316 again']))
+        eq('...and the sheet goes after a few seconds',
+           (oc.get('refusedLater') or {}).get('chooser'), None)
 
     eq('[carry two] Map view pins the two orders\' ends D1 and D2, and a pickup one '
        'order\'s card names P2', got.get('mapTwo'), ['D1', 'D2', 'P', 'P2'])
@@ -7956,6 +8116,11 @@ try:
                 ok_('the screen box alone goes with no card box (%r)' % bodies[1],
                     near(bodies[1].get('box'), [0.2, 0.1, 0.6, 0.8])
                     and 'card' not in bodies[1])
+            _ag = two.get('again') or {}
+            eq('Set box pressed again inside the "box sent" line\'s six seconds keeps '
+               'its instruction past them',
+               (_ag.get('drawing'), _ag.get('hint')),
+               (True, 'drag a box around the whole phone screen'))
 
         lw = sn.get('lockedWhileDrawing') or {}
         ok_('the drawing starts on the scene', lw.get('phoneBefore') is False)
@@ -9690,13 +9855,16 @@ try:
     # One lifetime for one answer. live.html forgets the destination a press
     # read at seven moments; the stops are the same press's answer, so they go
     # by the same function at the same seven — and a `destSaid = ''` written
-    # anywhere else is an eighth moment the stops would outlive.
+    # anywhere else is an eighth moment the stops would outlive. Six calls
+    # for the seven: the ⌖ reply that says nothing is held reaches it through
+    # orderDown(), as Drop's reply and the GPS drop do, since a hold that
+    # ended went with only half of its names cleared.
     _live = open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read()
     eq('live.html forgets the destination and the stops in one place, at every '
        'moment it forgets either',
        (len(re.findall(r"(?<!var )\bdestSaid = ''", _live)),
         len(re.findall(r"(?<!var )\bplannerSaid = null", _live)),
-        _live.count('forgetDest();')), (1, 1, 7))
+        _live.count('forgetDest();')), (1, 1, 6))
     eq('the Trip Planner a press read is shown stop by stop, in the order the '
        'phone listed them',
        (pl.get('four') or {}).get('lines', [])[:4],
