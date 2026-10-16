@@ -3931,12 +3931,21 @@ var latestCache = null;
  * only if EVERY reading of it is older than the floor and none of them predates
  * the clock. Everything else stays:
  *
- *   - every row with a `kind`, without exception. A rule written months ago
+ *   - every `mark` and `rule`, whenever written. A rule written months ago
  *     hides a card scanned today (see the rule fold below); a mark written
- *     today changes a card scanned months ago; `seen` and `pairs` ride on the
- *     folded array as properties and the page reads them whole. Kinds this
- *     build has never heard of are kept too — a newer writer's rows are not
- *     this reader's to discard.
+ *     today changes a card scanned months ago.
+ *   - every `seen` and `pair` at or after the floor. They ride on the folded
+ *     array as properties, and both callers count them only at or after their
+ *     own floor (/api/journal's `watched` and its pairings; shiftSummary reads
+ *     neither). Before, they were kept from the whole file, as was every other
+ *     kind — screen, sighting, drop, visit, planner and kinds this build has
+ *     never heard of — which the fold skips without reading ("something newer
+ *     than this reader"): it reads mark, rule, seen and pair and nothing else,
+ *     so a kind row it skips changes no answer. Measured at f80d0c2 on a
+ *     synthetic 22 MB journal (rows from rpi/journal.py's own writer over the
+ *     corpus texts, kind rows in the shapes this server writes), today's
+ *     window kept all 11,404 kind rows in the file; it keeps 489 now, and the
+ *     fold answers the same, offer for offer.
  *   - every reading of a card any of whose readings is in the window. Splitting
  *     one card's readings across the floor would change bestReading's vote, and
  *     so the pay, minutes, miles and $/hr reported for it, depending on which
@@ -3957,42 +3966,123 @@ var latestCache = null;
  * set built over the whole file, so a windowed set stops recognising rows it
  * has already stored and appends them again on every sync tick. The header of
  * readJournal above records what a short set did last time: 60 duplicate rows,
- * `ok: true`, and a `have` that was wrong. See AUDITS.md. */
-function rowsFor(rows, floor) {
-  if (!floor) return rows;
-  var wanted = Object.create(null);
-  var inRange = function (r) {
-    var at = (typeof r.at === 'number' && isFinite(r.at)) ? r.at : 0;
-    return at >= floor || at < CLOCK_BELIEVABLE_AFTER;
-  };
+ * `ok: true`, and a `have` that was wrong. See AUDITS.md.
+ *
+ * CARRIED FORWARD ACROSS APPENDS. readJournal's new array after an append is
+ * the old one's rows, the same objects, with the new ones after; so the window
+ * worked out over the first `n` rows stands, and only the rows after it are
+ * looked at. Walking the whole file again on each append is what made
+ * /api/today's cost grow with the journal: measured at f80d0c2 on synthetic
+ * journals, this function alone took a median of 4.5 ms after each append at
+ * 22 MB and 10.6 ms at 50 MB (0.01 ms now), and /api/today 4.3 ms and 7.5 ms
+ * (1.8 ms and 2.5 ms now).
+ * Worked out afresh when the array is not that one grown (the file rewritten,
+ * a half-written last line read again, a window not kept) and when an
+ * appended reading puts in the window a card whose earlier readings it had
+ * left out — those must come back in at their own places in the file. */
+var WINDOWS_MAX = 3;
+var windows = [];
+
+function inWindow(r, floor) {
+  var at = (typeof r.at === 'number' && isFinite(r.at)) ? r.at : 0;
+  return at >= floor || at < CLOCK_BELIEVABLE_AFTER;
+}
+
+// A kind row the fold reads, for this floor: see above.
+function foldReads(r, floor) {
+  if (r.kind === 'mark' || r.kind === 'rule') return true;
+  return (r.kind === 'seen' || r.kind === 'pair') && (r.at || 0) >= floor;
+}
+
+/* One row onto a window: kept or not, and false when the window cannot take
+ * it without being worked out again. */
+function windowTakes(w, r) {
+  if (r.kind) {
+    if (foldReads(r, w.floor)) w.out.push(r);
+    return true;
+  }
+  if (!r.id) {
+    if (inWindow(r, w.floor)) w.out.push(r);
+    return true;
+  }
+  if (w.wanted.has(r.id)) { w.out.push(r); return true; }
+  if (!inWindow(r, w.floor)) { w.dropped.add(r.id); return true; }
+  if (w.dropped.has(r.id)) return false;
+  w.wanted.add(r.id);
+  w.out.push(r);
+  return true;
+}
+
+function windowOver(rows, floor) {
+  var w = { floor: floor, rows: rows, n: rows.length, out: [], wanted: new Set(),
+            dropped: new Set() };
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
-    if (!r.kind && r.id && inRange(r)) wanted[r.id] = true;
+    if (!r.kind && r.id && inWindow(r, floor)) w.wanted.add(r.id);
   }
-  var out = [];
-  for (var j = 0; j < rows.length; j++) {
-    var row = rows[j];
-    if (row.kind) { out.push(row); continue; }
-    if (row.id) { if (wanted[row.id]) out.push(row); continue; }
-    if (inRange(row)) out.push(row);
+  for (var j = 0; j < rows.length; j++) windowTakes(w, rows[j]);
+  return w;
+}
+
+function rowsFor(rows, floor) {
+  if (!floor) return rows;
+  var w = null;
+  windows = windows.filter(function (x) {
+    if (x.floor === floor) w = x;
+    return x.floor !== floor;
+  });
+  var grown = w && w.n > 0 && rows.length >= w.n && rows[0] === w.rows[0]
+    && rows[w.n - 1] === w.rows[w.n - 1];
+  if (grown) {
+    for (var i = w.n; i < rows.length; i++) {
+      if (!windowTakes(w, rows[i])) { grown = false; break; }
+    }
   }
-  return out;
+  if (grown) {
+    w.rows = rows;
+    w.n = rows.length;
+  } else {
+    w = windowOver(rows, floor);
+  }
+  windows.push(w);
+  if (windows.length > WINDOWS_MAX) windows.shift();
+  // The window's own array, which the next append grows in place: the fold
+  // reads it once, synchronously, and keeps nothing of it.
+  return w.out;
 }
 
 /* Keyed on the floor as well as the array, because rowsFor builds a new array
-   every time and a cache keyed on identity alone would never hit again. One
-   entry per floor, all thrown away together the moment the file changes: the
-   floors in play are a driving screen's `since`, a page's window and All, so
-   the map stays small on its own without a policy for trimming it. */
+   every time and a cache keyed on identity alone would never hit again. All
+   thrown away together the moment the file changes.
+
+   THE FLOOR TO THE DAY, AND THREE OF THEM. /api/journal?days= asks from
+   `now - days`, a floor that moves every millisecond, so every load folded
+   afresh and kept its answer beside the last one's for as long as the file did
+   not change: measured at f80d0c2, RSS 181 MB to 393 MB over 31 days=30 loads
+   of a synthetic 22 MB journal (172 to 178 MB now). The fold now runs from
+   local midnight on or before the floor asked for — a window that holds every
+   row the exact one does, and both callers keep only what is at or after
+   their own floor (shiftSummary, /api/journal) — and the last WINDOWS_MAX
+   answers are kept. */
+function dayFloor(floor) {
+  if (!floor) return 0;
+  var d = new Date(floor);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 function latestPerOffer(rows, floor) {
-  floor = floor || 0;
+  var key = dayFloor(floor || 0);
   if (!latestCache || latestCache.rows !== rows || latestCache.n !== rows.length) {
-    latestCache = { rows: rows, n: rows.length, byFloor: Object.create(null) };
+    latestCache = { rows: rows, n: rows.length, byFloor: [] };
   }
-  if (!(floor in latestCache.byFloor)) {
-    latestCache.byFloor[floor] = latestPerOfferUncached(rowsFor(rows, floor));
+  var hit = latestCache.byFloor.filter(function (e) { return e.floor === key; })[0];
+  if (!hit) {
+    hit = { floor: key, offers: latestPerOfferUncached(rowsFor(rows, key)) };
+    latestCache.byFloor.push(hit);
+    if (latestCache.byFloor.length > WINDOWS_MAX) latestCache.byFloor.shift();
   }
-  return latestCache.byFloor[floor];
+  return hit.offers;
 }
 
 function latestPerOfferUncached(rows) {

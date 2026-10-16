@@ -8410,6 +8410,164 @@ for _carry in (False, True):
         _q12.stop()
         _q12.gone()
 
+# --- the window a fold reads, carried across appends --------------------------
+#
+# rowsFor kept every kind row in the file and walked the whole file again
+# after every append, so /api/today's cost grew with the journal; and
+# latestPerOffer kept one fold per floor, and /api/journal?days= asks from a
+# floor that moves every millisecond. The functions themselves, taken out of
+# server.js's source text into a context of their own (the file starts a
+# server when it is run), against the rule they replace, written out here:
+# every kind row kept, every reading of a card with one in the window.
+_FOLDJS = r'''
+var fs = require('fs'), vm = require('vm'), path = require('path');
+var ROOT = process.argv[2];
+var src = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+function grab(name) {
+  var i = src.indexOf('\nfunction ' + name + '(');
+  if (i === -1) throw new Error('server.js has no function ' + name);
+  return src.slice(i, src.indexOf('\n}\n', i) + 3);
+}
+function grabVar(name) {
+  var m = new RegExp('\\nvar ' + name + ' = [^\\n]*\\n').exec(src);
+  if (!m) throw new Error('server.js has no var ' + name);
+  return m[0];
+}
+var ctx = { Advice: require(path.join(ROOT, 'advice.js')), Set: Set, Date: Date, JSON: JSON,
+            Object: Object, console: console };
+vm.createContext(ctx);
+['CLOCK_BELIEVABLE_AFTER', 'WINDOWS_MAX', 'windows', 'latestCache'].forEach(function (n) {
+  vm.runInContext(grabVar(n), ctx);
+});
+['inWindow', 'foldReads', 'windowTakes', 'windowOver', 'rowsFor', 'dayFloor', 'latestPerOffer',
+ 'bestReading', 'latestPerOfferUncached'].forEach(function (n) { vm.runInContext(grab(n), ctx); });
+function whole(rows, floor) {
+  var inR = function (r) {
+    var at = (typeof r.at === 'number' && isFinite(r.at)) ? r.at : 0;
+    return at >= floor || at < ctx.CLOCK_BELIEVABLE_AFTER;
+  };
+  var wanted = {};
+  rows.forEach(function (r) { if (!r.kind && r.id && inR(r)) wanted[r.id] = true; });
+  return rows.filter(function (r) {
+    return r.kind ? true : r.id ? !!wanted[r.id] : inR(r);
+  });
+}
+var NOW = Date.now(), H = 3600000, floor = NOW - 2 * H;
+function card(id, at, pay) {
+  return { v: 1, id: id, seq: 1, at: at, firstAt: at, pay: pay, minutes: 20, miles: 4,
+           perHour: 30, grossPerHour: 36, cost: 1.2, billedMinutes: 20, state: 'go',
+           target: 25, band: 15, costPerMile: 0.3, legs: 2, whole: true };
+}
+var rows = [
+  card('old', NOW - 50 * H, 9), card('cross', floor - 60000, 11),
+  { v: 1, kind: 'mark', at: NOW - 49 * H, id: 'cross', accepted: true },
+  { v: 1, kind: 'rule', at: NOW - 48 * H, match: { pay: 13, minutes: 20, miles: 4 }, hidden: true },
+  { v: 1, kind: 'seen', at: NOW - 47 * H, id: 'seen-1', saw: 3, kept: 2 },
+  { v: 1, kind: 'pair', at: NOW - 46 * H, id: 'old', held: {}, offer: {} },
+  { v: 1, kind: 'screen', at: NOW - 45 * H, id: 'screen-1', text: 'x' },
+  { v: 1, kind: 'drop', at: NOW - 44 * H, id: 'old', seq: 1 },
+  card('cross', floor + 60000, 11.5), card('new', NOW - H, 13),
+  { v: 1, kind: 'seen', at: NOW - H, id: 'seen-2', saw: 4, kept: 3 },
+  { v: 1, kind: 'pair', at: NOW - H, id: 'new', held: {}, offer: {} },
+  { v: 1, kind: 'sighting', at: NOW - H, id: 'sighting-1' },
+  { v: 1, kind: 'visit', at: NOW - H, id: 'x#0' }, { v: 1, kind: 'planner', at: NOW - H, id: 'p' },
+  { v: 1, kind: 'snap', at: NOW - H, id: 's' }, { v: 1, kind: 'newer', at: NOW - H, id: 'n' },
+  { v: 1, kind: 'mark', at: NOW - H, id: 'new', accepted: false, via: 'review' }];
+var out = {};
+out.kinds = ctx.rowsFor(rows, floor).filter(function (r) { return r.kind; })
+  .map(function (r) { return r.kind + (r.at >= floor ? '+' : '-'); });
+function seenAs(f) {
+  return JSON.stringify({ offers: f.filter(function (o) { return (o.at || 0) >= floor; }),
+                          pairs: f.pairs.filter(function (p) { return (p.at || 0) >= floor; }),
+                          seen: f.seen.filter(function (s) { return (s.at || 0) >= floor; }) });
+}
+// ...and across appends, as readJournal hands them over: a new array, the
+// same row objects, and the new ones after. The second append is a reading
+// of a card whose only reading so far was before the floor — half a card,
+// which loses the vote to the whole reading only if that reading is there.
+var steps = [[card('new2', NOW - 30000, 8), { v: 1, kind: 'pair', at: NOW, id: 'new2' }],
+             [Object.assign(card('old', NOW - 20000, 9.25), { whole: false }),
+              card('cross', floor - 30000, 11)],
+             [{ v: 1, kind: 'mark', at: NOW, id: 'old', accepted: true }]];
+var cur = rows;
+var built = 0, over = ctx.windowOver;
+ctx.windowOver = function (r, f) { built += 1; return over(r, f); };
+vm.runInContext('windows = [];', ctx);
+out.same = [seenAs(ctx.latestPerOfferUncached(ctx.rowsFor(cur, floor)))
+            === seenAs(ctx.latestPerOfferUncached(whole(cur, floor)))];
+out.built = [built];
+steps.forEach(function (add) {
+  cur = cur.concat(add);
+  out.same.push(seenAs(ctx.latestPerOfferUncached(ctx.rowsFor(cur, floor)))
+                === seenAs(ctx.latestPerOfferUncached(whole(cur, floor))));
+  out.built.push(built);
+});
+ctx.windowOver = over;
+// Two days=30 loads, a few milliseconds apart, with no append between.
+var real = ctx.latestPerOfferUncached, folds = 0;
+ctx.latestPerOfferUncached = function (r) { folds += 1; return real(r); };
+ctx.latestPerOffer(cur, NOW - 30 * 24 * H);
+ctx.latestPerOffer(cur, NOW - 30 * 24 * H + 5);
+out.folds = folds;
+for (var k = 1; k <= 10; k++) ctx.latestPerOffer(cur, NOW - k * 24 * H);
+out.kept = vm.runInContext('latestCache.byFloor.length', ctx);
+console.log(JSON.stringify(out));
+'''
+_fdir = tempfile.mkdtemp()
+try:
+    with open(os.path.join(_fdir, 'fold.js'), 'w') as fh:
+        fh.write(_FOLDJS)
+    _fr = subprocess.run(['node', os.path.join(_fdir, 'fold.js'), ROOT], capture_output=True,
+                         text=True, timeout=60)
+    try:
+        _fo = json.loads(_fr.stdout)
+    except ValueError:
+        _fo = {'error': (_fr.stderr or _fr.stdout)[-400:]}
+    eq('rowsFor keeps no kind row the fold does not read',
+       _fo.get('kinds'), ['mark-', 'rule-', 'seen+', 'pair+', 'mark+'])
+    eq('...and the fold over it answers as over every kind row, before and after each '
+       'of three appends', _fo.get('same'), [True, True, True, True])
+    eq('rowsFor carries its window across an append, and works it out afresh only when a '
+       'card it left out comes back', _fo.get('built'), [1, 1, 2, 2])
+    eq('two days=30 loads fold once', _fo.get('folds'), 1)
+    eq('...and the folds kept are the last three', _fo.get('kept'), 3)
+finally:
+    shutil.rmtree(_fdir, ignore_errors=True)
+
+# ...and through the server: /api/journal's window against All, filtered by
+# hand to the same floor, before and after rows are appended under it.
+_wdir = tempfile.mkdtemp()
+try:
+    _wj = os.path.join(_wdir, 'journal.jsonl')
+    _WN = int(time.time() * 1000)
+    _wfloor = _WN - 2 * 3600000
+    write(_wj, [offer(1, _WN - 50 * 3600000), offer(2, _wfloor - 60000),
+                {'v': 1, 'kind': 'screen', 'at': _WN - 40 * 3600000, 'id': 'screen-1'},
+                {'v': 1, 'kind': 'seen', 'at': _WN - 30 * 3600000, 'id': 'seen-1', 'saw': 5,
+                 'kept': 4},
+                offer(3, _WN - 3600000), offer(2, _wfloor + 60000, pay=12.5),
+                {'v': 1, 'kind': 'seen', 'at': _WN - 3600000, 'id': 'seen-2', 'saw': 2,
+                 'kept': 1}])
+    _wp, _wb = start({'SCANNER': '0'}, _wj)
+    try:
+        def _wsame():
+            w = get(_wb, '/api/journal?since=%d&limit=0' % _wfloor)
+            a = get(_wb, '/api/journal?days=0&limit=0')
+            mine = [o for o in a.get('offers') or [] if (o.get('at') or 0) >= _wfloor]
+            return (w.get('offers') == mine and len(mine) > 0,
+                    w.get('watched'))
+        _w1 = _wsame()
+        write(_wj, [offer(4, _WN - 1000), offer(1, _WN - 500, pay=11.75, whole=False),
+                    {'v': 1, 'kind': 'mark', 'at': _WN, 'id': 'off1', 'accepted': True}], 'a')
+        _w2 = _wsame()
+        eq('the windowed journal answers as All does over the same floor, before and after '
+           'appends that bring an old card into it', (_w1, _w2),
+           ((True, {'saw': 2, 'kept': 1}), (True, {'saw': 2, 'kept': 1})))
+    finally:
+        stop(_wp)
+finally:
+    shutil.rmtree(_wdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)
