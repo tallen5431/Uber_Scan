@@ -6563,10 +6563,38 @@ var NBX_LIMIT = 10;
 // room for a whole bracketed address and nothing a page of this rig sends.
 var NBX_TERM_MAX = 120;
 
+/* ...and by SIZE as well as by count. A route with the road's shape is up to
+ * NBX_LINE_MAX points, and 500 of those are not a small cache: measured at
+ * f80d0c2, 500 routes of 5,000 points each (103,959 bytes an answer) through
+ * /api/nbx/route left 185.5 MB of heap in use after a full collection, from
+ * 6.6 MB, on a Pi that shares its memory with the camera, OpenCV and
+ * Tesseract. NBX_CACHE_BYTES bounds the answers' size as JSON (what each is
+ * sent as), oldest out first; an answer bigger than all of it is sent and not
+ * kept. 8 MB is chosen, not measured against a need: 80 of the largest
+ * routes, or every search a shift asks; the same 500 routes leave 35.8 MB
+ * (the objects weigh more than their JSON). NUCBOX_CACHE_BYTES moves it (the
+ * suite does). */
+var NBX_CACHE_BYTES = envNumber('NUCBOX_CACHE_BYTES', 8 * 1024 * 1024);
+var nbxCacheBytes = 0;
+var nbxSizes = new Map();
+
 function nbxRemember(key, value) {
-  nbxCache.delete(key);
+  var size = Buffer.byteLength(JSON.stringify(value));
+  if (nbxCache.has(key)) {
+    nbxCacheBytes -= nbxSizes.get(key) || 0;
+    nbxCache.delete(key);
+    nbxSizes.delete(key);
+  }
+  if (size > NBX_CACHE_BYTES) return;
   nbxCache.set(key, value);
-  while (nbxCache.size > NBX_CACHE_MAX) nbxCache.delete(nbxCache.keys().next().value);
+  nbxSizes.set(key, size);
+  nbxCacheBytes += size;
+  while (nbxCache.size > NBX_CACHE_MAX || nbxCacheBytes > NBX_CACHE_BYTES) {
+    var oldest = nbxCache.keys().next().value;
+    nbxCacheBytes -= nbxSizes.get(oldest) || 0;
+    nbxCache.delete(oldest);
+    nbxSizes.delete(oldest);
+  }
 }
 
 /* One question to the NucBox. `done(err, parsedJson)`; `err` is always a

@@ -8597,6 +8597,46 @@ try:
 finally:
     shutil.rmtree(_wdir, ignore_errors=True)
 
+# --- the NucBox's answers, kept by their size --------------------------------
+#
+# The cache held 500 answers whatever their size, and a route with the road's
+# shape is up to 5,000 points. It is bounded in bytes now (NBX_CACHE_BYTES),
+# oldest out first; here a bound a little over two of the fake's routes, so a
+# third puts the first out and the first is asked of the NucBox again.
+import urllib.parse                                            # noqa: E402
+_nf = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_nfb ='http://127.0.0.1:%d' % json.loads(_nf.stdout.readline())['port']
+_nroutes = ['-84.5499,33.9526;-84.3880,33.7490', '-84.5499,33.9526;-84.5499,33.9830',
+            '-84.5499,33.9526;-84.4500,33.8800']
+
+
+def _nasks(pts):
+    _all = json.loads(urllib.request.urlopen(_nfb + '/__asked', timeout=5).read())
+    return len([a for a in _all if pts in urllib.parse.unquote(a)])
+
+
+try:
+    for _cap, _want in (('', (1, 1)), ('300', (2, 1))):
+        _q16 = _Q(carry=False, env={'NUCBOX_ROUTER': _nfb, 'NUCBOX_CACHE_BYTES': _cap})
+        try:
+            _n0 = [_nasks(p) for p in _nroutes]
+            _sizes = []
+            for _p16 in _nroutes + _nroutes[:1] + _nroutes[2:]:
+                _s16, _b16, _h16 = raw(_q16.base, '/api/nbx/route?points=' + _p16)
+                _sizes.append(len(_b16.encode('utf-8')))
+            _got16 = (_nasks(_nroutes[0]) - _n0[0], _nasks(_nroutes[2]) - _n0[2])
+            if _cap:
+                eq('the NucBox cache lets its oldest answer go past its size in bytes, as past '
+                   'its count (answers of %s bytes)' % _sizes[:3], _got16, _want)
+            else:
+                eq('...and at its own size, 8 MB, keeps them all', _got16, _want)
+        finally:
+            _q16.stop()
+            _q16.gone()
+finally:
+    _nf.kill()
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)
