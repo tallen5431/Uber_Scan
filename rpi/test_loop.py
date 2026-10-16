@@ -3239,6 +3239,30 @@ ok_('...and the screen after the prompt was read', _rp3['nav_at'] is not None)
 eq('the screen after the zone prompt is not filed against the card before it',
    [x.get('after') for x in rp3['rows'] if x.get('kind') == 'screen'], [])
 
+# --- an idle screen showing the dash's earnings ----------------------------------
+#
+# DoorDash's idle screen prints the dash's earnings and Uber's prints the day's,
+# so each reads with a payout and the parser calls it no offer (NOT_AN_OFFER).
+# The loop asked only for the payout, so the resample burst and then the verify
+# beat went on reading a still phone nobody had offered anything on — measured
+# over 30 s of the DoorDash one: 15 reads, against 2 for the same screen with
+# the earnings out of the box. Counted here over 12 s each, against the screen
+# without them. Every word but the app's is invented.
+IDLE_DD = ("$12.55\nThis dash\nAb Cd Chinese\nFinding offers.\n"
+           "You're in a good place to wait for offers")
+IDLE_UBER = "$45.67\nYou're online\nFinding trips"
+IDLE_NONE = "This dash\nAb Cd Chinese\nFinding offers.\nYou're in a good place to wait for offers"
+ok_('the premise: both idle screens read with a payout and as no offer',
+    all(OP.parse(t)['pay'] is not None and OP.parse(t).get('notAnOffer')
+        for t in (IDLE_DD, IDLE_UBER)) and OP.parse(IDLE_NONE)['pay'] is None)
+_idle = {}
+for _name, _text in (('none', IDLE_NONE), ('dd', IDLE_DD), ('uber', IDLE_UBER)):
+    _idle[_name] = run(lambda n, k, t=_text: t, seconds=12.0)['submitted']
+for _name, _what in (('dd', 'the dash\'s earnings'), ('uber', 'the day\'s earnings, online')):
+    ok_('an idle screen showing %s is read no more than one without them (%d reads '
+        'against %d in 12 s of a still screen)' % (_what, _idle[_name], _idle['none']),
+        _idle[_name] <= _idle['none'] + 1)
+
 # --- a card taller than the card box, through main() ---------------------------
 #
 # The 8 Oct card box, drawn round a short card, over the taller Early-look card

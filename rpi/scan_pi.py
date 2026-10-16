@@ -4509,7 +4509,15 @@ def main():
         # what the slow beat above is gated on. Taken from the payout rather
         # than from `complete`, because a card whose journey was lost is
         # still a card and is exactly the reading worth looking at again.
-        card_on_screen = parsed.get('pay') is not None
+        #
+        # ...and not off a screen the parser itself says is no offer
+        # (NOT_AN_OFFER): DoorDash's idle screen prints the dash's earnings,
+        # "$12.55 This dash … Finding offers", and Uber's "$45.67 You're
+        # online", so a payout was there and the beat kept looking at a phone
+        # nobody had offered anything on. Measured through main(), 30 s of a
+        # still idle screen: 15 reads with the earnings in the box, 2 without
+        # (rpi/test_loop.py, "an idle screen showing the dash's earnings").
+        card_on_screen = parsed.get('pay') is not None and not parsed.get('notAnOffer')
         if not card_on_screen:
             last_verify = 0.0
         # The same card saying the same thing needs looking at less often
@@ -4533,7 +4541,11 @@ def main():
         if whole and stable:
             resample_until = 0.0
             resample_for = None
-        elif parsed.get('pay') and parsed.get('episode') != resample_for:
+        # ...and not for a screen that is no offer, for the reason the beat is
+        # not: the idle screen's earnings armed this burst too, 8 more reads in
+        # its first 4 s, of a screen with no leg on it to miss.
+        elif parsed.get('pay') and not parsed.get('notAnOffer') \
+                and parsed.get('episode') != resample_for:
             resample_for = parsed.get('episode')
             resample_until = time.monotonic() + RESAMPLE_WINDOW
         settled_on = signature
