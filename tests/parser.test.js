@@ -418,5 +418,38 @@ check('largest dollar figure wins over a promo line',
      ends('an address block with no header and no Waybill is not read'), '[false,false]');
 })();
 
+/* ---- a long run of one character ----
+   The mirror of rpi/test_parser.py's checks of the same names, at twice the
+   length because this engine is faster: measured before the anchors, 188 ms
+   for these calls over 8 kB of "l" and 54 ms for findStores' 8 kB of "1,", in
+   this engine on this machine. A budget, the best of three, after a call that
+   is not timed so the compiler is not what is measured. */
+(function () {
+  function bestMs(fn) {
+    fn();
+    var best = null;
+    for (var i = 0; i < 3; i++) {
+      var t0 = process.hrtime.bigint();
+      fn();
+      var ms = Number(process.hrtime.bigint() - t0) / 1e6;
+      best = best === null ? ms : Math.min(best, ms);
+    }
+    return best;
+  }
+  var reads = [function (s) { return P.rate(P.parse(s), { nowMinutes: 600 }); },
+               P.findAddress, P.findPlanner, P.plannerEnds, P.placePopup, P.sheetDropoff,
+               P.screenType];
+  ['l', 'S', 'lI'].forEach(function (u) {
+    var run = u.repeat(8192 / u.length);
+    var ms = bestMs(function () { reads.forEach(function (f) { f(run); }); });
+    eq('the parser reads an 8 kB letter run in under 50 ms (' + JSON.stringify(u) + ': '
+       + ms.toFixed(1) + ' ms)', ms < 50, true);
+  });
+  var stops = '2 stops (4.3 mi) 22 min\n' + '1,'.repeat(8192);
+  var ms = bestMs(function () { P.parse(stops); });
+  eq('findStores reads 16 kB of "1," under a stops line in under 50 ms (' + ms.toFixed(1)
+     + ' ms)', ms < 50, true);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED' : '\nAll ' + pass + ' parser checks passed');
 process.exit(fail ? 1 : 0);

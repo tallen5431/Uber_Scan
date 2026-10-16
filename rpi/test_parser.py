@@ -543,6 +543,105 @@ eq('planner_furniture: a navigation screen has none',
 eq('find_address is unchanged by the walk address_stop shares with it',
    (P.find_address(_PK) or {}).get('line'), '4100 Fable Mill Pkwy NW, Kennesaw, GA 30144')
 
+# --- a long run of one character -----------------------------------------------
+# A striped texture reads as a line of "l"s, and four patterns tried a run from
+# every character of it and re-read it to the end each time, n²/2. Measured
+# here before the anchors: ADDRESS alone 1.71 s over 8,000 "l"s, and the calls
+# below 1.93 s on 4 kB; find_stores 0.70 s on a stops card with 4 kB of "1,"
+# under it. Each is held to a budget rather than to a figure, the best of three.
+import re as _re                                          # noqa: E402
+import time as _time                                      # noqa: E402
+
+
+def _best_ms(fn, runs=3):
+    best = None
+    for _ in range(runs):
+        t0 = _time.perf_counter()
+        fn()
+        dt = (_time.perf_counter() - t0) * 1e3
+        best = dt if best is None else min(best, dt)
+    return best
+
+
+# What the scanner asks of every read's text (digest() and screen_address).
+_READS = (lambda s: P.rate(P.parse(s), {'nowMinutes': 600}), P.find_address,
+          P.address_stop, P.address_under_dropoff, P.find_planner, P.planner_ends,
+          P.place_popup, P.sheet_dropoff, P.screen_type)
+for _unit in ('l', 'S', 'lI'):
+    _run = (_unit * 4096)[:4096]
+    _ms = _best_ms(lambda: [f(_run) for f in _READS])
+    eq('the parser reads a 4 kB letter run in under 50 ms (%r: %.1f ms)' % (_unit, _ms),
+       _ms < 50, True)
+_ms = _best_ms(lambda: P.find_stores('2 stops (4.3 mi) 22 min\n' + '1,' * 2048))
+eq('find_stores reads a 4 kB run of "1," under a stops line in under 50 ms (%.1f ms)' % _ms,
+   _ms < 50, True)
+_ms = _best_ms(lambda: P.PLACE_JUNCTION_AT.findall('S' * 4000))
+eq('the junction seam looks through 4,000 capitals in under 50 ms (%.1f ms)' % _ms,
+   _ms < 50, True)
+_ms = _best_ms(lambda: P.POPUP_STATE_ZIP.match(' ' * 4000 + 'x'))
+eq('a popup\'s state and ZIP look past 4,000 spaces in under 50 ms (%.1f ms)' % _ms,
+   _ms < 50, True)
+
+# ...and the anchors bought the time and nothing else: each pattern, with its
+# anchor taken back out, finds the same matches on every corpus text and line.
+# The same held over the 12 Oct shift's 12,229 journal texts and 5,000 mutated
+# copies, which are the driver's and are not committed.
+def _texts(node, out):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in ('text', 'raw') and isinstance(v, str):
+                out.append(v)
+            else:
+                _texts(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _texts(v, out)
+    return out
+
+
+_corpus = _texts(cases, [])
+_corpus = _texts(json.load(open(os.path.join(ROOT, 'tests', 'fixtures', 'sequences.json'))),
+                 _corpus)
+
+
+def _undone(p, anchored, plain, times=1):
+    src = p.pattern
+    if src.count(anchored) != times:
+        return None
+    return _re.compile(src.replace(anchored, plain), p.flags)
+
+
+def _spans(p, s):
+    return [(m.span(), m.groups()) for m in p.finditer(s)]
+
+
+_was = {'ADDRESS': _undone(P.ADDRESS, '(?<![A-Za-z])', ''),
+        'PLACE_JUNCTION_AT': _undone(P.PLACE_JUNCTION_AT, '(?<![A-Z])', ''),
+        'STORE_STREET': _undone(_undone(P.STORE_STREET, '(?<!\\.)', '') or P.STORE_STREET,
+                                '^[^,]*,', ','),
+        'POPUP_STATE_ZIP': _undone(P.POPUP_STATE_ZIP, r'\s*(?:,\s*)?', r'\s*,?\s*')}
+_lines = [l for t in _corpus for l in t.split('\n')]
+eq('the premise: every anchor is there to take out, over %d texts and %d lines'
+   % (len(_corpus), len(_lines)), [k for k, v in _was.items() if v is None], [])
+if _was['ADDRESS'] is not None:
+    eq('ADDRESS from where a word begins finds what it found from every letter',
+       [t for t in _corpus if _spans(P.ADDRESS, P.normalize(t))
+        != _spans(_was['ADDRESS'], P.normalize(t))], [])
+if _was['PLACE_JUNCTION_AT'] is not None:
+    eq('PLACE_JUNCTION_AT finds the same seams from no capital after a capital',
+       [t for t in _corpus + _lines if _spans(P.PLACE_JUNCTION_AT, t)
+        != _spans(_was['PLACE_JUNCTION_AT'], t)], [])
+if _was['STORE_STREET'] is not None:
+    eq('STORE_STREET from the first comma and a run\'s first dot says the same of every line',
+       [l for l in _lines if bool(P.STORE_STREET.search(l))
+        != bool(_was['STORE_STREET'].search(l))], [])
+if _was['POPUP_STATE_ZIP'] is not None:
+    _cuts = [l[i:] for l in _lines for i in [0] + [j for j, c in enumerate(l) if c == ',']]
+    eq('POPUP_STATE_ZIP matches the same lines at the same places',
+       [c for c in _cuts if ((lambda a, b: (a and (a.span(), a.groups()))
+                                            != (b and (b.span(), b.groups())))(
+           P.POPUP_STATE_ZIP.match(c), _was['POPUP_STATE_ZIP'].match(c)))], [])
+
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)
 sys.exit(1 if bad else 0)
