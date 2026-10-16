@@ -1375,6 +1375,75 @@ async function nucbox() {
                      Math.max.apply(null, sizes)]),
      JSON.stringify([{ why: 'order' }, '0.09', 'miles,hi,line', 3]));
 
+  /* Two walks on one NbxSearch: live.html's card line asks the figure's
+     questions as a card comes up (wayWalk), and Map view asks the same ones
+     in the same words if it is opened while those are out. A question in
+     flight is asked once and both askers get its answer; two different
+     questions asked at once still go out `gap` apart. */
+  var twoAsk = { sent: [], clock: { t: 5000 } };
+  var shared = new MV.NbxSearch({ gap: 100,
+    now: function () { return twoAsk.clock.t; },
+    sleep: function (ms) { twoAsk.clock.t += ms; return Promise.resolve(); },
+    fetch: function (u) {
+      twoAsk.sent.push({ u: u, at: twoAsk.clock.t });
+      return new Promise(function (r) { setTimeout(r, 5); }).then(function () {
+        return { ok: true, status: 200, json: function () {
+          return Promise.resolve({ ok: true, metres: 1000, snaps: [0, 0] }); } };
+      });
+    } });
+  var both = await Promise.all([shared.road([P1, P2]), shared.road([P1, P2])]);
+  eq('one question asked by two walks at once is sent once, and both get its answer',
+     JSON.stringify([twoAsk.sent.length, both[0].metres, both[1].metres]),
+     JSON.stringify([1, 1000, 1000]));
+  twoAsk.sent = [];
+  await Promise.all([shared.road([P1, P3]), shared.road([P2, P3])]);
+  eq('...and two questions asked at once go out the gap apart, not together',
+     twoAsk.sent.length === 2 && twoAsk.sent[1].at - twoAsk.sent[0].at, 100);
+
+  /* The card's line (MV.wayLine): the caption's answer, said in one line. */
+  var cantBy = { said: "no pin for McDonald's — none fit the card · within 0.6 mi of you, "
+                       + 'nearest 1.2 mi' };
+  eq('a figure the caption calls on your way is ON THE WAY, the figure as the caption '
+     + 'writes it, and the ends',
+     JSON.stringify(MV.wayLine({ said: 'this pickup is on your way by road',
+                                 fig: { lo: 0.43, hi: 0.43, road: true, onWay: true } },
+                               'same-side')),
+     JSON.stringify({ kind: 'on', call: 'ON THE WAY',
+                      parts: ['+0.4 road mi', 'same side of town'], keep: 1,
+                      said: 'this pickup is on your way by road', lo: 0.43, hi: 0.43 }));
+  eq('...past the cut OUT OF THE WAY, in straight-line miles where the caption had them, '
+     + 'its range kept and "ends elsewhere" said',
+     JSON.stringify(MV.wayLine({ said: '+3.1–3.4 mi out of your way — straight lines, not roads',
+                                 fig: { lo: 3.12, hi: 3.37, road: false, onWay: false } },
+                               'elsewhere').parts),
+     JSON.stringify(['+3.1–3.4 mi', 'ends elsewhere']));
+  eq('...the call is the caption\'s own decision, not worked out again: a figure the '
+     + 'caption put past the cut is OUT OF THE WAY whatever its number',
+     MV.wayLine({ said: 'x', fig: { lo: 0.2, hi: 0.2, road: true, onWay: false } }).call,
+     'OUT OF THE WAY');
+  eq('...a road figure a hair below zero is +0.0, never "+-0.0"',
+     MV.wayLine({ said: 'x', fig: { lo: -0.037, hi: -0.037, road: true, onWay: true } }).parts[0],
+     '+0.0 road mi');
+  eq('...and no ends said where the pair line has none (its ENDS ? chip says that)',
+     MV.wayLine({ said: 'x', fig: { lo: 1, hi: 1, road: true, onWay: false } }, null).parts.length,
+     1);
+  eq('a refusal is CAN\'T TELL with the caption\'s own chip for its reason, its state '
+     + 'kept whole and what it is about the part that may be cut',
+     JSON.stringify(MV.wayLine(cantBy, 'same-side')),
+     JSON.stringify({ kind: 'cant', call: 'CAN\'T TELL',
+                      parts: ['NO PIN', 'McDonald\'s, none fit the card'], keep: 1,
+                      said: cantBy.said }));
+  eq('...less the "NO FIGURE · " CAN\'T TELL already says',
+     JSON.stringify(MV.wayLine({ said: 'order of stops unknown — no figure' }).parts),
+     JSON.stringify(['order of stops unknown']));
+  eq('...and a refusal only the card makes keeps its own chip',
+     JSON.stringify(MV.wayLine({ said: 'whole sentence',
+                                 chip: 'NUCBOX DOWN · ⛶ Map looks it up' }).parts),
+     JSON.stringify(['NUCBOX DOWN', '⛶ Map looks it up']));
+  eq('a card with its walk still out is said to be checking, with nothing to open',
+     JSON.stringify(MV.wayLine({ pending: true })),
+     JSON.stringify({ kind: 'wait', call: 'CHECKING THE ROUTE', parts: [], keep: 0, said: '' }));
+
   /* Through the real server.js and the fake NucBox. */
   /* A numberless street's stretch, kept inside the disc (MV.stretchInDisc).
      Lines are [[lat, lon], ...], as the street index sends them. */

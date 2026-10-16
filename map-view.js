@@ -23,11 +23,20 @@
  * misread street, turned into a distance, turned into a number on the panel,
  * is the exact failure this project refuses — confidently wrong, and silent.
  *
- * Nothing computed here reaches the panel. No rate, no verdict, no billed
+ * Nothing computed here reaches the verdict. No rate, no verdict, no billed
  * distance is derived from a lookup; `crowMiles` exists to CONTRADICT the
  * card, never to replace what it said. The one number this file produces that
  * a person acts on is "this pin is 600 miles from the others", which is an
  * accusation against the lookup rather than a claim about the job.
+ *
+ * ...and the detour, which is the exception and is held to one figure. The
+ * driver asked for it on the card (15 Oct 2026: tell at a glance whether a
+ * second offer is along the route), so live.html puts Map view's caption
+ * figure there too, as one line in neutral colours beside the pair line —
+ * the SAME figure under the same refusals, made by the one function that
+ * makes the caption (mapLine there, `wayLine` here), never a second number
+ * for the driver to act on, never in the verdict, the rate, the pair line's
+ * range or a colour. See `detour()`.
  *
  * That asymmetry is the whole safety argument, and it is checked: see
  * `judge()`, where a straight line longer than the reading's own stated
@@ -91,8 +100,12 @@
      from three geocoded points, which is the exact kind of number that must
      never reach the panel's verdict, rate or distance. It may be shown beside
      the pins it was computed from, on a map the driver chose to open, where
-     they can see for themselves whether the three pins are in sensible places.
-     It may not be shown anywhere it would be read as a fact about the job.
+     they can see for themselves whether the three pins are in sensible places
+     — and, the driver's own request, as that same caption figure in one line
+     on the card (wayLine), under every refusal the caption makes, labelled
+     as the caption labels it, in no verdict colour. It may not be shown
+     anywhere it would be read as a fact about the job: not in the verdict,
+     the rate, the pair line's range or a billed distance.
 
      Null when any of the three is missing, because a detour computed off two
      points is not a smaller detour — it is no answer with a number attached,
@@ -2151,15 +2164,22 @@
 
   /* Waiting BEFORE the request rather than after it drops the "except the last
      one" special case — there is no trailing wait to skip, because nothing
-     waits except immediately before talking. */
+     waits except immediately before talking.
+
+     ...and each caller waits for the one before it to have TALKED, not only
+     for the clock. Asked by one walk at a time that is the same thing. Asked
+     by two at once — live.html's card line and Map view share one NbxSearch
+     (wayWalk there) — both read the same `lastAsk` before either set it, and
+     both went out together. In turn, each goes `gap` after the last one went,
+     however many are waiting. */
   Geocoder.prototype.paced = function (fn) {
     var self = this;
-    var due = this.lastAsk + this.gap - this.now();
-    var wait = due > 0 ? this.sleep(due) : Promise.resolve();
-    return wait.then(function () {
-      self.lastAsk = self.now();
-      return fn();
-    });
+    var turn = (this.turn || Promise.resolve()).then(function () {
+      var due = self.lastAsk + self.gap - self.now();
+      return due > 0 ? self.sleep(due) : null;
+    }).then(function () { self.lastAsk = self.now(); });
+    this.turn = turn;
+    return turn.then(function () { return fn(); });
   };
 
   /* "Nobody there" and "nobody answered" are different answers.
@@ -2293,6 +2313,14 @@
    * geocoder's one-answer-per-string, and a pin chosen inside one card's disc
    * is a different answer to a different question.
    *
+   * ...and a question already out is not sent again: a second asker gets the
+   * first one's answer when it comes (`pending`). live.html asks the figure's
+   * own questions for the card line as a card comes up (wayWalk) and Map view
+   * asks the same ones, in the same words, if the driver opens it while
+   * those are in flight. Kept only, the cache would have sent each of them
+   * twice in that second; shared, a card costs the NucBox what Map view alone
+   * cost it.
+   *
    * ...and at most NBX_KEEP of them, the least recently asked going first,
    * as server.js keeps its own copy (nbxRemember, NBX_CACHE_MAX). They were
    * kept for the page's life, and the panel's page lives for the shift: a
@@ -2313,6 +2341,7 @@
     this.fetch = opts.fetch || function (u, init) { return fetch(u, init); };
     this.base = opts.base || '/api/nbx';
     this.cache = {};
+    this.pending = {};
     this.lastAsk = 0;
   }
 
@@ -2320,7 +2349,7 @@
   NbxSearch.prototype.paced = Geocoder.prototype.paced;
 
   /* Ask, or say why not. Never rejects. Resolves:
-       the answer        { ok, ... }, kept for the page's life; OSRM's
+       the answer        { ok, ... }, kept (the last NBX_KEEP); OSRM's
                          { noRoute } too (an answer about the points)
        { unreachable }   the server's `unreachable: true` (the NucBox did not
                          answer) or `configured: false` (none is set any
@@ -2336,6 +2365,19 @@
     if (Object.prototype.hasOwnProperty.call(this.cache, path)) {
       return Promise.resolve(this.keep(path, this.cache[path]));
     }
+    if (Object.prototype.hasOwnProperty.call(this.pending, path)) return this.pending[path];
+    var asked = this.ask(path);
+    this.pending[path] = asked;
+    // Gone once it settles, whatever it said: an answer is in the cache, and
+    // a refusal is asked afresh next time, as it always was.
+    return asked.then(function (got) {
+      delete self.pending[path];
+      return got;
+    });
+  };
+
+  NbxSearch.prototype.ask = function (path) {
+    var self = this;
     return this.paced(function () {
       return self.fetch(self.base + path, { headers: { 'Accept': 'application/json' } });
     }).then(function (r) {
@@ -2646,8 +2688,9 @@
 
   /* Whether this rig's server has the NucBox set, as { search, route,
      streets }; all false when it says so, when it is a server from before
-     this existed, or when it cannot be reached. Asked once per walk, at the
-     press. */
+     this existed, or when it cannot be reached. Asked once per walk — Map
+     view's at the press, the card line's as a card comes up — and once as
+     live.html loads. A question to this rig's own server, never the NucBox. */
   function nbxSettings(fetchFn) {
     var f = fetchFn || function (u) { return fetch(u); };
     return Promise.resolve().then(function () { return f('/api/nbx'); })
@@ -3053,8 +3096,126 @@
     return chip;
   }
 
+  /* THE ANSWER ON THE CARD: the caption's one figure, in one line on the card
+     while an order is held and an offer is screened (live.html's showWay).
+     The driver's question, the one Map view was built for: is this second
+     offer along the route I am already taking.
+
+     Not a second number. `ans` is what Map view's caption is made of
+     (live.html's mapLine: `said`, the caption's sentence, and `fig`, the
+     figure that sentence states, null where it refuses), so the card and the
+     caption are one answer said in two places, and nothing here measures:
+
+       ON THE WAY · +0.4 road mi · same side of town
+           the caption's "on your way": `fig.onWay`, its own half-mile cut
+       OUT OF THE WAY · +3.1 road mi · ends elsewhere
+           the caption's "+3.1 road mi out of your way"
+       CAN'T TELL · NO PIN · McDonald's, none fit the card
+           a refusal, as the caption's own chip (captionChip), less the
+           "NO FIGURE · " that CAN'T TELL already says
+
+     The cut is the caption's, decided where the caption decides it, never a
+     share of the run (Settled: "on your way" is not proportional). The
+     figure is written as the caption writes it, "road mi" or "mi", a range
+     where the caption has one, and never below zero: a road figure may come
+     out a hair under (ROAD_SAME_MI), which the caption calls on your way.
+     No minutes (Settled: a distance turned into time is a pace). `ends` is
+     the pair line's own `stack.ends` (Advice.sameArea, off the cards' own
+     words), in fewer words; nothing when it is not known, which the pair
+     line's ENDS ? chip already says.
+
+     And what only the card can say: `pending`, its walk still out, and a
+     refusal Map view never makes — a card nothing was looked up for — as
+     `said` with its `chip`. Returns { kind, call, parts, keep, said, lo, hi },
+     or null for no line: `keep` is how many of the parts may never be cut —
+     the figure, or the refusal's state ("NO PIN"); what follows them (the
+     ends, the place a refusal names) is what an ellipsis takes on a narrow
+     card, the whole sentence one tap away. A "NO FIGURE" chip's reason is
+     all it has, and may be cut like the rest. */
+  var WAY_CALL = { on: 'ON THE WAY', out: 'OUT OF THE WAY', cant: 'CAN\'T TELL',
+                   wait: 'CHECKING THE ROUTE' };
+  var WAY_ENDS = { elsewhere: 'ends elsewhere', 'same-zip': 'same ZIP',
+                   'same-side': 'same side of town', 'same-town': 'same town' };
+
+  function wayLine(ans, ends) {
+    if (!ans) return null;
+    if (ans.pending) return { kind: 'wait', call: WAY_CALL.wait, parts: [], keep: 0, said: '' };
+    var fig = ans.fig;
+    if (!fig) {
+      var chip = ans.chip || captionChip(ans.said);
+      var cut = chip ? chip.indexOf(' · ') : -1;
+      var parts = !chip ? [ans.said] : cut === -1 ? [chip]
+        : chip.slice(0, cut) === 'NO FIGURE' ? [chip.slice(cut + 3)]
+        : [chip.slice(0, cut), chip.slice(cut + 3)];
+      return { kind: 'cant', call: WAY_CALL.cant, parts: parts,
+               keep: parts.length > 1 ? 1 : 0, said: ans.said };
+    }
+    var lo = Math.max(0, fig.lo);
+    var hi = Math.max(lo, isFinite(fig.hi) ? fig.hi : fig.lo);
+    var most = hi.toFixed(1) === lo.toFixed(1) ? '' : '–' + hi.toFixed(1);
+    var kind = fig.onWay ? 'on' : 'out';
+    return { kind: kind, call: WAY_CALL[kind],
+             parts: ['+' + lo.toFixed(1) + most + (fig.road ? ' road mi' : ' mi')]
+               .concat(WAY_ENDS[ends] ? [WAY_ENDS[ends]] : []),
+             keep: 1, said: ans.said, lo: lo, hi: hi };
+  }
+
+  /* The card line drawn: the call, then each part after a dot — or, `open`,
+     the caption's whole sentence, one tap away as a notice's is. The
+     sentence is the element's title either way. Classes say the form
+     (`way-on`, `way-out`, `way-cant`, `way-wait`) and nothing else: the
+     stylesheet gives all four the same neutral colours (no verdict colour on
+     the pair line — Settled), so the form is said by its words. live.html's
+     showWay is the one caller on the panel; rpi/test_layout.py draws every
+     form through it. */
+  function sayWay(el, way, open) {
+    var doc = el.ownerDocument;
+    el.textContent = '';
+    el.className = 'wayline';
+    el.title = '';
+    el.removeAttribute('role');
+    el.removeAttribute('aria-expanded');
+    if (!way) return null;
+    el.classList.add('way-' + way.kind);
+    if (open && way.said) {
+      el.classList.add('open');
+      el.textContent = way.said;
+    } else {
+      var call = doc.createElement('b');
+      call.className = 'call';
+      // "THE" in ON THE WAY and OUT OF THE WAY on its own, for a card too
+      // narrow to hold it beside the widest figure (live.html's .the rule).
+      way.call.split(/(THE )/).forEach(function (bit) {
+        if (bit === 'THE ' && (way.kind === 'on' || way.kind === 'out')) {
+          var the = doc.createElement('span');
+          the.className = 'the';
+          the.textContent = bit;
+          call.appendChild(the);
+        } else if (bit) {
+          call.appendChild(doc.createTextNode(bit));
+        }
+      });
+      el.appendChild(call);
+      way.parts.forEach(function (p, i) {
+        var s = doc.createElement('span');
+        // The figure, or the state of the refusal, whole; then what may be
+        // cut — the ends, or what the refusal is about.
+        s.className = i >= (way.keep || 0) ? 'more' : way.kind === 'cant' ? 'why' : 'fig';
+        s.textContent = ' · ' + p;
+        el.appendChild(s);
+      });
+    }
+    if (way.said) {
+      el.title = way.said;
+      el.setAttribute('role', 'button');
+      el.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    return way;
+  }
+
   return { median: median, middleOf: middleOf, crowMiles: crowMiles,
            captionChip: captionChip, sayCaption: sayCaption,
+           wayLine: wayLine, sayWay: sayWay,
            civilTwilight: civilTwilight, nightFor: nightFor,
            detour: detour, detourThrough: detourThrough, fixOf: fixOf, fixRefused: fixRefused,
            cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,

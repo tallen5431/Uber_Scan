@@ -223,6 +223,19 @@
        the arrangement intended. */
     #perHour { font-size: min(16vw, 26dvh, 240px,
                               calc((100cqw - 40px) / (var(--chars) * 0.62))); }
+    /* ...and with the answer on the card under a pair (#way, showWay), that
+       row's 20px comes out of the height term: 18dvh, not 26. Measured in
+       rpi/test_layout.py at 800x480, the pair's card with the line under it
+       ran 4px past its border beside the phone, the word PASS the part that
+       went, and 12px beside the scene picture, where the card's width binds
+       and 20dvh still left it 3px over. 86px at 480 tall, still the largest
+       thing on the card by four times. Not where a notice is up too, whose
+       own rule takes more; and put back where there is the room, on 1024x600,
+       the rig's own (the min-width: 1000px block), and the hat keeps its own
+       (its block). */
+    .live:not(.driving) #verdict:has(#way:not([hidden])):not(:has(#warn:not([hidden]))) #perHour {
+      font-size: min(16vw, 18dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
     /* ...and it gives some of that back when there is something to say. A
        notice is two more lines inside a panel that is already as tall as the
        row it sits in, so without this the panel grows past the glass and the
@@ -441,6 +454,20 @@
        wide target, which is what a mouse at a light needs (see .maplink). */
     .stackline { margin-top: 3px; row-gap: 2px; font-size: 13px; }
     .stackline .maplink { min-height: 0; padding: 3px 8px; }
+    /* The answer on the card (#way) has no row to be given here: the pair's
+       card beside the phone was 6px inside its border without it and 18px
+       past it with it, the word PASS the part that went (rpi/test_layout.py,
+       measured). So here it takes the address line's row — the one the
+       driving form already puts away, and the one this line answers for at a
+       glance: where the new job is against the run the car is on — and is
+       set in the pair line's 13px and as tight, which together leave the
+       card as it was. */
+    #verdict:has(#way:not([hidden])) .places { display: none; }
+    .live:not(.driving) .wayline { margin-top: 2px; font-size: 12px; line-height: 1.2; }
+    /* ...and the headline as the pair has it here, not the panels' 18dvh. */
+    .live:not(.driving) #verdict:has(#way:not([hidden])):not(:has(#warn:not([hidden]))) #perHour {
+      font-size: min(8vw, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
   }
 
   /* The number is sized to the panel and to how many characters it has to
@@ -1170,6 +1197,52 @@
   /* ...and with it on, "with ① + ②": the same slot, whole, in the row's own
    * colour — it names what the range covers and doubts nothing. */
   .stackline .both { flex: none; margin-left: .35em; }
+  /* The answer on the card (showWay, MV.sayWay): under the pair line, one
+   * line, Map view's caption figure in it.
+   *
+   * NO VERDICT COLOUR, and nothing that reads as one. The card's own text and
+   * muted greys, the card's own line colour round the call, no fill, and the
+   * same for all four forms: ON THE WAY is not green, OUT OF THE WAY not
+   * amber, CAN'T TELL not the doubt violet. The verdict ladder is the
+   * headline's and nothing on this line may borrow it (Settled: no verdict
+   * colour on the pair line, the colour the pair row lost when 45 of its 71
+   * greens sat under offers that failed the target). Only the words say
+   * which, which is also why the call is in an outline and not a filled
+   * block: a filled block on this card is a verdict's panel.
+   *
+   * The call and the figure, or a refusal's state ("NO PIN"), never shrink;
+   * the ends, and what a refusal is about, are what an ellipsis takes, with
+   * the whole sentence one tap away (MV.wayLine's `keep`). */
+  .wayline { display: flex; align-items: baseline; justify-content: center;
+             gap: 0 .3em; margin-top: 4px; font-size: clamp(12px, 3.2vw, 16px);
+             font-weight: 600; color: var(--text); white-space: nowrap;
+             min-width: 0; cursor: pointer; }
+  .wayline[hidden] { display: none; }
+  .wayline .call { flex: none; padding: 0 .35em; border: 1px solid var(--line);
+                   border-radius: 4px; font-weight: 700; letter-spacing: .02em; }
+  .wayline .fig, .wayline .why { flex: none; }
+  .wayline .more { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                   color: var(--muted); }
+  .wayline.way-wait .call { color: var(--muted); border-style: dashed; }
+  .wayline.open { display: block; white-space: normal; color: var(--muted);
+                  font-weight: 400; text-align: center; }
+  .live #verdict > .wayline { flex: none; }
+  /* ...and on a card too narrow for the call and the widest figure side by
+     side, "OUT OF WAY" and "ON WAY", set closer: the 3.5" hat's card beside
+     the scene picture gives the line 208px, and OUT OF THE WAY · +18.8–19.2
+     road mi took 226.8px of it at the hat's 12px (DejaVu Sans, measured) —
+     a figure cut short, or a second row the card does not have. Without the
+     word, 198.5px parked and 206.7 driving at 12.5. The word that goes is
+     the one that says least; the figure is never cut. #verdict is the
+     container. */
+  @container (max-width: 260px) {
+    .wayline { gap: 0; }
+    .wayline .the { display: none; }
+    .wayline .call { padding: 0 .2em; }
+  }
+  /* ...and larger while the car is moving, with the pair line it qualifies:
+     "the take-another figure" is kept, and this is its other half. */
+  .live.driving .wayline { font-size: clamp(15px, 5cqw, 22px); }
 
   /* ---------- Sizes for the driver's seat ----------
    *
@@ -1223,6 +1296,13 @@
     .pending { font-size: 19px; }
     /* ...and the status row, now that it is short (fillMore): 15 to 18. */
     .connbar { font-size: 18px; }
+    /* The headline keeps its 26dvh under a pair with the answer on the card:
+       this panel has the room (the line takes 24px of the 80 to 105 the
+       1024x600 pair's card had spare, measured), so the 18dvh above is not
+       taken. */
+    .live:not(.driving) #verdict:has(#way:not([hidden])):not(:has(#warn:not([hidden]))) #perHour {
+      font-size: min(16vw, 26dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
   }
 
   /* ---------- Driving: the card at a glance ----------
@@ -1287,8 +1367,21 @@
       font-size: min(20vw, 34dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
     }
   }
+  /* ...and with the answer on the card as well (#way), 24dvh: the pair
+     against two orders beside the phone at 800x480 ran 17px past its card
+     with it at 34, and was 1px inside at 26, measured in rpi/test_layout.py.
+     Still larger than the same card parked, whose term is 18 with the line
+     up. 1024x600, the rig's own, has the room and keeps its 34 (below). */
+  @media (orientation: landscape) {
+    .live.driving #verdict:has(#way:not([hidden])) #perHour {
+      font-size: min(20vw, 24dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
+  }
   @media (orientation: landscape) and (min-width: 1000px) and (min-height: 560px) {
     .live.driving #detail.withheld { font-size: clamp(11px, 4.8cqw, 23px); }
+    .live.driving #verdict:has(#way:not([hidden])) #perHour {
+      font-size: min(20vw, 34dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
   }
   @media (orientation: landscape) and (max-height: 380px) {
     /* The hat's card is 191px tall, and the rate there is the parked hat's
@@ -1300,6 +1393,17 @@
     .live.driving #verdict:has(#stack:not([hidden])) #perHour {
       font-size: min(12vw, calc((100cqw - 40px) / (var(--chars) * 0.62)));
     }
+    /* ...and with the answer on the card under the pair, the parked hat's
+       own 8vw for a pair, and the line itself in 12.5px set tight (12
+       parked): the pair against two orders ran 19px past the card's top
+       beside the phone with the line and the rate at 12vw, and 21px beside
+       the scene picture (rpi/test_layout.py, measured). 12.5 and not more
+       because the widest call and figure, OUT OF WAY · +18.8–19.2 road mi,
+       take 206.7px of the scene card's 208 at 12.5 (DejaVu Sans, measured). */
+    .live.driving #verdict:has(#way:not([hidden])) #perHour {
+      font-size: min(8vw, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
+    .live.driving .wayline { font-size: 12.5px; line-height: 1.1; margin-top: 0; }
     /* The pay is one of the four things a glance needs, and on the hat a
        notice hides the figures (the rule under `#verdict:has(#warn...)`
        above). Driving, the other three are gone and the pay stays. */
@@ -1335,6 +1439,11 @@
            Above the figures, number first: at the bottom of the card it was
            the row that ran past the border on the 1024x600 panel. -->
       <div class="stackline" id="stack" hidden></div>
+      <!-- ...and whether this offer is along the way the order in the car is
+           already going: Map view's caption figure, the same one, in one
+           line and no verdict colour — ON THE WAY, OUT OF THE WAY or CAN'T
+           TELL and why, its whole sentence one tap away. See showWay. -->
+      <div class="wayline" id="way" hidden></div>
       <!-- As read off the card, so it can be checked against the phone in the
            two seconds before the offer times out. All four are deliberately
            the raw numbers: their whole job is to match what is on the screen.
@@ -1404,9 +1513,10 @@
          rig exists for.
 
          Empty until asked for. Leaflet and the tiles come from the network and
-         the geocoder is asked about places customers live, so switching here
-         is the press that decides it — the same gate as "Place them on a map"
-         on the map page. -->
+         the public geocoder is asked about places customers live, so switching
+         here is the press that decides it — the same gate as "Place them on a
+         map" on the map page. (The NucBox, the driver's own, is asked without
+         it for the card's line: see showWay.) -->
     <!-- The key to how each place was found (drawHow): one line over the
          map's bottom edge, inside the map so it is drawn only where the map
          is. Shown only when there is something of that drawn. -->
@@ -1656,7 +1766,7 @@
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
-   'working', 'places', 'spoken', 'took', 'shift', 'stack', 'drop', 'dest',
+   'working', 'places', 'spoken', 'took', 'shift', 'stack', 'way', 'drop', 'dest',
    'health', 'stops', 'heldNext', 'heldLine', 'heldLine2', 'whose', 'chooser', 'undo']
     .forEach(function (id) { el[id] = document.getElementById(id); });
 
@@ -2890,7 +3000,9 @@
     holdingNow = false; forgetDest(); heldEnds = undefined; heldSig = null;
     heldId = null; atDropoff = false; heldPlan = null; heldSaid = null;
     heldList = []; unownedNow = 0;
-    showStack(null); showDest(); showTook(); showHeld(heldMode);
+    // ...and the card's line with the pair line it qualifies, in the same
+    // moment: no order, nothing to be on the way of.
+    showStack(null); showWay(null); showDest(); showTook(); showHeld(heldMode);
   }
 
   el.drop.addEventListener('click', function () {
@@ -4135,6 +4247,7 @@
       // belonging to whatever comes next.
       showPlaces(null);
       showStack(null);
+      showWay(null);
       // ...and this is where the Trip Planner's stops go, if a press read one:
       // no card is being judged. Not while aiming, when the card is showing
       // the mount's own measurements.
@@ -4400,6 +4513,8 @@
     // mark reply, the Drop reply, the event stream and the status poll, and the
     // whole fault is that the READING is the one thing that has not heard.
     showStack(holdingNow ? r.stack : null);
+    // ...and under it whether this offer is on the way, by the same rule.
+    showWay(r);
     var working = rows.map(function (row) {
       return '<div class="' + row[0] + '">' + row[1] + '</div>';
     }).join('');
@@ -5673,13 +5788,18 @@
    * the driver pressed a button to open, in straight-line miles that are named
    * as straight-line miles — or, with the NucBox's router set, road miles named
    * as road miles, over the same three points. It never touches #perHour, the
-   * verdict, or the stack line.
+   * verdict, or the stack line. The card says the same answer in one line of
+   * its own beside them (showWay, "the answer on the card"), and that is the
+   * only other place it goes.
    *
-   * AND NOTHING IS LOOKED UP UNTIL THE BUTTON IS PRESSED. Some of these places
-   * are where customers live, the rig itself never sends them anywhere, and
-   * switching to this mode is the press that decides it — the same gate as
-   * "Place them on a map" on the map page. It is deliberately not remembered,
-   * so a reload cannot ask on nobody's behalf. */
+   * AND THE PUBLIC MAP IS ASKED NOTHING UNTIL THE BUTTON IS PRESSED. Some of
+   * these places are where customers live, and switching to this mode is the
+   * press that decides they go to a geocoder the driver does not own — the
+   * same gate as "Place them on a map" on the map page. It is deliberately not
+   * remembered, so a reload cannot ask on nobody's behalf. The NucBox at home
+   * is the driver's own box and is asked without it, for the figure's own
+   * places only: by server.js for the held order's end and pickups
+   * (searchHeldEnd), and by the card's line for the screened card (wayWalk). */
   var MV = window.MapView;
   var mapGeo = null;
   // The NucBox's search and router, through this rig's server; made the
@@ -6097,6 +6217,108 @@
     return cut.replace(/[\s,]+$/, '') + '…';
   }
 
+  /* Each of `names` asked of the NucBox at home, inside ITS card's disc:
+     this card's for its own pickup and dropoff, the held card's for where
+     the order in the car is going and where it is collected. A refusal is
+     kept with the disc it was made in, so the line under the map can say
+     what was searched and what was found.
+
+     Map view's walk and the card's (wayWalk) both ask through here, in the
+     same words through the one NbxSearch, so whichever asks second is
+     answered from the first one's cache or from its question still in
+     flight (MV.NbxSearch.get): a card costs the NucBox what Map view alone
+     cost it. Answers land in `found` and on `want` — nbxSeen, nbxWhy,
+     nbxAnswered, and nbxDown from the first place the NucBox did not
+     answer. Resolves the places it could not ask, that one and every one
+     after it, or null once `gone()` says the walk was left. `landed` is told
+     after each answer; `post` hands the held order's pins to the server,
+     which only Map view's walk does (the server searches them itself,
+     searchHeldEnd). */
+  async function askNucBox(want, names, here, nbx, found, gone, landed, post) {
+    var discs = { card: MV.discFor(want.card), held: MV.discFor(want.heldCard),
+                  held2: MV.discFor(want.heldCard2) };
+    var left = [];
+    for (var n = 0; n < names.length; n++) {
+      var q = names[n];
+      if (want.nbxDown) { left.push(q); continue; }
+      // The held order's pickups are its card's places too, and are
+      // searched in its disc as its end is.
+      var heldsOwn = q === want.held
+        || want.heldPicks.concat(want.donePicks).some(function (p) { return p.q === q; });
+      var whose = (heldsOwn && q !== want.pickup && q !== want.dropoff)
+        ? 'held' : (q === want.held2 && q !== want.pickup && q !== want.dropoff)
+        ? 'held2' : 'new';
+      var disc = whose === 'held' ? discs.held : whose === 'held2' ? discs.held2
+        : discs.card;
+      // `here` for a numberless street's pin: the point of its stretch
+      // nearest the car (MV.stretchInDisc), when the street index is set.
+      var got = await mapNbx.place(q, disc,            // eslint-disable-line no-await-in-loop
+                                   { streets: nbx.streets, car: here });
+      if (gone()) return null;
+      if (got.why === 'unreachable') {
+        // Today's path for this place and every one after it, under the
+        // same press: one dead NucBox is not three timeouts in a row.
+        // Only this: a question the relay REFUSED ('refused') is a bug
+        // here, kept below and said as one, never handed to the public
+        // map to answer instead.
+        want.nbxDown = got.error;
+        left.push(q);
+        continue;
+      }
+      found[q] = got.at || null;
+      want.nbxAnswered++;
+      want.nbxSeen[q] = { res: got, disc: disc, whose: whose };
+      if (post) {
+        // The END only: a pickup's pin is never sent as the held end.
+        if (whose === 'held' && q === want.held && disc) pinHeldEnd(want, q, got);
+        // ...the second order's end, under its own name.
+        else if (whose === 'held2' && disc) pinHeldEnd({ heldId: want.heldId2 }, q, got);
+        // ...and a pickup's pin goes as a pickup, for the restaurant guard.
+        else if (whose === 'held' && disc) pinHeldPickup(want, q, got);
+      }
+      if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
+      if (landed) landed();
+    }
+    return left;
+  }
+
+  /* The detour by road, when the router is set and only when the line would
+     state a figure at all: every refusal mapRefusal makes — a pin farFrom or
+     a card's disc refuses, no fix, no yardstick, nothing held — stands
+     exactly as it does for the straight line, and no point the panel will
+     not measure from is sent anywhere. Resolves the router's answer, or
+     { why: 'street' }, or undefined where nothing was asked, or WALK_LEFT
+     once `gone()` says the walk was left. `measuring` is told just before
+     the router is asked. Map view's walk and the card's both ask here. */
+  var WALK_LEFT = { left: true };
+  async function askRoad(want, found, here, gone, measuring) {
+    var j = mapJudge(want, found, here);
+    if (mapRefusal(want, found, here, j) !== null) return undefined;
+    var road;
+    // ...and never to a numberless street's pin: the router measures one
+    // point, and the card says the street, not where on it. Its figure is
+    // MV.stretchSpan's, over the whole stretch, in straight lines, and the
+    // line says why there is no road figure.
+    // With the held order's pickups still ahead, through them: the run car
+    // -> restaurant -> held end, the new pickup in its best gap
+    // (MV.NbxSearch.detour) — two questions a gap, each three points at
+    // most, through the same relay and cache.
+    if (j.runs) {
+      // Two orders in the car: through the run that commits the car to
+      // both, each ordering of it when the planner gave none
+      // (NbxSearch.detourOrders) — two or three points a question, as ever.
+      // mapRefusal has refused a street anywhere in it.
+      if (measuring) measuring();
+      road = await mapNbx.detourOrders(here, j.pick, j.runs.runs);
+    } else if (MV.stretchSpan(here, j.pick, j.held, heldStops(j))) {
+      return { why: 'street' };
+    } else {
+      if (measuring) measuring();
+      road = await mapNbx.detour(here, j.pick, j.held, heldStops(j));
+    }
+    return gone() ? WALK_LEFT : road;
+  }
+
   async function showMap() {
     if (!MV) {
       // map-view.js is same-origin and in the service worker's shell, so this
@@ -6272,54 +6494,13 @@
       var nbx = await MV.nbxSettings();
       if (viewMode !== 'map' || mapFor !== key) return;
       if ((nbx.search || nbx.route) && !mapNbx) mapNbx = new MV.NbxSearch();
+      var gone = function () { return viewMode !== 'map' || mapFor !== key; };
       var askPublic = want.names;
       if (nbx.search) {
-        /* Each place inside ITS card's disc: this card's for its own pickup
-           and dropoff, the held card's for where the order in the car is
-           going. A refusal is kept with the disc it was made in, so the line
-           under the map can say what was searched and what was found. */
-        var discs = { card: MV.discFor(want.card), held: MV.discFor(want.heldCard),
-                      held2: MV.discFor(want.heldCard2) };
-        askPublic = [];
-        for (var n = 0; n < want.names.length; n++) {
-          var q = want.names[n];
-          if (want.nbxDown) { askPublic.push(q); continue; }
-          // The held order's pickups are its card's places too, and are
-          // searched in its disc as its end is.
-          var heldsOwn = q === want.held
-            || want.heldPicks.concat(want.donePicks).some(function (p) { return p.q === q; });
-          var whose = (heldsOwn && q !== want.pickup && q !== want.dropoff)
-            ? 'held' : (q === want.held2 && q !== want.pickup && q !== want.dropoff)
-            ? 'held2' : 'new';
-          var disc = whose === 'held' ? discs.held : whose === 'held2' ? discs.held2
-            : discs.card;
-          // `here` for a numberless street's pin: the point of its stretch
-          // nearest the car (MV.stretchInDisc), when the street index is set.
-          var got = await mapNbx.place(q, disc,        // eslint-disable-line no-await-in-loop
-                                       { streets: nbx.streets, car: here });
-          if (viewMode !== 'map' || mapFor !== key) return;
-          if (got.why === 'unreachable') {
-            // Today's path for this place and every one after it, under the
-            // same press: one dead NucBox is not three timeouts in a row.
-            // Only this: a question the relay REFUSED ('refused') is a bug
-            // here, kept below and said as one, never handed to the public
-            // map to answer instead.
-            want.nbxDown = got.error;
-            askPublic.push(q);
-            continue;
-          }
-          found[q] = got.at || null;
-          want.nbxAnswered++;
-          want.nbxSeen[q] = { res: got, disc: disc, whose: whose };
-          // The END only: a pickup's pin is never sent as the held end.
-          if (whose === 'held' && q === want.held && disc) pinHeldEnd(want, q, got);
-          // ...the second order's end, under its own name.
-          else if (whose === 'held2' && disc) pinHeldEnd({ heldId: want.heldId2 }, q, got);
-          // ...and a pickup's pin goes as a pickup, for the restaurant guard.
-          else if (whose === 'held' && disc) pinHeldPickup(want, q, got);
-          if (!got.at) want.nbxWhy[q] = { res: got, disc: disc, whose: whose };
-          landed();
-        }
+        // What the NucBox could not be asked goes to the public map, under
+        // this press (askNucBox).
+        askPublic = await askNucBox(want, want.names, here, nbx, found, gone, landed, true);
+        if (askPublic === null) return;
       }
       if (askPublic.length) {
         await mapGeo.walk(askPublic, function () { return box; }, found, landed);
@@ -6340,41 +6521,16 @@
       // panel may never produce.
       if (viewMode !== 'map' || mapFor !== key) return;
 
-      /* The detour by road, when the router is set and only when the line
-         would state a figure at all: every refusal mapRefusal makes — a pin
-         farFrom or a card's disc refuses, no fix, no yardstick, nothing held
-         — stands exactly as it does for the straight line, and no point the
-         panel will not measure from is sent anywhere. Asked here, inside the
-         walk and under the busy guard, so a driver who leaves Map view while
-         it is in flight cannot come back to the previous card's line. */
+      /* The detour by road (askRoad: only where the line would state a
+         figure at all). Asked here, inside the walk and under the busy
+         guard, so a driver who leaves Map view while it is in flight cannot
+         come back to the previous card's line. */
       var road;
       if (nbx.route) {
-        var j = mapJudge(want, found, here);
-        if (mapRefusal(want, found, here, j) === null) {
-          // ...and never to a numberless street's pin: the router measures
-          // one point, and the card says the street, not where on it. Its
-          // figure is MV.stretchSpan's, over the whole stretch, in straight
-          // lines, and the line says why there is no road figure.
-          // With the held order's pickups still ahead, through them: the
-          // run car -> restaurant -> held end, the new pickup in its best gap
-          // (MV.NbxSearch.detour) — two questions a gap, each three points at
-          // most, through the same relay and cache.
-          if (j.runs) {
-            // Two orders in the car: through the run that commits the car
-            // to both, each ordering of it when the planner gave none
-            // (NbxSearch.detourOrders) — two or three points a question,
-            // as ever. mapRefusal has refused a street anywhere in it.
-            mapSay('measuring the detour by road…');
-            road = await mapNbx.detourOrders(here, j.pick, j.runs.runs);
-            if (viewMode !== 'map' || mapFor !== key) return;
-          } else if (MV.stretchSpan(here, j.pick, j.held, heldStops(j))) {
-            road = { why: 'street' };
-          } else {
-            mapSay('measuring the detour by road…');
-            road = await mapNbx.detour(here, j.pick, j.held, heldStops(j));
-            if (viewMode !== 'map' || mapFor !== key) return;
-          }
-        }
+        road = await askRoad(want, found, here, gone, function () {
+          mapSay('measuring the detour by road…');
+        });
+        if (road === WALK_LEFT) return;
       }
       /* The held order's run along the roads, to draw: the car, its pickups
          with a pin, its end — the points heldRun draws straight. Drawing
@@ -6480,6 +6636,172 @@
       if (viewMode === 'map' && mapFor !== mapWants().key) showMap();
     }
   }
+
+  /* --- the answer on the card ----------------------------------------------
+   *
+   * WHAT THIS IS FOR, the driver's goal: while carrying an order, when a
+   * second offer comes up, tell at a glance whether it is along the route
+   * already being driven. The figure that answers it was said in one place,
+   * the caption under Map view, which is three presses from the phone and
+   * not where the eye is while screening a card. So it is on the card too,
+   * in one line under the pair line, while an order is held and an offer is
+   * screened: ON THE WAY · +0.4 road mi · same side of town, OUT OF THE WAY
+   * · +3.1 road mi · ends elsewhere, or CAN'T TELL and why.
+   *
+   * THE SAME ANSWER, NOT A SECOND ONE. The line is MV.wayLine of mapLine's
+   * answer — the caption's sentence and the figure in it — so every refusal
+   * the caption makes is the card's, in the caption's own chip, and the
+   * figure is the caption's to the tenth. Nothing here measures. Whichever
+   * walk answered for this card: Map view's when it has drawn this card,
+   * which may have asked the public map under the press, and otherwise the
+   * card's own (wayWalk), which asks only the NucBox. And no distance
+   * reaches the verdict, the rate or the pair line: this line sits beside
+   * them and decides nothing (map-view.js's header).
+   *
+   * WITHOUT THE PRESS, AND ONLY OF THE NUCBOX. Map view looks nothing up
+   * until ⛶ Map is pressed, because the public geocoder is asked about
+   * places customers live. The card's own walk asks the driver's own box at
+   * home and nobody else — as server.js already does for the held order's
+   * end and pickups with no press at all (searchHeldEnd, the owner's
+   * decision of 14 Oct) — and only the questions the figure needs: the new
+   * pickup, where each order in the car ends and the pickups it still has
+   * ahead. Not the new job's end, not a pickup behind the car, and no road
+   * drawn: those are Map view's, for drawing. Through the one NbxSearch
+   * Map view uses, so opening the map afterwards asks the NucBox nothing
+   * the card already asked, and a question in flight is not asked twice.
+   * With a NucBox set that does not answer, the card says so, and that ⛶ Map
+   * would ask the public map; it never asks it itself. With none set at all
+   * there is nobody it may ask, so there is no line until Map view has
+   * answered for the card: on every pair of a shift a CAN'T TELL that no
+   * press of the card's could ever change is a row of the card spent on
+   * nothing (on the 3.5" hat it is the address's row, below). */
+  var way = null;
+  var wayAsking = null;
+  // Whether this rig's server has the NucBox search set, as the last walk
+  // was told (MV.nbxSettings); null before anything has asked. Asked once
+  // as the page loads too, so a rig with none never shows "checking" on its
+  // first pair: one question to this rig's own server, none to the NucBox.
+  var waySearch = null;
+  if (MV && MV.nbxSettings && MV.wayLine) {
+    MV.nbxSettings().then(function (n) {
+      if (waySearch === null) waySearch = !!n.search;
+      showWay(last);
+    });
+  }
+  // The card's own refusal, which Map view never makes: nothing looked up
+  // without the press. A chip and its sentence, as the caption's are.
+  function wayNucBoxDown(error) {
+    return { chip: 'NUCBOX DOWN · ⛶ Map looks it up',
+             said: 'The NucBox did not answer (' + error + '), and the public map is '
+                   + 'asked only when ⛶ Map is pressed.' };
+  }
+
+  /* An answer for the card whose places make `key` (mapWants): Map view's
+     ('map'), which stands once it is in, or the card's own ('card'), which
+     never replaces it. */
+  function wayAnswered(key, ans, from) {
+    if (from === 'card' && way && way.key === key && way.from === 'map') return;
+    way = { key: key, ans: ans, from: from };
+    showWay(last);
+  }
+
+  /* The places the figure is measured through, and no others: the new
+     pickup, each order's end, and the held pickups still ahead — what
+     mapRefusal and mapFigure read. */
+  function wayNames(want) {
+    return [want.pickup, want.held, want.held2]
+      .concat(want.heldPicks.map(function (p) { return p.q; })).filter(Boolean)
+      .filter(function (v, i, all) { return all.indexOf(v) === i; });
+  }
+
+  async function wayWalk(want) {
+    var key = want.key;
+    wayAsking = key;
+    var gone = function () { return mapWants().key !== key; };
+    try {
+      var here = MV.cardFix(want.card).at;
+      // Its answer is said off these places alone, so its sentence counts
+      // nothing it did not ask as "not asked".
+      want.names = wayNames(want);
+      var nbx = await MV.nbxSettings();
+      waySearch = !!nbx.search;
+      if (gone()) return;
+      // No line, not a refusal: see above. Map view's answer, if the map is
+      // opened on this card, still is one (wayAnswered).
+      if (!nbx.search) { wayAnswered(key, null, 'card'); return; }
+      if (!mapNbx) mapNbx = new MV.NbxSearch();
+      var found = {};
+      if (await askNucBox(want, want.names, here, nbx, found, gone, null, false) === null) return;
+      if (want.nbxDown) { wayAnswered(key, wayNucBoxDown(want.nbxDown), 'card'); return; }
+      var road;
+      if (nbx.route) {
+        road = await askRoad(want, found, here, gone, null);
+        if (road === WALK_LEFT) return;
+      }
+      wayAnswered(key, mapLine(want, found, here, mapJudge(want, found, here), road), 'card');
+    } finally {
+      if (wayAsking === key) wayAsking = null;
+    }
+  }
+
+  /* The line, drawn: shown exactly when the pair line is (render: an order
+     held and an offer up, which is when the server sends a stack), and
+     otherwise gone. A card with no answer yet starts its walk and says it is
+     checking. A tap on it swaps the chip for the whole sentence and back, as
+     a notice's does — back on its own after WARN_OPEN_MS, or on a new line;
+     while driving the tap is the card's peek, as every tap there is. */
+  var wayOpenAt = 0;
+  var wayOpenOn = '';
+  /* Whether the offer on record — whose places the walks are about
+     (mapWants) — is the card on the glass. Not always: the reading comes
+     first and the offer line once the card is written, so for a moment the
+     record is still the card before. Its answer under this card's verdict
+     would be a figure about another job, confidently. The pay to the cent
+     and the miles, which the reading and the offer line take off the same
+     figures (scan_pi.py emit and emit_offer); minutes would not do, a
+     delivery card's being the time left to its deadline, which counts down
+     between the two. */
+  function onRecordIs(r) {
+    var o = onRecord;
+    return !!o && typeof o.pay === 'number' && typeof r.pay === 'number'
+      && Math.round(o.pay * 100) === Math.round(r.pay * 100)
+      && (o.miles === undefined ? null : o.miles) === (r.miles === undefined ? null : r.miles);
+  }
+  function showWay(r) {
+    if (!MV || !MV.wayLine || !r || !r.ready || !holdingNow || !r.stack) {
+      setHidden(el.way, true);
+      return;
+    }
+    var want = onRecordIs(r) ? mapWants() : null;
+    var known = !!want && !!way && way.key === want.key;
+    var ans = known ? way.ans : null;
+    if (want && !known && wayAsking !== want.key) wayWalk(want);
+    // No NucBox to ask and no answer from Map view: no line (wayWalk). And
+    // with the record still the card before, "checking" only where this
+    // card's walk will have something to ask once its offer line is in.
+    if (known ? !ans : want ? waySearch === false : waySearch !== true) {
+      setHidden(el.way, true);
+      return;
+    }
+    var line = MV.wayLine(ans || { pending: true }, r.stack.ends);
+    var open = !!wayOpenAt && Date.now() - wayOpenAt < WARN_OPEN_MS && wayOpenOn === line.said;
+    if (!open) wayOpenAt = 0;
+    // Drawn again only when it says something else (drawnAs): it rides
+    // every reading of the card.
+    if (drawnAs(el.way, JSON.stringify([line, open]))) MV.sayWay(el.way, line, open);
+    setHidden(el.way, false);
+  }
+  el.way.tabIndex = 0;
+  function toggleWay() {
+    if (!el.way.title) return;
+    wayOpenAt = wayOpenAt ? 0 : Date.now();
+    wayOpenOn = el.way.title;
+    showWay(last);
+  }
+  el.way.addEventListener('click', toggleWay);
+  el.way.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleWay(); }
+  });
 
   /* One dot, sized and coloured for a panel read at arm's length through a
      windscreen. Bigger than the map page's, which is read at a desk. */
@@ -7032,7 +7354,12 @@
       return;
     }
 
-    mapDrew(mapLine(want, found, here, j, road));
+    var ans = mapLine(want, found, here, j, road);
+    mapDrew(ans.said);
+    // ...and the card's line, off the same answer: with the press behind it
+    // this walk may have asked the public map too, which the card's own walk
+    // never does, so this one is the card's answer from here on (wayAnswered).
+    wayAnswered(want.key, ans, 'map');
   }
 
   /* The one line of words under the map, and the only figure this mode
@@ -7040,7 +7367,14 @@
      on my way, or behind me — and it says in the same breath whether that is
      a straight line or the road, because a driver acting on it is acting on
      three geocoded points. Every reason not to state it first (mapRefusal),
-     and only then the figure (mapFigure). */
+     and only then the figure (mapFigure).
+
+     Answered as { said, fig }: `said` the caption's sentence, `fig` the
+     figure it states ({ lo, hi, road, onWay }) or none where it refuses. The
+     card's line (showWay, MV.wayLine) is made of this same answer and of
+     nothing else, so the card and the caption cannot come to say two things
+     about one pickup — the driver's question answered on the card was the
+     question answered here, in a second place, until they shared it. */
   function mapLine(want, found, here, j, road) {
     var stop = mapRefusal(want, found, here, j);
     // `drop` is deliberately not passed. The detour is car -> pickup -> where
@@ -7052,7 +7386,7 @@
     // the car goes before its end, which it has to, and the run the figure is
     // measured against goes through them (mapFigure).
     // ...and with two orders in the car, the run through both (j.runs).
-    return stop !== null ? stop
+    return stop !== null ? { said: stop }
       : mapFigure(want, found, here, j.pick, j.held, road, heldStops(j), j.runs);
   }
 
@@ -7363,31 +7697,39 @@
        otherwise, labelled as for one order. "incl. both orders" in the
        place "incl. restaurant" has, for the same reason: the same number
        means a different thing with both orders in it. */
+    /* Each sentence below goes out with the figure it states (`fig`, see
+       mapLine): its least and most, by road or not, and whether it called it
+       on your way — the decision made here, once, with the caption's own
+       `cut`. The card says that same figure in its own line (showWay). */
+    function stated(said, lo, hi, byRoad) {
+      return { said: said, fig: { lo: lo, hi: hi, road: byRoad, onWay: hi < cut } };
+    }
     if (runs) {
       var withBoth = ' incl. both orders';
-      if (road && road.why === 'order') return 'order of stops unknown — no figure';
+      if (road && road.why === 'order') return { said: 'order of stops unknown — no figure' };
       if (road && isFinite(road.miles)) {
         var rHi = isFinite(road.hi) ? road.hi : road.miles;
         var rMost = rHi.toFixed(1) === road.miles.toFixed(1) ? '' : '–' + rHi.toFixed(1);
-        return (rHi < cut ? 'on your way by road'
-                          : '+' + road.miles.toFixed(1) + rMost + ' road mi')
-          + withBoth + tap + count + nucbox;
+        return stated((rHi < cut ? 'on your way by road'
+                                 : '+' + road.miles.toFixed(1) + rMost + ' road mi')
+          + withBoth + tap + count + nucbox, road.miles, rHi, true);
       }
       var two = MV.detourOrders(here, pick, runs.runs);
-      if (!two || !two.stated) return 'order of stops unknown — no figure';
+      if (!two || !two.stated) return { said: 'order of stops unknown — no figure' };
       var tMost = two.hi.toFixed(1) === two.lo.toFixed(1) ? '' : '–' + two.hi.toFixed(1);
-      return (two.hi < cut ? 'on your way' : '+' + two.lo.toFixed(1) + tMost + ' mi')
-        + withBoth + ' — straight lines, not roads' + tap + count + nucbox;
+      return stated((two.hi < cut ? 'on your way' : '+' + two.lo.toFixed(1) + tMost + ' mi')
+        + withBoth + ' — straight lines, not roads' + tap + count + nucbox,
+        two.lo, two.hi, false);
     }
     if (road && isFinite(road.miles)) {
       if (withStop) {
-        return (road.miles < cut ? 'on your way by road'
-                                 : '+' + road.miles.toFixed(1) + ' road mi')
-          + withStop + tap + count + nucbox;
+        return stated((road.miles < cut ? 'on your way by road'
+                                        : '+' + road.miles.toFixed(1) + ' road mi')
+          + withStop + tap + count + nucbox, road.miles, road.miles, true);
       }
-      return (road.miles < cut ? 'this pickup is on your way by road'
-                               : '+' + road.miles.toFixed(1) + ' road mi out of your way')
-        + tap + count + nucbox;
+      return stated((road.miles < cut ? 'this pickup is on your way by road'
+                                      : '+' + road.miles.toFixed(1) + ' road mi out of your way')
+        + tap + count + nucbox, road.miles, road.miles, true);
     }
     /* An end that is a numberless street: the figure wherever on it the stop
        is (MV.stretchSpan; mapRefusal refused it where that is not one
@@ -7404,7 +7746,7 @@
       ? (hi < cut ? 'on your way' : '+' + lo.toFixed(1) + most + ' mi') + withStop
       : (hi < cut ? 'this pickup is on your way'
                   : '+' + lo.toFixed(1) + most + ' mi out of your way');
-    return said + ' — straight lines, not roads' + tap + count + nucbox;
+    return stated(said + ' — straight lines, not roads' + tap + count + nucbox, lo, hi, false);
   }
 
   // Last, not beside the button it belongs to: it can put the pane into map
