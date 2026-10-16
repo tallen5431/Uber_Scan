@@ -6485,6 +6485,13 @@ car's end, and when it is not, says why in a word on that line:
   the screen box is) read it, once as `Waypbill`. That it follows the LAST
   stop and not each one is read off where it sits on the one planner
   photographed, which had one stop; a stacked one has not been seen.
+  Both ends on the glass are still not enough when the reader lost a stop's
+  header between them: its lines fall into the stop above, and the dropoff
+  left may be the other customer's. So a block holding two "Expected by"
+  lines makes the page unbounded (`planner_ends`, `plannerEnds`), and
+  assemble.js's `listShort` says `list` too when the pickups' "N orders" add
+  up to more than the dropoffs' — the header lost with its time — and then
+  files no lone dropoff either.
 * **`address`** — one dropoff, list seen whole, but its street or its town did
   not read. A town alone is not filed: a map asked for "Marietta" puts a pin
   in the middle of Marietta.
@@ -6894,7 +6901,7 @@ forbids recovering the 24 back to 2.4. The flag would use one frame's evidence
 of the error to block the fix for it.
 
 So the point travels **with the winning reading** rather than across the window:
-`self.lone_miles` holds `(miles, had_decimal)` pairs, and the published flag is
+`self.lone_miles` tallies `(miles, had_decimal)` pairs, and the published flag is
 what the frames that read the winning value said. It comes out right in both
 directions — if 24 won and none of those frames saw a point, recovery is allowed
 and lands on 2.4; if the card really says `24.0` and one frame dropped the

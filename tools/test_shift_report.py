@@ -383,6 +383,54 @@ near('...and the minutes are still measured', mb['A']['actualMinutes'], 30.0, 1e
 code, _ = run(['--journal', JOURNAL, '--day', '2026-03-03'])
 eq('...and --gps left out is the same', code, 0)
 
+# --- the day's own logs, and no others -------------------------------------------
+# gpslog_tidy keeps KEEP_DAYS of logs, and a day's report read every one of
+# them. It reads, by the names gpspipe gives them, the logs that can hold a fix
+# the day's orders are measured over: those begun inside the day (or before the
+# last of its orders' ends) and the newest begun before it, which may be the
+# one still running across the day's start.
+_lone = os.path.join(work, 'gps-neighbour')
+os.mkdir(_lone)
+with open(os.path.join(_lone, '2026-03-02_2300.jsonl'), 'w') as fh:
+    for p in POINTS:
+        fh.write(stamped(p[0], tpv(*p)))
+_alone = SR.report(JOURNAL, _lone, '2026-03-03')
+ok_("a log begun the evening before and running through the day is read for it "
+    "(A's GPS miles)", {o['id']: o for o in _alone['orders']}['A']['gpsMiles'] is not None)
+_many = os.path.join(work, 'gps-many')
+shutil.copytree(_lone, _many)
+for _name, _day in (('2026-03-01_1200.jsonl', 1), ('2026-03-02_0900.jsonl', 2),
+                    ('2026-03-05_1000.jsonl', 5)):
+    with open(os.path.join(_many, _name), 'w') as fh:
+        for _k in range(10):
+            _t = at(12, _k, day=_day) // 1000
+            fh.write(stamped(_t, tpv(_t, LAT0, LON0, 8.0)))
+_dr = SR.report(JOURNAL, _many, '2026-03-03')
+eq("a day's report reads the logs that can hold its fixes and not the other days' "
+   "(read, left)", (_dr['info']['files'], _dr['info']['otherDays']), (1, 3))
+eq('...and its rows are what that one log gives alone',
+   [SR.cells(o) for o in _dr['orders']], [SR.cells(o) for o in _alone['orders']])
+ok_('...and the header says how many it left', '3 logs of other days not read' in SR.text(_dr))
+eq('a log whose name gives no day is always read', SR._logs_for(
+    ['gps-00.jsonl', '2026-03-05_1000.jsonl'], (at(4, 0), at(4, 0, day=4))), ['gps-00.jsonl'])
+eq('...and a name with the date alone counts as the whole of that date: the day '
+   'before, the day and the day after are read for a day that starts at 4am',
+   SR._logs_for(['2026-03-01.jsonl', '2026-03-02.jsonl', '2026-03-03.jsonl',
+                 '2026-03-04.jsonl', '2026-03-05.jsonl'], (at(4, 0), at(4, 0, day=4))),
+   ['2026-03-02.jsonl', '2026-03-03.jsonl', '2026-03-04.jsonl'])
+
+# --- an order with no Took is placed by its first reading -------------------------
+# One pass over the journal now, for every such order at once. The FIRST
+# reading still decides the day: N is read on the 3rd and again on the 4th.
+_nj = os.path.join(work, 'journal-n.jsonl')
+with open(_nj, 'w') as fh:
+    for r in (offer('N', at(21, 0), 6.00, 15, 3.0), offer('N', at(21, 0, day=4), 6.00, 15, 3.0),
+              mark('N', at(21, 30, day=4), True, via='review')):
+        fh.write(json.dumps(r) + '\n')
+eq('an order with no Took is on the day of its first reading, and not the next',
+   ([o['id'] for o in SR.report(_nj, None, '2026-03-03')['orders']],
+    [o['id'] for o in SR.report(_nj, None, '2026-03-04')['orders']]), (['N'], []))
+
 # --- nothing reads it ---------------------------------------------------------
 readers = []
 # The files git tracks, not a walk of the directory: a walk also reads other

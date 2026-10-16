@@ -693,11 +693,29 @@
               && (s.street || s.city));
   }
 
+  /* Whether the pickups' "N orders" add up to more than the dropoffs' do. A
+   * trip delivers what it picks up, so on a list read whole the two are equal;
+   * more picked up than dropped off is a dropoff the reader did not read — its
+   * header lost to OCR, its lines filed under the stop above (find_planner) —
+   * and the dropoff that is left may be another customer's door. A count that
+   * did not read (`orders` null) counts nothing on either side. Said as 'list',
+   * the list not seen whole, which is what it is, and a later read that gets
+   * the header back can still file: 'dropoffs' would refuse the pages for good
+   * over a misread. */
+  function listShort(stops) {
+    var sum = function (kind) {
+      return headed(stops).reduce(function (n, s) {
+        return n + (s.kind === kind && typeof s.orders === 'number' ? s.orders : 0);
+      }, 0);
+    };
+    return sum('pickup') > sum('dropoff');
+  }
+
   function plannerDestination(stops, bounded) {
     var drops = headed(stops).filter(function (s) { return s.kind === 'dropoff'; });
     if (!drops.length) return { address: null, why: null, stop: null };
     if (drops.length > 1) return { address: null, why: 'dropoffs', stop: null };
-    if (!bounded) return { address: null, why: 'list', stop: drops[0] };
+    if (!bounded || listShort(stops)) return { address: null, why: 'list', stop: drops[0] };
     if (!(drops[0].street && drops[0].city)) return { address: null, why: 'address', stop: drops[0] };
     return { address: addressOf(drops[0]), why: null, stop: drops[0] };
   }
@@ -715,6 +733,9 @@
   function plannerLoneDropoff(stops) {
     var drops = headed(stops).filter(function (s) { return s.kind === 'dropoff'; });
     if (drops.length !== 1 || drops[0].orders !== 1) return null;
+    // ...and not when the pickups say the trip carries more than it drops off:
+    // that is not a single trip, whatever is left on the glass (listShort).
+    if (listShort(stops)) return null;
     if (!(drops[0].street && drops[0].city)) return null;
     return addressOf(drops[0]);
   }
@@ -727,10 +748,25 @@
    * alone — and nor does the stop a page begins in the middle of, which has
    * no kind.
    *
-   * HOW LONG A PAGE WAITS FOR ITS NEIGHBOUR: STITCH_MS, 20 s. CHOSEN, NOT
+   * HOW LONG A PAGE WAITS FOR ITS NEIGHBOUR: STITCH_MS, 60 s. CHOSEN, NOT
    * MEASURED — no file on this rig holds two pages of one planner yet. It is
-   * twice SCREEN_AUTO_EVERY (rpi/scan_pi.py), so the unpressed read that
-   * follows a scroll can still reach the page before it.
+   * twice SCREEN_AUTO_HOT (rpi/scan_pi.py, 30 s), the spacing of the
+   * unpressed reads while the heat guard is on, so the read that follows a
+   * scroll can still reach the page before it when the Pi is hot. It was
+   * twice SCREEN_AUTO_EVERY (10 s), 20 s, and with the guard on two unpressed
+   * pages are never nearer than 30 s: replayed at that spacing, the five
+   * fixture sequences that stitch (tests/fixtures/sequences.json) all filed
+   * the card's end in place of the planner's. rpi/test_lint.py holds the two
+   * constants together.
+   *
+   * The longer window does not loosen what a stitch needs. Time is the
+   * weakest of the guards: two pages a minute apart join only when no other
+   * screen was sighted for that app between them (a navigation screen — the
+   * epoch), and when every position both show is the same stop by
+   * kind, name and "Expected by", with one alignment only: another trip's
+   * list would have to repeat this one's stops, names and times to join it.
+   * And the planner from the trip before is refused on the Took (refuse()),
+   * which the window does not touch.
    *
    * WHAT LIMITS A FALSE STITCH, all three required:
    *   - the same app;
@@ -749,7 +785,7 @@
    * (the title with the first stop's header straight under it) sits at the
    * top of the linked list, and one whose `page.bottom` is true ("Waybill"
    * after its last header) sits at the foot. Each may be a different page. */
-  var STITCH_MS = 20000;
+  var STITCH_MS = 60000;
   // How many planner pages are remembered at once. Chosen, not measured: at
   // one unpressed read every 10 s it is two minutes of planner.
   var PAGES_MAX = 12;
@@ -1325,7 +1361,18 @@
    * screened: ⌖ over that card's customer popup was filed onto ② by `only`,
    * replacing its end, as the popup's own line gave the card the same
    * address. Elimination proper needs a planner's list seen whole, and a
-   * planner is never a card's screen, so it does not arise here. */
+   * planner is never a card's screen, so it does not arise here.
+   *
+   * A LIST WITH MORE DROPOFFS THAN ORDERS LEFT. The hard rules rule orders
+   * out; they say nothing about whose the other dropoffs on a list are. A
+   * list seen whole with two dropoffs and one order left standing (the other
+   * order DoorDash's, or taken after the read) has a dropoff that is no order
+   * of ours, or two of that one order's — a batched card's two customers —
+   * and `only` filed the first of them as its end. Measured at f80d0c2,
+   * carrying two on, a two-customer Uber card and a DoorDash order held, an
+   * unpressed two-dropoff planner: mark row {cue: 'only'} with the first
+   * customer's door as the Uber order's end. So `only` is not allowed there,
+   * and a cue that names the order (the store, the deadline) still is. */
   function attribute(st, orders, d, ctx) {
     var out = { order: null, cue: null, why: null, votes: [], ties: [] };
     var live = (orders || []).filter(function (o) {
@@ -1336,7 +1383,9 @@
       return true;
     });
     if (!live.length) { out.why = 'nobody'; return out; }
-    if (live.length === 1 && !(ctx && ctx.card)) {
+    var crowded = d.bounded === true && Array.isArray(d.others)
+      && d.others.length + 1 > live.length;
+    if (live.length === 1 && !(ctx && ctx.card) && !crowded) {
       out.order = live[0];
       out.cue = 'only';
       return out;
@@ -1493,7 +1542,10 @@
     var run = pool.indexOf(page) === -1 ? { view: pageView(page), pages: [page] }
       : linked(pool, page);
     var view = run.pages.length > 1 ? run.view : pageView(page);
-    var bounded = view.top && view.bottom;
+    // Seen whole only with as many dropped off as picked up (listShort): every
+    // dropoff below is handed over for attribution, and one the reader lost
+    // would leave the others to be told apart by elimination.
+    var bounded = view.top && view.bottom && !listShort(view.stops);
     var verdict = plannerDestination(view.stops, bounded);
     var cands = [];
     if (bounded) {

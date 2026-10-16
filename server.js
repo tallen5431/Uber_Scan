@@ -178,6 +178,11 @@ var scanner = {
   // card came onto the slot and does not move while it is re-read. What a
   // customer's place popup is held to (popupArrived).
   offerSeenAt: null,
+  // ...and offerAt for the cards on the slot before it, newest last, as
+  // {id, at}: what a ✓ Took from a panel that has fallen behind dates its
+  // order from (cardArrivedAt). As many as rpi/journal.py keeps ids for
+  // (RECENT_CARDS, 8).
+  offerAts: [],
   // The orders being carried, first-taken first: a LIST, capped at MAX_HELD.
   // Read through heldOrders() and holding(), never directly. See holding().
   held: [],
@@ -189,6 +194,9 @@ var scanner = {
 };
 
 var listeners = [];    // open server-sent-event responses
+// The orders in the car as the last beat said them (holdIds, space-joined), or
+// null before the first: the beat carries `holding` when this changes.
+var beatHeldSaid = null;
 
 // How long a scanner has to stay up before its next exit counts as a fresh
 // problem rather than another rung of the same one. Comfortably longer than the
@@ -382,8 +390,24 @@ function startScanner() {
     lines.forEach(function (line) {
       line = line.trim();
       if (!line) return;
+      var read;
       try {
-        var read = JSON.parse(line);
+        read = JSON.parse(line);
+      } catch (e) {
+        console.log('scanner: ' + line);   // not JSON, so it is a log line
+        return;
+      }
+      if (!read || typeof read !== 'object') {
+        console.log('scanner: ' + line);   // JSON, but no message: a log line too
+        return;
+      }
+      // ...and a message this process then fails on is ITS fault, said as one
+      // with the stack that names where. One try round both used to log a
+      // throw anywhere below as `scanner: <the line>`, the shape of a
+      // library's chatter on the scanner's stdout: a planner line whose stops
+      // held a null was printed as if the scanner had said it, with nothing
+      // pointing at this file.
+      try {
         read.at = Date.now();
         // A sighting (rpi/scan_pi.py, emit_sighting): what a whole-screen or
         // planner read saw, typed by its screen. Counted by that type for
@@ -500,7 +524,12 @@ function startScanner() {
             read.offer.heldCard = holdIdOf(carriedNow);
           }
           scanner.offer = read.offer;
-          if (!sameCard) scanner.offerAt = Date.now();
+          if (!sameCard) {
+            scanner.offerAt = Date.now();
+            scanner.offerAts = scanner.offerAts.filter(function (c) {
+              return c.id !== read.offer.id;
+            }).concat([{ id: read.offer.id, at: scanner.offerAt }]).slice(-OFFER_ATS_MAX);
+          }
           scanner.offerSeenAt = Date.now();
           // ...and the Trip Planner a press read goes, as it goes off the
           // panel at this moment. See forgetPlanner.
@@ -580,13 +609,15 @@ function startScanner() {
           var plannerPage = Assemble.pageOf(assembly, read.planner.at);
           ownPickups(read.planner.stops, plannedAt, plannerPage, read.planner.at);
           if (heldNow) {
+            var heldWas = JSON.stringify(scanner.held);
             heldNow.planner = { stops: read.planner.stops,
                                 unfiled: read.planner.unfiled || null };
             // ...and a pickup it lists no longer marked visited, by the
             // planner's word (plannerVisits) — only off a read that shows
-            // the list from its top.
+            // the list from its top. It writes the orders when this changed
+            // them (`heldWas`).
             plannerVisits(heldNow, read.planner.stops, plannedAt,
-                          !!(plannerPage && plannerPage.top === true));
+                          !!(plannerPage && plannerPage.top === true), heldWas);
             // ...and its pickups searched for on the NucBox, for the
             // restaurant guard (searchHeldPickup); a no-op for one already
             // asked about on this hold.
@@ -629,10 +660,23 @@ function startScanner() {
           read.heldEnd = heldBeat ? heldEndState(heldBeat) : null;
           // ...and every order's, with carrying two on (ordersForPanel).
           if (heldBeat && carryTwo()) read.orders = ordersForPanel(Date.now());
+          // ...and the hold itself, heldForPanel's shape as a reading carries
+          // it, on the first beat after what is held changed. An order put
+          // down on its own clock (heldOrders, holdEnds) was said to no
+          // panel: no press made it, and no reading comes between offers to
+          // carry `holding` — so Drop and the in-car line stayed up over an
+          // empty car until the next card. Only on a change, so a beat is
+          // the size it was.
+          var heldNowSig = heldOrders(Date.now()).map(holdIdOf).join(' ');
+          if (heldNowSig !== beatHeldSaid) {
+            beatHeldSaid = heldNowSig;
+            read.holding = heldForPanel(heldBeat);
+          }
         }
         broadcast(read);
       } catch (e) {
-        console.log('scanner: ' + line);   // not JSON, so it is a log line
+        console.error('server: a scanner line could not be handled: '
+                      + (e && e.stack ? e.stack : String(e)));
       }
     });
   });
@@ -1038,16 +1082,33 @@ function maxHeld() {
  * it, for the suites. With it off, MAX_HELD is one and the server does what
  * Stage 4 did — a second Took replaces — and only says, in a `would` field on
  * rows it already writes, what attribution would have done. */
+/* ...and read again only when the file has changed (its mtime, size and
+ * inode), not on every call: it is asked on every beat, reading and planner
+ * line, and a shift's worth of those read and parsed the file 16,599 times
+ * (measured at f80d0c2 over a simulated shift of 5,000 beats, two orders held;
+ * once, with this). A stat is all an unchanged file costs now. The scanner
+ * replaces the file through a rename, which a new inode says even inside one
+ * mtime tick. */
+var carryTwoSeen = null;
+
 function carryTwo() {
   var env = process.env.CARRY_TWO;
   if (env === '1') return true;
   if (env === '0') return false;
+  var file = path.join(ROOT, 'rpi', 'config.json');
+  var st;
+  try { st = fs.statSync(file); } catch (e) { carryTwoSeen = null; return false; }
+  var c = carryTwoSeen;
+  if (c && c.mtime === st.mtimeMs && c.size === st.size && c.ino === st.ino) return c.on;
+  var on = false;
   try {
-    var cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'rpi', 'config.json'), 'utf8'));
-    return !!(cfg && cfg.settings && cfg.settings.carryTwo === true);
+    var cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+    on = !!(cfg && cfg.settings && cfg.settings.carryTwo === true);
   } catch (e) {
-    return false;
+    on = false;
   }
+  carryTwoSeen = { mtime: st.mtimeMs, size: st.size, ino: st.ino, on: on };
+  return on;
 }
 
 /* The orders in the car as the assembler is handed them: the first-taken
@@ -1089,9 +1150,18 @@ function asHold(h) {
  * kept on one order — so the copies cannot disagree. */
 function setHeld(list) {
   scanner.held = (list || []).filter(Boolean);
+  var tmp = null;
   try {
     if (scanner.held.length) {
-      fs.writeFileSync(holdPath(), JSON.stringify({ v: 2, orders: scanner.held }));
+      // Through a temporary and a rename, like every other file this process
+      // publishes. Written in place, a power cut mid-write — this box's
+      // ordinary way of stopping — left a file cut short, and loadHolding
+      // read that as nothing held: the order in the car gone at the next boot
+      // with no word said. A rename is all or nothing. No fsync, as the
+      // journal's own appends take none (appendLines).
+      tmp = partName(holdPath());
+      fs.writeFileSync(tmp, JSON.stringify({ v: 2, orders: scanner.held }));
+      fs.renameSync(tmp, holdPath());
     } else {
       fs.unlinkSync(holdPath());
     }
@@ -1101,6 +1171,7 @@ function setHeld(list) {
     // and never fatal: the panel works from memory either way and the driver
     // is mid-shift.
     if (e && e.code !== 'ENOENT') console.error('holding: ' + e.message);
+    if (tmp) { try { fs.unlinkSync(tmp); } catch (e2) { /* never written */ } }
   }
   tellScannerHeld(scanner.held);
   forgetHoldsGone(scanner.held);
@@ -1197,7 +1268,24 @@ function loadHolding() {
   var raw;
   try { raw = fs.readFileSync(holdPath(), 'utf8'); } catch (e) { return null; }
   var f;
-  try { f = JSON.parse(raw); } catch (e) { f = null; }
+  try {
+    f = JSON.parse(raw);
+  } catch (e) {
+    f = null;
+    // A file that does not parse — cut short by a power cut when it was
+    // written in place, or damaged since — was read as nothing held and said
+    // nothing: the order in the car gone at boot, the stack line judging the
+    // next card alone, and no line anywhere. Measured at f80d0c2 with the
+    // file's last nine bytes cut off: /api/status `holding: null`, and not a
+    // word in the log. Said now, and the file kept aside rather than
+    // overwritten by the next Took, so what it held can still be read.
+    var aside = holdPath() + '.bad';
+    var kept = true;
+    try { fs.renameSync(holdPath(), aside); } catch (e2) { kept = false; }
+    console.error('holding: ' + holdPath() + ' could not be read (' + e.message
+                  + '), so no order in the car is restored'
+                  + (kept ? '; it is kept as ' + aside : ''));
+  }
   var list = [];
   if (f && typeof f === 'object' && f.v === 2 && Array.isArray(f.orders)) {
     list = f.orders.map(heldFromFile).filter(Boolean);
@@ -1338,7 +1426,8 @@ function heldById(id, now) {
  *   - an unprompted sighting waits in the assembler's pool (Assemble.park),
  *     unwritten, and the panel says how many are waiting ("2 dropoffs read ·
  *     whose?"), until a later read gives it a cue (retryPool) or one of the
- *     two orders leaves the car and it is dropped.
+ *     two orders leaves the car and it is dropped. One the hard rules leave
+ *     to no order (`nobody`) is not parked: no later cue can give it one.
  *
  * With carrying two off, nothing here changes what is filed between ORDERS:
  * whoseDropoff only works out what attribution WOULD have said, over the order
@@ -1415,6 +1504,15 @@ function whoseDropoff(read, force, now) {
   if (d.asked !== false) {
     console.log('dropoff read with two orders in the car, ' + a.why + ': the chooser is open');
     openChooser('scan', d, orders, now);
+  } else if (a.why === 'nobody') {
+    // ...not one an order in the car can own at all: another app's screen, or
+    // a read from before both Tooks. The pool is for an address a LATER cue
+    // may decide, and no cue moves the hard rules — retryUnowned asks the
+    // same two orders the same question — so parked it said "1 dropoff read ·
+    // whose?" until one of them left the car. Measured at f80d0c2: two
+    // DoorDash orders held, an Uber navigation screen read unprompted, and
+    // `unowned: 1` on /api/status for as long as both were carried.
+    console.log('dropoff seen with two orders in the car, nobody\'s: not kept');
   } else {
     console.log('dropoff seen with two orders in the car, ' + a.why + ': waiting for a cue');
     Assemble.park(assembly, d, orders);
@@ -1590,7 +1688,9 @@ function ownPickups(stops, now, page, at) {
  * added, putDownPay}.
  *
  * Carrying two off: the order in the car, as Stage 4 had it — the Took
- * replaces it (and the replaced one is kept as a shadow for `would`).
+ * replaces it (and the replaced one is kept as a shadow for `would`). With
+ * two in the car already, it replaces the first-taken, and the other stays
+ * until its own end: the flag going off never puts down an order it held.
  *
  * Carrying two on:
  *   - an add-on card (Uber's screen `uber.addon`: "+ $", "+N min") is held as
@@ -1608,12 +1708,22 @@ function ownPickups(stops, now, page, at) {
 function placeTook(took, marked, inCar, now) {
   var out = { replaced: null, added: false, putDownPay: null };
   if (!carryTwo()) {
-    var before = inCar[0] || null;
-    if (before && before.id !== took.id) {
+    // The same card again is replaced where it stands; any other Took
+    // replaces the first-taken, with its drop row — and every OTHER order in
+    // the car stays, until its own clock or Drop. With two held and the flag
+    // read off (turned off mid-shift, or two restored from holding.json) this
+    // kept the Took alone: the second order left the car with no row, and
+    // nothing said it had. Measured at f80d0c2: two orders restored at boot,
+    // carrying two off, one Took — holding.json named only the new order and
+    // the journal had a drop row for the first alone.
+    var same = inCar.filter(function (o) { return o.id === took.id; })[0] || null;
+    var before = same ? null : (inCar[0] || null);
+    if (before) {
       out.replaced = before;
       shadows = [before];
     }
-    setHeld([took]);
+    setHeld(same ? inCar.map(function (o) { return o === same ? took : o; })
+      : inCar.filter(function (o) { return o !== before; }).concat([took]));
     return out;
   }
   if (marked.screen === 'uber.addon') {
@@ -1795,6 +1905,14 @@ function dropoffArrived(read, force) {
       // ...and the hold's `fields`, `dropoff` and `dropoffScanned` together;
       // a planner lone dropoff that files clears the planner's 'list'.
       Assemble.file(carrying, read.dropoff, said, assembly);
+      // ...and into holding.json, which it reached only by way of the NucBox
+      // search (armHeldEnd, searchHeldEnd's save) — so with NUCBOX_SEARCH
+      // unset, a ⌖ end the driver pressed for lived in memory alone, and a
+      // restart in the driveway brought the order back with the card's end.
+      // Measured at f80d0c2: a ⌖ end filed and on the panel, holding.json
+      // still holding the card's end, and /api/status saying the card's end
+      // (`from: 'card'`) after a restart.
+      saveHold(carrying);
       // ...and written down, which it was not.
       //
       // This is the case the button EXISTS for. An offer card does not
@@ -2256,6 +2374,24 @@ function pickupNearEnd(h, pin) {
   return picks.some(function (p) {
     return MV.crowMiles(p, pin) * 1609.344 <= PICKUP_GUARD_M;
   });
+}
+
+/* The customer guard: why an order's card does not let the GPS drop arm on
+ * its pinned door, or null when it does. A card for more than one order
+ * ("Drop off 2 orders", a batched Uber trip — scan_pi.says_multi_order) is
+ * one Took and one hold with TWO customers' doors, and the pin is whichever
+ * the ⌖ read: the car stops there and leaves for the second with the order
+ * still half in the car. Measured at f80d0c2: a two-customer DoorDash card
+ * held, its first customer's door pinned, the car stopped there and left, and
+ * a drop row `by: 'gps'` put the order down. Only a card that SAYS one order
+ * arms — `multiOrder: false`, as every offer line from a current scanner
+ * carries — the rule Assemble.dropoff already keeps for a planner's lone
+ * dropoff, and for the reason it gives: a card from a scanner too old to say
+ * is no witness that there is one door. The timer and Drop still end it. */
+function notOneCustomer(h) {
+  var c = h && h.card;
+  if (c && c.multiOrder === false) return null;
+  return c && c.multiOrder === true ? 'two customers' : 'customer count unread';
 }
 
 /* ---------- the held end, searched for by this server --------------------
@@ -2721,7 +2857,7 @@ function stopKey(s) {
   return k ? s.kind + '\n' + k : null;
 }
 
-function plannerVisits(h, stops, now, top) {
+function plannerVisits(h, stops, now, top, heldWas) {
   var keys = stops.map(stopKey);
   var listed = [];
   var orders = heldOrders(now);
@@ -2739,7 +2875,13 @@ function plannerVisits(h, stops, now, top) {
       return k && (e.after || []).indexOf(k) === -1;
     }));
   });
-  saveHold(h);
+  // Written when this read changed the orders — its stops, a pickup's record,
+  // the stops seen after one — and not otherwise. `heldWas` is the list as
+  // text before the caller put this read's stops on the order. It wrote
+  // holding.json on every planner line, and the scanner reads the planner on
+  // its own as often as SCREEN_AUTO_EVERY (rpi/scan_pi.py, 10 s) while an
+  // order is held: the same bytes onto the SD card, over and over.
+  if (JSON.stringify(scanner.held) !== heldWas) saveHold(h);
   if (!top) return;
   var gone = [];
   orders.forEach(function (o) {
@@ -2809,7 +2951,7 @@ function stepAt(arrival, beat, now, pin, arrived) {
 function arriveOne(h, beat, now) {
   var arrival = arrivalOf(holdIdOf(h));
   var pin = heldEndPin(h);
-  if (!pin || pickupNearEnd(h, pin)) return false;
+  if (!pin || pickupNearEnd(h, pin) || notOneCustomer(h)) return false;
   var step = stepAt(arrival, beat, now, pin, !!h.arrivedAt);
   if (step === 'arrive') {
     h.arrivedAt = now;
@@ -2933,15 +3075,16 @@ function timedLikeTheHeldJob(read) {
  * panel's in-car line says it from (live.html, gpsDropSaid): whether a
  * door-level pin is on it, whether the GPS has seen the car arrive there, and,
  * when it is not armed, why — a pin next to one of its pickups (pickupNearEnd),
- * or this server's refusal of the dropoff text it still names (searchHeldEnd).
- * And a fourth, `visited`, the pickups behind the car.
+ * a card that does not say one customer (notOneCustomer), or this server's
+ * refusal of the dropoff text it still names (searchHeldEnd). And a fourth,
+ * `visited`, the pickups behind the car.
  * ONE function, for /api/status, heldForPanel and the beat, so the status link
  * and the panel cannot give two answers about one pin. */
 function heldEndState(h) {
   var pin = heldEndPin(h);
   return { endPinned: !!pin, arrived: !!h.arrivedAt,
            endWhy: pin
-             ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : null)
+             ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : notOneCustomer(h))
              : h.endWhyFor === h.dropoff ? (h.endWhy || null) : null,
            // ...and its pickups the car has called at (visitPickups,
            // plannerVisits), by planner line (MV.pickupKey): the panel's next
@@ -3086,10 +3229,25 @@ function planAtOf(stops, h) {
  *
  * Best-effort. A journal that cannot be written must never stop the panel from
  * answering — the advice is the product, this is the notebook.
+ *
+ * ONE ROW PER PAIRING: the same card against the same order(s) in the car is
+ * one decision, however often it comes back. The scanner keeps a card's id
+ * when the driver pages away from it and back (rpi/journal.py, RECENT_CARDS),
+ * and its return is a new card on the slot here (not `sameCard`), so it was
+ * written again. Measured at f80d0c2: an order held, card A, card B, A paged
+ * back to — pair rows A, B, A, and the offers page listed three pairings for
+ * two. Kept in memory for the last PAIRED_MAX pairings, as process memory
+ * like the slot: a restart may write one twice.
  */
+var PAIRED_MAX = 32;
+var paired = [];
+
 function recordPairing(offer, now, reading) {
   var held = holding(now);
   if (!held || !offer || typeof offer.id !== 'string') return;
+  var pairKey = pairedWith(now, held).map(holdIdOf).join(' ') + '\n' + offer.id;
+  if (paired.indexOf(pairKey) !== -1) return;
+  paired = paired.concat([pairKey]).slice(-PAIRED_MAX);
   // The driver's money, off the READING — not off the offer line.
   //
   // The offer line is what scan_pi.emit_offer() prints, and it has never
@@ -3820,12 +3978,21 @@ var latestCache = null;
  * only if EVERY reading of it is older than the floor and none of them predates
  * the clock. Everything else stays:
  *
- *   - every row with a `kind`, without exception. A rule written months ago
+ *   - every `mark` and `rule`, whenever written. A rule written months ago
  *     hides a card scanned today (see the rule fold below); a mark written
- *     today changes a card scanned months ago; `seen` and `pairs` ride on the
- *     folded array as properties and the page reads them whole. Kinds this
- *     build has never heard of are kept too — a newer writer's rows are not
- *     this reader's to discard.
+ *     today changes a card scanned months ago.
+ *   - every `seen` and `pair` at or after the floor. They ride on the folded
+ *     array as properties, and both callers count them only at or after their
+ *     own floor (/api/journal's `watched` and its pairings; shiftSummary reads
+ *     neither). Before, they were kept from the whole file, as was every other
+ *     kind — screen, sighting, drop, visit, planner and kinds this build has
+ *     never heard of — which the fold skips without reading ("something newer
+ *     than this reader"): it reads mark, rule, seen and pair and nothing else,
+ *     so a kind row it skips changes no answer. Measured at f80d0c2 on a
+ *     synthetic 22 MB journal (rows from rpi/journal.py's own writer over the
+ *     corpus texts, kind rows in the shapes this server writes), today's
+ *     window kept all 11,404 kind rows in the file; it keeps 489 now, and the
+ *     fold answers the same, offer for offer.
  *   - every reading of a card any of whose readings is in the window. Splitting
  *     one card's readings across the floor would change bestReading's vote, and
  *     so the pay, minutes, miles and $/hr reported for it, depending on which
@@ -3846,42 +4013,123 @@ var latestCache = null;
  * set built over the whole file, so a windowed set stops recognising rows it
  * has already stored and appends them again on every sync tick. The header of
  * readJournal above records what a short set did last time: 60 duplicate rows,
- * `ok: true`, and a `have` that was wrong. See AUDITS.md. */
-function rowsFor(rows, floor) {
-  if (!floor) return rows;
-  var wanted = Object.create(null);
-  var inRange = function (r) {
-    var at = (typeof r.at === 'number' && isFinite(r.at)) ? r.at : 0;
-    return at >= floor || at < CLOCK_BELIEVABLE_AFTER;
-  };
+ * `ok: true`, and a `have` that was wrong. See AUDITS.md.
+ *
+ * CARRIED FORWARD ACROSS APPENDS. readJournal's new array after an append is
+ * the old one's rows, the same objects, with the new ones after; so the window
+ * worked out over the first `n` rows stands, and only the rows after it are
+ * looked at. Walking the whole file again on each append is what made
+ * /api/today's cost grow with the journal: measured at f80d0c2 on synthetic
+ * journals, this function alone took a median of 4.5 ms after each append at
+ * 22 MB and 10.6 ms at 50 MB (0.01 ms now), and /api/today 4.3 ms and 7.5 ms
+ * (1.8 ms and 2.5 ms now).
+ * Worked out afresh when the array is not that one grown (the file rewritten,
+ * a half-written last line read again, a window not kept) and when an
+ * appended reading puts in the window a card whose earlier readings it had
+ * left out — those must come back in at their own places in the file. */
+var WINDOWS_MAX = 3;
+var windows = [];
+
+function inWindow(r, floor) {
+  var at = (typeof r.at === 'number' && isFinite(r.at)) ? r.at : 0;
+  return at >= floor || at < CLOCK_BELIEVABLE_AFTER;
+}
+
+// A kind row the fold reads, for this floor: see above.
+function foldReads(r, floor) {
+  if (r.kind === 'mark' || r.kind === 'rule') return true;
+  return (r.kind === 'seen' || r.kind === 'pair') && (r.at || 0) >= floor;
+}
+
+/* One row onto a window: kept or not, and false when the window cannot take
+ * it without being worked out again. */
+function windowTakes(w, r) {
+  if (r.kind) {
+    if (foldReads(r, w.floor)) w.out.push(r);
+    return true;
+  }
+  if (!r.id) {
+    if (inWindow(r, w.floor)) w.out.push(r);
+    return true;
+  }
+  if (w.wanted.has(r.id)) { w.out.push(r); return true; }
+  if (!inWindow(r, w.floor)) { w.dropped.add(r.id); return true; }
+  if (w.dropped.has(r.id)) return false;
+  w.wanted.add(r.id);
+  w.out.push(r);
+  return true;
+}
+
+function windowOver(rows, floor) {
+  var w = { floor: floor, rows: rows, n: rows.length, out: [], wanted: new Set(),
+            dropped: new Set() };
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
-    if (!r.kind && r.id && inRange(r)) wanted[r.id] = true;
+    if (!r.kind && r.id && inWindow(r, floor)) w.wanted.add(r.id);
   }
-  var out = [];
-  for (var j = 0; j < rows.length; j++) {
-    var row = rows[j];
-    if (row.kind) { out.push(row); continue; }
-    if (row.id) { if (wanted[row.id]) out.push(row); continue; }
-    if (inRange(row)) out.push(row);
+  for (var j = 0; j < rows.length; j++) windowTakes(w, rows[j]);
+  return w;
+}
+
+function rowsFor(rows, floor) {
+  if (!floor) return rows;
+  var w = null;
+  windows = windows.filter(function (x) {
+    if (x.floor === floor) w = x;
+    return x.floor !== floor;
+  });
+  var grown = w && w.n > 0 && rows.length >= w.n && rows[0] === w.rows[0]
+    && rows[w.n - 1] === w.rows[w.n - 1];
+  if (grown) {
+    for (var i = w.n; i < rows.length; i++) {
+      if (!windowTakes(w, rows[i])) { grown = false; break; }
+    }
   }
-  return out;
+  if (grown) {
+    w.rows = rows;
+    w.n = rows.length;
+  } else {
+    w = windowOver(rows, floor);
+  }
+  windows.push(w);
+  if (windows.length > WINDOWS_MAX) windows.shift();
+  // The window's own array, which the next append grows in place: the fold
+  // reads it once, synchronously, and keeps nothing of it.
+  return w.out;
 }
 
 /* Keyed on the floor as well as the array, because rowsFor builds a new array
-   every time and a cache keyed on identity alone would never hit again. One
-   entry per floor, all thrown away together the moment the file changes: the
-   floors in play are a driving screen's `since`, a page's window and All, so
-   the map stays small on its own without a policy for trimming it. */
+   every time and a cache keyed on identity alone would never hit again. All
+   thrown away together the moment the file changes.
+
+   THE FLOOR TO THE DAY, AND THREE OF THEM. /api/journal?days= asks from
+   `now - days`, a floor that moves every millisecond, so every load folded
+   afresh and kept its answer beside the last one's for as long as the file did
+   not change: measured at f80d0c2, RSS 181 MB to 393 MB over 31 days=30 loads
+   of a synthetic 22 MB journal (172 to 178 MB now). The fold now runs from
+   local midnight on or before the floor asked for — a window that holds every
+   row the exact one does, and both callers keep only what is at or after
+   their own floor (shiftSummary, /api/journal) — and the last WINDOWS_MAX
+   answers are kept. */
+function dayFloor(floor) {
+  if (!floor) return 0;
+  var d = new Date(floor);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 function latestPerOffer(rows, floor) {
-  floor = floor || 0;
+  var key = dayFloor(floor || 0);
   if (!latestCache || latestCache.rows !== rows || latestCache.n !== rows.length) {
-    latestCache = { rows: rows, n: rows.length, byFloor: Object.create(null) };
+    latestCache = { rows: rows, n: rows.length, byFloor: [] };
   }
-  if (!(floor in latestCache.byFloor)) {
-    latestCache.byFloor[floor] = latestPerOfferUncached(rowsFor(rows, floor));
+  var hit = latestCache.byFloor.filter(function (e) { return e.floor === key; })[0];
+  if (!hit) {
+    hit = { floor: key, offers: latestPerOfferUncached(rowsFor(rows, key)) };
+    latestCache.byFloor.push(hit);
+    if (latestCache.byFloor.length > WINDOWS_MAX) latestCache.byFloor.shift();
   }
-  return latestCache.byFloor[floor];
+  return hit.offers;
 }
 
 function latestPerOfferUncached(rows) {
@@ -6233,6 +6481,34 @@ function handler(req, res) {
  * every mark already in a journal was written without it. */
 var MARK_VIA = ['panel', 'offers', 'review'];
 
+/* ...and which of them may put an order in the car or take one out: the
+ * driving panel's Took, and a page old enough to send no `via`. The offers
+ * page's ✓ and Close the shift's Took and Passed are answers about a card for
+ * the record — a REVIEW of the shift, made parked or at home — and the mark
+ * row is all they write. Before this either of them, ticking the card still on
+ * the slot, put it in the car: measured at f80d0c2, an order delivered and
+ * Drop pressed, then Close the shift's Took on the next card, and /api/status
+ * held it; and an offers-page ✓ on the card of the order already in the car
+ * rebuilt that order from its card, its ⌖ end gone back to the card's. */
+function marksTheHold(via) {
+  return via === undefined || via === 'panel';
+}
+
+/* When the card a Took names came onto the slot: offerAt while it is still
+ * the card there, else the time kept for it in scanner.offerAts, else null.
+ * A ✓ Took from a panel that has fallen behind names the card BEFORE the one
+ * on the slot (the mark handler's `offered` copy), and was dated from the
+ * newer card's offerAt — so its clock (holdEnds) started at a card it was not.
+ * Measured at f80d0c2: a card up for 3.0 s before the next, then Took on it,
+ * and the order said it had been held 11 ms. */
+var OFFER_ATS_MAX = 8;
+
+function cardArrivedAt(id) {
+  if (scanner.offer && scanner.offer.id === id && scanner.offerAt) return scanner.offerAt;
+  var hit = scanner.offerAts.filter(function (c) { return c.id === id; })[0];
+  return hit ? hit.at : null;
+}
+
 /* --- the NucBox's map services: a search and a router, at home -------------
  *
  * The NucBox runs Nominatim (Georgia) and OSRM (car profile, Georgia) behind
@@ -6319,10 +6595,38 @@ var NBX_LIMIT = 10;
 // room for a whole bracketed address and nothing a page of this rig sends.
 var NBX_TERM_MAX = 120;
 
+/* ...and by SIZE as well as by count. A route with the road's shape is up to
+ * NBX_LINE_MAX points, and 500 of those are not a small cache: measured at
+ * f80d0c2, 500 routes of 5,000 points each (103,959 bytes an answer) through
+ * /api/nbx/route left 185.5 MB of heap in use after a full collection, from
+ * 6.6 MB, on a Pi that shares its memory with the camera, OpenCV and
+ * Tesseract. NBX_CACHE_BYTES bounds the answers' size as JSON (what each is
+ * sent as), oldest out first; an answer bigger than all of it is sent and not
+ * kept. 8 MB is chosen, not measured against a need: 80 of the largest
+ * routes, or every search a shift asks; the same 500 routes leave 35.8 MB
+ * (the objects weigh more than their JSON). NUCBOX_CACHE_BYTES moves it (the
+ * suite does). */
+var NBX_CACHE_BYTES = envNumber('NUCBOX_CACHE_BYTES', 8 * 1024 * 1024);
+var nbxCacheBytes = 0;
+var nbxSizes = new Map();
+
 function nbxRemember(key, value) {
-  nbxCache.delete(key);
+  var size = Buffer.byteLength(JSON.stringify(value));
+  if (nbxCache.has(key)) {
+    nbxCacheBytes -= nbxSizes.get(key) || 0;
+    nbxCache.delete(key);
+    nbxSizes.delete(key);
+  }
+  if (size > NBX_CACHE_BYTES) return;
   nbxCache.set(key, value);
-  while (nbxCache.size > NBX_CACHE_MAX) nbxCache.delete(nbxCache.keys().next().value);
+  nbxSizes.set(key, size);
+  nbxCacheBytes += size;
+  while (nbxCache.size > NBX_CACHE_MAX || nbxCacheBytes > NBX_CACHE_BYTES) {
+    var oldest = nbxCache.keys().next().value;
+    nbxCacheBytes -= nbxSizes.get(oldest) || 0;
+    nbxCache.delete(oldest);
+    nbxSizes.delete(oldest);
+  }
 }
 
 /* One question to the NucBox. `done(err, parsedJson)`; `err` is always a
@@ -6832,7 +7136,9 @@ function route(req, res) {
         var marked = null;
         var offered = body.offer && typeof body.offer === 'object'
             && body.offer.id === note.id && typeof note.id === 'string';
-        if (note.kind === 'mark' && note.accepted !== undefined) {
+        // ...from the driving panel only (marksTheHold): a review tick is the
+        // mark row above and nothing else — the slot and the car untouched.
+        if (note.kind === 'mark' && note.accepted !== undefined && marksTheHold(note.via)) {
           if (scanner.offer && scanner.offer.id === note.id) {
             marked = scanner.offer;
           } else if (offered && !scanner.offer) {
@@ -6882,6 +7188,11 @@ function route(req, res) {
             // ADDED, and only a re-offer or a Took past MAX_HELD puts one
             // down, said the same way (placeTook).
             var tookAt = Date.now();
+            // When its card came onto the slot — this card's, not the slot's
+            // (cardArrivedAt): see `acceptedAt` below. One no longer kept
+            // came before the card on the slot, so that card's offerAt is the
+            // nearest bound on it, as it was before.
+            var cardAt = cardArrivedAt(marked.id) || scanner.offerAt || tookAt;
             var took = asHold({
               id: marked.id,
               pay: marked.pay,
@@ -6938,8 +7249,9 @@ function route(req, res) {
               // press would then stack the morning's first offer onto a
               // job finished at midnight. Dated from the card, holding()
               // expires it on the card's own clock, which for a prompt
-              // press is the same moment.
-              acceptedAt: scanner.offerAt || Date.now(),
+              // press is the same moment. THIS card's: a Took from a panel
+              // behind the slot names the card before it (cardArrivedAt).
+              acceptedAt: cardAt,
               // ...and where the car was when its card came up, with the
               // card's own size: what live.html's Map view checks this
               // order's end against. See cardOf.
@@ -6951,7 +7263,7 @@ function route(req, res) {
               // Where each of its ends came from, and when: the assembler's
               // record (Assemble.cardFields), kept beside `dropoff` and
               // `dropoffScanned` above, which it keeps in step.
-              fields: Assemble.cardFields(marked, scanner.offerAt || Date.now()),
+              fields: Assemble.cardFields(marked, cardAt),
               // ...and the list's own fields (see MAX_HELD): which app, the
               // press, the card's deadline. A scanner older than the offer
               // line's `app` and `deliverBy` leaves them null.

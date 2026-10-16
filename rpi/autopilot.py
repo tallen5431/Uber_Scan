@@ -150,10 +150,14 @@ def aim(as_json, port, timeout, min_card=None):
 
     floor = min_card or MIN_CARD_PIXELS
     good = 0
-    started = time.time()
-    last_report = 0
+    # Both are intervals, so the monotonic clock: a Pi with no real-time clock
+    # is aiming in 1970 until NTP steps it forward, and on the wall clock that
+    # step ended the wait for a good frame at once — "gave up waiting" — with
+    # the person still moving the mount (rpi/test_autopilot.py).
+    started = time.monotonic()
+    last_report = None
     try:
-        while time.time() - started < timeout:
+        while time.monotonic() - started < timeout:
             drawn = CX.take_request()
             if drawn is not None:
                 emit({'phase': 'aim', 'message': 'box drawn by hand — calibrating on it'},
@@ -190,8 +194,8 @@ def aim(as_json, port, timeout, min_card=None):
             ok = bool(card_px and card_px >= floor and sharp and sharp >= PV.SHARP_FLOOR)
             good = good + 1 if ok else 0
 
-            now = time.time()
-            if now - last_report > 2:
+            now = time.monotonic()
+            if last_report is None or now - last_report > 2:
                 last_report = now
                 emit({'phase': 'aim', 'cardPixels': card_px, 'sharpness': round(sharp) if sharp else None,
                       'stable': good, 'need': STABLE_READINGS, 'spill': spill,

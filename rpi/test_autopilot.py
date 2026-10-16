@@ -244,6 +244,81 @@ line = [ln for ln in server.split('\n') if 'phase:' in ln and '//' in ln]
 ok_('the server documents the same vocabulary',
     line and all(name in line[0] for name in emitted))
 
+
+# --- aiming waits out its timeout however the wall clock steps ----------------
+# aim()'s wait is an interval, and a Pi with no real-time clock aims in 1970
+# until NTP steps its wall clock forward. On the wall clock that step ended the
+# wait on the next frame — "gave up waiting for a good frame" — with the person
+# still moving the mount. The real aim(), over a still of an empty mount (no
+# phone, so it never comes good), with the camera module stubbed and only the
+# wall half of the clock stepped, three frames in.
+try:
+    import cv2 as _cv2
+    import numpy as _np
+except ImportError:                                      # pragma: no cover
+    _np = None
+if _np is not None:
+    _was_cam = sys.modules.get('camera')
+    _stub = type(sys)('camera')
+
+    class _Busy(Exception):
+        pass
+
+    _stub.CameraBusy = _Busy
+    sys.modules['camera'] = _stub
+    import handoff as _HO                                # noqa: E402
+    import preview as _PV                                # noqa: E402
+    _aim_dir = tempfile.mkdtemp()
+    _still = os.path.join(_aim_dir, 'mount.png')
+    _cv2.imwrite(_still, _np.full((240, 320, 3), 20, _np.uint8))
+    _frames = [0]
+    _RealSource = _PV.Source
+
+    class _StillSource(_RealSource):
+        def frame(self):
+            _frames[0] += 1
+            if _frames[0] == 3:
+                _wall.step = 3600.0
+            return _RealSource.frame(self)
+
+    import time as _time
+
+    class _Wall(type(sys)):
+        step = 0.0
+
+        def __getattr__(self, name):
+            return getattr(_time, name)
+
+        def time(self):
+            return _time.time() + self.step
+
+        def sleep(self, s):
+            _time.sleep(0.005)
+
+    _wall = _Wall('time')
+    _was = (AP.time, AP.SNAPSHOT, AP.emit, _PV.Source, os.environ.get(_HO.ENV_DIR))
+    AP.time, AP.SNAPSHOT = _wall, os.path.join(_aim_dir, 'live.jpg')
+    AP.emit = lambda payload, as_json: None
+    _PV.Source = lambda: _StillSource(image=_still)
+    os.environ[_HO.ENV_DIR] = _aim_dir
+    try:
+        _t0 = _time.monotonic()
+        _got = AP.aim(False, 0, 1.0)
+        _took = _time.monotonic() - _t0
+    finally:
+        AP.time, AP.SNAPSHOT, AP.emit, _PV.Source = _was[:4]
+        if _was[4] is None:
+            os.environ.pop(_HO.ENV_DIR, None)
+        else:
+            os.environ[_HO.ENV_DIR] = _was[4]
+        if _was_cam is None:
+            sys.modules.pop('camera', None)
+        else:
+            sys.modules['camera'] = _was_cam
+    ok_('aiming waits out its timeout however the wall clock steps (%d frames, %.2f s '
+        'of a 1.0 s timeout)' % (_frames[0], _took), _took >= 0.95 and _frames[0] > 5)
+    eq('...and an empty mount still never comes good', _got, (None, None))
+
 shutil.rmtree(work, ignore_errors=True)
 
 

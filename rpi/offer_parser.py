@@ -641,9 +641,17 @@ PLACE_MERCHANT = re.compile(r'^(.{2,44}?\([^)]{2,40}\))\s*(.{4,})$', ASCII)
 #
 # Capitalised words only, and at most four each side, so this anchors on a
 # street name rather than on the first ampersand in a line of icon-row sludge.
+#
+# Not from a capital with another capital before it (`(?<![A-Z])`): a match
+# from there is a match from the capital before it too, the same to its right,
+# and the leftmost is the one finditer gives, so no seam moves. What it saves is
+# a run of capitals with no ampersand after it, which was tried from every
+# letter and re-read to its end each time: n²/2, 0.24 s on 4,000 "S"s measured
+# here. A run of mixed case ("lIlI…") still costs that; nothing cheaper is
+# exact, and only a piece already over MAX_PLACE is asked.
 PLACE_WORD_CAP = r"[A-Z][A-Za-z'.]*"
 PLACE_JUNCTION_AT = re.compile(
-    r'(?:%s\s+){0,3}%s\s*&\s*(?:%s\s+){0,3}%s'
+    r'(?<![A-Z])(?:%s\s+){0,3}%s\s*&\s*(?:%s\s+){0,3}%s'
     % (PLACE_WORD_CAP, PLACE_WORD_CAP, PLACE_WORD_CAP, PLACE_WORD_CAP), ASCII)
 
 # ...and an address ends at its town. Nothing on the card marks the end of one,
@@ -2325,8 +2333,23 @@ STATES = set((
 # TOWN is the town's own words, named so the Trip Planner's "Marietta, GA" line
 # (see PLANNER_TOWN) is held to the same idea of a town as this.
 TOWN = r'[A-Za-z][A-Za-z.\'’-]*(?:\s+[A-Za-z][A-Za-z.\'’-]*){0,3}'
+# ...and only where a word begins. Without the lookbehind every letter of a run
+# was a start: TOWN ran to the end of the run, found no comma, and gave the run
+# back one letter at a time, so a run of n letters cost n²/2 — measured on this
+# machine, 1.71 s for ADDRESS over 8,000 "l"s, and nearly 0.5 s for each of the
+# four calls the scanner makes per read on 4 kB of them; a striped texture reads
+# as exactly that. A town found starting inside a run of letters is found from
+# the run's first letter first, the same span to its right, and finditer takes
+# the leftmost — so no match moves, with one exception it cannot see: a ZIP
+# whose last character read as a letter (DC) with the next town glued straight
+# onto it, where finditer used to start the second address at that town's
+# first letter. No text on file is that shape: the matches are the same over
+# 17,970 texts (the corpus, the 12 Oct shift's journal and unparsed reads, and
+# 5,000 of them mutated), and so is every answer offer-parser.js gives on them
+# and on their 199,638 lines, where the same lookbehind went in. The time is
+# held by rpi/test_parser.py ("the parser reads a 4 kB letter run …").
 ADDRESS = re.compile(
-    r'(' + TOWN + r')'
+    r'(?<![A-Za-z])(' + TOWN + r')'
     r'\s*,\s*([A-Za-z]{2})\s+(' + ZIP + r')(?:\s*-\s*' + DC + r'{4})?(?!\d)',
     ASCII)
 
@@ -3102,10 +3125,25 @@ def planner_ends(text):
 
     A headless page (_planner_headless) shows the list's foot and not its
     head: (False, True), so a list stitched from a page with the title over
-    it and this one under it is bounded, as one with a header on each is."""
+    it and this one under it is bounded, as one with a header on each is.
+
+    A HEADER THE READER LOST: (False, False), whatever is at the two ends. A
+    block holding two "Expected by" lines is two stops under one header — the
+    second's header went to OCR, and with it the stop: find_planner files that
+    stop's time and address under the one above (or, above its second time,
+    under nobody). Both ends were on the glass and the list between them was
+    not read whole, so the one dropoff left could be another customer's door:
+    on a trip of two dropoffs whose first header was lost, the page read as
+    bounded with ONE dropoff, the second customer's, and plannerDestination
+    filed it. Invented streets, the shape in tests/fixtures/cases.json ("a
+    dropoff header the reader lost …")."""
     lines, heads = _planner_lines(text)
     if not heads:
         return False, _planner_headless(lines) is not None
+    for k, at in enumerate(heads):
+        block = lines[at + 1:heads[k + 1] if k + 1 < len(heads) else len(lines)]
+        if sum(1 for l in block if PLANNER_EXPECTED.search(l)) > 1:
+            return False, False
     titles = [i for i in range(heads[0]) if PLANNER_TITLE.match(lines[i])]
     top = bool(titles) and not any(re.search(r'[A-Za-z]{2}', l)
                                    for l in lines[titles[-1] + 1:heads[0]])
@@ -3157,9 +3195,15 @@ SHEET_NUMBER = re.compile(r'^[1-9]\d{0,5} ', ASCII)
 SHEET_STREET_END = re.compile(
     r'\b(?:' + STREET_SUFFIX + r')\b\.?(?:\s+(?:NW|NE|SW|SE|N|S|E|W)\b)?',
     re.IGNORECASE | ASCII)
-SHEET_NAME = re.compile(r"^\W{0,3}[A-Z][A-Za-z'’-]+ [A-Z]\.?(?:\s|$)")
+# ASCII, as every pattern the two ports share is (see the README's note on the
+# corpus): without it `\W` here was Unicode's, which takes an accented letter
+# for a word character, so a mark the reader turned into "é" in front of the
+# name refused the sheet on the rig and the browser read it. tests/fixtures/
+# cases.json `sheets` has the case; SHEET_TOWN_WORDS asks nothing the flag
+# changes and carries it so that no pattern here is the odd one out.
+SHEET_NAME = re.compile(r"^\W{0,3}[A-Z][A-Za-z'’-]+ [A-Z]\.?(?:\s|$)", ASCII)
 SHEET_CAPS_JUNK = re.compile(r'^(?:[A-Z]{1,2}\s+)+(?=[A-Z][a-z])', ASCII)
-SHEET_TOWN_WORDS = re.compile(r"^[A-Z][a-z'’.-]+(?: [A-Z][a-z'’.-]+){0,3}$")
+SHEET_TOWN_WORDS = re.compile(r"^[A-Z][a-z'’.-]+(?: [A-Z][a-z'’.-]+){0,3}$", ASCII)
 # How far above "Dropoff type" the street may sit, in lines. On the 12 Oct
 # sheets that read a name, a street and a town it sat 2 to 7 lines above (the
 # town line, "House" and the reader's marks between); 8 is that and one more,
@@ -3305,7 +3349,12 @@ POPUP_PICKUP = re.compile(r'^[^A-Za-z]{0,3}' + POPUP_ICON + r'pick ?-?up from\b'
 POPUP_DROPOFF = re.compile(r'^[^A-Za-z]{0,3}' + POPUP_ICON
                            + r'(?:custom[ea]r(?: ?drop ?-?off)?|drop ?-?off'
                            r'|deliver(?:ing)? to)\b', re.IGNORECASE | ASCII)
-POPUP_STATE_ZIP = re.compile(r'^\s*,?\s*([A-Za-z]{2})\s+(\S{5})(?![0-9A-Za-z])', ASCII)
+# The space before the state is `\s*(?:,\s*)?`, which is the `\s*,?\s*` it was
+# with the two runs of space no longer able to share one stretch between them:
+# the same lines match, at the same places, and a long run of spaces with no
+# state after it is given back once rather than split every way (n²/2, 0.12 s
+# on 4,000 spaces, measured here).
+POPUP_STATE_ZIP = re.compile(r'^\s*(?:,\s*)?([A-Za-z]{2})\s+(\S{5})(?![0-9A-Za-z])', ASCII)
 POPUP_NAME_JUNK = re.compile(r'(?:\s+(?:[a-z]{1,2}|[^A-Za-z0-9\s]+))+$', ASCII)
 # How far below the role line the street may sit, and how far above
 # "Directions", in lines. Measured on the five sheets: the street 2 to 3 lines
@@ -3747,9 +3796,19 @@ def _labelled_pickup(text, place):
 # `f` or map texture: a name starts at the first capitalised word among the
 # line's first four, and where there is none, a short token holding no letter,
 # or one letter alone, in the first three is cut with everything before it.
+#
+# Asked only whether a line is a street, never where, so two of its four arms
+# are anchored for time and not for meaning. "A comma with a street word after
+# it" is true of some comma exactly when it is true of the first, so that arm
+# starts at the first comma (`^[^,]*`) rather than at every one: on a line of
+# "1,1,1,…" each comma re-read the rest of the line, n²/2 — 0.70 s of
+# find_stores on 4 kB of it, measured here. And a run of dots is tried from its
+# first dot only (`(?<!\.)`), which a run ending the line matches whenever a
+# later dot of it would. The answer on every line of the corpus and the shift's
+# texts is unchanged (rpi/test_parser.py, "find_stores reads a 4 kB …").
 STORE_STREET = re.compile(
     r'^\W{0,4}\d{1,6}\s+[A-Za-z].*(?:' + PLACE_STREET.pattern + r'|,|\.\.)'
-    r'|(?:\.{2,}|…)\s*$|,.*' + PLACE_STREET.pattern + r'|'
+    r'|(?:(?<!\.)\.{2,}|…)\s*$|^[^,]*,.*' + PLACE_STREET.pattern + r'|'
     + PLACE_STREET.pattern + r'.*,', re.IGNORECASE | ASCII)
 STORE_END = re.compile(r'custom[ea]r\s*drop|multiple\s*drop|\baccept\b|\bdecline\b',
                        re.IGNORECASE | ASCII)
@@ -3761,8 +3820,14 @@ STORES_LINE = re.compile(
 
 
 def _store_name(line):
-    """A store line without the icon in front of it, or '' if no name is left."""
-    words = line.split()
+    """A store line without the icon in front of it, or '' if no name is left.
+
+    Split on WHITESPACE, the union of what the two languages call a space, and
+    not on str.split()'s idea of one: that splits on U+001C-U+001F and U+0085,
+    which JavaScript's \\s does not, and not on U+FEFF, which it does, so the
+    two ports stored "Fable Grill" against "Fable\\x1cGrill" off one card
+    (tests/fixtures/cases.json `places`). See normalize()."""
+    words = [w for w in WHITESPACE.split(line) if w]
     cut = next((i for i, w in enumerate(words[:4])
                 if re.match(r'[A-Z]\S*[A-Za-z]', w)), None)
     if cut is None:
@@ -3776,6 +3841,11 @@ def _store_name(line):
         words.pop()
     name = ' '.join(words)
     return name if re.search(r'[A-Za-z]{2}', name) else ''
+
+
+# A line's space at either end, as WHITESPACE has it — the strip that goes with
+# _store_name's split, for the same reason.
+_STORE_EDGES = re.compile(r'^%s|%s\Z' % (WHITESPACE.pattern, WHITESPACE.pattern))
 
 
 def find_stores(raw_text):
@@ -3805,7 +3875,7 @@ def find_stores(raw_text):
             continue
         # A name the card wrapped onto a second line — `Freddy's Frozen
         # Custard &` / `Steakburgers` — starts with a letter and no icon.
-        if len(pending) == 1 and name == line.strip():
+        if len(pending) == 1 and name == _STORE_EDGES.sub('', line):
             pending.append(name)
         else:
             pending = [name]
