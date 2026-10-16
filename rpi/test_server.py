@@ -8231,6 +8231,78 @@ finally:
     _q7.stop()
     _q7.gone()
 
+# --- a tick for the record is not a Took --------------------------------------
+#
+# The offers page's ✓ and Close the shift's Took and Passed answer for a card
+# after the fact (via 'offers', 'review'); only the driving panel's Took (via
+# 'panel', or no via from a page older than the field) puts an order in the car
+# or takes one out. A review tick of the card still on the slot used to do
+# both.
+for _carry in (False, True):
+    _q8 = _Q(carry=_carry)
+    try:
+        _q8.card('A', 12.0, 30, 'uber')
+        _q8.took('A')
+        post(_q8.base, '/api/delivered', {})
+        _q8.card('B', 9.0, 25, 'doordash')
+        _r8 = _q8.took('B', via='review')
+        _settle(0.2)
+        eq('a review tick of the card on the slot puts nothing in the car%s'
+           % (' (carrying two)' if _carry else ''),
+           (_r8.get('holding'), _q8.status().get('holding'),
+            [(r.get('id'), r.get('via')) for r in _q8.rows('mark')]),
+           (False, None, [('A', 'panel'), ('B', 'review')]))
+    finally:
+        _q8.stop()
+        _q8.gone()
+
+    _q9 = _Q(carry=_carry)
+    try:
+        _q9.card('A', 12.0, 60, 'uber', dropoff='Birch Ln & Alder Ct, Kennesaw')
+        _q9.took('A')
+        _settle(0.1)
+        _q9.emit({'dropoff': dict(_PRESSED, at=int(time.time() * 1000))})
+        _settle()
+        _q9.took('A', via='offers')
+        _h9 = _q9.status().get('holding') or {}
+        eq('...nor rebuilds the order in the car%s' % (' (carrying two)' if _carry else ''),
+           (_h9.get('dropoff'), ((_h9.get('fields') or {}).get('dropoff') or {}).get('from'),
+            [r.get('by') for r in _q9.rows('drop')]),
+           (_PRESSED['line'], 'press', []))
+        post(_q9.base, '/api/offers/mark', {'id': 'A', 'accepted': None, 'via': 'offers'})
+        _settle(0.1)
+        eq('...and an offers-page Undo of it does not put it down%s'
+           % (' (carrying two)' if _carry else ''),
+           (str((_q9.status().get('holding') or {}).get('holdId')).split('@')[0],
+            _q9.rows('drop')), ('A', []))
+    finally:
+        _q9.stop()
+        _q9.gone()
+
+# --- a Took from a panel behind the slot --------------------------------------
+#
+# The panel still shows card X when the slot has moved on to Y (its socket
+# dropped and came back; /api/events replays readings, never the offer), and
+# the driver ticks X: the order goes in the car from the panel's copy of X, and
+# its clock starts when X came up, not when Y did.
+_q10 = _Q(carry=False)
+try:
+    _x10 = _q10.card('X', 12.0, 30, 'uber')
+    _xat = int(time.time() * 1000)
+    time.sleep(1.5)
+    _q10.card('Y', 8.0, 20, 'uber')
+    _q10.took('X', offer=_x10)
+    _h10 = _q10.status().get('holding') or {}
+    _id10, _at10 = (str(_h10.get('holdId') or 'none@0').split('@') + ['0'])[:2]
+    ok_('Took for the previous card dates the order from that card (%r ms before the Took)'
+        % _h10.get('heldMs'),
+        _id10 == 'X' and abs(int(_at10) - _xat) < 400 and (_h10.get('heldMs') or 0) >= 1400)
+    eq('...and the card on the slot is still the newer one',
+       (_q10.status().get('offer') or {}).get('id'), 'Y')
+finally:
+    _q10.stop()
+    _q10.gone()
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

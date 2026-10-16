@@ -178,6 +178,11 @@ var scanner = {
   // card came onto the slot and does not move while it is re-read. What a
   // customer's place popup is held to (popupArrived).
   offerSeenAt: null,
+  // ...and offerAt for the cards on the slot before it, newest last, as
+  // {id, at}: what a ✓ Took from a panel that has fallen behind dates its
+  // order from (cardArrivedAt). As many as rpi/journal.py keeps ids for
+  // (RECENT_CARDS, 8).
+  offerAts: [],
   // The orders being carried, first-taken first: a LIST, capped at MAX_HELD.
   // Read through heldOrders() and holding(), never directly. See holding().
   held: [],
@@ -500,7 +505,12 @@ function startScanner() {
             read.offer.heldCard = holdIdOf(carriedNow);
           }
           scanner.offer = read.offer;
-          if (!sameCard) scanner.offerAt = Date.now();
+          if (!sameCard) {
+            scanner.offerAt = Date.now();
+            scanner.offerAts = scanner.offerAts.filter(function (c) {
+              return c.id !== read.offer.id;
+            }).concat([{ id: read.offer.id, at: scanner.offerAt }]).slice(-OFFER_ATS_MAX);
+          }
           scanner.offerSeenAt = Date.now();
           // ...and the Trip Planner a press read goes, as it goes off the
           // panel at this moment. See forgetPlanner.
@@ -6286,6 +6296,34 @@ function handler(req, res) {
  * every mark already in a journal was written without it. */
 var MARK_VIA = ['panel', 'offers', 'review'];
 
+/* ...and which of them may put an order in the car or take one out: the
+ * driving panel's Took, and a page old enough to send no `via`. The offers
+ * page's ✓ and Close the shift's Took and Passed are answers about a card for
+ * the record — a REVIEW of the shift, made parked or at home — and the mark
+ * row is all they write. Before this either of them, ticking the card still on
+ * the slot, put it in the car: measured at f80d0c2, an order delivered and
+ * Drop pressed, then Close the shift's Took on the next card, and /api/status
+ * held it; and an offers-page ✓ on the card of the order already in the car
+ * rebuilt that order from its card, its ⌖ end gone back to the card's. */
+function marksTheHold(via) {
+  return via === undefined || via === 'panel';
+}
+
+/* When the card a Took names came onto the slot: offerAt while it is still
+ * the card there, else the time kept for it in scanner.offerAts, else null.
+ * A ✓ Took from a panel that has fallen behind names the card BEFORE the one
+ * on the slot (the mark handler's `offered` copy), and was dated from the
+ * newer card's offerAt — so its clock (holdEnds) started at a card it was not.
+ * Measured at f80d0c2: a card up for 3.0 s before the next, then Took on it,
+ * and the order said it had been held 11 ms. */
+var OFFER_ATS_MAX = 8;
+
+function cardArrivedAt(id) {
+  if (scanner.offer && scanner.offer.id === id && scanner.offerAt) return scanner.offerAt;
+  var hit = scanner.offerAts.filter(function (c) { return c.id === id; })[0];
+  return hit ? hit.at : null;
+}
+
 /* --- the NucBox's map services: a search and a router, at home -------------
  *
  * The NucBox runs Nominatim (Georgia) and OSRM (car profile, Georgia) behind
@@ -6885,7 +6923,9 @@ function route(req, res) {
         var marked = null;
         var offered = body.offer && typeof body.offer === 'object'
             && body.offer.id === note.id && typeof note.id === 'string';
-        if (note.kind === 'mark' && note.accepted !== undefined) {
+        // ...from the driving panel only (marksTheHold): a review tick is the
+        // mark row above and nothing else — the slot and the car untouched.
+        if (note.kind === 'mark' && note.accepted !== undefined && marksTheHold(note.via)) {
           if (scanner.offer && scanner.offer.id === note.id) {
             marked = scanner.offer;
           } else if (offered && !scanner.offer) {
@@ -6935,6 +6975,11 @@ function route(req, res) {
             // ADDED, and only a re-offer or a Took past MAX_HELD puts one
             // down, said the same way (placeTook).
             var tookAt = Date.now();
+            // When its card came onto the slot — this card's, not the slot's
+            // (cardArrivedAt): see `acceptedAt` below. One no longer kept
+            // came before the card on the slot, so that card's offerAt is the
+            // nearest bound on it, as it was before.
+            var cardAt = cardArrivedAt(marked.id) || scanner.offerAt || tookAt;
             var took = asHold({
               id: marked.id,
               pay: marked.pay,
@@ -6991,8 +7036,9 @@ function route(req, res) {
               // press would then stack the morning's first offer onto a
               // job finished at midnight. Dated from the card, holding()
               // expires it on the card's own clock, which for a prompt
-              // press is the same moment.
-              acceptedAt: scanner.offerAt || Date.now(),
+              // press is the same moment. THIS card's: a Took from a panel
+              // behind the slot names the card before it (cardArrivedAt).
+              acceptedAt: cardAt,
               // ...and where the car was when its card came up, with the
               // card's own size: what live.html's Map view checks this
               // order's end against. See cardOf.
@@ -7004,7 +7050,7 @@ function route(req, res) {
               // Where each of its ends came from, and when: the assembler's
               // record (Assemble.cardFields), kept beside `dropoff` and
               // `dropoffScanned` above, which it keeps in step.
-              fields: Assemble.cardFields(marked, scanner.offerAt || Date.now()),
+              fields: Assemble.cardFields(marked, cardAt),
               // ...and the list's own fields (see MAX_HELD): which app, the
               // press, the card's deadline. A scanner older than the offer
               // line's `app` and `deliverBy` leaves them null.
