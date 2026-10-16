@@ -838,11 +838,16 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     // keypad and the phone scanner hang theirs.
     await p3.goto(base + '/live.html', { waitUntil: 'domcontentloaded' })
             .catch(() => {});
-    await p3.waitForFunction(
-      async () => (await navigator.serviceWorker.getRegistrations()).length > 0,
-      null, { timeout: 10000 }).catch(() => {});
-    const n = await p3.evaluate(async () =>
-      (await navigator.serviceWorker.getRegistrations()).length);
+    // Polled from here, up to ten seconds. This was a waitForFunction with an
+    // async predicate, which hands back a Promise, and a Promise is truthy: it
+    // returned at once and the count below was taken whenever that was. So a
+    // panel that registered a moment late read as one that never registered.
+    let n = 0;
+    for (let i = 0; i < 100 && !n; i++) {
+      if (i) await new Promise((r) => setTimeout(r, 100));
+      n = await p3.evaluate(async () =>
+        (await navigator.serviceWorker.getRegistrations()).length).catch(() => 0);
+    }
     await ctx3.close();
     return n;
   })();
