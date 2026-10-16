@@ -370,11 +370,42 @@ with _ctx.redirect_stdout(buf):
 eq('fifty failures in a row are one line, not fifty',
    buf.getvalue().count('could not use the offer journal'), 1)
 buf = _io.StringIO()
-quiet._said_at = time.time() - JR.Journal.REPEAT_AFTER_S - 1
+quiet._said_at = time.monotonic() - JR.Journal.REPEAT_AFTER_S - 1
 with _ctx.redirect_stdout(buf):
     quiet.append({'id': 'x'})
 eq('...and it is said again once the interval has passed',
    buf.getvalue().count('could not use the offer journal'), 1)
+
+
+# ...on the monotonic clock: the wall clock stepped back an hour by NTP does
+# not silence a journal that goes on failing.
+class _Stepped(object):
+    def __init__(self):
+        self.mono, self.step = 5000.0, 0.0
+
+    def monotonic(self):
+        return self.mono
+
+    def time(self):
+        return 1_790_000_000.0 + self.mono + self.step
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+_clk, _was_clock = _Stepped(), JR.time
+JR.time = _clk
+try:
+    stuck = JR.Journal(os.path.join(work, 'no', 'such', 'other.jsonl'))
+    buf = _io.StringIO()
+    with _ctx.redirect_stdout(buf):
+        stuck.append({'id': 'x'})
+        _clk.step, _clk.mono = -3600.0, _clk.mono + JR.Journal.REPEAT_AFTER_S + 1
+        stuck.append({'id': 'x'})
+finally:
+    JR.time = _was_clock
+eq('...however the wall clock steps: said again after the interval with the clock put '
+   'back an hour', buf.getvalue().count('could not use the offer journal'), 2)
 
 # --- annotations from the web side must not be mistaken for offers ----------
 # The file is written by two things now: the scanner adds offers, and the web

@@ -605,7 +605,10 @@ class Journal:
     def _complain(self, e):
         """Say it once, then again every few minutes for as long as it lasts."""
         message = str(e)
-        now = time.time()
+        # The monotonic clock: this is an interval, and on the wall clock an NTP
+        # step back of an hour silenced a journal that was still failing for
+        # that hour (rpi/test_journal.py, "...however the wall clock steps").
+        now = time.monotonic()
         fresh = message != self._error
         due = (self._said_at is None
                or now - self._said_at >= self.REPEAT_AFTER_S)
