@@ -2735,6 +2735,11 @@ PLANNER_EDGE = re.compile(r'^[^A-Za-z0-9]+|[^A-Za-z0-9.]+$', ASCII)
 # where the screen's edge leaves a mark. See _planner_address.
 PLANNER_LONE_LETTER = re.compile(r'\b(?:' + STREET_SUFFIX + r')\.? ([A-Za-z])$',
                                  re.IGNORECASE | ASCII)
+# ...and one letter standing after the street's two-letter QUADRANT, which is
+# where nothing of a street's can stand: the 17 Oct planner read "<n> S <Name>
+# Dr Sw a" for "<n> S <Name> Dr SW" (the number and name left out here, the
+# slip the reading's). See _planner_address.
+PLANNER_QUADRANT_LETTER = re.compile(r'\S (?:NW|NE|SW|SE) ([A-Za-z])$', re.IGNORECASE | ASCII)
 # "Pl" read as "P" or "PI" at the end of the street: the 16 Oct planner's
 # dropoff, "<number> <Name> Pl" on the phone, came out "<Name> P" on one
 # frame and "<Name> PI" on the next, and the NucBox
@@ -2757,7 +2762,16 @@ def _planner_pl_slip(street):
     return street[:m.start()] + ' Pl'
 
 
-def _planner_address(street_line, town_line):
+def _planner_label_tail(label_line):
+    """True when the stop's "Address" label carries something after the word
+    ("Address he", "Address E"): the scroll bar's mark, nothing the app prints
+    there. A label taken one edit from the word (_planner_label) is the word
+    alone on its line, so it carries none."""
+    m = PLANNER_ADDRESS.match(label_line or '')
+    return bool(m and label_line[m.end():].strip())
+
+
+def _planner_address(street_line, town_line, label_line=None):
     """The street and the town under a stop's "Address" label, field by field.
 
     A field that does not read is None and the others stand: a town line whose
@@ -2785,6 +2799,27 @@ def _planner_address(street_line, town_line):
     the same column and its lone letter is taken as the same mark. With a clean
     town line it is kept, as the quadrant it may be. Two letters are never
     touched: that is NW/NE/SW/SE, and "Ct", which is a street.
+
+    AFTER THE QUADRANT. The 17 Oct planner's dropoff read
+
+        Address E
+        7 cy ee
+        <n> S <Name> Dr Sw a
+        Marietta, GA
+
+    (the number and name left out; the layout and the slips the reading's):
+    the bar again, beside the label ("E") and the street ("a"), with the town
+    line clean this time. After a two-letter quadrant (PLANNER_QUADRANT_LETTER)
+    a lone letter is no quadrant and no part of the street, so the evidence it
+    needs is weaker: the column's mark on EITHER line it passes, the town line
+    as above or the label (_planner_label_tail). After a suffix it still needs
+    the town line's, because there the letter may be the real quadrant and the
+    label sits further up the column, a stop's name and a place between. A
+    lone letter after a quadrant with both lines clean is kept: a unit's
+    letter can stand there, and nothing on the screen says otherwise. On the
+    shared corpus no planner street ended in a quadrant and a lone letter
+    before this case; the sheet's "412 Wrenfield Dr NW P &" is read by
+    sheet_dropoff, which ends the street at its suffix and quadrant anyway.
     """
     city = state = zipcode = None
     tail = False
@@ -2801,6 +2836,9 @@ def _planner_address(street_line, town_line):
     lone = PLANNER_LONE_LETTER.search(street)
     if lone and tail:
         street = street[:lone.start(1)].rstrip()
+    quad = PLANNER_QUADRANT_LETTER.search(street)
+    if quad and (tail or _planner_label_tail(label_line)):
+        street = street[:quad.start(1)].rstrip()
     s = STREET.match(street)
     street = re.sub(r'\s+', ' ', s.group(1)).strip(' .,') if s else None
     if street:
@@ -2959,13 +2997,36 @@ def _planner_under_a_place(block, label):
     return None
 
 
+# WHAT A PLACE LOOKS LIKE. A place is searched now (server.js searchHeldPlace,
+# the owner's decision of 17 Oct), so junk taken for one is a question asked of
+# the NucBox in the order's name, and the 17 Oct planner put the scroll bar and
+# the stop's icon on the line over the street: "7 cy ee" was its `place`. A
+# place is a NAME: a word of three letters or more (PLACE_NAME_WORD), and
+# letters for at least half of what is on the line that is not a space
+# (looks_like_a_name). Every place in the shared corpus passes — "Larksour
+# Inn & Suites Kennesaw NW", "Fable Parking Dec", "Fable Internationa",
+# "1200 Fable Tower" — and "7 cy ee" (no word of three) does not, nor would a
+# row of marks with one short word in it. Both readers' places, the planner's
+# (_planner_place) and the customer sheet's (_sheet_place), by this one rule.
+PLACE_NAME_WORD = re.compile(r'[A-Za-z]{3}', ASCII)
+
+
+def looks_like_a_name(name):
+    """True when `name` is shaped like a place's name: see PLACE_NAME_WORD."""
+    if not name or not PLACE_NAME_WORD.search(name):
+        return False
+    letters = len(re.findall(r'[A-Za-z]', name))
+    return letters * 2 >= len(re.sub(r'\s', '', name))
+
+
 def _planner_place(lines, town_line):
     """The place's name among `lines`, the ones over a stop's street: the first
-    with two letters in a row that is not the town said again on its own."""
+    shaped like a name (looks_like_a_name) that is not the town said again on
+    its own."""
     town = _planner_town(town_line).group(1).strip().lower()
     for l in lines:
         name = PLANNER_EDGE.sub('', l)
-        if re.search(r'[A-Za-z]{2}', name) and name.lower() != town:
+        if looks_like_a_name(name) and name.lower() != town:
             return name
     return None
 
@@ -3079,7 +3140,8 @@ def find_planner(text):
                 'orders': int(count) if count is not None and count >= 1
                 and count == int(count) else None,
                 'name': name, 'expectedBy': due}
-        stop.update(_planner_address(street_line, town_line))
+        stop.update(_planner_address(street_line, town_line,
+                                     own[label] if label is not None else None))
         # The hotel or business the address is at, when the block names one:
         # never the street, and searched only for a held order's end whose door
         # the NucBox lacks (server.js searchHeldPlace; the owner, 17 Oct). See
@@ -3155,7 +3217,7 @@ def _planner_orphan(lines, first):
             due = time_of_day(m.group(1), m.group(2), m.group(3))
     street_line, town_line, place = _planner_address_lines(above, label)
     stop = {'kind': None, 'orders': None, 'name': None, 'expectedBy': due}
-    stop.update(_planner_address(street_line, town_line))
+    stop.update(_planner_address(street_line, town_line, above[label]))
     stop['place'] = place
     stop['partial'] = 'top'
     return stop
@@ -3454,9 +3516,9 @@ def _sheet_street(line):
 def _sheet_place(line):
     """A place's name off one line of the sheet, the icons read after it
     taken off (SHEET_ICON_TAIL) and the screen's marks off its ends; None
-    without two letters in a row."""
+    unless what is left is shaped like a name (looks_like_a_name)."""
     name = PLANNER_EDGE.sub('', SHEET_ICON_TAIL.sub('', line or ''))
-    return name if re.search(r'[A-Za-z]{2}', name) else None
+    return name if looks_like_a_name(name) else None
 
 
 def sheet_dropoff(text):

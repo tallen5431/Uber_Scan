@@ -5565,6 +5565,231 @@
    "text": "2S 8 min €O 4.3 mi =\nLee R.\nFable Parking Dec k 2 &\n283 Quillon St NW\nSmyrna, GA\n) ©usiness / Building Name\nFable Parking Deck\nDrop off 1 order >\n4K217\nFable Grill -1item\nExpected by 12:30 AM\nVerify - Enter delivery PIN",
    "bounded": false,
    "expect": null
+  },
+  {
+   "name": "the 17 Oct dropoff: the scroll bar after the label and after the street's quadrant, the bar and the icon read as a line over the street",
+   "_why": "The dropoff block's layout and slips are the 17 Oct planner's read (\"Address E / 7 cy ee / <n> S <Name> Dr Sw a / Marietta, GA\"): \"E\" and \"a\" are the screen's scroll bar, beside the label and the street, and \"7 cy ee\" the bar and the stop's icon read as a line of their own. The letter after a two-letter quadrant goes on the label's mark (PLANNER_QUADRANT_LETTER, _planner_label_tail) though the town line is clean, and \"7 cy ee\" is no place: no word of three letters (looks_like_a_name). The quadrant is kept as read, \"Sw\". The pickup above is laid out as the phone prints it. The customer, the restaurant, the numbers and the streets are invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nMara T.\nExpected by 8:02 PM\nAddress E\n7 cy ee\n411 S Quillon Dr Sw a\nMarietta, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1180,
+     "street": "2210 Quarry Bend Rd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Mara T.",
+     "expectedBy": 1202,
+     "street": "411 S Quillon Dr Sw",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "411 S Quillon Dr Sw, Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a lone letter after the quadrant with the label and the town line both clean is kept",
+   "_why": "No column's mark on the label or the town line, so nothing says the letter is the bar's: a unit's letter can stand there, and it is kept, as a lone letter after a suffix is kept with a clean town line. The pickup above is laid out as the phone prints it. The customer, the restaurant, the numbers and the streets are invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n411 S Quillon Dr SW A\nMarietta, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1180,
+     "street": "2210 Quarry Bend Rd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Mara T.",
+     "expectedBy": 1202,
+     "street": "411 S Quillon Dr SW A",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "411 S Quillon Dr SW A, Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a lone letter after the quadrant goes on the town line's mark too",
+   "_why": "The scroll bar's mark after the state, the label clean: the town line's evidence is the rule PLANNER_LONE_LETTER already keeps, and it holds after a quadrant as after a suffix. The pickup above is laid out as the phone prints it. The customer, the restaurant, the numbers and the streets are invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n411 S Quillon Dr Sw a\nMarietta, GA E\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1180,
+     "street": "2210 Quarry Bend Rd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Mara T.",
+     "expectedBy": 1202,
+     "street": "411 S Quillon Dr Sw",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "411 S Quillon Dr Sw, Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "the label's mark alone does not take a lone letter after the street's suffix",
+   "_why": "After a SUFFIX the letter may be the real quadrant (Cobb Pkwy N and S), and the label sits further up the column than the town line: only the town line's mark takes it, as before. The label carries the bar's mark and the town line does not, so the S stays. The pickup above is laid out as the phone prints it. The customer, the restaurant, the numbers and the streets are invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nMara T.\nExpected by 8:02 PM\nAddress he\n4821 Quillon Dr S\nMarietta, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1180,
+     "street": "2210 Quarry Bend Rd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Mara T.",
+     "expectedBy": 1202,
+     "street": "4821 Quillon Dr S",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "4821 Quillon Dr S, Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a junk line over the street is passed over and the place's name under it is the place",
+   "_why": "In the hotel layout (PLANNER_HOUSE) the first line over the street shaped like a name is the place: \"7 cy ee\" is not one, \"Larksour Commons\" is. The pickup above is laid out as the phone prints it. The customer, the restaurant, the numbers and the streets are invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n7 cy ee\nLarksour Commons\n411 S Quillon Dr SW\nMarietta, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1180,
+     "street": "2210 Quarry Bend Rd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Mara T.",
+     "expectedBy": 1202,
+     "street": "411 S Quillon Dr SW",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "411 S Quillon Dr SW, Marietta",
+     "place": "Larksour Commons"
+    }
+   ]
+  },
+  {
+   "name": "a line of marks with one short word in it is no place",
+   "_why": "\"4 ~ }} Inn\" has a word of three letters, and letters for fewer than half of what is on the line: not shaped like a name (looks_like_a_name), so no place. The pickup above is laid out as the phone prints it. The customer, the restaurant, the numbers and the streets are invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:40 PM\nAddress\n2210 Quarry Bend Rd NW,\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n4 ~ }} Inn\n1180 Wrenfield Rd NW, Kennesaw, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1180,
+     "street": "2210 Quarry Bend Rd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "2210 Quarry Bend Rd NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Mara T.",
+     "expectedBy": 1202,
+     "street": "1180 Wrenfield Rd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "1180 Wrenfield Rd NW, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a stop the page begins in the middle of: the scroll bar after its label and its street's quadrant",
+   "_why": "The 17 Oct slips (\"Address E\", \"Sw a\") on a stop whose header is above the glass (_planner_orphan): its label is read for the bar's mark as a headed stop's is. The streets and the customer are invented.",
+   "text": "Address E\n411 S Quillon Dr Sw a\nMarietta, GA\nView details\nDropoff \u2022 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n77 Birch Ln\nMarietta, GA\nView details\nWaybill",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": null,
+     "orders": null,
+     "name": null,
+     "expectedBy": null,
+     "street": "411 S Quillon Dr Sw",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "411 S Quillon Dr Sw, Marietta",
+     "place": null,
+     "partial": "top"
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Mara T.",
+     "expectedBy": 1202,
+     "street": "77 Birch Ln",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "77 Birch Ln, Marietta",
+     "place": null
+    }
+   ]
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",
@@ -6171,6 +6396,30 @@
    "name": "the business label ABOVE the name is not the sheet's label",
    "text": "Business / Building name\nFable Parking Deck\nLee R.\n283 Quillon St NW\nSmyrna, GA",
    "expect": null
+  },
+  {
+   "name": "a place line of marks with one short word in it is no place",
+   "text": "Pat Q.\n4 ~ }} Inn\n1572 Larkspur Dr\nWoodstock, GA\nDropoff type\nMeet at door",
+   "expect": {
+    "line": "1572 Larkspur Dr, Woodstock",
+    "street": "1572 Larkspur Dr",
+    "city": "Woodstock",
+    "state": "GA",
+    "zip": null,
+    "place": null
+   }
+  },
+  {
+   "name": "a place shaped like a name between the name and the street is still the place",
+   "text": "Pat Q.\nLarksour Commons\n1572 Larkspur Dr\nWoodstock, GA\nDropoff type\nMeet at door",
+   "expect": {
+    "line": "1572 Larkspur Dr, Woodstock",
+    "street": "1572 Larkspur Dr",
+    "city": "Woodstock",
+    "state": "GA",
+    "zip": null,
+    "place": "Larksour Commons"
+   }
   }
  ],
  "_popups_comment": "DoorDash's place popup, opened from a stop on an offer card before the driver decides: place_popup / placePopup. The role label, the store's name, the street with a house number, the town, and 'Directions' under them. `expect` is {role, name, line, street, city, state, zip}, or null when the popup does not read as one. The store's layout and the OCR's marks are the five reads of it in the journal copied with the 12 Oct shift, all five of which read; the customer's is INFERRED (no customer popup has been read) and its cases say so; the pill over the map is the 12 Oct snaps' 16-03-08 and 16-03-17, whose text was never read. Every name, street and number is invented.",

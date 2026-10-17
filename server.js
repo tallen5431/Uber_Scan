@@ -2584,6 +2584,13 @@ function notOneCustomer(h) {
  * in the same disc: searchHeldPlace, the owner's decision of 17 Oct 2026, by
  * map-view.js pickPlace's rules, pinned `by: 'place'`.
  *
+ * ...and before either, where the street AS PRINTED is not inside the card's
+ * reach (MV.retryWanted), the door once more with the street's type word left
+ * out (searchHeldRetry, MV.streetRetry: "1830 <Name> Creek Cts SW" asked
+ * again as "1830 <Name> Creek SW", the 17 Oct evening snap), an answer kept
+ * only at the same door on the same street (MV.pickRetry). Map view's
+ * NbxSearch.place asks the same second question.
+ *
  * The public geocoder is never asked: it is the page's fallback, rationed and
  * outside the VPN, and a pin the GPS ends a delivery on is the NucBox's or
  * none. With NUCBOX_SEARCH unset nothing here sends anything.
@@ -2696,9 +2703,12 @@ function endAsk(key, attempt, target, answered) {
  * either way — the level the GPS drop arms at (heldEndPin) — and the
  * restaurant guard (pickupNearEnd) and the customer guard (notOneCustomer)
  * hold it to the same rules whoever chose it. */
-function pinHeldEnd(h, at, by) {
+function pinHeldEnd(h, at, by, asked) {
   h.endPin = { dropoff: h.dropoff, lat: at.lat, lon: at.lon,
                doorLevel: true, pinnedAt: Date.now(), by: by };
+  // ...and the street the door was found by when it was not the dropoff's
+  // own (searchHeldRetry: the type word left out).
+  if (asked) h.endPin.asked = asked;
   delete h.arrivedAt;
   delete h.endWhy;
   delete h.endWhyFor;
@@ -2725,17 +2735,51 @@ function searchHeldEnd(key, attempt) {
     // anything — undone, no check failed — and was a second place answering
     // the same question.
     var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
-    // The street and not the door, and the phone printed a place for the
-    // stop: the place is asked next, in the same disc (the owner, 17 Oct).
-    if (!res.at && res.why === 'nodoor' && placeOf(now)) {
-      return searchHeldPlace(key, attempt, disc);
+    // The street as printed not inside the card's reach: its door asked once
+    // more with the type word left out (MV.streetRetry; the 17 Oct evening
+    // snap, "<Name> Creek Cts SW" answered with nothing), held to the same
+    // street and the same door (MV.pickRetry).
+    var again = MV.streetRetry(plan);
+    if (again && MV.retryWanted(res, out.hits, disc)) {
+      return searchHeldRetry(key, attempt, disc, again, res);
     }
-    if (!res.at) {
-      return refuseHeldEnd(now, END_WHY[res.why] || 'no house number');
-    }
-    pinHeldEnd(now, res.at, 'server');
+    settleHeldEnd(key, attempt, disc, res, null);
   }
   endAsk(key, attempt, target, answered);
+}
+
+/* The door's answer acted on, from the first question or the retry (`asked`,
+ * the street the retry found it by, kept on the pin as `asked` and said on
+ * /api/status as `endAsked`; null for the street as printed). The street and
+ * not the door, and the phone printed a place for the stop: the place is
+ * asked next, in the same disc (the owner, 17 Oct). */
+function settleHeldEnd(key, attempt, disc, res, asked) {
+  var now = endHold(key);
+  if (!now || heldEndPin(now)) return;
+  if (!res.at && res.why === 'nodoor' && placeOf(now)) {
+    return searchHeldPlace(key, attempt, disc);
+  }
+  if (!res.at) {
+    return refuseHeldEnd(now, END_WHY[res.why] || 'no house number');
+  }
+  pinHeldEnd(now, res.at, 'server', asked);
+}
+
+/* ...the retry itself: ONE more question, the street less its type word, in
+ * the same discBox, through endAsk (nbxCache first, the NucBox's down handled
+ * as the first question's is). MV.afterRetry chooses which answer is acted
+ * on: the retry's when it pinned or found the street, else the first's, whose
+ * refusal the driver is told ("not inside the card's reach"). */
+function searchHeldRetry(key, attempt, disc, again, first) {
+  var said = nbxTerm(again.street);
+  if (!said) return settleHeldEnd(key, attempt, disc, first, null);
+  var target = nbxSearchTarget('street', said, MV.discBox(disc));
+  endAsk(key, attempt, target, function (out) {
+    var two = MV.pickRetry(out.hits, disc, again, out.cutAt);
+    // A pin here is only ever the retry's own (the first had none, or no
+    // retry was asked), so the street it was found by is the retry's.
+    settleHeldEnd(key, attempt, disc, MV.afterRetry(first, two), again.street);
+  });
 }
 
 /* ...and the held end by its PLACE, the owner's decision of 17 Oct 2026, asked
@@ -5400,6 +5444,14 @@ function statusNow() {
                    // the end is searched by when its door is not on the
                    // NucBox (searchHeldPlace).
                    place: placeOf(h),
+                   // ...and, when this server found the door by asking again
+                   // with the street's type word left out (searchHeldRetry),
+                   // the street it asked: "1830 <Name> Creek SW" for a door
+                   // printed "...Creek Cts SW". Null otherwise.
+                   endAsked: (function () {
+                     var pin = heldEndPin(h);
+                     return pin && pin.asked ? pin.asked : null;
+                   }()),
                    // ...and how many of its pickups the guard holds, from Map
                    // view or this server's search (keepPickupPin).
                    pickupsPinned: Array.isArray(h.pickupPins) ? h.pickupPins.length : 0,

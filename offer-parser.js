@@ -1465,6 +1465,16 @@
   // One letter after the street's suffix: where a quadrant goes, and where the
   // screen's edge leaves a mark. See plannerAddress.
   var PLANNER_LONE_LETTER = new RegExp('\\b(?:' + STREET_SUFFIX + ')\\.? ([A-Za-z])$', 'i');
+  // ...and one letter after the street's two-letter quadrant, where nothing of
+  // a street's stands: "<n> S <Name> Dr Sw a" on the 17 Oct planner. See
+  // PLANNER_QUADRANT_LETTER in offer_parser.py.
+  var PLANNER_QUADRANT_LETTER = /\S (?:NW|NE|SW|SE) ([A-Za-z])$/i;
+  // Whether the stop's "Address" label carries the scroll bar's mark after the
+  // word ("Address E"). See _planner_label_tail.
+  function plannerLabelTail(labelLine) {
+    var m = PLANNER_ADDRESS.exec(labelLine || '');
+    return !!(m && labelLine.slice(m[0].length).trim());
+  }
   // "Pl" read as "P" or "PI" at the end of the street. See PLANNER_PL_SLIP
   // in offer_parser.py.
   var PLANNER_PL_SLIP = / (?:P|PI|P1|P\|)$/;
@@ -1487,8 +1497,11 @@
      week's 1,802 places carry a real one, Cobb Pkwy N and S among them. The
      line carries the state only beside a ZIP, which is
      findAddress's line exactly; without one Advice.area could not take the
-     town off its end. See _planner_address in offer_parser.py. */
-  function plannerAddress(streetLine, townLine) {
+     town off its end. A lone letter after a two-letter QUADRANT is dropped on
+     weaker evidence, the mark on the town line or on the label (`labelLine`,
+     plannerLabelTail): after a quadrant it is no quadrant of the street's. See
+     _planner_address in offer_parser.py. */
+  function plannerAddress(streetLine, townLine, labelLine) {
     var city = null, state = null, zip = null, tail = false;
     var t = plannerTown(townLine);
     if (t) {
@@ -1506,6 +1519,10 @@
     var street = (streetLine || '').replace(PLANNER_EDGE, '');
     var lone = PLANNER_LONE_LETTER.exec(street);
     if (lone && tail) street = street.slice(0, lone.index + lone[0].length - 1).replace(/\s+$/, '');
+    var quad = PLANNER_QUADRANT_LETTER.exec(street);
+    if (quad && (tail || plannerLabelTail(labelLine))) {
+      street = street.slice(0, quad.index + quad[0].length - 1).replace(/\s+$/, '');
+    }
     var s = STREET.exec(street);
     street = (s && s.index === 0)
       ? s[1].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '') : null;
@@ -1556,13 +1573,25 @@
     return cut;
   }
 
+  /* What a place looks like, now that a place is searched: a word of three
+     letters or more, and letters for at least half of what is on the line
+     that is not a space. "7 cy ee", the 17 Oct planner's scroll bar and icon
+     over the street, is none. Both readers' places, the planner's and the
+     sheet's. See PLACE_NAME_WORD in offer_parser.py. */
+  var PLACE_NAME_WORD = /[A-Za-z]{3}/;
+  function looksLikeAName(name) {
+    if (!name || !PLACE_NAME_WORD.test(name)) return false;
+    return (name.match(/[A-Za-z]/g) || []).length * 2 >= name.replace(/\s/g, '').length;
+  }
+
   /* The place's name among `lines`, the ones over a stop's street: the first
-     with two letters in a row that is not the town said again on its own. */
+     shaped like a name (looksLikeAName) that is not the town said again on
+     its own. */
   function plannerPlace(lines, townLine) {
     var town = plannerTown(townLine)[1].trim().toLowerCase();
     for (var i = 0; i < lines.length; i++) {
       var name = lines[i].replace(PLANNER_EDGE, '');
-      if (/[A-Za-z]{2}/.test(name) && name.toLowerCase() !== town) return name;
+      if (looksLikeAName(name) && name.toLowerCase() !== town) return name;
     }
     return null;
   }
@@ -1669,7 +1698,7 @@
     }
     var found = plannerAddressLines(above, label);
     var stop = { kind: null, orders: null, name: null, expectedBy: due };
-    var where = plannerAddress(found.street, found.town);
+    var where = plannerAddress(found.street, found.town, above[label]);
     Object.keys(where).forEach(function (key) { stop[key] = where[key]; });
     stop.place = found.place;
     stop.partial = 'top';
@@ -1771,7 +1800,7 @@
                    orders: (count !== null && count >= 1 && count === Math.floor(count))
                      ? count : null,
                    name: name, expectedBy: due };
-      var where = plannerAddress(streetLine, townLine);
+      var where = plannerAddress(streetLine, townLine, label !== -1 ? own[label] : null);
       Object.keys(where).forEach(function (key) { stop[key] = where[key]; });
       // The hotel or business the address is at, when the block names one:
       // never the street, and searched only for a held order's end whose door
@@ -1897,7 +1926,7 @@
 
   function sheetPlace(line) {
     var name = String(line || '').replace(SHEET_ICON_TAIL, '').replace(PLANNER_EDGE, '');
-    return /[A-Za-z]{2}/.test(name) ? name : null;
+    return looksLikeAName(name) ? name : null;
   }
 
   function sheetDropoff(text) {
