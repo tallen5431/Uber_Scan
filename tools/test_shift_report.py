@@ -431,6 +431,207 @@ eq('an order with no Took is on the day of its first reading, and not the next',
    ([o['id'] for o in SR.report(_nj, None, '2026-03-03')['orders']],
     [o['id'] for o in SR.report(_nj, None, '2026-03-04')['orders']]), (['N'], []))
 
+# --- the shift's totals -------------------------------------------------------
+#
+# A second invented evening, on the 5th, built for the totals alone: on the
+# same invented line of latitude, `pos` metres east of where the log begins.
+#
+#   17:00:00-17:11  parked at start (+-2 m of wander)
+#   17:11-17:24     NOTHING: the rig off while the car drove 3,000 m away —
+#                   the 16 Oct shape, which must be a gap and not a stop
+#   17:24-17:34     drive east 6,000 m
+#   17:34-17:50     parked, 16 min (9,000 m from start)
+#   17:50-17:55     drive east 3,000 m
+#   17:55-17:58     parked 3 min, and the receiver jumps 100 m and back four
+#                   times at a speed of nothing: not miles, and not a stop
+#                   long enough to list
+#   17:58-18:08     drive east 6,000 m
+#   18:08-18:14     parked (18,000 m out)
+#   18:14-18:20     NOTHING: the rig rebooted where it stood
+#   18:20-18:26     parked, the same place: two stops either side of a gap
+#   18:26-18:56     drive west 18,000 m, back to start
+#   18:56-19:10     parked at start until the log ends
+T5 = lambda h, m, sec=0: at(h, m, sec, day=5) // 1000            # noqa: E731
+
+
+def evening5():
+    pts, pos = [], 0.0
+
+    def hold(t0, t1, jumps=()):
+        for t in range(t0, t1):
+            jump = 100.0 if t in jumps else (2.0 if t % 2 else -2.0)
+            pts.append((t, LAT0, lon_at(pos + jump), 8.0, 0.0))
+
+    def drive(t0, t1, speed):
+        nonlocal pos
+        for t in range(t0, t1):
+            pts.append((t, LAT0, lon_at(pos), 8.0, abs(speed)))
+            pos += speed
+
+    hold(T5(17, 0), T5(17, 11))
+    pos = 3000.0
+    drive(T5(17, 24), T5(17, 34), 10.0)
+    hold(T5(17, 34), T5(17, 50))
+    drive(T5(17, 50), T5(17, 55), 10.0)
+    hold(T5(17, 55), T5(17, 58), jumps={T5(17, 55, 30), T5(17, 56), T5(17, 56, 30), T5(17, 57)})
+    drive(T5(17, 58), T5(18, 8), 10.0)
+    hold(T5(18, 8), T5(18, 14))
+    hold(T5(18, 20), T5(18, 26))
+    drive(T5(18, 26), T5(18, 56), -10.0)
+    hold(T5(18, 56), T5(19, 10))
+    return pts
+
+
+DRIVEN5 = 6000.0 + 3000.0 + 6000.0 + 18000.0            # metres between fixes
+GPS5 = os.path.join(work, 'gps-totals')
+os.mkdir(GPS5)
+_p5 = evening5()
+with gzip.open(os.path.join(GPS5, '2026-03-05_1700.jsonl.gz'), 'wt') as fh:
+    for p in _p5:
+        if p[0] < T5(18, 15):
+            fh.write(stamped(p[0], tpv(*p)))
+with open(os.path.join(GPS5, '2026-03-05_1819.jsonl'), 'w') as fh:
+    for p in _p5:
+        if p[0] >= T5(18, 15):
+            fh.write(stamped(p[0], tpv(*p)))
+J5 = os.path.join(work, 'journal-5.jsonl')
+with open(J5, 'w') as fh:
+    for r in (offer('P', at(17, 29, 50, day=5), 8.00, 20, 4.0), mark('P', at(17, 30, day=5), True),
+              drop('P', at(17, 45, day=5)),
+              offer('Q', at(18, 0, day=5), 9.00, 25, 5.0), mark('Q', at(18, 1, day=5), True),
+              drop('Q', at(18, 20, day=5))):
+        fh.write(json.dumps(r) + '\n')
+
+rep5 = SR.report(J5, GPS5, '2026-03-05')
+t5 = rep5['totals']
+eq('totals: rig on and off are the first and last usable fix',
+   (t5['on'], t5['off']), (T5(17, 0), T5(19, 10) - 1))
+eq('totals: the two silences over 60 s are the gaps, each from the fix before '
+   'to the fix after', [(g['from'], g['to']) for g in t5['gaps']],
+   [(T5(17, 11) - 1, T5(17, 24)), (T5(18, 14) - 1, T5(18, 20))])
+near('...and the first came back 3,000 m (1.9 mi) from where it went quiet',
+     t5['gaps'][0]['apartMiles'], 2998.0 / 1609.344, 0.01)
+
+# The gap rule: miles, stops and minutes never cross a gap.
+near('a gap counts no miles: the shift is the 33,000 m driven between fixes, '
+     'not the 3,000 m across the first gap', t5['miles'], DRIVEN5 / 1609.344, 0.15)
+stops5 = [(s['from'], round(s['seconds'])) for s in t5['stops']]
+eq('a gap does not merge into a stop: parked, rebooted, parked is two stops, '
+   'each ending or starting at the gap',
+   [x for x in stops5 if T5(18, 0) <= x[0] < T5(18, 30)],
+   [(T5(18, 8), 6 * 60 - 1), (T5(18, 20), 6 * 60 - 1)])
+eq('...and the stop at start ends where the log went quiet, not at the first '
+   'fix after the gap', stops5[0], (T5(17, 0), 11 * 60 - 1))
+eq('...and says which edges the log cut',
+   [[k for k in ('fromOn', 'afterGap', 'beforeGap', 'toOff') if s[k]] for s in t5['stops']],
+   [['fromOn', 'beforeGap'], [], ['beforeGap'], ['afterGap'], ['toOff']])
+near('a gap is neither moving nor stopped: 55 min moving', t5['moving'] / 60.0, 55.0, 0.05)
+near('a gap is neither moving nor stopped: 56 min stopped (parked, less the '
+     'second before each gap)', t5['stopped'] / 60.0, 56.0 - 3 / 60.0, 0.05)
+near('...and the 19 min of gaps are counted apart', t5['gapSeconds'] / 60.0, 19.0 + 2 / 60.0, 0.01)
+eq('...and the three add up to the time the rig was on',
+   round(t5['moving'] + t5['stopped'] + t5['gapSeconds'] + t5['noSpeed']),
+   t5['off'] - t5['on'])
+
+# A departure after a gap.
+eq('a departure after a gap is the first fix after it', t5['left']['at'], T5(17, 24))
+eq('...and says from when it may have been', t5['left']['since'], T5(17, 11) - 1)
+# Back within START_M of the first fix (2 m west of 0): driving west at 10 m/s
+# from 18,000 m, the first fix at 148 m or less is 1,786 s after 18:26.
+eq('back at start: the first fix within START_M on the way in', t5['back']['at'],
+   T5(18, 26) + 1786)
+eq('...with no gap before it, so no "may have been"', t5['back']['since'], None)
+
+# Parked jitter is not miles.
+eq('a stop under 4 min is not listed (17:55, 3 min)',
+   [x for x in stops5 if T5(17, 50) <= x[0] < T5(17, 58)], [])
+eq('stops of 4 min or more, by time', [x[0] for x in stops5],
+   [T5(17, 0), T5(17, 34), T5(18, 8), T5(18, 20), T5(18, 56)])
+eq('...and their distance from start, never a position',
+   [('start' if s['atStart'] else round(s['fromStartMiles'], 1)) for s in t5['stops']],
+   ['start', 5.6, 11.2, 11.2, 'start'])
+
+_jit = [(float(t), LAT0, lon_at(2.0 if t % 2 else -2.0), 0.0) for t in range(0, 1800)]
+eq('jitter while parked is not miles: half an hour of +-2 m wander is 0.0 mi',
+   SR.run_metres(_jit), 0.0)
+# ...and the same with no speed on the fixes, or a speed reading noise of 1.5
+# m/s, which the parked rule cannot see: JITTER_M is what holds it then.
+eq('...nor with no speed to say it was parked',
+   SR.run_metres([(f[0], f[1], f[2], None) for f in _jit]), 0.0)
+eq('...nor with a speed that reads noise', SR.run_metres([(f[0], f[1], f[2], 1.5) for f in _jit]),
+   0.0)
+_jump = [(float(t), LAT0, lon_at(100.0 if t % 60 == 30 else 0.0), 0.0) for t in range(0, 600)]
+eq('...nor a parked receiver jumping 100 m and back at a speed of nothing',
+   SR.run_metres(_jump), 0.0)
+_go = [(float(t), LAT0, lon_at(10.0 * t), 10.0) for t in range(0, 101)]
+# ...short by at most the last step under JITTER_M, which the gate cannot vouch for.
+near('...while a car driven 1,000 m at 10 m/s is 1,000 m', SR.run_metres(_go), 1000.0,
+     SR.JITTER_M)
+_nospeed = [(f[0], f[1], f[2], None) for f in _go]
+near('...and one whose fixes give no speed is not said to be parked',
+     SR.run_metres(_nospeed), 1000.0, SR.JITTER_M)
+
+# Departures without a gap, never leaving, and not coming back.
+_out = ([(float(t), LAT0, lon_at(0.0), 0.0) for t in range(0, 600)]
+        + [(600.0 + t, LAT0, lon_at(5.0 + 10.0 * t), 10.0) for t in range(1, 601)])
+_to = SR.totals(_out, 0, 10 ** 6)
+eq('a departure with no gap is the first fix beyond START_M, and has no "since"',
+   (_to['left']['at'], _to['left']['since']), (615.0, None))
+eq('...and a car still away at the last fix is not back', (_to['back'], _to['stillAway']),
+   (None, True))
+_lap = ([(float(t), LAT0, lon_at(0.0), 0.0) for t in range(0, 300)]
+        + [(300.0 + t, LAT0, lon_at(10.0 * t), 10.0) for t in range(1, 31)]
+        + [(330.0 + t, LAT0, lon_at(300.0 - 10.0 * t), 10.0) for t in range(1, 31)]
+        + [(360.0 + t, LAT0, lon_at(0.0), 0.0) for t in range(1, 300)])
+eq('a minute out and back (a car park, a lap of the block) is not leaving',
+   SR.totals(_lap, 0, 10 ** 6)['left'], None)
+_twice = ([(float(t), LAT0, lon_at(0.0), 0.0) for t in range(0, 600)]
+          + [(600.0 + t, LAT0, lon_at(1000.0), 0.0) for t in range(0, 600)]
+          + [(1200.0 + t, LAT0, lon_at(0.0), 0.0) for t in range(0, 600)]
+          + [(1800.0 + t, LAT0, lon_at(1000.0), 0.0) for t in range(0, 600)]
+          + [(2400.0 + t, LAT0, lon_at(0.0), 0.0) for t in range(0, 600)])
+_tw = SR.totals(_twice, 0, 10 ** 6)
+eq('out and back twice: left at the first leaving, back at the last return',
+   (_tw['left']['at'], _tw['back']['at'], _tw['stillAway']), (600.0, 2400.0, False))
+eq('no fix on the day: no totals', SR.totals(_out, 10 ** 6, 2 * 10 ** 6), None)
+
+# What is printed.
+code5, out5 = run(['--journal', J5, '--gps', GPS5, '--day', '2026-03-05'])
+eq('the totals CLI exits 0', code5, 0)
+tot_text = out5[out5.index('Shift totals'):out5.index('\n#  app')]
+ok_('the totals are printed above the per-order table', out5.index('Shift totals') < out5.index('#  app'))
+for _want in ('rig on          17:00', 'rig off         19:09',
+              'left start      17:24, the first fix after a gap in the log: it may have been '
+              'any time from 17:10',
+              'back at start   18:55', 'miles driven    20.5, between fixes only: the 2 gaps '
+              'below not counted',
+              'moving          55 min', 'stopped         56 min', 'in gaps         19 min, '
+              'counted as neither', 'miles driven in a gap are not counted',
+              '17:10-17:24   13.0 min, the car 1.9 mi', '17:34   16.0 min  5.6 mi from start',
+              '18:08    6.0 min  11.2 mi from start, then the log went quiet',
+              '18:20    6.0 min  11.2 mi from start, after a gap in the log',
+              '17:00   11.0 min  at start, from rig on, then the log went quiet',
+              'orders taken    2'):
+    ok_('the totals say %r' % _want, _want in tot_text)
+for name, got, shape in (
+        ('totals', tot_text, r'12\.34|45\.67|\d+\.\d{2,}'),
+        ('whole report on the 5th', out5, r'12\.34|45\.67|11\.34|44\.67|\d+\.\d{4,}')):
+    eq('no address or coordinate in the output: nothing shaped like a lat/lon in the %s'
+       % name, re.findall(shape, got), [])
+ok_('...and every number in the totals is a clock, whole minutes or one decimal',
+    all(re.fullmatch(r'\d{1,4}(?:\.\d)?', n) for n in re.findall(r'[\d.]*\d', tot_text)))
+said = re.findall(r'\b(should|recommend\w*|avoid|worth|better|prefer\w*|target|take more|skip)\b',
+                  tot_text, re.I)
+eq('the totals describe and recommend nothing', said, [])
+ok_('the CSV stays one row per order, with no totals in it',
+    run(['--journal', J5, '--gps', GPS5, '--day', '2026-03-05', '--csv'])[1].count('\n') == 3)
+_out3 = run(['--journal', JOURNAL, '--gps', GPSDIR, '--day', '2026-03-03'])[1]
+ok_("the first evening's report prints its totals too, with its gap",
+    'Shift totals' in _out3 and '18:14-18:18' in _out3)
+ok_('a day with logs but no fix on it says so',
+    'Shift totals: no usable GPS fix on this day'
+    in run(['--journal', J5, '--gps', GPS5, '--day', '2026-03-07'])[1])
+
 # --- nothing reads it ---------------------------------------------------------
 readers = []
 # The files git tracks, not a walk of the directory: a walk also reads other
