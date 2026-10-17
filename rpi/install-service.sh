@@ -103,14 +103,16 @@ fi
 # steady, then execs scan_pi.py in its own place — so there is still one
 # process for systemd to stop. Already calibrated it goes straight to scanning,
 # and this costs nothing.
-# The two machines run the SAME server and differ in three lines, so the unit
-# is one template with those three substituted rather than two units that can
-# drift. What differs, and why each one:
+# The two machines run the SAME server and differ in these settings, so the unit
+# is one template with them substituted rather than two units that can drift.
+# What differs, and why each one:
 #
+#   SCANNER=1     the rig is explicitly the camera machine. Do not make its
+#                 boot depend on server.js continuing to infer that fact from
+#                 the mere presence of rpi/autopilot.py in a checkout.
 #   SCANNER=0     the copy machine has no picamera2, and without this the
 #                 server starts the scanner, fails, and restart-loops every few
-#                 seconds for ever — the exact failure the README warns about
-#                 and the reason this script could not simply be reused there.
+#                 seconds for ever — the exact failure the README warns about.
 #   JOURNAL       where the copy is kept. Left at the default it lands inside
 #                 the clone, beside a `git clean`.
 #   audio video   speech needs the driver's audio devices. The copy machine
@@ -123,7 +125,8 @@ Environment=JOURNAL=$COPY"
   UNIT_GROUPS=""
 else
   DESCRIPTION="Uber Scan — the panel, and the scanner that reads offers off the phone"
-  UNIT_ENV="Environment=SCANNER_SPEAK=$SPEAK
+  UNIT_ENV="Environment=SCANNER=1
+Environment=SCANNER_SPEAK=$SPEAK
 Environment=\"SCANNER_ARGS=$ARGS\""
   UNIT_GROUPS="SupplementaryGroups=audio video"
 fi
@@ -153,7 +156,10 @@ WorkingDirectory=$PROJECT
 # takes a value loses its value — which is how "--screen-fps 6" becomes a
 # scanner that exits on a missing argument and a unit that restarts for ever.
 #
-# On the copy machine: SCANNER=0 and where to keep the journal. See above.
+# SCANNER=1 is intentional even though server.js currently auto-detects the
+# checkout: the installed rig should state that it owns camera hardware instead
+# of relying on an implementation detail of the server. On the copy machine,
+# SCANNER=0 and JOURNAL name the opposite role. See above.
 $UNIT_ENV
 ExecStart=$NODE $PROJECT/server.js
 # The camera and calibration are not always ready the instant the Pi is, so let
