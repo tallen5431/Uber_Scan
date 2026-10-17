@@ -47,6 +47,17 @@ SYNC_TO="$1"
 # RHS sees an inherited SYNC_TOKEN before this assignment replaces it.
 SYNC_TOKEN="${2:-${SYNC_TOKEN:-}}"
 
+# These values eventually become one systemd Environment= line each. Refuse a
+# newline before either value is printed, put into a Python command or used on
+# the network; waiting until unit generation meant a malformed value could
+# reach the preflight first.
+case "$SYNC_TO" in
+    *$'\n'*) echo "the sync URL may not contain a newline" >&2; exit 1 ;;
+esac
+case "$SYNC_TOKEN" in
+    *$'\n'*) echo "SYNC_TOKEN may not contain a newline" >&2; exit 1 ;;
+esac
+
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # The account that owns the checkout, not whoever ran sudo. Getting this wrong
 # gives a timer that runs as root and writes root-owned files into a home
@@ -74,21 +85,26 @@ echo
 #
 # The "try it once" run below cannot do this on its own, and that is deliberate
 # on sync.py's side rather than a bug: a car is out of range most of the time,
-# so a failure to connect is normal and exits 0. Which means this gate — whose
-# whole purpose is "do not install a timer that has never worked" — passed
-# happily on an address nothing was listening on, and the driver got a timer
-# quietly syncing to nowhere. Ask the question sync.py refuses to fail on, using
-# sync's own far_end so the check that a router login page is not the far end
-# stays in one place. /api/journal/newest is intentionally a readable status
-# endpoint even when SYNC_TOKEN protects writes, so this reachability test does
-# not need or expose the secret.
+# so a failure to connect exits 0. Which means this gate — whose whole purpose
+# is "do not install a timer that has never worked" — passed happily on an
+# address nothing was listening on, and the driver got a timer quietly syncing
+# to nowhere. Ask the question sync.py refuses to fail on, using sync's own
+# far_end so the check that a router login page is not the far end stays in one
+# place. /api/journal/newest is intentionally a readable status endpoint even
+# when SYNC_TOKEN protects writes, so this reachability test does not need or
+# expose the secret.
+#
+# The repository path and URL are argv values, not interpolated into the Python
+# source. A perfectly legal quote in a path/URL must remain data; interpolating
+# either into -c source also turned a value supplied to this installer into
+# Python syntax.
 echo "checking $SYNC_TO answers..."
-if ! sudo -u "$RUN_AS" "$PYTHON" -c "
+if ! sudo -u "$RUN_AS" "$PYTHON" -c '
 import sys
-sys.path.insert(0, '$REPO/rpi')
+sys.path.insert(0, sys.argv[1])
 import sync
-sys.exit(0 if isinstance(sync.far_end('$SYNC_TO'), dict) else 1)
-"; then
+sys.exit(0 if isinstance(sync.far_end(sys.argv[2]), dict) else 1)
+' "$REPO/rpi" "$SYNC_TO"; then
     cat >&2 <<EOF
 
 Nothing answered at $SYNC_TO, so the timer is not being installed.
@@ -133,30 +149,20 @@ echo
 
 # systemd's Environment= parser and specifier expansion both touch these
 # values. Quote/backslash escaping preserves the actual value; doubling % keeps
-# it from being treated as a systemd specifier. Newlines cannot be represented
-# as one Environment= assignment and are refused rather than creating a second
-# directive.
+# it from being treated as a systemd specifier. Newlines are already refused
+# above, before a value can be used at all.
 systemd_value() {
     local value="$1"
-    case "$value" in
-        *$'\n'*) return 1 ;;
-    esac
     value="${value//\\/\\\\}"
     value="${value//\"/\\\"}"
     value="${value//%/%%}"
     printf '%s' "$value"
 }
 
-if ! SYSTEMD_TO="$(systemd_value "$SYNC_TO")"; then
-    echo "the sync URL may not contain a newline" >&2
-    exit 1
-fi
+SYSTEMD_TO="$(systemd_value "$SYNC_TO")"
 TOKEN_LINE=""
 if [ -n "$SYNC_TOKEN" ]; then
-    if ! SYSTEMD_TOKEN="$(systemd_value "$SYNC_TOKEN")"; then
-        echo "SYNC_TOKEN may not contain a newline" >&2
-        exit 1
-    fi
+    SYSTEMD_TOKEN="$(systemd_value "$SYNC_TOKEN")"
     TOKEN_LINE="Environment=\"SYNC_TOKEN=$SYSTEMD_TOKEN\""
 fi
 
