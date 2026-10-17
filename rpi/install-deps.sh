@@ -149,7 +149,7 @@ sudo apt-get install -y "${apt[@]}"
 python3 -m pip install --break-system-packages -r "$PIP_REQ"
 
 echo
-echo "installed the core camera/OCR dependencies${want_gps:+}"
+echo "installed the core camera/OCR dependencies"
 if [ "$want_gps" -eq 1 ]; then echo "  + gpsd USB-GPS tools"; fi
 if [ "$want_snap" -eq 1 ]; then echo "  + Snap screenshot tools"; fi
 if command -v node >/dev/null; then
@@ -163,4 +163,7 @@ else
   echo "note: install Node 18+ separately if this Pi will run server.js / the systemd service"
 fi
 
-echo "verify with: bash rpi/install-deps.sh --check${want_gps:+ --gps}${want_snap:+ --snap}"
+verify="bash rpi/install-deps.sh --check"
+if [ "$want_gps" -eq 1 ]; then verify="$verify --gps"; fi
+if [ "$want_snap" -eq 1 ]; then verify="$verify --snap"; fi
+echo "verify with: $verify"
