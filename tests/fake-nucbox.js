@@ -169,6 +169,29 @@ var LANTERN = [place(93, 34.0226, -84.4649, 'amenity', 'parking', 'Lantern Parki
                      'Lantern Parking Deck, Marietta, Cobb County, Georgia, 30062, '
                      + 'United States')];
 
+/* A door the NucBox holds under its street's other type word (map-view.js
+   streetRetry; the owner's 17 Oct evening snap): the app prints "1830 Tansy
+   Creek Cts SW" and this fake, as the real install did for the owner's, answers
+   that with nothing. Asked again with the type left out, "1830 Tansy Creek
+   SW", it answers as a free match on the name does: the door on Tansy Creek
+   Court Southwest, 2.2 mi north-west of the Square, and a house of the same
+   number on Tansy Creek Drive Southwest, 2.0 mi west-south-west — a different
+   street, which must never be the door. "2040 Tansy Creek Cts SW" is the same
+   and holds only the Drive's 2040. Invented, every one. */
+var TANSY_1830 = [
+  place(101, 33.9800, -84.5700, 'place', 'house', '',
+        '1830, Tansy Creek Court Southwest, Marietta, Cobb County, Georgia, 30064, '
+        + 'United States'),
+  place(102, 33.9400, -84.5820, 'place', 'house', '',
+        '1830, Tansy Creek Drive Southwest, Marietta, Cobb County, Georgia, 30064, '
+        + 'United States')
+];
+var TANSY_2040 = [
+  place(103, 33.9410, -84.5830, 'place', 'house', '',
+        '2040, Tansy Creek Drive Southwest, Marietta, Cobb County, Georgia, 30064, '
+        + 'United States')
+];
+
 var CHURCH = [
   place(31, 33.9580, -84.5520, 'highway', 'tertiary', 'Church Street',
         'Church Street, Marietta, Cobb County, Georgia, 30060, United States'),
@@ -206,6 +229,8 @@ function search(q) {
     else if (/^church st/.test(term)) all = CHURCH;
     else if (/^250 example (rd|road)/.test(term)) all = GRILL;
     else if (/^1975 cobb (pkwy|parkway)/.test(term)) all = DINER;
+    else if (term === '1830 tansy creek sw') all = TANSY_1830;
+    else if (term === '2040 tansy creek sw') all = TANSY_2040;
   }
   if (q.bounded === '1') all = all.filter(function (p) { return inBox(p, q.viewbox); });
   return all.slice(0, Number(q.limit) || 10);
@@ -347,7 +372,8 @@ function start(done) {
 module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    COBB_1985: COBB_1985, CHURCH: CHURCH, KESTREL: KESTREL,
                    STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM, GRILL: GRILL,
-                   DINER: DINER, DECK: DECK, QUARRY: QUARRY, LANTERN: LANTERN };
+                   DINER: DINER, DECK: DECK, QUARRY: QUARRY, LANTERN: LANTERN,
+                   TANSY_1830: TANSY_1830, TANSY_2040: TANSY_2040 };
 
 if (require.main === module) {
   start(function (f) { console.log(JSON.stringify({ port: f.port })); });

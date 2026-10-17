@@ -8465,7 +8465,7 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 1241 checks, the shared corpus
+node tests/corpus.test.js       # 1257 checks, the shared corpus
 node tests/parser.test.js       # 112 on the browser side alone
 node tests/advice.test.js       # 450 on what line to tell a driver to draw
 node tests/crop.test.js         #  22 on the trip from a drag to a crop box
@@ -8473,7 +8473,7 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-python3 rpi/test_parser.py      # 1321 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 1337 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 317 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
@@ -8559,7 +8559,7 @@ python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 903 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 908 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8578,7 +8578,7 @@ node tests/assemble.test.js     # 304 on where the order in the car ends: one
                                 #     hold decided as before, and a Trip Planner
                                 #     filed from pages stitched only on the cues
                                 #     the screen gives
-node tests/mapview.test.js      # 542 on the deciding behind both maps, with
+node tests/mapview.test.js      # 563 on the deciding behind both maps, with
                                 #     no map: the geometry, the cache, and the
                                 #     one-request-a-second rule against a fake
                                 #     clock, which is what makes the awkward

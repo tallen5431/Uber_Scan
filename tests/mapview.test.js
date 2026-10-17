@@ -1337,6 +1337,84 @@ async function nucbox() {
      MV.nbxRefusal({ at: null, why: 'noplace', n: 1 }, d30, '4821 Kestrel Dr', 'held'),
      'no pin for 4821 Kestrel Dr — street found, not the door or place');
 
+  /* The door asked again with its type word left out (streetRetry; the
+     owner's 17 Oct evening snap, "1830 <Name> Creek Cts SW" answered with
+     nothing). Invented streets throughout (tests/fake-nucbox.js, Tansy Creek). */
+  var RETRY = [
+    ['1830 Tansy Creek Cts SW, Marietta', '1830 Tansy Creek SW', 'court', 'an unusual plural and a quadrant'],
+    ['1830 Tansy Creek Ct, Marietta', '1830 Tansy Creek', 'court', 'no quadrant'],
+    ['12A Birch Hollow Dr. NE, Marietta', '12A Birch Hollow NE', 'drive', 'a lettered house and a stop after the type'],
+    ['100 Court St, Marietta', '100 Court', 'street', 'a name that is itself a type word'],
+    ['100 Main SW, Marietta', null, null, 'no type word to leave out'],
+    ['100 Ct SW, Marietta', null, null, 'nothing in front of the type but the house'],
+    ['Tansy Creek Cts SW, Marietta', null, null, 'no house number: no door to ask for'],
+    ['100 N Ct, Marietta', null, null, 'only a quadrant letter in front of the type']
+  ];
+  RETRY.forEach(function (c) {
+    var again = MV.streetRetry(MV.searchPlan(c[0]));
+    eq('streetRetry: ' + c[3] + ' (' + JSON.stringify(c[0]) + ')',
+       JSON.stringify(again ? [again.street, again.retry.type, again.house, again.door] : null),
+       JSON.stringify(c[1] ? [c[1], c[2], MV.searchPlan(c[0]).house, true] : null));
+  });
+  eq('streetType: every spelling of a court is one family, and a name is none',
+     JSON.stringify(['Cts', 'ct', 'Court', 'COURTS', 'Crt', 'Ct.', 'Creek'].map(MV.streetType)),
+     JSON.stringify(['court', 'court', 'court', 'court', 'court', 'court', null]));
+  var tansy = MV.streetRetry(MV.searchPlan('1830 Tansy Creek Cts SW, Marietta'));
+  function fits(name) { return MV.retryFits({ name: name }, tansy); }
+  eq('retryFits: the same name with the type in any spelling or none, and a quadrant or none, '
+     + 'is the street; another type, another name, another number\'s place in the name is not',
+     JSON.stringify([
+       fits('1830, Tansy Creek Court Southwest, Marietta'),
+       fits('1830, Tansy Creek Ct SW, Marietta'),
+       fits('1830, Tansy Creek Courts, Marietta'),
+       fits('1830, Tansy Creek Southwest, Marietta'),
+       fits('Clubhouse, 1830, Tansy Creek Court Southwest, Marietta'),
+       fits('1830, Tansy Creek Drive Southwest, Marietta'),
+       fits('1830, Tansy Creek Court Extension, Marietta'),
+       fits('1830, North Tansy Creek Court, Marietta'),
+       fits('1830, Tansy Court, Marietta'),
+       fits('Tansy Creek Court Southwest, Marietta')]),
+     JSON.stringify([true, true, true, true, true, false, false, false, false, true]));
+  var d50r = MV.discFor(card({ miles: 5.0 }));
+  var both = MV.pickRetry(hitsOf(FAKE.TANSY_1830), d50r, tansy, null);
+  eq('pickRetry: of the Court\'s door and the Drive\'s same number, both inside a 5.0 mi card, '
+     + 'the Court\'s is the door',
+     JSON.stringify([both.at && [both.at.lat, both.at.lon], both.n]),
+     JSON.stringify([[33.98, -84.57], 1]));
+  eq('...where pickInDisc alone would call the two "several"',
+     MV.pickInDisc(hitsOf(FAKE.TANSY_1830), d50r, tansy, null).why, 'several');
+  var drive = MV.pickRetry(hitsOf(FAKE.TANSY_2040),
+                           d50r, MV.streetRetry(MV.searchPlan('2040 Tansy Creek Cts SW, Marietta')), null);
+  eq('...and the Drive\'s door alone is never the Court\'s',
+     JSON.stringify([drive.at, drive.why]), JSON.stringify([null, 'none']));
+  eq('...a cut list proves nothing, and the street alone is not the door',
+     JSON.stringify([MV.pickRetry(hitsOf(FAKE.TANSY_1830), d50r, tansy, 10).why,
+                     MV.pickRetry([{ lat: 33.98, lon: -84.57,
+                                     name: 'Tansy Creek Court Southwest, Marietta' }],
+                                  d50r, tansy, null).why]),
+     JSON.stringify(['capped', 'nodoor']));
+  var far = { lat: 34.3, lon: -84.2, name: 'Tansy Creek Court' };
+  var near = { lat: 33.97, lon: -84.53, name: 'Tansy Creek Court' };
+  eq('retryWanted: nothing answered, or nothing inside, or the street only outside the disc; '
+     + 'never the street inside, several, capped, or a pin',
+     JSON.stringify([
+       MV.retryWanted({ at: null, why: 'none' }, [], d50r),
+       MV.retryWanted({ at: null, why: 'none' }, [far], d50r),
+       MV.retryWanted({ at: null, why: 'nodoor' }, [far], d50r),
+       MV.retryWanted({ at: null, why: 'nodoor' }, [far, near], d50r),
+       MV.retryWanted({ at: null, why: 'several' }, [near, near], d50r),
+       MV.retryWanted({ at: null, why: 'capped' }, [], d50r),
+       MV.retryWanted({ at: { lat: 1, lon: 1 } }, [near], d50r)]),
+     JSON.stringify([true, true, true, false, false, false, false]));
+  var first = { at: null, why: 'none' };
+  eq('afterRetry: the retry\'s answer when it pinned or found the street, else the first\'s',
+     JSON.stringify([MV.afterRetry(first, { at: { lat: 1 } }).at,
+                     MV.afterRetry(first, { at: null, why: 'nodoor' }).why,
+                     MV.afterRetry(first, { at: null, why: 'none', nearest: 9 }) === first,
+                     MV.afterRetry(first, { at: null, why: 'unreachable' }) === first,
+                     MV.afterRetry(first, null) === first]),
+     JSON.stringify([{ lat: 1 }, 'nodoor', true, true, true]));
+
   /* A list cut at the limit proves nothing about what is inside the disc. */
   var sb = hitsOf(FAKE.STARBUCKS.slice(0, 10));
   var sbOne = MV.pickInDisc(sb, d30, MV.searchPlan('Starbucks'), null);
@@ -1796,6 +1874,36 @@ async function nucbox() {
     got = await nbx.place('Birch Ln & Kestrel Dr, Roswell', d94);
     eq('a cross street is refused without asking anybody',
        [got.why, fake.asked.length - n0].join(','), 'cross,0');
+
+    // The door printed "...Cts SW", answered with nothing; asked once more
+    // with the type left out, and the Court's door pinned, not the Drive's.
+    var d50t = MV.discFor(card({ miles: 5.0 }));
+    n0 = fake.asked.length;
+    got = await nbx.place('1830 Tansy Creek Cts SW, Marietta', d50t);
+    sent = fake.asked.slice(n0);
+    eq('through the server, a door printed with an unusual type is found with the type left '
+       + 'out, at the door on the same street (' + sent.join(' ') + ')',
+       JSON.stringify([got.at && [got.at.lat, got.at.lon], sent.map(function (u) {
+         return decodeURIComponent(/street=([^&]*)/.exec(u)[1]);
+       })]),
+       JSON.stringify([[33.98, -84.57], ['1830 Tansy Creek Cts SW', '1830 Tansy Creek SW']]));
+    n0 = fake.asked.length;
+    got = await new MV.NbxSearch({ base: on.base + '/api/nbx' })
+      .place('1830 Tansy Creek Cts SW, Marietta', d50t);
+    eq('...and asked again by another page, both questions come from the server\'s cache',
+       JSON.stringify([!!got.at, fake.asked.length - n0]), JSON.stringify([true, 0]));
+    got = await nbx.place('2040 Tansy Creek Cts SW, Marietta', d50t);
+    eq('...a door of that number on another type of street is not the door: the first '
+       + 'refusal stands', [got.at, got.why].join(','), ',none');
+    n0 = fake.asked.length;
+    got = await nbx.place('4821 Kestrel Dr, Marietta', MV.discFor(card({ miles: 4.0 })));
+    eq('...and a street the NucBox found inside the disc is never asked again: the type '
+       + 'word was not the trouble', [got.why, fake.asked.length - n0].join(','), 'nodoor,1');
+    n0 = fake.asked.length;
+    got = await nbx.place('1830 Tansy Creek Cts SW, Marietta', null);
+    eq('...and with no disc, no retry', fake.asked.slice(n0).filter(function (u) {
+      return /Tansy%20Creek%20SW/.test(u);
+    }).length, 0);
 
     /* Corners and stretches, through this rig's server to the NucBox's
        street index. The fixture's corners are a few tenths of a mile from

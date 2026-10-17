@@ -27,6 +27,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -6414,6 +6415,41 @@ try:
         _h = _settled(_ab)
         eq('[auto arm] an answer outside the held card\'s disc does not arm',
            (_h.get('endPinned'), _h.get('endWhy')), (False, 'not inside the card\'s reach'))
+
+        # The 17 Oct evening snap, invented: the planner's door printed with
+        # the app's "Cts", which the NucBox answers with nothing; asked once
+        # more with the type word left out (MV.streetRetry), the door on the
+        # same street pinned, never the same number on another type of street.
+        _n = len(_aasked('Tansy'))
+        _atook(_ab, 'a-retry', '1830 Tansy Creek Cts SW, Marietta')
+        _h = _settled(_ab)
+        eq('[street retry] a door printed "Cts" and answered with nothing is asked once more '
+           'with its type left out, pinned at the same street\'s door, and says how',
+           (_h.get('endPinned'), _h.get('endBy'), _h.get('endAsked'), _h.get('endWhy'),
+            [urllib.parse.unquote(u.split('street=')[1].split('&')[0])
+             for u in _aasked('Tansy')[_n:]]),
+           (True, 'server', '1830 Tansy Creek SW', None,
+            ['1830 Tansy Creek Cts SW', '1830 Tansy Creek SW']))
+        _n = len(_aasked('Tansy'))
+        _atook(_ab, 'a-retry2', '1830 Tansy Creek Cts SW, Marietta')
+        _h = _settled(_ab)
+        eq('[street retry] ...the next order to that door is answered from the cache, both '
+           'questions', (_h.get('endPinned'), _h.get('endAsked'), len(_aasked('Tansy')) - _n),
+           (True, '1830 Tansy Creek SW', 0))
+        _atook(_ab, 'a-retry-drive', '2040 Tansy Creek Cts SW, Marietta')
+        _h = _settled(_ab)
+        eq('[street retry] the same number on another type of street is not the door: the '
+           'first question\'s refusal stands',
+           (_h.get('endPinned'), _h.get('endAsked'), _h.get('endWhy')),
+           (False, None, 'not inside the card\'s reach'))
+        _atook(_ab, 'a-retry-far', '1830 Tansy Creek Cts SW, Marietta', miles=1.0)
+        _h = _settled(_ab)
+        eq('[street retry] ...and the door found outside the held card\'s disc is refused',
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'not inside the card\'s reach'))
+        _atook(_ab, 'a-door2', _COBB)
+        _h = _settled(_ab)
+        eq('[street retry] a door found as printed says no other street',
+           (_h.get('endPinned'), _h.get('endAsked')), (True, None))
 
         # The same order, its dropoff changed by a ⌖ Scan: asked again.
         _atook(_ab, 'a-change', _KES, miles=6.0)

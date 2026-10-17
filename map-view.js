@@ -1002,6 +1002,134 @@
     return { at: null, why: 'several', n: inside.length };
   }
 
+  /* --- the door asked again, the street's type word left out ------------------
+   *
+   * The owner's snap of 17 Oct 2026 (evening): an Uber order held, its card's
+   * fix good to ±24 m, its disc 12.6 mi, and the Trip Planner's door "1830
+   * <Name> Creek Cts SW, <Town>" — the app prints "Cts", and printed it again
+   * in the card's cross streets. The NucBox answered nothing for the street as
+   * printed (pickInDisc 'none', "not inside the card's reach"): no pin, and
+   * GPS arrival never armed. Why is not measured: "Cts" is at best the
+   * plural, Courts, to a search that reads "Ct" as Court, and OSM writes a
+   * street's type its own way or not at all.
+   * So where the street AS PRINTED is not inside the card's reach, the door is
+   * asked ONCE more with its trailing type word left out — the house number,
+   * the name and the quadrant kept, "1830 <Name> Creek SW" — and an answer is
+   * taken only where ALL of:
+   *
+   *   1. it is the door: its house number is the one asked (hasDoor, inside
+   *      pickInDisc, as for the first question);
+   *   2. its street is the same street (retryFits): the same name words, then
+   *      no type at all or a type of the same family as the printed one
+   *      (STREET_TYPES: Cts, Ct, Crt, Court, Courts are one family), then the
+   *      quadrant if any. Left out of the QUESTION, the type is still held to
+   *      in the ANSWER, so "1830 <Name> Creek Drive" is never the door of
+   *      "1830 <Name> Creek Cts" — a wrong door the GPS would end a delivery
+   *      at, where none is only the timer and Drop;
+   *   3. it is inside the disc, alone or agreeing (pickInDisc), from a list
+   *      not cut at the limit.
+   *
+   * WHEN (retryWanted): the first answer was 'none' — nothing answered, or
+   * nothing inside the disc — or 'nodoor' with no answer inside the disc at
+   * all, the name living only elsewhere. NOT a 'nodoor' with the street inside
+   * the disc: the NucBox knew the street by the name as printed, so the type
+   * word was not the trouble, and the door missing is what the place is
+   * searched for (pickPlace). Never 'several' (doors inside the disc that do
+   * not agree: a question about which, not about the name) or 'capped'.
+   *
+   * One rule for a street's type, not a list of the owner's streets: every
+   * door this rig asks the NucBox for, the server's held end (searchHeldEnd)
+   * and Map view's (NbxSearch.place), goes through streetRetry, so the two ask
+   * the same second question and share its answer in the server's cache. */
+  var STREET_TYPES = {
+    alley: ['aly', 'alley'], avenue: ['ave', 'av', 'avenue', 'aves', 'avenues'],
+    bend: ['bnd', 'bend'], boulevard: ['blvd', 'boulevard'],
+    circle: ['cir', 'circ', 'circle', 'cirs', 'circles'],
+    close: ['close'], commons: ['cmns', 'commons', 'common'],
+    court: ['ct', 'crt', 'court', 'cts', 'courts'], cove: ['cv', 'cove', 'cvs', 'coves'],
+    crossing: ['xing', 'crossing'], drive: ['dr', 'drv', 'drive', 'drs', 'drives'],
+    glen: ['gln', 'glen'], highway: ['hwy', 'highway'], lane: ['ln', 'lane'],
+    landing: ['lndg', 'landing'], loop: ['loop'], overlook: ['ovlk', 'overlook'],
+    parkway: ['pkwy', 'pky', 'parkway'], pass: ['pass'], path: ['path'],
+    place: ['pl', 'place'], point: ['pt', 'point'], ridge: ['rdg', 'ridge'],
+    road: ['rd', 'road'], run: ['run'], square: ['sq', 'square'],
+    street: ['st', 'str', 'street'], terrace: ['ter', 'terr', 'terrace'],
+    trace: ['trce', 'trace'], trail: ['trl', 'trail'], view: ['vw', 'view'],
+    walk: ['walk'], way: ['wy', 'way']
+  };
+  // The quadrants, as the card prints them and as OSM writes them.
+  var QUADRANTS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw', 'north', 'south', 'east',
+                   'west', 'northeast', 'northwest', 'southeast', 'southwest'];
+
+  // The family a street-type word belongs to ("Cts" -> 'court'), or null.
+  function streetType(word) {
+    var w = String(word || '').toLowerCase().replace(/\.$/, '');
+    for (var fam in STREET_TYPES) {
+      if (STREET_TYPES[fam].indexOf(w) >= 0) return fam;
+    }
+    return null;
+  }
+
+  /* The second question for a door plan (searchPlan's, a street with a house
+     number): { kind, street, door, house, retry: {name, type, quadrant} },
+     the street less its trailing type word, or null where it has none to
+     leave out — no type word, or no name in front of it ("100 Court" is a
+     name, not a type). */
+  function streetRetry(plan) {
+    if (!plan || plan.kind !== 'street' || !plan.door) return null;
+    var words = plan.street.replace(/\s+/g, ' ').trim().split(' ');
+    var quad = words.length > 2 && QUADRANTS.indexOf(words[words.length - 1].toLowerCase()) >= 0
+      ? words.pop() : null;
+    var type = words.length > 2 ? streetType(words[words.length - 1]) : null;
+    if (!type) return null;
+    words.pop();
+    var name = words.slice(1);
+    if (!name.some(function (w) { return /[A-Za-z]{2}/.test(w); })) return null;
+    return { kind: 'street', street: words.concat(quad ? [quad] : []).join(' '),
+             door: true, house: plan.house,
+             retry: { name: name.map(function (w) { return w.toLowerCase(); }), type: type,
+                      quadrant: quad } };
+  }
+
+  /* Rule 2: whether an answer's street is the retried plan's street. The
+     street is the part after the house number in display_name (hasDoor's
+     two parts), else the first part; compared word by word, lower case: the
+     name, then no type or one of the family, then a quadrant or none. */
+  function retryFits(hit, plan) {
+    var parts = String(hit && hit.name || '').toLowerCase().split(/\s*,\s*/);
+    var at = parts.slice(0, 2).indexOf(String(plan.house).toLowerCase());
+    var words = (at >= 0 ? parts[at + 1] : parts[0] || '').split(/\s+/).filter(Boolean);
+    var name = plan.retry.name;
+    if (words.length < name.length) return false;
+    for (var i = 0; i < name.length; i++) if (words[i] !== name[i]) return false;
+    var rest = words.slice(name.length);
+    if (rest.length && streetType(rest[0]) === plan.retry.type) rest.shift();
+    if (rest.length && QUADRANTS.indexOf(rest[0]) >= 0) rest.shift();
+    return rest.length === 0;
+  }
+
+  // Rules 1-3: pickInDisc over the answers whose street is the plan's.
+  function pickRetry(hits, disc, plan, cutAt) {
+    return pickInDisc((hits || []).filter(function (h) { return h && retryFits(h, plan); }),
+                      disc, plan, cutAt);
+  }
+
+  // WHEN: the first answer said the street as printed is not inside the disc.
+  function retryWanted(res, hits, disc) {
+    if (!res || res.at) return false;
+    if (res.why === 'none') return true;
+    return res.why === 'nodoor' && !!disc && !pointsAmong(hits).some(function (h) {
+      return crowMiles(disc.at, h) <= disc.miles;
+    });
+  }
+
+  /* Which of the two answers is acted on: the retry's when it pinned, or when
+     it found the street and not the door ('nodoor', which the place is asked
+     after); else the first, whose refusal is what the driver is told. */
+  function afterRetry(first, second) {
+    return second && (second.at || second.why === 'nodoor') ? second : first;
+  }
+
   /* --- the held end by its PLACE, when the NucBox has the street and not the door
    *
    * The owner's decision of 17 Oct 2026. An Uber order's door was "1000 <Road>
@@ -2573,14 +2701,27 @@
         return res.why === 'nostreet' ? self.search(plan, disc) : res;
       });
     }
+    var me = this;
+    // ...and a door whose street as printed is not inside the disc is asked
+    // ONCE more with its type word left out (streetRetry, retryWanted,
+    // pickRetry): the server's own question for the held end, word for word,
+    // so the two share its answer.
+    var again = disc ? streetRetry(plan) : null;
     var asked = this.search(plan, disc);
+    if (again) {
+      asked = asked.then(function (res) {
+        if (!retryWanted(res, res.seen && res.seen.hits, disc)) return res;
+        return me.search(again, disc).then(function (two) {
+          return afterRetry(res, two);
+        });
+      });
+    }
     // ...and the held end's PLACE, the owner's rule of 17 Oct (pickPlace):
     // `opts.place` is the place the phone printed for the stop, given only
     // for the held order's end (live.html, askNucBox), and it is asked only
     // when the door search found the street and not the door, inside a disc.
     var named = opts.place && plan.kind === 'street' && plan.door && disc ? opts.place : null;
     if (!named) return asked;
-    var me = this;
     return asked.then(function (res) {
       return res.why === 'nodoor' ? me.placeSearch(named, disc) : res;
     });
@@ -2676,7 +2817,8 @@
     return this.get(path).then(function (body) {
       var down = nbxDown(body);
       if (down) return down;
-      var res = pickInDisc(body.hits, disc, plan, body.cutAt);
+      // A retried door (streetRetry) is held to its street (pickRetry).
+      var res = (plan.retry ? pickRetry : pickInDisc)(body.hits, disc, plan, body.cutAt);
       // What the NucBox answered, beside what was chosen from it, for Map view
       // to draw — and the door asked for, so a street answered for a door is
       // drawn as what it is (located).
@@ -3429,5 +3571,8 @@
            AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI,
            NBX_GAP_MS: NBX_GAP_MS, NBX_KEEP: NBX_KEEP, SNAP_MI: SNAP_MI, ROAD_SAME_MI: ROAD_SAME_MI,
            hasDoor: hasDoor, discShape: discShape, located: located,
+           STREET_TYPES: STREET_TYPES, streetType: streetType, streetRetry: streetRetry,
+           retryFits: retryFits, pickRetry: pickRetry, retryWanted: retryWanted,
+           afterRetry: afterRetry,
            howFound: howFound };
 }));
