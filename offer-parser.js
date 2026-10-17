@@ -2286,29 +2286,81 @@
     return /[A-Za-z]{2}/.test(name) ? name : '';
   }
 
-  function findStores(rawText) {
+  /* The store's door off the line under its name (the owner's 17 Oct
+     afternoon shift): "113 <Name> St NE, Marietta, 30060 GA", ZIP before the
+     state, or "…, Marietta, 30." with the ZIP cut by the card's edge. A house
+     number (up to four icon marks in front), a street with two letters in a
+     row, a comma, a town of capitalised words with three letters and no cut
+     mark, then only the ZIP and the state, in either order, each once; a ZIP
+     under five digits is the edge, dropped, and only as the last word.
+     Anything else after the town refuses the line. Written out as
+     "<n> <street>, <town>[, <ST> <ZIP>]". The Python twin, store_door /
+     STORE_DOOR, says why each part is asked. */
+  var STORE_DOOR = new RegExp(
+    '^\\W{0,4}(\\d{1,6}[A-Za-z]?\\s+[^,]*?)\\s*,\\s*'
+    + "([A-Z][A-Za-z'-]*(?:\\s+[A-Z][A-Za-z'-]*){0,3})\\s*(?:,\\s*([^,]*?))?\\s*$");
+  var DOOR_ZIP = /^\d{5}\.?$/;
+  var DOOR_STATE = /^[A-Z]{2}$/;
+  var DOOR_CUT_ZIP = /^\d{0,4}(?:\.+|…)?$/;
+  // The union of what the two languages call a space, as STORE_SPACE.
+  var DOOR_SPACE = /[\s\u001c-\u001f\u0085]+/g;
+
+  function storeDoor(line) {
+    var m = STORE_DOOR.exec(String(line || '').replace(DOOR_SPACE, ' ').trim());
+    if (!m) return null;
+    var street = m[1], town = m[2], tail = m[3] || '';
+    // Asked here, not in the pattern, which would backtrack n². See store_door.
+    if (!/[A-Za-z]{2}/.test(street) || (town.match(/[A-Za-z]/g) || []).length < 3) return null;
+    var state = null, zip = null;
+    var words = tail.split(' ').filter(function (w) { return w.length; });
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (DOOR_ZIP.test(w) && zip === null) zip = w.replace(/\.$/, '');
+      else if (DOOR_STATE.test(w) && state === null) state = w;
+      else if (i === words.length - 1 && DOOR_CUT_ZIP.test(w) && zip === null) continue;
+      else return null;
+    }
+    var rest = [state, zip].filter(Boolean).join(' ');
+    return street + ', ' + town + (rest ? ', ' + rest : '');
+  }
+
+  /* `doors`, when an array is passed, is filled beside the return value with
+     each store's door (storeDoor) off the line DIRECTLY under its name, or
+     null: a chip line between them is skipped as always, and a street after
+     one is not the name's door. See find_stores. */
+  function findStores(rawText, doors) {
     var lines = String(rawText || '').split('\n'), at = -1, i;
     for (i = 0; i < lines.length; i++) {
       if (STORES_LINE.test(lines[i])) { at = i; break; }
     }
     if (at < 0) return [];
-    var out = [], pending = [];
+    var out = [], pending = [], doorOf = [], underName = false;
     for (i = at + 1; i < lines.length; i++) {
       var line = lines[i];
       if (STORE_END.test(line)) break;
-      if (STORE_CHIP.test(line)) continue;
+      if (STORE_CHIP.test(line)) { underName = false; continue; }
       if (STORE_STREET.test(line)) {
-        if (pending.length) out.push(pending.join(' ').slice(0, MAX_PLACE));
+        if (pending.length) {
+          out.push(pending.join(' ').slice(0, MAX_PLACE));
+          doorOf.push(underName ? storeDoor(line) : null);
+        }
         pending = [];
+        underName = false;
         continue;
       }
       var name = storeName(line);
-      if (!name) continue;
+      if (!name) {
+        // A blank line is no line at all; anything else stands between.
+        underName = underName && !line.replace(STORE_EDGES, '');
+        continue;
+      }
       // A name the card wrapped onto a second line starts with a letter and
       // no icon.
       if (pending.length === 1 && name === line.replace(STORE_EDGES, '')) pending.push(name);
       else pending = [name];
+      underName = true;
     }
+    if (doors) doors.splice.apply(doors, [0, doors.length].concat(doorOf.slice(0, MAX_PLACES)));
     return out.slice(0, MAX_PLACES);
   }
 
@@ -3300,13 +3352,19 @@
     /* DoorDash's stops card names its stores itself, and they are all the
        pickup end: "Multiple dropoffs" prints no customer, so without the ends
        the second store would be offered as the destination. See findStores. */
-    var stores = findStores(rawText);
+    var doors = [];
+    var stores = findStores(rawText, doors);
     if (stores.length) {
       places = stores;
       ends = stores.map(function () { return 0; });
     }
     var pickup = findPickup(places, ends);
     var dropoff = findDropoff(places, text, ends);
+    /* ...and that store's door, when the card printed it under the name: only
+       ever the PICKUP's, found beside the store and nowhere else, so it cannot
+       become the dropoff. See storeDoor. */
+    var pickupLine = stores.length && stores.indexOf(pickup) >= 0
+      ? doors[stores.indexOf(pickup)] : null;
     /* The card can name its approach leg in words or by where it printed the
        pickup, and this is the second one. Written onto the leg rather than
        handed to toPickup, so the one rule that decides keeps deciding and so
@@ -3335,6 +3393,12 @@
       // in the car. See findDropoff, which is the half that decides.
       pickup: pickup,
       dropoff: dropoff,
+      // The pickup's street address off DoorDash's stops card, under the
+      // store's name, or null (every Uber card). `pickup` stays the NAME, for
+      // showing; Map view searches this for the pickup's pin in its place
+      // (live.html mapWants). Never a place, never the dropoff. See
+      // pickupLine in offer_parser.py.
+      pickupLine: pickupLine,
       // ...and which end the CARD said each entry of `places` was, beside it,
       // so an accumulator can ask the same question of the merged list.
       // Travels for the same reason `legDetail[].isApproach` travels: this
@@ -3787,7 +3851,7 @@
            DEFAULT_SETTINGS: DEFAULT_SETTINGS,
            findDeadline: findDeadline, minutesUntil: minutesUntil,
            findPlaces: findPlaces, trimPlace: trimPlace,
-           findPickup: findPickup, findDropoff: findDropoff,
+           findPickup: findPickup, findDropoff: findDropoff, storeDoor: storeDoor,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner, sheetDropoff: sheetDropoff,
            placePopup: placePopup,

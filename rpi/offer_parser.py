@@ -4120,30 +4120,104 @@ def _store_name(line):
 _STORE_EDGES = re.compile(r'^%s|%s\Z' % (WHITESPACE.pattern, WHITESPACE.pattern))
 
 
-def find_stores(raw_text):
+# THE STORE'S DOOR, off the line under its name (the owner's 17 Oct afternoon
+# shift). The card now prints the whole address there, not a street cut off:
+#
+#     & <store>                                  <- the name, as above
+#     113 <Name> St NE, Marietta, 30060 GA       <- ZIP BEFORE the state
+#     2530 <Name> Road, Marietta, 30.            <- the card's edge cut the ZIP
+#
+# The rig kept the name alone, Map view asked the NucBox for a chain's name in
+# the card's disc, got "too many to be sure", and the pickup had no pin, so the
+# stack line had no pickup to measure the detour through. The line under it is
+# the door, and searched as a street (map-view.js searchPlan: the house number
+# is the door rule, the town is cut off at the comma and never sent) it is one
+# place, where the name is every branch in the disc.
+#
+# The shape, all of it required except the tail: a house number (an icon of up
+# to four marks in front is the reader's, as STORE_STREET allows it), a street
+# with two letters in a row, a comma, a town of capitalised words with at
+# least three letters and no cut mark ("Sm..." is a town the card's edge took,
+# and is no town). After the town only the ZIP and the state, in either order,
+# each at most once: "30060 GA", "GA 30060", either alone, or nothing. A ZIP
+# under five digits is the card's edge and is dropped, and only as the LAST
+# word, where the edge is. Anything else after the town ("Suite 200", a second
+# line run on) refuses the whole line rather than guessing where the address
+# stopped. Written out as "<n> <street>, <town>[, <ST> <ZIP>]", find_address's
+# order, whatever order the card printed.
+STORE_DOOR = re.compile(
+    r'^\W{0,4}(\d{1,6}[A-Za-z]?\s+[^,]*?)\s*,\s*'
+    r'([A-Z][A-Za-z\'-]*(?:\s+[A-Z][A-Za-z\'-]*){0,3})\s*(?:,\s*([^,]*?))?\s*$',
+    ASCII)
+_DOOR_ZIP = re.compile(r'\d{5}\.?\Z', ASCII)
+_DOOR_STATE = re.compile(r'[A-Z]{2}\Z', ASCII)
+_DOOR_CUT_ZIP = re.compile(r'\d{0,4}(?:\.+|…)?\Z', ASCII)
+
+
+def store_door(line):
+    """The store's address off the line under its name, or None. See
+    STORE_DOOR for the shape and why each part is asked."""
+    m = STORE_DOOR.match(WHITESPACE.sub(' ', line or '').strip())
+    if not m:
+        return None
+    street, town, tail = m.group(1), m.group(2), m.group(3) or ''
+    # Asked here and not in the pattern: two runs of [^,] either side of the
+    # letters backtrack against each other, n² on a long line with no comma.
+    if not re.search(r'[A-Za-z]{2}', street) or len(re.findall(r'[A-Za-z]', town)) < 3:
+        return None
+    state = zip_ = None
+    words = [w for w in tail.split(' ') if w]
+    for i, w in enumerate(words):
+        if _DOOR_ZIP.match(w) and zip_ is None:
+            zip_ = w.rstrip('.')
+        elif _DOOR_STATE.match(w) and state is None:
+            state = w
+        elif i == len(words) - 1 and _DOOR_CUT_ZIP.match(w) and zip_ is None:
+            pass
+        else:
+            return None
+    out = '%s, %s' % (street, town)
+    rest = ' '.join(x for x in (state, zip_) if x)
+    return out + (', ' + rest if rest else '')
+
+
+def find_stores(raw_text, doors=None):
     """The store names on DoorDash's stops card, in the order it lists them.
 
     Empty on every other card: it reads nothing unless a `N stops (X mi)` line
     is there to start from. A name is only kept once the street under it has
     been seen, so a line of map texture with no street after it is not a store.
+
+    `doors`, when a list is passed, is filled beside the return value with each
+    store's address (store_door) off the line DIRECTLY under its name, or None
+    — the same out-parameter shape find_places' `whose` has. Directly: a chip
+    line between them ("Pick up 2 orders") is skipped as it always was, and a
+    street after one is not said to be the name's door.
     """
     lines = (raw_text or '').split('\n')
     at = next((i for i, l in enumerate(lines) if STORES_LINE.search(l)), None)
     if at is None:
         return []
-    out, pending = [], []
+    out, pending, door_of = [], [], []
+    # Whether the line before this one was the name's last line, for `doors`.
+    under_name = False
     for line in lines[at + 1:]:
         if STORE_END.search(line):
             break
         if STORE_CHIP.search(line):
+            under_name = False
             continue
         if STORE_STREET.search(line):
             if pending:
                 out.append(' '.join(pending)[:MAX_PLACE])
+                door_of.append(store_door(line) if under_name else None)
             pending = []
+            under_name = False
             continue
         name = _store_name(line)
         if not name:
+            # A blank line is no line at all; anything else stands between.
+            under_name = under_name and not _STORE_EDGES.sub('', line)
             continue
         # A name the card wrapped onto a second line — `Freddy's Frozen
         # Custard &` / `Steakburgers` — starts with a letter and no icon.
@@ -4151,6 +4225,9 @@ def find_stores(raw_text):
             pending.append(name)
         else:
             pending = [name]
+        under_name = True
+    if doors is not None:
+        doors[:] = door_of[:MAX_PLACES]
     return out[:MAX_PLACES]
 
 
@@ -4835,11 +4912,18 @@ def parse(raw_text):
     # DoorDash's stops card names its stores itself, and they are all the
     # pickup end: "Multiple dropoffs" prints no customer, so without the ends
     # the second store would be offered as the destination. See find_stores.
-    stores = find_stores(raw_text)
+    doors = []
+    stores = find_stores(raw_text, doors)
     if stores:
         places, ends = stores, [0] * len(stores)
     pickup = find_pickup(places, ends)
     dropoff = find_dropoff(places, text, ends)
+    # ...and that store's door, when the card printed it under the name. Only
+    # ever the PICKUP's: every store on this card is the pickup end (above),
+    # and the door is found beside the store and nowhere else, so it cannot
+    # become the dropoff — find_dropoff never sees it. See STORE_DOOR.
+    pickup_line = (doors[stores.index(pickup)]
+                   if stores and pickup in stores else None)
     # The card can name its approach leg in words or by where it printed the
     # pickup, and this is the second one. Written onto the leg rather than
     # handed to to_pickup, so that the one rule that decides keeps deciding and
@@ -4871,6 +4955,15 @@ def parse(raw_text):
         # See find_dropoff, which is the half that decides.
         'pickup': pickup,
         'dropoff': dropoff,
+        # The pickup's street address as DoorDash's stops card prints it under
+        # the store's name, "<n> <street>, <town>[, <ST> <ZIP>]", or None — on
+        # every Uber card, and on a DoorDash card whose line under the name
+        # is not that shape. `pickup` stays the NAME, for showing; this is
+        # what Map view searches for the pickup's pin in its place (live.html
+        # mapWants), because a chain's name in the card's disc is every branch
+        # and a door is one. Never a place and never the dropoff: `places`
+        # and the journal are unchanged by it. See STORE_DOOR.
+        'pickupLine': pickup_line,
         # ...and which end the CARD said each entry of `places` was, beside it,
         # so the accumulator can ask the same question of the merged list.
         # Travels for the same reason `legDetail[].isApproach` travels: this

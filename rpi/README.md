@@ -8465,7 +8465,7 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 1241 checks, the shared corpus
+node tests/corpus.test.js       # 1287 checks, the shared corpus
 node tests/parser.test.js       # 112 on the browser side alone
 node tests/advice.test.js       # 450 on what line to tell a driver to draw
 node tests/crop.test.js         #  22 on the trip from a drag to a crop box
@@ -8473,8 +8473,8 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-python3 rpi/test_parser.py      # 1321 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  # 317 on merging readings across frames, on a
+python3 rpi/test_parser.py      # 1367 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  # 320 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 280 on where to look, how big, what to log,
@@ -8505,7 +8505,7 @@ python3 rpi/test_cropbox.py     #  42 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 567 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 568 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
@@ -8544,7 +8544,7 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 1317 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 1320 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
@@ -8594,7 +8594,7 @@ node tests/streets.test.js      #  71 on the NucBox's street index, from a
                                 #     another, corners at a shared node and at a
                                 #     bridge, a dual carriageway as one corner,
                                 #     and a stretch cut at the box's edge
-python3 rpi/test_loop.py        # 399 on the scan loop re-telling a card once
+python3 rpi/test_loop.py        # 401 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused

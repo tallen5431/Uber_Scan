@@ -198,6 +198,12 @@ for c in cases.get('sheets', []):
 for c in cases.get('popups', []):
     eq('popups / ' + c['name'], P.place_popup(c['text']), c['expect'])
 
+# The store's door off the line under its name on DoorDash's stops card, or
+# None: the rule parse() takes `pickupLine` by. The same cases
+# tests/corpus.test.js runs. See STORE_DOOR in offer_parser.py.
+for c in cases.get('doors', []):
+    eq('doors / ' + c['name'], P.store_door(c['line']), c['expect'])
+
 for c in cases.get('navStops', []):
     _p = P.parse(c['text'])
     eq('navStops / ' + c['name'],

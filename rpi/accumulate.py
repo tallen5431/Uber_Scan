@@ -137,6 +137,9 @@ class OfferAccumulator:
         # the union was protecting is lost.
         self.pickup_votes = {}
         self.dropoff_votes = {}
+        # The store's door each frame read under a pickup's name, by the same
+        # index as `places` (OP's `pickupLine`). See where it is filled.
+        self.pickup_lines = {}
         # Which end of the job the CARD printed each of those against, beside
         # them and the same length: 0 a start, 1 an end, None the card did not
         # say. See OP.place_ends for what it is read off and the nine rows of
@@ -743,6 +746,18 @@ class OfferAccumulator:
             # strings keeps both — which the offers page renders, arrow and
             # all, as a two-stop route that never happened. See OP.same_place.
             at = OP.merge_place(self.places, place)
+            # ...and the store's door this frame read under that name (OP's
+            # `pickupLine`, DoorDash's stops card), kept by the same index:
+            # the line sits under the name at the card's edge and is the
+            # field a frame loses, so one frame seeing it is enough, as with
+            # `places`. The fuller of two readings stands — "…, 30060 GA"
+            # over the same line with the edge's "30." — longest, an earlier
+            # one on a tie. Asked of THIS frame's pickup only, so a door is
+            # never kept against a name the frame did not call the start.
+            _line = parsed.get('pickupLine')
+            if _line and place == parsed.get('pickup') and (
+                    len(_line) > len(self.pickup_lines.get(at) or '')):
+                self.pickup_lines[at] = _line
             # This frame's own verdict on which end this name is, counted by
             # the same index. `place` and parsed['pickup'] are both strings out
             # of THIS frame's own list, so comparing them is exact — the fuzzy
@@ -1078,6 +1093,15 @@ class OfferAccumulator:
                                  OP.find_dropoff(merged['places'], None, _ends),
                                  _ends.count(1) == 1,
                                  not_this=merged['pickup']))
+        # ...and the merged pickup's door, off whichever frame read it, by the
+        # merged pickup's own index — not whichever frame came last, which
+        # `dict(parsed)` would hand on, and not a door read under a name the
+        # window no longer calls the start. Map view searches it for the pin
+        # (live.html mapWants), and a door that came and went with the frames
+        # would move the pin's search under the driver with every read.
+        _pk = merged['pickup']
+        merged['pickupLine'] = (self.pickup_lines.get(merged['places'].index(_pk))
+                                if _pk in merged['places'] else None)
         # ...and WHY there is none, which is not the same fact and is the one
         # the driving screen needs.
         #

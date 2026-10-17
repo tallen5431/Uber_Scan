@@ -1996,7 +1996,86 @@
     "pay": 16.0,
     "addon": false
    }
+  },
+ {
+  "name": "DoorDash's stops card prints the store's door under its name, ZIP before the state: the pickup's door is that line, the pickup still the name",
+  "_why": "The owner's 17 Oct afternoon shift, as the rig's OCR gave it; store and street invented. The rig kept the name alone, Map view asked the NucBox for it in the card's disc, got \"too many to be sure\", and the pickup had no pin. `pickupLine` is what Map view searches in its place.",
+  "text": "$12.05 incl. tips\n2 stops (8.4 mi) - 53 min\n? Fable 2nd Branch\n113 Wren St NE, Marietta, 30060 GA\n& Customer dropoff",
+  "expect": {
+   "pay": 12.05,
+   "minutes": 53,
+   "miles": 8.4,
+   "stops": 2,
+   "pickup": "Fable 2nd Branch",
+   "pickupLine": "113 Wren St NE, Marietta, GA 30060",
+   "dropoff": null,
+   "endRefused": true
   }
+ },
+ {
+  "name": "...and with the ZIP cut by the card's edge, the cut ZIP is dropped",
+  "_why": "The same shift's second card: \"…, Marietta, 30.\" where the right edge took the ZIP. Store and street invented.",
+  "text": "$7.70 incl. tips\n2 stops (2.4 mi) « 18 min\n& Lark Owl Grill\n2530 Kestrel Plains Road, Marietta, 30.\n& Customer dropoff",
+  "expect": {
+   "pay": 7.7,
+   "minutes": 18,
+   "miles": 2.4,
+   "pickup": "Lark Owl Grill",
+   "pickupLine": "2530 Kestrel Plains Road, Marietta",
+   "dropoff": null
+  }
+ },
+ {
+  "name": "...and with the state before the ZIP, as an address is usually written",
+  "text": "$9.10 incl. tips\n2 stops (4.1 mi) - 26 min\n@ Wren Noodle Bar\n40 Birchfall Ln, Kennesaw, GA 30144\nCustomer dropoff",
+  "expect": {
+   "pickup": "Wren Noodle Bar",
+   "pickupLine": "40 Birchfall Ln, Kennesaw, GA 30144",
+   "dropoff": null
+  }
+ },
+ {
+  "name": "...and with two stores, the door is the pickup's, the first store's, and never the second's",
+  "text": "$8.45 incl. tips\n3 stops (8.8 mi) - 45 min\n@ Fable Grill\n12 Ab Rd, Marietta, 30066.\n@ Wren Noodles\n40 Cd Ln, Acworth, 30101.\nMultiple dropoffs (2 stops)",
+  "expect": {
+   "pickup": "Fable Grill",
+   "pickupLine": "12 Ab Rd, Marietta, 30066",
+   "dropoff": null
+  }
+ },
+ {
+  "name": "a street whose town the card's edge cut is no door: the name is all the pickup has",
+  "text": "$7.75\n2 stops (7.8 mi) - 30 min\n& Corner Bagel Co\n123 Maple Grove Road Northwest, Sm...\n& Customer dropoff",
+  "expect": {
+   "pickup": "Corner Bagel Co",
+   "pickupLine": null,
+   "dropoff": null
+  }
+ },
+ {
+  "name": "...nor is a line with more than a ZIP and a state after the town",
+  "text": "$7.75\n2 stops (7.8 mi) - 30 min\n& Corner Bagel Co\n123 Maple Grove Rd, Marietta, Suite 200\n& Customer dropoff",
+  "expect": {
+   "pickup": "Corner Bagel Co",
+   "pickupLine": null
+  }
+ },
+ {
+  "name": "...nor a street read under a chip line rather than directly under the name",
+  "text": "$7.75\n2 stops (7.8 mi) - 30 min\n& Corner Bagel Co\nPick up 2 orders\n123 Maple Grove Rd, Marietta, 30066 GA\n& Customer dropoff",
+  "expect": {
+   "pickupLine": null
+  }
+ },
+ {
+  "name": "Uber's bracketed store keeps its door in `pickup`, as it always has, and has no pickupLine",
+  "text": "Exclusive x\n$9.12\nGuaranteed (incl. tip)\n26 min (7.1 mi) total\nFable Grill (1200 Lantern Rd)\nBirch Ct & Kestrel Way, Marietta",
+  "expect": {
+   "pickup": "Fable Grill (1200 Lantern Rd)",
+   "pickupLine": null,
+   "dropoff": "Birch Ct & Kestrel Way, Marietta"
+  }
+ }
  ],
  "rate": [
  {
@@ -6278,6 +6357,94 @@
   {
    "name": "DoorDash's stops card itself, its stores' streets printed under their names, is no popup",
    "text": "$7.75\n3 stops (7.8 mi) · 30 min\n@ Fable Bagel Co\n123 Lantern Grove Road Northwest, Sm...\n& Pine Noodle House\n45 Birch Street Northwest, Sm...\n& Customer dropoff\nDrop off 2 orders",
+   "expect": null
+  }
+ ],
+ "_doors_comment": "The store's door off the line under its name on DoorDash's stops card: store_door / storeDoor, the rule parse() takes `pickupLine` by. A house number, a street, a comma, a town, then only the ZIP and the state in either order; a ZIP the card's edge cut is dropped. `expect` is the line as \"<n> <street>, <town>[, <ST> <ZIP>]\", or null when the line is refused. The shapes are the owner's 17 Oct afternoon shift; every street is invented.",
+ "doors": [
+  {
+   "name": "the shift's shape: ZIP before the state, written state first",
+   "line": "113 Wren St NE, Marietta, 30060 GA",
+   "expect": "113 Wren St NE, Marietta, GA 30060"
+  },
+  {
+   "name": "the state before the ZIP",
+   "line": "12 Ab Rd, Marietta, GA 30066",
+   "expect": "12 Ab Rd, Marietta, GA 30066"
+  },
+  {
+   "name": "the ZIP cut by the card's edge is dropped",
+   "line": "2530 Kestrel Plains Road, Marietta, 30.",
+   "expect": "2530 Kestrel Plains Road, Marietta"
+  },
+  {
+   "name": "...and cut to an ellipsis, behind the reader's icon",
+   "line": "• 12 Ab Rd, Marietta, 300…",
+   "expect": "12 Ab Rd, Marietta"
+  },
+  {
+   "name": "a ZIP with the card's full stop after it",
+   "line": "12 Ab Rd, Marietta, 30066.",
+   "expect": "12 Ab Rd, Marietta, 30066"
+  },
+  {
+   "name": "no ZIP and no state",
+   "line": "12 Ab Rd, Marietta",
+   "expect": "12 Ab Rd, Marietta"
+  },
+  {
+   "name": "a town of two words and the state alone",
+   "line": "12 Ab Rd, Powder Springs, GA",
+   "expect": "12 Ab Rd, Powder Springs, GA"
+  },
+  {
+   "name": "the reader's odd spaces are spaces in both ports",
+   "line": "12\u001cAb Rd,\ufeffMarietta, 30066",
+   "expect": "12 Ab Rd, Marietta, 30066"
+  },
+  {
+   "name": "a town the card's edge cut is no town",
+   "line": "123 Maple Grove Road Northwest, Sm...",
+   "expect": null
+  },
+  {
+   "name": "...nor is a town of two letters",
+   "line": "12 Ab Rd, Ma",
+   "expect": null
+  },
+  {
+   "name": "no town at all",
+   "line": "12 Ab Rd",
+   "expect": null
+  },
+  {
+   "name": "no house number",
+   "line": "Ab Rd, Marietta, 30066",
+   "expect": null
+  },
+  {
+   "name": "a street with no two letters together",
+   "line": "12 3 R, Marietta",
+   "expect": null
+  },
+  {
+   "name": "something else after the town refuses the line",
+   "line": "12 Ab Rd, Marietta, Suite 2",
+   "expect": null
+  },
+  {
+   "name": "a cut ZIP that is not the last word is not the edge",
+   "line": "12 Ab Rd, Marietta, 30. GA",
+   "expect": null
+  },
+  {
+   "name": "two states",
+   "line": "12 Ab Rd, Marietta, GA GA",
+   "expect": null
+  },
+  {
+   "name": "two ZIPs",
+   "line": "12 Ab Rd, Marietta, 30066 30067",
    "expect": null
   }
  ]

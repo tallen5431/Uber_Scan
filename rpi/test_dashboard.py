@@ -4199,6 +4199,74 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  /* --- a door off the card -------------------------------------------------
+   *
+   * DoorDash's stops card printed the store's address under its name (the
+   * owner's 17 Oct shift): the offer line carries `pickupLine` beside
+   * `pickup`, the name, and no tap. Map view searches the door, not the name
+   * — a chain's name in the disc was "too many to be sure" and no pin — and
+   * pins it, measures the figure to it, and says nothing of a tap, because
+   * there was none. The stub answers the door, the NAME and the held order's
+   * end, so a page that asked the name would pin it. Invented store and door. */
+  {
+    stage = 'the map: a door off the card';
+    const DOOR = '2530 Kestrel Plains Road, Marietta, GA 30066';
+    const NAME = 'Lark Owl Grill';
+    const ANSWERS = { 'Powder Springs Rd': [33.900, -84.640] };
+    ANSWERS[DOOR] = [34.020, -84.580];
+    ANSWERS[NAME] = [34.050, -84.610];
+    const page = await browser.newContext({ viewport: { width: 800, height: 480 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/status*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ last: null, lastAgeMs: null, heardAgeMs: 900, offer: null,
+        holding: { pay: 18.09, minutes: 38, dropoff: 'Powder Springs Rd', holdId: 'h-door@1',
+                   card: { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0, gpsMode: 3,
+                           gpsOk: true, gpsWhy: null, miles: 9.0, hasTotal: true, legs: 2,
+                           whole: true } } }) }));
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
+    await page.route('**/api/today*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{}' }));
+    await page.route('**/nominatim.openstreetmap.org/**', async (route) => {
+      const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
+      await page.evaluate((x) => window.__asked.push(x), q).catch(() => {});
+      const hit = ANSWERS[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    const push = (m) => page.evaluate((x) => {
+      if (x.offer) Object.assign(x.offer, window.__CARD);
+      window.__es.push(x);
+    }, m);
+    await push({ ready: true, state: 'warn', perHour: 20, grossPerHour: 24, pay: 7.70,
+                 minutes: 18, miles: 2.4, cost: 0.7, target: 25, band: 15, stack: null,
+                 holding: { pay: 18.09, minutes: 38, dropoff: 'Powder Springs Rd',
+                            holdId: 'h-door@1',
+                            card: { lat: 34.010, lon: -84.600, gpsAge: 0.8, gpsErr: 12.0,
+                                    gpsMode: 3, gpsOk: true, gpsWhy: null, miles: 9.0,
+                                    hasTotal: true, legs: 2, whole: true } } });
+    await push({ offer: { id: 'dd-door', pay: 7.70, minutes: 18, billedMinutes: 18, miles: 2.4,
+                          cost: 0.7, pickup: NAME, pickupLine: DOOR, dropoff: null,
+                          endRefused: true, app: 'doordash' } });
+    await page.click('#viewMode');
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');
+    await page.waitForTimeout(3200);
+    out.cardDoor = await page.evaluate(() => ({
+      asked: window.__asked.slice(),
+      pins: window.__marks.map((m) => String(m.popup || '').replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ').trim()),
+      note: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim() }));
+    await page.close();
+  }
+
   /* --- you are here --------------------------------------------------------
    *
    * The heartbeat's newest fix, drawn on the map as a dot inside a circle the
@@ -10177,6 +10245,19 @@ try:
         % (td.get('note'),),
         re.match(r'^(?:\+\d+\.\d mi out of your way|this pickup is on your way) — straight '
                  r'lines, not roads · addr from tap', td.get('note') or ''))
+    # A door off the card: see the stage of that name.
+    cd = got.get('cardDoor') or {}
+    eq('a door off the card: Map view searches the address DoorDash printed under the '
+       'store\'s name, not the name (%r)' % (cd.get('asked'),),
+       ('2530 Kestrel Plains Road, Marietta, GA 30066' in (cd.get('asked') or []),
+        'Lark Owl Grill' in (cd.get('asked') or [])), (True, False))
+    ok_('a door off the card: the pickup pin is that address, and claims no tap (%r)'
+        % (cd.get('pins'),),
+        any('pick this one up' in m and '2530 Kestrel Plains Road' in m
+            and 'addr from tap' not in m for m in cd.get('pins') or []))
+    ok_('a door off the card: the figure is measured to it (%r)' % (cd.get('note'),),
+        re.match(r'^(?:\+\d+\.\d mi out of your way|this pickup is on your way) — straight '
+                 r'lines, not roads$', cd.get('note') or ''))
     ht = got.get('heldTook') or {}
     ok_('held end: the ✓ Took reply\'s end is pinned as the held order\'s at once (%r)'
         % (ht.get('took'),), any(_HELD in m and 'Powder Springs' in m

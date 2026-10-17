@@ -206,7 +206,7 @@ real offers before mounting anything.
 
 ```sh
 node tests/parser.test.js     # 103 checks, no browser needed
-node tests/corpus.test.js     # 1012 checks shared with the Pi parser
+node tests/corpus.test.js     # 1287 checks shared with the Pi parser
 node tests/crop.test.js       #  22 on the Pi's hand-drawn box, server to scanner
 python3 rpi/test_scanjs.py    # 203 through a real browser, end to end
 ```

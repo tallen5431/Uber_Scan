@@ -132,6 +132,13 @@ function stopFields(stops) {
   eq('popups / ' + c.name, JSON.stringify(P.placePopup(c.text)), JSON.stringify(c.expect));
 });
 
+/* The store's door off the line under its name on DoorDash's stops card, or
+   null: the rule parse() takes `pickupLine` by. The same cases
+   rpi/test_parser.py runs. See STORE_DOOR in offer_parser.py. */
+(cases.doors || []).forEach(function (c) {
+  eq('doors / ' + c.name, P.storeDoor(c.line), c.expect);
+});
+
 /* What a navigation or "Deliver to" screen gives as a destination nobody
    pressed for. `expect` is [screen, line, stop, under, asOffer]; this port has
    no address_stop, so it holds the screen, findAddress's line and the offer
