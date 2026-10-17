@@ -2027,7 +2027,14 @@ const SNAP_MEASURE = (fixture) => {
         // above is of a bar two buttons short of its widest. That is the bar a
         // driver never sees at the moment it matters: an offer on screen while
         // a job is already in the car is exactly when both show.
-        shown.bar = await page.evaluate(() => {
+        // The ⌖ button's answers, which are its face for a while after a
+        // press: the fullest bar is measured with each in turn below. The
+        // refused-press face is read off the page, so a longer one is measured
+        // as written (DEST_STORE_FACE, live.html).
+        const destSrc = await (await fetch(base + '/live.html')).text();
+        const destFaces = ['⌖ reading…', '⌖ not read',
+          (/DEST_STORE_FACE = '([^']*)'/.exec(destSrc) || [])[1] || '(no DEST_STORE_FACE)'];
+        shown.bar = await page.evaluate((faces) => {
           const took = document.getElementById('took');
           const drop = document.getElementById('drop');
           const bar = document.querySelector('.bottombar');
@@ -2110,10 +2117,17 @@ const SNAP_MEASURE = (fixture) => {
           const full = measure();
           dest.hidden = false;
           const crowded = measure();
+          // ...and the same bar with each of ⌖'s answers on its face.
+          const was = dest.textContent;
+          const answers = faces.map((f) => {
+            dest.textContent = f;
+            return [f, measure().spilling];
+          });
+          dest.textContent = was;
           const d = document.documentElement;
           return { plain: plain, before: before, full: full, crowded: crowded,
-                   over: d.scrollWidth > d.clientWidth + 1 };
-        });
+                   answers: answers, over: d.scrollWidth > d.clientWidth + 1 };
+        }, destFaces);
         // The line ▣ Set box leaves up for six seconds once a box is read,
         // in the page's own words, over the bar as it stands: each control's
         // width with the line up against its width without. The line widened
@@ -5280,6 +5294,14 @@ try:
                 if (crowded.get('width') or 0) >= 470:
                     eq('...with every label inside its own button at %s'
                        % panel, crowded.get('spilling'), [])
+                    # ...and ⌖ answering a press: "reading…", "not read", and
+                    # the refused press at the restaurant ('⌖ a pickup').
+                    eq('...and with each of ⌖\'s answers on its face at %s' % panel,
+                       [(f, s) for f, s in bar.get('answers') or [] if s],
+                       [])
+                    eq('...the refused press\'s face among them, read off the page at %s'
+                       % panel, [f for f, _s in bar.get('answers') or []][2:],
+                       ['⌖ a pickup'])
 
                 # --- 📷 Snap ------------------------------------------------
                 snap_checks(panel, phone.get('snap') or {})

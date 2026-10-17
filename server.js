@@ -2123,6 +2123,22 @@ function dropoffArrived(read, force) {
       });
     }
     if (!wasAsked && !kept) { delete read.dropoff; }
+    // ...and a PRESS for the order in the car that was not kept, which is a
+    // store's screen and nothing else (Assemble.dropoff, rule 5: a press
+    // otherwise replaces anything). Said, because the driver asked — but NOT
+    // as what was read. The panel turns ⌖ green over any `dropoff.line` and
+    // titles it "Dropoff read as <line>", and on 17 Oct that line was the
+    // store's town: a green button over an end the order did not have. So
+    // the line goes and the refusal comes in its place — why, and the end
+    // the order kept — on the shape a press that found nothing already has
+    // (`found: false`, `asked`), so a panel from before this says "not read",
+    // which is true of the order, and never green. No mark row: nothing was
+    // filed.
+    if (wasAsked && carrying && !kept) {
+      console.log('dropoff press not filed: ' + said.why + ', the order keeps its end');
+      read.dropoff = { line: null, found: false, asked: true, refused: said.why,
+                       kept: carrying.dropoff || null, at: read.dropoff.at };
+    }
     // ...and an address filed onto the order in the car goes to the
     // panel AS that order's end, not only as the button's words.
     //
@@ -7521,7 +7537,11 @@ function route(req, res) {
       broadcast({ chooser: null });
       if (said.dropoff) broadcast(said);
       retryPool();
-      send(res, 200, JSON.stringify({ ok: true, filed: said.dropoff ? body.pick : null }), json);
+      // ...a row whose order refused the press (a store's screen: Assemble.
+      // dropoff, rule 5) filed nothing, and the reply says so; the stream has
+      // just said why.
+      var filed = said.dropoff && !said.dropoff.refused ? body.pick : null;
+      send(res, 200, JSON.stringify({ ok: true, filed: filed }), json);
     });
   }
 

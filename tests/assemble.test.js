@@ -357,6 +357,100 @@ SEQ.forEach(function (seq) {
      { value: 'Oak Dr & Elm Dr, Acworth', from: 'card' });
 })();
 
+/* ---- a press at the restaurant: the store's screen is not the order's end ----
+ *
+ * The 17 Oct fault, in invented names: an Uber order held with the Trip
+ * Planner's door as its end, ⌖ pressed at the restaurant over Uber's
+ * navigation to the store (uber.pickupNav), and the press read the town line
+ * alone and replaced the planner's door with "<Town>, GA 30066". */
+(function () {
+  var DOOR = '283 Quillon St NW, Smyrna';
+  function hold(extra) {
+    var h = Object.assign({ id: 'o', acceptedAt: 1000, pickup: 'Fable Grill',
+                            dropoff: 'Customer dropoff', dropoffScanned: false,
+                            card: { legs: 1, multiOrder: false } }, extra || {});
+    A.fieldsOf(h);
+    // The planner filed its door, unprompted, as on the shift.
+    var pl = { found: true, line: DOOR, street: '283 Quillon St NW', city: 'Smyrna',
+               state: 'GA', zip: null, asked: false, labelled: 'dropoff', planner: true,
+               at: 2000 };
+    A.file(h, pl, A.dropoff(h, pl, null));
+    return h;
+  }
+  function press(line, screen, extra) {
+    var parts = line.split(', ');
+    return Object.assign({ found: true, line: line,
+                           street: /^\d/.test(parts[0]) ? parts[0] : null,
+                           city: /^\d/.test(parts[0]) ? parts[1] : parts[0], state: 'GA',
+                           zip: '30066', asked: true, labelled: null, app: 'uber',
+                           screen: screen, at: 5000 }, extra || {});
+  }
+  function ends(h) {
+    return [h.dropoff, h.fields.dropoff && h.fields.dropoff.from];
+  }
+  var h = hold();
+  eq('the premise: the held order\'s end is the planner\'s door', ends(h), [DOOR, 'planner']);
+  var town = press('Smyrna, GA 30066', 'uber.pickupNav');
+  var said = A.dropoff(h, town, null);
+  A.file(h, town, said);
+  eq('a press over Uber\'s navigation to the store is refused while an order is held, and the '
+     + 'planner\'s door stays its end',
+     [said.to, said.kept, said.asked, said.why, ends(h)],
+     [null, false, true, 'a pickup screen', [DOOR, 'planner']]);
+  var h2 = hold();
+  var street = press('1150 Larch Pkwy, Smyrna, GA 30080', 'uber.pickupNav');
+  said = A.dropoff(h2, street, null);
+  eq('...whatever line it read off that screen, a door with a house number included',
+     [said.to, said.why, ends(h2)], [null, 'a pickup screen', [DOOR, 'planner']]);
+  // Nothing held: a press is about the card being screened, as it always was.
+  var card = { id: 'c', dropoff: null };
+  said = A.dropoff(null, town, card);
+  A.fileCard(card, town, said);
+  eq('with nothing held a press over the store\'s navigation still files on the screened card',
+     [said.to, said.why, card.dropoff, card.dropoffFrom],
+     ['card', 'press', 'Smyrna, GA 30066', 'press']);
+  // The held order's pickup, by each word on record, off a screen that is not
+  // the store's navigation.
+  var STORE = '1150 Larch Pkwy, Smyrna';
+  var hp = hold();
+  hp.fields.pickupAddr = { value: STORE, from: 'planner', conf: 2, at: 2000, screen: null };
+  said = A.dropoff(hp, press(STORE + ', GA 30080', 'uber.nav'), null);
+  eq('a press whose line is the pickup a planner filed on the held order is refused',
+     [said.to, said.why, ends(hp)], [null, 'a pickup', [DOOR, 'planner']]);
+  var hs = hold({ planner: { stops: [{ kind: 'pickup', street: '1150 Larch Pkwy',
+                                       line: STORE }] } });
+  said = A.dropoff(hs, press(STORE + ', GA 30080', 'unknown'), null);
+  eq('...and one whose line is one of its planner\'s pickups',
+     [said.to, said.why, ends(hs)], [null, 'a pickup', [DOOR, 'planner']]);
+  var hc = hold({ pickup: STORE });
+  said = A.dropoff(hc, press(STORE + ', GA 30080', 'uber.nav'), null);
+  eq('...and one whose line is the pickup its card printed',
+     [said.to, said.why, ends(hc)], [null, 'a pickup', [DOOR, 'planner']]);
+  // ...on every road a press takes to the hold: pressBetween's navigation cue
+  // gives it to the order, and the order refuses it.
+  var ht = hold();
+  ht.tookAt = 1000;
+  ht.app = 'uber';
+  ht.fields.pickupAddr = { value: STORE, from: 'planner', conf: 2, at: 2000, screen: null };
+  var onNav = press(STORE + ', GA 30080', 'uber.nav');
+  var between = A.pressBetween(ht, { id: 'c-other', app: 'uber', dropoff: null }, onNav);
+  said = A.dropoff(ht, onNav, { id: 'c-other', dropoff: null });
+  eq('a press pressBetween gives the held order on its navigation cue is still refused '
+     + 'when it reads the held pickup', [between && between.to, said.to, said.why, ends(ht)],
+     ['hold', null, 'a pickup', [DOOR, 'planner']]);
+  // The premise of all of it: an ordinary press still replaces anything.
+  var hn = hold();
+  var cust = press('61 Saddlebrook Ln, Smyrna, GA 30080', 'uber.nav');
+  said = A.dropoff(hn, cust, null);
+  A.file(hn, cust, said);
+  eq('an ordinary press over the customer\'s navigation still replaces the planner\'s door',
+     [said.to, said.why, ends(hn)],
+     ['hold', 'press', ['61 Saddlebrook Ln, Smyrna, GA 30080', 'press']]);
+  var hu = hold();
+  said = A.dropoff(hu, press('61 Saddlebrook Ln, Smyrna, GA 30080', 'unknown'), null);
+  eq('...and so does one off a screen nothing typed', [said.to, said.why], ['hold', 'press']);
+})();
+
 /* ---- the planner's one dropoff: moved from rpi/scan_pi.py, the same names ---- */
 (function () {
   function stop(kind, street, city, line) {

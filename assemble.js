@@ -263,6 +263,19 @@
     });
   }
 
+  /* Why `d`, read for the held order, is the store's and not where the order
+   * goes, or null: Uber's navigation to the store (uber.pickupNav), 'a pickup
+   * screen' — whatever line it read, since that screen prints the store's
+   * door and town and nothing of the customer's — else a pickup of `held` by
+   * any word on record (heldPickup), 'a pickup'. navCandidate's first and
+   * last refusals, the two that are about the store rather than the label;
+   * dropoff() holds a press to the same two (its rule 5). */
+  function storeScreen(held, d) {
+    if (!d) return null;
+    if (d.screen === 'uber.pickupNav') return 'a pickup screen';
+    return heldPickup(held, d) ? 'a pickup' : null;
+  }
+
   /* The Trip Planner's stops come off the order in the car at the moments the
    * driving screen forgets them (live.html's forgetDest): a ⌖ press and a
    * different offer on the record. See forgetPlanner in server.js, which says
@@ -306,9 +319,24 @@
    *      confidently wrong direction, so it is refused outright, blank or not.
    *      A navigation destination was held to every pickup on record, of
    *      every order in the car, before it got here (navCandidate).
-   *   5. Onto the hold when outranks() says so; held and not outranked is
+   *   5. A PRESS for a held order off a store's screen is refused, and the
+   *      hold's end stays what it was: the screen is Uber's navigation to the
+   *      store (`screen` uber.pickupNav), 'a pickup screen', or the line is a
+   *      pickup of the held order by any word on record (heldPickup), 'a
+   *      pickup'. outranks() lets a press past anything, and on 17 Oct that
+   *      was the fault: an Uber order held with the Trip Planner's door as its
+   *      end, ⌖ pressed at the restaurant over "Arriving soon / <Store> / <n>
+   *      <Street> & / Suite 128, <Town>, GA / 30066 / Note from business", and
+   *      the press read the town line alone and filed "<Town>, GA 30066" over
+   *      the planner's door — Map view ran the order to the town's centre, and
+   *      every offer for twenty minutes was judged against it. navCandidate
+   *      already refuses an unprompted read off that screen and off a held
+   *      pickup; a press is the driver saying "this screen", and a store's
+   *      screen is not where the order goes, whoever asked. With nothing held
+   *      a press is about the card being screened and none of this applies.
+   *   6. Onto the hold when outranks() says so; held and not outranked is
    *      nothing, and nothing said.
-   *   6. With nothing held, onto the card being screened when it is asked, or
+   *   7. With nothing held, onto the card being screened when it is asked, or
    *      when that card names no end.
    *
    * `tally` is whether the journal's `kind: 'sighting'` count row is owed:
@@ -352,6 +380,15 @@
     if (held) {
       if (aPickup) {
         out.why = 'a pickup';
+        return out;
+      }
+      // Rule 5: a press off a store's screen. Every road a press takes onto
+      // a hold ends here — straight, pressBetween's 'hold', the chooser's row,
+      // attribute()'s cue with two in the car — so this is the one place it
+      // is asked. Nothing filed, `to` null; server.js tells the panel why.
+      var offStore = wasAsked ? storeScreen(held, d) : null;
+      if (offStore) {
+        out.why = offStore;
         return out;
       }
       var cur = fieldsOf(held).dropoff;

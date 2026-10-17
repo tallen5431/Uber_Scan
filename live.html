@@ -3097,6 +3097,19 @@
   // none of them as the order's end — {stops, unfiled} — or null. See
   // showStops and unfiledNow.
   var plannerSaid = null;
+  // ...and a press the order in the car REFUSED, because the phone was showing
+  // the store: Uber's navigation to the restaurant, or the order's own pickup
+  // (server.js, dropoffArrived; Assemble.dropoff, rule 5) — {why, kept}, the
+  // server's reason and the end the order kept, or null. It is an answer to
+  // the press, so it goes when the press's other answers go (forgetDest) and
+  // when an address arrives after it, pressed for or read on its own (the
+  // navigation screen, once the car leaves the store). On 17 Oct a press at
+  // the restaurant read the store's town and the button went green, "Dropoff
+  // read as <Town>, GA 30066", over an order whose door was already on record.
+  // The face is two words because the bar gives it no more ('⌖ not read' is
+  // as long); the sentence, with the end kept, is on the title.
+  var destStore = null;
+  var DEST_STORE_FACE = '⌖ a pickup';
 
   /* What a press read is forgotten, all of it, in one place.
    *
@@ -3117,6 +3130,7 @@
    * the second-long tick a put-down order's stops were still being shown. */
   function forgetDest() {
     destSaid = '';
+    destStore = null;
     plannerSaid = null;
     showStops(false);
   }
@@ -3405,6 +3419,7 @@
     // The address itself goes where there is room for it - the title, and the
     // stack line's own geography.
     setText(el.dest, destBusy ? '⌖ reading…'
+      : destStore ? DEST_STORE_FACE
       : destFailed ? '⌖ not read' : '⌖ Scan');
     el.dest.classList.toggle('done', !destBusy && !!destSaid);
     // The same class Drop and Took already use for the same thing, so a
@@ -3461,7 +3476,15 @@
     // is the sentence that stands for. One reason, read off the line, for
     // both. See unfiledNow.
     var unfiled = unfiledNow();
-    setTitle(el.dest, destSaid
+    // A refused press: no colour — the order's end is as it was, which is
+    // neither news to celebrate nor a fault of the rig's — and the sentence.
+    var storeSaid = destStore
+      ? 'Restaurant screen, not where this order goes — '
+        + (destStore.kept ? 'kept ' + destStore.kept : 'nothing filed')
+        + '. Press again over the customer\'s address.'
+      : '';
+    setTitle(el.dest, storeSaid ? storeSaid
+      : destSaid
       ? 'Read as: ' + destSaid + '. Press again to read it afresh.'
       : destFailed
       ? 'Nothing on that screen read as an address. Get the destination up on '
@@ -3482,7 +3505,8 @@
       : 'Read where this card goes off your phone. It does not touch your phone.');
     // ...and said out loud, because the colour is the only thing on screen that
     // changed and a screen reader cannot see it.
-    setAttr(el.dest, 'aria-label', destSaid
+    setAttr(el.dest, 'aria-label', storeSaid ? storeSaid
+      : destSaid
       ? 'Dropoff read as ' + destSaid + '. Press again to read it afresh.'
       : destFailed
       ? 'Nothing on that screen read as an address. Press again once the '
@@ -5289,6 +5313,16 @@
         // !destSaid — until the next card cleared it.
         var ontoCard = holdingNow && msg.offer && msg.offer.dropoff === msg.dropoff.line;
         if (!ontoCard) destSaid = msg.dropoff.line;
+        destFailed = false;
+        destStore = null;
+        destBusy = false;
+        showDest();
+      } else if (msg.dropoff && msg.dropoff.refused && msg.dropoff.asked) {
+        // A press the order in the car refused: the phone showed the store
+        // (see destStore). Answered, so not "reading…"; not green, because
+        // nothing was read for the order; not "not read", because something
+        // was, and it was the restaurant's.
+        destStore = { why: msg.dropoff.refused, kept: msg.dropoff.kept || null };
         destFailed = false;
         destBusy = false;
         showDest();

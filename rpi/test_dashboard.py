@@ -1915,6 +1915,47 @@ const framed = (page) => page.waitForFunction(
       { dropoff: { line: null, found: false, asked: true, at: 4 } }));
     await page.waitForTimeout(200);
 
+    /* --- ...and a press the order in the car REFUSED: the store's screen ----
+     *
+     * 17 Oct: an order held with its planner's door on record, ⌖ pressed at
+     * the restaurant over Uber's navigation to the store, and the button went
+     * green, "Dropoff read as <Town>, GA 30066", for an end the order was
+     * never given. server.js now answers that press with the refusal and the
+     * end kept (dropoffArrived), and no line. Names and streets invented. */
+    await page.evaluate((r) => window.__es.push(r),
+      Object.assign({}, READINGS.deducted, {
+        holding: { pay: 11.09, minutes: 35, dropoff: '283 Quillon St NW, Smyrna' },
+        stack: null }));
+    await page.waitForTimeout(200);
+    await page.evaluate(() => document.getElementById('dest').click());
+    await page.waitForTimeout(150);
+    await page.evaluate(() => window.__es.push(
+      { dropoff: { line: null, found: false, asked: true, refused: 'a pickup screen',
+                   kept: '283 Quillon St NW, Smyrna', at: 5 } }));
+    await page.waitForTimeout(200);
+    const destLook = () => {
+      const d = document.getElementById('dest');
+      return { label: (d.textContent || '').trim(),
+               failed: d.classList.contains('failed'),
+               done: d.classList.contains('done'),
+               title: d.getAttribute('title') || '',
+               aria: d.getAttribute('aria-label') || '' };
+    };
+    out['destStore ' + panel[0]] = { refused: await page.evaluate(destLook) };
+    // ...and the customer's door arriving after it — here with no press, as
+    // the navigation screen read on its own once the car leaves the store —
+    // takes its place, green as ever.
+    await page.evaluate(() => window.__es.push(
+      { dropoff: { line: '61 Saddlebrook Ln, Smyrna', found: true, asked: false, at: 6 } }));
+    await page.waitForTimeout(200);
+    out['destStore ' + panel[0]].after = await page.evaluate(destLook);
+    // Back to the state the checks below start from: an answered empty press.
+    await page.evaluate(() => document.getElementById('dest').click());
+    await page.waitForTimeout(150);
+    await page.evaluate(() => window.__es.push(
+      { dropoff: { line: null, found: false, asked: true, at: 7 } }));
+    await page.waitForTimeout(200);
+
     /* --- the same button, before the accept ------------------------------
      *
      * The driver's own words: "for doordash orders I need to tap the customer
@@ -7971,6 +8012,24 @@ try:
         # reason to ask.
         ok_('%s: ...and was asking before the press that failed' % panel,
             de.get('wantedBefore'))
+        # A press the order refused because the phone showed the restaurant:
+        # said on the button, never green, never the town it read, and the
+        # end the order kept on the title. See destStore in live.html.
+        _ds = got.get('destStore ' + panel) or {}
+        _dr = _ds.get('refused') or {}
+        eq('%s: a press refused at the restaurant says so on ⌖ and is not green'
+           % panel, (_dr.get('label'), _dr.get('done'), _dr.get('failed')),
+           ('⌖ a pickup', False, False))
+        ok_('%s: ...and its title and spoken label name the end the order kept (%r)'
+            % (panel, _dr.get('title', '')[:60]),
+            all('kept 283 Quillon St NW, Smyrna' in (_dr.get(k) or '')
+                and 'Restaurant screen' in (_dr.get(k) or '')
+                and 'GA 30066' not in (_dr.get(k) or '') for k in ('title', 'aria')))
+        _da = _ds.get('after') or {}
+        eq('%s: ...and the customer\'s door arriving after it takes its place, green as ever'
+           % panel, (_da.get('label'), _da.get('done'),
+                     'Read as: 61 Saddlebrook Ln, Smyrna' in (_da.get('title') or '')),
+           ('⌖ Scan', True, True))
 
         held = got.get('held ' + panel) or {}
         ok_('%s: the pair line is up while the order is held' % panel,

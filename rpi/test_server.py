@@ -7534,6 +7534,104 @@ try:
 finally:
     stop(_tp2)
 
+# --- ⌖ at the restaurant: the store's screen is not where the order goes ------
+#
+# The 17 Oct fault, through the real server, every name and street invented: an
+# Uber order held, its Trip Planner read unprompted and its door filed
+# (`from: 'planner'`), then ⌖ pressed at the restaurant over Uber's navigation
+# to the store (uber.pickupNav), whose read gave the town line alone. The press
+# replaced the door, the panel turned ⌖ green, "Dropoff read as <Town>", and
+# Map view ran the order to the town's centre. Now the press is refused
+# (Assemble.dropoff, rule 5): the hold keeps its door, nothing is written, and
+# the stream says why and what was kept in place of what was read.
+_PK_DOOR = '283 Quillon St NW, Smyrna'
+_PK_TOWN = 'Smyrna, GA 30066'
+_PK_STORE = '1150 Larch Pkwy, Smyrna'
+
+
+def _pkpress(line, screen, street=None):
+    return {'dropoff': {'found': True, 'line': line, 'street': street, 'city': 'Smyrna',
+                        'state': 'GA', 'zip': '30066', 'asked': True, 'labelled': None,
+                        'ms': 10, 'app': 'uber', 'screen': screen, 'expectedBy': None,
+                        'at': int(time.time() * 1000)}}
+
+
+def _pickupnav(carry):
+    pp, pb, pj, _ph = _cserver('pickupnav-' + carry, CARRY_TWO=carry, CHOOSER_MS='1500')
+    out = {}
+
+    def held():
+        h = get(pb, '/api/status').get('holding') or {}
+        return (h.get('dropoff'), ((h.get('fields') or {}).get('dropoff') or {}).get('from'))
+
+    def marks(line):
+        return [(r.get('id'), r.get('asked')) for r in _rows(pj, 'mark')
+                if r.get('dropoff') == line]
+
+    def told(heard, line):
+        return ([(m['dropoff'].get('refused'), m['dropoff'].get('kept'), m['dropoff'].get('line'))
+                 for m in heard if (m.get('dropoff') or {}).get('refused')],
+                [m for m in heard if (m.get('dropoff') or {}).get('line') == line])
+
+    try:
+        _took2(pb, _card('pk-1', 11.09, minutes=35.0, pickup='Fable Grill', dropoff=None))
+        _say(_ssight(False, 'uber.planner', 'uber',
+                     [_sstop('pickup', _PK_STORE, 'Fable Grill', 1180),
+                      _sstop('dropoff', _PK_DOOR, 'Lee M.', 1202)], (True, True), True))
+        out['planner'] = held()
+        heard = listen(pb, 2.0)
+        time.sleep(0.2)
+        _say(_pkpress(_PK_TOWN, 'uber.pickupNav'))
+        time.sleep(0.4)
+        out['store'] = (held(), marks(_PK_TOWN), told(heard, _PK_TOWN))
+        # ...the same over another screen, reading the store's own door.
+        _say(_pkpress(_PK_STORE + ', GA 30080', 'uber.nav', '1150 Larch Pkwy'))
+        out['door'] = (held(), marks(_PK_STORE + ', GA 30080'))
+        # ...and through the chooser: a card being screened, the store's
+        # navigation pressed, which no cue gives to either, and the order's row
+        # picked. The order still refuses it, and the reply says nothing filed.
+        _say(_card('pk-s', 7.5, minutes=20.0, miles=3.0))
+        heard = listen(pb, 2.0)
+        time.sleep(0.2)
+        _say(_pkpress(_PK_TOWN, 'uber.pickupNav'))
+        ch = get(pb, '/api/status').get('chooser') or {}
+        rows = [r.get('pick') for r in ch.get('rows') or [] if r.get('n') == 1]
+        picked = post(pb, '/api/choose', {'id': ch.get('id'), 'pick': rows[0] if rows else None})
+        time.sleep(0.4)
+        out['chooser'] = (picked[0], (picked[1] or {}).get('filed', '<none>'), held(),
+                          marks(_PK_TOWN), told(heard, _PK_TOWN)[0])
+        # The premise: an ordinary press over the customer's navigation still
+        # replaces the planner's door.
+        _say(_pkpress('61 Saddlebrook Ln, Smyrna, GA 30080', 'uber.nav', '61 Saddlebrook Ln'))
+        out['ordinary'] = (held(), marks('61 Saddlebrook Ln, Smyrna, GA 30080'))
+    finally:
+        stop(pp)
+    return out
+
+
+_PKW = {
+    'planner': (_PK_DOOR, 'planner'),
+    'store': ((_PK_DOOR, 'planner'), [],
+              ([('a pickup screen', _PK_DOOR, None)], [])),
+    'door': ((_PK_DOOR, 'planner'), []),
+    'chooser': (200, None, (_PK_DOOR, 'planner'), [], [('a pickup screen', _PK_DOOR, None)]),
+    'ordinary': (('61 Saddlebrook Ln, Smyrna, GA 30080', 'press'),
+                 [('pk-1', True)]),
+}
+_pkr = _pickupnav('0')
+eq('the premise: the planner filed the held order\'s door', _pkr.get('planner'), _PKW['planner'])
+eq('⌖ over Uber\'s navigation to the store leaves the held order\'s planner end on '
+   '/api/status, writes no mark, and tells the panel why and what was kept, never the town',
+   _pkr.get('store'), _PKW['store'])
+eq('...a press that reads the held order\'s pickup door is refused the same way',
+   _pkr.get('door'), _PKW['door'])
+eq('...and the chooser\'s order row picked for that press files nothing, and its reply says so',
+   _pkr.get('chooser'), _PKW['chooser'])
+eq('...while an ordinary press still replaces the planner\'s end', _pkr.get('ordinary'),
+   _PKW['ordinary'])
+eq('[carry two] ⌖ at the restaurant with one order in the car: the same',
+   _pickupnav('1'), _PKW)
+
 shutil.rmtree(_cdir, ignore_errors=True)
 
 # --- the held order's pickups, visited ----------------------------------------
