@@ -1442,6 +1442,20 @@ DRIVE_FORMS = {
                     'larger': ['line', 'line2']},
     'waiting': {'msgs': [_EMPTY], 'larger': ['label']},
 }
+# ...and an Uber add-on's trip of three, one original and two add-ons
+# (server.js placeTook, the owner's 16 Oct trip details): ② onwards share the
+# second line ("②–③ +$256.16 → 1/2 ends", live.html restLine) at their widest
+# pay, and under an offer the trip is one line. No third line, no control.
+_DBA = dict(_DB, addOn=True, of='l-a@1')
+_DCA = dict(_DBA, n=3, holdId='l-c@3', dropoff=None)
+DRIVE_FORMS['three'] = {
+    'msgs': [dict(HELD['offer'], holding=_DA, orders=[_DA, _DBA, _DCA], unowned=0,
+                  stack=dict(HELD['offer']['stack'], heldCount=3,
+                             leftEach=[55, 60, 60], maxMinutes=197, route=None))],
+    'larger': ['label', 'pay', 'range', 'held']}
+DRIVE_FORMS['between three'] = {
+    'msgs': [{'holding': _DA, 'orders': [_DA, _DBA, _DCA], 'unowned': 2}, _EMPTY],
+    'larger': ['line', 'line2']}
 # ...and over the two pair forms, the answer on the card (live.html showWay,
 # MV.wayLine) in every form it takes, drawn by the page's own MV.sayWay over
 # the pair at its widest: ON THE WAY and OUT OF THE WAY at the widest figure

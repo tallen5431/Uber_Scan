@@ -955,10 +955,13 @@
    * a job of its own that might ride along inside another — so with two
    * orders held its share of the range is not "anywhere from nothing to all
    * of it" but exactly what the card says. Known by the screen the scanner
-   * typed it as (`screen`, the offer line's; OP.screen_type) or by the hold's
-   * own `addOn`. */
+   * typed it as (`screen`, the offer line's; OP.screen_type), by the parser's
+   * own `addon` (offer_parser.is_addon, on the offer line beside it: it also
+   * knows the card whose leg lost its plus signs), or by the hold's own
+   * `addOn`. */
   function addOnCard(offer) {
-    return !!offer && (offer.screen === 'uber.addon' || offer.addOn === true);
+    return !!offer && (offer.screen === 'uber.addon' || offer.addon === true
+                       || offer.addOn === true);
   }
 
   /* Every order in the car at once, first-taken first, and the offer against

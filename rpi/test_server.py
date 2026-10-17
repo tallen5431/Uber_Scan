@@ -7226,6 +7226,314 @@ try:
 finally:
     stop(_rp)
 
+# >>> add-on
+# Uber's add-on with carrying two OFF: the owner's decision of 17 Oct 2026.
+# On the 16 Oct shift the driver ticked "+ $9.50 / +8 min (+1.3 mi)" with an
+# order in the car, and the Took replaced it — a drop row `by: 'replaced'` for
+# an order whose planner door was on record, and a hold that knew only the
+# add-on, on its own 21-minute clock. Uber paid the two as one trip. Now the
+# add-on joins the trip in the car (server.js placeTook, tripOf), the planner
+# that shows both orders files each door on a cue or not at all, and the
+# trip's details for that night — a second add-on on the same trip, $25.03 +
+# $9.50 + $6.89 — are held as three orders of one trip. Every name, store and
+# street is invented.
+_HOLD_GRACE = 600000
+
+
+def _tplan(picks, drops, bottom=True):
+    """An unprompted Trip Planner read whole: `picks` store names, `drops`
+    (customer, street, Expected by) — the list seen to its foot unless
+    `bottom` is False."""
+    stops = [{'kind': 'pickup', 'orders': 1, 'name': nm, 'expectedBy': 700 + i,
+              'street': '%d Mill St' % (5 + i), 'city': 'Smyrna', 'state': 'GA', 'zip': None,
+              'line': '%d Mill St, Smyrna' % (5 + i), 'partial': None}
+             for i, nm in enumerate(picks)]
+    stops += [{'kind': 'dropoff', 'orders': 1, 'name': nm, 'expectedBy': by, 'street': st,
+               'city': 'Smyrna', 'state': 'GA', 'zip': None, 'line': st + ', Smyrna',
+               'partial': None} for nm, st, by in drops]
+    return {'sighting': {'asked': False, 'whole': True, 'titled': True, 'app': 'uber',
+                         'screen': 'uber.planner', 'page': {'top': True, 'bottom': bottom},
+                         'stops': stops, 'orderCount': None, 'keep': False}}
+
+
+def _holdfile(base_dir):
+    return json.load(open(os.path.join(os.path.dirname(base_dir), 'holding.json')))['orders']
+
+
+def _until(hand):
+    return json.load(open(os.path.join(hand, 'uberscan-holding.json'))).get('until')
+
+
+_MARA = ('Mara T.', '4821 Kestrel Dr', 1202)
+_JULES = ('Jules K.', '77 Birch Ln', 1220)
+_ap, _ab, _aj, _ah = _cserver('addon', CARRY_TWO='0')
+try:
+    _took2(_ab, _card('u-a', 25.03, minutes=31.0, miles=9.4, pickup='Fable Grill'))
+    _say(_tplan(['Fable Grill'], [_MARA]))
+    eq('[add-on] the premise: the order in the car has its planner door',
+       _held_end(_ab), ('4821 Kestrel Dr, Smyrna', 'planner'))
+    # The add-on, typed by the parser's `addon` alone (its leg lost its plus
+    # signs, so the screen type says uber.offer).
+    _rep = _took2(_ab, _card('u-b', 9.50, minutes=8.0, miles=1.3, pickup='Kestrel Noodle Bar',
+                             addon=True))
+    _st = get(_ab, '/api/status')
+    eq('[add-on] ✓ Took on an add-on with an order in the car keeps that order and holds the '
+       'add-on beside it, carrying two off: no drop row, the first order\'s door kept',
+       ([o.get('pay') for o in _orders(_ab)], _rows(_aj, 'drop'), _st.get('carryTwo'),
+        _held_end(_ab)),
+       ([25.03, 9.5], [], False, ('4821 Kestrel Dr, Smyrna', 'planner')))
+    _hf = _holdfile(_aj)
+    _aend = _hf[0]['acceptedAt'] + 31 * 1.5 * 60000 + _HOLD_GRACE
+    eq('[add-on] ...joined to it, and held to its end and then its own +8 min, half again — '
+       'not its own clock alone',
+       (_hf[1].get('addOn'), _hf[1].get('of'), _hf[1].get('ofEnds'), _until(_ah)),
+       (True, _hf[0]['holdId'], _aend, _aend + 8 * 1.5 * 60000))
+    eq('[add-on] the Took marks say which is the add-on, and to which order, by id',
+       [(r.get('id'), r.get('addon'), r.get('addonTo')) for r in _rows(_aj, 'mark')
+        if r.get('accepted') is True],
+       [('u-a', None, None), ('u-b', True, _hf[0]['holdId'])])
+    eq('[add-on] ...and the panel is told both orders, the second an add-on of the first, '
+       'with its Undo',
+       ([(o.get('n'), o.get('addOn'), o.get('of')) for o in _orders(_ab)],
+        [(o.get('n'), o.get('addOn')) for o in _rep.get('orders') or []],
+        (_rep.get('added') or {}).get('id')),
+       ([(1, False, None), (2, True, _hf[0]['holdId'])], [(1, False), (2, True)], 'u-b'))
+    # The list ran off the screen: a lone dropoff is a single-trip rule, and
+    # this is no single trip.
+    _say(_tplan(['Fable Grill', 'Kestrel Noodle Bar'], [_JULES], bottom=False))
+    eq('[add-on] a planner whose foot is off the screen files nothing onto either order',
+       ([o.get('dropoff') for o in _orders(_ab)], get(_ab, '/api/status').get('unowned')),
+       (['4821 Kestrel Dr, Smyrna', None], 0))
+    _say(_tplan(['Fable Grill', 'Kestrel Noodle Bar'], [_MARA, _JULES]))
+    _st = get(_ab, '/api/status')
+    eq('[add-on] the Trip Planner with both orders\' stops, read with nobody pressing: each '
+       'door onto its own order — the add-on\'s by growth — nothing waiting, no chooser',
+       ([o.get('dropoff') for o in _orders(_ab)], _st.get('unowned'), _st.get('chooser'),
+        [(r.get('id'), r.get('cue')) for r in _rows(_aj, 'mark')
+         if r.get('dropoff') == '77 Birch Ln, Smyrna']),
+       (['4821 Kestrel Dr, Smyrna', '77 Birch Ln, Smyrna'], 0, None, [('u-b', 'growth')]))
+    _pl = _tplan(['Fable Grill', 'Kestrel Noodle Bar'], [_MARA, _JULES])['sighting']['stops']
+    _say({'planner': {'stops': _pl, 'unfiled': None, 'asked': False, 'ms': None,
+                      'at': int(time.time() * 1000)}})
+    eq('[add-on] ...and its two pickups are each marked with its own order, by the store',
+       [s.get('of') for s in (_holdfile(_aj)[0].get('planner') or {}).get('stops') or []
+        if s.get('kind') == 'pickup'], [_hf[0]['holdId'], _hf[1]['holdId']])
+    # A new offer, weighed against the trip in the car as carrying two weighs
+    # one against two orders.
+    _say(_card('u-p', 14.0, minutes=25.0, miles=4.0))
+    _say({'ready': True, 'state': 'go', 'perHour': 30.0, 'grossPerHour': 33.6,
+          'pay': 14.0, 'minutes': 25.0, 'billedMinutes': 25.0, 'cardMinutes': 25.0,
+          'miles': 4.0, 'cost': 1.4, 'target': 25, 'band': 15, 'costPerMile': 0.35})
+    _ls = (get(_ab, '/api/status').get('last') or {}).get('stack') or {}
+    _pr = ([r for r in _rows(_aj, 'pair') if r.get('id') == 'u-p'] or [{}])[0]
+    eq('[add-on] a new offer is weighed against both orders, on the panel and the pair row',
+       (_ls.get('heldCount'), 'vsFirst' in _ls, _pr.get('heldCount'),
+        [h.get('pay') for h in _pr.get('heldAlso') or []]),
+       (2, False, 2, [9.5]))
+    # The second add-on on the same trip (the owner's trip details: $25.03 +
+    # $9.50 + $6.89, one trip).
+    _took2(_ab, _card('u-c', 6.89, minutes=9.0, miles=2.1, screen='uber.addon'))
+    _hf3 = _holdfile(_aj)
+    _bend = _aend + 8 * 1.5 * 60000
+    eq('[add-on] a second add-on joins the same trip: three orders, nothing put down, held '
+       'to the trip\'s end and then its own',
+       ([o.get('pay') for o in _orders(_ab)], [o.get('of') for o in _hf3],
+        _hf3[2].get('ofEnds'), _rows(_aj, 'drop')),
+       ([25.03, 9.5, 6.89], [None, _hf[0]['holdId'], _hf[0]['holdId']], _bend, []))
+    # The manual ⌖ Scan stays the backup: with no cue, the chooser, over all
+    # three, and nothing filed.
+    _say(_nav('3 Ash Way, Smyrna, GA 30080', '3 Ash Way', 'Smyrna'))
+    _ch = get(_ab, '/api/status').get('chooser') or {}
+    eq('[add-on] ⌖ Scan with the trip in the car and no cue opens the chooser over its '
+       'three orders and files nothing',
+       ([r.get('n') for r in _ch.get('rows') or []], [o.get('dropoff') for o in _orders(_ab)]),
+       ([1, 2, 3], ['4821 Kestrel Dr, Smyrna', '77 Birch Ln, Smyrna', None]))
+    post(_ab, '/api/choose', {'id': _ch.get('id'), 'pick': 'neither'})
+    # Drop with nothing to say which was delivered: the Drop chooser, as with
+    # two carried, and nothing put down.
+    _code, _rep = post(_ab, '/api/delivered', {})
+    eq('[add-on] Drop with the trip in the car and no door to go by offers its three orders '
+       'and puts nothing down',
+       ([r.get('n') for r in (_rep.get('choose') or {}).get('rows') or []],
+        len(_orders(_ab)), _rows(_aj, 'drop')), ([1, 2, 3], 3, []))
+    # The original delivered: its add-ons stay, still one trip.
+    _ids = [o['holdId'] for o in _orders(_ab)]
+    _code, _rep = post(_ab, '/api/delivered', {'holdIds': [_ids[0]]})
+    eq('[add-on] Drop of the original leaves its add-ons held, still one trip, and the reply '
+       'says so',
+       ([o.get('pay') for o in _orders(_ab)], [o.get('pay') for o in _rep.get('orders') or []],
+        [(r.get('id'), r.get('by'), r.get('carried'), r.get('addon')) for r in _rows(_aj, 'drop')]),
+       ([9.5, 6.89], [9.5, 6.89], [('u-a', 'chooser', 3, None)]))
+    post(_ab, '/api/delivered', {'holdIds': [_ids[1]]})
+    _st = get(_ab, '/api/status')
+    eq('[add-on] ...and the last one left is held on its own, its drop row saying it was an '
+       'add-on and of which order',
+       ((_st.get('holding') or {}).get('pay'), 'orders' in _st,
+        [(r.get('id'), r.get('addon'), r.get('addonTo')) for r in _rows(_aj, 'drop')
+         if r.get('id') == 'u-b']),
+       (6.89, False, [('u-b', True, _hf[0]['holdId'])]))
+    post(_ab, '/api/delivered', {})
+
+    # Carrying two off and an ordinary card: the trip is the order in the car,
+    # and a Took replaces it as it always replaced one — every order of it.
+    _took2(_ab, _card('u-d', 18.0, minutes=40.0))
+    _took2(_ab, _card('u-e', 5.0, minutes=10.0, addon=True))
+    _rep = _took2(_ab, _card('u-f', 12.0, minutes=30.0))
+    _st = get(_ab, '/api/status')
+    eq('[add-on] carrying two off, a Took on an ordinary card replaces the trip in the car, '
+       'every order of it, and the reply says the one now held',
+       ((_st.get('holding') or {}).get('pay'), 'orders' in _st,
+        [(r.get('id'), r.get('by'), r.get('addon')) for r in _rows(_aj, 'drop')
+         if r.get('id') in ('u-d', 'u-e')],
+        [o.get('pay') for o in _rep.get('orders') or []]),
+       (12.0, False, [('u-d', 'replaced', None), ('u-e', 'replaced', True)], [12.0]))
+    post(_ab, '/api/delivered', {})
+
+    # An add-on with nothing in the car: an order of its own, on its own
+    # clock — and a second ✓ on it is a Took pressed twice, never onto itself.
+    _took2(_ab, _card('u-g', 4.0, minutes=8.0, addon=True))
+    _took2(_ab, _card('u-g', 4.0, minutes=8.0, addon=True))
+    _hg = _holdfile(_aj)
+    eq('[add-on] an add-on with nothing in the car is held as an order of its own, on its '
+       'own clock, and pressed twice joins nothing',
+       (len(_hg), _hg[0].get('addOn'), _hg[0].get('of'), _until(_ah)),
+       (1, True, None, _hg[0]['acceptedAt'] + 8 * 1.5 * 60000 + _HOLD_GRACE))
+    post(_ab, '/api/delivered', {})
+    # ...and with only another app's order in the car it joins nothing either:
+    # carrying two off, it replaces that order, as any card does.
+    _took2(_ab, _card('u-h', 11.0, minutes=30.0, app='doordash', screen='dd.offer'))
+    _took2(_ab, _card('u-i', 6.0, minutes=10.0, addon=True))
+    eq('[add-on] ...and one with only a DoorDash order in the car joins nothing: it replaces it',
+       ((get(_ab, '/api/status').get('holding') or {}).get('pay'),
+        [(r.get('id'), r.get('by')) for r in _rows(_aj, 'drop') if r.get('id') == 'u-h']),
+       (6.0, [('u-h', 'replaced')]))
+finally:
+    stop(_ap)
+
+# No cue, no filing: the planner showing both orders' doors with nothing on
+# record to tell them apart files neither, and they wait. The ⌖ backup then
+# gives the original its door, from the chooser, and the cue that gives the
+# other its door is that one — the waiting doors asked again (retryPool).
+# And every message that says the car to the panel says the trip, as it says
+# two orders carried.
+_qp, _qb, _qj, _qh = _cserver('addonpool', CARRY_TWO='0')
+try:
+    _qseen = listen(_qb, 40)
+    time.sleep(0.3)
+    _took2(_qb, _card('q-a', 22.46, minutes=40.0, pickup='Fable Grill'))
+    _took2(_qb, _card('q-b', 9.64, minutes=19.0, addon=True, pickup='Kestrel Noodle Bar'))
+    _say(_tplan(['Fable Grill', 'Kestrel Noodle Bar'], [_MARA, _JULES]))
+    _st = get(_qb, '/api/status')
+    eq('[add-on] the planner with both doors and no cue files neither: they wait, said',
+       ([o.get('dropoff') for o in _orders(_qb)], _st.get('unowned'), _st.get('chooser'),
+        [r for r in _rows(_qj, 'mark') if r.get('dropoff')]),
+       ([None, None], 2, None, []))
+    _say(_nav('4821 Kestrel Dr, Smyrna', '4821 Kestrel Dr', 'Smyrna'))
+    _ch = get(_qb, '/api/status').get('chooser') or {}
+    post(_qb, '/api/choose', {'id': _ch.get('id'), 'pick': (_ch.get('rows') or [{}])[0].get('pick')})
+    time.sleep(0.4)
+    _st = get(_qb, '/api/status')
+    eq('[add-on] ...and the original\'s door given from the ⌖ chooser decides the other: '
+       'the add-on\'s by elimination, nothing left waiting',
+       ([o.get('dropoff') for o in _orders(_qb)], _st.get('unowned'),
+        sorted((r.get('id'), r.get('cue')) for r in _rows(_qj, 'mark') if r.get('dropoff'))),
+       (['4821 Kestrel Dr, Smyrna', '77 Birch Ln, Smyrna'], 0,
+        [('q-a', 'chooser'), ('q-b', 'elimination')]))
+    # An add-on card offered against the trip: its minutes are what the trip
+    # grows by (addOnAsCarded), and the reading carries the orders.
+    _say(_card('q-x', 6.0, minutes=15.0, miles=3.0, addon=True))
+    _say({'ready': True, 'state': 'no', 'perHour': 18.0, 'grossPerHour': 24.0,
+          'pay': 6.0, 'minutes': 15.0, 'billedMinutes': 15.0, 'cardMinutes': 15.0,
+          'miles': 3.0, 'cost': 1.05, 'target': 25, 'band': 15, 'costPerMile': 0.35})
+    _last = get(_qb, '/api/status').get('last') or {}
+    _lx = _last.get('stack') or {}
+    eq('[add-on] an add-on card offered against the trip: its range is its card\'s extension, '
+       'and the reading names both orders',
+       (round((_lx.get('minMinutes') or 0) - (_lx.get('leftMinutes') or 0), 1),
+        [o.get('pay') for o in _last.get('orders') or []]),
+       (15.0, [22.46, 9.64]))
+    _say(_beat((33.80, -84.40)))
+    time.sleep(0.3)
+    eq('[add-on] the beat and the filed door both carry the trip\'s orders to the panel',
+       ([len(m.get('orders') or []) for m in _qseen if m.get('alive') and 'orders' in m][-1:],
+        [len(m.get('orders') or []) for m in _qseen
+         if (m.get('dropoff') or {}).get('line') == '77 Birch Ln, Smyrna' and 'orders' in m][:1]),
+       ([2], [2]))
+finally:
+    stop(_qp)
+
+# ...and with carrying two ON the trip is one order to the cap: an add-on
+# joins past it, and a Took past two TRIPS puts down the trip that ends
+# soonest, every order of it, said by the trip's pay.
+_kp, _kb, _kj, _kh = _cserver('addonon', CARRY_TWO='1')
+try:
+    _took2(_kb, _card('k-a', 10.0, minutes=10.0))
+    _took2(_kb, _card('k-b', 4.0, minutes=5.0, addon=True))
+    _took2(_kb, _card('k-c', 20.0, minutes=60.0))
+    eq('[add-on] carrying two on, an order beside a trip of two is two trips: all three held',
+       ([o.get('pay') for o in _orders(_kb)], _rows(_kj, 'drop')), ([10.0, 4.0, 20.0], []))
+    _rep = _took2(_kb, _card('k-d', 15.0, minutes=40.0))
+    eq('[add-on] ...and a Took past two trips puts down the trip ending soonest, every order of '
+       'it, said by the trip\'s pay',
+       ([o.get('pay') for o in _orders(_kb)],
+        sorted((r.get('id'), r.get('by')) for r in _rows(_kj, 'drop')),
+        (_rep.get('replaced') or {}).get('pay')),
+       ([20.0, 15.0], [('k-a', 'replaced'), ('k-b', 'replaced')], 14.0))
+finally:
+    stop(_kp)
+
+# The original put down by the GPS at its door, and by its own clock: the
+# add-on stays either way.
+_gp, _gb, _gj, _gh = _cserver('addongps', CARRY_TWO='0', GPS_DWELL_MS='600')
+try:
+    _took2(_gb, _card('g-a', 22.46, minutes=40.0, dropoff=_AD))
+    _took2(_gb, _card('g-b', 9.64, minutes=19.0, addon=True))
+    _o = _orders(_gb)
+    _pin2(_gb, _o[0]['holdId'], _AD, _PA, '4821, Kestrel Drive, Marietta')
+    _say(*([_beat(_PA)] * 16))
+    _say(*([_beat((_PA[0] + 0.006, _PA[1]))] * 3))
+    eq('[add-on] the GPS drop at the original\'s door keeps its add-on',
+       ((get(_gb, '/api/status').get('holding') or {}).get('pay'),
+        [(r.get('id'), r.get('by')) for r in _rows(_gj, 'drop')]),
+       (9.64, [('g-a', 'gps')]))
+finally:
+    stop(_gp)
+_xnow = int(time.time() * 1000)
+_xa = {'id': 'x-a', 'acceptedAt': _xnow - 40 * 60000, 'pay': 25.03, 'minutes': 10.0,
+       'miles': 5.0, 'cost': 1.5, 'app': 'uber', 'dropoff': None}
+_xb = {'id': 'x-b', 'acceptedAt': _xnow - 5 * 60000, 'pay': 9.50, 'minutes': 8.0,
+       'miles': 1.3, 'cost': 0.5, 'app': 'uber', 'dropoff': None, 'addOn': True,
+       'of': 'x-a@%d' % _xa['acceptedAt'], 'ofEnds': _xnow + 20 * 60000}
+_xp, _xb2, _xj, _xh = _cserver('addonexp', hold={'v': 2, 'orders': [_xa, _xb]}, CARRY_TWO='0')
+try:
+    _st = get(_xb2, '/api/status')
+    # (The expiry's row is appended after the boot's list is written.)
+    for _ in range(60):
+        if _rows(_xj, 'drop'):
+            break
+        time.sleep(0.05)
+    eq('[add-on] the original run out by its own clock leaves its add-on held, to the trip\'s '
+       'end and then its own',
+       ((_st.get('holding') or {}).get('pay'), 'orders' in _st,
+        [(r.get('id'), r.get('by')) for r in _rows(_xj, 'drop')], _until(_xh)),
+       (9.5, False, [('x-a', 'expiry')], _xb['ofEnds'] + 8 * 1.5 * 60000))
+finally:
+    stop(_xp)
+# ...and a trip of three restored at boot comes back whole: the file's cap is
+# two TRIPS (MAX_HELD_FILE), and these three are one.
+_ya = dict(_xa, id='y-a', acceptedAt=_xnow - 60000, minutes=31.0)
+_yof = 'y-a@%d' % _ya['acceptedAt']
+_yb = dict(_xb, id='y-b', of=_yof)
+_yc = dict(_xb, id='y-c', pay=6.89, minutes=9.0, acceptedAt=_xnow - 30000, of=_yof)
+_yp, _yb2, _yj, _yh = _cserver('addonboot', hold={'v': 2, 'orders': [_ya, _yb, _yc]},
+                               CARRY_TWO='0')
+try:
+    eq('[add-on] a trip of three restored at boot comes back whole, carrying two off',
+       [o.get('pay') for o in _orders(_yb2)], [25.03, 9.5, 6.89])
+finally:
+    stop(_yp)
+# <<< add-on
+
 # With the flag off: Stage 4, exactly — and the `would` it logs.
 _op, _ob, _oj, _oh = _cserver('off', CARRY_TWO='0')
 try:

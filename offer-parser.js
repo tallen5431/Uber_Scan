@@ -1988,6 +1988,26 @@
     + '|multiple[ \\t\\r\\n]*drop[ \\t\\r\\n]*-?[ \\t\\r\\n]*offs'
     + '|all orders are picked up|deliver by|\\d ?mi ?[-+·•«] ?\\d{1,3} ?min', 'i');
   var SCREEN_ADDON = /\+ ?\d{1,3} ?min\w* ?\( ?\+/i;
+  // ...and the add-on's other half, its pay printed "+ $9.50", asked only of
+  // the figure findPay chose: "+$2.00 promo", "+$0.50 included" and
+  // "+$1.00/order" are refused as the payout already. See isAddon.
+  var ADDON_PAY = /\+ ?$/;
+
+  /* Whether `text`, one card's words (parse's `mine`), is Uber's offer to ADD
+     a job to the trip in progress: its leg in plus signs (SCREEN_ADDON) or its
+     headline printed "+ $9.50" — either half, as the reader drops a sign as
+     readily as a digit — and never a DoorDash card (SCREEN_DD_OFFER). `where`
+     is findPay's [{value, at}]; the payout is the first of its value. The
+     Python port's is_addon says what it was measured on. */
+  function isAddon(text, pay, where) {
+    if (pay === null || SCREEN_DD_OFFER.test(text)) return false;
+    if (SCREEN_ADDON.test(text)) return true;
+    var at = null;
+    for (var i = 0; i < where.length; i++) {
+      if (where[i].value === pay) { at = where[i].at; break; }
+    }
+    return at !== null && ADDON_PAY.test(text.slice(Math.max(0, at - 3), at));
+  }
   var SCREEN_UBER_OFFER = new RegExp(
     '\\d ?min\\w* ?\\( ?\\d|\\bmi\\)? ?total\\b|includes expected tip|\\bincl[.,]? ?tip\\b'
     + '|\\bexclusive\\b|est[.,]? ?delivery|\\bverified\\b|avg[.,]? ?wait time'
@@ -3350,6 +3370,9 @@
       // Null when the card did not say — the top chip may simply not have been
       // inside the crop — which is different from "not a shop order".
       shop: SHOP_CARD.test(text) ? true : null,
+      // ...and whether it is Uber's add-on, carried WITH the order in the car
+      // on one trip, never instead of it (server.js placeTook). See isAddon.
+      addon: isAddon(mine, pay, payWhere),
       text: text,
       /* ...and the same reading before normalize() flattened it.
        *

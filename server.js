@@ -659,7 +659,7 @@ function startScanner() {
           var heldBeat = holding(Date.now());
           read.heldEnd = heldBeat ? heldEndState(heldBeat) : null;
           // ...and every order's, with carrying two on (ordersForPanel).
-          if (heldBeat && carryTwo()) read.orders = ordersForPanel(Date.now());
+          if (heldBeat && carryingTwo(Date.now())) read.orders = ordersForPanel(Date.now());
           // ...and the hold itself, heldForPanel's shape as a reading carries
           // it, on the first beat after what is held changed. An order put
           // down on its own clock (heldOrders, holdEnds) was said to no
@@ -1053,9 +1053,12 @@ function cardOf(offer) {
  *             own time: see the mark handler)
  *   deliverBy the card's "Deliver by", minutes since midnight, or null
  *   addOn     whether the card was Uber's offer to add to a trip in progress
- *   of        for an add-on, the holdId of the order it adds to; else null
- *   ofEnds    for an add-on, when that order ended as it stood at the Took
- *             (holdEnds), which the add-on outlives: see holdEnds
+ *             (isAddOnCard: the parser's `addon`, or the screen `uber.addon`)
+ *   of        for an add-on taken onto a trip, the holdId of that trip's ROOT
+ *             order (tripOf); else null — an add-on with no Uber order held
+ *   ofEnds    for an add-on, when that trip ended as it stood at the Took
+ *             (the holdEnds of its order taken last, which is the latest of
+ *             its orders'), which the add-on outlives: see holdEnds
  *
  * Read through heldOrders(now) and holding(now), never off `scanner.held`:
  * those are the questions "which orders are being carried RIGHT NOW", and an
@@ -1063,6 +1066,87 @@ function cardOf(offer) {
  * reads the slot's old name. */
 function maxHeld() {
   return carryTwo() ? 2 : 1;
+}
+
+/* ---------- a trip: an order and the Uber add-ons joined to it ---------------
+ *
+ * The owner's decision of 17 Oct 2026, after the 16 Oct shift: twice the
+ * driver ticked an Uber add-on ("+ $9.50 / +8 min (+1.3 mi) total") with an
+ * order in the car, and with carrying two off the Took REPLACED that order —
+ * a drop row `by: 'replaced'` for the first, whose Trip Planner door was on
+ * record, and a hold that knew only the add-on: no end, and its own "+8 min"
+ * clock, run out 21 minutes later. Every offer for the next half hour was
+ * weighed against the wrong order. Uber paid each original and its add-on as
+ * ONE trip ($25.03 + $9.50 card, one $43.42 trip; $22.46 + $9.64, one $36.53),
+ * and the owner's trip details for the first show a second add-on on the same
+ * trip ($25.03 + $9.50 + $6.89 = $41.42 expected), accepted on the phone with
+ * no Took on the rig. An add-on is always joined to the trip in progress, so
+ * holding it beside that trip is never a guess.
+ *
+ * So the list's unit for every CAP is the trip, not the order. A trip is an
+ * order and every add-on whose `of` names it (tripOf): an add-on is joined to
+ * the ROOT of the trip it was taken onto, so a chain of two add-ons is one
+ * trip of three, and stays one trip when the root is put down. maxHeld() is
+ * how many trips — one with carrying two off, two with it on — so with no
+ * add-on held every answer here is the one it was.
+ *
+ * And while a trip of two or more is held, the carry-two machinery is in force
+ * whatever `carryTwo` says (carryingTwo): an address is filed onto one of its
+ * orders on a positive cue or the driver's pick from the chooser, and
+ * otherwise nowhere (AUDITS.md, Settled: no cue means no filing, and the
+ * chooser never times out into a guess). With carrying two off and no trip
+ * joined, nothing changes: a Took on anything but an add-on replaces the order
+ * in the car as it always did. */
+function isAddOnCard(o) {
+  return !!o && (o.addon === true || o.screen === 'uber.addon');
+}
+
+// The trip an order is part of, by the holdId of its root: an add-on's `of`,
+// else its own name.
+function tripOf(h) {
+  return h && h.addOn && typeof h.of === 'string' && h.of ? h.of : holdIdOf(h);
+}
+
+// The trips among `list`, first-taken first, by tripOf.
+function tripsIn(list) {
+  var keys = [];
+  (list || []).forEach(function (h) {
+    var k = tripOf(h);
+    if (keys.indexOf(k) === -1) keys.push(k);
+  });
+  return keys;
+}
+
+// Whether two of `list` are one trip: an add-on held with its trip.
+function tripJoined(list) {
+  return tripsIn(list).length < (list || []).length;
+}
+
+/* Whether the carry-two machinery is in force: carrying two is on, or a trip
+ * of two or more is in the car (see above). Asked where `carryTwo()` was asked
+ * by every path that files, draws or weighs more than one order. */
+function carryingTwo(now) {
+  return carryTwo() || tripJoined(heldOrders(now));
+}
+
+// When the trip `key` ends: the latest of its orders' holdEnds in `list`, or
+// null when none of them states a time.
+function tripEnds(list, key) {
+  var ends = null;
+  (list || []).forEach(function (h) {
+    if (tripOf(h) !== key) return;
+    var e = holdEnds(h);
+    if (e !== null && (ends === null || e > ends)) ends = e;
+  });
+  return ends;
+}
+
+/* The order an add-on card is taken onto: the Uber order in the car taken
+ * last, add-on or not — its trip is the trip in progress — or null with no
+ * Uber order held (nothing held, or only another app's), when the add-on is
+ * held as an order of its own on its own clock. */
+function addOnBase(inCar) {
+  return (inCar || []).filter(function (o) { return o.app === 'uber'; }).pop() || null;
 }
 
 /* ---------- carrying two orders: the flag ------------------------------------
@@ -1112,11 +1196,12 @@ function carryTwo() {
 }
 
 /* The orders in the car as the assembler is handed them: the first-taken
- * alone — exactly what it had before the list — unless carrying two is on and
- * two are held, when it is the list. */
+ * alone — exactly what it had before the list — unless carrying two is in
+ * force (carryingTwo: on, or an add-on held with its trip) and two or more
+ * are held, when it is the list. */
 function assemblerHeld(now) {
   var list = heldOrders(now);
-  return carryTwo() && list.length >= 2 ? list : (list[0] || null);
+  return carryingTwo(now) && list.length >= 2 ? list : (list[0] || null);
 }
 
 /* The name a hold goes by on the wire: the card's id and when it was on the
@@ -1240,11 +1325,17 @@ function heldFromFile(h) {
   return asHold(h);
 }
 
-// The most orders a file is read with, whatever MAX_HELD is now: a file
-// holding more is cut to this many, first-taken first. Not MAX_HELD itself, so
-// a restart does not throw away an order already in the car — a Took is where
-// the cap applies, and it is said there.
+// The most TRIPS a file is read with (tripsIn: an order and its add-ons are
+// one), whatever MAX_HELD is now: a file holding more is cut to this many,
+// first-taken first. Not MAX_HELD itself, so a restart does not throw away an
+// order already in the car — a Took is where the cap applies, and it is said
+// there. By trips, so a trip of three restored at boot comes back whole.
 var MAX_HELD_FILE = 2;
+
+function firstTrips(list, n) {
+  var keep = tripsIn(list).slice(0, n);
+  return list.filter(function (h) { return keep.indexOf(tripOf(h)) !== -1; });
+}
 
 /* ...and read back once, at startup, which is the only moment it means
  * anything.
@@ -1293,7 +1384,7 @@ function loadHolding() {
     var one = heldFromFile(f);
     if (one) list = [one];
   }
-  scanner.held = list.slice(0, MAX_HELD_FILE);
+  scanner.held = firstTrips(list, MAX_HELD_FILE);
   // Through heldOrders(), so an order that has outlived its own clock is put
   // down here rather than waiting to be noticed — and so the answer to "is
   // there an order in the car" is the same function at boot as it is
@@ -1321,7 +1412,14 @@ function holdEnds(h) {
   // An add-on (Uber's "+ $", "+N min" card, taken onto a trip in progress) is
   // done no sooner than the trip it joins, and then its own added minutes,
   // half again: the later of that and its own clock. Its card's minutes are
-  // the minutes it ADDS, so its own clock alone ends it before the trip.
+  // the minutes it ADDS, so its own clock alone ends it before the trip — on
+  // 16 Oct the "+8 min" add-on's hold ran out 21 minutes after its Took.
+  // `ofEnds` is the whole trip's end at the Took (placeTook), so a second
+  // add-on outlives the first. The trip's stated minutes and the clock, and
+  // nothing worked out from a distance. Frozen at the Took: the root put down
+  // early (Drop, the GPS) leaves the add-on held to that end all the same,
+  // until its own Drop — an end the rig cannot see coming is not a reason to
+  // forget an order the driver still carries.
   if (h.addOn && typeof h.ofEnds === 'number' && isFinite(h.ofEnds)) {
     return Math.max(own, h.ofEnds + stated * HOLD_OVERRUN * 60000);
   }
@@ -1363,6 +1461,20 @@ function heldOrders(now) {
   return scanner.held.filter(function (h) { return holdEnds(h) !== null; });
 }
 
+/* A journal row about an order in the car — a Took's mark, a drop of any
+ * kind — saying so when that order is an Uber add-on: `addon: true`, and
+ * `addonTo`, the holdId of the trip's root it was taken onto (tripOf), when
+ * there was one. Ids only: the root's own row says the rest. Nothing is added
+ * for an ordinary order, so its rows are the shape they always were, and a
+ * reader of the journal can tell an add-on's drop from a replaced order's. */
+function asAddOnRow(row, h) {
+  if (h && h.addOn) {
+    row.addon = true;
+    if (typeof h.of === 'string' && h.of) row.addonTo = h.of;
+  }
+  return row;
+}
+
 /* A drop row for each order put down by its own clock, `by: 'expiry'`.
  *
  * Before this an expiry wrote nothing, so the shift report (tools/) read an
@@ -1389,8 +1501,8 @@ function heldOrders(now) {
 function expiredRows(gone) {
   var rows = gone.map(function (h) {
     var ends = holdEnds(h);
-    return JSON.stringify({ v: 1, kind: 'drop', at: ends, id: h.id, seq: ends,
-                            acceptedAt: h.acceptedAt, by: 'expiry' }) + '\n';
+    return JSON.stringify(asAddOnRow({ v: 1, kind: 'drop', at: ends, id: h.id, seq: ends,
+                                       acceptedAt: h.acceptedAt, by: 'expiry' }, h)) + '\n';
   });
   appendLines(rows.join(''), function (err) {
     if (err) console.error('journal: could not record an expiry: ' + err.message);
@@ -1467,7 +1579,7 @@ function whoseDropoff(read, force, now) {
   }
   if (!d || typeof d.line !== 'string') return out;
   var orders = heldOrders(now);
-  if (!carryTwo()) {
+  if (!carryingTwo(now)) {
     if (!orders.length) return out;
     var w = Assemble.attribute(assembly, shadowsNow(now).concat(orders), d);
     out.would = { cue: w.cue, held: w.order ? holdIdOf(w.order) : null };
@@ -1646,7 +1758,7 @@ function chooserForPanel(now) {
  * sighting, an address filed, a Took and a Drop. With carrying two off there
  * is no pool. */
 function retryPool() {
-  if (!carryTwo()) return;
+  if (!carryingTwo(Date.now())) return;
   var before = Assemble.unowned(assembly);
   var found = Assemble.retryUnowned(assembly, heldOrders(Date.now()));
   found.forEach(function (f) {
@@ -1673,7 +1785,7 @@ function retryPool() {
 function ownPickups(stops, now, page, at) {
   var orders = heldOrders(now);
   stops.forEach(function (st) { if (st) delete st.of; });
-  if (!carryTwo() || orders.length < 2) return;
+  if (!carryingTwo(now) || orders.length < 2) return;
   stops.forEach(function (st) {
     if (!st || st.kind !== 'pickup') return;
     var a = Assemble.attribute(assembly, orders, {
@@ -1685,70 +1797,98 @@ function ownPickups(stops, now, page, at) {
 }
 
 /* Where a Took puts its order, and what it puts down. Returns {replaced,
- * added, putDownPay}.
+ * added, putDownPay}: `replaced` the orders put down, each to have its drop row
+ * `by: 'replaced'` (an empty list for none).
  *
- * Carrying two off: the order in the car, as Stage 4 had it — the Took
- * replaces it (and the replaced one is kept as a shadow for `would`). With
- * two in the car already, it replaces the first-taken, and the other stays
- * until its own end: the flag going off never puts down an order it held.
- *
- * Carrying two on:
- *   - an add-on card (Uber's screen `uber.addon`: "+ $", "+N min") is held as
- *     an add-on of the Uber order most recently taken, and runs no shorter
- *     than that order does (holdEnds);
+ * Both ways, first:
  *   - the same card id again is a Took pressed twice: replaced in place, no
  *     drop row, as before;
+ *   - an ADD-ON card (isAddOnCard: the parser's `addon`, "+ $9.50" over "+8
+ *     min (+1.3 mi)", or Uber's screen `uber.addon`) with an Uber order in the
+ *     car JOINS that order's trip (addOnBase, tripOf): held beside it, no
+ *     drop row, no cap — the trip is one order to every cap — and it runs no
+ *     shorter than the trip does (holdEnds). The owner's decision of 17 Oct
+ *     2026; see "a trip" above maxHeld. With no Uber order in the car it is
+ *     taken as any other card is, below, on its own clock.
+ *
+ * Carrying two off: the trip in the car, as Stage 4 had the order — the Took
+ * replaces it, every order of it (and they are kept as shadows for `would`).
+ * With two trips in the car already, it replaces the first-taken, and the
+ * other stays until its own end: the flag going off never puts down an order
+ * it held.
+ *
+ * Carrying two on:
  *   - a RE-OFFER of an order in the car — same miles, card minutes and both
  *     ends, a different pay, inside HELD_CARD_MS of that order's Took
  *     (Assemble.reOffer) — replaces it, `by: 'replaced'`;
- *   - anything else is ADDED, and a Took past MAX_HELD puts down the order
- *     whose clock ends soonest, `by: 'replaced'`, and the panel says its pay.
+ *   - anything else is ADDED, and a Took past MAX_HELD trips puts down the
+ *     trip whose clock ends soonest (tripEnds), every order of it, `by:
+ *     'replaced'`, and the panel says its pay.
  * A DoorDash card for two orders ("Drop off 2 orders") is one card and one
  * Took, so one order here: nothing counts its stops. */
 function placeTook(took, marked, inCar, now) {
-  var out = { replaced: null, added: false, putDownPay: null };
-  if (!carryTwo()) {
-    // The same card again is replaced where it stands; any other Took
-    // replaces the first-taken, with its drop row — and every OTHER order in
-    // the car stays, until its own clock or Drop. With two held and the flag
-    // read off (turned off mid-shift, or two restored from holding.json) this
-    // kept the Took alone: the second order left the car with no row, and
-    // nothing said it had. Measured at f80d0c2: two orders restored at boot,
-    // carrying two off, one Took — holding.json named only the new order and
-    // the journal had a drop row for the first alone.
-    var same = inCar.filter(function (o) { return o.id === took.id; })[0] || null;
-    var before = same ? null : (inCar[0] || null);
-    if (before) {
-      out.replaced = before;
-      shadows = [before];
-    }
-    setHeld(same ? inCar.map(function (o) { return o === same ? took : o; })
-      : inCar.filter(function (o) { return o !== before; }).concat([took]));
-    return out;
-  }
-  if (marked.screen === 'uber.addon') {
-    var base = inCar.filter(function (o) { return o.app === 'uber' && !o.addOn; }).pop();
+  var out = { replaced: [], added: false, putDownPay: null };
+  var same = inCar.filter(function (o) { return o.id === took.id; })[0] || null;
+  var base = null;
+  if (isAddOnCard(marked)) {
     took.addOn = true;
+    // Never onto itself: a Took pressed twice on the add-on is `same`.
+    base = addOnBase(inCar.filter(function (o) { return o !== same; }));
     if (base) {
-      took.of = holdIdOf(base);
+      took.of = tripOf(base);
+      // The trip's end: the order taken last on it, as every order of the
+      // trip taken after the first outlives the one before it (holdEnds).
       took.ofEnds = holdEnds(base);
     }
   }
-  var same = inCar.filter(function (o) { return o.id === took.id; })[0];
-  var again = same || inCar.filter(function (o) {
+  if (same) {
+    setHeld(inCar.map(function (o) { return o === same ? took : o; }));
+    return out;
+  }
+  if (base) {
+    out.added = true;
+    setHeld(inCar.concat([took]));
+    return out;
+  }
+  if (!carryTwo()) {
+    // Any other Took replaces the first-taken trip, with a drop row for each
+    // of its orders — and every OTHER trip in the car stays, until its own
+    // clock or Drop. With two held and the flag read off (turned off
+    // mid-shift, or two restored from holding.json) this kept the Took alone:
+    // the second order left the car with no row, and nothing said it had.
+    // Measured at f80d0c2: two orders restored at boot, carrying two off, one
+    // Took — holding.json named only the new order and the journal had a drop
+    // row for the first alone.
+    var first = inCar.length ? tripOf(inCar[0]) : null;
+    var before = inCar.filter(function (o) { return tripOf(o) === first; });
+    if (before.length) {
+      out.replaced = before;
+      shadows = before.slice();
+    }
+    setHeld(inCar.filter(function (o) { return before.indexOf(o) === -1; }).concat([took]));
+    return out;
+  }
+  var again = inCar.filter(function (o) {
     return Assemble.reOffer(o, marked, now, HELD_CARD_MS);
   })[0];
   if (again) {
-    if (!same) out.replaced = again;
+    out.replaced = [again];
     setHeld(inCar.map(function (o) { return o === again ? took : o; }));
     return out;
   }
   var list = inCar.concat([took]);
-  if (list.length > maxHeld()) {
-    var soonest = inCar.slice().sort(function (a, b) { return holdEnds(a) - holdEnds(b); })[0];
-    out.replaced = soonest;
-    out.putDownPay = numOrNull(soonest.pay);
-    list = list.filter(function (o) { return o !== soonest; });
+  if (tripsIn(list).length > maxHeld()) {
+    var soonest = tripsIn(inCar).sort(function (a, b) {
+      return tripEnds(inCar, a) - tripEnds(inCar, b);
+    })[0];
+    var gone = inCar.filter(function (o) { return tripOf(o) === soonest; });
+    out.replaced = gone;
+    // ...said by its pay: the trip's, every order of it.
+    var pays = gone.map(function (o) { return numOrNull(o.pay); })
+      .filter(function (p) { return p !== null; });
+    out.putDownPay = pays.length
+      ? Math.round(pays.reduce(function (a, b) { return a + b; }, 0) * 100) / 100 : null;
+    list = list.filter(function (o) { return gone.indexOf(o) === -1; });
   }
   out.added = inCar.length >= 1;
   setHeld(list);
@@ -2145,7 +2285,7 @@ function dropoffArrived(read, force) {
     // the car the address may have gone onto the second, which `orders` says.
     if (kept && carrying) {
       read.holding = heldForPanel(holding(Date.now()));
-      if (carryTwo()) read.orders = ordersForPanel(Date.now());
+      if (carryingTwo(Date.now())) read.orders = ordersForPanel(Date.now());
     }
     //
     // `scanner.dropoff` and `scanner.dropoffAt` were kept here for that
@@ -3003,7 +3143,7 @@ function putDown(now, by, done, which) {
                 acceptedAt: d.acceptedAt };
     if (by) row.by = by;
     if (carried >= 2) row.carried = carried;
-    return JSON.stringify(row) + '\n';
+    return JSON.stringify(asAddOnRow(row, d)) + '\n';
   });
   appendLines(rows.join(''), function (err) {
     if (err) console.error('journal: could not record a drop: ' + err.message);
@@ -3132,8 +3272,8 @@ function withStack(read, now) {
   // Carrying two OFF with two in the car — a holding.json written while it
   // was on, read back at boot (MAX_HELD_FILE) — is weighed against the first
   // alone, as before Stage 6, and the line still says so ("vs ① only").
-  if (read.stack && !carryTwo() && heldOrders(now).length >= 2) read.stack.vsFirst = true;
-  if (carryTwo()) {
+  if (read.stack && !carryingTwo(now) && heldOrders(now).length >= 2) read.stack.vsFirst = true;
+  if (carryingTwo(now)) {
     read.orders = ordersForPanel(now);
     read.unowned = Assemble.unowned(assembly);
   }
@@ -3146,7 +3286,7 @@ function withStack(read, now) {
  * row are what they were, whatever holding.json brought back. `held` is
  * holding(now), which the callers have already asked. */
 function pairedWith(now, held) {
-  return carryTwo() ? heldOrders(now) : (held ? [held] : []);
+  return carryingTwo(now) ? heldOrders(now) : (held ? [held] : []);
 }
 
 /* A reading of an Uber add-on card, typed as one for Advice.stackMany.
@@ -3161,7 +3301,7 @@ function pairedWith(now, held) {
  * always was). */
 function addOnAsCarded(read) {
   var o = scanner.offer;
-  if (!read || !o || o.screen !== 'uber.addon' || !carryTwo()) return read;
+  if (!read || !o || !isAddOnCard(o) || !carryingTwo(Date.now())) return read;
   var c = Assemble.cardSeen(o, false), r = Assemble.cardSeen(read, true);
   if (!c || !r || c.pay === null || r.pay === null
       || Math.round(c.pay * 100) !== Math.round(r.pay * 100)
@@ -3349,7 +3489,7 @@ function recordPairing(offer, now, reading) {
   // was the card against the first order alone ("vs ① only" on the panel);
   // the journal is append-only, so the two kinds of row are told apart by
   // this and nothing else. Absent with one order, whose row is unchanged.
-  if (carryTwo()) {
+  if (carryingTwo(now)) {
     row.heldAlso = all.slice(1).map(function (o) {
       return { pay: numOrNull(o.pay), minutes: numOrNull(o.minutes),
                dropoff: o.dropoff || null, scanned: !!o.dropoffScanned,
@@ -5175,8 +5315,8 @@ function statusNow() {
     // Every order in the car and the addresses waiting for an owner, while
     // carrying two is on (ordersForPanel); and whether it is.
     carryTwo: carryTwo(),
-    orders: carryTwo() ? ordersForPanel(Date.now()) : undefined,
-    unowned: carryTwo() ? Assemble.unowned(assembly) : undefined,
+    orders: carryingTwo(Date.now()) ? ordersForPanel(Date.now()) : undefined,
+    unowned: carryingTwo(Date.now()) ? Assemble.unowned(assembly) : undefined,
     // ...and the chooser, if one is open (openChooser).
     chooser: chooserForPanel(Date.now()),
     lastAgeMs: (scanner.last && typeof scanner.last.at === 'number')
@@ -7100,6 +7240,26 @@ function route(req, res) {
         }
         note.via = body.via;
       }
+      // A ✓ Took on an Uber add-on says so on its own mark row: `addon: true`
+      // and, when an Uber order is in the car, `addonTo` — the root of the
+      // trip it joins (addOnBase, tripOf), ids only. Asked here, before the
+      // row is written, of the card the handler below will take the order
+      // from (the slot's, or the panel's copy when the slot holds none or is
+      // behind) and of the car as it stands — the same question placeTook
+      // asks of the same two a moment later. On 16 Oct no row said a ticked
+      // card was an add-on at all.
+      if (note.kind === 'mark' && note.accepted === true && marksTheHold(note.via)) {
+        var aboutCard = scanner.offer && scanner.offer.id === note.id ? scanner.offer
+          : body.offer && typeof body.offer === 'object' && body.offer.id === note.id
+            ? body.offer : null;
+        if (isAddOnCard(aboutCard) && !aboutCard.heldCard) {
+          note.addon = true;
+          var addOnto = addOnBase(heldOrders(Date.now()).filter(function (o) {
+            return o.id !== note.id;
+          }));
+          if (addOnto) note.addonTo = tripOf(addOnto);
+        }
+      }
       appendLines(JSON.stringify(note) + '\n', function (writeErr) {
         if (writeErr) return send(res, 500, JSON.stringify({ ok: false, error: writeErr.message }),
                                   { 'Content-Type': 'application/json; charset=utf-8' });
@@ -7158,6 +7318,7 @@ function route(req, res) {
         var addedHold = null;
         var putDownPay = null;
         var carriedAtTook = 0;
+        var joinedAtTook = false;
         if (marked) {
           marked.accepted = note.accepted;
           var before = holding(Date.now());
@@ -7176,6 +7337,7 @@ function route(req, res) {
           // second's card come back is that order too.
           var inCar = heldOrders(Date.now());
           carriedAtTook = inCar.length;
+          joinedAtTook = tripJoined(inCar);
           if (note.accepted && before && marked.heldCard
               && inCar.some(function (h) { return holdIdOf(h) === marked.heldCard; })) {
             // the mark is written; the hold stands as it is
@@ -7320,14 +7482,19 @@ function route(req, res) {
         // the panel told — every panel, through the stream, and this one in
         // the reply too in case its stream is down. Best-effort like every
         // annotation: the mark is already on disk and is the driver's fact.
-        if (replacedHold) {
+        // A row for EACH order put down: a trip replaced is every order of it
+        // (placeTook), an add-on's row saying so (asAddOnRow).
+        if (replacedHold && replacedHold.length) {
           var dropNow = Date.now();
-          var dropRow = { v: 1, kind: 'drop', at: dropNow, id: replacedHold.id,
-                          seq: dropNow, acceptedAt: replacedHold.acceptedAt,
-                          by: 'replaced' };
-          // ...with two in the car at the press, as putDown says it.
-          if (carriedAtTook >= 2) dropRow.carried = carriedAtTook;
-          appendLines(JSON.stringify(dropRow) + '\n', function (dropErr) {
+          var dropRows = replacedHold.map(function (r) {
+            var dropRow = { v: 1, kind: 'drop', at: dropNow, id: r.id,
+                            seq: dropNow, acceptedAt: r.acceptedAt,
+                            by: 'replaced' };
+            // ...with two in the car at the press, as putDown says it.
+            if (carriedAtTook >= 2) dropRow.carried = carriedAtTook;
+            return JSON.stringify(asAddOnRow(dropRow, r)) + '\n';
+          });
+          appendLines(dropRows.join(''), function (dropErr) {
             if (dropErr) console.error('journal: could not record a replaced hold: '
                                        + dropErr.message);
           });
@@ -7337,7 +7504,7 @@ function route(req, res) {
           broadcast({ heldReplaced: replacedSaid });
         }
         var tookReply = { ok: true, note: note,
-                          replaced: replacedHold
+                          replaced: replacedHold && replacedHold.length
                             ? Object.assign({ at: Date.now(), saidForMs: HELD_REPLACED_SAID_MS },
                                             putDownPay !== null ? { pay: putDownPay } : {})
                             : null,
@@ -7346,7 +7513,10 @@ function route(req, res) {
         // With carrying two on: every order, and the one this Took ADDED —
         // the panel's Undo for it sends the untick this handler already
         // takes (accepted: null), which puts that order down and no other.
-        if (carryTwo()) {
+        // ...and with it in force by a trip (carryingTwo) — joined by this
+        // Took, or before it: the panel's list is then the one in the car,
+        // not the trip this Took replaced.
+        if (carryTwo() || joinedAtTook || carryingTwo(Date.now())) {
           tookReply.orders = ordersForPanel(Date.now());
           tookReply.added = addedHold && heldById(holdIdOf(addedHold), Date.now())
             ? { holdId: holdIdOf(addedHold), id: addedHold.id,
@@ -7439,7 +7609,8 @@ function route(req, res) {
     // that silently stopped would be read in a week as a driver who never
     // pressed Drop.
     //
-    // WITH TWO ORDERS IN THE CAR (carrying two on) a press names one of them,
+    // WITH TWO ORDERS IN THE CAR (carrying two on, or an add-on held with its
+    // trip: carryingTwo) a press names one of them,
     // and the server does not guess which. One tap puts down the order the
     // latest good fix is at the pinned door of, or the one the GPS has seen
     // arrive (dropDecides); otherwise nothing is put down and the reply is a
@@ -7450,10 +7621,14 @@ function route(req, res) {
       var asked = (!bodyErr && body) || {};
       var now = Date.now();
       var orders = heldOrders(now);
+      // ...and whether two were carried by a trip (carryingTwo) at the press:
+      // the reply then says what is left, though one add-on left alone is no
+      // longer a trip of two.
+      var twoAtPress = carryingTwo(now);
       var json = { 'Content-Type': 'application/json; charset=utf-8' };
       var answer = function (was, extra) {
         var reply = { ok: true, wasHolding: was };
-        if (carryTwo()) {
+        if (carryTwo() || twoAtPress) {
           var left = holding(Date.now());
           reply.holding = !!left;
           reply.held = heldForPanel(left);
@@ -7468,7 +7643,7 @@ function route(req, res) {
         if (!picked.length) return answer(false);
         return putDown(now, 'chooser', function (was) { answer(was); }, picked);
       }
-      if (carryTwo() && orders.length >= 2) {
+      if (twoAtPress && orders.length >= 2) {
         var one = dropDecides(orders, now);
         if (!one) {
           return answer(true, { choose: {

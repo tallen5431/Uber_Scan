@@ -1254,6 +1254,11 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
      JSON.stringify([addOn.minMinutes, addOn.maxMinutes, held.minMinutes,
                      plain.minMinutes, plain.maxMinutes]),
      JSON.stringify([50, 70, 50, 35, 70]));
+  // ...and by the parser's own word (`addon`, offer_parser.is_addon), which
+  // also knows the card whose leg lost its plus signs and kept the pay's.
+  eq('an add-on typed by the parser\'s `addon` is the same add-on',
+     A.stackMany([a, b], { pay: 9, minutes: 15, cost: 1.8, addon: true }, SET, now).minMinutes,
+     50);
 
   /* Where they end. Hiram for A, Marietta for B, a card ending in Hiram: the
      car goes to Marietta whatever A says, so the pair ends elsewhere. */

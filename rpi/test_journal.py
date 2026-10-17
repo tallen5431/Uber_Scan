@@ -802,6 +802,13 @@ _shoponly = JR.row_for(
     {'ready': True, 'state': 'no'}, at=1000)
 eq('a card that named only the shop records no dropoff', _shoponly['dropoff'], None)
 
+# An Uber add-on says so on its row (OP.is_addon), and any other card says
+# nothing: on 16 Oct no row could tell the two ticked add-ons from any card.
+eq('an add-on\'s row says it is one, and an ordinary card\'s row is silent',
+   (JR.row_for(P.parse('+ $9.50 Guaranteed (incl. tip) +8 min (+1.3 mi) total Fable Grill'),
+               {'ready': True, 'state': 'no'}, at=1000)['addon'], _ends['addon']),
+   (True, None))
+
 _trimmed = JR.row_for(
     P.parse("Exclusive x $11.88 Guaranteed (incl. tip) 35 min (17.9 mi) total "
             "| Mellow Mushroom (Acworth) \\ Lakeview Ter & Windmill Dr, Dallas"),

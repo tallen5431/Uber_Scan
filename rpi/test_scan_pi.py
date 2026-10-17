@@ -3995,6 +3995,14 @@ _dd = said(lambda: SP.emit_offer('y', {'pay': 9.4, 'minutes': None, 'deliverBy':
                                  {'ready': True, 'perHour': 20.0, 'cardMinutes': 28.0}))['offer']
 eq('...a DoorDash card\'s with its "Deliver by"',
    (_dd.get('app'), _dd.get('screen'), _dd.get('deliverBy')), ('doordash', 'dd.offer', 1155))
+_aw = said(lambda: SP.emit_offer('z', {'pay': 9.5, 'minutes': 8.0, 'deliverBy': None,
+                                       'addon': True,
+                                       'text': '+ $9.50\nGuaranteed (incl. tip)\n'
+                                               '8 min (1.3 mi) total'},
+                                 {'ready': True, 'perHour': 40.0, 'cardMinutes': 8.0}))['offer']
+eq('...and the parser\'s word that the card is Uber\'s add-on, which the screen type alone '
+   'misses when the leg lost its plus signs',
+   ((_aw.get('screen'), _aw.get('addon')), _dd.get('addon')), (('uber.offer', True), False))
 # ...and a navigation screen's sighting carries that time on its one stop, so
 # the assembler can attribute a navigation destination read with no press.
 _nav_seen = SP.sighting(_nav_text, None, {'line': '4821 Kestrel Dr, Marietta, GA 30060',

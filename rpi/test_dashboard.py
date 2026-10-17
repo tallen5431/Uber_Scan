@@ -6544,7 +6544,39 @@ const framed = (page) => page.waitForFunction(
       next: document.getElementById('heldNext').hidden ? null
         : [].slice.call(document.getElementById('heldNext').children)
           .map((c) => c.textContent.trim()).join(' ') })));
+    // An Uber add-on held with the order it joined (server.js placeTook), and
+    // a second one on the same trip: ② says its card's plus, and ② onwards
+    // share the second line once there are three. Then the original put down
+    // and the server stops sending a list (the trip came apart): a list about
+    // another hold is drawn no more. Invented streets.
+    const T1 = { n: 1, pay: 25.03, minutes: 31, holdId: 'u-a@7', dropoff: '4821 Kestrel Dr, Marietta',
+                 card: null, endPinned: true, arrived: false, endWhy: null, app: 'uber',
+                 addOn: false, of: null };
+    const T2 = { n: 2, pay: 9.5, minutes: 8, holdId: 'u-b@8', dropoff: '77 Birch Ln, Roswell',
+                 card: null, endPinned: false, arrived: false, endWhy: null, app: 'uber',
+                 addOn: true, of: 'u-a@7' };
+    const T3 = Object.assign({}, T2, { n: 3, pay: 6.89, minutes: 9, holdId: 'u-c@9', dropoff: null });
+    await push({ holding: T1, orders: [T1, T2], unowned: 0 });
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    const addOnTwo = await look();
+    await push({ holding: T1, orders: [T1, T2, T3], unowned: 0 });
+    await tick(300);
+    const addOnThree = await look();
+    await push(Object.assign({}, READINGS.deducted, {
+      holding: T1, orders: [T1, T2, T3], unowned: 0,
+      stack: { pay: 40.0, worst: 18.2, best: 31.0, minMinutes: 55, maxMinutes: 120,
+               leftMinutes: 55, state: 'warn', sure: false, uncosted: false, ends: null,
+               heldCount: 3, leftEach: [31, 8, 9] } }));
+    await tick(300);
+    const addOnOffer = await look();
+    await push({ holding: Object.assign({}, T2, { n: undefined }) });
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    const addOnLeft = await look();
     out.carryTwo = { added: added, undoGone: undoGone, undone: undone, between: between,
+                     addOnTwo: addOnTwo, addOnThree: addOnThree, addOnOffer: addOnOffer,
+                     addOnLeft: addOnLeft,
                      offerUp: offerUp, offerFirst: offerFirst, chooser: chooser,
                      closed: closed, picked: picked,
                      dropAsk: dropAsk, dropBoth: dropBoth, atDoor: atDoor,
@@ -7039,6 +7071,27 @@ const framed = (page) => page.waitForFunction(
       unfiled: null, asked: true, ms: null, at: 2 } });
     await page.waitForTimeout(3500);
     out.mapTwoKnown = await runsNow();
+    // ...and an Uber add-on joined to ② as well, its end on record: three in
+    // the car, one trip (server.js placeTook). The run through ① and ② would
+    // leave ③ out, so no figure, as when the order of stops is unknown.
+    const C3 = Object.assign({}, B2, { n: 3, holdId: 'm-c@3', addOn: true, of: 'm-b@2',
+                                       dropoff: 'Canton Rd, Marietta', planAt: null });
+    // The premise first: the same card against ① and ② alone, in the
+    // planner's order, has its figure.
+    const offerOn = (id, orders) => page.evaluate((x) => {
+      Object.assign(x.offer, window.__CARD);
+      window.__es.push(x);
+    }, Object.assign({}, OFFER_TWO, { holding: A2, orders: orders,
+                                      offer: { id: id, pay: 14.25, minutes: 20,
+                                               billedMinutes: 20, miles: 4, cost: 1.4,
+                                               pickup: 'Chipotle (Barrett Pkwy)',
+                                               dropoff: null } }));
+    await offerOn('o-two-known', [A2, B2]);
+    await page.waitForTimeout(3500);
+    out.mapThreePremise = await runsNow();
+    await offerOn('o-three', [A2, B2, C3]);
+    await page.waitForTimeout(3500);
+    out.mapThree = await runsNow();
     await page.close();
   }
   await browser.close();
@@ -7429,6 +7482,19 @@ try:
            (_bt.get('one'), _bt.get('two'), _bt.get('whose')),
            ('① $9.48 → 4821 Kestrel Dr · ● armed', '② $28.08 → ? · ○ not armed',
             '2 dropoffs read · whose?'))
+        eq('[add-on] an Uber add-on held with its trip: its line says its card\'s plus',
+           ((ct.get('addOnTwo') or {}).get('one'), (ct.get('addOnTwo') or {}).get('two')),
+           ('① $25.03 → 4821 Kestrel Dr · ● armed', '② +$9.50 → 77 Birch Ln · ○ not armed'))
+        eq('[add-on] three in the car, one trip: ② onwards on the second line, their pay '
+           'summed and how many of their ends are read',
+           ((ct.get('addOnThree') or {}).get('one'), (ct.get('addOnThree') or {}).get('two'),
+            (ct.get('addOnThree') or {}).get('bar')),
+           ('① $25.03 → 4821 Kestrel Dr · ● armed', '②–③ +$16.39 → 1/2 ends', 6))
+        eq('[add-on] ...and under an offer, the trip in one line',
+           (ct.get('addOnOffer') or {}).get('detail'), '· In car ① $25.03 · ②–③ +$16.39')
+        eq('[add-on] the original put down and no list sent: one order drawn, not two',
+           ((ct.get('addOnLeft') or {}).get('two'),
+            '$9.50' in ((ct.get('addOnLeft') or {}).get('one') or '')), (None, True))
         _of = ct.get('offerUp') or {}
         eq('[carry two] under an offer, both in one line, and the pair line says it is with ① + ②',
            (_of.get('detail'), _of.get('vs'), _of.get('both'), _of.get('more')),
@@ -7568,6 +7634,11 @@ try:
        'and the figure through both',
        (_tk.get('note'), _tk.get('runs'), _tk.get('detour')),
        ('+0.6 mi incl. both orders — straight lines, not roads', [['mv-held-run', 4]], 2))
+    eq('[add-on] Map view with three in the car, one trip: no figure through two of them, '
+       'where the same card against ① and ② has one',
+       ((got.get('mapThreePremise') or {}).get('note'), (got.get('mapThree') or {}).get('note')),
+       ('+0.6 mi incl. both orders — straight lines, not roads',
+        'order of stops unknown — no figure'))
 
     # --- the order in the car, on the card ---------------------------------
     hc = got.get('heldCard') or {}
