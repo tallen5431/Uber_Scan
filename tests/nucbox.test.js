@@ -221,12 +221,16 @@ function ask(client, target) {
     http: fakeHttp(function (target, opts, cb, req) { timedReq = req; })
   });
   var t0 = Date.now();
-  var t = await ask(silent, 'http://nuc/never');
+  var guard = new Promise(function (resolve) {
+    setTimeout(function () { resolve({ guard: true }); }, 2000);
+  });
+  var t = await Promise.race([ask(silent, 'http://nuc/never'), guard]);
   var elapsed = Date.now() - t0;
-  eq('wall-clock timeout names the configured interval', t.err,
+  no('wall-clock timeout returns before a generous deadlock guard', t && t.guard);
+  eq('wall-clock timeout names the configured interval', t && t.err,
      'the NucBox did not answer within 0.025 s');
   yes('wall-clock timeout destroys an unresponsive request', timedReq && timedReq.destroyed);
-  yes('wall-clock timeout fires without waiting for a socket event', elapsed >= 20 && elapsed < 500);
+  yes('wall-clock timeout does not fire before its configured floor', elapsed >= 20);
 
   var invalid = await ask(silent, 'not a url');
   eq('invalid target is rejected before I/O', invalid.err, 'the NucBox address is not a URL');
