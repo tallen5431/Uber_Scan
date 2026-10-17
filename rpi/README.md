@@ -4567,6 +4567,28 @@ printed and exits 1; run from the server, a failure is said once and the
 server carries on. A line still in an older `Start.sh` is harmless: the second
 run finds nothing to do.
 
+**The shift report, at the end of a shift**, on the rig, one command:
+
+```sh
+python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day $(date -d '4 hours ago' +%F)
+```
+
+`--day` is the driver's day, which starts at 4am (advice.js's `DAY_STARTS_AT`),
+and "four hours ago" is exactly the driver's day now: tonight's shift, past
+midnight too, until 4am. A shift that ran past 4am is the day before, named
+(`--day 2026-10-16`). It prints the shift's totals first, off the GPS log alone: when the
+rig began and stopped logging, when the car left the place the log began
+("start", never named or placed) and got back to it, the miles, the minutes
+moving and stopped (under 1 m/s), every stop of 4 minutes or more by its time,
+length and miles from start, every gap in the log over 60 s, and the count of
+orders. Then one row per order, card beside actual. A gap is a cut: the miles
+driven in it are not counted (the line says so, and how far apart the fixes
+either side are), no stop runs across it, its minutes are neither moving nor
+stopped, and a departure seen first after a gap says it may have been earlier.
+`--csv` gives the per-order rows only. It prints no address and no
+coordinate, recommends nothing, and nothing on the rig reads it. There is no
+panel button for it, deliberately: the bar holds six.
+
 **One gate, in one place.** Every fix carries what the receiver said about it
 — `mode`, and `err`, gpsd's `eph` in metres — and `gps.usable()` decides once
 whether it is good enough to show or compare: a 2D or 3D mode, an error
@@ -8429,7 +8451,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 41 suites
+npm test                # all 42 suites
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -8576,6 +8598,12 @@ python3 rpi/test_loop.py        # 393 on the scan loop re-telling a card once
                                 #     the rest of it arrives, going quiet when
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
+python3 tools/test_gpslog_tidy.py   #  45 on tidying the GPS logs unattended
+python3 tools/test_shift_report.py  # 129 on what each order really took and
+                                    #     what the shift adds up to: a gap in
+                                    #     the GPS log never a stop and never
+                                    #     miles, a parked receiver's wander
+                                    #     never miles, and no place printed
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.

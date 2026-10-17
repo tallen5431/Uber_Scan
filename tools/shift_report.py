@@ -12,6 +12,14 @@ car at the same time, and the card's pay over the minutes that really passed.
 Then a short table by app and by the card's minutes: the median of actual over
 card minutes, and the median actual $/hr. It describes; it recommends nothing.
 
+Above the orders, THE SHIFT'S TOTALS, off the GPS log alone (totals(), and
+the comment above it on gaps): when the rig began and stopped logging, when
+the car left the place the log began and got back to it, the miles, the
+minutes moving and stopped, every stop of 4 minutes or more by its time,
+length and miles from that place, every gap in the log, and the day's count
+of orders. Text only; the CSV stays one row per order. What the card paid
+against what the app paid is not here: the rig never sees the earnings.
+
 A REPORT, AND NOTHING READS IT. Nothing on the rig imports this file or its
 output: not the live rating, not the target, not advice.js, not the panel.
 tools/test_shift_report.py holds that by name. AUDITS.md's Settled entry on
@@ -393,8 +401,8 @@ def _logs_for(names, window):
 
 
 def load_fixes(directory, window=None):
-    """(fixes, info). `fixes` is [(t, lat, lon)] for every fix gps.usable()
-    passed, sorted by t (seconds, the Pi's clock), or None when there is no
+    """(fixes, info). `fixes` is [(t, lat, lon, speed)] for every fix gps.usable()
+    passed (speed in m/s, or None), sorted by t (seconds, the Pi's clock), or None when there is no
     log at all. `info` counts what was read and what was refused, and why.
 
     `window`, [lo, hi) in ms: read only the logs that can hold a fix in it, by
@@ -437,10 +445,14 @@ def load_fixes(directory, window=None):
                 fix = phone.latest()
                 if fix['ok']:
                     info['passed'] += 1
-                    fixes.append((t, fix['lat'], fix['lon']))
+                    # The TPV's own speed rides along for the shift's moving
+                    # and stopped minutes (totals); None when it gave none.
+                    fixes.append((t, fix['lat'], fix['lon'], _num(fix.get('speed'))))
                 else:
                     info['refused'][fix['why']] += 1
-    fixes.sort()
+    # By time, then place, as before the speed was added: a speed is never
+    # what orders two fixes, and None does not compare with a number.
+    fixes.sort(key=lambda f: f[:3])
     return fixes, info
 
 
@@ -479,15 +491,15 @@ def track(fixes, t0, t1):
     return out
 
 
-def stops(fixes):
+def stops(fixes, min_s=STOP_MIN_S):
     """[(start, end)] seconds, each a run of fixes within STOP_M of its first
-    lasting at least STOP_MIN_S."""
+    lasting at least `min_s` (STOP_MIN_S; the shift's totals ask LONG_STOP_S)."""
     out, i, n = [], 0, len(fixes)
     while i < n:
         j = i
         while j + 1 < n and _apart(fixes[i], fixes[j + 1]) <= STOP_M:
             j += 1
-        if fixes[j][0] - fixes[i][0] >= STOP_MIN_S:
+        if fixes[j][0] - fixes[i][0] >= min_s:
             out.append((fixes[i][0], fixes[j][0]))
         i = j + 1
     return out
@@ -535,6 +547,214 @@ def measure(o, fixes):
         o['doorMinutes'] = dwell(fixes, visits[-1] if visits else t0, t1)
 
 
+# --- the shift as a whole ----------------------------------------------------
+#
+# What the 16 Oct summary was worked out by hand to say, from the same fixes:
+# when the rig was logging, when the car left where it began and came back,
+# the miles, the minutes moving and stopped, the longer stops, and the gaps.
+#
+# A GAP CUTS THE LOG, and nothing in this section looks across a cut. On 16 Oct
+# the rig was off for about 13 minutes while the car was driven a few miles,
+# and a stop detector that read the fix before the gap and the fix after it as
+# one stretch called the whole of it a stop at the start and put the departure
+# ten minutes late. So: the miles are counted inside each stretch between gaps
+# and never across one (unlike an order's miles above, which bridge a gap in a
+# straight line and say so: there the least the car drove is the figure
+# wanted); a stop is found inside one stretch and ends where the log went
+# quiet; a minute in a gap is neither moving nor stopped; and a departure or
+# an arrival whose fix is the first after a gap is printed at that fix, with a
+# note that it may have been any time from the gap's start.
+
+# "Start" is the day's first usable fix, and "at start" is within START_M of
+# it. Called start, not home: it is where the rig began logging, whatever that
+# was. Chosen, not measured: three times the gate's FIX_ERR_MAX, so a parked
+# receiver at the worst error the gate passes is still at start, and well
+# short of a block, so a car driven off is not.
+START_M = 150.0
+
+# How long the car must stay beyond START_M for that to be leaving rather than
+# moving across a car park. Chosen, not measured.
+AWAY_S = 300.0
+
+# The stops listed: 4 minutes or more, as the owner asked. A stop is the run
+# stops() finds (every fix within STOP_M of its first), only longer.
+LONG_STOP_S = 240.0
+
+# Stopped, for the minutes and for the miles: a speed under gps.STOPPED_SPEED,
+# the 1 m/s the panel's driving rule stops at. Measured there, on the 12 Oct
+# shift: a parked receiver read p50 0.04 m/s and p99 0.42. Not a new number.
+STOPPED_MS = G.STOPPED_SPEED
+
+
+def runs(fixes):
+    """`fixes` cut at every gap over GAP_S: [[fix, ...], ...], each a stretch
+    the receiver logged without a break."""
+    out = []
+    for f in fixes:
+        if out and f[0] - out[-1][-1][0] <= GAP_S:
+            out[-1].append(f)
+        else:
+            out.append([f])
+    return out
+
+
+def _parked(f):
+    """A fix whose own speed says the car was standing. One with no speed is
+    not said to be parked: a speed nobody sent is not a stop."""
+    return f[3] is not None and f[3] < STOPPED_MS
+
+
+def run_metres(run):
+    """The metres driven inside one stretch. A step counts once it is at least
+    JITTER_M from the last fix counted (the per-order rule above), and only
+    when the fix it reaches is not parked: a parked receiver's jump past
+    JITTER_M, at a speed of nothing, is the receiver moving and not the car."""
+    metres = 0.0
+    anchor = run[0]
+    for f in run[1:]:
+        d = _apart(anchor, f)
+        if d >= JITTER_M and not _parked(f):
+            metres += d
+            anchor = f
+    return metres
+
+
+def _excursions(fixes, home):
+    """[(i, j)] over `fixes`: each run of fixes beyond START_M of `home`, i the
+    first fix beyond and j the first back within it (None: still away at the
+    last fix), kept only when the car stayed away AWAY_S or more."""
+    out, i = [], None
+    for k, f in enumerate(fixes):
+        away = _apart(home, f) > START_M
+        if away and i is None:
+            i = k
+        elif not away and i is not None:
+            out.append((i, k))
+            i = None
+    if i is not None:
+        out.append((i, None))
+    return [(i, j) for i, j in out
+            if (fixes[j][0] if j is not None else fixes[-1][0]) - fixes[i][0] >= AWAY_S]
+
+
+def _event(fixes, k):
+    """{'at', 'since'} for the fix k a departure or an arrival was seen at:
+    `since` is when the log went quiet before it, when the fix is the first
+    after a gap, and None otherwise."""
+    gap = k > 0 and fixes[k][0] - fixes[k - 1][0] > GAP_S
+    return {'at': fixes[k][0], 'since': fixes[k - 1][0] if gap else None}
+
+
+def totals(fixes, lo, hi):
+    """The shift as a whole, over the usable fixes in [lo, hi) seconds, or None
+    with none. Seconds and miles; positions are used and none is returned."""
+    fixes = [f for f in (fixes or ()) if lo <= f[0] < hi]
+    if not fixes:
+        return None
+    home = fixes[0]
+    cut = runs(fixes)
+    out = {'on': fixes[0][0], 'off': fixes[-1][0], 'gaps': [], 'gapSeconds': 0.0,
+           'miles': 0.0, 'moving': 0.0, 'stopped': 0.0, 'noSpeed': 0.0, 'stops': [],
+           'left': None, 'back': None, 'stillAway': False}
+    for a, b in zip(cut, cut[1:]):
+        out['gaps'].append({'from': a[-1][0], 'to': b[0][0], 'seconds': b[0][0] - a[-1][0],
+                            'apartMiles': _apart(a[-1], b[0]) / 1609.344})
+        out['gapSeconds'] += b[0][0] - a[-1][0]
+    for n, run in enumerate(cut):
+        out['miles'] += run_metres(run) / 1609.344
+        # Each second between two fixes is what the earlier one said the car
+        # was doing until the next. Only inside a stretch: a gap is neither.
+        for a, b in zip(run, run[1:]):
+            key = 'noSpeed' if a[3] is None else 'stopped' if a[3] < STOPPED_MS else 'moving'
+            out[key] += b[0] - a[0]
+        for s, e in stops(run, LONG_STOP_S):
+            # stops() takes in the last seconds of a car rolling up and the
+            # first of it pulling away, which are within STOP_M of where it
+            # stood; the stop is the fixes that read parked, by STOPPED_MS,
+            # the rule the minutes use.
+            still = [f for f in run if s <= f[0] <= e and _parked(f)]
+            if not still or still[-1][0] - still[0][0] < LONG_STOP_S:
+                continue
+            first, s, e = still[0], still[0][0], still[-1][0]
+            far = _apart(home, first)
+            out['stops'].append({
+                'from': s, 'seconds': e - s, 'atStart': far <= START_M,
+                'fromStartMiles': far / 1609.344,
+                # Where a stop touches the edge of a stretch its length is
+                # the least it lasted: the log was not there to see more.
+                'fromOn': n == 0 and s == run[0][0],
+                'afterGap': n > 0 and s == run[0][0],
+                'beforeGap': n < len(cut) - 1 and e == run[-1][0],
+                'toOff': n == len(cut) - 1 and e == run[-1][0]})
+    away = _excursions(fixes, home)
+    if away:
+        out['left'] = _event(fixes, away[0][0])
+        last = away[-1][1]
+        if last is None:
+            out['stillAway'] = True
+        else:
+            out['back'] = _event(fixes, last)
+    return out
+
+
+def _mins(seconds):
+    return '%.0f min' % (seconds / 60.0)
+
+
+def totals_text(t, n_orders):
+    """The shift's totals as lines of text. A time is a clock reading and a
+    distance is miles from start to one decimal; no place, no coordinate."""
+    if t is None:
+        return ['Shift totals: no usable GPS fix on this day']
+    c = lambda s: _clock(s * 1000.0)                                  # noqa: E731
+    out = ['Shift totals, from the GPS log ("start" is where the log began; '
+           'no place is printed):']
+    row = lambda k, v: out.append('  %-15s %s' % (k, v))             # noqa: E731
+    row('rig on', '%s, the first usable fix' % c(t['on']))
+    row('rig off', '%s, the last usable fix' % c(t['off']))
+
+    def seen(ev):
+        if ev['since'] is None:
+            return c(ev['at'])
+        return ('%s, the first fix after a gap in the log: it may have been any time '
+                'from %s' % (c(ev['at']), c(ev['since'])))
+    row('left start', seen(t['left']) if t['left']
+        else 'never: the car stayed within %d m of start' % START_M)
+    if t['back']:
+        row('back at start', seen(t['back']))
+    elif t['left']:
+        row('back at start', 'not by the last fix')
+    gaps = len(t['gaps'])
+    row('miles driven', '%.1f%s' % (t['miles'], ', between fixes only: the %d gap%s below '
+                                    'not counted' % (gaps, '' if gaps == 1 else 's')
+                                    if gaps else ''))
+    row('moving', _mins(t['moving']))
+    row('stopped', '%s (speed under %g m/s)' % (_mins(t['stopped']), STOPPED_MS))
+    if t['noSpeed']:
+        row('no speed', '%s (fixes that gave no speed)' % _mins(t['noSpeed']))
+    if gaps:
+        row('in gaps', '%s, counted as neither' % _mins(t['gapSeconds']))
+        out.append('  gaps in the log over %d s (miles driven in a gap are not counted):' % GAP_S)
+        for g in t['gaps']:
+            out.append('    %s-%s  %5.1f min, the car %.1f mi (a straight line) from where '
+                       'the log went quiet'
+                       % (c(g['from']), c(g['to']), g['seconds'] / 60.0, g['apartMiles']))
+    out.append('  stops of %d min or more (when and how long; how far from start, never where):'
+               % (LONG_STOP_S / 60))
+    if not t['stops']:
+        out.append('    none')
+    for s in t['stops']:
+        edge = [w for k, w in (('fromOn', 'from rig on'), ('afterGap', 'after a gap in the log'),
+                               ('beforeGap', 'then the log went quiet'), ('toOff', 'to rig off'))
+                if s[k]]
+        out.append('    %s  %5.1f min  %s%s'
+                   % (c(s['from']), s['seconds'] / 60.0,
+                      'at start' if s['atStart'] else '%.1f mi from start' % s['fromStartMiles'],
+                      ', ' + ', '.join(edge) if edge else ''))
+    row('orders taken', '%d (a row each below)' % n_orders)
+    return out
+
+
 # --- the report -------------------------------------------------------------
 
 def report(journal, gps_dir, day):
@@ -580,6 +800,7 @@ def report(journal, gps_dir, day):
     info['unreadable'] = bad
     info['gpsMissing'] = fixes is None
     return {'orders': mine, 'summary': summary(mine), 'info': info,
+            'totals': totals(fixes, start / 1000.0, end / 1000.0),
             'day': day, 'start': start, 'end': end}
 
 
@@ -661,6 +882,9 @@ def text(rep):
     if info['unreadable']:
         out.append('Journal: %d unreadable line%s skipped'
                    % (info['unreadable'], '' if info['unreadable'] == 1 else 's'))
+    if not info['gpsMissing']:
+        out.append('')
+        out.extend(totals_text(rep.get('totals'), len(rep['orders'])))
     out.append('')
     table = [('#',) + COLUMNS] + [(str(i + 1),) + cells(o) for i, o in enumerate(rep['orders'])]
     widths = [max(len(r[c]) for r in table) for c in range(len(table[0]))]
