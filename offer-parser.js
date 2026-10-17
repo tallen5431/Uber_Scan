@@ -1691,10 +1691,31 @@
     return stop;
   }
 
+  /* Uber's customer sheet is not the Trip Planner, though its "Drop off 1
+     order" reads as a stop header: a page with the sheet's own labels
+     ("Dropoff type", "Business / Building name") and none of the planner's
+     (title, "Address", "View details", "Waybill", the bar, a Pickup header)
+     is no planner. The 17 Oct press it cost, and the measurement, are at
+     _customer_sheet in offer_parser.py. */
+  function customerSheet(text) {
+    var lines = String(text || '').split(/[\r\n]+/).map(normalize)
+      .filter(function (l) { return l; });
+    if (!lines.some(function (l) { return SHEET_TYPE.test(l) || SHEET_BUSINESS.test(l); })) {
+      return false;
+    }
+    return !lines.some(function (l) {
+      if (PLANNER_TITLE.test(l) || plannerLabel(l) || PLANNER_DETAILS.test(l)
+          || PLANNER_END.test(l) || PLANNER_BAR.test(l)) return true;
+      var head = PLANNER_STOP.exec(l);
+      return !!head && /^p/i.test(head[1]);
+    });
+  }
+
   /* ...and the page's two edges, said as `partial` on the one stop each cut
      and on no other: 'top' for the stop above, 'bottom' for the last header
      with no address under it and no "Waybill" after it. See find_planner. */
   function findPlanner(text) {
+    if (customerSheet(text)) return null;
     var split = plannerLines(text);
     var lines = split.lines, heads = split.heads;
     if (!heads.length) {
@@ -1828,10 +1849,19 @@
   /* Uber's navigation sheet, opened: the customer's name, the street with its
      house number, the town with no ZIP, and "Dropoff type" under them — which
      the owner decided (14 Oct 2026) is the dropoff's label, read upwards.
-     {line, street, city, state, zip} or null. Every rule, and the 12 Oct
-     measurement behind SHEET_REACH, is at sheet_dropoff in offer_parser.py;
-     tests/fixtures/cases.json `sheets` holds the two ports to one answer. */
+     {line, street, city, state, zip, place} or null. The customer sheet of
+     17 Oct reads the same way: "Business / Building name" and its value
+     between the town and "Dropoff type" (SHEET_BUSINESS, the reach counted
+     from it, and the label alone where "Dropoff type" did not read), a street
+     wrapped at its comma with the icons after it, the place between the name
+     and the street (SHEET_NAME_REACH), and `place`, shown and never searched.
+     Every rule, and the 12 Oct measurement behind SHEET_REACH, is at
+     sheet_dropoff in offer_parser.py; tests/fixtures/cases.json `sheets`
+     holds the two ports to one answer. */
   var SHEET_TYPE = /\bdrop ?-?off ?type\b/i;
+  var SHEET_BUSINESS = /^[^A-Za-z0-9]{0,3}[A-Za-z]{4,12} ?\/ ?[A-Za-z]{4,12} ?name[^A-Za-z0-9]{0,3}$/i;
+  var SHEET_ICON_TAIL = /(?:\s+\S{1,2})+$/;
+  var SHEET_NAME_REACH = 3;
   var SHEET_HOUSE = /^\W{0,3}(\d{1,6} [A-Za-z].*)$/;
   var SHEET_NUMBER = /^[1-9]\d{0,5} /;
   var SHEET_STREET_END = new RegExp('\\b(?:' + STREET_SUFFIX + ')\\b\\.?'
@@ -1861,14 +1891,30 @@
             h[1].slice(cut)];
   }
 
+  function sheetPlace(line) {
+    var name = String(line || '').replace(SHEET_ICON_TAIL, '').replace(PLANNER_EDGE, '');
+    return /[A-Za-z]{2}/.test(name) ? name : null;
+  }
+
   function sheetDropoff(text) {
     var lines = String(text || '').split(/[\r\n]+/).map(normalize)
       .filter(function (l) { return l; });
-    var d = -1;
-    lines.forEach(function (l, i) { if (SHEET_TYPE.test(l)) d = i; });
+    var d = -1, pair = -1;
+    lines.forEach(function (l, i) {
+      if (SHEET_TYPE.test(l)) d = i;
+      if (SHEET_BUSINESS.test(l)) pair = i;
+    });
+    // The last "Dropoff type", or where none read the last business label.
+    if (d === -1) d = pair;
     if (d === -1) return null;
+    // The business pair above it, which the reach is counted from.
+    var b = -1;
+    for (var j = d; j >= 0 && j >= d - SHEET_REACH; j--) {
+      if (SHEET_BUSINESS.test(lines[j])) { b = j; break; }
+    }
+    var top = b === -1 ? d : b;
     var s = -1;
-    for (var i = d - 1; i >= 0 && i >= d - SHEET_REACH; i--) {
+    for (var i = top - 1; i >= 0 && i >= top - SHEET_REACH; i--) {
       if (SHEET_HOUSE.test(lines[i])) { s = i; break; }
     }
     if (s === -1) return null;
@@ -1876,6 +1922,8 @@
     if (!st) return null;
     var town = null, townAt = -1;
     var tail = /^\s*,\s*(.+)$/.exec(st[1]);
+    // A tail after the comma with no three letters in a row is the icons.
+    if (tail && !/[A-Za-z]{3}/.test(tail[1])) tail = null;
     if (tail) {
       town = sheetTown(tail[1]);
       if (!town) {
@@ -1883,23 +1931,30 @@
         town = SHEET_TOWN_WORDS.test(bare) ? [bare, null, null] : null;
       }
       townAt = s;
-    } else if (s + 1 < d) {
+    } else if (s + 1 < top) {
       town = sheetTown(lines[s + 1]);
       townAt = s + 1;
     }
     if (!town) return null;
     if (lines.slice(townAt + 1, d).some(function (l) { return plannerTown(l); })) return null;
     var n = -1;
-    [s - 1, s - 2].forEach(function (k) {
-      if (n === -1 && k >= 0 && SHEET_NAME.test(lines[k])) n = k;
-    });
+    for (var k = s - 1; k >= 0 && k >= s - SHEET_NAME_REACH; k--) {
+      if (SHEET_NAME.test(lines[k])) { n = k; break; }
+    }
     if (n === -1 || lines.slice(n + 1, s).some(function (l) {
       return SHEET_HOUSE.test(l) || plannerTown(l);
     })) return null;
+    // The place: the pair's value, else the line between the name and street.
+    var place = null;
+    if (b !== -1 && b + 1 < lines.length && b + 1 !== d && !SHEET_TYPE.test(lines[b + 1])
+        && !PLANNER_STOP.test(lines[b + 1])) {
+      place = sheetPlace(lines[b + 1]);
+    }
+    if (place === null && n + 1 < s) place = sheetPlace(lines[n + 1]);
     var parts = [st[0], town[0]];
     if (town[2]) parts.push(town[1] + ' ' + town[2]);
     return { line: parts.join(', '), street: st[0], city: town[0], state: town[1],
-             zip: town[2] };
+             zip: town[2], place: place };
   }
 
   /* DoorDash's place popup, opened from a stop on an offer card before the

@@ -5490,6 +5490,19 @@
      "place": null
     }
    ]
+  },
+  {
+   "name": "Measured: Uber's customer sheet is no planner, though its 'Drop off 1 order' reads as a stop header (17 Oct)",
+   "_why": "The press of 17 Oct over the customer sheet was answered by a planner of one dropoff, the order code under the header for its name and its time, and no address; the address the sheet printed above was never taken. The sheet's labels and none of the planner's: see _customer_sheet. The rig's whole-screen read, names, place, street and order code invented.",
+   "text": "= NSS: A@® .\n25 8 min €O 4.1 mi =\nLee R.\nFable Parking Deck QO &\n283 Quillon St NW\nSmyrna, GA\nBusiness / Building name\nFable Parking Deck\nDropoff type\nDrop off 1 order >\n4K217\nFable Grill - litem\nExpected by 12:30 AM\nere ces\nete delivery",
+   "bounded": false,
+   "expect": null
+  },
+  {
+   "name": "...nor with its 'Dropoff type' lost, by the business label alone",
+   "text": "2S 8 min €O 4.3 mi =\nLee R.\nFable Parking Dec k 2 &\n283 Quillon St NW\nSmyrna, GA\n) ©usiness / Building Name\nFable Parking Deck\nDrop off 1 order >\n4K217\nFable Grill -1item\nExpected by 12:30 AM\nVerify - Enter delivery PIN",
+   "bounded": false,
+   "expect": null
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",
@@ -5758,6 +5771,14 @@
     "app": "uber",
     "screen": "uber.nav"
    }
+  },
+  {
+   "name": "Uber's customer sheet, pulled all the way up, is its navigation and not the planner",
+   "text": "= NSS: A@® .\n25 8 min €O 4.1 mi =\nLee R.\nFable Parking Deck QO &\n283 Quillon St NW\nSmyrna, GA\nBusiness / Building name\nFable Parking Deck\nDropoff type\nDrop off 1 order >\n4K217\nFable Grill - litem\nExpected by 12:30 AM\nere ces\nete delivery",
+   "expect": {
+    "app": "uber",
+    "screen": "uber.nav"
+   }
   }
  ],
  "_navStops_comment": "What a navigation or \"Deliver to\" screen gives as the order's destination when nobody pressed ⌖: the screen type, find_address's line (null for none), the stop label in front of it (address_stop: 'dropoff', 'pickup' or null), whether it sits in that Dropoff label's own block (address_under_dropoff), and whether parse() reads the frame as an offer (a payout or a place: the test the scanner's `an_offer` starts from, which refuses the address before any label is asked; on a frame typed uber.nav with no payout the scanner asks it again with the bar taken out, rpi/scan_pi.py screen_address). `expect` is [screen, line, stop, under, asOffer]; tests/corpus.test.js holds screen, line and asOffer, the two label answers having no JavaScript port. The layouts are the 12 Oct shift's card-box reads of Uber's navigation, 179 of its 1,237 screen rows: the collapsed bar prints \"Deliver to\" over a NAME (36 reads), the opened sheet prints the name, the street and the town with no ZIP and its one label, \"Dropoff type\", BELOW them (18 reads), and a store's navigation prints its address with a ZIP under no label. Not one of the 179 has an address under either label. The cases that do are marked as shapes the shift did not show. The opened sheet's address is read by sheet_dropoff instead (`sheets`): the owner decided on 14 Oct that its 'Dropoff type', below the address, is its label. Every name, street, number and store is invented.",
@@ -5876,7 +5897,7 @@
    ]
   }
  ],
- "_sheets_comment": "Uber's navigation sheet, opened: sheet_dropoff / sheetDropoff. The customer's name, the street with a house number, the town with no ZIP, and 'Dropoff type' under them is the dropoff (the owner's decision, 14 Oct 2026). `expect` is {line, street, city, state, zip}, or null when the sheet does not read as one. The layouts and the OCR's marks are the 12 Oct shift's 18 opened sheets, 10 of which read; every name, street, number and place is invented.",
+ "_sheets_comment": "Uber's navigation sheet, opened: sheet_dropoff / sheetDropoff. The customer's name, the street with a house number, the town with no ZIP, and 'Dropoff type' under them is the dropoff (the owner's decision, 14 Oct 2026). `expect` is {line, street, city, state, zip, place}, or null when the sheet does not read as one; `place` is the building or business the sheet names, shown and never searched. The layouts and the OCR's marks are the 12 Oct shift's 18 opened sheets, 10 of which read, and the 17 Oct customer sheet (the same sheet pulled all the way up, with 'Business / Building name' and its value over 'Dropoff type'), whose labels' slips are the rig's card-box reads; every name, street, number and place is invented.",
  "sheets": [
   {
    "name": "the sheet as it arrives: name, street with the sheet's icons read after it, town, 'Dropoff type'",
@@ -5886,7 +5907,8 @@
     "street": "1572 Larkspur Dr",
     "city": "Woodstock",
     "state": "GA",
-    "zip": null
+    "zip": null,
+    "place": null
    }
   },
   {
@@ -5897,7 +5919,8 @@
     "street": "4416 Wrenfield Dr NW",
     "city": "Kennesaw",
     "state": "GA",
-    "zip": null
+    "zip": null,
+    "place": null
    }
   },
   {
@@ -5908,7 +5931,8 @@
     "street": "917 Heron Rd NW",
     "city": "Kennesaw",
     "state": null,
-    "zip": null
+    "zip": null,
+    "place": "Fable Internationa"
    }
   },
   {
@@ -5919,7 +5943,8 @@
     "street": "4416 Wrenfield Dr NW",
     "city": "Kennesaw",
     "state": "GA",
-    "zip": null
+    "zip": null,
+    "place": null
    }
   },
   {
@@ -5930,7 +5955,8 @@
     "street": "2950 Kestrel Dr",
     "city": "Woodstock",
     "state": "GA",
-    "zip": "30188"
+    "zip": "30188",
+    "place": null
    }
   },
   {
@@ -5981,8 +6007,108 @@
     "street": "2208 Wrenfield Dr",
     "city": "Woodstock",
     "state": "GA",
-    "zip": null
+    "zip": null,
+    "place": null
    }
+  },
+  {
+   "name": "Measured: the customer sheet pulled all the way up, read whole by the rig (17 Oct): a place between the name and the street, and 'Business / Building name' and its value between the town and 'Dropoff type'",
+   "text": "= NSS: A@® .\n25 8 min €O 4.1 mi =\nLee R.\nFable Parking Deck QO &\n283 Quillon St NW\nSmyrna, GA\nBusiness / Building name\nFable Parking Deck\nDropoff type\nDrop off 1 order >\n4K217\nFable Grill - litem\nExpected by 12:30 AM\nere ces\nete delivery",
+   "expect": {
+    "line": "283 Quillon St NW, Smyrna",
+    "street": "283 Quillon St NW",
+    "city": "Smyrna",
+    "state": "GA",
+    "zip": null,
+    "place": "Fable Parking Deck"
+   }
+  },
+  {
+   "name": "...its street wrapped at its comma, the chat and phone icons read after the comma",
+   "text": "Lee R.\nFable Parking Deck\n283 Quillon St NW, O &\nSmyrna, GA\nBusiness / Building name\nFable Parking Deck\nDropoff type\nMeet outside",
+   "expect": {
+    "line": "283 Quillon St NW, Smyrna",
+    "street": "283 Quillon St NW",
+    "city": "Smyrna",
+    "state": "GA",
+    "zip": null,
+    "place": "Fable Parking Deck"
+   }
+  },
+  {
+   "name": "...or ending on the comma alone",
+   "text": "Lee R.\nFable Parking Deck\n283 Quillon St NW,\nSmyrna, GA\nBusiness / Building name\nFable Parking Deck\nDropoff type\nMeet outside",
+   "expect": {
+    "line": "283 Quillon St NW, Smyrna",
+    "street": "283 Quillon St NW",
+    "city": "Smyrna",
+    "state": "GA",
+    "zip": null,
+    "place": "Fable Parking Deck"
+   }
+  },
+  {
+   "name": "...a town cut after the comma is still no town, icons or not",
+   "text": "Lee R.\nFable Parking Deck\n283 Quillon St NW, myrn &\nBusiness / Building name\nFable Parking Deck\nDropoff type",
+   "expect": null
+  },
+  {
+   "name": "...the icons read on a line of their own between the place and the street",
+   "text": "Lee R.\nFable Parking Deck\nO &\n283 Quillon St NW\nSmyrna, GA\nBusiness / Building name\nFable Parking Deck\nDropoff type",
+   "expect": {
+    "line": "283 Quillon St NW, Smyrna",
+    "street": "283 Quillon St NW",
+    "city": "Smyrna",
+    "state": "GA",
+    "zip": null,
+    "place": "Fable Parking Deck"
+   }
+  },
+  {
+   "name": "...but not a name four lines over the street",
+   "text": "Lee R.\nFable Parking Deck\nLevel 2\nO &\n283 Quillon St NW\nSmyrna, GA\nBusiness / Building name\nFable Parking Deck\nDropoff type",
+   "expect": null
+  },
+  {
+   "name": "Measured: 'Dropoff type' lost, the business label read with its slip as the rig's card box read it (17 Oct), is the sheet's label; the place off the line between, the icons after it taken off",
+   "text": "2S 8 min €O 4.3 mi =\nLee R.\nFable Parking Dec k 2 &\n283 Quillon St NW\nSmyrna, GA\n) ©usiness / Building Name\nDrop off 1 order >\n4K217\nFable Grill -1item\nExpected by 12:30 AM\nVerify - Enter delivery PIN",
+   "expect": {
+    "line": "283 Quillon St NW, Smyrna",
+    "street": "283 Quillon St NW",
+    "city": "Smyrna",
+    "state": "GA",
+    "zip": null,
+    "place": "Fable Parking Dec"
+   }
+  },
+  {
+   "name": "...and its value is the place when it read",
+   "text": "2S 8 min €O 4.3 mi =\nLee R.\nFable Parking Dec k 2 &\n283 Quillon St NW\nSmyrna, GA\n) ©usiness / Building Name\nFable Parking Deck\nDrop off 1 order >\n4K217\nFable Grill -1item\nExpected by 12:30 AM\nVerify - Enter delivery PIN",
+   "expect": {
+    "line": "283 Quillon St NW, Smyrna",
+    "street": "283 Quillon St NW",
+    "city": "Smyrna",
+    "state": "GA",
+    "zip": null,
+    "place": "Fable Parking Deck"
+   }
+  },
+  {
+   "name": "a business name that opens with a number is not the street: the reach starts above the label, read with the other slip on file",
+   "text": "Lee R.\nFable Tower\n283 Quillon St NW\nSmyrna, GA\nMUOHICSS / SUNGINg name\n1200 Fable Tower\nDropoff type\nMeet outside",
+   "expect": {
+    "line": "283 Quillon St NW, Smyrna",
+    "street": "283 Quillon St NW",
+    "city": "Smyrna",
+    "state": "GA",
+    "zip": null,
+    "place": "1200 Fable Tower"
+   }
+  },
+  {
+   "name": "the business label ABOVE the name is not the sheet's label",
+   "text": "Business / Building name\nFable Parking Deck\nLee R.\n283 Quillon St NW\nSmyrna, GA",
+   "expect": null
   }
  ],
  "_popups_comment": "DoorDash's place popup, opened from a stop on an offer card before the driver decides: place_popup / placePopup. The role label, the store's name, the street with a house number, the town, and 'Directions' under them. `expect` is {role, name, line, street, city, state, zip}, or null when the popup does not read as one. The store's layout and the OCR's marks are the five reads of it in the journal copied with the 12 Oct shift, all five of which read; the customer's is INFERRED (no customer popup has been read) and its cases say so; the pill over the map is the 12 Oct snaps' 16-03-08 and 16-03-17, whose text was never read. Every name, street and number is invented.",

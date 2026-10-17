@@ -4051,6 +4051,24 @@ _sheet_seen = SP.sighting(_SHEET_BAR, None, None, False, True,
 eq('the opened sheet\'s sighting types its address a dropoff, under the label it printed',
    [(s['kind'], s['label'], s['line']) for s in _sheet_seen['stops']],
    [('dropoff', 'dropoff type', '4416 Wrenfield Dr NW, Kennesaw')])
+# ...and the customer sheet, the same sheet pulled all the way up (17 Oct, the
+# shared case; names, place and street invented): read as the sheet and not
+# as a planner of one dropoff off its "Drop off 1 order", so the sighting is
+# typed Uber's navigation and carries the sheet's address, its place and the
+# one "Expected by" it prints.
+_CSHEET = next(t for n, t in _SHEETS.items()
+               if n.startswith('Measured: the customer sheet pulled all the way up'))
+eq('screen_address: the customer sheet is no offer, and its address is read',
+   _framed(_CSHEET), (False, None, '283 Quillon St NW, Smyrna'))
+_csheet_seen = SP.sighting(_CSHEET, OP2.find_planner(_CSHEET), None, True, True,
+                           sheet=OP2.sheet_dropoff(_CSHEET))
+eq('the customer sheet\'s sighting is navigation with the sheet\'s one dropoff, its place '
+   'and its time',
+   (_csheet_seen['screen'], _csheet_seen['orderCount'],
+    [(s['kind'], s['label'], s['line'], s['place'], s['expectedBy'])
+     for s in _csheet_seen['stops']]),
+   ('uber.nav', None,
+    [('dropoff', 'dropoff type', '283 Quillon St NW, Smyrna', 'Fable Parking Deck', 30)]))
 # The 16 Oct shift's planner, its title read "ny. mS" (the shared case; names
 # invented): the sighting says its layout proves it a planner, which the
 # assembler takes in place of the title on an unpressed read.

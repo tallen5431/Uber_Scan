@@ -418,6 +418,24 @@ check('largest dollar figure wins over a promo line',
      ends('an address block with no header and no Waybill is not read'), '[false,false]');
 })();
 
+/* ---- the customer sheet is no planner, by its labels and none of the planner's ----
+   Each of the planner's own lines put on the 17 Oct sheet makes the page a
+   planner again, and the sheet without its two labels is one too.
+   rpi/test_parser.py asks find_planner the same; see customerSheet. */
+(function () {
+  var sheet = require('./fixtures/cases.json').planner.filter(function (c) {
+    return c.name.indexOf("Measured: Uber's customer sheet is no planner") === 0;
+  })[0].text;
+  var only = ['Trip Planner', 'Address', 'View details', 'Waybill', 'Stop New Requests',
+              'Pickup • 1 order'];
+  var got = only.map(function (l) { return P.findPlanner(sheet + '\n' + l) !== null; });
+  got.push(P.findPlanner(sheet.replace('Dropoff type', 'Meet outside')
+    .replace('Business / Building name', 'Fable')) !== null);
+  eq('findPlanner: the customer sheet with any one of the planner\'s own lines on it is a '
+     + 'planner again, and without its two labels it is one too',
+     JSON.stringify(got), JSON.stringify(only.map(function () { return true; }).concat([true])));
+})();
+
 /* ---- a long run of one character ----
    The mirror of rpi/test_parser.py's checks of the same names, at twice the
    length because this engine is faster: measured before the anchors, 188 ms

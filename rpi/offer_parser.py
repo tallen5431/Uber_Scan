@@ -3029,6 +3029,8 @@ def find_planner(text):
     stitch in assemble.js could join the two pages only when the lower one
     also showed a header.
     """
+    if _customer_sheet(text):
+        return None
     lines, heads = _planner_lines(text)
     if not heads:
         headless = _planner_headless(lines)
@@ -3087,6 +3089,38 @@ def find_planner(text):
             and not any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:]):
         last['partial'] = 'bottom'
     return stops
+
+
+# UBER'S CUSTOMER SHEET IS NOT THE PLANNER, though it prints a stop header.
+# The sheet pulled all the way up (see sheet_dropoff) lists the order under
+# "Drop off 1 order", and PLANNER_STOP reads that as a Dropoff header: on the
+# 17 Oct shift a ⌖ press over it answered with a planner of one dropoff, its
+# time and no address (the order code "4K217" under it taken for the
+# customer), the press's window closed on that, and the address the sheet
+# printed above was never taken. So a page is no planner when it carries the
+# customer sheet's own labels — "Dropoff type" or "Business / Building name"
+# (SHEET_TYPE, SHEET_BUSINESS) — and none of the planner's: no title, no
+# "Address" label, no "View details", no "Waybill", no "Stop New Requests"
+# bar, and no Pickup header (the sheet lists only the orders it drops). One
+# planner line is enough to keep the planner read as it was. Measured before
+# it went in, over the shared corpus's 545 texts and the rig's journal through
+# 17 Oct (12,789): it changes find_planner's answer on 2, both that shift's
+# customer sheet (AUDITS.md, "Uber's customer sheet was read as a planner").
+def _customer_sheet(text):
+    """True when `text` is Uber's customer sheet and not the Trip Planner, by
+    the labels each prints: see above."""
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
+    lines = [l for l in lines if l]
+    if not any(SHEET_TYPE.search(l) or SHEET_BUSINESS.match(l) for l in lines):
+        return False
+    for l in lines:
+        if PLANNER_TITLE.match(l) or _planner_label(l) or PLANNER_DETAILS.match(l) \
+                or PLANNER_END.match(l) or PLANNER_BAR.match(l):
+            return False
+        head = PLANNER_STOP.match(l)
+        if head and head.group(1)[0] in 'pP':
+            return False
+    return True
 
 
 def _planner_orphan(lines, first):
@@ -3305,7 +3339,57 @@ def planner_ends(text):
 # Anything else is None. A street with no suffix is None too: the cut is what
 # keeps "Pp &" off the end, and a refusal costs a blank where a wrong door
 # costs the map.
+#
+# THE CUSTOMER SHEET, the same sheet pulled all the way up (the 17 Oct shift,
+# a ⌖ press over it while an order was carried; names, places and streets
+# invented, the layout and the reader's marks the rig's):
+#
+#     8 min ©O 4.3 mi              the bar
+#     Lee R.                       the customer
+#     Fable Parking Deck  O &      a PLACE, the chat and phone icons beside it
+#     283 Quillon St NW,           the street, its comma, wrapped
+#     Smyrna, GA                   the town, no ZIP
+#     Business / Building name     a label and its value: the place again
+#     Fable Parking Deck
+#     Dropoff type                 the label this rule reads upwards from
+#     Meet outside
+#     Drop off 1 order >           the sheet's order list, which is NOT the
+#     4K217                        Trip Planner's stop header whatever it
+#     Fable Grill · 1 item         looks like (see _customer_sheet)
+#     Expected by 12:30 AM
+#
+# The rules above read it as they stand once three things are allowed for:
+#
+#   - the PAIR: "Business / Building name" (SHEET_BUSINESS, its OCR slips
+#     too) and the line under it sit between the town and "Dropoff type".
+#     SHEET_REACH is counted from the label, not from "Dropoff type", so the
+#     pair costs the street no reach and a value that opens with a number
+#     ("1200 Fable Tower") is never taken for the street. The label is also
+#     the sheet's label on its own where "Dropoff type" did not read. "Drop
+#     off N order" is not one: the Trip Planner prints that header too, and a
+#     page with neither label is no sheet by _customer_sheet's test either;
+#   - the comma: a street line that ends in one, or in one and the icons read
+#     after it ("283 Quillon St NW, O &"), has no town on it — a tail after
+#     the comma with no three letters in a row is icons, not a town cut short
+#     (a cut town, "nnesaw", still has its three and is still refused);
+#   - the name: up to SHEET_NAME_REACH lines over the street, so the place
+#     line and an icon row read on a line of its own can stand between.
+#
+# THE PLACE ('place'), shown and never searched, as the planner's is: the
+# value under the label when the pair read, else the line between the name
+# and the street with the icons read after it taken off (every trailing word
+# of one or two characters: "Fable Parking Dec k 2 &" is "Fable Parking
+# Dec", the rig's own read of it — a place that ends in such a word loses
+# it, which costs a word of a label and nothing searched). None otherwise.
 SHEET_TYPE = re.compile(r'\bdrop ?-?off ?type\b', re.IGNORECASE | ASCII)
+# "Business / Building name": two words of four or more letters either side
+# of the slash, then "name", the line's own and nothing after it but marks.
+# Letters, not spelling: the rig's card-box reads of that line on 17 Oct were
+# ") ©usiness / Building Name" and "MUOHICSS / SUNGINg name".
+SHEET_BUSINESS = re.compile(
+    r'^[^A-Za-z0-9]{0,3}[A-Za-z]{4,12} ?/ ?[A-Za-z]{4,12} ?name[^A-Za-z0-9]{0,3}$',
+    re.IGNORECASE | ASCII)
+SHEET_ICON_TAIL = re.compile(r'(?:\s+\S{1,2})+$', ASCII)
 SHEET_HOUSE = re.compile(r'^\W{0,3}(\d{1,6} [A-Za-z].*)$', ASCII)
 SHEET_NUMBER = re.compile(r'^[1-9]\d{0,5} ', ASCII)
 SHEET_STREET_END = re.compile(
@@ -3325,6 +3409,11 @@ SHEET_TOWN_WORDS = re.compile(r"^[A-Z][a-z'’.-]+(?: [A-Z][a-z'’.-]+){0,3}$",
 # town line, "House" and the reader's marks between); 8 is that and one more,
 # CHOSEN. A block that long with no other address in it is still one stop.
 SHEET_REACH = 8
+# How far above the street the customer's name may sit: the 12 Oct sheets had
+# it straight above or one line up; the 17 Oct customer sheet puts the place
+# between, and the rig's reads put the icons on the place's line. 3 is that
+# and an icon row read on its own line, CHOSEN.
+SHEET_NAME_REACH = 3
 
 
 def _sheet_town(line):
@@ -3357,16 +3446,31 @@ def _sheet_street(line):
     return re.sub(r'\s+', ' ', body[:end.end()]).strip(' .,'), body[end.end():]
 
 
+def _sheet_place(line):
+    """A place's name off one line of the sheet, the icons read after it
+    taken off (SHEET_ICON_TAIL) and the screen's marks off its ends; None
+    without two letters in a row."""
+    name = PLANNER_EDGE.sub('', SHEET_ICON_TAIL.sub('', line or ''))
+    return name if re.search(r'[A-Za-z]{2}', name) else None
+
+
 def sheet_dropoff(text):
     """The address on Uber's opened navigation sheet — {'line', 'street',
-    'city', 'state', 'zip'} — or None. See the layout above."""
+    'city', 'state', 'zip', 'place'} — or None. See the layout above."""
     lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
     lines = [l for l in lines if l]
     types = [i for i, l in enumerate(lines) if SHEET_TYPE.search(l)]
-    if not types:
+    pairs = [i for i, l in enumerate(lines) if SHEET_BUSINESS.match(l)]
+    # The label read upwards: the last "Dropoff type", or, where that did not
+    # read, the last "Business / Building name".
+    d = types[-1] if types else pairs[-1] if pairs else None
+    if d is None:
         return None
-    d = types[-1]
-    s = next((i for i in range(d - 1, max(-1, d - 1 - SHEET_REACH), -1)
+    # ...and the business pair between it and the street, which the reach is
+    # counted from: the nearest label at or above `d`, within reach of it.
+    b = next((i for i in range(d, max(-1, d - 1 - SHEET_REACH), -1) if i in pairs), None)
+    top = d if b is None else b
+    s = next((i for i in range(top - 1, max(-1, top - 1 - SHEET_REACH), -1)
               if SHEET_HOUSE.match(lines[i])), None)
     if s is None:
         return None
@@ -3376,13 +3480,17 @@ def sheet_dropoff(text):
     street, rest = street
     town = None
     tail = re.match(r'^\s*,\s*(.+)$', rest)
+    # A tail after the comma with no three letters in a row is the sheet's
+    # icons, read after a street that wrapped: its town is on the next line.
+    if tail and not re.search(r'[A-Za-z]{3}', tail.group(1)):
+        tail = None
     if tail:
         town = _sheet_town(tail.group(1))
         if town is None:
             bare = PLANNER_EDGE.sub('', tail.group(1))
             town = (bare, None, None) if SHEET_TOWN_WORDS.match(bare) else None
         town_at = s
-    elif s + 1 < d:
+    elif s + 1 < top:
         town = _sheet_town(lines[s + 1])
         town_at = s + 1
     if town is None:
@@ -3391,13 +3499,23 @@ def sheet_dropoff(text):
     if any(_planner_town(l) for l in lines[town_at + 1:d]):
         return None
     # ...and the customer's name over the street, with no address between.
-    n = next((i for i in (s - 1, s - 2) if i >= 0 and SHEET_NAME.match(lines[i])), None)
+    n = next((i for i in range(s - 1, s - 1 - SHEET_NAME_REACH, -1)
+              if i >= 0 and SHEET_NAME.match(lines[i])), None)
     if n is None or any(SHEET_HOUSE.match(l) or _planner_town(l) for l in lines[n + 1:s]):
         return None
+    # The place: the pair's value, else the line between the name and street.
+    place = None
+    # Not the sheet's next label, nor its order list's header, where the
+    # value did not read.
+    if b is not None and b + 1 < len(lines) and b + 1 != d \
+            and not SHEET_TYPE.search(lines[b + 1]) and not PLANNER_STOP.match(lines[b + 1]):
+        place = _sheet_place(lines[b + 1])
+    if place is None and n + 1 < s:
+        place = _sheet_place(lines[n + 1])
     city, state, zipcode = town
     parts = [street, city] + (['%s %s' % (state, zipcode)] if zipcode else [])
     return {'line': ', '.join(parts), 'street': street, 'city': city,
-            'state': state, 'zip': zipcode}
+            'state': state, 'zip': zipcode, 'place': place}
 
 
 # DOORDASH'S PLACE POPUP: what the phone shows when the driver taps a stop on an

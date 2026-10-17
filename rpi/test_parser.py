@@ -159,6 +159,21 @@ eq('planner_laid_out: the shift\'s planner, title misread, is laid out as one; w
     P.planner_laid_out(_SHIFT.replace('View details', 'Viewed'))],
    [True, False, False, False, False])
 
+# Uber's customer sheet is no planner (_customer_sheet), by its own labels and
+# none of the planner's: each of the planner's lines, put on the shift's sheet
+# alone, makes the page a planner again, and the sheet with neither of its own
+# labels is one too. tests/parser.test.js asks findPlanner the same.
+_CSHEET = _PLANNER_TEXT["Measured: Uber's customer sheet is no planner, though its 'Drop off 1 "
+                        "order' reads as a stop header (17 Oct)"]
+_PLANNER_ONLY = ('Trip Planner', 'Address', 'View details', 'Waybill', 'Stop New Requests',
+                 'Pickup • 1 order')
+eq('find_planner: the customer sheet with any one of the planner\'s own lines on it is a '
+   'planner again, and without its two labels it is one too',
+   [P.find_planner(_CSHEET + '\n' + l) is not None for l in _PLANNER_ONLY]
+   + [P.find_planner(_CSHEET.replace('Dropoff type', 'Meet outside')
+                     .replace('Business / Building name', 'Fable')) is not None],
+   [True] * (len(_PLANNER_ONLY) + 1))
+
 # What screen a reading is, for a sighting: the app and the screen as one pair,
 # because the app follows from the screen and a case that got one right and
 # the other wrong is one fault. tests/corpus.test.js runs the same cases. See
