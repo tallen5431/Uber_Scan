@@ -49,10 +49,11 @@ fail=0
 failed_names=""
 
 run() {
-    local name="$1" cmd="$2"
+    local name="$1"
+    shift
     printf '  %-26s ' "$name"
     local out status
-    out=$(eval "$cmd" 2>&1)
+    out=$("$@" 2>&1)
     status=$?
     local last
     last=$(printf '%s\n' "$out" | grep -E 'passed|FAILED|skipping' | tail -1)
@@ -74,18 +75,18 @@ for f in rpi/test_*.py; do
         printf '  %-26s skipped (--quick)\n' "$base"
         continue
     fi
-    run "$base" "python3 '$f'"
+    run "$base" python3 "$f"
 done
 # ...and the tools' own, which live beside what they test. gpslog_tidy.py
 # deletes files on the rig, unattended, from Start.sh; shift_report.py reads
 # the journal and the GPS logs after a shift and must never print a place.
 for f in tools/test_*.py; do
-    run "$(basename "$f")" "python3 '$f'"
+    run "$(basename "$f")" python3 "$f"
 done
 
 echo "node"
 for f in tests/*.test.js; do
-    run "$(basename "$f")" "node '$f'"
+    run "$(basename "$f")" node "$f"
 done
 
 echo
