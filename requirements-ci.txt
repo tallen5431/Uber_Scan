@@ -1,0 +1,7 @@
+# Dependencies used by the non-hardware Python test suite in CI.
+# Raspberry Pi camera/libcamera packages are supplied by Raspberry Pi OS and
+# intentionally do not belong in this portable requirements file.
+numpy>=1.26,<3
+opencv-python-headless>=4.9,<5
+pytesseract>=0.3.10,<1
+Pillow>=10,<13
