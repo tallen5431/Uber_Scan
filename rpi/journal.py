@@ -1438,6 +1438,11 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # the same as "a ride" and must not be folded into one — see the kinds
         # split on the offers page.
         'shop': True if parsed.get('shop') else None,
+        # ...and whether it was Uber's add-on, an order to carry WITH the one
+        # in the car (OP.is_addon). None when not, as `shop` is: the 16 Oct
+        # rows had no such field, and a review could not tell the two add-on
+        # cards that replaced an order from any other card.
+        'addon': True if parsed.get('addon') else None,
         # --- what the scanner made of it ------------------------------------
         'perHour': _round(rate.get('perHour'), 2),
         'grossPerHour': _round(rate.get('grossPerHour'), 2),

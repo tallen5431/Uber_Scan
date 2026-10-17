@@ -1083,6 +1083,16 @@
     var many = run.pages.length > 1;
     var view = many ? run.view : pageView(page);
     var verdict = plannerDestination(view.stops, view.top && view.bottom);
+    // A list seen whole with ONE order in the car is remembered for growth
+    // too, as sightingMany remembers one with two: it is the "before" an Uber
+    // add-on's Took grows by one dropoff (attribute, growthVote). Kept only
+    // from sightingMany, the first list with the add-on in it had nothing to
+    // grow FROM — no view is ever taken between two Tooks while one order is
+    // all there is — and the original's own door, read again beside the
+    // add-on's, had no cue at all. Changes nothing filed with one order.
+    if (held && view.top && view.bottom && !listShort(view.stops)) {
+      noteView(st, app, page.at, view.stops);
+    }
     // A PLANNER BY ITS LAYOUT, title or not: the owner's decision (16 Oct),
     // after the single trip's planner was read with its title as "ny. mS" and
     // its one dropoff never filed. `laidOut` is offer_parser.planner_laid_out:
@@ -1312,6 +1322,12 @@
    *   elimination two orders of one app on a list seen whole with exactly two
    *               dropoffs, one of them already filed as one order's end: the
    *               other is the other order's
+   *   filed       ...and the mirror: a dropoff on a list seen whole, all its
+   *               orders of one app, that is ONE order's filed end already is
+   *               that order's (two orders on one door decide nothing)
+   * With three orders — an original and two Uber add-ons, one trip — each of
+   * growth and elimination is asked of the list as it stands: the newest
+   * order's growth, and every other dropoff one distinct order's filed end.
    * A cue that fits BOTH orders is no vote, and is a TIE: the one place the
    * cards' discs come in. With a tie and no vote the answer is 'tie', and
    * server.js may break it on the map (discBreak): the address searched on the
@@ -1381,7 +1397,14 @@
     while (st.views.length > VIEWS_MAX) st.views.shift();
   }
 
-  function growthVote(st, older, newer, d) {
+  /* `older` is the first-taken order, and `alone` whether it is the only one
+   * besides `newer`: the list seen whole between their two Tooks, grown by
+   * exactly one dropoff, gives that dropoff to `newer` — and the ones it
+   * already had to `older` only when `older` is the only order they can be.
+   * With three in the car (an original and two Uber add-ons, one trip) a
+   * dropoff already on the list is one of the two older orders', and which
+   * is not this cue's to say. */
+  function growthVote(st, older, newer, d, alone) {
     if (!d.key || !Array.isArray(d.listDrops)) return null;
     var before = (st.views || []).filter(function (v) {
       return v.app === d.app && v.at >= older.tookAt && v.at < newer.tookAt;
@@ -1390,7 +1413,8 @@
     var now = d.listDrops;
     var kept = before.drops.every(function (k) { return now.indexOf(k) !== -1; });
     if (!kept || now.length !== before.drops.length + 1) return null;
-    return before.drops.indexOf(d.key) === -1 ? newer : older;
+    if (before.drops.indexOf(d.key) === -1) return newer;
+    return alone ? older : null;
   }
 
   /* `orders` is every order held, first-taken first; `d` a dropoff line or a
@@ -1448,19 +1472,53 @@
         return clockNear(d.expectedBy, o.deliverBy, DEADLINE_SLACK_MIN);
       });
     }
-    if (live.length === 2) {
-      var grown = growthVote(st, older, newer, d);
+    // Two or more: with three, an original and two Uber add-ons on one trip
+    // (server.js, placeTook) — the owner's trip details for 16 Oct show one.
+    // Each cue below is the two-order cue asked of the list as it stands; with
+    // two it is that cue exactly.
+    if (live.length >= 2) {
+      // (From the first Took on, as with two: a list that grew by exactly one
+      // since then names the newest; one seen before the middle Took cannot
+      // have grown by one into a list of three.)
+      var grown = growthVote(st, older, newer, d, live.length === 2);
       if (grown) out.votes.push({ cue: 'growth', order: grown });
-      if (d.bounded && Array.isArray(d.others) && d.others.length === 1
-          && older.app && older.app === newer.app) {
-        var other = streetKey(d.others[0]);
-        var took = live.filter(function (o) {
-          var end = filedEnd(o);
-          return end && streetKey(end) === other;
+      var oneApp = live.every(function (o) { return o.app && o.app === older.app; });
+      // Elimination: every OTHER dropoff on the list is already one distinct
+      // order's filed end, and one order is left over — this is its.
+      if (d.bounded && Array.isArray(d.others) && d.others.length === live.length - 1
+          && oneApp) {
+        var owned = [];
+        var whole = d.others.every(function (line) {
+          var other = streetKey(line);
+          var took = live.filter(function (o) {
+            var end = filedEnd(o);
+            return end && streetKey(end) === other;
+          });
+          if (took.length !== 1) return false;
+          owned.push(took[0]);
+          return true;
         });
-        if (took.length === 1) {
-          out.votes.push({ cue: 'elimination', order: live[1 - live.indexOf(took[0])] });
+        var left = live.filter(function (o) { return owned.indexOf(o) === -1; });
+        if (whole && left.length === 1) {
+          out.votes.push({ cue: 'elimination', order: left[0] });
         }
+      }
+      // ...and its mirror: a dropoff on a list seen whole that IS one order's
+      // filed end — the door the screen already gave that order — is that
+      // order's. Without it the older order's own door, read again on the
+      // list that now shows both, waited in the pool as "1 dropoff read ·
+      // whose?" for as long as both were carried. One order's only: two
+      // orders filed to the same door is a tie, and no vote.
+      if (d.bounded && oneApp && typeof d.line === 'string') {
+        var mine = streetKey(d.line);
+        // Not through vote(): two orders on one door is no tie for the map
+        // to break (discBreak) — the door is both, and the map cannot say
+        // otherwise.
+        var filed = live.filter(function (o) {
+          var end = filedEnd(o);
+          return !!end && streetKey(end) === mine;
+        });
+        if (filed.length === 1) out.votes.push({ cue: 'filed', order: filed[0] });
       }
     }
     var picked = [];

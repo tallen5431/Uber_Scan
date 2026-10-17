@@ -3304,6 +3304,13 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None):
         # card's "Deliver by", minutes since midnight, for the deadline cue.
         'app': OP.screen_type(parsed.get('text') or '')['app'],
         'screen': OP.screen_type(parsed.get('text') or '')['screen'],
+        # ...and the parser's own word that this is Uber's add-on (OP.is_addon:
+        # "+ $9.50" over "+8 min (+1.3 mi)"), the window's union of it. Wider
+        # than the screen type, which asks the leg's plus signs alone: a card
+        # that kept the pay's plus and lost the leg's is still one. A Took on
+        # it keeps the order in the car and holds this beside it (server.js
+        # placeTook) — on 16 Oct two of them replaced it.
+        'addon': bool(parsed.get('addon')),
         'deliverBy': parsed.get('deliverBy'),
         # ...and where the car was when it came up, in the journal's own seven
         # fields — `lat`, `lon`, `gpsAge`, `gpsErr`, `gpsMode`, and the gate's

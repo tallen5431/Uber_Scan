@@ -53,6 +53,21 @@ third = acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=102.0)
 eq('retains the missed leg', third['minutes'], 28)
 eq('reports growth for the frame that needed it', third['grew'], True)
 
+# --- an Uber add-on, kept once any frame saw its plus signs -----------------
+# "+ $9.50 ... +8 min (+1.3 mi)": the plus is one character, and a frame that
+# lost it is not evidence the card never printed it (OP.is_addon). Invented
+# store and street.
+acc = OfferAccumulator()
+_ad1 = acc.add(P.parse('+ $9.50 Guaranteed (incl. tip) +8 min (+1.3 mi) total Fable Grill'),
+               now=150.0)
+_ad2 = acc.add(P.parse('$9.50 Guaranteed (incl. tip) 8 min (1.3 mi) total Fable Grill'),
+               now=151.0)
+eq('an add-on stays an add-on when a later frame lost its plus signs',
+   (_ad1['addon'], _ad2['addon']), (True, True))
+acc.reset()
+eq('...and the next card starts as no add-on',
+   acc.add(P.parse('$12.45 23 min (8.4 mi) trip'), now=160.0)['addon'], False)
+
 # --- re-reading the same leg must not double it -----------------------------
 acc = OfferAccumulator()
 for t in range(4):

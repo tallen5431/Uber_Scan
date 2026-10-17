@@ -84,6 +84,7 @@ class OfferAccumulator:
         # in the rig that looks at the legs, which is what can tell them apart.
         self.new_card = False
         self.shop = None
+        self.addon = False
         self.key = None
         self.started = 0.0
         self.last_add = 0.0
@@ -1135,6 +1136,12 @@ class OfferAccumulator:
         if parsed.get('shop'):
             self.shop = True
         merged['shop'] = True if self.shop else None
+        # ...and whether it is Uber's add-on (OP.is_addon), kept the same way
+        # and for the same reason: the plus signs are one character each, and
+        # a frame that lost them is not evidence the card never printed them.
+        if parsed.get('addon'):
+            self.addon = True
+        merged['addon'] = bool(self.addon)
         # True when the window supplied a leg this frame did not see, which is
         # the whole reason for keeping one.
         merged['grew'] = len(used) > len(parsed.get('legDetail') or [])

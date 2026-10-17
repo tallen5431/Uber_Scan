@@ -2792,9 +2792,11 @@
   }
 
   // One order's compact line: "① $9.48", "→ Kestrel Dr", "· ● armed"; its end
-  // as "?" when none is on record.
+  // as "?" when none is on record. An Uber add-on's pay is said the way its
+  // card printed it, "② +$9.50": it joined the trip on the line above
+  // (server.js placeTook), and the plus is the panel saying so.
   function orderLine(line, o, inDetail) {
-    setText(line.children[0], circled(o.n) + ' '
+    setText(line.children[0], circled(o.n) + ' ' + plus(o)
       + (typeof o.pay === 'number' ? money(o.pay, 2) : '?'));
     setHidden(line.children[1], false);
     setText(line.children[1], '\u2192 ' + (streetOf(o.dropoff) || '?'));
@@ -2802,22 +2804,53 @@
     setHidden(line.children[2], !!inDetail);
   }
 
-  /* showHeld with two orders: ① on #heldLine, ② on #heldLine2; under an
-     offer, one line after the reading's age — "In car ① $9.48 · ② $28.08" —
-     since the row there has room for one, and the card above has the pair. */
+  function plus(o) {
+    return o && o.addOn ? '+' : '';
+  }
+
+  /* The orders after ① when there are more than two — an original and two
+     Uber add-ons, one trip (server.js placeTook; the owner's 16 Oct trip
+     details show one) — said on ONE line, the second: "②–③ +$16.39",
+     "→ 1/2 ends". The panel has two lines for the car and no room beside the
+     card at 1024x600 for a third; the chooser and Map view still name each
+     order, and how many of their ends are read is what this line is for.
+     The pay is their sum, as Uber pays the trip: "?" when one is unknown. */
+  function restLine(line, rest) {
+    var known = rest.filter(function (o) { return !!streetOf(o.dropoff); }).length;
+    setText(line.children[0], restPay(rest));
+    setHidden(line.children[1], false);
+    setText(line.children[1], '\u2192 ' + known + '/' + rest.length + ' ends');
+    setHidden(line.children[2], true);
+  }
+
+  function restPay(rest) {
+    var paid = rest.every(function (o) { return typeof o.pay === 'number'; });
+    var sum = rest.reduce(function (s, o) { return s + (paid ? o.pay : 0); }, 0);
+    return circled(rest[0].n) + '\u2013' + circled(rest[rest.length - 1].n) + ' '
+      + (rest.every(function (o) { return o.addOn; }) ? '+' : '')
+      + (paid ? money(sum, 2) : '?');
+  }
+
+  /* showHeld with two orders: ① on #heldLine, ② on #heldLine2 (with three or
+     more, ② onwards on #heldLine2: restLine); under an offer, one line after
+     the reading's age — "In car ① $9.48 · ② $28.08" — since the row there has
+     room for one, and the card above has the pair. */
   function showTwoHeld(inDetail) {
-    var a = heldList[0], b = heldList[1];
+    var a = heldList[0], rest = heldList.slice(1), b = rest[0];
     if (inDetail) {
-      return heldInDetail(['\u00b7 In car ' + circled(a.n) + ' ' + money(a.pay, 2),
-                           '\u00b7 ' + circled(b.n) + ' ' + money(b.pay, 2), null]);
+      return heldInDetail(['\u00b7 In car ' + circled(a.n) + ' ' + plus(a) + money(a.pay, 2),
+                           '\u00b7 ' + (rest.length > 1 ? restPay(rest)
+                             : circled(b.n) + ' ' + plus(b) + money(b.pay, 2)), null]);
     }
     heldInDetail(null);
     orderLine(el.heldLine, a, false);
-    orderLine(el.heldLine2, b, false);
+    if (rest.length > 1) restLine(el.heldLine2, rest);
+    else orderLine(el.heldLine2, b, false);
   }
 
   // Whether two orders are in the car, by the server's list (ordersForPanel),
-  // which only a server carrying two sends.
+  // which only a server carrying two sends — or one carrying an Uber add-on
+  // with its trip (server.js carryingTwo).
   function twoHeld() {
     return holdingNow && heldList.length >= 2;
   }
@@ -3549,6 +3582,13 @@
   function takeOrders(msg) {
     if (!holdingNow) { heldList = []; unownedNow = 0; return; }
     if (msg && Array.isArray(msg.orders)) heldList = msg.orders;
+    // ...and a list about another hold is no list. A server carrying an Uber
+    // add-on with its trip sends one only while the trip is joined
+    // (server.js carryingTwo), so the original put down, or a Took that
+    // replaced the trip, would otherwise leave two orders drawn over one.
+    // The list is first-taken first, as `holding` is: its first is the hold
+    // this message names, or the list is stale.
+    else if (heldList.length && heldList[0].holdId !== heldId) heldList = [];
     if (msg && typeof msg.unowned === 'number') unownedNow = msg.unowned;
   }
 
@@ -6184,7 +6224,11 @@
     // ordersForPanel), otherwise both ways round. Null with one order, and
     // from a map-view.js from before it (sw.js may serve one): with two in
     // the car that is no figure at all, never a figure through one of them.
-    var runs = held && held2 && MV && MV.heldRuns && MV.detourOrders
+    // ...and never with THREE in the car — an original and two Uber add-ons,
+    // one trip (server.js placeTook): the run is through two ends, and a
+    // figure "incl. both orders" through ① and ② would leave ③ out of the car
+    // it is about. No run is "order of stops unknown — no figure" (mapRefusal).
+    var runs = held && held2 && heldList.length <= 2 && MV && MV.heldRuns && MV.detourOrders
       ? MV.heldRuns(plan, [{ n: 1, holdId: heldId, end: held,
                              planAt: (heldList[0] || {}).planAt },
                            { n: second.n, holdId: second.holdId, end: held2,

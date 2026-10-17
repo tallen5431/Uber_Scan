@@ -3723,6 +3723,39 @@ SCREEN_DD_OFFER = re.compile(
     r'|all orders are picked up|deliver by|\d ?mi ?[-+·•«] ?\d{1,3} ?min',
     re.IGNORECASE | ASCII)
 SCREEN_ADDON = re.compile(r'\+ ?\d{1,3} ?min\w* ?\( ?\+', re.IGNORECASE | ASCII)
+# ...and the add-on's other half, its PAY: "+ $9.50" over "Guaranteed (incl.
+# tip)", the plus printed in front of the headline itself. Asked only of the
+# figure find_pay chose (see is_addon), never of the text at large: "+$2.00
+# promo", "+$0.50 included" and "+$1.00/order" are plus signs before a dollar
+# too, and find_pay has already refused every one of them as the payout.
+ADDON_PAY = re.compile(r'\+ ?$', ASCII)
+
+
+def is_addon(text, pay, where):
+    """Whether `text`, one card's words (parse()'s `mine`), is Uber's offer to
+    ADD a job to the trip in progress: its leg in plus signs, "+8 min (+1.3
+    mi) total" (SCREEN_ADDON, the screen type's own test), or its headline
+    payout printed "+ $9.50". Either half alone, because the reader loses a
+    sign as readily as it loses a digit: "+ $4.70 / © +11min( 09 mi)" kept the
+    pay's plus and lost the distance's, "$5.85 ... +18 min (+ 7.2 mi)" the
+    other way round. Never a DoorDash card (SCREEN_DD_OFFER, asked first as
+    _screen asks it): its "+$16.00 Guaranteed Additional" is that app's own
+    kind of offer, and the owner's decision of 17 Oct is about Uber's.
+
+    `where` is find_pay's (amount, position) list; the chosen payout is the
+    first of its amount, as one_card takes it.
+
+    Measured over every text the shared corpus and the sequences hold (473
+    distinct): 6 say it — the 4 the screen type already called uber.addon
+    and 2 whose minutes lost their plus — and no other text moves. On the 16
+    Oct shift the driver ticked two such cards while an order was in the car,
+    and both replaced it (AUDITS.md, The order in the car)."""
+    if pay is None or SCREEN_DD_OFFER.search(text):
+        return False
+    if SCREEN_ADDON.search(text):
+        return True
+    at = next((pos for v, pos in where if v == pay), None)
+    return at is not None and bool(ADDON_PAY.search(text[max(0, at - 3):at]))
 SCREEN_UBER_OFFER = re.compile(
     r'\d ?min\w* ?\( ?\d|\bmi\)? ?total\b|includes expected tip|\bincl[.,]? ?tip\b'
     r'|\bexclusive\b|est[.,]? ?delivery|\bverified\b|avg[.,]? ?wait time'
@@ -4952,6 +4985,10 @@ def parse(raw_text):
         # chip may simply not have been inside the crop — which is different
         # from "not a shop order" and is kept different.
         'shop': True if SHOP_CARD.search(text) else None,
+        # ...and whether it is Uber's add-on, an order to be carried WITH the
+        # one in the car on the same trip, never instead of it: server.js
+        # holds it beside that order at ✓ Took (placeTook). See is_addon.
+        'addon': is_addon(mine, pay, _where),
         'text': text,
         # ...and the same reading before normalize() flattened it.
         #

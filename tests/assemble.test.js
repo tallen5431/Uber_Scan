@@ -667,6 +667,129 @@ SEQ.forEach(function (seq) {
       A.reOffer(held, Object.assign({}, again, { dropoff: null }), 2000, 180000),
       A.reOffer(held, again, 999999, 180000)],
      [true, false, false, false]);
+
+  /* An Uber add-on held with the order it joined (server.js placeTook, the
+     owner's decision of 17 Oct): the Trip Planner then shows both orders'
+     stops, and each dropoff is filed on a positive cue or not at all. The 16
+     Oct shift's first order had its planner door on record when the add-on
+     came. Stores, people and streets invented. */
+  var PLAN_ONE = 'Trip Planner\nPickup • 1 order\nFable Grill\nExpected by 7:50 PM\n'
+    + 'Address\n283 Quillon St NW\nSmyrna, GA\n'
+    + 'Dropoff • 1 order\nMara T.\nExpected by 8:02 PM\n'
+    + 'Address\n415 Ostrander Way NW\nKennesaw, GA\nWaybill';
+  var PLAN_TWO = 'Trip Planner\nPickup • 1 order\nFable Grill\nExpected by 7:50 PM\n'
+    + 'Address\n283 Quillon St NW\nSmyrna, GA\n'
+    + 'Pickup • 1 order\nKestrel Noodle Bar\nExpected by 7:58 PM\n'
+    + 'Address\n41 Wren Way\nSmyrna, GA\n'
+    + 'Dropoff • 1 order\nMara T.\nExpected by 8:02 PM\n'
+    + 'Address\n415 Ostrander Way NW\nKennesaw, GA\n'
+    + 'Dropoff • 1 order\nJules K.\nExpected by 8:20 PM\n'
+    + 'Address\n9 Elm Ct\nSmyrna, GA\nWaybill';
+  // ...and the shape with one store for both: "Pickup · 2 orders".
+  var PLAN_SHOP = 'Trip Planner\nPickup • 2 orders\nFable Grill\nExpected by 7:50 PM\n'
+    + 'Address\n283 Quillon St NW\nSmyrna, GA\n'
+    + 'Dropoff • 1 order\nMara T.\nExpected by 8:02 PM\n'
+    + 'Address\n415 Ostrander Way NW\nKennesaw, GA\n'
+    + 'Dropoff • 1 order\nJules K.\nExpected by 8:20 PM\n'
+    + 'Address\n9 Elm Ct\nSmyrna, GA\nWaybill';
+  function addOnRun(plan) {
+    var st = A.fresh();
+    var root = order('root', 1000, { pickup: 'Fable Grill' });
+    A.took(st, root);
+    // The original alone: its planner read whole files its door, and the list
+    // is remembered for growth.
+    A.sighting(st, root, pageOf(PLAN_ONE, 3000), 3000).candidates.forEach(function (c) {
+      A.file(root, c, A.dropoff(root, c, null), st);
+    });
+    var add = order('add', 5000, { pickup: 'Kestrel Noodle Bar', addOn: true,
+                                   of: root.holdId });
+    var cands = A.sighting(st, [root, add], pageOf(plan, 9000), 9000).candidates;
+    return { st: st, views: (st.views || []).length,
+             who: cands.map(function (c) {
+               var r = A.attribute(st, [root, add], c);
+               return [c.line, r.order ? r.order.id : null, r.cue];
+             }) };
+  }
+  var run2 = addOnRun(PLAN_TWO);
+  eq('[add-on] a list seen whole with ONE order in the car is remembered for growth',
+     run2.views >= 1, true);
+  eq('[add-on] the planner with both orders\' stops: the add-on\'s door by growth, the '
+     + 'original\'s by growth too', run2.who,
+     [['415 Ostrander Way NW, Kennesaw', 'root', 'growth'],
+      ['9 Elm Ct, Smyrna', 'add', 'growth']]);
+  eq('[add-on] ...and the same with "Pickup · 2 orders", one store for both',
+     addOnRun(PLAN_SHOP).who,
+     [['415 Ostrander Way NW, Kennesaw', 'root', 'growth'],
+      ['9 Elm Ct, Smyrna', 'add', 'growth']]);
+  // With no list remembered from before the add-on (its door came off a
+  // navigation screen, say): elimination for the add-on's, and the original's
+  // own door is the original's by `filed` — it waited in the pool before.
+  var rf = order('rf', 1000);
+  A.file(rf, { line: '415 Ostrander Way NW, Kennesaw', street: '415 Ostrander Way NW',
+               city: 'Kennesaw', at: 2000 }, { to: 'hold', from: 'nav' }, null);
+  var ad = order('ad', 5000, { addOn: true, of: rf.holdId });
+  var both = { bounded: true };
+  eq('[add-on] no list from before: the add-on\'s door by elimination',
+     who(A.fresh(), [rf, ad], d(Object.assign({ line: '9 Elm Ct, Smyrna',
+                                                 others: ['415 Ostrander Way NW, Kennesaw'] },
+                                               both))), ['ad', 'elimination', null]);
+  eq('[add-on] ...and the original\'s own door, read again on the list, by `filed`',
+     who(A.fresh(), [rf, ad], d(Object.assign({ line: '415 Ostrander Way NW, Kennesaw, GA',
+                                                 others: ['9 Elm Ct, Smyrna'] }, both))),
+     ['rf', 'filed', null]);
+  eq('[add-on] `filed` never off a list not seen whole',
+     who(A.fresh(), [rf, ad], d({ line: '415 Ostrander Way NW, Kennesaw', bounded: false,
+                                  others: ['9 Elm Ct, Smyrna'] })), [null, null, 'no cue']);
+  eq('[add-on] ...nor across apps',
+     who(A.fresh(), [rf, order('dx', 5000, { app: 'doordash' })],
+         d({ line: '415 Ostrander Way NW, Kennesaw', bounded: true, app: null,
+             others: ['9 Elm Ct, Smyrna'] })), [null, null, 'no cue']);
+  var rf2 = order('rf2', 5000);
+  A.file(rf2, { line: '415 Ostrander Way NW, Kennesaw', street: '415 Ostrander Way NW',
+                city: 'Kennesaw', at: 6000 }, { to: 'hold', from: 'nav' }, null);
+  eq('[add-on] ...and two orders filed to one door decide nothing, and are no tie for the map',
+     who(A.fresh(), [rf, rf2], d({ line: '415 Ostrander Way NW, Kennesaw', bounded: true,
+                                   others: ['9 Elm Ct, Smyrna'] })), [null, null, 'no cue']);
+  eq('[add-on] with nothing remembered and nothing filed, neither door is filed: they wait',
+     who(A.fresh(), [order('n1', 1000), order('n2', 5000, { addOn: true })],
+         d({ line: '9 Elm Ct, Smyrna', bounded: true, others: ['415 Ostrander Way NW, Kennesaw'] })),
+     [null, null, 'no cue']);
+
+  // An original and TWO add-ons, one trip of three (the owner's 16 Oct trip
+  // details: $25.03 + $9.50 + $6.89). Growth from the list seen between the
+  // second and third Tooks names the third's door, and only that one: a door
+  // already on that list is one of the two older orders', and which is not
+  // growth's to say.
+  var t1 = order('t1', 1000), t2 = order('t2', 5000, { addOn: true }),
+      t3 = order('t3', 7000, { addOn: true });
+  var g3 = A.fresh();
+  g3.views = [{ app: 'uber', at: 6000,
+                drops: ['dropoff|Mara T.|1202', 'dropoff|Jules K.|1220'] }];
+  var drops3 = ['dropoff|Mara T.|1202', 'dropoff|Jules K.|1220', 'dropoff|Ines V.|1235'];
+  eq('[add-on] three in the car: the list grown by one gives the newest its door',
+     who(g3, [t1, t2, t3], d({ key: 'dropoff|Ines V.|1235', listDrops: drops3 })),
+     ['t3', 'growth', null]);
+  eq('[add-on] ...and a door it already had to nobody by growth alone',
+     who(g3, [t1, t2, t3], d({ key: 'dropoff|Jules K.|1220', listDrops: drops3 })),
+     [null, null, 'no cue']);
+  A.file(t1, { line: '415 Ostrander Way NW, Kennesaw', street: '415 Ostrander Way NW',
+               city: 'Kennesaw', at: 2000 }, { to: 'hold', from: 'nav' }, null);
+  eq('[add-on] three in the car, one end filed: no elimination for the other two',
+     who(A.fresh(), [t1, t2, t3], d({ line: '3 Ash Way, Smyrna', bounded: true,
+                                      others: ['415 Ostrander Way NW, Kennesaw',
+                                               '9 Elm Ct, Smyrna'] })),
+     [null, null, 'no cue']);
+  A.file(t2, { line: '9 Elm Ct, Smyrna', street: '9 Elm Ct', city: 'Smyrna', at: 6000 },
+         { to: 'hold', from: 'nav' }, null);
+  eq('[add-on] ...two filed: the third door on the list is the third order\'s',
+     who(A.fresh(), [t1, t2, t3], d({ line: '3 Ash Way, Smyrna', bounded: true,
+                                      others: ['415 Ostrander Way NW, Kennesaw',
+                                               '9 Elm Ct, Smyrna'] })),
+     ['t3', 'elimination', null]);
+  eq('[add-on] ...but not when the list shows fewer dropoffs than orders',
+     who(A.fresh(), [t1, t2, t3], d({ line: '3 Ash Way, Smyrna', bounded: true,
+                                      others: ['9 Elm Ct, Smyrna'] })),
+     [null, null, 'no cue']);
 })();
 
 /* ---- DoorDash's place popup, read while a card is screened ----------------
