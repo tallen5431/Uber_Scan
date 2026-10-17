@@ -76,7 +76,8 @@ try:
 
     # python3 answers both installer probes successfully.  Logging argv lets
     # the test prove a token with spaces is still one value when the one-off
-    # sync is tried.
+    # sync is tried, and that the preflight's URL is argv rather than Python
+    # source.
     python_stub = os.path.join(bindir, 'python3')
     with open(python_stub, 'w', encoding='utf-8') as fh:
         fh.write('#!/bin/sh\n'
@@ -120,8 +121,10 @@ try:
         return open(unit, encoding='utf-8').read() if os.path.exists(unit) else ''
 
     # Environment input is the preferred authenticated form. Use the characters
-    # that have broken systemd Environment= assignments before.
-    url = 'https://nuc.example.net/sync%20path'
+    # that have broken systemd Environment= assignments before. The apostrophe
+    # in the URL is also deliberate: the old reachability probe interpolated
+    # this value into single-quoted Python source.
+    url = "https://nuc.example.net/sync%20path?label=O'Reilly"
     token = 'two words pc%25 "quoted" slash\\end'
     result = run([url], token)
     eq('environment-token install succeeds', result.returncode, 0)
@@ -135,6 +138,10 @@ try:
     no('the real token is never printed by the installer',
        token in result.stdout or token in result.stderr)
     calls = open(call_log, encoding='utf-8').read()
+    yes('the reachability probe reads its destination from argv',
+        'sync.far_end(sys.argv[2])' in calls)
+    no('the reachability probe does not splice the destination into Python source',
+       "sync.far_end('%s')" % url in calls)
     yes('the one-off sync receives --token', '<--token>' in calls)
     yes('the complete token remains one argv value', '<%s>' % token in calls)
     yes('the timer unit is generated too', os.path.exists(timer))
@@ -157,8 +164,8 @@ try:
     eq('tokenless install remains supported', result.returncode, 0)
     no('tokenless unit omits SYNC_TOKEN', 'Environment="SYNC_TOKEN=' in unit_text())
 
-    # Newlines cannot live safely in one Environment= directive.  Remove the
-    # previous unit first so refusal cannot be mistaken for a successful write.
+    # Newlines cannot live safely in one Environment= directive. They are
+    # refused before the reachability probe, not after network/Python use.
     if os.path.exists(unit):
         os.remove(unit)
     if os.path.exists(timer):
@@ -169,14 +176,18 @@ try:
         'SYNC_TOKEN may not contain a newline' in result.stderr)
     no('rejected multiline token writes no service unit', os.path.exists(unit))
     no('rejected multiline token writes no timer unit', os.path.exists(timer))
+    eq('multiline token is rejected before Python/network use',
+       open(call_log, encoding='utf-8').read(), '')
 
     # Same for the URL: putting a newline into the destination must not create
-    # an extra unit directive.
+    # an extra unit directive or reach the Python probe.
     result = run(['https://nuc.example.net/first\nsecond'])
     yes('multiline URL is rejected', result.returncode != 0)
     yes('multiline-URL error names the problem',
         'sync URL may not contain a newline' in result.stderr)
     no('rejected multiline URL writes no service unit', os.path.exists(unit))
+    eq('multiline URL is rejected before Python/network use',
+       open(call_log, encoding='utf-8').read(), '')
 
     too_many = run([url, 'one', 'two'])
     eq('more than URL + token is refused', too_many.returncode, 2)
