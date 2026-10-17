@@ -1002,6 +1002,126 @@
     return { at: null, why: 'several', n: inside.length };
   }
 
+  /* --- the held end by its PLACE, when the NucBox has the street and not the door
+   *
+   * The owner's decision of 17 Oct 2026. An Uber order's door was "1000 <Road>
+   * NW, <Town>" on a university campus; the NucBox's Nominatim holds the road
+   * and no house 1000, so the door search answered the street alone
+   * (pickInDisc 'nodoor', "no house number"), GPS arrival never armed, and
+   * the delivered order stayed held. The phone had printed a place name for
+   * that stop ("<Something> Parking Deck"), which the readers carry as the
+   * stop's `place` (offer_parser._planner_address, sheet_dropoff), and until
+   * then a place was "shown, never searched". Now, ONLY after the door search
+   * of the held end came back 'nodoor', the place is searched on the NucBox in
+   * the same disc (discBox), and a candidate is the end only when ALL of:
+   *
+   *   1. it is a NAMED FEATURE (namedFeature): Nominatim's category is one of
+   *      PLACE_KINDS — a building, an amenity (a parking deck is
+   *      amenity=parking), a shop, an office... — never a road (`highway`),
+   *      a town or a house number (`place`), a boundary or land use, and it
+   *      carries a name of its own (jsonv2 `name`, nbxHits' `called`);
+   *   2. that name is the place as read (placeNamed, below): close, not loose;
+   *   3. it is inside the disc, and alone or every such one agrees
+   *      (pickInDisc, AGREE_MI), from a list not cut at the limit.
+   *
+   * The town is NOT sent with it. The real install answered a question with
+   * the card's town after a comma with nothing ("Shadowood Pkwy SE, Atlanta":
+   * AUDITS.md, the Done entry on the NucBox's arrival; tests/fake-nucbox.js
+   * answers any such q with nothing), and a campus's postal town is the
+   * likeliest of all not to be OSM's — so the disc does the town's work, as it
+   * does for every other place this rig searches. The public geocoder is never asked for a
+   * place: it has no disc to choose by. A pin found this way says so
+   * (`by: 'place'`, pickPlace), on /api/status and on the panel's in-car line.
+   * Used by server.js (searchHeldEnd) and by NbxSearch.place below, so Map view
+   * and the server pin the held end by one rule. */
+  var PLACE_KINDS = ['amenity', 'building', 'shop', 'tourism', 'leisure', 'office',
+                     'healthcare', 'craft', 'historic', 'club'];
+
+  /* A place name as words to compare: lower case, "&" as "and", apostrophes
+     gone ("McDonald's" is "mcdonalds"), every other mark a space. Inside a
+     word of three letters or more the reader's digit look-alikes are read as
+     the letters they stand for — 0 o, 1 l, 5 s ("Wrenfie1d") — and a word
+     with fewer letters keeps its digits: "Lot 1A" is a lot's number, and a
+     number is never guessed at. */
+  function placeWords(s) {
+    var t = String(s == null ? '' : s).toLowerCase().replace(/&/g, ' and ')
+      .replace(/['’`]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+    return (t ? t.split(' ') : []).map(function (w) {
+      return (w.match(/[a-z]/g) || []).length >= 3
+        ? w.replace(/0/g, 'o').replace(/1/g, 'l').replace(/5/g, 's') : w;
+    });
+  }
+
+  // Whether two words differ by exactly one letter put in, taken out or
+  // changed.
+  function oneEdit(a, b) {
+    if (a === b || Math.abs(a.length - b.length) > 1) return false;
+    var i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+    return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+  }
+
+  /* Whether `called` (the feature's own name, as the NucBox holds it) is the
+   * place `read` off the phone. OCR-tolerant, not loose:
+   *
+   *   - case, apostrophes and punctuation do not count (placeWords);
+   *   - the read has four letters at least — a stray "A" is no name;
+   *   - the same words in the same order and as many of them: a word added
+   *     or missing is another place ("Wrenfield Deck" is not "Wrenfield
+   *     Parking Deck", nor "North Deck" "Deck");
+   *   - at most ONE word may differ, by one letter put in, taken out or
+   *     changed, and only where the longer of the two has four letters or
+   *     more. The reader's own read of the 17 Oct place lost its last letter
+   *     to the icons after it ("Fable Parking Dec"), and that is the slip
+   *     this allows;
+   *   - a word with a digit left in it (placeWords) differs by nothing:
+   *     "Deck 2" is not "Deck 3", nor "Lot 1A" "Lot 1B". */
+  function placeNamed(read, called) {
+    var a = placeWords(read), b = placeWords(called);
+    if (!a.length || a.length !== b.length) return false;
+    if ((a.join('').match(/[a-z]/g) || []).length < 4) return false;
+    var slips = 0;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] === b[i]) continue;
+      if (/\d/.test(a[i]) || /\d/.test(b[i])) return false;
+      if (Math.max(a[i].length, b[i].length) < 4 || !oneEdit(a[i], b[i])) return false;
+      slips += 1;
+    }
+    return slips <= 1;
+  }
+
+  // Rule 1: a candidate that is a named feature and not a road, a town or a
+  // bare house number.
+  function namedFeature(hit) {
+    return !!hit && PLACE_KINDS.indexOf(hit.kind) >= 0 && placeWords(hit.called).length > 0;
+  }
+
+  /* What is asked for a place: the text as read, its spacing closed up and
+     its edges' marks off, or null when that leaves under four letters. */
+  function placeQuery(place) {
+    var s = String(place == null ? '' : place).replace(/\s+/g, ' ')
+      .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+    return (s.match(/[A-Za-z]/g) || []).length >= 4 ? s : null;
+  }
+
+  /* Which candidate is the held end by its place, if any: pickInDisc's
+   * answer over the named features whose name is the place (rules 1-3), with
+   * `by: 'place'` on a pin. { why: 'noplace', n } when the NucBox answered
+   * nothing that is the place by name (`n` what it did answer), 'capped' for
+   * a list cut at the limit, 'none' and 'several' as pickInDisc says them. No
+   * disc is no answer: the owner's rule is the card's disc and nowhere wider. */
+  function pickPlace(hits, disc, place, cutAt) {
+    if (!disc) return { at: null, why: 'none', nearest: null, n: 0 };
+    if (cutAt) return { at: null, why: 'capped', n: cutAt };
+    var all = pointsAmong(hits);
+    var named = all.filter(function (h) { return namedFeature(h) && placeNamed(place, h.called); });
+    if (!named.length) return { at: null, why: 'noplace', n: all.length };
+    var res = pickInDisc(named, disc, null, null);
+    if (res.at) res.by = 'place';
+    return res;
+  }
+
   /* --- the stretch of a street inside the disc ------------------------------
    *
    * The street index answers a numberless street ("Shadowood Pkwy SE,
@@ -1533,6 +1653,9 @@
       return 'street too long to be sure · the NucBox sends ' + res.n + ' points at most';
     },
     nodoor: function () { return 'street found, not that door'; },
+    // ...and the held end's place asked after it (pickPlace), and nothing of
+    // that name answered.
+    noplace: function () { return 'street found, not the door or place'; },
     refused: function () { return 'a bug: the rig refused the question'; }
   };
 
@@ -2429,7 +2552,10 @@
      index set (nbxSettings): with it a cross street is asked as a corner
      and a numberless street as its stretch; without it, as before. And
      `opts.car` is where the car is, for the point of a stretch nearest it
-     (stretchInDisc). The card's town is never sent and never used. */
+     (stretchInDisc). The card's town is never sent and never used. And
+     `opts.place`, for the held order's end only, is the place the phone
+     printed for its stop: asked by name when the door is not on the NucBox
+     (placeSearch, pickPlace). */
   NbxSearch.prototype.place = function (place, disc, opts) {
     opts = opts || {};
     var plan = searchPlan(place);
@@ -2447,7 +2573,35 @@
         return res.why === 'nostreet' ? self.search(plan, disc) : res;
       });
     }
-    return this.search(plan, disc);
+    var asked = this.search(plan, disc);
+    // ...and the held end's PLACE, the owner's rule of 17 Oct (pickPlace):
+    // `opts.place` is the place the phone printed for the stop, given only
+    // for the held order's end (live.html, askNucBox), and it is asked only
+    // when the door search found the street and not the door, inside a disc.
+    var named = opts.place && plan.kind === 'street' && plan.door && disc ? opts.place : null;
+    if (!named) return asked;
+    var me = this;
+    return asked.then(function (res) {
+      return res.why === 'nodoor' ? me.placeSearch(named, disc) : res;
+    });
+  };
+
+  /* A place by its name, inside the disc (pickPlace): Nominatim's free-text
+     search with the place alone, the town never sent, as the server's own
+     search of the held end asks it (searchHeldEnd) — one question, so the two
+     share the server's cache. */
+  NbxSearch.prototype.placeSearch = function (place, disc) {
+    var q = placeQuery(place);
+    if (!q) return Promise.resolve({ at: null, why: 'noplace', n: 0 });
+    var path = '/search?q=' + encodeURIComponent(q) + '&viewbox='
+             + encodeURIComponent(discBox(disc));
+    return this.get(path).then(function (body) {
+      var down = nbxDown(body);
+      if (down) return down;
+      var res = pickPlace(body.hits, disc, place, body.cutAt);
+      res.seen = { hits: pointsAmong(body.hits), door: null };
+      return res;
+    });
   };
 
   // A refusal from the relay, or null when `body` is an answer.
@@ -3012,7 +3166,10 @@
     'the NucBox found nothing for it': 'nothing found',
     'no street index to ask': 'no street index',
     'a street name not on the NucBox': 'street not on the NucBox',
-    'a bug: the rig refused the question': 'a bug: question refused'
+    'a bug: the rig refused the question': 'a bug: question refused',
+    // The held end's place asked after its door (pickPlace): whole, the chip
+    // ran past three rows at 480x320 (rpi/test_layout.py).
+    'street found, not the door or place': 'no door or place'
   };
   // The sentences live.html words itself, each with its chip.
   var LINE_CHIPS = [
@@ -3262,6 +3419,8 @@
            plannerName: plannerName, heldPickups: heldPickups, pickupKey: pickupKey,
            heldRun: heldRun,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
+           placeWords: placeWords, placeNamed: placeNamed, namedFeature: namedFeature,
+           placeQuery: placeQuery, pickPlace: pickPlace, PLACE_KINDS: PLACE_KINDS,
            clipToDisc: clipToDisc, stretchInDisc: stretchInDisc, nearestOn: nearestOn,
            stretchSpan: stretchSpan, spanRefusal: spanRefusal, ON_WAY_MI: ON_WAY_MI,
            heldRuns: heldRuns, oneAnswer: oneAnswer, detourOrders: detourOrders,

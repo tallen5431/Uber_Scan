@@ -263,13 +263,14 @@
     });
   }
 
-  /* Why `d`, read for the held order, is the store's and not where the order
-   * goes, or null: Uber's navigation to the store (uber.pickupNav), 'a pickup
-   * screen' — whatever line it read, since that screen prints the store's
-   * door and town and nothing of the customer's — else a pickup of `held` by
-   * any word on record (heldPickup), 'a pickup'. navCandidate's first and
-   * last refusals, the two that are about the store rather than the label;
-   * dropoff() holds a press to the same two (its rule 5). */
+  /* Why `d` is the store's and not where an order goes, or null: Uber's
+   * navigation to the store (uber.pickupNav), 'a pickup screen' — whatever
+   * line it read, since that screen prints the store's door and town and
+   * nothing of the customer's, and whoever it was read for: the held order,
+   * the card being screened, or nobody (`held` null) — else a pickup of
+   * `held` by any word on record (heldPickup), 'a pickup'. navCandidate's
+   * first and last refusals, the two that are about the store rather than
+   * the label; dropoff() holds a press to the same two (its rule 5). */
   function storeScreen(held, d) {
     if (!d) return null;
     if (d.screen === 'uber.pickupNav') return 'a pickup screen';
@@ -319,11 +320,12 @@
    *      confidently wrong direction, so it is refused outright, blank or not.
    *      A navigation destination was held to every pickup on record, of
    *      every order in the car, before it got here (navCandidate).
-   *   5. A PRESS for a held order off a store's screen is refused, and the
-   *      hold's end stays what it was: the screen is Uber's navigation to the
-   *      store (`screen` uber.pickupNav), 'a pickup screen', or the line is a
-   *      pickup of the held order by any word on record (heldPickup), 'a
-   *      pickup'. outranks() lets a press past anything, and on 17 Oct that
+   *   5. A PRESS off a store's screen is refused, and the end it would have
+   *      replaced stays what it was: the screen is Uber's navigation to the
+   *      store (`screen` uber.pickupNav), 'a pickup screen' — for ANYONE: the
+   *      held order, and since 17 Oct the card being screened too — or the
+   *      line is a pickup of the held order by any word on record
+   *      (heldPickup), 'a pickup'. outranks() lets a press past anything, and on 17 Oct that
    *      was the fault: an Uber order held with the Trip Planner's door as its
    *      end, ⌖ pressed at the restaurant over "Arriving soon / <Store> / <n>
    *      <Street> & / Suite 128, <Town>, GA / 30066 / Note from business", and
@@ -332,8 +334,16 @@
    *      every offer for twenty minutes was judged against it. navCandidate
    *      already refuses an unprompted read off that screen and off a held
    *      pickup; a press is the driver saying "this screen", and a store's
-   *      screen is not where the order goes, whoever asked. With nothing held
-   *      a press is about the card being screened and none of this applies.
+   *      screen is not where the order goes, whoever asked. ...and not where
+   *      a CARD goes either (the owner, 17 Oct): with an order held and
+   *      another card on the slot, a press over the store's navigation opened
+   *      the chooser, and "This card" filed the store's address onto the
+   *      card; with nothing held it filed there straight away. Uber draws
+   *      that screen only for an order accepted, so it is never the card
+   *      being screened's end, and the press is refused for it as for the
+   *      hold (server.js no longer opens the chooser for one, whoseDropoff).
+   *      The held order's pickups by word (heldPickup) are the hold's alone:
+   *      with nothing held there are none to ask.
    *   6. Onto the hold when outranks() says so; held and not outranked is
    *      nothing, and nothing said.
    *   7. With nothing held, onto the card being screened when it is asked, or
@@ -377,20 +387,21 @@
       out.why = held ? 'before the Took' : 'nothing held';
       return out;
     }
+    if (aPickup) {
+      out.why = 'a pickup';
+      return out;
+    }
+    // Rule 5: a press off a store's screen. Every road a press takes onto
+    // a hold ends here — straight, pressBetween's 'hold', the chooser's row,
+    // attribute()'s cue with two in the car — and so does every road onto
+    // the card being screened, so this is the one place it is asked, before
+    // either. Nothing filed, `to` null; server.js tells the panel why.
+    var offStore = wasAsked ? storeScreen(held, d) : null;
+    if (offStore) {
+      out.why = offStore;
+      return out;
+    }
     if (held) {
-      if (aPickup) {
-        out.why = 'a pickup';
-        return out;
-      }
-      // Rule 5: a press off a store's screen. Every road a press takes onto
-      // a hold ends here — straight, pressBetween's 'hold', the chooser's row,
-      // attribute()'s cue with two in the car — so this is the one place it
-      // is asked. Nothing filed, `to` null; server.js tells the panel why.
-      var offStore = wasAsked ? storeScreen(held, d) : null;
-      if (offStore) {
-        out.why = offStore;
-        return out;
-      }
       var cur = fieldsOf(held).dropoff;
       var why = outranks(field(d.line, out.from, addressConf(d), d.at, d.screen, d.key), cur);
       if (why) {
@@ -421,6 +432,14 @@
     f.dropoff = field(d.line, said.from, addressConf(d), d.at, d.screen, d.key);
     held.dropoff = d.line;
     held.dropoffScanned = true;
+    // ...and the place the phone printed for that stop (placeOf), or none:
+    // it belongs to THIS end, so an end filed without one takes the old one
+    // away. The server searches the held end by it when the NucBox has the
+    // street and not the door (server.js searchHeldPlace, the owner's
+    // decision of 17 Oct); until then a place was shown and never searched.
+    var place = placeOf(d);
+    if (place) held.dropoffPlace = place;
+    else delete held.dropoffPlace;
     if (d.stop) {
       [['customer', d.stop.name], ['expectedBy', d.stop.expectedBy]].forEach(function (p) {
         var next = field(p[1], said.from, 1, d.at, d.screen, d.key);
@@ -446,6 +465,17 @@
         });
       }
     }
+  }
+
+  /* The place a dropoff's stop was printed with ("<Something> Parking Deck"),
+   * or null: the dropoff line's own `place` (rpi/scan_pi.py emit_dropoff,
+   * off the customer sheet), or a candidate's made here off a Trip Planner
+   * stop or a navigation sheet (candidate, navCandidate). The readers' rule
+   * for it (offer_parser.py, the planner's and the sheet's place) is theirs;
+   * here it is only carried. */
+  function placeOf(d) {
+    var p = d && d.place;
+    return typeof p === 'string' && p.trim() ? p.trim() : null;
   }
 
   /* ...and onto the card being screened. `dropoffFrom` rides with it, so the
@@ -1182,6 +1212,8 @@
              state: address.state, zip: address.zip, asked: asked,
              labelled: asked ? null : 'dropoff', singleCardOnly: lone ? true : null,
              planner: true, screen: 'uber.planner', key: keyOf(stop),
+             // The stop's place line (the hotel layout), for file().
+             place: stop && typeof stop.place === 'string' ? stop.place : null,
              stop: stop ? { name: stop.name || null,
                             expectedBy: stop.expectedBy === undefined ? null : stop.expectedBy }
                : null,
@@ -1268,6 +1300,8 @@
              nav: true, screen: typeof s.screen === 'string' ? s.screen : null,
              app: typeof s.app === 'string' ? s.app : null,
              expectedBy: typeof a.expectedBy === 'number' ? a.expectedBy : null,
+             // ...and the sheet's place, when it printed one, for file().
+             place: typeof a.place === 'string' ? a.place : null,
              ms: null, at: at };
   }
 
@@ -1759,6 +1793,7 @@
            sameStreet: sameStreet,
            dropoff: dropoff, file: file, fileCard: fileCard, cardRank: cardRank,
            pressBetween: pressBetween, ownPopup: ownPopup, cardCandidate: cardCandidate,
+           storeScreen: storeScreen, placeOf: placeOf,
            popup: popup, filePopup: filePopup, cardNames: cardNames,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
            keyOf: keyOf, placements: placements, linked: linked,

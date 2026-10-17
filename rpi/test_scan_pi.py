@@ -3287,6 +3287,21 @@ eq('an unpressed address under a Dropoff label goes out labelled \'dropoff\'; a 
    [(json.loads(l)['dropoff']['asked'], json.loads(l)['dropoff']['labelled'])
     for l in ''.join(_said).splitlines() if l.strip()],
    [(False, 'dropoff'), (True, None)])
+# ...and the place the phone printed for the stop, where the read gave one
+# (OP.sheet_dropoff's `place`): the held end is searched by it when the NucBox
+# has the street and not the door (server.js searchHeldPlace, the owner's
+# decision of 17 Oct). None from a read that gave none. Invented.
+_said[:] = []
+sys.stdout = _Catch()
+try:
+    SP.emit_dropoff({'line': '1000 Quarry Rd NW, Acworth', 'street': '1000 Quarry Rd NW',
+                     'city': 'Acworth', 'place': 'Wrenfield Parking Deck'}, asked=True)
+    SP.emit_dropoff({'line': '12 Made Up Way, Acworth, GA 30101'}, asked=True)
+finally:
+    sys.stdout = _was_stdout
+eq('a press\'s dropoff line carries the stop\'s place, and None where the read gave none',
+   [json.loads(l)['dropoff']['place'] for l in ''.join(_said).splitlines() if l.strip()],
+   ['Wrenfield Parking Deck', None])
 
 
 # --- ...and the same thing through the loop that has to do it ---------------

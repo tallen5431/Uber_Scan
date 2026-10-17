@@ -38,7 +38,9 @@
  * not the door, "Starbucks" is twelve branches cut at the limit, "Waffle
  * House" is a pickup the road by is shorter than the road direct, "Farm
  * Stand" is 450 m from a road, "250 Example Road" is a restaurant's door (a
- * held order's pickup) and "1975 Cobb Parkway" one 87 m from 1985's door, a
+ * held order's pickup) and "1975 Cobb Parkway" one 87 m from 1985's door,
+ * "Wrenfield Parking Deck" a place by Kestrel Drive (with "Quarry Hall" a road
+ * and "Lantern Parking Deck" a deck far off, below), a
  * point at 34.1, -84.6 is refused by the
  * router with a code that is not NoRoute, a route touching 33.9, -84.7
  * comes back with a shape that is not one, and GET /__asked lists every
@@ -147,6 +149,26 @@ var DINER = [place(82, 34.0004, -84.5554, 'amenity', 'restaurant', 'Example Dine
                    'Example Diner, 1975, Cobb Parkway, Kennesaw, Cobb County, Georgia, '
                    + '30152, United States')];
 
+/* The held end by its PLACE (map-view.js pickPlace; the owner, 17 Oct): a
+   parking deck beside Kestrel Drive, whose house 4821 this fake does not hold,
+   asked as q=Wrenfield Parking Deck and answered as Nominatim answers a named
+   feature, its category amenity and its own name — and the same for the
+   reader's read of it with the last letter lost ("Wrenfield Parking Dec") and
+   for a shorter name that is not it ("Wrenfield Deck"), as a free-text
+   search answers either. "Quarry Hall" is a ROAD of that name, never a
+   building, and "Lantern Parking Deck" a deck 6.9 mi north-east of the
+   Square: inside the box round a 5.0 mi card's 5.5 mi disc, and outside the
+   disc.
+   Invented, every one. */
+var DECK = [place(91, 33.9712, -84.5288, 'amenity', 'parking', 'Wrenfield Parking Deck',
+                  'Wrenfield Parking Deck, Kestrel Drive, Marietta, Cobb County, Georgia, '
+                  + '30060, United States')];
+var QUARRY = [place(92, 33.9690, -84.5310, 'highway', 'residential', 'Quarry Hall',
+                    'Quarry Hall, Marietta, Cobb County, Georgia, 30060, United States')];
+var LANTERN = [place(93, 34.0226, -84.4649, 'amenity', 'parking', 'Lantern Parking Deck',
+                     'Lantern Parking Deck, Marietta, Cobb County, Georgia, 30062, '
+                     + 'United States')];
+
 var CHURCH = [
   place(31, 33.9580, -84.5520, 'highway', 'tertiary', 'Church Street',
         'Church Street, Marietta, Cobb County, Georgia, 30060, United States'),
@@ -174,6 +196,9 @@ function search(q) {
     else if (term === 'starbucks') all = STARBUCKS;
     else if (term === 'waffle house') all = WAFFLE;
     else if (term === 'farm stand') all = FARM;
+    else if (/^wrenfield (parking dec|parking deck|deck)$/.test(term)) all = DECK;
+    else if (term === 'quarry hall') all = QUARRY;
+    else if (term === 'lantern parking deck') all = LANTERN;
   } else if (q.street !== undefined) {
     if (/^shadowood (pkwy|parkway)/.test(term)) all = SHADOWOOD;
     else if (/^1985 cobb (pkwy|parkway)/.test(term)) all = COBB_1985;
@@ -322,7 +347,7 @@ function start(done) {
 module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    COBB_1985: COBB_1985, CHURCH: CHURCH, KESTREL: KESTREL,
                    STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM, GRILL: GRILL,
-                   DINER: DINER };
+                   DINER: DINER, DECK: DECK, QUARRY: QUARRY, LANTERN: LANTERN };
 
 if (require.main === module) {
   start(function (f) { console.log(JSON.stringify({ port: f.port })); });

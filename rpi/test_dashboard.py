@@ -1228,6 +1228,17 @@ const framed = (page) => page.waitForFunction(
                  heldEnd: { endPinned: false, arrived: false, endWhy: 'no house number' } });
     await tick(300);
     const refused = await held();
+    // The door not on the NucBox, its place pinned instead (server.js
+    // searchHeldPlace, `endBy` 'place'), and the place refused as well.
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: true, arrived: false, endBy: 'place', endWhy: null } });
+    await tick(300);
+    const byPlace = await held();
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: false, arrived: false, endBy: null,
+                            endWhy: 'no door, place not found' } });
+    await tick(300);
+    const noPlace = await held();
     // ...and the car arrives at the door: the pickup is behind it.
     await push({ alive: true, at: Date.now(), atDropoff: true,
                  heldEnd: { endPinned: true, arrived: true, endWhy: null } });
@@ -1250,7 +1261,7 @@ const framed = (page) => page.waitForFunction(
     const gone = await held();
     out.heldCard = { tookUp: tookUp, tookGoneNow: tookGoneNow, tookGoneLater: tookGoneLater,
                      empty: empty, between: between, visited: visited,
-                     refused: refused, arrived: arrived,
+                     refused: refused, byPlace: byPlace, noPlace: noPlace, arrived: arrived,
                      offerUp: offerUp, gone: gone };
     await page.close();
     await ctx.close();
@@ -4560,7 +4571,7 @@ const framed = (page) => page.waitForFunction(
           ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
           minutes: 20.0, miles: card.miles, cost: 1.4, target: 25, band: 15,
           holding: { pay: 9.0, minutes: 18.0,
-                     dropoff: x.held || 'Shadowood Pkwy SE, Atlanta',
+                     dropoff: x.held || 'Shadowood Pkwy SE, Atlanta', place: x.place || null,
                      card: Object.assign({}, x.SQ, { miles: 9.4 }, x.heldCard || {}) },
           offer: Object.assign({ id: x.id, pay: 14.25, minutes: 20.0,
                                  billedMinutes: 20.0, cost: 1.4,
@@ -4718,6 +4729,22 @@ const framed = (page) => page.waitForFunction(
         r.doorPick = await pick();
         r.doorHow = await how();
         r.doorKeyNow = await keyNow();
+        // The held order going to that same street-only door: no pin, as
+        // before — and then, the same card, the place the phone printed for
+        // its stop learnt for that end (the owner, 17 Oct, map-view.js
+        // pickPlace): Map view walks again and pins the place, as the server
+        // does. The fake's deck by Kestrel Drive, 1.76 mi from the held
+        // card's fix. Invented.
+        await push({ id: 'n-place', held: '4821 Kestrel Dr, Marietta' });
+        await page.waitForTimeout(1500);
+        r.noPlaceHeld = await heldPin();
+        const placeAskedBefore = relayAsked.length;
+        await push({ id: 'n-place', held: '4821 Kestrel Dr, Marietta',
+                     place: 'Wrenfield Parking Deck' });
+        await page.waitForTimeout(1500);
+        r.placeHeld = await heldPin();
+        r.placeAsked = relayAsked.slice(placeAskedBefore)
+          .filter((u) => /[?&]q=Wrenfield%20Parking%20Deck&/.test(u)).length;
         // A place name longer than the relay will pass on: refused by this
         // rig's own server, which is a bug in the question, not a NucBox down.
         await push({ id: 'n-bug', pickup: 'Q'.repeat(121) });
@@ -7701,6 +7728,10 @@ try:
            ('Dropoff by 6:25', '4821 Kestrel Dr', '$28.08 in car · ● armed'))
         eq('...and why not, said in a few words when the server refuses the pin',
            (hc.get('refused') or {}).get('line'), '$28.08 in car · no house no.')
+        eq('[place] an end the server pinned by its place is armed, and says so',
+           (hc.get('byPlace') or {}).get('line'), '$28.08 in car · ● armed by place')
+        eq('[place] ...and a place refused too, in a few words',
+           (hc.get('noPlace') or {}).get('line'), '$28.08 in car · no door/place')
         _a = hc.get('arrived') or {}
         eq('...and at the door, the dropoff is next, with the planner\'s time for it',
            (_a.get('when'), _a.get('where'), _a.get('line')),
@@ -9774,6 +9805,11 @@ try:
         'door (%r)' % both.get('door'),
         re.match(r"^no pin for Jimmy.* — street found, not that door$",
                  both.get('door') or '') and both.get('doorPick') is None)
+    eq('[place] Map view pins the held end by its place when the NucBox has its street and '
+       'not its door, asking the place once when it is learnt for the same card, and '
+       'with no place pins nothing',
+       (both.get('placeHeld'), both.get('placeAsked'), both.get('noPlaceHeld')),
+       ([33.9712, -84.5288], 1, None))
     ok_('a question this rig\'s server refuses is said as a bug, never as the '
         'NucBox down (%r)' % both.get('bug'),
         re.match(r'^no pin for Q+… — a bug: the rig refused the question$',

@@ -2619,7 +2619,10 @@
     'too many answers': 'too many answers',
     'no card fix': 'no card fix',
     'NucBox down': 'NucBox down',
-    'door next to the pickup': 'door at pickup'
+    'door next to the pickup': 'door at pickup',
+    // The held end's place asked after its door, and nothing of that name
+    // (server.js searchHeldPlace).
+    'no door, place not found': 'no door/place'
   };
 
   /* The GPS drop's state in a few words: "at door" once the car has arrived
@@ -2639,7 +2642,12 @@
     if (h.endWhy) {
       return END_WHY_SHORT[h.endWhy] || String(h.endWhy).split(' ').slice(0, 3).join(' ');
     }
-    return h.endPinned ? '● armed' : '○ not armed';
+    // ...and an end the server pinned by the place the phone printed for it,
+    // its door not being on the NucBox (searchHeldPlace, `endBy` 'place'):
+    // armed all the same, and said, since that pin is a building's and not a
+    // door's.
+    return h.endPinned ? (h.endBy === 'place' ? '● armed by place' : '● armed')
+      : '○ not armed';
   }
 
   // A dropoff as the line has room for it: the street, without the town, the
@@ -5170,6 +5178,8 @@
         heldSaid.endPinned = !!msg.heldEnd.endPinned;
         heldSaid.arrived = !!msg.heldEnd.arrived;
         heldSaid.endWhy = msg.heldEnd.endWhy || null;
+        // ...who pinned it: 'place' is said on the line (gpsSaidOf).
+        heldSaid.endBy = msg.heldEnd.endBy || null;
         // ...and its pickups behind the car (visitPickups), which move the
         // next stop on and take the restaurant out of Map view's run.
         heldSaid.visited = Array.isArray(msg.heldEnd.visited) ? msg.heldEnd.visited : [];
@@ -6192,6 +6202,12 @@
     var card = cardOnMap() ? onRecord : null;
     var o = card || {};
     var held = holdingNow ? (heldEnds || null) : null;
+    // ...and the place the phone printed for that end's stop, as the server
+    // described the order (heldForPanel `place`): asked by name when the
+    // NucBox has the street and not the door (MV.pickPlace, the rule the
+    // server pins by). Only for the end the description is of.
+    var heldPlace = held && heldSaid && heldSaid.dropoff === held
+      && typeof heldSaid.place === 'string' && heldSaid.place ? heldSaid.place : null;
     /* ...and the held order's pickups off its Trip Planner, while it is held:
        the restaurant the driver read with ⌖ was never on this map, so the
        order and the place it is collected from were never seen together
@@ -6256,7 +6272,8 @@
              // Which of this card's two ends came off a tap, for the pins'
              // words and the figure's.
              tapped: { pickup: !!tapped, dropoff: !!o.dropoff && o.dropoffFrom === 'popup' },
-             held: held, heldPicks: heldPicks, donePicks: donePicks, names: names,
+             held: held, heldPlace: heldPlace,
+             heldPicks: heldPicks, donePicks: donePicks, names: names,
              // The two cards the line is measured with: this one, whose fix
              // is where the car was when it came up, and the one the order in
              // the car came from, whose own fix and distance its end is
@@ -6279,6 +6296,8 @@
              // here", which the next card took away with it. Measured in
              // rpi/test_dashboard.py, 'held end: the ✓ Took reply's end...'.
              key: names.join('|') + '#' + (o.id || '') + '@' + (held || '')
+               // ...and its place, learnt for the same end text.
+               + (heldPlace ? '[' + heldPlace : '')
                + (held2 ? '+' + held2 : '')
                // ...and the order of the run through both: a planner read
                // that places both ends moves the run under the same places.
@@ -6372,8 +6391,13 @@
         : discs.card;
       // `here` for a numberless street's pin: the point of its stretch
       // nearest the car (MV.stretchInDisc), when the street index is set.
+      // ...and the held end's place, for its door's search to fall back to
+      // (MV.NbxSearch.place). Never posted as the held end: pinHeldEnd sends
+      // a door and nothing else, and the server pins a place itself.
       var got = await mapNbx.place(q, disc,            // eslint-disable-line no-await-in-loop
-                                   { streets: nbx.streets, car: here });
+                                   { streets: nbx.streets, car: here,
+                                     place: whose === 'held' && q === want.held
+                                       ? want.heldPlace : null });
       if (gone()) return null;
       if (got.why === 'unreachable') {
         // Today's path for this place and every one after it, under the

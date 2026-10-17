@@ -8505,7 +8505,7 @@ python3 rpi/test_cropbox.py     #  42 on a box drawn by hand
 python3 rpi/test_money.py       # 255 from a picture of a card to a $/hour,
                                 #     and on a rate with no running cost off
                                 #     it never earning an ACCEPT
-python3 rpi/test_scan_pi.py     # 566 on the loop that holds the camera, on
+python3 rpi/test_scan_pi.py     # 567 on the loop that holds the camera, on
                                 #     which live view it is being asked for,
                                 #     and on one card being named once however
                                 #     many times it is read
@@ -8544,14 +8544,14 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 1314 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 1317 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
                                 #     words rather than a number whenever one
                                 #     would be wrong (skipped without
                                 #     Playwright)
-python3 rpi/test_layout.py      # 3958 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 3972 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
@@ -8559,7 +8559,7 @@ python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 890 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 903 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8574,11 +8574,11 @@ python3 rpi/test_map.py         # 231 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
-node tests/assemble.test.js     # 296 on where the order in the car ends: one
+node tests/assemble.test.js     # 304 on where the order in the car ends: one
                                 #     hold decided as before, and a Trip Planner
                                 #     filed from pages stitched only on the cues
                                 #     the screen gives
-node tests/mapview.test.js      # 505 on the deciding behind both maps, with
+node tests/mapview.test.js      # 542 on the deciding behind both maps, with
                                 #     no map: the geometry, the cache, and the
                                 #     one-request-a-second rule against a fake
                                 #     clock, which is what makes the awkward

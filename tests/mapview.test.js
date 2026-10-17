@@ -1051,7 +1051,9 @@ async function nucbox() {
   }
   function hitsOf(list) {
     return list.map(function (h) {
-      return { lat: Number(h.lat), lon: Number(h.lon), name: h.display_name };
+      // As server.js nbxHits sends them, `kind` and `called` included.
+      return { lat: Number(h.lat), lon: Number(h.lon), name: h.display_name,
+               kind: h.category, called: h.name };
     });
   }
 
@@ -1260,6 +1262,80 @@ async function nucbox() {
       MV.hasDoor({ name: '1985, Cobb Parkway, Kennesaw' }, '1985')
       && MV.hasDoor({ name: "McDonald's, 1155, Roswell Street Northeast" }, '1155')
       && !MV.hasDoor({ name: 'Kestrel Drive, Marietta, Cobb County, Georgia, 30060' }, '30060'));
+
+  /* ---- the held end by its PLACE (the owner, 17 Oct): pickPlace ----------
+   *
+   * Asked only after a door search came back 'nodoor' (above). A candidate is
+   * the end when it is a named feature and not a road, its own name is the
+   * place as read — close, not loose — and it is inside the disc. */
+  var NAMED = [
+    ['Wrenfield Parking Deck', 'Wrenfield Parking Deck', true, 'the same name'],
+    ['WRENFIELD PARKING DECK.', 'Wrenfield Parking Deck', true, 'case and a mark'],
+    ['Wrenfield Parking-Deck', 'Wrenfield Parking Deck', true, 'a hyphen for a space'],
+    ["Wren's Deck", 'Wrens Deck', true, 'an apostrophe'],
+    ['Fable & Wren Deck', 'Fable and Wren Deck', true, '"&" for "and"'],
+    ['Fable Parking Dec', 'Fable Parking Deck', true,
+     'the last letter lost to the icons, as the reader read it on 17 Oct'],
+    ['Wrenfie1d Parking Deck', 'Wrenfield Parking Deck', true, 'a 1 for an l inside a word'],
+    ['Wrenfield Parkinq Deck', 'Wrenfield Parking Deck', true, 'one letter changed'],
+    ['Wrenfield Deck', 'Wrenfield Parking Deck', false, 'a word missing'],
+    ['Wrenfield Parking Deck North', 'Wrenfield Parking Deck', false, 'a word added'],
+    ['Wrenfeld Parkinq Deck', 'Wrenfield Parking Deck', false, 'two words each a letter out'],
+    ['Wrnfeld Parking Deck', 'Wrenfield Parking Deck', false, 'one word two letters out'],
+    ['Wrenfeild Parking Deck', 'Wrenfield Parking Deck', false, 'two letters swapped'],
+    ['Wrnfiedl Parking Deck', 'Wrenfield Parking Deck', false, 'a letter lost and two swapped'],
+    ['Wrenfiel Parking Deck', 'Wrenfield Parking Deck', true, 'one letter lost inside a word'],
+    ['Parking Deck Wrenfield', 'Wrenfield Parking Deck', false, 'the words in another order'],
+    ['Wrenfield Deck 2', 'Wrenfield Deck 3', false, 'another number'],
+    ['Lot 1A', 'Lot 1B', false, 'a lot number one letter out'],
+    ['Deck 1200', 'Deck 1300', false, 'a long number one digit out'],
+    ['Gate 105', 'Gate Los', false, 'a number never read as letters'],
+    ['Lot A Deck', 'Lot B Deck', false, 'a one-letter word changed'],
+    ['Ab', 'Ab', false, 'under four letters'],
+    ['', 'Wrenfield Parking Deck', false, 'nothing read']
+  ];
+  NAMED.forEach(function (c) {
+    eq('placeNamed: ' + c[3] + ' (' + JSON.stringify(c[0]) + ' / ' + JSON.stringify(c[1])
+       + ') is ' + (c[2] ? '' : 'not ') + 'the place', MV.placeNamed(c[0], c[1]), c[2]);
+  });
+  var deck = hitsOf(FAKE.DECK)[0];
+  eq('namedFeature: an amenity with a name of its own is a named feature, a road, a bare '
+     + 'house number and a building with no name are not',
+     JSON.stringify([deck, hitsOf(FAKE.QUARRY)[0], hitsOf(FAKE.COBB_1985)[2],
+                     hitsOf(FAKE.COBB_1985)[0]].map(MV.namedFeature)),
+     JSON.stringify([true, false, false, false]));
+  eq('placeQuery: the place as read, its spacing closed up and its edges\' marks off; under '
+     + 'four letters is nothing to ask',
+     JSON.stringify([MV.placeQuery('  Wrenfield   Parking Deck &'), MV.placeQuery('A &'),
+                     MV.placeQuery(null)]),
+     JSON.stringify(['Wrenfield Parking Deck', null, null]));
+  var byPlace = MV.pickPlace([deck], d30, 'Wrenfield Parking Deck', null);
+  eq('pickPlace: the deck of that name inside a 3.0 mi card is the end, by place',
+     JSON.stringify([byPlace.at && [byPlace.at.lat, byPlace.at.lon], byPlace.by]),
+     JSON.stringify([[33.9712, -84.5288], 'place']));
+  eq('...a road of the place\'s name is not, nor is a deck of another name',
+     JSON.stringify([MV.pickPlace(hitsOf(FAKE.QUARRY), d30, 'Quarry Hall', null).why,
+                     MV.pickPlace([deck], d30, 'Wrenfield Deck', null).why]),
+     JSON.stringify(['noplace', 'noplace']));
+  eq('...the road beside it in one answer is passed over, and the deck pinned',
+     (MV.pickPlace(hitsOf(FAKE.QUARRY).concat([deck]), d30, 'Wrenfield Parking Deck', null).at
+      || {}).lat, 33.9712);
+  var d50 = MV.discFor(card({ miles: 5.0 }));
+  var lantern = MV.pickPlace(hitsOf(FAKE.LANTERN), d50, 'Lantern Parking Deck', null);
+  eq('...one outside the disc is refused, and saying how far it was',
+     JSON.stringify([lantern.at, lantern.why, (lantern.nearest || 0).toFixed(1)]),
+     JSON.stringify([null, 'none', '6.9']));
+  var twin = { lat: 33.99, lon: -84.53, name: 'Wrenfield Parking Deck, Marietta',
+               kind: 'amenity', called: 'Wrenfield Parking Deck' };
+  eq('...two of that name inside that are not one place are refused',
+     MV.pickPlace([deck, twin], d30, 'Wrenfield Parking Deck', null).why, 'several');
+  eq('...a list cut at the limit proves nothing, and no disc is no answer',
+     JSON.stringify([MV.pickPlace([deck], d30, 'Wrenfield Parking Deck', 10).why,
+                     MV.pickPlace([deck], null, 'Wrenfield Parking Deck', null).at]),
+     JSON.stringify(['capped', null]));
+  eq('...in words that say the street was found and not the door or the place',
+     MV.nbxRefusal({ at: null, why: 'noplace', n: 1 }, d30, '4821 Kestrel Dr', 'held'),
+     'no pin for 4821 Kestrel Dr — street found, not the door or place');
 
   /* A list cut at the limit proves nothing about what is inside the disc. */
   var sb = hitsOf(FAKE.STARBUCKS.slice(0, 10));
@@ -1683,6 +1759,32 @@ async function nucbox() {
     got = await nbx.place('4821 Kestrel Dr, Marietta', d94);
     eq('through the server, a door the NucBox answers with only its street is '
        + 'refused as the street', [got.at, got.why].join(','), ',nodoor');
+    // ...and with the place the phone printed for it (the held end's, the
+    // owner's rule of 17 Oct): asked by name, alone, inside the disc.
+    n0 = fake.asked.length;
+    got = await nbx.place('4821 Kestrel Dr, Marietta', d94, { place: 'Wrenfield Parking Deck' });
+    sent = fake.asked.slice(n0).join(' ');
+    eq('through the server, the door not held and its place given, the place is pinned',
+       JSON.stringify([got.at && got.at.lat, got.by]), JSON.stringify([33.9712, 'place']));
+    // (The door's own question was answered from the caches: asked above.)
+    ok_('...asked after the door, as the place alone inside the disc\'s box, bounded ('
+        + sent + ')',
+        /^\/search\?format=jsonv2&limit=10&q=Wrenfield%20Parking%20Deck&viewbox=[-0-9.,%C]+&bounded=1$/
+          .test(sent) && !/Marietta/.test(sent));
+    got = await nbx.place('4821 Kestrel Dr, Marietta', d94, { place: 'Quarry Hall' });
+    eq('...a road of that name is refused, in the place\'s words',
+       [got.at, got.why].join(','), ',noplace');
+    got = await nbx.place('1985 Cobb Parkway, Kennesaw', MV.discFor(card({ miles: 2.0 })),
+                          { place: 'Wrenfield Parking Deck' });
+    eq('...a door found outside the disc is that refusal, the place not asked in its stead '
+       + '(the deck is inside a 2.0 mi card, the door 3.4 mi out)',
+       [got.at, got.why, got.by].join(','), ',none,');
+    n0 = fake.asked.length;
+    got = await nbx.place('1985 Cobb Parkway, Kennesaw', d94, { place: 'Wrenfield Parking Deck' });
+    eq('...and a door the NucBox holds is pinned by the door, the place never asked',
+       JSON.stringify([!!got.at, got.by || null,
+                       fake.asked.slice(n0).filter(function (u) { return /q=/.test(u); }).length]),
+       JSON.stringify([true, null, 0]));
     got = await nbx.place('Starbucks', MV.discFor(card({ miles: 3.0 })));
     eq('...and twelve Starbucks cut at ten, one inside a 3.0 mi card, are too many '
        + 'to be sure', [got.at, got.why, got.n].join(','), ',capped,10');
