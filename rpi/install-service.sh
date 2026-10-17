@@ -221,7 +221,7 @@ deliberate — the pages are worth more than the write — so a running server i
 not by itself evidence that anything is landing. The line that says which is
 the last one printed at startup.
 
-  then on the rig:  bash tools/install-sync.sh http://$(hostname):8080${SYNC_TOKEN:+ "$SYNC_TOKEN"}
+  then on the rig:  bash tools/install-sync.sh http://$(hostname):8080${SYNC_TOKEN:+ '<same-token>'}
 DONE
 else
 cat <<DONE
