@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 9 * * 1'
 
 permissions:
   contents: read
@@ -15,6 +17,7 @@ concurrency:
 jobs:
   quick-suite:
     name: Quick suite (Node 24 + Python)
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -46,8 +49,43 @@ jobs:
           TZ: America/New_York
         run: npm run test:quick
 
+  full-suite:
+    name: Full suite including OCR
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install OCR test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-ci.txt
+
+      - name: Run full test suite
+        env:
+          TZ: America/New_York
+        run: npm test
+
   node-compat:
     name: JavaScript suite (Node ${{ matrix.node }})
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
