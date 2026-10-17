@@ -13,7 +13,7 @@
     "test:js": "for f in tests/*.test.js; do node \"$f\" || exit 1; done"
   },
   "engines": {
-    "node": ">=14"
+    "node": ">=18"
   },
   "license": "MIT"
 }
