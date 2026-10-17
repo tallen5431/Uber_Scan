@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   quick-suite:
-    name: Quick suite (Node 24 + Python)
+    name: Quick suite (Node 24 + Python 3.11)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -30,10 +30,10 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.11'
           cache: pip
           cache-dependency-path: requirements-ci.txt
 
@@ -64,10 +64,10 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.11'
           cache: pip
           cache-dependency-path: requirements-ci.txt
 
@@ -91,7 +91,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['22', '24']
+        node: ['14', '18', '22', '24']
 
     steps:
       - name: Check out repository
