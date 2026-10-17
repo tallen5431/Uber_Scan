@@ -901,6 +901,71 @@ SEQ.forEach(function (seq) {
      A.plannerLoneDropoff(OP.findPlanner(byName[lost[2]])), null);
 })();
 
+/* ---- the 16 Oct shift's single-trip planner, its label and town misread ----
+ *
+ * tests/fixtures/cases.json's "Measured: the single trip's planner with both
+ * slips…" (names and streets invented): the dropoff's label read "Addres" and
+ * its town line "<Town>. GA", so the stop had no street and no town, and the
+ * held order kept the card's corner as its end. With both parsed, its lone
+ * dropoff is a single trip's. The page shows no Waybill, so it is 'list'.
+ *
+ * Measured on this page through sighting(): with its title read whole it files
+ * onto a held card of one order on one leg, unpressed, as `singleCardOnly`.
+ * As read on shift, the title came back "ny. mS", and that page files nothing
+ * pressed or unpressed: the lone dropoff is taken only off an unpressed page
+ * under the "Trip Planner" title (the owner's decision, AUDITS.md, "on an
+ * unpressed whole-screen read only"; the title is what says the whole screen
+ * is the planner). Before the parser fix, neither page filed anything. */
+(function () {
+  var name = 'Measured: the single trip\'s planner with both slips, its title misread '
+    + 'and the bar under it';
+  var text = null;
+  require('./fixtures/cases.json').planner.forEach(function (c) {
+    if (c.name === name) text = c.text;
+  });
+  ok_('the premise: the shift\'s planner case is there', !!text);
+  if (!text) return;
+  var titled = text.replace('ny. mS', 'Trip Planner');
+  ok_('the premise: the case as read has no title, and with it read whole it does',
+      !OP.plannerTitled(text) && OP.plannerTitled(titled));
+  function single() {
+    var h = { id: 'o-single', acceptedAt: 1000, card: { legs: 1, multiOrder: false },
+              app: 'uber', dropoff: null, dropoffScanned: false };
+    A.fieldsOf(h);
+    return h;
+  }
+  eq('the shift\'s planner: its one dropoff, label "Addres" and town "<Town>. GA", is a '
+     + 'single trip\'s lone dropoff',
+     (A.plannerLoneDropoff(OP.findPlanner(text)) || {}).line, '283 Quillon St NW, Smyrna');
+
+  // Hold a single-trip card, then the page under its title, unpressed: it files.
+  var st = A.fresh();
+  var hold = single();
+  A.took(st, hold);
+  var r = A.sighting(st, hold, pageOf(titled, 2000, false), 2000);
+  var kept = r.candidates.map(function (d) {
+    var said = A.dropoff(hold, d, null);
+    if (!said.drop) A.file(hold, d, said, st);
+    return [d.singleCardOnly === true, said.drop ? 'dropped' : said.from];
+  });
+  eq('the shift\'s planner under its title, unpressed, files its lone dropoff on a '
+     + 'single-trip hold',
+     [r.why, kept, hold.dropoff, hold.dropoffScanned, brief(hold.fields.dropoff)],
+     ['list', [[true, 'planner']], '283 Quillon St NW, Smyrna', true,
+      { value: '283 Quillon St NW, Smyrna', from: 'planner' }]);
+
+  // The page as read on shift, title misread: nothing, pressed or not.
+  eq('...and as read on shift, its title misread "ny. mS", it files nothing pressed or '
+     + 'unpressed, and says \'list\'',
+     [true, false].map(function (asked) {
+       var s2 = A.fresh(), h2 = single();
+       A.took(s2, h2);
+       var r2 = A.sighting(s2, h2, pageOf(text, 2000, asked), 2000);
+       return [r2.candidates.length, A.verdictFor(s2, 2000)];
+     }),
+     [[0, 'list'], [0, 'list']]);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);
