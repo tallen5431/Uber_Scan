@@ -4433,6 +4433,23 @@ reader gets from the camera today, without glare but not much sharper. The
 camera stays the input; a capture source is a contained change if a $15 test
 ever shows the card.
 
+**Forwarding the panel's touches to the phone is noted for later, not built
+(17 Oct 2026).** The owner asked whether the Pi's touchscreen could drive the
+phone (a Bluetooth HID pointer, every tap from a physical touch on the panel's
+phone view, never from OCR or advice; Codex's `experiment/phone-touch-control`
+branch, unmerged). The owner's decision: the Settled rule against a rig-driven
+click stands unchanged, and the idea is kept here for the future. What stands
+in its way: a forwarded tap lands where the camera's warp places the screen,
+and on Uber's offer card the body is Accept, so a tap off by the mount's drift
+accepts a job; Android reports a tap's source to the app, and whether Uber or
+DoorDash treat an external pointer as automation is unknown and unpublished;
+and the phone sits beside the panel, so the reach saved is small. Before any
+build: a written answer from the apps' driver support that an external
+Bluetooth pointer on the driver phone is allowed, then — off shift, apps signed
+out — no forwarded tap while an offer card is on screen, an alignment check
+that stops forwarding when the phone moves, a deliberate press-and-hold per
+tap, and off by default with its state on show.
+
 ## What has been swept, and when
 
 | Area | Outcome |
