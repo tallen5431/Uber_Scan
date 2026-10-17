@@ -2,6 +2,7 @@
 # Install the timer that copies this rig's offers to a machine outside the car.
 #
 #   bash tools/install-sync.sh http://nuc.lan:8080
+#   SYNC_TOKEN=secret bash tools/install-sync.sh https://nuc.example.net
 #
 # Everything the unit needs is discovered rather than assumed. The first version
 # of this shipped units with `User=pi` and `/home/pi/Uber_Scan` written into
@@ -16,7 +17,13 @@ usage() {
 usage: bash tools/install-sync.sh <url-of-the-machine-keeping-the-copy> [token]
 
   bash tools/install-sync.sh http://nuc.lan:8080
-  bash tools/install-sync.sh https://nuc.example.net secret-token
+  SYNC_TOKEN=secret-token bash tools/install-sync.sh https://nuc.example.net
+  bash tools/install-sync.sh https://nuc.example.net secret-token   # legacy form
+
+SYNC_TOKEN in the environment is preferred when authentication is enabled: the
+secret then does not appear in this installer's process arguments. A positional
+token is still accepted for compatibility and takes precedence when both are
+set.
 
 Use the address that works from the *road*, not just the driveway. A Tailscale
 or WireGuard name syncs from anywhere the rig has a signal; a 192.168.x.x
@@ -29,9 +36,16 @@ if [ "$#" -lt 1 ] || [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     usage
     exit 1
 fi
+if [ "$#" -gt 2 ]; then
+    echo "too many arguments" >&2
+    usage >&2
+    exit 2
+fi
 
 SYNC_TO="$1"
-SYNC_TOKEN="${2:-}"
+# Positional token for compatibility; environment is the preferred route. The
+# RHS sees an inherited SYNC_TOKEN before this assignment replaces it.
+SYNC_TOKEN="${2:-${SYNC_TOKEN:-}}"
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 # The account that owns the checkout, not whoever ran sudo. Getting this wrong
@@ -65,7 +79,9 @@ echo
 # happily on an address nothing was listening on, and the driver got a timer
 # quietly syncing to nowhere. Ask the question sync.py refuses to fail on, using
 # sync's own far_end so the check that a router login page is not the far end
-# stays in one place.
+# stays in one place. /api/journal/newest is intentionally a readable status
+# endpoint even when SYNC_TOKEN protects writes, so this reachability test does
+# not need or expose the secret.
 echo "checking $SYNC_TO answers..."
 if ! sudo -u "$RUN_AS" "$PYTHON" -c "
 import sys
@@ -115,13 +131,33 @@ EOF
 fi
 echo
 
-# Built here rather than inside the heredoc with ${SYNC_TOKEN:+...}, because
-# bash performs QUOTE REMOVAL inside that expansion: the quotes are gone by
-# the time the line reaches the file, which is the whole thing being fixed.
-# The SYNC_TO line above has no expansion wrapped round it and keeps its own.
+# systemd's Environment= parser and specifier expansion both touch these
+# values. Quote/backslash escaping preserves the actual value; doubling % keeps
+# it from being treated as a systemd specifier. Newlines cannot be represented
+# as one Environment= assignment and are refused rather than creating a second
+# directive.
+systemd_value() {
+    local value="$1"
+    case "$value" in
+        *$'\n'*) return 1 ;;
+    esac
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//%/%%}"
+    printf '%s' "$value"
+}
+
+if ! SYSTEMD_TO="$(systemd_value "$SYNC_TO")"; then
+    echo "the sync URL may not contain a newline" >&2
+    exit 1
+fi
 TOKEN_LINE=""
 if [ -n "$SYNC_TOKEN" ]; then
-    TOKEN_LINE="Environment=\"SYNC_TOKEN=${SYNC_TOKEN//%/%%}\""
+    if ! SYSTEMD_TOKEN="$(systemd_value "$SYNC_TOKEN")"; then
+        echo "SYNC_TOKEN may not contain a newline" >&2
+        exit 1
+    fi
+    TOKEN_LINE="Environment=\"SYNC_TOKEN=$SYSTEMD_TOKEN\""
 fi
 
 UNIT=/etc/systemd/system/uberscan-sync.service
@@ -139,19 +175,10 @@ After=network.target
 Type=oneshot
 User=$RUN_AS
 WorkingDirectory=$REPO
-# Quoted, and the % doubled, because systemd reads Environment= as a
-# space-separated list of assignments and expands %-specifiers inside it even
-# when quoted. rpi/install-service.sh carries the same note over SCANNER_ARGS
-# and this file did not, which is the same fault twice.
-#
-# systemd's own verifier on the unit this used to write:
-#   token 'a b'    -> Invalid environment assignment, ignoring: b
-#   token 'pc%25'  -> Failed to resolve specifiers in SYNC_TOKEN=..., ignoring
-# Both drop the token INTO A LOG NOBODY READS and leave the unit looking
-# installed. The far end then answers 403 to every run, so a passphrase with a
-# space in it — which the installer had just tested successfully by hand —
-# silently ends the backup.
-Environment="SYNC_TO=$SYNC_TO"
+# Quoted and escaped as one assignment. Spaces, quotes and backslashes are data;
+# % is doubled because systemd expands %-specifiers inside unit settings. The
+# same escaping is used by rpi/install-service.sh for the receiving side.
+Environment="SYNC_TO=$SYSTEMD_TO"
 $TOKEN_LINE
 # Sends the offers and, alongside them, the 400-byte calibration, and brings
 # back what was done on the copy — ticks, hides, offers typed there — through
