@@ -4226,6 +4226,23 @@ def main():
                 # restaurant's or a customer's door, and the count is the
                 # question.
                 health.address_not_dropoff += 1
+        # ...and UNDER A PRESS, Uber's opened sheet: its address over "Dropoff
+        # type" (or "Business / Building name") with the customer's name above
+        # it, which the owner decided (14 Oct) is the dropoff, labelled by the
+        # sheet's own words read upwards (OP.sheet_dropoff). Unprompted it goes
+        # out on the sighting alone and the assembler files it at rank `nav`;
+        # a press's answer is the dropoff line, and the assembler leaves a
+        # pressed sighting off a navigation screen to it (navCandidate). So
+        # without this a press over the sheet was answered "nothing on that
+        # screen read as an address" — find_address wants a ZIP and the sheet
+        # prints none — and on 17 Oct, with the customer sheet up, the press
+        # was answered by a "planner" of one dropoff read off the sheet's
+        # "Drop off 1 order" instead (OP._customer_sheet now refuses that).
+        # Only where nothing else answered: `found` is the press's own address
+        # when the screen printed one, and a planner answers for itself.
+        # `sheet` is None wherever digest() took the frame for an offer.
+        if asked and found is None and sheet and planner is None:
+            found = sheet
         # ...and a card-box read nobody pressed for whose address is under a
         # Dropoff label in its own block is label-proven as the whole-screen
         # one above is: a navigation screen's "Dropoff <address>" read while an

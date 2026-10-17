@@ -2380,6 +2380,45 @@ eq('an opened navigation sheet\'s address over "Dropoff type" is the held order\
 eq('...and no dropoff line is sent for it, off the card box or the whole screen',
    rn4['dropoffs'], [])
 
+# ...and the CUSTOMER SHEET, the same sheet pulled all the way up (17 Oct): the
+# place between the name and the street, "Business / Building name" and its
+# value over "Dropoff type", and the order list under it, whose "Drop off 1
+# order" the planner parser took for a stop. On the shift a ⌖ press over it
+# was answered by that "planner" of one dropoff with no address, and the
+# address on the glass was never filed. The rig's whole-screen read and card-
+# box read of it, with every name, place, street and order code invented.
+_CSHEETS = {c['name']: c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'tests', 'fixtures', 'cases.json'), encoding='utf-8'))['sheets']}
+_CSHEET = next(t for n, t in _CSHEETS.items()
+               if n.startswith('Measured: the customer sheet pulled all the way up'))
+_CSHEET_BOX = _CSHEET[_CSHEET.index('Business / Building name'):]
+ok_('the premise: the card box holds the sheet\'s lower half, the label to the order list, '
+    'and asks for a whole-screen read; the whole screen reads as the sheet and no planner',
+    SP.auto_read_for(_CSHEET_BOX) is not None and OP.sheet_dropoff(_CSHEET_BOX) is None
+    and OP.find_planner(_CSHEET) is None and OP.sheet_dropoff(_CSHEET) is not None)
+_hc1, _pc1 = tempfile.mkdtemp(), []
+rc1 = run(_press_on_first_read(_hc1, ''), extra_argv=['--no-parallel'], seconds=5.0,
+          handoff=_hc1, whole_text=_CSHEET, planners=_pc1)
+eq('⌖ over Uber\'s customer sheet is answered with its address, asked, once',
+   [((d[0] or {}).get('line'), d[1].get('asked')) for d in rc1['dropoffs']],
+   [('283 Quillon St NW, Smyrna', True)])
+eq('...and not with a planner read off its "Drop off 1 order"', _pc1, [])
+eq('...its sighting the sheet\'s one dropoff, its place and "Expected by" with it',
+   [[(s['kind'], s['label'], s['line'], s['place'], s['expectedBy']) for s in x['stops']]
+    for x in rc1['sightings'] if x['whole']][:1],
+   [[('dropoff', 'dropoff type', '283 Quillon St NW, Smyrna', 'Fable Parking Deck', 30)]])
+_hc2 = tempfile.mkdtemp()
+_hold(_hc2, time.time() + 3600)
+rc2 = run(lambda n, k: FRAG if n == 1 else _CSHEET_BOX, extra_argv=['--no-parallel'],
+          seconds=4.0, handoff=_hc2, whole_text=_CSHEET)
+ok_('the premise: the customer sheet was read whole, unpressed (%r)' % rc2['wholes'],
+    sum(rc2['wholes']) == 1)
+eq('...and with an order held its address is the held order\'s destination with no press',
+   [(d['line'], d['asked'], d['from'], d['kept'])
+    for d in assembled([x for x in rc2['sightings'] if x['whole']], _held())['dropoffs']],
+   [('283 Quillon St NW, Smyrna', False, 'nav', True)])
+
 # ...and the planner's own one dropoff is sent, label-proven, on the list that
 # would give it to a press: both ends in view, one dropoff, its street and town
 # read, under its own "Dropoff" header. It used to stay the press's to file for
