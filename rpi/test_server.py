@@ -1681,8 +1681,8 @@ if shutil.which('python3'):
         # the panel's in-car line its GPS drop's state (heldEndState).
         eq('held end: the mark reply carries the order in the car as the stream describes it',
            sorted((reply.get('held') or {}).keys()),
-           ['arrived', 'card', 'dropoff', 'endPinned', 'endWhy', 'holdId', 'minutes', 'pay',
-            'visited'])
+           ['arrived', 'card', 'dropoff', 'endBy', 'endPinned', 'endWhy', 'holdId', 'minutes',
+            'pay', 'place', 'visited'])
         # Started after the mark, before the scanner's 2s sleep ends.
         heard = listen(base, 4)
 
@@ -5650,8 +5650,9 @@ try:
         _hits = _r.get('hits') or []
         eq('a chain search answers the branches inside the box, bounded',
            (_s, len(_hits)), (200, 2))
-        eq('...each as where it is and what it is called, and nothing else',
-           sorted(set(k for h in _hits for k in h)), ['lat', 'lon', 'name'])
+        eq('...each as where it is, what it is called, what kind of thing it is and its own '
+           'name (the held end\'s place, map-view.js pickPlace), and nothing else',
+           sorted(set(k for h in _hits for k in h)), ['called', 'kind', 'lat', 'lon', 'name'])
         eq('...and a list shorter than the limit is said to be whole',
            sorted(_r.keys()) + [_r.get('cutAt')], ['cutAt', 'hits', 'ok', None])
         ok_('...with its house number and street, as the real install answered',
@@ -6177,8 +6178,8 @@ try:
     _state = lambda h: {k: (h or {}).get(k) for k in ('endPinned', 'arrived', 'endWhy')}
     eq('[gps drop] the beat carries the GPS drop\'s state for the panel',
        (get(_gb, '/api/status').get('beat') or {}).get('heldEnd'),
-       {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup',
-        'visited': []})
+       {'endPinned': True, 'arrived': False, 'endBy': None,
+        'endWhy': 'door next to the pickup', 'visited': []})
     eq('[gps drop] ...the same as /api/status says', _state(_holding(_gb)),
        {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup'})
     _r = post(_gb, '/api/offers/mark', {
@@ -6728,6 +6729,110 @@ try:
         _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
         eq('[held pickups] a hold restored at boot has its planner pickups asked for',
            (_h.get('holdId', '').startswith('k-boot'), _h.get('pickupsPinned')), (True, 1))
+    finally:
+        stop(_hkp)
+
+    # --- the held end by its PLACE (the owner, 17 Oct) -----------------------
+    #
+    # The fault, invented throughout: an order's door "<n> <Road>" that the
+    # NucBox holds the road of and not the house (the fake's 4821 Kestrel Dr,
+    # answered as the street alone), so the door search said "no house
+    # number" and GPS arrival never armed; the phone printed the stop's place,
+    # which a ⌖ press's dropoff line now carries (scan_pi emit_dropoff
+    # `place`) onto the hold (Assemble.file `dropoffPlace`). The server asks
+    # the place, q= alone, in the held card's disc (searchHeldPlace), and pins
+    # only a named feature, not a road, of that name, inside the disc.
+    _PL_LINE = '4821 Kestrel Dr, Marietta, GA 30060'
+
+    def _plpress(place, line=_PL_LINE, street='4821 Kestrel Dr'):
+        return {'dropoff': {'found': True, 'line': line, 'street': street, 'city': 'Marietta',
+                            'state': 'GA', 'zip': '30060', 'asked': True, 'labelled': None,
+                            'ms': 10, 'app': 'uber', 'screen': 'uber.nav', 'expectedBy': None,
+                            'place': place, 'at': int(time.time() * 1000)}}
+
+    def _plend(base, oid, place, line=_PL_LINE, street='4821 Kestrel Dr', says=None):
+        _atook(base, oid, None)
+        (says or _hksays)([_plpress(place, line, street)])
+        h = _settled(base, lambda h: h.get('endPinned') or h.get('endWhy'))
+        return (h.get('place'), h.get('endPinned'), h.get('endBy'), h.get('endWhy'))
+
+    _hks, _hksays, _hkj = _hksayer('p')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800'}, _hkj)
+    try:
+        _n = len(_hkasked('q='))
+        eq('[place] the door not on the NucBox, its place is: the end is pinned by the place '
+           'and says so', _plend(_hkb, 'p-deck', 'Wrenfield Parking Deck'),
+           ('Wrenfield Parking Deck', True, 'place', None))
+        _q = _hkasked('q=')[_n:]
+        eq('[place] ...asked once, the place alone (no town), bounded to the held card\'s disc',
+           [(u.split('&q=')[1].split('&')[0], 'viewbox=' in u, 'bounded=1' in u) for u in _q],
+           [('Wrenfield%20Parking%20Deck', True, True)])
+        _hksays([_hkbeat(0.5)])
+        _beat = (get(_hkb, '/api/status').get('beat') or {}).get('heldEnd') or {}
+        eq('[place] ...and the panel is told who pinned it, on the beat as on /api/status',
+           (_beat.get('endPinned'), _beat.get('endBy')), (True, 'place'))
+        # The restaurant guard holds a place pin as it holds a door: a pickup
+        # pinned 60 m from the deck.
+        post(_hkb, '/api/held-pickup', {'holdId': (_holding(_hkb) or {}).get('holdId'),
+                                        'lat': 33.9717, 'lon': -84.5288,
+                                        'q': 'Example Grill, 9 Kestrel Dr'})
+        _h = _holding(_hkb) or {}
+        eq('[place] ...and a place within 150 m of a held pickup is not armed, and says why',
+           (_h.get('endPinned'), _h.get('endBy'), _h.get('endWhy')),
+           (True, 'place', 'door next to the pickup'))
+        post(_hkb, '/api/delivered', {})
+
+        eq('[place] the reader\'s read with its last letter lost still names the deck',
+           _plend(_hkb, 'p-ocr', 'Wrenfield Parking Dec'),
+           ('Wrenfield Parking Dec', True, 'place', None))
+        post(_hkb, '/api/delivered', {})
+        eq('[place] a name the NucBox answered that is not the place (a word short) is refused',
+           _plend(_hkb, 'p-loose', 'Wrenfield Deck'),
+           ('Wrenfield Deck', False, None, 'no door, place not found'))
+        post(_hkb, '/api/delivered', {})
+        eq('[place] a ROAD of the place\'s name is refused',
+           _plend(_hkb, 'p-road', 'Quarry Hall'),
+           ('Quarry Hall', False, None, 'no door, place not found'))
+        post(_hkb, '/api/delivered', {})
+        eq('[place] a feature of that name outside the held card\'s disc is refused',
+           _plend(_hkb, 'p-far', 'Lantern Parking Deck'),
+           ('Lantern Parking Deck', False, None, 'not inside the card\'s reach'))
+        post(_hkb, '/api/delivered', {})
+        # The door on the NucBox: the place is never asked.
+        _n = len(_hkasked('q='))
+        eq('[place] a door the NucBox holds is pinned by the door, and the place never asked',
+           (_plend(_hkb, 'p-door', 'Wrenfield Parking Deck', '1985 Cobb Parkway, Kennesaw',
+                   '1985 Cobb Parkway'), len(_hkasked('q=')) - _n),
+           (('Wrenfield Parking Deck', True, 'server', None), 0))
+        post(_hkb, '/api/delivered', {})
+        _n = len(_hkasked('q='))
+        eq('[place] no place, no place search: the door\'s refusal stands',
+           (_plend(_hkb, 'p-none', None), len(_hkasked('q=')) - _n),
+           ((None, False, None, 'no house number'), 0))
+        # ...and a place learnt for that same end text is searched for: the
+        # same line pressed again, this time with its place.
+        _hksays([_plpress('Wrenfield Parking Deck')])
+        _h = _settled(_hkb, lambda h: h.get('endPinned'))
+        eq('[place] a place learnt later for the same dropoff text is asked, and pins',
+           (_h.get('endPinned'), _h.get('endBy')), (True, 'place'))
+        post(_hkb, '/api/delivered', {})
+    finally:
+        stop(_hkp)
+
+    # NUCBOX_SEARCH unset: nothing is asked, place or not, and nothing said.
+    _hks, _hksays, _hkj = _hksayer('pu')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks},
+                       _hkj)
+    try:
+        _n = len(_hkasked(''))
+        _atook(_hkb, 'p-unset', None)
+        _hksays([_plpress('Wrenfield Parking Deck')])
+        time.sleep(0.5)
+        _h = _holding(_hkb) or {}
+        eq('[place] with NUCBOX_SEARCH unset the place rides on the hold and nothing is asked',
+           (_h.get('place'), _h.get('endPinned'), _h.get('endWhy'), len(_hkasked('')) - _n),
+           ('Wrenfield Parking Deck', False, None, 0))
     finally:
         stop(_hkp)
 finally:
@@ -7743,9 +7848,11 @@ def _screened(carry):
         out['card'] = (picked[0], ends(), marks(_SY),
                        [((m.get('offer') or {}).get('id'), (m.get('offer') or {}).get('dropoffFrom'))
                         for m in heard if (m.get('dropoff') or {}).get('line') == _SY])
-        # Three presses no cue decides: a store's navigation, a place popup
-        # the card was never given, and the order's navigation read before its
-        # Took. Neither, left alone, Neither.
+        # Three presses that file nothing: a store's navigation, which since
+        # 17 Oct opens no chooser at all — it is nobody's dropoff, the card's
+        # no more than the order's (Assemble.dropoff, rule 5) — and two no cue
+        # decides, a place popup the card was never given and the order's
+        # navigation read before its Took: left alone, Neither.
         seq = []
         for line, screen, app, at, pick in ((_SZ[0], 'uber.pickupNav', 'uber', None, 'neither'),
                                             (_SZ[1], 'dd.placePopup', 'doordash', None, None),
@@ -7779,7 +7886,7 @@ _SCR_WANT = {
               (_SP_END, ('s-1', _SC_END, 'press')), []),
     'card': (200, (_SP_END, ('s-1', _SY, 'chooser')), [('s-1', True, 'chooser')],
              [('s-1', 'chooser')]),
-    'never': ([(True, _SP_END, []), (True, _SP_END, []), (True, _SP_END, [])],
+    'never': ([(False, _SP_END, []), (True, _SP_END, []), (True, _SP_END, [])],
               [(_SP_END, True, 'planner')]),
 }
 _scr = _screened('1')
@@ -7882,6 +7989,19 @@ def _pickupnav(carry):
                 [m for m in heard if (m.get('dropoff') or {}).get('line') == line])
 
     try:
+        # Nothing held, a card being screened, and ⌖ over Uber's navigation
+        # to a store (an order the rig was never told of): until 17 Oct the
+        # store's town was filed as the CARD's end. A store's screen is
+        # nobody's dropoff, so it is refused here too, and said so.
+        _say(_card('pk-0', 6.0, minutes=20.0, miles=2.0, dropoff='Customer dropoff'))
+        heard = listen(pb, 2.0)
+        time.sleep(0.2)
+        _say(_pkpress(_PK_TOWN, 'uber.pickupNav'))
+        time.sleep(0.4)
+        st = get(pb, '/api/status')
+        out['nothing'] = ((st.get('offer') or {}).get('dropoff'),
+                          (st.get('offer') or {}).get('dropoffScanned'), st.get('chooser'),
+                          marks(_PK_TOWN), told(heard, _PK_TOWN))
         _took2(pb, _card('pk-1', 11.09, minutes=35.0, pickup='Fable Grill', dropoff=None))
         _say(_ssight(False, 'uber.planner', 'uber',
                      [_sstop('pickup', _PK_STORE, 'Fable Grill', 1180),
@@ -7895,18 +8015,17 @@ def _pickupnav(carry):
         # ...the same over another screen, reading the store's own door.
         _say(_pkpress(_PK_STORE + ', GA 30080', 'uber.nav', '1150 Larch Pkwy'))
         out['door'] = (held(), marks(_PK_STORE + ', GA 30080'))
-        # ...and through the chooser: a card being screened, the store's
-        # navigation pressed, which no cue gives to either, and the order's row
-        # picked. The order still refuses it, and the reply says nothing filed.
+        # ...and with a card being screened: the store's navigation pressed
+        # opened the chooser until 17 Oct, and its "This card" row filed the
+        # store's town onto the CARD. Now no chooser opens; the press is
+        # refused at once, for the order and the card alike, and said so.
         _say(_card('pk-s', 7.5, minutes=20.0, miles=3.0))
         heard = listen(pb, 2.0)
         time.sleep(0.2)
         _say(_pkpress(_PK_TOWN, 'uber.pickupNav'))
-        ch = get(pb, '/api/status').get('chooser') or {}
-        rows = [r.get('pick') for r in ch.get('rows') or [] if r.get('n') == 1]
-        picked = post(pb, '/api/choose', {'id': ch.get('id'), 'pick': rows[0] if rows else None})
         time.sleep(0.4)
-        out['chooser'] = (picked[0], (picked[1] or {}).get('filed', '<none>'), held(),
+        st = get(pb, '/api/status')
+        out['chooser'] = (st.get('chooser'), (st.get('offer') or {}).get('dropoff'), held(),
                           marks(_PK_TOWN), told(heard, _PK_TOWN)[0])
         # The premise: an ordinary press over the customer's navigation still
         # replaces the planner's door.
@@ -7918,22 +8037,27 @@ def _pickupnav(carry):
 
 
 _PKW = {
+    'nothing': ('Customer dropoff', None, None, [], ([('a pickup screen', None, None)], [])),
     'planner': (_PK_DOOR, 'planner'),
     'store': ((_PK_DOOR, 'planner'), [],
               ([('a pickup screen', _PK_DOOR, None)], [])),
     'door': ((_PK_DOOR, 'planner'), []),
-    'chooser': (200, None, (_PK_DOOR, 'planner'), [], [('a pickup screen', _PK_DOOR, None)]),
+    'chooser': (None, None, (_PK_DOOR, 'planner'), [], [('a pickup screen', _PK_DOOR, None)]),
     'ordinary': (('61 Saddlebrook Ln, Smyrna, GA 30080', 'press'),
                  [('pk-1', True)]),
 }
 _pkr = _pickupnav('0')
+eq('nothing held: ⌖ over Uber\'s navigation to a store is refused for the card being '
+   'screened, which keeps its end, and the panel is told why, never the town',
+   _pkr.get('nothing'), _PKW['nothing'])
 eq('the premise: the planner filed the held order\'s door', _pkr.get('planner'), _PKW['planner'])
 eq('⌖ over Uber\'s navigation to the store leaves the held order\'s planner end on '
    '/api/status, writes no mark, and tells the panel why and what was kept, never the town',
    _pkr.get('store'), _PKW['store'])
 eq('...a press that reads the held order\'s pickup door is refused the same way',
    _pkr.get('door'), _PKW['door'])
-eq('...and the chooser\'s order row picked for that press files nothing, and its reply says so',
+eq('...and with another card on the slot no chooser opens for that press: it is refused at '
+   'once for the card as for the order, and the panel told why',
    _pkr.get('chooser'), _PKW['chooser'])
 eq('...while an ordinary press still replaces the planner\'s end', _pkr.get('ordinary'),
    _PKW['ordinary'])

@@ -257,6 +257,43 @@ SEQ.forEach(function (seq) {
   eq('...a store\'s navigation files nothing, whatever label its address is under',
      run(hold(), navSight(5000, LINE, { screen: 'uber.pickupNav' })).refused,
      ['a pickup screen']);
+  // The place the sheet printed for the stop rides onto the hold with its
+  // end (the owner, 17 Oct: searched when the NucBox lacks the door).
+  var hp = hold();
+  run(hp, navSight(5000, LINE, null, { place: 'Wrenfield Parking Deck' }));
+  eq('a navigation sheet\'s place goes onto the hold with the end it was printed for',
+     [hp.dropoff, hp.dropoffPlace], [LINE, 'Wrenfield Parking Deck']);
+  var pressed = { found: true, line: '9 Fable Ct, Acworth, GA 30101', street: '9 Fable Ct',
+                  city: 'Acworth', state: 'GA', zip: '30101', asked: true, at: 6000 };
+  A.file(hp, pressed, A.dropoff(hp, pressed, null));
+  eq('...and an end filed after it with no place takes the old place away',
+     [hp.dropoff, hp.dropoffPlace], ['9 Fable Ct, Acworth, GA 30101', undefined]);
+  var withPlace = Object.assign({}, pressed, { place: '  Lantern Parking Deck ', at: 7000 });
+  A.file(hp, withPlace, A.dropoff(hp, withPlace, null));
+  eq('...while a press\'s dropoff line carries its own place, trimmed', hp.dropoffPlace,
+     'Lantern Parking Deck');
+  // ...and a Trip Planner's dropoff stop with a place line over its street
+  // (the hotel layout), filed off the planner.
+  var pstop = function (k, street, place, name) {
+    return { kind: k, orders: 1, name: name, place: place, expectedBy: 1200, street: street,
+             city: 'Acworth', state: 'GA', zip: null, line: street + ', Acworth, GA',
+             partial: null, label: k };
+  };
+  var hpl = hold({ dropoff: null });
+  var pst = A.fresh();
+  A.took(pst, hpl);
+  A.sighting(pst, hpl, { at: 5000, asked: false, whole: true, titled: true, laidOut: true,
+                         app: 'uber', screen: 'uber.planner', page: { top: true, bottom: true },
+                         stops: [pstop('pickup', '5 Mill St', null, 'Fable Grill'),
+                                 pstop('dropoff', '1000 Quarry Rd NW', 'Wrenfield Parking Deck',
+                                       'Lee M.')],
+                         orderCount: null, keep: true }, 5000).candidates
+    .forEach(function (c) { A.file(hpl, c, A.dropoff(hpl, c, null), pst); });
+  eq('...and so does a Trip Planner dropoff stop\'s place',
+     [hpl.dropoff, hpl.dropoffPlace], ['1000 Quarry Rd NW, Acworth, GA', 'Wrenfield Parking Deck']);
+  eq('placeOf: a dropoff\'s place, or null for none, a blank or not a string',
+     [A.placeOf({ place: 'Deck' }), A.placeOf({ place: '  ' }), A.placeOf({ place: 7 }),
+      A.placeOf(null)], ['Deck', null, null, null]);
   eq('...one that is the held card\'s pickup is refused',
      run(hold({ pickup: '12 Wren Hollow Ct, Acworth' }), navSight(5000, LINE)).refused,
      ['a pickup']);
@@ -402,13 +439,31 @@ SEQ.forEach(function (seq) {
   said = A.dropoff(h2, street, null);
   eq('...whatever line it read off that screen, a door with a house number included',
      [said.to, said.why, ends(h2)], [null, 'a pickup screen', [DOOR, 'planner']]);
-  // Nothing held: a press is about the card being screened, as it always was.
-  var card = { id: 'c', dropoff: null };
+  // Nothing held: a press is about the card being screened — but not off
+  // Uber's navigation to a store, which is nobody's end (the owner, 17 Oct:
+  // that screen is drawn only for an order accepted, never for an offer).
+  var card = { id: 'c', dropoff: 'Customer dropoff' };
   said = A.dropoff(null, town, card);
   A.fileCard(card, town, said);
-  eq('with nothing held a press over the store\'s navigation still files on the screened card',
-     [said.to, said.why, card.dropoff, card.dropoffFrom],
-     ['card', 'press', 'Smyrna, GA 30066', 'press']);
+  eq('with nothing held a press over the store\'s navigation is refused for the screened '
+     + 'card too, and the card keeps its end',
+     [said.to, said.kept, said.why, card.dropoff, card.dropoffFrom],
+     [null, false, 'a pickup screen', 'Customer dropoff', undefined]);
+  said = A.dropoff(null, town, null);
+  eq('...and with no card either it is refused, by name', [said.to, said.why],
+     [null, 'a pickup screen']);
+  var card2 = { id: 'c2', dropoff: null };
+  var custNav = press('61 Saddlebrook Ln, Smyrna, GA 30080', 'uber.nav');
+  said = A.dropoff(null, custNav, card2);
+  A.fileCard(card2, custNav, said);
+  eq('...while a press over any other screen still files on the screened card',
+     [said.to, said.why, card2.dropoff, card2.dropoffFrom],
+     ['card', 'press', '61 Saddlebrook Ln, Smyrna, GA 30080', 'press']);
+  eq('storeScreen: the store\'s navigation is a store\'s screen with nothing held, the held '
+     + 'pickup\'s words are the hold\'s alone',
+     [A.storeScreen(null, town), A.storeScreen(null, press('1150 Larch Pkwy, Smyrna, GA 30080',
+                                                            'uber.nav'))],
+     ['a pickup screen', null]);
   // The held order's pickup, by each word on record, off a screen that is not
   // the store's navigation.
   var STORE = '1150 Larch Pkwy, Smyrna';

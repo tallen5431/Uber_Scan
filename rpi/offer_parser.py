@@ -3081,7 +3081,9 @@ def find_planner(text):
                 'name': name, 'expectedBy': due}
         stop.update(_planner_address(street_line, town_line))
         # The hotel or business the address is at, when the block names one:
-        # shown, never searched, and never the street. See PLANNER_HOUSE.
+        # never the street, and searched only for a held order's end whose door
+        # the NucBox lacks (server.js searchHeldPlace; the owner, 17 Oct). See
+        # PLANNER_HOUSE.
         stop['place'] = place
         stops.append(stop)
     last = stops[-1]
@@ -3375,12 +3377,15 @@ def planner_ends(text):
 #   - the name: up to SHEET_NAME_REACH lines over the street, so the place
 #     line and an icon row read on a line of its own can stand between.
 #
-# THE PLACE ('place'), shown and never searched, as the planner's is: the
-# value under the label when the pair read, else the line between the name
-# and the street with the icons read after it taken off (every trailing word
-# of one or two characters: "Fable Parking Dec k 2 &" is "Fable Parking
-# Dec", the rig's own read of it — a place that ends in such a word loses
-# it, which costs a word of a label and nothing searched). None otherwise.
+# THE PLACE ('place'), as the planner's is — shown, and searched only for a
+# held order's end whose door the NucBox lacks (server.js searchHeldPlace; the
+# owner, 17 Oct): the value under the label when the pair read, else the line
+# between the name and the street with the icons read after it taken off
+# (every trailing word of one or two characters: "Fable Parking Dec k 2 &" is
+# "Fable Parking Dec", the rig's own read of it — a place that ends in such a
+# word loses it, which costs a word of a label; the search's name match,
+# map-view.js placeNamed, allows the one letter that read lost). None
+# otherwise.
 SHEET_TYPE = re.compile(r'\bdrop ?-?off ?type\b', re.IGNORECASE | ASCII)
 # "Business / Building name": two words of four or more letters either side
 # of the slash, then "name", the line's own and nothing after it but marks.

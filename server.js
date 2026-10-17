@@ -1563,9 +1563,10 @@ function shadowsNow(now) {
   return shadows;
 }
 
-/* {stop, order, cue, would} for one address arriving: `order` undefined to
- * leave dropoffArrived's own choice (the first-taken) alone, an order to file
- * onto that one, or null for none — and so the card being screened, where
+/* {stop, order, cue, would, store} for one address arriving — `store` when it
+ * is a press off Uber's navigation to a store, which nobody is given — and
+ * `order` undefined to leave dropoffArrived's own choice (the first-taken)
+ * alone, an order to file onto that one, or null for none — and so the card being screened, where
  * Assemble.dropoff gives it one; `stop` when nothing is to be filed at all.
  * `force` is a decision already made — the chooser's row, or the pool's cue —
  * and is taken as it is. */
@@ -1578,6 +1579,17 @@ function whoseDropoff(read, force, now) {
     return out;
   }
   if (!d || typeof d.line !== 'string') return out;
+  // A PRESS over Uber's navigation to a store (uber.pickupNav) is nobody's
+  // dropoff (Assemble.dropoff, rule 5; the owner, 17 Oct): not the order's in
+  // the car, not the card's being screened. So no cue is looked for and no
+  // chooser opened over it — it opened when a card was on the slot, and
+  // "This card" filed the store's address onto the card — and it goes on to
+  // Assemble.dropoff, which refuses it for whoever it would have gone to, and
+  // the panel is told at once (dropoffArrived). `store` says so there.
+  if (d.asked !== false && Assemble.storeScreen(null, d)) {
+    out.store = true;
+    return out;
+  }
   var orders = heldOrders(now);
   if (!carryingTwo(now)) {
     if (!orders.length) return out;
@@ -2274,10 +2286,15 @@ function dropoffArrived(read, force) {
     // (`found: false`, `asked`), so a panel from before this says "not read",
     // which is true of the order, and never green. No mark row: nothing was
     // filed.
-    if (wasAsked && carrying && !kept) {
-      console.log('dropoff press not filed: ' + said.why + ', the order keeps its end');
+    //
+    // ...and a press off Uber's navigation to a store with NO order in the
+    // car (whoseDropoff `store`): refused for the card being screened as for
+    // a hold, and said the same way, with no order's end to name as kept.
+    if (wasAsked && !kept && (carrying || who.store)) {
+      console.log('dropoff press not filed: ' + said.why
+                  + (carrying ? ', the order keeps its end' : ', nothing filed'));
       read.dropoff = { line: null, found: false, asked: true, refused: said.why,
-                       kept: carrying.dropoff || null, at: read.dropoff.at };
+                       kept: carrying ? (carrying.dropoff || null) : null, at: read.dropoff.at };
     }
     // ...and an address filed onto the order in the car goes to the
     // panel AS that order's end, not only as the button's words.
@@ -2562,6 +2579,11 @@ function notOneCustomer(h) {
  * the chosen answer carries it (hasDoor). Map view's own functions, so the
  * page and the server cannot keep two rules for "door level".
  *
+ * ...and where the NucBox has the street and not the door ('nodoor') and the
+ * phone printed a place for the stop (`dropoffPlace`), the place by its name
+ * in the same disc: searchHeldPlace, the owner's decision of 17 Oct 2026, by
+ * map-view.js pickPlace's rules, pinned `by: 'place'`.
+ *
  * The public geocoder is never asked: it is the page's fallback, rationed and
  * outside the VPN, and a pin the GPS ends a delivery on is the NucBox's or
  * none. With NUCBOX_SEARCH unset nothing here sends anything.
@@ -2580,7 +2602,25 @@ var endSearch = {};
 
 function endKeyOf(h) {
   return h && typeof h.dropoff === 'string' && h.dropoff
-    ? holdIdOf(h) + '\n' + h.dropoff : null;
+    ? holdIdOf(h) + '\n' + endTextOf(h) : null;
+}
+
+/* The place the phone printed for the held end's stop (`dropoffPlace`,
+ * Assemble.file: off a ⌖ press's dropoff line, a navigation sheet, or a Trip
+ * Planner stop), or null. */
+function placeOf(h) {
+  return h && typeof h.dropoffPlace === 'string' && h.dropoffPlace ? h.dropoffPlace : null;
+}
+
+/* What a search of the held end is ABOUT: its dropoff text, and its place
+ * after a newline when it has one. The key a search is asked once by, and
+ * what a refusal is kept for (`endWhyFor`), so a place learnt for the same
+ * dropoff text is searched for — and a refusal said of the text alone is not
+ * said of the text and its place. With no place it is the dropoff text,
+ * exactly, so a holding.json written before places were kept reads the same. */
+function endTextOf(h) {
+  var place = placeOf(h);
+  return h.dropoff + (place ? '\n' + place : '');
 }
 
 /* The hook: called for each order after the list is written (setHeld), after
@@ -2597,7 +2637,7 @@ function armHeldEnd(h) {
   // Nothing to search, already pinned, or already refused before a restart
   // for a reason another asking would not change (a NucBox down is asked).
   if (!key || heldEndPin(h)
-      || (h.endWhyFor === h.dropoff && h.endWhy !== 'NucBox down')) return;
+      || (h.endWhyFor === endTextOf(h) && h.endWhy !== 'NucBox down')) return;
   searchHeldEnd(key, 1);
 }
 
@@ -2613,13 +2653,58 @@ function endHold(key) {
 
 function refuseHeldEnd(h, why) {
   h.endWhy = why;
-  h.endWhyFor = h.dropoff;
+  h.endWhyFor = endTextOf(h);
   saveHold(h);
 }
 
-// pickInDisc's refusals, in the panel's words.
+// pickInDisc's refusals, in the panel's words — and pickPlace's one of its
+// own, the place asked after the door and nothing of that name answered.
 var END_WHY = { nodoor: 'no house number', none: 'not inside the card\'s reach',
-                several: 'several answers', capped: 'too many answers' };
+                several: 'several answers', capped: 'too many answers',
+                noplace: 'no door, place not found' };
+
+/* One search question for the held end, answered from nbxCache or asked;
+ * `answered(out)` with nbxHits' answer. A NucBox that does not answer is
+ * 'NucBox down' on the hold and is asked once more, the whole search from the
+ * top, after END_RETRY_MS. The door's question and the place's both come
+ * through here. */
+function endAsk(key, attempt, target, answered) {
+  if (nbxCache.has(target)) return answered(nbxCache.get(target));
+  nbxAsk(target, function (err, body) {
+    if (!err && !Array.isArray(body)) err = 'not a list';
+    if (err) {
+      var now = endHold(key);
+      if (!now || heldEndPin(now)) return;
+      refuseHeldEnd(now, 'NucBox down');
+      var on = endSearch[holdIdOf(now)];
+      if (attempt === 1 && on) {
+        on.timer = setTimeout(function () {
+          on.timer = null;
+          searchHeldEnd(key, 2);
+        }, END_RETRY_MS);
+      }
+      return;
+    }
+    var out = nbxHits(body);
+    nbxRemember(target, out);
+    answered(out);
+  });
+}
+
+/* The pin, kept on the hold as /api/held-end keeps one, plus who chose it:
+ * 'server' for the door, 'place' for the place (searchHeldPlace). Door level
+ * either way — the level the GPS drop arms at (heldEndPin) — and the
+ * restaurant guard (pickupNearEnd) and the customer guard (notOneCustomer)
+ * hold it to the same rules whoever chose it. */
+function pinHeldEnd(h, at, by) {
+  h.endPin = { dropoff: h.dropoff, lat: at.lat, lon: at.lon,
+               doorLevel: true, pinnedAt: Date.now(), by: by };
+  delete h.arrivedAt;
+  delete h.endWhy;
+  delete h.endWhyFor;
+  resetArrival(holdIdOf(h));
+  saveHold(h);
+}
 
 function searchHeldEnd(key, attempt) {
   var h = endHold(key);
@@ -2640,37 +2725,43 @@ function searchHeldEnd(key, attempt) {
     // anything — undone, no check failed — and was a second place answering
     // the same question.
     var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
+    // The street and not the door, and the phone printed a place for the
+    // stop: the place is asked next, in the same disc (the owner, 17 Oct).
+    if (!res.at && res.why === 'nodoor' && placeOf(now)) {
+      return searchHeldPlace(key, attempt, disc);
+    }
     if (!res.at) {
       return refuseHeldEnd(now, END_WHY[res.why] || 'no house number');
     }
-    // As /api/held-end keeps one, plus who chose it.
-    now.endPin = { dropoff: now.dropoff, lat: res.at.lat, lon: res.at.lon,
-                   doorLevel: true, pinnedAt: Date.now(), by: 'server' };
-    delete now.arrivedAt;
-    delete now.endWhy;
-    delete now.endWhyFor;
-    resetArrival(holdIdOf(now));
-    saveHold(now);
+    pinHeldEnd(now, res.at, 'server');
   }
-  if (nbxCache.has(target)) return answered(nbxCache.get(target));
-  nbxAsk(target, function (err, body) {
-    if (!err && !Array.isArray(body)) err = 'not a list';
-    if (err) {
-      var now = endHold(key);
-      if (!now || heldEndPin(now)) return;
-      refuseHeldEnd(now, 'NucBox down');
-      var on = endSearch[holdIdOf(now)];
-      if (attempt === 1 && on) {
-        on.timer = setTimeout(function () {
-          on.timer = null;
-          searchHeldEnd(key, 2);
-        }, END_RETRY_MS);
-      }
-      return;
-    }
-    var out = nbxHits(body);
-    nbxRemember(target, out);
-    answered(out);
+  endAsk(key, attempt, target, answered);
+}
+
+/* ...and the held end by its PLACE, the owner's decision of 17 Oct 2026, asked
+ * only after the door search above found the street and not the door: the
+ * NucBox's Nominatim, q= the place as read (MV.placeQuery) — the town never
+ * sent, as it never is (map-view.js says why) — in the same discBox, and the
+ * end only where MV.pickPlace says: a named feature, not a road, whose own
+ * name is the place (MV.placeNamed), inside the held card's disc, alone or
+ * agreeing. Pinned `by: 'place'`, which /api/status and the panel say. The
+ * public geocoder is never asked, and with NUCBOX_SEARCH unset nothing here
+ * runs at all (armHeldEnd). The fault it is for: an order's door "1000 <Road>
+ * NW, <Town>" on a campus, the road on the NucBox and house 1000 not, the stop
+ * named "<Something> Parking Deck" on the phone, and the delivered order held
+ * because GPS arrival never armed. */
+function searchHeldPlace(key, attempt, disc) {
+  var h = endHold(key);
+  if (!h) return;
+  var said = nbxTerm(MV.placeQuery(placeOf(h)) || '');
+  if (!said) return refuseHeldEnd(h, END_WHY.noplace);
+  var target = nbxSearchTarget('q', said, MV.discBox(disc));
+  endAsk(key, attempt, target, function (out) {
+    var now = endHold(key);
+    if (!now || heldEndPin(now)) return;
+    var res = MV.pickPlace(out.hits, disc, placeOf(now), out.cutAt);
+    if (!res.at) return refuseHeldEnd(now, END_WHY[res.why] || END_WHY.noplace);
+    pinHeldEnd(now, res.at, 'place');
   });
 }
 
@@ -3239,9 +3330,14 @@ function timedLikeTheHeldJob(read) {
 function heldEndState(h) {
   var pin = heldEndPin(h);
   return { endPinned: !!pin, arrived: !!h.arrivedAt,
+           // ...who pinned it: 'server' (the door, searchHeldEnd), 'place'
+           // (its place, searchHeldPlace), or null for Map view's post. Here
+           // and not on /api/status alone, so the panel's in-car line can say
+           // an end pinned by its place is ("● armed by place").
+           endBy: pin ? (pin.by || null) : null,
            endWhy: pin
              ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : notOneCustomer(h))
-             : h.endWhyFor === h.dropoff ? (h.endWhy || null) : null,
+             : h.endWhyFor === endTextOf(h) ? (h.endWhy || null) : null,
            // ...and its pickups the car has called at (visitPickups,
            // plannerVisits), by planner line (MV.pickupKey): the panel's next
            // stop, Map view's run and the figure's stops leave them out. On
@@ -3255,6 +3351,9 @@ function heldEndState(h) {
 function heldForPanel(held) {
   return held
     ? Object.assign({ pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null,
+        // ...and the place the phone printed for that stop, which Map view
+        // asks for when the door is not on the NucBox (map-view.js pickPlace).
+        place: placeOf(held),
         // What /api/held-end is told the pin is for. See holdIdOf.
         holdId: holdIdOf(held),
         // Its card's fix and size, so Map view can check this order's end
@@ -5293,10 +5392,14 @@ function statusNow() {
     holding: (function () {
       var h = holding(Date.now());
       return h ? Object.assign({ pay: h.pay, minutes: h.minutes, holdId: holdIdOf(h),
-                   // ...who pinned it ('server', or null for Map view). The
-                   // GPS drop's state beside it — pinned, arrived, and why
-                   // not armed — is heldEndState's, merged in below.
-                   endBy: heldEndPin(h) ? (h.endPin.by || null) : null,
+                   // ...who pinned it ('server', 'place', or null for Map
+                   // view) is heldEndState's `endBy`, merged in below with
+                   // the rest of the GPS drop's state — pinned, arrived, and
+                   // why not armed.
+                   // ...and the place the phone printed for its stop, which
+                   // the end is searched by when its door is not on the
+                   // NucBox (searchHeldPlace).
+                   place: placeOf(h),
                    // ...and how many of its pickups the guard holds, from Map
                    // view or this server's search (keepPickupPin).
                    pickupsPinned: Array.isArray(h.pickupPins) ? h.pickupPins.length : 0,
@@ -6864,7 +6967,11 @@ function nbxSearchTarget(term, said, vb) {
 }
 
 /* A Nominatim list as the page reads it: where, and what it is called (the
- * name is where a house number shows, map-view.js hasDoor) — and the limit,
+ * name is where a house number shows, map-view.js hasDoor) — and, for the
+ * held end's place (map-view.js pickPlace, the owner's rule of 17 Oct), what
+ * KIND of thing it is (jsonv2 `category`: a road is 'highway', a parking deck
+ * 'amenity') and the feature's OWN name (`called`, jsonv2 `name`, '' for an
+ * address with none) — and the limit,
  * as `cutAt`, when the list stopped at it (null when it did not). A full list
  * is not "every one in the box": Nominatim ranks by importance, not by
  * distance, so an eleventh inside the card's disc may be the one that was not
@@ -6873,7 +6980,9 @@ function nbxHits(body) {
   return { ok: true, cutAt: body.length >= NBX_LIMIT ? NBX_LIMIT : null,
            hits: body.map(function (h) {
              return { lat: Number(h.lat), lon: Number(h.lon),
-                      name: String(h.display_name || '') };
+                      name: String(h.display_name || ''),
+                      kind: typeof h.category === 'string' ? h.category : null,
+                      called: typeof h.name === 'string' ? h.name : '' };
            }).filter(function (h) { return isFinite(h.lat) && isFinite(h.lon); }) };
 }
 

@@ -1774,7 +1774,9 @@
       var where = plannerAddress(streetLine, townLine);
       Object.keys(where).forEach(function (key) { stop[key] = where[key]; });
       // The hotel or business the address is at, when the block names one:
-      // shown, never searched, and never the street. See PLANNER_HOUSE.
+      // never the street, and searched only for a held order's end whose door
+      // the NucBox lacks (server.js searchHeldPlace; the owner, 17 Oct). See
+      // PLANNER_HOUSE.
       stop.place = place;
       return stop;
     });
@@ -1854,7 +1856,9 @@
      between the town and "Dropoff type" (SHEET_BUSINESS, the reach counted
      from it, and the label alone where "Dropoff type" did not read), a street
      wrapped at its comma with the icons after it, the place between the name
-     and the street (SHEET_NAME_REACH), and `place`, shown and never searched.
+     and the street (SHEET_NAME_REACH), and `place`, shown, and searched
+     only for a held order's end whose door the NucBox lacks (server.js
+     searchHeldPlace; the owner, 17 Oct).
      Every rule, and the 12 Oct measurement behind SHEET_REACH, is at
      sheet_dropoff in offer_parser.py; tests/fixtures/cases.json `sheets`
      holds the two ports to one answer. */

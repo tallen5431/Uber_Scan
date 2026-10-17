@@ -2886,6 +2886,14 @@ def emit_dropoff(address, ms=None, asked=True, labelled=False, text=None):
         'city': address.get('city'),
         'state': address.get('state'),
         'zip': address.get('zip'),
+        # ...and the place the phone printed for the stop, where the read
+        # gave one (OP.sheet_dropoff's `place`, "<Something> Parking Deck");
+        # None from find_address, which reads none. Carried to the hold
+        # (assemble.js file) because the owner decided on 17 Oct that the
+        # held end is searched by it when the NucBox has the street and not
+        # the door (server.js searchHeldPlace); before that it was shown and
+        # never searched, and rode only on the sighting.
+        'place': address.get('place') or None,
         # Whether the driver ASKED for this one, or the rig simply saw it.
         #
         # The two are different claims and the receiving end treats them

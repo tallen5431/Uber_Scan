@@ -788,6 +788,10 @@ CAPTION_LINES = [
      "no pin for " + WIDEST_DISC + " — street too long to be sure"),
     ('no pin, a door the map does not hold',
      "no pin for " + WIDEST_DISC + " — street found, not that door"),
+    # ...and the held end's place asked after it, with nothing of that name
+    # (map-view.js pickPlace, the owner's rule of 17 Oct).
+    ('no pin, neither the door nor the place on the map',
+     "no pin for " + WIDEST_DISC + " — street found, not the door or place"),
     ('no pin, a list cut at the limit',
      "no pin for " + WIDEST_DISC + " — too many to be sure · the NucBox lists 10 "
      "at most",
@@ -942,7 +946,7 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 102)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 103)
 eq('...and forty-five of its entries declare a tail the clamp may eat',
    len(_DECLARED), 45)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
@@ -1091,6 +1095,8 @@ CAPTION_CHIPS = {
         "NO PIN · " + WIDEST_DISC + ", street too long to be sure",
     "no pin, a door the map does not hold":
         "NO PIN · " + WIDEST_DISC + ", street found, not that door",
+    "no pin, neither the door nor the place on the map":
+        "NO PIN · " + WIDEST_DISC + ", no door or place",
     "no pin, a list cut at the limit":
         "NO PIN · " + WIDEST_DISC + ", too many to be sure",
     "no pin, the rig refused the question":
@@ -1373,7 +1379,9 @@ PLANNER_BLIND = ['dark', 'stalled']
 # planner's first pickup, given the longest name a real card has printed for a
 # restaurant (Dave's Hot Chicken with its street in brackets, the 8 Oct snap
 # in rpi/test_dashboard.py) — by when, and one line with a three-figure pay
-# and the longest of the GPS drop's words ('too many answers', END_WHY_SHORT);
+# and the longest of the GPS drop's words ('too many answers', END_WHY_SHORT;
+# '● armed by place', an end pinned by its place, is narrower: 179 px to 184
+# at 20 px in the headless browser's sans-serif, measured 17 Oct);
 # under them the four stops above. With an offer up: the same order in one
 # line under the card, beside a pair whose range has a minus sign and three
 # figures, every clause the pair line can carry, the geography's widest chip
@@ -5410,7 +5418,7 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say a hundred and two things, so all
+                # occupant and it can say a hundred and three things, so all
                 # of them are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #
