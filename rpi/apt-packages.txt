@@ -1,0 +1,8 @@
+# Required Raspberry Pi OS packages for the scanner runtime.
+# One package per line; comments and blank lines are ignored by install-deps.sh.
+python3-picamera2
+python3-opencv
+python3-numpy
+python3-pip
+tesseract-ocr
+espeak-ng

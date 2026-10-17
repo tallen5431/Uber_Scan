@@ -8532,6 +8532,14 @@ python3 rpi/test_lint.py        # 353 on the faults that only surface when a
 python3 rpi/test_handoff.py     #   76 on the three files the browser and the
                                 #     camera pass requests through, and on both
                                 #     sides finding them in the same place
+python3 rpi/test_dependencies.py  #  41 on the Pi's dependency installer, run
+                                  #     with sudo, apt, pip and node stubbed:
+                                  #     the packages it would ask for, never
+                                  #     installed by the check
+python3 rpi/test_startup_contract.py  # 17 on the installed server roles: the
+                                      #     Pi's scanner on, the copy machine's
+                                      #     off, and a sync token escaped for
+                                      #     the shell and systemd, never echoed
 python3 rpi/test_service.py     #  58 on the systemd units BOTH installers
                                 #     write, asking systemd itself whether an
                                 #     environment assignment survived
@@ -8599,6 +8607,9 @@ python3 rpi/test_loop.py        # 399 on the scan loop re-telling a card once
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
 python3 tools/test_gpslog_tidy.py   #  45 on tidying the GPS logs unattended
+python3 tools/test_install_sync.py  #  27 on the sync installer's quoting, with
+                                    #     systemd stubbed and only its /etc
+                                    #     outputs redirected
 python3 tools/test_shift_report.py  # 129 on what each order really took and
                                     #     what the shift adds up to: a gap in
                                     #     the GPS log never a stop and never

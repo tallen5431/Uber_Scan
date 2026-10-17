@@ -8,6 +8,8 @@
 # ...and on the machine at home that keeps the copy, which has no camera:
 #
 #   sudo COPY=/var/lib/uberscan/journal.jsonl bash rpi/install-service.sh
+#   sudo COPY=/var/lib/uberscan/journal.jsonl SYNC_TOKEN=secret-token \
+#        bash rpi/install-service.sh              # require the same token from sync
 #
 # The receiving end holds the only copy of the one artefact this project calls
 # irreplaceable, and until now it was documented as a command typed into a
@@ -47,6 +49,11 @@ ARGS="${ARGS:-}"
 # left at its default: the journal would land in rpi/journal.jsonl inside the
 # clone, which works and stands the only backup next to a `git clean`.
 COPY="${COPY:-}"
+# Optional authentication for journal/config sync into the copy machine. The
+# sender already accepts the same value as the second argument to
+# tools/install-sync.sh; keeping the server side here means a reboot cannot
+# silently turn authentication off.
+SYNC_TOKEN="${SYNC_TOKEN:-}"
 
 # node, found the way the driver's own shell finds it — nvm installs live in
 # the home directory and root's PATH does not see them.
@@ -77,6 +84,9 @@ if [ -n "$COPY" ]; then
   mkdir -p "$COPY_DIR"
   chown "$RUN_USER" "$COPY_DIR"
   echo "the copy will be kept in $COPY (owned by $RUN_USER)"
+  if [ -n "$SYNC_TOKEN" ]; then
+    echo "journal sync will require SYNC_TOKEN"
+  fi
   echo
 fi
 
@@ -103,27 +113,49 @@ fi
 # steady, then execs scan_pi.py in its own place — so there is still one
 # process for systemd to stop. Already calibrated it goes straight to scanning,
 # and this costs nothing.
-# The two machines run the SAME server and differ in three lines, so the unit
-# is one template with those three substituted rather than two units that can
-# drift. What differs, and why each one:
+# The two machines run the SAME server and differ in these settings, so the unit
+# is one template with them substituted rather than two units that can drift.
+# What differs, and why each one:
 #
+#   SCANNER=1     the rig is explicitly the camera machine. Do not make its
+#                 boot depend on server.js continuing to infer that fact from
+#                 the mere presence of rpi/autopilot.py in a checkout.
 #   SCANNER=0     the copy machine has no picamera2, and without this the
 #                 server starts the scanner, fails, and restart-loops every few
-#                 seconds for ever — the exact failure the README warns about
-#                 and the reason this script could not simply be reused there.
+#                 seconds for ever — the exact failure the README warns about.
 #   JOURNAL       where the copy is kept. Left at the default it lands inside
 #                 the clone, beside a `git clean`.
+#   SYNC_TOKEN    optional shared secret required by the sync endpoints. The
+#                 sender gets the same token from tools/install-sync.sh.
 #   audio video   speech needs the driver's audio devices. The copy machine
 #                 says nothing and has no camera, so the grants are dropped
 #                 rather than granted to something that cannot use them.
+TOKEN_ENV=""
+if [ -n "$SYNC_TOKEN" ]; then
+  # systemd expands %-specifiers inside Environment= and uses backslash/quote
+  # escapes inside a quoted assignment. Preserve the token exactly rather than
+  # installing a unit that looks authenticated but silently received a changed
+  # secret. Newlines cannot be represented on one Environment= line and are
+  # rejected explicitly.
+  case "$SYNC_TOKEN" in
+    *$'\n'*) echo "SYNC_TOKEN may not contain a newline" >&2; exit 1 ;;
+  esac
+  SYSTEMD_TOKEN="${SYNC_TOKEN//\\/\\\\}"
+  SYSTEMD_TOKEN="${SYSTEMD_TOKEN//\"/\\\"}"
+  SYSTEMD_TOKEN="${SYSTEMD_TOKEN//%/%%}"
+  TOKEN_ENV="Environment=\"SYNC_TOKEN=$SYSTEMD_TOKEN\""
+fi
+
 if [ -n "$COPY" ]; then
   DESCRIPTION="Uber Scan — the copy of the journal, and the pages that read it"
   UNIT_ENV="Environment=SCANNER=0
-Environment=JOURNAL=$COPY"
+Environment=JOURNAL=$COPY
+$TOKEN_ENV"
   UNIT_GROUPS=""
 else
   DESCRIPTION="Uber Scan — the panel, and the scanner that reads offers off the phone"
-  UNIT_ENV="Environment=SCANNER_SPEAK=$SPEAK
+  UNIT_ENV="Environment=SCANNER=1
+Environment=SCANNER_SPEAK=$SPEAK
 Environment=\"SCANNER_ARGS=$ARGS\""
   UNIT_GROUPS="SupplementaryGroups=audio video"
 fi
@@ -153,7 +185,10 @@ WorkingDirectory=$PROJECT
 # takes a value loses its value — which is how "--screen-fps 6" becomes a
 # scanner that exits on a missing argument and a unit that restarts for ever.
 #
-# On the copy machine: SCANNER=0 and where to keep the journal. See above.
+# SCANNER=1 is intentional even though server.js currently auto-detects the
+# checkout: the installed rig should state that it owns camera hardware instead
+# of relying on an implementation detail of the server. On the copy machine,
+# SCANNER=0 and JOURNAL name the opposite role. See above.
 $UNIT_ENV
 ExecStart=$NODE $PROJECT/server.js
 # The camera and calibration are not always ready the instant the Pi is, so let
@@ -186,7 +221,7 @@ deliberate — the pages are worth more than the write — so a running server i
 not by itself evidence that anything is landing. The line that says which is
 the last one printed at startup.
 
-  then on the rig:  bash tools/install-sync.sh http://$(hostname):8080
+  then on the rig:  bash tools/install-sync.sh http://$(hostname):8080${SYNC_TOKEN:+ '<same-token>'}
 DONE
 else
 cat <<DONE
