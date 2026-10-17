@@ -1,0 +1,5 @@
+# Optional screenshot tools used by the Snap feature.
+# grim covers Wayland; scrot covers X11. The server detects the active session
+# and uses the tool that matches it.
+grim
+scrot
