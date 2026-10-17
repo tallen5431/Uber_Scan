@@ -1643,6 +1643,29 @@ eq('a DoorDash stops card merged across frames is whole, its stores and stop cou
     _dd['stops']),
    (True, 7.8, 30.0, 'Corner Bagel Co', None, 3))
 
+# --- the store's door, across frames ------------------------------------------
+# DoorDash's stops card prints the store's address under its name (the owner's
+# 17 Oct shift; invented store and street). One frame reads it whole, the next
+# with the ZIP cut by the edge, the last loses the line to the map: the merged
+# reading keeps the fullest door read under the pickup's name, as `places`
+# keeps a name one frame saw. Map view searches it for the pickup's pin.
+def _door_card(line):
+    return P.parse('$7.70 incl. tips\n2 stops (2.4 mi) - 18 min\n& Lark Owl Grill\n'
+                   + line + '& Customer dropoff')
+
+
+_dw = OfferAccumulator()
+_d1 = _dw.add(_door_card('2530 Kestrel Plains Road, Marietta, 30066 GA\n'), now=700.0)
+_d2 = _dw.add(_door_card('2530 Kestrel Plains Road, Marietta, 30.\n'), now=700.5)
+_d3 = _dw.add(_door_card(''), now=701.0)
+eq('the premise: the last frame read no door, alone', _door_card('')['pickupLine'], None)
+eq('a store\'s door read under its name is kept across frames, the fullest reading '
+   'standing over the edge-cut one and over a frame that lost it',
+   [(_d['pickup'], _d['pickupLine'], _d['dropoff']) for _d in (_d1, _d2, _d3)],
+   [('Lark Owl Grill', '2530 Kestrel Plains Road, Marietta, GA 30066', None)] * 3)
+eq('...and the episode is one card throughout', [_d1['episode'], _d3['episode']],
+   [_d1['episode']] * 2)
+
 # --- the wall clock stepping --------------------------------------------------
 # add() times only gaps — QUIET, and the window that closes after `window`
 # seconds of nothing — so its own clock is the monotonic one. It was the wall

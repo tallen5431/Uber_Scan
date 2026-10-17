@@ -3239,6 +3239,13 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None):
                  if rate.get('ready') and rate.get('cost') is not None else None),
         'dropoff': parsed.get('dropoff'),
         'pickup': parsed.get('pickup'),
+        # ...and the store's door DoorDash's stops card printed under that
+        # name (OP's `pickupLine`), which is what Map view searches for the
+        # pickup's pin when there is one (live.html mapWants): the panel's
+        # card is this object, server.js keeps it as `scanner.offer`, and a
+        # field the reading carries and this line does not never reaches the
+        # map. `pickup` stays the name, for showing.
+        'pickupLine': parsed.get('pickupLine'),
         # Whether the card REFUSED a destination or the reader merely found
         # none. Both arrive as `dropoff: null` and only the first is a state
         # the driver can do something about — Uber prints "Customer dropoff"
@@ -4895,8 +4902,12 @@ def main():
             # of one row agreeing on minutes, miles and dropoff and not on the
             # verdict: 1 row of 1,166, so this costs about one line a week.
             if args.json and offer_log.id is not None:
+                # ...and the store's door (`pickupLine`): a frame that reads
+                # the line under the store's name after the row landed is a
+                # pin the map can now place, and untold it never gets there.
                 reading = (offer_log.id, parsed.get('minutes'), parsed.get('miles'),
-                           parsed.get('dropoff'), rate.get('state'))
+                           parsed.get('dropoff'), rate.get('state'),
+                           parsed.get('pickupLine'))
                 if offer_log.id != told_offer or (landed and reading != told_as):
                     told_offer = offer_log.id
                     told_as = reading

@@ -1979,6 +1979,16 @@ eq('...and the minutes it was judged over', told['offer']['minutes'], 28.0)
 # can replace one. An id arriving after a card has gone must not resurrect a
 # verdict for it.
 ok_('...carrying no verdict', 'ready' not in told)
+# ...and the store's door DoorDash's stops card printed under the store's name,
+# beside the name: server.js keeps this object as the card, and Map view
+# searches the door for the pickup's pin. Invented store and street.
+_door = said(lambda: SP.emit_offer('x', SP.OP.parse(
+    '$7.70 incl. tips\n2 stops (2.4 mi) - 18 min\n& Lark Owl Grill\n'
+    '2530 Kestrel Plains Road, Marietta, 30066 GA\n& Customer dropoff'),
+    {'ready': True, 'perHour': 20.0, 'cardMinutes': 18.0}))['offer']
+eq('the offer carries the store\'s door off the card beside its name, and no dropoff',
+   (_door.get('pickup'), _door.get('pickupLine'), _door.get('dropoff')),
+   ('Lark Owl Grill', '2530 Kestrel Plains Road, Marietta, GA 30066', None))
 ok_('...and no state to be mistaken for one',
     not [k for k in told if k in ('state', 'doubt', 'grossPerHour')])
 

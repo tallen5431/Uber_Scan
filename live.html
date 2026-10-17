@@ -6288,7 +6288,16 @@
     var tapped = o.pickupAddr && o.pickupAddr.from === 'popup'
       && typeof o.pickupAddr.value === 'string' && o.pickupAddr.value
       ? o.pickupAddr.value : null;
-    var pickQ = tapped || o.pickup || null;
+    /* ...and, with no tap, the store's door DoorDash's stops card printed
+       under the store's name (the parser's `pickupLine`, "<n> <street>,
+       <town>"): searched in place of the name for the same reason. A chain's
+       name in the card's disc is every branch — the owner's 17 Oct shift,
+       "too many to be sure", no pickup pin and no figure — where the door is
+       one place (MV.searchPlan: the house number is the door rule, the town
+       is cut at the comma). `o.pickup` stays the name; a string only, so an
+       older reading's field of another shape is never searched. */
+    var cardDoor = typeof o.pickupLine === 'string' && o.pickupLine ? o.pickupLine : null;
+    var pickQ = tapped || cardDoor || o.pickup || null;
     var names = [pickQ, o.dropoff, held, held2]
       .concat(listed.map(function (p) { return p.q; })).filter(Boolean)
       .filter(function (v, i, all) { return all.indexOf(v) === i; });
