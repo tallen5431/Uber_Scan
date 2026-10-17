@@ -3169,6 +3169,38 @@ def planner_titled(text):
     return any(PLANNER_TITLE.match(l) for l in _planner_lines(text)[0])
 
 
+# THE LAYOUT IN PLACE OF THE TITLE. On the 16 Oct shift the single trip's
+# planner was read whole with its title as "ny. mS", so planner_titled said
+# no, and the page that carried the order's one dropoff was never filed. The
+# owner's decision (16 Oct): a whole-screen page is the Trip Planner, title or
+# not, when its layout proves it — a Pickup AND a Dropoff stop header, every
+# header with its own "Expected by" before the next, "View details", and the
+# app's "Stop New Requests" bar under the list. It stands in for the title
+# only where the title is asked of an UNPRESSED read (the automatic read, and
+# the assembler's lone dropoff); it never bounds a list — planner_ends still
+# wants the title for the top. Measured before it went in: of the shared
+# corpus's 532 texts, 2 are laid out so, both already titled planners; of the
+# 12 Oct journal's 12,229, none — its 28 planner reads are card-box crops, one
+# with the bar, none with the title or with both kinds of stop. So no page
+# there newly counts as a planner, and the only untitled one known is this
+# shift's. That is little evidence either way about false proofs; the four
+# parts asked together are what a screen other than the planner would need
+# to print to pass.
+def planner_laid_out(text):
+    """True when `text` has the Trip Planner's layout, as above."""
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
+    if not any(PLANNER_BAR.match(l) for l in lines if l):
+        return False
+    lines, heads = _planner_lines(text)
+    kinds = set()
+    for k, at in enumerate(heads):
+        block = lines[at + 1:heads[k + 1] if k + 1 < len(heads) else len(lines)]
+        if not any(PLANNER_EXPECTED.search(l) for l in block):
+            return False
+        kinds.add('pickup' if PLANNER_STOP.match(lines[at]).group(1)[0] in 'pP' else 'dropoff')
+    return kinds == {'pickup', 'dropoff'} and any(PLANNER_DETAILS.match(l) for l in lines)
+
+
 def planner_bounded(text):
     """True when both ends of the Trip Planner's list are on the screen: the
     title with the first stop straight under it, and "Waybill" after the last.

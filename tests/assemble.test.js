@@ -31,6 +31,7 @@ function pageOf(text, at, asked, app) {
   var kind = OP.screenType(text);
   return {
     at: at, asked: !!asked, whole: true, titled: OP.plannerTitled(text),
+    laidOut: OP.plannerLaidOut(text),
     app: app || kind.app, screen: kind.screen, page: OP.plannerEnds(text),
     stops: stops.map(function (s) {
       return { kind: s.kind, orders: s.orders, name: s.name, place: s.place,
@@ -911,11 +912,13 @@ SEQ.forEach(function (seq) {
  *
  * Measured on this page through sighting(): with its title read whole it files
  * onto a held card of one order on one leg, unpressed, as `singleCardOnly`.
- * As read on shift, the title came back "ny. mS", and that page files nothing
- * pressed or unpressed: the lone dropoff is taken only off an unpressed page
- * under the "Trip Planner" title (the owner's decision, AUDITS.md, "on an
- * unpressed whole-screen read only"; the title is what says the whole screen
- * is the planner). Before the parser fix, neither page filed anything. */
+ * As read on shift, the title came back "ny. mS"; by the owner's decision
+ * (16 Oct) its LAYOUT stands in for the title on an unpressed read — a Pickup
+ * and a Dropoff header each with its "Expected by", "View details" and the
+ * "Stop New Requests" bar (plannerLaidOut) — and it files too. A press on it
+ * still files nothing (a press's lone dropoff is not taken, as before), nor
+ * does the page without the bar, nor onto a card of two legs. Before the
+ * parser fix, no page here filed anything. */
 (function () {
   var name = 'Measured: the single trip\'s planner with both slips, its title misread '
     + 'and the bar under it';
@@ -954,16 +957,28 @@ SEQ.forEach(function (seq) {
      ['list', [[true, 'planner']], '283 Quillon St NW, Smyrna', true,
       { value: '283 Quillon St NW, Smyrna', from: 'planner' }]);
 
-  // The page as read on shift, title misread: nothing, pressed or not.
-  eq('...and as read on shift, its title misread "ny. mS", it files nothing pressed or '
-     + 'unpressed, and says \'list\'',
-     [true, false].map(function (asked) {
-       var s2 = A.fresh(), h2 = single();
-       A.took(s2, h2);
-       var r2 = A.sighting(s2, h2, pageOf(text, 2000, asked), 2000);
-       return [r2.candidates.length, A.verdictFor(s2, 2000)];
-     }),
-     [[0, 'list'], [0, 'list']]);
+  // The page as read on shift, title misread, unpressed: its layout proves it.
+  function play1(page, card) {
+    var s2 = A.fresh(), h2 = single();
+    if (card) h2.card = card;
+    A.took(s2, h2);
+    var r2 = A.sighting(s2, h2, page, 2000);
+    r2.candidates.forEach(function (d) {
+      var said = A.dropoff(h2, d, null);
+      if (!said.drop) A.file(h2, d, said, s2);
+    });
+    return [r2.candidates.length, h2.dropoff, A.verdictFor(s2, 2000)];
+  }
+  ok_('the premise: the page as read is laid out as a planner, and without its bar it is not',
+      OP.plannerLaidOut(text) && !OP.plannerLaidOut(text.replace('Stop New Requests', 'S Q')));
+  eq('a planner whose title was misread files its lone dropoff when its layout proves it',
+     play1(pageOf(text, 2000, false)), [1, '283 Quillon St NW, Smyrna', null]);
+  eq('...but a press on it files nothing, as a press on any unbounded list',
+     play1(pageOf(text, 2000, true)), [0, null, 'list']);
+  eq('...nor the same page without the "Stop New Requests" bar',
+     play1(pageOf(text.replace('Stop New Requests', 'S Q'), 2000, false)), [0, null, 'list']);
+  eq('...nor onto a held card of two legs',
+     play1(pageOf(text, 2000, false), { legs: 2, multiOrder: false })[1], null);
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'

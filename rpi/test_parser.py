@@ -145,6 +145,19 @@ eq('planner_ends: a headless page shows the end of the list and not its start',
 eq('...and an address block with no Waybill under it shows neither',
    P.planner_ends(_PLANNER_TEXT['an address block with no header and no Waybill is not '
                                 'read']), (False, False))
+# The planner's layout standing in for a title misread (the owner, 16 Oct): the
+# shift's page as read, title "ny. mS". Each part of the layout taken away in
+# turn is no longer proof. tests/assemble.test.js asks plannerLaidOut the same.
+_SHIFT = _PLANNER_TEXT["Measured: the single trip's planner with both slips, its title "
+                       "misread and the bar under it"]
+eq('planner_laid_out: the shift\'s planner, title misread, is laid out as one; without '
+   'its bar, its pickup header, a stop\'s "Expected by" or "View details" it is not',
+   [P.planner_laid_out(_SHIFT),
+    P.planner_laid_out(_SHIFT.replace('Stop New Requests', 'S Q')),
+    P.planner_laid_out(_SHIFT.replace('Pickup - 1 order', 'Fable')),
+    P.planner_laid_out(_SHIFT.replace('Expected by 7:45 PM', 'Pat')),
+    P.planner_laid_out(_SHIFT.replace('View details', 'Viewed'))],
+   [True, False, False, False, False])
 
 # What screen a reading is, for a sighting: the app and the screen as one pair,
 # because the app follows from the screen and a case that got one right and

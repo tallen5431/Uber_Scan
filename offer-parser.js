@@ -1764,6 +1764,23 @@
     return plannerLines(text).lines.some(function (l) { return PLANNER_TITLE.test(l); });
   }
 
+  /* The Trip Planner's layout in place of a title misread ("ny. mS" on the
+     16 Oct shift): a Pickup and a Dropoff header, every header with its own
+     "Expected by", "View details", and the "Stop New Requests" bar. The
+     owner's decision; see planner_laid_out in offer_parser.py. */
+  function plannerLaidOut(text) {
+    var raw = String(text || '').split(/[\r\n]+/).map(normalize);
+    if (!raw.some(function (l) { return l && PLANNER_BAR.test(l); })) return false;
+    var pl = plannerLines(text), lines = pl.lines, heads = pl.heads, kinds = {};
+    for (var k = 0; k < heads.length; k++) {
+      var block = lines.slice(heads[k] + 1, k + 1 < heads.length ? heads[k + 1] : lines.length);
+      if (!block.some(function (l) { return PLANNER_EXPECTED.test(l); })) return false;
+      kinds[/^p/i.test(PLANNER_STOP.exec(lines[heads[k]])[1]) ? 'pickup' : 'dropoff'] = true;
+    }
+    return !!(kinds.pickup && kinds.dropoff)
+      && lines.some(function (l) { return PLANNER_DETAILS.test(l); });
+  }
+
   function plannerBounded(text) {
     var ends = plannerEnds(text);
     return ends.top && ends.bottom;
@@ -3679,7 +3696,7 @@
            findAddress: findAddress, findPlanner: findPlanner, sheetDropoff: sheetDropoff,
            placePopup: placePopup,
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
-           plannerTitled: plannerTitled,
+           plannerTitled: plannerTitled, plannerLaidOut: plannerLaidOut,
            screenType: screenType, SCREENS: SCREENS,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,

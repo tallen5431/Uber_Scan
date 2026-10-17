@@ -3050,7 +3050,7 @@ def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet
     """Stage 2 of the multi-order design: what a whole-screen read or a planner
     read SAW, typed by its screen, and nothing more.
 
-        {sighting: {at, asked, whole, titled, app, screen, page: {top, bottom},
+        {sighting: {at, asked, whole, titled, laidOut, app, screen, page: {top, bottom},
                     stops: [{kind, orders, name, place, expectedBy, street,
                              city, state, zip, line, partial, label}],
                     orderCount, keep}}
@@ -3061,7 +3061,8 @@ def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet
     the decision planner_destination and planner_lone_dropoff made here
     before. This side only types what it saw: `titled` is whether the "Trip
     Planner" title is on the screen, which an unpressed planner read needs to
-    be filed. The server still writes no journal row from it and broadcasts it
+    be filed, and `laidOut` whether its layout proves it a planner with the
+    title misread (OP.planner_laid_out), which stands in for it. The server still writes no journal row from it and broadcasts it
     to no one; an address filed off it goes to the panel as a dropoff line
     does.
 
@@ -3082,6 +3083,7 @@ def sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None
     return {'at': int(time.time() * 1000) if at is None else at,
             'asked': bool(asked), 'whole': bool(whole),
             'titled': OP.planner_titled(text),
+            'laidOut': OP.planner_laid_out(text),
             'app': kind['app'], 'screen': kind['screen'], 'page': page,
             'stops': listed,
             'orderCount': order_count(stops) if stops is not None else None,
@@ -4126,11 +4128,18 @@ def main():
         # sighting says `titled` too, and the assembler asks it of an
         # unpressed page before it files off one.
         #
+        # ...OR WHOSE LAYOUT PROVES IT, title or not (the owner, 16 Oct, after
+        # the single trip's planner was read with its title as "ny. mS" and
+        # its one dropoff never filed): a Pickup and a Dropoff header each with
+        # its "Expected by", "View details" and the "Stop New Requests" bar —
+        # OP.planner_laid_out. The sighting says it as `laidOut`.
+        #
         # Not an accept detector and not a press: it runs only when the driver
         # has already marked the order taken (order_held), and the rig still
         # touches nothing on the phone.
         auto = (planner is not None and whole and not asked
-                and OP.planner_titled(out.get('text')))
+                and (OP.planner_titled(out.get('text'))
+                     or OP.planner_laid_out(out.get('text'))))
         if planner is not None:
             found = None
         # A whole-screen read nobody pressed for sends NO dropoff line at all:

@@ -982,7 +982,7 @@
     });
   }
 
-  /* One sighting (rpi/scan_pi.py, sighting()): {at, asked, whole, titled, app,
+  /* One sighting (rpi/scan_pi.py, sighting()): {at, asked, whole, titled, laidOut, app,
    * screen, page: {top, bottom}, stops, orderCount, keep}. Returns
    * {candidates: [dropoff-shaped], why, at} — `why` the reason the planner
    * this page belongs to gives the order no end, for the planner line that
@@ -1030,6 +1030,8 @@
     var page = { at: out.at === null ? now : out.at, app: app,
                  epoch: st.epoch[app] || 0, asked: s.asked === true,
                  titled: s.titled === true,
+                 // The layout standing in for a title misread: see below.
+                 laidOut: s.laidOut === true,
                  top: !!(s.page && s.page.top), bottom: !!(s.page && s.page.bottom),
                  stops: s.stops.filter(function (x) { return x && typeof x === 'object'; }),
                  pending: false, why: null };
@@ -1044,7 +1046,14 @@
     var many = run.pages.length > 1;
     var view = many ? run.view : pageView(page);
     var verdict = plannerDestination(view.stops, view.top && view.bottom);
-    var titled = run.pages.some(function (p) { return p.titled; });
+    // A PLANNER BY ITS LAYOUT, title or not: the owner's decision (16 Oct),
+    // after the single trip's planner was read with its title as "ny. mS" and
+    // its one dropoff never filed. `laidOut` is offer_parser.planner_laid_out:
+    // a Pickup and a Dropoff header each with its "Expected by", "View
+    // details" and the "Stop New Requests" bar. It stands in for the title
+    // where an UNPRESSED page is asked for one — never for a press, and never
+    // to bound a list (the page's `top` still needs the title).
+    var titled = run.pages.some(function (p) { return p.titled || p.laidOut; });
     var cand = null;
     if (!many) {
       if (page.asked) {
@@ -1059,7 +1068,7 @@
           var shops = one.filter(function (x) { return x.kind === 'pickup'; });
           cand.store = shops.length === 1 && one.length === 2 ? (shops[0].name || null) : null;
         }
-      } else if (page.titled) {
+      } else if (page.titled || page.laidOut) {
         if (verdict.address) cand = candidate(verdict.address, verdict.stop, page, false, false);
         else if (verdict.why === 'list') {
           var lone = plannerLoneDropoff(view.stops);

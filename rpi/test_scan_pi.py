@@ -4051,6 +4051,16 @@ _sheet_seen = SP.sighting(_SHEET_BAR, None, None, False, True,
 eq('the opened sheet\'s sighting types its address a dropoff, under the label it printed',
    [(s['kind'], s['label'], s['line']) for s in _sheet_seen['stops']],
    [('dropoff', 'dropoff type', '4416 Wrenfield Dr NW, Kennesaw')])
+# The 16 Oct shift's planner, its title read "ny. mS" (the shared case; names
+# invented): the sighting says its layout proves it a planner, which the
+# assembler takes in place of the title on an unpressed read.
+_SHIFT_PLANNER = {c['name']: c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', 'tests', 'fixtures', 'cases.json')))['planner']}[
+    "Measured: the single trip's planner with both slips, its title misread and the bar under it"]
+_shift_seen = SP.sighting(_SHIFT_PLANNER, OP2.find_planner(_SHIFT_PLANNER), None, False, True)
+eq('the sighting of a planner whose title was misread says its layout proves it one',
+   (_shift_seen['titled'], _shift_seen['laidOut'], _shift_seen['screen']),
+   (False, True, 'uber.planner'))
 
 # --- what in the card box asks for an unpressed whole-screen read ------------
 #
