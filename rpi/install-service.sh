@@ -8,6 +8,8 @@
 # ...and on the machine at home that keeps the copy, which has no camera:
 #
 #   sudo COPY=/var/lib/uberscan/journal.jsonl bash rpi/install-service.sh
+#   sudo COPY=/var/lib/uberscan/journal.jsonl SYNC_TOKEN=secret-token \
+#        bash rpi/install-service.sh              # require the same token from sync
 #
 # The receiving end holds the only copy of the one artefact this project calls
 # irreplaceable, and until now it was documented as a command typed into a
@@ -47,6 +49,11 @@ ARGS="${ARGS:-}"
 # left at its default: the journal would land in rpi/journal.jsonl inside the
 # clone, which works and stands the only backup next to a `git clean`.
 COPY="${COPY:-}"
+# Optional authentication for journal/config sync into the copy machine. The
+# sender already accepts the same value as the second argument to
+# tools/install-sync.sh; keeping the server side here means a reboot cannot
+# silently turn authentication off.
+SYNC_TOKEN="${SYNC_TOKEN:-}"
 
 # node, found the way the driver's own shell finds it — nvm installs live in
 # the home directory and root's PATH does not see them.
@@ -77,6 +84,9 @@ if [ -n "$COPY" ]; then
   mkdir -p "$COPY_DIR"
   chown "$RUN_USER" "$COPY_DIR"
   echo "the copy will be kept in $COPY (owned by $RUN_USER)"
+  if [ -n "$SYNC_TOKEN" ]; then
+    echo "journal sync will require SYNC_TOKEN"
+  fi
   echo
 fi
 
@@ -115,13 +125,32 @@ fi
 #                 seconds for ever — the exact failure the README warns about.
 #   JOURNAL       where the copy is kept. Left at the default it lands inside
 #                 the clone, beside a `git clean`.
+#   SYNC_TOKEN    optional shared secret required by the sync endpoints. The
+#                 sender gets the same token from tools/install-sync.sh.
 #   audio video   speech needs the driver's audio devices. The copy machine
 #                 says nothing and has no camera, so the grants are dropped
 #                 rather than granted to something that cannot use them.
+TOKEN_ENV=""
+if [ -n "$SYNC_TOKEN" ]; then
+  # systemd expands %-specifiers inside Environment= and uses backslash/quote
+  # escapes inside a quoted assignment. Preserve the token exactly rather than
+  # installing a unit that looks authenticated but silently received a changed
+  # secret. Newlines cannot be represented on one Environment= line and are
+  # rejected explicitly.
+  case "$SYNC_TOKEN" in
+    *$'\n'*) echo "SYNC_TOKEN may not contain a newline" >&2; exit 1 ;;
+  esac
+  SYSTEMD_TOKEN="${SYNC_TOKEN//\\/\\\\}"
+  SYSTEMD_TOKEN="${SYSTEMD_TOKEN//\"/\\\"}"
+  SYSTEMD_TOKEN="${SYSTEMD_TOKEN//%/%%}"
+  TOKEN_ENV="Environment=\"SYNC_TOKEN=$SYSTEMD_TOKEN\""
+fi
+
 if [ -n "$COPY" ]; then
   DESCRIPTION="Uber Scan — the copy of the journal, and the pages that read it"
   UNIT_ENV="Environment=SCANNER=0
-Environment=JOURNAL=$COPY"
+Environment=JOURNAL=$COPY
+$TOKEN_ENV"
   UNIT_GROUPS=""
 else
   DESCRIPTION="Uber Scan — the panel, and the scanner that reads offers off the phone"
@@ -192,7 +221,7 @@ deliberate — the pages are worth more than the write — so a running server i
 not by itself evidence that anything is landing. The line that says which is
 the last one printed at startup.
 
-  then on the rig:  bash tools/install-sync.sh http://$(hostname):8080
+  then on the rig:  bash tools/install-sync.sh http://$(hostname):8080${SYNC_TOKEN:+ "$SYNC_TOKEN"}
 DONE
 else
 cat <<DONE
