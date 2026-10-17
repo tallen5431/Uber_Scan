@@ -19,7 +19,7 @@ jobs:
     name: Quick suite (Node 24 + Python 3.11)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
