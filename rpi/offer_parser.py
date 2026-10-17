@@ -2735,6 +2735,26 @@ PLANNER_EDGE = re.compile(r'^[^A-Za-z0-9]+|[^A-Za-z0-9.]+$', ASCII)
 # where the screen's edge leaves a mark. See _planner_address.
 PLANNER_LONE_LETTER = re.compile(r'\b(?:' + STREET_SUFFIX + r')\.? ([A-Za-z])$',
                                  re.IGNORECASE | ASCII)
+# "Pl" read as "P" or "PI" at the end of the street: the 16 Oct planner's
+# dropoff, "<number> <Name> Pl" on the phone, came out "<Name> P" on one
+# frame and "<Name> PI" on the next, and the NucBox
+# found no door for either, so GPS arrival never armed. No street type is
+# "P" or "PI"; the word before it must not be one, or "Oak St P" would gain
+# a second. Case kept: "Pi" or "p" is not read as this.
+PLANNER_PL_SLIP = re.compile(r' (?:P|PI|P1|P\|)$', ASCII)
+
+
+def _planner_pl_slip(street):
+    """`street` with a final "P"/"PI" read for "Pl", when the word before it
+    is a name and not itself a street type. See PLANNER_PL_SLIP."""
+    m = PLANNER_PL_SLIP.search(street)
+    if not m:
+        return street
+    before = street[:m.start()].split(' ')
+    if len(before) < 2 or not re.fullmatch(r'[A-Za-z]{2,}', before[-1]) \
+            or re.fullmatch(STREET_SUFFIX, before[-1], re.IGNORECASE):
+        return street
+    return street[:m.start()] + ' Pl'
 
 
 def _planner_address(street_line, town_line):
@@ -2783,6 +2803,8 @@ def _planner_address(street_line, town_line):
         street = street[:lone.start(1)].rstrip()
     s = STREET.match(street)
     street = re.sub(r'\s+', ' ', s.group(1)).strip(' .,') if s else None
+    if street:
+        street = _planner_pl_slip(street)
     # What to show and to store. The state goes in only beside a ZIP, which
     # is find_address's line exactly; without one, "…, Marietta, GA" would end
     # on a word Advice.area cannot take for a town, and the geography would go

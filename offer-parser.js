@@ -1465,6 +1465,19 @@
   // One letter after the street's suffix: where a quadrant goes, and where the
   // screen's edge leaves a mark. See plannerAddress.
   var PLANNER_LONE_LETTER = new RegExp('\\b(?:' + STREET_SUFFIX + ')\\.? ([A-Za-z])$', 'i');
+  // "Pl" read as "P" or "PI" at the end of the street. See PLANNER_PL_SLIP
+  // in offer_parser.py.
+  var PLANNER_PL_SLIP = / (?:P|PI|P1|P\|)$/;
+  var STREET_TYPE_WORD = new RegExp('^(?:' + STREET_SUFFIX + ')$', 'i');
+
+  function plannerPlSlip(street) {
+    var m = PLANNER_PL_SLIP.exec(street);
+    if (!m) return street;
+    var before = street.slice(0, m.index).split(' ');
+    var last = before[before.length - 1];
+    if (before.length < 2 || !/^[A-Za-z]{2,}$/.test(last) || STREET_TYPE_WORD.test(last)) return street;
+    return street.slice(0, m.index) + ' Pl';
+  }
 
   /* The street and the town under a stop's "Address" label, field by field.
      A lone letter after the street's suffix is dropped only when the town line
@@ -1496,6 +1509,7 @@
     var s = STREET.exec(street);
     street = (s && s.index === 0)
       ? s[1].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '') : null;
+    if (street) street = plannerPlSlip(street);
     var parts = [];
     if (street) parts.push(street);
     if (city) parts.push(city);

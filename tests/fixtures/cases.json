@@ -5394,6 +5394,102 @@
      "place": null
     }
    ]
+  },
+  {
+   "name": "Pl read as P",
+   "_why": "Measured shape: the 16 Oct planner's dropoff ended \"Pl\" on the phone and read \"P\" on one frame and \"PI\" on the next; the NucBox found no door for either and GPS arrival never armed. A final P or PI after a name is Pl. Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddress\n283 Quillon P\nSmyrna, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": "283 Quillon Pl",
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "283 Quillon Pl, Smyrna",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "Pl read as PI",
+   "_why": "The other slip of the same frame pair: \"PI\" for \"Pl\". Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddress\n283 Quillon PI\nSmyrna, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": "283 Quillon Pl",
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "283 Quillon Pl, Smyrna",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a P after a street type is not Pl",
+   "_why": "A P after a street's own type is that street's quadrant or the scroll bar's mark (see _planner_address), never a second type: kept as read, with a clean town line. Invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Grill\nExpected by 7:23 PM\nAddress\n830 Wrenfield Pkwy NW\nKennesaw, GA 30144\nView details\nDropoff \u2022 1 order\nLee R.\nExpected by 7:45 PM\nAddress\n283 Quillon St P\nSmyrna, GA\nView details\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1163,
+     "street": "830 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "830 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1185,
+     "street": "283 Quillon St P",
+     "city": "Smyrna",
+     "state": "GA",
+     "zip": null,
+     "line": "283 Quillon St P, Smyrna",
+     "place": null
+    }
+   ]
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",
