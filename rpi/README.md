@@ -8488,7 +8488,7 @@ python3 rpi/test_exposure.py    # 192 on flicker, brightness, gain and
                                 #     being reported as a phone
 python3 rpi/test_track.py       # 137 on following the phone as it drifts, and
                                 #     on the centre recovery that never fired
-python3 rpi/test_gps.py         # 192 on the position stamped beside a card:
+python3 rpi/test_gps.py         # 194 on the position stamped beside a card:
                                 #     that a fix too old to mean anything is
                                 #     refused rather than rounded, and that a
                                 #     row written before the rig had a GPS
@@ -8526,7 +8526,7 @@ python3 rpi/test_autopilot.py   #  47 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      # 111 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 353 on the faults that only surface when a
+python3 rpi/test_lint.py        # 356 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #   76 on the three files the browser and the
@@ -8544,7 +8544,7 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 1317 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 1320 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
@@ -8559,7 +8559,7 @@ python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 903 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 906 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8578,7 +8578,7 @@ node tests/assemble.test.js     # 304 on where the order in the car ends: one
                                 #     hold decided as before, and a Trip Planner
                                 #     filed from pages stitched only on the cues
                                 #     the screen gives
-node tests/mapview.test.js      # 542 on the deciding behind both maps, with
+node tests/mapview.test.js      # 557 on the deciding behind both maps, with
                                 #     no map: the geometry, the cache, and the
                                 #     one-request-a-second rule against a fake
                                 #     clock, which is what makes the awkward

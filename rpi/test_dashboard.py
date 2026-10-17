@@ -3683,6 +3683,30 @@ const framed = (page) => page.waitForFunction(
     // told) before render flips the page to between, so only setBetween's own
     // call is made at the new width.
     out.betweenSizedW = await page.evaluate(() => (window.__sizedW || []).slice());
+    // A read starting over that screen — the motion gate re-reading the
+    // navigation map, as it does every few seconds — keeps the map whole: the
+    // owner's 17 Oct "flaps between full and half for offers that were not
+    // there". The label proves the read is in progress (READING THE SCREEN).
+    await page.evaluate(() => window.__es.push({ reading: true }));
+    await page.waitForTimeout(200);
+    out.betweenReadNav = await wide();
+    // ...but after a reading with part of an offer on it (a payout, no
+    // time), the next read is the card's: the column comes back for it.
+    await page.evaluate(() => window.__es.push(
+      { ready: false, state: 'empty', track: null, pay: 9.5,
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                   card: window.__HELD } }));
+    await page.waitForTimeout(150);
+    await page.evaluate(() => window.__es.push({ reading: true }));
+    await page.waitForTimeout(200);
+    out.betweenReadPart = await wide();
+    // Back to the empty screen, read to its end, for what follows.
+    await page.evaluate(() => window.__es.push(
+      { ready: false, state: 'empty', track: null,
+        holding: { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd',
+                   card: window.__HELD } }));
+    await page.waitForTimeout(200);
+    out.betweenReadDone = await wide();
     // ...and not between while the card has something to say: the Trip
     // Planner's stops on it give the verdict's column back. Then cleared.
     await page.evaluate(() => window.__es.push({ planner: { stops: [
@@ -9569,6 +9593,18 @@ try:
     ok_('...after the map has taken the whole width, not only before (%r, map %r)'
         % (_sw, _bn.get('mapW')), _sw and _sw[-1] >= (_bn.get('mapW') or 0) - 2
         and _sw[-1] > (_bo.get('mapW') or 0) + 2)
+    _brn, _brp, _brd = (got.get('betweenReadNav') or {}, got.get('betweenReadPart') or {},
+                        got.get('betweenReadDone') or {})
+    ok_('between offers, a read in progress over a screen whose last reading was no '
+        'offer (the navigation map re-read) keeps the map whole: no flap (%r)' % _brn,
+        not _brn.get('live') and _brn.get('label') == 'READING THE SCREEN'
+        and _brn.get('mapW', 0) >= _brn.get('barW', 1) - 2)
+    ok_('...but a read after a reading with part of an offer on it gives the card its '
+        'column back, READING THE CARD (%r)' % _brp,
+        _brp.get('live') and _brp.get('label') == 'READING THE CARD'
+        and _brp.get('mapW', 0) < _brp.get('appW', 0) * 0.6)
+    ok_('...and the empty screen read to its end is whole again (%r)' % _brd,
+        not _brd.get('live') and _brd.get('label') == 'WAITING FOR AN OFFER')
     _bs = got.get('betweenStops') or {}
     ok_('...but not while the card has something to say: the Trip Planner\'s stops '
         'on it give the verdict its column back (%r)' % _bs,

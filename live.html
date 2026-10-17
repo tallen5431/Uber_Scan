@@ -4395,8 +4395,32 @@
          which is the card saying something. */
       // No phase is the ordinary shift (a `scanning` phase is cleared when
       // the scanner first speaks), and its label is the same.
-      setBetween(!blind && (!p.phase || p.phase === 'scanning') && !busy && quiet <= STALE_MS
-                 && el.warn.hidden && el.stops.hidden);
+      //
+      // A READ IN PROGRESS DOES NOT LEAVE BETWEEN-OFFERS BY ITSELF (`again`).
+      // The owner, 17 Oct afternoon: in Map view the map "flapped between
+      // full and half for offers that were not there". `busy` is true for
+      // READING_MS after any read starts, and the motion gate re-reads the
+      // Uber navigation screen, DoorDash's "Finding offers" and the zone
+      // prompts every few seconds — so on each read the map dropped to half
+      // width under READING THE SCREEN and came back when the read found no
+      // offer. A read over a screen whose last reading came to nothing
+      // offer-like (`again`, the same notion the label above uses) is the rig
+      // looking again, and the map stays whole. What gives the column back is
+      // what always did: a reading with something of an offer on it (render's
+      // offer branch, setBetween(false) in the same render, so a real card's
+      // verdict is on the glass the moment its reading lands), and blind,
+      // aiming, a fault, a stale scanner, a notice or the Trip Planner's
+      // stops.
+      //
+      // THE FIRST READ, with no reading yet (`r` null), still gives the
+      // column back: nothing says the screen under it is not a card, and its
+      // label is READING THE CARD — a cue the driver should see. It is one
+      // read a shift (or after a reconnect with no replay), so it cannot
+      // flap; and after a reading with part of an offer on it the next read
+      // is very likely that card's, which is the cue the half-width card is
+      // for.
+      setBetween(!blind && (!p.phase || p.phase === 'scanning') && (!busy || !!again)
+                 && quiet <= STALE_MS && el.warn.hidden && el.stops.hidden);
       return;
     }
     // An offer: the verdict back on the glass, in this same render.

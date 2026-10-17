@@ -470,16 +470,23 @@ def usable(fix, age=None, stale_after=STALE_AFTER):
     mode = fix.get('mode')
     if not (_number(mode) and mode >= 2):
         return False, 'nomode'
-    if err > FIX_ERR_MAX:
-        return False, 'rough'
     # A good error estimate says nothing here: the owner's frozen fix carried
     # eph 27.8 m, well inside FIX_ERR_MAX, three kilometres from the car.
+    #
+    # And frozen is asked BEFORE rough, so that `rough` promises the lat/lon
+    # was not stuck: map-view.js's discFix centres a search disc on a fix
+    # refused only as rough (the owner's 17 Oct held card, 73 m downtown, its
+    # end never searched), widened by its error — sound for a position off by
+    # its error, and not for one stuck kilometres away. A fix both stuck and
+    # rough is now `frozen`, which is the worse of the two things to be.
     held = fix.get('heldFor')
     if _number(held) and held > FROZEN_AFTER and any(
             _number(fix.get(k)) and fix[k] > limit
             for k, limit in (('speed', MOVING), ('ecefSpeed', MOVING),
                              ('heldMoved', ECEF_MOVED))):
         return False, 'frozen'
+    if err > FIX_ERR_MAX:
+        return False, 'rough'
     if not fresh(fix.get('ageSeconds') if age is None else age, stale_after):
         return False, 'stale'
     return True, None

@@ -1172,8 +1172,61 @@ async function nucbox() {
      + 'stands for', JSON.stringify([MV.discFor(card({ legs: 1, hasTotal: false })).miles,
                                      MV.discFor(card({ legs: 1, hasTotal: false })).card]),
      JSON.stringify([60, null]));
-  eq('...and a card with no fix the gate passed in nothing',
-     MV.discFor(card({ gpsOk: false, gpsWhy: 'rough', gpsErr: 129.2 })), null);
+  /* ...and a card whose fix the gate refused ONLY as rough (MV.discFix): the
+     owner's 17 Oct afternoon, a held card stamped mode 3, 0.2 s, 73 m,
+     `rough`, and the held end never searched ("no card fix"). The disc is
+     centred on it and widened by ROUGH_WIDEN_K x its error; every other
+     refusal is still no disc. Synthetic coordinates (the square fixture). */
+  var ROUGH73 = { gpsErr: 73, gpsAge: 0.2, gpsMode: 3, gpsOk: false, gpsWhy: 'rough' };
+  var dr = MV.discFor(card(ROUGH73));
+  eq('a held card refused only as rough (73 m, mode 3, 0.2 s) still has a disc, '
+     + 'centred on it and widened by twice its error',
+     dr && [dr.at.lat, dr.at.lon, dr.miles.toFixed(4), dr.card, dr.rough].join('|'),
+     [SQ.lat, SQ.lon, (9.4 + 0.5 + 2 * 73 / 1609.344).toFixed(4), 9.4, 73].join('|'));
+  eq('...a disc round a fix the gate passed is not widened, and says no rough',
+     JSON.stringify([d94.miles, 'rough' in d94]), JSON.stringify([9.9, false]));
+  eq('...the no-yardstick sixty miles widened the same way',
+     MV.discFor(card(Object.assign({ legs: 1, hasTotal: false }, ROUGH73))).miles.toFixed(4),
+     (60 + 2 * 73 / 1609.344).toFixed(4));
+  eq('...a 2D rough fix counts too', !!MV.discFor(card(Object.assign({}, ROUGH73, { gpsMode: 2 }))),
+     true);
+  eq('...exactly at the cap (' + MV.ROUGH_DISC_MAX_M + ' m) still a disc',
+     !!MV.discFor(card(Object.assign({}, ROUGH73, { gpsErr: MV.ROUGH_DISC_MAX_M }))), true);
+  eq('...over the cap, no disc: an error that large is itself in doubt',
+     MV.discFor(card(Object.assign({}, ROUGH73, { gpsErr: MV.ROUGH_DISC_MAX_M + 0.1 }))), null);
+  eq('...stale: a rough stamp older than gps.py\'s STALE_AFTER is no disc '
+     + '(usable() said rough before it asked the age)',
+     MV.discFor(card(Object.assign({}, ROUGH73, { gpsAge: MV.GPS_STALE_AFTER_S + 0.1 }))), null);
+  eq('...exactly at STALE_AFTER still fresh, as gps.fresh() says',
+     !!MV.discFor(card(Object.assign({}, ROUGH73, { gpsAge: MV.GPS_STALE_AFTER_S }))), true);
+  eq('...no age, or a negative one, is not fresh',
+     JSON.stringify([MV.discFor(card(Object.assign({}, ROUGH73, { gpsAge: null }))),
+                     MV.discFor(card(Object.assign({}, ROUGH73, { gpsAge: -1 })))]),
+     '[null,null]');
+  eq('...no mode, or mode 1, no disc',
+     JSON.stringify([MV.discFor(card(Object.assign({}, ROUGH73, { gpsMode: null }))),
+                     MV.discFor(card(Object.assign({}, ROUGH73, { gpsMode: 1 })))]),
+     '[null,null]');
+  eq('...no error figure, no disc',
+     MV.discFor(card(Object.assign({}, ROUGH73, { gpsErr: null }))), null);
+  eq('...every other refusal is still no disc: frozen, stale, nomode, unrated, '
+     + 'unjudged',
+     JSON.stringify(['frozen', 'stale', 'nomode', 'unrated', null].map(function (w) {
+       return MV.discFor(card(Object.assign({}, ROUGH73, { gpsWhy: w })));
+     })), '[null,null,null,null,null]');
+  eq('...a NaN coordinate on a rough stamp, no disc',
+     MV.discFor(card(Object.assign({}, ROUGH73, { lat: NaN }))), null);
+  /* ...and the fix is still rough for what it says about where the CAR was:
+     cardFix refuses it, so the panel's detour start, the pin accusation and
+     the caption are unchanged ("ROUGH FIX · on this card ±73 m"). */
+  eq('...cardFix still refuses the rough fix: no car position from it',
+     JSON.stringify(MV.cardFix(card(ROUGH73))),
+     JSON.stringify({ at: null, why: 'rough', err: 73 }));
+  eq('...and the caption still says ROUGH FIX with its figure',
+     MV.captionChip(MV.fixLine(MV.cardFix(card(ROUGH73)), 'held')),
+     'ROUGH FIX · on your order\'s card ±73 m');
+  eq('...and a pin past the card cannot be accused off a rough fix',
+     MV.cardRefuses(card(ROUGH73), MV.cardFix(card(ROUGH73)).at, WRONG_BRANCH), null);
   var vb = MV.discBox(d94).split(',').map(Number);
   ok_('the box asked for holds the whole disc (' + vb.join(',') + ')',
       [{ lat: SQ.lat + 9.9 / 69, lon: SQ.lon }, { lat: SQ.lat - 9.9 / 69, lon: SQ.lon },

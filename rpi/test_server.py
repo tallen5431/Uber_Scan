@@ -6687,6 +6687,69 @@ try:
     finally:
         stop(_hkp)
 
+    # A held card stamped ROUGH, its end filed by the Trip Planner: the
+    # owner's 17 Oct afternoon. The card's fix was mode 3, 0.2 s old, 73 m —
+    # usable() said `rough` — and /api/status said endWhy 'no card fix' for
+    # the whole delivery, so the end was never searched and GPS arrival never
+    # armed. MV.discFor now centres the disc on a fix refused only as rough,
+    # widened by its error (ROUGH_DISC_MAX_M), so the planner's door is
+    # searched, pinned and arrived at. And one over the cap is still no disc.
+    # The Square fixture and the fake's invented door; no real place.
+    _hks, _hksays, _hkj = _hksayer('rough')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800',
+                        'GPS_DWELL_MS': '1000'}, _hkj)
+
+    def _rough_took(oid, err):
+        o = dict(_SQ, id=oid, pay=12.0, minutes=40.0, billedMinutes=40.0, miles=10.3,
+                 cost=1.75, gpsOk=False, gpsWhy='rough', gpsErr=err, gpsMode=3, gpsAge=0.2)
+        post(_hkb, '/api/offers/mark', {'id': oid, 'accepted': True, 'offer': o})
+
+    def _planner_end():
+        """A whole Trip Planner page, unpressed, its sighting then its planner
+        line under one stamp (as Stage 3 sends them): an invented pickup with
+        no NucBox answer, and the fake's door as the order's end."""
+        at = int(time.time() * 1000)
+        stops = [{'kind': 'pickup', 'orders': 1, 'name': 'Example Wok', 'place': None,
+                  'expectedBy': 1180, 'street': '2210 Quarry Bend Rd NW', 'city': 'Kennesaw',
+                  'state': 'GA', 'zip': None, 'line': '2210 Quarry Bend Rd NW, Kennesaw',
+                  'partial': None, 'label': 'pickup'},
+                 {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'place': None,
+                  'expectedBy': 1202, 'street': '1985 Cobb Parkway', 'city': 'Kennesaw',
+                  'state': 'GA', 'zip': None, 'line': '1985 Cobb Parkway, Kennesaw',
+                  'partial': None, 'label': 'dropoff'}]
+        _hksays([{'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': True,
+                               'app': 'uber', 'screen': 'uber.planner',
+                               'page': {'top': True, 'bottom': True}, 'stops': stops,
+                               'orderCount': 1, 'keep': False}},
+                 {'planner': {'stops': [{k: v for k, v in s.items()
+                                         if k not in ('partial', 'label')} for s in stops],
+                              'keep': False, 'asked': False, 'ms': None, 'at': at}}])
+
+    try:
+        _rough_took('k-rough', 73.0)
+        _planner_end()
+        _h = _settled(_hkb, lambda h: h.get('endPinned') or h.get('endWhy'))
+        eq('[rough disc] a held card stamped rough (73 m, mode 3, 0.2 s), its door filed by '
+           'the Trip Planner: searched, pinned by the server, armed — not "no card fix"',
+           (_h.get('dropoff'), ((_h.get('fields') or {}).get('dropoff') or {}).get('from'),
+            _h.get('endPinned'), _h.get('endBy'), _h.get('endWhy')),
+           ('1985 Cobb Parkway, Kennesaw', 'planner', True, 'server', None))
+        _hksays([_hkbeat(0.0002)] * 7)
+        ok_('[rough disc] ...and the GPS arrival at it counts (arrived)',
+            (_holding(_hkb) or {}).get('arrived'))
+        post(_hkb, '/api/delivered', {})
+
+        _rough_took('k-rough-cap', 250.0)
+        _planner_end()
+        _h = _settled(_hkb, lambda h: h.get('endPinned') or h.get('endWhy'))
+        eq('[rough disc] ...but a rough stamp over the cap (250 m) is still no disc',
+           (_h.get('dropoff'), _h.get('endPinned'), _h.get('endWhy')),
+           ('1985 Cobb Parkway, Kennesaw', False, 'no card fix'))
+        post(_hkb, '/api/delivered', {})
+    finally:
+        stop(_hkp)
+
     # A NucBox that is down, so nothing is cached and every question shows:
     # the same planner read three times asks once (the retry is a minute off),
     # and a pickup with no street is never asked.

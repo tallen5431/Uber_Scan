@@ -569,7 +569,10 @@
    * landed and put on the offer line, which is also the point the platform
    * measured the card's distance from (give or take the seconds between). Only
    * one rpi/gps.py's gate passed, through fixOf. A fix the gate refused says
-   * why, in words, rather than reading as no fix at all. */
+   * why, in words, rather than reading as no fix at all. (The one exception
+   * is the SEARCH disc, discFor, which may be centred on a fix refused only
+   * as rough and is widened by its error — discFix says why a disc may and a
+   * position may not. Nothing here reads it.) */
   var SLACK_MI = 0.5;
 
   /* judge()'s yardstick rule, stated once for both of its users: a figure the
@@ -885,19 +888,109 @@
 
   /* The disc a place is searched in: the card's fix, and the card's own
    * distance plus SLACK_MI — the same edge cardRefuses holds a pin to, so a
-   * pin chosen here is never then refused there. A card with a fix and no
+   * pin chosen here is never then refused there. (A disc round a ROUGH fix
+   * is wider, and cardRefuses refuses nothing on one: no fix, no accusation —
+   * so that still holds; see discFix below.) A card with a fix and no
    * yardstick is searched in the sixty-mile radius the public path's box
    * stands for (`card` null says so), and a card with no fix in nothing:
    * the NucBox holds Georgia, and a candidate is used only if it is alone or
    * every one agrees. */
   function discFor(card) {
-    var fix = cardFix(card);
-    if (!fix.at) return null;
+    var fix = discFix(card);
+    if (!fix) return null;
     var yard = cardYardstick(card);
-    return yard.miles
-      ? { at: fix.at, miles: yard.miles + SLACK_MI, card: yard.miles,
+    var d = yard.miles
+      ? { at: fix.at, miles: yard.miles + SLACK_MI + fix.widen, card: yard.miles,
           corrected: yard.corrected }
-      : { at: fix.at, miles: BOX_MILES, card: null, corrected: false };
+      : { at: fix.at, miles: BOX_MILES + fix.widen, card: null, corrected: false };
+    // Said on the disc, so a reader can tell a disc grown round a rough
+    // centre from one round a fix the gate passed. Absent on the latter, so
+    // every disc built before this reads the same.
+    if (fix.rough !== undefined) d.rough = fix.rough;
+    return d;
+  }
+
+  /* --- a rough fix as a disc's centre, and as nothing else ------------------
+   *
+   * THE FAULT (the owner's 17 Oct afternoon shift). An Uber order was taken
+   * downtown and its Trip Planner filed the door, and /api/status said
+   * `endPinned: false, endWhy: 'no card fix'` for the whole delivery: the
+   * server never searched the held end, so GPS arrival never armed. The held
+   * card's stamp was mode 3, 0.2 s old, gpsErr 73 m — refused by
+   * rpi/gps.py's usable() as `rough`, err over FIX_ERR_MAX (50 m). The
+   * receiver ran 69-73 m on cards downtown for a while and 36 m a minute
+   * later. And the disc that fix was to anchor was the card's 10.3 miles
+   * plus SLACK_MI: 10.8 miles, against which 73 m is 0.045 mi.
+   *
+   * WHY A DISC MAY USE WHAT A POSITION MAY NOT. The gate answers "may this be
+   * shown or compared as where the car IS", and a rough fix may not: a dot,
+   * an accusation (cardRefuses), a detour's start, are all claims about one
+   * point, and 73 m is a different street. A disc claims only that the place
+   * lies within R of the centre — and a centre off by e is honoured by
+   * growing R by e: every point within R of the true centre is within R + e
+   * of the measured one (the triangle inequality, nothing measured). So the
+   * disc stays sound on a rough centre, it is merely a little larger, and
+   * pickInDisc's "alone, or every one agrees" is asked over a little more.
+   *
+   * THE MARGIN: twice the error, ROUGH_WIDEN_K. gpsd's eph is a model whose
+   * certainty its own documentation calls unknown, and it cannot see
+   * multipath — which is what a downtown error of 70 m is. Doubling it is
+   * CHOSEN, not measured, and cheap: at the cap it is 400 m, a quarter of a
+   * mile on a disc of miles. A fix the gate passed is not widened at all
+   * (`widen` 0): its error (50 m at most) is inside the SLACK_MI the disc
+   * already carries, as it always has been.
+   *
+   * THE CAP: ROUGH_DISC_MAX_M, 200 m — CHOSEN, NOT MEASURED. No journal or
+   * fixture in this repository carries a gpsErr from a real shift, so there
+   * is nothing to fit it to. What it rests on: the design study's mode-3
+   * stream at HDOP 6.8 read 129.2 m (gps.py, FIX_ERR_MAX), so a working but
+   * badly placed receiver lands inside it; on gpsd's NMEA path (eph = HDOP x
+   * 19 m) 200 m is HDOP 10.5, past which the usual DOP ratings stop calling
+   * a fix moderate. Over it the receiver's estimate is itself the thing in
+   * doubt, and a disc widened by a number nobody trusts is not a disc — so
+   * none, as before.
+   *
+   * WHAT ELSE MUST HOLD, because usable() stops at its FIRST refusal and
+   * `rough` is said before `stale` is asked (quality before age, there):
+   *   - `gpsWhy` exactly 'rough'. Frozen is judged before rough (usable()),
+   *     so a rough word promises the lat/lon was not stuck; unrated, nomode,
+   *     frozen, stale and a fix nobody judged are no disc, as always.
+   *   - gpsMode 2 or 3: implied by `rough` (nomode is asked first), asked
+   *     again here because it is the line's own figure and costs nothing.
+   *   - fresh: gpsAge a number, 0 to GPS_STALE_AFTER_S. The one check usable()
+   *     never reached; the figure is gps.py's STALE_AFTER, copied and held to
+   *     it by rpi/test_lint.py rather than judged a second way.
+   *   - gpsErr a number, under the cap; lat and lon finite.
+   *
+   * WHAT DOES NOT CHANGE. cardFix still refuses a rough fix, so the panel's
+   * detour start, cardRefuses' accusation, againstCard and fixLine — "ROUGH
+   * FIX · on this card ±69 m" — say exactly what they said: the fix is still
+   * too rough for what it says about where the CAR was. Only the disc reads
+   * it, through here. */
+  var ROUGH_DISC_MAX_M = 200;
+  var ROUGH_WIDEN_K = 2;
+  var GPS_STALE_AFTER_S = 20.0;
+
+  /* The disc's centre for this card and how much to widen the disc by, in
+     miles, or null for no disc. { at, widen } for a fix the gate passed
+     (widen 0); { at, widen, rough: err } for a rough one this allows. */
+  function discFix(card) {
+    var fix = cardFix(card);
+    if (fix.at) return { at: fix.at, widen: 0 };
+    if (!roughCentre(card)) return null;
+    return { at: { lat: card.lat, lon: card.lon },
+             widen: ROUGH_WIDEN_K * card.gpsErr / METRES_PER_MILE, rough: card.gpsErr };
+  }
+
+  // The named check: a card fix refused ONLY as rough, fit to centre a disc.
+  function roughCentre(o) {
+    return !!o && o.gpsOk !== true && o.gpsWhy === 'rough'
+      && typeof o.lat === 'number' && typeof o.lon === 'number'
+      && isFinite(o.lat) && isFinite(o.lon)
+      && typeof o.gpsMode === 'number' && o.gpsMode >= 2
+      && typeof o.gpsAge === 'number' && o.gpsAge >= 0 && o.gpsAge <= GPS_STALE_AFTER_S
+      && typeof o.gpsErr === 'number' && isFinite(o.gpsErr)
+      && o.gpsErr <= ROUGH_DISC_MAX_M;
   }
 
   /* Nominatim's viewbox round a disc, widened outward to the next hundredth
@@ -3401,7 +3494,9 @@
            fixOf: fixOf, fixRefused: fixRefused,
            cardFix: cardFix, fixLine: fixLine, cardYardstick: cardYardstick,
            againstCard: againstCard, cardRefuses: cardRefuses,
-           SLACK_MI: SLACK_MI,
+           SLACK_MI: SLACK_MI, roughCentre: roughCentre,
+           ROUGH_DISC_MAX_M: ROUGH_DISC_MAX_M, ROUGH_WIDEN_K: ROUGH_WIDEN_K,
+           GPS_STALE_AFTER_S: GPS_STALE_AFTER_S,
            hereDot: hereDot, GPS_REFUSED: GPS_REFUSED,
            anchorFor: anchorFor, boxAround: boxAround,
            localityOf: localityOf, townOf: townOf, townFor: townFor,

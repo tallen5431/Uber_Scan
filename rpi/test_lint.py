@@ -922,6 +922,25 @@ eq("map-view.js's GPS_REFUSED has a line for every refusal but stale",
    sorted(_gate_words - {'stale'} - _mv_named), [])
 eq('...and none for a word the gate cannot give', sorted(_mv_named - _gate_words), [])
 
+# --- a rough fix as a disc's centre: what the word must promise -------------
+#
+# map-view.js's discFix centres a search disc on a card fix refused ONLY as
+# `rough` (the owner's 17 Oct held card, 73 m, its end never searched). That
+# is sound only because of the gate's order and figures, so they are held
+# here: frozen asked before rough (a rough word promises a lat/lon not stuck),
+# the freshness map-view.js checks (usable() says rough before it asks the
+# age) is gps.py's own STALE_AFTER, and the cap sits above FIX_ERR_MAX, or no
+# rough fix could ever pass it.
+import gps as _gps_mod                                        # noqa: E402
+ok_("gps.usable() asks frozen before rough",
+    0 <= _usable_body.find("'frozen'") < _usable_body.find("'rough'"))
+_mv_stale = re.search(r'var GPS_STALE_AFTER_S = ([\d.]+);', _mv_src)
+eq("map-view.js's GPS_STALE_AFTER_S is gps.py's STALE_AFTER",
+   float(_mv_stale.group(1)) if _mv_stale else None, _gps_mod.STALE_AFTER)
+_mv_cap = re.search(r'var ROUGH_DISC_MAX_M = ([\d.]+);', _mv_src)
+ok_("map-view.js's ROUGH_DISC_MAX_M is above gps.py's FIX_ERR_MAX",
+    _mv_cap and float(_mv_cap.group(1)) > _gps_mod.FIX_ERR_MAX)
+
 # --- a request the scan loop takes sits under its own comment --------------
 #
 # The loop takes four requests from the screens one after another, each under

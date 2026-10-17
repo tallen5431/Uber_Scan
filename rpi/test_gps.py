@@ -910,6 +910,13 @@ eq('...and so by its ECEF velocity alone',
    G.usable(dict(_held, ecefSpeed=3.0)), (False, 'frozen'))
 eq('...and so by its ECEF having moved 30 m alone',
    G.usable(dict(_held, heldMoved=30.0)), (False, 'frozen'))
+# Frozen before rough: a `rough` word is what map-view.js's discFix centres a
+# search disc on (widened by the error), so it must promise the lat/lon was
+# not stuck. A stuck AND rough fix says frozen; a rough one that moves, rough.
+eq('frozen is judged before rough: a stuck 129 m fix is frozen, not rough',
+   G.usable(dict(_held, err=129.2, speed=3.0)), (False, 'frozen'))
+eq('...and the same 129 m fix moving normally is rough',
+   G.usable(dict(_held, err=129.2, heldFor=0.0, speed=3.0)), (False, 'rough'))
 eq('held exactly five seconds at speed is not yet',
    G.usable(dict(_held, heldFor=5.0, speed=30.0)), (True, None))
 eq('held a minute at walking-noise speed inside the ECEF jitter is fine',
