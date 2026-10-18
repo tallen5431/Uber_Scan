@@ -1253,6 +1253,82 @@ SEQ.forEach(function (seq) {
      play1(pageOf(text, 2000, false), { legs: 2, multiOrder: false })[1], null);
 })();
 
+/* The same store as an order in the car (Assemble.samePickup; the owner's
+ * decision of 18 Oct 2026). The 17 Oct shape, invented: an Uber order held
+ * from "<Store> (113 <Street> NW)" and a DoorDash card whose stops line reads
+ * the same door with the quadrant NE. Every store and street invented. */
+(function () {
+  var side = function (pickup, extra) { return A.pickupSide(Object.assign({ pickup: pickup }, extra || {}), null, null); };
+  var held = side('Larkspur Tacos (113 Quillon St NW)');
+  var dd = side('Larkspur Tacos', { pickupLine: '113 Quillon St NE, Marietta, 30060 GA' });
+  eq('same store: the same door with the quadrant read differently is the same store',
+     A.samePickup(held, dd, null), 'door');
+  eq('...and with the street\'s type spelt out, and an i read as l in it',
+     A.samePickup(side('Larkspur Tacos (113 Quillon Street)'),
+                  side('Larkspur Tacos', { pickupLine: '113 Qulllon St NE, Marietta' }), null), 'door');
+  eq('...and a house number read with an O for its 0',
+     A.sameDoor('Fable Pizza (1O5 Wren Pkwy)', '105 Wren Parkway NW, Kennesaw'), true);
+  eq('...but not a different house number on the same street',
+     A.samePickup(held, side('Larkspur Tacos', { pickupLine: '118 Quillon St NE, Marietta' }), 0),
+     null);
+  eq('...nor two slips in the street, nor one that is not a look-alike',
+     [A.sameDoor('1 Quillon St', '1 Qulll0n St'), A.sameDoor('1 Quillon St', '1 Quiiton St')],
+     [false, false]);
+  eq('...nor a suite taken for the street: the door is before it',
+     A.doorOf('Fable Pizza (1200 Fable Pkwy NW STE 100)'), { house: '1200', street: 'fable' });
+  eq('...and a name with no door has none',
+     [A.doorOf('Larkspur Tacos'), A.doorOf("Papa John's (Store 3317)")], [null, null]);
+  eq('a chain\'s name at the same door IS the same store',
+     A.samePickup(side('Chick-fil-A (2290 Kestrel Rd NW)'),
+                  side('Chick-fil-A', { pickupLine: '2290 Kestrel Rd, Kennesaw' }), null), 'door');
+  eq('...and a distinctive name at two different doors is two branches, whatever the names say',
+     A.samePickup(held, side('Larkspur Tacos', { pickupLine: '940 Wren Ave, Smyrna' }), 0), null);
+  eq('a distinctive name, no door on one side, the pickups proven within half a mile: the same',
+     A.samePickup(side('Larkspur Tacos'), held, 0.3), 'name');
+  eq('...at exactly the half mile too, and not past it',
+     [A.samePickup(side('Larkspur Tacos'), held, A.SAME_STORE_NEAR_MI),
+      A.samePickup(side('Larkspur Tacos'), held, A.SAME_STORE_NEAR_MI + 0.01)], ['name', null]);
+  eq('...nor with nothing to bound them: can\'t tell is not the same',
+     [A.samePickup(side('Larkspur Tacos'), held, null),
+      A.samePickup(side('Larkspur Tacos'), held, function () { return null; })], [null, null]);
+  eq('...and the bound is asked only once the names have matched',
+     (function () {
+       var asked = 0;
+       A.samePickup(side('Larkspur Tacos'), side('Wren Street Noodles'),
+                    function () { asked += 1; return 0; });
+       return asked;
+     })(), 0);
+  eq('a chain\'s name alone is not the same store, however near',
+     [A.samePickup(side('Chick-fil-A'), side('Chick-fil-A'), 0.1),
+      A.samePickup(side("McDonald's"), side("McDonald's #1155"), 0.1)], [null, null]);
+  eq('...and far apart, no more so',
+     A.samePickup(side('Chick-fil-A'), side('Chick-fil-A'), 12.0), null);
+  eq('what is a chain: national names, a branch\'s label, a name too short to be one place',
+     [A.chainName('Chick-fil-A'), A.chainName("McDonald's"), A.chainName("Papa John's Store 3317"),
+      A.chainName('AtHome - 0020-Kennesaw'), A.chainName('Bo'), A.chainName('Larkspur Tacos'),
+      A.chainName('Larkspur Tacos (113 Quillon St NW)')],
+     [true, true, true, true, true, false, false]);
+  eq('a hold\'s own planner pickup is its door, by its id or, unmarked, by its name',
+     [A.pickupSide({ pickup: 'Larkspur Tacos' },
+                   [{ kind: 'pickup', name: 'oe Larkspur Tacos', street: '113 Quillon St NW',
+                      line: '113 Quillon St NW, Marietta' }], 'h@1').doors,
+      A.pickupSide({ pickup: 'Larkspur Tacos' },
+                   [{ kind: 'pickup', name: 'Wren Street Noodles', of: 'h@1', street: '7 Wren Ave' }],
+                   'h@1').doors,
+      A.pickupSide({ pickup: 'Larkspur Tacos' },
+                   [{ kind: 'pickup', name: 'Larkspur Tacos', of: 'other@2', street: '7 Wren Ave' },
+                    { kind: 'dropoff', name: 'Larkspur Tacos', street: '9 Wren Ave' }],
+                   'h@1').doors],
+     [['Larkspur Tacos', '113 Quillon St NW, Marietta'], ['Larkspur Tacos', '7 Wren Ave'],
+      ['Larkspur Tacos']]);
+  eq('...and a tapped popup\'s door, on the card or the hold',
+     [A.pickupSide({ pickup: 'Larkspur Tacos',
+                     pickupAddr: { value: '113 Quillon St', from: 'popup' } }).doors,
+      A.pickupSide({ pickup: 'Larkspur Tacos',
+                     fields: { pickupAddr: { value: '113 Quillon St', from: 'popup' } } }).doors],
+     [['Larkspur Tacos', '113 Quillon St'], ['Larkspur Tacos', '113 Quillon St']]);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

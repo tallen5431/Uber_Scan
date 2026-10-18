@@ -1402,6 +1402,181 @@
     return slips === 1;
   }
 
+  /* ---------- the same store as an order in the car -------------------------
+   *
+   * The owner's decision of 18 Oct 2026: when a new offer's pickup is the same
+   * restaurant as an order already in the car, the panel says so in a few
+   * words beside the pair line — "same store as ①". A FACT, not a rule or a
+   * score: it moves no verdict, no state, no range and no colour, and nothing
+   * here is ever a distance on the glass. The evidence: on 17 Oct a DoorDash
+   * card "$12.05 · 2 stops (8.4 mi) · <Store> / 113 <Street> NE, <Town>,
+   * 30060 GA" came up while an Uber order from that store, "<Store> (113
+   * <Street> NW)", was held — the street's quadrant even differs by OCR.
+   *
+   * WHAT DECIDES "THE SAME PLACE", in this order and no other:
+   *
+   *   1. The door, when BOTH sides have one (sameDoor): the house number the
+   *      same, the street the same once its quadrant (NE/NW/N/Northwest...)
+   *      and its type (St/Street/Pkwy...) are set aside, with ONE character
+   *      read as its OCR look-alike (i/l/1, o/0, s/5) allowed in a street of
+   *      five letters or more. Any door of one side against any of the other:
+   *      a hold has several (its card's bracket, DoorDash's stops line, a
+   *      tapped popup, its Trip Planner's pickups). Both sides with doors and
+   *      none agreeing is NOT the same store, whatever the names say: that is
+   *      two branches of one chain, and the door is the better witness. A
+   *      chain's name at the same door IS the same store.
+   *   2. Otherwise the name, and only where a name can be trusted to mean one
+   *      place: sameStore (one i/l slip, as everywhere in this file), the name
+   *      distinctive (not a chain, `chainName`: a list of the national names
+   *      this driver's metro is full of, a branch label like "Store 3317" or
+   *      "- 0020-Kennesaw", or a key under four letters), AND the two pickups
+   *      within SAME_STORE_NEAR_MI of each other by what the cards and pins
+   *      prove (`apart`, server.js pickupsApart — an UPPER bound, or null when
+   *      nothing bounds it). "Chick-fil-A" by name is a hundred restaurants.
+   *   3. Nothing else. A side with neither a door nor a bound is "can't tell",
+   *      and can't tell draws nothing — the panel never says "not the same".
+   *
+   * SAME_STORE_NEAR_MI is CHOSEN, not measured: no journal row on file carries
+   * two pins of one name, so there is nothing to fit it to. Half a mile is the
+   * width of a shopping centre's lot, and a distinctive name with two branches
+   * inside it is the case it can get wrong. */
+  var SAME_STORE_NEAR_MI = 0.5;
+
+  // The national names, as storeKey writes them. A key that STARTS with one
+  // is that chain too ("mcdonalds1155", "chickfilakennesaw"). Not exhaustive
+  // and it does not need to be: a chain missing here still has to clear the
+  // half-mile bound, which two of its branches seldom both sit inside.
+  var CHAINS = ['mcdonalds', 'chickfila', 'wendys', 'burgerking', 'tacobell', 'kfc',
+    'popeyes', 'subway', 'starbucks', 'dunkin', 'chipotle', 'panera', 'pizzahut',
+    'dominos', 'papajohns', 'littlecaesars', 'arbys', 'sonic', 'dairyqueen', 'zaxbys',
+    'raisingcanes', 'wingstop', 'jimmyjohns', 'jerseymikes', 'firehousesubs', 'fiveguys',
+    'whataburger', 'checkers', 'rallys', 'jackinthebox', 'wafflehouse', 'ihop', 'dennys',
+    'applebees', 'chilis', 'olivegarden', 'outback', 'texasroadhouse', 'crackerbarrel',
+    'redlobster', 'buffalowildwings', 'pandaexpress', 'qdoba', 'moes', 'cookout',
+    'krispykreme', 'bojangles', 'churchs', 'culvers', 'steaknshake', 'shakeshack',
+    'tropicalsmoothie', 'smoothieking', 'jamba', 'marcos', 'hungryhowies', 'cicis',
+    'longhorn', 'redrobin', 'tgifridays', 'hardees', 'carlsjr', 'whitecastle', 'crumbl',
+    'insomniacookies', 'baskinrobbins', 'coldstone', 'firstwatch', 'mcalisters',
+    'potbelly', 'jasonsdeli', 'schlotzskys', 'captainds', 'longjohnsilvers',
+    'elpolloloco', 'sweetgreen', 'cava', 'cvs', 'walgreens', 'walmart', 'target',
+    'kroger', 'publix', 'aldi', 'costco', 'samsclub', 'dollargeneral', 'familydollar',
+    '7eleven', 'circlek', 'quiktrip', 'racetrac', 'petsmart', 'petco', 'homedepot',
+    'lowes', 'bestbuy'];
+
+  // The store a pickup NAMES, less the street Uber prints after it in
+  // brackets ("<Store> (113 Main St NW)", closed or cut at the card's edge).
+  function storeOf(pickup) {
+    if (typeof pickup !== 'string') return '';
+    return pickup.replace(/\s*\([^()]*\)?\s*$/, '').trim();
+  }
+
+  // Whether a name may mean many places: a chain, a branch's label, or too
+  // short to be anybody's in particular.
+  function chainName(name) {
+    var k = storeKey(storeOf(name));
+    if (k.length < 4) return true;
+    if (/(?:\bstore\s*#?\s*\d|#\s*\d|\s-\s*#?\d)/i.test(String(name))) return true;
+    return CHAINS.some(function (c) { return k.indexOf(c) === 0; });
+  }
+
+  var QUADRANT = /^(?:n|s|e|w|ne|nw|se|sw|north|south|east|west|northeast|northwest|southeast|southwest)$/;
+  var STREET_TYPE = /^(?:st|street|rd|road|ave|av|avenue|blvd|boulevard|pkwy|parkway|dr|drive|ln|lane|ct|court|cir|circle|hwy|highway|way|pl|place|trl|trail|ter|terrace|plz|plaza|pike|sq|square|cv|cove|xing|crossing|loop|run|row|walk|path|ext|pt|point|bnd|bend|ctr|center|centre)$/;
+
+  /* A door out of one pickup text, {house, street}, or null for a text that
+   * names none. Uber's bracket after the store's name, else the line before
+   * its first comma (DoorDash's stops line, a popup's, a planner stop's). The
+   * house number may carry the reader's look-alikes for its digits (O for 0,
+   * l or I for 1); the street is its words less a suite, less its quadrant
+   * and less its type, run together. A street that is ONLY a quadrant and a
+   * type, or a number and nothing else, names no door. */
+  function doorOf(text) {
+    if (typeof text !== 'string' || !text) return null;
+    var br = /\(\s*([^()]*?)\s*\)?\s*$/.exec(text);
+    var s = br && /^\S*\d/.test(br[1]) ? br[1] : text;
+    s = s.split(',')[0].replace(/\s+/g, ' ').trim();
+    var words = s.split(' ');
+    var house = (words.shift() || '').replace(/[Oo]/g, '0').replace(/[lI|]/g, '1');
+    if (!/^\d+[A-Za-z]?$/.test(house)) return null;
+    var street = [];
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i].toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (/^(?:ste|suite|unit|apt|bldg)$/.test(w) || /^#/.test(words[i])) break;
+      if (!w || QUADRANT.test(w)) continue;
+      street.push(w);
+    }
+    // The type only where a name is left without it ("Main St" is "main";
+    // "Pike" alone stays "pike").
+    var named = street.filter(function (w) { return !STREET_TYPE.test(w); });
+    var core = (named.length ? named : street).join('');
+    return /[a-z]/.test(core) || /^\d+(?:st|nd|rd|th)$/.test(core)
+      ? { house: house.toLowerCase(), street: core } : null;
+  }
+
+  // ONE character read as its look-alike, in a street long enough that one
+  // character is not most of its name.
+  var LOOKALIKE = { i: 'l1', l: 'i1', 1: 'il', o: '0', 0: 'o', s: '5', 5: 's' };
+  function oneSlip(x, y) {
+    if (x.length !== y.length || x.length < 5) return false;
+    var slips = 0;
+    for (var i = 0; i < x.length; i++) {
+      if (x[i] === y[i]) continue;
+      if (!LOOKALIKE[x[i]] || LOOKALIKE[x[i]].indexOf(y[i]) < 0) return false;
+      slips += 1;
+    }
+    return slips === 1;
+  }
+
+  function sameDoor(a, b) {
+    var x = doorOf(a), y = doorOf(b);
+    return !!x && !!y && x.house === y.house
+      && (x.street === y.street || oneSlip(x.street, y.street));
+  }
+
+  /* One side of the question, {name, doors}: an offer line or an order in
+   * the car. Every door text it carries — the card's own pickup (Uber's
+   * bracket), DoorDash's stops line (`pickupLine`), the door a popup tapped
+   * on the card (`pickupAddr`, an offer's own field; a hold's
+   * `fields.pickupAddr`), and, for a hold, its Trip Planner's pickups that are
+   * its own: marked with its id (`of`, server.js ownPickups) or, unmarked,
+   * named as its card names its store. `stops` is the planner the first
+   * order in the car keeps; `id` the hold's holdId. Read only: fieldsOf is
+   * not asked, it would write the hold. */
+  function pickupSide(o, stops, id) {
+    var x = o || {};
+    var name = storeOf(x.pickup);
+    var doors = [x.pickup, x.pickupLine];
+    [x.pickupAddr, x.fields && x.fields.pickupAddr].forEach(function (f) {
+      if (f && typeof f === 'object' && typeof f.value === 'string') doors.push(f.value);
+    });
+    var own = (Array.isArray(stops) ? stops : []).filter(function (s) {
+      if (!s || s.kind !== 'pickup') return false;
+      return s.of ? !!id && s.of === id : !!name && sameStore(s.name, name);
+    });
+    own.forEach(function (s) { doors.push(s.line || s.street); });
+    // ...and those stops themselves, which the server's pins are named by
+    // (MV.pickupKey), for the bound on the name's rule.
+    return { name: name, stops: own,
+             doors: doors.filter(function (d) { return typeof d === 'string' && d; }) };
+  }
+
+  /* 'door', 'name' or null — see the block above. `apart` is the bound in
+   * miles, or a function giving it (asked only when the names decide), or
+   * null. */
+  function samePickup(a, b, apart) {
+    if (!a || !b) return null;
+    var da = a.doors || [], db = b.doors || [];
+    var doorsA = da.filter(doorOf), doorsB = db.filter(doorOf);
+    if (doorsA.length && doorsB.length) {
+      return doorsA.some(function (p) {
+        return doorsB.some(function (q) { return sameDoor(p, q); });
+      }) ? 'door' : null;
+    }
+    if (!sameStore(a.name, b.name) || chainName(a.name) || chainName(b.name)) return null;
+    var d = typeof apart === 'function' ? apart() : apart;
+    return typeof d === 'number' && isFinite(d) && d >= 0 && d <= SAME_STORE_NEAR_MI
+      ? 'name' : null;
+  }
+
   // Two clock readings, minutes since midnight, within `slack` round midnight.
   function clockNear(a, b, slack) {
     if (typeof a !== 'number' || typeof b !== 'number') return false;
@@ -1801,6 +1976,10 @@
            verdictFor: verdictFor, pageOf: pageOf, plannerRowDue: plannerRowDue,
            cardSeen: cardSeen, heldOwnCard: heldOwnCard, holdIdOf: holdIdOf,
            DEADLINE_SLACK_MIN: DEADLINE_SLACK_MIN, storeKey: storeKey, sameStore: sameStore,
+           // ...and the same store as an order in the car (server.js
+           // sameStoreOf; the owner's decision of 18 Oct 2026).
+           SAME_STORE_NEAR_MI: SAME_STORE_NEAR_MI, chainName: chainName, doorOf: doorOf,
+           sameDoor: sameDoor, pickupSide: pickupSide, samePickup: samePickup,
            attribute: attribute, park: park, unpark: unpark, unowned: unowned,
            retryUnowned: retryUnowned,
            plannerCandidates: plannerCandidates, reOffer: reOffer };

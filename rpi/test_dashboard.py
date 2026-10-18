@@ -6576,6 +6576,16 @@ const framed = (page) => page.waitForFunction(
           ? text(document.querySelector('#stack .more')) : null,
         both: shown(document.querySelector('#stack .both'))
           ? text(document.querySelector('#stack .both')) : null,
+        // ...and "same store as ①" (live.html sameNote, server.js
+        // sameStoreOf) wherever it is drawn — the head of the address line,
+        // or the pair line on the 3.5" hat — with the verdict it sits under:
+        // its class, its word and its rate; and the address line's ends.
+        same: [document.querySelector('#places .same'), document.querySelector('#stack .same')]
+          .filter(shown).map(text).join(' + ') || null,
+        ends: [].slice.call(document.querySelectorAll('#places .end')).map(text),
+        verdict: [document.getElementById('verdict').className,
+                  text(document.getElementById('verdictLabel')),
+                  text(document.getElementById('perHour'))].join(' | '),
         status: text(document.getElementById('health')),
       };
     });
@@ -6658,6 +6668,37 @@ const framed = (page) => page.waitForFunction(
                state: 'warn', sure: false, uncosted: false, ends: null, vsFirst: true } }));
     await tick(300);
     const offerFirst = await look();
+    // The same store as an order in the car (the owner's decision of 18 Oct
+    // 2026): the card against both, its pickup ②'s store — "same store as
+    // ②" beside "with ① + ②", and nothing else on the card moved; with one
+    // order, "same store as in car"; a stack without it, and none at all,
+    // draw nothing.
+    const twoStack = { pay: 40.0, worst: 18.2, best: 31.0, minMinutes: 55, maxMinutes: 120,
+                       leftMinutes: 55, state: 'warn', sure: false, uncosted: false, ends: null,
+                       heldCount: 2, leftEach: [40, 55] };
+    await push(Object.assign({}, READINGS.deducted, { holding: A, orders: [A, B], unowned: 0,
+                                                      stack: twoStack }));
+    await tick(300);
+    const sameBefore = await look();
+    await push(Object.assign({}, READINGS.deducted, { holding: A, orders: [A, B], unowned: 0,
+      stack: Object.assign({}, twoStack, { sameStore: 'c-b@2', sameStoreN: 2 }) }));
+    await tick(300);
+    const sameTwo = await look();
+    await push(Object.assign({}, READINGS.deducted, { holding: A, orders: [A], unowned: 0,
+      stack: { pay: 40.0, worst: 18.2, best: 31.0, minMinutes: 40, maxMinutes: 65,
+               leftMinutes: 40, state: 'warn', sure: false, uncosted: false, ends: null,
+               sameStore: 'c-a@1', sameStoreN: 1 } }));
+    await tick(300);
+    const sameOne = await look();
+    await push(Object.assign({}, READINGS.deducted, { holding: A, orders: [A], unowned: 0,
+      stack: { pay: 40.0, worst: 18.2, best: 31.0, minMinutes: 40, maxMinutes: 65,
+               leftMinutes: 40, state: 'warn', sure: false, uncosted: false, ends: null } }));
+    await tick(300);
+    const sameGone = await look();
+    await push(Object.assign({}, READINGS.deducted, { holding: A, orders: [A], unowned: 0,
+                                                      stack: null }));
+    await tick(300);
+    const sameNoStack = await look();
     // ⌖ with no cue: the chooser, over the verdict pane.
     await push({ chooser: { id: 'choose-1', kind: 'scan', line: '77 Birch Ln, Roswell, GA',
                             rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
@@ -6786,6 +6827,8 @@ const framed = (page) => page.waitForFunction(
                      addOnTwo: addOnTwo, addOnThree: addOnThree, addOnOffer: addOnOffer,
                      addOnLeft: addOnLeft,
                      offerUp: offerUp, offerFirst: offerFirst, chooser: chooser,
+                     same: { before: sameBefore, two: sameTwo, one: sameOne, gone: sameGone,
+                             noStack: sameNoStack },
                      closed: closed, picked: picked,
                      dropAsk: dropAsk, dropBoth: dropBoth, atDoor: atDoor,
                      refusedUndo: refusedUndo,
@@ -7707,6 +7750,23 @@ try:
         eq('[carry two] under an offer, both in one line, and the pair line says it is with ① + ②',
            (_of.get('detail'), _of.get('vs'), _of.get('both'), _of.get('more')),
            ('· In car ① $9.48 · ② $28.08', None, 'with ① + ②', 'over 55–120 min'))
+        _ss = ct.get('same') or {}
+        _sb, _s2 = _ss.get('before') or {}, _ss.get('two') or {}
+        eq('same store: with two in the car the card says "same store as ②" under the pair '
+           'line that says "with ① + ②"',
+           (_sb.get('same'), _s2.get('same'), _s2.get('both')),
+           (None, 'same store as ②', 'with ① + ②'))
+        eq('...and nothing else on the card moves: the verdict, its rate, the pair line\'s words',
+           [(_s2.get(k) == _sb.get(k), k) for k in ('verdict', 'more', 'detail', 'bar', 'ends')],
+           [(True, 'verdict'), (True, 'more'), (True, 'detail'), (True, 'bar'), (True, 'ends')])
+        ok_('...the premise: there is a verdict and an address line to compare (%r, %r)'
+            % (_sb.get('verdict'), _sb.get('ends')),
+            '|' in (_sb.get('verdict') or '') and _sb.get('ends'))
+        eq('...with one order in the car it says "same store as in car"',
+           (_ss.get('one') or {}).get('same'), 'same store as in car')
+        eq('...a stack without it, and no stack at all, draw none',
+           ((_ss.get('gone') or {}).get('same'), (_ss.get('noStack') or {}).get('same')),
+           (None, None))
         _ff = ct.get('offerFirst') or {}
         eq('[carry two] carrying two off with two read back: the pair line still says vs ① only',
            (_ff.get('vs'), _ff.get('both'), _ff.get('more')),

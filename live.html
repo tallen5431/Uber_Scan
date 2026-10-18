@@ -480,6 +480,16 @@
        set in the pair line's 13px and as tight, which together leave the
        card as it was. */
     #verdict:has(#way:not([hidden])) .places { display: none; }
+    /* ...and so the same-store note (sameNote) cannot ride the address line
+       here, which the answer on the card puts away. It goes on the pair
+       line's first row instead, which on this panel holds the range alone
+       (the ENDS chip and the link are on the second): a third track of the
+       sum, after the words that give way, in its short form — "same store
+       ①", "same store" — since beside the scene picture the row has 86px
+       past the range and "same store as in car" is 110. Never both. */
+    #places .same, #places .withsame > .sp { display: none; }
+    .stackline .sum.withsame { grid-template-columns: auto minmax(0, max-content) auto; }
+    #stack .sum .same { display: inline; font-size: 0.88em; }
     .live:not(.driving) .wayline { margin-top: 2px; font-size: 12px; line-height: 1.2; }
     /* ...and the headline as the pair has it here, not the panels' 18dvh. */
     .live:not(.driving) #verdict:has(#way:not([hidden])):not(:has(#warn:not([hidden]))) #perHour {
@@ -1237,6 +1247,14 @@
   /* ...and with it on, "with ① + ②": the same slot, whole, in the row's own
    * colour — it names what the range covers and doubts nothing. */
   .stackline .both { flex: none; margin-left: .35em; }
+  /* "same store as ①" at the head of the address line (sameNote): in the
+   * card's own text colour where the addresses are muted, so it is read
+   * before them, and bold like the pair line above it — but no chip, no
+   * fill, no verdict colour: a fact about the pickup, never a verdict. */
+  #places .same { color: var(--text); font-weight: 700; }
+  /* ...and its short form on the pair line, drawn only on the 3.5" hat (see
+     the rule there); everywhere else the address line has it. */
+  .stackline .sum .same { display: none; color: var(--text); }
   /* The answer on the card (showWay, MV.sayWay): under the pair line, one
    * line, Map view's caption figure in it.
    *
@@ -1452,6 +1470,12 @@
   @media (orientation: portrait), (min-height: 381px) {
     .live.moving #places.two:not([hidden]) { display: flex; flex-direction: column; }
     .live.moving #places .end { overflow: hidden; text-overflow: ellipsis; }
+    /* ...the first end with the same-store note before it, on one line: the
+       note whole, the end giving way. */
+    .live.moving #places.two > .withsame { display: flex; justify-content: center;
+                                           min-width: 0; gap: .3em; }
+    .live.moving #places .withsame > .same { flex: none; }
+    .live.moving #places .withsame > .end { min-width: 0; }
   }
   .live.driving { container-type: inline-size; }
   .live.driving .submetrics .sub:not(:first-child),
@@ -2324,9 +2348,9 @@
   // the text is what it was and parked draws exactly what it drew. Only a
   // pickup and a dropoff (`two`) get their lines: a list of three or more is
   // MV.ends handing back the frames' union, not two ends, and stays one line.
-  function showPlaces(list) {
+  function showPlaces(list, same) {
     var where = (list || []).filter(function (p) { return !!p; });
-    if (drawnAs(el.places, JSON.stringify(where))) {
+    if (drawnAs(el.places, JSON.stringify([where, same || null]))) {
       el.places.classList.toggle('two', where.length === 2);
       el.places.textContent = '';
       where.forEach(function (p, i) {
@@ -2334,10 +2358,58 @@
         var end = document.createElement('span');
         end.className = 'end';
         end.textContent = (i ? '\u2192 ' : '') + p;
+        // ...and, at the head of the line, whether this card's pickup is the
+        // store of an order in the car (sameNote): with the first end in a
+        // span of its own (`.withsame`), so moving, where the ends are a line
+        // each, the note rides the first end's line and is not one more.
+        if (!i && same) {
+          var row = document.createElement('span');
+          row.className = 'withsame';
+          var tag = document.createElement('span');
+          tag.className = 'same';
+          tag.textContent = same;
+          tag.title = 'This offer is picked up at the same restaurant as an order '
+            + 'already in the car: the same door, or the same distinctive name close by.';
+          var sp = document.createElement('span');
+          sp.className = 'sp';
+          sp.textContent = ' ';
+          row.appendChild(tag);
+          row.appendChild(sp);
+          row.appendChild(end);
+          el.places.appendChild(row);
+          return;
+        }
         el.places.appendChild(end);
       });
     }
     setHidden(el.places, !where.length);
+  }
+
+  /* "same store as ①" — or "same store as in car" with one order, which
+   * has no number on this panel to be named by — when the server says this
+   * card's pickup is the store of an order in the car (server.js
+   * sameStoreOf; the owner's decision of 18 Oct 2026). Off the stack, so it
+   * goes when the pair line goes; null otherwise.
+   *
+   * A FACT, not a verdict: the card's verdict, rate, figures and pair line
+   * are drawn as they would be without it. WHERE: at the head of the address
+   * line, under the pair line, beside the pickup it is about. Not ON the pair
+   * line, which was tried and measured (rpi/test_layout.py): that row is full
+   * at 800x480 beside the phone and 1024x600 beside the scene picture — a
+   * range, the ENDS chip and the route link leave it 75px — so "same store as
+   * in car" (154px) wrapped it and put PASS outside the card, and on the 3.5"
+   * hat beside the scene picture it cut the range. The address line is one
+   * ellipsised line whose words are the ones that give way, and the head of
+   * it is the one place the ellipsis never reaches. */
+  function sameNote(r, short) {
+    var s = r && r.stack;
+    if (!s || !s.sameStore) return null;
+    var n = (s.heldCount > 1 || s.vsFirst) && s.sameStoreN ? circled(s.sameStoreN) : null;
+    // The short form, for the pair line on the 3.5" hat (showStack): the
+    // line only appears with an order in the car, so "same store" alone
+    // says "as the one in the car".
+    if (short) return 'same store' + (n ? ' ' + n : '');
+    return 'same store as ' + (n || 'in car');
   }
 
   // Both jobs at once, when there is already one in the car.
@@ -2401,7 +2473,8 @@
     // The rest only when what it says has moved, and never the route link
     // with it (showRoute).
     if (!drawnAs(el.stack, JSON.stringify([lo, hi, s.heldCount, s.minMinutes, s.maxMinutes,
-                                           s.sure, s.uncosted, s.ends, s.vsFirst]))) return;
+                                           s.sure, s.uncosted, s.ends, s.vsFirst,
+                                           s.sameStore, s.sameStoreN]))) return;
     // Built from parts rather than one string, because the parts have different
     // priorities when the row runs out of room. See .stackline in styles.css:
     // this is the half that gives way, and it can because the same figures are
@@ -2484,6 +2557,19 @@
       ;
     sum.appendChild(range);
     sum.appendChild(more);
+    // ...and the same-store note's short form, drawn on the 3.5" hat alone,
+    // where the address line it rides everywhere else is put away (see
+    // sameNote and the rule under the hat's media query).
+    var same = sameNote({ stack: s }, true);
+    if (same) {
+      var tag = document.createElement('span');
+      tag.className = 'same';
+      tag.textContent = same;
+      tag.title = 'This offer is picked up at the same restaurant as an order already '
+        + 'in the car: the same door, or the same distinctive name close by.';
+      sum.className = 'sum withsame';
+      sum.appendChild(tag);
+    }
     put(sum);
     // ...and the half that does not give way. Its own element, so the ellipsis
     // above can never reach it: these words are the only place this claim is
@@ -4727,7 +4813,7 @@
     // The two ends, not the union: `places` is in the order the frames
     // arrived. See MV.ends, which the offers page asks too. Without MV this
     // page still draws the list, which is what it always drew.
-    showPlaces(MV ? MV.ends(r) : r.places);
+    showPlaces(MV ? MV.ends(r) : r.places, sameNote(r));
     // A card being judged takes the stops' room back. See showStops.
     showStops(false);
     // Sent by the server, which is where the order in the car is known. A page

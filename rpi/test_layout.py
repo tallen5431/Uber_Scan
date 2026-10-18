@@ -1386,7 +1386,10 @@ PLANNER_BLIND = ['dark', 'stalled']
 # line under the card, beside a pair whose range has a minus sign and three
 # figures, every clause the pair line can carry, the geography's widest chip
 # and the route link — the most the pair row is ever asked to hold, above the
-# figures. Invented but for the name.
+# figures. Invented but for the name. ...and its pickup the store of the
+# order in the car (server.js sameStoreOf), "same store as in car", the
+# widest the note is with one order — and with two, on the forms below that
+# say so, "same store as ②".
 HELD = {
     'hold': {'pay': 112.45, 'minutes': 55, 'holdId': 'h-layout@1',
              'dropoff': '4821 Kestrel Dr S, Powder Springs, GA 30127', 'card': None,
@@ -1406,7 +1409,8 @@ HELD = {
                         'worst': -16.4, 'best': 133.4, 'state': 'warn', 'sure': True,
                         'uncosted': True, 'ends': 'elsewhere',
                         'route': 'https://www.google.com/maps/dir/?api=1&origin=A'
-                                 '&destination=B&travelmode=driving'}},
+                                 '&destination=B&travelmode=driving',
+                        'sameStore': 'h-layout@1', 'sameStoreN': 1}},
     # The Took button's widest label once its card has gone: the widest pay a
     # card prints and an age of two figures. See tookAge.
     'took': {'id': 'o-layout-took', 'pay': 112.45, 'minutes': 55, 'perHour': 99.9},
@@ -1447,7 +1451,8 @@ DRIVE_FORMS = {
              'offer': True, 'larger': []},
     'two': {'msgs': [dict(HELD['offer'], holding=_DA, orders=[_DA, _DB], unowned=0,
                           stack=dict(HELD['offer']['stack'], heldCount=2,
-                                     leftEach=[55, 60], maxMinutes=137, route=None))],
+                                     leftEach=[55, 60], maxMinutes=137, route=None,
+                                     sameStore='l-b@2', sameStoreN=2))],
             'offer': True, 'larger': []},
     'refused': {'msgs': [dict(HELD['offer'], state='doubt', doubt='rate', pay=136.0,
                               minutes=10.0, cardMinutes=10.0, billedMinutes=10.0,
@@ -3494,6 +3499,18 @@ const SNAP_MEASURE = (fixture) => {
                                     right: detail.getBoundingClientRect().right,
                                     top: -Infinity, bottom: Infinity }, glass])).join(''),
       } : null,
+      // The same-store note (live.html sameNote) where it is drawn: at the
+      // head of the address line, or on the 3.5" hat on the pair line's
+      // first row — never both (`both`). Its words, which line it is on,
+      // and what of it is outside that line, the card or the glass.
+      same: (() => {
+        const els = [document.querySelector('#places .same'), stack.querySelector('.same')];
+        const on = els.filter(shown);
+        if (!on.length) return null;
+        const line = on[0] === els[0] ? document.getElementById('places') : stack;
+        return { text: text(on[0]), on: line.id, both: on.length > 1,
+                 cut: outside(on[0], [line.getBoundingClientRect(), card, glass]) };
+      })(),
       range: shown(stack) && range ? {
         text: text(range), px: px(range),
         cut: outside(range, [stack.getBoundingClientRect(), card, glass]),
@@ -3741,9 +3758,15 @@ const SNAP_MEASURE = (fixture) => {
         const st = document.getElementById('stack');
         if (!shown(st)) return null;
         const rg = st.querySelector('.range'), bo = st.querySelector('.both');
-        const cutOf = (el) => outside(el, [box(el), box(st), card, glass]);
+        const sm = [document.querySelector('#places .same'), st.querySelector('.same')]
+          .filter(shown)[0] || null;
+        const cutOf = (el) => outside(el, [box(el), box(el === sm ? el.closest('#places, #stack') : st),
+                                           card, glass]);
         return { range: text(rg), rangeCut: cutOf(rg),
-                 both: shown(bo) ? text(bo) : null, bothCut: shown(bo) ? cutOf(bo) : null };
+                 both: shown(bo) ? text(bo) : null, bothCut: shown(bo) ? cutOf(bo) : null,
+                 // ...and "same store as ②" at the head of the address line
+                 // (live.html sameNote), the same.
+                 same: shown(sm) ? text(sm) : null, sameCut: shown(sm) ? cutOf(sm) : null };
       })(),
       over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
     };
@@ -3832,7 +3855,8 @@ const SNAP_MEASURE = (fixture) => {
       // last being Map view's question), at the most the row holds.
       await push(Object.assign({}, HELD.offer, { holding: A, orders: [A, B], unowned: 0,
         stack: Object.assign({}, HELD.offer.stack, { heldCount: 2, leftEach: [55, 60],
-                                                     maxMinutes: 137, route: null }) }));
+                                                     maxMinutes: 137, route: null,
+                                                     sameStore: 'l-b@2', sameStoreN: 2 }) }));
       await page.clock.runFor(1100);
       const offer = await measureCarry(page);
       // ...and with carrying two off and two read back at boot: ① alone, and
@@ -4040,6 +4064,7 @@ const SNAP_MEASURE = (fixture) => {
         min: part('#vMin'), mile: part('#vMile'), perMile: part('#vPerMile'),
         working: part('#working'), stops: part('#stops'),
         range: part('#stack .range'), both: part('#stack .both'), ends: part('#stack .ends'),
+        same: part('#places .same') || part('#stack .same'),
         way: part('#way .call'),
         next: part('#heldNext .where'), nextWhen: part('#heldNext .when'),
         line: part('#heldLine'), line2: part('#heldLine2'), whose: part('#whose'),
@@ -4743,6 +4768,14 @@ try:
                 ('dropoffs', '2 dropoffs: end not guessed', 1, ''),
                 ('list', 'list cut off: end not guessed', 1, '')])
 
+    # The same-store note's words (live.html sameNote): whole on the
+    # address line, short on the pair line on the 3.5" hat.
+    def _same1(h):
+        return 'same store' if h <= 380 else 'same store as in car'
+
+    def _same2(h):
+        return 'same store ②' if h <= 380 else 'same store as ②'
+
     # Two orders in the car (carrying two on), on the three panels and in both
     # pictures: the two compact order lines between offers, whole — pay and
     # GPS word inside the card — with "2 dropoffs read · whose?" under them;
@@ -4827,6 +4860,13 @@ try:
                (_pr.get('range'), _pr.get('rangeCut'), _pr.get('both'), _pr.get('bothCut'),
                 _of.get('vs')),
                ('-$16 to $133/hr', '', 'with ① + ②', '', None))
+            # ...and "same store as ②" under them, whole, at the head of the
+            # address line (live.html sameNote): the store of the second
+            # order (server.js sameStoreOf), never in the words that give way.
+            # On the 3.5" hat, whose address line the answer on the card puts
+            # away, "same store ②" on the pair line's first row.
+            eq('...and "%s" whole at %s' % (_same2(h), where),
+               (_pr.get('same'), _pr.get('sameCut')), (_same2(h), ''))
             # ...and with carrying two off and two read back, "vs ① only"
             # beside the chip, whole, as before.
             _vs = (cm.get('offerFirst') or {}).get('vs') or {}
@@ -4943,6 +4983,11 @@ try:
                ('-$16 to $133/hr', '', True))
             ok_('...larger than the row\'s words at %s (%spx)' % (where, _r.get('px')),
                 (_r.get('px') or 0) >= 16)
+            _sm = _o.get('same') or {}
+            eq('...and "%s" whole, on %s, once, at %s'
+               % (_same1(h), 'the pair line' if h <= 380 else 'the address line under it', where),
+               (_sm.get('text'), _sm.get('on'), _sm.get('both'), _sm.get('cut')),
+               (_same1(h), 'stack' if h <= 380 else 'places', False, ''))
             if not (panel == '480x320' and view == 'scene'):
                 eq('...with the pair row, the verdict and the figures inside the card at %s'
                    % where, (_r.get('rowIn'), _o.get('spill')), (True, []))
@@ -5072,6 +5117,17 @@ try:
                     eq('...with the offer up, the whole card at the parked sizes: nothing the '
                        'parked card draws is gone, smaller or larger, at %s' % where,
                        (_gone, _smaller, _larger), ([], [], []))
+                    # ...and the same-store note (server.js sameStoreOf) drawn
+                    # moving wherever the form's pair carries one, whole (the
+                    # cut check above): a fact the driver reads at a glance.
+                    _sameWant = {'pair': _same1(h), 'long pickup pair': _same1(h),
+                                 'two': _same2(h),
+                                 'three': 'same store ①' if h <= 380 else 'same store as ①'}
+                    if form in _sameWant:
+                        eq('...the same-store note drawn moving as parked, "%s", at %s'
+                           % (form, where),
+                           ((_dp.get('same') or {}).get('text'), (_pp.get('same') or {}).get('text')),
+                           (_sameWant[form], _sameWant[form]))
                     _pkd = _pk.get('detail') or []
                     eq('...every notice, and nothing out of sight but the read diagnostics and '
                        'the route link%s, at %s' % (' and the working' if _small else '', where),
