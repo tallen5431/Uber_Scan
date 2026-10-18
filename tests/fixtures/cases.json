@@ -1915,6 +1915,62 @@
    }
   },
   {
+   "name": "DoorDash's hour-long stops card, the zero of `1 hr 0 min` read as an O, is sixty minutes",
+   "_why": "16 Oct, kept as unread: `3 stops (11.8 mi) - 1hrO min`. The minutes token had no real digit, so the leg was refused, the bracket was a distance no leg claimed and the card a payout with no journey; it was the one real offer of the 100 unread pictures that no other frame read, and it never reached the journal. Behind an hour with a real digit the O is DC's one lookalike inside a number the hour has confirmed. Stores, street and figures made up; the reader's noise lines kept in their shape.",
+   "text": ">»\n$12.40 incl. tips\n3 stops (10.6 mi) - 1hrO min\n&@ Lark Owl Grill\n12 Fable Highway, Smallt...\nSe eee\n& Multiple dropoffs (2 stops)",
+   "expect": {
+    "pay": 12.4,
+    "minutes": 60.0,
+    "miles": 10.6,
+    "legs": 1,
+    "stops": 3,
+    "shortATime": false,
+    "complete": true
+   }
+  },
+  {
+   "name": "...but behind an hour, a digitless minutes token past 59 is no minutes",
+   "_why": "An hours-and-minutes duration prints 0-59 in its minutes slot, so `BB` (88) there is not the card. The leg is refused as it was before the hour vouched for anything.",
+   "text": "$12.40 incl. tips\n3 stops (10.6 mi) - 1 hr BB min\n& Lark Owl Grill",
+   "expect": {
+    "minutes": null,
+    "shortATime": true,
+    "complete": false
+   }
+  },
+  {
+   "name": "...and with no hour in front, a digitless minutes token is still refused",
+   "_why": "`lO min` is two guesses stacked: that it is a number, and which. Only an hour with a real digit answers the first.",
+   "text": "$12.40 incl. tips\n3 stops (10.6 mi) - lO min\n& Lark Owl Grill",
+   "expect": {
+    "minutes": null,
+    "shortATime": true,
+    "complete": false
+   }
+  },
+  {
+   "name": "an hour that read as `1L` is an hour that did not read, not no hours",
+   "_why": "12 Oct: `1hr 29 min (34.6 mi) total` read as `1Lhr 29 min` on a $31.28 card's last frame. LEG is case-insensitive, so DC's `l` matched the L, the real-digit guard saw the 1, the token was no number and `or 0` made it no hours: the window's last row was `go` at 29 minutes where its earlier one was 89, `no`. Refused like a digitless hour; the next frame supplies it. Six texts of the journal (16 Aug-17 Oct) have the shape, every one an hour lost. Card made up.",
+   "text": "x\n$21.50\nGuaranteed (incl. tip)\n© 1Lhr 29 min (30.2 mi) total\nLark Owl Grill (Smalltown)\nWren Dr & Kestrel Ct, Smalltown",
+   "expect": {
+    "pay": 21.5,
+    "minutes": null,
+    "shortATime": true,
+    "complete": false
+   }
+  },
+  {
+   "name": "Uber's Est. delivery card with the E of Est lost and a space read into the rest is still a deadline card",
+   "_why": "12 Oct, kept as unread: `s t. delivery 4:04 PM + 4.4 mi`, the E lost beside the clock icon. It read as a payout and a distance with no deadline: incomplete, no journey. The reader's lines kept in their shape; the merchant, streets, town and figures made up.",
+   "text": ". ——— “~ »\n$ 9 A\nbe ri\nae Includes expected tip\n>¥,\nSe ;\ns t. delivery 6:12 PM + 3.9 mi\nx\n* Lark Owl Custard &\nBurgers (12 Fable Pkwy Nw)\n@ Wren Dr NE & Kestrel Dr NE,\nSmalltown\n@ Matching may take longer",
+   "expect": {
+    "pay": 9.0,
+    "miles": 3.9,
+    "deliverBy": 1092,
+    "complete": true
+   }
+  },
+  {
    "name": "a headline whose cents the reader split off with spaces is the whole figure",
    "_why": "`$12.68` came back as `$12 6 8` on the 12 Oct shift and was read as $12.00; `$12.78` came back as `$12. 78` the same way. A dollar figure followed by a space and exactly two digits, nothing numeric or a unit after them, is one figure. Card around it made up.",
    "text": "x\n$12 6 8\nIncludes expected tip\n46 min (17.8 mi) total\nCorner Bagel Co (Maple Grove)\nOak St & Elm Ave, Smalltown",
@@ -3683,6 +3739,23 @@
    "_why": "Measured on the same card's `incl. tip` over the week's 5,116 readings of it: the full stop lost 289 times, read as a comma 20, and the space after it lost 21. Est. delivery's variants are those three.",
    "text": "Est.delivery 4:15 PM",
    "expect": 975
+  },
+  {
+   "name": "...with its E lost and a space read into what is left",
+   "_why": "12 Oct, a card kept as unread: `s t. delivery 4:04 PM + 4.4 mi`, the E lost beside the clock icon.",
+   "text": "s t. delivery 4:15 PM",
+   "expect": 975
+  },
+  {
+   "name": "...or its E lost alone",
+   "text": "st delivery 4:15 PM",
+   "expect": 975
+  },
+  {
+   "name": "an ordinal is not Est with its E lost",
+   "_why": "The E is optional, so the word boundary in front of the s is what keeps `1st` out, as it keeps `Fastest` out.",
+   "text": "1st delivery 4:15 PM",
+   "expect": null
   }
  ],
  "_until_comment": "Minutes left, wrapping midnight. A deadline already past is a stale card, not a short job, and the sanity bounds refuse what wrapping turns it into.",
@@ -4033,6 +4106,12 @@
    "name": "DoorDash's stops card is finished when its one summary line reads",
    "_why": "The card times the whole job in one line, `3 stops (7.8 mi) · 30 min`, and there is no second leg coming. All 21 DoorDash offers of the 12 Oct shift journalled whole=0 because the bracketed distance was left outside the leg.",
    "text": "$5.00 incl. tips\n2 stops (4.1 mi) - 25 min\n& Corner Bagel Co\n305 Maple Grove Road North...\n& Customer dropoff\nAccept 0:08",
+   "expect": true
+  },
+  {
+   "name": "...and so is the hour-long one whose `0 min` read as `O min`",
+   "_why": "16 Oct's unread `1hrO min`: the bracketed distance belongs to the hour-long leg, so nothing is left untimed.",
+   "text": ">»\n$12.40 incl. tips\n3 stops (10.6 mi) - 1hrO min\n&@ Lark Owl Grill\n12 Fable Highway, Smallt...\nSe eee\n& Multiple dropoffs (2 stops)",
    "expect": true
   }
  ]

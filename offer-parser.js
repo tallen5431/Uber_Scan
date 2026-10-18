@@ -697,6 +697,20 @@
      refused across the owner's 5,491 frames and 0 of the corpus's 314. */
   var HOUR_UNREAD = /(?:h(?:r|rs|our|ours)[a-z]{0,2}|the)\.?[ \t]*$/i;
 
+  /* A minutes token with no real digit, behind an hour whose number has one:
+     `1hrO min`, DoorDash's "1 hr 0 min" with the zero an O (16 Oct; the one
+     real offer of 100 unread pictures no other frame read). The hour already
+     says the line is a duration, so what is left is DC's one lookalike inside
+     a confirmed number - nothing the card did not print. The hour's own real
+     digit, and its being a number, are findLegs' guards on every leg, asked
+     straight after. The minutes slot of an hours-and-minutes duration is 0-59,
+     so nothing past 59. Moves none of the journal's 12,735 texts (16 Aug-17
+     Oct). See hour_vouches_for_minutes. */
+  function hourVouchesForMinutes(hoursToken, minutes) {
+    return hoursToken !== undefined && hoursToken !== null
+      && minutes >= 0 && minutes < 60;
+  }
+
   var ITEMS = new RegExp('(' + DC + '{1,3})\\s*items?\\b', 'i');
 
   /* What a card calls a leg of the journey. Uber labels every one — "away",
@@ -813,10 +827,15 @@
    *
    * The clock time itself is CLOCK_TIME, named so the Trip Planner's "Expected
    * by 4:18 PM" (PLANNER_EXPECTED) is read by the same glyph rule and not a
-   * copy of it. See CLOCK_TIME in offer_parser.py. */
+   * copy of it. See CLOCK_TIME in offer_parser.py.
+   *
+   * ...and "Est" with its E lost and a space read into the rest, `s t.
+   * delivery 4:04 PM + 4.4 mi` (12 Oct, the E eaten by the clock icon): the E
+   * optional, one space allowed inside `st`, still a whole word in front of a
+   * clock time. Moves none of the journal's 12,735 texts (16 Aug-17 Oct). */
   var CLOCK_TIME = '(\\d{1,2})\\s*[:.]\\s*(\\d{2})\\s*([ap])\\.?\\s*m\\.?';
   var DELIVER_BY = new RegExp(
-    '(?:deliver(?:ed|y)?\\s*by|\\best\\s*[.,]?\\s*delivery)'
+    '(?:deliver(?:ed|y)?\\s*by|\\b(?:e\\s?)?s\\s?t\\s*[.,]?\\s*delivery)'
     + '\\s*' + CLOCK_TIME
     + '(?:\\s*[^\\s\\w()]{1,3}\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)'
     + '\\s*mi(?:les?)?\\b)?', 'i');
@@ -2615,6 +2634,12 @@
       // "l hr 10 min (4.6 mi) total" read as a ten-minute job, whole, no
       // doubt, $141/hr ACCEPT. Refused, the next frame supplies it.
       if (m[2] !== undefined && m[2] !== null && !/\d/.test(String(m[2]))) continue;
+      // ...and an hour with a real digit that still is not a number: `1Lhr
+      // 29 min`. LEG is case-insensitive, so DC's `l` also matches an `L`
+      // that DIGIT_FIX does not map, toNumber gives null, and `|| 0` made it
+      // no hours: a $31.28 89-minute card journalled `go` at 29 minutes on 12
+      // Oct. Refused like the digitless hour. See find_legs in the Python port.
+      if (m[2] !== undefined && m[2] !== null && toNumber(m[2]) === null) continue;
       // ...and the same leg again, when the hour's number did not read as a
       // number AT ALL. `Thr 21min` is `1hr 21min` with the 1 read as a T, and
       // T is deliberately not in DC - "too risky to match on", which is right,
@@ -2630,8 +2655,11 @@
       var hours = toNumber(m[2]) || 0;
       var mins = toNumber(m[3]);
       // The number has to contain a real digit. "SI min" is two guesses
-      // stacked, and stacked guesses are how noise becomes data.
-      if (mins === null || !/\d/.test(String(m[3]))) continue;
+      // stacked, and stacked guesses are how noise becomes data - unless the
+      // hour beside it has one: `1hrO min`, DoorDash's "1 hr 0 min". See
+      // hourVouchesForMinutes.
+      if (mins === null) continue;
+      if (!/\d/.test(String(m[3])) && !hourVouchesForMinutes(m[2], mins)) continue;
       var minutes = hours * 60 + mins;
       if (minutes <= 0 || minutes > 600) continue;
 

@@ -315,6 +315,39 @@ STOPS_COUNT = re.compile(r'(?:^|[^\d])(\d{1,2})\s*stops?\s*\(', re.IGNORECASE | 
 # guesses stacked, and stacked guesses are how noise becomes data.
 HAS_DIGIT = re.compile(r'\d', ASCII)
 
+
+# ...except where the hour beside it already has one: `1hrO min`.
+#
+# DoorDash prints an hour-long job as "3 stops (11.8 mi) · 1 hr 0 min", and on
+# 16 Oct the reader gave it back as `3 stops (11.8 mi) - 1hrO min`, the zero an
+# O. The minutes token had no real digit, so the leg was refused, the bracket
+# was a distance no leg claimed (`shortATime`), the reading was a payout with
+# no journey — and of the 100 unread pictures kept 12-17 Oct it is the one real
+# offer that no other frame read: the card never reached the journal.
+#
+# The rule above refuses "SI min" because a digitless token is two guesses
+# stacked: that it is a number at all, and which number. Behind an hour unit
+# whose own number has a real digit the first guess is already answered — the
+# line IS a duration, `1hr` says so in a digit — and what is left is the one
+# lookalike DC exists for, inside a number already confirmed. Nothing is
+# supplied that the card did not print: the O is where the 0 was.
+#
+# Two limits, both the card's own grammar rather than a tuning:
+# - an hour unit with a number in front of it. That number's real digit is not
+#   asked here because find_legs asks it of every leg straight after (`l hr`
+#   is refused, and so is `1Lhr`, a number that is not one): two digitless
+#   numbers would be two stacked guesses again, and they never get this far.
+# - the minutes under sixty. An hour-and-minutes duration never prints 60 or
+#   more in its minutes slot: `1hr lO min` (10) is the card, `1 hr BB min`
+#   (88) is not.
+#
+# Measured over the 12,735 distinct texts of the rig's journal (16 Aug-17 Oct
+# 2026): an hour unit in front of a digitless minutes token occurs twice,
+# `lLhrll min` and `S Hi min`, both with a digitless hour too, so the rule
+# moves none of them. Its one case is the unread picture's.
+def hour_vouches_for_minutes(hours_token, minutes):
+    return hours_token is not None and 0 <= minutes < 60
+
 # An hour unit sitting immediately in front of a leg whose hours group matched
 # NOTHING: `Thr 21min`. See find_legs, which refuses such a leg.
 #
@@ -425,9 +458,20 @@ ITEMS = re.compile(r'(' + DC + r'{1,3})\s*items?\b', re.IGNORECASE | ASCII)
 # "Expected by 4:18 PM" (see PLANNER_EXPECTED) is read by the same glyph rule
 # rather than a copy of it: two rules for "what a time looks like through this
 # lens" would answer differently the first time either was touched.
+#
+# ...and "Est" with its E lost and a space read into what is left: `s t.
+# delivery 4:04 PM + 4.4 mi`, 12 Oct, the E eaten by the clock icon beside it.
+# The card read as $8 and 4.4 mi with no deadline: incomplete, a payout with no
+# journey, and its picture kept as unread. So the E is optional and the `s t`
+# may hold one space, where the full stop already could be lost or a comma.
+# Still a whole word (\b in front, so "Fastest delivery" and "1st delivery"
+# stay out) and still only in front of a clock time. Measured over the 12,735
+# distinct texts of the journal (16 Aug-17 Oct): 42 put a clock time after
+# "delivery", every one behind a whole "Est" that already matched, so it moves
+# none of them; that shift's later frames of the same card read it whole 4 s on.
 CLOCK_TIME = r'(\d{1,2})\s*[:.]\s*(\d{2})\s*([ap])\.?\s*m\.?'
 DELIVER_BY = re.compile(
-    r'(?:deliver(?:ed|y)?\s*by|\best\s*[.,]?\s*delivery)'
+    r'(?:deliver(?:ed|y)?\s*by|\b(?:e\s?)?s\s?t\s*[.,]?\s*delivery)'
     r'\s*' + CLOCK_TIME +
     r'(?:\s*[^\s\w()]{1,3}\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)'
     r'\s*mi(?:les?)?\b)?', re.IGNORECASE | ASCII)
@@ -1171,12 +1215,27 @@ def find_legs(text):
     legs = []
     for m in LEG.finditer(text):
         mins = to_number(m.group(3))
-        if mins is None or not HAS_DIGIT.search(m.group(3)):
+        if mins is None:
+            continue
+        if not HAS_DIGIT.search(m.group(3)) \
+                and not hour_vouches_for_minutes(m.group(2), mins):
             continue
         # An hour unit whose number has no real digit — "l hr" — is a leg
         # that did not read, not a leg with no hours; matched, it dropped
         # sixty minutes and called a ten-minute job whole.
         if m.group(2) is not None and not HAS_DIGIT.search(m.group(2)):
+            continue
+        # ...and an hour that has a real digit and still is not a number:
+        # `1Lhr 29 min`. LEG is compiled IGNORECASE, so DC's `l` also matches
+        # an `L` that DIGIT_FIX does not map (nor a `q`), the guard above sees
+        # the 1 and passes, to_number gives None, and `or 0` below made it no
+        # hours at all. 12 Oct: a $31.28 card, `1hr 29 min (34.6 mi) total`,
+        # was journalled `go` at 29 minutes off its last frame's `1Lhr 29 min`
+        # where the window's earlier rows had it at 89, `no`. Refused here like
+        # the digitless hour: the hour is printed, it did not read, and the
+        # next frame supplies it. Not read as a 1: an L is not in DIGIT_FIX and
+        # this is not the place to add a guess to it.
+        if m.group(2) is not None and to_number(m.group(2)) is None:
             continue
         # ...and the same leg again, when the hour's number did not read as a
         # number AT ALL. `Thr 21min` is `1hr 21min` with the 1 read as a T, and
