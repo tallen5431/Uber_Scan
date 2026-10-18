@@ -8382,6 +8382,84 @@ eq('...while an ordinary press still replaces the planner\'s end', _pkr.get('ord
 eq('[carry two] ⌖ at the restaurant with one order in the car: the same',
    _pickupnav('1'), _PKW)
 
+# --- the same store as an order in the car ------------------------------------
+#
+# The owner's decision of 18 Oct 2026, on the 17 Oct shape (invented): an Uber
+# order held from "<Store> (113 <Street> NW)", and a DoorDash card whose stops
+# line prints the same door with the quadrant NE. The pair row names the held
+# order by its holdId (`sameStore`, ids only), the reading's stack carries it
+# for the panel with its number on the line (`sameStoreN`), and nothing else
+# on either moves: the row's arithmetic, its `said`, the reading's verdict.
+# A card at another door says nothing; a reading of another card says nothing
+# under the card on record; with two in the car the second is named ②.
+def _ssread(pay, miles, state='go'):
+    return {'ready': True, 'state': state, 'perHour': 30.0, 'grossPerHour': 33.6,
+            'pay': pay, 'minutes': 25.0, 'billedMinutes': 25.0, 'cardMinutes': 25.0,
+            'miles': miles, 'cost': 1.4, 'target': 25, 'band': 15, 'costPerMile': 0.35}
+
+
+def _samestore():
+    sp, sb, sj, _sh = _cserver('samestore', CARRY_TWO='1')
+    out = {}
+    try:
+        _took2(sb, _card('ss-a', 9.48, minutes=40.0, pickup='Larkspur Tacos (113 Quillon St NW)'))
+        ida = (_orders(sb)[0] or {}).get('holdId')
+        out['ida'] = bool(ida)
+        # A reading first, so each card's pair row is judged against the same
+        # target (recordPairing takes it off the reading before the card).
+        _say(_ssread(12.05, 8.4))
+        _say(_card('ss-d', 12.05, minutes=25.0, miles=8.4, app='doordash', screen='dd.offer',
+                   pickup='Larkspur Tacos', pickupLine='113 Quillon St NE, Marietta, 30060 GA'))
+        _say(_ssread(12.05, 8.4))
+        st = (get(sb, '/api/status').get('last') or {})
+        out['same'] = ([r.get('sameStore') == ida for r in _rows(sj, 'pair') if r.get('id') == 'ss-d'],
+                       (st.get('stack') or {}).get('sameStore') == ida,
+                       (st.get('stack') or {}).get('sameStoreN'), st.get('state'))
+        # ...a reading of ANOTHER card, before its offer line: nothing said
+        # under the card on record.
+        _say(_ssread(6.10, 3.1))
+        out['other reading'] = 'sameStore' in ((get(sb, '/api/status').get('last') or {})
+                                                .get('stack') or {})
+        # ...the same figures at another door: no note, and the row the same
+        # but for it.
+        _say(_card('ss-x', 12.05, minutes=25.0, miles=8.4, app='doordash', screen='dd.offer',
+                   pickup='Larkspur Tacos', pickupLine='940 Wren Ave, Smyrna, 30080 GA'))
+        _say(_ssread(12.05, 8.4))
+        st = (get(sb, '/api/status').get('last') or {})
+        rd = [r for r in _rows(sj, 'pair') if r.get('id') == 'ss-d'][0]
+        rx = [r for r in _rows(sj, 'pair') if r.get('id') == 'ss-x'][0]
+        out['other door'] = ('sameStore' in rx, 'sameStore' in (st.get('stack') or {}),
+                             sorted(set(rd) - set(rx)), rd.get('said'), rx.get('said'),
+                             (rd.get('stack') or {}).get('state') == (rx.get('stack') or {}).get('state'),
+                             (rd.get('stack') or {}).get('worst') == (rx.get('stack') or {}).get('worst'))
+        # ...and with two in the car, the second's store: named ②.
+        _took2(sb, _card('ss-b', 28.08, minutes=55.0, app='doordash', screen='dd.offer',
+                         pickup='Wren Street Noodles', pickupLine='7 Wren Ave, Smyrna, 30080 GA'))
+        idb = (_orders(sb)[1] if len(_orders(sb)) > 1 else {}).get('holdId')
+        _say(_card('ss-e', 14.0, minutes=25.0, miles=4.0, pickup='Wren Street Noodles (7 Wren Avenue SW)'))
+        _say(_ssread(14.0, 4.0))
+        st = (get(sb, '/api/status').get('last') or {})
+        out['second'] = ([r.get('sameStore') == idb for r in _rows(sj, 'pair') if r.get('id') == 'ss-e'],
+                         (st.get('stack') or {}).get('sameStore') == idb,
+                         (st.get('stack') or {}).get('sameStoreN'))
+    finally:
+        stop(sp)
+    return out
+
+
+_ssr = _samestore()
+ok_('same store: the order in the car has a holdId to be named by', _ssr.get('ida'))
+eq('same store: a DoorDash card at the held Uber order\'s door, quadrant NE for NW, names that '
+   'order on its pair row and on the reading\'s stack, ①, and the verdict is the reading\'s own',
+   _ssr.get('same'), ([True], True, 1, 'go'))
+eq('...a reading of another card says nothing under the card on record',
+   _ssr.get('other reading'), False)
+eq('...a card at another door says nothing, and its pair row differs from the same-store one '
+   'by that field alone: the same said, the same arithmetic',
+   _ssr.get('other door'), (False, False, ['sameStore'], 'go', 'go', True, True))
+eq('...and with two in the car the second order\'s store is named, ②',
+   _ssr.get('second'), ([True], True, 2))
+
 shutil.rmtree(_cdir, ignore_errors=True)
 
 # --- the held order's pickups, visited ----------------------------------------

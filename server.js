@@ -3585,6 +3585,19 @@ function withStack(read, now) {
   // was on, read back at boot (MAX_HELD_FILE) — is weighed against the first
   // alone, as before Stage 6, and the line still says so ("vs ① only").
   if (read.stack && !carryingTwo(now) && heldOrders(now).length >= 2) read.stack.vsFirst = true;
+  // ...and whether the offer's pickup is the store of one of those orders
+  // (sameStoreOf): its holdId and its number on the line. Off the offer LINE,
+  // which carries the doors and the fix a reading does not, and only while
+  // that line is this reading's card (offerIsReading): a new card's reading
+  // arrives before its line, and the store of the card before is not said
+  // under it. On the stack, so it goes when the pair line goes.
+  if (read.stack && offerIsReading(scanner.offer, read)) {
+    var same = sameStoreOf(pairedWith(now, held), scanner.offer);
+    if (same) {
+      read.stack.sameStore = same.holdId;
+      read.stack.sameStoreN = same.n;
+    }
+  }
   if (carryingTwo(now)) {
     read.orders = ordersForPanel(now);
     read.unowned = Assemble.unowned(assembly);
@@ -3619,6 +3632,85 @@ function addOnAsCarded(read) {
       || Math.round(c.pay * 100) !== Math.round(r.pay * 100)
       || c.minutes !== r.minutes || c.miles !== r.miles) return read;
   return Object.assign({}, read, { screen: 'uber.addon' });
+}
+
+/* ---------- the same store as an order in the car --------------------------
+ *
+ * The owner's decision of 18 Oct 2026: an offer whose pickup is the same
+ * restaurant as an order in the car is SAID so on the pair line — "same store
+ * as ①", "same store as in car" with one — and nothing else changes: not the
+ * verdict, not the state, not the range, not the pair row's arithmetic. The
+ * rule is Assemble.samePickup (the door when both sides have one, quadrant
+ * and type and one OCR look-alike tolerated; the name only when it is
+ * distinctive and the two pickups are proven within half a mile).
+ *
+ * WHY HERE AND NOT ON THE PANEL. Three of the doors the rule reads live on
+ * this side only — a hold's tapped `fields.pickupAddr`, its Trip Planner's
+ * pickups (kept on the first order) and the pins this server keeps for them
+ * — and the pair row is written here, so the record says which order the
+ * offer shared a store with (`sameStore: <holdId>`, ids only, never the
+ * store) under the same rule the glass used. The panel draws what it is
+ * sent, as it draws the range.
+ *
+ * Against the orders the pair line weighs the offer against (pairedWith):
+ * the note sits on that line and names one of ITS orders. `orders` is that
+ * list, first-taken first; the first that shares the store is named. Never
+ * the offer against its own hold (the held card come back is not paired). */
+function sameStoreOf(orders, offer) {
+  if (!offer || !orders || !orders.length) return null;
+  var stops = orders[0] && orders[0].planner && Array.isArray(orders[0].planner.stops)
+    ? orders[0].planner.stops : [];
+  var mine = Assemble.pickupSide(offer, null, null);
+  for (var i = 0; i < orders.length; i++) {
+    var h = orders[i];
+    if (!h || h.id === offer.id) continue;
+    var side = Assemble.pickupSide(h, stops, holdIdOf(h));
+    var by = Assemble.samePickup(side, mine, pickupsApartFn(side, offer));
+    if (by) return { holdId: holdIdOf(h), n: i + 1, by: by };
+  }
+  return null;
+}
+
+/* Whether the offer on record is the card this reading is of: the pay to the
+ * cent and the miles, which emit and emit_offer take off the same figures —
+ * the rule live.html's onRecordIs holds the map's answer to. Not minutes: a
+ * delivery card's count down between the two. */
+function offerIsReading(o, read) {
+  return !!o && !!read && typeof o.pay === 'number' && typeof read.pay === 'number'
+    && Math.round(o.pay * 100) === Math.round(read.pay * 100)
+    && (o.miles === undefined ? null : o.miles) === (read.miles === undefined ? null : read.miles);
+}
+
+/* The name rule's bound: how far apart the held store and the offer's pickup
+ * can be, in miles, by what is PROVEN — or null. The held store's position is
+ * a pin this server keeps for one of its own planner pickups (pickupPins, by
+ * MV.pickupKey; any order's list, since with one order a pin stays where it
+ * was asked); the offer's is its card's fix, which the gate passed
+ * (MV.cardFix), and the drive to the pickup the card printed
+ * (`toPickupMiles`) plus the fix's own error. A road is never shorter than
+ * the straight line, so the pickup is inside that circle, and the sum is an
+ * upper bound by the triangle inequality. Not slack for the car's motion
+ * between the platform's figure and the fix: seconds, at most a few hundred
+ * feet, and unmeasured (as MV.cardYardstick says). No pin, no fix or no
+ * approach leg: null, and the name decides nothing. A function, so it is
+ * worked out only when the names have already matched. */
+function pickupsApartFn(side, offer) {
+  return function () {
+    var fix = MV.cardFix(offer).at;
+    var leg = offer && offer.toPickupMiles;
+    if (!fix || typeof leg !== 'number' || !isFinite(leg) || leg < 0) return null;
+    var keys = (side.stops || []).map(MV.pickupKey).filter(Boolean);
+    var err = typeof offer.gpsErr === 'number' && isFinite(offer.gpsErr) ? offer.gpsErr : 0;
+    var best = null;
+    heldOrders(Date.now()).forEach(function (o) {
+      (Array.isArray(o.pickupPins) ? o.pickupPins : []).forEach(function (p) {
+        if (keys.indexOf(p.q) === -1) return;
+        var d = MV.crowMiles(fix, p) + leg + err / 1609.344;
+        if (best === null || d < best) best = d;
+      });
+    });
+    return best;
+  };
 }
 
 /* Every order in the car as the panel draws it: heldForPanel's shape, with its
@@ -3813,6 +3905,13 @@ function recordPairing(offer, now, reading) {
     row.heldCount = all.length;
     if (row.stack && all.length > 1) row.stack.over = all.length;
   }
+  // ...and the order in the car whose store this offer's pickup is, by its
+  // holdId (sameStoreOf, the rule the pair line says it by): ids only, the
+  // store's name and door are on the rows they came from. Absent when none
+  // is, or when nothing could tell, so a row written before it reads the
+  // same as one with no shared store — which is what the glass said then.
+  var same = sameStoreOf(pairedWith(now, held), offer);
+  if (same) row.sameStore = same.holdId;
   appendLines(JSON.stringify(row) + '\n', function (err) {
     if (err) console.error('journal: could not record a pairing: ' + err.message);
   });
@@ -7731,12 +7830,14 @@ function route(req, res) {
               pickup: marked.pickup || null,
               // ...and the store's door DoorDash's stops card printed under
               // that name (the parser's `pickupLine`, "<n> <street>, <town>"),
-              // a string or null: what this server searches the restaurant
-              // by for the GPS drop's guard (pickupAsks), and what a
+              // a non-empty string or null: what this server searches the
+              // restaurant by for the GPS drop's guard (pickupAsks), what a
               // navigation screen's address is refused as the store's by
-              // (Assemble.heldPickup). The hold kept the name alone, and
-              // a chain's name is no place.
-              pickupLine: typeof marked.pickupLine === 'string' ? marked.pickupLine : null,
+              // (Assemble.heldPickup), and what the same-store note reads as
+              // this order's pickup (sameStoreOf). The hold kept the name
+              // alone, and a chain's name is no place.
+              pickupLine: typeof marked.pickupLine === 'string' && marked.pickupLine
+                ? marked.pickupLine : null,
               // Whether this reading was one the rig would state a verdict
               // about. A doubted order in the car makes every pair judged
               // against it nonsense, and an uncosted one makes the pair's
