@@ -8526,7 +8526,7 @@ python3 rpi/test_autopilot.py   #  47 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      # 111 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 356 on the faults that only surface when a
+python3 rpi/test_lint.py        # 358 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #   76 on the three files the browser and the
@@ -8559,7 +8559,7 @@ python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 911 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 929 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8574,7 +8574,7 @@ python3 rpi/test_map.py         # 231 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
-node tests/assemble.test.js     # 304 on where the order in the car ends: one
+node tests/assemble.test.js     # 308 on where the order in the car ends: one
                                 #     hold decided as before, and a Trip Planner
                                 #     filed from pages stitched only on the cues
                                 #     the screen gives

@@ -6509,6 +6509,8 @@ try:
         eq('[auto arm] with NUCBOX_SEARCH unset nothing is sent and nothing is said',
            ((len(_aasked('')), len(_Stub.searches)), _h.get('endPinned'), _h.get('endWhy')),
            (_n, False, None))
+        eq('[auto arm] ...nor of its pickups, though none has a house number',
+           (_h.get('pickupsPinned'), _h.get('pickupsWhy')), (0, None))
     finally:
         stop(_cp)
     # ...and that same hold, restored at boot by a server that now has the
@@ -6688,6 +6690,21 @@ try:
             and 'bounded=1' in _q[0])
         eq('[held pickups] ...so the door the server armed 87 m from it is not armed, and '
            'says why', (_h.get('endPinned'), _h.get('endWhy')), (True, 'door next to the pickup'))
+        eq('[held pickups] ...and /api/status says how: by the server, from the planner',
+           _h.get('pickupsHow'), [{'by': 'server', 'from': 'planner', 'asked': None}])
+        post(_hkb, '/api/delivered', {})
+
+        # A planner pickup with a street and no house number: door level only
+        # (pickupDoorPlan, the owner's decision of 18 Oct), so not asked.
+        _atook(_hkb, 'k-nonum', _COBB)
+        _settled(_hkb, lambda h: h.get('endPinned'))
+        _n = len(_hkasked(''))
+        _hksays([_hkplanner(('Example Diner', 'Cobb Parkway'))])
+        _h = _settled(_hkb, lambda h: (h.get('planner') or {}).get('stops'))
+        time.sleep(0.3)
+        eq('[held pickups] a planner pickup with no house number is not asked, and /api/status '
+           'says why', (_hkasked('')[_n:], _h.get('pickupsPinned'),
+                        (_holding(_hkb) or {}).get('pickupsWhy')), ([], 0, 'no house number'))
         post(_hkb, '/api/delivered', {})
 
         # The end armed AND arrived at — the car waiting at the restaurant —
@@ -6716,9 +6733,12 @@ try:
                 break
             time.sleep(0.05)
         time.sleep(0.3)
-        eq('[held pickups] a pickup the NucBox places outside the held card\'s disc is asked '
-           'and not kept', (len(_hkasked('street=250')) - _n,
-                            (_holding(_hkb) or {}).get('pickupsPinned')), (1, 0))
+        time.sleep(0.3)
+        eq('[held pickups] a pickup the NucBox places outside the held card\'s disc is asked, '
+           'once more without its street\'s type word (as the end is), and not kept',
+           (len(_hkasked('street=250')) - _n, (_holding(_hkb) or {}).get('pickupsPinned'),
+            (_holding(_hkb) or {}).get('pickupsWhy')),
+           (2, 0, 'not inside the card\'s reach'))
         post(_hkb, '/api/delivered', {})
     finally:
         stop(_hkp)
@@ -6782,6 +6802,8 @@ try:
         eq('[rough disc] ...but a rough stamp over the cap (250 m) is still no disc',
            (_h.get('dropoff'), _h.get('endPinned'), _h.get('endWhy')),
            ('1985 Cobb Parkway, Kennesaw', False, 'no card fix'))
+        eq('[rough disc] ...and its planner pickup, a door, is not asked either, and says why',
+           (_h.get('pickupsPinned'), _h.get('pickupsWhy')), (0, 'no card fix'))
         post(_hkb, '/api/delivered', {})
     finally:
         stop(_hkp)
@@ -6830,6 +6852,203 @@ try:
            (_h.get('holdId', '').startswith('k-boot'), _h.get('pickupsPinned')), (True, 1))
     finally:
         stop(_hkp)
+
+    # --- the held order's restaurant, pinned by the server from its card ---
+    #
+    # The owner's decision of 18 Oct 2026: the server pins the held order's
+    # restaurant itself, so the restaurant guard is always on — not only when
+    # a Trip Planner was read. Each pickup address on record with a house
+    # number (server.js pickupAsks): DoorDash's printed door under the store's
+    # name (`pickupLine`, now carried onto the hold at Took), an Uber card's
+    # "Store (<n> <street>)", a popup's door filed on the hold. The fake's
+    # "1981 Cobb Parkway" is a restaurant 60 m from the door at 1985 Cobb
+    # Parkway. Every name and address invented.
+    _SP_DOOR = '1981 Cobb Pkwy, Kennesaw, GA 30152'
+
+    def _sptook(base, oid, pickup, line=None, dropoff=_COBB, app='doordash'):
+        o = dict(_SQ, id=oid, pay=9.0, minutes=35.0, billedMinutes=35.0, miles=5.0,
+                 cost=1.5, pickup=pickup, app=app)
+        if dropoff:
+            o['dropoff'] = dropoff
+        if line:
+            o['pickupLine'] = line
+        post(base, '/api/offers/mark', {'id': oid, 'accepted': True, 'offer': o})
+
+    def _spsettled(base):
+        return _settled(base, lambda h: (h.get('pickupsPinned') or h.get('pickupsWhy'))
+                        and (h.get('endPinned') or h.get('endWhy')))
+
+    def _sporders(journal):
+        """holding.json's orders, by id: (pickupLine, [(lat, lon, q, by, from)])."""
+        f = json.load(open(os.path.join(os.path.dirname(journal), 'holding.json')))
+        return {o.get('id'): (o.get('pickupLine'),
+                              [(p.get('lat'), p.get('lon'), p.get('q'), p.get('by'),
+                                p.get('from')) for p in o.get('pickupPins') or []])
+                for o in f.get('orders') or []}
+
+    _SP_AT = (34.001, -84.55535)          # the fake's restaurant at 1981
+
+    _spj = os.path.join(_hkdir, 'sp', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_spj))
+    open(_spj, 'w').close()
+    _spp, _spb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base,
+                        'NUCBOX_TIMEOUT_MS': '800'}, _spj)
+    try:
+        _n = len(_hkasked('street=1981'))
+        _sptook(_spb, 's-uber', 'Example Burger (1981 Cobb Pkwy)', app='uber')
+        _h = _spsettled(_spb)
+        _spq = _hkasked('street=1981')[_n:]
+        ok_('[server pickups] the card\'s door is asked once, on the NucBox, inside the held '
+            'card\'s disc (%r)' % _spq,
+            len(_spq) == 1 and 'viewbox=' in _spq[0] and 'bounded=1' in _spq[0])
+        eq('[server pickups] an Uber card\'s "Store (<n> <street>)" is its door: pinned by the '
+           'server from the card, and the door 60 m from it is not armed',
+           (_h.get('pickupsPinned'), _h.get('pickupsHow'), _h.get('endPinned'),
+            _h.get('endWhy')),
+           (1, [{'by': 'server', 'from': 'card', 'asked': None}], True,
+            'door next to the pickup'))
+        post(_spb, '/api/delivered', {})
+
+        _n = len(_hkasked(''))
+        _sptook(_spb, 's-none', 'Example Taqueria', 7)
+        _h = _spsettled(_spb)
+        eq('[server pickups] a pickupLine that is not a string is not kept on the hold',
+           _sporders(_spj).get('s-none', ('missing',))[0], None)
+        eq('[server pickups] no pickup address with a house number: nothing asked, the store\'s '
+           'name never, the door armed, and /api/status says why',
+           ([a for a in _hkasked('')[_n:] if 'street=1985' not in a], _h.get('pickupsPinned'),
+            _h.get('pickupsWhy'), _h.get('endPinned'), _h.get('endWhy')),
+           ([], 0, 'no house number', True, None))
+        post(_spb, '/api/delivered', {})
+
+        # The street-type retry, as the end's: "Cts" asked again without it.
+        _sptook(_spb, 's-retry', 'Example Wok', '1830 Tansy Creek Cts SW, Marietta, GA 30064',
+                dropoff=_KES)
+        _h = _settled(_spb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
+        eq('[server pickups] a printed door the NucBox holds under another type word is asked '
+           'again without it, as the end is, and says the street asked',
+           (_h.get('pickupsPinned'), _h.get('pickupsHow')),
+           (1, [{'by': 'server', 'from': 'card', 'asked': '1830 Tansy Creek SW'}]))
+        post(_spb, '/api/delivered', {})
+
+        # Left held for the restart below.
+        _sptook(_spb, 's-dd', 'Example Taqueria', _SP_DOOR)
+        _h = _spsettled(_spb)
+        eq('[server pickups] a held DoorDash order keeps its card\'s printed door '
+           '(pickupLine), and the server pins it there, by the server, from the card',
+           (_sporders(_spj).get('s-dd'), _h.get('pickupsHow'), _h.get('pickupsWhy')),
+           ((_SP_DOOR, [(_SP_AT[0], _SP_AT[1], _SP_DOOR, 'server', 'card')]),
+            [{'by': 'server', 'from': 'card', 'asked': None}], None))
+        eq('[server pickups] ...so a door 60 m from it is not armed, and says why',
+           (_h.get('endPinned'), _h.get('endWhy')), (True, 'door next to the pickup'))
+        _code = post(_spb, '/api/held-pickup', {'holdId': _h.get('holdId'), 'lat': 34.0,
+                                                 'lon': -84.55, 'q': _SP_DOOR})[0]
+        eq('[server pickups] the first valid pin for a pickup text wins: Map view\'s post for '
+           'it after the server pinned it moves nothing',
+           (_code, _sporders(_spj).get('s-dd')[1]),
+           (200, [(_SP_AT[0], _SP_AT[1], _SP_DOOR, 'server', 'card')]))
+        post(_spb, '/api/held-pickup', {'holdId': _h.get('holdId'), 'lat': _SP_AT[0],
+                                        'lon': _SP_AT[1]})
+        eq('[server pickups] ...and a post with no name at the same position keeps the name '
+           'and who pinned it', _sporders(_spj).get('s-dd')[1],
+           [(_SP_AT[0], _SP_AT[1], _SP_DOOR, 'server', 'card')])
+    finally:
+        stop(_spp)
+    _n = len(_hkasked('street=1981'))
+    _spp, _spb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base,
+                        'NUCBOX_TIMEOUT_MS': '800'}, _spj)
+    try:
+        _h = _spsettled(_spb)
+        time.sleep(0.3)
+        eq('[server pickups] a restart restores the pin and how it was made, the door still '
+           'not armed, and a pinned pickup is not asked again',
+           (_h.get('holdId', '').startswith('s-dd'), _h.get('pickupsHow'), _h.get('endWhy'),
+            len(_hkasked('street=1981')) - _n),
+           (True, [{'by': 'server', 'from': 'card', 'asked': None}], 'door next to the pickup',
+            0))
+    finally:
+        stop(_spp)
+
+    # A hold restored at boot whose store's door a place popup filed
+    # (`fields.pickupAddr`, from 'popup'), no pickup pinned: asked at boot —
+    # and its card's own "Store (<n> <street>)" as well, which the popup's
+    # filing took out of the field.
+    _spr = os.path.join(_hkdir, 'spr')
+    os.makedirs(_spr)
+    open(os.path.join(_spr, 'offers.jsonl'), 'w').close()
+    with open(os.path.join(_spr, 'holding.json'), 'w') as _fh:
+        _at = int(time.time() * 1000) - 60000
+        json.dump({'id': 's-popup', 'acceptedAt': _at, 'pay': 9.0, 'minutes': 35.0,
+                   'miles': 5.0, 'pickup': 'Example Grill (250 Example Rd)', 'dropoff': None,
+                   'card': dict(_SQ, miles=5.0),
+                   'fields': {'dropoff': None, 'customer': None, 'expectedBy': None,
+                              'pickupAddr': {'value': '1981 Cobb Pkwy, Kennesaw',
+                                             'from': 'popup', 'conf': 2, 'at': _at}}}, _fh)
+    _spp, _spb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base},
+                       os.path.join(_spr, 'offers.jsonl'))
+    try:
+        _h = _settled(_spb, lambda h: (h.get('pickupsPinned') or 0) >= 2)
+        eq('[server pickups] a store\'s door a popup filed on the hold is pinned, from the popup, '
+           'and the card\'s bracketed door beside it, from the card',
+           (_h.get('pickupsPinned'), sorted(w.get('from') for w in _h.get('pickupsHow') or [])),
+           (2, ['card', 'popup']))
+    finally:
+        stop(_spp)
+
+    # Two orders in the car (carrying two on), each card printing its own
+    # store's door: each is pinned, under its own order.
+    _spj2 = os.path.join(_hkdir, 'sp2', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_spj2))
+    open(_spj2, 'w').close()
+    _spp, _spb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base, 'CARRY_TWO': '1',
+                        'NUCBOX_TIMEOUT_MS': '800'}, _spj2)
+    try:
+        _sptook(_spb, 's-two-a', 'Example Taqueria', _SP_DOOR)
+        _sptook(_spb, 's-two-b', 'Example Grill', '250 Example Rd, Marietta, GA 30060',
+                dropoff=None)
+        _two = []
+        for _ in range(120):
+            _two = get(_spb, '/api/status').get('orders') or []
+            if len(_two) == 2 and all(o.get('pickupsPinned') for o in _two):
+                break
+            time.sleep(0.05)
+        _o = _sporders(_spj2)
+        eq('[server pickups] two orders: each order\'s own store is pinned by the server, '
+           'under that order, and /api/status says so of each',
+           ([(o.get('n'), o.get('pickupsPinned'), o.get('pickupsHow')) for o in _two],
+            [(p[0], p[1]) for p in _o.get('s-two-a', (None, []))[1]],
+            [(p[0], p[1]) for p in _o.get('s-two-b', (None, []))[1]]),
+           ([(1, 1, [{'by': 'server', 'from': 'card', 'asked': None}]),
+             (2, 1, [{'by': 'server', 'from': 'card', 'asked': None}])],
+            [_SP_AT], [(33.97, -84.53)]))
+    finally:
+        stop(_spp)
+
+    # A NucBox that does not answer: nothing pinned, said, and Map view's own
+    # post for the same text still kept.
+    _spj3 = os.path.join(_hkdir, 'sp3', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_spj3))
+    open(_spj3, 'w').close()
+    _spp, _spb = start({'SCANNER': '0', 'NUCBOX_RETRY_MS': '1000',
+                        'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _hkdown.server_address[1]},
+                       _spj3)
+    try:
+        _n = len([u for u in _HkDown.searches if 'street=1981' in u])
+        _sptook(_spb, 's-down', 'Example Taqueria', _SP_DOOR)
+        _h = _settled(_spb, lambda h: h.get('pickupsWhy'))
+        time.sleep(3.5)
+        eq('[server pickups] a NucBox that does not answer pins nothing, says so, and is asked '
+           'exactly once more',
+           (_h.get('pickupsPinned'), _h.get('pickupsWhy'),
+            len([u for u in _HkDown.searches if 'street=1981' in u]) - _n), (0, 'NucBox down', 2))
+        post(_spb, '/api/held-pickup', {'holdId': _h.get('holdId'), 'lat': _SP_AT[0],
+                                        'lon': _SP_AT[1], 'q': _SP_DOOR})
+        _h = _holding(_spb) or {}
+        eq('[server pickups] ...and Map view\'s post still pins it, said as the page\'s',
+           (_h.get('pickupsPinned'), _h.get('pickupsHow'), _h.get('pickupsWhy')),
+           (1, [{'by': None, 'from': None, 'asked': None}], None))
+    finally:
+        stop(_spp)
 
     # --- the held end by its PLACE (the owner, 17 Oct) -----------------------
     #

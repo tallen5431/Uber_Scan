@@ -2812,49 +2812,115 @@ function searchHeldPlace(key, attempt, disc) {
 /* ---------- the held order's pickups, searched for by this server ----------
  *
  * The restaurant guard (pickupNearEnd) is only as good as the pickups it is
- * given, and until this only Map view gave them (/api/held-pickup): with Map
- * view never opened on a hold the guard held nothing, and searchHeldEnd armed
- * a door next to the restaurant all the same — the case the guard is there
- * for (the 12 Oct replay, at PICKUP_GUARD_M). So when the hold carries its
- * Trip Planner (the rig reads it unpressed while an order is held) and
- * NUCBOX_SEARCH is set, this server asks the NucBox for each of its pickups
- * the question Map view asks: each stop
- * MV.heldPickups keeps (a pickup that has a street, its line as the place),
- * searchPlan's street in discBox round the HELD card's disc, chosen by
- * pickInDisc. Map view's own functions, as for the end. The position is kept
- * as /api/held-pickup keeps one (keepPickupPin): one path, so the two cannot
- * keep pickups two ways.
+ * given, and until 3ca870a only Map view gave them (/api/held-pickup): with
+ * Map view never opened on a hold the guard held nothing, and searchHeldEnd
+ * armed a door next to the restaurant all the same — the case the guard is
+ * there for (the 12 Oct replay, at PICKUP_GUARD_M). 3ca870a searched the Trip
+ * Planner's pickups, so an order with no planner read — every DoorDash order,
+ * and an Uber one whose planner the rig never saw — still left the guard
+ * empty. THE OWNER'S DECISION, 18 Oct 2026: the server pins the held order's
+ * restaurant itself, so the guard is always on.
  *
- * Any pin pickInDisc chooses, not only a door: where the line has a house
- * number the door rule is pickInDisc's own, and where it has none the street's
- * agreeing answers are what Map view pins too (with no street index). The
- * guard only ever WITHHOLDS the GPS drop, so a pickup kept a little off costs
- * at most a drop the timer and Drop still make — the cheap error, as refusing
- * the end is. A corner ("A & B") is the street index's question, which this
- * server does not ask: no pin, as with no NucBox at all. NucBox only; with
- * NUCBOX_SEARCH unset nothing here sends anything.
+ * So when an order is held and NUCBOX_SEARCH is set, this server asks the
+ * NucBox for each pickup address on record for it (pickupAsks): the Trip
+ * Planner's pickups (MV.heldPickups: street with its town), the store's door
+ * a planner or DoorDash's place popup filed on the hold (`fields.pickupAddr`),
+ * the door DoorDash's stops card printed under the store's name (`pickupLine`,
+ * carried onto the hold at ✓ Took), and an Uber card's "Store (<n> <street>)"
+ * (searchPlan's bracket). Each exactly as the held end is asked
+ * (searchHeldEnd): searchPlan's street in discBox round the HELD card's disc
+ * (MV.discFor — a rough fix widened), chosen by pickInDisc, and the street
+ * less its type word once more where the street as printed is not inside the
+ * card's reach (MV.streetRetry, retryWanted, pickRetry, afterRetry). Map
+ * view's own functions, so the page and the server keep one rule.
  *
- * ONE search per hold and pickup line (`pickSearch.asked`); a failure or a
- * timeout is asked once more after END_RETRY_MS, as the end's is, and an
- * answer that comes back after the hold changed is dropped. Nothing is kept
- * of a refusal; /api/status says how many pickups the guard holds
- * (`pickupsPinned`) beside the planner's own stops (`planner`), and Map view
- * says why one has no pin. */
-// One per order, by holdId: {asked, timers}.
+ * DOOR LEVEL ONLY (pickupDoorPlan): an address with a house number, kept only
+ * where pickInDisc finds that number (hasDoor, its own rule). Until the
+ * owner's decision a planner pickup with no number was asked for its street
+ * and any agreeing answer kept; a street is a mile of road, and a pin kept
+ * along it withholds the GPS drop from whatever door happens to be within
+ * PICKUP_GUARD_M of it — and is the circle visitPickups marks the restaurant
+ * visited by. A pickup with no house number anywhere on record is not asked,
+ * and /api/status says so (`pickupsWhy: 'no house number'`); Map view still
+ * pins it as it always has, and posts it. A corner ("A & B") is the street
+ * index's question, which this server does not ask. The store's NAME is never
+ * asked: a chain's name inside a disc is whichever branch, the wrong
+ * restaurant at the confidence of the right one.
+ *
+ * The position is kept as /api/held-pickup keeps one (keepPickupPin), `by:
+ * 'server'` with the source it came from (`from`) and, when the type-word
+ * retry found it, the street asked (`asked`): one path, so the two cannot
+ * keep pickups two ways, and the newest PICKUP_PINS_MAX kept as before. The
+ * FIRST valid pin for a pickup text wins, this server's or Map view's
+ * (pickupPinFor): a text already pinned is not asked, and an answer that
+ * lands after the page pinned it is dropped, as the end's is.
+ *
+ * The public geocoder is never asked; with NUCBOX_SEARCH unset nothing here
+ * sends anything. ONE search per hold and pickup text (`pickSearch.asked`); a
+ * failure or a timeout is asked once more after END_RETRY_MS, as the end's
+ * is, and an answer that comes back after the hold changed is dropped. A
+ * refusal is kept in memory by text (`pickSearch.why`) — a restart asks again
+ * — and /api/status says how many pickups the guard holds and how each was
+ * pinned (pickupState). With two orders in the car, or a trip and its Uber
+ * add-ons, each order's own card is asked under that order, and the
+ * planner's pickups (kept on the first-taken) land on the order whose card
+ * names the store (keepPickupPin, pickupOwner). */
+// One per order, by holdId: {asked, timers, why}.
 var pickSearch = {};
 
-/* The hook, beside armHeldEnd: for each order after the list is written, when
- * a Trip Planner read lands on one, and at boot. A no-op for a pickup line
- * already asked about on that order. */
+/* The named check: a pickup text's search plan when it is a street with a
+ * house number (searchPlan's door), else null. The one rule for "this pickup
+ * may be asked", for the asking and for /api/status's reason. */
+function pickupDoorPlan(q) {
+  var plan = typeof q === 'string' && q ? MV.searchPlan(q) : null;
+  return plan && plan.kind === 'street' && plan.door ? plan : null;
+}
+
+/* Every pickup address on record for this order that may be asked, as
+ * [{q, from}], first source first: 'planner' (its Trip Planner's stops,
+ * MV.heldPickups' `q`, the name visitPickups marks it by), the source a filed
+ * `fields.pickupAddr` says ('planner', 'popup'; its 'card' is the card's
+ * pickup below), and 'card' (DoorDash's printed door `pickupLine`, then the
+ * card's pickup itself, which searchPlan reads as a door only in an Uber
+ * "Store (<n> <street>)"). A text on it twice is asked once
+ * (armHeldPickups' `asked`), under the first source. */
+function pickupAsks(h) {
+  var out = [];
+  function add(q, from) {
+    if (pickupDoorPlan(q)) out.push({ q: q, from: from });
+  }
+  if (h.planner) MV.heldPickups(h.planner.stops).forEach(function (p) { add(p.q, 'planner'); });
+  var f = Assemble.fieldsOf(h).pickupAddr;
+  if (f) add(f.value, f.from);
+  add(h.pickupLine, 'card');
+  add(h.pickup, 'card');
+  return out;
+}
+
+/* The pin kept for this pickup text on any order in the car, or null: the
+ * first valid one wins (keepPickupPin), and a text pinned is not asked. */
+function pickupPinFor(q) {
+  var hit = null;
+  heldOrders(Date.now()).forEach(function (o) {
+    (Array.isArray(o.pickupPins) ? o.pickupPins : []).forEach(function (p) {
+      if (!hit && p.q === q) hit = p;
+    });
+  });
+  return hit;
+}
+
+/* The hook, beside armHeldEnd: for each order after the list is written
+ * (a ✓ Took among them, with its card's door), when a Trip Planner read lands
+ * on one, and at boot. A no-op for a pickup text already asked about on that
+ * order, or already pinned. */
 function armHeldPickups(h) {
   if (!NBX.search || !h) return;
   var id = holdIdOf(h);
-  var on = pickSearch[id] || (pickSearch[id] = { asked: {}, timers: [] });
-  if (!h.planner || !MV.discFor(h.card || null)) return;
-  MV.heldPickups(h.planner.stops).forEach(function (p) {
-    if (on.asked[p.q]) return;
-    on.asked[p.q] = true;
-    searchHeldPickup(id, p.q, 1);
+  var on = pickSearch[id] || (pickSearch[id] = { asked: {}, timers: [], why: {} });
+  pickupAsks(h).forEach(function (a) {
+    if (on.asked[a.q] || pickupPinFor(a.q)) return;
+    on.asked[a.q] = true;
+    searchHeldPickup(id, a, 1);
   });
 }
 
@@ -2887,40 +2953,119 @@ function forgetHoldsGone(list) {
   });
 }
 
-function searchHeldPickup(id, q, attempt) {
+/* One pickup asked: `a` is pickupAsks' {q, from}. Nothing with no disc
+ * round the held card (MV.discFor), which /api/status says (pickupsWhyOf).
+ * As searchHeldEnd asks the end, and the street less its type word once more when the street as printed
+ * is not inside the card's reach (searchPickupRetry). */
+function searchHeldPickup(id, a, attempt) {
   var h = pickHold(id);
   if (!h) return;
-  var plan = MV.searchPlan(q);
+  var plan = pickupDoorPlan(a.q);
   var disc = MV.discFor(h.card || null);
-  var said = plan && plan.kind === 'street' ? nbxTerm(plan.street) : null;
+  var said = plan ? nbxTerm(plan.street) : null;
   if (!said || !disc) return;
   var target = nbxSearchTarget('street', said, MV.discBox(disc));
-  function answered(out) {
-    var now = pickHold(id);
-    if (!now) return;
+  pickupAsk(id, a, attempt, target, function (out) {
     var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
-    if (res.at) keepPickupPin(now, res.at, q);
+    var again = MV.streetRetry(plan);
+    if (again && MV.retryWanted(res, out.hits, disc)) {
+      return searchPickupRetry(id, a, attempt, disc, again, res);
+    }
+    settleHeldPickup(id, a, res, null);
+  });
+}
+
+/* ...the retry: ONE more question, the street less its type word, in the
+ * same discBox, an answer kept only at the same door on the same street
+ * (MV.pickRetry), and MV.afterRetry choosing which answer is acted on. */
+function searchPickupRetry(id, a, attempt, disc, again, first) {
+  var said = nbxTerm(again.street);
+  if (!said) return settleHeldPickup(id, a, first, null);
+  var target = nbxSearchTarget('street', said, MV.discBox(disc));
+  pickupAsk(id, a, attempt, target, function (out) {
+    settleHeldPickup(id, a, MV.afterRetry(first, MV.pickRetry(out.hits, disc, again, out.cutAt)),
+                     again.street);
+  });
+}
+
+/* One question for a pickup, answered from nbxCache or asked; `answered(out)`
+ * only while the order is still held. A NucBox that does not answer is
+ * 'NucBox down' for that text, and the whole search is asked once more, from
+ * the top, after END_RETRY_MS. A text the page pinned while this was out is
+ * not asked about here a second time: keepPickupPin keeps the first, the one
+ * place that rule is. */
+function pickupAsk(id, a, attempt, target, answered) {
+  function go(out) {
+    if (pickHold(id)) answered(out);
   }
-  if (nbxCache.has(target)) return answered(nbxCache.get(target));
+  if (nbxCache.has(target)) return go(nbxCache.get(target));
   nbxAsk(target, function (err, body) {
     if (!err && !Array.isArray(body)) err = 'not a list';
     if (err) {
-      if (attempt === 1 && pickHold(id)) {
+      if (!pickHold(id)) return;
+      pickSearch[id].why[a.q] = 'NucBox down';
+      if (attempt === 1) {
         pickSearch[id].timers.push(setTimeout(function () {
-          searchHeldPickup(id, q, 2);
+          searchHeldPickup(id, a, 2);
         }, END_RETRY_MS));
       }
       return;
     }
     var out = nbxHits(body);
     nbxRemember(target, out);
-    answered(out);
+    go(out);
   });
+}
+
+/* The answer acted on: a door kept `by: 'server'`, or the refusal kept for
+ * /api/status in pickInDisc's words (END_WHY, the end's). `asked` is the
+ * street the type-word retry found it by, else null. */
+function settleHeldPickup(id, a, res, asked) {
+  var now = pickHold(id);
+  if (!now) return;
+  if (!res.at) {
+    pickSearch[id].why[a.q] = END_WHY[res.why] || 'no house number';
+    return;
+  }
+  keepPickupPin(now, res.at, a.q, { by: 'server', from: a.from, asked: asked });
+}
+
+/* What /api/status says of one order's pickups: how many the guard holds
+ * (`pickupsPinned`), how each was pinned (`pickupsHow`, oldest first: `by`
+ * 'server' or null for Map view's post, `from` the source this server asked,
+ * `asked` the street when the type-word retry found it), and, with none
+ * pinned, why (`pickupsWhy`): 'no house number' when no pickup on record has
+ * one, 'no card fix' when the held card has no disc, else the last refusal
+ * of the first text asked (END_WHY's words, or 'NucBox down'); null while
+ * one is still being asked, or with NUCBOX_SEARCH unset, when this server
+ * asks nothing and says nothing. */
+function pickupState(h) {
+  var pins = Array.isArray(h.pickupPins) ? h.pickupPins : [];
+  return { pickupsPinned: pins.length,
+           pickupsHow: pins.map(function (p) {
+             return { by: p.by || null, from: p.from || null, asked: p.asked || null };
+           }),
+           pickupsWhy: pins.length ? null : pickupsWhyOf(h) };
+}
+
+function pickupsWhyOf(h) {
+  if (!NBX.search) return null;
+  var asks = pickupAsks(h);
+  if (!asks.length) return 'no house number';
+  if (!MV.discFor(h.card || null)) return 'no card fix';
+  var on = pickSearch[holdIdOf(h)];
+  var said = asks.map(function (a) { return on ? on.why[a.q] : null; }).filter(Boolean);
+  return said.length ? said[0] : null;
 }
 
 /* Keep one of the held order's pickups, from Map view (/api/held-pickup) or
  * this server's own search: at most PICKUP_PINS_MAX, the newest, one per
- * position.
+ * position. `how` is this server's {by, from, asked}, or null for the page.
+ *
+ * ...ONE per pickup text: the first valid pin for a text wins (the end's
+ * rule, /api/held-end), so a pin already kept for it — this server's door or
+ * the page's — is not moved by a second opinion, and an arrival or a visit
+ * already counted at it stands.
  *
  * ...and the guard asked again there and then. A door armed before its
  * restaurant was known may already have counted the car waiting at the
@@ -2931,7 +3076,8 @@ function searchHeldPickup(id, q, attempt) {
  * (a newer pickup pushing this one out of the PICKUP_PINS_MAX kept) the next
  * departure puts the order down on it. So a pickup that puts the armed door
  * inside the guard takes the arrival and the dwell with it. */
-function keepPickupPin(h, at, q) {
+function keepPickupPin(h, at, q, how) {
+  if (typeof q === 'string' && q && pickupPinFor(q)) return;
   // With two orders in the car, onto the order the pickup is (pickupOwner);
   // one that is nobody's stays where it was asked for, for the guard, which
   // reads every order's pins.
@@ -2944,14 +3090,21 @@ function keepPickupPin(h, at, q) {
     if (p.lat === at.lat && p.lon === at.lon) { was = p; return false; }
     return true;
   });
-  // ...named by the planner line it was searched for (`q`, MV.heldPickups'),
-  // which is what the GPS marks visited (visitPickups). A pin with no name —
-  // a page from before the field — still guards the door, and is never
-  // visited: there is no pickup to say it of. A second opinion at the same
-  // position without a name keeps the name it had.
+  // ...named by the text it was searched for (`q`: MV.heldPickups' planner
+  // line, or the card's door), which is what the GPS marks visited
+  // (visitPickups). A pin with no name — a page from before the field — still
+  // guards the door, and is never visited: there is no pickup to say it of. A
+  // second opinion at the same position without a name keeps the name it had,
+  // and who pinned it.
   var pin = { lat: at.lat, lon: at.lon };
   if (typeof q === 'string' && q) pin.q = q;
   else if (was && was.q) pin.q = was.q;
+  var by = how || (was && was.by ? was : null);
+  if (by) {
+    pin.by = by.by;
+    if (by.from) pin.from = by.from;
+    if (by.asked) pin.asked = by.asked;
+  }
   picks.push(pin);
   h.pickupPins = picks.slice(-PICKUP_PINS_MAX);
   // Every order's door, since the guard is every order's pickups (see
@@ -3480,7 +3633,10 @@ function ordersForPanel(now) {
     ? list[0].planner.stops : [];
   return list.map(function (h, i) {
     var o = Object.assign(heldForPanel(h), { n: i + 1, app: h.app || null,
-                                             addOn: !!h.addOn, of: h.of || null });
+                                             addOn: !!h.addOn, of: h.of || null },
+                          // ...and its pickups as the guard holds them, each
+                          // order its own (pickupState).
+                          pickupState(h));
     // With two in the car, where on that planner this order's end is
     // (planAt): Map view runs the car through both orders in the planner's
     // order only when it places both ends (MV.heldRuns). Absent with one,
@@ -5453,8 +5609,9 @@ function statusNow() {
                      return pin && pin.asked ? pin.asked : null;
                    }()),
                    // ...and how many of its pickups the guard holds, from Map
-                   // view or this server's search (keepPickupPin).
-                   pickupsPinned: Array.isArray(h.pickupPins) ? h.pickupPins.length : 0,
+                   // view or this server's search (keepPickupPin), merged
+                   // in below: pickupsPinned, pickupsHow, pickupsWhy
+                   // (pickupState).
                    // Where it ends, and whether that came off the card or
                    // off a scan of the screen after the accept. The panel
                    // needs the difference: a card-derived dropoff is a
@@ -5481,7 +5638,7 @@ function statusNow() {
                    card: h.card || null,
                    heldMs: Math.max(0, Date.now() - h.acceptedAt) },
                    // endPinned, arrived, endWhy: see heldEndState.
-                   heldEndState(h)) : null;
+                   heldEndState(h), pickupState(h)) : null;
     }()),
     // Every order in the car and the addresses waiting for an owner, while
     // carrying two is on (ordersForPanel); and whether it is.
@@ -7572,6 +7729,14 @@ function route(req, res) {
               // `false`, with the address itself identical.
               dropoffScanned: !!marked.dropoffScanned,
               pickup: marked.pickup || null,
+              // ...and the store's door DoorDash's stops card printed under
+              // that name (the parser's `pickupLine`, "<n> <street>, <town>"),
+              // a string or null: what this server searches the restaurant
+              // by for the GPS drop's guard (pickupAsks), and what a
+              // navigation screen's address is refused as the store's by
+              // (Assemble.heldPickup). The hold kept the name alone, and
+              // a chain's name is no place.
+              pickupLine: typeof marked.pickupLine === 'string' ? marked.pickupLine : null,
               // Whether this reading was one the rig would state a verdict
               // about. A doubted order in the car makes every pair judged
               // against it nonsense, and an uncosted one makes the pair's
@@ -7939,7 +8104,9 @@ function route(req, res) {
    * visited (visitPickups). A `q` that is not a string is no name. A pin
    * for another hold, or with no position, is refused and changes nothing.
    * This server searches for the same pickups itself (searchHeldPickup), so
-   * Map view need not be opened for the guard to hold. */
+   * Map view need not be opened for the guard to hold; the first valid pin
+   * for a text wins, the page's or the server's (keepPickupPin), and the
+   * page's says no `by`. */
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/held-pickup') {
     return readBody(req, 1024, function (err, text) {
       var json = { 'Content-Type': 'application/json; charset=utf-8' };
@@ -7959,7 +8126,7 @@ function route(req, res) {
       // The one path this server's own search keeps a pickup by too, guard
       // and all (keepPickupPin).
       keepPickupPin(h, { lat: body.lat, lon: body.lon },
-                    typeof body.q === 'string' ? body.q : null);
+                    typeof body.q === 'string' ? body.q : null, null);
       send(res, 200, JSON.stringify({ ok: true }), json);
     });
   }
