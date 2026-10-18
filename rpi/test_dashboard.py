@@ -1270,13 +1270,17 @@ const framed = (page) => page.waitForFunction(
   // --- driving: the card at a glance while the car moves --------------------
   stage = 'driving: the card at a glance while the car moves';
   //
-  // While the car is moving the card shows the verdict, the pay, the rate,
-  // the pair line's range and the order in the car, larger, and the rest
-  // waits until it stops. Moving is gps.py's word on the beat's fix
-  // (`driving`, DRIVING_SPEED there); this holds what the page does with it:
-  // the form, everything back when it stops, a tap for the detail for ten
-  // seconds, and a state whose hold (`drivingFor`) has run out never
-  // driving. On the page's own clock, at 800x480 beside the phone.
+  // While the car is moving with an offer up, the card is the whole card
+  // (the owner's decision of 17 Oct 2026): every figure, both ends — a line
+  // each — the pair line, every notice, the in-car line, at the parked
+  // card's sizes; only the read diagnostics and the route link wait. Between
+  // offers it takes the driving form: the order in the car larger, the stops
+  // put away, a tap for them for ten seconds. Moving is gps.py's word on the
+  // beat's fix (`driving`, DRIVING_SPEED there); this holds what the page
+  // does with it: both forms, the change between them in the frame the card
+  // changes, everything back when it stops, and a state whose hold
+  // (`drivingFor`) has run out never moving. On the page's own clock, at
+  // 800x480 beside the phone.
   {
     const ctx = await browser.newContext({
       viewport: { width: 800, height: 480 }, deviceScaleFactor: 1,
@@ -1312,10 +1316,10 @@ const framed = (page) => page.waitForFunction(
                   gpsOk: true, gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false,
                   drivingFor: 0.0 };
     const MOVING = { speed: 13.4, driving: true, drivingFor: 9.6 };
-    const beat = (fix) => push({ alive: true, at: Date.now(), tooBright: true,
+    const beat = (fix, extra) => push(Object.assign({ alive: true, at: Date.now(), tooBright: true,
                                  notSaving: 'Offers are NOT being saved: disk full',
                                  gps: { state: 'ok', ageSeconds: 0.4,
-                                        fix: fix && Object.assign({}, FIX, fix) } });
+                                        fix: fix && Object.assign({}, FIX, fix) } }, extra || {}));
     // What is on the card side, and how big: every part the driving form
     // keeps or hides, with its type size.
     const look = () => page.evaluate(() => {
@@ -1331,8 +1335,19 @@ const framed = (page) => page.waitForFunction(
       };
       const chips = [].slice.call(document.querySelectorAll('#warn .chip'))
         .filter(shown).map((c) => c.textContent);
+      // The address line: its words, and how many rows its ends are drawn
+      // on (the distinct tops of the ends that are drawn).
+      const ends = [].slice.call(document.querySelectorAll('#places .end')).filter(shown);
+      const pl = document.getElementById('places');
       return {
         driving: document.querySelector('.live').classList.contains('driving'),
+        moving: document.querySelector('.live').classList.contains('moving'),
+        placesText: shown(pl) ? pl.textContent : null,
+        placesRows: new Set(ends.map((e) => Math.round(e.getBoundingClientRect().top))).size,
+        // Each end whole on its row, nothing ellipsised (this card's ends
+        // are short; the long-pickup case is test_layout's).
+        placesWhole: ends.every((e) => e.scrollWidth <= e.clientWidth + 1),
+        warnOpen: document.getElementById('warn').getAttribute('aria-expanded') === 'true',
         label: part('#verdictLabel'), rate: part('#perHour'), pay: part('#vPay'),
         minutes: part('#vMin'), miles: part('#vMile'), perMile: part('#vPerMile'),
         working: part('#working'), places: part('#places'), range: part('#stack .range'),
@@ -1395,26 +1410,57 @@ const framed = (page) => page.waitForFunction(
     await beat(MOVING);
     await tick(1100);
     const moving = await look();
-    // A tap on the card, while moving: the detail, for ten seconds.
-    await page.evaluate(() => document.getElementById('verdict').click());
+    // A tap on a notice, while moving with the offer up: no peek to take it
+    // (there is nothing put away), so it is the notice's sentence, as
+    // parked; and a second tap, the chips back.
+    await page.evaluate(() => document.getElementById('warn').click());
     await tick(200);
     const tapped = await look();
-    await beat(MOVING);
-    await tick(9000);
-    const tapped9 = await look();
-    await beat(MOVING);
-    await tick(1500);
-    const tapped10 = await look();
+    await page.evaluate(() => document.getElementById('warn').click());
+    await tick(200);
+    const tappedBack = await look();
     // Stopped: under 1 m/s for 5 s, gps.py's word again.
     await beat({ speed: 0.2, driving: false });
     await tick(1100);
     const stopped = await look();
-    // Moving again, between offers: the order in the car, not its stops.
+    // Moving again, between offers: the order in the car, not its stops —
+    // in the frame the card goes, before any tick.
     await beat(MOVING);
+    await tick(1100);
     await push({ ready: false, state: 'empty', track: null });
+    const offerGone = await look();
     await tick(1100);
     const between = await look();
+    // A tap on the card between offers, moving: the stops, for ten seconds.
+    await page.evaluate(() => document.getElementById('verdict').click());
+    await tick(200);
+    const peek = await look();
+    await beat(MOVING);
+    await tick(9000);
+    const peek9 = await look();
+    // Looked at on a beat, which renders as it lands: the page's own
+    // one-second render is on whatever phase the waits above left it.
+    await tick(1500);
+    await beat(MOVING);
+    const peek10 = await look();
+    // ...and an offer arriving while moving: the whole card, in the frame
+    // the offer lands.
+    await push(OFFER);
+    const offerBack = await look();
+    // ...a rig gone blind with that offer still on record: render draws no
+    // offer (its own branch test), so neither is the card the whole card.
+    await beat(MOVING, { blind: 'stalled' });
+    const blindMoving = await look();
+    await beat(MOVING, { blind: null });
+    // ...and a reading whose places are three, the frames' union and not two
+    // ends (MV.ends): the one line it is parked.
+    await push(Object.assign({}, OFFER, { places: ['Cobb Pkwy NW, Acworth',
+                                                   'Barrett Pkwy NW, Kennesaw',
+                                                   'Canton Rd, Marietta'] }));
+    const unionMoving = await look();
+    await push(OFFER);
     await beat({ speed: 0.2, driving: false });
+    await push({ ready: false, state: 'empty', track: null });
     await tick(1100);
     const betweenStopped = await look();
     await push(OFFER);
@@ -1456,8 +1502,10 @@ const framed = (page) => page.waitForFunction(
     await tick(1100);
     const noFix = await look();
     out.driving = { alone: alone, aloneMoving: aloneMoving,
-                    parked: parked, moving: moving, tapped: tapped, tapped9: tapped9,
-                    tapped10: tapped10, stopped: stopped, between: between,
+                    parked: parked, moving: moving, tapped: tapped, tappedBack: tappedBack,
+                    stopped: stopped, offerGone: offerGone, between: between,
+                    peek: peek, peek9: peek9, peek10: peek10, offerBack: offerBack,
+                    blindMoving: blindMoving, unionMoving: unionMoving,
                     betweenStopped: betweenStopped, fresh: fresh, inHold: inHold,
                     outrun: outrun, held: held, refused: refused, unsaid: unsaid,
                     noFix: noFix };
@@ -7858,80 +7906,111 @@ try:
 
     # --- driving: the card at a glance while the car moves -------------------
     #
-    # gps.py's `driving` on the beat's fix puts the card side in its driving
-    # form: the verdict, the pay and the rate, larger; the pair line's range
-    # and the order in the car kept; the other figures, the working, the
-    # address, the read diagnostics, the route link and every notice but the
-    # first (counted on a chip) out of sight until the car stops. A tap on the
-    # card brings the detail back for ten seconds. The picture's column does
-    # not move.
+    # gps.py's `driving` on the beat's fix: with an offer up, the whole card,
+    # as parked (the owner's decision of 17 Oct 2026, "it is better to have
+    # the full info presented") — the minutes, the miles, $/mi, the working,
+    # both ends on a line each, the pair line, every notice, the in-car line,
+    # at the parked sizes — with only the read diagnostics and the route
+    # link put away. Between offers the driving form: the order in the car
+    # larger, its stops put away, a tap for them for ten seconds. The
+    # picture's column does not move.
     dv = got.get('driving') or {}
     ok_('the driving form was measured', bool(dv.get('moving')))
     if dv.get('moving'):
         _p, _m = dv.get('parked') or {}, dv['moving']
         _sh = lambda m, *ks: tuple(bool((m.get(k) or {}).get('shown')) for k in ks)
         _px = lambda m, k: (m.get(k) or {}).get('px') or 0
-        _DETAIL = ('minutes', 'miles', 'perMile', 'working', 'places', 'route')
+        # What an offer is decided on, by the owner's list: every figure,
+        # both ends, the pair line's range, the card line, the in-car line
+        # and the reading's age. The first four are any offer's.
+        _DECIDE = ('minutes', 'miles', 'perMile', 'places', 'range', 'way', 'held', 'age')
+        _SIZES = ('label', 'rate', 'pay', 'minutes', 'miles', 'perMile', 'range', 'held', 'way')
         _a, _am = dv.get('alone') or {}, dv.get('aloneMoving') or {}
         eq('parked, the card is the whole card',
-           (_p.get('driving'), _sh(_p, *_DETAIL), len(_p.get('chips') or []),
-            _sh(_a, 'diag')),
-           (False, (True,) * len(_DETAIL), 2, (True,)))
-        eq('moving: the card shows the verdict, pay and $/hr large, and hides the detail '
-           '(label %spx→%spx, pay %spx→%spx, rate %spx→%spx)'
-           % (_px(_p, 'label'), _px(_m, 'label'), _px(_p, 'pay'), _px(_m, 'pay'),
-              _px(_p, 'rate'), _px(_m, 'rate')),
-           (_m.get('driving'), _sh(_m, 'label', 'pay', 'rate'),
-            _px(_m, 'label') > _px(_p, 'label'), _px(_m, 'pay') > _px(_p, 'pay'),
-            _px(_m, 'rate') >= _px(_p, 'rate'), _sh(_m, *_DETAIL),
-            _am.get('driving'), _sh(_am, 'diag', 'age')),
-           (True, (True, True, True), True, True, True, (False,) * len(_DETAIL),
-            True, (False, True)))
-        eq('...the first notice only, and a chip counting the rest (%r)' % (_m.get('chips'),),
-           _m.get('chips'), ['OFFERS NOT SAVED · disk full', '+1 more'])
-        eq('...and the picture beside it where it was', _m.get('view'), _p.get('view'))
-        eq('driving mode keeps the in-car line and the take-another figure, larger '
-           '(range %spx→%spx, in-car %spx→%spx)'
-           % (_px(_p, 'range'), _px(_m, 'range'), _px(_p, 'held'), _px(_m, 'held')),
-           (_sh(_m, 'range', 'held', 'age'), _px(_m, 'range') > _px(_p, 'range'),
-            _px(_m, 'held') > _px(_p, 'held')),
-           ((True, True, True), True, True))
-        eq('driving mode keeps the card line, larger, saying what it said parked '
-           '(%spx→%spx, %r)' % (_px(_p, 'way'), _px(_m, 'way'), _m.get('wayText')),
-           (_sh(_p, 'way'), _sh(_m, 'way'), _px(_m, 'way') > _px(_p, 'way'),
-            _m.get('wayText') == _p.get('wayText'),
+           (_p.get('driving'), _p.get('moving'), _sh(_p, *_DECIDE), _sh(_p, 'route', 'working'),
+            len(_p.get('chips') or []), _sh(_a, 'diag'), _p.get('placesRows')),
+           (False, False, (True,) * len(_DECIDE), (True, True), 2, (True,), 1))
+        eq('moving with an offer up: the whole card, not the driving form — every figure, '
+           'the ends, the pair line, the card line and the in-car line',
+           (_m.get('moving'), _m.get('driving'), _sh(_m, *_DECIDE),
+            _am.get('moving'), _am.get('driving'), _sh(_am, *_DECIDE[:4])),
+           (True, False, (True,) * len(_DECIDE), True, False, (True,) * 4))
+        eq('...at the parked sizes, none smaller (%s)'
+           % ', '.join('%s %s→%s' % (k, _px(_p, k), _px(_m, k)) for k in _SIZES),
+           [k for k in _SIZES if abs(_px(_m, k) - _px(_p, k)) > 0.05], [])
+        eq('...every notice, as parked, no "+N more" (%r)' % (_m.get('chips'),),
+           (_m.get('chips'), len(_m.get('chips') or [])), (_p.get('chips'), 2))
+        eq('...both ends on a line each, saying what parked said on one (%r)'
+           % (_m.get('placesText'),),
+           (_m.get('placesRows'), _m.get('placesWhole'), _m.get('placesText')),
+           (2, True, _p.get('placesText')))
+        eq('...the card line saying what it said parked (%r)' % (_m.get('wayText'),),
+           (_m.get('wayText') == _p.get('wayText'),
             (_m.get('wayText') or '').startswith("CAN'T TELL · NUCBOX DOWN")),
-           ((True,), (True,), True, True, True))
+           (True, True))
+        # ...and at 800x480, below the rig's own panel, the working with
+        # them: the sum from the figures to the headline (test_layout holds
+        # it kept at 1024x600).
+        eq('...and only the read diagnostics, the route link and (below 1024x600) the '
+           'working put away, the age kept',
+           (_sh(_m, 'route', 'working'), _sh(_am, 'diag', 'age', 'working')),
+           ((False, False), (False, True, False)))
+        eq('...and the picture beside it where it was', _m.get('view'), _p.get('view'))
+        _t, _tb = dv.get('tapped') or {}, dv.get('tappedBack') or {}
+        eq('a tap on a notice while moving with an offer up is its sentence, as parked — '
+           'no peek takes it — and a second tap the chips',
+           (_t.get('moving'), _t.get('driving'), _t.get('warnOpen'), _sh(_t, *_DECIDE),
+            _tb.get('warnOpen'), _tb.get('chips')),
+           (True, False, True, (True,) * len(_DECIDE), False, _p.get('chips')))
         _b, _bs = dv.get('between') or {}, dv.get('betweenStopped') or {}
-        eq('...and between offers, where the order in the car goes next and its line, '
-           'its stops back once the car stops',
-           (_b.get('driving'), _sh(_b, 'heldNext', 'heldLine', 'stops'),
-            _px(_b, 'heldLine') > _px(_bs, 'heldLine'), _sh(_bs, 'heldNext', 'heldLine', 'stops')),
-           (True, (True, True, False), True, (True, True, True)))
+        _og, _ob = dv.get('offerGone') or {}, dv.get('offerBack') or {}
+        eq('...and between offers, the driving form: where the order in the car goes next '
+           'and its line, larger, its stops back once the car stops',
+           (_b.get('driving'), _b.get('moving'), _sh(_b, 'heldNext', 'heldLine', 'stops'),
+            _px(_b, 'heldLine') > _px(_bs, 'heldLine'), _bs.get('driving'),
+            _sh(_bs, 'heldNext', 'heldLine', 'stops')),
+           (True, False, (True, True, False), True, False, (True, True, True)))
+        eq('the form changes in the frame the card does: the driving form as the offer goes, '
+           'the whole card as one lands',
+           (_og.get('driving'), _og.get('moving'), _ob.get('driving'), _ob.get('moving'),
+            _sh(_ob, *_DECIDE[:4])),
+           (True, False, False, True, (True,) * 4))
+        _bm, _um = dv.get('blindMoving') or {}, dv.get('unionMoving') or {}
+        eq('...and a blind rig with an offer on record is no offer on the card: the driving '
+           'form, as render draws it',
+           (_bm.get('driving'), _bm.get('moving'), _sh(_bm, 'minutes', 'places')),
+           (True, False, (False, False)))
+        eq('...the ends exactly as parked words them, the arrow at the head of the second '
+           '(%r), and three places, the frames\' union, on the one line parked gives them'
+           % (_m.get('placesText'),),
+           (_p.get('placesText'), _m.get('placesText'), _um.get('moving'), _um.get('placesRows'),
+            _um.get('placesText')),
+           ('Cobb Pkwy NW, Acworth → Canton Rd, Marietta',) * 2
+           + (True, 1, 'Cobb Pkwy NW, Acworth → Barrett Pkwy NW, Kennesaw → Canton Rd, Marietta'))
+        eq('between offers a tap shows the stops for 10 s while moving',
+           [(dv.get(k) or {}).get('driving') for k in ('peek', 'peek9', 'peek10')]
+           + [(dv.get(k) or {}).get('moving') for k in ('peek', 'peek10')]
+           + [_sh(dv.get('peek') or {}, 'stops'), _sh(dv.get('peek10') or {}, 'stops')],
+           [False, False, True, False, False, (True,), (False,)])
         _s = dv.get('stopped') or {}
         _form = lambda m: {k: v for k, v in m.items() if k != 'view'}
-        # Not driving, the detail drawn, and the card as it was parked: the
-        # last alone could pass against a parked card that never left the
-        # driving form either.
-        eq('stopped: everything is back',
-           (_s.get('driving'), _sh(_s, *_DETAIL), _form(_s)),
-           (False, (True,) * len(_DETAIL), _form(_p)))
-        eq('a tap shows the detail for 10 s while moving',
-           [(dv.get(k) or {}).get('driving') for k in ('tapped', 'tapped9', 'tapped10')]
-           + [_sh(dv.get('tapped') or {}, *_DETAIL)],
-           [False, False, True, (True,) * len(_DETAIL)])
-        eq('a fix gps.py lets go is never driving: a refused one past its hold, one '
+        # Not moving, and the card as it was parked: the last alone could
+        # pass against a parked card that never left the moving state.
+        eq('stopped: the card as it was parked',
+           (_s.get('moving'), _s.get('driving'), _form(_s)),
+           (False, False, _form(_p)))
+        eq('a fix gps.py lets go is never moving: a refused one past its hold, one '
            'from a scanner that does not say how long its hold has left, none',
-           [(dv.get(k) or {}).get('driving') for k in ('refused', 'unsaid', 'noFix')],
+           [(dv.get(k) or {}).get('moving') for k in ('refused', 'unsaid', 'noFix')],
            [False, False, False])
-        eq('a refused fix mid-drive keeps driving mode on the page too, while gps.py '
-           'holds it', (dv.get('held') or {}).get('driving'), True)
+        eq('a refused fix mid-drive keeps the page moving too, while gps.py holds it',
+           (dv.get('held') or {}).get('moving'), True)
         # The beat says 9.6 s of the hold and 19.6 s of the fix; the page went
         # by the second, and held a quiet rig's driving form to about 20 s.
-        eq('...with the beats stopped, the page leaves driving mode after the hold, '
-           'not the fix\'s freshFor (driving 1.1 s and 9.0 s after the last beat, '
-           'the whole card at 10.7 s with 8.9 s of freshFor left)',
-           [(dv.get(k) or {}).get('driving') for k in ('fresh', 'inHold', 'outrun')],
+        eq('...with the beats stopped, the page stops moving after the hold, '
+           'not the fix\'s freshFor (moving 1.1 s and 9.0 s after the last beat, '
+           'parked at 10.7 s with 8.9 s of freshFor left)',
+           [(dv.get(k) or {}).get('moving') for k in ('fresh', 'inHold', 'outrun')],
            [True, True, False])
 
     # --- marking an offer as taken, from the driving screen --------------

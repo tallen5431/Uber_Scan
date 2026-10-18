@@ -8551,7 +8551,7 @@ python3 rpi/test_dashboard.py   # 1323 on what the driving screen shows while a
                                 #     words rather than a number whenever one
                                 #     would be wrong (skipped without
                                 #     Playwright)
-python3 rpi/test_layout.py      # 3972 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 4190 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:

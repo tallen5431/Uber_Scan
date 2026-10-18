@@ -1411,37 +1411,56 @@ HELD = {
     # card prints and an age of two figures. See tookAge.
     'took': {'id': 'o-layout-took', 'pay': 112.45, 'minutes': 55, 'perHour': 99.9},
 }
-# The card side's driving forms (live.html, `.live.driving`): what the card
-# shows while gps.py says the car is being driven, every form it takes, each
-# measured against the same card parked. The most each is asked to hold: the
-# four notices CHIPS_CARD writes; the pair at its widest with the order in the
-# car (HELD); the pair against two orders, "with ① + ②"; a card the reader
-# refused, its rate withheld; between offers with one order in the car and
-# its stops read, and with two; and nothing at all. `larger` names the parts
-# that must come out strictly larger driving than parked; every part both
-# forms draw must come out no smaller.
+# The card side while gps.py says the car is being driven, every form it
+# takes, each measured against the same card parked. With an offer up
+# (`offer`: live.html `.live.moving`) the whole card, the owner's decision of
+# 17 Oct 2026: every part the parked card draws, at its size, but the read
+# diagnostics and the route link (and what the check under DRIVE_FORMS's
+# loop names for the smaller panels), and the two ends a line each.
+# Between offers the driving form (`.live.driving`), larger. The most each is
+# asked to hold: the four notices CHIPS_CARD writes; the pair at its widest
+# with the order in the car (HELD); the pair against two orders, "with ① +
+# ②"; a card the reader refused, its rate withheld; the owner's snap, a long
+# pickup (LONG_ENDS) under the notices, alone and with the pair line; between
+# offers with one order in the car and its stops read, and with two; and
+# nothing at all. `larger` names the parts that must come out strictly
+# larger moving than parked; every part both forms draw must come out no
+# smaller.
 _DA = {'n': 1, 'pay': 112.45, 'minutes': 55, 'holdId': 'l-a@1',
        'dropoff': '4821 Kestrel Dr S, Powder Springs, GA 30127', 'card': None,
        'endPinned': False, 'arrived': False, 'endWhy': 'too many answers', 'app': 'uber'}
 _DB = dict(_DA, n=2, pay=128.08, minutes=60, holdId='l-b@2',
            dropoff='1985 Cobb Pkwy NW, Kennesaw, GA 30152')
 _EMPTY = {'ready': False, 'state': 'empty', 'track': None, 'places': [], 'text': ''}
+# The owner's 17 Oct snap, an Uber card from a KFC to a corner in Marietta,
+# its pickup at the length a store with its street in brackets runs to.
+# Invented but for the shape.
+# Long enough to be cut on every panel, so the ellipsis is measured too.
+LONG_ENDS = ['KFC (2575 Delk Rd SE, Suite 100, Powers Ferry Village Shopping Center, '
+             'Marietta, GA 30067)',
+             'Powers Ferry Rd & Terrell Mill Rd, Marietta']
+_NOTICES = {'tooBright': True, 'notSaving': CHIPS_BEAT['notSaving']}
 DRIVE_FORMS = {
-    'offer': {'beat': {'tooBright': True,
-                       'notSaving': CHIPS_BEAT['notSaving']},
-              'msgs': [CHIPS_CARD], 'larger': ['label', 'pay']},
+    'offer': {'beat': _NOTICES, 'msgs': [CHIPS_CARD], 'offer': True, 'larger': []},
     'pair': {'msgs': [{'holding': HELD['hold']},
                       dict(HELD['offer'], holding=HELD['hold'])],
-             'larger': ['label', 'pay', 'range', 'held']},
+             'offer': True, 'larger': []},
     'two': {'msgs': [dict(HELD['offer'], holding=_DA, orders=[_DA, _DB], unowned=0,
                           stack=dict(HELD['offer']['stack'], heldCount=2,
                                      leftEach=[55, 60], maxMinutes=137, route=None))],
-            'larger': ['label', 'pay', 'range', 'held']},
+            'offer': True, 'larger': []},
     'refused': {'msgs': [dict(HELD['offer'], state='doubt', doubt='rate', pay=136.0,
                               minutes=10.0, cardMinutes=10.0, billedMinutes=10.0,
                               perHour=816.0, grossPerHour=816.0, stack=None,
                               holding=None)],
-                'larger': ['label', 'pay']},
+                'offer': True, 'larger': []},
+    'long pickup': {'beat': _NOTICES, 'msgs': [dict(CHIPS_CARD, places=LONG_ENDS)],
+                    'offer': True, 'larger': []},
+    'long pickup pair': {'beat': _NOTICES,
+                         'msgs': [{'holding': HELD['hold']},
+                                  dict(HELD['offer'], holding=HELD['hold'],
+                                       places=LONG_ENDS, milesUncertain=True)],
+                         'offer': True, 'larger': []},
     'between': {'msgs': [{'holding': HELD['hold']},
                          {'planner': {'stops': HELD['stops'], 'unfiled': 'list',
                                       'asked': True, 'ms': None, 'at': 1}}, _EMPTY],
@@ -1460,7 +1479,7 @@ DRIVE_FORMS['three'] = {
     'msgs': [dict(HELD['offer'], holding=_DA, orders=[_DA, _DBA, _DCA], unowned=0,
                   stack=dict(HELD['offer']['stack'], heldCount=3,
                              leftEach=[55, 60, 60], maxMinutes=197, route=None))],
-    'larger': ['label', 'pay', 'range', 'held']}
+    'offer': True, 'larger': []}
 DRIVE_FORMS['between three'] = {
     'msgs': [{'holding': _DA, 'orders': [_DA, _DBA, _DCA], 'unowned': 2}, _EMPTY],
     'larger': ['line', 'line2']}
@@ -1472,8 +1491,6 @@ DRIVE_FORMS['between three'] = {
 # the caption can refuse with, at its widest place (CAPTION_CHIPS), and the
 # one only the card makes (the NucBox down), read off live.html.
 DRIVE_FORMS['pair']['way'] = DRIVE_FORMS['two']['way'] = True
-DRIVE_FORMS['pair']['larger'].append('way')
-DRIVE_FORMS['two']['larger'].append('way')
 _card_only = re.findall(r"chip: '([A-Z ]+ · [^']+)'",
                         live_src[live_src.index('  function wayNucBoxDown('):
                                  live_src.index('  function wayAnswered(')])
@@ -3983,10 +4000,45 @@ const SNAP_MEASURE = (fixture) => {
     const d = document.documentElement;
     const lh = parseFloat(getComputedStyle(detail).lineHeight)
       || parseFloat(getComputedStyle(detail).fontSize) * 1.2;
+    // The two ends: each one's words, whether it is whole on its line
+    // (nothing ellipsised: an inline end has no box of its own to overflow,
+    // so parked it is the line that is asked), its box inside the card, and
+    // the rows they take.
+    const pl = document.getElementById('places');
+    const ends = [].slice.call(document.querySelectorAll('#places .end')).filter(shown);
+    const inside = (r) => r.left >= card.left - 0.5 && r.right <= card.right + 0.5
+      && r.top >= card.top - 0.5 && r.bottom <= card.bottom + 0.5
+      && r.right <= glass.right + 0.5 && r.bottom <= glass.bottom + 0.5;
+    const places = shown(pl) ? {
+      text: pl.textContent,
+      rows: new Set(ends.map((e) => Math.round(e.getBoundingClientRect().top))).size,
+      ends: ends.map((e) => {
+        const box = getComputedStyle(e).display === 'inline' ? pl : e;
+        const cs = getComputedStyle(box);
+        return { text: e.textContent, whole: box.scrollWidth <= box.clientWidth + 1,
+                 // ...and, cut, cut with an ellipsis inside its own box.
+                 ellipsis: cs.textOverflow === 'ellipsis' && cs.overflowX === 'hidden',
+                 inCard: inside(e.getBoundingClientRect()),
+                 px: parseFloat(getComputedStyle(e).fontSize) };
+      }),
+    } : null;
+    // The notice's box on the glass, against one row of its chips: on the
+    // hat it scrolls, and its first row is what has to be in sight.
+    const warn = document.getElementById('warn');
+    const chip0 = warn.querySelector('.chip');
+    const warnRow = shown(warn) && chip0 ? {
+      h: Math.round(warn.getBoundingClientRect().height * 10) / 10,
+      line: Math.round((parseFloat(getComputedStyle(chip0).lineHeight)
+                        || parseFloat(getComputedStyle(chip0).fontSize) * 1.2) * 10) / 10,
+    } : null;
     return {
       driving: document.querySelector('.live').classList.contains('driving'),
+      moving: document.querySelector('.live').classList.contains('moving'),
+      places: places, warnRow: warnRow,
       parts: {
         label: part('#verdictLabel'), rate: part('#perHour'), pay: part('#vPay'),
+        min: part('#vMin'), mile: part('#vMile'), perMile: part('#vPerMile'),
+        working: part('#working'), stops: part('#stops'),
         range: part('#stack .range'), both: part('#stack .both'), ends: part('#stack .ends'),
         way: part('#way .call'),
         next: part('#heldNext .where'), nextWhen: part('#heldNext .when'),
@@ -4938,48 +4990,154 @@ try:
                ([_hs[0]] * 2, 'Took $112.45 not saved', '✓ Took $112.45 in car',
                 '', '', '', ''))
 
-    # The driving form, every form of it (DRIVE_FORMS), on the three panels in
-    # both pictures: whole — every glyph of every part it keeps inside the
-    # card and on the glass, the line under the card inside its row, no child
-    # of the card over its edge, nothing scrolling; larger than the same card
-    # parked; the detail out of sight, the first notice kept with a chip
-    # counting the rest; and the bar, the status row and the picture's column
-    # — the map, in Map view — exactly where the parked card left them.
+    # The card side moving, every form of it (DRIVE_FORMS), on the three
+    # panels in both pictures: whole — every glyph of every part it draws
+    # inside the card and on the glass, the line under the card inside its
+    # row, no child of the card over its edge, nothing scrolling — and the
+    # bar, the status row and the picture's column (the map, in Map view)
+    # exactly where the parked card left them. With an offer up, the whole
+    # card (the owner's decision of 17 Oct 2026): every part the parked card
+    # draws, at its size, every notice, and nothing put away but the read
+    # diagnostics and the route link (and below 1024x600 the working; on the
+    # hat $/mi, the rate smaller under a notice, and the notice a
+    # scroll); the ends a line each, the dropoff whole on its own, however
+    # long the pickup — on the hat, one line. Between offers, the driving form:
+    # larger, the detail out of sight, the first notice kept with a chip
+    # counting the rest.
+    _NOT_DECIDING = ('#detail .diag', '#stack .maplink')
+    # DRIVE_MEASURE's `detail`, in its order.
+    _DRIVE_DETAIL = ['#vMin', '#vMile', '#vPerMile', '#working', '#places', '#stops',
+                     '#detail .diag', '#stack .maplink']
     for panel, w, h in PLANNER_PANELS:
         for view in ('screen', 'scene'):
             where = '%s, %s view' % (panel, view)
+            hat = h <= 380
             for form, spec in DRIVE_FORMS.items():
                 dm = got.get('%s %s drive %s' % (panel, view, form)) or {}
                 _pk, _dr = dm.get('parked') or {}, dm.get('driving') or {}
-                ok_('the driving form "%s" was measured at %s' % (form, where),
-                    _pk and _dr and _dr.get('driving') and not _pk.get('driving'))
+                _offer = bool(spec.get('offer'))
+                ok_('the card moving, "%s", was measured at %s (%s)'
+                    % (form, where, 'the whole card' if _offer else 'the driving form'),
+                    _pk and _dr and not _pk.get('moving') and not _pk.get('driving')
+                    and _dr.get('moving') is _offer and _dr.get('driving') is not _offer)
                 if not (_pk and _dr):
                     continue
                 _pp, _dp = _pk.get('parts') or {}, _dr.get('parts') or {}
                 _cut = {k: v['cut'] for k, v in _dp.items() if v and v.get('cut')}
-                eq('the driving form "%s" is whole, nothing clipped, at %s' % (form, where),
+                # On the 3.5" hat, with an offer up, the notice is what gives
+                # way, as it is parked there ("a line and a bit plus a
+                # scroll", live.html): every other part whole, and of the
+                # notice its first row of chips in sight — or, where the
+                # parked card had less than a row for it (the pair under the
+                # notices beside the scene picture: 9px), no less than that.
+                _wr, _pwr = _dr.get('warnRow'), _pk.get('warnRow') or {}
+                _scrolls = hat and _offer and _wr is not None
+                if _scrolls:
+                    _cut.pop('chip', None)
+                    _need = min(_wr.get('line') or 99, _pwr.get('h') or 99)
+                    ok_('...on the 3.5" hat the notice shows a row of its chips, or what the '
+                        'parked card gave it, the rest a scroll away (%spx for a %spx row, '
+                        '%spx parked), "%s" at %s'
+                        % (_wr.get('h'), _wr.get('line'), _pwr.get('h'), form, where),
+                        (_wr.get('h') or 0) >= _need - 0.5)
+                eq('the card moving, "%s", is whole, nothing clipped%s, at %s'
+                   % (form, ' but the notice' if _scrolls else '', where),
                    (_cut, _dr.get('spill'), (_dr.get('detailRows') or 0) <= 1, _dr.get('over')),
                    ({}, [], True, False))
                 _px = lambda m, k: (m.get(k) or {}).get('px')
                 _smaller = sorted(k for k in _dp if _dp[k] and _pp.get(k)
                                   and _px(_dp, k) < _px(_pp, k) - 0.05)
-                # A part the parked card does not draw counts as larger where
-                # the driving one does: on the 3.5" hat a notice hides the
-                # parked figures, the pay with them, and driving it is back.
-                _not = sorted(k for k in spec['larger']
-                              if not (_dp.get(k) and (not _pp.get(k)
-                                                      or _px(_dp, k) > _px(_pp, k) + 0.05)))
-                eq('...larger than the normal form at %s (%s)'
-                   % (where, ', '.join('%s %s→%s' % (k, _px(_pp, k), _px(_dp, k))
-                                       for k in spec['larger'])),
-                   (_not, _smaller), ([], []))
-                _chips = _pk.get('chips') or []
-                eq('...the detail out of sight, the first notice and a count of the rest '
-                   'kept, at %s' % where,
-                   (_dr.get('detail'), _dr.get('chips')),
-                   ([], _chips[:1] + (['+%d more' % (len(_chips) - 1)] if len(_chips) > 1 else [])))
                 eq('...and the bar, the status row and the picture where they were at %s'
                    % where, _dr.get('layout'), _pk.get('layout'))
+                _chips = _pk.get('chips') or []
+                if _offer:
+                    # Below the rig's own 1024x600 the working goes too (the
+                    # sum from the figures to the headline; live.html says
+                    # why), and on the hat the figures a notice puts away
+                    # parked are back.
+                    # On the hat $/mi as well, the pay over the miles beside
+                    # it, and the rate at the parked pair's size under a
+                    # notice.
+                    _small = not (w >= 1000 and h >= 560)
+                    _away = (_NOT_DECIDING + (('#working',) if _small else ())
+                             + (('#vPerMile',) if hat else ()))
+                    _larger = sorted(k for k in _dp if _dp[k] and _pp.get(k)
+                                     and _px(_dp, k) > _px(_pp, k) + 0.05)
+                    _gone = sorted(k for k in _pp if _pp[k] and not _dp.get(k)
+                                   and not (_small and k == 'working')
+                                   and not (hat and k == 'perMile'))
+                    _hatSmall = hat and bool(_pk.get('chips'))
+                    if _hatSmall:
+                        _smaller = [k for k in _smaller if k != 'rate']
+                    eq('...with the offer up, the whole card at the parked sizes: nothing the '
+                       'parked card draws is gone, smaller or larger, at %s' % where,
+                       (_gone, _smaller, _larger), ([], [], []))
+                    _pkd = _pk.get('detail') or []
+                    eq('...every notice, and nothing out of sight but the read diagnostics and '
+                       'the route link%s, at %s' % (' and the working' if _small else '', where),
+                       (_dr.get('detail'), _dr.get('chips')),
+                       ([s for s in _DRIVE_DETAIL if s not in _away
+                         and (s in _pkd or s in ('#vMin', '#vMile', '#vPerMile'))], _chips))
+                    # The pay, the minutes and the miles, wherever the card has
+                    # them: on the hat a notice puts them away parked, and
+                    # moving they are back.
+                    eq('...the pay, the minutes, the miles%s drawn, at %s'
+                       % ('' if hat else ' and $/mi', where),
+                       [k for k in ('pay', 'min', 'mile') + (() if hat else ('perMile',))
+                        if not _dp.get(k)], [])
+                    # ...and the rate, at 6.5vw under a notice on the hat
+                    # (31.2px at 480 wide; under a pair alone it keeps the
+                    # parked 8vw), never under that, and still the largest
+                    # type on the card.
+                    if _hatSmall:
+                        _big = max(_px(_dp, k) or 0 for k in _dp if k != 'rate' and _dp[k])
+                        ok_('...the rate at no less than 6.5vw on the hat under a notice, '
+                            'and the largest type on the card (%s→%spx, next %spx), at %s'
+                            % (_px(_pp, 'rate'), _px(_dp, 'rate'), _big, where),
+                            (_px(_dp, 'rate') or 0) >= min(0.065 * w, _px(_pp, 'rate') or 0) - 0.05
+                            and (_px(_dp, 'rate') or 0) > _big)
+                    _pl, _pkl = _dr.get('places'), _pk.get('places')
+                    ok_('...the ends drawn wherever the parked card draws them, saying the '
+                        'same, at %s' % where,
+                        (_pl or {}).get('text') == (_pkl or {}).get('text'))
+                    if _pl and not hat:
+                        _e = _pl.get('ends') or []
+                        eq('...a line each, inside the card, the dropoff whole on its own '
+                           'line (%s), at %s'
+                           % (' | '.join('%s %spx%s' % (x.get('text'), x.get('px'),
+                                                        '' if x.get('whole') else ' cut')
+                                         for x in _e), where),
+                           (_pl.get('rows'), len(_e), [x.get('inCard') for x in _e],
+                            _e[-1].get('whole') if _e else None,
+                            [x.get('px') for x in _e] == [(_pkl.get('ends') or [{}])[0].get('px')] * 2),
+                           (2, 2, [True, True], True, True))
+                        # A cut end says so, with an ellipsis in its own box;
+                        # and the owner's long pickup is cut, so that is asked.
+                        eq('...each end cut only with an ellipsis, the long pickup cut, at %s'
+                           % where,
+                           ([x.get('text') for x in _e if not x.get('whole')
+                             and not x.get('ellipsis')],
+                            bool(_e) and _e[0].get('text') == LONG_ENDS[0]
+                            and _e[0].get('whole')),
+                           ([], False))
+                    elif _pl:
+                        eq('...on the 3.5" hat, the one line it has parked, at %s' % where,
+                           _pl.get('rows'), _pkl.get('rows'))
+                else:
+                    # A part the parked card does not draw counts as larger where
+                    # the driving one does.
+                    _not = sorted(k for k in spec['larger']
+                                  if not (_dp.get(k) and (not _pp.get(k)
+                                                          or _px(_dp, k) > _px(_pp, k) + 0.05)))
+                    eq('...larger than the normal form at %s (%s)'
+                       % (where, ', '.join('%s %s→%s' % (k, _px(_pp, k), _px(_dp, k))
+                                           for k in spec['larger'])),
+                       (_not, _smaller), ([], []))
+                    eq('...the detail out of sight, the first notice and a count of the rest '
+                       'kept, at %s' % where,
+                       (_dr.get('detail'), _dr.get('chips')),
+                       ([], _chips[:1] + (['+%d more' % (len(_chips) - 1)] if len(_chips) > 1 else [])))
+
                 if not spec.get('way'):
                     continue
                 # The answer on the card over this pair, every form of it
@@ -5013,9 +5171,12 @@ try:
                     eq('...and the card runs no further past its border with it than without '
                        'it (%spx), every form, over "%s", %s, at %s'
                        % (_was, form, _state, where), _past, [])
+                # Moving with the pair up the card is the parked card, so the
+                # line is the parked line's size (it was larger in the driving
+                # form, when the rows round it were put away).
                 _small = sorted(n for n in _wp if n in _wd
-                                and not (_wd[n].get('px') or 0) > (_wp[n].get('px') or 0) + 0.05)
-                eq('...and every form larger driving than parked, over "%s" at %s (%s→%s)'
+                                and abs((_wd[n].get('px') or 0) - (_wp[n].get('px') or 0)) > 0.05)
+                eq('...and every form at its parked size moving, over "%s" at %s (%s→%s)'
                    % (form, where, (_wp.get('checking') or {}).get('px'),
                       (_wd.get('checking') or {}).get('px')), _small, [])
 
