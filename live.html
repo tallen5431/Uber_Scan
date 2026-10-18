@@ -473,9 +473,10 @@
     /* The answer on the card (#way) has no row to be given here: the pair's
        card beside the phone was 6px inside its border without it and 18px
        past it with it, the word PASS the part that went (rpi/test_layout.py,
-       measured). So here it takes the address line's row — the one the
-       driving form already puts away, and the one this line answers for at a
-       glance: where the new job is against the run the car is on — and is
+       measured). So here it takes the address line's row — the one this line
+       answers for at a glance: where the new job is against the run the car
+       is on (an Open entry in AUDITS.md, since the owner's 17 Oct decision
+       that an offer's ends are decision information) — and is
        set in the pair line's 13px and as tight, which together leave the
        card as it was. */
     #verdict:has(#way:not([hidden])) .places { display: none; }
@@ -1279,9 +1280,6 @@
     .wayline .the { display: none; }
     .wayline .call { padding: 0 .2em; }
   }
-  /* ...and larger while the car is moving, with the pair line it qualifies:
-     "the take-another figure" is kept, and this is its other half. */
-  .live.driving .wayline { font-size: clamp(15px, 5cqw, 22px); }
 
   /* ---------- Sizes for the driver's seat ----------
    *
@@ -1347,107 +1345,160 @@
   /* ---------- Driving: the card at a glance ----------
    *
    * While the car is being driven (showDriving: gps.py's `driving` on the
-   * beat's fix) the card side shows what a glance takes in and no more: the
-   * verdict, the pay, the rate, the pair line's range with what qualifies it,
-   * the order in the car, and the first notice with a count of the rest. The
-   * other figures, the working, the address, the Trip Planner's stops, the
-   * read diagnostics and the route link wait until the car stops, or a tap
-   * on the card brings them back for ten seconds. Only `.live` — the picture,
-   * the map and its caption, the status row and the bar are where they were,
-   * which rpi/test_layout.py holds.
+   * beat's fix) the card side takes one of two forms, and which is decided
+   * by whether an offer is on the card.
    *
-   * What is kept is larger, sized on the card (`cqw`; the verdict is a
-   * container, and so is the card side while driving) so a narrow card is
-   * not handed a wide card's type. Every form, measured in rpi/test_layout.py
-   * at 1024x600, 800x480 and 480x320 in both pictures: whole, larger than the
-   * same card parked, nothing cut. Where a size below stops short of what
-   * the room seems to allow, it is because the measurement said so. */
+   * With an offer, the whole card (`.live.moving`). The owner's decision of
+   * 17 Oct 2026, from a snap at 16 m/s (showDriving has it): the minutes, the
+   * miles, $/mi, the working, both ends, the Trip Planner's stops if a press
+   * read them, the pair line, the card line, every notice and the in-car
+   * line are what an offer is decided on, and this form put them away until
+   * the car stopped. They are drawn as the parked card draws them and at its
+   * sizes — on the 1024x600 and larger, the fifth larger that was set for
+   * the seat (above) — because that is the card rpi/test_layout.py has held
+   * whole on every panel all along. The larger pay, rate, pair line and
+   * in-car line this form used to give an offer were paid for with the rows
+   * it put away, and with every row back there is no room to pay with: put
+   * back over the whole card, they ran the card past its own edges (the
+   * Done entry in AUDITS.md has the measurement).
+   *
+   * Two things wait for a stop on every panel, and neither is something an
+   * offer is decided on:
+   *  - the read diagnostics on the line under the card (#detail .diag: the
+   *    read time, the leg count, the tracker's drift). Questions about the
+   *    rig, not the offer, and the 3.5" hat never shows them at all. The
+   *    reading's age beside them stays: it says whether the card is fresh.
+   *  - the ⤳ route link at the end of the pair line. A control, not a fact:
+   *    it opens a map in another tab over this panel, and the pair line in
+   *    front of it says in words what the pair pays, for how long, and where
+   *    the two jobs end.
+   * And the two ends get a line each: parked they share one, ellipsised,
+   * and a long pickup ran the dropoff off its end (showPlaces). Each still
+   * ellipsises, inside its own line, so neither can take the other's.
+   * Below the rig's own 1024x600 the card is smaller than the whole of it,
+   * and what gives is said where it gives (the working, below; on the 3.5"
+   * hat $/mi, the rate's size and the notice's room).
+   *
+   * Between offers, the driving form (`.live.driving`, never with `moving`):
+   * the label and the order in the car larger, and the Trip Planner's stops
+   * (and, while aiming, the mount's figures but the first) out of sight
+   * until the car stops, or a tap brings them back for ten seconds. Sized on the card (`cqw`; the
+   * verdict is a container, and so is the card side here) so a narrow card
+   * is not handed a wide card's type.
+   *
+   * Only `.live`, in both: the picture, the map and its caption, the status
+   * row and the bar are where they were, which rpi/test_layout.py holds, at
+   * 1024x600, 800x480 and 480x320 in both pictures — whole, nothing cut, and
+   * the driving form larger than the same card parked. Where a size below
+   * stops short of what the room seems to allow, it is because the
+   * measurement said so. */
+  .live.moving #detail .diag,
+  .live.moving #stack .maplink { display: none; }
+  /* ...and, below the rig's own 1024x600, the working: the sum that joins
+     the figures to the headline (the pay in the minutes, the raw $/hr, less
+     the car costs, the net $/hr), whose every term but the raw rate and
+     the cost is on the card already, as a figure or as the headline. A check on the headline,
+     not a figure an offer is decided on, and the hat's own block above
+     already calls it a sum "checked on a bigger screen when parked". On
+     1024x600 and larger the card has the room and it stays. Below, the
+     card did not: with a pair line and the notices up at 800x480 the first
+     notice ran out of the card with it, and on the 3.5" hat the pair's
+     verdict word did (measured; the Done entry has the figures). */
+  @media (max-width: 999px), (max-height: 559px) {
+    .live.moving #working { display: none; }
+  }
+  /* On the 3.5" hat a notice puts the figures away parked (the rule under
+     `#verdict:has(#warn...)` there): the notice is the reason to doubt them
+     and the card has no room for both. Moving, they are back — the pay, the
+     minutes and the miles are the decision — and the notice is the item
+     that gives way, as it is everywhere else (`.live #verdict > #warn`,
+     which scrolls). A card the reader refused too: its notice says which
+     figure to check, and the figures are what it is checked against. */
+  @media (orientation: landscape) and (max-height: 380px) {
+    .live.moving #verdict:has(#warn:not([hidden])) .submetrics { display: grid; }
+    /* ...and the card is 191px tall, so the rest is paid for here, and only
+       here. $/mi is put away: it is the pay over the miles, both figures
+       drawn beside it, and without it the other three go across in one row
+       (three columns, each value over its label: beside the scene picture
+       the grid's own 74px columns took two, and four figures in two rows of
+       value-beside-label were 46px; these are 34). Under a notice the rate
+       takes 6.5vw, 31px — the parked hat's own is 12vw there, and 8vw under
+       a pair, which it keeps — and is still the largest type on the card.
+       With the figures back and none of this, the four-notice card beside
+       the scene picture had 9px for its notice (39 parked, with no
+       figures), now 51; and the trip of three ran the verdict word
+       over the card's top there, as the parked pair, two orders and three
+       all do already (AUDITS Open). Measured, rpi/test_layout.py. One form
+       still does not have a row for its notice: the pair under the notices
+       beside the scene picture, 11px of a 21px row (9 parked); it
+       scrolls, and AUDITS has it under Open. */
+    .live.moving .submetrics .sub:has(#vPerMile) { display: none; }
+    .live.moving .submetrics { grid-template-columns: repeat(3, minmax(0, 1fr));
+                               padding-top: 1px; row-gap: 0; }
+    .live.moving #verdict .sub { flex-direction: column; align-items: center; gap: 0; }
+    /* ...and the notice's 10px over it is 4: it is the item that gives way,
+       and this is room it gets back. The chips are their own boxes, so
+       nothing runs into them. */
+    .live.moving #verdict > #warn { margin-top: 4px; }
+    .live.moving #verdict:has(#warn:not([hidden])) #perHour {
+      font-size: min(6.5vw, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
+  }
+  /* Not on the 3.5" hat, whose card has no row to give the second end: its
+     pair with the card line up puts the whole address line away parked as
+     well (`#verdict:has(#way...) .places` above), and an offer there is
+     the parked card's one line. `:not([hidden])` because `.places[hidden]`
+     is weaker than this and an offer with no ends must draw none. */
+  @media (orientation: portrait), (min-height: 381px) {
+    .live.moving #places.two:not([hidden]) { display: flex; flex-direction: column; }
+    .live.moving #places .end { overflow: hidden; text-overflow: ellipsis; }
+  }
   .live.driving { container-type: inline-size; }
-  .live.driving #working,
   .live.driving .submetrics .sub:not(:first-child),
-  .live.driving #places,
-  .live.driving #stops,
-  .live.driving #detail .diag,
-  .live.driving #stack .maplink { display: none; }
-  /* The pay alone, across the card, its label beside it rather than under
-     it, and no rule over it: the figures the rule divided it from are gone.
-     Beside, because under it the label is a row of its own, and the pair
-     against two orders at 800x480 beside the phone has no room for that row:
-     measured with the label under, that card ran over its own top and foot,
-     the verdict word cut. */
+  .live.driving #stops { display: none; }
+  /* The pay's cell alone, across the card, its label beside it rather than
+     under it, and no rule over it: the figures the rule divided it from are
+     gone. Between offers it is drawn only while aiming (`novalue` puts a
+     '--' away), and the size is the one measured when this form carried an
+     offer's pay too. */
   .live.driving .submetrics { grid-template-columns: minmax(0, 1fr); border-top: 0;
                               padding-top: 0; }
   .live.driving .sub { flex-direction: row; align-items: baseline;
                        justify-content: center; gap: .3em;
                        font-size: clamp(22px, 8cqw, 44px); }
-  /* 20px at the floor, two over the hat's parked 18: "≈ CLOSE CALL ?" is
-     201px there at 20 and 221 at 22, against the 208 inside the hat's scene
-     card, and on two rows it squeezed the first notice out of that card. */
+  /* 20px at the floor, two over the hat's parked 18: measured on the widest
+     word this form ever carried, "≈ CLOSE CALL ?" (201px at 20 and 221 at
+     22, against the 208 inside the hat's scene card). The words between
+     offers are held whole at it by the "waiting" form in test_layout. */
   .live.driving .verdict-label { font-size: clamp(20px, 7.5cqw, 40px); }
-  .live.driving .stackline { font-size: clamp(15px, 5cqw, 22px); }
   .live.driving .heldline { font-size: clamp(14px, 4cqw, 20px); }
   /* 16px at the floor, not 18: the 3.5" hat's scene card is 228px, and at 18
      each order's line took three rows there and pushed "2 dropoffs read ·
      whose?" out of the card. */
   .live.driving .heldline.between { font-size: clamp(16px, 5.5cqw, 27px); }
-  /* The in-car line under an offer, after the reading's age: on the card
-     side's width (`cqw` here is `.live`'s), because it is one row whose pay
-     and GPS state may not shrink. At a flat 20px it ran its last letter off
-     the 800x480 scene card's 388px, where 4.8% of the column is 18.6px. */
-  .live.driving #detail.withheld { font-size: clamp(11px, 4.8cqw, 20px); }
   @media (orientation: landscape) {
-    /* The rate takes back what a notice or a pair line cost it, and on the
-       panels some of the room the hidden rows leave: its height term 34% of
-       the screen where the parked card's is 26. Wherever its width holds it —
-       the scene picture's half-width card — it stays as it was. */
+    /* The rate's box ('--' between offers) takes back what a notice cost it,
+       and on the panels some of the room the hidden rows leave: its height
+       term 34% of the screen where the parked card's is 26. */
     .live.driving #perHour,
-    .live.driving #verdict:has(#warn:not([hidden])) #perHour,
-    .live.driving #verdict:has(#stack:not([hidden])) #perHour {
-      font-size: min(20vw, 34dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
-    }
-  }
-  /* ...and with the answer on the card as well (#way), 24dvh: the pair
-     against two orders beside the phone at 800x480 ran 17px past its card
-     with it at 34, and was 1px inside at 26, measured in rpi/test_layout.py.
-     Still larger than the same card parked, whose term is 18 with the line
-     up. 1024x600, the rig's own, has the room and keeps its 34 (below). */
-  @media (orientation: landscape) {
-    .live.driving #verdict:has(#way:not([hidden])) #perHour {
-      font-size: min(20vw, 24dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
-    }
-  }
-  @media (orientation: landscape) and (min-width: 1000px) and (min-height: 560px) {
-    .live.driving #detail.withheld { font-size: clamp(11px, 4.8cqw, 23px); }
-    .live.driving #verdict:has(#way:not([hidden])) #perHour {
+    .live.driving #verdict:has(#warn:not([hidden])) #perHour {
       font-size: min(20vw, 34dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
     }
   }
   @media (orientation: landscape) and (max-height: 380px) {
     /* The hat's card is 191px tall, and the rate there is the parked hat's
-       own (12vw) without what a notice or a pair cost it. At the panels'
-       size, 88.5px beside the phone, the first notice was squeezed out of
-       the card and the pair against two orders ran over its top. */
+       own (12vw) without what a notice cost it. At the panels' size the
+       first notice was squeezed out of the card. */
     .live.driving #perHour,
-    .live.driving #verdict:has(#warn:not([hidden])) #perHour,
-    .live.driving #verdict:has(#stack:not([hidden])) #perHour {
+    .live.driving #verdict:has(#warn:not([hidden])) #perHour {
       font-size: min(12vw, calc((100cqw - 40px) / (var(--chars) * 0.62)));
     }
-    /* ...and with the answer on the card under the pair, the parked hat's
-       own 8vw for a pair, and the line itself in 12.5px set tight (12
-       parked): the pair against two orders ran 19px past the card's top
-       beside the phone with the line and the rate at 12vw, and 21px beside
-       the scene picture (rpi/test_layout.py, measured). 12.5 and not more
-       because the widest call and figure, OUT OF WAY · +18.8–19.2 road mi,
-       take 206.7px of the scene card's 208 at 12.5 (DejaVu Sans, measured). */
-    .live.driving #verdict:has(#way:not([hidden])) #perHour {
-      font-size: min(8vw, calc((100cqw - 40px) / (var(--chars) * 0.62)));
-    }
-    .live.driving .wayline { font-size: 12.5px; line-height: 1.1; margin-top: 0; }
-    /* The pay is one of the four things a glance needs, and on the hat a
-       notice hides the figures (the rule under `#verdict:has(#warn...)`
-       above). Driving, the other three are gone and the pay stays. */
+    /* On the hat a notice hides the figures (the rule under
+       `#verdict:has(#warn...)` above); in this form the other three are
+       gone and the pay's cell stays. */
     .live.driving #verdict:not(.novalue):has(#warn:not([hidden])) .submetrics { display: grid; }
   }
+
 </style>
 </head>
 <body>
@@ -2077,10 +2128,34 @@
 
   // --- driving: the card at a glance ------------------------------------------
   //
-  // While the car is being driven the card side takes its driving form (the
-  // stylesheet's `.live.driving`): the verdict, the pay, the rate, the pair
-  // line and the order in the car, larger, and the rest out of sight until
-  // the car stops. Whether it is being driven is rpi/gps.py's answer, put on
+  // While the car is being driven the card side takes one of two forms.
+  //
+  // With an offer on the card, the whole card (the stylesheet's
+  // `.live.moving`): the owner's decision of 17 Oct 2026, from a snap taken at
+  // 16 m/s of an Uber offer, $9.31 for 34 min and 8.7 mi from a KFC to a
+  // corner in Marietta, on which this panel showed PASS, $11.8/hr, the pay and
+  // one notice and nothing else: "it sometimes leaves info off the card ...
+  // this can make it hard to decide to take the offer or not, it is better to
+  // have the full info presented." The minutes, the miles, $/mi, both ends,
+  // the stops, the pair line and every notice are what the offer is decided
+  // on, and a decision is the one thing this card is up for while it is
+  // moving. Two things only wait for a stop, the read diagnostics and the
+  // route link, and on the smaller panels what does not fit; the stylesheet
+  // says why each is not decision information.
+  //
+  // Between offers, the driving form (`.live.driving`): the order in the car
+  // and the label larger, the stops and the '--' figures out of sight until
+  // the car stops or a tap (PEEK_MS). Nothing in it is an offer, so nothing
+  // it puts away is something an offer is decided on.
+  //
+  // So `.live` carries `moving` (being driven, an offer up) or `driving`
+  // (being driven, no offer, not peeking) or neither, never both. "An offer
+  // is up" is render()'s own test for its offer branch (a reading that is
+  // ready, and a rig that can see), asked here before render draws anything
+  // so the form and the card arrive in the same frame; rpi/test_dashboard.py
+  // holds the two to the same answer from both sides of the change.
+  //
+  // Whether it is being driven is rpi/gps.py's answer, put on
   // the beat's fix as `driving` (DRIVING_SPEED there, with the 12 Oct shift's
   // measurements): this page asks nothing again but how long it may go on
   // believing it. gps.py holds a driving state for DRIVING_HOLD (10 s) past
@@ -2099,8 +2174,12 @@
   // to judge: mid-drive it holds the state, so the page does not ask `gpsOk`
   // again.
   //
-  // No control for it. A tap on the card side shows the whole card for
-  // PEEK_MS, moving or not, and the driving form comes back on its own.
+  // No control for it (AUDITS Settled: the bar holds six). Between offers a
+  // tap on the card side shows the whole card for PEEK_MS — the Trip
+  // Planner's stops, which the driving form puts away — and the driving form
+  // comes back on its own. With an offer up there is no peek, because there
+  // is nothing put away that a peek would be for: the tap goes to what it
+  // landed on, a notice's sentence or the card line's, as it does parked.
   var PEEK_MS = 10000;
   var peekUntil = 0;
   var drivingShown = false;
@@ -2113,14 +2192,19 @@
     return Date.now() - gpsAt <= held * 1000;
   }
 
+  // render()'s branch test, `!r || !r.ready || blind`, the other way up.
+  function offerUp() { return !!(last && last.ready && !blind); }
+
   function showDriving() {
-    drivingShown = drivingNow() && Date.now() >= peekUntil;
+    var moving = drivingNow(), offer = offerUp();
+    drivingShown = moving && !offer && Date.now() >= peekUntil;
     liveSide.classList.toggle('driving', drivingShown);
+    liveSide.classList.toggle('moving', moving && offer);
   }
 
   // Captured on the way down, so while the driving form is up the tap is
-  // the peek and nothing under it — a chip's sentence, the route link —
-  // takes it too. Parked, or peeking, it passes straight through.
+  // the peek and nothing under it takes it too. Parked, peeking, or with an
+  // offer up (no driving form), it passes straight through.
   liveSide.addEventListener('click', function (e) {
     if (!drivingShown) return;
     e.preventDefault();
@@ -2232,9 +2316,27 @@
   // the same way the offers page writes them, so the two screens read alike —
   // and since both now ask MV.ends for them, that is one rule rather than a
   // resemblance two files have to keep up by hand.
+  // Each end its own element, so that moving each can have a line of its own
+  // (`.live.moving #places` in the stylesheet): one line ellipsised is what
+  // parked draws, and a long pickup \u2014 the owner's 17 Oct snap, a KFC with
+  // its street in brackets \u2014 ran the dropoff off its end. The words are the
+  // same either way: "A \u2192 B", the arrow at the head of the second end, so
+  // the text is what it was and parked draws exactly what it drew. Only a
+  // pickup and a dropoff (`two`) get their lines: a list of three or more is
+  // MV.ends handing back the frames' union, not two ends, and stays one line.
   function showPlaces(list) {
     var where = (list || []).filter(function (p) { return !!p; });
-    setText(el.places, where.join(' \u2192 '));
+    if (drawnAs(el.places, JSON.stringify(where))) {
+      el.places.classList.toggle('two', where.length === 2);
+      el.places.textContent = '';
+      where.forEach(function (p, i) {
+        if (i) el.places.appendChild(document.createTextNode(' '));
+        var end = document.createElement('span');
+        end.className = 'end';
+        end.textContent = (i ? '\u2192 ' : '') + p;
+        el.places.appendChild(end);
+      });
+    }
     setHidden(el.places, !where.length);
   }
 
@@ -3342,12 +3444,16 @@
   function showNotes(list) {
     var said = list.map(function (n) { return n.full; }).join(' ');
     if (said !== warnSaid) { warnSaid = said; warnOpenAt = 0; }
-    // Driving, never the sentences: they are read parked.
+    // In the driving form (between offers), never the sentences: a tap there
+    // is the peek. With an offer up, moving or not, the card is the whole
+    // card, and a tap on a notice is its sentence as it is parked.
     var open = !drivingShown && !!warnOpenAt && Date.now() - warnOpenAt < WARN_OPEN_MS;
     if (!open) warnOpenAt = 0;
-    // ...and the first chip only, with a chip saying how many more there
-    // are, so the rest are put away rather than gone with nothing saying so.
-    // Every sentence stays on the notice's title.
+    // ...and, in the driving form, the first chip only, with a chip saying
+    // how many more there are, so the rest are put away rather than gone
+    // with nothing saying so. Every sentence stays on the notice's title.
+    // Never under an offer: every notice there is about the offer, or about
+    // whether its reading can be trusted, which is the same thing.
     if (drivingShown && list.length > 1) {
       list = [list[0], note('+' + (list.length - 1) + ' more', said)];
     }
@@ -6893,7 +6999,8 @@
      otherwise gone. A card with no answer yet starts its walk and says it is
      checking. A tap on it swaps the chip for the whole sentence and back, as
      a notice's does — back on its own after WARN_OPEN_MS, or on a new line;
-     while driving the tap is the card's peek, as every tap there is. */
+     moving too, since the line is only ever under an offer and an offer is
+     never in the driving form (showDriving), whose taps are the peek. */
   var wayOpenAt = 0;
   var wayOpenOn = '';
   /* Whether the offer on record — whose places the walks are about
