@@ -301,6 +301,26 @@ SEQ.forEach(function (seq) {
   hp.fields.pickupAddr = { value: '12 Wren Hollow Ct, Acworth', from: 'planner', conf: 2 };
   eq('...and one that is the pickup a planner filed on it', run(hp, navSight(5000, LINE)).refused,
      ['a pickup']);
+  // The card's own words for the store's door, which the hold now keeps
+  // (server.js carries `pickupLine` at ✓ Took): DoorDash's printed door under
+  // the store's name, and an Uber card's "Store (<n> <street>)".
+  eq('...and one that is the store\'s door DoorDash printed under its name (pickupLine)',
+     run(hold({ pickup: 'Example Diner', pickupLine: '12 Wren Hollow Ct, Acworth, GA 30101' }),
+         navSight(5000, LINE)).refused, ['a pickup']);
+  eq('...and one that is the door in an Uber card\'s "Store (<n> <street>)", closed or cut',
+     [run(hold({ pickup: 'Example Diner (12 Wren Hollow Ct)' }), navSight(5000, LINE)).refused,
+      run(hold({ pickup: 'Example Diner (12 Wren Hollow Ct' }), navSight(5000, LINE)).refused],
+     [['a pickup'], ['a pickup']]);
+  eq('...while a store\'s name, and a door on another street, are no pickup of it',
+     [run(hold({ pickup: 'Example Diner' }), navSight(5000, LINE)).refused,
+      run(hold({ pickup: 'Example Diner (14 Wren Hollow Ct)', pickupLine: '9 Fable Ct, Acworth' }),
+          navSight(5000, LINE)).refused], [[], []]);
+  eq('bracketDoor: the door in a store\'s bracket, closed or cut by the edge, trailing '
+     + 'punctuation off; no number, no street word, no bracket or no string is none',
+     [A.bracketDoor('Example Diner (12 Wren Hollow Ct.)'), A.bracketDoor("Culver's (1275 Hwy"),
+      A.bracketDoor('Example Diner (Store 12)'), A.bracketDoor('Papa (12 A)'),
+      A.bracketDoor('Example Diner'), A.bracketDoor(null)],
+     ['12 Wren Hollow Ct', '1275 Hwy', null, null, null, null]);
   eq('...a read older than the Took is nothing, not a sighting that may fill a blank',
      run(hold({ dropoff: null }), navSight(500, LINE)).said, [[LINE, 'nav', 'before the Took']]);
   eq('...and with the order gone, nothing',

@@ -253,14 +253,41 @@
    * on it (`fields.pickupAddr`), or the pickup its card named — on the street,
    * as sameStreet. What a navigation destination is held to: a store's door
    * read off a navigation screen is the confidently wrong end, so a nav
-   * destination that is any held order's pickup is refused outright. */
+   * destination that is any held order's pickup is refused outright.
+   *
+   * ...and the card's own words for the store's DOOR, which the hold now
+   * keeps (pickupWords): DoorDash's `pickupLine`, the address printed under
+   * the store's name, carried onto the hold at ✓ Took, and an Uber card's
+   * "Store (<n> <street>)", whose street is inside the bracket. Before, the
+   * hold had the store's name alone, so "4100 Fable Rd" read off a navigation
+   * screen was never the pickup "Example Diner" was (AUDITS.md, the DoorDash
+   * pickupLine entry's Open note). */
   function heldPickup(held, dropoff) {
     if (!held || !dropoff) return false;
     if (plannerPickup(held, dropoff)) return true;
-    var f = fieldsOf(held).pickupAddr;
-    return [f ? f.value : null, held.pickup].some(function (p) {
-      return typeof p === 'string' && sameStreet(p, dropoff.line);
+    return pickupWords(held).some(function (p) {
+      return sameStreet(p, dropoff.line);
     });
+  }
+
+  // The held order's pickup by every word its card and its fields carry: the
+  // field, the card's name, its printed door, the bracket's door. One that is
+  // absent or not a string has no street, and sameStreet says no of it.
+  function pickupWords(held) {
+    var f = fieldsOf(held).pickupAddr;
+    return [f ? f.value : null, held.pickup, held.pickupLine, bracketDoor(held.pickup)];
+  }
+
+  /* The door inside a store's bracket — "Store (123 Main St)", or cut off by
+   * the card's edge, "Culver's (1275 Hwy" — or null: map-view.js searchPlan's
+   * bracket, the SAME expression and the same three-letter test (held so by
+   * rpi/test_lint.py), so the street this refuses a navigation screen by is
+   * the street the server searches the pickup by. */
+  var BRACKET_DOOR = /\(\s*(\d+[A-Za-z]?\s+[^()]*?)\s*\)?\s*$/;
+  function bracketDoor(name) {
+    // (exec reads anything else as its string, which no bracket is in.)
+    var br = BRACKET_DOOR.exec(name);
+    return br && /[A-Za-z]{3}/.test(br[1]) ? br[1].replace(/[\s,.]+$/, '') : null;
   }
 
   /* Why `d` is the store's and not where an order goes, or null: Uber's
@@ -1793,7 +1820,7 @@
            sameStreet: sameStreet,
            dropoff: dropoff, file: file, fileCard: fileCard, cardRank: cardRank,
            pressBetween: pressBetween, ownPopup: ownPopup, cardCandidate: cardCandidate,
-           storeScreen: storeScreen, placeOf: placeOf,
+           storeScreen: storeScreen, placeOf: placeOf, bracketDoor: bracketDoor,
            popup: popup, filePopup: filePopup, cardNames: cardNames,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
            keyOf: keyOf, placements: placements, linked: linked,

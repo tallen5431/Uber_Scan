@@ -38,7 +38,8 @@
  * not the door, "Starbucks" is twelve branches cut at the limit, "Waffle
  * House" is a pickup the road by is shorter than the road direct, "Farm
  * Stand" is 450 m from a road, "250 Example Road" is a restaurant's door (a
- * held order's pickup) and "1975 Cobb Parkway" one 87 m from 1985's door,
+ * held order's pickup) and "1975 Cobb Parkway" one 87 m from 1985's door
+ * ("1981 Cobb Parkway" one 60 m),
  * "Wrenfield Parking Deck" a place by Kestrel Drive (with "Quarry Hall" a road
  * and "Lantern Parking Deck" a deck far off, below), a
  * point at 34.1, -84.6 is refused by the
@@ -149,6 +150,14 @@ var DINER = [place(82, 34.0004, -84.5554, 'amenity', 'restaurant', 'Example Dine
                    'Example Diner, 1975, Cobb Parkway, Kennesaw, Cobb County, Georgia, '
                    + '30152, United States')];
 
+/* ...and one 60 m east of that same door (street=1981 Cobb Parkway): the
+   restaurant the SERVER pins for the guard from the held card's own words
+   (server.js pickupAsks, the owner's decision of 18 Oct) — DoorDash's printed
+   door under the store's name, or an Uber "Store (1981 Cobb Pkwy)". Invented. */
+var TAQUERIA = [place(83, 34.0010, -84.55535, 'amenity', 'restaurant', 'Example Taqueria',
+                      'Example Taqueria, 1981, Cobb Parkway, Kennesaw, Cobb County, Georgia, '
+                      + '30152, United States')];
+
 /* The held end by its PLACE (map-view.js pickPlace; the owner, 17 Oct): a
    parking deck beside Kestrel Drive, whose house 4821 this fake does not hold,
    asked as q=Wrenfield Parking Deck and answered as Nominatim answers a named
@@ -229,6 +238,7 @@ function search(q) {
     else if (/^church st/.test(term)) all = CHURCH;
     else if (/^250 example (rd|road)/.test(term)) all = GRILL;
     else if (/^1975 cobb (pkwy|parkway)/.test(term)) all = DINER;
+    else if (/^1981 cobb (pkwy|parkway)/.test(term)) all = TAQUERIA;
     else if (term === '1830 tansy creek sw') all = TANSY_1830;
     else if (term === '2040 tansy creek sw') all = TANSY_2040;
   }
@@ -372,7 +382,7 @@ function start(done) {
 module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    COBB_1985: COBB_1985, CHURCH: CHURCH, KESTREL: KESTREL,
                    STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM, GRILL: GRILL,
-                   DINER: DINER, DECK: DECK, QUARRY: QUARRY, LANTERN: LANTERN,
+                   DINER: DINER, TAQUERIA: TAQUERIA, DECK: DECK, QUARRY: QUARRY, LANTERN: LANTERN,
                    TANSY_1830: TANSY_1830, TANSY_2040: TANSY_2040 };
 
 if (require.main === module) {

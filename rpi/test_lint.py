@@ -941,6 +941,21 @@ _mv_cap = re.search(r'var ROUGH_DISC_MAX_M = ([\d.]+);', _mv_src)
 ok_("map-view.js's ROUGH_DISC_MAX_M is above gps.py's FIX_ERR_MAX",
     _mv_cap and float(_mv_cap.group(1)) > _gps_mod.FIX_ERR_MAX)
 
+# --- a store's door in its bracket: one expression in two files ------------
+#
+# server.js searches an Uber card's "Store (<n> <street>)" for the restaurant
+# guard by map-view.js searchPlan's bracket, and assemble.js heldPickup refuses
+# a navigation screen's address as that store's by its own copy (bracketDoor:
+# assemble.js loads without map-view.js). Two copies of one rule drift, so
+# the expression and its three-letter test are held to be the same.
+_as_src = open(os.path.join(ROOT, 'assemble.js'), encoding='utf-8').read()
+_as_br = re.search(r'var BRACKET_DOOR = (/.*?/);', _as_src)
+_mv_br = re.search(r'var br = (/.*?/)\.exec\(s\);\n\s*if \(br && (/\[A-Za-z\]\{3\}/)', _mv_src)
+eq("assemble.js's BRACKET_DOOR is map-view.js searchPlan's bracket",
+   _as_br.group(1) if _as_br else None, _mv_br.group(1) if _mv_br else 'missing')
+ok_("...and both ask the same three letters of it",
+    _mv_br is not None and "/[A-Za-z]{3}/.test(br[1])" in _as_src)
+
 # --- a request the scan loop takes sits under its own comment --------------
 #
 # The loop takes four requests from the screens one after another, each under
