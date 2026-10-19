@@ -6467,6 +6467,67 @@ try:
     finally:
         stop(_ap)
 
+    # The 19 Oct night fault, invented: the planner's "1106 <Name> Ln" read off
+    # a dark frame as "L106 <Nam..>r" and filed "1106 Tamaror", which the
+    # NucBox's search answers with nothing, and with no type word to leave
+    # out. With NUCBOX_STREETS set the street index (the fake's, by the real
+    # streets.js) is asked which one street that read is, and the door asked
+    # by its name (searchHeldNamed, MV.nameRetry).
+    _nmj = os.path.join(_adir, 'nm', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_nmj))
+    open(_nmj, 'w').close()
+    _nmp, _nmb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _afake_base,
+                        'NUCBOX_STREETS': _afake_base, 'NUCBOX_TIMEOUT_MS': '800'}, _nmj)
+    try:
+        _n = len(_aasked('Tamar'))
+        _atook(_nmb, 'n-door', '1106 Tamaror, Marietta')
+        _h = _settled(_nmb)
+        eq('[name rescue] a door filed under a name read short is pinned by the one street the '
+           'street index says it is, and says which',
+           (_h.get('endPinned'), _h.get('endBy'), _h.get('endAsked'), _h.get('endWhy'),
+            [urllib.parse.unquote(re.search(r'[?&](?:street|name)=([^&]*)', u).group(1))
+             for u in _aasked('Tamar')[_n:]]),
+           (True, 'server', '1106 Tamarons Lane', None,
+            ['1106 Tamaror', 'Tamaror', '1106 Tamarons Lane']))
+        eq('[name rescue] ...the index asked at /api/streets/named inside the disc\'s box',
+           [u.split('?')[0] for u in _aasked('Tamar')[_n:]],
+           ['/search', '/api/streets/named', '/search'])
+        _n = len(_aasked('Tamar'))
+        _atook(_nmb, 'n-door2', '1106 Tamaror, Marietta')
+        _h = _settled(_nmb)
+        eq('[name rescue] ...the next order to that door is answered from the cache, all three',
+           (_h.get('endPinned'), _h.get('endAsked'), len(_aasked('Tamar')) - _n),
+           (True, '1106 Tamarons Lane', 0))
+        _atook(_nmb, 'n-two', '1106 Brindler, Marietta')
+        _h = _settled(_nmb)
+        eq('[name rescue] a read two near streets can be is neither: the first refusal stands '
+           'and no door is asked by either name',
+           (_h.get('endPinned'), _h.get('endAsked'), _h.get('endWhy'),
+            len(_aasked('Brindlewood')) + len(_aasked('Brindleton'))),
+           (False, None, 'not inside the card\'s reach', 0))
+        _atook(_nmb, 'n-far', '1106 Tamaror, Marietta', miles=1.0)
+        _h = _settled(_nmb)
+        eq('[name rescue] ...and the door found outside a 1.0 mi card is refused',
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'not inside the card\'s reach'))
+        _atook(_nmb, 'n-cobb', _COBB)
+        _h = _settled(_nmb)
+        eq('[name rescue] a door found as printed never asks the index',
+           (_h.get('endPinned'), _h.get('endAsked'), len(_aasked('named?name=1985')),
+            len(_aasked('named?name=Cobb'))), (True, None, 0, 0))
+        _s, _r, _ = raw(_nmb, '/api/nbx/named?name=Tamaror')
+        eq('[name rescue] the relay passes the question on only with a box',
+           (_s, json.loads(_r).get('error')), (400, 'named needs a box'))
+        _r = get(_nmb, '/api/nbx/named?name=Tamaror&box=-84.65,34.04,-84.45,33.87')
+        eq('[name rescue] ...and relays the index\'s answer, from the cache',
+           (_r.get('names'), _r.get('how'), _r.get('among')), (['Tamarons Lane'], 'cut', 1))
+    finally:
+        stop(_nmp)
+    # Without NUCBOX_STREETS: the server above (_ab) refused "2040 Tansy Creek
+    # Cts SW" as not inside the card's reach, the case the index would be
+    # asked in, and asked it nothing.
+    eq('[name rescue] with NUCBOX_STREETS unset the index is never asked',
+       len(_aasked('named?name=Tansy')), 0)
+
     _bj = os.path.join(_adir, 'b', 'offers.jsonl')
     os.makedirs(os.path.dirname(_bj))
     open(_bj, 'w').close()

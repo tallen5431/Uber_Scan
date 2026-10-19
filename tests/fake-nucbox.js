@@ -29,8 +29,9 @@
  * route answer on purpose: server.js must drop it, and a suite can only see
  * that if it was there.
  *
- * And the NucBox's own server.js's two street questions (/api/streets/cross
- * and /stretch), answered in its shape with one fixed corner and stretch.
+ * And the NucBox's own server.js's street questions: /api/streets/cross and
+ * /stretch answered in its shape with one fixed corner and stretch, and
+ * /named by the real streets.js over a small invented index (NAMED_INDEX).
  *
  * Also: "Church St" is two streets of that name in two towns (two that fit
  * and disagree, whatever the card's town), "Slow Place" answers after two and
@@ -201,6 +202,35 @@ var TANSY_2040 = [
         + 'United States')
 ];
 
+/* A door filed under a name read short (map-view.js nameRetry; the owner's 19
+   Oct night fault): "1106 Tamaror" is "1106 Tamarons Ln" read off a dark
+   frame with its type lost and its last word cut, and this fake's search, as
+   the real install did for the owner's, answers it with nothing. Its street
+   index (NAMED_INDEX below) knows Tamarons Lane 1.7 mi north-west of the
+   Square, and asked by that name the search answers the door. "Brindler" is
+   a read two near streets can be — Brindlewood Way and Brindleton Court,
+   both by the Square — whose doors the search holds too, so a suite can see
+   neither is ever asked. Invented, every one. */
+var TAMARONS_1106 = [
+  place(111, 33.9752, -84.5601, 'place', 'house', '',
+        '1106, Tamarons Lane, Marietta, Cobb County, Georgia, 30064, United States')];
+var BRINDLE_1106 = [
+  place(112, 33.9650, -84.5400, 'place', 'house', '',
+        '1106, Brindlewood Way, Marietta, Cobb County, Georgia, 30060, United States')];
+
+/* The NucBox's street index for the questions above, answered by the real
+   streets.js (named), so what the server is told is what the NucBox would
+   say: each street one short way. Coordinates are deltas, node to node, in
+   millionths of a degree. */
+var Streets = require('../streets.js');
+var NAMED_INDEX = Streets.build({
+  format: Streets.FORMAT, e: 6,
+  names: ['Tamarons Lane', 'Brindlewood Way', 'Brindleton Court'],
+  nodes: [-84561000, 33975000, 2000, 400,            // Tamarons Lane
+          21000, -10400, 2000, 0,                    // Brindlewood Way
+          -6000, 3000, 0, 2000],                     // Brindleton Court
+  ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]]] });
+
 var CHURCH = [
   place(31, 33.9580, -84.5520, 'highway', 'tertiary', 'Church Street',
         'Church Street, Marietta, Cobb County, Georgia, 30060, United States'),
@@ -241,6 +271,8 @@ function search(q) {
     else if (/^1981 cobb (pkwy|parkway)/.test(term)) all = TAQUERIA;
     else if (term === '1830 tansy creek sw') all = TANSY_1830;
     else if (term === '2040 tansy creek sw') all = TANSY_2040;
+    else if (term === '1106 tamarons lane') all = TAMARONS_1106;
+    else if (term === '1106 brindlewood way') all = BRINDLE_1106;
   }
   if (q.bounded === '1') all = all.filter(function (p) { return inBox(p, q.viewbox); });
   return all.slice(0, Number(q.limit) || 10);
@@ -343,6 +375,13 @@ function start(done) {
     // half seconds (for the timeout) and "Bad Street" with a meeting that is
     // not a point (for the relay's all-or-nothing check). What a real index
     // answers is tests/streets.test.js's.
+    // ...and /api/streets/named, by the real streets.js over NAMED_INDEX.
+    if (u.pathname === '/api/streets/named') {
+      var nb = Streets.named(NAMED_INDEX, String(u.query.name || ''),
+                             u.query.box ? Streets.boxOf(String(u.query.box)) : null);
+      nb.ok = true;
+      return json(200, nb);
+    }
     if (u.pathname === '/api/streets/cross' || u.pathname === '/api/streets/stretch') {
       var said = u.query.a || u.query.name || '';
       var cross = u.pathname === '/api/streets/cross';
@@ -383,7 +422,9 @@ module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    COBB_1985: COBB_1985, CHURCH: CHURCH, KESTREL: KESTREL,
                    STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM, GRILL: GRILL,
                    DINER: DINER, TAQUERIA: TAQUERIA, DECK: DECK, QUARRY: QUARRY, LANTERN: LANTERN,
-                   TANSY_1830: TANSY_1830, TANSY_2040: TANSY_2040 };
+                   TANSY_1830: TANSY_1830, TANSY_2040: TANSY_2040,
+                   TAMARONS_1106: TAMARONS_1106, BRINDLE_1106: BRINDLE_1106,
+                   NAMED_INDEX: NAMED_INDEX };
 
 if (require.main === module) {
   start(function (f) { console.log(JSON.stringify({ port: f.port })); });

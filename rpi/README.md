@@ -8559,7 +8559,7 @@ python3 rpi/test_offerspage.py  # 516 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 934 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 943 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8581,14 +8581,14 @@ node tests/assemble.test.js     # 326 on where the order in the car ends: one
                                 #     offer's pickup is the store of an order
                                 #     in the car, by its door or, distinctive
                                 #     and close by, its name
-node tests/mapview.test.js      # 578 on the deciding behind both maps, with
+node tests/mapview.test.js      # 592 on the deciding behind both maps, with
                                 #     no map: the geometry, the cache, and the
                                 #     one-request-a-second rule against a fake
                                 #     clock, which is what makes the awkward
                                 #     cases — two walks in a row, a cache hit
                                 #     mid-walk, a hotspot that drops — cost
                                 #     milliseconds instead of seconds
-node tests/streets.test.js      #  71 on the NucBox's street index, from a
+node tests/streets.test.js      #  88 on the NucBox's street index, from a
                                 #     handful of invented streets through the
                                 #     real exporter (osmium-tool when it is
                                 #     installed) and the real server: names

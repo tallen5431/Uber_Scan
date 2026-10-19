@@ -212,6 +212,54 @@ eq('a name the index holds anywhere is never read as another inside the box: '
    S.match(twoPlaces, 'Ellis St', S.boxOf('-84.41,34.01,-84.39,33.99')).names.join(),
    'Ellis Street');
 
+/* ---- one street by its name as read, inside a box (named) ---------------- */
+// The owner's 19 Oct night fault, invented: "1106 <Name> Ln" read off a dark
+// frame as "<Nam..>r", the type lost and the last word cut. Tamarons Lane is
+// at 33.975, -84.561; Brindlewood Way and Brindleton Court a mile east, both
+// what "Brindler" could be; Tamar Court 0.6 degrees off, outside every box
+// asked here. Coordinates are deltas, in millionths of a degree.
+var cutIx = S.build({ format: S.FORMAT, e: 6,
+  names: ['Tamarons Lane', 'Brindlewood Way', 'Brindleton Court', 'Tamar Court',
+          'Wendle Lane Northwest'],
+  nodes: [-84561000, 33975000, 2000, 400, 21000, -10400, 2000, 0, -6000, 3000, 0, 2000,
+          600000, 0, 100, 100, -620000, -17000, 2000, 0],
+  ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]], [[3], [6, 1]], [[4], [8, 1]]] });
+var CARD = S.boxOf('-84.6,34.0,-84.5,33.9');
+function nm(name, box) {
+  var x = S.named(cutIx, name, box === undefined ? CARD : box);
+  return x.names.join(' | ') + ' (' + x.how + ', ' + x.among + ')';
+}
+eq('named: "Tamaror" — the type lost, the last word cut and the letter at the cut misread — '
+   + 'is the one street inside the box it can be', nm('Tamaror'), 'Tamarons Lane (cut, 1)');
+eq('...and the word whole with only its type lost', nm('Tamarons'), 'Tamarons Lane (cut, 1)');
+eq('...and a name the matcher finds as read is counted inside the box as well',
+   nm('Tamarons Ln'), 'Tamarons Lane (exact, 1)');
+eq('...two near streets the read can be are none, never the likelier: "Brindler"',
+   nm('Brindler'), ' (cut, 2)');
+eq('...a read longer than the street word is none: "Brindlewoods"', nm('Brindlewoods'),
+   ' (null, 0)');
+eq('...and once it can be only one of them, that one: "Brindlewo"', nm('Brindlewo'),
+   'Brindlewood Way (cut, 1)');
+eq('...CUT_KEEP (' + S.CUT_KEEP + ') letters before the cut read right: "Tamax" is Tamarons, '
+   + '"Tamx" nothing', [nm('Tamax'), nm('Tamx')].join(' / '),
+   'Tamarons Lane (cut, 1) /  (null, 0)');
+eq('...a digit in the word read is never a cut word: "Tamaro5"', nm('Tamaro5'), ' (null, 0)');
+eq('...a read that kept its type is not a cut name: "Tamaror Ln"', nm('Tamaror Ln'), ' (null, 0)');
+eq('...the words before the last must be the street\'s: "Old Tamaror"', nm('Old Tamaror'),
+   ' (null, 0)');
+eq('...directionals agree as match\'s do: "Wendle" is Wendle Lane Northwest, "Wendle SE" '
+   + 'not', [nm('Wendle'), nm('Wendle SE')].join(' / '),
+   'Wendle Lane Northwest (cut, 1) /  (null, 0)');
+eq('...a name the index holds as read ANYWHERE is never read as another inside the box: '
+   + '"Tamar Ct" is Tamar Court, off the box, so none', nm('Tamar Ct'), ' (exact, 0)');
+eq('...no street of it inside the box is none', nm('Tamaror', S.boxOf('-84.4,33.9,-84.3,33.8')),
+   ' (null, 0)');
+eq('...and no box is no answer', nm('Tamaror', null), ' (null, 0)');
+eq('the fixture through named: "Foxglov" is Foxglove Trail, and "Church St" (two of that name '
+   + 'in the box) is none', [S.named(ix, 'Foxglov', ALL).names.join(),
+                            S.named(ix, 'Church St', ALL).among].join(' / '),
+   'Foxglove Trail / 2');
+
 /* ---- where two streets meet --------------------------------------------- */
 function meets(a, b, box) {
   return S.cross(ix, a, b, box ? S.boxOf(box) : null).meets.map(function (x) {
@@ -339,7 +387,13 @@ async function get(srv, u, init) {
                   + '&box=' + box);
     eq('/api/streets/stretch answers the street inside the box',
        JSON.stringify([g.status, g.body.lines]), JSON.stringify([200, st.lines]));
+    g = await get(nuc, '/api/streets/named?name=' + encodeURIComponent('Foxglov')
+                  + '&box=-84.6,34.0,-84.5,33.9');
+    eq('/api/streets/named answers the one street the name as read is inside the box',
+       JSON.stringify([g.status, g.body.names, g.body.how, g.body.among]),
+       JSON.stringify([200, ['Foxglove Trail'], 'cut', 1]));
     var refused = [
+      ['/api/streets/named?name=Foxglov', 'named needs a box'],
       ['/api/streets/cross?a=x&b=y&limit=5', 'refused: limit'],
       ['/api/streets/cross?a=x&a=y&b=z', 'given more than once: a'],
       ['/api/streets/cross?a=x', 'a and b must each be'],

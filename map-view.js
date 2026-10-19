@@ -1223,6 +1223,67 @@
     return second && (second.at || second.why === 'nodoor') ? second : first;
   }
 
+  /* --- the door by the one street the street index says the name as read is
+   *
+   * The owner's fault of 19 Oct 2026 (night): the Trip Planner's dropoff
+   * "1106 <Name> Ln, Marietta" read off a dark grayscale frame as "L106
+   * <Nam..>" — the type gone, the name's last word cut and the letter at the
+   * cut misread — and filed "1106 <Nam..>". The NucBox's search found nothing
+   * ('none', "not inside the card's reach"), streetRetry had no type word to
+   * leave out, and GPS arrival never armed. The NucBox's street index holds
+   * every named street of the metro and already matches names as the reader
+   * misreads them without one street becoming another (streets.js).
+   *
+   * So, LAST, where the street as printed — and without its type word, where
+   * one was asked — is not inside the card's reach (nameWanted), and only
+   * with the street index set: the index is asked which ONE street inside the
+   * disc's box the name as read (nameAsked) can be (streets.js named: its own
+   * rules, then a type lost and the last word cut, CUT_KEEP letters kept),
+   * and the door is asked ONCE more by that street's own name (nameRetry),
+   * taken only at door level inside the disc (pickNamed: pickInDisc, and
+   * retryFits to the street's name and type when it has one). Two streets
+   * the read could be are none. The server's held end (searchHeldNamed) and
+   * Map view's (NbxSearch.place, `named`) ask the same two questions, so
+   * they share the server's cache. */
+
+  // WHEN: the street as printed not inside the card's reach (retryWanted),
+  // and the type-word retry, where one was asked (`two`), neither pinned nor
+  // found the street (afterRetry kept the first's answer). Never with no disc.
+  function nameWanted(first, hits, disc, two) {
+    return !!disc && retryWanted(first, hits, disc) && afterRetry(first, two) === first;
+  }
+
+  // The street's name as read, the house number left off ("1106 <Nam..>" ->
+  // "<Nam..>"), for a door plan; null with no letters left to ask by.
+  function nameAsked(plan) {
+    if (!plan || plan.kind !== 'street' || !plan.door) return null;
+    var name = plan.street.replace(/\s+/g, ' ').trim().replace(/^\S+\s*/, '');
+    return /[A-Za-z]{2}/.test(name) ? name : null;
+  }
+
+  /* The door asked again by the index's street: a door plan, the house
+     number and the street's name as OSM spells it, with `retry` (streetRetry's
+     words) when that name ends in a type word, so the answer is held to the
+     same street (pickNamed). Null unless the index answered exactly ONE
+     street (`among` 1, a name given), or when its name is the one already
+     asked. */
+  function nameRetry(plan, ans) {
+    var asked = nameAsked(plan);
+    if (!asked || !ans || ans.among !== 1 || !Array.isArray(ans.names)
+        || typeof ans.names[0] !== 'string') return null;
+    var name = ans.names[0].replace(/\s+/g, ' ').trim();
+    if (!name || name.toLowerCase() === asked.toLowerCase()) return null;
+    var p = streetPlan(plan.house + ' ' + name);
+    var same = streetRetry(p);
+    if (same) p.retry = same.retry;
+    return p;
+  }
+
+  // Door level inside the disc, held to the street's own name where it has a type.
+  function pickNamed(hits, disc, plan, cutAt) {
+    return (plan && plan.retry ? pickRetry : pickInDisc)(hits, disc, plan, cutAt);
+  }
+
   /* --- the held end by its PLACE, when the NucBox has the street and not the door
    *
    * The owner's decision of 17 Oct 2026. An Uber order's door was "1000 <Road>
@@ -2800,12 +2861,19 @@
     // pickRetry): the server's own question for the held end, word for word,
     // so the two share its answer.
     var again = disc ? streetRetry(plan) : null;
+    // ...and last, with the street index set, the door by the one street the
+    // index says the name as read is (nameWanted, nameRetry; the 19 Oct night
+    // fault), as the server asks it (searchHeldNamed).
+    var byName = opts.streets && disc && plan.kind === 'street' && plan.door;
     var asked = this.search(plan, disc);
-    if (again) {
+    if (again || byName) {
       asked = asked.then(function (res) {
-        if (!retryWanted(res, res.seen && res.seen.hits, disc)) return res;
-        return me.search(again, disc).then(function (two) {
-          return afterRetry(res, two);
+        var hits = res.seen && res.seen.hits;
+        if (!retryWanted(res, hits, disc)) return res;
+        var two = again ? me.search(again, disc) : Promise.resolve(null);
+        return two.then(function (t) {
+          return byName && nameWanted(res, hits, disc, t) ? me.named(plan, disc, res)
+            : afterRetry(res, t);
         });
       });
     }
@@ -2817,6 +2885,28 @@
     if (!named) return asked;
     return asked.then(function (res) {
       return res.why === 'nodoor' ? me.placeSearch(named, disc) : res;
+    });
+  };
+
+  /* The door by the ONE street the street index says the name as read is
+     (nameRetry), inside the disc (pickNamed); `first` is the door search's
+     own answer, which stands when the index names no one street, does not
+     answer, or the door is not found — never the public map, whatever the
+     index said: a door asked by a guessed name is the NucBox's or none.
+     A door found this way carries the street it was found by (`asked`). */
+  NbxSearch.prototype.named = function (plan, disc, first) {
+    var me = this;
+    var path = '/named?name=' + encodeURIComponent(nameAsked(plan) || '')
+             + '&box=' + encodeURIComponent(discBox(disc));
+    if (!nameAsked(plan)) return Promise.resolve(first);
+    return this.get(path).then(function (body) {
+      var p2 = nbxDown(body) ? null : nameRetry(plan, body);
+      if (!p2) return first;
+      return me.search(p2, disc).then(function (two) {
+        var res = afterRetry(first, two);
+        if (res === two) res.asked = p2.street;
+        return res;
+      });
     });
   };
 
@@ -3668,6 +3758,7 @@
            hasDoor: hasDoor, discShape: discShape, located: located,
            STREET_TYPES: STREET_TYPES, streetType: streetType, streetRetry: streetRetry,
            retryFits: retryFits, pickRetry: pickRetry, retryWanted: retryWanted,
-           afterRetry: afterRetry,
+           afterRetry: afterRetry, nameWanted: nameWanted, nameAsked: nameAsked,
+           nameRetry: nameRetry, pickNamed: pickNamed,
            howFound: howFound };
 }));

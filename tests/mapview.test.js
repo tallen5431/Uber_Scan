@@ -1468,6 +1468,58 @@ async function nucbox() {
                      MV.afterRetry(first, null) === first]),
      JSON.stringify([{ lat: 1 }, 'nodoor', true, true, true]));
 
+  /* The door by the one street the street index says the name as read is
+     (the owner's 19 Oct night fault, "1106 <Name> Ln" read "<Nam..>r").
+     Invented streets throughout (tests/fake-nucbox.js, Tamarons Lane). */
+  var tam = MV.searchPlan('1106 Tamaror, Marietta');
+  eq('nameAsked: the street less its house number; none for no door or no letters',
+     JSON.stringify([MV.nameAsked(tam), MV.nameAsked(MV.searchPlan('12A Birch Hollow Dr NE, X')),
+                     MV.nameAsked(MV.searchPlan('Tamaror, Marietta')),
+                     MV.nameAsked(MV.searchPlan('1106 7, Marietta')), MV.nameAsked(null)]),
+     JSON.stringify(['Tamaror', 'Birch Hollow Dr NE', null, null, null]));
+  var one = { names: ['Tamarons Lane'], how: 'cut', among: 1 };
+  var tr = MV.nameRetry(tam, one);
+  eq('nameRetry: the house number and the index\'s one street, held to its name and type',
+     JSON.stringify(tr && [tr.street, tr.house, tr.door, tr.retry]),
+     JSON.stringify(['1106 Tamarons Lane', '1106', true,
+                     { name: ['tamarons'], type: 'lane', quadrant: null }]));
+  eq('...and none where the index named no one street, two, a bad answer, or the name asked',
+     JSON.stringify([MV.nameRetry(tam, { names: [], among: 0 }),
+                     MV.nameRetry(tam, { names: ['Tamarons Lane'], among: 2 }),
+                     MV.nameRetry(tam, { names: [7], among: 1 }), MV.nameRetry(tam, null),
+                     MV.nameRetry(tam, { names: ['tamaror'], among: 1 }),
+                     MV.nameRetry(MV.searchPlan('Tamaror, Marietta'), one)]),
+     JSON.stringify([null, null, null, null, null, null]));
+  eq('...and a street with no type word is asked by its name alone, no retry words',
+     JSON.stringify(MV.nameRetry(tam, { names: ['Broadway'], among: 1 })),
+     JSON.stringify({ kind: 'street', street: '1106 Broadway', door: true, house: '1106' }));
+  var d50n = MV.discFor(card({ miles: 5.0 }));
+  var tamHits = hitsOf(FAKE.TAMARONS_1106);
+  var lane = MV.pickNamed(tamHits, d50n, tr, null);
+  eq('pickNamed: the door on the one street, inside the disc',
+     JSON.stringify(lane.at && [lane.at.lat, lane.at.lon]), JSON.stringify([33.9752, -84.5601]));
+  eq('...the same number on a street of a like name is not it, nor a door outside the disc, '
+     + 'nor the street alone, nor a cut list',
+     JSON.stringify([MV.pickNamed([{ lat: 33.9752, lon: -84.5601,
+                                     name: '1106, Tamarons Lane Court, Marietta' }], d50n, tr, null).why,
+                     MV.pickNamed(tamHits, MV.discFor(card({ miles: 1.0 })), tr, null).why,
+                     MV.pickNamed([{ lat: 33.9752, lon: -84.5601, name: 'Tamarons Lane, Marietta' }],
+                                  d50n, tr, null).why,
+                     MV.pickNamed(tamHits, d50n, tr, 10).why]),
+     JSON.stringify(['none', 'none', 'nodoor', 'capped']));
+  var none1 = { at: null, why: 'none' };
+  eq('nameWanted: the street as printed not inside the reach and the type retry, if any, '
+     + 'neither pinned nor found the street; never with no disc, the street inside, or a pin',
+     JSON.stringify([MV.nameWanted(none1, [], d50n, null),
+                     MV.nameWanted(none1, [], d50n, { at: null, why: 'none' }),
+                     MV.nameWanted(none1, [], d50n, { at: null, why: 'nodoor' }),
+                     MV.nameWanted(none1, [], d50n, { at: { lat: 1, lon: 1 } }),
+                     MV.nameWanted(none1, [], null, null),
+                     MV.nameWanted({ at: null, why: 'nodoor' }, [near], d50n, null),
+                     MV.nameWanted({ at: null, why: 'several' }, [near, near], d50n, null),
+                     MV.nameWanted({ at: { lat: 1, lon: 1 } }, [near], d50n, null)]),
+     JSON.stringify([true, true, false, false, false, false, false, false]));
+
   /* A list cut at the limit proves nothing about what is inside the disc. */
   var sb = hitsOf(FAKE.STARBUCKS.slice(0, 10));
   var sbOne = MV.pickInDisc(sb, d30, MV.searchPlan('Starbucks'), null);
@@ -1957,6 +2009,53 @@ async function nucbox() {
     eq('...and with no disc, no retry', fake.asked.slice(n0).filter(function (u) {
       return /Tansy%20Creek%20SW/.test(u);
     }).length, 0);
+
+    // The 19 Oct night fault, invented: a door filed "1106 Tamaror", which
+    // the search answers with nothing; the street index (the fake's, by the
+    // real streets.js) says the one street that read is, and the door is
+    // asked by its name. Only with the street index set (opts.streets).
+    var named = await startServer({ NUCBOX_SEARCH: fb, NUCBOX_STREETS: fb });
+    try {
+      var nbxN = new MV.NbxSearch({ base: named.base + '/api/nbx' });
+      n0 = fake.asked.length;
+      got = await nbxN.place('1106 Tamaror, Marietta', d50t, { streets: true });
+      sent = fake.asked.slice(n0).map(decodeURIComponent);
+      eq('through the server, a door filed under a name read short is found by the one street '
+         + 'the index says it is, and says by which (' + sent.join(' ') + ')',
+         JSON.stringify([got.at && [got.at.lat, got.at.lon], got.asked, sent.map(function (u) {
+           return /[?&](?:street|name)=([^&]*)/.exec(u)[1];
+         })]),
+         JSON.stringify([[33.9752, -84.5601], '1106 Tamarons Lane',
+                         ['1106 Tamaror', 'Tamaror', '1106 Tamarons Lane']]));
+      ok_('...the index asked as /api/streets/named with the disc\'s box, the town left home',
+          /^\/api\/streets\/named\?name=Tamaror&box=[-0-9.,]+$/.test(sent[1]));
+      n0 = fake.asked.length;
+      got = await new MV.NbxSearch({ base: named.base + '/api/nbx' })
+        .place('1106 Tamaror, Marietta', d50t, { streets: true });
+      eq('...and asked again by another page, all three come from the server\'s cache',
+         JSON.stringify([!!got.at, fake.asked.length - n0]), JSON.stringify([true, 0]));
+      n0 = fake.asked.length;
+      got = await nbxN.place('1106 Brindler, Marietta', d50t, { streets: true });
+      sent = fake.asked.slice(n0).map(decodeURIComponent);
+      eq('...a read two near streets can be is neither: the first refusal stands, and no door '
+         + 'is asked by either name', JSON.stringify([got.at, got.why, sent.filter(function (u) {
+           return /Brindle(wood|ton)/.test(u);
+         })]), JSON.stringify([null, 'none', []]));
+      got = await nbxN.place('1106 Tamaror, Marietta', MV.discFor(card({ miles: 1.0 })),
+                             { streets: true });
+      eq('...the door found outside a 1.0 mi card is refused as before',
+         [got.at, got.why].join(','), ',none');
+      n0 = fake.asked.length;
+      got = await nbxN.place('1106 Tamaror, Marietta', d50t);
+      eq('...and without the street index set, the index is never asked',
+         JSON.stringify([got.why, fake.asked.slice(n0).filter(function (u) {
+           return /named/.test(u);
+         }).length]), JSON.stringify(['none', 0]));
+      got = await nbxN.place('1106 Tamaror, Marietta', null, { streets: true });
+      eq('...nor with no disc', got.asked, undefined);
+    } finally {
+      named.stop();
+    }
 
     /* Corners and stretches, through this rig's server to the NucBox's
        street index. The fixture's corners are a few tenths of a mile from

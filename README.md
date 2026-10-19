@@ -274,8 +274,9 @@ heap Y MB" — the real figures, which nobody has yet read off the NucBox.
 `curl localhost:8080/api/streets` says the same. A file that is set and cannot
 be read is said at start and on every question, never as "no such street".
 
-What it answers, `GET /api/streets/cross?a=&b=&box=` and
-`/api/streets/stretch?name=&box=` (box `left,top,right,bottom`, optional):
+What it answers, `GET /api/streets/cross?a=&b=&box=`,
+`/api/streets/stretch?name=&box=` and `/api/streets/named?name=&box=` (box
+`left,top,right,bottom`, optional but for `named`):
 
 * **Where two streets meet** — ways that share a node meet there, and ways
   that cross without one (a bridge) where their segments cross. Points within
@@ -311,6 +312,15 @@ What it answers, `GET /api/streets/cross?a=&b=&box=` and
   matched both Peachtree St NE and Peachtree St SW — two streets, and where
   each meets the other name is what decides between them. The card's town is
   never sent and never used.
+* **The one street a name as read is** (`named`, asked only inside a card's
+  box) — for a held order's door the NucBox's search found nothing for: the
+  names above, counted among the streets inside the box, and then a read that
+  lost the street's type and cut its last word short ("…r" for "…ns Ln", at
+  least four letters before the cut read right). A street only when exactly
+  one inside the box fits; two are none. The rig asks it (relayed as
+  `/api/nbx/named`) and then the door by that street's own name. **The
+  NucBox's copy of server.js answers this, so the NucBox needs a `git pull`
+  and a restart before the rig can ask it.**
 
 Measured: the suite's synthetic streets load in 1 ms. The real metro's size
 is **not known** here, and every figure that follows is for a synthetic grid

@@ -353,6 +353,101 @@ function match(ix, asked, box) {
   return { names: [], how: null, keys: [] };
 }
 
+/* --- one street by its name as read, inside a box -------------------------
+ *
+ * THE FAULT (the owner, 19 Oct night). The Trip Planner's dropoff "1106
+ * <Name> Ln, Marietta" was read off a dark grayscale frame as "L106 <Nam..>":
+ * the street's type gone and the name's last word cut, with the letter at the
+ * cut read wrong ("...ns Ln" came out "...r"). Filed as "1106 <Nam..>", the
+ * NucBox's search found nothing, the street-type retry had no type word to
+ * leave out, and GPS arrival never armed. The street was in this index all
+ * along, inside the card's disc. So the held end's door search asks here, once,
+ * which ONE street of the index inside the card's box the name as read can be
+ * (map-view.js nameRetry; server.js searchHeldNamed), and asks the door again
+ * by that street's own name.
+ *
+ * WHICH, in order; the first that finds anything decides, as in match:
+ *
+ *   match's own rules (exact, dir, junk, ocr), counted only among the streets
+ *            with a way reaching into the box. A name the index holds as read
+ *            ANYWHERE decides here even when none of it is in the box — and
+ *            then the answer is none: a real street read right is never read
+ *            as another one near the card (match's own rule).
+ *   cut      the read lost the street's type and cut its last word short
+ *            (cutFits): the same name words, but for the last, which is the
+ *            index's word cut — its first letters read right, at least
+ *            CUT_KEEP of them, and the one letter at the cut read as anything
+ *            ("<Nam..>r" for "<Name>ns") — or the whole word with only the type
+ *            lost; then, on the index's side, a type word or none. Directionals
+ *            agree as match's do. Never a digit in the word read (12th and 13th
+ *            are different streets), never a read that kept its type word (the
+ *            name in front of a type was read whole, which match's rules are
+ *            for), and never a read longer than the word it would be.
+ *
+ * ONE OR NONE (`among`): the answer is a street only when exactly ONE street of
+ * the index inside the box is what the read can be; two or more are refused
+ * together, whatever their likeness — "<Nam..>r" near both "<Name>ns Ln" and
+ * "<Name>dor Way" is neither, because a wrong street is a wrong door and the
+ * GPS ends a delivery at a door. A street is one KEY here (its words, short
+ * forms, directionals included), so one street mapped under two directionals
+ * is two and refused: nothing, rather than a guess.
+ *
+ * The box is the card's disc's box (map-view.js discBox), a little larger than
+ * the disc at its corners: a second near street in a corner of the box, outside
+ * the disc, refuses too. The door is then asked of the NucBox's search by the
+ * one street's name and held to the disc there (pickInDisc), so a street found
+ * only in a corner gives no pin.
+ *
+ * CUT_KEEP is chosen, not measured: no frame of the fault is in the repository.
+ * Four letters read right is where match's ocr rule starts trusting a word (an
+ * ocr misread needs four letters in the index's word, ocrMay), and with one
+ * letter at the cut the shortest read is five. */
+var CUT_KEEP = 4;
+
+/* Whether `ws`, the words of a name as read, can be the index's key `o`
+   read with its type lost and its last word cut (the rule `cut` above). */
+function cutFits(sq, o) {
+  if (!dirsAgree(sq, o.sp)) return false;
+  var q = sq.base, base = o.sp.base;
+  if (!q.length || isType(q[q.length - 1])) return false;
+  // The index's name, less its trailing type word if it has one.
+  var name = base.length > 1 && isType(base[base.length - 1]) ? base.slice(0, -1) : base;
+  if (name.length !== q.length) return false;
+  for (var i = 0; i < q.length - 1; i++) if (q[i] !== name[i]) return false;
+  var r = q[q.length - 1], w = name[name.length - 1];
+  if (!/^[a-z]+$/.test(r)) return false;
+  if (r === w) return name.length < base.length;     // the type lost, the word whole
+  return r.length < w.length && r.length - 1 >= CUT_KEEP
+    && r.slice(0, -1) === w.slice(0, r.length - 1);
+}
+
+/* The one street of the index inside `box` that the name as read can be:
+   { names: [as OSM spells it] or [], how: match's rule or 'cut' or null,
+     among: how many streets inside the box it could be }. `names` is given
+   only when `among` is exactly 1. No box, no answer: this is a guess between
+   streets, and the card's box is what keeps it to the ones that could be
+   meant. */
+function named(ix, asked, box) {
+  var none = { names: [], how: null, among: 0 };
+  if (!box) return none;
+  var inside = function (key) { return waysIn(ix, [key], box).length > 0; };
+  var m = match(ix, asked, box);
+  var keys, how;
+  if (m.keys.length) {
+    keys = m.keys.filter(inside);
+    how = m.how;
+  } else {
+    var sq = split(words(asked));
+    keys = ix.keys.filter(function (o) { return cutFits(sq, o) && inside(o.key); })
+      .map(function (o) { return o.key; }).sort();
+    how = 'cut';
+  }
+  // None inside: said with the rule that found the name elsewhere, if one did.
+  if (!keys.length) return { names: [], how: m.keys.length ? how : null, among: 0 };
+  return { names: keys.length === 1 ? ix.byKey.get(keys[0]).names.slice().sort() : [],
+           how: how, among: keys.length };
+}
+
 /* --- geometry ------------------------------------------------------------ */
 
 function metres(aLat, aLon, bLat, bLon) {
@@ -566,5 +661,6 @@ function stretch(ix, name, box, most) {
 module.exports = { FORMAT: FORMAT, words: words, split: split, cleaned: cleaned,
                    oneEdit: oneEdit, ocrMay: ocrMay, build: build, load: load,
                    match: match, cross: cross, stretch: stretch, metres: metres,
+                   named: named, cutFits: cutFits, CUT_KEEP: CUT_KEEP,
                    boxOf: boxOf, CLUSTER_M: CLUSTER_M, MEETS_MAX: MEETS_MAX,
                    POINTS_MAX: POINTS_MAX, TYPES: TYPES, DIRS: DIRS };

@@ -2674,11 +2674,15 @@ var END_WHY = { nodoor: 'no house number', none: 'not inside the card\'s reach',
  * `answered(out)` with nbxHits' answer. A NucBox that does not answer is
  * 'NucBox down' on the hold and is asked once more, the whole search from the
  * top, after END_RETRY_MS. The door's question and the place's both come
- * through here. */
-function endAsk(key, attempt, target, answered) {
+ * through here — and the street index's (searchHeldNamed), whose answer
+ * `read` turns into what is kept (streetAnswer), or null for one that is not
+ * an answer, which is the NucBox not answering as any other is. */
+function endAsk(key, attempt, target, answered, read) {
+  read = read || function (body) { return Array.isArray(body) ? nbxHits(body) : null; };
   if (nbxCache.has(target)) return answered(nbxCache.get(target));
   nbxAsk(target, function (err, body) {
-    if (!err && !Array.isArray(body)) err = 'not a list';
+    var out = err ? null : read(body);
+    if (!err && !out) err = 'not an answer';
     if (err) {
       var now = endHold(key);
       if (!now || heldEndPin(now)) return;
@@ -2692,7 +2696,6 @@ function endAsk(key, attempt, target, answered) {
       }
       return;
     }
-    var out = nbxHits(body);
     nbxRemember(target, out);
     answered(out);
   });
@@ -2707,7 +2710,8 @@ function pinHeldEnd(h, at, by, asked) {
   h.endPin = { dropoff: h.dropoff, lat: at.lat, lon: at.lon,
                doorLevel: true, pinnedAt: Date.now(), by: by };
   // ...and the street the door was found by when it was not the dropoff's
-  // own (searchHeldRetry: the type word left out).
+  // own (searchHeldRetry: the type word left out; searchHeldNamed: the one
+  // street the street index says the name as read is).
   if (asked) h.endPin.asked = asked;
   delete h.arrivedAt;
   delete h.endWhy;
@@ -2741,7 +2745,12 @@ function searchHeldEnd(key, attempt) {
     // street and the same door (MV.pickRetry).
     var again = MV.streetRetry(plan);
     if (again && MV.retryWanted(res, out.hits, disc)) {
-      return searchHeldRetry(key, attempt, disc, again, res);
+      return searchHeldRetry(key, attempt, disc, again, res, out.hits, plan);
+    }
+    // ...and with no type word to leave out, the street index asked which
+    // street the name as read is (MV.nameWanted; the 19 Oct night fault).
+    if (NBX.streets && MV.nameWanted(res, out.hits, disc, null)) {
+      return searchHeldNamed(key, attempt, disc, plan, res);
     }
     settleHeldEnd(key, attempt, disc, res, null);
   }
@@ -2770,15 +2779,63 @@ function settleHeldEnd(key, attempt, disc, res, asked) {
  * as the first question's is). MV.afterRetry chooses which answer is acted
  * on: the retry's when it pinned or found the street, else the first's, whose
  * refusal the driver is told ("not inside the card's reach"). */
-function searchHeldRetry(key, attempt, disc, again, first) {
+function searchHeldRetry(key, attempt, disc, again, first, firstHits, plan) {
   var said = nbxTerm(again.street);
   if (!said) return settleHeldEnd(key, attempt, disc, first, null);
   var target = nbxSearchTarget('street', said, MV.discBox(disc));
   endAsk(key, attempt, target, function (out) {
     var two = MV.pickRetry(out.hits, disc, again, out.cutAt);
+    // Neither the street as printed nor without its type word: the street
+    // index asked which street the name as read is (searchHeldNamed).
+    if (NBX.streets && MV.nameWanted(first, firstHits, disc, two)) {
+      return searchHeldNamed(key, attempt, disc, plan, first);
+    }
     // A pin here is only ever the retry's own (the first had none, or no
     // retry was asked), so the street it was found by is the retry's.
     settleHeldEnd(key, attempt, disc, MV.afterRetry(first, two), again.street);
+  });
+}
+
+/* ...and last, the door by the ONE street the NucBox's street index says the
+ * name as read is (the owner's fault of 19 Oct, night: the Trip Planner's
+ * "1106 <Name> Ln" read off a dark frame as "L106 <Nam..>" and filed "1106
+ * <Nam..>"; the NucBox's search found nothing, there was no type word to leave
+ * out, and GPS arrival never armed). Asked only when the street as printed,
+ * and without its type word where it had one, is not inside the card's reach
+ * (MV.nameWanted), and only with NUCBOX_STREETS set; never the public
+ * geocoder. Two questions, each once, each through endAsk (nbxCache first, a
+ * NucBox not answering handled as the first question's is):
+ *
+ *   1. the street index, /api/streets/named: the name as read (MV.nameAsked,
+ *      the street less its house number) inside the disc's box. Its answer is
+ *      a street only when exactly one street there can be that read
+ *      (streets.js named: its own matcher, or a type lost and the last word
+ *      cut short, CUT_KEEP); two near names are none, never the likelier.
+ *   2. the NucBox's search, the house number and that street's own name
+ *      (MV.nameRetry), held as any door is: hasDoor in pickInDisc, inside the
+ *      disc, alone or agreeing — and to that street's name and type where it
+ *      has one (pickRetry, retryFits), so a door on another street of a like
+ *      name the search hands back is not taken.
+ *
+ * A pin is `by: 'server'` with the street it was found by kept as `asked`
+ * (/api/status `endAsked`, "1106 <Name> Lane"). MV.afterRetry chooses as for
+ * the type-word retry: the door, or the street found and not the door (the
+ * place is then asked), else the first question's refusal stands. */
+function searchHeldNamed(key, attempt, disc, plan, first) {
+  var said = nbxTerm(MV.nameAsked(plan) || '');
+  if (!said) return settleHeldEnd(key, attempt, disc, first, null);
+  var target = streetTarget('named', { name: said, box: MV.discBox(disc) });
+  endAsk(key, attempt, target, function (ans) {
+    var p2 = MV.nameRetry(plan, ans);
+    var said2 = p2 ? nbxTerm(p2.street) : null;
+    if (!said2) return settleHeldEnd(key, attempt, disc, first, null);
+    endAsk(key, attempt, nbxSearchTarget('street', said2, MV.discBox(disc)), function (out) {
+      var two = MV.pickNamed(out.hits, disc, p2, out.cutAt);
+      settleHeldEnd(key, attempt, disc, MV.afterRetry(first, two), p2.street);
+    });
+  }, function (body) {
+    var a = streetAnswer('named', body);
+    return a.error ? null : a;
   });
 }
 
@@ -7128,7 +7185,10 @@ var NBX = { search: nbxBase('NUCBOX_SEARCH'), route: nbxBase('NUCBOX_ROUTER'),
             streets: nbxBase('NUCBOX_STREETS') };
 // Which setting names each relayed question's service, for the words.
 var NBX_SETTING = { search: 'NUCBOX_SEARCH', route: 'NUCBOX_ROUTER', cross: 'NUCBOX_STREETS',
-                    stretch: 'NUCBOX_STREETS' };
+                    stretch: 'NUCBOX_STREETS', named: 'NUCBOX_STREETS' };
+// The questions the NucBox's street index answers (streetsRoute there, the
+// relay and searchHeldNamed here).
+var STREET_ASKS = ['cross', 'stretch', 'named'];
 /* Short, because the one caller is a panel read while driving and the
  * alternative it falls back to is already there. Three seconds is chosen,
  * not measured: nobody has timed the real install over Tailscale, and a
@@ -7329,8 +7389,9 @@ function nbxTerm(v) {
   return said && said.length <= NBX_TERM_MAX && !/[\u0000-\u001f]/.test(said) ? said : null;
 }
 
-/* A question about streets — `which` is 'cross' (a, b, box) or 'stretch'
- * (name, box) — checked for shape, or { error }. ONE check for both ends:
+/* A question about streets — `which` is 'cross' (a, b, box), 'stretch'
+ * (name, box) or 'named' (name, box: the one street the name as read can be
+ * inside the box, streets.js named) — checked for shape, or { error }. ONE check for both ends:
  * the rig's relay below and the NucBox's own /api/streets answer the same
  * question, so they refuse the same things for the same reasons, and a
  * question the relay passed is one the NucBox will take. The box is
@@ -7353,7 +7414,21 @@ function streetQuestion(req, which) {
     out.box = nbxBox(sq.q.box);
     if (!out.box) return { error: 'box is left,top,right,bottom' };
   }
+  // ...except 'named', which is a guess between streets and is only ever
+  // asked inside a card's box (streets.js named answers nothing without one).
+  if (which === 'named' && !out.box) return { error: 'named needs a box' };
   return out;
+}
+
+/* The NucBox street index's own URL for a checked question (streetQuestion's
+ * `st`): the rig's relay and the server's own held-end search (searchHeldNamed)
+ * both build it here, so the two ask in the same words and share nbxCache. */
+function streetTarget(which, st) {
+  return NBX.streets + '/api/streets/' + which + '?'
+       + (which === 'cross'
+          ? 'a=' + encodeURIComponent(st.a) + '&b=' + encodeURIComponent(st.b)
+          : 'name=' + encodeURIComponent(st.name))
+       + (st.box ? '&box=' + encodeURIComponent(st.box) : '');
 }
 
 /* What the NucBox's street index answered, as the fields the page reads, or
@@ -7369,6 +7444,16 @@ function streetAnswer(which, body) {
     }) ? { names: side.names, how: typeof side.how === 'string' ? side.how : null } : null;
   };
   var cut = body && fin(body.cutAt) ? body.cutAt : null;
+  if (which === 'named') {
+    var one = names(body);
+    // `among` a count, and names given only with exactly one street: a list
+    // of names beside two streets is not "the one street".
+    if (!body || body.ok !== true || !one || !fin(body.among) || body.among < 0
+        || (one.names.length > 0 && body.among !== 1)) {
+      return { error: 'the NucBox street index answered something that is not one street' };
+    }
+    return { ok: true, names: one.names, how: one.how, among: body.among };
+  }
   if (which === 'cross') {
     var a = names(body && body.a), b = names(body && body.b);
     if (!body || body.ok !== true || !a || !b || !Array.isArray(body.meets)
@@ -7428,26 +7513,23 @@ function nbxRoute(req, res) {
                         streets: !!NBX.streets });
   }
   var which = { '/api/nbx/search': 'search', '/api/nbx/route': 'route',
-                '/api/nbx/cross': 'cross', '/api/nbx/stretch': 'stretch' }[p] || null;
+                '/api/nbx/cross': 'cross', '/api/nbx/stretch': 'stretch',
+                '/api/nbx/named': 'named' }[p] || null;
   if (!which) return reply(404, { ok: false, error: 'no such NucBox endpoint' });
-  var base = NBX[which === 'cross' || which === 'stretch' ? 'streets' : which];
+  var streetish = STREET_ASKS.indexOf(which) >= 0;
+  var base = NBX[streetish ? 'streets' : which];
   if (!base) {
     return reply(404, { ok: false, configured: false,
-                        error: 'no NucBox ' + (which === 'cross' || which === 'stretch'
-                                               ? 'street index' : which)
+                        error: 'no NucBox ' + (streetish ? 'street index' : which)
                                + ' is set on this machine (' + NBX_SETTING[which] + ')' });
   }
   var target;
-  if (which === 'cross' || which === 'stretch') {
+  if (streetish) {
     var st = streetQuestion(req, which);
     if (st.error) return reply(400, { ok: false, error: st.error });
     // The NucBox's own server answers these, at the same path with the same
     // parameters, checked by the same function; nothing else is sent.
-    target = base + '/api/streets/' + which + '?'
-           + (which === 'cross'
-              ? 'a=' + encodeURIComponent(st.a) + '&b=' + encodeURIComponent(st.b)
-              : 'name=' + encodeURIComponent(st.name))
-           + (st.box ? '&box=' + encodeURIComponent(st.box) : '');
+    target = streetTarget(which, st);
   } else if (which === 'search') {
     var sq = nbxQuery(req, ['q', 'street', 'viewbox']);
     if (sq.error) return reply(400, { ok: false, error: sq.error });
@@ -7502,7 +7584,7 @@ function nbxRoute(req, res) {
       }
       // What the page reads and nothing else: see nbxHits.
       out = nbxHits(body);
-    } else if (which === 'cross' || which === 'stretch') {
+    } else if (streetish) {
       out = streetAnswer(which, body);
       if (out.error) return down(out.error);
     } else if (body && body.code === 'NoRoute') {
@@ -7587,7 +7669,8 @@ function streetsRoute(req, res) {
           loadMs: STREETS.ms, heapMb: STREETS.heapMb }
       : { ok: true, loaded: false, error: STREETS.why });
   }
-  var which = p === '/api/streets/cross' ? 'cross' : p === '/api/streets/stretch' ? 'stretch' : null;
+  var which = /^\/api\/streets\/([a-z]+)$/.exec(p);
+  which = which && STREET_ASKS.indexOf(which[1]) >= 0 ? which[1] : null;
   if (!which) return reply(404, { ok: false, error: 'no such street endpoint' });
   if (!STREETS.ix) {
     return STREETS.why ? reply(503, { ok: false, error: STREETS.why })
@@ -7598,6 +7681,7 @@ function streetsRoute(req, res) {
   if (st.error) return reply(400, { ok: false, error: st.error });
   var box = Streets.boxOf(st.box);
   var out = which === 'cross' ? Streets.cross(STREETS.ix, st.a, st.b, box)
+    : which === 'named' ? Streets.named(STREETS.ix, st.name, box)
     : Streets.stretch(STREETS.ix, st.name, box, STREETS_POINTS_MAX);
   out.ok = true;
   return reply(200, out);
