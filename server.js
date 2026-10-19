@@ -1992,6 +1992,15 @@ function dropoffArrived(read, force) {
   // with this line in the log.
   var dNow = Date.now();
   var carrying = holding(dNow);
+  // A batched trip's last door (Assemble.batchPlan) is for ONE order in the
+  // car and no other shape: with two held — an add-on's trip, carrying two,
+  // or two restored with the flag off — the planner's doors are two orders'
+  // and are filed on cues (attribute), never as one order's batch. Dropped
+  // whole, and not said.
+  if (read.dropoff && read.dropoff.batch && heldOrders(dNow).length !== 1) {
+    delete read.dropoff;
+    return;
+  }
   // WHOSE IT IS, with two orders in the car (Stage 5): see whoseDropoff. It
   // names the order the rest of this function files onto, in place of the
   // first-taken, or says nothing is to be filed — the chooser is open, or the
@@ -2097,7 +2106,12 @@ function dropoffArrived(read, force) {
           // have said ({cue, held}). Ids and a word: no address. See
           // whoseDropoff.
           cue: cue || undefined,
-          would: would || undefined
+          would: would || undefined,
+          // ...and a batched trip's (Assemble.batchPlan): that the end is
+          // the last of `drops` doors on one card. A flag and a count, no
+          // address beyond the end the row already names.
+          batch: read.dropoff.batch ? true : undefined,
+          drops: read.dropoff.batch ? read.dropoff.batch.drops.length : undefined
         }) + '\n', function (err) {
           // Said out loud for the same reason the screening branch says
           // it: a read-only SD card mid-shift is the classic Pi failure,
@@ -3545,6 +3559,13 @@ function heldEndState(h) {
            }).map(function (e) { return e.q; }) };
 }
 
+// A batched trip's door count (Assemble.batchPlan, file), or null for an
+// order of one door. Two at least, or it is no batch.
+function batchDrops(h) {
+  return h && h.batch === true && Array.isArray(h.drops) && h.drops.length >= 2
+    ? h.drops.length : null;
+}
+
 function heldForPanel(held) {
   return held
     ? Object.assign({ pay: held.pay, minutes: held.minutes, dropoff: held.dropoff || null,
@@ -3555,7 +3576,10 @@ function heldForPanel(held) {
         holdId: holdIdOf(held),
         // Its card's fix and size, so Map view can check this order's end
         // against them — see cardOf.
-        card: held.card || null },
+        card: held.card || null,
+        // ...and, on a batched trip (Assemble.batchPlan), how many doors it
+        // has: the panel's "2 drops" beside the pay. Null otherwise.
+        drops: batchDrops(held) },
         // ...and the GPS drop's state, which the in-car line on the panel
         // says. It was on /api/status alone — fetched once, at load — so a
         // panel left open never learned that a pin had armed or been refused.
@@ -5732,6 +5756,16 @@ function statusNow() {
                    // as long as the panel keeps them, which is shorter than
                    // the scanned destination beside it — see forgetPlanner.
                    planner: h.planner || null,
+                   // ...and a batched trip (Assemble.batchPlan): `batch`, its
+                   // doors {line, name, expectedBy, key} in `drops` — the end
+                   // above is the last of them — or, with none, why the
+                   // planner's dropoffs were not taken for one (`batchWhy`:
+                   // 'card end elsewhere', 'no card street', 'address', 'an
+                   // add-on'; null when no list of two dropoffs was seen).
+                   batch: batchDrops(h) !== null,
+                   drops: batchDrops(h) !== null ? h.drops : null,
+                   batchWhy: batchDrops(h) !== null ? null
+                     : Assemble.batchWhy(assembly, h),
                    // ...and its card's fix and size, for Map view's check of
                    // where it ends. See cardOf.
                    card: h.card || null,

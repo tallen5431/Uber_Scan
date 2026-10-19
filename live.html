@@ -2941,9 +2941,26 @@
     if (!on) return heldInDetail(null);
     if (two) return showTwoHeld(inDetail);
     var pay = heldSaid && typeof heldSaid.pay === 'number' ? money(heldSaid.pay, 2) : '';
+    // A batched trip (server.js batchDrops, Assemble.batchPlan): one card,
+    // more than one door, the end the LAST of them — the stop on the line is
+    // that last door, and the GPS drop is armed on it alone. Said "2 drops":
+    // between offers beside the pay; under an offer at the HEAD of the stop,
+    // the part that gives way, since beside the pay it pushed the GPS words
+    // off the glass on the 800x480 and 480x320 panels beside the scene
+    // picture with the card moving (test_layout "pair batch"). ...and not
+    // under an offer on the 3.5" hat at all: there the line has no room the
+    // stop can give (the same form, measured, cut the stop's last letters),
+    // and between offers the hat still says it. No control.
+    var nDrops = heldSaid && typeof heldSaid.drops === 'number' && heldSaid.drops >= 2
+      ? heldSaid.drops : 0;
+    var drops = nDrops ? ' \u00b7 ' + nDrops + ' drops' : '';
     if (inDetail) {
+      var hat = !!(window.matchMedia
+                   && window.matchMedia('(orientation: landscape) and (max-height: 380px)').matches);
       return heldInDetail(['· In car' + (pay ? ' ' + pay : ''),
-                           '· ▸ ' + (next.name || next.kind), '· ' + gpsDropSaid()]);
+                           '· ▸ ' + (nDrops && !hat ? nDrops + ' drops, ' : '')
+                             + (next.name || next.kind),
+                           '· ' + gpsDropSaid()]);
     }
     heldInDetail(null);
     var line = el.heldLine;
@@ -2951,9 +2968,9 @@
       setText(el.heldNext.firstChild, next.kind
         + (typeof next.by === 'number' ? ' by ' + clockOf(next.by) : ''));
       setText(el.heldNext.lastChild, next.name || 'address not read');
-      setText(line.children[0], pay ? pay + ' in car' : 'In car');
+      setText(line.children[0], (pay ? pay + ' in car' : 'In car') + drops);
     } else {
-      setText(line.children[0], 'In car' + (pay ? ' ' + pay : ''));
+      setText(line.children[0], 'In car' + (pay ? ' ' + pay : '') + drops);
       setText(line.children[1], '· ▸ ' + (next.name || next.kind));
     }
     setHidden(line.children[1], between);

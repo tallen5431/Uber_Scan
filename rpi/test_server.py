@@ -1682,8 +1682,10 @@ if shutil.which('python3'):
         # the panel's in-car line its GPS drop's state (heldEndState).
         eq('held end: the mark reply carries the order in the car as the stream describes it',
            sorted((reply.get('held') or {}).keys()),
-           ['arrived', 'card', 'dropoff', 'endBy', 'endPinned', 'endWhy', 'holdId', 'minutes',
-            'pay', 'place', 'visited'])
+           ['arrived', 'card', 'dropoff', 'drops', 'endBy', 'endPinned', 'endWhy', 'holdId',
+            'minutes', 'pay', 'place', 'visited'])
+        eq('held end: ...its `drops` null for an order of one door (a batch\'s count, '
+           'server.js batchDrops)', (reply.get('held') or {}).get('drops', 'missing'), None)
         # Started after the mark, before the scanner's 2s sleep ends.
         heard = listen(base, 4)
 
@@ -6196,6 +6198,132 @@ try:
        (get(_gb, '/api/status').get('beat') or {}).get('heldEnd', 'missing'), None)
 finally:
     stop(_gp)
+
+# A BATCHED Uber trip (the owner's facts of 17 and 19 Oct 2026, the decision of
+# 19 Oct; Assemble.batchPlan): ONE card, one Took, and a Trip Planner seen
+# whole that lists two dropoffs. The end is the LAST door, the GPS drop arms on
+# it alone, and arriving at the first door and leaving puts nothing down.
+# Every store, person and street invented.
+def _bstop(kind, name, by, street, city):
+    return {'kind': kind, 'orders': 1, 'name': name, 'place': None, 'expectedBy': by,
+            'street': street, 'city': city, 'state': 'GA' if city else None, 'zip': None,
+            'line': (street + ', ' + city) if street and city else None,
+            'partial': None, 'label': kind}
+
+
+_BFIRST = '88 Hollin Ct, Marietta'
+_BLAST = '517 Tarrow Ridge Dr NW, Marietta'
+_BSTOPS = [_bstop('pickup', 'Tamsin Bakehouse', 1040, '40 Quarrel St', 'Smyrna'),
+           _bstop('pickup', 'Orrin Noodle Co', 1046, '12 Pellow Ave', 'Smyrna'),
+           _bstop('dropoff', 'Vesna R.', 1062, '88 Hollin Ct', 'Marietta'),
+           _bstop('dropoff', 'Corvin D.', 1080, '517 Tarrow Ridge Dr NW', 'Marietta')]
+_BCARD = 'Tarrow Ridge Dr & Brisk Ln, Marietta'
+
+
+def _bplanner(stops=_BSTOPS, top=True, bottom=True):
+    """An unpressed whole-screen planner read: its sighting, then its line."""
+    at = int(time.time() * 1000)
+    _beats([{'_line': {'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': True,
+                                    'app': 'uber', 'screen': 'uber.planner',
+                                    'page': {'top': top, 'bottom': bottom}, 'stops': stops,
+                                    'orderCount': 1, 'keep': False}}},
+            {'_line': {'planner': {'stops': [{k: v for k, v in x.items()
+                                              if k not in ('partial', 'label')}
+                                             for x in stops],
+                                   'keep': False, 'asked': False, 'ms': None, 'at': at}}}])
+
+
+def _marks(oid):
+    rows = [json.loads(l) for l in open(_gjournal) if l.strip()]
+    return [r for r in rows if r.get('kind') == 'mark' and r.get('id') == oid]
+
+
+_BFAR = 0.01      # the first door, ~1.1 km north of the last one (_PIN)
+_gp, _gb = start(_GENV, _gjournal)
+try:
+    _took(_gb, 'b-trip', dropoff=_BCARD)
+    _bplanner()
+    _bh = _holding(_gb) or {}
+    eq('[batch] two dropoffs on a list seen whole with one order held: the end is the '
+       'LAST door, from the planner',
+       (_bh.get('dropoff'), ((_bh.get('fields') or {}).get('dropoff') or {}).get('from')),
+       (_BLAST, 'planner'))
+    eq('[batch] ...the order is a batch, every door on it, and no batchWhy',
+       (_bh.get('batch'), [d.get('line') for d in _bh.get('drops') or []],
+        _bh.get('batchWhy')), (True, [_BFIRST, _BLAST], None))
+    eq('[batch] ...the planner line says no reason for the end',
+       ((_bh.get('planner') or {}).get('unfiled')), None)
+    _bm = [r for r in _marks('b-trip') if r.get('batch')]
+    eq('[batch] ...the journal\'s mark row says batch and the count, no door list',
+       [(r.get('batch'), r.get('drops'), r.get('dropoff'), 'stops' in r) for r in _bm],
+       [(True, 2, _BLAST, False)])
+    eq('[batch] the last door\'s pin is kept',
+       _pin(_gb, _bh, dropoff=_BLAST,
+            name='517, Tarrow Ridge Drive Northwest, Marietta, Cobb County')[0], 200)
+    eq('[batch] ...and a pin for the first door is not the order\'s end',
+       post(_gb, '/api/held-end', {'holdId': _bh.get('holdId'), 'dropoff': _BFIRST,
+                                   'lat': _PIN[0] + _BFAR, 'lon': _PIN[1],
+                                   'name': '88, Hollin Court, Marietta',
+                                   'doorLevel': True})[0], 409)
+    _beats([_fix(_BFAR)] * 7 + [_fix(_BFAR + _FAR)] * 3)
+    eq('[batch] arriving at the FIRST door and leaving does not put the order down',
+       (bool(_holding(_gb)), _drops('b-trip')), (True, []))
+    _beats(_DWELL + _LEAVE)
+    eq('[batch] ...arriving at the LAST door and leaving does, once, by the GPS',
+       ([r.get('by') for r in _drops('b-trip')], _holding(_gb)), (['gps'], None))
+
+    # The guard: the card's corner is on none of the planner's dropoffs.
+    _took(_gb, 'b-else', dropoff='Wexley Pkwy & Brisk Ln, Kennesaw')
+    _bplanner()
+    _bh = _holding(_gb) or {}
+    eq('[batch] a card whose end is on none of the planner\'s dropoffs is no batch, and '
+       '/api/status says why', (_bh.get('dropoff'), _bh.get('batch'), _bh.get('batchWhy')),
+       ('Wexley Pkwy & Brisk Ln, Kennesaw', False, 'card end elsewhere'))
+    post(_gb, '/api/delivered', {})
+    # A list whose foot is off the screen. Its customers named afresh: this
+    # harness sends no offer line, so every Took here is dated from the same
+    # card (cardArrivedAt), and the last order's pages would stitch to these.
+    _BOFF = [dict(x, name=(x['name'] + ' 2')) for x in _BSTOPS]
+    _took(_gb, 'b-off', dropoff=_BCARD)
+    _bplanner(_BOFF, bottom=False)
+    _bh = _holding(_gb) or {}
+    eq('[batch] a list running off the screen is no batch',
+       (_bh.get('dropoff'), _bh.get('batch'), _bh.get('drops')), (_BCARD, False, None))
+    # A batch goes with its order: a later card taken replaces it, batch and all.
+    _bplanner(_BOFF)
+    ok_('[batch] (the premise: the list seen whole makes it a batch)',
+        (_holding(_gb) or {}).get('batch'))
+    _took(_gb, 'b-next', dropoff='Kestrel Dr, Marietta')
+    _bh = _holding(_gb) or {}
+    eq('[batch] ...and a later Took replaces it, the batch with it',
+       (_bh.get('dropoff'), _bh.get('batch'), _bh.get('drops'),
+        [r.get('by') for r in _drops('b-off')]),
+       ('Kestrel Dr, Marietta', False, None, ['replaced']))
+    post(_gb, '/api/delivered', {})
+    # An add-on trip is untouched: two orders held, the planner's doors are
+    # theirs by cues, and neither is a batch.
+    post(_gb, '/api/offers/mark', {
+        'id': 'b-root', 'accepted': True,
+        'offer': {'id': 'b-root', 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': _BCARD, 'multiOrder': False,
+                  'app': 'uber'}})
+    post(_gb, '/api/offers/mark', {
+        'id': 'b-add', 'accepted': True,
+        'offer': {'id': 'b-add', 'pay': 9.5, 'minutes': 8.0, 'billedMinutes': 8.0,
+                  'miles': 1.3, 'cost': 0.5, 'dropoff': None, 'multiOrder': False,
+                  'addon': True, 'app': 'uber'}})
+    _bplanner()
+    _bo = get(_gb, '/api/status').get('orders') or []
+    _bh = _holding(_gb) or {}
+    eq('[batch] an add-on trip\'s planner makes no batch of either order',
+       (len(_bo), _bh.get('batch'), _bh.get('drops'),
+        [r for r in _marks('b-root') + _marks('b-add') if r.get('batch')]),
+       (2, False, None, []))
+    post(_gb, '/api/delivered', {})
+    post(_gb, '/api/delivered', {})
+finally:
+    stop(_gp)
+
 
 # The 12 Oct replay's numbers, at their real defaults (no GPS_DWELL_MS): the
 # dwell is 60 s and the arrive radius 75 m + min(err, 25). Real seconds are

@@ -431,6 +431,12 @@
     if (held) {
       var cur = fieldsOf(held).dropoff;
       var why = outranks(field(d.line, out.from, addressConf(d), d.at, d.screen, d.key), cur);
+      // A batch's last door (batchPlan) is filed over anything the screen
+      // gave unprompted — a navigation screen or a planner read before the
+      // list showed both doors may have filed the FIRST customer's — and over
+      // the same door again, so the batch is recorded; never over a press,
+      // which is the driver's own word for the end.
+      if (!why && d.batch && labelled && cur && cur.from !== 'press') why = 'the last door';
       if (why) {
         out.to = 'hold';
         out.kept = true;
@@ -478,7 +484,15 @@
                      d.pickupAddr.key);
       if (outranks(pk, f.pickupAddr)) f.pickupAddr = pk;
     }
-    if (d.singleCardOnly === true) {
+    // ...and a batch (batchPlan): every door of the trip, on the hold, so
+    // the panel and /api/status can say there are more than one. The hold's
+    // end is the last of them, set above; the GPS drop arms on that one
+    // alone, so an earlier door never puts the order down.
+    if (d.batch && Array.isArray(d.batch.drops)) {
+      held.batch = true;
+      held.drops = d.batch.drops.map(function (x) { return Object.assign({}, x); });
+    }
+    if (d.singleCardOnly === true || d.batch) {
       if (held.planner) held.planner.unfiled = null;
       // ...and the planner line that follows this read's sighting is told so,
       // and the pages it came off leave the pool: the order has its end.
@@ -834,6 +848,124 @@
     return addressOf(drops[0]);
   }
 
+  /* ---------- a batched Uber trip: one card, one Took, two doors -------------
+   *
+   * The owner's facts (17 and 19 Oct 2026): Uber sends BATCHED orders — ONE
+   * offer card, one ✓ Took, two pickups and/or two dropoffs. 17 Oct: the card
+   * named one store and one corner ("<Store A> (40 <St>) · <Cross> & <Cross>,
+   * <Town>", the offer line said legs 1, multiOrder false), and the Trip
+   * Planner after the Took listed two pickups and two dropoffs, the card's
+   * corner the LAST dropoff's street. 19 Oct: one store, two dropoffs. The rig
+   * held one order, plannerDestination said 'dropoffs' and filed nothing, and
+   * nothing knew the trip had two doors. No snap of a batched card is on file,
+   * so the CARD cannot yet be told for one (AUDITS.md, Open): the planner is
+   * the only witness, and this asks it only where it can be believed.
+   *
+   * batchPlan(held, stops) → {end, endStop, drops, why}. A batch — `end` the
+   * address of the trip's LAST door, `drops` every dropoff with street and town
+   * as {line, name, expectedBy, key} — only when, all of them (the caller,
+   * sighting(), has already asked for ONE order held, an unpressed read under
+   * the title or its layout, the list seen whole and not short):
+   *   - the hold is no add-on trip's (`addOn`, `of`): an add-on's planner is
+   *     two orders' list, which attribute() files on cues ('an add-on');
+   *   - the list has MORE than one dropoff (otherwise plannerDestination);
+   *   - THE LAST DOOR is the dropoff with the latest "Expected by" — the
+   *     order Uber drives them in; a tie goes to the one on the card's street
+   *     (cardStreets) when exactly one is, else the last on the screen, which
+   *     is also the answer when any dropoff printed no time;
+   *   - that last one has its street and town read ('address' otherwise: the
+   *     order waits, a later read may have them); an earlier one without is
+   *     left off `drops` and does not stop the batch;
+   *   - the CARD's end is one of them (cardEndOk): its corner or door names
+   *     the street of at least one dropoff on the list. One it names none of
+   *     is 'card end elsewhere' — the list may hold an order the driver took
+   *     on the phone with no ✓ Took, and its door would become this order's
+   *     end. A card that printed no street ("Customer dropoff", a town) is no
+   *     witness either way: 'no card street', and nothing is batched.
+   * `why` is the refusal, said on /api/status as `batchWhy`. */
+  var BATCH_STREET_WORDS = /^(st|street|rd|road|dr|drive|ln|lane|ave|av|avenue|blvd|boulevard|ct|court|way|pkwy|pky|parkway|cir|circle|pl|place|trl|trail|ter|terrace|hwy|highway|sq|square|loop|run|path|pass|row|xing|crossing|pt|point|walk|trce|trace|cv|cove|n|s|e|w|ne|nw|se|sw|north|south|east|west|northeast|northwest|southeast|southwest)$/;
+
+  // A street's name with its house number, its type and its directions gone:
+  // "40 Bramble Rd NW" and "Bramble Road" are both "bramble". Null for text
+  // with no street word or house number in it, which is a town, not a street.
+  function streetCore(text) {
+    var ws = String(text || '').toLowerCase().replace(/['’]/g, '')
+      .split(/[^a-z0-9]+/).filter(Boolean);
+    var typed = ws.some(function (w) { return BATCH_STREET_WORDS.test(w); })
+      || /^\d+$/.test(ws[0] || '');
+    var core = ws.filter(function (w, i) {
+      return !(i === 0 && /^\d+[a-z]?$/.test(w)) && !BATCH_STREET_WORDS.test(w);
+    }).join(' ');
+    return typed && core ? core : null;
+  }
+
+  // The streets the card's end names: its corner's two ("A Rd & B St, Town")
+  // or its door's one, before the town.
+  function cardStreets(text) {
+    if (typeof text !== 'string') return [];
+    return text.split(',')[0].split(/\s*(?:&|\band\b|\bat\b|\/)\s*/i)
+      .map(streetCore).filter(Boolean);
+  }
+
+  // The card's own end as the driver took it: what it printed (seenAs, kept
+  // whatever a ⌖ later wrote over `dropoff`), else the hold's end while the
+  // card still gives it.
+  function cardEndOf(held) {
+    if (held && held.seenAs && typeof held.seenAs.dropoff === 'string') return held.seenAs.dropoff;
+    var f = held && held.fields && held.fields.dropoff;
+    if (f && f.from === 'card') return f.value;
+    return held && !held.dropoffScanned && typeof held.dropoff === 'string' ? held.dropoff : null;
+  }
+
+  // Minutes past midnight, unwrapped across it: on a trip that runs past
+  // twelve, 11:50 PM comes before 12:10 AM.
+  function byKeys(drops) {
+    var ts = drops.map(function (s) { return s.expectedBy; });
+    if (!ts.every(function (t) { return typeof t === 'number' && isFinite(t); })) return null;
+    var span = Math.max.apply(null, ts) - Math.min.apply(null, ts);
+    return span > 720 ? ts.map(function (t) { return t < 720 ? t + 1440 : t; }) : ts;
+  }
+
+  function batchPlan(held, stops) {
+    var out = { end: null, endStop: null, drops: [], why: null };
+    var drops = headed(stops).filter(function (s) { return s.kind === 'dropoff'; });
+    if (drops.length < 2) { out.why = 'one dropoff'; return out; }
+    if (!held || held.addOn || held.of) { out.why = 'an add-on'; return out; }
+    var streets = cardStreets(cardEndOf(held));
+    var onCard = function (s) {
+      var c = streetCore(s.street);
+      return !!c && streets.indexOf(c) !== -1;
+    };
+    // The last door: the latest time, a tie to the card's street, else the
+    // last on the screen.
+    var keys = byKeys(drops);
+    var last = drops[drops.length - 1];
+    if (keys) {
+      var top = Math.max.apply(null, keys);
+      var tied = drops.filter(function (s, i) { return keys[i] === top; });
+      var mine = tied.filter(onCard);
+      last = mine.length === 1 ? mine[0] : tied[tied.length - 1];
+    }
+    if (!(last.street && last.city)) { out.why = 'address'; return out; }
+    if (!streets.length) { out.why = 'no card street'; return out; }
+    if (!drops.some(onCard)) { out.why = 'card end elsewhere'; return out; }
+    out.end = addressOf(last);
+    out.endStop = last;
+    out.drops = drops.filter(function (s) { return s.street && s.city; }).map(function (s) {
+      return { line: addressOf(s).line, name: s.name || null,
+               expectedBy: typeof s.expectedBy === 'number' ? s.expectedBy : null,
+               key: keyOf(s) };
+    });
+    return out;
+  }
+
+  /* Why the planner gave the order in the car no batch, for /api/status's
+   * `batchWhy`: the last refusal batchPlan said for THIS hold, or null. */
+  function batchWhy(st, held) {
+    var b = st && st.batchWhy;
+    return b && held && b.holdId === holdIdOf(held) ? b.why : null;
+  }
+
   /* ---------- the Trip Planner: several pages --------------------------------
    *
    * A stop's key is its kind, name and time, `kind|name|expectedBy`: what two
@@ -1185,6 +1317,25 @@
       var lone2 = plannerLoneDropoff(view.stops);
       if (lone2) cand = candidate(lone2, verdict.stop, page, false, true);
     }
+    // A BATCHED TRIP (batchPlan): the owner's decision of 19 Oct 2026. With
+    // ONE order held (`held` here is one: sightingMany takes two), an
+    // unpressed read under the title or its layout, the list seen whole —
+    // top and foot, on one page or stitched, never a list running off the
+    // screen — and not short, MORE than one dropoff is that order's trip:
+    // its end the LAST door, every door on `batch`. A press's answer stays
+    // the press's rule (one dropoff or nothing): the driver asked about the
+    // screen, not about the trip.
+    var batched = false;
+    if (!cand && held && verdict.why === 'dropoffs' && !page.asked && titled
+        && view.top && view.bottom && !listShort(view.stops)) {
+      var plan = batchPlan(held, view.stops);
+      st.batchWhy = { holdId: holdIdOf(held), why: plan.why };
+      if (plan.end) {
+        cand = candidate(plan.end, plan.endStop, page, false, false);
+        cand.batch = { drops: plan.drops };
+        batched = true;
+      }
+    }
     if (cand && many) cand.pages = run.pages.length;
     // The reads it was made from, so one that files can take them out of the
     // pool (file()): a lone dropoff waits there until it is known to be kept.
@@ -1198,12 +1349,16 @@
     }
     var deduped = false;
     if (cand && !cand.asked) {
-      var seen = cand.line + (cand.singleCardOnly ? '|lone' : '');
+      var seen = cand.line + (cand.singleCardOnly ? '|lone' : '')
+        + (cand.batch ? '|batch' + cand.batch.drops.length : '');
       if (st.said[seen]) { cand = null; deduped = true; }
       else st.said[seen] = true;
     }
     if (cand) out.candidates.push(cand);
-    out.why = verdict.why;
+    // ...and a batch filed is no 'dropoffs' for the planner line: the order
+    // has its end, so the panel's "end not guessed" goes with it.
+    var why = batched ? null : verdict.why;
+    out.why = why;
     // The pool. With an order held, every page of this run read after its
     // Took waits for the page that may complete it — unless the run gave its
     // address (a lone dropoff still waits: a later page may bound the list),
@@ -1217,7 +1372,7 @@
         if (p === page && !cand) refuse(st, p, 'before the Took');
         return;
       }
-      if (verdict.why === 'dropoffs') {
+      if (why === 'dropoffs') {
         if (was || p === page) refuse(st, p, 'dropoffs');
         p.why = 'dropoffs';
         return;
@@ -1229,7 +1384,7 @@
       p.pending = true;
       p.why = verdict.why || (verdict.address ? 'not titled' : 'no dropoff');
     });
-    st.verdicts.push({ at: page.at, why: verdict.why });
+    st.verdicts.push({ at: page.at, why: why });
     while (st.verdicts.length > PAGES_MAX) st.verdicts.shift();
     return out;
   }
@@ -1998,6 +2153,9 @@
            storeScreen: storeScreen, placeOf: placeOf, bracketDoor: bracketDoor,
            popup: popup, filePopup: filePopup, cardNames: cardNames,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
+           // ...and a batched trip's doors (the owner's decision of 19 Oct).
+           batchPlan: batchPlan, batchWhy: batchWhy, cardStreets: cardStreets,
+           streetCore: streetCore,
            keyOf: keyOf, placements: placements, linked: linked,
            fresh: fresh, took: took, sighting: sighting, pending: pending,
            verdictFor: verdictFor, pageOf: pageOf, plannerRowDue: plannerRowDue,

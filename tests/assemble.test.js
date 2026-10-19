@@ -1349,6 +1349,139 @@ SEQ.forEach(function (seq) {
      [['Larkspur Tacos', '113 Quillon St'], ['Larkspur Tacos', '113 Quillon St']]);
 })();
 
+/* ---- a batched Uber trip: one card, one Took, two doors (the owner's facts of
+   17 and 19 Oct 2026; the decision of 19 Oct). The planner seen whole lists
+   two dropoffs for ONE order held; the end is the last door. Every store,
+   person and street invented. ---- */
+(function () {
+  var BATCH = 'Trip Planner\nPickup • 1 order\nTamsin Bakehouse\nExpected by 5:20 PM\n'
+    + 'Address\n40 Quarrel St\nSmyrna, GA\n'
+    + 'Pickup • 1 order\nOrrin Noodle Co\nExpected by 5:26 PM\n'
+    + 'Address\n12 Pellow Ave\nSmyrna, GA\n'
+    + 'Dropoff • 1 order\nVesna R.\nExpected by 5:42 PM\n'
+    + 'Address\n88 Hollin Ct\nMarietta, GA\n'
+    + 'Dropoff • 1 order\nCorvin D.\nExpected by 6:00 PM\n'
+    + 'Address\n517 Tarrow Ridge Dr NW\nMarietta, GA\nWaybill';
+  var CARD_END = 'Tarrow Ridge Dr & Brisk Ln, Marietta';
+  function batchHold(dropoff, more) {
+    var h = Object.assign({ id: 'b-1', acceptedAt: 1000, tookAt: 1005, minutes: 51,
+                            app: 'uber', pickup: 'Tamsin Bakehouse (40 Quarrel St)',
+                            dropoff: dropoff === undefined ? CARD_END : dropoff,
+                            dropoffScanned: false,
+                            card: { legs: 1, multiOrder: false } }, more || {});
+    h.seenAs = { dropoff: h.dropoff };
+    A.fieldsOf(h);
+    return h;
+  }
+  // The server's road: sighting → dropoff → file.
+  function run(h, text, at, st) {
+    st = st || A.fresh();
+    A.took(st, h);
+    var r = A.sighting(st, h, pageOf(text, at || 5000), at || 5000);
+    var saids = r.candidates.map(function (c) {
+      var said = A.dropoff(h, c, null);
+      A.file(h, c, said, st);
+      return said.why;
+    });
+    return { st: st, r: r, saids: saids, verdict: A.verdictFor(st, at || 5000) };
+  }
+  var h = batchHold();
+  var got = run(h, BATCH);
+  eq('[batch] two dropoffs on a list seen whole with one order held: the LAST door is '
+     + 'the end, over the card\'s corner, from the planner',
+     [h.dropoff, A.fieldsOf(h).dropoff.from, got.saids],
+     ['517 Tarrow Ridge Dr NW, Marietta', 'planner', ['over the card']]);
+  eq('[batch] ...the hold carries `batch` and every door, in the planner\'s order',
+     [h.batch, (h.drops || []).map(function (d) { return [d.line, d.expectedBy]; })],
+     [true, [['88 Hollin Ct, Marietta', 1062], ['517 Tarrow Ridge Dr NW, Marietta', 1080]]]);
+  eq('[batch] ...the planner line says no reason, and batchWhy none',
+     [got.verdict, A.batchWhy(got.st, h)], [null, null]);
+  eq('[batch] ...and the last door\'s customer and time are the hold\'s',
+     [A.fieldsOf(h).customer.value, A.fieldsOf(h).expectedBy.value], ['Corvin D.', 1080]);
+  // The latest "Expected by" decides, not the screen's order.
+  var swapped = BATCH.replace('Expected by 5:42 PM', 'Expected by 6:10 PM');
+  var hs = batchHold('Hollin Ct & Brisk Ln, Marietta');
+  run(hs, swapped);
+  eq('[batch] the last door is the latest time, wherever it sits on the list',
+     hs.dropoff, '88 Hollin Ct, Marietta');
+  // A tie goes to the card's street, else the last on screen.
+  var tie = BATCH.replace('Expected by 6:00 PM', 'Expected by 5:42 PM');
+  var ht = batchHold('Hollin Ct & Brisk Ln, Marietta');
+  run(ht, tie);
+  var ht2 = batchHold('Brisk Ln & Tarrow Ridge Dr, Marietta');
+  run(ht2, tie);
+  eq('[batch] a tie in time goes to the dropoff on the card\'s street',
+     [ht.dropoff, ht2.dropoff], ['88 Hollin Ct, Marietta', '517 Tarrow Ridge Dr NW, Marietta']);
+  // The guard: the card's corner names none of the planner's streets.
+  var hx = batchHold('Wexley Pkwy & Brisk Ln, Kennesaw');
+  var gx = run(hx, BATCH);
+  eq('[batch] a card whose end is on none of the planner\'s dropoffs batches nothing, '
+     + 'and says why', [hx.dropoff, !!hx.batch, gx.verdict, A.batchWhy(gx.st, hx)],
+     ['Wexley Pkwy & Brisk Ln, Kennesaw', false, 'dropoffs', 'card end elsewhere']);
+  var hn = batchHold(null);
+  var gn = run(hn, BATCH);
+  eq('[batch] ...nor a card that printed no street at all',
+     [hn.dropoff, !!hn.batch, A.batchWhy(gn.st, hn)], [null, false, 'no card street']);
+  // The list running off the screen: no Waybill under the last stop.
+  var hl = batchHold();
+  var gl = run(hl, BATCH.replace('\nWaybill', ''));
+  eq('[batch] a list whose foot is off the screen batches nothing',
+     [hl.dropoff, !!hl.batch, gl.r.candidates.length], [CARD_END, false, 0]);
+  var hp = batchHold();
+  var stp = A.fresh();
+  A.took(stp, hp);
+  var gp = A.sighting(stp, hp, pageOf(BATCH, 5000, true), 5000);
+  eq('[batch] ...and a PRESS over the list is the press\'s rule: nothing',
+     [gp.candidates.length, !!hp.batch], [0, false]);
+  // An earlier door without its street: batched without it. The last one
+  // without: the order waits.
+  var noFirst = BATCH.replace('Address\n88 Hollin Ct\nMarietta, GA\n', '');
+  var hf = batchHold();
+  run(hf, noFirst);
+  eq('[batch] an earlier dropoff with no street is left off, the batch still made',
+     [hf.dropoff, (hf.drops || []).length], ['517 Tarrow Ridge Dr NW, Marietta', 1]);
+  var noLast = BATCH.replace('Address\n517 Tarrow Ridge Dr NW\nMarietta, GA\n', '');
+  var hw = batchHold();
+  var gw = run(hw, noLast);
+  eq('[batch] ...the last one with no street: nothing filed, the order waits',
+     [hw.dropoff, !!hw.batch, A.batchWhy(gw.st, hw)], [CARD_END, false, 'address']);
+  // Over the first customer's door a navigation screen filed: replaced by the
+  // last. Never over a press.
+  var hv = batchHold();
+  hv.fields.dropoff = { value: '88 Hollin Ct, Marietta', from: 'nav', conf: 2, at: 3000,
+                        screen: 'uber.nav' };
+  hv.dropoff = '88 Hollin Ct, Marietta';
+  hv.dropoffScanned = true;
+  run(hv, BATCH);
+  var hq = batchHold();
+  hq.fields.dropoff = { value: '88 Hollin Ct, Marietta', from: 'press', conf: 2, at: 3000,
+                        screen: 'uber.nav' };
+  hq.dropoff = '88 Hollin Ct, Marietta';
+  run(hq, BATCH);
+  eq('[batch] the last door replaces a first door a screen filed, never a press',
+     [hv.dropoff, !!hv.batch, hq.dropoff, !!hq.batch],
+     ['517 Tarrow Ridge Dr NW, Marietta', true, '88 Hollin Ct, Marietta', false]);
+  // An add-on trip is not a batch: two orders go to sightingMany, and an
+  // add-on alone is refused.
+  var ha = batchHold(undefined, { addOn: true, of: 'x@1' });
+  var ga = run(ha, BATCH);
+  eq('[batch] an add-on\'s hold is no batch', [!!ha.batch, A.batchWhy(ga.st, ha)],
+     [false, 'an add-on']);
+  var root = batchHold(), add = batchHold(undefined, { id: 'b-2', acceptedAt: 2000,
+                                                       addOn: true, of: 'b-1@1000' });
+  var sm = A.fresh();
+  A.took(sm, [root, add]);
+  var cm = A.sighting(sm, [root, add], pageOf(BATCH, 5000), 5000).candidates;
+  eq('[batch] ...and two orders held never make one', cm.some(function (c) {
+    return !!c.batch;
+  }), false);
+  eq('[batch] the same list read again files nothing twice',
+     run(h, BATCH, 6000, got.st).r.candidates.length, 0);
+  eq('[batch] the card\'s streets: a corner\'s two, a door\'s one, a town none',
+     [A.cardStreets(CARD_END), A.cardStreets('40 Quarrel St, Smyrna'),
+      A.cardStreets('Marietta, GA')], [['tarrow ridge', 'brisk'], ['quarrel'], []]);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

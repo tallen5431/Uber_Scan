@@ -1474,6 +1474,17 @@ DRIVE_FORMS = {
                     'larger': ['line', 'line2']},
     'waiting': {'msgs': [_EMPTY], 'larger': ['label']},
 }
+# ...and a batched Uber trip (server.js batchDrops, the owner's decision of 19
+# Oct): one order with two doors, "2 drops" beside the pay — under an offer at
+# the pair's widest, and between offers with its stops read.
+_HB = dict(HELD['hold'], drops=2)
+DRIVE_FORMS['pair batch'] = {'msgs': [{'holding': _HB}, dict(HELD['offer'], holding=_HB)],
+                             'offer': True, 'larger': []}
+DRIVE_FORMS['between batch'] = {
+    'msgs': [{'holding': _HB},
+             {'planner': {'stops': HELD['stops'], 'unfiled': None,
+                          'asked': False, 'ms': None, 'at': 1}}, _EMPTY],
+    'larger': ['line']}
 # ...and an Uber add-on's trip of three, one original and two add-ons
 # (server.js placeTook, the owner's 16 Oct trip details): ② onwards share the
 # second line ("②–③ +$256.16 → 1/2 ends", live.html restLine) at their widest
