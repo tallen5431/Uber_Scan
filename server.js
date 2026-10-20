@@ -1921,7 +1921,7 @@ function dropDecides(orders, now) {
       && typeof f.gpsErr === 'number' && isFinite(f.gpsErr)) {
     var at = orders.filter(function (o) {
       var pin = heldEndPin(o);
-      return pin && MV.crowMiles(f, pin) * 1609.344
+      return pin && pinMetres(f, pin)
         <= ARRIVE_M + Math.min(f.gpsErr, ARRIVE_ERR_CAP_M);
     });
     if (at.length === 1) return at;
@@ -2561,7 +2561,7 @@ function pickupNearEnd(h, pin) {
       if (Array.isArray(o.pickupPins)) picks = picks.concat(o.pickupPins);
     });
   return picks.some(function (p) {
-    return MV.crowMiles(p, pin) * 1609.344 <= PICKUP_GUARD_M;
+    return pinMetres(p, pin) <= PICKUP_GUARD_M;
   });
 }
 
@@ -2782,7 +2782,12 @@ function settleHeldEnd(key, attempt, disc, res, asked) {
   var now = endHold(key);
   if (!now || heldEndPin(now)) return;
   if (!res.at && res.why === 'nodoor' && placeOf(now)) {
-    return searchHeldPlace(key, attempt, disc);
+    return searchHeldPlace(key, attempt, disc, asked);
+  }
+  // ...and with no place, or none found, the street itself when it is short
+  // (searchHeldStreet, the owner's fault of 19 Oct).
+  if (!res.at && res.why === 'nodoor') {
+    return searchHeldStreet(key, attempt, disc, asked, END_WHY.nodoor);
   }
   if (!res.at) {
     return refuseHeldEnd(now, END_WHY[res.why] || 'no house number');
@@ -2867,19 +2872,113 @@ function searchHeldNamed(key, attempt, disc, plan, first) {
  * NW, <Town>" on a campus, the road on the NucBox and house 1000 not, the stop
  * named "<Something> Parking Deck" on the phone, and the delivered order held
  * because GPS arrival never armed. */
-function searchHeldPlace(key, attempt, disc) {
+function searchHeldPlace(key, attempt, disc, asked) {
   var h = endHold(key);
   if (!h) return;
   var said = nbxTerm(MV.placeQuery(placeOf(h)) || '');
-  if (!said) return refuseHeldEnd(h, END_WHY.noplace);
+  if (!said) return searchHeldStreet(key, attempt, disc, asked, END_WHY.noplace);
   var target = nbxSearchTarget('q', said, MV.discBox(disc));
   endAsk(key, attempt, target, function (out) {
     var now = endHold(key);
     if (!now || heldEndPin(now)) return;
     var res = MV.pickPlace(out.hits, disc, placeOf(now), out.cutAt);
-    if (!res.at) return refuseHeldEnd(now, END_WHY[res.why] || END_WHY.noplace);
+    if (!res.at) {
+      return searchHeldStreet(key, attempt, disc, asked, END_WHY[res.why] || END_WHY.noplace);
+    }
     pinHeldEnd(now, res.at, 'place');
   });
+}
+
+/* ...and last, the held end by its STREET, when the street is short: the
+ * owner's fault of 19 Oct 2026. The Trip Planner gave "306 <Name> Ct, <Town>"
+ * right; the NucBox's Nominatim holds the court and not house 306 (OSM maps a
+ * subdivision's streets long before anyone adds its house numbers), so the
+ * door search ended 'no house number', there was no place, and GPS arrival
+ * never armed on an order delivered to that court.
+ *
+ * Asked only after the door search found the street and not the door
+ * ('nodoor') and the place fallback found nothing or had nothing to ask, and
+ * only with NUCBOX_STREETS set — never the public geocoder. ONE question,
+ * through endAsk (nbxCache first, a NucBox not answering handled as the
+ * first's): the street index's /api/streets/whole, the street's name as
+ * printed (MV.nameAsked) inside the disc's box, which answers every street of
+ * that name reaching into the box WHOLE, by its own matcher (streets.js
+ * match: case, USPS abbreviations, a directional on one side) — a read that
+ * needed the ocr rule is not the same name and is not used. A street is its
+ * ways joined at shared nodes, so two courts of one name in two subdivisions
+ * are two.
+ *
+ * Armed only when exactly ONE such street touches the held card's disc (a
+ * street too long to send its shape counts as one: unknown is not none) and
+ * its whole length is at most SHORT_STREET_M. Then the GPS arrives when a
+ * usable fix is within the arrive radius of ANY point of the street's
+ * polyline (pinMetres, MV.nearestOn: distance to the segment), with the same
+ * DWELL, LEAVE and restaurant guard as a door (a pickup within
+ * PICKUP_GUARD_M of any point of it disarms it). The pin is `by: 'street'`
+ * (the panel's "● armed by street"), still door level, because a court of a
+ * few hundred metres is where the car stops for that door and nowhere else.
+ * Otherwise the earlier refusal (`why`) stands, unchanged.
+ *
+ * SHORT_STREET_M is 600 m, CHOSEN, not measured: no subdivision's geometry
+ * is in the repository to fit it to. What it rests on: a cul-de-sac or court
+ * is typically 100-400 m; at 600 m the farthest the car can be from the true
+ * door and still be "on the street" is about 600 m + the arrive radius, and
+ * LEAVE_M (300 m) is measured from the street too, so leaving means leaving
+ * the street. A through road of a mile is an arterial and never arms so. */
+var SHORT_STREET_M = 600;
+
+function searchHeldStreet(key, attempt, disc, asked, why) {
+  var h = endHold(key);
+  if (!h) return;
+  var plan = [asked, h.dropoff].map(function (t) {
+    return typeof t === 'string' && t ? MV.searchPlan(t) : null;
+  }).filter(function (pl) { return pl && MV.streetRetry(pl); })[0];
+  var said = NBX.streets && plan ? nbxTerm(MV.nameAsked(plan) || '') : null;
+  if (!said) return refuseHeldEnd(h, why);
+  var target = streetTarget('whole', { name: said, box: MV.discBox(disc) });
+  endAsk(key, attempt, target, function (ans) {
+    var now = endHold(key);
+    if (!now || heldEndPin(now)) return;
+    var one = shortStreetIn(ans, disc);
+    if (!one) return refuseHeldEnd(now, why);
+    pinHeldEnd(now, one.at, 'street', asked);
+    now.endPin.lines = one.lines;
+    now.endPin.metres = one.metres;
+    saveHold(now);
+  }, function (body) {
+    var a = streetAnswer('whole', body);
+    return a.error ? null : a;
+  });
+}
+
+/* The one short street of the index's answer that touches the disc, as
+ * {at, lines, metres}, or null: the named check searchHeldStreet arms by. */
+function shortStreetIn(ans, disc) {
+  if (!ans || ['exact', 'dir', 'junk'].indexOf(ans.how) < 0) return null;
+  var touching = ans.streets.filter(function (st) {
+    return st.lines === null || st.lines.some(function (l) {
+      return l.some(function (pt) {
+        return MV.crowMiles(disc.at, { lat: pt[0], lon: pt[1] }) <= disc.miles;
+      });
+    });
+  });
+  if (touching.length !== 1) return null;
+  var st = touching[0];
+  if (!st.lines || st.metres > SHORT_STREET_M) return null;
+  return { at: { lat: st.lines[0][0][0], lon: st.lines[0][0][1] },
+           lines: st.lines, metres: st.metres };
+}
+
+/* How far `p` is from a pin, in metres: from its point, or for a street pin
+ * (`lines`, searchHeldStreet) from the nearest point of the street. */
+function pinMetres(p, pin) {
+  if (pin && Array.isArray(pin.lines)) {
+    var near = MV.nearestOn(pin.lines.map(function (l) {
+      return l.map(function (pt) { return { lat: pt[0], lon: pt[1] }; });
+    }), p);
+    if (near) return near.miles * 1609.344;
+  }
+  return MV.crowMiles(p, pin) * 1609.344;
 }
 
 /* ---------- the held order's pickups, searched for by this server ----------
@@ -3448,7 +3547,7 @@ function stepAt(arrival, beat, now, pin, arrived) {
   arrival.lastFixAt = fix.at;
   arrival.refusedFrom = arrival.refusedTo = null;
   arrival.silentMs = 0;
-  var metres = MV.crowMiles(fix, pin) * 1609.344;
+  var metres = pinMetres(fix, pin);
   if (!arrived) {
     var within = ARRIVE_M + Math.min(fix.err, ARRIVE_ERR_CAP_M);
     if (metres > within) { arrival.insideSince = null; return 'out'; }
@@ -3601,9 +3700,10 @@ function heldEndState(h) {
   var pin = heldEndPin(h);
   return { endPinned: !!pin, arrived: !!h.arrivedAt,
            // ...who pinned it: 'server' (the door, searchHeldEnd), 'place'
-           // (its place, searchHeldPlace), or null for Map view's post. Here
-           // and not on /api/status alone, so the panel's in-car line can say
-           // an end pinned by its place is ("● armed by place").
+           // (its place, searchHeldPlace), 'street' (a short street,
+           // searchHeldStreet), or null for Map view's post. Here and not on
+           // /api/status alone, so the panel's in-car line can say an end
+           // pinned by its place is ("● armed by place").
            endBy: pin ? (pin.by || null) : null,
            endWhy: pin
              ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : notOneCustomer(h))
@@ -7327,10 +7427,11 @@ var NBX = { search: nbxBase('NUCBOX_SEARCH'), route: nbxBase('NUCBOX_ROUTER'),
             streets: nbxBase('NUCBOX_STREETS') };
 // Which setting names each relayed question's service, for the words.
 var NBX_SETTING = { search: 'NUCBOX_SEARCH', route: 'NUCBOX_ROUTER', cross: 'NUCBOX_STREETS',
-                    stretch: 'NUCBOX_STREETS', named: 'NUCBOX_STREETS' };
+                    stretch: 'NUCBOX_STREETS', named: 'NUCBOX_STREETS',
+                    whole: 'NUCBOX_STREETS' };
 // The questions the NucBox's street index answers (streetsRoute there, the
-// relay and searchHeldNamed here).
-var STREET_ASKS = ['cross', 'stretch', 'named'];
+// relay and searchHeldNamed and searchHeldStreet here).
+var STREET_ASKS = ['cross', 'stretch', 'named', 'whole'];
 /* Short, because the one caller is a panel read while driving and the
  * alternative it falls back to is already there. Three seconds is chosen,
  * not measured: nobody has timed the real install over Tailscale, and a
@@ -7557,8 +7658,11 @@ function streetQuestion(req, which) {
     if (!out.box) return { error: 'box is left,top,right,bottom' };
   }
   // ...except 'named', which is a guess between streets and is only ever
-  // asked inside a card's box (streets.js named answers nothing without one).
-  if (which === 'named' && !out.box) return { error: 'named needs a box' };
+  // asked inside a card's box (streets.js named answers nothing without one),
+  // and 'whole', the streets of a name that reach into a card's box.
+  if ((which === 'named' || which === 'whole') && !out.box) {
+    return { error: which + ' needs a box' };
+  }
   return out;
 }
 
@@ -7595,6 +7699,26 @@ function streetAnswer(which, body) {
       return { error: 'the NucBox street index answered something that is not one street' };
     }
     return { ok: true, names: one.names, how: one.how, among: body.among };
+  }
+  if (which === 'whole') {
+    var w = names(body);
+    // Each street a length and its ways' polylines, or null for one too long
+    // to have been sent: all or nothing, as the rest.
+    if (!body || body.ok !== true || !w || !Array.isArray(body.streets)
+        || !body.streets.every(function (st) {
+          return st && fin(st.metres) && st.metres >= 0 && (st.lines === null
+            || (Array.isArray(st.lines) && st.lines.every(function (l) {
+              return Array.isArray(l) && l.length >= 2 && l.every(function (pt) {
+                return Array.isArray(pt) && pt.length === 2 && fin(pt[0]) && fin(pt[1]);
+              });
+            })));
+        })) {
+      return { error: 'the NucBox street index answered something that is not a street\'s '
+                      + 'length' };
+    }
+    return { ok: true, names: w.names, how: w.how, streets: body.streets.map(function (st) {
+      return { metres: st.metres, lines: st.lines };
+    }) };
   }
   if (which === 'cross') {
     var a = names(body && body.a), b = names(body && body.b);
@@ -7656,7 +7780,7 @@ function nbxRoute(req, res) {
   }
   var which = { '/api/nbx/search': 'search', '/api/nbx/route': 'route',
                 '/api/nbx/cross': 'cross', '/api/nbx/stretch': 'stretch',
-                '/api/nbx/named': 'named' }[p] || null;
+                '/api/nbx/named': 'named', '/api/nbx/whole': 'whole' }[p] || null;
   if (!which) return reply(404, { ok: false, error: 'no such NucBox endpoint' });
   var streetish = STREET_ASKS.indexOf(which) >= 0;
   var base = NBX[streetish ? 'streets' : which];
@@ -7824,6 +7948,7 @@ function streetsRoute(req, res) {
   var box = Streets.boxOf(st.box);
   var out = which === 'cross' ? Streets.cross(STREETS.ix, st.a, st.b, box)
     : which === 'named' ? Streets.named(STREETS.ix, st.name, box)
+    : which === 'whole' ? Streets.whole(STREETS.ix, st.name, box)
     : Streets.stretch(STREETS.ix, st.name, box, STREETS_POINTS_MAX);
   out.ok = true;
   return reply(200, out);

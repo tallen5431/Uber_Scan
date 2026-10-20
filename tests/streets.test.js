@@ -260,6 +260,38 @@ eq('the fixture through named: "Foxglov" is Foxglove Trail, and "Church St" (two
                             S.named(ix, 'Church St', ALL).among].join(' / '),
    'Foxglove Trail / 2');
 
+/* ---- every street of a name reaching into a box, whole (whole) ---------- */
+// The owner's 19 Oct fault, invented: a court the NucBox's search holds
+// without its house numbers. Larkmoor Court is two ways sharing a node (one
+// street, 249 m + 111 m), its second way running out of the box asked below;
+// Fennick Court is two courts of that name that share nothing; Hollin Road
+// runs 2.5 km, past WHOLE_LINE_M.
+var wholeIx = S.build({ format: S.FORMAT, e: 6,
+  names: ['Larkmoor Court', 'Fennick Court', 'Hollin Road'],
+  nodes: [-84540000, 33960000, 2700, 0, 0, 1000,          // Larkmoor Court
+          -20000, 5000, 2000, 0, 30000, -25000, 2000, 0,  // Fennick Court, twice
+          -30000, -20000, 27000, 0],                      // Hollin Road
+  ways: [[[0], [0, 1]], [[0], [1, 1]], [[1], [3, 1]], [[1], [5, 1]], [[2], [7, 1]]] });
+function wh(name, box) {
+  return S.whole(wholeIx, name, box === undefined ? CARD : box);
+}
+var lark = wh('Larkmoor Ct', S.boxOf('-84.541,33.9605,-84.536,33.959'));
+eq('whole: a court of two ways sharing a node is one street, measured whole even where it '
+   + 'leaves the box, with its geometry',
+   JSON.stringify([lark.names, lark.how, lark.streets]),
+   JSON.stringify([['Larkmoor Court'], 'exact', [{ metres: 360, ways: 2, lines: [
+     [[33.96, -84.54], [33.96, -84.5373]], [[33.96, -84.5373], [33.961, -84.5373]]] }]]));
+eq('...two courts of one name that share no node are two streets, each its own length',
+   JSON.stringify(wh('Fennick Court').streets.map(function (x) { return [x.metres, x.ways]; })),
+   '[[184,1],[184,1]]');
+eq('...and one of them alone where the box holds only it',
+   wh('Fennick Ct', S.boxOf('-84.535,33.945,-84.52,33.935')).streets.length, 1);
+eq('...a street past WHOLE_LINE_M (' + S.WHOLE_LINE_M + ' m) is said by its length, no shape',
+   JSON.stringify(wh('Hollin Rd').streets), '[{"metres":2491,"ways":1,"lines":null}]');
+eq('...a name not in the box, and no box, are no street',
+   [wh('Larkmoor Ct', S.boxOf('-84.4,33.9,-84.3,33.8')).streets.length,
+    wh('Larkmoor Ct', null).streets.length].join(), '0,0');
+
 /* ---- where two streets meet --------------------------------------------- */
 function meets(a, b, box) {
   return S.cross(ix, a, b, box ? S.boxOf(box) : null).meets.map(function (x) {
@@ -392,7 +424,14 @@ async function get(srv, u, init) {
     eq('/api/streets/named answers the one street the name as read is inside the box',
        JSON.stringify([g.status, g.body.names, g.body.how, g.body.among]),
        JSON.stringify([200, ['Foxglove Trail'], 'cut', 1]));
+    g = await get(nuc, '/api/streets/whole?name=' + encodeURIComponent('Foxglove Trl')
+                  + '&box=-84.6,34.0,-84.5,33.9');
+    eq('/api/streets/whole answers each street of the name reaching into the box, whole',
+       JSON.stringify([g.status, g.body.names, g.body.how, g.body.streets.length,
+                       typeof g.body.streets[0].metres]),
+       JSON.stringify([200, ['Foxglove Trail'], 'exact', 1, 'number']));
     var refused = [
+      ['/api/streets/whole?name=Foxglov', 'whole needs a box'],
       ['/api/streets/named?name=Foxglov', 'named needs a box'],
       ['/api/streets/cross?a=x&b=y&limit=5', 'refused: limit'],
       ['/api/streets/cross?a=x&a=y&b=z', 'given more than once: a'],

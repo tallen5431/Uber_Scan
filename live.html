@@ -2847,7 +2847,8 @@
     // its door not being on the NucBox (searchHeldPlace, `endBy` 'place'):
     // armed all the same, and said, since that pin is a building's and not a
     // door's.
-    return h.endPinned ? (h.endBy === 'place' ? '● armed by place' : '● armed')
+    return h.endPinned ? (h.endBy === 'place' ? '● armed by place'
+      : h.endBy === 'street' ? '● armed by street' : '● armed')
       : '○ not armed';
   }
 
