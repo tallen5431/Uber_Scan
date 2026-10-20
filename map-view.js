@@ -814,6 +814,24 @@
     return pts.length >= 2 ? pts : [];
   }
 
+  /* Where the held order's run starts between offers, when no card's fix is
+   * there to start it from: the car's live fix, KEPT until the car is more
+   * than ROUTE_MOVE_M from it or the leg changes (`leg`, a key of the stops
+   * still ahead — a pickup visited, ✓ Took, a new end). So the run is one
+   * road question per leg and per ~300 m, answered from NbxSearch's cache in
+   * between, and never one per GPS fix. 300 m is chosen, not measured: past a
+   * block or two the drawn road plainly starts behind the car; under it the
+   * start sits inside the fix's own circle. `kept` is the last answer or
+   * null, `fix` { lat, lon } or null. Returns { at, leg } or null — null
+   * with no fix, and the straight run from no car as before. */
+  var ROUTE_MOVE_M = 300;
+  function routeFrom(kept, fix, leg) {
+    if (!fix || !isFinite(fix.lat) || !isFinite(fix.lon)) return null;
+    if (kept && kept.at && kept.leg === leg
+        && crowMiles(kept.at, fix) * METRES_PER_MILE <= ROUTE_MOVE_M) return kept;
+    return { at: { lat: fix.lat, lon: fix.lon }, leg: leg };
+  }
+
   function searchPlan(place) {
     var s = searchText(place);
     if (!s) return null;
@@ -3759,7 +3777,7 @@
            searchPlan: searchPlan, searchText: searchText, storeName: storeName,
            discFor: discFor, discBox: discBox,
            plannerName: plannerName, heldPickups: heldPickups, pickupKey: pickupKey,
-           heldRun: heldRun,
+           heldRun: heldRun, routeFrom: routeFrom, ROUTE_MOVE_M: ROUTE_MOVE_M,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            placeWords: placeWords, placeNamed: placeNamed, namedFeature: namedFeature,
            placeQuery: placeQuery, pickPlace: pickPlace, PLACE_KINDS: PLACE_KINDS,
