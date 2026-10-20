@@ -1410,7 +1410,11 @@ HELD = {
                         'uncosted': True, 'ends': 'elsewhere',
                         'route': 'https://www.google.com/maps/dir/?api=1&origin=A'
                                  '&destination=B&travelmode=driving',
-                        'sameStore': 'h-layout@1', 'sameStoreN': 1}},
+                        'sameStore': 'h-layout@1', 'sameStoreN': 1,
+                        # ...and the on-time hint at its widest (server.js
+                        # onTimeHint): the order in the car late by two
+                        # figures of minutes.
+                        'onTime': 'late1', 'lateMin': 12}},
     # The Took button's widest label once its card has gone: the widest pay a
     # card prints and an age of two figures. See tookAge.
     'took': {'id': 'o-layout-took', 'pay': 112.45, 'minutes': 55, 'perHour': 99.9},
@@ -3769,6 +3773,7 @@ const SNAP_MEASURE = (fixture) => {
         const st = document.getElementById('stack');
         if (!shown(st)) return null;
         const rg = st.querySelector('.range'), bo = st.querySelector('.both');
+        const ot = st.querySelector('.ontime');
         const sm = [document.querySelector('#places .same'), st.querySelector('.same')]
           .filter(shown)[0] || null;
         const cutOf = (el) => outside(el, [box(el), box(el === sm ? el.closest('#places, #stack') : st),
@@ -3777,7 +3782,9 @@ const SNAP_MEASURE = (fixture) => {
                  both: shown(bo) ? text(bo) : null, bothCut: shown(bo) ? cutOf(bo) : null,
                  // ...and "same store as ②" at the head of the address line
                  // (live.html sameNote), the same.
-                 same: shown(sm) ? text(sm) : null, sameCut: shown(sm) ? cutOf(sm) : null };
+                 same: shown(sm) ? text(sm) : null, sameCut: shown(sm) ? cutOf(sm) : null,
+                 // ...and the on-time hint (live.html onTimeSaid), the same.
+                 ontime: shown(ot) ? text(ot) : null, ontimeCut: shown(ot) ? cutOf(ot) : null };
       })(),
       over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
     };
@@ -4878,6 +4885,15 @@ try:
             # away, "same store ②" on the pair line's first row.
             eq('...and "%s" whole at %s' % (_same2(h), where),
                (_pr.get('same'), _pr.get('sameCut')), (_same2(h), ''))
+            # ...and the on-time hint at its widest, first in the words that
+            # give way: whole on every panel but the 3.5" hat beside the
+            # scene picture, where the ellipsis takes "n ·" and leaves
+            # "① late ~12 mi" — the call and its minutes, never the range.
+            _otc = _pr.get('ontimeCut') or ''
+            ok_('...and the on-time hint "\u2460 late ~12 min" at %s, cut by at most its last '
+                'letter and dot (%r)' % (where, (_pr.get('ontime'), _otc)),
+                _pr.get('ontime') == '\u2460 late ~12 min \u00b7'
+                and (_otc == '' or (h <= 380 and view == 'scene' and _otc == 'n \u00b7')))
             # ...and with carrying two off and two read back, "vs ① only"
             # beside the chip, whole, as before.
             _vs = (cm.get('offerFirst') or {}).get('vs') or {}

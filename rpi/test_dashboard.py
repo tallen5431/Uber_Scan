@@ -6627,6 +6627,9 @@ const framed = (page) => page.waitForFunction(
         same: [document.querySelector('#places .same'), document.querySelector('#stack .same')]
           .filter(shown).map(text).join(' + ') || null,
         ends: [].slice.call(document.querySelectorAll('#places .end')).map(text),
+        // ...and the on-time hint beside the pair line (live.html onTimeSaid).
+        ontime: shown(document.querySelector('#stack .ontime'))
+          ? text(document.querySelector('#stack .ontime')) : null,
         verdict: [document.getElementById('verdict').className,
                   text(document.getElementById('verdictLabel')),
                   text(document.getElementById('perHour'))].join(' | '),
@@ -6743,6 +6746,20 @@ const framed = (page) => page.waitForFunction(
                                                       stack: null }));
     await tick(300);
     const sameNoStack = await look();
+    // The on-time hint (server.js onTimeHint, the owner's decision of 20 Oct
+    // 2026): "both on time", "② late ~7 min", nothing with none — beside the
+    // pair line, the verdict as it was.
+    const oneStack = { pay: 40.0, worst: 18.2, best: 31.0, minMinutes: 40, maxMinutes: 65,
+                       leftMinutes: 40, state: 'warn', sure: false, uncosted: false, ends: null };
+    const onTimes = {};
+    for (const [k, extra] of [['both', { onTime: 'both' }],
+                              ['late2', { onTime: 'late2', lateMin: 7 }],
+                              ['none', {}]]) {
+      await push(Object.assign({}, READINGS.deducted, { holding: A, orders: [A], unowned: 0,
+        stack: Object.assign({}, oneStack, extra) }));
+      await tick(300);
+      onTimes[k] = await look();
+    }
     // ⌖ with no cue: the chooser, over the verdict pane.
     await push({ chooser: { id: 'choose-1', kind: 'scan', line: '77 Birch Ln, Roswell, GA',
                             rows: [{ pick: 'c-a@1', n: 1, pay: 9.48, end: A.dropoff },
@@ -6873,6 +6890,7 @@ const framed = (page) => page.waitForFunction(
                      offerUp: offerUp, offerFirst: offerFirst, chooser: chooser,
                      same: { before: sameBefore, two: sameTwo, one: sameOne, gone: sameGone,
                              noStack: sameNoStack },
+                     onTimes: onTimes,
                      closed: closed, picked: picked,
                      dropAsk: dropAsk, dropBoth: dropBoth, atDoor: atDoor,
                      refusedUndo: refusedUndo,
@@ -7931,6 +7949,19 @@ try:
         eq('...a stack without it, and no stack at all, draw none',
            ((_ss.get('gone') or {}).get('same'), (_ss.get('noStack') or {}).get('same')),
            (None, None))
+        _ot = ct.get('onTimes') or {}
+        eq('on time: the pair line says "both on time", "② late ~7 min", and nothing with no '
+           'hint',
+           [(_ot.get(k) or {}).get('ontime') for k in ('both', 'late2', 'none')],
+           ['both on time ·', '② late ~7 min ·', None])
+        eq('...first in the pair line\'s words, and nothing else on the card moves: the '
+           'verdict, the rest of the words, the address line',
+           [((_ot.get(k) or {}).get(f) == (_ot.get('none') or {}).get(f), k, f)
+            for k in ('both', 'late2') for f in ('verdict', 'ends')]
+           + [((_ot.get('both') or {}).get('more'), (_ot.get('none') or {}).get('more'))],
+           [(True, k, f) for k in ('both', 'late2') for f in ('verdict', 'ends')]
+           + [('both on time · with the one you have, over 40–65 min',
+               'with the one you have, over 40–65 min')])
         _ff = ct.get('offerFirst') or {}
         eq('[carry two] carrying two off with two read back: the pair line still says vs ① only',
            (_ff.get('vs'), _ff.get('both'), _ff.get('more')),
