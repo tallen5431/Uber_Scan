@@ -2068,6 +2068,10 @@ function dropoffArrived(read, force) {
       // ...and the hold's `fields`, `dropoff` and `dropoffScanned` together;
       // a planner lone dropoff that files clears the planner's 'list'.
       Assemble.file(carrying, read.dropoff, said, assembly);
+      // ...and how the order was chosen for this end, with two in the car
+      // (`only`, a cue's name — 'cardStreet', 'elimination', ... — or
+      // 'chooser'), for /api/status's `orders[].cue`; null with one.
+      carrying.endCue = cue || null;
       // ...and into holding.json, which it reached only by way of the NucBox
       // search (armHeldEnd, searchHeldEnd's save) — so with NUCBOX_SEARCH
       // unset, a ⌖ end the driver pressed for lived in memory alone, and a
@@ -3921,7 +3925,10 @@ function ordersForPanel(now) {
     ? list[0].planner.stops : [];
   return list.map(function (h, i) {
     var o = Object.assign(heldForPanel(h), { n: i + 1, app: h.app || null,
-                                             addOn: !!h.addOn, of: h.of || null },
+                                             addOn: !!h.addOn, of: h.of || null,
+                                             // ...and the cue its end was
+                                             // filed on (dropoffArrived).
+                                             cue: h.endCue || null },
                           // ...and its pickups as the guard holds them, each
                           // order its own (pickupState).
                           pickupState(h));

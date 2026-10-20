@@ -8212,6 +8212,50 @@ try:
 finally:
     stop(_qp)
 
+# The owner's snap of 20 Oct, 19:06–19:08 (names and streets invented): an
+# Uber order held off a card ending at a corner, an add-on onto its trip, and
+# the Trip Planner seen only in pages scrolled — never the list whole. The
+# add-on's door read first waits; the order's own door is on its card's
+# corner (cardStreet), and that decides the waiting one (elimination).
+def _ppage(top, drops):
+    stops = [{'kind': 'dropoff', 'orders': 1, 'name': nm, 'expectedBy': by, 'street': st,
+              'city': town, 'state': 'GA', 'zip': None, 'line': st + ', ' + town,
+              'partial': None} for nm, st, town, by in drops]
+    return {'sighting': {'asked': False, 'whole': True, 'titled': top, 'app': 'uber',
+                         'screen': 'uber.planner', 'page': {'top': top, 'bottom': False},
+                         'stops': stops, 'orderCount': None, 'keep': False}}
+
+
+_sp, _sb, _sj, _sh = _cserver('cardstreet', CARRY_TWO='0')
+try:
+    _took2(_sb, _card('s-a', 8.14, minutes=22.0, pickup='Fable Grill',
+                      dropoff='Larkspur Rd NW & Ombre Cir NW, Kennesaw'))
+    _took2(_sb, _card('s-b', 16.43, minutes=18.0, addon=True, pickup='Kestrel Noodle Bar'))
+    _say(_ppage(True, [('Ines B.', '608 Wickerby St NW', 'Marietta', 1188)]))
+    _st = get(_sb, '/api/status')
+    eq('[card street] a planner page not seen whole, its door on no card\'s street: '
+       'nothing filed, it waits',
+       ([o.get('dropoff') for o in _orders(_sb)], _st.get('unowned')),
+       (['Larkspur Rd NW & Ombre Cir NW, Kennesaw', None], 1))
+    _say(_ppage(False, [('Rhea A.', '1800 Ombre Cir NW', 'Kennesaw', 1170)]))
+    time.sleep(0.3)
+    _st = get(_sb, '/api/status')
+    eq('[card street] the next page\'s door on the card\'s own corner is the order\'s '
+       '(cardStreet), and the waiting door is the add-on\'s (elimination); the cue on '
+       'status and the mark rows',
+       ([(o.get('dropoff'), o.get('cue')) for o in _orders(_sb)], _st.get('unowned'),
+        _st.get('chooser'),
+        sorted((r.get('id'), r.get('cue')) for r in _rows(_sj, 'mark') if r.get('dropoff'))),
+       ([('1800 Ombre Cir NW, Kennesaw', 'cardStreet'),
+         ('608 Wickerby St NW, Marietta', 'elimination')], 0, None,
+        [('s-a', 'cardStreet'), ('s-b', 'elimination')]))
+    eq('[card street] ...both ends filed from the planner, and kept in holding.json',
+       [(((o.get('fields') or {}).get('dropoff') or {}).get('from'), o.get('endCue'))
+        for o in _holdfile(_sj)],
+       [('planner', 'cardStreet'), ('planner', 'elimination')])
+finally:
+    stop(_sp)
+
 # ...and with carrying two ON the trip is one order to the cap: an add-on
 # joins past it, and a Took past two TRIPS puts down the trip that ends
 # soonest, every order of it, said by the trip's pay.

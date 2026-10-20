@@ -1605,6 +1605,9 @@
    *   filed       ...and the mirror: a dropoff on a list seen whole, all its
    *               orders of one app, that is ONE order's filed end already is
    *               that order's (two orders on one door decide nothing)
+   *   cardStreet  the dropoff's street is the one order's own CARD printed
+   *               for its end, and elimination's lighter form after it, on
+   *               lists not seen whole too: see streetCues, above
    * With three orders — an original and two Uber add-ons, one trip — each of
    * growth and elimination is asked of the list as it stands: the newest
    * order's growth, and every other dropoff one distinct order's filed end.
@@ -1872,6 +1875,78 @@
     return alone ? older : null;
   }
 
+  /* ---------- the card's own street: the owner, 20 Oct 19:06–19:08 ----------
+   *
+   * An Uber order held, its card's end a corner ("<A> Rd NW & <B> Cir NW,
+   * <Town>"), and an Uber add-on taken onto its trip. The Trip Planner then
+   * showed both doors — "1800 <B> Cir NW, <Town>" and "608 <C> St NW,
+   * <Town>" — but only across pages the driver scrolled, never the list
+   * whole, so growth and elimination (both a list seen whole) never spoke,
+   * and neither door was filed: the order kept the card's corner, 'no house
+   * number', and the add-on had no end at all. Two positive cues, asked of
+   * every unprompted Trip Planner dropoff with two or more held (attribute)
+   * and of the same dropoff waiting in the pool (retryUnowned):
+   *
+   *   cardStreet   the dropoff's street NAME (streetCore: its house number,
+   *                type and quadrant gone) is one the order's OWN CARD
+   *                printed for its end (cardStreets: its door, or either side
+   *                of its corner), and no other held order's card names that
+   *                street. Two cards naming it is no cue at all.
+   *   elimination  exactly two orders held, one trip, the read after BOTH
+   *                Tooks (the add-on's included); one order's end is a
+   *                planner door on its own card's street (as cardStreet
+   *                filed it); this dropoff's street is on no held card and is
+   *                not that order's door: it is the OTHER order's — only
+   *                while that one has no end the screen filed.
+   *
+   * Never over a ⌖ press (an asked read is the chooser's; elimination's
+   * other order must have no screen-filed end, and a pressed end is one),
+   * never a pickup of any held order. These are the ONLY cues a dropoff off
+   * a list not seen whole (`partial`) is asked: Settled stands, no cue means
+   * no filing, and the chooser never times out into a guess. */
+  function cardHas(o, core) {
+    return cardStreets(cardEndOf(o)).indexOf(core) !== -1;
+  }
+
+  function aPickupOfAny(orders, d) {
+    return orders.some(function (o) {
+      if (plannerPickup(o, d)) return true;
+      var f = o.fields && o.fields.pickupAddr;
+      return [f ? f.value : null, o.pickup, o.pickupLine, bracketDoor(o.pickup)]
+        .some(function (p) { return sameStreet(p, d.line); });
+    });
+  }
+
+  function streetCues(orders, live, d, out) {
+    if (d.asked !== false || d.planner !== true || typeof d.line !== 'string') return;
+    var all = (orders || []).filter(Boolean);
+    if (all.length < 2 || aPickupOfAny(all, d)) return;
+    var core = streetCore(typeof d.street === 'string' && d.street ? d.street
+      : d.line.split(',')[0]);
+    if (!core) return;
+    var naming = all.filter(function (o) { return cardHas(o, core); });
+    if (naming.length > 1) return;
+    if (naming.length === 1) {
+      var f = naming[0].fields && naming[0].fields.dropoff;
+      if (live.indexOf(naming[0]) !== -1 && !(f && f.from === 'press')) {
+        out.votes.push({ cue: 'cardStreet', order: naming[0] });
+      }
+      return;
+    }
+    if (all.length !== 2 || live.length !== 2 || typeof d.at !== 'number') return;
+    if (!all.every(function (o) { return typeof o.tookAt === 'number' && d.at >= o.tookAt; })) return;
+    var first = all.filter(function (o) {
+      var e = o.fields && o.fields.dropoff;
+      var c = e && e.from === 'planner' ? streetCore(String(e.value).split(',')[0]) : null;
+      return !!c && all.filter(function (x) { return cardHas(x, c); }).length === 1
+        && cardHas(o, c);
+    });
+    if (first.length !== 1) return;
+    var other = all[all[0] === first[0] ? 1 : 0];
+    if (filedEnd(other) || sameStreet(d.line, filedEnd(first[0]))) return;
+    out.votes.push({ cue: 'elimination', order: other });
+  }
+
   /* `orders` is every order held, first-taken first; `d` a dropoff line or a
    * candidate made off a planner. Returns {order, cue, why, votes}: `order`
    * null when nothing decides, `why` then 'nobody' (the hard rules left none),
@@ -1908,9 +1983,15 @@
       return true;
     });
     if (!live.length) { out.why = 'nobody'; return out; }
+    // A dropoff off a list NOT seen whole (sightingMany's `partial`) is
+    // decided by the card's street alone (streetCues): what the screen did
+    // not show may be anyone's, so neither `only` nor a cue that reads the
+    // list (growth, elimination, filed) nor one that reads a page's lone
+    // store stands on it.
+    var partial = d.partial === true;
     var crowded = d.bounded === true && Array.isArray(d.others)
       && d.others.length + 1 > live.length;
-    if (live.length === 1 && !(ctx && ctx.card) && !crowded) {
+    if (live.length === 1 && !(ctx && ctx.card) && !crowded && !partial) {
       out.order = live[0];
       out.cue = 'only';
       return out;
@@ -1921,8 +2002,8 @@
       if (hit.length === 1) out.votes.push({ cue: cue, order: hit[0] });
       else if (hit.length > 1) out.ties.push(cue);
     }
-    if (d.store) vote('name', function (o) { return sameStore(d.store, o.pickup); });
-    if (typeof d.expectedBy === 'number') {
+    if (d.store && !partial) vote('name', function (o) { return sameStore(d.store, o.pickup); });
+    if (typeof d.expectedBy === 'number' && !partial) {
       vote('deadline', function (o) {
         return clockNear(d.expectedBy, o.deliverBy, DEADLINE_SLACK_MIN);
       });
@@ -1931,7 +2012,7 @@
     // (server.js, placeTook) — the owner's trip details for 16 Oct show one.
     // Each cue below is the two-order cue asked of the list as it stands; with
     // two it is that cue exactly.
-    if (live.length >= 2) {
+    if (live.length >= 2 && !partial) {
       // (From the first Took on, as with two: a list that grew by exactly one
       // since then names the newest; one seen before the middle Took cannot
       // have grown by one into a list of three.)
@@ -1976,6 +2057,7 @@
         if (filed.length === 1) out.votes.push({ cue: 'filed', order: filed[0] });
       }
     }
+    streetCues(orders, live, d, out);
     var picked = [];
     out.votes.forEach(function (v) { if (picked.indexOf(v.order) === -1) picked.push(v.order); });
     if (picked.length === 1) {
@@ -2115,6 +2197,24 @@
         if (st.said[seen]) return false;
         st.said[seen] = true;
         return true;
+      });
+    } else if (!page.asked && orders.some(function (o) { return cardStreets(cardEndOf(o)).length; })) {
+      // ...and a list NOT seen whole, unprompted, while a held card printed
+      // a street for its end: each dropoff read whole, `partial`, for the
+      // card's-street cues alone (streetCues; the owner's snap of 20 Oct,
+      // both doors seen only on pages scrolled). No store (a page's one
+      // pickup need not be its one dropoff's), no list for growth. With no
+      // card street there is nothing they could say, and nothing is offered.
+      cands = plannerCandidates(view, page, false).filter(function (c) {
+        var seen = c.line + '|part';
+        if (st.said[seen]) return false;
+        st.said[seen] = true;
+        return true;
+      });
+      cands.forEach(function (c) {
+        c.partial = true;
+        c.store = null;
+        c.listDrops = null;
       });
     }
     run.pages.forEach(function (p) {

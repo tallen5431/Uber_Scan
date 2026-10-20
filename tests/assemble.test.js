@@ -1554,6 +1554,112 @@ SEQ.forEach(function (seq) {
      [h.dropoff, h.dropoffReads.reads.length], ['305 Quillon Dr, Smyrna', A.VOTE_READS]);
 })();
 
+/* ---- the card's own street (the owner, 20 Oct 19:06–19:08) ----
+ *
+ * An Uber order held off a card whose end is a corner, an add-on on its
+ * trip, and the Trip Planner seen only in pages scrolled: the order's door by
+ * `cardStreet`, the add-on's by elimination after it. Streets and names
+ * invented. */
+(function () {
+  function order(id, at, more) {
+    var o = Object.assign({ id: id, acceptedAt: at, tookAt: at + 5, holdId: id + '@' + at,
+                            minutes: 40, app: 'uber', pickup: null, deliverBy: null,
+                            dropoff: null, dropoffScanned: false }, more || {});
+    // ...and what its card printed, as server.js keeps it at the Took.
+    o.seenAs = { dropoff: o.dropoff, tookAt: o.tookAt };
+    A.fieldsOf(o);
+    return o;
+  }
+  var CORNER = 'Larkspur Rd NW & Ombre Cir NW, Kennesaw';
+  function trip() {
+    var root = order('r', 1000, { dropoff: CORNER, pickup: 'Fable Grill' });
+    var add = order('x', 5000, { addOn: true, of: root.holdId, pickup: 'Kestrel Noodle Bar' });
+    return [root, add];
+  }
+  function pd(line, street, more) {
+    return Object.assign({ line: line, street: street, city: 'Kennesaw', at: 9000,
+                           app: 'uber', asked: false, labelled: 'dropoff', planner: true,
+                           screen: 'uber.planner', partial: true, bounded: false }, more || {});
+  }
+  var DOOR = pd('1800 Ombre Circle, Kennesaw', '1800 Ombre Circle');
+  var OTHER = pd('608 Wickerby St NW, Marietta', '608 Wickerby St NW', { city: 'Marietta' });
+  function who(orders, x, st) {
+    var r = A.attribute(st || A.fresh(), orders, x);
+    return [r.order ? r.order.id : null, r.cue, r.why];
+  }
+  var t = trip();
+  eq('[cardStreet] a planner door on one side of the card\'s corner is that order\'s, '
+     + 'type and quadrant aside', who(t, DOOR), ['r', 'cardStreet', null]);
+  eq('[cardStreet] ...and its other side too',
+     who(t, pd('22 Larkspur Road, Kennesaw', '22 Larkspur Road')), ['r', 'cardStreet', null]);
+  eq('[cardStreet] a door on no card\'s street, nothing filed yet: no cue (it waits)',
+     who(t, OTHER), [null, null, 'no cue']);
+  var same = [order('r', 1000, { dropoff: CORNER }),
+              order('y', 5000, { dropoff: '40 Ombre Cir NW, Kennesaw' })];
+  eq('[cardStreet] two cards naming the same street: no cue',
+     who(same, DOOR), [null, null, 'no cue']);
+  eq('[cardStreet] never over a press: a pressed read is the chooser\'s',
+     who(t, Object.assign({}, DOOR, { asked: true })), [null, null, 'no cue']);
+  eq('[cardStreet] never a pickup: a held order\'s store on the card\'s street',
+     who([order('r', 1000, { dropoff: CORNER, pickup: 'Fable Grill (1800 Ombre Circle)' }),
+          t[1]], DOOR), [null, null, 'no cue']);
+  eq('[cardStreet] a partial read before the add-on\'s Took is no `only` for the original',
+     who(t, Object.assign({}, OTHER, { at: 3000 })), [null, null, 'no cue']);
+  // The first door filed by cardStreet, as server.js files it.
+  A.file(t[0], DOOR, A.dropoff(t[0], DOOR, null), null);
+  eq('[cardStreet] the premise: the original\'s end is the planner door',
+     [t[0].dropoff, t[0].fields.dropoff.from], ['1800 Ombre Circle, Kennesaw', 'planner']);
+  eq('[elimination] ...then a different door of the trip, on no card\'s street, is the '
+     + 'add-on\'s', who(t, OTHER), ['x', 'elimination', null]);
+  eq('[elimination] ...but not from a read before the add-on\'s Took',
+     who(t, Object.assign({}, OTHER, { at: 4000 })), [null, null, 'no cue']);
+  eq('[elimination] ...nor the first order\'s own door read again',
+     who(t, pd('1800 Ombre Circle, Kennesaw', '1800 Ombre Circle')), ['r', 'cardStreet', null]);
+  var t2 = trip();
+  A.file(t2[0], DOOR, A.dropoff(t2[0], DOOR, null), null);
+  A.file(t2[1], OTHER, { to: 'hold', from: 'nav' }, null);
+  eq('[elimination] ...nor when the add-on already has an end the screen filed',
+     who(t2, pd('9 Elm Ct, Marietta', '9 Elm Ct')), [null, null, 'no cue']);
+  var t3 = trip();
+  A.file(t3[0], DOOR, { to: 'hold', from: 'press' }, null);
+  eq('[elimination] ...nor off a first door the driver pressed for',
+     who(t3, OTHER), [null, null, 'no cue']);
+  // The pages as sightingMany reads them: two pages, neither the list whole.
+  var st = A.fresh();
+  var t4 = trip();
+  function page(at, top, drops) {
+    return { at: at, asked: false, whole: true, titled: top, app: 'uber',
+             screen: 'uber.planner', page: { top: top, bottom: false }, orderCount: null,
+             keep: false,
+             stops: drops.map(function (x) {
+               return { kind: 'dropoff', orders: 1, name: x[0], expectedBy: x[3],
+                        street: x[1], city: x[2], state: 'GA', zip: null,
+                        line: x[1] + ', ' + x[2], partial: null };
+             }) };
+  }
+  var c1 = A.sighting(st, t4, page(9000, true, [['Ines B.', '608 Wickerby St NW', 'Marietta',
+                                                 1188]]), 9000).candidates;
+  var c2 = A.sighting(st, t4, page(9500, false, [['Rhea A.', '1800 Ombre Cir NW', 'Kennesaw',
+                                                  1170]]), 9500).candidates;
+  eq('[cardStreet] a list never seen whole still offers its dropoffs, `partial`',
+     [c1.map(function (c) { return [c.line, c.partial, c.store, c.listDrops]; }),
+      c2.map(function (c) { return c.line; })],
+     [[['608 Wickerby St NW, Marietta', true, null, null]], ['1800 Ombre Cir NW, Kennesaw']]);
+  A.park(st, c1[0], t4);
+  var a2 = A.attribute(st, t4, c2[0]);
+  A.file(a2.order, c2[0], A.dropoff(a2.order, c2[0], null), st);
+  var back = A.retryUnowned(st, t4);
+  eq('[cardStreet] the snap: the order\'s door by cardStreet, then the waiting door by '
+     + 'elimination, out of the pool',
+     [a2.order.id, a2.cue, back.map(function (f) { return [f.d.line, f.order.id, f.cue]; }),
+      A.unowned(st)],
+     ['r', 'cardStreet', [['608 Wickerby St NW, Marietta', 'x', 'elimination']], 0]);
+  eq('[cardStreet] no card street on any held order: a list not seen whole offers nothing',
+     A.sighting(A.fresh(), [order('p', 1000), order('q', 5000)],
+                page(9000, true, [['Ines B.', '608 Wickerby St NW', 'Marietta', 1188]]),
+                9000).candidates, []);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);
