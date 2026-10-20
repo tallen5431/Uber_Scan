@@ -2487,7 +2487,8 @@
     // with it (showRoute).
     if (!drawnAs(el.stack, JSON.stringify([lo, hi, s.heldCount, s.minMinutes, s.maxMinutes,
                                            s.sure, s.uncosted, s.ends, s.vsFirst,
-                                           s.sameStore, s.sameStoreN]))) return;
+                                           s.sameStore, s.sameStoreN, s.onTime, s.lateMin,
+                                           s.offWayMi, waySearch]))) return;
     // Built from parts rather than one string, because the parts have different
     // priorities when the row runs out of room. See .stackline in styles.css:
     // this is the half that gives way, and it can because the same figures are
@@ -2527,7 +2528,25 @@
     // that loses money is the one a driver most needs to read correctly.
     // ...and with two in the car (carrying two on) not "the one you have":
     // which ones is said whole, beside the chip (`.both`, below).
-    more.textContent = (s.heldCount > 1 ? ' over ' : ' with the one you have, over ')
+    // The on-time hint first (server.js onTimeHint, the owner's decision of
+    // 20 Oct 2026): whether some order of the stops, by the NucBox router's
+    // drive times and a fixed allowance at each pickup, reaches both drops by
+    // their deadlines. In the words that give way, not a chip of its own:
+    // measured in rpi/test_layout.py, a chip or a column of its own wrapped
+    // the row at 800x480 and cut the range on the 3.5" hat, and the range
+    // is what this row exists for. First in the words, so it is the last of
+    // them the ellipsis reaches. No verdict colour: it decides nothing. With
+    // no deadline it falls back to the road miles the new pickup adds, said
+    // only where the card's own way line, which says that figure, will not
+    // be up (no NucBox search).
+    var hint = onTimeSaid(s);
+    if (hint) {
+      var ot = document.createElement('span');
+      ot.className = 'ontime';
+      ot.textContent = ' ' + hint + ' \u00b7';
+      more.appendChild(ot);
+    }
+    more.appendChild(document.createTextNode((s.heldCount > 1 ? ' over ' : ' with the one you have, over ')
       + (s.minMinutes === s.maxMinutes
          ? Math.round(s.minMinutes)
          : Math.round(s.minMinutes) + '\u2013' + Math.round(s.maxMinutes))
@@ -2567,7 +2586,7 @@
       // town" is nearly meaningless where this driver works: 44% of their
       // placed dropoffs are in Atlanta, which is 135 square miles, and a metro
       // ZIP is a few.
-      ;
+      ));
     sum.appendChild(range);
     sum.appendChild(more);
     // ...and the same-store note's short form, drawn on the 3.5" hat alone,
@@ -2650,6 +2669,18 @@
       put(both);
     }
     put(chip);
+  }
+
+  function onTimeSaid(s) {
+    if (!s) return null;
+    if (s.onTime === 'both') return 'both on time';
+    if ((s.onTime === 'late1' || s.onTime === 'late2') && s.lateMin > 0) {
+      return circled(s.onTime === 'late1' ? 1 : 2) + ' late ~' + s.lateMin + ' min';
+    }
+    if (typeof s.offWayMi === 'number' && waySearch !== true) {
+      return '+' + s.offWayMi.toFixed(1) + ' mi out of the way';
+    }
+    return null;
   }
 
   // ...and the same question handed to a map, which answers it in driving

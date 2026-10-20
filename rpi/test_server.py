@@ -5693,13 +5693,19 @@ try:
            'road\'s shape to draw as [lat, lon]',
            (_s, _r), (200, {'ok': True, 'metres': 31307.4, 'snaps': [3.1, 3.1],
                             'line': [[33.9526, -84.5499], [33.9526, -84.388],
-                                     [33.749, -84.388]]}))
-        no_('...and no duration in any form: minutes from a pace are refused',
-            re.search(r'dur|second|minute|weight', json.dumps(_r)))
+                                     [33.749, -84.388]], 'duration': 1659.8}))
+        no_('...and the router\'s own duration in seconds, the owner\'s decision of 20 Oct '
+            '2026, and nothing else of time: no weight, no minutes',
+            re.search(r'second|minute|weight', json.dumps(_r)))
         eq('...asked for the simplified shape as GeoJSON, fixed here, the points '
            'as the page wrote them',
            _asked()[-1], '/route/v1/driving/-84.5499,33.9526;-84.3880,33.7490'
                          '?overview=simplified&geometries=geojson')
+        _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.5400,33.9600;'
+                           '-84.5300,33.9700;-84.5200,33.9800;-84.5100,33.9900')
+        eq('a route of five points (the car and two orders\' four stops) is relayed, with '
+           'its duration', (_s, _r.get('ok'), len(_r.get('snaps') or []),
+                            isinstance(_r.get('duration'), (int, float))), (200, True, 5, True))
         _s, _r = _nbx(_b1, '/api/nbx/route?points=-84.5499,33.9526;-84.3880,33.7490'
                            '&overview=full')
         eq('...and the page cannot choose the shape: any other parameter is refused',
@@ -5779,10 +5785,10 @@ try:
                 ('/api/nbx/search?q=' + 'x' * 121, 'q must be 1 to 120'),
                 ('/api/nbx/search?q=a&viewbox=1,2,3', 'viewbox is'),
                 ('/api/nbx/search?q=a&viewbox=-84.6,34,-84.4,9999', 'viewbox is'),
-                ('/api/nbx/route?points=-84.5,33.9', 'points is two or three'),
-                ('/api/nbx/route?points=-84.5,33.9;-84.4,33.8;-84.3,33.7;-84.2,33.6',
-                 'points is two or three'),
-                ('/api/nbx/route?points=-84.5,33.9;../../etc', 'points is two or three'),
+                ('/api/nbx/route?points=-84.5,33.9', 'points is two to five'),
+                ('/api/nbx/route?points=-84.5,33.9;-84.4,33.8;-84.3,33.7;-84.2,33.6;'
+                 '-84.1,33.5;-84.0,33.4', 'points is two to five'),
+                ('/api/nbx/route?points=-84.5,33.9;../../etc', 'points is two to five'),
                 ('/api/nbx/route?points=-84.5,33.9;-84.4,33.8&alternatives=true',
                  'refused: alternatives'),
                 ('/api/nbx/table?points=-84.5,33.9;-84.4,33.8', 'no such NucBox endpoint'),
@@ -8760,6 +8766,87 @@ eq('...a card at another door says nothing, and its pair row differs from the sa
    _ssr.get('other door'), (False, False, ['sameStore'], 'go', 'go', True, True))
 eq('...and with two in the car the second order\'s store is named, ②',
    _ssr.get('second'), ([True], True, 2))
+
+# --- on time for both ----------------------------------------------------------
+#
+# The owner's decision of 20 Oct 2026: with one order in the car and every
+# point pinned, the NucBox router's drive times (tests/fake-nucbox.js, a road
+# a quarter longer than the line at 13.4 m/s) say whether some order of the
+# stops reaches both drops by their deadlines — on the reading's stack and on
+# the pair row (`onTime`, numbers only), the verdict untouched. No deadline:
+# the road miles the new pickup adds, never via the new job's end. A held end
+# with no pin: nothing. Invented doors round Marietta Square, the fake's own.
+_OTFIX = {'lat': 33.9526, 'lon': -84.5499, 'gpsOk': True, 'gpsMode': 3, 'gpsAge': 1,
+          'gpsErr': 5, 'miles': 6.0}
+_OTEND = '1106 Brindlewood Way, Marietta, GA 30060'
+# ...and an end the NucBox holds the street of and not the door, so the
+# server's own search cannot pin it either.
+_OTNODOOR = '4821 Kestrel Dr, Marietta, GA 30060'
+
+
+def _othold(deliver_by, pinned=True):
+    now = int(time.time() * 1000)
+    h = {'id': 'ot-a', 'acceptedAt': now - 60000, 'pay': 9.48, 'minutes': 40.0, 'miles': 5.0,
+         'cost': 1.5, 'dropoff': _OTEND if pinned else _OTNODOOR, 'deliverBy': deliver_by,
+         'app': 'uber',
+         'card': dict(_OTFIX)}
+    if pinned:
+        h['endPin'] = {'dropoff': _OTEND, 'lat': 33.9650, 'lon': -84.5400, 'doorLevel': True,
+                       'pinnedAt': now, 'by': 'server'}
+    return {'v': 2, 'orders': [h]}
+
+
+def _ontime(name, deliver_by, pinned=True, minutes=30.0):
+    nf = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    nb = 'http://127.0.0.1:%d' % json.loads(nf.stdout.readline())['port']
+    sp, sb, sj, _sh = _cserver(name, hold=_othold(deliver_by, pinned), NUCBOX_SEARCH=nb,
+                               NUCBOX_ROUTER=nb)
+    try:
+        read = _ssread(12.05, 6.0)
+        _say(read)
+        _say(_card('ot-b', 12.05, minutes=minutes,
+                   pickup='Example Grill (250 Example Road)',
+                   dropoff='1106 Tamarons Lane, Marietta, GA 30064', **_OTFIX))
+        _say(read)
+        time.sleep(1.0)
+        _say(read)
+        last = get(sb, '/api/status').get('last') or {}
+        st = last.get('stack') or {}
+        rows = [r for r in _rows(sj, 'pair') if r.get('id') == 'ot-b']
+        row = rows[0] if rows else {}
+        return {'stack': {k: st.get(k) for k in ('onTime', 'lateMin', 'offWayMi')},
+                'row': {k: row.get(k) for k in ('onTime', 'lateMin', 'offWayMi')},
+                'rows': len(rows), 'state': last.get('state'), 'said': row.get('said'),
+                'rowkeys': sorted(k for k in ('onTime', 'lateMin', 'offWayMi') if k in row)}
+    finally:
+        stop(sp)
+        nf.kill()
+
+
+_otb = _ontime('ontime-both', (_NOWMIN + 40) % 1440)
+eq('on time: both deadlines met by some order of the stops, by the router\'s drive times, '
+   'on the reading\'s stack and on the one pair row; the verdict the reading\'s own',
+   (_otb['stack'], _otb['row'], _otb['rows'], _otb['state'], _otb['rowkeys']),
+   ({'onTime': 'both', 'lateMin': None, 'offWayMi': None},
+    {'onTime': 'both', 'lateMin': None, 'offWayMi': None}, 1, 'go', ['onTime']))
+_otl = _ontime('ontime-late', _NOWMIN)
+ok_('on time: the held order due this minute is late in every order of the stops, said as '
+    '①\'s whole minutes late on the stack and the row (got %r)' % (_otl,),
+    _otl['stack']['onTime'] == 'late1' and _otl['row']['onTime'] == 'late1'
+    and isinstance(_otl['row']['lateMin'], int) and 1 <= _otl['row']['lateMin'] <= 6
+    and _otl['stack']['lateMin'] == _otl['row']['lateMin'] and _otl['state'] == 'go')
+_otd = _ontime('ontime-nodue', None)
+ok_('on time: with no deadline on the held order, the road miles the new pickup adds '
+    'instead, no call made (got %r)' % (_otd,),
+    _otd['stack']['onTime'] is None and _otd['row']['onTime'] is None
+    and isinstance(_otd['stack']['offWayMi'], (int, float)) and _otd['stack']['offWayMi'] >= 0
+    and _otd['row']['offWayMi'] == _otd['stack']['offWayMi'])
+_otp = _ontime('ontime-nopin', (_NOWMIN + 40) % 1440, pinned=False)
+eq('on time: the held end not pinned (its door not on the NucBox), nothing at all: no call, no miles, the row\'s onTime null',
+   (_otp['stack'], _otp['row'], _otp['rowkeys']),
+   ({'onTime': None, 'lateMin': None, 'offWayMi': None},
+    {'onTime': None, 'lateMin': None, 'offWayMi': None}, ['onTime']))
 
 shutil.rmtree(_cdir, ignore_errors=True)
 

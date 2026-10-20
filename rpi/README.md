@@ -8544,14 +8544,14 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 1337 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 1339 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
                                 #     words rather than a number whenever one
                                 #     would be wrong (skipped without
                                 #     Playwright)
-python3 rpi/test_layout.py      # 4306 on every page fitting the screen it is
+python3 rpi/test_layout.py      # 4312 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
 python3 rpi/test_offerspage.py  # 545 on the offers page as a driver reads it:
@@ -8559,7 +8559,7 @@ python3 rpi/test_offerspage.py  # 545 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 983 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 988 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that

@@ -3780,6 +3780,15 @@ function withStack(read, now) {
       read.stack.sameStore = same.holdId;
       read.stack.sameStoreN = same.n;
     }
+    // ...and the on-time hint, said beside the pair line (onTimeHint): asked
+    // here, answered on a later reading of the same card once it is in.
+    var ot = onTimeHint(scanner.offer, now);
+    if (ot && ot.onTime) {
+      read.stack.onTime = ot.onTime;
+      if (ot.lateMin) read.stack.lateMin = ot.lateMin;
+    } else if (ot && typeof ot.offWayMi === 'number') {
+      read.stack.offWayMi = ot.offWayMi;
+    }
   }
   if (carryingTwo(now)) {
     read.orders = ordersForPanel(now);
@@ -3939,6 +3948,285 @@ function planAtOf(stops, h) {
   return at.length === 1 ? at[0] : null;
 }
 
+/* ---------- on time for both: the owner's decision of 20 Oct 2026 ----------
+ *
+ * "Could the NucBox give an idea of the time? If time can't be determined,
+ * distance out of the way is a reasonable place to start as well" — a simple
+ * call on the card, when it can be worked out, that taking the second order
+ * still delivers both on time. AUDITS.md records the decision: the NucBox
+ * router's (OSRM's) own DRIVE TIMES are allowed for this one hint, narrowing
+ * the Settled refusal of minutes for this use only. Still no pace, no minutes
+ * from distance, and nothing here moves the verdict, the state or the range.
+ *
+ * Asked only with ONE order in the car and one offer on the glass, and only
+ * when every point is pinned: the car (the offer card's own fix, as the
+ * detour starts from it), the held order's pickup while the car has not
+ * called there (one, from its kept pins; a pickup on record with no pin is
+ * no answer), its end (the door-level pin GPS arrival arms on), and the
+ * offer's pickup and dropoff, each searched here on the NucBox at door
+ * level inside the offer card's disc (offerPin). And both deadlines: the
+ * held order's Trip Planner "Expected by" for its dropoff stop (planAtOf),
+ * else its card's deliverBy; the offer's deliverBy, else its own card
+ * minutes from now, which is Uber's promise for it.
+ *
+ * Then at most three orders of the stops are asked of the router, the
+ * sensible ones and no others:
+ *   pickup still ahead   A-pick A-drop B-pick B-drop | A-pick B-pick A-drop
+ *                        B-drop | B-pick A-pick A-drop B-drop
+ *   food in the car      A-drop B-pick B-drop | B-pick A-drop B-drop |
+ *                        B-pick B-drop A-drop
+ * each arrival the sum of the router's leg times plus PICKUP_ALLOW_S for
+ * every pickup stop before it. 'both' when some order reaches each drop by
+ * its deadline; otherwise the order least late in all, said by whichever of
+ * the two is later ('late1' the held order, 'late2' the offer) and by how
+ * many whole minutes, rounded up. Null when anything cannot be had.
+ *
+ * With every pin the extra road distance needs and no deadline (or a router
+ * that gave no times), `offWayMi`: road(car → B-pick → A-drop) less
+ * road(car → A-drop), with the held pickup in front when it is still ahead
+ * and the new pickup either side of it, the shorter. NEVER through where the
+ * new job ends (Settled: "Do not widen the detour"). The card's own way line
+ * (live.html showWay) already says this figure from the same roads, so the
+ * panel draws this one only where that line is not up. */
+
+// The time allowed at each pickup for the food, in seconds. CHOSEN, NOT
+// MEASURED: no restaurant wait is on record anywhere in this repository.
+var PICKUP_ALLOW_S = 5 * 60;
+// How long a pair row waits for a hint still being asked, then is written
+// with `onTime: null` (ms).
+var ONTIME_WAIT_MS = envNumber('ONTIME_WAIT_MS', 4000);
+// A road figure this far below zero is the router choosing different roads
+// (the detour figure's own bound, map-view.js).
+var ONTIME_NEG_MI = 0.05;
+
+var offerPins = {};   // offer id -> { pickup: pin|null|undefined, dropoff: ... }
+var onTimes = {};     // inputs key -> { hint, waiters } (hint undefined while asked)
+var ONTIME_KEEP = 32;
+
+function onTimeKeep(map, key, val) {
+  map[key] = val;
+  var keys = Object.keys(map);
+  if (keys.length > ONTIME_KEEP) delete map[keys[0]];
+}
+
+/* One side of the offer pinned at door level inside its card's disc, or null
+ * where it cannot be; undefined while asked. Asked once per offer and side. */
+function offerPin(offer, side) {
+  var on = offerPins[offer.id];
+  if (!on) {
+    on = { pickup: undefined, dropoff: undefined };
+    onTimeKeep(offerPins, offer.id, on);
+  }
+  if (on[side] !== undefined || on[side + 'Asking']) return on[side];
+  var text = side === 'pickup' ? (offer.pickupLine || offer.pickup) : offer.dropoff;
+  var plan = text ? MV.searchPlan(text) : null;
+  var disc = MV.discFor(cardOf(offer));
+  var said = plan && plan.kind === 'street' && plan.door ? nbxTerm(plan.street) : null;
+  if (!NBX.search || !said || !disc) {
+    on[side] = null;
+    return null;
+  }
+  var target = nbxSearchTarget('street', said, MV.discBox(disc));
+  var settle = function (out) {
+    on[side + 'Asking'] = false;
+    var res = out ? MV.pickInDisc(out.hits, disc, plan, out.cutAt) : null;
+    on[side] = res && res.at ? { lat: res.at.lat, lon: res.at.lon } : null;
+    onTimeAgain(offer);
+  };
+  if (nbxCache.has(target)) {
+    settle(nbxCache.get(target));
+    return on[side];
+  }
+  on[side + 'Asking'] = true;
+  nbxAsk(target, function (err, body) {
+    if (err || !Array.isArray(body)) return settle(null);
+    var out = nbxHits(body);
+    nbxRemember(target, out);
+    settle(out);
+  });
+  return undefined;
+}
+
+// Minutes since midnight as the nearest such moment to `now` (ms).
+function dueAt(minOfDay, now) {
+  if (typeof minOfDay !== 'number' || !isFinite(minOfDay)) return null;
+  var d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  var t = d.getTime() + minOfDay * 60000;
+  if (t < now - 12 * 3600000) t += 86400000;
+  else if (t > now + 12 * 3600000) t -= 86400000;
+  return t;
+}
+
+/* What the hint is worked out from, or { none: true } when it cannot be, or
+ * { pending: true } while the offer's pins are still being asked. */
+function onTimeInputs(offer, now) {
+  var orders = heldOrders(now);
+  if (orders.length !== 1 || !offer || typeof offer.id !== 'string') return { none: true };
+  var h = orders[0];
+  if (h.id === offer.id) return { none: true };
+  var car = MV.cardFix(offer).at;
+  var aDrop = heldEndPin(h);
+  if (!car || !aDrop) return { none: true };
+  var listed = Array.isArray(h.pickups) ? h.pickups : [];
+  var visited = listed.filter(function (e) { return e.visited; }).map(function (e) { return e.q; });
+  var ahead = listed.filter(function (e) { return !e.visited; }).map(function (e) { return e.q; });
+  var pins = (Array.isArray(h.pickupPins) ? h.pickupPins : []).filter(function (p) {
+    return p.q && visited.indexOf(p.q) === -1;
+  });
+  // A pickup ahead with no pin, or more than one ahead: not a run to time.
+  if (pins.length > 1 || ahead.some(function (q) {
+    return !pins.some(function (p) { return p.q === q; });
+  })) return { none: true };
+  var bPick = offerPin(offer, 'pickup');
+  var bDrop = offerPin(offer, 'dropoff');
+  if (bPick === undefined || bDrop === undefined) return { pending: true };
+  var stops = h.planner && Array.isArray(h.planner.stops) ? h.planner.stops : [];
+  var at = planAtOf(stops, h);
+  var aDue = dueAt(at !== null && stops[at] ? stops[at].expectedBy : null, now);
+  if (aDue === null) aDue = dueAt(h.deliverBy, now);
+  var bDue = dueAt(offer.deliverBy, now);
+  if (bDue === null && typeof offer.minutes === 'number' && isFinite(offer.minutes)
+      && offer.minutes > 0) bDue = now + offer.minutes * 60000;
+  var pt = function (p) { return p ? { lat: p.lat, lon: p.lon } : null; };
+  return { car: pt(car), aPick: pins.length ? pt(pins[0]) : null, aDrop: pt(aDrop),
+           bPick: pt(bPick), bDrop: pt(bDrop), aDue: aDue, bDue: bDue };
+}
+
+/* One route question of the router, ours alone: the leg times and metres
+ * (no shape), or null for any answer that is not a route, a refusal, or a
+ * point moved past the detour's SNAP_MI to reach a road. */
+function roadLegs(pts, done) {
+  var target = NBX.route + '/route/v1/driving/' + pts.map(function (p) {
+    return p.lon.toFixed(6) + ',' + p.lat.toFixed(6);
+  }).join(';') + '?overview=false';
+  if (nbxCache.has(target)) return done(nbxCache.get(target));
+  nbxAsk(target, function (err, body) {
+    var r0 = !err && body && body.code === 'Ok' && Array.isArray(body.routes) && body.routes[0];
+    var wps = body && Array.isArray(body.waypoints) ? body.waypoints : [];
+    var legs = r0 && Array.isArray(r0.legs) ? r0.legs : [];
+    var num = function (x) { return typeof x === 'number' && isFinite(x) && x >= 0; };
+    var out = null;
+    if (r0 && legs.length === pts.length - 1 && wps.length === pts.length
+        && wps.every(function (w) {
+          return w && num(w.distance) && w.distance / 1609.344 <= MV.SNAP_MI;
+        })
+        && legs.every(function (l) { return l && num(l.distance); })) {
+      out = { metres: legs.map(function (l) { return l.distance; }),
+              seconds: legs.every(function (l) { return num(l.duration); })
+                ? legs.map(function (l) { return l.duration; }) : null };
+    }
+    if (out) nbxRemember(target, out);
+    done(out);
+  });
+}
+
+function sumOf(xs) {
+  return xs.reduce(function (a, b) { return a + b; }, 0);
+}
+
+/* The hint from the inputs: { onTime, lateMin, offWayMi }, through done(). */
+function onTimeWork(inp, done) {
+  var P = 'P', D = 'D';
+  var seqs = inp.aPick
+    ? [[[inp.aPick, P, 1], [inp.aDrop, D, 1], [inp.bPick, P, 2], [inp.bDrop, D, 2]],
+       [[inp.aPick, P, 1], [inp.bPick, P, 2], [inp.aDrop, D, 1], [inp.bDrop, D, 2]],
+       [[inp.bPick, P, 2], [inp.aPick, P, 1], [inp.aDrop, D, 1], [inp.bDrop, D, 2]]]
+    : [[[inp.aDrop, D, 1], [inp.bPick, P, 2], [inp.bDrop, D, 2]],
+       [[inp.bPick, P, 2], [inp.aDrop, D, 1], [inp.bDrop, D, 2]],
+       [[inp.bPick, P, 2], [inp.bDrop, D, 2], [inp.aDrop, D, 1]]];
+  var none = { onTime: null, lateMin: null, offWayMi: null };
+  // The detour, never through the new job's end: car (→ A-pick) → A-drop
+  // against the same with B-pick put in, either side of A-pick.
+  var distance = function () {
+    if (!inp.bPick) return done(none);
+    var asks = [[inp.car].concat(inp.aPick ? [inp.aPick] : [], [inp.aDrop])].concat(inp.aPick
+      ? [[inp.car, inp.bPick, inp.aPick, inp.aDrop], [inp.car, inp.aPick, inp.bPick, inp.aDrop]]
+      : [[inp.car, inp.bPick, inp.aDrop]]);
+    var got = [], left = asks.length;
+    asks.forEach(function (pts, i) {
+      roadLegs(pts, function (r) {
+        got[i] = r;
+        if (--left) return;
+        if (got.some(function (g) { return !g; })) return done(none);
+        var miles = got.map(function (g) { return sumOf(g.metres) / 1609.344; });
+        var extra = Math.min.apply(null, miles.slice(1)) - miles[0];
+        done({ onTime: null, lateMin: null,
+               offWayMi: extra < -ONTIME_NEG_MI ? null : Math.round(Math.max(0, extra) * 10) / 10 });
+      });
+    });
+  };
+  if (inp.aDue === null || inp.bDue === null || !inp.bPick || !inp.bDrop) return distance();
+  var left = seqs.length, best = null;
+  seqs.forEach(function (seq) {
+    roadLegs([inp.car].concat(seq.map(function (s) { return s[0]; })), function (r) {
+      if (r && r.seconds) {
+        var t = inp.now, late = { 1: 0, 2: 0 };
+        seq.forEach(function (s, i) {
+          t += r.seconds[i] * 1000;
+          if (s[1] === D) late[s[2]] = Math.max(0, t - (s[2] === 1 ? inp.aDue : inp.bDue));
+          else t += PICKUP_ALLOW_S * 1000;
+        });
+        if (!best || late[1] + late[2] < best[1] + best[2]) best = late;
+      }
+      if (--left) return;
+      if (!best) return distance();
+      if (!best[1] && !best[2]) return done({ onTime: 'both', lateMin: null, offWayMi: null });
+      var who = best[1] >= best[2] ? 1 : 2;
+      done({ onTime: 'late' + who, lateMin: Math.ceil(best[who] / 60000), offWayMi: null });
+    });
+  });
+}
+
+/* The hint for this offer now: the answer, null for none, or undefined while
+ * it is being asked (then `waiter`, if given, is called with it once it is
+ * in). Nothing at all without NUCBOX_ROUTER. */
+function onTimeHint(offer, now, waiter) {
+  if (!NBX.route) return null;
+  var inp = onTimeInputs(offer, now);
+  if (inp.none) return null;
+  if (inp.pending) {
+    var pk = offer.id + '\npending';
+    if (waiter) {
+      var pw = onTimes[pk] || { hint: undefined, waiters: [] };
+      onTimeKeep(onTimes, pk, pw);
+      pw.waiters.push(waiter);
+    }
+    return undefined;
+  }
+  // Pins and deadlines, never `now`: a card's hint is worked out once.
+  var key = offer.id + '\n' + JSON.stringify(inp);
+  var on = onTimes[key];
+  if (on) {
+    if (on.hint === undefined && waiter) on.waiters.push(waiter);
+    return on.hint;
+  }
+  on = { hint: undefined, waiters: [] };
+  onTimeKeep(onTimes, key, on);
+  inp.now = now;
+  onTimeWork(inp, function (hint) {
+    on.hint = hint;
+    var w = on.waiters;
+    on.waiters = [];
+    w.forEach(function (f) { f(hint); });
+  });
+  // The waiter is called only when the answer is not returned here.
+  if (on.hint === undefined && waiter) on.waiters.push(waiter);
+  return on.hint;
+}
+
+// An offer pin answered: whoever waited on the pins asks again.
+function onTimeAgain(offer) {
+  var pw = onTimes[offer.id + '\npending'];
+  if (!pw || !pw.waiters.length) return;
+  var w = pw.waiters;
+  pw.waiters = [];
+  w.forEach(function (f) {
+    var h = onTimeHint(offer, Date.now(), f);
+    if (h !== undefined) f(h);
+  });
+}
+
 /* The pairing, written down at the moment it is made.
  *
  * The stack line is the newest and least-proven thing on this rig, and until
@@ -3978,6 +4266,21 @@ function recordPairing(offer, now, reading) {
   var pairKey = pairedWith(now, held).map(holdIdOf).join(' ') + '\n' + offer.id;
   if (paired.indexOf(pairKey) !== -1) return;
   paired = paired.concat([pairKey]).slice(-PAIRED_MAX);
+  // With the on-time hint still being asked of the NucBox (onTimeHint), the
+  // row waits for it, ONTIME_WAIT_MS at most, and is written as it stood at
+  // `now`. With no router set it is written here and now, as it always was.
+  var wrote = false;
+  var go = function (hint) {
+    if (wrote) return;
+    wrote = true;
+    writePairing(offer, now, reading, held, hint || null);
+  };
+  var hint = onTimeHint(offer, now, go);
+  if (hint !== undefined) return go(hint);
+  setTimeout(function () { go(null); }, ONTIME_WAIT_MS);
+}
+
+function writePairing(offer, now, reading, held, hint) {
   // The driver's money, off the READING — not off the offer line.
   //
   // The offer line is what scan_pi.emit_offer() prints, and it has never
@@ -4095,6 +4398,13 @@ function recordPairing(offer, now, reading) {
   // same as one with no shared store — which is what the glass said then.
   var same = sameStoreOf(pairedWith(now, held), offer);
   if (same) row.sameStore = same.holdId;
+  // ...and the on-time hint the card showed beside the pair line: 'both',
+  // 'late1' (the order in the car), 'late2' (this offer) or null for none,
+  // with the whole minutes late, or the road miles out of the way it fell
+  // back to. Numbers only: no point, no stop, no time of day.
+  row.onTime = hint ? hint.onTime : null;
+  if (hint && typeof hint.lateMin === 'number') row.lateMin = hint.lateMin;
+  if (hint && typeof hint.offWayMi === 'number') row.offWayMi = hint.offWayMi;
   appendLines(JSON.stringify(row) + '\n', function (err) {
     if (err) console.error('journal: could not record a pairing: ' + err.message);
   });
@@ -7752,6 +8062,9 @@ function streetAnswer(which, body) {
  * drew, which is a line that looks like what it is. All or nothing, because a
  * road with one point quietly missing is a line drawn through a field. */
 var NBX_LINE_MAX = 5000;
+// The most points one route question carries: the car and two orders' four
+// stops (onTimeHint).
+var NBX_ROUTE_POINTS_MAX = 5;
 function nbxLine(g) {
   var c = g && g.type === 'LineString' && Array.isArray(g.coordinates) ? g.coordinates : null;
   if (!c || c.length < 2 || c.length > NBX_LINE_MAX) return null;
@@ -7820,8 +8133,10 @@ function nbxRoute(req, res) {
     var rq = nbxQuery(req, ['points']);
     if (rq.error) return reply(400, { ok: false, error: rq.error });
     var pts = String(rq.q.points || '').split(';').map(nbxPoint);
-    if (pts.length < 2 || pts.length > 3 || pts.some(function (x) { return !x; })) {
-      return reply(400, { ok: false, error: 'points is two or three lon,lat pairs, ;-separated' });
+    // Up to five since the on-time hint (onTimeHint): the car and the four
+    // stops of two orders. Map view still asks two or three.
+    if (pts.length < 2 || pts.length > NBX_ROUTE_POINTS_MAX || pts.some(function (x) { return !x; })) {
+      return reply(400, { ok: false, error: 'points is two to five lon,lat pairs, ;-separated' });
     }
     // The shape of the road as well as its length: simplified (OSRM thins
     // it to the zoom that frames the whole route, which is the zoom Map view
@@ -7879,11 +8194,17 @@ function nbxRoute(req, res) {
       })) {
         return down('the NucBox router answered without how far it moved each point');
       }
-      // The distance and the road's shape ONLY. OSRM's `duration` is a
-      // free-flow estimate with no traffic in it, and minutes from a pace are
-      // refused outright (AUDITS.md, Settled: "Do not re-time an offer at a
-      // pace"), so it is dropped here, where no page can ever be handed it.
-      out = { ok: true, metres: r0.distance, snaps: snaps, line: nbxLine(r0.geometry) };
+      // The distance, the road's shape and, since the owner's decision of
+      // 20 Oct 2026 (AUDITS.md, Done, "On time for both"), OSRM's own
+      // `duration` in seconds, or null when it sent none. It is the ROUTER's
+      // drive time over the road it chose, free-flow with no traffic in it —
+      // not a pace and not minutes from distance, both still refused
+      // (Settled: "Do not re-time an offer at a pace"). One use is allowed:
+      // the on-time hint beside the pair line (onTimeHint). Map view does
+      // not read it.
+      out = { ok: true, metres: r0.distance, snaps: snaps, line: nbxLine(r0.geometry),
+              duration: typeof r0.duration === 'number' && isFinite(r0.duration) && r0.duration >= 0
+                ? r0.duration : null };
     }
     nbxRemember(target, out);
     reply(200, out);
