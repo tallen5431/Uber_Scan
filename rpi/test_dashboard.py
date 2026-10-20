@@ -1254,6 +1254,18 @@ const framed = (page) => page.waitForFunction(
                  heldEnd: { endPinned: true, arrived: false, endWhy: null } });
     await tick(300);
     const offerUp = await held();
+    // A batched trip (server.js batchDrops): the same order with two doors,
+    // under an offer and between offers. "2 drops" beside the pay.
+    await push(Object.assign({}, READINGS.deducted, {
+      holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
+                 dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                 endPinned: true, endWhy: null, arrived: false, drops: 2 },
+      stack: null }));
+    await tick(300);
+    const batchUp = await held();
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(300);
+    const batchBetween = await held();
     // ...and the order goes, the card with it.
     await push({ holding: null });
     await push({ ready: false, state: 'empty', track: null });
@@ -1262,7 +1274,8 @@ const framed = (page) => page.waitForFunction(
     out.heldCard = { tookUp: tookUp, tookGoneNow: tookGoneNow, tookGoneLater: tookGoneLater,
                      empty: empty, between: between, visited: visited,
                      refused: refused, byPlace: byPlace, noPlace: noPlace, arrived: arrived,
-                     offerUp: offerUp, gone: gone };
+                     offerUp: offerUp, batchUp: batchUp, batchBetween: batchBetween,
+                     gone: gone };
     await page.close();
     await ctx.close();
   }
@@ -7954,6 +7967,14 @@ try:
         eq('...the pay and the GPS state whole on the glass',
            (_o.get('detailPay'), _o.get('detailGps')), ('· In car $28.08', '· ● armed'))
         eq('...under the offer\'s own verdict', _o.get('label'), 'PASS')
+        # A batched trip (server.js batchDrops): "2 drops" beside the pay, in
+        # the line under an offer and in the one between offers.
+        eq('[batch] a batched trip says its doors: at the head of the stop under an offer, '
+           'beside the pay between offers',
+           ((hc.get('batchUp') or {}).get('detail'),
+            (hc.get('batchBetween') or {}).get('line')),
+           ('· In car $28.08 · ▸ 2 drops, Burger Barn · ● armed',
+            '$28.08 in car · 2 drops · ● armed'))
         no_('...in place of the read diagnostics', _o.get('diagShown'))
         # Took names the last offer on record after its card has gone. With
         # the age, the driver can tell it is not the card they just screened.
