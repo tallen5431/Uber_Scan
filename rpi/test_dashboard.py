@@ -1514,6 +1514,22 @@ const framed = (page) => page.waitForFunction(
     await beat(null);
     await tick(1100);
     const noFix = await look();
+    // [in car list] A tap on the in-car line opens the offers page at its In
+    // car list (journal.html#incar). Driving between offers the first tap is
+    // the peek and goes nowhere; a tap on the peeked card's in-car line goes.
+    await beat(MOVING);
+    await push({ ready: false, state: 'empty', track: null });
+    await tick(1100);
+    const lineTap = { before: page.url(), drivingAt: (await look()).driving,
+                      lineShown: (await look()).heldLine.shown };
+    await page.evaluate(() => document.getElementById('heldLine').click());
+    await tick(200);
+    lineTap.peeked = !(await look()).driving;
+    lineTap.stayed = page.url();
+    await Promise.all([
+      page.waitForURL(/journal\.html#incar$/, { timeout: 5000 }).catch(() => {}),
+      page.evaluate(() => document.getElementById('heldLine').click())]);
+    lineTap.after = page.url();
     out.driving = { alone: alone, aloneMoving: aloneMoving,
                     parked: parked, moving: moving, tapped: tapped, tappedBack: tappedBack,
                     stopped: stopped, offerGone: offerGone, between: between,
@@ -1521,7 +1537,7 @@ const framed = (page) => page.waitForFunction(
                     blindMoving: blindMoving, unionMoving: unionMoving,
                     betweenStopped: betweenStopped, fresh: fresh, inHold: inHold,
                     outrun: outrun, held: held, refused: refused, unsaid: unsaid,
-                    noFix: noFix };
+                    noFix: noFix, lineTap: lineTap };
     await page.close();
     await ctx.close();
   }
@@ -8073,6 +8089,14 @@ try:
            + [(dv.get(k) or {}).get('moving') for k in ('peek', 'peek10')]
            + [_sh(dv.get('peek') or {}, 'stops'), _sh(dv.get('peek10') or {}, 'stops')],
            [False, False, True, False, False, (True,), (False,)])
+        _lt = dv.get('lineTap') or {}
+        eq('[in car list] driving between offers, a tap on the in-car line is the peek and '
+           'goes nowhere (%r)' % (_lt,),
+           (_lt.get('drivingAt'), _lt.get('lineShown'), _lt.get('peeked'),
+            _lt.get('stayed') == _lt.get('before')), (True, True, True, True))
+        ok_('[in car list] ...and a tap on the peeked card\'s in-car line opens the offers '
+            'page at its In car list (%r)' % (_lt.get('after'),),
+            (_lt.get('after') or '').endswith('/journal.html#incar'))
         _s = dv.get('stopped') or {}
         _form = lambda m: {k: v for k, v in m.items() if k != 'view'}
         # Not moving, and the card as it was parked: the last alone could
