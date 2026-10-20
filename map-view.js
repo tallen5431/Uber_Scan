@@ -833,6 +833,13 @@
       }
       return streetPlan(street);
     }
+    // A door with its town line lost (19 Oct: a planner pickup read
+    // "840 <Name> W. <Name> Parkway" alone): a house number, a name, and a
+    // street type last (a quadrant after it or none) is a street, asked
+    // door-level inside the disc like any other — the disc bounds it where
+    // the town would have. A merchant's name that opens with a number
+    // ("1000 Degrees Pizza") ends in no street type and stays a name.
+    if (bareDoor(s)) return streetPlan(s.replace(/[\s,.]+$/, ''));
     return { kind: 'name', q: storeName(s.replace(/\s*\([^()]*\)?\s*$/, '').trim() || s) };
   }
 
@@ -865,6 +872,14 @@
       .exec(s);
     if (!tail || !tail.index) return s;
     return s.slice(0, tail.index).replace(/^(?!Mc)([A-Z][a-z])(?=[A-Z][a-z])/, '$1 ');
+  }
+
+  /* Whether a text with no comma is "<n> <name> <type>[ <quadrant>]". */
+  function bareDoor(s) {
+    var w = String(s).replace(/[\s,.]+$/, '').split(' ');
+    if (w.length < 3 || !/^\d+[A-Za-z]?$/.test(w[0])) return false;
+    if (QUADRANTS.indexOf(w[w.length - 1].toLowerCase().replace(/\.$/, '')) >= 0) w.pop();
+    return w.length >= 3 && /[A-Za-z]{2}/.test(w[1]) && !!streetType(w[w.length - 1]);
   }
 
   // A street, and its house number when it opens with one ("1985", "12A").
@@ -3756,7 +3771,7 @@
            AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI,
            NBX_GAP_MS: NBX_GAP_MS, NBX_KEEP: NBX_KEEP, SNAP_MI: SNAP_MI, ROAD_SAME_MI: ROAD_SAME_MI,
            hasDoor: hasDoor, discShape: discShape, located: located,
-           STREET_TYPES: STREET_TYPES, streetType: streetType, streetRetry: streetRetry,
+           STREET_TYPES: STREET_TYPES, streetType: streetType, bareDoor: bareDoor, streetRetry: streetRetry,
            retryFits: retryFits, pickRetry: pickRetry, retryWanted: retryWanted,
            afterRetry: afterRetry, nameWanted: nameWanted, nameAsked: nameAsked,
            nameRetry: nameRetry, pickNamed: pickNamed,

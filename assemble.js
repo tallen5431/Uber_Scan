@@ -196,7 +196,8 @@
         ? 'fuller' : null;
     }
     if (next.from === 'nav' && cur.from === 'seen') return 'over a sighting';
-    if (next.from === cur.from && next.key && next.key === cur.key && next.conf > cur.conf) {
+    if (next.from === cur.from && next.key && next.key === cur.key
+        && (next.conf > cur.conf || typedOver(next.value, cur.value))) {
       return 'fuller';
     }
     if (next.from === 'nav' && cur.from !== 'press'
@@ -205,6 +206,27 @@
       return 'fuller';
     }
     return null;
+  }
+
+  /* Whether `a` names its street's type and `b` does not, the house number
+   * the same: the SAME planner stop (the caller holds the key) read clean
+   * after a garbled frame. 19 Oct night: "1106 Commor" on several frames,
+   * the phone printing "1106 Commons Ln"; both read a street and nothing
+   * more, so conf alone never let the clean one past. The type words are
+   * offer-parser.js's STREET_SUFFIX (a copy: this file loads nothing). */
+  var STREET_SUFFIX = new RegExp('^(?:st|street|rd|road|dr|drive|ln|lane|ave|avenue|blvd'
+    + '|boulevard|ct|court|way|pkwy|parkway|cir|circle|trl|trail|hwy|highway|ter|terrace'
+    + '|pl|place|xing|crossing|sq|square|loop|run|walk|path|row|bnd|bend)$');
+  var QUADRANT = /^(?:nw|ne|sw|se|n|s|e|w)$/;
+  function typedOver(a, b) {
+    function door(v) {
+      var w = streetKey(v).split(' ');
+      if (w.length > 2 && QUADRANT.test(w[w.length - 1])) w.pop();
+      return /^\d+[a-z]?$/.test(w[0]) && w.length > 1
+        ? { house: w[0], typed: w.length > 2 && STREET_SUFFIX.test(w[w.length - 1]) } : null;
+    }
+    var x = door(a), y = door(b);
+    return !!x && !!y && x.house === y.house && x.typed && !y.typed;
   }
 
   /* Two address lines on the same street: the part before the first comma,

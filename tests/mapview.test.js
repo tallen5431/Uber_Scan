@@ -1072,6 +1072,16 @@ async function nucbox() {
      JSON.stringify(MV.searchPlan('77 Birch Ln NW, Roswell, GA 30075')),
      JSON.stringify({ kind: 'street', street: '77 Birch Ln NW', door: true,
                       house: '77' }));
+  // 19 Oct: a planner pickup's town line lost; the disc bounds the search.
+  eq('a door with no town is still asked as its street, door level',
+     JSON.stringify(MV.searchPlan('840 Wren W. Larkspur Parkway')),
+     JSON.stringify({ kind: 'street', street: '840 Wren W. Larkspur Parkway', door: true,
+                      house: '840' }));
+  eq('...and with a quadrant after its type',
+     MV.searchPlan('1106 Tansy Commons Ln NW').street, '1106 Tansy Commons Ln NW');
+  eq('...but a number then a name with no street type stays a name',
+     [MV.searchPlan('1000 Degrees Pizza').kind, MV.searchPlan('77 Ln').kind,
+      MV.searchPlan('Birch Ln').kind].join(','), 'name,name,name');
   eq('cross streets are not asked of a search that answers one point a street',
      JSON.stringify(MV.searchPlan('Birch Ln & Kestrel Dr, Roswell')),
      JSON.stringify({ kind: 'cross', a: 'Birch Ln', b: 'Kestrel Dr' }));

@@ -6896,6 +6896,20 @@ try:
                         (_holding(_hkb) or {}).get('pickupsWhy')), ([], 0, 'no house number'))
         post(_hkb, '/api/delivered', {})
 
+        # A door whose town line was lost (19 Oct: "840 <Name> W. <Name>
+        # Parkway" alone): a house number and a street type is still a door
+        # search inside the disc, for the held end and the pickup alike.
+        post(_hkb, '/api/offers/mark', {'id': 'k-notown', 'accepted': True, 'offer': dict(
+            _SQ, id='k-notown', pay=12.0, minutes=40.0, billedMinutes=40.0, miles=5.0,
+            cost=1.75, dropoff='1985 Cobb Parkway', pickupLine='1975 Cobb Parkway')})
+        _h = _settled(_hkb, lambda h: h.get('endWhy') and h.get('pickupsPinned'))
+        eq('[held pickups] a door with no town is asked inside the disc, end and pickup both, '
+           'and pinned at door level',
+           (_h.get('pickupsPinned'), _h.get('endPinned'), _h.get('endWhy'),
+            (_h.get('pickupsHow') or [{}])[0].get('from')),
+           (1, True, 'door next to the pickup', 'card'))
+        post(_hkb, '/api/delivered', {})
+
         # The end armed AND arrived at — the car waiting at the restaurant —
         # before the planner read says where the restaurant is.
         _atook(_hkb, 'k-late', _COBB)
@@ -6950,7 +6964,7 @@ try:
                  cost=1.75, gpsOk=False, gpsWhy='rough', gpsErr=err, gpsMode=3, gpsAge=0.2)
         post(_hkb, '/api/offers/mark', {'id': oid, 'accepted': True, 'offer': o})
 
-    def _planner_end():
+    def _planner_end(street='1985 Cobb Parkway'):
         """A whole Trip Planner page, unpressed, its sighting then its planner
         line under one stamp (as Stage 3 sends them): an invented pickup with
         no NucBox answer, and the fake's door as the order's end."""
@@ -6960,8 +6974,8 @@ try:
                   'state': 'GA', 'zip': None, 'line': '2210 Quarry Bend Rd NW, Kennesaw',
                   'partial': None, 'label': 'pickup'},
                  {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'place': None,
-                  'expectedBy': 1202, 'street': '1985 Cobb Parkway', 'city': 'Kennesaw',
-                  'state': 'GA', 'zip': None, 'line': '1985 Cobb Parkway, Kennesaw',
+                  'expectedBy': 1202, 'street': street, 'city': 'Kennesaw',
+                  'state': 'GA', 'zip': None, 'line': street + ', Kennesaw',
                   'partial': None, 'label': 'dropoff'}]
         _hksays([{'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': True,
                                'app': 'uber', 'screen': 'uber.planner',
@@ -6983,6 +6997,22 @@ try:
         _hksays([_hkbeat(0.0002)] * 7)
         ok_('[rough disc] ...and the GPS arrival at it counts (arrived)',
             (_holding(_hkb) or {}).get('arrived'))
+        post(_hkb, '/api/delivered', {})
+
+        # 19 Oct night: the planner's dropoff read "1106 Commor" on several
+        # frames, then "1106 Commons Ln". A later reading of the SAME stop
+        # whose street names its type replaces the one that did not, and the
+        # end is searched again for the new text.
+        _rough_took('k-typed', 25.0)
+        _planner_end('1985 Cobb')
+        _h = _settled(_hkb, lambda h: h.get('endWhy'))
+        _was = (_h.get('dropoff'), _h.get('endPinned'))
+        _planner_end()
+        _h = _settled(_hkb, lambda h: h.get('endPinned'))
+        eq('[typed street] a clean reading of the same planner stop replaces a garbled one '
+           'with no street type, and the end is searched and pinned anew',
+           (_was, _h.get('dropoff'), _h.get('endPinned'), _h.get('endBy')),
+           (('1985 Cobb, Kennesaw', False), '1985 Cobb Parkway, Kennesaw', True, 'server'))
         post(_hkb, '/api/delivered', {})
 
         _rough_took('k-rough-cap', 250.0)

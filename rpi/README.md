@@ -8559,7 +8559,7 @@ python3 rpi/test_offerspage.py  # 529 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 971 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 973 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8574,14 +8574,14 @@ python3 rpi/test_map.py         # 231 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
-node tests/assemble.test.js     # 343 on where the order in the car ends: one
+node tests/assemble.test.js     # 348 on where the order in the car ends: one
                                 #     hold decided as before, and a Trip Planner
                                 #     filed from pages stitched only on the cues
                                 #     the screen gives; and on whether an
                                 #     offer's pickup is the store of an order
                                 #     in the car, by its door or, distinctive
                                 #     and close by, its name
-node tests/mapview.test.js      # 592 on the deciding behind both maps, with
+node tests/mapview.test.js      # 595 on the deciding behind both maps, with
                                 #     no map: the geometry, the cache, and the
                                 #     one-request-a-second rule against a fake
                                 #     clock, which is what makes the awkward

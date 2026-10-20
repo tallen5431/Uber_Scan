@@ -175,6 +175,22 @@ SEQ.forEach(function (seq) {
   ok_('...nor a fuller one of a different stop',
       !A.outranks(f('planner', 'b', 2, 'dropoff|Orrin B.|1220'),
                   f('planner', 'a', 1, 'dropoff|Mara T.|1202')));
+  // 19 Oct night: "1106 Commor" filed first, "1106 Commons Ln" read later.
+  ok_('a later reading of the same stop whose street names its type replaces one that does not',
+      A.outranks(f('planner', '1106 Wren Commons Ln', 1, 'dropoff|Mara T.|1202'),
+                 f('planner', '1106 Wren Commor', 1, 'dropoff|Mara T.|1202')));
+  ok_('...but not with another house number',
+      !A.outranks(f('planner', '1160 Wren Commons Ln', 1, 'dropoff|Mara T.|1202'),
+                  f('planner', '1106 Wren Commor', 1, 'dropoff|Mara T.|1202')));
+  ok_('...nor of a different stop',
+      !A.outranks(f('planner', '1106 Wren Commons Ln', 1, 'dropoff|Orrin B.|1220'),
+                  f('planner', '1106 Wren Commor', 1, 'dropoff|Mara T.|1202')));
+  ok_('...nor the garbled one back over the clean one',
+      !A.outranks(f('planner', '1106 Wren Commor', 1, 'dropoff|Mara T.|1202'),
+                  f('planner', '1106 Wren Commons Ln', 1, 'dropoff|Mara T.|1202')));
+  ok_('...nor a typed street over another typed one',
+      !A.outranks(f('planner', '1106 Wren Commons Ct', 1, 'dropoff|Mara T.|1202'),
+                  f('planner', '1106 Wren Commons Ln NW', 1, 'dropoff|Mara T.|1202')));
   eq('the ranks, highest first', Object.keys(A.RANK).sort(function (a, b) {
     return A.RANK[b] - A.RANK[a];
   }), ['press', 'label', 'nav', 'planner', 'popup', 'card', 'seen']);
