@@ -5774,6 +5774,8 @@ function statusNow() {
     holding: (function () {
       var h = holding(Date.now());
       return h ? Object.assign({ pay: h.pay, minutes: h.minutes, holdId: holdIdOf(h),
+                   // ...and its app, for the offers page's In car list.
+                   app: h.app || null,
                    // ...who pinned it ('server', 'place', or null for Map
                    // view) is heldEndState's `endBy`, merged in below with
                    // the rest of the GPS drop's state — pinned, arrived, and

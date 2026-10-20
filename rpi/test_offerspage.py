@@ -722,7 +722,11 @@ FEEDS = {
     'in the car': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
                    'hidden': 0, 'watched': {'saw': 12, 'kept': 12},
                    'unreadable': None, 'pairs': [], 'offers': TOOK_SIX,
-                   '__status': {'holding': {'holdId': 'r3@%d' % (NOW - 3 * 600000)},
+                   '__status': {'holding': {'holdId': 'r3@%d' % (NOW - 3 * 600000),
+                                            'pay': 12.5, 'app': 'uber',
+                                            'dropoff': '4821 Kestrel Dr, Marietta, GA 30064',
+                                            'endPinned': True, 'endBy': 'server',
+                                            'drops': [{'line': 'a'}, {'line': 'b'}]},
                                 'scanner': {'enabled': True}}},
     # The three answers `sure` has, in one window. Its own feed rather than
     # more rows on 'took six', whose tally of what the panel said is asserted
@@ -1847,6 +1851,63 @@ const TEXT = (sel) => {
       out[name].later = await press('r9', { ok: true, car: { held: false, why: 'later' } });
       out[name].old = await press('r10', { ok: true, car: { held: false, why: 'old' } });
       out[name].putDown = await press('r3', { ok: true, car: { putDown: true } });
+      // [in car list] The section at the top: its line, fitting at both
+      // sizes, then Drop — the panel's bare POST /api/delivered with one
+      // order held — and the section gone once the server holds nothing.
+      const incar = () => page.evaluate(() => {
+        const sec = document.getElementById('incar');
+        const r = sec.getBoundingClientRect();
+        const b = sec.querySelector('button');
+        const br = b && b.getBoundingClientRect();
+        const hit = br && document.elementFromPoint(br.left + br.width / 2, br.top + br.height / 2);
+        return { shown: !sec.hidden && r.height > 0,
+                 lines: [].slice.call(sec.querySelectorAll('li .what')).map(
+                   (w) => w.textContent.replace(/\s+/g, ' ').trim()),
+                 buttons: [].slice.call(sec.querySelectorAll('button')).map((x) => x.textContent),
+                 side: document.documentElement.scrollWidth - window.innerWidth,
+                 inBox: !!br && br.right <= r.right + 0.5 && br.left >= r.left - 0.5,
+                 dropOnTop: !!(hit && hit === b), dropH: br ? br.height : 0 };
+      });
+      out[name].incar = {};
+      for (const [w, h] of [[1024, 600], [360, 640]]) {
+        await page.setViewportSize({ width: w, height: h });
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.waitForTimeout(250);
+        out[name].incar[w + 'x' + h] = await incar();
+      }
+      await page.setViewportSize({ width: 900, height: 900 });
+      await page.evaluate(() => {
+        window.__drops = [];
+        const was = window.fetch;
+        let held = true;
+        window.fetch = function (url, opts) {
+          if (String(url).indexOf('/api/delivered') === 0) {
+            window.__drops.push({ method: (opts || {}).method || 'GET',
+                                  body: (opts || {}).body || null });
+            held = false;
+            return Promise.resolve({ ok: true, status: 200,
+              json: () => Promise.resolve({ ok: true, wasHolding: true }) });
+          }
+          if (!held && String(url).indexOf('/api/status') === 0) {
+            return Promise.resolve({ ok: true, status: 200,
+              json: () => Promise.resolve({ holding: null, scanner: { enabled: true } }) });
+          }
+          return was.apply(this, arguments);
+        };
+        window.scrollTo(0, 0);
+        document.querySelector('#incar button').click();
+      });
+      await page.waitForTimeout(600);
+      out[name].incarDropped = await page.evaluate(() => ({
+        drops: window.__drops,
+        shown: !document.getElementById('incar').hidden,
+        tags: document.querySelectorAll('#log .tag.incar').length }));
+    }
+    if (name === 'took six') {
+      out[name].incarHidden = await page.evaluate(() => {
+        const sec = document.getElementById('incar');
+        return sec.hidden && sec.getBoundingClientRect().height === 0;
+      });
     }
     // A chip that picks nothing, on the feed with no verdicts on its rows.
     if (name === 'took six') {
@@ -2398,6 +2459,25 @@ try:
     io = ic.get('old') or {}
     ok_('[offers tick] a ✓ on an old card says it was recorded only (%r)' % io.get('said'),
         'Recorded only' in (io.get('said') or '') and 'too long ago' in (io.get('said') or ''))
+    # --- [in car list] the orders the server holds, at the top -------------
+    for size in ('1024x600', '360x640'):
+        f = (ic.get('incar') or {}).get(size) or {}
+        eq('[in car list] at %s the section lists the order held: pay, app, street, '
+           'drops, the end\'s state' % size, f.get('lines'),
+           ['$12.50 \u00b7 uber \u2192 4821 Kestrel Dr \u00b7 2 drops \u00b7 \u25cf armed'])
+        eq('[in car list] ...with one control, Drop, at %s' % size, f.get('buttons'), ['Drop'])
+        ok_('[in car list] ...fitting at %s: no sideways scroll, Drop inside the box, '
+            'on top and 44px or more (%r)' % (size, f),
+            f.get('shown') and (f.get('side') or 0) <= 0 and f.get('inBox')
+            and f.get('dropOnTop') and (f.get('dropH') or 0) >= 44)
+    idr = ic.get('incarDropped') or {}
+    eq('[in car list] Drop posts the panel\'s own Drop: a bare POST /api/delivered',
+       idr.get('drops'), [{'method': 'POST', 'body': None}])
+    no_('[in car list] ...and the section is gone once the server holds nothing',
+        idr.get('shown'))
+    eq('[in car list] ...and so is the row\'s "in car" tag', idr.get('tags'), 0)
+    ok_('[in car list] with nothing held the section is hidden',
+        got['took six'].get('incarHidden') is True)
     ip = ic.get('putDown') or {}
     eq('[offers tick] the ✓ taken back on the order in the car posts the take-back',
        ip.get('marks'), [{'id': 'r3', 'accepted': None, 'via': 'offers'}])
@@ -3524,6 +3604,96 @@ ok_('...and an advice block and charts to put it against',
     _advice_at > 0 and _charts_at > 0)
 ok_('the list comes before the advice block', _list_at < _advice_at)
 ok_('...and before the charts', _list_at < _charts_at)
+
+# --- [in car list] Drop, end to end against a server holding an order -------
+#
+# A server of its own, started over a holding.json with one order in it (a
+# server with no scanner restores what was held, as after a restart). The page
+# opened at #incar, the way the panel's in-car line opens it: the section
+# shows the order, Drop puts it down on the server — a drop row in the
+# journal, the panel's own, and /api/status holding nothing — and the
+# section goes.
+E2E = r"""
+const { chromium } = require('playwright');
+(async () => {
+  const base = process.argv[2];
+  let browser = null;
+  for (const exe of JSON.parse(process.env.PW_EXES || '[]').concat([null])) {
+    try { browser = await chromium.launch(exe ? { executablePath: exe } : {}); break; }
+    catch (e) {}
+  }
+  if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
+  const page = await browser.newPage({ viewport: { width: 360, height: 640 } });
+  await page.goto(base + '/journal.html#incar', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#incar:not([hidden])', { timeout: 10000 }).catch(() => {});
+  const before = await page.evaluate(() => ({
+    shown: !document.getElementById('incar').hidden,
+    line: (document.querySelector('#incar li .what') || {}).textContent || null,
+    top: Math.round(document.getElementById('incar').getBoundingClientRect().top) }));
+  await page.click('#incar button');
+  await page.waitForSelector('#incar[hidden]', { state: 'attached', timeout: 10000 })
+    .catch(() => {});
+  const after = { shown: await page.evaluate(() => !document.getElementById('incar').hidden) };
+  await browser.close();
+  console.log(JSON.stringify({ before: before, after: after }));
+})().catch((e) => console.log(JSON.stringify({ __crashed: String((e && e.stack) || e) })));
+"""
+_ework = tempfile.mkdtemp()
+_ejournal = os.path.join(_ework, 'journal.jsonl')
+open(_ejournal, 'w').close()
+import time as _etime
+_eat = int(_etime.time() * 1000) - 5 * 60000
+with open(os.path.join(_ework, 'holding.json'), 'w') as _fh:
+    json.dump({'v': 2, 'orders': [{'id': 'e-1', 'pay': 14.25, 'minutes': 30,
+                                   'acceptedAt': _eat, 'app': 'uber',
+                                   'dropoff': '77 Quarry Ln, Smyrna, GA 30080'}]}, _fh)
+_eport = free_port()
+_eproc = subprocess.Popen(
+    ['node', os.path.join(ROOT, 'server.js')],
+    env=dict(os.environ, SCANNER='0', PORT=str(_eport), JOURNAL=_ejournal),
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+_ebase = 'http://127.0.0.1:%d' % _eport
+try:
+    import urllib.request as _eurl
+    for _ in range(120):
+        try:
+            _estatus = json.loads(_eurl.urlopen(_ebase + '/api/status', timeout=1).read())
+            break
+        except Exception:
+            _etime.sleep(0.1)
+    else:
+        raise RuntimeError('the in-car server never came up')
+    ok_('[in car list] the end-to-end server holds the order (%r)'
+        % ((_estatus.get('holding') or {}).get('holdId'),),
+        (_estatus.get('holding') or {}).get('app') == 'uber')
+    _edriver = os.path.join(_ework, 'incar.js')
+    open(_edriver, 'w').write(E2E)
+    _erun = subprocess.run(
+        ['node', _edriver, _ebase],
+        env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
+                 PW_EXES=json.dumps([os.environ.get('CHROMIUM', ''),
+                                     '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'])),
+        capture_output=True, text=True, timeout=120)
+    _eout = json.loads((_erun.stdout or '{}').strip().split('\n')[-1] or '{}')
+    no_('[in car list] the end-to-end driver ran (%r)' % _eout.get('__crashed'),
+        _eout.get('__crashed') or _eout.get('skip'))
+    _eb = _eout.get('before') or {}
+    ok_('[in car list] opened at #incar, the section shows the held order (%r)' % _eb,
+        _eb.get('shown') and '$14.25' in (_eb.get('line') or '')
+        and '77 Quarry Ln' in (_eb.get('line') or '') and (_eb.get('top') or 0) < 200)
+    no_('[in car list] ...and Drop takes it away', (_eout.get('after') or {}).get('shown'))
+    _estatus = json.loads(_eurl.urlopen(_ebase + '/api/status', timeout=2).read())
+    eq('[in car list] ...the server holds nothing after it', _estatus.get('holding'), None)
+    _erows = [json.loads(l) for l in open(_ejournal) if l.strip()]
+    eq("[in car list] ...and wrote the panel Drop's row: a drop for the order, no `by`",
+       [(r.get('kind'), r.get('id'), r.get('by')) for r in _erows if r.get('kind') == 'drop'],
+       [('drop', 'e-1', None)])
+finally:
+    _eproc.terminate()
+    try:
+        _eproc.wait(timeout=5)
+    except Exception:
+        _eproc.kill()
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d offers-page checks passed' % ok)

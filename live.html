@@ -1136,6 +1136,7 @@
   .heldline .stop[hidden] { display: none; }
   .heldline.between { font-size: clamp(15px, 4.4cqw, 22px); margin-top: 8px; flex-wrap: wrap; }
   .heldline[hidden] { display: none; }
+  #heldLine, #heldLine2, #detail .held { cursor: pointer; }
   /* ...and the same line under an offer, after the reading's age in place of
    * the diagnostics (showHeld says why it is not in the card). One row: the
    * age, the pay and the GPS state whole, the stop the part that gives way. */
@@ -2236,6 +2237,18 @@
     peekUntil = Date.now() + PEEK_MS;
     render();
   }, true);
+
+  // A tap on the in-car line opens the offers page at its In car list, where
+  // each order has its own Drop (journal.html#incar) — the page ▤ Offers
+  // opens, so no new control on the bar. While the driving form is up the
+  // tap above is the peek and never reaches here; a second tap, on the
+  // peeked card, does. Under an offer the line is the card's last (.held).
+  function openInCar(e) {
+    if (e.target.closest('#heldLine, #heldLine2, #detail .held')) {
+      location.href = 'journal.html#incar';
+    }
+  }
+  liveSide.addEventListener('click', openInCar);
 
   // --- the panel at night ------------------------------------------------------
   //

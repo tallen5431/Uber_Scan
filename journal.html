@@ -191,6 +191,21 @@
             font-size: 13px; font-weight: 800; color: var(--text);
             background: var(--panel); border: 1px solid var(--muted);
             border-radius: 8px; cursor: pointer; }
+  /* The orders the server holds, at the top, with Drop for each: the
+     panel's in-car line opens this page here (journal.html#incar). */
+  #incar { border: 1px solid var(--line); border-radius: 12px;
+           background: var(--panel); padding: 8px 12px; margin: 0 0 14px; }
+  #incar[hidden] { display: none; }
+  #incar h2 { margin: 0 0 4px; }
+  #incarList { list-style: none; margin: 0; padding: 0; }
+  #incarList li { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+  #incarList li + li { border-top: 1px solid var(--line); }
+  #incarList .what { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+  #incarList .what small { color: var(--muted); }
+  #incarList button { flex: none; min-height: 52px; padding: 8px 16px; font: inherit;
+                      font-size: 13px; font-weight: 800; color: var(--text);
+                      background: var(--panel-2); border: 1px solid var(--muted);
+                      border-radius: 8px; cursor: pointer; }
   .rangebtns { display: flex; gap: 6px; justify-content: center; margin: 0 0 14px; }
   /* 44px, like everything else meant to be hit one-handed after parking. */
   .rangebtns button { flex: 1; min-height: 52px; padding: 8px 0; font: inherit;
@@ -572,6 +587,13 @@
 <body>
 <main id="app">
 
+  <!-- The orders in the car, as /api/status has them, each with Drop: the
+       panel's own Drop (POST /api/delivered). Hidden when nothing is held. -->
+  <section id="incar" hidden>
+    <h2>In car</h2>
+    <ul id="incarList"></ul>
+  </section>
+
   <!-- A group, named, with the pressed one announced. It was four unlabelled
        buttons whose selected state existed only as a border colour. -->
   <div class="rangebtns" id="ranges" role="group" aria-label="How far back to look">
@@ -822,7 +844,7 @@
    'review', 'reviewSays', 'reviewDays', 'reviewBack', 'reviewOn', 'reviewLead',
    'reviewList',
    'sheet', 'sheetHead', 'sheetWhere', 'sheetShut', 'sheetMap', 'sheetFoot',
-   'sheetNote', 'sheetOut'].forEach(function (id) {
+   'sheetNote', 'sheetOut', 'incar', 'incarList'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -4121,10 +4143,77 @@
           if (id) inCar[id] = true;
         });
         paintInCar();
+        showHeldList(list, !(s && Array.isArray(s.orders)));
       })
       // Unreachable, the rows say nothing about the car rather than something
       // stale; the list itself says the server cannot be reached.
-      .catch(function () { inCar = {}; paintInCar(); });
+      .catch(function () { inCar = {}; paintInCar(); showHeldList([], true); });
+  }
+
+  /* The "In car" section: one line per order the server holds — pay, app,
+   * where it ends (the street), the GPS drop's state in the panel's words,
+   * "2 drops" for a batch — and Drop. Drop is the panel's: with one order the
+   * same bare POST /api/delivered as its Drop button, with two the holdId of
+   * this one, as its chooser sends. Asked again after every press, and with
+   * the rest of the page on load(). Opened from the panel's in-car line at
+   * #incar, it is scrolled to once, when it first shows. */
+  var incarScrolled = false;
+
+  function endSaid(o) {
+    if (o.arrived) return 'at door';
+    if (o.endPinned) return o.endBy === 'place' ? '\u25cf armed by place' : '\u25cf armed';
+    if (o.endWhy) return String(o.endWhy).split(' ').slice(0, 3).join(' ');
+    return '\u25cb not armed';
+  }
+
+  function showHeldList(list, single) {
+    el.incarList.textContent = '';
+    list.forEach(function (o) {
+      var li = document.createElement('li');
+      var what = document.createElement('span');
+      what.className = 'what';
+      var n = Array.isArray(o.drops) ? o.drops.length
+        : typeof o.drops === 'number' ? o.drops : 0;
+      var street = o.dropoff ? String(o.dropoff).split(',')[0].trim() : '';
+      what.textContent = (o.addOn ? '+' : '')
+        + (typeof o.pay === 'number' ? '$' + o.pay.toFixed(2) : '$?')
+        + (o.app ? ' \u00b7 ' + o.app : '')
+        + ' \u2192 ' + (street || '?')
+        + (n >= 2 ? ' \u00b7 ' + n + ' drops' : '') + ' ';
+      var state = document.createElement('small');
+      state.textContent = '\u00b7 ' + endSaid(o);
+      what.appendChild(state);
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = 'Drop';
+      b.setAttribute('aria-label', 'Drop ' + what.textContent);
+      b.addEventListener('click', function () { dropOne(b, single ? null : o.holdId); });
+      li.appendChild(what);
+      li.appendChild(b);
+      el.incarList.appendChild(li);
+    });
+    el.incar.hidden = !list.length;
+    if (list.length && !incarScrolled && location.hash === '#incar') {
+      incarScrolled = true;
+      el.incar.scrollIntoView({ block: 'start' });
+    }
+  }
+
+  function dropOne(button, holdId) {
+    button.disabled = true;
+    button.textContent = 'dropping\u2026';
+    var opts = { method: 'POST' };
+    if (holdId) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify({ holdIds: [holdId] });
+    }
+    fetch('/api/delivered', opts)
+      .then(function (r) { if (!r.ok) throw new Error(); askInCar(); })
+      .catch(function () {
+        // Still held, as far as anyone knows: the server is the truth.
+        button.disabled = false;
+        button.textContent = 'could not drop';
+      });
   }
 
   // A tag on the row, beside the ✓, and nothing on any other. In the place
