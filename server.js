@@ -530,6 +530,8 @@ function startScanner() {
               return c.id !== read.offer.id;
             }).concat([{ id: read.offer.id, at: scanner.offerAt }]).slice(-OFFER_ATS_MAX);
           }
+          // ...and its reading, for the offers page's ✓ (offersTickHolds).
+          keepOfferCard(scanner.offer, scanner.offerAt);
           scanner.offerSeenAt = Date.now();
           // ...and the Trip Planner a press read goes, as it goes off the
           // panel at this moment. See forgetPlanner.
@@ -5827,6 +5829,9 @@ function statusNow() {
                    // where it ends. See cardOf.
                    card: h.card || null,
                    heldMs: Math.max(0, Date.now() - h.acceptedAt) },
+                   // ...and 'offers' when the offers page's ✓ took it
+                   // (offersTickHolds); absent for the panel's Took.
+                   h.tookOn ? { tookOn: h.tookOn } : {},
                    // endPinned, arrived, endWhy: see heldEndState.
                    heldEndState(h), pickupState(h)) : null;
     }()),
@@ -7147,7 +7152,13 @@ var MARK_VIA = ['panel', 'offers', 'review'];
  * the slot, put it in the car: measured at f80d0c2, an order delivered and
  * Drop pressed, then Close the shift's Took on the next card, and /api/status
  * held it; and an offers-page ✓ on the card of the order already in the car
- * rebuilt that order from its card, its ⌖ end gone back to the card's. */
+ * rebuilt that order from its card, its ⌖ end gone back to the card's.
+ *
+ * Since the owner's decision of 19 Oct 2026 the offers page's ✓ on a RECENT
+ * card is a ✓ Took on that card, and its take-back on an order in the car is
+ * Drop: see offersTickHolds. Not through here — that is a question about one
+ * card and the clock, not about the surface — and an offers-page ✓ on the
+ * order already in the car still rebuilds nothing ('inCar'). */
 function marksTheHold(via) {
   return via === undefined || via === 'panel';
 }
@@ -7165,6 +7176,101 @@ function cardArrivedAt(id) {
   if (scanner.offer && scanner.offer.id === id && scanner.offerAt) return scanner.offerAt;
   var hit = scanner.offerAts.filter(function (c) { return c.id === id; })[0];
   return hit ? hit.at : null;
+}
+
+/* --- the offers page's ✓ on a RECENT card puts that order in the car --------
+ *
+ * The owner's decision of 19 Oct 2026: "It will only map an order of the last
+ * card it scanned; offer cards can move very fast, making it easy to miss.
+ * Make it so I can map and scan from the offers page where the information is
+ * recorded, when I press the green check box that is already there." The
+ * panel's ✓ Took names the card on the slot (or the panel's copy of the one
+ * before it), and the driver paging fast past a card they accepted on the
+ * phone has nothing left on the panel to press for it.
+ *
+ * So the offers page's ✓ (via 'offers') on a card that is RECENT is a ✓ Took
+ * on that card: the same path below the mark handler's `marked` — the hold
+ * from the card's reading as the slot had it (pay, minutes, miles, pickup,
+ * dropoff, pickupLine, the add-on flag, the card's fix and disc: cardOf),
+ * placeTook's replacement and add-on rules, the assembler told, the GPS drop
+ * and pickup searches armed by setHeld. It is a press on one named card, so it
+ * is not a silence read as an accept (AUDITS.md, Settled), and it names the
+ * card itself, so it is not Plan 2.1's hold on the previous card by timing.
+ *
+ * RECENT, both of these (offersTickHolds, the named checks):
+ *   heldStillInForce  the card's own hold would still be in force now had it
+ *                     been Took'd the moment it arrived: holdEnds from its
+ *                     arrival (the time cardArrivedAt keeps for it), its own
+ *                     clock — no stated time is never in force;
+ *   noLaterTook       no ✓ Took of another card was pressed after it arrived
+ *                     (tookPresses, and the tookAt of every order held, which
+ *                     survives a restart): the driver went on to take a later
+ *                     job, and putting this one in the car now would replace
+ *                     or stack onto that one on a review's word.
+ * And the server must still have the card's reading (offerCards, process
+ * memory like the slot and offerAts): the offers page's row is the journal's
+ * vote over every reading (bestReading), which carries no pickupLine, app,
+ * screen or multiOrder, so a hold built from it would arm what a Took on the
+ * same card would not. After a restart the tick records only, and says so.
+ *
+ * Anything else is today's behaviour: the mark row and nothing more, and the
+ * reply says why (`car.why`: 'unseen', 'untimed', 'old', 'later', 'inCar')
+ * for the page to say. The mark row of one that held says `inCar: true`, and
+ * the order says `tookOn: 'offers'`, so a reader can tell it from a review
+ * label (the shift report in tools/ times it as a Took). Close the shift's Took and
+ * Passed (via 'review') are unchanged: they answer for a whole day's cards.
+ *
+ * Taking it back is Drop: the ✓ pressed again (or the page's Undo of a ✓) on
+ * an order in the car puts that order down with a drop row `by: 'offers'`
+ * (putDown), whichever surface put it there. */
+var OFFER_CARDS_MAX = 120;
+var offerCards = [];
+var TOOK_PRESSES_MAX = 16;
+var tookPresses = [];
+
+// The latest reading of a card the slot held, against when it last came up
+// (the slot's offerAt, as offerAts keeps it). Newest last.
+function keepOfferCard(card, at) {
+  offerCards = offerCards.filter(function (c) { return c.id !== card.id; })
+    .concat([{ id: card.id, at: at, card: card }]).slice(-OFFER_CARDS_MAX);
+}
+
+// Every ✓ Took that put an order in the car, the panel's or this page's.
+function keepTookPress(id, at) {
+  tookPresses = tookPresses.concat([{ id: id, at: at }]).slice(-TOOK_PRESSES_MAX);
+}
+
+function heldStillInForce(card, at, now) {
+  var probe = { minutes: typeof card.billedMinutes === 'number'
+                  ? card.billedMinutes : card.minutes,
+                acceptedAt: at };
+  var ends = holdEnds(probe);
+  return ends !== null && now <= ends;
+}
+
+function noLaterTook(id, at) {
+  var tooks = tookPresses.concat(scanner.held.map(function (h) {
+    return { id: h.id, at: h.tookAt };
+  }));
+  return !tooks.some(function (t) {
+    return t.id !== id && typeof t.at === 'number' && t.at > at;
+  });
+}
+
+// {card, at} for a tick that puts the order in the car, else {why}.
+function offersTickHolds(id, now) {
+  var kept = offerCards.filter(function (c) { return c.id === id; })[0];
+  if (!kept) return { why: 'unseen' };
+  var card = kept.card;
+  var inCar = heldOrders(now).some(function (h) {
+    return h.id === id || (card.heldCard && holdIdOf(h) === card.heldCard);
+  });
+  if (inCar) return { why: 'inCar' };
+  var minutes = typeof card.billedMinutes === 'number' ? card.billedMinutes : card.minutes;
+  if (!(typeof minutes === 'number' && minutes > 0)) return { why: 'untimed' };
+  if (!heldStillInForce(card, kept.at, now)) return { why: 'old' };
+  if (!noLaterTook(id, kept.at)) return { why: 'later' };
+  return { card: card, at: kept.at };
 }
 
 /* --- the NucBox's map services: a search and a router, at home -------------
@@ -7791,6 +7897,12 @@ function route(req, res) {
         }
         note.via = body.via;
       }
+      // The offers page's ✓ on a RECENT card is a ✓ Took on it (offersTickHolds);
+      // asked before the row is written, so the row can say it held.
+      var fromOffers = note.kind === 'mark' && note.via === 'offers' && note.accepted === true
+        ? offersTickHolds(note.id, Date.now()) : null;
+      var offersHolds = !!(fromOffers && fromOffers.card);
+      if (offersHolds) note.inCar = true;
       // A ✓ Took on an Uber add-on says so on its own mark row: `addon: true`
       // and, when an Uber order is in the car, `addonTo` — the root of the
       // trip it joins (addOnBase, tripOf), ids only. Asked here, before the
@@ -7799,8 +7911,9 @@ function route(req, res) {
       // behind) and of the car as it stands — the same question placeTook
       // asks of the same two a moment later. On 16 Oct no row said a ticked
       // card was an add-on at all.
-      if (note.kind === 'mark' && note.accepted === true && marksTheHold(note.via)) {
-        var aboutCard = scanner.offer && scanner.offer.id === note.id ? scanner.offer
+      if (note.kind === 'mark' && note.accepted === true && (marksTheHold(note.via) || offersHolds)) {
+        var aboutCard = offersHolds ? fromOffers.card
+          : scanner.offer && scanner.offer.id === note.id ? scanner.offer
           : body.offer && typeof body.offer === 'object' && body.offer.id === note.id
             ? body.offer : null;
         if (isAddOnCard(aboutCard) && !aboutCard.heldCard) {
@@ -7859,6 +7972,10 @@ function route(req, res) {
           } else if (offered) {
             marked = Object.assign({}, body.offer);
           }
+        } else if (offersHolds) {
+          // ...or the offers page's ✓ on a recent card: that card's reading as
+          // the slot had it, and the slot left alone.
+          marked = fromOffers.card;
         }
         // The order a Took is about to put down, if it replaces one: see the
         // drop row below.
@@ -7905,7 +8022,10 @@ function route(req, res) {
             // (cardArrivedAt): see `acceptedAt` below. One no longer kept
             // came before the card on the slot, so that card's offerAt is the
             // nearest bound on it, as it was before.
-            var cardAt = cardArrivedAt(marked.id) || scanner.offerAt || tookAt;
+            // The offers page's tick: when that card arrived, as offersTickHolds
+            // judged it recent by.
+            var cardAt = (offersHolds ? fromOffers.at : null)
+              || cardArrivedAt(marked.id) || scanner.offerAt || tookAt;
             var took = asHold({
               id: marked.id,
               pay: marked.pay,
@@ -7996,6 +8116,9 @@ function route(req, res) {
               addOn: false,
               of: null
             });
+            // ...and which surface took it, for the offers page's alone.
+            if (offersHolds) took.tookOn = 'offers';
+            keepTookPress(took.id, tookAt);
             // Placed by placeTook: replacing the order in the car, as the
             // slot did, with carrying two off; added beside it with it on.
             var placed = placeTook(took, marked, inCar, tookAt);
@@ -8038,6 +8161,14 @@ function route(req, res) {
         // (heldForPanel), so Map view has the held end from this moment and
         // not from the next reading. Until one arrived the page drew the
         // accepted card's dropoff as that CARD's, and lost it with the card.
+        // The offers page's ✓ taken back (or a pass) on an order in the car is
+        // Drop for that order, `by: 'offers'` (offersTickHolds' header).
+        var offersPutDown = [];
+        if (note.kind === 'mark' && note.via === 'offers'
+            && (note.accepted === null || note.accepted === false)) {
+          offersPutDown = heldOrders(Date.now()).filter(function (h) { return h.id === note.id; });
+          if (offersPutDown.length) putDown(Date.now(), 'offers', function () {}, offersPutDown);
+        }
         var heldAfter = holding(Date.now());
         // The replaced order's drop row, the same shape putDown writes, and
         // the panel told — every panel, through the stream, and this one in
@@ -8083,6 +8214,24 @@ function route(req, res) {
             ? { holdId: holdIdOf(addedHold), id: addedHold.id,
                 pay: numOrNull(addedHold.pay), undoForMs: UNDO_ADDED_MS }
             : null;
+        }
+        // The offers page is told what its press did to the car: put the order
+        // in it, recorded only (and why), or put it down. And every panel is
+        // told on the stream, as a reading tells it (`holding` with no
+        // `ready`): no panel made this press, so no reply reaches one.
+        if (note.kind === 'mark' && note.via === 'offers') {
+          var nowHeld = heldOrders(Date.now()).filter(function (h) {
+            return h.id === note.id;
+          })[0] || null;
+          tookReply.car = offersHolds ? { held: !!nowHeld, holdId: holdIdOf(nowHeld) }
+            : offersPutDown.length ? { putDown: true }
+            : fromOffers ? { held: false, why: fromOffers.why }
+            : null;
+          if (offersHolds || offersPutDown.length) {
+            var carSaid = { holding: heldForPanel(heldAfter), heldBy: 'offers' };
+            if (carryingTwo(Date.now())) carSaid.orders = ordersForPanel(Date.now());
+            broadcast(carSaid);
+          }
         }
         send(res, 200, JSON.stringify(tookReply),
              { 'Content-Type': 'application/json; charset=utf-8' });

@@ -715,6 +715,15 @@ FEEDS = {
     'took six': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
                  'hidden': 0, 'watched': {'saw': 14, 'kept': 12},
                  'unreadable': None, 'pairs': [PAIR, UNJUDGED], 'offers': TOOK_SIX},
+    # [offers tick] The owner's decision of 19 Oct 2026: the ✓ on a recent card
+    # puts its order in the car (server.js offersTickHolds). The orders in the
+    # car come off /api/status, answered here from `__status`: r3 is in the
+    # car, as the server names it (`<id>@<acceptedAt>`), and nothing else is.
+    'in the car': {'count': 12, 'total': 12, 'truncated': False, 'days': 7,
+                   'hidden': 0, 'watched': {'saw': 12, 'kept': 12},
+                   'unreadable': None, 'pairs': [], 'offers': TOOK_SIX,
+                   '__status': {'holding': {'holdId': 'r3@%d' % (NOW - 3 * 600000)},
+                                'scanner': {'enabled': True}}},
     # The three answers `sure` has, in one window. Its own feed rather than
     # more rows on 'took six', whose tally of what the panel said is asserted
     # row by row and would be measuring two things at once.
@@ -975,6 +984,11 @@ const STUB = (feed) => `
         }
         return r;
       });
+    }
+    // The orders in the car, on a feed that names them (paintInCar).
+    if (FEED.__status && String(url).indexOf('/api/status') === 0) {
+      return Promise.resolve({ ok: true, status: 200,
+        json: () => Promise.resolve(JSON.parse(JSON.stringify(FEED.__status))) });
     }
     if (String(url).indexOf('nominatim') !== -1) {
       const u = new URL(String(url));
@@ -1766,6 +1780,74 @@ const TEXT = (sel) => {
       await page.click('#ranges button[data-days="7"]').catch(() => {});
       await page.waitForTimeout(400);
     }
+    // [offers tick] The "in car" tag, and what the bar says a ✓ did to the
+    // car, with the mark's reply answered here as the server gives it.
+    if (name === 'in the car') {
+      const tags = () => page.evaluate(() => [].slice.call(
+        document.querySelectorAll('#log details.offer')).filter(
+        (d) => d.querySelector('summary .tag.incar')).map((d) => d.getAttribute('data-id')));
+      out[name].inCar = await tags();
+      // Fits beside the ✓ on the panel and on a phone: the row's summary does
+      // not overflow, the page does not scroll sideways, and the ✓ is still
+      // what a press on it reaches.
+      out[name].fits = {};
+      // Against r4, ticked and the same shape with nothing in the car: a
+      // ticked row's summary already runs a few pixels past its box (the
+      // fold arrow), and the tag may add nothing to that.
+      const measure = async (id) => {
+        await page.evaluate((id) => {
+          document.querySelector('#log details.offer[data-id="' + id + '"] summary')
+            .scrollIntoView({ block: 'center', behavior: 'instant' });
+        }, id);
+        await page.waitForTimeout(200);
+        return page.evaluate((id) => {
+          const sm = document.querySelector('#log details.offer[data-id="' + id + '"] summary');
+          const tag = sm.querySelector('.tag.incar');
+          const t = tag && tag.getBoundingClientRect();
+          const b = sm.querySelector('[data-act="took"]');
+          const r = b.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          const box = sm.getBoundingClientRect();
+          return { over: sm.scrollWidth - sm.clientWidth,
+                   side: document.documentElement.scrollWidth - window.innerWidth,
+                   tagIn: !!t && t.width > 0 && t.left >= box.left - 0.5
+                     && t.right <= box.right + 0.5,
+                   tickOnTop: !!(hit && hit.closest('[data-act="took"]') === b) };
+        }, id);
+      };
+      for (const [w, h] of [[1024, 600], [360, 640]]) {
+        await page.setViewportSize({ width: w, height: h });
+        await page.waitForTimeout(250);
+        out[name].fits[w + 'x' + h] = { r3: await measure('r3'), r4: await measure('r4') };
+      }
+      await page.setViewportSize({ width: 900, height: 900 });
+      const press = async (id, reply) => {
+        await page.evaluate((reply) => {
+          window.__marks = [];
+          const was = window.__realFetch || (window.__realFetch = window.fetch);
+          window.fetch = function (url, opts) {
+            if (String(url).indexOf('/api/offers/mark') === 0) {
+              window.__marks.push(JSON.parse(opts.body));
+              return Promise.resolve({ ok: true, status: 200,
+                json: () => Promise.resolve(reply) });
+            }
+            return was.apply(this, arguments);
+          };
+        }, reply);
+        await page.evaluate((id) => {
+          document.querySelector('#log details.offer[data-id="' + id + '"] summary [data-act="took"]').click();
+        }, id);
+        await page.waitForTimeout(600);
+        return page.evaluate(() => ({
+          marks: window.__marks,
+          said: (document.getElementById('undoWhat').textContent || '').trim(),
+          undoShown: document.getElementById('undoGo').getBoundingClientRect().width > 0 }));
+      };
+      out[name].held = await press('r8', { ok: true, car: { held: true, holdId: 'r8@1' } });
+      out[name].later = await press('r9', { ok: true, car: { held: false, why: 'later' } });
+      out[name].old = await press('r10', { ok: true, car: { held: false, why: 'old' } });
+      out[name].putDown = await press('r3', { ok: true, car: { putDown: true } });
+    }
     // A chip that picks nothing, on the feed with no verdicts on its rows.
     if (name === 'took six') {
       await page.click('#chips button[data-pick="no"]');
@@ -2286,6 +2368,41 @@ try:
     ok_('...tells a screen reader too (%r)' % rf.get('label'),
         'could not save' in (rf.get('label') or '').lower())
     no_('...and can be pressed again', rf.get('disabled'))
+
+    # --- [offers tick] the ✓ and the order in the car ------------------------
+    #
+    # The owner's decision of 19 Oct 2026 (server.js offersTickHolds). The row
+    # of the order in the car says "in car", whoever took it, and nothing
+    # else does; the bar says what each ✓ did to the car.
+    ic = got.get('in the car') or {}
+    eq('[offers tick] the row of the order in the car says "in car", and no other',
+       ic.get('inCar'), ['r3'])
+    for size in ('1024x600', '360x640'):
+        f = (ic.get('fits') or {}).get(size) or {}
+        f3, f4 = f.get('r3') or {}, f.get('r4') or {}
+        ok_('[offers tick] ...beside the ✓ at %s, overflowing no more than a ticked row '
+            'without it, the ✓ still pressable (%r)' % (size, f),
+            f3.get('tagIn') and f4.get('over') is not None
+            and (f3.get('over') or 0) <= f4['over'] and (f3.get('side') or 0) <= 0
+            and f3.get('tickOnTop'))
+    ih = ic.get('held') or {}
+    eq('[offers tick] a ✓ that put the order in the car posts the mark as before',
+       ih.get('marks'), [{'id': 'r8', 'accepted': True, 'via': 'offers'}])
+    ok_('[offers tick] ...and says it is in the car now (%r)' % ih.get('said'),
+        'taken' in (ih.get('said') or '') and 'in the car now' in (ih.get('said') or ''))
+    il = ic.get('later') or {}
+    ok_('[offers tick] a ✓ after a later Took says it was recorded only, and why (%r)'
+        % il.get('said'),
+        'Recorded only' in (il.get('said') or '')
+        and 'taken after this card' in (il.get('said') or '') and il.get('undoShown'))
+    io = ic.get('old') or {}
+    ok_('[offers tick] a ✓ on an old card says it was recorded only (%r)' % io.get('said'),
+        'Recorded only' in (io.get('said') or '') and 'too long ago' in (io.get('said') or ''))
+    ip = ic.get('putDown') or {}
+    eq('[offers tick] the ✓ taken back on the order in the car posts the take-back',
+       ip.get('marks'), [{'id': 'r3', 'accepted': None, 'via': 'offers'}])
+    ok_('[offers tick] ...and says it was put down (%r)' % ip.get('said'),
+        'Unmarked' in (ip.get('said') or '') and 'Put down' in (ip.get('said') or ''))
 
     # --- a mark leaves the row where it was -------------------------------
     mk = got['took six'].get('mark') or {}

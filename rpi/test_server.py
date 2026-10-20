@@ -9413,15 +9413,148 @@ for _carry in (False, True):
            (_h9.get('dropoff'), ((_h9.get('fields') or {}).get('dropoff') or {}).get('from'),
             [r.get('by') for r in _q9.rows('drop')]),
            (_PRESSED['line'], 'press', []))
+        # Since the owner's decision of 19 Oct 2026 the ✓ taken back on the
+        # offers page is Drop for an order in the car, whoever took it.
         post(_q9.base, '/api/offers/mark', {'id': 'A', 'accepted': None, 'via': 'offers'})
         _settle(0.1)
-        eq('...and an offers-page Undo of it does not put it down%s'
+        eq('[offers tick] ...and the ✓ taken back there puts the order down, by \'offers\'%s'
            % (' (carrying two)' if _carry else ''),
-           (str((_q9.status().get('holding') or {}).get('holdId')).split('@')[0],
-            _q9.rows('drop')), ('A', []))
+           (_q9.status().get('holding'),
+            [(r.get('id'), r.get('by')) for r in _q9.rows('drop')]),
+           (None, [('A', 'offers')]))
     finally:
         _q9.stop()
         _q9.gone()
+
+# --- [offers tick] the offers page's ✓ on a RECENT card is a ✓ Took on it ------
+#
+# The owner's decision of 19 Oct 2026: cards move fast, and the panel's Took
+# names only the last one. The offers page's ✓ on a card whose own hold would
+# still be in force had it been taken when it arrived, with no Took of another
+# card since it arrived, puts that card's order in the car from its reading as
+# the slot had it (server.js offersTickHolds). Anything else records only and
+# says why. Cards, doors and stores invented; the fix is the fake NucBox's
+# Marietta Square, as '[auto arm]' uses.
+_ofake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_ofake_base = 'http://127.0.0.1:%d' % json.loads(_ofake.stdout.readline())['port']
+_o1 = _Q(carry=False, env={'NUCBOX_SEARCH': _ofake_base, 'NUCBOX_TIMEOUT_MS': '800'})
+try:
+    _ev1 = listen(_o1.base, 6)
+    _settle(0.3)
+    _o1.card('R', 12.0, 40, 'doordash', **dict(
+        _SQ, miles=5.0, dropoff=_COBB, pickup='Larkspur Tacos',
+        pickupLine='12 Mill St, Roswell, GA'))
+    _rat = int(time.time() * 1000)
+    time.sleep(1.2)
+    _o1.card('S', 8.0, 20, 'uber')
+    _r1 = _o1.took('R', via='offers')
+    _h1 = _settled(_o1.base)
+    _f1 = (json.load(open(_o1.hold)).get('orders') or [{}])[0]
+    _id1, _at1 = (str(_h1.get('holdId') or 'none@0').split('@') + ['0'])[:2]
+    ok_('[offers tick] a recent card ticked there is the order in the car, dated from its '
+        'own arrival (%r)' % _h1.get('holdId'),
+        _id1 == 'R' and abs(int(_at1) - _rat) < 400 and (_h1.get('heldMs') or 0) >= 1100)
+    eq('[offers tick] ...from that card\'s reading: pay, minutes, miles, ends, store door, fix',
+       (_f1.get('pay'), _f1.get('minutes'), _f1.get('miles'), _f1.get('pickup'),
+        _f1.get('dropoff'), _f1.get('pickupLine'), _f1.get('app'),
+        (_f1.get('card') or {}).get('lat'), (_f1.get('card') or {}).get('multiOrder')),
+       (12.0, 40, 5.0, 'Larkspur Tacos', _COBB, '12 Mill St, Roswell, GA', 'doordash',
+        _SQ['lat'], False))
+    eq('[offers tick] ...and the GPS drop armed from it, as a Took arms it',
+       (_h1.get('endPinned'), _h1.get('endBy')), (True, 'server'))
+    eq('[offers tick] ...the order says the offers page took it, the slot is left alone',
+       (_f1.get('tookOn'), _h1.get('tookOn'), (_o1.status().get('offer') or {}).get('id')),
+       ('offers', 'offers', 'S'))
+    eq('[offers tick] ...the mark row keeps via \'offers\' and says it held',
+       [(r.get('id'), r.get('accepted'), r.get('via'), r.get('inCar')) for r in _o1.rows('mark')],
+       [('R', True, 'offers', True)])
+    eq('[offers tick] ...the page is told', (_r1.get('car') or {}).get('held'), True)
+    _settle(0.3)
+    ok_('[offers tick] ...and every panel, on the stream',
+        any(m.get('heldBy') == 'offers'
+            and str((m.get('holding') or {}).get('holdId') or '').startswith('R@')
+            for m in _ev1))
+    _s1, _u1 = post(_o1.base, '/api/offers/mark', {'id': 'R', 'accepted': None, 'via': 'offers'})
+    _settle(0.2)
+    eq('[offers tick] the ✓ taken back puts it down like Drop, by \'offers\'',
+       (_o1.status().get('holding'), (_u1.get('car') or {}).get('putDown'),
+        [(r.get('id'), r.get('by')) for r in _o1.rows('drop')]),
+       (None, True, [('R', 'offers')]))
+    _r1b = _o1.took('never-on-the-slot', via='offers')
+    eq('[offers tick] a card this server never held records only, and says why',
+       (_r1b.get('car'), _o1.status().get('holding')),
+       ({'held': False, 'why': 'unseen'}, None))
+finally:
+    _o1.stop()
+    _o1.gone()
+    _ofake.kill()
+
+# Old: the card's own clock has run out (HOLD_GRACE_MS 0, a 0.02-minute card,
+# so its hold would have ended 1.8 s after it arrived).
+_o2 = _Q(carry=False, env={'HOLD_GRACE_MS': '0'})
+try:
+    _o2.card('O', 9.0, 0.02, 'uber')
+    time.sleep(2.2)
+    _r2 = _o2.took('O', via='offers')
+    eq('[offers tick] a card whose hold would have run out records only (shift review)',
+       (_r2.get('car'), _o2.status().get('holding'), _o2.rows('drop'),
+        [(r.get('id'), r.get('via'), r.get('inCar')) for r in _o2.rows('mark')]),
+       ({'held': False, 'why': 'old'}, None, [], [('O', 'offers', None)]))
+finally:
+    _o2.stop()
+    _o2.gone()
+
+# A later Took: card A, card B, ✓ Took on B; the offers page's ✓ on A records
+# only and leaves B where it is. A card C that came up after B's Took is
+# recent, and with carrying two off replaces B as a Took on C would.
+_o3 = _Q(carry=False)
+try:
+    _o3.card('A', 12.0, 60, 'uber')
+    _o3.card('B', 9.0, 60, 'uber')
+    _o3.took('B')
+    _r3 = _o3.took('A', via='offers')
+    eq('[offers tick] a card ticked after a later Took records only, and the car is as it was',
+       (_r3.get('car'), str((_o3.status().get('holding') or {}).get('holdId')).split('@')[0],
+        _o3.rows('drop')),
+       ({'held': False, 'why': 'later'}, 'B', []))
+    time.sleep(0.05)
+    _o3.card('C', 11.0, 30, 'uber')
+    _o3.card('D', 7.0, 20, 'uber')
+    _r3c = _o3.took('C', via='offers')
+    _settle(0.2)
+    eq('[offers tick] ...one that came up after it replaces the order as a Took would',
+       ((_r3c.get('car') or {}).get('held'),
+        str((_o3.status().get('holding') or {}).get('holdId')).split('@')[0],
+        [(r.get('id'), r.get('by')) for r in _o3.rows('drop')]),
+       (True, 'C', [('B', 'replaced')]))
+finally:
+    _o3.stop()
+    _o3.gone()
+
+# An Uber add-on ticked there joins the trip in the car, as its Took would.
+_o4 = _Q(carry=False)
+try:
+    _o4.card('A', 25.03, 60, 'uber')
+    _o4.took('A')
+    _hA = (_o4.status().get('holding') or {}).get('holdId')
+    _o4.card('U', 9.5, 8, 'uber', addon=True, screen='uber.addon')
+    _o4.card('X', 6.0, 15, 'doordash')
+    _r4 = _o4.took('U', via='offers')
+    _settle(0.2)
+    _ord4 = _o4.status().get('orders') or []
+    eq('[offers tick] an add-on ticked there joins the trip in the car',
+       ((_r4.get('car') or {}).get('held'),
+        [(str(o.get('holdId')).split('@')[0], o.get('addOn'), o.get('of')) for o in _ord4],
+        _o4.rows('drop')),
+       (True, [('A', False, None), ('U', True, _hA)], []))
+    eq('[offers tick] ...and its mark row says so',
+       [(r.get('id'), r.get('addon'), r.get('addonTo'), r.get('inCar'))
+        for r in _o4.rows('mark') if r.get('id') == 'U'],
+       [('U', True, _hA, True)])
+finally:
+    _o4.stop()
+    _o4.gone()
 
 # --- a Took from a panel behind the slot --------------------------------------
 #

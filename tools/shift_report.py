@@ -46,7 +46,9 @@ latestPerOfferUncached folds them: the newest mark wins, by its `at`, and an
 offer whose newest answer is `true` was taken; a `null` or a `false` after it
 takes it back. Its Took is the panel press that put it in the car (`via:
 'panel'`, or no `via` from a page older than the field): the first `true`
-after the last answer that was not one. A `true` from the
+after the last answer that was not one. Since 19 Oct 2026 the offers
+page's ✓ on a recent card is a Took too, and its mark row says so (`via:
+'offers'`, `inCar: true`: server.js offersTickHolds). Any other `true` from the
 offers page or the end-of-shift review labels the card and puts nothing in the
 car, so an order marked only there has no Took and no times, and says so.
 
@@ -221,7 +223,8 @@ def orders(rows):
             # apart by `via`) does not matter here: either way the order is
             # out of the car, and either way it was not taken.
             if final is True:
-                if took is None and m.get('via') in (None, 'panel'):
+                if took is None and (m.get('via') in (None, 'panel')
+                                     or (m.get('via') == 'offers' and m.get('inCar') is True)):
                     took = _num(m.get('at'))
             else:
                 took = None

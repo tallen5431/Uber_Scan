@@ -632,6 +632,19 @@ ok_('a day with logs but no fix on it says so',
     'Shift totals: no usable GPS fix on this day'
     in run(['--journal', J5, '--gps', GPS5, '--day', '2026-03-07'])[1])
 
+# --- the offers page's ✓ that put the order in the car (19 Oct 2026) ------------
+#
+# server.js offersTickHolds: a ✓ there on a recent card is a Took, and its mark
+# row says `inCar: true`. One without it is a label, as before.
+_ot = {o['id']: o for o in SR.orders([
+    offer('P', at(18, 0), 11.0, 30, 4.0), offer('Q', at(18, 5), 8.0, 20, 3.0),
+    dict(mark('P', at(18, 2), True, via='offers'), inCar=True),
+    mark('Q', at(18, 30), True, via='offers'),
+    drop('P', at(18, 40))])}
+eq('[offers tick] a ✓ on the offers page that held the order is its Took, and ends at Drop',
+   (_ot['P']['took'], _ot['P']['how'], _ot['P']['end']), (at(18, 2), 'Drop', at(18, 40)))
+eq('[offers tick] ...one that only recorded is still no Took', _ot['Q']['how'], 'no Took')
+
 # --- nothing reads it ---------------------------------------------------------
 readers = []
 # The files git tracks, not a walk of the directory: a walk also reads other
