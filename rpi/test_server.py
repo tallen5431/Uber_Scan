@@ -1682,8 +1682,8 @@ if shutil.which('python3'):
         # the panel's in-car line its GPS drop's state (heldEndState).
         eq('held end: the mark reply carries the order in the car as the stream describes it',
            sorted((reply.get('held') or {}).keys()),
-           ['arrived', 'card', 'dropoff', 'drops', 'endBy', 'endPinned', 'endWhy', 'holdId',
-            'minutes', 'pay', 'place', 'visited'])
+           ['arrived', 'card', 'dropoff', 'drops', 'endAt', 'endBy', 'endPinned', 'endWhy',
+            'holdId', 'minutes', 'pay', 'place', 'visited'])
         eq('held end: ...its `drops` null for an order of one door (a batch\'s count, '
            'server.js batchDrops)', (reply.get('held') or {}).get('drops', 'missing'), None)
         # Started after the mark, before the scanner's 2s sleep ends.
@@ -6182,6 +6182,7 @@ try:
     eq('[gps drop] the beat carries the GPS drop\'s state for the panel',
        (get(_gb, '/api/status').get('beat') or {}).get('heldEnd'),
        {'endPinned': True, 'arrived': False, 'endBy': None,
+        'endAt': {'lat': 33.9, 'lon': -84.5},
         'endWhy': 'door next to the pickup', 'visited': []})
     eq('[gps drop] ...the same as /api/status says', _state(_holding(_gb)),
        {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup'})
@@ -7013,6 +7014,25 @@ try:
            'with no street type, and the end is searched and pinned anew',
            (_was, _h.get('dropoff'), _h.get('endPinned'), _h.get('endBy')),
            (('1985 Cobb, Kennesaw', False), '1985 Cobb Parkway, Kennesaw', True, 'server'))
+        post(_hkb, '/api/delivered', {})
+
+        # The owner's 19 Oct 21:41 fault, invented: the planner's dropoff read
+        # "1385" once and was filed, then "1985" on every read after, the same
+        # stop and as complete. The reading seen most of the last few of that
+        # stop replaces the filed one, and the end is searched and pinned.
+        _rough_took('k-vote', 25.0)
+        _planner_end('1385 Cobb Parkway')
+        _h = _settled(_hkb, lambda h: h.get('endWhy'))
+        _was = (_h.get('dropoff'), _h.get('endPinned'))
+        for _ in range(3):
+            _planner_end()
+        _h = _settled(_hkb, lambda h: h.get('endPinned'))
+        eq('[house vote] "1385" read once then "1985" three times on the same planner stop: '
+           '"1985" is filed, searched and pinned, and its point is on status',
+           (_was, _h.get('dropoff'), _h.get('endPinned'), _h.get('endBy'),
+            sorted((_h.get('endAt') or {}).keys())),
+           (('1385 Cobb Parkway, Kennesaw', False), '1985 Cobb Parkway, Kennesaw', True,
+            'server', ['lat', 'lon']))
         post(_hkb, '/api/delivered', {})
 
         _rough_took('k-rough-cap', 250.0)

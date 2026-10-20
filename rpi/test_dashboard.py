@@ -4741,6 +4741,7 @@ const framed = (page) => page.waitForFunction(
           minutes: 20.0, miles: card.miles, cost: 1.4, target: 25, band: 15,
           holding: { pay: 9.0, minutes: 18.0,
                      dropoff: x.held || 'Shadowood Pkwy SE, Atlanta', place: x.place || null,
+                     endPinned: !!x.endAt, endBy: x.endBy || null, endAt: x.endAt || null,
                      card: Object.assign({}, x.SQ, { miles: 9.4 }, x.heldCard || {}) },
           offer: Object.assign({ id: x.id, pay: 14.25, minutes: 20.0,
                                  billedMinutes: 20.0, cost: 1.4,
@@ -4914,6 +4915,19 @@ const framed = (page) => page.waitForFunction(
         r.placeHeld = await heldPin();
         r.placeAsked = relayAsked.slice(placeAskedBefore)
           .filter((u) => /[?&]q=Wrenfield%20Parking%20Deck&/.test(u)).length;
+        // The same street-only door, no place, but the SERVER armed it by
+        // the short street (endBy 'street', its point): Map view draws that
+        // as D, not "NO PIN" (the owner, 19 Oct). A pin of Map view's own
+        // post (endBy null) is not taken. Invented point.
+        await push({ id: 'n-srv', held: '4821 Kestrel Dr, Marietta',
+                     endBy: 'street', endAt: { lat: 33.9701, lon: -84.5302 } });
+        await page.waitForTimeout(1500);
+        r.serverHeld = await heldPin();
+        r.serverNote = await note();
+        await push({ id: 'n-srv2', held: '4821 Kestrel Dr, Marietta',
+                     endBy: null, endAt: { lat: 33.9701, lon: -84.5302 } });
+        await page.waitForTimeout(1500);
+        r.ownPostHeld = await heldPin();
         // A place name longer than the relay will pass on: refused by this
         // rig's own server, which is a bug in the question, not a NucBox down.
         await push({ id: 'n-bug', pickup: 'Q'.repeat(121) });
@@ -10098,6 +10112,12 @@ try:
        'with no place pins nothing',
        (both.get('placeHeld'), both.get('placeAsked'), both.get('noPlaceHeld')),
        ([33.9712, -84.5288], 1, None))
+    ok_('[server pin] Map view draws the held end the server armed by street as D, at its '
+        'point, and does not say NO PIN; a pin by no server rule is not drawn (%r)'
+        % both.get('serverNote'),
+        both.get('serverHeld') == [33.9701, -84.5302]
+        and 'not that door' not in (both.get('serverNote') or '')
+        and both.get('ownPostHeld') is None)
     ok_('a question this rig\'s server refuses is said as a bug, never as the '
         'NucBox down (%r)' % both.get('bug'),
         re.match(r'^no pin for Q+… — a bug: the rig refused the question$',

@@ -3705,6 +3705,10 @@ function heldEndState(h) {
            // /api/status alone, so the panel's in-car line can say an end
            // pinned by its place is ("● armed by place").
            endBy: pin ? (pin.by || null) : null,
+           // ...and where, so Map view draws the server's pin as D in place
+           // of its own search's refusal (a street pin's point is its first
+           // node). Null with no pin.
+           endAt: pin ? { lat: pin.lat, lon: pin.lon } : null,
            endWhy: pin
              ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : notOneCustomer(h))
              : h.endWhyFor === endTextOf(h) ? (h.endWhy || null) : null,

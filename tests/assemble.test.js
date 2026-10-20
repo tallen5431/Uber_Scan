@@ -1498,6 +1498,62 @@ SEQ.forEach(function (seq) {
       A.cardStreets('Marietta, GA')], [['tarrow ridge', 'brisk'], ['quarrel'], []]);
 })();
 
+/* ---- the most-read reading of one planner stop (the owner, 19 Oct 21:41) ----
+ * "305 <Name> Dr" read once and filed, "905 <Name> Dr" every read after: the
+ * same stop key, as complete, so outranks() alone kept "305". Invented. */
+(function () {
+  var KEY = 'dropoff|Mara T.|1202';
+  function hold() {
+    var h = { id: 'o', acceptedAt: 1000, pickup: 'Fable Grill', dropoff: null,
+              dropoffScanned: false, card: { legs: 1, multiOrder: false } };
+    A.fieldsOf(h);
+    return h;
+  }
+  function read(house, key, at) {
+    var street = house + ' Quillon Dr';
+    return { found: true, line: street + ', Smyrna', street: street, city: 'Smyrna',
+             state: 'GA', zip: null, asked: false, labelled: 'dropoff', planner: true,
+             at: at || 2000, key: key || KEY };
+  }
+  function say(h, d) {
+    if (A.plannerVote(h, d)) d.vote = true;
+    var said = A.dropoff(h, d, null);
+    A.file(h, d, said);
+    return said.why;
+  }
+  var h = hold();
+  var whys = [say(h, read('305')), say(h, read('905')), say(h, read('905'))];
+  eq('[vote] "305" filed once, then "905" twice: the tie keeps "305", the third read files "905"',
+     [whys, h.dropoff], [['blank', 'outranked by planner', 'most read'], '905 Quillon Dr, Smyrna']);
+  eq('[vote] ...and "905" stays on a fourth read of it, and a lone "305" back does not undo it',
+     [say(h, read('905')), say(h, read('305')), h.dropoff],
+     ['outranked by planner', 'outranked by planner', '905 Quillon Dr, Smyrna']);
+  h = hold();
+  say(h, read('305'));
+  [read('905', 'dropoff|Orrin B.|1220'), read('905', 'dropoff|Orrin B.|1220'),
+   read('905', 'dropoff|Orrin B.|1220')].forEach(function (d) { say(h, d); });
+  eq('[vote] never across stops: another key\'s reads do not move the filed one',
+     h.dropoff, '305 Quillon Dr, Smyrna');
+  h = hold();
+  var pr = Object.assign(read('305'), { asked: true, labelled: null, key: undefined });
+  say(h, pr);
+  [1, 2, 3].forEach(function () { say(h, read('905')); });
+  eq('[vote] never over a press', [h.dropoff, h.fields.dropoff.from],
+     ['305 Quillon Dr, Smyrna', 'press']);
+  h = hold();
+  say(h, read('305'));
+  say(h, read('905'));
+  say(h, read('605'));
+  eq('[vote] three readings once each: the filed one stays', h.dropoff, '305 Quillon Dr, Smyrna');
+  h = hold();
+  say(h, read('305'));
+  for (var i = 0; i < A.VOTE_READS; i++) say(h, read('305'));
+  say(h, read('905'));
+  say(h, read('905'));
+  eq('[vote] only the last ' + A.VOTE_READS + ' reads count: "305" ×6 then "905" ×2 keeps "305"',
+     [h.dropoff, h.dropoffReads.reads.length], ['305 Quillon Dr, Smyrna', A.VOTE_READS]);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

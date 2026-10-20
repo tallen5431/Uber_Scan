@@ -459,6 +459,13 @@
       // the same door again, so the batch is recorded; never over a press,
       // which is the driver's own word for the end.
       if (!why && d.batch && labelled && cur && cur.from !== 'press') why = 'the last door';
+      // ...and the reading of the SAME planner stop seen most often of late
+      // (plannerVote, which sighting() asked as it was read), over a
+      // different one filed first; never over a press or another stop.
+      if (!why && d.vote === true && out.from === 'planner' && cur && cur.from === 'planner'
+          && d.key && cur.key === d.key) {
+        why = 'most read';
+      }
       if (why) {
         out.to = 'hold';
         out.kept = true;
@@ -474,6 +481,38 @@
       out.why = wasAsked ? 'press' : 'blank';
     }
     return out;
+  }
+
+  /* The owner, 19 Oct 21:41: the planner's dropoff read "305 <Name> Dr" once
+   * and was filed; every later read said "905 <Name> Dr", the same stop key
+   * and as complete, so outranks() kept "305" and its door was never found.
+   * "Rescanning can throw out previous good scans." So the hold keeps the
+   * street lines (house number and street, streetKey) of the last VOTE_READS
+   * readings of ONE planner stop (`dropoffReads`: its key and the lines,
+   * the filed one counted as it was read), and a reading whose line is now
+   * seen more often than the filed one's, and most often of all, replaces
+   * it. A tie keeps the filed one. Another key starts the tally anew; a press,
+   * or anything filed that is not that stop's planner read, is never voted
+   * over. Returns whether `d` wins. VOTE_READS is CHOSEN, not measured.
+   * Asked by sighting() for every unprompted planner reading of a stop, the
+   * ones its once-per-line dedupe drops included (else a repeat would never
+   * count), and the winner passes that dedupe; dropoff() files it. */
+  var VOTE_READS = 5;
+  function plannerVote(held, d) {
+    if (!held || !d || d.asked || d.planner !== true || !d.key) return false;
+    var cur = fieldsOf(held).dropoff;
+    var line = streetKey(d.line);
+    if (!line) return false;
+    var v = held.dropoffReads;
+    if (!v || v.key !== d.key) v = held.dropoffReads = { key: d.key, reads: [] };
+    v.reads.push(line);
+    if (v.reads.length > VOTE_READS) v.reads.shift();
+    if (!cur || cur.from !== 'planner' || cur.key !== d.key) return false;
+    var filed = streetKey(cur.value);
+    if (line === filed) return false;
+    function count(x) { return v.reads.filter(function (r) { return r === x; }).length; }
+    var mine = count(line);
+    return mine > count(filed) && v.reads.every(function (r) { return count(r) <= mine; });
   }
 
   /* What a kept decision changes on the hold: the field, the older fields
@@ -1370,10 +1409,13 @@
       }
     }
     var deduped = false;
+    // ...and every reading of a planner stop counted toward its most read
+    // (plannerVote), before the dedupe; the winner gets past it.
+    if (cand && !cand.batch && plannerVote(held, cand)) cand.vote = true;
     if (cand && !cand.asked) {
       var seen = cand.line + (cand.singleCardOnly ? '|lone' : '')
         + (cand.batch ? '|batch' + cand.batch.drops.length : '');
-      if (st.said[seen]) { cand = null; deduped = true; }
+      if (st.said[seen] && !cand.vote) { cand = null; deduped = true; }
       else st.said[seen] = true;
     }
     if (cand) out.candidates.push(cand);
@@ -2169,7 +2211,7 @@
            plannerPickup: plannerPickup, forgetPlanner: forgetPlanner,
            // ...and the street rule they stand on, for server.js's planAtOf
            // (where on a planner each order's end is).
-           sameStreet: sameStreet,
+           sameStreet: sameStreet, VOTE_READS: VOTE_READS, plannerVote: plannerVote,
            dropoff: dropoff, file: file, fileCard: fileCard, cardRank: cardRank,
            pressBetween: pressBetween, ownPopup: ownPopup, cardCandidate: cardCandidate,
            storeScreen: storeScreen, placeOf: placeOf, bracketDoor: bracketDoor,

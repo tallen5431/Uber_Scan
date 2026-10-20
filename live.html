@@ -3282,6 +3282,18 @@
       .catch(function () {});
   }
 
+  /* The held end as the server pinned it (heldEndState: endPinned, endBy
+     'server', 'place' or 'street', endAt), as an answer Map view draws, for
+     the end text `q` it was pinned for; else null. */
+  var SERVER_PINS = ['server', 'place', 'street'];
+  function serverEnd(q) {
+    var h = heldSaid;
+    var at = h && h.endAt;
+    if (!h || h.dropoff !== q || !h.endPinned || SERVER_PINS.indexOf(h.endBy) === -1
+        || !at || typeof at.lat !== 'number' || typeof at.lon !== 'number') return null;
+    return { at: { lat: at.lat, lon: at.lon, name: q }, n: 1, by: h.endBy };
+  }
+
   /* ...and where one of its pickups is, found inside the held card's disc as
      its end is: the server does not arm a door within 150 m of one (the
      restaurant guard, pickupNearEnd in server.js). The server now searches
@@ -5427,6 +5439,8 @@
         heldSaid.endWhy = msg.heldEnd.endWhy || null;
         // ...who pinned it: 'place' is said on the line (gpsSaidOf).
         heldSaid.endBy = msg.heldEnd.endBy || null;
+        // ...and where (serverEnd): Map view draws it as D.
+        heldSaid.endAt = msg.heldEnd.endAt || null;
         // ...and its pickups behind the car (visitPickups), which move the
         // next stop on and take the restaurant out of Map view's run.
         heldSaid.visited = Array.isArray(msg.heldEnd.visited) ? msg.heldEnd.visited : [];
@@ -6554,6 +6568,8 @@
              key: names.join('|') + '#' + (o.id || '') + '@' + (held || '')
                // ...and its place, learnt for the same end text.
                + (heldPlace ? '[' + heldPlace : '')
+               // ...and the server's pin for it, learnt on a beat (serverEnd).
+               + (held && serverEnd(held) ? '!' + heldSaid.endBy : '')
                + (held2 ? '+' + held2 : '')
                // ...and the order of the run through both: a planner read
                // that places both ends moves the run under the same places.
@@ -6665,12 +6681,18 @@
         left.push(q);
         continue;
       }
+      // ...and the held end the SERVER pinned (by door, place or short
+      // street) where this search found no door: drawn as D, never posted
+      // back. The owner, 19 Oct: Map view said "NO PIN" and drew no D over
+      // an end the server had armed.
+      var theirs = !got.at && whose === 'held' && q === want.held ? serverEnd(q) : null;
+      if (theirs) got = theirs;
       found[q] = got.at || null;
       want.nbxAnswered++;
       want.nbxSeen[q] = { res: got, disc: disc, whose: whose };
       if (post) {
         // The END only: a pickup's pin is never sent as the held end.
-        if (whose === 'held' && q === want.held && disc) pinHeldEnd(want, q, got);
+        if (whose === 'held' && q === want.held && disc) { if (!theirs) pinHeldEnd(want, q, got); }
         // ...the second order's end, under its own name.
         else if (whose === 'held2' && disc) pinHeldEnd({ heldId: want.heldId2 }, q, got);
         // ...and a pickup's pin goes as a pickup, for the restaurant guard.
