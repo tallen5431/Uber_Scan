@@ -220,6 +220,25 @@ var PLAN2 = [
 var ORD2 = [{ n: 1, holdId: 'a@1', end: '4821 Kestrel Dr, Marietta, GA 30060', planAt: 3 },
             { n: 2, holdId: 'b@2', end: '77 Birch Ln, Roswell, GA 30075', planAt: 1 }];
 function runSaid(r) { return r.map(function (e) { return e.n ? 'D' + e.n : e.q.split(',')[0]; }).join(' > '); }
+/* Where the held order's run starts with no card's fix (MV.routeFrom): the
+   live fix, kept until the car is ROUTE_MOVE_M from it or the leg changes,
+   so the road is asked once per leg and per ~300 m, never per GPS fix. */
+var RF0 = { lat: 33.9526, lon: -84.5499 };
+var rf = MV.routeFrom(null, RF0, 'end|pick');
+eq('[road run] the run starts at the live fix, for its leg',
+   JSON.stringify(rf), JSON.stringify({ at: RF0, leg: 'end|pick' }));
+eq('[road run] ...and a fix 100 m on keeps that start, the same object: no new '
+   + 'question', MV.routeFrom(rf, { lat: 33.9535, lon: -84.5499 }, 'end|pick'), rf);
+var rfFar = MV.routeFrom(rf, { lat: 33.9556, lon: -84.5499 }, 'end|pick');
+ok_('[road run] ...a fix ~330 m on starts it again from there',
+    rfFar !== rf && rfFar.at.lat === 33.9556);
+var rfLeg = MV.routeFrom(rf, { lat: 33.9527, lon: -84.5499 }, 'end');
+ok_('[road run] ...and so does a new leg (a pickup visited), however near',
+    rfLeg !== rf && rfLeg.leg === 'end' && rfLeg.at.lat === 33.9527);
+eq('[road run] ...the move is 300 m, chosen', MV.ROUTE_MOVE_M, 300);
+eq('[road run] ...and with no fix there is no start: the straight run, as before',
+   MV.routeFrom(rf, null, 'end|pick'), null);
+
 var hr = MV.heldRuns(PLAN2, ORD2, []);
 eq('one planner listing both orders sets the run order',
    JSON.stringify([hr.known, hr.runs.map(runSaid)]),
@@ -2174,6 +2193,18 @@ async function nucbox() {
     eq('...nor one the router refuses outright (router down)',
        await nbx.runLine([SQ, { lat: 34.1, lon: -84.6 }]), null);
     eq('...nor a run of one point', await nbx.runLine([SQ]), null);
+    /* The held order's run between offers (owner, 19 Oct: a straight
+       pickup -> dropoff with the router set): one question per leg, from
+       the cache after. */
+    var beforeAgain = fake.asked.length;
+    var again = await nbx.runLine([SQ, A, B, S]);
+    eq('[road run] the same run asked again is answered from the cache: nothing new '
+       + 'is asked', fake.asked.length - beforeAgain, 0);
+    eq('[road run] ...and is the same road', JSON.stringify(again), JSON.stringify(run4));
+    var visitedRun = await nbx.runLine([SQ, S]);
+    ok_('[road run] a new leg (the pickup visited) is car -> end along the road',
+        JSON.stringify(visitedRun) === JSON.stringify([[SQ.lat, SQ.lon], [SQ.lat, S.lon],
+                                                          [S.lat, S.lon]]));
     var asked = fake.asked.filter(function (u) { return /^\/route/.test(u); });
     ok_('...and the router was never asked about any fourth point (' + asked.length + ' routes)',
         asked.every(function (u) { return u.split('?')[0].split(';').length <= 3; }));

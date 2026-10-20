@@ -4785,6 +4785,7 @@ const framed = (page) => page.waitForFunction(
                    .test(String(m.popup || ''))).length,
                  run: cls.some((c) => /mv-held-run/.test(c)),
                  extra: cls.some((c) => /mv-detour/.test(c)),
+                 job: cls.some((c) => /mv-job/.test(c)),
                  numbered: (window.__letters || []).some((l) => /^\d+$/.test(
                    String(((l.opts || {}).icon || {}).html || ''))) };
       });
@@ -7227,6 +7228,126 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  /* --- the held order's run along the roads, between offers ----------------
+   *
+   * The owner's 19 Oct fault: between offers, with the NucBox's router set,
+   * Map view drew the held order as a straight line from its pickup pin to
+   * its dropoff pin — the run with no car in it, because the car came off a
+   * card and there was none. Now the live fix starts it (MV.routeFrom), and
+   * it is car -> pickup -> end along the roads; one road question per leg
+   * and per 300 m. Then a card: its own trip in its own colour. The router
+   * is faked at the page's relay, its road turning east-west then
+   * north-south leg by leg. Invented places. */
+  for (const which of ['road', 'noRoad']) {
+    stage = 'the map mode: the held run along the roads (' + which + ')';
+    const PLACES = { '310 Mill St, Roswell, GA 30075': [34.010, -84.610],
+                     'Powder Springs Rd': [33.900, -84.600],
+                     'Chipotle (Barrett Pkwy)': [34.020, -84.580],
+                     'Canton Rd, Marietta': [33.980, -84.500] };
+    const page = await browser.newContext({ viewport: { width: 1024, height: 600 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
+    await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+      const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
+      const hit = PLACES[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
+    });
+    const routes = [];
+    await page.route('**/api/nbx**', (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname === '/api/nbx') {
+        return route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify({ ok: true, search: false, route: which === 'road', streets: false }) });
+      }
+      routes.push(u.pathname + u.search);
+      if (which !== 'road') {
+        return route.fulfill({ status: 503, contentType: 'application/json',
+          body: JSON.stringify({ unreachable: true, error: 'down' }) });
+      }
+      const pts = (u.searchParams.get('points') || '').split(';').map((x) => {
+        const [lon, lat] = x.split(',').map(Number); return [lat, lon]; });
+      const line = [pts[0]];
+      for (let i = 1; i < pts.length; i++) line.push([pts[i - 1][0], pts[i][1]], pts[i]);
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, metres: 5000, snaps: pts.map(() => 3), line: line }) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    const card = await page.evaluate(() => window.__CARD);
+    const heldCard = await page.evaluate(() => window.__HELD);
+    const A = { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd', holdId: 'rr-a@1',
+                card: heldCard, endPinned: false, arrived: false, endWhy: null, visited: [] };
+    const fix = (lat) => ({ lat: lat, lon: -84.5499, gpsAge: 0.6, gpsErr: 27.8, gpsMode: 3,
+                            gpsOk: true, gpsWhy: null, freshFor: 19.4 });
+    const beat = (lat, visited) => ({ alive: true, at: Date.now(),
+      gps: { state: 'ok', ageSeconds: 0.6, fix: fix(lat) },
+      heldEnd: { endPinned: false, arrived: false, endWhy: null, visited: visited } });
+    const runs = () => page.evaluate(() => (window.__lines || []).filter(
+      (l) => !/mv-casing/.test(String((l.opts || {}).className || ''))).map((l) => ({
+        cls: String((l.opts || {}).className || ''), pts: l.pts, color: (l.opts || {}).color })));
+    const wait = () => page.waitForTimeout(1000);
+    // Until the held run (and, `job`, the card's trip) is drawn as `test`
+    // wants it: the pins land one a second, so a fixed wait is a race.
+    const until = (lat, n, job) => page.waitForFunction((x) => {
+      const ls = (window.__lines || []).filter((l) => !/mv-casing/.test(String((l.opts || {}).className || '')));
+      const h = ls.filter((l) => /mv-held-run/.test(String((l.opts || {}).className || '')));
+      return h.length && h[0].pts.length === x.n && h[0].pts[0][0] === x.lat
+        && (!x.job || ls.some((l) => /mv-job/.test(String((l.opts || {}).className || ''))
+                                    && (x.job !== 'road' || /mv-road/.test(String(l.opts.className)))));
+    }, { lat: lat, n: n, job: job }, { timeout: 8000 }).catch(() => {});
+    const R = which === 'road';
+    await push(beat(33.9526, []));
+    await push({ holding: A });
+    await push({ planner: { stops: [
+      { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700, street: '310 Mill St',
+        city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
+        city: 'Marietta', line: 'Powder Springs Rd' }], unfiled: null, asked: true, ms: null, at: 1 } });
+    await page.click('#viewMode');
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');
+    await until(33.9526, R ? 5 : 3);
+    const r = { idle: await runs(), idleRoutes: routes.length,
+                said: await page.evaluate(() => ((n) => (n.classList.contains('chipped')
+                  ? n.title : n.textContent))(document.getElementById('viewNote')).trim()),
+                mode: await page.evaluate(() => document.getElementById('viewMode').textContent) };
+    // With the router down, the straight run is the whole question.
+    if (!R) { out['roadRun_' + which] = r; await page.close(); continue; }
+    // A beat 100 m on: the same run, nothing asked.
+    await push(beat(33.9535, []));
+    await wait();
+    r.nearRoutes = routes.length;
+    // ...330 m on: asked again, from there.
+    await push(beat(33.9556, []));
+    await until(33.9556, R ? 5 : 3);
+    r.far = await runs();
+    r.farRoutes = routes.length;
+    // ...the restaurant behind the car: car -> end.
+    await push(beat(33.9556, ['310 Mill St, Roswell, GA 30075']));
+    await until(33.9556, R ? 3 : 2);
+    r.visited = await runs();
+    // ...and a card screened: its own trip, in its own colour, beside the run.
+    await push({ ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0,
+      pay: 14.25, minutes: 20.0, miles: 9.4, cost: 1.4, target: 25, band: 15, holding: A,
+      offer: Object.assign({ id: 'rr-1', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+                             miles: 9.4, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+                             dropoff: 'Canton Rd, Marietta' }, card, { miles: 9.4 }) });
+    await until(33.9526, R ? 3 : 2, R ? 'road' : 'any');
+    r.offer = await runs();
+    r.offerKey = await page.evaluate(() => {
+      const k = document.getElementById('mapKey');
+      return k.hidden ? null : k.innerText.replace(/\s+/g, ' ').trim();
+    });
+    out['roadRun_' + which] = r;
+    await page.close();
+  }
+
   /* --- two orders in the car, on the map ------------------------------------
    *
    * With carrying two on: the first order's end pinned D1, the second's D2,
@@ -7918,6 +8039,48 @@ try:
        (_zax in (_bs.get('pins') or []), _canton in (_bs.get('pins') or []),
         _held in (_bs.get('pins') or []), _bs.get('said')),
        (False, False, True, 'no card up — only the order in your car'))
+
+    # The owner's 19 Oct fault: between offers the held order was a straight
+    # pickup -> dropoff with the router set. Now car -> pickup -> end along the
+    # road from the live fix, re-asked per leg and per 300 m, straight only
+    # with no router; and a screened card's trip in its own colour.
+    def _rr_road(*pts):
+        out_ = [list(pts[0])]
+        for a, b in zip(pts, pts[1:]):
+            out_ += [[a[0], b[1]], list(b)]
+        return out_
+    _rr = got.get('roadRun_road') or {}
+    _rn = got.get('roadRun_noRoad') or {}
+    _mill, _psr = (34.010, -84.610), (33.900, -84.600)
+    def _held(ls):
+        return [l for l in ls or [] if 'mv-held-run' in l.get('cls', '')]
+    eq('[road run] between offers the held order is drawn car -> pickup -> dropoff along '
+       'the road from the live fix, not a straight pickup -> dropoff',
+       [(l['cls'], l['pts']) for l in _held(_rr.get('idle'))],
+       [('mv-held-run mv-road', _rr_road((33.9526, -84.5499), _mill, _psr))])
+    eq('[road run] ...a fix 100 m on asks the router nothing new',
+       _rr.get('nearRoutes'), _rr.get('idleRoutes'))
+    ok_('[road run] ...a fix 330 m on asks again and starts the road there (%r)'
+        % ([l['pts'][:1] for l in _held(_rr.get('far'))],),
+        (_rr.get('farRoutes') or 0) > (_rr.get('idleRoutes') or 0)
+        and [l['pts'] for l in _held(_rr.get('far'))]
+        == [_rr_road((33.9556, -84.5499), _mill, _psr)])
+    eq('[road run] ...and with the restaurant behind the car, car -> dropoff along the road',
+       [l['pts'] for l in _held(_rr.get('visited'))],
+       [_rr_road((33.9556, -84.5499), _psr)])
+    eq('[road run] with the router down the run is the straight car -> pickup -> dropoff',
+       [(l['cls'], l['pts']) for l in _held(_rn.get('idle'))],
+       [('mv-held-run', [[33.9526, -84.5499], list(_mill), list(_psr)])])
+    _job = [l for l in _rr.get('offer') or [] if 'mv-job' in l.get('cls', '')]
+    _hr = _held(_rr.get('offer'))
+    ok_('[road run] a screened card\'s own trip is drawn pickup -> dropoff along the road in '
+        'teal, beside the held run in amber (%r, %r)'
+        % ([(l['cls'], l['color']) for l in _job], [l['color'] for l in _hr]),
+        len(_job) == 1 and _job[0]['cls'] == 'mv-job mv-road' and _job[0]['color'] == '#2dd4bf'
+        and _job[0]['pts'] == _rr_road((34.020, -84.580), (33.980, -84.500))
+        and _hr and all(l['color'] == '#f5a524' for l in _hr))
+    ok_('[road run] ...and the key names both trips (%r)' % _rr.get('offerKey'),
+        '━ run' in (_rr.get('offerKey') or '') and '━ offer' in (_rr.get('offerKey') or ''))
 
     eq('[carry two] Map view pins the two orders\' ends D1 and D2, and a pickup one '
        'order\'s card names P2', got.get('mapTwo'), ['D1', 'D2', 'P', 'P2'])
@@ -9882,7 +10045,7 @@ try:
        'drawn), the lettered pins, the run, the extra and the numbers, and nothing '
        'the public map\'s answers do not have', (on.get('keyShown'), on.get('keyText')),
        (True, ("◯ reach · " if any(h.get('shown') for h in _how) else '')
-        + 'PD pin · ━ run · ┅ extra · 12 order'))
+        + 'PD pin · ━ run · ━ offer · ┅ extra · 12 order'))
 
     # THE figure, and the reason this mode exists. The driver's words: "if it
     # makes sense to pickup the second offer since it would be mostly along the
@@ -10402,6 +10565,8 @@ try:
             parts.append('● found' if short else '● also found')
         if any(' mv-out ' in c + ' ' for c in cls): parts.append('○ outside')
         if now.get('run'): parts.append('━ run')
+        # ...and the offer's own trip beside it, in its own colour.
+        if now.get('job') and now.get('run'): parts.append('━ offer')
         # The dashed leg is the run's extra only where there is a run to add
         # it to: with the order's end unpinned it is the drive to the pickup.
         if now.get('extra') and now.get('run'): parts.append('┅ extra')

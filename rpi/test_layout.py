@@ -2457,7 +2457,7 @@ const SNAP_MEASURE = (fixture) => {
           key.querySelector('.k-all').hidden = failed;
           key.querySelector('.k-fail').hidden = !failed;
           key.querySelector('.k-item[data-k="hpick"]').hidden = !hpick;
-          ['run', 'extra', 'order'].forEach((k) => {
+          ['run', 'job', 'extra', 'order'].forEach((k) => {
             key.querySelector('.k-item[data-k="' + k + '"]').hidden = !lines;
           });
           const r = key.getBoundingClientRect();
@@ -2486,7 +2486,7 @@ const SNAP_MEASURE = (fixture) => {
           key.querySelector('.k-all').hidden = false;
           key.querySelector('.k-fail').hidden = true;
           key.querySelector('.k-item[data-k="hpick"]').hidden = false;
-          ['run', 'extra', 'order'].forEach((k) => {
+          ['run', 'job', 'extra', 'order'].forEach((k) => {
             key.querySelector('.k-item[data-k="' + k + '"]').hidden = true;
           });
           return out;
@@ -5793,8 +5793,8 @@ try:
                     key.get('inside') and key.get('belowZoom')
                     and 1 <= (key.get('rows') or 9) <= 2 and not key.get('spills'))
                 eq('...saying them after the rest at %s' % panel, key.get('text'),
-                   "◯ reach · PD%s · ● found · ○ outside · P held pickup · ━ run · ┅ extra "
-                   "· 12%s" % (('', '') if h <= 380 else (' pin', ' order')))
+                   "◯ reach · PD%s · ● found · ○ outside · P held pickup · ━ run · ━%s · ┅ extra "
+                   "· 12%s" % (('', '', '') if h <= 380 else (' pin', ' offer', ' order')))
                 key = phone.get('keyFailed') or {}
                 ok_('the key saying how each place was found was not drawn sits inside '
                     'the map, below the zoom buttons, in one row, nothing cut, at %s (%r)'

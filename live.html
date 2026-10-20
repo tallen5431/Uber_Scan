@@ -854,6 +854,7 @@
      order the car would call at them, as the pins carry them. */
   #mapKey .k-run { color: #f5a524; font-weight: 700; }
   #mapKey .k-extra { color: #c084fc; font-weight: 700; }
+  #mapKey .k-job { color: #2dd4bf; font-weight: 700; }
   #mapKey .k-num { display: inline-block; min-width: 1.15em; margin-right: 1px;
                    border: 1px solid var(--text); border-radius: 50%; text-align: center;
                    font-weight: 700; line-height: 1.15; box-sizing: border-box; }
@@ -902,7 +903,9 @@
        short key was 226px of words for the 214 the hat's map gives it
        (measured, DejaVu Sans 12px), and the letters say what they are on
        the pins themselves. The same for the word after the numbered
-       stops' 1 2. */
+       stops' 1 2, and after the offer's own trip, which its teal says
+       beside the run's amber: with it the full key was three rows there
+       (measured, rpi/test_layout.py). */
     #mapKey .k-pinword { display: none; }
     /* ...and with the order's run, the extra and the numbered stops in it
        as well that is still three rows (ending 209, 190 and 15px in), the
@@ -1641,6 +1644,7 @@
       class="k-item" data-k="out"><span class="k-sep"> · </span><span class="k-out">○</span> outside</span><span
       class="k-item" data-k="hpick"><span class="k-sep"> · </span><span class="k-hpick">P</span> held pickup</span><span
       class="k-item" data-k="run" hidden><span class="k-sep"> · </span><span class="k-run">━</span> run</span><span
+      class="k-item" data-k="job" hidden><span class="k-sep"> · </span><span class="k-job">━</span><span class="k-pinword"> offer</span></span><span
       class="k-item" data-k="extra" hidden><span class="k-sep"> · </span><span class="k-extra">┅</span> extra</span><span
       class="k-item" data-k="order" hidden><span class="k-sep"> · </span><span class="k-num">1</span><span class="k-num">2</span><span class="k-pinword"> order</span></span></span><span class="k-fail" hidden>how each was found: not drawn</span></div><div id="mapTip" hidden></div></div>
     <!-- What the "you are here" dot says about itself — "±12 m · 2 s old" —
@@ -6221,6 +6225,9 @@
      stays is the order in the car, whose run is the map's job between
      offers, and the caption says the card has gone. */
   var cardReadAt = 0;
+  // Where the held order's run was last started with no card's fix
+  // (MV.routeFrom, mapWants): { at, leg } or null.
+  var routeKept = null;
   function cardOnMap() {
     return !!onRecord && Date.now() - cardReadAt <= READ_STALE_MS;
   }
@@ -6501,6 +6508,21 @@
     // can be drawn, and one through the first alone ignores an order in the
     // car (mapRefusal says so).
     var noEnd2 = !!second && !second.dropoff;
+    /* ...and where the held order's run starts when no card's fix starts it
+       (between offers, or a card that came up with none): the live fix,
+       kept per leg and per ROUTE_MOVE_M (MV.routeFrom), so the run goes car
+       -> pickup -> end along the roads, re-asked only when the car has
+       moved on or the leg changed — never the straight pickup -> end the
+       owner saw on 19 Oct, which was this run with no car in it. Drawing
+       only: no figure is measured from it. In the key, so a far move or a
+       new leg walks again. */
+    var dot = held && MV && MV.routeFrom && gpsNow
+      ? MV.hereDot(gpsNow.fix, Date.now() - gpsAt) : null;
+    routeKept = dot && !dot.line && !dot.grey
+      ? MV.routeFrom(routeKept, dot, [held, held2].concat(heldPicks.map(function (p) {
+          return p.q; })).join('|'))
+      : null;
+    var carNow = routeKept ? routeKept.at : null;
     /* The store's door, when DoorDash's place popup gave this card one while
        it was being screened (server.js popupArrived): searched IN PLACE OF the
        card's name for it, which is a store's name with its street cut off
@@ -6538,7 +6560,7 @@
              heldId: held ? heldId : null,
              held2: held2, heldCard2: held2 ? (second.card || null) : null,
              heldId2: held2 ? (second.holdId || null) : null,
-             runs: runs, noEnd2: noEnd2,
+             runs: runs, noEnd2: noEnd2, carNow: carNow,
              // The number each order goes by on the pins: ① and ② by holdId.
              heldNs: heldList.reduce(function (m, x) { m[x.holdId] = x.n; return m; }, {}),
              // The card is part of the key: two cards naming the same places
@@ -6563,7 +6585,11 @@
                // ...and which of its pickups are behind the car: a visit
                // moves the run and the figure under the same places.
                + (donePicks.length ? '~' + donePicks.map(function (p) { return p.q; }).join('|')
-                                   : ''),
+                                   : '')
+               // ...and where the run starts with no card's fix: it moves
+               // only per leg and per ROUTE_MOVE_M (MV.routeFrom).
+               + (carNow && !(card && MV.cardFix(card).at)
+                 ? '^' + carNow.lat + ',' + carNow.lon : ''),
              // What the NucBox said about these places on this walk: a
              // refusal per place, with the disc it was made in, and why the
              // NucBox could not be asked at all (and the public map was) —
@@ -6957,13 +6983,15 @@
           }
         }
       } else if (nbx.route && mapNbx) {
+        // From the card's fix, or with none the live one (want.carNow); with
+        // neither, its pickups -> its end, along the roads all the same.
         var hj = mapJudge(want, found, here);
-        var runPts = [here].concat(hj.heldPicks.filter(function (p) { return p.at; })
+        var runPts = [here || want.carNow].concat(hj.heldPicks.filter(function (p) { return p.at; })
           .map(function (p) { return p.at; }), [hj.held]).filter(Boolean);
         var trusted = hj.held && !hj.off.held && !hj.wrong[want.held]
           && hj.heldPicks.every(function (p) { return !p.at || (!p.off && !hj.wrong[p.q]); })
           && runPts.every(function (p) { return !p.stretch; });
-        if (here && trusted && runPts.length >= 2) {
+        if (trusted && runPts.length >= 2) {
           heldRoad = await mapNbx.runLine(runPts);
           if (viewMode !== 'map' || mapFor !== key) return;
         }
@@ -7424,7 +7452,8 @@
     // anything: with no NucBox there is nothing of how it was found to
     // explain, and a green ring beside the green pin is still a mark to name.
     // The same for the lines and the numbers.
-    mapKey.hidden = drawn === false && !heldPick && !lines.run && !lines.extra && !lines.order;
+    mapKey.hidden = drawn === false && !heldPick && !lines.run && !lines.extra && !lines.order
+      && !lines.job;
     mapKey.querySelector('.k-all').hidden = drawn === null;
     mapKey.querySelector('.k-fail').hidden = drawn !== null;
     if (drawn === null) return;
@@ -7432,6 +7461,7 @@
     has.hpick = !!heldPick;
     has.run = !!lines.run;
     has.extra = !!lines.extra;
+    has.job = !!lines.job;
     has.order = !!lines.order;
     // Kept for sizeDiscs, which takes the disc's item off while no disc is
     // shown at the zoom the map is at.
@@ -7686,7 +7716,7 @@
     if (j.runs) {
       (j.runs.known ? [j.runs.runs[0]] : j.runs.own).forEach(function (r, i) {
         var line = heldRoad && heldRoad.lines ? heldRoad.lines[i] : null;
-        var pts = line || MV.heldRun(here, r.slice(0, -1), r[r.length - 1]);
+        var pts = line || MV.heldRun(here || want.carNow, r.slice(0, -1), r[r.length - 1]);
         if (pts.length) {
           runLine(pts, { color: '#f5a524', opacity: .9,
                          className: 'mv-held-run' + (j.runs.known ? '' : ' mv-order-' + (i + 1))
@@ -7695,7 +7725,7 @@
         }
       });
     } else {
-      var run = heldRoad || (MV.heldRun ? MV.heldRun(here, heldAt, held)
+      var run = heldRoad || (MV.heldRun ? MV.heldRun(here || want.carNow, heldAt, held)
         : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []));
       if (run.length && (held || heldAt.some(Boolean))) {
         runLine(run, { color: '#f5a524', opacity: .9,
@@ -7738,10 +7768,15 @@
       drewExtra = true;
     }
     // The job itself, solid: along the road when the router drew it (see
-    // showMap), straight otherwise.
+    // showMap), straight otherwise. In its own teal, not the pickup pins'
+    // green: beside the held order's amber run the two trips are the
+    // comparison the driver opened the map for (owner, 19 Oct), and a green
+    // line read as one more pickup ring.
+    var drewJob = false;
     if (pick && drop) {
+      drewJob = true;
       runLine(jobRoad || [[pick.lat, pick.lon], [drop.lat, drop.lon]],
-              { color: '#17c964', opacity: .9,
+              { color: '#2dd4bf', opacity: .9,
                 className: 'mv-job' + (jobRoad ? ' mv-road' : '') });
     }
     if (gap.to) {
@@ -7769,7 +7804,8 @@
     showKey(drewHow, !!(held || pick || drop), heldAt.some(Boolean),
             // The lines only with an order in the car: with none the dashed
             // leg is the drive to the pickup, the key's as it always was.
-            { run: drewRun, extra: drewExtra && inCar, order: !!order });
+            { run: drewRun, extra: drewExtra && inCar, order: !!order,
+              job: drewJob && drewRun });
 
     /* THE VIEW: the car and the stops (`frame`), once per card — on the
        settled draw, which a walk makes once, when the card's answer is in —

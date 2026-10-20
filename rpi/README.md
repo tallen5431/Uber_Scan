@@ -8544,7 +8544,7 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 1337 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 1344 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
@@ -8581,7 +8581,7 @@ node tests/assemble.test.js     # 348 on where the order in the car ends: one
                                 #     offer's pickup is the store of an order
                                 #     in the car, by its door or, distinctive
                                 #     and close by, its name
-node tests/mapview.test.js      # 595 on the deciding behind both maps, with
+node tests/mapview.test.js      # 604 on the deciding behind both maps, with
                                 #     no map: the geometry, the cache, and the
                                 #     one-request-a-second rule against a fake
                                 #     clock, which is what makes the awkward
