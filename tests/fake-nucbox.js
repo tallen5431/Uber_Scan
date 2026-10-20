@@ -225,11 +225,33 @@ var BRINDLE_1106 = [
 var Streets = require('../streets.js');
 var NAMED_INDEX = Streets.build({
   format: Streets.FORMAT, e: 6,
-  names: ['Tamarons Lane', 'Brindlewood Way', 'Brindleton Court'],
+  names: ['Tamarons Lane', 'Brindlewood Way', 'Brindleton Court',
+          'Larkmoor Court', 'Hollin Road', 'Fennick Court'],
   nodes: [-84561000, 33975000, 2000, 400,            // Tamarons Lane
           21000, -10400, 2000, 0,                    // Brindlewood Way
-          -6000, 3000, 0, 2000],                     // Brindleton Court
-  ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]]] });
+          -6000, 3000, 0, 2000,                      // Brindleton Court
+          2000, -10000, 2700, 0, 0, 1000,            // Larkmoor Court, two ways, 360 m
+          -22700, -16000, 13000, 0,                  // Hollin Road, 1.2 km
+          -13000, 20000, 2000, 0,                    // Fennick Court, by the Square...
+          28000, -25000, 2000, 0],                   // ...and another, 2.3 mi south-east
+  ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]],
+         [[3], [6, 1]], [[3], [7, 1]], [[4], [9, 1]], [[5], [11, 1]], [[5], [13, 1]]] });
+
+/* Streets the NucBox's search holds without their house numbers, for the
+   held end by its street (server.js searchHeldStreet; the owner's fault of 19
+   Oct): "306 Larkmoor Ct" answers the court and not the house, and the index
+   above holds the court whole (360 m, two ways); "512 Hollin Rd" a road of
+   1.2 km; "77 Fennick Ct" two courts of that name, both inside a 5.0 mi
+   card's disc round the Square. Invented, every one. */
+var LARKMOOR = [place(121, 33.9600, -84.5387, 'highway', 'residential', 'Larkmoor Court',
+                      'Larkmoor Court, Marietta, Cobb County, Georgia, 30060, United States')];
+var HOLLIN = [place(122, 33.9450, -84.5535, 'highway', 'residential', 'Hollin Road',
+                    'Hollin Road, Marietta, Cobb County, Georgia, 30060, United States')];
+var FENNICK = [
+  place(123, 33.9650, -84.5590, 'highway', 'residential', 'Fennick Court',
+        'Fennick Court, Marietta, Cobb County, Georgia, 30060, United States'),
+  place(124, 33.9400, -84.5290, 'highway', 'residential', 'Fennick Court',
+        'Fennick Court, Marietta, Cobb County, Georgia, 30060, United States')];
 
 var CHURCH = [
   place(31, 33.9580, -84.5520, 'highway', 'tertiary', 'Church Street',
@@ -273,6 +295,9 @@ function search(q) {
     else if (term === '2040 tansy creek sw') all = TANSY_2040;
     else if (term === '1106 tamarons lane') all = TAMARONS_1106;
     else if (term === '1106 brindlewood way') all = BRINDLE_1106;
+    else if (/^\d+ larkmoor (ct|court)$/.test(term)) all = LARKMOOR;
+    else if (/^\d+ hollin (rd|road)$/.test(term)) all = HOLLIN;
+    else if (/^\d+ fennick (ct|court)$/.test(term)) all = FENNICK;
   }
   if (q.bounded === '1') all = all.filter(function (p) { return inBox(p, q.viewbox); });
   return all.slice(0, Number(q.limit) || 10);
@@ -376,6 +401,13 @@ function start(done) {
     // not a point (for the relay's all-or-nothing check). What a real index
     // answers is tests/streets.test.js's.
     // ...and /api/streets/named, by the real streets.js over NAMED_INDEX.
+    // ...and /api/streets/whole, the same way.
+    if (u.pathname === '/api/streets/whole') {
+      var wh = Streets.whole(NAMED_INDEX, String(u.query.name || ''),
+                             u.query.box ? Streets.boxOf(String(u.query.box)) : null);
+      wh.ok = true;
+      return json(200, wh);
+    }
     if (u.pathname === '/api/streets/named') {
       var nb = Streets.named(NAMED_INDEX, String(u.query.name || ''),
                              u.query.box ? Streets.boxOf(String(u.query.box)) : null);

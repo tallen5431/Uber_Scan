@@ -658,9 +658,71 @@ function stretch(ix, name, box, most) {
   return out;
 }
 
+/* The longest street `whole` sends the shape of. A street longer than this is
+   said by its length alone (`lines` null): the rig arms nothing on a street
+   over its own cap (server.js SHORT_STREET_M, far under this), so an
+   arterial's thousands of points are never sent for nothing. */
+var WHOLE_LINE_M = 2000;
+
+/* Every street named `name` that has a way inside `box`, each WHOLE — not cut
+   at the box's edge, because what the rig asks of it is how long the street
+   is: { names, how, streets: [{ metres, ways, lines }] }. A street is the
+   ways of that name joined where they share a node, so a court mapped as
+   three ways is one street and two courts of one name in two subdivisions
+   are two. `lines` are its ways' polylines, [[lat, lon], ...], or null past
+   WHOLE_LINE_M. No box, no answer, as for `named`: the box is what keeps the
+   question to the card's reach. Asked by server.js searchHeldStreet, the
+   owner's fault of 19 Oct (a court the NucBox holds without its house
+   numbers). */
+function whole(ix, name, box) {
+  var out = { names: [], how: null, streets: [] };
+  if (!box) return out;
+  var m = match(ix, name, box);
+  out.names = m.names;
+  out.how = m.how;
+  if (!m.keys.length) return out;
+  var all = waysIn(ix, m.keys, null);
+  var near = waysIn(ix, m.keys, box);
+  var group = all.map(function (w, i) { return i; });
+  function root(i) { while (group[i] !== i) i = group[i] = group[group[i]]; return i; }
+  var owner = new Map();
+  all.forEach(function (w, i) {
+    for (var k = ix.start[w]; k < ix.start[w + 1]; k++) {
+      var nd = ix.nodes[k];
+      if (owner.has(nd)) group[root(i)] = root(owner.get(nd));
+      else owner.set(nd, i);
+    }
+  });
+  var by = new Map();
+  all.forEach(function (w, i) {
+    var r = root(i);
+    if (!by.has(r)) by.set(r, []);
+    by.get(r).push(w);
+  });
+  by.forEach(function (ws) {
+    if (!ws.some(function (w) { return near.indexOf(w) >= 0; })) return;
+    var len = 0, lines = [];
+    ws.forEach(function (w) {
+      var line = [];
+      for (var k = ix.start[w]; k < ix.start[w + 1]; k++) {
+        var nd = ix.nodes[k];
+        if (k > ix.start[w]) {
+          var pd = ix.nodes[k - 1];
+          len += metres(ix.lat[pd], ix.lon[pd], ix.lat[nd], ix.lon[nd]);
+        }
+        line.push([round6(ix.lat[nd]), round6(ix.lon[nd])]);
+      }
+      if (line.length >= 2) lines.push(line);
+    });
+    out.streets.push({ metres: Math.round(len), ways: ws.length,
+                       lines: len <= WHOLE_LINE_M ? lines : null });
+  });
+  return out;
+}
+
 module.exports = { FORMAT: FORMAT, words: words, split: split, cleaned: cleaned,
                    oneEdit: oneEdit, ocrMay: ocrMay, build: build, load: load,
                    match: match, cross: cross, stretch: stretch, metres: metres,
-                   named: named, cutFits: cutFits, CUT_KEEP: CUT_KEEP,
+                   named: named, whole: whole, WHOLE_LINE_M: WHOLE_LINE_M, cutFits: cutFits, CUT_KEEP: CUT_KEEP,
                    boxOf: boxOf, CLUSTER_M: CLUSTER_M, MEETS_MAX: MEETS_MAX,
                    POINTS_MAX: POINTS_MAX, TYPES: TYPES, DIRS: DIRS };

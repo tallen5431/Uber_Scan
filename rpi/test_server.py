@@ -6997,6 +6997,88 @@ try:
     finally:
         stop(_hkp)
 
+    # The owner's 19 Oct fault, invented: the Trip Planner gave "306 <Name>
+    # Ct" right, the NucBox's search holds the court and not house 306 ('no
+    # house number'), there is no place, and GPS arrival never armed. With
+    # NUCBOX_STREETS set the street index is asked for every street of that
+    # name reaching into the disc's box, whole (/api/streets/whole), and ONE
+    # short one (SHORT_STREET_M, 600 m) arms the GPS drop on the street
+    # (searchHeldStreet): arrival anywhere along it. The fake's Larkmoor
+    # Court (360 m, two ways), Hollin Road (1.2 km) and two Fennick Courts.
+    _sts, _stsays, _stj = _hksayer('street')
+    _stp, _stb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _sts,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_STREETS': _hkfake_base,
+                        'NUCBOX_TIMEOUT_MS': '800', 'GPS_DWELL_MS': '1000'}, _stj)
+
+    def _stbeat(lat, lon):
+        return {'alive': True, 'gps': {'state': 'ok', 'ageSeconds': 0.1, 'fix': {
+            'lat': lat, 'lon': lon, 'gpsAge': 0.1, 'gpsErr': 25.0, 'gpsMode': 3,
+            'gpsOk': True, 'gpsWhy': None, 'freshFor': 10.0}}}
+
+    def _stdrops(oid):
+        rows = [json.loads(l) for l in open(_stj) if l.strip()]
+        return [r.get('by') for r in rows if r.get('kind') == 'drop' and r.get('id') == oid]
+
+    try:
+        _n = len(_hkasked('/api/streets/whole'))
+        _atook(_stb, 's-court', '306 Larkmoor Ct, Marietta')
+        _h = _settled(_stb)
+        eq('[street arm] a short court the NucBox holds without house 306 arms the GPS drop on '
+           'the street, says so, and asked the index once',
+           (_h.get('endPinned'), _h.get('endBy'), _h.get('endWhy'),
+            len(_hkasked('/api/streets/whole')) - _n),
+           (True, 'street', None, 1))
+        # The far end of the court, about 270 m from the street's first point
+        # (the pin's lat/lon) and 30 m from the street itself.
+        _stsays([_stbeat(33.9613, -84.5373)] * 7)
+        ok_('[street arm] ...a dwell anywhere along the street is an arrival (its far end)',
+            (_holding(_stb) or {}).get('arrived'))
+        _stsays([_stbeat(33.9620, -84.5373)] * 3)
+        ok_('[street arm] ...staying near the street does not drop', _holding(_stb))
+        _stsays([_stbeat(33.9680, -84.5373)] * 3)
+        eq('[street arm] ...and leaving it puts the order down, once, by the GPS',
+           (_holding(_stb), _stdrops('s-court')), (None, ['gps']))
+
+        _atook(_stb, 's-road', '512 Hollin Rd, Marietta')
+        _h = _settled(_stb)
+        eq('[street arm] a road of 1.2 km is never armed by its street: the refusal stands',
+           (_h.get('endPinned'), _h.get('endBy'), _h.get('endWhy')),
+           (False, None, 'no house number'))
+        _atook(_stb, 's-two', '77 Fennick Ct, Marietta')
+        _h = _settled(_stb)
+        eq('[street arm] two short courts of one name inside the disc are neither',
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+
+        _n = len(_hkasked('/api/streets/whole'))
+        _atook(_stb, 's-guard', '306 Larkmoor Ct, Marietta')
+        _h = _settled(_stb)
+        eq('[street arm] the next order to that court is armed from the cache',
+           (_h.get('endPinned'), _h.get('endBy'), len(_hkasked('/api/streets/whole')) - _n),
+           (True, 'street', 0))
+        # A pickup 55 m from the court's far end, 280 m from its first point.
+        post(_stb, '/api/held-pickup', {'holdId': _h.get('holdId'),
+                                        'lat': 33.9615, 'lon': -84.5373})
+        eq('[street arm] a held pickup within 150 m of ANY point of the street disarms it',
+           (_holding(_stb) or {}).get('endWhy'), 'door next to the pickup')
+        _stsays([_stbeat(33.9613, -84.5373)] * 7 + [_stbeat(33.9680, -84.5373)] * 3)
+        eq('[street arm] ...so waiting there and leaving drops nothing',
+           (bool(_holding(_stb)), _stdrops('s-guard')), (True, []))
+        post(_stb, '/api/delivered', {})
+    finally:
+        stop(_stp)
+    _sts, _stsays, _stj = _hksayer('street-unset')
+    _stp, _stb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base,
+                        'NUCBOX_TIMEOUT_MS': '800'}, _stj)
+    try:
+        _n = len(_hkasked('/api/streets/whole'))
+        _atook(_stb, 's-unset', '306 Larkmoor Ct, Marietta', miles=4.0)
+        _h = _settled(_stb)
+        eq('[street arm] with NUCBOX_STREETS unset the index is never asked, nothing armed',
+           (_h.get('endPinned'), _h.get('endWhy'), len(_hkasked('/api/streets/whole')) - _n),
+           (False, 'no house number', 0))
+    finally:
+        stop(_stp)
+
     # A NucBox that is down, so nothing is cached and every question shows:
     # the same planner read three times asks once (the retry is a minute off),
     # and a pickup with no street is never asked.
