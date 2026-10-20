@@ -8544,7 +8544,7 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 1337 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 1338 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
@@ -8559,7 +8559,7 @@ python3 rpi/test_offerspage.py  # 545 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 983 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 984 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8574,7 +8574,7 @@ python3 rpi/test_map.py         # 231 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
-node tests/assemble.test.js     # 348 on where the order in the car ends: one
+node tests/assemble.test.js     # 354 on where the order in the car ends: one
                                 #     hold decided as before, and a Trip Planner
                                 #     filed from pages stitched only on the cues
                                 #     the screen gives; and on whether an
