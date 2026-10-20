@@ -327,6 +327,8 @@
   }
   .offer button.took.on { color: var(--go); border-style: solid; opacity: 1; }
   .offer button.took:disabled { opacity: .3; }
+  /* The order in the car right now (paintInCar), in the ✓'s own green. */
+  .offer .tag.incar { color: var(--go); }
 
   /* A pairing row carries more in its summary than an offer row does — a range,
      two payouts, a span, a verdict chip and where both jobs end — so its places
@@ -3446,6 +3448,7 @@
     Array.prototype.forEach.call(el.log.querySelectorAll('details.offer'), function (d) {
       if (wasOpen[d.getAttribute('data-id')]) d.open = true;
     });
+    paintInCar();
     if (y) window.scrollTo(0, y);
 
     // Say what the filter did, because an empty list and a list with nothing
@@ -3666,6 +3669,7 @@
     // it is short of the window, so a cap that arrives some other way cannot
     // be silent either.
     el.csv.href = '/api/journal.csv?limit=0&' + windowQuery();
+    askInCar();
     fetch('/api/journal?' + windowQuery())
       .then(function (r) { return r.json(); })
       .then(function (data) { if (seq === loadSeq) render(data); })
@@ -4021,8 +4025,9 @@
     Array.prototype.forEach.call(offer.querySelectorAll('button'), function (b) {
       b.disabled = true;
     });
-    mark(body).then(function () {
-      offerUndo(what, undo);
+    mark(body).then(function (reply) {
+      // ...and what the ✓ did to the car, said after it (carSaid).
+      offerUndo(act === 'took' ? what + carSaid(reply && reply.car) : what, undo);
       load();
     }).catch(function () {
       // Not written into the tick. It sits in a folded row's summary, 52px
@@ -4075,6 +4080,80 @@
       });
     });
   });
+
+  /* --- the ✓ and the order in the car ----------------------------------------
+   *
+   * The owner's decision of 19 Oct 2026: the ✓ on a RECENT card is ✓ Took on
+   * the panel for that card — the server puts its order in the car from the
+   * card's own reading (server.js offersTickHolds) — and the ✓ taken back on
+   * an order in the car is Drop. Anything older is recorded only, as before.
+   * The server decides and says which in the reply's `car`; this page says it
+   * on the bar under the list, and marks the row of every order in the car
+   * "in car" from /api/status, whoever took it. */
+  var CAR_SAID = {
+    later: ' Recorded only: an order was taken after this card came up.',
+    old: ' Recorded only: too long ago to be in the car now.',
+    unseen: ' Recorded only: not a card the scanner has had since it last started.',
+    untimed: ' Recorded only: the card gave no time to hold it for.',
+    inCar: ' It is already in the car.'
+  };
+
+  function carSaid(car) {
+    if (!car) return '';
+    if (car.held === true) return ' It is in the car now, as ✓ Took would put it.';
+    if (car.putDown) return ' Put down, as Drop would.';
+    return CAR_SAID[car.why] || '';
+  }
+
+  // The ids of the orders in the car, off /api/status: `orders` while two are
+  // carried, else `holding`. Each is `<id>@<acceptedAt>` (holdIdOf).
+  var inCar = {};
+
+  function askInCar() {
+    fetch('/api/status')
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        var list = s && Array.isArray(s.orders) ? s.orders
+          : s && s.holding ? [s.holding] : [];
+        inCar = {};
+        list.forEach(function (o) {
+          var id = String((o && o.holdId) || '').replace(/@[^@]*$/, '');
+          if (id) inCar[id] = true;
+        });
+        paintInCar();
+      })
+      // Unreachable, the rows say nothing about the car rather than something
+      // stale; the list itself says the server cannot be reached.
+      .catch(function () { inCar = {}; paintInCar(); });
+  }
+
+  // A tag on the row, beside the ✓, and nothing on any other. In the place
+  // of the row's other tags while it stands ("during a job", "stacked on",
+  // "odd"): a ticked row on a 360px phone already fills its summary to the
+  // edge, and what the order is doing NOW is the one to read. Put back when
+  // the order leaves the car.
+  function paintInCar() {
+    Array.prototype.forEach.call(el.log.querySelectorAll('details.offer'), function (d) {
+      var had = d.querySelector('summary .tag.incar');
+      var want = !!inCar[d.getAttribute('data-id')];
+      if (had && !want) {
+        had.parentNode.removeChild(had);
+        Array.prototype.forEach.call(d.querySelectorAll('summary .tag[data-incar-hid]'),
+          function (t) { t.hidden = false; t.removeAttribute('data-incar-hid'); });
+      }
+      if (!had && want) {
+        Array.prototype.forEach.call(d.querySelectorAll('summary .tag'), function (t) {
+          t.hidden = true;
+          t.setAttribute('data-incar-hid', '');
+        });
+        var tag = document.createElement('span');
+        tag.className = 'tag incar';
+        tag.textContent = 'in car';
+        var took = d.querySelector('summary [data-act="took"]');
+        if (took) took.parentNode.insertBefore(tag, took.nextSibling);
+      }
+    });
+  }
 
   function mark(body) {
     return fetch('/api/offers/mark', {
