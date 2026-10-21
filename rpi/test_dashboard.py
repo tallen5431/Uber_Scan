@@ -1234,6 +1234,12 @@ const framed = (page) => page.waitForFunction(
                  heldEnd: { endPinned: true, arrived: false, endBy: 'place', endWhy: null } });
     await tick(300);
     const byPlace = await held();
+    // ...and by the short street the NucBox holds without the house
+    // (server.js searchHeldStreet, `endBy` 'street').
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: true, arrived: false, endBy: 'street', endWhy: null } });
+    await tick(300);
+    const byStreet = await held();
     await push({ alive: true, at: Date.now(), atDropoff: false,
                  heldEnd: { endPinned: false, arrived: false, endBy: null,
                             endWhy: 'no door, place not found' } });
@@ -1266,6 +1272,37 @@ const framed = (page) => page.waitForFunction(
     await push({ ready: false, state: 'empty', track: null });
     await tick(300);
     const batchBetween = await held();
+    // ...and while a card is being read, the line under READING THE CARD.
+    await push({ reading: true });
+    await tick(100);
+    const batchReading = await held();
+    await push({ ready: false, state: 'empty', track: null });
+    // ...and a count of one is no batch: nothing said.
+    await push({ holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
+                            dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                            endPinned: true, endWhy: null, arrived: false, drops: 1 } });
+    await tick(300);
+    const oneDrop = await held();
+    // [in car list] Under an offer the in-car line is the card's last
+    // (#detail .held): a tap on it opens the offers page too. The navigation
+    // is caught and cancelled in the page (the Navigation API's `navigate`),
+    // so the page stays for what follows.
+    const tapGoes = (sel) => page.evaluate((s) => {
+      const asked = [];
+      const h = (e) => { asked.push(e.destination.url.replace(/^.*\//, '')); e.preventDefault(); };
+      navigation.addEventListener('navigate', h);
+      const el = document.querySelector(s);
+      if (el) el.click();
+      navigation.removeEventListener('navigate', h);
+      return asked;
+    }, sel);
+    await push(Object.assign({}, READINGS.deducted, {
+      holding: { pay: 28.08, minutes: 40, holdId: 'h-in-car@1',
+                 dropoff: '4821 Kestrel Dr, Marietta, GA 30064', card: null,
+                 endPinned: true, endWhy: null, arrived: false },
+      stack: null }));
+    await tick(300);
+    const detailTap = await tapGoes('#detail .held');
     // ...and the order goes, the card with it.
     await push({ holding: null });
     await push({ ready: false, state: 'empty', track: null });
@@ -1273,8 +1310,10 @@ const framed = (page) => page.waitForFunction(
     const gone = await held();
     out.heldCard = { tookUp: tookUp, tookGoneNow: tookGoneNow, tookGoneLater: tookGoneLater,
                      empty: empty, between: between, visited: visited,
-                     refused: refused, byPlace: byPlace, noPlace: noPlace, arrived: arrived,
+                     refused: refused, byPlace: byPlace, byStreet: byStreet, noPlace: noPlace,
+                     arrived: arrived,
                      offerUp: offerUp, batchUp: batchUp, batchBetween: batchBetween,
+                     batchReading: batchReading, oneDrop: oneDrop, detailTap: detailTap,
                      gone: gone };
     await page.close();
     await ctx.close();
@@ -4736,17 +4775,20 @@ const framed = (page) => page.waitForFunction(
                    hasTotal: true, legs: 2, whole: true };
       const push = (a) => page.evaluate((x) => {
         const card = Object.assign({}, x.SQ, x.card || {});
-        window.__es.push({
+        const m = {
           ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0, pay: 14.25,
           minutes: 20.0, miles: card.miles, cost: 1.4, target: 25, band: 15,
           holding: { pay: 9.0, minutes: 18.0,
                      dropoff: x.held || 'Shadowood Pkwy SE, Atlanta', place: x.place || null,
-                     endPinned: !!x.endAt, endBy: x.endBy || null, endAt: x.endAt || null,
+                     endPinned: x.endPinned !== undefined ? x.endPinned : !!x.endAt,
+                     endBy: x.endBy || null, endAt: x.endAt || null, holdId: x.holdId || null,
                      card: Object.assign({}, x.SQ, { miles: 9.4 }, x.heldCard || {}) },
           offer: Object.assign({ id: x.id, pay: 14.25, minutes: 20.0,
                                  billedMinutes: 20.0, cost: 1.4,
                                  pickup: x.pickup || "McDonald's (Marietta Sq)",
-                                 dropoff: x.dropoff || 'Church St, Marietta' }, card) });
+                                 dropoff: x.dropoff || 'Church St, Marietta' }, card) };
+        if (x.stack) m.stack = x.stack;
+        window.__es.push(m);
       }, Object.assign({ SQ: SQ }, a));
       const note = () => page.evaluate(
         () => ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(document.getElementById('viewNote')).trim());
@@ -4929,6 +4971,28 @@ const framed = (page) => page.waitForFunction(
                      endBy: null, endAt: { lat: 33.9701, lon: -84.5302 } });
         await page.waitForTimeout(1500);
         r.ownPostHeld = await heldPin();
+        // ...nor a point the server does not say is pinned; and a pin the
+        // server makes later, said on a BEAT for the same card
+        // (heldEnd.endAt), is drawn then: the map walks again for it.
+        // Never posted back to the server as Map view's door, even for an end
+        // whose text names its house apart ("4821, Kestrel Dr": the shape
+        // MV.hasDoor reads as a door).
+        const srvPosts = [];
+        const srvSeen = (q) => {
+          if (/\/api\/held-end$/.test(new URL(q.url()).pathname)) srvPosts.push(q.postData());
+        };
+        page.on('request', srvSeen);
+        await push({ id: 'n-srv4', held: '4821, Kestrel Dr, Marietta', holdId: 'n-srv4@1',
+                     endPinned: false, endBy: 'street', endAt: { lat: 33.9701, lon: -84.5302 } });
+        await page.waitForTimeout(1500);
+        r.serverBefore4 = await heldPin();
+        await page.evaluate(() => window.__es.push({ alive: true, at: Date.now(),
+          heldEnd: { endPinned: true, arrived: false, endWhy: null, endBy: 'street',
+                     endAt: { lat: 33.9701, lon: -84.5302 } } }));
+        await page.waitForTimeout(1500);
+        page.off('request', srvSeen);
+        r.serverHeld4 = await heldPin();
+        r.serverPosts = srvPosts;
         // A place name longer than the relay will pass on: refused by this
         // rig's own server, which is a bug in the question, not a NucBox down.
         await push({ id: 'n-bug', pickup: 'Q'.repeat(121) });
@@ -5124,6 +5188,19 @@ const framed = (page) => page.waitForFunction(
                            (k) => String(k.popup || '').indexOf('pick up the order in your car') >= 0)
                            .length) };
         await page.evaluate(() => { window.MapView.detourThrough = window.__thru; });
+        // [on time] With the NucBox search set the card's way line says the
+        // road miles the new pickup adds, so the pair line's fallback does
+        // not say them twice (live.html onTimeSaid, waySearch).
+        await push({ id: 'n-offway', stack: { pay: 40.0, worst: 18.2, best: 31.0,
+          minMinutes: 40, maxMinutes: 65, leftMinutes: 40, state: 'warn', sure: false,
+          uncosted: false, ends: null, offWayMi: 1.24 } });
+        await page.waitForTimeout(300);
+        r.offWay = await page.evaluate(() => {
+          const ot = document.querySelector('#stack .ontime');
+          const more = document.querySelector('#stack .more');
+          return { ontime: ot ? ot.textContent.trim() : null,
+                   more: more ? more.textContent.replace(/\s+/g, ' ').trim() : null };
+        });
       }
       if (which === 'noSearch') {
         // The public map, which the stub answers for these three: nothing,
@@ -6701,6 +6778,16 @@ const framed = (page) => page.waitForFunction(
     await push({ ready: false, state: 'empty', track: null });
     await tick(1100);
     const between = await look();
+    // [in car list] ...a tap on ②'s line opens the offers page, as ①'s does
+    // (the navigation cancelled in the page, so the page stays).
+    const line2Tap = await page.evaluate(() => {
+      const asked = [];
+      const h = (e) => { asked.push(e.destination.url.replace(/^.*\//, '')); e.preventDefault(); };
+      navigation.addEventListener('navigate', h);
+      document.getElementById('heldLine2').click();
+      navigation.removeEventListener('navigate', h);
+      return asked;
+    });
     // A card up, and its pair line, with both in the car: against both
     // (Advice.stackMany, which says how many, `heldCount`).
     await push(Object.assign({}, READINGS.deducted, {
@@ -6757,6 +6844,9 @@ const framed = (page) => page.waitForFunction(
     const onTimes = {};
     for (const [k, extra] of [['both', { onTime: 'both' }],
                               ['late2', { onTime: 'late2', lateMin: 7 }],
+                              ['late1', { onTime: 'late1', lateMin: 12 }],
+                              ['noMin', { onTime: 'late2', lateMin: null }],
+                              ['miles', { offWayMi: 1.24 }],
                               ['none', {}]]) {
       await push(Object.assign({}, READINGS.deducted, { holding: A, orders: [A], unowned: 0,
         stack: Object.assign({}, oneStack, extra) }));
@@ -6888,6 +6978,7 @@ const framed = (page) => page.waitForFunction(
     await tick(300);
     const addOnLeft = await look();
     out.carryTwo = { added: added, undoGone: undoGone, undone: undone, between: between,
+                     line2Tap: line2Tap,
                      addOnTwo: addOnTwo, addOnThree: addOnThree, addOnOffer: addOnOffer,
                      addOnLeft: addOnLeft,
                      offerUp: offerUp, offerFirst: offerFirst, chooser: chooser,
@@ -7353,7 +7444,26 @@ const framed = (page) => page.waitForFunction(
                   ? n.title : n.textContent))(document.getElementById('viewNote')).trim()),
                 mode: await page.evaluate(() => document.getElementById('viewMode').textContent) };
     // With the router down, the straight run is the whole question.
-    if (!R) { out['roadRun_' + which] = r; await page.close(); continue; }
+    if (!R) {
+      // ...and a fix gone grey (stale) starts no run: pickup -> end, no car.
+      await push({ alive: true, at: Date.now(),
+        gps: { state: 'stale', ageSeconds: 60,
+               fix: Object.assign(fix(33.9600), { gpsOk: false, gpsWhy: 'stale', gpsAge: 60 }) },
+        heldEnd: { endPinned: false, arrived: false, endWhy: null, visited: [] } });
+      await until(34.010, 2);
+      r.grey = await runs();
+      // ...and two orders in the car, a good fix again: each order's own
+      // straight run starts at the live fix too.
+      const B = { n: 2, pay: 7.0, minutes: 20.0, dropoff: 'Canton Rd, Marietta',
+                  holdId: 'rr-b@2', card: heldCard, endPinned: false, arrived: false,
+                  endWhy: null, visited: [] };
+      await push(beat(33.9526, []));
+      await push({ holding: Object.assign({ n: 1 }, A), orders: [Object.assign({ n: 1 }, A), B] });
+      await until(33.9526, 3);
+      await wait();
+      r.two = await runs();
+      out['roadRun_' + which] = r; await page.close(); continue;
+    }
     // A beat 100 m on: the same run, nothing asked.
     await push(beat(33.9535, []));
     await wait();
@@ -7363,9 +7473,10 @@ const framed = (page) => page.waitForFunction(
     await until(33.9556, R ? 5 : 3);
     r.far = await runs();
     r.farRoutes = routes.length;
-    // ...the restaurant behind the car: car -> end.
-    await push(beat(33.9556, ['310 Mill St, Roswell, GA 30075']));
-    await until(33.9556, R ? 3 : 2);
+    // ...the restaurant behind the car, 100 m on: a new leg, so car -> end
+    // from where the car is now, not the start kept for the last leg.
+    await push(beat(33.9565, ['310 Mill St, Roswell, GA 30075']));
+    await until(33.9565, R ? 3 : 2);
     r.visited = await runs();
     // ...and a card screened: its own trip, in its own colour, beside the run.
     await push({ ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0,
@@ -7957,6 +8068,12 @@ try:
            'hint',
            [(_ot.get(k) or {}).get('ontime') for k in ('both', 'late2', 'none')],
            ['both on time ·', '② late ~7 min ·', None])
+        eq('on time: the held order late is ①; a late with no minutes says nothing; with no '
+           'deadline and no NucBox search, the road miles the new pickup adds',
+           [(_ot.get(k) or {}).get('ontime') for k in ('late1', 'noMin', 'miles')],
+           ['① late ~12 min ·', None, '+1.2 mi out of the way ·'])
+        eq('[in car list] with two in the car a tap on ②\'s line opens the offers page too',
+           ct.get('line2Tap'), ['journal.html#incar'])
         eq('...first in the pair line\'s words, and nothing else on the card moves: the '
            'verdict, the rest of the words, the address line',
            [((_ot.get(k) or {}).get(f) == (_ot.get('none') or {}).get(f), k, f)
@@ -8113,12 +8230,21 @@ try:
         (_rr.get('farRoutes') or 0) > (_rr.get('idleRoutes') or 0)
         and [l['pts'] for l in _held(_rr.get('far'))]
         == [_rr_road((33.9556, -84.5499), _mill, _psr)])
-    eq('[road run] ...and with the restaurant behind the car, car -> dropoff along the road',
+    eq('[road run] ...and with the restaurant behind the car, a new leg: car -> dropoff along '
+       'the road from where the car is now, 100 m on',
        [l['pts'] for l in _held(_rr.get('visited'))],
-       [_rr_road((33.9556, -84.5499), _psr)])
+       [_rr_road((33.9565, -84.5499), _psr)])
     eq('[road run] with the router down the run is the straight car -> pickup -> dropoff',
        [(l['cls'], l['pts']) for l in _held(_rn.get('idle'))],
        [('mv-held-run', [[33.9526, -84.5499], list(_mill), list(_psr)])])
+    eq('[road run] ...and a fix gone grey starts no run: pickup -> dropoff with no car',
+       [(l['cls'], l['pts']) for l in _held(_rn.get('grey'))],
+       [('mv-held-run', [list(_mill), list(_psr)])])
+    eq('[road run] ...and with two orders in the car each one\'s straight run starts at the '
+       'live fix',
+       [(l['cls'], l['pts']) for l in _held(_rn.get('two'))],
+       [('mv-held-run mv-order-1', [[33.9526, -84.5499], list(_psr)]),
+        ('mv-held-run mv-order-2', [[33.9526, -84.5499], [33.980, -84.500]])])
     _job = [l for l in _rr.get('offer') or [] if 'mv-job' in l.get('cls', '')]
     _hr = _held(_rr.get('offer'))
     ok_('[road run] a screened card\'s own trip is drawn pickup -> dropoff along the road in '
@@ -8170,6 +8296,8 @@ try:
            (hc.get('refused') or {}).get('line'), '$28.08 in car · no house no.')
         eq('[place] an end the server pinned by its place is armed, and says so',
            (hc.get('byPlace') or {}).get('line'), '$28.08 in car · ● armed by place')
+        eq('[street arm] an end the server armed by the short street says so',
+           (hc.get('byStreet') or {}).get('line'), '$28.08 in car · ● armed by street')
         eq('[place] ...and a place refused too, in a few words',
            (hc.get('noPlace') or {}).get('line'), '$28.08 in car · no door/place')
         _a = hc.get('arrived') or {}
@@ -8202,6 +8330,13 @@ try:
             (hc.get('batchBetween') or {}).get('line')),
            ('· In car $28.08 · ▸ 2 drops, Burger Barn · ● armed',
             '$28.08 in car · 2 drops · ● armed'))
+        eq('[batch] ...and beside the pay on the line under READING THE SCREEN',
+           ((hc.get('batchReading') or {}).get('label'), (hc.get('batchReading') or {}).get('line')),
+           ('READING THE SCREEN', 'In car $28.08 · 2 drops · ▸ Burger Barn · ● armed'))
+        eq('[batch] ...and a count of one says nothing of drops',
+           (hc.get('oneDrop') or {}).get('line'), '$28.08 in car · ● armed')
+        eq('[in car list] under an offer a tap on the card\'s in-car line opens the offers '
+           'page too', hc.get('detailTap'), ['journal.html#incar'])
         no_('...in place of the read diagnostics', _o.get('diagShown'))
         # Took names the last offer on record after its card has gone. With
         # the age, the driver can tell it is not the card they just screened.
@@ -10315,6 +10450,14 @@ try:
         both.get('serverHeld') == [33.9701, -84.5302]
         and 'not that door' not in (both.get('serverNote') or '')
         and both.get('ownPostHeld') is None)
+    eq('[server pin] ...nor a point the server does not say is pinned; and a pin the server '
+       'makes later, said on a beat for the same card, is drawn then, and never posted back '
+       'as Map view\'s door',
+       (both.get('serverBefore4'), both.get('serverHeld4'), both.get('serverPosts')),
+       (None, [33.9701, -84.5302], []))
+    eq('[on time] with the NucBox search set the pair line leaves the road miles to the '
+       'card\'s way line',
+       both.get('offWay'), {'ontime': None, 'more': 'with the one you have, over 40–65 min'})
     ok_('a question this rig\'s server refuses is said as a bug, never as the '
         'NucBox down (%r)' % both.get('bug'),
         re.match(r'^no pin for Q+… — a bug: the rig refused the question$',
