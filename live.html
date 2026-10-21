@@ -38,8 +38,21 @@
     /* Half each, for the scene view — a picture of the cabin is landscape and
        does use the width it is given. The phone view overrides this below,
        because a portrait picture does not. */
+    /* The picture on the LEFT and the verdict on the right, which is the
+       owner's (21 Oct): "Could you swap the camera/phone feed to the left side
+       of the screen? I use the touch screen as a magnifying glass to read my
+       phone while it is in the mount." The panel is on the driver's right, so
+       the left of it is the near side — the side a hand reaches to tap the
+       picture up to full size.
+
+       By name rather than by number, so the swap is these templates and
+       nothing else: every item below is placed in `pic` or `card`, and each
+       template says which side those are on. A template with one column names
+       it both, so a card-side item (the chooser, the Undo) cannot be pushed
+       into an implicit second column when the other side is not there. */
     #app { display: grid;
-           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+           grid-template-columns: [pic-start] minmax(0, 1fr)
+                                  [pic-end card-start] minmax(0, 1fr) [card-end];
            grid-template-rows: minmax(0, 1fr) auto auto;
            align-content: start; }
     /* `safe`, which is the difference between overflowing downward and
@@ -48,7 +61,7 @@
        so on the one screen whose whole job is to show a verdict, the verdict's
        name was the first thing to be clipped away. `safe center` centres while
        it fits and falls back to the top when it does not. */
-    .live { grid-column: 1; grid-row: 1; justify-content: safe center; }
+    .live { grid-column: card; grid-row: 1; justify-content: safe center; }
     /* The panel takes the height of the row it is in rather than only the
        height of its own words. On a 1280x800 panel the verdict was 352px of a
        788px column and the rest was black — the same complaint that started
@@ -114,9 +127,19 @@
        
        Stretched, the wrapper is the row, the percentage has a number to
        resolve against, and the picture is centred inside it whole. */
-    #viewWrap { grid-column: 2; grid-row: 1; margin: 0; min-height: 0;
+    #viewWrap { grid-column: pic; grid-row: 1; margin: 0; min-height: 0;
                 align-self: stretch; display: flex;
-                align-items: center; justify-content: center; }
+                align-items: center; justify-content: safe center; }
+    /* `safe`, for the same reason as the card's, and it took the pane moving
+       to the left to show it. While ▣ Set box is drawing, its line and its
+       buttons are items in this row beside the scene picture, and the row is
+       wider than the pane; centred, it spilled out of both ends. On the right
+       of the panel the near end ran over the card and stayed on the glass. On
+       the left it runs off it: measured at 800x480, the picture's left edge at
+       -29px, so a box dragged from near that edge started off the screen and
+       was never drawn (rpi/test_dashboard.py, "snap: two boxes"). `safe`
+       starts the row at the pane's edge when it does not fit and spills it
+       toward the card, as before; when it fits, nothing moves. */
     /* Bounded by the row it is in rather than by the viewport. It used to be
        `100dvh - 132px`, which is a guess at what the bars below it cost, and a
        guess that is too big overflows the page — the whole reason the bottom
@@ -147,16 +170,19 @@
        rather than sitting in half of it beside a black rectangle. The view is
        what gives way, because it matters while aiming the mount and the
        verdict is why the screen is bolted to the dashboard. */
-    #app:has(#viewWrap.gone) { grid-template-columns: minmax(0, 1fr); }
+    #app:has(#viewWrap.gone) {
+      grid-template-columns: [pic-start card-start] minmax(0, 1fr) [pic-end card-end];
+    }
     #viewWrap.gone { display: none; }
     /* ...and the other way round, in Map view between offers: the card has
        nothing on it but WAITING FOR AN OFFER (setBetween says when), and the
        map takes its column. Measured on the 1024x600 panel in the driver's
        photograph, the map was 500px of the 1008 across. The card comes back
        in the render that brings an offer. */
-    body.between #app:has(#liveMap:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
+    body.between #app:has(#liveMap:not([hidden])) {
+      grid-template-columns: [pic-start card-start] minmax(0, 1fr) [pic-end card-end];
+    }
     body.between #app:has(#liveMap:not([hidden])) .live { display: none; }
-    body.between #app:has(#liveMap:not([hidden])) #viewWrap { grid-column: 1; }
 
     /* Reading the phone rather than aiming at it.
      *
@@ -187,7 +213,9 @@
 
        So the column is sized to the picture and what is left goes to the
        verdict and the controls. Same phone, room for everything else. */
-    body.phoneview #app { grid-template-columns: minmax(0, 1fr) auto; }
+    body.phoneview #app {
+      grid-template-columns: [pic-start] auto [pic-end card-start] minmax(0, 1fr) [card-end];
+    }
     /* Down the whole panel, not just the row the verdict is in. The bar of
        controls and the connection line were spanning both columns, so the
        picture stopped 78px above the bottom of an 800x480 screen and the space
@@ -195,9 +223,9 @@
        every row to itself the same phone is 468px tall instead of 382, and the
        controls lose nothing — five buttons across the remaining 520px is still
        104px each. */
-    body.phoneview #viewWrap  { grid-column: 2; grid-row: 1 / -1; }
-    body.phoneview .connbar   { grid-column: 1; }
-    body.phoneview .bottombar { grid-column: 1; }
+    body.phoneview #viewWrap  { grid-column: pic; grid-row: 1 / -1; }
+    body.phoneview .connbar   { grid-column: card; }
+    body.phoneview .bottombar { grid-column: card; }
     body.phoneview #viewWrap { align-self: stretch; display: flex;
                                align-items: center; justify-content: center; }
     body.phoneview #viewWrap > img {
@@ -1221,15 +1249,15 @@
   }
   .undo[hidden] { display: none; }
   @media (orientation: landscape) {
-    /* In the verdict's own grid cell, over it: column one, row one. */
+    /* In the verdict's own grid cell, over it: the card column, row one. */
     #app > .chooser, #app > .undo {
       position: relative; left: auto; right: auto; top: auto; bottom: auto;
-      grid-column: 1; grid-row: 1; margin: 0;
+      grid-column: card; grid-row: 1; margin: 0;
     }
     #app > .undo { align-self: end; }
     #app > .moresheet {
       position: relative; left: auto; right: auto; bottom: auto;
-      grid-column: 1; grid-row: 1; margin: 0; align-self: end;
+      grid-column: card; grid-row: 1; margin: 0; align-self: end;
     }
     /* ...above the Undo while it shows (see .undo). */
     #app:has(> .undo:not([hidden])) > .moresheet {
@@ -1604,10 +1632,10 @@
 
        A child of #app rather than of .live, which is not a detail. On the rig's
        own dashboard panel #app becomes a two-column grid — the verdict beside
-       the camera view — and this carries `grid-column: 2`. Nested one level
+       the camera view — and this carries `grid-column: pic`. Nested one level
        deeper that property applied to nothing at all: .live is a flex column,
-       so the view stacked underneath the verdict inside the left-hand column,
-       and the right-hand column stayed empty. Measured on an 800x480 panel: two
+       so the view stacked underneath the verdict inside the verdict's column,
+       and the picture's column stayed empty. Measured on an 800x480 panel: two
        columns of 431px and 345px, the verdict rendered at 431px, the camera
        view at 431px below it, 43% of the glass black, and the page overflowing
        to 768px so the bottom bar fell off the bottom of the screen.
