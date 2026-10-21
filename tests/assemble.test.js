@@ -1751,6 +1751,85 @@ SEQ.forEach(function (seq) {
                 9000).candidates, []);
 })();
 
+/* ---- a single trip's dropoff whose header the reader lost (the owner, 20 Oct 21:08) ----
+ *
+ * tests/fixtures/cases.json's "a single trip's dropoff whose header the reader
+ * lost…" (names and streets invented): "Dropoff · 1 order" lost to OCR on a
+ * whole-screen read, the customer's door under the pickup's "View details",
+ * and the hold kept the card's end, "<Name> Creek Bivd, Marietta", no house
+ * number. The parser keeps the stop `partial: 'header'`; this files it only
+ * where the held card names its street (lostHeaderDropoff). */
+(function () {
+  var text = null;
+  require('./fixtures/cases.json').planner.forEach(function (c) {
+    if (/^a single trip's dropoff whose header the reader lost/.test(c.name)) text = c.text;
+  });
+  ok_('[lost header] the premise: the case is there', !!text);
+  if (!text) return;
+  function single(end, more) {
+    var h = Object.assign({ id: 'o', acceptedAt: 1000, tookAt: 1005, holdId: 'o@1000',
+                            card: { legs: 1, multiOrder: false }, app: 'uber',
+                            pickup: 'Fable Steakhouse (810 Ardley West Corwin Parkway)',
+                            dropoff: end, dropoffScanned: false }, more || {});
+    h.seenAs = { dropoff: end, tookAt: h.tookAt };
+    A.fieldsOf(h);
+    return h;
+  }
+  var END = 'Tansy Creek Bivd, Marietta';
+  var p = pageOf(text, 2000, false);
+  eq('[lost header] the premise: the page is the planner, its dropoff kept as header-lost, '
+     + 'not bounded, not laid out',
+     [p.screen, p.stops.map(function (s) { return [s.kind, s.orders, s.partial]; }),
+      p.page.top || p.page.bottom, p.laidOut],
+     ['uber.planner', [['pickup', 1, null], ['dropoff', null, 'header']], false, false]);
+  var h = single(END);
+  var c = A.sighting(A.fresh(), h, p, 2000).candidates;
+  eq('[lost header] unprompted, on a card whose end names the street ("Bivd" the reader\'s '
+     + 'Blvd), the door is a candidate, a single trip\'s',
+     c.map(function (x) { return [x.line, x.asked, x.singleCardOnly, x.labelled]; }),
+     [['2400 Tansy Creek Blvd, Marietta', false, true, 'dropoff']]);
+  var said = A.dropoff(h, c[0], null);
+  A.file(h, c[0], said, null);
+  eq('[lost header] ...and is filed over the card\'s own end, from the planner',
+     [said.to, said.from, h.dropoff, h.fields.dropoff.from],
+     ['hold', 'planner', '2400 Tansy Creek Blvd, Marietta', 'planner']);
+  eq('[lost header] a press on the same page files nothing (a press\'s rule is one dropoff '
+     + 'read whole)', A.sighting(A.fresh(), single(END), pageOf(text, 2000, true), 2000)
+       .candidates.length, 0);
+  eq('[lost header] a card whose end names another street, a town only, or nothing: nothing',
+     [single('Quillon Way, Marietta'), single('Marietta, GA'), single(null)].map(function (o) {
+       return A.sighting(A.fresh(), o, pageOf(text, 2000, false), 2000).candidates.length;
+     }), [0, 0, 0]);
+  eq('[lost header] an add-on trip\'s order: nothing (its list is two orders\')',
+     A.sighting(A.fresh(), single(END, { addOn: true, of: 'r@1' }), pageOf(text, 2000, false),
+                2000).candidates.length, 0);
+  var two = single(END, { card: { legs: 2, multiOrder: false } });
+  var c2 = A.sighting(A.fresh(), two, pageOf(text, 2000, false), 2000).candidates;
+  eq('[lost header] a card of two legs: the candidate is refused as not a single trip',
+     [c2.length, A.dropoff(two, c2[0], null).why], [1, 'not a single trip']);
+  var early = single(END);
+  var ce = A.sighting(A.fresh(), early, pageOf(text, 900, false), 900).candidates;
+  eq('[lost header] read before the Took: nothing filed',
+     ce.map(function (x) { return A.dropoff(early, x, null).to; }), [null]);
+  var other = { id: 'q', acceptedAt: 1500, tookAt: 1505, holdId: 'q@1500', app: 'uber',
+                card: { legs: 1, multiOrder: false }, pickup: 'Kestrel Noodle Bar',
+                dropoff: '903 Brindle Ct, Acworth', dropoffScanned: false };
+  other.seenAs = { dropoff: other.dropoff, tookAt: other.tookAt };
+  A.fieldsOf(other);
+  var pair = [single(END), other];
+  var cm = A.sighting(A.fresh(), pair, pageOf(text, 2000, false), 2000).candidates;
+  var r = cm.length ? A.attribute(A.fresh(), pair, cm[0]) : {};
+  eq('[lost header] with two orders held it is a `partial` candidate, and only the card\'s '
+     + 'street files it, on the order whose card names it',
+     [cm.map(function (x) { return [x.line, x.partial]; }), r.order && r.order.id, r.cue],
+     [[['2400 Tansy Creek Blvd, Marietta', true]], 'o', 'cardStreet']);
+  eq('[lost header] lostHeaderDropoff: a dropoff whose header read is not this rule\'s',
+     A.lostHeaderDropoff(single(END), [
+       { kind: 'pickup', orders: 1, street: '810 Ardley West Corwin Parkway', city: 'Kennesaw' },
+       { kind: 'dropoff', orders: 1, street: '2400 Tansy Creek Blvd', city: 'Marietta',
+         line: '2400 Tansy Creek Blvd, Marietta' }]), null);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

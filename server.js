@@ -2609,7 +2609,10 @@ function notOneCustomer(h) {
  * out (searchHeldRetry, MV.streetRetry: "1830 <Name> Creek Cts SW" asked
  * again as "1830 <Name> Creek SW", the 17 Oct evening snap), an answer kept
  * only at the same door on the same street (MV.pickRetry). Map view's
- * NbxSearch.place asks the same second question.
+ * NbxSearch.place asks the same second question. And where the street WAS
+ * found inside the reach and not the door, once more with a directional
+ * inside its name the other way (searchHeldDir, MV.dirRetry: "810 <A> West
+ * <B> Parkway" asked as "810 <A> W <B> Parkway", the 20 Oct fault).
  *
  * The public geocoder is never asked: it is the page's fallback, rationed and
  * outside the VPN, and a pin the GPS ends a delivery on is the NucBox's or
@@ -2772,9 +2775,30 @@ function searchHeldEnd(key, attempt) {
     if (NBX.streets && MV.nameWanted(res, out.hits, disc, null)) {
       return searchHeldNamed(key, attempt, disc, plan, res);
     }
+    // ...and the street found inside the disc and not the door, a directional
+    // inside its name the other way (MV.dirRetry; the 20 Oct "Ernest West
+    // Barrett" fault), before the place and the short street are asked.
+    var dir = MV.dirRetry(plan);
+    if (dir && MV.dirWanted(res, out.hits, disc)) {
+      return searchHeldDir(key, attempt, disc, dir, res);
+    }
     settleHeldEnd(key, attempt, disc, res, null);
   }
   endAsk(key, attempt, target, answered);
+}
+
+/* ...the directional retry: ONE more question, the street with its
+ * directional words the other way ("810 <A> West <B> Parkway" asked as "810
+ * <A> W <B> Parkway"), in the same discBox, through endAsk. Its answer is acted
+ * on only when it pinned the door on the same street (MV.pickRetry,
+ * MV.afterDir); else the first answer, a 'nodoor', goes on as before. */
+function searchHeldDir(key, attempt, disc, dir, first) {
+  var said = nbxTerm(dir.street);
+  if (!said) return settleHeldEnd(key, attempt, disc, first, null);
+  endAsk(key, attempt, nbxSearchTarget('street', said, MV.discBox(disc)), function (out) {
+    var two = MV.afterDir(first, MV.pickRetry(out.hits, disc, dir, out.cutAt));
+    settleHeldEnd(key, attempt, disc, two, two === first ? null : dir.street);
+  });
 }
 
 /* The door's answer acted on, from the first question or the retry (`asked`,
@@ -3007,7 +3031,9 @@ function pinMetres(p, pin) {
  * (searchHeldEnd): searchPlan's street in discBox round the HELD card's disc
  * (MV.discFor — a rough fix widened), chosen by pickInDisc, and the street
  * less its type word once more where the street as printed is not inside the
- * card's reach (MV.streetRetry, retryWanted, pickRetry, afterRetry). Map
+ * card's reach (MV.streetRetry, retryWanted, pickRetry, afterRetry), and
+ * with a directional inside its name the other way where the street was found
+ * inside and not the door (MV.dirRetry, dirWanted, afterDir). Map
  * view's own functions, so the page and the server keep one rule.
  *
  * DOOR LEVEL ONLY (pickupDoorPlan): an address with a house number, kept only
@@ -3146,6 +3172,19 @@ function searchHeldPickup(id, a, attempt) {
     var again = MV.streetRetry(plan);
     if (again && MV.retryWanted(res, out.hits, disc)) {
       return searchPickupRetry(id, a, attempt, disc, again, res);
+    }
+    // ...and the street found inside and not the door: a directional inside
+    // its name the other way (MV.dirRetry), as the held end asks it.
+    var dir = MV.dirRetry(plan);
+    if (dir && MV.dirWanted(res, out.hits, disc)) {
+      var said2 = nbxTerm(dir.street);
+      if (said2) {
+        return pickupAsk(id, a, attempt, nbxSearchTarget('street', said2, MV.discBox(disc)),
+          function (out2) {
+            var two = MV.afterDir(res, MV.pickRetry(out2.hits, disc, dir, out2.cutAt));
+            settleHeldPickup(id, a, two, two === res ? null : dir.street);
+          });
+      }
     }
     settleHeldPickup(id, a, res, null);
   });

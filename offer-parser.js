@@ -1795,12 +1795,66 @@
     }
     var top = plannerOrphan(lines, heads[0]);
     var stops = headedStops(lines, heads);
+    var lost = top ? null : plannerLostDropoff(lines, heads);
+    if (lost) stops.push(lost);
     var last = stops[stops.length - 1];
     if (!(last.street || last.city)
         && !lines.slice(heads[heads.length - 1] + 1).some(function (l) { return PLANNER_END.test(l); })) {
       last.partial = 'bottom';
     }
     return top ? [top].concat(stops) : stops;
+  }
+
+  /* The stop's icon read as letters in front of its name ("oO Outback
+     Steakhouse", "o <Customer> J" on the owner's read of 20 Oct): a first word
+     of one or two o's goes, with two letters in a row left after it. See
+     PLANNER_ICON in offer_parser.py. */
+  var PLANNER_ICON = /^[oO]{1,2}\s+(?=.*[A-Za-z]{2})/;
+
+  // A stop's name off its line, edge furniture and icon off; null with no two
+  // letters in a row. See _planner_name in offer_parser.py.
+  function plannerName(line) {
+    var name = String(line || '').replace(PLANNER_EDGE, '').replace(PLANNER_ICON, '')
+      .replace(PLANNER_EDGE, '');
+    return /[A-Za-z]{2}/.test(name) ? name : null;
+  }
+
+  /* The dropoff a single trip's planner lost the header of, `partial:
+     'header'`, or null: the page's one header a Pickup of "1 order" with no
+     stop above it, its block holding exactly two "Expected by", the pickup's
+     own "Address" and then "View details" straight over the lost stop's name,
+     and under its time an "Address" label with a street opening with a house
+     number and a town read. Its count null. See _planner_lost_dropoff in
+     offer_parser.py, which says why each part is asked. */
+  function plannerLostDropoff(lines, heads) {
+    if (heads.length !== 1) return null;
+    var head = PLANNER_STOP.exec(lines[heads[0]]);
+    if (!/^p/i.test(head[1]) || toNumber(head[2]) !== 1) return null;
+    var block = lines.slice(heads[0] + 1);
+    var times = [];
+    block.forEach(function (l, i) { if (PLANNER_EXPECTED.test(l)) times.push(i); });
+    if (times.length !== 2 || times[1] < 2) return null;
+    var t = times[1];
+    if (!PLANNER_DETAILS.test(block[t - 2])
+        || !block.slice(0, t - 2).some(plannerLabel)) return null;
+    if (plannerLabel(block[t - 1]) || PLANNER_DETAILS.test(block[t - 1])) return null;
+    var name = plannerName(block[t - 1]);
+    var rest = block.slice(t);
+    var label = -1;
+    for (var j = 0; j < rest.length; j++) {
+      if (plannerLabel(rest[j])) { label = j; break; }
+    }
+    if (!name || label === -1) return null;
+    var found = plannerAddressLines(rest, label);
+    var m = PLANNER_EXPECTED.exec(block[t]);
+    var stop = { kind: 'dropoff', orders: null, name: name,
+                 expectedBy: timeOfDay(m[1], m[2], m[3]) };
+    var where = plannerAddress(found.street, found.town, rest[label]);
+    Object.keys(where).forEach(function (key) { stop[key] = where[key]; });
+    if (!(stop.street && stop.city && /^\d/.test(stop.street))) return null;
+    stop.place = found.place;
+    stop.partial = 'header';
+    return stop;
   }
 
   function headedStops(lines, heads) {
@@ -1813,8 +1867,7 @@
       var name = null;
       if (block.length && !PLANNER_EXPECTED.test(block[0])
           && !plannerLabel(block[0])) {
-        name = block[0].replace(PLANNER_EDGE, '');
-        if (!/[A-Za-z]{2}/.test(name)) name = null;
+        name = plannerName(block[0]);
       }
       var due = null;
       for (var i = 0; i < block.length; i++) {

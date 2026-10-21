@@ -5180,6 +5180,9 @@ const framed = (page) => page.waitForFunction(
         r.stretchHow = await how();
         r.stretchKeyNow = await keyNow();
         r.stretchRoutesAfter = await routesAt();
+        r.stretchRun = await page.evaluate(() => (window.__lines || []).map(
+          (l) => String((l.opts || {}).className || ''))
+          .filter((c) => c.indexOf('mv-held-run') >= 0));
         r.stretchWant = await page.evaluate(() => {
           const MV = window.MapView, C = { lat: 33.9526, lon: -84.5499 };
           const A = { lat: 33.9830, lon: -84.5499 };
@@ -10462,8 +10465,14 @@ try:
     ok_('...its pin at the point of the stretch nearest the car (%r)' % (st.get('stretchHeld'),),
         st.get('stretchHeld')
         and abs(st['stretchHeld'][0] - 33.948) < 1e-6 and abs(st['stretchHeld'][1] + 84.552) < 1e-6)
-    eq('...and the router not asked: it measures one point, and the card names a street',
-       st.get('stretchRoutesAfter'), st.get('stretchRoutesBefore'))
+    # The owner, 20 Oct 21:08: the held run to Map view's own pin on a
+    # numberless street was drawn straight with the relay answering routes.
+    # The run is a drawing, no figure: it goes along the roads to the pin, one
+    # question, and the figure above stays the straight-line range.
+    eq('[held route] ...the run to it drawn along the roads, the router asked once for the '
+       'drawing and never for the figure',
+       ((st.get('stretchRoutesAfter') or 0) - (st.get('stretchRoutesBefore') or 0),
+        st.get('stretchRun')), (1, ['mv-held-run mv-road']))
     ok_('a numberless street whose figure is not one answer along it is refused, '
         'with how long it runs in the card (%r)' % st.get('longStreet'),
         re.match(r'^no figure for Northgate.* — the street runs 1\.4 mi in its card$',

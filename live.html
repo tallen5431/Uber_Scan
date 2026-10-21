@@ -7014,11 +7014,14 @@
       /* The held order's run along the roads, to draw: the car, its pickups
          with a pin, its end — the points heldRun draws straight. Drawing
          only; no figure comes of it. Not when any of them is a pin the map
-         calls wrong (red) or a numberless street's point (its card names the
-         street, not where on it): a road to a point nobody vouches for is a
-         road drawn with more confidence than the pin under it. With no
-         held pickups this is car -> held end, the question detour already
-         asked, answered from the page's cache. Router down: null, and the
+         calls wrong (red): a road to a point nobody vouches for is a road
+         drawn with more confidence than the pin under it. A numberless
+         street's point IS drawn to by road (the owner, 20 Oct 21:08: the
+         held end Map view's own pin on the card's "<Name> Creek Blvd", the
+         relay answering routes, and the run drawn straight): the card names
+         that street, the run is a drawing and no figure, and the detour's
+         figure to it stays the straight-line range (stretchSpan). With no
+         held pickups this is car -> held end. Router down: null, and the
          straight run as before. */
       var heldRoad = null;
       if (nbx.route && mapNbx && want.runs) {
@@ -7042,8 +7045,7 @@
         var runPts = [here || want.carNow].concat(hj.heldPicks.filter(function (p) { return p.at; })
           .map(function (p) { return p.at; }), [hj.held]).filter(Boolean);
         var trusted = hj.held && !hj.off.held && !hj.wrong[want.held]
-          && hj.heldPicks.every(function (p) { return !p.at || (!p.off && !hj.wrong[p.q]); })
-          && runPts.every(function (p) { return !p.stretch; });
+          && hj.heldPicks.every(function (p) { return !p.at || (!p.off && !hj.wrong[p.q]); });
         if (trusted && runPts.length >= 2) {
           heldRoad = await mapNbx.runLine(runPts);
           if (viewMode !== 'map' || mapFor !== key) return;

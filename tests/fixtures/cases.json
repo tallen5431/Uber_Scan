@@ -5296,6 +5296,159 @@
    ]
   },
   {
+   "name": "a single trip's dropoff whose header the reader lost, after its pickup's open block, is kept as the dropoff, its header said lost",
+   "_why": "Measured shape: the owner's whole-screen read of 20 Oct, 21:08, one Uber order held - \"Dropoff • 1 order\" lost to OCR, the customer's name, time and address under the pickup's \"View details\". The lost stop is kept, kind dropoff, count null (the header that said it is the line lost), `partial: 'header'`; the page is not bounded, since a header was lost. The icon read \"oO\" and \"o\" in front of both names goes. The assembler files it only where the held card's end names its street (tests/assemble.test.js). Names and streets invented.",
+   "text": "Pickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\no Pat J\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\nStop New Requests",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": null,
+     "name": "Pat J",
+     "expectedBy": 1294,
+     "street": "2400 Tansy Creek Blvd",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "2400 Tansy Creek Blvd, Marietta",
+     "place": null,
+     "partial": "header"
+    }
+   ]
+  },
+  {
+   "name": "...not when the pickup's count is two orders",
+   "_why": "Two orders picked up are two dropped off: the stop after the pickup need not be the only dropoff, and nothing is kept for the lost header. Invented.",
+   "text": "Pickup • 2 orders\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\no Pat J\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\n",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 2,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor when no \"View details\" closes the pickup's block over the lost name",
+   "_why": "Without the pickup's own link straight above it, the name is not proven the start of a new block. Invented.",
+   "text": "Pickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\no Pat J\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\n",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor when the lost stop's street has no house number",
+   "_why": "A street with no door is no door to file. Invented.",
+   "text": "Pickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\no Pat J\nExpected by 9:34 PM\nAddress\nTansy Creek Blvd\nMarietta, GA\nView details\n",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor when two headers were lost",
+   "_why": "Three \"Expected by\" under one header: which of the stops after it is the dropoff is not said. Invented.",
+   "text": "Pickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\no Pat J\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\nLee R.\nExpected by 9:50 PM\nAddress\n17 Quillon Way\nMarietta, GA\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a dropoff header read \"Dropoff +1 order\", the bullet as a plus, is a dropoff's header",
+   "_why": "Measured shape: the box read of the same block on 20 Oct, 21:08 - the bullet read \"+\", the icon \"©\". Its address carries no ZIP, so address_under_dropoff does not reach it; the planner's own grammar does. Invented names.",
+   "text": "Dropoff +1 order\n© Pat J.\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat J.",
+     "expectedBy": 1294,
+     "street": "2400 Tansy Creek Blvd",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "2400 Tansy Creek Blvd, Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and \"Dropoff + 1 order\", a space either side of the plus",
+   "_why": "Invented.",
+   "text": "Dropoff + 1 order\n© Pat J.\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat J.",
+     "expectedBy": 1294,
+     "street": "2400 Tansy Creek Blvd",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "2400 Tansy Creek Blvd, Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
    "name": "a dropoff header lost with its time leaves the list bounded on the glass, and the pickups' count says a dropoff is missing",
    "_why": "The first case with the lost stop's \"Expected by\" gone too: one time per block, so nothing on the page says a header went, and it reads as bounded with one dropoff, the second customer's. What does say so is the counts: the pickup carries 2 orders and the dropoffs read add up to 1. assemble.js refuses that list (listShort), and tests/assemble.test.js holds that nothing is filed. Invented.",
    "text": "Trip Planner\nPickup • 2 orders\nFable Grill\nExpected by 4:02 PM\nAddress\n12 Ab St\nKennesaw, GA\nView details\nPat Q.\nAddress\n17 Quillon Way\nMarietta, GA\nView details\nDropoff • 1 order\nLee R.\nExpected by 4:31 PM\nAddress\n903 Brindle Ct\nAcworth, GA\nView details\nWaybill",
@@ -5636,7 +5789,7 @@
     {
      "kind": "dropoff",
      "orders": 1,
-     "name": "oO Lee R. H",
+     "name": "Lee R. H",
      "expectedBy": 1185,
      "street": "283 Quillon St NW",
      "city": "Smyrna",

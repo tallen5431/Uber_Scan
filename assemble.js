@@ -967,6 +967,45 @@
     return addressOf(drops[0]);
   }
 
+  /* The address of a single trip's dropoff whose header the reader lost
+   * (offer_parser._planner_lost_dropoff, `partial: 'header'`), when the held
+   * order's OWN card names its street; null otherwise. The owner's read of 20
+   * Oct, 21:08: "Dropoff · 1 order" lost to OCR on a whole-screen read of the
+   * planner, the customer's name, time and door under the pickup's "View
+   * details", and the hold kept the card's end, "<Name> Creek Bivd, Marietta",
+   * with no house number.
+   *
+   * The parser keeps that stop only in one shape (one Pickup header of "1
+   * order", the pickup's block open and closed by "View details" straight over
+   * the lost name, exactly two "Expected by", a door with its town read), and
+   * never as bounded: the header that would say "dropoff" and "1 order" is
+   * the line lost, so plannerDestination and plannerLoneDropoff never file it
+   * (its count is null and listShort says so). What says it is THIS order's
+   * door is the witness the two-order rule already trusts (streetCues,
+   * `cardStreet`): the card the driver took names the street, streetCore to
+   * streetCore (house number, type and quadrant gone). So, all of:
+   *   - the list read is exactly one pickup of "1 order" and that one dropoff;
+   *   - one order held, not an add-on trip's (`addOn`, `of`), and asked by the
+   *     caller of an unprompted whole-screen read only;
+   *   - the held card's end (cardEndOf: what it printed) names the street;
+   *   - and, as the lone-dropoff rule, the card is one order on one leg
+   *     (`singleCardOnly`, asked by dropoff()).
+   * With two orders held the same stop is offered as sightingMany's `partial`
+   * candidates are, and only the cardStreet cue can file it. */
+  function lostHeaderDropoff(held, stops) {
+    var all = headed(stops);
+    var drops = all.filter(function (s) { return s.kind === 'dropoff'; });
+    var picks = all.filter(function (s) { return s.kind === 'pickup'; });
+    if (drops.length !== 1 || drops[0].partial !== 'header') return null;
+    if (picks.length !== 1 || picks[0].orders !== 1 || all.length !== 2) return null;
+    if (!held || held.addOn || held.of) return null;
+    var d = drops[0];
+    if (!(d.street && d.city)) return null;
+    var core = streetCore(d.street);
+    if (!core || cardStreets(cardEndOf(held)).indexOf(core) === -1) return null;
+    return addressOf(d);
+  }
+
   /* ---------- a batched Uber trip: one card, one Took, two doors -------------
    *
    * The owner's facts (17 and 19 Oct 2026): Uber sends BATCHED orders — ONE
@@ -1002,10 +1041,12 @@
    *     end. A card that printed no street ("Customer dropoff", a town) is no
    *     witness either way: 'no card street', and nothing is batched.
    * `why` is the refusal, said on /api/status as `batchWhy`. */
-  var BATCH_STREET_WORDS = /^(st|street|rd|road|dr|drive|ln|lane|ave|av|avenue|blvd|boulevard|ct|court|way|pkwy|pky|parkway|cir|circle|pl|place|trl|trail|ter|terrace|hwy|highway|sq|square|loop|run|path|pass|row|xing|crossing|pt|point|walk|trce|trace|cv|cove|n|s|e|w|ne|nw|se|sw|north|south|east|west|northeast|northwest|southeast|southwest)$/;
+  var BATCH_STREET_WORDS = /^(st|street|rd|road|dr|drive|ln|lane|ave|av|avenue|blvd|bivd|boulevard|ct|court|way|pkwy|pky|parkway|cir|circle|pl|place|trl|trail|ter|terrace|hwy|highway|sq|square|loop|run|path|pass|row|xing|crossing|pt|point|walk|trce|trace|cv|cove|n|s|e|w|ne|nw|se|sw|north|south|east|west|northeast|northwest|southeast|southwest)$/;
 
   // A street's name with its house number, its type and its directions gone:
-  // "40 Bramble Rd NW" and "Bramble Road" are both "bramble". Null for text
+  // "40 Bramble Rd NW" and "Bramble Road" are both "bramble". "Bivd" is the
+  // reader's i/l slip of "Blvd" (offer_parser's STREET_WORD takes it too): the
+  // owner's held card of 20 Oct printed "<Name> Creek Bivd, Marietta". Null for text
   // with no street word or house number in it, which is a town, not a street.
   function streetCore(text) {
     var ws = String(text || '').toLowerCase().replace(/['’]/g, '')
@@ -1187,7 +1228,11 @@
   // one that printed a header, the address block whole from whichever read
   // more of it — never a street off one page and a town off the other.
   function mergeStop(a, b) {
-    var head = a.kind ? a : b;
+    // A stop whose header the reader lost (`partial: 'header'`) has a kind
+    // the parser gave it, not one the screen printed: a page that read the
+    // header gives the header.
+    var real = function (x) { return !!x.kind && x.partial !== 'header'; };
+    var head = real(a) ? a : real(b) ? b : a.kind ? a : b;
     var addr = fuller(a, b);
     var out = {};
     Object.keys(a).concat(Object.keys(b)).forEach(function (k) { out[k] = null; });
@@ -1203,8 +1248,10 @@
     ADDRESS_KEYS.concat(['place']).forEach(function (k) {
       out[k] = addr[k] === undefined ? null : addr[k];
     });
-    out.partial = out.kind && (out.street || out.city) ? null
-      : (a.partial || b.partial || null);
+    var cut = function (x) { return x.partial !== 'header' && x.partial; };
+    out.partial = !real(a) && !real(b) && (a.partial === 'header' || b.partial === 'header')
+      ? 'header'
+      : out.kind && (out.street || out.city) ? null : (cut(a) || cut(b) || null);
     return out;
   }
 
@@ -1435,6 +1482,13 @@
     } else if (verdict.why === 'list' && titled) {
       var lone2 = plannerLoneDropoff(view.stops);
       if (lone2) cand = candidate(lone2, verdict.stop, page, false, true);
+    }
+    // ...and a single trip's dropoff whose header the reader lost, on the
+    // held card's own street (lostHeaderDropoff; the owner's read of 20 Oct).
+    // Unprompted only: a press's answer is the press's rule.
+    if (!cand && held && !page.asked && verdict.why === 'list') {
+      var lost = lostHeaderDropoff(held, view.stops);
+      if (lost) cand = candidate(lost, verdict.stop, page, false, true);
     }
     // A BATCHED TRIP (batchPlan): the owner's decision of 19 Oct 2026. With
     // ONE order held (`held` here is one: sightingMany takes two), an
@@ -2375,6 +2429,7 @@
            storeScreen: storeScreen, placeOf: placeOf, bracketDoor: bracketDoor,
            popup: popup, filePopup: filePopup, cardNames: cardNames,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
+           lostHeaderDropoff: lostHeaderDropoff,
            // ...and a batched trip's doors (the owner's decision of 19 Oct).
            batchPlan: batchPlan, batchWhy: batchWhy, cardStreets: cardStreets,
            streetCore: streetCore,

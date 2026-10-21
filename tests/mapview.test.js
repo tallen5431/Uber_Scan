@@ -1497,6 +1497,78 @@ async function nucbox() {
                      MV.afterRetry(first, null) === first]),
      JSON.stringify([{ lat: 1 }, 'nodoor', true, true, true]));
 
+  /* The door asked again with a directional inside its name the other way
+     (dirRetry; the owner's 20 Oct fault, "810 <A> West <B> Parkway" found as
+     the road and not the door). Invented streets (tests/fake-nucbox.js,
+     Ardley W Corwin Parkway). */
+  var DIRS = [
+    ['810 Ardley West Corwin Parkway, Kennesaw, GA 30144', '810 Ardley W Corwin Parkway',
+     ['ardley', 'w', 'corwin'], 'a middle initial spelled out'],
+    ['810 Ardley W Corwin Pkwy, Kennesaw', '810 Ardley West Corwin Pkwy',
+     ['ardley', 'w', 'corwin'], 'a middle initial as its letter'],
+    ['Outback Steakhouse (810 Ardley West Corwin Parkway)', '810 Ardley W Corwin Parkway',
+     ['ardley', 'w', 'corwin'], 'a store\'s bracketed door'],
+    ['810 Ardley Corwin Pkwy Northwest, Kennesaw', '810 Ardley Corwin Pkwy NW',
+     ['ardley', 'corwin'], 'a quadrant spelled out last'],
+    ['810 Ardley N Corwin Pkwy NW, Kennesaw', '810 Ardley North Corwin Pkwy Northwest',
+     ['ardley', 'n', 'corwin'], 'both, each the other way'],
+    ['810 West Paces Ferry Rd, Atlanta', null, null, 'only the name\'s opening word'],
+    ['810 Ardley West Corwin, Kennesaw', null, null, 'no type word after the name'],
+    ['810 N W Pkwy, Kennesaw', null, null, 'no name word that is not a directional'],
+    ['Ardley West Corwin Parkway, Kennesaw', null, null, 'no house number'],
+    ['4821 Kestrel Dr, Marietta', null, null, 'no directional anywhere']
+  ];
+  DIRS.forEach(function (c) {
+    var d = MV.dirRetry(MV.searchPlan(c[0]));
+    eq('dirRetry: ' + c[3] + ' (' + JSON.stringify(c[0]) + ')',
+       JSON.stringify(d ? [d.street, d.retry.name, d.retry.dirs, d.house] : null),
+       JSON.stringify(c[1] ? [c[1], c[2], true, '810'] : null));
+  });
+  eq('dirFlip: every directional both ways, and a name none',
+     JSON.stringify(['West', 'w', 'W.', 'NW', 'northwest', 'South', 'e', 'Westover'].map(MV.dirFlip)),
+     JSON.stringify(['W', 'West', 'West', 'Northwest', 'NW', 'S', 'East', null]));
+  var ard = MV.dirRetry(MV.searchPlan('810 Ardley West Corwin Parkway, Kennesaw'));
+  function dfits(name) { return MV.retryFits({ name: name }, ard); }
+  eq('retryFits (directional): the name with West or W, the type in any spelling or none, '
+     + 'a quadrant or none; another type, a dropped initial, another letter is not',
+     JSON.stringify([dfits('810, Ardley W Corwin Parkway Northwest, Kennesaw'),
+                     dfits('810, Ardley West Corwin Pkwy, Kennesaw'),
+                     dfits('810, Ardley W Corwin NW, Kennesaw'),
+                     dfits('810, Ardley W Corwin Circle Northwest, Kennesaw'),
+                     dfits('810, Ardley Corwin Parkway, Kennesaw'),
+                     dfits('810, Ardley E Corwin Parkway, Kennesaw')]),
+     JSON.stringify([true, true, true, false, false, false]));
+  var d50d = MV.discFor(card({ miles: 5.0 }));
+  var d10d = MV.discFor(card({ miles: 1.0 }));
+  var ardDoor = MV.pickRetry(hitsOf(FAKE.ARDLEY_810), d50d, ard, null);
+  eq('pickRetry (directional): the door 3.1 mi out inside a 5.0 mi card',
+     JSON.stringify(ardDoor.at && [ardDoor.at.lat, ardDoor.at.lon]), JSON.stringify([33.99, -84.58]));
+  eq('...outside a 1.0 mi card refused, the Circle\'s 812 never the Parkway\'s, the road alone '
+     + 'not the door',
+     JSON.stringify([MV.pickRetry(hitsOf(FAKE.ARDLEY_810), d10d, ard, null).why,
+                     MV.pickRetry(hitsOf(FAKE.ARDLEY_812), d50d,
+                                  MV.dirRetry(MV.searchPlan('812 Ardley West Corwin Parkway, X')),
+                                  null).why,
+                     MV.pickRetry(hitsOf(FAKE.ARDLEY_ROAD), d50d, ard, null).why]),
+     JSON.stringify(['none', 'none', 'nodoor']));
+  var roadIn = hitsOf(FAKE.ARDLEY_ROAD);
+  eq('dirWanted: only the street found inside the disc and not the door; never outside, none, '
+     + 'several, capped, a pin, or no disc',
+     JSON.stringify([MV.dirWanted({ at: null, why: 'nodoor' }, roadIn, d50d),
+                     MV.dirWanted({ at: null, why: 'nodoor' }, [far], d50d),
+                     MV.dirWanted({ at: null, why: 'none' }, roadIn, d50d),
+                     MV.dirWanted({ at: null, why: 'several' }, roadIn, d50d),
+                     MV.dirWanted({ at: null, why: 'capped' }, roadIn, d50d),
+                     MV.dirWanted({ at: { lat: 1, lon: 1 } }, roadIn, d50d),
+                     MV.dirWanted({ at: null, why: 'nodoor' }, roadIn, null)]),
+     JSON.stringify([true, false, false, false, false, false, false]));
+  eq('afterDir: the retry\'s answer only when it pinned; its street alone leaves the first\'s',
+     JSON.stringify([MV.afterDir(first, { at: { lat: 1 } }).at,
+                     MV.afterDir(first, { at: null, why: 'nodoor' }) === first,
+                     MV.afterDir(first, { at: null, why: 'unreachable' }) === first,
+                     MV.afterDir(first, null) === first]),
+     JSON.stringify([{ lat: 1 }, true, true, true]));
+
   /* The door by the one street the street index says the name as read is
      (the owner's 19 Oct night fault, "1106 <Name> Ln" read "<Nam..>r").
      Invented streets throughout (tests/fake-nucbox.js, Tamarons Lane). */
@@ -2038,6 +2110,30 @@ async function nucbox() {
     eq('...and with no disc, no retry', fake.asked.slice(n0).filter(function (u) {
       return /Tansy%20Creek%20SW/.test(u);
     }).length, 0);
+
+    // The 20 Oct fault, invented: "810 <A> West <B> Parkway" answered as the
+    // road inside the disc and not the door; asked once more with "W".
+    n0 = fake.asked.length;
+    got = await nbx.place('810 Ardley West Corwin Parkway, Kennesaw, GA 30144', d50t);
+    sent = fake.asked.slice(n0);
+    eq('through the server, a door printed with its directional spelled out is found with it '
+       + 'as its letter (' + sent.join(' ') + ')',
+       JSON.stringify([got.at && [got.at.lat, got.at.lon], sent.map(function (u) {
+         return decodeURIComponent(/street=([^&]*)/.exec(u)[1]);
+       })]),
+       JSON.stringify([[33.99, -84.58], ['810 Ardley West Corwin Parkway',
+                                         '810 Ardley W Corwin Parkway']]));
+    n0 = fake.asked.length;
+    got = await new MV.NbxSearch({ base: on.base + '/api/nbx' })
+      .place('Outback Steakhouse (810 Ardley West Corwin Parkway)', d50t);
+    eq('...a store\'s bracketed door the same, both questions from the server\'s cache',
+       JSON.stringify([got.at && got.at.lat, fake.asked.length - n0]), JSON.stringify([33.99, 0]));
+    got = await nbx.place('812 Ardley West Corwin Parkway, Kennesaw', d50t);
+    eq('...a house of that number on the Circle is not the Parkway\'s door: the road stands',
+       [got.at, got.why].join(','), ',nodoor');
+    got = await nbx.place('810 Ardley West Corwin Parkway, Kennesaw', MV.discFor(card({ miles: 1.0 })));
+    eq('...nor the door outside a 1.0 mi card, the road inside it',
+       [got.at, got.why].join(','), ',nodoor');
 
     // The 19 Oct night fault, invented: a door filed "1106 Tamaror", which
     // the search answers with nothing; the street index (the fake's, by the

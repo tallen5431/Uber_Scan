@@ -3209,9 +3209,7 @@ def find_planner(text):
         name = None
         if block and not PLANNER_EXPECTED.search(block[0]) \
                 and not _planner_label(block[0]):
-            name = PLANNER_EDGE.sub('', block[0])
-            if not re.search(r'[A-Za-z]{2}', name):
-                name = None
+            name = _planner_name(block[0])
         due = None
         for line in block:
             m = PLANNER_EXPECTED.search(line)
@@ -3247,11 +3245,117 @@ def find_planner(text):
         # PLANNER_HOUSE.
         stop['place'] = place
         stops.append(stop)
+    lost = _planner_lost_dropoff(lines, heads) if top is None else None
+    if lost is not None:
+        stops.append(lost)
     last = stops[-1]
     if not (last['street'] or last['city']) \
             and not any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:]):
         last['partial'] = 'bottom'
     return stops
+
+
+# THE STOP'S ICON, read as letters in front of its name. The planner draws a
+# round icon beside each stop's name; the reader turns it into "©", which
+# PLANNER_EDGE takes off, or into the letter o: "oO Outback Steakhouse" and
+# "o <Customer> J" on the owner's read of 20 Oct, 21:08 (the customer's name
+# left out here), and the panel showed the store as "oO Outback Steakhouse".
+# So a first word made only of one or two o's, in either case, goes too — but
+# only with two letters in a row left after it, so a name that IS "Oo" is not
+# emptied. No name the planner prints opens with a word of o's alone:
+# "O'Charley's" keeps its apostrophe and is one word.
+PLANNER_ICON = re.compile(r'^[oO]{1,2}\s+(?=.*[A-Za-z]{2})', ASCII)
+
+
+def _planner_name(line):
+    """A stop's name as the line under its header printed it, its edge
+    furniture (PLANNER_EDGE) and its icon (PLANNER_ICON) taken off; None
+    without two letters in a row, which is a mark and not a name."""
+    name = PLANNER_EDGE.sub('', PLANNER_ICON.sub('', PLANNER_EDGE.sub('', line or '')))
+    return name if re.search(r'[A-Za-z]{2}', name) else None
+
+
+# THE DROPOFF WHOSE HEADER THE READER LOST, on a single trip's planner. The
+# owner's read of 20 Oct, 21:08, one Uber order held (names and streets
+# invented here, the layout and the slips the reading's):
+#
+#     Pickup · 1 order             the one header that read
+#     oO Fable Steakhouse
+#     Expected by 9:05 PM
+#     Address
+#     810 Ardley West Corwin Parkway,
+#     Kennesaw, GA 30144
+#     View details                 the pickup's block, closed by its link
+#     o Pat J                      ...and the next stop's, its header lost
+#     Expected by 9:34 PM
+#     Address
+#     2400 Tansy Creek Blvd
+#     Marietta, GA
+#     View details
+#
+# "Dropoff · 1 order" went to OCR, so the dropoff's lines fell into the
+# pickup's block, find_planner made no dropoff, and the hold kept the card's
+# own end, a street with no house number. The block's second "Expected by"
+# already said a header was lost (planner_ends: unbounded) and kept the
+# pickup from taking the dropoff's address. What is new is that the lost stop
+# is kept as the dropoff — `partial: 'header'` — in exactly this shape, all of:
+#
+#   - the page's ONLY header is a Pickup of "1 order", with no stop above it
+#     (no orphan address block): one order picked up is one dropped off, and
+#     on a single trip the stop after its one pickup is that dropoff;
+#   - that header's block holds exactly two "Expected by" lines — one header
+#     lost, not two;
+#   - the pickup's own block above the second is OPEN and closed: its own
+#     "Address" label, and "View details" on the line straight above the lost
+#     stop's name — so the lines that follow are a new block by the screen's
+#     own layout, not the pickup's tail;
+#   - that name is a name (two letters in a row, not a label or a time), and
+#     under the second time an "Address" label with a street that opens with
+#     a house number and a town both read.
+#
+# Its count is None: the header that said it is the line that was lost. It is
+# never bounded (planner_ends), so plannerDestination never files it, nor the
+# lone-dropoff rule, which wants "1 order"; the assembler files it only on the
+# held card's own witness, the card's end naming this street (assemble.js,
+# lostHeaderDropoff; with two orders held, the cardStreet cue it is already
+# asked). It is not on the planner line (planner_stops). Measured before it
+# went in, over the shared corpus's 519 distinct texts (cases.json and
+# sequences.json): it adds a stop to none but the cases written for it. The
+# single trip whose pickup is closed ("...the pickup keeps no address of the
+# customer's") is unchanged: no "View details" stands over the lost name.
+def _planner_lost_dropoff(lines, heads):
+    """The dropoff a single trip's planner lost the header of, as a stop with
+    `partial: 'header'`, or None: see above."""
+    if len(heads) != 1:
+        return None
+    head = PLANNER_STOP.match(lines[heads[0]])
+    if head.group(1)[0] not in 'pP' or to_number(head.group(2)) != 1:
+        return None
+    block = lines[heads[0] + 1:]
+    times = [j for j, l in enumerate(block) if PLANNER_EXPECTED.search(l)]
+    if len(times) != 2 or times[1] < 2:
+        return None
+    t = times[1]
+    if not PLANNER_DETAILS.match(block[t - 2]) \
+            or not any(_planner_label(l) for l in block[:t - 2]):
+        return None
+    if _planner_label(block[t - 1]) or PLANNER_DETAILS.match(block[t - 1]):
+        return None
+    name = _planner_name(block[t - 1])
+    rest = block[t:]
+    label = next((j for j, l in enumerate(rest) if _planner_label(l)), None)
+    if name is None or label is None:
+        return None
+    street_line, town_line, place = _planner_address_lines(rest, label)
+    m = PLANNER_EXPECTED.search(block[t])
+    stop = {'kind': 'dropoff', 'orders': None, 'name': name,
+            'expectedBy': time_of_day(m.group(1), m.group(2), m.group(3))}
+    stop.update(_planner_address(street_line, town_line, rest[label]))
+    if not (stop['street'] and stop['city'] and re.match(r'\d', stop['street'])):
+        return None
+    stop['place'] = place
+    stop['partial'] = 'header'
+    return stop
 
 
 # UBER'S CUSTOMER SHEET IS NOT THE PLANNER, though it prints a stop header.

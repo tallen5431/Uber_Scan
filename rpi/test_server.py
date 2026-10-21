@@ -6586,6 +6586,30 @@ try:
         eq('[street retry] a door found as printed says no other street',
            (_h.get('endPinned'), _h.get('endAsked')), (True, None))
 
+        # The owner's 20 Oct fault, invented: the road's middle initial spelled
+        # out ("<A> West <B> Parkway"), the road found inside the disc and not
+        # the door; asked once more with "W" (MV.dirRetry), the door on the
+        # same street pinned, never a house of that number on another street.
+        _n = len(_aasked('Ardley'))
+        _atook(_ab, 'a-dir', '810 Ardley West Corwin Parkway, Kennesaw, GA 30144')
+        _h = _settled(_ab)
+        eq('[directional retry] a door whose road is found and not the door is asked once more '
+           'with the directional as its letter, pinned at the same street\'s door, and says how',
+           (_h.get('endPinned'), _h.get('endBy'), _h.get('endAsked'), _h.get('endWhy'),
+            [urllib.parse.unquote(u.split('street=')[1].split('&')[0])
+             for u in _aasked('Ardley')[_n:]]),
+           (True, 'server', '810 Ardley W Corwin Parkway', None,
+            ['810 Ardley West Corwin Parkway', '810 Ardley W Corwin Parkway']))
+        _atook(_ab, 'a-dir-circle', '812 Ardley West Corwin Parkway, Kennesaw, GA 30144')
+        _h = _settled(_ab)
+        eq('[directional retry] a house of that number on another street is not the door: the '
+           'road\'s refusal stands', (_h.get('endPinned'), _h.get('endAsked'), _h.get('endWhy')),
+           (False, None, 'no house number'))
+        _atook(_ab, 'a-dir-far', '810 Ardley West Corwin Parkway, Kennesaw, GA 30144', miles=1.0)
+        _h = _settled(_ab)
+        eq('[directional retry] ...nor the door outside the held card\'s disc',
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+
         # The same order, its dropoff changed by a ⌖ Scan: asked again.
         _atook(_ab, 'a-change', _KES, miles=6.0)
         _settled(_ab)
@@ -7330,6 +7354,24 @@ try:
            'again without it, as the end is, and says the street asked',
            (_h.get('pickupsPinned'), _h.get('pickupsHow')),
            (1, [{'by': 'server', 'from': 'card', 'asked': '1830 Tansy Creek SW'}]))
+        post(_spb, '/api/delivered', {})
+
+        # The owner's 20 Oct fault, invented: an Uber card's store door with
+        # the road's middle initial spelled out, its road found and not the
+        # door; asked again with "W", as the end is (MV.dirRetry).
+        _sptook(_spb, 's-dir', 'Example Steakhouse (810 Ardley West Corwin Parkway)',
+                dropoff=_KES, app='uber')
+        _h = _settled(_spb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
+        eq('[server pickups] a store door whose road is found and not the door is asked again '
+           'with the directional as its letter, and says the street asked',
+           (_h.get('pickupsPinned'), _h.get('pickupsHow')),
+           (1, [{'by': 'server', 'from': 'card', 'asked': '810 Ardley W Corwin Parkway'}]))
+        post(_spb, '/api/delivered', {})
+        _sptook(_spb, 's-dir-circle', 'Example Steakhouse (812 Ardley West Corwin Parkway)',
+                dropoff=_KES, app='uber')
+        _h = _settled(_spb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
+        eq('[server pickups] ...a house of that number on another street is not its door',
+           (_h.get('pickupsPinned'), _h.get('pickupsWhy')), (0, 'no house number'))
         post(_spb, '/api/delivered', {})
 
         # Left held for the restart below.

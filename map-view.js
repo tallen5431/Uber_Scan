@@ -1227,7 +1227,9 @@
     var words = (at >= 0 ? parts[at + 1] : parts[0] || '').split(/\s+/).filter(Boolean);
     var name = plan.retry.name;
     if (words.length < name.length) return false;
-    for (var i = 0; i < name.length; i++) if (words[i] !== name[i]) return false;
+    // A directional retry (dirRetry) holds "West" and "W" to be one word.
+    var fold = plan.retry.dirs ? dirFold : function (w) { return w; };
+    for (var i = 0; i < name.length; i++) if (fold(words[i]) !== name[i]) return false;
     var rest = words.slice(name.length);
     if (rest.length && streetType(rest[0]) === plan.retry.type) rest.shift();
     if (rest.length && QUADRANTS.indexOf(rest[0]) >= 0) rest.shift();
@@ -1254,6 +1256,92 @@
      after); else the first, whose refusal is what the driver is told. */
   function afterRetry(first, second) {
     return second && (second.at || second.why === 'nodoor') ? second : first;
+  }
+
+  /* --- the door asked again, a directional inside the name the other way -----
+   *
+   * The owner's fault of 20 Oct 2026, 21:08: an Uber order's pickup "Outback
+   * Steakhouse (810 Ernest West Barrett Parkway)" and the Trip Planner's "810
+   * Ernest West Barrett Parkway, Kennesaw" were never pinned (pickupsWhy 'no
+   * house number'). Uber spells out the road's middle initial; OSM names it
+   * "Ernest W Barrett Parkway Northwest", and the NucBox's Nominatim found the
+   * road by the spelled-out name and not the door (pickInDisc 'nodoor', the
+   * street inside the disc) — the case retryWanted leaves alone, because the
+   * type word is not the trouble there.
+   *
+   * So where the street was found INSIDE the disc and not the door (dirWanted,
+   * exactly the 'nodoor' retryWanted refuses), and the street as printed has a
+   * directional word inside its name — after its first name word, so never
+   * the name's opening word ("West Paces Ferry Rd" is asked as printed) — or a
+   * quadrant last, the door is asked ONCE more with each such word written
+   * the other way (dirRetry: West <-> W, North <-> N, East <-> E, South <-> S,
+   * Northwest <-> NW and the other three; "810 Ernest W Barrett Parkway"). An
+   * answer is taken only at door level, inside the disc, alone or agreeing,
+   * on the same street (pickRetry: retryFits with a directional and its letter
+   * one word, `retry.dirs`, then the same type family or none, then a quadrant
+   * or none). Else the first answer stands (afterDir), and with it what
+   * follows a 'nodoor' — the place, the short street — as before.
+   *
+   * One rule for the held end (server.js searchHeldEnd), the held order's
+   * pickups (searchHeldPickup) and Map view (NbxSearch.place), asked in the
+   * same words, so the three share the server's cache. */
+  var DIR_WORDS = { n: 'north', s: 'south', e: 'east', w: 'west',
+                    ne: 'northeast', nw: 'northwest', se: 'southeast', sw: 'southwest' };
+
+  // A directional the other way ("West" -> "W", "nw" -> "Northwest"), or null.
+  function dirFlip(word) {
+    var w = String(word || '').toLowerCase().replace(/\.$/, '');
+    if (DIR_WORDS[w]) {
+      var long = DIR_WORDS[w];
+      return long.charAt(0).toUpperCase() + long.slice(1);
+    }
+    for (var k in DIR_WORDS) if (DIR_WORDS[k] === w) return k.toUpperCase();
+    return null;
+  }
+
+  // One spelling of a word for comparing: a directional as its letters.
+  function dirFold(word) {
+    var f = dirFlip(word);
+    return f && f.length <= 2 ? f.toLowerCase() : String(word || '').toLowerCase().replace(/\.$/, '');
+  }
+
+  /* The second question for a door plan with a directional inside its name or
+     a quadrant last: { kind, street, door, house, retry: {name, type,
+     quadrant, dirs: true} }, or null where there is none to write the other
+     way, no type word after the name, or no name word that is not one. */
+  function dirRetry(plan) {
+    if (!plan || plan.kind !== 'street' || !plan.door) return null;
+    var words = plan.street.replace(/\s+/g, ' ').trim().split(' ');
+    var house = words.shift();
+    var quad = words.length > 2 && QUADRANTS.indexOf(words[words.length - 1].toLowerCase()
+      .replace(/\.$/, '')) >= 0 ? words.pop() : null;
+    var type = words.length >= 2 ? streetType(words[words.length - 1]) : null;
+    if (!type) return null;
+    var typeWord = words.pop();
+    var flipped = false;
+    var name = words.map(function (w, i) {
+      var f = i > 0 ? dirFlip(w) : null;
+      if (f) flipped = true;
+      return f || w;
+    });
+    if (!name.some(function (w) { return /[A-Za-z]{2}/.test(w) && !dirFlip(w); })) return null;
+    var q2 = quad ? dirFlip(quad) : null;
+    if (q2) flipped = true;
+    if (!flipped) return null;
+    return { kind: 'street', street: [house].concat(name, [typeWord], q2 ? [q2] : []).join(' '),
+             door: true, house: plan.house,
+             retry: { name: name.map(dirFold), type: type, quadrant: q2, dirs: true } };
+  }
+
+  // WHEN: a door asked, its street found INSIDE the disc and not the door.
+  function dirWanted(res, hits, disc) {
+    return !!res && !res.at && res.why === 'nodoor' && !!disc
+      && pointsAmong(hits).some(function (h) { return crowMiles(disc.at, h) <= disc.miles; });
+  }
+
+  // The retry's answer only when it pinned the door; else the first's.
+  function afterDir(first, second) {
+    return second && second.at ? second : first;
   }
 
   /* --- the door by the one street the street index says the name as read is
@@ -2899,6 +2987,17 @@
     // fault), as the server asks it (searchHeldNamed).
     var byName = opts.streets && disc && plan.kind === 'street' && plan.door;
     var asked = this.search(plan, disc);
+    // ...and a door whose street was found inside the disc and not the door,
+    // once more with a directional inside its name written the other way
+    // (dirRetry, dirWanted; the 20 Oct "Ernest West Barrett" fault), as the
+    // server asks it for the held end and its pickups.
+    var dir = disc ? dirRetry(plan) : null;
+    if (dir) {
+      asked = asked.then(function (res) {
+        if (!dirWanted(res, res.seen && res.seen.hits, disc)) return res;
+        return me.search(dir, disc).then(function (t) { return afterDir(res, t); });
+      });
+    }
     if (again || byName) {
       asked = asked.then(function (res) {
         var hits = res.seen && res.seen.hits;
@@ -3791,7 +3890,8 @@
            hasDoor: hasDoor, discShape: discShape, located: located,
            STREET_TYPES: STREET_TYPES, streetType: streetType, bareDoor: bareDoor, streetRetry: streetRetry,
            retryFits: retryFits, pickRetry: pickRetry, retryWanted: retryWanted,
-           afterRetry: afterRetry, nameWanted: nameWanted, nameAsked: nameAsked,
+           afterRetry: afterRetry, dirFlip: dirFlip, dirRetry: dirRetry, dirWanted: dirWanted,
+           afterDir: afterDir, nameWanted: nameWanted, nameAsked: nameAsked,
            nameRetry: nameRetry, pickNamed: pickNamed,
            howFound: howFound };
 }));

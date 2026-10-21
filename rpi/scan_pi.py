@@ -2980,11 +2980,15 @@ def planner_stops(stops):
     which the assembler stitches pages from; handed to the log or the panel's
     "▸ Dropoff" line, a stop of no kind would be a None to join or a pickup
     drawn as a dropoff. So the planner line is given exactly what it was given
-    before, and the sighting is given all of it."""
+    before, and the sighting is given all of it.
+
+    ...and not the dropoff whose header the reader lost (`partial: 'header'`,
+    OP._planner_lost_dropoff): no header printed its kind, and only the
+    assembler, on the held card's witness, may take it for one."""
     if stops is None:
         return None
     return [{k: v for k, v in s.items() if k != 'partial'}
-            for s in stops if s.get('kind')] or None
+            for s in stops if s.get('kind') and s.get('partial') != 'header'] or None
 
 
 # The fields of a stop on a sighting, in this order, whichever screen it came

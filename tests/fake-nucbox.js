@@ -202,6 +202,27 @@ var TANSY_2040 = [
         + 'United States')
 ];
 
+/* A door the NucBox holds under its street's directional the other way
+   (map-view.js dirRetry; the owner's fault of 20 Oct, 21:08): Uber prints the
+   road's middle initial spelled out, "810 Ardley West Corwin Parkway", and
+   this fake, as the real install did for the owner's, answers that with the
+   road alone, half a mile north-west of the Square. Asked "810 Ardley W
+   Corwin Parkway" it answers the door, 3.1 mi north-west, under the name as
+   OSM writes it, quadrant and all. "812 Ardley West Corwin Parkway" is the
+   same road, and its W-spelt question holds only a house 812 on Ardley W
+   Corwin Circle — a different street, which must never be the door.
+   Invented, every one. */
+var ARDLEY_ROAD = [place(131, 33.9600, -84.5550, 'highway', 'primary',
+                         'Ardley W Corwin Parkway Northwest',
+                         'Ardley W Corwin Parkway Northwest, Marietta, Cobb County, Georgia, '
+                         + '30064, United States')];
+var ARDLEY_810 = [place(132, 33.9900, -84.5800, 'place', 'house', '',
+                        '810, Ardley W Corwin Parkway Northwest, Kennesaw, Cobb County, '
+                        + 'Georgia, 30144, United States')];
+var ARDLEY_812 = [place(133, 33.9880, -84.5790, 'place', 'house', '',
+                        '812, Ardley W Corwin Circle Northwest, Kennesaw, Cobb County, '
+                        + 'Georgia, 30144, United States')];
+
 /* A door filed under a name read short (map-view.js nameRetry; the owner's 19
    Oct night fault): "1106 Tamaror" is "1106 Tamarons Ln" read off a dark
    frame with its type lost and its last word cut, and this fake's search, as
@@ -295,6 +316,9 @@ function search(q) {
     else if (term === '2040 tansy creek sw') all = TANSY_2040;
     else if (term === '1106 tamarons lane') all = TAMARONS_1106;
     else if (term === '1106 brindlewood way') all = BRINDLE_1106;
+    else if (/^81[02] ardley west corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_ROAD;
+    else if (/^810 ardley w corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_810;
+    else if (/^812 ardley w corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_812;
     else if (/^\d+ larkmoor (ct|court)$/.test(term)) all = LARKMOOR;
     else if (/^\d+ hollin (rd|road)$/.test(term)) all = HOLLIN;
     else if (/^\d+ fennick (ct|court)$/.test(term)) all = FENNICK;
@@ -455,6 +479,7 @@ module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    STARBUCKS: STARBUCKS, WAFFLE: WAFFLE, FARM: FARM, GRILL: GRILL,
                    DINER: DINER, TAQUERIA: TAQUERIA, DECK: DECK, QUARRY: QUARRY, LANTERN: LANTERN,
                    TANSY_1830: TANSY_1830, TANSY_2040: TANSY_2040,
+                   ARDLEY_ROAD: ARDLEY_ROAD, ARDLEY_810: ARDLEY_810, ARDLEY_812: ARDLEY_812,
                    TAMARONS_1106: TAMARONS_1106, BRINDLE_1106: BRINDLE_1106,
                    NAMED_INDEX: NAMED_INDEX };
 
