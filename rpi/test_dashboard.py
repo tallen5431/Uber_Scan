@@ -10582,9 +10582,25 @@ try:
     # the index does not hold (Shadowood Parkway) is asked of the search as
     # before, so the first card's line is the one `both` drew.
     st = nb.get('streets') or {}
+    # The rungs the runs stood on, after the caption (MV.routeSaid; the
+    # owner, 21 Oct): the order's run to a corner, to a corner's street, to
+    # a street — and the offer's trip to its numberless street, "trip: …".
+    _RUNG = r'((?: · (?:trip: )?route to (?:street, not door|corner|pickup only))*)$'
+
+    def _bare(said):
+        return re.sub(_RUNG, '', said or '')
+
+    def _rung(said):
+        return re.search(_RUNG, said or '').group(1)
+    eq('[ladder] the runs\' rungs said after the caption: a corner, a corner whose streets '
+       'meet twice (either street), a numberless street; the offer\'s trip to its street',
+       [_rung(st.get(k)) for k in ('corner', 'twice', 'stretch')],
+       [' · route to corner · trip: route to street, not door',
+        ' · route to street, not door · trip: route to street, not door',
+        ' · route to street, not door · trip: route to street, not door'])
     eq('with the street index set, a street it does not hold is pinned by the '
-       'search as before, the same line', st.get('one'), both.get('one'))
-    _m = re.match(r'^\+(\d+\.\d) road mi out of your way$', st.get('corner') or '')
+       'search as before, the same line', _bare(st.get('one')), _bare(both.get('one')))
+    _m = re.match(r'^\+(\d+\.\d) road mi out of your way$', _bare(st.get('corner')))
     ok_('the order in the car going to a corner is pinned where its two streets meet '
         'and measured to by road (%r, %r, %.2f wanted)'
         % (st.get('corner'), st.get('cornerHeld'), st.get('cornerWant') or 0),
@@ -10593,13 +10609,13 @@ try:
     ok_('a corner whose streets meet twice inside its card is refused, not pinned '
         '(%r)' % st.get('twice'),
         re.match(r'^no pin for Juniper.* — 2 corners fit its card · within 3 mi$',
-                 st.get('twice') or '') and st.get('twiceHeld') is None)
+                 _bare(st.get('twice'))) and st.get('twiceHeld') is None)
     # The figure to a numberless street is the straight line's wherever on
     # its stretch the stop is, as a range — never one figure measured to the
     # pin, a point the card never named (map-view.js stretchSpan).
     _sw = st.get('stretchWant') or [0, 0]
     _m = re.match(r'^\+(\d+\.\d)–(\d+\.\d) mi out of your way — straight lines, not roads'
-                  r' · whole street, no road figure$', st.get('stretch') or '')
+                  r' · whole street, no road figure$', _bare(st.get('stretch')))
     ok_('a numberless street\'s figure is the range along its stretch in the card, '
         'in straight lines, and says why there is no road figure (%r, %.2f-%.2f wanted)'
         % (st.get('stretch'), _sw[0], _sw[1]),
@@ -10619,12 +10635,12 @@ try:
     ok_('a numberless street whose figure is not one answer along it is refused, '
         'with how long it runs in the card (%r)' % st.get('longStreet'),
         re.match(r'^no figure for Northgate.* — the street runs 1\.4 mi in its card$',
-                 st.get('longStreet') or '') and st.get('longStreetHeld'))
+                 _bare(st.get('longStreet'))) and st.get('longStreetHeld'))
     eq('...and with the NucBox answering, the public map is asked nothing',
        st.get('publicAsked'), [])
     eq('[held route] a restaurant on a numberless street is no figure: the run goes '
        'through a point of it the planner never named',
-       st.get('routeStreet'), 'no figure for Larkspur… — your order\'s pickup is a street')
+       _bare(st.get('routeStreet')), 'no figure for Larkspur… — your order\'s pickup is a street')
 
     # HOW EACH PLACE WAS FOUND, drawn (drawHow): what the NucBox sent for
     # each place, beside what was chosen, off the answers the walk already
@@ -10736,7 +10752,7 @@ try:
         'the refusal (%r)' % (_k,),
         sorted(k.get('ll')[0] for k in _k) == [33.965, 33.969]
         and st.get('twiceHeld') is None
-        and all(k.get('tip') == st.get('twice') for k in _k))
+        and all(k.get('tip') == _bare(st.get('twice')) for k in _k))
     def _crow(a, b):
         import math
         la, lb = math.radians(a[0]), math.radians(b[0])

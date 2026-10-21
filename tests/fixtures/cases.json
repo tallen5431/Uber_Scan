@@ -4516,7 +4516,7 @@
    ]
   }
  ],
- "_planner_comment": "Uber's Trip Planner, read off the whole screen when the driver presses the dropoff button: every stop in the order the screen lists it. `expect` is the list of stops, each with all ten fields - kind, orders, name, expectedBy (minutes since midnight), street, city, state, zip, line, place (the hotel or business the address is at, when the block names one) - or null when the text is not a planner. Compared field by field in that order by both runners. A stop a page edge cut carries an eleventh, `partial`: 'top' for an address block above the first header (its kind null), 'bottom' for a last header with no address and no Waybill after it; absent on every other stop, and compared as absent-is-null. And `bounded`: whether both ends of the list are on the screen - the title with the first stop under it, \"Waybill\" after the last - which is what lets the scanner take a planner's one dropoff for the trip's only one; false for a text that is no planner, and false when a block holds two \"Expected by\" lines, a stop header the reader lost between the two ends. And, only where a case states it, `framed`: whether the read opens on a Pickup header with only the title or furniture above it and the foot of the screen under the list (planner_framed / plannerFramed). Names, streets and house numbers are invented in every case; the layout, the OCR noise and the time in the cases marked Measured are a real reading's.",
+ "_planner_comment": "Uber's Trip Planner, read off the whole screen when the driver presses the dropoff button: every stop in the order the screen lists it. `expect` is the list of stops, each with all ten fields - kind, orders, name, expectedBy (minutes since midnight), street, city, state, zip, line, place (the hotel or business the address is at, when the block names one) - or null when the text is not a planner. Compared field by field in that order by both runners. A stop a page edge cut carries an eleventh, `partial`: 'top' for an address block above the first header (its kind null), 'bottom' for a last header with no address and no Waybill after it; absent on every other stop, and compared as absent-is-null. And `bounded`: whether both ends of the list are on the screen - the title with the first stop under it, \"Waybill\" after the last - which is what lets the scanner take a planner's one dropoff for the trip's only one; false for a text that is no planner, and false when a block holds two \"Expected by\" lines, a stop header the reader lost between the two ends. And, only where a case states it, `framed`: whether the read opens on a Pickup header with only the title or furniture above it and the foot of the screen under the list (planner_framed / plannerFramed). And, only where a case states it, `footed`: whether the read is the trip's last stop block with its header cropped off - no stop header, \"Address\", a street with a house number, \"<Town>, ST\" and \"View details\" each straight under the last, and the list's foot (\"Waybill\" or the \"Stop New Requests\" bar) straight under that (planner_foot / plannerFoot). Names, streets and house numbers are invented in every case; the layout, the OCR noise and the time in the cases marked Measured are a real reading's.",
  "planner": [
   {
    "name": "Uber's Trip Planner as the rig's live view read it",
@@ -4717,6 +4717,7 @@
    "_why": "A lone dropoff scrolled so that its header falls on the page above and its address on this one: no stop header here, an address block, and \"Waybill\" under it. Read as no planner, the address was lost, and the assembler could join the two pages only when this one also showed a header. Now the one stop of kind null, partial 'top', which assemble.js's stitch joins under the page above's cut header. Street and town invented.",
    "text": "Address\n4821 Wrenmoor Ct\nMarietta, GA\nView details\nWaybill\nStop New Requests",
    "bounded": false,
+   "footed": true,
    "expect": [
     {
      "kind": null,
@@ -4755,11 +4756,26 @@
    ]
   },
   {
-   "name": "an address block with no header and no Waybill is not read",
-   "_why": "Nothing says it is the foot of a list: it may be the middle of one whose headers did not read. Invented.",
+   "name": "an address block with no header and the bar straight under its \"View details\" is the trip's last stop",
+   "_why": "It was refused as possibly the middle of a list whose headers did not read. The owner's decision of 21 Oct, 15:00: the foot of the list is \"Waybill\" and/or the \"Stop New Requests\" bar, and on Uber's Trip Planner the trip ends on a dropoff, so the last block straight over the foot is that dropoff with its header cropped off (planner_foot). Kept as the headless stop; not bounded - the bar is not Waybill. Invented.",
    "text": "Address\n4821 Wrenmoor Ct\nMarietta, GA\nView details\nStop New Requests",
    "bounded": false,
-   "expect": null
+   "footed": true,
+   "expect": [
+    {
+     "kind": null,
+     "orders": null,
+     "name": null,
+     "expectedBy": null,
+     "street": "4821 Wrenmoor Ct",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "4821 Wrenmoor Ct, Marietta",
+     "place": null,
+     "partial": "top"
+    }
+   ]
   },
   {
    "name": "a label and Waybill with no address read between them is not a stop",
@@ -6651,6 +6667,72 @@
      "zip": null,
      "line": "2282 Corbin, Marietta",
      "place": null
+    }
+   ]
+  },
+  {
+   "name": "Measured: the card-box read of 21 Oct, 15:00, the trip's last stop under its cropped Dropoff header, Waybill and the bar under it",
+   "_why": "The owner's card-box read of the planner, one Uber order held, the layout and the marks as read, the street invented: the \"Dropoff\" header was above the crop, so nothing was filed. On Uber's Trip Planner the trip ends on a dropoff; this is its block, straight over \"Waybill\" (planner_foot). The foot only, so not bounded at the top.",
+   "text": "Address\n3259 Wrenfield Oaks Dr\nMarietta, GA\nView details\nWaybill\noS Q\n=o\nStop New Requests",
+   "bounded": false,
+   "footed": true,
+   "expect": [
+    {
+     "kind": null,
+     "orders": null,
+     "name": null,
+     "expectedBy": null,
+     "street": "3259 Wrenfield Oaks Dr",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "3259 Wrenfield Oaks Dr, Marietta",
+     "place": null,
+     "partial": "top"
+    }
+   ]
+  },
+  {
+   "name": "a last block with a line between \"View details\" and Waybill is not the trip's last stop by its shape",
+   "_why": "Invented. Only the foot STRAIGHT under \"View details\" says the block is the list's last; the headless stop is read as before, `footed` false.",
+   "text": "Address\n3259 Wrenfield Oaks Dr\nMarietta, GA\nView details\nPat Q.\nWaybill",
+   "bounded": false,
+   "footed": false,
+   "expect": [
+    {
+     "kind": null,
+     "orders": null,
+     "name": null,
+     "expectedBy": null,
+     "street": "3259 Wrenfield Oaks Dr",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "3259 Wrenfield Oaks Dr, Marietta",
+     "place": null,
+     "partial": "top"
+    }
+   ]
+  },
+  {
+   "name": "a last block whose street has no house number is not the trip's last stop by its shape",
+   "_why": "Invented. \"<n> <street>\" is the shape; a street with no number is read as the headless stop as before (the town alone: with no house number the line is not taken for a street), `footed` false.",
+   "text": "Address\nWrenfield Oaks Dr\nMarietta, GA\nView details\nWaybill",
+   "bounded": false,
+   "footed": false,
+   "expect": [
+    {
+     "kind": null,
+     "orders": null,
+     "name": null,
+     "expectedBy": null,
+     "street": null,
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "Marietta",
+     "place": null,
+     "partial": "top"
     }
    ]
   }

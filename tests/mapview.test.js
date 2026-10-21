@@ -3187,6 +3187,78 @@ async function nucbox() {
   eq('...midwinter has no civil dawn: night all day',
      MV.nightFor([{ lat: 78, lon: 15 }], Date.UTC(2026, 11, 21, 12), CLOCK), true);
 
+  /* ---- a run drawn to whatever can be drawn (routeLadder; the owner, 21 Oct)
+   *
+   * 15:00, one Uber order held: its end the card's corner "<A> Flat Ct & <B>
+   * Rd, Marietta", the planner's pickup "Kennesaw" alone, and nothing was
+   * routed. Door, then a street's point, then the corner (or either of its
+   * streets), then the car to the pickups — each rung below the door said
+   * after the caption. Invented streets throughout. */
+  var CAR = { lat: 33.95, lon: -84.55 }, PK = { lat: 33.96, lon: -84.54 };
+  var END = { lat: 33.97, lon: -84.53 };
+  var HUB = { lat: 33.9526, lon: -84.5499 }, DISC3 = { at: HUB, miles: 3.0 };
+  eq('[ladder] the rungs: a door, a street\'s stretch, a short street the server pinned, a '
+     + 'corner\'s meeting, a corner\'s street, nothing',
+     JSON.stringify([MV.routeRung('3259 Wrenfield Oaks Dr, Marietta', END),
+      MV.routeRung('Wrenfield Oaks Dr, Marietta', Object.assign({ stretch: [[1, 2]] }, END)),
+      MV.routeRung('3259 Wrenfield Oaks Dr, Marietta', END, 'street'),
+      MV.routeRung('Wren Flat Ct & Oriel Rd, Marietta', END),
+      MV.routeRung('Wren Flat Ct & Oriel Rd, Marietta', Object.assign({ street: true }, END)),
+      MV.routeRung('Wren Flat Ct & Oriel Rd, Marietta', null)]),
+     JSON.stringify(['door', 'street', 'street', 'corner', 'street', null]));
+  eq('[ladder] the door: car -> pickup -> end, and nothing said',
+     JSON.stringify(MV.routeLadder(CAR, [PK], END, 'door')),
+     JSON.stringify({ pts: [CAR, PK, END], note: null }));
+  eq('[ladder] ...a street, a corner: the same points, said',
+     MV.routeLadder(CAR, [], END, 'street').note + ' / '
+       + MV.routeLadder(CAR, [PK], END, 'corner').note,
+     'route to street, not door / route to corner');
+  eq('[ladder] ...no end: the car to the pickups, "route to pickup only"',
+     JSON.stringify(MV.routeLadder(CAR, [PK, null], null, null)),
+     JSON.stringify({ pts: [CAR, PK], note: 'route to pickup only' }));
+  eq('[ladder] ...nothing to draw: no end and no pickup, or one point alone',
+     JSON.stringify([MV.routeLadder(CAR, [], null, null), MV.routeLadder(null, [PK], null, null),
+                     MV.routeLadder(CAR, [{ lat: NaN, lon: 1 }], null, null)]),
+     JSON.stringify([null, null, null]));
+  eq('[ladder] the caption carries each rung once after its sentence',
+     JSON.stringify([MV.routeSaid('+1.2 mi out of your way',
+                                  ['route to corner', 'route to corner',
+                                   'trip: route to pickup only']),
+                     MV.routeSaid('+1.2 mi out of your way', [])]),
+     JSON.stringify(['+1.2 mi out of your way · route to corner · trip: route to pickup only',
+                     '+1.2 mi out of your way']));
+  var REFUSED = 'no pin for X — a bug: the rig refused the question';
+  eq('[ladder] ...and a chipped sentence keeps its chip, the rung after it',
+     JSON.stringify([MV.captionChip(MV.routeSaid(REFUSED, ['route to street, not door'])),
+                     MV.captionChip(MV.routeSaid('no chip for this', ['route to corner']))]),
+     JSON.stringify([MV.captionChip(REFUSED) + ' · route to street, not door', null]));
+  // Either of a corner's streets, off a stub of the relay's /stretch: the
+  // first street the index does not hold, the second's stretch inside the
+  // disc, its point nearest the car marked `street`.
+  var stretchAsked = [];
+  var sides = new MV.NbxSearch({ gap: 0, fetch: function (u) {
+    var name = decodeURIComponent(/name=([^&]*)/.exec(u)[1]);
+    stretchAsked.push(name);
+    var body = name === 'Oriel Rd'
+      ? { ok: true, names: ['Oriel Road'], lines: [[[HUB.lat + 0.004, HUB.lon - 0.004],
+                                         [HUB.lat + 0.004, HUB.lon + 0.004]]] }
+      : { ok: true, names: [], lines: [] };
+    return Promise.resolve({ ok: true, status: 200,
+                             json: function () { return Promise.resolve(body); } });
+  } });
+  var side = await sides.cornerStreet(MV.searchPlan('Wren Flat Ct & Oriel Rd, Marietta'),
+                                      DISC3, HUB);
+  eq('[ladder] a corner with no meeting: either street, the second\'s point, marked a street',
+     JSON.stringify([stretchAsked, !!side.at, side.at && side.at.street,
+                     MV.routeRung('Wren Flat Ct & Oriel Rd, Marietta', side.at)]),
+     JSON.stringify([['Wren Flat Ct', 'Oriel Rd'], true, true, 'street']));
+  eq('[ladder] ...and no corner is asked as one: a door, or no disc',
+     JSON.stringify([
+       (await sides.cornerStreet(MV.searchPlan('3259 Wrenfield Oaks Dr, Marietta'), DISC3, HUB)).why,
+       (await sides.cornerStreet(MV.searchPlan('Wren Flat Ct & Oriel Rd, Marietta'), null,
+                                 HUB)).why,
+       stretchAsked.length]), JSON.stringify(['notwo', 'notwo', 2]));
+
   /* ---- Leaflet that will not load (needLeaflet) ----------------------------
    *
    * A document of the page's shape, whose script never arrives: what a failed

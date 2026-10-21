@@ -1684,7 +1684,7 @@ if shutil.which('python3'):
         eq('held end: the mark reply carries the order in the car as the stream describes it',
            sorted((reply.get('held') or {}).keys()),
            ['arrived', 'card', 'dropoff', 'drops', 'endAt', 'endBy', 'endPinned', 'endWhy',
-            'holdId', 'minutes', 'pay', 'place', 'visited'])
+            'holdId', 'minutes', 'pay', 'pickAt', 'place', 'visited'])
         eq('held end: ...its `drops` null for an order of one door (a batch\'s count, '
            'server.js batchDrops)', (reply.get('held') or {}).get('drops', 'missing'), None)
         # Started after the mark, before the scanner's 2s sleep ends.
@@ -6195,6 +6195,8 @@ try:
        (get(_gb, '/api/status').get('beat') or {}).get('heldEnd'),
        {'endPinned': True, 'arrived': False, 'endBy': None,
         'endAt': {'lat': 33.9, 'lon': -84.5},
+        # ...and its pickup's pin, the map's last rung (MV.routeLadder).
+        'pickAt': {'lat': 33.9009, 'lon': -84.5},
         'endWhy': 'door next to the pickup', 'visited': []})
     eq('[gps drop] ...the same as /api/status says', _state(_holding(_gb)),
        {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup'})
@@ -6876,6 +6878,89 @@ try:
             if p.get('kind') == 'pickup'], ['1985 Wrenfield Parkway NW'])
     finally:
         stop(_fp)
+
+    # The owner's card-box read of 21 Oct, 15:00, end to end, every street
+    # invented: one Uber order held, its end the card's corner "<A> Flat Ct &
+    # <B> Rd, Marietta" (no house number). The planner read in the card box,
+    # its Dropoff header above the crop: "Address / 3259 <Name> Oaks Dr /
+    # Marietta, GA / View details / Waybill / ... / Stop New Requests" — the
+    # shared case, made into the sighting rpi/scan_pi.py sends by offer_parser
+    # itself. The trip ends on a dropoff, so that block is the order's end,
+    # filed at rank `label` over the corner (assemble.js footDropoff).
+    _wtext = [c['text'] for c in json.load(open(os.path.join(
+        ROOT, 'tests', 'fixtures', 'cases.json')))['planner']
+        if c['name'].startswith("Measured: the card-box read of 21 Oct, 15:00")][0]
+
+    def _wread(text, footed=None, asked=False):
+        """One card-box read of `text` as the scanner sends it: the sighting
+        alone (no planner line: no header read). `footed` overrides the
+        reader's."""
+        stops = _OP.find_planner(text) or []
+        top, bottom = _OP.planner_ends(text)
+        return [{'sighting': {
+            'at': int(time.time() * 1000), 'asked': asked, 'whole': False,
+            'titled': _OP.planner_titled(text), 'laidOut': _OP.planner_laid_out(text),
+            'framed': _OP.planner_framed(text),
+            'footed': _OP.planner_foot(text) if footed is None else footed,
+            'app': 'uber', 'screen': _OP.screen_type(text)['screen'],
+            'page': {'top': top, 'bottom': bottom},
+            'stops': [dict({k: s.get(k) for k in ('kind', 'orders', 'name', 'place',
+                                                  'expectedBy', 'street', 'city', 'state',
+                                                  'zip', 'line', 'partial')},
+                           label=s.get('kind')) for s in stops],
+            'orderCount': None, 'keep': False}}]
+
+    _wdir = os.path.join(_adir, 'footed')
+    os.makedirs(_wdir)
+    _wj = os.path.join(_wdir, 'offers.jsonl')
+    open(_wj, 'w').close()
+    _wcmds = os.path.join(_wdir, 'cmds.jsonl')
+    open(_wcmds, 'w').close()
+    _wrelay = os.path.join(_wdir, 'relay.py')
+    with open(_wrelay, 'w') as _fh:
+        _fh.write('import time\n'
+                  'done = 0\n'
+                  'end = time.time() + 300\n'
+                  'while time.time() < end:\n'
+                  '    lines = open(%r).read().splitlines()\n'
+                  '    for l in lines[done:]:\n'
+                  '        print(l, flush=True)\n'
+                  '    done = len(lines)\n'
+                  '    time.sleep(0.05)\n' % _wcmds)
+
+    def _wsay(msgs):
+        with open(_wcmds, 'a') as fh:
+            for m in msgs:
+                fh.write(json.dumps(m) + '\n')
+
+    _wp, _wb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _wrelay},
+                     _wj)
+    try:
+        post(_wb, '/api/offers/mark', {'id': 'w-one', 'accepted': True, 'offer': dict(
+            _SQ, id='w-one', pay=17.62, minutes=30.0, billedMinutes=30.0, miles=8.0, cost=2.8,
+            legs=1, hasTotal=True, multiOrder=False,
+            pickup='Fable Grill (3400 Fable International Blvd NW)',
+            dropoff='Wren Flat Ct & Oriel Rd, Marietta')})
+        time.sleep(0.5)
+        # As the reader saw it before: no shape, nothing filed.
+        _wsay(_wread(_wtext, footed=False))
+        time.sleep(1.0)
+        _h = _holding(_wb) or {}
+        eq('[waybill last] (the premise: a card-box read without the shape files nothing; the '
+           'corner is held)', (_h.get('dropoff'), _h.get('dropoffScanned')),
+           ('Wren Flat Ct & Oriel Rd, Marietta', False))
+        # ...and a press on it is the press's rule: the cropped block is no answer.
+        _wsay(_wread(_wtext, asked=True))
+        time.sleep(1.0)
+        eq('[waybill last] ...nor a pressed one', (_holding(_wb) or {}).get('dropoff'),
+           'Wren Flat Ct & Oriel Rd, Marietta')
+        _wsay(_wread(_wtext))
+        _h = _settled(_wb, lambda h: h.get('dropoffScanned'))
+        eq('[waybill last] the 21 Oct 15:00 card-box read files the trip\'s last stop over the '
+           'card\'s corner', (_h.get('dropoff'), _h.get('dropoffScanned')),
+           ('3259 Wrenfield Oaks Dr, Marietta', True))
+    finally:
+        stop(_wp)
 
     _bj = os.path.join(_adir, 'b', 'offers.jsonl')
     os.makedirs(os.path.dirname(_bj))

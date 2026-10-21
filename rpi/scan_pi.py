@@ -3062,7 +3062,7 @@ def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet
     """Stage 2 of the multi-order design: what a whole-screen read or a planner
     read SAW, typed by its screen, and nothing more.
 
-        {sighting: {at, asked, whole, titled, laidOut, framed, app, screen,
+        {sighting: {at, asked, whole, titled, laidOut, framed, footed, app, screen,
                     page: {top, bottom},
                     stops: [{kind, orders, name, place, expectedBy, street,
                              city, state, zip, line, partial, label}],
@@ -3078,7 +3078,10 @@ def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet
     title misread (OP.planner_laid_out), which stands in for it, and `framed`
     whether a Pickup header opens the read with the foot of the screen under
     it (OP.planner_framed), which the assembler asks of a single trip's page
-    whose title scrolled off. The server still writes no journal row from it and broadcasts it
+    whose title scrolled off, and `footed` whether the read is the trip's last
+    stop block, its header cropped off, with the list's foot straight under
+    it (OP.planner_foot), which the assembler files as a dropoff with one
+    order held, card box or whole. The server still writes no journal row from it and broadcasts it
     to no one; an address filed off it goes to the panel as a dropoff line
     does.
 
@@ -3101,6 +3104,7 @@ def sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None
             'titled': OP.planner_titled(text),
             'laidOut': OP.planner_laid_out(text),
             'framed': OP.planner_framed(text),
+            'footed': OP.planner_foot(text),
             'app': kind['app'], 'screen': kind['screen'], 'page': page,
             'stops': listed,
             'orderCount': order_count(stops) if stops is not None else None,

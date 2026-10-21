@@ -3717,7 +3717,18 @@ function timedLikeTheHeldJob(read) {
  * and the panel cannot give two answers about one pin. */
 function heldEndState(h) {
   var pin = heldEndPin(h);
+  var gone = (Array.isArray(h.pickups) ? h.pickups : []).filter(function (e) {
+    return e.visited;
+  }).map(function (e) { return e.q; });
+  // The first pickup pinned and not behind the car: Map view's run goes to
+  // it when no end can be drawn (MV.routeLadder, "route to pickup only"; the
+  // owner, 21 Oct). Drawing only, as endAt is.
+  var pick = (Array.isArray(h.pickupPins) ? h.pickupPins : []).filter(function (p) {
+    return p && typeof p.lat === 'number' && typeof p.lon === 'number'
+      && gone.indexOf(p.q) === -1;
+  })[0] || null;
   return { endPinned: !!pin, arrived: !!h.arrivedAt,
+           pickAt: pick ? { lat: pick.lat, lon: pick.lon } : null,
            // ...who pinned it: 'server' (the door, searchHeldEnd), 'place'
            // (its place, searchHeldPlace), 'street' (a short street,
            // searchHeldStreet), or null for Map view's post. Here and not on
@@ -3736,9 +3747,7 @@ function heldEndState(h) {
            // stop, Map view's run and the figure's stops leave them out. On
            // the same three messages, for the same reason: a visit happens
            // between offers.
-           visited: (Array.isArray(h.pickups) ? h.pickups : []).filter(function (e) {
-             return e.visited;
-           }).map(function (e) { return e.q; }) };
+           visited: gone };
 }
 
 /* ---------- how the order's end was pinned, journaled when it goes ---------

@@ -115,6 +115,13 @@ function stopFields(stops) {
     if (framed === c.framed) ok++;
     else { bad++; console.log('FAIL  planner framed / ' + c.name + ': got ' + framed + ' want ' + c.framed); }
   }
+  /* ...and whether it is the trip's last block, its header cropped off, the
+     foot straight under it (plannerFoot; the owner's read of 21 Oct, 15:00). */
+  if (c.footed !== undefined) {
+    var footed = P.plannerFoot(c.text);
+    if (footed === c.footed) ok++;
+    else { bad++; console.log('FAIL  planner foot / ' + c.name + ': got ' + footed + ' want ' + c.footed); }
+  }
 });
 
 /* What screen a reading is, for a sighting: app and screen as one pair. The

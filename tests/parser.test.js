@@ -414,8 +414,10 @@ check('largest dollar figure wins over a promo line',
   eq('plannerEnds: a headless page shows the end of the list and not its start',
      ends('a page holding only an address block and Waybill is the foot of the list'),
      '[false,true]');
-  eq('...and an address block with no Waybill under it shows neither',
-     ends('an address block with no header and no Waybill is not read'), '[false,false]');
+  eq('...and an address block with the bar and no Waybill under it shows neither: the '
+     + 'trip\'s last stop (plannerFoot) bounds nothing',
+     ends('an address block with no header and the bar straight under its "View details" is '
+          + 'the trip\'s last stop'), '[false,false]');
 })();
 
 /* ---- the customer sheet is no planner, by its labels and none of the planner's ----
