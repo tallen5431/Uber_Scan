@@ -2044,6 +2044,13 @@ const SNAP_MEASURE = (fixture) => {
         // taller than its row does not overflow the page and does not fail any
         // check that asks whether the page fits. It is silently trimmed at
         // both ends, and the end that matters is the top, where the payout is.
+        const SIDE_SRC = `(() => {
+          const v = document.getElementById('viewWrap').getBoundingClientRect();
+          const l = document.querySelector('.live').getBoundingClientRect();
+          const n = (x) => Math.round(x * 10) / 10;
+          return { picL: n(v.left), picR: n(v.right), picT: n(v.top), picW: n(v.width),
+                   cardL: n(l.left), cardR: n(l.right), cardB: n(l.bottom), cardW: n(l.width) };
+        })()`;
         const LOOKAT = () => {
           const d = document.documentElement;
           const img = document.getElementById('view');
@@ -2078,6 +2085,12 @@ const SNAP_MEASURE = (fixture) => {
           };
         };
         const shown = await page.evaluate(LOOKAT);
+        // Which side of the card the pane is on, in each thing it can show.
+        // The owner's, 21 Oct: the feed on the LEFT — the near side of a panel
+        // on the driver's right, and the picture is what gets tapped up to
+        // read the phone in its mount. A string, so it is evaluated as written
+        // in the page rather than closed over here.
+        shown.side = await page.evaluate(SIDE_SRC);
         // The bar of controls with everything on it at once.
         //
         // Two of its buttons are conditional — "Took $8.04" appears when there
@@ -2240,6 +2253,7 @@ const SNAP_MEASURE = (fixture) => {
           .then(() => true, () => false);
         await page.waitForTimeout(1200);
         const scene = await page.evaluate(LOOKAT);
+        shown.sceneSide = await page.evaluate(SIDE_SRC);
         shown.was = scene.h;
         shown.sceneSrc = scene.src;
         shown.scenePressed = scene.pressed;
@@ -2295,6 +2309,9 @@ const SNAP_MEASURE = (fixture) => {
           out.offerMapW = Math.round(r('#liveMap').width);
           return out;
         });
+        // ...and the map beside a card, measured while the class is off.
+        shown.mapSide = await page.evaluate(
+          "document.body.classList.remove('between'), " + SIDE_SRC);
         // Every sentence the caption under the map can say, measured in the
         // row it is said in.
         //
@@ -5594,6 +5611,25 @@ try:
                         phone['cutLeft'], phone['cutRight']) <= 1)
                 ok_('...nor off the scene at %s (%.0fpx)'
                     % (panel, phone['sceneCut']), phone['sceneCut'] <= 1)
+                # The picture on the LEFT of the card, every landscape panel,
+                # in all three things the pane shows — the owner's, 21 Oct:
+                # "Could you swap the camera/phone feed to the left side of the
+                # screen? I use the touch screen as a magnifying glass to read
+                # my phone while it is in the mount." The panel is on the
+                # driver's right, so its left is the near side. Upright, the
+                # pane stays under the card, where it always was.
+                for _what, _s in (('the phone', phone.get('side')),
+                                  ('the scene', phone.get('sceneSide')),
+                                  ('the map beside a card', phone.get('mapSide'))):
+                    _s = _s or {}
+                    if w > h:
+                        ok_('%s is left of the card at %s (%r)' % (_what, panel, _s),
+                            _s.get('picW', 0) > 50 and _s.get('cardW', 0) > 50
+                            and _s.get('picR', 9999) <= _s.get('cardL', 0) + 1)
+                    else:
+                        ok_('%s is under the card, upright, at %s (%r)' % (_what, panel, _s),
+                            _s.get('picW', 0) > 50
+                            and _s.get('picT', 0) >= _s.get('cardB', 9999) - 1)
                 # ...and the other direction, which is now the one that takes a
                 # press. The mount still has to be aimed sometimes, and a
                 # toggle that only travels one way is a driver stuck in the
