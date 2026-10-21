@@ -1799,6 +1799,9 @@
     var lines = split.lines, heads = split.heads;
     if (!heads.length) {
       var headless = plannerHeadless(lines);
+      // ...or, the foot the bar alone, the trip's last block in the shape
+      // plannerFoot names (the owner's read of 21 Oct, 15:00).
+      if (!headless && plannerFoot(text)) headless = plannerOrphan(lines, lines.length);
       return headless ? [headless] : null;
     }
     var top = plannerOrphan(lines, heads[0]);
@@ -1968,6 +1971,26 @@
     })) return false;
     return raw.some(function (l) { return l && PLANNER_BAR.test(l); })
       || lines.slice(heads[heads.length - 1] + 1).some(function (l) { return PLANNER_END.test(l); });
+  }
+
+  /* The trip's last stop block with its header cropped off (the owner's
+     card-box read of 21 Oct, 15:00): no stop header on the read, and its last
+     "View details" straight under "Address", a street opening with a house
+     number and a town line "<Town>, ST", with the list's foot straight under
+     it, "Waybill" or the "Stop New Requests" bar. On Uber's Trip Planner the
+     trip ends on a dropoff. Carried on the sighting as `footed`; the
+     assembler files it (Assemble.footDropoff). See planner_foot in
+     offer_parser.py. */
+  function plannerFoot(text) {
+    var raw = String(text || '').split(/[\r\n]+/).map(normalize)
+      .filter(function (l) { return l; });
+    if (raw.some(function (l) { return PLANNER_STOP.test(l); })) return false;
+    var d = -1;
+    raw.forEach(function (l, i) { if (PLANNER_DETAILS.test(l)) d = i; });
+    if (d < 3 || d + 1 >= raw.length) return false;
+    if (!(PLANNER_END.test(raw[d + 1]) || PLANNER_BAR.test(raw[d + 1]))) return false;
+    return !!(plannerLabel(raw[d - 3]) && PLANNER_HOUSE.test(raw[d - 2])
+              && plannerTown(raw[d - 1]));
   }
 
   function plannerBounded(text) {
@@ -4021,7 +4044,7 @@
            placePopup: placePopup,
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
            plannerTitled: plannerTitled, plannerLaidOut: plannerLaidOut,
-           plannerFramed: plannerFramed,
+           plannerFramed: plannerFramed, plannerFoot: plannerFoot,
            screenType: screenType, SCREENS: SCREENS,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,

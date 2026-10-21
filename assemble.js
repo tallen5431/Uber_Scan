@@ -480,6 +480,14 @@
       // ...and the same door read with its street's type, over a planner
       // street filed without one or with a garbled last word (labelTyped).
       if (!why && labelTyped(d, cur, out.from)) why = 'typed street';
+      // ...and the trip's last stop filed off its cropped block (footDropoff:
+      // rank `label`, off the planner's screen) read again under its header,
+      // stitched or whole, the same street: the planner's reading of the same
+      // door, with its customer and time, in its place.
+      if (!why && out.from === 'planner' && cur && cur.from === 'label'
+          && cur.screen === 'uber.planner' && sameStreet(d.line, cur.value)) {
+        why = 'same door';
+      }
       if (!why && won) why = 'most read';
       if (why) {
         out.to = 'hold';
@@ -1013,6 +1021,54 @@
     return addressOf(d);
   }
 
+  /* The trip's LAST stop, its header cropped off, as a dropoff candidate, or
+   * null. The owner's card-box read of 21 Oct, 15:00, one Uber order held:
+   * "Address / 3259 <Name> Oaks Dr / Marietta, GA / View details / Waybill /
+   * … / Stop New Requests", the "Dropoff" header above the crop, and nothing
+   * filed — a card-box read is no page, and a headless stop has no kind. On
+   * Uber's Trip Planner the trip ends on a dropoff, so the block the list's
+   * foot sits straight under is one, whatever header it had. The parser says
+   * the shape (offer_parser.planner_foot, the sighting's `footed`): no stop
+   * header on the read, the last "View details" straight under "Address",
+   * "<n> <street>" and "<Town>, ST", and "Waybill" or the bar straight under
+   * it. Card box or whole, all of:
+   *   - the sighting is the planner's, `footed`, unpressed (a ⌖ press is the
+   *     press's own rule, and outranks() keeps a pressed end over this), and
+   *     its one stop is that headless block, street and town read;
+   *   - exactly ONE order held, not an add-on trip's (`addOn`, `of`):
+   *     sightingMany takes two and never asks this;
+   *   - read at or after its Took (dropoff() asks `at` again);
+   *   - not one of the held order's pickups by any word on record
+   *     (heldPickup): a store's door is the confidently wrong end.
+   * Filed at rank `label` — a dropoff the screen proved, as a card-box read
+   * under a Dropoff label is (`labelled`, not `planner`) — so it fills the
+   * card's corner or town and never passes a press or a planner's door. */
+  function footDropoff(held, s, at) {
+    if (!held || held.addOn || held.of || !s || s.footed !== true || s.asked === true) return null;
+    if (s.screen !== 'uber.planner' || !Array.isArray(s.stops) || s.stops.length !== 1) return null;
+    var d = s.stops[0];
+    if (!d || typeof d !== 'object' || d.kind || d.partial !== 'top') return null;
+    if (!(d.street && d.city && typeof d.line === 'string')) return null;
+    if (typeof at !== 'number' || at < held.acceptedAt) return null;
+    if (heldPickup(held, d)) return null;
+    return { found: true, line: d.line, street: d.street, city: d.city,
+             state: d.state || null, zip: d.zip || null, asked: false,
+             labelled: 'dropoff', singleCardOnly: null, planner: false, foot: true,
+             screen: 'uber.planner', key: null,
+             place: typeof d.place === 'string' ? d.place : null,
+             stop: { name: null, expectedBy: d.expectedBy === undefined ? null : d.expectedBy },
+             ms: null, at: at };
+  }
+
+  // Whether the trip's last stop (footDropoff) is new for this hold: said
+  // once, as every unprompted planner candidate is (`said`).
+  function saidOnce(st, c) {
+    var seen = c.line + '|foot';
+    if (st.said[seen]) return false;
+    st.said[seen] = true;
+    return true;
+  }
+
   /* Whether a planner page proves, by itself, that the trip is ONE pickup and
    * ONE dropoff, so that the lone dropoff it shows (plannerLoneDropoff) may
    * be filed onto a held card whose legs read 0. The owner's read of 21 Oct,
@@ -1462,7 +1518,15 @@
       if (nav) out.candidates.push(nav);
       return out;
     }
-    if (s.whole !== true || !pageStops(s.stops)) return out;
+    // The trip's last stop, its header cropped off (footDropoff), off a
+    // card-box read: no page — it saw part of the screen — but the foot
+    // under it says which stop it is.
+    var foot = footDropoff(held, s, out.at === null ? now : out.at);
+    if (s.whole !== true) {
+      if (foot && saidOnce(st, foot)) out.candidates.push(foot);
+      return out;
+    }
+    if (!pageStops(s.stops)) return out;
     var page = { at: out.at === null ? now : out.at, app: app,
                  epoch: st.epoch[app] || 0, asked: s.asked === true,
                  titled: s.titled === true,
@@ -1564,6 +1628,9 @@
         batched = true;
       }
     }
+    // ...and, read whole, the trip's last stop under a cropped header
+    // (footDropoff) where nothing above gave the order an end.
+    if (!cand && foot && saidOnce(st, foot)) out.candidates.push(foot);
     if (cand && many) cand.pages = run.pages.length;
     // The reads it was made from, so one that files can take them out of the
     // pool (file()): a lone dropoff waits there until it is known to be kept.
@@ -2489,6 +2556,7 @@
            popup: popup, filePopup: filePopup, cardNames: cardNames,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
            lostHeaderDropoff: lostHeaderDropoff, framedTrip: framedTrip,
+           footDropoff: footDropoff,
            // ...and a batched trip's doors (the owner's decision of 19 Oct).
            batchPlan: batchPlan, batchWhy: batchWhy, cardStreets: cardStreets,
            streetCore: streetCore,

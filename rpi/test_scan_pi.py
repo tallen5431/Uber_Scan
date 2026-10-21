@@ -4124,6 +4124,21 @@ _framed_seen = SP.sighting(_FRAMED_PLANNER, OP2.find_planner(_FRAMED_PLANNER), N
 eq('the sighting of a planner whose title scrolled off says it is framed; the misread '
    'title\'s is not', (_framed_seen['framed'], _framed_seen['laidOut'], _shift_seen['framed']),
    (True, True, False))
+# ...and the 21 Oct 15:00 card-box read, the trip's last stop under its
+# cropped Dropoff header (the shared case; the street invented): the sighting
+# says `footed` (OP.planner_foot), which the assembler files as the trip's
+# dropoff (footDropoff), and carries the headless stop. The framed page is not.
+_FOOT = [c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', 'tests', 'fixtures',
+    'cases.json')))['planner']
+    if c['name'].startswith("Measured: the card-box read of 21 Oct, 15:00")][0]
+_foot_seen = SP.sighting(_FOOT, OP2.find_planner(_FOOT), None, False, False)
+eq('the sighting of the trip\'s last stop under a cropped header says it is footed; the '
+   'framed page\'s is not',
+   (_foot_seen['footed'], _foot_seen['whole'], _foot_seen['screen'],
+    [(x['kind'], x['street'], x['partial']) for x in _foot_seen['stops']],
+    _framed_seen['footed']),
+   (True, False, 'uber.planner', [(None, '3259 Wrenfield Oaks Dr', 'top')], False))
 
 # --- what in the card box asks for an unpressed whole-screen read ------------
 #

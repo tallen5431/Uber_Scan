@@ -3210,6 +3210,10 @@ def find_planner(text):
     lines, heads = _planner_lines(text)
     if not heads:
         headless = _planner_headless(lines)
+        # ...or, the foot the bar alone, the trip's last block in the shape
+        # planner_foot names (the owner's read of 21 Oct, 15:00).
+        if headless is None and planner_foot(text):
+            headless = _planner_orphan(lines, len(lines))
         return [headless] if headless is not None else None
     stops = []
     top = _planner_orphan(lines, heads[0])
@@ -3586,6 +3590,51 @@ def planner_framed(text):
         return False
     return any(PLANNER_BAR.match(l) for l in raw if l) \
         or any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:])
+
+
+# THE TRIP'S LAST STOP, ITS HEADER CROPPED OFF. The owner's card-box read of
+# the planner, 21 Oct, 15:00, one Uber order held (the name left out, the
+# layout as read):
+#
+#     Address
+#     3259 <Name> Oaks Dr
+#     Marietta, GA
+#     View details
+#     Waybill
+#     ...
+#     Stop New Requests
+#
+# The "Dropoff" header was above the crop, so the stop was of no kind and
+# nothing was filed. On Uber's Trip Planner the trip ENDS on a dropoff, so
+# the last stop block on the list — the one the foot sits straight under —
+# is a dropoff whatever header it had. True when the read has no stop header
+# at all, and its last "View details" is: the "Address" label, a street
+# opening with a house number (PLANNER_HOUSE), a town line "<Town>, ST"
+# (_planner_town), "View details", each straight under the one before, and
+# the next line the list's foot, "Waybill" or the "Stop New Requests" bar.
+# Nothing between, nothing else accepted: a block of any other shape, or
+# with a header anywhere on the read, is not this (a header lost between two
+# headed stops is _planner_lost_dropoff's, and asks the card). The stop is
+# find_planner's headless one; the assembler (assemble.js, footDropoff) asks
+# this of it, carried on the sighting as `footed`, and files it only with one
+# order held, unpressed, after the Took, and not one of its pickups.
+def planner_foot(text):
+    """True when `text` is the trip's last stop block with its header cropped
+    off and the list's foot straight under it: see above."""
+    raw = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
+    raw = [l for l in raw if l]
+    if any(PLANNER_STOP.match(l) for l in raw):
+        return False
+    details = [i for i, l in enumerate(raw) if PLANNER_DETAILS.match(l)]
+    if not details:
+        return False
+    d = details[-1]
+    if d < 3 or d + 1 >= len(raw):
+        return False
+    if not (PLANNER_END.match(raw[d + 1]) or PLANNER_BAR.match(raw[d + 1])):
+        return False
+    return bool(_planner_label(raw[d - 3]) and PLANNER_HOUSE.match(raw[d - 2])
+                and _planner_town(raw[d - 1]))
 
 
 def planner_bounded(text):

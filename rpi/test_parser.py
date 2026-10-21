@@ -130,6 +130,10 @@ for c in cases.get('planner', []):
     # the foot under it (planner_framed; the owner's planner of 21 Oct).
     if 'framed' in c:
         eq('planner framed / ' + c['name'], P.planner_framed(c['text']), c['framed'])
+    # ...and whether it is the trip's last block, its header cropped off, the
+    # foot straight under it (planner_foot; the owner's read of 21 Oct, 15:00).
+    if 'footed' in c:
+        eq('planner foot / ' + c['name'], P.planner_foot(c['text']), c['footed'])
 
 # ...and the two ends one at a time, which is what a sighting's `page` says.
 # `bounded` is both together and cannot see them swapped; these two cases have
@@ -146,9 +150,10 @@ eq('...and one running on below the screen its start and not its end',
 eq('planner_ends: a headless page shows the end of the list and not its start',
    P.planner_ends(_PLANNER_TEXT['a page holding only an address block and Waybill is '
                                 'the foot of the list']), (False, True))
-eq('...and an address block with no Waybill under it shows neither',
-   P.planner_ends(_PLANNER_TEXT['an address block with no header and no Waybill is not '
-                                'read']), (False, False))
+eq('...and an address block with the bar and no Waybill under it shows neither: the trip\'s '
+   'last stop (planner_foot) bounds nothing',
+   P.planner_ends(_PLANNER_TEXT['an address block with no header and the bar straight under '
+                                'its "View details" is the trip\'s last stop']), (False, False))
 # The planner's layout standing in for a title misread (the owner, 16 Oct): the
 # shift's page as read, title "ny. mS". Each part of the layout taken away in
 # turn is no longer proof. tests/assemble.test.js asks plannerLaidOut the same.

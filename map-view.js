@@ -832,6 +832,75 @@
     return { at: { lat: fix.lat, lon: fix.lon }, leg: leg };
   }
 
+  /* --- a run drawn to whatever can be drawn (the owner, 21 Oct) -------------
+   *
+   * "It would be better if the map tried to route something or anything it
+   * can." 15:00 that day, one Uber order held: its end the card's corner
+   * "<A> Flat Ct & <B> Rd, Marietta" (no house number), the planner's pickup
+   * read "Kennesaw" alone, and nothing was routed. Map view's run — the held
+   * order's, and the offer's own trip — now goes down a ladder and stops at
+   * the first rung it can stand on:
+   *
+   *   'door'    the end pinned at its door: drawn, said nothing, as before;
+   *   'street'  a numberless street's point (stretchInDisc), a short street
+   *             the server pinned (`by` 'street'), or one of a corner's two
+   *             streets where they do not meet in the disc (cornerStreet):
+   *             "route to street, not door";
+   *   'corner'  where the corner's two streets meet (NbxSearch.corner):
+   *             "route to corner";
+   *   'pickup'  no end that can be drawn, a pickup pinned: the car to the
+   *             pickups, "route to pickup only".
+   *
+   * DRAWING ONLY. No figure comes of any rung (the detour stays mapLine's,
+   * refused or ranged as it was), and nothing here is posted: GPS arrival is
+   * armed by the server's door pin and its rules alone (pinHeldEnd sends a
+   * door askNucBox found, never a point of this). */
+  var ROUTE_NOTES = { street: 'route to street, not door', corner: 'route to corner',
+                      pickup: 'route to pickup only' };
+
+  /* The rung an end's point stands on: `place` the text searched, `at` its
+     point, `by` who pinned it where the server did ('street' for a short
+     street). Null with no point. */
+  function routeRung(place, at, by) {
+    if (!at) return null;
+    if (at.street === true || at.stretch || by === 'street') return 'street';
+    var plan = searchPlan(place);
+    return plan && plan.kind === 'cross' ? 'corner' : 'door';
+  }
+
+  /* The points to route and the words to say: the car, the pickups pinned,
+     then the end on `rung` — or, with no end, the car to the pickups, which
+     is 'pickup' ("route to pickup only"). { pts, note } with `note` null at
+     the door, or null when fewer than two points can be drawn, or with no
+     end and no pickup (a car alone goes nowhere). */
+  function routeLadder(car, pickups, end, rung) {
+    function ok(p) { return !!p && isFinite(p.lat) && isFinite(p.lon); }
+    var picks = (pickups || []).filter(ok);
+    var e = ok(end) ? end : null;
+    if (!e && !picks.length) return null;
+    var pts = [car].concat(picks, e ? [e] : []).filter(ok);
+    if (pts.length < 2) return null;
+    var note = !e ? ROUTE_NOTES.pickup : rung && rung !== 'door' ? ROUTE_NOTES[rung] || null : null;
+    return { pts: pts, note: note };
+  }
+
+  /* The caption with the runs' words after it: "<said> · route to corner",
+     each note once, `said` alone with none. captionChip reads the sentence
+     through them (routeTail). */
+  function routeSaid(said, notes) {
+    var seen = [];
+    (notes || []).forEach(function (n) { if (n && seen.indexOf(n) === -1) seen.push(n); });
+    return seen.length ? String(said || '') + ' · ' + seen.join(' · ') : String(said || '');
+  }
+
+  // The notes routeSaid put after a sentence, as one tail; captionChip
+  // chips the sentence before them and keeps them after the chip.
+  var ROUTE_TAIL = /((?: · (?:trip: )?route to (?:street, not door|corner|pickup only))+)$/;
+  function routeTail(text) {
+    var m = ROUTE_TAIL.exec(String(text || ''));
+    return m ? { said: text.slice(0, m.index), tail: m[1] } : { said: text, tail: '' };
+  }
+
   function searchPlan(place) {
     var s = searchText(place);
     if (!s) return null;
@@ -3104,6 +3173,29 @@
     });
   };
 
+  /* A corner whose two streets did not give one meeting in the disc, routed
+     to EITHER street (routeLadder's 'street' rung; the owner, 21 Oct): the
+     first street's stretch (stretchInDisc, the point nearest the car), else
+     the second's. Its point carries `street: true`, so routeRung says
+     "route to street, not door". Drawing only: never a pin, never posted. A
+     plan that is no corner of two names is { at: null, why: 'notwo' }. */
+  NbxSearch.prototype.cornerStreet = function (plan, disc, car) {
+    if (!plan || plan.kind !== 'cross' || !plan.a || !plan.b || !disc) {
+      return Promise.resolve({ at: null, why: 'notwo', n: 0 });
+    }
+    var me = this;
+    function one(name) {
+      return me.stretch({ kind: 'street', street: name, door: false, house: null }, disc, car);
+    }
+    function marked(res) {
+      if (res.at) res.at = Object.assign({}, res.at, { street: true });
+      return res;
+    }
+    return one(plan.a).then(function (a) {
+      return a.at ? marked(a) : one(plan.b).then(marked);
+    });
+  };
+
   /* A numberless street as its stretch inside the disc (stretchInDisc), or
      `nostreet` for a name the index does not hold, or `long` for a stretch
      the NucBox would not send whole. */
@@ -3683,6 +3775,12 @@
 
   function captionChip(text) {
     if (typeof text !== 'string' || !text) return null;
+    // A run's words after the sentence (routeSaid) ride after its chip.
+    var cut = routeTail(text);
+    if (cut.tail) {
+      var head = captionChip(cut.said);
+      return head ? head + cut.tail : null;
+    }
     var whose, k, m;
     for (whose in FIX_WORDS) {
       for (k in FIX_WORDS[whose]) {
@@ -3877,6 +3975,8 @@
            discFor: discFor, discBox: discBox,
            plannerName: plannerName, heldPickups: heldPickups, pickupKey: pickupKey,
            heldRun: heldRun, routeFrom: routeFrom, ROUTE_MOVE_M: ROUTE_MOVE_M,
+           ROUTE_NOTES: ROUTE_NOTES, routeRung: routeRung, routeLadder: routeLadder,
+           routeSaid: routeSaid,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            placeWords: placeWords, placeNamed: placeNamed, namedFeature: namedFeature,
            placeQuery: placeQuery, pickPlace: pickPlace, PLACE_KINDS: PLACE_KINDS,

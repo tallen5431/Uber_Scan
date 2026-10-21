@@ -5478,6 +5478,9 @@
         heldSaid.endBy = msg.heldEnd.endBy || null;
         // ...and where (serverEnd): Map view draws it as D.
         heldSaid.endAt = msg.heldEnd.endAt || null;
+        // ...and its first pickup the server pinned, not yet visited: the
+        // run's last rung when nothing else can be drawn (MV.routeLadder).
+        heldSaid.pickAt = msg.heldEnd.pickAt || null;
         // ...and its pickups behind the car (visitPickups), which move the
         // next stop on and take the restaurant out of Map view's run.
         heldSaid.visited = Array.isArray(msg.heldEnd.visited) ? msg.heldEnd.visited : [];
@@ -6625,6 +6628,9 @@
                + (heldPlace ? '[' + heldPlace : '')
                // ...and the server's pin for it, learnt on a beat (serverEnd).
                + (held && serverEnd(held) ? '!' + heldSaid.endBy : '')
+               // ...and the server's pickup pin, the ladder's last rung
+               // (MV.routeLadder), learnt on a beat too.
+               + (holdingNow && heldSaid && heldSaid.pickAt ? '^p' : '')
                + (held2 ? '+' + held2 : '')
                // ...and the order of the run through both: a planner read
                // that places both ends moves the run under the same places.
@@ -6772,6 +6778,20 @@
      once `gone()` says the walk was left. `measuring` is told just before
      the router is asked. Map view's walk and the card's both ask here. */
   var WALK_LEFT = { left: true };
+
+  /* A corner that gave no meeting to route to: a point on either of its
+     streets (MV.NbxSearch.cornerStreet), in `card`'s disc, nearest `car`;
+     null for an end that is no corner, no disc, or neither street held.
+     Drawing only (MV.routeLadder's 'street' rung): never a pin, never
+     posted, so never what GPS arrival is armed by. */
+  async function cornerSide(q, card, car) {
+    var plan = MV.searchPlan ? MV.searchPlan(q) : null;
+    var disc = MV.discFor(card);
+    if (!plan || plan.kind !== 'cross' || !disc || !mapNbx.cornerStreet) return null;
+    var res = await mapNbx.cornerStreet(plan, disc, car);
+    return res && res.at ? res.at : null;
+  }
+
   async function askRoad(want, found, here, gone, measuring) {
     var j = mapJudge(want, found, here);
     if (mapRefusal(want, found, here, j) !== null) return undefined;
@@ -7026,6 +7046,10 @@
          held pickups this is car -> held end. Router down: null, and the
          straight run as before. */
       var heldRoad = null;
+      // The runs' words after the caption, one per rung below the door
+      // (MV.routeLadder), and the car -> pickup road of a card with nothing
+      // in the car and no end to draw its trip to.
+      var notes = [], pickRoad = null;
       if (nbx.route && mapNbx && want.runs) {
         // Two orders: a road per line drawMap draws — the run through both,
         // or each order's own — and only where the line would state a
@@ -7040,17 +7064,34 @@
             if (viewMode !== 'map' || mapFor !== key) return;
           }
         }
-      } else if (nbx.route && mapNbx) {
-        // From the card's fix, or with none the live one (want.carNow); with
-        // neither, its pickups -> its end, along the roads all the same.
+      } else if (nbx.route && mapNbx && MV.routeLadder) {
+        /* From the card's fix, or with none the live one (want.carNow); with
+           neither, its pickups -> its end, along the roads all the same. DOWN
+           THE LADDER (MV.routeLadder; the owner, 21 Oct: "route something or
+           anything it can"): the end at its door, or a street's point, or the
+           corner, or — the corner's streets not meeting in the disc — either
+           street (mapNbx.cornerStreet); with no end that can be drawn, the
+           car to the pickups, the server's pickup pin when Map view has none
+           (heldSaid.pickAt). A pin the map calls wrong (red) is no rung. Each
+           rung but the door is said after the caption (`notes`). */
         var hj = mapJudge(want, found, here);
-        var runPts = [here || want.carNow].concat(hj.heldPicks.filter(function (p) { return p.at; })
-          .map(function (p) { return p.at; }), [hj.held]).filter(Boolean);
-        var trusted = hj.held && !hj.off.held && !hj.wrong[want.held]
-          && hj.heldPicks.every(function (p) { return !p.at || (!p.off && !hj.wrong[p.q]); });
-        if (trusted && runPts.length >= 2) {
-          heldRoad = await mapNbx.runLine(runPts);
+        var heldOk = hj.held && !hj.off.held && !hj.wrong[want.held] ? hj.held : null;
+        var picksOk = hj.heldPicks.filter(function (p) { return p.at && !p.off && !hj.wrong[p.q]; })
+          .map(function (p) { return p.at; });
+        var heldSeen = want.nbxSeen && want.nbxSeen[want.held];
+        var rung = MV.routeRung(want.held, heldOk, heldSeen && heldSeen.res ? heldSeen.res.by : null);
+        if (!heldOk && !hj.held && want.held && nbx.streets) {
+          var side = await cornerSide(want.held, want.heldCard, here || want.carNow);
+          if (gone()) return;
+          if (side) { heldOk = side; rung = 'street'; }
+        }
+        if (!heldOk && !picksOk.length && heldSaid && heldSaid.pickAt) picksOk = [heldSaid.pickAt];
+        var lad = want.held || picksOk.length
+          ? MV.routeLadder(here || want.carNow, picksOk, heldOk, rung) : null;
+        if (lad) {
+          heldRoad = await mapNbx.runLine(lad.pts);
           if (viewMode !== 'map' || mapFor !== key) return;
+          if (heldRoad && lad.note) notes.push(lad.note);
         }
       }
       /* ...and this card's own job, pickup -> its dropoff, along the road:
@@ -7061,15 +7102,32 @@
          same trust as the held run — neither pin red or a card's refusal,
          neither a numberless street's point — and straight otherwise. */
       var jobRoad = null;
-      if (nbx.route && mapNbx) {
+      if (nbx.route && mapNbx && MV.routeLadder) {
+        /* ...down the same ladder (the owner, 21 Oct): its end at the door, a
+           street's point or the corner — or either of the corner's streets
+           (cornerSide) — said "trip: …" after the caption; with no end to
+           draw and nothing in the car, the car to its pickup, "trip: route
+           to pickup only" (with an order in the car that leg is the detour's
+           own). Not from a pickup the map calls wrong or a card refuses. */
         var jj = mapJudge(want, found, here);
-        if (jj.pick && jj.drop && !jj.off.pick && !jj.wrong[want.pickup]
-            && !jj.wrong[want.dropoff] && !jj.pick.stretch && !jj.drop.stretch) {
-          jobRoad = await mapNbx.runLine([jj.pick, jj.drop]);
+        var pickOk = jj.pick && !jj.off.pick && !jj.wrong[want.pickup] ? jj.pick : null;
+        var dropOk = jj.drop && !jj.wrong[want.dropoff] ? jj.drop : null;
+        var dropRung = MV.routeRung(want.dropoff, dropOk, null);
+        if (pickOk && !jj.drop && want.dropoff && nbx.streets) {
+          var dside = await cornerSide(want.dropoff, want.card, here);
+          if (gone()) return;
+          if (dside) { dropOk = dside; dropRung = 'street'; }
+        }
+        var jl = pickOk ? MV.routeLadder(dropOk ? null : here, [pickOk], dropOk, dropRung) : null;
+        if (jl && (dropOk || !want.held)) {
+          var jr = await mapNbx.runLine(jl.pts);
           if (viewMode !== 'map' || mapFor !== key) return;
+          if (dropOk) jobRoad = jr;
+          else pickRoad = jr;
+          if (jr && jl.note) notes.push('trip: ' + jl.note);
         }
       }
-      drawMap(want, found, here, true, road, heldRoad, jobRoad);
+      drawMap(want, found, here, true, road, heldRoad, jobRoad, { notes: notes, pickRoad: pickRoad });
       if (want.refit) { fitFor = cardId; fitWanted = false; }
     } finally {
       mapBusy = false;
@@ -7609,8 +7667,12 @@
      they land, and not one geocoded CLAIM is made until every answer is in.
      `road` is the router's detour when one was asked for, `heldRoad` the
      held order's run along the roads and `jobRoad` this card's pickup ->
-     dropoff along them, each or null (see showMap). */
-  function drawMap(want, found, here, settled, road, heldRoad, jobRoad) {
+     dropoff along them, each or null (see showMap). `runs` is what else
+     the walk's ladder gave (MV.routeLadder): `notes`, the words said after
+     the caption, and `pickRoad`, the car -> pickup road of a card with no
+     end to draw and nothing in the car. */
+  function drawMap(want, found, here, settled, road, heldRoad, jobRoad, runs) {
+    var ladder = runs || {};
     var j = mapJudge(want, found, here);
     var wrong = j.wrong, pick = j.pick, drop = j.drop, held = j.held, off = j.off;
 
@@ -7785,7 +7847,9 @@
     } else {
       var run = heldRoad || (MV.heldRun ? MV.heldRun(here || want.carNow, heldAt, held)
         : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []));
-      if (run.length && (held || heldAt.some(Boolean))) {
+      // (A road to a rung below the door — a corner's street, the pickups
+      // alone — is drawn with no D under it: MV.routeLadder.)
+      if (run.length && (heldRoad || held || heldAt.some(Boolean))) {
         runLine(run, { color: '#f5a524', opacity: .9,
                        className: 'mv-held-run' + (heldRoad ? ' mv-road' : '') });
         drewRun = true;
@@ -7821,8 +7885,11 @@
            || { from: here, to: held })
       : {};
     if (gap.from) {
-      runLine([[gap.from.lat, gap.from.lon], [pick.lat, pick.lon]],
-              { color: '#c084fc', dashArray: '2 9', opacity: .95, className: 'mv-detour' });
+      // ...along the road with nothing in the car (the ladder's pickup rung).
+      var toPick = !inCar && ladder.pickRoad ? ladder.pickRoad : null;
+      runLine(toPick || [[gap.from.lat, gap.from.lon], [pick.lat, pick.lon]],
+              { color: '#c084fc', dashArray: '2 9', opacity: .95,
+                className: 'mv-detour' + (toPick ? ' mv-road' : '') });
       drewExtra = true;
     }
     // The job itself, solid: along the road when the router drew it (see
@@ -7831,7 +7898,8 @@
     // comparison the driver opened the map for (owner, 19 Oct), and a green
     // line read as one more pickup ring.
     var drewJob = false;
-    if (pick && drop) {
+    // (...or to a point on one of its corner's streets, by road only: no D.)
+    if (pick && (drop || jobRoad)) {
       drewJob = true;
       runLine(jobRoad || [[pick.lat, pick.lon], [drop.lat, drop.lon]],
               { color: '#2dd4bf', opacity: .9,
@@ -7862,7 +7930,8 @@
     showKey(drewHow, !!(held || pick || drop), heldAt.some(Boolean),
             // The lines only with an order in the car: with none the dashed
             // leg is the drive to the pickup, the key's as it always was.
-            { run: drewRun, extra: drewExtra && inCar, order: !!order,
+            // (...or beside a run the ladder drew with no end pinned.)
+            { run: drewRun, extra: drewExtra && (inCar || drewRun), order: !!order,
               job: drewJob && drewRun });
 
     /* THE VIEW: the car and the stops (`frame`), once per card — on the
@@ -7905,7 +7974,9 @@
       return;
     }
 
-    mapDrew(ans.said);
+    // ...and the runs' rungs below the door after it (MV.routeSaid), on the
+    // caption only: the card's line is the figure's, and no rung is one.
+    mapDrew(MV.routeSaid ? MV.routeSaid(ans.said, ladder.notes) : ans.said);
     // ...and the card's line, off the same answer: with the press behind it
     // this walk may have asked the public map too, which the card's own walk
     // never does, so this one is the card's answer from here on (wayAnswered).

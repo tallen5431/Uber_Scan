@@ -32,6 +32,7 @@ function pageOf(text, at, asked, app) {
   return {
     at: at, asked: !!asked, whole: true, titled: OP.plannerTitled(text),
     laidOut: OP.plannerLaidOut(text), framed: OP.plannerFramed(text),
+    footed: OP.plannerFoot(text),
     app: app || kind.app, screen: kind.screen, page: OP.plannerEnds(text),
     stops: stops.map(function (s) {
       return { kind: s.kind, orders: s.orders, name: s.name, place: s.place,
@@ -1423,6 +1424,90 @@ SEQ.forEach(function (seq) {
      [true, false, false, false, false, false, false, false, false, false, false]);
   eq('[framed] framedTrip: ...and the list it is read as must be the same one trip',
      A.framedTrip(held(), page, { stops: stops.concat([stops[1]]) }), false);
+})();
+
+/* The trip's last stop, its Dropoff header cropped off (footDropoff; the
+ * owner's card-box read of 21 Oct, 15:00, one Uber order held, its end the
+ * card's corner). The shared case "Measured: the card-box read of 21 Oct,
+ * 15:00 …" (the street invented): "Address / <n> <street> / <Town>, GA /
+ * View details / Waybill / … / Stop New Requests". Filed at rank `label`
+ * over the card's corner, card box or whole; never with two held, an add-on,
+ * a press, before the Took, or onto one of the order's own pickups. */
+(function () {
+  var name = 'Measured: the card-box read of 21 Oct, 15:00, the trip\'s last stop under its '
+    + 'cropped Dropoff header, Waybill and the bar under it';
+  var text = null;
+  require('./fixtures/cases.json').planner.forEach(function (c) {
+    if (c.name === name) text = c.text;
+  });
+  ok_('[foot] the premise: the 21 Oct 15:00 case is there, footed', !!text && OP.plannerFoot(text));
+  if (!text) return;
+  function held(extra) {
+    var h = Object.assign({ id: 'o-foot', acceptedAt: 1000, app: 'uber',
+                            card: { legs: 0, multiOrder: false },
+                            pickup: 'Fable Grill (3400 Fable International Blvd NW)',
+                            dropoff: 'Wren Flat Ct & Oriel Rd, Marietta',
+                            dropoffScanned: false }, extra || {});
+    h.fields = A.cardFields({ dropoff: h.dropoff, pickup: h.pickup }, h.acceptedAt);
+    return h;
+  }
+  function run(page, h, st) {
+    st = st || A.fresh();
+    h = h || held();
+    A.took(st, h);
+    var r = A.sighting(st, h, page, page.at);
+    var said = r.candidates.map(function (d) {
+      var s = A.dropoff(h, d, null);
+      if (s.to === 'hold') A.file(h, d, s, st);
+      return [d.foot === true, s.to ? s.from : s.why];
+    });
+    return [said, h.dropoff, brief(h.fields.dropoff)];
+  }
+  var box = Object.assign(pageOf(text, 2000, false), { whole: false });
+  var corner = 'Wren Flat Ct & Oriel Rd, Marietta';
+  var door = '3259 Wrenfield Oaks Dr, Marietta';
+  eq('[foot] the fault: the card-box read files the door over the card\'s corner, rank label',
+     run(box), [[[true, 'label']], door, { value: door, from: 'label' }]);
+  eq('[foot] ...and read whole, the same',
+     run(pageOf(text, 2000, false))[1], door);
+  eq('[foot] ...said once per hold: the same read again offers nothing',
+     (function () {
+       var st = A.fresh(), h = held();
+       run(box, h, st);
+       return run(Object.assign({}, box, { at: 3000 }), h, st)[0];
+     })(), []);
+  eq('[foot] ...not without the shape (`footed` false)',
+     run(Object.assign({}, box, { footed: false })).slice(0, 2), [[], corner]);
+  eq('[foot] ...not off a press',
+     run(Object.assign({}, box, { asked: true })).slice(0, 2), [[], corner]);
+  eq('[foot] ...not read before the Took',
+     run(Object.assign({}, box, { at: 500 })).slice(0, 2), [[], corner]);
+  eq('[foot] ...not onto an add-on\'s trip, by `addOn` or by `of`',
+     [run(box, held({ addOn: true }))[1], run(box, held({ of: 'o-root@1' }))[1]],
+     [corner, corner]);
+  eq('[foot] ...not when the block is the held order\'s own pickup',
+     run(box, held({ pickup: 'Fable Grill (3259 Wrenfield Oaks Dr)' })).slice(0, 2),
+     [[], corner]);
+  eq('[foot] ...nor a stop with a kind, or a page of two stops',
+     [run(Object.assign({}, box, { stops: [Object.assign({}, box.stops[0],
+                                                         { kind: 'pickup' })] }))[1],
+      run(Object.assign({}, box, { stops: box.stops.concat(box.stops) }))[1]],
+     [corner, corner]);
+  // An end the driver pressed for stays: rank `label` never outranks a press.
+  var pressed = held();
+  A.file(pressed, { line: '3261 Wrenfield Oaks Dr, Marietta', asked: true, at: 1500 },
+         A.dropoff(pressed, { line: '3261 Wrenfield Oaks Dr, Marietta', asked: true, at: 1500 },
+                   null));
+  eq('[foot] ...and never over an end the driver pressed for',
+     run(box, pressed)[1], '3261 Wrenfield Oaks Dr, Marietta');
+  // With two orders held nothing of this rule is asked (sightingMany).
+  (function () {
+    var st = A.fresh();
+    var a = held(), b = held({ id: 'o-other', acceptedAt: 1200 });
+    var r = A.sighting(st, [a, b], box, 2000);
+    eq('[foot] with two orders held the cropped last stop is offered nowhere',
+       r.candidates.filter(function (d) { return d.foot; }).length, 0);
+  })();
 })();
 
 /* The same store as an order in the car (Assemble.samePickup; the owner's
