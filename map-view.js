@@ -895,7 +895,7 @@
   /* Whether a text with no comma is "<n> <name> <type>[ <quadrant>]". */
   function bareDoor(s) {
     var w = String(s).replace(/[\s,.]+$/, '').split(' ');
-    if (w.length < 3 || !/^\d+[A-Za-z]?$/.test(w[0])) return false;
+    if (!/^\d+[A-Za-z]?$/.test(w[0])) return false;
     if (QUADRANTS.indexOf(w[w.length - 1].toLowerCase().replace(/\.$/, '')) >= 0) w.pop();
     return w.length >= 3 && /[A-Za-z]{2}/.test(w[1]) && !!streetType(w[w.length - 1]);
   }

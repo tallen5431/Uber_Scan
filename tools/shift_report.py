@@ -354,7 +354,8 @@ def pin_text(p):
     if p['pickups'] is None:
         return end
     return end + '; pickups %d pinned' % p['pickups'] + (
-        ': %s' % p['pickupsWhy'] if p['pickupsWhy'] and not p['pickups'] else '')
+        # (server.js gives a reason only when none is pinned: pickupState)
+        ': %s' % p['pickupsWhy'] if p['pickupsWhy'] else '')
 
 
 @functools.lru_cache(maxsize=None)

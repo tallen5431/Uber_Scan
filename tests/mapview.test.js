@@ -1098,9 +1098,16 @@ async function nucbox() {
                       house: '840' }));
   eq('...and with a quadrant after its type',
      MV.searchPlan('1106 Tansy Commons Ln NW').street, '1106 Tansy Commons Ln NW');
+  eq('...and with the reader\'s dots after its type, left off',
+     MV.searchPlan('1106 Tansy Commons Ln..').street, '1106 Tansy Commons Ln');
   eq('...but a number then a name with no street type stays a name',
      [MV.searchPlan('1000 Degrees Pizza').kind, MV.searchPlan('77 Ln').kind,
       MV.searchPlan('Birch Ln').kind].join(','), 'name,name,name');
+  // Mutation catch-up (21 Oct): bareDoor's own two word rules.
+  eq('...and a name of three words ending in a type but no house number stays a name, as does '
+     + 'a number and a road number ("1200 41 Hwy": no name word)',
+     [MV.searchPlan('Birch Hollow Ln').kind, MV.searchPlan('1200 41 Hwy').kind].join(','),
+     'name,name');
   eq('cross streets are not asked of a search that answers one point a street',
      JSON.stringify(MV.searchPlan('Birch Ln & Kestrel Dr, Roswell')),
      JSON.stringify({ kind: 'cross', a: 'Birch Ln', b: 'Kestrel Dr' }));

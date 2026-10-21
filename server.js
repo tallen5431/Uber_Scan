@@ -4171,6 +4171,8 @@ var EARLY_MAX = 200;
 // while the NucBox's Nominatim answers a bounded search in well under a
 // second. A card's own pickup and dropoff are not counted: two per card.
 var EARLY_WARM_PER_MIN = 6;
+// ...the "minute" itself, settable for the suite only (ms).
+var EARLY_WARM_MS = envNumber('EARLY_WARM_MS', 60000);
 // Card ids already searched (once a card, however often it is re-read).
 var EARLY_CARDS = 32;
 var early = new Map();          // key -> { done, res, waiters }
@@ -4287,8 +4289,7 @@ function warmEarly(read, now) {
   var said = addressesOf(read);
   if (!said.length) return;
   var orders = heldOrders(now);
-  if (!orders.length) return;
-  earlyWarmAts = earlyWarmAts.filter(function (t) { return now - t < 60000; });
+  earlyWarmAts = earlyWarmAts.filter(function (t) { return now - t < EARLY_WARM_MS; });
   var room = function () {
     if (earlyWarmAts.length >= EARLY_WARM_PER_MIN) return false;
     earlyWarmAts.push(now);
@@ -7871,8 +7872,8 @@ function cardArrivedAt(id) {
  *                     arrival (the time cardArrivedAt keeps for it), its own
  *                     clock — no stated time is never in force;
  *   noLaterTook       no ✓ Took of another card was pressed after it arrived
- *                     (tookPresses, and the tookAt of every order held, which
- *                     survives a restart): the driver went on to take a later
+ *                     (tookPresses, the last TOOK_PRESSES_MAX; a restart
+ *                     forgets the cards as well): the driver went on to take a later
  *                     job, and putting this one in the car now would replace
  *                     or stack onto that one on a review's word.
  * And the server must still have the card's reading (offerCards, process
@@ -7908,19 +7909,18 @@ function keepTookPress(id, at) {
   tookPresses = tookPresses.concat([{ id: id, at: at }]).slice(-TOOK_PRESSES_MAX);
 }
 
+// (offersTickHolds asks this only of a card with minutes, so holdEnds has an end.)
 function heldStillInForce(card, at, now) {
-  var probe = { minutes: typeof card.billedMinutes === 'number'
-                  ? card.billedMinutes : card.minutes,
-                acceptedAt: at };
-  var ends = holdEnds(probe);
-  return ends !== null && now <= ends;
+  return now <= holdEnds({ minutes: typeof card.billedMinutes === 'number'
+                             ? card.billedMinutes : card.minutes,
+                           acceptedAt: at });
 }
 
+// Every Took is in tookPresses (keepTookPress). The orders held are not asked
+// as well: after a restart offerCards is empty, so no card this asks about
+// can have come up before a Took that tookPresses has forgotten.
 function noLaterTook(id, at) {
-  var tooks = tookPresses.concat(scanner.held.map(function (h) {
-    return { id: h.id, at: h.tookAt };
-  }));
-  return !tooks.some(function (t) {
+  return !tookPresses.some(function (t) {
     return t.id !== id && typeof t.at === 'number' && t.at > at;
   });
 }

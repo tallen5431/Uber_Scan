@@ -434,14 +434,17 @@ function cutFits(sq, o) {
     if (name.length !== n - 1 || name.length === base.length) return false;
     for (var k = 0; k < n - 2; k++) if (q[k] !== name[k]) return false;
     var word = name[name.length - 1], cut = p[n - 2];
-    return q[n - 2] === word
-      || (cut.length >= CUT_KEEP && cut.length < word.length && word.slice(0, cut.length) === cut);
+    // (`cut` has CUT_KEEP letters at least, `frag` says; one the word's length
+    // that is its first letters is the word, which the first test takes.)
+    return q[n - 2] === word || word.slice(0, cut.length) === cut;
   }
   if (name.length !== q.length) return false;
   for (var i = 0; i < q.length - 1; i++) if (q[i] !== name[i]) return false;
   var r = q[q.length - 1], w = name[name.length - 1];
   if (!/^[a-z]+$/.test(r)) return false;
-  if (r === w) return name.length < base.length;     // the type lost, the word whole
+  // The type lost, the word whole. (An untyped street read whole is the
+  // index's own key, which match's rules find before this is asked.)
+  if (r === w) return true;
   return r.length < w.length && r.length - 1 >= CUT_KEEP
     && r.slice(0, -1) === w.slice(0, r.length - 1);
 }
