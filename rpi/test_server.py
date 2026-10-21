@@ -1040,7 +1040,8 @@ if shutil.which('python3'):
             ((get(base, '/api/status').get('holding') or {}).get('holdId') or '').startswith('n-2@'))
         _row = [r for r in lines(journal) if r.get('kind') == 'drop'][:1] or [{}]
         eq('[replaced] ...in the same shape as a pressed drop',
-           sorted(_row[0].keys()), ['acceptedAt', 'at', 'by', 'id', 'kind', 'seq', 'v'])
+           sorted(_row[0].keys()),
+           ['acceptedAt', 'at', 'by', 'end', 'id', 'kind', 'pickups', 'seq', 'v'])
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
@@ -7594,6 +7595,116 @@ try:
         eq('[place] with NUCBOX_SEARCH unset the place rides on the hold and nothing is asked',
            (_h.get('place'), _h.get('endPinned'), _h.get('endWhy'), len(_hkasked('')) - _n),
            ('Wrenfield Parking Deck', False, None, 0))
+    finally:
+        stop(_hkp)
+
+    # --- searched early, and the pin outcome journaled (the owner, 21 Oct) ---
+    #
+    # An offer card's pickup and dropoff are searched on the NucBox the moment
+    # the scanner's offer line arrives (server.js searchCardEarly, earlyDoor:
+    # doorChain inside the card's disc), so a later ✓ Took finds every answer
+    # in nbxCache and asks nothing. While an order is held, every address a
+    # screen reports is searched too, EARLY_WARM_PER_MIN (6) new a minute at
+    # most. Every drop row says how the order's end was pinned or why not
+    # (pinOutcome), in words. Every address invented; "Quillon Way" is a
+    # street the fake does not hold.
+    def _ewait(word, n, seconds=4.0):
+        for _ in range(int(seconds / 0.05)):
+            if len(_hkasked(word)) >= n:
+                break
+            time.sleep(0.05)
+        return len(_hkasked(word))
+
+    def _edrop(journal, oid):
+        with open(journal) as fh:
+            rows = [json.loads(x) for x in fh if x.strip()]
+        return [r for r in rows if r.get('kind') == 'drop' and r.get('id') == oid]
+
+    _ECARD = dict(_SQ, id='e-card', pay=9.0, minutes=35.0, billedMinutes=35.0, miles=5.0,
+                  cost=1.5, pickup='Example Burger (1981 Cobb Pkwy)', dropoff=_COBB, app='uber')
+    _hks, _hksays, _hkj = _hksayer('early')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800'}, _hkj)
+    try:
+        _n85, _n81 = len(_hkasked('street=1985')), len(_hkasked('street=1981'))
+        _hksays([{'offer': _ECARD}])
+        _ewait('street=1985', _n85 + 1)
+        _ewait('street=1981', _n81 + 1)
+        _eq = _hkasked('street=1985')[_n85:] + _hkasked('street=1981')[_n81:]
+        ok_('[early search] a card read is searched at once, its dropoff and its pickup, '
+            'each once, inside the card\'s disc, before any Took (%r)' % _eq,
+            len(_eq) == 2 and all('viewbox=' in q and 'bounded=1' in q for q in _eq))
+        _hksays([{'offer': dict(_ECARD, pay=9.5)}])
+        eq('[early search] ...and a re-read of the same card asks nothing more',
+           (len(_hkasked('street=1985')) - _n85, len(_hkasked('street=1981')) - _n81), (1, 1))
+        _nall = len(_hkasked(''))
+        post(_hkb, '/api/offers/mark', {'id': 'e-card', 'accepted': True, 'offer': _ECARD})
+        _h = _settled(_hkb, lambda h: h.get('endPinned') and h.get('pickupsPinned'))
+        eq('[early search] ✓ Took pins the end and the restaurant from the early answers, '
+           'with no new request to the NucBox',
+           (_h.get('endPinned'), _h.get('endBy'), _h.get('pickupsPinned'),
+            len(_hkasked('')) - _nall), (True, 'server', 1, 0))
+        post(_hkb, '/api/delivered', {})
+        time.sleep(0.3)
+        _r = (_edrop(_hkj, 'e-card') or [{}])[0]
+        eq('[pin log] Drop journals how the end was pinned and why it did not arm, in words',
+           (_r.get('end'), _r.get('pickups')),
+           ({'by': 'server', 'why': 'door next to the pickup', 'asked': 'door'},
+            {'pinned': 1, 'why': None}))
+        _rt = json.dumps(_r)
+        eq('[pin log] ...and carries no address or coordinate it did not already carry',
+           [w for w in ('Cobb', '1985', '1981', 'Burger', '34.0', '-84.5', 'lat', 'lon')
+            if w in _rt], [])
+
+        # No door on the NucBox: the refusal, said in the row a Took that
+        # replaced the order writes.
+        _atook(_hkb, 'e-street', _KES)
+        _settled(_hkb, lambda h: h.get('endWhy'))
+        _atook(_hkb, 'e-two', _COBB)
+        _h = _settled(_hkb, lambda h: h.get('endPinned') and (h.get('holdId') or '')
+                      .startswith('e-two'))
+        time.sleep(0.3)
+        _r = (_edrop(_hkj, 'e-street') or [{}])[0]
+        eq('[pin log] a replaced order\'s row says its end was not pinned, and why',
+           (_r.get('by'), _r.get('end'), _r.get('pickups')),
+           ('replaced', {'by': None, 'why': 'no house number', 'asked': 'door'},
+            {'pinned': 0, 'why': 'no house number'}))
+
+        # Every other screen, while an order is held: a planner page of nine
+        # doors the fake does not hold. Six are searched in the held card's
+        # disc (each with its type-word retry), three are not, this minute.
+        def _eplanner(base):
+            return {'planner': {'stops': [
+                {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'street': None,
+                 'city': None, 'state': None, 'zip': None,
+                 'line': '%d Quillon Way, Marietta' % (base + i)} for i in range(9)],
+                'unfiled': 'dropoffs', 'asked': False}}
+
+        def _enumbers():
+            said = ' '.join(_hkasked('Quillon'))
+            return sorted(set(re.findall(r'street=(\d+)%20Quillon', said)))
+        _hksays([_eplanner(300)])
+        time.sleep(1.0)
+        _got = _enumbers()
+        eq('[early warm] while an order is held, a screen\'s doors are searched, six new '
+           'a minute at most (EARLY_WARM_PER_MIN)', (len(_got), _got[:1]), (6, ['300']))
+        ok_('[early warm] ...inside the held card\'s disc',
+            all('viewbox=' in q and 'bounded=1' in q for q in _hkasked('Quillon')))
+        _nq = len(_hkasked('Quillon'))
+        _hksays([_eplanner(300)])
+        time.sleep(0.5)
+        eq('[early warm] ...the same page again asks nothing: six already searched, '
+           'the minute\'s room spent', len(_hkasked('Quillon')) - _nq, 0)
+        post(_hkb, '/api/delivered', {})
+        time.sleep(0.3)
+        _r = (_edrop(_hkj, 'e-two') or [{}])[0]
+        eq('[pin log] the order the early cache pinned says so on its own Drop row',
+           (_r.get('end') or {}).get('by'), 'server')
+        _nq = len(_hkasked('Quillon'))
+        _hksays([_eplanner(400)])
+        time.sleep(0.5)
+        eq('[early warm] with nothing held, another screen\'s doors are not searched',
+           len(_hkasked('Quillon')) - _nq, 0)
     finally:
         stop(_hkp)
 finally:

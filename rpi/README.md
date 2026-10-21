@@ -4581,7 +4581,9 @@ rig began and stopped logging, when the car left the place the log began
 ("start", never named or placed) and got back to it, the miles, the minutes
 moving and stopped (under 1 m/s), every stop of 4 minutes or more by its time,
 length and miles from start, every gap in the log over 60 s, and the count of
-orders. Then one row per order, card beside actual. A gap is a cut: the miles
+orders. Then one row per order, card beside actual, and "Pinning": how each
+order's end was pinned for the GPS drop or why not, its pickups pinned, and the
+shift's pinned rate (off the drop rows' `end` and `pickups` words). A gap is a cut: the miles
 driven in it are not counted (the line says so, and how far apart the fixes
 either side are), no stop runs across it, its minutes are neither moving nor
 stopped, and a departure seen first after a gap says it may have been earlier.
@@ -8559,7 +8561,7 @@ python3 rpi/test_offerspage.py  # 545 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 999 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 1010 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8602,7 +8604,7 @@ python3 rpi/test_loop.py        # 401 on the scan loop re-telling a card once
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
 python3 tools/test_gpslog_tidy.py   #  45 on tidying the GPS logs unattended
-python3 tools/test_shift_report.py  # 131 on what each order really took and
+python3 tools/test_shift_report.py  # 140 on what each order really took and
                                     #     what the shift adds up to: a gap in
                                     #     the GPS log never a stop and never
                                     #     miles, a parked receiver's wander

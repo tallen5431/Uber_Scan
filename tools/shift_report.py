@@ -66,6 +66,17 @@ with no drop row at all has no end on record: the server lost the hold, or it
 expired before the server wrote expiry rows. `replaced`, `expiry` and no-row
 are all UNRELIABLE, marked on the row, and left out of the summary.
 
+HOW ITS END WAS PINNED, the "Pinning" section, off the same drop row: since
+21 Oct 2026 server.js writes on every drop row, in words, how the order's end
+was pinned for the GPS drop or why not (`end: {by, why, asked}`) and how many
+of its pickups the restaurant guard held (`pickups: {pinned, why}`; server.js
+pinOutcome). Per order that is printed as it stands, and the shift's pinned
+rate is the orders whose end was pinned at all — at the door, by its place or
+by its short street, whoever pinned it — over the orders whose row says
+either way. A row from before the field, or no row, says nothing and is
+counted apart. Words only, as the row has them: the row carries no address
+and no coordinate for this, and the report prints none.
+
 THE GPS LOG is `gpspipe -w -uu` output in one directory, `.jsonl` or the
 `.jsonl.gz` tools/gpslog_tidy.py leaves; of those, the logs whose names say
 they can hold the day's fixes (_logs_for), and the header says how many others
@@ -239,7 +250,7 @@ def orders(rows):
 
 def _order(oid, took, readings, drops, visits):
     o = {'id': oid, 'took': took, 'end': None, 'how': None, 'reliable': False,
-         'carried': None, 'visits': [], 'notes': []}
+         'carried': None, 'visits': [], 'notes': [], 'pin': None}
     # The card as it stood when Took was pressed: the last reading of it
     # written at or before the press. Not the server's vote over every reading
     # (bestReading), which may have been made after the press and is a
@@ -262,6 +273,7 @@ def _order(oid, took, readings, drops, visits):
     after = sorted((d for d in drops if d['at'] >= took), key=lambda d: d['at'])
     if after:
         d = after[0]
+        o['pin'] = pin_of(d)
         o['end'] = d['at']
         o['carried'] = _num(d.get('carried'))
         if d.get('by') in HOW:
@@ -292,6 +304,57 @@ def _order(oid, took, readings, drops, visits):
                          if v['at'] >= took and (o['end'] is None or v['at'] <= o['end']))
     o['actualMinutes'] = (o['end'] - took) / 60000.0 if o['end'] is not None else None
     return o
+
+
+# How long a word off the row may print. Every word server.js writes there is
+# shorter ("not inside the card's reach" is 27); a longer one is a newer
+# build's, cut rather than let run on.
+WORD_MAX = 32
+
+
+def _word(v):
+    return v[:WORD_MAX] if isinstance(v, str) and v else None
+
+
+def pin_of(d):
+    """A drop row's `end` and `pickups` (server.js pinOutcome), as
+    {'by', 'why', 'asked', 'pickups', 'pickupsWhy'}, or None for a row that
+    does not say (written before the field)."""
+    end = d.get('end')
+    if not isinstance(end, dict):
+        return None
+    picks = d.get('pickups') if isinstance(d.get('pickups'), dict) else {}
+    n = _num(picks.get('pinned'))
+    return {'by': _word(end.get('by')), 'why': _word(end.get('why')),
+            'asked': _word(end.get('asked')),
+            'pickups': int(n) if n is not None else None,
+            'pickupsWhy': _word(picks.get('why'))}
+
+
+def pinning(rows):
+    """The Pinning section's count, as {'recorded', 'pinned', 'unrecorded'}.
+    Pinned is an end with a pin of any kind (`by` said); the rate is over the
+    orders whose row says either way."""
+    said = [o['pin'] for o in rows if o.get('pin')]
+    return {'recorded': len(said), 'pinned': sum(1 for p in said if p['by']),
+            'unrecorded': len(rows) - len(said)}
+
+
+def pin_text(p):
+    """One order's pin as a phrase: how its end was pinned or why not, and its
+    pickups."""
+    if p is None:
+        return 'no record (no drop row, or one from before the server wrote it)'
+    if p['by']:
+        end = 'end pinned by %s' % p['by'] + (', not armed: %s' % p['why'] if p['why'] else '')
+    else:
+        end = 'end not pinned: %s' % (p['why'] or 'no reason given')
+    if p['asked']:
+        end += ' (asked: %s)' % p['asked']
+    if p['pickups'] is None:
+        return end
+    return end + '; pickups %d pinned' % p['pickups'] + (
+        ': %s' % p['pickupsWhy'] if p['pickupsWhy'] and not p['pickups'] else '')
 
 
 @functools.lru_cache(maxsize=None)
@@ -897,6 +960,18 @@ def text(rep):
     if notes:
         out.append('')
         out.extend('  #%d %s' % n for n in notes)
+    if rep['orders']:
+        out.append('')
+        out.append("Pinning (how each order's end was pinned for the GPS drop, or why not):")
+        for i, o in enumerate(rep['orders']):
+            out.append('  #%d %s' % (i + 1, pin_text(o.get('pin'))))
+        pn = pinning(rep['orders'])
+        rate = ('%d of %d order%s with a record (%d%%)'
+                % (pn['pinned'], pn['recorded'], '' if pn['recorded'] == 1 else 's',
+                   round(100.0 * pn['pinned'] / pn['recorded']))
+                if pn['recorded'] else 'no order has a record')
+        out.append('  Pinned: %s%s' % (rate, '; %d without one' % pn['unrecorded']
+                                       if pn['unrecorded'] and pn['recorded'] else ''))
     s = rep['summary']
     out.append('')
     out.append('Over the %d reliable order%s of %d (an order replaced, expired or with no end is left out):'

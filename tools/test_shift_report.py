@@ -645,6 +645,62 @@ eq('[offers tick] a ✓ on the offers page that held the order is its Took, and 
    (_ot['P']['took'], _ot['P']['how'], _ot['P']['end']), (at(18, 2), 'Drop', at(18, 40)))
 eq('[offers tick] ...one that only recorded is still no Took', _ot['Q']['how'], 'no Took')
 
+# --- how each order's end was pinned (21 Oct 2026) ----------------------------
+#
+# server.js pinOutcome: every drop row says, in words, how the order's end was
+# pinned for the GPS drop or why not, and how many of its pickups were pinned.
+# The rate is the orders pinned at all over the orders whose row says.
+def pinned_drop(oid, when, by, end, pickups, **kw):
+    return dict(drop(oid, when, by=by, **kw), end=end, pickups=pickups)
+
+
+_pj = os.path.join(work, 'pin.jsonl')
+with open(_pj, 'w') as fh:
+    for r in [
+        offer('P1', at(18, 0), 11.0, 30, 4.0), mark('P1', at(18, 1), True),
+        pinned_drop('P1', at(18, 30), 'gps', {'by': 'server', 'why': None, 'asked': 'door'},
+                    {'pinned': 1, 'why': None}),
+        offer('P2', at(18, 40), 8.0, 20, 3.0), mark('P2', at(18, 41), True),
+        pinned_drop('P2', at(19, 0), None,
+                    {'by': None, 'why': 'no house number', 'asked': 'door'},
+                    {'pinned': 0, 'why': 'no house number'}),
+        offer('P3', at(19, 10), 9.0, 25, 5.0), mark('P3', at(19, 11), True),
+        pinned_drop('P3', at(19, 20), 'replaced',
+                    {'by': 'place', 'why': 'door next to the pickup', 'asked': 'door'},
+                    {'pinned': 1, 'why': None}),
+        offer('P4', at(19, 30), 7.0, 20, 3.0), mark('P4', at(19, 31), True),
+        drop('P4', at(19, 50)),
+        offer('P5', at(20, 0), 7.0, 20, 3.0), mark('P5', at(20, 1), True),
+        pinned_drop('P5', at(20, 20), None,
+                    {'by': 'x' * 80, 'why': None, 'asked': None}, 'not a dict'),
+    ]:
+        fh.write(json.dumps(r) + '\n')
+_prep = SR.report(_pj, None, '2026-03-03')
+_pby = {o['id']: o['pin'] for o in _prep['orders']}
+eq('[pinning] a drop row\'s end and pickups are read off it, as words',
+   _pby['P1'], {'by': 'server', 'why': None, 'asked': 'door', 'pickups': 1,
+                'pickupsWhy': None})
+eq('[pinning] ...an end not pinned keeps its reason', (_pby['P2']['by'], _pby['P2']['why']),
+   (None, 'no house number'))
+eq('[pinning] ...a replaced order\'s row says too', _pby['P3']['by'], 'place')
+eq('[pinning] ...a row from before the field says nothing', _pby['P4'], None)
+eq('[pinning] ...a newer build\'s long word is cut, and pickups not a dict are unknown',
+   (len(_pby['P5']['by']), _pby['P5']['pickups']), (SR.WORD_MAX, None))
+eq('[pinning] the rate: ends pinned over the orders whose row says',
+   SR.pinning(_prep['orders']), {'recorded': 4, 'pinned': 3, 'unrecorded': 1})
+_ptext = SR.text(_prep)
+_psec = _ptext[_ptext.index('Pinning'):_ptext.index('Over the ')]
+ok_('[pinning] the text prints a Pinning section, one line per order (%r)' % _psec,
+    '#1 end pinned by server (asked: door); pickups 1 pinned' in _psec
+    and '#2 end not pinned: no house number (asked: door); pickups 0 pinned: no house number'
+    in _psec
+    and '#3 end pinned by place, not armed: door next to the pickup' in _psec
+    and '#4 no record' in _psec)
+ok_('[pinning] ...and the shift\'s pinned rate',
+    'Pinned: 3 of 4 orders with a record (75%); 1 without one' in _psec)
+eq('[pinning] a shift with no order prints no Pinning section',
+   'Pinning' in SR.text(SR.report(_pj, None, '2026-03-05')), False)
+
 # --- nothing reads it ---------------------------------------------------------
 readers = []
 # The files git tracks, not a walk of the directory: a walk also reads other

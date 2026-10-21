@@ -409,6 +409,9 @@ function startScanner() {
       // pointing at this file.
       try {
         read.at = Date.now();
+        // Every address this line reports, searched on the NucBox while an
+        // order is held, a few a minute at most (warmEarly).
+        warmEarly(read, read.at);
         // A sighting (rpi/scan_pi.py, emit_sighting): what a whole-screen or
         // planner read saw, typed by its screen. Counted by that type for
         // /api/status, and — Stage 3 — handed to the assembler, which is now
@@ -532,6 +535,9 @@ function startScanner() {
           }
           // ...and its reading, for the offers page's ✓ (offersTickHolds).
           keepOfferCard(scanner.offer, scanner.offerAt);
+          // ...and its pickup and dropoff searched on the NucBox now, so a
+          // ✓ Took finds them answered (searchCardEarly).
+          searchCardEarly(scanner.offer, Date.now());
           scanner.offerSeenAt = Date.now();
           // ...and the Trip Planner a press read goes, as it goes off the
           // panel at this moment. See forgetPlanner.
@@ -1236,6 +1242,15 @@ function asHold(h) {
  * the per-hold searches. ONE function for every change — a Took, a Drop, a pin
  * kept on one order — so the copies cannot disagree. */
 function setHeld(list) {
+  // How each order leaving the list had its end pinned, worked out while its
+  // searches are still known (pinOutcome): its drop row says it.
+  var was = scanner.held || [];
+  var staying = (list || []).filter(Boolean).map(holdIdOf);
+  var leaving = was.filter(function (h) { return staying.indexOf(holdIdOf(h)) === -1; });
+  leaving.forEach(function (h) {
+    goneOutcomes.set(holdIdOf(h), pinOutcome(h, was));
+    while (goneOutcomes.size > GONE_KEEP) goneOutcomes.delete(goneOutcomes.keys().next().value);
+  });
   scanner.held = (list || []).filter(Boolean);
   var tmp = null;
   try {
@@ -1503,8 +1518,9 @@ function asAddOnRow(row, h) {
 function expiredRows(gone) {
   var rows = gone.map(function (h) {
     var ends = holdEnds(h);
-    return JSON.stringify(asAddOnRow({ v: 1, kind: 'drop', at: ends, id: h.id, seq: ends,
-                                       acceptedAt: h.acceptedAt, by: 'expiry' }, h)) + '\n';
+    return JSON.stringify(asAddOnRow(withOutcome({ v: 1, kind: 'drop', at: ends, id: h.id,
+                                                   seq: ends, acceptedAt: h.acceptedAt,
+                                                   by: 'expiry' }, h), h)) + '\n';
   });
   appendLines(rows.join(''), function (err) {
     if (err) console.error('journal: could not record an expiry: ' + err.message);
@@ -2558,9 +2574,11 @@ function heldEndPin(h) {
  * EVERY order's pickups, not only this one's: with two in the car the car
  * waits at the second order's restaurant too, and a first order's door beside
  * it would arrive there the same way. With one order it is that order's. */
-function pickupNearEnd(h, pin) {
+function pickupNearEnd(h, pin, list) {
   var picks = [];
-  heldOrders(Date.now()).concat(h && scanner.held.indexOf(h) === -1 ? [h] : [])
+  // `list` is the orders to read, heldOrders' by default; pinOutcome passes
+  // the raw list, from inside setHeld, where heldOrders would write it again.
+  (list || heldOrders(Date.now())).concat(h && scanner.held.indexOf(h) === -1 ? [h] : [])
     .forEach(function (o) {
       if (Array.isArray(o.pickupPins)) picks = picks.concat(o.pickupPins);
     });
@@ -2606,12 +2624,12 @@ function notOneCustomer(h) {
  *
  * ...and before either, where the street AS PRINTED is not inside the card's
  * reach (MV.retryWanted), the door once more with the street's type word left
- * out (searchHeldRetry, MV.streetRetry: "1830 <Name> Creek Cts SW" asked
+ * out (doorChain, MV.streetRetry: "1830 <Name> Creek Cts SW" asked
  * again as "1830 <Name> Creek SW", the 17 Oct evening snap), an answer kept
  * only at the same door on the same street (MV.pickRetry). Map view's
  * NbxSearch.place asks the same second question. And where the street WAS
  * found inside the reach and not the door, once more with a directional
- * inside its name the other way (searchHeldDir, MV.dirRetry: "810 <A> West
+ * inside its name the other way (doorChain, MV.dirRetry: "810 <A> West
  * <B> Parkway" asked as "810 <A> W <B> Parkway", the 20 Oct fault).
  *
  * The public geocoder is never asked: it is the page's fallback, rationed and
@@ -2697,7 +2715,7 @@ var END_WHY = { nodoor: 'no house number', none: 'not inside the card\'s reach',
  * `answered(out)` with nbxHits' answer. A NucBox that does not answer is
  * 'NucBox down' on the hold and is asked once more, the whole search from the
  * top, after END_RETRY_MS. The door's question and the place's both come
- * through here — and the street index's (searchHeldNamed), whose answer
+ * through here — and the street index's (doorChain's byName), whose answer
  * `read` turns into what is kept (streetAnswer), or null for one that is not
  * an answer, which is the NucBox not answering as any other is. */
 function endAsk(key, attempt, target, answered, read) {
@@ -2729,13 +2747,16 @@ function endAsk(key, attempt, target, answered, read) {
  * either way — the level the GPS drop arms at (heldEndPin) — and the
  * restaurant guard (pickupNearEnd) and the customer guard (notOneCustomer)
  * hold it to the same rules whoever chose it. */
-function pinHeldEnd(h, at, by, asked) {
+function pinHeldEnd(h, at, by, asked, via) {
   h.endPin = { dropoff: h.dropoff, lat: at.lat, lon: at.lon,
                doorLevel: true, pinnedAt: Date.now(), by: by };
   // ...and the street the door was found by when it was not the dropoff's
-  // own (searchHeldRetry: the type word left out; searchHeldNamed: the one
-  // street the street index says the name as read is).
+  // own (doorChain: the type word left out; the one street the street index
+  // says the name as read is; a directional the other way).
   if (asked) h.endPin.asked = asked;
+  // ...and which of those retries it was ('type', 'rescue', 'dir'): a word,
+  // for the drop row's account of how the end was pinned (pinOutcome).
+  if (via) h.endPin.via = via;
   delete h.arrivedAt;
   delete h.endWhy;
   delete h.endWhyFor;
@@ -2750,63 +2771,111 @@ function searchHeldEnd(key, attempt) {
   if (!plan || plan.kind !== 'street' || !plan.door) return refuseHeldEnd(h, 'no house number');
   var disc = MV.discFor(h.card || null);
   if (!disc) return refuseHeldEnd(h, 'no card fix');
-  var said = nbxTerm(plan.street);
-  if (!said) return refuseHeldEnd(h, 'no house number');
-  var target = nbxSearchTarget('street', said, MV.discBox(disc));
-  function answered(out) {
-    var now = endHold(key);
-    if (!now || heldEndPin(now)) return;    // moved on, or the page pinned first
-    // Door level is pickInDisc's own rule: with a house number in the plan
-    // (required above) it keeps only answers that carry it, and refuses with
-    // 'nodoor' when none does. A second hasDoor here could never refuse
-    // anything — undone, no check failed — and was a second place answering
-    // the same question.
-    var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
-    // The street as printed not inside the card's reach: its door asked once
-    // more with the type word left out (MV.streetRetry; the 17 Oct evening
-    // snap, "<Name> Creek Cts SW" answered with nothing), held to the same
-    // street and the same door (MV.pickRetry).
-    var again = MV.streetRetry(plan);
-    if (again && MV.retryWanted(res, out.hits, disc)) {
-      return searchHeldRetry(key, attempt, disc, again, res, out.hits, plan);
-    }
-    // ...and with no type word to leave out, the street index asked which
-    // street the name as read is (MV.nameWanted; the 19 Oct night fault).
-    if (NBX.streets && MV.nameWanted(res, out.hits, disc, null)) {
-      return searchHeldNamed(key, attempt, disc, plan, res);
-    }
-    // ...and the street found inside the disc and not the door, a directional
-    // inside its name the other way (MV.dirRetry; the 20 Oct "Ernest West
-    // Barrett" fault), before the place and the short street are asked.
-    var dir = MV.dirRetry(plan);
-    if (dir && MV.dirWanted(res, out.hits, disc)) {
-      return searchHeldDir(key, attempt, disc, dir, res);
-    }
-    settleHeldEnd(key, attempt, disc, res, null);
-  }
-  endAsk(key, attempt, target, answered);
-}
-
-/* ...the directional retry: ONE more question, the street with its
- * directional words the other way ("810 <A> West <B> Parkway" asked as "810
- * <A> W <B> Parkway"), in the same discBox, through endAsk. Its answer is acted
- * on only when it pinned the door on the same street (MV.pickRetry,
- * MV.afterDir); else the first answer, a 'nodoor', goes on as before. */
-function searchHeldDir(key, attempt, disc, dir, first) {
-  var said = nbxTerm(dir.street);
-  if (!said) return settleHeldEnd(key, attempt, disc, first, null);
-  endAsk(key, attempt, nbxSearchTarget('street', said, MV.discBox(disc)), function (out) {
-    var two = MV.afterDir(first, MV.pickRetry(out.hits, disc, dir, out.cutAt));
-    settleHeldEnd(key, attempt, disc, two, two === first ? null : dir.street);
+  if (!nbxTerm(plan.street)) return refuseHeldEnd(h, 'no house number');
+  // Every question through endAsk (nbxCache first, a NucBox not answering
+  // refused 'NucBox down' and asked once more from the top), and nothing more
+  // asked once the hold has moved on or the page pinned first.
+  doorChain(plan, disc, true, function (target, read, answered) {
+    endAsk(key, attempt, target, function (out) {
+      var now = endHold(key);
+      if (!now || heldEndPin(now)) return;
+      answered(out);
+    }, read);
+  }, function (res, asked, via) {
+    settleHeldEnd(key, attempt, disc, res, asked, via);
   });
 }
 
-/* The door's answer acted on, from the first question or the retry (`asked`,
+/* THE DOOR SEARCH, ONE CHAIN OF QUESTIONS for every caller: the held end
+ * (searchHeldEnd), the held order's pickups (searchHeldPickup), and an offer
+ * card's pickup and dropoff searched the moment the card is read, or an
+ * address a screen showed while an order is held (earlyDoor). One chain, so
+ * a search made early asks exactly the questions a later ✓ Took asks, and the
+ * Took finds every answer in nbxCache. `plan` is a door plan (searchPlan's
+ * street with a house number, its street a valid nbxTerm); `ask(target,
+ * read, answered)` asks one question (`read` turns a body into what is kept,
+ * null for nbxHits) and calls `answered(out)` only with an answer — each
+ * caller handles a NucBox not answering its own way. `done(res, asked, via)`:
+ * pickInDisc's answer (or a retry's, chosen by MV.afterRetry / MV.afterDir),
+ * the street the door was found by when it was not the plan's own, and which
+ * retry found the door ('type', 'dir', 'rescue'), else null.
+ *
+ *   1. searchPlan's street in discBox round the disc, chosen by pickInDisc.
+ *   2. Where the street as printed is not inside the card's reach
+ *      (MV.retryWanted), the door once more with the street's type word left
+ *      out (MV.streetRetry: "1830 <Name> Creek Cts SW" asked again as "1830
+ *      <Name> Creek SW", the 17 Oct evening snap), an answer kept only at the
+ *      same door on the same street (MV.pickRetry).
+ *   3. With `named` (an end's search, not a pickup's) and NUCBOX_STREETS
+ *      set, where neither found the street (MV.nameWanted), the street index
+ *      asked which ONE street inside the disc's box the name as read is,
+ *      /api/streets/named (the 19 Oct night fault: "1106 <Name> Ln" read off
+ *      a dark frame as "L106 <Nam..>"; two near names are none), then the
+ *      door by that street's own name (MV.nameRetry), held to it
+ *      (MV.pickNamed).
+ *   4. Where the street WAS found inside the reach and not the door
+ *      (MV.dirWanted), once more with a directional inside its name the
+ *      other way (MV.dirRetry: "810 <A> West <B> Parkway" asked as "810 <A> W
+ *      <B> Parkway", the 20 Oct fault), taken only when it pinned
+ *      (MV.afterDir).
+ *
+ * Never the public geocoder. Each question is asked at most once a chain. */
+function doorChain(plan, disc, named, ask, done) {
+  var box = MV.discBox(disc);
+  ask(nbxSearchTarget('street', nbxTerm(plan.street), box), null, function (out) {
+    var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
+    var again = MV.streetRetry(plan);
+    if (again && MV.retryWanted(res, out.hits, disc)) {
+      var said = nbxTerm(again.street);
+      if (!said) return done(res, null, null);
+      return ask(nbxSearchTarget('street', said, box), null, function (out2) {
+        var two = MV.pickRetry(out2.hits, disc, again, out2.cutAt);
+        // Neither the street as printed nor without its type word: the
+        // street index asked which street the name as read is.
+        if (named && NBX.streets && MV.nameWanted(res, out.hits, disc, two)) return byName(res);
+        // A pin here is only ever the retry's own (the first had none), so
+        // the street it was found by is the retry's.
+        var kept = MV.afterRetry(res, two);
+        done(kept, again.street, kept.at ? 'type' : null);
+      });
+    }
+    if (named && NBX.streets && MV.nameWanted(res, out.hits, disc, null)) return byName(res);
+    var dir = MV.dirRetry(plan);
+    if (dir && MV.dirWanted(res, out.hits, disc)) {
+      var said3 = nbxTerm(dir.street);
+      if (!said3) return done(res, null, null);
+      return ask(nbxSearchTarget('street', said3, box), null, function (out3) {
+        var two = MV.afterDir(res, MV.pickRetry(out3.hits, disc, dir, out3.cutAt));
+        done(two, two === res ? null : dir.street, two === res ? null : 'dir');
+      });
+    }
+    done(res, null, null);
+  });
+  function byName(first) {
+    var said = nbxTerm(MV.nameAsked(plan) || '');
+    if (!said) return done(first, null, null);
+    ask(streetTarget('named', { name: said, box: box }), function (body) {
+      var a = streetAnswer('named', body);
+      return a.error ? null : a;
+    }, function (ans) {
+      var p2 = MV.nameRetry(plan, ans);
+      var said2 = p2 ? nbxTerm(p2.street) : null;
+      if (!said2) return done(first, null, null);
+      ask(nbxSearchTarget('street', said2, box), null, function (out) {
+        var kept = MV.afterRetry(first, MV.pickNamed(out.hits, disc, p2, out.cutAt));
+        done(kept, p2.street, kept.at ? 'rescue' : null);
+      });
+    });
+  }
+}
+
+/* The door's answer acted on, from the first question or a retry (`asked`,
  * the street the retry found it by, kept on the pin as `asked` and said on
- * /api/status as `endAsked`; null for the street as printed). The street and
+ * /api/status as `endAsked`; null for the street as printed; `via`, which
+ * retry, kept on the pin for the drop row's word, pinOutcome). The street and
  * not the door, and the phone printed a place for the stop: the place is
  * asked next, in the same disc (the owner, 17 Oct). */
-function settleHeldEnd(key, attempt, disc, res, asked) {
+function settleHeldEnd(key, attempt, disc, res, asked, via) {
   var now = endHold(key);
   if (!now || heldEndPin(now)) return;
   if (!res.at && res.why === 'nodoor' && placeOf(now)) {
@@ -2820,72 +2889,7 @@ function settleHeldEnd(key, attempt, disc, res, asked) {
   if (!res.at) {
     return refuseHeldEnd(now, END_WHY[res.why] || 'no house number');
   }
-  pinHeldEnd(now, res.at, 'server', asked);
-}
-
-/* ...the retry itself: ONE more question, the street less its type word, in
- * the same discBox, through endAsk (nbxCache first, the NucBox's down handled
- * as the first question's is). MV.afterRetry chooses which answer is acted
- * on: the retry's when it pinned or found the street, else the first's, whose
- * refusal the driver is told ("not inside the card's reach"). */
-function searchHeldRetry(key, attempt, disc, again, first, firstHits, plan) {
-  var said = nbxTerm(again.street);
-  if (!said) return settleHeldEnd(key, attempt, disc, first, null);
-  var target = nbxSearchTarget('street', said, MV.discBox(disc));
-  endAsk(key, attempt, target, function (out) {
-    var two = MV.pickRetry(out.hits, disc, again, out.cutAt);
-    // Neither the street as printed nor without its type word: the street
-    // index asked which street the name as read is (searchHeldNamed).
-    if (NBX.streets && MV.nameWanted(first, firstHits, disc, two)) {
-      return searchHeldNamed(key, attempt, disc, plan, first);
-    }
-    // A pin here is only ever the retry's own (the first had none, or no
-    // retry was asked), so the street it was found by is the retry's.
-    settleHeldEnd(key, attempt, disc, MV.afterRetry(first, two), again.street);
-  });
-}
-
-/* ...and last, the door by the ONE street the NucBox's street index says the
- * name as read is (the owner's fault of 19 Oct, night: the Trip Planner's
- * "1106 <Name> Ln" read off a dark frame as "L106 <Nam..>" and filed "1106
- * <Nam..>"; the NucBox's search found nothing, there was no type word to leave
- * out, and GPS arrival never armed). Asked only when the street as printed,
- * and without its type word where it had one, is not inside the card's reach
- * (MV.nameWanted), and only with NUCBOX_STREETS set; never the public
- * geocoder. Two questions, each once, each through endAsk (nbxCache first, a
- * NucBox not answering handled as the first question's is):
- *
- *   1. the street index, /api/streets/named: the name as read (MV.nameAsked,
- *      the street less its house number) inside the disc's box. Its answer is
- *      a street only when exactly one street there can be that read
- *      (streets.js named: its own matcher, or a type lost and the last word
- *      cut short, CUT_KEEP); two near names are none, never the likelier.
- *   2. the NucBox's search, the house number and that street's own name
- *      (MV.nameRetry), held as any door is: hasDoor in pickInDisc, inside the
- *      disc, alone or agreeing — and to that street's name and type where it
- *      has one (pickRetry, retryFits), so a door on another street of a like
- *      name the search hands back is not taken.
- *
- * A pin is `by: 'server'` with the street it was found by kept as `asked`
- * (/api/status `endAsked`, "1106 <Name> Lane"). MV.afterRetry chooses as for
- * the type-word retry: the door, or the street found and not the door (the
- * place is then asked), else the first question's refusal stands. */
-function searchHeldNamed(key, attempt, disc, plan, first) {
-  var said = nbxTerm(MV.nameAsked(plan) || '');
-  if (!said) return settleHeldEnd(key, attempt, disc, first, null);
-  var target = streetTarget('named', { name: said, box: MV.discBox(disc) });
-  endAsk(key, attempt, target, function (ans) {
-    var p2 = MV.nameRetry(plan, ans);
-    var said2 = p2 ? nbxTerm(p2.street) : null;
-    if (!said2) return settleHeldEnd(key, attempt, disc, first, null);
-    endAsk(key, attempt, nbxSearchTarget('street', said2, MV.discBox(disc)), function (out) {
-      var two = MV.pickNamed(out.hits, disc, p2, out.cutAt);
-      settleHeldEnd(key, attempt, disc, MV.afterRetry(first, two), p2.street);
-    });
-  }, function (body) {
-    var a = streetAnswer('named', body);
-    return a.error ? null : a;
-  });
+  pinHeldEnd(now, res.at, 'server', asked, via);
 }
 
 /* ...and the held end by its PLACE, the owner's decision of 17 Oct 2026, asked
@@ -3157,8 +3161,9 @@ function forgetHoldsGone(list) {
 
 /* One pickup asked: `a` is pickupAsks' {q, from}. Nothing with no disc
  * round the held card (MV.discFor), which /api/status says (pickupsWhyOf).
- * As searchHeldEnd asks the end, and the street less its type word once more when the street as printed
- * is not inside the card's reach (searchPickupRetry). */
+ * By doorChain, as the end is asked, less the street index's step (`named`
+ * false: searchHeldPickup never asked it), every question through
+ * pickupAsk. */
 function searchHeldPickup(id, a, attempt) {
   var h = pickHold(id);
   if (!h) return;
@@ -3166,40 +3171,10 @@ function searchHeldPickup(id, a, attempt) {
   var disc = MV.discFor(h.card || null);
   var said = plan ? nbxTerm(plan.street) : null;
   if (!said || !disc) return;
-  var target = nbxSearchTarget('street', said, MV.discBox(disc));
-  pickupAsk(id, a, attempt, target, function (out) {
-    var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
-    var again = MV.streetRetry(plan);
-    if (again && MV.retryWanted(res, out.hits, disc)) {
-      return searchPickupRetry(id, a, attempt, disc, again, res);
-    }
-    // ...and the street found inside and not the door: a directional inside
-    // its name the other way (MV.dirRetry), as the held end asks it.
-    var dir = MV.dirRetry(plan);
-    if (dir && MV.dirWanted(res, out.hits, disc)) {
-      var said2 = nbxTerm(dir.street);
-      if (said2) {
-        return pickupAsk(id, a, attempt, nbxSearchTarget('street', said2, MV.discBox(disc)),
-          function (out2) {
-            var two = MV.afterDir(res, MV.pickRetry(out2.hits, disc, dir, out2.cutAt));
-            settleHeldPickup(id, a, two, two === res ? null : dir.street);
-          });
-      }
-    }
-    settleHeldPickup(id, a, res, null);
-  });
-}
-
-/* ...the retry: ONE more question, the street less its type word, in the
- * same discBox, an answer kept only at the same door on the same street
- * (MV.pickRetry), and MV.afterRetry choosing which answer is acted on. */
-function searchPickupRetry(id, a, attempt, disc, again, first) {
-  var said = nbxTerm(again.street);
-  if (!said) return settleHeldPickup(id, a, first, null);
-  var target = nbxSearchTarget('street', said, MV.discBox(disc));
-  pickupAsk(id, a, attempt, target, function (out) {
-    settleHeldPickup(id, a, MV.afterRetry(first, MV.pickRetry(out.hits, disc, again, out.cutAt)),
-                     again.street);
+  doorChain(plan, disc, false, function (target, read, answered) {
+    pickupAsk(id, a, attempt, target, answered);
+  }, function (res, asked) {
+    settleHeldPickup(id, a, res, asked);
   });
 }
 
@@ -3662,7 +3637,8 @@ function putDown(now, by, done, which) {
                 acceptedAt: d.acceptedAt };
     if (by) row.by = by;
     if (carried >= 2) row.carried = carried;
-    return JSON.stringify(asAddOnRow(row, d)) + '\n';
+    // ...and how its end was pinned, or why not (pinOutcome).
+    return JSON.stringify(asAddOnRow(withOutcome(row, d), d)) + '\n';
   });
   appendLines(rows.join(''), function (err) {
     if (err) console.error('journal: could not record a drop: ' + err.message);
@@ -3763,6 +3739,74 @@ function heldEndState(h) {
            visited: (Array.isArray(h.pickups) ? h.pickups : []).filter(function (e) {
              return e.visited;
            }).map(function (e) { return e.q; }) };
+}
+
+/* ---------- how the order's end was pinned, journaled when it goes ---------
+ *
+ * The owner, 21 Oct 2026: "measure how often pinning works". Every drop row
+ * (Drop, the GPS, the chooser, a Took that replaced it, the offers page's
+ * untick, its own clock) now says how this order's end was pinned for the GPS
+ * drop, or why not, and how many of its pickups the restaurant guard held:
+ *
+ *   end: { by, why, asked }
+ *     by     who pinned the end: 'server' (the door as printed), 'type' /
+ *            'dir' / 'rescue' (the door found by doorChain's type-word,
+ *            directional or street-index retry), 'place', 'street', 'page'
+ *            (Map view's post), or null for no pin.
+ *     why    heldEndState's endWhy: with a pin, why it did not arm ('door
+ *            next to the pickup', 'two customers', 'customer count unread')
+ *            or null; with none, the refusal ('no house number', 'not inside
+ *            the card's reach', 'NucBox down', ...), 'no dropoff', 'no NucBox
+ *            search' (NUCBOX_SEARCH unset) or 'still asking'.
+ *     asked  what the server asked the NucBox for: 'door' (the door as
+ *            printed), 'street' (the door found under another spelling of its
+ *            street), or null (nothing asked: no house number, no card fix,
+ *            no NucBox search, or the pin was the page's).
+ *   pickups: { pinned, why }  pickupState's count and reason.
+ *
+ * WORDS AND COUNTS ONLY. No coordinate, no address, no street asked — the
+ * Settled rule for this journal: a row carries ids and words, and no address
+ * it did not already carry. The shift report (tools/) prints it, in its
+ * "Pinning" section. Computed by setHeld for every order as it leaves the list (goneOutcome),
+ * before its searches are forgotten, so a row written after the list changed
+ * still has them. */
+var GONE_KEEP = 16;
+var goneOutcomes = new Map();     // holdId -> pinOutcome, the last GONE_KEEP
+
+function pinOutcome(h, list) {
+  var pin = heldEndPin(h);
+  var by = pin ? (pin.by === 'server' && pin.via ? pin.via : (pin.by || 'page')) : null;
+  var why;
+  if (pin) {
+    why = pickupNearEnd(h, pin, list) ? 'door next to the pickup' : notOneCustomer(h);
+  } else if (typeof h.dropoff !== 'string' || !h.dropoff) {
+    why = 'no dropoff';
+  } else if (!NBX.search) {
+    why = 'no NucBox search';
+  } else {
+    why = (h.endWhyFor === endTextOf(h) ? h.endWhy : null) || 'still asking';
+  }
+  var plan = typeof h.dropoff === 'string' && h.dropoff ? pickupDoorPlan(h.dropoff) : null;
+  var asked = pin && pin.asked ? 'street'
+    : pin && !pin.by ? null
+    : NBX.search && plan && MV.discFor(h.card || null) ? 'door' : null;
+  var picks = pickupState(h);
+  return { end: { by: by, why: why || null, asked: asked },
+           pickups: { pinned: picks.pickupsPinned, why: picks.pickupsWhy } };
+}
+
+/* The outcome a drop row carries for `h`: the one kept as it left the list,
+ * else worked out now. */
+function outcomeFor(h) {
+  return goneOutcomes.get(holdIdOf(h)) || pinOutcome(h);
+}
+
+// ...and the row given it.
+function withOutcome(row, h) {
+  var o = outcomeFor(h);
+  row.end = o.end;
+  row.pickups = o.pickups;
+  return row;
 }
 
 // A batched trip's door count (Assemble.batchPlan, file), or null for an
@@ -4060,7 +4104,9 @@ function onTimeKeep(map, key, val) {
 }
 
 /* One side of the offer pinned at door level inside its card's disc, or null
- * where it cannot be; undefined while asked. Asked once per offer and side. */
+ * where it cannot be; undefined while asked. Asked once per offer and side,
+ * by earlyDoor — so with the retries the held end is asked with, and from
+ * the search made the moment the card was read (searchCardEarly). */
 function offerPin(offer, side) {
   var on = offerPins[offer.id];
   if (!on) {
@@ -4069,32 +4115,192 @@ function offerPin(offer, side) {
   }
   if (on[side] !== undefined || on[side + 'Asking']) return on[side];
   var text = side === 'pickup' ? (offer.pickupLine || offer.pickup) : offer.dropoff;
-  var plan = text ? MV.searchPlan(text) : null;
-  var disc = MV.discFor(cardOf(offer));
-  var said = plan && plan.kind === 'street' && plan.door ? nbxTerm(plan.street) : null;
-  if (!NBX.search || !said || !disc) {
-    on[side] = null;
-    return null;
-  }
-  var target = nbxSearchTarget('street', said, MV.discBox(disc));
-  var settle = function (out) {
-    on[side + 'Asking'] = false;
-    var res = out ? MV.pickInDisc(out.hits, disc, plan, out.cutAt) : null;
-    on[side] = res && res.at ? { lat: res.at.lat, lon: res.at.lon } : null;
-    onTimeAgain(offer);
-  };
-  if (nbxCache.has(target)) {
-    settle(nbxCache.get(target));
-    return on[side];
-  }
   on[side + 'Asking'] = true;
-  nbxAsk(target, function (err, body) {
-    if (err || !Array.isArray(body)) return settle(null);
-    var out = nbxHits(body);
-    nbxRemember(target, out);
-    settle(out);
+  earlyDoor(text, MV.discFor(cardOf(offer)), side === 'dropoff', function (r) {
+    on[side + 'Asking'] = false;
+    on[side] = r && r.at ? { lat: r.at.lat, lon: r.at.lon } : null;
+    onTimeAgain(offer);
   });
-  return undefined;
+  return on[side + 'Asking'] ? undefined : on[side];
+}
+
+/* ---------- searched early: the owner's request of 21 Oct 2026 ------------
+ *
+ * "Search as soon as a card appears, cheaply — the NucBox does the work" and
+ * "try to capture that information from every page scanned". Until this, an
+ * offer's pickup and dropoff were asked of the NucBox only at ✓ Took (the
+ * held end and its pickups), on the on-time hint's reading, or when Map view
+ * opened, so the first door the GPS drop could arm on was a round trip to the
+ * NucBox after the press, with the phone already showing the next screen.
+ *
+ * So, with NUCBOX_SEARCH set:
+ *
+ *   A CARD (the scanner's offer line): its pickup (DoorDash's printed door
+ *   `pickupLine`, an Uber card's "Store (<n> <street>)") and its dropoff are
+ *   searched the moment the card is read, inside THAT card's disc, by
+ *   doorChain — the door-level search and the retries the held end is asked
+ *   with, so a later ✓ Took (the panel's or the offers page's) asks exactly
+ *   the same questions and finds every answer in nbxCache: no request, the pin
+ *   at once. Map view's own questions (/api/nbx/search) and the on-time hint
+ *   (offerPin) are answered from the same cache. Once per card (EARLY_CARDS).
+ *
+ *   ANY OTHER SCREEN, while an order is held: every address the scanner
+ *   reports with a house number — a sighting's stops (navigation screens,
+ *   Uber's customer sheet, a Trip Planner page), the planner line's stops, a
+ *   dropoff line, DoorDash's place popup — is searched the same way inside
+ *   each held order's disc, to warm the cache for the Took, the pin or the
+ *   page that may want it. BOUNDED: at most EARLY_WARM_PER_MIN new searches in
+ *   any minute, the rest dropped, not queued (a planner page re-read every
+ *   second is the same texts, and a text already searched in that disc is
+ *   skipped before it is counted).
+ *
+ * A search is a door's only: a text with no house number is not asked (a
+ * street or a store's name inside a disc is any point on a mile of road, or
+ * whichever branch). Never the public geocoder, and nothing is written to the
+ * journal: the answers live in nbxCache (NBX_CACHE_MAX / NBX_CACHE_BYTES) and
+ * the outcomes in `early` (EARLY_MAX), oldest out first. The rig sends a few
+ * small HTTP questions; the NucBox does the searching. */
+
+// How many searches' outcomes are kept, by text, side and disc. The answers
+// themselves are nbxCache's, which has its own bounds. Chosen: a shift reads
+// a few hundred cards, and an outcome is a few dozen bytes.
+var EARLY_MAX = 200;
+// The most NEW warming searches (another screen's address, an order held) in
+// any 60 s. CHOSEN, NOT MEASURED: each is one to three questions to the
+// NucBox, and six a minute is a planner page of stops and a sheet or two,
+// while the NucBox's Nominatim answers a bounded search in well under a
+// second. A card's own pickup and dropoff are not counted: two per card.
+var EARLY_WARM_PER_MIN = 6;
+// Card ids already searched (once a card, however often it is re-read).
+var EARLY_CARDS = 32;
+var early = new Map();          // key -> { done, res, waiters }
+var earlyWarmAts = [];          // when each warming search of the last minute began
+var earlyCards = [];
+
+function earlyKeep(key, on) {
+  early.set(key, on);
+  while (early.size > EARLY_MAX) early.delete(early.keys().next().value);
+}
+
+/* The door for `text` inside `disc`, by doorChain, through `done(r)`: r is
+ * {at, asked, via} for a door, {at: null, why} for doorChain's refusal, or
+ * null when it cannot be asked (no NUCBOX_SEARCH, no house number, no disc)
+ * or the NucBox did not answer (kept as null for END_RETRY_MS, so a NucBox
+ * that is down is not asked again by every read of a screen; the held end's
+ * and pickups' own retry still runs).
+ * `named` is an end's search (doorChain's street-index step), not a
+ * pickup's. Returns what it did: 'no', 'cached', 'asking' (joined a search
+ * already out) or 'asked'. Callers that must not ask pass `onlyIf` and get
+ * 'skip' when it says no. */
+function earlyDoor(text, disc, named, done, onlyIf) {
+  var plan = pickupDoorPlan(text);
+  if (!NBX.search || !plan || !disc || !nbxTerm(plan.street)) {
+    done(null);
+    return 'no';
+  }
+  var key = (named ? 'end' : 'pickup') + '\n' + MV.discBox(disc) + '\n' + text;
+  var on = early.get(key);
+  if (on && on.done && on.until && Date.now() > on.until) {
+    early.delete(key);
+    on = null;
+  }
+  if (on && on.done) {
+    done(on.res);
+    return 'cached';
+  }
+  if (on) {
+    on.waiters.push(done);
+    return 'asking';
+  }
+  if (onlyIf && !onlyIf()) return 'skip';
+  on = { done: false, res: null, waiters: [done] };
+  earlyKeep(key, on);
+  var finish = function (r, keep) {
+    on.done = true;
+    on.res = r;
+    if (!keep) on.until = Date.now() + END_RETRY_MS;
+    var w = on.waiters;
+    on.waiters = [];
+    w.forEach(function (f) { f(r); });
+  };
+  doorChain(plan, disc, named, function (target, read, answered) {
+    if (nbxCache.has(target)) return answered(nbxCache.get(target));
+    nbxAsk(target, function (err, body) {
+      var out = err ? null
+        : read ? read(body) : Array.isArray(body) ? nbxHits(body) : null;
+      if (!out) return finish(null, false);
+      nbxRemember(target, out);
+      answered(out);
+    });
+  }, function (res, asked, via) {
+    finish(res.at ? { at: { lat: res.at.lat, lon: res.at.lon }, asked: asked, via: via }
+                  : { at: null, why: res.why }, true);
+  });
+  return 'asked';
+}
+
+/* The hook for a card: its pickup and dropoff searched once, inside its own
+ * disc. A card read before its fix is asked again on the next reading. */
+function searchCardEarly(offer, now) {
+  if (!NBX.search || !offer || typeof offer.id !== 'string') return;
+  if (earlyCards.indexOf(offer.id) !== -1) return;
+  var disc = MV.discFor(cardOf(offer));
+  if (!disc) return;
+  earlyCards = earlyCards.concat([offer.id]).slice(-EARLY_CARDS);
+  var none = function () {};
+  [offer.pickupLine, offer.pickup].forEach(function (t) {
+    if (typeof t === 'string') earlyDoor(t, disc, false, none);
+  });
+  if (typeof offer.dropoff === 'string') earlyDoor(offer.dropoff, disc, true, none);
+}
+
+/* Every address with a house number a scanner line reports, as [{text,
+ * pickup}]: a sighting's stops, a planner line's stops, a
+ * dropoff line, a place popup. Words in, words out: nothing is kept. */
+function addressesOf(read) {
+  var out = [];
+  function add(a, pickup) {
+    if (!a || typeof a !== 'object') return;
+    var t = typeof a.line === 'string' && a.line ? a.line
+      : typeof a.street === 'string' ? a.street : null;
+    if (t && pickupDoorPlan(t)) out.push({ text: t, pickup: !!pickup });
+  }
+  var stops = function (list) {
+    (Array.isArray(list) ? list : []).forEach(function (s) {
+      add(s, s && s.kind === 'pickup');
+    });
+  };
+  // A sighting carries every address it saw as a stop: a planner page's,
+  // a customer sheet's, a navigation screen's one (scan_pi.sighting_stops).
+  if (read.sighting) stops(read.sighting.stops);
+  if (read.planner) stops(read.planner.stops);
+  if (read.dropoff) add(read.dropoff, false);
+  if (read.popup) add(read.popup, read.popup.role === 'pickup');
+  return out;
+}
+
+/* The hook for every other screen: while an order is held, each address
+ * searched inside each held order's disc, EARLY_WARM_PER_MIN new searches a
+ * minute at most. */
+function warmEarly(read, now) {
+  if (!NBX.search) return;
+  var said = addressesOf(read);
+  if (!said.length) return;
+  var orders = heldOrders(now);
+  if (!orders.length) return;
+  earlyWarmAts = earlyWarmAts.filter(function (t) { return now - t < 60000; });
+  var room = function () {
+    if (earlyWarmAts.length >= EARLY_WARM_PER_MIN) return false;
+    earlyWarmAts.push(now);
+    return true;
+  };
+  orders.forEach(function (h) {
+    var disc = MV.discFor(h.card || null);
+    if (!disc) return;
+    said.forEach(function (a) {
+      earlyDoor(a.text, disc, !a.pickup, function () {}, room);
+    });
+  });
 }
 
 // Minutes since midnight as the nearest such moment to `now` (ms).
@@ -6245,7 +6451,7 @@ function statusNow() {
                    // NucBox (searchHeldPlace).
                    place: placeOf(h),
                    // ...and, when this server found the door by asking again
-                   // with the street's type word left out (searchHeldRetry),
+                   // with the street's type word left out (doorChain),
                    // the street it asked: "1830 <Name> Creek SW" for a door
                    // printed "...Creek Cts SW". Null otherwise.
                    endAsked: (function () {
@@ -7790,7 +7996,7 @@ var NBX_SETTING = { search: 'NUCBOX_SEARCH', route: 'NUCBOX_ROUTER', cross: 'NUC
                     stretch: 'NUCBOX_STREETS', named: 'NUCBOX_STREETS',
                     whole: 'NUCBOX_STREETS' };
 // The questions the NucBox's street index answers (streetsRoute there, the
-// relay and searchHeldNamed and searchHeldStreet here).
+// relay and doorChain and searchHeldStreet here).
 var STREET_ASKS = ['cross', 'stretch', 'named', 'whole'];
 /* Short, because the one caller is a panel read while driving and the
  * alternative it falls back to is already there. Three seconds is chosen,
@@ -7874,8 +8080,34 @@ function nbxRemember(key, value) {
  * every Map press in that time returned without doing anything. A timer
  * started here, before the connect, cleared by the first ending of any kind,
  * and destroying the request when it fires, is the one thing that means
- * what the sentence says. */
+ * what the sentence says.
+ *
+ * ...and ONE request for one question at a time: a question asked again while
+ * the first asking is still out waits for that answer (nbxAsking) instead of
+ * sending a second. A card's pickup searched the moment it is read
+ * (earlyDoor) and the same text asked by a ✓ Took a second later are one
+ * request to the NucBox, as are Map view's question and the server's own.
+ * Every waiter is answered when the one request ends, which the wall clock
+ * below bounds, so the map holds nothing for longer than that. */
+var nbxAsking = new Map();
+
 function nbxAsk(target, done) {
+  var waiting = nbxAsking.get(target);
+  if (waiting) return waiting.push(done);
+  nbxAsking.set(target, [done]);
+  nbxAskOnce(target, function (err, body) {
+    var all = nbxAsking.get(target) || [];
+    nbxAsking.delete(target);
+    // One waiter that throws must not leave the others unanswered.
+    all.forEach(function (f) {
+      try { f(err, body); } catch (e) {
+        console.error('nucbox: an answer could not be handled: ' + (e && e.stack ? e.stack : e));
+      }
+    });
+  });
+}
+
+function nbxAskOnce(target, done) {
   var u;
   try { u = new URL(target); } catch (e) { return done('the NucBox address is not a URL'); }
   var lib = u.protocol === 'https:' ? https : http;
@@ -8027,7 +8259,7 @@ function streetQuestion(req, which) {
 }
 
 /* The NucBox street index's own URL for a checked question (streetQuestion's
- * `st`): the rig's relay and the server's own held-end search (searchHeldNamed)
+ * `st`): the rig's relay and the server's own held-end search (doorChain)
  * both build it here, so the two ask in the same words and share nbxCache. */
 function streetTarget(which, st) {
   return NBX.streets + '/api/streets/' + which + '?'
@@ -8682,7 +8914,7 @@ function route(req, res) {
                             by: 'replaced' };
             // ...with two in the car at the press, as putDown says it.
             if (carriedAtTook >= 2) dropRow.carried = carriedAtTook;
-            return JSON.stringify(asAddOnRow(dropRow, r)) + '\n';
+            return JSON.stringify(asAddOnRow(withOutcome(dropRow, r), r)) + '\n';
           });
           appendLines(dropRows.join(''), function (dropErr) {
             if (dropErr) console.error('journal: could not record a replaced hold: '
@@ -8808,7 +9040,8 @@ function route(req, res) {
     // it, for this press and for the GPS drop alike (which adds `by: 'gps'`);
     // a Took that replaces a hold writes the same row with `by: 'replaced'`,
     // and an order that outlives its own clock `by: 'expiry'`, dated when the
-    // clock ran out (expiredRows).
+    // clock ran out (expiredRows). Every one of them also says, in words, how
+    // the order's end was pinned or why not (`end`, `pickups`: pinOutcome).
     //
     // The order is down whether or not the row landed, so the answer is
     // still ok: the panel believes this reply about the HOLD (see the Drop
