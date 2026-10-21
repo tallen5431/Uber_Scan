@@ -1555,6 +1555,16 @@
     .live.driving #verdict:not(.novalue):has(#warn:not([hidden])) .submetrics { display: grid; }
   }
 
+  /* The route view (ROUTE_VIEW in the script, /live.html?route): the map and
+     the verdict over it on a phone held upright, no picture, no controls but
+     the way to the offers page. The map takes what the verdict leaves. */
+  body.routeview .bottombar > :not([href="journal.html"]),
+  body.routeview #snap, body.routeview #undo, body.routeview #chooser { display: none !important; }
+  body.routeview #view { display: none !important; }
+  @media (orientation: portrait) {
+    body.routeview #liveMap { min-height: 52vh; }
+  }
+
 </style>
 </head>
 <body>
@@ -1890,8 +1900,25 @@
   // driver is not left looking at a dead button.
   var POST_TIMEOUT_MS = 20000;
 
+  /* The route view: this page opened as /live.html?route, on the driver's
+     phone over the VPN while he waits at a restaurant (the owner, 21 Oct: "see
+     that map route that was created on the rig ... so when I am waiting at a
+     restaurant I can see if any new orders would fit along that route").
+     The same page and the same stream, so the held run and the offer's trip
+     are the panel's own drawing and never a second answer; only Map view, the
+     verdict above it, and nothing that writes. Read-only is enforced here,
+     where every write goes through, and not only by hiding the bar: a POST
+     from this mode is refused before it leaves, so the phone never marks,
+     drops, chooses, snaps or pins (the panel's own Map view already tells the
+     server the pins it finds). See body.routeview in the stylesheet. */
+  var ROUTE_VIEW = /^\?(?:.*&)?route(?:[=&]|$)/.test(location.search || '');
+  if (ROUTE_VIEW) document.body.classList.add('routeview');
+
   function ask(url, opts) {
     opts = opts || {};
+    if (ROUTE_VIEW && String(opts.method || 'GET').toUpperCase() !== 'GET') {
+      return Promise.reject(new Error('the route view writes nothing'));
+    }
     // Feature-detected rather than assumed: this page is opened from phones and
     // laptops as well as the panel, and a browser without AbortController gets
     // the behaviour it had before, which is the old behaviour and not a crash.
@@ -5902,6 +5929,8 @@
     var stored = localStorage.getItem(VIEW_KEY);
     if (stored === 'screen' || stored === 'scene') viewMode = stored;
   } catch (e) { viewMode = 'screen'; }
+  // ...and the route view is Map view and nothing else, never remembered.
+  if (ROUTE_VIEW) viewMode = 'map';
 
   /* Which picture to ask the rig for. In map mode there is no picture: the
      frame requests stop, which is also what tells the scanner nobody is

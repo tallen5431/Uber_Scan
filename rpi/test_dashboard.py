@@ -7494,6 +7494,101 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  /* --- the route view: /live.html?route on the driver's phone -------------
+   *
+   * The owner, 21 Oct: the rig's map route on his phone while he waits at a
+   * restaurant. The same page in Map view from the first frame, at a phone's
+   * two sizes: the held run along the road, the offer's trip in teal with the
+   * verdict above it, no picture, no control but ▤ Offers, no write leaving
+   * the page (the held pickup's pin, which the panel posts, is not). Invented
+   * places, the router faked at the relay as in [road run]. */
+  for (const [vw, vh] of [[390, 844], [360, 640]]) {
+    stage = 'the route view at ' + vw + 'x' + vh;
+    const PLACES = { '310 Mill St, Roswell, GA 30075': [34.010, -84.610],
+                     'Powder Springs Rd': [33.900, -84.600],
+                     'Chipotle (Barrett Pkwy)': [34.020, -84.580],
+                     'Canton Rd, Marietta': [33.980, -84.500] };
+    const page = await browser.newContext({ viewport: { width: vw, height: vh } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
+    await page.route('**/nominatim.openstreetmap.org/**', (route) => {
+      const q = decodeURIComponent(new URL(route.request().url()).searchParams.get('q') || '');
+      const hit = PLACES[q];
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(hit ? [{ lat: String(hit[0]), lon: String(hit[1]),
+                                      display_name: q }] : []) });
+    });
+    await page.route('**/api/nbx**', (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname === '/api/nbx') {
+        return route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify({ ok: true, search: false, route: true, streets: false }) });
+      }
+      const pts = (u.searchParams.get('points') || '').split(';').map((x) => {
+        const [lon, lat] = x.split(',').map(Number); return [lat, lon]; });
+      const line = [pts[0]];
+      for (let i = 1; i < pts.length; i++) line.push([pts[i - 1][0], pts[i][1]], pts[i]);
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, metres: 5000, snaps: pts.map(() => 3), line: line }) });
+    });
+    const posts = [];
+    page.on('request', (q) => { if (q.method() !== 'GET') posts.push(q.url()); });
+    await page.goto(base + '/live.html?route', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    const card = await page.evaluate(() => window.__CARD);
+    const heldCard = await page.evaluate(() => window.__HELD);
+    const A = { pay: 9.0, minutes: 18.0, dropoff: 'Powder Springs Rd', holdId: 'rv-a@1',
+                card: heldCard, endPinned: false, arrived: false, endWhy: null, visited: [] };
+    await push({ alive: true, at: Date.now(),
+      gps: { state: 'ok', ageSeconds: 0.6, fix: { lat: 33.9526, lon: -84.5499, gpsAge: 0.6,
+             gpsErr: 27.8, gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 } },
+      heldEnd: { endPinned: false, arrived: false, endWhy: null, visited: [] } });
+    await push({ holding: A });
+    await push({ planner: { stops: [
+      { kind: 'pickup', orders: 1, name: 'Larkspur Tacos', expectedBy: 700, street: '310 Mill St',
+        city: 'Roswell', line: '310 Mill St, Roswell, GA 30075' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 720, street: 'Powder Springs Rd',
+        city: 'Marietta', line: 'Powder Springs Rd' }], unfiled: null, asked: true, ms: null, at: 1 } });
+    const lines = () => page.evaluate(() => (window.__lines || []).filter(
+      (l) => !/mv-casing/.test(String((l.opts || {}).className || ''))).map((l) => ({
+        cls: String((l.opts || {}).className || ''), n: l.pts.length, color: (l.opts || {}).color })));
+    await page.waitForFunction(() => (window.__lines || []).some(
+      (l) => /mv-held-run/.test(String((l.opts || {}).className || '')) && l.pts.length === 5),
+      null, { timeout: 8000 }).catch(() => {});
+    const look = () => page.evaluate(() => {
+      const box = (id) => { const n = document.getElementById(id);
+        if (!n) return null; const r = n.getBoundingClientRect();
+        return getComputedStyle(n).display === 'none' || n.hidden ? null
+          : [Math.round(r.top), Math.round(r.bottom), Math.round(r.width)]; };
+      const bar = Array.from(document.querySelectorAll('.bottombar > *')).filter(
+        (n) => getComputedStyle(n).display !== 'none' && !n.hidden).map((n) => n.textContent.trim());
+      return { routeview: document.body.classList.contains('routeview'), map: box('liveMap'),
+               view: box('view'), snap: box('snap'), bar: bar,
+               wide: document.documentElement.scrollWidth > innerWidth,
+               tall: document.documentElement.scrollHeight > innerHeight,
+               verdict: document.getElementById('verdict').innerText.replace(/\s+/g, ' ') };
+    });
+    const r = { idle: await lines(), idleLook: await look() };
+    await push({ ready: true, state: 'go', perHour: 30.0, grossPerHour: 36.0,
+      pay: 14.25, minutes: 20.0, miles: 9.4, cost: 1.4, target: 25, band: 15, holding: A,
+      offer: Object.assign({ id: 'rv-1', pay: 14.25, minutes: 20.0, billedMinutes: 20.0,
+                             miles: 9.4, cost: 1.4, pickup: 'Chipotle (Barrett Pkwy)',
+                             dropoff: 'Canton Rd, Marietta' }, card, { miles: 9.4 }) });
+    await page.waitForFunction(() => (window.__lines || []).some(
+      (l) => /mv-job/.test(String((l.opts || {}).className || ''))
+             && /mv-road/.test(String((l.opts || {}).className || ''))),
+      null, { timeout: 8000 }).catch(() => {});
+    r.offer = await lines();
+    r.offerLook = await look();
+    r.posts = posts.slice();
+    out['routeView_' + vw] = r;
+    await page.close();
+  }
+
   /* --- two orders in the car, on the map ------------------------------------
    *
    * With carrying two on: the first order's end pinned D1, the second's D2,
@@ -8214,6 +8309,28 @@ try:
         for a, b in zip(pts, pts[1:]):
             out_ += [[a[0], b[1]], list(b)]
         return out_
+    # The route view on the driver's phone (/live.html?route).
+    for _vw in (390, 360):
+        _rv = got.get('routeView_%d' % _vw) or {}
+        _il, _ol = _rv.get('idleLook') or {}, _rv.get('offerLook') or {}
+        eq('[route view] %d: Map view from the first frame, no picture, no 📷, only ▤ Offers '
+           'on the bar' % _vw,
+           (_il.get('routeview'), bool(_il.get('map')), _il.get('view'), _il.get('snap'),
+            _il.get('bar')), (True, True, None, None, ['▤ Offers']))
+        eq('[route view] %d: ...the held run car -> pickup -> dropoff along the road' % _vw,
+           [l['n'] for l in _rv.get('idle') or [] if 'mv-held-run' in l['cls']][:1], [5])
+        ok_('[route view] %d: ...the map at least half the screen and no sideways scroll (%r)'
+            % (_vw, _ol.get('map')),
+            bool(_ol.get('map')) and _ol['map'][1] - _ol['map'][0] >= 0.45 * {390: 844, 360: 640}[_vw]
+            and not _il.get('wide') and not _ol.get('wide'))
+        eq('[route view] %d: an offer\'s trip by road in teal beside the run, its pay above' % _vw,
+           ([l['color'] for l in _rv.get('offer') or []
+             if 'mv-job' in l['cls'] and 'mv-road' in l['cls']][:1],
+            any('mv-held-run' in l['cls'] for l in _rv.get('offer') or []),
+            '14.25' in (_ol.get('verdict') or '')),
+           (['#2dd4bf'], True, True))
+        eq('[route view] %d: ...and nothing written: no POST left the page, not even the '
+           'held pickup\'s pin' % _vw, _rv.get('posts'), [])
     _rr = got.get('roadRun_road') or {}
     _rn = got.get('roadRun_noRoad') or {}
     _mill, _psr = (34.010, -84.610), (33.900, -84.600)

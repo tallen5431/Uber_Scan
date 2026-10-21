@@ -814,6 +814,8 @@
       if (s && s.ok !== false) rememberRig();
       var live = document.getElementById('toLive');
       if (live && s && s.scanner && s.scanner.enabled) live.hidden = false;
+      var route = document.getElementById('toRoute');
+      if (route && s && s.scanner && s.scanner.enabled) route.hidden = false;
     })
     .catch(function () {});
 

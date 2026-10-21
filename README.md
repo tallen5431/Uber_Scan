@@ -158,7 +158,13 @@ offline install; for that, install `ssl/ca.pem` on the phone.
 On a Raspberry Pi with a camera, `npm start` also runs the rig's autopilot —
 which aims, calibrates and then reads offers — wherever `rpi/autopilot.py`
 exists, serving the live verdict at `/live.html` and its state at
-`/api/status`. See [rpi/README.md](rpi/README.md). On any other machine, the
+`/api/status`. **On your phone over the VPN, `http://<rig>:8080/live.html?route`**
+(⤳ Route on the keypad and the offers page) is that screen's Map view alone and
+read-only: the order in the car along the road, the live car dot, and the offer
+on the panel in teal with its pay, minutes, miles and the pair line above the
+map, so you can see while waiting at a restaurant whether a new order fits along
+the route. It writes nothing; mark offers on the offers page. See
+[rpi/README.md](rpi/README.md). On any other machine, the
 copy at home included, set `SCANNER=0` so it does not try.
 
 **If your host tried to run `ui.js` (or the old `app.js`) with Node and died on
