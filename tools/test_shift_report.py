@@ -644,6 +644,11 @@ _ot = {o['id']: o for o in SR.orders([
 eq('[offers tick] a ✓ on the offers page that held the order is its Took, and ends at Drop',
    (_ot['P']['took'], _ot['P']['how'], _ot['P']['end']), (at(18, 2), 'Drop', at(18, 40)))
 eq('[offers tick] ...one that only recorded is still no Took', _ot['Q']['how'], 'no Took')
+_ot2 = {o['id']: o for o in SR.orders([
+    offer('R', at(18, 0), 11.0, 30, 4.0),
+    dict(mark('R', at(18, 2), True, via='review'), inCar=True)])}
+eq('[offers tick] ...and `inCar` on a mark from anywhere but the offers page is no Took',
+   _ot2['R']['how'], 'no Took')
 
 # --- how each order's end was pinned (21 Oct 2026) ----------------------------
 #

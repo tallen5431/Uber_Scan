@@ -3322,6 +3322,11 @@ try:
        [(r[0], r[1]) for r in _xdrops() if r[0] == 'x-3'], [('x-3', 'expiry')])
     eq('...dated at its end, not at the request that noticed',
        [r[2] for r in _xdrops() if r[0] == 'x-3'], [_xend3])
+    eq('[pin log] ...and says how its end was pinned, as every drop row does',
+       [(r.get('end'), r.get('pickups')) for r in
+        (json.loads(l) for l in open(_xjournal) if l.strip())
+        if r.get('kind') == 'drop' and r.get('id') == 'x-3'],
+       [({'by': None, 'why': 'no dropoff', 'asked': None}, {'pinned': 0, 'why': None})])
 finally:
     stop(_xproc)
 shutil.rmtree(_xdir, ignore_errors=True)
@@ -6655,6 +6660,13 @@ try:
         _n = len(_aasked('Tamar'))
         _atook(_nmb, 'n-door2', '1106 Tamaror, Marietta')
         _h = _settled(_nmb)
+        time.sleep(0.3)
+        _nrow = [json.loads(x) for x in open(_nmj) if x.strip()]
+        eq('[pin log] the replaced order\'s row says its end was pinned by the street-index '
+           'rescue, under another spelling of its street',
+           [((r.get('end') or {}).get('by'), (r.get('end') or {}).get('asked'))
+            for r in _nrow if r.get('kind') == 'drop' and r.get('id') == 'n-door'],
+           [('rescue', 'street')])
         eq('[name rescue] ...the next order to that door is answered from the cache, all three',
            (_h.get('endPinned'), _h.get('endAsked'), len(_aasked('Tamar')) - _n),
            (True, '1106 Tamarons Lane', 0))
@@ -6669,8 +6681,21 @@ try:
         _h = _settled(_nmb)
         eq('[name rescue] ...and the door found outside a 1.0 mi card is refused',
            (_h.get('endPinned'), _h.get('endWhy')), (False, 'not inside the card\'s reach'))
+        # A door the NucBox holds only the street of, pinned by Map view's
+        # post: its row says the page pinned it and asks nothing of how.
+        _atook(_nmb, 'n-page', _KES)
+        _h = _settled(_nmb)
+        post(_nmb, '/api/held-end', {'holdId': _h.get('holdId'), 'dropoff': _KES,
+                                     'lat': 33.9600, 'lon': -84.5400, 'doorLevel': True,
+                                     'name': '4821, Kestrel Drive, Marietta, Cobb County'})
         _atook(_nmb, 'n-cobb', _COBB)
         _h = _settled(_nmb)
+        time.sleep(0.3)
+        _nrow = [json.loads(x) for x in open(_nmj) if x.strip()]
+        eq('[pin log] an end Map view pinned says \'page\', and no question of the server\'s',
+           [((r.get('end') or {}).get('by'), (r.get('end') or {}).get('asked'))
+            for r in _nrow if r.get('kind') == 'drop' and r.get('id') == 'n-page'],
+           [('page', None)])
         eq('[name rescue] a door found as printed never asks the index',
            (_h.get('endPinned'), _h.get('endAsked'), len(_aasked('named?name=1985')),
             len(_aasked('named?name=Cobb'))), (True, None, 0, 0))
@@ -6680,6 +6705,19 @@ try:
         _r = get(_nmb, '/api/nbx/named?name=Tamaror&box=-84.65,34.04,-84.45,33.87')
         eq('[name rescue] ...and relays the index\'s answer, from the cache',
            (_r.get('names'), _r.get('how'), _r.get('among')), (['Tamarons Lane'], 'cut', 1))
+        # Mutation catch-up (21 Oct): a door whose street kept its type word,
+        # "1106 Tamarons Ln", asked as printed and without "Ln", neither of
+        # which the fake answers: the index is asked after the type-word retry
+        # too, and the door found by the street's own name (its search from
+        # the cache: "1106 Tamarons Lane" was asked for n-door above).
+        _n = len(_aasked('Tamarons'))
+        _atook(_nmb, 'n-typed', '1106 Tamarons Ln, Marietta')
+        _h = _settled(_nmb)
+        eq('[name rescue] after the type-word retry found nothing, the index is asked and the '
+           'door pinned by the street\'s own name',
+           (_h.get('endPinned'), _h.get('endAsked'),
+            [u.split('?')[0] for u in _aasked('Tamarons')[_n:]]),
+           (True, '1106 Tamarons Lane', ['/search', '/search', '/api/streets/named']))
     finally:
         stop(_nmp)
     # Without NUCBOX_STREETS: the server above (_ab) refused "2040 Tansy Creek
@@ -6687,6 +6725,58 @@ try:
     # asked in, and asked it nothing.
     eq('[name rescue] with NUCBOX_STREETS unset the index is never asked',
        len(_aasked('named?name=Tansy')), 0)
+
+    # Mutation catch-up (21 Oct): "1106 Tamaror" with no type word to leave
+    # out, on a server with NUCBOX_STREETS unset, keeps the door search's own
+    # refusal, not a question to an index that is not there ('NucBox down');
+    # and on one whose index answers names beside two streets (not "the one
+    # street"), that answer is no answer: refused as the NucBox not answering,
+    # and the relay says the same.
+    class _BadIx(object):
+        asked = []
+
+    def _badix_app():
+        import http.server
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                _BadIx.asked.append(self.path)
+                body = json.dumps({'ok': True, 'names': ['Tamarons Lane'], 'how': 'cut',
+                                   'among': 2})
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body.encode('utf-8'))
+        srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+    _badix = _badix_app()
+    _badix_base = 'http://127.0.0.1:%d' % _badix.server_address[1]
+    for _ixname, _ixenv, _ixwant in (
+            ('unset', {}, 'not inside the card\'s reach'),
+            ('bad', {'NUCBOX_STREETS': _badix_base}, 'NucBox down')):
+        _ixj = os.path.join(_adir, 'ix-' + _ixname, 'offers.jsonl')
+        os.makedirs(os.path.dirname(_ixj))
+        open(_ixj, 'w').close()
+        _ixp, _ixb = start(dict({'SCANNER': '0', 'NUCBOX_SEARCH': _afake_base,
+                                 'NUCBOX_TIMEOUT_MS': '800', 'NUCBOX_RETRY_MS': '60000'},
+                                **_ixenv), _ixj)
+        try:
+            _atook(_ixb, 'ix-' + _ixname, '1106 Tamaror, Marietta')
+            _h = _settled(_ixb)
+            eq('[name rescue] the index %s: "1106 Tamaror" refused as %r' % (
+                'unset' if _ixname == 'unset' else 'answering names beside two streets',
+                _ixwant), (_h.get('endPinned'), _h.get('endWhy')), (False, _ixwant))
+            if _ixname == 'bad':
+                _s, _r, _ = raw(_ixb, '/api/nbx/named?name=Tamaror&box=-84.65,34.04,-84.45,33.87')
+                eq('[name rescue] ...and the relay refuses that answer as the index not answering',
+                   (_s, json.loads(_r).get('unreachable')), (502, True))
+        finally:
+            stop(_ixp)
+    _badix.shutdown()
 
     _bj = os.path.join(_adir, 'b', 'offers.jsonl')
     os.makedirs(os.path.dirname(_bj))
@@ -7203,6 +7293,41 @@ try:
         _h = _settled(_stb)
         eq('[street arm] two short courts of one name inside the disc are neither',
            (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+        # Mutation catch-up (21 Oct). A 0.7 mi card (a 1.2 mi disc): the box
+        # still holds both Fennick Courts, the disc only the one by the Square.
+        _atook(_stb, 's-near', '77 Fennick Ct, Marietta', miles=0.7)
+        _h = _settled(_stb)
+        eq('[street arm] ...but one of them alone touching a smaller card\'s disc, the other only '
+           'in its box, arms on that one',
+           (_h.get('endPinned'), _h.get('endBy')), (True, 'street'))
+        _atook(_stb, 's-ocr', '21 Eliis Ct, Marietta')
+        _h = _settled(_stb)
+        eq('[street arm] a street the index reads as the name only by its ocr rule is not the same '
+           'name: the refusal stands',
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+        _atook(_stb, 's-long', '40 Quarrel Ct, Marietta')
+        _h = _settled(_stb)
+        eq('[street arm] a short court beside a street of its name too long to send its shape is '
+           'one of two (unknown is not none): neither',
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+        _atook(_stb, 's-untyped', '12 Pembury, Marietta')
+        _h = _settled(_stb)
+        eq('[street arm] a street read with no type word is no street name to ask the index by, '
+           'even one the index holds with none (Pembury, 120 m)',
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+        # The court's door pressed with a place printed for its stop: the place
+        # is asked first, and found nowhere (or too short to ask), the street.
+        for _pn, _pl in (('s-place', 'Nowhere Hall'), ('s-shortplace', 'Inn')):
+            _atook(_stb, _pn, None)
+            _stsays([{'dropoff': {
+                'found': True, 'line': '306 Larkmoor Ct, Marietta, GA 30060',
+                'street': '306 Larkmoor Ct', 'city': 'Marietta', 'state': 'GA', 'zip': '30060',
+                'asked': True, 'labelled': None, 'ms': 10, 'app': 'uber', 'screen': 'uber.nav',
+                'expectedBy': None, 'place': _pl, 'at': int(time.time() * 1000)}}])
+            _h = _settled(_stb, lambda h: h.get('endPinned') or h.get('endWhy'))
+            eq('[street arm] a place %s, then the short street: armed by it' % (
+                'found nowhere' if _pn == 's-place' else 'too short to ask'),
+               (_h.get('place'), _h.get('endPinned'), _h.get('endBy')), (_pl, True, 'street'))
 
         _n = len(_hkasked('/api/streets/whole'))
         _atook(_stb, 's-guard', '306 Larkmoor Ct, Marietta')
@@ -7623,8 +7748,10 @@ try:
     _ECARD = dict(_SQ, id='e-card', pay=9.0, minutes=35.0, billedMinutes=35.0, miles=5.0,
                   cost=1.5, pickup='Example Burger (1981 Cobb Pkwy)', dropoff=_COBB, app='uber')
     _hks, _hksays, _hkj = _hksayer('early')
+    # The warming window is EARLY_WARM_MS (60 s on the rig), 3 s here.
     _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
-                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800'}, _hkj)
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800',
+                        'EARLY_WARM_MS': '3000'}, _hkj)
     try:
         _n85, _n81 = len(_hkasked('street=1985')), len(_hkasked('street=1981'))
         _hksays([{'offer': _ECARD}])
@@ -7651,7 +7778,8 @@ try:
            (_r.get('end'), _r.get('pickups')),
            ({'by': 'server', 'why': 'door next to the pickup', 'asked': 'door'},
             {'pinned': 1, 'why': None}))
-        _rt = json.dumps(_r)
+        # (Its times left out: a millisecond clock can hold "1981" by chance.)
+        _rt = json.dumps({k: v for k, v in _r.items() if k not in ('at', 'seq', 'acceptedAt')})
         eq('[pin log] ...and carries no address or coordinate it did not already carry',
            [w for w in ('Cobb', '1985', '1981', 'Burger', '34.0', '-84.5', 'lat', 'lon')
             if w in _rt], [])
@@ -7683,6 +7811,7 @@ try:
         def _enumbers():
             said = ' '.join(_hkasked('Quillon'))
             return sorted(set(re.findall(r'street=(\d+)%20Quillon', said)))
+        _wt0 = time.time()
         _hksays([_eplanner(300)])
         time.sleep(1.0)
         _got = _enumbers()
@@ -7695,6 +7824,11 @@ try:
         time.sleep(0.5)
         eq('[early warm] ...the same page again asks nothing: six already searched, '
            'the minute\'s room spent', len(_hkasked('Quillon')) - _nq, 0)
+        time.sleep(max(0.1, _wt0 + 3.4 - time.time()))
+        _hksays([_eplanner(300)])
+        time.sleep(1.0)
+        eq('[early warm] ...and once the window has passed, the three left are searched',
+           len(_enumbers()), 9)
         post(_hkb, '/api/delivered', {})
         time.sleep(0.3)
         _r = (_edrop(_hkj, 'e-two') or [{}])[0]
@@ -7705,6 +7839,62 @@ try:
         time.sleep(0.5)
         eq('[early warm] with nothing held, another screen\'s doors are not searched',
            len(_hkasked('Quillon')) - _nq, 0)
+        # [pin log] A store's door the NucBox does not hold: the pickups'
+        # refusal is worked out before the order's searches are forgotten.
+        post(_hkb, '/api/offers/mark', {'id': 'e-pick', 'accepted': True, 'offer': dict(
+            _ECARD, id='e-pick', pickup='Nowhere Cafe (12 Quillon Way)')})
+        _settled(_hkb, lambda h: h.get('pickupsWhy') and h.get('endPinned'))
+        post(_hkb, '/api/delivered', {})
+        time.sleep(0.3)
+        eq('[pin log] a pickup the NucBox refused says why on the Drop row',
+           (_edrop(_hkj, 'e-pick') or [{}])[0].get('pickups'),
+           {'pinned': 0, 'why': 'not inside the card\'s reach'})
+        # [early search] A card read before its fix is asked on the next reading.
+        _n90 = len(_hkasked('street=1990'))
+        _nofix = dict(_ECARD, id='e-nofix', dropoff='1990 Cobb Parkway, Kennesaw',
+                      pickup='Nowhere Two')
+        _hksays([{'offer': dict(_nofix, lat=None, lon=None, gpsOk=False)}])
+        time.sleep(0.5)
+        _n90b = len(_hkasked('street=1990'))
+        _hksays([{'offer': _nofix}])
+        _ewait('street=1990', _n90 + 1)
+        eq('[early search] a card read before its fix is asked nothing, and is asked on the next '
+           'reading with one', (_n90b - _n90, len(_hkasked('street=1990')) > _n90b), (0, True))
+    finally:
+        stop(_hkp)
+
+    # A NucBox that does not answer: a card is asked once and not again, however
+    # often it is re-read; another screen's door is asked again once the
+    # refusal is END_RETRY_MS old (NUCBOX_RETRY_MS, 400 ms here).
+    _hks, _hksays, _hkj = _hksayer('early-down')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                        'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _hkdown.server_address[1],
+                        'NUCBOX_TIMEOUT_MS': '800', 'NUCBOX_RETRY_MS': '400'}, _hkj)
+    try:
+        def _downs(word):
+            return len([p for p in _HkDown.searches if word in p])
+        _n = _downs('street=1985')
+        _hksays([{'offer': dict(_ECARD, id='e-down')}])
+        time.sleep(0.8)
+        _hksays([{'offer': dict(_ECARD, id='e-down', pay=9.5)}])
+        time.sleep(0.5)
+        eq('[early search] a card the NucBox did not answer is asked once, not again on a re-read',
+           _downs('street=1985') - _n, 1)
+        _atook(_hkb, 'e-dheld', _KES)
+        _n = _downs('Quillon')
+        _hksays([{'planner': {'stops': [{'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.',
+                                        'street': None, 'city': None, 'state': None,
+                                        'zip': None, 'line': '10 Quillon Way, Marietta'}],
+                              'unfiled': 'dropoffs', 'asked': False}}])
+        time.sleep(0.8)
+        _hksays([{'planner': {'stops': [{'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.',
+                                        'street': None, 'city': None, 'state': None,
+                                        'zip': None, 'line': '10 Quillon Way, Marietta'}],
+                              'unfiled': 'dropoffs', 'asked': False}}])
+        time.sleep(0.5)
+        eq('[early warm] a door the NucBox did not answer is asked again past END_RETRY_MS',
+           _downs('Quillon') - _n, 2)
+        post(_hkb, '/api/delivered', {})
     finally:
         stop(_hkp)
 finally:
@@ -9075,7 +9265,7 @@ _OTEND = '1106 Brindlewood Way, Marietta, GA 30060'
 _OTNODOOR = '4821 Kestrel Dr, Marietta, GA 30060'
 
 
-def _othold(deliver_by, pinned=True):
+def _othold(deliver_by, pinned=True, more=None):
     now = int(time.time() * 1000)
     h = {'id': 'ot-a', 'acceptedAt': now - 60000, 'pay': 9.48, 'minutes': 40.0, 'miles': 5.0,
          'cost': 1.5, 'dropoff': _OTEND if pinned else _OTNODOOR, 'deliverBy': deliver_by,
@@ -9084,15 +9274,22 @@ def _othold(deliver_by, pinned=True):
     if pinned:
         h['endPin'] = {'dropoff': _OTEND, 'lat': 33.9650, 'lon': -84.5400, 'doorLevel': True,
                        'pinnedAt': now, 'by': 'server'}
+    h.update(more or {})
     return {'v': 2, 'orders': [h]}
 
 
-def _ontime(name, deliver_by, pinned=True, minutes=30.0):
+def _ontime(name, deliver_by, pinned=True, minutes=30.0, more=None, planner=None, two=False):
     nf = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     nb = 'http://127.0.0.1:%d' % json.loads(nf.stdout.readline())['port']
-    sp, sb, sj, _sh = _cserver(name, hold=_othold(deliver_by, pinned), NUCBOX_SEARCH=nb,
-                               NUCBOX_ROUTER=nb)
+    hold = _othold(deliver_by, pinned, more)
+    env = {}
+    if two:
+        # A second order in the car, carrying two on: no hint at all.
+        hold['orders'].append(dict(hold['orders'][0], id='ot-c',
+                                   acceptedAt=hold['orders'][0]['acceptedAt'] + 1000))
+        env['CARRY_TWO'] = '1'
+    sp, sb, sj, _sh = _cserver(name, hold=hold, NUCBOX_SEARCH=nb, NUCBOX_ROUTER=nb, **env)
     try:
         read = _ssread(12.05, 6.0)
         _say(read)
@@ -9102,6 +9299,13 @@ def _ontime(name, deliver_by, pinned=True, minutes=30.0):
         _say(read)
         time.sleep(1.0)
         _say(read)
+        if planner is not None:
+            # A Trip Planner read with the card still on record (a new card
+            # forgets the planner, forgetPlanner), then the card read again.
+            _say({'planner': {'stops': planner, 'unfiled': None, 'asked': False}})
+            _say(read)
+            time.sleep(1.0)
+            _say(read)
         last = get(sb, '/api/status').get('last') or {}
         st = last.get('stack') or {}
         rows = [r for r in _rows(sj, 'pair') if r.get('id') == 'ot-b']
@@ -9138,6 +9342,44 @@ eq('on time: the held end not pinned (its door not on the NucBox), nothing at al
    (_otp['stack'], _otp['row'], _otp['rowkeys']),
    ({'onTime': None, 'lateMin': None, 'offWayMi': None},
     {'onTime': None, 'lateMin': None, 'offWayMi': None}, ['onTime']))
+# Mutation catch-up (21 Oct): the fake router's own legs (a road a quarter
+# longer than the line at 13.4 m/s) with the food in the car: A-drop B-pick
+# B-drop reaches ② at 13.65 min, B-pick A-drop B-drop at 14.2, B-pick B-drop
+# A-drop at 13.55 — each with PICKUP_ALLOW_S (5 min) at ② 's pickup. An
+# 11-minute offer is ② late in every order, least by 2.55 min: "~3".
+_ot2 = _ontime('ontime-late2', (_NOWMIN + 40) % 1440, minutes=11.0)
+eq('[on time] an offer due before any order of the stops reaches it, the 5 min at its pickup '
+   'counted: ② late, the least late order\'s minutes rounded up',
+   (_ot2['stack'], _ot2['row']),
+   ({'onTime': 'late2', 'lateMin': 3, 'offWayMi': None},
+    {'onTime': 'late2', 'lateMin': 3, 'offWayMi': None}))
+# The held order's Trip Planner "Expected by" for its own dropoff stop is its
+# deadline over its card's: due this minute by the planner, ① late.
+_otpl = _ontime('ontime-planner', (_NOWMIN + 40) % 1440, planner=[
+    {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'line': _OTEND, 'expectedBy': _NOWMIN}])
+eq('[on time] the planner\'s Expected by for the held order\'s stop is its deadline, over its '
+   'card\'s: read with the card on record, the next reading says ① late',
+   _otpl['stack']['onTime'], 'late1')
+# A pickup of the held order still ahead with no pin: no run to time, nothing.
+_otnp = _ontime('ontime-pickup-unpinned', (_NOWMIN + 40) % 1440, more={
+    'pickups': [{'q': '250 Example Road, Marietta', 'visited': False}]})
+eq('[on time] a held pickup still ahead with no pin: nothing at all',
+   _otnp['stack'], {'onTime': None, 'lateMin': None, 'offWayMi': None})
+# ...and pinned, with no deadline: the miles the new pickup adds, the shorter
+# of it before or after the held pickup (1.7 mi; the longer is 2.7).
+_otpp = _ontime('ontime-pickup-pinned', None, more={
+    'pickups': [{'q': '250 Example Road, Marietta', 'visited': False}],
+    'pickupPins': [{'q': '250 Example Road, Marietta', 'lat': 33.9600, 'lon': -84.5450,
+                    'by': 'server'}]})
+eq('[on time] a held pickup ahead and pinned, no deadline: the new pickup either side of it, '
+   'the shorter', _otpp['stack'], {'onTime': None, 'lateMin': None, 'offWayMi': 1.7})
+
+_ot2o = _ontime('ontime-two', (_NOWMIN + 40) % 1440, two=True)
+eq('[on time] two orders in the car: nothing at all',
+   _ot2o['stack'], {'onTime': None, 'lateMin': None, 'offWayMi': None})
+_otnt = _ontime('ontime-untimed', (_NOWMIN + 40) % 1440, minutes=None)
+eq('[on time] an offer with no deadline and no minutes: no call, the miles instead',
+   _otnt['stack'], {'onTime': None, 'lateMin': None, 'offWayMi': 1.6})
 
 shutil.rmtree(_cdir, ignore_errors=True)
 
@@ -9940,7 +10182,8 @@ try:
     _o1.card('S', 8.0, 20, 'uber')
     _r1 = _o1.took('R', via='offers')
     _h1 = _settled(_o1.base)
-    _f1 = (json.load(open(_o1.hold)).get('orders') or [{}])[0]
+    _f1 = ((json.load(open(_o1.hold)) if os.path.exists(_o1.hold) else {})
+           .get('orders') or [{}])[0]
     _id1, _at1 = (str(_h1.get('holdId') or 'none@0').split('@') + ['0'])[:2]
     ok_('[offers tick] a recent card ticked there is the order in the car, dated from its '
         'own arrival (%r)' % _h1.get('holdId'),
@@ -10045,6 +10288,100 @@ try:
 finally:
     _o4.stop()
     _o4.gone()
+
+# Mutation catch-up (21 Oct): the rest of offersTickHolds' rules, each by name.
+# A card with no minutes is 'untimed', not 'old'; and a card's own clock is
+# its BILLED minutes, as a Took's hold is (HOLD_GRACE_MS 0: a card printing 30
+# minutes billed 0.02 is over 1.8 s after it arrived).
+_o5 = _Q(carry=False, env={'HOLD_GRACE_MS': '0'})
+try:
+    _o5.card('N', 9.0, None, 'uber')
+    _r5 = _o5.took('N', via='offers')
+    eq('[offers tick] a card with no minutes records only, \'untimed\'',
+       (_r5.get('car'), _o5.status().get('holding')), ({'held': False, 'why': 'untimed'}, None))
+    _o5.card('M', 9.0, 30, 'uber', billedMinutes=0.02)
+    time.sleep(2.2)
+    _r5 = _o5.took('M', via='offers')
+    eq('[offers tick] ...and a card is timed by its billed minutes, as its hold would be',
+       (_r5.get('car'), _o5.status().get('holding')), ({'held': False, 'why': 'old'}, None))
+    # A card nine cards back, past the slot's own memory of arrivals
+    # (OFFER_ATS_MAX, 8): dated from when it came up all the same.
+    _o5.card('P', 12.0, 40, 'uber')
+    _pat = int(time.time() * 1000)
+    time.sleep(1.2)
+    for _i in range(9):
+        _o5.card('q%d' % _i, 5.0, 20, 'uber')
+    _o5.took('P', via='offers')
+    _id5, _at5 = (str((_o5.status().get('holding') or {}).get('holdId') or 'none@0')
+                  .split('@') + ['0'])[:2]
+    ok_('[offers tick] a card nine cards back is dated from its own arrival (%s@%s)'
+        % (_id5, _at5), _id5 == 'P' and abs(int(_at5) - _pat) < 400)
+finally:
+    _o5.stop()
+    _o5.gone()
+
+# A pass (accepted false) on the order in the car puts it down as the untick
+# does, every panel told on the stream; ticked again it is in the car again
+# (its own earlier Took is no later Took). Then a later Took of another card,
+# put down since, still makes an earlier card 'later'.
+_o6 = _Q(carry=False)
+try:
+    _ev6 = listen(_o6.base, 8)
+    _settle(0.3)
+    _o6.card('R', 12.0, 40, 'uber', dropoff='12 Mill St, Roswell, GA')
+    _o6.took('R', via='offers')
+    _s6, _u6 = post(_o6.base, '/api/offers/mark', {'id': 'R', 'accepted': False, 'via': 'offers'})
+    _settle(0.3)
+    eq('[offers tick] a pass there on the order in the car puts it down like Drop, by \'offers\'',
+       (_o6.status().get('holding'), (_u6.get('car') or {}).get('putDown'),
+        [(r.get('id'), r.get('by')) for r in _o6.rows('drop')]),
+       (None, True, [('R', 'offers')]))
+    ok_('[offers tick] ...and every panel is told on the stream that nothing is held',
+        any(m.get('heldBy') == 'offers' and 'holding' in m and m.get('holding') is None
+            for m in _ev6))
+    eq('[pin log] with NUCBOX_SEARCH unset the row says so, nothing asked',
+       (_o6.rows('drop') or [{}])[0].get('end'),
+       {'by': None, 'why': 'no NucBox search', 'asked': None})
+    _r6 = _o6.took('R', via='offers')
+    eq('[offers tick] ...ticked again, it is back in the car: its own Took is not a later one',
+       ((_r6.get('car') or {}).get('held'),
+        str((_o6.status().get('holding') or {}).get('holdId')).split('@')[0]), (True, 'R'))
+    post(_o6.base, '/api/offers/mark', {'id': 'R', 'accepted': None, 'via': 'offers'})
+    _o6.card('A', 12.0, 60, 'uber')
+    _o6.card('B', 9.0, 60, 'uber')
+    _o6.took('B')
+    post(_o6.base, '/api/delivered', {})
+    _settle(0.2)
+    _r6 = _o6.took('A', via='offers')
+    eq('[offers tick] a card ticked after a later Took records only, that order put down since',
+       (_r6.get('car'), _o6.status().get('holding')), ({'held': False, 'why': 'later'}, None))
+finally:
+    _o6.stop()
+    _o6.gone()
+
+# [pin log] An order restored with a refusal kept for an EARLIER dropoff text,
+# its own text still being asked (a NucBox that takes the connection and never
+# answers): put down now, its row says 'still asking', not the old refusal.
+_hang = socket.socket()
+_hang.bind(('127.0.0.1', 0))
+_hang.listen(8)
+_hnow = int(time.time() * 1000)
+_o7 = _Q(carry=False, env={'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _hang.getsockname()[1],
+                           'NUCBOX_TIMEOUT_MS': '20000'},
+         holding=json.dumps({'v': 2, 'orders': [dict(
+             id='W', acceptedAt=_hnow - 60000, pay=9.0, minutes=40, billedMinutes=40,
+             miles=5.0, cost=1.5, dropoff='12 Mill St, Roswell, GA', card=dict(_SQ),
+             endWhy='no house number', endWhyFor='99 Old St, Roswell, GA')]}))
+try:
+    _settle(0.5)
+    post(_o7.base, '/api/delivered', {})
+    _settle(0.3)
+    eq('[pin log] a refusal kept for an earlier dropoff text is not this one\'s: still asking',
+       ((_o7.rows('drop') or [{}])[0].get('end') or {}).get('why'), 'still asking')
+finally:
+    _o7.stop()
+    _o7.gone()
+    _hang.close()
 
 # --- a Took from a panel behind the slot --------------------------------------
 #

@@ -245,6 +245,9 @@ eq('...CUT_KEEP (' + S.CUT_KEEP + ') letters before the cut read right: "Tamax" 
    'Tamarons Lane (cut, 1) /  (null, 0)');
 eq('...a digit in the word read is never a cut word: "Tamaro5"', nm('Tamaro5'), ' (null, 0)');
 eq('...a read that kept its type is not a cut name: "Tamaror Ln"', nm('Tamaror Ln'), ' (null, 0)');
+// ...nor with its word cut clean, where the type word would otherwise pass
+// for a fragment (cutFits' first refusal).
+eq('...nor one cut clean before its type: "Tamaro Ln"', nm('Tamaro Ln'), ' (null, 0)');
 eq('...the words before the last must be the street\'s: "Old Tamaror"', nm('Old Tamaror'),
    ' (null, 0)');
 eq('...directionals agree as match\'s do: "Wendle" is Wendle Lane Northwest, "Wendle SE" '
@@ -260,10 +263,12 @@ eq('...and no box is no answer', nm('Tamaror', null), ' (null, 0)');
 // and cut to a fragment. Every street here is inside CARD; two near ones for
 // "Ferrow Lake", and one with no type word.
 var fragIx = S.build({ format: S.FORMAT, e: 6,
-  names: ['Quillon Lakes Drive', 'Ferrow Lakeview Court', 'Ferrow Lakeside Way', 'Harlan Lakes'],
+  names: ['Quillon Lakes Drive', 'Ferrow Lakeview Court', 'Ferrow Lakeside Way', 'Harlan Lakes',
+          'Wexley Elm Drive', 'Gable 14th Street'],
   nodes: [-84561000, 33975000, 2000, 400, 3000, -2000, 2000, 0, 3000, 2000, 2000, 0,
-          -9000, 3000, 2000, 0],
-  ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]], [[3], [6, 1]]] });
+          -9000, 3000, 2000, 0, 1000, -4000, 2000, 0, 1000, -3000, 2000, 0],
+  ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]], [[3], [6, 1]], [[4], [8, 1]],
+         [[5], [10, 1]]] });
 function fr(name) {
   var x = S.named(fragIx, name, CARD);
   return x.names.join(' | ') + ' (' + x.how + ', ' + x.among + ')';
@@ -282,6 +287,13 @@ eq('[fragment] ...a letter misread before it is none: "Quillon Lakx r"', fr('Qui
    ' (null, 0)');
 eq('[fragment] ...and the words before must be the street\'s: "Old Quillon Lake r"',
    fr('Old Quillon Lake r'), ' (null, 0)');
+// Mutation catch-up (21 Oct): the fragment's own bounds.
+eq('[fragment] ...three letters is no fragment: "Quillon Lakes Dxx"', fr('Quillon Lakes Dxx'),
+   ' (null, 0)');
+eq('[fragment] ...nor is one after a word shorter than CUT_KEEP, read whole or not: '
+   + '"Wexley Elm r"', fr('Wexley Elm r'), ' (null, 0)');
+eq('[fragment] ...nor after a word with a digit in it: "Gable 14th r"', fr('Gable 14th r'),
+   ' (null, 0)');
 eq('the fixture through named: "Foxglov" is Foxglove Trail, and "Church St" (two of that name '
    + 'in the box) is none', [S.named(ix, 'Foxglov', ALL).names.join(),
                             S.named(ix, 'Church St', ALL).among].join(' / '),

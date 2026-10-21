@@ -247,27 +247,45 @@ var Streets = require('../streets.js');
 var NAMED_INDEX = Streets.build({
   format: Streets.FORMAT, e: 6,
   names: ['Tamarons Lane', 'Brindlewood Way', 'Brindleton Court',
-          'Larkmoor Court', 'Hollin Road', 'Fennick Court'],
+          'Larkmoor Court', 'Hollin Road', 'Fennick Court', 'Ellis Court', 'Quarrel Court',
+          'Pembury'],
   nodes: [-84561000, 33975000, 2000, 400,            // Tamarons Lane
           21000, -10400, 2000, 0,                    // Brindlewood Way
           -6000, 3000, 0, 2000,                      // Brindleton Court
           2000, -10000, 2700, 0, 0, 1000,            // Larkmoor Court, two ways, 360 m
           -22700, -16000, 13000, 0,                  // Hollin Road, 1.2 km
           -13000, 20000, 2000, 0,                    // Fennick Court, by the Square...
-          28000, -25000, 2000, 0],                   // ...and another, 2.3 mi south-east
+          28000, -25000, 2000, 0,                    // ...and another, 2.3 mi south-east
+          -17000, 10000, 1500, 0,                    // Ellis Court, 139 m
+          -8500, 7000, 2000, 0,                      // Quarrel Court, 185 m by the Square...
+          -10000, -57000, 27000, 0,                  // ...and a Quarrel Court of 2.5 km
+          -20000, 56000, 1300, 0],                   // Pembury, no type word, 120 m
   ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]],
-         [[3], [6, 1]], [[3], [7, 1]], [[4], [9, 1]], [[5], [11, 1]], [[5], [13, 1]]] });
+         [[3], [6, 1]], [[3], [7, 1]], [[4], [9, 1]], [[5], [11, 1]], [[5], [13, 1]],
+         [[6], [15, 1]], [[7], [17, 1]], [[7], [19, 1]], [[8], [21, 1]]] });
 
 /* Streets the NucBox's search holds without their house numbers, for the
    held end by its street (server.js searchHeldStreet; the owner's fault of 19
-   Oct): "306 Larkmoor Ct" answers the court and not the house, and the index
+   Oct): "306 Larkmoor Ct" (or with no type word) answers the court and not
+   the house, and the index
    above holds the court whole (360 m, two ways); "512 Hollin Rd" a road of
    1.2 km; "77 Fennick Ct" two courts of that name, both inside a 5.0 mi
-   card's disc round the Square. Invented, every one. */
+   card's disc round the Square. And (the mutation catch-up of 21 Oct) "21
+   Eliis Ct" answers Ellis Court's street, which the index reads as Ellis
+   Court only by its ocr rule, and "40 Quarrel Ct" a short court whose name a
+   road of 2.5 km also carries, inside the same card's box (said by its length
+   alone, past WHOLE_LINE_M), and "12 Pembury" a street the index holds with
+   no type word. Invented, every one. */
 var LARKMOOR = [place(121, 33.9600, -84.5387, 'highway', 'residential', 'Larkmoor Court',
                       'Larkmoor Court, Marietta, Cobb County, Georgia, 30060, United States')];
 var HOLLIN = [place(122, 33.9450, -84.5535, 'highway', 'residential', 'Hollin Road',
                     'Hollin Road, Marietta, Cobb County, Georgia, 30060, United States')];
+var ELLIS = [place(125, 33.9500, -84.5442, 'highway', 'residential', 'Ellis Court',
+                   'Ellis Court, Marietta, Cobb County, Georgia, 30060, United States')];
+var QUARREL = [place(126, 33.9570, -84.5510, 'highway', 'residential', 'Quarrel Court',
+                     'Quarrel Court, Marietta, Cobb County, Georgia, 30060, United States')];
+var PEMBURY = [place(127, 33.9560, -84.5520, 'highway', 'residential', 'Pembury',
+                     'Pembury, Marietta, Cobb County, Georgia, 30060, United States')];
 var FENNICK = [
   place(123, 33.9650, -84.5590, 'highway', 'residential', 'Fennick Court',
         'Fennick Court, Marietta, Cobb County, Georgia, 30060, United States'),
@@ -319,9 +337,12 @@ function search(q) {
     else if (/^81[02] ardley west corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_ROAD;
     else if (/^810 ardley w corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_810;
     else if (/^812 ardley w corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_812;
-    else if (/^\d+ larkmoor (ct|court)$/.test(term)) all = LARKMOOR;
+    else if (/^\d+ larkmoor( ct| court)?$/.test(term)) all = LARKMOOR;
     else if (/^\d+ hollin (rd|road)$/.test(term)) all = HOLLIN;
     else if (/^\d+ fennick (ct|court)$/.test(term)) all = FENNICK;
+    else if (/^\d+ eliis (ct|court)$/.test(term)) all = ELLIS;
+    else if (/^\d+ quarrel (ct|court)$/.test(term)) all = QUARREL;
+    else if (/^\d+ pembury$/.test(term)) all = PEMBURY;
   }
   if (q.bounded === '1') all = all.filter(function (p) { return inBox(p, q.viewbox); });
   return all.slice(0, Number(q.limit) || 10);
