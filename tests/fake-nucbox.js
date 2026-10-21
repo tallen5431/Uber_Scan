@@ -239,6 +239,15 @@ var BRINDLE_1106 = [
   place(112, 33.9650, -84.5400, 'place', 'house', '',
         '1106, Brindlewood Way, Marietta, Cobb County, Georgia, 30060, United States')];
 
+/* The owner's planner of 21 Oct, 13:57, invented: the dropoff "2282 <Name>s
+   Dr" read "2282 <Name>" — its last letter and its type lost — and filed off
+   a planner whose title had scrolled away. "2282 Corbin" answers nothing
+   here; the index knows Corbins Drive 1.3 mi north-east of the Square, and
+   asked by that name the search answers the door. */
+var CORBINS_2282 = [
+  place(113, 33.9701, -84.5340, 'place', 'house', '',
+        '2282, Corbins Drive, Marietta, Cobb County, Georgia, 30062, United States')];
+
 /* The NucBox's street index for the questions above, answered by the real
    streets.js (named), so what the server is told is what the NucBox would
    say: each street one short way. Coordinates are deltas, node to node, in
@@ -248,7 +257,7 @@ var NAMED_INDEX = Streets.build({
   format: Streets.FORMAT, e: 6,
   names: ['Tamarons Lane', 'Brindlewood Way', 'Brindleton Court',
           'Larkmoor Court', 'Hollin Road', 'Fennick Court', 'Ellis Court', 'Quarrel Court',
-          'Pembury'],
+          'Pembury', 'Corbins Drive'],
   nodes: [-84561000, 33975000, 2000, 400,            // Tamarons Lane
           21000, -10400, 2000, 0,                    // Brindlewood Way
           -6000, 3000, 0, 2000,                      // Brindleton Court
@@ -259,10 +268,12 @@ var NAMED_INDEX = Streets.build({
           -17000, 10000, 1500, 0,                    // Ellis Court, 139 m
           -8500, 7000, 2000, 0,                      // Quarrel Court, 185 m by the Square...
           -10000, -57000, 27000, 0,                  // ...and a Quarrel Court of 2.5 km
-          -20000, 56000, 1300, 0],                   // Pembury, no type word, 120 m
+          -20000, 56000, 1300, 0,                    // Pembury, no type word, 120 m
+          16700, 14000, 2000, 0],                    // Corbins Drive, 1.3 mi north-east
   ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]],
          [[3], [6, 1]], [[3], [7, 1]], [[4], [9, 1]], [[5], [11, 1]], [[5], [13, 1]],
-         [[6], [15, 1]], [[7], [17, 1]], [[7], [19, 1]], [[8], [21, 1]]] });
+         [[6], [15, 1]], [[7], [17, 1]], [[7], [19, 1]], [[8], [21, 1]],
+         [[9], [23, 1]]] });
 
 /* Streets the NucBox's search holds without their house numbers, for the
    held end by its street (server.js searchHeldStreet; the owner's fault of 19
@@ -334,6 +345,7 @@ function search(q) {
     else if (term === '2040 tansy creek sw') all = TANSY_2040;
     else if (term === '1106 tamarons lane') all = TAMARONS_1106;
     else if (term === '1106 brindlewood way') all = BRINDLE_1106;
+    else if (term === '2282 corbins drive') all = CORBINS_2282;
     else if (/^81[02] ardley west corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_ROAD;
     else if (/^810 ardley w corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_810;
     else if (/^812 ardley w corwin (pkwy|parkway)$/.test(term)) all = ARDLEY_812;
@@ -502,6 +514,7 @@ module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    TANSY_1830: TANSY_1830, TANSY_2040: TANSY_2040,
                    ARDLEY_ROAD: ARDLEY_ROAD, ARDLEY_810: ARDLEY_810, ARDLEY_812: ARDLEY_812,
                    TAMARONS_1106: TAMARONS_1106, BRINDLE_1106: BRINDLE_1106,
+                   CORBINS_2282: CORBINS_2282,
                    NAMED_INDEX: NAMED_INDEX };
 
 if (require.main === module) {

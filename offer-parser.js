@@ -1524,6 +1524,11 @@
   // in offer_parser.py.
   var PLANNER_PL_SLIP = / (?:P|PI|P1|P\|)$/;
   var STREET_TYPE_WORD = new RegExp('^(?:' + STREET_SUFFIX + ')$', 'i');
+  // A unit after the street, ", STE 120", ", Suite 120", ", Ste. 120",
+  // ", Unit 4", ", Apt 2B" or "#120": it goes and the street stands (the
+  // owner's planner of 21 Oct, 13:57). See PLANNER_UNIT in offer_parser.py.
+  var PLANNER_UNIT = new RegExp('(?:\\s*,\\s*(?:ste|suite|unit|apt)\\b\\.?\\s*#?|\\s*,?\\s*#)\\s*'
+    + '(?:[A-Za-z]?\\d{1,5}[A-Za-z]?|[A-Za-z])$', 'i');
 
   function plannerPlSlip(street) {
     var m = PLANNER_PL_SLIP.exec(street);
@@ -1561,7 +1566,7 @@
         tail = !!(zip ? rest.slice(z[0].length) : rest).trim();
       }
     }
-    var street = (streetLine || '').replace(PLANNER_EDGE, '');
+    var street = (streetLine || '').replace(PLANNER_EDGE, '').replace(PLANNER_UNIT, '');
     var lone = PLANNER_LONE_LETTER.exec(street);
     if (lone && tail) street = street.slice(0, lone.index + lone[0].length - 1).replace(/\s+$/, '');
     var quad = PLANNER_QUADRANT_LETTER.exec(street);
@@ -1946,6 +1951,23 @@
     }
     return !!(kinds.pickup && kinds.dropoff)
       && lines.some(function (l) { return PLANNER_DETAILS.test(l); });
+  }
+
+  /* The list framed with the title scrolled off (the owner's planner of 21
+     Oct, 13:57): the first stop header of the read is a Pickup, every line
+     above it is the title or furniture (no two letters in a row), and the
+     foot is on the screen, the "Stop New Requests" bar or "Waybill" after
+     the last header. Bounds nothing; the assembler asks it of a single
+     trip's page (`framed`). See planner_framed in offer_parser.py. */
+  function plannerFramed(text) {
+    var raw = String(text || '').split(/[\r\n]+/).map(normalize);
+    var pl = plannerLines(text), lines = pl.lines, heads = pl.heads;
+    if (!heads.length || !/^p/i.test(PLANNER_STOP.exec(lines[heads[0]])[1])) return false;
+    if (lines.slice(0, heads[0]).some(function (l) {
+      return /[A-Za-z]{2}/.test(l) && !PLANNER_TITLE.test(l);
+    })) return false;
+    return raw.some(function (l) { return l && PLANNER_BAR.test(l); })
+      || lines.slice(heads[heads.length - 1] + 1).some(function (l) { return PLANNER_END.test(l); });
   }
 
   function plannerBounded(text) {
@@ -3999,6 +4021,7 @@
            placePopup: placePopup,
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
            plannerTitled: plannerTitled, plannerLaidOut: plannerLaidOut,
+           plannerFramed: plannerFramed,
            screenType: screenType, SCREENS: SCREENS,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,

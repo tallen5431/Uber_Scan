@@ -6778,6 +6778,105 @@ try:
             stop(_ixp)
     _badix.shutdown()
 
+    # The owner's planner of 21 Oct, 13:57, end to end, every name and street
+    # invented: one Uber order held, carrying two on, its card read badly
+    # (legs 0, hasTotal false, multiOrder false) with the corner "Corbins Dr,
+    # Marietta" as its end. The Trip Planner read whole with its title scrolled
+    # off — the shared case, made into the sighting rpi/scan_pi.py sends by
+    # offer_parser itself — files its lone dropoff "2282 Corbin, Marietta" as
+    # the planner's (assemble.js framedTrip), and the street-index rescue finds
+    # the door by "2282 Corbins Drive": the last letter and the type lost.
+    import offer_parser as _OP                                # noqa: E402
+    _ftext = [c['text'] for c in json.load(open(os.path.join(
+        ROOT, 'tests', 'fixtures', 'cases.json')))['planner']
+        if c['name'].startswith("Measured: the single trip's planner of 21 Oct")][0]
+
+    def _fread(text, framed=None):
+        """One unpressed whole-screen read of `text` as the scanner sends it:
+        the sighting (scan_pi.sighting's fields, by offer_parser), then the
+        planner line under the same stamp. `framed` overrides the reader's."""
+        at = int(time.time() * 1000)
+        stops = _OP.find_planner(text) or []
+        top, bottom = _OP.planner_ends(text)
+        return [{'sighting': {
+            'at': at, 'asked': False, 'whole': True, 'titled': _OP.planner_titled(text),
+            'laidOut': _OP.planner_laid_out(text),
+            'framed': _OP.planner_framed(text) if framed is None else framed,
+            'app': 'uber', 'screen': _OP.screen_type(text)['screen'],
+            'page': {'top': top, 'bottom': bottom},
+            'stops': [dict({k: s.get(k) for k in ('kind', 'orders', 'name', 'place',
+                                                  'expectedBy', 'street', 'city', 'state',
+                                                  'zip', 'line', 'partial')},
+                           label=s.get('kind')) for s in stops],
+            'orderCount': 1, 'keep': False}},
+            {'planner': {'stops': [{k: v for k, v in s.items() if k != 'partial'}
+                                   for s in stops if s.get('kind')],
+                         'keep': False, 'asked': False, 'ms': None, 'at': at}}]
+
+    _fdir = os.path.join(_adir, 'framed')
+    os.makedirs(_fdir)
+    _fj = os.path.join(_fdir, 'offers.jsonl')
+    open(_fj, 'w').close()
+    _fcmds = os.path.join(_fdir, 'cmds.jsonl')
+    open(_fcmds, 'w').close()
+    _frelay = os.path.join(_fdir, 'relay.py')
+    with open(_frelay, 'w') as _fh:
+        _fh.write('import time\n'
+                  'done = 0\n'
+                  'end = time.time() + 300\n'
+                  'while time.time() < end:\n'
+                  '    lines = open(%r).read().splitlines()\n'
+                  '    for l in lines[done:]:\n'
+                  '        print(l, flush=True)\n'
+                  '    done = len(lines)\n'
+                  '    time.sleep(0.05)\n' % _fcmds)
+
+    def _fsay(msgs):
+        with open(_fcmds, 'a') as fh:
+            for m in msgs:
+                fh.write(json.dumps(m) + '\n')
+
+    _fp, _fb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _frelay,
+                      'CARRY_TWO': '1', 'NUCBOX_SEARCH': _afake_base,
+                      'NUCBOX_STREETS': _afake_base, 'NUCBOX_TIMEOUT_MS': '800'}, _fj)
+    try:
+        post(_fb, '/api/offers/mark', {'id': 'f-one', 'accepted': True, 'offer': dict(
+            _SQ, id='f-one', pay=9.75, minutes=21.0, billedMinutes=21.0, miles=5.0, cost=1.75,
+            legs=0, hasTotal=False, multiOrder=False, dropoff='Corbins Dr, Marietta')})
+        _h = _settled(_fb, lambda h: h.get('endWhy'))
+        eq('[framed] (the premise: the card\'s corner is held, no house number, carrying two on)',
+           (_h.get('dropoff'), _h.get('endWhy'), get(_fb, '/api/status').get('carryTwo')),
+           ('Corbins Dr, Marietta', 'no house number', True))
+        # As the reader saw it before: the page not framed, the old refusal.
+        # (Its door is searched already, warmEarly: the rescue's answer is in
+        # the cache by the time the framed read files the door.)
+        _n = len(_aasked('Corbin'))
+        _fsay(_fread(_ftext, framed=False))
+        time.sleep(1.0)
+        _h = _holding(_fb) or {}
+        eq('[framed] an unframed read of the page files nothing: the panel says the list was cut '
+           'off', (_h.get('dropoff'), (_h.get('planner') or {}).get('unfiled')),
+           ('Corbins Dr, Marietta', 'list'))
+        _fsay(_fread(_ftext))
+        _h = _settled(_fb, lambda h: h.get('endPinned'))
+        eq('[framed] the 21 Oct page, title scrolled off, files its lone dropoff onto a card whose '
+           'legs read 0, and the planner line says nothing unfiled',
+           (_h.get('dropoff'), _h.get('dropoffScanned'),
+            (_h.get('planner') or {}).get('unfiled')),
+           ('2282 Corbin, Marietta', True, None))
+        eq('[framed] ...and the street-index rescue pins the door as "2282 Corbins Drive"',
+           (_h.get('endPinned'), _h.get('endBy'), _h.get('endAsked'), _h.get('endWhy')),
+           (True, 'server', '2282 Corbins Drive', None))
+        eq('[framed] ...asked as printed, of the index inside the disc\'s box, then by the '
+           'street\'s own name, once each',
+           [u.split('?')[0] for u in _aasked('Corbin')[_n:]],
+           ['/search', '/api/streets/named', '/search'])
+        eq('[framed] ...and the store\'s street kept without its suite',
+           [p.get('street') for p in (_h.get('planner') or {}).get('stops') or []
+            if p.get('kind') == 'pickup'], ['1985 Wrenfield Parkway NW'])
+    finally:
+        stop(_fp)
+
     _bj = os.path.join(_adir, 'b', 'offers.jsonl')
     os.makedirs(os.path.dirname(_bj))
     open(_bj, 'w').close()

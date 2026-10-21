@@ -2849,6 +2849,19 @@ PLANNER_QUADRANT_LETTER = re.compile(r'\S (?:NW|NE|SW|SE) ([A-Za-z])$', re.IGNOR
 # "P" or "PI"; the word before it must not be one, or "Oak St P" would gain
 # a second. Case kept: "Pi" or "p" is not read as this.
 PLANNER_PL_SLIP = re.compile(r' (?:P|PI|P1|P\|)$', ASCII)
+# A UNIT after the street: the owner's planner of 21 Oct, 13:57, printed the
+# store's door as "1985 <Name> Parkway NW, STE 120" over "Kennesaw, GA 30152"
+# (the name left out here), and STREET — words to the end of the line, no
+# comma — took nothing, so the pickup kept its town and no street. The unit
+# goes and the street stands: ", STE 120", ", Suite 120", ", Ste. 120",
+# ", Unit 4", ", Apt 2B" — the word after a comma only, so a street NAMED
+# "Suite" or "Unit" is never cut — or "#120" with or without the comma. The
+# unit itself is a number, a number with a letter on either side, or one
+# letter; nothing longer. The NucBox has no door for a suite, so it is not
+# kept: the street is what is searched.
+PLANNER_UNIT = re.compile(
+    r'(?:\s*,\s*(?:ste|suite|unit|apt)\b\.?\s*#?|\s*,?\s*#)\s*'
+    r'(?:[A-Za-z]?\d{1,5}[A-Za-z]?|[A-Za-z])$', re.IGNORECASE | ASCII)
 
 
 def _planner_pl_slip(street):
@@ -2934,7 +2947,7 @@ def _planner_address(street_line, town_line, label_line=None):
             z = PLANNER_ZIP.match(rest)
             zipcode = a_zip(z.group(1)) if z else None
             tail = bool((rest[z.end():] if zipcode else rest).strip())
-    street = PLANNER_EDGE.sub('', street_line or '')
+    street = PLANNER_UNIT.sub('', PLANNER_EDGE.sub('', street_line or ''))
     lone = PLANNER_LONE_LETTER.search(street)
     if lone and tail:
         street = street[:lone.start(1)].rstrip()
@@ -3525,6 +3538,54 @@ def planner_laid_out(text):
             return False
         kinds.add('pickup' if PLANNER_STOP.match(lines[at]).group(1)[0] in 'pP' else 'dropoff')
     return kinds == {'pickup', 'dropoff'} and any(PLANNER_DETAILS.match(l) for l in lines)
+
+
+# THE LIST FRAMED, WITH THE TITLE SCROLLED OFF. The owner's planner of 21 Oct,
+# 13:57, one Uber order held, read whole-screen (names left out, the layout
+# and the slips the reading's):
+#
+#     Pickup - 1 order             the first line of the read
+#     © <Store>
+#     Expected by 2:01 PM
+#     Address
+#     1985 <Name> Parkway NW, STE 120
+#     Kennesaw, GA 30152
+#     View details
+#     Dropoff - 1 order
+#     oO <Customer> C,
+#     Expected by 2:18 PM
+#     Address
+#     2282 <Name>
+#     Marietta, GA
+#     View details
+#     oS Q
+#     =o
+#     Stop New Requests            the app's bar, the foot of the screen
+#
+# The title had scrolled off, so planner_ends gave no top, the list was
+# 'list', and its one dropoff went unfiled: the held card's legs read 0, and
+# the lone-dropoff rule wants 1. What the page does show is a Pickup header
+# with nothing above it — no stop's tail (its time, its address, "View
+# details", a name), so no stop is above it — and the foot. True when the
+# first stop header of the read is a Pickup, every line above it is the title
+# or furniture (no two letters in a row, the test planner_ends asks of the
+# lines between the title and the first header), and the foot is on the
+# screen: the "Stop New Requests" bar, or "Waybill" after the last header.
+# Alone it bounds nothing (planner_ends is unchanged); the assembler asks it
+# of ONE page showing one Pickup and one Dropoff of one order each, with one
+# order held (assemble.js, `framed`).
+def planner_framed(text):
+    """True when `text` shows a Pickup header at the top of the read and the
+    foot of the screen: see above."""
+    raw = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
+    lines, heads = _planner_lines(text)
+    if not heads or PLANNER_STOP.match(lines[heads[0]]).group(1)[0] not in 'pP':
+        return False
+    if any(re.search(r'[A-Za-z]{2}', l) and not PLANNER_TITLE.match(l)
+           for l in lines[:heads[0]]):
+        return False
+    return any(PLANNER_BAR.match(l) for l in raw if l) \
+        or any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:])
 
 
 def planner_bounded(text):

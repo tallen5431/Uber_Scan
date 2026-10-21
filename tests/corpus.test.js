@@ -108,6 +108,13 @@ function stopFields(stops) {
   var ends = P.plannerBounded(c.text);
   if (ends === c.bounded) ok++;
   else { bad++; console.log('FAIL  planner ends / ' + c.name + ': got ' + ends + ' want ' + c.bounded); }
+  /* ...and, where a case says, whether a Pickup header opens the read with
+     the foot under it (plannerFramed; the owner's planner of 21 Oct). */
+  if (c.framed !== undefined) {
+    var framed = P.plannerFramed(c.text);
+    if (framed === c.framed) ok++;
+    else { bad++; console.log('FAIL  planner framed / ' + c.name + ': got ' + framed + ' want ' + c.framed); }
+  }
 });
 
 /* What screen a reading is, for a sighting: app and screen as one pair. The

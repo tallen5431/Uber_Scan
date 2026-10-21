@@ -126,6 +126,10 @@ for c in cases.get('planner', []):
     # lets the scanner take a planner's one dropoff for the trip's only one.
     # Every case says, and a case that does not is a KeyError, not a pass.
     eq('planner ends / ' + c['name'], P.planner_bounded(c['text']), c['bounded'])
+    # ...and, where a case says, whether a Pickup header opens the read with
+    # the foot under it (planner_framed; the owner's planner of 21 Oct).
+    if 'framed' in c:
+        eq('planner framed / ' + c['name'], P.planner_framed(c['text']), c['framed'])
 
 # ...and the two ends one at a time, which is what a sighting's `page` says.
 # `bounded` is both together and cannot see them swapped; these two cases have

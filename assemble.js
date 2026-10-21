@@ -352,8 +352,10 @@
    *      order on ONE leg: what the screen did not show may be a second
    *      customer's door, and the card the driver took is the only witness
    *      that there is none. `multiOrder` must say false — a card from a
-   *      scanner too old to say is refused — and `legs` must be 1. Refused,
-   *      it is dropped whole (`drop`), as it always was.
+   *      scanner too old to say is refused — and `legs` must be 1, or 0 when
+   *      the page itself framed the trip as one pickup and one dropoff
+   *      (`framed`, framedTrip; the owner's read of 21 Oct). Refused, it is
+   *      dropped whole (`drop`), as it always was.
    *   2. Whether the driver ASKED (missing means asked, so a scanner older
    *      than the field keeps the behaviour it had).
    *   3. Whether an unasked one is LABEL-PROVEN: the screen printed it under
@@ -405,8 +407,10 @@
                 why: null, tally: false, drop: false };
     if (!d) return out;
     if (d.singleCardOnly === true) {
-      var oneTrip = !!held && !!held.card && held.card.legs === 1
-        && held.card.multiOrder === false;
+      // ...or, off a page that frames the whole trip itself (`framed`,
+      // framedTrip), legs 0: the card's legs unread, the page the witness.
+      var oneTrip = !!held && !!held.card && held.card.multiOrder === false
+        && (held.card.legs === 1 || (d.framed === true && held.card.legs === 0));
       if (!oneTrip) {
         out.drop = true;
         out.why = 'not a single trip';
@@ -1009,6 +1013,42 @@
     return addressOf(d);
   }
 
+  /* Whether a planner page proves, by itself, that the trip is ONE pickup and
+   * ONE dropoff, so that the lone dropoff it shows (plannerLoneDropoff) may
+   * be filed onto a held card whose legs read 0. The owner's read of 21 Oct,
+   * 13:57, one Uber order held, carrying two on: the planner read whole with
+   * its title scrolled off the top and the bar at the foot, "Pickup - 1
+   * order" the first line of the read, its block, then "Dropoff - 1 order"
+   * and the customer's door; the list was 'list', and the held card read
+   * badly (legs 0, hasTotal false, multiOrder false), so `singleCardOnly`
+   * refused it and the order kept the card's corner, no house number.
+   *
+   * This narrows the lone-dropoff rule's `card.legs === 1` for THIS page
+   * shape only (dropoff(), rule 1), all of:
+   *   - the page is unprompted (the caller asks), read whole, and `framed`
+   *     (offer_parser.planner_framed): the first stop header of the read is
+   *     a Pickup with only the title or furniture above it — no stop above
+   *     it — and the foot on the screen, the bar or "Waybill";
+   *   - the page's own stops, and the list it is read as, are exactly one
+   *     Pickup of "1 order" then one Dropoff of "1 order", neither cut by a
+   *     page edge nor header-lost (`partial`), nothing of no kind;
+   *   - one order held, not an add-on trip's (`addOn`, `of`): sightingMany
+   *     takes two and never asks this.
+   * dropoff() still wants the card's `multiOrder` false and its legs a
+   * number no more than 1. A press is the press's rule, and outranks() keeps
+   * a pressed end over this as over any planner. */
+  function oneTripStops(stops) {
+    var s = stops || [];
+    return s.length === 2 && s.every(function (x) { return x && !x.partial; })
+      && s[0].kind === 'pickup' && s[0].orders === 1
+      && s[1].kind === 'dropoff' && s[1].orders === 1;
+  }
+
+  function framedTrip(held, page, view) {
+    if (!held || held.addOn || held.of || !page.framed) return false;
+    return oneTripStops(page.stops) && oneTripStops(view.stops);
+  }
+
   /* ---------- a batched Uber trip: one card, one Took, two doors -------------
    *
    * The owner's facts (17 and 19 Oct 2026): Uber sends BATCHED orders — ONE
@@ -1378,7 +1418,7 @@
     });
   }
 
-  /* One sighting (rpi/scan_pi.py, sighting()): {at, asked, whole, titled, laidOut, app,
+  /* One sighting (rpi/scan_pi.py, sighting()): {at, asked, whole, titled, laidOut, framed, app,
    * screen, page: {top, bottom}, stops, orderCount, keep}. Returns
    * {candidates: [dropoff-shaped], why, at} — `why` the reason the planner
    * this page belongs to gives the order no end, for the planner line that
@@ -1428,6 +1468,9 @@
                  titled: s.titled === true,
                  // The layout standing in for a title misread: see below.
                  laidOut: s.laidOut === true,
+                 // A Pickup header opening the read, the foot under it: see
+                 // framedTrip.
+                 framed: s.framed === true,
                  top: !!(s.page && s.page.top), bottom: !!(s.page && s.page.bottom),
                  stops: s.stops.filter(function (x) { return x && typeof x === 'object'; }),
                  pending: false, why: null };
@@ -1496,6 +1539,12 @@
       var lost = lostHeaderDropoff(held, view.stops);
       if (lost) cand = candidate(lost, verdict.stop, page, false, true);
     }
+    // ...and a lone dropoff off a page that frames the whole trip itself
+    // (framedTrip; the owner's read of 21 Oct, 13:57): dropoff() then takes
+    // a held card whose legs read 0 as well as 1.
+    if (cand && cand.singleCardOnly && !page.asked && framedTrip(held, page, view)) {
+      cand.framed = true;
+    }
     // A BATCHED TRIP (batchPlan): the owner's decision of 19 Oct 2026. With
     // ONE order held (`held` here is one: sightingMany takes two), an
     // unpressed read under the title or its layout, the list seen whole —
@@ -1531,7 +1580,9 @@
     // (plannerVote), before the dedupe; the winner gets past it.
     if (cand && !cand.batch && plannerVote(held, cand)) cand.vote = true;
     if (cand && !cand.asked) {
+      // (A framed one is its own: one refused unframed must not hide it.)
       var seen = cand.line + (cand.singleCardOnly ? '|lone' : '')
+        + (cand.framed ? '|framed' : '')
         + (cand.batch ? '|batch' + cand.batch.drops.length : '');
       if (st.said[seen] && !cand.vote) { cand = null; deduped = true; }
       else st.said[seen] = true;
@@ -2437,7 +2488,7 @@
            storeScreen: storeScreen, placeOf: placeOf, bracketDoor: bracketDoor,
            popup: popup, filePopup: filePopup, cardNames: cardNames,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
-           lostHeaderDropoff: lostHeaderDropoff,
+           lostHeaderDropoff: lostHeaderDropoff, framedTrip: framedTrip,
            // ...and a batched trip's doors (the owner's decision of 19 Oct).
            batchPlan: batchPlan, batchWhy: batchWhy, cardStreets: cardStreets,
            streetCore: streetCore,

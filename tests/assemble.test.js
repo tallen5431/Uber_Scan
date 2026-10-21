@@ -31,7 +31,7 @@ function pageOf(text, at, asked, app) {
   var kind = OP.screenType(text);
   return {
     at: at, asked: !!asked, whole: true, titled: OP.plannerTitled(text),
-    laidOut: OP.plannerLaidOut(text),
+    laidOut: OP.plannerLaidOut(text), framed: OP.plannerFramed(text),
     app: app || kind.app, screen: kind.screen, page: OP.plannerEnds(text),
     stops: stops.map(function (s) {
       return { kind: s.kind, orders: s.orders, name: s.name, place: s.place,
@@ -1296,6 +1296,133 @@ SEQ.forEach(function (seq) {
      play1(pageOf(text.replace('Stop New Requests', 'S Q'), 2000, false)), [0, null, 'list']);
   eq('...nor onto a held card of two legs',
      play1(pageOf(text, 2000, false), { legs: 2, multiOrder: false })[1], null);
+})();
+
+/* A single trip's planner with its title scrolled off (framedTrip; the
+ * owner's read of 21 Oct, 13:57, one Uber order held, carrying two on). The
+ * shared case "Measured: the single trip's planner of 21 Oct…" (names and
+ * streets invented): "Pickup - 1 order" the first line of the read, the bar
+ * the last, no title and no Waybill, so the list is 'list'. The held card
+ * read badly — legs 0, hasTotal false, multiOrder false — and the lone
+ * dropoff was dropped as 'not a single trip': the order kept the card's
+ * corner. Now the page's own frame, one Pickup of one order then one Dropoff
+ * of one order, stands in for the card's legs, 0 allowed; nothing else of
+ * the lone-dropoff rule moves. */
+(function () {
+  var name = 'Measured: the single trip\'s planner of 21 Oct, its title scrolled off the top, '
+    + 'the store\'s street with a suite';
+  var text = null;
+  require('./fixtures/cases.json').planner.forEach(function (c) {
+    if (c.name === name) text = c.text;
+  });
+  ok_('[framed] the premise: the 21 Oct planner case is there', !!text);
+  if (!text) return;
+  var ends = OP.plannerEnds(text);
+  eq('[framed] the premise: the page is framed and laid out, with neither end of the list',
+     [OP.plannerFramed(text), OP.plannerLaidOut(text), OP.plannerTitled(text), ends.top,
+      ends.bottom], [true, true, false, false, false]);
+  function held(card, extra) {
+    var h = Object.assign({ id: 'o-framed', acceptedAt: 1000,
+                            card: card === undefined
+                              ? { legs: 0, multiOrder: false, hasTotal: false } : card,
+                            app: 'uber', dropoff: 'Corbins Dr, Marietta',
+                            dropoffScanned: false }, extra || {});
+    h.fields = A.cardFields({ dropoff: h.dropoff, pickup: null }, h.acceptedAt);
+    return h;
+  }
+  // One page through sighting(), its candidates through dropoff() and file().
+  function run(page, h) {
+    var st = A.fresh();
+    h = h || held();
+    A.took(st, h);
+    var r = A.sighting(st, h, page, 2000);
+    var said = r.candidates.map(function (d) {
+      var s = A.dropoff(h, d, null);
+      if (!s.drop) A.file(h, d, s, st);
+      return [d.framed === true, s.drop ? s.why : s.from];
+    });
+    return [said, h.dropoff, brief(h.fields.dropoff), A.verdictFor(st, 2000)];
+  }
+  var page = pageOf(text, 2000, false);
+  eq('[framed] the fault: the lone dropoff files onto a held card whose legs read 0, as a '
+     + 'planner end, and the planner line says nothing unfiled',
+     run(page),
+     [[[true, 'planner']], '2282 Corbin, Marietta',
+      { value: '2282 Corbin, Marietta', from: 'planner' }, null]);
+  eq('[framed] ...and without the frame the old refusal stands: dropped, the card\'s corner '
+     + 'kept, "list"',
+     run(Object.assign({}, page, { framed: false })),
+     [[[false, 'not a single trip']], 'Corbins Dr, Marietta',
+      { value: 'Corbins Dr, Marietta', from: 'card' }, 'list']);
+  eq('[framed] ...a card of one leg files as it always did',
+     run(page, held({ legs: 1, multiOrder: false }))[1], '2282 Corbin, Marietta');
+  eq('[framed] ...but not a card of two legs',
+     run(page, held({ legs: 2, multiOrder: false }))[0], [[true, 'not a single trip']]);
+  eq('[framed] ...nor a card of two orders',
+     run(page, held({ legs: 0, multiOrder: true }))[0], [[true, 'not a single trip']]);
+  eq('[framed] ...nor a card too old to say whether it was two orders',
+     run(page, held({ legs: 0 }))[0], [[true, 'not a single trip']]);
+  eq('[framed] ...nor a card that never said its legs',
+     run(page, held({ multiOrder: false }))[0], [[true, 'not a single trip']]);
+  eq('[framed] ...nor a hold with no card',
+     run(page, held(null))[0], [[true, 'not a single trip']]);
+  eq('[framed] ...nor an add-on\'s trip, by `addOn`',
+     run(page, held(undefined, { addOn: true }))[0], [[false, 'not a single trip']]);
+  eq('[framed] ...nor by `of`',
+     run(page, held(undefined, { of: 'o-root@1' }))[0], [[false, 'not a single trip']]);
+  eq('[framed] a press on the page files nothing: a press is the press\'s rule',
+     run(pageOf(text, 2000, true)).slice(0, 2), [[], 'Corbins Dr, Marietta']);
+  // An end the driver pressed for stays: a planner never outranks a press.
+  var pressed = held();
+  A.file(pressed, { line: '2290 Corbins Dr, Marietta', asked: true, at: 1500 },
+         A.dropoff(pressed, { line: '2290 Corbins Dr, Marietta', asked: true, at: 1500 }, null));
+  eq('[framed] ...and it never files over an end the driver pressed for',
+     run(page, pressed).slice(1, 3),
+     ['2290 Corbins Dr, Marietta', { value: '2290 Corbins Dr, Marietta', from: 'press' }]);
+  // A read refused unframed (the title showing, no foot) does not hide the
+  // framed read of the same door that follows: each is its own.
+  (function () {
+    var st = A.fresh(), h = held();
+    A.took(st, h);
+    var first = A.sighting(st, h, Object.assign({}, page, { at: 2000, framed: false }), 2000);
+    first.candidates.forEach(function (d) { A.dropoff(h, d, null); });
+    var r = A.sighting(st, h, Object.assign({}, page, { at: 3000 }), 3000);
+    r.candidates.forEach(function (d) {
+      var s = A.dropoff(h, d, null);
+      if (!s.drop) A.file(h, d, s, st);
+    });
+    eq('[framed] a read refused unframed does not hide the framed read of the same door',
+       [first.candidates.length, r.candidates.length, h.dropoff],
+       [1, 1, '2282 Corbin, Marietta']);
+  })();
+  // With two orders held nothing of this rule is asked: sightingMany offers
+  // no lone dropoff and nothing framed.
+  (function () {
+    var st = A.fresh();
+    var a = held(), b = held(undefined, { id: 'o-other', acceptedAt: 1200 });
+    var r = A.sighting(st, [a, b], page, 2000);
+    eq('[framed] with two orders held no candidate is framed or a lone dropoff',
+       r.candidates.filter(function (d) { return d.framed || d.singleCardOnly; }).length, 0);
+  })();
+  // The page's shape, one condition at a time (framedTrip).
+  var stops = page.stops;
+  var with_ = function (i, f) {
+    return stops.map(function (s, k) { return k === i ? Object.assign({}, s, f) : s; });
+  };
+  var asked = function (s, pg) {
+    var p = Object.assign({}, page, pg || {}, { stops: s });
+    return A.framedTrip(held(), p, { stops: s });
+  };
+  eq('[framed] framedTrip: the fault\'s page is the trip; each part taken away is not',
+     [asked(stops), asked(stops, { framed: false }),
+      asked(with_(0, { orders: 2 })), asked(with_(1, { orders: 2 })),
+      asked(with_(0, { kind: 'dropoff' })), asked(with_(1, { kind: 'pickup' })),
+      asked(with_(1, { partial: 'header' })), asked(with_(0, { partial: 'top' })),
+      asked(stops.concat([stops[1]])), asked(stops.slice(1)),
+      asked([Object.assign({}, stops[1], { kind: null, partial: 'top' })].concat(stops))],
+     [true, false, false, false, false, false, false, false, false, false, false]);
+  eq('[framed] framedTrip: ...and the list it is read as must be the same one trip',
+     A.framedTrip(held(), page, { stops: stops.concat([stops[1]]) }), false);
 })();
 
 /* The same store as an order in the car (Assemble.samePickup; the owner's

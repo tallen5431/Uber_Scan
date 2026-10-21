@@ -4112,6 +4112,18 @@ _shift_seen = SP.sighting(_SHIFT_PLANNER, OP2.find_planner(_SHIFT_PLANNER), None
 eq('the sighting of a planner whose title was misread says its layout proves it one',
    (_shift_seen['titled'], _shift_seen['laidOut'], _shift_seen['screen']),
    (False, True, 'uber.planner'))
+# ...and the 21 Oct planner, its title scrolled off (the shared case; names
+# invented): the sighting says a Pickup header opens the read with the bar
+# under it, `framed` (OP.planner_framed), which the assembler asks of a single
+# trip's page. The 16 Oct page, the misread title over its first header, is not.
+_FRAMED_PLANNER = [t for n, t in {c['name']: c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', 'tests', 'fixtures',
+    'cases.json')))['planner']}.items()
+    if n.startswith("Measured: the single trip's planner of 21 Oct")][0]
+_framed_seen = SP.sighting(_FRAMED_PLANNER, OP2.find_planner(_FRAMED_PLANNER), None, False, True)
+eq('the sighting of a planner whose title scrolled off says it is framed; the misread '
+   'title\'s is not', (_framed_seen['framed'], _framed_seen['laidOut'], _shift_seen['framed']),
+   (True, True, False))
 
 # --- what in the card box asks for an unpressed whole-screen read ------------
 #
