@@ -1791,6 +1791,20 @@ const TEXT = (sel) => {
         document.querySelectorAll('#log details.offer')).filter(
         (d) => d.querySelector('summary .tag.incar')).map((d) => d.getAttribute('data-id')));
       out[name].inCar = await tags();
+      // ...in place of the row's other tags, which come back once the order
+      // leaves the car: the words of each one shown on a row.
+      const otherTags = (id) => page.evaluate((id) => [].slice.call(
+        document.querySelectorAll('#log details.offer[data-id="' + id + '"] summary .tag'))
+        .filter((t) => !t.classList.contains('incar') && !t.hidden
+                && t.getBoundingClientRect().width > 0)
+        .map((t) => t.textContent.trim()), id);
+      out[name].otherTags = await otherTags('r3');
+      // ...and it stands beside the ✓, the next thing after it.
+      out[name].tagBesideTick = await page.evaluate(() => {
+        const b = document.querySelector('#log details.offer[data-id="r3"] summary [data-act="took"]');
+        const n = b && b.nextElementSibling;
+        return !!(n && n.classList.contains('incar'));
+      });
       // Fits beside the ✓ on the panel and on a phone: the row's summary does
       // not overflow, the page does not scroll sideways, and the ✓ is still
       // what a press on it reaches.
@@ -1902,6 +1916,67 @@ const TEXT = (sel) => {
         drops: window.__drops,
         shown: !document.getElementById('incar').hidden,
         tags: document.querySelectorAll('#log .tag.incar').length }));
+      out[name].otherTagsAfter = await otherTags('r3');
+      // [in car list] Four in the car, as /api/status lists them while two
+      // or more are carried (`orders`): each line says its own GPS drop in
+      // the panel's words; Drop on one sends that order's holdId, as the
+      // panel's chooser does; and a Drop the server refuses says so.
+      await page.evaluate(() => {
+        window.__drops = [];
+        window.__dropOk = true;
+        const was = window.fetch;
+        const orders = [
+          { holdId: 'r1@1', pay: 9.5, app: 'doordash', dropoff: '12 Wren St, Roswell',
+            endPinned: true, endBy: 'place' },
+          { holdId: 'r2@2', pay: 7, dropoff: '77 Birch Ln, Roswell', endPinned: true,
+            arrived: true },
+          { holdId: 'r5@3', pay: 5, addOn: true, dropoff: null, endPinned: false,
+            endWhy: 'no house number on the NucBox' },
+          { holdId: 'r0@4', pay: 4, dropoff: '306 Elm Ct, Marietta', endPinned: true,
+            endBy: 'street' }];
+        window.fetch = function (url, opts) {
+          if (String(url).indexOf('/api/delivered') === 0) {
+            window.__drops.push((opts || {}).body || null);
+            return Promise.resolve({ ok: window.__dropOk, status: window.__dropOk ? 200 : 500,
+              json: () => Promise.resolve({ ok: window.__dropOk }) });
+          }
+          if (String(url).indexOf('/api/status') === 0) {
+            return Promise.resolve({ ok: true, status: 200,
+              json: () => Promise.resolve({ holding: orders[0], orders: orders,
+                                            scanner: { enabled: true } }) });
+          }
+          return was.apply(this, arguments);
+        };
+      });
+      // ...opened at #incar (as the panel's in-car line opens it) and scrolled
+      // down the list, as a reload would restore it: the section, once it
+      // shows, is scrolled to the top of the glass.
+      out[name].incarScroll = await page.evaluate(() => {
+        history.replaceState(null, '', location.pathname + location.search + '#incar');
+        window.scrollTo(0, document.documentElement.scrollHeight);
+        const before = window.scrollY;
+        document.querySelector('#ranges button[data-days="7"]').click();
+        return { before: before };
+      });
+      await page.waitForTimeout(500);
+      out[name].incarScroll.top = await page.evaluate(
+        () => Math.round(document.getElementById('incar').getBoundingClientRect().top));
+      const lines = () => page.evaluate(() => [].slice.call(
+        document.querySelectorAll('#incar li .what')).map(
+        (w) => w.textContent.replace(/\s+/g, ' ').trim()));
+      out[name].incarFour = await lines();
+      await page.evaluate(() => document.querySelectorAll('#incar button')[1].click());
+      await page.waitForTimeout(400);
+      out[name].incarFourDrop = await page.evaluate(() => window.__drops.slice());
+      await page.evaluate(() => {
+        window.__dropOk = false;
+        document.querySelectorAll('#incar button')[0].click();
+      });
+      await page.waitForTimeout(400);
+      out[name].incarRefused = await page.evaluate(() => {
+        const b = document.querySelectorAll('#incar button')[0];
+        return { text: b.textContent, disabled: b.disabled };
+      });
     }
     if (name === 'took six') {
       out[name].incarHidden = await page.evaluate(() => {
@@ -2476,6 +2551,27 @@ try:
     no_('[in car list] ...and the section is gone once the server holds nothing',
         idr.get('shown'))
     eq('[in car list] ...and so is the row\'s "in car" tag', idr.get('tags'), 0)
+    eq('[offers tick] the "in car" tag stands in place of the row\'s other tags, which '
+       'come back once the order leaves the car',
+       (ic.get('otherTags'), ic.get('otherTagsAfter')), ([], ['stacked on']))
+    ok_('[offers tick] ...and stands beside the ✓, the next thing after it',
+        ic.get('tagBesideTick') is True)
+    eq('[in car list] four in the car: each line in the panel\'s words — by place, at the '
+       'door, why not in its first three words for an add-on with no dropoff, by street',
+       ic.get('incarFour'),
+       ['$9.50 · doordash → 12 Wren St · ● armed by place',
+        '$7.00 → 77 Birch Ln · at door',
+        '+$5.00 → ? · no house number',
+        '$4.00 → 306 Elm Ct · ● armed by street'])
+    _isc = ic.get('incarScroll') or {}
+    ok_('[in car list] opened at #incar with the page scrolled down, the section is scrolled '
+        'to the top of the glass once it shows (%r)' % (_isc,),
+        (_isc.get('before') or 0) > 200 and _isc.get('top') is not None
+        and 0 <= _isc['top'] <= 20)
+    eq('[in car list] ...Drop on one of them sends its holdId, as the panel\'s chooser does',
+       ic.get('incarFourDrop'), ['{"holdIds":["r2@2"]}'])
+    eq('[in car list] ...and a Drop the server refuses says so and can be pressed again',
+       ic.get('incarRefused'), {'text': 'could not drop', 'disabled': False})
     ok_('[in car list] with nothing held the section is hidden',
         got['took six'].get('incarHidden') is True)
     ip = ic.get('putDown') or {}

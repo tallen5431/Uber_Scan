@@ -4161,7 +4161,10 @@
 
   function endSaid(o) {
     if (o.arrived) return 'at door';
-    if (o.endPinned) return o.endBy === 'place' ? '\u25cf armed by place' : '\u25cf armed';
+    if (o.endPinned) {
+      return o.endBy === 'place' ? '\u25cf armed by place'
+        : o.endBy === 'street' ? '\u25cf armed by street' : '\u25cf armed';
+    }
     if (o.endWhy) return String(o.endWhy).split(' ').slice(0, 3).join(' ');
     return '\u25cb not armed';
   }

@@ -3318,13 +3318,15 @@
   }
 
   /* The held end as the server pinned it (heldEndState: endPinned, endBy
-     'server', 'place' or 'street', endAt), as an answer Map view draws, for
-     the end text `q` it was pinned for; else null. */
+     'server', 'place' or 'street', endAt), as an answer Map view draws, named
+     `q`; else null. Asked only for the held end (`heldEnds`), which is always
+     heldSaid's own dropoff: both are set from the same description
+     (setHeldFrom, the Took reply), so no test of the text is made here. */
   var SERVER_PINS = ['server', 'place', 'street'];
   function serverEnd(q) {
     var h = heldSaid;
     var at = h && h.endAt;
-    if (!h || h.dropoff !== q || !h.endPinned || SERVER_PINS.indexOf(h.endBy) === -1
+    if (!h || !h.endPinned || SERVER_PINS.indexOf(h.endBy) === -1
         || !at || typeof at.lat !== 'number' || typeof at.lon !== 'number') return null;
     return { at: { lat: at.lat, lon: at.lon, name: q }, n: 1, by: h.endBy };
   }
@@ -7507,8 +7509,9 @@
     // anything: with no NucBox there is nothing of how it was found to
     // explain, and a green ring beside the green pin is still a mark to name.
     // The same for the lines and the numbers.
-    mapKey.hidden = drawn === false && !heldPick && !lines.run && !lines.extra && !lines.order
-      && !lines.job;
+    // (The offer's own trip is named only beside the run, so `job` never
+    // shows the key on its own.)
+    mapKey.hidden = drawn === false && !heldPick && !lines.run && !lines.extra && !lines.order;
     mapKey.querySelector('.k-all').hidden = drawn === null;
     mapKey.querySelector('.k-fail').hidden = drawn !== null;
     if (drawn === null) return;

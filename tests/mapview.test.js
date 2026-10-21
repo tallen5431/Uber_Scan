@@ -238,6 +238,10 @@ ok_('[road run] ...and so does a new leg (a pickup visited), however near',
 eq('[road run] ...the move is 300 m, chosen', MV.ROUTE_MOVE_M, 300);
 eq('[road run] ...and with no fix there is no start: the straight run, as before',
    MV.routeFrom(rf, null, 'end|pick'), null);
+eq('[road run] ...nor with a fix missing a number (no lat, a NaN lon)',
+   JSON.stringify([MV.routeFrom(rf, { lon: -84.5499 }, 'end|pick'),
+                   MV.routeFrom(null, { lat: 33.9526, lon: NaN }, 'end|pick')]),
+   '[null,null]');
 
 var hr = MV.heldRuns(PLAN2, ORD2, []);
 eq('one planner listing both orders sets the run order',

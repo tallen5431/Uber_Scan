@@ -827,7 +827,7 @@
   var ROUTE_MOVE_M = 300;
   function routeFrom(kept, fix, leg) {
     if (!fix || !isFinite(fix.lat) || !isFinite(fix.lon)) return null;
-    if (kept && kept.at && kept.leg === leg
+    if (kept && kept.leg === leg
         && crowMiles(kept.at, fix) * METRES_PER_MILE <= ROUTE_MOVE_M) return kept;
     return { at: { lat: fix.lat, lon: fix.lon }, leg: leg };
   }
