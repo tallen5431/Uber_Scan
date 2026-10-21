@@ -255,6 +255,33 @@ eq('...a name the index holds as read ANYWHERE is never read as another inside t
 eq('...no street of it inside the box is none', nm('Tamaror', S.boxOf('-84.4,33.9,-84.3,33.8')),
    ' (null, 0)');
 eq('...and no box is no answer', nm('Tamaror', null), ' (null, 0)');
+// The owner's 20 Oct 20:44 fault, invented: "2100 <Ellison> Lakes Dr" read
+// "2100 <Ellison> Lake r" — the word's last letter and the type run together
+// and cut to a fragment. Every street here is inside CARD; two near ones for
+// "Ferrow Lake", and one with no type word.
+var fragIx = S.build({ format: S.FORMAT, e: 6,
+  names: ['Quillon Lakes Drive', 'Ferrow Lakeview Court', 'Ferrow Lakeside Way', 'Harlan Lakes'],
+  nodes: [-84561000, 33975000, 2000, 400, 3000, -2000, 2000, 0, 3000, 2000, 2000, 0,
+          -9000, 3000, 2000, 0],
+  ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]], [[3], [6, 1]]] });
+function fr(name) {
+  var x = S.named(fragIx, name, CARD);
+  return x.names.join(' | ') + ' (' + x.how + ', ' + x.among + ')';
+}
+eq('[fragment] "Quillon Lake r": the fragment left out, "Lake" the cut word of "Lakes" and the '
+   + 'type lost, is the one street', fr('Quillon Lake r'), 'Quillon Lakes Drive (cut, 1)');
+eq('[fragment] ...and the word whole before a two-letter fragment: "Quillon Lakes Dx"',
+   fr('Quillon Lakes Dx'), 'Quillon Lakes Drive (cut, 1)');
+eq('[fragment] ...two near streets it can be are none: "Ferrow Lake r"', fr('Ferrow Lake r'),
+   ' (cut, 2)');
+eq('[fragment] ...a street with no type word has no fragment to lose: "Harlan Lake r"',
+   fr('Harlan Lake r'), ' (null, 0)');
+eq('[fragment] ...fewer than CUT_KEEP letters before it is none: "Quillon Lak r"',
+   fr('Quillon Lak r'), ' (null, 0)');
+eq('[fragment] ...a letter misread before it is none: "Quillon Lakx r"', fr('Quillon Lakx r'),
+   ' (null, 0)');
+eq('[fragment] ...and the words before must be the street\'s: "Old Quillon Lake r"',
+   fr('Old Quillon Lake r'), ' (null, 0)');
 eq('the fixture through named: "Foxglov" is Foxglove Trail, and "Church St" (two of that name '
    + 'in the box) is none', [S.named(ix, 'Foxglov', ALL).names.join(),
                             S.named(ix, 'Church St', ALL).among].join(' / '),

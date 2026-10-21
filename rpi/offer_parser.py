@@ -2340,6 +2340,46 @@ def trim_place(value):
 PLACE_IS_A_SHOP = re.compile(r'\([^)]{2,40}\)\s*$', ASCII)
 
 
+# A cross-street corner with its town, "<street> & <street>, <town>", and no
+# bracket before the town: Uber's way of printing where a delivery ENDS. The
+# store is a name, often "Store (n street)", and its bracket may hold an "&" of
+# its own ("Hooters (Old 41 Hwy NW & N Roberts Rd)"), which is why a bracket
+# before the town refuses. The JavaScript twin is CORNER_PLACE; see
+# corner_ends.
+CORNER_PLACE = re.compile(
+    r'^[^()&,]*[A-Za-z][^()&,]*&[^()&,]*[A-Za-z][^()&,]*,[ \t]*[A-Za-z]', ASCII)
+
+
+def corner_ends(places, ends, totals):
+    """`ends` with every corner (CORNER_PLACE) marked the trip's end, 1, on an
+    Uber DELIVERY card: one whose leg is a "total" ("24 min (3.6 mi) total"),
+    which a ride card never prints.
+
+    The owner, 20 Oct 20:44: the held card's store line was lost by the
+    reader, and its only place, "<Del Lago> Cir NW & <Ellison> Lakes Dr NW,
+    Kennesaw", was taken as the pickup — fields.pickupAddr from 'card', the
+    dropoff null. On an Uber delivery card a corner is always the dropoff end.
+    So it is never the pickup there, and with no store read the pickup stays
+    None. A RIDE card's pickup IS a corner (the rider's), and it prints no
+    total, so it is not asked; nor is DoorDash's stops card, which names its
+    stores itself (find_stores).
+
+    Carried as `placeEnds`, so the window (rpi/accumulate.py) narrows its
+    merged list by it as by the layout. MEASURED over the shared corpus's 591
+    texts (tests/fixtures/cases.json, every case with text): 6 change, none
+    a ride card. Three are a corner alone after a store the reader lost
+    ("Capriole Dr NE & Mitchell Rd, Marietta", twice "Elderberry Dr NW & Ruby
+    Lee Dr, Acworth"), now the dropoff with no pickup, as asked. Three are a
+    store glued to its customer's corner in one place ("Papa Mario Pizza Kirk
+    Ln NW & Kirk View Ct, Dallas"), now the dropoff where it was the pickup:
+    wrong either way, and the corner in it is where the job ends."""
+    if not totals:
+        return ends
+    return [1 if CORNER_PLACE.search(p)
+            else (ends[i] if ends is not None and i < len(ends) else None)
+            for i, p in enumerate(places or [])]
+
+
 # The card's own word for where a job starts. A place printed right after it is
 # a pickup however it is named — "@ Pickup Crumbl", "Retail pickup GoPuff" — and
 # brackets have nothing to do with it.
@@ -5037,6 +5077,9 @@ def parse(raw_text):
     stores = find_stores(raw_text, doors)
     if stores:
         places, ends = stores, [0] * len(stores)
+    else:
+        # ...and on Uber's delivery card a corner is the end, never the start.
+        ends = corner_ends(places, ends, bool(totals))
     pickup = find_pickup(places, ends)
     dropoff = find_dropoff(places, text, ends)
     # ...and that store's door, when the card printed it under the name. Only

@@ -2131,6 +2131,38 @@
    "pickupLine": null,
    "dropoff": "Birch Ct & Kestrel Way, Marietta"
   }
+ },
+ {
+  "name": "[corner] Uber's delivery card with its store line lost: the one corner is the dropoff and the pickup is none (the owner, 20 Oct 20:44)",
+  "text": "$9.40\nIncludes expected tip\n© 21 min (6.2 mi) total\nWren Hollow Cir NW & Quillon Lakes Dr NW,\nKennesaw",
+  "expect": {
+   "pickup": null,
+   "dropoff": "Wren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw"
+  }
+ },
+ {
+  "name": "[corner] ...and with the store read, the store is the pickup and the corner the dropoff, as before",
+  "text": "$9.40\nIncludes expected tip\n© 21 min (6.2 mi) total\nFable Grill (283 Quillon St NW)\nWren Hollow Cir NW & Quillon Lakes Dr NW,\nKennesaw",
+  "expect": {
+   "pickup": "Fable Grill (283 Quillon St NW)",
+   "dropoff": "Wren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw"
+  }
+ },
+ {
+  "name": "[corner] a ride card prints no total, and its rider's corner stays the pickup",
+  "text": "$11.40\n* 4.92 © Verified\n6 min (2.1 mi)\nWren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw\n18 mins (9.0 mi)\nKestrel Dr NW & Fable St NW, Marietta",
+  "expect": {
+   "pickup": "Wren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw",
+   "dropoff": "Kestrel Dr NW & Fable St NW, Marietta"
+  }
+ },
+ {
+  "name": "[corner] ...nor when the crop cut its trip leg off and the corner is the only place",
+  "text": "$11.40\n* 4.92 © Verified\n6 min (2.1 mi)\nWren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw",
+  "expect": {
+   "pickup": "Wren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw",
+   "dropoff": null
+  }
  }
  ],
  "rate": [

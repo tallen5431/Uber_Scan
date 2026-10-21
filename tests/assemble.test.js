@@ -1554,6 +1554,97 @@ SEQ.forEach(function (seq) {
      [h.dropoff, h.dropoffReads.reads.length], ['305 Quillon Dr, Smyrna', A.VOTE_READS]);
 })();
 
+/* ---- a card-box read of the planner over a garbled planner street (the
+ * owner, 20 Oct 20:44) ----
+ * "2100 <Ellison> Lakes Dr" read whole-screen as "2100 <Ellison> Lake r" and
+ * filed from 'planner'; every read after was a card-box read, a dropoff line
+ * under a Dropoff label (rank `label`, no key), clean. Invented. */
+(function () {
+  var KEY = 'dropoff|Mara T.|1202';
+  function hold() {
+    var h = { id: 'o', acceptedAt: 1000, pickup: 'Fable Grill', dropoff: null,
+              dropoffScanned: false, card: { legs: 1, multiOrder: false } };
+    A.fieldsOf(h);
+    return h;
+  }
+  function line(street, more) {
+    return Object.assign({ found: true, line: street + ', Kennesaw', street: street,
+                           city: 'Kennesaw', state: 'GA', zip: null, asked: false,
+                           labelled: 'dropoff', screen: 'uber.planner', at: 2000 }, more || {});
+  }
+  // The whole-screen planner read, as sighting() makes it.
+  function planner(street, key) { return line(street, { planner: true, key: key || KEY }); }
+  function say(h, d) {
+    if (A.plannerVote(h, d)) d.vote = true;
+    var said = A.dropoff(h, d, null);
+    A.file(h, d, said);
+    return said.why;
+  }
+  var h = hold();
+  var whys = [say(h, planner('2100 Quillon Lake r')), say(h, line('2100 Quillon Lakes Dr'))];
+  eq('[box typed] a box read "2100 Quillon Lakes Dr" replaces the planner\'s "2100 Quillon Lake r", '
+     + 'at its own rank', [whys, h.dropoff, h.fields.dropoff.from],
+     [['blank', 'typed street'], '2100 Quillon Lakes Dr, Kennesaw', 'label']);
+  eq('[box typed] ...and the garbled one read again is not taken back',
+     [say(h, line('2100 Quillon Lake r')), say(h, planner('2100 Quillon Lake r')), h.dropoff],
+     ['outranked by label', 'outranked by label', '2100 Quillon Lakes Dr, Kennesaw']);
+  h = hold();
+  say(h, planner('2100 Quillon Lake r'));
+  eq('[box typed] ...a whole-screen planner read of another stop key, typed, replaces it too',
+     [say(h, planner('2100 Quillon Lakes Dr NW', 'dropoff|Mara T.|1205')), h.fields.dropoff.from],
+     ['typed street', 'planner']);
+  h = hold();
+  say(h, planner('2100 Quillon Commor'));
+  eq('[box typed] ...and a filed street with no type at all: "2100 Quillon Commor"',
+     [say(h, line('2100 Quillon Commons Ln')), h.dropoff],
+     ['typed street', '2100 Quillon Commons Ln, Kennesaw']);
+  h = hold();
+  say(h, planner('2100 Quillon Lake r'));
+  eq('[box typed] never another house number', [say(h, line('2110 Quillon Lakes Dr')), h.dropoff],
+     ['outranked by planner', '2100 Quillon Lake r, Kennesaw']);
+  h = hold();
+  say(h, planner('2100 Quillon Lakes Ct'));
+  eq('[box typed] never one typed street over another', say(h, line('2100 Quillon Lakes Dr')),
+     'outranked by planner');
+  h = hold();
+  say(h, line('2100 Quillon Lake r', { asked: true, labelled: null }));
+  eq('[box typed] never over a press', [say(h, line('2100 Quillon Lakes Dr')),
+                                        h.fields.dropoff.from], ['outranked by press', 'press']);
+  h = hold();
+  say(h, line('2100 Quillon Lake r'));
+  eq('[box typed] never over a label read: the filed street must be the planner\'s',
+     say(h, line('2100 Quillon Lakes Dr')), 'outranked by label');
+  h = hold();
+  say(h, planner('2100 Quillon Lake r'));
+  eq('[box typed] never a read no label proved, nor one older than the Took',
+     [say(h, line('2100 Quillon Lakes Dr', { labelled: null })),
+      say(h, line('2100 Quillon Lakes Dr', { at: 500 })), h.dropoff],
+     ['outranked by planner', 'outranked by planner', '2100 Quillon Lake r, Kennesaw']);
+
+  // The house vote counts the box reads (labelVote).
+  h = hold();
+  whys = [say(h, planner('305 Quillon Dr')), say(h, line('905 Quillon Dr')),
+          say(h, planner('905 Quillon Dr'))];
+  eq('[box vote] "305" filed, a box read of "905" counted, and the planner\'s first "905" wins',
+     [whys, h.dropoff, h.dropoffReads.reads],
+     [['blank', 'outranked by planner', 'most read'], '905 Quillon Dr, Kennesaw',
+      ['305 quillon dr', '905 quillon dr', '905 quillon dr']]);
+  h = hold();
+  whys = [say(h, planner('305 Quillon Dr')), say(h, line('905 Quillon Dr')),
+          say(h, line('905 Quillon Dr'))];
+  eq('[box vote] ...and two box reads of "905" win alone, filed at their own rank',
+     [whys, h.dropoff, h.fields.dropoff.from],
+     [['blank', 'outranked by planner', 'most read'], '905 Quillon Dr, Kennesaw', 'label']);
+  h = hold();
+  say(h, line('305 Quillon Dr', { asked: true, labelled: null }));
+  [1, 2, 3].forEach(function () { say(h, line('905 Quillon Dr')); });
+  eq('[box vote] never over a press, and nothing counted against one',
+     [h.dropoff, h.dropoffReads || null], ['305 Quillon Dr, Kennesaw', null]);
+  h = hold();
+  say(h, planner('305 Quillon Dr'));
+  eq('[box vote] a tie keeps the filed one', say(h, line('905 Quillon Dr')), 'outranked by planner');
+})();
+
 /* ---- the card's own street (the owner, 20 Oct 19:06–19:08) ----
  *
  * An Uber order held off a card whose end is a corner, an add-on on its

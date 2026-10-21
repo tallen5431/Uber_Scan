@@ -7053,6 +7053,80 @@ try:
     finally:
         stop(_hkp)
 
+    # The owner's 20 Oct 20:44 fault, invented, carrying two on: the planner's
+    # dropoff read whole-screen as "1985 Cobb Pa" and filed from 'planner';
+    # the NucBox found nothing. Every read after was a card-box read of the
+    # planner — a dropoff line under a Dropoff label, rank `label`, no stop key
+    # — saying "1985 Cobb Parkway" cleanly, and the hold kept the garbled one.
+    # Now the same house number with its street's type replaces it
+    # (Assemble.labelTyped), the end is searched again and pinned; a press
+    # filed garbled is never replaced.
+    _bxs, _bxsays, _bxj = _hksayer('boxtyped')
+    _bxp, _bxb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _bxs,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800',
+                        'CARRY_TWO': '1'}, _bxj)
+
+    def _bx_box(line, asked=False):
+        """The scanner's dropoff line off a card-box read of the planner (or a
+        ⌖ press over it, `asked`)."""
+        _bxsays([{'dropoff': {'found': True, 'line': line, 'street': line.split(',')[0],
+                              'city': 'Kennesaw', 'state': 'GA', 'zip': None, 'place': None,
+                              'asked': asked, 'labelled': None if asked else 'dropoff',
+                              'ms': None, 'app': 'uber', 'screen': 'uber.planner',
+                              'expectedBy': 1202, 'at': int(time.time() * 1000)}}])
+
+    def _bx_planner(street):
+        at = int(time.time() * 1000)
+        stops = [{'kind': 'pickup', 'orders': 1, 'name': 'Example Wok', 'place': None,
+                  'expectedBy': 1180, 'street': '2210 Quarry Bend Rd NW', 'city': 'Kennesaw',
+                  'state': 'GA', 'zip': None, 'line': '2210 Quarry Bend Rd NW, Kennesaw',
+                  'partial': None, 'label': 'pickup'},
+                 {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'place': None,
+                  'expectedBy': 1202, 'street': street, 'city': 'Kennesaw',
+                  'state': 'GA', 'zip': None, 'line': street + ', Kennesaw',
+                  'partial': None, 'label': 'dropoff'}]
+        _bxsays([{'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': True,
+                               'app': 'uber', 'screen': 'uber.planner',
+                               'page': {'top': True, 'bottom': True}, 'stops': stops,
+                               'orderCount': 1, 'keep': False}},
+                 {'planner': {'stops': [{k: v for k, v in s.items()
+                                         if k not in ('partial', 'label')} for s in stops],
+                              'keep': False, 'asked': False, 'ms': None, 'at': at}}])
+
+    def _bx_took(oid):
+        o = dict(_SQ, id=oid, pay=12.0, minutes=40.0, billedMinutes=40.0, miles=10.3,
+                 cost=1.75, gpsOk=False, gpsWhy='rough', gpsErr=25.0, gpsMode=3, gpsAge=0.2)
+        post(_bxb, '/api/offers/mark', {'id': oid, 'accepted': True, 'offer': o})
+
+    try:
+        _bx_took('x-boxtyped')
+        _bx_planner('1985 Cobb Pa')
+        _h = _settled(_bxb, lambda h: h.get('endWhy'))
+        _was = (_h.get('dropoff'), ((_h.get('fields') or {}).get('dropoff') or {}).get('from'),
+                _h.get('endPinned'))
+        _bx_box('1985 Cobb Parkway, Kennesaw')
+        _h = _settled(_bxb, lambda h: h.get('endPinned'))
+        eq('[box typed] carrying two on: a planner dropoff filed garbled ("1985 Cobb Pa") is '
+           'replaced by a card-box read of it typed, searched anew and pinned by the server',
+           (_was, _h.get('dropoff'), ((_h.get('fields') or {}).get('dropoff') or {}).get('from'),
+            _h.get('endPinned'), _h.get('endBy')),
+           (('1985 Cobb Pa, Kennesaw', 'planner', False), '1985 Cobb Parkway, Kennesaw', 'label',
+            True, 'server'))
+        post(_bxb, '/api/delivered', {})
+
+        _bx_took('x-boxpress')
+        _bx_box('1985 Cobb Pa, Kennesaw', asked=True)
+        _settled(_bxb, lambda h: h.get('endWhy'))
+        _bx_box('1985 Cobb Parkway, Kennesaw')
+        time.sleep(1.0)
+        _h = _holding(_bxb) or {}
+        eq('[box typed] ...but never over a ⌖ press, garbled or not',
+           (_h.get('dropoff'), ((_h.get('fields') or {}).get('dropoff') or {}).get('from')),
+           ('1985 Cobb Pa, Kennesaw', 'press'))
+        post(_bxb, '/api/delivered', {})
+    finally:
+        stop(_bxp)
+
     # The owner's 19 Oct fault, invented: the Trip Planner gave "306 <Name>
     # Ct" right, the NucBox's search holds the court and not house 306 ('no
     # house number'), there is no place, and GPS arrival never armed. With

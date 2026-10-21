@@ -1257,6 +1257,29 @@
    * that distinguishes the place a job STARTS from the place it ENDS. */
   var PLACE_IS_A_SHOP = /\([^)]{2,40}\)\s*$/;
 
+  /* A cross-street corner with its town, "<street> & <street>, <town>", and
+     no bracket before the town: Uber's way of printing where a delivery ENDS
+     (the store is a name, often "Store (n street)", whose bracket may hold an
+     "&" of its own). The Python twin is CORNER_PLACE; see cornerEnds. */
+  var CORNER_PLACE = /^[^()&,]*[A-Za-z][^()&,]*&[^()&,]*[A-Za-z][^()&,]*,[ \t]*[A-Za-z]/;
+
+  /* `ends` with every corner (CORNER_PLACE) marked the trip's end, 1, on an
+     Uber DELIVERY card: one whose leg is a "total" ("24 min (3.6 mi)
+     total"), which a ride card never prints. The owner, 20 Oct 20:44: the
+     card's store line lost by the reader, its only place "<Del Lago> Cir NW &
+     <Ellison> Lakes Dr NW, Kennesaw" was taken as the pickup — on an Uber
+     delivery card a corner is always the dropoff. So it is never the pickup
+     there, and with no store read the pickup is null. A RIDE card's pickup IS
+     a corner (the rider's), and it prints no total; DoorDash's stops card
+     names its stores itself (findStores) and is not asked. The Python twin is
+     corner_ends, and the measurement is there. */
+  function cornerEnds(places, ends, totals) {
+    if (!totals) return ends;
+    return (places || []).map(function (p, i) {
+      return CORNER_PLACE.test(p) ? 1 : (ends && i < ends.length ? ends[i] : null);
+    });
+  }
+
   /* Where the job ENDS, or null when the card did not say.
    *
    * The driver's own description: "the drop off locations will always pretty
@@ -3414,6 +3437,9 @@
     if (stores.length) {
       places = stores;
       ends = stores.map(function () { return 0; });
+    } else {
+      // ...and on Uber's delivery card a corner is the end, never the start.
+      ends = cornerEnds(places, ends, totals.length > 0);
     }
     var pickup = findPickup(places, ends);
     var dropoff = findDropoff(places, text, ends);

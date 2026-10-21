@@ -8465,7 +8465,7 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 1328 checks, the shared corpus
+node tests/corpus.test.js       # 1336 checks, the shared corpus
 node tests/parser.test.js       # 112 on the browser side alone
 node tests/advice.test.js       # 450 on what line to tell a driver to draw
 node tests/crop.test.js         #  22 on the trip from a drag to a crop box
@@ -8473,8 +8473,8 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-python3 rpi/test_parser.py      # 1408 — the same corpus, plus the Pi's own
-python3 rpi/test_accumulate.py  # 320 on merging readings across frames, on a
+python3 rpi/test_parser.py      # 1416 — the same corpus, plus the Pi's own
+python3 rpi/test_accumulate.py  # 322 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
 python3 rpi/test_pipeline.py    # 280 on where to look, how big, what to log,
@@ -8559,7 +8559,7 @@ python3 rpi/test_offerspage.py  # 545 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 992 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 994 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8574,7 +8574,7 @@ python3 rpi/test_map.py         # 231 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
-node tests/assemble.test.js     # 370 on where the order in the car ends: one
+node tests/assemble.test.js     # 383 on where the order in the car ends: one
                                 #     hold decided as before, and a Trip Planner
                                 #     filed from pages stitched only on the cues
                                 #     the screen gives; and on whether an
@@ -8588,7 +8588,7 @@ node tests/mapview.test.js      # 604 on the deciding behind both maps, with
                                 #     cases — two walks in a row, a cache hit
                                 #     mid-walk, a hotspot that drops — cost
                                 #     milliseconds instead of seconds
-node tests/streets.test.js      #  95 on the NucBox's street index, from a
+node tests/streets.test.js      # 102 on the NucBox's street index, from a
                                 #     handful of invented streets through the
                                 #     real exporter (osmium-tool when it is
                                 #     installed) and the real server: names

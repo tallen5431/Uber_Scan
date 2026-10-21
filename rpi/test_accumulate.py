@@ -1413,6 +1413,27 @@ for _n, _t in enumerate([_BOTH_ENDS, _BOTH_ENDS]):
 ok_('the published ends are never one place twice',
     _ends2['pickup'] != _ends2['dropoff'])
 
+# --- a corner on Uber's delivery card is the end (the owner, 20 Oct 20:44) --
+# The card's store line lost on every frame: its one place, a corner, was the
+# held card's pickup and its dropoff none. OP.corner_ends marks it the end on
+# each frame, and the window narrows by that as by the layout. Invented.
+_CORNER = ('$9.40\nIncludes expected tip\n© 21 min (6.2 mi) total\n'
+           'Wren Hollow Cir NW & Quillon Lakes Dr NW,\nKennesaw')
+_STORE = ('$9.40\nIncludes expected tip\n© 21 min (6.2 mi) total\nFable Grill\n'
+          'Wren Hollow Cir NW & Quillon Lakes Dr NW,\nKennesaw')
+acc = OfferAccumulator()
+for _n, _t in enumerate([_CORNER, _CORNER, _CORNER]):
+    _cn = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
+eq('[corner] three frames of a delivery card that read only its corner: no pickup, the corner '
+   'the dropoff', (_cn['pickup'], _cn['dropoff'], _cn['placeEnds']),
+   (None, 'Wren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw', [1]))
+acc = OfferAccumulator()
+for _n, _t in enumerate([_CORNER, _STORE, _CORNER]):
+    _cn = acc.add(P.parse(_t), now=1000.0 + _n * 0.5)
+eq('[corner] ...and the corner read first, a frame then reading the store: the store is the '
+   'pickup', (_cn['pickup'], _cn['dropoff']),
+   ('Fable Grill', 'Wren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw'))
+
 # --- which leg claims a slot, when two of them could ------------------------
 #
 # A leg matches a slot when EITHER field agrees, which is right and is argued

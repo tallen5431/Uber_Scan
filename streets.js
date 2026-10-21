@@ -382,7 +382,11 @@ function match(ix, asked, box) {
  *            agree as match's do. Never a digit in the word read (12th and 13th
  *            are different streets), never a read that kept its type word (the
  *            name in front of a type was read whole, which match's rules are
- *            for), and never a read longer than the word it would be.
+ *            for), and never a read longer than the word it would be. ...or
+            a 1-2 letter FRAGMENT after a full word ("<Ellison> Lake r" for
+            "<Ellison> Lakes Dr"): the fragment left out, the word before it
+            the index's read right, whole or cut with CUT_KEEP letters kept,
+            and the index's street typed (cutFits).
  *
  * ONE OR NONE (`among`): the answer is a street only when exactly ONE street of
  * the index inside the box is what the read can be; two or more are refused
@@ -412,6 +416,27 @@ function cutFits(sq, o) {
   if (!q.length || isType(q[q.length - 1])) return false;
   // The index's name, less its trailing type word if it has one.
   var name = base.length > 1 && isType(base[base.length - 1]) ? base.slice(0, -1) : base;
+  // A FRAGMENT after a full word (the owner, 20 Oct 20:44): "2100 <Ellison>
+  // Lakes Dr" read "2100 <Ellison> Lake r", the word's last letter and the
+  // type run together and cut to one or two letters. The fragment is left
+  // out and the word before it is the index's word read right as far as it
+  // goes — whole, or cut with at least CUT_KEEP letters, none misread — and
+  // the index's street has a type word, which is where the fragment came
+  // from. The letter-at-the-cut rule below cannot reach it: the cut word's
+  // last letter is read right and the fragment is not one letter of the word.
+  // Compared as PRINTED where the short forms would hide the cut: "Lake" is
+  // a type word ("lk"), "Lakes" is not, so the cut is asked of the letters
+  // read (`sq.raw`, named's), the rest on short forms as everywhere here.
+  var p = sq.raw && sq.raw.length === q.length ? sq.raw : q, n = q.length;
+  var frag = n >= 2 && /^[a-z]{1,2}$/.test(p[n - 1])
+    && /^[a-z]+$/.test(p[n - 2]) && p[n - 2].length >= CUT_KEEP;
+  if (frag) {
+    if (name.length !== n - 1 || name.length === base.length) return false;
+    for (var k = 0; k < n - 2; k++) if (q[k] !== name[k]) return false;
+    var word = name[name.length - 1], cut = p[n - 2];
+    return q[n - 2] === word
+      || (cut.length >= CUT_KEEP && cut.length < word.length && word.slice(0, cut.length) === cut);
+  }
   if (name.length !== q.length) return false;
   for (var i = 0; i < q.length - 1; i++) if (q[i] !== name[i]) return false;
   var r = q[q.length - 1], w = name[name.length - 1];
@@ -437,7 +462,10 @@ function named(ix, asked, box) {
     keys = m.keys.filter(inside);
     how = m.how;
   } else {
-    var sq = split(words(asked));
+    var raw = printed(asked), sq = split(raw.map(short));
+    // ...and the same words as printed, for the fragment's cut (cutFits).
+    var lead = sq.pre ? sq.pre.split(' ').length : 0;
+    sq.raw = raw.slice(lead, lead + sq.base.length);
     keys = ix.keys.filter(function (o) { return cutFits(sq, o) && inside(o.key); })
       .map(function (o) { return o.key; }).sort();
     how = 'cut';

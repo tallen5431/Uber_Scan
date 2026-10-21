@@ -466,6 +466,14 @@
           && d.key && cur.key === d.key) {
         why = 'most read';
       }
+      // ...and a card-box read under a Dropoff label (rank `label`), counted
+      // in that stop's tally (labelVote) whatever else is decided, and filed
+      // when it is now the most read...
+      var won = labelVote(held, d, out.from, labelled && !nav);
+      // ...and the same door read with its street's type, over a planner
+      // street filed without one or with a garbled last word (labelTyped).
+      if (!why && labelled && !nav && labelTyped(d, cur, out.from)) why = 'typed street';
+      if (!why && won) why = 'most read';
       if (why) {
         out.to = 'hold';
         out.kept = true;
@@ -510,9 +518,59 @@
     if (!cur || cur.from !== 'planner' || cur.key !== d.key) return false;
     var filed = streetKey(cur.value);
     if (line === filed) return false;
-    function count(x) { return v.reads.filter(function (r) { return r === x; }).length; }
+    return mostRead(v.reads, line, filed);
+  }
+
+  // Whether `line` is seen more often than `filed` among `reads`, and as often
+  // as any line there.
+  function mostRead(reads, line, filed) {
+    function count(x) { return reads.filter(function (r) { return r === x; }).length; }
     var mine = count(line);
-    return mine > count(filed) && v.reads.every(function (r) { return count(r) <= mine; });
+    return mine > count(filed) && reads.every(function (r) { return count(r) <= mine; });
+  }
+
+  /* The owner, 20 Oct 20:44: the planner's dropoff "2100 <Ellison> Lakes Dr /
+   * Kennesaw, GA" read whole-screen as "2100 <Ellison> Lake r" and filed
+   * (from 'planner'); the NucBox found nothing. Every read after was a
+   * CARD-BOX read of the planner (not whole), which the scanner sends as a
+   * dropoff line under a Dropoff label — rank `label`, no stop key — and said
+   * "2100 <Ellison> Lakes Dr" cleanly; but the typed-street replacement
+   * (typedOver, in outranks) and the house vote (plannerVote) count only the
+   * same planner stop's whole-screen reads, and a label does not replace a
+   * planner. So the hold kept the garbled one.
+   *
+   * labelTyped: an unprompted read under a Dropoff label after the Took, at
+   * rank `label` or `planner` (box or whole, any key), with the SAME house
+   * number as the planner street filed, its street ending in a type word,
+   * where the filed one's does not (no type word, or a garbled last word: "r"
+   * in "Lake r"), replaces it (typedOver). Filed at its own rank. Never over
+   * a press or anything not a planner read; never the untyped one back; never
+   * one typed street over another, or another house number.
+   *
+   * labelVote: the same card-box reads are counted in the filed stop's
+   * `dropoffReads` (plannerVote's tally, under the filed key; started with
+   * the filed line where the tally is another stop's or none), so a box read
+   * of the right house number counts toward the planner's next read of it —
+   * and files 'most read' itself when it is now the most read, over a
+   * planner read only. Planner reads are counted by plannerVote alone.
+   * Returns whether `d` wins. The text changes either way, so the held-end
+   * search runs again for it. */
+  function labelTyped(d, cur, from) {
+    return (from === 'label' || from === 'planner') && !!cur && cur.from === 'planner'
+      && typedOver(d.line, cur.value);
+  }
+
+  function labelVote(held, d, from, proven) {
+    if (!proven || from !== 'label' || d.planner === true) return false;
+    var cur = fieldsOf(held).dropoff;
+    if (!cur || cur.from !== 'planner' || !cur.key) return false;
+    var line = streetKey(d.line), filed = streetKey(cur.value);
+    if (!line || !filed) return false;
+    var v = held.dropoffReads;
+    if (!v || v.key !== cur.key) v = held.dropoffReads = { key: cur.key, reads: [filed] };
+    v.reads.push(line);
+    while (v.reads.length > VOTE_READS) v.reads.shift();
+    return line !== filed && mostRead(v.reads, line, filed);
   }
 
   /* What a kept decision changes on the hold: the field, the older fields
