@@ -1272,12 +1272,15 @@
      there, and with no store read the pickup is null. A RIDE card's pickup IS
      a corner (the rider's), and it prints no total; DoorDash's stops card
      names its stores itself (findStores) and is not asked. The Python twin is
-     corner_ends, and the measurement is there. */
+     corner_ends, and the measurement is there.
+
+     Every other place's end is null there: a card that printed a "total" is
+     never the two-leg layout (twoLegLayout refuses a total leg), and
+     placeEndsOf says nothing off any other. So `ends` is only passed back
+     when there is no total. */
   function cornerEnds(places, ends, totals) {
     if (!totals) return ends;
-    return (places || []).map(function (p, i) {
-      return CORNER_PLACE.test(p) ? 1 : (ends && i < ends.length ? ends[i] : null);
-    });
+    return (places || []).map(function (p) { return CORNER_PLACE.test(p) ? 1 : null; });
   }
 
   /* Where the job ENDS, or null when the card did not say.
@@ -1833,7 +1836,10 @@
     var block = lines.slice(heads[0] + 1);
     var times = [];
     block.forEach(function (l, i) { if (PLANNER_EXPECTED.test(l)) times.push(i); });
-    if (times.length !== 2 || times[1] < 2) return null;
+    // (Python also refuses a second time on the block's first two lines: its
+    // block[t - 2] would wrap to the end. Here it is undefined, which
+    // PLANNER_DETAILS below refuses.)
+    if (times.length !== 2) return null;
     var t = times[1];
     if (!PLANNER_DETAILS.test(block[t - 2])
         || !block.slice(0, t - 2).some(plannerLabel)) return null;

@@ -469,10 +469,13 @@
       // ...and a card-box read under a Dropoff label (rank `label`), counted
       // in that stop's tally (labelVote) whatever else is decided, and filed
       // when it is now the most read...
-      var won = labelVote(held, d, out.from, labelled && !nav);
+      // (Rank `label` or `planner` is itself a read a Dropoff label proved
+      // after the Took, unpressed and not a navigation screen: out.from
+      // above. So neither rule asks `labelled` or `nav` again.)
+      var won = labelVote(held, d, out.from);
       // ...and the same door read with its street's type, over a planner
       // street filed without one or with a garbled last word (labelTyped).
-      if (!why && labelled && !nav && labelTyped(d, cur, out.from)) why = 'typed street';
+      if (!why && labelTyped(d, cur, out.from)) why = 'typed street';
       if (!why && won) why = 'most read';
       if (why) {
         out.to = 'hold';
@@ -516,13 +519,12 @@
     v.reads.push(line);
     if (v.reads.length > VOTE_READS) v.reads.shift();
     if (!cur || cur.from !== 'planner' || cur.key !== d.key) return false;
-    var filed = streetKey(cur.value);
-    if (line === filed) return false;
-    return mostRead(v.reads, line, filed);
+    return mostRead(v.reads, line, streetKey(cur.value));
   }
 
   // Whether `line` is seen more often than `filed` among `reads`, and as often
-  // as any line there.
+  // as any line there. Never the filed line itself: it is not seen more often
+  // than itself.
   function mostRead(reads, line, filed) {
     function count(x) { return reads.filter(function (r) { return r === x; }).length; }
     var mine = count(line);
@@ -560,8 +562,8 @@
       && typedOver(d.line, cur.value);
   }
 
-  function labelVote(held, d, from, proven) {
-    if (!proven || from !== 'label' || d.planner === true) return false;
+  function labelVote(held, d, from) {
+    if (from !== 'label') return false;
     var cur = fieldsOf(held).dropoff;
     if (!cur || cur.from !== 'planner' || !cur.key) return false;
     var line = streetKey(d.line), filed = streetKey(cur.value);
@@ -570,7 +572,7 @@
     if (!v || v.key !== cur.key) v = held.dropoffReads = { key: cur.key, reads: [filed] };
     v.reads.push(line);
     while (v.reads.length > VOTE_READS) v.reads.shift();
-    return line !== filed && mostRead(v.reads, line, filed);
+    return mostRead(v.reads, line, filed);
   }
 
   /* What a kept decision changes on the hold: the field, the older fields
@@ -997,7 +999,8 @@
     var drops = all.filter(function (s) { return s.kind === 'dropoff'; });
     var picks = all.filter(function (s) { return s.kind === 'pickup'; });
     if (drops.length !== 1 || drops[0].partial !== 'header') return null;
-    if (picks.length !== 1 || picks[0].orders !== 1 || all.length !== 2) return null;
+    // (A headed stop is a pickup or a dropoff, so these two are the list.)
+    if (picks.length !== 1 || picks[0].orders !== 1) return null;
     if (!held || held.addOn || held.of) return null;
     var d = drops[0];
     if (!(d.street && d.city)) return null;
@@ -1248,10 +1251,11 @@
     ADDRESS_KEYS.concat(['place']).forEach(function (k) {
       out[k] = addr[k] === undefined ? null : addr[k];
     });
-    var cut = function (x) { return x.partial !== 'header' && x.partial; };
+    // (A stop kept header-lost always has its street and town, so the address
+    // here has them too and the last arm never sees its 'header'.)
     out.partial = !real(a) && !real(b) && (a.partial === 'header' || b.partial === 'header')
       ? 'header'
-      : out.kind && (out.street || out.city) ? null : (cut(a) || cut(b) || null);
+      : out.kind && (out.street || out.city) ? null : (a.partial || b.partial || null);
     return out;
   }
 
@@ -1485,8 +1489,10 @@
     }
     // ...and a single trip's dropoff whose header the reader lost, on the
     // held card's own street (lostHeaderDropoff; the owner's read of 20 Oct).
-    // Unprompted only: a press's answer is the press's rule.
-    if (!cand && held && !page.asked && verdict.why === 'list') {
+    // Unprompted only: a press's answer is the press's rule. (Its verdict is
+    // always 'list': the stop's count is null, so its one pickup's "1 order"
+    // makes the list short, seen whole or not.)
+    if (!cand && held && !page.asked) {
       var lost = lostHeaderDropoff(held, view.stops);
       if (lost) cand = candidate(lost, verdict.stop, page, false, true);
     }
@@ -2055,7 +2061,9 @@
     });
     if (first.length !== 1) return;
     var other = all[all[0] === first[0] ? 1 : 0];
-    if (filedEnd(other) || sameStreet(d.line, filedEnd(first[0]))) return;
+    // (The first order's own door read again is on its card's street, so
+    // cardStreet answered it above and it never reaches here.)
+    if (filedEnd(other)) return;
     out.votes.push({ cue: 'elimination', order: other });
   }
 

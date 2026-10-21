@@ -2163,6 +2163,38 @@
    "pickup": "Wren Hollow Cir NW & Quillon Lakes Dr NW, Kennesaw",
    "dropoff": null
   }
+ },
+ {
+  "name": "[corner] ...a corner with no town read is no corner: it stays the place it was",
+  "text": "$9.40\nIncludes expected tip\n© 21 min (6.2 mi) total\nWren Hollow Cir NW & Quillon Lakes Dr NW",
+  "expect": {
+   "pickup": "Wren Hollow Cir NW & Quillon Lakes Dr NW",
+   "dropoff": null
+  }
+ },
+ {
+  "name": "[corner] ...nor a store whose bracket holds a corner and its town",
+  "text": "$9.40\nIncludes expected tip\n© 21 min (6.2 mi) total\nHooters (Old 41 Hwy NW & N Roberts Rd, Kennesaw)",
+  "expect": {
+   "pickup": "Hooters (Old 41 Hwy NW & N Roberts Rd, Kennesaw",
+   "dropoff": null
+  }
+ },
+ {
+  "name": "[corner] ...nor a corner whose second street did not read",
+  "text": "$9.40\nIncludes expected tip\n© 21 min (6.2 mi) total\nWren Hollow Cir NW &, Kennesaw",
+  "expect": {
+   "pickup": "Wren Hollow Cir NW &, Kennesaw",
+   "dropoff": null
+  }
+ },
+ {
+  "name": "[corner] ...nor a house number and a street either side of an \"&\"",
+  "text": "$9.40\nIncludes expected tip\n© 21 min (6.2 mi) total\n1200 & Quillon Lakes Dr NW, Kennesaw",
+  "expect": {
+   "pickup": "1200 & Quillon Lakes Dr NW, Kennesaw",
+   "dropoff": null
+  }
  }
  ],
  "rate": [
@@ -5404,6 +5436,234 @@
      "state": "GA",
      "zip": "30144",
      "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor when a stop header follows the lost stop",
+   "_why": "One header lost and the next one read: the page holds more than the single trip's two stops, and which is the dropoff is not said. The Dropoff header at the foot, its block off the glass, stays as it reads. Invented.",
+   "text": "Pickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\no Pat J\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\nDropoff • 1 order",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": null,
+     "expectedBy": null,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null,
+     "place": null,
+     "partial": "bottom"
+    }
+   ]
+  },
+  {
+   "name": "...nor when the one header read is a Dropoff",
+   "_why": "The lost stop is the dropoff only after a single trip's one pickup: under a Dropoff header the lines that follow are no stop the parser can name. Invented.",
+   "text": "Dropoff • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\no Pat J\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\n",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor when the pickup's block has no Address of its own above its View details",
+   "_why": "The pickup's block must be open (its own Address label) and closed (View details) for the next lines to be a new block by the screen's own layout. Invented.",
+   "text": "Pickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nView details\no Pat J\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\n",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null,
+     "place": null,
+     "partial": "bottom"
+    }
+   ]
+  },
+  {
+   "name": "...nor when the line over the lost stop's time is the link read twice",
+   "_why": "A second View details where the name would be is no name. Invented.",
+   "text": "Pickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\nView details\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\n",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor when it is an Address label",
+   "_why": "A label where the name would be is no name. Invented.",
+   "text": "Pickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\nAddress\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\n",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor when the lost stop's street does not open with its house number",
+   "_why": "Kept only with a door: the street must open with its house number. Here the reader put a letter in front of it (\"B2400\"), and a street with no number is the card's own kind of end, nothing new. Invented.",
+   "text": "Pickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\no Pat J\nExpected by 9:34 PM\nAddress\nB2400 Tansy Creek Blvd\nMarietta, GA\nView details\n",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor when an address block sits above the Pickup header",
+   "_why": "A stop cut at the top of the glass (the orphan block) is a stop above the pickup: the page is not the single trip's first two stops. Invented.",
+   "text": "Address\n17 Quillon Way\nMarietta, GA\nView details\nPickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\no Pat J\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\n",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": null,
+     "orders": null,
+     "name": null,
+     "expectedBy": null,
+     "street": "17 Quillon Way",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "17 Quillon Way, Marietta",
+     "place": null,
+     "partial": "top"
+    },
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor when the lost stop's name is only the icon",
+   "_why": "No two letters in a row over the time: no name, and no stop. Invented.",
+   "text": "Pickup • 1 order\noO Fable Steakhouse\nExpected by 9:05 PM\nAddress\n810 Ardley West Corwin Parkway,\nKennesaw, GA 30144\nView details\n©\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details\n",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Steakhouse",
+     "expectedBy": 1265,
+     "street": "810 Ardley West Corwin Parkway",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "810 Ardley West Corwin Parkway, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor when the second time is on the block's second line",
+   "_why": "Nothing between the two times for the link and the name: no lost stop. (Python asks it outright, its block[t - 2] wrapping to the last line, View details here; JavaScript's is undefined.) Invented.",
+   "text": "Pickup • 1 order\nExpected by 9:05 PM\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": null,
+     "expectedBy": 1265,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null,
+     "place": null,
+     "partial": "bottom"
+    }
+   ]
+  },
+  {
+   "name": "a stop name of \"Oo\" before one letter keeps its o's: the icon goes only with two letters in a row left after it",
+   "_why": "PLANNER_ICON's look-ahead: \"Oo J\" emptied to \"J\" would be no name at all. Invented.",
+   "text": "Trip Planner\nDropoff • 1 order\nOo J\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\nMarietta, GA\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Oo J",
+     "expectedBy": 1294,
+     "street": "2400 Tansy Creek Blvd",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "2400 Tansy Creek Blvd, Marietta",
      "place": null
     }
    ]

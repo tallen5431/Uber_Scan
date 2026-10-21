@@ -191,6 +191,15 @@ SEQ.forEach(function (seq) {
   ok_('...nor a typed street over another typed one',
       !A.outranks(f('planner', '1106 Wren Commons Ct', 1, 'dropoff|Mara T.|1202'),
                   f('planner', '1106 Wren Commons Ln NW', 1, 'dropoff|Mara T.|1202')));
+  ok_('...nor one untyped reading over another',
+      !A.outranks(f('planner', '1106 Wren Commo', 1, 'dropoff|Mara T.|1202'),
+                  f('planner', '1106 Wren Commor', 1, 'dropoff|Mara T.|1202')));
+  ok_('...nor a bare type word with the street\'s name lost',
+      !A.outranks(f('planner', '1106 Ln', 1, 'dropoff|Mara T.|1202'),
+                  f('planner', '1106 Wren Commor', 1, 'dropoff|Mara T.|1202')));
+  ok_('...nor a street with no house number',
+      !A.outranks(f('planner', 'Wren Commons Ln', 1, 'dropoff|Mara T.|1202'),
+                  f('planner', 'Wren Commor', 1, 'dropoff|Mara T.|1202')));
   eq('the ranks, highest first', Object.keys(A.RANK).sort(function (a, b) {
     return A.RANK[b] - A.RANK[a];
   }), ['press', 'label', 'nav', 'planner', 'popup', 'card', 'seen']);
@@ -1496,6 +1505,75 @@ SEQ.forEach(function (seq) {
   eq('[batch] the card\'s streets: a corner\'s two, a door\'s one, a town none',
      [A.cardStreets(CARD_END), A.cardStreets('40 Quarrel St, Smyrna'),
       A.cardStreets('Marietta, GA')], [['tarrow ridge', 'brisk'], ['quarrel'], []]);
+
+  // The mutation catch-up of 21 Oct: one check per guard nothing held.
+  eq('[batch] ...a corner printed with "and", "at" or "/" is two streets too',
+     ['Tarrow Ridge Dr and Brisk Ln, Marietta', 'Tarrow Ridge Dr at Brisk Ln, Marietta',
+      'Tarrow Ridge Dr / Brisk Ln, Marietta'].map(A.cardStreets),
+     [['tarrow ridge', 'brisk'], ['tarrow ridge', 'brisk'], ['tarrow ridge', 'brisk']]);
+  eq('[batch] streetCore: a house number makes a street of a name with no type word',
+     [A.streetCore('40 Quarrel'), A.streetCore('Quarrel')], ['quarrel', null]);
+  function drop(street, at, city) {
+    return { kind: 'dropoff', orders: 1, name: 'C. ' + at, expectedBy: at, street: street,
+             city: city === undefined ? 'Marietta' : city };
+  }
+  eq('[batch] batchPlan: one dropoff is no batch',
+     A.batchPlan(batchHold(), [drop('517 Tarrow Ridge Dr NW', 1080)]).why, 'one dropoff');
+  eq('[batch] ...an add-on by either mark is none: `addOn` alone, `of` alone',
+     [A.batchPlan(batchHold(undefined, { addOn: true }), [drop('88 Hollin Ct', 1062),
+       drop('517 Tarrow Ridge Dr NW', 1080)]).why,
+      A.batchPlan(batchHold(undefined, { of: 'x@1' }), [drop('88 Hollin Ct', 1062),
+       drop('517 Tarrow Ridge Dr NW', 1080)]).why], ['an add-on', 'an add-on']);
+  eq('[batch] ...a last door with its street and no town waits as \'address\'',
+     A.batchPlan(batchHold(), [drop('88 Hollin Ct', 1062),
+                               drop('517 Tarrow Ridge Dr NW', 1080, null)]).why, 'address');
+  // A tie with BOTH doors on the card's streets: the last on the screen.
+  var hb = batchHold('Hollin Ct & Tarrow Ridge Dr, Marietta');
+  run(hb, tie);
+  eq('[batch] a tie with both doors on the card\'s streets goes to the last on the screen',
+     hb.dropoff, '517 Tarrow Ridge Dr NW, Marietta');
+  // Past midnight: 12:10 AM is after 11:50 PM, wherever it sits.
+  var late = BATCH.replace('Expected by 5:42 PM', 'Expected by 12:10 AM')
+    .replace('Expected by 6:00 PM', 'Expected by 11:50 PM');
+  var hm = batchHold();
+  run(hm, late);
+  eq('[batch] a trip past midnight: 12:10 AM is the last door, not 11:50 PM',
+     hm.dropoff, '88 Hollin Ct, Marietta');
+  // A dropoff that printed no time: the last on the screen, whatever the others say.
+  var untimed = BATCH.replace('Vesna R.\nExpected by 5:42 PM\n', 'Vesna R.\n');
+  var hu = batchHold('Hollin Ct & Tarrow Ridge Dr, Marietta');
+  run(hu, untimed);
+  eq('[batch] ...a door with no time on the list: the last on the screen',
+     hu.dropoff, '517 Tarrow Ridge Dr NW, Marietta');
+  // More picked up than dropped off: a header lost, so no batch.
+  var hs2 = batchHold();
+  var gs2 = run(hs2, BATCH.replace('Pickup • 1 order\nOrrin', 'Pickup • 2 orders\nOrrin'));
+  eq('[batch] a list whose pickups carry more orders than its dropoffs batches nothing',
+     [hs2.dropoff, !!hs2.batch, gs2.r.candidates.length], [CARD_END, false, 0]);
+  eq('[batch] the sighting that batched says no reason either',
+     got.r.why, null);
+  eq('[batch] batchWhy is the refusal for THIS hold only',
+     [A.batchWhy(gx.st, hx), A.batchWhy(gx.st, batchHold(undefined, { id: 'b-9' }))],
+     ['card end elsewhere', null]);
+  eq('[batch] a batch\'s reads are not one stop\'s readings: no house tally',
+     h.dropoffReads, undefined);
+  // The planner line's 'dropoffs' from before the batch goes with it.
+  var hd = batchHold();
+  hd.planner = { stops: [], unfiled: 'dropoffs' };
+  run(hd, BATCH);
+  eq('[batch] the hold\'s planner line loses its "dropoffs" when the batch files',
+     [hd.planner.unfiled, hd.batch], [null, true]);
+  // The last door filed alone first (its own list, one dropoff), then the list
+  // of both: the batch is recorded over the same door.
+  var ONE = BATCH.replace(/Dropoff • 1 order\nVesna R\.\nExpected by 5:42 PM\nAddress\n88 Hollin Ct\nMarietta, GA\n/, '')
+    .replace('Pickup • 1 order\nOrrin Noodle Co\nExpected by 5:26 PM\nAddress\n12 Pellow Ave\nSmyrna, GA\n', '');
+  var h1 = batchHold();
+  var st1 = run(h1, ONE, 4000).st;
+  var mid = [h1.dropoff, !!h1.batch];
+  run(h1, BATCH, 5000, st1);
+  eq('[batch] the last door filed alone first, then the list of both: the batch is recorded',
+     [mid, h1.dropoff, h1.batch, (h1.drops || []).length],
+     [['517 Tarrow Ridge Dr NW, Marietta', false], '517 Tarrow Ridge Dr NW, Marietta', true, 2]);
 })();
 
 /* ---- the most-read reading of one planner stop (the owner, 19 Oct 21:41) ----
@@ -1552,6 +1630,82 @@ SEQ.forEach(function (seq) {
   say(h, read('905'));
   eq('[vote] only the last ' + A.VOTE_READS + ' reads count: "305" ×6 then "905" ×2 keeps "305"',
      [h.dropoff, h.dropoffReads.reads.length], ['305 Quillon Dr, Smyrna', A.VOTE_READS]);
+
+  // The mutation catch-up of 21 Oct: one check per guard nothing held.
+  h = hold();
+  say(h, read('305'));
+  eq('[vote] a pressed read is not counted, nor a read that is no planner stop\'s',
+     [A.plannerVote(h, Object.assign(read('905'), { asked: true })),
+      A.plannerVote(h, Object.assign(read('905'), { asked: true })),
+      A.plannerVote(h, Object.assign(read('905'), { planner: false })),
+      A.plannerVote(h, Object.assign(read('905'), { planner: false })), h.dropoffReads.reads],
+     [false, false, false, false, ['305 quillon dr']]);
+  eq('[vote] ...nor a read whose street did not read',
+     [A.plannerVote(h, Object.assign(read('905'), { line: '' })),
+      A.plannerVote(h, Object.assign(read('905'), { line: '' })), h.dropoffReads.reads],
+     [false, false, ['305 quillon dr']]);
+  h = hold();
+  say(h, read('305'));
+  eq('[vote] another stop\'s reads start their own tally, and never win over the filed stop',
+     [A.plannerVote(h, read('905', 'dropoff|Orrin B.|1220')),
+      A.plannerVote(h, read('905', 'dropoff|Orrin B.|1220')), h.dropoffReads],
+     [false, false, { key: 'dropoff|Orrin B.|1220', reads: ['905 quillon dr', '905 quillon dr'] }]);
+  h = hold();
+  say(h, read('305'));
+  say(h, read('305'));
+  say(h, read('305'));
+  say(h, read('905', 'dropoff|Orrin B.|1220'));
+  eq('[vote] ...so back on the filed stop the tally is anew: one "905" now outvotes the filed one',
+     [say(h, read('905')), h.dropoff], ['most read', '905 Quillon Dr, Smyrna']);
+  h = hold();
+  say(h, Object.assign(read('305'), { asked: true, labelled: null }));
+  eq('[vote] a press filed with the stop\'s own key: nothing voted over it',
+     [h.fields.dropoff.key, A.plannerVote(h, read('905')), A.plannerVote(h, read('905'))],
+     [KEY, false, false]);
+  h = hold();
+  say(h, read('305'));
+  h.dropoffReads = { key: KEY, reads: ['605 quillon dr', '605 quillon dr', '605 quillon dr'] };
+  eq('[vote] a line read more often than the filed one, but less than another, is not the most read',
+     A.plannerVote(h, read('905')), false);
+  // dropoff() asks the vote's own rules again of a `vote` it is handed.
+  h = hold();
+  say(h, read('305'));
+  eq('[vote] dropoff(): a `vote` never moves another stop\'s end, nor files a read no label proved',
+     [A.dropoff(h, Object.assign(read('905', 'dropoff|Orrin B.|1220'), { vote: true }), null).why,
+      A.dropoff(h, Object.assign(read('905', KEY, 500), { vote: true }), null).why],
+     ['outranked by planner', 'outranked by planner']);
+  h = hold();
+  say(h, Object.assign(read('305'), { planner: false }));
+  eq('[vote] ...nor an end a label filed, the same key on it',
+     [h.fields.dropoff.from,
+      A.dropoff(h, Object.assign(read('905'), { vote: true }), null).why],
+     ['label', 'outranked by label']);
+})();
+
+/* ---- the most-read reading through sighting(): the dedupe lets the winner by ---- */
+(function () {
+  var PAGE = 'Trip Planner\nPickup • 1 order\nFable Grill\nExpected by 7:40 PM\n'
+    + 'Address\n40 Quarrel St\nSmyrna, GA\n'
+    + 'Dropoff • 1 order\nMara T.\nExpected by 8:02 PM\nAddress\n305 Quillon Dr\nSmyrna, GA\n'
+    + 'Waybill';
+  var h = { id: 'o', acceptedAt: 1000, tookAt: 1005, pickup: 'Fable Grill', dropoff: null,
+            dropoffScanned: false, card: { legs: 1, multiOrder: false } };
+  A.fieldsOf(h);
+  var st = A.fresh();
+  A.took(st, h);
+  var whys = [];
+  [['305', 2000], ['905', 30000], ['905', 60000]].forEach(function (r) {
+    var text = PAGE.replace('305 Quillon Dr', r[0] + ' Quillon Dr');
+    A.sighting(st, h, pageOf(text, r[1]), r[1]).candidates.forEach(function (c) {
+      var said = A.dropoff(h, c, null);
+      A.file(h, c, said, st);
+      whys.push(said.why);
+    });
+  });
+  eq('[vote] through sighting(): "305" filed, "905" tied, and "905" read again gets past the '
+     + 'once-per-line dedupe as the most read',
+     [whys, h.dropoff], [['blank', 'outranked by planner', 'most read'],
+                         '905 Quillon Dr, Smyrna']);
 })();
 
 /* ---- a card-box read of the planner over a garbled planner street (the
@@ -1643,6 +1797,42 @@ SEQ.forEach(function (seq) {
   h = hold();
   say(h, planner('305 Quillon Dr'));
   eq('[box vote] a tie keeps the filed one', say(h, line('905 Quillon Dr')), 'outranked by planner');
+
+  // The mutation catch-up of 21 Oct: one check per guard nothing held.
+  h = hold();
+  say(h, planner('2100 Quillon Lake r'));
+  eq('[box typed] never a navigation screen\'s read', say(h, line('2100 Quillon Lakes Dr',
+     { nav: true, screen: 'uber.nav' })), 'outranked by planner');
+  h = hold();
+  say(h, Object.assign(planner('305 Quillon Dr'), { asked: true, labelled: null }));
+  [1, 2, 3].forEach(function () { say(h, line('905 Quillon Dr')); });
+  eq('[box vote] never over a press that carries the planner stop\'s key, nothing counted',
+     [h.fields.dropoff.key, h.dropoff, h.dropoffReads || null],
+     [KEY, '305 Quillon Dr, Kennesaw', null]);
+  h = hold();
+  say(h, line('305 Quillon Dr', { planner: true }));
+  [1, 2, 3].forEach(function () { say(h, line('905 Quillon Dr')); });
+  eq('[box vote] a planner end filed with no stop key has no tally to count in',
+     [h.dropoff, h.dropoffReads || null], ['305 Quillon Dr, Kennesaw', null]);
+  h = hold();
+  say(h, planner('305 Quillon Dr'));
+  say(h, planner('305 Quillon Dr', 'dropoff|Orrin B.|1220'));
+  whys = [say(h, line('905 Quillon Dr')), say(h, line('905 Quillon Dr'))];
+  eq('[box vote] a tally of another stop is started anew from the filed line: one box read '
+     + 'ties, the second wins', [whys, h.dropoffReads.key],
+     [['outranked by planner', 'most read'], KEY]);
+  h = hold();
+  say(h, planner('305 Quillon Dr'));
+  for (var i = 0; i < A.VOTE_READS; i++) say(h, planner('305 Quillon Dr'));
+  whys = [1, 2, 3].map(function () { return say(h, line('905 Quillon Dr')); });
+  eq('[box vote] only the last ' + A.VOTE_READS + ' reads count: "305" ×6, then the third box '
+     + '"905" wins', [whys, h.dropoffReads.reads.length],
+     [['outranked by planner', 'outranked by planner', 'most read'], A.VOTE_READS]);
+  h = hold();
+  say(h, planner('305 Quillon Dr'));
+  [1, 2, 3].forEach(function () { say(h, line('', { line: '', street: null })); });
+  eq('[box vote] a box read whose street did not read is not counted',
+     [h.dropoff, h.dropoffReads.reads], ['305 Quillon Dr, Kennesaw', ['305 quillon dr']]);
 })();
 
 /* ---- the card's own street (the owner, 20 Oct 19:06–19:08) ----
@@ -1749,6 +1939,84 @@ SEQ.forEach(function (seq) {
      A.sighting(A.fresh(), [order('p', 1000), order('q', 5000)],
                 page(9000, true, [['Ines B.', '608 Wickerby St NW', 'Marietta', 1188]]),
                 9000).candidates, []);
+
+  // The mutation catch-up of 21 Oct: one check per guard nothing held.
+  eq('[cardStreet] only a Trip Planner\'s dropoff: a box or navigation read on the card\'s '
+     + 'street is no cue', who(t, Object.assign({}, DOOR, { planner: false })), [null, null, 'no cue']);
+  eq('[cardStreet] ...nor with one order held: a partial read is nobody\'s by the card alone',
+     who([trip()[0]], DOOR), [null, null, 'no cue']);
+  var p6 = [order('p', 1000, { dropoff: '9 Elm Ct, Marietta' }), order('q', 5000, { dropoff: CORNER })];
+  eq('[cardStreet] ...nor the card of an order taken after the read',
+     who(p6, Object.assign({}, DOOR, { at: 3000 })), [null, null, 'no cue']);
+  var t5 = trip();
+  A.file(t5[0], pd('5 Elm Ct, Marietta', '5 Elm Ct'), { to: 'hold', from: 'press' }, null);
+  eq('[cardStreet] ...nor onto an order whose end the driver pressed', who(t5, DOOR),
+     [null, null, 'no cue']);
+  var t6 = trip();
+  t6[0].planner = { stops: [{ kind: 'pickup', street: '1800 Ombre Circle',
+                              line: '1800 Ombre Circle, Kennesaw' }] };
+  var t7 = trip();
+  t7[0].fields.pickupAddr = { value: '1800 Ombre Circle, Kennesaw', from: 'planner', conf: 2 };
+  eq('[cardStreet] never a pickup by the planner\'s own pickups, nor by a pickup address filed',
+     [who(t6, DOOR), who(t7, DOOR)], [[null, null, 'no cue'], [null, null, 'no cue']]);
+  // Two cards naming the street: no cue, and no elimination either, though
+  // one order's end is on a street its card alone names.
+  var s2 = [order('r', 1000, { dropoff: CORNER }),
+            order('y', 5000, { dropoff: '40 Ombre Cir NW, Kennesaw' })];
+  A.file(s2[0], pd('22 Larkspur Road, Kennesaw', '22 Larkspur Road'),
+         A.dropoff(s2[0], pd('22 Larkspur Road, Kennesaw', '22 Larkspur Road'), null), null);
+  eq('[cardStreet] two cards naming the door\'s street: no cue, nor elimination off the other',
+     who(s2, DOOR), [null, null, 'no cue']);
+  function firstFiled(more) {
+    var o = trip();
+    if (more) Object.assign(o[1], more);
+    A.file(o[0], DOOR, A.dropoff(o[0], DOOR, null), null);
+    return o;
+  }
+  var e1 = firstFiled();
+  e1[1] = order('y', 5000, { app: 'doordash' });
+  eq('[elimination] ...not onto an order of another app', who(e1, OTHER), [null, null, 'no cue']);
+  var e2 = firstFiled();
+  delete e2[1].tookAt;
+  eq('[elimination] ...nor onto an order with no Took time on record', who(e2, OTHER),
+     [null, null, 'no cue']);
+  var e3 = [order('r', 1000, { dropoff: CORNER }),
+            order('x', 5000, { addOn: true, of: 'r@1000', dropoff: 'Ombre Cir NW, Kennesaw' })];
+  A.file(e3[0], DOOR, A.dropoff(e3[0], DOOR, null), null);
+  eq('[elimination] ...nor off a first door whose street the other card names too',
+     who(e3, OTHER), [null, null, 'no cue']);
+  // A partial read is decided by the card's street ALONE: no store, deadline
+  // or filed cue, even handed one.
+  var tc = [order('r', 1000, { dropoff: CORNER, pickup: 'Fable Grill' }),
+            order('x', 5000, { addOn: true, of: 'r@1000', pickup: 'Kestrel Noodle Bar',
+                               deliverBy: 1188 })];
+  eq('[cardStreet] a partial read: no store cue, no deadline cue',
+     [who(tc, Object.assign({}, OTHER, { store: 'Kestrel Noodle Bar' })),
+      who(tc, Object.assign({}, OTHER, { expectedBy: 1188 }))],
+     [[null, null, 'no cue'], [null, null, 'no cue']]);
+  var tf = trip();
+  A.file(tf[1], OTHER, { to: 'hold', from: 'nav' }, null);
+  eq('[cardStreet] ...and no `filed` cue, though marked bounded and on an order\'s filed end',
+     who(tf, Object.assign({}, OTHER, { bounded: true, others: [] })), [null, null, 'no cue']);
+  // sightingMany: a pressed page is not offered partial; a page's one pickup
+  // is no store for its one dropoff; a page read again offers nothing again.
+  var sp = A.fresh();
+  var tp = trip();
+  eq('[cardStreet] a PRESSED list not seen whole offers nothing',
+     A.sighting(sp, tp, Object.assign(page(9000, true, [['Ines B.', '608 Wickerby St NW',
+                                                         'Marietta', 1188]]), { asked: true }),
+                9000).candidates, []);
+  var pk = page(9000, true, [['Ines B.', '608 Wickerby St NW', 'Marietta', 1188]]);
+  pk.stops.unshift({ kind: 'pickup', orders: 1, name: 'Kestrel Noodle Bar', expectedBy: 1160,
+                     street: '12 Pellow Ave', city: 'Smyrna', state: 'GA', zip: null,
+                     line: '12 Pellow Ave, Smyrna', partial: null });
+  var sq = A.fresh();
+  var cq = A.sighting(sq, trip(), pk, 9000).candidates;
+  eq('[cardStreet] ...a page\'s one pickup is no store for its dropoff, and the page read again '
+     + 'offers nothing', [cq.map(function (c) { return [c.line, c.store]; }),
+                          A.sighting(sq, trip(), Object.assign({}, pk, { at: 9200 }), 9200)
+                            .candidates.length],
+     [[['608 Wickerby St NW, Marietta', null]], 0]);
 })();
 
 /* ---- a single trip's dropoff whose header the reader lost (the owner, 20 Oct 21:08) ----
@@ -1828,6 +2096,50 @@ SEQ.forEach(function (seq) {
        { kind: 'pickup', orders: 1, street: '810 Ardley West Corwin Parkway', city: 'Kennesaw' },
        { kind: 'dropoff', orders: 1, street: '2400 Tansy Creek Blvd', city: 'Marietta',
          line: '2400 Tansy Creek Blvd, Marietta' }]), null);
+
+  // The mutation catch-up of 21 Oct: one check per guard nothing held.
+  var PICK = { kind: 'pickup', orders: 1, street: '810 Ardley West Corwin Parkway', city: 'Kennesaw' };
+  var LOST = { kind: 'dropoff', orders: null, name: 'Pat J', expectedBy: 1294,
+               street: '2400 Tansy Creek Blvd', city: 'Marietta', state: 'GA', zip: null,
+               line: '2400 Tansy Creek Blvd, Marietta', partial: 'header' };
+  eq('[lost header] lostHeaderDropoff: the premise, the parser\'s stop on the card\'s street',
+     A.lostHeaderDropoff(single(END), [PICK, LOST]).line, '2400 Tansy Creek Blvd, Marietta');
+  eq('[lost header] ...not under a pickup of two orders, nor with a second pickup, nor a second '
+     + 'dropoff', [A.lostHeaderDropoff(single(END), [Object.assign({}, PICK, { orders: 2 }), LOST]),
+                   A.lostHeaderDropoff(single(END), [PICK, PICK, LOST]),
+                   A.lostHeaderDropoff(single(END), [PICK, LOST,
+                     { kind: 'dropoff', orders: 1, street: '17 Quillon Way', city: 'Marietta' }])],
+     [null, null, null]);
+  eq('[lost header] ...nor a door with no town',
+     A.lostHeaderDropoff(single(END), [PICK, Object.assign({}, LOST, { city: null })]), null);
+  eq('[lost header] ...nor an add-on by either mark: `addOn` alone, `of` alone',
+     [A.lostHeaderDropoff(single(END, { addOn: true }), [PICK, LOST]),
+      A.lostHeaderDropoff(single(END, { of: 'r@1' }), [PICK, LOST])], [null, null]);
+  // Stitched (mergeStop): the page below reads the header the first page
+  // lost. The header is the page's that printed it — "1 order" — so the
+  // planner's lone dropoff answers, with no card street needed.
+  var BELOW = 'Dropoff • 1 order\nPat J\nExpected by 9:34 PM\nAddress\n2400 Tansy Creek Blvd\n'
+    + 'Marietta, GA\nView details\nWaybill';
+  function stitched(end, upper, lower) {
+    var o = single(end), s = A.fresh();
+    A.took(s, o);
+    var cs = [upper, lower].map(function (x, i) {
+      return A.sighting(s, o, pageOf(x, 2000 + 500 * i, false), 2000 + 500 * i).candidates
+        .map(function (c) { return [c.line, !!c.singleCardOnly, c.pages || 1]; });
+    });
+    return cs;
+  }
+  eq('[lost header] a page below that read the lost header gives the header: the stitched stop '
+     + 'is the list\'s lone dropoff of "1 order", on a card naming another street',
+     stitched('Quillon Way, Marietta', 'Trip Planner\n' + text, BELOW),
+     [[], [['2400 Tansy Creek Blvd, Marietta', true, 2]]]);
+  // ...and two reads that both lost it keep it lost: the card's street files it.
+  var ZIP = text.replace('Marietta, GA\nView details\nStop New Requests',
+                         'Marietta, GA 30060\nView details\nWaybill');
+  eq('[lost header] ...two reads that both lost the header stitch to a stop still header-lost, '
+     + 'filed on the card\'s street', stitched(END, text, ZIP),
+     [[['2400 Tansy Creek Blvd, Marietta', true, 1]],
+      [['2400 Tansy Creek Blvd, Marietta, GA 30060', true, 2]]]);
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'

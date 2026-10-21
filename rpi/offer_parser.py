@@ -2372,12 +2372,15 @@ def corner_ends(places, ends, totals):
     Lee Dr, Acworth"), now the dropoff with no pickup, as asked. Three are a
     store glued to its customer's corner in one place ("Papa Mario Pizza Kirk
     Ln NW & Kirk View Ct, Dallas"), now the dropoff where it was the pickup:
-    wrong either way, and the corner in it is where the job ends."""
+    wrong either way, and the corner in it is where the job ends.
+
+    Every other place's end is None there: a card that printed a "total" is
+    never the two-leg layout (two_leg_layout refuses a total leg), and
+    place_ends says nothing off any other. So `ends` is only passed back when
+    there is no total."""
     if not totals:
         return ends
-    return [1 if CORNER_PLACE.search(p)
-            else (ends[i] if ends is not None and i < len(ends) else None)
-            for i, p in enumerate(places or [])]
+    return [1 if CORNER_PLACE.search(p) else None for p in places or []]
 
 
 # The card's own word for where a job starts. A place printed right after it is
