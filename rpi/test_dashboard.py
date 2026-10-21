@@ -377,17 +377,22 @@ const framed = (page) => page.waitForFunction(
   // on this machine (the whole suite 296 s), so one more wait in any section
   // turned a failed check into "the driver hung in <the last section>" —
   // which is what undoing a pickup-visit check did. The suite's own
-  // subprocess timeout below is 900 s, past this, so the watchdog is what
+  // subprocess timeout below is 1100 s, past this, so the watchdog is what
   // speaks. How close the run came is a check of its own: '[harness] ...'.
   //
-  // 600 s. At 480 the driver had grown to 341 s of the 360 the harness
+  // 800 s (21 Oct): the route view's stage took the driver to 465 s of the
+  // 450 the quarter-to-spare check allowed at 600, with the margin already
+  // gone at e3fcf31 (454 s). Raised, as it was on 16 Oct, rather than
+  // cutting checks; the subprocess timeout below moved with it.
+  //
+  // 600 s before that. At 480 the driver had grown to 341 s of the 360 the harness
   // check allows (16 Oct, this machine, with other suites running beside
   // it), and the panel's checks of that day — an unchanged card's layouts,
   // the route link under a press, Leaflet that will not load, the view
   // between offers — needed more than the 19 s left.
   let stage = 'start';
   const STARTED = Date.now();
-  const WATCHDOG_MS = 600000;
+  const WATCHDOG_MS = 800000;
   setTimeout(() => {
     console.log(JSON.stringify({ __hung: stage }));
     process.exit(2);
@@ -7902,7 +7907,7 @@ try:
                  ]),
                  # Where 📷 Snaps' downloads are kept, for the checks to read.
                  SNAP_SAVE_DIR=work),
-        capture_output=True, text=True, timeout=900)
+        capture_output=True, text=True, timeout=1100)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
         got = json.loads(line)
