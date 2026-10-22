@@ -666,6 +666,8 @@ function startScanner() {
           // car at the held order's door, or takes it away (gpsArrival). The
           // answer rides the beat to the panel, which says "at dropoff".
           read.atDropoff = gpsArrival(read, Date.now());
+          // ...and the NucBox services not answering, by name (nbxDown).
+          read.nucboxDown = nbxDown();
           // ...and the rest of the GPS drop's state, on the same beat. Between
           // offers no reading arrives to carry heldForPanel, and that is when
           // the panel's in-car line is the card's whole message: a pin armed
@@ -7002,6 +7004,8 @@ function statusNow() {
     // Every order in the car and the addresses waiting for an owner, while
     // carrying two is on (ordersForPanel); and whether it is.
     carryTwo: carryTwo(),
+    // Whether each NucBox service set is answering (nbxHealthOut).
+    nucbox: nbxHealthOut(),
     orders: carryingTwo(Date.now()) ? ordersForPanel(Date.now()) : undefined,
     unowned: carryingTwo(Date.now()) ? Assemble.unowned(assembly) : undefined,
     // ...and the chooser, if one is open (openChooser).
@@ -8516,6 +8520,83 @@ var nbxCache = new Map();
  * not measured on the real install — so NBX_LINE_MAX's 5,000 points is
  * about 115 kB, inside this. Anything near this is not one. */
 var NBX_BODY_MAX = 256 * 1024;
+
+/* --- whether each NucBox service is answering (the owner, 22 Oct) ----------
+ *
+ * The 22 Oct snap: an order held on a card's corner, and the map drew
+ * nothing — with no word anywhere on the panel about whether the NucBox's
+ * street index (its own server.js on 8081, which a reboot does not restart),
+ * its Nominatim or its router was answering. Each set service now has a
+ * state: up or down, why, and since when. Two ways in:
+ *   - every real question's outcome (nbxAskOnce): an answer is up; a failure
+ *     counts, and TWO in a row are down — one slow search past the timeout
+ *     is a question's trouble, not the service's;
+ *   - a probe every NBX_PROBE_MS (60 s, chosen; NUCBOX_PROBE_MS moves it, 0
+ *     stops it) of a path that answers JSON whenever the service runs and
+ *     costs it nothing: Nominatim's /status, the street index's /api/streets
+ *     (which also says whether an index is LOADED: a server up with none is
+ *     down for this), and the router's /health (no such route on OSRM: its
+ *     JSON refusal is the answer). A probe's failure is down at once.
+ * Said on the heartbeat (`nucboxDown`, the services down by name) and in
+ * /api/status (`nucbox`, the whole state). Nothing about any address. */
+var NBX_PROBE_MS = process.env.NUCBOX_PROBE_MS !== undefined
+  && isFinite(Number(process.env.NUCBOX_PROBE_MS))
+  ? Math.max(0, Number(process.env.NUCBOX_PROBE_MS)) : 60000;
+var NBX_PROBE_PATH = { search: '/status?format=json', route: '/health',
+                       streets: '/api/streets' };
+var nbxHealth = {};
+
+// The service a question goes to, by the base it was built on, or null.
+function nbxServiceOf(target) {
+  var names = ['search', 'route', 'streets'];
+  for (var i = 0; i < names.length; i++) {
+    var base = NBX[names[i]];
+    if (base && (target === base || target.indexOf(base + '/') === 0)) return names[i];
+  }
+  return null;
+}
+
+function nbxNote(service, err, probe) {
+  if (!service) return;
+  var now = Date.now();
+  var h = nbxHealth[service] || (nbxHealth[service] = { up: null, why: null, since: now,
+                                                        at: now, fails: 0 });
+  h.at = now;
+  h.fails = err ? h.fails + 1 : 0;
+  var up = err ? (probe || h.fails >= 2 ? false : h.up) : true;
+  if (up !== h.up) h.since = now;
+  h.up = up;
+  h.why = up === false ? String(err) : null;
+}
+
+function nbxProbe() {
+  Object.keys(NBX_PROBE_PATH).forEach(function (service) {
+    if (!NBX[service]) return;
+    nbxAskOnce(NBX[service] + NBX_PROBE_PATH[service], function (err, body) {
+      if (!err && service === 'streets' && body && body.loaded === false) {
+        err = 'no street index is loaded there' + (body.error ? ' (' + body.error + ')' : '');
+      }
+      nbxNote(service, err, true);
+    }, true);
+  });
+}
+
+// The services down, by name, for the beat; [] with all up or none set.
+function nbxDown() {
+  return Object.keys(nbxHealth).filter(function (s) {
+    return NBX[s] && nbxHealth[s].up === false;
+  });
+}
+
+function nbxHealthOut() {
+  var out = {};
+  ['search', 'route', 'streets'].forEach(function (s) {
+    var h = nbxHealth[s];
+    out[s] = !NBX[s] ? null
+      : h ? { up: h.up, why: h.why, since: h.since, at: h.at } : { up: null };
+  });
+  return out;
+}
 /* How many candidates a search asks for. Ten: enough for every branch of a
  * chain inside a disc the size of a card's distance, mostly — the real
  * install answered ten McDonald's in a 0.2-degree box round Marietta, which
@@ -8602,7 +8683,7 @@ function nbxAsk(target, done) {
   });
 }
 
-function nbxAskOnce(target, done) {
+function nbxAskOnce(target, done, probe) {
   var u;
   try { u = new URL(target); } catch (e) { return done('the NucBox address is not a URL'); }
   var lib = u.protocol === 'https:' ? https : http;
@@ -8616,6 +8697,9 @@ function nbxAskOnce(target, done) {
     if (finished) return;
     finished = true;
     clearTimeout(timer);
+    // Every real question says whether its service answered (nbxNote); a
+    // probe says it itself, after reading what came back.
+    if (!probe) nbxNote(nbxServiceOf(target), err, false);
     done(err, body);
   }
   req = lib.get(target, { headers: { 'Accept': 'application/json' } }, function (up) {
@@ -11300,6 +11384,11 @@ if (NBX.search || NBX.route || NBX.streets) {
   console.log('\nNucBox search: ' + (NBX.search || 'not set (NUCBOX_SEARCH)')
               + '\nNucBox router: ' + (NBX.route || 'not set (NUCBOX_ROUTER)')
               + '\nNucBox streets: ' + (NBX.streets || 'not set (NUCBOX_STREETS)'));
+}
+// ...and whether each answers, asked now and every NBX_PROBE_MS (nbxProbe).
+if ((NBX.search || NBX.route || NBX.streets) && NBX_PROBE_MS > 0) {
+  setTimeout(nbxProbe, 1000).unref();
+  setInterval(nbxProbe, NBX_PROBE_MS).unref();
 }
 // The street index this machine holds, when it holds one: what is in it and
 // what it cost to load, measured here, so the driver reads the real figures

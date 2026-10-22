@@ -5465,6 +5465,14 @@
     } else if (g && g.state === 'lost') {
       bits.push('GPS: no fix since start');
     }
+    // ...and the NucBox's services that are not answering (server.js
+    // nbxDown, on the beat): the reason a map draws nothing or a door is
+    // never pinned, which said nowhere before (the owner's snap of 22 Oct).
+    // Nothing while each answers, as for the GPS.
+    if (nucboxDown.length) {
+      bits.push('NucBox: ' + (nucboxDown.length >= 3 ? 'down'
+        : nucboxDown.map(function (s) { return NBX_WORDS[s] || s; }).join(', ') + ' down'));
+    }
     // Not a fault, and on this row anyway: it is about the order in the car,
     // not the offer, and the bar beside Drop has no room (it holds six).
     if (atDropoff && holdingNow) bits.push('at dropoff');
@@ -5521,6 +5529,10 @@
   // which was the first wording asked for: the offers are not read slower,
   // and a driver told they are would be told something the rig does not do.
   var heatGuardNow = false;
+  // The NucBox services down, off the beat (healthNote), and their names
+  // there: "NucBox: streets down".
+  var nucboxDown = [];
+  var NBX_WORDS = { search: 'search', route: 'routes', streets: 'streets' };
   var HEAT_WORDS = { 'under-voltage': 'LOW POWER', throttled: 'SLOWED', capped: 'SLOWED' };
   var HEAT_ALONE = ' \u00b7 fewer auto reads';
 
@@ -5680,6 +5692,10 @@
       // ...and the heat guard the same beat's figures put the scanner in
       // (heatNote), which only the beat carries, like the two above.
       if (msg.heatGuard !== undefined) heatGuardNow = !!msg.heatGuard;
+      // ...and the NucBox's services down (healthNote), also beat-only.
+      if (msg.nucboxDown !== undefined) {
+        nucboxDown = Array.isArray(msg.nucboxDown) ? msg.nucboxDown : [];
+      }
       // A new offer on the record. `tookState` resets with it — the mark
       // belongs to the offer, not to the button.
       //

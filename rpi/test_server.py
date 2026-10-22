@@ -32,6 +32,10 @@ import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The NucBox health probe (server.js nbxProbe) off in every server this
+# suite starts, so no fake counts a probe among its questions; the
+# checks of the probe itself turn it back on.
+os.environ['NUCBOX_PROBE_MS'] = '0'
 # Every server this suite starts would otherwise tidy the GPS logs of whoever
 # runs it (server.js's tidyGpsLogs, ~/gpslog by default). Off for all of them;
 # the section that checks the tidy names its own directory.
@@ -9436,6 +9440,87 @@ eq('...a card at another door says nothing, and its pair row differs from the sa
    _ssr.get('other door'), (False, False, ['sameStore'], 'go', 'go', True, True))
 eq('...and with two in the car the second order\'s store is named, ②',
    _ssr.get('second'), ([True], True, 2))
+
+# --- whether each NucBox service is answering ----------------------------------
+#
+# The owner, 22 Oct: the map drew nothing for a held order and nothing said
+# whether the NucBox was answering. server.js keeps each set service's state
+# (nbxHealth): probed every NUCBOX_PROBE_MS on a path that costs the service
+# nothing, and told by every real question, two failures in a row being down.
+# Said in /api/status (`nucbox`) and on the beat (`nucboxDown`), which the
+# panel's health row reads. Through tests/fake-nucbox.js, which answers the
+# probes and does not count them, and a port nothing listens on.
+def _nbxhealth(name, unloaded=False, **env):
+    nf = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                          env=dict(os.environ, FAKE_STREETS_UNLOADED='1' if unloaded else '0'))
+    nb = 'http://127.0.0.1:%d' % json.loads(nf.stdout.readline())['port']
+    dead = 'http://127.0.0.1:%d' % free_port()
+    want = {'NUCBOX_SEARCH': nb, 'NUCBOX_ROUTER': nb, 'NUCBOX_STREETS': nb}
+    want.update({k: (dead if v == 'dead' else v) for k, v in env.items()})
+    sp, sb, _sj, _sh = _cserver(name, **want)
+    return nf, nb, sp, sb
+
+
+_hf, _hnb, _hp, _hb = _nbxhealth('nbx-health-up', NUCBOX_PROBE_MS='300')
+try:
+    time.sleep(1.8)
+    _say({'alive': True})
+    _hs = get(_hb, '/api/status')
+    eq('[nucbox health] every service set and answering: each up, and the beat says none down',
+       ({k: (v or {}).get('up') for k, v in (_hs.get('nucbox') or {}).items()},
+        (_hs.get('beat') or {}).get('nucboxDown')),
+       ({'search': True, 'route': True, 'streets': True}, []))
+    eq('[nucbox health] ...and the probes are no question the fake counts',
+       json.loads(urllib.request.urlopen(_hnb + '/__asked', timeout=5).read()), [])
+finally:
+    stop(_hp)
+    _hf.kill()
+
+_hf, _hnb, _hp, _hb = _nbxhealth('nbx-health-streets', NUCBOX_PROBE_MS='300',
+                                  NUCBOX_STREETS='dead')
+try:
+    time.sleep(1.8)
+    _say({'alive': True})
+    _hs = get(_hb, '/api/status')
+    _st = (_hs.get('nucbox') or {}).get('streets') or {}
+    ok_('[nucbox health] the street index not answering: down, with why, the others up (got %r)'
+        % (_hs.get('nucbox'),),
+        _st.get('up') is False and 'did not answer' in (_st.get('why') or '')
+        and (_hs['nucbox'].get('search') or {}).get('up') is True)
+    eq('[nucbox health] ...and the beat names it for the panel',
+       (_hs.get('beat') or {}).get('nucboxDown'), ['streets'])
+finally:
+    stop(_hp)
+    _hf.kill()
+
+# ...and a NucBox server up with no street index loaded is down for this.
+_hf, _hnb, _hp, _hb = _nbxhealth('nbx-health-unloaded', unloaded=True, NUCBOX_PROBE_MS='300')
+try:
+    time.sleep(1.8)
+    _st = (get(_hb, '/api/status').get('nucbox') or {}).get('streets') or {}
+    ok_('[nucbox health] the street index server up with no index loaded: down, and says so '
+        '(got %r)' % (_st,),
+        _st.get('up') is False and 'no street index is loaded' in (_st.get('why') or ''))
+finally:
+    stop(_hp)
+    _hf.kill()
+
+# With no probe, the real questions say it: one failure is not down (a slow
+# answer is the question's trouble), two in a row are.
+_hf, _hnb, _hp, _hb = _nbxhealth('nbx-health-asked', NUCBOX_SEARCH='dead', NUCBOX_ROUTER='')
+try:
+    _nbx(_hb, '/api/nbx/search?q=Fable%20Grill')
+    _one = ((get(_hb, '/api/status').get('nucbox') or {}).get('search') or {}).get('up')
+    _nbx(_hb, '/api/nbx/search?q=Wren%20Diner')
+    _two = ((get(_hb, '/api/status').get('nucbox') or {}).get('search') or {}).get('up')
+    eq('[nucbox health] no probe: one failed search is not down, a second in a row is',
+       (_one, _two), (None, False))
+    eq('[nucbox health] ...and a service not set is null, not down',
+       get(_hb, '/api/status')['nucbox'].get('route'), None)
+finally:
+    stop(_hp)
+    _hf.kill()
 
 # --- on time for both ----------------------------------------------------------
 #

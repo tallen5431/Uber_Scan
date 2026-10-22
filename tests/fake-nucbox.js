@@ -450,6 +450,18 @@ function start(done) {
       res.end(JSON.stringify(body));
     }
     if (u.pathname === '/__asked') return json(200, asked);
+    // The health probes (server.js nbxProbe), answered as the real services
+    // answer them and never recorded: they are no question about a place,
+    // and the suites read `asked` for the order of those.
+    if (u.pathname === '/status') return json(200, { status: 0, message: 'OK' });
+    if (u.pathname === '/health') return json(400, { code: 'InvalidUrl', message: 'URL string malformed' });
+    if (u.pathname === '/api/streets') {
+      // FAKE_STREETS_UNLOADED=1: a NucBox server up with no index loaded.
+      if (process.env.FAKE_STREETS_UNLOADED === '1') {
+        return json(200, { ok: true, loaded: false, error: 'streets.json is missing' });
+      }
+      return json(200, { ok: true, loaded: true, counts: { names: 1, ways: 1, nodes: 2 } });
+    }
     asked.push(req.url);
     // The NucBox's own server.js answering from its street index
     // (server.js streetsRoute), in its shapes: one corner for any two names,

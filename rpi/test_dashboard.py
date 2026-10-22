@@ -38,6 +38,10 @@ import time
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The NucBox health probe (server.js nbxProbe) off in every server this
+# suite starts, so no fake counts a probe among its questions; the
+# checks of the probe itself turn it back on.
+os.environ['NUCBOX_PROBE_MS'] = '0'
 
 # The rig's own panel, and the small hat, which has rules of its own.
 PANELS = [('800x480', 800, 480), ('1280x800', 1280, 800), ('480x320', 480, 320)]
@@ -6315,6 +6319,18 @@ const framed = (page) => page.waitForFunction(
                            throttled: { now: ['under-voltage', 'throttled'],
                                         sinceBoot: ['under-voltage', 'throttled'] },
                            throttledWhy: null, heatGuard: true });
+    // The NucBox's services not answering (server.js nbxDown, on the beat):
+    // one, then all three beside the widest Pi chip and a GPS stale for
+    // sixteen hours, then all answering again.
+    slot.nbxStreets = await say(Object.assign({ gps: { state: 'ok', ageSeconds: 0.4 },
+                                                nucboxDown: ['streets'] }, NOPI));
+    slot.nbxAll = await say({ gps: { state: 'stale', ageSeconds: 60000 }, cpuC: 84.6,
+                              cpuCWhy: null,
+                              throttled: { now: ['temp limit'], sinceBoot: ['temp limit'] },
+                              throttledWhy: null, heatGuard: true,
+                              nucboxDown: ['search', 'route', 'streets'] });
+    slot.nbxBack = await say(Object.assign({ gps: { state: 'ok', ageSeconds: 0.4 },
+                                             nucboxDown: [] }, NOPI));
     // A Took that replaced the order in the car (server.js writes the old
     // one's drop row `by: 'replaced'`): said on this row for a minute.
     await page.evaluate(() => window.__es.push({ heldReplaced: { at: 1, saidForMs: 60000 } }));
@@ -9752,6 +9768,15 @@ try:
             _note('stale').get('shown') and _note('stale').get('whole'))
         eq('[%s] a GPS that has never answered says so' % _pn,
            _note('lost').get('text'), 'GPS: no fix since start')
+        # The NucBox (the owner, 22 Oct): a service not answering is said on
+        # this row by name, all three as "down", and nothing once they answer.
+        eq('[%s] the NucBox street index not answering says so' % _pn,
+           _note('nbxStreets').get('text'), 'NucBox: streets down')
+        eq('[%s] ...all three: "NucBox: down", after the Pi chip and the GPS' % _pn,
+           _note('nbxAll').get('text'), 'HOT 85°C · GPS: no fix for 1000 min · NucBox: down')
+        ok_('[%s] ...on the glass (%r)' % (_pn, _note('nbxAll')), _note('nbxAll').get('shown'))
+        eq('[%s] ...and nothing once every service answers' % _pn,
+           _note('nbxBack').get('hidden'), True)
         # The heat guard, as a chip: the cause and its temperature, and alone on
         # the row what the rig is doing about it.
         eq('[%s] a Pi at its temperature limit says the heat guard is on: a chip, the '
