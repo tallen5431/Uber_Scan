@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Uber Scan — Shift</title>
+<meta name="theme-color" content="#0b0f14">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* Today's shift as the end-of-shift report has it (tools/shift_report.py,
+     run by server.js for GET /api/shift; the owner, 22 Oct 2026), on the
+     phone held upright: the totals, each order's card against what it really
+     took, and how each order's end was pinned. Read parked, so it scrolls
+     like the offers page and lets text be selected. It reads and never
+     writes: there is no control here but the way back and "again".
+     It describes; it recommends nothing, as the report does not. */
+  #app { height: auto; min-height: 100dvh; max-width: 640px; margin: 0 auto; }
+  body { user-select: text; -webkit-user-select: text; overscroll-behavior: auto; }
+  h1 { font-size: 20px; margin: 4px 0 0; }
+  h2 { font-size: 16px; margin: 0 0 6px; }
+  #lead { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+  #lead.failed { color: var(--no); }
+  section { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+            padding: 10px 12px; min-width: 0; }
+  section[hidden] { display: none; }
+  /* The totals: a word and its figure, two columns that wrap their figure
+     rather than run off a 360px screen. */
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px;
+        margin: 0; font-size: 14px; line-height: 1.45; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .list { margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px; line-height: 1.45; }
+  .list li { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .list li + li { margin-top: 2px; }
+  .sub { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+  /* An order: what the card said, and what really happened, side by side. */
+  .order { border-top: 1px solid var(--line); padding: 8px 0 0; margin: 8px 0 0; }
+  .order:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+  .order h3 { margin: 0; font-size: 15px; font-variant-numeric: tabular-nums;
+              overflow-wrap: anywhere; }
+  .order h3 small { font-size: inherit; font-weight: 400; color: var(--muted); }
+  .order h3 .no { color: var(--doubt); font-weight: 700; }
+  .vs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px;
+        margin: 4px 0 0; font-size: 14px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+  .vs div { min-width: 0; overflow-wrap: anywhere; }
+  .vs b { display: block; font-size: 12px; font-weight: 400; color: var(--muted);
+          text-transform: uppercase; letter-spacing: .04em; }
+  .notes { margin: 4px 0 0; padding: 0 0 0 16px; font-size: 13px; line-height: 1.45;
+           color: var(--muted); overflow-wrap: anywhere; }
+  #again { align-self: flex-start; min-height: 44px; padding: 4px 14px; font: inherit;
+           font-size: 14px; font-weight: 700; color: var(--text); background: var(--panel);
+           border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+  #again[disabled] { cursor: progress; opacity: .7; }
+  .bottombar { position: sticky; bottom: 0; z-index: 6; background: var(--bg);
+               padding: 8px 0 calc(env(safe-area-inset-bottom) + 4px); margin-top: auto; }
+  /* Sized for the panel too, should it be opened there: the floors
+     rpi/test_layout.py holds the rig's other pages to, 15px and 12px on the
+     3.5" hat. */
+  @media (orientation: landscape) {
+    #lead, .kv, .list, .sub, .vs, .notes, #again { font-size: 15px; }
+    .order h3, h2 { font-size: 17px; }
+  }
+  @media (orientation: landscape) and (max-height: 380px) {
+    #lead, .kv, .list, .sub, .vs, .notes, #again, .vs b { font-size: 12px; }
+  }
+</style>
+</head>
+<body data-page="shift">
+<main id="app">
+  <h1>◷ Shift</h1>
+  <p id="lead">Asking the rig…</p>
+  <button type="button" id="again">Again</button>
+  <section id="totals" hidden>
+    <h2>Totals</h2>
+    <dl class="kv" id="totalsList"></dl>
+    <p class="sub" id="gapsHead" hidden></p>
+    <ul class="list" id="gaps"></ul>
+    <p class="sub" id="stopsHead"></p>
+    <ul class="list" id="stops"></ul>
+  </section>
+  <section id="orders" hidden>
+    <h2 id="ordersHead">Orders</h2>
+    <div id="orderList"></div>
+  </section>
+  <section id="pinning" hidden>
+    <h2>Pinning</h2>
+    <p class="sub" id="pinLead">How each order's end was pinned for the GPS drop, or why not.</p>
+    <ul class="list" id="pins"></ul>
+    <p class="sub" id="pinRate"></p>
+  </section>
+  <section id="summary" hidden>
+    <h2 id="summaryHead">Over the reliable orders</h2>
+    <ul class="list" id="summaryList"></ul>
+  </section>
+  <nav class="bottombar">
+    <a class="linkbtn" href="live.html?route">⤳ Route</a>
+    <a class="linkbtn" href="journal.html">▤ Offers</a>
+  </nav>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // The deadline every page of this rig puts on a request, for the reason
+  // snaps.html gives: a connection that opens and never answers would leave
+  // "Asking the rig…" up for as long as the page is open. Longer than theirs,
+  // because the first answer of the day runs the report (SHIFT_TIMEOUT_MS in
+  // server.js is the server's own limit on it).
+  var ASK_MS = 70000;
+
+  var el = {};
+  ['lead', 'again', 'totals', 'totalsList', 'gapsHead', 'gaps', 'stopsHead', 'stops',
+   'orders', 'ordersHead', 'orderList', 'pinning', 'pins', 'pinRate', 'summary',
+   'summaryHead', 'summaryList'].forEach(function (id) {
+    el[id] = document.getElementById(id);
+  });
+
+  function ask(url) {
+    var opts = { cache: 'no-store' };
+    if (typeof AbortController !== 'function') return fetch(url, opts);
+    var stop = new AbortController();
+    var timer = setTimeout(function () { stop.abort(); }, ASK_MS);
+    opts.signal = stop.signal;
+    return fetch(url, opts).then(function (r) {
+      clearTimeout(timer);
+      return r;
+    }, function (e) {
+      clearTimeout(timer);
+      throw e;
+    });
+  }
+
+  function node(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function num(v) { return typeof v === 'number' && isFinite(v); }
+
+  // A clock reading as the report prints one, 24-hour, in this phone's zone,
+  // which is the driver's and the rig's.
+  function clock(ms) {
+    if (!num(ms)) return '';
+    var d = new Date(ms);
+    var two = function (n) { return (n < 10 ? '0' : '') + n; };
+    return two(d.getHours()) + ':' + two(d.getMinutes());
+  }
+
+  function mins(seconds) { return num(seconds) ? Math.round(seconds / 60) + ' min' : '?'; }
+  function fixed(v, n) { return num(v) ? v.toFixed(n) : ''; }
+  function money(v) { return num(v) ? '$' + v.toFixed(2) : '$?'; }
+
+  function seen(ev) {
+    if (!ev) return '';
+    return ev.since === null || ev.since === undefined ? clock(ev.at)
+      : clock(ev.at) + ', the first fix after a gap: any time from ' + clock(ev.since);
+  }
+
+  function kv(list, k, v) {
+    list.appendChild(node('dt', null, k));
+    list.appendChild(node('dd', null, v));
+  }
+
+  function drawTotals(rep) {
+    var t = rep.totals;
+    el.totalsList.textContent = '';
+    el.gaps.textContent = '';
+    el.stops.textContent = '';
+    el.gapsHead.hidden = true;
+    el.totals.hidden = false;
+    if (!t) {
+      kv(el.totalsList, 'GPS', rep.gps && rep.gps.missing ? 'no log found'
+                                                          : 'no usable fix on this day');
+      kv(el.totalsList, 'orders taken', String((rep.orders || []).length));
+      el.stopsHead.textContent = '';
+      return;
+    }
+    kv(el.totalsList, 'rig on', clock(t.on));
+    kv(el.totalsList, 'rig off', clock(t.off) + ', the last usable fix');
+    kv(el.totalsList, 'left start', t.left ? seen(t.left)
+      : 'never: the car stayed within ' + t.startM + ' m of start');
+    if (t.back) kv(el.totalsList, 'back at start', seen(t.back));
+    else if (t.left) kv(el.totalsList, 'back at start', 'not by the last fix');
+    var gaps = (t.gaps || []).length;
+    kv(el.totalsList, 'miles', fixed(t.miles, 1)
+      + (gaps ? ', between fixes only: ' + gaps + ' gap' + (gaps === 1 ? '' : 's')
+               + ' not counted' : ''));
+    kv(el.totalsList, 'moving', mins(t.moving));
+    kv(el.totalsList, 'stopped', mins(t.stopped));
+    if (t.noSpeed) kv(el.totalsList, 'no speed', mins(t.noSpeed));
+    if (gaps) kv(el.totalsList, 'in gaps', mins(t.gapSeconds) + ', counted as neither');
+    kv(el.totalsList, 'orders taken', String((rep.orders || []).length));
+    if (gaps) {
+      el.gapsHead.hidden = false;
+      el.gapsHead.textContent = 'Gaps in the log over ' + t.gapS + ' s:';
+      t.gaps.forEach(function (g) {
+        el.gaps.appendChild(node('li', null, clock(g.from) + '–' + clock(g.to) + '  '
+          + fixed(g.seconds / 60, 1) + ' min, the car ' + fixed(g.apartMiles, 1)
+          + ' mi from where the log went quiet'));
+      });
+    }
+    el.stopsHead.textContent = 'Stops of ' + Math.round(t.longStopS / 60)
+      + ' min or more (how far from start, never where):';
+    if (!(t.stops || []).length) el.stops.appendChild(node('li', null, 'none'));
+    (t.stops || []).forEach(function (s) {
+      var edge = [['fromOn', 'from rig on'], ['afterGap', 'after a gap'],
+                  ['beforeGap', 'then the log went quiet'], ['toOff', 'to rig off']]
+        .filter(function (p) { return s[p[0]]; }).map(function (p) { return p[1]; });
+      el.stops.appendChild(node('li', null, clock(s.from) + '  ' + fixed(s.seconds / 60, 1)
+        + ' min  ' + (s.atStart ? 'at start' : fixed(s.fromStartMiles, 1) + ' mi from start')
+        + (edge.length ? ', ' + edge.join(', ') : '')));
+    });
+  }
+
+  function side(title, lines) {
+    var d = node('div');
+    d.appendChild(node('b', null, title));
+    lines.filter(Boolean).forEach(function (l, i) {
+      if (i) d.appendChild(document.createElement('br'));
+      d.appendChild(document.createTextNode(l));
+    });
+    return d;
+  }
+
+  function drawOrders(rep) {
+    var list = rep.orders || [];
+    el.orderList.textContent = '';
+    el.orders.hidden = false;
+    el.ordersHead.textContent = list.length
+      ? 'Orders: ' + list.length + ' taken' : 'Orders: none taken yet';
+    list.forEach(function (o) {
+      var box = node('div', 'order');
+      var h = node('h3', null, '#' + o.n + ' ' + (o.app || '?') + ' ' + money(o.pay) + ' ');
+      h.appendChild(node('small', null, '· ' + o.how));
+      if (!o.reliable) { h.appendChild(document.createTextNode(' ')); h.appendChild(node('span', 'no', 'unreliable')); }
+      box.appendChild(h);
+      var vs = node('div', 'vs');
+      vs.appendChild(side('card', [
+        num(o.cardMinutes) ? o.cardMinutes + ' min' : 'no minutes',
+        num(o.cardMiles) ? o.cardMiles + ' mi' : 'no miles']));
+      vs.appendChild(side('actual', [
+        num(o.actualMinutes) ? fixed(o.actualMinutes, 1) + ' min' : 'not timed',
+        num(o.gpsMiles) ? fixed(o.gpsMiles, 1) + ' GPS mi' : 'no GPS miles',
+        num(o.perHour) ? money(o.perHour) + '/hr' : '']));
+      box.appendChild(vs);
+      var when = [];
+      if (num(o.took)) when.push('took ' + clock(o.took) + (num(o.end) ? ', ended ' + clock(o.end) : ''));
+      if (num(o.restaurantMinutes)) when.push('restaurant ' + fixed(o.restaurantMinutes, 1) + ' min');
+      if (num(o.doorMinutes)) when.push('door ' + fixed(o.doorMinutes, 1) + ' min');
+      when.push('with another: ' + o.alongside);
+      box.appendChild(node('p', 'sub', when.join(' · ')));
+      if ((o.notes || []).length) {
+        var ul = node('ul', 'notes');
+        o.notes.forEach(function (n) { ul.appendChild(node('li', null, n)); });
+        box.appendChild(ul);
+      }
+      el.orderList.appendChild(box);
+    });
+  }
+
+  function drawPinning(rep) {
+    var list = rep.orders || [];
+    el.pins.textContent = '';
+    el.pinning.hidden = !list.length;
+    list.forEach(function (o) { el.pins.appendChild(node('li', null, '#' + o.n + ' ' + o.pin)); });
+    var p = rep.pinning || {};
+    el.pinRate.textContent = 'Pinned: ' + (p.recorded
+      ? p.pinned + ' of ' + p.recorded + ' order' + (p.recorded === 1 ? '' : 's')
+        + ' with a record (' + p.rate + '%)'
+        + (p.unrecorded ? '; ' + p.unrecorded + ' without one' : '')
+      : 'no order has a record');
+  }
+
+  function drawSummary(rep) {
+    var s = rep.summary || {};
+    el.summaryList.textContent = '';
+    el.summary.hidden = !(rep.orders || []).length;
+    el.summaryHead.textContent = 'Over the ' + (s.reliable || 0) + ' reliable order'
+      + (s.reliable === 1 ? '' : 's') + ' of ' + (s.of || 0);
+    [['byApp', 'by app'], ['byBand', 'by card minutes']].forEach(function (k) {
+      (s[k[0]] || []).forEach(function (g) {
+        el.summaryList.appendChild(node('li', null, k[1] + ' · ' + g.group + ': n=' + g.n
+          + (num(g.ratio) ? ', actual/card minutes ' + fixed(g.ratio, 2) : '')
+          + (num(g.perHour) ? ', actual ' + money(g.perHour) + '/hr' : '')));
+      });
+    });
+    if (!el.summaryList.firstChild) el.summaryList.appendChild(node('li', null, 'nothing to summarise'));
+  }
+
+  function load() {
+    el.again.disabled = true;
+    el.lead.classList.remove('failed');
+    ask('/api/shift').then(function (r) {
+      return r.json().catch(function () { return null; });
+    }).then(function (a) {
+      if (!a || !a.ok || !a.report) {
+        throw new Error((a && a.error) || 'the rig gave no answer');
+      }
+      var rep = a.report;
+      el.lead.textContent = 'The driver’s day of ' + rep.day + ', from '
+        + clock(rep.start) + ' · as of ' + clock(a.at)
+        + (rep.unreadable ? ' · ' + rep.unreadable + ' unreadable journal line'
+           + (rep.unreadable === 1 ? '' : 's') + ' skipped' : '');
+      drawTotals(rep);
+      drawOrders(rep);
+      drawPinning(rep);
+      drawSummary(rep);
+    }).catch(function (e) {
+      el.lead.textContent = 'Could not get the shift from the rig: '
+        + (e && e.name === 'AbortError' ? 'no answer' : (e && e.message) || 'no answer');
+      el.lead.classList.add('failed');
+    }).then(function () {
+      el.again.disabled = false;
+    });
+  }
+
+  el.again.addEventListener('click', load);
+  load();
+})();
+</script>
+</body>
+</html>

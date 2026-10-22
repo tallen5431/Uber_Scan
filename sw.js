@@ -24,7 +24,7 @@
  * install would not have put it back: a phone with no signal would have lost
  * the scanner entirely, in the name of shipping a scanner fix.
  */
-var SHELL = 'uberscan-shell-v52';   // v52: snaps.html joined the shell
+var SHELL = 'uberscan-shell-v53';   // v53: shift.html joined the shell
 
 /* Bumped only when the vendored engine itself changes, which is rare and
  * deliberate. Held apart from the shell so that shipping app code never costs
@@ -63,6 +63,9 @@ var ASSETS = [
   // rig — but it opens as itself and says it cannot reach the rig, rather
   // than as the offline notice for a page this build has never heard of.
   'snaps.html',
+  // ...and the shift so far, for the same reason: it needs the rig for its
+  // figures, and offline it opens as itself and says it cannot reach it.
+  'shift.html',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',

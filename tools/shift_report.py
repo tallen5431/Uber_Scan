@@ -3,6 +3,7 @@
 
     python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12
     python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12 --csv
+    python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12 --json
 
 One row per order taken: its app and card pay, the card's minutes and miles,
 when Took was pressed, when and how the order ended, the minutes that really
@@ -20,9 +21,13 @@ length and miles from that place, every gap in the log, and the day's count
 of orders. Text only; the CSV stays one row per order. What the card paid
 against what the app paid is not here: the rig never sees the earnings.
 
-A REPORT, AND NOTHING READS IT. Nothing on the rig imports this file or its
-output: not the live rating, not the target, not advice.js, not the panel.
-tools/test_shift_report.py holds that by name. AUDITS.md's Settled entry on
+A REPORT, AND NOTHING DECIDES ON IT. Nothing on the rig imports this file or
+its output: not the live rating, not the target, not advice.js, not the panel.
+One thing shows it: since 22 Oct 2026 the phone's shift page (shift.html)
+asks server.js's GET /api/shift, which runs this file with --json and passes
+the answer through untouched — a page that reads, and nothing on the server
+keeps or weighs it. tools/test_shift_report.py holds both by name: server.js
+and shift.html the only files that name it. AUDITS.md's Settled entry on
 re-timing an offer ends "The honest route to the driver's actual question
 needs elapsed times, not a model of them", and this is those elapsed times,
 measured, after the shift. Turning them into a rule — a pace, a floor, a
@@ -78,6 +83,13 @@ the server's count, which bounds the orders carried alongside it. An order
 with no drop row at all has no end on record: the server lost the hold, or it
 expired before the server wrote expiry rows. `replaced`, `expiry` and no-row
 are all UNRELIABLE, marked on the row, and left out of the summary.
+
+A DROP TAKEN BACK did not happen. Since 22 Oct 2026 the panel's Drop (and
+the offers page's In car Drop) reads "↶ Undo" for ten seconds, and a press
+puts the order back exactly as it was; server.js writes `{kind: 'undo', id,
+dropAt, holdId}` (ids only), and the drop row with that id and `at` is read
+here as if it had never been written (_undone). The order's end is then its
+next drop row, as though Drop had not been pressed.
 
 HOW ITS END WAS PINNED, the "Pinning" section, off the same drop row: since
 21 Oct 2026 server.js writes on every drop row, in words, how the order's end
@@ -219,6 +231,14 @@ def _num(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v else None
 
 
+def _undone(rows):
+    """The drops taken back by ↶ Undo, as a set of (id, at): each `undo` row
+    names its drop by the offer's id and the drop row's own `at` (dropAt)."""
+    return set((r['id'], r['dropAt']) for r in rows
+               if r.get('kind') == 'undo' and r.get('undoes') == 'drop' and r.get('id')
+               and _num(r.get('dropAt')) is not None)
+
+
 def orders(rows):
     """Every order taken in the journal, as dicts, ordered by Took (an order
     with no Took last). See the module docstring for the rules."""
@@ -226,11 +246,13 @@ def orders(rows):
     drops = collections.defaultdict(list)
     visits = collections.defaultdict(list)
     readings = collections.defaultdict(list)
+    undone = _undone(rows)
     for r in rows:
         kind = r.get('kind')
         if kind == 'mark' and r.get('id') and 'accepted' in r:
             marks[r['id']].append(r)
-        elif kind == 'drop' and r.get('id') and _num(r.get('at')) is not None:
+        elif kind == 'drop' and r.get('id') and _num(r.get('at')) is not None \
+                and (r['id'], r['at']) not in undone:
             drops[r['id']].append(r)
         elif kind == 'visit' and isinstance(r.get('holdId'), str) \
                 and _num(r.get('at')) is not None:
@@ -1084,6 +1106,71 @@ def to_csv(rep):
     return buf.getvalue()
 
 
+# --- as JSON, for the phone's shift page ----------------------------------------
+#
+# What the text says, as data, for shift.html (server.js GET /api/shift runs
+# this with --json and passes it through). BUILT FIELD BY FIELD, never by
+# dumping the report's dicts: those carry an offer's id and, through the fixes
+# and the readings they were made from, nothing that may leave; a field added to
+# them later must not reach the phone by default. Times are epoch ms (the
+# totals' seconds multiplied up), durations seconds, distances miles. No
+# address, no place, no coordinate: the same promise the text keeps, and
+# tools/test_shift_report.py holds the JSON to it as it holds the text.
+
+def _ms(s):
+    return None if s is None else s * 1000.0
+
+
+def _event_json(ev):
+    return None if ev is None else {'at': _ms(ev['at']), 'since': _ms(ev['since'])}
+
+
+def totals_json(t):
+    if t is None:
+        return None
+    return {'on': _ms(t['on']), 'off': _ms(t['off']),
+            'left': _event_json(t['left']), 'back': _event_json(t['back']),
+            'stillAway': bool(t['stillAway']), 'miles': t['miles'],
+            'moving': t['moving'], 'stopped': t['stopped'], 'noSpeed': t['noSpeed'],
+            'gapSeconds': t['gapSeconds'],
+            'gaps': [{'from': _ms(g['from']), 'to': _ms(g['to']), 'seconds': g['seconds'],
+                      'apartMiles': g['apartMiles']} for g in t['gaps']],
+            'stops': [{'from': _ms(s['from']), 'seconds': s['seconds'],
+                       'atStart': s['atStart'], 'fromStartMiles': s['fromStartMiles'],
+                       'fromOn': s['fromOn'], 'afterGap': s['afterGap'],
+                       'beforeGap': s['beforeGap'], 'toOff': s['toOff']}
+                      for s in t['stops']],
+            'startM': START_M, 'longStopS': LONG_STOP_S, 'gapS': GAP_S,
+            'stoppedMs': STOPPED_MS}
+
+
+def as_json(rep):
+    info = rep['info']
+    pn = pinning(rep['orders'])
+    return {
+        'day': rep['day'], 'start': rep['start'], 'end': rep['end'],
+        'gps': {'missing': bool(info['gpsMissing']), 'files': info['files'],
+                'positions': info['positions'], 'passed': info['passed'],
+                'refused': dict(sorted(info['refused'].items())),
+                'unstamped': info['unstamped'], 'beforeClock': info['beforeClock'],
+                'otherDays': info.get('otherDays', 0)},
+        'unreadable': info['unreadable'],
+        'totals': None if info['gpsMissing'] else totals_json(rep.get('totals')),
+        'orders': [{'n': i + 1, 'app': o['app'], 'pay': o['pay'],
+                    'cardMinutes': o['cardMinutes'], 'cardMiles': o['cardMiles'],
+                    'took': o['took'], 'end': o['end'], 'how': o['how'],
+                    'actualMinutes': o.get('actualMinutes'), 'gpsMiles': o.get('gpsMiles'),
+                    'restaurantMinutes': o.get('restaurantMinutes'),
+                    'doorMinutes': o.get('doorMinutes'), 'alongside': o['alongside'],
+                    'perHour': o.get('perHour'), 'reliable': bool(o['reliable']),
+                    'notes': list(o['notes']), 'pin': pin_text(o.get('pin'))}
+                   for i, o in enumerate(rep['orders'])],
+        'pinning': dict(pn, rate=(round(100.0 * pn['pinned'] / pn['recorded'])
+                                  if pn['recorded'] else None)),
+        'summary': rep['summary'],
+    }
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--journal', required=True, help='the journal, e.g. rpi/journal.jsonl')
@@ -1092,11 +1179,16 @@ def main(argv=None):
     ap.add_argument('--day', required=True, help="the driver's day, YYYY-MM-DD "
                                                  '(it starts at advice.js\'s DAY_STARTS_AT)')
     ap.add_argument('--csv', action='store_true', help='CSV instead of text')
+    ap.add_argument('--json', action='store_true',
+                    help='JSON instead of text, for the phone\'s shift page (as_json)')
     args = ap.parse_args(argv)
     if not re.match(r'^\d{4}-\d\d-\d\d$', args.day):
         ap.error('--day must be YYYY-MM-DD')
     rep = report(args.journal, os.path.expanduser(args.gps) if args.gps else None, args.day)
-    sys.stdout.write(to_csv(rep) if args.csv else text(rep))
+    if args.json:
+        sys.stdout.write(json.dumps(as_json(rep), allow_nan=False) + '\n')
+    else:
+        sys.stdout.write(to_csv(rep) if args.csv else text(rep))
     return 0
 
 

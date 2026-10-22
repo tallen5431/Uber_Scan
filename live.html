@@ -1562,7 +1562,7 @@
   /* The route view (ROUTE_VIEW in the script, /live.html?route): the map and
      the verdict over it on a phone held upright, no picture, no controls but
      the way to the offers page. The map takes what the verdict leaves. */
-  body.routeview .bottombar > :not([href="journal.html"]),
+  body.routeview .bottombar > :not([href="journal.html"]):not([href="shift.html"]),
   body.routeview #snap, body.routeview #undo, body.routeview #chooser { display: none !important; }
   body.routeview #view { display: none !important; }
   @media (orientation: portrait) {
@@ -1917,6 +1917,17 @@
      server the pins it finds). See body.routeview in the stylesheet. */
   var ROUTE_VIEW = /^\?(?:.*&)?route(?:[=&]|$)/.test(location.search || '');
   if (ROUTE_VIEW) document.body.classList.add('routeview');
+  // ...and beside ▤ Offers on its bar, the shift so far (shift.html, read-only
+  // like this view; the owner, 22 Oct). Made here and only here, so the
+  // panel's own bar is the markup's six and never holds a seventh control.
+  if (ROUTE_VIEW) {
+    var toShift = document.createElement('a');
+    toShift.className = 'linkbtn';
+    toShift.href = 'shift.html';
+    toShift.textContent = '◷ Shift';
+    var toOffers = document.querySelector('.bottombar > [href="journal.html"]');
+    if (toOffers) toOffers.parentNode.insertBefore(toShift, toOffers.nextSibling);
+  }
 
   function ask(url, opts) {
     opts = opts || {};
@@ -3382,13 +3393,69 @@
   }
 
   function showDrop() {
-    setHidden(el.drop, !holdingNow);
+    // For dropUndo's seconds after a Drop put something down, the same button
+    // is "↶ Undo", shown whether or not anything is left in the car.
+    setHidden(el.drop, !holdingNow && !dropUndo);
     // "Drop ▾" with two in the car: one tap may ask which (the chooser).
-    setText(el.drop, dropBusy ? '…' : dropFailed ? 'Drop · failed'
+    setText(el.drop, dropBusy ? '…'
+      : dropUndo ? (dropUndo.failed ? '↶ Undo · failed' : '↶ Undo')
+      : dropFailed ? 'Drop · failed'
       : twoHeld() ? 'Drop \u25be' : 'Drop');
-    el.drop.classList.toggle('failed', dropFailed);
-    setTitle(el.drop, 'Put the order down, so the next offer is judged on its own '
-                    + 'again. It does not touch your phone.');
+    el.drop.classList.toggle('failed', dropUndo ? !!dropUndo.failed : dropFailed);
+    setTitle(el.drop, dropUndo
+      ? 'Put back the order you just dropped, exactly as it was, as if Drop had not '
+        + 'been pressed. For a few seconds only. It does not touch your phone.'
+      : 'Put the order down, so the next offer is judged on its own '
+        + 'again. It does not touch your phone.');
+  }
+
+  /* ---------- ↶ Undo, after a Drop ----------------------------------------
+   *
+   * The owner, 22 Oct 2026: "fewer hands, less friction". The server answers
+   * a Drop that put something down with `undo: {id, forMs}` (offerDropUndo
+   * in server.js), and for forMs (10 s) Drop itself reads "↶ Undo" — the
+   * same button, so the bar never holds a seventh control. A press asks the
+   * server to put back exactly what the Drop took (/api/drop-undo) and
+   * believes its answer, as Drop does: back, the order is set from the
+   * reply; refused (too late, or the car has changed since), the drop
+   * stands and the button goes back to what the car says; not saved, it
+   * says so and stays for the rest of its seconds. */
+  var dropUndo = null;
+  var dropUndoTimer = null;
+
+  function offerDropUndo(undo) {
+    clearTimeout(dropUndoTimer);
+    dropUndo = undo && undo.id ? { id: undo.id, failed: false } : null;
+    if (dropUndo) {
+      dropUndoTimer = setTimeout(function () { dropUndo = null; showDrop(); },
+                                 typeof undo.forMs === 'number' ? undo.forMs : 10000);
+    }
+    showDrop();
+  }
+
+  function undoDrop() {
+    var u = dropUndo;
+    dropBusy = true;
+    showDrop();
+    ask('/api/drop-undo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: u.id }) }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (body) {
+        if (r.ok && body && body.ok) {
+          offerDropUndo(null);
+          if (body.held) setHeldFrom(body.held, body);
+          showDrop(); showDest(); showTook(); showHeld(heldMode);
+          if (viewMode === 'map') showMap();
+          return;
+        }
+        if (r.status === 409) { offerDropUndo(null); return; }
+        if (dropUndo === u) u.failed = true;
+      });
+    }).catch(function () {
+      if (dropUndo === u) u.failed = true;
+    }).then(function () {
+      dropBusy = false;
+      showDrop();
+    });
   }
 
   /* Map view pinned the held order's end at DOOR level: tell the server, which
@@ -3448,6 +3515,7 @@
 
   el.drop.addEventListener('click', function () {
     if (dropBusy) return;
+    if (dropUndo) return undoDrop();
     dropBusy = true;
     showDrop();
     ask('/api/delivered', { method: 'POST' }).then(function (r) {
@@ -3461,6 +3529,7 @@
         // server put none down and sent the chooser (dropDecides).
         if (body && body.choose) return openChooser(body.choose);
         dropAnswered(body);
+        offerDropUndo(body && body.undo);
       });
     }).catch(function () {
       /* Left as it was: an order the server still holds is the truth. */
@@ -4048,7 +4117,10 @@
                               body: JSON.stringify({ holdIds: ids }) }).then(function (r) {
         dropFailed = !r.ok;
         dropFailedFor = r.ok ? null : heldSig;
-        return r.ok ? r.json().catch(function () { return {}; }).then(dropAnswered) : null;
+        return r.ok ? r.json().catch(function () { return {}; }).then(function (body) {
+          dropAnswered(body);
+          offerDropUndo(body && body.undo);
+        }) : null;
       }).catch(function () {
         dropFailed = true;
         dropFailedFor = heldSig;
