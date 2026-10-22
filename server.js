@@ -4826,6 +4826,10 @@ function onTimeInputs(offer, now) {
   var stops = h.planner && Array.isArray(h.planner.stops) ? h.planner.stops : [];
   var at = planAtOf(stops, h);
   var aDue = dueAt(at !== null && stops[at] ? stops[at].expectedBy : null, now);
+  // ...else the Expected by filed on the hold with its end (Assemble.file):
+  // a new card forgets the planner (forgetPlanner), and the field stays.
+  var filed = h.fields && h.fields.expectedBy;
+  if (aDue === null && filed) aDue = dueAt(filed.value, now);
   if (aDue === null) aDue = dueAt(h.deliverBy, now);
   var bDue = dueAt(offer.deliverBy, now);
   if (bDue === null && typeof offer.minutes === 'number' && isFinite(offer.minutes)

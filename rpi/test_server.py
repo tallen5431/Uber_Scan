@@ -9468,7 +9468,7 @@ def _othold(deliver_by, pinned=True, more=None):
 
 
 def _ontime(name, deliver_by, pinned=True, minutes=30.0, more=None, planner=None, two=False,
-            waits=None):
+            waits=None, planner_first=None):
     nf = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     nb = 'http://127.0.0.1:%d' % json.loads(nf.stdout.readline())['port']
@@ -9484,6 +9484,11 @@ def _ontime(name, deliver_by, pinned=True, minutes=30.0, more=None, planner=None
     try:
         read = _ssread(12.05, 6.0)
         _say(read)
+        if planner_first is not None:
+            # A Trip Planner read BEFORE the offer: the card that follows
+            # forgets the planner, and what it filed on the hold stays.
+            _say({'planner': {'stops': planner_first, 'unfiled': None, 'asked': False}})
+            time.sleep(0.5)
         _say(_card('ot-b', 12.05, minutes=minutes,
                    pickup='Example Grill (250 Example Road)',
                    dropoff='1106 Tamarons Lane, Marietta, GA 30064', **_OTFIX))
@@ -9581,6 +9586,13 @@ _otpl = _ontime('ontime-planner', (_NOWMIN + 40) % 1440, planner=[
 eq('[on time] the planner\'s Expected by for the held order\'s stop is its deadline, over its '
    'card\'s: read with the card on record, the next reading says ① late',
    _otpl['stack']['onTime'], 'late1')
+# ...and read before the offer came: the offer's card forgets the planner, the
+# Expected by it filed on the hold with the end (fields.expectedBy) stands.
+_otpf = _ontime('ontime-planner-first', (_NOWMIN + 40) % 1440, planner_first=[
+    {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'line': _OTEND, 'expectedBy': _NOWMIN}])
+eq('[on time] the planner read before the offer, forgotten at its card: the Expected by it '
+   'filed on the hold is still the deadline, ① late',
+   _otpf['stack']['onTime'], 'late1')
 # A pickup of the held order still ahead with no pin: no run to time, nothing.
 _otnp = _ontime('ontime-pickup-unpinned', (_NOWMIN + 40) % 1440, more={
     'pickups': [{'q': '250 Example Road, Marietta', 'visited': False}]})
