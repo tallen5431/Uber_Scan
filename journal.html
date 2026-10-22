@@ -707,6 +707,7 @@
   <div class="chips sorts" id="sorts" role="group" aria-label="Order">
     <button type="button" data-sort="newest" aria-pressed="true">Newest</button>
     <button type="button" data-sort="perHour" aria-pressed="false">Best $/hr</button>
+    <button type="button" data-sort="payPerMile" aria-pressed="false">Best $/mi</button>
     <button type="button" data-sort="pay" aria-pressed="false">Highest pay</button>
     <button type="button" data-sort="minutes" aria-pressed="false">Longest</button>
   </div>
@@ -1273,6 +1274,9 @@
       + '<span class="big">' + money(r.perHour, 0) + '<i class="unit">/hr</i>' + gross + '</span>'
       + '<span class="meta">' + money(r.pay, 2) + ' · ' + mins + ' min'
       + (r.miles === null ? '' : ' · ' + num(r.miles) + ' mi')
+      // ...and, ranked by it, the figure the list is ranked by.
+      + (sortBy === 'payPerMile' && payPerMile(r) !== null
+         ? ' · <b class="ppm">' + money(payPerMile(r), 2) + '/mi</b>' : '')
       + (r.items ? ' · ' + r.items + ' items' : '')
       // Where it went, on the row rather than only inside it. This is what
       // turns the log from a list of figures into something a driver can read
@@ -1531,6 +1535,17 @@
   // days, so the headers go and what is left is the top of the pile. Rows
   // with no figure to rank on sink to the bottom rather than vanish — a row
   // missing from a ranked list looks like a row that was never recorded.
+  // The card's payout over the card's miles, nothing taken off: the owner's
+  // ask of 22 Oct, "sort by the raw $/mile so I can get an idea of what is a
+  // good rate". A way to READ the log, never a rule: the verdict, the state
+  // and the panel still judge by the hour (AUDITS.md, Settled: a $/mile rule
+  // measured 24% below $/hr on the replay). Null without both figures, or on
+  // a card under a tenth of a mile, whose ratio is a misread's.
+  function payPerMile(r) {
+    return typeof r.pay === 'number' && typeof r.miles === 'number' && r.miles >= 0.1
+      ? r.pay / r.miles : null;
+  }
+
   function ordered(found) {
     if (sortBy === 'newest') return found.slice(-LOG_MAX).reverse();
     var key = sortBy;
@@ -1541,7 +1556,10 @@
     // the page is out of the ranking too; it keeps its place at the bottom,
     // ranked among its own kind by the same figure — on a window where
     // every row was set aside, the ranking is still a ranking.
-    var rank = function (r) { return typeof r[key] === 'number' ? r[key] : -Infinity; };
+    var rank = function (r) {
+      var v = key === 'payPerMile' ? payPerMile(r) : r[key];
+      return typeof v === 'number' ? v : -Infinity;
+    };
     return found.slice().sort(function (a, b) {
       return ((counted(b) ? 1 : 0) - (counted(a) ? 1 : 0))
           || rank(b) - rank(a) || (b.at || 0) - (a.at || 0);

@@ -8585,7 +8585,7 @@ python3 rpi/test_dashboard.py   # 1388 on what the driving screen shows while a
 python3 rpi/test_layout.py      # 4336 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
-python3 rpi/test_offerspage.py  # 553 on the offers page as a driver reads it:
+python3 rpi/test_offerspage.py  # 556 on the offers page as a driver reads it:
                                 #     the search, the undo, the runs and the
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one

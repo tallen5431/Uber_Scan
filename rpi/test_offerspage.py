@@ -162,7 +162,9 @@ VERDICTS = [
     offer(4, accepted=True, pay=14.0, state='go'),      # $36/hr
     offer(5, pay=10.0, state='go'),                     # cleared, never ticked
     offer(6, accepted=True, pay=10.0, state='go', hidden=True),
-    offer(7, pay=10.0, state='no'),
+    # Two miles where the rest are six: $5.00 a mile, the top of "Best $/mi"
+    # where r4 tops pay and $/hr.
+    dict(offer(7, pay=10.0, state='no'), miles=2.0),
     # ...and one typed on the keypad. No verdict recorded, not ticked, so it
     # lands under no chip but All — and its row has to say what it is.
     dict(offer(8, pay=10.0), typed=True),
@@ -1210,10 +1212,14 @@ const TEXT = (sel) => {
         await page.waitForTimeout(250);
         out[name].picks[pick] = await peek();
       }
-      for (const sort of ['perHour', 'pay', 'minutes', 'newest']) {
+      for (const sort of ['perHour', 'pay', 'payPerMile', 'minutes', 'newest']) {
         await page.click('#sorts button[data-sort="' + sort + '"]');
         await page.waitForTimeout(250);
         out[name].picks['sort:' + sort] = await peek();
+        // The figure a row is ranked by, where the row shows one.
+        out[name].picks['sort:' + sort].ppm = await page.evaluate(() =>
+          [].slice.call(document.querySelectorAll('#log details.offer .ppm'))
+            .map((b) => (b.textContent || '').trim()));
       }
       // A chip and a ranking together, then a mark made inside the selection:
       // the list must stay selected and ranked through the redraw.
@@ -3298,6 +3304,14 @@ try:
     eq('Best $/hr ranks the list', p['sort:perHour']['rows'][0], 'r4')
     eq('...and a ranking has no days', p['sort:perHour']['days'], 0)
     eq('Highest pay ranks by the card', p['sort:pay']['rows'][0], 'r4')
+    # The owner, 22 Oct: "sort by the raw $/mile". Pay over the card's miles,
+    # nothing taken off; r7's $10.00 over 2 mi leads, then r4's $14.00 over 6,
+    # and each counted row says its figure. A way to read the log only.
+    eq('Best $/mi ranks by pay over the card\'s miles, nothing taken off',
+       p['sort:payPerMile']['rows'][:2], ['r7', 'r4'])
+    eq('...and each row says the figure it is ranked by, $/mi to the cent',
+       p['sort:payPerMile']['ppm'][:2], ['$5.00/mi', '$2.33/mi'])
+    eq('...and only under that ranking', p['sort:pay']['ppm'], [])
     ok_('Longest ranks by minutes, ties to newest (%s)' % p['sort:minutes']['rows'][:2],
         p['sort:minutes']['rows'][0] == 'r0')
     ok_('Newest restores the day headers', p['sort:newest']['days'] >= 1)
