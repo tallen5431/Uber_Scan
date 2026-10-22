@@ -4210,6 +4210,66 @@ try:
 finally:
     shutil.rmtree(_cdir, ignore_errors=True)
 
+# --- the delivery app's own screen from after a delivery ---------------------
+#
+# DoorDash's "This dash so far" over "This offer $X" (OP.delivered_screen): the
+# loop says it on its own line once while it stays up, offer-shaped as its
+# "$9.40" makes it, and the server decides whether an order goes. Every name
+# and figure is invented.
+_DONE_TEXT = ('Fable Market .\nThis dash so far\n© Total online time 31 min\n'
+              '() Offers accepted 1 out of 6\nThis offer v $9.40\nContinue dashing')
+_done_reads = []
+
+
+def _completion_look(self, frames, now=None, geom=None):
+    """The phone showing DoorDash's completion screen on every read."""
+    _done_reads.append(time.time())
+    parsed = OP2.parse(_DONE_TEXT)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': _DONE_TEXT, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+_delivered = []
+_real_delivered = SP.emit_delivered
+SP.emit_delivered = lambda said, at=None: _delivered.append((dict(said), at))
+try:
+    _done_run = run(TC.uberx_screen(), seconds=20.0, vanish_at=10_000.0,
+                    extra_argv=['--no-parallel'], look=_completion_look,
+                    until=lambda st: len(_done_reads) >= 4)
+finally:
+    SP.emit_delivered = _real_delivered
+ok_('(the completion screen was read more than once: %d reads)' % len(_done_reads),
+    len(_done_reads) >= 2)
+eq('the completion screen, read again and again, is said once, with its app and its pay',
+   [(d.get('app'), d.get('screen'), d.get('pay'), d.get('name')) for d, _ in _delivered],
+   [('doordash', 'dd.delivered', 9.4, None)])
+ok_('...stamped with when its frame was taken, in ms',
+    bool(_delivered) and isinstance(_delivered[0][1], int)
+    and abs(_delivered[0][1] / 1000.0 - _done_reads[0]) < 30)
+
+# One screen left up is one line; the same app's next screen, after a gap, is
+# another; the other app's is its own.
+_ds = SP.DeliveredSaid()
+eq('a completion screen is new the first time, not while it stays up, and new again '
+   'after DELIVERED_GAP_S without one; the other app keeps its own clock',
+   [_ds.fresh('doordash', 100.0), _ds.fresh('doordash', 101.0),
+    _ds.fresh('doordash', 100.0 + SP.DELIVERED_GAP_S),
+    _ds.fresh('doordash', 100.0 + 2 * SP.DELIVERED_GAP_S),
+    _ds.fresh('uber', 100.0 + 2 * SP.DELIVERED_GAP_S + 1),
+    _ds.fresh('doordash', 100.0 + 2 * SP.DELIVERED_GAP_S + 1)],
+   [True, False, False, True, True, False])
+_grab = io.StringIO()
+with contextlib.redirect_stdout(_grab):
+    SP.emit_delivered({'app': 'uber', 'screen': 'uber.delivered', 'pay': 7.45,
+                       'name': 'Fable K.'}, at=1234)
+eq('the delivered line: app, screen, pay, name and the frame\'s time, no verdict',
+   json.loads(_grab.getvalue()),
+   {'delivered': {'app': 'uber', 'screen': 'uber.delivered', 'pay': 7.45,
+                  'name': 'Fable K.', 'at': 1234}})
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

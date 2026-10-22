@@ -4075,6 +4075,10 @@ def place_popup(text):
 #                  offer wait", "likely to get offers".
 #   uber.finding   Uber idle: "Finding trips", "You're online", and the map's
 #                  Trip Radar button with no offer under it.
+#   dd.delivered   DoorDash's screen AFTER a delivery is completed: "This
+#   uber.delivered dash so far" over "This offer $8.95" (and Uber's "Delivery
+#                  completed", a shape no file on record holds). See
+#                  delivered_screen, which says what each rests on.
 #   unknown        Anything else, including screens the shift shows and this
 #                  list has no name for: DoorDash's "Are you sure you want to
 #                  decline this offer?", and a "Pickup from <store> /
@@ -4093,8 +4097,8 @@ def place_popup(text):
 # minutes are its own, while "Guaranteed (incl. tip" is on both and decides
 # nothing alone.
 SCREENS = ('uber.offer', 'uber.addon', 'uber.planner', 'uber.pickupNav',
-           'uber.nav', 'uber.finding', 'tripRadar', 'dd.offer', 'dd.finding',
-           'dd.switch', 'dd.placePopup', 'unknown')
+           'uber.nav', 'uber.finding', 'uber.delivered', 'tripRadar', 'dd.offer',
+           'dd.finding', 'dd.switch', 'dd.placePopup', 'dd.delivered', 'unknown')
 SCREEN_DD_SWITCH = re.compile(r"switch to dash|busier zone|don.?t switch",
                               re.IGNORECASE | ASCII)
 SCREEN_PLANNER = re.compile(r'^[^A-Za-z0-9]{0,3}(?:trip ?planner|address|stop new requests'
@@ -4168,6 +4172,84 @@ SCREEN_DD_FINDING = re.compile(r'finding offers|wait for offers|zone offer wait'
                                r'|likely to get offers', re.IGNORECASE | ASCII)
 SCREEN_UBER_FINDING = re.compile(r"finding trips|\by?ou.?re online", re.IGNORECASE | ASCII)
 
+# The delivery app's own word that a delivery is DONE: the screen it shows
+# after the driver completes one. server.js puts the order down on it, behind
+# `"screenDrop": true` (see deliveredArrived there); this only reads it.
+#
+# What is on record, searched 22 Oct 2026 over the Sep week's 23,693 distinct
+# frame texts and the 12, 16 and 19 Oct shift journals' screen rows (1,701 in
+# the 19 Oct file, which holds the other two): ONE completion screen, DoorDash's,
+# read four times in one delivery in September —
+#
+#     This dash so far / Total online time 25 min / Offers accepted 1 out of 7
+#     / This offer v $8.95 / Continue dashing
+#
+# — and no Uber completion screen at all. Screen rows are only the frames read
+# after a card, so the shifts' silence is not evidence that none was shown.
+#
+# DoorDash: "This dash so far" AND "This offer $X" on one screen, the two lines
+# all four reads carry ("Continue dashing" was cut off one). Not "This offer
+# $X" alone: DoorDash's pane DURING a task prints it too, over "This dash
+# $0.00", "Current task", "Deliver to <name>", "9 min to complete" and "Pause
+# orders after delivery" (two reads on record), which is before the drop. Not
+# "Dash summary": that is the end of the dash, shown with or without a
+# delivery before it.
+#
+# Uber: "Delivery completed" or "Trip completed" on one line, the word order
+# that is not the slider. Public knowledge, not a reading: no file on record
+# holds it, which is why the put-down is off until a snap of the real screen
+# says what it prints. Refused with DoorDash's own words on the screen
+# (DELIVERED_NOT_UBER). Not "You earned $X" (a Quest or the week's earnings
+# says it at any time) and not "Rate"/"How was" (Uber asks about the store
+# after the PICKUP).
+#
+# Never with anything that comes BEFORE the drop on the same screen
+# (DELIVERED_NOT): Uber's "Complete delivery" slider, "Enter delivery PIN"
+# and "Confirm order" — all three read on the 19 Oct shift's navigation screen
+# or the store's — DoorDash's task pane, and the dash's summary. One line at a
+# time ([ \t], never \s): "...after delivery" over "Complete delivery" is not
+# "delivery complete".
+DELIVERED_DD = re.compile(r'this[ \t]*dash[ \t]*so[ \t]*far', re.IGNORECASE | ASCII)
+DELIVERED_DD_PAY = re.compile(r'this[ \t]*offer\b[^\n$\d]{0,6}\$[ \t]?(\d{1,3}[.,]\d{2})\b',
+                              re.IGNORECASE | ASCII)
+DELIVERED_UBER = re.compile(r'\b(?:delivery|trip)[ \t]+completed?\b', re.IGNORECASE | ASCII)
+DELIVERED_NOT = re.compile(
+    r'complete[ \t]*delivery|delivery[ \t]*pin|confirm[ \t]*order|current[ \t]*task'
+    r'|to[ \t]+complete\b|pause[ \t]*orders|\bdeliver(?:ing)?[ \t]+to\b|dash[ \t]*summary'
+    r'|\bswipe\b|\bslide[ \t]+to\b', re.IGNORECASE | ASCII)
+DELIVERED_NOT_UBER = re.compile(r'\bdash(?:er|ing)?\b|door[ \t]*dash', re.IGNORECASE | ASCII)
+# The customer, where the screen names one: "Delivered to <Name>", the first
+# name and an initial as the apps print them. Only ever a cue between two
+# orders of one app in the car (server.js); it does not make the screen.
+DELIVERED_TO = re.compile(r"\b[Dd]elivered[ \t]+[Tt]o[ \t]+([A-Z][A-Za-z'-]{1,20}"
+                          r"(?:[ \t]+[A-Z][A-Za-z]{0,20}\.?)?)", ASCII)
+DELIVERED_AMOUNT = re.compile(r'\$[ \t]?(\d{1,3}[.,]\d{2})\b', ASCII)
+
+
+def delivered_screen(text):
+    """{'app', 'screen', 'pay', 'name'} when `text` is a delivery app's screen
+    from AFTER a delivery was completed, else None. `pay` is the figure the
+    screen gives the delivery (DoorDash's "This offer $X"; Uber's one dollar
+    figure, when it prints exactly one), `name` the customer it names. Both
+    None where not printed. See DELIVERED_DD above for what each shape rests
+    on, and for every screen refused because it comes before the drop."""
+    text = str(text or '')
+    if DELIVERED_NOT.search(text):
+        return None
+    name = DELIVERED_TO.search(text)
+    name = name.group(1).strip() if name else None
+    if DELIVERED_DD.search(text):
+        pay = DELIVERED_DD_PAY.search(text)
+        if pay is None:
+            return None
+        return {'app': 'doordash', 'screen': 'dd.delivered',
+                'pay': float(pay.group(1).replace(',', '.')), 'name': name}
+    if DELIVERED_UBER.search(text) and not DELIVERED_NOT_UBER.search(text):
+        amounts = set(float(a.replace(',', '.')) for a in DELIVERED_AMOUNT.findall(text))
+        return {'app': 'uber', 'screen': 'uber.delivered',
+                'pay': amounts.pop() if len(amounts) == 1 else None, 'name': name}
+    return None
+
 
 def nav_without_bar(text):
     """`text` with every line carrying Uber's navigation bar (NAV_BAR) taken
@@ -4209,6 +4291,13 @@ def _screen(text):
     lines = [normalize(l) for l in re.split(r'[\r\n]+', text)]
     if find_planner(text) is not None or any(SCREEN_PLANNER.match(l) for l in lines):
         return 'uber.planner'
+    # After the offers, as an offer card lands on top of it; before DoorDash's
+    # other screens, whose words ("this dash so far") it carries.
+    done = delivered_screen(text)
+    if done is not None and done['app'] == 'doordash':
+        return 'dd.delivered'
+    if done is not None:
+        return 'uber.delivered'
     if SCREEN_DD_ELSEWHERE.search(text):
         return 'unknown'
     if SCREEN_PICKUP_NAV.search(text):
@@ -4285,11 +4374,18 @@ def _screen(text):
 # sits over the map behind an offer card too, and bleeds into the card's own
 # reading: it is on 308 offer rows, 169 offers, two of them on 12 Oct alone. Nor
 # a bare "online", which an Uber Reserve card prints as "Be online by".
+#
+# And DoorDash's screen after a delivery (delivered_screen): "This offer $8.95"
+# read as the payout and "Total online time 25 min" as the minutes, so the one
+# on record (30 Aug 2026) went on the journal as an offer, WARN, ready for a
+# ✓ Took. "This dash so far" is on its four reads and on no other of the
+# 26,039 distinct texts the 19 Oct journal holds.
 NOT_AN_OFFER = re.compile(
     r'add\s*stops'                 # Uber's route planner
     r'|finding\s*offers'           # DoorDash, with no offers to show
     r'|you(?:\W{0,3}re|\s*are)\s*online'   # Uber's online map, waiting
-    r'|finding\s*trips',           # ...and the same sheet while it searches
+    r'|finding\s*trips'            # ...and the same sheet while it searches
+    r'|this\s*dash\s*so\s*far',    # DoorDash, after a delivery (delivered_screen)
     re.IGNORECASE | ASCII)
 
 

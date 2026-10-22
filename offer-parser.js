@@ -2212,8 +2212,8 @@
      shift measured: see screen_type in offer_parser.py. rpi/test_lint.py
      holds the two SCREENS lists equal. */
   var SCREENS = ['uber.offer', 'uber.addon', 'uber.planner', 'uber.pickupNav',
-                 'uber.nav', 'uber.finding', 'tripRadar', 'dd.offer', 'dd.finding',
-                 'dd.switch', 'dd.placePopup', 'unknown'];
+                 'uber.nav', 'uber.finding', 'uber.delivered', 'tripRadar', 'dd.offer',
+                 'dd.finding', 'dd.switch', 'dd.placePopup', 'dd.delivered', 'unknown'];
   var SCREEN_DD_SWITCH = /switch to dash|busier zone|don.?t switch/i;
   var SCREEN_PLANNER = /^[^A-Za-z0-9]{0,3}(?:trip ?planner|address|stop new requests|way ?[A-Za-z]? ?bill)\b/i;
   var SCREEN_RADAR = /\btrip ?radar\b/i;
@@ -2259,6 +2259,45 @@
   var SCREEN_DD_FINDING = /finding offers|wait for offers|zone offer wait|likely to get offers/i;
   var SCREEN_UBER_FINDING = /finding trips|\by?ou.?re online/i;
 
+  /* The delivery app's own word that a delivery is DONE, read off the screen
+     it shows after one: {app, screen, pay, name}, or null. What each shape
+     rests on (one DoorDash screen on record; no Uber one), and every screen
+     refused because it comes before the drop: see delivered_screen in
+     offer_parser.py. */
+  var DELIVERED_DD = /this[ \t]*dash[ \t]*so[ \t]*far/i;
+  var DELIVERED_DD_PAY = /this[ \t]*offer\b[^\n$\d]{0,6}\$[ \t]?(\d{1,3}[.,]\d{2})\b/i;
+  var DELIVERED_UBER = /\b(?:delivery|trip)[ \t]+completed?\b/i;
+  var DELIVERED_NOT = new RegExp(
+    'complete[ \\t]*delivery|delivery[ \\t]*pin|confirm[ \\t]*order|current[ \\t]*task'
+    + '|to[ \\t]+complete\\b|pause[ \\t]*orders|\\bdeliver(?:ing)?[ \\t]+to\\b|dash[ \\t]*summary'
+    + '|\\bswipe\\b|\\bslide[ \\t]+to\\b', 'i');
+  var DELIVERED_NOT_UBER = /\bdash(?:er|ing)?\b|door[ \t]*dash/i;
+  var DELIVERED_TO = /\b[Dd]elivered[ \t]+[Tt]o[ \t]+([A-Z][A-Za-z'-]{1,20}(?:[ \t]+[A-Z][A-Za-z]{0,20}\.?)?)/;
+  var DELIVERED_AMOUNT = /\$[ \t]?(\d{1,3}[.,]\d{2})\b/g;
+
+  function deliveredScreen(text) {
+    text = String(text || '');
+    if (DELIVERED_NOT.test(text)) return null;
+    var named = DELIVERED_TO.exec(text);
+    var name = named ? named[1].trim() : null;
+    if (DELIVERED_DD.test(text)) {
+      var pay = DELIVERED_DD_PAY.exec(text);
+      if (pay === null) return null;
+      return { app: 'doordash', screen: 'dd.delivered',
+               pay: parseFloat(pay[1].replace(',', '.')), name: name };
+    }
+    if (DELIVERED_UBER.test(text) && !DELIVERED_NOT_UBER.test(text)) {
+      var amounts = [];
+      (text.match(DELIVERED_AMOUNT) || []).forEach(function (a) {
+        var v = parseFloat(a.replace(/^\$[ \t]?/, '').replace(',', '.'));
+        if (amounts.indexOf(v) === -1) amounts.push(v);
+      });
+      return { app: 'uber', screen: 'uber.delivered',
+               pay: amounts.length === 1 ? amounts[0] : null, name: name };
+    }
+    return null;
+  }
+
   function screenType(text) {
     var screen = screenOf(String(text || ''));
     return { app: /^dd\./.test(screen) ? 'doordash' : screen === 'unknown' ? null : 'uber',
@@ -2277,6 +2316,11 @@
     var lines = text.split(/[\r\n]+/).map(normalize);
     if (findPlanner(text) !== null
         || lines.some(function (l) { return SCREEN_PLANNER.test(l); })) return 'uber.planner';
+    // After the offers, as an offer card lands on top of it; before DoorDash's
+    // other screens, whose words ("this dash so far") it carries.
+    var done = deliveredScreen(text);
+    if (done !== null && done.app === 'doordash') return 'dd.delivered';
+    if (done !== null) return 'uber.delivered';
     if (SCREEN_DD_ELSEWHERE.test(text)) return 'unknown';
     if (SCREEN_PICKUP_NAV.test(text)) return 'uber.pickupNav';
     if (SCREEN_NAV.test(text)) return 'uber.nav';
@@ -2336,7 +2380,7 @@
    * corpus's map-noise frame. NOT "Trip Radar": the pill bleeds into offer
    * cards read over the map, 308 offer rows of it. See NOT_AN_OFFER in
    * rpi/offer_parser.py, which the shared corpus holds this to. */
-  var NOT_AN_OFFER = /add\s*stops|finding\s*offers|you(?:\W{0,3}re|\s*are)\s*online|finding\s*trips/i;
+  var NOT_AN_OFFER = /add\s*stops|finding\s*offers|you(?:\W{0,3}re|\s*are)\s*online|finding\s*trips|this\s*dash\s*so\s*far/i;
 
   var DROPOFF_NOT_STATED = /custom[ea]r\s*drop\s*-?\s*off/i;
 
@@ -4045,7 +4089,7 @@
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
            plannerTitled: plannerTitled, plannerLaidOut: plannerLaidOut,
            plannerFramed: plannerFramed, plannerFoot: plannerFoot,
-           screenType: screenType, SCREENS: SCREENS,
+           screenType: screenType, SCREENS: SCREENS, deliveredScreen: deliveredScreen,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,
            /* Exported so the default can be checked directly. Everything that

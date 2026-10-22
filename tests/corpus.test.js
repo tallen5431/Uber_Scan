@@ -132,6 +132,14 @@ function stopFields(stops) {
      JSON.stringify([c.expect.app, c.expect.screen]));
 });
 
+/* The delivery app's own screen from after a delivery: {app, screen, pay,
+   name} or null. The same cases rpi/test_parser.py runs. See delivered_screen
+   in offer_parser.py. */
+(cases.delivered || []).forEach(function (c) {
+  eq('delivered / ' + c.name, JSON.stringify(P.deliveredScreen(c.text)),
+     JSON.stringify(c.expect));
+});
+
 /* Uber's opened navigation sheet: its address over "Dropoff type", with the
    customer's name above, or null. The same cases rpi/test_parser.py runs.
    See sheet_dropoff in offer_parser.py. */

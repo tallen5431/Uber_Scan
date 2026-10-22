@@ -309,6 +309,15 @@
    }
   },
   {
+   "name": "DoorDash's screen after a delivery is not an offer, whatever its pay and its online time read as",
+   "_why": "The one completion screen on record (30 Aug 2026) went on the journal as an offer: “This offer $8.95” the payout and “Total online time 25 min” its minutes, WARN. “This dash so far” is on its four reads and on no other text of the 26,039 on file. Text made up in that shape.",
+   "text": "Fable Market .\nThis dash so far\n© Total online time 31 min\n() Offers accepted 1 out of 6\nThis offer v $9.40\nContinue dashing",
+   "expect": {
+    "pay": 9.4,
+    "notAnOffer": true
+   }
+  },
+  {
    "name": "nor is any bare number-plus-m",
    "text": "$8.00 Rau WeS 34 m AC a RRC",
    "expect": {
@@ -7011,6 +7020,98 @@
     "app": "uber",
     "screen": "uber.nav"
    }
+  },
+  {
+   "name": "DoorDash's screen after a delivery: this dash so far over this offer's pay, ahead of the dash's other words",
+   "text": "\\ or oe\nWren Noodles ~\nFable Market\n® ae\nThis dash so far\n© Total online time 31 min\n® Offers accepted 2 out of 6\nThis offer v $9.40\nContinue dashing",
+   "expect": {
+    "app": "doordash",
+    "screen": "dd.delivered"
+   }
+  },
+  {
+   "name": "Uber's screen after a delivery, as public knowledge says it reads (no reading of one is on record)",
+   "text": "Delivery completed\nDelivered to Fable K.\n$7.45",
+   "expect": {
+    "app": "uber",
+    "screen": "uber.delivered"
+   }
+  },
+  {
+   "name": "...and an offer card landed over it is the offer",
+   "text": "This dash so far\nThis offer v $9.40\n$6.10 Guaranteed (incl. tips)\n4.2 mi + 21 min\nCustomer dropoff",
+   "expect": {
+    "app": "doordash",
+    "screen": "dd.offer"
+   }
+  }
+ ],
+ "_delivered_comment": "The delivery app's own screen from AFTER a delivery is completed: delivered_screen / deliveredScreen, {app, screen, pay, name} or null. DoorDash's shape is the one completion screen on record (30 Aug 2026, four reads of one delivery): 'This dash so far' with 'This offer $X' under it. Uber's has no reading on record and is public knowledge only. The traps are the screens that come BEFORE the drop, each refused: Uber's 'Complete delivery' slider, 'Enter delivery PIN' and 'Confirm order' (the 19 Oct shift's layouts), DoorDash's task pane, which prints 'This offer $X' too, and the dash's summary. Every name, store, street and figure is invented.",
+ "delivered": [
+  {
+   "name": "DoorDash after a delivery, with the reader's marks round it",
+   "text": "Ww e —\n; i Wren Noodles ~\nFable Market 4\nYd @ 92\nThis dash so far\n© Total online time 31 min\n® Offers accepted lout of 6\nThis offer v $9.40\nshing",
+   "expect": {"app": "doordash", "screen": "dd.delivered", "pay": 9.4, "name": null}
+  },
+  {
+   "name": "...and with its button read whole",
+   "text": "Fable Market .\nThis dash so far\n© Total online time 31 min\n() Offers accepted 1 out of 6\nThis offer v $12.05\nContinue dashing",
+   "expect": {"app": "doordash", "screen": "dd.delivered", "pay": 12.05, "name": null}
+  },
+  {
+   "name": "DoorDash's pane DURING a task prints this offer's pay too, and is before the drop",
+   "text": "f Pickup for Fable K\na by 7:09 PM - Wren Noodles\nCurrent task\nDeliver to Fable K\na 9 min to complete 2\n00 Pause orders after delivery\nEarnings\nThis offer $8.00\nThis dash $0.00",
+   "expect": null
+  },
+  {
+   "name": "...and its pay alone, with the pane's other words lost, is no completion either",
+   "text": "Earnings\nThis offer $8.00\nThis dash $0.00",
+   "expect": null
+  },
+  {
+   "name": "this dash so far with no offer's pay under it says nothing of a delivery",
+   "text": "This dash so far\n© Total online time 31 min\nContinue dashing",
+   "expect": null
+  },
+  {
+   "name": "the dash's summary is its end, with or without a delivery",
+   "text": "Dash summary\n© Total online time 51 min\n© Offers accepted 1 out of 9\n@ Earnings this week $106.60\nThis dash so far\nThis offer $8.95",
+   "expect": null
+  },
+  {
+   "name": "Uber's delivery completed, its customer and its one figure",
+   "text": "Delivery completed\nDelivered to Fable K.\n$7.45",
+   "expect": {"app": "uber", "screen": "uber.delivered", "pay": 7.45, "name": "Fable K."}
+  },
+  {
+   "name": "...trip completed with two figures gives no pay, and no name where none is printed",
+   "text": "Trip completed\n$7.45\nTip $2.00",
+   "expect": {"app": "uber", "screen": "uber.delivered", "pay": null, "name": null}
+  },
+  {
+   "name": "Uber's navigation with the slider and the PIN is before the drop",
+   "text": "Business / Building name\nNorth Parking Deck\nDropoff type\nMeet outside\nDrop off 1 order »\n3D046\nFable Deli - 1 item\nExpected by 12:30 AM\nVerify - Enter delivery PIN\nComplete delivery",
+   "expect": null
+  },
+  {
+   "name": "...and the slider's words on a line under one ending in delivery are not delivery complete",
+   "text": "Drop off 1 order after delivery\nComplete delivery",
+   "expect": null
+  },
+  {
+   "name": "the store's screen, Confirm order, is before the drop",
+   "text": "Pick up order\nWren Noodles\nConfirm order\nTrip completed",
+   "expect": null
+  },
+  {
+   "name": "a Quest's trips completed is not a trip completed",
+   "text": "Trip Quest - 1/1 trips completed\n$18.03",
+   "expect": null
+  },
+  {
+   "name": "delivery completed with DoorDash's own words on the screen is not Uber's",
+   "text": "Delivery completed\nDasher pay $6.10",
+   "expect": null
   }
  ],
  "_navStops_comment": "What a navigation or \"Deliver to\" screen gives as the order's destination when nobody pressed ⌖: the screen type, find_address's line (null for none), the stop label in front of it (address_stop: 'dropoff', 'pickup' or null), whether it sits in that Dropoff label's own block (address_under_dropoff), and whether parse() reads the frame as an offer (a payout or a place: the test the scanner's `an_offer` starts from, which refuses the address before any label is asked; on a frame typed uber.nav with no payout the scanner asks it again with the bar taken out, rpi/scan_pi.py screen_address). `expect` is [screen, line, stop, under, asOffer]; tests/corpus.test.js holds screen, line and asOffer, the two label answers having no JavaScript port. The layouts are the 12 Oct shift's card-box reads of Uber's navigation, 179 of its 1,237 screen rows: the collapsed bar prints \"Deliver to\" over a NAME (36 reads), the opened sheet prints the name, the street and the town with no ZIP and its one label, \"Dropoff type\", BELOW them (18 reads), and a store's navigation prints its address with a ZIP under no label. Not one of the 179 has an address under either label. The cases that do are marked as shapes the shift did not show. The opened sheet's address is read by sheet_dropoff instead (`sheets`): the owner decided on 14 Oct that its 'Dropoff type', below the address, is its label. Every name, street, number and store is invented.",
