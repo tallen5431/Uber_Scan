@@ -9485,10 +9485,18 @@ def _ontime(name, deliver_by, pinned=True, minutes=30.0, more=None, planner=None
         read = _ssread(12.05, 6.0)
         _say(read)
         if planner_first is not None:
-            # A Trip Planner read BEFORE the offer: the card that follows
-            # forgets the planner, and what it filed on the hold stays.
-            _say({'planner': {'stops': planner_first, 'unfiled': None, 'asked': False}})
-            time.sleep(0.5)
+            # A Trip Planner read BEFORE the offer, as the scanner sends one:
+            # its sighting (which the assembler files from), then its line.
+            # The card that follows forgets the planner; what it filed stays.
+            at = int(time.time() * 1000)
+            _say({'sighting': {'at': at, 'asked': False, 'whole': True, 'titled': True,
+                               'app': 'uber', 'screen': 'uber.planner',
+                               'page': {'top': True, 'bottom': True}, 'stops': planner_first,
+                               'orderCount': 1, 'keep': False}},
+                 {'planner': {'stops': [{k: v for k, v in s.items()
+                                         if k not in ('partial', 'label')}
+                                        for s in planner_first],
+                              'keep': False, 'asked': False, 'ms': None, 'at': at}})
         _say(_card('ot-b', 12.05, minutes=minutes,
                    pickup='Example Grill (250 Example Road)',
                    dropoff='1106 Tamarons Lane, Marietta, GA 30064', **_OTFIX))
@@ -9589,7 +9597,9 @@ eq('[on time] the planner\'s Expected by for the held order\'s stop is its deadl
 # ...and read before the offer came: the offer's card forgets the planner, the
 # Expected by it filed on the hold with the end (fields.expectedBy) stands.
 _otpf = _ontime('ontime-planner-first', (_NOWMIN + 40) % 1440, planner_first=[
-    {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'line': _OTEND, 'expectedBy': _NOWMIN}])
+    {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'place': None, 'expectedBy': _NOWMIN,
+     'street': '1106 Brindlewood Way', 'city': 'Marietta', 'state': 'GA', 'zip': '30060',
+     'line': _OTEND, 'partial': None, 'label': 'dropoff'}])
 eq('[on time] the planner read before the offer, forgotten at its card: the Expected by it '
    'filed on the hold is still the deadline, ① late',
    _otpf['stack']['onTime'], 'late1')
