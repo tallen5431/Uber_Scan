@@ -446,6 +446,13 @@ function startScanner() {
           popupArrived(read.popup, Date.now());
           return;
         }
+        // The delivery app's own screen from after a delivery (rpi/scan_pi.py,
+        // emit_delivered): a put-down, or the Drop chooser, for an order of
+        // that app in the car. See deliveredArrived.
+        if (read.delivered) {
+          deliveredArrived(read.delivered, Date.now());
+          return;
+        }
         if (read.phase) {
           scanner.phase = read.phase;
           scanner.status = read;
@@ -4049,6 +4056,166 @@ function planAtOf(stops, h) {
     }
   });
   return at.length === 1 ? at[0] : null;
+}
+
+/* ---------- put down by the delivery app's own screen ----------------------
+ *
+ * The owner, 22 Oct 2026: make it more hands-free. An order goes by the GPS
+ * (stopped at the door, then gone) or by Drop, and many doors never arm (no
+ * house number), so Drop is pressed at the door. This is a second positive
+ * put-down: the app's own screen from AFTER the delivery was completed
+ * (offer_parser.delivered_screen, sent once while it stays up by
+ * rpi/scan_pi.py's emit_delivered). Never an accept, and nothing at all with
+ * no order of that app in the car.
+ *
+ * Behind `"screenDrop": true` in rpi/config.json's settings, false unless it
+ * says exactly true; SCREEN_DROP=1 or 0 overrides it, for the suites. OFF by
+ * default because of what is on record: one DoorDash completion screen (30
+ * Aug, four reads of one delivery) and no Uber one at all, the Uber shape
+ * being public knowledge only. A snap of each app's real screen is what turns
+ * it on. Off, every screen still writes its `delivered` row, saying what it
+ * WOULD have done, so a shift can be held against the driver's own Drops.
+ *
+ * WHICH ORDER, by positive cues only, as with an address (Assemble.attribute):
+ *   - the app must match — an order whose app is unknown is no match;
+ *   - a screen whose frame was taken before an order's Took is not that
+ *     order's (the assembler's own rule);
+ *   - with two or more of that app, the customer the screen names
+ *     ("Delivered to <name>") against each order's own (customersOf): exactly
+ *     one match is the cue;
+ *   - otherwise the one order of that app it can be about — the only one, or
+ *     the only one taken before its frame (cue 'only', 'took') — unless the
+ *     screen names a customer and that order's known customer is someone else.
+ * With two or more and no cue, the Drop chooser opens on the panel — the one
+ * Drop's own press opens (live.html openChooser, kind 'drop'), whose answer
+ * comes back through /api/delivered as `by: 'chooser'` — and nothing is put
+ * down unless the driver picks; left alone it closes and nothing goes.
+ *
+ * ONE PUT-DOWN PER SCREEN: an app's screen said again within
+ * SCREEN_DROP_QUIET_MS of the last one taken up is the same screen lingering,
+ * and does nothing, not even a row — otherwise, with two of an app held, the
+ * first put down would leave the second "the only order of that app" for the
+ * same screen, and an order taken while it is up would go by it.
+ * Chosen, not measured, like the scanner's own DELIVERED_GAP_S.
+ *
+ * The drop row is putDown's, `by: 'screen'`. The `delivered` row: {v, kind,
+ * at, id, seq, app, pay, held, would, cue, holdId, acted}, `pay` the figure
+ * the screen printed (null for none), `held` how many orders of that app were
+ * in the car, `would` 'put down', 'chooser', 'nothing held', 'before the
+ * Took' or 'another customer'. No name: the customer stays off the journal. */
+var SCREEN_DROP_QUIET_MS = envNumber('SCREEN_DROP_QUIET_MS', 120000);
+var screenDropQuiet = {};
+var screenDropSeen = null;
+
+function screenDrop() {
+  var env = process.env.SCREEN_DROP;
+  if (env === '1') return true;
+  if (env === '0') return false;
+  var file = path.join(ROOT, 'rpi', 'config.json');
+  var st;
+  try { st = fs.statSync(file); } catch (e) { screenDropSeen = null; return false; }
+  var c = screenDropSeen;
+  if (c && c.mtime === st.mtimeMs && c.size === st.size && c.ino === st.ino) return c.on;
+  var on = false;
+  try {
+    var cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+    on = !!(cfg && cfg.settings && cfg.settings.screenDrop === true);
+  } catch (e) {
+    on = false;
+  }
+  screenDropSeen = { mtime: st.mtimeMs, size: st.size, ino: st.ino, on: on };
+  return on;
+}
+
+// A customer's name as two readings of it can agree: its letters, lower case,
+// at least three of them. "Pat Q." and "PatQ" are one name.
+function customerKey(name) {
+  var k = String(name || '').toLowerCase().replace(/[^a-z]/g, '');
+  return k.length >= 3 ? k : null;
+}
+
+/* The customers an order in the car is known to be going to, as customerKey
+ * gives them: the customer its end was filed with (Assemble.file keeps the
+ * planner stop's name on the hold's fields, so it outlives the planner, which
+ * the next offer card forgets), its own dropoff stop on the Trip Planner still
+ * on record (planAtOf, the stop on its end's street), and each door of a
+ * batched trip. */
+function customersOf(h, stops) {
+  var names = [];
+  var filed = h.fields && h.fields.customer;
+  if (filed && typeof filed === 'object') names.push(filed.value);
+  var at = planAtOf(stops, h);
+  if (at !== null && stops[at]) names.push(stops[at].name);
+  (Array.isArray(h.drops) ? h.drops : []).forEach(function (d) {
+    if (d) names.push(d.name);
+  });
+  return names.map(customerKey).filter(Boolean);
+}
+
+/* Whose delivery a completion screen of `app` is, among `orders` (heldOrders):
+ * {would, pick, cue, mine, among}, `pick` the orders to put down, `mine` that
+ * app's, and for the chooser `among`, those of them taken before the frame. */
+function screenPick(app, name, at, orders) {
+  var mine = orders.filter(function (o) { return o.app === app; });
+  if (!mine.length) return { would: 'nothing held', pick: null, cue: null, mine: mine };
+  var after = mine.filter(function (o) { return typeof o.tookAt !== 'number' || at >= o.tookAt; });
+  if (!after.length) return { would: 'before the Took', pick: null, cue: null, mine: mine };
+  var stops = orders[0] && orders[0].planner && Array.isArray(orders[0].planner.stops)
+    ? orders[0].planner.stops : [];
+  var key = customerKey(name);
+  var named = key ? after.filter(function (o) {
+    return customersOf(o, stops).indexOf(key) !== -1;
+  }) : [];
+  if (named.length === 1) return { would: 'put down', pick: named, cue: 'name', mine: mine };
+  // ...the one order of that app the screen can be about: the only one, or
+  // the only one taken before its frame.
+  if (after.length === 1) {
+    if (key && customersOf(after[0], stops).length) {
+      return { would: 'another customer', pick: null, cue: null, mine: mine };
+    }
+    return { would: 'put down', pick: after, cue: mine.length === 1 ? 'only' : 'took',
+             mine: mine };
+  }
+  return { would: 'chooser', pick: null, cue: null, mine: mine, among: after };
+}
+
+function deliveredArrived(said, now) {
+  var app = said && (said.app === 'uber' || said.app === 'doordash') ? said.app : null;
+  if (!app) return;
+  if (screenDropQuiet[app] !== undefined && now < screenDropQuiet[app]) return;
+  screenDropQuiet[app] = now + SCREEN_DROP_QUIET_MS;
+  var at = typeof said.at === 'number' && isFinite(said.at) ? said.at : now;
+  var orders = heldOrders(now);
+  var p = screenPick(app, typeof said.name === 'string' ? said.name : null, at, orders);
+  var on = screenDrop();
+  appendLines(JSON.stringify({
+    v: 1, kind: 'delivered', at: now, id: 'delivered-' + now, seq: 1, app: app,
+    pay: numOrNull(said.pay), held: p.mine.length, would: p.would, cue: p.cue,
+    holdId: p.pick && p.pick.length === 1 ? holdIdOf(p.pick[0]) : null,
+    acted: on && (p.would === 'put down' || p.would === 'chooser')
+  }) + '\n', function (err) {
+    if (err) console.error('journal: could not record a completion screen: ' + err.message);
+  });
+  if (!on) return;
+  if (p.would === 'chooser') {
+    broadcast({ chooser: { kind: 'drop', closesInMs: CHOOSER_MS, by: 'screen',
+                           rows: p.among.map(function (o) {
+                             return { pick: holdIdOf(o), n: orders.indexOf(o) + 1,
+                                      pay: numOrNull(o.pay), end: o.dropoff || null };
+                           }) } });
+    return;
+  }
+  if (p.would !== 'put down') return;
+  var gone = p.pick[0];
+  putDown(now, 'screen', function () {
+    var left = holding(Date.now());
+    // The panel takes the hold off this message as it takes an expiry off a
+    // beat (live.html, a message carrying `holding` and no `ready`).
+    var out = { screenDrop: { at: now, app: app, holdId: holdIdOf(gone), pay: numOrNull(gone.pay) },
+                holding: heldForPanel(left) };
+    if (left && carryingTwo(Date.now())) out.orders = ordersForPanel(Date.now());
+    broadcast(out);
+  }, p.pick);
 }
 
 /* ---------- on time for both: the owner's decision of 20 Oct 2026 ----------

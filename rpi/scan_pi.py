@@ -2938,6 +2938,46 @@ def emit_popup(popup, at=None):
         'at': at if at is not None else int(time.time() * 1000)}}), flush=True)
 
 
+# How long an app's completion screen must have been gone before it is said
+# again: the screen stays up until the driver taps on, and is read on every
+# beat it stays. Chosen, not measured — the one screen on record was read four
+# times in a second — and the server keeps its own quiet window as well
+# (SCREEN_DROP_QUIET_MS), so a flicker cannot put down a second order.
+DELIVERED_GAP_S = 60.0
+
+
+class DeliveredSaid(object):
+    """Whether a completion screen read now is a new one to say, by app: yes
+    the first time, and after DELIVERED_GAP_S with none of that app's read.
+    Every read of it moves the clock on, so one screen left up for ten minutes
+    is said once."""
+
+    def __init__(self):
+        self.last = {}
+
+    def fresh(self, app, now):
+        was = self.last.get(app)
+        self.last[app] = now
+        return was is None or now - was >= DELIVERED_GAP_S
+
+
+def emit_delivered(said, at=None):
+    """The delivery app's own screen from after a delivery
+    (OP.delivered_screen): its app and screen, the pay it printed and the
+    customer it named, either None where it printed none.
+
+    Its own line, for the reason the popup line has one: it carries no verdict
+    and is no offer, whatever payout its "This offer $8.95" reads as. server.js
+    puts the order of that app in the car down on it, or opens the Drop
+    chooser, behind `"screenDrop": true` (deliveredArrived); never an accept.
+    `at` is when the frame was TAKEN: a screen read before an order's Took is
+    not that order's."""
+    print(json.dumps({'delivered': {
+        'app': said.get('app'), 'screen': said.get('screen'),
+        'pay': said.get('pay'), 'name': said.get('name'),
+        'at': at if at is not None else int(time.time() * 1000)}}), flush=True)
+
+
 def emit_planner(stops, keep=False, ms=None, asked=True, at=None):
     """Uber's Trip Planner, read off the whole screen because ⌖ was pressed.
 
@@ -3819,6 +3859,9 @@ def main():
     # said once per card and address, like the dropoff line's repeat rule, and
     # again for the next card. See emit_popup.
     popup_said = None
+    # ...and when each app's completion screen was last read: said once while
+    # it stays up. See DeliveredSaid.
+    delivered_said = DeliveredSaid()
     # Whether the loop has already said why it went quiet. See where it goes.
     quiet_said = False
     # The last few preview frames, and whether the newest was the same picture
@@ -4514,6 +4557,16 @@ def main():
                     emit_popup(popup, at=int(started * 1000))
                 log('place popup read: the %s\'s address' % (
                     'store' if popup['role'] == 'pickup' else 'customer'))
+        # ...and the delivery app's own screen from AFTER a delivery, card box
+        # or whole screen, offer-shaped or not (its "This offer $8.95" reads as
+        # a payout): once while it stays up, stamped with when its frame was
+        # TAKEN. Whether it puts an order down is the server's (deliveredArrived).
+        # The app in the log, never the customer.
+        delivered = OP.delivered_screen(out.get('text'))
+        if delivered is not None and delivered_said.fresh(delivered['app'], started):
+            if args.json:
+                emit_delivered(delivered, at=int(started * 1000))
+            log('completion screen read: %s' % delivered['app'])
         if answers:
             dropoff_until = 0.0
             dropoff_asked = False

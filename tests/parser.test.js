@@ -458,7 +458,7 @@ check('largest dollar figure wins over a promo line',
   }
   var reads = [function (s) { return P.rate(P.parse(s), { nowMinutes: 600 }); },
                P.findAddress, P.findPlanner, P.plannerEnds, P.placePopup, P.sheetDropoff,
-               P.screenType];
+               P.screenType, P.deliveredScreen];
   ['l', 'S', 'lI'].forEach(function (u) {
     var run = u.repeat(8192 / u.length);
     var ms = bestMs(function () { reads.forEach(function (f) { f(run); }); });

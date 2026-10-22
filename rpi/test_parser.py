@@ -192,6 +192,12 @@ for c in cases.get('screens', []):
     eq('screens / ' + c['name'], [got['app'], got['screen']],
        [c['expect']['app'], c['expect']['screen']])
 
+# The delivery app's own screen from after a delivery: {app, screen, pay,
+# name} or None, and every screen from before the drop refused. The same cases
+# tests/corpus.test.js runs. See OP.delivered_screen.
+for c in cases.get('delivered', []):
+    eq('delivered / ' + c['name'], P.delivered_screen(c['text']), c['expect'])
+
 # What a navigation or "Deliver to" screen gives as a destination nobody pressed
 # for: [screen, find_address's line, the stop label in front of it, whether it
 # is in that Dropoff label's own block, whether the frame reads as an offer].
@@ -609,7 +615,7 @@ def _best_ms(fn, runs=3):
 # What the scanner asks of every read's text (digest() and screen_address).
 _READS = (lambda s: P.rate(P.parse(s), {'nowMinutes': 600}), P.find_address,
           P.address_stop, P.address_under_dropoff, P.find_planner, P.planner_ends,
-          P.place_popup, P.sheet_dropoff, P.screen_type)
+          P.place_popup, P.sheet_dropoff, P.screen_type, P.delivered_screen)
 for _unit in ('l', 'S', 'lI'):
     _run = (_unit * 4096)[:4096]
     _ms = _best_ms(lambda: [f(_run) for f in _READS])

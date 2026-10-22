@@ -9565,6 +9565,151 @@ _otnt = _ontime('ontime-untimed', (_NOWMIN + 40) % 1440, minutes=None)
 eq('[on time] an offer with no deadline and no minutes: no call, the miles instead',
    _otnt['stack'], {'onTime': None, 'lateMin': None, 'offWayMi': 1.6})
 
+# --- put down by the delivery app's own screen --------------------------------
+#
+# The owner, 22 Oct: make it more hands-free. The app's screen from AFTER a
+# delivery (offer_parser.delivered_screen, said once by the scanner) puts the
+# order of that app down, `by: 'screen'`, behind `screenDrop` (SCREEN_DROP
+# here): the only order of that app, or with two the one whose customer the
+# screen names; with no cue the Drop chooser, and nothing with no order of that
+# app in the car. Every name, store and street is invented.
+
+
+def _done(app='doordash', name=None, pay=9.4, at=None):
+    return {'delivered': {'app': app, 'screen': 'dd.delivered' if app == 'doordash'
+                          else 'uber.delivered', 'pay': pay, 'name': name,
+                          'at': int(time.time() * 1000) if at is None else at}}
+
+
+def _sdrops(j):
+    return [(r.get('id'), r.get('by')) for r in _rows(j, 'drop')]
+
+
+def _sdone(j):
+    return [(r.get('app'), r.get('would'), r.get('cue'), r.get('acted'))
+            for r in _rows(j, 'delivered')]
+
+
+def _heard(seen, pred, seconds=3.0):
+    """What the stream has carried that `pred` takes, waiting for it a while:
+    a message is sent the moment a line is handled, and read a moment later."""
+    end = time.time() + seconds
+    while time.time() < end and not any(pred(m) for m in list(seen)):
+        time.sleep(0.05)
+    return [m for m in list(seen) if pred(m)]
+
+
+_DQ = 3.1   # past SCREEN_DROP_QUIET_MS below, so the next screen is a new one
+_scp, _scb, _scj, _sch = _cserver('screen-one', SCREEN_DROP='1', CARRY_TWO='1',
+                                  SCREEN_DROP_QUIET_MS='3000')
+try:
+    _say(_done())
+    eq('[screen drop] a completion screen with no order in the car puts nothing down, and '
+       'its row says so', (_sdrops(_scj), _sdone(_scj)),
+       ([], [('doordash', 'nothing held', None, False)]))
+    time.sleep(_DQ)
+    _took2(_scb, _card('s-1', 9.40, app='doordash', screen='dd.offer'))
+    _seen = listen(_scb, 4.0)
+    _say(_done())
+    _told = _heard(_seen, lambda m: 'screenDrop' in m)
+    eq('[screen drop] DoorDash\'s screen with one DoorDash order in the car puts it down, '
+       'by the screen', (_sdrops(_scj), _orders(_scb), _sdone(_scj)[-1]),
+       ([('s-1', 'screen')], [], ('doordash', 'put down', 'only', True)))
+    ok_('[screen drop] ...and the panel is told the car is empty',
+        bool(_told) and all(m.get('holding') is None for m in _told))
+    # The same screen, still up: the order taken since is not put down by it.
+    _took2(_scb, _card('s-2', 7.25, app='doordash', screen='dd.offer'))
+    _say(_done())
+    eq('[screen drop] the same screen read again inside the quiet window puts down '
+       'nothing, not even the order taken since, and writes no second row',
+       ([o.get('pay') for o in _orders(_scb)], _sdrops(_scj), len(_sdone(_scj))),
+       ([7.25], [('s-1', 'screen')], 2))
+    time.sleep(_DQ)
+    _say(_done(app='uber', pay=7.45))
+    eq('[screen drop] Uber\'s screen with only a DoorDash order held puts nothing down',
+       ([o.get('pay') for o in _orders(_scb)], _sdrops(_scj), _sdone(_scj)[-1]),
+       ([7.25], [('s-1', 'screen')], ('uber', 'nothing held', None, False)))
+    _s2took = _orders(_scb)[0]
+    _say(_done(at=int(time.time() * 1000) - 600000))
+    eq('[screen drop] a screen whose frame was taken before the order\'s Took is not '
+       'that order\'s', ([o.get('pay') for o in _orders(_scb)], _sdone(_scj)[-1]),
+       ([7.25], ('doordash', 'before the Took', None, False)))
+    time.sleep(_DQ)
+    _say(_done())
+    eq('[screen drop] ...and the next one, after the quiet window, puts it down',
+       (_orders(_scb), _sdrops(_scj)), ([], [('s-1', 'screen'), ('s-2', 'screen')]))
+finally:
+    stop(_scp)
+
+# Two Uber orders: ①'s end filed with its customer's name (the hold's fields,
+# as Assemble.file keeps it), ②'s customer only on the Trip Planner on record.
+_SPAT = '4821 Kestrel Dr, Marietta, GA 30060'
+_SLEE = '77 Birch Ln, Roswell, GA 30075'
+_SSTOPS = [{'kind': 'pickup', 'orders': 1, 'name': 'Wren Street Noodles',
+            'line': None, 'expectedBy': None},
+           {'kind': 'dropoff', 'orders': 1, 'name': 'Lee R.', 'line': _SLEE,
+            'street': '77 Birch Ln', 'city': 'Roswell', 'expectedBy': None}]
+_snow = int(time.time() * 1000)
+_sta = {'id': 't-a', 'acceptedAt': _snow - 10 * 60000, 'pay': 9.48, 'minutes': 40.0,
+        'miles': 5.0, 'cost': 1.5, 'app': 'uber', 'dropoff': _SPAT,
+        'fields': {'customer': {'value': 'Pat Q.', 'from': 'planner', 'conf': 1,
+                                'at': _snow - 9 * 60000, 'screen': 'uber.planner'}}}
+_stbh = {'id': 't-b', 'acceptedAt': _snow - 8 * 60000, 'pay': 28.08, 'minutes': 55.0,
+         'miles': 9.0, 'cost': 2.5, 'app': 'uber', 'dropoff': _SLEE}
+_stp, _stb, _stj, _sth = _cserver('screen-two', hold={'v': 2, 'orders': [_sta, _stbh]},
+                                  SCREEN_DROP='1', CARRY_TWO='1',
+                                  SCREEN_DROP_QUIET_MS='3000', CHOOSER_MS='1500')
+try:
+    _say({'planner': {'stops': _SSTOPS, 'unfiled': None, 'asked': False}})
+    _say(_done(app='uber', name='Lee R.', pay=28.08))
+    eq('[screen drop] two Uber orders in the car: the screen naming one\'s customer puts '
+       'that one down and keeps the other',
+       ([o.get('pay') for o in _orders(_stb)], _sdrops(_stj), _sdone(_stj)),
+       ([9.48], [('t-b', 'screen')], [('uber', 'put down', 'name', True)]))
+    time.sleep(_DQ)
+    _took2(_stb, _card('t-c', 6.10))
+    _seen = listen(_stb, 4.0)
+    _say(_done(app='uber', pay=6.10))
+    _chs = [m['chooser'] for m in _heard(_seen, lambda m: isinstance(m.get('chooser'), dict))]
+    eq('[screen drop] two in the car and nothing on the screen to say whose: the Drop '
+       'chooser over both, and nothing put down',
+       ([c.get('kind') for c in _chs], [[r.get('n') for r in c.get('rows') or []] for c in _chs],
+        [o.get('pay') for o in _orders(_stb)], _sdrops(_stj), _sdone(_stj)[-1]),
+       (['drop'], [[1, 2]], [9.48, 6.10], [('t-b', 'screen')],
+        ('uber', 'chooser', None, True)))
+    # The driver's answer is Drop's own: ② by the chooser.
+    _code, _ = post(_stb, '/api/delivered', {'holdIds': [_chs[0]['rows'][1]['pick']]}
+                    if _chs else {'holdIds': []})
+    eq('[screen drop] ...answered, it is Drop\'s chooser: that order down, by the chooser',
+       ([o.get('pay') for o in _orders(_stb)], _sdrops(_stj)),
+       ([9.48], [('t-b', 'screen'), ('t-c', 'chooser')]))
+    time.sleep(_DQ)
+    _say(_done(app='uber', name='Lee R.', pay=28.08))
+    eq('[screen drop] one Uber order left, its customer known, and a screen naming '
+       'another: nothing put down', ([o.get('pay') for o in _orders(_stb)],
+                                     _sdone(_stj)[-1]),
+       ([9.48], ('uber', 'another customer', None, False)))
+    time.sleep(_DQ)
+    _say(_done(app='uber', name='Pat Q.', pay=9.48))
+    eq('[screen drop] ...and the screen naming its own customer puts it down',
+       (_orders(_stb), _sdrops(_stj)[-1], _sdone(_stj)[-1]),
+       ([], ('t-a', 'screen'), ('uber', 'put down', 'name', True)))
+finally:
+    stop(_stp)
+
+# Off unless the setting says exactly true: the row, and nothing else.
+_sop, _sob, _soj, _soh = _cserver('screen-off')
+try:
+    _took2(_sob, _card('o-1', 9.40, app='doordash', screen='dd.offer'))
+    _say(_done())
+    eq('[screen drop] off by default: the order stays in the car, and the row says what '
+       'it would have done', ([o.get('pay') for o in _orders(_sob)]
+                              or [(get(_sob, '/api/status').get('holding') or {}).get('pay')],
+                              _sdrops(_soj), _sdone(_soj)),
+       ([9.40], [], [('doordash', 'put down', 'only', False)]))
+finally:
+    stop(_sop)
+
 shutil.rmtree(_cdir, ignore_errors=True)
 
 # --- the held order's pickups, visited ----------------------------------------
