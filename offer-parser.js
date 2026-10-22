@@ -1765,6 +1765,9 @@
       if (PLANNER_END.test(lines[i])) { end = i; break; }
     }
     if (end === -1) return null;
+    // ...nor a pickup's block whose header OCR cut to the word itself
+    // (PLANNER_PICKUP_WORD, at plannerFoot).
+    if (lines.some(function (l) { return PLANNER_PICKUP_WORD.test(l); })) return null;
     var stop = plannerOrphan(lines, end);
     if (!stop || !(stop.street || stop.city)) return null;
     return stop;
@@ -1981,10 +1984,17 @@
      trip ends on a dropoff. Carried on the sighting as `footed`; the
      assembler files it (Assemble.footDropoff). See planner_foot in
      offer_parser.py. */
+  // ...never a pickup's block whose header OCR cut to its first word: a line
+  // that is the word Pickup ("Pick up", "Picking up") says whose block it is.
+  // See PLANNER_PICKUP_WORD in offer_parser.py.
+  var PLANNER_PICKUP_WORD = /^[^A-Za-z0-9]{0,3}pick(?:ing)? ?-? ?up\b/i;
+
   function plannerFoot(text) {
     var raw = String(text || '').split(/[\r\n]+/).map(normalize)
       .filter(function (l) { return l; });
-    if (raw.some(function (l) { return PLANNER_STOP.test(l); })) return false;
+    if (raw.some(function (l) {
+      return PLANNER_STOP.test(l) || PLANNER_PICKUP_WORD.test(l);
+    })) return false;
     var d = -1;
     raw.forEach(function (l, i) { if (PLANNER_DETAILS.test(l)) d = i; });
     if (d < 3 || d + 1 >= raw.length) return false;

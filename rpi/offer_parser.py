@@ -3463,6 +3463,10 @@ def _planner_headless(lines):
     end = next((i for i, l in enumerate(lines) if PLANNER_END.match(l)), None)
     if end is None:
         return None
+    # A pickup's block whose header OCR cut to the word itself is no foot of
+    # the list either (PLANNER_PICKUP_WORD, at planner_foot).
+    if any(PLANNER_PICKUP_WORD.match(l) for l in lines):
+        return None
     stop = _planner_orphan(lines, end)
     if stop is None or not (stop['street'] or stop['city']):
         return None
@@ -3618,12 +3622,25 @@ def planner_framed(text):
 # find_planner's headless one; the assembler (assemble.js, footDropoff) asks
 # this of it, carried on the sighting as `footed`, and files it only with one
 # order held, unpressed, after the Took, and not one of its pickups.
+#
+# ...but not a pickup's block whose header OCR cut down to its first word. The
+# shape rpi/test_loop.py's "a pickup's address is never the order's
+# destination" holds (invented): "Pickup / <Store> / Expected by … / Address /
+# 4100 <Name> Pkwy NW, / <Town>, GA 30144 / View details / Stop New Requests"
+# — PLANNER_STOP wants the count, so the line "Pickup" is no header to it, and
+# at e3fcf31 this rule filed the restaurant as the trip's end. A line that is
+# the word Pickup (or "Pick up", "Picking up"), alone or with a mark or two
+# after it, says whose block it is: no foot.
+PLANNER_PICKUP_WORD = re.compile(r'^[^A-Za-z0-9]{0,3}pick(?:ing)? ?-? ?up\b',
+                                 re.IGNORECASE | ASCII)
+
+
 def planner_foot(text):
     """True when `text` is the trip's last stop block with its header cropped
     off and the list's foot straight under it: see above."""
     raw = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
     raw = [l for l in raw if l]
-    if any(PLANNER_STOP.match(l) for l in raw):
+    if any(PLANNER_STOP.match(l) or PLANNER_PICKUP_WORD.match(l) for l in raw):
         return False
     details = [i for i, l in enumerate(raw) if PLANNER_DETAILS.match(l)]
     if not details:

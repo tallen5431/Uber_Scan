@@ -6744,6 +6744,22 @@
      "partial": "top"
     }
    ]
+  },
+  {
+   "name": "a pickup's block with its header cut to the word Pickup is not the trip's last stop",
+   "_why": "rpi/test_loop.py's shape (invented): the header read as the word alone, so no stop header matched, and the block over the bar alone looked like the trip's last stop with its header cropped. At e3fcf31 planner_foot filed the restaurant as the order's end. The word Pickup on the read says whose block it is.",
+   "text": "Pickup\nFable Grill\nExpected by 5:46 PM\nAddress\n4100 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details\nStop New Requests",
+   "bounded": false,
+   "footed": false,
+   "expect": null
+  },
+  {
+   "name": "...nor with it read as Picking up and a mark after it",
+   "_why": "The same block with the word OCR'd another way. Invented.",
+   "text": "Picking up -\nFable Grill\nAddress\n4100 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details\nWaybill",
+   "bounded": false,
+   "footed": false,
+   "expect": null
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",
