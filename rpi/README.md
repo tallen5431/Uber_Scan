@@ -8575,7 +8575,7 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 1385 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 1388 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
@@ -8590,7 +8590,7 @@ python3 rpi/test_offerspage.py  # 553 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 1077 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 1101 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
