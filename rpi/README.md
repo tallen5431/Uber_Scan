@@ -8590,7 +8590,7 @@ python3 rpi/test_offerspage.py  # 553 on the offers page as a driver reads it:
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 1101 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 1102 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
