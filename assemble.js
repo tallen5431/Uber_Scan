@@ -2568,6 +2568,8 @@
            // ...and the same store as an order in the car (server.js
            // sameStoreOf; the owner's decision of 18 Oct 2026).
            SAME_STORE_NEAR_MI: SAME_STORE_NEAR_MI, chainName: chainName, doorOf: doorOf,
+           // ...and the name a store's waits are kept by (server.js storeNameSaid).
+           storeOf: storeOf,
            sameDoor: sameDoor, pickupSide: pickupSide, samePickup: samePickup,
            attribute: attribute, park: park, unpark: unpark, unowned: unowned,
            retryUnowned: retryUnowned,

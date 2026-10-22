@@ -39,7 +39,20 @@ card's text, pickup and dropoff, and the GPS log is nothing but positions. The
 report prints none of them — the app is read off the card's text by
 offer_parser.screen_type, the same function the scanner names it with, and the
 text goes no further. Positions are used for distances and stops and are
-never printed, in the text or the CSV.
+never printed, in the text or the CSV. One thing off the pickup is printed,
+in one place: the STORE'S NAME in the "Restaurant waits" section (below), the
+pickup less Uber's bracketed street, and nothing for a pickup that is a door
+or a corner (store_name).
+
+RESTAURANT WAITS, the owner's request of 22 Oct 2026: by store, how many of
+the day's orders were measured waiting at it and the median minutes. An
+order counts when its pickup was visited ONCE, by the GPS (`visit` row `by:
+'gps'`), and the stop before that row was found in the log (its restaurant
+minutes, dwell()); a planner's visit is when the planner was read, not when
+the car left, and two visits are two stores. The rig keeps its own history
+of the same thing, keyed by the store's pin (server.js storeWaitFor,
+store-waits.json); the journal holds no position and no dwell start, so
+this is how a past day's waits are seen. A description, like the rest.
 
 WHAT COUNTS AS AN ORDER, read off the journal's marks the way server.js's
 latestPerOfferUncached folds them: the newest mark wins, by its `at`, and an
@@ -250,7 +263,7 @@ def orders(rows):
 
 def _order(oid, took, readings, drops, visits):
     o = {'id': oid, 'took': took, 'end': None, 'how': None, 'reliable': False,
-         'carried': None, 'visits': [], 'notes': [], 'pin': None}
+         'carried': None, 'visits': [], 'visitsBy': [], 'notes': [], 'pin': None}
     # The card as it stood when Took was pressed: the last reading of it
     # written at or before the press. Not the server's vote over every reading
     # (bestReading), which may have been made after the press and is a
@@ -262,6 +275,7 @@ def _order(oid, took, readings, drops, visits):
             card = r
     card = card or (readings[0] if readings else {})
     o['app'] = OP.screen_type(card.get('text') or '')['app'] if card.get('text') else None
+    o['store'] = store_name(card.get('pickup'))
     o['pay'] = _num(card.get('pay'))
     o['cardMinutes'] = _num(card.get('minutes'))
     o['cardMiles'] = _num(card.get('miles'))
@@ -300,10 +314,57 @@ def _order(oid, took, readings, drops, visits):
         o['how'] = 'no end'
         o['notes'].append('unreliable: no drop row; the server lost the hold, or it expired '
                           'before the server wrote expiry rows')
-    o['visits'] = sorted(v['at'] for v in visits
-                         if v['at'] >= took and (o['end'] is None or v['at'] <= o['end']))
+    kept = sorted((v for v in visits
+                   if v['at'] >= took and (o['end'] is None or v['at'] <= o['end'])),
+                  key=lambda v: v['at'])
+    o['visits'] = [v['at'] for v in kept]
+    o['visitsBy'] = [v.get('by') for v in kept]
     o['actualMinutes'] = (o['end'] - took) / 60000.0 if o['end'] is not None else None
     return o
+
+
+# How long a store's name may print: a name, not the rest of a card.
+NAME_MAX = 40
+
+
+def store_name(t):
+    """The store a card's pickup names, or None. Uber's bracketed street
+    off its end (assemble.js storeOf), the Trip Planner's icon letters off its
+    front (map-view.js plannerName), and no name at all for a door or a
+    corner — a leading house number, an '&' — which would be an address:
+    server.js storeNameSaid's rule, so the two say the same stores."""
+    if not isinstance(t, str):
+        return None
+    s = re.sub(r'\s*\([^()]*\)?\s*$', '', re.sub(r'\s+', ' ', t).strip()).strip()
+    m = re.match(r'^[a-z]{1,2} (?=[A-Z])', s)
+    if m:
+        s = s[m.end():]
+    if not re.sub(r'[^a-z0-9]', '', s.lower()) or re.match(r'^\d', s) or ' & ' in s:
+        return None
+    return s[:NAME_MAX]
+
+
+def waits(orders_):
+    """{'stores': [{store, visits, median}] by name, 'uncounted': n}: each
+    store's measured waits over the orders given (module docstring,
+    RESTAURANT WAITS). `uncounted` is the orders with restaurant minutes
+    that could not be put to one store."""
+    groups = collections.OrderedDict()
+    uncounted = 0
+    for o in orders_:
+        if o.get('restaurantMinutes') is None:
+            continue
+        if o.get('visitsBy') != ['gps'] or not o.get('store'):
+            uncounted += 1
+            continue
+        # One store however its name was spelt: assemble.js storeKey's key.
+        key = re.sub(r'[^a-z0-9]', '', re.split(r' [\u2013\u2014-] ', o['store'])[0].lower())
+        g = groups.setdefault(key, {'store': o['store'], 'minutes': []})
+        g['minutes'].append(o['restaurantMinutes'])
+    stores = [{'store': g['store'], 'visits': len(g['minutes']),
+               'median': statistics.median(g['minutes'])} for g in groups.values()]
+    stores.sort(key=lambda g: g['store'].lower())
+    return {'stores': stores, 'uncounted': uncounted}
 
 
 # How long a word off the row may print. Every word server.js writes there is
@@ -962,6 +1023,20 @@ def text(rep):
         out.append('')
         out.extend('  #%d %s' % n for n in notes)
     if rep['orders']:
+        out.append('')
+        out.append('Restaurant waits (minutes stopped at the store, off the GPS log at its '
+                   'GPS visit):')
+        w = waits(rep['orders'])
+        width = max([len(g['store']) for g in w['stores']] + [0])
+        for g in w['stores']:
+            out.append('  %s  %d visit%s  median %.1f min'
+                       % (g['store'].ljust(width), g['visits'], '' if g['visits'] == 1 else 's',
+                          g['median']))
+        if not w['stores']:
+            out.append('  none measured')
+        if w['uncounted']:
+            out.append('  %d order%s waited with no one store to put it to (no name, or not '
+                       'one GPS visit)' % (w['uncounted'], '' if w['uncounted'] == 1 else 's'))
         out.append('')
         out.append("Pinning (how each order's end was pinned for the GPS drop, or why not):")
         for i, o in enumerate(rep['orders']):

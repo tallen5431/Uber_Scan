@@ -8174,10 +8174,11 @@ def _orders(base):
     return get(base, '/api/status').get('orders') or []
 
 
-def _cserver(name, hold=None, **env):
+def _cserver(name, hold=None, waits=None, **env):
     # A directory each: holding.json is kept beside the journal, and a server
     # started on the last one's would restore its orders. `hold`, when given,
     # is a holding.json to start with: the orders a restart brings back.
+    # `waits`, a store-waits.json to start with: the restaurant waits on record.
     home = os.path.join(_cdir, name)
     os.mkdir(home)
     j = os.path.join(home, 'offers.jsonl')
@@ -8185,6 +8186,9 @@ def _cserver(name, hold=None, **env):
     if hold is not None:
         with open(os.path.join(home, 'holding.json'), 'w') as fh:
             json.dump(hold, fh)
+    if waits is not None:
+        with open(os.path.join(home, 'store-waits.json'), 'w') as fh:
+            json.dump(waits, fh)
     hand = os.path.join(home, 'hand')
     os.mkdir(hand)
     e = {'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _cfake,
@@ -9462,7 +9466,8 @@ def _othold(deliver_by, pinned=True, more=None):
     return {'v': 2, 'orders': [h]}
 
 
-def _ontime(name, deliver_by, pinned=True, minutes=30.0, more=None, planner=None, two=False):
+def _ontime(name, deliver_by, pinned=True, minutes=30.0, more=None, planner=None, two=False,
+            waits=None):
     nf = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     nb = 'http://127.0.0.1:%d' % json.loads(nf.stdout.readline())['port']
@@ -9473,7 +9478,8 @@ def _ontime(name, deliver_by, pinned=True, minutes=30.0, more=None, planner=None
         hold['orders'].append(dict(hold['orders'][0], id='ot-c',
                                    acceptedAt=hold['orders'][0]['acceptedAt'] + 1000))
         env['CARRY_TWO'] = '1'
-    sp, sb, sj, _sh = _cserver(name, hold=hold, NUCBOX_SEARCH=nb, NUCBOX_ROUTER=nb, **env)
+    sp, sb, sj, _sh = _cserver(name, hold=hold, waits=waits, NUCBOX_SEARCH=nb, NUCBOX_ROUTER=nb,
+                               **env)
     try:
         read = _ssread(12.05, 6.0)
         _say(read)
@@ -9495,6 +9501,7 @@ def _ontime(name, deliver_by, pinned=True, minutes=30.0, more=None, planner=None
         rows = [r for r in _rows(sj, 'pair') if r.get('id') == 'ot-b']
         row = rows[0] if rows else {}
         return {'stack': {k: st.get(k) for k in ('onTime', 'lateMin', 'offWayMi')},
+                'storeWait': last.get('storeWait'),
                 'row': {k: row.get(k) for k in ('onTime', 'lateMin', 'offWayMi')},
                 'rows': len(rows), 'state': last.get('state'), 'said': row.get('said'),
                 'rowkeys': sorted(k for k in ('onTime', 'lateMin', 'offWayMi') if k in row)}
@@ -9537,6 +9544,35 @@ eq('[on time] an offer due before any order of the stops reaches it, the 5 min a
    (_ot2['stack'], _ot2['row']),
    ({'onTime': 'late2', 'lateMin': 3, 'offWayMi': None},
     {'onTime': 'late2', 'lateMin': 3, 'offWayMi': None}))
+# ...and the same offer with its store's waits on record (restaurant waits,
+# store-waits.json beside the journal, at the fake's pin for 250 Example
+# Road): a median of 60 s in place of the 5 min makes the least late order
+# 2.55 - 4 min, on time for both; a median of 600 s, 2.55 + 5 = 7.55, "~8";
+# one wait alone is no median, and the 5 min stands. The verdict the
+# reading's own each time; the card says what is on record.
+
+
+def _otwaits(*secs):
+    return {'v': 1, 'stores': [{'key': 'examplegrill@67940,-169060', 'name': 'Example Grill',
+                                'lat': 33.97, 'lon': -84.53,
+                                'waits': [{'at': 1000 * i, 's': s} for i, s in enumerate(secs)]}]}
+
+
+_otw1 = _ontime('ontime-wait-short', (_NOWMIN + 40) % 1440, minutes=11.0,
+                waits=_otwaits(50, 60, 70))
+eq('[store waits] the on-time hint allows the store\'s median wait at its pickup in place of '
+   'PICKUP_ALLOW_S: 60 s, both on time; the verdict unmoved; the card says "3 visits, ~1 min"',
+   (_otw1['stack'], _otw1['row'], _otw1['state'], _otw1['storeWait']),
+   ({'onTime': 'both', 'lateMin': None, 'offWayMi': None},
+    {'onTime': 'both', 'lateMin': None, 'offWayMi': None}, 'go', {'n': 3, 'avgMin': 1}))
+_otw2 = _ontime('ontime-wait-long', (_NOWMIN + 40) % 1440, minutes=11.0,
+                waits=_otwaits(600, 540, 660, 600))
+eq('[store waits] ...a median of 10 min: ② late ~8 min',
+   (_otw2['stack'], _otw2['state']), ({'onTime': 'late2', 'lateMin': 8, 'offWayMi': None}, 'go'))
+_otw3 = _ontime('ontime-wait-one', (_NOWMIN + 40) % 1440, minutes=11.0, waits=_otwaits(60))
+eq('[store waits] ...one wait on record: PICKUP_ALLOW_S, ② late ~3, and no note',
+   (_otw3['stack'], _otw3['storeWait']),
+   ({'onTime': 'late2', 'lateMin': 3, 'offWayMi': None}, None))
 # The held order's Trip Planner "Expected by" for its own dropoff stop is its
 # deadline over its card's: due this minute by the planner, ① late.
 _otpl = _ontime('ontime-planner', (_NOWMIN + 40) % 1440, planner=[
@@ -9844,6 +9880,104 @@ try:
             len(_vrows(_vj2))), ([[], [_Q2]], 1))
     finally:
         stop(_vp)
+finally:
+    shutil.rmtree(_vdir, ignore_errors=True)
+
+# --- restaurant waits ---------------------------------------------------------
+#
+# The owner's request of 22 Oct 2026: how long the car stood at a store,
+# measured by the GPS at each held pickup it visited (visitPickups), kept per
+# store in store-waits.json beside the journal — keyed by the pin rounded to
+# STORE_GRID_DEG and the store's name — and said on a card naming the store
+# with two visits or more (`storeWait`, server.js storeWaitFor). The fixes are
+# _vwait's, real seconds made from each fix's age, so a 3-minute wait reads
+# 180 s plus the second or so the lines take to say. Invented stores.
+_vdir = tempfile.mkdtemp()
+_SW = (33.90012, -84.50017)             # a store's pin, off the 0.0005° grid
+_SWQ = '310 Mill St, Roswell, GA 30075'
+
+
+def _swtook(base, oid, pickup):
+    post(base, '/api/offers/mark', {
+        'id': oid, 'accepted': True,
+        'offer': {'id': oid, 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0,
+                  'miles': 5.0, 'cost': 1.75, 'pickup': pickup,
+                  'dropoff': '4821 Kestrel Dr, Marietta', 'multiOrder': False}})
+    return get(base, '/api/status').get('holding') or {}
+
+
+def _swvisit(base, say, oid, pickup, seconds):
+    """Took, the pickup pinned, a wait of `seconds` there and away, Drop."""
+    h = _swtook(base, oid, pickup)
+    _vpin(base, h, _SW, _SWQ)
+    say(_vwait(_SW, seconds) + _vleave(_SW))
+    post(base, '/api/delivered', {})
+
+
+def _swfile(journal):
+    try:
+        return json.load(open(os.path.join(os.path.dirname(journal), 'store-waits.json')))
+    except (OSError, ValueError):
+        return None
+
+
+def _swread(pickup):
+    return {'ready': True, 'state': 'go', 'perHour': 30.0, 'grossPerHour': 33.6, 'pay': 7.25,
+            'minutes': 25.0, 'billedMinutes': 25.0, 'cardMinutes': 25.0, 'miles': 4.0,
+            'cost': 1.4, 'target': 25, 'band': 15, 'costPerMile': 0.35, 'pickup': pickup,
+            'places': [pickup, '77 Birch Ln, Roswell']}
+
+
+try:
+    _ws, _wsay, _wj = _vsayer('waits')
+    _wenv = {'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _ws}
+    _wp, _wb = start(_wenv, _wj)
+    try:
+        _swvisit(_wb, _wsay, 'w-1', 'Larkspur Tacos (310 Mill St)', 180)
+        _wf = _swfile(_wj) or {}
+        _wst = (_wf.get('stores') or [{}])[0]
+        ok_('[store waits] a 3-minute stop at a held pickup the GPS visited is one wait of its '
+            'store, 180 s and the seconds the lines took (got %r)' % (_wf,),
+            len(_wf.get('stores') or []) == 1 and _wst.get('name') == 'Larkspur Tacos'
+            and [180 <= w.get('s', 0) <= 190 for w in _wst.get('waits') or []] == [True])
+        eq('[store waits] ...kept at its pin rounded to the grid, and the store\'s name less '
+           'Uber\'s bracketed street', (_wst.get('lat'), _wst.get('lon'), _wst.get('key')),
+           (33.9, -84.5, 'larkspurtacos@67800,-169000'))
+        # One visit is not enough to say anything.
+        _wsay([_swread('Larkspur Tacos (310 Mill St)')])
+        no_('[store waits] one visit on record: the card says nothing',
+            'storeWait' in (get(_wb, '/api/status').get('last') or {}))
+        _swvisit(_wb, _wsay, 'w-2', 'Larkspur Tacos', 120)
+        # A card whose pickup is a door, not a name: no store to keep it by.
+        _swvisit(_wb, _wsay, 'w-3', '1981 Cobb Pkwy NW, Kennesaw', 120)
+        _wf = _swfile(_wj) or {}
+        eq('[store waits] a second visit joins the first under one store; a pickup that is a '
+           'door is kept under no name', [(s.get('name'), len(s.get('waits') or []))
+                                          for s in _wf.get('stores') or []],
+           [('Larkspur Tacos', 2)])
+        _wsay([_swread('Larkspur Tacos')])
+        eq('[store waits] two visits: the card naming the store, with no pin, a distinctive name '
+           'at one place, carries how many and the mean in whole minutes; the verdict its own',
+           ((get(_wb, '/api/status').get('last') or {}).get('storeWait'),
+            (get(_wb, '/api/status').get('last') or {}).get('state')),
+           ({'n': 2, 'avgMin': 3}, 'go'))
+        _wsay([_swread('Wren Street Noodles')])
+        no_('[store waits] ...a card naming another store carries none',
+            'storeWait' in (get(_wb, '/api/status').get('last') or {}))
+        _wrow = [sorted(r) for r in _vrows(_wj)]
+        eq('[store waits] ...and the journal\'s visit rows are as they were: no wait, no place',
+           _wrow, [['at', 'by', 'holdId', 'id', 'kind', 'pickup', 'seq', 'v']] * 3)
+    finally:
+        stop(_wp)
+    # A history beside the journal survives a restart, and nothing is
+    # backfilled into it: the journal has no position and no dwell start.
+    _wp, _wb = start(_wenv, _wj)
+    try:
+        _wsay([_swread('Larkspur Tacos (310 Mill St)')])
+        eq('[store waits] after a restart the card still says it',
+           (get(_wb, '/api/status').get('last') or {}).get('storeWait'), {'n': 2, 'avgMin': 3})
+    finally:
+        stop(_wp)
 finally:
     shutil.rmtree(_vdir, ignore_errors=True)
 

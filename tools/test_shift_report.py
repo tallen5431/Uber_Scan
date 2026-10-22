@@ -348,8 +348,14 @@ code, out = run(['--journal', JOURNAL, '--gps', GPSDIR, '--day', '2026-03-03'])
 code_csv, out_csv = run(['--journal', JOURNAL, '--gps', GPSDIR, '--day', '2026-03-03', '--csv'])
 eq('the CLI exits 0', (code, code_csv), (0, 0))
 for name, got in (('text', out), ('CSV', out_csv)):
-    bare = [w for w in ('Nowhere', 'Example Ave', 'Faketown', 'Bistro') if w in got]
+    bare = [w for w in ('Nowhere', 'Example Ave', 'Faketown') if w in got]
     eq('no address or coordinate in the output: no place in the %s' % name, bare, [])
+    # The store's name is printed in one place, the Restaurant waits section,
+    # and its bracketed street (above) never.
+    _named = got.replace(got[got.index('Restaurant waits'):got.index('Pinning')], '') \
+        if 'Restaurant waits' in got else got
+    eq('...and the store\'s name nowhere but its Restaurant waits line in the %s' % name,
+       'Bistro' in _named, False)
     coords = re.findall(r'12\.34|45\.67|11\.34|44\.67|\d+\.\d{4,}', got)
     eq('no address or coordinate in the output: no coordinate in the %s' % name, coords, [])
 rows = list(csv.DictReader(io.StringIO(out_csv)))
@@ -705,6 +711,42 @@ ok_('[pinning] ...and the shift\'s pinned rate',
     'Pinned: 3 of 4 orders with a record (75%); 1 without one' in _psec)
 eq('[pinning] a shift with no order prints no Pinning section',
    'Pinning' in SR.text(SR.report(_pj, None, '2026-03-05')), False)
+
+# --- restaurant waits (22 Oct 2026) -------------------------------------------
+#
+# By store, over the day's orders whose pickup the GPS visited once: how many
+# and the median of their restaurant minutes. Names only. The evening's A is
+# the one: 'Imaginary Bistro (1 Nowhere Ln)', 6.5 min before its GPS visit.
+_wtext = SR.text(rep)
+_wsec = _wtext[_wtext.index('Restaurant waits'):_wtext.index('Pinning')]
+ok_('[waits] the text prints a Restaurant waits section: A\'s store, one visit, its minutes '
+    '(%r)' % _wsec, re.search(r'\n  Imaginary Bistro  1 visit  median 6\.[4-6] min\n', _wsec))
+eq('[waits] the store is the card\'s pickup less its bracketed street; a door, a corner and '
+   'no text are no store; the planner\'s icon letters go',
+   [SR.store_name(t) for t in ('Imaginary Bistro (1 Nowhere Ln)', 'Larkspur Tacos (113 Quil',
+                               '1981 Cobb Pkwy NW, Kennesaw', 'Elm St & Oak Ave, Faketown',
+                               None, '', 'oe Larkspur Tacos')],
+   ['Imaginary Bistro', 'Larkspur Tacos', None, None, None, None, 'Larkspur Tacos'])
+
+
+def _wo(store, minutes, by=('gps',)):
+    return {'store': store, 'restaurantMinutes': minutes, 'visitsBy': list(by)}
+
+
+_wr = SR.waits([_wo('Larkspur Tacos', 4.0), _wo('LARKSPUR TACOS', 2.0),
+                _wo('Larkspur Tacos', 9.0), _wo('Wren Street Noodles', 3.5),
+                _wo('Wren Street Noodles', None),
+                _wo('Example Grill', 5.0, by=('planner',)),
+                _wo('Example Grill', 5.0, by=('gps', 'gps')), _wo(None, 6.0)])
+eq('[waits] one store however its name is cased, by name, with its visits and median; '
+   'an order with no minutes is no visit',
+   [(g['store'], g['visits'], g['median']) for g in _wr['stores']],
+   [('Larkspur Tacos', 3, 4.0), ('Wren Street Noodles', 1, 3.5)])
+eq('[waits] ...a planner\'s visit, two visits and no name are not put to a store, and counted',
+   _wr['uncounted'], 3)
+_wnone = SR.text(dict(rep, orders=[dict(by['D'])]))
+ok_('[waits] a shift with nothing measured says so',
+    'Restaurant waits' in _wnone and '  none measured\n' in _wnone)
 
 # --- nothing reads it ---------------------------------------------------------
 readers = []

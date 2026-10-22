@@ -3356,7 +3356,7 @@ var pickArrivals = {};
 
 function freshArrival(id) {
   return { holdId: id, insideSince: null, lastFixAt: null, outCount: 0,
-           skippedMs: 0, refusedFrom: null, refusedTo: null, silentMs: 0 };
+           skippedMs: 0, refusedFrom: null, refusedTo: null, silentMs: 0, nearAt: null };
 }
 
 function pickArrivalOf(h, pin) {
@@ -3419,6 +3419,7 @@ function markVisited(list, now, by) {
     x.e.visitedAt = now;
     x.e.by = by;
     delete x.e.arrivedAt;
+    delete x.e.dwellFrom;
     delete x.e.after;
     var id = holdIdOf(x.h);
     var i = x.h.pickups.indexOf(x.e);
@@ -3433,6 +3434,185 @@ function markVisited(list, now, by) {
   });
 }
 
+/* ---------- restaurant waits: the owner's request of 22 Oct 2026 ----------
+ *
+ * "Make the tool more hands-free and better for optimizing deliveries": how
+ * long the car has stood at a store before, measured by the GPS, said on the
+ * card that names the store again. A MEASUREMENT, NOT A RULE: it moves no
+ * verdict, no state, no rate and no range (AUDITS.md, Settled: no payout
+ * floor, no $/mile rule, no re-timing at a pace, no minutes from distance).
+ * Two places read it. The card's place line says "waited ~4 min avg (3)"
+ * (live.html showPlaces), and the on-time hint, the one place the owner's
+ * 20 Oct decision lets times be added up, allows that store's MEDIAN wait at
+ * its pickup in place of PICKUP_ALLOW_S (onTimeInputs).
+ *
+ * ONE WAIT is one held order's pickup pinned and visited BY THE GPS
+ * (visitPickups, a `visit` row by 'gps'): from the start of the dwell that
+ * arrived (`dwellFrom`, the first fix of it inside the arrive radius) to the
+ * last counted fix inside that radius before the car left (stepAt's
+ * `nearAt`). Not to the visit itself, which is written after the car is
+ * LEAVE_M away on LEAVE_FIXES fixes — a minute of driving on 12 Oct (96 s and
+ * 56 s), which is not waiting. A pickup the planner marked visited has no
+ * dwell and no wait; two stores visited together at one stop (SAME_SPOT_M)
+ * are one wait, filed under the pin the car stood at; a restart while
+ * waiting keeps `dwellFrom` (on the hold) and measures to the next fix
+ * inside, or not at all if the car has left by then.
+ *
+ * KEYED by the store's pinned position rounded to STORE_GRID_DEG (about 55 m
+ * of latitude and 46 m of longitude here) and its name as Assemble.storeKey
+ * writes it, so two branches of a chain are two stores. The name is the
+ * order's card's pickup less Uber's bracketed street (Assemble.storeOf), else
+ * the Trip Planner's name for that stop (MV.heldPickups), and never a door: a
+ * "name" that starts with a house number, or a corner, is no name, and the
+ * wait is not kept (the end-of-shift report prints these names, and no address).
+ *
+ * KEPT in store-waits.json beside the journal, like holding.json: the newest
+ * STORE_WAITS_KEEP waits of each store, the STORE_WAITS_MAX stores waited at
+ * most recently, the position as the rounded cell and nothing finer. Written
+ * through a temporary and a rename. Not in the journal: its rows carry no
+ * coordinate (Settled), and a wait without its store's place is a wait at
+ * every branch of the chain.
+ *
+ * NOT BACKFILLED. A `visit` row says which order's pickup and when the car
+ * had left, and nothing else: no position (the pins live in holding.json only
+ * while the order is held) and no dwell start. So the history begins with
+ * this build. The end-of-shift report in tools/ measures a past day's waits
+ * off the GPS log by name, and prints them; nothing on the rig reads that. */
+var STORE_WAITS_KEEP = 10;
+var STORE_WAITS_MAX = 500;
+// Measured visits a store needs before the card says anything of it, or the
+// hint uses it. Two, the owner's figure: one wait is an anecdote.
+var STORE_WAITS_MIN = 2;
+// The cell a store's position is kept in, in degrees.
+var STORE_GRID_DEG = 0.0005;
+// An offer's pickup pin is that store's within this of the cell's centre: the
+// cell's half-diagonal and a pin's own slack, chosen as SAME_SPOT_M is.
+var STORE_NEAR_M = SAME_SPOT_M;
+var storeWaitList = null;     // [{key, name, lat, lon, waits: [{at, s}]}], newest last
+
+function storeWaitsPath() {
+  return path.join(path.dirname(JOURNAL_PATH), 'store-waits.json');
+}
+
+// The list, read once: what the file holds that is well formed, else none.
+function storeWaits() {
+  if (storeWaitList) return storeWaitList;
+  storeWaitList = [];
+  var f = null;
+  try {
+    f = JSON.parse(fs.readFileSync(storeWaitsPath(), 'utf8'));
+  } catch (e) {
+    // None yet is the ordinary case; anything else is said, and the file is
+    // rewritten by the next wait, as a history it is cheap to lose.
+    if (e.code !== 'ENOENT') console.error('store waits: ' + storeWaitsPath() + ': ' + e.message);
+  }
+  if (f && f.v === 1 && Array.isArray(f.stores)) {
+    storeWaitList = f.stores.filter(function (st) {
+      return st && typeof st.key === 'string' && typeof st.name === 'string'
+        && typeof st.lat === 'number' && typeof st.lon === 'number' && Array.isArray(st.waits);
+    }).map(function (st) {
+      return { key: st.key, name: st.name, lat: st.lat, lon: st.lon,
+               waits: st.waits.filter(function (w) {
+                 return w && typeof w.s === 'number' && isFinite(w.s) && w.s >= 0
+                   && typeof w.at === 'number';
+               }).slice(-STORE_WAITS_KEEP) };
+    }).slice(-STORE_WAITS_MAX);
+  }
+  return storeWaitList;
+}
+
+function saveStoreWaits() {
+  var tmp = partName(storeWaitsPath());
+  try {
+    fs.writeFileSync(tmp, JSON.stringify({ v: 1, stores: storeWaits() }));
+    fs.renameSync(tmp, storeWaitsPath());
+  } catch (e) {
+    console.error('store waits: ' + e.message);
+    try { fs.unlinkSync(tmp); } catch (e2) { /* never written */ }
+  }
+}
+
+// A store's name as said, or null for none or for a door or a corner.
+function storeNameSaid(t) {
+  var s = MV.plannerName(Assemble.storeOf(typeof t === 'string' ? t : ''));
+  if (!Assemble.storeKey(s) || /^\d/.test(s) || / & /.test(s)) return null;
+  return s;
+}
+
+// The store a held order's pickup `q` is: its card's, else its planner's.
+function storeNameOf(h, q) {
+  var card = storeNameSaid(h && h.pickup);
+  if (card) return card;
+  var stops = h && h.planner && Array.isArray(h.planner.stops) ? h.planner.stops : [];
+  var hit = MV.heldPickups(stops).filter(function (p) { return p.q === q; })[0];
+  return hit ? storeNameSaid(hit.name) : null;
+}
+
+function gridOf(at) {
+  return { lat: Math.round(at.lat / STORE_GRID_DEG) * STORE_GRID_DEG,
+           lon: Math.round(at.lon / STORE_GRID_DEG) * STORE_GRID_DEG };
+}
+
+/* A pickup left by the GPS: its wait kept, if there is one to measure. */
+function storeWaitHeard(h, pin, e, nearAt) {
+  var from = e && e.dwellFrom;
+  if (typeof from !== 'number' || typeof nearAt !== 'number' || nearAt < from) return;
+  var name = storeNameOf(h, pin.q);
+  if (!name) return;
+  var cell = gridOf(pin);
+  var key = Assemble.storeKey(name) + '@' + Math.round(cell.lat / STORE_GRID_DEG)
+    + ',' + Math.round(cell.lon / STORE_GRID_DEG);
+  var list = storeWaits();
+  var st = null;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].key === key) { st = list.splice(i, 1)[0]; break; }
+  }
+  st = st || { key: key, name: name, lat: +cell.lat.toFixed(6), lon: +cell.lon.toFixed(6),
+               waits: [] };
+  st.name = name;
+  st.waits = st.waits.concat([{ at: nearAt, s: Math.round((nearAt - from) / 1000) }])
+    .slice(-STORE_WAITS_KEEP);
+  list.push(st);
+  if (list.length > STORE_WAITS_MAX) list.splice(0, list.length - STORE_WAITS_MAX);
+  saveStoreWaits();
+}
+
+/* What is on record for the store `name`, at `pin` when its pickup is
+ * pinned: {n, avgMin, medianS}, or null under STORE_WAITS_MIN visits. Every
+ * store of that name (Assemble.sameStore, one i/l slip) within STORE_NEAR_M
+ * of the pin; with no pin, only a name that is not a chain's
+ * (Assemble.chainName) and whose stores on record are all one place —
+ * otherwise which branch is a guess, and a guess is not said. */
+function storeWaitFor(name, pin) {
+  var said = storeNameSaid(name);
+  if (!said) return null;
+  var near = function (a, b) { return MV.crowMiles(a, b) * 1609.344 <= STORE_NEAR_M; };
+  var hits = storeWaits().filter(function (st) { return Assemble.sameStore(st.name, said); });
+  if (pin && typeof pin.lat === 'number' && typeof pin.lon === 'number') {
+    hits = hits.filter(function (st) { return near(st, pin); });
+  } else if (Assemble.chainName(said) || !hits.every(function (st) { return near(st, hits[0]); })) {
+    return null;
+  }
+  var waits = [];
+  hits.forEach(function (st) { waits = waits.concat(st.waits); });
+  waits = waits.sort(function (a, b) { return a.at - b.at; }).slice(-STORE_WAITS_KEEP)
+    .map(function (w) { return w.s; });
+  if (waits.length < STORE_WAITS_MIN) return null;
+  var sorted = waits.slice().sort(function (a, b) { return a - b; });
+  var mid = sorted.length >> 1;
+  var median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return { n: waits.length, avgMin: Math.max(1, Math.round(sumOf(waits) / waits.length / 60)),
+           medianS: Math.round(median) };
+}
+
+// A held order's store, at its first pin that names a pickup.
+function storeWaitOfHold(h) {
+  var pin = (Array.isArray(h && h.pickupPins) ? h.pickupPins : []).filter(function (p) {
+    return typeof p.q === 'string';
+  })[0] || null;
+  return storeWaitFor(storeNameOf(h, pin ? pin.q : null), pin);
+}
+
 /* One heartbeat, for the pickups: each named pin of each order in the car,
  * stepped by stepAt, and on leaving one, every pickup pinned within
  * SAME_SPOT_M of it marked visited with it — each under the order it is
@@ -3444,12 +3624,17 @@ function visitPickups(beat, now) {
       if (typeof pin.q !== 'string') return;
       var own = pickupOwner(pin.q, now);
       if (!own || own.e.visited) return;
-      var step = stepAt(pickArrivalOf(h, pin), beat, now, pin, !!own.e.arrivedAt);
+      var arr = pickArrivalOf(h, pin);
+      var step = stepAt(arr, beat, now, pin, !!own.e.arrivedAt);
       if (step === 'arrive') {
         own.e.arrivedAt = now;
+        // ...and when the dwell that arrived began, the start of the wait
+        // (storeWaitHeard): on the hold, so a restart while waiting keeps it.
+        own.e.dwellFrom = arr.insideSince;
         saveHold(own.h);
       }
       if (step !== 'left') return;
+      storeWaitHeard(own.h, pin, own.e, arr.nearAt);
       var here = [];
       orders.forEach(function (o) {
         (Array.isArray(o.pickupPins) ? o.pickupPins : []).forEach(function (p) {
@@ -3566,8 +3751,12 @@ function stepAt(arrival, beat, now, pin, arrived) {
   arrival.refusedFrom = arrival.refusedTo = null;
   arrival.silentMs = 0;
   var metres = pinMetres(fix, pin);
+  var within = ARRIVE_M + Math.min(fix.err, ARRIVE_ERR_CAP_M);
+  // The last counted fix inside the arrive radius: when the car was last AT
+  // the place, which a restaurant's wait is measured to (visitPickups,
+  // storeWaitHeard). It changes no answer this function gives.
+  if (metres <= within) arrival.nearAt = fix.at;
   if (!arrived) {
-    var within = ARRIVE_M + Math.min(fix.err, ARRIVE_ERR_CAP_M);
     if (metres > within) { arrival.insideSince = null; return 'out'; }
     if (arrival.insideSince === null || (gap > GAP_MS && !refused)) {
       arrival.insideSince = fix.at;
@@ -3856,6 +4045,17 @@ function withStack(read, now) {
     return heldOwnCard(h, read, now, true);
   })[0];
   read.heldCard = own ? holdIdOf(own) : null;
+  // ...and what is on record of the card's store (restaurant waits,
+  // storeWaitFor): the held order's own, or the offer's, at its pickup's pin
+  // where the offer line on record is this card and that pin is in (and its
+  // pickup, where the reading names none). Said on the place line; nothing
+  // is judged by it.
+  var onRecord = offerIsReading(scanner.offer, read) ? scanner.offer : null;
+  var waited = own ? storeWaitOfHold(own)
+    : storeWaitFor(read.pickup || (onRecord && onRecord.pickup),
+                   onRecord && offerPins[onRecord.id] ? offerPins[onRecord.id].pickup : null);
+  if (waited) read.storeWait = { n: waited.n, avgMin: waited.avgMin };
+  else delete read.storeWait;
   // Against every order in the car while carrying two is on (Stage 6,
   // Advice.stackMany), and the panel says which: "with ① + ②". With one
   // order that is stack() to the byte.
@@ -4078,8 +4278,9 @@ function planAtOf(stops, h) {
  *                        B-drop | B-pick A-pick A-drop B-drop
  *   food in the car      A-drop B-pick B-drop | B-pick A-drop B-drop |
  *                        B-pick B-drop A-drop
- * each arrival the sum of the router's leg times plus PICKUP_ALLOW_S for
- * every pickup stop before it. 'both' when some order reaches each drop by
+ * each arrival the sum of the router's leg times plus, for every pickup stop
+ * before it, that store's median measured wait (storeWaitFor, the owner's
+ * request of 22 Oct 2026) or, with fewer than two on record, PICKUP_ALLOW_S. 'both' when some order reaches each drop by
  * its deadline; otherwise the order least late in all, said by whichever of
  * the two is later ('late1' the held order, 'late2' the offer) and by how
  * many whole minutes, rounded up. Null when anything cannot be had.
@@ -4093,7 +4294,8 @@ function planAtOf(stops, h) {
  * panel draws this one only where that line is not up. */
 
 // The time allowed at each pickup for the food, in seconds. CHOSEN, NOT
-// MEASURED: no restaurant wait is on record anywhere in this repository.
+// MEASURED: the fallback for a store with fewer than STORE_WAITS_MIN waits
+// measured (restaurant waits, storeWaitFor), whose median is allowed instead.
 var PICKUP_ALLOW_S = 5 * 60;
 // How long a pair row waits for a hint still being asked, then is written
 // with `onTime: null` (ms).
@@ -4355,8 +4557,14 @@ function onTimeInputs(offer, now) {
   if (bDue === null && typeof offer.minutes === 'number' && isFinite(offer.minutes)
       && offer.minutes > 0) bDue = now + offer.minutes * 60000;
   var pt = function (p) { return p ? { lat: p.lat, lon: p.lon } : null; };
+  // The time allowed at each pickup: that store's median measured wait where
+  // it has STORE_WAITS_MIN of them (storeWaitFor), else PICKUP_ALLOW_S.
+  var aWait = pins.length ? storeWaitFor(storeNameOf(h, pins[0].q), pins[0]) : null;
+  var bWait = storeWaitFor(offer.pickup, bPick);
   return { car: pt(car), aPick: pins.length ? pt(pins[0]) : null, aDrop: pt(aDrop),
-           bPick: pt(bPick), bDrop: pt(bDrop), aDue: aDue, bDue: bDue };
+           bPick: pt(bPick), bDrop: pt(bDrop), aDue: aDue, bDue: bDue,
+           aWaitS: aWait ? aWait.medianS : PICKUP_ALLOW_S,
+           bWaitS: bWait ? bWait.medianS : PICKUP_ALLOW_S };
 }
 
 /* One route question of the router, ours alone: the leg times and metres
@@ -4431,7 +4639,7 @@ function onTimeWork(inp, done) {
         seq.forEach(function (s, i) {
           t += r.seconds[i] * 1000;
           if (s[1] === D) late[s[2]] = Math.max(0, t - (s[2] === 1 ? inp.aDue : inp.bDue));
-          else t += PICKUP_ALLOW_S * 1000;
+          else t += (s[2] === 1 ? inp.aWaitS : inp.bWaitS) * 1000;
         });
         if (!best || late[1] + late[2] < best[1] + best[2]) best = late;
       }
@@ -10548,6 +10756,14 @@ listen(http.createServer(handler), PORT, 'http', true, function () {
                 + ', ' + back.minutes + ' min'
                 + (back.dropoff ? ' to ' + back.dropoff : '')
                 + '\n  press Drop on the panel if it has already been delivered');
+  }
+  // ...and the restaurant waits on record (storeWaits), read now so a bad
+  // file is said at boot rather than at the first card. Nothing backfilled:
+  // see "restaurant waits" for why the journal cannot be.
+  var waits = storeWaits();
+  if (waits.length) {
+    console.log('restaurant waits on record: ' + waits.length + ' store'
+                + (waits.length === 1 ? '' : 's'));
   }
   tidyGpsLogs();
 });

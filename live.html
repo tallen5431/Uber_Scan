@@ -1284,6 +1284,9 @@
    * before them, and bold like the pair line above it — but no chip, no
    * fill, no verdict colour: a fact about the pickup, never a verdict. */
   #places .same { color: var(--text); font-weight: 700; }
+  /* ...and the store's measured wait after it (waitNote), in the text colour
+     and not bold: a figure about the store, read after the note. */
+  #places .wait { color: var(--text); }
   /* ...and its short form on the pair line, drawn only on the 3.5" hat (see
      the rule there); everywhere else the address line has it. */
   .stackline .sum .same { display: none; color: var(--text); }
@@ -1506,7 +1509,8 @@
        note whole, the end giving way. */
     .live.moving #places.two > .withsame { display: flex; justify-content: center;
                                            min-width: 0; gap: .3em; }
-    .live.moving #places .withsame > .same { flex: none; }
+    .live.moving #places .withsame > .same,
+    .live.moving #places .withsame > .wait { flex: none; }
     .live.moving #places .withsame > .end { min-width: 0; }
   }
   .live.driving { container-type: inline-size; }
@@ -2420,9 +2424,9 @@
   // the text is what it was and parked draws exactly what it drew. Only a
   // pickup and a dropoff (`two`) get their lines: a list of three or more is
   // MV.ends handing back the frames' union, not two ends, and stays one line.
-  function showPlaces(list, same) {
+  function showPlaces(list, same, wait) {
     var where = (list || []).filter(function (p) { return !!p; });
-    if (drawnAs(el.places, JSON.stringify([where, same || null]))) {
+    if (drawnAs(el.places, JSON.stringify([where, same || null, wait || null]))) {
       el.places.classList.toggle('two', where.length === 2);
       el.places.textContent = '';
       where.forEach(function (p, i) {
@@ -2434,19 +2438,36 @@
         // store of an order in the car (sameNote): with the first end in a
         // span of its own (`.withsame`), so moving, where the ends are a line
         // each, the note rides the first end's line and is not one more.
-        if (!i && same) {
+        // ...and after it how long the car has waited at this store before
+        // (waitNote), with a separator of its own (`.wsp`), since the 3.5"
+        // hat puts the same-store note and its `.sp` away here.
+        if (!i && (same || wait)) {
           var row = document.createElement('span');
           row.className = 'withsame';
-          var tag = document.createElement('span');
-          tag.className = 'same';
-          tag.textContent = same;
-          tag.title = 'This offer is picked up at the same restaurant as an order '
-            + 'already in the car: the same door, or the same distinctive name close by.';
-          var sp = document.createElement('span');
-          sp.className = 'sp';
-          sp.textContent = ' ';
-          row.appendChild(tag);
-          row.appendChild(sp);
+          if (same) {
+            var tag = document.createElement('span');
+            tag.className = 'same';
+            tag.textContent = same;
+            tag.title = 'This offer is picked up at the same restaurant as an order '
+              + 'already in the car: the same door, or the same distinctive name close by.';
+            var sp = document.createElement('span');
+            sp.className = 'sp';
+            sp.textContent = ' ';
+            row.appendChild(tag);
+            row.appendChild(sp);
+          }
+          if (wait) {
+            var wt = document.createElement('span');
+            wt.className = 'wait';
+            wt.textContent = wait + ' ·';
+            wt.title = 'How long the car stood at this store on its last visits, '
+              + 'measured by the GPS from stopping to leaving. It judges nothing.';
+            var wsp = document.createElement('span');
+            wsp.className = 'wsp';
+            wsp.textContent = ' ';
+            row.appendChild(wt);
+            row.appendChild(wsp);
+          }
           row.appendChild(end);
           el.places.appendChild(row);
           return;
@@ -2455,6 +2476,19 @@
       });
     }
     setHidden(el.places, !where.length);
+  }
+
+  /* "waited ~4 min avg (3)": the GPS's measured waits at this card's store
+   * (server.js storeWaitFor, the owner's request of 22 Oct 2026), the mean
+   * in whole minutes and how many visits, two at least; null otherwise. A
+   * FACT about the store, like the same-store note beside it: nothing on the
+   * card is drawn differently for it. The pair line's on-time hint already
+   * allows that store's median wait at its pickup, worked out on the server. */
+  function waitNote(r) {
+    var w = r && r.storeWait;
+    if (!w || typeof w.n !== 'number' || w.n < 2 || typeof w.avgMin !== 'number'
+        || !isFinite(w.avgMin)) return null;
+    return 'waited ~' + Math.max(1, Math.round(w.avgMin)) + ' min avg (' + w.n + ')';
   }
 
   /* "same store as ①" — or "same store as in car" with one order, which
@@ -2589,7 +2623,8 @@
     // which ones is said whole, beside the chip (`.both`, below).
     // The on-time hint first (server.js onTimeHint, the owner's decision of
     // 20 Oct 2026): whether some order of the stops, by the NucBox router's
-    // drive times and a fixed allowance at each pickup, reaches both drops by
+    // drive times and at each pickup the store's median measured wait (a
+    // fixed allowance with under two on record), reaches both drops by
     // their deadlines. In the words that give way, not a chip of its own:
     // measured in rpi/test_layout.py, a chip or a column of its own wrapped
     // the row at 800x480 and cut the range on the 3.5" hat, and the range
@@ -4948,7 +4983,7 @@
     // The two ends, not the union: `places` is in the order the frames
     // arrived. See MV.ends, which the offers page asks too. Without MV this
     // page still draws the list, which is what it always drew.
-    showPlaces(MV ? MV.ends(r) : r.places, sameNote(r));
+    showPlaces(MV ? MV.ends(r) : r.places, sameNote(r), waitNote(r));
     // A card being judged takes the stops' room back. See showStops.
     showStops(false);
     // Sent by the server, which is where the order in the car is known. A page

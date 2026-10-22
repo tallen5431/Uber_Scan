@@ -62,11 +62,13 @@ rpi/journal.jsonl.*
 # ...and what the web server keeps beside the journal, which is rpi/ unless
 # JOURNAL moves it: the order in the car and where it is going, the places read
 # off the cards with a pin on each — some of them where customers live — and
-# the copy of the rig's calibration the sync delivers. Globs, because two of
+# the copy of the rig's calibration the sync delivers, and the restaurants the
+# car has waited at with a rounded position on each. Globs, because three of
 # them are written through a pid-suffixed `.part`.
 rpi/holding.json*
 rpi/places.json*
 rpi/config-backup.json*
+rpi/store-waits.json*
 
 # ...and the pictures those offers were read from, which sit beside the journal
 # by default and are the same fact in a stronger form: a photograph of the
