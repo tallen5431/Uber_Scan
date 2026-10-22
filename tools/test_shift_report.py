@@ -706,6 +706,74 @@ ok_('[pinning] ...and the shift\'s pinned rate',
 eq('[pinning] a shift with no order prints no Pinning section',
    'Pinning' in SR.text(SR.report(_pj, None, '2026-03-05')), False)
 
+# --- a Drop taken back by ↶ Undo (22 Oct 2026) ---------------------------------
+#
+# server.js /api/drop-undo writes {kind: 'undo', undoes: 'drop', id, dropAt,
+# holdId}: the drop row with that id and `at` did not happen, and the order's
+# end is its next drop row.
+def undo(oid, when, drop_at):
+    return {'v': 1, 'kind': 'undo', 'at': when, 'id': oid, 'seq': when, 'undoes': 'drop',
+            'dropAt': drop_at, 'holdId': '%s@%d' % (oid, drop_at - 1)}
+
+
+_ur = [offer('U1', at(18, 0), 11.0, 30, 4.0), mark('U1', at(18, 1), True),
+       drop('U1', at(18, 10)), undo('U1', at(18, 10, 4), at(18, 10)),
+       drop('U1', at(18, 35), by='gps'),
+       offer('U2', at(19, 0), 8.0, 20, 3.0), mark('U2', at(19, 1), True),
+       drop('U2', at(19, 10), by='chooser', carried=2), undo('U2', at(19, 10, 3), at(19, 10)),
+       offer('U3', at(20, 0), 8.0, 20, 3.0), mark('U3', at(20, 1), True),
+       drop('U3', at(20, 10)), undo('U3', at(20, 10, 3), at(20, 9)),
+       offer('U4', at(21, 0), 8.0, 20, 3.0), mark('U4', at(21, 1), True),
+       drop('U4', at(21, 10)), dict(undo('U4', at(21, 10, 3), at(21, 10)), undoes='mark')]
+_uo = {o['id']: o for o in SR.orders(_ur)}
+eq('[undo] a Drop taken back did not happen: the order ends at its next drop row',
+   (_uo['U1']['how'], _uo['U1']['end'], _uo['U1']['actualMinutes']), ('GPS drop', at(18, 35), 34.0))
+eq('[undo] ...and one taken back with no later row has no end on record, unreliable',
+   (_uo['U2']['how'], _uo['U2']['end'], _uo['U2']['reliable'], _uo['U2']['carried']),
+   ('no end', None, False, None))
+eq('[undo] ...an undo row names its drop by id AND the drop\'s own time: another time is '
+   'not that drop', (_uo['U3']['how'], _uo['U3']['end']), ('Drop', at(20, 10)))
+eq('[undo] ...and an undo of anything but a drop takes no drop back',
+   (_uo['U4']['how'], _uo['U4']['end']), ('Drop', at(21, 10)))
+
+# --- as JSON, for the phone's shift page (22 Oct 2026) ---------------------------
+code_js, out_js = run(['--journal', JOURNAL, '--gps', GPSDIR, '--day', '2026-03-03', '--json'])
+eq('[json] the CLI exits 0 with --json', code_js, 0)
+_js = json.loads(out_js)
+eq('[json] one object: the day, the GPS, the totals, the orders, the pinning, the summary',
+   sorted(_js), ['day', 'end', 'gps', 'orders', 'pinning', 'start', 'summary', 'totals',
+                 'unreadable'])
+eq('[json] the orders as the text has them, by number and with no id',
+   [(o['n'], o['how'], o['reliable']) for o in _js['orders']],
+   [(i + 1, o['how'], o['reliable']) for i, o in enumerate(rep['orders'])])
+ok_('[json] ...no offer id on any order', all('id' not in o for o in _js['orders']))
+eq('[json] card against actual on each order, as the report measures it',
+   [(o['pay'], o['cardMinutes'], o['actualMinutes']) for o in _js['orders'][:2]],
+   [(12.0, 30, 30.0), (9.0, 20, 25.0)])
+eq('[json] the totals in epoch ms and seconds: rig on and off, as the text prints them',
+   (_js['totals']['on'], _js['totals']['off']),
+   (rep['totals']['on'] * 1000.0, rep['totals']['off'] * 1000.0))
+eq('[json] ...left and back, miles, moving and stopped',
+   (_js['totals']['left'] and _js['totals']['left']['at'], round(_js['totals']['miles'], 6),
+    _js['totals']['moving'], _js['totals']['stopped']),
+   (rep['totals']['left'] and rep['totals']['left']['at'] * 1000.0,
+    round(rep['totals']['miles'], 6), rep['totals']['moving'], rep['totals']['stopped']))
+eq('[json] each order\'s pinning in the text\'s own words, and the rate',
+   ([o['pin'] for o in _js['orders']][:1], _js['pinning']),
+   ([SR.pin_text(rep['orders'][0]['pin'])],
+    dict(SR.pinning(rep['orders']), rate=None)))
+_jsp = json.loads(run(['--journal', _pj, '--day', '2026-03-03', '--json'])[1])
+eq('[json] ...with a record, the rate as the text rounds it', _jsp['pinning'],
+   {'recorded': 4, 'pinned': 3, 'unrecorded': 1, 'rate': 75})
+eq('[json] no GPS log: no totals, and it says the log is missing',
+   (lambda j: (j['totals'], j['gps']['missing']))(
+       json.loads(run(['--journal', JOURNAL, '--gps', gone, '--day', '2026-03-03',
+                       '--json'])[1])), (None, True))
+_bare = [w for w in ('Nowhere', 'Example Ave', 'Faketown', 'Bistro') if w in out_js]
+eq('[json] no address or coordinate in the JSON: no place', _bare, [])
+eq('[json] ...and no coordinate (every number in it is a time, a length or a count)',
+   re.findall(r'12\.34|45\.67|11\.34|44\.67', out_js), [])
+
 # --- nothing reads it ---------------------------------------------------------
 readers = []
 # The files git tracks, not a walk of the directory: a walk also reads other
@@ -728,8 +796,20 @@ for rel in _tracked:
         readers.append(rel)
     elif f.endswith('.py') and re.search(r'^\s*(?:import|from)\s+shift_report\b', src, re.M):
         readers.append(rel)
-eq('nothing on the rig reads the report (the rating, the target, advice.js, the pages)',
-   readers, [])
+# ...but one page SHOWS it (22 Oct 2026): shift.html, through server.js's GET
+# /api/shift, which runs this file with --json and passes the answer through.
+# Those two and no other; and in server.js the name stays inside the one
+# section that runs it, so nothing there keeps or weighs what it says.
+eq('nothing on the rig reads the report (the rating, the target, advice.js, the panel); '
+   'only the shift page shows it, through the server',
+   readers, ['server.js', 'shift.html'])
+with open(os.path.join(ROOT, 'server.js'), encoding='utf-8') as fh:
+    _srv = fh.read()
+_sec = re.search(r'/\* -{6,} the shift, on the phone.*?/\* -{6,} the shift ends', _srv, re.S)
+eq('...and server.js names it only inside the section that runs it for /api/shift',
+   (_srv.count('shift_report'), _sec and _sec.group(0).count('shift_report') or 0),
+   (_srv.count('shift_report'),) * 2)
+ok_('...a section there is (%r)' % bool(_sec), _sec and 'shift_report' in _sec.group(0))
 
 shutil.rmtree(work)
 print('FAILED: %d of %d' % (bad, ok + bad) if bad

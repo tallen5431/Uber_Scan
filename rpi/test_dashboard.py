@@ -7594,6 +7594,153 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  /* --- ↶ Undo after a Drop (the owner, 22 Oct: "fewer hands, less friction")
+   *
+   * For the reply's forMs after a Drop puts an order down, Drop itself reads
+   * "↶ Undo" — the same button, the bar the same count — and a press asks
+   * /api/drop-undo and believes it: back, the order is held and the button
+   * is Drop again; refused, the drop stands. Both answers faked at the page,
+   * so the stage costs a second or two. */
+  {
+    stage = 'the Drop undo';
+    const page = await browser.newContext({ viewport: { width: 1024, height: 600 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    const posted = [];
+    let forMs = 10000;
+    let undoAnswer = { status: 200, body: { ok: true, restored: ['u-a@1'], holding: true,
+      held: { pay: 12.5, minutes: 30, dropoff: 'Oak Ln, Marietta', holdId: 'u-a@1' } } };
+    await page.route('**/api/delivered', (route) => {
+      posted.push(['/api/delivered', route.request().postData() || null]);
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, wasHolding: true,
+                               undo: { id: 'drop-1-1', forMs: forMs } }) });
+    });
+    await page.route('**/api/drop-undo', (route) => {
+      posted.push(['/api/drop-undo', route.request().postData() || null]);
+      return route.fulfill({ status: undoAnswer.status, contentType: 'application/json',
+                             body: JSON.stringify(undoAnswer.body) });
+    });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    const HELD = Object.assign({}, READINGS.deducted, {
+      holding: { pay: 12.5, minutes: 30, dropoff: 'Oak Ln, Marietta', holdId: 'u-a@1' },
+      stack: null });
+    const face = () => page.evaluate(() => {
+      const d = document.getElementById('drop');
+      const shown = (n) => !n.hidden && getComputedStyle(n).display !== 'none';
+      return { text: d.textContent.trim(), shown: shown(d),
+               bar: [].slice.call(document.querySelector('.bottombar').children).filter(shown).length,
+               fits: document.documentElement.scrollWidth <= innerWidth };
+    });
+    const press = async (ms) => {
+      await page.evaluate(() => document.getElementById('drop').click());
+      await page.waitForTimeout(ms || 300);
+    };
+    const u = {};
+    await push({ alive: true, at: Date.now(), tooBright: false, tooDim: false });
+    await push(HELD);
+    await page.waitForTimeout(250);
+    u.held = await face();
+    await press();
+    u.offered = await face();
+    await press();
+    u.undone = await face();
+    // Refused (too late, or the car changed): the drop stands.
+    undoAnswer = { status: 409, body: { ok: false, error: 'too late' } };
+    await press();
+    await press();
+    u.refused = await face();
+    // ...and its seconds run out on their own.
+    forMs = 600;
+    await push(HELD);
+    await page.waitForTimeout(200);
+    await press(150);
+    u.short = await face();
+    await page.waitForTimeout(800);
+    u.after = await face();
+    u.posted = posted.slice();
+    out.dropUndo = u;
+    await page.close();
+  }
+
+  /* --- the shift on the phone: shift.html, read-only, upright ---------------
+   *
+   * Its answer faked at the page (the endpoint is test_server's): an invented
+   * evening with the longest words the report writes — a gap, stops at both
+   * edges of the log, an expired order's note, every Pinning phrase — at a
+   * phone's two sizes. No sideways scroll, nothing under 12px, the way back
+   * at 44px, every section drawn, and nothing but GETs. */
+  for (const [vw, vh] of [[390, 844], [360, 640]]) {
+    stage = 'the shift page at ' + vw + 'x' + vh;
+    const page = await browser.newContext({ viewport: { width: vw, height: vh } })
+                              .then((c) => c.newPage());
+    const T = Date.UTC(2026, 9, 22, 21, 0, 0);
+    const o = (n, extra) => Object.assign({ n: n, app: 'uber', pay: 12.5, cardMinutes: 30,
+      cardMiles: 6.2, took: T + n * 3600000, end: T + n * 3600000 + 1800000, how: 'Drop',
+      actualMinutes: 30.0, gpsMiles: 5.9, restaurantMinutes: 6.5, doorMinutes: 2.0,
+      alongside: 'no', perHour: 25.0, reliable: true, notes: [],
+      pin: 'end pinned by server (asked: door); pickups 1 pinned' }, extra || {});
+    const REPORT = { day: '2026-10-22', start: T - 9 * 3600000, end: T + 15 * 3600000,
+      gps: { missing: false, files: 3, positions: 23163, passed: 22350, refused: { err: 813 },
+             unstamped: 0, beforeClock: 0, otherDays: 2 },
+      unreadable: 1,
+      totals: { on: T - 600000, off: T + 5 * 3600000, left: { at: T, since: null },
+        back: { at: T + 4.5 * 3600000, since: T + 4.4 * 3600000 }, stillAway: false,
+        miles: 112.4, moving: 11040, stopped: 6120, noSpeed: 60, gapSeconds: 780,
+        gaps: [{ from: T + 3600000, to: T + 3600000 + 780000, seconds: 780, apartMiles: 3.4 }],
+        stops: [{ from: T - 600000, seconds: 600, atStart: true, fromStartMiles: 0, fromOn: true,
+                  afterGap: false, beforeGap: false, toOff: false },
+                { from: T + 7200000, seconds: 960, atStart: false, fromStartMiles: 11.7,
+                  fromOn: false, afterGap: true, beforeGap: true, toOff: false }],
+        startM: 150, longStopS: 240, gapS: 60, stoppedMs: 1 },
+      orders: [o(1), o(2, { app: 'doordash', how: 'GPS drop', alongside: 'yes' }),
+        o(3, { how: 'expired', end: null, actualMinutes: null, gpsMiles: null, perHour: null,
+               reliable: false, notes: ['unreliable: expired on its own clock at 23:55; the '
+                 + 'card\'s minutes x 1.5 + 10, not a measurement, so not timed'],
+               pin: 'end not pinned: not inside the card\'s reach (asked: street); pickups 0 '
+                 + 'pinned: no house number' }),
+        o(4, { how: 'replaced', reliable: false, perHour: null, alongside: '?',
+               notes: ['unreliable: put down by the next Took, so its end is that Took, not a '
+                 + 'delivery', '2 GPS gaps over 60 s bridged in a straight line (13.0 min)'],
+               pin: 'no record (no drop row, or one from before the server wrote it)' })],
+      pinning: { recorded: 3, pinned: 2, unrecorded: 1, rate: 67 },
+      summary: { reliable: 2, of: 4, byApp: [{ group: 'doordash', n: 1, ratio: 1.0, perHour: 25.0 },
+        { group: 'uber', n: 1, ratio: 1.0, perHour: 25.0 }],
+        byBand: [{ group: '30-45 min', n: 2, ratio: 1.0, perHour: 25.0 }] } };
+    const writes = [];
+    page.on('request', (q) => { if (q.method() !== 'GET') writes.push(q.url()); });
+    await page.route('**/api/shift*', (route) => route.fulfill({ status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, day: '2026-10-22', at: T + 5 * 3600000, report: REPORT }) }));
+    await page.goto(base + '/shift.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction(() => !document.getElementById('orders').hidden, null,
+                               { timeout: 8000 }).catch(() => {});
+    const s = await page.evaluate(() => {
+      const shown = (n) => !n.hidden && getComputedStyle(n).display !== 'none';
+      let small = null;
+      document.querySelectorAll('body *').forEach((n) => {
+        if (!shown(n) || !n.childNodes.length) return;
+        const own = [].some.call(n.childNodes, (c) => c.nodeType === 3 && c.textContent.trim());
+        const px = parseFloat(getComputedStyle(n).fontSize);
+        if (own && (small === null || px < small)) small = px;
+      });
+      const links = [].slice.call(document.querySelectorAll('.bottombar a'));
+      return { wide: document.documentElement.scrollWidth > innerWidth, small: small,
+               sections: ['totals', 'orders', 'pinning', 'summary'].filter(
+                 (id) => shown(document.getElementById(id))),
+               orders: document.querySelectorAll('#orderList .order').length,
+               pins: document.querySelectorAll('#pins li').length,
+               links: links.map((a) => [a.getAttribute('href'),
+                                        Math.round(a.getBoundingClientRect().height)]),
+               text: document.body.innerText.replace(/\s+/g, ' ') };
+    });
+    s.writes = writes.slice();
+    out['shiftPage_' + vw] = s;
+    await page.close();
+  }
+
   /* --- two orders in the car, on the map ------------------------------------
    *
    * With carrying two on: the first order's end pinned D1, the second's D2,
@@ -8319,9 +8466,9 @@ try:
         _rv = got.get('routeView_%d' % _vw) or {}
         _il, _ol = _rv.get('idleLook') or {}, _rv.get('offerLook') or {}
         eq('[route view] %d: Map view from the first frame, no picture, no 📷, only ▤ Offers '
-           'on the bar' % _vw,
+           'and, beside it, ◷ Shift on the bar' % _vw,
            (_il.get('routeview'), bool(_il.get('map')), _il.get('view'), _il.get('snap'),
-            _il.get('bar')), (True, True, None, None, ['▤ Offers']))
+            _il.get('bar')), (True, True, None, None, ['▤ Offers', '◷ Shift']))
         eq('[route view] %d: ...the held run car -> pickup -> dropoff along the road' % _vw,
            [l['n'] for l in _rv.get('idle') or [] if 'mv-held-run' in l['cls']][:1], [5])
         ok_('[route view] %d: ...the map at least half the screen and no sideways scroll (%r)'
@@ -8336,6 +8483,47 @@ try:
            (['#2dd4bf'], True, True))
         eq('[route view] %d: ...and nothing written: no POST left the page, not even the '
            'held pickup\'s pin' % _vw, _rv.get('posts'), [])
+    # ↶ Undo after a Drop (22 Oct).
+    _du = got.get('dropUndo') or {}
+    _f = lambda k: ((_du.get(k) or {}).get('text'), (_du.get(k) or {}).get('shown'))
+    eq('[drop undo] set up: an order in the car, Drop on the bar', _f('held'), ('Drop', True))
+    eq('[drop undo] after Drop puts it down, the same button reads "↶ Undo"', _f('offered'),
+       ('↶ Undo', True))
+    ok_('[drop undo] ...no more controls on the bar than with the order in the car, and '
+        'nothing sideways (%r of %r)' % ((_du.get('offered') or {}).get('bar'),
+                                         (_du.get('held') or {}).get('bar')),
+        (_du.get('offered') or {}).get('bar') is not None
+        and _du['offered']['bar'] <= (_du.get('held') or {}).get('bar', 0)
+        and _du['offered'].get('fits'))
+    eq('[drop undo] a press puts the order back, and the button is Drop again', _f('undone'),
+       ('Drop', True))
+    eq('[drop undo] ...having asked the server for the Undo it was given, once',
+       (_du.get('posted') or [])[:2],
+       [['/api/delivered', None], ['/api/drop-undo', '{"id":"drop-1-1"}']])
+    eq('[drop undo] an Undo the server refuses leaves the drop standing: nothing held, no button',
+       (_du.get('refused') or {}).get('shown'), False)
+    eq('[drop undo] ...and the Undo goes by itself when its seconds are up',
+       (_f('short'), (_du.get('after') or {}).get('shown')), (('↶ Undo', True), False))
+    # The shift on the phone (shift.html, 22 Oct).
+    for _vw in (390, 360):
+        _sp = got.get('shiftPage_%d' % _vw) or {}
+        eq('[shift page] %d: every section drawn, an order each, a Pinning line each' % _vw,
+           (_sp.get('sections'), _sp.get('orders'), _sp.get('pins')),
+           (['totals', 'orders', 'pinning', 'summary'], 4, 4))
+        ok_('[shift page] %d: upright with no sideways scroll, nothing under 12px (%r)'
+            % (_vw, _sp.get('small')),
+            _sp and not _sp.get('wide') and (_sp.get('small') or 0) >= 12)
+        eq('[shift page] %d: the way back to the route and the offers, each 44px or more' % _vw,
+           [(h, (px or 0) >= 44) for h, px in _sp.get('links') or []],
+           [('live.html?route', True), ('journal.html', True)])
+        _st = _sp.get('text') or ''
+        ok_('[shift page] %d: the totals, card against actual, how each ended and the rate, in '
+            'the report\'s words' % _vw,
+            all(w in _st for w in ('rig on', 'left start', 'back at start', 'miles', 'moving',
+                                   'stopped', '112.4', 'card', 'actual', 'GPS drop', 'expired',
+                                   'not timed', 'Pinned: 2 of 3 orders with a record (67%)',
+                                   'end pinned by server')))
+        eq('[shift page] %d: ...and it writes nothing' % _vw, _sp.get('writes'), [])
     _rr = got.get('roadRun_road') or {}
     _rn = got.get('roadRun_noRoad') or {}
     _mill, _psr = (34.010, -84.610), (33.900, -84.600)

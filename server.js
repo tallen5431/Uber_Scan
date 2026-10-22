@@ -3649,6 +3649,113 @@ function putDown(now, by, done, which) {
   retryPool();
 }
 
+/* ---------- ↶ Undo: a Drop taken back --------------------------------------
+ *
+ * The owner, 22 Oct 2026: "fewer hands, less friction". A Drop pressed on the
+ * wrong order, or a moment early, was for good: the order was off the list,
+ * its pins and searches forgotten, its planner gone, and the only way back
+ * was a fresh ✓ Took on a card long gone from the phone. Now, for
+ * UNDO_DROP_MS after the panel's Drop (or the offers page's In car Drop, the
+ * same POST) puts something down, that button reads "↶ Undo" — the same
+ * button, no new control (Settled: no seventh bar control) — and a press puts
+ * back EXACTLY what the press took: the list as it stood before it, every
+ * order of it as it was (its fields, pins, planner, batch and add-on links,
+ * acceptedAt and so its clock), and the addresses waiting between them that
+ * the drop threw out (Assemble's pool).
+ *
+ * FROM A SNAPSHOT IN MEMORY, taken at the press (undoBefore): the holds are
+ * cloned through JSON, which is the shape holding.json already keeps them in
+ * and so the shape a restart restores, and restored through setHeld, the one
+ * writer — so holding.json, the scanner's handoff and the GPS drop's arming
+ * come back the way a restart would bring them. Process memory: a restart
+ * forgets it, and the Undo with it.
+ *
+ * ONLY A PRESS. The GPS drop, an expiry, a Took that replaced the order and
+ * the offers page's untick are not taken back here: none of them is the
+ * driver's Drop, and none of them is offered an Undo. And only while the car
+ * is exactly as that Drop left it: a Took, the GPS or a second Drop since
+ * makes the snapshot about a car that is no longer there, and the Undo is
+ * refused ('the car changed') rather than putting two lists together.
+ *
+ * WRITTEN FIRST. An `undo` row per drop row the press wrote — {v, kind:
+ * 'undo', at, id, seq, undoes: 'drop', dropAt, holdId}, ids and times only —
+ * and the orders are put back only once it is on disk, so the journal never
+ * says an order was down while the car holds it. The shift report (tools/)
+ * reads the drop row that row names as never written; the fold and journal.py skip
+ * a kind they do not read, as for every other row with a kind. A row that
+ * could not be written puts nothing back and the Undo stays open to try again
+ * (the panel says "↶ Undo · failed"). */
+var UNDO_DROP_MS = envNumber('UNDO_DROP_MS', 10000);
+var dropUndo = null;
+var dropUndoSeq = 0;
+
+function cloneHold(h) {
+  return JSON.parse(JSON.stringify(h));
+}
+
+function heldKey(list) {
+  return (list || []).map(holdIdOf).join('\n');
+}
+
+// The car as it stands, just before a Drop's putDown.
+function undoBefore() {
+  return { held: scanner.held.map(cloneHold), unowned: (assembly.unowned || []).slice() };
+}
+
+/* ...kept once putDown has put something down, and the reply's `undo`
+ * ({id, forMs}); null when it put nothing down. Asked straight after putDown
+ * returns, which has rewritten the list by then (setHeld is synchronous). */
+function offerDropUndo(before, now) {
+  var after = scanner.held.map(holdIdOf);
+  var gone = before.held.filter(function (h) { return after.indexOf(holdIdOf(h)) === -1; });
+  if (!gone.length) return null;
+  dropUndoSeq += 1;
+  dropUndo = { id: 'drop-' + now + '-' + dropUndoSeq, at: now, until: now + UNDO_DROP_MS,
+               before: before.held, unowned: before.unowned, after: heldKey(scanner.held),
+               // ...and which of them had a drop row: an order with no stated
+               // time leaves with a Drop and writes none (putDown).
+               gone: gone.map(function (h) {
+                 return { id: h.id, holdId: holdIdOf(h), rowed: holdEnds(h) !== null };
+               }) };
+  return { id: dropUndo.id, forMs: UNDO_DROP_MS };
+}
+
+/* Put back what the Undo `u` names. `done(err)`: err when the undo rows could
+ * not be written, and then nothing was put back. */
+function restoreDrop(u, now, done) {
+  var rows = u.gone.filter(function (g) { return g.rowed; }).map(function (g) {
+    return JSON.stringify({ v: 1, kind: 'undo', at: now, id: g.id, seq: now, undoes: 'drop',
+                            dropAt: u.at, holdId: g.holdId }) + '\n';
+  });
+  var restore = function () {
+    // Its drop row's outcome was kept as it left (goneOutcomes); the order is
+    // back, and its next drop works its outcome out afresh.
+    u.gone.forEach(function (g) { goneOutcomes.delete(g.holdId); });
+    setHeld(u.before.map(cloneHold));
+    var waiting = (assembly.unowned || []).map(function (x) { return x.d.line; });
+    assembly.unowned = u.unowned.filter(function (x) {
+      return waiting.indexOf(x.d.line) === -1;
+    }).concat(assembly.unowned || []);
+    retryPool();
+    done(null);
+  };
+  if (!rows.length) return restore();
+  appendLines(rows.join(''), function (err) {
+    if (err) {
+      console.error('journal: could not record an undo, so nothing was put back: '
+                    + err.message);
+      return done(err);
+    }
+    // The append is the one wait in this, a few milliseconds; a Took landing
+    // inside it would make the snapshot about another car. Said, not merged.
+    if (heldKey(scanner.held) !== u.after) {
+      console.error('undo: the car changed while the undo was written; nothing put back');
+      return done(new Error('the car changed'));
+    }
+    restore();
+  });
+}
+
 /* The offer as Advice.stack has to see it: timed the way the HELD job is timed.
  *
  * `stack` reads `offer.minutes`, and the two sides of the comparison were not
@@ -9086,12 +9193,33 @@ function route(req, res) {
         }
         send(res, 200, JSON.stringify(Object.assign(reply, extra || {})), json);
       };
+      // Every press that puts something down offers to take it back (↶ Undo,
+      // offerDropUndo): the car as it was just before, and `undo` on the
+      // reply once putDown has rewritten the list — which it has by the time
+      // it returns, while its `done` waits on the row's append.
+      var dropping = function (by, which) {
+        var before = undoBefore();
+        var undo;
+        var was = null;
+        var reply = function () {
+          // Nothing put down (an order with no stated time is cleared by a
+          // bare Drop and counted by nothing): nothing to take back.
+          if (!was && undo && dropUndo && dropUndo.id === undo.id) dropUndo = null;
+          answer(was, was && undo ? { undo: undo } : null);
+        };
+        putDown(now, by, function (w) {
+          was = w;
+          if (undo !== undefined) reply();
+        }, which);
+        undo = offerDropUndo(before, now);
+        if (was !== null) reply();
+      };
       if (Array.isArray(asked.holdIds)) {
         var picked = orders.filter(function (o) {
           return asked.holdIds.indexOf(holdIdOf(o)) !== -1;
         });
         if (!picked.length) return answer(false);
-        return putDown(now, 'chooser', function (was) { answer(was); }, picked);
+        return dropping('chooser', picked);
       }
       if (twoAtPress && orders.length >= 2) {
         var one = dropDecides(orders, now);
@@ -9103,9 +9231,50 @@ function route(req, res) {
                        end: o.dropoff || null };
             }) } });
         }
-        return putDown(now, null, function (was) { answer(was); }, one);
+        return dropping(null, one);
       }
-      return putDown(now, null, function (was) { answer(was); });
+      return dropping(null);
+    });
+  }
+
+  /* ↶ Undo of the Drop just pressed: {id}, the reply's `undo.id`. See
+   * offerDropUndo. 409 with nothing changed when there is no such Undo
+   * ('nothing to undo'), its UNDO_DROP_MS are up ('too late'), or the car is
+   * no longer as that Drop left it ('the car changed'); 503 when the undo row
+   * could not be written, the Undo still open. Answered as Drop is, with the
+   * order in the car (`holding`, `held`, and `orders` with two), and every
+   * panel told on the stream, `heldBy: 'undo'`. */
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/drop-undo') {
+    return readJsonBody(req, function (err, body) {
+      var json = { 'Content-Type': 'application/json; charset=utf-8' };
+      var now = Date.now();
+      var u = dropUndo;
+      var refuse = function (code, why) {
+        send(res, code, JSON.stringify({ ok: false, error: why }), json);
+      };
+      if (err || !body || !u || body.id !== u.id) return refuse(409, 'nothing to undo');
+      if (now >= u.until) { dropUndo = null; return refuse(409, 'too late'); }
+      if (heldKey(scanner.held) !== u.after) {
+        dropUndo = null;
+        return refuse(409, 'the car changed');
+      }
+      dropUndo = null;
+      restoreDrop(u, now, function (rowErr) {
+        if (rowErr) {
+          if (rowErr.message === 'the car changed') return refuse(409, 'the car changed');
+          dropUndo = u;
+          return refuse(503, 'not saved');
+        }
+        var back = holding(Date.now());
+        var reply = { ok: true, restored: u.gone.map(function (g) { return g.holdId; }),
+                      holding: !!back, held: heldForPanel(back) };
+        var said = { holding: heldForPanel(back), heldBy: 'undo' };
+        if (carryingTwo(Date.now())) {
+          reply.orders = said.orders = ordersForPanel(Date.now());
+        }
+        broadcast(said);
+        send(res, 200, JSON.stringify(reply), json);
+      });
     });
   }
 
@@ -10423,6 +10592,21 @@ function route(req, res) {
     });
   }
 
+  // Today's shift as the end-of-shift report has it, for shift.html: see
+  // shiftReported. Read-only, as the page is.
+  if (pathname === '/api/shift') {
+    var sq = url.parse(req.url, true).query || {};
+    var sday = typeof sq.day === 'string' && sq.day ? sq.day : driverDay(Date.now());
+    if (!/^\d{4}-\d\d-\d\d$/.test(sday)) {
+      return send(res, 400, JSON.stringify({ ok: false, error: 'day must be YYYY-MM-DD' }),
+                  { 'Content-Type': 'application/json; charset=utf-8' });
+    }
+    return shiftReported(sday, function (code, answer) {
+      send(res, code, JSON.stringify(answer),
+           { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    });
+  }
+
   if (pathname.endsWith('/')) pathname += 'index.html';
 
   // Resolve first, then confirm the result is still inside ROOT, so "..", an
@@ -10591,6 +10775,104 @@ function tidyGpsLogs() {
     else if (last) console.log('gps logs: ' + last);
   });
 }
+
+/* ---------- the shift, on the phone: GET /api/shift ------------------------
+ *
+ * The owner, 22 Oct 2026: today's shift on the phone, as the end-of-shift
+ * report computes it — the totals (rig on and off, left and back, miles,
+ * moving and stopped), the orders (card against actual, how each ended) and
+ * the Pinning section. shift.html draws it; this answers it.
+ *
+ * BY RUNNING THE REPORT, not a port of it. tools/shift_report.py is about a
+ * thousand lines, and the parts the page shows lean on two things that are
+ * Python on this rig and nowhere else: gps.Phone.take, the one gate every fix
+ * passes (frozen fixes, error, mode, the parked receiver), and
+ * offer_parser.screen_type, which names an order's app off its card. A port
+ * would be second copies of both, plus of the report's own gap, stop and
+ * start rules — the rules the 16 Oct summary got wrong by hand, and which a
+ * second copy would drift from without anything saying so. So once per
+ * request, `shift_report.py --json` (its as_json: built field by field, no
+ * address, no coordinate, no offer id), and the answer handed on untouched.
+ * Measured on the real 12 Oct shift at 1.32 s on the development machine; the
+ * Pi is slower, so the answer is kept SHIFT_CACHE_MS (30 s) per day, a second
+ * request while one runs waits for that run rather than starting another,
+ * the child runs at a lower priority than the scanner, and it is killed
+ * after SHIFT_TIMEOUT_MS. Nothing here keeps or weighs what it says: the
+ * report stays a report (its own header, and tools/test_shift_report.py,
+ * which holds this section to being the one place on the server that names
+ * it).
+ *
+ * The day is the driver's (advice.js's DAY_STARTS_AT), today unless `day`
+ * names another as YYYY-MM-DD. The GPS logs are GPSLOG_DIR's, as the tidy's;
+ * set empty, the report's GPS half says it has no log. */
+var SHIFT_CACHE_MS = envNumber('SHIFT_CACHE_MS', 30000);
+var SHIFT_TIMEOUT_MS = envNumber('SHIFT_TIMEOUT_MS', 60000);
+var SHIFT_OUT_MAX = 4 * 1024 * 1024;
+var shiftKept = {};      // day -> {at, answer}
+var shiftWaiting = {};   // day -> [done, ...] while a run is under way
+
+function driverDay(ms) {
+  var d = new Date(ms);
+  d.setHours(d.getHours() - Advice.DAY_STARTS_AT);
+  var two = function (n) { return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate());
+}
+
+/* `done(code, answer)`: 200 and {ok, day, at, report}, or 503 and {ok: false,
+ * day, error}. */
+function shiftReported(day, done) {
+  var kept = shiftKept[day];
+  if (kept && Date.now() - kept.at < SHIFT_CACHE_MS) return done(200, kept.answer);
+  if (shiftWaiting[day]) return shiftWaiting[day].push(done);
+  shiftWaiting[day] = [done];
+  var finish = function (code, answer) {
+    var waiting = shiftWaiting[day] || [];
+    delete shiftWaiting[day];
+    if (code === 200) shiftKept[day] = { at: answer.at, answer: answer };
+    waiting.forEach(function (d) { d(code, answer); });
+  };
+  var fail = function (why) { finish(503, { ok: false, day: day, error: why }); };
+  // A rig with no journal yet has no orders: an empty file, not a failure.
+  var journal = fs.existsSync(JOURNAL_PATH) ? JOURNAL_PATH : os.devNull;
+  var argv = [path.join(ROOT, 'tools', 'shift_report.py'),
+              '--journal', journal, '--day', day, '--json'];
+  if (GPSLOG_DIR) argv.push('--gps', GPSLOG_DIR);
+  var child;
+  try {
+    child = spawn(process.env.PYTHON || 'python3', argv,
+                  { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    return fail('the shift report could not run: ' + e.message);
+  }
+  try { os.setPriority(child.pid, 10); } catch (e) { /* not allowed here: as it is */ }
+  var out = [], size = 0, said = '', over = false;
+  var timer = setTimeout(function () { over = true; child.kill('SIGKILL'); }, SHIFT_TIMEOUT_MS);
+  child.stdout.on('data', function (d) {
+    size += d.length;
+    if (size > SHIFT_OUT_MAX) { over = true; child.kill('SIGKILL'); return; }
+    out.push(d);
+  });
+  child.stderr.on('data', function (d) { said = (said + d).slice(-2048); });
+  child.on('error', function (e) {
+    clearTimeout(timer);
+    fail('the shift report could not run: ' + e.message);
+  });
+  child.on('close', function (code) {
+    clearTimeout(timer);
+    if (!shiftWaiting[day]) return;          // answered by 'error' already
+    if (over) return fail('the shift report took too long or said too much');
+    if (code) {
+      return fail('the shift report failed (exit ' + code + '): '
+                  + (said.trim().split('\n').pop() || '').slice(0, 200));
+    }
+    var report;
+    try { report = JSON.parse(Buffer.concat(out).toString('utf8')); } catch (e) {
+      return fail('the shift report said something that is not JSON');
+    }
+    finish(200, { ok: true, day: day, at: Date.now(), report: report });
+  });
+}
+/* ---------- the shift ends here ------------------------------------------ */
 
 if (tls) {
   listen(https.createServer({ cert: tls.cert, key: tls.key }, handler),

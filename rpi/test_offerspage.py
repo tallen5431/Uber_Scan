@@ -3726,12 +3726,29 @@ const { chromium } = require('playwright');
     shown: !document.getElementById('incar').hidden,
     line: (document.querySelector('#incar li .what') || {}).textContent || null,
     top: Math.round(document.getElementById('incar').getBoundingClientRect().top) }));
+  // Drop, and for its ten seconds the line stays with its Drop now "↶ Undo"
+  // (the owner, 22 Oct); a press puts the order back on the server.
+  const look = () => page.evaluate(() => fetch('/api/status').then((r) => r.json()).then((s) => ({
+    shown: !document.getElementById('incar').hidden,
+    button: ((document.querySelector('#incar button') || {}).textContent || '').trim(),
+    dropped: !!document.querySelector('#incar li.dropped'),
+    held: s && s.holding ? s.holding.holdId : null })));
+  const button = (text) => page.waitForFunction((t) => {
+    const b = document.querySelector('#incar button');
+    return b && b.textContent.trim() === t;
+  }, text, { timeout: 10000 }).catch(() => {});
   await page.click('#incar button');
-  await page.waitForSelector('#incar[hidden]', { state: 'attached', timeout: 10000 })
+  await button('↶ Undo');
+  const offered = await look();
+  await page.click('#incar button');
+  await button('Drop');
+  const back = await look();
+  await page.click('#incar button');
+  await page.waitForSelector('#incar[hidden]', { state: 'attached', timeout: 16000 })
     .catch(() => {});
   const after = { shown: await page.evaluate(() => !document.getElementById('incar').hidden) };
   await browser.close();
-  console.log(JSON.stringify({ before: before, after: after }));
+  console.log(JSON.stringify({ before: before, offered: offered, back: back, after: after }));
 })().catch((e) => console.log(JSON.stringify({ __crashed: String((e && e.stack) || e) })));
 """
 _ework = tempfile.mkdtemp()
@@ -3777,13 +3794,25 @@ try:
     ok_('[in car list] opened at #incar, the section shows the held order (%r)' % _eb,
         _eb.get('shown') and '$14.25' in (_eb.get('line') or '')
         and '77 Quarry Ln' in (_eb.get('line') or '') and (_eb.get('top') or 0) < 200)
-    no_('[in car list] ...and Drop takes it away', (_eout.get('after') or {}).get('shown'))
+    _eo, _ek = _eout.get('offered') or {}, _eout.get('back') or {}
+    eq('[drop undo] the offers page\'s Drop puts the order down and, for its seconds, the '
+       'same line\'s Drop reads "↶ Undo"',
+       (_eo.get('held'), _eo.get('shown'), _eo.get('dropped'), _eo.get('button')),
+       (None, True, True, '↶ Undo'))
+    eq('[drop undo] ...a press puts it back in the car, and the line is Drop again',
+       (_ek.get('held'), _ek.get('dropped'), _ek.get('button')),
+       ('e-1@%d' % _eat, False, 'Drop'))
+    no_('[in car list] ...and Drop takes it away, once its Undo is over',
+        (_eout.get('after') or {}).get('shown'))
     _estatus = json.loads(_eurl.urlopen(_ebase + '/api/status', timeout=2).read())
     eq('[in car list] ...the server holds nothing after it', _estatus.get('holding'), None)
     _erows = [json.loads(l) for l in open(_ejournal) if l.strip()]
-    eq("[in car list] ...and wrote the panel Drop's row: a drop for the order, no `by`",
-       [(r.get('kind'), r.get('id'), r.get('by')) for r in _erows if r.get('kind') == 'drop'],
-       [('drop', 'e-1', None)])
+    eq("[in car list] ...and wrote the panel Drop's row: a drop for the order, no `by` "
+       "(twice: the first taken back by its undo row)",
+       ([(r.get('kind'), r.get('id'), r.get('by')) for r in _erows if r.get('kind') == 'drop'],
+        [(r.get('id'), r.get('dropAt')) for r in _erows if r.get('kind') == 'undo']),
+       ([('drop', 'e-1', None)] * 2,
+        [('e-1', ([r.get('at') for r in _erows if r.get('kind') == 'drop'] or [None])[0])]))
 finally:
     _eproc.terminate()
     try:

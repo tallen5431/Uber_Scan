@@ -18,6 +18,7 @@ order in the car.
 """
 
 import json
+import math
 import os
 import shutil
 import socket
@@ -11007,6 +11008,190 @@ try:
             _q16.gone()
 finally:
     _nf.kill()
+
+# --- ↶ Undo of a Drop, and the shift on the phone (22 Oct 2026) ----------------
+#
+# The owner: "fewer hands, less friction". For UNDO_DROP_MS (10 s) after a Drop
+# puts an order down, the same button reads "↶ Undo", and /api/drop-undo puts
+# back exactly what the Drop took, from the snapshot taken at the press, writing
+# an `undo` row of ids so the shift report reads the drop as never pressed.
+# Invented orders and places throughout; the coordinates are nowhere near the
+# driver.
+_un = int(time.time() * 1000)
+_UA = {'id': 'ud-a', 'acceptedAt': _un - 20 * 60000, 'pay': 12.5, 'minutes': 40.0,
+       'miles': 5.0, 'cost': 1.5, 'app': 'uber', 'pickup': 'Larkspur Tacos',
+       'dropoff': '4821 Kestrel Dr, Marietta', 'card': {'multiOrder': False},
+       'endPin': {'dropoff': '4821 Kestrel Dr, Marietta', 'lat': 12.3456, 'lon': 45.6789,
+                  'doorLevel': True, 'pinnedAt': _un - 60000},
+       'pickupPins': [{'q': 'Larkspur Tacos', 'lat': 12.3399, 'lon': 45.6701}],
+       'planner': {'stops': [{'kind': 'pickup', 'name': 'Larkspur Tacos'},
+                             {'kind': 'dropoff', 'line': '4821 Kestrel Dr, Marietta'}],
+                   'at': _un - 5 * 60000},
+       'batch': True, 'drops': [{'line': '4821 Kestrel Dr'}, {'line': '17 Wren Way'}]}
+_UB = {'id': 'ud-b', 'acceptedAt': _un - 5 * 60000, 'pay': 6.25, 'minutes': 9.0,
+       'miles': 1.2, 'cost': 0.4, 'app': 'uber', 'dropoff': None, 'addOn': True,
+       'of': 'ud-a@%d' % _UA['acceptedAt'], 'ofEnds': _un + 30 * 60000}
+
+
+def _ujournal(path):
+    # The cards and their Tooks, so the shift report has the orders to time.
+    write(path, [offer(0, _UA['acceptedAt'], id='ud-a', pay=12.5, minutes=40.0, miles=5.0,
+                       pickup='Larkspur Tacos', dropoff='4821 Kestrel Dr, Marietta',
+                       lat=12.3456, lon=45.6789,
+                       text='$12.50\n40 min (5.0 mi) total\nLarkspur Tacos\n'
+                            '4821 Kestrel Dr, Marietta\nAccept'),
+                 {'v': 1, 'kind': 'mark', 'id': 'ud-a', 'at': _UA['acceptedAt'] + 1000,
+                  'accepted': True, 'via': 'panel'}])
+
+
+def _uhold(path):
+    return json.load(open(os.path.join(os.path.dirname(path), 'holding.json')))['orders']
+
+
+_ud = tempfile.mkdtemp()
+_uj = os.path.join(_ud, 'offers.jsonl')
+_ujournal(_uj)
+with open(os.path.join(_ud, 'holding.json'), 'w') as _fh:
+    json.dump({'v': 2, 'orders': [_UA, _UB]}, _fh)
+# A minute of GPS log, a straight drive east, so the shift's totals have fixes.
+_ugps = os.path.join(_ud, 'gpslog')
+os.mkdir(_ugps)
+_ut0 = int(time.time()) - 15 * 60
+with open(os.path.join(_ugps, time.strftime('%Y-%m-%d_%H%M', time.localtime(_ut0))
+                       + '.jsonl'), 'w') as _fh:
+    for _i in range(240):
+        _t = _ut0 + _i
+        _fh.write('%s %.6f: %s\n' % (
+            time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(_t)), _t,
+            json.dumps({'class': 'TPV', 'device': '/dev/ttyACM0', 'mode': 3,
+                        'time': time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(_t)),
+                        'lat': 12.3456, 'lon': 45.6789 + _i * 0.0001, 'eph': 8.0,
+                        'speed': 10.0})))
+_up, _ub = start({'SCANNER': '0', 'GPSLOG_DIR': _ugps}, _uj)
+try:
+    _before = _uhold(_uj)
+    eq('[drop undo] set up: a trip of two in the car, the original pinned and planned',
+       [o.get('holdId') for o in (get(_ub, '/api/status').get('orders') or [])],
+       ['ud-a@%d' % _UA['acceptedAt'], 'ud-b@%d' % _UB['acceptedAt']])
+    _c, _d = post(_ub, '/api/delivered', {'holdIds': ['ud-a@%d' % _UA['acceptedAt']]})
+    _uid = (_d.get('undo') or {}).get('id')
+    eq('[drop undo] Drop answers with an Undo for ten seconds',
+       (_c, bool(_uid), (_d.get('undo') or {}).get('forMs')), (200, True, 10000))
+    eq('[drop undo] ...the order is down, its add-on left',
+       [o.get('id') for o in _uhold(_uj)], ['ud-b'])
+    _c2, _d2 = post(_ub, '/api/drop-undo', {'id': _uid})
+    eq('[drop undo] Undo puts it back, and says what is in the car',
+       (_c2, _d2.get('ok'), _d2.get('restored'), (_d2.get('held') or {}).get('pay'),
+        [o.get('pay') for o in _d2.get('orders') or []]),
+       (200, True, ['ud-a@%d' % _UA['acceptedAt']], 12.5, [12.5, 6.25]))
+    eq('[drop undo] ...exactly as it was: every field of every order, its pins, planner, '
+       'batch and add-on links and clock, in its place on the list',
+       [{k: o.get(k) for k in f} for o, f in zip(_uhold(_uj), (_UA, _UB))], [_UA, _UB])
+    _st = get(_ub, '/api/status')
+    eq('[drop undo] ...and the GPS drop armed on its door again',
+       ((_st.get('holding') or {}).get('holdId'), (_st.get('holding') or {}).get('endPinned')),
+       ('ud-a@%d' % _UA['acceptedAt'], True))
+    time.sleep(0.3)
+    _urows = _rows(_uj, 'undo')
+    _udrop = [r for r in _rows(_uj, 'drop') if r.get('id') == 'ud-a']
+    eq('[drop undo] the Undo writes one undo row, naming the drop row it takes back',
+       [(r.get('id'), r.get('undoes'), r.get('dropAt'), r.get('holdId')) for r in _urows],
+       [('ud-a', 'drop', _udrop[0].get('at') if _udrop else None,
+         'ud-a@%d' % _UA['acceptedAt'])])
+    eq('[drop undo] ...ids and times only', sorted(_urows[0]) if _urows else None,
+       ['at', 'dropAt', 'holdId', 'id', 'kind', 'seq', 'undoes', 'v'])
+    # ...and again from the server's own written list (the fields it fills in
+    # on an order restored at boot included): a second Drop and Undo.
+    _before = _uhold(_uj)
+    _cr, _dr = post(_ub, '/api/delivered', {'holdIds': ['ud-a@%d' % _UA['acceptedAt']]})
+    post(_ub, '/api/drop-undo', {'id': (_dr.get('undo') or {}).get('id')})
+    eq('[drop undo] ...the list the server wrote before the Drop, as it was after the Undo',
+       _uhold(_uj), _before)
+    time.sleep(0.2)
+    eq('[drop undo] the same Undo twice is refused, and changes nothing',
+       (post(_ub, '/api/drop-undo', {'id': _uid}), len(_rows(_uj, 'undo')),
+        [o.get('id') for o in _uhold(_uj)]),
+       ((409, {'ok': False, 'error': 'nothing to undo'}), 2, ['ud-a', 'ud-b']))
+    eq('[drop undo] ...as is one with no id it gave',
+       post(_ub, '/api/drop-undo', {'id': 'drop-1-1'}), (409, {'ok': False, 'error': 'nothing to undo'}))
+    # The car changed under it: the add-on put down by a second Drop, and the
+    # first Drop's Undo is no longer about the car there is.
+    _c3, _d3 = post(_ub, '/api/delivered', {'holdIds': ['ud-a@%d' % _UA['acceptedAt']]})
+    _c4, _d4 = post(_ub, '/api/delivered', {'holdIds': ['ud-b@%d' % _UB['acceptedAt']]})
+    eq('[drop undo] an Undo after a later Drop is the later one\'s: the earlier is refused',
+       post(_ub, '/api/drop-undo', {'id': (_d3.get('undo') or {}).get('id')})[0], 409)
+    eq('[drop undo] ...and the later one puts back what IT took',
+       (post(_ub, '/api/drop-undo', {'id': (_d4.get('undo') or {}).get('id')})[0],
+        [o.get('id') for o in _uhold(_uj)]), (200, ['ud-b']))
+    # Ten seconds, and no more: the trip's add-on dropped again and left.
+    _c5, _d5 = post(_ub, '/api/delivered', {'holdIds': ['ud-b@%d' % _UB['acceptedAt']]})
+    time.sleep(10.3)
+    eq('[drop undo] an Undo after its ten seconds is refused, and nothing comes back',
+       (post(_ub, '/api/drop-undo', {'id': (_d5.get('undo') or {}).get('id')}),
+        os.path.exists(os.path.join(_ud, 'holding.json')), len(_rows(_uj, 'undo'))),
+       ((409, {'ok': False, 'error': 'too late'}), False, 3))
+    eq('[drop undo] a Drop with nothing in the car offers no Undo',
+       'undo' in post(_ub, '/api/delivered', {})[1], False)
+
+    # The shift, on the phone: today's report through the server.
+    _sc, _sh, _ = raw(_ub, '/api/shift')
+    _sj = json.loads(_sh) if _sc == 200 else {}
+    _srep = _sj.get('report') or {}
+    _sa = [o for o in _srep.get('orders') or []]
+    eq('[shift] /api/shift answers today\'s shift as the report computes it',
+       (_sc, _sj.get('ok'), _sj.get('day'), sorted(_srep)),
+       (200, True, time.strftime('%Y-%m-%d', time.localtime(time.time() - 4 * 3600)),
+        ['day', 'end', 'gps', 'orders', 'pinning', 'start', 'summary', 'totals',
+         'unreadable']))
+    _sdrops = [r for r in _rows(_uj, 'drop') if r.get('id') == 'ud-a']
+    eq('[shift] ...an undone Drop is no end: the order ends at the Drop that stood',
+       [(o.get('how'), o.get('end'), o.get('pay'), o.get('cardMinutes')) for o in _sa],
+       [('chooser', _sdrops[-1].get('at') if _sdrops else None, 12.5, 40.0)])
+    eq('[shift] ...(the premise: three drop rows for it, the first two taken back)',
+       [r.get('at') for r in _sdrops][:2],
+       [r.get('dropAt') for r in _rows(_uj, 'undo') if r.get('id') == 'ud-a'])
+    eq('[shift] ...and the totals off the GPS log: rig on at its first fix, the miles driven',
+       ((_srep.get('totals') or {}).get('on'),
+        round((_srep.get('totals') or {}).get('miles') or 0, 1)),
+       (_ut0 * 1000.0, round(239 * 0.0001 * 111320 * math.cos(math.radians(12.3456))
+                             / 1609.344, 1)))
+    eq('[shift] ...and its Pinning line, in the report\'s words',
+       [o.get('pin') for o in _sa][:1], ['end pinned by page; pickups 1 pinned'])
+    eq('[shift] no address, no place and no coordinate leaves the server',
+       [w for w in ('Kestrel', 'Larkspur', 'Wren', 'Marietta', '12.34', '45.67') if w in _sh],
+       [])
+    eq('[shift] a second ask inside the cache is the same answer, not a second run',
+       json.loads(raw(_ub, '/api/shift')[1]).get('at'), _sj.get('at'))
+    eq('[shift] a day that is not YYYY-MM-DD is refused',
+       raw(_ub, '/api/shift?day=yesterday')[0], 400)
+    _sx = json.loads(raw(_ub, '/api/shift?day=2001-01-01')[1])
+    eq('[shift] ...and another day is that day\'s, with nothing in it',
+       (_sx.get('day'), (_sx.get('report') or {}).get('orders')), ('2001-01-01', []))
+finally:
+    stop(_up)
+shutil.rmtree(_ud, ignore_errors=True)
+# ...and a car changed since the Drop by something that offers no Undo of its
+# own: the offers page's untick of the other order. The Undo is refused, and
+# the order the Drop took stays down.
+_ud2 = tempfile.mkdtemp()
+_uj2 = os.path.join(_ud2, 'offers.jsonl')
+open(_uj2, 'w').close()
+with open(os.path.join(_ud2, 'holding.json'), 'w') as _fh:
+    json.dump({'v': 2, 'orders': [dict(_UA, id='uc-a'),
+                                  dict(_UB, id='uc-b', of='uc-a@%d' % _UA['acceptedAt'])]}, _fh)
+_up2, _ub2 = start({'SCANNER': '0'}, _uj2)
+try:
+    _d6 = post(_ub2, '/api/delivered', {'holdIds': ['uc-a@%d' % _UA['acceptedAt']]})[1]
+    post(_ub2, '/api/offers/mark', {'id': 'uc-b', 'accepted': None, 'via': 'offers'})
+    time.sleep(0.2)
+    eq('[drop undo] an Undo once the car has changed some other way is refused, and the '
+       'order stays down',
+       (post(_ub2, '/api/drop-undo', {'id': (_d6.get('undo') or {}).get('id')}),
+        get(_ub2, '/api/status').get('holding'), len(_rows(_uj2, 'undo'))),
+       ((409, {'ok': False, 'error': 'the car changed'}), None, 0))
+finally:
+    stop(_up2)
+shutil.rmtree(_ud2, ignore_errors=True)
 
 # --- the GPS logs are tidied when the server starts ---------------------------
 #

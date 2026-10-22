@@ -3917,6 +3917,21 @@ earlier tick's stated minutes, and in 6 of those the earlier job was stated to
 end first, so a drop row is one job's elapsed time only where no other tick
 overlaps it.
 
+**A Drop can be taken back for ten seconds** (the owner, 22 Oct 2026). After
+the panel's Drop — or the offers page's In car Drop, the same press — puts an
+order down, that same button reads **↶ Undo** for `UNDO_DROP_MS` (10 s), and a
+press puts back exactly what the Drop took: the list as it stood, each order
+with its fields, pins, planner, batch and add-on links and its clock, and the
+addresses that were waiting between them, from a snapshot server.js took at
+the press (`POST /api/drop-undo`). It first writes a `kind: "undo"` row —
+`undoes: "drop"`, the offer's `id`, the drop row's own time as `dropAt`, the
+`holdId`, ids and times only — and `tools/shift_report.py` reads the drop row
+it names as never pressed. Refused, with nothing changed, after its ten
+seconds, or once the car has changed some other way (a Took, the GPS drop,
+another Drop, an expiry). The GPS drop, an expiry and a Took that replaced an
+order are not undone here. The snapshot is process memory: a restart forgets
+it.
+
 **What it cost the bar of controls.** Two of the six are conditional — "Took
 $8.04" with an offer on the record, "Drop" with an order in the car — so with
 both up the bar goes from five buttons to seven, and measured across every panel
@@ -4588,8 +4603,22 @@ driven in it are not counted (the line says so, and how far apart the fixes
 either side are), no stop runs across it, its minutes are neither moving nor
 stopped, and a departure seen first after a gap says it may have been earlier.
 `--csv` gives the per-order rows only. It prints no address and no
-coordinate, recommends nothing, and nothing on the rig reads it. There is no
+coordinate, recommends nothing, and nothing on the rig decides on it. There is no
 panel button for it, deliberately: the bar holds six.
+
+**And on the phone, today's so far:** `http://<rig>:8080/shift.html` (◷ Shift
+on the route view's bar beside ▤ Offers, and near the top of the offers page)
+shows the same report for the driver's day now — the totals, each order's card
+against actual and how it ended, and the Pinning section — upright and
+read-only. The page asks `GET /api/shift` (`?day=YYYY-MM-DD` for another day),
+and server.js answers it by running this same tool with `--json`, which builds
+its answer field by field (no offer id, no address, no coordinate) and is
+passed through untouched. Run, not ported: the report leans on `gps.Phone.take`
+(the one fix gate) and `offer_parser.screen_type`, and a second copy of those
+and of the report's gap and stop rules would drift. The answer is kept for
+`SHIFT_CACHE_MS` (30 s), a request during a run waits for that run, the child
+runs at a lower priority than the scanner, and it is stopped after
+`SHIFT_TIMEOUT_MS` (60 s). The GPS half reads `GPSLOG_DIR`, as the tidy does.
 
 **One gate, in one place.** Every fix carries what the receiver said about it
 — `mode`, and `err`, gpsd's `eph` in metres — and `gps.usable()` decides once
@@ -8528,7 +8557,7 @@ python3 rpi/test_autopilot.py   #  47 on the one command that takes the rig
                                 #     branch that used to brick it
 python3 rpi/test_keypad.py      # 111 on the fallback input path, driven
                                 #     through a real browser one key at a time
-python3 rpi/test_lint.py        # 357 on the faults that only surface when a
+python3 rpi/test_lint.py        # 359 on the faults that only surface when a
                                 #     cold branch runs, and on nothing the rig
                                 #     writes being committable (flake8 optional)
 python3 rpi/test_handoff.py     #   76 on the three files the browser and the
@@ -8546,7 +8575,7 @@ python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
 python3 rpi/test_tesseract.py   # 125 on the kept OCR engine reading exactly as
                                 #     the spawned binary did, and on every way
                                 #     it can fail ending with the rig reading
-python3 rpi/test_dashboard.py   # 1368 on what the driving screen shows while a
+python3 rpi/test_dashboard.py   # 1385 on what the driving screen shows while a
                                 #     card is being read, after, once the card
                                 #     has gone and only the driver knows they
                                 #     took it, and on the shift figures saying
@@ -8556,12 +8585,12 @@ python3 rpi/test_dashboard.py   # 1368 on what the driving screen shows while a
 python3 rpi/test_layout.py      # 4330 on every page fitting the screen it is
                                 #     bolted to and being readable from the
                                 #     driving seat (skipped without Playwright)
-python3 rpi/test_offerspage.py  # 551 on the offers page as a driver reads it:
+python3 rpi/test_offerspage.py  # 553 on the offers page as a driver reads it:
                                 #     the search, the undo, the runs and the
                                 #     empty states (skipped without Playwright)
 python3 rpi/test_stacking.py    # 172 on judging a second job against the one
                                 #     already in the car
-python3 rpi/test_server.py      # 1052 on the server's own edges: two readers of
+python3 rpi/test_server.py      # 1077 on the server's own edges: two readers of
                                 #     the journal at once, a mark for an offer
                                 #     it has forgotten, a scanner re-reading
                                 #     the same card, a journal directory that
@@ -8604,7 +8633,7 @@ python3 rpi/test_loop.py        # 401 on the scan loop re-telling a card once
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
 python3 tools/test_gpslog_tidy.py   #  45 on tidying the GPS logs unattended
-python3 tools/test_shift_report.py  # 141 on what each order really took and
+python3 tools/test_shift_report.py  # 159 on what each order really took and
                                     #     what the shift adds up to: a gap in
                                     #     the GPS log never a stop and never
                                     #     miles, a parked receiver's wander

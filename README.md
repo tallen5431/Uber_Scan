@@ -163,7 +163,17 @@ exists, serving the live verdict at `/live.html` and its state at
 read-only: the order in the car along the road, the live car dot, and the offer
 on the panel in teal with its pay, minutes, miles and the pair line above the
 map, so you can see while waiting at a restaurant whether a new order fits along
-the route. It writes nothing; mark offers on the offers page. See
+the route. It writes nothing; mark offers on the offers page. **Beside its
+▤ Offers, ◷ Shift opens `http://<rig>:8080/shift.html`**, today's shift so far
+as the end-of-shift report has it (also linked near the top of the offers
+page): the totals (rig on and off, left and back at start, miles, minutes
+moving and stopped, the stops and gaps), each order's card against what it
+really took and how it ended, and the Pinning section — read-only, upright on
+the phone, no address and no coordinate, off `GET /api/shift` (which runs
+`tools/shift_report.py --json`, kept 30 s). And a **Drop** pressed by mistake
+can be taken back: for ten seconds the same button reads **↶ Undo** (on the
+offers page, the In car line's Drop does the same), and a press puts the order
+back exactly as it was. See
 [rpi/README.md](rpi/README.md). On any other machine, the
 copy at home included, set `SCANNER=0` so it does not try.
 
@@ -523,6 +533,7 @@ used. A one-line key across the map's foot names the marks on it.
 | `streets.js` | The NucBox's street index: where two named streets meet, and the stretch of one street inside a box, answered by the NucBox's own `server.js` from the file `tools/street_index.py` makes, and relayed by the rig's (see *The NucBox at home*) |
 | `live.html` | The driving screen: the rig's verdict, the phone as the camera sees it, and the controls used while moving |
 | `snaps.html` | Every **📷 Snap** the rig has kept, newest first, with a link to open or save each file. The control is on the driving screen, in the row with the connection dot; one press keeps a screenshot of the rig's own display, the camera's last picture with its age, and what `/api/status` said, and says which of those it could not keep and why. **⤓ one file** saves a snap as a single `.html` to share — the pictures inside it, the records as text and as the files themselves, nothing it needs a network for; tick several, or take one **with the newer** ones (the series it starts), and they are one file, oldest first. A snap can carry a short note ("trip planner"), typed here so the press on the driving screen stays one click. Linked from the offers page. See [rpi/README.md](rpi/README.md) for the screenshot tool it needs |
+| `shift.html` | Today's shift on the phone, read-only: what `tools/shift_report.py` says about it — the totals off the GPS log, each order's card against what it really took, how each order's end was pinned — through `GET /api/shift`. No address, no coordinate, no control but the way back. Linked from the route view (**◷ Shift**) and the offers page |
 | `scan.html`, `scan.js`, `scan.css` | The phone's own scanner — a photo of the offer card, read on the phone; see [SCANNING.md](SCANNING.md) |
 | `offer-parser.js` | Turns the text off a card into pay, minutes and miles — one corpus, shared with the Pi's port |
 | `vendor/` | The OCR engine the phone's scanner runs, kept here so the page works with no signal |

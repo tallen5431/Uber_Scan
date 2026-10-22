@@ -202,6 +202,10 @@
   #incarList li + li { border-top: 1px solid var(--line); }
   #incarList .what { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
   #incarList .what small { color: var(--muted); }
+  #toShift { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px;
+             border: 1px solid var(--line); border-radius: 8px; color: var(--text);
+             text-decoration: none; }
+  #incarList li.dropped .what { color: var(--muted); }
   #incarList button { flex: none; min-height: 52px; padding: 8px 16px; font: inherit;
                       font-size: 13px; font-weight: 800; color: var(--text);
                       background: var(--panel-2); border: 1px solid var(--muted);
@@ -612,6 +616,10 @@
        every figure either way; this only decides whether they are listed. -->
   <p class="hint"><button type="button" id="showHidden" aria-pressed="false">
     show hidden offers</button></p>
+  <!-- Today's shift as the end-of-shift report has it (shift.html; the
+       owner, 22 Oct): here and on the route view's bar, not on this page's
+       bar, which already holds six links at 360px. -->
+  <p class="hint"><a id="toShift" href="shift.html">◷ Today's shift: totals, orders, pinning</a></p>
 
   <!-- Percentiles, not an average. $/hour is a ratio with a small noisy
        denominator, and the characteristic failure here — a leg lost to glare —
@@ -4173,40 +4181,76 @@
     return '\u25cb not armed';
   }
 
+  function heldLine(o, said) {
+    var li = document.createElement('li');
+    var what = document.createElement('span');
+    what.className = 'what';
+    var n = Array.isArray(o.drops) ? o.drops.length
+      : typeof o.drops === 'number' ? o.drops : 0;
+    var street = o.dropoff ? String(o.dropoff).split(',')[0].trim() : '';
+    what.textContent = (o.addOn ? '+' : '')
+      + (typeof o.pay === 'number' ? '$' + o.pay.toFixed(2) : '$?')
+      + (o.app ? ' \u00b7 ' + o.app : '')
+      + ' \u2192 ' + (street || '?')
+      + (n >= 2 ? ' \u00b7 ' + n + ' drops' : '') + ' ';
+    var state = document.createElement('small');
+    state.textContent = '\u00b7 ' + (said || endSaid(o));
+    what.appendChild(state);
+    var b = document.createElement('button');
+    b.type = 'button';
+    li.appendChild(what);
+    li.appendChild(b);
+    el.incarList.appendChild(li);
+    return { li: li, what: what, button: b };
+  }
+
   function showHeldList(list, single) {
     el.incarList.textContent = '';
     list.forEach(function (o) {
-      var li = document.createElement('li');
-      var what = document.createElement('span');
-      what.className = 'what';
-      var n = Array.isArray(o.drops) ? o.drops.length
-        : typeof o.drops === 'number' ? o.drops : 0;
-      var street = o.dropoff ? String(o.dropoff).split(',')[0].trim() : '';
-      what.textContent = (o.addOn ? '+' : '')
-        + (typeof o.pay === 'number' ? '$' + o.pay.toFixed(2) : '$?')
-        + (o.app ? ' \u00b7 ' + o.app : '')
-        + ' \u2192 ' + (street || '?')
-        + (n >= 2 ? ' \u00b7 ' + n + ' drops' : '') + ' ';
-      var state = document.createElement('small');
-      state.textContent = '\u00b7 ' + endSaid(o);
-      what.appendChild(state);
-      var b = document.createElement('button');
-      b.type = 'button';
+      var line = heldLine(o);
+      var b = line.button;
       b.textContent = 'Drop';
-      b.setAttribute('aria-label', 'Drop ' + what.textContent);
-      b.addEventListener('click', function () { dropOne(b, single ? null : o.holdId); });
-      li.appendChild(what);
-      li.appendChild(b);
-      el.incarList.appendChild(li);
+      b.setAttribute('aria-label', 'Drop ' + line.what.textContent);
+      b.addEventListener('click', function () { dropOne(b, single ? null : o.holdId, o); });
     });
-    el.incar.hidden = !list.length;
-    if (list.length && !incarScrolled && location.hash === '#incar') {
+    // ...and the order just dropped, for the seconds its Undo is open: the
+    // same line, its Drop now "\u21b6 Undo" (dropUndo below).
+    var gone = dropUndo && !list.some(function (o) {
+      return o.holdId && o.holdId === dropUndo.o.holdId;
+    });
+    if (gone) {
+      var u = dropUndo;
+      var line = heldLine(u.o, 'dropped');
+      line.li.className = 'dropped';
+      line.button.textContent = u.failed ? '\u21b6 Undo \u00b7 failed' : '\u21b6 Undo';
+      line.button.setAttribute('aria-label', 'Undo the drop of ' + line.what.textContent);
+      line.button.addEventListener('click', function () { undoDropOne(line.button, u); });
+    }
+    el.incar.hidden = !list.length && !gone;
+    if ((list.length || gone) && !incarScrolled && location.hash === '#incar') {
       incarScrolled = true;
       el.incar.scrollIntoView({ block: 'start' });
     }
   }
 
-  function dropOne(button, holdId) {
+  /* \u21b6 Undo for the Drop just pressed here, as the panel's Drop offers it
+   * (offerDropUndo in server.js; the owner, 22 Oct): for the reply's forMs
+   * the dropped order's line stays, its button "\u21b6 Undo", and a press asks
+   * the server to put back exactly what the Drop took. Then the list is
+   * asked again, whatever the answer. */
+  var dropUndo = null;
+  var dropUndoTimer = null;
+
+  function offerDropUndo(o, undo) {
+    clearTimeout(dropUndoTimer);
+    dropUndo = undo && undo.id ? { id: undo.id, o: o, failed: false } : null;
+    if (dropUndo) {
+      dropUndoTimer = setTimeout(function () { dropUndo = null; askInCar(); },
+                                 typeof undo.forMs === 'number' ? undo.forMs : 10000);
+    }
+  }
+
+  function dropOne(button, holdId, o) {
     button.disabled = true;
     button.textContent = 'dropping\u2026';
     var opts = { method: 'POST' };
@@ -4215,11 +4259,39 @@
       opts.body = JSON.stringify({ holdIds: [holdId] });
     }
     fetch('/api/delivered', opts)
-      .then(function (r) { if (!r.ok) throw new Error(); askInCar(); })
+      .then(function (r) {
+        if (!r.ok) throw new Error();
+        return r.json().catch(function () { return {}; });
+      })
+      .then(function (body) {
+        offerDropUndo(o, body && body.undo);
+        askInCar();
+      })
       .catch(function () {
         // Still held, as far as anyone knows: the server is the truth.
         button.disabled = false;
         button.textContent = 'could not drop';
+      });
+  }
+
+  function undoDropOne(button, u) {
+    button.disabled = true;
+    button.textContent = 'undoing\u2026';
+    fetch('/api/drop-undo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ id: u.id }) })
+      .then(function (r) {
+        // Back, or refused for good (too late, the car changed): either way
+        // the Undo is over and the list says what the car holds.
+        if (r.ok || r.status === 409) {
+          offerDropUndo(null, null);
+        } else if (dropUndo === u) {
+          u.failed = true;
+        }
+        askInCar();
+      })
+      .catch(function () {
+        if (dropUndo === u) u.failed = true;
+        askInCar();
       });
   }
 
