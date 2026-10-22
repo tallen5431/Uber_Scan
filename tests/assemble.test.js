@@ -1350,11 +1350,20 @@ SEQ.forEach(function (seq) {
      run(page),
      [[[true, 'planner']], '2282 Corbin, Marietta',
       { value: '2282 Corbin, Marietta', from: 'planner' }, null]);
-  eq('[framed] ...and without the frame the old refusal stands: dropped, the card\'s corner '
-     + 'kept, "list"',
-     run(Object.assign({}, page, { framed: false })),
+  eq('[framed] ...and without the frame or the foot the old refusal stands: dropped, the '
+     + 'card\'s corner kept, "list"',
+     run(Object.assign({}, page, { framed: false, footed: false })),
      [[[false, 'not a single trip']], 'Corbins Dr, Marietta',
       { value: 'Corbins Dr, Marietta', from: 'card' }, 'list']);
+  // (22 Oct) ...but without the frame and WITH the foot — the last block a
+  // Dropoff over the bar's icons and the bar — the lone dropoff is still
+  // refused, its card's legs unread, and the trip's last stop files the same
+  // door at rank label beside it (footDropoff).
+  eq('[framed] ...without the frame, footed: refused as a lone dropoff, filed as the trip\'s '
+     + 'last stop, rank label',
+     run(Object.assign({}, page, { framed: false })),
+     [[[false, 'label'], [false, 'not a single trip']], '2282 Corbin, Marietta',
+      { value: '2282 Corbin, Marietta', from: 'label' }, 'list']);
   eq('[framed] ...a card of one leg files as it always did',
      run(page, held({ legs: 1, multiOrder: false }))[1], '2282 Corbin, Marietta');
   eq('[framed] ...but not a card of two legs',
@@ -1385,7 +1394,8 @@ SEQ.forEach(function (seq) {
   (function () {
     var st = A.fresh(), h = held();
     A.took(st, h);
-    var first = A.sighting(st, h, Object.assign({}, page, { at: 2000, framed: false }), 2000);
+    var first = A.sighting(st, h, Object.assign({}, page, { at: 2000, framed: false,
+                                                           footed: false }), 2000);
     first.candidates.forEach(function (d) { A.dropoff(h, d, null); });
     var r = A.sighting(st, h, Object.assign({}, page, { at: 3000 }), 3000);
     r.candidates.forEach(function (d) {
@@ -1507,6 +1517,86 @@ SEQ.forEach(function (seq) {
     var r = A.sighting(st, [a, b], box, 2000);
     eq('[foot] with two orders held the cropped last stop is offered nowhere',
        r.candidates.filter(function (d) { return d.foot; }).length, 0);
+  })();
+})();
+
+/* The owner's planner of 22 Oct, one Uber order held whose card read legs 0,
+ * its end the card's corner: the whole read had the title, both stops and
+ * the bar, its lines edged with the cloth's noise and words over the title,
+ * and the card box saw the Dropoff block alone over the bar's icons and the
+ * bar. Neither filed. The shared cases "the owner's whole-screen planner of
+ * 22 Oct …" and "...and the card box's read of the same screen …" (names and
+ * streets invented): the whole read is framed by its title and files as a
+ * planner end; the card box's block is the trip's last stop WITH its header
+ * (footDropoff) and files at rank label. */
+(function () {
+  var texts = {};
+  require('./fixtures/cases.json').planner.forEach(function (c) { texts[c.name] = c.text; });
+  var whole = texts['the owner\'s whole-screen planner of 22 Oct: the cloth\'s noise at both '
+    + 'edges of the stops\' lines and over the title, and no Waybill'];
+  var boxText = texts['...and the card box\'s read of the same screen: the Dropoff block over '
+    + 'the bar, and Dr read as Or'];
+  var peek = texts['...but a name between the block and the bar is the next stop peeking out: '
+    + 'not the trip\'s last stop'];
+  ok_('[foot 22 Oct] the premise: the three cases are there', !!whole && !!boxText && !!peek);
+  if (!whole || !boxText || !peek) return;
+  var corner = 'Wren Flat Ct & Oriel Rd, Kennesaw';
+  var door = '412 Brindle Dr NW, Kennesaw';
+  function held(extra) {
+    var h = Object.assign({ id: 'o-1022', acceptedAt: 1000, app: 'uber',
+                            card: { legs: 0, multiOrder: false, hasTotal: false },
+                            pickup: 'Fable Grill (Kennesaw, GA)', dropoff: corner,
+                            dropoffScanned: false }, extra || {});
+    h.fields = A.cardFields({ dropoff: h.dropoff, pickup: h.pickup }, h.acceptedAt);
+    return h;
+  }
+  function run(page, h) {
+    var st = A.fresh();
+    h = h || held();
+    A.took(st, h);
+    var r = A.sighting(st, h, page, page.at);
+    var said = r.candidates.map(function (d) {
+      var s = A.dropoff(h, d, null);
+      if (s.to === 'hold') A.file(h, d, s, st);
+      return [d.foot === true, d.framed === true, s.to ? s.from : s.why];
+    });
+    return [said, h.dropoff, brief(h.fields.dropoff), brief(h.fields.expectedBy)];
+  }
+  var box = Object.assign(pageOf(boxText, 2000, false), { whole: false });
+  eq('[foot 22 Oct] the card box: the Dropoff block over the bar is the trip\'s last stop, '
+     + 'its door ("Or" read as Dr) filed over the corner at rank label with its time',
+     run(box), [[[true, false, 'label']], door, { value: door, from: 'label' },
+                { value: 1130, from: 'label' }]);
+  eq('[foot 22 Oct] the whole read: framed by its title over the noise, the lone dropoff files '
+     + 'as a planner end',
+     run(pageOf(whole, 2000, false)).slice(0, 3),
+     [[[false, true, 'planner']], door, { value: door, from: 'planner' }]);
+  var d = box.stops[0];
+  var pick = { kind: 'pickup', orders: 1, name: 'Fable Grill', expectedBy: 1098,
+               street: '1200 Wrenfield Pkwy NW', city: 'Kennesaw', state: 'GA', zip: '30144',
+               line: '1200 Wrenfield Pkwy NW, Kennesaw, GA 30144', partial: null,
+               label: 'pickup' };
+  var withStops = function (stops) { return Object.assign({}, box, { stops: stops }); };
+  eq('[foot 22 Oct] ...a Pickup of one order above it is allowed',
+     run(withStops([pick, d]))[1], door);
+  eq('[foot 22 Oct] ...not with another dropoff on the page, a block of no kind above it, a '
+     + 'pickup of two orders (a header lost), or the Dropoff cut by an edge',
+     [run(withStops([Object.assign({}, d, { line: '17 Quillon Way, Marietta',
+                                            street: '17 Quillon Way', city: 'Marietta' }), d]))[1],
+      run(withStops([Object.assign({}, d, { kind: null, orders: null, partial: 'top' }), d]))[1],
+      run(withStops([Object.assign({}, pick, { orders: 2 }), d]))[1],
+      run(withStops([Object.assign({}, d, { partial: 'bottom' })]))[1]],
+     [corner, corner, corner, corner]);
+  eq('[foot 22 Oct] ...nor with the next stop\'s name peeking out between it and the bar',
+     run(Object.assign(pageOf(peek, 2000, false), { whole: false })).slice(0, 2), [[], corner]);
+  eq('[foot 22 Oct] ...nor an add-on\'s trip, nor off a press, nor before the Took',
+     [run(box, held({ addOn: true }))[1], run(Object.assign({}, box, { asked: true }))[1],
+      run(Object.assign({}, box, { at: 500 }))[1]],
+     [corner, corner, corner]);
+  (function () {
+    var r = A.sighting(A.fresh(), [held(), held({ id: 'o-other', acceptedAt: 1200 })], box, 2000);
+    eq('[foot 22 Oct] with two orders held it is offered nowhere',
+       r.candidates.filter(function (c) { return c.foot; }).length, 0);
   })();
 })();
 

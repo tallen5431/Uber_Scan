@@ -1474,7 +1474,12 @@
     + '(?:[^\\w\\s()]{0,3}|[A-Za-z]) ?'
     + '(' + DC + '{1,2}) ?orders?\\b', 'i');
   var PLANNER_EXPECTED = new RegExp('\\bexpected\\s*by\\s*' + CLOCK_TIME, 'i');
-  var PLANNER_ADDRESS = /^[^A-Za-z0-9]{0,3}address\b/i;
+  /* The phone's edge in front of a label: "us Address" and "MU View details"
+     on a whole-screen read of 22 Oct, the cloth and the bezel beside them. One
+     or two letters, a mark or two, then a space may stand in front of the
+     label word. See PLANNER_EDGE_WORD in offer_parser.py. */
+  var PLANNER_EDGE_WORD = '(?:[A-Za-z]{1,2}[^A-Za-z0-9\\s]{0,2} )?';
+  var PLANNER_ADDRESS = new RegExp('^[^A-Za-z0-9]{0,3}' + PLANNER_EDGE_WORD + 'address\\b', 'i');
   /* The label misread, on the driver's planner on shift: the dropoff's came
      back "Addres", the block had no label, and the stop lost its street - the
      held order kept the card's corner as its end and GPS arrival never armed.
@@ -1530,6 +1535,34 @@
   var PLANNER_UNIT = new RegExp('(?:\\s*,\\s*(?:ste|suite|unit|apt)\\b\\.?\\s*#?|\\s*,?\\s*#)\\s*'
     + '(?:[A-Za-z]?\\d{1,5}[A-Za-z]?|[A-Za-z])$', 'i');
 
+  /* The phone's edge after a street: "\ <n> <Name> Dr NW > i" on the same
+     read. A mark no street prints, after a space, with nothing after it that
+     holds three letters in a row, ends the line. See PLANNER_EDGE_MARK in
+     offer_parser.py. */
+  var PLANNER_EDGE_MARK = /\s+[^A-Za-z0-9\s.,'#&\/()\-]/g;
+  /* "Dr" read as "Or" in the street's type ("<n> <Name> Or NW" on the 22 Oct
+     card-box read, "Dr" on the whole read of the same screen): no street type
+     is "Or". Last word, or last before a quadrant, after a name that is not a
+     type; case kept. See PLANNER_OR_SLIP in offer_parser.py. */
+  var PLANNER_OR_SLIP = / Or(?=(?: (?:NW|NE|SW|SE|N|S|E|W))?$)/;
+  function plannerOrSlip(street) {
+    var m = PLANNER_OR_SLIP.exec(street);
+    if (!m) return street;
+    var before = street.slice(0, m.index).split(' ');
+    var last = before[before.length - 1];
+    if (before.length < 2 || !/^[A-Za-z]{2,}$/.test(last) || STREET_TYPE_WORD.test(last)) return street;
+    return street.slice(0, m.index) + ' Dr' + street.slice(m.index + m[0].length);
+  }
+
+  function plannerEdgeCut(line) {
+    PLANNER_EDGE_MARK.lastIndex = 0;
+    var m;
+    while ((m = PLANNER_EDGE_MARK.exec(line)) !== null) {
+      if (m.index && !/[A-Za-z]{3}/.test(line.slice(m.index))) return line.slice(0, m.index);
+    }
+    return line;
+  }
+
   function plannerPlSlip(street) {
     var m = PLANNER_PL_SLIP.exec(street);
     if (!m) return street;
@@ -1566,7 +1599,7 @@
         tail = !!(zip ? rest.slice(z[0].length) : rest).trim();
       }
     }
-    var street = (streetLine || '').replace(PLANNER_EDGE, '').replace(PLANNER_UNIT, '');
+    var street = plannerEdgeCut(streetLine || '').replace(PLANNER_EDGE, '').replace(PLANNER_UNIT, '');
     var lone = PLANNER_LONE_LETTER.exec(street);
     if (lone && tail) street = street.slice(0, lone.index + lone[0].length - 1).replace(/\s+$/, '');
     var quad = PLANNER_QUADRANT_LETTER.exec(street);
@@ -1576,7 +1609,7 @@
     var s = STREET.exec(street);
     street = (s && s.index === 0)
       ? s[1].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '') : null;
-    if (street) street = plannerPlSlip(street);
+    if (street) street = plannerOrSlip(plannerPlSlip(street));
     var parts = [];
     if (street) parts.push(street);
     if (city) parts.push(city);
@@ -1653,7 +1686,7 @@
      place, unless it is the town again. Only when the two lines under the
      label held no town line. See PLANNER_HOUSE in offer_parser.py. */
   var PLANNER_HOUSE = new RegExp('^\\W{0,3}' + DC + '{1,6} [A-Za-z]');
-  var PLANNER_DETAILS = /^[^A-Za-z0-9]{0,3}view ?details\b/i;
+  var PLANNER_DETAILS = new RegExp('^[^A-Za-z0-9]{0,3}' + PLANNER_EDGE_WORD + 'view ?details\\b', 'i');
 
   function plannerUnderAPlace(block, label) {
     var under = [];
@@ -1964,12 +1997,17 @@
      above it is the title or furniture (no two letters in a row), and the
      foot is on the screen, the "Stop New Requests" bar or "Waybill" after
      the last header. Bounds nothing; the assembler asks it of a single
-     trip's page (`framed`). See planner_framed in offer_parser.py. */
+     trip's page (`framed`). See planner_framed in offer_parser.py. With the
+     title on the read (the owner's planner of 22 Oct, the status bar and the
+     cloth over it read as words) only the lines between the title and the
+     first header are asked, planner_ends' own test for the top. */
   function plannerFramed(text) {
     var raw = String(text || '').split(/[\r\n]+/).map(normalize);
     var pl = plannerLines(text), lines = pl.lines, heads = pl.heads;
     if (!heads.length || !/^p/i.test(PLANNER_STOP.exec(lines[heads[0]])[1])) return false;
-    if (lines.slice(0, heads[0]).some(function (l) {
+    var title = -1;
+    for (var i = 0; i < heads[0]; i++) if (PLANNER_TITLE.test(lines[i])) title = i;
+    if (lines.slice(title + 1, heads[0]).some(function (l) {
       return /[A-Za-z]{2}/.test(l) && !PLANNER_TITLE.test(l);
     })) return false;
     return raw.some(function (l) { return l && PLANNER_BAR.test(l); })
@@ -1988,19 +2026,45 @@
   // that is the word Pickup ("Pick up", "Picking up") says whose block it is.
   // See PLANNER_PICKUP_WORD in offer_parser.py.
   var PLANNER_PICKUP_WORD = /^[^A-Za-z0-9]{0,3}pick(?:ing)? ?-? ?up\b/i;
+  // ...and the same block WITH its "Dropoff" header (the owner's card-box
+  // read of 22 Oct): the last header on the read a Dropoff, one stop under it
+  // and no Pickup word, and the bar's icons between "View details" and the
+  // bar's words, up to PLANNER_FOOT_ICONS lines of four characters at most
+  // and no three letters in a row. "Waybill" is still wanted straight under.
+  // See planner_foot in offer_parser.py.
+  var PLANNER_FOOT_ICONS = 8;
 
   function plannerFoot(text) {
     var raw = String(text || '').split(/[\r\n]+/).map(normalize)
       .filter(function (l) { return l; });
-    if (raw.some(function (l) {
-      return PLANNER_STOP.test(l) || PLANNER_PICKUP_WORD.test(l);
-    })) return false;
+    var last = -1;
+    raw.forEach(function (l, i) { if (PLANNER_STOP.test(l)) last = i; });
+    if (last !== -1 && !/^d/i.test(PLANNER_STOP.exec(raw[last])[1])) return false;
+    var block = raw.slice(last + 1);
+    if (block.some(function (l) { return PLANNER_PICKUP_WORD.test(l); })) return false;
+    // A header lost ANYWHERE on the read (two "Expected by" under one header)
+    // is two stops run together, maybe two customers': not this rule's.
+    var heads = [];
+    raw.forEach(function (l, i) { if (PLANNER_STOP.test(l)) heads.push(i); });
+    if (!heads.length) heads = [-1];
+    for (var h = 0; h < heads.length; h++) {
+      var under = raw.slice(heads[h] + 1, h + 1 < heads.length ? heads[h + 1] : raw.length);
+      if (under.filter(function (l) { return PLANNER_EXPECTED.test(l); }).length > 1) return false;
+    }
     var d = -1;
-    raw.forEach(function (l, i) { if (PLANNER_DETAILS.test(l)) d = i; });
-    if (d < 3 || d + 1 >= raw.length) return false;
-    if (!(PLANNER_END.test(raw[d + 1]) || PLANNER_BAR.test(raw[d + 1]))) return false;
-    return !!(plannerLabel(raw[d - 3]) && PLANNER_HOUSE.test(raw[d - 2])
-              && plannerTown(raw[d - 1]));
+    block.forEach(function (l, i) { if (PLANNER_DETAILS.test(l)) d = i; });
+    if (d < 3 || d + 1 >= block.length) return false;
+    if (!PLANNER_END.test(block[d + 1])) {
+      var k = d + 1;
+      while (k < block.length && !PLANNER_BAR.test(block[k])) {
+        if (k - d > PLANNER_FOOT_ICONS || block[k].replace(/\s/g, '').length > 4
+            || /[A-Za-z]{3}/.test(block[k])) return false;
+        k++;
+      }
+      if (k >= block.length) return false;
+    }
+    return !!(plannerLabel(block[d - 3]) && PLANNER_HOUSE.test(block[d - 2])
+              && plannerTown(block[d - 1]));
   }
 
   function plannerBounded(text) {

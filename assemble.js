@@ -402,16 +402,22 @@
    *
    * `tally` is whether the journal's `kind: 'sighting'` count row is owed:
    * every unprompted address that arrives while an order is carried. */
+  /* Rule 1's question of a lone dropoff (`singleCardOnly`): the held card was
+   * ONE order on ONE leg — or, off a page that frames the whole trip itself
+   * (`framed`, framedTrip), legs 0: the card's legs unread, the page the
+   * witness. Also asked by sighting(), which offers the trip's last stop
+   * (footDropoff) beside a lone dropoff this refuses. */
+  function loneTaken(held, d) {
+    return !!held && !!held.card && held.card.multiOrder === false
+      && (held.card.legs === 1 || (!!d && d.framed === true && held.card.legs === 0));
+  }
+
   function dropoff(held, d, screening) {
     var out = { to: null, kept: false, asked: true, labelled: false, from: null,
                 why: null, tally: false, drop: false };
     if (!d) return out;
     if (d.singleCardOnly === true) {
-      // ...or, off a page that frames the whole trip itself (`framed`,
-      // framedTrip), legs 0: the card's legs unread, the page the witness.
-      var oneTrip = !!held && !!held.card && held.card.multiOrder === false
-        && (held.card.legs === 1 || (d.framed === true && held.card.legs === 0));
-      if (!oneTrip) {
+      if (!loneTaken(held, d)) {
         out.drop = true;
         out.why = 'not a single trip';
         return out;
@@ -1042,12 +1048,30 @@
    *     (heldPickup): a store's door is the confidently wrong end.
    * Filed at rank `label` — a dropoff the screen proved, as a card-box read
    * under a Dropoff label is (`labelled`, not `planner`) — so it fills the
-   * card's corner or town and never passes a press or a planner's door. */
+   * card's corner or town and never passes a press or a planner's door.
+   *
+   * ...and the same block WITH its "Dropoff" header (the owner's card-box
+   * read of 22 Oct: "Dropoff - 1 order", the block, the bar's icons and the
+   * bar, one Uber order held whose card read legs 0; planner_foot now says
+   * `footed` of it). The last stop on the sighting is then that Dropoff,
+   * whole (no `partial`), and every other stop on it a headed Pickup: a page
+   * that shows another dropoff may be an add-on's list, whose last door is
+   * attribute()'s and batchPlan's to give, and a block of no kind above it
+   * (cut by the top edge) may be one — the stitch decides those, as it did.
+   * The customer is left off as on a headless page: a name read at rank
+   * `label` would stand over the planner's cleaner reading of it. */
   function footDropoff(held, s, at) {
     if (!held || held.addOn || held.of || !s || s.footed !== true || s.asked === true) return null;
-    if (s.screen !== 'uber.planner' || !Array.isArray(s.stops) || s.stops.length !== 1) return null;
-    var d = s.stops[0];
-    if (!d || typeof d !== 'object' || d.kind || d.partial !== 'top') return null;
+    if (s.screen !== 'uber.planner' || !Array.isArray(s.stops) || !s.stops.length) return null;
+    var d = s.stops[s.stops.length - 1];
+    if (!d || typeof d !== 'object') return null;
+    var headless = s.stops.length === 1 && !d.kind && d.partial === 'top';
+    // ...and never a list whose pickups carry more orders than its dropoffs
+    // (listShort: "Pickup - 2 orders" over one dropoff is a header lost).
+    var headed = d.kind === 'dropoff' && !d.partial && s.stops.every(function (x) {
+      return x === d || (x && typeof x === 'object' && x.kind === 'pickup');
+    }) && !listShort(s.stops);
+    if (!headless && !headed) return null;
     if (!(d.street && d.city && typeof d.line === 'string')) return null;
     if (typeof at !== 'number' || at < held.acceptedAt) return null;
     if (heldPickup(held, d)) return null;
@@ -1629,8 +1653,14 @@
       }
     }
     // ...and, read whole, the trip's last stop under a cropped header
-    // (footDropoff) where nothing above gave the order an end.
-    if (!cand && foot && saidOnce(st, foot)) out.candidates.push(foot);
+    // (footDropoff) where nothing above gave the order an end — or where
+    // what did is a lone dropoff rule 1 refuses (loneTaken) only because the
+    // card's legs went unread: legs 0, one order. A card that SAID two legs
+    // or two orders, or no card, is a refusal on evidence and stands.
+    var unread = !!held && !!held.card && held.card.multiOrder === false
+      && held.card.legs === 0;
+    var refused = !!cand && cand.singleCardOnly === true && unread && !loneTaken(held, cand);
+    if ((!cand || refused) && foot && saidOnce(st, foot)) out.candidates.push(foot);
     if (cand && many) cand.pages = run.pages.length;
     // The reads it was made from, so one that files can take them out of the
     // pool (file()): a lone dropoff waits there until it is known to be kept.

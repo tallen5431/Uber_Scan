@@ -5305,6 +5305,7 @@
    "_why": "Two dropoffs under a pickup of 2 orders, the first dropoff's header lost to OCR, both ends of the list on the glass. Its lines fall into the pickup's block; the label above the second \"Expected by\" is not looked for, so that stop is filed under nobody and ONE dropoff is left, the other customer's. It read as bounded, and plannerDestination filed 903 Brindle Ct as the order's end. A block holding two \"Expected by\" lines is two stops under one header: neither end is vouched for. tests/assemble.test.js holds that nothing is filed. Invented.",
    "text": "Trip Planner\nPickup • 2 orders\nFable Grill\nExpected by 4:02 PM\nAddress\n12 Ab St\nKennesaw, GA\nView details\nPat Q.\nExpected by 4:18 PM\nAddress\n17 Quillon Way\nMarietta, GA\nView details\nDropoff • 1 order\nLee R.\nExpected by 4:31 PM\nAddress\n903 Brindle Ct\nAcworth, GA\nView details\nWaybill",
    "bounded": false,
+   "footed": false,
    "expect": [
     {
      "kind": "pickup",
@@ -6760,6 +6761,198 @@
    "bounded": false,
    "footed": false,
    "expect": null
+  },
+  {
+   "name": "the owner's whole-screen planner of 22 Oct: the cloth's noise at both edges of the stops' lines and over the title, and no Waybill",
+   "_why": "The single trip's planner read whole on 22 Oct, one Uber order held whose card read legs 0 (names, numbers and streets invented; the layout and the noise the reading's). The pickup's label read \"us Address\" and its link \"MU View details\" (the bezel and the cloth in front of them: PLANNER_EDGE_WORD); the dropoff's street \"\\\\ 412 Brindle Dr NW > i\" (a mark and a letter after it: PLANNER_EDGE_MARK). Both stops lost their streets, and the list framed by the title and the bar was refused for the words the status bar and the cloth made above the title: with the title on the read, only the lines between it and the first header are asked (planner_framed). The last block, a Dropoff over the bar's icons and the bar, is the trip's last stop (planner_foot).",
+   "text": "\u00a5 Pr J\nSHOR BO ey & Bee! ani ae\nAh a SORES ey Ae a\nGz==D> \u00a9 50 4a eS\nTrip Planner = my\na \u2014== >\n\u00ae Pickup +1 order J _.\n\u2018y @ Fable Grill \u201c\nXK: Expected by 6:18 PM a\nKN. a\nus Address\n_ 1200 Wrenfield Pkwy NW, \u2019 \u2018\u201c\n\u201c Kennesaw, GA 30144 eons\n, \u00e9 <4.\nMU View details\n0 ~\n. Dropoff - 1 order A \u2018\n\u00a9 Pat Q. \u2122~\nExpected by 6:50 PM , 7\n. a ig\n; i\n=\nAddress\n\\ 412 Brindle Dr NW > i\nKennesaw, GA be\n\u2018 View details\n~\n4\nx\nSe\n1\n5 Q\n\u2014o\nStop New Requests\ni] OD < \u2018Ie",
+   "bounded": false,
+   "framed": true,
+   "footed": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "y @ Fable Grill",
+     "expectedBy": 1098,
+     "street": "1200 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "1200 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 1130,
+     "street": "412 Brindle Dr NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "412 Brindle Dr NW, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and the card box's read of the same screen: the Dropoff block over the bar, and Dr read as Or",
+   "_why": "The card box on the same screen saw the last stop alone: its \"Dropoff - 1 order\" header, its block, the bar's icons (\"5 Q\", \"\\u2014o\") and the bar. planner_foot wanted no header at all and the bar straight under \"View details\"; the header is more of the same evidence, and the icons are the bar's. The street's type read \"Or\" for \"Dr\" (PLANNER_OR_SLIP).",
+   "text": ". Dropoff - 1 order\np \u00a9 pat q. -\nR Expected by 6:50 PM\nAddress\n412 Brindle Or NW\nKennesaw, GA\nView details\n5 Q\n\u2014o\nStop New Requests\nIi} O < x",
+   "bounded": false,
+   "footed": true,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "p \u00a9 pat q.",
+     "expectedBy": 1130,
+     "street": "412 Brindle Dr NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "412 Brindle Dr NW, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...but a name between the block and the bar is the next stop peeking out: not the trip's last stop",
+   "_why": "A line with three letters in a row between \"View details\" and the bar is no icon of the bar's: the list may go on under it.",
+   "text": ". Dropoff - 1 order\np \u00a9 pat q. -\nR Expected by 6:50 PM\nAddress\n412 Brindle Or NW\nKennesaw, GA\nView details\nLee R.\n5 Q\n\u2014o\nStop New Requests\nIi} O < x",
+   "bounded": false,
+   "footed": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "p \u00a9 pat q.",
+     "expectedBy": 1130,
+     "street": "412 Brindle Dr NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "412 Brindle Dr NW, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor a page whose last block is a Pickup's",
+   "_why": "The trip ends on a dropoff: a Pickup header last on the read says the list goes on below the bar.",
+   "text": "Dropoff - 1 order\nPat Q.\nExpected by 6:50 PM\nAddress\n412 Brindle Dr NW\nKennesaw, GA\nView details\nPickup - 1 order\nFable Grill\nExpected by 7:05 PM\nAddress\n1200 Wrenfield Pkwy NW,\nKennesaw, GA 30144\nView details\n5 Q\nStop New Requests",
+   "bounded": false,
+   "footed": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 1130,
+     "street": "412 Brindle Dr NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "412 Brindle Dr NW, Kennesaw",
+     "place": null
+    },
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Grill",
+     "expectedBy": 1145,
+     "street": "1200 Wrenfield Pkwy NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "1200 Wrenfield Pkwy NW, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor with a word of three letters alone between them",
+   "_why": "The bar's icons read as a mark, a digit or two letters; \"Lee\" is a word, and the list may go on under the bar.",
+   "text": ". Dropoff - 1 order\np \u00a9 pat q. -\nR Expected by 6:50 PM\nAddress\n412 Brindle Or NW\nKennesaw, GA\nView details\nLee\n5 Q\n\u2014o\nStop New Requests\nIi} O < x",
+   "bounded": false,
+   "footed": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "p \u00a9 pat q.",
+     "expectedBy": 1130,
+     "street": "412 Brindle Dr NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "412 Brindle Dr NW, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor with a line longer than the bar's icons between them",
+   "_why": "No icon of the bar's reads longer than four characters; \"Dr - 1 oi\" is the next stop's header cut by the bar's edge.",
+   "text": ". Dropoff - 1 order\np \u00a9 pat q. -\nR Expected by 6:50 PM\nAddress\n412 Brindle Or NW\nKennesaw, GA\nView details\nDr - 1 oi\n5 Q\n\u2014o\nStop New Requests\nIi} O < x",
+   "bounded": false,
+   "footed": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "p \u00a9 pat q.",
+     "expectedBy": 1130,
+     "street": "412 Brindle Dr NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "412 Brindle Dr NW, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor with more lines between them than the bar has icons",
+   "_why": "Ten lines of marks between \"View details\" and the bar's words is more than its icons make (PLANNER_FOOT_ICONS, 8).",
+   "text": ". Dropoff - 1 order\np \u00a9 pat q. -\nR Expected by 6:50 PM\nAddress\n412 Brindle Or NW\nKennesaw, GA\nView details\n~\n~\n~\n~\n~\n~\n~\n~\n5 Q\n\u2014o\nStop New Requests\nIi} O < x",
+   "bounded": false,
+   "footed": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "p \u00a9 pat q.",
+     "expectedBy": 1130,
+     "street": "412 Brindle Dr NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "412 Brindle Dr NW, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "\"Or\" after a street type is not read as Dr",
+   "_why": "PLANNER_OR_SLIP takes \"Or\" for \"Dr\" only after a name: after a type (\"Ct\") it is no type's place, and the street stays as read. Invented.",
+   "text": ". Dropoff - 1 order\np \u00a9 pat q. -\nR Expected by 6:50 PM\nAddress\n88 Brindle Ct Or\nKennesaw, GA\nView details\n5 Q\n\u2014o\nStop New Requests\nIi} O < x",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "p \u00a9 pat q.",
+     "expectedBy": 1130,
+     "street": "88 Brindle Ct Or",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "88 Brindle Ct Or, Kennesaw",
+     "place": null
+    }
+   ]
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",

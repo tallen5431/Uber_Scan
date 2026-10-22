@@ -2762,7 +2762,15 @@ PLANNER_STOP = re.compile(
     r'(' + DC + r'{1,2}) ?orders?\b', re.IGNORECASE | ASCII)
 PLANNER_EXPECTED = re.compile(r'\bexpected\s*by\s*' + CLOCK_TIME,
                               re.IGNORECASE | ASCII)
-PLANNER_ADDRESS = re.compile(r'^[^A-Za-z0-9]{0,3}address\b', re.IGNORECASE | ASCII)
+# THE PHONE'S EDGE IN FRONT OF A LABEL. A whole-screen read of 22 Oct took
+# the cloth and the phone's bezel beside the pickup's label as "us Address"
+# (and its link as "MU View details"): the label did not read, so the store
+# kept its name and lost its street and town. One or two letters, a mark or
+# two after them, then a space — the edge's own reading, never a word of the
+# app's — may stand in front of the label word (PLANNER_EDGE_WORD).
+PLANNER_EDGE_WORD = r'(?:[A-Za-z]{1,2}[^A-Za-z0-9\s]{0,2} )?'
+PLANNER_ADDRESS = re.compile(r'^[^A-Za-z0-9]{0,3}' + PLANNER_EDGE_WORD + r'address\b',
+                             re.IGNORECASE | ASCII)
 
 
 # THE LABEL MISREAD. The driver's planner for a single trip, read whole-screen
@@ -2864,6 +2872,48 @@ PLANNER_UNIT = re.compile(
     r'(?:[A-Za-z]?\d{1,5}[A-Za-z]?|[A-Za-z])$', re.IGNORECASE | ASCII)
 
 
+# THE PHONE'S EDGE AFTER A STREET. The same 22 Oct read gave the dropoff's
+# street as "\ <n> <Name> Dr NW > i": the cloth beside the phone read as a
+# chevron and a letter. STREET wants words to the end of the line, so the
+# stop kept its town and lost its street, and the order kept the card's
+# corner. A mark no street prints (anything but a letter, a digit, a space
+# and . , ' # & / ( ) -) standing after a space, with nothing after it that
+# holds three letters in a row, is the edge's: the line ends before it.
+PLANNER_EDGE_MARK = re.compile(r"\s+[^A-Za-z0-9\s.,'#&/()\-]", ASCII)
+
+
+# "Dr" read as "Or" in the street's type: the 22 Oct card-box read of the
+# planner gave "<n> <Name> Or NW" where the whole read of the same screen
+# gave "<n> <Name> Dr NW", and streets.js's index refuses the slip (one the
+# reader makes the same way in every frame cannot be told from a real
+# street there: "Cedar Ridge Or" and "Ottley Or NE" on the week's cards). No
+# street type is "Or". Only as the last word, or the last before a quadrant,
+# after a name that is not itself a type; case kept, so "OR" and "or" are
+# not taken.
+PLANNER_OR_SLIP = re.compile(r' Or(?=(?: (?:NW|NE|SW|SE|N|S|E|W))?$)', ASCII)
+
+
+def _planner_or_slip(street):
+    """`street` with "Or" read for "Dr" in the type's place: see above."""
+    m = PLANNER_OR_SLIP.search(street)
+    if not m:
+        return street
+    before = street[:m.start()].split(' ')
+    if len(before) < 2 or not re.fullmatch(r'[A-Za-z]{2,}', before[-1]) \
+            or re.fullmatch(STREET_SUFFIX, before[-1], re.IGNORECASE):
+        return street
+    return street[:m.start()] + ' Dr' + street[m.end():]
+
+
+def _planner_edge_cut(line):
+    """`line` less the edge's mark and what follows it: see PLANNER_EDGE_MARK.
+    Unchanged when what follows the mark holds a word."""
+    for m in PLANNER_EDGE_MARK.finditer(line):
+        if m.start() and not re.search(r'[A-Za-z]{3}', line[m.start():]):
+            return line[:m.start()]
+    return line
+
+
 def _planner_pl_slip(street):
     """`street` with a final "P"/"PI" read for "Pl", when the word before it
     is a name and not itself a street type. See PLANNER_PL_SLIP."""
@@ -2947,7 +2997,7 @@ def _planner_address(street_line, town_line, label_line=None):
             z = PLANNER_ZIP.match(rest)
             zipcode = a_zip(z.group(1)) if z else None
             tail = bool((rest[z.end():] if zipcode else rest).strip())
-    street = PLANNER_UNIT.sub('', PLANNER_EDGE.sub('', street_line or ''))
+    street = PLANNER_UNIT.sub('', PLANNER_EDGE.sub('', _planner_edge_cut(street_line or '')))
     lone = PLANNER_LONE_LETTER.search(street)
     if lone and tail:
         street = street[:lone.start(1)].rstrip()
@@ -2957,7 +3007,7 @@ def _planner_address(street_line, town_line, label_line=None):
     s = STREET.match(street)
     street = re.sub(r'\s+', ' ', s.group(1)).strip(' .,') if s else None
     if street:
-        street = _planner_pl_slip(street)
+        street = _planner_or_slip(_planner_pl_slip(street))
     # What to show and to store. The state goes in only beside a ZIP, which
     # is find_address's line exactly; without one, "…, Marietta, GA" would end
     # on a word Advice.area cannot take for a town, and the geography would go
@@ -3087,7 +3137,8 @@ def _planner_cut(line):
 # place's name, unless it is the town again. Only when the two lines under the
 # label held no town line, so the three layouts above read as they did.
 PLANNER_HOUSE = re.compile(r'^\W{0,3}' + DC + r'{1,6} [A-Za-z]', ASCII)
-PLANNER_DETAILS = re.compile(r'^[^A-Za-z0-9]{0,3}view ?details\b', re.IGNORECASE | ASCII)
+PLANNER_DETAILS = re.compile(r'^[^A-Za-z0-9]{0,3}' + PLANNER_EDGE_WORD + r'view ?details\b',
+                             re.IGNORECASE | ASCII)
 
 
 def _planner_under_a_place(block, label):
@@ -3582,6 +3633,14 @@ def planner_laid_out(text):
 # Alone it bounds nothing (planner_ends is unchanged); the assembler asks it
 # of ONE page showing one Pickup and one Dropoff of one order each, with one
 # order held (assemble.js, `framed`).
+#
+# ...and WITH the title, over the noise of a whole-screen read. The owner's
+# planner of 22 Oct, one Uber order held, its card's legs read 0: the title,
+# "Pickup - 1 order", "Dropoff - 1 order" and the bar all on the glass, and
+# above the title the phone's status bar and the cloth round the phone read
+# as words. Those lines are not the list's — nothing of a stop is above the
+# title — so with the title on the read only the lines between it and the
+# first header are asked (planner_ends' own test for the top).
 def planner_framed(text):
     """True when `text` shows a Pickup header at the top of the read and the
     foot of the screen: see above."""
@@ -3589,8 +3648,9 @@ def planner_framed(text):
     lines, heads = _planner_lines(text)
     if not heads or PLANNER_STOP.match(lines[heads[0]]).group(1)[0] not in 'pP':
         return False
-    if any(re.search(r'[A-Za-z]{2}', l) and not PLANNER_TITLE.match(l)
-           for l in lines[:heads[0]]):
+    titles = [i for i in range(heads[0]) if PLANNER_TITLE.match(lines[i])]
+    above = lines[titles[-1] + 1:heads[0]] if titles else lines[:heads[0]]
+    if any(re.search(r'[A-Za-z]{2}', l) and not PLANNER_TITLE.match(l) for l in above):
         return False
     return any(PLANNER_BAR.match(l) for l in raw if l) \
         or any(PLANNER_END.match(l) for l in lines[heads[-1] + 1:])
@@ -3633,25 +3693,67 @@ def planner_framed(text):
 # after it, says whose block it is: no foot.
 PLANNER_PICKUP_WORD = re.compile(r'^[^A-Za-z0-9]{0,3}pick(?:ing)? ?-? ?up\b',
                                  re.IGNORECASE | ASCII)
+#
+# ...and the same block WITH its "Dropoff" header. The owner's card-box read
+# of 22 Oct, one Uber order held, its card's legs read 0:
+#
+#     Dropoff - 1 order
+#     <name>
+#     Expected by 6:50 PM
+#     Address
+#     <n> <Name> Dr NW
+#     <Town>, GA
+#     View details
+#     5 Q                          the bar's icons, over its words
+#     -o
+#     Stop New Requests
+#
+# The header is MORE of the same evidence, not less, and the rule above
+# refused it for having one. So the read may carry stop headers, the last of
+# them a Dropoff with the block under it one stop (one "Expected by"; two
+# are a header lost) and no Pickup word in it. And the bar's icons read as
+# lines of their own between "View details" and the bar's words: up to
+# PLANNER_FOOT_ICONS lines, each at most four characters and no three
+# letters in a row, are taken as the bar's. "Waybill" is printed straight
+# under the stop's card and is still wanted straight under it.
+PLANNER_FOOT_ICONS = 8
 
 
 def planner_foot(text):
-    """True when `text` is the trip's last stop block with its header cropped
-    off and the list's foot straight under it: see above."""
+    """True when `text` is the trip's last stop block, its header cropped off
+    or a Dropoff, with the list's foot under it: see above."""
     raw = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
     raw = [l for l in raw if l]
-    if any(PLANNER_STOP.match(l) or PLANNER_PICKUP_WORD.match(l) for l in raw):
+    heads = [i for i, l in enumerate(raw) if PLANNER_STOP.match(l)]
+    if heads and PLANNER_STOP.match(raw[heads[-1]]).group(1)[0] not in 'dD':
         return False
-    details = [i for i, l in enumerate(raw) if PLANNER_DETAILS.match(l)]
+    block = raw[heads[-1] + 1:] if heads else raw
+    if any(PLANNER_PICKUP_WORD.match(l) for l in block):
+        return False
+    # A header lost ANYWHERE on the read (two "Expected by" under one header,
+    # planner_ends' test) is two stops run together, maybe two customers':
+    # the last door is not this rule's to file.
+    for k, at in enumerate(heads or [-1]):
+        under = raw[at + 1:heads[k + 1] if k + 1 < len(heads) else len(raw)]
+        if sum(1 for l in under if PLANNER_EXPECTED.search(l)) > 1:
+            return False
+    details = [i for i, l in enumerate(block) if PLANNER_DETAILS.match(l)]
     if not details:
         return False
     d = details[-1]
-    if d < 3 or d + 1 >= len(raw):
+    if d < 3 or d + 1 >= len(block):
         return False
-    if not (PLANNER_END.match(raw[d + 1]) or PLANNER_BAR.match(raw[d + 1])):
-        return False
-    return bool(_planner_label(raw[d - 3]) and PLANNER_HOUSE.match(raw[d - 2])
-                and _planner_town(raw[d - 1]))
+    if not PLANNER_END.match(block[d + 1]):
+        k = d + 1
+        while k < len(block) and not PLANNER_BAR.match(block[k]):
+            if k - d > PLANNER_FOOT_ICONS or len(re.sub(r'\s', '', block[k])) > 4 \
+                    or re.search(r'[A-Za-z]{3}', block[k]):
+                return False
+            k += 1
+        if k >= len(block):
+            return False
+    return bool(_planner_label(block[d - 3]) and PLANNER_HOUSE.match(block[d - 2])
+                and _planner_town(block[d - 1]))
 
 
 def planner_bounded(text):
