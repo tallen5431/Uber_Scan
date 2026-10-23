@@ -7221,6 +7221,31 @@ try:
            (1, True, 'door next to the pickup', 'card'))
         post(_hkb, '/api/delivered', {})
 
+        # (23 Oct) No door anywhere on record — the card's pickup is the store's
+        # name alone — and the store is asked by its NAME inside the held card's
+        # disc, pinned where one place of that name answers...
+        post(_hkb, '/api/offers/mark', {'id': 'k-name', 'accepted': True, 'offer': dict(
+            _SQ, id='k-name', pay=12.0, minutes=40.0, billedMinutes=40.0, miles=5.0,
+            cost=1.75, dropoff=_COBB, pickup='Example Grill')})
+        _h = _settled(_hkb, lambda h: h.get('pickupsPinned'))
+        _qn = _hkasked('q=Example')
+        eq('[held pickups] a card\'s pickup with no door is asked by its store\'s name inside the '
+           'disc, and pinned where one place answers',
+           (_h.get('pickupsPinned'), _h.get('pickupsHow'), len(_qn),
+            'viewbox=' in (_qn[0] if _qn else '')),
+           (1, [{'by': 'server', 'from': 'card', 'asked': None}], 1, True))
+        post(_hkb, '/api/delivered', {})
+        # ...and a chain's several branches inside the disc are no pin.
+        post(_hkb, '/api/offers/mark', {'id': 'k-chain', 'accepted': True, 'offer': dict(
+            _SQ, id='k-chain', pay=12.0, minutes=40.0, billedMinutes=40.0, miles=5.0,
+            cost=1.75, dropoff=_COBB, pickup='Starbucks')})
+        _h = _settled(_hkb, lambda h: h.get('pickupsWhy') not in (None,))
+        time.sleep(0.5)
+        _h = _holding(_hkb) or {}
+        eq('[held pickups] ...but a chain\'s several branches in the disc pin nothing, and say so',
+           (_h.get('pickupsPinned'), _h.get('pickupsWhy')), (0, 'several answers'))
+        post(_hkb, '/api/delivered', {})
+
         # The end armed AND arrived at — the car waiting at the restaurant —
         # before the planner read says where the restaurant is.
         _atook(_hkb, 'k-late', _COBB)

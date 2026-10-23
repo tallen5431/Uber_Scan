@@ -3109,7 +3109,21 @@ function pickupAsks(h) {
   if (f) add(f.value, f.from);
   add(h.pickupLine, 'card');
   add(h.pickup, 'card');
+  // ...and, with no door on record at all, the card's STORE by its name (the
+  // owner's 23 Oct ride: "Momoyama Ramen & Hawaiian BBQ" on the card and no
+  // planner pickup, so the run had no pickup and the guard nothing). Asked
+  // inside the held card's disc and pinned only where one place of that name
+  // answers (searchHeldPickup, MV.pickPlace): a chain's several branches are
+  // still a refusal, 'several answers'.
+  if (!out.length && pickupNamePlan(h.pickup)) out.push({ q: h.pickup, from: 'card', name: true });
   return out;
+}
+
+/* The card's pickup as a store's name to search (searchPlan's 'name'), or
+ * null: never a corner or a street, which are not a store. */
+function pickupNamePlan(q) {
+  var plan = typeof q === 'string' && q ? MV.searchPlan(q) : null;
+  return plan && plan.kind === 'name' && plan.q && /[A-Za-z]{3}/.test(plan.q) ? plan : null;
 }
 
 /* The pin kept for this pickup text on any order in the car, or null: the
@@ -3176,6 +3190,7 @@ function forgetHoldsGone(list) {
 function searchHeldPickup(id, a, attempt) {
   var h = pickHold(id);
   if (!h) return;
+  if (a.name) return searchHeldPickupName(id, a, attempt, h);
   var plan = pickupDoorPlan(a.q);
   var disc = MV.discFor(h.card || null);
   var said = plan ? nbxTerm(plan.street) : null;
@@ -3184,6 +3199,22 @@ function searchHeldPickup(id, a, attempt) {
     pickupAsk(id, a, attempt, target, answered);
   }, function (res, asked) {
     settleHeldPickup(id, a, res, asked);
+  });
+}
+
+/* ...the store by its name (pickupAsks' `name`): ONE question, the name as
+ * searchPlan writes it (storeName) inside the disc's box, the place chosen by
+ * the end's own rule for a place (MV.pickPlace: one answer inside the disc,
+ * or every one the same place). */
+function searchHeldPickupName(id, a, attempt, h) {
+  var plan = pickupNamePlan(a.q);
+  var disc = MV.discFor(h.card || null);
+  var said = plan ? nbxTerm(plan.q) : null;
+  if (!said || !disc) return;
+  var target = nbxSearchTarget('q', said, MV.discBox(disc));
+  pickupAsk(id, a, attempt, target, function (out) {
+    var res = MV.pickPlace(out.hits, disc, plan.q, out.cutAt);
+    settleHeldPickup(id, a, res.at ? res : { why: res.why || 'none' }, null);
   });
 }
 

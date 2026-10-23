@@ -328,6 +328,9 @@ function search(q) {
     if (term.indexOf(',') >= 0) all = [];
     else if (term === "mcdonald's") all = MCD;
     else if (term === 'starbucks') all = STARBUCKS;
+    // ...and the one Example Grill by its name: a held pickup with no door
+    // on record is asked by its store's name (server.js pickupAsks, 23 Oct).
+    else if (term === 'example grill') all = GRILL;
     else if (term === 'waffle house') all = WAFFLE;
     else if (term === 'farm stand') all = FARM;
     else if (/^wrenfield (parking dec|parking deck|deck)$/.test(term)) all = DECK;
