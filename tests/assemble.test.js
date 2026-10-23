@@ -1293,8 +1293,18 @@ SEQ.forEach(function (seq) {
      play1(pageOf(text, 2000, false)), [1, '283 Quillon St NW, Smyrna', null]);
   eq('...but a press on it files nothing, as a press on any unbounded list',
      play1(pageOf(text, 2000, true)), [0, null, 'list']);
-  eq('...nor the same page without the "Stop New Requests" bar',
-     play1(pageOf(text.replace('Stop New Requests', 'S Q'), 2000, false)), [0, null, 'list']);
+  // (22 Oct) The bar is now known by its icons too ("S Q" over "=o",
+  // PLANNER_ICON_Q), so "no bar" takes them off with its words...
+  ok_('the premise: the page has the bar\'s icons over its words',
+      text.indexOf('S Q\n=o\nStop New Requests') !== -1);
+  eq('...nor the same page without the "Stop New Requests" bar or its icons',
+     play1(pageOf(text.replace('S Q\n=o\nStop New Requests', ''), 2000, false)),
+     [0, null, 'list']);
+  // ...and with the icons and not the words, the page's last block is the
+  // trip's last stop (footDropoff), filed at rank label.
+  eq('...but with the bar\'s icons and its words unread, the last block is the trip\'s last stop',
+     play1(pageOf(text.replace('Stop New Requests', 'pe J bs a'), 2000, false)).slice(0, 2),
+     [1, '283 Quillon St NW, Smyrna']);
   eq('...nor onto a held card of two legs',
      play1(pageOf(text, 2000, false), { legs: 2, multiOrder: false })[1], null);
 })();

@@ -8496,7 +8496,7 @@ them fails.
 The Pi parser is a port of the browser one, and both run the same corpus:
 
 ```sh
-node tests/corpus.test.js       # 1489 checks, the shared corpus
+node tests/corpus.test.js       # 1502 checks, the shared corpus
 node tests/parser.test.js       # 112 on the browser side alone
 node tests/advice.test.js       # 450 on what line to tell a driver to draw
 node tests/crop.test.js         #  22 on the trip from a drag to a crop box
@@ -8504,7 +8504,7 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-python3 rpi/test_parser.py      # 1569 — the same corpus, plus the Pi's own
+python3 rpi/test_parser.py      # 1582 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 322 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
                                 #     one address read twice staying one place
@@ -8605,7 +8605,7 @@ python3 rpi/test_map.py         # 231 on the map check page: that it asks
                                 #     another state — and that the positions
                                 #     the rig's own GPS recorded are drawn
                                 #     only when asked for
-node tests/assemble.test.js     # 484 on where the order in the car ends: one
+node tests/assemble.test.js     # 486 on where the order in the car ends: one
                                 #     hold decided as before, and a Trip Planner
                                 #     filed from pages stitched only on the cues
                                 #     the screen gives; and on whether an

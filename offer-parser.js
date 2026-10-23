@@ -1470,7 +1470,15 @@
    * lost, and never a bracket - or read as one lone letter, the misreading
    * this reader is on record making of a mark that size. See the
    * same section of offer_parser.py for the measurements behind each rule. */
-  var PLANNER_STOP = new RegExp('^[^A-Za-z0-9]{0,3}(pick ?-?up|drop ?-?off) ?'
+  /* ...and the phone's edge in front ("x Pickup +1 order x"), or Dropoff's
+     first letter lost ("ropoff - 1 order"): the owner's reads of 22 Oct. The
+     kind is told by the first letter, so only Dropoff's may go. See
+     PLANNER_STOP in offer_parser.py. */
+  var PLANNER_EDGE_WORD = '(?:[A-Za-z]{1,2}[^A-Za-z0-9\\s]{0,2} )?';
+  // With the edge word in front, the one-word form only: "Wa Pick up 1 order"
+  // is Uber's pickup screen's button.
+  var PLANNER_STOP = new RegExp('^[^A-Za-z0-9]{0,3}(?:[A-Za-z]{1,2}[^A-Za-z0-9\\s]{0,2} (?=pickup|d?ropoff))?'
+    + '(pick ?-?up|d?rop ?-?off) ?'
     + '(?:[^\\w\\s()]{0,3}|[A-Za-z]) ?'
     + '(' + DC + '{1,2}) ?orders?\\b', 'i');
   var PLANNER_EXPECTED = new RegExp('\\bexpected\\s*by\\s*' + CLOCK_TIME, 'i');
@@ -1478,7 +1486,6 @@
      on a whole-screen read of 22 Oct, the cloth and the bezel beside them. One
      or two letters, a mark or two, then a space may stand in front of the
      label word. See PLANNER_EDGE_WORD in offer_parser.py. */
-  var PLANNER_EDGE_WORD = '(?:[A-Za-z]{1,2}[^A-Za-z0-9\\s]{0,2} )?';
   var PLANNER_ADDRESS = new RegExp('^[^A-Za-z0-9]{0,3}' + PLANNER_EDGE_WORD + 'address\\b', 'i');
   /* The label misread, on the driver's planner on shift: the dropoff's came
      back "Addres", the block had no label, and the stop lost its street - the
@@ -1733,6 +1740,14 @@
         place = plannerPlace(under.slice(0, k), townLine);
         break;
       }
+    }
+    // ...or a line of marks between the street and the town (the owner's
+    // whole read of 22 Oct: "<n> <Name> Dr NW" / "e" / "Kennesaw, GA"): the
+    // town on the third line, only with no word on the second and a house
+    // number opening the first. See _planner_address_lines.
+    if (townAt === -1 && under.length >= 3 && /^\W{0,3}\d/.test(under[0])
+        && !/[A-Za-z]{2}/.test(under[1]) && plannerTown(under[2])) {
+      townAt = 2; streetLine = under[0]; townLine = under[2];
     }
     if (townAt === -1) {
       var found = plannerUnderAPlace(block, label);
@@ -2039,7 +2054,7 @@
       .filter(function (l) { return l; });
     var last = -1;
     raw.forEach(function (l, i) { if (PLANNER_STOP.test(l)) last = i; });
-    if (last !== -1 && !/^d/i.test(PLANNER_STOP.exec(raw[last])[1])) return false;
+    if (last !== -1 && /^p/i.test(PLANNER_STOP.exec(raw[last])[1])) return false;
     var block = raw.slice(last + 1);
     if (block.some(function (l) { return PLANNER_PICKUP_WORD.test(l); })) return false;
     // A header lost ANYWHERE on the read (two "Expected by" under one header)
@@ -2056,15 +2071,29 @@
     if (d < 3 || d + 1 >= block.length) return false;
     if (!PLANNER_END.test(block[d + 1])) {
       var k = d + 1;
-      while (k < block.length && !PLANNER_BAR.test(block[k])) {
+      while (k < block.length && !PLANNER_BAR.test(block[k]) && !plannerBarIcons(block, k)) {
         if (k - d > PLANNER_FOOT_ICONS || block[k].replace(/\s/g, '').length > 4
             || /[A-Za-z]{3}/.test(block[k])) return false;
         k++;
       }
-      if (k >= block.length) return false;
+      // ...and the icons, when they stood for the bar, inside the same reach.
+      if (k >= block.length || (!PLANNER_BAR.test(block[k]) && k + 1 - d > PLANNER_FOOT_ICONS)) return false;
     }
-    return !!(plannerLabel(block[d - 3]) && PLANNER_HOUSE.test(block[d - 2])
-              && plannerTown(block[d - 1]));
+    if (plannerLabel(block[d - 3]) && PLANNER_HOUSE.test(block[d - 2])
+        && plannerTown(block[d - 1])) return true;
+    // ...or a line of marks between the street and the town.
+    return !!(d >= 4 && plannerLabel(block[d - 4]) && PLANNER_HOUSE.test(block[d - 3])
+              && !/[A-Za-z]{2}/.test(block[d - 2]) && plannerTown(block[d - 1]));
+  }
+
+  /* The bar by its icons, its words unread (the owner's card-box read of 22
+     Oct, 18:12: "o= Q" over "—o"): a line ending in a lone Q straight over a
+     line of one to three marks and an o. On 7 of 30,771 texts, every one a
+     Trip Planner. See PLANNER_ICON_Q in offer_parser.py. */
+  var PLANNER_ICON_Q = /^\W{0,2}[A-Za-z0-9]{0,2}\W{0,2}\s?Q\.?$/;
+  var PLANNER_ICON_O = /^[^A-Za-z0-9]{1,3}[oO]$/;
+  function plannerBarIcons(lines, k) {
+    return k + 1 < lines.length && PLANNER_ICON_Q.test(lines[k]) && PLANNER_ICON_O.test(lines[k + 1]);
   }
 
   function plannerBounded(text) {

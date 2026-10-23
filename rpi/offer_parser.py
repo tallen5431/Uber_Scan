@@ -2757,8 +2757,24 @@ def planner_furniture(text):
 # vanishes with its lines filed under the stop above. A lone letter between
 # "Pickup" and a one- or two-digit count followed by "order" is still nothing
 # DoorDash prints: its count is in brackets, and the bracket is still refused.
+#
+# ...and the phone's edge in front, or the word's first letter lost (the
+# owner's planner reads of 22 Oct: "x Pickup +1 order x" with the bezel
+# before it, and "ropoff - 1 order" with the D gone). The edge word is
+# PLANNER_EDGE_WORD's, one or two letters and a mark or two then a space,
+# defined here for the header and used by the label and the link below. The
+# lost letter only on "Dropoff": the kind is told by the word's first letter
+# (P a pickup, anything else a dropoff), and "ickup" would be read as one.
+# The count and "order" are still wanted, which no other line of the app's
+# prints. With the edge word in front the header must be written as the
+# planner writes it, "Pickup" or "Dropoff", one word: Uber's pickup screen's
+# button "Pick up 1 order" with the cloth before it ("Wa Pick up 1 order",
+# twice on the 22 Oct journal) is no stop.
+PLANNER_EDGE_WORD = r'(?:[A-Za-z]{1,2}[^A-Za-z0-9\s]{0,2} )?'
 PLANNER_STOP = re.compile(
-    r'^[^A-Za-z0-9]{0,3}(pick ?-?up|drop ?-?off) ?(?:[^\w\s()]{0,3}|[A-Za-z]) ?'
+    r'^[^A-Za-z0-9]{0,3}(?:[A-Za-z]{1,2}[^A-Za-z0-9\s]{0,2} (?=pickup|d?ropoff))?'
+    r'(pick ?-?up|d?rop ?-?off) ?'
+    r'(?:[^\w\s()]{0,3}|[A-Za-z]) ?'
     r'(' + DC + r'{1,2}) ?orders?\b', re.IGNORECASE | ASCII)
 PLANNER_EXPECTED = re.compile(r'\bexpected\s*by\s*' + CLOCK_TIME,
                               re.IGNORECASE | ASCII)
@@ -2768,7 +2784,7 @@ PLANNER_EXPECTED = re.compile(r'\bexpected\s*by\s*' + CLOCK_TIME,
 # kept its name and lost its street and town. One or two letters, a mark or
 # two after them, then a space — the edge's own reading, never a word of the
 # app's — may stand in front of the label word (PLANNER_EDGE_WORD).
-PLANNER_EDGE_WORD = r'(?:[A-Za-z]{1,2}[^A-Za-z0-9\s]{0,2} )?'
+# (PLANNER_EDGE_WORD is defined with PLANNER_STOP, above.)
 PLANNER_ADDRESS = re.compile(r'^[^A-Za-z0-9]{0,3}' + PLANNER_EDGE_WORD + r'address\b',
                              re.IGNORECASE | ASCII)
 
@@ -3096,6 +3112,14 @@ def _planner_address_lines(block, label):
             # name: see the fourth layout, below.
             place = _planner_place(under[:j], town_line)
             break
+    # ...or a line of marks between the street and the town (the owner's
+    # whole read of 22 Oct: "<n> <Name> Dr NW" / "e" / "Kennesaw, GA"): the
+    # cloth beside the phone read as a line of its own. The town is taken off
+    # the THIRD line only when the second holds no word (no two letters in a
+    # row) and the first opens with a house number.
+    if town_at is None and len(under) >= 3 and re.match(r'\W{0,3}\d', under[0]) \
+            and not re.search(r'[A-Za-z]{2}', under[1]) and _planner_town(under[2]):
+        town_at, street_line, town_line = 2, under[0], under[2]
     if town_at is None:
         found = _planner_under_a_place(block, label)
         if found is None:
@@ -3725,7 +3749,7 @@ def planner_foot(text):
     raw = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
     raw = [l for l in raw if l]
     heads = [i for i, l in enumerate(raw) if PLANNER_STOP.match(l)]
-    if heads and PLANNER_STOP.match(raw[heads[-1]]).group(1)[0] not in 'dD':
+    if heads and PLANNER_STOP.match(raw[heads[-1]]).group(1)[0] in 'pP':
         return False
     block = raw[heads[-1] + 1:] if heads else raw
     if any(PLANNER_PICKUP_WORD.match(l) for l in block):
@@ -3745,15 +3769,43 @@ def planner_foot(text):
         return False
     if not PLANNER_END.match(block[d + 1]):
         k = d + 1
-        while k < len(block) and not PLANNER_BAR.match(block[k]):
+        while k < len(block) and not PLANNER_BAR.match(block[k]) \
+                and not _planner_bar_icons(block, k):
             if k - d > PLANNER_FOOT_ICONS or len(re.sub(r'\s', '', block[k])) > 4 \
                     or re.search(r'[A-Za-z]{3}', block[k]):
                 return False
             k += 1
-        if k >= len(block):
+        # ...and the icons, when they are what stood for the bar, inside the
+        # same reach: they are two of its lines.
+        if k >= len(block) or (not PLANNER_BAR.match(block[k])
+                               and k + 1 - d > PLANNER_FOOT_ICONS):
             return False
-    return bool(_planner_label(block[d - 3]) and PLANNER_HOUSE.match(block[d - 2])
+    if _planner_label(block[d - 3]) and PLANNER_HOUSE.match(block[d - 2]) \
+            and _planner_town(block[d - 1]):
+        return True
+    # ...or a line of marks between the street and the town, as
+    # _planner_address_lines takes it.
+    return bool(d >= 4 and _planner_label(block[d - 4]) and PLANNER_HOUSE.match(block[d - 3])
+                and not re.search(r'[A-Za-z]{2}', block[d - 2])
                 and _planner_town(block[d - 1]))
+
+
+# THE BAR BY ITS ICONS. The owner's card-box read of 22 Oct, 18:12: the bar's
+# words came back as "pe J bs a ci a ead ; i", and its icons above them as
+# "o= Q" over "—o" (the search glass and the filter), the shape every read of
+# the bar on file gives them ("5 Q" / "—o", "oS Q" / "=o", "S Q" / "=o"). A
+# line ending in a lone Q, a mark or two and two characters at most before it,
+# straight over a line of one to three marks and an o, stands for the bar.
+# Measured over the 19 and 22 Oct journals' 30,771 texts: the pair is on 7,
+# every one a Trip Planner screen, 4 of them with the bar's words unread.
+PLANNER_ICON_Q = re.compile(r'^\W{0,2}[A-Za-z0-9]{0,2}\W{0,2}\s?Q\.?$', ASCII)
+PLANNER_ICON_O = re.compile(r'^[^A-Za-z0-9]{1,3}[oO]$', ASCII)
+
+
+def _planner_bar_icons(lines, k):
+    """True when lines[k] and the line under it are the bar's two icons."""
+    return k + 1 < len(lines) and bool(PLANNER_ICON_Q.match(lines[k])
+                                       and PLANNER_ICON_O.match(lines[k + 1]))
 
 
 def planner_bounded(text):
