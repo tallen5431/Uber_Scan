@@ -2598,9 +2598,38 @@
   // The union of what the two languages call a space, as STORE_SPACE.
   var DOOR_SPACE = /[\s\u001c-\u001f\u0085]+/g;
 
+  /* ...and the door the card cut before its town (the owner's DoorDash offer
+     of 22 Oct: "830 <Name> Parkway North..." under the store, no comma): a
+     house number, a name, a street type, and after the type at most one word,
+     dropped unless it is a whole two-letter quadrant. Written out as the street
+     alone. See STORE_DOOR_CUT in offer_parser.py. */
+  var DOOR_HOUSE = /^\W{0,4}\d{1,6}[A-Za-z]?$/;
+  var DOOR_WORD = /^[A-Za-z0-9][A-Za-z0-9'.-]*$/;
+  var DOOR_TYPE = new RegExp('^(?:' + STREET_SUFFIX + ')\\.?$', 'i');
+  function storeDoorCut(line) {
+    var flat = String(line || '').replace(DOOR_SPACE, ' ').trim();
+    if (flat.indexOf(',') >= 0) return null;
+    var words = flat.replace(/\s*(?:\.+|\u2026)\s*$/, '').split(' ');
+    if (words.length && /^\W{1,4}$/.test(words[0])) words = words.slice(1);
+    // ...or as one character before the house number ("1 851 <Name> Blvd").
+    if (words.length > 1 && words[0].length === 1 && DOOR_HOUSE.test(words[1])) words = words.slice(1);
+    if (words.length < 3 || !DOOR_HOUSE.test(words[0])) return null;
+    var k = -1;
+    for (var i = 2; i < words.length; i++) if (DOOR_TYPE.test(words[i])) k = i;
+    if (k < 0 || words.length - 1 - k > 1) return null;
+    var mid = words.slice(1, k + 1);
+    if (!mid.every(function (w) { return DOOR_WORD.test(w); })
+        || !words.slice(1, k).some(function (w) { return /[A-Za-z]{2}/.test(w); })) return null;
+    var keep = words.slice(0, k + 1);
+    if (k + 1 < words.length && ['NW', 'NE', 'SW', 'SE'].indexOf(words[k + 1]) >= 0) {
+      keep.push(words[k + 1]);
+    }
+    return keep.join(' ').replace(/^\W+/, '').replace(/\.+$/, '');
+  }
+
   function storeDoor(line) {
     var m = STORE_DOOR.exec(String(line || '').replace(DOOR_SPACE, ' ').trim());
-    if (!m) return null;
+    if (!m) return storeDoorCut(line);
     var street = m[1], town = m[2], tail = m[3] || '';
     // Asked here, not in the pattern, which would backtrack n². See store_door.
     if (!/[A-Za-z]{2}/.test(street) || (town.match(/[A-Za-z]/g) || []).length < 3) return null;

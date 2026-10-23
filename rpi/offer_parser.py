@@ -4747,12 +4747,66 @@ _DOOR_STATE = re.compile(r'[A-Z]{2}\Z', ASCII)
 _DOOR_CUT_ZIP = re.compile(r'\d{0,4}(?:\.+|…)?\Z', ASCII)
 
 
+# ...and THE DOOR CUT BEFORE ITS TOWN. The owner's DoorDash offer of 22 Oct,
+# an add-on to an Uber order in the car (the name and the street the card's;
+# a business, not a customer):
+#
+#     @ Chick-fil-A
+#     830 Ernest W Barrett Parkway North...      <- "Northwest, Kennesaw" cut
+#
+# No comma, so STORE_DOOR refused it; the rig asked the NucBox for the chain's
+# name, got "too many to be sure", and the offer had no pickup pin and no
+# route. The town is never sent (above), so the street alone is the search:
+# a house number, a name with two letters in a row, a street type, and after
+# the type at most ONE word, which the edge cut (a quadrant, "North" of
+# "Northwest") and which is dropped — a quadrant half read is a different
+# road's. A mark of the edge ("...", "…", ".") may end the line. Nothing
+# else: a comma is STORE_DOOR's, and two words after the type are not a cut
+# quadrant. Written out as the street alone, "<n> <name> <type>".
+_DOOR_HOUSE = re.compile(r'^\W{0,4}\d{1,6}[A-Za-z]?$', ASCII)
+_DOOR_WORD = re.compile(r"^[A-Za-z0-9][A-Za-z0-9'.-]*$", ASCII)
+_DOOR_TYPE = re.compile(r'^(?:' + STREET_SUFFIX + r')\.?$', re.IGNORECASE | ASCII)
+
+
+def store_door_cut(line):
+    """The street of a store's door the card cut before its town, or None.
+    See the shape above: "<n> <name> <type>", a whole two-letter quadrant
+    after the type kept (NW, NE, SW, SE: no cut word is two capitals) and
+    any other one word after it dropped."""
+    flat = WHITESPACE.sub(' ', line or '').strip()
+    if ',' in flat:
+        return None
+    words = re.sub(r'\s*(?:\.+|…)\s*$', '', flat).split(' ')
+    # An icon in front read as marks of its own ("@ 830 ..."), as STORE_STREET
+    # allows it.
+    if words and re.match(r'^\W{1,4}$', words[0]):
+        words = words[1:]
+    # ...or as one character of its own before the house number ("1 851
+    # <Name> Boulevard" on the 19 Oct journal): the icon, not the number.
+    if len(words) > 1 and len(words[0]) == 1 and _DOOR_HOUSE.match(words[1]):
+        words = words[1:]
+    if len(words) < 3 or not _DOOR_HOUSE.match(words[0]):
+        return None
+    types = [i for i in range(2, len(words)) if _DOOR_TYPE.match(words[i])]
+    if not types or len(words) - 1 - types[-1] > 1:
+        return None
+    k = types[-1]
+    if not all(_DOOR_WORD.match(w) for w in words[1:k + 1]) \
+            or not any(re.search(r'[A-Za-z]{2}', w) for w in words[1:k]):
+        return None
+    keep = words[:k + 1]
+    if k + 1 < len(words) and words[k + 1] in ('NW', 'NE', 'SW', 'SE'):
+        keep.append(words[k + 1])
+    return re.sub(r'^\W+', '', ' '.join(keep)).rstrip('.')
+
+
 def store_door(line):
     """The store's address off the line under its name, or None. See
-    STORE_DOOR for the shape and why each part is asked."""
+    STORE_DOOR for the shape and why each part is asked, and STORE_DOOR_CUT
+    for a door the card cut before its town."""
     m = STORE_DOOR.match(WHITESPACE.sub(' ', line or '').strip())
     if not m:
-        return None
+        return store_door_cut(line)
     street, town, tail = m.group(1), m.group(2), m.group(3) or ''
     # Asked here and not in the pattern: two runs of [^,] either side of the
     # letters backtrack against each other, n² on a long line with no comma.

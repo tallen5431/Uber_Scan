@@ -2204,7 +2204,59 @@
    "pickup": "1200 & Quillon Lakes Dr NW, Kennesaw",
    "dropoff": null
   }
- }
+ },
+  {
+   "name": "DoorDash's stops card with the store's door cut before its town: the street is the door, the cut quadrant dropped",
+   "_why": "The owner's DoorDash add-on offer of 22 Oct, as the rig's OCR gave it; store and street invented. The line under the store ran off the card's edge before its comma (\"830 <Name> Parkway North...\" for \"...Northwest, Kennesaw\"), STORE_DOOR wanted the town, the rig searched the chain's name and got \"too many to be sure\": no pickup pin, no route. The town is never sent, so the street is the door (STORE_DOOR_CUT); the half-read quadrant goes.",
+   "text": "$5.30 incl. tips\n2 stops (2.6 mi) - 20 min\n@ Fable Grill\n830 Wrenfield Parkway North.\n& Customer dropoff",
+   "expect": {
+    "pay": 5.3,
+    "minutes": 20.0,
+    "miles": 2.6,
+    "pickup": "Fable Grill",
+    "pickupLine": "830 Wrenfield Parkway",
+    "dropoff": null
+   }
+  },
+  {
+   "name": "...with a whole two-letter quadrant after the type, kept",
+   "_why": "No cut word is two capitals: NW is the street's own. Invented.",
+   "text": "$5.30 incl. tips\n2 stops (2.6 mi) - 20 min\n@ Fable Grill\n412 Brindle Dr NW\n& Customer dropoff",
+   "expect": {
+    "pay": 5.3,
+    "minutes": 20.0,
+    "miles": 2.6,
+    "pickup": "Fable Grill",
+    "pickupLine": "412 Brindle Dr NW",
+    "dropoff": null
+   }
+  },
+  {
+   "name": "...but not with the street type itself cut by the edge",
+   "_why": "\"Parkw...\" is no type: no door, the name searched as before. Invented.",
+   "text": "$5.30 incl. tips\n2 stops (2.6 mi) - 20 min\n@ Fable Grill\n830 Wrenfield Parkw...\n& Customer dropoff",
+   "expect": {
+    "pay": 5.3,
+    "minutes": 20.0,
+    "miles": 2.6,
+    "pickup": "Fable Grill",
+    "pickupLine": null,
+    "dropoff": null
+   }
+  },
+  {
+   "name": "...nor with two words after the type",
+   "_why": "Two words after the type are not a quadrant the edge cut (a suite, a second line run on): no door. Invented.",
+   "text": "$5.30 incl. tips\n2 stops (2.6 mi) - 20 min\n@ Fable Grill\n1200 Fable St Suite 200\n& Customer dropoff",
+   "expect": {
+    "pay": 5.3,
+    "minutes": 20.0,
+    "miles": 2.6,
+    "pickup": "Fable Grill",
+    "pickupLine": null,
+    "dropoff": null
+   }
+  }
  ],
  "rate": [
  {
@@ -7838,9 +7890,14 @@
    "expect": null
   },
   {
-   "name": "no town at all",
+   "name": "no town at all: the street is the door, the town never being sent (STORE_DOOR_CUT, 22 Oct)",
    "line": "12 Ab Rd",
-   "expect": null
+   "expect": "12 Ab Rd"
+  },
+  {
+   "name": "...and the store's icon read as a digit in front of the house number is the icon",
+   "line": "1 851 Wren Place Boulevard",
+   "expect": "851 Wren Place Boulevard"
   },
   {
    "name": "no house number",
