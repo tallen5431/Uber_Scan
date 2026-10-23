@@ -660,7 +660,10 @@
     // badge's 4 miles sat six characters past "min" and was charged as the
     // trip. LONE_MILES has refused the badge since it was written; this
     // window did not. See NOT_THE_CHARGER.
-    '(?:[^(\\d]{0,6}\\(?\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b'
+    // ...and an Uber add-on's plus inside the bracket, "+14 min (+ 4.1 mi)":
+    // without it every add-on card lost its store and destination. See LEG
+    // in offer_parser.py.
+    '(?:[^(\\d]{0,6}\\(?\\s*\\+?\\s*(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b'
     + NOT_THE_CHARGER + '\\s*\\)?)?',
     'gi'
   );

@@ -1104,6 +1104,18 @@ async function nucbox() {
      MV.searchPlan('1106 Tansy Commons Ln NW').street, '1106 Tansy Commons Ln NW');
   eq('...and with the reader\'s dots after its type, left off',
      MV.searchPlan('1106 Tansy Commons Ln..').street, '1106 Tansy Commons Ln');
+  // 22 Oct: "790 <Name> Bivd NW" on an Early look card, no door found. The
+  // reader's misreads of the type word are put back before it is asked.
+  eq('the type word\'s misreads are put back: Bivd, Tri, PI and Or, before a quadrant or last',
+     [MV.searchPlan('Fable Grill (790 Wren Place Bivd NW)').street,
+      MV.searchPlan('12 Creek Crossing Tri, Kennesaw').street,
+      MV.searchPlan('129 Wren PI, Acworth').street,
+      MV.searchPlan('412 Brindle Or NW, Kennesaw').street].join(' | '),
+     '790 Wren Place Blvd NW | 12 Creek Crossing Trl | 129 Wren Pl | 412 Brindle Dr NW');
+  eq('...but never a word that is the street\'s name, or one not in the type\'s place',
+     [MV.searchPlan('5 Or Rd, Marietta').street, MV.searchPlan('12 Tri Oak Ct').street,
+      MV.searchPlan('9 Or, Marietta').street].join(' | '),
+     '5 Or Rd | 12 Tri Oak Ct | 9 Or');
   eq('...but a number then a name with no street type stays a name',
      [MV.searchPlan('1000 Degrees Pizza').kind, MV.searchPlan('77 Ln').kind,
       MV.searchPlan('Birch Ln').kind].join(','), 'name,name,name');

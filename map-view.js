@@ -969,8 +969,30 @@
     return w.length >= 3 && /[A-Za-z]{2}/.test(w[1]) && !!streetType(w[w.length - 1]);
   }
 
-  // A street, and its house number when it opens with one ("1985", "12A").
+  /* The reader's misreads of a street's TYPE word, put back before it is
+     asked: "790 <Name> Bivd NW" on the owner's 22 Oct Early look card (l read
+     as i), and the NucBox found no door, "not inside the card's reach". The
+     same slips streets.js names for its index ("Tri" for Trl, "Bivd" for
+     Blvd, "PI" for Pl) and "Or" for Dr. None of them is a street type, so
+     only the word in the type's place is touched — the last, or the last
+     before a quadrant — after a name of two letters or more; a name that is
+     the word itself ("Or Rd") has a type after it and is not touched. */
+  var TYPE_SLIPS = { bivd: 'Blvd', b1vd: 'Blvd', tri: 'Trl', pi: 'Pl', or: 'Dr' };
+  function typeSlip(street) {
+    var w = String(street).split(' ');
+    var at = w.length - 1;
+    if (at > 1 && QUADRANTS.indexOf(w[at].toLowerCase().replace(/\.$/, '')) >= 0) at--;
+    if (at < 2 || !/[A-Za-z]{2}/.test(w[at - 1])) return street;
+    var fix = TYPE_SLIPS[w[at].toLowerCase().replace(/\.$/, '')];
+    if (!fix) return street;
+    w[at] = fix;
+    return w.join(' ');
+  }
+
+  // A street, and its house number when it opens with one ("1985", "12A"),
+  // its type word's misread put back (typeSlip).
   function streetPlan(street) {
+    street = typeSlip(street);
     var no = /^(\d+[A-Za-z]?)\b/.exec(street);
     return { kind: 'street', street: street, door: !!no, house: no ? no[1] : null };
   }

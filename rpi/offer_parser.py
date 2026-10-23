@@ -280,7 +280,13 @@ LEG = re.compile(
     # ...and the trailing distance is not a badge's: "20 min trip 4 mi from
     # fast charger" with the trip's bracket lost. LONE_MILES has refused the
     # badge since it was written; this window did not. See NOT_THE_CHARGER.
-    r'(?:[^(\d]{0,6}\(?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b'
+    # ...and an Uber add-on's plus inside the bracket, "+14 min (+ 4.1 mi)
+    # total": without it the leg ended at "min", the tail after it began
+    # "(+ 4.1 mi) total" and was cut at its distance, and every add-on card
+    # lost its store and its destination (the owner's 22 Oct add-on, no
+    # dropoff and no pin). The distance itself was read by LONE_MILES, which
+    # is why nothing else showed it.
+    r'(?:[^(\d]{0,6}\(?\s*\+?\s*(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b'
     + NOT_THE_CHARGER + r'\s*\)?)?',
     re.IGNORECASE | ASCII)
 

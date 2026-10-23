@@ -2256,6 +2256,48 @@
     "pickupLine": null,
     "dropoff": null
    }
+  },
+  {
+   "name": "an Uber add-on's leg with its plus inside the bracket: the store and the destination are read",
+   "_why": "The owner's add-on of 22 Oct, 18:16 (store and streets invented): \"+14 min (+ 4.1 mi) total\". LEG allowed no plus inside the bracket, so the leg ended at \"min\", the tail after it began \"(+ 4.1 mi)\" and was cut at its distance: no pickup, no dropoff on any add-on card (753 of the two journals' texts), and the add-on held with \"no dropoff\". The distance was LONE_MILES', unchanged.",
+   "text": "Exclusive\n+ $12.50\nGuaranteed (incl. tip)\n\u00a9 +14 min (+ 4.1 mi) total\nI Fable Chix (Kennesaw)\nWren Way & Brindle St\nNW, Kennesaw",
+   "expect": {
+    "pay": 12.5,
+    "minutes": 14.0,
+    "miles": 4.1,
+    "legs": 1,
+    "pickup": "Fable Chix (Kennesaw)",
+    "dropoff": "Wren Way & Brindle St NW, Kennesaw",
+    "addon": true,
+    "milesUncertain": false
+   }
+  },
+  {
+   "name": "...and the map's ETA bubble over an add-on card is no second leg",
+   "_why": "\"23min\" on the map above the card read as a leg of its own beside \"+18 min (+ 5.1 mi) total\", which had no distance to make it the total: 41 minutes for an 18-minute add-on, 24 of the journal's texts. With the plus taken the card's leg is its total, and the bubble is not added. Invented.",
+   "text": "0 23min ee Lon\nXL\nAdd a delivery Exclusive x\n+ $4.01\nGuaranteed (incl. tip)\n\u00a9 +18 min (+ 5.1 mi) total\nI Fable Gas #12\nWren Way & Brindle Ln, Woodstock",
+   "expect": {
+    "pay": 4.01,
+    "minutes": 18.0,
+    "miles": 5.1,
+    "legs": 1,
+    "addon": true
+   }
+  },
+  {
+   "name": "...and an add-on that adds no distance says so: +0 mi",
+   "_why": "\"+20 min (+ 0 mi) total\": the miles are 0, not unknown; rate() gives no $/mi and no running cost for it, as for any card under a mile of nothing. Invented.",
+   "text": "Add a delivery Exclusive x\n+ $8.05\nGuaranteed (incl. tip)\n\u00a9 +20 min (+ 0 mi) total\nFable Burger (Wren Ave)\nBrindle St SE & Wren Ave NE, Atlanta\nAccept",
+   "expect": {
+    "pay": 8.05,
+    "minutes": 20.0,
+    "miles": 0.0,
+    "legs": 1,
+    "pickup": "Fable Burger (Wren Ave)",
+    "dropoff": "Brindle St SE & Wren Ave NE, Atlanta",
+    "addon": true,
+    "milesUncertain": false
+   }
   }
  ],
  "rate": [
