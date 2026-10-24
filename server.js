@@ -625,8 +625,30 @@ function startScanner() {
           ownPickups(read.planner.stops, plannedAt, plannerPage, read.planner.at);
           if (heldNow) {
             var heldWas = JSON.stringify(scanner.held);
-            heldNow.planner = { stops: read.planner.stops,
-                                unfiled: read.planner.unfiled || null };
+            // MERGED with the pages this hold already keeps, not in place of
+            // them (Assemble.mergePlanner; the owner's snap of 24 Oct, 03:03:
+            // page 1 read the pickup's door, the scrolled pages after it did
+            // not, and each replaced the last, so the restaurant was gone
+            // from the hold — and from its pickup search and Map view's run —
+            // before anything asked for it). The reason none was filed is
+            // this read's. `held` on the line is the merged list, for the
+            // panel's heldPlan, so the live page and a reload show the same
+            // stops; the line's own `stops` stay the page as read, which is
+            // what the journal row and plannerVisits are given.
+            //
+            // ...and a read that answers a ⌖ press (`asked`) is the press's
+            // own answer, kept as it was read: the press forgot the planner
+            // before it was made (forgetPlanner at /api/dropoff), as the
+            // panel forgets the last answer's stops, so there is nothing of
+            // this trip's to merge with that the driver did not just ask to
+            // have read again. The merge is for the reads the rig makes on
+            // its own while the driver scrolls (`screen_auto`).
+            heldNow.planner = {
+              stops: read.planner.asked === true ? read.planner.stops
+                : Assemble.mergePlanner(heldNow.planner && heldNow.planner.stops,
+                                        read.planner.stops, plannerPage),
+              unfiled: read.planner.unfiled || null };
+            read.planner.held = heldNow.planner.stops;
             // ...and a pickup it lists no longer marked visited, by the
             // planner's word (plannerVisits) — only off a read that shows
             // the list from its top. It writes the orders when this changed

@@ -7336,6 +7336,95 @@ try:
     finally:
         stop(_hkp)
 
+    # The owner's snap of 24 Oct, 03:03, invented: one Uber trip, ONE pickup
+    # ("Pickup • 2 orders") and two dropoffs. Page 1 of the Trip Planner read
+    # the pickup with its door, the first dropoff and the second's header and
+    # nothing more; page 2, scrolled, the second dropoff alone — and each read
+    # replaced the last on the hold, so the restaurant went before anything
+    # pinned it. Now the pages merge on the hold (Assemble.mergePlanner).
+    # Read while the NucBox is DOWN, so the pickup's one ask fails; restarted
+    # with it up, the hold asks at boot what its planner keeps — the page-1
+    # pickup only if it was kept. The end stays the card's door, armed alone:
+    # the first dropoff is drawing only, and a car that waits at it and
+    # leaves drops nothing.
+    _mpdir = os.path.join(_hkdir, 'pages')
+    _mps, _mpsays, _ = _hksayer('pages-say')
+    os.makedirs(_mpdir)
+    _mpj = os.path.join(_mpdir, 'offers.jsonl')
+    open(_mpj, 'w').close()
+    _MP_NONE = {'city': None, 'state': None, 'zip': None, 'place': None}
+    _mp1 = {'planner': {'stops': [
+        dict(_MP_NONE, kind='pickup', orders=2, name='Example Grill', expectedBy=None,
+             street='250 Example Road', line='250 Example Road'),
+        dict(_MP_NONE, kind='dropoff', orders=1, name='Pat Q.', expectedBy=1403,
+             street='4821 Kestrel Dr', city='Marietta', line='4821 Kestrel Dr, Marietta'),
+        dict(_MP_NONE, kind='dropoff', orders=1, name=None, expectedBy=None, street=None,
+             line=None)], 'unfiled': 'dropoffs', 'asked': False}}
+    _mp2 = {'planner': {'stops': [
+        dict(_MP_NONE, kind='dropoff', orders=1, name='Lee R.', expectedBy=1416,
+             street='1985 Cobb Parkway', city='Kennesaw', line='1985 Cobb Parkway, Kennesaw')],
+        'unfiled': None, 'asked': False}}
+
+    def _mpstops(h):
+        return [(x.get('kind'), x.get('name'), x.get('line'))
+                for x in ((h or {}).get('planner') or {}).get('stops') or []]
+    _mpp, _mpb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _mps,
+                        'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _hkdown.server_address[1],
+                        'NUCBOX_RETRY_MS': '60000'}, _mpj)
+    try:
+        _atook(_mpb, 'k-pages', _COBB)
+        _mpsays([_mp1, _mp2])
+        _h = _holding(_mpb) or {}
+        eq('[planner pages] two pages on one hold are merged: page 1\'s pickup kept with its '
+           'door, page 2\'s dropoff in place of the header page 1 cut off',
+           _mpstops(_h),
+           [('pickup', 'Example Grill', '250 Example Road'),
+            ('dropoff', 'Pat Q.', '4821 Kestrel Dr, Marietta'),
+            ('dropoff', 'Lee R.', '1985 Cobb Parkway, Kennesaw')])
+        eq('[planner pages] ...and the end is still the card\'s, not filed off a planner line',
+           (_h.get('dropoff'), _h.get('batch')), (_COBB, False))
+    finally:
+        stop(_mpp)
+    # (A scanner of its own: the first one's would say its pages again.)
+    _mps, _mpsays, _ = _hksayer('pages-say2')
+    _mpp, _mpb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _mps,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800',
+                        'GPS_DWELL_MS': '1000'}, _mpj)
+
+    def _mpbeat(lat, lon):
+        return {'alive': True, 'gps': {'state': 'ok', 'ageSeconds': 0.1, 'fix': {
+            'lat': lat, 'lon': lon, 'gpsAge': 0.1, 'gpsErr': 25.0, 'gpsMode': 3,
+            'gpsOk': True, 'gpsWhy': None, 'freshFor': 10.0}}}
+    try:
+        _h = _settled(_mpb, lambda h: h.get('pickupsPinned') and h.get('endPinned'))
+        eq('[planner pages] restarted with the NucBox up, the pickup only page 1 showed is '
+           'asked and pinned, from the planner, and the end armed at its own door',
+           (_h.get('pickupsPinned'), _h.get('pickupsHow'), _h.get('endPinned'),
+            _h.get('dropoff')),
+           (1, [{'by': 'server', 'from': 'planner', 'asked': None}], True, _COBB))
+        _s, _r = post(_mpb, '/api/held-end', {
+            'holdId': _h.get('holdId'), 'dropoff': '4821 Kestrel Dr, Marietta',
+            'lat': 33.9700, 'lon': -84.5300, 'name': 'Kestrel Drive', 'doorLevel': True})
+        eq('[planner pages] the first dropoff posted as the held end is refused: the GPS drop '
+           'arms on the end alone', (_s, (_holding(_mpb) or {}).get('dropoff')), (409, _COBB))
+        # Kestrel Drive, the fake's point for the first dropoff's street.
+        _mpsays([_mpbeat(33.9700, -84.5300)] * 7 + [_mpbeat(33.9900, -84.5300)] * 3)
+        _h = _holding(_mpb) or {}
+        eq('[planner pages] ...and a car that waits at the first dropoff and leaves drops '
+           'nothing: still held, its end armed at its own door, nothing arrived',
+           (bool(_h), _h.get('dropoff'), _h.get('endPinned'), _h.get('arrived')),
+           (True, _COBB, True, False))
+        post(_mpb, '/api/delivered', {})
+        # A NEW trip after that one ends starts with no planner: its first
+        # page is all it keeps.
+        _atook(_mpb, 'k-pages-next', _COBB)
+        _mpsays([_mp2])
+        eq('[planner pages] the next order\'s planner merges with nothing of the last',
+           _mpstops(_holding(_mpb)), [('dropoff', 'Lee R.', '1985 Cobb Parkway, Kennesaw')])
+        post(_mpb, '/api/delivered', {})
+    finally:
+        stop(_mpp)
+
     # A held card stamped ROUGH, its end filed by the Trip Planner: the
     # owner's 17 Oct afternoon. The card's fix was mode 3, 0.2 s old, 73 m —
     # usable() said `rough` — and /api/status said endWhy 'no card fix' for

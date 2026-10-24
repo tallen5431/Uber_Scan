@@ -886,16 +886,102 @@
      is 'pickup' ("route to pickup only"). { pts, note } with `note` null at
      the door, or null when fewer than two points can be drawn, or with no
      end and no pickup (a car alone goes nowhere). */
-  function routeLadder(car, pickups, end, rung) {
+  function routeLadder(car, pickups, end, rung, drops) {
     function ok(p) { return !!p && isFinite(p.lat) && isFinite(p.lon); }
     var picks = (pickups || []).filter(ok);
     var e = ok(end) ? end : null;
     if (!e && !picks.length) return null;
-    var pts = [car].concat(picks, e ? [e] : []).filter(ok);
+    // ...and a batched trip's other doors (heldDrops), between the pickups
+    // and the end, only where the end itself is drawn: with no end there is
+    // no "on the way to" for them to be on.
+    var via = e && Array.isArray(drops) ? drops.filter(ok) : [];
+    var pts = [car].concat(picks, via, e ? [e] : []).filter(ok);
     if (pts.length < 2) return null;
     var note = !e ? ROUTE_NOTES.pickup : rung === 'area' ? areaNote(e)
       : rung && rung !== 'door' ? ROUTE_NOTES[rung] || null : null;
-    return { pts: pts, note: note };
+    var out = { pts: pts, note: note };
+    var skipped = e && Array.isArray(drops) ? drops.length - via.length : 0;
+    if (skipped) out.skip = dropsSkipped(skipped);
+    return out;
+  }
+
+  /* --- a batched trip's other doors (the owner's snap, 24 Oct 03:03) --------
+   *
+   * One Uber trip: ONE pickup, "Pickup • 2 orders", then two dropoffs, by
+   * 3:23 and by 3:36. The panel listed both ("▸ Dropoff by 3:23 · ...",
+   * "▸ Dropoff by 3:36 · ...", "2 dropoffs: end not guessed"), the end was
+   * pinned at the second customer's door and armed — and the run on the map
+   * went car -> D, straight past the first customer's door, which is where
+   * the car was actually going first.
+   *
+   * So with ONE order in the car whose Trip Planner lists more than one
+   * dropoff, the run is car -> the pickups not yet visited -> each dropoff
+   * the planner lists BEFORE the order's end, in the planner's order -> the
+   * end. `stops` is the planner as the hold keeps it (pages merged,
+   * Assemble.mergePlanner), `end` holding.dropoff. Returns [{q, name, n}],
+   * `q` the stop's line as pickupKey makes one (the street and its town,
+   * or the bare street ending in a comma; null for a dropoff with no
+   * street, which is counted and skipped, never searched by its name), `n`
+   * 1, 2, ... for its mark (D1, D2). [] when the planner lists one dropoff
+   * or none, when no planner dropoff or more than one is on the end's
+   * street (which of them IS the end is then not known, and a run through
+   * "the others" might go through the end twice or leave a door out), and
+   * for the dropoffs listed AFTER the end: the run stops at the end, as it
+   * does everywhere, and which end the order has is the server's rule
+   * (batchPlan, the label, a press), never this.
+   *
+   * The end is told by its street as Assemble.sameStreet tells it — the part
+   * before the first comma, case, commas and spacing ignored — because this
+   * file is the page's and assemble.js is not loaded there.
+   *
+   * DRAWING ONLY, like every rung of the ladder. They are searched by Map
+   * view on the NucBox as the end is (NbxSearch.place in the held card's
+   * disc, a door by its number; the general area of 'several' or 'nodoor'
+   * allowed, dropPoint), and their points are drawn on the run and marked,
+   * and that is all: never posted to the server, never a door pin, never
+   * what the GPS drop is armed by, never the restaurant guard's, never a
+   * stop of the detour's figure (detourThrough is handed the pickups alone,
+   * as before). */
+  function dropKey(s) {
+    if (!s || s.kind !== 'dropoff' || !s.street) return null;
+    return s.city && s.line ? s.line : s.street + ',';
+  }
+
+  function streetPart(t) {
+    return typeof t === 'string'
+      ? t.split(',')[0].toLowerCase().replace(/[\s,.]+/g, ' ').trim() : '';
+  }
+
+  function heldDrops(stops, end) {
+    var list = (Array.isArray(stops) ? stops : []).filter(function (s) {
+      return !!s && s.kind === 'dropoff';
+    });
+    var key = streetPart(end);
+    if (list.length < 2 || !key) return [];
+    var at = [];
+    list.forEach(function (s, i) { if (streetPart(s.line || s.street) === key) at.push(i); });
+    if (at.length !== 1) return [];
+    return list.slice(0, at[0]).map(function (s, i) {
+      return { q: dropKey(s), name: plannerName(s.name) || null, n: i + 1 };
+    });
+  }
+
+  /* A dropoff's point for the run off NbxSearch.place's answer: the door
+     where one was found, else the general area of its answers (withArea,
+     `approx: true`), else null — which the run skips and says. */
+  function dropPoint(res) {
+    if (!res) return null;
+    var a = res.at || res.area;
+    if (!a || typeof a.lat !== 'number' || typeof a.lon !== 'number'
+        || !isFinite(a.lat) || !isFinite(a.lon)) return null;
+    return res.at ? { lat: a.lat, lon: a.lon }
+      : { lat: a.lat, lon: a.lon, approx: true };
+  }
+
+  // The words for the dropoffs the run could not place: said after the
+  // caption, like a rung's, so the driver knows the line leaves one out.
+  function dropsSkipped(n) {
+    return 'route skips ' + n + ' dropoff' + (n === 1 ? '' : 's') + ', not found';
   }
 
   /* The caption with the runs' words after it: "<said> · route to corner",
@@ -930,7 +1016,7 @@
 
   // The notes routeSaid put after a sentence, as one tail; captionChip
   // chips the sentence before them and keeps them after the chip.
-  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ route to area(?:, \d+ within [\d.]+ mi)?))+)$/;
+  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ route to area(?:, \d+ within [\d.]+ mi)?|route skips \d+ dropoffs?, not found))+)$/;
   function routeTail(text) {
     var m = ROUTE_TAIL.exec(String(text || ''));
     return m ? { said: text.slice(0, m.index), tail: m[1] } : { said: text, tail: '' };
@@ -4125,6 +4211,9 @@
            heldRun: heldRun, routeFrom: routeFrom, ROUTE_MOVE_M: ROUTE_MOVE_M,
            ROUTE_NOTES: ROUTE_NOTES, routeRung: routeRung, routeLadder: routeLadder,
            routeSaid: routeSaid,
+           // ...and a batched trip's other doors, drawn on the run (24 Oct).
+           heldDrops: heldDrops, dropKey: dropKey, dropPoint: dropPoint,
+           dropsSkipped: dropsSkipped,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            placeWords: placeWords, placeNamed: placeNamed, namedFeature: namedFeature,
            placeQuery: placeQuery, pickPlace: pickPlace, PLACE_KINDS: PLACE_KINDS,

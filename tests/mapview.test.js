@@ -3388,6 +3388,92 @@ async function nucbox() {
                                  HUB)).why,
        stretchAsked.length]), JSON.stringify(['notwo', 'notwo', 2]));
 
+  /* ---- a batched trip's other doors on the run (heldDrops; the owner's snap,
+   * 24 Oct 03:03)
+   *
+   * One Uber trip: one pickup, two dropoffs (by 3:23, by 3:36), the end
+   * pinned at the second's door — and the run went car -> D past the first.
+   * Now car -> pickups -> each dropoff the planner lists before the end, in
+   * its order -> the end. Drawing only. Invented names and streets. */
+  function pstop(kind, name, by, street, city) {
+    return { kind: kind, orders: 1, name: name, expectedBy: by, street: street,
+             city: city || null, state: null, zip: null,
+             line: street ? (city ? street + ', ' + city : street) : null };
+  }
+  var BP = pstop('pickup', 'oe Example Grill', null, '250 Example Road', 'Kennesaw');
+  var BA = pstop('dropoff', 'Pat Q.', 203, '4821 Kestrel Dr', 'Kennesaw');
+  var BB = pstop('dropoff', 'Lee R.', 216, '1985 Cobb Parkway', 'Kennesaw');
+  var BC = pstop('dropoff', 'Kim T.', 230, '3150 Thornbury Mill Rd SE', null);
+  eq('[batch run] the snap: the dropoff before the end, in the planner\'s order, as D1',
+     JSON.stringify(MV.heldDrops([BP, BA, BB], '1985 Cobb Parkway, Kennesaw, GA 30144')),
+     JSON.stringify([{ q: '4821 Kestrel Dr, Kennesaw', name: 'Pat Q.', n: 1 }]));
+  eq('[batch run] ...two before it, D1 then D2, a street with no town ending in its comma',
+     JSON.stringify(MV.heldDrops([BP, BC, BA, BB], '1985 Cobb Parkway, Kennesaw')),
+     JSON.stringify([{ q: '3150 Thornbury Mill Rd SE,', name: 'Kim T.', n: 1 },
+                         { q: '4821 Kestrel Dr, Kennesaw', name: 'Pat Q.', n: 2 }]));
+  eq('[batch run] ...none: one dropoff, an end on no dropoff\'s street, an end on two, no end, '
+     + 'the end listed first (what comes after the end is not on its run)',
+     JSON.stringify([MV.heldDrops([BP, BB], '1985 Cobb Parkway, Kennesaw'),
+                     MV.heldDrops([BP, BA, BB], 'Wren Flat Ct & Oriel Rd, Marietta'),
+                     MV.heldDrops([BA, BB, pstop('dropoff', 'Ann V.', 240, '1985 Cobb Parkway',
+                                                 'Kennesaw')], '1985 Cobb Parkway'),
+                     MV.heldDrops([BA, BB], null),
+                     MV.heldDrops([BB, BA], '1985 Cobb Parkway, Kennesaw')]),
+     JSON.stringify([[], [], [], [], []]));
+  eq('[batch run] ...a dropoff before the end with no street is on the run with no place to '
+     + 'search (q null): never its name',
+     JSON.stringify(MV.heldDrops([BP, pstop('dropoff', 'Pat Q.', 203, null, null), BB],
+                                 '1985 Cobb Parkway')),
+     JSON.stringify([{ q: null, name: 'Pat Q.', n: 1 }]));
+  var D1 = { lat: 33.965, lon: -84.535 }, D2 = { lat: 33.968, lon: -84.532 };
+  eq('[batch run] the run: car -> pickup -> D1 -> D2 -> the end, nothing said at the door',
+     JSON.stringify(MV.routeLadder(CAR, [PK], END, 'door', [D1, D2])),
+     JSON.stringify({ pts: [CAR, PK, D1, D2, END], note: null }));
+  eq('[batch run] ...a dropoff not found is skipped, and said',
+     JSON.stringify(MV.routeLadder(CAR, [PK], END, 'door', [null, D2])),
+     JSON.stringify({ pts: [CAR, PK, D2, END], note: null,
+                      skip: 'route skips 1 dropoff, not found' }));
+  eq('[batch run] ...two not found, and the end\'s own rung said beside it',
+     JSON.stringify(MV.routeLadder(CAR, [], END, 'corner', [null, { lat: NaN, lon: 1 }])),
+     JSON.stringify({ pts: [CAR, END], note: 'route to corner',
+                      skip: 'route skips 2 dropoffs, not found' }));
+  eq('[batch run] ...and with no end to draw the dropoffs are not on it (nothing to be on the '
+     + 'way to), nor said',
+     JSON.stringify(MV.routeLadder(CAR, [PK], null, null, [D1, null])),
+     JSON.stringify({ pts: [CAR, PK], note: 'route to pickup only' }));
+  eq('[batch run] a dropoff\'s point: its door, else its answers\' general area (approximate), '
+     + 'else none',
+     JSON.stringify([MV.dropPoint({ at: { lat: 33.97, lon: -84.53, n: 1 } }),
+                     MV.dropPoint({ at: null, why: 'nodoor',
+                                    area: { lat: 33.97, lon: -84.53, approx: true, n: 1 } }),
+                     MV.dropPoint({ at: null, why: 'none' }), MV.dropPoint(null)]),
+     JSON.stringify([{ lat: 33.97, lon: -84.53 }, { lat: 33.97, lon: -84.53, approx: true },
+                     null, null]));
+  eq('[batch run] the skip rides after the caption\'s sentence and its chip, as a rung does',
+     JSON.stringify([MV.routeSaid('+1.2 mi out of your way', ['route skips 1 dropoff, not found']),
+                     MV.captionChip(MV.routeSaid(REFUSED, ['route skips 1 dropoff, not found']))]),
+     JSON.stringify(['+1.2 mi out of your way · route skips 1 dropoff, not found',
+                     MV.captionChip(REFUSED) + ' · route skips 1 dropoff, not found']));
+  // Searched as the end is: NbxSearch.place in the held card's disc, off a
+  // stub relay whose door search answers 4821 Kestrel Dr's street alone.
+  var dropAsked = [];
+  var dropNbx = new MV.NbxSearch({ gap: 0, fetch: function (u) {
+    dropAsked.push(u);
+    var body = { ok: true, hits: require('./fake-nucbox.js').KESTREL.map(function (h) {
+      return { lat: Number(h.lat), lon: Number(h.lon), name: h.display_name,
+               kind: h.category, called: h.name };
+    }) };
+    return Promise.resolve({ ok: true, status: 200,
+                             json: function () { return Promise.resolve(body); } });
+  } });
+  var dropGot = await dropNbx.place('4821 Kestrel Dr, Kennesaw', DISC3, {});
+  eq('[batch run] a dropoff searched on the NucBox as the end is: by its street inside the held '
+     + 'card\'s disc, its street alone found, routed to the street\'s area',
+     JSON.stringify([dropAsked.length >= 1, /street=4821/.test(decodeURIComponent(dropAsked[0])),
+                     /Kennesaw/.test(decodeURIComponent(dropAsked[0])),
+                     MV.dropPoint(dropGot) && MV.dropPoint(dropGot).approx]),
+     JSON.stringify([true, true, false, true]));
+
   /* ---- Leaflet that will not load (needLeaflet) ----------------------------
    *
    * A document of the page's shape, whose script never arrives: what a failed

@@ -1379,6 +1379,233 @@
     return out;
   }
 
+  /* ---------- the planner the order in the car keeps: pages merged ----------
+   *
+   * The owner's snap of 24 Oct, 03:03-03:04: one Uber trip, ONE pickup
+   * ("Pickup • 2 orders") and two dropoffs. Page 1 of the Trip Planner read
+   * the pickup with its full door, the first customer's dropoff (by 3:23)
+   * and the second's header and nothing else; the next reads, scrolled
+   * further, were the second customer's dropoff alone and then both
+   * dropoffs. server.js put each read's stops on the hold IN PLACE of the
+   * last, so the pickup page 1 had seen — the restaurant's own door — was
+   * gone from `holding.planner.stops` before anything asked the NucBox for
+   * it, and the map's run had no pickup and no first door.
+   *
+   * So a planner read landing on a hold that already keeps a planner is
+   * MERGED with what it keeps (server.js, the planner branch). `older` the
+   * kept stops, `newer` this read's, `page` this read's page as its
+   * sighting described it ({top, bottom}, pageOf) or null. Returns the
+   * stops, copies, in the planner's order:
+   *
+   *   - A stop of the newer read and a kept one are the SAME stop by the
+   *     key two pages of one list both print (keyOf: kind, name, "Expected
+   *     by"), or the same kind and name with times that agree (one read
+   *     lost the time), or the same kind and street line (sameStreet) with
+   *     times and names that agree (one read lost the name). Once each.
+   *   - The same stop is one stop: the header's words (kind, count, name,
+   *     time, place, label) from the newer read where it printed them, else
+   *     the kept; the address block WHOLE from whichever read more of it
+   *     (addressConf, the newer on a tie) — never a street off one read and
+   *     a town off the other, as mergeStop keeps a stitched stop.
+   *   - A kept stop the newer read does not show is KEPT, where it was:
+   *     after the nearest kept stop before it that is still in the list, or
+   *     before the nearest after it. A read scrolled down shows the stops
+   *     after the pickup without it, and that is the shape of the fault.
+   *   - Two reads with no stop in common go in the order their times give
+   *     (the kept read's last "Expected by" against the newer's first,
+   *     past midnight unwrapped, as byKeys does), else the newer first when
+   *     its page shows the list's top, else the kept first — a list is read
+   *     scrolling down. Where they meet, a stop one of them read as a header
+   *     with nothing under it (no name, no time, no street) and the other's
+   *     first stop of the same kind are taken for one stop: the header cut at
+   *     the foot of one page over the stop at the top of the next, the one
+   *     join linked() makes too. The same between two stops in common,
+   *     and there also two stops of one kind and one "Expected by" whose
+   *     doors do not differ (slotJoins): one stop, its name misread.
+   *   - A kept header with nothing read under it that is still not matched
+   *     is left out: it has no name, no time and no door to show, ask or
+   *     draw, and could be any stop.
+   *   - A newer read that shows the list's TOP has the last word on what is
+   *     above its first stop: kept stops that would sit before it are left
+   *     out — a pickup swiped in the app, a door already delivered. One
+   *     that shows its FOOT ("Waybill") the same below its last. A read
+   *     whose page is not known (no sighting of it) leaves both.
+   *
+   * What this does NOT touch: which stop is the order's end (dropoff(),
+   * batchPlan, the label and press rules decide that off the sightings, as
+   * before — a page's stops on the hold are not where an end comes from),
+   * and a pickup's visit: server.js's plannerVisits is handed the READ's
+   * stops, not these, so "the list moved past it" is still the app's own
+   * word off one read that shows the top. The merge lives on the hold, so a
+   * new order (a Took, the hold going) starts with no planner, and a ⌖ press
+   * or a different offer on the record forgets it as before
+   * (forgetPlanner). */
+  var PLANNER_COPY = ['kind', 'orders', 'name', 'expectedBy', 'place', 'label'];
+
+  function headerOnly(s) {
+    return !keyOf(s) && !s.street && !s.line && !s.city;
+  }
+
+  function sameName(a, b) {
+    return !!a.name && !!b.name && norm(a.name) === norm(b.name);
+  }
+
+  function samePlannerStop(a, b) {
+    if (!a || !b || !a.kind || a.kind !== b.kind) return false;
+    var ka = keyOf(a), kb = keyOf(b);
+    if (ka && kb && ka === kb) return true;
+    if (!timesAgree(a, b)) return false;
+    if (sameName(a, b)) return true;
+    var namesClash = !!a.name && !!b.name && !sameName(a, b);
+    return !namesClash && sameStreet(a.line || a.street, b.line || b.street);
+  }
+
+  // Whether a header with nothing under it and a stop beside it can be one
+  // stop where two reads meet.
+  function headerJoins(a, b) {
+    return !!a && !!b && a.kind === b.kind && (headerOnly(a) || headerOnly(b))
+      && timesAgree(a, b) && !(a.name && b.name && !sameName(a, b));
+  }
+
+  // Two stops at one place in the list — beside the same stop in common, on
+  // the same side — of one kind and one "Expected by", whose doors do not
+  // differ: one stop whose name one read misread (the reader's "Mara T." for
+  // the screen's "Jules K." is as likely as a second customer due at the
+  // same minute in the same slot). The newer read's name stands.
+  function slotJoins(a, b) {
+    var timed = function (x) { return typeof x.expectedBy === 'number' && isFinite(x.expectedBy); };
+    if (!a || !b || a.kind !== b.kind || !timed(a) || !timed(b)
+        || a.expectedBy !== b.expectedBy) return false;
+    var da = a.line || a.street, db = b.line || b.street;
+    return !(da && db && !sameStreet(da, db));
+  }
+
+  function mergePlannerStop(kept, read) {
+    var out = Object.assign({}, kept, read);
+    // Only the fields either read carries: a stop merged with itself is the
+    // stop it was, byte for byte, so a planner read that changes nothing
+    // writes nothing (server.js plannerVisits' `heldWas`).
+    var has = function (k) { return k in kept || k in read; };
+    PLANNER_COPY.forEach(function (k) {
+      if (!has(k)) return;
+      var v = read[k] !== undefined && read[k] !== null ? read[k] : kept[k];
+      out[k] = v === undefined ? null : v;
+    });
+    var addr = addressConf(kept) > addressConf(read) ? kept : read;
+    ADDRESS_KEYS.forEach(function (k) {
+      if (has(k)) out[k] = addr[k] === undefined ? null : addr[k];
+    });
+    // ...and the order a pickup was given (server.js ownPickups' `of`): this
+    // read's answer where it gave one, else the kept.
+    if (!read.of && kept.of) out.of = kept.of;
+    return out;
+  }
+
+  // The first and last "Expected by" of a list, as minutes, or null.
+  function firstTime(stops) {
+    for (var i = 0; i < stops.length; i++) {
+      if (typeof stops[i].expectedBy === 'number' && isFinite(stops[i].expectedBy)) {
+        return stops[i].expectedBy;
+      }
+    }
+    return null;
+  }
+
+  function lastTime(stops) {
+    return firstTime(stops.slice().reverse());
+  }
+
+  function mergePlanner(older, newer, page) {
+    var obj = function (s) { return !!s && typeof s === 'object'; };
+    var news = (Array.isArray(newer) ? newer : []).filter(obj)
+      .map(function (s) { return Object.assign({}, s); });
+    var olds = (Array.isArray(older) ? older : []).filter(obj);
+    if (!olds.length) return news;
+    // Which newer stop each kept one is (-1 for none), in order.
+    var match = olds.map(function () { return -1; });
+    var used = news.map(function () { return false; });
+    olds.forEach(function (o, i) {
+      for (var j = 0; j < news.length; j++) {
+        if (!used[j] && samePlannerStop(o, news[j])) { match[i] = j; used[j] = true; return; }
+      }
+    });
+    // ...a header with nothing under it, beside a stop in common, is the stop
+    // the other read shows there — and so is one in the same slot due at the
+    // same minute (slotJoins).
+    olds.forEach(function (o, i) {
+      if (match[i] !== -1) return;
+      var before = i > 0 ? match[i - 1] : -1;
+      var after = i + 1 < olds.length ? match[i + 1] : -1;
+      var j = before !== -1 ? before + 1 : after !== -1 ? after - 1 : -1;
+      if (j >= 0 && j < news.length && !used[j]
+          && (headerJoins(o, news[j]) || slotJoins(o, news[j]))) {
+        match[i] = j; used[j] = true;
+      }
+    });
+    // The list: the newer read's stops, each the merged stop where a kept one
+    // is the same; `fromNew` marks them for the trims below.
+    var list = news.map(function (s, j) {
+      var i = match.indexOf(j);
+      return { s: i === -1 ? s : mergePlannerStop(olds[i], s), fromNew: true, old: i };
+    });
+    var common = match.some(function (j) { return j !== -1; });
+    if (!common) {
+      // No stop in common: the two reads side by side, in the order their
+      // times give, else the newer first when it shows the list's top, and
+      // where they meet a header and the stop beside it are one.
+      var lo = lastTime(olds), fn = firstTime(news);
+      var oldFirst = !(page && page.top);
+      if (lo !== null && fn !== null) {
+        var gap = fn - lo;
+        if (gap > 720) gap -= 1440;
+        if (gap < -720) gap += 1440;
+        oldFirst = gap >= 0;
+      }
+      var a = oldFirst ? olds : news, b = oldFirst ? news : olds;
+      var joined = a.length && b.length && headerJoins(a[a.length - 1], b[0]);
+      var keptList = olds.map(function (s, i) { return { s: s, fromNew: false, old: i }; });
+      if (joined) {
+        // The header and its stop as one, standing where the newer read's is.
+        var oi = oldFirst ? olds.length - 1 : 0;
+        var nj = oldFirst ? 0 : news.length - 1;
+        list[nj] = { s: mergePlannerStop(olds[oi], news[nj]), fromNew: true, old: oi };
+        keptList.splice(oi, 1);
+      }
+      list = oldFirst ? keptList.concat(list) : list.concat(keptList);
+    } else {
+      // Each kept stop not in common, after the nearest kept stop before it
+      // still in the list, else before the nearest after it.
+      olds.forEach(function (o, i) {
+        if (match[i] !== -1) return;
+        var at = -1, k;
+        for (k = 0; k < list.length; k++) {
+          if (list[k].old !== -1 && list[k].old < i && (at === -1 || list[k].old > list[at].old)) {
+            at = k;
+          }
+        }
+        var entry = { s: o, fromNew: false, old: i };
+        if (at !== -1) { list.splice(at + 1, 0, entry); return; }
+        for (k = 0; k < list.length; k++) if (list[k].old > i) break;
+        list.splice(k, 0, entry);
+      });
+    }
+    // A read that shows the top has the last word above its first stop, and
+    // one that shows the foot below its last.
+    var firstNew = -1, lastNew = -1;
+    list.forEach(function (e, k) {
+      if (!e.fromNew) return;
+      if (firstNew === -1) firstNew = k;
+      lastNew = k;
+    });
+    return list.filter(function (e, k) {
+      if (e.fromNew) return true;
+      if (headerOnly(e.s)) return false;
+      if (page && page.top && firstNew !== -1 && k < firstNew) return false;
+      if (page && page.bottom && lastNew !== -1 && k > lastNew) return false;
+      return true;
+    }).map(function (e) { return e.fromNew ? e.s : Object.assign({}, e.s); });
+  }
+
   /* `upper` and `lower` as one list, lower's first stop at upper's `k`. Each
    * side carries {stops, top, bottom}: whether a page with that end sits at
    * this side's own start or foot. */
@@ -2591,6 +2818,8 @@
            batchPlan: batchPlan, batchWhy: batchWhy, cardStreets: cardStreets,
            streetCore: streetCore,
            keyOf: keyOf, placements: placements, linked: linked,
+           // ...and the planner the hold keeps, pages merged (24 Oct).
+           mergePlanner: mergePlanner,
            fresh: fresh, took: took, sighting: sighting, pending: pending,
            verdictFor: verdictFor, pageOf: pageOf, plannerRowDue: plannerRowDue,
            cardSeen: cardSeen, heldOwnCard: heldOwnCard, holdIdOf: holdIdOf,

@@ -5907,8 +5907,15 @@
       // and the rig says no "not read" over the stops either. Either way the
       // press is answered, so the button stops saying "reading…".
       if (msg.planner && Array.isArray(msg.planner.stops)) {
-        plannerSaid = { stops: msg.planner.stops, unfiled: msg.planner.unfiled || null };
-        if (holdingNow) heldPlan = { of: heldOwner(), stops: msg.planner.stops };
+        /* ...as the order in the car now keeps them, where the server sent
+           that (`held`: this page merged with the pages before it on the
+           same hold, Assemble.mergePlanner; the owner's snap of 24 Oct, where
+           page 2 replaced page 1 and the pickup it listed went with it), so
+           the live panel and Map view show what a reload would. The page as
+           read where nothing is held. */
+        var keptStops = Array.isArray(msg.planner.held) ? msg.planner.held : msg.planner.stops;
+        plannerSaid = { stops: keptStops, unfiled: msg.planner.unfiled || null };
+        if (holdingNow) heldPlan = { of: heldOwner(), stops: keptStops };
         destFailed = false;
         destBusy = false;
         showDest();
@@ -6756,6 +6763,16 @@
     // can be drawn, and one through the first alone ignores an order in the
     // car (mapRefusal says so).
     var noEnd2 = !!second && !second.dropoff;
+    /* ...and with ONE order in the car whose planner lists more than one
+       dropoff — a batched Uber trip, one pickup and two doors (the owner's
+       snap of 24 Oct, 03:03: the run went car -> D past the first door) —
+       the dropoffs it lists before the end, in its order (MV.heldDrops), for
+       the run to go through. Drawing only: searched by the walk below in the
+       held card's disc, never in `names` (so never posted, never `found`,
+       never the figure's, never the public map's), and never with two
+       orders in the car, whose run is MV.heldRuns'. Guarded for a
+       map-view.js from before it. */
+    var heldDrops = held && !second && plan && MV && MV.heldDrops ? MV.heldDrops(plan, held) : [];
     /* ...and where the held order's run starts when no card's fix starts it
        (between offers, or a card that came up with none): the live fix,
        kept per leg and per ROUTE_MOVE_M (MV.routeFrom), so the run goes car
@@ -6800,6 +6817,7 @@
              tapped: { pickup: !!tapped, dropoff: !!o.dropoff && o.dropoffFrom === 'popup' },
              held: held, heldPlace: heldPlace,
              heldPicks: heldPicks, donePicks: donePicks, names: names,
+             heldDrops: heldDrops,
              // The two cards the line is measured with: this one, whose fix
              // is where the car was when it came up, and the one the order in
              // the car came from, whose own fix and distance its end is
@@ -6832,6 +6850,9 @@
                // (MV.routeLadder), learnt on a beat too.
                + (holdingNow && heldSaid && heldSaid.pickAt ? '^p' : '')
                + (held2 ? '+' + held2 : '')
+               // ...and the batched trip's other doors the run goes through.
+               + (heldDrops.length ? '>d' + heldDrops.map(function (d) {
+                   return d.q || '?'; }).join('>') : '')
                // ...and the order of the run through both: a planner read
                // that places both ends moves the run under the same places.
                + (runs ? '>' + runs.runs.map(function (r) {
@@ -7272,6 +7293,9 @@
       // ...and the ends refused and routed to their general area (areaEnd),
       // which drawMap marks "≈" — the held order's, and this card's own.
       var areas = { held: null, drop: null };
+      // ...and the batched trip's other doors the run went through, with
+      // their points or none, for drawMap's D1, D2 (MV.heldDrops).
+      var ladDrops = [];
       if (nbx.route && mapNbx && want.runs) {
         // Two orders: a road per line drawMap draws — the run through both,
         // or each order's own — and only where the line would state a
@@ -7315,13 +7339,40 @@
           if (area) { heldOk = area; rung = MV.routeRung(want.held, area, null); areas.held = area; }
         }
         if (!heldOk && !picksOk.length && heldSaid && heldSaid.pickAt) picksOk = [heldSaid.pickAt];
+        /* ...and a batched trip's other doors (want.heldDrops; the owner's
+           snap of 24 Oct, 03:03): each searched on the NucBox as the end is,
+           in the HELD card's disc (NbxSearch.place: a door by its number,
+           else its answers' general area, MV.dropPoint), and gone through
+           between the pickups and the end, in the planner's order — only
+           where the end is drawn. One with no point is skipped and said
+           ("route skips 1 dropoff, not found"). DRAWING ONLY: kept here and
+           on drawMap's marks, never in `found`, so never posted
+           (pinHeldEnd, pinHeldPickup), never a figure's stop, never what the
+           GPS drop is armed by. */
+        var drops = [];
+        if (heldOk && want.heldDrops && want.heldDrops.length) {
+          var ddisc = MV.discFor(want.heldCard);
+          for (var dk = 0; dk < want.heldDrops.length; dk++) {
+            var dd = want.heldDrops[dk];
+            var dres = dd.q && nbx.search && ddisc
+              ? await mapNbx.place(dd.q, ddisc,   // eslint-disable-line no-await-in-loop
+                                   { streets: nbx.streets, car: here || want.carNow })
+              : null;
+            if (gone()) return;
+            drops.push({ q: dd.q, name: dd.name, n: dd.n, at: MV.dropPoint(dres) });
+          }
+        }
         var lad = want.held || picksOk.length
-          ? MV.routeLadder(here || want.carNow, picksOk, heldOk, rung) : null;
+          ? MV.routeLadder(here || want.carNow, picksOk, heldOk, rung,
+                           drops.length ? drops.map(function (d) { return d.at; }) : undefined)
+          : null;
         if (lad) {
           heldRoad = await mapNbx.runLine(lad.pts);
           if (viewMode !== 'map' || mapFor !== key) return;
           if (heldRoad && lad.note) notes.push(lad.note);
+          if (lad.skip) notes.push(lad.skip);
         }
+        ladDrops = drops;
       }
       /* ...and this card's own job, pickup -> its dropoff, along the road:
          one question of two points, drawing only. No figure comes of it, and
@@ -7362,7 +7413,7 @@
         }
       }
       drawMap(want, found, here, true, road, heldRoad, jobRoad,
-              { notes: notes, pickRoad: pickRoad, areas: areas });
+              { notes: notes, pickRoad: pickRoad, areas: areas, drops: ladDrops });
       if (want.refit) { fitFor = cardId; fitWanted = false; }
     } finally {
       mapBusy = false;
@@ -8020,6 +8071,19 @@
           + 'what its answers share, not the door', want.dropoff, false, '≈',
           { faded: true, aside: inCar });
     }
+    /* ...and a batched trip's other doors the run goes through (MV.heldDrops;
+       the owner's snap of 24 Oct): a RING in the end's amber, D1, D2 in the
+       planner's order, faded where only the general area was found. Drawn
+       and nothing else — not the end, whose D is above, not a figure's
+       stop, not posted; a door the walk could not place is not drawn and the
+       caption says the run skips it. */
+    var runDrops = (ladder.drops || []).filter(function (d) { return d && d.at; });
+    runDrops.forEach(function (d) {
+      put(d.at, '#f5a524', (d.at.approx ? '≈ the area of ' : '')
+          + 'a dropoff of the order in your car, on the way to its end',
+          [d.name, String(d.q || '').replace(/,$/, '')].filter(Boolean).join(' · '), true,
+          'D' + d.n, { faded: !!d.at.approx });
+    });
     put(j.held2, colourFor(want.held2, '#f5a524', off.held2),
         sayFor(want.held2, 'where order \u2461 in your car is going', off.held2),
         want.held2, true, numberOf[want.held2] || 'D2');
@@ -8096,7 +8160,9 @@
         }
       });
     } else {
-      var run = heldRoad || (MV.heldRun ? MV.heldRun(here || want.carNow, heldAt, held)
+      // (...through the batched trip's other doors, as the ladder ran it.)
+      var run = heldRoad || (MV.heldRun ? MV.heldRun(here || want.carNow, held
+          ? heldAt.concat(runDrops.map(function (d) { return d.at; })) : heldAt, held)
         : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []));
       // (A road to a rung below the door — a corner's street, the pickups
       // alone — is drawn with no D under it: MV.routeLadder.)

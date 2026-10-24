@@ -7544,6 +7544,90 @@ const framed = (page) => page.waitForFunction(
     await page.close();
   }
 
+  /* --- a batched trip's other doors on the run (the owner's snap, 24 Oct) ----
+   *
+   * One Uber trip, one pickup and three dropoffs on its planner, the end the
+   * last: the run went car -> D past the doors before it. Now car -> pickup
+   * -> each dropoff before the end, in the planner's order -> the end, each
+   * searched on the NucBox (faked at the page's relay) in the held card's
+   * disc; one the NucBox does not hold is skipped and said. Drawing only:
+   * nothing about those doors leaves the page. Invented places. */
+  {
+    stage = 'the map mode: a batched trip run through its dropoffs';
+    const DOORS = { '250 Example Road': [34.020, -84.620, '250, Example Road, Kennesaw'],
+                    '4821 Kestrel Dr': [34.030, -84.580, '4821, Kestrel Drive, Kennesaw'],
+                    '1985 Cobb Parkway': [34.000, -84.560, '1985, Cobb Parkway, Kennesaw'] };
+    const page = await browser.newContext({ viewport: { width: 1024, height: 600 } })
+                              .then((c) => c.newPage());
+    await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+    await page.addInitScript(MAPSTUB);
+    await page.route('**/api/journal*', (route) => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{"offers":[]}' }));
+    const asked = [];
+    await page.route('**/api/nbx**', (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname === '/api/nbx') {
+        return route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify({ ok: true, search: true, route: true, streets: false }) });
+      }
+      if (u.pathname === '/api/nbx/search') {
+        const st = u.searchParams.get('street') || u.searchParams.get('q') || '';
+        asked.push(st);
+        const d = DOORS[st];
+        return route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify({ ok: true, hits: d ? [{ lat: d[0], lon: d[1], name: d[2] }] : [] }) });
+      }
+      const pts = (u.searchParams.get('points') || '').split(';').map((x) => {
+        const [lon, lat] = x.split(',').map(Number); return [lat, lon]; });
+      const line = [pts[0]];
+      for (let i = 1; i < pts.length; i++) line.push([pts[i - 1][0], pts[i][1]], pts[i]);
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ok: true, metres: 5000, snaps: pts.map(() => 3), line: line }) });
+    });
+    const sent = [];
+    page.on('request', (q) => { if (q.method() !== 'GET') sent.push(q.url() + ' ' + (q.postData() || '')); });
+    await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+    const push = (m) => page.evaluate((x) => window.__es.push(x), m);
+    const heldCard = await page.evaluate(() => window.__HELD);
+    const A = { pay: 23.0, minutes: 40.0, dropoff: '1985 Cobb Parkway, Kennesaw',
+                holdId: 'br-a@1', card: heldCard, endPinned: false, arrived: false,
+                endWhy: null, visited: [] };
+    await push({ alive: true, at: Date.now(),
+      gps: { state: 'ok', ageSeconds: 0.6, fix: { lat: 33.9526, lon: -84.5499, gpsAge: 0.6,
+             gpsErr: 27.8, gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 } },
+      heldEnd: { endPinned: false, arrived: false, endWhy: null, visited: [] } });
+    await push({ holding: A });
+    await push({ planner: { stops: [
+      { kind: 'pickup', orders: 2, name: 'Example Grill', expectedBy: null,
+        street: '250 Example Road', city: 'Kennesaw', line: '250 Example Road, Kennesaw' },
+      { kind: 'dropoff', orders: 1, name: 'Kim T.', expectedBy: 200, street: '77 Birch Ln',
+        city: 'Kennesaw', line: '77 Birch Ln, Kennesaw' },
+      { kind: 'dropoff', orders: 1, name: 'Pat Q.', expectedBy: 203, street: '4821 Kestrel Dr',
+        city: 'Kennesaw', line: '4821 Kestrel Dr, Kennesaw' },
+      { kind: 'dropoff', orders: 1, name: 'Lee R.', expectedBy: 216, street: '1985 Cobb Parkway',
+        city: 'Kennesaw', line: '1985 Cobb Parkway, Kennesaw' }],
+      unfiled: 'dropoffs', asked: false, ms: null, at: 1 } });
+    await page.click('#viewMode');
+    await page.waitForTimeout(150);
+    await page.click('#viewMode');
+    await page.waitForFunction(() => (window.__lines || []).some(
+      (l) => /mv-held-run/.test(String((l.opts || {}).className || '')) && l.pts.length === 7),
+      null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    out.batchRun = await page.evaluate(() => ({
+      runs: (window.__lines || []).filter(
+        (l) => /mv-held-run/.test(String((l.opts || {}).className || ''))).map((l) => ({
+          cls: String(l.opts.className), pts: l.pts })),
+      letters: (window.__letters || []).map((m) =>
+        String((m.opts && m.opts.icon && m.opts.icon.html) || '')).sort(),
+      said: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(
+        document.getElementById('viewNote')).trim() }));
+    out.batchRun.asked = asked.slice();
+    out.batchRun.sent = sent.slice();
+    await page.close();
+  }
+
   /* --- the route view: /live.html?route on the driver's phone -------------
    *
    * The owner, 21 Oct: the rig's map route on his phone while he waits at a
@@ -8624,6 +8708,24 @@ try:
         and _hr and all(l['color'] == '#f5a524' for l in _hr))
     ok_('[road run] ...and the key names both trips (%r)' % _rr.get('offerKey'),
         '━ run' in (_rr.get('offerKey') or '') and '━ offer' in (_rr.get('offerKey') or ''))
+
+    # The owner's snap of 24 Oct: a batched trip run through its dropoffs.
+    _br = got.get('batchRun') or {}
+    _brp = [[33.9526, -84.5499], [34.020, -84.620], [34.030, -84.580], [34.000, -84.560]]
+    eq('[batch run] Map view runs the car -> the pickup -> the dropoff before the end the '
+       'NucBox placed -> the end, along the road',
+       [(l['cls'], l['pts']) for l in _br.get('runs') or []],
+       [('mv-held-run mv-road', _rr_road(*[tuple(p) for p in _brp]))])
+    ok_('[batch run] ...marks it D2 (its place on the planner) beside the end\'s D and the '
+        'pickup\'s P (%r)' % _br.get('letters'),
+        all(x in (_br.get('letters') or []) for x in ('D', 'D2', 'P'))
+        and 'D1' not in (_br.get('letters') or []))
+    ok_('[batch run] ...says the dropoff the NucBox does not hold is skipped (%r)'
+        % _br.get('said'), 'route skips 1 dropoff, not found' in (_br.get('said') or ''))
+    ok_('[batch run] ...searched each dropoff on the NucBox by its street (%r)' % _br.get('asked'),
+        '77 Birch Ln' in (_br.get('asked') or []) and '4821 Kestrel Dr' in (_br.get('asked') or []))
+    eq('[batch run] ...and nothing about those dropoffs left the page: drawing only',
+       [x for x in _br.get('sent') or [] if 'Kestrel' in x or 'Birch' in x], [])
 
     eq('[carry two] Map view pins the two orders\' ends D1 and D2, and a pickup one '
        'order\'s card names P2', got.get('mapTwo'), ['D1', 'D2', 'P', 'P2'])

@@ -2454,6 +2454,134 @@ SEQ.forEach(function (seq) {
       [['2400 Tansy Creek Blvd, Marietta, GA 30060', true, 2]]]);
 })();
 
+/* ---- the planner the hold keeps, pages merged (Assemble.mergePlanner) ----
+ *
+ * The owner's snap of 24 Oct, 03:03-03:04, invented: one Uber trip, ONE
+ * pickup ("Pickup • 2 orders") and two dropoffs. Page 1 read the pickup with
+ * its door, the first dropoff (by 3:23) and the second's header and nothing
+ * else; the scrolled pages after it the second dropoff alone, then both. Each
+ * used to replace the last on the hold, and the restaurant went with page 1. */
+(function () {
+  function stop(kind, name, by, street, city, extra) {
+    return Object.assign({ kind: kind, orders: 1, name: name || null, place: null,
+                           expectedBy: by === undefined ? null : by, street: street || null,
+                           city: city || null, state: city ? 'GA' : null, zip: null,
+                           line: street ? (city ? street + ', ' + city : street) : null,
+                           label: kind }, extra || {});
+  }
+  function said(stops) {
+    return stops.map(function (s) { return [s.kind, s.name, s.expectedBy, s.line]; });
+  }
+  var P = stop('pickup', 'Example Grill', null, '250 Example Road', 'Kennesaw', { orders: 2 });
+  var A1 = stop('dropoff', 'Pat Q.', 203, '4821 Kestrel Dr', 'Kennesaw');
+  var HDR = stop('dropoff', null, null, null, null);
+  var B1 = stop('dropoff', 'Lee R.', 216, '1985 Cobb Parkway', 'Kennesaw');
+  var page1 = [P, A1, HDR];
+  var m2 = A.mergePlanner(page1, [B1], null);
+  eq('[planner pages] the snap: page 2 (the second dropoff alone) onto page 1 keeps page 1\'s '
+     + 'pickup with its door and its first dropoff, the second where page 1 cut its header',
+     said(m2), said([P, A1, B1]));
+  var m3 = A.mergePlanner(m2, [A1, B1], null);
+  eq('[planner pages] ...and page 3 (both dropoffs) onto that keeps the pickup ahead of them',
+     said(m3), said([P, A1, B1]));
+  eq('[planner pages] ...in place of the old replace, which kept the last page alone',
+     said(m3).length, 3);
+  ok_('[planner pages] ...copies: neither read\'s stops are changed',
+      m2[0] !== P && m2[2] !== B1 && page1[2].name === null && page1.length === 3);
+  eq('[planner pages] nothing kept: the read as it is, copied',
+     [said(A.mergePlanner(null, [B1], null)), A.mergePlanner([], [B1], null)[0] === B1],
+     [said([B1]), false]);
+  // The same stop read twice: the newer read's header words where it printed
+  // them, the address block whole from the read that has more of it.
+  var aBare = stop('dropoff', 'Pat Q.', null, '4821 Kestrel Dr', null);
+  var aNoName = stop('dropoff', null, 203, '4821 Kestrel Dr', 'Kennesaw');
+  eq('[planner pages] one stop off two reads: a time one lost, a town the other read',
+     said(A.mergePlanner([aBare], [aNoName], null)), [['dropoff', 'Pat Q.', 203,
+                                                     '4821 Kestrel Dr, Kennesaw']]);
+  eq('[planner pages] ...and the fuller address stays when the newer read has less of it',
+     said(A.mergePlanner([A1], [aBare], null)), [['dropoff', 'Pat Q.', 203,
+                                                 '4821 Kestrel Dr, Kennesaw']]);
+  eq('[planner pages] ...never a street off one read and a town off the other',
+     A.mergePlanner([stop('dropoff', 'Pat Q.', 203, null, 'Kennesaw')],
+                    [stop('dropoff', 'Pat Q.', 203, '4821 Kestrel Dr', null)], null)[0].city,
+     null);
+  // A header with nothing under it between two stops in common is the stop
+  // the other read shows there: a door read before is not lost to it.
+  eq('[planner pages] a newer header cut at the foot over a stop kept whole keeps its door',
+     said(A.mergePlanner([P, A1, B1], [A1, HDR], null)), said([P, A1, B1]));
+  // Two customers on one street are two stops; two names are two stops.
+  var A2 = stop('dropoff', 'Lee R.', 216, '4900 Kestrel Dr', 'Kennesaw');
+  eq('[planner pages] two doors on one street, two names, are two stops, in time order',
+     said(A.mergePlanner([A1], [A2], null)), said([A1, A2]));
+  eq('[planner pages] ...and the same door under two names is two stops too',
+     said(A.mergePlanner([A1], [stop('dropoff', 'Kim T.', 203, '4821 Kestrel Dr',
+                                     'Kennesaw')], null)).length, 2);
+  // Two reads with nothing in common: their times put them in order.
+  eq('[planner pages] a newer page whose times come first goes first',
+     said(A.mergePlanner([B1], [P, A1], null)), said([P, A1, B1]));
+  var late = stop('dropoff', 'Pat Q.', 1430, '4821 Kestrel Dr', 'Kennesaw');
+  var after = stop('dropoff', 'Lee R.', 10, '1985 Cobb Parkway', 'Kennesaw');
+  eq('[planner pages] ...past midnight unwrapped: 11:50 PM before 12:10 AM',
+     [said(A.mergePlanner([late], [after], null)), said(A.mergePlanner([after], [late], null))],
+     [said([late, after]), said([late, after])]);
+  var noTime = stop('dropoff', 'Lee R.', null, '1985 Cobb Parkway', 'Kennesaw');
+  eq('[planner pages] ...no times: the kept first (a list is read scrolling down), the newer '
+     + 'first when its page shows the top',
+     [said(A.mergePlanner([P], [noTime], null)),
+      said(A.mergePlanner([noTime], [P], { top: true, bottom: false }))],
+     [said([P, noTime]), said([P, noTime])]);
+  // A read that shows the top has the last word above its first stop, one
+  // that shows the foot below its last.
+  eq('[planner pages] a newer read from the list\'s top leaves out the kept pickup above it '
+     + '(swiped in the app)',
+     said(A.mergePlanner([P, A1, B1], [A1, B1], { top: true, bottom: false })), said([A1, B1]));
+  eq('[planner pages] ...one that shows the foot leaves out what was kept below it',
+     said(A.mergePlanner([P, A1, B1], [P, A1], { top: false, bottom: true })), said([P, A1]));
+  eq('[planner pages] ...and a read whose page is not known, or that shows neither, keeps both',
+     [said(A.mergePlanner([P, A1, B1], [A1], null)),
+      said(A.mergePlanner([P, A1, B1], [A1], { top: false, bottom: false }))],
+     [said([P, A1, B1]), said([P, A1, B1])]);
+  // A kept header with nothing under it, matched to nothing, is left out.
+  eq('[planner pages] a kept header with nothing read under it, matched to nothing, is left out',
+     said(A.mergePlanner([HDR, P], [P, A1], null)), said([P, A1]));
+  eq('[planner pages] ...but one beside a stop in common is the stop the newer read shows there',
+     said(A.mergePlanner([P, HDR], [P, A1], null)), said([P, A1]));
+  // A name misread in the same slot, due at the same minute, is one stop
+  // under the newer read's name — never a second customer conjured.
+  var mara = stop('dropoff', 'Mara T.', 203, null, null);
+  var jules = stop('dropoff', 'Jules K.', 203, null, null);
+  eq('[planner pages] one slot beside a stop in common, one "Expected by", no doors that '
+     + 'differ: one stop, the newer read\'s name',
+     said(A.mergePlanner([P, mara], [P, jules], null)), said([P, jules]));
+  eq('[planner pages] ...but not at another minute, nor with another door',
+     [said(A.mergePlanner([P, mara], [P, stop('dropoff', 'Jules K.', 216, null, null)],
+                          null)).length,
+      said(A.mergePlanner([P, A1], [P, stop('dropoff', 'Jules K.', 203, '1985 Cobb Parkway',
+                                            'Kennesaw')], null)).length], [3, 3]);
+  // A read that changes nothing gives the stops it was given, byte for byte
+  // (server.js writes holding.json only when the orders change).
+  var bare = [{ kind: 'pickup', orders: 1, name: 'Example Grill', expectedBy: 1100,
+                line: '5 Mill St, Roswell', street: '5 Mill St', city: 'Roswell', state: null,
+                zip: null }];
+  eq('[planner pages] the same read again is the same list, byte for byte',
+     JSON.stringify(A.mergePlanner(A.mergePlanner(null, bare, null), bare, null)),
+     JSON.stringify(bare));
+  // The order a pickup was given (server.js ownPickups' `of`) survives a read
+  // that gave it none.
+  var Pof = Object.assign({}, P, { of: 'o-1' });
+  eq('[planner pages] a pickup\'s order (`of`) is kept through a read that gave it none, and '
+     + 'a read that gives one wins',
+     [A.mergePlanner([Pof], [P], null)[0].of,
+      A.mergePlanner([Pof], [Object.assign({}, P, { of: 'o-2' })], null)[0].of],
+     ['o-1', 'o-2']);
+  // What the hold's pickups are asked from (MV.heldPickups, server.js
+  // pickupAsks): the page-1 pickup is still there after page 2.
+  var MVp = require('../map-view.js');
+  eq('[planner pages] the pickup page 1 read is still one to ask after page 2 lands',
+     JSON.stringify(MVp.heldPickups(m2)), JSON.stringify([{ q: '250 Example Road, Kennesaw',
+                                                          name: 'Example Grill' }]));
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

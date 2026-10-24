@@ -700,6 +700,14 @@ CAPTION_LINES = [
      'this pickup is on your way — straight lines, not roads · 1 not found '
      '· road question refused, a bug',
      'this pickup is on your way — straight lines, not roads'),
+    # ...and the run through a batched trip's dropoffs leaving out two it
+    # could not place (MV.routeLadder's `skip`; the owner's snap of 24 Oct),
+    # said after the figure's own tail, the most dropoffs a planner page has
+    # room to list before its end.
+    ('the figure, the run skipping a batched trip\'s dropoffs',
+     'this pickup is on your way — straight lines, not roads · 1 not found '
+     '· route skips 2 dropoffs, not found',
+     'this pickup is on your way — straight lines, not roads'),
     # ...and why the NucBox gave no pin — MV.nbxRefusal's words, every one, at
     # the widest name, three-figure distances and the rig's repair named. The
     # refusal LEADS, as the disc's own lines do, so what a clamp keeps opens
@@ -961,9 +969,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 105)
-eq('...and forty-seven of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 47)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 106)
+eq('...and forty-eight of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 48)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:
