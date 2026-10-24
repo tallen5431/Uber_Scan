@@ -1112,6 +1112,8 @@ async function nucbox() {
       MV.searchPlan('129 Wren PI, Acworth').street,
       MV.searchPlan('412 Brindle Or NW, Kennesaw').street].join(' | '),
      '790 Wren Place Blvd NW | 12 Creek Crossing Trl | 129 Wren Pl | 412 Brindle Dr NW');
+  eq('...and Lr for Ln (the owner\'s batch of 23 Oct)',
+     MV.searchPlan('1301 Brindle Lr, Woodstock').street, '1301 Brindle Ln');
   eq('...but never a word that is the street\'s name, or one not in the type\'s place',
      [MV.searchPlan('5 Or Rd, Marietta').street, MV.searchPlan('12 Tri Oak Ct').street,
       MV.searchPlan('9 Or, Marietta').street].join(' | '),

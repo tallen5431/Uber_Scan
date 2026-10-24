@@ -977,7 +977,8 @@
      only the word in the type's place is touched — the last, or the last
      before a quadrant — after a name of two letters or more; a name that is
      the word itself ("Or Rd") has a type after it and is not touched. */
-  var TYPE_SLIPS = { bivd: 'Blvd', b1vd: 'Blvd', tri: 'Trl', pi: 'Pl', or: 'Dr' };
+  // ...and "Lr" for Ln (the owner's batch of 23 Oct, "1301 <Name> Lr").
+  var TYPE_SLIPS = { bivd: 'Blvd', b1vd: 'Blvd', tri: 'Trl', pi: 'Pl', or: 'Dr', lr: 'Ln' };
   function typeSlip(street) {
     var w = String(street).split(' ');
     var at = w.length - 1;

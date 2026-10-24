@@ -1542,7 +1542,10 @@
   // A unit after the street, ", STE 120", ", Suite 120", ", Ste. 120",
   // ", Unit 4", ", Apt 2B" or "#120": it goes and the street stands (the
   // owner's planner of 21 Oct, 13:57). See PLANNER_UNIT in offer_parser.py.
-  var PLANNER_UNIT = new RegExp('(?:\\s*,\\s*(?:ste|suite|unit|apt)\\b\\.?\\s*#?|\\s*,?\\s*#)\\s*'
+  // ...and "Hwy Suite 110" (no comma) and "Pkwy, 140" (a bare number), the
+  // owner's batch of 23 Oct. See PLANNER_UNIT in offer_parser.py.
+  var PLANNER_UNIT = new RegExp('(?:\\s*,\\s*(?:ste|suite|unit|apt)\\b\\.?\\s*#?|\\s+(?:ste|suite)\\b\\.?\\s*#?'
+    + '|\\s*,?\\s*#|\\s*,\\s*(?=\\d{1,5}$))\\s*'
     + '(?:[A-Za-z]?\\d{1,5}[A-Za-z]?|[A-Za-z])$', 'i');
 
   /* The phone's edge after a street: "\ <n> <Name> Dr NW > i" on the same
@@ -1721,6 +1724,12 @@
 
   function plannerAddressLines(block, label) {
     var under = block.slice(label + 1, label + 4);
+    // A town line broken after its comma ("..., Canton," over "GA 30114-6559"):
+    // one line. See _planner_address_lines in offer_parser.py.
+    if (under.length >= 2 && /,\s*$/.test(under[0])
+        && new RegExp('^[A-Z]{2}\\s+' + ZIP_RX + '(?:\\s*-\\s*\\d{4})?$').test(under[1].trim())) {
+      under = [under[0].replace(/\s+$/, '') + ' ' + under[1].trim()].concat(under.slice(2));
+    }
     var streetLine = null, townLine = null, townAt = -1, place = null;
     for (var k = 0; k < Math.min(under.length, 2); k++) {
       var l = under[k];

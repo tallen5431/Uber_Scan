@@ -7162,6 +7162,46 @@
      "place": null
     }
    ]
+  },
+  {
+   "name": "the owner's batch of 23 Oct: a store's door with Suite and no comma before it, and the ZIP wrapped",
+   "_why": "\"3753 <Name> Hwy Suite 110, Canton, GA\" over \"30114\": PLANNER_UNIT wanted a comma before the suite, so the street kept \"Suite 110\" and the door was never found. A street is never named Suite after its type. Invented.",
+   "text": "Pickup - 1 order\n@ Fable Pizza & Kitchen\nExpected by 8:32 PM\nAddress\n3753 Wren Hwy Suite 110, Canton, GA\n30114\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Pizza & Kitchen",
+     "expectedBy": 1232,
+     "street": "3753 Wren Hwy",
+     "city": "Canton",
+     "state": "GA",
+     "zip": "30114",
+     "line": "3753 Wren Hwy, Canton, GA 30114",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and a store's door with a bare unit number and its town line broken after the comma",
+   "_why": "\"130 <Name> Point Pkwy, 140, Canton,\" over \"GA 30114-6559\": the unit a bare number after a comma, and the state and ZIP alone on the next line. The two lines are one, the unit goes. Invented.",
+   "text": "Pickup - 1 order\n@ Fable Wok Kitchen\nExpected by 8:26 PM\nAddress\n130 Wren Point Pkwy, 140, Canton,\nGA 30114-6559\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Wok Kitchen",
+     "expectedBy": 1226,
+     "street": "130 Wren Point Pkwy",
+     "city": "Canton",
+     "state": "GA",
+     "zip": "30114",
+     "line": "130 Wren Point Pkwy, Canton, GA 30114",
+     "place": null
+    }
+   ]
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",

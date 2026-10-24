@@ -146,6 +146,17 @@
        bar ended up off the glass. `100%` is the row, and the row is what is
        actually left over. */
     #viewWrap > img { max-height: 100%; object-fit: contain; }
+    /* The magnifier (the owner, 23 Oct: "I'd like to be able to see more of
+       it, it is helpful for checking offers and reading Uber's navigation"):
+       a tap on the top or the bottom half of the picture shows that half at
+       twice the size, the turn banner or the card, and a tap goes back. The
+       phone is portrait in a landscape pane, so its half at 2x is as wide as
+       the pane and no wider. Clipped by the pane; never while ▣ Set box is
+       drawing, which is the one other thing a press on the picture does. */
+    #viewWrap { overflow: hidden; }
+    #view { transition: transform 120ms ease-out; }
+    #view.zoomTop { transform: scale(2); transform-origin: 50% 0; }
+    #view.zoomBottom { transform: scale(2); transform-origin: 50% 100%; }
     /* The map takes the row the same way, and takes what is LEFT of it rather
        than all of it: the caption under it is the line that says how far out
        of the way the pickup is, which is the whole reason a driver switched
@@ -5711,6 +5722,9 @@
       if (msg.offer && msg.offer.id) {
         var newCard = !onRecord || onRecord.id !== msg.offer.id;
         if (newCard) {
+          // ...and the magnifier back to the whole phone: a new card is
+          // read whole (unzoom, by the picture's code).
+          if (typeof unzoom === 'function') unzoom();
           tookState = false;
           tookFailed = false;
           // ...and its age starts here: server.js stamps offerAt at the same
@@ -8636,6 +8650,7 @@
       if (streaming) startStream();
       else refreshView();
     }
+    if (on) unzoom();
     viewWrap.classList.toggle('drawing', on);
     // The view is borrowed for the length of the drawing, so it may not be
     // given back mid-drag.
@@ -8697,6 +8712,28 @@
   // 2328px frame the card would be 116px tall against a 380px floor, so there
   // is nothing readable inside a box that small.
   function bigEnough(b) { return b && b.w >= 0.05 && b.h >= 0.05; }
+
+  /* The magnifier: a tap on the picture's top or bottom half shows that half
+     at twice the size (`zoomTop`, `zoomBottom` in the stylesheet), and a tap
+     goes back. Back on its own after ZOOM_MS, on a new offer card (newCard,
+     in connect), and when ▣ Set box starts drawing, so the driver is never
+     left on half a phone. Not in Map view, and never while drawing. */
+  var ZOOM_MS = 30000;
+  var zoomTimer = null;
+  function unzoom() {
+    view.classList.remove('zoomTop', 'zoomBottom');
+    if (zoomTimer) { clearTimeout(zoomTimer); zoomTimer = null; }
+  }
+  view.addEventListener('click', function (e) {
+    if (viewWrap.classList.contains('drawing') || viewMode === 'map') return;
+    if (view.classList.contains('zoomTop') || view.classList.contains('zoomBottom')) {
+      unzoom();
+      return;
+    }
+    var r = view.getBoundingClientRect();
+    view.classList.add(e.clientY < r.top + r.height / 2 ? 'zoomTop' : 'zoomBottom');
+    zoomTimer = setTimeout(unzoom, ZOOM_MS);
+  });
 
   view.addEventListener('pointerdown', function (e) {
     if (!viewWrap.classList.contains('drawing')) return;

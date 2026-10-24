@@ -2889,8 +2889,14 @@ PLANNER_PL_SLIP = re.compile(r' (?:P|PI|P1|P\|)$', ASCII)
 # unit itself is a number, a number with a letter on either side, or one
 # letter; nothing longer. The NucBox has no door for a suite, so it is not
 # kept: the street is what is searched.
+#
+# ...and, from the owner's batch of 23 Oct, two more ways the app writes it:
+# "3753 <Name> Hwy Suite 110" (Suite or Ste with no comma before it; a street
+# is never NAMED Suite after its type) and "130 <Name> Pkwy, 140" (the unit a
+# bare number after a comma, which no street ends with).
 PLANNER_UNIT = re.compile(
-    r'(?:\s*,\s*(?:ste|suite|unit|apt)\b\.?\s*#?|\s*,?\s*#)\s*'
+    r'(?:\s*,\s*(?:ste|suite|unit|apt)\b\.?\s*#?|\s+(?:ste|suite)\b\.?\s*#?|\s*,?\s*#'
+    r'|\s*,\s*(?=\d{1,5}$))\s*'
     r'(?:[A-Za-z]?\d{1,5}[A-Za-z]?|[A-Za-z])$', re.IGNORECASE | ASCII)
 
 
@@ -3096,6 +3102,13 @@ def _planner_address_lines(block, label):
     line under it — the third under the label, and no further.
     """
     under = block[label + 1:label + 4]
+    # A town line the screen broke after its comma: "130 <Name> Pkwy, 140,
+    # Canton," over "GA 30114-6559" (the owner's batch of 23 Oct). The first
+    # line ends on a comma and the next is the state and the ZIP alone: one
+    # line, so the cut below finds the town.
+    if len(under) >= 2 and under[0].rstrip().endswith(',') \
+            and re.match(r'^[A-Z]{2}\s+' + ZIP + r'(?:\s*-\s*\d{4})?$', under[1].strip()):
+        under = [under[0].rstrip() + ' ' + under[1].strip()] + under[2:]
     street_line = town_line = place = None
     town_at = None
     for j, l in enumerate(under[:2]):
