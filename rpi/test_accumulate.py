@@ -941,9 +941,12 @@ _LONE_HURT = '$7.06 Guaranteed (incl. tip) 26 min (g3 mi) total Taco Mac'
 _LONE_OK = '$7.09 34 min total'
 
 _n, _m = _episodes([(_ADD, None)] * 3)
-eq('an Add a delivery card keeps a single leg whose bracket did not read',
+# (23 Oct) The plus inside the bracket is the add-on's own (LEG takes it), so
+# the leg now reads its bracket, where it once read none and the distance came
+# off LONE_MILES alone.
+eq('an Add a delivery card keeps a single leg, its bracket read with the add-on\'s plus',
    [(l.get('miles'), l.get('lostMiles')) for l in _m['legDetail']],
-   [(None, True)])
+   [(7.2, False)])
 # The whole risk the clause carries, and the reason the merge asks it AFTER the
 # merged distance exists. The lone-distance branch recovered 7.2 correctly; ask
 # the rule of the legs alone and this good reading is thrown away, which this
