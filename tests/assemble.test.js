@@ -2580,6 +2580,34 @@ SEQ.forEach(function (seq) {
   eq('[planner pages] the pickup page 1 read is still one to ask after page 2 lands',
      JSON.stringify(MVp.heldPickups(m2)), JSON.stringify([{ q: '250 Example Road, Kennesaw',
                                                           name: 'Example Grill' }]));
+
+  // A ⌖ press merges too (the owner, 24 Oct: "Would there be a way to have
+  // the scan button also merge?"), with PRESS PRECEDENCE: for a stop both
+  // show, the pressed read's fields win, its address block included where it
+  // read one; the kept field only where it read nothing. It used to replace.
+  var aPressed = stop('dropoff', 'Pat Q.', 203, '4823 Kestrel Dr', null);
+  eq('[press merge] a pressed page 2 keeps page 1\'s pickup (it used to replace it)',
+     said(A.mergePlanner(page1, [aPressed, B1], null, true)),
+     [said([P])[0], ['dropoff', 'Pat Q.', 203, '4823 Kestrel Dr'], said([B1])[0]]);
+  eq('[press merge] ...the pressed read\'s address block wins whole, though the kept one is '
+     + 'fuller (unpressed, the fuller one stays)',
+     [said(A.mergePlanner([A1], [aPressed], null, true)),
+      A.mergePlanner([A1], [aPressed], null, true)[0].city,
+      said(A.mergePlanner([A1], [aPressed], null))],
+     [[['dropoff', 'Pat Q.', 203, '4823 Kestrel Dr']], null,
+      [['dropoff', 'Pat Q.', 203, '4821 Kestrel Dr, Kennesaw']]]);
+  var aNoDoor = stop('dropoff', 'Pat Q.', null, null, null, { place: 'Gate 2' });
+  eq('[press merge] ...and where the pressed read has nothing, the kept field stands: the '
+     + 'time and the whole door kept, the place it printed taken',
+     (function (m) { return [m.expectedBy, m.line, m.city, m.place]; })(
+       A.mergePlanner([A1], [aNoDoor], null, true)[0]),
+     [203, '4821 Kestrel Dr, Kennesaw', 'Kennesaw', 'Gate 2']);
+  eq('[press merge] ...the top of the list trims as an unpressed read\'s does, and the foot',
+     [said(A.mergePlanner([P, A1, B1], [A1, B1], { top: true, bottom: false }, true)),
+      said(A.mergePlanner([P, A1, B1], [P, A1], { top: false, bottom: true }, true))],
+     [said([A1, B1]), said([P, A1])]);
+  eq('[press merge] ...and a pressed read with nothing kept is the read, copied',
+     said(A.mergePlanner(null, [aPressed], null, true)), said([aPressed]));
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'

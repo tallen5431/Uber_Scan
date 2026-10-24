@@ -3474,6 +3474,62 @@ async function nucbox() {
                      MV.dropPoint(dropGot) && MV.dropPoint(dropGot).approx]),
      JSON.stringify([true, true, false, true]));
 
+  /* ---- the dashed detour leg through D1, and a door passed (the owner's ask,
+   * 24 Oct). Drawing only: the figure is detourThrough's, to the end, as it
+   * was; a door the car has been to and left is off the run. Invented
+   * points, the metro's as above. */
+  var NEW = { lat: 33.967, lon: -84.536 };
+  var thru = MV.detourThrough(CAR, NEW, [PK], END);
+  eq('[detour via drops] the figure after the held pickup rejoins at the end — measured to '
+     + 'the end, no dropoff in it',
+     JSON.stringify([thru.to === END, thru.miles === MV.detour(PK, NEW, END)]),
+     JSON.stringify([true, true]));
+  eq('[detour via drops] ...its dashed leg runs pickup -> D1 -> D2 -> the end, in order',
+     JSON.stringify(MV.detourOnward(NEW, thru.to, END, [D1, D2])),
+     JSON.stringify([[NEW.lat, NEW.lon], [D1.lat, D1.lon], [D2.lat, D2.lon],
+                     [END.lat, END.lon]]));
+  eq('[detour via drops] ...the same end by its numbers, an unplaced one left out, and none',
+     JSON.stringify([MV.detourOnward(NEW, { lat: END.lat, lon: END.lon }, END, [null, D2]),
+                     MV.detourOnward(NEW, END, END, [])]),
+     JSON.stringify([[[NEW.lat, NEW.lon], [D2.lat, D2.lon], [END.lat, END.lon]],
+                     [[NEW.lat, NEW.lon], [END.lat, END.lon]]]));
+  eq('[detour via drops] ...a figure that rejoins at a held restaurant is the one leg it was, '
+     + 'and nothing with no pickup',
+     JSON.stringify([MV.detourOnward(NEW, PK, END, [D1]), MV.detourOnward(null, END, END, [D1])]),
+     JSON.stringify([[[NEW.lat, NEW.lon], [PK.lat, PK.lon]], null]));
+  // A door the car has been within DROP_NEAR_MI of and then left by more
+  // than DROP_LEFT_MI is passed; anything else is not.
+  var fixAt = function (lat, lon, extra) {
+    return Object.assign({ lat: lat, lon: lon, err: 25, grey: false, label: '' }, extra || {});
+  };
+  var near = fixAt(D1.lat + 0.0005, D1.lon);         // ~0.03 mi
+  var edge = fixAt(D1.lat + 0.0022, D1.lon);         // ~0.15 mi
+  var gone = fixAt(D1.lat + 0.006, D1.lon);          // ~0.41 mi
+  var walk = function (fixes) {
+    return fixes.reduce(function (st, f) { return MV.dropPassStep(st, D1, f); }, undefined);
+  };
+  eq('[drop passed] chosen, not measured: near at 0.1 mi, left past 0.2 mi',
+     JSON.stringify([MV.DROP_NEAR_MI, MV.DROP_LEFT_MI]), JSON.stringify([0.1, 0.2]));
+  eq('[drop passed] near then far is passed; far alone, near alone, and near then the edge '
+     + 'are not; once passed it stays',
+     JSON.stringify([walk([gone, near, gone]), walk([gone]) || 'none', walk([near]),
+                     walk([near, edge]), walk([near, gone, near])]),
+     JSON.stringify(['passed', 'none', 'near', 'near', 'passed']));
+  eq('[drop passed] ...a grey fix, a refused one, or no point changes nothing',
+     JSON.stringify([walk([near, fixAt(gone.lat, gone.lon, { grey: true })]),
+                     walk([near, { line: 'GPS fix too rough' }]),
+                     MV.dropPassStep('near', null, gone)]),
+     JSON.stringify(['near', 'near', 'near']));
+  eq('[drop passed] the run leaves a passed door out — not skipped, done — and the dashed leg '
+     + 'with it',
+     JSON.stringify([MV.routeLadder(CAR, [PK], END, 'door', MV.dropsAhead(
+                       [{ n: 1, at: D1, passed: true }, { n: 2, at: D2 }])),
+                     MV.dropsAhead([{ n: 1, at: D1, passed: true }, { n: 2, at: null }]),
+                     MV.detourOnward(NEW, END, END, MV.dropsAhead(
+                       [{ n: 1, at: D1, passed: true }, { n: 2, at: D2 }]))]),
+     JSON.stringify([{ pts: [CAR, PK, D2, END], note: null }, [null],
+                     [[NEW.lat, NEW.lon], [D2.lat, D2.lon], [END.lat, END.lon]]]));
+
   /* ---- Leaflet that will not load (needLeaflet) ----------------------------
    *
    * A document of the page's shape, whose script never arrives: what a failed

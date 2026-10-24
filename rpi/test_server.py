@@ -2301,9 +2301,17 @@ if shutil.which('python3'):
         held = status.get('holding') or {}
         # With the scanner's reason for filing none of them, so a reloaded
         # panel says what the live one said about the button.
-        eq('the order in the car carries the stops last read, and why none was '
-           'filed, for a panel reloaded mid-delivery', held.get('planner'),
-           {'stops': _STOPS_C, 'unfiled': 'dropoffs'})
+        #
+        # Changed 24 Oct, at the owner's ask ("Would there be a way to have
+        # the scan button also merge?"): this pinned the LAST pressed read
+        # alone, because each press replaced the one before. Pressed reads
+        # merge now (Assemble.mergePlanner's `pressed`): B, read with no page
+        # known, keeps Pat Q.; C's Sam R. at the same door and minute under
+        # another name is a stop of its own (two names, two stops), first by
+        # its time. The reason is the last read's.
+        eq('the order in the car carries the stops the presses read, merged, and why '
+           'none was filed, for a panel reloaded mid-delivery', held.get('planner'),
+           {'stops': _STOPS_C + _STOPS_A, 'unfiled': 'dropoffs'})
         # One rule for where an order ends. The scanner sends a dropoff line
         # when a planner gives one; this one did not, so the end stays as it
         # was — a server that read an address out of the stops itself would be
@@ -2340,9 +2348,9 @@ if shutil.which('python3'):
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
 
-# ...and off the order in the car at the other two moments the panel forgets
-# them — a press, and a different offer on the record — so a reload shows what
-# the live panel shows. They were kept until another planner replaced them, and
+# ...and off the order in the car at the other moment the panel forgets them —
+# a different offer on the record — so a reload shows what the live panel
+# shows. (A press was the other moment until 24 Oct: it merges now, below.) They were kept until another planner replaced them, and
 # a reload after a two-dropoff planner and then a ⌖ press that READ the order's
 # end brought back "2 dropoffs: end not guessed" beside a green button. The
 # order's read end itself stays: the stack line goes on using it.
@@ -2417,10 +2425,20 @@ if shutil.which('python3'):
             code == 200 and reply.get('holding') is True)
         ok_('the premise: the order in the car holds a two-dropoff planner',
             (_held_planner(True).get('planner') or {}).get('unfiled') == 'dropoffs')
+        # Changed 24 Oct, at the owner's ask ("Would there be a way to have
+        # the scan button also merge?"): these pinned that a press took the
+        # planner off the order. It keeps it now, for the press's own planner
+        # read to merge into (Assemble.mergePlanner's `pressed`), and the panel
+        # keeps the held stops through the press too, so a reload still shows
+        # what the live panel shows. The "not guessed" line the old fault put
+        # beside the green button stays off it: unfiledNow says nothing once
+        # the order has an end (test_dashboard's 'reloadedEnd').
         code, _ = post(base, '/api/dropoff', {})
-        eq('a ⌖ press takes the last planner off the order in the car, as it takes '
-           'its stops off the panel', (code, (get(base, '/api/status').get('holding')
-                                              or {}).get('planner')), (200, None))
+        eq('a ⌖ press keeps the planner on the order in the car, as the panel keeps '
+           'its stops', (code, [s.get('name') for s in
+                                ((get(base, '/api/status').get('holding') or {})
+                                 .get('planner') or {}).get('stops') or []]),
+           (200, ['Pat Q.', 'Lee M.']))
         held = {}
         for _ in range(80):
             held = get(base, '/api/status').get('holding') or {}
@@ -2428,9 +2446,10 @@ if shutil.which('python3'):
                 break
             time.sleep(0.05)
         eq('...so a reload after that press read the order\'s end shows the end '
-           'and no stops beside it',
-           (held.get('dropoff'), held.get('dropoffScanned'), held.get('planner')),
-           ('12 Oak St, Marietta, GA 30060', True, None))
+           'and the stops beside it',
+           (held.get('dropoff'), held.get('dropoffScanned'),
+            len((held.get('planner') or {}).get('stops') or [])),
+           ('12 Oak St, Marietta, GA 30060', True, 2))
         ok_('the premise: a planner is held again before the next card',
             bool(_held_planner(True).get('planner')))
         held = _held_planner(False)
@@ -7368,9 +7387,22 @@ try:
     def _mpstops(h):
         return [(x.get('kind'), x.get('name'), x.get('line'))
                 for x in ((h or {}).get('planner') or {}).get('stops') or []]
+    # ...and then a ⌖ press over page 2 (the owner, 24 Oct: "Would there be a
+    # way to have the scan button also merge?"): its read MERGES too, the
+    # press's fields winning — Pat Q.'s door as the press read it, "4823",
+    # over the fuller "4821 …, Marietta" kept — and page 1's pickup, which
+    # the pressed page does not show, still kept.
+    _mp3 = {'planner': {'stops': [
+        dict(_MP_NONE, kind='dropoff', orders=1, name='Pat Q.', expectedBy=1403,
+             street='4823 Kestrel Dr', line='4823 Kestrel Dr'),
+        dict(_MP_NONE, kind='dropoff', orders=1, name='Lee R.', expectedBy=1416,
+             street='1985 Cobb Parkway', city='Kennesaw', line='1985 Cobb Parkway, Kennesaw')],
+        'unfiled': 'dropoffs', 'asked': True}}
+    _mphand = os.path.join(_mpdir, 'handoff')
+    os.makedirs(_mphand)
     _mpp, _mpb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _mps,
                         'NUCBOX_SEARCH': 'http://127.0.0.1:%d' % _hkdown.server_address[1],
-                        'NUCBOX_RETRY_MS': '60000'}, _mpj)
+                        'NUCBOX_RETRY_MS': '60000', 'UBERSCAN_HANDOFF_DIR': _mphand}, _mpj)
     try:
         _atook(_mpb, 'k-pages', _COBB)
         _mpsays([_mp1, _mp2])
@@ -7383,6 +7415,19 @@ try:
             ('dropoff', 'Lee R.', '1985 Cobb Parkway, Kennesaw')])
         eq('[planner pages] ...and the end is still the card\'s, not filed off a planner line',
            (_h.get('dropoff'), _h.get('batch')), (_COBB, False))
+        _s, _ = post(_mpb, '/api/dropoff', {})
+        eq('[press merge] a ⌖ press keeps the pages the hold merged (it forgot them)',
+           (_s, len(_mpstops(_holding(_mpb)))), (200, 3))
+        _mpsays([_mp3])
+        eq('[press merge] the pressed page merges into them: page 1\'s pickup kept, the '
+           'pressed read\'s door winning over the fuller one kept',
+           _mpstops(_holding(_mpb)),
+           [('pickup', 'Example Grill', '250 Example Road'),
+            ('dropoff', 'Pat Q.', '4823 Kestrel Dr'),
+            ('dropoff', 'Lee R.', '1985 Cobb Parkway, Kennesaw')])
+        eq('[press merge] ...its reason the pressed read\'s, and the end still the card\'s',
+           (((_holding(_mpb) or {}).get('planner') or {}).get('unfiled'),
+            (_holding(_mpb) or {}).get('dropoff')), ('dropoffs', _COBB))
     finally:
         stop(_mpp)
     # (A scanner of its own: the first one's would say its pages again.)
@@ -8483,10 +8528,18 @@ try:
     _DB = {'kind': 'dropoff', 'name': 'Lee M.', 'street': '77 Birch Ln', 'line': '77 Birch Ln, Roswell'}
     _DK = {'kind': 'dropoff', 'name': 'Pat Q.', 'street': '4821 Kestrel Dr',
            'line': '4821 Kestrel Dr, Marietta'}
+    #
+    # Each planner below on a hold that keeps none: a pressed read MERGES
+    # with the stops kept since 24 Oct (the owner's "Would there be a way to
+    # have the scan button also merge?"), so a read leaving ①'s end out would
+    # no longer take it off. A different card on the record between them
+    # forgets the planner (forgetPlanner), the one moment that still does.
     _say(_plan(_PU, _DB, _DK))
     _both = [o.get('planAt') for o in _orders(_cb)]
+    _say(_card('c-forget-1', 5.0))
     _say(_plan(_PU, _DB))
     _half = [o.get('planAt') for o in _orders(_cb)]
+    _say(_card('c-forget-2', 5.0))
     _say(_plan(_PU, _DB, dict(_DB, name='Lee M. again')))
     _twice = [o.get('planAt') for o in _orders(_cb)]
     eq('[carry two] one planner listing both orders sets the run order: each order says '
@@ -8516,9 +8569,14 @@ try:
     _ls = (_st.get('last') or {}).get('stack') or {}
     eq('[carry two] ...and the stack line on the reading is against both, as the row is, '
        'and says how many',
+       # (Within 0.1: each of leftEach is rounded to 0.1 on its own, so the
+       # sum can sit a tenth off the unrounded maxMinutes depending on the
+       # second the reading lands — it did, steadily, once the planner checks
+       # above put two cards on the record, 24 Oct.)
        (_ls.get('heldCount'), 'vsFirst' in _ls, len(_ls.get('leftEach') or []),
-        round((_ls.get('maxMinutes') or 0) - sum(_ls.get('leftEach') or []), 1)),
-       (2, False, 2, 25.0))
+        abs(round((_ls.get('maxMinutes') or 0) - sum(_ls.get('leftEach') or []), 1) - 25.0)
+        <= 0.11),
+       (2, False, 2, True))
     # ...and an Uber add-on card ("+15 min (+ 3 mi) total") offered against
     # the two: its 15 minutes are what the trip grows by, so the shortest
     # time is the longest order's left AND those 15, on the row (the offer

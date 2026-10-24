@@ -326,10 +326,12 @@
     return heldPickup(held, d) ? 'a pickup' : null;
   }
 
-  /* The Trip Planner's stops come off the order in the car at the moments the
-   * driving screen forgets them (live.html's forgetDest): a ⌖ press and a
-   * different offer on the record. See forgetPlanner in server.js, which says
-   * why, and which now asks this. */
+  /* The Trip Planner's stops come off the order in the car at the moment the
+   * driving screen forgets them (live.html's forgetDest): a different offer
+   * on the record. See forgetPlanner in server.js, which says why, and which
+   * now asks this. A ⌖ press was the other moment, until the owner asked on
+   * 24 Oct for the press to merge (mergePlanner's `pressed`): it keeps them
+   * now, here and on the panel. */
   function forgetPlanner(held) {
     if (held) delete held.planner;
   }
@@ -1437,9 +1439,22 @@
    * and a pickup's visit: server.js's plannerVisits is handed the READ's
    * stops, not these, so "the list moved past it" is still the app's own
    * word off one read that shows the top. The merge lives on the hold, so a
-   * new order (a Took, the hold going) starts with no planner, and a ⌖ press
-   * or a different offer on the record forgets it as before
-   * (forgetPlanner). */
+   * new order (a Took, the hold going) starts with no planner, and a
+   * different offer on the record forgets it as before (forgetPlanner).
+   *
+   * ...and a read that answers a ⌖ press merges too (`pressed`; the owner,
+   * 24 Oct: "Would there be a way to have the scan button also merge?"). It
+   * used to replace the kept stops, because the press forgot the planner
+   * first, so a press on page 2 lost the pickup page 1 had read — the same
+   * fault as above, by the button. The press no longer forgets, and its
+   * read is merged by the same rules with ONE difference, PRESS PRECEDENCE:
+   * for a stop both show, the pressed read's fields win wherever it read
+   * them, its address block included whenever it read one (whole, as
+   * always, but not by addressConf's fuller-wins: the driver pressed to have
+   * this page read, and its door is the answer they asked for); the kept
+   * field stands only where the pressed read has nothing. Stops the pressed
+   * page does not show are kept, and its top or foot trims as an
+   * unpressed read's does. */
   var PLANNER_COPY = ['kind', 'orders', 'name', 'expectedBy', 'place', 'label'];
 
   function headerOnly(s) {
@@ -1480,7 +1495,12 @@
     return !(da && db && !sameStreet(da, db));
   }
 
-  function mergePlannerStop(kept, read) {
+  // Whether a stop read any of its address block.
+  function hasAddress(s) {
+    return ADDRESS_KEYS.some(function (k) { return !!s[k]; });
+  }
+
+  function mergePlannerStop(kept, read, pressed) {
     var out = Object.assign({}, kept, read);
     // Only the fields either read carries: a stop merged with itself is the
     // stop it was, byte for byte, so a planner read that changes nothing
@@ -1491,7 +1511,10 @@
       var v = read[k] !== undefined && read[k] !== null ? read[k] : kept[k];
       out[k] = v === undefined ? null : v;
     });
-    var addr = addressConf(kept) > addressConf(read) ? kept : read;
+    // The fuller block, or — a pressed read's (press precedence) — the
+    // pressed read's own whenever it read one.
+    var addr = pressed ? (hasAddress(read) ? read : kept)
+      : addressConf(kept) > addressConf(read) ? kept : read;
     ADDRESS_KEYS.forEach(function (k) {
       if (has(k)) out[k] = addr[k] === undefined ? null : addr[k];
     });
@@ -1515,7 +1538,8 @@
     return firstTime(stops.slice().reverse());
   }
 
-  function mergePlanner(older, newer, page) {
+  function mergePlanner(older, newer, page, pressed) {
+    pressed = pressed === true;
     var obj = function (s) { return !!s && typeof s === 'object'; };
     var news = (Array.isArray(newer) ? newer : []).filter(obj)
       .map(function (s) { return Object.assign({}, s); });
@@ -1546,7 +1570,7 @@
     // is the same; `fromNew` marks them for the trims below.
     var list = news.map(function (s, j) {
       var i = match.indexOf(j);
-      return { s: i === -1 ? s : mergePlannerStop(olds[i], s), fromNew: true, old: i };
+      return { s: i === -1 ? s : mergePlannerStop(olds[i], s, pressed), fromNew: true, old: i };
     });
     var common = match.some(function (j) { return j !== -1; });
     if (!common) {
@@ -1568,7 +1592,7 @@
         // The header and its stop as one, standing where the newer read's is.
         var oi = oldFirst ? olds.length - 1 : 0;
         var nj = oldFirst ? 0 : news.length - 1;
-        list[nj] = { s: mergePlannerStop(olds[oi], news[nj]), fromNew: true, old: oi };
+        list[nj] = { s: mergePlannerStop(olds[oi], news[nj], pressed), fromNew: true, old: oi };
         keptList.splice(oi, 1);
       }
       list = oldFirst ? keptList.concat(list) : list.concat(keptList);

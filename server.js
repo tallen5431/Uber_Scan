@@ -636,17 +636,18 @@ function startScanner() {
             // stops; the line's own `stops` stay the page as read, which is
             // what the journal row and plannerVisits are given.
             //
-            // ...and a read that answers a ⌖ press (`asked`) is the press's
-            // own answer, kept as it was read: the press forgot the planner
-            // before it was made (forgetPlanner at /api/dropoff), as the
-            // panel forgets the last answer's stops, so there is nothing of
-            // this trip's to merge with that the driver did not just ask to
-            // have read again. The merge is for the reads the rig makes on
-            // its own while the driver scrolls (`screen_auto`).
+            // ...and a read that answers a ⌖ press (`asked`) is merged too
+            // (the owner, 24 Oct: "Would there be a way to have the scan
+            // button also merge?"). It used to be kept as read, because the
+            // press forgot the planner first, so a press on page 2 lost the
+            // pickup page 1 had read. The press no longer forgets (see
+            // /api/dropoff), and its read merges with PRESS PRECEDENCE: for a
+            // stop both show, its fields win wherever it read them, its
+            // address block included (mergePlanner's `pressed`).
             heldNow.planner = {
-              stops: read.planner.asked === true ? read.planner.stops
-                : Assemble.mergePlanner(heldNow.planner && heldNow.planner.stops,
-                                        read.planner.stops, plannerPage),
+              stops: Assemble.mergePlanner(heldNow.planner && heldNow.planner.stops,
+                                           read.planner.stops, plannerPage,
+                                           read.planner.asked === true),
               unfiled: read.planner.unfiled || null };
             read.planner.held = heldNow.planner.stops;
             // ...and a pickup it lists no longer marked visited, by the
@@ -5283,10 +5284,18 @@ function writePairing(offer, now, reading, held, hint) {
   });
 }
 
-/* The Trip Planner's stops come off the order in the car at the moments the
+/* The Trip Planner's stops come off the order in the car at the moment the
  * driving screen forgets them — live.html's forgetDest — so a panel reloaded
  * mid-delivery shows what the live one showed, and not stops it had already
  * dropped.
+ *
+ * ONE moment now: a different offer on the record. A ⌖ press was the other
+ * until the owner asked, on 24 Oct, for the press to merge ("Would there be
+ * a way to have the scan button also merge?"): /api/dropoff no longer calls
+ * this, its planner read merges into the kept stops with its own fields
+ * winning (Assemble.mergePlanner's `pressed`), and the panel keeps the held
+ * stops through the press. What follows is why it was written, and holds
+ * for the moment it still has.
  *
  * They were kept until the order went or another planner replaced them, which
  * is longer than the panel keeps them, and the difference was on the glass: a
@@ -10003,10 +10012,14 @@ function route(req, res) {
   // as a `dropoff` line, which is why this returns as soon as the ask is
   // written rather than waiting for one.
   if (req.method === 'POST' && req.url.split('?')[0] === '/api/dropoff') {
-    // A press asks the question again, and the panel forgets the last answer's
-    // stops the moment it is pressed: so does the order in the car. See
-    // forgetPlanner.
-    forgetPlanner(Date.now());
+    // A press asks the question again — and no longer forgets the planner
+    // the order in the car keeps (the owner, 24 Oct: "Would there be a way to
+    // have the scan button also merge?"). It did (forgetPlanner), so the
+    // press's planner read replaced the pages before it and a press on page 2
+    // lost page 1's pickup. Its read now MERGES into them, its own fields
+    // winning (Assemble.mergePlanner's `pressed`, at the planner branch), and
+    // the panel keeps the held stops through the press too (live.html's
+    // dest button), so a reload and the live panel show the same stops.
     return fs.writeFile(DROPOFF_PATH, '', function (err) {
       if (err) return send(res, 500, JSON.stringify({ ok: false, error: err.message }),
                            { 'Content-Type': 'application/json; charset=utf-8' });

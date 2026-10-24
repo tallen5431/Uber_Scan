@@ -3397,6 +3397,38 @@
    * server kept, which is plannerSaid's life (forgetPlanner in server.js). */
   var heldPlan = null;
 
+  /* The batched trip's dropoffs the car has been to and left (MV.dropPassStep;
+   * the owner's ask of 24 Oct: a delivered door left the run only when a read
+   * showed the planner's top). Page memory only, keyed by the order in the
+   * car and the stop (dropPassKey), so a status poll or a new hold does not
+   * mix them up and a reload forgets them — DRAWING ONLY: the run and the
+   * dashed detour leg leave a passed door out and its mark says "✓", and the
+   * server, the hold, the GPS drop and every figure never hear of it.
+   * `dropSpots` is where the last Map view walk placed them, which each GPS
+   * beat is stepped against (stepDrops). */
+  var dropsPassed = {};
+  var dropSpots = [];
+
+  function dropPassKey(d) {
+    return heldOwner() + '\n' + (d.q || '') + '\n' + (d.name || '');
+  }
+
+  // A beat's fix against each placed dropoff; Map view redrawn when one
+  // has just been passed.
+  function stepDrops() {
+    if (!MV || !MV.dropPassStep || !holdingNow || !dropSpots.length || !gpsNow) return;
+    var dot = MV.hereDot(gpsNow.fix, 0);
+    var passed = false;
+    dropSpots.forEach(function (d) {
+      var was = dropsPassed[d.key];
+      var now = MV.dropPassStep(was, d.at, dot);
+      if (now === was) return;
+      dropsPassed[d.key] = now;
+      if (now === 'passed') passed = true;
+    });
+    if (passed && viewMode === 'map') showMap();
+  }
+
   function heldOwner() { return holdingNow ? (heldId || heldSig) : null; }
 
   function holdSignature(holding) {
@@ -3518,6 +3550,8 @@
   function orderDown() {
     holdingNow = false; forgetDest(); heldEnds = undefined; heldSig = null;
     heldId = null; atDropoff = false; heldPlan = null; heldSaid = null;
+    // (...and the doors it passed: a new order's are its own, dropPassKey.)
+    dropSpots = [];
     heldList = []; unownedNow = 0;
     // ...and the card's line with the pair line it qualifies, in the same
     // moment: no order, nothing to be on the way of.
@@ -3602,7 +3636,9 @@
    * route for a trip that is over. rpi/test_dashboard.py holds every one of
    * them to this function. server.js drops the stops it keeps on the order in
    * the car at the same moments (forgetPlanner), so a reload does not bring
-   * back what this has forgotten.
+   * back what this has forgotten — except at a ⌖ press, where the server now
+   * keeps them for the press's read to merge into (the owner's ask of 24
+   * Oct), and so the dest button puts the held stops back after this.
    *
    * ...and the stops come off the glass HERE, not at the next render: Drop and
    * the replies to a press answer on their own and do not render, so for up to
@@ -4232,7 +4268,19 @@
   el.dest.addEventListener('click', function () {
     if (destBusy) return;
     destBusy = true;
+    /* ...but the Trip Planner the order in the car keeps stays on the glass
+       through the press (the owner, 24 Oct: "Would there be a way to have the
+       scan button also merge?"). The server no longer forgets it at a press:
+       a pressed planner read MERGES into it, its own fields winning
+       (Assemble.mergePlanner's `pressed`), and comes back as `held`, which
+       the planner branch shows. Forgotten here and kept there, a reload
+       between the press and its answer — or after a press that read an
+       address, not a planner — would bring back stops the live panel had
+       dropped. With nothing held the server kept nothing, and nor does this. */
+    // Redrawn where they were drawn (a card being judged keeps their room).
+    var keptPlan = holdingNow ? plannerSaid : null, stopsUp = !el.stops.hidden;
     forgetDest();
+    if (keptPlan) { plannerSaid = keptPlan; showStops(stopsUp); }
     destFailed = false;
     showDest();
     ask('/api/dropoff', { method: 'POST' }).then(function (r) {
@@ -5646,6 +5694,8 @@
         gpsAt = Date.now();
         rememberFix(gpsNow);
         showNight();
+        // ...and the batched trip's doors the car has been to (stepDrops).
+        stepDrops();
       }
       // The GPS drop (gpsArrival in server.js): at the held order's door, on
       // this beat — and the order put down because the car left it, which is
@@ -6014,8 +6064,9 @@
     }
     // ...and the Trip Planner's stops, with the scanner's reason for filing
     // none of them: the server keeps the ones a press read while this order
-    // was in the car, and drops them at the moments this page forgets them
-    // (forgetPlanner in server.js). A planner read with nothing held was
+    // was in the car, pages merged, and drops them at the moments this page
+    // forgets them (forgetPlanner in server.js; a ⌖ press keeps them on both
+    // sides since 24 Oct, the dest button). A planner read with nothing held was
     // shown and not kept, like an address read with nothing held, so a reload
     // does not bring it back.
     var heldPlanner = s.holding && s.holding.planner;
@@ -6773,6 +6824,11 @@
        orders in the car, whose run is MV.heldRuns'. Guarded for a
        map-view.js from before it. */
     var heldDrops = held && !second && plan && MV && MV.heldDrops ? MV.heldDrops(plan, held) : [];
+    // ...each with whether the car has been to it and left (stepDrops).
+    heldDrops.forEach(function (d) {
+      d.key = dropPassKey(d);
+      d.passed = dropsPassed[d.key] === 'passed';
+    });
     /* ...and where the held order's run starts when no card's fix starts it
        (between offers, or a card that came up with none): the live fix,
        kept per leg and per ROUTE_MOVE_M (MV.routeFrom), so the run goes car
@@ -6852,7 +6908,7 @@
                + (held2 ? '+' + held2 : '')
                // ...and the batched trip's other doors the run goes through.
                + (heldDrops.length ? '>d' + heldDrops.map(function (d) {
-                   return d.q || '?'; }).join('>') : '')
+                   return (d.q || '?') + (d.passed ? '✓' : ''); }).join('>') : '')
                // ...and the order of the run through both: a planner read
                // that places both ends moves the run under the same places.
                + (runs ? '>' + runs.runs.map(function (r) {
@@ -7359,12 +7415,16 @@
                                    { streets: nbx.streets, car: here || want.carNow })
               : null;
             if (gone()) return;
-            drops.push({ q: dd.q, name: dd.name, n: dd.n, at: MV.dropPoint(dres) });
+            drops.push({ q: dd.q, name: dd.name, n: dd.n, at: MV.dropPoint(dres),
+                         key: dd.key, passed: !!dd.passed });
           }
         }
+        // ...those the car has been to and left (stepDrops) off the run, not
+        // skipped: done (MV.dropsAhead).
+        var ahead = !drops.length ? undefined : MV.dropsAhead ? MV.dropsAhead(drops)
+          : drops.map(function (d) { return d.at; });
         var lad = want.held || picksOk.length
-          ? MV.routeLadder(here || want.carNow, picksOk, heldOk, rung,
-                           drops.length ? drops.map(function (d) { return d.at; }) : undefined)
+          ? MV.routeLadder(here || want.carNow, picksOk, heldOk, rung, ahead)
           : null;
         if (lad) {
           heldRoad = await mapNbx.runLine(lad.pts);
@@ -7373,6 +7433,9 @@
           if (lad.skip) notes.push(lad.skip);
         }
         ladDrops = drops;
+        // ...and where they were placed, for each beat's fix (stepDrops).
+        dropSpots = drops.filter(function (d) { return d.at && d.key; })
+          .map(function (d) { return { key: d.key, at: d.at }; });
       }
       /* ...and this card's own job, pickup -> its dropoff, along the road:
          one question of two points, drawing only. No figure comes of it, and
@@ -8079,11 +8142,20 @@
        caption says the run skips it. */
     var runDrops = (ladder.drops || []).filter(function (d) { return d && d.at; });
     runDrops.forEach(function (d) {
-      put(d.at, '#f5a524', (d.at.approx ? '≈ the area of ' : '')
-          + 'a dropoff of the order in your car, on the way to its end',
+      /* ...and one the car has been to and left (stepDrops; the owner's ask
+         of 24 Oct) is marked done, "D1 ✓", faded, and is off the run: a
+         guess off the fix, drawing only, which a reload forgets. */
+      put(d.at, '#f5a524', d.passed
+            ? 'a dropoff of the order in your car the car has been to and left: off the run'
+            : (d.at.approx ? '≈ the area of ' : '')
+              + 'a dropoff of the order in your car, on the way to its end',
           [d.name, String(d.q || '').replace(/,$/, '')].filter(Boolean).join(' · '), true,
-          'D' + d.n, { faded: !!d.at.approx });
+          'D' + d.n + (d.passed ? ' ✓' : ''), { faded: !!d.at.approx || !!d.passed });
     });
+    // The points of those still ahead, in order: the run's, and the dashed
+    // detour leg's after the new pickup (MV.detourOnward).
+    var aheadAt = runDrops.filter(function (d) { return !d.passed; })
+      .map(function (d) { return d.at; });
     put(j.held2, colourFor(want.held2, '#f5a524', off.held2),
         sayFor(want.held2, 'where order \u2461 in your car is going', off.held2),
         want.held2, true, numberOf[want.held2] || 'D2');
@@ -8162,7 +8234,7 @@
     } else {
       // (...through the batched trip's other doors, as the ladder ran it.)
       var run = heldRoad || (MV.heldRun ? MV.heldRun(here || want.carNow, held
-          ? heldAt.concat(runDrops.map(function (d) { return d.at; })) : heldAt, held)
+          ? heldAt.concat(aheadAt) : heldAt, held)
         : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []));
       // (A road to a rung below the door — a corner's street, the pickups
       // alone — is drawn with no D under it: MV.routeLadder.)
@@ -8222,8 +8294,15 @@
               { color: '#2dd4bf', opacity: .9,
                 className: 'mv-job' + (jobRoad ? ' mv-road' : '') });
     }
+    /* ...and on from the pickup to where the figure rejoins the run: to the
+       end THROUGH the batched trip's dropoffs still ahead, in order, as the
+       run goes (MV.detourOnward; the owner's ask of 24 Oct — it ran straight
+       from the pickup to the end, past D1). DRAWING ONLY: the stated figure
+       is still the one measured pickup -> end (detourThrough is handed the
+       pickups alone), and no mile is measured to a dropoff. */
     if (gap.to) {
-      runLine([[pick.lat, pick.lon], [gap.to.lat, gap.to.lon]],
+      var onward = MV.detourOnward ? MV.detourOnward(pick, gap.to, held, aheadAt) : null;
+      runLine(onward || [[pick.lat, pick.lon], [gap.to.lat, gap.to.lon]],
               { color: '#c084fc', dashArray: '2 9', opacity: .95, className: 'mv-detour' });
     }
 

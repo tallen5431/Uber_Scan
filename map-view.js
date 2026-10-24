@@ -984,6 +984,63 @@
     return 'route skips ' + n + ' dropoff' + (n === 1 ? '' : 's') + ', not found';
   }
 
+  /* --- a batched trip's door the car has been to (the owner's ask, 24 Oct) --
+   *
+   * A delivered dropoff only left the planner the hold keeps when a read
+   * showed the list's top (Assemble.mergePlanner), so after the first door
+   * the run went on drawing the car back to it. On the page, DRAWING ONLY:
+   * once the car's fix has been within DROP_NEAR_MI of a dropoff the run
+   * placed (door or area, dropPoint), and then further than DROP_LEFT_MI
+   * from it, that dropoff is PASSED — left off the run, and off the
+   * detour's dashed line, and marked done ("D1 ✓", faded). Both distances
+   * are chosen, not measured: 0.1 mi is a door and its kerb, the drive of a
+   * house or a block of flats' lot, past a fix's ±25 m; 0.2 mi to leave
+   * keeps a fix that wanders at the edge of 0.1 from calling it left. A car
+   * that only drives past within 0.1 mi counts too — the planner is the
+   * app's word, this is a drawing's guess, and a reload forgets it.
+   *
+   * `state` the stop's last ('near', 'passed' or undefined), `at` its point,
+   * `fix` the car's (a hereDot that is neither a refusal nor grey; anything
+   * else changes nothing). Returns the new state. NEVER the server's: the
+   * GPS drop, its door pin and the hold are not told, and no figure moves —
+   * the stated detour is measured as before (detourThrough, no dropoff). */
+  var DROP_NEAR_MI = 0.1;
+  var DROP_LEFT_MI = 0.2;
+
+  function dropPassStep(state, at, fix) {
+    if (state === 'passed') return state;
+    if (!at || !fix || fix.line || fix.grey || !isFinite(at.lat) || !isFinite(fix.lat)) {
+      return state;
+    }
+    var mi = crowMiles(fix, at);
+    if (mi <= DROP_NEAR_MI) return 'near';
+    return state === 'near' && mi > DROP_LEFT_MI ? 'passed' : state;
+  }
+
+  /* The run's dropoffs as routeLadder is handed them: each one's point, null
+     for one not found (counted as skipped), and the PASSED left out
+     altogether (dropPassStep) — not skipped, done. */
+  function dropsAhead(drops) {
+    return (Array.isArray(drops) ? drops : []).filter(function (d) {
+      return !!d && !d.passed;
+    }).map(function (d) { return d.at || null; });
+  }
+
+  /* The detour's dashed leg after the new pickup, when the figure put it
+     after the held order's last pickup and before its end (detourThrough's
+     `to` is the end): pickup -> each dropoff still ahead -> the end, as the
+     run goes, not straight past them (the owner's ask of 24 Oct). DRAWING
+     ONLY: the figure stays the one measured pickup -> end; no mile is
+     measured to a dropoff. Any other `to` (a held restaurant) is the one
+     leg it was. [[lat, lon], ...] or null. */
+  function detourOnward(pick, to, end, ahead) {
+    function ok(p) { return !!p && isFinite(p.lat) && isFinite(p.lon); }
+    if (!ok(pick) || !ok(to)) return null;
+    var isEnd = ok(end) && (to === end || (to.lat === end.lat && to.lon === end.lon));
+    var via = isEnd && Array.isArray(ahead) ? ahead.filter(ok) : [];
+    return [pick].concat(via, [to]).map(function (p) { return [p.lat, p.lon]; });
+  }
+
   /* The caption with the runs' words after it: "<said> · route to corner",
      each note once, `said` alone with none. captionChip reads the sentence
      through them (routeTail).
@@ -4214,6 +4271,9 @@
            // ...and a batched trip's other doors, drawn on the run (24 Oct).
            heldDrops: heldDrops, dropKey: dropKey, dropPoint: dropPoint,
            dropsSkipped: dropsSkipped,
+           // ...the doors passed, and the dashed leg through those ahead.
+           DROP_NEAR_MI: DROP_NEAR_MI, DROP_LEFT_MI: DROP_LEFT_MI,
+           dropPassStep: dropPassStep, dropsAhead: dropsAhead, detourOnward: detourOnward,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            placeWords: placeWords, placeNamed: placeNamed, namedFeature: namedFeature,
            placeQuery: placeQuery, pickPlace: pickPlace, PLACE_KINDS: PLACE_KINDS,

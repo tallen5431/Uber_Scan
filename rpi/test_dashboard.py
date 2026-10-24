@@ -6480,8 +6480,9 @@ const framed = (page) => page.waitForFunction(
     await push({ planner: { stops: ONE, unfiled: null, asked: true, ms: null, at: 7 } }, 50);
     await push({ dropoff: Object.assign({ at: 8 }, KESTREL) });
     slot.one = await stops();
-    // Pressed again with all of that on the glass: what it read is gone in the
-    // same turn as the click, before an answer and before the tick.
+    // Pressed again with all of that on the glass: its green answer is gone in
+    // the same turn as the click, before an answer and before the tick, and
+    // the order in the car's stops stay (a press merges, 24 Oct).
     slot.repressed = await page.evaluate(() => {
       document.getElementById('dest').click();
       return window.__stopsNow();
@@ -7624,6 +7625,28 @@ const framed = (page) => page.waitForFunction(
       said: ((n) => (n.classList.contains('chipped') ? n.title : n.textContent))(
         document.getElementById('viewNote')).trim() }));
     out.batchRun.asked = asked.slice();
+    // ...and the car at D2's door, the pickup made, then 0.41 mi on (the
+    // owner's ask of 24 Oct: a delivered door stayed on the run until a read
+    // showed the planner's top). Page memory only, drawing only: D2 is off
+    // the run, marked "D2 ✓", and nothing of it is posted.
+    const at = (lat, lon) => ({ alive: true, at: Date.now(),
+      gps: { state: 'ok', ageSeconds: 0.6, fix: { lat: lat, lon: lon, gpsAge: 0.6,
+             gpsErr: 27.8, gpsMode: 3, gpsOk: true, gpsWhy: null, freshFor: 19.4 } },
+      heldEnd: { endPinned: false, arrived: false, endWhy: null,
+                 visited: ['250 Example Road, Kennesaw'] } });
+    await push(at(34.0302, -84.5800));
+    await page.waitForTimeout(1200);
+    await push(at(34.0360, -84.5800));
+    await page.waitForFunction(() => (window.__letters || []).some(
+      (m) => /D2 ✓/.test(String((m.opts && m.opts.icon && m.opts.icon.html) || ''))),
+      null, { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(800);
+    out.batchRun.passed = await page.evaluate(() => ({
+      runs: (window.__lines || []).filter(
+        (l) => /mv-held-run/.test(String((l.opts || {}).className || ''))).map((l) => ({
+          cls: String(l.opts.className), pts: l.pts })),
+      letters: (window.__letters || []).map((m) =>
+        String((m.opts && m.opts.icon && m.opts.icon.html) || '')).sort() }));
     out.batchRun.sent = sent.slice();
     await page.close();
   }
@@ -8726,6 +8749,15 @@ try:
         '77 Birch Ln' in (_br.get('asked') or []) and '4821 Kestrel Dr' in (_br.get('asked') or []))
     eq('[batch run] ...and nothing about those dropoffs left the page: drawing only',
        [x for x in _br.get('sent') or [] if 'Kestrel' in x or 'Birch' in x], [])
+    _bp = _br.get('passed') or {}
+    eq('[drop passed] the car at D2\'s door, the pickup made, then 0.41 mi on: D2 is off the '
+       'run, car -> the end along the road',
+       [(l['cls'], l['pts']) for l in _bp.get('runs') or []],
+       [('mv-held-run mv-road', _rr_road((34.0360, -84.5800), (34.000, -84.560)))])
+    ok_('[drop passed] ...and marked done, "D2 ✓", beside the end\'s D (%r)'
+        % _bp.get('letters'),
+        any('D2 ✓' in x for x in _bp.get('letters') or [])
+        and 'D' in (_bp.get('letters') or []))
 
     eq('[carry two] Map view pins the two orders\' ends D1 and D2, and a pickup one '
        'order\'s card names P2', got.get('mapTwo'), ['D1', 'D2', 'P', 'P2'])
@@ -12110,11 +12142,21 @@ try:
     # Taken in the same turn as the click, so it is the press that did it and
     # not the one-second tick, and with the stops and a green button on the
     # glass first — a press over nothing has nothing to forget.
+    #
+    # Changed 24 Oct, at the owner's ask ("Would there be a way to have the
+    # scan button also merge?"): this pinned that a press forgot the stops
+    # too. The server no longer forgets the held planner at a press (its read
+    # MERGES into it, Assemble.mergePlanner's `pressed`), so a panel that
+    # dropped them would differ from a reload: the press forgets its green
+    # answer, and the order in the car's stops stay, in the same turn and
+    # after the tick.
     _rp = pl.get('repressed') or {}
-    eq('a press forgets what the last one read before it asks again',
-       (_rp.get('shown'), _rp.get('done'), _rp.get('label')), (False, False, '⌖ reading…'))
-    eq('...and for good, not until the next tick redraws them',
-       (pl.get('repressedLater') or {}).get('shown'), False)
+    eq('a press forgets what the last one read before it asks again, and keeps the '
+       'stops the order in the car keeps',
+       (_rp.get('shown'), _rp.get('done'), _rp.get('label'), _rp.get('lines')),
+       (True, False, '⌖ reading…', ['▸ Dropoff by 4:18 · Pat Q. · 4821 Kestrel Dr, Marietta']))
+    eq('...and they stay through the next tick, as a reload would show them',
+       (pl.get('repressedLater') or {}).get('shown'), True)
     ok_('the premise: the stops are on the glass when Drop is pressed',
         (pl.get('beforeDrop') or {}).get('shown'))
     eq('putting the order down takes its stops off the glass with the answer, not '
