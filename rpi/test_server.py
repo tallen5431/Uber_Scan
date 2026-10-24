@@ -7242,8 +7242,9 @@ try:
         _h = _settled(_hkb, lambda h: h.get('pickupsWhy') not in (None,))
         time.sleep(0.5)
         _h = _holding(_hkb) or {}
-        eq('[held pickups] ...but a chain\'s several branches in the disc pin nothing, and say so',
-           (_h.get('pickupsPinned'), _h.get('pickupsWhy')), (0, 'several answers'))
+        # (The fake's twelve Starbucks are more than the ten asked for: capped.)
+        eq('[held pickups] ...but a chain\'s branches in the disc pin nothing, and say so',
+           (_h.get('pickupsPinned'), _h.get('pickupsWhy')), (0, 'too many answers'))
         post(_hkb, '/api/delivered', {})
 
         # The end armed AND arrived at — the car waiting at the restaurant —
@@ -7679,11 +7680,15 @@ try:
         _h = _spsettled(_spb)
         eq('[server pickups] a pickupLine that is not a string is not kept on the hold',
            _sporders(_spj).get('s-none', ('missing',))[0], None)
-        eq('[server pickups] no pickup address with a house number: nothing asked, the store\'s '
-           'name never, the door armed, and /api/status says why',
-           ([a for a in _hkasked('')[_n:] if 'street=1985' not in a], _h.get('pickupsPinned'),
-            _h.get('pickupsWhy'), _h.get('endPinned'), _h.get('endWhy')),
-           ([], 0, 'no house number', True, None))
+        # (23 Oct) ...and with no door on record the store is asked by its NAME,
+        # once, inside the disc (pickupAsks' name ask): this fake knows no
+        # Example Taqueria by name, so nothing is pinned and the door is armed.
+        _spn = [a for a in _hkasked('')[_n:] if 'street=1985' not in a]
+        eq('[server pickups] no pickup address with a house number: the store\'s name asked once '
+           'inside the disc, nothing pinned, the door armed, and /api/status says why',
+           (len(_spn), all('q=Example%20Taqueria' in a and 'bounded=1' in a for a in _spn),
+            _h.get('pickupsPinned'), _h.get('pickupsWhy'), _h.get('endPinned'), _h.get('endWhy')),
+           (1, True, 0, 'no door, place not found', True, None))
         post(_spb, '/api/delivered', {})
 
         # The street-type retry, as the end's: "Cts" asked again without it.
