@@ -332,13 +332,16 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     # panel was told a read had started.
     submitted_whole = []
     stamps = []
+    # ...and whether each asked for the navigation banner beside it.
+    banners = []
     readings = [0]
 
-    def submit(self, frames, now, geom):
+    def submit(self, frames, now, geom, banner=False):
         submitted[0] += 1
         submitted_whole.append(bool(getattr(geom, 'whole', False)))
         stamps.append((now, bool(getattr(geom, 'whole', False))))
-        return real[12](self, frames, now, geom)
+        banners.append(bool(banner))
+        return real[12](self, frames, now, geom, banner=banner)
 
     SP.Reader.submit = submit
     # What the loop tells the server it is pricing a mile at, as a copy: the
@@ -472,6 +475,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     return dict(rows=rows(), announced=announced, offer_kw=offer_kw,
                 beats=beats, calls=calls[0],
                 submitted=submitted[0], submitted_whole=submitted_whole, stamps=stamps,
+                banners=banners,
                 readings=readings[0], planners=said_planners, sightings=sightings,
                 popups=popups,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
@@ -2366,6 +2370,71 @@ rn2 = run(lambda n, k: FRAG if n == 1 else _NAV_BOX, extra_argv=['--no-parallel'
           seconds=4.0, handoff=_hn2, whole_text=_NAV_WHOLE)
 eq('with no order held, a navigation screen in the card box is not read whole',
    sum(rn2['wholes']), 0)
+
+# ...and its BANNER, read on its own beside that read: the stop in the dark
+# band at the top, which the whole-screen read garbles, typed by the strip at
+# the foot ("Picking up <name>", or the customer's leg). The reader's banner
+# read is stubbed (the crop and the engine are rpi/test_scan_pi.py's); what is
+# held here is that main() asks for it on the unpressed read alone and that
+# the stop rides the sighting to the assembler. Name and street invented.
+_BAND = 'f Exit 16 GA-140\n6.8 mi\n412 Brindle Dr NW\nWoodstock, GA\n'
+_BAND_PICK = '45\nLIMIT v\n6 min © 1.7 mi\nPicking up Pat Q.'
+_BAND_DROP = '45\nLIMIT v\n6 min © 1.7 mi\nDropping off Pat Q.'
+ok_('the premise: both strips read as Uber\'s navigation with no offer and no address',
+    all(OP.screen_type(t)['screen'] == 'uber.nav' and OP.parse(t)['places'] == []
+        and OP.parse(t)['pay'] is None and OP.find_address(t) is None
+        for t in (_BAND_PICK, _BAND_DROP)))
+
+
+def _band_run(whole_text, held=True, texts=None, handoff=None, seconds=4.0):
+    """run() over the navigation screen with the banner read stubbed: the
+    result, and how many banner reads the reader made."""
+    handoff = handoff or tempfile.mkdtemp()
+    if held:
+        _hold(handoff, time.time() + 3600)
+    was, made = SP.read_banner, [0]
+
+    def fake(fitted):
+        made[0] += 1
+        return _BAND
+    SP.read_banner = fake
+    try:
+        got = run(texts or (lambda n, k: FRAG if n == 1 else _NAV_BOX),
+                  extra_argv=['--no-parallel'], seconds=seconds, handoff=handoff,
+                  whole_text=whole_text)
+    finally:
+        SP.read_banner = was
+    return got, made[0]
+
+
+rb1, _made1 = _band_run(_BAND_PICK)
+eq('with an order held, the one unpressed whole-screen read asks for the banner and the '
+   'reader reads it once (%r)' % rb1['wholes'],
+   (sum(rb1['wholes']), sum(rb1['banners']), _made1), (1, 1, 1))
+eq('...and only that read asks: no card-box read does',
+   [b for b, w in zip(rb1['banners'], rb1['submitted_whole']) if b and not w], [])
+eq('...its sighting carries the band\'s stop, a pickup under "Picking up"',
+   [[(s['kind'], s['label'], s['line']) for s in x['stops']]
+    for x in rb1['sightings'] if x['whole']],
+   [[('pickup', 'banner', '412 Brindle Dr NW, Woodstock')]])
+eq('...which is never the held order\'s end',
+   assembled([x for x in rb1['sightings'] if x['whole']], _held())['dropoffs'], [])
+rb2, _made2 = _band_run(_BAND_DROP)
+eq('on the customer\'s leg the band\'s stop is the held order\'s end, rank nav, unpressed',
+   [(d['line'], d['asked'], d['from'], d['kept'])
+    for d in assembled([x for x in rb2['sightings'] if x['whole']], _held())['dropoffs']],
+   [('412 Brindle Dr NW, Woodstock', False, 'nav', True)])
+rb3, _made3 = _band_run(_BAND_PICK, held=False)
+eq('with no order held, no banner is read', (sum(rb3['banners']), _made3), (0, 0))
+_hb4 = tempfile.mkdtemp()
+rb4, _made4 = _band_run(_BAND_PICK, held=False, handoff=_hb4,
+                        texts=_press_on_first_read(_hb4, _NAV_BOX), seconds=5.0)
+ok_('the premise: the press read the screen whole (%r)' % rb4['wholes'],
+    sum(rb4['wholes']) >= 1)
+eq('...and a ⌖ press over it reads no banner: its reads answer the press',
+   (sum(rb4['banners']), _made4,
+    [s['label'] for x in rb4['sightings'] for s in x['stops'] if s['label'] == 'banner']),
+   (0, 0, []))
 
 # ONE clock for every kind: a planner in the box, then the navigation screen,
 # each of which would ask on its own. The owner's figure is one unpressed read

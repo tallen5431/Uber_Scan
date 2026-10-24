@@ -382,6 +382,153 @@ SEQ.forEach(function (seq) {
      s2.refused.map(function (x) { return x.why; }), ['a pickup']);
 })();
 
+/* ---- the navigation banner: the band's stop, typed by the strip ----
+ * rpi/scan_pi.py's banner_stop: the address the band read on its own, its
+ * kind the strip's ("Picking up <name>" a pickup, the customer's leg a
+ * dropoff), labelled 'banner', after whatever the whole screen itself gave.
+ * Streets invented. */
+(function () {
+  var END = '412 Brindle Dr NW, Woodstock', STORE = '88 Fable Ct, Acworth';
+  function bandStop(kind, line) {
+    var parts = line.split(', ');
+    return { kind: kind, orders: null, name: null, place: null, expectedBy: null,
+             street: parts[0], city: parts[1] || null, state: 'GA', zip: null, line: line,
+             partial: null, label: 'banner' };
+  }
+  function bandSight(at, stops, more) {
+    return Object.assign({ at: at, asked: false, whole: true, titled: false, app: 'uber',
+                           screen: 'uber.nav', page: { top: null, bottom: null },
+                           stops: stops, orderCount: null, keep: true }, more || {});
+  }
+  function hold(extra) {
+    var h = Object.assign({ id: 'o', acceptedAt: 1000, dropoff: 'Oak Dr & Elm Dr, Acworth',
+                            pickup: 'Fable Grill', dropoffScanned: false,
+                            card: { legs: 1, multiOrder: false } }, extra || {});
+    h.fields = A.cardFields({ dropoff: h.dropoff, pickup: h.pickup }, h.acceptedAt);
+    return h;
+  }
+  // As server.js runs a sighting: the candidates through dropoff() and file(),
+  // the pickups through filePickup().
+  function run(h, s, st) {
+    st = st || A.fresh();
+    var r = A.sighting(st, h, s, s.at);
+    return {
+      said: r.candidates.map(function (c) {
+        var d = A.dropoff(h, c, null);
+        A.file(h, c, d, st);
+        return [c.line, d.from, d.why];
+      }),
+      picked: r.pickups.map(function (p) { return [p.line, A.filePickup(h, p)]; }),
+      refused: st.refused.map(function (x) { return x.why; }), st: st };
+  }
+
+  var h = hold();
+  var got = run(h, bandSight(5000, [bandStop('dropoff', END)]));
+  eq('the banner\'s stop under the customer\'s leg is the held order\'s end, rank nav, '
+     + 'as a "Deliver to" address is', [got.said, got.picked, h.dropoff, h.fields.dropoff.from],
+     [[[END, 'nav', 'over the card']], [], END, 'nav']);
+  eq('...and the pickup is left as the card named it', h.fields.pickupAddr.value, 'Fable Grill');
+
+  var hp = hold();
+  var gp = run(hp, bandSight(5000, [bandStop('pickup', STORE)]));
+  eq('the banner\'s stop under "Picking up" is never the end: no candidate, the card\'s end '
+     + 'kept', [gp.said, hp.dropoff, hp.fields.dropoff.from],
+     [[], 'Oak Dr & Elm Dr, Acworth', 'card']);
+  eq('...it is the hold\'s pickupAddr, rank nav, over the card\'s name for the store',
+     [gp.picked, hp.fields.pickupAddr.value, hp.fields.pickupAddr.from,
+      hp.fields.pickupAddr.conf, hp.fields.pickupAddr.at],
+     [[[STORE, 'over the card']], STORE, 'nav', 2, 5000]);
+  eq('...and a banner dropoff of that door afterwards is a pickup, and files nothing',
+     [run(hp, bandSight(6000, [bandStop('dropoff', STORE)])).said, hp.dropoff],
+     [[], 'Oak Dr & Elm Dr, Acworth']);
+  var tapped = hold();
+  tapped.fields.pickupAddr = { value: '9 Lantern Way, Acworth', from: 'popup', conf: 2, at: 900,
+                               screen: 'dd.placePopup' };
+  run(tapped, bandSight(5000, [bandStop('pickup', STORE)]));
+  eq('...over a popup\'s tap too, read before the Took', tapped.fields.pickupAddr.from, 'nav');
+  var planned = hold();
+  planned.fields.pickupAddr = { value: '9 Lantern Way, Acworth', from: 'planner', conf: 2,
+                                at: 3000, screen: 'uber.planner' };
+  eq('...but not over a planner\'s pickup on another street',
+     [run(planned, bandSight(5000, [bandStop('pickup', STORE)])).picked,
+      planned.fields.pickupAddr.value], [[[STORE, null]], '9 Lantern Way, Acworth']);
+  var pressed = hold();
+  pressed.fields.pickupAddr = { value: STORE, from: 'press', conf: 2, at: 3000, screen: null };
+  var fuller = '88 Fable Ct, Acworth, GA 30101';
+  eq('...nor over a press',
+     [run(pressed, bandSight(5000, [bandStop('pickup', fuller)])).picked,
+      pressed.fields.pickupAddr.from], [[[fuller, null]], 'press']);
+
+  eq('a banner pickup read before the Took, pressed, or off a card-box read files nothing',
+     [run(hold(), bandSight(500, [bandStop('pickup', STORE)])).refused,
+      run(hold(), bandSight(5000, [bandStop('pickup', STORE)], { asked: true })).picked,
+      run(hold(), bandSight(5000, [bandStop('pickup', STORE)], { whole: false })).picked],
+     [['before the Took'], [], []]);
+  eq('...nor with nothing held', A.sighting(A.fresh(), null,
+     bandSight(5000, [bandStop('pickup', STORE)]), 5000).pickups, []);
+  var ended = hold();
+  ended.fields.dropoff = { value: STORE, from: 'nav', conf: 2, at: 2000, screen: 'uber.nav' };
+  eq('...nor one that is the order\'s end already filed', run(ended,
+     bandSight(5000, [bandStop('pickup', STORE)])).refused, ['the end']);
+  var once = A.fresh(), h1 = hold();
+  run(h1, bandSight(5000, [bandStop('pickup', STORE)]), once);
+  eq('...and one band up for the whole drive is offered once', run(h1,
+     bandSight(15000, [bandStop('pickup', STORE)]), once).picked, []);
+
+  eq('a banner dropoff read before the Took is nothing',
+     run(hold({ dropoff: null }), bandSight(500, [bandStop('dropoff', END)])).said,
+     [[END, 'nav', 'before the Took']]);
+  eq('...as one off a pressed read or a card-box read, or with nothing held, makes no end',
+     [A.sighting(A.fresh(), hold(), bandSight(5000, [bandStop('dropoff', END)],
+                                                { asked: true }), 5000).candidates,
+      A.sighting(A.fresh(), hold(), bandSight(5000, [bandStop('dropoff', END)],
+                                                { whole: false }), 5000).candidates,
+      A.sighting(A.fresh(), null, bandSight(5000, [bandStop('dropoff', END)]), 5000).candidates],
+     [[], [], []]);
+  eq('...and one that is the card\'s pickup by any word is refused',
+     run(hold({ pickup: 'Fable Grill (412 Brindle Dr NW)' }),
+         bandSight(5000, [bandStop('dropoff', END)])).refused, ['a pickup']);
+  eq('...as is any banner stop off a store\'s navigation: the end refused, the door filed',
+     (function () {
+       var hs = hold();
+       var r = run(hs, bandSight(5000, [bandStop('dropoff', END)], { screen: 'uber.pickupNav' }));
+       var q = run(hold(), bandSight(5000, [bandStop('pickup', STORE)],
+                                      { screen: 'uber.pickupNav' }));
+       return [r.refused, r.said, q.picked];
+     })(), [['a pickup screen'], [], [[STORE, 'over the card']]]);
+  eq('the screen\'s own address under "Deliver to" is asked first, the banner after it',
+     run(hold(), bandSight(5000, [
+       Object.assign(bandStop('dropoff', '7 Wren Ct, Woodstock'), { label: 'dropoff' }),
+       bandStop('dropoff', END)])).said, [['7 Wren Ct, Woodstock', 'nav', 'over the card']]);
+  var unl = run(hold(), bandSight(5000, [
+    Object.assign(bandStop(null, '7 Wren Ct, Woodstock'), { label: null }),
+    bandStop('dropoff', END)]));
+  eq('...and where that one is refused the banner\'s still files', [unl.refused, unl.said],
+     [['no label'], [[END, 'nav', 'over the card']]]);
+  eq('...while two banner stops on one sighting are none',
+     run(hold(), bandSight(5000, [bandStop('dropoff', END), bandStop('dropoff', END)])).said,
+     []);
+
+  // Two in the car: a banner dropoff is a navigation destination with the cues
+  // attribute() needs; whose store a banner pickup is, nothing says.
+  function order(id, at) {
+    var o = { id: id, acceptedAt: at, tookAt: at + 5, minutes: 40, app: 'uber', pickup: null,
+              deliverBy: null, dropoff: null, dropoffScanned: false };
+    A.fieldsOf(o);
+    return o;
+  }
+  var two = A.fresh(), oa = order('a', 1000), ob = order('b', 2000);
+  var timed = Object.assign(bandStop('dropoff', END), { expectedBy: 1205 });
+  var r2 = A.sighting(two, [oa, ob], bandSight(9000, [timed]), 9000);
+  eq('two held: a banner dropoff is a candidate carrying its app, time and read',
+     r2.candidates.map(function (c) { return [c.line, c.app, c.expectedBy, c.at, c.nav]; }),
+     [[END, 'uber', 1205, 9000, true]]);
+  var r3 = A.sighting(two, [oa, ob], bandSight(9500, [bandStop('pickup', STORE)]), 9500);
+  eq('...a banner pickup is refused, two in the car, and files nothing',
+     [r3.pickups, two.refused.map(function (x) { return x.why; }),
+      oa.fields.pickupAddr, ob.fields.pickupAddr], [[], ['two in the car'], null, null]);
+})();
+
 /* ---- one hold: the server's old dropoff branch, rule by rule ---- */
 (function () {
   function hold(dropoff, scanned, extra) {

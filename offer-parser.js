@@ -2320,6 +2320,64 @@
              city: town[0], state: town[1], zip: town[2] };
   }
 
+  /* Uber's navigation banner, the dark band across the top of the navigation
+     screen, read off its crop on its own (rpi/scan_pi.py read_banner): the
+     turn and its distance, then the stop's street with its house number and
+     its "Town, ST". {line, street, city, state, zip} or null — one address on
+     the band, never a distance ("500 ft Turn right onto Elm St"). And whose
+     door it is, off the whole screen's strip: 'pickup' for "Picking up
+     <name>", 'dropoff' for the customer's leg ("Dropping off", "Delivering
+     to", "Deliver to", "Drop off" and a name), null for neither or both.
+     Every rule, and which of the words are measured, is at nav_banner and
+     nav_role in offer_parser.py; tests/fixtures/cases.json `banners` holds
+     the two ports to one answer. */
+  var NAV_BANNER_DISTANCE = /^\W{0,3}\d[\d.,]* ?(?:mi|ft|km|m|yd|yds|miles?|feet)\b/i;
+
+  function navBanner(text) {
+    var lines = String(text || '').split(/[\r\n]+/).map(normalize)
+      .filter(function (l) { return l; });
+    var found = [];
+    lines.forEach(function (l, i) {
+      if (NAV_BANNER_DISTANCE.test(l)) return;
+      var st = sheetStreet(l);
+      if (!st) return;
+      var tail = /^\s*,\s*(.+)$/.exec(st[1]);
+      var town = tail ? sheetTown(tail[1]) : null;
+      if (!town) {
+        var after = lines.slice(i + 1, i + 3);
+        // ...past one line with no word on it.
+        if (after.length && !/[A-Za-z]{2}/.test(after[0])) after = after.slice(1);
+        town = after.length ? sheetTown(after[0]) : null;
+      }
+      if (!town) return;
+      var parts = [st[0], town[0]];
+      if (town[2]) parts.push(town[1] + ' ' + town[2]);
+      var one = { line: parts.join(', '), street: st[0], city: town[0], state: town[1],
+                  zip: town[2] };
+      if (!found.some(function (f) { return JSON.stringify(f) === JSON.stringify(one); })) {
+        found.push(one);
+      }
+    });
+    return found.length === 1 ? found[0] : null;
+  }
+
+  var NAV_ROLE_LEAD = '^[^A-Za-z0-9]{0,3}(?:[A-Za-z]{1,2}[^A-Za-z0-9\\s]{0,2} )?';
+  var NAV_PICKING = new RegExp(NAV_ROLE_LEAD + 'picking ?-?up\\b', 'i');
+  var NAV_DROPPING = new RegExp(NAV_ROLE_LEAD + '(?:dropping ?-?off|delivering ?to|deliver ?to'
+    + '|drop ?-?off)\\s+(?!type\\b)', 'i');
+  var NAV_ROLE_NAME = /^[A-Z][A-Za-z'’.-]/;
+
+  function navRole(text) {
+    var lines = String(text || '').split(/[\r\n]+/).map(normalize);
+    var pick = lines.some(function (l) { return NAV_PICKING.test(l); });
+    var drop = lines.some(function (l) {
+      var m = NAV_DROPPING.exec(l);
+      return !!m && NAV_ROLE_NAME.test(l.slice(m[0].length));
+    });
+    if (pick === drop) return null;
+    return pick ? 'pickup' : 'dropoff';
+  }
+
   /* What screen a reading is, for a sighting: {app, screen}, `screen` one of
      SCREENS and `app` 'uber', 'doordash', or null for 'unknown' alone.
      Collection only, and kept apart from NOT_AN_OFFER, which decides. Each
@@ -4229,7 +4287,7 @@
            findPickup: findPickup, findDropoff: findDropoff, storeDoor: storeDoor,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner, sheetDropoff: sheetDropoff,
-           placePopup: placePopup,
+           placePopup: placePopup, navBanner: navBanner, navRole: navRole,
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
            plannerTitled: plannerTitled, plannerLaidOut: plannerLaidOut,
            plannerFramed: plannerFramed, plannerFoot: plannerFoot,

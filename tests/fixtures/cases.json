@@ -8126,5 +8126,129 @@
    "line": "12 Ab Rd, Marietta, 30066 30067",
    "expect": null
   }
+ ],
+ "_banners_comment": "Uber's navigation banner, the dark band across the top of the navigation screen, read off its crop on its own (rpi/scan_pi.py read_banner): nav_banner / navBanner. The turn and its distance, then the stop's street with a house number and its town. `expect` is {line, street, city, state, zip}, or null where the band gives no one stop. The layout and the reader's marks are the 23 Oct snap's crop of the band; every street and town is invented.",
+ "banners": [
+  {
+   "name": "the band as the 23 Oct snap's crop read it: the turn with its arrow read as letters, its distance, a mark before the house number, the town with no ZIP",
+   "text": "fc Exit 16 GA-140\n6.8 mi\n' 412 Brindle Dr NW\nWoodstock, GA\n",
+   "expect": {
+    "line": "412 Brindle Dr NW, Woodstock",
+    "street": "412 Brindle Dr NW",
+    "city": "Woodstock",
+    "state": "GA",
+    "zip": null
+   }
+  },
+  {
+   "name": "...the distance said toward a town, and the town and ZIP after a comma on the street's own line",
+   "text": "f Exit 16\n0.2 mi toward Woodstock\n412 Brindle Dr NW, Woodstock, GA 30188",
+   "expect": {
+    "line": "412 Brindle Dr NW, Woodstock, GA 30188",
+    "street": "412 Brindle Dr NW",
+    "city": "Woodstock",
+    "state": "GA",
+    "zip": "30188"
+   }
+  },
+  {
+   "name": "...a line of the reader's marks between the street and the town",
+   "text": "f Exit 16 GA-140\n6.8 mi\n412 Brindle Dr NW\n. ,\nWoodstock, GA",
+   "expect": {
+    "line": "412 Brindle Dr NW, Woodstock",
+    "street": "412 Brindle Dr NW",
+    "city": "Woodstock",
+    "state": "GA",
+    "zip": null
+   }
+  },
+  {
+   "name": "a distance in feet opening a turn onto a street is the turn, not a house number",
+   "text": "500 ft Turn right onto Lantern St\nWoodstock, GA",
+   "expect": null
+  },
+  {
+   "name": "the turn and its distance over a town alone: no stop",
+   "text": "Exit 16 GA-140\n6.8 mi\nWoodstock, GA",
+   "expect": null
+  },
+  {
+   "name": "a street with no town under it",
+   "text": "f Exit 16 GA-140\n6.8 mi\n412 Brindle Dr NW",
+   "expect": null
+  },
+  {
+   "name": "a town whose state is not a state",
+   "text": "412 Brindle Dr NW\nWoodstock, QX",
+   "expect": null
+  },
+  {
+   "name": "two addresses on the band: neither, rather than a guess at a door",
+   "text": "412 Brindle Dr NW\nWoodstock, GA\n88 Fable Ct\nAcworth, GA",
+   "expect": null
+  },
+  {
+   "name": "what the whole-screen read makes of the band, the map round it: nothing",
+   "text": "a tep a to CT wo le\noR ea\nptclan GC wilas Bele\nfor Tellost",
+   "expect": null
+  }
+ ],
+ "_navRoles_comment": "Whose door the navigation screen is driving to, off the whole screen's text: nav_role / navRole. 'pickup' for the strip's \"Picking up <name>\" (the 23 Oct snap, read whole), 'dropoff' for the customer's leg, null for neither or both. The customer's words are inferred and say so, except \"Deliver to <name>\", the collapsed bar of the 12 Oct shift's navigation reads. Every name is invented.",
+ "navRoles": [
+  {
+   "name": "the strip heading to the store, under the bar: the 23 Oct snap's words, read whole",
+   "text": "45\nLIMIT v\n6 min \u00a9 1.7 mi\nPicking up Pat Q.",
+   "expect": "pickup"
+  },
+  {
+   "name": "...behind an icon read as a mark",
+   "text": "\u00a9 Picking up Pat Q.",
+   "expect": "pickup"
+  },
+  {
+   "name": "the customer's leg, 'Dropping off' (inferred: no snap yet)",
+   "text": "6 min \u00a9 1.7 mi\nDropping off Pat Q.",
+   "expect": "dropoff"
+  },
+  {
+   "name": "...'Delivering to' (inferred)",
+   "text": "Delivering to Pat Q.",
+   "expect": "dropoff"
+  },
+  {
+   "name": "...'Deliver to', the collapsed bar of the 12 Oct shift's navigation reads",
+   "text": "45\nLIMIT v\no= 6 min \u00a9 1.7 mi \u2014\nDeliver to Pat Q.",
+   "expect": "dropoff"
+  },
+  {
+   "name": "...'Drop off' and a name (inferred)",
+   "text": "Drop off Pat Q.",
+   "expect": "dropoff"
+  },
+  {
+   "name": "the customer sheet's order list is not the strip",
+   "text": "Drop off 1 order",
+   "expect": null
+  },
+  {
+   "name": "the sheet's own label is not either",
+   "text": "Dropoff type\nMeet at door",
+   "expect": null
+  },
+  {
+   "name": "a store's navigation furniture is not 'Picking up'",
+   "text": "Note from business\nPick up order",
+   "expect": null
+  },
+  {
+   "name": "both legs on one screen: neither",
+   "text": "Deliver to Pat Q.\nPicking up Fable Grill",
+   "expect": null
+  },
+  {
+   "name": "no strip at all",
+   "text": "6 min \u00a9 1.7 mi\nExpected by 8:20 PM",
+   "expect": null
+  }
  ]
 }

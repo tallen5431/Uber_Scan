@@ -4221,6 +4221,105 @@ def place_popup(text):
             'city': city, 'state': state, 'zip': zipcode}
 
 
+# UBER'S NAVIGATION BANNER: the dark band across the top of the navigation
+# screen, the turn over the stop it is driving to.
+#
+#     f Exit 16 GA-140               the turn, an arrow read as a letter or two
+#     6.8 mi                         the distance to it
+#     412 Brindle Dr NW              the stop's street, with its house number
+#     Woodstock, GA                  and its town, no ZIP
+#
+# (Street and town invented; the layout and the reader's marks are the 23 Oct
+# snap's: its whole-screen read turned the band into garbage, the map round it
+# confusing the layout, and the band cropped on its own read as above, at every
+# size tried — rpi/scan_pi.py, read_banner, makes that crop.) The band is the
+# phone's own word for where the car is going: "Picking up <name>" or the
+# customer's under it in the bottom strip says whose door (nav_role), and this
+# only reads the address:
+#   - a line opening with a house number (SHEET_NUMBER's real digits behind at
+#     most a mark or two) and a street ending in a street suffix, cut there as
+#     the navigation sheet's street is (_sheet_street);
+#   - NOT a distance: "500 ft Turn right onto Elm St" opens with a number and
+#     ends in a suffix, and is the turn (NAV_BANNER_DISTANCE);
+#   - its town: "Town, ST" after a comma on the street's line, or the next
+#     line, past at most one line of the reader's marks — a state that is a
+#     state (_sheet_town), the ZIP when the band prints one;
+#   - ONE such address on the band. Two is a band the reader did not separate
+#     from something else, and taking either is a guess at a door.
+# tests/fixtures/cases.json `banners` and `navRoles` hold the two ports to one
+# answer.
+NAV_BANNER_DISTANCE = re.compile(r'^\W{0,3}\d[\d.,]* ?(?:mi|ft|km|m|yd|yds|miles?|feet)\b',
+                                 re.IGNORECASE | ASCII)
+
+
+def nav_banner(text):
+    """The stop on Uber's navigation banner, read off the banner's crop on its
+    own — {'line', 'street', 'city', 'state', 'zip'} — or None. See the layout
+    above. `line` is the navigation sheet's: the street and town, then the
+    state and ZIP only when a ZIP read."""
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
+    lines = [l for l in lines if l]
+    found = []
+    for i, l in enumerate(lines):
+        if NAV_BANNER_DISTANCE.match(l):
+            continue
+        street = _sheet_street(l)
+        if street is None:
+            continue
+        street, rest = street
+        tail = re.match(r'^\s*,\s*(.+)$', rest)
+        town = _sheet_town(tail.group(1)) if tail else None
+        if town is None:
+            after = lines[i + 1:i + 3]
+            # ...past one line with no word on it: a mark the band's edge put
+            # on a line of its own.
+            if after and not re.search(r'[A-Za-z]{2}', after[0]):
+                after = after[1:]
+            town = _sheet_town(after[0]) if after else None
+        if town is None:
+            continue
+        city, state, zipcode = town
+        parts = [street, city] + (['%s %s' % (state, zipcode)] if zipcode else [])
+        one = {'line': ', '.join(parts), 'street': street, 'city': city,
+               'state': state, 'zip': zipcode}
+        if one not in found:
+            found.append(one)
+    return found[0] if len(found) == 1 else None
+
+
+# ...and whose door it is, off the WHOLE screen's text: the strip at the foot
+# of the navigation screen. "Picking up <name>" heading to the store is the
+# 23 Oct snap's, read whole; the customer's is NOT YET SEEN on a snap, so these
+# are the words Uber uses for that leg elsewhere — "Deliver to <name>" is the
+# collapsed bar on the 12 Oct shift's navigation reads (auto_read_for, in
+# rpi/scan_pi.py) — and the strip's own will need its snap before they are
+# trusted further. A name after them, capitalised: "Drop off 1 order" is the
+# customer sheet's order list and "Dropoff type" the sheet's label, and
+# neither is the strip.
+NAV_ROLE_LEAD = r'^[^A-Za-z0-9]{0,3}(?:[A-Za-z]{1,2}[^A-Za-z0-9\s]{0,2} )?'
+NAV_PICKING = re.compile(NAV_ROLE_LEAD + r'picking ?-?up\b', re.IGNORECASE | ASCII)
+NAV_DROPPING = re.compile(NAV_ROLE_LEAD + r'(?:dropping ?-?off|delivering ?to|deliver ?to'
+                          r'|drop ?-?off)\s+(?!type\b)', re.IGNORECASE | ASCII)
+NAV_ROLE_NAME = re.compile(r"[A-Z][A-Za-z'’.-]", ASCII)
+
+
+def nav_role(text):
+    """'pickup' when the navigation screen's strip says "Picking up <name>",
+    'dropoff' when it names the customer's leg ("Dropping off", "Delivering
+    to", "Deliver to", "Drop off" and a name), None for neither or both. See
+    above."""
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', str(text or ''))]
+    pick = any(NAV_PICKING.match(l) for l in lines)
+    drop = False
+    for l in lines:
+        m = NAV_DROPPING.match(l)
+        if m and NAV_ROLE_NAME.match(l[m.end():]):
+            drop = True
+    if pick == drop:
+        return None
+    return 'pickup' if pick else 'dropoff'
+
+
 # Stage 2 of the multi-order design: every whole-screen read and every planner
 # read goes out as a SIGHTING typed by the screen it was off, and nothing files
 # on it — the dropoff and planner lines still do all the filing. This is the

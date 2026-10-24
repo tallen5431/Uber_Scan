@@ -427,12 +427,28 @@ function startScanner() {
           var sightedNow = Date.now();
           // The orders in the car, as the assembler takes them: one is the
           // order (Stage 3, unchanged), two only while carrying two is on.
-          var assembled = Assemble.sighting(assembly, assemblerHeld(sightedNow),
-                                            read.sighting, sightedNow);
+          var heldFor = assemblerHeld(sightedNow);
+          var assembled = Assemble.sighting(assembly, heldFor, read.sighting, sightedNow);
           assembled.candidates.forEach(function (c) {
             var said = { dropoff: c, at: Date.now() };
             dropoffArrived(said);
             if (said.dropoff) broadcast(said);
+          });
+          // ...and the store's door off Uber's navigation banner under
+          // "Picking up" (Assemble.navPickup, one order in the car only): the
+          // hold's `pickupAddr` when it outranks what is there, written, and
+          // searched for as the pickup (armHeldPickups, pickupAsks). Never
+          // the order's end. No address in the log.
+          (assembled.pickups || []).forEach(function (p) {
+            if (!heldFor || Array.isArray(heldFor)) return;
+            var why = Assemble.filePickup(heldFor, p);
+            if (!why) {
+              console.log('navigation banner: the store\'s door not filed: outranked');
+              return;
+            }
+            saveHold(heldFor);
+            armHeldPickups(heldFor);
+            console.log('navigation banner: the store\'s door filed as the pickup (' + why + ')');
           });
           // ...and what waited for a cue asked again: this sighting may be it.
           retryPool();

@@ -219,6 +219,14 @@ for c in cases.get('popups', []):
 for c in cases.get('doors', []):
     eq('doors / ' + c['name'], P.store_door(c['line']), c['expect'])
 
+# Uber's navigation banner, read off its own crop: the stop's address, or None;
+# and whose door it is, off the whole screen's strip. The same cases
+# tests/corpus.test.js runs. See nav_banner and nav_role in offer_parser.py.
+for c in cases.get('banners', []):
+    eq('banners / ' + c['name'], P.nav_banner(c['text']), c['expect'])
+for c in cases.get('navRoles', []):
+    eq('navRoles / ' + c['name'], P.nav_role(c['text']), c['expect'])
+
 for c in cases.get('navStops', []):
     _p = P.parse(c['text'])
     eq('navStops / ' + c['name'],

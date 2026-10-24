@@ -1250,6 +1250,115 @@ for _ in range(120):
     time.sleep(0.05)
 eq('...and leaves no thread behind', _threading.active_count(), before)
 
+# --- the navigation banner, read beside the unpressed whole-screen read ------
+# Uber's navigation prints the stop in the dark band at its top, and the
+# whole-screen read garbles it; read on its own it reads. The reader reads it
+# once, on its own thread, for the read the rig makes unprompted while an order
+# is held (Reader.submit's `banner`, main() passing `screen_auto` with no press
+# open), and only off a navigation screen. Streets and names invented.
+_BAND_NAV = '45\nLIMIT v\n6 min © 1.7 mi\nPicking up Pat Q.'
+_BAND_TEXT = 'f Exit 16 GA-140\n6.8 mi\n412 Brindle Dr NW\nWoodstock, GA\n'
+
+
+class BandStub(StubScanner):
+    """A whole-screen read of `text`, two frames, each with its own picture."""
+
+    def __init__(self, text):
+        StubScanner.__init__(self)
+        self.text = text
+
+    def look_many(self, frames, now=None, geom=None):
+        return [{'parsed': {'pay': None}, 'text': self.text, 'fitted': 'picture %s' % f,
+                 'dropped': 0, 'recovered': 0, 'rescued': 0} for f in frames]
+
+
+def _band_read(text, banner, whole=True, fails=False):
+    """(the pictures read_banner was asked of, the outs) for one read."""
+    asked = []
+    was = SP.read_banner
+
+    def fake(fitted):
+        asked.append(fitted)
+        if fails:
+            raise RuntimeError('tesseract fell over')
+        return _BAND_TEXT
+    SP.read_banner = fake
+    try:
+        rb = SP.Reader(BandStub(text), threaded=False)
+        rb.submit(['a', 'b'], 1.0, PL.Geometry(whole=whole), banner=banner)
+        done = rb.take()
+        rb.close()
+    finally:
+        SP.read_banner = was
+    return asked, done
+
+
+_asked, _done = _band_read(_BAND_NAV, True)
+eq('an unpressed whole-screen read of a navigation screen reads its banner once, off the '
+   'first frame, and gives the band to both frames',
+   (_asked, [(o.get('banner'), o.get('bannerRead')) for o in _done['outs']], _done['error']),
+   (['picture a'], [(_BAND_TEXT, True)] * 2, None))
+eq('...and a store\'s navigation too: its band is the store\'s door',
+   _band_read('Note from business\nPick up order\n6 min © 1.7 mi', True)[0], ['picture a'])
+eq('no banner read when the read was not asked to (a press, or a card-box read), when the '
+   'geometry is not the whole screen, or off a screen that is not navigation',
+   [_band_read(_BAND_NAV, False)[0], _band_read(_BAND_NAV, True, whole=False)[0],
+    _band_read('$9.50\nIncludes expected tip\n17 min (3.7 mi)', True)[0],
+    _band_read('Trip Planner\nPickup\nFable Grill', True)[0]], [[], [], [], []])
+eq('...and nothing on the frames says one was', [
+    sorted(k for k in _band_read(_BAND_NAV, False)[1]['outs'][0] if k.startswith('banner')),
+    [(o['banner'], o['bannerRead']) for o in
+     _band_read('$9.50\nIncludes expected tip\n17 min (3.7 mi)', True)[1]['outs']]],
+   [[], [(None, False)] * 2])
+_asked, _done = _band_read(_BAND_NAV, True, fails=True)
+eq('a banner read that throws loses the band and not the read',
+   (_asked, _done['error'], len(_done['outs']), _done['outs'][0]['banner']),
+   (['picture a'], None, 2, None))
+eq('main() asks for the banner on the unpressed whole-screen read alone',
+   [l.strip() for l in inspect.getsource(SP.main).splitlines()
+    if 'banner_read =' in l or 'banner=banner_read' in l],
+   ['banner_read = screen_auto and not pressed',
+    'scanner.geometry(whole=whole_read), banner=banner_read)'])
+
+# The crop itself, through the real engine: a band drawn where the 23 Oct
+# snap's was (BANNER_ROWS, BANNER_COLS), white on dark, over a light screen.
+_phone = np.full((1000, 500), 225, np.uint8)
+cv2.rectangle(_phone, (0, 30), (499, 230), 30, -1)
+for _y, _t, _sc in ((80, 'Exit 16 GA-140', 0.9), (120, '6.8 mi', 0.7),
+                    (165, '412 Brindle Dr NW', 0.9), (205, 'Woodstock, GA', 0.9)):
+    cv2.putText(_phone, _t, (60, _y), cv2.FONT_HERSHEY_SIMPLEX, _sc, 240, 2, cv2.LINE_AA)
+cv2.putText(_phone, '6 min 1.7 mi', (40, 900), cv2.FONT_HERSHEY_SIMPLEX, 0.9, 20, 2, cv2.LINE_AA)
+eq('read_banner: the band cropped and read on its own gives the stop',
+   (OP2.nav_banner(SP.read_banner(_phone)) or {}).get('line'), '412 Brindle Dr NW, Woodstock')
+eq('read_banner: no picture, no read', [SP.read_banner(None), SP.read_banner('picture')],
+   [None, None])
+
+# banner_stop: the band's address typed by the strip, labelled 'banner', with
+# the screen's "Expected by"; nothing without both. And the sighting carries
+# it after the frame's own address, and not on a planner.
+_bs = SP.banner_stop(_BAND_NAV + '\nExpected by 8:20 PM', _BAND_TEXT)
+eq('banner_stop: under "Picking up", the band\'s address is a pickup, labelled banner',
+   (_bs['kind'], _bs['label'], _bs['line'], _bs['street'], _bs['city'], _bs['state'],
+    _bs['expectedBy'], sorted(_bs) == sorted(SP.SIGHTING_STOP)),
+   ('pickup', 'banner', '412 Brindle Dr NW, Woodstock', '412 Brindle Dr NW', 'Woodstock',
+    'GA', 20 * 60 + 20, True))
+eq('...on the customer\'s leg a dropoff; with no strip, no address, or both legs, none',
+   [(SP.banner_stop('6 min © 1.7 mi\nDropping off Pat Q.', _BAND_TEXT) or {}).get('kind'),
+    SP.banner_stop('6 min © 1.7 mi', _BAND_TEXT),
+    SP.banner_stop(_BAND_NAV, 'a tep a to CT wo le\noR ea'),
+    SP.banner_stop(_BAND_NAV, None),
+    SP.banner_stop(_BAND_NAV + '\nDeliver to Pat Q.', _BAND_TEXT)],
+   ['dropoff', None, None, None, None])
+_band_seen = SP.sighting(_BAND_NAV, None, None, False, True, banner=_bs)
+eq('the sighting of an unpressed navigation read carries the banner\'s stop',
+   (_band_seen['screen'], [(s['kind'], s['label'], s['line']) for s in _band_seen['stops']]),
+   ('uber.nav', [('pickup', 'banner', '412 Brindle Dr NW, Woodstock')]))
+_band_sheet = SP.sighting(_BAND_NAV, None, None, False, True, banner=_bs,
+                          sheet={'line': '7 Wren Ct, Woodstock', 'street': '7 Wren Ct',
+                                 'city': 'Woodstock', 'state': 'GA', 'zip': None})
+eq('...after the frame\'s own address', [s['label'] for s in _band_sheet['stops']],
+   ['dropoff type', 'banner'])
+
 # --- the live view does not stop while a card is being read -----------------
 # The whole point of moving the read off the loop, stated as the property
 # rather than as a number: how long the picture goes without a new frame must
@@ -2242,6 +2351,16 @@ quiet_counts = health_line()
 no_('a run with neither says nothing about them',
     'since start had a street' in quiet_counts
     or 'since start refused' in quiet_counts)
+# ...and the navigation banners read beside an unpressed read, and how many
+# gave a stop: a run total, on the line and in the tally the `seen` row takes.
+_banners = health_line(banners_read=3, banner_stops=1)
+ok_('the banners read since start, and how many gave a stop, are on the health line',
+    '3 navigation banners since start read, 1 giving a stop' in _banners)
+no_('...and nothing about them before one was read', 'navigation banner' in quiet_counts)
+_bh = SP.Health()
+_bh.banners_read, _bh.banner_stops = 2, 1
+eq('...and in the tally', (_bh.counters(0.0)['bannersRead'], _bh.counters(0.0)['bannerStops']),
+   (2, 1))
 
 # The heartbeat is what the live page reads, and it is a separate path from the
 # health line: a rig can be perfectly healthy in every other respect and still

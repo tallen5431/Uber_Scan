@@ -55,7 +55,10 @@
    *            off the card box (the scanner's dropoff line)
    *   nav      unprompted, printed under a "Deliver to" or "Dropoff" label in
    *            its own block, off the whole-screen read the scanner makes on
-   *            its own while an order is held (navCandidate, below)
+   *            its own while an order is held (navCandidate, below) — or the
+   *            stop on the navigation screen's banner, read beside it, the
+   *            end under the customer's leg and `pickupAddr` under "Picking
+   *            up" (navPickup)
    *   planner  unprompted, the Trip Planner's one dropoff (one page or several)
    *   popup    unprompted, off DoorDash's place popup while the card was being
    *            screened, onto that card and carried here at ✓ Took (popup(),
@@ -1531,7 +1534,8 @@
       return held.length < 2 ? sighting(st, held[0] || null, s, now)
         : sightingMany(st, held, s, now);
     }
-    var out = { candidates: [], why: null, at: s && typeof s.at === 'number' ? s.at : null };
+    var out = { candidates: [], pickups: [], why: null,
+                at: s && typeof s.at === 'number' ? s.at : null };
     if (!s || typeof s !== 'object') return out;
     took(st, held);
     var app = typeof s.app === 'string' ? s.app : null;
@@ -1540,6 +1544,9 @@
       else Object.keys(st.epoch).forEach(function (a) { st.epoch[a] += 1; });
       var nav = navCandidate(st, held ? [held] : [], s, out.at === null ? now : out.at);
       if (nav) out.candidates.push(nav);
+      // ...and the banner's pickup, for the hold's `pickupAddr` (navPickup).
+      var pick = navPickup(st, held ? [held] : [], s, out.at === null ? now : out.at);
+      if (pick) out.pickups.push(pick);
       return out;
     }
     // The trip's last stop, its header cropped off (footDropoff), off a
@@ -1786,8 +1793,21 @@
     var stops = Array.isArray(s.stops) ? s.stops.filter(function (x) {
       return x && typeof x === 'object';
     }) : [];
-    if (stops.length !== 1 || typeof stops[0].line !== 'string' || !stops[0].line) return null;
-    var a = stops[0];
+    // The navigation banner's stop (label 'banner') is asked after the
+    // screen's own address and only where that gave none: the address under
+    // "Deliver to" or over "Dropoff type" is the screen's label speaking, and
+    // the banner the same door read off the band. See bannerStop.
+    var own = stops.filter(function (x) { return x.label !== 'banner'; });
+    var nav = own.length === 1 ? navStop(st, orders, s, own[0], at) : null;
+    if (nav) return nav;
+    var band = bannerStop(stops, 'dropoff');
+    return band ? navStop(st, orders, s, band, at) : null;
+  }
+
+  /* navCandidate's rules for one stop, `a`: a candidate, or null with the
+   * refusal kept. */
+  function navStop(st, orders, s, a, at) {
+    if (typeof a.line !== 'string' || !a.line) return null;
     var why = s.screen === 'uber.pickupNav' ? 'a pickup screen'
       // DoorDash's place popup is about the card being screened and never
       // about an order taken (popup(), rule 2): its own line files it on the
@@ -1815,6 +1835,80 @@
              // ...and the sheet's place, when it printed one, for file().
              place: typeof a.place === 'string' ? a.place : null,
              ms: null, at: at };
+  }
+
+  /* ---------- the navigation banner ------------------------------------------
+   *
+   * Uber's navigation screen prints, in the dark band across its top, the
+   * turn and under it the stop the car is driving to — and in the strip at
+   * its foot whose door that is: "Picking up <name>" on the way to the store,
+   * the customer's words on the way to them. The scanner reads the band on
+   * its own beside the whole-screen read it makes unprompted while an order
+   * is held (rpi/scan_pi.py, read_banner: the whole-screen read turns the
+   * band into garbage), and sends it as one stop labelled 'banner', typed
+   * by the strip (banner_stop): never a stop of no kind.
+   *
+   *   - typed 'dropoff', it is the held order's end exactly as a "Deliver to"
+   *     address read off the whole screen is (navCandidate, navStop): rank
+   *     `nav`, read after the Took or nothing (dropoff()), not one of any
+   *     held order's pickups, once per address, and with two in the car by
+   *     the same attribution;
+   *   - typed 'pickup', it is NEVER the end: it is the store's door, filed as
+   *     the hold's `pickupAddr` (navPickup, filePickup), which server.js
+   *     searches for the pickup (pickupAsks).
+   * One stop of each kind at most; a sighting with two is refused whole. */
+  function bannerStop(stops, kind) {
+    var band = stops.filter(function (x) { return x.label === 'banner'; });
+    return band.length === 1 && band[0].kind === kind ? band[0] : null;
+  }
+
+  /* The banner's pickup as a candidate for the hold's `pickupAddr`, or null
+   * with the refusal kept. Only with ONE order in the car: the strip names a
+   * person and the band a door, and which of two orders' stores a door is
+   * has no cue to settle it on ('two in the car'). Read after the Took
+   * ('before the Took'), unpressed and whole, as a navigation destination is;
+   * and not the held order's end ('the end'): the band naming the door
+   * already filed as where the order goes, under "Picking up", is the strip
+   * and the band disagreeing, and the end is the older word. Once per address
+   * for this hold. */
+  function navPickup(st, orders, s, at) {
+    if (!orders.length || s.whole !== true || s.asked === true) return null;
+    var stops = Array.isArray(s.stops) ? s.stops.filter(function (x) {
+      return x && typeof x === 'object';
+    }) : [];
+    var a = bannerStop(stops, 'pickup');
+    if (!a || typeof a.line !== 'string' || !a.line) return null;
+    var held = orders[0];
+    var end = fieldsOf(held).dropoff;
+    var why = orders.length > 1 ? 'two in the car'
+      : s.screen === 'dd.placePopup' ? 'a place popup'
+      : typeof at !== 'number' || at < held.acceptedAt ? 'before the Took'
+      : end && sameStreet(a.line, end.value) ? 'the end'
+      : null;
+    if (why) {
+      refuse(st, { at: at }, why);
+      return null;
+    }
+    var seen = a.line + '|navPickup';
+    if (st.said[seen]) return null;
+    st.said[seen] = true;
+    return { line: a.line, street: a.street || null, city: a.city || null,
+             state: a.state || null, zip: a.zip || null, from: 'nav',
+             screen: typeof s.screen === 'string' ? s.screen : null, at: at };
+  }
+
+  /* What a kept banner pickup changes on the hold: `fields.pickupAddr`, at
+   * rank `nav`, when outranks() says so — over the card's name for the store
+   * and a popup's tap, and over another navigation read only as the same
+   * street read fuller; never over a press or a planner's own pickup on
+   * another street. Returns outranks()' reason, or null for nothing filed. */
+  function filePickup(held, p) {
+    if (!held || !p) return null;
+    var f = fieldsOf(held);
+    var next = field(p.line, 'nav', addressConf(p), p.at, p.screen);
+    var why = outranks(next, f.pickupAddr);
+    if (why) f.pickupAddr = next;
+    return why;
   }
 
   /* The reason the planner read at `at` gives the order no end, for the
@@ -2423,7 +2517,8 @@
    * except that a list whose dropoffs are all handed over gives none — they
    * are the attribution's now, and the panel says what came of them. */
   function sightingMany(st, orders, s, now) {
-    var out = { candidates: [], why: null, at: s && typeof s.at === 'number' ? s.at : null };
+    var out = { candidates: [], pickups: [], why: null,
+                at: s && typeof s.at === 'number' ? s.at : null };
     if (!s || typeof s !== 'object') return out;
     took(st, orders);
     var app = typeof s.app === 'string' ? s.app : null;
@@ -2435,6 +2530,9 @@
       // each card's "Deliver by" — and with no cue it waits in the pool.
       var nav = navCandidate(st, orders, s, out.at === null ? now : out.at);
       if (nav) out.candidates.push(nav);
+      // ...and the banner's pickup, which with two in the car is refused
+      // (navPickup): there is no cue for whose store it is.
+      navPickup(st, orders, s, out.at === null ? now : out.at);
       return out;
     }
     if (s.whole !== true || !pageStops(s.stops)) return out;
@@ -2584,6 +2682,9 @@
            pressBetween: pressBetween, ownPopup: ownPopup, cardCandidate: cardCandidate,
            storeScreen: storeScreen, placeOf: placeOf, bracketDoor: bracketDoor,
            popup: popup, filePopup: filePopup, cardNames: cardNames,
+           // ...and the navigation banner's pickup (server.js, the sighting's
+           // `pickups`).
+           navPickup: navPickup, filePickup: filePickup,
            plannerDestination: plannerDestination, plannerLoneDropoff: plannerLoneDropoff,
            lostHeaderDropoff: lostHeaderDropoff, framedTrip: framedTrip,
            footDropoff: footDropoff,

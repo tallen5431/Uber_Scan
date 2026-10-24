@@ -161,6 +161,16 @@ function stopFields(stops) {
   eq('doors / ' + c.name, P.storeDoor(c.line), c.expect);
 });
 
+/* Uber's navigation banner, read off its own crop: the stop's address, or
+   null; and whose door it is, off the whole screen's strip. The same cases
+   rpi/test_parser.py runs. See nav_banner and nav_role in offer_parser.py. */
+(cases.banners || []).forEach(function (c) {
+  eq('banners / ' + c.name, JSON.stringify(P.navBanner(c.text)), JSON.stringify(c.expect));
+});
+(cases.navRoles || []).forEach(function (c) {
+  eq('navRoles / ' + c.name, P.navRole(c.text), c.expect);
+});
+
 /* What a navigation or "Deliver to" screen gives as a destination nobody
    pressed for. `expect` is [screen, line, stop, under, asOffer]; this port has
    no address_stop, so it holds the screen, findAddress's line and the offer

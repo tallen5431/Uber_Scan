@@ -352,7 +352,7 @@ class Reader:
                                             daemon=True)
             self._thread.start()
 
-    def submit(self, frames, now, geom):
+    def submit(self, frames, now, geom, banner=False):
         """Hand over frames to read. Call only when not busy.
 
         `now` comes back on the finished read as `at`, and it is the only clock
@@ -363,13 +363,17 @@ class Reader:
         ...and `since` comes back on it as `began`: the same moment on the
         monotonic clock, for the intervals digest() times off it. `at` is a
         stamp for the wire and the journal; `began` is never written anywhere.
+
+        `banner`: this is the whole-screen read the rig makes on its own while
+        an order is held (`screen_auto`), and a navigation screen in it has its
+        banner read as well, here beside the read it belongs to (with_banner).
         """
         self.busy = True
         self.since = time.monotonic()
         if not self.threaded:
-            self._done.put(self._job(frames, now, geom, self.since))
+            self._done.put(self._job(frames, now, geom, self.since, banner))
             return
-        self._work.put((frames, now, geom, self.since))
+        self._work.put((frames, now, geom, self.since, banner))
 
     def take(self):
         """The finished read, or None if there is not one yet.
@@ -390,9 +394,12 @@ class Reader:
             done['outs'] = self.scanner.settle(done['outs'], done['geom'])
         return done
 
-    def _job(self, frames, now, geom, began=None):
+    def _job(self, frames, now, geom, began=None, banner=False):
         try:
-            return {'outs': self.scanner.look_many(frames, now, geom=geom),
+            outs = self.scanner.look_many(frames, now, geom=geom)
+            if banner and getattr(geom, 'whole', False):
+                with_banner(outs)
+            return {'outs': outs,
                     'geom': geom, 'frames': frames, 'at': now, 'began': began,
                     'error': None}
         except BaseException as e:                 # noqa: BLE001 — see take()
@@ -704,6 +711,72 @@ def auto_read_for(text, planner=None):
     if OP.address_under_dropoff(text):
         return 'label'
     return None
+
+
+# UBER'S NAVIGATION BANNER, read on its own. The dark band across the top of the
+# navigation screen prints the turn and, under it, the stop the car is driving
+# to: "412 Brindle Dr NW" / "Woodstock, GA" (invented). The whole-screen read
+# turns it into garbage — on the 23 Oct snap the map round the band confused
+# tesseract's layout — while the same band cropped on its own read perfectly,
+# turn, distance, street and town, with the card's own preprocess() and
+# OCR_CONFIG, at every phone height tried from 700px to 2000px and every band
+# height from 240px to 440px.
+#
+# The band's place on the flattened screen, measured on that snap: rows 5% to
+# 22% of its height, columns 8% to 85% of its width (the turn arrow's left edge
+# and the voice button's are outside it). Scaled to BANNER_HEIGHT, which is the
+# band at twice the snap's 1000px screen: 33-37ms of tesseract on the
+# development box for the band, against a whole-screen read of a second or more
+# on the Pi — the one extra read is small next to the read it rides on.
+BANNER_ROWS = (0.05, 0.22)
+BANNER_COLS = (0.08, 0.85)
+BANNER_HEIGHT = 340
+# The screens whose band is read: Uber's navigation, and its navigation to a
+# store, whose band is the store's door — the pickup the assembler files as
+# the hold's `pickupAddr` (assemble.js, navPickup). Never an offer: both are
+# typed only once every offer recogniser has said no (OP.screen_type).
+BANNER_SCREENS = ('uber.nav', 'uber.pickupNav')
+
+
+def read_banner(fitted):
+    """The banner's text off `fitted`, the whole screen as the reader cut it
+    out (Scanner._look's `fitted`, grey, before preprocess()), or None when
+    there is no picture to crop. One OCR pass, the reader's own engine on the
+    reader's own thread (PL.ocr), through the card's preprocess(): the band
+    is white on dark, and preprocess() turns it the right way up."""
+    if fitted is None or getattr(fitted, 'ndim', 0) < 2:
+        return None
+    h, w = fitted.shape[:2]
+    band = fitted[int(h * BANNER_ROWS[0]):int(h * BANNER_ROWS[1]),
+                  int(w * BANNER_COLS[0]):int(w * BANNER_COLS[1])]
+    if band.size == 0:
+        return None
+    return PL.ocr(PL.preprocess(PL.resize_height(PL.to_grey(band), BANNER_HEIGHT)))
+
+
+def with_banner(outs):
+    """The banner read, once, for a whole-screen read the rig made on its own
+    (Reader.submit's `banner`): off the first frame whose text is a navigation
+    screen (BANNER_SCREENS), and put on every frame of the read as `banner`,
+    which is None where none was read. The frames are one screen 33ms apart,
+    and digest() is given whichever of them read_the_money chooses, so the one
+    band read answers for all of them; a second would be the same band read
+    twice. A band that fails to read loses the band and not the read: the
+    whole-screen reading is what the sighting stands on."""
+    text = None
+    read = False
+    for out in outs or []:
+        if OP.screen_type(out.get('text') or '')['screen'] in BANNER_SCREENS:
+            read = True
+            try:
+                text = read_banner(out.get('fitted'))
+            except Exception:                      # noqa: BLE001 — see above
+                text = None
+            break
+    for out in outs or []:
+        out['banner'] = text
+        out['bannerRead'] = read
+    return outs
 
 
 def settings_requested():
@@ -1626,6 +1699,13 @@ class Health:
         # answered in two places, and the second would be the one nothing
         # could correct.
         self.screens_kept = 0
+        # `banners_read` is how many navigation banners the reader read on
+        # their own beside an unpressed whole-screen read (with_banner), and
+        # `banner_stops` how many of them gave a stop the sighting carried
+        # (banner_stop). Run totals, as the three above: whether the band
+        # reads at all on this rig is a question about a shift.
+        self.banners_read = 0
+        self.banner_stops = 0
         # Preview frames that were the same picture, byte for byte, as one just
         # before them — Repeats' evidence of a stalled camera. A run total, and
         # the measurement the stall watch rests on: that a working camera never
@@ -1723,6 +1803,7 @@ class Health:
                 'addressAsOffer': self.address_refused_as_offer,
                 'addressNotDropoff': self.address_not_dropoff,
                 'screensKept': self.screens_kept,
+                'bannersRead': self.banners_read, 'bannerStops': self.banner_stops,
                 'repeats': self.repeats,
                 'relocks': self.relocks, 'rebaselines': self.rebaselines,
                 'bright': self.bright, 'banding': self.banding,
@@ -1808,6 +1889,10 @@ class Health:
             bits.append('%d screen%s since start recorded as following a card'
                         % (self.screens_kept,
                            '' if self.screens_kept == 1 else 's'))
+        if self.banners_read:
+            bits.append('%d navigation banner%s since start read, %d giving a stop'
+                        % (self.banners_read, '' if self.banners_read == 1 else 's',
+                           self.banner_stops))
         # Said as the premise it is, not as a fact about the sensor: that a
         # working camera hands over none is testcards' model, and this count
         # is how this camera answers it. "A live camera's never are" claimed
@@ -3038,7 +3123,7 @@ SIGHTING_STOP = ('kind', 'orders', 'name', 'place', 'expectedBy', 'street', 'cit
                  'state', 'zip', 'line', 'partial', 'label')
 
 
-def sighting_stops(text, stops, address, sheet=None):
+def sighting_stops(text, stops, address, sheet=None, banner=None):
     """The stops a sighting carries, and the page's two ends, as
     (stops, {'top', 'bottom'}).
 
@@ -3054,6 +3139,10 @@ def sighting_stops(text, stops, address, sheet=None):
     pickup, a dropoff only where OP.address_under_dropoff says it sits in a
     Dropoff label's own block, and otherwise of no kind. No page ends: only
     the planner's list has them.
+
+    ...and after it, off any screen but a planner, the navigation banner's
+    stop (`banner`, banner_stop), already typed by the strip that says whose
+    door it is, labelled 'banner'.
     """
     if stops is not None:
         top, bottom = OP.planner_ends(text)
@@ -3067,14 +3156,15 @@ def sighting_stops(text, stops, address, sheet=None):
     # customer's name above (OP.sheet_dropoff; `sheet` is None wherever
     # digest() took the frame for an offer). The owner's decision: that is the
     # dropoff, typed so, its label the words the sheet printed.
+    extra = [banner] if banner else []
     if sheet:
         one = {k: sheet.get(k) for k in SIGHTING_STOP}
         one['kind'] = 'dropoff'
         one['label'] = 'dropoff type'
         one['expectedBy'] = screen_said(text)['expectedBy']
-        return [one], {'top': None, 'bottom': None}
+        return [one] + extra, {'top': None, 'bottom': None}
     if not address:
-        return [], {'top': None, 'bottom': None}
+        return extra, {'top': None, 'bottom': None}
     label = OP.address_stop(text)
     one = {k: address.get(k) for k in SIGHTING_STOP}
     one['kind'] = ('pickup' if label == 'pickup' else
@@ -3085,7 +3175,28 @@ def sighting_stops(text, stops, address, sheet=None):
     # and with two orders in the car it is the deadline cue the assembler
     # attributes a navigation destination by.
     one['expectedBy'] = screen_said(text)['expectedBy']
-    return [one], {'top': None, 'bottom': None}
+    return [one] + extra, {'top': None, 'bottom': None}
+
+
+def banner_stop(text, banner):
+    """The navigation banner's stop as a sighting carries it, or None: the
+    address the band read on its own (`banner`, read_banner's text;
+    OP.nav_banner), typed by whose door the whole screen's strip says it is
+    (`text`; OP.nav_role) — 'pickup' under "Picking up <name>", 'dropoff' on
+    the customer's leg — and labelled 'banner', with the screen's one
+    "Expected by" as every other stop off a navigation screen carries it.
+    None without both: an address the strip does not say is the store's or
+    the customer's is a door of no kind, and the assembler files none of
+    those."""
+    found = OP.nav_banner(banner)
+    role = OP.nav_role(text) if found else None
+    if not role:
+        return None
+    one = {k: found.get(k) for k in SIGHTING_STOP}
+    one['kind'] = role
+    one['label'] = 'banner'
+    one['expectedBy'] = screen_said(text)['expectedBy']
+    return one
 
 
 def order_count(stops):
@@ -3098,7 +3209,8 @@ def order_count(stops):
     return sum(s['orders'] for s in drops)
 
 
-def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None):
+def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None,
+                  banner=None):
     """Stage 2 of the multi-order design: what a whole-screen read or a planner
     read SAW, typed by its screen, and nothing more.
 
@@ -3132,13 +3244,15 @@ def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet
     later stage that does keep them has the answer the rig had.
     """
     print(json.dumps({'sighting': sighting(text, stops, address, asked, whole,
-                                           keep=keep, at=at, sheet=sheet)}), flush=True)
+                                           keep=keep, at=at, sheet=sheet,
+                                           banner=banner)}), flush=True)
 
 
-def sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None):
+def sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None,
+             banner=None):
     """The sighting line's body, built: see emit_sighting, which prints it."""
     kind = OP.screen_type(text)
-    listed, page = sighting_stops(text, stops, address, sheet)
+    listed, page = sighting_stops(text, stops, address, sheet, banner)
     return {'at': int(time.time() * 1000) if at is None else at,
             'asked': bool(asked), 'whole': bool(whole),
             'titled': OP.planner_titled(text),
@@ -4540,12 +4654,27 @@ def main():
         # has decided them by the time the planner line below arrives, and
         # puts the reason on it for the panel.
         seen_at = int(time.time() * 1000)
+        # ...with the navigation banner's stop on it, when the reader read the
+        # banner beside this read (with_banner: the whole-screen read nobody
+        # pressed for, off a navigation screen) and the band and the strip
+        # gave an address and whose door it is (banner_stop). Never off an
+        # offer, on the same `an_offer` the frame's own address answers to,
+        # and never under a press, whose reads answer the press. Counted: how
+        # many banners were read and how many gave a stop, so a band that
+        # never reads is a number on the health line and not a silence.
+        banner = None
+        if out.get('bannerRead'):
+            health.banners_read += 1
+            if whole and not asked and not an_offer and seen_stops is None:
+                banner = banner_stop(out.get('text'), out.get('banner'))
+            if banner is not None:
+                health.banner_stops += 1
         if args.json and (whole or seen_stops is not None):
             emit_sighting(out.get('text'), seen_stops,
                           None if an_offer else frame_address,
                           asked, whole,
                           keep=offer_log is not None and offer_log.keep_places,
-                          at=seen_at, sheet=sheet)
+                          at=seen_at, sheet=sheet, banner=banner)
         # ...and the popup, once per card and address, stamped with when its
         # frame was TAKEN: the server files it only onto a card on the slot
         # from before that moment. The role, not the address, in the log.
@@ -5020,6 +5149,10 @@ def main():
             'streetNoAddress': tally.get('streetNoAddress'),
             'addressAsOffer': tally.get('addressAsOffer'),
             'addressNotDropoff': tally.get('addressNotDropoff'),
+            # ...and the navigation banners read beside an unpressed read, and
+            # how many gave a stop: run totals, as the three above.
+            'bannersRead': tally.get('bannersRead'),
+            'bannerStops': tally.get('bannerStops'),
             # ...and how the reading went in the window, which was the rest of
             # the health line and went no further than the log. See
             # Health._window. `reads` and `failed` were in the tally all along
@@ -5866,11 +5999,15 @@ def main():
             # ...and for the whole-screen read digest() asked for without a
             # press (`screen_auto`), once: the request is spent by this
             # hand-over.
-            whole_read = (dropoff_asked and time.monotonic() < dropoff_until) or screen_auto
+            pressed = dropoff_asked and time.monotonic() < dropoff_until
+            whole_read = pressed or screen_auto
+            # ...and the navigation banner read with it, on the unpressed read
+            # alone (with_banner): a press's reads answer the press.
+            banner_read = screen_auto and not pressed
             screen_auto = False
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(),
-                          scanner.geometry(whole=whole_read))
+                          scanner.geometry(whole=whole_read), banner=banner_read)
             looked = True
             # Before the read, not after it. The dashboard has nothing else to
             # go on for the second and a half this takes — see emit_reading.
