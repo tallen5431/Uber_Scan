@@ -780,6 +780,17 @@
   <p class="hint" id="pairsLead" hidden></p>
   <div id="pairs"></div>
 
+  <!-- What the orders taken really took, and the restaurants' waits (the
+       owner, 23 Oct: "make better use of the data to optimize what orders I
+       should take"). Both are history, said as it is: nothing here moves the
+       verdict or the target. -->
+  <h2 id="realHead" hidden>Card against what it took</h2>
+  <p class="hint" id="realLead" hidden></p>
+  <div id="real"></div>
+  <h2 id="waitsHead" hidden>Restaurant waits</h2>
+  <p class="hint" id="waitsLead" hidden></p>
+  <div id="waits"></div>
+
 
   <ul class="note" id="caveats"></ul>
 
@@ -854,6 +865,7 @@
    'find', 'findNote', 'live', 'nothing', 'ladder',
    'took', 'tookHead', 'chips', 'sorts', 'week', 'weekHead',
    'pairs', 'pairsHead', 'pairsLead', 'runsAll',
+   'real', 'realHead', 'realLead', 'waits', 'waitsHead', 'waitsLead',
    'review', 'reviewSays', 'reviewDays', 'reviewBack', 'reviewOn', 'reviewLead',
    'reviewList',
    'sheet', 'sheetHead', 'sheetWhere', 'sheetShut', 'sheetMap', 'sheetFoot',
@@ -2704,6 +2716,91 @@
     }).join('');
   }
 
+  /* CARD AGAINST WHAT IT TOOK. Each order taken in the window and put down
+     (server.js takenRuns): how long it was held, Took to put-down, against
+     the minutes its card said, and the pay over that real time — by app and
+     by the card's minutes, as tools/shift_report.py groups them. Put downs by
+     'replaced' and 'expiry' measure nothing and are left out. A Drop pressed
+     before the door shortens a run, so the line says how many were put down
+     at the door (the GPS, the app's own screen) and the medians say over
+     what. History only: no verdict, target or rate on the panel moves. */
+  var REAL_BANDS = [[0, 20, '0-20 min'], [20, 30, '20-30 min'], [30, 45, '30-45 min'],
+                    [45, Infinity, '45+ min']];
+  function medianOf(xs) {
+    var s = xs.slice().sort(function (a, b) { return a - b; });
+    if (!s.length) return null;
+    var m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+  function showReal(taken) {
+    var runs = (taken || []).filter(function (t) {
+      return t && t.by !== 'replaced' && t.by !== 'expiry' && typeof t.pay === 'number'
+        && typeof t.minutes === 'number' && t.minutes > 0 && t.endedAt > t.tookAt;
+    }).map(function (t) {
+      var real = (t.endedAt - t.tookAt) / 60000;
+      return { app: t.app || 'other', card: t.minutes, real: real,
+               ratio: real / t.minutes, perHour: t.pay / (real / 60),
+               door: t.by === 'gps' || t.by === 'screen' };
+    });
+    if (!runs.length) {
+      el.real.innerHTML = '';
+      el.realHead.hidden = el.realLead.hidden = true;
+      return;
+    }
+    el.realHead.hidden = el.realLead.hidden = false;
+    var atDoor = runs.filter(function (r) { return r.door; }).length;
+    el.realHead.innerHTML = 'Card against what it took <em>· ' + runs.length
+      + (runs.length === 1 ? ' order' : ' orders') + ' taken and put down</em>';
+    el.realLead.textContent = 'How long each order was held, Took to put-down, against the '
+      + 'minutes on its card, and its pay over that real time. ' + atDoor + ' of '
+      + runs.length + ' were put down at the door (GPS or the app\'s screen); a Drop pressed '
+      + 'before the door makes an order look faster than it was.';
+    function row(label, rs) {
+      var ratio = medianOf(rs.map(function (r) { return r.ratio; }));
+      var rate = medianOf(rs.map(function (r) { return r.perHour; }));
+      return '<tr><td>' + esc(label) + '</td><td>' + rs.length + '</td><td>'
+        + (ratio === null ? '--' : ratio.toFixed(2) + '\u00d7') + '</td><td>'
+        + (rate === null ? '--' : money(rate, 0) + '/hr') + '</td></tr>';
+    }
+    var html = '<table class="waits"><thead><tr><th>taken</th><th>orders</th>'
+      + '<th>real / card min</th><th>real $/hr</th></tr></thead><tbody>';
+    var apps = {};
+    runs.forEach(function (r) { (apps[r.app] = apps[r.app] || []).push(r); });
+    Object.keys(apps).sort().forEach(function (a) {
+      html += row(a === 'uber' ? 'Uber' : a === 'doordash' ? 'DoorDash' : a, apps[a]);
+    });
+    REAL_BANDS.forEach(function (b) {
+      var rs = runs.filter(function (r) { return r.card >= b[0] && r.card < b[1]; });
+      if (rs.length) html += row('card ' + b[2], rs);
+    });
+    el.real.innerHTML = html + '</tbody></table>';
+  }
+
+  /* RESTAURANT WAITS. The stores the GPS has measured a wait at two or more
+     times (server.js storeWaitsOut: the name, how many, the median minutes),
+     longest first. The same figures the panel's "waited ~N min avg" says. */
+  function showWaits(waits) {
+    var ws = (waits || []).filter(function (w) {
+      return w && typeof w.name === 'string' && typeof w.n === 'number'
+        && typeof w.medianMin === 'number';
+    });
+    if (!ws.length) {
+      el.waits.innerHTML = '';
+      el.waitsHead.hidden = el.waitsLead.hidden = true;
+      return;
+    }
+    el.waitsHead.hidden = el.waitsLead.hidden = false;
+    el.waitsHead.innerHTML = 'Restaurant waits <em>· ' + ws.length
+      + (ws.length === 1 ? ' store' : ' stores') + ' measured twice or more</em>';
+    el.waitsLead.textContent = 'Minutes the car stood at the store, off the GPS, the median of '
+      + 'its last visits. Longest first.';
+    el.waits.innerHTML = '<table class="waits"><thead><tr><th>store</th><th>visits</th>'
+      + '<th>median wait</th></tr></thead><tbody>' + ws.map(function (w) {
+        return '<tr><td>' + esc(w.name) + '</td><td>' + w.n + '</td><td>'
+          + w.medianMin.toFixed(1) + ' min</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
   function showPairs(pairs) {
     pairs = pairs || [];
     if (!pairs.length) {
@@ -3018,6 +3115,8 @@
     // the panel asked about a second job, and that is exactly the shift where
     // a driver wants to see what it said.
     showPairs(data.pairs);
+    showReal(data.taken);
+    showWaits(data.waits);
 
     if (!offers.length) {
       // Nothing was recorded, or nothing could be READ. Those are different
@@ -3737,6 +3836,8 @@
         // the scanner".
         view = null;
         showPairs([]);
+        showReal([]);
+        showWaits([]);
         // ...and the questions about the last window's day, whose buttons
         // would post marks against rows this page can no longer show.
         showReview();

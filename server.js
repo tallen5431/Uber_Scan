@@ -3535,6 +3535,45 @@ function storeWaitsPath() {
 }
 
 // The list, read once: what the file holds that is well formed, else none.
+/* --- what the orders taken really took (the owner, 23 Oct: "make better use
+ * of the data to optimize what orders I should take") ----------------------
+ *
+ * For the offers page's "Card against what it took": each order put down in
+ * the window, by its drop row (which carries its Took, `acceptedAt`), with
+ * its card's figures off the offer it was taken on. `by` is how it was put
+ * down: 'gps' and 'screen' at the door, 'drop' the driver's press (which can
+ * be early), 'chooser', and 'replaced' / 'expiry', which measure nothing and
+ * the page leaves out. Descriptive only: nothing here moves a verdict, and
+ * the time is a clock reading less another, never minutes from distance. */
+function takenRuns(rows, floor, offers) {
+  var byId = {};
+  (offers || []).forEach(function (o) { if (o && typeof o.id === 'string') byId[o.id] = o; });
+  var out = [];
+  (rows || []).forEach(function (r) {
+    if (!r || r.kind !== 'drop' || typeof r.id !== 'string' || typeof r.at !== 'number'
+        || typeof r.acceptedAt !== 'number' || r.at < r.acceptedAt) return;
+    if (floor && r.acceptedAt < floor) return;
+    var o = byId[r.id];
+    if (!o) return;
+    out.push({ id: r.id, app: o.app || null, pay: o.pay, minutes: o.minutes, miles: o.miles,
+               tookAt: r.acceptedAt, endedAt: r.at, by: r.by || 'drop',
+               addon: r.addon === true });
+  });
+  return out;
+}
+
+/* The restaurants' waits for the offers page: each store with STORE_WAITS_MIN
+ * or more on record, its name, how many and the median in minutes, longest
+ * first. The name and nothing of where: no coordinate leaves the rig. */
+function storeWaitsOut() {
+  return storeWaits().map(function (st) {
+    var s = st.waits.map(function (w) { return w.s; }).sort(function (a, b) { return a - b; });
+    var mid = s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+    return { name: st.name, n: s.length, medianMin: Math.round(mid / 6) / 10 };
+  }).filter(function (w) { return w.n >= STORE_WAITS_MIN; })
+    .sort(function (a, b) { return b.medianMin - a.medianMin; });
+}
+
 function storeWaits() {
   if (storeWaitList) return storeWaitList;
   storeWaitList = [];
@@ -11051,6 +11090,11 @@ function route(req, res) {
                                       // project keeps writing sections about.
                                       torn: torn || 0,
                                       pairs: window,
+                                      // What each order taken in the window
+                                      // really took, and the restaurants'
+                                      // waits (takenRuns, storeWaitsOut).
+                                      taken: takenRuns(rows, floor, offers),
+                                      waits: storeWaitsOut(),
                                       offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });
