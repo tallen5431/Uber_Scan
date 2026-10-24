@@ -2838,9 +2838,32 @@ def _planner_label(line):
     return _one_edit(word.lower(), 'address')
 
 
+# THE COUNTRY AFTER THE ZIP. The owner's snap of 24 Oct: Uber's Trip Planner
+# printed a pickup's door in its full form,
+#
+#     Address
+#     800 <Name> Street Northwest, Atlanta,
+#     GA 30318, US
+#
+# (the name left out here; the layout the app's), the street type and the
+# quadrant spelled out, the town on the street's line and the country after
+# the ZIP. ", US" is nothing the comma-broken town line below allowed, so no
+# line under the label was a town line: the stop kept its name and lost its
+# street, town and ZIP, and the held order's pickup was never pinned ("no
+# house number"). The country is the app's own furniture, the same on every
+# address it is printed on, and says nothing about where the door is: ", US",
+# " USA" or ", United States", with or without the comma, at the END of a line
+# after a ZIP and nowhere else. It goes, and the line is read as it would be
+# without it. Capitals as printed ("us" is a word, "US" the country).
+PLANNER_COUNTRY = r'(?:\s*,?\s*(?:USA|US|United States))'
 # A bare ZIP on a line of its own: the end of a town line the screen wrapped,
-# "…, Kennesaw, GA" over "30152" on the rig's own picture of a planner.
-PLANNER_ZIP_LINE = re.compile(r'^(' + ZIP + r')(?: ?- ?' + DC + r'{4})?$', ASCII)
+# "…, Kennesaw, GA" over "30152" on the rig's own picture of a planner — and
+# the country after it, as above.
+PLANNER_ZIP_LINE = re.compile(r'^(' + ZIP + r')(?: ?- ?' + DC + r'{4})?'
+                              + PLANNER_COUNTRY + r'?$', ASCII)
+# The country alone, what is left of a town line after its ZIP. See
+# _planner_address: it is not the scroll bar's mark.
+PLANNER_COUNTRY_TAIL = re.compile(r'^' + PLANNER_COUNTRY + r'$', ASCII)
 # "Marietta, GA", and whatever the line carries after the state. TOWN is
 # find_address's own idea of a town; the state is the check, as it is there.
 PLANNER_TOWN = re.compile(r'^[^A-Za-z]{0,3}(' + TOWN + r') ?, ?([A-Za-z]{2})\b ?(.*)$',
@@ -3032,7 +3055,14 @@ def _planner_address(street_line, town_line, label_line=None):
             rest = t.group(3).strip()
             z = PLANNER_ZIP.match(rest)
             zipcode = a_zip(z.group(1)) if z else None
-            tail = bool((rest[z.end():] if zipcode else rest).strip())
+            after = (rest[z.end():] if zipcode else rest).strip()
+            # The country after a ZIP (PLANNER_COUNTRY_TAIL; the owner's snap
+            # of 24 Oct, "GA 30318, US") is the app's, not the scroll bar's:
+            # read as a mark, it would take a real quadrant "S" or "N" off the
+            # street beside it.
+            if zipcode and PLANNER_COUNTRY_TAIL.match(after):
+                after = ''
+            tail = bool(after)
     street = PLANNER_UNIT.sub('', PLANNER_EDGE.sub('', _planner_edge_cut(street_line or '')))
     lone = PLANNER_LONE_LETTER.search(street)
     if lone and tail:
@@ -3082,6 +3112,17 @@ PLANNER_QUADRANT_LEAD = re.compile(
     r'^[^A-Za-z0-9]{0,3}((?:north|south) ?(?:east|west)|north|south|east|west'
     r'|[NS][EW]) ?, ?(.+)$', re.IGNORECASE | ASCII)
 
+# The state and the ZIP alone on a line — the end of a town line the screen
+# broke after the town's comma — and the country after them or none
+# (PLANNER_COUNTRY). See _planner_address_lines.
+PLANNER_STATE_ZIP_LINE = re.compile(
+    r'^[A-Z]{2}\s+' + ZIP + r'(?:\s*-\s*\d{4})?' + PLANNER_COUNTRY + r'?$', ASCII)
+# A street line that ends in its town: a house number first, then the last
+# comma, or full stop with a space in front of it, before a town (TOWN, as
+# find_address takes one) that ends the line. See _planner_address_lines.
+PLANNER_STREET_TOWN = re.compile(
+    r'^(\W{0,3}' + DC + r'{1,6} .*\S)(?:\s*,\s*|\s+\.\s*)(' + TOWN + r')$', ASCII)
+
 
 def _planner_address_lines(block, label):
     """The street line, the town line and the place's name under the "Address"
@@ -3114,9 +3155,28 @@ def _planner_address_lines(block, label):
     # Canton," over "GA 30114-6559" (the owner's batch of 23 Oct). The first
     # line ends on a comma and the next is the state and the ZIP alone: one
     # line, so the cut below finds the town.
-    if len(under) >= 2 and under[0].rstrip().endswith(',') \
-            and re.match(r'^[A-Z]{2}\s+' + ZIP + r'(?:\s*-\s*\d{4})?$', under[1].strip()):
-        under = [under[0].rstrip() + ' ' + under[1].strip()] + under[2:]
+    #
+    # ...with the country after the ZIP (PLANNER_COUNTRY; the owner's snap of
+    # 24 Oct, "800 <Name> Street Northwest, Atlanta," over "GA 30318, US").
+    #
+    # ...and the same break with the street line's separators misread: the 22
+    # Oct shift's "<n> <Name> Pkwy . Kennesaw" over "GA 30144", the comma
+    # before the town read as " ." and the one after it lost. When the line
+    # under is the state and the ZIP alone (PLANNER_STATE_ZIP_LINE) and the
+    # line over it opens with a house number and ENDS in a town after a comma
+    # or a full stop with a space in front of it (PLANNER_STREET_TOWN), the two
+    # are one line written as the app writes it, "<street>, <Town>, ST ZIP".
+    # A full stop with no space before it is a word's ("Pkwy. Kennesaw" is the
+    # abbreviation's, and the town has nothing to start at) and is not taken.
+    # The "ST ZIP" line is the anchor: two capitals that must be a state and
+    # five digits that must be a ZIP, alone on their line, straight under the
+    # label's first line, which no other line of the app's is.
+    if len(under) >= 2 and PLANNER_STATE_ZIP_LINE.match(under[1].strip()):
+        st = PLANNER_STREET_TOWN.match(under[0].strip().rstrip(' ,'))
+        if st:
+            under = ['%s, %s, %s' % (st.group(1), st.group(2), under[1].strip())] + under[2:]
+        elif under[0].rstrip().endswith(','):
+            under = [under[0].rstrip() + ' ' + under[1].strip()] + under[2:]
     street_line = town_line = place = None
     town_at = None
     for j, l in enumerate(under[:2]):

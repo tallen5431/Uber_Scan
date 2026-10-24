@@ -1510,8 +1510,20 @@
     if (PLANNER_ADDRESS.test(line)) return true;
     return oneEdit(line.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '').toLowerCase(), 'address');
   }
-  // A bare ZIP on a line of its own, the end of a town line the screen wrapped.
-  var PLANNER_ZIP_LINE = new RegExp('^(' + ZIP_RX + ')(?: ?- ?' + DC + '{4})?$');
+  /* The country after the ZIP: ", US", " USA", ", United States", at the END
+     of a line after a ZIP and nowhere else. The owner's snap of 24 Oct printed
+     a pickup's door as "800 <Name> Street Northwest, Atlanta," over "GA 30318,
+     US", and the ", US" left no line under the label a town line: the stop
+     lost its street, town and ZIP and the pickup was never pinned ("no house
+     number"). The app's furniture, not the place's, so it goes. Capitals as
+     printed. See PLANNER_COUNTRY in offer_parser.py. */
+  var PLANNER_COUNTRY = '(?:\\s*,?\\s*(?:USA|US|United States))';
+  // A bare ZIP on a line of its own, the end of a town line the screen wrapped,
+  // and the country after it or none.
+  var PLANNER_ZIP_LINE = new RegExp('^(' + ZIP_RX + ')(?: ?- ?' + DC + '{4})?' + PLANNER_COUNTRY + '?$');
+  // The country alone after a town line's ZIP: not the scroll bar's mark. See
+  // plannerAddress.
+  var PLANNER_COUNTRY_TAIL = new RegExp('^' + PLANNER_COUNTRY + '$');
   var PLANNER_TOWN = new RegExp('^[^A-Za-z]{0,3}(' + TOWN + ') ?, ?([A-Za-z]{2})\\b ?(.*)$');
   /* ...and the comma read as a full stop ("<Town>. GA", the same planner) or
      lost ("Marietta GA"): taken only with every word of the town capitalised,
@@ -1611,7 +1623,12 @@
         var rest = t[3].trim();
         var z = PLANNER_ZIP.exec(rest);
         zip = z ? aZip(z[1]) : null;
-        tail = !!(zip ? rest.slice(z[0].length) : rest).trim();
+        var after = (zip ? rest.slice(z[0].length) : rest).trim();
+        // The country after a ZIP ("GA 30318, US", the owner's snap of 24 Oct)
+        // is the app's, not the scroll bar's: read as a mark it would take a
+        // real quadrant off the street beside it. See PLANNER_COUNTRY_TAIL.
+        if (zip && PLANNER_COUNTRY_TAIL.test(after)) after = '';
+        tail = !!after;
       }
     }
     var street = plannerEdgeCut(streetLine || '').replace(PLANNER_EDGE, '').replace(PLANNER_UNIT, '');
@@ -1661,6 +1678,15 @@
      offer_parser.py. */
   var PLANNER_QUADRANT_LEAD = new RegExp('^[^A-Za-z0-9]{0,3}((?:north|south) ?(?:east|west)'
     + '|north|south|east|west|[NS][EW]) ?, ?(.+)$', 'i');
+
+  /* The state and the ZIP alone on a line, the country after them or none;
+     and a street line that ends in its town, after the last comma or a full
+     stop with a space in front of it. See PLANNER_STATE_ZIP_LINE and
+     PLANNER_STREET_TOWN in offer_parser.py. */
+  var PLANNER_STATE_ZIP_LINE = new RegExp('^[A-Z]{2}\\s+' + ZIP_RX + '(?:\\s*-\\s*\\d{4})?'
+    + PLANNER_COUNTRY + '?$');
+  var PLANNER_STREET_TOWN = new RegExp('^(\\W{0,3}' + DC + '{1,6} .*\\S)(?:\\s*,\\s*|\\s+\\.\\s*)('
+    + TOWN + ')$');
 
   /* The last comma in `line` whose remainder is a town line, or -1. */
   function plannerCut(line) {
@@ -1727,10 +1753,18 @@
   function plannerAddressLines(block, label) {
     var under = block.slice(label + 1, label + 4);
     // A town line broken after its comma ("..., Canton," over "GA 30114-6559"):
-    // one line. See _planner_address_lines in offer_parser.py.
-    if (under.length >= 2 && /,\s*$/.test(under[0])
-        && new RegExp('^[A-Z]{2}\\s+' + ZIP_RX + '(?:\\s*-\\s*\\d{4})?$').test(under[1].trim())) {
-      under = [under[0].replace(/\s+$/, '') + ' ' + under[1].trim()].concat(under.slice(2));
+    // one line. ...with the country after the ZIP ("..., Atlanta," over "GA
+    // 30318, US", the owner's snap of 24 Oct); and with the street line's
+    // separators misread ("<n> <Name> Pkwy . Kennesaw" over "GA 30144", the
+    // 22 Oct shift), written back as "<street>, <Town>, ST ZIP". See
+    // _planner_address_lines in offer_parser.py.
+    if (under.length >= 2 && PLANNER_STATE_ZIP_LINE.test(under[1].trim())) {
+      var st = PLANNER_STREET_TOWN.exec(under[0].trim().replace(/[\s,]+$/, ''));
+      if (st) {
+        under = [st[1] + ', ' + st[2] + ', ' + under[1].trim()].concat(under.slice(2));
+      } else if (/,\s*$/.test(under[0])) {
+        under = [under[0].replace(/\s+$/, '') + ' ' + under[1].trim()].concat(under.slice(2));
+      }
     }
     var streetLine = null, townLine = null, townAt = -1, place = null;
     for (var k = 0; k < Math.min(under.length, 2); k++) {

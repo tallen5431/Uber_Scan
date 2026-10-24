@@ -7213,6 +7213,118 @@
      "place": null
     }
    ]
+  },
+  {
+   "name": "a pickup's door in the full form: type and quadrant spelled out, the town on the street line, the country after the ZIP",
+   "_why": "The owner's snap of 24 Oct: \"800 <Name> Street Northwest, Atlanta,\" over \"GA 30318, US\" under a pickup's label, a dropoff in the short form under it. The ', US' left no line under the label a town line, so the pickup's street, town and ZIP were all None and it was never pinned ('no house number'). The two lines are one, the country goes, the street stays as printed. Names and streets invented.",
+   "text": "Pickup \u2022 1 order\nFable Smokehouse\nExpected by 1:43 AM\nAddress\n800 Wrenfield Street Northwest, Atlanta,\nGA 30318, US\nView details\nDropoff \u2022 1 order\nPat H.\nExpected by 2:15 AM\nAddress\n1716 Kestrel Mill Rd SE\nMarietta, GA\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Smokehouse",
+     "expectedBy": 103,
+     "street": "800 Wrenfield Street Northwest",
+     "city": "Atlanta",
+     "state": "GA",
+     "zip": "30318",
+     "line": "800 Wrenfield Street Northwest, Atlanta, GA 30318",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat H.",
+     "expectedBy": 135,
+     "street": "1716 Kestrel Mill Rd SE",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "1716 Kestrel Mill Rd SE, Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and the street line ending in its town with the comma read as a full stop, the state and ZIP on the next line",
+   "_why": "The 22 Oct shift's \"<n> <Name> Pkwy . Kennesaw\" over \"GA 30144\": the comma before the town read as ' .' and the one after it lost, so the street was stored as '... Pkwy . Kennesaw' with no town or ZIP. Under a line that is the state and ZIP alone, a street line ending in a town after a comma or a spaced full stop is the two halves of one line. Invented.",
+   "text": "Pickup - 1 order\n@ Fable Coffee - Kennesaw\nExpected by 9:10 PM\nAddress\n2950 Wren Hollow Pkwy . Kennesaw\nGA 30144\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Coffee - Kennesaw",
+     "expectedBy": 1270,
+     "street": "2950 Wren Hollow Pkwy",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30144",
+     "line": "2950 Wren Hollow Pkwy, Kennesaw, GA 30144",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and the country after a town line's ZIP is not the scroll bar's mark: a real quadrant stays",
+   "_why": "\"<street> S\" over \"<Town>, GA 30060, United States\": the country is the app's furniture after the ZIP, so the town line has no mark after its ZIP, and the lone 'S' after the street's type is kept as the quadrant it may be (see _planner_address). Before 24 Oct the country counted as the mark and took the S. Invented.",
+   "text": "Pickup - 1 order\nFable Deli\nExpected by 9:10 PM\nAddress\n412 Lantern Pkwy S\nMarietta, GA 30060, United States\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Deli",
+     "expectedBy": 1270,
+     "street": "412 Lantern Pkwy S",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": "30060",
+     "line": "412 Lantern Pkwy S, Marietta, GA 30060",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and a bare ZIP wrapped onto its own line with the country after it",
+   "_why": "\"<street>, Kennesaw, GA\" over \"30152, US\": the third layout of _planner_address_lines with the country tail of the owner's 24 Oct snap. The wrapped ZIP is taken with it. Invented.",
+   "text": "Pickup - 1 order\nFable Noodle Bar\nExpected by 7:05 PM\nAddress\n1625 Fable Blvd NW, Kennesaw, GA\n30152, US\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Noodle Bar",
+     "expectedBy": 1145,
+     "street": "1625 Fable Blvd NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": "30152",
+     "line": "1625 Fable Blvd NW, Kennesaw, GA 30152",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...but a full stop with no space in front of it is a word's, not the town's comma",
+   "_why": "\"<n> <Name> Pkwy. Kennesaw\" over \"GA 30144\": 'Pkwy.' is the abbreviation's own full stop, so the line is not split there and the town is not read off it; the stop keeps the street line as printed and no town. Guards PLANNER_STREET_TOWN's ' .' rule from reading any full stop as a comma. Invented.",
+   "text": "Pickup - 1 order\nFable Bagels\nExpected by 9:10 PM\nAddress\n2950 Wren Hollow Pkwy. Kennesaw\nGA 30144\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Bagels",
+     "expectedBy": 1270,
+     "street": "2950 Wren Hollow Pkwy. Kennesaw",
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": "2950 Wren Hollow Pkwy. Kennesaw",
+     "place": null
+    }
+   ]
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",
