@@ -2466,8 +2466,16 @@ ADDRESS = re.compile(
 # "anything but a comma". A card printing "28 min (11.2 mi) total 100 Rosemont
 # Ct" satisfies the loose version from the "28", and the driver is shown the
 # offer's own arithmetic dressed up as a street name.
+#
+# ...and a house number starts a word. DoorDash's "Deliver to <name>" sheet
+# puts the customer's name straight in front of the door, and this reader
+# takes "o" and "s" for 0 and 5 (DC): "Deliver to Sal Os A / 12 Elm Dr" gave
+# the street as "os A 12 Elm Dr" off the end of the name, the held order's end
+# had no house number, and it never routed (owner's snap, 23 Oct). Measured
+# over 31,701 texts on file: two answers move, both the same read, "l a 2440
+# ..." becoming the number it should have been.
 STREET = re.compile(
-    r'(' + DC + r"{1,6}\s+[A-Za-z][A-Za-z.'-]*"
+    r'(?<![A-Za-z0-9])(' + DC + r"{1,6}\s+[A-Za-z][A-Za-z.'-]*"
     r"(?:\s+[A-Za-z0-9.'-]+){0,4})\s*$", ASCII)
 
 # A single letter standing alone in front of a town is the icon row, not a word:

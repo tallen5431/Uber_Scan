@@ -1349,8 +1349,10 @@
   /* A house number and a street, shown and never decided on - but WORDS, not
      "anything but a comma". A card printing "28 min (11.2 mi) total 100
      Rosemont Ct" satisfies the loose version from the "28", and the driver is
-     shown the offer's own arithmetic dressed up as a street name. */
-  var STREET = /([\dOoQlIiSsBbZz]{1,6}\s+[A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z0-9.'-]+){0,4})\s*$/;
+     shown the offer's own arithmetic dressed up as a street name. And a
+     house number starts a word: a name in front of the door, "Sal Os A 12 Elm
+     Dr", is not "os A 12 Elm Dr" (see STREET in offer_parser.py). */
+  var STREET = /(?<![A-Za-z0-9])([\dOoQlIiSsBbZz]{1,6}\s+[A-Za-z][A-Za-z.'-]*(?:\s+[A-Za-z0-9.'-]+){0,4})\s*$/;
 
   /* Where a street stops and a town starts when the address did not say with a
      comma - the case to EXPECT, not the exception: a screen puts the street and

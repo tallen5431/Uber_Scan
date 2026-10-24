@@ -3978,6 +3978,17 @@
    "expect": ["1234 Daffodil Ln, Powder Springs, GA 30127", "Powder Springs", "30127"]
   },
   {
+   "name": "...with the customer's name in front of the door, ending in letters the reader takes for digits",
+   "_why": "DoorDash's \"Deliver to <name>\" sheet, the layout and the slips the owner's snap of 23 Oct (name and street invented). \"o\" and \"s\" read as 0 and 5, so the street was taken from the end of the name, \"os A 812 Wren Dr SE\": no house number, and the held order never routed. A house number starts a word.",
+   "text": "'=. . OS . -e/* - a QA ae ' Deliver to Marcos A 812 Wren Dr SE a Marietta, GA 30067 4] Leave it at my door a Noodle Barn (001.005.0294) @ Drink",
+   "expect": ["812 Wren Dr SE, Marietta, GA 30067", "Marietta", "30067"]
+  },
+  {
+   "name": "...and the same sheet read line by line",
+   "text": "Current dash\nDeliver to Jo\n812 Wren Dr SE\nMarietta, GA 30067\nLeave it at my door",
+   "expect": ["812 Wren Dr SE, Marietta, GA 30067", "Marietta", "30067"]
+  },
+  {
    "name": "...with a quadrant, which belongs to the street and not the town",
    "text": "1234 Chastain Rd NW Kennesaw, GA 30144",
    "expect": ["1234 Chastain Rd NW, Kennesaw, GA 30144", "Kennesaw", "30144"]
