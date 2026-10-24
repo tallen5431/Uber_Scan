@@ -4960,6 +4960,12 @@ const framed = (page) => page.waitForFunction(
         await push({ id: 'n-place', held: '4821 Kestrel Dr, Marietta' });
         await page.waitForTimeout(1500);
         r.noPlaceHeld = await heldPin();
+        // ...and its street's general area (MV's withArea; the owner, 24
+        // Oct), where the run goes: a faded "≈" ring, never the end's pin.
+        r.noPlaceArea = await page.evaluate(() => (window.__marks || []).filter(
+          (k) => String(k.popup || '').indexOf('the area the order in your car is going to') >= 0)
+          .map((k) => k.ll));
+        r.noPlaceNote = await note();
         const placeAskedBefore = relayAsked.length;
         await push({ id: 'n-place', held: '4821 Kestrel Dr, Marietta',
                      place: 'Wrenfield Parking Deck' });
@@ -10816,6 +10822,10 @@ try:
        'with no place pins nothing',
        (both.get('placeHeld'), both.get('placeAsked'), both.get('noPlaceHeld')),
        ([33.9712, -84.5288], 1, None))
+    eq('[area] ...and with no place, the street\'s general area is drawn where the run goes, '
+       'a "≈" ring and never the end\'s pin, the caption saying so (%r)' % both.get('noPlaceNote'),
+       (both.get('noPlaceArea'), '\u2248 rout' in (both.get('noPlaceNote') or '')),
+       ([[33.97, -84.53]], True))
     ok_('[server pin] Map view draws the held end the server armed by street as D, at its '
         'point, and does not say NO PIN; a pin by no server rule is not drawn (%r)'
         % both.get('serverNote'),
@@ -11111,8 +11121,10 @@ try:
     ok_('a door the NucBox holds only the street of: the street drawn grey, no pin, '
         'saying it is not that door (%r)' % (_d,),
         len(_d) == 1 and both.get('doorPick') is None
-        and _d[0].get('tip') == (both.get('door') or '?') + ' · this one its street, '
-        'not door 4821')
+        # (...and, since the owner's 24 Oct, that the run goes to the street's
+        # general area: its one answer is inside the disc, MV's withArea.)
+        and _d[0].get('tip') == (both.get('door') or '?') + ' · ≈ routed to the area, '
+        'not a door · this one its street, not door 4821')
     _k = _of(st.get('cornerHow'), 'mv-how mv-cand mv-held')
     ok_('a corner pinned where its streets meet: the meeting drawn under the held '
         'pin, in the held card\'s colour, inside its 3.0 mi card\'s disc (%r)' % (_k,),

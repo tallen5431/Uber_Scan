@@ -1688,8 +1688,9 @@ if shutil.which('python3'):
         # the panel's in-car line its GPS drop's state (heldEndState).
         eq('held end: the mark reply carries the order in the car as the stream describes it',
            sorted((reply.get('held') or {}).keys()),
-           ['arrived', 'card', 'dropoff', 'drops', 'endAt', 'endBy', 'endPinned', 'endWhy',
-            'holdId', 'minutes', 'pay', 'pickAt', 'place', 'visited'])
+           # (`endArea`: the general area a refusal kept, the owner's 24 Oct.)
+           ['arrived', 'card', 'dropoff', 'drops', 'endArea', 'endAt', 'endBy', 'endPinned',
+            'endWhy', 'holdId', 'minutes', 'pay', 'pickAt', 'place', 'visited'])
         eq('held end: ...its `drops` null for an order of one door (a batch\'s count, '
            'server.js batchDrops)', (reply.get('held') or {}).get('drops', 'missing'), None)
         # Started after the mark, before the scanner's 2s sleep ends.
@@ -6202,7 +6203,10 @@ try:
         'endAt': {'lat': 33.9, 'lon': -84.5},
         # ...and its pickup's pin, the map's last rung (MV.routeLadder).
         'pickAt': {'lat': 33.9009, 'lon': -84.5},
-        'endWhy': 'door next to the pickup', 'visited': []})
+        'endWhy': 'door next to the pickup', 'visited': [],
+        # ...and no general area beside a pin (refuseHeldEnd's endArea; the
+        # owner, 24 Oct): a door pinned is never routed to roughly.
+        'endArea': None})
     eq('[gps drop] ...the same as /api/status says', _state(_holding(_gb)),
        {'endPinned': True, 'arrived': False, 'endWhy': 'door next to the pickup'})
     _r = post(_gb, '/api/offers/mark', {
@@ -7279,6 +7283,55 @@ try:
            (len(_hkasked('street=250')) - _n, (_holding(_hkb) or {}).get('pickupsPinned'),
             (_holding(_hkb) or {}).get('pickupsWhy')),
            (2, 0, 'not inside the card\'s reach'))
+        post(_hkb, '/api/delivered', {})
+    finally:
+        stop(_hkp)
+
+    # The owner's snap of 24 Oct, invented: the planner's door "<number>
+    # <Name> Mill Rd SE", two doors of that number answered inside the held
+    # card's disc a few hundred metres apart, refused 'several answers' and
+    # nothing routed. The refusal now keeps their general area (MV's
+    # withArea) for Map view's run, `endArea` on /api/status — and it is NO
+    # PIN: endPinned false, endWhy still the refusal, nothing posted as the
+    # door, and a car that waits there and leaves drops nothing.
+    _hks, _hksays, _hkj = _hksayer('area')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800',
+                        'GPS_DWELL_MS': '1000'}, _hkj)
+
+    def _areabeat(lat, lon):
+        return {'alive': True, 'gps': {'state': 'ok', 'ageSeconds': 0.1, 'fix': {
+            'lat': lat, 'lon': lon, 'gpsAge': 0.1, 'gpsErr': 25.0, 'gpsMode': 3,
+            'gpsOk': True, 'gpsWhy': None, 'freshFor': 10.0}}}
+    try:
+        _atook(_hkb, 'k-area', '3150 Thornbury Mill Rd SE, Marietta')
+        _h = _settled(_hkb)
+        _ea = _h.get('endArea') or {}
+        eq('[area] two doors 0.33 mi apart inside the held card\'s disc: no pin, the refusal '
+           'still says why, and their general area kept beside it, approximate',
+           (_h.get('endPinned'), _h.get('endBy'), _h.get('endAt'), _h.get('endWhy'),
+            _ea.get('approx'), _ea.get('n'), round(_ea.get('lat') or 0, 4),
+            round(_ea.get('lon') or 0, 4)),
+           (False, None, None, 'several answers', True, 2, 33.962, -84.5435))
+        _s, _r = post(_hkb, '/api/held-end', {
+            'holdId': _h.get('holdId'), 'dropoff': '3150 Thornbury Mill Rd SE, Marietta',
+            'lat': _ea.get('lat'), 'lon': _ea.get('lon'), 'name': 'Thornbury Mill Road',
+            'doorLevel': False})
+        eq('[area] ...the area posted as the held end is refused as not door level',
+           (_s, _r.get('error'), (_holding(_hkb) or {}).get('endPinned')),
+           (409, 'not door level', False))
+        _hksays([_areabeat(_ea.get('lat'), _ea.get('lon'))] * 7
+                + [_areabeat(_ea.get('lat') + 0.02, _ea.get('lon'))] * 3)
+        _h = _holding(_hkb) or {}
+        eq('[area] ...a car that waits at the area and leaves arrives nowhere and drops nothing',
+           (_h.get('dropoff'), _h.get('arrived'), _h.get('endPinned'), _h.get('endWhy')),
+           ('3150 Thornbury Mill Rd SE, Marietta', False, False, 'several answers'))
+        post(_hkb, '/api/delivered', {})
+        _atook(_hkb, 'k-area-far', '3152 Thornbury Mill Rd SE, Marietta')
+        _h = _settled(_hkb)
+        eq('[area] two doors 2.5 mi apart are no area: refused as ever, nothing kept',
+           (_h.get('endPinned'), _h.get('endWhy'), _h.get('endArea')),
+           (False, 'several answers', None))
         post(_hkb, '/api/delivered', {})
     finally:
         stop(_hkp)

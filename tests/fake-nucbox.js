@@ -40,7 +40,8 @@
  * House" is a pickup the road by is shorter than the road direct, "Farm
  * Stand" is 450 m from a road, "250 Example Road" is a restaurant's door (a
  * held order's pickup) and "1975 Cobb Parkway" one 87 m from 1985's door
- * ("1981 Cobb Parkway" one 60 m),
+ * ("1981 Cobb Parkway" one 60 m), "3150 Thornbury Mill Rd SE" two doors of
+ * that number 0.33 mi apart (one general area) and "3152" two 2.5 mi apart,
  * "Wrenfield Parking Deck" a place by Kestrel Drive (with "Quarry Hall" a road
  * and "Lantern Parking Deck" a deck far off, below), a
  * point at 34.1, -84.6 is refused by the
@@ -303,6 +304,29 @@ var FENNICK = [
   place(124, 33.9400, -84.5290, 'highway', 'residential', 'Fennick Court',
         'Fennick Court, Marietta, Cobb County, Georgia, 30060, United States')];
 
+/* Two doors of ONE number a few hundred metres apart, both inside the held
+   card's disc (map-view.js withArea; the owner's snap of 24 Oct: "<number>
+   <Name> Mill Rd SE", two door answers drawn as two circles almost touching,
+   refused as 'several' and nothing routed): "3150 Thornbury Mill Rd SE"
+   answers two houses 0.33 mi apart, 0.6 and 0.9 mi north-east of the
+   Square — one general area, routed to and never a pin — and "3152
+   Thornbury Mill Rd SE" two 2.5 mi apart, which are no area either.
+   Invented, every one. */
+var THORNBURY_3150 = [
+  place(141, 33.9600, -84.5450, 'place', 'house', '',
+        '3150, Thornbury Mill Road Southeast, Marietta, Cobb County, Georgia, 30067, '
+        + 'United States'),
+  place(142, 33.9640, -84.5420, 'place', 'house', '',
+        '3150, Thornbury Mill Road Southeast, Marietta, Cobb County, Georgia, 30067, '
+        + 'United States')];
+var THORNBURY_3152 = [
+  place(143, 33.9600, -84.5450, 'place', 'house', '',
+        '3152, Thornbury Mill Road Southeast, Marietta, Cobb County, Georgia, 30067, '
+        + 'United States'),
+  place(144, 33.9900, -84.5200, 'place', 'house', '',
+        '3152, Thornbury Mill Road Southeast, Marietta, Cobb County, Georgia, 30067, '
+        + 'United States')];
+
 var CHURCH = [
   place(31, 33.9580, -84.5520, 'highway', 'tertiary', 'Church Street',
         'Church Street, Marietta, Cobb County, Georgia, 30060, United States'),
@@ -358,6 +382,8 @@ function search(q) {
     else if (/^\d+ eliis (ct|court)$/.test(term)) all = ELLIS;
     else if (/^\d+ quarrel (ct|court)$/.test(term)) all = QUARREL;
     else if (/^\d+ pembury$/.test(term)) all = PEMBURY;
+    else if (/^3150 thornbury mill (rd|road)/.test(term)) all = THORNBURY_3150;
+    else if (/^3152 thornbury mill (rd|road)/.test(term)) all = THORNBURY_3152;
   }
   if (q.bounded === '1') all = all.filter(function (p) { return inBox(p, q.viewbox); });
   return all.slice(0, Number(q.limit) || 10);
@@ -530,6 +556,7 @@ module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    ARDLEY_ROAD: ARDLEY_ROAD, ARDLEY_810: ARDLEY_810, ARDLEY_812: ARDLEY_812,
                    TAMARONS_1106: TAMARONS_1106, BRINDLE_1106: BRINDLE_1106,
                    CORBINS_2282: CORBINS_2282,
+                   THORNBURY_3150: THORNBURY_3150, THORNBURY_3152: THORNBURY_3152,
                    NAMED_INDEX: NAMED_INDEX };
 
 if (require.main === module) {

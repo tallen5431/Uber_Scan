@@ -1364,6 +1364,107 @@ async function nucbox() {
   eq('...while the same street asked with no number is pinned as the street',
      (MV.pickInDisc(hitsOf(FAKE.KESTREL), d30, MV.searchPlan('Kestrel Dr, Marietta')).at || {}).lat,
      33.97);
+  /* ---- the general area, for routing only (the owner, 24 Oct): withArea ----
+   *
+   * The snap: two doors of the asked number inside the held card's disc, a
+   * few hundred metres apart, refused 'several' and nothing routed. The
+   * refusal now carries their middle as `area` — `approx`, the `why` kept,
+   * `at` still null — when every candidate inside is within AREA_MI. */
+  var d50 = MV.discFor(card({ miles: 5.0 }));
+  var near2 = MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), d50,
+                            MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta'));
+  eq('[area] two doors 0.33 mi apart inside the disc: still no pin, still "several", '
+     + 'and an approximate area at their middle',
+     JSON.stringify([near2.at, near2.why, near2.n, near2.area && near2.area.approx,
+                     near2.area && [near2.area.lat, near2.area.lon, near2.area.n,
+                                    near2.area.miles.toFixed(2)]]),
+     JSON.stringify([null, 'several', 2, true, [33.962, -84.5435, 2, '0.33']]));
+  eq('[area] ...the middle is middleOf\'s, the pin rule\'s own',
+     JSON.stringify(MV.middleOf(hitsOf(FAKE.THORNBURY_3150))),
+     JSON.stringify({ lat: near2.area.lat, lon: near2.area.lon }));
+  eq('[area] ...a mile, chosen: the same as a numberless street\'s pieces',
+     JSON.stringify([MV.AREA_MI, MV.AREA_MI === MV.STREET_AGREE_MI]), '[1,true]');
+  var far2 = MV.pickInDisc(hitsOf(FAKE.THORNBURY_3152), d50,
+                           MV.searchPlan('3152 Thornbury Mill Rd SE, Marietta'));
+  eq('[area] two doors 2.5 mi apart are no area: "several" as before, nothing to route to',
+     JSON.stringify([far2.at, far2.why, far2.area]), JSON.stringify([null, 'several', null]));
+  eq('[area] ...nor three where one of them is past AREA_MI from the others',
+     MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150).concat(hitsOf(FAKE.THORNBURY_3152).slice(1)
+       .map(function (h) { return Object.assign({}, h, { name: h.name.replace('3152', '3150') }); })),
+       d50, MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta')).area, undefined);
+  eq('[area] never for "none", "capped", a corner, a merchant\'s name, or no disc',
+     JSON.stringify([
+       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150),
+                     MV.discFor(card({ lat: 33.90, lon: -84.60, miles: 0.5 })),
+                     MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta')).why,
+       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), d50,
+                     MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta'), 10).why,
+       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), d50,
+                     { kind: 'cross', a: 'Thornbury Mill Rd', b: 'Oak St' }).why,
+       MV.pickInDisc(hitsOf(FAKE.MCD), d94, MV.searchPlan("McDonald's")).why,
+       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), null,
+                     MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta')).why]),
+     JSON.stringify(['none', 'capped', 'several', 'several', 'several']));
+  ok_('[area] ...and none of those carries an area',
+      [MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150),
+                     MV.discFor(card({ lat: 33.90, lon: -84.60, miles: 0.5 })),
+                     MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta')),
+       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), d50,
+                     MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta'), 10),
+       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), d50,
+                     { kind: 'cross', a: 'Thornbury Mill Rd', b: 'Oak St' }),
+       MV.pickInDisc(hitsOf(FAKE.MCD), d94, MV.searchPlan("McDonald's")),
+       MV.pickInDisc(hitsOf(FAKE.THORNBURY_3150), null,
+                     MV.searchPlan('3150 Thornbury Mill Rd SE, Marietta'))]
+        .every(function (r) { return !r.at && r.area === undefined; }));
+  eq('[area] a door answered by its street alone, the street inside the disc: '
+     + '"nodoor" kept, the street\'s area beside it',
+     JSON.stringify([kestrel.at, kestrel.why, kestrel.area && kestrel.area.approx,
+                     kestrel.area && [kestrel.area.lat, kestrel.area.lon]]),
+     JSON.stringify([null, 'nodoor', true, [33.97, -84.53]]));
+  eq('[area] ...but not its street outside the disc',
+     MV.pickInDisc(hitsOf(FAKE.KESTREL), MV.discFor(card({ lat: 33.90, lon: -84.60, miles: 0.5 })),
+                   MV.searchPlan('4821 Kestrel Dr, Marietta')).area, undefined);
+  eq('[area] ...and the refusal\'s words are the refusal\'s, unchanged',
+     MV.nbxRefusal(near2, MV.discFor(card({ miles: 14.9 })), '3150 Thornbury…', 'held'),
+     'no pin for 3150 Thornbury… — 2 fit its card and disagree · within 14.9 mi');
+  /* The run: the area is its own rung, said "≈", never the door's. */
+  eq('[area] the area\'s rung is "area" — before street or door, whatever the text',
+     JSON.stringify([MV.routeRung('3150 Thornbury Mill Rd SE, Marietta', near2.area),
+                     MV.routeRung('3150 Thornbury Mill Rd SE, Marietta', near2.area, 'street'),
+                     MV.routeRung('3150 Thornbury Mill Rd SE, Marietta', { lat: 1, lon: 2 })]),
+     JSON.stringify(['area', 'area', 'door']));
+  var areaRun = MV.routeLadder({ lat: 33.9526, lon: -84.5499 }, [], near2.area, 'area');
+  eq('[area] ...routed car -> area, said with how many answers and how far apart',
+     JSON.stringify([areaRun.pts.length, areaRun.note]),
+     JSON.stringify([2, '≈ route to area, 2 within 0.3 mi']));
+  eq('[area] ...one answer (a street\'s) says no spread',
+     MV.routeLadder({ lat: 33.9526, lon: -84.5499 }, [], kestrel.area, 'area').note,
+     '≈ route to area');
+  var REF2 = 'no pin for 3150 Thornbury… — 2 fit its card and disagree · within 14.9 mi';
+  var areaSaid = MV.routeSaid(REF2, [areaRun.note], '3150 Thornbury…');
+  eq('[area] the caption that is the routed end\'s own refusal carries the area\'s words '
+     + 'in place of the disc\'s figures',
+     areaSaid, 'no pin for 3150 Thornbury… — 2 fit its card and disagree · ≈ routed, '
+     + '2 within 0.3 mi');
+  eq('[area] ...and its chip says "≈" as its reason',
+     MV.captionChip(areaSaid), 'NO PIN · 3150 Thornbury…, ≈ routed, 2 within 0.3 mi');
+  eq('[area] ...a street\'s one answer, "routed to area"',
+     MV.captionChip(MV.routeSaid('no pin for 4821 Kestrel… — street found, not that door',
+                                 ['≈ route to area'], '4821 Kestrel…')),
+     'NO PIN · 4821 Kestrel…, ≈ routed to area');
+  eq('[area] ...a caption about another place keeps the area as a note after its chip',
+     MV.captionChip(MV.routeSaid(REF2, [areaRun.note], 'Somewhere Else')),
+     'NO PIN · 3150 Thornbury…, 2 fit its card and disagree · ≈ route to area, 2 within 0.3 mi');
+  eq('[area] ...and the offer\'s trip says it as a trip\'s note',
+     MV.routeSaid('on your way by road', ['trip: ' + areaRun.note]),
+     'on your way by road · trip: ≈ route to area, 2 within 0.3 mi');
+  ok_('[area] ...and the candidates drawn say the run went to their area, not a door',
+      MV.located(Object.assign({ seen: { hits: hitsOf(FAKE.THORNBURY_3150), door: '3150' } }, near2),
+                 d50, '3150 Thornbury…', 'held').marks.every(function (m) {
+        return m.tip.indexOf(' · ≈ routed to the area, not a door') > 0;
+      }));
+
   ok_('...and a door is read off the first two parts of the name, so the '
       + 'postcode is never taken for the house number',
       MV.hasDoor({ name: '1985, Cobb Parkway, Kennesaw' }, '1985')
@@ -2478,11 +2579,25 @@ async function nucbox() {
 
     // Through the real server.js and the fake NucBox.
     var door = MV.located(await nbx.place('4821 Kestrel Dr, Marietta', d94), d94, 'Jimmy', 'new');
+    // (...and, since the owner's 24 Oct, that the run goes to the street's
+    // general area: the street's one answer is inside the disc, withArea.)
     ok_('a door answered by its street: the street drawn, no pin, saying not that door ('
         + (door.marks[0] || {}).tip + ')',
         door.marks.length >= 1 && door.marks.every(function (m) {
-          return / — street found, not that door · this one its street, not door 4821$/.test(m.tip);
+          return new RegExp(' — street found, not that door · ≈ routed to the area, not a door'
+                            + ' · this one its street, not door 4821$').test(m.tip);
         }));
+    // ...and the owner's 24 Oct snap, invented: two doors of one number a few
+    // hundred metres apart are no pin, and their area rides on the refusal.
+    var twoDoors = await nbx.place('3150 Thornbury Mill Rd SE, Marietta', d94);
+    eq('[area] through the server: two doors 0.33 mi apart, no pin, the area beside it',
+       JSON.stringify([twoDoors.at, twoDoors.why, !!(twoDoors.area && twoDoors.area.approx)]),
+       JSON.stringify([null, 'several', true]));
+    // ...and a street's area outlives the place asked after it (pickPlace).
+    var noPlace = await nbx.place('4821 Kestrel Dr, Marietta', d94, { place: 'Nowhere Hall' });
+    eq('[area] ...a street found, the place asked after it not: the street\'s area kept',
+       JSON.stringify([noPlace.at, noPlace.why, !!(noPlace.area && noPlace.area.approx)]),
+       JSON.stringify([null, 'noplace', true]));
     var cutRes = await nbx.place('Starbucks', d30);
     var cut = MV.located(cutRes, d30, 'Starbucks', 'new');
     eq('a list cut at the limit: all ten drawn as sent, one inside, every one too many',

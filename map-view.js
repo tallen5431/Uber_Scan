@@ -850,19 +850,32 @@
    *             "route to corner";
    *   'pickup'  no end that can be drawn, a pickup pinned: the car to the
    *             pickups, "route to pickup only".
+   *   'area'    (the owner, 24 Oct) a door refused as 'several' or 'nodoor'
+   *             whose answers in the disc are one general area (withArea,
+   *             AREA_MI): their middle, `approx: true`, "≈ route to area,
+   *             2 within 0.3 mi". Below the door, above the pickup.
    *
    * DRAWING ONLY. No figure comes of any rung (the detour stays mapLine's,
    * refused or ranged as it was), and nothing here is posted: GPS arrival is
    * armed by the server's door pin and its rules alone (pinHeldEnd sends a
    * door askNucBox found, never a point of this). */
   var ROUTE_NOTES = { street: 'route to street, not door', corner: 'route to corner',
-                      pickup: 'route to pickup only' };
+                      pickup: 'route to pickup only', area: '≈ route to area' };
+
+  /* The words for an area's rung: how many answers and how far apart, so
+     the driver can see how rough the end of the run is. */
+  function areaNote(at) {
+    return ROUTE_NOTES.area + (at && at.n > 1 && isFinite(at.miles)
+      ? ', ' + at.n + ' within ' + Math.max(0.1, at.miles).toFixed(1) + ' mi' : '');
+  }
 
   /* The rung an end's point stands on: `place` the text searched, `at` its
      point, `by` who pinned it where the server did ('street' for a short
-     street). Null with no point. */
+     street). Null with no point. An area (`approx`) is said before
+     anything else, so it can never be taken for a door. */
   function routeRung(place, at, by) {
     if (!at) return null;
+    if (at.approx === true) return 'area';
     if (at.street === true || at.stretch || by === 'street') return 'street';
     var plan = searchPlan(place);
     return plan && plan.kind === 'cross' ? 'corner' : 'door';
@@ -880,22 +893,44 @@
     if (!e && !picks.length) return null;
     var pts = [car].concat(picks, e ? [e] : []).filter(ok);
     if (pts.length < 2) return null;
-    var note = !e ? ROUTE_NOTES.pickup : rung && rung !== 'door' ? ROUTE_NOTES[rung] || null : null;
+    var note = !e ? ROUTE_NOTES.pickup : rung === 'area' ? areaNote(e)
+      : rung && rung !== 'door' ? ROUTE_NOTES[rung] || null : null;
     return { pts: pts, note: note };
   }
 
   /* The caption with the runs' words after it: "<said> · route to corner",
      each note once, `said` alone with none. captionChip reads the sentence
-     through them (routeTail). */
-  function routeSaid(said, notes) {
-    var seen = [];
-    (notes || []).forEach(function (n) { if (n && seen.indexOf(n) === -1) seen.push(n); });
-    return seen.length ? String(said || '') + ' · ' + seen.join(' · ') : String(said || '');
+     through them (routeTail).
+
+     ...and where the caption IS the refusal of the end the run was routed
+     to its general area (`about`, that end's place as the caption names it
+     — live.html's shortPlace), the area's words go INTO the refusal in
+     place of the disc's figures: "no pin for X — 2 fit its card and
+     disagree · ≈ routed, 2 within 0.3 mi" (" · ≈ routed to area" for one
+     answer). Measured by rpi/test_layout.py: the refusal, its disc's tail
+     and the rung's words after them ran past two rows at 800x480 and its
+     chip past three on the 3.5" hat. The disc's figures are the tail a clamp
+     may eat anyway; the refusal's reason stays, and its chip says "≈"
+     (LINE_CHIPS). An area note about another place stays a note. */
+  function routeSaid(said, notes, about) {
+    var s = String(said || ''), seen = [];
+    var lead = about ? 'no pin for ' + about + ' — ' : null;
+    (notes || []).forEach(function (n) {
+      if (!n || seen.indexOf(n) !== -1) return;
+      if (lead && s.indexOf(lead) === 0 && n.indexOf(ROUTE_NOTES.area) === 0
+          && s.indexOf(' · \u2248 routed') === -1) {
+        var rest = n.slice(ROUTE_NOTES.area.length);
+        s = s.replace(/ · within .*$/, '') + ' · \u2248 routed' + (rest || ' to area');
+        return;
+      }
+      seen.push(n);
+    });
+    return seen.length ? s + ' · ' + seen.join(' · ') : s;
   }
 
   // The notes routeSaid put after a sentence, as one tail; captionChip
   // chips the sentence before them and keeps them after the chip.
-  var ROUTE_TAIL = /((?: · (?:trip: )?route to (?:street, not door|corner|pickup only))+)$/;
+  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ route to area(?:, \d+ within [\d.]+ mi)?))+)$/;
   function routeTail(text) {
     var m = ROUTE_TAIL.exec(String(text || ''));
     return m ? { said: text.slice(0, m.index), tail: m[1] } : { said: text, tail: '' };
@@ -1151,6 +1186,70 @@
     return true;
   }
 
+  /* --- the general area, for routing and trip planning only ------------------
+   *
+   * THE OWNER'S DECISION OF 24 OCT 2026: "It is better for the map to route
+   * even if it is not exact as long as it gets the general area right for
+   * the use case of trip planning." The snap that day: an Uber order held,
+   * its card's fix good to ±26 m and its disc 14.9 mi, the Trip Planner's
+   * door "<number> <Name> Mill Rd SE, Marietta". The NucBox answered TWO
+   * doors of that number inside the disc a few hundred metres apart — drawn
+   * as two orange circles almost touching — and pickInDisc refused them as
+   * 'several' (two doors are not one place at AGREE_MI), so nothing was
+   * routed, though every answer was in the same few streets.
+   *
+   * So a door plan's refusal carries an AREA beside it, `area`, when
+   * EVERY candidate inside the disc lies within AREA_MI of every other:
+   *
+   *   'several'  the doors inside the disc (the snap's case);
+   *   'nodoor'   the street's own answers inside the disc, the door asked
+   *              and not held — the street is where the door is, near
+   *              enough to plan a trip by.
+   *
+   * { lat, lon, name, approx: true, n, miles }: the middle of them
+   * (middleOf, as a pin's), how many, and how far apart the two farthest
+   * are. Never for 'none', 'capped' or 'together', never for a corner, a
+   * merchant's name or a place by its name (pickPlace), and never with no
+   * disc: a spread is only small against a card's reach.
+   *
+   * IT IS NOT A PIN. The refusal stands, `at` stays null and the `why` is
+   * the one it was, so every rule that reads `at` — the GPS drop's door
+   * level (server.js heldEndPin, pinHeldEnd), the restaurant guard, the
+   * page's post (/api/held-end), the figures — reads exactly what it read
+   * before. The area is read in two places only: Map view's run, which
+   * routes to it and says "≈ route to area" (routeRung, routeLadder), and
+   * the server, which keeps it apart from the pin as `endArea` and goes on
+   * saying why the GPS drop is not armed.
+   *
+   * AREA_MI is a mile, CHOSEN, NOT MEASURED, like AGREE_MI: the snap's
+   * spacing was seen on a map and not recorded. What it rests on: with two
+   * answers the middle is at most half a mile from either, which is
+   * ON_WAY_MI, the cut the panel already calls "on your way" — so the
+   * route never ends further from the true door than the panel's own
+   * tolerance for a stop being along the way. It is STREET_AGREE_MI too,
+   * the spread at which a numberless street's pieces are already one pin. */
+  var AREA_MI = 1.0;
+
+  // The largest distance between two of `pts`, in miles.
+  function spreadOf(pts) {
+    var most = 0;
+    for (var i = 0; i < pts.length; i++) {
+      for (var j = i + 1; j < pts.length; j++) most = Math.max(most, crowMiles(pts[i], pts[j]));
+    }
+    return most;
+  }
+
+  // `res` with its area put on, where the rule above allows one; `pts` the
+  // candidates inside the disc.
+  function withArea(res, pts, disc, plan) {
+    if (!disc || !plan || plan.kind !== 'street' || !plan.door || !pts.length
+        || !agreeing(pts, AREA_MI)) return res;
+    var mid = middleOf(pts);
+    res.area = { lat: mid.lat, lon: mid.lon, name: pts[0].name || '', approx: true,
+                 n: pts.length, miles: spreadOf(pts) };
+    return res;
+  }
+
   /* Which candidate, if any. `hits` is what the NucBox answered ({lat, lon,
    * name}); `disc` is discFor's answer or null; `plan` is searchPlan's;
    * `cutAt` is the server's limit when the list stopped at it, else null.
@@ -1168,6 +1267,10 @@
    *   { why: 'several', n }        n fit and they are not one place
    *   { why: 'together', n }       a corner (`plan.kind` 'cross') whose two
    *                                streets run together inside the disc
+   *
+   * ...and a door plan's 'nodoor' or 'several' with `area` beside it, still
+   * no pin, where its candidates inside the disc are one general area
+   * (withArea, AREA_MI: for routing and trip planning only).
    *
    * CAPPED, refused outright. The other honest rule was to ask again in a
    * tighter box — but the box asked is already the disc's own (discBox), so
@@ -1188,7 +1291,12 @@
     if (cutAt) return { at: null, why: 'capped', n: cutAt };
     if (plan && plan.door && all.length) {
       var doors = all.filter(function (h) { return hasDoor(h, plan.house); });
-      if (!doors.length) return { at: null, why: 'nodoor', n: all.length };
+      if (!doors.length) {
+        return withArea({ at: null, why: 'nodoor', n: all.length },
+                        disc ? all.filter(function (h) {
+                          return crowMiles(disc.at, h) <= disc.miles;
+                        }) : [], disc, plan);
+      }
       all = doors;
     }
     var inside = disc ? all.filter(function (h) {
@@ -1217,7 +1325,7 @@
       return { at: { lat: mid.lat, lon: mid.lon, name: inside[0].name || '' },
                n: inside.length };
     }
-    return { at: null, why: 'several', n: inside.length };
+    return withArea({ at: null, why: 'several', n: inside.length }, inside, disc, plan);
   }
 
   /* --- the door asked again, the street's type word left out ------------------
@@ -1985,6 +2093,9 @@
     // A refusal nbxRefusal has no words for is still no pin, and is never
     // drawn as "pinned".
     var why = res.at ? null : (nbxRefusal(res, disc, name, whose) || 'no pin for ' + name);
+    // ...and a refusal whose answers are one general area (withArea) says
+    // the run goes to their middle, roughly, and still no door.
+    if (why !== null && res.area) why += ' · ≈ routed to the area, not a door';
     var edge = disc ? ' the ' + disc.miles.toFixed(1) + ' mi searched' : '';
     var hits = res.seen.hits || [];
     var door = res.seen.door || null;
@@ -3108,7 +3219,16 @@
     var named = opts.place && plan.kind === 'street' && plan.door && disc ? opts.place : null;
     if (!named) return asked;
     return asked.then(function (res) {
-      return res.why === 'nodoor' ? me.placeSearch(named, disc) : res;
+      if (res.why !== 'nodoor') return res;
+      // ...the street's general area (withArea) kept beside the place's
+      // refusal, as the server keeps it (endArea): the street is still
+      // where the door is, near enough to route a trip to.
+      return me.placeSearch(named, disc).then(function (p) {
+        if (!p.at && !p.area && res.area && p.why !== 'unreachable' && p.why !== 'refused') {
+          p.area = res.area;
+        }
+        return p;
+      });
     });
   };
 
@@ -3768,6 +3888,11 @@
     [/^no pin for (.+?) — \d+(?: corners)? found · no GPS fix (on your order's card )?to /,
      function (m) {
        return 'NO PIN · ' + m[1] + ', no fix ' + (m[2] ? 'on its card' : 'to choose'); }],
+    // ...and an end the run went to the general area of (routeSaid's
+    // "≈ routed"): the area's words are the chip's reason, as they took the
+    // disc's place in the sentence.
+    [/^no pin for (.+?) — .+? · (\u2248 routed(?:, \d+ within [\d.]+ mi| to area))$/,
+     function (m) { return 'NO PIN · ' + m[1] + ', ' + m[2]; }],
     [/^no pin for (.+?) — (.+?)(?: · .*)?$/, function (m) {
       return 'NO PIN · ' + m[1] + ', ' + (PIN_SHORT[m[2]] || m[2]); }],
     [/^no figure for (.+?) — the street runs ([\d.]+) mi in /, function (m) {
@@ -4008,7 +4133,7 @@
            heldRuns: heldRuns, oneAnswer: oneAnswer, detourOrders: detourOrders,
            SPAN_STEP_MI: SPAN_STEP_MI,
            NbxSearch: NbxSearch, nbxSettings: nbxSettings,
-           AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI,
+           AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI, AREA_MI: AREA_MI,
            NBX_GAP_MS: NBX_GAP_MS, NBX_KEEP: NBX_KEEP, SNAP_MI: SNAP_MI, ROAD_SAME_MI: ROAD_SAME_MI,
            hasDoor: hasDoor, discShape: discShape, located: located,
            STREET_TYPES: STREET_TYPES, streetType: streetType, bareDoor: bareDoor, streetRetry: streetRetry,

@@ -5663,6 +5663,10 @@
         heldSaid.endBy = msg.heldEnd.endBy || null;
         // ...and where (serverEnd): Map view draws it as D.
         heldSaid.endAt = msg.heldEnd.endAt || null;
+        // ...and, with no pin, the general area the server's refusal kept
+        // (endArea; the owner, 24 Oct): Map view's run may go to it, "≈
+        // route to area" (areaEnd), and nothing else reads it.
+        heldSaid.endArea = msg.heldEnd.endArea || null;
         // ...and its first pickup the server pinned, not yet visited: the
         // run's last rung when nothing else can be drawn (MV.routeLadder).
         heldSaid.pickAt = msg.heldEnd.pickAt || null;
@@ -6822,6 +6826,8 @@
                + (heldPlace ? '[' + heldPlace : '')
                // ...and the server's pin for it, learnt on a beat (serverEnd).
                + (held && serverEnd(held) ? '!' + heldSaid.endBy : '')
+               // ...and the general area its refusal kept (areaEnd).
+               + (held && heldSaid && heldSaid.endArea && !heldSaid.endPinned ? '≈' : '')
                // ...and the server's pickup pin, the ladder's last rung
                // (MV.routeLadder), learnt on a beat too.
                + (holdingNow && heldSaid && heldSaid.pickAt ? '^p' : '')
@@ -6978,6 +6984,25 @@
      null for an end that is no corner, no disc, or neither street held.
      Drawing only (MV.routeLadder's 'street' rung): never a pin, never
      posted, so never what GPS arrival is armed by. */
+  /* An end the NucBox refused whose answers are one general area (MV's
+     withArea, AREA_MI; the owner, 24 Oct: "better for the map to route even
+     if it is not exact as long as it gets the general area right for the use
+     case of trip planning"): their middle, as a point for the run, or null.
+     Map view's own search's `area` (want.nbxSeen), else — for the held end
+     only (`held`) — the one the server's refusal kept (heldSaid.endArea).
+     `approx: true` on it always, so MV.routeRung puts it on the 'area' rung
+     ("≈ route to area") and never the door's. Drawing only, as cornerSide
+     is: never in `found`, so never posted (pinHeldEnd), never a figure's
+     end (mapJudge reads `found`), never what GPS arrival is armed by. */
+  function areaEnd(want, q, held) {
+    var seen = want.nbxSeen && want.nbxSeen[q];
+    var a = seen && seen.res && !seen.res.at ? seen.res.area : null;
+    if (!a && held && heldSaid && !heldSaid.endPinned) a = heldSaid.endArea;
+    if (!a || typeof a.lat !== 'number' || typeof a.lon !== 'number'
+        || !isFinite(a.lat) || !isFinite(a.lon)) return null;
+    return { lat: a.lat, lon: a.lon, approx: true, n: a.n, miles: a.miles };
+  }
+
   async function cornerSide(q, card, car) {
     var plan = MV.searchPlan ? MV.searchPlan(q) : null;
     var disc = MV.discFor(card);
@@ -7244,6 +7269,9 @@
       // (MV.routeLadder), and the car -> pickup road of a card with nothing
       // in the car and no end to draw its trip to.
       var notes = [], pickRoad = null;
+      // ...and the ends refused and routed to their general area (areaEnd),
+      // which drawMap marks "≈" — the held order's, and this card's own.
+      var areas = { held: null, drop: null };
       if (nbx.route && mapNbx && want.runs) {
         // Two orders: a road per line drawMap draws — the run through both,
         // or each order's own — and only where the line would state a
@@ -7279,6 +7307,13 @@
           if (gone()) return;
           if (side) { heldOk = side; rung = 'street'; }
         }
+        // ...and a door refused whose answers are one general area: their
+        // middle, "≈ route to area" (the owner, 24 Oct). Not a pin the map
+        // calls wrong: `hj.held` is null only where nothing was pinned.
+        if (!heldOk && !hj.held && want.held) {
+          var area = areaEnd(want, want.held, true);
+          if (area) { heldOk = area; rung = MV.routeRung(want.held, area, null); areas.held = area; }
+        }
         if (!heldOk && !picksOk.length && heldSaid && heldSaid.pickAt) picksOk = [heldSaid.pickAt];
         var lad = want.held || picksOk.length
           ? MV.routeLadder(here || want.carNow, picksOk, heldOk, rung) : null;
@@ -7312,6 +7347,11 @@
           if (gone()) return;
           if (dside) { dropOk = dside; dropRung = 'street'; }
         }
+        // ...and its door refused, its answers one general area (areaEnd).
+        if (pickOk && !dropOk && !jj.drop && want.dropoff) {
+          var darea = areaEnd(want, want.dropoff, false);
+          if (darea) { dropOk = darea; dropRung = MV.routeRung(want.dropoff, darea, null); areas.drop = darea; }
+        }
         var jl = pickOk ? MV.routeLadder(dropOk ? null : here, [pickOk], dropOk, dropRung) : null;
         if (jl && (dropOk || !want.held)) {
           var jr = await mapNbx.runLine(jl.pts);
@@ -7321,7 +7361,8 @@
           if (jr && jl.note) notes.push('trip: ' + jl.note);
         }
       }
-      drawMap(want, found, here, true, road, heldRoad, jobRoad, { notes: notes, pickRoad: pickRoad });
+      drawMap(want, found, here, true, road, heldRoad, jobRoad,
+              { notes: notes, pickRoad: pickRoad, areas: areas });
       if (want.refit) { fitFor = cardId; fitWanted = false; }
     } finally {
       mapBusy = false;
@@ -7963,6 +8004,22 @@
         sayFor(want.held, two ? 'where order \u2460 in your car is going'
                               : 'where the order in your car is going', off.held),
         want.held, true, numberOf[want.held] || (two ? 'D1' : 'D'));
+    /* ...or, its door refused, the general area its answers share (areaEnd;
+       the owner, 24 Oct), where the run was routed to: a FADED ring marked
+       "≈" and never D, so it cannot be read as the door — nor its words as
+       the end's ("where the order in your car is going" is the pin's). No
+       figure is measured to it, and the GPS drop is not armed by it. */
+    var areas = ladder.areas || {};
+    if (!held && areas.held) {
+      put(areas.held, '#f5a524', '≈ the area the order in your car is going to — '
+          + 'what its answers share, not the door', want.held, true, '≈',
+          { faded: true });
+    }
+    if (!drop && areas.drop) {
+      put(areas.drop, '#f5a524', '≈ the area this one is dropped in — '
+          + 'what its answers share, not the door', want.dropoff, false, '≈',
+          { faded: true, aside: inCar });
+    }
     put(j.held2, colourFor(want.held2, '#f5a524', off.held2),
         sayFor(want.held2, 'where order \u2461 in your car is going', off.held2),
         want.held2, true, numberOf[want.held2] || 'D2');
@@ -8170,7 +8227,11 @@
 
     // ...and the runs' rungs below the door after it (MV.routeSaid), on the
     // caption only: the card's line is the figure's, and no rung is one.
-    mapDrew(MV.routeSaid ? MV.routeSaid(ans.said, ladder.notes) : ans.said);
+    // An end routed to its general area is named, so its own refusal can
+    // carry the area's words (MV.routeSaid, `about`: the caption's cut).
+    mapDrew(MV.routeSaid ? MV.routeSaid(ans.said, ladder.notes,
+                                        areas.held ? shortPlace(want.held, DISC_PLACE_SHOWN) : null)
+                         : ans.said);
     // ...and the card's line, off the same answer: with the press behind it
     // this walk may have asked the public map too, which the card's own walk
     // never does, so this one is the card's answer from here on (wayAnswered).

@@ -2708,9 +2708,23 @@ function endHold(key) {
   return hit;
 }
 
-function refuseHeldEnd(h, why) {
+/* ...and with the refusal, where pickInDisc found its answers to be one
+ * general area (MV's withArea, AREA_MI: the owner, 24 Oct — "route even if
+ * it is not exact as long as it gets the general area right"), that area,
+ * kept as `endArea` for Map view's run and NOTHING ELSE. It is not `endPin`:
+ * heldEndPin reads endPin alone and asks doorLevel, so the GPS drop, the
+ * restaurant guard (pickupNearEnd), the customer guard and the drop row's
+ * pinOutcome never see it, and `endWhy` goes on saying why the drop is not
+ * armed. Read only beside endWhyFor (heldEndState), so a changed dropoff
+ * does not wear the old area; any refusal without one takes it off. */
+function refuseHeldEnd(h, why, area) {
   h.endWhy = why;
   h.endWhyFor = endTextOf(h);
+  if (area && isFinite(area.lat) && isFinite(area.lon)) {
+    h.endArea = { lat: area.lat, lon: area.lon, approx: true, n: area.n, miles: area.miles };
+  } else {
+    delete h.endArea;
+  }
   saveHold(h);
 }
 
@@ -2769,6 +2783,7 @@ function pinHeldEnd(h, at, by, asked, via) {
   delete h.arrivedAt;
   delete h.endWhy;
   delete h.endWhyFor;
+  delete h.endArea;
   resetArrival(holdIdOf(h));
   saveHold(h);
 }
@@ -2887,16 +2902,20 @@ function doorChain(plan, disc, named, ask, done) {
 function settleHeldEnd(key, attempt, disc, res, asked, via) {
   var now = endHold(key);
   if (!now || heldEndPin(now)) return;
+  // (`res.area`, the street's general area, rides down both to the refusal
+  // they may end in: refuseHeldEnd's endArea, never a pin.)
   if (!res.at && res.why === 'nodoor' && placeOf(now)) {
-    return searchHeldPlace(key, attempt, disc, asked);
+    return searchHeldPlace(key, attempt, disc, asked, res.area);
   }
   // ...and with no place, or none found, the street itself when it is short
   // (searchHeldStreet, the owner's fault of 19 Oct).
   if (!res.at && res.why === 'nodoor') {
-    return searchHeldStreet(key, attempt, disc, asked, END_WHY.nodoor);
+    return searchHeldStreet(key, attempt, disc, asked, END_WHY.nodoor, res.area);
   }
+  // ...and 'several' doors that are one general area (the owner, 24 Oct)
+  // refused as ever, the area kept beside the refusal.
   if (!res.at) {
-    return refuseHeldEnd(now, END_WHY[res.why] || 'no house number');
+    return refuseHeldEnd(now, END_WHY[res.why] || 'no house number', res.area);
   }
   pinHeldEnd(now, res.at, 'server', asked, via);
 }
@@ -2913,18 +2932,19 @@ function settleHeldEnd(key, attempt, disc, res, asked, via) {
  * NW, <Town>" on a campus, the road on the NucBox and house 1000 not, the stop
  * named "<Something> Parking Deck" on the phone, and the delivered order held
  * because GPS arrival never armed. */
-function searchHeldPlace(key, attempt, disc, asked) {
+function searchHeldPlace(key, attempt, disc, asked, area) {
   var h = endHold(key);
   if (!h) return;
   var said = nbxTerm(MV.placeQuery(placeOf(h)) || '');
-  if (!said) return searchHeldStreet(key, attempt, disc, asked, END_WHY.noplace);
+  if (!said) return searchHeldStreet(key, attempt, disc, asked, END_WHY.noplace, area);
   var target = nbxSearchTarget('q', said, MV.discBox(disc));
   endAsk(key, attempt, target, function (out) {
     var now = endHold(key);
     if (!now || heldEndPin(now)) return;
     var res = MV.pickPlace(out.hits, disc, placeOf(now), out.cutAt);
     if (!res.at) {
-      return searchHeldStreet(key, attempt, disc, asked, END_WHY[res.why] || END_WHY.noplace);
+      return searchHeldStreet(key, attempt, disc, asked, END_WHY[res.why] || END_WHY.noplace,
+                              area);
     }
     pinHeldEnd(now, res.at, 'place');
   });
@@ -2968,20 +2988,20 @@ function searchHeldPlace(key, attempt, disc, asked) {
  * the street. A through road of a mile is an arterial and never arms so. */
 var SHORT_STREET_M = 600;
 
-function searchHeldStreet(key, attempt, disc, asked, why) {
+function searchHeldStreet(key, attempt, disc, asked, why, area) {
   var h = endHold(key);
   if (!h) return;
   var plan = [asked, h.dropoff].map(function (t) {
     return typeof t === 'string' && t ? MV.searchPlan(t) : null;
   }).filter(function (pl) { return pl && MV.streetRetry(pl); })[0];
   var said = NBX.streets && plan ? nbxTerm(MV.nameAsked(plan) || '') : null;
-  if (!said) return refuseHeldEnd(h, why);
+  if (!said) return refuseHeldEnd(h, why, area);
   var target = streetTarget('whole', { name: said, box: MV.discBox(disc) });
   endAsk(key, attempt, target, function (ans) {
     var now = endHold(key);
     if (!now || heldEndPin(now)) return;
     var one = shortStreetIn(ans, disc);
-    if (!one) return refuseHeldEnd(now, why);
+    if (!one) return refuseHeldEnd(now, why, area);
     pinHeldEnd(now, one.at, 'street', asked);
     now.endPin.lines = one.lines;
     now.endPin.metres = one.metres;
@@ -4117,6 +4137,13 @@ function heldEndState(h) {
            endWhy: pin
              ? (pickupNearEnd(h, pin) ? 'door next to the pickup' : notOneCustomer(h))
              : h.endWhyFor === endTextOf(h) ? (h.endWhy || null) : null,
+           // ...and, with no pin, the general area the refusal kept
+           // (refuseHeldEnd, the owner's 24 Oct): `approx` always, for Map
+           // view's run ("≈ route to area") and never the GPS drop — endWhy
+           // beside it still says why that is not armed. Null otherwise.
+           endArea: !pin && h.endArea && h.endWhyFor === endTextOf(h)
+             ? { lat: h.endArea.lat, lon: h.endArea.lon, approx: true,
+                 n: h.endArea.n, miles: h.endArea.miles } : null,
            // ...and its pickups the car has called at (visitPickups,
            // plannerVisits), by planner line (MV.pickupKey): the panel's next
            // stop, Map view's run and the figure's stops leave them out. On
@@ -9899,6 +9926,7 @@ function route(req, res) {
         delete h.arrivedAt;
         delete h.endWhy;
         delete h.endWhyFor;
+        delete h.endArea;
         resetArrival(holdIdOf(h));
         saveHold(h);
       }
