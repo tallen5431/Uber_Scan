@@ -4973,6 +4973,31 @@ const framed = (page) => page.waitForFunction(
         r.placeHeld = await heldPin();
         r.placeAsked = relayAsked.slice(placeAskedBefore)
           .filter((u) => /[?&]q=Wrenfield%20Parking%20Deck&/.test(u)).length;
+        // The owner's DoorDash snap of 24 Oct, 19:25, invented: a NEW offer's
+        // pickup whose door the NucBox's list was cut on, its ten answers
+        // one tight cluster (MV's withArea, `cut`): the trip routed from
+        // the pickup's area, a faded green "≈" ring and never P, its own
+        // refusal saying so, and nothing of it posted.
+        const areaPosts = [];
+        const onPost = (q) => {
+          if (q.method() === 'POST' && /\/api\/held-/.test(q.url())) areaPosts.push(q.url());
+        };
+        page.on('request', onPost);
+        await push({ id: 'n-cutarea', pickup: '10800 Vessington Hwy, Marietta',
+                     dropoff: '4821 Kestrel Dr, Marietta', holdId: 'h-cutarea' });
+        await page.waitForTimeout(2500);
+        r.cutArea = {
+          note: await note(),
+          chip: await page.evaluate(() => {
+            const n = document.getElementById('viewNote');
+            return n.classList.contains('chipped') ? n.textContent.trim() : null; }),
+          ring: await page.evaluate(() => (window.__marks || []).filter(
+            (k) => String(k.popup || '').indexOf('the area this one is picked up in') >= 0)
+            .map((k) => ({ ll: k.ll, faded: (k.opts || {}).fillOpacity < 0.5 }))),
+          pick: await pick(),
+          job: (await keyNow()).job,
+          posts: areaPosts.slice() };
+        page.off('request', onPost);
         // The same street-only door, no place, but the SERVER armed it by
         // the short street (endBy 'street', its point): Map view draws that
         // as D, not "NO PIN" (the owner, 19 Oct). A pin of Map view's own
@@ -10947,9 +10972,11 @@ try:
        'not pinned', (both.get('cut'), both.get('cutPick')),
        ("no pin for Starbucks — too many to be sure · the NucBox lists 10 at most",
         None))
+    # (...and, since the owner's DoorDash snap of 24 Oct, the offer's own
+    # pickup routed to its street's general area says so in its refusal.)
     ok_('a door the NucBox holds only the street of is refused, not pinned as the '
         'door (%r)' % both.get('door'),
-        re.match(r"^no pin for Jimmy.* — street found, not that door$",
+        re.match(r"^no pin for Jimmy.* — street found, not that door · ≈ routed to area$",
                  both.get('door') or '') and both.get('doorPick') is None)
     eq('[place] Map view pins the held end by its place when the NucBox has its street and '
        'not its door, asking the place once when it is learnt for the same card, and '
@@ -10960,6 +10987,14 @@ try:
        'a "≈" ring and never the end\'s pin, the caption saying so (%r)' % both.get('noPlaceNote'),
        (both.get('noPlaceArea'), '\u2248 rout' in (both.get('noPlaceNote') or '')),
        ([[33.97, -84.53]], True))
+    _ca = both.get('cutArea') or {}
+    eq('[area more] a new offer\'s pickup the NucBox\'s list was cut on, its answers one area: '
+       'no P, a faded "≈" ring where the trip starts, its own refusal saying "≈ routed, 10+", '
+       'nothing posted (%r, %r)' % (_ca.get('note'), _ca.get('chip')),
+       (_ca.get('pick'), len(_ca.get('ring') or []),
+        all(m.get('faded') for m in _ca.get('ring') or []),
+        '\u2248 routed, 10+ within 0.3 mi' in (_ca.get('note') or ''), _ca.get('posts')),
+       (None, 1, True, True, []))
     ok_('[server pin] Map view draws the held end the server armed by street as D, at its '
         'point, and does not say NO PIN; a pin by no server rule is not drawn (%r)'
         % both.get('serverNote'),
@@ -11257,8 +11292,10 @@ try:
         len(_d) == 1 and both.get('doorPick') is None
         # (...and, since the owner's 24 Oct, that the run goes to the street's
         # general area: its one answer is inside the disc, MV's withArea.)
-        and _d[0].get('tip') == (both.get('door') or '?') + ' · ≈ routed to the area, '
-        'not a door · this one its street, not door 4821')
+        # (...and the caption's own words for that route, since the DoorDash
+        # snap of 24 Oct, are the caption's, not the candidate's tip.)
+        and _d[0].get('tip') == (both.get('door') or '?').replace(' · ≈ routed to area', '')
+        + ' · ≈ routed to the area, not a door · this one its street, not door 4821')
     _k = _of(st.get('cornerHow'), 'mv-how mv-cand mv-held')
     ok_('a corner pinned where its streets meet: the meeting drawn under the held '
         'pin, in the held card\'s colour, inside its 3.0 mi card\'s disc (%r)' % (_k,),

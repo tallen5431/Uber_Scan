@@ -7077,7 +7077,10 @@
     if (!a && held && heldSaid && !heldSaid.endPinned) a = heldSaid.endArea;
     if (!a || typeof a.lat !== 'number' || typeof a.lon !== 'number'
         || !isFinite(a.lat) || !isFinite(a.lon)) return null;
-    return { lat: a.lat, lon: a.lon, approx: true, n: a.n, miles: a.miles };
+    // ...a list cut at the limit (`cut`) or the street's own area (`rough`)
+    // said so (MV.areaNote; the owner's DoorDash snap of 24 Oct).
+    return { lat: a.lat, lon: a.lon, approx: true, n: a.n, miles: a.miles,
+             cut: a.cut === true, rough: a.rough === true };
   }
 
   async function cornerSide(q, card, car) {
@@ -7348,7 +7351,7 @@
       var notes = [], pickRoad = null;
       // ...and the ends refused and routed to their general area (areaEnd),
       // which drawMap marks "≈" — the held order's, and this card's own.
-      var areas = { held: null, drop: null };
+      var areas = { held: null, drop: null, pick: null, picks: [] };
       // ...and the batched trip's other doors the run went through, with
       // their points or none, for drawMap's D1, D2 (MV.heldDrops).
       var ladDrops = [];
@@ -7380,6 +7383,26 @@
         var heldOk = hj.held && !hj.off.held && !hj.wrong[want.held] ? hj.held : null;
         var picksOk = hj.heldPicks.filter(function (p) { return p.at && !p.off && !hj.wrong[p.q]; })
           .map(function (p) { return p.at; });
+        /* ...and a held pickup with no pin whose door's answers are one
+           general area (areaEnd, Map view's own search; the owner's DoorDash
+           snap of 24 Oct): the run goes through it, a faded "≈" ring.
+           PAGE-SIDE ONLY: never posted (pinHeldPickup sends `got.at` alone),
+           so never in the server's pickupPins, never the restaurant guard's,
+           never a figure's stop (detourThrough reads `found`). Only where
+           every pickup is a door or such an area, so the run's order
+           stands; said in that pickup's own refusal (MV.routeSaid). */
+        var pickAreas = [];
+        if (picksOk.length < hj.heldPicks.length) {
+          var withAreas = hj.heldPicks.map(function (p) {
+            if (p.at) return p.at && !p.off && !hj.wrong[p.q] ? p.at : null;
+            var pa = areaEnd(want, p.q, false);
+            if (pa) pickAreas.push({ q: p.q, at: pa });
+            return pa;
+          });
+          if (pickAreas.length && withAreas.every(Boolean)) picksOk = withAreas;
+          else pickAreas = [];
+        }
+        areas.picks = pickAreas;
         var heldSeen = want.nbxSeen && want.nbxSeen[want.held];
         var rung = MV.routeRung(want.held, heldOk, heldSeen && heldSeen.res ? heldSeen.res.by : null);
         if (!heldOk && !hj.held && want.held && nbx.streets) {
@@ -7430,6 +7453,9 @@
           heldRoad = await mapNbx.runLine(lad.pts);
           if (viewMode !== 'map' || mapFor !== key) return;
           if (heldRoad && lad.note) notes.push(lad.note);
+          if (heldRoad) {
+            pickAreas.forEach(function (pa) { notes.push(MV.areaNote(pa.at, true)); });
+          }
           if (lad.skip) notes.push(lad.skip);
         }
         ladDrops = drops;
@@ -7454,6 +7480,18 @@
            own). Not from a pickup the map calls wrong or a card refuses. */
         var jj = mapJudge(want, found, here);
         var pickOk = jj.pick && !jj.off.pick && !jj.wrong[want.pickup] ? jj.pick : null;
+        /* ...and its pickup's door refused, its answers one general area
+           (areaEnd; the owner's DoorDash snap of 24 Oct, 19:23: "NO PIN ·
+           10495…, none found" over a pickup the map could have routed to the
+           area of): the trip from there, its words in the pickup's own
+           refusal ("≈ routed, 10+ within 0.4 mi", MV.routeSaid).
+           Drawing only, as the dropoff's: never in `found`, so the detour's
+           figure and the card's line still refuse as before. */
+        var pickArea = null;
+        if (!pickOk && !jj.pick && want.pickup) {
+          pickArea = areaEnd(want, want.pickup, false);
+          if (pickArea) { pickOk = pickArea; areas.pick = pickArea; }
+        }
         var dropOk = jj.drop && !jj.wrong[want.dropoff] ? jj.drop : null;
         var dropRung = MV.routeRung(want.dropoff, dropOk, null);
         if (pickOk && !jj.drop && want.dropoff && nbx.streets) {
@@ -7472,7 +7510,9 @@
           if (viewMode !== 'map' || mapFor !== key) return;
           if (dropOk) jobRoad = jr;
           else pickRoad = jr;
-          if (jr && jl.note) notes.push('trip: ' + jl.note);
+          // (A pickup area's own words stand for "pickup only".)
+          if (jr && pickArea) notes.push('trip: ' + MV.areaNote(pickArea, true));
+          if (jr && jl.note && !(pickArea && !dropOk)) notes.push('trip: ' + jl.note);
         }
       }
       drawMap(want, found, here, true, road, heldRoad, jobRoad,
@@ -8134,6 +8174,20 @@
           + 'what its answers share, not the door', want.dropoff, false, '≈',
           { faded: true, aside: inCar });
     }
+    // ...and the pickups routed to their general area (the owner's DoorDash
+    // snap of 24 Oct): this card's own, and the held order's, faded green
+    // "≈" and never P — not the restaurant's door, not the guard's.
+    var areaSaid = function (a) {
+      return a.rough ? 'its street, the door not found' : 'what its answers share, not the door';
+    };
+    if (!pick && areas.pick) {
+      put(areas.pick, '#17c964', '≈ the area this one is picked up in — '
+          + areaSaid(areas.pick), want.pickup, false, '≈', { faded: true });
+    }
+    (areas.picks || []).forEach(function (pa) {
+      put(pa.at, '#17c964', '≈ the area of a pickup of the order in your car — '
+          + areaSaid(pa.at), pa.q.replace(/,$/, ''), true, '≈', { faded: true });
+    });
     /* ...and a batched trip's other doors the run goes through (MV.heldDrops;
        the owner's snap of 24 Oct): a RING in the end's amber, D1, D2 in the
        planner's order, faded where only the general area was found. Drawn
@@ -8374,9 +8428,22 @@
     // caption only: the card's line is the figure's, and no rung is one.
     // An end routed to its general area is named, so its own refusal can
     // carry the area's words (MV.routeSaid, `about`: the caption's cut).
-    mapDrew(MV.routeSaid ? MV.routeSaid(ans.said, ladder.notes,
-                                        areas.held ? shortPlace(want.held, DISC_PLACE_SHOWN) : null)
-                         : ans.said);
+    // Each end so routed with ITS note, so the caption that is one end's
+    // refusal never carries another's area (the DoorDash snap of 24 Oct: the
+    // caption was the offer's own pickup's).
+    var aboutAreas = [];
+    if (areas.held) aboutAreas.push([shortPlace(want.held, DISC_PLACE_SHOWN), MV.areaNote(areas.held)]);
+    if (areas.pick) {
+      aboutAreas.push([shortPlace(want.pickup, DISC_PLACE_SHOWN),
+                       'trip: ' + MV.areaNote(areas.pick, true), areas.pick]);
+    }
+    if (areas.drop) {
+      aboutAreas.push([shortPlace(want.dropoff, DISC_PLACE_SHOWN), 'trip: ' + MV.areaNote(areas.drop)]);
+    }
+    (areas.picks || []).forEach(function (pa) {
+      aboutAreas.push([shortPlace(pa.q, DISC_PLACE_SHOWN), MV.areaNote(pa.at, true), pa.at]);
+    });
+    mapDrew(MV.routeSaid ? MV.routeSaid(ans.said, ladder.notes, aboutAreas) : ans.said);
     // ...and the card's line, off the same answer: with the press behind it
     // this walk may have asked the public map too, which the card's own walk
     // never does, so this one is the card's answer from here on (wayAnswered).

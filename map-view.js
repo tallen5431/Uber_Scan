@@ -863,10 +863,25 @@
                       pickup: 'route to pickup only', area: '≈ route to area' };
 
   /* The words for an area's rung: how many answers and how far apart, so
-     the driver can see how rough the end of the run is. */
-  function areaNote(at) {
-    return ROUTE_NOTES.area + (at && at.n > 1 && isFinite(at.miles)
-      ? ', ' + at.n + ' within ' + Math.max(0.1, at.miles).toFixed(1) + ' mi' : '');
+     the driver can see how rough the end of the run is — "10+" where the
+     list was cut (withArea's `cut`), and a street's area (streetArea,
+     `rough`) said as one, "≈ route to street area", with no count: its
+     spread is a street's length, not answers that disagree. `pickup` for
+     the offer's own pickup or the held order's, routed to as a stop and not
+     the end: "≈ pickup area" — said ONLY inside that pickup's own
+     refusal, where routeSaid gives the count or the street (its `about`'s
+     area), and nowhere else: after another end's refusal and its disc's
+     tail, "≈ route to pickup area, 10+ within 1.0 mi", "≈ route to pickup
+     street area" and "≈ pickup area" each took the caption past two rows
+     at 800x480 and its chip past three on the hat (rpi/test_layout.py).
+     Elsewhere the faded "≈" ring on the map says it. */
+  function areaNote(at, pickup) {
+    if (pickup) return '≈ pickup area';
+    var head = '≈ route to ' + (at && at.rough ? 'street ' : '') + 'area';
+    if (!at || at.rough) return head;
+    return head + ((at.n > 1 || at.cut) && isFinite(at.miles)
+      ? ', ' + at.n + (at.cut ? '+' : '') + ' within ' + Math.max(0.1, at.miles).toFixed(1) + ' mi'
+      : '');
   }
 
   /* The rung an end's point stands on: `place` the text searched, `at` its
@@ -1055,17 +1070,38 @@
      chip past three on the 3.5" hat. The disc's figures are the tail a clamp
      may eat anyway; the refusal's reason stays, and its chip says "≈"
      (LINE_CHIPS). An area note about another place stays a note. */
+  /* ...`about` may also be a list of [place, note, area] (the owner's
+     DoorDash snap of 24 Oct: the caption was the offer's own PICKUP's
+     refusal), each end routed to an area with ITS note: the refusal of
+     `place` takes the words of `note` and no other, so one end's area is
+     never said in another's refusal — said off `area` where it is given
+     (areaNote's count, which a pickup's note leaves out). The pickup's word and a trip's "trip:"
+     go, as the refusal names the place: "≈ routed, 10+ within 0.4 mi",
+     "≈ routed to street area". The disc's tail goes as above — and a cut
+     list's ("· the NucBox lists 10 at most"): the refusal's reason stays. */
+  function areaMerged(n) {
+    var m = /^(?:trip: )?\u2248 (?:route to |pickup )((?:street )?area)(, .*)?$/.exec(n);
+    return m ? ' · \u2248 routed' + (m[2] || ' to ' + m[1]) : null;
+  }
+
   function routeSaid(said, notes, about) {
     var s = String(said || ''), seen = [];
-    var lead = about ? 'no pin for ' + about + ' — ' : null;
+    var pairs = Array.isArray(about) ? about.filter(function (p) { return p && p[0] && p[1]; })
+      : about ? [[about, null]] : [];
     (notes || []).forEach(function (n) {
       if (!n || seen.indexOf(n) !== -1) return;
-      if (lead && s.indexOf(lead) === 0 && n.indexOf(ROUTE_NOTES.area) === 0
-          && s.indexOf(' · \u2248 routed') === -1) {
-        var rest = n.slice(ROUTE_NOTES.area.length);
-        s = s.replace(/ · within .*$/, '') + ' · \u2248 routed' + (rest || ' to area');
-        return;
+      for (var i = 0; i < pairs.length; i++) {
+        var lead = 'no pin for ' + pairs[i][0] + ' — ';
+        var mine = pairs[i][1] === null
+          ? n.indexOf('\u2248 route to ') === 0 : n === pairs[i][1];
+        var words = !mine ? null : pairs[i][2] ? areaMerged(areaNote(pairs[i][2])) : areaMerged(n);
+        if (words && s.indexOf(lead) === 0 && s.indexOf(' · \u2248 routed') === -1) {
+          s = lead + s.slice(lead.length).split(' · ')[0] + words;
+          return;
+        }
       }
+      // A pickup's area is said in its own refusal or not at all (areaNote).
+      if (/^(?:trip: )?\u2248 pickup area$/.test(n)) return;
       seen.push(n);
     });
     return seen.length ? s + ' · ' + seen.join(' · ') : s;
@@ -1073,7 +1109,7 @@
 
   // The notes routeSaid put after a sentence, as one tail; captionChip
   // chips the sentence before them and keeps them after the chip.
-  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ route to area(?:, \d+ within [\d.]+ mi)?|route skips \d+ dropoffs?, not found))+)$/;
+  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ route to (?:street )?area(?:, \d+\+? within [\d.]+ mi)?|route skips \d+ dropoffs?, not found))+)$/;
   function routeTail(text) {
     var m = ROUTE_TAIL.exec(String(text || ''));
     return m ? { said: text.slice(0, m.index), tail: m[1] } : { said: text, tail: '' };
@@ -1351,9 +1387,22 @@
    *
    * { lat, lon, name, approx: true, n, miles }: the middle of them
    * (middleOf, as a pin's), how many, and how far apart the two farthest
-   * are. Never for 'none', 'capped' or 'together', never for a corner, a
-   * merchant's name or a place by its name (pickPlace), and never with no
-   * disc: a spread is only small against a card's reach.
+   * are. Never for 'together', never for a corner, a merchant's name or a
+   * place by its name (pickPlace), and never with no disc: a spread is only
+   * small against a card's reach.
+   *
+   * ...and (the owner's DoorDash snap of 24 Oct, 19:23: "It is better to
+   * route something than nothing at all") two more, for routing still:
+   *
+   *   'capped'   the list cut at the NucBox's limit, every candidate the cut
+   *              list holds inside the disc within AREA_MI: `cut: true` on
+   *              the area, said "10+" — the list may have held more, and
+   *              the snap's were drawn as one tight cluster in the right
+   *              place. The same AREA_MI, not a wider cap: a cut list is
+   *              less, not more, to go on, so it earns no looser spread.
+   *   'none'     nothing at the door's street as printed or retried: the
+   *              STREET asked alone (streetArea, ROUGH_AREA_MI below),
+   *              `rough: true`.
    *
    * IT IS NOT A PIN. The refusal stands, `at` stays null and the `why` is
    * the one it was, so every rule that reads `at` — the GPS drop's door
@@ -1384,13 +1433,83 @@
 
   // `res` with its area put on, where the rule above allows one; `pts` the
   // candidates inside the disc.
-  function withArea(res, pts, disc, plan) {
+  function withArea(res, pts, disc, plan, cut) {
     if (!disc || !plan || plan.kind !== 'street' || !plan.door || !pts.length
         || !agreeing(pts, AREA_MI)) return res;
     var mid = middleOf(pts);
     res.area = { lat: mid.lat, lon: mid.lon, name: pts[0].name || '', approx: true,
                  n: pts.length, miles: spreadOf(pts) };
+    if (cut) res.area.cut = true;
     return res;
+  }
+
+  /* --- the street alone, when the door's street found nothing ---------------
+   *
+   * The owner's DoorDash snap of 24 Oct, 19:23: an offer's pickup "10495
+   * <Name> Street, <Town>", and the hat said "NO PIN · 10495…, none found" —
+   * the NucBox answered NOTHING for the door, nor for it with the type word
+   * left out (streetRetry), and nothing was routed. "It is better to route
+   * something than nothing at all."
+   *
+   * So where a door plan's answer, after every retry, is 'none', the STREET
+   * is asked ONCE more, alone: its name as printed less the house number
+   * (nameAsked — "<Name> Street"), of the NucBox's street index, `whole`,
+   * in the disc's box — the question the server's held end already asks of
+   * a court (searchHeldStreet), so the two share its answer. The index
+   * matches names its own way (a type word another way, one lost, a letter
+   * misread inside the box: streets.js match), which is why it is asked and
+   * not the search again: the search just said it holds nothing of that
+   * name, and asking it the same street without the number is the same
+   * question. No street index, no street asked. The town is never asked.
+   *
+   * Its answer is a ROUGH area only where ALL of:
+   *
+   *   1. the index read the name as ONE name (`names` one): two streets the
+   *      read could be are none, as nameRetry's rule;
+   *   2. no street of that name in the box is too long to have been sent
+   *      whole (`lines` null past streets.js WHOLE_LINE_M, 2 km): a long
+   *      street is not one area, and which of its pieces is the door's is
+   *      the question the card does not answer. Its pieces nearest the disc's
+   *      centre were NOT taken: the centre is where the card was read, the
+   *      car, not where the door is, so nearest it is a guess about the
+   *      driver, not the door;
+   *   3. some of its points lie inside the disc, and all the points of the
+   *      streets that do lie within ROUGH_AREA_MI of each other.
+   *
+   * { lat, lon, name, approx: true, rough: true, n, miles }: the point ON
+   * the street nearest the middle of its points (so the run ends on the
+   * street), how many streets, and the spread. Said "≈ route to street area"
+   * — rougher than a door's area, and said so. Not a pin, as above.
+   *
+   * ROUGH_AREA_MI is 1.5 mi, CHOSEN, NOT MEASURED. What it rests on: one
+   * street sent whole is at most WHOLE_LINE_M (1.24 mi) long, so one street
+   * always fits; two streets of one name fit only where they are one
+   * neighbourhood's, and a run ending up to ~0.75 mi from the door still
+   * ends in the right few streets, which is the owner's "generally right". */
+  var ROUGH_AREA_MI = 1.5;
+
+  function streetArea(ans, disc) {
+    if (!ans || !disc || !Array.isArray(ans.streets) || !Array.isArray(ans.names)
+        || ans.names.length !== 1) return null;
+    if (ans.streets.some(function (st) { return !st || !Array.isArray(st.lines); })) return null;
+    var runs = [], n = 0;
+    ans.streets.forEach(function (st) {
+      var mine = st.lines.map(function (l) {
+        return l.map(function (p) { return { lat: p[0], lon: p[1] }; });
+      });
+      var inside = mine.some(function (r) {
+        return r.some(function (p) { return crowMiles(disc.at, p) <= disc.miles; });
+      });
+      if (!inside) return;
+      n++;
+      runs = runs.concat(mine);
+    });
+    var pts = [].concat.apply([], runs);
+    if (!pts.length || !agreeing(pts, ROUGH_AREA_MI)) return null;
+    var on = nearestOn(runs, middleOf(pts));
+    if (!on) return null;
+    return { lat: on.at.lat, lon: on.at.lon, name: ans.names[0], approx: true, rough: true,
+             n: n, miles: spreadOf(pts) };
   }
 
   /* Which candidate, if any. `hits` is what the NucBox answered ({lat, lon,
@@ -1411,8 +1530,8 @@
    *   { why: 'together', n }       a corner (`plan.kind` 'cross') whose two
    *                                streets run together inside the disc
    *
-   * ...and a door plan's 'nodoor' or 'several' with `area` beside it, still
-   * no pin, where its candidates inside the disc are one general area
+   * ...and a door plan's 'nodoor', 'several' or 'capped' with `area` beside
+   * it, still no pin, where its candidates inside the disc are one general area
    * (withArea, AREA_MI: for routing and trip planning only).
    *
    * CAPPED, refused outright. The other honest rule was to ask again in a
@@ -1431,7 +1550,14 @@
 
   function pickInDisc(hits, disc, plan, cutAt) {
     var all = pointsAmong(hits);
-    if (cutAt) return { at: null, why: 'capped', n: cutAt };
+    // ...cut, refused; and where what the cut list holds inside the disc is
+    // one general area, that area beside it (withArea, `cut`).
+    if (cutAt) {
+      return withArea({ at: null, why: 'capped', n: cutAt },
+                      disc ? all.filter(function (h) {
+                        return crowMiles(disc.at, h) <= disc.miles;
+                      }) : [], disc, plan, true);
+    }
     if (plan && plan.door && all.length) {
       var doors = all.filter(function (h) { return hasDoor(h, plan.house); });
       if (!doors.length) {
@@ -3355,6 +3481,19 @@
         });
       });
     }
+    // ...and a door whose every question found NOTHING ('none'), with the
+    // street index set, its street alone (streetArea; the owner's DoorDash
+    // snap of 24 Oct): a rough area beside the refusal, or the refusal as
+    // it was. The server asks the held end's the same (searchHeldStreetArea).
+    if (opts.streets && disc && plan.kind === 'street' && plan.door) {
+      asked = asked.then(function (res) {
+        if (res.at || res.why !== 'none' || res.area) return res;
+        return me.streetArea(plan, disc).then(function (a) {
+          if (a) res.area = a;
+          return res;
+        });
+      });
+    }
     // ...and the held end's PLACE, the owner's rule of 17 Oct (pickPlace):
     // `opts.place` is the place the phone printed for the stop, given only
     // for the held order's end (live.html, askNucBox), and it is asked only
@@ -3372,6 +3511,18 @@
         }
         return p;
       });
+    });
+  };
+
+  /* The street of a door plan alone, of the street index (`whole`, the
+     server's question for a court, searchHeldStreet), as a rough area
+     (streetArea) or null — for any answer that is not one, too. */
+  NbxSearch.prototype.streetArea = function (plan, disc) {
+    var name = nameAsked(plan);
+    if (!name || !disc) return Promise.resolve(null);
+    return this.get('/whole?name=' + encodeURIComponent(name) + '&box='
+                    + encodeURIComponent(discBox(disc))).then(function (body) {
+      return nbxDown(body) ? null : streetArea(body, disc);
     });
   };
 
@@ -4034,7 +4185,7 @@
     // ...and an end the run went to the general area of (routeSaid's
     // "≈ routed"): the area's words are the chip's reason, as they took the
     // disc's place in the sentence.
-    [/^no pin for (.+?) — .+? · (\u2248 routed(?:, \d+ within [\d.]+ mi| to area))$/,
+    [/^no pin for (.+?) — .+? · (\u2248 routed(?:, \d+\+? within [\d.]+ mi| to (?:street )?area))$/,
      function (m) { return 'NO PIN · ' + m[1] + ', ' + m[2]; }],
     [/^no pin for (.+?) — (.+?)(?: · .*)?$/, function (m) {
       return 'NO PIN · ' + m[1] + ', ' + (PIN_SHORT[m[2]] || m[2]); }],
@@ -4267,7 +4418,8 @@
            plannerName: plannerName, heldPickups: heldPickups, pickupKey: pickupKey,
            heldRun: heldRun, routeFrom: routeFrom, ROUTE_MOVE_M: ROUTE_MOVE_M,
            ROUTE_NOTES: ROUTE_NOTES, routeRung: routeRung, routeLadder: routeLadder,
-           routeSaid: routeSaid,
+           routeSaid: routeSaid, areaNote: areaNote, streetArea: streetArea,
+           ROUGH_AREA_MI: ROUGH_AREA_MI,
            // ...and a batched trip's other doors, drawn on the run (24 Oct).
            heldDrops: heldDrops, dropKey: dropKey, dropPoint: dropPoint,
            dropsSkipped: dropsSkipped,

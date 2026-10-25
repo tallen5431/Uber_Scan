@@ -2744,11 +2744,21 @@ function refuseHeldEnd(h, why, area) {
   h.endWhy = why;
   h.endWhyFor = endTextOf(h);
   if (area && isFinite(area.lat) && isFinite(area.lon)) {
-    h.endArea = { lat: area.lat, lon: area.lon, approx: true, n: area.n, miles: area.miles };
+    h.endArea = areaKept(area);
   } else {
     delete h.endArea;
   }
   saveHold(h);
+}
+
+/* An area as it is kept and said: `approx` always, and (the owner's DoorDash
+ * snap of 24 Oct) `cut` where the NucBox's list was cut at its limit and
+ * `rough` where it is the street's (MV.streetArea), each only when true. */
+function areaKept(a) {
+  var out = { lat: a.lat, lon: a.lon, approx: true, n: a.n, miles: a.miles };
+  if (a.cut === true) out.cut = true;
+  if (a.rough === true) out.rough = true;
+  return out;
 }
 
 // pickInDisc's refusals, in the panel's words — and pickPlace's one of its
@@ -2935,8 +2945,15 @@ function settleHeldEnd(key, attempt, disc, res, asked, via) {
   if (!res.at && res.why === 'nodoor') {
     return searchHeldStreet(key, attempt, disc, asked, END_WHY.nodoor, res.area);
   }
-  // ...and 'several' doors that are one general area (the owner, 24 Oct)
-  // refused as ever, the area kept beside the refusal.
+  // ...and NOTHING found for the door, however asked: the street alone, as
+  // a rough area beside the refusal (searchHeldStreetArea; the owner's
+  // DoorDash snap of 24 Oct, "better to route something than nothing").
+  if (!res.at && res.why === 'none') {
+    return searchHeldStreetArea(key, attempt, disc, END_WHY.none);
+  }
+  // ...and 'several' doors that are one general area (the owner, 24 Oct),
+  // or a list cut at the limit that is (the DoorDash snap, 19:25), refused
+  // as ever, the area kept beside the refusal.
   if (!res.at) {
     return refuseHeldEnd(now, END_WHY[res.why] || 'no house number', res.area);
   }
@@ -3033,6 +3050,30 @@ function searchHeldStreet(key, attempt, disc, asked, why, area) {
     var a = streetAnswer('whole', body);
     return a.error ? null : a;
   });
+}
+
+/* ...and a door that NOTHING answered (doorChain's 'none', after its
+ * retries): the street alone, asked of the street index as searchHeldStreet
+ * asks a court (`whole`, its name as printed less the number, MV.nameAsked),
+ * so Map view's question (NbxSearch.streetArea) is answered from nbxCache.
+ * Its answer is never a pin: MV.streetArea's rough area, kept as endArea
+ * beside the refusal `why`, or the refusal alone. No street index, nothing
+ * asked. */
+function searchHeldStreetArea(key, attempt, disc, why) {
+  var h = endHold(key);
+  if (!h) return;
+  var plan = typeof h.dropoff === 'string' && h.dropoff ? MV.searchPlan(h.dropoff) : null;
+  var said = NBX.streets && plan ? nbxTerm(MV.nameAsked(plan) || '') : null;
+  if (!said) return refuseHeldEnd(h, why);
+  endAsk(key, attempt, streetTarget('whole', { name: said, box: MV.discBox(disc) }),
+    function (ans) {
+      var now = endHold(key);
+      if (!now || heldEndPin(now)) return;
+      refuseHeldEnd(now, why, MV.streetArea(ans, disc));
+    }, function (body) {
+      var a = streetAnswer('whole', body);
+      return a.error ? null : a;
+    });
 }
 
 /* The one short street of the index's answer that touches the disc, as
@@ -4165,8 +4206,7 @@ function heldEndState(h) {
            // view's run ("≈ route to area") and never the GPS drop — endWhy
            // beside it still says why that is not armed. Null otherwise.
            endArea: !pin && h.endArea && h.endWhyFor === endTextOf(h)
-             ? { lat: h.endArea.lat, lon: h.endArea.lon, approx: true,
-                 n: h.endArea.n, miles: h.endArea.miles } : null,
+             ? areaKept(h.endArea) : null,
            // ...and its pickups the car has called at (visitPickups,
            // plannerVisits), by planner line (MV.pickupKey): the panel's next
            // stop, Map view's run and the figure's stops leave them out. On

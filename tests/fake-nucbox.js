@@ -42,6 +42,9 @@
  * held order's pickup) and "1975 Cobb Parkway" one 87 m from 1985's door
  * ("1981 Cobb Parkway" one 60 m), "3150 Thornbury Mill Rd SE" two doors of
  * that number 0.33 mi apart (one general area) and "3152" two 2.5 mi apart,
+ * "10800 Vessington Hwy" ten houses cut at the limit within 0.4 mi and "10900"
+ * ten spread over 3 mi, "10495 Pellmore Street" nothing with its street short
+ * in the index and "10497 Dunmere Parkway" nothing with its street long,
  * "Wrenfield Parking Deck" a place by Kestrel Drive (with "Quarry Hall" a road
  * and "Lantern Parking Deck" a deck far off, below), a
  * point at 34.1, -84.6 is refused by the
@@ -258,7 +261,7 @@ var NAMED_INDEX = Streets.build({
   format: Streets.FORMAT, e: 6,
   names: ['Tamarons Lane', 'Brindlewood Way', 'Brindleton Court',
           'Larkmoor Court', 'Hollin Road', 'Fennick Court', 'Ellis Court', 'Quarrel Court',
-          'Pembury', 'Corbins Drive'],
+          'Pembury', 'Corbins Drive', 'Pellmore Street', 'Dunmere Parkway'],
   nodes: [-84561000, 33975000, 2000, 400,            // Tamarons Lane
           21000, -10400, 2000, 0,                    // Brindlewood Way
           -6000, 3000, 0, 2000,                      // Brindleton Court
@@ -270,11 +273,13 @@ var NAMED_INDEX = Streets.build({
           -8500, 7000, 2000, 0,                      // Quarrel Court, 185 m by the Square...
           -10000, -57000, 27000, 0,                  // ...and a Quarrel Court of 2.5 km
           -20000, 56000, 1300, 0,                    // Pembury, no type word, 120 m
-          16700, 14000, 2000, 0],                    // Corbins Drive, 1.3 mi north-east
+          16700, 14000, 2000, 0,                     // Corbins Drive, 1.3 mi north-east
+          -13000, -12000, 4000, 0,                   // Pellmore Street, 369 m by the Square
+          -28000, -8000, 40000, 0],                  // Dunmere Parkway, 3.7 km
   ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]],
          [[3], [6, 1]], [[3], [7, 1]], [[4], [9, 1]], [[5], [11, 1]], [[5], [13, 1]],
          [[6], [15, 1]], [[7], [17, 1]], [[7], [19, 1]], [[8], [21, 1]],
-         [[9], [23, 1]]] });
+         [[9], [23, 1]], [[10], [25, 1]], [[11], [27, 1]]] });
 
 /* Streets the NucBox's search holds without their house numbers, for the
    held end by its street (server.js searchHeldStreet; the owner's fault of 19
@@ -326,6 +331,28 @@ var THORNBURY_3152 = [
   place(144, 33.9900, -84.5200, 'place', 'house', '',
         '3152, Thornbury Mill Road Southeast, Marietta, Cobb County, Georgia, 30067, '
         + 'United States')];
+
+/* The owner's DoorDash snap of 24 Oct, 19:23-19:25, invented (map-view.js
+   withArea's `cut`, streetArea): "10800 Vessington Hwy" answers ten houses
+   (the limit, so the list is cut) all within 0.4 mi, 0.4 mi north-east of
+   the Square — one general area, routed to and never a pin — and "10900
+   Vessington Hwy" ten spread over 3 mi, which are none. "10495 Pellmore
+   Street" and "10497 Dunmere Parkway" answer nothing at all, as any door
+   this fake does not know; the index above holds Pellmore Street short
+   (369 m) by the Square and Dunmere Parkway long (3.7 km, past
+   WHOLE_LINE_M). Invented, every one. */
+var VESSINGTON_10800 = [];
+var VESSINGTON_10900 = [];
+for (var vi = 0; vi < 10; vi++) {
+  VESSINGTON_10800.push(place(150 + vi, 33.9570 + (vi % 5) * 0.0010, -84.5450 + Math.floor(vi / 5) * 0.0020,
+                              'place', 'house', '',
+                              (10800 + vi * 2) + ', Vessington Highway, Marietta, Cobb County, '
+                              + 'Georgia, 30060, United States'));
+  VESSINGTON_10900.push(place(160 + vi, 33.9300 + vi * 0.0050, -84.5600 + vi * 0.0030,
+                              'place', 'house', '',
+                              (10900 + vi * 2) + ', Vessington Highway, Marietta, Cobb County, '
+                              + 'Georgia, 30060, United States'));
+}
 
 var CHURCH = [
   place(31, 33.9580, -84.5520, 'highway', 'tertiary', 'Church Street',
@@ -384,6 +411,8 @@ function search(q) {
     else if (/^\d+ pembury$/.test(term)) all = PEMBURY;
     else if (/^3150 thornbury mill (rd|road)/.test(term)) all = THORNBURY_3150;
     else if (/^3152 thornbury mill (rd|road)/.test(term)) all = THORNBURY_3152;
+    else if (/^10800 vessington (hwy|highway)$/.test(term)) all = VESSINGTON_10800;
+    else if (/^10900 vessington (hwy|highway)$/.test(term)) all = VESSINGTON_10900;
   }
   if (q.bounded === '1') all = all.filter(function (p) { return inBox(p, q.viewbox); });
   return all.slice(0, Number(q.limit) || 10);
@@ -557,6 +586,7 @@ module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    TAMARONS_1106: TAMARONS_1106, BRINDLE_1106: BRINDLE_1106,
                    CORBINS_2282: CORBINS_2282,
                    THORNBURY_3150: THORNBURY_3150, THORNBURY_3152: THORNBURY_3152,
+                   VESSINGTON_10800: VESSINGTON_10800, VESSINGTON_10900: VESSINGTON_10900,
                    NAMED_INDEX: NAMED_INDEX };
 
 if (require.main === module) {

@@ -7355,6 +7355,70 @@ try:
     finally:
         stop(_hkp)
 
+    # The owner's DoorDash snap of 24 Oct, 19:23-19:25, invented: "It is
+    # better to route something than nothing at all." A door the NucBox's list
+    # was cut on, its answers one area, and a door NOTHING answered, its
+    # street short in the index: each keeps an area beside its refusal for
+    # Map view's run (`cut`, `rough`), and NEITHER is a pin — endPinned false,
+    # the GPS drop not armed by a car waiting there, and a held pickup's
+    # area never enters pickupPins (the restaurant guard's).
+    _hks, _hksays, _hkj = _hksayer('area-more')
+    _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_STREETS': _hkfake_base,
+                        'NUCBOX_TIMEOUT_MS': '800', 'GPS_DWELL_MS': '1000'}, _hkj)
+    try:
+        _atook(_hkb, 'k-cut', '10800 Vessington Hwy, Marietta')
+        _h = _settled(_hkb)
+        _ea = _h.get('endArea') or {}
+        eq('[area more] a cut list whose ten answers are one area: no pin, "too many answers", '
+           'the area kept and marked cut',
+           (_h.get('endPinned'), _h.get('endAt'), _h.get('endWhy'), _ea.get('approx'),
+            _ea.get('cut'), _ea.get('n'), _ea.get('rough')),
+           (False, None, 'too many answers', True, True, 10, None))
+        _hksays([_areabeat(_ea.get('lat'), _ea.get('lon'))] * 7
+                + [_areabeat(_ea.get('lat') + 0.02, _ea.get('lon'))] * 3)
+        _h = _holding(_hkb) or {}
+        eq('[area more] ...a car that waits at it and leaves arrives nowhere and drops nothing',
+           (_h.get('dropoff'), _h.get('arrived'), _h.get('endPinned')),
+           ('10800 Vessington Hwy, Marietta', False, False))
+        post(_hkb, '/api/delivered', {})
+        _n = len(_hkasked('/api/streets/whole?name=Pellmore'))
+        _atook(_hkb, 'k-street', '10495 Pellmore Street, Marietta')
+        _h = _settled(_hkb)
+        _ea = _h.get('endArea') or {}
+        eq('[area more] a door nothing answered: its street asked alone, once, of the index; no '
+           'pin, the refusal kept, the street\'s rough area beside it',
+           (_h.get('endPinned'), _h.get('endAt'), _h.get('endWhy'), _ea.get('approx'),
+            _ea.get('rough'), round(_ea.get('lat') or 0, 4),
+            len(_hkasked('/api/streets/whole?name=Pellmore')) - _n),
+           (False, None, 'not inside the card\'s reach', True, True, 33.958, 1))
+        _hksays([_areabeat(_ea.get('lat'), _ea.get('lon'))] * 7
+                + [_areabeat(_ea.get('lat') + 0.02, _ea.get('lon'))] * 3)
+        _h = _holding(_hkb) or {}
+        eq('[area more] ...and waiting there drops nothing either',
+           (_h.get('arrived'), _h.get('endPinned')), (False, False))
+        post(_hkb, '/api/delivered', {})
+        _atook(_hkb, 'k-long', '10497 Dunmere Parkway, Marietta')
+        _h = _settled(_hkb)
+        eq('[area more] a door nothing answered on a street too long to be one area: refused, '
+           'no area', (_h.get('endPinned'), _h.get('endWhy'), _h.get('endArea')),
+           (False, 'not inside the card\'s reach', None))
+        post(_hkb, '/api/delivered', {})
+        # A held pickup whose door is the cut list's: the area is the page's
+        # to draw and nothing of it is kept as a pin.
+        _atook(_hkb, 'k-pick', _COBB)
+        _settled(_hkb, lambda h: h.get('endPinned'))
+        _hksays([_hkplanner(('Example Cafe', '10800 Vessington Hwy'))])
+        _h = _settled(_hkb, lambda h: h.get('pickupsWhy'))
+        eq('[area more] a held pickup whose answers are one area is no pin: none kept for the '
+           'guard, the refusal said, and the armed door stays armed',
+           (_h.get('pickupsPinned'), _h.get('pickupsWhy'), _h.get('endPinned'),
+            'pickupAreas' in _h),
+           (0, 'too many answers', True, False))
+        post(_hkb, '/api/delivered', {})
+    finally:
+        stop(_hkp)
+
     # The owner's snap of 24 Oct, 03:03, invented: one Uber trip, ONE pickup
     # ("Pickup • 2 orders") and two dropoffs. Page 1 of the Trip Planner read
     # the pickup with its door, the first dropoff and the second's header and

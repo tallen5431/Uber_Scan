@@ -754,6 +754,25 @@ CAPTION_LINES = [
     ('no pin, a door the map does not hold, routed to its street\'s area',
      "no pin for " + WIDEST_DISC + " — street found, not that door · ≈ routed to area",
      "no pin for " + WIDEST_DISC + " — street found, not that door"),
+    # ...and the owner's DoorDash snap of 24 Oct, 19:23-19:25 ("better to
+    # route something than nothing at all"): a list cut at the NucBox's
+    # limit that is one area, "10+" at AREA_MI; a door nothing answered,
+    # routed to its street's rough area (MV.streetArea), in both of the
+    # refusal's "none" forms. (A pickup's area said after ANOTHER end's
+    # refusal and its disc's tail was measured here three ways — "≈ route
+    # to pickup area, 10+ within 1.0 mi", "≈ route to pickup street area",
+    # "≈ pickup area" — and each ran past two rows at 800x480 and its chip
+    # past three on the hat, so a pickup's area is said only inside its own
+    # refusal, MV.routeSaid, and the row is not kept.)
+    ('no pin, a cut list routed to its area',
+     "no pin for " + WIDEST_DISC + " — too many to be sure · ≈ routed, 10+ within 1.0 mi",
+     "no pin for " + WIDEST_DISC + " — too many to be sure"),
+    ('no pin, none in this card, routed to its street\'s area',
+     "no pin for " + WIDEST_DISC + " — none fit the card · ≈ routed to street area",
+     "no pin for " + WIDEST_DISC + " — none fit the card"),
+    ('no pin, none in sixty miles, routed to its street\'s area',
+     "no pin for " + WIDEST_DISC + " — none found · ≈ routed to street area",
+     "no pin for " + WIDEST_DISC + " — none found"),
     ('no pin, several with no fix',
      "no pin for " + WIDEST_DISC + " — 10 found · no GPS fix to choose between "
      "them",
@@ -947,7 +966,8 @@ CAPTION_LINES = [
 # (or the limit a cut list or a stretch stopped at), behind "no pin for" and
 # the few words saying why — a corner's "50 corners fit the card" among
 # them — the same way round; or, where the run was routed to the general
-# area of the answers, ` · ≈ routed, 10 within 1.0 mi` in the disc's place.
+# area of the answers, ` · ≈ routed, 10 within 1.0 mi` in the disc's place
+# (`10+` for a cut list, ` · ≈ routed to street area` for a street's).
 # Each is the end of its sentence
 # precisely so that it is what a clamp eats; everything before it is a figure
 # or a hedge on one.
@@ -969,9 +989,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 106)
-eq('...and forty-eight of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 48)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 109)
+eq('...and fifty-one of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 51)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:
@@ -1094,6 +1114,12 @@ CAPTION_CHIPS = {
         "NO PIN · " + WIDEST_DISC + ", ≈ routed, 10 within 1.0 mi",
     "no pin, a door the map does not hold, routed to its street's area":
         "NO PIN · " + WIDEST_DISC + ", ≈ routed to area",
+    "no pin, a cut list routed to its area":
+        "NO PIN · " + WIDEST_DISC + ", ≈ routed, 10+ within 1.0 mi",
+    "no pin, none in this card, routed to its street's area":
+        "NO PIN · " + WIDEST_DISC + ", ≈ routed to street area",
+    "no pin, none in sixty miles, routed to its street's area":
+        "NO PIN · " + WIDEST_DISC + ", ≈ routed to street area",
     "no pin, several with no fix":
         "NO PIN · " + WIDEST_DISC + ", no fix to choose",
     "no pin, several with no fix on the held card":
