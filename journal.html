@@ -202,7 +202,7 @@
   #incarList li + li { border-top: 1px solid var(--line); }
   #incarList .what { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
   #incarList .what small { color: var(--muted); }
-  #toShift { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px;
+  #toShift, #toPlaces a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px;
              border: 1px solid var(--line); border-radius: 8px; color: var(--text);
              text-decoration: none; }
   #incarList li.dropped .what { color: var(--muted); }
@@ -620,6 +620,11 @@
        owner, 22 Oct): here and on the route view's bar, not on this page's
        bar, which already holds six links at 360px. -->
   <p class="hint"><a id="toShift" href="shift.html">◷ Today's shift: totals, orders, pinning</a></p>
+  <!-- The places report (tools/places_report.js, run on the NucBox; the
+       owner, 25 Oct): served by this server at places/ from its own folder
+       outside the repo. Shown only where one has been written, so the rig,
+       which keeps none, shows no dead link. -->
+  <p class="hint" id="toPlaces" hidden><a href="places/">⌖ Where the good offers start: the places report</a></p>
 
   <!-- Percentiles, not an average. $/hour is a ratio with a small noisy
        denominator, and the characteristic failure here — a leg lost to glare —
@@ -4574,6 +4579,15 @@
   load();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 })();
+
+  // The places link, where this server has a report to serve.
+  (function () {
+    var link = document.getElementById('toPlaces');
+    if (!link || typeof fetch !== 'function') return;
+    fetch('places/index.html', { method: 'HEAD', cache: 'no-store' }).then(function (r) {
+      if (r.ok) link.hidden = false;
+    }).catch(function () {});
+  })();
 </script>
 </body>
 </html>

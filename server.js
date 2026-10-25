@@ -11356,6 +11356,18 @@ function route(req, res) {
     });
   }
 
+  // The places report (tools/places_report.js), the owner's of 25 Oct: "make
+  // the report accessible from the uber scan website". Written OUTSIDE the
+  // repo on purpose — it names real places — so it is served from its own
+  // folder, PLACES_DIR, and nothing else: confined to it as ROOT's files are
+  // (resolved, then the real path checked), the report's own kinds of file
+  // only, read-only. A server with no report (the rig, as a rule) answers 404.
+  if (pathname === '/places') {
+    res.writeHead(302, { Location: '/places/' });
+    return res.end();
+  }
+  if (pathname.indexOf('/places/') === 0) return servePlaces(req, res, pathname);
+
   if (pathname.endsWith('/')) pathname += 'index.html';
 
   // Resolve first, then confirm the result is still inside ROOT, so "..", an
@@ -11383,13 +11395,41 @@ function route(req, res) {
   });
 }
 
-function serveFile(req, res, file) {
+/* The places report's folder, and the kinds of file the report writes: its
+ * page and its tables. PLACES_REPORT_DIR moves it; places_report.js's
+ * `--out` is the other half of the same setting. */
+var PLACES_DIR = path.resolve(process.env.PLACES_REPORT_DIR
+                              || path.join(os.homedir(), 'places-report'));
+var PLACES_TYPES = { '.html': TYPES['.html'], '.csv': 'text/csv; charset=utf-8' };
+
+function servePlaces(req, res, pathname) {
+  var rest = pathname.slice('/places'.length);
+  if (rest.endsWith('/')) rest += 'index.html';
+  var type = PLACES_TYPES[path.extname(rest).toLowerCase()];
+  var file = path.resolve(PLACES_DIR, '.' + rest);
+  if (file === PLACES_DIR || !file.startsWith(PLACES_DIR + path.sep)) {
+    return send(res, 403, 'forbidden', { 'Content-Type': 'text/plain' });
+  }
+  if (!type) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
+  fs.realpath(PLACES_DIR, function (dirErr, realDir) {
+    if (dirErr) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
+    fs.realpath(file, function (linkErr, real) {
+      if (linkErr) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
+      if (!real.startsWith(realDir + path.sep)) {
+        return send(res, 403, 'forbidden', { 'Content-Type': 'text/plain' });
+      }
+      serveFile(req, res, real, type);
+    });
+  });
+}
+
+function serveFile(req, res, file, type) {
   fs.stat(file, function (err, stat) {
     if (err || !stat.isFile()) {
       return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
     }
     var headers = {
-      'Content-Type': TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
+      'Content-Type': type || TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
       'Content-Length': stat.size,
       'Cache-Control': 'no-cache'
     };

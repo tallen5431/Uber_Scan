@@ -11989,6 +11989,60 @@ finally:
 shutil.rmtree(_gd, ignore_errors=True)
 shutil.rmtree(_gd2, ignore_errors=True)
 
+# The places report (tools/places_report.js), served from its own folder
+# outside the repo at /places/ (the owner, 25 Oct): its page and its tables,
+# confined to that folder, and nothing where no report was written.
+_pd = tempfile.mkdtemp()
+_prep = os.path.join(_pd, 'report')
+os.makedirs(_prep)
+with open(os.path.join(_prep, 'index.html'), 'w') as fh:
+    fh.write('<h1>Where the good offers start</h1>')
+with open(os.path.join(_prep, 'places.csv'), 'w') as fh:
+    fh.write('place,n\nPho Corner,31\n')
+with open(os.path.join(_prep, 'notes.js'), 'w') as fh:
+    fh.write('x')
+with open(os.path.join(_pd, 'secret.html'), 'w') as fh:
+    fh.write('outside')
+os.symlink(os.path.join(_pd, 'secret.html'), os.path.join(_prep, 'away.html'))
+_pproc, _pbase = start({'SCANNER': '0', 'PLACES_REPORT_DIR': _prep},
+                       os.path.join(_pd, 'j.jsonl'))
+try:
+    _pi = raw(_pbase, '/places/')
+    eq('[places] /places/ serves the report\'s page',
+       (_pi[0], 'good offers' in _pi[1], _pi[2].get('content-type', '').split(';')[0]),
+       (200, True, 'text/html'))
+    _pc = raw(_pbase, '/places/places.csv')
+    eq('[places] ...and its tables, as CSV',
+       (_pc[0], _pc[2].get('content-type', '').split(';')[0], 'Pho Corner' in _pc[1]),
+       (200, 'text/csv', True))
+    eq('[places] ...and no other kind of file in its folder',
+       raw(_pbase, '/places/notes.js')[0], 404)
+    eq('[places] ...nor anything outside it, by an encoded step up or a link',
+       (raw(_pbase, '/places/%2e%2e/secret.html')[0], raw(_pbase, '/places/away.html')[0]),
+       (403, 403))
+    try:
+        _pr = urllib.request.build_opener(type('NoRedirect', (urllib.request.HTTPRedirectHandler,),
+                                               {'redirect_request': lambda *a, **k: None}))
+        _pr.open(_pbase + '/places', timeout=5)
+        _pwhere = None
+    except urllib.error.HTTPError as e:
+        _pwhere = (e.code, e.headers.get('Location'))
+    eq('[places] /places goes to /places/, so the page\'s own links resolve',
+       _pwhere, (302, '/places/'))
+finally:
+    stop(_pproc)
+_pproc2, _pbase2 = start({'SCANNER': '0', 'PLACES_REPORT_DIR': os.path.join(_pd, 'none')},
+                         os.path.join(_pd, 'j2.jsonl'))
+try:
+    eq('[places] a server with no report written answers not found',
+       raw(_pbase2, '/places/')[0], 404)
+    _pj = raw(_pbase2, '/journal.html')[1]
+    ok_('[places] the offers page links the report, hidden until it answers',
+        'id="toPlaces" hidden' in _pj and "fetch('places/index.html'" in _pj)
+finally:
+    stop(_pproc2)
+shutil.rmtree(_pd, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

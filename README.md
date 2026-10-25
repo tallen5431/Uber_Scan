@@ -725,6 +725,10 @@ node tools/places_report.js http://localhost:8081 --out ~/places-report \
 xdg-open ~/places-report/index.html      # or copy the folder to a laptop
 ```
 
+The NucBox's own server serves the report at `/places/` (from `~/places-report`,
+or `PLACES_REPORT_DIR`), read-only and confined to that folder, and the offers
+page links it ("⌖ Where the good offers start") wherever one has been written.
+
 `--since YYYY-MM-DD` narrows the window (the server sends at most 20,000
 offers, and the report says when it was cut); `--gps` is the directory of
 gpspipe logs, if the NucBox has them; without `--nominatim` the search goes
