@@ -710,6 +710,59 @@ Two things it is careful about:
   `rpi/journal.jsonl` is gitignored and, like everything under `rpi/`, the
   server refuses to serve the file itself.
 
+## Where the good offers start: a report on the NucBox
+
+`tools/places_report.js` is an offline report, run on the NucBox against the
+copy at home. It is **not** a heat map on the rig — AUDITS.md's Settled-weight
+entry on that is why — and nothing on the rig reads it. It answers "where and
+what places turn up good offers" with a dot plot and a table, and says where
+the answer is noise.
+
+```sh
+# on the NucBox, from the checkout (git pull first)
+node tools/places_report.js http://localhost:8081 --out ~/places-report \
+     --gps ~/gpslog --nominatim http://localhost:8088
+xdg-open ~/places-report/index.html      # or copy the folder to a laptop
+```
+
+`--since YYYY-MM-DD` narrows the window (the server sends at most 20,000
+offers, and the report says when it was cut); `--gps` is the directory of
+gpspipe logs, if the NucBox has them; without `--nominatim` the search goes
+through that server's own `/api/nbx` relay when it has one set, else to
+`http://localhost:8088`. The public geocoder is never asked. The NucBox's
+answers are kept in `~/.cache/uber-scan/places-report-answers.json`, so a
+second run asks nothing it asked before; delete that file to ask again.
+
+What it does:
+
+* **Places each pickup by the rig's own rules** (map-view.js, as the server
+  pins a held order's pickup): a printed door by its door, a store's name by
+  `pickPlace`, both inside the disc round the card's GPS fix and its own
+  distance, and **only where one place answers**. A chain with several
+  branches in reach, a card with no fix, a name the map does not hold: not
+  placed, counted, and the pay gap between placed and unplaced printed with
+  its test, shift day by shift day.
+* **Ranks places, towns and a 2-mile grid** by each offer's $/hr against what
+  the other cells paid in the same three-hour block (advice.js `matched`),
+  with 95% bootstrap intervals, the median $/hr and pay, and the share the
+  rig itself said take. The permutation test is advice.js `areas`, shuffled
+  within blocks. A cell under 30 offers or 2 shift days is "too few" and not
+  ranked.
+* **Colours only what beats chance**: the grouping's test under 0.05 and the
+  cell's interval clear of zero. Everything else is grey, "not
+  distinguishable from the rest". The map (Leaflet, OSM tiles, needs the
+  internet) draws one dot per place sized by its offers.
+* **Where trips leave you**: for each order taken and put down at the door,
+  the minutes until the next offer the rig said take, and what it paid, by
+  the town and the 2-mile cell the trip ended in (the GPS log at the drop,
+  else the dropoff's door).
+* An hour filter in the page, and CSVs of every table beside `index.html`.
+
+**It holds real places, so it is written outside the repository** (it refuses
+a path inside it) and is not to be committed. Dropoffs are counted by area
+only: no door, name or position of a customer is written, and a 2-mile cell
+with fewer than 10 trips is not named at all.
+
 ## What the server will not serve
 
 `server.js` sits on a LAN, on plain http, with no authentication — every file

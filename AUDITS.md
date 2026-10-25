@@ -4479,6 +4479,45 @@ here: the tail is a $185.46 card, not a $41 one, and the mean's false-hot rate
 never recovers (3.2% at n=30 and 0.7% still at n=60, against the median's 0.4%
 by n=30).
 
+**Where the good offers start, as an offline report on the NucBox (the owner,
+25 Oct 2026: "It would be helpful know where and what places turn up good
+offers ... a table is also very helpful").** Built as `tools/places_report.js`,
+suite `tests/placesreport.test.js`; not yet run on the real journal, so no
+figure from it is recorded here. It does not reopen the entry above, because
+it is not that feature and it does not have that fault:
+
+- *Not on the rig.* It runs on the NucBox against the copy at home's
+  `/api/journal`, writes a page and CSVs to a folder outside the repository,
+  and nothing on the rig, the panel or any page the rig serves reads it. No
+  verdict, target or colour on the glass comes of it.
+- *No colour bands, so no miscolouring.* The fault that refuted the heat map
+  was a fixed band edge read at n=12. Here every ranked cell is a median and a
+  bootstrap interval on a dot plot, and colour is given only where the
+  grouping's own permutation test (Advice.areas, 2,000 shuffles) is under
+  0.05 AND the cell's interval of its score is clear of zero. On a no-effect
+  fixture, 40 worlds, at most 5 colour anything; the floor is 30 offers on two
+  shift days, the low end of the 30-60 the entry derived, and below it a cell
+  is listed "too few" with its n.
+- *The hour is held.* The score is Advice.areas' `matched` — each offer
+  against the OTHER cells in its own three-hour block — and the test shuffles
+  within blocks. A fixture where one place is simply seen late at night
+  (raw p < 0.05, medians $10 apart) comes out not significant and grey.
+- *The biased third is on the page, not under it.* A pickup is placed only by
+  map-view.js's rules as the server places a held order's pickup (a door by
+  its door, a name by `pickPlace`, inside the card's disc, one answer or
+  none), so a bare chain name is unplaced, and the placed-against-unplaced
+  gap in $/hr and pay, with its test, per shift day, heads the report. The
+  town table needs no pin and is not cut that way.
+- *It still cannot say where to wait.* Offers are dispatched from near the
+  car, so it ranks only places near where the driver already waits; the
+  banner says so, and that it is offered, not earned.
+
+Dropoffs (customers) are only counted by town and 2-mile cell for "where
+trips leave you" (minutes to the next offer the rig said take); no door, name
+or position is written, and a cell under ten trips is not named. The open
+question is the real result: whether anything below town scale beats chance
+on the larger journal, which the entry above found it did not on one week.
+
 ---
 
 **One unlabelled bracketed leg on a lone card is called whole, and on a ride card that is the drive to the rider alone.** is_whole's single-leg clause says 'Uber labels every leg of a ride (away, trip, total)'. laid_out_approach measured 'away' on 0 of 1,166 rows. Measured on the week: rows 444 frame 0 and 805 frame 1 are ride frames whose trip leg did not read, and they read whole on the approach alone. Row 805's merge recovered; row 444's journal row is whole=0 for another reason. Not fixed, because the same shape is also an Eats card whose `total` did not read (`tota`, `te al`): 7 frames on 6 rows, all whole jobs. Telling them apart needs a text-level ride signal carried through the accumulator. half_a_ride answers it only where another card is in shot, and 'whole / one bare leg on a frame holding ONE card is left as it was' pins that boundary.
