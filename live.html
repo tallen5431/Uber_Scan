@@ -7071,16 +7071,56 @@
      ("≈ route to area") and never the door's. Drawing only, as cornerSide
      is: never in `found`, so never posted (pinHeldEnd), never a figure's
      end (mapJudge reads `found`), never what GPS arrival is armed by. */
-  function areaEnd(want, q, held) {
+  function areaEnd(want, q, held, band) {
     var seen = want.nbxSeen && want.nbxSeen[q];
-    var a = seen && seen.res && !seen.res.at ? seen.res.area : null;
+    // ...the distance band's area first (bandEnd; the owner, 25 Oct), where
+    // this walk found one: the card's own miles narrowed the answers.
+    var a = band && seen && seen.res && !seen.res.at ? band : null;
+    if (!a) a = seen && seen.res && !seen.res.at ? seen.res.area : null;
+    // ...and the server's band for the held end (bandHeldEnd) over a plain
+    // area of this walk's own.
+    if ((!a || !a.band) && held && heldSaid && !heldSaid.endPinned && heldSaid.endArea
+        && heldSaid.endArea.band === true) a = heldSaid.endArea;
     if (!a && held && heldSaid && !heldSaid.endPinned) a = heldSaid.endArea;
     if (!a || typeof a.lat !== 'number' || typeof a.lon !== 'number'
         || !isFinite(a.lat) || !isFinite(a.lon)) return null;
     // ...a list cut at the limit (`cut`) or the street's own area (`rough`)
-    // said so (MV.areaNote; the owner's DoorDash snap of 24 Oct).
-    return { lat: a.lat, lon: a.lon, approx: true, n: a.n, miles: a.miles,
-             cut: a.cut === true, rough: a.rough === true };
+    // said so (MV.areaNote; the owner's DoorDash snap of 24 Oct), and the
+    // band's with the card's figure it was chosen by (`band`, `cardMi`).
+    var out = { lat: a.lat, lon: a.lon, approx: true, n: a.n, miles: a.miles,
+                cut: a.cut === true, rough: a.rough === true };
+    if (a.band === true && isFinite(a.cardMi)) { out.band = true; out.cardMi = a.cardMi; }
+    return out;
+  }
+
+  /* THE DISTANCE BAND (MV.bandTarget, MV.NbxSearch.band; the owner, 25 Oct:
+     "Go ahead with the distance band"): for a door Map view's own search
+     refused with several candidates, the road miles from the card's fix or
+     the placed pickup (`pick`) to each, held to the card's printed figure
+     for that stop (`stop`: 'pickup', 'dropoff', or 'any' for a stop no
+     figure names but none is past). The area of the ones that fit, or null
+     — the router down or slow, no target, nothing narrowed: what was there
+     before stands. `budget` is the walk's (MV.BAND_CARD_ASKS). DRAWING
+     ONLY, as every area: never in `found`, so never posted (pinHeldEnd,
+     pinHeldPickup send `got.at`), never a figure's point — and that matters
+     twice here: the band chose it BY the card's miles, so a figure measured
+     to it would be the card checked against itself. */
+  async function bandEnd(want, q, card, stop, pick, budget, streets) {
+    var seen = want.nbxSeen && want.nbxSeen[q];
+    if (!q || !seen || !seen.res || seen.res.at || !mapNbx || !mapNbx.band
+        || !MV.bandTarget) return null;
+    var spec = MV.bandTarget(card, stop);
+    if (!spec) return null;
+    return mapNbx.band(q, seen.res, seen.disc, spec, pick || null, budget, streets);
+  }
+
+  /* The placed pickup a dropoff's band is measured from: a door, or a band
+     answer of ONE survivor — never a general area, a street's point or a
+     corner, whose road miles would be a guess about a guess. */
+  function bandOrigin(p) {
+    if (!p || typeof p.lat !== 'number' || !isFinite(p.lat) || p.street || p.corner) return null;
+    if (p.approx) return p.band && p.n === 1 ? p : null;
+    return p;
   }
 
   async function cornerSide(q, card, car) {
@@ -7352,6 +7392,8 @@
       // ...and the ends refused and routed to their general area (areaEnd),
       // which drawMap marks "≈" — the held order's, and this card's own.
       var areas = { held: null, drop: null, pick: null, picks: [] };
+      // ...and the road questions the distance band may ask on this walk.
+      var bandLeft = { left: MV.BAND_CARD_ASKS || 0 };
       // ...and the batched trip's other doors the run went through, with
       // their points or none, for drawMap's D1, D2 (MV.heldDrops).
       var ladDrops = [];
@@ -7393,9 +7435,21 @@
            stands; said in that pickup's own refusal (MV.routeSaid). */
         var pickAreas = [];
         if (picksOk.length < hj.heldPicks.length) {
+          // ...each narrowed by the held card's own miles first where it can
+          // be (bandEnd): its drive to the pickup with one pickup, else no
+          // further than the whole job.
+          var pickBands = {};
+          for (var pb = 0; pb < hj.heldPicks.length; pb++) {
+            var hp = hj.heldPicks[pb];
+            if (hp.at) continue;
+            pickBands[hp.q] = await bandEnd(want, hp.q, want.heldCard,   // eslint-disable-line no-await-in-loop
+                                            hj.heldPicks.length === 1 ? 'pickup' : 'any',
+                                            null, bandLeft, nbx.streets);
+            if (gone()) return;
+          }
           var withAreas = hj.heldPicks.map(function (p) {
             if (p.at) return p.at && !p.off && !hj.wrong[p.q] ? p.at : null;
-            var pa = areaEnd(want, p.q, false);
+            var pa = areaEnd(want, p.q, false, pickBands[p.q]);
             if (pa) pickAreas.push({ q: p.q, at: pa });
             return pa;
           });
@@ -7414,7 +7468,15 @@
         // middle, "≈ route to area" (the owner, 24 Oct). Not a pin the map
         // calls wrong: `hj.held` is null only where nothing was pinned.
         if (!heldOk && !hj.held && want.held) {
-          var area = areaEnd(want, want.held, true);
+          // ...narrowed by the held card's trip from its one placed pickup
+          // where it can be (bandEnd); the server's band, if it found one,
+          // comes as heldSaid.endArea as before.
+          var hpick = hj.heldPicks.length === 1 && picksOk.length === 1 ? picksOk[0]
+            : !hj.heldPicks.length && heldSaid && heldSaid.pickAt ? heldSaid.pickAt : null;
+          var heldBand = await bandEnd(want, want.held, want.heldCard, 'dropoff',
+                                       bandOrigin(hpick), bandLeft, nbx.streets);
+          if (gone()) return;
+          var area = areaEnd(want, want.held, true, heldBand);
           if (area) { heldOk = area; rung = MV.routeRung(want.held, area, null); areas.held = area; }
         }
         if (!heldOk && !picksOk.length && heldSaid && heldSaid.pickAt) picksOk = [heldSaid.pickAt];
@@ -7438,6 +7500,15 @@
                                    { streets: nbx.streets, car: here || want.carNow })
               : null;
             if (gone()) return;
+            // ...a door refused, narrowed by the held card's miles: no
+            // dropoff of the trip is further by road than the whole job
+            // (bandEnd's 'any'; no figure on the card is the road to one).
+            if (dres && !dres.at && mapNbx.band && MV.bandTarget) {
+              var dband = await mapNbx.band(   // eslint-disable-line no-await-in-loop
+                dd.q, dres, ddisc, MV.bandTarget(want.heldCard, 'any'), null, bandLeft, nbx.streets);
+              if (gone()) return;
+              if (dband) dres = Object.assign({}, dres, { bandArea: dband });
+            }
             drops.push({ q: dd.q, name: dd.name, n: dd.n, at: MV.dropPoint(dres),
                          key: dd.key, passed: !!dd.passed });
           }
@@ -7489,7 +7560,12 @@
            figure and the card's line still refuse as before. */
         var pickArea = null;
         if (!pickOk && !jj.pick && want.pickup) {
-          pickArea = areaEnd(want, want.pickup, false);
+          // ...narrowed first by this card's own miles (bandEnd): Uber's
+          // drive to the pickup, DoorDash's whole job as a ceiling.
+          var pickBand = await bandEnd(want, want.pickup, want.card, 'pickup', null,
+                                       bandLeft, nbx.streets);
+          if (gone()) return;
+          pickArea = areaEnd(want, want.pickup, false, pickBand);
           if (pickArea) { pickOk = pickArea; areas.pick = pickArea; }
         }
         var dropOk = jj.drop && !jj.wrong[want.dropoff] ? jj.drop : null;
@@ -7501,7 +7577,11 @@
         }
         // ...and its door refused, its answers one general area (areaEnd).
         if (pickOk && !dropOk && !jj.drop && want.dropoff) {
-          var darea = areaEnd(want, want.dropoff, false);
+          // ...narrowed by the trip from the placed pickup (bandEnd, bandOrigin).
+          var dropBand = await bandEnd(want, want.dropoff, want.card, 'dropoff',
+                                       bandOrigin(pickOk), bandLeft, nbx.streets);
+          if (gone()) return;
+          var darea = areaEnd(want, want.dropoff, false, dropBand);
           if (darea) { dropOk = darea; dropRung = MV.routeRung(want.dropoff, darea, null); areas.drop = darea; }
         }
         var jl = pickOk ? MV.routeLadder(dropOk ? null : here, [pickOk], dropOk, dropRung) : null;
@@ -8164,21 +8244,26 @@
        the end's ("where the order in your car is going" is the pin's). No
        figure is measured to it, and the GPS drop is not armed by it. */
     var areas = ladder.areas || {};
+    // (A distance band's area, MV.bandPick, says what chose it.)
+    var bandSaid = function (a) {
+      return a.band ? 'the answer the card\'s miles by road fit, not the door'
+        : 'what its answers share, not the door';
+    };
     if (!held && areas.held) {
       put(areas.held, '#f5a524', '≈ the area the order in your car is going to — '
-          + 'what its answers share, not the door', want.held, true, '≈',
+          + bandSaid(areas.held), want.held, true, '≈',
           { faded: true });
     }
     if (!drop && areas.drop) {
       put(areas.drop, '#f5a524', '≈ the area this one is dropped in — '
-          + 'what its answers share, not the door', want.dropoff, false, '≈',
+          + bandSaid(areas.drop), want.dropoff, false, '≈',
           { faded: true, aside: inCar });
     }
     // ...and the pickups routed to their general area (the owner's DoorDash
     // snap of 24 Oct): this card's own, and the held order's, faded green
     // "≈" and never P — not the restaurant's door, not the guard's.
     var areaSaid = function (a) {
-      return a.rough ? 'its street, the door not found' : 'what its answers share, not the door';
+      return a.band || !a.rough ? bandSaid(a) : 'its street, the door not found';
     };
     if (!pick && areas.pick) {
       put(areas.pick, '#17c964', '≈ the area this one is picked up in — '

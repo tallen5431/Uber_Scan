@@ -1066,7 +1066,11 @@ function holdPath() {
  * field allows (MapView.cardFix, MapView.cardYardstick). */
 var CARD_FIELDS = ['lat', 'lon', 'gpsAge', 'gpsErr', 'gpsMode', 'gpsOk', 'gpsWhy',
                    'miles', 'whole', 'hasTotal', 'legs', 'milesUncertain',
-                   'milesCorrected', 'earlyLook', 'doubt', 'multiOrder'];
+                   'milesCorrected', 'earlyLook', 'doubt', 'multiOrder',
+                   // ...and the card's split of its miles, for the distance
+                   // band's targets (MapView.bandTarget; the owner, 25 Oct):
+                   // Uber's drive to the pickup, DoorDash's count of stops.
+                   'toPickupMiles', 'stops'];
 
 function cardOf(offer) {
   var out = {};
@@ -2758,7 +2762,92 @@ function areaKept(a) {
   var out = { lat: a.lat, lon: a.lon, approx: true, n: a.n, miles: a.miles };
   if (a.cut === true) out.cut = true;
   if (a.rough === true) out.rough = true;
+  // ...and (the owner, 25 Oct) the distance band's, with the card's figure
+  // it was chosen by (bandHeldEnd, MV.bandPick).
+  if (a.band === true && typeof a.cardMi === 'number' && isFinite(a.cardMi)) {
+    out.band = true;
+    out.cardMi = a.cardMi;
+  }
   return out;
+}
+
+/* --- the distance band, for the held end -------------------------------------
+ *
+ * THE OWNER'S DECISION OF 25 OCT 2026 ("Go ahead with the distance band"),
+ * map-view.js's long note at bandTarget: the held end's door refused with
+ * several candidates inside the disc ('several', 'capped', or its street's
+ * points for a door NOTHING answered), the router asked the ROAD miles from
+ * the order's ONE placed pickup (pickupPins, whoever pinned it) to each, and
+ * those within MV.bandMiles of the held card's trip kept — Uber's printed
+ * trip, or DoorDash's whole job less the road from the card's fix to that
+ * pickup. Where what is kept is one general area and something was thrown
+ * out, that area is `endArea` (`band: true`) beside the refusal, which
+ * stands: `endWhy` unchanged, NO PIN — refuseHeldEnd's endArea, which the
+ * GPS drop (heldEndPin reads endPin alone), the restaurant and customer
+ * guards and the drop row never read. Distance only: roadLegs' metres, its
+ * seconds never read here (Settled: no re-timing).
+ *
+ * The candidates are kept on the end's search (endSearch[id].bandCands,
+ * memory only) until there is a pickup to measure from: the pickup is
+ * often pinned after the end is refused, and keepPickupPin asks again
+ * (bandHeldNow). Asked once per candidate list. Bounded as the page's
+ * (MV.BAND_ASKS_MAX questions, plus one for DoorDash's lead; given up after
+ * MV.BAND_WAIT_MS): a router down or slow answers null to every question,
+ * nothing is kept, and the refusal and its earlier area stand. With
+ * NUCBOX_ROUTER unset nothing is asked. */
+function bandHeldEnd(key, cands) {
+  var h = endHold(key);
+  var on = h ? endSearch[holdIdOf(h)] : null;
+  if (!on) return;
+  on.bandCands = Array.isArray(cands) && cands.length >= 2 && cands.length <= MV.BAND_ASKS_MAX
+    ? cands : null;
+  bandHeldNow(h);
+}
+
+// One question for the band, from nbxCache or asked; `done(null)` for any
+// answer `read` refuses or a NucBox that does not answer.
+function bandAsk(target, read, done) {
+  if (nbxCache.has(target)) return done(nbxCache.get(target));
+  nbxAsk(target, function (err, body) {
+    var out = err ? null : read(body);
+    if (out) nbxRemember(target, out);
+    done(out);
+  });
+}
+
+function bandHeldNow(h) {
+  var on = h ? endSearch[holdIdOf(h)] : null;
+  var cands = on && on.bandCands;
+  if (!NBX.route || !cands || heldEndPin(h) || !h.endWhy || h.endWhy === 'NucBox down') return;
+  var spec = MV.bandTarget(h.card || null, 'dropoff');
+  var pins = Array.isArray(h.pickupPins) ? h.pickupPins : [];
+  if (!spec || pins.length !== 1) return;
+  on.bandCands = null;
+  var from = { lat: pins[0].lat, lon: pins[0].lon };
+  var key = on.key, why = h.endWhy, whyFor = h.endWhyFor, finished = false;
+  var timer = setTimeout(function () { finish(null); }, MV.BAND_WAIT_MS);
+  function finish(area) {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    var now = endHold(key);
+    if (!area || !now || heldEndPin(now) || now.endWhy !== why || now.endWhyFor !== whyFor) return;
+    refuseHeldEnd(now, why, area);
+  }
+  function mi(a, b, done) {
+    roadLegs([a, b], function (out) { done(out ? out.metres[0] / 1609.344 : NaN); });
+  }
+  (spec.less ? function (d) { mi(spec.less, from, d); } : function (d) { d(0); })(function (before) {
+    var target = spec.miles - before;
+    if (!isFinite(before) || !(target > 0)) return finish(null);
+    var roads = [], left = cands.length;
+    cands.forEach(function (c, i) {
+      mi(from, c, function (m) {
+        roads[i] = m;
+        if (--left === 0) finish(MV.bandPick(cands, roads, target, spec.upper, spec.said));
+      });
+    });
+  });
 }
 
 // pickInDisc's refusals, in the panel's words — and pickPlace's one of its
@@ -2955,7 +3044,10 @@ function settleHeldEnd(key, attempt, disc, res, asked, via) {
   // or a list cut at the limit that is (the DoorDash snap, 19:25), refused
   // as ever, the area kept beside the refusal.
   if (!res.at) {
-    return refuseHeldEnd(now, END_WHY[res.why] || 'no house number', res.area);
+    refuseHeldEnd(now, END_WHY[res.why] || 'no house number', res.area);
+    // ...and narrowed by the held card's own miles where they can
+    // (bandHeldEnd; the owner, 25 Oct): still the refusal, an area beside it.
+    return bandHeldEnd(key, MV.bandCands(res));
   }
   pinHeldEnd(now, res.at, 'server', asked, via);
 }
@@ -3070,6 +3162,19 @@ function searchHeldStreetArea(key, attempt, disc, why) {
       var now = endHold(key);
       if (!now || heldEndPin(now)) return;
       refuseHeldEnd(now, why, MV.streetArea(ans, disc));
+      // ...and the street's points held to the card's miles (bandHeldEnd;
+      // the owner, 25 Oct), a long street's above all, which is no area by
+      // itself: its stretch in the disc's box, one name, not cut at its cap.
+      if (!NBX.route || !ans || !Array.isArray(ans.names) || ans.names.length !== 1) return;
+      // Not through endAsk: an index that does not answer this is no band,
+      // never "NucBox down" over a refusal already made.
+      bandAsk(streetTarget('stretch', { name: said, box: MV.discBox(disc) }), function (body) {
+        var a = streetAnswer('stretch', body);
+        return a.error ? null : a;
+      }, function (st) {
+        if (!st || st.cutAt || st.names.length !== 1) return;
+        bandHeldEnd(key, MV.bandSamples(st.lines, disc, MV.BAND_ASKS_MAX, st.names[0]));
+      });
     }, function (body) {
       var a = streetAnswer('whole', body);
       return a.error ? null : a;
@@ -3431,6 +3536,9 @@ function keepPickupPin(h, at, q, how) {
     }
   });
   saveHold(h);
+  // ...and an end refused with candidates waiting for a pickup to measure
+  // the distance band from (bandHeldNow; the owner, 25 Oct).
+  heldOrders(Date.now()).forEach(bandHeldNow);
 }
 
 /* ---------- the held order's pickups, visited -------------------------------

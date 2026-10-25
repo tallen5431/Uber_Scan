@@ -878,6 +878,12 @@
   function areaNote(at, pickup) {
     if (pickup) return '≈ pickup area';
     var head = '≈ route to ' + (at && at.rough ? 'street ' : '') + 'area';
+    // ...and the distance band's (bandPick): the card's figure it was
+    // chosen by, "≈ route to area, by card's 1.2 mi" — not how many or how
+    // far apart, which the band has already narrowed.
+    if (at && at.band && isFinite(at.cardMi)) {
+      return '≈ route to area, by card\'s ' + Number(at.cardMi).toFixed(1) + ' mi';
+    }
     if (!at || at.rough) return head;
     return head + ((at.n > 1 || at.cut) && isFinite(at.miles)
       ? ', ' + at.n + (at.cut ? '+' : '') + ' within ' + Math.max(0.1, at.miles).toFixed(1) + ' mi'
@@ -983,13 +989,17 @@
 
   /* A dropoff's point for the run off NbxSearch.place's answer: the door
      where one was found, else the general area of its answers (withArea,
-     `approx: true`), else null — which the run skips and says. */
+     `approx: true`), else null — which the run skips and says. ...and the
+     distance band's area (`bandArea`, NbxSearch.band; the owner, 25 Oct)
+     before the general one where live.html found one: `band: true`, still
+     approximate, still no door. */
   function dropPoint(res) {
     if (!res) return null;
-    var a = res.at || res.area;
+    var a = res.at || res.bandArea || res.area;
     if (!a || typeof a.lat !== 'number' || typeof a.lon !== 'number'
         || !isFinite(a.lat) || !isFinite(a.lon)) return null;
-    return res.at ? { lat: a.lat, lon: a.lon }
+    if (res.at) return { lat: a.lat, lon: a.lon };
+    return a === res.bandArea ? { lat: a.lat, lon: a.lon, approx: true, band: true }
       : { lat: a.lat, lon: a.lon, approx: true };
   }
 
@@ -1109,7 +1119,7 @@
 
   // The notes routeSaid put after a sentence, as one tail; captionChip
   // chips the sentence before them and keeps them after the chip.
-  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ route to (?:street )?area(?:, \d+\+? within [\d.]+ mi)?|route skips \d+ dropoffs?, not found))+)$/;
+  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ route to (?:street )?area(?:, \d+\+? within [\d.]+ mi|, by card's [\d.]+ mi)?|route skips \d+ dropoffs?, not found))+)$/;
   function routeTail(text) {
     var m = ROUTE_TAIL.exec(String(text || ''));
     return m ? { said: text.slice(0, m.index), tail: m[1] } : { said: text, tail: '' };
@@ -1512,6 +1522,206 @@
              n: n, miles: spreadOf(pts) };
   }
 
+  /* --- the distance band: the card's own miles, by road ---------------------
+   *
+   * THE OWNER'S DECISION OF 25 OCT 2026: "Go ahead with the distance band."
+   * The disc (discFor) is the one distance rule a search had: a candidate is
+   * kept when it is no further from the car, IN A STRAIGHT LINE, than the
+   * card's miles and SLACK_MI. That throws out only what is too far. The card
+   * says more than that: Uber prints how far the pickup is (`toPickupMiles`)
+   * and the trip, DoorDash the whole job, "2 stops (2.5 mi)", car -> store ->
+   * customer. A candidate the road puts a mile off the card's figure is not
+   * the stop, however well its name matches.
+   *
+   * So where a door's search ended with several candidates and no pin —
+   * 'several', 'capped' (a cut list, with or without its area), or 'none'
+   * with its street's pieces in the disc (a street too long to be one area,
+   * or a short one: its points every BAND_STEP_M stand in for doors) — the
+   * NucBox's router is asked the ROAD miles from the right origin to each
+   * candidate (NbxSearch.band; server.js bandHeldEnd for the held end), and
+   * the candidates whose road miles sit within bandMiles of the card's are
+   * kept. Where those that are kept are one general area (AREA_MI) and some
+   * were thrown out, the band's area, `band: true`, said "≈ route to area,
+   * by card's 1.2 mi". Nothing thrown out, nothing kept, or what is kept
+   * still spread: no band, and what was there before stands (the earlier
+   * area, else the refusal).
+   *
+   * The targets (bandTarget), from the card's printed figures only:
+   *
+   *   Uber, the pickup     from the card's fix (cardFix: the gate's fix, not a
+   *                        disc's rough centre), `toPickupMiles`.
+   *   Uber, the dropoff    from the placed pickup (a door, or a band answer of
+   *                        one survivor), the trip: its own leg where the
+   *                        card printed one (legDetail), else the card's miles
+   *                        less `toPickupMiles`.
+   *   DoorDash, the pickup from the card's fix, the whole job as an UPPER
+   *                        bound only: the road to the store cannot be more
+   *                        than the road through it to the customer.
+   *   DoorDash, the dropoff from the placed pickup, the whole job less the
+   *                        road from the fix to that pickup (`less`).
+   *   any stop ('any')     from the card's fix, the whole job as an upper
+   *                        bound — for a batched trip's dropoffs between
+   *                        (heldDrops): no figure on the card is the road to
+   *                        one of them, but none is further than the job.
+   *
+   * A card of neither shape (one leg, not known to count the drive to the
+   * store: cardYardstick's 'shape'), one judge() would not vouch for, an
+   * early look, no fix or no placed pickup: no target, no band.
+   *
+   * IT IS NOT A PIN, as no area is (withArea above): `at` stays null, the
+   * `why` stays the refusal's, the band's point is never posted, never
+   * endPin or pickupPins, never arms the GPS drop, never the restaurant or
+   * customer guard. And NEVER A FIGURE'S POINT: the band chose it BY the
+   * card's distance, so measuring the card's distance or the detour to it
+   * would be the card agreeing with itself — and nothing does, because every
+   * figure reads `found` and `at`, which the band never writes.
+   *
+   * DISTANCE ONLY. The router's metres, never its minutes: no pace, no drive
+   * time, no re-timing (Settled).
+   *
+   * bandMiles is max(BAND_MIN_MI, BAND_FRAC of the target) — 0.4 mi, or 15%
+   * of a long one — CHOSEN, NOT MEASURED. What it rests on: the card prints
+   * a tenth of a mile, so its figure is ±0.05 of the app's; the app's road
+   * is not OSRM's (the app may route by time or traffic, OSRM the fastest
+   * free-flow road, and a few percent apart is ordinary over a few miles);
+   * the fix is seconds older or newer than the platform's measurement
+   * (cardYardstick: unmeasured), and a placed pickup is a door, not the kerb
+   * the app measured to. A quarter mile of those together is easy; 0.4 mi
+   * at the short end, 15% at the long, keeps what they could move and still
+   * throws out the house of that number in the next town. */
+  var BAND_MIN_MI = 0.4;
+  var BAND_FRAC = 0.15;
+
+  function bandMiles(target) {
+    return Math.max(BAND_MIN_MI, BAND_FRAC * target);
+  }
+
+  /* The bounds on asking. BAND_ASKS_MAX road questions a stop (a cut list's
+     ten, or a street's samples), BAND_CARD_ASKS a card's walk (live.html
+     keeps the count), and BAND_WAIT_MS for a band's answers before it is
+     given up as no band at all: a router slow or down is the panel as it was,
+     never a panel waiting. A street sampled every BAND_STEP_M along its
+     pieces inside the disc, further apart where that would be more than
+     BAND_ASKS_MAX points. All chosen: a cut list is ten, ten questions are a
+     second at the relay's pace (NBX_GAP_MS), and 150 m is about a block —
+     closer than bandMiles can tell apart anyway. */
+  var BAND_ASKS_MAX = 10;
+  var BAND_CARD_ASKS = 24;
+  var BAND_WAIT_MS = 4000;
+  var BAND_STEP_M = 150;
+
+  // A figure the card printed, as a number to hold road miles to.
+  function printedMi(v) {
+    return typeof v === 'number' && isFinite(v) && v > 0 ? v : null;
+  }
+
+  /* The trip of an Uber card that split off its drive to the pickup: the one
+     leg it printed besides the approach, else the miles less the approach. */
+  function tripLeg(card) {
+    var legs = Array.isArray(card.legDetail) ? card.legDetail.filter(function (l) {
+      return l && !l.isApproach && !l.isTotal && printedMi(l.miles) !== null;
+    }) : [];
+    if (legs.length === 1) return legs[0].miles;
+    return printedMi(Math.round((card.miles - card.toPickupMiles) * 10) / 10);
+  }
+
+  /* The band's target for `stop` ('pickup', 'dropoff', 'any') of `card`, or
+     null: { from, miles, upper, less, said }. `from` a point (the card's
+     fix) or 'pickup' (the caller's placed pickup); `upper` for an upper
+     bound only; `less` a point the road from which to the pickup comes off
+     the target first (DoorDash's dropoff); `said` the card's printed figure
+     the words say. */
+  function bandTarget(card, stop) {
+    if (!card || printedMi(card.miles) === null || !vouches(card) || card.doubt
+        || card.earlyLook) return null;
+    var fix = cardFix(card).at;
+    var split = typeof card.toPickupMiles === 'number' && isFinite(card.toPickupMiles)
+      && card.toPickupMiles >= 0;
+    var dash = !split && typeof card.stops === 'number' && card.stops >= 2;
+    if (!split && !dash) return null;
+    if (stop === 'any') return fix ? { from: fix, miles: card.miles, upper: true, said: card.miles } : null;
+    if (stop === 'pickup') {
+      if (!fix) return null;
+      if (split) return printedMi(card.toPickupMiles) === null ? null
+        : { from: fix, miles: card.toPickupMiles, said: card.toPickupMiles };
+      return { from: fix, miles: card.miles, upper: true, said: card.miles };
+    }
+    if (stop === 'dropoff') {
+      if (split) {
+        var trip = tripLeg(card);
+        return trip === null ? null : { from: 'pickup', miles: trip, said: trip };
+      }
+      return fix ? { from: 'pickup', miles: card.miles, less: fix, said: card.miles } : null;
+    }
+    return null;
+  }
+
+  /* The candidates a band may choose among, from a refusal: a door plan's
+     'several' or 'capped' (pickInDisc's `cands`, the ones inside the disc).
+     Null for anything else. */
+  function withCands(res, pts, disc, plan) {
+    if (disc && plan && plan.kind === 'street' && plan.door && pts.length >= 2) {
+      res.cands = pts.slice(0, 50).map(function (h) {
+        return { lat: h.lat, lon: h.lon, name: h.name || '' };
+      });
+    }
+    return res;
+  }
+
+  function bandCands(res) {
+    if (!res || res.at || (res.why !== 'several' && res.why !== 'capped')) return null;
+    return Array.isArray(res.cands) && res.cands.length >= 2 ? res.cands : null;
+  }
+
+  /* Points along a street's pieces ([[lat, lon], ...] each) inside the disc,
+     BAND_STEP_M apart (or wider, to stay within `most`), named `name`. */
+  function bandSamples(lines, disc, most, name) {
+    if (!Array.isArray(lines) || !disc) return [];
+    var segs = [], len = 0;
+    lines.forEach(function (l) {
+      for (var i = 1; l && i < l.length; i++) {
+        var a = { lat: l[i - 1][0], lon: l[i - 1][1] }, b = { lat: l[i][0], lon: l[i][1] };
+        var m = crowMiles(a, b) * METRES_PER_MILE;
+        if (!(m > 0)) continue;
+        segs.push({ a: a, b: b, m: m });
+        len += m;
+      }
+    });
+    var step = Math.max(BAND_STEP_M, len / Math.max(1, most));
+    var out = [], until = step / 2;
+    segs.forEach(function (s) {
+      while (until <= s.m) {
+        var t = until / s.m;
+        var p = { lat: s.a.lat + t * (s.b.lat - s.a.lat), lon: s.a.lon + t * (s.b.lon - s.a.lon),
+                  name: name || '' };
+        if (crowMiles(disc.at, p) <= disc.miles) out.push(p);
+        until += step;
+      }
+      until -= s.m;
+    });
+    return out.slice(0, most);
+  }
+
+  /* The band itself: `cands` and their road miles (`roads`, NaN for one with
+     no road), held to `target` (an upper bound with `upper`). The area of
+     those kept, or null — see the long note above. Its point is the kept
+     candidate nearest their middle, so it is a door or a point of the
+     street, never between two. */
+  function bandPick(cands, roads, target, upper, said) {
+    if (!Array.isArray(cands) || !cands.length || !(target > 0)) return null;
+    var w = bandMiles(target);
+    var keep = cands.filter(function (c, i) {
+      var r = roads[i];
+      if (typeof r !== 'number' || !isFinite(r)) return false;
+      return upper ? r <= target + w : Math.abs(r - target) <= w;
+    });
+    if (!keep.length || keep.length === cands.length || !agreeing(keep, AREA_MI)) return null;
+    var mid = middleOf(keep), at = keep[0];
+    keep.forEach(function (k) { if (crowMiles(k, mid) < crowMiles(at, mid)) at = k; });
+    return { lat: at.lat, lon: at.lon, name: at.name || '', approx: true, band: true,
+             n: keep.length, miles: spreadOf(keep), cardMi: said || target };
+  }
+
   /* Which candidate, if any. `hits` is what the NucBox answered ({lat, lon,
    * name}); `disc` is discFor's answer or null; `plan` is searchPlan's;
    * `cutAt` is the server's limit when the list stopped at it, else null.
@@ -1553,10 +1763,11 @@
     // ...cut, refused; and where what the cut list holds inside the disc is
     // one general area, that area beside it (withArea, `cut`).
     if (cutAt) {
-      return withArea({ at: null, why: 'capped', n: cutAt },
-                      disc ? all.filter(function (h) {
-                        return crowMiles(disc.at, h) <= disc.miles;
-                      }) : [], disc, plan, true);
+      var cutIn = disc ? all.filter(function (h) {
+        return crowMiles(disc.at, h) <= disc.miles;
+      }) : [];
+      return withCands(withArea({ at: null, why: 'capped', n: cutAt }, cutIn, disc, plan, true),
+                       cutIn, disc, plan);
     }
     if (plan && plan.door && all.length) {
       var doors = all.filter(function (h) { return hasDoor(h, plan.house); });
@@ -1594,7 +1805,8 @@
       return { at: { lat: mid.lat, lon: mid.lon, name: inside[0].name || '' },
                n: inside.length };
     }
-    return withArea({ at: null, why: 'several', n: inside.length }, inside, disc, plan);
+    return withCands(withArea({ at: null, why: 'several', n: inside.length }, inside, disc, plan),
+                     inside, disc, plan);
   }
 
   /* --- the door asked again, the street's type word left out ------------------
@@ -3356,6 +3568,8 @@
     };
     this.fetch = opts.fetch || function (u, init) { return fetch(u, init); };
     this.base = opts.base || '/api/nbx';
+    // How long a distance band waits for its roads (band, BAND_WAIT_MS).
+    if (typeof opts.bandWait === 'number') this.bandWait = opts.bandWait;
     this.cache = {};
     this.pending = {};
     this.lastAsk = 0;
@@ -3523,6 +3737,83 @@
     return this.get('/whole?name=' + encodeURIComponent(name) + '&box='
                     + encodeURIComponent(discBox(disc))).then(function (body) {
       return nbxDown(body) ? null : streetArea(body, disc);
+    });
+  };
+
+  /* The distance band for one stop (bandTarget, bandPick above): `q` the
+     text searched, `res` its answer, `disc` its card's disc, `spec`
+     bandTarget's, `pick` the placed pickup where `spec.from` is 'pickup',
+     `budget` the walk's { left } road questions (BAND_CARD_ASKS), and
+     `streets` whether the street index is set (a 'none' door's street is
+     sampled only with it). Resolves the band's area or null, NEVER rejects,
+     and never waits past BAND_WAIT_MS (`opts.bandWait`). Asks the relay's
+     two-point route (road), as the detour does, through the cache: the
+     relay has no table service, and ten two-point questions through the
+     cache are what a cut list costs once. Router down or refusing, an origin
+     moved past SNAP_MI to reach a road, a budget spent: null. */
+  NbxSearch.prototype.band = function (q, res, disc, spec, pick, budget, streets) {
+    var plan = searchPlan(q);
+    if (!res || res.at || !disc || !spec || !plan || plan.kind !== 'street' || !plan.door) {
+      return Promise.resolve(null);
+    }
+    var from = spec.from === 'pickup' ? pick : spec.from;
+    if (!from || !isFinite(from.lat) || !isFinite(from.lon)) return Promise.resolve(null);
+    var me = this;
+    var c = bandCands(res);
+    var got = c ? Promise.resolve(c)
+      : res.why === 'none' && streets ? this.bandStreet(plan, disc) : Promise.resolve(null);
+    var work = got.then(function (cands) {
+      if (!cands || cands.length < 2 || cands.length > BAND_ASKS_MAX) return null;
+      var asks = cands.length + (spec.less ? 1 : 0);
+      if (budget) {
+        if (!(budget.left >= asks)) return null;
+        budget.left -= asks;
+      }
+      // Road miles a to b; NaN for no road or a candidate moved far to
+      // reach one (not kept); a throw for anything that makes it no band.
+      function mi(a, b) {
+        return me.road([a, b]).then(function (r) {
+          if (r.why === 'noroute') return NaN;
+          if (r.why || !Array.isArray(r.snaps) || r.snaps.length !== 2
+              || !(typeof r.metres === 'number' && isFinite(r.metres))) throw r;
+          if (!(r.snaps[0] / METRES_PER_MILE <= SNAP_MI)) throw r;
+          return r.snaps[1] / METRES_PER_MILE <= SNAP_MI ? r.metres / METRES_PER_MILE : NaN;
+        });
+      }
+      return (spec.less ? mi(spec.less, from) : Promise.resolve(0)).then(function (before) {
+        var target = spec.miles - before;
+        if (!isFinite(before) || !(target > 0)) return null;
+        return Promise.all(cands.map(function (p) { return mi(from, p); })).then(function (roads) {
+          return bandPick(cands, roads, target, spec.upper, spec.said);
+        });
+      });
+    }).catch(function () { return null; });
+    var wait = typeof this.bandWait === 'number' ? this.bandWait : BAND_WAIT_MS;
+    return new Promise(function (resolve) {
+      var done = false;
+      var t = setTimeout(function () { if (!done) { done = true; resolve(null); } }, wait);
+      work.then(function (a) {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        resolve(a);
+      });
+    });
+  };
+
+  /* A door plan's street as points along it inside the disc (bandSamples),
+     of the street index's stretch in the disc's box (cut at its edge, sent
+     whatever its length, unlike `whole`): null where the index reads two
+     names, holds none, or cut the stretch at its cap. */
+  NbxSearch.prototype.bandStreet = function (plan, disc) {
+    var name = nameAsked(plan);
+    if (!name || !disc) return Promise.resolve(null);
+    return this.get('/stretch?name=' + encodeURIComponent(name) + '&box='
+                    + encodeURIComponent(discBox(disc))).then(function (body) {
+      if (nbxDown(body) || !Array.isArray(body.names) || body.names.length !== 1 || body.cutAt) {
+        return null;
+      }
+      return bandSamples(body.lines, disc, BAND_ASKS_MAX, body.names[0]);
     });
   };
 
@@ -4185,7 +4476,7 @@
     // ...and an end the run went to the general area of (routeSaid's
     // "≈ routed"): the area's words are the chip's reason, as they took the
     // disc's place in the sentence.
-    [/^no pin for (.+?) — .+? · (\u2248 routed(?:, \d+\+? within [\d.]+ mi| to (?:street )?area))$/,
+    [/^no pin for (.+?) — .+? · (\u2248 routed(?:, \d+\+? within [\d.]+ mi|, by card's [\d.]+ mi| to (?:street )?area))$/,
      function (m) { return 'NO PIN · ' + m[1] + ', ' + m[2]; }],
     [/^no pin for (.+?) — (.+?)(?: · .*)?$/, function (m) {
       return 'NO PIN · ' + m[1] + ', ' + (PIN_SHORT[m[2]] || m[2]); }],
@@ -4420,6 +4711,11 @@
            ROUTE_NOTES: ROUTE_NOTES, routeRung: routeRung, routeLadder: routeLadder,
            routeSaid: routeSaid, areaNote: areaNote, streetArea: streetArea,
            ROUGH_AREA_MI: ROUGH_AREA_MI,
+           // ...and the distance band (the owner, 25 Oct).
+           bandMiles: bandMiles, bandTarget: bandTarget, bandPick: bandPick,
+           bandCands: bandCands, bandSamples: bandSamples, tripLeg: tripLeg,
+           BAND_MIN_MI: BAND_MIN_MI, BAND_FRAC: BAND_FRAC, BAND_ASKS_MAX: BAND_ASKS_MAX,
+           BAND_CARD_ASKS: BAND_CARD_ASKS, BAND_WAIT_MS: BAND_WAIT_MS, BAND_STEP_M: BAND_STEP_M,
            // ...and a batched trip's other doors, drawn on the run (24 Oct).
            heldDrops: heldDrops, dropKey: dropKey, dropPoint: dropPoint,
            dropsSkipped: dropsSkipped,

@@ -44,7 +44,8 @@
  * that number 0.33 mi apart (one general area) and "3152" two 2.5 mi apart,
  * "10800 Vessington Hwy" ten houses cut at the limit within 0.4 mi and "10900"
  * ten spread over 3 mi, "10495 Pellmore Street" nothing with its street short
- * in the index and "10497 Dunmere Parkway" nothing with its street long,
+ * in the index and "10497 Dunmere Parkway" nothing with its street long
+ * (its stretch 5.4 mi due north of the Square, for the distance band),
  * "Wrenfield Parking Deck" a place by Kestrel Drive (with "Quarry Hall" a road
  * and "Lantern Parking Deck" a deck far off, below), a
  * point at 34.1, -84.6 is refused by the
@@ -550,6 +551,11 @@ function start(done) {
             meets: [{ lat: 33.96, lon: -84.55, n: 1, spanM: 0, shared: true }] }
         : { ok: true, names: [String(u.query.name)], how: 'exact', points: 2, cutAt: null,
             lines: [[[33.948, -84.56], [33.948, -84.552]]] };
+      // ...and "Dunmere Parkway" (the long street of NAMED_INDEX, which
+      // `whole` sends by its length alone) as its stretch in a box, for the
+      // distance band (map-view.js bandSamples, server.js bandHeldEnd): one
+      // straight piece running 5.4 mi due north from the Square. Invented.
+      if (!cross && said === 'Dunmere Parkway') body.lines = [[[33.9526, -84.5499], [34.0300, -84.5499]]];
       if (said === 'Bad Street') {
         if (cross) body.meets.push({ lat: 'north', lon: -84.55, n: 1, spanM: 0 });
         else body.lines[0].push([33.948]);

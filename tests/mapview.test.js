@@ -1560,6 +1560,180 @@ async function nucbox() {
      JSON.stringify(['no pin for 10495 Pellmore… — none found · ≈ routed to street area',
                      'NO PIN · 10495 Pellmore…, ≈ routed to street area']));
 
+  /* ---- the distance band (the owner, 25 Oct: "Go ahead with the distance
+   * band"): the card's printed miles, BY ROAD, among a refused door's
+   * candidates. Off a stub of the relay whose road is a quarter longer than
+   * the straight line (tests/fake-nucbox.js's own rule), and its stretch of
+   * "Dunmere Parkway" the fake's: 5.4 mi due north of the Square. Invented
+   * places throughout. Never a pin: `at` and `why` stay the refusal's. */
+  var bandAsked = [];
+  function bandNbx(how) {
+    return new MV.NbxSearch({ gap: 0, bandWait: how === 'slow' ? 30 : undefined, fetch: function (u) {
+      bandAsked.push(u);
+      if (how === 'slow') return new Promise(function () {});
+      var body;
+      if (how === 'down') body = { ok: false, unreachable: true, error: 'down' };
+      else if (/\/stretch\?/.test(u)) {
+        body = { ok: true, names: ['Dunmere Parkway'], how: 'exact', points: 2, cutAt: null,
+                 lines: [[[33.9526, -84.5499], [34.0300, -84.5499]]] };
+      } else {
+        var pts = decodeURIComponent(u.split('points=')[1]).split(';').map(function (c) {
+          var x = c.split(',').map(Number);
+          return { lat: x[1], lon: x[0] };
+        });
+        body = { ok: true, metres: MV.crowMiles(pts[0], pts[1]) * 1.25 * 1609.344, snaps: [3, 3] };
+      }
+      return Promise.resolve({ ok: !body.unreachable, status: body.unreachable ? 502 : 200,
+                               json: function () { return Promise.resolve(body); } });
+    } });
+  }
+  var uber = function (o) { return card(Object.assign({ miles: 5.0, toPickupMiles: 0.7 }, o)); };
+  var dash = function (o) {
+    return card(Object.assign({ miles: 3.0, stops: 2, hasTotal: false, legs: 1 }, o));
+  };
+  var tPlan = '3152 Thornbury Mill Rd SE, Marietta';
+  var tRes = MV.pickInDisc(hitsOf(FAKE.THORNBURY_3152), d50, MV.searchPlan(tPlan));
+  eq('[band] the width: 0.4 mi, or 15% of a long figure — chosen',
+     JSON.stringify([MV.bandMiles(1.0), +MV.bandMiles(4.0).toFixed(2), MV.BAND_MIN_MI,
+                     MV.BAND_FRAC]), JSON.stringify([0.4, 0.6, 0.4, 0.15]));
+  eq('[band] the targets: Uber\'s pickup from the fix at its printed drive there, its dropoff '
+     + 'from the pickup at the trip (its own leg, else miles less the drive)',
+     JSON.stringify([MV.bandTarget(uber(), 'pickup'),
+                     MV.bandTarget(uber({ legDetail: [{ miles: 0.7, isApproach: true },
+                                                      { miles: 4.1 }] }), 'dropoff'),
+                     MV.bandTarget(uber(), 'dropoff')]),
+     JSON.stringify([{ from: SQ, miles: 0.7, said: 0.7 }, { from: 'pickup', miles: 4.1, said: 4.1 },
+                     { from: 'pickup', miles: 4.3, said: 4.3 }]));
+  eq('[band] ...DoorDash\'s pickup the whole job as a ceiling, its dropoff the job less the '
+     + 'road to the pickup; any stop of a batched trip no further than the job',
+     JSON.stringify([MV.bandTarget(dash(), 'pickup'), MV.bandTarget(dash(), 'dropoff'),
+                     MV.bandTarget(dash(), 'any')]),
+     JSON.stringify([{ from: SQ, miles: 3, upper: true, said: 3 },
+                     { from: 'pickup', miles: 3, less: SQ, said: 3 },
+                     { from: SQ, miles: 3, upper: true, said: 3 }]));
+  eq('[band] ...none for a card of one leg (not known to count the drive), a doubted one, an '
+     + 'early look, or no fix to measure from',
+     JSON.stringify([MV.bandTarget(card({ miles: 5.0, legs: 1, hasTotal: false }), 'pickup'),
+                     MV.bandTarget(uber({ doubt: 'miles' }), 'pickup'),
+                     MV.bandTarget(uber({ earlyLook: true }), 'pickup'),
+                     MV.bandTarget(uber({ gpsOk: false, gpsWhy: 'stale' }), 'pickup')]),
+     JSON.stringify([null, null, null, null]));
+  eq('[band] two doors 2.5 mi apart refused "several", both kept as the band\'s candidates',
+     JSON.stringify([tRes.at, tRes.why, tRes.area, (tRes.cands || []).length]),
+     JSON.stringify([null, 'several', null, 2]));
+  bandAsked = [];
+  var bPick = await bandNbx().band(tPlan, tRes, d50, MV.bandTarget(uber(), 'pickup'), null,
+                                   { left: 24 }, true);
+  eq('[band] Uber, pickup 0.7 mi: the door 0.73 road mi off is kept, the one 3.9 off thrown '
+     + 'out — an area at that door, the band\'s, not a pin',
+     JSON.stringify(bPick && [bPick.lat, bPick.lon, bPick.approx, bPick.band, bPick.n,
+                              bPick.cardMi, tRes.at, tRes.why]),
+     JSON.stringify([33.96, -84.545, true, true, 1, 0.7, null, 'several']));
+  eq('[band] ...two road questions, car to each door, through the relay\'s two-point route',
+     JSON.stringify([bandAsked.length, bandAsked.every(function (u) {
+       return /^\/api\/nbx\/route\?points=-84\.54990,33\.95260;/.test(u); })]),
+     JSON.stringify([2, true]));
+  eq('[band] ...said by the card\'s figure, in the end\'s own refusal and its chip',
+     JSON.stringify([MV.areaNote(bPick), MV.captionChip(MV.routeSaid(
+       'no pin for 3152 Thornbury… — 2 fit its card and disagree · within 5.5 mi',
+       ['trip: ' + MV.areaNote(bPick, true)],
+       [['3152 Thornbury…', 'trip: ' + MV.areaNote(bPick, true), bPick]]))]),
+     JSON.stringify(['≈ route to area, by card\'s 0.7 mi',
+                     'NO PIN · 3152 Thornbury…, ≈ routed, by card\'s 0.7 mi']));
+  var bDrop = await bandNbx().band(tPlan, tRes, d50,
+                                   MV.bandTarget(uber({ toPickupMiles: 4.3 }), 'dropoff'),
+                                   SQ, { left: 24 }, true);
+  eq('[band] Uber, dropoff: from the placed pickup, the trip 0.7 mi keeps the same door',
+     JSON.stringify(bDrop && [bDrop.lat, bDrop.n]), JSON.stringify([33.96, 1]));
+  eq('[band] ...and with no placed pickup nothing is asked',
+     await bandNbx().band(tPlan, tRes, d50, MV.bandTarget(uber(), 'dropoff'), null,
+                          { left: 24 }, true), null);
+  var bDash = await bandNbx().band(tPlan, tRes, d50, MV.bandTarget(dash(), 'pickup'), null,
+                                   { left: 24 }, true);
+  eq('[band] DoorDash, pickup, 3.0 mi a ceiling: the door 3.9 road mi off is past it and the '
+     + 'other kept',
+     JSON.stringify(bDash && [bDash.lat, bDash.n, bDash.cardMi]), JSON.stringify([33.96, 1, 3]));
+  eq('[band] ...a ceiling over both throws nothing out, so no band',
+     await bandNbx().band(tPlan, tRes, d50, MV.bandTarget(dash({ miles: 5.0 }), 'pickup'), null,
+                          { left: 24 }, true), null);
+  var ddPick = { lat: 33.9526, lon: -84.54 };
+  var bDashDrop = await bandNbx().band(tPlan, tRes, d50, MV.bandTarget(dash({ miles: 1.5 }),
+                                                                       'dropoff'),
+                                       ddPick, { left: 24 }, true);
+  eq('[band] DoorDash, dropoff: 1.5 mi less the 0.68 road mi car to pickup is 0.82, and the '
+     + 'door 0.75 from the pickup fits',
+     JSON.stringify(bDashDrop && [bDashDrop.lat, bDashDrop.n]), JSON.stringify([33.96, 1]));
+  eq('[band] none survive (a 10 mi figure): no band, and the refusal as it was',
+     JSON.stringify([await bandNbx().band(tPlan, tRes, d50,
+                                          MV.bandTarget(uber({ toPickupMiles: 10 }), 'pickup'),
+                                          null, { left: 24 }, true), tRes.area, tRes.why]),
+     JSON.stringify([null, null, 'several']));
+  var vRes = MV.pickInDisc(hitsOf(FAKE.VESSINGTON_10900), d50,
+                           MV.searchPlan('10900 Vessington Hwy, Marietta'), 10);
+  eq('[band] a cut list spread over 3 mi: at 2.1 mi the doors kept are still miles apart, so '
+     + 'no band, as before',
+     JSON.stringify([(vRes.cands || []).length,
+                     await bandNbx().band('10900 Vessington Hwy, Marietta', vRes, d50,
+                                          MV.bandTarget(uber({ toPickupMiles: 2.1 }), 'pickup'),
+                                          null, { left: 24 }, true)]),
+     JSON.stringify([10, null]));
+  var vBand = await bandNbx().band('10900 Vessington Hwy, Marietta', vRes, d50,
+                                   MV.bandTarget(dash({ miles: 0.3 }), 'pickup'), null,
+                                   { left: 24 }, true);
+  eq('[band] ...and a ceiling of 0.3 mi keeps the three nearest, one area of the cut list',
+     JSON.stringify(vBand && [vBand.n, vBand.miles < MV.AREA_MI, vBand.band, vRes.why]),
+     JSON.stringify([3, true, true, 'capped']));
+  var dunRes = { at: null, why: 'none', nearest: null, n: 0 };
+  var dun = await bandNbx().band('10497 Dunmere Parkway, Marietta', dunRes, d50,
+                                 MV.bandTarget(uber({ toPickupMiles: 2.0 }), 'pickup'), null,
+                                 { left: 24 }, true);
+  eq('[band] a door nothing answered on a long street: its stretch sampled (10 points), and '
+     + 'the two whose road miles meet the card\'s 2.0 are an area where the street crosses it',
+     JSON.stringify(dun && [+dun.lat.toFixed(4), dun.lon, dun.n, dun.band, dunRes.why, dunRes.at]),
+     JSON.stringify([33.9719, -84.5499, 2, true, 'none', null]));
+  eq('[band] ...sampled every 150 m or wider, never past BAND_ASKS_MAX points',
+     JSON.stringify([MV.bandSamples([[[33.9526, -84.5499], [34.0300, -84.5499]]], d50, 10, '')
+                       .length,
+                     MV.bandSamples([[[33.9526, -84.5499], [33.9600, -84.5499]]], d50, 10, '')
+                       .length, MV.BAND_STEP_M]),
+     JSON.stringify([10, 5, 150]));
+  eq('[band] ...without the street index the street is not asked',
+     await bandNbx().band('10497 Dunmere Parkway, Marietta', dunRes, d50,
+                          MV.bandTarget(uber({ toPickupMiles: 2.0 }), 'pickup'), null,
+                          { left: 24 }, false), null);
+  eq('[band] router down: no band, silently',
+     await bandNbx('down').band(tPlan, tRes, d50, MV.bandTarget(uber(), 'pickup'), null,
+                                { left: 24 }, true), null);
+  eq('[band] router slow: given up after its wait, no band',
+     await bandNbx('slow').band(tPlan, tRes, d50, MV.bandTarget(uber(), 'pickup'), null,
+                                { left: 24 }, true), null);
+  bandAsked = [];
+  var budget = { left: 1 };
+  eq('[band] a walk\'s budget spent: nothing asked, no band',
+     JSON.stringify([await bandNbx().band(tPlan, tRes, d50, MV.bandTarget(uber(), 'pickup'), null,
+                                          budget, true), bandAsked.length, budget.left,
+                     MV.BAND_CARD_ASKS, MV.BAND_ASKS_MAX]),
+     JSON.stringify([null, 0, 1, 24, 10]));
+  eq('[band] a pinned door, a corner, a merchant\'s name: no band asked',
+     JSON.stringify([await bandNbx().band(tPlan, { at: { lat: 1, lon: 2 }, why: null }, d50,
+                                          MV.bandTarget(uber(), 'pickup'), null, null, true),
+                     await bandNbx().band('Oak St & Elm St', tRes, d50,
+                                          MV.bandTarget(uber(), 'pickup'), null, null, true),
+                     await bandNbx().band("McDonald's", tRes, d50,
+                                          MV.bandTarget(uber(), 'pickup'), null, null, true)]),
+     JSON.stringify([null, null, null]));
+  /* NO CIRCULARITY: the band chose its point BY the card's miles, so no
+     figure may be measured to it. Every figure and judgement reads `at`
+     (and live.html's `found`, which only `at` fills); the band never writes
+     it, so the card's line refuses as it did, and the dropoff run takes the
+     band's point as an approximate one, never a door. */
+  eq('[band] no circularity: the refusal keeps no pin, so the card is never held against the '
+     + 'band\'s point, and its words are the refusal\'s',
+     JSON.stringify([tRes.at, MV.nbxRefusal(tRes, d50, '3152 Thornbury…', 'new'),
+                     MV.dropPoint(Object.assign({}, tRes, { bandArea: bPick }))]),
+     JSON.stringify([null, 'no pin for 3152 Thornbury… — 2 fit the card and disagree · within '
+                     + '5 mi of you', { lat: 33.96, lon: -84.545, approx: true, band: true }]));
+
   ok_('...and a door is read off the first two parts of the name, so the '
       + 'postcode is never taken for the house number',
       MV.hasDoor({ name: '1985, Cobb Parkway, Kennesaw' }, '1985')

@@ -7419,6 +7419,62 @@ try:
     finally:
         stop(_hkp)
 
+    # The distance band (the owner, 25 Oct: "Go ahead with the distance
+    # band"), invented: an Uber order held whose card printed 5.0 mi, 4.3 of
+    # them to the pickup, so a 0.7 mi trip; its door "3152 <Name> Mill Rd SE"
+    # answered as two doors 2.5 mi apart inside the disc, refused 'several
+    # answers' with no area. When its one pickup is pinned, the router is asked
+    # the road from it to each door, and the one 0.73 road mi off is kept as
+    # the end's AREA (`band`) — NO PIN: endPinned false, the refusal kept, and
+    # a car that waits there and leaves drops nothing. With the router down,
+    # nothing is kept and the refusal stands as it was.
+    def _bandtook(base, oid):
+        o = dict(_SQ, id=oid, pay=12.0, minutes=40.0, billedMinutes=40.0, miles=5.0,
+                 toPickupMiles=4.3, cost=1.75, dropoff='3152 Thornbury Mill Rd SE, Marietta')
+        post(base, '/api/offers/mark', {'id': oid, 'accepted': True, 'offer': o})
+
+    for _bwhich, _broute in (('up', _hkfake_base), ('down', 'http://127.0.0.1:9')):
+        _hks, _hksays, _hkj = _hksayer('band-' + _bwhich)
+        _hkp, _hkb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _hks,
+                            'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_ROUTER': _broute,
+                            'NUCBOX_TIMEOUT_MS': '800', 'GPS_DWELL_MS': '1000'}, _hkj)
+        try:
+            _bandtook(_hkb, 'k-band-' + _bwhich)
+            _h = _settled(_hkb)
+            eq('[band] (%s) the two doors refused, no area of their own before the pickup is '
+               'placed' % _bwhich, (_h.get('endPinned'), _h.get('endWhy'), _h.get('endArea')),
+               (False, 'several answers', None))
+            post(_hkb, '/api/held-pickup', {'holdId': _h.get('holdId'), 'lat': 33.9526,
+                                            'lon': -84.5499, 'q': 'Example Cafe'})
+            if _bwhich == 'up':
+                _h = _settled(_hkb, lambda h: (h.get('endArea') or {}).get('band'))
+                _ea = _h.get('endArea') or {}
+                eq('[band] the pickup placed: the door whose road from it fits the card\'s 0.7 mi '
+                   'trip kept as the end\'s area, the band\'s — still no pin, the refusal kept',
+                   (_h.get('endPinned'), _h.get('endBy'), _h.get('endAt'), _h.get('endWhy'),
+                    _ea.get('approx'), _ea.get('band'), _ea.get('n'), _ea.get('cardMi'),
+                    round(_ea.get('lat') or 0, 4), round(_ea.get('lon') or 0, 4)),
+                   (False, None, None, 'several answers', True, True, 1, 0.7, 33.96, -84.545))
+                eq('[band] ...asked of the router as two-point routes, no more than the doors',
+                   len([a for a in _hkasked('/route/v1/driving/-84.549900,33.952600;')
+                        if 'overview=false' in a]) >= 2, True)
+                _hksays([_areabeat(_ea.get('lat'), _ea.get('lon'))] * 7
+                        + [_areabeat(_ea.get('lat') + 0.02, _ea.get('lon'))] * 3)
+                _h = _holding(_hkb) or {}
+                eq('[band] ...a car that waits at the band\'s area and leaves arrives nowhere and '
+                   'drops nothing', (_h.get('dropoff'), _h.get('arrived'), _h.get('endPinned'),
+                                     _h.get('endWhy')),
+                   ('3152 Thornbury Mill Rd SE, Marietta', False, False, 'several answers'))
+            else:
+                time.sleep(1.5)
+                _h = _holding(_hkb) or {}
+                eq('[band] the router down: no band, the refusal as it was, nothing kept',
+                   (_h.get('endPinned'), _h.get('endWhy'), _h.get('endArea')),
+                   (False, 'several answers', None))
+            post(_hkb, '/api/delivered', {})
+        finally:
+            stop(_hkp)
+
     # The owner's snap of 24 Oct, 03:03, invented: one Uber trip, ONE pickup
     # ("Pickup • 2 orders") and two dropoffs. Page 1 of the Trip Planner read
     # the pickup with its door, the first dropoff and the second's header and

@@ -773,6 +773,20 @@ CAPTION_LINES = [
     ('no pin, none in sixty miles, routed to its street\'s area',
      "no pin for " + WIDEST_DISC + " — none found · ≈ routed to street area",
      "no pin for " + WIDEST_DISC + " — none found"),
+    # ...and the distance band (the owner, 25 Oct): several, a cut list, or
+    # a long street's points, narrowed by the card's own miles by road
+    # (MV.bandPick), said by the card's figure — "88.8", the widest figure a
+    # card prints in a tenth.
+    ('no pin, several narrowed by the card\'s miles',
+     "no pin for " + WIDEST_DISC + " — 10 fit its card and disagree · ≈ routed, "
+     "by card's 88.8 mi",
+     "no pin for " + WIDEST_DISC + " — 10 fit its card and disagree"),
+    ('no pin, a cut list narrowed by the card\'s miles',
+     "no pin for " + WIDEST_DISC + " — too many to be sure · ≈ routed, by card's 88.8 mi",
+     "no pin for " + WIDEST_DISC + " — too many to be sure"),
+    ('no pin, a long street narrowed by the card\'s miles',
+     "no pin for " + WIDEST_DISC + " — none found · ≈ routed, by card's 88.8 mi",
+     "no pin for " + WIDEST_DISC + " — none found"),
     ('no pin, several with no fix',
      "no pin for " + WIDEST_DISC + " — 10 found · no GPS fix to choose between "
      "them",
@@ -967,7 +981,8 @@ CAPTION_LINES = [
 # the few words saying why — a corner's "50 corners fit the card" among
 # them — the same way round; or, where the run was routed to the general
 # area of the answers, ` · ≈ routed, 10 within 1.0 mi` in the disc's place
-# (`10+` for a cut list, ` · ≈ routed to street area` for a street's).
+# (`10+` for a cut list, ` · ≈ routed to street area` for a street's, and
+# ` · ≈ routed, by card's 1.2 mi` for the distance band's).
 # Each is the end of its sentence
 # precisely so that it is what a clamp eats; everything before it is a figure
 # or a hedge on one.
@@ -989,9 +1004,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 109)
-eq('...and fifty-one of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 51)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 112)
+eq('...and fifty-four of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 54)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:
@@ -1120,6 +1135,12 @@ CAPTION_CHIPS = {
         "NO PIN · " + WIDEST_DISC + ", ≈ routed to street area",
     "no pin, none in sixty miles, routed to its street's area":
         "NO PIN · " + WIDEST_DISC + ", ≈ routed to street area",
+    "no pin, several narrowed by the card's miles":
+        "NO PIN · " + WIDEST_DISC + ", ≈ routed, by card's 88.8 mi",
+    "no pin, a cut list narrowed by the card's miles":
+        "NO PIN · " + WIDEST_DISC + ", ≈ routed, by card's 88.8 mi",
+    "no pin, a long street narrowed by the card's miles":
+        "NO PIN · " + WIDEST_DISC + ", ≈ routed, by card's 88.8 mi",
     "no pin, several with no fix":
         "NO PIN · " + WIDEST_DISC + ", no fix to choose",
     "no pin, several with no fix on the held card":

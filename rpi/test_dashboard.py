@@ -4997,6 +4997,24 @@ const framed = (page) => page.waitForFunction(
           pick: await pick(),
           job: (await keyNow()).job,
           posts: areaPosts.slice() };
+        // The distance band (the owner, 25 Oct), invented: a NEW Uber offer
+        // whose card printed 0.7 mi to the pickup, its pickup's door answered
+        // as two doors 2.5 mi apart inside the disc ('several', no area). The
+        // road from the car to each, held to 0.7 mi, keeps the near one: the
+        // trip routed from the band's area, a faded "≈" ring and never P,
+        // its refusal saying "by card's 0.7 mi", and nothing posted.
+        await push({ id: 'n-band', pickup: '3152 Thornbury Mill Rd SE, Marietta',
+                     dropoff: '4821 Kestrel Dr, Marietta', holdId: 'h-band',
+                     card: { miles: 5.0, toPickupMiles: 0.7 } });
+        await page.waitForTimeout(2500);
+        r.bandArea = {
+          note: await note(),
+          ring: await page.evaluate(() => (window.__marks || []).filter(
+            (k) => String(k.popup || '').indexOf('the area this one is picked up in') >= 0)
+            .map((k) => ({ ll: k.ll, faded: (k.opts || {}).fillOpacity < 0.5,
+                           band: String(k.popup || '').indexOf('card\'s miles by road') >= 0 }))),
+          pick: await pick(),
+          posts: areaPosts.slice() };
         page.off('request', onPost);
         // The same street-only door, no place, but the SERVER armed it by
         // the short street (endBy 'street', its point): Map view draws that
@@ -10995,6 +11013,13 @@ try:
         all(m.get('faded') for m in _ca.get('ring') or []),
         '\u2248 routed, 10+ within 0.3 mi' in (_ca.get('note') or ''), _ca.get('posts')),
        (None, 1, True, True, []))
+    _ba = both.get('bandArea') or {}
+    eq('[band] a new Uber offer\'s pickup refused as two doors, the card\'s 0.7 mi by road '
+       'keeping one: no P, one faded "≈" ring at that door said as the band\'s, its refusal '
+       'saying "by card\'s 0.7 mi", nothing posted (%r)' % (_ba.get('note'),),
+       (_ba.get('pick'), [(m.get('ll'), m.get('faded'), m.get('band')) for m in _ba.get('ring') or []],
+        '\u2248 routed, by card\'s 0.7 mi' in (_ba.get('note') or ''), _ba.get('posts')),
+       (None, [([33.96, -84.545], True, True)], True, []))
     ok_('[server pin] Map view draws the held end the server armed by street as D, at its '
         'point, and does not say NO PIN; a pin by no server rule is not drawn (%r)'
         % both.get('serverNote'),
