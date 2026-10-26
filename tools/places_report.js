@@ -712,6 +712,24 @@ function takesTable(rows, runs, key, label, what) {
  * slip) and ONLY where the join cannot be a guess — server.js storeWaitFor's
  * rule for a store with no pin: not a chain's name (Assemble.chainName), one
  * store of that name on record, and one place of that name in this report. */
+function waitsOk(waits) {
+  return (waits || []).filter(function (w) {
+    return w && typeof w.name === 'string' && typeof w.n === 'number' && typeof w.medianMin === 'number';
+  });
+}
+
+/* The one join rule, for the waits tab and the Restaurants tab alike:
+ * `label` the name, `ws` the waits on record (waitsOk), `places` how many
+ * places of that name this report holds. { w, why }: the wait, or why not. */
+function waitOf(label, ws, places) {
+  var hits = ws.filter(function (w) { return AS.sameStore(w.name, label); });
+  if (!hits.length) return { w: null, why: 'none on record' };
+  if (AS.chainName(label)) return { w: null, why: 'a chain: which branch, a guess' };
+  if (hits.length > 1) return { w: null, why: 'several stores of this name on record' };
+  if (places > 1) return { w: null, why: 'this name is at more than one place here' };
+  return { w: hits[0], why: null };
+}
+
 function waitsTable(rows, places, waits, placeKey) {
   var by = groupBy(rows.filter(counted), placeKey);
   var sameName = Object.create(null);
@@ -719,18 +737,11 @@ function waitsTable(rows, places, waits, placeKey) {
     var k = AS.storeKey(places[id].label);
     sameName[k] = (sameName[k] || 0) + 1;
   });
-  var ws = (waits || []).filter(function (w) {
-    return w && typeof w.name === 'string' && typeof w.n === 'number' && typeof w.medianMin === 'number';
-  });
+  var ws = waitsOk(waits);
   var out = Object.keys(by).map(function (k) {
     var list = by[k], label = places[k] ? places[k].label : k;
-    var hits = ws.filter(function (w) { return AS.sameStore(w.name, label); });
-    var why = null, w = null;
-    if (!hits.length) why = 'none on record';
-    else if (AS.chainName(label)) why = 'a chain: which branch, a guess';
-    else if (hits.length > 1) why = 'several stores of this name on record';
-    else if (sameName[AS.storeKey(label)] > 1) why = 'this name is at more than one place here';
-    else w = hits[0];
+    var j = waitOf(label, ws, sameName[AS.storeKey(label)] || 0);
+    var why = j.why, w = j.w;
     var pays = list.map(function (o) { return o.pay; }).filter(function (v) { return typeof v === 'number'; });
     return { name: label, n: list.length, pay: med(pays), perHour: med(list.map(function (o) { return o.perHour; })),
              wait: w ? w.medianMin : null, waitN: w ? w.n : null, why: why };
@@ -994,6 +1005,173 @@ function heldOf(taken) {
   }).map(function (t) { return [t.tookAt, t.endedAt]; });
 }
 
+/* --- restaurants: every offer of a name, placed or not --------------------
+ *
+ * The owner, 26 Oct 2026: "Would it be possible to have a comparison of
+ * different restaurants and their pay? That could be helpful." The Places
+ * table holds only pickups the map could pin, and the unplaced paid less
+ * (the banner's own test), so this groups by the NAME the card printed and
+ * needs no pin: every "Bramble Burger" is one row, its placed branches listed
+ * under it, its unplaced offers counted with them.
+ *
+ * THE NAME. A pickup's name is storeLabel's (Uber's bracketed street off,
+ * the line before a printed door's comma), and only where searchPlan reads
+ * it as a name (pickupKind 'name'): a door, a street or a corner is no
+ * restaurant's name and is counted as "no name on the card". Names are
+ * merged by the rig's own store-name rule, the one this report already joins
+ * waits by: Assemble.storeKey (case, marks, the planner's icon letters and a
+ * " – Town" tail set aside) and Assemble.sameStore (one i/l slip). server.js
+ * keys its store waits by storeKey too (storeWaitHeard), but its name rule
+ * (storeNameSaid) is not exported and is not copied here. sameStore is not
+ * transitive, so each name joins the first, most-offered, name it is the
+ * same store as; a branch's label ("#1155") stays its own name, as the rig
+ * reads it. */
+function nameOf(pickup) {
+  if (typeof pickup !== 'string' || !pickup.trim()) return null;
+  var label = storeLabel(pickup);
+  return pickupKind(label).kind === 'name' && AS.storeKey(label) ? label : null;
+}
+
+/* Every name in `offers`, merged: { of(o) -> key|null, labels: {key: label},
+ * keys: {storeKey: key} }. The key is the merged name's own storeKey; the
+ * label its most-printed spelling. */
+function restaurantNames(offers) {
+  var byKey = Object.create(null);
+  (offers || []).filter(counted).forEach(function (o) {
+    var l = nameOf(o.pickup);
+    if (!l) return;
+    var k = AS.storeKey(l);
+    var e = byKey[k] || (byKey[k] = { n: 0, labels: Object.create(null) });
+    e.n += 1;
+    e.labels[l] = (e.labels[l] || 0) + 1;
+  });
+  var order = Object.keys(byKey).sort(function (a, b) { return byKey[b].n - byKey[a].n || (a < b ? -1 : 1); });
+  var to = Object.create(null), heads = [], spell = Object.create(null);
+  order.forEach(function (k) {
+    var head = heads.filter(function (h) { return AS.sameStore(h, k); })[0];
+    if (!head) { head = k; heads.push(k); spell[k] = Object.create(null); }
+    to[k] = head;
+    Object.keys(byKey[k].labels).forEach(function (l) { spell[head][l] = (spell[head][l] || 0) + byKey[k].labels[l]; });
+  });
+  var labels = Object.create(null);
+  heads.forEach(function (h) {
+    labels[h] = Object.keys(spell[h]).sort(function (a, b) { return spell[h][b] - spell[h][a] || (a < b ? -1 : 1); })[0];
+  });
+  var memo = Object.create(null);
+  return {
+    labels: labels, keys: to,
+    of: function (o) {
+      var p = o && o.pickup;
+      if (typeof p !== 'string') return null;
+      if (!(p in memo)) { var l = nameOf(p); memo[p] = l ? to[AS.storeKey(l)] || null : null; }
+      return memo[p];
+    },
+  };
+}
+
+/* What a list of offers paid and what became of them, as the second pass
+ * measures it: medians, your takes and their real time (realOf: put down at
+ * the door), add-on and stacking (flagsOf), the app split (appOf). */
+function describe(list, runs, seed) {
+  var pays = list.map(function (o) { return o.pay; }).filter(function (v) { return typeof v === 'number'; });
+  var ppms = list.map(payPerMile).filter(function (v) { return v !== null; });
+  var took = list.filter(function (o) { return runs[o.id]; });
+  var real = [];
+  took.forEach(function (o) { runs[o.id].forEach(function (t) { var r = realOf(t); if (r) real.push(r); }); });
+  var ph = real.map(function (r) { return r.perHour; }).filter(function (v) { return v !== null; });
+  var df = real.map(function (r) { return r.diff; }).filter(function (v) { return v !== null; });
+  var fl = list.map(flagsOf);
+  var addonRead = fl.filter(function (x) { return x.addon !== null; });
+  var stacked = fl.filter(function (x) { return x.addon || x.multiOrder || x.manyDropoffs || x.earlyLook; }).length;
+  var out = { n: list.length, outings: A.outingsIn(list),
+              perHour: med(list.map(function (o) { return o.perHour; })), pay: med(pays),
+              ppm: med(ppms), ppmN: ppms.length,
+              taken: took.length, take: share(took.length, list.length), takeCi: wilson(took.length, list.length),
+              timed: real.length,
+              realPerHour: ph.length >= REAL_MED_N ? med(ph) : null, realCi: medCi(ph, 'rr' + seed),
+              cardVsReal: df.length >= REAL_MED_N ? med(df) : null,
+              addon: share(addonRead.filter(function (x) { return x.addon; }).length, addonRead.length),
+              stacked: share(stacked, list.length) };
+  APPS.forEach(function (app) {
+    var l = list.filter(function (o) { return appOf(o) === app; });
+    out[app + 'N'] = l.length;
+    out[app + 'PerHour'] = l.length >= DESC_MIN_N ? med(l.map(function (o) { return o.perHour; })) : null;
+  });
+  return out;
+}
+
+/* The Restaurants table for one hours view. Ranked exactly as the other
+ * groupings are (cells: Advice.areas' Kruskal-Wallis against block-held
+ * shuffles across the ranked restaurants, `matched` against the other
+ * ranked restaurants in the same block, bootstrap intervals, the same floor
+ * and the same colour rule); everything else is describe's.
+ *
+ * WAITS. A restaurant's own row takes a wait by waitOf with every branch of
+ * it counted as a place of that name: not a chain's, one store of it on
+ * record, and at most one placed branch. A chain's wait is per branch only,
+ * and since the waits on record carry no position (storeWaitsOut), a chain's
+ * branch is never joined either: which branch, a guess. A branch row asks
+ * waitOf as the waits tab does. */
+function restaurantsTable(rows, ctx) {
+  var res = cells(rows, ctx.key, { hold: ctx.hold, minN: ctx.minN });
+  var pool = rows.filter(counted);
+  var by = groupBy(pool, ctx.key);
+  var ws = waitsOk(ctx.waits);
+  var placeOf = Object.create(null);
+  (ctx.placeCells ? ctx.placeCells.groups : []).forEach(function (g) { placeOf[g.name] = g; });
+  // Places per name, across the whole report, as the waits tab counts them.
+  var sameName = Object.create(null), branchesOf = Object.create(null);
+  Object.keys(ctx.places).forEach(function (id) {
+    var k = AS.storeKey(ctx.places[id].label);
+    sameName[k] = (sameName[k] || 0) + 1;
+    var head = ctx.names.keys[k];
+    if (head) branchesOf[head] = (branchesOf[head] || 0) + 1;
+  });
+  function rowOf(k, g) {
+    var list = by[k] || [];
+    var label = ctx.names.labels[k] || k;
+    var d = describe(list, ctx.runs, k);
+    var j = waitOf(label, ws, branchesOf[k] || 0);
+    var subs = groupBy(list, function (o) { return ctx.placeKey(o) || '\u0000'; });
+    var branches = Object.keys(subs).filter(function (id) { return id !== '\u0000'; }).map(function (id) {
+      var p = ctx.places[id] || {}, pd = describe(subs[id], ctx.runs, id);
+      var pj = waitOf(p.label || label, ws, sameName[AS.storeKey(p.label || label)] || 0);
+      var pg = placeOf[id];
+      return Object.assign(pd, { id: id, name: p.label || label, lat: p.lat, lon: p.lon,
+                                 placeScore: pg ? pg.score : null, placeSci: pg ? pg.sci : null,
+                                 placeBeats: pg ? pg.beats : false, wait: pj.w ? pj.w.medianMin : null,
+                                 waitN: pj.w ? pj.w.n : null, waitWhy: pj.why });
+    }).sort(function (a, b) { return b.n - a.n || (a.name < b.name ? -1 : 1); });
+    var un = subs['\u0000'] || [];
+    if (un.length && branches.length) {
+      branches.push(Object.assign(describe(un, ctx.runs, k + '~'), { id: null, name: 'not placed', unplaced: true,
+                                                                     wait: null, waitN: null, waitWhy: null }));
+    }
+    var out = Object.assign(d, { name: k, label: label, ranked: !!g, chain: AS.chainName(label),
+                                 placedN: list.length - un.length, branchN: branchesOf[k] || 0,
+                                 wait: j.w ? j.w.medianMin : null, waitN: j.w ? j.w.n : null, waitWhy: j.why,
+                                 branches: branches });
+    if (g) {
+      ['score', 'sci', 'median', 'ci', 'clear', 'beats', 'matched', 'compared'].forEach(function (f) { out[f] = g[f]; });
+      out.outings = g.outings;
+    } else {
+      out.score = null; out.sci = null; out.beats = false; out.clear = null;
+    }
+    return out;
+  }
+  var ranked = res.groups.map(function (g) { return rowOf(g.name, g); });
+  var thin = res.thin.map(function (t) { return rowOf(t.name, null); });
+  var noName = pool.filter(function (o) { return typeof o.pickup === 'string' && o.pickup.trim() && !ctx.key(o); }).length;
+  var named = pool.filter(function (o) { return ctx.key(o); });
+  return { p: res.p, h: res.h, rawP: res.rawP, held: res.held, significant: res.significant, kept: res.kept,
+           floor: res.floor, outings: res.outings, groups: ranked, thin: thin,
+           named: named.length, noName: noName, noPickup: pool.filter(function (o) {
+             return !(typeof o.pickup === 'string' && o.pickup.trim());
+           }).length,
+           placed: named.filter(function (o) { return ctx.placeKey(o); }).length,
+           names: ranked.length + thin.length };
+}
+
 /* --- the whole analysis, given placements --------------------------------
  *
  * `placed[i]` is offers[i]'s pickup answer { at, why, kind } (or undefined
@@ -1028,6 +1206,8 @@ function analyse(offers, taken, placed, dropAt, opts) {
     return c ? c.id : null;
   }
   function townKey(o) { return MV.townFor(o, A.area); }
+  var names = restaurantNames(offers);
+  function restKey(o) { return names.of(o); }
 
   var trips = tripsOf(offers, taken, dropAt);
   var runs = runsOf(taken);
@@ -1066,6 +1246,9 @@ function analyse(offers, taken, placed, dropAt, opts) {
       dropTown: dropTable(tv, 'town', hold),
       dropGrid: dropTable(tv, 'cell', hold),
     };
+    views[v].rest = restaurantsTable(rows, { key: restKey, placeKey: placeKey, places: grouped.places,
+                                             names: names, runs: runs, waits: opts.waits, hold: hold,
+                                             minN: opts.minN, placeCells: views[v].place });
     if (hold) {
       diffs = { place: views[v].place.diffs, town: views[v].town.diffs };
       delete views[v].place.diffs;
@@ -1133,6 +1316,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
     descMinN: DESC_MIN_N, realMedN: REAL_MED_N, quietDays: QUIET_DAYS, spellM: SPELL_M,
     spellMinS: SPELL_MIN_S, spellGapS: SPELL_GAP_S, spellMinN: SPELL_MIN_N,
     places: grouped.places,
+    restNames: names.labels,
     cells: cellBoxes,
     views: views,
     source: opts.source || null,
@@ -1174,6 +1358,12 @@ function summary(r) {
              + ' (' + pText(cv.all.p) + ')');
   }
   out.push(testLine('Places', all.place));
+  if (all.rest) {
+    out.push('Restaurants, by the name on the card, placed or not: ' + all.rest.groups.length + ' ranked of '
+             + all.rest.names + ' names (' + all.rest.thin.length + ' too few), ' + all.rest.named + ' offers named, '
+             + all.rest.placed + ' of them placed; ' + all.rest.noName + ' pickups printed no name (a door or a street)');
+    out.push(testLine('Restaurants', all.rest));
+  }
   out.push(testLine('Towns', all.town));
   out.push(testLine(r.gridMi + '-mile grid', all.grid));
   out.push(testLine('Wait after a drop, by town', all.dropTown));
@@ -1188,10 +1378,10 @@ function summary(r) {
       out.push('Gone quiet (' + k + '): ' + x.name + ' — ' + x.flag + ', last offer ' + x.last);
     });
   });
-  ['place', 'town', 'grid'].forEach(function (k) {
-    var beat = all[k].groups.filter(function (g) { return g.beats; });
+  ['place', 'rest', 'town', 'grid'].forEach(function (k) {
+    var beat = all[k] ? all[k].groups.filter(function (g) { return g.beats; }) : [];
     if (!beat.length) return;
-    out.push('Clear of the rest (' + k + '):');
+    out.push('Clear of the rest (' + (k === 'rest' ? 'restaurant' : k) + '):');
     beat.forEach(function (g) {
       out.push('  ' + labelOf(r, k, g.name) + '  ' + (g.score >= 0 ? '+' : '') + g.score.toFixed(2)
                + ' $/hr vs same hours elsewhere [' + g.sci[0].toFixed(2) + ', ' + g.sci[1].toFixed(2)
@@ -1205,6 +1395,7 @@ function pct(n, of) { return of ? (Math.round(n / of * 1000) / 10).toFixed(1) + 
 
 function labelOf(r, kind, name) {
   if (kind === 'place') return (r.places[name] && r.places[name].label) || name;
+  if (kind === 'rest') return (r.restNames && r.restNames[name]) || name;
   if (kind === 'grid') {
     var c = r.cells[name];
     return c ? 'cell near ' + c.lat.toFixed(3) + ', ' + c.lon.toFixed(3) : name;
@@ -1320,6 +1511,52 @@ var MORE_CSVS = {
   'trend_towns.csv': [function (r) { return r.trend.town; }, false],
 };
 
+/* The Restaurants tab as two CSVs: a line per restaurant per hours view, and
+ * a line per placed branch (and the not-placed rest) per hours view. */
+var REST_COLS = ['n', 'outings', 'score', 'score_lo', 'score_hi', 'median_per_hour', 'median_lo', 'median_hi',
+                 'median_pay', 'median_per_mile', 'taken', 'take_rate', 'take_lo', 'take_hi', 'timed_at_door',
+                 'real_per_hour', 'real_lo', 'real_hi', 'real_minus_card_min', 'wait_min', 'waits', 'wait_not_joined',
+                 'addon_share', 'stacked_share', 'uber_n', 'uber_per_hour', 'doordash_n', 'doordash_per_hour'];
+function restVals(g) {
+  function lo(c) { return c ? c[0] : null; }
+  function hi(c) { return c ? c[1] : null; }
+  return [g.n, g.outings, g.score, lo(g.sci), hi(g.sci), g.median !== undefined ? g.median : g.perHour,
+          lo(g.ci), hi(g.ci), g.pay, g.ppm, g.taken, g.take, lo(g.takeCi), hi(g.takeCi), g.timed,
+          g.realPerHour, lo(g.realCi), hi(g.realCi), g.cardVsReal, g.wait, g.waitN, g.waitWhy,
+          g.addon, g.stacked, g.uberN, g.uberPerHour, g.doordashN, g.doordashPerHour];
+}
+function restCsv(r) {
+  var lines = [['hours', 'restaurant', 'ranked', 'chain', 'placed_offers', 'placed_branches'].concat(REST_COLS)
+    .concat(['clear', 'beats_chance', 'grouping_p']).join(',')];
+  VIEWS.forEach(function (v) {
+    var c = r.views[v].rest;
+    c.groups.concat(c.thin).forEach(function (g) {
+      lines.push([r.views[v].name, g.label, g.ranked ? 'yes' : 'too few', g.chain ? 'yes' : 'no', g.placedN, g.branchN]
+        .concat(g.ranked ? restVals(g) : restVals(Object.assign({}, g, { median: g.perHour })))
+        .concat([g.clear, g.beats ? 'yes' : 'no', c.p]).map(csvCell).join(','));
+    });
+  });
+  return lines.join('\n') + '\n';
+}
+function restBranchCsv(r) {
+  var lines = [['hours', 'restaurant', 'branch', 'lat', 'lon', 'place_score', 'place_score_lo', 'place_score_hi',
+                'place_beats_chance'].concat(REST_COLS.filter(function (k) { return !/^score/.test(k); }))
+    .join(',')];
+  VIEWS.forEach(function (v) {
+    var c = r.views[v].rest;
+    c.groups.concat(c.thin).forEach(function (g) {
+      g.branches.forEach(function (b) {
+        var vals = restVals(Object.assign({}, b, { median: b.perHour, ci: null, score: null, sci: null }));
+        vals.splice(2, 3);
+        lines.push([r.views[v].name, g.label, b.name, b.lat, b.lon, b.placeScore, b.placeSci && b.placeSci[0],
+                    b.placeSci && b.placeSci[1], b.unplaced ? '' : b.placeBeats ? 'yes' : 'no'].concat(vals)
+          .map(csvCell).join(','));
+      });
+    });
+  });
+  return lines.join('\n') + '\n';
+}
+
 function coverageCsv(r) {
   var lines = ['day,placed,unplaced,placed_per_hour,unplaced_per_hour,gap_per_hour,placed_pay,unplaced_pay,gap_pay,p'];
   r.coverage.days.concat([Object.assign({ day: 'all' }, r.coverage.all)]).forEach(function (d) {
@@ -1354,8 +1591,10 @@ function banner(r) {
                 : 'They paid a median ' + money(cv.unplaced.perHour) + '/hr against ' + money(cv.placed.perHour)
                   + '/hr for the placed ones (' + pText(cv.p) + '), so the place and grid tables describe a '
                   + (cv.gapPerHour > 0 ? 'better' : cv.gapPerHour < 0 ? 'worse' : 'similar')
-                  + '-paying slice than your whole record. The town table does not need a pin and is not cut this way.'));
+                  + '-paying slice than your whole record. The town and restaurant tables do not need a pin and are '
+                  + 'not cut this way.'));
   lines.push('<b>Significance:</b> ' + esc(testLine('places', all.place)) + ' '
+             + esc(testLine('restaurants', all.rest)) + ' '
              + esc(testLine('towns', all.town)) + ' ' + esc(testLine(r.gridMi + '-mile grid', all.grid)));
   return lines.map(function (l) { return '<p>' + l + '</p>'; }).join('\n');
 }
@@ -1381,6 +1620,21 @@ function html(r) {
     }).join('') + '</nav>\n'
     + '<section data-tab="places"><h2>Places — a store at a location</h2><p class="note" id="placeTest"></p>'
     + '<div id="placePlot" class="plot"></div><div id="placeTable"></div><div id="placeThin" class="thin"></div></section>\n'
+    + '<section data-tab="restaurants"><h2>Restaurants — by the name on the card, placed or not</h2>'
+    + '<p class="note">One row per name, every branch together: the pickup\'s name as the card printed it (Uber\'s '
+    + 'bracketed street off), merged by the rig\'s own store-name rule (Assemble.storeKey: case, marks and a '
+    + '“ – Town” tail aside; Assemble.sameStore: one i/l slip). <b>No map pin is needed</b>, so this holds the bare '
+    + 'names the Places tab cannot place (chains with several branches in reach, cards with no fix): '
+    + '<span id="restCover"></span> A branch\'s own label (“#1155”) is its own name, as the rig reads it. '
+    + 'Ranked as the other tables are: ' + r.minN + ' offers on ' + r.minOutings + ' shift days, the score '
+    + 'against the other ranked restaurants in the same three-hour block, colour only where the test beats chance '
+    + 'and the interval is clear of zero. <b>Your take</b> is the share you took; <b>real $/hr</b> only on orders '
+    + 'put down at the door by the GPS or the screen (a median needs ' + r.realMedN + '); the <b>wait</b> only where '
+    + 'the name cannot be a guess — for a chain the wait is per branch, and the waits on record carry no place, so '
+    + 'a chain\'s branches go without. <b>$/mi is for reading, not an accept rule.</b> Click ▸ for the placed '
+    + 'branches; click a heading to sort.</p>'
+    + '<p class="note" id="restTest"></p><div id="restPlot" class="plot"></div><div id="restTable"></div>'
+    + '<div id="restThin"></div></section>\n'
     + '<section data-tab="map"><h2>Map</h2><p class="note">One dot per place, sized by its offers. Coloured only where it '
     + 'beats chance: <span class="k up">●</span> pays more than the same hours elsewhere, '
     + '<span class="k down">●</span> less; <span class="k grey">●</span> not distinguishable from the rest; '
@@ -1412,7 +1666,7 @@ function html(r) {
 }
 
 // The page's tabs, in order: [id, label].
-var TABS = [['places', 'Places'], ['map', 'Map'], ['towns', 'Towns'], ['grid', 'Grid'],
+var TABS = [['places', 'Places'], ['restaurants', 'Restaurants'], ['map', 'Map'], ['towns', 'Towns'], ['grid', 'Grid'],
             ['after', 'After a drop'], ['takes', 'Your takes'], ['apps', 'Uber vs DoorDash'],
             ['ppm', '$/mi'], ['waits', 'Store waits'], ['strand', 'Strand risk'], ['busy', 'Busy'],
             ['stack', 'Add-ons'], ['quiet', 'Gone quiet'], ['trend', 'Trend'], ['coverage', 'Coverage'],
@@ -1556,6 +1810,11 @@ var PAGE_CSS = [
   'th[aria-sort="ascending"]:after{content:" \\2191"}th[aria-sort="descending"]:after{content:" \\2193"}',
   '.spark{display:block;width:140px;height:30px}.spark .z{stroke:var(--axis);stroke-dasharray:3 3}',
   '.spark polyline{fill:none;stroke:var(--ink2);stroke-width:1.5}.spark circle{fill:var(--ink2)}',
+  'tr.br td{color:var(--ink2);border-bottom-style:dashed}tr.br td:first-child{padding-left:20px}',
+  'table.groups th:first-child,table.groups td:first-child{position:sticky;left:0;z-index:1;background:var(--bg);',
+  'min-width:150px;max-width:190px}',
+  '.xb{font:inherit;font-size:12px;padding:0 6px;margin-right:4px;border-radius:4px;border:1px solid var(--axis);',
+  'background:var(--surface);color:var(--ink);cursor:pointer}',
 ].join('\n');
 
 /* The page's script: it switches between views computed above and draws them.
@@ -1578,6 +1837,7 @@ var PAGE_JS = String(function page() {
   }
   function label(kind, name) {
     if (kind === 'place') return (R.places[name] && R.places[name].label) || name;
+    if (kind === 'rest') return (R.restNames && R.restNames[name]) || name;
     if (kind === 'grid') {
       var c = R.cells[name];
       return c ? 'cell near ' + c.lat.toFixed(3) + ', ' + c.lon.toFixed(3) : name;
@@ -1705,6 +1965,68 @@ var PAGE_JS = String(function page() {
         + '<th>next take $/hr</th><th>next take pay</th><th></th></tr></thead><tbody>' + rows
         + '</tbody></table></div>' : '<p class="note">No area clears the floor here.</p>') + thin;
   }
+
+  /* The Restaurants table: a tbody per restaurant, its branches hidden under
+     it until ▸ is clicked, so a sort moves a restaurant with its branches. */
+  var REST_HEAD = ['restaurant', 'offers', 'days', 'vs same hours', '95%', 'median $/hr', '95%', 'median pay',
+                   '$/mi (read only)', 'you took', 'real $/hr', 'timed', 'real − card', 'wait', 'add-on', 'stacked',
+                   'Uber · DD', ''];
+  function restCells(g, isBranch) {
+    function td(v, text) { return '<td data-v="' + esc(v === null || v === undefined ? '' : String(v)) + '">' + text + '</td>'; }
+    var wait = g.wait !== null && g.wait !== undefined ? g.wait.toFixed(1) + ' min (' + g.waitN + ')'
+      : g.waitWhy && g.waitWhy !== 'none on record' ? '<span title="' + esc(g.waitWhy) + '">— ' + esc(g.waitWhy) + '</span>' : '—';
+    var score = isBranch ? (g.placeScore !== null && g.placeScore !== undefined
+      ? '<span title="as a place, against the other places">' + sg(g.placeScore) + ' (place)</span>' : '—') : sg(g.score);
+    return [td(g.n, String(g.n)), td(g.outings, String(g.outings)), td(isBranch ? g.placeScore : g.score, score),
+            td(g.sci ? g.sci[0] : '', isBranch ? '' : ci(g.sci, sg)),
+            td(g.ranked ? g.median : g.perHour, m(g.ranked && !isBranch ? g.median : g.perHour)),
+            td(g.ci ? g.ci[0] : '', isBranch ? '' : ci(g.ci, m)), td(g.pay, m(g.pay)), td(g.ppm, m(g.ppm)),
+            td(g.take, pc(g.take) + (g.taken ? ' (' + g.taken + ')' : '')), td(g.realPerHour, m(g.realPerHour)),
+            td(g.timed, String(g.timed)),
+            td(g.cardVsReal, g.cardVsReal === null ? '—' : (g.cardVsReal >= 0 ? '+' : '−') + Math.abs(g.cardVsReal).toFixed(1) + ' min'),
+            td(g.wait, wait), td(g.addon, pc(g.addon)), td(g.stacked, pc(g.stacked)),
+            td(g.uberN, g.uberN + ' · ' + g.doordashN)].join('');
+  }
+  function restRows(list, ranked) {
+    return list.map(function (g, i) {
+      var nb = g.branches.filter(function (b) { return !b.unplaced; }).length;
+      var btn = g.branches.length ? '<button type="button" class="xb" aria-expanded="false" title="placed branches">▸ '
+        + nb + '</button>' : '';
+      var head = '<tr><td data-v="' + esc(label('rest', g.name).toLowerCase()) + '">' + btn + esc(label('rest', g.name))
+        + (g.chain ? ' <span class="note">chain</span>' : '') + '</td>' + restCells(g, false) + '<td>'
+        + (ranked ? tag(g, false) : '<span class="tag grey">too few</span>') + '</td></tr>';
+      var subs = g.branches.map(function (b) {
+        var nm = b.unplaced ? 'not placed' : b.name + (b.lat !== undefined ? ' <span class="note">near '
+          + b.lat.toFixed(3) + ', ' + b.lon.toFixed(3) + '</span>' : '');
+        return '<tr class="br" hidden><td>↳ ' + (b.unplaced ? '<i>not placed</i>' : nm) + '</td>' + restCells(b, true)
+          + '<td>' + (b.placeBeats ? '<span class="note">clear of the rest in Places</span>' : '') + '</td></tr>';
+      }).join('');
+      return '<tbody>' + head + subs + '</tbody>';
+    }).join('');
+  }
+  function restTable(c) {
+    document.getElementById('restCover').textContent = c.named + ' offers carry a name, ' + c.placed + ' of them '
+      + 'placed (' + (c.named ? Math.round(c.placed / c.named * 100) : 0) + '%); ' + c.noName
+      + ' printed a door, a street or a corner and no name, and are not here.';
+    var head = '<thead><tr>' + REST_HEAD.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr></thead>';
+    document.getElementById('restTable').innerHTML = c.groups.length
+      ? '<div class="tw"><table class="groups">' + head + restRows(c.groups, true) + '</table></div>' : '';
+    var CAP = 150, thin = c.thin.slice(0, CAP);
+    document.getElementById('restThin').innerHTML = c.thin.length
+      ? '<h3>Too few to rank</h3><p class="thin">Under ' + c.floor + ' offers or ' + c.outings + ' shift days: listed '
+        + 'for reading, neither ranked nor tested nor coloured' + (c.thin.length > CAP ? '; the ' + CAP
+        + ' with the most offers shown, all ' + c.thin.length + ' in restaurants.csv' : '') + '.</p>'
+        + '<div class="tw"><table class="groups">' + head + restRows(thin, false) + '</table></div>' : '';
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('button.xb');
+    if (!b) return;
+    e.stopPropagation();
+    var open = b.getAttribute('aria-expanded') !== 'true';
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    b.textContent = (open ? '▾ ' : '▸ ') + b.textContent.slice(2);
+    Array.prototype.forEach.call(b.closest('tbody').querySelectorAll('tr.br'), function (r) { r.hidden = !open; });
+  });
 
   function coverageTable() {
     var d = R.coverage.days.concat([Object.assign({ day: 'all days' }, R.coverage.all)]);
@@ -1849,6 +2171,18 @@ var PAGE_JS = String(function page() {
     var dir = th.getAttribute('aria-sort') === 'descending' ? 1 : -1;
     Array.prototype.forEach.call(th.parentNode.children, function (h) { h.removeAttribute('aria-sort'); });
     th.setAttribute('aria-sort', dir === 1 ? 'ascending' : 'descending');
+    if (table.classList.contains('groups')) {
+      // A restaurant moves with its branches: sort the tbodies by their first row.
+      var bodies = Array.prototype.slice.call(table.tBodies);
+      bodies.sort(function (a, b) {
+        var x = cellVal(a.rows[0].cells[i]), y = cellVal(b.rows[0].cells[i]);
+        if (x === null) return y === null ? 0 : 1;
+        if (y === null) return -1;
+        return (x < y ? -1 : x > y ? 1 : 0) * dir;
+      });
+      bodies.forEach(function (b) { table.appendChild(b); });
+      return;
+    }
     var rows = Array.prototype.slice.call(body.rows);
     rows.sort(function (a, b) {
       var x = cellVal(a.cells[i]), y = cellVal(b.cells[i]);
@@ -1906,6 +2240,9 @@ var PAGE_JS = String(function page() {
       table(document.getElementById(k[0] + 'Table'), v[k[0]], k[0]);
       thinList(document.getElementById(k[0] + 'Thin'), v[k[0]], k[0], 'offers');
     });
+    document.getElementById('restTest').innerHTML = testText(v.rest, 'restaurants');
+    dotPlot(document.getElementById('restPlot'), v.rest, 'rest', '$', false);
+    restTable(v.rest);
     document.getElementById('dropTest').innerHTML = testText(v.dropTown, 'wait by town');
     dropTable(document.getElementById('dropTown'), v.dropTown, 'town');
     dropTable(document.getElementById('dropGrid'), v.dropGrid, 'cell');
@@ -2267,11 +2604,13 @@ async function main(argv) {
   fs.writeFileSync(path.join(outDir, 'dropoff_towns.csv'), dropCsv(report, 'dropTown'));
   fs.writeFileSync(path.join(outDir, 'dropoff_grid.csv'), dropCsv(report, 'dropGrid'));
   fs.writeFileSync(path.join(outDir, 'coverage.csv'), coverageCsv(report));
+  fs.writeFileSync(path.join(outDir, 'restaurants.csv'), restCsv(report));
+  fs.writeFileSync(path.join(outDir, 'restaurant_branches.csv'), restBranchCsv(report));
   Object.keys(MORE_CSVS).forEach(function (name) {
     fs.writeFileSync(path.join(outDir, name), tableCsv(report, MORE_CSVS[name][0], MORE_CSVS[name][1]));
   });
   console.log(summary(report));
-  console.log('\nWritten: ' + path.join(outDir, 'index.html') + ' (and ' + (6 + Object.keys(MORE_CSVS).length)
+  console.log('\nWritten: ' + path.join(outDir, 'index.html') + ' (and ' + (8 + Object.keys(MORE_CSVS).length)
               + ' CSVs beside it)');
   console.log('NucBox questions: ' + cache.fresh + ' asked, ' + cache.hits + ' answered from ' + cacheFile);
 }
@@ -2282,7 +2621,8 @@ module.exports = {
   placesOf: placesOf, cellOf: cellOf, bootCI: bootCI, cells: cells, coverage: coverage,
   nextTake: nextTake, timelineOf: timelineOf, tripsOf: tripsOf, dropTable: dropTable,
   analyse: analyse, summary: summary, testLine: testLine, html: html, csvOf: csvOf, dropCsv: dropCsv,
-  coverageCsv: coverageCsv, hitsOf: hitsOf, nbxFetch: nbxFetch, gpsAt: gpsAt, parseArgs: parseArgs,
+  coverageCsv: coverageCsv, restCsv: restCsv, restBranchCsv: restBranchCsv, nameOf: nameOf,
+  restaurantNames: restaurantNames, restaurantsTable: restaurantsTable, waitOf: waitOf, hitsOf: hitsOf, nbxFetch: nbxFetch, gpsAt: gpsAt, parseArgs: parseArgs,
   DESC_MIN_N: DESC_MIN_N, REAL_MED_N: REAL_MED_N, QUIET_DAYS: QUIET_DAYS, SPELL_M: SPELL_M,
   SPELL_MIN_S: SPELL_MIN_S, SPELL_GAP_S: SPELL_GAP_S, SPELL_MIN_N: SPELL_MIN_N, REAL_BY: REAL_BY,
   EARLY_LOOK: EARLY_LOOK, MULTI_ORDER: MULTI_ORDER, MANY_DROPOFFS: MANY_DROPOFFS, MORE_CSVS: MORE_CSVS,

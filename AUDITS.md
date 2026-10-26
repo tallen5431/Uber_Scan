@@ -4562,6 +4562,42 @@ only after a build that succeeded and wrote a page; a failed or half-written
 run leaves the served report as it was. The rig's address is a setting in a
 file on the NucBox, never in the repository.
 
+**A Restaurants tab in the places report: pay compared by the name on the card,
+placed or not (the owner, 26 Oct 2026: "Would it be possible to have a
+comparison of different restaurants and their pay? That could be helpful").**
+Added to `tools/places_report.js` with checks in `tests/placesreport.test.js`
+(178 → 211); not yet run on the real journal, so no figure is recorded. The
+Places tab ranks only pinned pickups, and the banner's own test says the
+unpinned paid less; this tab groups by name and needs no pin, so it is the
+fullest comparison the record allows. Held to the rules above and the Settled
+list:
+
+- *One name rule, the rig's.* storeLabel (Uber's bracket off), a name only
+  where `MV.searchPlan` reads one (doors, streets and corners counted out),
+  merged by `Assemble.storeKey` and `Assemble.sameStore` — the rule the waits
+  are joined by. server.js keys its store waits by storeKey as well, but its
+  `storeNameSaid` is not exported and is not copied. sameStore is not
+  transitive; each name joins the most-offered name it matches. Known gap: a
+  branch label ("McDonald's #1155") is a name of its own, as storeKey writes
+  it, not folded into the chain.
+- *Ranked as places are*: `cells` (Advice.areas, block-held shuffles,
+  `matched`), 30 offers on 2 shift days, bootstrap intervals, colour only
+  where the grouping beats chance and the interval is clear of zero; under
+  the floor, "too few", never ranked, tested or coloured.
+- *Descriptive beside it*: median pay, $/mi (read only, no floor), your take
+  rate (Wilson), real $/hr and real − card minutes on put-downs at the door
+  only, add-on and stacked share, the app split.
+- *Waits by the one join rule* (`waitOf`, now shared with the waits tab): a
+  restaurant's row only where the name is not a chain's, one store of it is
+  on record and at most one branch of it is placed. A chain's wait is per
+  branch, and the waits on record carry no place, so a chain's branch is
+  never joined either.
+- *Privacy*: pickups are businesses and their placed branches are shown with
+  a position, as the Places tab shows them; the page and both CSVs are
+  checked for a dropoff's text and position. Checked at 375 px in headless
+  Chromium, light and dark: no page-wide sideways scroll, no script error,
+  the table scrolls in its own box with the name column held.
+
 ---
 
 **One unlabelled bracketed leg on a lone card is called whole, and on a ride card that is the drive to the rider alone.** is_whole's single-leg clause says 'Uber labels every leg of a ride (away, trip, total)'. laid_out_approach measured 'away' on 0 of 1,166 rows. Measured on the week: rows 444 frame 0 and 805 frame 1 are ride frames whose trip leg did not read, and they read whole on the approach alone. Row 805's merge recovered; row 444's journal row is whole=0 for another reason. Not fixed, because the same shape is also an Eats card whose `total` did not read (`tota`, `te al`): 7 frames on 6 rows, all whole jobs. Telling them apart needs a text-level ride signal carried through the accumulator. half_a_ride answers it only where another card is in shot, and 'whole / one bare leg on a frame holding ONE card is left as it was' pins that boundary.

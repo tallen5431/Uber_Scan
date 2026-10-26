@@ -672,6 +672,127 @@ function nbx() {
   eq('a cell\'s town is the reverse answer for its centre, asked once', [tn, revAsked.length], ['Faketown', 1]);
   ok('...at the cell\'s centre, not a spell\'s own fix', revAsked[0].indexOf('lat=' + cc.lat.toFixed(5)) >= 0);
 
+  /* --- restaurants: by the name on the card, placed or not --- */
+
+  // Name merging: the rig's storeKey and sameStore, nothing new.
+  var nm = P.restaurantNames(['Fernbrook Grill', 'fernbrook grill', 'Fernbrook GrilI', 'Fernbrook Grill (12 Pell Lane)',
+                              'Fernbrook Grill – Faketown', 'b Fernbrook Grill', 'Fernbrook Grille', 'Fernbrook Cafe',
+                              '77 Quillon Way, Faketown, ZZ 99999', 'Larkspur Ct & Ombre Rd, Faketown', 'Quillon Way, Faketown']
+    .map(function (p, i) { return card({ id: 'nm' + i, pickup: p }); }));
+  function nk(p) { return nm.of({ pickup: p }); }
+  eq('names: case, a bracketed street, a " – Town" tail, a planner icon and one i/l slip merge',
+     ['fernbrook grill', 'Fernbrook GrilI', 'Fernbrook Grill (12 Pell Lane)', 'Fernbrook Grill – Faketown', 'b Fernbrook Grill']
+       .map(nk), ['fernbrookgrill', 'fernbrookgrill', 'fernbrookgrill', 'fernbrookgrill', 'fernbrookgrill']);
+  ok('...a different name does not (Grille, Cafe)', nk('Fernbrook Grille') !== nk('Fernbrook Grill')
+     && nk('Fernbrook Cafe') !== nk('Fernbrook Grill') && nk('Fernbrook Grille') && nk('Fernbrook Cafe'));
+  eq('...the label is the spelling printed most', nm.labels.fernbrookgrill, 'Fernbrook Grill');
+  eq('...a door, a corner or a street is no restaurant\'s name',
+     [nk('77 Quillon Way, Faketown, ZZ 99999'), nk('Larkspur Ct & Ombre Rd, Faketown'), nk('Quillon Way, Faketown')],
+     [null, null, null]);
+  eq('...two slips are two names (Assemble.sameStore allows one)', P.restaurantNames([card({ pickup: 'Fernbrook Grill' }),
+     card({ pickup: 'Fernbrook GriII' })]).of({ pickup: 'Fernbrook GriII' }), 'fernbrookgriii');
+
+  // Bare names the map cannot place are counted here and not in Places (rep4:
+  // 20 placed Fernbrook Grill, 20 unplaced Bramble Burger, one with no pickup).
+  var r4 = rep4.views.all.rest;
+  var bram = r4.thin.filter(function (g) { return g.label === 'Bramble Burger'; })[0];
+  eq('a bare name the map could not place is in Restaurants, with all its offers', [bram && bram.n, bram && bram.placedN],
+     [20, 0]);
+  ok('...and in no Places row', Object.keys(rep4.places).every(function (id) { return rep4.places[id].label !== 'Bramble Burger'; }));
+  eq('...the tab says how many carry a name and how many of those were placed', [r4.named, r4.placed, r4.noPickup], [40, 20, 1]);
+
+  // The floor is the other tables' floor (rep3).
+  eq('restaurants: the floor is ' + P.MIN_N + ' offers on two shift days',
+     rep3.views.all.rest.groups.map(function (g) { return g.label; }).sort(), ['Forty Two Days', 'Thirty Two Days']);
+  eq('...the rest are "too few", unranked and uncoloured, with their n',
+     rep3.views.all.rest.thin.map(function (g) { return [g.label, g.n, g.outings, g.score, g.beats]; }),
+     [['Thirty One Day', 30, 1, null, false], ['Twenty Nine', 29, 3, null, false]]);
+
+  // No effect, and a strong one (rep0 and rep1, as the Places checks above).
+  var re0 = rep0.views.all.rest;
+  ok('restaurants, no effect: not significant (p = ' + re0.p + '), nothing coloured', re0.p >= 0.05 && !re0.significant
+     && re0.groups.length === 4 && re0.groups.every(function (g) { return !g.beats; }));
+  var re1 = rep1.views.all.rest;
+  ok('restaurants, strong effect: significant (p = ' + re1.p + ')', re1.significant && re1.held);
+  eq('...the paying one alone is coloured above, ranked first', re1.groups.filter(function (g) { return g.beats && g.clear === 'above'; })
+     .map(function (g) { return g.label; }).concat([re1.groups[0].label]), ['Ash Cafe', 'Ash Cafe']);
+  eq('...the score is advice.js\'s `matched`', re1.groups.map(function (g) { return g.score; }),
+     re1.groups.map(function (g) { return g.matched; }));
+  ok('...the summary gives the count, the test and who beat chance', /Restaurants, by the name on the card[^\n]*4 ranked of 4 names/
+     .test(P.summary(rep1)) && /Restaurants: 4 cells[^\n]*beats chance/.test(P.summary(rep1))
+     && /Clear of the rest \(restaurant\):\n  Ash Cafe  \+/.test(P.summary(rep1)));
+
+  // A chain: three placed branches and bare-name offers; a non-chain at two
+  // places; a non-chain at one place and some unplaced. Taken trips at one
+  // branch and unplaced, timed by the GPS, one by a press.
+  var cRows = [], cTaken = [];
+  var McPins = [off(0.1, 0), off(0.15, 0), off(0.2, 0), null];
+  function cRow(id, pickup, i, pin, extra) {
+    var o = card(Object.assign({ id: id, at: at(2 + i % 3, 19 + i % 3, i % 60), pickup: pickup, perHour: 18 + (i % 5),
+                                 pay: 9, miles: 3, app: i % 3 ? 'uber' : 'doordash' }, extra || {}));
+    o.pin = pin;
+    cRows.push(o);
+    return o;
+  }
+  for (var ci = 0; ci < 56; ci++) {
+    var br = ci < 36 ? Math.floor(ci / 12) : 3;
+    var mo = cRow('mcd' + ci, br === 1 ? 'McDonald\'s (40 Oak Row)' : 'McDonald\'s', ci, McPins[br],
+                  ci < 6 || (ci >= 36 && ci < 38) || ci === 12 ? { dropoff: '742 Ombre Avenue, Faketown' } : null);
+    if (ci < 4) cTaken.push({ id: mo.id, pay: 10, minutes: 25, tookAt: mo.at, endedAt: mo.at + 30 * 60000, by: 'gps' });
+    if (ci === 36 || ci === 37) cTaken.push({ id: mo.id, pay: 10, minutes: 25, tookAt: mo.at, endedAt: mo.at + 20 * 60000, by: 'gps' });
+    if (ci === 12) cTaken.push({ id: mo.id, pay: 10, minutes: 25, tookAt: mo.at, endedAt: mo.at + 5 * 60000, by: 'drop' });
+  }
+  for (ci = 0; ci < 40; ci++) cRow('hod' + ci, 'Hollow Oak Deli', ci, ci % 2 ? off(0.3, 0) : off(0.35, 0));
+  for (ci = 0; ci < 15; ci++) cRow('lpp' + ci, 'Lone Pine Pho', ci, ci < 10 ? off(0.4, 0) : null);
+  var cWaits = [{ name: 'McDonalds', n: 5, medianMin: 4 }, { name: 'Hollow Oak Deli', n: 3, medianMin: 7 },
+                { name: 'Lone Pine Pho', n: 4, medianMin: 11.5 }];
+  var repR = P.analyse(cRows, cTaken, byHand(cRows), function () { return { at: dropFix, how: 'gps' }; },
+                       { now: 0, waits: cWaits });
+  var rr = repR.views.all.rest;
+  function restOf(c, label) { return c.groups.concat(c.thin).filter(function (g) { return g.label === 'McDonald\'s' ? label === g.label : g.label === label; })[0]; }
+  var mcd = restOf(rr, 'McDonald\'s');
+  eq('a chain is one row, every branch and every bare name together', [mcd.n, mcd.placedN, mcd.branchN, mcd.chain, mcd.ranked],
+     [56, 36, 3, true, true]);
+  eq('...its placed branches listed under it, most offers first, the unplaced last',
+     mcd.branches.map(function (b) { return [b.unplaced ? 'not placed' : b.name, b.n]; }),
+     [['McDonald\'s', 12], ['McDonald\'s', 12], ['McDonald\'s', 12], ['not placed', 20]]);
+  ok('...each placed branch with its position (a pickup, a business)', mcd.branches.slice(0, 3).every(function (b) { return typeof b.lat === 'number'; }));
+  eq('...while Places sees the three branches only, each under its floor',
+     repR.views.all.place.thin.filter(function (t) { return repR.places[t.name].label === 'McDonald\'s'; }).map(function (t) { return t.n; }),
+     [12, 12, 12]);
+  eq('the chain\'s real $/hr: every timed take, any branch or none; the press left out',
+     [mcd.taken, mcd.timed, mcd.realPerHour, mcd.cardVsReal], [7, 6, 20, 5]);
+  var b0 = mcd.branches.filter(function (b) { return b.timed === 4; })[0];
+  var bUn = mcd.branches.filter(function (b) { return b.unplaced; })[0];
+  eq('...a branch\'s own, at ' + P.REAL_MED_N + ' timed trips or more', [b0 && b0.realPerHour, b0 && b0.taken], [20, 4]);
+  eq('...and the unplaced two give their n and no median', [bUn.timed, bUn.realPerHour], [2, null]);
+  eq('the chain\'s wait: not joined, for the chain nor for any branch (the waits carry no place)',
+     [mcd.wait, mcd.waitWhy].concat(mcd.branches.filter(function (b) { return !b.unplaced; }).map(function (b) { return b.wait; })),
+     [null, 'a chain: which branch, a guess', null, null, null]);
+  var hod = restOf(rr, 'Hollow Oak Deli'), lpp = restOf(rr, 'Lone Pine Pho');
+  eq('a distinctive name at two places: not joined', [hod.wait, hod.waitWhy], [null, 'this name is at more than one place here']);
+  eq('a distinctive name at one place, the rest unplaced: joined', [lpp.wait, lpp.waitN, lpp.ranked], [11.5, 4, false]);
+  eq('the app split and the $/mi, as the other tabs read them', [mcd.uberN, mcd.doordashN, mcd.ppm], [37, 19, 3]);
+  ok('the hour filter picks its own restaurants', repR.views[6].rest.groups.concat(repR.views[6].rest.thin)
+     .every(function (g) { return g.n <= restOf(rr, g.label).n; }) && repR.views[6].rest.named < rr.named);
+
+  var pageR = P.html(repR);
+  ok('the Restaurants tab is on the page, with its plot, table and test', /data-tab="restaurants"/.test(pageR)
+     && /id="restPlot"/.test(pageR) && /id="restTable"/.test(pageR) && /restaurants: /.test(pageR));
+  ok('...and the page\'s script still parses', (function () {
+    try { new Function(pageR.split('<script>\n')[1].split('\n</script>')[0]); return true; } catch (e) { return false; }
+  }()));
+  var restCsvs = P.restCsv(repR) + P.restBranchCsv(repR);
+  ok('restaurants.csv: a line per restaurant per hours view', P.restCsv(repR).split('\n').filter(function (l) {
+    return /^all hours,McDonald's,yes,yes,36,3,56,/.test(l); }).length === 1);
+  ok('restaurant_branches.csv: its branches with their positions, and the unplaced', P.restBranchCsv(repR).split('\n')
+    .filter(function (l) { return /^all hours,McDonald's,/.test(l); }).length === 4
+    && /^all hours,McDonald's,not placed,,,/m.test(P.restBranchCsv(repR)));
+  ok('no dropoff text or drop position on the page or in the CSVs',
+     [pageR, restCsvs].every(function (t) { return t.indexOf('Ombre') < 0 && t.indexOf('742 ') < 0
+       && t.indexOf(String(dropFix.lat).slice(0, 7)) < 0; }));
+  ok('...nor a field named dropoff in the embedded data', !/"dropoff"/.test(pageR.split('id="data">')[1].split('</script>')[0]));
+
   /* --- the nightly refresh --- */
 
   await (async function nightly() {
@@ -717,7 +838,8 @@ function nbx() {
     eq('nightly: a good run exits 0', code1, 0);
     ok('...the report is a symlink to its build, with its page and CSVs', fs.lstatSync(out).isSymbolicLink()
        && /Where the good offers start/.test(fs.readFileSync(path.join(out, 'index.html'), 'utf8'))
-       && fs.existsSync(path.join(out, 'takes_places.csv')));
+       && fs.existsSync(path.join(out, 'takes_places.csv')) && fs.existsSync(path.join(out, 'restaurants.csv'))
+       && fs.existsSync(path.join(out, 'restaurant_branches.csv')));
     var callsTxt = fs.readFileSync(calls, 'utf8');
     ok('...RIG_HOST came from the config file and was asked first, in batch mode',
        /^ssh -o BatchMode=yes -o ConnectTimeout=10 driver@rig\.invalid true$/m.test(callsTxt));

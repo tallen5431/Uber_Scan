@@ -761,6 +761,28 @@ What it does:
   the minutes until the next offer the rig said take, and what it paid, by
   the town and the 2-mile cell the trip ended in (the GPS log at the drop,
   else the dropoff's door).
+* **Restaurants** (the owner, 26 Oct 2026: "Would it be possible to have a
+  comparison of different restaurants and their pay?"; `restaurants.csv`,
+  `restaurant_branches.csv`): one row per name on the card, every branch
+  together, **no map pin needed**, so it holds the bare names (chains with
+  several branches in reach, cards with no fix) that the Places tab cannot
+  place, and the tab says how many of its offers were placed. The name is the
+  pickup less Uber's bracketed street, and only where `searchPlan` reads a
+  name (a door, street or corner is left out and counted); names merge by the
+  rig's own store-name rule, the one the waits are joined by: Assemble
+  `storeKey` (case, marks, a planner icon and a " – Town" tail aside) and
+  `sameStore` (one i/l slip). A branch's own label ("#1155") stays its own
+  name. Placed branches are listed under their restaurant (click ▸), with
+  the unplaced rest as "not placed". Ranked, tested and coloured exactly as
+  places are (30 offers on 2 shift days, the score against the other ranked
+  restaurants in the same block, colour only where the test beats chance and
+  the interval clears zero), with a dot plot; beside the score: median pay,
+  $/hr and $/mi (read only), your take rate, real $/hr and real − card
+  minutes on orders put down at the door by the GPS or screen, the store wait
+  where the name cannot be a guess (for a chain, per branch only — and as the
+  waits on record carry no place, a chain's branches go without), the add-on
+  and stacked share, and the Uber · DoorDash counts. Under the floor a name is
+  listed as "too few", unranked and uncoloured.
 * An hour filter in the page, and CSVs of every table beside `index.html`.
 
 **The second pass, experimental and descriptive** (the owner, 26 Oct 2026:
