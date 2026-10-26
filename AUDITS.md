@@ -4598,6 +4598,84 @@ list:
   Chromium, light and dark: no page-wide sideways scroll, no script error,
   the table scrolls in its own box with the name column held.
 
+**Placement levels, rig waits, GPS-timed presses and Best offers — the places report's third pass: the rig's whole search chain with levels,
+the store waits from the rig, Drop presses timed by the GPS, and a Best
+offers tab on the top of the distribution (the owner, 26 Oct 2026, after the
+first real run placed 8% of pickups: "Go ahead with all three, fast track to
+experimental. Also please implement the new statistics you mentioned as I am
+trying to get the best offers which are higher than the median by a good
+bit").** Added to `tools/places_report.js` and `tools/places_nightly.sh` with
+checks in `tests/placesreport.test.js` (212 → 276); not yet run on the real
+journal, so no figure is recorded here. Experimental. Held to the Settled
+list and the heat-map entry:
+
+- *One chain, the rig's.* Placement asks map-view.js NbxSearch.place — the
+  chain server.js composes as doorChain (pickInDisc; streetRetry /
+  retryWanted / pickRetry; dirRetry / dirWanted / afterDir; nameWanted /
+  nameRetry / pickNamed; streetArea for a door nothing answered) — NbxSearch's
+  corner for a cross street, the street index's `whole` read by MV.streetArea
+  for a numberless street, and NbxSearch.band (MV.bandTarget, bandPick) for a
+  refused door. No server.js code is copied. The street index is asked even
+  with `--nominatim` (the first run's 662 corners went unasked because the
+  direct path never asked it): `--streets`, else the server's relay, else its
+  own loaded index; stdout says which. Road questions go through the relay's
+  `/api/nbx/route`, at most `--road-asks`, cached with the rest.
+- *Levels.* door, corner, name are a point; band, area, street are an area
+  with its spread. **Places** take a point, and an area only within AGREE_MI
+  (0.2 mi) of a point of the same store, or with its own spread ≤ 0.3 mi
+  (chosen, not measured: a spread is the two farthest candidates, so its
+  middle is within 0.15 mi of either — inside AGREE_MI). **The 2-mile grid**
+  takes every level with spread ≤ AREA_MI (1 mi). Towns are unchanged. The
+  Coverage tab counts each level and the refusal it stood in for, and the
+  pay gap is re-measured with every level placed and with points alone.
+- *Fix-less cards.* A printed door with its town or ZIP is searched in a disc
+  round the driver's region — the bounding box of every good card fix in the
+  record, 5 mi wider each way (chosen) — and kept only at door or corner level
+  where an answer at the pin carries that town or ZIP; no band, no area (a
+  region is no card's reach). A store name with no fix stays unplaced.
+- *Store waits* come from `--waits` (the rig's `/api/journal`) when the main
+  source has none; the nightly script passes `RIG_URL` (config file only) when
+  it is set and answers. No address is committed.
+- *A pressed drop timed by the GPS — chosen, not measured.* The stop the press
+  belongs to (stillRuns: every fix within 100 m for 60 s or more, no fix gap
+  over 5 min, beginning after the Took): the one containing the press, else
+  the first starting within 10 min after (an early press), else the last
+  ending within 5 min before (a late press); the real end is the stop's end,
+  the car leaving the door. No stop: still excluded. Labelled
+  `drop (gps-timed)`, counted apart, used in real $/hr and card-vs-real with a
+  "GPS-timed" column. A clock less a clock: no pace, no distance-to-time.
+  Known gap: a stop at the next pickup within 10 min of an early press would
+  be taken for the door.
+- *Top tier, hour-held.* Top 25% / 10% = at or over the 75th / 90th
+  percentile $/hr of every offer in the same three-hour block (30 offers for
+  a block to have one). These are percentiles to read, never a floor or a
+  verdict. P75 and P90 (bootstrap interval at 30 values, the binomial
+  order-statistic interval at 1,000 or more, for speed) and the top-10% share
+  sit beside every main table's median.
+- *Does top-10% share differ by area* — a new test: the statistic Σ (O − E)² / n
+  per group, the top-10% marks permuted within each block (2,000 seeded
+  shuffles), floors 30 offers on 2 shift days, all hours only; a group's
+  score is its share less the other groups' share in the same hours, with a
+  bootstrap interval; colour only where the test beats chance AND the
+  interval clears zero. Checked against no effect, a strong effect and the
+  hour wearing a town's clothes.
+- *Per hour of waiting and expected $/hr* use the Busy tab's spells (no
+  order in the car), 10 spells on 2 shift days: offers seen while parked
+  there ÷ hours parked; the takes made while waiting (a Took inside the spell
+  or 2 min after, chosen) — their pay ÷ (hours waited + their real hours),
+  timed takes only, so it reads low where takes went untimed. The "every
+  top-10% offer taken" line is offered, not earned, at card minutes, and
+  ignores that a take ends the wait.
+- *Dead miles* are the GPS log's straight lines (10 s apart, a little under
+  the road) from a put-down to the next Took (≤ 90 min, the log unbroken,
+  chosen) plus the next card's printed to-pickup miles; unpaid share = dead ÷
+  (dead + the delivered trips' card miles). By dropoff town and cell, counts
+  only; a cell under 10 measured trips is not named.
+- *Offer size bands* (< 4, 4–8, 8–12, 12+ card miles) are descriptive; $/mi
+  read only.
+- Checked at 375 px in headless Chromium, light and dark, on a synthetic
+  report: no page-wide sideways scroll, no script error, the Best tab first.
+
 ---
 
 **One unlabelled bracketed leg on a lone card is called whole, and on a ride card that is the drive to the rider alone.** is_whole's single-leg clause says 'Uber labels every leg of a ride (away, trip, total)'. laid_out_approach measured 'away' on 0 of 1,166 rows. Measured on the week: rows 444 frame 0 and 805 frame 1 are ride frames whose trip leg did not read, and they read whole on the approach alone. Row 805's merge recovered; row 444's journal row is whole=0 for another reason. Not fixed, because the same shape is also an Eats card whose `total` did not read (`tota`, `te al`): 7 frames on 6 rows, all whole jobs. Telling them apart needs a text-level ride signal carried through the accumulator. half_a_ride answers it only where another card is in shot, and 'whole / one bare leg on a frame holding ONE card is left as it was' pins that boundary.

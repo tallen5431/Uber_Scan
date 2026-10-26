@@ -21,6 +21,10 @@
 #   RIG_GPSLOG        the logs on the rig (default: gpslog/, under its home)
 #   RIG_SSH_KEY       a key file for ssh to the rig (default: ssh's own); one
 #                     with no passphrase, since cron has nobody to type it
+#   RIG_URL           the rig's own server, e.g. http://<rig-address>:8080; when
+#                     set AND it answers, passed as --waits, so the report has
+#                     the rig's store waits (the NucBox's copy of the journal
+#                     carries none); unset: no waits from the rig
 #   PLACES_SERVER     the server to read (default http://localhost:8082)
 #   PLACES_NOMINATIM  the NucBox's Nominatim (default http://localhost:8088)
 #   PLACES_GPS        the NucBox's GPS logs (default ~/gpslog)
@@ -41,7 +45,7 @@ if [ -f "$ENV_FILE" ]; then
         key="${line%%=*}"
         val="${line#*=}"
         case "$key" in
-            RIG_HOST|RIG_GPSLOG|RIG_SSH_KEY|PLACES_SERVER|PLACES_NOMINATIM|PLACES_GPS|PLACES_OUT|PLACES_LOG|PLACES_SINCE|PLACES_KEEP|RSYNC_TIMEOUT|SSH_TIMEOUT|PLACES_NODE) ;;
+            RIG_HOST|RIG_GPSLOG|RIG_SSH_KEY|RIG_URL|PLACES_SERVER|PLACES_NOMINATIM|PLACES_GPS|PLACES_OUT|PLACES_LOG|PLACES_SINCE|PLACES_KEEP|RSYNC_TIMEOUT|SSH_TIMEOUT|PLACES_NODE) ;;
             *) continue ;;
         esac
         val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
@@ -55,6 +59,7 @@ fi
 RIG_HOST="${RIG_HOST:-}"
 RIG_GPSLOG="${RIG_GPSLOG:-gpslog/}"
 RIG_SSH_KEY="${RIG_SSH_KEY:-}"
+RIG_URL="${RIG_URL:-}"
 PLACES_SERVER="${PLACES_SERVER:-http://localhost:8082}"
 PLACES_NOMINATIM="${PLACES_NOMINATIM:-http://localhost:8088}"
 PLACES_GPS="${PLACES_GPS:-$HOME/gpslog}"
@@ -102,6 +107,18 @@ STAMP="$(date '+%Y%m%d-%H%M%S')-$$"
 NEW="$BUILDS/$STAMP"
 ARGS=("$HERE/places_report.js" "$PLACES_SERVER" --out "$NEW" --gps "$PLACES_GPS" --nominatim "$PLACES_NOMINATIM")
 [ -n "$PLACES_SINCE" ] && ARGS+=(--since "$PLACES_SINCE")
+# The rig's store waits, when RIG_URL is set and the rig answers (a rig off or
+# away is the ordinary case: the report is built without them).
+if [ -n "$RIG_URL" ]; then
+    if curl -fsS -m "$SSH_TIMEOUT" -o /dev/null "${RIG_URL%/}/api/journal?days=1&limit=1" >> "$PLACES_LOG" 2>&1; then
+        ARGS+=(--waits "$RIG_URL")
+        log "store waits from the rig ($RIG_URL)"
+    else
+        log "the rig's server did not answer; no store waits from it"
+    fi
+else
+    log "RIG_URL not set; no store waits from the rig"
+fi
 if ! "$PLACES_NODE" "${ARGS[@]}" >> "$PLACES_LOG" 2>&1; then
     log "FAILED: the report did not build; the old report is untouched"
     rm -rf "$NEW"

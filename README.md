@@ -829,10 +829,74 @@ offers (or one take) for a row; an interval needs 10 values.
 * **Trend** (`trend_*.csv`): each ranked place's and town's hour-held score by
   ISO week, weeks with 10+ offers only, drawn as a small line.
 
+**The third pass** (the owner, 26 Oct 2026, after the first real run placed 8%
+of pickups: "Go ahead with all three, fast track to experimental ... I am
+trying to get the best offers which are higher than the median by a good
+bit"). Experimental; the Settled list holds (no $/mile rule or payout floor —
+a threshold below is a percentile of your own offers, to read; no pace
+re-timing — the band is distance only; no weekday term; colour only where a
+grouping beats chance and the interval clears zero).
+
+* **Placement by the rig's whole search chain** (map-view.js NbxSearch, the
+  chain server.js composes as doorChain): the door, the type word left out,
+  the directional the other way, the street index's one street for a misread
+  name, the street alone; corners by the street index; numberless streets by
+  its `whole`; a refused door's candidates narrowed by the **distance band**
+  (the card's own to-pickup miles by road, through the server's
+  `/api/nbx/route`, at most `--road-asks` questions, cached). **The street
+  index is asked even with `--nominatim`**: `--streets URL` (a relay's
+  `.../api/nbx`, or a server with `NUCBOX_STREETS_FILE` loaded), by default the
+  server's relay, else its own index; stdout says which ("street index: …").
+  Every placement has a **level**: door, corner, name (a point) or band, area,
+  street (approximate, with its spread). **Places** take a point, and an area
+  only within 0.2 mi of a point of the same store or with its candidates
+  within 0.3 mi; **the grid** every level within a mile; towns are unchanged.
+  The Coverage tab counts placements by level and the refusal each stood in
+  for (`coverage_levels.csv`), and re-measures the placed-vs-unplaced pay gap,
+  points alone too.
+* **Cards with no fix**: a printed door with its town or ZIP is searched in the
+  driver's region (the box round every good card fix in the record, 5 mi wider
+  each way; stdout and the Method tab give it), kept only at door or corner
+  level with that town or ZIP at the pin. A store name with no fix stays
+  unplaced: a chain is everywhere.
+* **Store waits from the rig**: `--waits URL` (a server whose `/api/journal`
+  carries `waits`, e.g. the rig's `:8080`), used when the main source has none
+  — the NucBox's copy of the journal carries no store waits.
+* **Drop presses timed by the GPS** (needs `--gps`): the stop the press
+  belongs to — every fix within 100 m for a minute or more, beginning after
+  the Took — that contains the press, else the first starting within 10 min
+  after it (pressed on the way), else the last ending within 5 min before it
+  (pressed late); the real end is that stop's end. No stop: still left out.
+  Labelled `drop (gps-timed)`, counted apart, and used in real $/hr with a
+  column saying how many. Chosen, not measured.
+* **Best offers** (the first tab; `good_*.csv`, `waiting_*.csv`,
+  `top_share_tests.csv`, `dead_miles_*.csv`, `size_*.csv`):
+  * *Top 25% / top 10%*: at or over the 75th / 90th percentile $/hr of every
+    offer in the same three-hour block (30 offers for a block to have one);
+    the thresholds are printed. Beside every main table's median: P75, P90
+    (with a 95% interval) and the top-10% share, sortable.
+  * *Good offers* (the rig's take, and both tiers) per town, cell, restaurant
+    and app, and **per hour of waiting** there off the GPS spells, by area and
+    three-hour block (10 spells on 2 shift days).
+  * *Expected $/hr of working an area*: the pay of orders taken while waiting
+    there ÷ (hours waited + their real hours), timed takes only; beside it,
+    *if every top-10% offer seen there were taken* — offered, not earned, at
+    the card's minutes.
+  * *Does the top-10% share differ by area?* A permutation of the top-10%
+    marks within each block (hours held), per town, restaurant, place and
+    cell; coloured only where it beats chance and the group's interval clears
+    zero; stdout names who did.
+  * *Dead miles after a drop*: the GPS miles from the put-down to the next
+    Took (within 90 min, the log unbroken), plus the next card's printed
+    to-pickup miles, and the unpaid share, by dropoff town and cell (counts
+    only, 10 trips to name a cell).
+  * *Offer size*: short < 4 mi, 4–8, 8–12, 12+ by card miles, per town, app and
+    restaurant: n, median and P90 $/hr, top-10% share, $/mi (read only).
+
 ### Every night, on the NucBox
 
 `tools/places_nightly.sh` copies the rig's GPS logs over when the rig answers,
-rebuilds the report into a new folder, and swaps it in only when the build
+passes the rig's server as `--waits` when `RIG_URL` is set and answers, rebuilds the report into a new folder, and swaps it in only when the build
 succeeded: `~/places-report` becomes a symlink to the newest build
 (`~/places-report.d/`), replaced by one rename, so the page is never half
 written and a failed night leaves the old report as it was (and exits
@@ -846,6 +910,7 @@ over the file). The file is this NucBox's own and is never committed:
 RIG_HOST=pi@<the rig's address>        # unset: no copy from the rig
 #RIG_SSH_KEY=~/.ssh/id_nightly         # a key with no passphrase, for cron
 #RIG_GPSLOG=gpslog/                    # on the rig, under its home
+#RIG_URL=http://<the rig's address>:8080  # the rig's server: its store waits (--waits)
 #PLACES_SERVER=http://localhost:8082   # the server to read
 #PLACES_NOMINATIM=http://localhost:8088
 #PLACES_GPS=~/gpslog

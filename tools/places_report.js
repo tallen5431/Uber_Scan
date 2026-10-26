@@ -68,6 +68,16 @@
  * GPS), Uber against DoorDash, add-on and stacking share, places gone quiet,
  * a weekly trend and $/mi. See "the second pass" below for each one's rule
  * and floor; tools/places_nightly.sh rebuilds the whole report every night.
+ *
+ * THE THIRD PASS (26 Oct 2026, after the owner's first real run), experimental:
+ * pickups placed by the rig's whole search chain with every placement's level
+ * (door, corner, name; band, area, street), the street index asked even with
+ * --nominatim (--streets), cards with no fix searched in the driver's region
+ * by a printed door and town; the rig's store waits (--waits); Drop presses
+ * timed by the GPS; and a "Best offers" tab on the top of the distribution —
+ * hour-held top-25% / top-10% offers, P75 / P90, good offers per hour of
+ * waiting, the expected $/hr of working an area, dead miles after a drop and
+ * offer size bands. See "the third pass" below for each rule and floor.
  */
 
 'use strict';
@@ -118,7 +128,9 @@ var PLACE_SAME_MI = MV.AGREE_MI;
 var NBX_LIMIT = 10;
 // How a taken order was put down, by takenRuns' `by`: at the door. The
 // offers page leaves out 'replaced' and 'expiry', which measure nothing.
-var AT_THE_DOOR = ['gps', 'screen', 'drop', 'chooser'];
+var AT_THE_DOOR = ['gps', 'screen', 'drop', 'chooser', 'drop (gps-timed)'];
+// A Drop press the GPS log timed (timePresses below): its own `by`.
+var GPS_TIMED = 'drop (gps-timed)';
 
 /* --- small pieces -------------------------------------------------------- */
 
@@ -139,14 +151,16 @@ function seedOf(text) {
   return h >>> 0;
 }
 
-/* A percentile bootstrap interval for the median, 95%, or null under two. */
-function bootCI(values, seed, reps) {
+/* A percentile bootstrap interval for the median, 95%, or null under two.
+ * `stat` another statistic of the resample in its place (a quantile, a mean). */
+function bootCI(values, seed, reps, stat) {
   if (!values || values.length < 2) return null;
   reps = reps || BOOTS;
+  stat = stat || MV.median;
   var r = rng(seed), n = values.length, meds = new Array(reps), buf = new Array(n);
   for (var k = 0; k < reps; k++) {
     for (var i = 0; i < n; i++) buf[i] = values[Math.floor(r() * n)];
-    meds[k] = MV.median(buf);
+    meds[k] = stat(buf);
   }
   meds.sort(function (a, b) { return a - b; });
   return [round2(meds[Math.floor(0.025 * reps)]), round2(meds[Math.ceil(0.975 * reps) - 1])];
@@ -206,6 +220,13 @@ function pickupKind(text) {
 // The words a refusal is counted under. One list, printed as is.
 var WHY = {
   nofix: 'no GPS fix on the card',
+  nofixdoor: 'no GPS fix on the card, and no town or ZIP printed to search the region by',
+  regiontown: 'no fix; the door found in the region is not in the printed town',
+  corners: 'a corner whose streets meet in several places',
+  nomeet: 'a corner whose streets do not meet inside the card\'s reach',
+  nostreet: 'a street the street index does not hold',
+  notwo: 'nothing searchable',
+  long: 'a street with no door number',
   several: 'several places answer (a chain, or branches)',
   capped: 'several places answer (a chain, or branches)',
   noplace: 'not found inside the card\'s reach',
@@ -219,36 +240,182 @@ var WHY = {
   refused: 'the NucBox did not answer',
 };
 
-/* One pickup, placed or refused: { at, why, kind }. `nbx` is an NbxSearch.
- * The door is asked as the server asks a held order's pickup door; the name
- * as it asks the store by its name (searchHeldPickupName: one question, the
- * name as searchPlan writes it, chosen by MV.pickPlace). Only a pin counts:
- * a "general area" beside a refusal is a refusal here. */
-async function placePickup(nbx, text, card, streets) {
-  var k = pickupKind(text);
-  if (k.kind === 'none') return { at: null, why: 'notext', kind: k.kind };
-  if (k.kind === 'street') return { at: null, why: 'street', kind: k.kind };
-  if (k.kind === 'cross' && !streets) return { at: null, why: 'cross', kind: k.kind };
-  var disc = MV.discFor(card || null);
-  if (!disc) return { at: null, why: 'nofix', kind: k.kind };
-  var res = k.kind === 'name'
-    ? await nbx.placeSearch(k.plan.q, disc)
-    : await nbx.place(text, disc, { streets: !!streets });
-  if (res && res.at) return { at: { lat: res.at.lat, lon: res.at.lon }, why: null, kind: k.kind };
-  var why = res && res.why;
-  return { at: null, why: WHY[why] ? why : 'none', kind: k.kind };
+/* --- THE THIRD PASS: the rig's whole search chain, and its levels ---------
+ *
+ * The owner's first real run (25 Oct 2026) placed 8% of pickups: a corner
+ * with no street index (the run asked Nominatim directly and so never asked
+ * the index), a street with no door number, several answers, and cards with
+ * no fix. The owner, 26 Oct: "Go ahead with all three, fast track to
+ * experimental."
+ *
+ * ONE RULE IN ONE PLACE, still. NbxSearch.place IS the chain server.js
+ * composes as doorChain for a held order's door — the street as printed
+ * (pickInDisc), then the type word left out where the street was not in
+ * reach (MV.streetRetry / retryWanted / pickRetry), the directional the other
+ * way where the street was found and not the door (MV.dirRetry / dirWanted /
+ * afterDir), the street index's one street for the name as read (nameWanted /
+ * nameRetry / pickNamed), and for a door nothing answered its street alone
+ * (MV.streetArea) — so this asks it, never a copy. A corner is NbxSearch's
+ * corner (the street index's /cross, pickInDisc), a numberless street its
+ * `whole` (NbxSearch.streetArea), a refused door's candidates the distance
+ * band (NbxSearch.band: MV.bandTarget's Uber `toPickupMiles` or DoorDash's
+ * upper bound, road miles off the relay's /route, MV.bandPick), and the
+ * areas pickInDisc puts beside a refusal (MV.withArea: 'several', 'nodoor',
+ * 'capped') are read as they come.
+ *
+ * LEVELS. Every placement says how it was placed:
+ *   'door'    a printed door, found at its number (one place, or agreeing)
+ *   'corner'  where the two streets meet, one meeting inside the reach
+ *   'name'    a store's name, one place of it answered (pickPlace)
+ * ...those three are a POINT. And three that are an AREA, never a pin on the
+ * rig and approximate here, each with its spread (the two farthest
+ * candidates apart, MV's own `miles`):
+ *   'band'    the candidates the card's own miles by road kept (bandPick)
+ *   'area'    the door's candidates, one general area (withArea)
+ *   'street'  the street alone, its points one area (streetArea)
+ *
+ * FIX-LESS CARDS. Older cards carry no fix, so no disc. A printed door with
+ * its town or ZIP after a comma is searched in the driver's own REGION
+ * instead (regionOf: the bounding box of every good card fix in the record,
+ * REGION_MARGIN_MI wider each way, as a disc round its middle reaching its
+ * corners), through the same chain, and kept only at door or corner level
+ * and only where an answer at the pin carries the printed town or ZIP: a
+ * house number on a street of that name is not one place across a metro, but
+ * in its own town it is. A store NAME with no fix stays unplaced — a chain is
+ * everywhere, and which branch is a guess. No band (it measures from the
+ * fix) and no area (a region is no card's reach) without a fix. */
+var REGION_MARGIN_MI = 5;
+// The band asks for its roads with the run's patience, not the panel's: an
+// offline run can wait, and a band given up is the refusal as it was.
+var BAND_WAIT_OFFLINE_MS = 30000;
+// The level a placement is at, and whether it is a point.
+var POINT_LEVELS = ['door', 'corner', 'name'];
+var APPROX_LEVELS = ['band', 'area', 'street'];
+
+/* The printed town or ZIP of an address text, as the card printed it after a
+ * comma (map-view.js townOf, the rule the towns table reads), or null. */
+function printedTown(text) {
+  var s = String(text || '');
+  var zip = /,[^,]*?\b(\d{5})(?:-\d{4})?\b/.exec(s);
+  var town = MV.townOf(s, A.area);
+  return town || (zip ? zip[1] : null) ? { town: town || null, zip: zip ? zip[1] : null } : null;
 }
 
-/* A taken order's dropoff, placed to be COUNTED by area and nothing else: a
- * door or (with the street index) a corner, inside its card's disc. */
-async function placeDropoff(nbx, text, card, streets) {
+/* The driver's region off the record's own good card fixes (MV.cardFix):
+ * their bounding box, REGION_MARGIN_MI wider on each side, and the disc
+ * round its middle that reaches its corners. Null with no fix at all. */
+function regionOf(offers) {
+  var s = Infinity, n = -Infinity, w = Infinity, e = -Infinity, k = 0;
+  (offers || []).forEach(function (o) {
+    var f = o && MV.cardFix(o).at;
+    if (!f) return;
+    k += 1;
+    s = Math.min(s, f.lat); n = Math.max(n, f.lat); w = Math.min(w, f.lon); e = Math.max(e, f.lon);
+  });
+  if (!k) return null;
+  var dLat = REGION_MARGIN_MI / 69.0;
+  var mid = (s + n) / 2;
+  var dLon = REGION_MARGIN_MI / (69.0 * Math.max(0.2, Math.cos(mid * Math.PI / 180)));
+  var box = { s: round5(s - dLat), n: round5(n + dLat), w: round5(w - dLon), e: round5(e + dLon) };
+  var at = { lat: round5((box.s + box.n) / 2), lon: round5((box.w + box.e) / 2) };
+  var miles = MV.crowMiles(at, { lat: box.n, lon: box.e });
+  return { box: box, fixes: k, marginMi: REGION_MARGIN_MI,
+           disc: { at: at, miles: Math.round(miles * 100) / 100, card: null, corrected: false, region: true } };
+}
+
+// An answer's hit list says the printed town (or ZIP) near `at`.
+function townAt(res, at, said) {
+  var hits = res && res.seen && Array.isArray(res.seen.hits) ? res.seen.hits : [];
+  return hits.some(function (h) {
+    if (MV.crowMiles(h, at) > PLACE_SAME_MI) return false;
+    var nm = String(h.name || '').toLowerCase();
+    return (said.town && nm.indexOf(said.town.toLowerCase()) >= 0) || (said.zip && nm.indexOf(said.zip) >= 0);
+  });
+}
+
+function placedAt(at, kind, level, spread, extra) {
+  return Object.assign({ at: { lat: at.lat, lon: at.lon }, why: null, kind: kind, level: level,
+                         spread: spread ? Math.round(spread * 100) / 100 : 0 }, extra || {});
+}
+
+/* One pickup, placed or refused: { at, why, kind, level, spread }. `nbx` is
+ * an NbxSearch; `streets` whether the street index answers; `ctx`
+ * { region (regionOf), road (the router answers), budget ({left}, road
+ * questions) }. Without `ctx` or `streets` it is the first pass's rule. */
+async function placePickup(nbx, text, card, streets, ctx) {
+  ctx = ctx || {};
+  var k = pickupKind(text);
+  if (k.kind === 'none') return { at: null, why: 'notext', kind: k.kind };
+  if (k.kind === 'street' && !streets) return { at: null, why: 'street', kind: k.kind };
+  if (k.kind === 'cross' && !streets) return { at: null, why: 'cross', kind: k.kind };
+  var disc = MV.discFor(card || null), region = false;
+  if (!disc) {
+    var said = k.kind === 'door' ? printedTown(text) : null;
+    if (!said || !ctx.region) return { at: null, why: k.kind === 'door' ? 'nofixdoor' : 'nofix', kind: k.kind };
+    disc = ctx.region.disc;
+    region = said;
+  }
+  var res;
+  try {
+    if (k.kind === 'name') res = await nbx.placeSearch(k.plan.q, disc);
+    else if (k.kind === 'street') {
+      // The street index's `whole` for the street as printed (NbxSearch.
+      // streetArea asks it for a door plan's street; a numberless street IS
+      // its street), its points one area by MV.streetArea's rule.
+      var body = await nbx.get('/whole?name=' + encodeURIComponent(k.plan.street) + '&box='
+                               + encodeURIComponent(MV.discBox(disc)));
+      var a = body && !body.unreachable && !body.refused ? MV.streetArea(body, disc) : null;
+      return a ? placedAt(a, k.kind, 'street', a.miles) : { at: null, why: 'street', kind: k.kind };
+    } else res = await nbx.place(text, disc, { streets: !!streets });
+  } catch (e) {
+    return { at: null, why: 'refused', kind: k.kind };
+  }
+  if (res && res.at) {
+    if (region && !townAt(res, res.at, region)) return { at: null, why: 'regiontown', kind: k.kind };
+    return placedAt(res.at, k.kind, k.kind === 'name' ? 'name' : k.kind === 'cross' ? 'corner' : 'door', 0,
+                    region ? { region: true } : null);
+  }
+  var why = res && res.why;
+  why = WHY[why] ? why : 'none';
+  if (region || k.kind !== 'door') return { at: null, why: why, kind: k.kind };
+  // The door refused: the band first (it narrows; an area it found is tighter
+  // than the one it was chosen from), else the area beside the refusal.
+  if (ctx.road) {
+    var spec = MV.bandTarget(card, 'pickup');
+    var band = spec ? await nbx.band(text, res, disc, spec, null, ctx.budget || null, !!streets) : null;
+    if (band) return placedAt(band, k.kind, 'band', band.miles, { refused: why, cardMi: band.cardMi });
+  }
+  if (res && res.area) {
+    return placedAt(res.area, k.kind, res.area.rough ? 'street' : 'area', res.area.miles, { refused: why });
+  }
+  return { at: null, why: why, kind: k.kind };
+}
+
+/* A taken order's dropoff, placed to be COUNTED by area and nothing else:
+ * by the same chain (no band: it measures from the placed pickup), kept at
+ * any level whose spread is a 2-mile cell's to tell (AREA_MI). */
+async function placeDropoff(nbx, text, card, streets, ctx) {
   var k = pickupKind(text);
   if (k.kind !== 'door' && !(k.kind === 'cross' && streets)) return null;
-  var disc = MV.discFor(card || null);
-  if (!disc) return null;
-  var res = await nbx.place(text, disc, { streets: !!streets });
-  return res && res.at ? { lat: res.at.lat, lon: res.at.lon } : null;
+  var r = await placePickup(nbx, text, card, streets, { region: ctx && ctx.region });
+  return r && r.at && !(r.spread > MV.AREA_MI) ? { lat: r.at.lat, lon: r.at.lon } : null;
 }
+
+/* PLACES TAKE A POINT, AND AN AREA ONLY WHERE IT IS ONE STORE'S. A place is
+ * a store at a location, and an area is not a location: so an approximate
+ * placement joins Places only (a) within PLACE_SAME_MI (AGREE_MI) of a point
+ * placement of the same store name — the area agrees with a door or name
+ * already found for that store, and is that place — or (b) where its own
+ * spread is PLACE_APPROX_MI or less, a few blocks, the size of one shopping
+ * centre. 0.3 mi is CHOSEN, NOT MEASURED: AGREE_MI (0.2) is the rig's "one
+ * place" for two pins, and a spread is the two FARTHEST candidates, so its
+ * middle is within half of it of either — 0.15 mi, inside AGREE_MI. The
+ * 2-mile grid takes every level whose spread is AREA_MI or less (a mile:
+ * the rig's own general area, half a cell). Towns read the card's text and
+ * are unchanged. */
+var PLACE_APPROX_MI = 0.3;
+function isPoint(r) { return !!(r && r.at && (!r.level || POINT_LEVELS.indexOf(r.level) >= 0)); }
+function gridOk(r) { return !!(r && r.at && !(r.spread > MV.AREA_MI)); }
 
 // The store a pickup names, as printed: Uber's bracketed street off the end,
 // or for a printed door (a DoorDash stops line) the line before its comma.
@@ -263,15 +430,21 @@ function storeLabel(text) {
  * { byRow: {rowIndex: placeId}, places: {id: {label, lat, lon, pins}} }. */
 function placesOf(placed) {
   var byKey = Object.create(null), places = Object.create(null), byRow = Object.create(null);
-  placed.forEach(function (p) {
+  // Points first, so an area can find the door or name it agrees with
+  // (PLACE_APPROX_MI above); a pin with no `level` is a point, as before.
+  var points = placed.filter(function (p) { return isPoint(p); });
+  var areas = placed.filter(function (p) { return !isPoint(p); });
+  points.concat(areas).forEach(function (p) {
     var key = AS.storeKey(p.label) || p.label.toLowerCase();
     var list = byKey[key] || (byKey[key] = []);
     var hit = null;
     for (var i = 0; i < list.length; i++) {
-      if (MV.crowMiles(list[i].first, p.at) <= PLACE_SAME_MI) { hit = list[i]; break; }
+      if (MV.crowMiles(list[i].first, p.at) <= PLACE_SAME_MI
+          && (isPoint(p) || list[i].point || p.spread <= PLACE_APPROX_MI)) { hit = list[i]; break; }
     }
+    if (!hit && !isPoint(p) && !(p.spread <= PLACE_APPROX_MI)) return;
     if (!hit) {
-      hit = { id: key + '#' + (list.length + 1), first: p.at, pins: [], labels: {} };
+      hit = { id: key + '#' + (list.length + 1), first: p.at, pins: [], labels: {}, point: isPoint(p) };
       list.push(hit);
     }
     hit.pins.push(p.at);
@@ -367,6 +540,7 @@ function cells(rows, key, opts) {
       });
     }
     var ppms = g.offers.map(payPerMile).filter(function (v) { return v !== null; });
+    var top = topOf(g.offers, opts.tierOf);
     var score = diffs.length ? round2(MV.median(diffs)) : null;
     var sci = bootCI(diffs, seedOf('s' + g.name));
     var clear = sci ? (sci[0] > 0 ? 'above' : sci[1] < 0 ? 'below' : null) : null;
@@ -383,6 +557,8 @@ function cells(rows, key, opts) {
       clear: clear,
       beats: !!(significant && clear),
       matched: g.matched === undefined ? null : g.matched,
+      p75: top.p75, p90: top.p90, p75Ci: top.p75Ci, p90Ci: top.p90Ci,
+      top25: top.top25, top10: top.top10, tiered: top.tiered,
     };
   });
   groups.sort(function (a, b) {
@@ -428,12 +604,21 @@ function coverage(rows, placedRow) {
     }
     return out;
   }
-  var why = Object.create(null), kinds = Object.create(null);
+  var why = Object.create(null), kinds = Object.create(null), levels = Object.create(null);
   withPickup.forEach(function (o) {
     var r = placedRow(o);
     kinds[r.kind] = kinds[r.kind] || { n: 0, placed: 0 };
     kinds[r.kind].n += 1;
-    if (r.at) { kinds[r.kind].placed += 1; return; }
+    if (r.at) {
+      kinds[r.kind].placed += 1;
+      var lv = r.level || (r.kind === 'name' ? 'name' : 'door');
+      var e = levels[lv] || (levels[lv] = { level: lv, n: 0, rates: [], refused: Object.create(null), region: 0 });
+      e.n += 1;
+      e.rates.push(o.perHour);
+      if (r.refused) e.refused[WHY[r.refused] || r.refused] = (e.refused[WHY[r.refused] || r.refused] || 0) + 1;
+      if (r.region) e.region += 1;
+      return;
+    }
     var w = WHY[r.why] || r.why;
     why[w] = (why[w] || 0) + 1;
   });
@@ -448,6 +633,15 @@ function coverage(rows, placedRow) {
     why: Object.keys(why).map(function (k) { return { why: k, n: why[k] }; })
       .sort(function (a, b) { return b.n - a.n; }),
     kinds: kinds,
+    // Placed, by level (POINT_LEVELS then APPROX_LEVELS): how many, their
+    // median $/hr, the refusal an approximate one stood in for, and how many
+    // were found in the region box (a card with no fix).
+    levels: POINT_LEVELS.concat(APPROX_LEVELS).filter(function (l) { return levels[l]; }).map(function (l) {
+      var e = levels[l];
+      return { level: l, point: POINT_LEVELS.indexOf(l) >= 0, n: e.n, perHour: med(e.rates), region: e.region,
+               refused: Object.keys(e.refused).map(function (k) { return k + ' ' + e.refused[k]; }).join(' · ') };
+    }),
+    points: split(withPickup.filter(function (o) { return !placedRow(o).at || isPoint(placedRow(o)); })),
     days: Object.keys(byDay).sort().map(function (d) {
       var s = split(byDay[d]);
       s.day = d;
@@ -477,7 +671,7 @@ function nextTake(timeline, endedAt) {
 
 function timelineOf(offers) {
   return offers.filter(function (o) { return typeof seenAt(o) === 'number'; }).map(function (o) {
-    return { at: seenAt(o), go: counted(o) && o.state === 'go', counted: counted(o), perHour: o.perHour, pay: o.pay };
+    return { at: seenAt(o), go: counted(o) && o.state === 'go', counted: counted(o), perHour: o.perHour, pay: o.pay, o: o };
   }).sort(function (a, b) { return a.at - b.at; });
 }
 
@@ -562,7 +756,7 @@ var REAL_MED_N = 3;
 // A Drop press ('drop', 'chooser') can come early and makes a trip look
 // faster than it was; 'replaced' and 'expiry' measure nothing. The offers
 // page's "Card against what it took" says the same and counts both kinds.
-var REAL_BY = ['gps', 'screen'];
+var REAL_BY = ['gps', 'screen', 'drop (gps-timed)'];
 // Gone quiet: the last QUIET_DAYS of the record against the rest.
 var QUIET_DAYS = 14;
 var QUIET_MIN_OUTINGS = 3;
@@ -664,7 +858,7 @@ function realOf(t) {
   if (!t || REAL_BY.indexOf(t.by) < 0 || typeof t.tookAt !== 'number' || typeof t.endedAt !== 'number'
       || !(t.endedAt > t.tookAt)) return null;
   var mins = (t.endedAt - t.tookAt) / 60000;
-  return { mins: mins,
+  return { mins: mins, gpsTimed: t.by === GPS_TIMED,
            perHour: typeof t.pay === 'number' ? t.pay / (mins / 60) : null,
            diff: typeof t.minutes === 'number' && t.minutes > 0 ? mins - t.minutes : null,
            ratio: typeof t.minutes === 'number' && t.minutes > 0 ? mins / t.minutes : null };
@@ -694,6 +888,7 @@ function takesTable(rows, runs, key, label, what) {
     var enough = function (xs) { return xs.length >= REAL_MED_N; };
     return { name: label(k), offered: list.length, taken: took.length, take: share(took.length, list.length),
              takeCi: wilson(took.length, list.length), timed: real.length,
+             gpsTimed: real.filter(function (r) { return r.gpsTimed; }).length,
              realPerHour: enough(ph) ? med(ph) : null, realCi: medCi(ph, 'r' + k),
              cardVsReal: enough(df) ? med(df) : null, cardVsRealCi: medCi(df, 'c' + k),
              ratio: enough(ra) ? med(ra) : null };
@@ -701,6 +896,7 @@ function takesTable(rows, runs, key, label, what) {
     .sort(function (a, b) { return b.taken - a.taken || b.offered - a.offered; });
   return { cols: [C('name', what, 't'), C('offered', 'offered', 'n'), C('taken', 'taken', 'n'),
                   C('take', 'take rate', '%'), C('takeCi', '95%', '%ci'), C('timed', 'timed at door', 'n'),
+                  C('gpsTimed', 'of them, press GPS-timed', 'n'),
                   C('realPerHour', 'real $/hr', '$'), C('realCi', '95%', '$ci'),
                   C('cardVsReal', 'real − card min', 'dmin'), C('cardVsRealCi', '95%', 'dminci'),
                   C('ratio', 'real ÷ card', 'x')], rows: out };
@@ -971,15 +1167,30 @@ function trendTable(diffs, label, what) {
  * in time than SPELL_GAP_S, lasting SPELL_MIN_S; the held time is cut out
  * and each piece left that still lasts SPELL_MIN_S is a spell. Returns
  * [{from, to, lat, lon}] in ms, at the run's first fix. */
-function spellsOf(fixes, held) {
+/* Runs of fixes each within `m` metres of the run's first, no two fixes
+ * further apart than `gapS`, lasting `minS` or more: [{from, to, lat, lon}]
+ * in ms, at the run's first fix. The one rule for "the car stood still",
+ * a spell's (spellsOf) and a press's stop's (timePresses) alike. */
+function stillRuns(fixes, m, minS, gapS) {
   var out = [], n = (fixes || []).length, i = 0;
-  var hs = (held || []).slice().sort(function (a, b) { return a[0] - b[0]; });
   function metres(a, b) { return MV.crowMiles({ lat: a[1], lon: a[2] }, { lat: b[1], lon: b[2] }) * 1609.344; }
   while (i < n) {
     var j = i;
-    while (j + 1 < n && fixes[j + 1][0] - fixes[j][0] <= SPELL_GAP_S && metres(fixes[i], fixes[j + 1]) <= SPELL_M) j += 1;
-    if (fixes[j][0] - fixes[i][0] >= SPELL_MIN_S) {
-      var pieces = [[fixes[i][0] * 1000, fixes[j][0] * 1000]];
+    while (j + 1 < n && fixes[j + 1][0] - fixes[j][0] <= gapS && metres(fixes[i], fixes[j + 1]) <= m) j += 1;
+    if (fixes[j][0] - fixes[i][0] >= minS) {
+      out.push({ from: fixes[i][0] * 1000, to: fixes[j][0] * 1000, lat: fixes[i][1], lon: fixes[i][2] });
+    }
+    i = j + 1;
+  }
+  return out;
+}
+
+function spellsOf(fixes, held) {
+  var out = [];
+  var hs = (held || []).slice().sort(function (a, b) { return a[0] - b[0]; });
+  stillRuns(fixes, SPELL_M, SPELL_MIN_S, SPELL_GAP_S).forEach(function (run) {
+    {
+      var pieces = [[run.from, run.to]];
       hs.forEach(function (h) {
         var next = [];
         pieces.forEach(function (p) {
@@ -990,11 +1201,10 @@ function spellsOf(fixes, held) {
         pieces = next;
       });
       pieces.forEach(function (p) {
-        if (p[1] - p[0] >= SPELL_MIN_S * 1000) out.push({ from: p[0], to: p[1], lat: fixes[i][1], lon: fixes[i][2] });
+        if (p[1] - p[0] >= SPELL_MIN_S * 1000) out.push({ from: p[0], to: p[1], lat: run.lat, lon: run.lon });
       });
     }
-    i = j + 1;
-  }
+  });
   return out;
 }
 
@@ -1072,7 +1282,7 @@ function restaurantNames(offers) {
 /* What a list of offers paid and what became of them, as the second pass
  * measures it: medians, your takes and their real time (realOf: put down at
  * the door), add-on and stacking (flagsOf), the app split (appOf). */
-function describe(list, runs, seed) {
+function describe(list, runs, seed, tierOf) {
   var pays = list.map(function (o) { return o.pay; }).filter(function (v) { return typeof v === 'number'; });
   var ppms = list.map(payPerMile).filter(function (v) { return v !== null; });
   var took = list.filter(function (o) { return runs[o.id]; });
@@ -1087,11 +1297,13 @@ function describe(list, runs, seed) {
               perHour: med(list.map(function (o) { return o.perHour; })), pay: med(pays),
               ppm: med(ppms), ppmN: ppms.length,
               taken: took.length, take: share(took.length, list.length), takeCi: wilson(took.length, list.length),
-              timed: real.length,
+              timed: real.length, gpsTimed: real.filter(function (r) { return r.gpsTimed; }).length,
               realPerHour: ph.length >= REAL_MED_N ? med(ph) : null, realCi: medCi(ph, 'rr' + seed),
               cardVsReal: df.length >= REAL_MED_N ? med(df) : null,
               addon: share(addonRead.filter(function (x) { return x.addon; }).length, addonRead.length),
               stacked: share(stacked, list.length) };
+  var top = topOf(list, tierOf, 'd' + seed);
+  out.p75 = top.p75; out.p90 = top.p90; out.p90Ci = top.p90Ci; out.top10 = top.top10; out.top25 = top.top25;
   APPS.forEach(function (app) {
     var l = list.filter(function (o) { return appOf(o) === app; });
     out[app + 'N'] = l.length;
@@ -1113,7 +1325,7 @@ function describe(list, runs, seed) {
  * branch is never joined either: which branch, a guess. A branch row asks
  * waitOf as the waits tab does. */
 function restaurantsTable(rows, ctx) {
-  var res = cells(rows, ctx.key, { hold: ctx.hold, minN: ctx.minN });
+  var res = cells(rows, ctx.key, { hold: ctx.hold, minN: ctx.minN, tierOf: ctx.tierOf });
   var pool = rows.filter(counted);
   var by = groupBy(pool, ctx.key);
   var ws = waitsOk(ctx.waits);
@@ -1130,11 +1342,11 @@ function restaurantsTable(rows, ctx) {
   function rowOf(k, g) {
     var list = by[k] || [];
     var label = ctx.names.labels[k] || k;
-    var d = describe(list, ctx.runs, k);
+    var d = describe(list, ctx.runs, k, ctx.tierOf);
     var j = waitOf(label, ws, branchesOf[k] || 0);
     var subs = groupBy(list, function (o) { return ctx.placeKey(o) || '\u0000'; });
     var branches = Object.keys(subs).filter(function (id) { return id !== '\u0000'; }).map(function (id) {
-      var p = ctx.places[id] || {}, pd = describe(subs[id], ctx.runs, id);
+      var p = ctx.places[id] || {}, pd = describe(subs[id], ctx.runs, id, ctx.tierOf);
       var pj = waitOf(p.label || label, ws, sameName[AS.storeKey(p.label || label)] || 0);
       var pg = placeOf[id];
       return Object.assign(pd, { id: id, name: p.label || label, lat: p.lat, lon: p.lon,
@@ -1144,7 +1356,7 @@ function restaurantsTable(rows, ctx) {
     }).sort(function (a, b) { return b.n - a.n || (a.name < b.name ? -1 : 1); });
     var un = subs['\u0000'] || [];
     if (un.length && branches.length) {
-      branches.push(Object.assign(describe(un, ctx.runs, k + '~'), { id: null, name: 'not placed', unplaced: true,
+      branches.push(Object.assign(describe(un, ctx.runs, k + '~', ctx.tierOf), { id: null, name: 'not placed', unplaced: true,
                                                                      wait: null, waitN: null, waitWhy: null }));
     }
     var out = Object.assign(d, { name: k, label: label, ranked: !!g, chain: AS.chainName(label),
@@ -1172,6 +1384,442 @@ function restaurantsTable(rows, ctx) {
            names: ranked.length + thin.length };
 }
 
+/* --- the third pass: the top of the distribution --------------------------
+ *
+ * The owner, 26 Oct 2026: "please implement the new statistics you mentioned
+ * as I am trying to get the best offers which are higher than the median by a
+ * good bit." EXPERIMENTAL, and descriptive except where a test is named. No
+ * $/mile rule and no payout floor (a threshold here is a percentile of the
+ * record's own offers in their own hours, a thing to read, never an accept
+ * rule), no minutes re-timed at a pace (real time is a clock less a clock;
+ * the band is distance only), no weekday term, and colour only where a
+ * grouping beats chance AND the interval is clear of zero — as before.
+ *
+ * TOP TIER, HOUR-HELD. An offer is top 25% (top 10%) when its $/hr is at or
+ * over the 75th (90th) percentile of EVERY offer the rig stands behind in the
+ * same three-hour block (advice.js blockOf), so a late-night offer is held to
+ * late-night offers. A block with fewer than TIER_MIN_N offers gets no
+ * threshold and its offers no tier. Ties at the threshold count as top, so a
+ * share can sit a little over 10%. */
+var TIER_MIN_N = MIN_N;
+// Values before a P75 or P90 gets a bootstrap interval: the ranking's floor.
+var Q_CI_MIN_N = MIN_N;
+// A take "while waiting there": its Took within the spell or this soon after
+// it ends (a spell is cut at the Took; the car may roll off a little first).
+var TAKE_SLACK_MS = 2 * 60000;
+// Dead miles: the next Took within this many minutes of the put-down, else
+// the driver stopped, and the miles are not counted (censored).
+var DEAD_MAX_MIN = 90;
+// A press's stop: the car within STOP_M of the stop's first fix for STOP_MIN_S.
+var STOP_M = 100;
+var STOP_MIN_S = 60;
+var PRESS_AFTER_MIN = 10;
+var PRESS_BEFORE_MIN = 5;
+// Offer size by card miles: [from, below, label].
+var SIZE_BANDS = [[0, 4, 'short, under 4 mi'], [4, 8, 'medium, 4–8 mi'], [8, 12, 'long, 8–12 mi'],
+                  [12, Infinity, '12 mi and over']];
+
+// The q-th quantile, linear between order statistics (R's type 7).
+function quantile(xs, q) {
+  var v = xs.slice().sort(function (a, b) { return a - b; });
+  if (!v.length) return null;
+  var h = (v.length - 1) * q, lo = Math.floor(h);
+  return v[lo] + (h - lo) * ((v[lo + 1] === undefined ? v[lo] : v[lo + 1]) - v[lo]);
+}
+// The same quantile, of a resample that may be reordered in place (the
+// bootstrap's own buffer): two selections, not a sort.
+function selectK(a, k) {
+  var lo = 0, hi = a.length - 1;
+  while (lo < hi) {
+    var pv = a[(lo + hi) >> 1], i = lo, j = hi;
+    while (i <= j) {
+      while (a[i] < pv) i++;
+      while (a[j] > pv) j--;
+      if (i <= j) { var t = a[i]; a[i] = a[j]; a[j] = t; i++; j--; }
+    }
+    if (k <= j) hi = j; else if (k >= i) lo = i; else return a[k];
+  }
+  return a[k];
+}
+function qOf(q) {
+  return function (xs) {
+    var h = (xs.length - 1) * q, lo = Math.floor(h), a = selectK(xs, lo);
+    if (h === lo) return a;
+    var b = Infinity;
+    for (var i = lo + 1; i < xs.length; i++) if (xs[i] < b) b = xs[i];
+    return a + (h - lo) * (b - a);
+  };
+}
+
+/* A 95% interval for the q-th quantile: the percentile bootstrap (BOOTS
+ * resamples, seeded) under Q_BOOT_MAX values; at or over it, where a
+ * thousand sorts of thousands of values are slow and the bootstrap and the
+ * distribution-free interval agree, the order statistics at ranks
+ * n*q -/+ 1.96 * sqrt(n*q*(1-q)) (the binomial interval for a quantile). */
+var Q_BOOT_MAX = 1000;
+function qCI(vals, q, seed) {
+  if (vals.length < Q_CI_MIN_N) return null;
+  if (vals.length < Q_BOOT_MAX) return bootCI(vals, seedOf(seed), BOOTS, qOf(q));
+  var v = vals.slice().sort(function (a, b) { return a - b; }), n = v.length;
+  var half = 1.96 * Math.sqrt(n * q * (1 - q));
+  return [round2(v[Math.max(0, Math.floor(n * q - half) - 1)]), round2(v[Math.min(n - 1, Math.ceil(n * q + half) - 1)])];
+}
+function mean(xs) { return xs.length ? xs.reduce(function (s, x) { return s + x; }, 0) / xs.length : null; }
+
+/* Thresholds per block off every counted offer: { th: {block: {n, p75, p90}},
+ * of(o) -> {top25, top10} | null }. */
+function tiersOf(offers) {
+  var pool = (offers || []).filter(counted);
+  var by = groupBy(pool, function (o) { return String(stratum(o)); });
+  var th = Object.create(null);
+  Object.keys(by).forEach(function (b) {
+    var v = by[b].map(function (o) { return o.perHour; });
+    if (v.length >= TIER_MIN_N) th[b] = { n: v.length, p75: round2(quantile(v, 0.75)), p90: round2(quantile(v, 0.9)) };
+  });
+  var memo = new Map();
+  pool.forEach(function (o) {
+    var t = th[String(stratum(o))];
+    memo.set(o, t ? { top25: o.perHour >= t.p75, top10: o.perHour >= t.p90 } : null);
+  });
+  return { th: th, of: function (o) { return memo.get(o) || null; } };
+}
+
+/* P75 and P90 $/hr of a list, with intervals at Q_CI_MIN_N, and its shares
+ * of top-25% and top-10% offers over the offers that have a tier. */
+function topOf(list, tierOf, seed, noCi) {
+  var vals = list.filter(function (o) { return typeof o.perHour === 'number' && isFinite(o.perHour); })
+    .map(function (o) { return o.perHour; });
+  var t = tierOf ? list.map(tierOf).filter(Boolean) : [];
+  return { p75: vals.length ? round2(quantile(vals, 0.75)) : null, p90: vals.length ? round2(quantile(vals, 0.9)) : null,
+           // Only the P90's interval is drawn; the P75's is not worked out.
+           p75Ci: null, p90Ci: noCi ? null : qCI(vals, 0.9, 'q90' + seed),
+           tiered: t.length,
+           top25: share(t.filter(function (x) { return x.top25; }).length, t.length),
+           top10: share(t.filter(function (x) { return x.top10; }).length, t.length),
+           top10N: t.filter(function (x) { return x.top10; }).length };
+}
+
+/* TIMING A PRESSED DROP FROM THE GPS. A Drop press ('drop', 'chooser') can
+ * come before the door or after it, so the first two passes left it out of
+ * real time. The GPS log says where the car stood still: a stop is
+ * stillRuns' (every fix within STOP_M of the stop's first, STOP_MIN_S or
+ * more, no fix gap over SPELL_GAP_S), and it must begin after the order's
+ * Took (a stop that began before it is the restaurant's or the car park's).
+ * The press belongs to the stop that CONTAINS it; else the first that starts
+ * within PRESS_AFTER_MIN after it (pressed on the way); else the last that
+ * ends within PRESS_BEFORE_MIN before it (pressed late). The real end is
+ * that stop's END — the car leaving the door. No such stop: still left out.
+ * All four figures CHOSEN, NOT MEASURED: 100 m is a kerb and a front door
+ * past a ±25 m fix, a minute is longer than a light, ten minutes is a long
+ * last mile, five a slow press after. The run is labelled
+ * `by: 'drop (gps-timed)'`, its press kept as `pressedAt` / `pressedBy`. */
+function timePresses(taken, fixes) {
+  var stops = stillRuns(fixes || [], STOP_M, STOP_MIN_S, SPELL_GAP_S);
+  var stats = { pressed: 0, timed: 0, inside: 0, early: 0, late: 0, none: 0 };
+  var out = (taken || []).map(function (t) {
+    if (!t || (t.by !== 'drop' && t.by !== 'chooser') || typeof t.endedAt !== 'number') return t;
+    stats.pressed += 1;
+    var p = t.endedAt, took = typeof t.tookAt === 'number' ? t.tookAt : -Infinity;
+    var ok = stops.filter(function (s) { return s.from > took; });
+    var hit = null, how = null, i;
+    for (i = 0; i < ok.length && !hit; i++) if (ok[i].from <= p && p <= ok[i].to) { hit = ok[i]; how = 'inside'; }
+    for (i = 0; i < ok.length && !hit; i++) {
+      if (ok[i].from > p && ok[i].from <= p + PRESS_AFTER_MIN * 60000) { hit = ok[i]; how = 'early'; }
+    }
+    for (i = ok.length - 1; i >= 0 && !hit; i--) {
+      if (ok[i].to < p && ok[i].to >= p - PRESS_BEFORE_MIN * 60000) { hit = ok[i]; how = 'late'; }
+    }
+    if (!hit) { stats.none += 1; return t; }
+    stats.timed += 1;
+    stats[how] += 1;
+    return Object.assign({}, t, { by: GPS_TIMED, pressedBy: t.by, pressedAt: p, endedAt: hit.to, timedHow: how });
+  });
+  return { taken: out, stats: stats };
+}
+
+/* DOES TOP-TIER SHARE DIFFER BY AREA, BEYOND CHANCE? Groups over the
+ * ranking's floor (MIN_N offers with a tier, MIN_OUTINGS shift days). The
+ * statistic is sum over groups of (O - E)^2 / n: O a group's top-10% offers,
+ * E what the pooled share of its own blocks predicts for its offers. The
+ * shuffle permutes the top-10% marks WITHIN each block (SHUFFLES times,
+ * seeded), so every group keeps its hours and E stays put — the hour held,
+ * as Advice.areas' strata hold it. Each group's score is the mean, over its
+ * offers, of (top 10% ? 1 : 0) less the top-10% share of the OTHER ranked
+ * groups in that offer's block (Advice's `matched`, for a share), with a 95%
+ * bootstrap interval; colour only where the test beats chance AND the
+ * interval is clear of zero. All hours only. */
+function shareTest(rows, key, tierOf, opts) {
+  opts = opts || {};
+  var floor = typeof opts.minN === 'number' ? opts.minN : MIN_N;
+  var shuffles = opts.shuffles || SHUFFLES;
+  var pool = (rows || []).filter(function (o) { return counted(o) && key(o) && tierOf(o); });
+  var by = groupBy(pool, key);
+  var names = Object.keys(by).filter(function (k) {
+    return by[k].length >= floor && A.outingsIn(by[k]) >= MIN_OUTINGS;
+  }).sort();
+  var thin = Object.keys(by).filter(function (k) { return names.indexOf(k) < 0; }).map(function (k) {
+    return { name: k, n: by[k].length, outings: A.outingsIn(by[k]) };
+  }).sort(function (a, b) { return b.n - a.n; });
+  var items = [];
+  names.forEach(function (k, gi) {
+    by[k].forEach(function (o) { items.push({ g: gi, b: String(stratum(o)), y: tierOf(o).top10 ? 1 : 0 }); });
+  });
+  var G = names.length, ys = items.map(function (it) { return it.y; });
+  var blocks = groupBy(items.map(function (it, i) { return { i: i, b: it.b }; }), function (x) { return x.b; });
+  var rate = Object.create(null);
+  Object.keys(blocks).forEach(function (b) {
+    rate[b] = mean(blocks[b].map(function (x) { return ys[x.i]; }));
+  });
+  var E = new Array(G).fill(0), nG = new Array(G).fill(0);
+  items.forEach(function (it) { E[it.g] += rate[it.b]; nG[it.g] += 1; });
+  function stat(y) {
+    var O = new Array(G).fill(0);
+    for (var i = 0; i < items.length; i++) O[items[i].g] += y[i];
+    var s2 = 0;
+    for (var g = 0; g < G; g++) s2 += (O[g] - E[g]) * (O[g] - E[g]) / Math.max(1, nG[g]);
+    return s2;
+  }
+  var p = null;
+  var total = ys.reduce(function (a, b) { return a + b; }, 0);
+  if (G >= 2 && total > 0 && total < ys.length) {
+    var obs = stat(ys), r = rng(seedOf('share' + names.join('|'))), y = ys.slice(), hits = 0;
+    var idx = Object.keys(blocks).map(function (b) { return blocks[b].map(function (x) { return x.i; }); });
+    for (var s = 0; s < shuffles; s++) {
+      idx.forEach(function (list) {
+        for (var i = list.length - 1; i > 0; i--) {
+          var j = Math.floor(r() * (i + 1)), a = list[i], c = list[j], tmp = y[a];
+          y[a] = y[c]; y[c] = tmp;
+        }
+      });
+      if (stat(y) >= obs - 1e-12) hits += 1;
+    }
+    p = Math.round(hits / shuffles * 10000) / 10000;
+  }
+  var significant = p !== null && p < ALPHA;
+  // Each offer against the OTHER groups' share in its block.
+  var inB = Object.create(null);
+  items.forEach(function (it) {
+    var c = inB[it.b] || (inB[it.b] = { k: new Array(G).fill(0), n: new Array(G).fill(0), K: 0, N: 0 });
+    c.k[it.g] += it.y; c.n[it.g] += 1; c.K += it.y; c.N += 1;
+  });
+  var groups = names.map(function (k, gi) {
+    var d = [];
+    items.forEach(function (it) {
+      if (it.g !== gi) return;
+      var c = inB[it.b], N = c.N - c.n[gi];
+      if (N > 0) d.push(it.y - (c.K - c.k[gi]) / N);
+    });
+    var top = topOf(by[k], tierOf, k, true);
+    var sci = bootCI(d, seedOf('sh' + k), BOOTS, mean);
+    var score = d.length ? round2(mean(d)) : null;
+    var clear = sci ? (sci[0] > 0 ? 'above' : sci[1] < 0 ? 'below' : null) : null;
+    return { name: k, n: by[k].length, outings: A.outingsIn(by[k]), top10: top.top10, top10N: top.top10N,
+             top25: top.top25, expect: score === null ? null : round2(top.top10 - score), score: score, sci: sci,
+             clear: clear, beats: !!(significant && clear) };
+  }).sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
+  return { p: p, significant: significant, groups: groups, thin: thin, floor: floor, outings: MIN_OUTINGS,
+           kept: items.length };
+}
+
+/* (a) Good offers by area: the rig's take (`go`) and the two top tiers,
+ * counts and shares, beside the median, P75 and P90 $/hr. Areas with
+ * DESC_MIN_N offers; the first row is every area together. */
+function goodTable(rows, key, label, what, tierOf) {
+  var pool = rows.filter(counted);
+  var by = groupBy(pool, key);
+  function row(name, list, seed) {
+    var top = topOf(list, tierOf, seed);
+    var go = list.filter(function (o) { return o.state === 'go'; }).length;
+    var said = list.filter(function (o) { return typeof o.state === 'string' && o.state; }).length;
+    return { name: name, n: list.length, go: go, goShare: share(go, said), tiered: top.tiered,
+             top25: top.top25, top10N: top.top10N, top10: top.top10,
+             top10Ci: wilson(top.top10N, top.tiered),
+             median: med(list.map(function (o) { return o.perHour; })), p75: top.p75, p90: top.p90, p90Ci: top.p90Ci };
+  }
+  var out = Object.keys(by).filter(function (k) { return by[k].length >= DESC_MIN_N; })
+    .map(function (k) { return row(label(k), by[k], 'g' + k); })
+    .sort(function (a, b) { return (b.top10 || 0) - (a.top10 || 0) || b.n - a.n; });
+  if (pool.length) out.unshift(row('every ' + what, pool, 'g*' + what));
+  return { cols: [C('name', what, 't'), C('n', 'offers', 'n'), C('go', 'rig said take', 'n'), C('goShare', 'take share', '%'),
+                  C('top25', 'top 25%', '%'), C('top10N', 'top 10% n', 'n'), C('top10', 'top 10%', '%'),
+                  C('top10Ci', '95%', '%ci'), C('median', 'median $/hr', '$'), C('p75', 'P75 $/hr', '$'),
+                  C('p90', 'P90 $/hr', '$'), C('p90Ci', '95%', '$ci')], rows: out };
+}
+
+/* (a) per hour of waiting and (b) the expected $/hr of working an area, off
+ * the GPS spells (spellsOf), by area and three-hour block. Each spell carries
+ * the offers counted while it lasted (their tiers), and the takes made while
+ * waiting there (a Took inside it or TAKE_SLACK_MS after). Expected $/hr =
+ * the pay of those takes ÷ (hours waited there + those takes' real hours),
+ * over the takes with a real time only (realOf); a take with none is counted
+ * and left out of both sides, so the figure reads low where they are many.
+ * The counterfactual — every top-10% offer seen while waiting there, taken,
+ * at its card's minutes — is OFFERED, NOT EARNED: it ignores that taking one
+ * ends the wait, and the card's minutes are the app's. Floors: SPELL_MIN_N
+ * spells on MIN_OUTINGS shift days, else the row gives its n only. */
+function waitTable(spells, keyName, label, what) {
+  var by = groupBy(spells.filter(function (s) { return s[keyName]; }),
+                   function (s) { return s[keyName] + '\u0000' + A.blockOf(s.from); });
+  var out = Object.keys(by).map(function (k) {
+    var list = by[k], parts = k.split('\u0000');
+    var days = Object.create(null);
+    list.forEach(function (s) { days[outingOf(s.from)] = true; });
+    var hours = list.reduce(function (sum, s) { return sum + (s.to - s.from) / 3.6e6; }, 0);
+    function sum(f) { return list.reduce(function (a, s) { return a + f(s); }, 0); }
+    var ok = list.length >= SPELL_MIN_N && Object.keys(days).length >= MIN_OUTINGS && hours > 0;
+    var trips = [].concat.apply([], list.map(function (s) { return s.takes || []; }));
+    var timed = trips.filter(function (t) { return t.mins !== null && typeof t.pay === 'number'; });
+    var tripH = timed.reduce(function (a, t) { return a + t.mins / 60; }, 0);
+    var pay = timed.reduce(function (a, t) { return a + t.pay; }, 0);
+    var tPay = sum(function (s) { return s.top10Pay || 0; }), tMin = sum(function (s) { return s.top10Min || 0; });
+    return { name: label(parts[0]), block: A.BLOCK_NAMES[Number(parts[1])], blockN: Number(parts[1]),
+             n: list.length, days: Object.keys(days).length, hours: Math.round(hours * 10) / 10,
+             goPerHour: ok ? round2(sum(function (s) { return s.goN || 0; }) / hours) : null,
+             top25PerHour: ok ? round2(sum(function (s) { return s.top25N || 0; }) / hours) : null,
+             top10PerHour: ok ? round2(sum(function (s) { return s.top10N || 0; }) / hours) : null,
+             trips: trips.length, timed: timed.length,
+             expected: ok ? round2(pay / (hours + tripH)) : null,
+             ifTop10: ok && sum(function (s) { return s.top10N || 0; }) ? round2(tPay / (hours + tMin / 60)) : null };
+  }).sort(function (a, b) { return (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || a.blockN - b.blockN; });
+  out.forEach(function (r) { delete r.blockN; });
+  return { cols: [C('name', what, 't'), C('block', 'hours', 't'), C('n', 'spells', 'n'), C('days', 'days', 'n'),
+                  C('hours', 'hours waited', 'h'), C('goPerHour', 'takes said / hr waiting', 'r2'),
+                  C('top25PerHour', 'top 25% / hr waiting', 'r2'), C('top10PerHour', 'top 10% / hr waiting', 'r2'),
+                  C('trips', 'taken while there', 'n'), C('timed', 'of them timed', 'n'),
+                  C('expected', 'expected $/hr working it', '$'),
+                  C('ifTop10', 'if every top 10% taken (offered, card min)', '$')], rows: out };
+}
+
+/* (c) Dead miles after a drop: from each put-down at the door to the next
+ * Took (any order), the GPS log's miles — the straight lines between its
+ * fixes, one each SPELL_THIN_S, so a little under the road — plus that next
+ * card's own printed drive to the pickup (Uber's `toPickupMiles`) where it
+ * printed one. Censored (not counted): no next Took within DEAD_MAX_MIN, or
+ * the log with a gap over SPELL_GAP_S in between (the rig off). The unpaid
+ * share is the area's dead miles ÷ (dead + the delivered trips' card miles),
+ * sums over its measured trips. By the dropoff's town and 2-mile cell,
+ * counts only; DROP_MIN_N trips for a row, and a thinner cell is not named. */
+function deadOf(trips, taken, byId, fixes) {
+  var tooks = (taken || []).filter(function (t) { return t && typeof t.tookAt === 'number'; })
+    .sort(function (a, b) { return a.tookAt - b.tookAt; });
+  var ts = (fixes || []).map(function (f) { return f[0] * 1000; });
+  function firstAt(ms) { var lo = 0, hi = ts.length; while (lo < hi) { var m = (lo + hi) >> 1; if (ts[m] < ms) lo = m + 1; else hi = m; } return lo; }
+  trips.forEach(function (tr) {
+    var next = tooks.filter(function (t) { return t.tookAt > tr.at; })[0];
+    if (!next || next.tookAt - tr.at > DEAD_MAX_MIN * 60000) { tr.dead = { censored: true }; return; }
+    var i = firstAt(tr.at), j = firstAt(next.tookAt + 1) - 1;
+    if (j - i < 1 || ts[i] - tr.at > SPELL_GAP_S * 1000 || next.tookAt - ts[j] > SPELL_GAP_S * 1000) {
+      tr.dead = { censored: true }; return;
+    }
+    var mi = 0;
+    for (var k = i + 1; k <= j; k++) {
+      if (ts[k] - ts[k - 1] > SPELL_GAP_S * 1000) { tr.dead = { censored: true }; return; }
+      mi += MV.crowMiles({ lat: fixes[k - 1][1], lon: fixes[k - 1][2] }, { lat: fixes[k][1], lon: fixes[k][2] });
+    }
+    var nx = byId[next.id];
+    var tp = nx && typeof nx.toPickupMiles === 'number' && isFinite(nx.toPickupMiles) ? nx.toPickupMiles : null;
+    tr.dead = { censored: false, gpsMi: mi, toPickupMi: tp, deadMi: mi + (tp || 0),
+                paidMi: tr.offer && typeof tr.offer.miles === 'number' ? tr.offer.miles : null };
+  });
+}
+
+function deadTable(trips, keyName, label, what) {
+  var by = groupBy(trips.filter(function (t) { return t[keyName] && t.dead; }), function (t) { return t[keyName]; });
+  var thinCount = 0, thinTrips = 0;
+  var out = Object.keys(by).map(function (k) {
+    var list = by[k], got = list.filter(function (t) { return !t.dead.censored; });
+    if (got.length < DROP_MIN_N) {
+      if (keyName === 'cell') { thinCount += 1; thinTrips += list.length; return null; }
+      return { name: label(k), trips: list.length, measured: got.length, gpsMi: null, toPickup: null, toPickupN: null,
+               deadMi: null, unpaid: null };
+    }
+    var tp = got.filter(function (t) { return t.dead.toPickupMi !== null; }).map(function (t) { return t.dead.toPickupMi; });
+    var paid = got.filter(function (t) { return t.dead.paidMi !== null; });
+    var dSum = paid.reduce(function (a, t) { return a + t.dead.deadMi; }, 0);
+    var pSum = paid.reduce(function (a, t) { return a + t.dead.paidMi; }, 0);
+    var gm = got.map(function (t) { return t.dead.gpsMi; });
+    return { name: label(k), trips: list.length, measured: got.length, gpsMi: med(gm), gpsCi: medCi(gm, 'dd' + k),
+             toPickup: tp.length ? med(tp) : null, toPickupN: tp.length,
+             deadMi: med(got.map(function (t) { return t.dead.deadMi; })),
+             unpaid: dSum + pSum > 0 ? round2(dSum / (dSum + pSum)) : null };
+  }).filter(Boolean).sort(function (a, b) { return b.trips - a.trips; });
+  return { cols: [C('name', what, 't'), C('trips', 'trips', 'n'), C('measured', 'measured', 'n'),
+                  C('gpsMi', 'GPS mi to next Took', 'mi'), C('gpsCi', '95%', 'mici'),
+                  C('toPickup', 'next card\'s to-pickup mi', 'mi'), C('toPickupN', 'printed', 'n'),
+                  C('deadMi', 'dead mi', 'mi'), C('unpaid', 'unpaid share', '%')], rows: out,
+           thinCount: thinCount, thinTrips: thinTrips };
+}
+
+/* (d) Offer size, by card miles (SIZE_BANDS), per area: n, median and P90
+ * $/hr, top-10% share, median $/mi (read only). A median needs DESC_MIN_N. */
+function sizeTable(rows, key, label, what, tierOf) {
+  var pool = rows.filter(function (o) { return counted(o) && typeof o.miles === 'number' && o.miles > 0; });
+  var by = groupBy(pool, key);
+  var out = [];
+  function add(name, list, seed) {
+    SIZE_BANDS.forEach(function (b) {
+      var l = list.filter(function (o) { return o.miles >= b[0] && o.miles < b[1]; });
+      if (!l.length) return;
+      var ok = l.length >= DESC_MIN_N, top = topOf(l, tierOf, seed + b[2], true);
+      out.push({ name: name, band: b[2], n: l.length, median: ok ? med(l.map(function (o) { return o.perHour; })) : null,
+                 p90: ok ? top.p90 : null, top10: ok ? top.top10 : null,
+                 ppm: ok ? med(l.map(payPerMile).filter(function (v) { return v !== null; })) : null });
+    });
+  }
+  if (pool.length) add('every ' + what, pool, 'z*');
+  Object.keys(by).filter(function (k) { return by[k].length >= DESC_MIN_N; })
+    .sort(function (a, b) { return by[b].length - by[a].length; })
+    .forEach(function (k) { add(label(k), by[k], 'z' + k); });
+  return { cols: [C('name', what, 't'), C('band', 'size', 't'), C('n', 'offers', 'n'), C('median', 'median $/hr', '$'),
+                  C('p90', 'P90 $/hr', '$'), C('top10', 'top 10%', '%'), C('ppm', 'median $/mi (read only)', '$')],
+           rows: out };
+}
+
+/* The Best offers tab's plain-language lines, off the report. */
+function bestLines(r) {
+  var out = [], b = r.best || {};
+  var th = Object.keys(b.thresholds || {}).sort(function (x, y) { return x - y; }).map(function (k) {
+    var t = b.thresholds[k];
+    return A.BLOCK_NAMES[Number(k)] + ': top 25% at $' + t.p75.toFixed(2) + '/hr, top 10% at $' + t.p90.toFixed(2)
+      + '/hr (' + t.n + ' offers)';
+  });
+  out.push(th.length ? 'What "top" means, from every offer in its own three hours — ' + th.join('; ') + '.'
+           : 'No three-hour block has the ' + TIER_MIN_N + ' offers a threshold needs.');
+  var all = r.views.all;
+  var every = all.best.goodTown.rows[0];
+  if (every) {
+    out.push('The rig said take to ' + every.go + ' of ' + every.n + ' offers (' + pct(every.go, every.n) + '); '
+             + every.top10N + ' were top 10% for their hours.');
+  }
+  var waits = all.best.waitTown.rows.filter(function (x) { return x.top10PerHour !== null; })
+    .sort(function (x, y) { return y.top10PerHour - x.top10PerHour; });
+  if (!r.spells.gps) {
+    out.push('No GPS spells, so nothing is "per hour of waiting" yet: no GPS log reached this report (--gps).');
+  } else if (!waits.length) {
+    out.push('No town has the ' + SPELL_MIN_N + ' spells on ' + MIN_OUTINGS + ' shift days a "per hour of waiting" '
+             + 'figure needs yet (' + r.spells.n + ' spells in all).');
+  } else {
+    waits.slice(0, 3).forEach(function (w) {
+      out.push('Waiting in ' + w.name + ' (' + w.block + '): ' + w.top10PerHour.toFixed(2) + ' top-10% offers and '
+               + w.goPerHour.toFixed(2) + ' the rig said take, an hour (' + w.n + ' spells, ' + w.hours
+               + ' h); working it paid ' + (w.expected === null ? '—' : '$' + w.expected.toFixed(2) + '/hr')
+               + ' over ' + w.timed + ' timed takes.');
+    });
+  }
+  [['town', 'Towns'], ['rest', 'Restaurants'], ['place', 'Places'], ['grid', r.gridMi + '-mile cells']].forEach(function (k) {
+    var t = b.share && b.share[k[0]];
+    if (!t) return;
+    if (t.p === null) { out.push(k[1] + ': top-10% share not tested (' + t.groups.length + ' over the floor).'); return; }
+    var beat = t.groups.filter(function (g) { return g.beats; });
+    out.push(k[1] + ': top-10% share ' + (t.significant ? 'differs beyond chance' : 'is not distinguishable from chance')
+             + ' (' + pText(t.p) + ', hours held).' + (beat.length ? ' ' + beat.map(function (g) {
+               return shareName(r, k[0], g.name) + ' ' + (g.clear === 'above' ? 'more' : 'fewer') + ' ('
+                 + Math.round(g.top10 * 100) + '% against ' + Math.round(g.expect * 100) + '% for the others in the same hours)';
+             }).join('; ') + '.' : ''));
+  });
+  return out;
+}
+
 /* --- the whole analysis, given placements --------------------------------
  *
  * `placed[i]` is offers[i]'s pickup answer { at, why, kind } (or undefined
@@ -1194,23 +1842,30 @@ function analyse(offers, taken, placed, dropAt, opts) {
   var pins = [];
   offers.forEach(function (o, i) {
     var r = placed[i];
-    if (r && r.at) pins.push({ row: i, at: r.at, label: storeLabel(o.pickup) });
+    if (r && r.at) pins.push({ row: i, at: r.at, label: storeLabel(o.pickup), level: r.level, spread: r.spread || 0 });
   });
   var grouped = placesOf(pins);
   var cellBoxes = Object.create(null);
   function placeKey(o) { return grouped.byRow[idx.get(o)] || null; }
   function cellKey(o) {
     var r = answer(o);
-    var c = r.at ? cellOf(r.at) : null;
+    var c = gridOk(r) ? cellOf(r.at) : null;
     if (c) cellBoxes[c.id] = c;
     return c ? c.id : null;
   }
   function townKey(o) { return MV.townFor(o, A.area); }
   var names = restaurantNames(offers);
   function restKey(o) { return names.of(o); }
+  function appKey(o) { return appOf(o); }
+  var tiers = tiersOf(offers);
+  var tierOf = tiers.of;
 
   var trips = tripsOf(offers, taken, dropAt);
   var runs = runsOf(taken);
+  var byIdAll = Object.create(null);
+  offers.forEach(function (o) { if (o && typeof o.id === 'string') byIdAll[o.id] = o; });
+  if (opts.fixes) deadOf(trips, taken, byIdAll, opts.fixes);
+  var tookRuns = (taken || []).filter(function (t) { return t && typeof t.tookAt === 'number'; });
   // Spells parked with no order in the car (main reads them off the GPS
   // log): each to its 2-mile cell and, where the NucBox named one, the town
   // of that cell's centre; with the offers counted while there and the
@@ -1221,9 +1876,18 @@ function analyse(offers, taken, placed, dropAt, opts) {
     if (c) cellBoxes[c.id] = c;
     var during = line.filter(function (t) { return t.at >= sp.from && t.at <= sp.to; });
     var go = during.filter(function (t) { return t.go; })[0];
+    var tops = during.map(function (t) { return { t: tierOf(t.o), o: t.o }; }).filter(function (x) { return x.t; });
+    var t10 = tops.filter(function (x) { return x.t.top10; });
+    var takes = tookRuns.filter(function (t) { return t.tookAt >= sp.from && t.tookAt <= sp.to + TAKE_SLACK_MS; })
+      .map(function (t) { var rr = realOf(t); return { pay: t.pay, mins: rr ? rr.mins : null }; });
     return { from: sp.from, to: sp.to, cell: c ? c.id : null,
              town: c && opts.cellTown ? opts.cellTown[c.id] || null : null,
-             seen: during.length, go: go ? (go.at - sp.from) / 60000 : null };
+             seen: during.length, go: go ? (go.at - sp.from) / 60000 : null,
+             goN: during.filter(function (t) { return t.go; }).length,
+             top25N: tops.filter(function (x) { return x.t.top25; }).length, top10N: t10.length,
+             top10Pay: t10.reduce(function (a, x) { return a + (typeof x.o.pay === 'number' ? x.o.pay : 0); }, 0),
+             top10Min: t10.reduce(function (a, x) { return a + (typeof x.o.minutes === 'number' ? x.o.minutes : 0); }, 0),
+             takes: takes };
   });
   function placeLabel(k) { return (grouped.places[k] && grouped.places[k].label) || k; }
   function cellLabel(k) {
@@ -1240,15 +1904,15 @@ function analyse(offers, taken, placed, dropAt, opts) {
     views[v] = {
       name: v === 'all' ? 'all hours' : A.BLOCK_NAMES[v],
       offers: rows.filter(counted).length,
-      place: cells(rows, placeKey, { hold: hold, minN: opts.minN, keepDiffs: hold }),
-      town: cells(rows, townKey, { hold: hold, minN: opts.minN, keepDiffs: hold }),
-      grid: cells(rows, cellKey, { hold: hold, minN: opts.minN }),
+      place: cells(rows, placeKey, { hold: hold, minN: opts.minN, keepDiffs: hold, tierOf: tierOf }),
+      town: cells(rows, townKey, { hold: hold, minN: opts.minN, keepDiffs: hold, tierOf: tierOf }),
+      grid: cells(rows, cellKey, { hold: hold, minN: opts.minN, tierOf: tierOf }),
       dropTown: dropTable(tv, 'town', hold),
       dropGrid: dropTable(tv, 'cell', hold),
     };
     views[v].rest = restaurantsTable(rows, { key: restKey, placeKey: placeKey, places: grouped.places,
                                              names: names, runs: runs, waits: opts.waits, hold: hold,
-                                             minN: opts.minN, placeCells: views[v].place });
+                                             minN: opts.minN, placeCells: views[v].place, tierOf: tierOf });
     if (hold) {
       diffs = { place: views[v].place.diffs, town: views[v].town.diffs };
       delete views[v].place.diffs;
@@ -1258,6 +1922,14 @@ function analyse(offers, taken, placed, dropAt, opts) {
   // A dropoff cell is named only where the all-hours table names it.
   var namedCells = Object.create(null);
   views.all.dropGrid.groups.forEach(function (g) { namedCells[g.name] = g.box || cellBoxes[g.name] || null; });
+  var dropBoxes = Object.create(null);
+  trips.forEach(function (t) { if (t.cell && t.cellBox) dropBoxes[t.cell] = t.cellBox; });
+  // A dropoff cell is named in the dead-miles table only over its floor
+  // (deadTable drops the thinner ones), by its 2-mile cell's centre.
+  function deadCellName(k) {
+    var c = dropBoxes[k];
+    return c ? 'cell near ' + c.lat.toFixed(3) + ', ' + c.lon.toFixed(3) : 'a cell';
+  }
   function dropCellName(k) {
     var c = namedCells[k];
     return c ? 'cell near ' + c.lat.toFixed(3) + ', ' + c.lon.toFixed(3) : 'a cell';
@@ -1282,7 +1954,26 @@ function analyse(offers, taken, placed, dropAt, opts) {
       ppmGrid: ppmTable(rows, cellKey, cellLabel, 'cell'),
       stack: stackTable(rows, placeKey, placeLabel),
     };
+    function restLabel(k) { return names.labels[k] || k; }
+    views[v].best = {
+      goodTown: goodTable(rows, townKey, same, 'town', tierOf),
+      goodGrid: goodTable(rows, cellKey, cellLabel, 'cell', tierOf),
+      goodRest: goodTable(rows, restKey, restLabel, 'restaurant', tierOf),
+      goodApp: goodTable(rows, appKey, same, 'app', tierOf),
+      waitTown: waitTable(sv, 'town', same, 'town'),
+      waitGrid: waitTable(sv, 'cell', cellLabel, 'cell'),
+      deadTown: deadTable(tv, 'town', same, 'dropoff town'),
+      deadGrid: deadTable(tv, 'cell', deadCellName, 'dropoff cell'),
+      sizeTown: sizeTable(rows, townKey, same, 'town', tierOf),
+      sizeApp: sizeTable(rows, appKey, same, 'app', tierOf),
+      sizeRest: sizeTable(rows, restKey, restLabel, 'restaurant', tierOf),
+    };
   });
+  // Top-tier share, all hours, hours held (shareTest).
+  var shareTests = { town: shareTest(offers, townKey, tierOf, { minN: opts.minN }),
+                     rest: shareTest(offers, restKey, tierOf, { minN: opts.minN }),
+                     place: shareTest(offers, placeKey, tierOf, { minN: opts.minN }),
+                     grid: shareTest(offers, cellKey, tierOf, { minN: opts.minN }) };
   var quiet = { place: quietTable(offers, placeKey, placeLabel, diffs.place, 'place'),
                 town: quietTable(offers, townKey, same, diffs.town, 'town') };
   var trend = { place: trendTable(diffs.place, placeLabel, 'place'),
@@ -1309,12 +2000,23 @@ function analyse(offers, taken, placed, dropAt, opts) {
     quiet: quiet, trend: trend,
     takes: { taken: (taken || []).length, onCounted: offers.filter(function (o) { return counted(o) && runs[o.id]; }).length,
              timed: (taken || []).filter(function (t) { return realOf(t); }).length,
-             pressed: (taken || []).filter(function (t) { return t && (t.by === 'drop' || t.by === 'chooser'); }).length },
+             gpsTimed: (taken || []).filter(function (t) { return t && t.by === GPS_TIMED; }).length,
+             pressed: (taken || []).filter(function (t) {
+               return t && (t.by === 'drop' || t.by === 'chooser' || t.by === GPS_TIMED);
+             }).length },
     spells: { n: spells.length, hours: Math.round(spells.reduce(function (s2, sp) { return s2 + (sp.to - sp.from); }, 0) / 3.6e5) / 10,
               towns: spells.filter(function (sp) { return sp.town; }).length, gps: !!opts.spells },
-    waitsOnRecord: (opts.waits || []).length,
+    waitsOnRecord: (opts.waits || []).length, waitsFrom: opts.waitsFrom || null,
     descMinN: DESC_MIN_N, realMedN: REAL_MED_N, quietDays: QUIET_DAYS, spellM: SPELL_M,
     spellMinS: SPELL_MIN_S, spellGapS: SPELL_GAP_S, spellMinN: SPELL_MIN_N,
+    best: { thresholds: tiers.th, share: shareTests, tierMinN: TIER_MIN_N, spellMinN: SPELL_MIN_N,
+            takeSlackMin: TAKE_SLACK_MS / 60000, deadMaxMin: DEAD_MAX_MIN,
+            dead: { gps: !!opts.fixes, n: trips.filter(function (t) { return t.dead && !t.dead.censored; }).length },
+            presses: opts.presses || null, stopM: STOP_M, stopMinS: STOP_MIN_S, pressAfterMin: PRESS_AFTER_MIN,
+            pressBeforeMin: PRESS_BEFORE_MIN, placeApproxMi: PLACE_APPROX_MI, areaMi: MV.AREA_MI,
+            region: opts.region ? { box: opts.region.box, fixes: opts.region.fixes, marginMi: opts.region.marginMi,
+                                    miles: opts.region.disc.miles } : null,
+            streets: opts.streetsSaid || null, road: opts.roadSaid || null },
     places: grouped.places,
     restNames: names.labels,
     cells: cellBoxes,
@@ -1349,6 +2051,11 @@ function summary(r) {
               + ' of ' + r.source.total + ' — use --since)' : ''));
   out.push('Pickups placed: ' + cv.all.placed.n + ' of ' + (cv.all.placed.n + cv.all.unplaced.n)
            + ' (' + pct(cv.all.placed.n, cv.all.placed.n + cv.all.unplaced.n) + ')');
+  (cv.levels || []).forEach(function (l) {
+    out.push('  placed at ' + l.level + ' level' + (l.point ? '' : ' (approximate)') + ': ' + l.n
+             + (l.region ? ' (' + l.region + ' in the region box, no fix)' : '')
+             + (l.refused ? '  [stood in for: ' + l.refused + ']' : ''));
+  });
   cv.why.forEach(function (w) { out.push('  unplaced, ' + w.why + ': ' + w.n); });
   if (cv.all.gapPerHour !== null) {
     out.push('Placed pay $' + cv.all.placed.perHour.toFixed(2) + '/hr, unplaced $'
@@ -1356,6 +2063,31 @@ function summary(r) {
              + (cv.all.gapPerHour >= 0 ? '$' + cv.all.gapPerHour.toFixed(2) + '/hr less'
                 : '$' + (-cv.all.gapPerHour).toFixed(2) + '/hr more')
              + ' (' + pText(cv.all.p) + ')');
+  }
+  if (cv.points && cv.points.gapPerHour !== null && cv.levels && cv.levels.some(function (l) { return !l.point; })) {
+    out.push('  points only (door, corner, name) against the unplaced: $' + cv.points.placed.perHour.toFixed(2) + '/hr vs $'
+             + cv.points.unplaced.perHour.toFixed(2) + '/hr (' + pText(cv.points.p) + ')');
+  }
+  if (r.best) {
+    var thr = Object.keys(r.best.thresholds).sort(function (a, b) { return a - b; });
+    out.push('Top-tier thresholds (every offer in its own 3-hour block; ' + TIER_MIN_N + ' offers for one):');
+    thr.forEach(function (k) {
+      var t = r.best.thresholds[k];
+      out.push('  ' + A.BLOCK_NAMES[Number(k)] + ': top 25% >= $' + t.p75.toFixed(2) + '/hr, top 10% >= $'
+               + t.p90.toFixed(2) + '/hr  (n=' + t.n + ')');
+    });
+    if (!thr.length) out.push('  none: no block has ' + TIER_MIN_N + ' offers');
+    [['town', 'Towns'], ['rest', 'Restaurants'], ['place', 'Places'], ['grid', r.gridMi + '-mile grid']].forEach(function (k) {
+      var t = r.best.share[k[0]];
+      out.push('Top-10% share, ' + k[1] + ': ' + (t.p === null ? 'not tested (' + t.groups.length + ' over the floor)'
+               : t.groups.length + ' groups, hours held, ' + pText(t.p) + ' — '
+                 + (t.significant ? 'beats chance' : 'NOT distinguishable from chance')));
+      t.groups.filter(function (g) { return g.beats; }).forEach(function (g) {
+        out.push('  ' + shareName(r, k[0], g.name) + '  ' + Math.round(g.top10 * 100) + '% top 10% vs '
+                 + Math.round(g.expect * 100) + '% for the others, same hours [' + (g.sci[0] * 100).toFixed(1) + ', '
+                 + (g.sci[1] * 100).toFixed(1) + ' points], n=' + g.n);
+      });
+    });
   }
   out.push(testLine('Places', all.place));
   if (all.rest) {
@@ -1368,8 +2100,9 @@ function summary(r) {
   out.push(testLine(r.gridMi + '-mile grid', all.grid));
   out.push(testLine('Wait after a drop, by town', all.dropTown));
   if (r.takes) {
-    out.push('Taken: ' + r.takes.taken + ' orders, ' + r.takes.timed + ' timed at the door (GPS or screen), '
-             + r.takes.pressed + ' put down by a press and not timed');
+    out.push('Taken: ' + r.takes.taken + ' orders, ' + r.takes.timed + ' timed at the door (GPS, screen, or a press '
+             + 'the GPS log timed), ' + r.takes.pressed + ' put down by a press: ' + r.takes.gpsTimed
+             + ' of them GPS-timed, ' + (r.takes.pressed - r.takes.gpsTimed) + ' not timed');
   }
   if (r.spells && r.spells.gps) out.push('Spells parked with no order in the car: ' + r.spells.n + ', ' + r.spells.hours + ' h');
   ['place', 'town'].forEach(function (k) {
@@ -1389,6 +2122,13 @@ function summary(r) {
     });
   });
   return out.join('\n');
+}
+
+// A group's name in the share lines: a place with where it is, as there
+// may be several branches of one name.
+function shareName(r, kind, name) {
+  var l = labelOf(r, kind, name), p = kind === 'place' ? r.places[name] : null;
+  return p ? l + ' near ' + p.lat.toFixed(3) + ', ' + p.lon.toFixed(3) : l;
 }
 
 function pct(n, of) { return of ? (Math.round(n / of * 1000) / 10).toFixed(1) + '%' : 'n/a'; }
@@ -1415,7 +2155,8 @@ function csvOf(r, kind) {
   var head = ['hours', kind === 'grid' ? 'cell' : kind, 'lat', 'lon', 'n', 'outings',
               'median_per_hour', 'median_lo', 'median_hi', 'score_vs_same_hours', 'score_lo',
               'score_hi', 'median_pay', 'share_rig_said_take', 'clear', 'beats_chance',
-              'grouping_p', 'ranked'];
+              'grouping_p', 'ranked', 'p75_per_hour', 'p90_per_hour', 'p90_lo', 'p90_hi', 'top25_share',
+              'top10_share'];
   var lines = [head.join(',')];
   VIEWS.forEach(function (v) {
     var c = r.views[v][kind];
@@ -1424,12 +2165,13 @@ function csvOf(r, kind) {
       lines.push([r.views[v].name, labelOf(r, kind, g.name), at && at.lat, at && at.lon, g.n,
                   g.outings, g.median, g.ci && g.ci[0], g.ci && g.ci[1], g.score,
                   g.sci && g.sci[0], g.sci && g.sci[1], g.pay, g.take, g.clear,
-                  g.beats ? 'yes' : 'no', c.p, 'yes'].map(csvCell).join(','));
+                  g.beats ? 'yes' : 'no', c.p, 'yes', g.p75, g.p90, g.p90Ci && g.p90Ci[0], g.p90Ci && g.p90Ci[1],
+                  g.top25, g.top10].map(csvCell).join(','));
     });
     c.thin.forEach(function (t) {
       var at = kind === 'place' ? r.places[t.name] : kind === 'grid' ? r.cells[t.name] : null;
       lines.push([r.views[v].name, labelOf(r, kind, t.name), at && at.lat, at && at.lon, t.n,
-                  t.outings, '', '', '', '', '', '', '', '', '', 'too few', c.p, 'no']
+                  t.outings, '', '', '', '', '', '', '', '', '', 'too few', c.p, 'no', '', '', '', '', '', '']
                  .map(csvCell).join(','));
     });
   });
@@ -1509,21 +2251,59 @@ var MORE_CSVS = {
   'quiet_towns.csv': [function (r) { return r.quiet.town; }, false],
   'trend_places.csv': [function (r) { return r.trend.place; }, false],
   'trend_towns.csv': [function (r) { return r.trend.town; }, false],
+  'good_towns.csv': [function (v) { return v.best.goodTown; }, true],
+  'good_grid.csv': [function (v) { return v.best.goodGrid; }, true],
+  'good_restaurants.csv': [function (v) { return v.best.goodRest; }, true],
+  'good_apps.csv': [function (v) { return v.best.goodApp; }, true],
+  'waiting_towns.csv': [function (v) { return v.best.waitTown; }, true],
+  'waiting_grid.csv': [function (v) { return v.best.waitGrid; }, true],
+  'dead_miles_towns.csv': [function (v) { return v.best.deadTown; }, true],
+  'dead_miles_grid.csv': [function (v) { return v.best.deadGrid; }, true],
+  'size_towns.csv': [function (v) { return v.best.sizeTown; }, true],
+  'size_apps.csv': [function (v) { return v.best.sizeApp; }, true],
+  'size_restaurants.csv': [function (v) { return v.best.sizeRest; }, true],
 };
+
+/* The top-10% share tests (all hours, hours held), one CSV, a line a group. */
+function shareCsv(r) {
+  var lines = ['grouping,name,ranked,n,outings,top10_share,top25_share,others_same_hours,score,score_lo,score_hi,clear,beats_chance,grouping_p'];
+  ['town', 'rest', 'place', 'grid'].forEach(function (k) {
+    var t = r.best.share[k];
+    t.groups.forEach(function (g) {
+      lines.push([k, shareName(r, k, g.name), 'yes', g.n, g.outings, g.top10, g.top25, g.expect, g.score,
+                  g.sci && g.sci[0], g.sci && g.sci[1], g.clear, g.beats ? 'yes' : 'no', t.p].map(csvCell).join(','));
+    });
+    t.thin.forEach(function (g) {
+      lines.push([k, shareName(r, k, g.name), 'too few', g.n, g.outings, '', '', '', '', '', '', '', '', t.p]
+        .map(csvCell).join(','));
+    });
+  });
+  return lines.join('\n') + '\n';
+}
+
+function levelsCsv(r) {
+  var lines = ['level,point,placed,median_per_hour,in_region_box,stood_in_for'];
+  (r.coverage.levels || []).forEach(function (l) {
+    lines.push([l.level, l.point ? 'yes' : 'no', l.n, l.perHour, l.region, l.refused].map(csvCell).join(','));
+  });
+  return lines.join('\n') + '\n';
+}
 
 /* The Restaurants tab as two CSVs: a line per restaurant per hours view, and
  * a line per placed branch (and the not-placed rest) per hours view. */
 var REST_COLS = ['n', 'outings', 'score', 'score_lo', 'score_hi', 'median_per_hour', 'median_lo', 'median_hi',
                  'median_pay', 'median_per_mile', 'taken', 'take_rate', 'take_lo', 'take_hi', 'timed_at_door',
                  'real_per_hour', 'real_lo', 'real_hi', 'real_minus_card_min', 'wait_min', 'waits', 'wait_not_joined',
-                 'addon_share', 'stacked_share', 'uber_n', 'uber_per_hour', 'doordash_n', 'doordash_per_hour'];
+                 'addon_share', 'stacked_share', 'uber_n', 'uber_per_hour', 'doordash_n', 'doordash_per_hour',
+                 'gps_timed', 'p75_per_hour', 'p90_per_hour', 'top10_share'];
 function restVals(g) {
   function lo(c) { return c ? c[0] : null; }
   function hi(c) { return c ? c[1] : null; }
   return [g.n, g.outings, g.score, lo(g.sci), hi(g.sci), g.median !== undefined ? g.median : g.perHour,
           lo(g.ci), hi(g.ci), g.pay, g.ppm, g.taken, g.take, lo(g.takeCi), hi(g.takeCi), g.timed,
           g.realPerHour, lo(g.realCi), hi(g.realCi), g.cardVsReal, g.wait, g.waitN, g.waitWhy,
-          g.addon, g.stacked, g.uberN, g.uberPerHour, g.doordashN, g.doordashPerHour];
+          g.addon, g.stacked, g.uberN, g.uberPerHour, g.doordashN, g.doordashPerHour, g.gpsTimed,
+          g.p75, g.p90, g.top10];
 }
 function restCsv(r) {
   var lines = [['hours', 'restaurant', 'ranked', 'chain', 'placed_offers', 'placed_branches'].concat(REST_COLS)
@@ -1618,7 +2398,13 @@ function html(r) {
     + '<nav class="tabs" id="tabs">' + TABS.map(function (t) {
       return '<button type="button" data-tab="' + t[0] + '">' + esc(t[1]) + '</button>';
     }).join('') + '</nav>\n'
-    + '<section data-tab="places"><h2>Places — a store at a location</h2><p class="note" id="placeTest"></p>'
+    + BEST_SECTION(r)
+    + '<section data-tab="places"><h2>Places — a store at a location</h2><p class="note">A place is a pin at door, '
+    + 'corner or name level, or an approximate placement where it is that store\'s: within ' + PLACE_SAME_MI
+    + ' mi of a door or name pin of the same store, or its own candidates no more than ' + r.best.placeApproxMi
+    + ' mi apart (see Coverage for every level). <b>P75 / P90</b> are the 75th and 90th percentiles of the '
+    + 'place\'s $/hr; <b>top 10%</b> is the share of its offers at or over the 90th percentile of every offer in '
+    + 'their own three hours. Click a heading to sort.</p><p class="note" id="placeTest"></p>'
     + '<div id="placePlot" class="plot"></div><div id="placeTable"></div><div id="placeThin" class="thin"></div></section>\n'
     + '<section data-tab="restaurants"><h2>Restaurants — by the name on the card, placed or not</h2>'
     + '<p class="note">One row per name, every branch together: the pickup\'s name as the card printed it (Uber\'s '
@@ -1644,7 +2430,9 @@ function html(r) {
     + 'then pickup, the rule the rig\'s map ranks towns by (map-view.js townFor). No geocoder.</p>'
     + '<p class="note" id="townTest"></p><div id="townPlot" class="plot"></div><div id="townTable"></div>'
     + '<div id="townThin" class="thin"></div></section>\n'
-    + '<section data-tab="grid"><h2>' + r.gridMi + '-mile grid — by the pickup\'s pin</h2><p class="note" id="gridTest"></p>'
+    + '<section data-tab="grid"><h2>' + r.gridMi + '-mile grid — by the pickup\'s pin</h2><p class="note">Every '
+    + 'placement level, an approximate one only where its candidates lie within ' + r.best.areaMi + ' mi of each '
+    + 'other (the rig\'s general area, half a cell).</p><p class="note" id="gridTest"></p>'
     + '<div id="gridPlot" class="plot"></div><div id="gridTable"></div><div id="gridThin" class="thin"></div></section>\n'
     + '<section data-tab="after"><h2>Where trips leave you</h2><p class="note">For each order you took and put down at the door: '
     + 'how long until the next offer the rig said <b>take</b>, and what it paid. Placed by the GPS log at the drop '
@@ -1657,6 +2445,10 @@ function html(r) {
     + MORE_SECTIONS(r)
     + '<section data-tab="coverage"><h2>Coverage, shift day by shift day</h2><p class="note">Pickups placed and not, and what each paid. '
     + 'A gap that keeps the same sign day after day is a bias in what the map can show, not a fact about places.</p>'
+    + '<h3>Placed, by level</h3><p class="note">door, corner and name are a point; band, area and street are '
+    + 'approximate (an area, with its spread). "Stood in for" is the refusal an approximate placement was found '
+    + 'beside. Street index: ' + esc(r.best.streets || 'none') + '. Router (for the band): '
+    + esc(r.best.road || 'none') + '.</p><div id="levels"></div>'
     + '<div id="coverage"></div></section>\n'
     + '<section data-tab="method" class="method"><h2>How this was measured</h2>' + METHOD(r) + '</section>\n'
     + '</main>\n<div id="tip" hidden></div>\n'
@@ -1666,7 +2458,7 @@ function html(r) {
 }
 
 // The page's tabs, in order: [id, label].
-var TABS = [['places', 'Places'], ['restaurants', 'Restaurants'], ['map', 'Map'], ['towns', 'Towns'], ['grid', 'Grid'],
+var TABS = [['best', 'Best offers'], ['places', 'Places'], ['restaurants', 'Restaurants'], ['map', 'Map'], ['towns', 'Towns'], ['grid', 'Grid'],
             ['after', 'After a drop'], ['takes', 'Your takes'], ['apps', 'Uber vs DoorDash'],
             ['ppm', '$/mi'], ['waits', 'Store waits'], ['strand', 'Strand risk'], ['busy', 'Busy'],
             ['stack', 'Add-ons'], ['quiet', 'Gone quiet'], ['trend', 'Trend'], ['coverage', 'Coverage'],
@@ -1687,8 +2479,10 @@ function MORE_SECTIONS(r) {
              + 'carrying its Took), ' + tk.taken + ' in the window, ' + tk.onCounted + ' on rows the rig stands behind. '
              + 'Take rate is taken over offered, with a Wilson 95% interval. <b>Real $/hr</b> is the card\'s pay over '
              + 'the real time, Took to put-down, before the car\'s cost (as the offers page\'s "Card against what it '
-             + 'took"), and <b>only for orders put down at the door</b> by the GPS or the app\'s own screen ('
-             + tk.timed + '): a Drop pressed by hand (' + tk.pressed + ') can come before the door and is left out. '
+             + 'took"), and <b>only for orders put down at the door</b> by the GPS, the app\'s own screen, or a Drop '
+             + 'press the GPS log timed (' + tk.timed + ' in all, ' + tk.gpsTimed + ' of them a press GPS-timed: the '
+             + 'stop the press belongs to, its end the car leaving the door — Method says the rule). A press with no '
+             + 'such stop (' + (tk.pressed - tk.gpsTimed) + ' of ' + tk.pressed + ') can come before the door and is left out. '
              + '<b>Real − card</b> is real minutes less the card\'s minutes. A median needs ' + r.realMedN
              + ' timed trips and an interval ' + r.descMinN + '; an area needs ' + r.descMinN
              + ' offers or one take to be listed.',
@@ -1706,7 +2500,7 @@ function MORE_SECTIONS(r) {
           [['ppmPlace', 'By place'], ['ppmTown', 'By town'], ['ppmGrid', 'By ' + r.gridMi + '-mile cell']])
     + sec('waits', 'Restaurant waits beside pay',
           'The rig\'s measured waits at a store (server.js storeWaitsOut: name, how many, the median minutes; '
-          + r.waitsOnRecord + ' stores on record) joined to a place by its name as Assemble.sameStore compares '
+          + r.waitsOnRecord + ' stores on record' + (r.waitsFrom ? ', from ' + esc(r.waitsFrom) : '') + ') joined to a place by its name as Assemble.sameStore compares '
           + 'two, and only where the join is not a guess: not a chain\'s name, one store of that name on record, and '
           + 'one place of that name here. The waits are all hours; the pay follows the hours picked.',
           [['waits', 'Places']])
@@ -1750,8 +2544,74 @@ function MORE_SECTIONS(r) {
           [['trendPlace', 'By place'], ['trendTown', 'By town']]);
 }
 
+/* The Best offers tab: plain lines first, then where good offers turn up
+ * per hour of waiting and what working an area paid, then the share tests,
+ * then the descriptive tables. */
+function BEST_SECTION(r) {
+  function tbl(id, title) { return '<h3>' + esc(title) + '</h3><div id="b-' + id + '"></div>'; }
+  var b = r.best;
+  return '<section data-tab="best"><h2>Best offers — where the top of the pay turns up</h2>'
+    + '<p class="exp">Experimental. Offered, not earned; only near where you wait; and see Coverage for what could '
+    + 'be placed. Thresholds are percentiles of your own offers, to read — not an accept rule.</p>'
+    + '<ul class="lines">' + bestLines(r).map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>'
+    + '<p class="note"><b>Top 25% / top 10%</b>: an offer at or over the 75th / 90th percentile $/hr of EVERY offer '
+    + 'in its own three-hour block (' + b.tierMinN + ' offers for a block to have one), so each hour is held to '
+    + 'itself. <b>Rig said take</b> is the rig\'s own verdict at the time. <b>Per hour of waiting</b> counts the '
+    + 'offers that came while the car was parked in that area with no order in it (the Busy tab\'s spells), over '
+    + 'the hours parked; ' + b.spellMinN + ' spells on ' + r.minOutings + ' shift days for a figure. <b>Expected $/hr '
+    + 'working it</b> = pay of the orders taken while waiting there (a Took inside the spell or ' + b.takeSlackMin
+    + ' min after) ÷ (hours waited + those orders\' real hours); only orders with a real time count, on both '
+    + 'sides, so many untimed takes make it read low. <b>If every top 10% taken</b> is the pay of the top-10% '
+    + 'offers seen while waiting ÷ (hours waited + their card minutes): <b>offered, not earned</b>, and it ignores '
+    + 'that taking one ends the wait.</p>'
+    + tbl('waitTown', 'Waiting, by town and hours') + tbl('waitGrid', 'Waiting, by ' + r.gridMi + '-mile cell and hours')
+    + '<h3>Does the top-10% share differ by area? (all hours, hours held)</h3><p class="note">A permutation of the '
+    + 'top-10% marks within each three-hour block (' + r.shuffles + ' shuffles); the score is a group\'s share less '
+    + 'what the other groups showed in the same hours, with a 95% bootstrap interval. Coloured only where the test '
+    + 'beats chance and the interval is clear of zero. ' + r.minN + ' offers on ' + r.minOutings + ' shift days.</p>'
+    + '<div id="shareTests"></div>'
+    + tbl('goodTown', 'Good offers by town') + tbl('goodRest', 'Good offers by restaurant (the name on the card)')
+    + tbl('goodGrid', 'Good offers by ' + r.gridMi + '-mile cell') + tbl('goodApp', 'Good offers by app')
+    + '<h3>Offer size</h3><p class="note">By card miles: under 4, 4–8, 8–12, 12 and over. Median and P90 $/hr, '
+    + 'top-10% share, and $/mi — <b>$/mi for reading, not an accept rule</b>. A median needs ' + r.descMinN + '.</p>'
+    + tbl('sizeTown', 'By town') + tbl('sizeApp', 'By app') + tbl('sizeRest', 'By restaurant')
+    + '<h3>Dead miles after a drop</h3><p class="note">' + (b.dead.gps ? b.dead.n + ' trips measured. '
+      : '<b>No GPS log was given (--gps), so nothing is measured.</b> ')
+    + 'From each put-down at the door to the next Took: the GPS log\'s miles (straight lines between fixes ten '
+    + 'seconds apart, a little under the road), plus the next card\'s printed drive to the pickup where Uber printed '
+    + 'one. Not counted: no Took within ' + b.deadMaxMin + ' minutes, or the log broken between. <b>Unpaid share</b> '
+    + '= dead ÷ (dead + the delivered trips\' card miles). By the dropoff\'s town and cell, counts only; a cell under '
+    + r.dropMinN + ' measured trips is not named.</p>'
+    + tbl('deadTown', 'By dropoff town') + tbl('deadGrid', 'By dropoff cell')
+    + '</section>\n';
+}
+
 function METHOD(r) {
+  var b = r.best;
   return '<ul>'
+    + '<li><b>Placing a pickup, third pass</b>: map-view.js\'s NbxSearch chain — the door as printed, the type word '
+    + 'left out, the directional the other way, the street index\'s one street for the name as read, the street '
+    + 'alone where nothing answered; a corner by the street index; a numberless street by its <code>whole</code> '
+    + 'answer; a refused door\'s candidates by the distance band (road miles off the router, held to the card\'s '
+    + 'own figure — distance only). Levels: door, corner, name (a point); band, area, street (an area, with its '
+    + 'spread). <b>Places</b> take a point, and an area only within ' + PLACE_SAME_MI + ' mi of a point of the same store '
+    + 'or with its candidates within ' + b.placeApproxMi + ' mi (chosen); <b>the grid</b> every level within '
+    + b.areaMi + ' mi; towns unchanged.</li>'
+    + '<li><b>Cards with no fix</b>: a printed door with its town or ZIP is searched in the region '
+    + (b.region ? 'from ' + b.region.box.s.toFixed(2) + ',' + b.region.box.w.toFixed(2) + ' to ' + b.region.box.n.toFixed(2)
+       + ',' + b.region.box.e.toFixed(2) + ' (the box round ' + b.region.fixes + ' good card fixes, ' + b.region.marginMi
+       + ' mi wider each way)' : '(none: the record has no good card fix)')
+    + ', kept only at door or corner level with the printed town or ZIP at the pin. A store name with no fix is '
+    + 'not placed: a chain is everywhere.</li>'
+    + '<li><b>A pressed drop timed by the GPS</b> (chosen, not measured): the stop — every fix within ' + b.stopM
+    + ' m for ' + b.stopMinS + ' s or more, beginning after the Took — that contains the press, else the first '
+    + 'starting within ' + b.pressAfterMin + ' min after it, else the last ending within ' + b.pressBeforeMin
+    + ' min before it; the real end is that stop\'s end, the car leaving the door. No stop: still left out. '
+    + (b.presses ? b.presses.timed + ' of ' + b.presses.pressed + ' presses timed (' + b.presses.inside + ' inside, '
+       + b.presses.early + ' early, ' + b.presses.late + ' late).' : 'No GPS log, so none timed.') + '</li>'
+    + '<li><b>Top tiers, P75 and P90</b>: percentiles of $/hr (linear between order statistics); intervals are '
+    + 'bootstraps at ' + r.minN + ' values or more, and the binomial order-statistic interval at ' + Q_BOOT_MAX
+    + ' or more.</li>'
     + '<li><b>$/hr</b> is the card\'s rate as the rig worked it out (the row\'s <code>perHour</code>, pay less the car\'s '
     + 'cost over the minutes it was judged over), on rows advice.js\'s <code>trustworthy</code> keeps.</li>'
     + '<li><b>Score</b> is the median, over a cell\'s offers, of each offer\'s $/hr less what the <i>other</i> ranked '
@@ -1813,6 +2673,7 @@ var PAGE_CSS = [
   'tr.br td{color:var(--ink2);border-bottom-style:dashed}tr.br td:first-child{padding-left:20px}',
   'table.groups th:first-child,table.groups td:first-child{position:sticky;left:0;z-index:1;background:var(--bg);',
   'min-width:150px;max-width:190px}',
+  '.lines{padding-left:20px}.lines li{margin:6px 0}',
   '.xb{font:inherit;font-size:12px;padding:0 6px;margin-right:4px;border-radius:4px;border:1px solid var(--axis);',
   'background:var(--surface);color:var(--ink);cursor:pointer}',
 ].join('\n');
@@ -1927,12 +2788,15 @@ var PAGE_JS = String(function page() {
     var rows = c.groups.map(function (g) {
       return '<tr><td>' + esc(label(kind, g.name)) + '</td><td>' + g.n + '</td><td>' + g.outings + '</td><td>'
         + sg(g.score) + '</td><td>' + ci(g.sci, sg) + '</td><td>' + m(g.median) + '</td><td>' + ci(g.ci, m)
+        + '</td><td>' + m(g.p75) + '</td><td>' + m(g.p90) + '</td><td>' + ci(g.p90Ci, m)
+        + '</td><td data-v="' + (g.top10 === null || g.top10 === undefined ? '' : g.top10) + '">' + pc(g.top10)
         + '</td><td>' + m(g.pay) + '</td><td>' + m(g.ppm) + '</td><td>' + ci(g.ppmCi, m) + '</td><td>' + pc(g.take)
         + '</td><td>' + tag(g, false) + '</td></tr>';
     }).join('');
     el.innerHTML = c.groups.length ? '<div class="tw"><table><thead><tr><th>' + (kind === 'place' ? 'place'
       : kind === 'town' ? 'town' : 'cell') + '</th><th>n</th><th>days</th><th>vs same hours</th><th>95%</th>'
-      + '<th>median $/hr</th><th>95%</th><th>median pay</th><th>$/mi (read only)</th><th>95%</th>'
+      + '<th>median $/hr</th><th>95%</th><th>P75 $/hr</th><th>P90 $/hr</th><th>95%</th><th>top 10%</th>'
+      + '<th>median pay</th><th>$/mi (read only)</th><th>95%</th>'
       + '<th>rig said take</th><th></th></tr></thead><tbody>'
       + rows + '</tbody></table></div>' : '';
   }
@@ -1968,7 +2832,8 @@ var PAGE_JS = String(function page() {
 
   /* The Restaurants table: a tbody per restaurant, its branches hidden under
      it until ▸ is clicked, so a sort moves a restaurant with its branches. */
-  var REST_HEAD = ['restaurant', 'offers', 'days', 'vs same hours', '95%', 'median $/hr', '95%', 'median pay',
+  var REST_HEAD = ['restaurant', 'offers', 'days', 'vs same hours', '95%', 'median $/hr', '95%', 'P90 $/hr', 'top 10%',
+                   'median pay',
                    '$/mi (read only)', 'you took', 'real $/hr', 'timed', 'real − card', 'wait', 'add-on', 'stacked',
                    'Uber · DD', ''];
   function restCells(g, isBranch) {
@@ -1980,7 +2845,8 @@ var PAGE_JS = String(function page() {
     return [td(g.n, String(g.n)), td(g.outings, String(g.outings)), td(isBranch ? g.placeScore : g.score, score),
             td(g.sci ? g.sci[0] : '', isBranch ? '' : ci(g.sci, sg)),
             td(g.ranked ? g.median : g.perHour, m(g.ranked && !isBranch ? g.median : g.perHour)),
-            td(g.ci ? g.ci[0] : '', isBranch ? '' : ci(g.ci, m)), td(g.pay, m(g.pay)), td(g.ppm, m(g.ppm)),
+            td(g.ci ? g.ci[0] : '', isBranch ? '' : ci(g.ci, m)), td(g.p90, m(g.p90)), td(g.top10, pc(g.top10)),
+            td(g.pay, m(g.pay)), td(g.ppm, m(g.ppm)),
             td(g.take, pc(g.take) + (g.taken ? ' (' + g.taken + ')' : '')), td(g.realPerHour, m(g.realPerHour)),
             td(g.timed, String(g.timed)),
             td(g.cardVsReal, g.cardVsReal === null ? '—' : (g.cardVsReal >= 0 ? '+' : '−') + Math.abs(g.cardVsReal).toFixed(1) + ' min'),
@@ -2028,6 +2894,42 @@ var PAGE_JS = String(function page() {
     Array.prototype.forEach.call(b.closest('tbody').querySelectorAll('tr.br'), function (r) { r.hidden = !open; });
   });
 
+  function levelsTable() {
+    var ls = R.coverage.levels || [];
+    document.getElementById('levels').innerHTML = ls.length ? '<div class="tw"><table><thead><tr><th>level</th>'
+      + '<th>kind</th><th>placed</th><th>median $/hr</th><th>no fix, region box</th><th>stood in for</th></tr></thead><tbody>'
+      + ls.map(function (l) {
+        return '<tr><td>' + esc(l.level) + '</td><td>' + (l.point ? 'point' : 'approximate') + '</td><td>' + l.n
+          + '</td><td>' + m(l.perHour) + '</td><td>' + l.region + '</td><td>' + esc(l.refused || '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div>'
+      + (R.coverage.points && R.coverage.points.gapPerHour !== null ? '<p class="note">Points only (door, corner, '
+         + 'name) against the unplaced: ' + m(R.coverage.points.placed.perHour) + '/hr against '
+         + m(R.coverage.points.unplaced.perHour) + '/hr (' + pTxt(R.coverage.points.p) + '). The table below counts '
+         + 'every level as placed.</p>' : '')
+      : '<p class="note">Nothing placed.</p>';
+  }
+  function shareTests() {
+    var B = R.best.share, out = '';
+    [['town', 'Towns'], ['rest', 'Restaurants'], ['place', 'Places'], ['grid', R.gridMi + '-mile cells']].forEach(function (k) {
+      var t = B[k[0]];
+      out += '<h3>' + esc(k[1]) + '</h3><p class="note">' + (t.p === null ? 'Not tested: ' + t.groups.length
+        + ' over the floor.' : t.groups.length + ' groups over ' + t.kept + ' offers, hours held, ' + pTxt(t.p) + ' — '
+        + (t.significant ? '<b>beats chance</b>; colour only where a group\'s interval is clear of zero.'
+           : '<b>not distinguishable from chance</b>, so nothing is coloured.')) + '</p>';
+      if (!t.groups.length) return;
+      out += '<div class="tw"><table><thead><tr><th>' + esc(k[1].toLowerCase()) + '</th><th>offers</th><th>days</th>'
+        + '<th>top 10%</th><th>the others, same hours</th><th>vs same hours</th><th>95%</th><th>top 25%</th><th></th></tr></thead><tbody>'
+        + t.groups.map(function (g) {
+          function pts(v) { return v === null || v === undefined ? '—' : (v >= 0 ? '+' : '−') + Math.abs(v * 100).toFixed(1) + ' pts'; }
+          var pl = k[0] === 'place' ? R.places[g.name] : null;
+          return '<tr><td>' + esc(label(k[0], g.name)) + (pl ? ' <span class="note">near ' + pl.lat.toFixed(3) + ', '
+            + pl.lon.toFixed(3) + '</span>' : '') + '</td><td>' + g.n + '</td><td>' + g.outings + '</td><td data-v="'
+            + g.top10 + '">' + pc(g.top10) + '</td><td>' + pc(g.expect) + '</td><td data-v="' + g.score + '">' + pts(g.score)
+            + '</td><td>' + ci(g.sci, pts) + '</td><td>' + pc(g.top25) + '</td><td>' + tag(g, false) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    });
+    document.getElementById('shareTests').innerHTML = out;
+  }
   function coverageTable() {
     var d = R.coverage.days.concat([Object.assign({ day: 'all days' }, R.coverage.all)]);
     document.getElementById('coverage').innerHTML = '<div class="tw"><table><thead><tr><th>shift day</th>'
@@ -2101,6 +3003,7 @@ var PAGE_JS = String(function page() {
     if (f === 'mi') return v.toFixed(1) + ' mi';
     if (f === 'h') return v.toFixed(1) + ' h';
     if (f === 'r') return v.toFixed(1);
+    if (f === 'r2') return v.toFixed(2);
     if (f === 'x') return v.toFixed(2) + '×';
     if (f === 'p') return v === 0 ? 'p < ' + (1 / R.shuffles).toFixed(4) : v.toFixed(3);
     if (f === '$ci') return ci(v, m);
@@ -2148,6 +3051,7 @@ var PAGE_JS = String(function page() {
   }
   function drawMore(v) {
     Object.keys(v.more).forEach(function (k) { moreTable(document.getElementById('m-' + k), v.more[k]); });
+    Object.keys(v.best).forEach(function (k) { moreTable(document.getElementById('b-' + k), v.best[k]); });
     moreTable(document.getElementById('m-quietPlace'), R.quiet.place);
     moreTable(document.getElementById('m-quietTown'), R.quiet.town);
     moreTable(document.getElementById('m-trendPlace'), R.trend.place);
@@ -2201,7 +3105,7 @@ var PAGE_JS = String(function page() {
   var current = null;
   function showTab(id) {
     var known = Array.prototype.some.call(tabs.children, function (b) { return b.getAttribute('data-tab') === id; });
-    if (!known) id = 'places';
+    if (!known) id = 'best';
     current = id;
     Array.prototype.forEach.call(tabs.children, function (b) {
       b.setAttribute('aria-pressed', b.getAttribute('data-tab') === id ? 'true' : 'false');
@@ -2252,8 +3156,10 @@ var PAGE_JS = String(function page() {
   }
   sel.addEventListener('change', draw);
   coverageTable();
+  levelsTable();
+  shareTests();
   draw();
-  showTab((location.hash || '').slice(1) || 'places');
+  showTab((location.hash || '').slice(1) || 'best');
 }).replace(/^function page\(\) \{/, '(function () {').replace(/\}$/, '}());');
 
 /* --- talking to the server, the NucBox and the GPS log -------------------- */
@@ -2294,6 +3200,9 @@ function hitsOf(list) {
 function nbxFetch(opts) {
   var cache = opts.cache;
   var server = opts.server.replace(/\/+$/, '');
+  // The street index's questions go to `opts.streets` (streetsBase: a relay's
+  // /api/nbx, or a server's own /api/streets), else this server's relay.
+  var streetsAt = opts.streets ? opts.streets.replace(/\/+$/, '') : server + '/api/nbx';
   function reply(status, body) {
     return { ok: status === 200, status: status, json: function () { return Promise.resolve(body); } };
   }
@@ -2318,6 +3227,9 @@ function nbxFetch(opts) {
           return reply(502, { ok: false, unreachable: true, error: 'Nominatim answered ' + r.status });
         }
         body = hitsOf(r.body); status = 200;
+      } else if (/^\/(cross|stretch|named|whole)\?/.test(pathAsked)) {
+        var r3 = await getJson(streetsAt + pathAsked);
+        body = r3.body || {}; status = r3.status;
       } else {
         var r2 = await getJson(server + '/api/nbx' + pathAsked);
         body = r2.body || {}; status = r2.status;
@@ -2332,6 +3244,44 @@ function nbxFetch(opts) {
     }
     return reply(status, body);
   };
+}
+
+/* Where the street index is asked: `url` as given — a path ending /api/nbx
+ * is a relay (server.js nbxRoute: /api/nbx/cross...), a bare server is its
+ * own index (/api/streets/cross..., server.js streetsRoute, NUCBOX_STREETS_FILE
+ * loaded there) — or, unasked, this server's relay when it has one set, else
+ * this server's own index when it has one loaded. Returns { base, said } or
+ * { base: null, said } with why not. */
+async function streetsBase(server, url) {
+  server = server.replace(/\/+$/, '');
+  async function probe(base) {
+    try {
+      if (/\/api\/nbx$/.test(base)) {
+        var a = await getJson(base);
+        return a.ok && a.body && a.body.streets ? base : null;
+      }
+      var b = await getJson(base.replace(/\/api\/streets$/, '') + '/api/streets');
+      return b.ok && b.body && b.body.loaded ? base.replace(/\/api\/streets$/, '') + '/api/streets' : null;
+    } catch (e) { return null; }
+  }
+  if (url) {
+    var u = url.replace(/\/+$/, '');
+    var got = await probe(u);
+    return got ? { base: got, said: got } : { base: null, said: 'none — ' + u + ' did not answer as a street index' };
+  }
+  var relay = await probe(server + '/api/nbx');
+  if (relay) return { base: relay, said: relay + ' (the server\'s relay)' };
+  var own = await probe(server);
+  if (own) return { base: own, said: own + ' (the server\'s own index)' };
+  return { base: null, said: 'none — ' + server + ' has no relay to one (NUCBOX_STREETS) and no index loaded; give --streets' };
+}
+
+/* The rig's store waits, for a source whose /api/journal carries none (the
+ * NucBox's copy holds no store-waits file): `url`'s /api/journal `waits`. */
+async function loadWaits(url) {
+  var got = await getJson(url.replace(/\/+$/, '') + '/api/journal?days=1&limit=1');
+  if (!got.ok || !got.body || !Array.isArray(got.body.waits)) throw new Error(url + ' answered ' + got.status + ' with no waits');
+  return got.body.waits;
 }
 
 /* The car's position at each moment asked, off the GPS log, read by
@@ -2435,7 +3385,7 @@ function home(p) { return p && p[0] === '~' ? path.join(os.homedir(), p.slice(1)
 function parseArgs(argv) {
   var o = { server: null, out: path.join(os.homedir(), 'places-report'), gps: null, since: null,
             nominatim: null, cache: path.join(os.homedir(), '.cache', 'uber-scan', 'places-report-answers.json'),
-            gap: MV.NBX_GAP_MS, minN: MIN_N };
+            gap: MV.NBX_GAP_MS, minN: MIN_N, streets: null, waits: null, roadAsks: 5000 };
   for (var i = 0; i < argv.length; i++) {
     var a = argv[i];
     var val = function () { if (i + 1 >= argv.length) throw new Error(a + ' wants a value'); return argv[++i]; };
@@ -2446,6 +3396,9 @@ function parseArgs(argv) {
     else if (a === '--cache') o.cache = home(val());
     else if (a === '--gap') o.gap = Number(val());
     else if (a === '--min-n') o.minN = Number(val());
+    else if (a === '--streets') o.streets = val();
+    else if (a === '--waits') o.waits = val();
+    else if (a === '--road-asks') o.roadAsks = Number(val());
     else if (a === '-h' || a === '--help') o.help = true;
     else if (/^--/.test(a)) throw new Error('unknown option ' + a);
     else if (!o.server) o.server = a;
@@ -2455,6 +3408,10 @@ function parseArgs(argv) {
   if (o.since && !/^\d{4}-\d\d-\d\d$/.test(o.since)) throw new Error('--since is YYYY-MM-DD');
   if (!(o.minN >= 2)) throw new Error('--min-n is a number, 2 or more');
   if (!(o.gap >= 0)) throw new Error('--gap is milliseconds');
+  if (!(o.roadAsks >= 0)) throw new Error('--road-asks is a number');
+  [['--streets', o.streets], ['--waits', o.waits]].forEach(function (x) {
+    if (x[1] && !/^https?:\/\//.test(x[1])) throw new Error(x[0] + ' is an http(s) URL');
+  });
   return o;
 }
 
@@ -2462,11 +3419,19 @@ var USAGE = [
   'usage: node tools/places_report.js [http://localhost:8081] [--out ~/places-report]',
   '         [--gps ~/gpslog] [--since YYYY-MM-DD] [--nominatim http://localhost:8088]',
   '         [--cache ~/.cache/uber-scan/places-report-answers.json] [--gap ms] [--min-n 30]',
+  '         [--streets URL] [--waits URL] [--road-asks 5000]',
   '',
   'Run on the NucBox. Reads the copy at home (its /api/journal), places pickups with the',
   'NucBox\'s own Nominatim (directly with --nominatim, else through that server\'s /api/nbx),',
   'and writes index.html and CSVs to --out, which must be outside the repository.',
-  'With --gps, also the spells parked with no order in the car (the Busy tab).',
+  'With --gps, also the spells parked with no order in the car (the Busy tab), Drop presses',
+  'timed by the GPS, and dead miles after a drop.',
+  '--streets: the street index (a relay\'s .../api/nbx, or a server with one loaded); by default',
+  'the server\'s relay, else its own index — asked EVEN WITH --nominatim.',
+  '--waits: a server whose /api/journal carries the rig\'s store waits (the rig\'s :8080),',
+  'used when the main source carries none.',
+  '--road-asks: road questions the distance band may ask in all (through the server\'s',
+  '/api/nbx/route; cached).',
   'Every night: tools/places_nightly.sh (see the README, "Every night, on the NucBox").',
 ].join('\n');
 
@@ -2503,14 +3468,20 @@ async function main(argv) {
                   + ' offers (its limit). Narrow the window with --since.');
   }
 
-  var settings = { search: false, streets: false };
+  var settings = { search: false, streets: false, route: false };
   try {
     var s = await getJson(o.server.replace(/\/+$/, '') + '/api/nbx');
-    if (s.ok && s.body) settings = { search: !!s.body.search, streets: !!s.body.streets };
+    if (s.ok && s.body) settings = { search: !!s.body.search, streets: !!s.body.streets, route: !!s.body.route };
   } catch (e) { /* an older server: no relay */ }
   var nominatim = o.nominatim || (settings.search ? null : 'http://localhost:8088');
-  console.error('search: ' + (nominatim ? nominatim + ' (direct)' : o.server + '/api/nbx (relay)')
-                + ' · street index: ' + (settings.streets ? 'yes, through the relay' : 'none'));
+  // The street index EVEN WITH --nominatim (the first real run's 662 corners
+  // went unasked): --streets, else the server's relay, else its own index.
+  var st = await streetsBase(o.server, o.streets);
+  var roadSaid = settings.route ? o.server.replace(/\/+$/, '') + '/api/nbx/route (the server\'s relay), at most '
+    + o.roadAsks + ' questions' : 'none — the server has no router set (NUCBOX_ROUTER), so no distance band';
+  console.log('search: ' + (nominatim ? nominatim + ' (direct)' : o.server + '/api/nbx (relay)'));
+  console.log('street index: ' + st.said);
+  console.log('router: ' + roadSaid);
 
   var cache = { answers: {}, hits: 0, fresh: 0 };
   try {
@@ -2523,9 +3494,14 @@ async function main(argv) {
     fs.writeFileSync(tmp, JSON.stringify({ v: 1, answers: cache.answers }));
     fs.renameSync(tmp, cacheFile);
   }
-  var nbx = new MV.NbxSearch({ base: '/api/nbx', gap: o.gap,
-    fetch: nbxFetch({ cache: cache, server: o.server, nominatim: nominatim,
+  var nbx = new MV.NbxSearch({ base: '/api/nbx', gap: o.gap, bandWait: BAND_WAIT_OFFLINE_MS,
+    fetch: nbxFetch({ cache: cache, server: o.server, nominatim: nominatim, streets: st.base,
                       onFresh: function () { if (cache.fresh % 100 === 0) saveCache(); } }) });
+  var region = regionOf(offers.filter(counted));
+  console.log('region for cards with no fix: ' + (region ? region.box.s + ',' + region.box.w + ' to ' + region.box.n
+              + ',' + region.box.e + ' (the box round ' + region.fixes + ' good card fixes, ' + REGION_MARGIN_MI
+              + ' mi wider each way)' : 'none (no good card fix in the record)'));
+  var ctx = { region: region, road: settings.route, budget: { left: o.roadAsks } };
 
   // Every pickup the rig stands behind, asked once per (text, card disc box).
   var placed = new Array(offers.length);
@@ -2536,17 +3512,32 @@ async function main(argv) {
     var row = offers[i];
     if (!counted(row) || !row.pickup) continue;
     var disc = MV.discFor(row);
+    var spec = settings.route ? MV.bandTarget(row, 'pickup') : null;
     var k = row.pickup + '\u0000' + (disc ? MV.discBox(disc) + '/' + disc.miles.toFixed(2)
-                                          + '/' + disc.at.lat.toFixed(3) + ',' + disc.at.lon.toFixed(3) : '-');
-    if (!memo.has(k)) memo.set(k, await placePickup(nbx, row.pickup, row, settings.streets));
+                                          + '/' + disc.at.lat.toFixed(3) + ',' + disc.at.lon.toFixed(3) : '-')
+      + (spec ? '/' + spec.miles + (spec.upper ? '+' : '') : '');
+    if (!memo.has(k)) memo.set(k, await placePickup(nbx, row.pickup, row, !!st.base, ctx));
     placed[i] = memo.get(k);
     done += 1;
     if (done % 200 === 0) console.error('  pickups ' + done + ' of ' + todo + ' (' + cache.fresh + ' asked, '
                                         + cache.hits + ' from the cache)');
   }
+  saveCache();
+
+  // The GPS log, once: presses timed, drops placed, spells, dead miles.
+  var taken = Array.isArray(body.taken) ? body.taken : [];
+  var spanTimes = offers.filter(counted).map(seenAt).filter(isFinite);
+  var fx = null, presses = null;
+  if (o.gps && spanTimes.length) {
+    fx = gpsFixes(o.gps, Math.min.apply(null, spanTimes) - 3600e3, Math.max.apply(null, spanTimes) + 3600e3);
+    var tp = timePresses(taken, fx.fixes);
+    taken = tp.taken;
+    presses = tp.stats;
+    console.log('presses timed by the GPS: ' + presses.timed + ' of ' + presses.pressed + ' (' + presses.inside
+                + ' inside a stop, ' + presses.early + ' early, ' + presses.late + ' late; ' + presses.none + ' no stop)');
+  }
 
   // Taken trips: the GPS log at the drop, else the dropoff's door.
-  var taken = Array.isArray(body.taken) ? body.taken : [];
   var byId = Object.create(null);
   offers.forEach(function (row2) { if (row2 && typeof row2.id === 'string') byId[row2.id] = row2; });
   var atDoor = taken.filter(function (t) { return AT_THE_DOOR.indexOf(t.by || 'drop') >= 0 && byId[t.id]; });
@@ -2561,7 +3552,7 @@ async function main(argv) {
   for (var t = 0; t < atDoor.length; t++) {
     var trip = atDoor[t], key = trip.id + '@' + trip.endedAt;
     if (gpsPos[key]) continue;
-    var at = await placeDropoff(nbx, byId[trip.id].dropoff, byId[trip.id], settings.streets);
+    var at = await placeDropoff(nbx, byId[trip.id].dropoff, byId[trip.id], !!st.base, { region: region });
     if (at) dropPins[key] = at;
   }
   saveCache();
@@ -2574,9 +3565,7 @@ async function main(argv) {
 
   // Spells parked with no order in the car, over the record's own span.
   var spells = null, cellTown = Object.create(null);
-  var spanTimes = offers.filter(counted).map(seenAt).filter(isFinite);
-  if (o.gps && spanTimes.length) {
-    var fx = gpsFixes(o.gps, Math.min.apply(null, spanTimes) - 3600e3, Math.max.apply(null, spanTimes) + 3600e3);
+  if (fx) {
     spells = spellsOf(fx.fixes, heldOf(taken));
     console.error('spells: ' + spells.length + ' parked with no order in the car, off ' + fx.fixes.length
                   + ' fixes (one per ' + SPELL_THIN_S + ' s)');
@@ -2592,8 +3581,20 @@ async function main(argv) {
     }
   }
 
+  // Store waits: the source's, else the rig's (--waits) when the source has none.
+  var waits = Array.isArray(body.waits) ? body.waits : [];
+  var waitsFrom = waits.length ? o.server : null;
+  if (!waits.length && o.waits) {
+    try {
+      waits = await loadWaits(o.waits);
+      waitsFrom = o.waits;
+    } catch (e) { console.error('store waits: ' + (e && e.message || e) + '; none used'); }
+  }
+  console.log('store waits: ' + waits.length + (waitsFrom ? ' from ' + waitsFrom : ' (none on record)'));
+
   var report = analyse(offers, taken, placed, dropAt, {
-    minN: o.minN, waits: Array.isArray(body.waits) ? body.waits : [], spells: spells, cellTown: cellTown,
+    minN: o.minN, waits: waits, spells: spells, cellTown: cellTown, fixes: fx ? fx.fixes : null,
+    presses: presses, region: region, streetsSaid: st.said, roadSaid: roadSaid, waitsFrom: waitsFrom,
     source: { server: o.server, count: body.count, total: body.total,
               truncated: !!body.truncated, since: o.since } });
   fs.mkdirSync(outDir, { recursive: true });
@@ -2606,11 +3607,13 @@ async function main(argv) {
   fs.writeFileSync(path.join(outDir, 'coverage.csv'), coverageCsv(report));
   fs.writeFileSync(path.join(outDir, 'restaurants.csv'), restCsv(report));
   fs.writeFileSync(path.join(outDir, 'restaurant_branches.csv'), restBranchCsv(report));
+  fs.writeFileSync(path.join(outDir, 'top_share_tests.csv'), shareCsv(report));
+  fs.writeFileSync(path.join(outDir, 'coverage_levels.csv'), levelsCsv(report));
   Object.keys(MORE_CSVS).forEach(function (name) {
     fs.writeFileSync(path.join(outDir, name), tableCsv(report, MORE_CSVS[name][0], MORE_CSVS[name][1]));
   });
   console.log(summary(report));
-  console.log('\nWritten: ' + path.join(outDir, 'index.html') + ' (and ' + (8 + Object.keys(MORE_CSVS).length)
+  console.log('\nWritten: ' + path.join(outDir, 'index.html') + ' (and ' + (10 + Object.keys(MORE_CSVS).length)
               + ' CSVs beside it)');
   console.log('NucBox questions: ' + cache.fresh + ' asked, ' + cache.hits + ' answered from ' + cacheFile);
 }
@@ -2632,6 +3635,13 @@ module.exports = {
   stackTable: stackTable, quietTable: quietTable, trendTable: trendTable, spellsOf: spellsOf,
   heldOf: heldOf, gpsFixes: gpsFixes, cellTownOf: cellTownOf, tableCsv: tableCsv,
   inside: inside, realish: realish, outingOf: outingOf, main: main,
+  printedTown: printedTown, regionOf: regionOf, isPoint: isPoint, gridOk: gridOk, PLACE_APPROX_MI: PLACE_APPROX_MI,
+  REGION_MARGIN_MI: REGION_MARGIN_MI, quantile: quantile, qOf: qOf, tiersOf: tiersOf, topOf: topOf, timePresses: timePresses,
+  stillRuns: stillRuns, shareTest: shareTest, goodTable: goodTable, waitTable: waitTable, deadOf: deadOf,
+  deadTable: deadTable, sizeTable: sizeTable, bestLines: bestLines, shareCsv: shareCsv, levelsCsv: levelsCsv,
+  streetsBase: streetsBase, loadWaits: loadWaits, GPS_TIMED: GPS_TIMED, TIER_MIN_N: TIER_MIN_N,
+  STOP_M: STOP_M, STOP_MIN_S: STOP_MIN_S, PRESS_AFTER_MIN: PRESS_AFTER_MIN, PRESS_BEFORE_MIN: PRESS_BEFORE_MIN,
+  DEAD_MAX_MIN: DEAD_MAX_MIN, SIZE_BANDS: SIZE_BANDS, TAKE_SLACK_MS: TAKE_SLACK_MS,
 };
 
 if (require.main === module) main(process.argv.slice(2));

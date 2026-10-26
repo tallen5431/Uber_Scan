@@ -793,6 +793,352 @@ function nbx() {
        && t.indexOf(String(dropFix.lat).slice(0, 7)) < 0; }));
   ok('...nor a field named dropoff in the embedded data', !/"dropoff"/.test(pageR.split('id="data">')[1].split('</script>')[0]));
 
+  /* --- the third pass: the rig's whole search chain, and its levels --- */
+
+  // A fake NucBox with a street index and a router: the relay's shapes
+  // (server.js nbxHits, streetAnswer, nbxRoute), invented streets.
+  var CHAIN = {
+    // Printed with a type word the map does not hold: found without it.
+    '1830 Fennel Creek Cts SW': [],
+    '1830 Fennel Creek SW': [hit('1830, Fennel Creek Southwest, Faketown, 99999', 'building', '', off(0.01, 0))],
+    // Two doors of one number 1.4 and 2.5 mi from the fix: several, too far apart for an area.
+    '55 Garnet Road': [hit('55, Garnet Road, Faketown, 99999', 'building', '', off(0.02, 0)),
+                       hit('55, Garnet Road, Faketown, 99999', 'building', '', off(-0.03, 0.02))],
+    // Two doors a few hundred yards apart: several, one general area.
+    '8 Hazel Row': [hit('8, Hazel Row, Faketown, 99999', 'building', '', off(0.004, 0)),
+                    hit('8, Hazel Row, Faketown, 99999', 'building', '', off(0.012, 0.004))],
+    // Far from any fix, inside the driver's region: for a card with no fix.
+    '9 Tansy Lane': [hit('9, Tansy Lane, Otherville, 99998', 'building', '', off(0.12, 0.1))],
+  };
+  var chainAsked = [];
+  function chainFetch(u) {
+    chainAsked.push(u);
+    var p2 = u.replace(/^\/api\/nbx/, ''), q2 = new URLSearchParams(u.split('?')[1] || ''), body;
+    if (/^\/search/.test(p2)) {
+      var list = q2.has('q') ? (ANSWERS[q2.get('q')] || []) : (CHAIN[q2.get('street')] || STREETS[q2.get('street')] || []);
+      body = { ok: true, cutAt: null, hits: list };
+    } else if (/^\/cross/.test(p2)) {
+      body = { ok: true, a: { names: ['Larkspur Ct'] }, b: { names: ['Ombre Rd'] },
+               meets: [{ lat: BASE.lat + 0.01, lon: BASE.lon + 0.01, n: 1, spanM: 20 }], cutAt: null };
+    } else if (/^\/whole/.test(p2)) {
+      body = { ok: true, names: ['Quillon Way'], streets: [{ metres: 800, lines: [[[BASE.lat + 0.005, BASE.lon + 0.005],
+                                                                                    [BASE.lat + 0.009, BASE.lon + 0.006]]] }] };
+    } else if (/^\/named/.test(p2)) {
+      body = { ok: true, names: [], among: 0 };
+    } else if (/^\/route/.test(p2)) {
+      var pts = q2.get('points').split(';').map(function (x) { var a2 = x.split(','); return { lon: +a2[0], lat: +a2[1] }; });
+      body = { ok: true, metres: MV.crowMiles(pts[0], pts[1]) * 1609.344 * 1.2, snaps: [1, 1], line: null };
+    } else body = { ok: false, error: 'no such' };
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(body); } });
+  }
+  var cn = new MV.NbxSearch({ gap: 0, fetch: chainFetch });
+  var retried = await P.placePickup(cn, '1830 Fennel Creek Cts SW, Faketown', card(), true);
+  eq('chain: a door the type word hid is found by the retry, at door level', [retried.level, retried.at && retried.at.lat],
+     ['door', 12.31]);
+  ok('...asked again without the type word (MV.streetRetry)', chainAsked.some(function (u) { return /street=1830%20Fennel%20Creek%20SW/.test(u); }));
+  var cornered = await P.placePickup(cn, 'Larkspur Ct & Ombre Rd, Faketown', card(), true);
+  eq('chain: a corner, with the street index, is where the streets meet (corner level)', [cornered.level, cornered.kind],
+     ['corner', 'cross']);
+  var bareSt = await P.placePickup(cn, 'Quillon Way, Faketown', card(), true);
+  ok('chain: a street with no number is its street index area (street level, with its spread)', bareSt.level === 'street'
+     && bareSt.spread > 0 && bareSt.spread <= MV.ROUGH_AREA_MI && chainAsked.some(function (u) { return /\/whole\?name=Quillon%20Way/.test(u); }));
+  var d55 = MV.crowMiles(BASE, off(0.02, 0));
+  var banded = await P.placePickup(cn, 'Garnet Gyro (55 Garnet Road)', card({ toPickupMiles: Math.round(d55 * 1.2 * 10) / 10 }),
+                                   true, { road: true, budget: { left: 100 } });
+  eq('chain: several doors, the card\'s own to-pickup miles by road keep one: band level', [banded.level, banded.refused,
+     banded.at && banded.at.lat], ['band', 'several', 12.32]);
+  ok('...asked of the router, two-point routes from the fix', chainAsked.filter(function (u) { return /^\/api\/nbx\/route/.test(u); }).length === 2);
+  var noRoad = await P.placePickup(cn, 'Garnet Gyro (55 Garnet Road)', card({ toPickupMiles: 1.7 }), true, {});
+  eq('...with no router, several stays several, unplaced', [noRoad.at, noRoad.why], [null, 'several']);
+  var spent = await P.placePickup(cn, 'Garnet Gyro (55 Garnet Road)', card({ toPickupMiles: 1.7 }), true,
+                                  { road: true, budget: { left: 1 } });
+  eq('...nor with its road questions spent', spent.at, null);
+  var areaOf = await P.placePickup(cn, 'Hazel Bakes (8 Hazel Row)', card(), true, {});
+  ok('chain: several doors that are one general area: area level, with its spread', areaOf.level === 'area'
+     && areaOf.spread > 0 && areaOf.spread <= MV.AREA_MI && areaOf.refused === 'several');
+  var region = P.regionOf([card(), card({ lat: BASE.lat + 0.1, lon: BASE.lon + 0.1 }), card({ gpsOk: false, lat: 40, lon: 40 })]);
+  ok('the region is the box round the good card fixes, ' + P.REGION_MARGIN_MI + ' mi wider (' + JSON.stringify(region.box) + ')',
+     region.fixes === 2 && region.box.s < BASE.lat - 0.07 && region.box.n > BASE.lat + 0.17 && region.box.n < BASE.lat + 0.18);
+  var noFixCard = card({ gpsOk: false, gpsWhy: 'stale' });
+  var fixless = await P.placePickup(cn, '9 Tansy Lane, Otherville', noFixCard, true, { region: region });
+  ok('a card with no fix: a printed door with its town, searched in the region, is placed at door level',
+     fixless.at && fixless.level === 'door' && fixless.region === true);
+  var wrongTown = await P.placePickup(cn, '9 Tansy Lane, Faketown', noFixCard, true, { region: region });
+  eq('...but not where the answer is in another town', [wrongTown.at, wrongTown.why], [null, 'regiontown']);
+  var noTown = await P.placePickup(cn, '9 Tansy Lane', noFixCard, true, { region: region });
+  eq('...nor a door with no town printed', [noTown.at, noTown.why], [null, 'nofixdoor']);
+  var fixlessName = await P.placePickup(cn, 'Fernbrook Grill', noFixCard, true, { region: region });
+  eq('...and a store name with no fix stays unplaced (a chain is everywhere)', [fixlessName.at, fixlessName.why], [null, 'nofix']);
+  eq('printedTown reads the town, or a ZIP after a comma', [P.printedTown('9 Tansy Lane, Otherville').town,
+     P.printedTown('9 Tansy Lane, ZZ 99998').zip, P.printedTown('10495 Tansy Lane')], ['Otherville', '99998', null]);
+
+  // The street index EVEN WITH --nominatim: a corner's question goes to it.
+  var seenSt = [];
+  global.fetch = function (u) {
+    seenSt.push(u);
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({ ok: true, a: { names: [] }, b: { names: [] }, meets: [] }); } });
+  };
+  var fSt = P.nbxFetch({ cache: { answers: {}, hits: 0, fresh: 0 }, server: 'http://nucbox.invalid:8082',
+                         nominatim: 'http://nucbox.invalid:8088', streets: 'http://nucbox.invalid:8081/api/streets' });
+  await fSt('/api/nbx/cross?a=X&b=Y&box=1');
+  await fSt('/api/nbx/route?points=1,2;3,4');
+  global.fetch = realFetch;
+  eq('with --nominatim, the street index is still asked, at --streets', seenSt[0], 'http://nucbox.invalid:8081/api/streets/cross?a=X&b=Y&box=1');
+  eq('...and a road through the server\'s relay', seenSt[1], 'http://nucbox.invalid:8082/api/nbx/route?points=1,2;3,4');
+
+  /* --- Places vs the grid: which levels each takes --- */
+
+  var adm = [], admPlaced = [];
+  function admRows(label, count, pin, answer) {
+    for (var i2 = 0; i2 < count; i2++) {
+      adm.push(card({ id: label + i2, at: at(2 + i2 % 3, 19, i2), pickup: label, perHour: 15 + (i2 % 7) }));
+      admPlaced.push(Object.assign({ at: pin, why: null, kind: 'name' }, answer));
+    }
+  }
+  admRows('Alder Grill', 30, off(0, 0), { level: 'name', spread: 0 });
+  admRows('Alder Grill', 30, off(0.001, 0), { level: 'area', spread: 0.8, kind: 'door' });     // 0.07 mi from the name pin
+  admRows('Birch Bowl', 30, off(0.1, 0), { level: 'band', spread: 0.25, kind: 'door' });
+  admRows('Cedar Cup', 30, off(0.2, 0), { level: 'area', spread: 0.6, kind: 'door' });
+  admRows('Dune Deli', 30, off(0.3, 0.3), { level: 'street', spread: 1.3, kind: 'street' });
+  var repA = P.analyse(adm, [], admPlaced, function () { return null; }, { now: 0 });
+  var admLabels = Object.keys(repA.places).map(function (id) { return [repA.places[id].label, repA.places[id].pins]; }).sort();
+  eq('Places: a point; an area within ' + MV.AGREE_MI + ' mi of that store\'s point joins it; a tight area (<= '
+     + P.PLACE_APPROX_MI + ' mi) is its own place; a wider one is not a place', admLabels,
+     [['Alder Grill', 60], ['Birch Bowl', 30]]);
+  var gridCells = repA.views.all.grid.groups.map(function (g) { return g.name; });
+  ok('the grid takes every level within AREA_MI (Cedar Cup\'s 0.6 mi area), not the 1.3 mi street',
+     gridCells.indexOf(P.cellOf(off(0.2, 0)).id) >= 0 && gridCells.indexOf(P.cellOf(off(0.3, 0.3)).id) < 0
+     && repA.views.all.grid.thin.every(function (t) { return t.name !== P.cellOf(off(0.3, 0.3)).id; }));
+  eq('coverage counts every level, points first', repA.coverage.levels.map(function (l) { return [l.level, l.n, l.point]; }),
+     [['name', 30, true], ['band', 30, false], ['area', 60, false], ['street', 30, false]]);
+  eq('...placed is every level; the gap is re-measured on points alone too', [repA.coverage.all.placed.n,
+     repA.coverage.points.placed.n, repA.coverage.points.unplaced.n], [150, 30, 0]);
+  ok('...and the page and CSV say the levels', /id="levels"/.test(P.html(repA)) && /^area,no,60,/m.test(P.levelsCsv(repA)));
+
+  /* --- pressed drops timed by the GPS --- */
+
+  var PT = at(4, 19, 0) / 1000, pfix = [];
+  function moveTo(t0s, t1s, from, to) {
+    for (var ts = t0s; ts < t1s; ts += 10) {
+      var f2 = (ts - t0s) / (t1s - t0s);
+      pfix.push([ts, from.lat + f2 * (to.lat - from.lat), from.lon + f2 * (to.lon - from.lon)]);
+    }
+  }
+  var door2 = off(0.05, 0);
+  pfix.push([PT - 600, BASE.lat, BASE.lon]);
+  for (var w0 = PT - 590; w0 < PT; w0 += 10) pfix.push([w0, BASE.lat, BASE.lon]);   // parked before the Took: not the drop
+  moveTo(PT, PT + 1200, BASE, door2);                                                    // 20 min driving
+  for (var w1 = PT + 1200; w1 <= PT + 1440; w1 += 10) pfix.push([w1, door2.lat, door2.lon]);  // 4 min at the door
+  moveTo(PT + 1450, PT + 2000, off(0.06, 0), off(0.3, 0.1));
+  function press(id, minutes) { return { id: id, tookAt: PT * 1000, endedAt: (PT + minutes * 60) * 1000, by: 'drop', pay: 12, minutes: 25 }; }
+  var tp = P.timePresses([press('in', 22), press('early', 12), press('late', 27), press('none', 40),
+                          { id: 'g', tookAt: PT * 1000, endedAt: (PT + 1440) * 1000, by: 'gps' }], pfix);
+  var tpBy = {}; tp.taken.forEach(function (t2) { tpBy[t2.id] = t2; });
+  eq('a press inside the stop at the door: the stop\'s end is the real end', [tpBy['in'].by, tpBy['in'].timedHow,
+     (tpBy['in'].endedAt / 1000 - PT) / 60], [P.GPS_TIMED, 'inside', 24]);
+  eq('...a press on the way, the stop starting within ' + P.PRESS_AFTER_MIN + ' min after it', [tpBy.early.timedHow,
+     (tpBy.early.endedAt / 1000 - PT) / 60], ['early', 24]);
+  eq('...a press late, the stop ending within ' + P.PRESS_BEFORE_MIN + ' min before it', [tpBy.late.timedHow,
+     (tpBy.late.endedAt / 1000 - PT) / 60], ['late', 24]);
+  eq('...and no stop near it: still a press, still left out', [tpBy.none.by, P.realOf(tpBy.none)], ['drop', null]);
+  eq('...the counts', tp.stats, { pressed: 4, timed: 3, inside: 1, early: 1, late: 1, none: 1 });
+  eq('...the press is kept beside it, and a GPS put-down is untouched', [tpBy['in'].pressedAt, tpBy['in'].pressedBy, tpBy.g.by],
+     [(PT + 22 * 60) * 1000, 'drop', 'gps']);
+  eq('...and real $/hr counts a timed press (24 minutes, $12)', P.realOf(tpBy.early).perHour, 30);
+  var stopBefore = P.timePresses([{ id: 'b', tookAt: (PT + 30) * 1000, endedAt: (PT - 60) * 1000, by: 'chooser' }], pfix);
+  eq('...a stop that began before the Took is never the drop', stopBefore.taken[0].by, 'chooser');
+  var tpRows = ['in', 'early', 'late', 'none', 'g'].map(function (id) { return card({ id: id, at: PT * 1000, pickup: 'Fernbrook Grill' }); });
+  var tpTake = P.takesTable(tpRows, P.runsOf(tp.taken), function (o) { return o.pickup; }, function (k) { return k; }, 'place');
+  eq('...the takes table counts them, and says how many were GPS-timed', [tpTake.rows[0].timed, tpTake.rows[0].gpsTimed], [4, 3]);
+
+  /* --- top tiers, hour-held --- */
+
+  var tRows = [];
+  for (var ti = 0; ti < 40; ti++) {
+    tRows.push(card({ id: 'te' + ti, at: at(2 + ti % 3, 19, ti), perHour: 10 + ti }));      // 6-9pm: $10..$49
+    tRows.push(card({ id: 'tn' + ti, at: at(2 + ti % 3, 1, ti), perHour: 30 + ti }));       // 12-3am: $30..$69
+  }
+  for (ti = 0; ti < 5; ti++) tRows.push(card({ id: 'tm' + ti, at: at(2, 10, ti), perHour: 99 }));
+  var tiers = P.tiersOf(tRows);
+  eq('thresholds per block, off every offer in it', [tiers.th[String(A.blockOf(at(2, 19)))], tiers.th[String(A.blockOf(at(2, 1)))]],
+     [{ n: 40, p75: 39.25, p90: 45.1 }, { n: 40, p75: 59.25, p90: 65.1 }]);
+  eq('...a block under ' + P.TIER_MIN_N + ' offers has none, and its offers no tier',
+     [tiers.th[String(A.blockOf(at(2, 10)))], tiers.of(tRows[80])], [undefined, null]);
+  var hiEve = card({ id: 'x1', at: at(3, 19, 59), perHour: 46 }), hiNight = card({ id: 'x2', at: at(3, 1, 59), perHour: 46 });
+  var tiers2 = P.tiersOf(tRows.concat([hiEve, hiNight]));
+  eq('$46 is top 10% at 7pm and not at 1am: each hour held to itself', [tiers2.of(hiEve).top10, tiers2.of(hiNight).top10,
+     tiers2.of(hiNight).top25], [true, false, false]);
+  eq('quantile is linear between order statistics', [P.quantile([1, 2, 3, 4], 0.5), P.quantile([5], 0.9)], [2.5, 5]);
+  ok('...and the in-place one the bootstrap uses agrees with it', [0.5, 0.75, 0.9].every(function (q3) {
+    var xs = []; for (var i3 = 0; i3 < 57; i3++) xs.push((i3 * 37) % 23 + i3 / 100);
+    return Math.abs(P.qOf(q3)(xs.slice()) - P.quantile(xs, q3)) < 1e-9;
+  }));
+
+  /* --- good offers per hour of waiting, and the expected $/hr of working an area --- */
+
+  var wRows = [], wSpells = [], wTaken = [];
+  for (var wb = 0; wb < 40; wb++) wRows.push(card({ id: 'wb' + wb, at: at(2 + wb % 5, 18, wb), perHour: 10 + wb % 20, state: 'no' }));
+  for (var ws = 0; ws < 10; ws++) {
+    var wFrom = at(2 + ws % 5, 19 + Math.floor(ws / 5) % 2, 0);
+    wSpells.push({ from: wFrom, to: wFrom + 30 * 60000, lat: BASE.lat + 0.01, lon: BASE.lon + 0.01 });
+    wRows.push(card({ id: 'wt' + ws, at: wFrom + 5 * 60000, perHour: 60, pay: 20, minutes: 30, state: 'go' }));
+    wRows.push(card({ id: 'wl' + ws, at: wFrom + 10 * 60000, perHour: 11, state: 'no' }));
+    if (ws < 5) wTaken.push({ id: 'wl' + ws, tookAt: wFrom + 30 * 60000, endedAt: wFrom + 60 * 60000, by: 'gps', pay: 15, minutes: 25 });
+  }
+  var wCell = P.cellOf({ lat: BASE.lat + 0.01, lon: BASE.lon + 0.01 }).id;
+  var wTown = {}; wTown[wCell] = 'Faketown';
+  var repW = P.analyse(wRows, wTaken, [], function () { return null; }, { now: 0, spells: wSpells, cellTown: wTown });
+  var wt = repW.views.all.best.waitTown.rows[0];
+  eq('waiting: spells, hours, top-10% and take offers per hour of waiting there', [wt.name, wt.block, wt.n, wt.hours,
+     wt.top10PerHour, wt.goPerHour], ['Faketown', '6–9pm', 10, 5, 2, 2]);
+  eq('expected $/hr working it: takes\' pay over (hours waited + their real hours)', [wt.trips, wt.timed, wt.expected],
+     [5, 5, 10]);
+  eq('...and the counterfactual, every top 10% taken at its card minutes (offered, not earned)', wt.ifTop10, 20);
+  var thinW = P.waitTable(wSpells.slice(0, 3).map(function (s2) { return Object.assign({ town: 'Faketown' }, s2); }),
+                          'town', function (k) { return k; }, 'town').rows[0];
+  eq('...under ' + P.SPELL_MIN_N + ' spells a row gives its n only', [thinW.n, thinW.top10PerHour, thinW.expected], [3, null, null]);
+  var gT = repW.views.all.best.goodApp.rows[0];
+  ok('good offers by area: the rig\'s take and the top tiers, counted and shared (' + gT.top10N + ' of ' + gT.n + ')',
+     gT.name === 'every app' && gT.go === 10 && gT.top10N >= 10 && gT.top10 === Math.round(gT.top10N / gT.tiered * 100) / 100);
+  ok('the Best tab leads, with its plain lines', /data-tab="best"/.test(P.html(repW))
+     && P.html(repW).indexOf('data-tab="best"') < P.html(repW).indexOf('data-tab="places"')
+     && /Waiting in Faketown \(6–9pm\): 2\.00 top-10% offers/.test(P.html(repW)));
+  ok('...and it keeps the caveats: offered not earned, only near where you wait, coverage',
+     /Offered, not earned; only near where you wait/.test(P.html(repW)));
+
+  /* --- does top-10% share differ by area? --- */
+
+  function shareWorld(seed, boost) {
+    var Rs = rng(seed), rows2 = [];
+    ['Aster', 'Briar', 'Clove'].forEach(function (town, ti2) {
+      for (var k5 = 0; k5 < 80; k5++) {
+        var o5 = card({ id: town + k5, at: at(2 + k5 % 3, [16, 19, 22][k5 % 3], k5 % 60),
+                        perHour: 12 + Rs() * 20 + (ti2 === 0 && Rs() < boost ? 25 : 0) });
+        o5.town = town;
+        rows2.push(o5);
+      }
+    });
+    return rows2;
+  }
+  var flatS = shareWorld(11, 0), tf = P.tiersOf(flatS).of;
+  var st0 = P.shareTest(flatS, function (o) { return o.town; }, tf);
+  ok('top-10% share, no effect: not significant (p = ' + st0.p + '), nothing coloured', st0.p >= 0.05 && !st0.significant
+     && st0.groups.every(function (g) { return !g.beats; }));
+  var boosted = shareWorld(11, 0.3), tb = P.tiersOf(boosted).of;
+  var st1 = P.shareTest(boosted, function (o) { return o.town; }, tb);
+  ok('...strong effect: significant (p = ' + st1.p + ')', st1.significant);
+  eq('...the one with more top offers alone is coloured, above', st1.groups.filter(function (g) { return g.beats; })
+     .map(function (g) { return [g.name, g.clear]; }).filter(function (x) { return x[1] === 'above'; }), [['Aster', 'above']]);
+  ok('...its score is its share less the others\' in the same hours, interval clear of zero',
+     st1.groups[0].name === 'Aster' && st1.groups[0].sci[0] > 0 && Math.abs(st1.groups[0].top10 - st1.groups[0].expect - st1.groups[0].score) < 0.011);
+  // The hour in a place's clothes: late pays more, one town only late. Tiers
+  // are per block, so the shares are the same.
+  var hourS = [];
+  for (var k6 = 0; k6 < 60; k6++) {
+    var oN = card({ id: 'hn' + k6, at: at(2 + k6 % 3, 1, k6), perHour: 30 + (k6 * 7) % 20 }); oN.town = 'Owl';
+    var oD = card({ id: 'hd' + k6, at: at(2 + k6 % 3, 16, k6), perHour: 10 + (k6 * 7) % 20 }); oD.town = 'Lark';
+    var oM = card({ id: 'hm' + k6, at: at(2 + k6 % 3, k6 % 2 ? 1 : 16, k6), perHour: (k6 % 2 ? 30 : 10) + (k6 * 3) % 20 }); oM.town = 'Even';
+    hourS.push(oN, oD, oM);
+  }
+  var stH = P.shareTest(hourS, function (o) { return o.town; }, P.tiersOf(hourS).of);
+  ok('...the hour held: a town seen only late is not "more top offers" (p = ' + stH.p + ')', !stH.significant);
+
+  /* --- dead miles after a drop --- */
+
+  var DT = at(5, 20, 0), dFix = [], dTrips = [], dTaken = [], dById = {};
+  for (var dd = 0; dd < 12; dd++) {
+    var t0d = DT + dd * 3 * 3600000;
+    for (var sx = 0; sx <= 600; sx += 10) dFix.push([t0d / 1000 + sx, BASE.lat + 0.01 * sx / 600, BASE.lon]);
+    dTrips.push({ at: t0d, town: 'Faketown', cell: 'c1', cellBox: P.cellOf(BASE), offer: { miles: 5 } });
+    dTaken.push({ id: 'nx' + dd, tookAt: t0d + 600000 });
+    dById['nx' + dd] = { toPickupMiles: dd % 2 ? 1.5 : undefined };
+  }
+  dTrips.push({ at: DT + 40 * 3600000, town: 'Faketown', cell: 'c1', offer: { miles: 5 } });   // no next Took: censored
+  P.deadOf(dTrips, dTaken, dById, dFix);
+  var dRow = P.deadTable(dTrips, 'town', function (k) { return k; }, 'town').rows[0];
+  var leg = MV.crowMiles(BASE, off(0.01, 0));
+  eq('dead miles: trips, measured, GPS miles to the next Took, the printed to-pickup', [dRow.trips, dRow.measured,
+     Math.abs(dRow.gpsMi - leg) < 0.01, dRow.toPickup, dRow.toPickupN], [13, 12, true, 1.5, 6]);
+  ok('...unpaid share is dead over dead plus the delivered trips\' card miles (' + dRow.unpaid + ')',
+     Math.abs(dRow.unpaid - (12 * leg + 9) / (12 * leg + 9 + 60)) < 0.01);
+  ok('...the 40-minute silence and the run past ' + P.DEAD_MAX_MIN + ' min are not counted', dTrips[12].dead.censored);
+  var dCell = P.deadTable(dTrips.slice(0, 5).concat(dTrips.slice(12)), 'cell', function (k) { return k; }, 'cell');
+  eq('...a dropoff cell under ' + P.DROP_MIN_N + ' measured trips is not named, only counted', [dCell.rows.length, dCell.thinCount],
+     [0, 1]);
+
+  /* --- offer size bands --- */
+
+  var zRows = [];
+  [2, 6, 10, 14].forEach(function (mi2, bi) {
+    for (var zz = 0; zz < 12; zz++) {
+      var oz = card({ id: 'z' + bi + '-' + zz, at: at(2 + zz % 3, 19, zz), miles: mi2, pay: 4 * mi2, perHour: 10 + 5 * bi + zz % 3 });
+      oz.town = 'Faketown';
+      zRows.push(oz);
+    }
+  });
+  var zt = P.sizeTable(zRows, function (o) { return o.town; }, function (k) { return k; }, 'town', P.tiersOf(zRows).of);
+  eq('size bands by card miles: every row per band, its n, median $/hr and $/mi', zt.rows.filter(function (r2) {
+    return r2.name === 'every town'; }).map(function (r2) { return [r2.band, r2.n, r2.median, r2.ppm]; }),
+     [['short, under 4 mi', 12, 11, 4], ['medium, 4–8 mi', 12, 16, 4], ['long, 8–12 mi', 12, 21, 4], ['12 mi and over', 12, 26, 4]]);
+  ok('...and per town, with a P90 and a top-10% share', zt.rows.filter(function (r2) { return r2.name === 'Faketown'; }).length === 4
+     && zt.rows.every(function (r2) { return typeof r2.p90 === 'number'; }));
+
+  /* --- the command, end to end: --streets, --waits, the stdout --- */
+
+  await (async function endToEnd() {
+    var http2 = require('http');
+    var jrows = [];
+    for (var e = 0; e < 40; e++) jrows.push(card({ id: 'e' + e, at: at(2 + e % 3, 19, e), pickup: 'Larkspur Ct & Ombre Rd, Faketown', perHour: 10 + e }));
+    var mainJ = { count: 40, total: 40, truncated: false, waits: [], taken: [], offers: jrows };
+    var rigJ = { count: 0, total: 0, truncated: false, waits: [{ name: 'Fernbrook Grill', n: 4, medianMin: 6.5 }], taken: [], offers: [] };
+    function server(handler) {
+      return new Promise(function (ok3) {
+        var sv = http2.createServer(handler);
+        sv.listen(0, '127.0.0.1', function () { ok3(sv); });
+      });
+    }
+    var srvM = await server(function (req, res) {
+      if (/^\/api\/journal/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify(mainJ)); return; }
+      if (/^\/api\/nbx$/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify({ ok: true, search: false, streets: false, route: false })); return; }
+      if (/^\/api\/streets$/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify({ ok: true, loaded: true })); return; }
+      if (/^\/api\/streets\/cross/.test(req.url)) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, a: { names: ['Larkspur Ct'] }, b: { names: ['Ombre Rd'] }, cutAt: null,
+                                 meets: [{ lat: BASE.lat + 0.01, lon: BASE.lon + 0.01, n: 1, spanM: 20 }] }));
+        return;
+      }
+      if (/^\/search/.test(req.url)) { res.writeHead(200); res.end('[]'); return; }
+      res.writeHead(404); res.end('{}');
+    });
+    var srvR = await server(function (req, res) {
+      if (/^\/api\/journal/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify(rigJ)); return; }
+      res.writeHead(404); res.end('{}');
+    });
+    var bM = 'http://127.0.0.1:' + srvM.address().port, bR = 'http://127.0.0.1:' + srvR.address().port;
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'places-e2e-'));
+    var outs = [], logA = console.log, errA = console.error;
+    console.log = function (x) { outs.push(String(x)); };
+    console.error = function () {};
+    try {
+      await P.main([bM, '--out', path.join(tmp, 'out'), '--cache', path.join(tmp, 'cache.json'), '--nominatim', bM,
+                    '--waits', bR, '--gap', '0']);
+    } finally { console.log = logA; console.error = errA; }
+    var said = outs.join('\n');
+    ok('end to end: the street index is found and said, even with --nominatim', /street index: http:\/\/127\.0\.0\.1:\d+\/api\/streets \(the server's own index\)/.test(said));
+    ok('...the corners are placed at corner level', /placed at corner level: 40/.test(said));
+    ok('...the store waits came from --waits, the main source having none', new RegExp('store waits: 1 from ' + bR.replace(/\./g, '\\.')).test(said));
+    ok('...the thresholds are printed', /Top-tier thresholds[^\n]*\n  6–9pm: top 25% >= \$\d/.test(said));
+    ok('...and the share tests', /Top-10% share, Towns: /.test(said));
+    var page2 = fs.readFileSync(path.join(tmp, 'out', 'index.html'), 'utf8');
+    ok('...the page\'s script parses, and the new CSVs are written', (function () {
+      try { new Function(page2.split('<script>\n')[1].split('\n</script>')[0]); } catch (e2) { return false; }
+      return ['top_share_tests.csv', 'coverage_levels.csv', 'good_towns.csv', 'waiting_towns.csv', 'dead_miles_towns.csv',
+              'size_restaurants.csv'].every(function (f3) { return fs.existsSync(path.join(tmp, 'out', f3)); });
+    }()));
+    ok('...the cache holds the street index\'s answer', /\/cross\?/.test(fs.readFileSync(path.join(tmp, 'cache.json'), 'utf8')));
+    srvM.close(); srvR.close();
+  }());
+
   /* --- the nightly refresh --- */
 
   await (async function nightly() {
@@ -885,6 +1231,22 @@ function nbx() {
     await run({ RIG_HOST: '' });
     await run({ RIG_HOST: '' });
     ok('...and only the live build and ' + 2 + ' more are kept', fs.readdirSync(out + '.d').length <= 3);
+    // RIG_URL: passed as --waits only when set and the rig answers.
+    fs.writeFileSync(path.join(bin, 'argnode'), '#!/bin/sh\necho "node $*" >> "' + calls + '"\nexec node "$@"\n');
+    fs.chmodSync(path.join(bin, 'argnode'), 0o755);
+    fs.writeFileSync(calls, '');
+    await run({ RIG_HOST: '', PLACES_NODE: path.join(bin, 'argnode') });
+    var noUrl = fs.readFileSync(calls, 'utf8');
+    ok('RIG_URL unset: no --waits', /^node .*places_report\.js/m.test(noUrl) && !/--waits/.test(noUrl));
+    fs.writeFileSync(calls, '');
+    fs.writeFileSync(path.join(tmpHome, 'places.env'), 'RIG_URL=' + base + '\n');
+    await run({ PLACES_NODE: path.join(bin, 'argnode') });
+    ok('RIG_URL set in the config file and the rig answering: passed as --waits', new RegExp('--waits ' + base.replace(/\./g, '\\.') + '( |$)', 'm')
+       .test(fs.readFileSync(calls, 'utf8')) && /store waits from the rig/.test(fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8')));
+    fs.writeFileSync(calls, '');
+    await run({ PLACES_NODE: path.join(bin, 'argnode'), RIG_URL: 'http://127.0.0.1:9' });
+    ok('...a rig that does not answer: not passed, and said', !/--waits/.test(fs.readFileSync(calls, 'utf8'))
+       && /the rig's server did not answer/.test(fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8')));
     srv.close();
   }());
 
