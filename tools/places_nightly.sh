@@ -19,6 +19,8 @@
 # own values — the rig's address among them — and is never committed.
 #   RIG_HOST          ssh destination of the rig, e.g. pi@<rig-address>; unset: no copy
 #   RIG_GPSLOG        the logs on the rig (default: gpslog/, under its home)
+#   RIG_SSH_KEY       a key file for ssh to the rig (default: ssh's own); one
+#                     with no passphrase, since cron has nobody to type it
 #   PLACES_SERVER     the server to read (default http://localhost:8082)
 #   PLACES_NOMINATIM  the NucBox's Nominatim (default http://localhost:8088)
 #   PLACES_GPS        the NucBox's GPS logs (default ~/gpslog)
@@ -39,7 +41,7 @@ if [ -f "$ENV_FILE" ]; then
         key="${line%%=*}"
         val="${line#*=}"
         case "$key" in
-            RIG_HOST|RIG_GPSLOG|PLACES_SERVER|PLACES_NOMINATIM|PLACES_GPS|PLACES_OUT|PLACES_LOG|PLACES_SINCE|PLACES_KEEP|RSYNC_TIMEOUT|SSH_TIMEOUT|PLACES_NODE) ;;
+            RIG_HOST|RIG_GPSLOG|RIG_SSH_KEY|PLACES_SERVER|PLACES_NOMINATIM|PLACES_GPS|PLACES_OUT|PLACES_LOG|PLACES_SINCE|PLACES_KEEP|RSYNC_TIMEOUT|SSH_TIMEOUT|PLACES_NODE) ;;
             *) continue ;;
         esac
         val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
@@ -52,6 +54,7 @@ fi
 
 RIG_HOST="${RIG_HOST:-}"
 RIG_GPSLOG="${RIG_GPSLOG:-gpslog/}"
+RIG_SSH_KEY="${RIG_SSH_KEY:-}"
 PLACES_SERVER="${PLACES_SERVER:-http://localhost:8082}"
 PLACES_NOMINATIM="${PLACES_NOMINATIM:-http://localhost:8088}"
 PLACES_GPS="${PLACES_GPS:-$HOME/gpslog}"
@@ -78,6 +81,7 @@ log "start: server $PLACES_SERVER, gps $PLACES_GPS, nominatim $PLACES_NOMINATIM"
 mkdir -p "$PLACES_GPS"
 if [ -n "$RIG_HOST" ]; then
     SSH="ssh -o BatchMode=yes -o ConnectTimeout=$SSH_TIMEOUT"
+    [ -n "$RIG_SSH_KEY" ] && SSH="$SSH -i $RIG_SSH_KEY -o IdentitiesOnly=yes"
     if $SSH "$RIG_HOST" true >> "$PLACES_LOG" 2>&1; then
         if rsync -a --timeout="$RSYNC_TIMEOUT" -e "$SSH" "$RIG_HOST:$RIG_GPSLOG" "$PLACES_GPS/" >> "$PLACES_LOG" 2>&1; then
             log "gps logs copied from the rig"

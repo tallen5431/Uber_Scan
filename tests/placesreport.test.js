@@ -725,10 +725,18 @@ function nbx() {
        /^rsync -a --timeout=300 -e ssh -o BatchMode=yes -o ConnectTimeout=10 driver@rig\.invalid:gpslog\/ .*\/gpslog\/$/m.test(callsTxt)
        && !/--delete/.test(callsTxt));
     ok('...and the run is logged', /done: /.test(log1));
+    // A key of its own for cron (RIG_SSH_KEY), passed to ssh and to rsync's ssh alike.
+    fs.writeFileSync(calls, '');
+    await run({ RIG_SSH_KEY: '/keys/id_nightly' });
+    var keyed = fs.readFileSync(calls, 'utf8');
+    ok('...RIG_SSH_KEY is the key ssh and rsync use, and the only one',
+       /^ssh -o BatchMode=yes -o ConnectTimeout=10 -i \/keys\/id_nightly -o IdentitiesOnly=yes driver@rig\.invalid true$/m.test(keyed)
+       && /^rsync .* -e ssh -o BatchMode=yes -o ConnectTimeout=10 -i \/keys\/id_nightly -o IdentitiesOnly=yes driver@rig/m.test(keyed));
     var first = fs.realpathSync(out);
     var firstPage = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
 
     // The server down: the run fails, the old report stays, nothing is left behind.
+    var builds = fs.readdirSync(out + '.d').length;
     down = true;
     var code2 = await run({ FAKE_SSH_STATUS: '255' });
     eq('a failed run exits non-zero', code2 !== 0, true);
@@ -737,7 +745,7 @@ function nbx() {
     ok('...says so in the log, and that the rig did not answer', /FAILED: the report did not build/.test(
       fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8'))
        && /the rig did not answer ssh/.test(fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8')));
-    eq('...and no half-built folder is kept', fs.readdirSync(out + '.d').length, 1);
+    eq('...and no half-built folder is kept', fs.readdirSync(out + '.d').length, builds);
     down = false;
     var code3 = await run({ PLACES_NODE: path.join(bin, 'halfnode') });
     ok('a run that wrote half a page and failed is never swapped in', code3 !== 0

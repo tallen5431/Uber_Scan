@@ -822,6 +822,7 @@ over the file). The file is this NucBox's own and is never committed:
 ```sh
 # ~/.config/uber-scan/places.env
 RIG_HOST=pi@<the rig's address>        # unset: no copy from the rig
+#RIG_SSH_KEY=~/.ssh/id_nightly         # a key with no passphrase, for cron
 #RIG_GPSLOG=gpslog/                    # on the rig, under its home
 #PLACES_SERVER=http://localhost:8082   # the server to read
 #PLACES_NOMINATIM=http://localhost:8088
