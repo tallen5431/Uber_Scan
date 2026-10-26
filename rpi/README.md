@@ -8504,13 +8504,19 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-node tests/placesreport.test.js #  96 on the NucBox's offline report of where
+node tests/placesreport.test.js # 178 on the NucBox's offline report of where
                                 #     good offers start: a pin only where one
                                 #     place answers inside the card's disc, no
                                 #     colour on a no-effect fixture or on an
                                 #     hour passed off as a place, the floor,
                                 #     the unplaced share and its pay gap, the
-                                #     wait after a drop, and no dropoff on the page
+                                #     wait after a drop, and no dropoff on the page;
+                                #     takes and real $/hr per place, card vs
+                                #     real, the waits join, strand risk, parked
+                                #     spells with held time cut out, the app
+                                #     split, add-on share, gone quiet, the
+                                #     weekly trend's floor, $/mi, and the
+                                #     nightly script's swap and failed run
 python3 rpi/test_parser.py      # 1603 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 322 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on

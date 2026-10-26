@@ -409,6 +409,355 @@ function nbx() {
   ok('...and the gate passed the good fixes', g.passed >= 290 && g.files === 1);
   eq('no log directory is no positions', P.gpsAt(path.join(logDir, 'none'), [at(3, 19, 2)]).at, [null]);
 
+  /* --- the second pass: takes, real time, waits, strand, apps, $/mi --- */
+
+  // Forty offers at Fernbrook Grill over four shift days, pay $10 for 30 card
+  // minutes and 5 card miles; fourteen taken: twelve put down by the GPS 40
+  // minutes after the Took, two by a Drop press 20 minutes after. Twenty at
+  // Quince Tea, never taken, $8 for 2 miles. Each GPS trip is followed five
+  // minutes after its drop by an offer the rig said take.
+  var FERN = off(0, 0), QUINCE = off(0.05, 0);
+  var mRows = [], mTaken = [];
+  for (var q = 0; q < 40; q++) {
+    var qAt = at(2 + q % 4, 18 + Math.floor(q / 4) % 3, (q * 7) % 60);
+    var row = card({ id: 'f' + q, at: qAt, pickup: 'Fernbrook Grill', pay: 10, minutes: 30, miles: 5,
+                     perHour: 18, app: q % 2 ? 'doordash' : 'uber',
+                     dropoff: q < 14 ? '742 Ombre Avenue, ' + (q < 10 ? 'Faketown' : 'Otherville') : null });
+    row.pin = FERN;
+    mRows.push(row);
+    if (q < 14) {
+      var by = q < 12 ? 'gps' : 'drop';
+      var ends = qAt + (by === 'gps' ? 40 : 20) * 60000;
+      mTaken.push({ id: row.id, app: row.app, pay: 10, minutes: 30, miles: 5, tookAt: qAt, endedAt: ends, by: by });
+      var nx = card({ id: 'go' + q, at: ends + 5 * 60000, state: 'go', perHour: 30, pickup: null });
+      mRows.push(nx);
+    }
+  }
+  for (q = 0; q < 20; q++) {
+    var qr = card({ id: 'q' + q, at: at(2 + q % 3, 19, q), pickup: 'Quince Tea', pay: 8, miles: 2, perHour: 16,
+                    text: q < 5 ? 'Uber Eats $8.00 incl. expected tip 20 min (2.0 mi) total' : null });
+    qr.pin = QUINCE;
+    mRows.push(qr);
+  }
+  var mWaits = [{ name: 'Fernbrook Grill', n: 4, medianMin: 6.5 },
+                { name: 'Quince Tea', n: 2, medianMin: 3 }, { name: 'Quince Tea', n: 3, medianMin: 9 }];
+  var otherFix = off(0.4123, 0.4123);
+  var rep6 = P.analyse(mRows, mTaken, byHand(mRows), function (t, o) {
+    return { at: /Otherville/.test(o.dropoff || '') ? otherFix : dropFix, how: 'gps' };
+  }, { now: 0, waits: mWaits });
+  var more = rep6.views.all.more;
+  function rowOf(t, name) { return t.rows.filter(function (r) { return r.name === name; })[0]; }
+  var fern = rowOf(more.takesPlace, 'Fernbrook Grill');
+  eq('takes: offered and taken per place, off takenRuns\' ids', [fern.offered, fern.taken, fern.take], [40, 14, 0.35]);
+  ok('...with a Wilson interval round the rate (' + fern.takeCi + ')', fern.takeCi[0] < 0.35 && fern.takeCi[1] > 0.35);
+  eq('...and only the put-downs at the door are timed (gps/screen, not a Drop press)', fern.timed, 12);
+  eq('real $/hr is pay over Took-to-put-down', fern.realPerHour, 15);
+  eq('card vs real: real minutes less card minutes, and their ratio', [fern.cardVsReal, fern.ratio], [10, 1.33]);
+  ok('...with an interval at ' + P.DESC_MIN_N + ' timed trips or more', fern.realCi && fern.cardVsRealCi);
+  eq('a place never taken is listed with its offers and no take', [rowOf(more.takesPlace, 'Quince Tea').taken,
+     rowOf(more.takesPlace, 'Quince Tea').realPerHour], [0, null]);
+  eq('realOf: a Drop press measures nothing', P.realOf({ by: 'drop', tookAt: 0, endedAt: 60000, pay: 5 }), null);
+  eq('...nor a put-down before its Took', P.realOf({ by: 'gps', tookAt: 5, endedAt: 5, pay: 5 }), null);
+  var few = P.takesTable(mRows.slice(0, 8), P.runsOf(mTaken.slice(0, 2)), function (o) { return o.pickup; },
+                         function (k) { return k; }, 'place');
+  eq('under ' + P.REAL_MED_N + ' timed trips the medians are not printed, only the n',
+     [few.rows[0].timed, few.rows[0].realPerHour, few.rows[0].realCi], [2, null, null]);
+
+  // Restaurant waits, joined by name only where it cannot be a guess.
+  var wt = more.waits;
+  eq('waits: one store of the name, one place of it here: joined', [rowOf(wt, 'Fernbrook Grill').wait,
+     rowOf(wt, 'Fernbrook Grill').waitN], [6.5, 4]);
+  eq('...two stores of a name on record: not joined, and says why', [rowOf(wt, 'Quince Tea').wait,
+     rowOf(wt, 'Quince Tea').why], [null, 'several stores of this name on record']);
+  var chainRows = [];
+  for (q = 0; q < 12; q++) {
+    var cr = card({ id: 'mc' + q, at: at(2 + q % 2, 19, q), pickup: 'McDonald\'s' });
+    cr.pin = off(0.1, 0);
+    chainRows.push(cr);
+  }
+  var repC = P.analyse(chainRows, [], byHand(chainRows), function () { return null; },
+                       { now: 0, waits: [{ name: 'McDonalds', n: 5, medianMin: 4 }] });
+  eq('...a chain\'s name is never joined (which branch is a guess)', rowOf(repC.views.all.more.waits, 'McDonald\'s').why,
+     'a chain: which branch, a guess');
+
+  // Strand risk per store.
+  var st6 = rowOf(more.strand, 'Fernbrook Grill');
+  eq('strand: median card miles and the trips taken there', [st6.miles, st6.trips], [5, 14]);
+  eq('...where they ended, by town, counts only', st6.towns, 'Faketown 10 · Otherville 4');
+  ok('...the cell the floor names, named by its cell; the thin one counted, not named (' + st6.cells + ')',
+     /^cell near [\d.]+, [\d.]+ 10 · cells too thin to name 4$/.test(st6.cells));
+  eq('...its own measured wait after, and the wait its towns predict', [st6.ownWait, st6.expectWait, st6.covered],
+     [5, 5, 10]);
+
+  // Uber against DoorDash.
+  var ap = rowOf(more.appsPlace, 'Fernbrook Grill');
+  eq('apps: each app\'s n, $/hr, $/mi and take share', [ap.uberN, ap.doordashN, ap.uberPerHour, ap.uberPpm, ap.uberTake,
+     ap.doordashTake], [20, 20, 18, 2, 0.35, 0.35]);
+  eq('...an app read off the row\'s text where the row has none', P.appOf({ text: 'DoorDash $7.50 Guaranteed (incl. tips) 4.2 mi 30 min Deliver by 8:15 PM Accept' }),
+     'doordash');
+  eq('...and none where neither says', P.appOf({}), null);
+  eq('...the first row is every area together', more.appsPlace.rows[0].name, 'every place');
+
+  // $/mi: the offers page's payPerMile, a column and its own view.
+  eq('$/mi is pay over card miles', P.payPerMile({ pay: 10, miles: 4 }), 2.5);
+  eq('...null under a tenth of a mile, or without both', [P.payPerMile({ pay: 10, miles: 0.05 }), P.payPerMile({ pay: 10 })],
+     [null, null]);
+  var pp = rowOf(more.ppmPlace, 'Fernbrook Grill');
+  eq('...per place with its interval', [pp.n, pp.ppm, pp.ppmCi], [40, 2, [2, 2]]);
+  eq('...and Quince Tea at $4/mi sorts first', more.ppmPlace.rows[0].name, 'Quince Tea');
+  var rankedFern = rep6.views.all.place.groups.filter(function (g) { return rep6.places[g.name].label === 'Fernbrook Grill'; })[0];
+  eq('...and the ranked table carries it as a column', [rankedFern.ppm, rankedFern.ppmN], [2, 40]);
+  var page6 = P.html(rep6);
+  ok('...said on the page to be for reading, not an accept rule', /\$\/mi is shown for reading, not as an accept rule/.test(page6));
+
+  // The page and its CSVs hold no dropoff.
+  ok('the second pass\'s page holds no dropoff text', page6.indexOf('Ombre') < 0 && page6.indexOf('742') < 0);
+  ok('...nor a drop position', page6.indexOf(String(dropFix.lat).slice(0, 7)) < 0 && page6.indexOf('12.712') < 0);
+  var csv6 = Object.keys(P.MORE_CSVS).map(function (k) {
+    return P.tableCsv(rep6, P.MORE_CSVS[k][0], P.MORE_CSVS[k][1]);
+  }).join('');
+  ok('...nor do its CSVs', csv6.indexOf('Ombre') < 0 && csv6.indexOf(String(dropFix.lat).slice(0, 7)) < 0
+     && csv6.indexOf('12.712') < 0);
+  ok('...and no trip list is embedded', !/"offer"/.test(page6.split('id="data">')[1]));
+  ok('every new tab is on the page', ['takes', 'apps', 'ppm', 'waits', 'strand', 'busy', 'stack', 'quiet', 'trend']
+     .every(function (t) { return page6.indexOf('data-tab="' + t + '"') >= 0; }));
+  ok('...and the page\'s script still parses', (function () {
+    try { new Function(page6.split('<script>\n')[1].split('\n</script>')[0]); return true; } catch (e) { return false; }
+  }()));
+  ok('a CSV splits an interval into two columns', /takeCi_lo,takeCi_hi/.test(P.tableCsv(rep6, P.MORE_CSVS['takes_places.csv'][0], true)));
+
+  /* --- add-on and stacking chance --- */
+
+  // scan_pi's own patterns, held equal to the copies here.
+  var scanPi = fs.readFileSync(path.join(__dirname, '..', 'rpi', 'scan_pi.py'), 'utf8');
+  [['EARLY_LOOK', P.EARLY_LOOK], ['MULTI_ORDER', P.MULTI_ORDER], ['MANY_DROPOFFS', P.MANY_DROPOFFS]].forEach(function (p) {
+    var m = new RegExp('^' + p[0] + " = re\\.compile\\(r'(.*)', re\\.I\\)$", 'm').exec(scanPi);
+    eq('the ' + p[0] + ' pattern is scan_pi\'s', m && m[1], p[1].source);
+  });
+  var sRows = [];
+  for (q = 0; q < 20; q++) {
+    var sr = card({ id: 's' + q, at: at(2 + q % 2, 20, q), pickup: 'Stack Shop',
+                    text: q < 9 ? (q < 5 ? 'plain' : 'Pickup (2 orders) Stack Shop') : q === 9 ? 'Early look $8' : 'plain' });
+    if (q < 5) sr.addon = true;
+    if (q === 10) sr.manyDropoffs = true;
+    if (q === 11) { sr.multiOrder = false; sr.text = 'Pickup (2 orders)'; }
+    sr.pin = off(0.2, 0);
+    sRows.push(sr);
+  }
+  var bare = card({ id: 'bare' });
+  delete bare.text;
+  eq('a row with neither field nor text is unread, not "no"', P.flagsOf(bare).multiOrder, null);
+  var repS = P.analyse(sRows, [], byHand(sRows), function () { return null; }, { now: 0 });
+  var sk = rowOf(repS.views.all.more.stack, 'Stack Shop');
+  eq('stacking: add-on, more than one order, more than one dropoff, early look, any',
+     [sk.n, sk.addon, sk.multiOrder, sk.manyDropoffs, sk.earlyLook, sk.any], [20, 0.25, 0.2, 0.05, 0.05, 0.55]);
+  ok('...a row\'s own field wins over its text', P.flagsOf(sRows[11]).multiOrder === false);
+
+  /* --- gone quiet, and the trend by week --- */
+
+  function day(d, h, mm) { return new Date(2026, 2, d, h, mm || 0).getTime(); }   // March; d > 31 runs into April
+  var qRows = [];
+  for (var d = 1; d <= 41; d++) {
+    [19, 20].forEach(function (h, j) {
+      var t0 = day(d, h, 10 * j);
+      var s1 = card({ id: 'st' + d + h, at: t0, pickup: 'Steady Spot', perHour: 20 });
+      s1.pin = off(0, 0.1);
+      qRows.push(s1);
+      if (d <= 25) {
+        var s2 = card({ id: 'oh' + d + h, at: t0 + 60000, pickup: 'Old Haunt', perHour: 20 });
+        s2.pin = off(0, 0.2);
+        qRows.push(s2);
+      }
+      var s3 = card({ id: 'fs' + d + h, at: t0 + 120000, pickup: 'Falling Star', perHour: d <= 26 ? 30 : 12 });
+      s3.pin = off(0, 0.3);
+      qRows.push(s3);
+    });
+  }
+  var repQ = P.analyse(qRows, [], byHand(qRows), function () { return null; }, { now: 0 });
+  var qp = repQ.quiet.place;
+  var oh = rowOf(qp, 'Old Haunt'), sts = rowOf(qp, 'Steady Spot'), fsr = rowOf(qp, 'Falling Star');
+  eq('gone quiet: split ' + P.QUIET_DAYS + ' days before the record\'s newest offer', qp.cut, '2026-03-27');
+  eq('...a place that stopped sending: its last day, and flagged fewer offers', [oh.last, oh.recent, oh.flag],
+     ['2026-03-25', 0, 'fewer offers']);
+  ok('...on a Poisson p (' + oh.countP + ') against what its rate per shift day predicts (' + oh.expected + ')',
+     oh.countP < 0.05 && oh.expected > 20);
+  eq('...a place that kept its rate is not flagged', sts.flag, '');
+  eq('...a place whose hour-held score fell is flagged lower score', fsr.flag, 'lower score');
+  ok('...its two sides\' scores say so (' + fsr.scoreBefore + ' then ' + fsr.scoreRecent + ')',
+     fsr.scoreBefore > 0 && fsr.scoreRecent < 0 && fsr.scoreP < 0.05);
+  var thinQ = P.quietTable(qRows.filter(function (o) { return o.pickup === 'Old Haunt' && o.at < day(10, 0); })
+    .concat(qRows.filter(function (o) { return o.pickup === 'Steady Spot'; })), function (o) { return o.pickup; },
+    function (k) { return k; }, {}, 'place');
+  eq('...and too few offers before is never flagged, whatever the silence', [rowOf(thinQ, 'Old Haunt').countP,
+     rowOf(thinQ, 'Old Haunt').flag], [null, '']);
+
+  eq('ISO weeks: 1 Jan 2026 is in its first', P.isoWeek('2026-01-01'), '2026-W01');
+  eq('...and 1 Jan 2027 in 2026\'s fifty-third', P.isoWeek('2027-01-01'), '2026-W53');
+  var tr = rowOf(repQ.trend.place, 'Falling Star');
+  ok('trend: every week shown holds ' + P.DESC_MIN_N + ' or more', tr.spark.every(function (w) { return w.n >= P.DESC_MIN_N; }));
+  ok('...the lone Sunday that opens the record is not shown', tr.spark[0].w === '2026-W10' && tr.spark.length === 6);
+  ok('...the score is up then down (' + tr.first + ', ' + tr.last + ')', tr.first > 0 && tr.last < 0);
+  var pageQ = P.html(repQ);
+  var embQ = JSON.parse(pageQ.split('<script type="application/json" id="data">')[1].split('</script>')[0]);
+  ok('...and the page carries its weeks for the line it draws', rowOf(embQ.trend.place, 'Falling Star').spark.length === 6
+     && /class="spark"/.test(pageQ));
+  ok('the trend CSV has a line per week', P.tableCsv(repQ, P.MORE_CSVS['trend_places.csv'][0], false)
+     .split('\n').filter(function (l) { return /^Falling Star,/.test(l); }).length === 6);
+
+  /* --- how busy each area is: spells parked, no order in the car --- */
+
+  function fixesAt(t0s, secs, pt, step, wobble) {
+    var out = [];
+    for (var k2 = 0; k2 <= secs; k2 += step) out.push([t0s + k2, pt.lat + (k2 % 20 ? wobble : -wobble), pt.lon]);
+    return out;
+  }
+  var sp0 = at(3, 18, 0) / 1000;
+  var parked = fixesAt(sp0, 1200, off(0.01, 0.01), 10, 0.0002);    // 20 min, wandering ~22 m
+  eq('a car parked 20 minutes is one spell', P.spellsOf(parked, []).map(function (x) { return (x.to - x.from) / 60000; }), [20]);
+  eq('...an order in the car cuts its time out (5 + 8 minutes left)', P.spellsOf(parked, [[(sp0 + 300) * 1000, (sp0 + 720) * 1000]])
+     .map(function (x) { return (x.to - x.from) / 60000; }), [5, 8]);
+  eq('...and a piece shorter than ' + P.SPELL_MIN_S / 60 + ' minutes is no spell',
+     P.spellsOf(parked, [[(sp0 + 60) * 1000, (sp0 + 1140) * 1000]]), []);
+  var driving = [];
+  for (var k3 = 0; k3 < 120; k3++) driving.push([sp0 + k3 * 10, BASE.lat + k3 * 0.0005, BASE.lon]);   // ~55 m a fix
+  eq('a car moving is never parked', P.spellsOf(driving, []), []);
+  var gapped = fixesAt(sp0, 150, off(0.01, 0.01), 10, 0).concat(fixesAt(sp0 + 150 + P.SPELL_GAP_S + 10, 150, off(0.01, 0.01), 10, 0));
+  eq('a gap with no fix (the rig off) ends a spell', P.spellsOf(gapped, []), []);
+  var drift = fixesAt(sp0, 600, off(0.01, 0.01), 10, 0).concat([[sp0 + 610, BASE.lat + 0.01 + 0.002, BASE.lon + 0.01]])
+    .concat(fixesAt(sp0 + 620, 300, { lat: BASE.lat + 0.012, lon: BASE.lon + 0.01 }, 10, 0));
+  eq('...and moving more than ' + P.SPELL_M + ' m starts another', P.spellsOf(drift, []).length, 2);
+  eq('held time is every taken run, Took to put-down', P.heldOf([{ tookAt: 1, endedAt: 9, by: 'replaced' }, { tookAt: 5 }]),
+     [[1, 9]]);
+
+  // Ten spells at one cell on five shift days, 6-9pm, half an hour each,
+  // three offers counted in each and the first take 12 minutes in; one spell
+  // at another cell, under the floor.
+  var bRows = [], bSpells = [];
+  for (var b2 = 0; b2 < 10; b2++) {
+    var from = at(2 + b2 % 5, 18 + Math.floor(b2 / 5), 0);
+    bSpells.push({ from: from, to: from + 30 * 60000, lat: BASE.lat + 0.01, lon: BASE.lon + 0.01 });
+    [[4, 'no'], [12, 'go'], [20, 'go']].forEach(function (x) {
+      bRows.push(card({ id: 'b' + b2 + x[0], at: from + x[0] * 60000, state: x[1], pickup: null }));
+    });
+  }
+  bSpells.push({ from: at(4, 18, 0), to: at(4, 18, 40), lat: BASE.lat + 0.2, lon: BASE.lon });
+  var busyCell = P.cellOf({ lat: BASE.lat + 0.01, lon: BASE.lon + 0.01 }).id;
+  var cellTown = {}; cellTown[busyCell] = 'Faketown';
+  var repB = P.analyse(bRows, [], [], function () { return null; }, { now: 0, spells: bSpells, cellTown: cellTown });
+  var bt = rowOf(repB.views.all.more.busyTown, 'Faketown');
+  eq('busy: spells, days, hours waited, offers an hour, share that saw a take, minutes to it',
+     [bt.n, bt.days, bt.hours, bt.perHour, bt.goShare, bt.goMin, bt.block], [10, 5, 5, 6, 1, 12, '6–9pm']);
+  var thinB = repB.views.all.more.busyGrid.rows.filter(function (r) { return r.n === 1; })[0];
+  eq('...under the floor a row says its n and nothing else', [thinB.n, thinB.perHour, thinB.goMin], [1, null, null]);
+  eq('...and a picked block holds only its own spells', repB.views[5].more.busyTown.rows.length, 0);
+  ok('...and the page says what a spell is', /no order in the car/.test(P.html(repB)));
+
+  // The GPS log read for spells by load_fixes, thinned (the log above: 300
+  // seconds parked, so one spell of five minutes).
+  var gf = P.gpsFixes(logDir, at(3, 18, 0), at(3, 21, 0), 10);
+  ok('the GPS log thinned to one fix per 10 s through the gate (' + gf.fixes.length + ')', gf.fixes.length >= 28 && gf.fixes.length <= 31);
+  eq('...and the five minutes parked in it are one spell', P.spellsOf(gf.fixes, []).length, 1);
+
+  // The town of a spell's cell: the NucBox's reverse answer for the cell's
+  // centre, asked once and kept.
+  var revAsked = [];
+  var revFetch = function (u) {
+    revAsked.push(u);
+    return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ address: { town: 'Faketown' } }); } });
+  };
+  var revCache = { answers: {}, hits: 0, fresh: 0 };
+  var cc = P.cellOf(off(0.01, 0.01));
+  var tn = await P.cellTownOf(revFetch, 'http://nucbox.invalid:8088', revCache, cc);
+  await P.cellTownOf(revFetch, 'http://nucbox.invalid:8088', revCache, cc);
+  eq('a cell\'s town is the reverse answer for its centre, asked once', [tn, revAsked.length], ['Faketown', 1]);
+  ok('...at the cell\'s centre, not a spell\'s own fix', revAsked[0].indexOf('lat=' + cc.lat.toFixed(5)) >= 0);
+
+  /* --- the nightly refresh --- */
+
+  await (async function nightly() {
+    var http = require('http');
+    var cpN = require('child_process');
+    var tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'places-nightly-'));
+    var bin = path.join(tmpHome, 'bin');
+    fs.mkdirSync(bin);
+    var calls = path.join(tmpHome, 'calls.log');
+    // Fake ssh and rsync: they say what they were asked, and "copy" one log.
+    fs.writeFileSync(path.join(bin, 'ssh'), '#!/bin/sh\necho "ssh $*" >> "' + calls + '"\nexit ${FAKE_SSH_STATUS:-0}\n');
+    fs.writeFileSync(path.join(bin, 'rsync'), '#!/bin/sh\necho "rsync $*" >> "' + calls + '"\n'
+                     + 'for a; do last="$a"; done\ntouch "$last/2026-03-03_1900.jsonl"\nexit 0\n');
+    // A node that writes half a page and fails.
+    fs.writeFileSync(path.join(bin, 'halfnode'), '#!/bin/sh\nwhile [ "$1" != "--out" ]; do shift; done\n'
+                     + 'mkdir -p "$2"; printf "<!doctype html><html><body>half" > "$2/index.html"; exit 1\n');
+    ['ssh', 'rsync', 'halfnode'].forEach(function (f) { fs.chmodSync(path.join(bin, f), 0o755); });
+    var journal = { count: 1, total: 1, truncated: false, waits: [], taken: [],
+                    offers: [card({ id: 'only', pickup: 'Nowhere Diner' })] };
+    var down = false;
+    var srv = http.createServer(function (req, res) {
+      if (down) { res.writeHead(500); res.end('{}'); return; }
+      if (/^\/api\/journal/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify(journal)); return; }
+      if (/^\/api\/nbx$/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify({ search: false, streets: false })); return; }
+      if (/^\/search/.test(req.url)) { res.writeHead(200); res.end('[]'); return; }
+      res.writeHead(404); res.end('{}');
+    });
+    await new Promise(function (ok2) { srv.listen(0, '127.0.0.1', ok2); });
+    var base = 'http://127.0.0.1:' + srv.address().port;
+    var out = path.join(tmpHome, 'places-report');
+    function run(extra) {
+      var env = Object.assign({}, process.env, { HOME: tmpHome, PATH: bin + ':' + process.env.PATH,
+        PLACES_SERVER: base, PLACES_NOMINATIM: base, PLACES_ENV: path.join(tmpHome, 'places.env') }, extra || {});
+      return new Promise(function (done) {
+        var ch = cpN.spawn('bash', [path.join(__dirname, '..', 'tools', 'places_nightly.sh')], { env: env });
+        ch.on('close', function (code) { done(code); });
+      });
+    }
+    // The rig's address only in the config file, as the README says to keep it.
+    fs.writeFileSync(path.join(tmpHome, 'places.env'), '# this NucBox only\nRIG_HOST=driver@rig.invalid\n');
+    var code1 = await run();
+    var log1 = fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8');
+    eq('nightly: a good run exits 0', code1, 0);
+    ok('...the report is a symlink to its build, with its page and CSVs', fs.lstatSync(out).isSymbolicLink()
+       && /Where the good offers start/.test(fs.readFileSync(path.join(out, 'index.html'), 'utf8'))
+       && fs.existsSync(path.join(out, 'takes_places.csv')));
+    var callsTxt = fs.readFileSync(calls, 'utf8');
+    ok('...RIG_HOST came from the config file and was asked first, in batch mode',
+       /^ssh -o BatchMode=yes -o ConnectTimeout=10 driver@rig\.invalid true$/m.test(callsTxt));
+    ok('...the logs were copied with rsync -a, a timeout and no delete',
+       /^rsync -a --timeout=300 -e ssh -o BatchMode=yes -o ConnectTimeout=10 driver@rig\.invalid:gpslog\/ .*\/gpslog\/$/m.test(callsTxt)
+       && !/--delete/.test(callsTxt));
+    ok('...and the run is logged', /done: /.test(log1));
+    var first = fs.realpathSync(out);
+    var firstPage = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
+
+    // The server down: the run fails, the old report stays, nothing is left behind.
+    down = true;
+    var code2 = await run({ FAKE_SSH_STATUS: '255' });
+    eq('a failed run exits non-zero', code2 !== 0, true);
+    eq('...and leaves the old report where it was, untouched', [fs.realpathSync(out),
+       fs.readFileSync(path.join(out, 'index.html'), 'utf8') === firstPage], [first, true]);
+    ok('...says so in the log, and that the rig did not answer', /FAILED: the report did not build/.test(
+      fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8'))
+       && /the rig did not answer ssh/.test(fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8')));
+    eq('...and no half-built folder is kept', fs.readdirSync(out + '.d').length, 1);
+    down = false;
+    var code3 = await run({ PLACES_NODE: path.join(bin, 'halfnode') });
+    ok('a run that wrote half a page and failed is never swapped in', code3 !== 0
+       && fs.readFileSync(path.join(out, 'index.html'), 'utf8') === firstPage);
+    // A plain folder from before the script is kept aside once, then replaced.
+    fs.unlinkSync(out);
+    fs.mkdirSync(out);
+    fs.writeFileSync(path.join(out, 'index.html'), 'old');
+    var code4 = await run({ RIG_HOST: '' });
+    ok('a report folder from before the script is moved aside and replaced by the link', code4 === 0
+       && fs.lstatSync(out).isSymbolicLink()
+       && fs.readdirSync(out + '.d').some(function (n) { return /^before-nightly-/.test(n); }));
+    ok('...RIG_HOST set empty in the environment wins over the file', /RIG_HOST not set/.test(
+      fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8')));
+    await run({ RIG_HOST: '' });
+    await run({ RIG_HOST: '' });
+    ok('...and only the live build and ' + 2 + ' more are kept', fs.readdirSync(out + '.d').length <= 3);
+    srv.close();
+  }());
+
   /* --- the command line, and where it may write --- */
 
   var ROOT = path.resolve(__dirname, '..');

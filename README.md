@@ -545,6 +545,7 @@ used. A one-line key across the map's foot names the marks on it.
 | `tools/make-cert.sh` | `npm run cert` — local certificate authority for https |
 | `tools/street_index.py` | Makes the street index once, on the NucBox, from the Georgia extract it already holds — osmium-tool for the cutting, Python's standard library for the rest |
 | `tools/install-sync.sh` | Puts the rig's journal on a timer to the machine at home; see the rig's README |
+| `tools/places_report.js`, `tools/places_nightly.sh` | The NucBox's offline report of where good offers start, and its nightly rebuild; see *Where the good offers start* |
 | [`AUDITS.md`](AUDITS.md) | What has already been looked at: what was fixed, what is known and still open, and — the point of the file — proposals that were checked against the code and found to be wrong, so the same ground is not dug twice. Read it before starting anything that sounds like an improvement |
 
 ## Looking at a shift afterwards
@@ -761,6 +762,88 @@ What it does:
   the town and the 2-mile cell the trip ended in (the GPS log at the drop,
   else the dropoff's door).
 * An hour filter in the page, and CSVs of every table beside `index.html`.
+
+**The second pass, experimental and descriptive** (the owner, 26 Oct 2026:
+"Go ahead with all of them ... having $/mi data is also a good metric to
+see"). One tab each, every table sortable by a click on its heading, every
+table also a CSV. Counts, medians and intervals only: nothing in these tabs is
+ranked by a test or coloured, and none of it is a rule (no $/mile rule, no
+payout floor, no pace, no weekday term — AUDITS.md, Settled). An area needs 10
+offers (or one take) for a row; an interval needs 10 values.
+
+* **Your takes** (`takes_*.csv`): per place, town and cell, offers you took
+  (the offer's id among `/api/journal`'s `taken`, server.js takenRuns) over
+  offered, with a Wilson interval; **real $/hr** = pay ÷ (put-down − Took),
+  only for orders put down at the door by the GPS or the app's screen (a Drop
+  press can be early and is left out); **real − card** minutes and real ÷ card.
+  A median needs 3 timed trips.
+* **Uber vs DoorDash** (`apps_*.csv`): each app's n, median $/hr, median $/mi
+  and the share taken, side by side. The app is the row's, else offer-parser.js
+  `screenType` off its text.
+* **$/mi** (`per_mile_*.csv`, and a column in the ranked tables): the offers
+  page's payPerMile, pay ÷ card miles, median and interval, per app too —
+  shown for reading, not as an accept rule.
+* **Store waits** (`waits.csv`): the rig's measured waits (`waits`, server.js
+  storeWaitsOut) beside a place's pay, joined by name (Assemble.sameStore) only
+  where it is not a guess: no chain's name, one store of the name on record,
+  one place of it in the report.
+* **Strand risk** (`strand.csv`): per store, median card miles, where its taken
+  trips ended (towns, and 2-mile cells only where "Where trips leave you"
+  names them), its own minutes to the next take after them, and the wait its
+  trips' towns predict.
+* **Busy** (`busy_*.csv`, needs `--gps`): spells parked — every fix within
+  150 m for 3 minutes or more, no fix gap over 5 minutes, **no order in the
+  car** (every taken order's Took to put-down cut out) — by town (the NucBox
+  Nominatim's name for the 2-mile cell's centre) or cell and three-hour block:
+  hours waited, offers an hour, the share that saw a take and the minutes to it.
+  10 spells on 2 shift days, or the row gives its n only.
+* **Add-ons** (`stacking.csv`): per store, the share of offers that were an
+  Uber add-on, more than one order, more than one dropoff, or an early look.
+* **Gone quiet** (`quiet_*.csv`): each place's last offer, and a flag where
+  the last 14 days (to the record's newest offer) brought far fewer offers per
+  shift day out than before (30+ before, 3+ shift days since, 5+ expected,
+  Poisson p < 0.05), or a lower hour-held score (10+ each side, rank test
+  p < 0.05).
+* **Trend** (`trend_*.csv`): each ranked place's and town's hour-held score by
+  ISO week, weeks with 10+ offers only, drawn as a small line.
+
+### Every night, on the NucBox
+
+`tools/places_nightly.sh` copies the rig's GPS logs over when the rig answers,
+rebuilds the report into a new folder, and swaps it in only when the build
+succeeded: `~/places-report` becomes a symlink to the newest build
+(`~/places-report.d/`), replaced by one rename, so the page is never half
+written and a failed night leaves the old report as it was (and exits
+non-zero). It logs to `~/places-report.log`.
+
+Its settings live in `~/.config/uber-scan/places.env` (the environment wins
+over the file). The file is this NucBox's own and is never committed:
+
+```sh
+# ~/.config/uber-scan/places.env
+RIG_HOST=pi@<the rig's address>        # unset: no copy from the rig
+#RIG_GPSLOG=gpslog/                    # on the rig, under its home
+#PLACES_SERVER=http://localhost:8082   # the server to read
+#PLACES_NOMINATIM=http://localhost:8088
+#PLACES_GPS=~/gpslog
+#PLACES_OUT=~/places-report
+#PLACES_LOG=~/places-report.log
+#PLACES_SINCE=2026-09-01
+```
+
+Once, so rsync can reach the rig with no password from cron:
+
+```sh
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519   # if there is no key yet
+ssh-copy-id pi@<the rig's address>
+ssh -o BatchMode=yes pi@<the rig's address> true && echo ok
+```
+
+Then `crontab -e` and add:
+
+```
+17 5 * * * bash ~/HTTP_Server/projects/uber_scan/tools/places_nightly.sh
+```
 
 **It holds real places, so it is written outside the repository** (it refuses
 a path inside it) and is not to be committed. Dropoffs are counted by area

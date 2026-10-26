@@ -4518,6 +4518,50 @@ or position is written, and a cell under ten trips is not named. The open
 question is the real result: whether anything below town scale beats chance
 on the larger journal, which the entry above found it did not on one week.
 
+**The places report's second pass: takes, real time, waits, strand risk,
+busy areas, the app split, add-ons, gone quiet, a weekly trend and $/mi (the
+owner, 26 Oct 2026: "Go ahead with all of them, fast track to experimental,
+having $/mi data is also a good metric to see").** Added to
+`tools/places_report.js`, each item with checks in
+`tests/placesreport.test.js`; not yet run on the real journal, so no figure is
+recorded. Experimental and descriptive: counts, medians, bootstrap or Wilson
+intervals, no test-ranked order and no colour, so the entry above's
+colour-only-where-it-beats-chance rule is untouched, and nothing reaches the
+rig. Held to the Settled list:
+
+- *$/mi is read, not ruled.* The offers page's own payPerMile (pay over card
+  miles, nothing off, none under 0.1 mi) as a column and a sortable view, with
+  the page saying it is not an accept rule. No floor, no band, no verdict.
+- *Real time is a clock less a clock.* Took to put-down off takenRuns, and only
+  for put-downs at the door (`by` gps or screen): a Drop press can come early,
+  so those are counted and left out. No minutes re-timed at a pace or worked
+  out from distance.
+- *No weekday term.* The weekly trend is ISO weeks of the hour-held score, a
+  line to look at; weeks under 10 offers are left out, not drawn as zero.
+- *Dropoffs stay counts by area.* Strand risk names a trip's town, and its
+  2-mile cell only where "Where trips leave you" already names that cell (10+
+  trips); the page and CSVs are checked for the dropoff's text and position.
+- *Waits are joined only where the join is not a guess* — server.js
+  storeWaitFor's no-pin rule: not a chain's name, one store of the name on
+  record, one place of it in the report.
+- *Busy spells are chosen thresholds, not measured ones*: 150 m, 3 minutes, a
+  5-minute fix gap ending a spell, every taken order's Took to put-down cut
+  out. Known gap: an order taken and never put down has no takenRuns row, so
+  its time counts as waiting; and the spell's town is the NucBox map's name
+  for its 2-mile cell's centre, which can straddle a town line.
+- *Gone quiet is a rate per shift day out*, against the record's newest offer
+  rather than today, so a week off or a journal that stopped syncing is not a
+  place going quiet; flagged only on 30+ offers before, 3+ shift days since,
+  5+ expected, Poisson p < 0.05 (or a rank test on the score, 10+ each side).
+- *Add-on, multi-order, many-dropoff and early-look flags* are the row's own
+  fields where it has them, else scan_pi's patterns over the row's texts —
+  copies the suite holds equal to rpi/scan_pi.py's.
+
+The nightly rebuild, `tools/places_nightly.sh`, swaps a symlink by one rename
+only after a build that succeeded and wrote a page; a failed or half-written
+run leaves the served report as it was. The rig's address is a setting in a
+file on the NucBox, never in the repository.
+
 ---
 
 **One unlabelled bracketed leg on a lone card is called whole, and on a ride card that is the drive to the rider alone.** is_whole's single-leg clause says 'Uber labels every leg of a ride (away, trip, total)'. laid_out_approach measured 'away' on 0 of 1,166 rows. Measured on the week: rows 444 frame 0 and 805 frame 1 are ride frames whose trip leg did not read, and they read whole on the approach alone. Row 805's merge recovered; row 444's journal row is whole=0 for another reason. Not fixed, because the same shape is also an Eats card whose `total` did not read (`tota`, `te al`): 7 frames on 6 rows, all whole jobs. Telling them apart needs a text-level ride signal carried through the accumulator. half_a_ride answers it only where another card is in shot, and 'whole / one bare leg on a frame holding ONE card is left as it was' pins that boundary.
