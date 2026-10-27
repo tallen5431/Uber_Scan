@@ -926,6 +926,100 @@ eq('...and server.js names it only inside the section that runs it for /api/shif
    (_srv.count('shift_report'),) * 2)
 ok_('...a section there is (%r)' % bool(_sec), _sec and 'shift_report' in _sec.group(0))
 
+# --- an Uber add-on's card minutes are an increment (the owner's 26 Oct) --------
+#
+# Order #5 of 26 Oct was a "+10 min" add-on onto #4, delivered with it 27
+# minutes after its Took: 2.7 x "its card" in the by-card-minutes medians,
+# though the card's 10 minutes were only what it added. Invented: X a 30 min
+# card, Y its "+10 min" add-on (the Took's mark says `addon`, as server.js
+# asAddOnRow writes it), each put down by its own Drop.
+_aoj = os.path.join(work, 'addon.jsonl')
+with open(_aoj, 'w') as fh:
+    for r in [offer('X', at(18, 0), 12.0, 30, 6.0), mark('X', at(18, 0, 10), True),
+              offer('Y', at(18, 9, 50), 8.5, 10, 0.4),
+              dict(mark('Y', at(18, 10), True), addon=True, addonTo='X@1'),
+              drop('X', at(18, 35)), dict(drop('Y', at(18, 50)), addon=True, addonTo='X@1')]:
+        fh.write(json.dumps(r) + '\n')
+_aorep = SR.report(_aoj, None, '2026-03-03')
+_ao = _aorep['orders']
+_aob = {o['id']: o for o in _ao}
+eq('[add-on] the Took\'s mark makes the order an add-on; the order it joined is not',
+   (_aob['Y']['addon'], _aob['X']['addon'], _aob['Y']['reliable']), (True, False, True))
+eq('[add-on] ...its card minutes and miles print as the increment',
+   SR.cells(_aob['Y'])[2:4], ('+10', '+0.4'))
+_aos = SR.summary(_ao)
+eq('[add-on] ...it counts in its app\'s n and $/hr, and in no actual/card ratio: the median is '
+   'the base order\'s alone (34.8/30), not 40/10 beside it',
+   [(g['group'], g['n'], round(g['ratio'], 3)) for g in _aos['byApp']],
+   [('uber', 2, round(_aob['X']['actualMinutes'] / 30.0, 3))])
+eq('[add-on] ...and in no card-minutes band', [(g['group'], g['n']) for g in _aos['byBand']],
+   [(SR._band(30), 1)])
+eq('[add-on] ...and the summary says how many it left out', _aos['addOns'], 1)
+_aot = SR.text(_aorep)
+ok_('[add-on] ...in the text, by its note and by the summary\'s line',
+    'an add-on: its card minutes and miles are what it added' in _aot
+    and '1 add-on counted by app, and left out of every actual/card minutes ratio' in _aot)
+ok_('[add-on] ...and the JSON says it per order',
+    [o['addon'] for o in SR.as_json(_aorep)['orders']] == [False, True])
+# ...and the card's own `addon` says it too, with no mark saying so.
+eq('[add-on] ...or the card\'s own `addon`',
+   SR.orders([dict(offer('Z', at(18, 0), 8.0, 10, 0.4), addon=True),
+              mark('Z', at(18, 0, 10), True)])[0]['addon'], True)
+
+# --- a step of the Pi's clock inside one log (the owner's 26 Oct) ---------------
+#
+# The 26 Oct `_1415` log: 136 fixes stamped 923 s early, then the stamps step
+# forward as NTP answers, the TPVs' own `time` running on through it. Those
+# fixes are moved onto the clock the log ends on; a gpsd stall (both clocks
+# move alike), a receiver's own small offset (21 s, under CLOCK_STEP_S) and a
+# step with no GPS time before it move nothing. Invented track.
+def _steplog(name, rows):
+    d = os.path.join(work, name)
+    os.mkdir(d)
+    with open(os.path.join(d, '2026-03-03_1800.jsonl'), 'w') as fh:
+        for stamp, body in rows:
+            fh.write(stamped(stamp, body))
+    return d
+
+
+_g0 = at(18, 0) / 1000.0
+_good = [(_g0 + i, tpv(_g0 + i, LAT0, lon_at(10.0 * i), 5.0, 10.0)) for i in range(60)]
+_stepped = [((g - 923 if i < 30 else g), b) for i, (g, b) in enumerate(_good)]
+eq('[clock step] measured against the TPVs\' own time: one step of +923 s, at the line '
+   'the stamps jumped',
+   SR.clock_steps([(t, SR._gps_seconds(b)) for t, b in _stepped]), [(30, 923.0)])
+_fx, _fi = SR.load_fixes(_steplog('step-fwd', _stepped))
+eq('[clock step] ...and every fix before it re-stamped onto the clock after it, said so',
+   ([round(f[0] - _g0) for f in _fx] == list(range(60)), _fi['clockSteps'], _fi['restamped']),
+   (True, 1, 30))
+_back = [((g + 600 if i < 30 else g), b) for i, (g, b) in enumerate(_good)]
+_fx, _fi = SR.load_fixes(_steplog('step-back', _back))
+eq('[clock step] ...a step backwards, the same',
+   ([round(f[0] - _g0) for f in _fx] == list(range(60)), _fi['clockSteps']), (True, 1))
+_stall = [(g + (300 if i >= 30 else 0), tpv(g + (300 if i >= 30 else 0), LAT0, lon_at(10.0 * i),
+                                            5.0, 10.0)) for i, (g, b) in enumerate(_good)]
+_small = [((g - 21 if i < 30 else g), b) for i, (g, b) in enumerate(_good)]
+_dark = [(_g0 - 3285 + i, '{"class":"SKY","satellites":[]}') for i in range(10)] + _good
+eq('[clock step] ...not a gap in the log (gpsd stalled: both clocks moved), not a receiver\'s '
+   '21 s, not a step with no GPS time on its far side',
+   [SR.load_fixes(_steplog(n, rows))[1]['clockSteps']
+    for n, rows in (('stall', _stall), ('small', _small), ('dark', _dark))], [0, 0, 0])
+_srep = dict(rep, info=dict(rep['info'], clockSteps=1, restamped=30))
+ok_('[clock step] ...and the text\'s GPS line says it',
+    "the Pi's clock stepped 1 time inside a log, and 30 positions before a step were "
+    "re-stamped by the GPS's own time" in SR.text(_srep))
+eq('[clock step] ...as the JSON does',
+   [SR.as_json(_srep)['gps'][k] for k in ('clockSteps', 'restamped')], [1, 30])
+
+# ...and a log named by tools/gpslog_name.py (the GPS's own minute) is read
+# back as beginning at that minute; one it marked `-unsynced` as saying no
+# date, so every day's report reads it.
+import gpslog_name as GN                                      # noqa: E402
+_nt = at(17, 38) / 1000.0
+eq('[log name] gpslog_name\'s name is read back as its minute; its unsynced one as no date',
+   (SR._log_began(GN.name_for(_nt) + '.jsonl')[0] / 1000.0,
+    SR._log_began(GN.name_for(_nt, synced=False) + '.jsonl')), (_nt, None))
+
 shutil.rmtree(work)
 print('FAILED: %d of %d' % (bad, ok + bad) if bad
       else '\nAll %d shift report checks passed' % ok)

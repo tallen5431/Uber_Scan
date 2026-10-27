@@ -266,6 +266,75 @@ code, out = run('--apply', d)
 ok_('a .part a power cut left does not stop the next run',
     code == 0 and os.path.exists(os.path.join(d, 'old.jsonl.gz')))
 
+# --- a new log's name, by the GPS's clock (tools/gpslog_name.py) ----------------
+#
+# After the owner's 26 Oct shift every log on the rig was named for a minute
+# the Pi's clock said before NTP answered: `_1526` began at 17:38. The name
+# is now the first fix's own UTC `time`, as local time; with no fix, the
+# clock's minute, marked `-unsynced` unless NTP says it set it. Invented.
+import json as _json                                          # noqa: E402
+import socket as _socket                                      # noqa: E402
+import threading as _threading                                # noqa: E402
+import gpslog_name as GN                                      # noqa: E402
+
+os.environ['TZ'] = 'America/New_York'
+time.tzset()
+_T = 1793036280.0       # 2026-10-26 17:38:00 UTC: 13:38 in New York (EDT)
+eq('[name] a TPV with a fix gives its own UTC time; one with none, or no fix, gives nothing',
+   (GN.gps_seconds({'class': 'TPV', 'mode': 3, 'time': '2026-10-26T17:38:00.000Z'}),
+    GN.gps_seconds({'class': 'TPV', 'mode': 1, 'time': '2026-10-26T17:38:00.000Z'}),
+    GN.gps_seconds({'class': 'TPV', 'mode': 3}), GN.gps_seconds({'class': 'SKY'})),
+   (_T, None, None, None))
+eq('[name] ...named in the rig\'s local time, the minute shift_report reads off a name',
+   GN.name_for(_T), '2026-10-26_1338')
+# (tools/test_shift_report.py holds that the report reads these names back:
+# the minute, and the unsynced one as no date.)
+eq('[name] ...and unsynced, marked so', GN.name_for(_T, synced=False),
+   '2026-10-26_1338-unsynced')
+
+
+def _name(**kw):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+        code = GN.main(['--wait', '0.2'], **kw)
+    return code, buf.getvalue().strip()
+
+
+eq('[name] the first fix names the log, whatever the stale clock says',
+   _name(now=_T - 3285, synced=False, fix_time=lambda h, w: _T), (0, '2026-10-26_1338'))
+eq('[name] ...no fix: the clock\'s minute when NTP set it, marked when not',
+   (_name(now=_T, synced=True, fix_time=lambda h, w: None),
+    _name(now=_T - 3285, synced=False, fix_time=lambda h, w: None)),
+   ((0, '2026-10-26_1338'), (0, '2026-10-26_1243-unsynced')))
+
+# ...and off a gpsd that speaks: a stand-in on a free port that sends VERSION,
+# a TPV with no fix, then one with a fix.
+_srv = _socket.socket()
+_srv.bind(('127.0.0.1', 0))
+_srv.listen(1)
+
+
+def _gpsd():
+    c, _ = _srv.accept()
+    c.recv(1024)
+    for m in ({'class': 'VERSION', 'release': '3.22'},
+              {'class': 'TPV', 'mode': 1},
+              {'class': 'TPV', 'mode': 3, 'time': '2026-10-26T17:38:00.000Z', 'lat': 40.0,
+               'lon': -75.0}):
+        c.sendall((_json.dumps(m) + '\n').encode())
+    time.sleep(0.5)
+    c.close()
+
+
+_th = _threading.Thread(target=_gpsd)
+_th.start()
+eq('[name] ...read off gpsd itself: the first TPV with a fix and a time',
+   GN.first_fix_time('127.0.0.1:%d' % _srv.getsockname()[1], 5.0), _T)
+_th.join()
+_srv.close()
+eq('[name] ...and a gpsd nobody runs is no fix, not a failure',
+   GN.first_fix_time('127.0.0.1:1', 0.5), None)
+
 shutil.rmtree(work, ignore_errors=True)
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d gpslog tidy checks passed' % ok)

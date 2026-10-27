@@ -629,6 +629,13 @@
     }
     if (!vouches(o) || o.doubt) return { why: 'untrusted' };
     if (o.earlyLook) return { why: 'early' };
+    // An Uber ADD-ON card ("+0.4 mi", "+10 min") prints what it ADDS to the
+    // trip in progress, not a trip: the owner's 26 Oct shift, order #5, whose
+    // door was #4's own and fell outside a disc of 0.4 mi and the slack round
+    // the add-on's fix. Its figure is no yardstick for a pin on its own; the
+    // held add-on's search disc is the trip's, grown by it (discFor's `base`).
+    // `addon` is server.js's cardOf, set only on an add-on's card.
+    if (o.addon === true) return { why: 'addon' };
     if (!(o.hasTotal || (o.legs || 0) >= 2)) return { why: 'shape' };
     return { miles: o.miles, corrected: !!o.milesCorrected };
   }
@@ -1251,7 +1258,35 @@
    * stands for (`card` null says so), and a card with no fix in nothing:
    * the NucBox holds Georgia, and a candidate is used only if it is alone or
    * every one agrees. */
-  function discFor(card) {
+  /* ...AND AN ADD-ON'S DISC IS ITS TRIP'S, GROWN BY WHAT IT ADDS. `base` is
+   * the disc of the order the add-on was taken onto (server.js, heldDisc: the
+   * order taken before it on the same trip, itself grown if it was an add-on
+   * too). The owner's 26 Oct shift: order #5, an Uber add-on of "+0.4 mi",
+   * went to the same door as #4, the order it joined, and its door search
+   * was a disc of 0.4 mi and the slack round where the add-on came up — the
+   * increment treated as the whole trip — so the door was outside it and
+   * never pinned. The trip as it stood was `base.card` miles from `base`'s
+   * centre, and the add-on makes it that and its own miles: every stop of the
+   * joined trip, the add-on's door and pickup included, lies on a route no
+   * longer than the two together from where the base order was offered, so
+   * within that distance as the crow flies (the triangle inequality, as for
+   * a rough centre below). So: base's centre, base's miles plus the add-on's
+   * own, `addOn` said on it. A base that is no yardstick (`card` null) gives
+   * its sixty-mile disc unchanged; an add-on with no base, or no figure of its
+   * own, is searched as a card with no yardstick (below, `card` null) — wide,
+   * and a candidate still used only alone or when every one agrees. */
+  function discFor(card, base) {
+    if (card && card.addon === true && base && base.at) {
+      var inc = card && typeof card.miles === 'number' && isFinite(card.miles)
+        && card.miles > 0 && vouches(card) && !card.doubt ? card.miles : null;
+      if (inc !== null && base.card !== null && typeof base.card === 'number') {
+        var grown = { at: base.at, miles: base.miles + inc, card: base.card + inc,
+                      corrected: !!base.corrected || !!card.milesCorrected, addOn: true };
+        if (base.rough !== undefined) grown.rough = base.rough;
+        return grown;
+      }
+      if (base.card === null) return Object.assign({}, base, { addOn: true });
+    }
     var fix = discFix(card);
     if (!fix) return null;
     var yard = cardYardstick(card);
@@ -2713,7 +2748,8 @@
       early: 'an Early look card may not measure from your car — no yardstick '
         + 'yet',
       shape: 'this kind of card may not count the drive to the pickup — no '
-        + 'yardstick yet'
+        + 'yardstick yet',
+      addon: 'an add-on card prints only what it adds — no yardstick yet'
     },
     held: {
       none: 'the order in your car stated no distance to check its end against',
@@ -2722,7 +2758,9 @@
       early: 'the order in your car was an Early look card — no yardstick yet '
         + 'for its end',
       shape: 'the order in your car is a kind of card with no yardstick yet '
-        + 'for its end'
+        + 'for its end',
+      addon: 'the order in your car is an add-on card — no yardstick yet for '
+        + 'its end'
     }
   };
 

@@ -3879,9 +3879,47 @@ def planner_foot(text):
         return True
     # ...or a line of marks between the street and the town, as
     # _planner_address_lines takes it.
-    return bool(d >= 4 and _planner_label(block[d - 4]) and PLANNER_HOUSE.match(block[d - 3])
-                and not re.search(r'[A-Za-z]{2}', block[d - 2])
-                and _planner_town(block[d - 1]))
+    if d >= 4 and _planner_label(block[d - 4]) and PLANNER_HOUSE.match(block[d - 3]) \
+            and not re.search(r'[A-Za-z]{2}', block[d - 2]) \
+            and _planner_town(block[d - 1]):
+        return True
+    return bool(heads) and _planner_foot_address(block, d)
+
+
+# ...and, UNDER ITS DROPOFF HEADER, the address in any layout find_planner
+# itself reads. The owner's card-box read of 26 Oct, 20:38, one Uber order
+# held, 44 s after the Took (the name and the door left out, the layout as
+# read):
+#
+#     ropoff +1 order              "Dropoff • 1 order", its D cut by the box
+#     oO <name>
+#     Expected by 9:06 PM
+#     Address
+#     <Place>                      the building's name, the place line
+#     <n> <Name> Ave NE, Atlanta, GA    street and town on one line
+#     View details
+#     2 Q                          the bar's icons
+#     —O
+#     Stop New Requests
+#
+# find_planner read it as the dropoff it is, door and town, and the order kept
+# its card's corner: the strict shape above wants the street and the town on
+# the two lines straight over "View details", and this stop printed a place
+# line over a street that carries its own town (_planner_address_lines' third
+# and fourth layouts). With the Dropoff header read, the header is the
+# evidence of whose block it is, and the lines between "Address" and "View
+# details" need only be what the planner grammar reads as a door: one to
+# three of them, the street opening with a house number, a town read. The
+# headless block keeps the strict shape: there, the shape is all there is.
+def _planner_foot_address(block, d):
+    """True when block[:d] ends in an "Address" label over one to three lines
+    that _planner_address_lines reads as a street with a house number and a
+    town."""
+    for label in range(d - 2, max(d - 5, -1), -1):
+        if _planner_label(block[label]):
+            street, town, _place = _planner_address_lines(block[:d], label)
+            return bool(street and town and PLANNER_HOUSE.match(street))
+    return False
 
 
 # THE BAR BY ITS ICONS. The owner's card-box read of 22 Oct, 18:12: the bar's

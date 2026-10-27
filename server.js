@@ -1103,8 +1103,40 @@ function cardOf(offer) {
   CARD_FIELDS.forEach(function (k) {
     if (offer && offer[k] !== undefined) out[k] = offer[k];
   });
+  // ...and, on an Uber add-on's card only, that it is one (isAddOnCard): its
+  // miles are what it ADDS to the trip, not a trip (MV.cardYardstick, 'addon';
+  // heldDisc). Absent on every other card, so their shape is unchanged.
+  if (isAddOnCard(offer)) out.addon = true;
   return out;
 }
+
+/* The disc a held order's door and pickups are searched in (MV.discFor). For
+ * an Uber add-on joined to a trip, the trip's disc grown by the add-on's own
+ * miles: the owner's 26 Oct shift, order #5, a "+0.4 mi" add-on onto #4 with
+ * #4's own door for its end, searched in 0.4 mi and the slack round where the
+ * add-on came up, and the door 2.3 mi from there — outside, never pinned.
+ * The base is the order taken just before it on the same trip (tripOf),
+ * itself grown when it is an add-on too, so a chain of add-ons adds each
+ * one's miles. A hold's `addOn` says it is one even where its card predates
+ * cardOf's `addon`. With the trip's other orders put down, no base: the
+ * add-on's own fix, no yardstick (MV.discFor says how wide). */
+function heldDisc(h, depth) {
+  var card = h && h.card || null;
+  if (!h || !h.addOn) return MV.discFor(card);
+  card = Object.assign({}, card || {}, { addon: true });
+  var trip = typeof h.of === 'string' && h.of ? h.of : null;
+  var base = null;
+  if (trip && (depth || 0) < MAX_HELD_TRIP_DEPTH) {
+    scanner.held.forEach(function (o) {
+      if (o === h || tripOf(o) !== trip || !(o.acceptedAt < h.acceptedAt)) return;
+      if (!base || o.acceptedAt > base.acceptedAt) base = o;
+    });
+  }
+  return MV.discFor(card, base ? heldDisc(base, (depth || 0) + 1) : null);
+}
+// (A trip is a handful of orders; the bound is only against a loop in a hand-
+// edited holding.json.)
+var MAX_HELD_TRIP_DEPTH = 8;
 
 /* ---------- the orders in the car: a list ----------------------------------
  *
@@ -1793,7 +1825,7 @@ function discBreak(d, orders, cue) {
     broadcast({ unowned: Assemble.unowned(assembly) });
   };
   orders.forEach(function (o) {
-    var disc = MV.discFor(o.card || null);
+    var disc = heldDisc(o);
     if (!disc) return one();
     var target = nbxSearchTarget('street', term, MV.discBox(disc));
     var take = function (out) {
@@ -2953,7 +2985,7 @@ function searchHeldEnd(key, attempt) {
   if (!h) return;
   var plan = MV.searchPlan(h.dropoff);
   if (!plan || plan.kind !== 'street' || !plan.door) return refuseHeldEnd(h, 'no house number');
-  var disc = MV.discFor(h.card || null);
+  var disc = heldDisc(h);
   if (!disc) return refuseHeldEnd(h, 'no card fix');
   if (!nbxTerm(plan.street)) return refuseHeldEnd(h, 'no house number');
   // Every question through endAsk (nbxCache first, a NucBox not answering
@@ -3421,7 +3453,7 @@ function searchHeldPickup(id, a, attempt) {
   if (!h) return;
   if (a.name) return searchHeldPickupName(id, a, attempt, h);
   var plan = pickupDoorPlan(a.q);
-  var disc = MV.discFor(h.card || null);
+  var disc = heldDisc(h);
   var said = plan ? nbxTerm(plan.street) : null;
   if (!said || !disc) return;
   doorChain(plan, disc, false, function (target, read, answered) {
@@ -3437,7 +3469,7 @@ function searchHeldPickup(id, a, attempt) {
  * or every one the same place). */
 function searchHeldPickupName(id, a, attempt, h) {
   var plan = pickupNamePlan(a.q);
-  var disc = MV.discFor(h.card || null);
+  var disc = heldDisc(h);
   var said = plan ? nbxTerm(plan.q) : null;
   if (!said || !disc) return;
   var target = nbxSearchTarget('q', said, MV.discBox(disc));
@@ -3511,7 +3543,7 @@ function pickupsWhyOf(h) {
   if (!NBX.search) return null;
   var asks = pickupAsks(h);
   if (!asks.length) return 'no house number';
-  if (!MV.discFor(h.card || null)) return 'no card fix';
+  if (!heldDisc(h)) return 'no card fix';
   var on = pickSearch[holdIdOf(h)];
   var said = asks.map(function (a) { return on ? on.why[a.q] : null; }).filter(Boolean);
   return said.length ? said[0] : null;
@@ -4620,7 +4652,7 @@ function pinOutcome(h, list) {
   var plan = typeof h.dropoff === 'string' && h.dropoff ? pickupDoorPlan(h.dropoff) : null;
   var asked = pin && pin.asked ? 'street'
     : pin && !pin.by ? null
-    : NBX.search && plan && MV.discFor(h.card || null) ? 'door' : null;
+    : NBX.search && plan && heldDisc(h) ? 'door' : null;
   var picks = pickupState(h);
   return { end: { by: by, why: why || null, asked: asked },
            pickups: { pinned: picks.pickupsPinned, why: picks.pickupsWhy } };
@@ -5300,7 +5332,7 @@ function warmEarly(read, now) {
     return true;
   };
   orders.forEach(function (h) {
-    var disc = MV.discFor(h.card || null);
+    var disc = heldDisc(h);
     if (!disc) return;
     said.forEach(function (a) {
       earlyDoor(a.text, disc, !a.pickup, function () {}, room);
@@ -9081,9 +9113,44 @@ function nbxServiceOf(target) {
   return null;
 }
 
+/* THE WALL CLOCK STEPPED since the last note, in ms (+ forward), or 0. The Pi
+ * has no real-time clock: after a reboot it runs from the time saved at the
+ * last shutdown and steps when NTP answers — after the owner's 26 Oct shift
+ * the reboot's GPS log shows the step, 3,285 s forward, twelve seconds after
+ * gpspipe started — and every `since` noted before it is on the old clock: a
+ * service up since before the step said so as "up since" nearly an hour
+ * before the server started. A step is the wall clock's move against the monotonic one between
+ * two notes, past NBX_CLOCK_STEP_MS (60 s: more than a probe's own delay, far
+ * less than any step worth naming). */
+var NBX_CLOCK_STEP_MS = 60000;
+var nbxClockAt = null;
+
+function nbxClockStep(now) {
+  var hr = process.hrtime();
+  var mono = hr[0] * 1000 + hr[1] / 1e6;
+  var was = nbxClockAt;
+  nbxClockAt = { wall: now, mono: mono };
+  if (!was) return 0;
+  var step = (now - was.wall) - (mono - was.mono);
+  return Math.abs(step) > NBX_CLOCK_STEP_MS ? Math.round(step) : 0;
+}
+
 function nbxNote(service, err, probe) {
   if (!service) return;
   var now = Date.now();
+  // ...and on a step, every service's `since` is moved by it, onto the clock
+  // the server now has, rather than reported from the clock it had (the
+  // owner, after 26 Oct). Small and here alone: nothing else in /api/status
+  // is re-stamped.
+  var step = nbxClockStep(now);
+  if (step) {
+    Object.keys(nbxHealth).forEach(function (s) {
+      if (typeof nbxHealth[s].since === 'number') nbxHealth[s].since += step;
+      if (typeof nbxHealth[s].at === 'number') nbxHealth[s].at += step;
+    });
+    console.log('nucbox health: the clock stepped ' + Math.round(step / 1000)
+                + ' s; each service\'s "since" moved with it');
+  }
   var h = nbxHealth[service] || (nbxHealth[service] = { up: null, why: null, since: now,
                                                         at: now, fails: 0 });
   h.at = now;

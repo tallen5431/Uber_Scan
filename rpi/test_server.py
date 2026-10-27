@@ -6362,6 +6362,13 @@ try:
        (len(_bo), _bh.get('batch'), _bh.get('drops'),
         [r for r in _marks('b-root') + _marks('b-add') if r.get('batch')]),
        (2, False, None, []))
+    # The add-on's card says it is one (cardOf `addon`), and the root's does
+    # not: what MV.cardYardstick reads to take its miles as an increment and
+    # heldDisc to search its door in the trip's disc grown by them (the
+    # owner's 26 Oct shift, order #5). Absent, not false, on the root's.
+    eq('[add-on disc] the add-on\'s held card is marked an add-on\'s; the root\'s is not',
+       [('addon' in (o.get('card') or {}), (o.get('card') or {}).get('addon')) for o in _bo],
+       [(False, None), (True, True)])
     post(_gb, '/api/delivered', {})
     post(_gb, '/api/delivered', {})
 finally:
@@ -10040,6 +10047,40 @@ try:
 finally:
     stop(_hp)
     _hf.kill()
+
+# ...and THE CLOCK STEPPING under it (the owner, after 26 Oct: the Pi runs from
+# the time saved at shutdown until NTP answers, then steps). Staged by a server
+# whose Date.now runs an hour behind until a file appears, then right: the
+# probes note each service up on the stale clock, the step comes, and its
+# `since` must be on the clock the server now has, not an hour before it
+# started. server.js nbxClockStep: the wall clock against the monotonic one.
+_stepflag = os.path.join(_cdir, 'clock-stepped')
+_stepjs = os.path.join(_cdir, 'clock-step.js')
+with open(_stepjs, 'w') as _fh:
+    _fh.write('var fs = require("fs"), real = Date.now, flag = %s, stepped = false, seen = 0;\n'
+              'Date.now = function () {\n'
+              '  var t = real();\n'
+              '  if (!stepped && t - seen > 50) { seen = t; stepped = fs.existsSync(flag); }\n'
+              '  return stepped ? t : t - 3600000;\n'
+              '};\n' % json.dumps(_stepflag))
+_hf, _hnb, _hp, _hb = _nbxhealth('nbx-health-step', NUCBOX_PROBE_MS='300',
+                                  NODE_OPTIONS='--require ' + _stepjs)
+try:
+    time.sleep(1.5)
+    _before = ((get(_hb, '/api/status').get('nucbox') or {}).get('search') or {}).get('since')
+    open(_stepflag, 'w').close()
+    time.sleep(1.5)
+    _after = ((get(_hb, '/api/status').get('nucbox') or {}).get('search') or {}).get('since')
+    _real = time.time() * 1000
+    ok_('[nucbox health] the clock stepping an hour forward moves `since` with it, onto the '
+        'clock the server now has (stale %r, after %r, now %r)' % (_before, _after, _real),
+        isinstance(_before, (int, float)) and _before < _real - 3000000
+        and isinstance(_after, (int, float)) and _real - 120000 < _after <= _real)
+finally:
+    stop(_hp)
+    _hf.kill()
+    if os.path.exists(_stepflag):
+        os.remove(_stepflag)
 
 # --- on time for both ----------------------------------------------------------
 #

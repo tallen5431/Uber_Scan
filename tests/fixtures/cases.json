@@ -7195,6 +7195,78 @@
    ]
   },
   {
+   "name": "the owner's card-box read of 26 Oct, 20:38: the Dropoff block with a place line over a street that carries its own town, over the bar's icons and the bar",
+   "_why": "One Uber order held, 44 s after the Took: \"Dropoff \u2022 1 order\" with its D cut by the box, the customer, the time, \"Address\", the building's name on a line of its own, then \"<n> <street>, <Town>, GA\" on one line, \"View details\", the bar's icons and the bar. find_planner read the dropoff and its door; planner_foot wanted the street and the town on the two lines straight over \"View details\", so the trip's last stop was never offered and the order kept its card's corner. Under a Dropoff header the address need only be what the planner grammar reads as a door (_planner_foot_address). Names, place and street invented; the layout and the slips the reading's.",
+   "text": "ropoff +1 order\noO Lee R.\nExpected by 9:06 PM\nAddress\nWrenfield Lofts\n412 Brindle Ave NE, Kennesaw, GA\nView details\n2 Q\n\u2014O\nStop New Requests",
+   "bounded": false,
+   "footed": true,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1266,
+     "street": "412 Brindle Ave NE",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "412 Brindle Ave NE, Kennesaw",
+     "place": "Wrenfield Lofts"
+    }
+   ]
+  },
+  {
+   "name": "...and the same with no place line, the street and town on one line",
+   "_why": "The third layout of _planner_address_lines alone under a Dropoff header, the bar straight under \"View details\". Invented.",
+   "text": "Dropoff \u2022 1 order\nLee R.\nExpected by 9:06 PM\nAddress\n412 Brindle Ave NE, Kennesaw, GA\nView details\nStop New Requests",
+   "bounded": false,
+   "footed": true,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1266,
+     "street": "412 Brindle Ave NE",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "412 Brindle Ave NE, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...but not a street with no house number under the place line",
+   "_why": "The door is the shape: a street with no house number is read as no address (the stop cut at its foot) and is not the trip's last stop by its shape. Invented.",
+   "text": "Dropoff \u2022 1 order\nLee R.\nExpected by 9:06 PM\nAddress\nWrenfield Lofts\nBrindle Ave NE, Kennesaw, GA\nView details\nStop New Requests",
+   "bounded": false,
+   "footed": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1266,
+     "street": null,
+     "city": null,
+     "state": null,
+     "zip": null,
+     "line": null,
+     "place": null,
+     "partial": "bottom"
+    }
+   ]
+  },
+  {
+   "name": "...nor the headless block with a place line: without the header the strict shape stands",
+   "_why": "No stop header on the read, the place line over a one-line street and town: the header is what the looser address rides on, so the headless block keeps the four-line shape and this is no planner page at all. Invented.",
+   "text": "Address\nWrenfield Lofts\n412 Brindle Ave NE, Kennesaw, GA\nView details\nStop New Requests",
+   "bounded": false,
+   "footed": false,
+   "expect": null
+  },
+  {
    "name": "the owner's batch of 23 Oct: a store's door with Suite and no comma before it, and the ZIP wrapped",
    "_why": "\"3753 <Name> Hwy Suite 110, Canton, GA\" over \"30114\": PLANNER_UNIT wanted a comma before the suite, so the street kept \"Suite 110\" and the door was never found. A street is never named Suite after its type. Invented.",
    "text": "Pickup - 1 order\n@ Fable Pizza & Kitchen\nExpected by 8:32 PM\nAddress\n3753 Wren Hwy Suite 110, Canton, GA\n30114\nView details",

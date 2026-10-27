@@ -2130,8 +2130,25 @@
     if (plannerLabel(block[d - 3]) && PLANNER_HOUSE.test(block[d - 2])
         && plannerTown(block[d - 1])) return true;
     // ...or a line of marks between the street and the town.
-    return !!(d >= 4 && plannerLabel(block[d - 4]) && PLANNER_HOUSE.test(block[d - 3])
-              && !/[A-Za-z]{2}/.test(block[d - 2]) && plannerTown(block[d - 1]));
+    if (d >= 4 && plannerLabel(block[d - 4]) && PLANNER_HOUSE.test(block[d - 3])
+        && !/[A-Za-z]{2}/.test(block[d - 2]) && plannerTown(block[d - 1])) return true;
+    return last !== -1 && plannerFootAddress(block, d);
+  }
+
+  /* ...and, under its Dropoff header, the address in any layout the planner
+     grammar reads (the owner's card-box read of 26 Oct, 20:38: a place line
+     over "<n> <Name> Ave NE, Atlanta, GA", street and town on one line): an
+     "Address" label over one to three lines that plannerAddressLines reads
+     as a street with a house number and a town. The headless block keeps the
+     strict shape. See _planner_foot_address in offer_parser.py. */
+  function plannerFootAddress(block, d) {
+    for (var label = d - 2; label > Math.max(d - 5, -1); label--) {
+      if (plannerLabel(block[label])) {
+        var a = plannerAddressLines(block.slice(0, d), label);
+        return !!(a.street && a.town && PLANNER_HOUSE.test(a.street));
+      }
+    }
+    return false;
   }
 
   /* The bar by its icons, its words unread (the owner's card-box read of 22

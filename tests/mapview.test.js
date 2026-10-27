@@ -1226,6 +1226,39 @@ async function nucbox() {
      + 'stands for', JSON.stringify([MV.discFor(card({ legs: 1, hasTotal: false })).miles,
                                      MV.discFor(card({ legs: 1, hasTotal: false })).card]),
      JSON.stringify([60, null]));
+  /* ...and an Uber ADD-ON's card (the owner's 26 Oct shift, order #5: "+0.4
+     mi" onto #4, the same door, searched in 0.4 mi and the slack round the
+     add-on's fix and 2.3 mi out). Its miles are the increment: no yardstick
+     alone, and with the trip's disc for `base`, that disc's centre and its
+     miles plus the increment. Synthetic coordinates. */
+  var addOnCard = card({ miles: 0.4, addon: true, lat: SQ.lat + 0.03 });
+  eq('an add-on\'s card is no yardstick by itself: its miles are what it adds',
+     MV.cardYardstick(addOnCard).why, 'addon');
+  eq('...so it refuses no pin, however far past its 0.4 mi',
+     MV.cardRefuses(addOnCard, MV.cardFix(addOnCard).at, { lat: SQ.lat + 0.1, lon: SQ.lon }),
+     null);
+  var grown = MV.discFor(addOnCard, d94);
+  eq('...and its disc, given the trip\'s, is the trip\'s centre with the trip\'s miles '
+     + 'plus the increment, said as an add-on\'s',
+     grown && [grown.at.lat, grown.at.lon, grown.miles.toFixed(2), grown.card.toFixed(2),
+               grown.addOn].join('|'),
+     [SQ.lat, SQ.lon, (9.9 + 0.4).toFixed(2), (9.4 + 0.4).toFixed(2), true].join('|'));
+  eq('...a chain adds each increment: an add-on onto that add-on',
+     MV.discFor(addOnCard, grown).card.toFixed(2), (9.4 + 0.8).toFixed(2));
+  eq('...with no base, its own fix and no yardstick: the sixty miles',
+     JSON.stringify([MV.discFor(addOnCard).miles, MV.discFor(addOnCard).card,
+                     MV.discFor(addOnCard).at.lat === SQ.lat + 0.03]),
+     JSON.stringify([60, null, true]));
+  eq('...a base of no yardstick gives its sixty miles round the trip\'s centre',
+     JSON.stringify((function (b) { return [b.miles, b.card, b.at.lat, b.addOn]; })(
+       MV.discFor(addOnCard, MV.discFor(card({ legs: 1, hasTotal: false }))))),
+     JSON.stringify([60, null, SQ.lat, true]));
+  eq('...and a card that is no add-on ignores a base',
+     MV.discFor(card(), MV.discFor(card({ miles: 20 }))).miles, 9.9);
+  eq('...and the held order\'s words say why it has no yardstick',
+     MV.againstCard(addOnCard, MV.cardFix(addOnCard).at, { lat: SQ.lat, lon: SQ.lon },
+                    'Fable Grill', 'held'),
+     'the order in your car is an add-on card — no yardstick yet for its end');
   /* ...and a card whose fix the gate refused ONLY as rough (MV.discFix): the
      owner's 17 Oct afternoon, a held card stamped mode 3, 0.2 s, 73 m,
      `rough`, and the held end never searched ("no card fix"). The disc is

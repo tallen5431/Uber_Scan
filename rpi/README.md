@@ -4553,11 +4553,23 @@ Then `SCANNER_ARGS="--gps 127.0.0.1"` in `Start.sh` (or the unit's
 
 ```sh
 mkdir -p ~/gpslog
-gpspipe -w -uu -o ~/gpslog/$(date +%F).jsonl
+gpspipe -w -uu -o ~/gpslog/$(python3 tools/gpslog_name.py).jsonl
 ```
 
 `-uu` stamps every line with the Pi's own clock, which is what lets a log line
-be put beside a journal row. The log is raw gpsd JSON and stays on the Pi; it
+be put beside a journal row.
+
+**The name is the GPS's minute, not `date`'s.** The Pi has no real-time clock:
+after a reboot it runs from the time saved at shutdown until NTP answers, and
+on the 26 Oct shift every log named off `date` was named for that stale minute
+(`2026-10-26_1526` began at 17:38). `tools/gpslog_name.py` waits up to two
+minutes for gpsd's first fix and names the log by its UTC `time`, in local
+time; with no fix by then, by the clock, marked `-unsynced` unless
+`timedatectl` says NTP set it (a name the shift report reads for every day,
+not for a wrong one). A `Start.sh` that names its log off `date` should use it
+instead. The stamps inside still step when NTP answers; the shift report
+measures each step against the TPVs' own `time` and moves the lines before it
+(tools/shift_report.py, `CLOCK_STEP_S`). The log is raw gpsd JSON and stays on the Pi; it
 is what the first week's numbers come from — how often a moving car stays
 inside the gate, and where it loses the sky — and nothing on the panel reads it.
 

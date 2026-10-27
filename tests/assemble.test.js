@@ -1610,6 +1610,96 @@ SEQ.forEach(function (seq) {
   })();
 })();
 
+/* The owner's order #7 of 26 Oct, one Uber order held: 44 s after the Took
+ * the card box read "Dropoff • 1 order", the customer, a place line over the
+ * door with its town on the same line, and the bar; find_planner read the
+ * dropoff, and nothing was filed — the read was not whole, and the foot's
+ * shape wanted the street and the town on two lines. Now a card-box page with
+ * a stop on it is decided as a whole page is, alone and never pooled, and the
+ * foot takes the door the planner grammar reads under a Dropoff header. The
+ * shared case "the owner's card-box read of 26 Oct, 20:38 …" (names, place and
+ * street invented). */
+(function () {
+  var texts = {};
+  require('./fixtures/cases.json').planner.forEach(function (c) { texts[c.name] = c.text; });
+  var boxText = texts['the owner\'s card-box read of 26 Oct, 20:38: the Dropoff block with a '
+    + 'place line over a street that carries its own town, over the bar\'s icons and the bar'];
+  ok_('[box 26 Oct] the premise: the case is there', !!boxText);
+  if (!boxText) return;
+  var corner = 'Airline Ct NE & Wren St NE, Kennesaw';
+  var door = '412 Brindle Ave NE, Kennesaw';
+  function held(extra) {
+    var h = Object.assign({ id: 'o-1026', acceptedAt: 1000, app: 'uber',
+                            card: { legs: 1, multiOrder: false, hasTotal: true },
+                            pickup: 'Fable Trattoria (Kennesaw)', dropoff: corner,
+                            dropoffScanned: false }, extra || {});
+    h.fields = A.cardFields({ dropoff: h.dropoff, pickup: h.pickup }, h.acceptedAt);
+    return h;
+  }
+  function run(page, h, st) {
+    st = st || A.fresh();
+    h = h || held();
+    A.took(st, h);
+    var r = A.sighting(st, h, page, page.at);
+    var said = r.candidates.map(function (d) {
+      var s = A.dropoff(h, d, null);
+      if (s.to === 'hold') A.file(h, d, s, st);
+      return [d.foot === true, d.planner === true, s.to ? s.from : s.why];
+    });
+    return [said, h.dropoff, brief(h.fields.dropoff), A.pending(st).length];
+  }
+  var box = Object.assign(pageOf(boxText, 45000, false), { whole: false });
+  eq('[box 26 Oct] the premise: the box read is the dropoff, footed, no title, no layout',
+     [box.stops.map(function (s) { return [s.kind, s.line, s.place]; }), box.footed,
+      box.titled, box.laidOut],
+     [[['dropoff', door, 'Wrenfield Lofts']], true, false, false]);
+  eq('[box 26 Oct] the fault: the card-box read files the door over the card\'s corner, '
+     + 'rank label, and pools nothing',
+     run(box), [[[true, false, 'label']], door, { value: door, from: 'label' }, 0]);
+  eq('[box 26 Oct] ...not onto an add-on\'s trip, nor off a press, nor before the Took',
+     [run(box, held({ addOn: true }))[1], run(Object.assign({}, box, { asked: true }))[1],
+      run(Object.assign({}, box, { at: 500 }))[1]],
+     [corner, corner, corner]);
+  (function () {
+    var r = A.sighting(A.fresh(), [held(), held({ id: 'o-other', acceptedAt: 1200 })], box, 45000);
+    eq('[box 26 Oct] with two orders held a card-box page files nothing (sightingMany: whole '
+       + 'reads only)', r.candidates.length, 0);
+  })();
+  // A box page decided by the whole page's rules: its layout (a Pickup and a
+  // Dropoff each with its time, "View details", the bar) stands in for the
+  // title, and its lone dropoff is a planner end on a one-leg card.
+  var laid = 'Pickup • 1 order\nFable Trattoria\nExpected by 8:47 PM\nAddress\n'
+    + '1200 Wrenfield Pkwy NW,\nKennesaw, GA 30144\nView details\n'
+    + 'Dropoff • 1 order\nLee R.\nExpected by 9:06 PM\nAddress\n412 Brindle Ave NE\n'
+    + 'Kennesaw, GA\nView details\nStop New Requests';
+  var laidBox = Object.assign(pageOf(laid, 45000, false), { whole: false });
+  eq('[box 26 Oct] a box page laid out as the planner files its lone dropoff as a whole page '
+     + 'does, from planner',
+     [laidBox.laidOut, run(laidBox).slice(0, 2)],
+     [true, [[[false, true, 'planner']], door]]);
+  eq('[box 26 Oct] ...and is never `framed`: the top of a box read is the box\'s edge, so on a '
+     + 'legs-0 card the lone dropoff is refused, and only the trip\'s last stop over the bar '
+     + 'files, at rank label, as it does read whole',
+     run(Object.assign({}, laidBox, { framed: true }),
+         held({ card: { legs: 0, multiOrder: false, hasTotal: false } })).slice(0, 2),
+     [[[true, false, 'label'], [false, true, 'not a single trip']], door]);
+  (function () {
+    var st = A.fresh(), h = held();
+    A.took(st, h);
+    var whole = pageOf('Trip Planner\nPickup • 1 order\nFable Trattoria\n'
+                       + 'Expected by 8:47 PM', 44000, false);
+    A.sighting(st, h, whole, 44000);
+    var before = A.pending(st).length;
+    for (var i = 0; i < 15; i++) {
+      A.sighting(st, h, Object.assign({}, box, { at: 46000 + i * 1000, stops: [Object.assign(
+        {}, box.stops[0], { street: null, city: null, line: null, partial: 'bottom' })] }),
+                 46000 + i * 1000);
+    }
+    eq('[box 26 Oct] fifteen box reads push no whole page out of the pool',
+       [before, A.pending(st).length, st.pages.length], [1, 1, 1]);
+  })();
+})();
+
 /* The same store as an order in the car (Assemble.samePickup; the owner's
  * decision of 18 Oct 2026). The 17 Oct shape, invented: an Uber order held
  * from "<Store> (113 <Street> NW)" and a DoorDash card whose stops line reads

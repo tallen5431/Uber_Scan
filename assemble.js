@@ -1794,7 +1794,8 @@
    * SEVERAL PAGES, linked as above, with an order held and every page read
    * after its Took: the list's one dropoff once the list is bounded, from
    * 'planner'; else, under a title somewhere on it, the lone dropoff.
-   * A card-box read (not whole) is no page: it saw part of the screen.
+   * A card-box read (not whole) with a stop on it is ONE page alone, decided
+   * by the same rules and never pooled (see below; the owner's 26 Oct shift).
    *
    * An unprompted candidate already decided for this hold is not offered
    * again: the scanner's `dropoff_said` used to stop a planner up for a whole
@@ -1822,24 +1823,48 @@
     // card-box read: no page — it saw part of the screen — but the foot
     // under it says which stop it is.
     var foot = footDropoff(held, s, out.at === null ? now : out.at);
-    if (s.whole !== true) {
-      if (foot && saidOnce(st, foot)) out.candidates.push(foot);
+    // A CARD-BOX READ OF THE PLANNER IS DECIDED AS A WHOLE-SCREEN PAGE IS, when
+    // the planner's grammar read a stop on it (pageStops). The owner, after the
+    // 26 Oct shift: order #7's door was on a card-box read 44 s after the Took
+    // ("Dropoff • 1 order", the customer, the door, the bar), find_planner read
+    // it as the dropoff it is, and this function dropped it here unread
+    // because the read was not whole — "a card-box read is no page: it saw
+    // part of the screen". A whole-screen read sees part of the list as often:
+    // the planner scrolls, and every rule below already asks what the page
+    // proves (the title or its layout, the list's two ends, the trip's last
+    // stop over the bar) rather than how much glass the read covered. So the
+    // box's page is judged by those same rules, one page alone, with the same
+    // rules on which order it belongs to (one order held here; two go to
+    // sightingMany, which still takes whole reads only).
+    //
+    // Two things the box cannot say and is not asked: `framed` — the top of a
+    // box read is the box's edge, not the list's, so "nothing above the
+    // Pickup header" proves nothing there; and the pool — a box read comes
+    // every second or two the screen moves, and pooled it would push the
+    // whole-screen pages a stitch needs out of PAGES_MAX, and the planner
+    // line's verdicts with them. So a box page is never pooled, never stitched,
+    // never pending, refused or a verdict: it files on its own or not at all,
+    // and a read of no stop is as before (its foot, footDropoff, or nothing).
+    var boxed = s.whole !== true;
+    if (!pageStops(s.stops)) {
+      if (boxed && foot && saidOnce(st, foot)) out.candidates.push(foot);
       return out;
     }
-    if (!pageStops(s.stops)) return out;
     var page = { at: out.at === null ? now : out.at, app: app,
                  epoch: st.epoch[app] || 0, asked: s.asked === true,
                  titled: s.titled === true,
                  // The layout standing in for a title misread: see below.
                  laidOut: s.laidOut === true,
                  // A Pickup header opening the read, the foot under it: see
-                 // framedTrip.
-                 framed: s.framed === true,
+                 // framedTrip. Never off the card box (above).
+                 framed: !boxed && s.framed === true,
                  top: !!(s.page && s.page.top), bottom: !!(s.page && s.page.bottom),
                  stops: s.stops.filter(function (x) { return x && typeof x === 'object'; }),
-                 pending: false, why: null };
-    st.pages.push(page);
-    while (st.pages.length > PAGES_MAX) st.pages.shift();
+                 pending: false, why: null, box: boxed };
+    if (!boxed) {
+      st.pages.push(page);
+      while (st.pages.length > PAGES_MAX) st.pages.shift();
+    }
 
     // Pages for linking: with a hold, only those read after its Took.
     var pool = held ? st.pages.filter(function (p) { return p.at >= held.acceptedAt; })
@@ -1856,7 +1881,7 @@
     // grow FROM — no view is ever taken between two Tooks while one order is
     // all there is — and the original's own door, read again beside the
     // add-on's, had no cue at all. Changes nothing filed with one order.
-    if (held && view.top && view.bottom && !listShort(view.stops)) {
+    if (held && !boxed && view.top && view.bottom && !listShort(view.stops)) {
       noteView(st, app, page.at, view.stops);
     }
     // A PLANNER BY ITS LAYOUT, title or not: the owner's decision (16 Oct),
@@ -1970,6 +1995,8 @@
     // address (a lone dropoff still waits: a later page may bound the list),
     // or has two dropoffs, which no page can undo.
     var consumed = deduped || (!!cand && !cand.singleCardOnly);
+    // (A box page is not in the pool, and keeps none of its bookkeeping.)
+    if (boxed) return out;
     run.pages.forEach(function (p) {
       var was = p.pending;
       p.pending = false;

@@ -603,6 +603,13 @@ CAPTION_LINES = [
     ('the held card, one leg',
      'the order in your car is a kind of card with no yardstick yet for its '
      'end'),
+    # ...and an Uber add-on's, whose card prints only what it adds (the
+    # owner's 26 Oct shift, order #5: MV.cardYardstick's 'addon').
+    ('this card, an add-on',
+     'an add-on card prints only what it adds — no yardstick yet'),
+    ('the held card, an add-on',
+     'the order in your car is an add-on card — no yardstick yet for its '
+     'end'),
     # ...and a pin a card contradicts, at its widest: the place cut to
     # DISC_PLACE_SHOWN in its widest letter, a straight line under farFrom's
     # 75 miles (past that the misread-name line above is said instead), a
@@ -1019,7 +1026,7 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 114)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 116)
 eq('...and fifty-six of its entries declare a tail the clamp may eat',
    len(_DECLARED), 56)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])

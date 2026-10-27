@@ -130,6 +130,7 @@ anything and is counted, not used.
 
 import argparse
 import bisect
+import calendar
 import collections
 import csv
 import functools
@@ -301,13 +302,14 @@ def orders(rows):
         if final is not True:
             continue
         out.append(_order(oid, took, readings.get(oid, []),
-                          drops.get(oid, []), visits.get(oid, [])))
+                          drops.get(oid, []), visits.get(oid, []),
+                          addon=any(m.get('addon') is True for m in ms)))
     out.sort(key=lambda o: (o['took'] is None, o['took'] or 0))
     _alongside(out)
     return out
 
 
-def _order(oid, took, readings, drops, visits):
+def _order(oid, took, readings, drops, visits, addon=False):
     o = {'id': oid, 'took': took, 'end': None, 'how': None, 'reliable': False,
          'carried': None, 'visits': [], 'visitsBy': [], 'notes': [], 'pin': None}
     # The card as it stood when Took was pressed: the last reading of it
@@ -326,6 +328,19 @@ def _order(oid, took, readings, drops, visits):
     o['cardMinutes'] = _num(card.get('minutes'))
     o['cardMiles'] = _num(card.get('miles'))
     o['billedMinutes'] = _num(card.get('billedMinutes'))
+    # AN UBER ADD-ON'S CARD PRINTS WHAT IT ADDS ("+10 min", "+0.4 mi") to the
+    # trip in progress, not a trip: the owner's 26 Oct shift, order #5, "+10
+    # min" onto #4 and delivered with it 27 minutes after its Took, read as
+    # 2.7 x its card. Said by the Took's mark (server.js asAddOnRow), the drop
+    # row, or the card's own `addon`. Its minutes are printed as the increment
+    # ("+10"), and summary() leaves it out of the actual/card ratios and the
+    # card-minutes bands, saying how many.
+    o['addon'] = bool(addon or card.get('addon') is True
+                      or any(d.get('addon') is True for d in drops))
+    if o['addon']:
+        o['notes'].append('an add-on: its card minutes and miles are what it added to the '
+                          'trip in progress, not a trip, so actual over card minutes is not '
+                          'read for it')
     if took is None:
         o['how'] = 'no Took'
         o['notes'].append('marked taken on the offers page; never pressed in the car, so not timed')
@@ -596,6 +611,74 @@ def _logs_for(names, window):
             or (began[n][1] > lo and began[n][0] < hi)]
 
 
+# A STEP OF THE PI'S CLOCK INSIDE ONE LOG. The Pi has no real-time clock:
+# after a reboot it runs from the time saved at shutdown and steps when NTP
+# answers, and gpspipe's -uu stamps step with it. After the owner's 26 Oct
+# shift the reboot's log (named for the stale minute it began on) runs twelve
+# seconds on the saved clock and then 3,285 s forward, mid-line of nothing
+# that moved: every line before the step is stamped nearly an hour early. A
+# TPV carries the receiver's own UTC `time`, which no reboot touches, so a
+# step is measured, not guessed: between two TPVs that carry it, the stamps
+# moved by more than the GPS's clock did, past CLOCK_STEP_S (60 s — a gpsd
+# stall or a dead receiver moves both clocks alike, and is a gap, not a step).
+# Every line before the step is then moved by it, onto the clock the log
+# ends on (the one the journal was written on, once NTP had answered), and
+# the step's line is the one where the stamps jumped. A step with no TPV time
+# on one side of it is not measured and moves nothing: lines with no GPS time
+# are lines with no fix, and no position is lost or moved by that.
+CLOCK_STEP_S = 60.0
+_GPS_TIME = re.compile(r'"time":"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d(?:\.\d+)?)Z"')
+
+
+def _gps_seconds(line):
+    """The UTC seconds of a TPV line's own `time`, or None."""
+    if '"TPV"' not in line:
+        return None
+    m = _GPS_TIME.search(line)
+    if not m:
+        return None
+    try:
+        whole = calendar.timegm(tuple(int(m.group(i)) for i in range(1, 6))
+                                + (int(float(m.group(6))), 0, 0, 0))
+    except (OverflowError, ValueError):
+        return None
+    return whole + float(m.group(6)) % 1
+
+
+def clock_steps(lines):
+    """[(k, step)] for one log's stamped lines in order, `lines` as (stamp,
+    gps seconds or None): line k is the first on the new clock, `step` the
+    seconds every line before it is moved by. See CLOCK_STEP_S."""
+    pairs = [(k, t, g) for k, (t, g) in enumerate(lines) if g is not None]
+    out = []
+    for (k0, t0, g0), (k1, t1, g1) in zip(pairs, pairs[1:]):
+        step = (t1 - t0) - (g1 - g0)
+        if abs(step) <= CLOCK_STEP_S:
+            continue
+        sign = 1 if step > 0 else -1
+        at = max(range(k0 + 1, k1 + 1),
+                 key=lambda k: sign * (lines[k][0] - lines[k - 1][0]))
+        out.append((at, step))
+    return out
+
+
+def _restamp(path):
+    """For each stamped line of the log at `path`, in order, the seconds to
+    add to its stamp (clock_steps), as a list; and how many steps."""
+    lines = []
+    with _open(path) as fh:
+        for line in fh:
+            m = _STAMP.match(line.strip())
+            if m:
+                lines.append((float(m.group(1)), _gps_seconds(m.group(2))))
+    steps = clock_steps(lines)
+    add = [0.0] * len(lines)
+    for at, step in steps:
+        for k in range(at):
+            add[k] += step
+    return add, len(steps)
+
+
 def load_fixes(directory, window=None):
     """(fixes, info). `fixes` is [(t, lat, lon, speed)] for every fix gps.usable()
     passed (speed in m/s, or None), sorted by t (seconds, the Pi's clock), or None when there is no
@@ -605,7 +688,8 @@ def load_fixes(directory, window=None):
     their names (_logs_for); `info['otherDays']` counts the ones left unread.
     Every log, as before, without it."""
     info = {'files': 0, 'positions': 0, 'passed': 0, 'refused': collections.Counter(),
-            'unstamped': 0, 'beforeClock': 0, 'otherDays': 0}
+            'unstamped': 0, 'beforeClock': 0, 'otherDays': 0,
+            'clockSteps': 0, 'restamped': 0}
     if not directory or not os.path.isdir(directory):
         return None, info
     names = sorted(n for n in os.listdir(directory)
@@ -621,6 +705,11 @@ def load_fixes(directory, window=None):
         # One Phone per file: one gpspipe run is one stream, and the hold
         # bookkeeping (`heldFor`) is about consecutive fixes of one stream.
         phone = G.Phone('gpspipe-log', clock=lambda: now[0])
+        # The log read once for its clock's steps (CLOCK_STEP_S), and again
+        # for its fixes, each stamp moved by what the first read found.
+        add, steps = _restamp(os.path.join(directory, name))
+        info['clockSteps'] += steps
+        k = -1
         with _open(os.path.join(directory, name)) as fh:
             for line in fh:
                 m = _STAMP.match(line.strip())
@@ -628,10 +717,14 @@ def load_fixes(directory, window=None):
                     if line.lstrip().startswith('{'):
                         info['unstamped'] += 1
                     continue
+                k += 1
                 got = G.parse_line(m.group(2))
                 if got is None:
                     continue
                 t = float(m.group(1))
+                if k < len(add) and add[k]:
+                    t += add[k]
+                    info['restamped'] += 1
                 if t < CLOCK_FLOOR:
                     info['beforeClock'] += 1
                     continue
@@ -1014,13 +1107,19 @@ def _band(m):
 
 def summary(rows):
     """By app and by card-minutes band, over the reliable rows: n, the median
-    of actual over card minutes, and the median actual $/hr."""
+    of actual over card minutes, and the median actual $/hr. An add-on (see
+    _order) is in its app's n and $/hr, and in no actual/card ratio and no
+    card-minutes band: its card minutes are an increment. `addOns` says how
+    many were left out so."""
     good = [o for o in rows if o['reliable'] and o.get('actualMinutes')]
-    out = {'reliable': len(good), 'of': len(rows), 'byApp': [], 'byBand': []}
+    out = {'reliable': len(good), 'of': len(rows), 'byApp': [], 'byBand': [],
+           'addOns': sum(1 for o in good if o.get('addon'))}
     for key, name in (('byApp', lambda o: o['app'] or 'unknown'),
                       ('byBand', lambda o: _band(o['cardMinutes']))):
         groups = collections.OrderedDict()
         for o in good:
+            if key == 'byBand' and o.get('addon'):
+                continue
             groups.setdefault(name(o), []).append(o)
         order = [_band(lo) for lo, _ in BANDS] + ['no card minutes'] if key == 'byBand' \
             else sorted(groups)
@@ -1028,7 +1127,8 @@ def summary(rows):
             if label not in groups:
                 continue
             os_ = groups[label]
-            ratio = [o['actualMinutes'] / o['cardMinutes'] for o in os_ if o['cardMinutes']]
+            ratio = [o['actualMinutes'] / o['cardMinutes'] for o in os_
+                     if o['cardMinutes'] and not o.get('addon')]
             rate = [o['perHour'] for o in os_ if o['perHour'] is not None]
             out[key].append({'group': label, 'n': len(os_),
                              'ratio': statistics.median(ratio) if ratio else None,
@@ -1050,8 +1150,10 @@ COLUMNS = ('app', 'card pay', 'card min', 'card mi', 'took', 'ended', 'how',
 
 
 def cells(o):
-    return (o['app'] or '?', _f(o['pay'], '$%.2f'), _f(o['cardMinutes'], '%g'),
-            _f(o['cardMiles'], '%g'), _clock(o['took']), _clock(o['end']), o['how'],
+    # An add-on's card figures are increments, printed so: "+10", "+0.4".
+    inc = '+' if o.get('addon') else ''
+    return (o['app'] or '?', _f(o['pay'], '$%.2f'), _f(o['cardMinutes'], inc + '%g'),
+            _f(o['cardMiles'], inc + '%g'), _clock(o['took']), _clock(o['end']), o['how'],
             _f(o.get('actualMinutes'), '%.1f'), _f(o.get('gpsMiles'), '%.1f'),
             _f(o.get('restaurantMinutes'), '%.1f'), _f(o.get('doorMinutes'), '%.1f'),
             o['alongside'], _f(o.get('perHour'), '$%.2f'), 'yes' if o['reliable'] else 'NO')
@@ -1075,6 +1177,11 @@ def text(rep):
                               (('unstamped', 'with no -uu stamp'),
                                ('beforeClock', 'stamped before the clock was set'))
                               if info[k])
+                      + (('; the Pi\'s clock stepped %d time%s inside a log, and %d position%s '
+                          'before a step were re-stamped by the GPS\'s own time'
+                          % (info['clockSteps'], '' if info['clockSteps'] == 1 else 's',
+                             info['restamped'], '' if info['restamped'] == 1 else 's'))
+                         if info.get('clockSteps') else '')
                       + (('; %d log%s of other days not read'
                           % (info['otherDays'], '' if info['otherDays'] == 1 else 's'))
                          if info.get('otherDays') else '')))
@@ -1124,6 +1231,10 @@ def text(rep):
     out.append('Over the %d reliable order%s of %d (an order replaced, expired, put down with '
                'another too soon or with no end is left out):'
                % (s['reliable'], '' if s['reliable'] == 1 else 's', s['of']))
+    if s.get('addOns'):
+        out.append('  (%d add-on%s counted by app, and left out of every actual/card minutes '
+                   'ratio and of the card-minutes bands: an add-on\'s card minutes are only '
+                   'what it added)' % (s['addOns'], '' if s['addOns'] == 1 else 's'))
     for key, title in (('byApp', 'by app'), ('byBand', 'by card minutes')):
         out.append('  %s' % title)
         if not s[key]:
@@ -1203,7 +1314,8 @@ def as_json(rep):
                 'positions': info['positions'], 'passed': info['passed'],
                 'refused': dict(sorted(info['refused'].items())),
                 'unstamped': info['unstamped'], 'beforeClock': info['beforeClock'],
-                'otherDays': info.get('otherDays', 0)},
+                'otherDays': info.get('otherDays', 0),
+                'clockSteps': info.get('clockSteps', 0), 'restamped': info.get('restamped', 0)},
         'unreadable': info['unreadable'],
         'totals': None if info['gpsMissing'] else totals_json(rep.get('totals')),
         'orders': [{'n': i + 1, 'app': o['app'], 'pay': o['pay'],
@@ -1213,6 +1325,7 @@ def as_json(rep):
                     'restaurantMinutes': o.get('restaurantMinutes'),
                     'doorMinutes': o.get('doorMinutes'), 'alongside': o['alongside'],
                     'perHour': o.get('perHour'), 'reliable': bool(o['reliable']),
+                    'addon': bool(o.get('addon')),
                     'notes': list(o['notes']), 'pin': pin_text(o.get('pin'))}
                    for i, o in enumerate(rep['orders'])],
         'pinning': dict(pn, rate=(round(100.0 * pn['pinned'] / pn['recorded'])

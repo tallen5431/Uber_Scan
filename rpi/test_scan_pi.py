@@ -4141,6 +4141,26 @@ eq('the sighting of the trip\'s last stop under a cropped header says it is foot
     [(x['kind'], x['street'], x['partial']) for x in _foot_seen['stops']],
     _framed_seen['footed']),
    (True, False, 'uber.planner', [(None, '3259 Wrenfield Oaks Dr', 'top')], True))
+# ...and the owner's card-box read of 26 Oct, 20:38 (order #7; the shared case,
+# names, place and street invented): a Dropoff header, a place line over the
+# door with its town on the same line, and the bar. The card box's read is
+# sent as a sighting like any planner read (`whole or seen_stops is not
+# None`), now footed, the dropoff and its door on it, unpressed, and asks a
+# whole-screen read while an order is held (auto_read_for) — the assembler
+# decides it as a page (assemble.js, sighting: a box page alone).
+_BOX26 = [c['text'] for c in json.load(open(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', 'tests', 'fixtures',
+    'cases.json')))['planner']
+    if c['name'].startswith("the owner's card-box read of 26 Oct, 20:38")][0]
+_box26_stops = OP2.find_planner(_BOX26)
+_box26_seen = SP.sighting(_BOX26, _box26_stops, None, False, False)
+eq('the 26 Oct card-box read of the trip\'s last stop: a footed, unpressed planner sighting '
+   'with the dropoff\'s door and place, and it asks a whole read',
+   (_box26_seen['footed'], _box26_seen['whole'], _box26_seen['asked'], _box26_seen['screen'],
+    [(x['kind'], x['line'], x['place'], x['label']) for x in _box26_seen['stops']],
+    SP.auto_read_for(_BOX26, SP.planner_stops(_box26_stops))),
+   (True, False, False, 'uber.planner',
+    [('dropoff', '412 Brindle Ave NE, Kennesaw', 'Wrenfield Lofts', 'dropoff')], 'planner'))
 
 # --- what in the card box asks for an unpressed whole-screen read ------------
 #
