@@ -911,6 +911,8 @@ RIG_HOST=pi@<the rig's address>        # unset: no copy from the rig
 #RIG_SSH_KEY=~/.ssh/id_nightly         # a key with no passphrase, for cron
 #RIG_GPSLOG=gpslog/                    # on the rig, under its home
 #RIG_URL=http://<the rig's address>:8080  # the rig's server: its store waits (--waits)
+#PLACES_RELAY=http://localhost:8081      # a server with NUCBOX_SEARCH/ROUTER/STREETS set (--relay),
+                                         # when the journal's server has none: the router is the distance band's
 #PLACES_SERVER=http://localhost:8082   # the server to read
 #PLACES_NOMINATIM=http://localhost:8088
 #PLACES_GPS=~/gpslog

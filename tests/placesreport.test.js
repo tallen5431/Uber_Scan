@@ -1247,6 +1247,10 @@ function nbx() {
     await run({ PLACES_NODE: path.join(bin, 'argnode'), RIG_URL: 'http://127.0.0.1:9' });
     ok('...a rig that does not answer: not passed, and said', !/--waits/.test(fs.readFileSync(calls, 'utf8'))
        && /the rig's server did not answer/.test(fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8')));
+    // PLACES_RELAY: the NucBox relay the report asks, apart from the journal's server.
+    fs.writeFileSync(calls, '');
+    await run({ RIG_HOST: '', PLACES_NODE: path.join(bin, 'argnode'), PLACES_RELAY: 'http://127.0.0.1:9' });
+    ok('PLACES_RELAY is passed as --relay', /--relay http:\/\/127\.0\.0\.1:9( |$)/m.test(fs.readFileSync(calls, 'utf8')));
     srv.close();
   }());
 
@@ -1270,6 +1274,9 @@ function nbx() {
                          '--nominatim', 'http://h:8088']);
     return [a.server, a.out, a.gps, a.since, a.nominatim, a.minN];
   }()), ['http://h:8081', '/x', '/g', '2026-09-01', 'http://h:8088', P.MIN_N]);
+  eq('--relay is its own server, apart from the journal\'s', P.parseArgs(['http://h:8082', '--relay', 'http://h:8081']).relay,
+     'http://h:8081');
+  ok('...and an http(s) URL', (function () { try { P.parseArgs(['--relay', 'h:8081']); } catch (e) { return true; } return false; }()));
   ok('a bad date is refused', (function () { try { P.parseArgs(['--since', '9/1']); } catch (e) { return true; } return false; }()));
 
   console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'

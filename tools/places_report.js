@@ -3385,7 +3385,7 @@ function home(p) { return p && p[0] === '~' ? path.join(os.homedir(), p.slice(1)
 function parseArgs(argv) {
   var o = { server: null, out: path.join(os.homedir(), 'places-report'), gps: null, since: null,
             nominatim: null, cache: path.join(os.homedir(), '.cache', 'uber-scan', 'places-report-answers.json'),
-            gap: MV.NBX_GAP_MS, minN: MIN_N, streets: null, waits: null, roadAsks: 5000 };
+            gap: MV.NBX_GAP_MS, minN: MIN_N, streets: null, waits: null, relay: null, roadAsks: 5000 };
   for (var i = 0; i < argv.length; i++) {
     var a = argv[i];
     var val = function () { if (i + 1 >= argv.length) throw new Error(a + ' wants a value'); return argv[++i]; };
@@ -3398,6 +3398,7 @@ function parseArgs(argv) {
     else if (a === '--min-n') o.minN = Number(val());
     else if (a === '--streets') o.streets = val();
     else if (a === '--waits') o.waits = val();
+    else if (a === '--relay') o.relay = val();
     else if (a === '--road-asks') o.roadAsks = Number(val());
     else if (a === '-h' || a === '--help') o.help = true;
     else if (/^--/.test(a)) throw new Error('unknown option ' + a);
@@ -3409,7 +3410,7 @@ function parseArgs(argv) {
   if (!(o.minN >= 2)) throw new Error('--min-n is a number, 2 or more');
   if (!(o.gap >= 0)) throw new Error('--gap is milliseconds');
   if (!(o.roadAsks >= 0)) throw new Error('--road-asks is a number');
-  [['--streets', o.streets], ['--waits', o.waits]].forEach(function (x) {
+  [['--streets', o.streets], ['--waits', o.waits], ['--relay', o.relay]].forEach(function (x) {
     if (x[1] && !/^https?:\/\//.test(x[1])) throw new Error(x[0] + ' is an http(s) URL');
   });
   return o;
@@ -3419,7 +3420,7 @@ var USAGE = [
   'usage: node tools/places_report.js [http://localhost:8081] [--out ~/places-report]',
   '         [--gps ~/gpslog] [--since YYYY-MM-DD] [--nominatim http://localhost:8088]',
   '         [--cache ~/.cache/uber-scan/places-report-answers.json] [--gap ms] [--min-n 30]',
-  '         [--streets URL] [--waits URL] [--road-asks 5000]',
+  '         [--streets URL] [--waits URL] [--relay URL] [--road-asks 5000]',
   '',
   'Run on the NucBox. Reads the copy at home (its /api/journal), places pickups with the',
   'NucBox\'s own Nominatim (directly with --nominatim, else through that server\'s /api/nbx),',
@@ -3430,7 +3431,10 @@ var USAGE = [
   'the server\'s relay, else its own index — asked EVEN WITH --nominatim.',
   '--waits: a server whose /api/journal carries the rig\'s store waits (the rig\'s :8080),',
   'used when the main source carries none.',
-  '--road-asks: road questions the distance band may ask in all (through the server\'s',
+  '--relay: a server whose /api/nbx relay (search, router, street index) is asked instead of',
+  'the journal\'s server\'s: the copy at home may keep the journal and the site and have no',
+  'NucBox settings of its own.',
+  '--road-asks: road questions the distance band may ask in all (through the relay\'s',
   '/api/nbx/route; cached).',
   'Every night: tools/places_nightly.sh (see the README, "Every night, on the NucBox").',
 ].join('\n');
@@ -3468,18 +3472,20 @@ async function main(argv) {
                   + ' offers (its limit). Narrow the window with --since.');
   }
 
+  // The relay asked: --relay, else the journal's own server.
+  var relay = (o.relay || o.server).replace(/\/+$/, '');
   var settings = { search: false, streets: false, route: false };
   try {
-    var s = await getJson(o.server.replace(/\/+$/, '') + '/api/nbx');
+    var s = await getJson(relay + '/api/nbx');
     if (s.ok && s.body) settings = { search: !!s.body.search, streets: !!s.body.streets, route: !!s.body.route };
   } catch (e) { /* an older server: no relay */ }
   var nominatim = o.nominatim || (settings.search ? null : 'http://localhost:8088');
   // The street index EVEN WITH --nominatim (the first real run's 662 corners
   // went unasked): --streets, else the server's relay, else its own index.
-  var st = await streetsBase(o.server, o.streets);
-  var roadSaid = settings.route ? o.server.replace(/\/+$/, '') + '/api/nbx/route (the server\'s relay), at most '
-    + o.roadAsks + ' questions' : 'none — the server has no router set (NUCBOX_ROUTER), so no distance band';
-  console.log('search: ' + (nominatim ? nominatim + ' (direct)' : o.server + '/api/nbx (relay)'));
+  var st = await streetsBase(relay, o.streets);
+  var roadSaid = settings.route ? relay + '/api/nbx/route (the relay), at most '
+    + o.roadAsks + ' questions' : 'none — ' + relay + ' has no router set (NUCBOX_ROUTER), so no distance band';
+  console.log('search: ' + (nominatim ? nominatim + ' (direct)' : relay + '/api/nbx (relay)'));
   console.log('street index: ' + st.said);
   console.log('router: ' + roadSaid);
 
@@ -3495,7 +3501,7 @@ async function main(argv) {
     fs.renameSync(tmp, cacheFile);
   }
   var nbx = new MV.NbxSearch({ base: '/api/nbx', gap: o.gap, bandWait: BAND_WAIT_OFFLINE_MS,
-    fetch: nbxFetch({ cache: cache, server: o.server, nominatim: nominatim, streets: st.base,
+    fetch: nbxFetch({ cache: cache, server: relay, nominatim: nominatim, streets: st.base,
                       onFresh: function () { if (cache.fresh % 100 === 0) saveCache(); } }) });
   var region = regionOf(offers.filter(counted));
   console.log('region for cards with no fix: ' + (region ? region.box.s + ',' + region.box.w + ' to ' + region.box.n

@@ -26,6 +26,8 @@
 #                     the rig's store waits (the NucBox's copy of the journal
 #                     carries none); unset: no waits from the rig
 #   PLACES_SERVER     the server to read (default http://localhost:8082)
+#   PLACES_RELAY      a server whose NucBox relay (search, router, street index)
+#                     the report asks, passed as --relay (default: PLACES_SERVER's)
 #   PLACES_NOMINATIM  the NucBox's Nominatim (default http://localhost:8088)
 #   PLACES_GPS        the NucBox's GPS logs (default ~/gpslog)
 #   PLACES_OUT        the report the server serves (default ~/places-report)
@@ -45,7 +47,7 @@ if [ -f "$ENV_FILE" ]; then
         key="${line%%=*}"
         val="${line#*=}"
         case "$key" in
-            RIG_HOST|RIG_GPSLOG|RIG_SSH_KEY|RIG_URL|PLACES_SERVER|PLACES_NOMINATIM|PLACES_GPS|PLACES_OUT|PLACES_LOG|PLACES_SINCE|PLACES_KEEP|RSYNC_TIMEOUT|SSH_TIMEOUT|PLACES_NODE) ;;
+            RIG_HOST|RIG_GPSLOG|RIG_SSH_KEY|RIG_URL|PLACES_SERVER|PLACES_RELAY|PLACES_NOMINATIM|PLACES_GPS|PLACES_OUT|PLACES_LOG|PLACES_SINCE|PLACES_KEEP|RSYNC_TIMEOUT|SSH_TIMEOUT|PLACES_NODE) ;;
             *) continue ;;
         esac
         val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
@@ -61,6 +63,7 @@ RIG_GPSLOG="${RIG_GPSLOG:-gpslog/}"
 RIG_SSH_KEY="${RIG_SSH_KEY:-}"
 RIG_URL="${RIG_URL:-}"
 PLACES_SERVER="${PLACES_SERVER:-http://localhost:8082}"
+PLACES_RELAY="${PLACES_RELAY:-}"
 PLACES_NOMINATIM="${PLACES_NOMINATIM:-http://localhost:8088}"
 PLACES_GPS="${PLACES_GPS:-$HOME/gpslog}"
 PLACES_OUT="${PLACES_OUT:-$HOME/places-report}"
@@ -107,6 +110,7 @@ STAMP="$(date '+%Y%m%d-%H%M%S')-$$"
 NEW="$BUILDS/$STAMP"
 ARGS=("$HERE/places_report.js" "$PLACES_SERVER" --out "$NEW" --gps "$PLACES_GPS" --nominatim "$PLACES_NOMINATIM")
 [ -n "$PLACES_SINCE" ] && ARGS+=(--since "$PLACES_SINCE")
+[ -n "$PLACES_RELAY" ] && ARGS+=(--relay "$PLACES_RELAY")
 # The rig's store waits, when RIG_URL is set and the rig answers (a rig off or
 # away is the ordinary case: the report is built without them).
 if [ -n "$RIG_URL" ]; then
