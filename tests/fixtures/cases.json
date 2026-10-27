@@ -8249,5 +8249,148 @@
    "line": "12 Ab Rd, Marietta, 30066 30067",
    "expect": null
   }
+ ],
+ "_mapLabels_comment": "DoorDash's map label, the customer's street in a white-on-black rounded label above an offer card that reads only 'Customer dropoff' (the owner, 27 Oct): map_label / mapLabel, '<n> <street>[ <type>][ <quadrant>]' with no town, or null. `clipped` says the label ran into the screen's left edge (the number is dropped); `store` is the card's store name and door, which a label may not name. Every street is invented.",
+ "mapLabels": [
+  {
+   "name": "a number, a name, a type and a quadrant",
+   "text": "418 Fable Ave NE",
+   "expect": "418 Fable Ave NE"
+  },
+  {
+   "name": "a long number and a parkway, a mark in front",
+   "text": "\"10770 Kestrel Pkwy",
+   "expect": "10770 Kestrel Pkwy"
+  },
+  {
+   "name": "the number's letter slips put back",
+   "text": "1O770 Kestrel Pkwy",
+   "expect": "10770 Kestrel Pkwy"
+  },
+  {
+   "name": "the pill's end read as a letter in front, and Or for Dr",
+   "text": "e 412 Wrenfield Or NW",
+   "expect": "412 Wrenfield Dr NW"
+  },
+  {
+   "name": "P for Pl",
+   "text": "35 Lark P",
+   "expect": "35 Lark Pl"
+  },
+  {
+   "name": "a quadrant written out",
+   "text": "9 Wren St Northwest",
+   "expect": "9 Wren St Northwest"
+  },
+  {
+   "name": "an ordinal street",
+   "text": "14 14th St",
+   "expect": "14 14th St"
+  },
+  {
+   "name": "no type, two words of three letters",
+   "text": "77 Lark Owl Approach",
+   "expect": "77 Lark Owl Approach"
+  },
+  {
+   "name": "no type and one word says nothing to search",
+   "text": "418 Fable",
+   "expect": null
+  },
+  {
+   "name": "no number is no door",
+   "text": "Fable Ave NE",
+   "expect": null
+  },
+  {
+   "name": "a number cut by the screen edge, unclipped, is refused",
+   "text": "0 Lark Owl Approach",
+   "expect": null
+  },
+  {
+   "name": "...and with the edge said, the street alone",
+   "text": "0 Lark Owl Approach",
+   "clipped": true,
+   "expect": "Lark Owl Approach"
+  },
+  {
+   "name": "...the digits in front dropped too",
+   "text": "90 Kestrel Pkwy",
+   "clipped": true,
+   "expect": "Kestrel Pkwy"
+  },
+  {
+   "name": "a leading zero is no house number",
+   "text": "05 Wren St",
+   "expect": null
+  },
+  {
+   "name": "the app's Uber bubble",
+   "text": "Uber",
+   "expect": null
+  },
+  {
+   "name": "the app's Decline",
+   "text": "Decline",
+   "expect": null
+  },
+  {
+   "name": "the stops line",
+   "text": "2 stops (13.1 mi)",
+   "expect": null
+  },
+  {
+   "name": "a route chip",
+   "text": "41 min",
+   "expect": null
+  },
+  {
+   "name": "the accept bar and its clock",
+   "text": "Accept 0:14",
+   "expect": null
+  },
+  {
+   "name": "money",
+   "text": "$12.35",
+   "expect": null
+  },
+  {
+   "name": "the dropoff line itself",
+   "text": "418 Customer Dropoff",
+   "expect": null
+  },
+  {
+   "name": "a status chip",
+   "text": "Toot That (fe",
+   "expect": null
+  },
+  {
+   "name": "the store's own door",
+   "text": "2471 Fable Parkway Southeast",
+   "store": [
+    "Lark Owl Grill",
+    "2471 Fable Parkway Southeast, Smyr"
+   ],
+   "expect": null
+  },
+  {
+   "name": "...and a door that is not the store's",
+   "text": "418 Fable Ave NE",
+   "store": [
+    "Lark Owl Grill",
+    "2471 Fable Parkway Southeast, Smyr"
+   ],
+   "expect": "418 Fable Ave NE"
+  },
+  {
+   "name": "a unit after the street",
+   "text": "1200 Kestrel Plains Rd Suite 4",
+   "expect": null
+  },
+  {
+   "name": "too long to be a label",
+   "text": "1200 Kestrel Plains Wren Lark Owl Fable Road",
+   "expect": null
+  }
  ]
 }

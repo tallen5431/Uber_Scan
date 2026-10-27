@@ -3209,7 +3209,279 @@ def says_multi_order(parsed):
     return any(MULTI_ORDER.search(t or '') for t in texts)
 
 
-def emit_offer(offer_id, parsed, rate, where=None, whole=None):
+# --- DoorDash's map label ---------------------------------------------------
+#
+# The owner, 27 Oct: "reading the doordash icons still doesnt seem to work if a
+# best guess can be used for the map". A DoorDash card whose dropoff reads only
+# "Customer dropoff" has, on the map above it, a white-on-black rounded label
+# naming the customer's street with its house number ("<n> <Name> Ave NE") at
+# the route's end. The card box never reads it. This does, once per offer,
+# after the card's own reading and its offer line are out:
+#
+#   1. the screen box warped straight (PL.warp, the same corners the read
+#      used), and the band of it above the card: MAP_LABEL_BAND, down to the
+#      drawn card box's top where one sits inside that band;
+#   2. a light map, or nothing: the band's mean grey under MAP_LABEL_DIM (low
+#      light, a dark-mode map) or more than MAP_LABEL_DARK_SHARE of it near
+#      black, and the label is not looked for;
+#   3. near-black, unsaturated pixels (a red route chip is not one), opened to
+#      drop the route's thin line, each blob's holes filled (the white text),
+#      and the rows of it wide enough to be a pill kept: a box at least
+#      MAP_LABEL_ASPECT times as wide as it is tall, of the label's height
+#      (MAP_LABEL_TALL), with white text inside;
+#   4. each box deskewed (the phone sits a degree or two off square), cut in
+#      from its rounded ends, inverted to dark text on light, and read by
+#      tesseract as ONE LINE (psm 7); OP.map_label decides whether it is a
+#      street, refusing the app's own words and the card's own store;
+#   5. the first box that reads as one is the answer, biggest first, at most
+#      MAP_LABEL_MOST boxes, and never past MAP_LABEL_CAP_S of wall clock.
+#
+# A box that runs into the screen's left edge is `clipped`: its digits can be
+# the tail of a longer number, so the street goes alone. One that runs into the
+# right edge is not read: its street type is what was cut.
+#
+# On its own thread (MapLabels), so the camera loop never waits on it and the
+# card's reader never shares its time: the card's verdict is out before this
+# starts. A GUESS FOR DRAWING ONLY — see emit_offer's `mapLabel`.
+MAP_LABEL_BAND = (0.06, 0.62)
+MAP_LABEL_HEIGHT = 1400          # the screen box warped to this many rows
+MAP_LABEL_DIM = 90               # mean grey of the band below which: not looked for
+MAP_LABEL_DARK_SHARE = 0.35
+MAP_LABEL_BLACK = 80             # a label's grey is under this...
+MAP_LABEL_CHROMA = 40            # ...and its colour's spread (a red chip is not one)
+MAP_LABEL_TALL = (0.018, 0.08)   # a label's height, of the screen box's
+MAP_LABEL_ASPECT = 2.5
+MAP_LABEL_WIDE = 0.15            # ...and its width, of the screen box's
+MAP_LABEL_MOST = 3
+MAP_LABEL_CAP_S = 1.5
+MAP_LABEL_OCR = '--oem 1 --psm 7 -c tessedit_do_invert=0'
+MAP_LABEL_TEXT_ROWS = 70         # a label's box, scaled to this many rows to read
+
+
+def map_band(frame, geom, height=MAP_LABEL_HEIGHT):
+    """The map above the card, straightened: a BGR image, or None with no
+    corners or a whole-screen read. The band's bottom is the drawn card box's
+    top where that sits inside MAP_LABEL_BAND, else the band's own."""
+    if frame is None or geom is None or getattr(geom, 'quad', None) is None \
+            or getattr(geom, 'whole', False):
+        return None
+    q = np.asarray(geom.quad, dtype=np.float32).reshape(4, 2)
+    if not np.all(np.isfinite(q)):
+        return None
+    screen = PL.warp(frame, q, height=height)
+    if screen.ndim == 2:
+        screen = cv2.cvtColor(screen, cv2.COLOR_GRAY2BGR)
+    top, bottom = MAP_LABEL_BAND
+    roi = getattr(geom, 'roi', None)
+    if roi and top + 0.2 < float(roi[1]) < bottom:
+        bottom = float(roi[1])
+    h = screen.shape[0]
+    return screen[int(top * h):int(bottom * h)]
+
+
+def _runs(flags):
+    out, start = [], None
+    for i, v in enumerate(list(flags) + [False]):
+        if v and start is None:
+            start = i
+        elif not v and start is not None:
+            out.append((start, i))
+            start = None
+    return out
+
+
+def map_label_boxes(band, screen_h):
+    """The dark rounded label boxes in `band`, biggest first:
+    [(x, y, w, h)], or [] for a band too dim or too dark to hold one."""
+    if band is None or band.size == 0:
+        return []
+    # Grey as the brightest channel, and colour as the spread between the
+    # channels in grey levels rather than HSV's saturation, which a tinted
+    # picture's near-black pixels make large for nothing.
+    hi_c = band.max(axis=2)
+    grey = hi_c
+    chroma = hi_c.astype(np.int16) - band.min(axis=2)
+    dark = ((grey < MAP_LABEL_BLACK) & (chroma < MAP_LABEL_CHROMA)).astype(np.uint8)
+    if float(grey.mean()) < MAP_LABEL_DIM or float(dark.mean()) > MAP_LABEL_DARK_SHARE:
+        return []
+    H, W = band.shape[:2]
+    k = max(3, int(round(screen_h * 0.005))) | 1
+    opened = cv2.morphologyEx(dark, cv2.MORPH_OPEN,
+                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    found = cv2.findContours(opened, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = found[0] if len(found) == 2 else found[1]
+    lo, hi = MAP_LABEL_TALL[0] * screen_h, MAP_LABEL_TALL[1] * screen_h
+    boxes = []
+    for c in contours:
+        x, y, w, h = cv2.boundingRect(c)
+        if w < MAP_LABEL_WIDE * W or h < lo:
+            continue
+        filled = np.zeros((h, w), np.uint8)
+        cv2.drawContours(filled, [c - [x, y]], -1, 1, -1)
+        for r0, r1 in _runs(filled.mean(axis=1) >= 0.45):
+            rh = r1 - r0
+            if not lo <= rh <= hi:
+                continue
+            cols = _runs(filled[r0:r1].mean(axis=0) >= 0.5)
+            if not cols:
+                continue
+            c0, c1 = max(cols, key=lambda cc: cc[1] - cc[0])
+            bw = c1 - c0
+            if bw < MAP_LABEL_ASPECT * rh or bw < MAP_LABEL_WIDE * W:
+                continue
+            inside = grey[y + r0:y + r1, x + c0:x + c1]
+            # White text inside: a black blob with none is a road's shadow
+            # or a building, not a label.
+            if not 0.04 <= float((inside > 170).mean()) <= 0.6:
+                continue
+            boxes.append((x + c0, y + r0, bw, rh))
+    boxes.sort(key=lambda b: -b[2] * b[3])
+    return boxes
+
+
+def map_label_image(band, box):
+    """One label box, deskewed, cut in from its rounded ends and inverted to
+    dark text on light, at MAP_LABEL_TEXT_ROWS rows: what tesseract reads."""
+    x, y, w, h = box
+    H, W = band.shape[:2]
+    pad = int(h * 0.3)
+    x0, y0, x1, y1 = max(0, x - pad), max(0, y - pad), min(W, x + w + pad), min(H, y + h + pad)
+    grey = cv2.cvtColor(band[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)
+    dark = (grey < MAP_LABEL_BLACK).astype(np.uint8)
+    found = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = found[0] if len(found) == 2 else found[1]
+    angle, cx, cy, bw, bh = 0.0, x - x0 + w / 2.0, y - y0 + h / 2.0, float(w), float(h)
+    if contours:
+        (rx, ry), (rw, rh), ra = cv2.minAreaRect(max(contours, key=cv2.contourArea))
+        if rw < rh:
+            rw, rh, ra = rh, rw, ra + 90
+        if ra > 45:
+            ra -= 90
+        if ra < -45:
+            ra += 90
+        if abs(ra) <= 8 and rh <= 1.4 * h:
+            angle, cx, cy, bw, bh = ra, rx, ry, rw, rh
+    if angle:
+        m = cv2.getRotationMatrix2D((cx, cy), angle, 1.0)
+        grey = cv2.warpAffine(grey, m, (grey.shape[1], grey.shape[0]),
+                              borderMode=cv2.BORDER_REPLICATE)
+    cut_x, cut_y = bh * 0.3, bh * 0.12
+    a0, a1 = int(max(0, cx - bw / 2 + cut_x)), int(min(grey.shape[1], cx + bw / 2 - cut_x))
+    b0, b1 = int(max(0, cy - bh / 2 + cut_y)), int(min(grey.shape[0], cy + bh / 2 - cut_y))
+    if a1 - a0 < 8 or b1 - b0 < 4:
+        return None
+    inner = 255 - grey[b0:b1, a0:a1]
+    scale = MAP_LABEL_TEXT_ROWS / float(inner.shape[0])
+    inner = cv2.resize(inner, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    return cv2.copyMakeBorder(inner, 15, 15, 15, 15, cv2.BORDER_REPLICATE)
+
+
+def read_map_label(frame, geom, store=None, ocr=None, cap_s=MAP_LABEL_CAP_S,
+                   clock=time.monotonic):
+    """DoorDash's map label off `frame`: {'line', 'clipped', 'raw', 'ms'}, or
+    None. `store` is the card's store name and door, which a label may not
+    name (OP.map_label). Never raises; never reads past `cap_s`."""
+    began = clock()
+    ocr = ocr or (lambda image: PL.ocr(image, MAP_LABEL_OCR))
+    try:
+        band = map_band(frame, geom)
+        if band is None:
+            return None
+        W = band.shape[1]
+        for box in map_label_boxes(band, MAP_LABEL_HEIGHT)[:MAP_LABEL_MOST]:
+            if clock() - began > cap_s:
+                return None
+            x, _, w, _ = box
+            if x + w >= W - 2:
+                continue
+            clipped = x <= 2
+            image = map_label_image(band, box)
+            if image is None:
+                continue
+            raw = (ocr(image) or '').strip()
+            if clock() - began > cap_s:
+                return None
+            line = OP.map_label(raw, clipped=clipped, store=store)
+            if line:
+                return {'line': line, 'clipped': clipped, 'raw': raw,
+                        'ms': int((clock() - began) * 1000)}
+    except Exception:                               # noqa: BLE001 — a guess
+        return None
+    return None
+
+
+def wants_map_label(parsed):
+    """Is this reading DoorDash's offer card with no customer's door on it —
+    the card the map label is read for?"""
+    return bool(parsed and parsed.get('pay') is not None and not parsed.get('dropoff')
+                and OP.screen_type(parsed.get('text') or '')['screen'] == 'dd.offer')
+
+
+class MapLabels(object):
+    """read_map_label, off the camera's loop and the card's reader: one at a
+    time, the newest offer's only, on a thread of its own. `submit` never
+    blocks (a label already being read keeps its turn); `take` hands back
+    (offer_id, answer) once, answer None for none found. With `threaded`
+    False (--no-thread) the read runs in `submit`, capped as ever."""
+
+    def __init__(self, threaded=True, read=None):
+        self.read = read or read_map_label
+        self.threaded = threaded
+        self._work = queue.Queue(maxsize=1)
+        self._done = queue.Queue()
+        self._asked = set()
+        self._thread = None
+        if threaded:
+            self._thread = threading.Thread(target=self._serve, name='maplabel', daemon=True)
+            self._thread.start()
+
+    def submit(self, offer_id, frame, geom, store=None):
+        if offer_id is None or offer_id in self._asked:
+            return False
+        job = (offer_id, frame, geom, store)
+        if not self.threaded:
+            self._asked.add(offer_id)
+            self._done.put(self._job(*job))
+            return True
+        try:
+            self._work.put_nowait(job)
+        except queue.Full:
+            return False
+        self._asked.add(offer_id)
+        if len(self._asked) > 64:
+            self._asked = set(list(self._asked)[-32:])
+            self._asked.add(offer_id)
+        return True
+
+    def take(self):
+        try:
+            return self._done.get_nowait()
+        except queue.Empty:
+            return None
+
+    def _job(self, offer_id, frame, geom, store):
+        try:
+            return offer_id, self.read(frame, geom, store=store)
+        except Exception:                           # noqa: BLE001
+            return offer_id, None
+
+    def _serve(self):
+        while True:
+            job = self._work.get()
+            if job is None:
+                return
+            self._done.put(self._job(*job))
+
+    def close(self):
+        if self._thread is None:
+            return
+        try:
+            self._work.put_nowait(None)
+        except queue.Full:
+            pass
+
+
+def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
     """Which offer is now on the record, so the driver can say they took it.
 
     The one thing the rig cannot see is the driver pressing Accept, and it must
@@ -3299,6 +3571,19 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None):
         # field the reading carries and this line does not never reaches the
         # map. `pickup` stays the name, for showing.
         'pickupLine': parsed.get('pickupLine'),
+        # ...and the customer's street DoorDash's map labelled above a card
+        # that printed only "Customer dropoff" (read_map_label; the owner, 27
+        # Oct): "<n> <street>", or the street alone when the label ran into
+        # the screen's edge, or None. Told on a second offer line once its
+        # read is done, after this card's own. server.js keeps it as the
+        # offer's `dropoffGuess` — a guess Map view may DRAW to, never the
+        # offer's `dropoff`, never a figure, never a pin, never a hold's end.
+        'mapLabel': map_label,
+        # ...and DoorDash's printed stop count ("2 stops"), which
+        # MapView.bandTarget reads to know a DoorDash card's miles are the
+        # whole job: server.js's CARD_FIELDS has asked for it, and the
+        # reading carried it, but this line never did.
+        'stops': parsed.get('stops'),
         # Whether the card REFUSED a destination or the reader merely found
         # none. Both arrive as `dropoff: null` and only the first is a state
         # the driver can do something about — Uber prints "Customer dropoff"
@@ -3957,6 +4242,28 @@ def main():
     seen_pay = False
     seen_kept = False
     reader = Reader(scanner, threaded=not args.no_thread)
+    # ...and DoorDash's map label, read on a thread of its own once a card's
+    # offer line is out (MapLabels, read_map_label). `labels` holds what each
+    # offer's label read as, and the arguments its offer line was last told
+    # with, so the line can be told again carrying the label.
+    map_labels = MapLabels(threaded=not args.no_thread)
+    labels = {'for': {}, 'told': None}
+
+    def tell_label():
+        got = map_labels.take()
+        if got is None:
+            return
+        offer_id, answer = got
+        line = answer.get('line') if answer else None
+        if not line:
+            return
+        labels['for'][offer_id] = line
+        if len(labels['for']) > 32:
+            labels['for'].pop(next(iter(labels['for'])))
+        told = labels['told']
+        if args.json and told and told[0] == offer_id == told_offer:
+            emit_offer(offer_id, told[1], told[2], where=told[3], whole=told[4],
+                       map_label=line)
 
     # Every offer the scanner is sure of, kept so a shift can be looked at
     # afterwards. Seeded from the file rather than from nothing: the scanner is
@@ -3984,7 +4291,7 @@ def main():
     # says so for both. --no-journal writes none of them, which is what it asks.
     updown = UpDown(offer_log.journal if offer_log is not None else None,
                     asked_gps=bool(args.gps))
-    def digest(out, frame, read_at=None, whole=False, began=None):
+    def digest(out, frame, read_at=None, whole=False, began=None, geom=None):
         """Everything a read means, once the reading itself is done.
 
         On the loop's thread, always — the accumulator, the journal, the voice
@@ -4978,7 +5285,16 @@ def main():
                     told_offer = offer_log.id
                     told_as = reading
                     emit_offer(offer_log.id, parsed, rate, where=where,
-                               whole=whole)
+                               whole=whole, map_label=labels['for'].get(offer_log.id))
+                    labels['told'] = (offer_log.id, parsed, rate, where, whole)
+                # ...and DoorDash's map label for a card that printed only
+                # "Customer dropoff", once per card, AFTER its own line: the
+                # read is on MapLabels' thread, and its answer is told on a
+                # second offer line (tell_label). Not on a whole-screen read,
+                # which is a ⌖ press's question.
+                if not whole and geom is not None and wants_map_label(parsed):
+                    map_labels.submit(offer_log.id, frame, geom,
+                                      store=[parsed.get('pickup'), parsed.get('pickupLine')])
 
         if args.display:
             cv2.imshow('uber-scan', render_panel(rate, parsed, whole=whole,
@@ -5046,6 +5362,7 @@ def main():
 
     def collect():
         """Take a finished read, if there is one, and act on it."""
+        tell_label()
         done = reader.take()
         if done is None:
             return False
@@ -5103,7 +5420,7 @@ def main():
                 if i != chosen:
                     accumulator.add(other['parsed'])
         return digest(batch[chosen], done['frames'][0], done.get('at'), whole=whole,
-                      began=done.get('began'))
+                      began=done.get('began'), geom=done.get('geom'))
 
     # What the server answers GET /api/settings with, from the moment the loop
     # runs. See emit_settings.
@@ -5901,6 +6218,7 @@ def main():
         if clean:
             updown.stop()
         reader.close()
+        map_labels.close()
         if phone is not None:
             phone.stop()
         cam.stop()

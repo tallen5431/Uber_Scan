@@ -9791,6 +9791,82 @@ eq('...a card at another door says nothing, and its pair row differs from the sa
 eq('...and with two in the car the second order\'s store is named, ②',
    _ssr.get('second'), ([True], True, 2))
 
+# --- DoorDash's map label as the offer's guessed end (the owner, 27 Oct) -------
+#
+# "reading the doordash icons still doesnt seem to work if a best guess can be
+# used for the map": the rig reads the customer's street off DoorDash's map
+# label (scan_pi.read_map_label) onto the offer line as `mapLabel`, and the
+# server keeps it as the offer's `dropoffGuess` {line, from: 'dd map label'}
+# for Map view to DRAW to — and for nothing else. The pair row, the reading's
+# stack and its verdict are the same with it as without; a Took's hold ends
+# where the screens after the accept say, never at the guess. Invented streets.
+def _guesses():
+    sp, sb, sj, _sh = _cserver('ddguess')
+    out = {}
+    try:
+        _took2(sb, _card('gl-a', 9.48, minutes=40.0, pickup='Larkspur Tacos',
+                         dropoff='12 Quillon St, Marietta, GA 30060'))
+        _say(_ssread(12.35, 11.2))
+        _say(_card('gl-d', 12.35, minutes=38.0, miles=11.2, app='doordash', screen='dd.offer',
+                   pickup='Lark Owl Grill', stops=2, endRefused=True,
+                   mapLabel='418 Fable Ave NE'))
+        _say(_ssread(12.35, 11.2))
+        st = get(sb, '/api/status')
+        o = st.get('offer') or {}
+        out['kept'] = (o.get('dropoffGuess'), o.get('dropoff'), 'mapLabel' in o)
+        out['stack d'] = (st.get('last') or {}).get('stack')
+        # ...the same card read again with no label: the guess stands.
+        _say(_card('gl-d', 12.35, minutes=38.0, miles=11.2, app='doordash', screen='dd.offer',
+                   pickup='Lark Owl Grill', stops=2, endRefused=True))
+        out['again'] = ((get(sb, '/api/status').get('offer') or {}).get('dropoffGuess') or {}).get('line')
+        # ...the same figures with no label at all: the pair row and the stack
+        # as they were, but for the id.
+        _say(_card('gl-x', 12.35, minutes=38.0, miles=11.2, app='doordash', screen='dd.offer',
+                   pickup='Lark Owl Grill', stops=2, endRefused=True))
+        _say(_ssread(12.35, 11.2))
+        st = get(sb, '/api/status')
+        out['none'] = (st.get('offer') or {}).get('dropoffGuess')
+        rd = [r for r in _rows(sj, 'pair') if r.get('id') == 'gl-d'][0]
+        rx = [r for r in _rows(sj, 'pair') if r.get('id') == 'gl-x'][0]
+        # (`held` and `stack` move with the minutes the order in the car has
+        # run between the two cards; the verdict and its worst do not.)
+        out['pair'] = ((rd.get('stack') or {}).get('state') == (rx.get('stack') or {}).get('state'),
+                       (rd.get('stack') or {}).get('worst') == (rx.get('stack') or {}).get('worst'),
+                       rd.get('said') == rx.get('said'), bool(rd.get('said')),
+                       '418 Fable' in json.dumps(rd))
+        out['stack same'] = out['stack d'] == (st.get('last') or {}).get('stack')
+        # ...an Uber card, or a DoorDash card that named its own dropoff: none.
+        _say(_card('gl-u', 12.35, app='uber', mapLabel='418 Fable Ave NE'))
+        out['uber'] = (get(sb, '/api/status').get('offer') or {}).get('dropoffGuess')
+        _say(_card('gl-o', 12.35, app='doordash', screen='dd.offer',
+                   dropoff='7 Wren Ave, Smyrna, GA 30080', mapLabel='418 Fable Ave NE'))
+        out['own end'] = (get(sb, '/api/status').get('offer') or {}).get('dropoffGuess')
+        # ...and a Took on a guessed card: the hold has no end from it.
+        _took2(sb, _card('gl-t', 12.35, minutes=38.0, miles=11.2, app='doordash',
+                         screen='dd.offer', pickup='Lark Owl Grill', stops=2, endRefused=True,
+                         mapLabel='418 Fable Ave NE'))
+        held = [h for h in json.load(open(os.path.join(os.path.dirname(sj),
+                                                       'holding.json')))['orders']
+                if h.get('id') == 'gl-t']
+        out['took'] = ([h.get('dropoff') for h in held], '418 Fable' in json.dumps(held))
+    finally:
+        stop(sp)
+    return out
+
+
+_gl = _guesses()
+eq('dd map label: the offer keeps it as dropoffGuess, its dropoff still none, no mapLabel kept',
+   _gl.get('kept'), ({'line': '418 Fable Ave NE', 'from': 'dd map label'}, None, False))
+eq('...carried across a re-read of the same card', _gl.get('again'), '418 Fable Ave NE')
+eq('...a card with no label has none', _gl.get('none'), None)
+eq('...and with an order in the car the pair row says the same with it as without',
+   _gl.get('pair'), (True, True, True, True, False))
+ok_('...and so does the reading\'s stack (no figure moves)', _gl.get('stack same'))
+eq('...an Uber card\'s label is not kept', _gl.get('uber'), None)
+eq('...nor one on a DoorDash card that named its own dropoff', _gl.get('own end'), None)
+eq('...and a Took on a guessed card holds no end from it',
+   _gl.get('took'), ([None], False))
+
 # --- whether each NucBox service is answering ----------------------------------
 #
 # The owner, 22 Oct: the map drew nothing for a held order and nothing said

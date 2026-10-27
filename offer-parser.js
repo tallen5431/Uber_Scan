@@ -2723,6 +2723,74 @@
     return street + ', ' + town + (rest ? ', ' + rest : '');
   }
 
+  /* DoorDash's map label: the customer's street, white on black above an
+     offer card whose dropoff reads only "Customer dropoff" (the owner, 27
+     Oct). "<house number> <street words>[ <type>][ <quadrant>]", one line, no
+     town, or null; with `clipped` (the label ran into the screen's left edge)
+     the number is dropped and the street stands alone. Refuses a time or
+     money mark, the app's own words ("Uber", "Decline", "2 stops", "41 min"),
+     a bare one-word street, and the store itself (`store`: the card's
+     pickup name and door). A GUESS FOR DRAWING ONLY: the offer's
+     `dropoffGuess`, never its `dropoff`. See MAP_LABEL_JUNK and map_label in
+     offer_parser.py, which say why each part is asked. */
+  var MAP_LABEL_JUNK = new RegExp(
+    '^(?:uber|doordash|dasher|decline|accept|customer|dropoff|drop|pickup|pick|stops?|'
+    + 'min|mins|minutes|mi|miles|incl|tips?|guaranteed|orders?|deliver|total|toot)$', 'i');
+  var MAP_LABEL_MARKS = /[:$()+·•|@#%&*=<>\[\]{}]/;
+  var LABEL_NUMBER = new RegExp('^' + DC + '{1,6}$');
+  var LABEL_WORD = /^(?:[A-Za-z][A-Za-z'.-]*|\d{1,3}(?:st|nd|rd|th))$/i;
+  var LABEL_DIR = new RegExp('^(?:N|S|E|W|NE|NW|SE|SW|North|South|East|West|'
+    + 'Northeast|Northwest|Southeast|Southwest)\\.?$', 'i');
+  var LABEL_TYPE = new RegExp('^(?:' + STREET_SUFFIX + ')\\.?$', 'i');
+  var MAP_LABEL_LONGEST = 48;
+
+  function labelKey(text) {
+    return (String(text || '').toLowerCase().match(/[a-z0-9]+/g) || []).join(' ');
+  }
+
+  function mapLabel(text, clipped, store) {
+    var flat = normalize(text).replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9.]+$/g, '');
+    if (!flat || flat.length > MAP_LABEL_LONGEST || MAP_LABEL_MARKS.test(flat)) return null;
+    var words = flat.split(' ');
+    if (words.length > 1 && words[0].length === 1 && !/^\d$/.test(words[0])
+        && /\d/.test(words[1])) words = words.slice(1);
+    var number = null;
+    if (LABEL_NUMBER.test(words[0]) && /\d/.test(words[0])) {
+      number = fixDigits(words[0]);
+      words = words.slice(1);
+    }
+    if (!clipped && (number === null || !/^\d+$/.test(number) || number[0] === '0')) return null;
+    if (!words.length || words.length > 6) return null;
+    if (!words.every(function (w) { return LABEL_WORD.test(w); })
+        || words.some(function (w) { return MAP_LABEL_JUNK.test(w.replace(/\.+$/, '')); })) {
+      return null;
+    }
+    var quadrant = null;
+    if (words.length > 1 && LABEL_DIR.test(words[words.length - 1])) {
+      quadrant = words[words.length - 1].replace(/\.+$/, '');
+      if (quadrant.length <= 2) quadrant = quadrant.toUpperCase();
+      words = words.slice(0, -1);
+    }
+    var street = plannerOrSlip(plannerPlSlip('1 ' + words.join(' '))).slice(2);
+    words = street.split(' ');
+    var typed = words.length > 1 && LABEL_TYPE.test(words[words.length - 1]);
+    var names = typed ? words.slice(0, -1) : words;
+    if (typed) {
+      if (!names.some(function (w) { return /[A-Za-z]{2}/.test(w); })) return null;
+    } else if (names.length < 2 || !names.every(function (w) { return /[A-Za-z]{3}/.test(w); })) {
+      return null;
+    }
+    street = words.concat(quadrant ? [quadrant] : []).join(' ');
+    var line = clipped ? street : number + ' ' + street;
+    var key = labelKey(line);
+    var stores = typeof store === 'string' ? [store] : Array.isArray(store) ? store : [];
+    for (var i = 0; i < stores.length; i++) {
+      var k = labelKey(stores[i]);
+      if (k && (k === key || k.indexOf(key + ' ') === 0)) return null;
+    }
+    return line;
+  }
+
   /* `doors`, when an array is passed, is filled beside the return value with
      each store's door (storeDoor) off the line DIRECTLY under its name, or
      null: a chip line between them is skipped as always, and a street after
@@ -4263,6 +4331,7 @@
            findDeadline: findDeadline, minutesUntil: minutesUntil,
            findPlaces: findPlaces, trimPlace: trimPlace,
            findPickup: findPickup, findDropoff: findDropoff, storeDoor: storeDoor,
+           mapLabel: mapLabel,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner, sheetDropoff: sheetDropoff,
            placePopup: placePopup,

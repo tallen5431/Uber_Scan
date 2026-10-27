@@ -860,7 +860,9 @@
    * armed by the server's door pin and its rules alone (pinHeldEnd sends a
    * door askNucBox found, never a point of this). */
   var ROUTE_NOTES = { street: 'route to street, not door', corner: 'route to corner',
-                      pickup: 'route to pickup only', area: '≈ route to area' };
+                      pickup: 'route to pickup only', area: '≈ route to area',
+                      // ...and an end that is DoorDash's map label (guessDisc).
+                      guess: '≈ from DoorDash\'s map' };
 
   /* The words for an area's rung: how many answers and how far apart, so
      the driver can see how rough the end of the run is — "10+" where the
@@ -1112,6 +1114,11 @@
       }
       // A pickup's area is said in its own refusal or not at all (areaNote).
       if (/^(?:trip: )?\u2248 pickup area$/.test(n)) return;
+      // ...and DoorDash's guessed end (ROUTE_NOTES.guess) is not said after a
+      // refusal already carrying an area's words: with both the caption ran
+      // past two rows at 800x480 (rpi/test_layout.py), and the faded "≈" and
+      // the dashed run on the map say it.
+      if (n.replace(/^trip: /, '') === ROUTE_NOTES.guess && s.indexOf(' · \u2248 routed') !== -1) return;
       seen.push(n);
     });
     return seen.length ? s + ' · ' + seen.join(' · ') : s;
@@ -1119,7 +1126,7 @@
 
   // The notes routeSaid put after a sentence, as one tail; captionChip
   // chips the sentence before them and keeps them after the chip.
-  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ route to (?:street )?area(?:, \d+\+? within [\d.]+ mi|, by card's [\d.]+ mi)?|route skips \d+ dropoffs?, not found))+)$/;
+  var ROUTE_TAIL = /((?: · (?:trip: )?(?:route to (?:street, not door|corner|pickup only)|≈ from DoorDash's map|≈ route to (?:street )?area(?:, \d+\+? within [\d.]+ mi|, by card's [\d.]+ mi)?|route skips \d+ dropoffs?, not found))+)$/;
   function routeTail(text) {
     var m = ROUTE_TAIL.exec(String(text || ''));
     return m ? { said: text.slice(0, m.index), tail: m[1] } : { said: text, tail: '' };
@@ -1654,6 +1661,47 @@
       return fix ? { from: 'pickup', miles: card.miles, less: fix, said: card.miles } : null;
     }
     return null;
+  }
+
+  /* --- DoorDash's map label as the trip's end (the owner, 27 Oct) ---------
+   *
+   * "reading the doordash icons still doesnt seem to work if a best guess can
+   * be used for the map". A DoorDash card that prints only "Customer dropoff"
+   * has no end to search; its map, above the card, labels the customer's
+   * street ("<n> <Name> Ave NE", no town), and the rig reads that label
+   * (scan_pi.read_map_label, OfferParser.mapLabel) onto the offer as
+   * `dropoffGuess` {line, from: GUESS_FROM} (server.js).
+   *
+   * Searched as a door INSIDE guessDisc: round the PLACED PICKUP, as far as
+   * the card's whole job (the customer is no further from the store by road
+   * than the job, and a straight line is no longer than the road) plus
+   * SLACK_MI, on a card judge() vouches for, not doubted, not an early look.
+   * Several answers inside it are chosen among by the distance band for
+   * DoorDash's dropoff (bandTarget: the job less the road from the card's
+   * fix to the pickup, measured from the pickup).
+   *
+   * DRAWING ONLY, and less than an area: the point is the trip's end on the
+   * map, faded "≈", the run car -> pickup -> it, said "trip: ≈ from
+   * DoorDash's map". It is never `found`, so never a figure's point (no
+   * detour, miles or minutes are measured to it), never posted (pinHeldEnd),
+   * never a hold's end (the hold's dropoff comes from the screens after the
+   * accept, as before), never what the GPS drop is armed by. */
+  var GUESS_FROM = 'dd map label';
+
+  function guessDisc(card, pick) {
+    if (!card || printedMi(card.miles) === null || !vouches(card) || card.doubt
+        || card.earlyLook || !pick || typeof pick.lat !== 'number'
+        || typeof pick.lon !== 'number' || !isFinite(pick.lat) || !isFinite(pick.lon)) return null;
+    return { at: { lat: pick.lat, lon: pick.lon }, miles: card.miles + SLACK_MI,
+             card: card.miles, corrected: !!card.milesCorrected, guess: true };
+  }
+
+  /* The offer's guessed end as text to search, or null: only DoorDash's map
+     label's, and only on a card that named no dropoff of its own. */
+  function guessOf(o) {
+    var g = o && !o.dropoff && o.dropoffGuess;
+    return g && typeof g === 'object' && g.from === GUESS_FROM && typeof g.line === 'string'
+      && g.line ? g.line : null;
   }
 
   /* The candidates a band may choose among, from a refusal: a door plan's
@@ -4714,6 +4762,8 @@
            // ...and the distance band (the owner, 25 Oct).
            bandMiles: bandMiles, bandTarget: bandTarget, bandPick: bandPick,
            bandCands: bandCands, bandSamples: bandSamples, tripLeg: tripLeg,
+           // ...and DoorDash's map label as the trip's end (27 Oct).
+           GUESS_FROM: GUESS_FROM, guessDisc: guessDisc, guessOf: guessOf,
            BAND_MIN_MI: BAND_MIN_MI, BAND_FRAC: BAND_FRAC, BAND_ASKS_MAX: BAND_ASKS_MAX,
            BAND_CARD_ASKS: BAND_CARD_ASKS, BAND_WAIT_MS: BAND_WAIT_MS, BAND_STEP_M: BAND_STEP_M,
            // ...and a batched trip's other doors, drawn on the run (24 Oct).

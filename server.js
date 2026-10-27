@@ -533,6 +533,13 @@ function startScanner() {
           } else if (!sameCard && carriedNow) {
             read.offer.heldCard = holdIdOf(carriedNow);
           }
+          // ...and DoorDash's map label for a card that printed only "Customer
+          // dropoff" (dropoffGuessOf; the owner, 27 Oct), kept as the offer's
+          // `dropoffGuess` and carried across re-reads like the tap above.
+          // Never `dropoff`: nothing here or in the hold reads it.
+          read.offer.dropoffGuess = dropoffGuessOf(read.offer)
+            || (sameCard && !read.offer.dropoff ? scanner.offer.dropoffGuess || null : null);
+          delete read.offer.mapLabel;
           scanner.offer = read.offer;
           if (!sameCard) {
             scanner.offerAt = Date.now();
@@ -1071,6 +1078,25 @@ var CARD_FIELDS = ['lat', 'lon', 'gpsAge', 'gpsErr', 'gpsMode', 'gpsOk', 'gpsWhy
                    // band's targets (MapView.bandTarget; the owner, 25 Oct):
                    // Uber's drive to the pickup, DoorDash's count of stops.
                    'toPickupMiles', 'stops'];
+
+/* DoorDash's map label as the offer's guessed end (the owner, 27 Oct: "if a
+ * best guess can be used for the map"): { line, from: MV.GUESS_FROM } off the
+ * offer line's `mapLabel` (scan_pi.read_map_label, the parser's map_label),
+ * or null — only on a DoorDash card that named no dropoff of its own.
+ *
+ * DRAWING ONLY. Map view searches it in the card's disc round the placed
+ * pickup and draws it as an approximate end (live.html, MV.guessDisc). It is
+ * not `dropoff`, so no figure, pairing, stacking advice, pin, GPS drop or
+ * hold reads it: cardOf's CARD_FIELDS leave it out, Assemble.cardFields
+ * takes `dropoff` alone, and a held order's end comes from the screens after
+ * the accept as before. */
+function dropoffGuessOf(offer) {
+  var t = offer && offer.mapLabel;
+  if (!offer || offer.app !== 'doordash' || offer.dropoff || typeof t !== 'string') return null;
+  t = t.replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 60 || !/[A-Za-z]{2}/.test(t)) return null;
+  return { line: t, from: MV.GUESS_FROM || 'dd map label' };
+}
 
 function cardOf(offer) {
   var out = {};

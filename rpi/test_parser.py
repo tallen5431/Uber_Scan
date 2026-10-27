@@ -219,6 +219,13 @@ for c in cases.get('popups', []):
 for c in cases.get('doors', []):
     eq('doors / ' + c['name'], P.store_door(c['line']), c['expect'])
 
+# DoorDash's map label, the customer's street above a card that reads only
+# "Customer dropoff", or None. The same cases tests/corpus.test.js runs. See
+# map_label in offer_parser.py.
+for c in cases.get('mapLabels', []):
+    eq('mapLabels / ' + c['name'],
+       P.map_label(c['text'], c.get('clipped', False), c.get('store')), c['expect'])
+
 for c in cases.get('navStops', []):
     _p = P.parse(c['text'])
     eq('navStops / ' + c['name'],

@@ -787,6 +787,21 @@ CAPTION_LINES = [
     ('no pin, a long street narrowed by the card\'s miles',
      "no pin for " + WIDEST_DISC + " — none found · ≈ routed, by card's 88.8 mi",
      "no pin for " + WIDEST_DISC + " — none found"),
+    # ...and a DoorDash card printing only "Customer dropoff", its trip drawn
+    # to the street DoorDash's map labelled (the owner, 27 Oct: MV.guessDisc,
+    # the ladder's 'guess' rung), said after the caption's own tail.
+    ('the figure, the trip drawn to DoorDash\'s map label',
+     'this pickup is on your way by road · 1 not found · trip: ≈ from DoorDash\'s map',
+     'this pickup is on your way by road'),
+    # (After a refusal already carrying an area's words — "no pin for <W…> —
+    # too many to be sure · ≈ routed, 10+ within 1.0 mi" — it ran past two
+    # rows at 800x480, so there it is not said (MV.routeSaid) and the row is
+    # not kept; beside "1 not found · NucBox router down" it did too.) ...and
+    # after the straight-line figure:
+    ('the straight-line figure, the trip to DoorDash\'s map label',
+     'this pickup is on your way — straight lines, not roads · 1 not found '
+     '· trip: ≈ from DoorDash\'s map',
+     'this pickup is on your way — straight lines, not roads'),
     ('no pin, several with no fix',
      "no pin for " + WIDEST_DISC + " — 10 found · no GPS fix to choose between "
      "them",
@@ -1004,9 +1019,9 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 112)
-eq('...and fifty-four of its entries declare a tail the clamp may eat',
-   len(_DECLARED), 54)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 114)
+eq('...and fifty-six of its entries declare a tail the clamp may eat',
+   len(_DECLARED), 56)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
                  for row in CAPTION_LINES]
 for _name, _text, _keep in CAPTION_LINES:

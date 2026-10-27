@@ -5015,6 +5015,32 @@ const framed = (page) => page.waitForFunction(
                            band: String(k.popup || '').indexOf('card\'s miles by road') >= 0 }))),
           pick: await pick(),
           posts: areaPosts.slice() };
+        // DoorDash's map label as the trip's end (the owner, 27 Oct),
+        // invented: a DoorDash card printing only "Customer dropoff", its
+        // store's door pinned, and the street its map labelled carried as
+        // the offer's dropoffGuess. First the same card with no guess, then
+        // with it: the caption gains only the guess's words, a faded "≈"
+        // ring is drawn at the guessed door and never D, and nothing is
+        // posted.
+        const dash = { miles: 5.0, stops: 2, hasTotal: false, legs: 1, dropoff: null };
+        await push({ id: 'n-guess0', pickup: '250 Example Road', holdId: 'h-guess',
+                     card: dash });
+        await page.waitForTimeout(2500);
+        const guessBefore = await note();
+        await push({ id: 'n-guess', pickup: '250 Example Road', holdId: 'h-guess',
+                     card: Object.assign({ dropoffGuess: { line: '1981 Cobb Parkway',
+                                                           from: 'dd map label' } }, dash) });
+        await page.waitForTimeout(2500);
+        r.guess = {
+          before: guessBefore,
+          note: await note(),
+          ring: await page.evaluate(() => (window.__marks || []).filter(
+            (k) => String(k.popup || '').indexOf('DoorDash\'s map labels the customer') >= 0)
+            .map((k) => ({ ll: k.ll, faded: (k.opts || {}).fillOpacity < 0.5 }))),
+          drop: await page.evaluate(() => (window.__marks || []).filter(
+            (k) => String(k.popup || '').indexOf('and drop it here') >= 0).length),
+          pick: await pick(),
+          posts: areaPosts.slice() };
         page.off('request', onPost);
         // The same street-only door, no place, but the SERVER armed it by
         // the short street (endBy 'street', its point): Map view draws that
@@ -11020,6 +11046,16 @@ try:
        (_ba.get('pick'), [(m.get('ll'), m.get('faded'), m.get('band')) for m in _ba.get('ring') or []],
         '\u2248 routed, by card\'s 0.7 mi' in (_ba.get('note') or ''), _ba.get('posts')),
        (None, [([33.96, -84.545], True, True)], True, []))
+    _gg = both.get('guess') or {}
+    eq('[dd map label] a DoorDash card naming no dropoff, its map\'s label carried as the '
+       'offer\'s guess: a faded "≈" ring at the guessed door, never D, the store still P, the '
+       'caption the same but for "trip: ≈ from DoorDash\'s map", nothing posted (%r, %r)'
+       % (_gg.get('before'), _gg.get('note')),
+       ([(bool(m.get('ll')), m.get('faded')) for m in _gg.get('ring') or []], _gg.get('drop'),
+        bool(_gg.get('pick')),
+        (_gg.get('note') or '').replace(' \u00b7 trip: \u2248 from DoorDash\'s map', '')
+        == _gg.get('before'), 'DoorDash\'s map' in (_gg.get('note') or ''), _gg.get('posts')),
+       ([(True, True)], 0, True, True, True, []))
     ok_('[server pin] Map view draws the held end the server armed by street as D, at its '
         'point, and does not say NO PIN; a pin by no server rule is not drawn (%r)'
         % both.get('serverNote'),

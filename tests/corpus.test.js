@@ -161,6 +161,13 @@ function stopFields(stops) {
   eq('doors / ' + c.name, P.storeDoor(c.line), c.expect);
 });
 
+/* DoorDash's map label, the customer's street above a card that reads only
+   "Customer dropoff", or null. The same cases rpi/test_parser.py runs. See
+   map_label in offer_parser.py. */
+(cases.mapLabels || []).forEach(function (c) {
+  eq('mapLabels / ' + c.name, P.mapLabel(c.text, !!c.clipped, c.store || null), c.expect);
+});
+
 /* What a navigation or "Deliver to" screen gives as a destination nobody
    pressed for. `expect` is [screen, line, stop, under, asOffer]; this port has
    no address_stop, so it holds the screen, findAddress's line and the offer

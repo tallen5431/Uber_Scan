@@ -4967,6 +4967,100 @@ def store_door(line):
     return out + (', ' + rest if rest else '')
 
 
+# DOORDASH'S MAP LABEL. Above an offer card whose dropoff reads only "Customer
+# dropoff", DoorDash's map names the customer's street in a white-on-black
+# rounded label beside the route's end: "<n> <Name> Ave NE", "<n> <Name>
+# Pkwy" — a house number and a street, and never a town (the owner, 27 Oct:
+# "reading the doordash icons still doesnt seem to work if a best guess can be
+# used for the map"). scan_pi.read_map_label crops those labels out of the map
+# and hands each one's reading here.
+#
+# map_label / mapLabel: "<house number> <street words>[ <type>][ <quadrant>]",
+# one line, or None. The number is digits (DC's slips fixed, at least one real
+# digit, never 0 or a leading 0); the words are letters (or an ordinal, 14th);
+# a type from STREET_SUFFIX, with "Or" for "Dr" and "P"/"PI" for "Pl" put back
+# as the planner's are; a quadrant or a compass word last. A street with no
+# type needs two words of three letters ("<Name> Approach"); one bare word is
+# refused ("418 Fable" says nothing a search could hold). Refused outright:
+# a time or money mark (":" "$" "(" ")" "+" "·" "•"), a word of the app's own
+# (MAP_LABEL_JUNK: "Uber", "Decline", "Customer dropoff", "2 stops", "41 min",
+# a route chip's "mi"), and the store itself — `store` is the card's store name
+# and its door (pickup, pickupLine): a label naming those is the pickup's.
+#
+# `clipped`: the label ran into the screen's edge on its left, so the digits in
+# front can be the tail of a longer number. The number is dropped and the
+# street stands alone — the map searches it as a street, not a door.
+#
+# A GUESS FOR DRAWING ONLY. What this returns rides the offer line as
+# `mapLabel`, and server.js keeps it as the offer's `dropoffGuess`: never the
+# offer's `dropoff`, never a figure, never a pin, never a hold's end.
+MAP_LABEL_JUNK = re.compile(
+    r'^(?:uber|doordash|dasher|decline|accept|customer|dropoff|drop|pickup|pick|stops?|'
+    r'min|mins|minutes|mi|miles|incl|tips?|guaranteed|orders?|deliver|total|toot)$',
+    re.IGNORECASE | ASCII)
+MAP_LABEL_MARKS = re.compile(r'[:$()+·•|@#%&*=<>\[\]{}]', ASCII)
+_LABEL_NUMBER = re.compile(DC + r'{1,6}', ASCII)
+_LABEL_WORD = re.compile(r"[A-Za-z][A-Za-z'.-]*|\d{1,3}(?:st|nd|rd|th)", re.IGNORECASE | ASCII)
+_LABEL_DIR = re.compile(r'(?:N|S|E|W|NE|NW|SE|SW|North|South|East|West|'
+                        r'Northeast|Northwest|Southeast|Southwest)\.?', re.IGNORECASE | ASCII)
+_LABEL_TYPE = re.compile(r'(?:' + STREET_SUFFIX + r')\.?', re.IGNORECASE | ASCII)
+MAP_LABEL_LONGEST = 48
+
+
+def _label_key(text):
+    return ' '.join(re.findall(r'[a-z0-9]+', str(text or '').lower()))
+
+
+def map_label(text, clipped=False, store=None):
+    """DoorDash's map label as "<n> <street>" (the street alone when
+    `clipped`), or None. See MAP_LABEL_JUNK above for the rule."""
+    flat = normalize(text)
+    flat = re.sub(r"^[^A-Za-z0-9]+|[^A-Za-z0-9.]+$", '', flat)
+    if not flat or len(flat) > MAP_LABEL_LONGEST or MAP_LABEL_MARKS.search(flat):
+        return None
+    words = flat.split(' ')
+    # An icon or the pill's rounded end read as one character in front.
+    if len(words) > 1 and len(words[0]) == 1 and not words[0].isdigit() \
+            and re.search(r'\d', words[1]):
+        words = words[1:]
+    number = None
+    if _LABEL_NUMBER.fullmatch(words[0]) and re.search(r'\d', words[0]):
+        number = fix_digits(words[0])
+        words = words[1:]
+    if not clipped and (number is None or not number.isdigit() or number[0] == '0'):
+        return None
+    if not words or len(words) > 6:
+        return None
+    if not all(_LABEL_WORD.fullmatch(w) for w in words) \
+            or any(MAP_LABEL_JUNK.match(w.rstrip('.')) for w in words):
+        return None
+    quadrant = None
+    if len(words) > 1 and _LABEL_DIR.fullmatch(words[-1]):
+        quadrant = words[-1].rstrip('.')
+        if len(quadrant) <= 2:
+            quadrant = quadrant.upper()
+        words = words[:-1]
+    # The planner's slips, asked of the street behind a house number as the
+    # planner's are (they want a word in front of the name).
+    street = _planner_or_slip(_planner_pl_slip('1 ' + ' '.join(words)))[2:]
+    words = street.split(' ')
+    typed = len(words) > 1 and _LABEL_TYPE.fullmatch(words[-1]) is not None
+    names = words[:-1] if typed else words
+    if typed:
+        if not any(re.search(r'[A-Za-z]{2}', w) for w in names):
+            return None
+    elif len(names) < 2 or not all(re.search(r'[A-Za-z]{3}', w) for w in names):
+        return None
+    street = ' '.join(words + ([quadrant] if quadrant else []))
+    line = street if clipped else '%s %s' % (number, street)
+    key = _label_key(line)
+    for s in ([store] if isinstance(store, str) else (store or [])):
+        k = _label_key(s)
+        if k and (k == key or k.startswith(key + ' ')):
+            return None
+    return line
+
+
 def find_stores(raw_text, doors=None):
     """The store names on DoorDash's stops card, in the order it lists them.
 

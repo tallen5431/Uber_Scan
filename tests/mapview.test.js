@@ -1734,6 +1734,53 @@ async function nucbox() {
      JSON.stringify([null, 'no pin for 3152 Thornbury… — 2 fit the card and disagree · within '
                      + '5 mi of you', { lat: 33.96, lon: -84.545, approx: true, band: true }]));
 
+  /* ---- DoorDash's map label as the trip's end (the owner, 27 Oct) -------
+   *
+   * "if a best guess can be used for the map": a card printing only
+   * "Customer dropoff" carries the street DoorDash's map labelled, as the
+   * offer's dropoffGuess (server.js), searched in the card's disc round the
+   * PLACED PICKUP and chosen among by DoorDash's dropoff band. Drawing only. */
+  eq('[guess] the disc: round the placed pickup, the whole job plus the slack, on a card '
+     + 'judge() vouches for',
+     JSON.stringify(MV.guessDisc(dash({ miles: 1.5 }), ddPick)),
+     JSON.stringify({ at: ddPick, miles: 2, card: 1.5, corrected: false, guess: true }));
+  eq('[guess] ...none with no pickup placed, a doubted card, an early look, or no miles',
+     JSON.stringify([MV.guessDisc(dash(), null), MV.guessDisc(dash({ doubt: 'miles' }), ddPick),
+                     MV.guessDisc(dash({ earlyLook: true }), ddPick),
+                     MV.guessDisc(dash({ miles: null }), ddPick)]),
+     JSON.stringify([null, null, null, null]));
+  eq('[guess] the text searched: DoorDash\'s map label only, on a card that named no dropoff',
+     JSON.stringify([MV.guessOf({ dropoffGuess: { line: '418 Fable Ave NE', from: MV.GUESS_FROM } }),
+                     MV.guessOf({ dropoff: '7 Wren Ave', dropoffGuess: { line: '418 Fable Ave NE',
+                                                                         from: MV.GUESS_FROM } }),
+                     MV.guessOf({ dropoffGuess: { line: '418 Fable Ave NE', from: 'popup' } }),
+                     MV.guessOf({ dropoffGuess: '418 Fable Ave NE' }), MV.guessOf(null)]),
+     JSON.stringify(['418 Fable Ave NE', null, null, null, null]));
+  var gDisc = MV.guessDisc(dash({ miles: 1.5 }), ddPick);
+  var gBand = await bandNbx().band(tPlan, tRes, gDisc, MV.bandTarget(dash({ miles: 1.5 }), 'dropoff'),
+                                   ddPick, { left: 24 }, true);
+  eq('[guess] two doors of the label\'s street in the disc: the band for DoorDash\'s dropoff '
+     + 'keeps the one the job\'s miles fit, an area, never a door',
+     JSON.stringify(gBand && [gBand.lat, gBand.n, gBand.approx, gBand.band,
+                              MV.dropPoint(Object.assign({}, tRes, { bandArea: gBand })).approx]),
+     JSON.stringify([33.96, 1, true, true, true]));
+  var gLad = MV.routeLadder(SQ, [ddPick], { lat: 33.96, lon: -84.545, approx: true, guess: true },
+                            'guess');
+  eq('[guess] the run car -> pickup -> the guess, said "≈ from DoorDash\'s map"',
+     JSON.stringify([gLad.pts.length, gLad.note, MV.ROUTE_NOTES.guess]),
+     JSON.stringify([3, '≈ from DoorDash\'s map', '≈ from DoorDash\'s map']));
+  eq('[guess] ...a note after the caption the chip keeps whole',
+     MV.routeSaid('this pickup is on your way by road', ['trip: ' + gLad.note]),
+     'this pickup is on your way by road · trip: ≈ from DoorDash\'s map');
+  eq('[guess] ...not said after a refusal already carrying an area\'s words (two rows at 800x480)',
+     MV.routeSaid('no pin for 2471 Fable… — too many to be sure · ≈ routed, 10+ within 1.0 mi',
+                  ['trip: ' + gLad.note]),
+     'no pin for 2471 Fable… — too many to be sure · ≈ routed, 10+ within 1.0 mi');
+  eq('[guess] ...and a tail the caption\'s chip carries after itself (ROUTE_TAIL)',
+     MV.captionChip('no pin for 2471 Fable… — too many to be sure · ≈ routed, 10+ within 1.0 mi'
+                    + ' · trip: ≈ from DoorDash\'s map'),
+     'NO PIN · 2471 Fable…, ≈ routed, 10+ within 1.0 mi · trip: ≈ from DoorDash\'s map');
+
   ok_('...and a door is read off the first two parts of the name, so the '
       + 'postcode is never taken for the house number',
       MV.hasDoor({ name: '1985, Cobb Parkway, Kennesaw' }, '1985')

@@ -4272,6 +4272,167 @@ eq('the delivered line: app, screen, pay, name and the frame\'s time, no verdict
    {'delivered': {'app': 'uber', 'screen': 'uber.delivered', 'pay': 7.45,
                   'name': 'Fable K.', 'at': 1234}})
 
+# --- DoorDash's map label (the owner, 27 Oct) --------------------------------
+#
+# "reading the doordash icons still doesnt seem to work if a best guess can be
+# used for the map". A DoorDash card printing only "Customer dropoff" has, on
+# the map above it, a white-on-black rounded label naming the customer's
+# street. read_map_label crops the map above the card out of the straightened
+# screen box, finds the dark pills and reads each as one line. These screens
+# are SYNTHETIC: a light map with roads, a thin dark route, a red route chip,
+# the app's "Uber" bubble and the label, every street invented.
+from PIL import Image as _Img, ImageDraw as _Draw              # noqa: E402
+
+
+def _dd_map(label='418 Fable Ave NE', size=(700, 1400), at=(250, 360), light=226,
+            chip=True, tilt=0.0, left=None):
+    w, h = size
+    im = _Img.new('RGB', size, (light, light, light - 4))
+    d = _Draw.Draw(im)
+    for i in range(0, w, 90):                                   # roads
+        d.line([(i, 0), (i + 120, h)], fill=(250, 250, 250), width=9)
+    for j in range(40, h, 130):
+        d.line([(0, j), (w, j + 40)], fill=(205, 205, 200), width=5)
+    d.line([(120, 700), (260, 520), (330, 470), (420, 430)], fill=(40, 40, 40), width=4)
+    d.ellipse([70, 330, 160, 420], fill=(25, 25, 25))           # the Uber bubble
+    d.text((88, 352), 'Uber', font=TC.font(26), fill=(255, 255, 255))
+    if chip:                                                   # a red route chip
+        d.rounded_rectangle([380, 520, 600, 572], 26, fill=(200, 30, 50))
+        d.text((400, 530), '12 min', font=TC.font(30), fill=(255, 255, 255))
+    if label:
+        f = TC.font(34)
+        tw = int(d.textlength(label, font=f))
+        pill = _Img.new('RGBA', (tw + 70, 74), (0, 0, 0, 0))
+        _Draw.Draw(pill).rounded_rectangle([0, 0, tw + 69, 73], 37, fill=(18, 18, 18, 255))
+        _Draw.Draw(pill).text((35, 16), label, font=f, fill=(255, 255, 255, 255))
+        if tilt:
+            pill = pill.rotate(tilt, expand=True, resample=_Img.BICUBIC)
+        x = at[0] if left is None else left
+        im.paste(pill, (x, at[1]), pill)
+    # ...and the card below the map, white, where no label is looked for.
+    d.rectangle([0, int(h * 0.63), w, h], fill=(250, 250, 250))
+    d.rounded_rectangle([40, h - 150, w - 40, h - 60], 40, fill=(30, 30, 30))
+    d.text((280, h - 128), 'Accept', font=TC.font(40), fill=(255, 255, 255))
+    return cv2.cvtColor(np.asarray(im), cv2.COLOR_RGB2BGR)
+
+
+class _MapGeom(object):
+    def __init__(self, img, roi=None, whole=False):
+        h, w = img.shape[:2]
+        self.quad = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], np.float32)
+        self.roi = roi
+        self.whole = whole
+
+
+_ml = _dd_map()
+_got = SP.read_map_label(_ml, _MapGeom(_ml))
+eq('the map label: a black pill with white text above a DoorDash card is read as its street',
+   (_got or {}).get('line'), '418 Fable Ave NE')
+eq('...not clipped, inside the cap', ((_got or {}).get('clipped'),
+                                      (_got or {}).get('ms', 99999) < SP.MAP_LABEL_CAP_S * 1000),
+   (False, True))
+_ml = _dd_map('10770 Kestrel Pkwy', tilt=2.5)
+eq('...a label a degree or two off square, deskewed',
+   (SP.read_map_label(_ml, _MapGeom(_ml)) or {}).get('line'), '10770 Kestrel Pkwy')
+# One pill, and only the dark rounded boxes of a label's shape: the route's
+# thin line, the round Uber bubble, the red chip and the card's own Accept bar
+# (below the band) are none.
+_ml = _dd_map()
+_boxes = SP.map_label_boxes(SP.map_band(_ml, _MapGeom(_ml)), SP.MAP_LABEL_HEIGHT)
+eq('...one box: not the route, the round bubble, the red chip or the Accept bar',
+   len(_boxes), 1)
+_ml = _dd_map(label=None)
+eq('...a map with no label gives nothing', SP.read_map_label(_ml, _MapGeom(_ml)), None)
+# The label running into the screen's left edge: the digits in front may be
+# the tail of a longer number, so the street goes alone.
+_ml = _dd_map('0770 Kestrel Pkwy', left=-40)
+_got = SP.read_map_label(_ml, _MapGeom(_ml))
+eq('...cut by the screen\'s left edge, the street alone and said clipped',
+   ((_got or {}).get('line'), (_got or {}).get('clipped')), ('Kestrel Pkwy', True))
+# The card's own store is never the customer's end.
+_ml = _dd_map('2471 Fable Pkwy')
+eq('...a label naming the card\'s own store\'s door is refused',
+   SP.read_map_label(_ml, _MapGeom(_ml), store=['Lark Owl Grill', '2471 Fable Pkwy, Smyr']),
+   None)
+# Bounded: low light, a dark-mode map, a whole-screen read and a screen with
+# no corners are not looked at; the clock is held to the cap between reads.
+_ml = _dd_map(light=60)
+eq('...a dim picture (low light, a dark-mode map) is not looked at',
+   SP.read_map_label(_ml, _MapGeom(_ml)), None)
+_ml = _dd_map()
+eq('...nor a whole-screen read, a ⌖ press\'s question',
+   SP.read_map_label(_ml, _MapGeom(_ml, whole=True)), None)
+_nogeom = _MapGeom(_ml)
+_nogeom.quad = None
+eq('...nor a screen with no corners', SP.read_map_label(_ml, _nogeom), None)
+_reads = []
+_t = [0.0]
+
+
+def _slow_clock():
+    _t[0] += 1.0
+    return _t[0]
+
+
+SP.read_map_label(_dd_map(), _MapGeom(_dd_map()),
+                  ocr=lambda im: (_reads.append(1), 'Uber')[1], clock=_slow_clock)
+ok_('...and past MAP_LABEL_CAP_S no further box is read', len(_reads) <= 1)
+eq('...an OCR that throws is no label, not a crash',
+   SP.read_map_label(_ml, _MapGeom(_ml), ocr=lambda im: 1 / 0), None)
+# The band stops at a card box drawn inside it.
+_ml = _dd_map(at=(250, 700))
+eq('...the band stops at the top of a card box drawn inside it',
+   (SP.read_map_label(_ml, _MapGeom(_ml, roi=[0.0, 0.45, 1.0, 0.55])) or {}).get('line'), None)
+
+# Which readings it is asked for: DoorDash's offer card, its dropoff unknown.
+_dd_card = SP.OP.parse('$12.35 incl. tips\n2 stops (11.2 mi) - 38 min\nLark Owl Grill\n'
+                       '2471 Fable Parkway Southeast, Smyr...\nCustomer dropoff')
+eq('wants_map_label: DoorDash\'s card with "Customer dropoff", and not an Uber card',
+   (SP.wants_map_label(_dd_card),
+    SP.wants_map_label(SP.OP.parse('UberX $16.05 3 mins (1.1 mi) away 20 mins (7.3 mi) trip'))),
+   (True, False))
+
+# Off the loop: MapLabels reads on its own thread, once an offer, and hands
+# back (offer, answer) once; submit never blocks.
+_seen_reads = []
+
+
+def _fake_read(frame, geom, store=None):
+    _seen_reads.append(store)
+    return {'line': '418 Fable Ave NE', 'clipped': False, 'raw': 'x', 'ms': 1}
+
+
+_labels = SP.MapLabels(threaded=True, read=_fake_read)
+eq('MapLabels: a submit is taken', _labels.submit('o1', None, None, store=['Lark Owl Grill']), True)
+eq('...and the same offer is not read twice', _labels.submit('o1', None, None), False)
+_answer = None
+for _ in range(200):
+    _answer = _labels.take()
+    if _answer:
+        break
+    _REAL_SLEEP(0.01)
+eq('...its answer comes back once, with the offer it is for',
+   (_answer, _labels.take()), (('o1', {'line': '418 Fable Ave NE', 'clipped': False,
+                                       'raw': 'x', 'ms': 1}), None))
+eq('...the card\'s store handed to the read', _seen_reads, [['Lark Owl Grill']])
+_labels.close()
+_inline = SP.MapLabels(threaded=False, read=lambda f, g, store=None: None)
+_inline.submit('o2', None, None)
+eq('...and under --no-thread it reads in submit, answering none found', _inline.take(), ('o2', None))
+
+# The offer line carries it, and DoorDash's stop count, and nothing that
+# reads as a verdict.
+_with_label = said(lambda: SP.emit_offer('x', _dd_card, {'ready': True, 'perHour': 20.0,
+                                                         'cardMinutes': 38.0},
+                                         map_label='418 Fable Ave NE'))
+eq('the offer line carries the map label and the card\'s stops, the dropoff still none',
+   (_with_label['offer'].get('mapLabel'), _with_label['offer'].get('stops'),
+    _with_label['offer'].get('dropoff')), ('418 Fable Ave NE', 2, None))
+ok_('...and no verdict', 'ready' not in _with_label)
+eq('...and without one, mapLabel is None',
+   said(lambda: SP.emit_offer('x', _dd_card, {'ready': False}))['offer'].get('mapLabel', 'absent'),
+   None)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)
