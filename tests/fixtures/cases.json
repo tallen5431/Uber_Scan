@@ -5215,6 +5215,26 @@
    ]
   },
   {
+   "name": "...and the street line before the wrapped quadrant ending in a comma, a tab and a comma",
+   "_why": "The two ports trimmed the street line over the wrapped quadrant differently (review, 27 Oct): Python's rstrip(' ,') stopped at a tab or a no-break space that JavaScript's /[\\s,]+$/ went past. Both now strip any whitespace and commas (_planner_trim). The slip, the street, the number and the restaurant are invented.",
+   "text": "Trip Planner\nPickup \u2022 1 order\nFable Crust Pizza\nExpected by 7:49 PM\nAddress\n4410 Fable W Lantern Parkway,\t,\nNorthwest, Marietta, GA 30060\nWaybill",
+   "bounded": true,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Crust Pizza",
+     "expectedBy": 1189,
+     "street": "4410 Fable W Lantern Parkway Northwest",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": "30060",
+     "line": "4410 Fable W Lantern Parkway Northwest, Marietta, GA 30060",
+     "place": null
+    }
+   ]
+  },
+  {
    "name": "a dropoff at a hotel: its name, the town bare, then the street and town with no ZIP",
    "_why": "The dropoff block is Measured: the rig's box read of the lower half of the driver's planner, a dropoff at a hotel, with its noise - \"\u00a9\" the stop's icon, \"oS CC Q\" and \"\u2014O\" the bar of buttons - except its header, which that read lost as \"rept hk VEU\" and the whole-screen read caught (it filed the stop's name and time). The pickup above is laid out as the phone printed it. The hotel, the customer, the restaurant, the numbers and the streets are invented in place of the real ones; the noise in the hotel's name (\"Larksour\"), the bare town line and the street line with no ZIP are the read's. Nothing in the two lines under the label was a town line, so the stop kept its name and lost its address - street, town and line all null, exactly what the shift's whole-screen read sent. The street is the line opening with a house number, the hotel's name is the stop's place and never its street, and the bare town line is passed over. Not bounded: no Waybill on the screen, the two open stops fill the list - as on the shift, where it was left unfiled as 'list'.",
    "text": "Trip Planner\nPickup • 1 order\nFable Grill\nExpected by 9:51 PM\nAddress\n3300 Fable Mill Pkwy NW,\nKennesaw, GA 30144\nView details\nDropoff • 1 order\n© Dana R.\nExpected by 10:05 PM\nAddress\nLarksour Inn & Suites Kennesaw NW\nKennesaw\n1180 Wrenfield Rd NW, Kennesaw, GA\nView details\noS CC Q\n—O",

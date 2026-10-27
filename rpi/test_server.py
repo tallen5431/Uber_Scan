@@ -11192,7 +11192,9 @@ try:
        (_written(_q7.hold) != _w1,
         [s.get('name') for s in (json.load(open(_q7.hold))['orders'][0].get('planner')
                                  or {}).get('stops', [])]),
-       (True, ['Larkspur Tacos', 'Jules K.']))
+       # (Two names due the same minute are two customers since the review
+       # of 27 Oct, Assemble slotJoins: Mara's stop is kept beside Jules'.)
+       (True, ['Larkspur Tacos', 'Mara T.', 'Jules K.']))
 finally:
     _q7.stop()
     _q7.gone()

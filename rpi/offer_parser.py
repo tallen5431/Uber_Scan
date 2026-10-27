@@ -3124,6 +3124,13 @@ PLANNER_STREET_TOWN = re.compile(
     r'^(\W{0,3}' + DC + r'{1,6} .*\S)(?:\s*,\s*|\s+\.\s*)(' + TOWN + r')$', ASCII)
 
 
+def _planner_trim(line):
+    """`line` less the spaces and commas that end it: any whitespace, as the
+    JavaScript twin's /[\\s,]+$/ (review, 27 Oct: rstrip(' ,') left a tab
+    or a no-break space the other kept)."""
+    return re.sub(r'[\s,]+$', '', line)
+
+
 def _planner_address_lines(block, label):
     """The street line, the town line and the place's name under the "Address"
     label at block[label]: the first two as _planner_address takes them, each
@@ -3172,7 +3179,7 @@ def _planner_address_lines(block, label):
     # five digits that must be a ZIP, alone on their line, straight under the
     # label's first line, which no other line of the app's is.
     if len(under) >= 2 and PLANNER_STATE_ZIP_LINE.match(under[1].strip()):
-        st = PLANNER_STREET_TOWN.match(under[0].strip().rstrip(' ,'))
+        st = PLANNER_STREET_TOWN.match(_planner_trim(under[0].strip()))
         if st:
             under = ['%s, %s, %s' % (st.group(1), st.group(2), under[1].strip())] + under[2:]
         elif under[0].rstrip().endswith(','):
@@ -3186,7 +3193,7 @@ def _planner_address_lines(block, label):
         q = PLANNER_QUADRANT_LEAD.match(l) if j else None
         if q and _planner_town(q.group(2)):
             town_at, town_line = j, q.group(2)
-            street_line = under[0].rstrip(' ,') + ' ' + q.group(1)
+            street_line = _planner_trim(under[0]) + ' ' + q.group(1)
             break
         if _planner_town(l):
             town_at, town_line = j, l

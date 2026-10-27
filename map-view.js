@@ -1814,6 +1814,13 @@
       var cutIn = disc ? all.filter(function (h) {
         return crowMiles(disc.at, h) <= disc.miles;
       }) : [];
+      // ...of the doors with the asked number where any are there, as
+      // 'several' below is: a cut list's other houses are the street, not
+      // the door (review, 27 Oct). None: all of them, as before.
+      if (plan && plan.door) {
+        var cutDoors = cutIn.filter(function (h) { return hasDoor(h, plan.house); });
+        if (cutDoors.length) cutIn = cutDoors;
+      }
       return withCands(withArea({ at: null, why: 'capped', n: cutAt }, cutIn, disc, plan, true),
                        cutIn, disc, plan);
     }
@@ -3798,7 +3805,14 @@
      two-point route (road), as the detour does, through the cache: the
      relay has no table service, and ten two-point questions through the
      cache are what a cut list costs once. Router down or refusing, an origin
-     moved past SNAP_MI to reach a road, a budget spent: null. */
+     moved past SNAP_MI to reach a road, a budget spent: null.
+     ONE WAIT A WALK: the budget also keeps the time the walk's bands have
+     spent waiting (`waited`, ms), and each waits only what is left of one
+     BAND_WAIT_MS; one asked with none left asks nothing. Bands await one
+     after another (a dropoff's is measured from the pickup's), so with a
+     wait each a hanging router held the settled draw, and the card line's
+     figure, several × BAND_WAIT_MS (review, 27 Oct). Only the bands' own
+     waits count: a slow search between two bands spends none of it. */
   NbxSearch.prototype.band = function (q, res, disc, spec, pick, budget, streets) {
     var plan = searchPlan(q);
     if (!res || res.at || !disc || !spec || !plan || plan.kind !== 'street' || !plan.door) {
@@ -3806,6 +3820,12 @@
     }
     var from = spec.from === 'pickup' ? pick : spec.from;
     if (!from || !isFinite(from.lat) || !isFinite(from.lon)) return Promise.resolve(null);
+    var wait = typeof this.bandWait === 'number' ? this.bandWait : BAND_WAIT_MS;
+    if (budget) {
+      wait -= budget.waited > 0 ? budget.waited : 0;
+      if (!(wait > 0)) return Promise.resolve(null);
+    }
+    var began = Date.now();
     var me = this;
     var c = bandCands(res);
     var got = c ? Promise.resolve(c)
@@ -3836,14 +3856,19 @@
         });
       });
     }).catch(function () { return null; });
-    var wait = typeof this.bandWait === 'number' ? this.bandWait : BAND_WAIT_MS;
     return new Promise(function (resolve) {
       var done = false;
-      var t = setTimeout(function () { if (!done) { done = true; resolve(null); } }, wait);
+      var spent = function () {
+        if (budget) budget.waited = (budget.waited > 0 ? budget.waited : 0) + (Date.now() - began);
+      };
+      var t = setTimeout(function () {
+        if (!done) { done = true; spent(); resolve(null); }
+      }, wait);
       work.then(function (a) {
         if (done) return;
         done = true;
         clearTimeout(t);
+        spent();
         resolve(a);
       });
     });

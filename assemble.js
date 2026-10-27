@@ -1471,6 +1471,18 @@
     if (ka && kb && ka === kb) return true;
     if (!timesAgree(a, b)) return false;
     if (sameName(a, b)) return true;
+    return sameDoorStop(a, b);
+  }
+
+  // The same kind on the same street with no clashing name: one stop WHATEVER
+  // the times say. The app moves a stop's "Expected by" between reads (7:27 →
+  // 7:32 as the run slips), and held to timesAgree the one customer was kept
+  // twice (review of 27 Oct): the server's planAtOf found two of the end,
+  // MV.heldDrops lost D1, the panel listed it twice. mergePlanner asks this
+  // only after samePlannerStop has had every pair, so a stop whose times
+  // agree is never taken by one that moved.
+  function sameDoorStop(a, b) {
+    if (!a || !b || !a.kind || a.kind !== b.kind) return false;
     var namesClash = !!a.name && !!b.name && !sameName(a, b);
     return !namesClash && sameStreet(a.line || a.street, b.line || b.street);
   }
@@ -1484,13 +1496,15 @@
 
   // Two stops at one place in the list — beside the same stop in common, on
   // the same side — of one kind and one "Expected by", whose doors do not
-  // differ: one stop whose name one read misread (the reader's "Mara T." for
-  // the screen's "Jules K." is as likely as a second customer due at the
-  // same minute in the same slot). The newer read's name stands.
+  // differ and whose names do not clash (one read lost it): one stop. Two
+  // names are two customers, though due at the same minute in the same slot
+  // (review of 27 Oct: "Mara T." kept and "Jules K., 9 Elm Dr" read were
+  // made one, and Mara's stop was gone). The newer read's name stands.
   function slotJoins(a, b) {
     var timed = function (x) { return typeof x.expectedBy === 'number' && isFinite(x.expectedBy); };
     if (!a || !b || a.kind !== b.kind || !timed(a) || !timed(b)
         || a.expectedBy !== b.expectedBy) return false;
+    if (a.name && b.name && !sameName(a, b)) return false;
     var da = a.line || a.street, db = b.line || b.street;
     return !(da && db && !sameStreet(da, db));
   }
@@ -1551,6 +1565,13 @@
     olds.forEach(function (o, i) {
       for (var j = 0; j < news.length; j++) {
         if (!used[j] && samePlannerStop(o, news[j])) { match[i] = j; used[j] = true; return; }
+      }
+    });
+    // ...then one whose "Expected by" moved, by its door (sameDoorStop).
+    olds.forEach(function (o, i) {
+      if (match[i] !== -1) return;
+      for (var j = 0; j < news.length; j++) {
+        if (!used[j] && sameDoorStop(o, news[j])) { match[i] = j; used[j] = true; return; }
       }
     });
     // ...a header with nothing under it, beside a stop in common, is the stop
@@ -1614,7 +1635,11 @@
       });
     }
     // A read that shows the top has the last word above its first stop, and
-    // one that shows the foot below its last.
+    // one that shows the foot below its last; one that shows both (the top
+    // and the Waybill under the last stop) is the whole list, and no kept
+    // stop it does not show stands (the matched ones are merged above, press
+    // precedence and all).
+    var whole = !!(page && page.top && page.bottom);
     var firstNew = -1, lastNew = -1;
     list.forEach(function (e, k) {
       if (!e.fromNew) return;
@@ -1623,7 +1648,7 @@
     });
     return list.filter(function (e, k) {
       if (e.fromNew) return true;
-      if (headerOnly(e.s)) return false;
+      if (whole || headerOnly(e.s)) return false;
       if (page && page.top && firstNew !== -1 && k < firstNew) return false;
       if (page && page.bottom && lastNew !== -1 && k > lastNew) return false;
       return true;

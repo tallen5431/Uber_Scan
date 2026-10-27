@@ -1487,6 +1487,27 @@ async function nucbox() {
   eq('[area more] ...a cut list spread over 3 mi is refused as before, no area',
      JSON.stringify([capSpread.at, capSpread.why, capSpread.area]),
      JSON.stringify([null, 'capped', null]));
+  // A cut list holding the asked door twice among houses spread down the
+  // street: the area and the band's candidates are those doors', as for
+  // 'several' (review, 27 Oct). Invented.
+  var qHits = [];
+  for (var qi = 0; qi < 10; qi++) {
+    var qDoor = qi === 3 || qi === 4;
+    qHits.push({ lat: qDoor ? 33.9600 + (qi - 3) * 0.0008 : 33.9300 + qi * 0.0050,
+                 lon: qDoor ? -84.5450 : -84.5600 + qi * 0.0030,
+                 name: (qDoor ? '512' : String(600 + qi * 10)) + ', Quarrel Lane, Marietta, Georgia' });
+  }
+  var qCut = MV.pickInDisc(qHits, d50, MV.searchPlan('512 Quarrel Ln, Marietta'), 10);
+  eq('[area more] a cut list spread over 3 mi holding the asked door twice close together: '
+     + 'still "capped", no pin, the area and the band\'s candidates the two doors\'',
+     JSON.stringify([qCut.at, qCut.why, qCut.n, qCut.area && qCut.area.n,
+                     qCut.area && qCut.area.cut, (qCut.cands || []).length]),
+     JSON.stringify([null, 'capped', 10, 2, true, 2]));
+  var qNone = MV.pickInDisc(qHits, d50, MV.searchPlan('514 Quarrel Ln, Marietta'), 10);
+  eq('[area more] ...and with no door of that number in it, all ten, as before: spread, so no '
+     + 'area, ten candidates',
+     JSON.stringify([qNone.why, qNone.area || null, (qNone.cands || []).length]),
+     JSON.stringify(['capped', null, 10]));
   eq('[area more] ...nor a cut list with no disc, nor a merchant\'s cut list',
      JSON.stringify([MV.pickInDisc(hitsOf(FAKE.VESSINGTON_10800), null, vPlan, 10).area,
                      MV.pickInDisc(hitsOf(FAKE.STARBUCKS), d50, MV.searchPlan('Starbucks'), 10).area]),
@@ -1707,6 +1728,25 @@ async function nucbox() {
   eq('[band] router slow: given up after its wait, no band',
      await bandNbx('slow').band(tPlan, tRes, d50, MV.bandTarget(uber(), 'pickup'), null,
                                 { left: 24 }, true), null);
+  // ONE WAIT A WALK (review, 27 Oct): a hanging router holds a walk's bands
+  // one wait in all, not one each — the walk awaits them one after another.
+  bandAsked = [];
+  var walkBudget = { left: 24 };
+  var hangStart = Date.now();
+  var hung = [];
+  for (var hb = 0; hb < 4; hb++) {
+    hung.push(await bandNbx('slow').band(tPlan, tRes, d50,   // eslint-disable-line no-await-in-loop
+                                         MV.bandTarget(uber(), 'pickup'), null, walkBudget, true));
+  }
+  var hangMs = Date.now() - hangStart;
+  eq('[band] a hanging router: four bands of one walk wait one BAND_WAIT_MS between them, '
+     + 'not four; the first asks, the rest ask nothing',
+     JSON.stringify([hung, hangMs >= 25 && hangMs < 110, bandAsked.length, walkBudget.left]),
+     JSON.stringify([[null, null, null, null], true, 2, 22]));
+  var after = await bandNbx().band(tPlan, tRes, d50, MV.bandTarget(uber(), 'pickup'), null,
+                                   { left: 24, waited: 10 }, true);
+  eq('[band] ...a walk whose bands have waited some, not all, still asks (the wait spent is '
+     + 'the bands\' own, not the walk\'s)', JSON.stringify(after && after.n), '1');
   bandAsked = [];
   var budget = { left: 1 };
   eq('[band] a walk\'s budget spent: nothing asked, no band',
@@ -3769,6 +3809,26 @@ async function nucbox() {
      JSON.stringify(MV.heldDrops([BP, pstop('dropoff', 'Pat Q.', 203, null, null), BB],
                                  '1985 Cobb Parkway')),
      JSON.stringify([{ q: null, name: 'Pat Q.', n: 1 }]));
+  // heldDrops' street rule is restated here (the page does not load
+  // assemble.js): held to Assemble.sameStreet's answers over invented lines,
+  // so the two cannot drift (review, 27 Oct). A stop is on the end's street
+  // for heldDrops exactly when it is for Assemble.
+  var Asm = require('../assemble.js');
+  var SLINES = ['4821 Kestrel Dr, Kennesaw', '4821 KESTREL DR', '4821  Kestrel   Dr., Kennesaw',
+                '4821 Kestrel Dr.', ' 4821 Kestrel Dr , Kennesaw, GA', '4821 Kestrel Drive',
+                '4822 Kestrel Dr', 'Kestrel Dr', '4821 Kestrel Dr NW', '4821, Kestrel Dr',
+                '12 St. Ann St', '12 St Ann St, Roswell', '12 St.Ann St', '', ',', ' , Kennesaw',
+                '1985 Cobb Pkwy.', '1985 cobb pkwy', 'Wren Flat Ct & Oriel Rd', 'wren flat ct & oriel rd.'];
+  var streetDrift = [];
+  SLINES.forEach(function (a) {
+    SLINES.forEach(function (b) {
+      var other = pstop('dropoff', 'Ann V.', 240, '77 Unrelated Way', 'Nowhere');
+      var mv = MV.heldDrops([other, pstop('dropoff', 'Kim T.', 230, b, null)], a).length === 1;
+      if (mv !== Asm.sameStreet(a, b)) streetDrift.push([a, b, mv]);
+    });
+  });
+  eq('[batch run] heldDrops\' street rule gives Assemble.sameStreet\'s answer over ' + SLINES.length
+     + ' x ' + SLINES.length + ' invented street lines', JSON.stringify(streetDrift), '[]');
   var D1 = { lat: 33.965, lon: -84.535 }, D2 = { lat: 33.968, lon: -84.532 };
   eq('[batch run] the run: car -> pickup -> D1 -> D2 -> the end, nothing said at the door',
      JSON.stringify(MV.routeLadder(CAR, [PK], END, 'door', [D1, D2])),

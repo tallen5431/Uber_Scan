@@ -2550,14 +2550,63 @@ SEQ.forEach(function (seq) {
   // under the newer read's name — never a second customer conjured.
   var mara = stop('dropoff', 'Mara T.', 203, null, null);
   var jules = stop('dropoff', 'Jules K.', 203, null, null);
+  var noName = stop('dropoff', null, 203, null, null);
   eq('[planner pages] one slot beside a stop in common, one "Expected by", no doors that '
-     + 'differ: one stop, the newer read\'s name',
-     said(A.mergePlanner([P, mara], [P, jules], null)), said([P, jules]));
+     + 'differ, a name one read lost: one stop, the name kept',
+     said(A.mergePlanner([P, mara], [P, noName], null)), said([P, mara]));
+  // Two names in one slot at one minute are two customers (review, 27 Oct).
+  eq('[planner pages] ...but two names there are two customers: a kept "Mara T." with no door '
+     + 'and a newer "Jules K." with one are both kept, the kept one after its neighbour',
+     [said(A.mergePlanner([P, mara], [P, jules], null)),
+      said(A.mergePlanner([P, mara], [P, stop('dropoff', 'Jules K.', 203, '9 Elm Dr', 'Kennesaw')],
+                          { top: true, bottom: false })).map(function (r) { return r[1]; })],
+     [said([P, mara, jules]), ['Example Grill', 'Mara T.', 'Jules K.']]);
   eq('[planner pages] ...but not at another minute, nor with another door',
      [said(A.mergePlanner([P, mara], [P, stop('dropoff', 'Jules K.', 216, null, null)],
                           null)).length,
       said(A.mergePlanner([P, A1], [P, stop('dropoff', 'Jules K.', 203, '1985 Cobb Parkway',
                                             'Kennesaw')], null)).length], [3, 3]);
+  // The same stop with its "Expected by" moved between reads (7:27 → 7:32)
+  // is one stop: same kind, same street, no clashing name (review, 27 Oct).
+  var elm = stop('dropoff', 'Mara T.', 447, '9 Elm Dr', 'Kennesaw');
+  var elmLate = stop('dropoff', 'Mara T.', 452, '9 Elm Dr', 'Kennesaw');
+  var P430 = Object.assign({}, P, { expectedBy: 430 });
+  eq('[planner pages] a stop whose "Expected by" moved is one stop, the newer time, on every '
+     + 'kind of read: whole, top only, foot only, unknown, pressed',
+     [{ top: true, bottom: true }, { top: true, bottom: false }, { top: false, bottom: true },
+      null].map(function (pg) { return said(A.mergePlanner([P430, elm], [P430, elmLate], pg)); })
+       .concat([said(A.mergePlanner([P430, elm], [P430, elmLate], { top: true, bottom: false },
+                                    true)),
+                said(A.mergePlanner([P430, elm], [elmLate], { top: false, bottom: true }))]),
+     [0, 1, 2, 3, 4].map(function () { return said([P430, elmLate]); })
+       .concat([said([P430, elmLate])]));
+  eq('[planner pages] ...one with its name lost and its time moved too',
+     said(A.mergePlanner([P430, elm], [P430, stop('dropoff', null, 452, '9 Elm Dr', 'Kennesaw')],
+                         null)), said([P430, elmLate]));
+  eq('[planner pages] ...but never two names on one door, nor two doors on one street',
+     [said(A.mergePlanner([elm], [stop('dropoff', 'Jules K.', 452, '9 Elm Dr', 'Kennesaw')],
+                          null)).length,
+      said(A.mergePlanner([elm], [stop('dropoff', 'Mara T.', 452, '11 Elm Dr', 'Kennesaw')],
+                          null)).length], [2, 2]);
+  // Times that agree are matched first: a moved time never takes the stop
+  // whose own time the newer read shows.
+  var cafe430 = stop('pickup', 'Example Grill', 430, '250 Example Road', 'Kennesaw');
+  var cafe445 = stop('pickup', 'Example Grill', 445, '250 Example Road', 'Kennesaw');
+  eq('[planner pages] ...and two pickups at one store, each due its own minute, each match '
+     + 'their own read whatever order the newer read lists them',
+     [said(A.mergePlanner([cafe430], [cafe445, cafe430], null)),
+      said(A.mergePlanner([cafe430, cafe445], [cafe430, cafe445], null))],
+     [said([cafe445, cafe430]), said([cafe430, cafe445])]);
+  // A read that shows the top AND the foot is the whole list: a kept stop it
+  // does not show is not there any more.
+  eq('[planner pages] a read showing the top and the foot is the whole list; a kept stop it '
+     + 'does not show goes, pressed or not',
+     [said(A.mergePlanner([P, A1, B1], [P, B1], { top: true, bottom: true })),
+      said(A.mergePlanner([P, A1, B1], [P, B1], { top: true, bottom: true }, true)),
+      said(A.mergePlanner([P], [A1, B1], { top: true, bottom: true })),
+      said(A.mergePlanner([P, A1, B1], [P, B1], { top: true, bottom: false }))],
+     [said([P, B1]), said([P, B1]), said([A1, B1]), said([P, A1, B1])]);
+
   // A read that changes nothing gives the stops it was given, byte for byte
   // (server.js writes holding.json only when the orders change).
   var bare = [{ kind: 'pickup', orders: 1, name: 'Example Grill', expectedBy: 1100,

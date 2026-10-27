@@ -161,6 +161,26 @@ function nbx() {
   global.fetch = function () { return Promise.reject(new Error('ECONNREFUSED')); };
   var down = await f('/search?q=Other&viewbox=1');
   eq('a NucBox that does not answer is "unreachable", and not kept', [down.ok, Object.keys(cache.answers).length], [false, 2]);
+  // ...nor a Nominatim answering 503, nor a relay's 502 "unreachable"; each
+  // fresh question counted, the ones not answered apart (review, 27 Oct).
+  global.fetch = function () {
+    return Promise.resolve({ ok: false, status: 503, json: function () { return Promise.resolve({}); } });
+  };
+  var d503 = await f('/search?q=Third&viewbox=1');
+  global.fetch = function () {
+    return Promise.resolve({ ok: false, status: 502, json: function () {
+      return Promise.resolve({ ok: false, unreachable: true, error: 'down' }); } });
+  };
+  var d502 = await f('/api/nbx/cross?a=P&b=Q&box=1');
+  eq('...nor a Nominatim\'s 503 or a relay\'s 502 "unreachable": asked again next time',
+     [d503.status, d502.status, Object.keys(cache.answers).length], [502, 502, 2]);
+  eq('...and the fresh questions are counted, the unanswered apart (the cached one not at all)',
+     [cache.asked, cache.unreachable], [6, 3]);
+  eq('DEGRADED: more than ' + P.DEGRADED_SHARE * 100 + '% and more than ' + P.DEGRADED_MIN
+     + ' fresh questions unanswered; either alone is not',
+     [P.degraded({ asked: 200, unreachable: 51 }), P.degraded({ asked: 300, unreachable: 51 }),
+      P.degraded({ asked: 60, unreachable: 50 }), P.degraded({ answers: {} })],
+     [{ asked: 200, unreachable: 51 }, null, null, null]);
   global.fetch = realFetch;
   eq('hitsOf says a full list is cut', P.hitsOf(new Array(10).fill({ lat: 1, lon: 1 })).cutAt, 10);
 
@@ -1136,6 +1156,49 @@ function nbx() {
               'size_restaurants.csv'].every(function (f3) { return fs.existsSync(path.join(tmp, 'out', f3)); });
     }()));
     ok('...the cache holds the street index\'s answer', /\/cross\?/.test(fs.readFileSync(path.join(tmp, 'cache.json'), 'utf8')));
+    // A Nominatim down for the whole run (review, 27 Oct): every pickup
+    // unplaced for it, not for where it is. Nothing is written and the run
+    // exits 1, so the nightly keeps the old report; --allow-degraded writes.
+    var drows = [];
+    for (var de = 0; de < 60; de++) {
+      drows.push(card({ id: 'd' + de, at: at(2 + de % 3, 19, de), pickup: 'Fernbrook Grill ' + de, perHour: 10 + de }));
+    }
+    var srvD = await server(function (req, res) {
+      if (/^\/api\/journal/.test(req.url)) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ count: 60, total: 60, truncated: false, waits: [], taken: [], offers: drows }));
+        return;
+      }
+      if (/^\/search/.test(req.url)) { res.writeHead(503); res.end('busy'); return; }
+      res.writeHead(404); res.end('{}');
+    });
+    var bD = 'http://127.0.0.1:' + srvD.address().port;
+    async function mainD(extra) {
+      var outsD = [];
+      console.log = function (x) { outsD.push(String(x)); };
+      console.error = function () {};
+      process.exitCode = 0;
+      var code;
+      try {
+        await P.main([bD, '--out', path.join(tmp, 'outD'), '--cache', path.join(tmp, 'cacheD.json'), '--nominatim', bD,
+                      '--gap', '0'].concat(extra || []));
+      } finally { console.log = logA; console.error = errA; code = process.exitCode; process.exitCode = 0; }
+      return { code: code, said: outsD.join('\n') };
+    }
+    var dRun = await mainD();
+    ok('a Nominatim down for the run: nothing written, exit 1, and stdout says why (' + dRun.code + ')',
+       dRun.code === 1 && !fs.existsSync(path.join(tmp, 'outD', 'index.html'))
+       && /NOT WRITTEN: \d+ of \d+ fresh NucBox questions went unanswered/.test(dRun.said)
+       && /--allow-degraded/.test(dRun.said));
+    ok('...nor its failures cached', !/Fernbrook/.test(fs.existsSync(path.join(tmp, 'cacheD.json'))
+       ? fs.readFileSync(path.join(tmp, 'cacheD.json'), 'utf8') : ''));
+    var dAllow = await mainD(['--allow-degraded']);
+    ok('...and with --allow-degraded it is written, said degraded',
+       !dAllow.code && fs.existsSync(path.join(tmp, 'outD', 'index.html'))
+       && /DEGRADED, written anyway \(--allow-degraded\)/.test(dAllow.said));
+    ok('--allow-degraded parses', P.parseArgs(['--allow-degraded']).allowDegraded === true
+       && P.parseArgs([]).allowDegraded === false);
+    srvD.close();
     srvM.close(); srvR.close();
   }());
 
@@ -1149,7 +1212,11 @@ function nbx() {
     fs.mkdirSync(bin);
     var calls = path.join(tmpHome, 'calls.log');
     // Fake ssh and rsync: they say what they were asked, and "copy" one log.
-    fs.writeFileSync(path.join(bin, 'ssh'), '#!/bin/sh\necho "ssh $*" >> "' + calls + '"\nexit ${FAKE_SSH_STATUS:-0}\n');
+    // (...and each word apart, in <>, to tell a path with a space from two words.)
+    var sshArgs = path.join(tmpHome, 'ssh-args.log');
+    fs.writeFileSync(path.join(bin, 'ssh'), '#!/bin/sh\necho "ssh $*" >> "' + calls + '"\n'
+                     + 'printf "<%s>" "$@" >> "' + sshArgs + '"\necho >> "' + sshArgs + '"\n'
+                     + 'exit ${FAKE_SSH_STATUS:-0}\n');
     fs.writeFileSync(path.join(bin, 'rsync'), '#!/bin/sh\necho "rsync $*" >> "' + calls + '"\n'
                      + 'for a; do last="$a"; done\ntouch "$last/2026-03-03_1900.jsonl"\nexit 0\n');
     // A node that writes half a page and fails.
@@ -1251,6 +1318,54 @@ function nbx() {
     fs.writeFileSync(calls, '');
     await run({ RIG_HOST: '', PLACES_NODE: path.join(bin, 'argnode'), PLACES_RELAY: 'http://127.0.0.1:9' });
     ok('PLACES_RELAY is passed as --relay', /--relay http:\/\/127\.0\.0\.1:9( |$)/m.test(fs.readFileSync(calls, 'utf8')));
+    // (review, 27 Oct) A key path with a space is one word to ssh, and quoted
+    // for rsync's ssh; a RIG_GPSLOG with no trailing slash copies the folder's
+    // logs, not the folder; a RIG_HOST starting with '-' is never handed to ssh.
+    fs.writeFileSync(path.join(tmpHome, 'places.env'), 'RIG_HOST=driver@rig.invalid\n');
+    fs.writeFileSync(calls, '');
+    fs.writeFileSync(sshArgs, '');
+    await run({ RIG_SSH_KEY: '/keys/my key', RIG_GPSLOG: 'logs/gps' });
+    var spaced = fs.readFileSync(calls, 'utf8');
+    ok('a RIG_SSH_KEY with a space is one word to ssh, and quoted for rsync\'s',
+       fs.readFileSync(sshArgs, 'utf8').indexOf('<-i></keys/my key><-o><IdentitiesOnly=yes>') >= 0
+       && /^rsync .* -e ssh -o BatchMode=yes -o ConnectTimeout=10 -i \/keys\/my\\ key -o IdentitiesOnly=yes driver@rig/m
+         .test(spaced));
+    ok('...a RIG_GPSLOG with no trailing slash is copied as its logs (logs/gps/)',
+       /^rsync .* driver@rig\.invalid:logs\/gps\/ .*\/gpslog\/$/m.test(spaced));
+    fs.writeFileSync(calls, '');
+    var dashed = await run({ RIG_HOST: '-oProxyCommand=touch /tmp/never' });
+    ok('...and a RIG_HOST starting with "-" is refused: no ssh, no rsync, said, the report built',
+       dashed === 0 && !/^(ssh|rsync) /m.test(fs.readFileSync(calls, 'utf8'))
+       && /RIG_HOST starts with '-'/.test(fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8')));
+    // PLACES_TIMEOUT: a run past it is stopped and fails, the old report kept.
+    fs.writeFileSync(path.join(bin, 'sleepnode'), '#!/bin/sh\nsleep 20\n');
+    fs.chmodSync(path.join(bin, 'sleepnode'), 0o755);
+    var before = [fs.realpathSync(out), fs.readFileSync(path.join(out, 'index.html'), 'utf8')];
+    var t0 = Date.now();
+    var slow = await run({ RIG_HOST: '', PLACES_NODE: path.join(bin, 'sleepnode'), PLACES_TIMEOUT: '1' });
+    var tookMs = Date.now() - t0;
+    ok('a run past PLACES_TIMEOUT is stopped and fails (' + tookMs + ' ms), the old report untouched',
+       slow !== 0 && tookMs < 10000
+       && JSON.stringify([fs.realpathSync(out), fs.readFileSync(path.join(out, 'index.html'), 'utf8')])
+         === JSON.stringify(before)
+       && /ran past PLACES_TIMEOUT \(1s\)/.test(fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8')));
+    // The lock: held by a run, the next leaves (0); held past PLACES_TIMEOUT,
+    // it says the run is stuck and exits non-zero (it used to leave, 0, for ever).
+    var lockFile = out + '.lock';
+    var holder = cpN.spawn('flock', [lockFile, 'sleep', '30'], { stdio: 'ignore' });
+    await new Promise(function (ok2) { setTimeout(ok2, 300); });
+    var heldFresh = await run({ RIG_HOST: '' });
+    var logNow = fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8');
+    ok('a lock held by a run still within PLACES_TIMEOUT: the next run leaves, exit 0',
+       heldFresh === 0 && /another run holds .*places-report\.lock; leaving\n$/.test(logNow));
+    var old = (Date.now() - 4 * 3600 * 1000) / 1000;
+    fs.utimesSync(lockFile, old, old);
+    var heldStuck = await run({ RIG_HOST: '' });
+    ok('...held past it: said stuck, non-zero, the old report untouched', heldStuck !== 0
+       && /FAILED: a run has held .*places-report\.lock for \d+s, past PLACES_TIMEOUT \(10800s\): it is stuck/
+         .test(fs.readFileSync(path.join(tmpHome, 'places-report.log'), 'utf8'))
+       && fs.realpathSync(out) === before[0]);
+    holder.kill();
     srv.close();
   }());
 

@@ -4973,6 +4973,28 @@ const framed = (page) => page.waitForFunction(
         r.placeHeld = await heldPin();
         r.placeAsked = relayAsked.slice(placeAskedBefore)
           .filter((u) => /[?&]q=Wrenfield%20Parking%20Deck&/.test(u)).length;
+        // The server's area for a held end it refused (heldEnd.endArea), and
+        // then its distance band's (bandHeldNow, band: true) somewhere else on
+        // a later beat for the same card: the map walks again and the ring
+        // moves (review, 27 Oct: the key carried a bare '≈', so the band was
+        // never drawn). Invented points; the street is one the fake lacks.
+        const areaRing = () => page.evaluate(() => (window.__marks || []).filter(
+          (k) => String(k.popup || '').indexOf('the area the order in your car is going to') >= 0)
+          .map((k) => k.ll));
+        await push({ id: 'n-srvarea', held: '77 Nowhere Rd, Marietta' });
+        await page.waitForTimeout(1500);
+        await page.evaluate(() => window.__es.push({ alive: true, at: Date.now(),
+          heldEnd: { endPinned: false, arrived: false, endWhy: 'no such street',
+                     endArea: { lat: 33.9811, lon: -84.5122, approx: true, n: 3,
+                                miles: 0.3 } } }));
+        await page.waitForTimeout(1500);
+        r.srvArea = await areaRing();
+        await page.evaluate(() => window.__es.push({ alive: true, at: Date.now(),
+          heldEnd: { endPinned: false, arrived: false, endWhy: 'no such street',
+                     endArea: { lat: 33.9922, lon: -84.5233, approx: true, n: 2,
+                                miles: 0.4, band: true, cardMi: 2.1 } } }));
+        await page.waitForTimeout(1500);
+        r.srvBand = await areaRing();
         // The owner's DoorDash snap of 24 Oct, 19:25, invented: a NEW offer's
         // pickup whose door the NucBox's list was cut on, its ten answers
         // one tight cluster (MV's withArea, `cut`): the trip routed from
@@ -11031,6 +11053,10 @@ try:
        'a "≈" ring and never the end\'s pin, the caption saying so (%r)' % both.get('noPlaceNote'),
        (both.get('noPlaceArea'), '\u2248 rout' in (both.get('noPlaceNote') or '')),
        ([[33.97, -84.53]], True))
+    eq('[area key] the server\'s area for a refused held end is drawn, and its distance band '
+       'arriving on a later beat for the same card walks again: the ring moves to the band\'s',
+       (both.get('srvArea'), both.get('srvBand')),
+       ([[33.9811, -84.5122]], [[33.9922, -84.5233]]))
     _ca = both.get('cutArea') or {}
     eq('[area more] a new offer\'s pickup the NucBox\'s list was cut on, its answers one area: '
        'no P, a faded "≈" ring where the trip starts, its own refusal saying "≈ routed, 10+", '

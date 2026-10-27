@@ -3196,7 +3196,31 @@ function hitsOf(list) {
 /* The fetch an NbxSearch is given. Its paths are the relay's (`/api/nbx/search?...`,
  * `/cross?...`, ...): a search goes to `nominatim` directly when one is named,
  * else through the server's own relay; the street index's questions only
- * through the relay. Every answer is kept in `cache` by its question. */
+ * through the relay. Every answer is kept in `cache` by its question — an
+ * answer, never a failure: a NucBox down (502, `unreachable`) or any status
+ * but 200 is asked again next time. Each question not from the cache is
+ * counted in `cache.asked`, and one the NucBox did not answer (thrown,
+ * `unreachable`, a 5xx) in `cache.unreachable`, for main's DEGRADED check. */
+function tallyAsk(cache, unreachable) {
+  cache.asked = (cache.asked || 0) + 1;
+  if (unreachable) cache.unreachable = (cache.unreachable || 0) + 1;
+}
+
+/* A run whose fresh questions the NucBox mostly did not answer: offers left
+ * unplaced for a Nominatim or relay that was down, not for where they are.
+ * Its report is not written (the nightly keeps the old one) unless
+ * --allow-degraded. Chosen, not measured: more than DEGRADED_SHARE of the
+ * fresh questions AND more than DEGRADED_MIN of them, so a few misses on a
+ * warm cache never refuse a night. */
+var DEGRADED_SHARE = 0.2;
+var DEGRADED_MIN = 50;
+
+function degraded(cache) {
+  var asked = cache.asked || 0, bad = cache.unreachable || 0;
+  return bad > DEGRADED_MIN && bad > DEGRADED_SHARE * asked
+    ? { asked: asked, unreachable: bad } : null;
+}
+
 function nbxFetch(opts) {
   var cache = opts.cache;
   var server = opts.server.replace(/\/+$/, '');
@@ -3224,6 +3248,7 @@ function nbxFetch(opts) {
           + (q.get('viewbox') ? '&viewbox=' + encodeURIComponent(q.get('viewbox')) + '&bounded=1' : '');
         var r = await getJson(u);
         if (!r.ok || !Array.isArray(r.body)) {
+          tallyAsk(cache, true);
           return reply(502, { ok: false, unreachable: true, error: 'Nominatim answered ' + r.status });
         }
         body = hitsOf(r.body); status = 200;
@@ -3235,8 +3260,10 @@ function nbxFetch(opts) {
         body = r2.body || {}; status = r2.status;
       }
     } catch (e) {
+      tallyAsk(cache, true);
       return reply(502, { ok: false, unreachable: true, error: String(e && e.message || e) });
     }
+    tallyAsk(cache, !!(body && body.unreachable) || !(status < 500));
     if (status === 200 && body && body.ok !== undefined && !body.unreachable) {
       cache.answers[pathAsked] = body;
       cache.fresh += 1;
@@ -3385,7 +3412,8 @@ function home(p) { return p && p[0] === '~' ? path.join(os.homedir(), p.slice(1)
 function parseArgs(argv) {
   var o = { server: null, out: path.join(os.homedir(), 'places-report'), gps: null, since: null,
             nominatim: null, cache: path.join(os.homedir(), '.cache', 'uber-scan', 'places-report-answers.json'),
-            gap: MV.NBX_GAP_MS, minN: MIN_N, streets: null, waits: null, relay: null, roadAsks: 5000 };
+            gap: MV.NBX_GAP_MS, minN: MIN_N, streets: null, waits: null, relay: null, roadAsks: 5000,
+            allowDegraded: false };
   for (var i = 0; i < argv.length; i++) {
     var a = argv[i];
     var val = function () { if (i + 1 >= argv.length) throw new Error(a + ' wants a value'); return argv[++i]; };
@@ -3400,6 +3428,7 @@ function parseArgs(argv) {
     else if (a === '--waits') o.waits = val();
     else if (a === '--relay') o.relay = val();
     else if (a === '--road-asks') o.roadAsks = Number(val());
+    else if (a === '--allow-degraded') o.allowDegraded = true;
     else if (a === '-h' || a === '--help') o.help = true;
     else if (/^--/.test(a)) throw new Error('unknown option ' + a);
     else if (!o.server) o.server = a;
@@ -3420,7 +3449,7 @@ var USAGE = [
   'usage: node tools/places_report.js [http://localhost:8081] [--out ~/places-report]',
   '         [--gps ~/gpslog] [--since YYYY-MM-DD] [--nominatim http://localhost:8088]',
   '         [--cache ~/.cache/uber-scan/places-report-answers.json] [--gap ms] [--min-n 30]',
-  '         [--streets URL] [--waits URL] [--relay URL] [--road-asks 5000]',
+  '         [--streets URL] [--waits URL] [--relay URL] [--road-asks 5000] [--allow-degraded]',
   '',
   'Run on the NucBox. Reads the copy at home (its /api/journal), places pickups with the',
   'NucBox\'s own Nominatim (directly with --nominatim, else through that server\'s /api/nbx),',
@@ -3436,6 +3465,9 @@ var USAGE = [
   'NucBox settings of its own.',
   '--road-asks: road questions the distance band may ask in all (through the relay\'s',
   '/api/nbx/route; cached).',
+  '--allow-degraded: write the report even when more than ' + DEGRADED_SHARE * 100 + '% (and more than '
+    + DEGRADED_MIN + ') of the',
+  'fresh NucBox questions went unanswered; without it such a run writes nothing and exits 1.',
   'Every night: tools/places_nightly.sh (see the README, "Every night, on the NucBox").',
 ].join('\n');
 
@@ -3489,7 +3521,7 @@ async function main(argv) {
   console.log('street index: ' + st.said);
   console.log('router: ' + roadSaid);
 
-  var cache = { answers: {}, hits: 0, fresh: 0 };
+  var cache = { answers: {}, hits: 0, fresh: 0, asked: 0, unreachable: 0 };
   try {
     var held = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
     if (held && held.v === 1 && held.answers && typeof held.answers === 'object') cache.answers = held.answers;
@@ -3562,6 +3594,22 @@ async function main(argv) {
     if (at) dropPins[key] = at;
   }
   saveCache();
+  // A NucBox down for the run: nothing written, so the nightly keeps the
+  // report it has (review, 27 Oct: it used to write one with the offers
+  // unplaced and swap it in).
+  var down = degraded(cache);
+  if (down) {
+    var downSaid = down.unreachable + ' of ' + down.asked + ' fresh NucBox questions went unanswered (the search, '
+      + 'Nominatim or the relay down?)';
+    if (!o.allowDegraded) {
+      console.log('NOT WRITTEN: ' + downSaid + '; the report would leave those offers unplaced. '
+                  + 'Run again when it answers, or pass --allow-degraded.');
+      process.exitCode = 1;
+      return;
+    }
+    console.log('DEGRADED, written anyway (--allow-degraded): ' + downSaid);
+  }
+
   function dropAt(tr) {
     var kk = tr.id + '@' + tr.endedAt;
     if (gpsPos[kk]) return { at: gpsPos[kk], how: 'gps' };
@@ -3631,7 +3679,8 @@ module.exports = {
   nextTake: nextTake, timelineOf: timelineOf, tripsOf: tripsOf, dropTable: dropTable,
   analyse: analyse, summary: summary, testLine: testLine, html: html, csvOf: csvOf, dropCsv: dropCsv,
   coverageCsv: coverageCsv, restCsv: restCsv, restBranchCsv: restBranchCsv, nameOf: nameOf,
-  restaurantNames: restaurantNames, restaurantsTable: restaurantsTable, waitOf: waitOf, hitsOf: hitsOf, nbxFetch: nbxFetch, gpsAt: gpsAt, parseArgs: parseArgs,
+  restaurantNames: restaurantNames, restaurantsTable: restaurantsTable, waitOf: waitOf, hitsOf: hitsOf, nbxFetch: nbxFetch,
+  degraded: degraded, DEGRADED_SHARE: DEGRADED_SHARE, DEGRADED_MIN: DEGRADED_MIN, gpsAt: gpsAt, parseArgs: parseArgs,
   DESC_MIN_N: DESC_MIN_N, REAL_MED_N: REAL_MED_N, QUIET_DAYS: QUIET_DAYS, SPELL_M: SPELL_M,
   SPELL_MIN_S: SPELL_MIN_S, SPELL_GAP_S: SPELL_GAP_S, SPELL_MIN_N: SPELL_MIN_N, REAL_BY: REAL_BY,
   EARLY_LOOK: EARLY_LOOK, MULTI_ORDER: MULTI_ORDER, MANY_DROPOFFS: MANY_DROPOFFS, MORE_CSVS: MORE_CSVS,

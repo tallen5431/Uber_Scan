@@ -17,8 +17,11 @@
 # SETTINGS, from the environment or from a file of KEY=value lines (default
 # ~/.config/uber-scan/places.env, or PLACES_ENV). The file holds this NucBox's
 # own values — the rig's address among them — and is never committed.
-#   RIG_HOST          ssh destination of the rig, e.g. pi@<rig-address>; unset: no copy
-#   RIG_GPSLOG        the logs on the rig (default: gpslog/, under its home)
+#   RIG_HOST          ssh destination of the rig, e.g. pi@<rig-address>; unset: no copy;
+#                     one starting with '-' is refused (ssh would read an option)
+#   RIG_GPSLOG        the logs on the rig (default: gpslog/, under its home); a
+#                     trailing slash is added, so the folder's logs land in
+#                     PLACES_GPS itself, never in PLACES_GPS/gpslog/
 #   RIG_SSH_KEY       a key file for ssh to the rig (default: ssh's own); one
 #                     with no passphrase, since cron has nobody to type it
 #   RIG_URL           the rig's own server, e.g. http://<rig-address>:8080; when
@@ -36,6 +39,10 @@
 #   PLACES_KEEP       builds kept beside the live one (default 2)
 #   RSYNC_TIMEOUT     seconds (default 300); SSH_TIMEOUT seconds (default 10)
 #   PLACES_NODE       the node to run (default node)
+#   PLACES_TIMEOUT    seconds the report may run (default 10800, three hours):
+#                     past it the run is stopped and fails, the old report kept.
+#                     A lock older than this with its run still holding it is a
+#                     wedged run, and the next night says so and exits non-zero
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -47,7 +54,7 @@ if [ -f "$ENV_FILE" ]; then
         key="${line%%=*}"
         val="${line#*=}"
         case "$key" in
-            RIG_HOST|RIG_GPSLOG|RIG_SSH_KEY|RIG_URL|PLACES_SERVER|PLACES_RELAY|PLACES_NOMINATIM|PLACES_GPS|PLACES_OUT|PLACES_LOG|PLACES_SINCE|PLACES_KEEP|RSYNC_TIMEOUT|SSH_TIMEOUT|PLACES_NODE) ;;
+            RIG_HOST|RIG_GPSLOG|RIG_SSH_KEY|RIG_URL|PLACES_SERVER|PLACES_RELAY|PLACES_NOMINATIM|PLACES_GPS|PLACES_OUT|PLACES_LOG|PLACES_SINCE|PLACES_KEEP|RSYNC_TIMEOUT|SSH_TIMEOUT|PLACES_NODE|PLACES_TIMEOUT) ;;
             *) continue ;;
         esac
         val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
@@ -60,6 +67,7 @@ fi
 
 RIG_HOST="${RIG_HOST:-}"
 RIG_GPSLOG="${RIG_GPSLOG:-gpslog/}"
+RIG_GPSLOG="${RIG_GPSLOG%/}/"
 RIG_SSH_KEY="${RIG_SSH_KEY:-}"
 RIG_URL="${RIG_URL:-}"
 PLACES_SERVER="${PLACES_SERVER:-http://localhost:8082}"
@@ -73,25 +81,46 @@ PLACES_KEEP="${PLACES_KEEP:-2}"
 RSYNC_TIMEOUT="${RSYNC_TIMEOUT:-300}"
 SSH_TIMEOUT="${SSH_TIMEOUT:-10}"
 PLACES_NODE="${PLACES_NODE:-node}"
+PLACES_TIMEOUT="${PLACES_TIMEOUT:-10800}"
+case "$PLACES_TIMEOUT" in ''|*[!0-9]*) PLACES_TIMEOUT=10800 ;; esac
 
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$PLACES_LOG"; }
 
-# One run at a time: a second, started while one is running, leaves.
+# One run at a time: a second, started while one is running, leaves. Opened
+# to append, so a run that only looks does not touch it; the run that takes it
+# stamps it, and a lock held past PLACES_TIMEOUT is a run wedged in something
+# the timeout below does not cover: said, and non-zero, every night it stands
+# (it used to say "another run holds" and exit 0 for ever).
 LOCK="$PLACES_OUT.lock"
 if command -v flock >/dev/null 2>&1; then
-    exec 9> "$LOCK"
-    if ! flock -n 9; then log "another run holds $LOCK; leaving"; exit 0; fi
+    exec 9>> "$LOCK"
+    if ! flock -n 9; then
+        held=$(( $(date +%s) - $(stat -c %Y "$LOCK" 2>/dev/null || date +%s) ))
+        if [ "$held" -gt "$PLACES_TIMEOUT" ]; then
+            log "FAILED: a run has held $LOCK for ${held}s, past PLACES_TIMEOUT (${PLACES_TIMEOUT}s): it is stuck; the old report is untouched"
+            exit 2
+        fi
+        log "another run holds $LOCK; leaving"
+        exit 0
+    fi
+    touch "$LOCK"
 fi
 
 log "start: server $PLACES_SERVER, gps $PLACES_GPS, nominatim $PLACES_NOMINATIM"
 
 # --- 1. the rig's GPS logs, when the rig is there ---------------------------
 mkdir -p "$PLACES_GPS"
-if [ -n "$RIG_HOST" ]; then
-    SSH="ssh -o BatchMode=yes -o ConnectTimeout=$SSH_TIMEOUT"
-    [ -n "$RIG_SSH_KEY" ] && SSH="$SSH -i $RIG_SSH_KEY -o IdentitiesOnly=yes"
-    if $SSH "$RIG_HOST" true >> "$PLACES_LOG" 2>&1; then
-        if rsync -a --timeout="$RSYNC_TIMEOUT" -e "$SSH" "$RIG_HOST:$RIG_GPSLOG" "$PLACES_GPS/" >> "$PLACES_LOG" 2>&1; then
+if [ "${RIG_HOST#-}" != "$RIG_HOST" ]; then
+    log "WARNING: RIG_HOST starts with '-', which ssh would read as an option; no copy from the rig"
+elif [ -n "$RIG_HOST" ]; then
+    # An array, so a key path with a space is one word; rsync takes its ssh
+    # as one string, each word quoted for it (printf %q).
+    SSH=(ssh -o BatchMode=yes -o ConnectTimeout="$SSH_TIMEOUT")
+    [ -n "$RIG_SSH_KEY" ] && SSH+=(-i "$RIG_SSH_KEY" -o IdentitiesOnly=yes)
+    RSH="$(printf '%q ' "${SSH[@]}")"
+    RSH="${RSH% }"
+    if "${SSH[@]}" "$RIG_HOST" true >> "$PLACES_LOG" 2>&1; then
+        if rsync -a --timeout="$RSYNC_TIMEOUT" -e "$RSH" "$RIG_HOST:$RIG_GPSLOG" "$PLACES_GPS/" >> "$PLACES_LOG" 2>&1; then
             log "gps logs copied from the rig"
         else
             log "WARNING: rsync from the rig failed (status $?); building from the logs already here"
@@ -123,8 +152,22 @@ if [ -n "$RIG_URL" ]; then
 else
     log "RIG_URL not set; no store waits from the rig"
 fi
-if ! "$PLACES_NODE" "${ARGS[@]}" >> "$PLACES_LOG" 2>&1; then
-    log "FAILED: the report did not build; the old report is untouched"
+# Under a time limit (PLACES_TIMEOUT): a run wedged on a server that stopped
+# answering would hold the lock, and every night after it, for ever.
+LIMIT=()
+if command -v timeout >/dev/null 2>&1; then
+    LIMIT=(timeout -k 60 "$PLACES_TIMEOUT")
+else
+    log "WARNING: no timeout command; the report runs with no time limit"
+fi
+${LIMIT[@]+"${LIMIT[@]}"} "$PLACES_NODE" "${ARGS[@]}" >> "$PLACES_LOG" 2>&1
+status=$?
+if [ "$status" -ne 0 ]; then
+    if [ "${#LIMIT[@]}" -gt 0 ] && { [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; }; then
+        log "FAILED: the report ran past PLACES_TIMEOUT (${PLACES_TIMEOUT}s) and was stopped; the old report is untouched"
+    else
+        log "FAILED: the report did not build (status $status); the old report is untouched"
+    fi
     rm -rf "$NEW"
     exit 1
 fi

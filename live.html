@@ -6910,8 +6910,14 @@
                + (heldPlace ? '[' + heldPlace : '')
                // ...and the server's pin for it, learnt on a beat (serverEnd).
                + (held && serverEnd(held) ? '!' + heldSaid.endBy : '')
-               // ...and the general area its refusal kept (areaEnd).
-               + (held && heldSaid && heldSaid.endArea && !heldSaid.endPinned ? '≈' : '')
+               // ...and the general area its refusal kept (areaEnd): where it
+               // is and whether it is the distance band's, so a later band
+               // (bandHeldNow) or an area that moved walks again — a bare
+               // '≈' kept the first area drawn (review, 27 Oct).
+               + (held && heldSaid && heldSaid.endArea && !heldSaid.endPinned
+                 ? '≈' + (+heldSaid.endArea.lat).toFixed(5) + ','
+                   + (+heldSaid.endArea.lon).toFixed(5)
+                   + (heldSaid.endArea.band === true ? 'b' : '') : '')
                // ...and the server's pickup pin, the ladder's last rung
                // (MV.routeLadder), learnt on a beat too.
                + (holdingNow && heldSaid && heldSaid.pickAt ? '^p' : '')

@@ -341,17 +341,20 @@ var THORNBURY_3152 = [
    Street" and "10497 Dunmere Parkway" answer nothing at all, as any door
    this fake does not know; the index above holds Pellmore Street short
    (369 m) by the Square and Dunmere Parkway long (3.7 km, past
-   WHOLE_LINE_M). Invented, every one. */
+   WHOLE_LINE_M). The ten of each are neighbours of the door asked (10802
+   on, 10902 on), never the door itself, so a cut list's area is all ten's
+   (pickInDisc keeps the doors with the asked number where any are there).
+   Invented, every one. */
 var VESSINGTON_10800 = [];
 var VESSINGTON_10900 = [];
 for (var vi = 0; vi < 10; vi++) {
   VESSINGTON_10800.push(place(150 + vi, 33.9570 + (vi % 5) * 0.0010, -84.5450 + Math.floor(vi / 5) * 0.0020,
                               'place', 'house', '',
-                              (10800 + vi * 2) + ', Vessington Highway, Marietta, Cobb County, '
+                              (10802 + vi * 2) + ', Vessington Highway, Marietta, Cobb County, '
                               + 'Georgia, 30060, United States'));
   VESSINGTON_10900.push(place(160 + vi, 33.9300 + vi * 0.0050, -84.5600 + vi * 0.0030,
                               'place', 'house', '',
-                              (10900 + vi * 2) + ', Vessington Highway, Marietta, Cobb County, '
+                              (10902 + vi * 2) + ', Vessington Highway, Marietta, Cobb County, '
                               + 'Georgia, 30060, United States'));
 }
 
