@@ -2773,6 +2773,24 @@ const SNAP_MEASURE = (fixture) => {
           };
         });
 
+        // [per mile] The four tables of 24 Oct, on every panel: drawn, and
+        // no cell of them past the glass.
+        out[panel[0] + ' permile'] = await page.evaluate(() => {
+          const d = document.documentElement;
+          const ids = ['ppm', 'err', 'ppmReal', 'refig'];
+          const cells = [].slice.call(document.querySelectorAll(
+            ids.map((i) => '#' + i + ' td, #' + i + ' th, #' + i + ' li').join(', ')));
+          return {
+            shown: ids.filter((i) => !document.getElementById(i + 'Head').hidden),
+            cells: cells.length,
+            outside: cells.filter((el) => {
+              const r = el.getBoundingClientRect();
+              return r.right > d.clientWidth + 1 || r.left < -1;
+            }).length,
+            pageWide: d.scrollWidth > d.clientWidth + 1,
+          };
+        });
+
         /* The map sheet, on every panel this gets bolted to.
          *
          * Opened by hand rather than by pressing a control: the fixture's
@@ -4456,6 +4474,14 @@ for i, (state, ends, took) in enumerate([
     if took is not None:
         rows.append({'kind': 'mark', 'id': 'r%d' % (i * 3), 'accepted': took,
                      'at': now - i * 1800000})
+# ...and six orders put down by the GPS, so the four $/mi tables under the
+# orders taken (journal.html showPerMile and the rest) are measured with
+# something in them: real minutes 1.2 times each card's, so the app is
+# re-figured as well as described.
+for i in range(1, 7):
+    took = rows[i]['at'] + 30000
+    rows.append({'v': 1, 'kind': 'drop', 'id': rows[i]['id'], 'seq': 1, 'by': 'gps',
+                 'acceptedAt': took, 'at': took + int(rows[i]['minutes'] * 1.2 * 60000)})
 with open(journal, 'w') as fh:
     for r in rows:
         fh.write(json.dumps(r) + '\n')
@@ -6125,6 +6151,19 @@ try:
                    pairs['outside'], 0)
                 eq('...and the page still not scrolling sideways at %s' % panel,
                    pairs['pageWide'], False)
+
+            # [per mile] The four tables, drawn off the fixture's orders put
+            # down by the GPS, and nothing of them off the glass.
+            pm = got.get('%s permile' % panel)
+            if name == 'journal.html':
+                eq('[per mile] the four $/mi tables are on the page at %s' % panel,
+                   (pm or {}).get('shown'), ['ppm', 'err', 'ppmReal', 'refig'])
+                ok_('...with cells to measure at %s (%d)' % (panel, (pm or {}).get('cells', 0)),
+                    (pm or {}).get('cells', 0) > 20)
+                eq('...none of them off the glass at %s' % panel,
+                   (pm or {}).get('outside'), 0)
+                eq('...and the page not scrolling sideways for them at %s' % panel,
+                   (pm or {}).get('pageWide'), False)
 
             # Close the shift, opened, on every panel: two answers a row at the
             # 52px every control on this page keeps, beside a payout, a

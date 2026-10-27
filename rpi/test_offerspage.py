@@ -882,6 +882,42 @@ FEEDS = {
                         'unreadable': None, 'pairs': [], 'offers': []},
 }
 
+# [per mile] The four tables of 24 Oct ("help me decide what $/mi I should
+# accept"), as server.js answers them (rpi/test_server.py checks the
+# arithmetic; this checks what the page makes of it). Invented figures: Uber
+# with a spread overall and under 4 mi, too few at 8-12 mi and at 9pm-12;
+# DoorDash too few anywhere; DoorDash re-figured, Uber short of orders.
+_PPM_NONE = {'p25': None, 'p50': None, 'p75': None, 'p90': None}
+FEEDS['per mile'] = dict(FEEDS['took six'], perMileSeen={
+    'min': 8, 'n': 23, 'apps': [
+        {'app': 'doordash', 'all': dict(_PPM_NONE, n=5),
+         'lengths': [dict(_PPM_NONE, band='4-8 mi', n=5)],
+         'blocks': [dict(_PPM_NONE, block='6–9pm', n=5)]},
+        {'app': 'uber', 'all': {'n': 18, 'p25': 1.1, 'p50': 1.62, 'p75': 2.05, 'p90': 2.9},
+         'lengths': [{'band': 'under 4 mi', 'n': 12, 'p25': 1.5, 'p50': 2.0, 'p75': 2.5,
+                      'p90': 3.1},
+                     dict(_PPM_NONE, band='4-8 mi', n=0),
+                     dict(_PPM_NONE, band='8-12 mi', n=6),
+                     dict(_PPM_NONE, band='12+ mi', n=0)],
+         'blocks': [{'block': '6–9pm', 'n': 15, 'p25': 1.2, 'p50': 1.7, 'p75': 2.1,
+                     'p90': 2.8},
+                    dict(_PPM_NONE, block='9pm–12', n=3)]}]},
+    cardVsReal={'n': 9, 'notAtDoor': 2, 'addons': 1, 'together': 3, 'miles': None, 'apps': [
+        {'app': 'doordash', 'n': 6, 'ratio': 0.9, 'ratioP25': 0.8, 'ratioP75': 1.05,
+         'overMin': -3.0},
+        {'app': 'uber', 'n': 3, 'ratio': 1.25, 'ratioP25': 1.1, 'ratioP75': 1.4,
+         'overMin': 5.5}]},
+    realByPerMile={'n': 9, 'bands': [
+        {'band': 'under $1/mi', 'n': 0, 'median': None},
+        {'band': '$1-1.50/mi', 'n': 2, 'median': 14.5},
+        {'band': '$1.50-2/mi', 'n': 3, 'median': 21.0},
+        {'band': '$2+/mi', 'n': 4, 'median': 28.75}]},
+    refigured={'minRuns': 5, 'target': 25, 'apps': [
+        {'app': 'doordash', 'offers': 40, 'runs': 6, 'ratio': 0.9, 'n': 38,
+         'toPass': 0, 'toAccept': 4},
+        {'app': 'uber', 'offers': 140, 'runs': 3, 'ratio': None, 'n': 0,
+         'toPass': 0, 'toAccept': 0}]})
+
 DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, feedsPath, queriesJson] = process.argv.slice(2);
@@ -1040,7 +1076,13 @@ const TEXT = (sel) => {
   }, 400000).unref();
   for (const [name, feed] of Object.entries(FEEDS)) {
     stage = name;
-    const ctx = await browser.newContext({ viewport: { width: 900, height: 900 } });
+    // 'in the car' in UTC whatever the host's zone: there NOW (22:13 UTC)
+    // puts "10:13 PM" on r0, the widest clock a row prints, and its 360px
+    // fit checks ([offers tick], [in car list]) are about that row. Off UTC
+    // the hour had one digit and a 1px sideways scroll went unseen.
+    const ctx = await browser.newContext(Object.assign(
+      { viewport: { width: 900, height: 900 } },
+      name === 'in the car' ? { timezoneId: 'UTC' } : {}));
     const page = await ctx.newPage();
     await page.addInitScript(STUB(feed));
     await page.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' })
@@ -1082,6 +1124,20 @@ const TEXT = (sel) => {
         // thing standing behind that promise.
         csv: document.getElementById('csv').getAttribute('href'),
         days: list('.day'),
+        // [per mile] The four tables: each heading (null while hidden), its
+        // line, and its rows as their class and cells.
+        perMile: ['ppm', 'err', 'ppmReal', 'refig'].reduce(function (o, id) {
+          o[id] = document.getElementById(id + 'Head').hidden ? null : {
+            head: text('#' + id + 'Head'), lead: text('#' + id + 'Lead'),
+            rows: [].slice.call(document.querySelectorAll('#' + id + ' tbody tr'))
+              .map(function (tr) {
+                return { cls: tr.className, cells: [].slice.call(tr.children).map(function (td) {
+                  return (td.textContent || '').replace(/\s+/g, ' ').trim();
+                }) };
+              }),
+            items: list('#' + id + ' li') };
+          return o;
+        }, {}),
         pairsHead: document.getElementById('pairsHead').hidden
           ? null : text('#pairsHead'),
         pairsLead: document.getElementById('pairsLead').hidden
@@ -2228,6 +2284,71 @@ try:
     _shares = [float(c['cells'][1].rstrip('%')) for c in _w]
     eq('a pickier line never takes a larger share of what came past',
        _shares, sorted(_shares, reverse=True))
+
+    # --- what $/mi to accept, read off the record (24 Oct 2026) -----------
+    #
+    # Four descriptions, server.js's arithmetic (rpi/test_server.py), drawn
+    # here. Each has to say how many it rests on, grey what is too thin to
+    # have a spread, and say that it is not a rule.
+    _pm = (got.get('per mile') or {}).get('perMile') or {}
+    _ppm = _pm.get('ppm') or {}
+    ok_('[per mile] where an offer\'s $/mi sits is drawn, with its count (%r)'
+        % _ppm.get('head'), 'sits' in (_ppm.get('head') or '') and '23 offers' in _ppm.get('head'))
+    ok_('[per mile] ...says the minimum and that it is not a line (%r)' % (_ppm.get('lead') or '')[-90:],
+        'Under 8 offers' in (_ppm.get('lead') or '')
+        and 'the verdict still goes by the hour' in (_ppm.get('lead') or ''))
+    _pr = [(r['cls'], r['cells']) for r in _ppm.get('rows') or []]
+    eq('[per mile] ...by app and trip length: an app\'s own row, its lengths seen, '
+       'and too few greyed with its count and no figures',
+       _pr[:5],
+       [('app few', ['DoorDash', '5', '--', '--', '--', '--']),
+        ('few', ['4-8 mi', '5', '--', '--', '--', '--']),
+        ('app', ['Uber', '18', '$1.10', '$1.62', '$2.05', '$2.90']),
+        ('', ['under 4 mi', '12', '$1.50', '$2.00', '$2.50', '$3.10']),
+        ('few', ['8-12 mi', '6', '--', '--', '--', '--'])])
+    eq('[per mile] ...and by time of day, in a table of its own',
+       _pr[5:],
+       [('app', ['DoorDash']), ('few', ['6–9pm', '5', '--', '--', '--', '--']),
+        ('app', ['Uber']), ('', ['6–9pm', '15', '$1.20', '$1.70', '$2.10', '$2.80']),
+        ('few', ['9pm–12', '3', '--', '--', '--', '--'])])
+    _err = _pm.get('err') or {}
+    ok_('[card vs real] card minutes against real, per app, with its count (%r)'
+        % _err.get('head'), '9 orders put down at the door' in (_err.get('head') or ''))
+    ok_('[card vs real] ...says what was left out, and that no driven miles are here (%r)'
+        % (_err.get('lead') or '')[-120:],
+        '2 put down by a Drop press' in (_err.get('lead') or '')
+        and 'no driven miles per order' in (_err.get('lead') or ''))
+    ok_('[card vs real] ...and the add-on left out, and how many were carried with another (%r)'
+        % (_err.get('lead') or '')[:260],
+        '1 add-on is left out, since its card\'s minutes are only what it adds'
+        in (_err.get('lead') or '')
+        and '3 of the 9 were in the car with another order' in (_err.get('lead') or ''))
+    eq('[card vs real] ...the median ratio, its middle half and the minutes over',
+       [r['cells'] for r in _err.get('rows') or []],
+       [['DoorDash', '6', '0.90×', '0.80–1.05', '-3.0'],
+        ['Uber', '3', '1.25×', '1.10–1.40', '+5.5']])
+    _pr2 = _pm.get('ppmReal') or {}
+    eq('[real by $/mi] real $/hr by the card\'s $/mi band, the empty band left off',
+       [r['cells'] for r in _pr2.get('rows') or []],
+       [['$1-1.50/mi', '2', '$15/hr'], ['$1.50-2/mi', '3', '$21/hr'],
+        ['$2+/mi', '4', '$29/hr']])
+    _rfg = _pm.get('refig') or {}
+    ok_('[refigured] the verdicts with the measured time say they are a count, not a rule (%r)'
+        % _rfg.get('head'), 'not a rule' in (_rfg.get('head') or ''))
+    ok_('[refigured] ...and that the time is never worked out from the miles (%r)'
+        % (_rfg.get('lead') or '')[-140:],
+        'never worked out from the miles' in (_rfg.get('lead') or '')
+        and '$25/hr' in (_rfg.get('lead') or '') and 'needs 5 orders' in (_rfg.get('lead') or ''))
+    eq('[refigured] ...as counts each way, and an app short of orders says so',
+       _rfg.get('items'),
+       ['4 of 38 DoorDash offers would flip at 0.90×: 0 from accept to pass, '
+        '4 pass to accept.',
+        'Uber: 3 of 5 orders measured at the door, not enough to re-figure its 140 offers.'])
+    # No figures: none of the four is drawn, rather than four empty headings.
+    for _f in ('genuinely empty', 'took six', 'unreadable'):
+        eq('[per mile] %s: none of the four tables is drawn' % _f,
+           (got.get(_f) or {}).get('perMile'),
+           {'ppm': None, 'err': None, 'ppmReal': None, 'refig': None})
 
     # --- the cost sweep, and the sentence under it ------------------------
     #

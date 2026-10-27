@@ -3789,7 +3789,10 @@ function takenRuns(rows, floor, offers) {
     if (!o) return;
     out.push({ id: r.id, app: o.app || null, pay: o.pay, minutes: o.minutes, miles: o.miles,
                tookAt: r.acceptedAt, endedAt: r.at, by: r.by || 'drop',
-               addon: r.addon === true });
+               addon: r.addon === true,
+               // How many orders were in the car when it was put down (the
+               // drop row's `carried`, written only for two or more).
+               carried: typeof r.carried === 'number' && r.carried >= 2 ? r.carried : 1 });
   });
   return out;
 }
@@ -3804,6 +3807,212 @@ function storeWaitsOut() {
     return { name: st.name, n: s.length, medianMin: Math.round(mid / 6) / 10 };
   }).filter(function (w) { return w.n >= STORE_WAITS_MIN; })
     .sort(function (a, b) { return b.medianMin - a.medianMin; });
+}
+
+/* --- what $/mile to accept, read off the record (the owner, 24 Oct: "What
+ * kind of analysis can be built into the offers page to help me decide what
+ * $/mi I should accept? The $/time can have error in it ... but $/mi is
+ * always correct", and then "optimize for the best value from real scanned
+ * data so I don't sit idle and take what is reasonably the best") ---------
+ *
+ * Four tables for the offers page, each a DESCRIPTION of the window and
+ * nothing else. Nothing here moves a verdict, a state, the target, the
+ * advice or the panel; the panel never sees these fields. AUDITS.md,
+ * Settled: no $/mile acceptance rule and no payout floor (a $/mile rule
+ * replayed 24% below $/hr), no re-timing at a pace, no minutes from
+ * distance. So:
+ *
+ *   perMileSeen  where an offer's raw $/mi (pay over the card's miles,
+ *                journal.html's payPerMile, nothing taken off) sits among
+ *                the offers SEEN in the window: p25/p50/p75/p90 by app and
+ *                trip length, and by app and time of day. A cell of fewer
+ *                than PER_MILE_MIN offers carries its count and no figures.
+ *   cardVsReal   per app, how the card's minutes compare with the real
+ *                ones, Took to put-down, over orders put down AT THE DOOR
+ *                (by 'gps' or 'screen'; a Drop pressed early shortens a
+ *                run). Median real/card ratio, its p25-p75, the median
+ *                minutes over. An Uber add-on is left out and counted
+ *                (`addons`): its card's minutes are only what it adds to the
+ *                trip ("+8 min"), and its real time is the trip's. An order
+ *                carried with another stays in and is counted (`together`):
+ *                its clock is still its own. Real MILES are not here: the per-order GPS
+ *                miles are worked out by the end-of-shift report off the
+ *                GPS logs, one day per run, and nothing on this route has
+ *                them; `miles` says so rather than inventing a figure.
+ *   realByPerMile  for the same door-measured orders, pay over the real
+ *                hours (gross, as takenRuns carries the pay) grouped by the
+ *                card's $/mi band, with n and the median.
+ *   refigured    each counted offer's $/hr with its card minutes scaled by
+ *                its app's MEASURED median real/card ratio (cardVsReal), the
+ *                driver's own pad and shopping allowance left as they were:
+ *                billed + minutes x (ratio - 1). A clock measurement per
+ *                app, never minutes from miles and never a speed: the ratio
+ *                multiplies the card's own minutes, so this is not the pace
+ *                re-timing refused in Settled. Counted against each row's
+ *                own target (the line the panel judged it on; 25 for a row
+ *                written without one, as the page assumes): how many cross
+ *                it each way. Only for an app with REFIGURED_MIN_RUNS or
+ *                more door-measured orders. A REPORT: it is computed here
+ *                and printed there and feeds no rule.
+ *
+ * Aggregates only: counts, ratios and dollars. No id, place or coordinate. */
+var PER_MILE_MIN = 8;
+var REFIGURED_MIN_RUNS = 5;
+var PER_MILE_LENGTHS = [[0, 4, 'under 4 mi'], [4, 8, '4-8 mi'], [8, 12, '8-12 mi'],
+                        [12, Infinity, '12+ mi']];
+var PER_MILE_RATES = [[0, 1, 'under $1/mi'], [1, 1.5, '$1-1.50/mi'], [1.5, 2, '$1.50-2/mi'],
+                      [2, Infinity, '$2+/mi']];
+
+function ppmOf(o) {
+  return o && typeof o.pay === 'number' && isFinite(o.pay)
+    && typeof o.miles === 'number' && isFinite(o.miles) && o.miles >= 0.1
+    ? o.pay / o.miles : null;
+}
+
+function rounded(v, dp) {
+  return typeof v === 'number' && isFinite(v) ? +v.toFixed(dp) : null;
+}
+
+// p25/p50/p75/p90 of `xs`, or only the count under `min`.
+function spreadOf(xs, min, dp) {
+  var s = xs.slice().sort(function (a, b) { return a - b; });
+  var out = { n: s.length, p25: null, p50: null, p75: null, p90: null };
+  if (s.length < min) return out;
+  out.p25 = rounded(percentileOf(s, 0.25), dp);
+  out.p50 = rounded(percentileOf(s, 0.50), dp);
+  out.p75 = rounded(percentileOf(s, 0.75), dp);
+  out.p90 = rounded(percentileOf(s, 0.90), dp);
+  return out;
+}
+
+function appsOf(list) {
+  var seen = {};
+  list.forEach(function (x) { seen[x.app] = true; });
+  return Object.keys(seen).sort();
+}
+
+function perMileSeen(offers) {
+  var rows = (offers || []).filter(function (o) {
+    return Advice.trustworthy(o) && ppmOf(o) !== null;
+  }).map(function (o) {
+    return { app: o.app || 'other', ppm: ppmOf(o), miles: o.miles,
+             block: Advice.blockOf(typeof o.firstAt === 'number' ? o.firstAt : o.at) };
+  });
+  var out = { min: PER_MILE_MIN, n: rows.length, apps: [] };
+  appsOf(rows).forEach(function (app) {
+    var mine = rows.filter(function (r) { return r.app === app; });
+    var all = mine.map(function (r) { return r.ppm; });
+    out.apps.push({
+      app: app,
+      all: spreadOf(all, PER_MILE_MIN, 2),
+      lengths: PER_MILE_LENGTHS.map(function (b) {
+        return Object.assign({ band: b[2] }, spreadOf(mine.filter(function (r) {
+          return r.miles >= b[0] && r.miles < b[1];
+        }).map(function (r) { return r.ppm; }), PER_MILE_MIN, 2));
+      }),
+      // Only the blocks the app was seen in: eight rows of "0" say nothing.
+      blocks: Advice.BLOCK_NAMES.map(function (name, i) {
+        return Object.assign({ block: name }, spreadOf(mine.filter(function (r) {
+          return r.block === i;
+        }).map(function (r) { return r.ppm; }), PER_MILE_MIN, 2));
+      }).filter(function (b) { return b.n > 0; })
+    });
+  });
+  return out;
+}
+
+// The orders put down at the door, with a real time and a card time. Not an
+// add-on: its card's minutes are an increment, not the order's own.
+function atDoor(t) {
+  return !!t && (t.by === 'gps' || t.by === 'screen');
+}
+
+function doorRuns(taken) {
+  return (taken || []).filter(function (t) {
+    return atDoor(t) && t.addon !== true && typeof t.pay === 'number'
+      && typeof t.minutes === 'number' && t.minutes > 0 && t.endedAt > t.tookAt;
+  }).map(function (t) {
+    var real = (t.endedAt - t.tookAt) / 60000;
+    return { app: t.app || 'other', card: t.minutes, real: real, pay: t.pay,
+             ppm: ppmOf(t), ratio: real / t.minutes, together: t.carried >= 2 };
+  });
+}
+
+function cardVsReal(taken) {
+  var runs = doorRuns(taken);
+  var list = taken || [];
+  return {
+    n: runs.length,
+    // Put down some other way (a Drop press, the chooser): not measured here.
+    notAtDoor: list.filter(function (t) {
+      return t && !atDoor(t) && t.by !== 'replaced' && t.by !== 'expiry';
+    }).length,
+    // Add-ons put down at the door, left out (see above).
+    addons: list.filter(function (t) { return atDoor(t) && t.addon === true; }).length,
+    // Of those measured, how many were in the car with another order.
+    together: runs.filter(function (r) { return r.together; }).length,
+    // No per-order driven miles reach this route; see above.
+    miles: null,
+    apps: appsOf(runs).map(function (app) {
+      var mine = runs.filter(function (r) { return r.app === app; });
+      var ratios = mine.map(function (r) { return r.ratio; }).sort(function (a, b) { return a - b; });
+      var over = mine.map(function (r) { return r.real - r.card; }).sort(function (a, b) { return a - b; });
+      return { app: app, n: mine.length,
+               ratio: rounded(percentileOf(ratios, 0.5), 2),
+               ratioP25: rounded(percentileOf(ratios, 0.25), 2),
+               ratioP75: rounded(percentileOf(ratios, 0.75), 2),
+               overMin: rounded(percentileOf(over, 0.5), 1) };
+    })
+  };
+}
+
+function realByPerMile(taken) {
+  var runs = doorRuns(taken).filter(function (r) { return r.ppm !== null; });
+  return {
+    n: runs.length,
+    bands: PER_MILE_RATES.map(function (b) {
+      var rates = runs.filter(function (r) { return r.ppm >= b[0] && r.ppm < b[1]; })
+        .map(function (r) { return r.pay / (r.real / 60); }).sort(function (a, b2) { return a - b2; });
+      return { band: b[2], n: rates.length, median: rounded(percentileOf(rates, 0.5), 2) };
+    })
+  };
+}
+
+function refigured(offers, taken) {
+  var measured = {};
+  cardVsReal(taken).apps.forEach(function (a) { measured[a.app] = a; });
+  var rows = (offers || []).filter(Advice.trustworthy);
+  var targets = {};
+  var apps = appsOf(rows.map(function (o) { return { app: o.app || 'other' }; }));
+  return {
+    minRuns: REFIGURED_MIN_RUNS,
+    apps: apps.map(function (app) {
+      var mine = rows.filter(function (o) { return (o.app || 'other') === app; });
+      var runs = measured[app];
+      var m = runs && runs.n >= REFIGURED_MIN_RUNS && runs.ratio > 0 ? runs : null;
+      var out = { app: app, offers: mine.length, runs: runs ? runs.n : 0,
+                  ratio: m ? m.ratio : null, n: 0, toPass: 0, toAccept: 0 };
+      if (!m) return out;
+      mine.forEach(function (o) {
+        var billed = typeof o.billedMinutes === 'number' ? o.billedMinutes : o.minutes;
+        if (typeof o.perHour !== 'number' || !isFinite(o.perHour)
+            || typeof o.minutes !== 'number' || !(o.minutes > 0)
+            || typeof billed !== 'number' || !(billed > 0)) return;
+        var net = o.perHour * billed / 60;
+        var mins = billed + o.minutes * (m.ratio - 1);
+        if (!(mins > 0)) return;
+        var line = typeof o.target === 'number' ? o.target : 25;
+        targets[line] = true;
+        var was = o.perHour >= line, now = net / (mins / 60) >= line;
+        out.n += 1;
+        if (was && !now) out.toPass += 1;
+        if (!was && now) out.toAccept += 1;
+      });
+      return out;
+    }),
+    // The line, when every row re-figured was judged on the same one.
+    target: Object.keys(targets).length === 1 ? +Object.keys(targets)[0] : null
+  };
 }
 
 function storeWaits() {
@@ -11253,6 +11462,10 @@ function route(req, res) {
       // 60000 truncated to 5000 — and it was labelling the second one "All",
       // computing the median and the $/hr ladder over an unannounced subset.
       var total = offers.length;
+      // The whole window, before the cap: the per-mile tables and the orders
+      // taken describe every offer in it, not the newest `limit` of them, and
+      // an order whose card fell under the cap was missing from `taken`.
+      var windowed = offers;
       if (limit && offers.length > limit) offers = offers.slice(-limit);
       if (pathname === '/api/journal.csv') {
         // A journal that could not be READ is refused here rather than
@@ -11313,6 +11526,7 @@ function route(req, res) {
       //
       // Newest first, because a shift is read from its end: the pairing a
       // driver wants is nearly always the one they just made.
+      var taken = takenRuns(rows, floor, windowed);
       var window = pairs.filter(function (r) { return !floor || (r.at || 0) >= floor; })
                         .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
       send(res, 200, JSON.stringify({ count: offers.length, total: total,
@@ -11344,8 +11558,15 @@ function route(req, res) {
                                       // What each order taken in the window
                                       // really took, and the restaurants'
                                       // waits (takenRuns, storeWaitsOut).
-                                      taken: takenRuns(rows, floor, offers),
+                                      taken: taken,
                                       waits: storeWaitsOut(),
+                                      // What $/mi to accept, read off the
+                                      // window: four descriptions, no rule
+                                      // (perMileSeen and its neighbours).
+                                      perMileSeen: perMileSeen(windowed),
+                                      cardVsReal: cardVsReal(taken),
+                                      realByPerMile: realByPerMile(taken),
+                                      refigured: refigured(windowed, taken),
                                       offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });

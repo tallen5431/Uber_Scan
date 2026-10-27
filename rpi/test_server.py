@@ -12098,6 +12098,146 @@ finally:
     stop(_up2)
 shutil.rmtree(_ud2, ignore_errors=True)
 
+# --- what $/mi to accept, read off the record (24 Oct 2026) -----------------
+# The owner: "help me decide what $/mi I should accept ... $/mi is always
+# correct", then all four tables. /api/journal gains perMileSeen, cardVsReal,
+# realByPerMile and refigured (server.js perMileSeen and its neighbours):
+# descriptions of the window, counts and dollars, no id and no place. Every
+# offer below is invented, at one evening's hour so the time-of-day block is
+# one block. Uber: ten 2-mile cards paying $2..$20 ($1..$10/mi) and three
+# 10-mile cards ($1, $1.50, $2/mi); five of the 2-mile cards taken and put
+# down by the GPS at 22..30 min against a 20-min card (the first with another
+# order in the car), one by a Drop press, one replaced, and one an add-on put
+# down by the GPS an hour after its Took. DoorDash: five 5-mile cards, all taken and put down by the
+# app's screen at 24..33 min against a 30-min card.
+import datetime as _pmdt
+_pmday = _pmdt.datetime.now().replace(hour=19, minute=5, second=0, microsecond=0) \
+    - _pmdt.timedelta(days=1)
+_PM0 = int(_pmday.timestamp() * 1000)
+
+
+def _pm_offer(oid, app, pay, miles, minutes, per_hour, k):
+    return offer(0, _PM0 + k * 60000, id=oid, app=app, pay=pay, miles=miles,
+                 minutes=minutes, billedMinutes=minutes, perHour=per_hour)
+
+
+def _pm_drop(oid, by, real_min, k):
+    took = _PM0 + k * 60000 + 30000
+    return {'v': 1, 'kind': 'drop', 'id': oid, 'seq': 1, 'by': by,
+            'acceptedAt': took, 'at': took + int(real_min * 60000)}
+
+
+_pm_uber_ph = [26, 28, 29, 31, 40, 10, 12, 20, 24, 25, 50, 15, 27]
+_pm_rows = []
+for _i in range(10):
+    _pm_rows.append(_pm_offer('pmu%d' % _i, 'uber', 2.0 * (_i + 1), 2.0, 20.0,
+                              _pm_uber_ph[_i], _i))
+for _j, _pay in enumerate([10.0, 15.0, 20.0]):
+    _pm_rows.append(_pm_offer('pmu%d' % (10 + _j), 'uber', _pay, 10.0, 20.0,
+                              _pm_uber_ph[10 + _j], 10 + _j))
+for _i, _ph in enumerate([23, 24, 20, 30, 10]):
+    _pm_rows.append(_pm_offer('pmd%d' % _i, 'doordash', 10.0, 5.0, 30.0, _ph, 20 + _i))
+for _i, _real in enumerate([22, 24, 24, 26, 30]):
+    _pm_rows.append(_pm_drop('pmu%d' % _i, 'gps', _real, _i))
+_pm_rows[-5]['carried'] = 2
+_pm_rows.append(_pm_drop('pmu5', 'drop', 12, 5))
+_pm_rows.append(_pm_drop('pmu6', 'replaced', 3, 6))
+_pm_rows.append(dict(_pm_drop('pmu7', 'gps', 60, 7), addon=True))
+for _i, _real in enumerate([24, 24, 27, 30, 33]):
+    _pm_rows.append(_pm_drop('pmd%d' % _i, 'screen', _real, 20 + _i))
+_pmd = tempfile.mkdtemp()
+write(os.path.join(_pmd, 'j.jsonl'), _pm_rows)
+_pmproc, _pmbase = start({'SCANNER': '0'}, os.path.join(_pmd, 'j.jsonl'))
+try:
+    _pm = get(_pmbase, '/api/journal?days=0')
+finally:
+    stop(_pmproc)
+_seen = _pm.get('perMileSeen') or {}
+_apps = {a.get('app'): a for a in _seen.get('apps') or []}
+eq('[per mile] where an offer\'s $/mi sits: every counted offer, by app, and the minimum said',
+   (_seen.get('n'), _seen.get('min'), sorted(_apps)), (18, 8, ['doordash', 'uber']))
+_u = _apps.get('uber') or {}
+eq('[per mile] ...Uber\'s 13 offers, p25/p50/p75/p90 of pay over the card\'s miles',
+   _u.get('all'), {'n': 13, 'p25': 2.0, 'p50': 4.0, 'p75': 7.0, 'p90': 8.8})
+_ul = {c.get('band'): c for c in _u.get('lengths') or []}
+eq('[per mile] ...the four trip lengths, each with its count',
+   [(c.get('band'), c.get('n')) for c in _u.get('lengths') or []],
+   [('under 4 mi', 10), ('4-8 mi', 0), ('8-12 mi', 3), ('12+ mi', 0)])
+eq('[per mile] ...a length with 8 or more has its spread',
+   _ul.get('under 4 mi'), {'band': 'under 4 mi', 'n': 10, 'p25': 3.25, 'p50': 5.5,
+                           'p75': 7.75, 'p90': 9.1})
+eq('[per mile] ...and one under 8 its count and no figures',
+   _ul.get('8-12 mi'), {'band': '8-12 mi', 'n': 3, 'p25': None, 'p50': None,
+                        'p75': None, 'p90': None})
+eq('[per mile] ...by time of day, only the blocks the app was seen in',
+   [(b.get('block'), b.get('n'), b.get('p50')) for b in _u.get('blocks') or []],
+   [('6–9pm', 13, 4.0)])
+eq('[per mile] ...DoorDash\'s 5 are too few for any figure',
+   (_apps.get('doordash') or {}).get('all'),
+   {'n': 5, 'p25': None, 'p50': None, 'p75': None, 'p90': None})
+_cvr = _pm.get('cardVsReal') or {}
+eq('[card vs real] orders put down at the door only: the Drop press counted out, '
+   'the replaced one not at all; no driven miles on this route',
+   (_cvr.get('n'), _cvr.get('notAtDoor'), _cvr.get('miles')), (10, 1, None))
+eq('[card vs real] ...an add-on left out and counted (its card\'s minutes are an '
+   'increment), one carried with another kept and counted',
+   (_cvr.get('addons'), _cvr.get('together')), (1, 1))
+eq('[card vs real] ...and the orders taken say how many were in the car at the drop',
+   sorted((t.get('id'), t.get('carried'), t.get('addon')) for t in _pm.get('taken') or []
+          if t.get('id') in ('pmu0', 'pmu1', 'pmu7')),
+   [('pmu0', 2, False), ('pmu1', 1, False), ('pmu7', 1, True)])
+eq('[card vs real] ...per app: the median real/card, its middle half, the minutes over',
+   [(a.get('app'), a.get('n'), a.get('ratio'), a.get('ratioP25'), a.get('ratioP75'),
+     a.get('overMin')) for a in _cvr.get('apps') or []],
+   [('doordash', 5, 0.9, 0.8, 1.0, -3.0), ('uber', 5, 1.2, 1.2, 1.3, 4.0)])
+_rpm = _pm.get('realByPerMile') or {}
+eq('[real by $/mi] pay over the real hours, by the card\'s $/mi band, with n and the median',
+   [(b.get('band'), b.get('n'), b.get('median')) for b in _rpm.get('bands') or []],
+   [('under $1/mi', 0, None), ('$1-1.50/mi', 1, 5.45), ('$1.50-2/mi', 0, None),
+    ('$2+/mi', 9, 20.0)])
+_rf = _pm.get('refigured') or {}
+eq('[refigured] each offer\'s $/hr with its app\'s measured ratio: how many cross the '
+   'line each way',
+   [(a.get('app'), a.get('runs'), a.get('ratio'), a.get('n'), a.get('toPass'),
+     a.get('toAccept')) for a in _rf.get('apps') or []],
+   [('doordash', 5, 0.9, 5, 0, 2), ('uber', 5, 1.2, 13, 5, 0)])
+eq('[refigured] ...the minimum said and the one line every row was judged on',
+   (_rf.get('minRuns'), _rf.get('target')), (5, 25))
+eq('[refigured] ...and nothing moved: every offer\'s own verdict and rate as written',
+   sorted((o.get('id'), o.get('perHour'), o.get('state')) for o in _pm.get('offers') or []),
+   sorted((r['id'], r['perHour'], r['state']) for r in _pm_rows if 'kind' not in r))
+_pm_out = json.dumps({k: _pm.get(k) for k in ('perMileSeen', 'cardVsReal', 'realByPerMile',
+                                             'refigured')})
+no_('[per mile] ...and no id, place or coordinate in the four fields',
+    any(w in _pm_out for w in ('pmu', 'pmd', 'lat', 'lon', 'places', 'pickup', 'dropoff')))
+
+# An app with too few orders measured is not re-figured, and says how many it
+# has; an empty journal says nothing at all.
+_pm_few = [r for r in _pm_rows if r.get('id') != 'pmu4']
+write(os.path.join(_pmd, 'few.jsonl'), _pm_few)
+write(os.path.join(_pmd, 'none.jsonl'), [])
+_pmproc, _pmbase = start({'SCANNER': '0'}, os.path.join(_pmd, 'few.jsonl'))
+try:
+    _few = get(_pmbase, '/api/journal?days=0')
+finally:
+    stop(_pmproc)
+eq('[refigured] under 5 orders at the door an app is not re-figured, its count kept',
+   [(a.get('app'), a.get('runs'), a.get('ratio'), a.get('n'))
+    for a in (_few.get('refigured') or {}).get('apps') or []],
+   [('doordash', 5, 0.9, 5), ('uber', 4, None, 0)])
+_pmproc, _pmbase = start({'SCANNER': '0'}, os.path.join(_pmd, 'none.jsonl'))
+try:
+    _none = get(_pmbase, '/api/journal?days=0')
+finally:
+    stop(_pmproc)
+eq('[per mile] an empty journal: four empty tables',
+   ((_none.get('perMileSeen') or {}).get('apps'), (_none.get('cardVsReal') or {}).get('apps'),
+    [b.get('n') for b in (_none.get('realByPerMile') or {}).get('bands') or []],
+    (_none.get('refigured') or {}).get('apps')),
+   ([], [], [0, 0, 0, 0], []))
+shutil.rmtree(_pmd, ignore_errors=True)
+
+
 # --- the GPS logs are tidied when the server starts ---------------------------
 #
 # tools/gpslog_tidy.py had to be added to an untracked Start.sh by hand, so a

@@ -137,6 +137,11 @@
   table.waits tr.mine td { font-weight: 700; color: var(--text); }
   table.waits tr.mine td i { font-style: normal; font-weight: 400;
                              font-size: 11px; color: var(--muted); }
+  /* The per-mile tables use the same table. A cell with too few offers to
+     have a spread keeps its count and greys, so it reads as thin rather
+     than as missing; an app's name heads its own rows. */
+  table.waits tr.few td { color: var(--muted); }
+  table.waits tr.app td { font-weight: 700; padding-top: 10px; }
   /* One caveat per line, marked, rather than four facts run together in a grey
      block the eye skips whole. */
   ul.note { list-style: none; margin: 18px 0 0; padding: 0; }
@@ -296,7 +301,12 @@
      you scan down to recognise a job, not what you judge it by. */
   .offer .meta em { display: block; font-style: normal; font-size: 11px;
                     opacity: .8; overflow: hidden; text-overflow: ellipsis; }
-  .offer .when { margin-left: auto; padding-left: 6px; font-size: 11px;
+  /* No padding of its own: the row's 10px gap already stands before it. A 6px
+     pad here was 6px more than a ticked row with a tag has on a 360px phone
+     once `.meta` has shrunk to nothing, so from 10:00 to 12:59 a two-digit
+     hour ("10:13 PM", 4.6px wider than "9:43 PM") pushed the chevron's turned
+     box 1px past the glass and the whole page scrolled sideways. */
+  .offer .when { margin-left: auto; font-size: 11px;
                  color: var(--muted); flex: none; }
   /* Set aside: still listed, because an offer missing from the record is the
      thing that makes a record impossible to check against. */
@@ -523,6 +533,11 @@
     .review .days button { font-size: 17px; }
     .review > .note { font-size: 16px; }
     .review .ask .what em { font-size: 15px; }
+    /* The tables under the orders taken (the waits, the $/mi ones), the
+       same: their headings were 11px, which rpi/test_layout.py named once
+       the $/mi tables put one on every panel. */
+    table.waits { font-size: 17px; }
+    table.waits th, table.waits tr.mine td i { font-size: 15px; }
     #nothing { font-size: 17px; }
     #nothing b { font-size: 20px; }
     #nothing code { font-size: 16px; }
@@ -796,6 +811,25 @@
   <p class="hint" id="waitsLead" hidden></p>
   <div id="waits"></div>
 
+  <!-- What $/mi to accept, read off the record (the owner, 24 Oct: "help me
+       decide what $/mi I should accept ... the $/time can have error in it,
+       but $/mi is always correct"). Four descriptions of the window, worked
+       out by server.js (perMileSeen, cardVsReal, realByPerMile, refigured).
+       None of them is a rule: no verdict, target, advice or panel line moves,
+       and the last one says what the verdicts WOULD have been, as a count. -->
+  <h2 id="ppmHead" hidden>Where an offer&rsquo;s $/mi sits</h2>
+  <p class="hint" id="ppmLead" hidden></p>
+  <div id="ppm"></div>
+  <h2 id="errHead" hidden>Card minutes against real, by app</h2>
+  <p class="hint" id="errLead" hidden></p>
+  <div id="err"></div>
+  <h2 id="ppmRealHead" hidden>Real $/hr by the card&rsquo;s $/mi</h2>
+  <p class="hint" id="ppmRealLead" hidden></p>
+  <div id="ppmReal"></div>
+  <h2 id="refigHead" hidden>Verdicts with the measured time</h2>
+  <p class="hint" id="refigLead" hidden></p>
+  <div id="refig"></div>
+
 
   <ul class="note" id="caveats"></ul>
 
@@ -871,6 +905,8 @@
    'took', 'tookHead', 'chips', 'sorts', 'week', 'weekHead',
    'pairs', 'pairsHead', 'pairsLead', 'runsAll',
    'real', 'realHead', 'realLead', 'waits', 'waitsHead', 'waitsLead',
+   'ppm', 'ppmHead', 'ppmLead', 'err', 'errHead', 'errLead',
+   'ppmReal', 'ppmRealHead', 'ppmRealLead', 'refig', 'refigHead', 'refigLead',
    'review', 'reviewSays', 'reviewDays', 'reviewBack', 'reviewOn', 'reviewLead',
    'reviewList',
    'sheet', 'sheetHead', 'sheetWhere', 'sheetShut', 'sheetMap', 'sheetFoot',
@@ -2806,6 +2842,138 @@
       }).join('') + '</tbody></table>';
   }
 
+  /* WHAT $/MI TO ACCEPT, READ OFF THE RECORD. Four descriptions of the
+     window that server.js works out (perMileSeen, cardVsReal, realByPerMile,
+     refigured) over every offer in it, not only the rows listed here. History
+     only, said as it is: nothing on this page or the panel judges an offer by
+     its $/mi (AUDITS.md, Settled: a $/mile rule replayed 24% below $/hr),
+     and the last table counts what the verdicts would have been with the
+     measured time, without changing one. */
+  function appName(a) {
+    return a === 'uber' ? 'Uber' : a === 'doordash' ? 'DoorDash' : a;
+  }
+  function hideSection(name) {
+    el[name].innerHTML = '';
+    el[name + 'Head'].hidden = el[name + 'Lead'].hidden = true;
+  }
+  function showSection(name) {
+    el[name + 'Head'].hidden = el[name + 'Lead'].hidden = false;
+  }
+
+  function showPerMile(seen) {
+    var apps = (seen && Array.isArray(seen.apps) ? seen.apps : []).filter(function (a) {
+      return a && a.all && a.all.n > 0;
+    });
+    if (!apps.length) return hideSection('ppm');
+    showSection('ppm');
+    var min = seen.min;
+    el.ppmHead.innerHTML = 'Where an offer&rsquo;s $/mi sits <em>· ' + seen.n
+      + (seen.n === 1 ? ' offer' : ' offers') + ' seen</em>';
+    el.ppmLead.textContent = 'The pay over the card\'s miles, nothing taken off, of every '
+      + 'offer seen in this stretch: a quarter paid under the 25 figure, half under the 50, '
+      + 'and so on. Under ' + min + ' offers a row keeps its count and no figures. A way to '
+      + 'see where a card sits, not a line: the verdict still goes by the hour.';
+    function cells(c) {
+      var few = c.p50 === null;
+      return '<td>' + c.n + '</td>' + ['p25', 'p50', 'p75', 'p90'].map(function (k) {
+        return '<td>' + (few ? '--' : money(c[k], 2)) + '</td>';
+      }).join('');
+    }
+    function line(label, c) {
+      return '<tr' + (c.p50 === null ? ' class="few"' : '') + '><td>' + esc(label)
+        + '</td>' + cells(c) + '</tr>';
+    }
+    var head = '<thead><tr><th>$/mi</th><th>offers</th><th>25</th><th>50</th>'
+      + '<th>75</th><th>90</th></tr></thead><tbody>';
+    var byLength = '', byHour = '';
+    apps.forEach(function (a) {
+      byLength += '<tr class="app' + (a.all.p50 === null ? ' few' : '') + '"><td>'
+        + esc(appName(a.app)) + '</td>' + cells(a.all) + '</tr>';
+      (a.lengths || []).forEach(function (c) { if (c.n) byLength += line(c.band, c); });
+      if ((a.blocks || []).length) {
+        byHour += '<tr class="app"><td colspan="6">' + esc(appName(a.app)) + '</td></tr>';
+        a.blocks.forEach(function (c) { byHour += line(c.block, c); });
+      }
+    });
+    el.ppm.innerHTML = '<table class="waits">' + head + byLength + '</tbody></table>'
+      + (byHour ? '<table class="waits">' + head.replace('$/mi', 'time of day') + byHour
+        + '</tbody></table>' : '');
+  }
+
+  function showCardVsReal(cvr) {
+    var apps = (cvr && Array.isArray(cvr.apps) ? cvr.apps : []).filter(function (a) {
+      return a && a.n > 0;
+    });
+    if (!apps.length) return hideSection('err');
+    showSection('err');
+    el.errHead.innerHTML = 'Card minutes against real, by app <em>· ' + cvr.n
+      + (cvr.n === 1 ? ' order' : ' orders') + ' put down at the door</em>';
+    el.errLead.textContent = 'Took to put-down against the minutes on the card, for orders '
+      + 'put down at the door (GPS or the app\'s screen) only'
+      + (cvr.notAtDoor ? '; ' + cvr.notAtDoor + ' put down by a Drop press or the chooser '
+        + 'are left out, since an early press makes an order look faster' : '')
+      + (cvr.addons ? '; ' + cvr.addons + (cvr.addons === 1 ? ' add-on is' : ' add-ons are')
+        + ' left out, since its card\'s minutes are only what it adds to the trip' : '')
+      + (cvr.together ? '; ' + cvr.together + ' of the ' + cvr.n + ' were in the car with '
+        + 'another order, which can stretch either' : '')
+      + '. 1.20× is a fifth longer than the card said. The card\'s miles are not '
+      + 'checked here: this page has no driven miles per order (the Shift page has them '
+      + 'for one day at a time).';
+    el.err.innerHTML = '<table class="waits"><thead><tr><th>app</th><th>orders</th>'
+      + '<th>real / card</th><th>middle half</th><th>min over</th></tr></thead><tbody>'
+      + apps.map(function (a) {
+        var mid = a.ratioP25 === null ? '--'
+          : a.ratioP25.toFixed(2) + '–' + a.ratioP75.toFixed(2);
+        return '<tr><td>' + esc(appName(a.app)) + '</td><td>' + a.n + '</td><td>'
+          + (a.ratio === null ? '--' : a.ratio.toFixed(2) + '×') + '</td><td>' + mid
+          + '</td><td>' + (a.overMin === null ? '--'
+            : (a.overMin > 0 ? '+' : '') + a.overMin.toFixed(1)) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function showRealByPerMile(rpm) {
+    var bands = (rpm && Array.isArray(rpm.bands) ? rpm.bands : []).filter(function (b) {
+      return b && b.n > 0;
+    });
+    if (!bands.length) return hideSection('ppmReal');
+    showSection('ppmReal');
+    el.ppmRealHead.innerHTML = 'Real $/hr by the card&rsquo;s $/mi <em>· ' + rpm.n
+      + (rpm.n === 1 ? ' order' : ' orders') + '</em>';
+    el.ppmRealLead.textContent = 'The same orders, put down at the door: the card\'s pay '
+      + 'over the real time it took, nothing taken off for the car, by the card\'s $/mi.';
+    el.ppmReal.innerHTML = '<table class="waits"><thead><tr><th>card</th><th>orders</th>'
+      + '<th>median real $/hr</th></tr></thead><tbody>' + bands.map(function (b) {
+        return '<tr><td>' + esc(b.band) + '</td><td>' + b.n + '</td><td>'
+          + (b.median === null ? '--' : money(b.median, 0) + '/hr') + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function showRefigured(rf) {
+    var apps = (rf && Array.isArray(rf.apps) ? rf.apps : []).filter(function (a) {
+      return a && a.offers > 0;
+    });
+    if (!apps.length) return hideSection('refig');
+    showSection('refig');
+    var line = typeof rf.target === 'number' ? money(rf.target, 0) + '/hr' : 'your target';
+    el.refigHead.innerHTML = 'Verdicts with the measured time <em>· a count, not a rule</em>';
+    el.refigLead.textContent = 'Each offer\'s $/hr again with its card minutes stretched by '
+      + 'its app\'s measured real / card above, your pad left as it was, and how many would '
+      + 'land the other side of ' + line + '. The time is the clock\'s, never worked out from '
+      + 'the miles, and nothing the panel says changes. An app needs ' + rf.minRuns
+      + ' orders put down at the door first.';
+    el.refig.innerHTML = '<ul class="note">' + apps.map(function (a) {
+      var name = esc(appName(a.app));
+      if (a.ratio === null) {
+        return '<li>' + name + ': ' + a.runs + ' of ' + rf.minRuns + ' orders measured at '
+          + 'the door, not enough to re-figure its ' + a.offers + ' offers.</li>';
+      }
+      var flips = a.toPass + a.toAccept;
+      return '<li><b>' + flips + '</b> of ' + a.n + ' ' + name + ' offers would flip at '
+        + a.ratio.toFixed(2) + '×: <b>' + a.toPass + '</b> from accept to pass, <b>'
+        + a.toAccept + '</b> pass to accept.</li>';
+    }).join('') + '</ul>';
+  }
+
   function showPairs(pairs) {
     pairs = pairs || [];
     if (!pairs.length) {
@@ -3122,6 +3290,10 @@
     showPairs(data.pairs);
     showReal(data.taken);
     showWaits(data.waits);
+    showPerMile(data.perMileSeen);
+    showCardVsReal(data.cardVsReal);
+    showRealByPerMile(data.realByPerMile);
+    showRefigured(data.refigured);
 
     if (!offers.length) {
       // Nothing was recorded, or nothing could be READ. Those are different
