@@ -2886,10 +2886,21 @@ var END_WHY = { nodoor: 'no house number', none: 'not inside the card\'s reach',
  * `answered(out)` with nbxHits' answer. A NucBox that does not answer is
  * 'NucBox down' on the hold and is asked once more, the whole search from the
  * top, after END_RETRY_MS. The door's question and the place's both come
- * through here — and the street index's (doorChain's byName), whose answer
- * `read` turns into what is kept (streetAnswer), or null for one that is not
- * an answer, which is the NucBox not answering as any other is. */
-function endAsk(key, attempt, target, answered, read) {
+ * through here — and the street index's (doorChain's byName, searchHeldStreet,
+ * searchHeldStreetArea), whose answer `read` turns into what is kept
+ * (streetAnswer), or null for one that is not an answer.
+ *
+ * ...EXCEPT a question asked AFTER the search answered: those pass
+ * `unanswered(now)`, and a NucBox that does not answer it gets that instead
+ * of 'NucBox down' — the refusal the search's own answer already made (the
+ * 26 Oct shift: the street index on 8081 refused every connection all
+ * evening while search answered, and three doors were refused 'NucBox down',
+ * each after its search had answered, by an index asked only to rescue it).
+ * The whole search is still asked once more after END_RETRY_MS (once a
+ * search, however many of its questions went unanswered), so an index back
+ * by then is asked. That the index is down is the panel's "NucBox: streets
+ * down" (nbxHealth), not a word on one order's end. */
+function endAsk(key, attempt, target, answered, read, unanswered) {
   read = read || function (body) { return Array.isArray(body) ? nbxHits(body) : null; };
   if (nbxCache.has(target)) return answered(nbxCache.get(target));
   nbxAsk(target, function (err, body) {
@@ -2898,14 +2909,15 @@ function endAsk(key, attempt, target, answered, read) {
     if (err) {
       var now = endHold(key);
       if (!now || heldEndPin(now)) return;
-      refuseHeldEnd(now, 'NucBox down');
+      if (!unanswered) refuseHeldEnd(now, 'NucBox down');
       var on = endSearch[holdIdOf(now)];
-      if (attempt === 1 && on) {
+      if (attempt === 1 && on && !on.timer) {
         on.timer = setTimeout(function () {
           on.timer = null;
           searchHeldEnd(key, 2);
         }, END_RETRY_MS);
       }
+      if (unanswered) unanswered(now);
       return;
     }
     nbxRemember(target, out);
@@ -2947,12 +2959,12 @@ function searchHeldEnd(key, attempt) {
   // Every question through endAsk (nbxCache first, a NucBox not answering
   // refused 'NucBox down' and asked once more from the top), and nothing more
   // asked once the hold has moved on or the page pinned first.
-  doorChain(plan, disc, true, function (target, read, answered) {
+  doorChain(plan, disc, true, function (target, read, answered, unanswered) {
     endAsk(key, attempt, target, function (out) {
       var now = endHold(key);
       if (!now || heldEndPin(now)) return;
       answered(out);
-    }, read);
+    }, read, unanswered);
   }, function (res, asked, via) {
     settleHeldEnd(key, attempt, disc, res, asked, via);
   });
@@ -2965,9 +2977,11 @@ function searchHeldEnd(key, attempt) {
  * a search made early asks exactly the questions a later ✓ Took asks, and the
  * Took finds every answer in nbxCache. `plan` is a door plan (searchPlan's
  * street with a house number, its street a valid nbxTerm); `ask(target,
- * read, answered)` asks one question (`read` turns a body into what is kept,
- * null for nbxHits) and calls `answered(out)` only with an answer — each
- * caller handles a NucBox not answering its own way. `done(res, asked, via)`:
+ * read, answered, unanswered)` asks one question (`read` turns a body into
+ * what is kept, null for nbxHits) and calls `answered(out)` only with an
+ * answer — each caller handles a NucBox not answering its own way, and the
+ * held end's (endAsk) calls `unanswered()` where step 3's index does not
+ * answer: the chain then ends on the search's own answer, as with no index. `done(res, asked, via)`:
  * pickInDisc's answer (or a retry's, chosen by MV.afterRetry / MV.afterDir),
  * the street the door was found by when it was not the plan's own, and which
  * retry found the door ('type', 'dir', 'rescue'), else null.
@@ -3037,7 +3051,7 @@ function doorChain(plan, disc, named, ask, done) {
         var kept = MV.afterRetry(first, MV.pickNamed(out.hits, disc, p2, out.cutAt));
         done(kept, p2.street, kept.at ? 'rescue' : null);
       });
-    });
+    }, function () { done(first, null, null); });
   }
 }
 
@@ -3167,7 +3181,7 @@ function searchHeldStreet(key, attempt, disc, asked, why, area) {
   }, function (body) {
     var a = streetAnswer('whole', body);
     return a.error ? null : a;
-  });
+  }, function (now) { refuseHeldEnd(now, why, area); });
 }
 
 /* ...and a door that NOTHING answered (doorChain's 'none', after its
@@ -3204,7 +3218,7 @@ function searchHeldStreetArea(key, attempt, disc, why) {
     }, function (body) {
       var a = streetAnswer('whole', body);
       return a.error ? null : a;
-    });
+    }, function (now) { refuseHeldEnd(now, why); });
 }
 
 /* The one short street of the index's answer that touches the disc, as

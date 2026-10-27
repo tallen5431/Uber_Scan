@@ -6760,8 +6760,10 @@ try:
     # out, on a server with NUCBOX_STREETS unset, keeps the door search's own
     # refusal, not a question to an index that is not there ('NucBox down');
     # and on one whose index answers names beside two streets (not "the one
-    # street"), that answer is no answer: refused as the NucBox not answering,
-    # and the relay says the same.
+    # street"), that answer is no answer — the relay says the index is not
+    # answering — and, since 26 Oct (endAsk's `unanswered`), the held end keeps
+    # the door search's own refusal there too: the search answered, and only
+    # the rescue had nothing.
     class _BadIx(object):
         asked = []
 
@@ -6787,7 +6789,7 @@ try:
     _badix_base = 'http://127.0.0.1:%d' % _badix.server_address[1]
     for _ixname, _ixenv, _ixwant in (
             ('unset', {}, 'not inside the card\'s reach'),
-            ('bad', {'NUCBOX_STREETS': _badix_base}, 'NucBox down')):
+            ('bad', {'NUCBOX_STREETS': _badix_base}, 'not inside the card\'s reach')):
         _ixj = os.path.join(_adir, 'ix-' + _ixname, 'offers.jsonl')
         os.makedirs(os.path.dirname(_ixj))
         open(_ixj, 'w').close()
@@ -6807,6 +6809,97 @@ try:
         finally:
             stop(_ixp)
     _badix.shutdown()
+
+    # The 26 Oct shift: the street index on 8081 refused every connection all
+    # evening (ECONNREFUSED; the panel said "NucBox: streets down") while
+    # search answered, and three held doors were refused 'NucBox down' — each
+    # after its search had answered, by the index asked only to rescue it
+    # (doorChain's byName), to arm a short street (searchHeldStreet), or for a
+    # rough area (searchHeldStreetArea). Each now keeps the search's own
+    # refusal, its drop row says that, and the whole search is still asked
+    # once more, once. A port nothing listens on, as that evening's index.
+    import socket as _sk
+    _dead = _sk.socket()
+    _dead.bind(('127.0.0.1', 0))
+    _dead_base = 'http://127.0.0.1:%d' % _dead.getsockname()[1]
+    _dead.close()
+    _sdj = os.path.join(_adir, 'streets-down', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_sdj))
+    open(_sdj, 'w').close()
+    _sdp, _sdb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _afake_base,
+                        'NUCBOX_STREETS': _dead_base, 'NUCBOX_TIMEOUT_MS': '800',
+                        'NUCBOX_RETRY_MS': '60000'}, _sdj)
+    try:
+        _sdgot = []
+        for _sdid, _sddoor in (('sd-name', '1106 Tamaror, Marietta'),
+                               ('sd-court', '306 Larkmoor Ct, Marietta'),
+                               ('sd-area', '10495 Pellmore Street, Marietta')):
+            _atook(_sdb, _sdid, _sddoor)
+            _h = _settled(_sdb)
+            _sdgot.append((_h.get('endPinned'), _h.get('endWhy'), bool(_h.get('endArea'))))
+        # (The court keeps the general area its door search found, which is
+        # the search's and no index's: refuseHeldEnd's endArea, never a pin.
+        # The other two have none: the index was to give theirs.)
+        eq('[streets down] a door whose search answered keeps the search\'s refusal when the '
+           'street index refuses the connection: the name rescue, the short court, the area',
+           _sdgot, [(False, 'not inside the card\'s reach', False), (False, 'no house number', True),
+                    (False, 'not inside the card\'s reach', False)])
+        _atook(_sdb, 'sd-next', _COBB)
+        _settled(_sdb, lambda h: h.get('endPinned'))
+        time.sleep(0.3)
+        _sdrows = [json.loads(x) for x in open(_sdj) if x.strip()]
+        eq('[streets down] ...and their drop rows say so, never "NucBox down"',
+           [(r['id'], (r.get('end') or {}).get('why')) for r in _sdrows
+            if r.get('kind') == 'drop' and r.get('id', '').startswith('sd-')
+            and r.get('id') != 'sd-next'],
+           [('sd-name', 'not inside the card\'s reach'), ('sd-court', 'no house number'),
+            ('sd-area', 'not inside the card\'s reach')])
+        eq('[streets down] ...while the panel\'s word for the index is down',
+           (get(_sdb, '/api/status').get('nucbox') or {}).get('streets', {}).get('up'), False)
+    finally:
+        stop(_sdp)
+
+    # ...and the whole search asked once more after NUCBOX_RETRY_MS, ONCE,
+    # however many of its index questions went unanswered: "1106 Tamaror"
+    # asks the index twice in one chain (named, then whole for the area), both
+    # answered 503 by a stub that counts them.
+    class _DownIx(object):
+        asked = []
+
+    def _downix_app():
+        import http.server
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                _DownIx.asked.append(self.path.split('?')[0])
+                self.send_response(503)
+                self.end_headers()
+        srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+    _downix = _downix_app()
+    _sdj2 = os.path.join(_adir, 'streets-503', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_sdj2))
+    open(_sdj2, 'w').close()
+    _sdp, _sdb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _afake_base, 'NUCBOX_PROBE_MS': '0',
+                        'NUCBOX_STREETS': 'http://127.0.0.1:%d' % _downix.server_address[1],
+                        'NUCBOX_TIMEOUT_MS': '800', 'NUCBOX_RETRY_MS': '400'}, _sdj2)
+    try:
+        _atook(_sdb, 'sd-retry', '1106 Tamaror, Marietta')
+        _h = _settled(_sdb)
+        time.sleep(1.5)
+        _h = _settled(_sdb)
+        eq('[streets down] the search asked once more, once: each index question twice in all, '
+           'and the search\'s refusal still',
+           (sorted(_DownIx.asked), _h.get('endWhy')),
+           (['/api/streets/named'] * 2 + ['/api/streets/whole'] * 2,
+            'not inside the card\'s reach'))
+    finally:
+        stop(_sdp)
+        _downix.shutdown()
 
     # The owner's planner of 21 Oct, 13:57, end to end, every name and street
     # invented: one Uber order held, carrying two on, its card read badly

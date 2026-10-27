@@ -84,6 +84,20 @@ with no drop row at all has no end on record: the server lost the hold, or it
 expired before the server wrote expiry rows. `replaced`, `expiry` and no-row
 are all UNRELIABLE, marked on the row, and left out of the summary.
 
+PUT DOWN WITH ANOTHER, AND TOO SOON, is not a delivery either (the 26 Oct
+shift's #8, put_down_together). One press of Drop or of the chooser can put
+two orders down at once — both drop rows carry the same `at` — and on 26 Oct
+one of the two was an Uber "Early look" taken 113 s before: "1.9 min, $415/hr,
+reliable", against a card of 20 min. Whether that order was ever delivered
+the journal cannot say; what it can say is that its end was the other
+order's press, not its own delivery. So an order put down by a press (Drop or
+chooser) within TOGETHER_S of another order's end, and whose minutes are
+under TOO_SOON of its card's, is UNRELIABLE, its row names the other order
+and how long after its Took, and it is left out of the summary like the rest.
+An order carried the whole way with another (an add-on put down with the
+order it was added to, at its own door) passes: its minutes are its card's
+or more.
+
 A DROP TAKEN BACK did not happen. Since 22 Oct 2026 the panel's Drop (and
 the offers page's In car Drop) reads "↶ Undo" for ten seconds, and a press
 puts the order back exactly as it was; server.js writes `{kind: 'undo', id,
@@ -179,6 +193,16 @@ BANDS = ((0, 20), (20, 30), (30, 45), (45, None))
 
 # The ends that are a delivery, and the word each is printed as.
 HOW = {None: 'Drop', 'gps': 'GPS drop', 'chooser': 'chooser'}
+
+# An order put down by a press within TOGETHER_S of another order's end, in
+# less than TOO_SOON of its card's minutes, was put down with it and not
+# delivered (put_down_together). Both CHOSEN, NOT MEASURED. 60 s: one press
+# of the chooser writes both rows at the same `at` (26 Oct: 0 ms apart, twice),
+# and a minute is room for two presses of Drop one after the other. 0.3: the
+# 26 Oct order it is for was 1.9 min against 20 (0.095); the fastest reliable
+# order of that shift was 15.4 against 29 (0.53).
+TOGETHER_S = 60.0
+TOO_SOON = 0.3
 
 _STAMP = re.compile(r'^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d )?(\d+(?:\.\d+)?): (\{.*)$')
 
@@ -343,6 +367,28 @@ def _order(oid, took, readings, drops, visits):
     o['visitsBy'] = [v.get('by') for v in kept]
     o['actualMinutes'] = (o['end'] - took) / 60000.0 if o['end'] is not None else None
     return o
+
+
+def put_down_together(orders_):
+    """In place, over the day's orders as numbered (#1 first): each order the
+    module docstring's PUT DOWN WITH ANOTHER, AND TOO SOON describes is made
+    unreliable, its note naming the other order by number."""
+    for o in orders_:
+        if not o['reliable'] or o['how'] not in (HOW[None], HOW['chooser']):
+            continue
+        card, actual = o['cardMinutes'], o.get('actualMinutes')
+        if not card or actual is None or actual >= TOO_SOON * card:
+            continue
+        for n, p in enumerate(orders_, 1):
+            if p is o or p['end'] is None or p['how'] not in HOW.values():
+                continue
+            if abs(p['end'] - o['end']) <= TOGETHER_S * 1000.0:
+                o['reliable'] = False
+                o['notes'].append(
+                    'unreliable: put down with #%d within %d s of its Took; %.1f min against '
+                    "the card's %g is that order's Drop, not this one's delivery"
+                    % (n, round((o['end'] - o['took']) / 1000.0), actual, card))
+                break
 
 
 # How long a store's name may print: a name, not the rest of a card.
@@ -932,6 +978,9 @@ def report(journal, gps_dir, day):
             at = first.get(o['id'])
             if at is not None and start <= at < end:
                 mine.append(o)
+    # Before anything is measured off `reliable` (a door's minutes, the $/hr),
+    # and numbered as the text numbers them.
+    put_down_together(mine)
     # ...and only the GPS logs that can hold a fix those orders are measured
     # over: from the day's start to its end, or to the last of its orders'
     # ends and the NEAR_S a stop is looked for past it, if later. Every log in
@@ -1072,7 +1121,8 @@ def text(rep):
                                        if pn['unrecorded'] and pn['recorded'] else ''))
     s = rep['summary']
     out.append('')
-    out.append('Over the %d reliable order%s of %d (an order replaced, expired or with no end is left out):'
+    out.append('Over the %d reliable order%s of %d (an order replaced, expired, put down with '
+               'another too soon or with no end is left out):'
                % (s['reliable'], '' if s['reliable'] == 1 else 's', s['of']))
     for key, title in (('byApp', 'by app'), ('byBand', 'by card minutes')):
         out.append('  %s' % title)

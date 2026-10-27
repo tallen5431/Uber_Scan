@@ -367,7 +367,7 @@ eq('...and an expiry is "expired" with no end clock in it',
    [(r['how'], r['ended'], r['actual_minutes']) for r in rows if r['id'] == 'M'],
    [('expired', '', '')])
 ok_('the text summary names expired orders among those left out',
-    'replaced, expired or with no end is left out' in out)
+    'replaced, expired, put down with another too soon or with no end is left out' in out)
 ok_('the text says the 1 unreadable journal line was skipped', '1 unreadable line skipped' in out)
 summary_text = out[out.index('Over the '):]
 said = re.findall(r'\b(should|recommend\w*|avoid|worth|better|prefer\w*|target|take more|skip)\b',
@@ -778,6 +778,73 @@ eq('[undo] ...an undo row names its drop by id AND the drop\'s own time: another
 eq('[undo] ...and an undo of anything but a drop takes no drop back',
    (_uo['U4']['how'], _uo['U4']['end']), ('Drop', at(21, 10)))
 
+# --- put down with another, and too soon (the 26 Oct shift's #8) ------------------
+#
+# One chooser press puts two orders down at the same `at`. An order put down so
+# within TOGETHER_S of another's end, in under TOO_SOON of its card's minutes,
+# is not timed; one carried the whole way beside the other (an add-on) is.
+# Times and figures shaped like the 26 Oct evening; every row invented.
+_tj = os.path.join(work, 'together.jsonl')
+with open(_tj, 'w') as fh:
+    for r in [
+        # #1 and #2: an order and its add-on ("+10 min"), one press at 19:40:43.
+        offer('W1', at(19, 8, 50), 17.0, 36, 11.9), mark('W1', at(19, 8, 59), True),
+        offer('W2', at(19, 13, 30), 8.5, 10, 0.4), mark('W2', at(19, 13, 41), True),
+        drop('W1', at(19, 40, 43), by='chooser', carried=2),
+        drop('W2', at(19, 40, 43), by='chooser', carried=2),
+        # #3 and #4: an order 46 min in, and one taken 113 s before the press.
+        offer('T1', at(20, 37, 50), 15.0, 29, 9.3), mark('T1', at(20, 38, 2), True),
+        offer('T2', at(21, 22, 20), 13.0, 20, 6.6), mark('T2', at(21, 22, 28), True),
+        drop('T1', at(21, 24, 21), by='chooser', carried=2),
+        drop('T2', at(21, 24, 21), by='chooser', carried=2),
+        # #5: a Drop two minutes after its Took with nothing else put down.
+        offer('T5', at(21, 59, 50), 9.0, 20, 4.0), mark('T5', at(22, 0), True),
+        drop('T5', at(22, 2)),
+        # #6 and #7: two Drops 61 s apart, the second three minutes in.
+        offer('T6', at(22, 29, 50), 12.0, 30, 6.0), mark('T6', at(22, 30), True),
+        offer('T7', at(23, 7, 50), 9.0, 20, 4.0), mark('T7', at(23, 8), True),
+        drop('T6', at(23, 10)), drop('T7', at(23, 11, 1)),
+        # #8 and #9: a GPS drop a minute in, beside a Drop: the GPS saw it leave.
+        offer('T8', at(23, 19, 50), 12.0, 30, 6.0), mark('T8', at(23, 20), True),
+        offer('T9', at(23, 49, 50), 9.0, 20, 4.0), mark('T9', at(23, 50), True),
+        drop('T8', at(23, 51)), drop('T9', at(23, 51, 10), by='gps'),
+        # #10 and #11: one replaced by the next Took, which is Dropped 30 s
+        # later: a Took is no press that put anything down.
+        offer('R1', at(1, 59, 50, day=4), 12.0, 30, 6.0), mark('R1', at(2, 0, day=4), True),
+        offer('R2', at(2, 4, 50, day=4), 9.0, 20, 4.0), mark('R2', at(2, 5, day=4), True),
+        drop('R1', at(2, 5, day=4), by='replaced'), drop('R2', at(2, 5, 30, day=4)),
+    ]:
+        fh.write(json.dumps(r) + '\n')
+_trep = SR.report(_tj, None, '2026-03-03')
+_tby = {o['id']: o for o in _trep['orders']}
+eq('[together] (the premise: the orders in Took order)',
+   [o['id'] for o in _trep['orders']],
+   ['W1', 'W2', 'T1', 'T2', 'T5', 'T6', 'T7', 'T8', 'T9', 'R1', 'R2'])
+eq('[together] an order put down in the same press as another, 1.9 min into a 20 min card, '
+   'is unreliable: no $/hr, no door minutes',
+   (_tby['T2']['reliable'], _tby['T2']['perHour'], _tby['T2']['doorMinutes']),
+   (False, None, None))
+eq('[together] ...and its row names the other order by number and says how soon',
+   [n for n in _tby['T2']['notes'] if 'put down with' in n],
+   ["unreliable: put down with #3 within 113 s of its Took; 1.9 min against the card's 20 "
+    "is that order's Drop, not this one's delivery"])
+eq('[together] ...while the order whose press it was stays reliable',
+   (_tby['T1']['reliable'], round(_tby['T1']['actualMinutes'], 1)), (True, 46.3))
+eq('[together] an add-on put down with its order, 27 min against "+10", is carried, not '
+   'too soon: both reliable', (_tby['W1']['reliable'], _tby['W2']['reliable'],
+                               round(_tby['W2']['actualMinutes'], 1)), (True, True, 27.0))
+eq('[together] a quick Drop with nothing else put down is not this rule\'s',
+   _tby['T5']['reliable'], True)
+eq('[together] ...nor two Drops 61 s apart, the second three minutes into 20',
+   (_tby['T6']['reliable'], _tby['T7']['reliable']), (True, True))
+eq('[together] ...nor a GPS drop beside a Drop: the GPS saw it leave the door',
+   (_tby['T8']['reliable'], _tby['T9']['reliable']), (True, True))
+eq('[together] ...nor a Drop 30 s after another order was replaced by its Took',
+   (_tby['R1']['how'], _tby['R2']['reliable']), ('replaced', True))
+eq('[together] the summary leaves it out', _trep['summary']['reliable'], 9)
+ok_('[together] ...and the text prints the reason under the table',
+    "#4 unreliable: put down with #3 within 113 s of its Took" in SR.text(_trep))
+
 # --- as JSON, for the phone's shift page (22 Oct 2026) ---------------------------
 code_js, out_js = run(['--journal', JOURNAL, '--gps', GPSDIR, '--day', '2026-03-03', '--json'])
 eq('[json] the CLI exits 0 with --json', code_js, 0)
@@ -842,6 +909,12 @@ for rel in _tracked:
 # /api/shift, which runs this file with --json and passes the answer through.
 # Those two and no other; and in server.js the name stays inside the one
 # section that runs it, so nothing there keeps or weighs what it says.
+# ...and the places report (tools/places_report.js, the owner's of 25 Oct),
+# which runs on the NucBox and never on the rig: it borrows this file's GPS
+# gate (load_fixes) to read the logs the rig wrote, and nothing of the
+# report's own figures. It and its suite are named here so a second reader
+# on the rig still fails this check.
+readers = [r for r in readers if r not in ('tools/places_report.js', 'tests/placesreport.test.js')]
 eq('nothing on the rig reads the report (the rating, the target, advice.js, the panel); '
    'only the shift page shows it, through the server',
    readers, ['server.js', 'shift.html'])
