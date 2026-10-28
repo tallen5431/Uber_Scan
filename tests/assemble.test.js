@@ -2606,6 +2606,22 @@ SEQ.forEach(function (seq) {
   eq('[planner pages] ...and the same door under two names is two stops too',
      said(A.mergePlanner([A1], [stop('dropoff', 'Kim T.', 203, '4821 Kestrel Dr',
                                      'Kennesaw')], null)).length, 2);
+  // One customer's name read with the screen's noise round it (the owner's
+  // snaps of 28 Oct, names invented): one stop, not one per reading.
+  var nz = function (name, t, street) { return stop('dropoff', name, t, street || null, street ? 'Acworth' : null); };
+  eq('[planner names] a name read with marks and stray letters round it is the one stop',
+     said(A.mergePlanner(A.mergePlanner([nz('oe Marcus |.', 383)], [nz('Marcus. .', 383)], null),
+                         [nz('y \u00a9 Marcus.', 383)], null)).length, 1);
+  eq('[planner names] ...and its initial run onto the name, or its dot read as a letter',
+     said(A.mergePlanner(A.mergePlanner([nz('DeShondraB', 392, '4320 Lindell Ln')],
+                                        [nz('DeShondras.', 392, '4320 Lindell Ln')], null),
+                         [nz('\u00a9 DeShondra B.', 392)], null)).length, 1);
+  eq('[planner names] ...a letter misread in a long name is still the name',
+     said(A.mergePlanner([nz('Marcus T.', 383)], [nz('Marcos T.', 383)], null)).length, 1);
+  eq('[planner names] ...but two names are two customers, due the same minute',
+     said(A.mergePlanner([nz('Marcus T.', 383)], [nz('Pat Q.', 383)], null)).length, 2);
+  eq('[planner names] ...and a name of marks alone clashes with none',
+     said(A.mergePlanner([nz('Marcus T.', 383, '4320 Lindell Ln')], [nz('oe |.', 383, '4320 Lindell Ln')], null)).length, 1);
   // Two reads with nothing in common: their times put them in order.
   eq('[planner pages] a newer page whose times come first goes first',
      said(A.mergePlanner([B1], [P, A1], null)), said([P, A1, B1]));

@@ -1461,8 +1461,48 @@
     return !keyOf(s) && !s.street && !s.line && !s.city;
   }
 
+  /* A planner name's own words: runs of three or more letters, lowercased,
+   * apostrophes dropped ("Dave's" is "daves"). The owner's snaps of 28 Oct:
+   * one customer read as "oe jonathan |.", "jonathan. ." and "y © jonathan."
+   * and another as "ShaRhandaB" and "ShaRhandas." — the screen's edge, the
+   * stop's icon and the initial's dot read as letters and marks round the
+   * name — and compared whole, each reading was a stop of its own: the
+   * panel listed "7 dropoffs" for a trip of two. The noise is short (one or
+   * two letters, a mark); a name's own word is not ("Pat Q." is "pat"). */
+  function nameWords(name) {
+    return (typeof name === 'string' ? name.toLowerCase().replace(/['\u2019]/g, '') : '')
+      .split(/[^a-z]+/).filter(function (w) { return w.length >= 3; });
+  }
+
+  // Two words of one name: the same, or one the other with a letter or two
+  // more at its end (the initial run on, "sharhandab" for "sharhanda"), or,
+  // five letters and more, one letter apart (a letter misread).
+  function wordsAlike(x, y) {
+    if (x === y) return true;
+    var lo = x.length < y.length ? x : y, hi = x.length < y.length ? y : x;
+    if (lo.length >= 4 && hi.length - lo.length <= 2 && hi.indexOf(lo) === 0) return true;
+    if (lo.length >= 5 && hi.length - lo.length <= 1) {
+      var i = 0;
+      while (i < lo.length && lo[i] === hi[i]) i += 1;
+      return lo.slice(i + (lo.length === hi.length ? 1 : 0)) === hi.slice(i + 1);
+    }
+    return false;
+  }
+
+  // Whether a stop's name says anything: a word of its own. A name read as
+  // marks and a letter or two is no name, and clashes with none.
+  function named(st) {
+    return nameWords(st && st.name).length > 0;
+  }
+
+  // The same name, read twice: a word of one is alike a word of the other.
+  // Two customers of one first name in one trip would read as one here; the
+  // times (timesAgree) and the doors (sameStreet) are asked beside it.
   function sameName(a, b) {
-    return !!a.name && !!b.name && norm(a.name) === norm(b.name);
+    if (!a.name || !b.name) return false;
+    if (norm(a.name) === norm(b.name)) return true;
+    var wa = nameWords(a.name), wb = nameWords(b.name);
+    return wa.some(function (x) { return wb.some(function (y) { return wordsAlike(x, y); }); });
   }
 
   function samePlannerStop(a, b) {
@@ -1483,7 +1523,7 @@
   // agree is never taken by one that moved.
   function sameDoorStop(a, b) {
     if (!a || !b || !a.kind || a.kind !== b.kind) return false;
-    var namesClash = !!a.name && !!b.name && !sameName(a, b);
+    var namesClash = named(a) && named(b) && !sameName(a, b);
     return !namesClash && sameStreet(a.line || a.street, b.line || b.street);
   }
 
@@ -1491,7 +1531,7 @@
   // stop where two reads meet.
   function headerJoins(a, b) {
     return !!a && !!b && a.kind === b.kind && (headerOnly(a) || headerOnly(b))
-      && timesAgree(a, b) && !(a.name && b.name && !sameName(a, b));
+      && timesAgree(a, b) && !(named(a) && named(b) && !sameName(a, b));
   }
 
   // Two stops at one place in the list — beside the same stop in common, on
@@ -1504,7 +1544,7 @@
     var timed = function (x) { return typeof x.expectedBy === 'number' && isFinite(x.expectedBy); };
     if (!a || !b || a.kind !== b.kind || !timed(a) || !timed(b)
         || a.expectedBy !== b.expectedBy) return false;
-    if (a.name && b.name && !sameName(a, b)) return false;
+    if (named(a) && named(b) && !sameName(a, b)) return false;
     var da = a.line || a.street, db = b.line || b.street;
     return !(da && db && !sameStreet(da, db));
   }
