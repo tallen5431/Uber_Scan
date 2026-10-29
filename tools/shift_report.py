@@ -126,6 +126,21 @@ a GPS track (19 of them, add-ons aside), the lowest were 0.53 of the card's
 minutes and 0.64 of its miles (both the 26 Oct shift's #3), measured with
 this file; the early presses of those shifts ran 0.09-0.26 and 0.00-0.30.
 
+A DROP THE GPS FINISHED ends where the GPS says. Since 29 Oct 2026 (the
+owner: "let me drop it so the computing is treated normally but track the GPS
+points") a press of Drop or of the chooser lets the order go for everything
+that computes, and server.js goes on watching the GPS for its end
+(finishWatch); when the car gets there it writes `{kind: 'finished', id,
+holdId, at, how, dropAt}`, ids and times only, `dropAt` the drop row's own
+`at`. Such an order ends at the finished row's `at` (the start of the stop),
+printed "Drop -> GPS 'door'" ('area', 'stop'), its minutes measured to it,
+and RELIABLE: its end is a stop the GPS saw, not the press. 'door' is the GPS
+drop's own arrival rule at the pinned door; 'area' the first stop near its
+approximate end; 'stop' the first stop anywhere once the car had moved 0.2 mi
+from the press, the weakest of the three, and its row says so. A press with
+no finished row is read as it always was (_finished), and the two tests
+just above are what catch it.
+
 A DROP TAKEN BACK did not happen. Since 22 Oct 2026 the panel's Drop (and
 the offers page's In car Drop) reads "↶ Undo" for ten seconds, and a press
 puts the order back exactly as it was; server.js writes `{kind: 'undo', id,
@@ -303,6 +318,16 @@ def _undone(rows):
                and _num(r.get('dropAt')) is not None)
 
 
+def _finished(rows):
+    """The presses the GPS went on to finish, {(id, dropAt): row}: each
+    `finished` row names its press by the offer's id and the drop row's own
+    `at` (dropAt), as an undo row does."""
+    return dict(((r['id'], r['dropAt']), r) for r in rows
+                if r.get('kind') == 'finished' and r.get('id')
+                and _num(r.get('dropAt')) is not None and _num(r.get('at')) is not None
+                and r['at'] >= r['dropAt'] and r.get('how') in ('door', 'area', 'stop'))
+
+
 def orders(rows):
     """Every order taken in the journal, as dicts, ordered by Took (an order
     with no Took last). See the module docstring for the rules."""
@@ -311,6 +336,7 @@ def orders(rows):
     visits = collections.defaultdict(list)
     readings = collections.defaultdict(list)
     undone = _undone(rows)
+    finished = _finished(rows)
     for r in rows:
         kind = r.get('kind')
         if kind == 'mark' and r.get('id') and 'accepted' in r:
@@ -342,14 +368,16 @@ def orders(rows):
             continue
         out.append(_order(oid, took, readings.get(oid, []),
                           drops.get(oid, []), visits.get(oid, []),
-                          addon=any(m.get('addon') is True for m in ms)))
+                          addon=any(m.get('addon') is True for m in ms),
+                          finished=finished))
     out.sort(key=lambda o: (o['took'] is None, o['took'] or 0))
     _alongside(out)
     return out
 
 
-def _order(oid, took, readings, drops, visits, addon=False):
+def _order(oid, took, readings, drops, visits, addon=False, finished=None):
     o = {'id': oid, 'took': took, 'end': None, 'how': None, 'reliable': False,
+         'finished': None,
          'carried': None, 'visits': [], 'visitsBy': [], 'notes': [], 'pin': None}
     # The card as it stood when Took was pressed: the last reading of it
     # written at or before the press. Not the server's vote over every reading
@@ -390,7 +418,19 @@ def _order(oid, took, readings, drops, visits, addon=False):
         o['pin'] = pin_of(d)
         o['end'] = d['at']
         o['carried'] = _num(d.get('carried'))
-        if d.get('by') in HOW:
+        f = (finished or {}).get((d['id'], d['at'])) if d.get('by') in (None, 'chooser') else None
+        if f is not None:
+            # A press the GPS went on to finish: its end is the stop, and
+            # `finished` says how, for any rule that reads presses.
+            o['end'] = f['at']
+            o['finished'] = f['how']
+            o['pressedAt'] = d['at']
+            o['how'] = "%s -> GPS '%s'" % (HOW[d.get('by')], f['how'])
+            o['reliable'] = True
+            if f['how'] == 'stop':
+                o['notes'].append("finished by the GPS at the first stop after the car moved "
+                                  "0.2 mi from the press: no end was pinned, so the weakest end")
+        elif d.get('by') in HOW:
             o['how'] = HOW[d.get('by')]
             o['reliable'] = True
         elif d.get('by') == 'replaced':
@@ -1387,7 +1427,7 @@ def as_json(rep):
                     'restaurantMinutes': o.get('restaurantMinutes'),
                     'doorMinutes': o.get('doorMinutes'), 'alongside': o['alongside'],
                     'perHour': o.get('perHour'), 'reliable': bool(o['reliable']),
-                    'addon': bool(o.get('addon')),
+                    'addon': bool(o.get('addon')), 'finished': o.get('finished'),
                     'notes': list(o['notes']), 'pin': pin_text(o.get('pin'))}
                    for i, o in enumerate(rep['orders'])],
         'pinning': dict(pn, rate=(round(100.0 * pn['pinned'] / pn['recorded'])

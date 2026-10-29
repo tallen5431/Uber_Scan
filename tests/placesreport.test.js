@@ -967,6 +967,15 @@ function nbx() {
   eq('...and real $/hr counts a timed press (24 minutes, $12)', P.realOf(tpBy.early).perHour, 30);
   var stopBefore = P.timePresses([{ id: 'b', tookAt: (PT + 30) * 1000, endedAt: (PT - 60) * 1000, by: 'chooser' }], pfix);
   eq('...a stop that began before the Took is never the drop', stopBefore.taken[0].by, 'chooser');
+  // A Drop the GPS went on to finish (server.js finishWatch, the owner's 29
+  // Oct): takenRuns already ended it at the finish, so the GPS press-timing
+  // leaves it alone and its real time counts, at the door.
+  var fin = P.timePresses([{ id: 'f', tookAt: PT * 1000, endedAt: (PT + 1200) * 1000, by: 'finished-area',
+                             pressedAt: (PT + 300) * 1000, pressedBy: 'drop', pay: 12, minutes: 25 }], pfix);
+  eq('a press the server finished by the GPS is not re-timed, and counts as a real time ($12 over 20 min)',
+     [fin.taken[0].by, fin.taken[0].endedAt, fin.stats.pressed, P.realOf(fin.taken[0]).perHour,
+      P.REAL_BY.indexOf('finished-stop') >= 0 && P.FINISHED.length === 3],
+     ['finished-area', (PT + 1200) * 1000, 0, 36, true]);
   var tpRows = ['in', 'early', 'late', 'none', 'g'].map(function (id) { return card({ id: id, at: PT * 1000, pickup: 'Fernbrook Grill' }); });
   var tpTake = P.takesTable(tpRows, P.runsOf(tp.taken), function (o) { return o.pickup; }, function (k) { return k; }, 'place');
   eq('...the takes table counts them, and says how many were GPS-timed', [tpTake.rows[0].timed, tpTake.rows[0].gpsTimed], [4, 3]);

@@ -696,6 +696,9 @@ function startScanner() {
           // car at the held order's door, or takes it away (gpsArrival). The
           // answer rides the beat to the panel, which says "at dropoff".
           read.atDropoff = gpsArrival(read, Date.now());
+          // ...and the orders Drop let go of, finished quietly from the same
+          // fix (finishStep): nothing on the beat is changed by it.
+          finishStep(read, Date.now());
           // ...and the NucBox services not answering, by name (nbxDown).
           read.nucboxDown = nbxDown();
           // ...and the rest of the GPS drop's state, on the same beat. Between
@@ -1371,6 +1374,9 @@ function setHeld(list) {
   }
   tellScannerHeld(scanner.held);
   forgetHoldsGone(scanner.held);
+  // ...and a dropped order back in the car (↶ Undo, a re-Took) is no longer
+  // finished in the background (finishWatch).
+  finishForget(scanner.held);
   scanner.held.forEach(function (h) {
     armHeldEnd(h);
     armHeldPickups(h);
@@ -3808,10 +3814,29 @@ function storeWaitsPath() {
  * down: 'gps' and 'screen' at the door, 'drop' the driver's press (which can
  * be early), 'chooser', and 'replaced' / 'expiry', which measure nothing and
  * the page leaves out. Descriptive only: nothing here moves a verdict, and
- * the time is a clock reading less another, never minutes from distance. */
+ * the time is a clock reading less another, never minutes from distance.
+ *
+ * ...and a press the GPS went on to finish (finishWatch, the owner's 29 Oct
+ * "let me drop it so the computing is treated normally but track the GPS
+ * points"): a Drop or chooser row with a `finished` row naming it (same id,
+ * `dropAt` its `at`) ends at the finished row's `at`, `by: 'finished-door'`,
+ * 'finished-area' or 'finished-stop' (the weakest: the first stop after
+ * the car moved off), the press kept as `pressedAt` / `pressedBy`. */
+function finishedBy(by) {
+  return by === 'finished-door' || by === 'finished-area' || by === 'finished-stop';
+}
+
 function takenRuns(rows, floor, offers) {
   var byId = {};
   (offers || []).forEach(function (o) { if (o && typeof o.id === 'string') byId[o.id] = o; });
+  var finished = {};
+  (rows || []).forEach(function (r) {
+    if (r && r.kind === 'finished' && typeof r.id === 'string' && typeof r.at === 'number'
+        && typeof r.dropAt === 'number' && r.at >= r.dropAt
+        && (r.how === 'door' || r.how === 'area' || r.how === 'stop')) {
+      finished[JSON.stringify([r.id, r.dropAt])] = r;
+    }
+  });
   var out = [];
   (rows || []).forEach(function (r) {
     if (!r || r.kind !== 'drop' || typeof r.id !== 'string' || typeof r.at !== 'number'
@@ -3819,12 +3844,21 @@ function takenRuns(rows, floor, offers) {
     if (floor && r.acceptedAt < floor) return;
     var o = byId[r.id];
     if (!o) return;
-    out.push({ id: r.id, app: o.app || null, pay: o.pay, minutes: o.minutes, miles: o.miles,
-               tookAt: r.acceptedAt, endedAt: r.at, by: r.by || 'drop',
-               addon: r.addon === true,
-               // How many orders were in the car when it was put down (the
-               // drop row's `carried`, written only for two or more).
-               carried: typeof r.carried === 'number' && r.carried >= 2 ? r.carried : 1 });
+    var run = { id: r.id, app: o.app || null, pay: o.pay, minutes: o.minutes, miles: o.miles,
+                tookAt: r.acceptedAt, endedAt: r.at, by: r.by || 'drop',
+                addon: r.addon === true,
+                // How many orders were in the car when it was put down (the
+                // drop row's `carried`, written only for two or more).
+                carried: typeof r.carried === 'number' && r.carried >= 2 ? r.carried : 1 };
+    var f = (run.by === 'drop' || run.by === 'chooser')
+      ? finished[JSON.stringify([r.id, r.at])] : null;
+    if (f) {
+      run.pressedAt = r.at;
+      run.pressedBy = run.by;
+      run.endedAt = f.at;
+      run.by = 'finished-' + f.how;
+    }
+    out.push(run);
   });
   return out;
 }
@@ -3861,7 +3895,8 @@ function storeWaitsOut() {
  *                than PER_MILE_MIN offers carries its count and no figures.
  *   cardVsReal   per app, how the card's minutes compare with the real
  *                ones, Took to put-down, over orders put down AT THE DOOR
- *                (by 'gps' or 'screen'; a Drop pressed early shortens a
+ *                (by 'gps' or 'screen', or a press the GPS finished,
+ *                'finished-*': takenRuns; a Drop pressed early shortens a
  *                run). Median real/card ratio, its p25-p75, the median
  *                minutes over. An Uber add-on is left out and counted
  *                (`addons`): its card's minutes are only what it adds to the
@@ -3956,7 +3991,7 @@ function perMileSeen(offers) {
 // The orders put down at the door, with a real time and a card time. Not an
 // add-on: its card's minutes are an increment, not the order's own.
 function atDoor(t) {
-  return !!t && (t.by === 'gps' || t.by === 'screen');
+  return !!t && (t.by === 'gps' || t.by === 'screen' || finishedBy(t.by));
 }
 
 function doorRuns(taken) {
@@ -4388,6 +4423,253 @@ function putDown(now, by, done, which) {
   // ...and an address waiting to be someone's is dropped if one of the orders
   // it was waiting between has gone (Assemble.retryUnowned).
   retryPool();
+  // ...and an order the DRIVER put down (a press of Drop, or the chooser's
+  // pick) is finished quietly in the background (finishWatch): the computing
+  // has already let it go, above; the GPS goes on looking for its door.
+  if (by === null || by === 'chooser') {
+    dropped.forEach(function (d) { finishWatch(d, now, by, live); });
+  }
+}
+
+/* ---------- finishing a dropped order: the GPS goes on watching -------------
+ *
+ * The owner, 29 Oct 2026: "I do drop deliveries early to avoid it computing
+ * the value for incoming deliveries that won't be stacked onto the order I am
+ * running, could it let me drop it so the computing is treated normally but
+ * track the GPS points?" — and then "Go ahead and build it, fast track to
+ * experimental."
+ *
+ * So a press of Drop (and the chooser's put-down) is EXACTLY what it was for
+ * everything that computes: the order leaves the list, the stack line and the
+ * advice weigh the next card alone, the drop row is putDown's as it always
+ * was. What is added is a WATCH, kept beside the list and never in it: for
+ * that order, where it ends, and until when, and the GPS fixes the GPS drop
+ * already counts (the beat, gpsArrival) are put against it. When the car gets
+ * there, one journal row says so, and that is all:
+ *
+ *   {v: 1, kind: 'finished', at, id, seq, holdId, how, dropAt}
+ *
+ * `at` the start of the stop that finished it (the car's arrival, not its
+ * departure: a stop's start is the one moment all three rules below agree
+ * on), `seq` the same moment so the sync keys it as one row (syncKey's
+ * [kind, id, seq]), `dropAt` the drop row's own `at`, which names the press
+ * it finishes as the undo row names the drop it takes back, and `how`:
+ *
+ *   'door'  the order had a door-level end pin (heldEndPin) the GPS drop
+ *           would have armed on (not beside a pickup: pickupNearEnd; one
+ *           customer: notOneCustomer), and the car arrived there by THE SAME
+ *           rule the GPS drop arrives by (stepAt: ARRIVE_M plus the fix's
+ *           error, capped, for DWELL_MS, no silence over GAP_MS).
+ *   'area'  no such pin, but its end was refused with an approximate area
+ *           (refuseHeldEnd's endArea, `approx`): the first stop — every fix
+ *           within the arrive radius of the stop's first, for DWELL_MS, no
+ *           silence over GAP_MS — whose first fix is within FINISH_AREA_M of
+ *           the area, or half the area's spread where that is more, capped at
+ *           FINISH_AREA_CAP_M.
+ *   'stop'  no end at all: the first such stop, anywhere, but only once the
+ *           car has been FINISH_MOVE_MI from where it stood at the press (the
+ *           last good fix, or the first after it), so the restaurant, or the
+ *           kerb the press was made at, is not taken for the door. WEAKER
+ *           than the other two: a stop for fuel or a red light held a minute
+ *           finishes it as well as the customer's door does, and every reader
+ *           (the end-of-shift report, the places report) prints the word.
+ *
+ * NO FIX SPEED: the receiver's speed is not on the beat, so "stopped" is the
+ * shift report's own definition of a stop (STOP_M there), with this file's
+ * arrive radius and dwell. A run of fixes the gate refused does not bridge a
+ * silence here as it does for the door (stepAt): a refused run resets the
+ * stop, which can only make a finish later, never earlier.
+ *
+ * THE WINDOW is the order's own clock, holdEnds — its card's minutes x
+ * HOLD_OVERRUN plus HOLD_GRACE_MS from the Took, the moment the server would
+ * have stopped counting it had it been carried, and the shift report's rule
+ * for an expiry. A stop that begins after it finishes nothing, and the watch
+ * is forgotten with no row: the press then stands as the end, which is what
+ * it was before this existed. A new Took does NOT end a watch: the driver may
+ * well finish the old order first. At most FINISH_MAX at once, the oldest
+ * forgotten first.
+ *
+ * NO WATCH is kept for an order with no stated minutes (no window, and no
+ * drop row either), for an order the GPS had already seen arrive at its door
+ * when Drop was pressed (`arrivedAt`: the press was made at the door, and is
+ * the end), or for an order back on the list (setHeld forgets it: that is
+ * how ↶ Undo cancels the watch its Drop opened, and how a re-Took does).
+ *
+ * NOTHING ELSE. No panel word, no control (Settled: no seventh bar control),
+ * no verdict, advice or stack line, no GPS drop of any order in the car, and
+ * nothing is pressed on the phone (Settled). The row carries ids and times
+ * only: no coordinate goes in the journal, as no drop row carries one.
+ *
+ * KEPT like the list: finishing.json beside the journal (holding.json's
+ * reasoning, through a temporary and a rename, written synchronously at the
+ * moments it changes — a watch opened, moved, finished, forgotten — never per
+ * fix), so a restart mid-delivery keeps the watch. Its coordinates (the end,
+ * where the press was made) stay in that file, as the pins stay in
+ * holding.json. The dwell under way is memory, as the GPS drop's is: a restart
+ * starts it again. */
+var FINISH_MAX = 3;
+var FINISH_AREA_M = 150;        // chosen, not measured: a block either way
+var FINISH_AREA_CAP_M = 400;    // ...and no wider than this, however spread
+var FINISH_MOVE_MI = 0.2;       // chosen: past a restaurant's car park
+// How old the last good fix may be and still say where the press was made.
+var FINISH_PRESS_FIX_MS = 120000;
+var finishing = [];             // the watches, oldest first
+var finishLive = {};            // holdId -> the dwell under way (memory)
+var finishLastFix = null;       // {lat, lon, at}: the newest good fix seen
+
+function finishPath() {
+  return path.join(path.dirname(JOURNAL_PATH), 'finishing.json');
+}
+
+function saveFinishing() {
+  var tmp = null;
+  try {
+    if (finishing.length) {
+      tmp = partName(finishPath());
+      fs.writeFileSync(tmp, JSON.stringify({ v: 1, watches: finishing }));
+      fs.renameSync(tmp, finishPath());
+    } else {
+      fs.unlinkSync(finishPath());
+    }
+  } catch (e) {
+    if (e && e.code !== 'ENOENT') console.error('finishing: ' + e.message);
+    if (tmp) { try { fs.unlinkSync(tmp); } catch (e2) { /* never written */ } }
+  }
+}
+
+// One watch off the file, or null.
+function finishFromFile(w) {
+  if (!w || typeof w !== 'object' || typeof w.id !== 'string' || typeof w.holdId !== 'string'
+      || typeof w.dropAt !== 'number' || typeof w.ends !== 'number' || !w.to
+      || ['door', 'area', 'none'].indexOf(w.to.kind) === -1) return null;
+  if (w.to.kind !== 'none' && !(isFinite(w.to.lat) && isFinite(w.to.lon))) return null;
+  if (w.from !== null && !(w.from && isFinite(w.from.lat) && isFinite(w.from.lon))) w.from = null;
+  if (typeof w.movedAt !== 'number') w.movedAt = null;
+  return w;
+}
+
+/* Read back once, at boot, after loadHolding: a watch past its window, or for
+ * an order the list holds again, is forgotten. Returns how many are kept. */
+function loadFinishing() {
+  var f = null;
+  try { f = JSON.parse(fs.readFileSync(finishPath(), 'utf8')); } catch (e) { f = null; }
+  var now = Date.now();
+  var held = (scanner.held || []).map(holdIdOf);
+  finishing = (f && f.v === 1 && Array.isArray(f.watches) ? f.watches : [])
+    .map(finishFromFile).filter(function (w) {
+      return w && w.ends > now && w.dropAt <= now && held.indexOf(w.holdId) === -1;
+    }).slice(-FINISH_MAX);
+  saveFinishing();
+  return finishing.length;
+}
+
+// Forget the watches for the orders on `list` (setHeld): one back in the car.
+function finishForget(list) {
+  if (!finishing.length) return;
+  var ids = (list || []).map(holdIdOf);
+  var kept = finishing.filter(function (w) { return ids.indexOf(w.holdId) === -1; });
+  if (kept.length === finishing.length) return;
+  finishing.forEach(function (w) { if (ids.indexOf(w.holdId) !== -1) delete finishLive[w.holdId]; });
+  finishing = kept;
+  saveFinishing();
+}
+
+/* Open the watch for `d`, put down at `now` by a press (`by` null) or the
+ * chooser. `list` is the car as it stood before the press, whose pickups the
+ * restaurant guard reads. */
+function finishWatch(d, now, by, list) {
+  var ends = holdEnds(d);
+  if (ends === null || now >= ends || d.arrivedAt) return;
+  var pin = heldEndPin(d);
+  var to = { kind: 'none' };
+  if (pin && !pickupNearEnd(d, pin, list) && !notOneCustomer(d)) {
+    to = { kind: 'door', lat: pin.lat, lon: pin.lon };
+    if (Array.isArray(pin.lines)) to.lines = pin.lines;
+  } else if (!pin && d.endArea && d.endWhyFor === endTextOf(d)
+             && isFinite(d.endArea.lat) && isFinite(d.endArea.lon)) {
+    var spread = typeof d.endArea.miles === 'number' && isFinite(d.endArea.miles)
+      ? d.endArea.miles * 1609.344 / 2 : 0;
+    to = { kind: 'area', lat: d.endArea.lat, lon: d.endArea.lon,
+           m: Math.min(FINISH_AREA_CAP_M, Math.max(FINISH_AREA_M, spread)) };
+  }
+  var from = finishLastFix && now - finishLastFix.at <= FINISH_PRESS_FIX_MS
+    ? { lat: finishLastFix.lat, lon: finishLastFix.lon } : null;
+  finishing = finishing.filter(function (w) { return w.holdId !== holdIdOf(d); });
+  finishing.push({ id: d.id, holdId: holdIdOf(d), dropAt: now, by: by || 'drop', ends: ends,
+                   to: to, from: from, movedAt: null });
+  while (finishing.length > FINISH_MAX) delete finishLive[finishing.shift().holdId];
+  delete finishLive[holdIdOf(d)];
+  saveFinishing();
+}
+
+/* One watch's step on one beat: {at, how} when this fix finishes it, else
+ * null. `dirty` is set when what is kept on file changed (`from`, `movedAt`). */
+function finishOne(w, beat, now) {
+  var live = finishLive[w.holdId]
+    || (finishLive[w.holdId] = { arrival: freshArrival(w.holdId), anchor: null, spent: false });
+  if (w.to.kind === 'door') {
+    var step = stepAt(live.arrival, beat, now, w.to, false);
+    if (step !== 'arrive' || live.arrival.insideSince > w.ends) return null;
+    return { at: live.arrival.insideSince, how: 'door' };
+  }
+  var fix = countableFix(beat, now, live.arrival);
+  if (!fix) return null;
+  var gap = live.arrival.lastFixAt === null ? Infinity : fix.at - live.arrival.lastFixAt;
+  live.arrival.lastFixAt = fix.at;
+  live.arrival.refusedFrom = live.arrival.refusedTo = null;
+  live.arrival.silentMs = 0;
+  if (w.to.kind === 'none') {
+    if (!w.from) { w.from = { lat: fix.lat, lon: fix.lon }; w.dirty = true; }
+    if (w.movedAt === null) {
+      if (MV.crowMiles(fix, w.from) < FINISH_MOVE_MI) return null;
+      w.movedAt = fix.at;
+      w.dirty = true;
+      live.anchor = null;
+    }
+  }
+  var within = ARRIVE_M + Math.min(fix.err, ARRIVE_ERR_CAP_M);
+  if (!live.anchor || gap > GAP_MS || MV.crowMiles(fix, live.anchor) * 1609.344 > within) {
+    live.anchor = { lat: fix.lat, lon: fix.lon, at: fix.at };
+    live.spent = false;
+    return null;
+  }
+  if (live.spent || fix.at - live.anchor.at < DWELL_MS) return null;
+  live.spent = true;                // one stop is asked once
+  if (live.anchor.at > w.ends) return null;
+  if (w.to.kind === 'area' && pinMetres(live.anchor, w.to) > w.to.m) return null;
+  return { at: live.anchor.at, how: w.to.kind === 'area' ? 'area' : 'stop' };
+}
+
+/* Every beat: the newest good fix kept (where a press is made), and each
+ * watch stepped. Says nothing to the panel and changes nothing it reads. */
+function finishStep(beat, now) {
+  var f = beat && beat.gps && beat.gps.fix;
+  if (f && f.gpsOk === true && typeof f.freshFor === 'number' && f.freshFor > 0
+      && typeof f.lat === 'number' && typeof f.lon === 'number' && isFinite(f.lat)
+      && isFinite(f.lon) && typeof f.gpsAge === 'number' && isFinite(f.gpsAge) && f.gpsAge >= 0) {
+    finishLastFix = { lat: f.lat, lon: f.lon, at: now - f.gpsAge * 1000 };
+  }
+  if (!finishing.length) return;
+  var changed = false;
+  var rows = [];
+  finishing = finishing.filter(function (w) {
+    if (now >= w.ends) { changed = true; delete finishLive[w.holdId]; return false; }
+    var hit = finishOne(w, beat, now);
+    if (w.dirty) { delete w.dirty; changed = true; }
+    if (!hit) return true;
+    var at = Math.round(hit.at);
+    rows.push(JSON.stringify({ v: 1, kind: 'finished', at: at, id: w.id, seq: at,
+                               holdId: w.holdId, how: hit.how, dropAt: w.dropAt }) + '\n');
+    delete finishLive[w.holdId];
+    changed = true;
+    return false;
+  });
+  if (changed) saveFinishing();
+  if (rows.length) {
+    appendLines(rows.join(''), function (err) {
+      if (err) console.error('journal: could not record a finished order: ' + err.message);
+    });
+  }
 }
 
 /* ---------- ↶ Undo: a Drop taken back --------------------------------------
@@ -11843,6 +12125,13 @@ listen(http.createServer(handler), PORT, 'http', true, function () {
   // silent version of this would be a rig that quietly believes something
   // about the car that nobody told it.
   var back = loadHolding();
+  // ...and the dropped orders still being finished in the background
+  // (finishWatch), after the list so one back in it is forgotten.
+  var finishingBack = loadFinishing();
+  if (finishingBack) {
+    console.log('finishing ' + finishingBack + ' dropped order' + (finishingBack === 1 ? '' : 's')
+                + ' from before the restart (GPS only)');
+  }
   if (back) {
     console.log('\ncarrying an order from before the restart: $'
                 + (typeof back.pay === 'number' ? back.pay.toFixed(2) : '?')

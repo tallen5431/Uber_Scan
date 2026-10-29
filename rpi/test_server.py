@@ -5970,8 +5970,8 @@ _gdir = tempfile.mkdtemp()
 _gjournal = os.path.join(_gdir, 'offers.jsonl')
 open(_gjournal, 'w').close()
 _gfake = os.path.join(_gdir, 'beats.py')
-with open(_gfake, 'w') as _fh:
-    _fh.write(
+# (kept as text too: the finishing checks at the end give it a directory of its own)
+_FSCAN_SRC = (
         'import json, os, sys, time\n'
         'd = os.path.dirname(os.path.abspath(__file__))\n'
         'q = os.path.join(d, "next")\n'
@@ -5992,6 +5992,8 @@ with open(_gfake, 'w') as _fh:
         '    open(os.path.join(d, "done-%d" % n), "w").close()\n'
         '    n += 1\n'
         '    open(q, "w").write(str(n))\n')
+with open(_gfake, 'w') as _fh:
+    _fh.write(_FSCAN_SRC)
 _PIN = (33.9000, -84.5000)
 _DOOR = '4821 Kestrel Dr, Marietta'
 _seq = [0]
@@ -12394,6 +12396,253 @@ try:
 finally:
     stop(_pproc2)
 shutil.rmtree(_pd, ignore_errors=True)
+
+# --- a dropped order finished in the background (29 Oct 2026) -------------------
+#
+# The owner: "I do drop deliveries early to avoid it computing the value for
+# incoming deliveries that won't be stacked onto the order I am running, could
+# it let me drop it so the computing is treated normally but track the GPS
+# points?" A press of Drop (or the chooser's) puts the order down exactly as
+# before; server.js then keeps a watch (finishing.json beside the journal) and
+# writes one `finished` row when the GPS sees the car get there: at the pinned
+# door by the GPS drop's own arrival rule ('door'), the first stop near an
+# approximate end ('area'), or with no end the first stop once the car has
+# moved 0.2 mi from the press ('stop'). Nothing else: no panel word, no drop of
+# any order in the car. A fake scanner of its own, as the GPS drop's above;
+# every coordinate invented, in open country.
+_fdir = tempfile.mkdtemp()
+_fscan = os.path.join(_fdir, 'beats.py')
+with open(_fscan, 'w') as _fh:
+    _fh.write(_FSCAN_SRC)
+_fseq = [0]
+
+
+def _fbeats(fixes):
+    n = _fseq[0]
+    _fseq[0] += 1
+    p = os.path.join(_fdir, 'beats-%d.json' % n)
+    with open(p + '.tmp', 'w') as fh:
+        json.dump(fixes, fh)
+    os.rename(p + '.tmp', p)
+    for _ in range(400):
+        if os.path.exists(os.path.join(_fdir, 'done-%d' % n)):
+            break
+        time.sleep(0.05)
+    time.sleep(0.2)
+
+
+def _ff(dlat, dlon=0.0):
+    return {'lat': _PIN[0] + dlat, 'lon': _PIN[1] + dlon, 'gpsAge': 0.1, 'gpsErr': 25.0,
+            'gpsMode': 3, 'gpsOk': True, 'gpsWhy': None, 'freshFor': 10.0}
+
+
+def _fstay(dlat, dlon=0.0, n=7):
+    return [_ff(dlat, dlon)] * n       # 1.5 s at one spot: past the 1 s dwell
+
+
+def _ftook(base, oid, minutes=40.0, dropoff=_DOOR):
+    post(base, '/api/offers/mark', {
+        'id': oid, 'accepted': True,
+        'offer': {'id': oid, 'pay': 12.0, 'minutes': minutes, 'billedMinutes': minutes,
+                  'miles': 5.0, 'cost': 1.75, 'dropoff': dropoff, 'multiOrder': False}})
+    return (get(base, '/api/status').get('holding') or {})
+
+
+def _frows(path, kind, oid=None):
+    rows = [json.loads(l) for l in open(path) if l.strip()]
+    return [r for r in rows if r.get('kind') == kind and (oid is None or r.get('id') == oid)]
+
+
+def _fwatch(path):
+    try:
+        return json.load(open(os.path.join(os.path.dirname(path), 'finishing.json')))['watches']
+    except (OSError, ValueError):
+        return []
+
+
+_FENV = {'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _fscan,
+         'GPS_DWELL_MS': '1000'}
+_fj = os.path.join(_fdir, 'offers.jsonl')
+open(_fj, 'w').close()
+_fp, _fb = start(_FENV, _fj)
+try:
+    # A door pinned, Drop pressed on the way: the order is down for everything
+    # that computes, and its watch is kept.
+    _h = _ftook(_fb, 'fin-door')
+    _pin(_fb, _h)
+    _fbeats([_ff(0.02)] * 2)
+    _c, _d = post(_fb, '/api/delivered', {})
+    _fdrop = _frows(_fj, 'drop', 'fin-door')
+    eq('[finish] Drop puts the order down exactly as before: no order in the car, one drop row '
+       'with no `by`, an Undo offered',
+       (_c, _holding(_fb), [r.get('by') for r in _fdrop], bool(_d.get('undo'))),
+       (200, None, [None], True))
+    eq('[finish] ...and a watch is kept for it, at its door, until its own clock runs out',
+       [(w.get('holdId'), (w.get('to') or {}).get('kind'), w.get('dropAt'), w.get('by'))
+        for w in _fwatch(_fj)], [(_h.get('holdId'), 'door', _fdrop[0]['at'], 'drop')])
+    # A new order taken while the old one is being finished is held alone: the
+    # watch is not in the car, and its door puts the new one down for nothing.
+    _h2 = _ftook(_fb, 'fin-next', dropoff='17 Wren Way, Marietta')
+    _st = get(_fb, '/api/status')
+    eq('[finish] a watch is not an order in the car: a new Took is held alone',
+       ((_st.get('holding') or {}).get('holdId'), len(_st.get('orders') or [None])),
+       (_h2.get('holdId'), 1))
+    _ev = listen(_fb, 3)
+    time.sleep(0.3)
+    _fbeats(_fstay(_IN))
+    _fin = _frows(_fj, 'finished', 'fin-door')
+    eq('[finish] the car stops at the dropped order\'s door: one finished row, by the door',
+       [(r.get('how'), r.get('holdId'), r.get('dropAt')) for r in _fin],
+       [('door', _h.get('holdId'), _fdrop[0]['at'])])
+    eq('[finish] ...ids and times only: {v, kind, at, id, seq, holdId, how, dropAt}, seq its at, '
+       'at after the press',
+       [(sorted(r), r['seq'] == r['at'], r['at'] >= r['dropAt']) for r in _fin],
+       [(['at', 'dropAt', 'holdId', 'how', 'id', 'kind', 'seq', 'v'], True, True)])
+    eq('[finish] ...and nothing else: the new order still held, no drop row for it, the watch gone',
+       ((_holding(_fb) or {}).get('holdId'), _frows(_fj, 'drop', 'fin-next'), _fwatch(_fj)),
+       (_h2.get('holdId'), [], []))
+    no_('[finish] ...and the panel is told nothing of it (no finished word on the stream)',
+        any('finished' in json.dumps(m) or 'finish' in m for m in _ev))
+    # No end at all: the first stop once the car is 0.2 mi from the press.
+    # The press is made here, at the old door (the last good fix).
+    _c, _d = post(_fb, '/api/delivered', {})
+    eq('[finish] an order with no end pinned is watched with no end',
+       [(w.get('holdId'), (w.get('to') or {}).get('kind')) for w in _fwatch(_fj)],
+       [(_h2.get('holdId'), 'none')])
+    _fbeats(_fstay(_IN, n=9))
+    eq('[finish] ...a stop where the press was made does not finish it',
+       _frows(_fj, 'finished', 'fin-next'), [])
+    _fbeats(_fstay(_IN + 0.0025, n=9))      # ~245 m on: not yet 0.2 mi
+    eq('[finish] ...nor one before the car has gone 0.2 mi', _frows(_fj, 'finished', 'fin-next'), [])
+    _fbeats(_fstay(_IN + 0.0045))           # ~500 m (0.31 mi) on, and stopped
+    eq('[finish] ...the first stop after moving 0.2 mi does, `how: stop` (the weakest)',
+       [r.get('how') for r in _frows(_fj, 'finished', 'fin-next')], ['stop'])
+    eq('[finish] ...and no finish ever wrote a drop row', len(_frows(_fj, 'drop')), 2)
+finally:
+    stop(_fp)
+
+# An approximate end (refuseHeldEnd's endArea), Undo, the window, a restart.
+# The orders are put in the car the way a restart restores them, holding.json.
+_fn = int(time.time() * 1000)
+_fdir2 = tempfile.mkdtemp()
+_fj2 = os.path.join(_fdir2, 'offers.jsonl')
+open(_fj2, 'w').close()
+_FAREA = {'id': 'fin-area', 'acceptedAt': _fn - 60000, 'pay': 9.0, 'minutes': 40.0,
+          'miles': 4.0, 'cost': 1.0, 'app': 'uber', 'dropoff': 'Larch Ct, Marietta',
+          'card': {'multiOrder': False}, 'endWhy': 'no door number',
+          'endWhyFor': 'Larch Ct, Marietta',
+          'endArea': {'lat': _PIN[0] + 0.03, 'lon': _PIN[1], 'approx': True, 'n': 3,
+                      'miles': 0.1}}
+with open(os.path.join(_fdir2, 'holding.json'), 'w') as _fh:
+    json.dump({'v': 2, 'orders': [_FAREA]}, _fh)
+# The scanner of the first server counts on from where it stopped.
+for _f in os.listdir(_fdir):
+    if _f.startswith(('beats-', 'done-', 'next')):
+        os.remove(os.path.join(_fdir, _f))
+_fseq[0] = 0
+_FENV2 = dict(_FENV, HOLD_GRACE_MS='0')
+_fp, _fb = start(_FENV2, _fj2)
+try:
+    _fbeats([_ff(0.0)] * 2)
+    post(_fb, '/api/delivered', {})
+    eq('[finish] an end refused with an approximate area is watched as that area, 150 m round',
+       [((w.get('to') or {}).get('kind'), (w.get('to') or {}).get('m')) for w in _fwatch(_fj2)],
+       [('area', 150)])
+    _fbeats(_fstay(0.03 + 0.0027))          # stopped ~300 m from the area
+    eq('[finish] ...a stop 300 m from the area does not finish it', _frows(_fj2, 'finished'), [])
+    _fbeats(_fstay(0.03 + 0.0007))          # stopped ~80 m from it
+    eq('[finish] ...one 80 m from it does, `how: area`',
+       [(r.get('id'), r.get('how')) for r in _frows(_fj2, 'finished')], [('fin-area', 'area')])
+
+    # ↶ Undo cancels the watch its Drop opened: the order is back in the car,
+    # and its door is the GPS drop's again, not a finish.
+    _h = _ftook(_fb, 'fin-undo')
+    _pin(_fb, _h)
+    _c, _d = post(_fb, '/api/delivered', {})
+    eq('[finish] Drop opens a watch...', [w.get('holdId') for w in _fwatch(_fj2)], [_h.get('holdId')])
+    _c, _u = post(_fb, '/api/drop-undo', {'id': (_d.get('undo') or {}).get('id')})
+    eq('[finish] ...↶ Undo puts the order back and the watch is gone',
+       (_c, (_holding(_fb) or {}).get('holdId'), _fwatch(_fj2)), (200, _h.get('holdId'), []))
+    _fbeats(_fstay(_IN))
+    eq('[finish] ...so the car at its door is an arrival, not a finished row',
+       (bool((_holding(_fb) or {}).get('arrived')), _frows(_fj2, 'finished', 'fin-undo')),
+       (True, []))
+    post(_fb, '/api/delivered', {})
+    eq('[finish] ...and a Drop pressed AT the door (arrived) opens no watch: the press is the end',
+       _fwatch(_fj2), [])
+
+    # The window: the order's own clock (here 0.05 min x 1.5, no grace). A
+    # stop after it finishes nothing, and the watch is forgotten.
+    _h = _ftook(_fb, 'fin-late', minutes=0.05)
+    _pin(_fb, _h)
+    _fbeats([_ff(0.02)] * 2)
+    post(_fb, '/api/delivered', {})
+    _fw = [w.get('holdId') for w in _fwatch(_fj2)]
+    time.sleep(4.8)
+    _fbeats(_fstay(_IN))
+    eq('[finish] a watch past its window writes no row and is forgotten',
+       (_fw, _frows(_fj2, 'finished', 'fin-late'), _fwatch(_fj2)), ([_h.get('holdId')], [], []))
+
+    # A restart keeps the watch (finishing.json), and finishes it after.
+    _h = _ftook(_fb, 'fin-boot')
+    _pin(_fb, _h)
+    _fbeats([_ff(0.02)] * 2)
+    post(_fb, '/api/delivered', {})
+finally:
+    stop(_fp)
+eq('[finish] the watch is on file across a restart',
+   [w.get('holdId') for w in _fwatch(_fj2)], [_h.get('holdId')])
+_fp, _fb = start(_FENV2, _fj2)
+try:
+    eq('[finish] ...the restarted server holds nothing in the car for it',
+       _holding(_fb), None)
+    _fbeats(_fstay(_IN))
+    eq('[finish] ...and finishes it at its door after the restart',
+       [r.get('how') for r in _frows(_fj2, 'finished', 'fin-boot')], ['door'])
+finally:
+    stop(_fp)
+
+# The offers page and the places report read the press's real end off takenRuns:
+# a Drop or chooser row a finished row names ends at the finish.
+_frun = [_pm_offer('frn1', 'uber', 10.0, 4.0, 20.0, 30, 0),
+         _pm_offer('frn2', 'uber', 10.0, 4.0, 20.0, 30, 1),
+         _pm_offer('frn3', 'uber', 10.0, 4.0, 20.0, 30, 2),
+         _pm_offer('frn4', 'uber', 10.0, 4.0, 20.0, 30, 3)]
+_fd1 = _pm_drop('frn1', None, 5, 0)
+del _fd1['by']
+_fd2 = _pm_drop('frn2', 'chooser', 4, 1)
+_fd3 = _pm_drop('frn3', None, 6, 2)
+del _fd3['by']
+_fd4 = _pm_drop('frn4', 'gps', 22, 3)
+_frun += [_fd1, _fd2, _fd3, _fd4]
+for _dr, _how, _end in ((_fd1, 'door', 23), (_fd2, 'stop', 21), (_fd4, 'door', 30)):
+    _t = _dr['acceptedAt'] + _end * 60000
+    _frun.append({'v': 1, 'kind': 'finished', 'at': _t, 'id': _dr['id'], 'seq': _t,
+                  'holdId': '%s@%d' % (_dr['id'], _dr['acceptedAt']), 'how': _how,
+                  'dropAt': _dr['at']})
+_t = _fd3['acceptedAt'] + 20 * 60000
+_frun.append({'v': 1, 'kind': 'finished', 'at': _t, 'id': 'frn3', 'seq': _t, 'holdId': 'x',
+              'how': 'area', 'dropAt': _fd3['at'] - 1})
+write(os.path.join(_fdir2, 'runs.jsonl'), _frun)
+_fp, _fb = start({'SCANNER': '0'}, os.path.join(_fdir2, 'runs.jsonl'))
+try:
+    _fjn = get(_fb, '/api/journal?days=0')
+finally:
+    stop(_fp)
+eq('[finish] takenRuns ends a finished press at the finish, by \'finished-<how>\', the press kept',
+   sorted((t.get('id'), t.get('by'), round((t['endedAt'] - t['tookAt']) / 60000.0),
+           t.get('pressedBy'), t.get('pressedAt') is not None)
+          for t in _fjn.get('taken') or [] if t.get('id', '').startswith('frn')),
+   [('frn1', 'finished-door', 23, 'drop', True), ('frn2', 'finished-stop', 21, 'chooser', True),
+    ('frn3', 'drop', 6, None, False), ('frn4', 'gps', 22, None, False)])
+eq('[finish] ...and card against real counts a finished press as measured at the door',
+   ((_fjn.get('cardVsReal') or {}).get('n'), (_fjn.get('cardVsReal') or {}).get('notAtDoor')),
+   (3, 1))
+_ftp = open(os.path.join(ROOT, 'journal.html'), encoding='utf-8').read()
+ok_('[finish] ...and the offers page counts the finished ones as timed at the door',
+    "t.by === 'finished-door'" in _ftp and "t.by === 'finished-stop'" in _ftp)
+shutil.rmtree(_fdir, ignore_errors=True)
+shutil.rmtree(_fdir2, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)

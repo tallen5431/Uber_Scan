@@ -128,7 +128,14 @@ var PLACE_SAME_MI = MV.AGREE_MI;
 var NBX_LIMIT = 10;
 // How a taken order was put down, by takenRuns' `by`: at the door. The
 // offers page leaves out 'replaced' and 'expiry', which measure nothing.
-var AT_THE_DOOR = ['gps', 'screen', 'drop', 'chooser', 'drop (gps-timed)'];
+// A Drop the GPS went on to finish (server.js finishWatch, the owner's 29 Oct
+// "let me drop it so the computing is treated normally but track the GPS
+// points"): takenRuns' 'finished-door', '-area' or '-stop', ended at the GPS's
+// finish, the press kept as `pressedAt`. 'finished-stop' is the weakest (the
+// first stop after the car moved off). timePresses never re-times one: it
+// reads 'drop' and 'chooser' only.
+var FINISHED = ['finished-door', 'finished-area', 'finished-stop'];
+var AT_THE_DOOR = ['gps', 'screen', 'drop', 'chooser', 'drop (gps-timed)'].concat(FINISHED);
 // A Drop press the GPS log timed (timePresses below): its own `by`.
 var GPS_TIMED = 'drop (gps-timed)';
 
@@ -756,7 +763,7 @@ var REAL_MED_N = 3;
 // A Drop press ('drop', 'chooser') can come early and makes a trip look
 // faster than it was; 'replaced' and 'expiry' measure nothing. The offers
 // page's "Card against what it took" says the same and counts both kinds.
-var REAL_BY = ['gps', 'screen', 'drop (gps-timed)'];
+var REAL_BY = ['gps', 'screen', 'drop (gps-timed)'].concat(FINISHED);
 // Gone quiet: the last QUIET_DAYS of the record against the rest.
 var QUIET_DAYS = 14;
 var QUIET_MIN_OUTINGS = 3;
@@ -3726,7 +3733,7 @@ module.exports = {
   restaurantNames: restaurantNames, restaurantsTable: restaurantsTable, waitOf: waitOf, hitsOf: hitsOf, nbxFetch: nbxFetch,
   degraded: degraded, DEGRADED_SHARE: DEGRADED_SHARE, DEGRADED_MIN: DEGRADED_MIN, gpsAt: gpsAt, parseArgs: parseArgs,
   DESC_MIN_N: DESC_MIN_N, REAL_MED_N: REAL_MED_N, QUIET_DAYS: QUIET_DAYS, SPELL_M: SPELL_M,
-  SPELL_MIN_S: SPELL_MIN_S, SPELL_GAP_S: SPELL_GAP_S, SPELL_MIN_N: SPELL_MIN_N, REAL_BY: REAL_BY,
+  SPELL_MIN_S: SPELL_MIN_S, SPELL_GAP_S: SPELL_GAP_S, SPELL_MIN_N: SPELL_MIN_N, REAL_BY: REAL_BY, FINISHED: FINISHED,
   EARLY_LOOK: EARLY_LOOK, MULTI_ORDER: MULTI_ORDER, MANY_DROPOFFS: MANY_DROPOFFS, MORE_CSVS: MORE_CSVS,
   payPerMile: payPerMile, appOf: appOf, flagsOf: flagsOf, wilson: wilson, poissonLE: poissonLE,
   isoWeek: isoWeek, runsOf: runsOf, realOf: realOf, takesTable: takesTable, waitsTable: waitsTable,

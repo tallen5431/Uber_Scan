@@ -66,6 +66,7 @@ rpi/journal.jsonl.*
 # car has waited at with a rounded position on each. Globs, because three of
 # them are written through a pid-suffixed `.part`.
 rpi/holding.json*
+rpi/finishing.json*
 rpi/places.json*
 rpi/config-backup.json*
 rpi/store-waits.json*

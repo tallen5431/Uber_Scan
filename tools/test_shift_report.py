@@ -779,6 +779,41 @@ eq('[undo] ...an undo row names its drop by id AND the drop\'s own time: another
 eq('[undo] ...and an undo of anything but a drop takes no drop back',
    (_uo['U4']['how'], _uo['U4']['end']), ('Drop', at(21, 10)))
 
+# --- a Drop the GPS went on to finish (29 Oct 2026) ------------------------------
+#
+# The owner: "let me drop it so the computing is treated normally but track the
+# GPS points". server.js finishWatch writes {kind: 'finished', id, holdId, at,
+# how, dropAt}: the press `dropAt` names ends at `at`, timed and reliable.
+def finished(oid, when, drop_at, how):
+    return {'v': 1, 'kind': 'finished', 'at': when, 'id': oid, 'seq': when,
+            'holdId': '%s@%d' % (oid, drop_at - 1), 'how': how, 'dropAt': drop_at}
+
+
+_fr = [offer('F1', at(18, 0), 11.0, 30, 4.0), mark('F1', at(18, 1), True),
+       drop('F1', at(18, 6)), finished('F1', at(18, 29), at(18, 6), 'door'),
+       offer('F2', at(19, 0), 8.0, 20, 3.0), mark('F2', at(19, 1), True),
+       drop('F2', at(19, 3), by='chooser', carried=2), finished('F2', at(19, 19), at(19, 3), 'stop'),
+       offer('F3', at(20, 0), 8.0, 20, 3.0), mark('F3', at(20, 1), True),
+       drop('F3', at(20, 4)), finished('F3', at(20, 18), at(20, 3), 'area'),
+       offer('F4', at(21, 0), 8.0, 20, 3.0), mark('F4', at(21, 1), True),
+       drop('F4', at(21, 4), by='gps'), finished('F4', at(21, 18), at(21, 4), 'door')]
+_fo = {o['id']: o for o in SR.orders(_fr)}
+eq('[finished] a Drop the GPS finished at the door ends there: timed from it, reliable',
+   (_fo['F1']['how'], _fo['F1']['end'], _fo['F1']['actualMinutes'], _fo['F1']['reliable'],
+    _fo['F1']['finished'], _fo['F1']['pressedAt']),
+   ("Drop -> GPS 'door'", at(18, 29), 28.0, True, 'door', at(18, 6)))
+eq('[finished] ...a chooser press finished at the first stop says so, and that it is the weakest',
+   (_fo['F2']['how'], _fo['F2']['actualMinutes'], _fo['F2']['reliable'],
+    any('weakest' in n for n in _fo['F2']['notes'])),
+   ("chooser -> GPS 'stop'", 18.0, True, True))
+eq('[finished] ...a finished row naming another press is not this press\'s',
+   (_fo['F3']['how'], _fo['F3']['end'], _fo['F3']['finished']), ('Drop', at(20, 4), None))
+eq('[finished] ...and only a press is finished: a GPS drop keeps its own end',
+   (_fo['F4']['how'], _fo['F4']['end']), ('GPS drop', at(21, 4)))
+_fu = {o['id']: o for o in SR.orders(_fr[:4] + [undo('F1', at(18, 6, 4), at(18, 6))])}
+eq('[finished] ...a Drop taken back has no press to finish (the server writes none; '
+   'a stray row reads as nothing)', (_fu['F1']['how'], _fu['F1']['end']), ('no end', None))
+
 # --- put down with another, and too soon (the 26 Oct shift's #8) ------------------
 #
 # One chooser press puts two orders down at the same `at`. An order put down so

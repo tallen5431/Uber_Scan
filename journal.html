@@ -2781,7 +2781,12 @@
       var real = (t.endedAt - t.tookAt) / 60000;
       return { app: t.app || 'other', card: t.minutes, real: real,
                ratio: real / t.minutes, perHour: t.pay / (real / 60),
-               door: t.by === 'gps' || t.by === 'screen' };
+               // ...or a Drop the GPS went on to finish (server.js
+               // finishWatch, the owner's 29 Oct "let me drop it so the
+               // computing is treated normally but track the GPS points"):
+               // 'finished-door', '-area' or '-stop', timed by the GPS.
+               door: t.by === 'gps' || t.by === 'screen' || t.by === 'finished-door'
+                 || t.by === 'finished-area' || t.by === 'finished-stop' };
     });
     if (!runs.length) {
       el.real.innerHTML = '';
@@ -2794,7 +2799,7 @@
       + (runs.length === 1 ? ' order' : ' orders') + ' taken and put down</em>';
     el.realLead.textContent = 'How long each order was held, Took to put-down, against the '
       + 'minutes on its card, and its pay over that real time. ' + atDoor + ' of '
-      + runs.length + ' were put down at the door (GPS or the app\'s screen); a Drop pressed '
+      + runs.length + ' were put down at the door (GPS or the app\'s screen, or a Drop the GPS finished); a Drop pressed '
       + 'before the door makes an order look faster than it was.';
     function row(label, rs) {
       var ratio = medianOf(rs.map(function (r) { return r.ratio; }));
