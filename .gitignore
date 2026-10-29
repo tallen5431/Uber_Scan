@@ -82,3 +82,9 @@ rpi/scans/
 # same fact as the scans, taken on purpose to be shown to someone — which is a
 # decision about one picture, not about a public remote.
 rpi/snaps/
+
+# ...and the map band above each offer card, kept at full resolution for an
+# offline study (MAP_BANDS_DIR in rpi/scan_pi.py). The app's map round a
+# customer's door, with its street names: the same fact as the scans, and
+# local to the rig.
+rpi/mapbands/

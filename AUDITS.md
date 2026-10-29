@@ -4353,6 +4353,39 @@ and `keepPlaces: false` drops it (Done, "The GPS").
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
 
+**EXPERIMENTAL — the map band above every offer card is kept, for an offline
+study; nothing reads it (29 Oct 2026).** The owner, verbatim: *"Yes add the map
+saving, fast track to experimental."* Purpose: an offline prototype estimates
+where an order drops off from the route the app draws on its map, and it can
+only be scored against the GPS stop the delivery really made if the map was
+kept at full resolution for the offers later taken — the 480x360 scene views
+are too small (the pins measured 36–44 px in a 1000-row view of the phone).
+So once per offer — Uber, DoorDash, an Uber add-on popup — the scanner writes
+`map_band()`'s straightened crop above the card (~650x784 at the label
+reader's 1400-row warp, ~100–150kB) to `rpi/mapbands/<offer id>.jpg` with a
+`.json` sidecar: the offer id, time, app and screen, the screen corners and
+the band's place in the warp, the card's pay, miles, minutes and pickup text,
+and the fix the journal row got (`lat`/`lon`/`gpsOk`/`gpsErr`/`gpsAge`, none
+under `"keepPlaces": false`). After the offer line, on a thread of its own
+(`MapBands`), never in the verdict's way; JPEG quality 80, the encode held to
+0.5 s (over it, dropped and tried on a later read); not on a ⌖ whole-screen
+read, with no corners or in low light; at most three tries per offer. **Caps:**
+a ring of 400 files and 150MB, the oldest first (`"mapBandsKeep"`,
+`"mapBandsMB"`); a disk error is logged once and never stops the scanner. **On
+by default**; `"mapBands": false` in the config or `MAP_BANDS=0` turns it off.
+**Privacy:** the map shows the street names round a customer's door. The folder
+is in `.gitignore` (rpi/test_lint.py asks git), `rpi/sync.py` sends only
+journal rows and the config (rpi/test_sync.py runs a sync over a rig with
+bands on disk and finds none of them in what it sent), and the server serves
+none of it — the one way a band leaves the rig is a 📷 Snap, which carries the
+newest band from the last two minutes into its folder as `map.jpg` and
+`map.json`, to go where the driver sends that snap. Pulled in bulk by hand
+(rpi/README.md). No readout, nothing on the panel, no figure or verdict
+change. **The Settled list binds whatever is built on it:** no $/mile rules, no
+payout floors, no pace re-timing, no heat map, no silence as accept, no
+seventh bar control, and the rig never presses the phone. Open: how good the
+estimate is has not been measured — that is what the bands are for.
+
 **A card with one readable place calls it the pickup, and 474 of 1,166 rows
 rest on that.** Where the card's own layout names the end, the rig now follows
 it: that is `place_ends`, shipped with the two-ends fix recorded under Done. It

@@ -4451,7 +4451,7 @@ if _have_reader:
     os.makedirs(_rho)
     _rplan = os.path.join(_pdir, 'reader-plan.txt')
     with open(_rplan, 'w') as _fh:
-        _fh.write('agree disagree noread garbage none agree agree')
+        _fh.write('agree disagree noread garbage none agree agree band')
     _rfake = os.path.join(_pdir, 'answers.py')
     with open(_rfake, 'w') as _fh:
         _fh.write('import json, os, sys, time\n'
@@ -4481,6 +4481,16 @@ if _have_reader:
                   '        now = time.time()\n'
                   '        if how == "garbage":\n'
                   '            open(os.path.join(folder, "reader.json"), "w").write("not json")\n'
+                  '        elif how == "band":\n'
+                  '            import tempfile\n'
+                  '            src = tempfile.mkdtemp()\n'
+                  '            jpg = os.path.join(src, "o-snap.jpg")\n'
+                  '            SP.PL.write_jpeg(jpg, np.full((80, 60, 3), 200, np.uint8))\n'
+                  '            open(jpg[:-4] + ".json", "w").write(json.dumps({"offerId": "o-snap"}))\n'
+                  '            SP.answer_snap(folder, last, SP.reader_record(last, now, '
+                  'offer_log=OnRecord("o-snap"), counters=SP.Health().counters(now)), '
+                  'band={"offerId": "o-snap", "jpg": jpg, "json": jpg[:-4] + ".json", '
+                  '"savedAt": now - 5})\n'
                   '        else:\n'
                   '            read = None if how == "noread" else last\n'
                   '            card = {"disagree": "o-other", "none": None}.get(how, "o-snap")\n'
@@ -4581,6 +4591,31 @@ if _have_reader:
            [[True, True], [True, True]])
         ok_('...neither waiting out the deadline for it (%s)'
             % ', '.join('%.1fs' % x[1] for x in _two), all(x[1] < 3.5 for x in _two))
+
+        # The newest offer's map band (scan_pi.MAP_BANDS_DIR), copied in by
+        # the scanner beside reader.json: kept as map.jpg and map.json, listed,
+        # served and bundled with the rest, and never on the panel's line.
+        _code, _rep = _snap(_u)
+        _name = _rep.get('name') or '?'
+        _dir = os.path.join(_snaps, _name)
+        _band = _piece(_rep, 'map')
+        eq('a scanner that answers with a map band leaves it in the snap as map.jpg',
+           (_band.get('saved'), _band.get('bytes'), _band.get('offer')),
+           (True, _size(os.path.join(_dir, 'map.jpg')), 'o-snap'))
+        eq('...and nothing about it on the panel\'s line', _rep.get('said'),
+           'saved — no camera picture: no camera picture yet')
+        eq('...listed with its sidecar among the snap\'s files',
+           sorted(f['file'] for f in _listed(_u, _name).get('files') or []),
+           ['map.jpg', 'map.json', 'panel.png', 'reader.jpg', 'reader.json', 'snap.json',
+            'status.json'])
+        _st, _body, _type = _fetch(_u, '/api/snaps/%s/map.jpg' % _name)
+        eq('...served as the JPEG the scanner copied',
+           (_st, _type, _body == open(os.path.join(_dir, 'map.jpg'), 'rb').read()),
+           (200, 'image/jpeg', True))
+        _st, _body, _type = _fetch(_u, '/api/snaps/bundle?snap=%s' % _name)
+        _body = _body.decode('utf-8', 'replace') if isinstance(_body, bytes) else _body
+        ok_('...and carried in the snap\'s bundle, picture and sidecar',
+            _st == 200 and 'map.jpg — ' in _body and 'map.json — ' in _body)
     finally:
         stop(_p)
 

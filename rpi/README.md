@@ -2201,6 +2201,7 @@ connection dot, just above the bar of buttons — not on the bar, which holds si
 | `reader.jpg` | the card the scanner last read — the greyscale crop as it came off the warp, which `preprocess()` then turned into tesseract's input |
 | `reader.json` | the scanner's own account of that read: when, and how long before it answered; the text, the parse and the rate; whether it was a ⌖ read of the whole screen; the offer it has on record and the card's episode; its health counters as they stand; the flags its last heartbeat carried; and the GPS's state and its fix, with the gate's `ok`/`why` on it, or "gps off" |
 | `snap.json` | which of those it kept, and for each one it did not, why |
+| `map.jpg`, `map.json` | experimental, only when there is one: the newest offer's map band from the last two minutes and its sidecar (see 🗺 Map bands below) — never listed as missing |
 
 **Why the scanner is asked.** Everything above `reader.jpg` is what the
 *panel* knew. A misread is a question about what the *reader* was looking at,
@@ -2367,6 +2368,31 @@ it would cut the digits by 19px and 34px; the phone has `snaps.html`. A phone
 held on its side has the room and does draw it, and from there, like
 `snaps.html`, it photographs the rig's display. The 7" panel keeps 22px to
 spare with 📷 drawn.
+
+### 🗺 Map bands: the map above each offer, kept for a study (experimental)
+
+Once per offer — Uber, DoorDash, an Uber add-on — the scanner keeps the map
+above the card, straightened and at full resolution, in `rpi/mapbands/` beside
+the journal: `<offer id>.jpg` and a `<offer id>.json` saying which offer, which
+app and screen, the corners it was cut from, the card's miles, minutes and
+pickup, and the GPS fix the journal row got. It is written after the offer line,
+on a thread of its own, and nothing on the panel or in any figure uses it: it
+is collected for an offline study of where orders drop off, scored later
+against the GPS stops. A ring of the newest 400 files and at most 150MB
+(`"mapBandsKeep"`, `"mapBandsMB"` in `rpi/config.json`); `"mapBands": false`,
+or `MAP_BANDS=0` in the scanner's environment, turns it off.
+
+**They stay on the rig.** The map shows street names round a customer's door,
+so the folder is in `.gitignore`, the sync never sends it, and the server never
+serves it. A 📷 Snap carries the newest band (from the last two minutes) into
+its folder as `map.jpg` and `map.json`. To pull them all off by hand:
+
+```sh
+# on the Pi
+tar czf ~/mapbands.tar.gz -C ~/HTTP_Server/projects/uber_scan/rpi mapbands
+# from another machine
+scp pi@<rig>:mapbands.tar.gz .
+```
 
 ## Calibrate
 

@@ -4453,6 +4453,165 @@ eq('...and without one, mapLabel is None',
    said(lambda: SP.emit_offer('x', _dd_card, {'ready': False}))['offer'].get('mapLabel', 'absent'),
    None)
 
+# --- the map band, kept once per offer (MAP_BANDS_DIR) ------------------------
+#
+# Collection only: the map above every offer card, Uber's and DoorDash's, at
+# full resolution, for an offline study of where orders drop off. SYNTHETIC
+# screens: _dd_map's invented streets, and the test UberX screen.
+_bands_dir = tempfile.mkdtemp()
+_bands_log = []
+_real_log_b = SP.log
+SP.log = _bands_log.append
+try:
+    _mb = SP.MapBands(os.path.join(_bands_dir, 'mapbands'), threaded=False)
+    _ddm = _dd_map()
+    _meta = SP.map_band_meta('o-dd1', _dd_card, _MapGeom(_ddm),
+                             where={'lat': 44.98, 'lon': -93.27, 'ok': True, 'err': 8.0,
+                                    'ageSeconds': 1.2})
+    eq('map band: a DoorDash offer\'s band is taken', _mb.submit('o-dd1', _ddm, _MapGeom(_ddm), _meta),
+       True)
+    _jpg = os.path.join(_bands_dir, 'mapbands', 'o-dd1.jpg')
+    _side = json.load(open(os.path.join(_bands_dir, 'mapbands', 'o-dd1.json')))
+    _img = cv2.imread(_jpg)
+    eq('...written as <offer id>.jpg, the band at full resolution (784 of 1400 rows)',
+       (_img is not None, _img.shape[0] if _img is not None else None), (True, 784))
+    eq('...with a sidecar naming the offer, the app and the screen',
+       (_side['offerId'], _side['app'], _side['screen']), ('o-dd1', 'doordash', 'dd.offer'))
+    eq('...the card\'s miles, minutes and store',
+       (_side['miles'], _side['minutes'], _side['pickup']),
+       (_dd_card.get('miles'), _dd_card.get('minutes'), _dd_card.get('pickup')))
+    eq('...the fix the row got',
+       (_side['lat'], _side['lon'], _side['gpsOk'], _side['gpsErr'], _side['gpsAge']),
+       (44.98, -93.27, True, 8.0, 1.2))
+    eq('...and what relates its pixels to the screen box',
+       (_side['band']['warpHeight'], _side['band']['top'], _side['band']['bottom'],
+        _side['band']['scale'], len(_side['geom']['quad']), _side['geom']['frame']),
+       (1400, 0.06, 0.62, 1.0, 4, [1400, 700]))
+    eq('...and once per offer, not once per read', _mb.submit('o-dd1', _ddm, _MapGeom(_ddm), _meta),
+       False)
+    eq('...latest() names it for a snap', (_mb.latest() or {}).get('offerId'), 'o-dd1')
+    eq('...but not once it is older than two minutes',
+       _mb.latest(now=time.time() + SP.SNAP_BAND_AGE_S + 5), None)
+
+    _ux = TC.uberx_screen()
+    _umeta = SP.map_band_meta('o-ub1', {'text': 'UberX\nExclusive\n$16.05\n23 min (8.4 mi) total',
+                                        'miles': 8.4, 'minutes': 23.0}, _MapGeom(_ux))
+    _mb.submit('o-ub1', _ux, _MapGeom(_ux), _umeta)
+    _uside = json.load(open(os.path.join(_bands_dir, 'mapbands', 'o-ub1.json')))
+    eq('an Uber offer\'s band is kept too, its sidecar saying so',
+       (os.path.isfile(os.path.join(_bands_dir, 'mapbands', 'o-ub1.jpg')), _uside['app'],
+        _uside['screen'], _uside['lat'], _uside['gpsOk']),
+       (True, 'uber', 'uber.offer', None, None))
+    eq('...and an Uber add-on popup is an offer card like any other',
+       SP.map_band_meta('o-add', {'text': 'Add to your trip\n+ $5.10\n+12 min (+3.0 mi)'},
+                        _MapGeom(_ux))['app'], 'uber')
+
+    # No corners, a ⌖ read of the whole screen, low light: skipped, and tried
+    # again on a later read, a few times at most.
+    eq('no corners: nothing kept', (_mb.submit('o-x', _ddm, None), _mb.outcomes[-1]),
+       (True, ('o-x', 'no band')))
+    eq('a whole-screen read: nothing kept', (_mb.submit('o-w', _ddm, _MapGeom(_ddm, whole=True)),
+                                             _mb.outcomes[-1][1]), (True, 'no band'))
+    _dark = (_ddm * 0.05).astype(np.uint8)
+    _mb.submit('o-dark', _dark, _MapGeom(_dark))
+    eq('low light: nothing kept', (_mb.outcomes[-1], os.path.exists(
+        os.path.join(_bands_dir, 'mapbands', 'o-dark.jpg'))), (('o-dark', 'dim'), False))
+    for _ in range(5):
+        _mb.submit('o-dark', _dark, _MapGeom(_dark))
+    eq('...tried again on later reads, %d times at most' % SP.MAP_BANDS_TRIES,
+       sum(1 for o in _mb.outcomes if o[0] == 'o-dark'), SP.MAP_BANDS_TRIES)
+
+    # The time cap: an encode slower than MAP_BANDS_CAP_S is not written.
+    _t = [100.0]
+
+    def _slow(image, quality):
+        _t[0] += SP.MAP_BANDS_CAP_S + 0.2
+        return b'\xff\xd8slow'
+
+    _slowb = SP.MapBands(os.path.join(_bands_dir, 'slow'), threaded=False, encode=_slow,
+                         clock=lambda: _t[0])
+    _slowb.submit('o-s', _ddm, _MapGeom(_ddm), {'geom': {}})
+    eq('an encode over its %.1fs cap is dropped, not written' % SP.MAP_BANDS_CAP_S,
+       (_slowb.outcomes[-1], os.path.exists(os.path.join(_bands_dir, 'slow', 'o-s.jpg'))),
+       (('o-s', 'slow'), False))
+    ok_('...and said in the log, once', sum('over its' in m for m in _bands_log) == 1)
+
+    # Off the loop: a slow band never holds up submit.
+    _gate = _threading.Event()
+
+    def _held_band(frame, geom):
+        _gate.wait(5)
+        return None
+
+    _thr = SP.MapBands(os.path.join(_bands_dir, 'thr'), threaded=True, band=_held_band)
+    _t0 = time.monotonic()
+    _r = (_thr.submit('o-t1', _ddm, _MapGeom(_ddm)), _thr.submit('o-t2', _ddm, _MapGeom(_ddm)))
+    _sub = time.monotonic() - _t0
+    ok_('threaded: submit returns at once while a band is being cut (%.1fms)' % (_sub * 1000),
+        _sub < 0.05)
+    _gate.set()
+    _thr.close()
+
+    # The ring: a count cap and a byte cap, the oldest going first.
+    _ring = os.path.join(_bands_dir, 'ring')
+    _rb = SP.MapBands(_ring, keep=3, threaded=False, encode=lambda im, q: b'\xff' * 1000)
+    for _i in range(5):
+        _rb.submit('r%d' % _i, _ddm, _MapGeom(_ddm), {'geom': {}})
+        for _f in ('r%d.jpg' % _i, 'r%d.json' % _i):
+            os.utime(os.path.join(_ring, _f), (1000 + _i, 1000 + _i))
+    _rb.prune()
+    eq('the ring keeps the newest %d by count, each .json with its .jpg' % 3,
+       sorted(os.listdir(_ring)),
+       ['r2.jpg', 'r2.json', 'r3.jpg', 'r3.json', 'r4.jpg', 'r4.json'])
+    _side_b = os.path.getsize(os.path.join(_ring, 'r4.json'))
+    _rb.keep, _rb.max_bytes = 400, 2 * (1000 + _side_b) + 10
+    _rb.prune()
+    eq('...and within its byte cap', sorted(f for f in os.listdir(_ring) if f.endswith('.jpg')),
+       ['r3.jpg', 'r4.jpg'])
+
+    # A disk that cannot be written: never fatal, said once.
+    _blocker = os.path.join(_bands_dir, 'a-file')
+    open(_blocker, 'w').close()
+    _db = SP.MapBands(os.path.join(_blocker, 'mapbands'), threaded=False)
+    _r1 = _db.submit('d1', _ddm, _MapGeom(_ddm), {'geom': {}})
+    _r2 = _db.submit('d2', _ddm, _MapGeom(_ddm), {'geom': {}})
+    eq('a disk error is no error to the loop', (_r1, _r2, [o[1] for o in _db.outcomes]),
+       (True, True, ['disk', 'disk']))
+    eq('...and logged once', sum('could not write' in m for m in _bands_log), 1)
+
+    # The setting: on by default, off by config or environment.
+    eq('map bands on by default, at 400 files and 150MB',
+       SP.map_bands_setting({}, env={}), (True, 400, 150 * 1024 * 1024, None))
+    eq('...off with "mapBands": false',
+       SP.map_bands_setting({'mapBands': False}, env={})[0], False)
+    eq('...off with MAP_BANDS=0', SP.map_bands_setting({}, env={'MAP_BANDS': '0'})[:1], (False,))
+    eq('...and the caps move with mapBandsKeep and mapBandsMB',
+       SP.map_bands_setting({'mapBandsKeep': 50, 'mapBandsMB': 10}, env={})[1:3],
+       (50, 10 * 1024 * 1024))
+
+    # A snap carries the newest band in as map.jpg and map.json, before
+    # reader.json, and reader.json says which offer it was.
+    _sfold = os.path.join(_bands_dir, 'snap')
+    os.makedirs(_sfold)
+    _rec = {'v': 1}
+    SP.answer_snap(_sfold, None, _rec, band=_mb.latest())
+    _said_snap = json.load(open(os.path.join(_sfold, 'reader.json')))
+    eq('a snap carries the newest map band and its sidecar',
+       (sorted(os.listdir(_sfold)), (_said_snap.get('mapBand') or {}).get('offerId')),
+       (['map.jpg', 'map.json', 'reader.json'], 'o-ub1'))
+    eq('...byte for byte', open(os.path.join(_sfold, 'map.jpg'), 'rb').read(),
+       open(os.path.join(_bands_dir, 'mapbands', 'o-ub1.jpg'), 'rb').read())
+    _sfold2 = os.path.join(_bands_dir, 'snap2')
+    os.makedirs(_sfold2)
+    SP.answer_snap(_sfold2, None, {'v': 1}, band=None)
+    eq('...and with none to carry, none, said as that',
+       (sorted(os.listdir(_sfold2)),
+        json.load(open(os.path.join(_sfold2, 'reader.json'))).get('mapBand', 'absent')),
+       (['reader.json'], None))
+finally:
+    SP.log = _real_log_b
+    shutil.rmtree(_bands_dir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

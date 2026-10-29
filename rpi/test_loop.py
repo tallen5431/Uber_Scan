@@ -206,6 +206,11 @@ def out_for(text, clipped=False, fitted=None):
             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 1}}
 
 
+BANDS = []
+# ...and each map-label read asked for (scan_pi.MapLabels.submit).
+LABELS = []
+
+
 def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=None,
         hang_from=None, stuck_after=None, handoff=None, alive_every=None,
         config_extra=None, appear_at=0.4, cam_out=None,
@@ -320,6 +325,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     # travel that way, and a recorder that kept only the positional arguments
     # could not see whether the line and the row were handed one fix or two.
     offer_kw = []
+    offer_at = []
     said_settings = []
     real = (SP.start_camera, SP.emit, SP.emit_offer, SP.emit_alive, SP.log,
             PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
@@ -364,7 +370,26 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     SP.start_camera = lambda *a, **k: cam
     # Stamped, so a check can ask how soon after something a verdict came.
     SP.emit = lambda *a, **k: verdicts.append((a, k, time.time()))
-    SP.emit_offer = lambda *a, **k: (announced.append(a), offer_kw.append(k))
+    SP.emit_offer = lambda *a, **k: (announced.append(a), offer_kw.append(k),
+                                     offer_at.append(time.monotonic()))
+    # ...and each map band asked for, when, and of which MapBands, so a check
+    # can hold it to after the offer line (scan_pi.MAP_BANDS_DIR).
+    del BANDS[:]
+    real_band_submit = SP.MapBands.submit
+
+    def band_submit(self, offer_id, frame, geom, meta=None):
+        BANDS.append((self, offer_id, time.monotonic()))
+        return real_band_submit(self, offer_id, frame, geom, meta)
+
+    SP.MapBands.submit = band_submit
+    del LABELS[:]
+    real_label_submit = SP.MapLabels.submit
+
+    def label_submit(self, offer_id, frame, geom, store=None):
+        LABELS.append((offer_id, time.monotonic()))
+        return real_label_submit(self, offer_id, frame, geom, store=store)
+
+    SP.MapLabels.submit = label_submit
 
     def beat(*a, **k):
         beats.append(time.time())
@@ -458,6 +483,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
          PL.Scanner.look_many, time.sleep, SP.HEALTH_EVERY, SP.READ_STUCK_S,
          SP.emit_reading, SP.emit_dropoff, SP.emit_settings, SP.Reader.submit) = real
         PL.CF.find_card, PL.Scanner._look, PL.ocr_lines = real_reading
+        SP.MapBands.submit = real_band_submit
+        SP.MapLabels.submit = real_label_submit
         SP.emit_planner = was_planner
         SP.emit_sighting = was_sighting
         SP.emit_popup = was_popup
@@ -469,7 +496,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             os.environ.pop(HO.ENV_DIR, None)
         else:
             os.environ[HO.ENV_DIR] = was_handoff
-    return dict(rows=rows(), announced=announced, offer_kw=offer_kw,
+    return dict(rows=rows(), announced=announced, offer_kw=offer_kw, offer_at=offer_at,
+                work=work, bands=list(BANDS), labels=list(LABELS),
                 beats=beats, calls=calls[0],
                 submitted=submitted[0], submitted_whole=submitted_whole, stamps=stamps,
                 readings=readings[0], planners=said_planners, sightings=sightings,
@@ -526,6 +554,58 @@ eq('...and not again for a reading that says nothing new',
 ok_('the startup line counts rows, not offers (%r)'
     % [l for l in r['logs'] if l.startswith('journal:')][:1],
     any(l.startswith('journal:') and 'journal row' in l and 'offer' not in l for l in r['logs']))
+
+# --- the map band above the card, kept once per offer, after its line ---------
+#
+# scan_pi.MAP_BANDS_DIR: collection only. Every offer card, Uber's and
+# DoorDash's, has its map band written to mapbands/<offer id>.jpg beside the
+# journal, on a thread of its own, once — however many reads the card gets.
+def _band_saved(rows, ann, calls):
+    return calls >= 4 and any(b[0].saved for b in BANDS)
+
+
+for _app, _text in (('uber', WHOLE),
+                    ('doordash', '$12.35 incl. tips\n2 stops (11.2 mi) - 38 min\n'
+                                 'Lark Owl Grill\nCustomer dropoff')):
+    # The card in the mount from the first frame: the stubbed reader answers
+    # its text over an empty mount too, and a band of an empty mount is (rightly)
+    # too dark to keep.
+    r = run(lambda n, k, t=_text: t, seconds=20.0, until=_band_saved, appear_at=0.0)
+    _ids = sorted(set(a[0] for a in r['announced']))
+    _dir = os.path.join(r['work'], 'mapbands')
+    _files = sorted(os.listdir(_dir)) if os.path.isdir(_dir) else []
+    eq('%s: one map band and its sidecar, named for the offer (%r)' % (_app, _ids),
+       _files, ['%s.jpg' % i for i in _ids[:1]] + ['%s.json' % i for i in _ids[:1]])
+    _side = json.load(open(os.path.join(_dir, _files[1]))) if len(_files) == 2 else {}
+    eq('...its sidecar naming the offer and the app', (_side.get('offerId'), _side.get('app')),
+       (_ids[0] if _ids else None, _app))
+    _mine = [b for b in r['bands'] if b[1] in _ids]
+    ok_('...asked for only after the offer line went out (%d asks)' % len(_mine),
+        _mine and r['offer_at'] and min(b[2] for b in _mine) >= r['offer_at'][0])
+    eq('...and kept once, however many reads (%d)' % r['calls'],
+       [o for o in _mine[0][0].outcomes if o[1] == 'saved'] if _mine else None,
+       [(_ids[0], 'saved')] if _ids else None)
+
+# ...and DoorDash's map label is READ for a card read well. The submit asked
+# `not whole`, and `whole` by there is OP.is_whole: a DoorDash card with its
+# "2 stops (11.2 mi)" on it is whole, so the label was asked only of half-read
+# cards (the owner's shifts of 26-29 Oct: 31 DoorDash offers, no label).
+_dd_whole = '$12.35 incl. tips\n2 stops (11.2 mi) - 38 min\nLark Owl Grill\nCustomer dropoff'
+r = run(lambda n, k: _dd_whole, seconds=20.0, appear_at=0.0,
+        until=lambda rows, ann, calls: calls >= 4 and bool(LABELS))
+_ids = sorted(set(a[0] for a in r['announced']))
+ok_('a DoorDash card read whole is asked its map label (%d asks for %r)' % (len(r['labels']), _ids),
+    _ids and any(l[0] in _ids for l in r['labels']))
+ok_('...after its offer line went out',
+    r['labels'] and r['offer_at'] and min(l[1] for l in r['labels']) >= r['offer_at'][0])
+r = run(lambda n, k: WHOLE, seconds=6.0, appear_at=0.0, until=lambda rows, ann, calls: calls >= 4)
+eq('...and an Uber card is not', r['labels'], [])
+
+r = run(lambda n, k: WHOLE, seconds=4.0, config_extra={'mapBands': False},
+        until=lambda rows, ann, calls: calls >= 4)
+eq('"mapBands": false keeps none', (os.path.isdir(os.path.join(r['work'], 'mapbands')),
+                                    r['bands']), (False, []))
+ok_('...and says so at startup', any('map bands off' in l for l in r['logs']))
 
 # --- ...and so is a reading of the same card whose verdict moved -------------
 #

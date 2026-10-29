@@ -7908,6 +7908,13 @@ function statusNow() {
  *                parse and rate, the offer it has on record, its health
  *                counters, its last heartbeat and the phone's GPS — written
  *                by the scanner into this folder when asked (see askReader)
+ *   map.jpg      EXPERIMENTAL, and only when the scanner kept one in the last
+ *   map.json     two minutes: the newest offer's map band at full resolution
+ *                and its sidecar (MAP_BANDS_DIR in rpi/scan_pi.py), copied in
+ *                by the scanner with reader.json. Collection for an offline
+ *                study; never missing, only absent, so it is never on the
+ *                panel's line. The rig's own rpi/mapbands/ is served by
+ *                nothing — a snap is the one way a band leaves the rig.
  *
  * ...and snap.json, which says which of those it has and, for each one it has
  * not, why. A folder with no panel.png and nothing saying why is the second
@@ -7983,7 +7990,7 @@ var SNAP_FRAME_STALE_MS = 12000;
 // URL is ever a path.
 var SNAP_NAME = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d{2})?$/;
 var SNAP_FILES = ['panel.png', 'camera.jpg', 'status.json', 'snap.json',
-                  'reader.jpg', 'reader.json'];
+                  'reader.jpg', 'reader.json', 'map.jpg', 'map.json'];
 // How every PNG opens — its signature, then its image header, which the format
 // requires first — and how every PNG ends: the empty IEND chunk and its CRC.
 // The tail is what a tool cut off part way, or a card that filled under it,
@@ -8428,13 +8435,22 @@ function readerAnswered(ask, text, finish) {
       crop.why = said && typeof said.noCrop === 'string' ? said.noCrop
         : 'the scanner kept no reader.jpg and did not say why';
     }
-    finish([crop, reader]);
+    // ...and the map band, when the scanner copied one in. A part only when
+    // it is there: it is collection for a study, not something a snap lacks.
+    fs.lstat(path.join(ask.dir, 'map.jpg'), function (mapErr, mapSt) {
+      if (mapErr || !mapSt.isFile()) return finish([crop, reader]);
+      var band = { what: 'map', file: 'map.jpg', saved: true, bytes: mapSt.size };
+      if (said && said.mapBand && typeof said.mapBand === 'object') {
+        band.offer = said.mapBand.offerId || null;
+      }
+      finish([crop, reader, band]);
+    });
   });
 }
 
 // What a part that is missing is called, in the line the panel shows.
 var SNAP_NOUN = { panel: 'screenshot', camera: 'camera picture', status: 'status',
-                  crop: 'reader crop', reader: 'reader record' };
+                  crop: 'reader crop', reader: 'reader record', map: 'map band' };
 
 /* The one line that says what a snap holds: the panel's message, the log
  * line, and the summary the snaps page shows under each one. Written once so
@@ -8602,11 +8618,13 @@ function takeSnap(done) {
     // The pictures first, then the records, which is the order the line the
     // panel shows takes them in.
     var parts = [null, null, null, null, null];
+    // ...and the map band, after them, when the scanner answered with one.
+    var extra = [];
     var waiting = parts.length;
     var landed = function (i) {
       return function (part) {
         parts[i] = part;
-        if (--waiting === 0) seal(name, dir, parts);
+        if (--waiting === 0) seal(name, dir, parts.concat(extra));
       };
     };
     takePanel(path.join(dir, 'panel.png'), landed(0));
@@ -8615,6 +8633,7 @@ function takeSnap(done) {
     // directory is not necessarily this one's.
     askReader(path.resolve(dir), pressed.offer ? pressed.offer.id || null : null,
               function (two) {
+                if (two[2]) extra.push(two[2]);
                 landed(2)(two[0]);
                 landed(4)(two[1]);
               });
@@ -8965,7 +8984,9 @@ var SNAP_ABOUT = {
   'reader.jpg': 'the crop the reader last read',
   'status.json': 'what /api/status said at the press',
   'reader.json': 'the scanner\'s account of its last read',
-  'snap.json': 'what the press kept, and why anything is missing'
+  'snap.json': 'what the press kept, and why anything is missing',
+  'map.jpg': 'the newest offer\'s map band, kept for a study',
+  'map.json': 'where that map band came from'
 };
 // Which of them are pictures, in the order they are laid side by side — on
 // snaps.html, which is handed this list, and at the head of a bundle's

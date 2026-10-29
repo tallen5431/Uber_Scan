@@ -1629,6 +1629,70 @@ finally:
     _big_far.close()
     shutil.rmtree(_big_dir, ignore_errors=True)
 
+# --- the map bands stay on the rig ------------------------------------------
+#
+# scan_pi.MAP_BANDS_DIR keeps the app's map round a customer's door beside the
+# journal, in mapbands/. The sync sends journal rows and the config and nothing
+# else: run over a rig with bands on disk, everything it sent is read back and
+# none of them is in it.
+class Recorder(OldCopy):
+    """A far end that keeps every request it was sent, path and body."""
+
+    def __init__(self):
+        self.seen = []
+        me = self
+        OldCopy.__init__(self)
+        handler = self.httpd.RequestHandlerClass
+        get, post = handler.do_GET, handler.do_POST
+
+        def do_GET(h):
+            me.seen.append((h.path, b''))
+            return get(h)
+
+        def do_POST(h):
+            n = int(h.headers.get('Content-Length') or 0)
+            body = h.rfile.read(n)
+            me.seen.append((h.path, body))
+            import io
+            h.rfile = io.BytesIO(body)
+            return post(h)
+
+        handler.do_GET, handler.do_POST = do_GET, do_POST
+
+
+_rec = Recorder()
+_rig = tempfile.mkdtemp()
+try:
+    _rj = os.path.join(_rig, 'journal.jsonl')
+    write(_rj, [offer(i, now - i * 60000) for i in range(5)])
+    _cfg = os.path.join(_rig, 'config.json')
+    with open(_cfg, 'w') as _fh:
+        json.dump({'quad': [[0, 0], [1, 0], [1, 1], [0, 1]]}, _fh)
+    os.makedirs(os.path.join(_rig, 'mapbands'))
+    _jpeg = b'\xff\xd8\xff\xe0MAPBANDSECRET' + b'\x00' * 64 + b'\xff\xd9'
+    with open(os.path.join(_rig, 'mapbands', 'off0.jpg'), 'wb') as _fh:
+        _fh.write(_jpeg)
+    with open(os.path.join(_rig, 'mapbands', 'off0.json'), 'w') as _fh:
+        json.dump({'offerId': 'off0', 'pickup': 'MAPBANDSIDECAR'}, _fh)
+    import io as _io
+    _argv, _err = sys.argv, sys.stderr
+    sys.argv = ['sync', '--to', _rec.base, '--journal', _rj, '--quiet', '--config', _cfg,
+                '--local', _rec.base]
+    sys.stderr = _io.StringIO()
+    try:
+        SY.main()
+    finally:
+        sys.argv, sys.stderr = _argv, _err
+    ok_('a sync over a rig with map bands on disk sends its offers (%d requests)' % len(_rec.seen),
+        any(b for _, b in _rec.seen))
+    _all = b''.join(p.encode() + b for p, b in _rec.seen)
+    eq('...and no map band, sidecar or folder name in anything it sent',
+       [w for w in (b'\xff\xd8\xff', b'MAPBANDSECRET', b'MAPBANDSIDECAR', b'mapbands')
+        if w in _all], [])
+finally:
+    _rec.close()
+    shutil.rmtree(_rig, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d sync checks passed' % ok)
 sys.exit(1 if bad else 0)

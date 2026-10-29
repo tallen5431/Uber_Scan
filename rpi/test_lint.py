@@ -231,6 +231,22 @@ for name in beside:
     ok_('%s, inside a directory server.js makes, is ignored by git' % _inside,
         subprocess.run([_git, '-C', ROOT, 'check-ignore', '-q', _inside]).returncode == 0)
 
+# ...and the map bands the scanner keeps beside the journal (MAP_BANDS_DIR in
+# scan_pi.py): joined onto the journal's directory, so the scan above cannot
+# see them, and a picture of the app's map round a customer's door.
+try:
+    import scan_pi as _SP                                     # noqa: E402
+    _bands = os.path.relpath(_SP.map_bands_dir(os.path.join(ROOT, 'rpi', 'journal.jsonl')),
+                             ROOT)
+    eq('the map bands live in rpi/mapbands by default', _bands, os.path.join('rpi', 'mapbands'))
+except ImportError:                                           # no OpenCV here
+    _bands = os.path.join('rpi', 'mapbands')
+if _git:
+    for _f in ('o-123.jpg', 'o-123.json', 'o-123.jpg.part'):
+        ok_('%s/%s is ignored by git' % (_bands, _f),
+            subprocess.run([_git, '-C', ROOT, 'check-ignore', '-q',
+                            os.path.join(_bands, _f)]).returncode == 0)
+
 # ...and the rule the paragraph above STATES is now the rule this file ENFORCES,
 # which it did not. It asserted that both name shapes are gitignored — a fact
 # about `.gitignore` — and said in prose that the crop endpoint appends a pid

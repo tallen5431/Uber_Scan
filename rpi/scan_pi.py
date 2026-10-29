@@ -20,6 +20,7 @@ import math
 import os
 import re
 import queue
+import shutil
 import subprocess
 import sys
 import threading
@@ -938,19 +939,36 @@ def reader_record(last, now, offer_log=None, counters=None, beat=None,
     return record
 
 
-def answer_snap(folder, last, record):
+def answer_snap(folder, last, record, band=None):
     """reader.jpg, then reader.json, into the folder a press named. Never fatal.
 
     reader.jpg is `last['fitted']`: the greyscale card as it came off the warp,
     before preprocess() — the picture tesseract's input was made from, which is
     what "why did it read that?" is asked of. In that order, because the
     server takes reader.json arriving as the answer being complete.
+
+    `band`, MapBands.latest()'s answer: the newest offer's map band, copied in
+    as map.jpg and map.json before reader.json (see MAP_BANDS_DIR). reader.json
+    says which offer it was, or why there is none.
     """
     if last is not None:
         problem = PL.write_jpeg(os.path.join(folder, 'reader.jpg'),
                                 last['fitted'], quality=SCAN_QUALITY)
         if problem:
             record['noCrop'] = 'could not write reader.jpg: %s' % problem
+    if band:
+        try:
+            for src, name in ((band['jpg'], 'map.jpg'), (band.get('json'), 'map.json')):
+                if src and os.path.isfile(src):
+                    dst = os.path.join(folder, name)
+                    shutil.copyfile(src, dst + '.part')
+                    os.replace(dst + '.part', dst)
+            record['mapBand'] = {'offerId': band.get('offerId'), 'file': 'map.jpg',
+                                 'ageS': round(time.time() - band.get('savedAt', 0), 1)}
+        except (IOError, OSError, KeyError, TypeError) as e:
+            record['mapBand'] = 'could not copy the map band: %s' % e
+    else:
+        record['mapBand'] = None
     where = os.path.join(folder, 'reader.json')
     try:
         with open(where + '.part', 'w') as fh:
@@ -3481,6 +3499,297 @@ class MapLabels(object):
             pass
 
 
+# --- the map band, kept: data collection only ---------------------------------
+#
+# The owner, 29 Oct: "Yes add the map saving, fast track to experimental."
+# EXPERIMENTAL, AND COLLECTION ONLY. An offline prototype (estimating where an
+# order drops off from the route the app draws on its map) needs the map at
+# full resolution for offers that were later taken, to be scored afterwards
+# against the GPS stop the delivery really made. The 480x360 scene views are
+# too small: the pins are 36–44 px in a 1000-row view of the phone and a few
+# pixels in the scene view. So once per offer — Uber and DoorDash, an add-on
+# popup included — the map band above the card (map_band, the same straightened
+# crop the DoorDash label reader uses) is written to <journal dir>/mapbands/
+# as <offer id>.jpg with a small .json beside it. Nothing reads it here: no
+# panel, no figure, no verdict uses it.
+#
+#   - AFTER the offer line, on a thread of its own (MapBands), never in the
+#     read's way; the warp, the encode and the write all happen there. The
+#     encode and write are held to MAP_BANDS_CAP_S: an encode that took longer
+#     is dropped rather than written, and the offer is tried again later.
+#   - not on a whole-screen read, with no corners, or in low light (the band's
+#     mean grey under MAP_BANDS_DIM) — tried again on the card's next read, at
+#     most MAP_BANDS_TRIES times; saved once, never again for that offer.
+#   - a ring: at most MAP_BANDS_KEEP files and MAP_BANDS_MB megabytes, the
+#     oldest (by mtime) going first. ~100–150kB a band, so 400 is ~50MB.
+#   - never fatal: a disk error is logged once and the band skipped.
+#   - on by default; `"mapBands": false` in the config, or MAP_BANDS=0 in the
+#     environment, turns it off. `"mapBandsKeep"` and `"mapBandsMB"` move the
+#     caps.
+#
+# PRIVATE. The map shows street names round a customer's door. The folder is
+# in .gitignore, rpi/sync.py sends only journal rows and the config, and the
+# server serves none of it — only a 📷 Snap carries the newest band (from the
+# last SNAP_BAND_AGE_S) into that snap's folder as map.jpg and map.json, which
+# goes where the driver chooses to send that snap.
+MAP_BANDS_DIR = 'mapbands'
+MAP_BANDS_KEEP = 400
+MAP_BANDS_MB = 150
+MAP_BANDS_QUALITY = 80
+MAP_BANDS_CAP_S = 0.5
+# Mean grey under this: no picture of a screen at all (screen off, camera
+# blind). Low, because a dark-mode map at night is dark and is still a map.
+MAP_BANDS_DIM = 16
+MAP_BANDS_MAX_ROWS = 1400        # map_band gives ~780 at MAP_LABEL_HEIGHT; a guard
+MAP_BANDS_TRIES = 3
+SNAP_BAND_AGE_S = 120
+
+
+def map_bands_dir(journal_path):
+    """Where the map bands go: beside the journal, like the scans."""
+    return os.path.join(os.path.dirname(os.path.abspath(journal_path)), MAP_BANDS_DIR)
+
+
+def map_bands_setting(cfg, env=None):
+    """(on, keep, max_bytes, why_off) from the config and the environment."""
+    env = os.environ if env is None else env
+    cfg = cfg or {}
+
+    def number(key, default):
+        v = cfg.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+            return v
+        return default
+
+    keep = int(number('mapBandsKeep', MAP_BANDS_KEEP))
+    max_bytes = int(number('mapBandsMB', MAP_BANDS_MB) * 1024 * 1024)
+    flag = str(env.get('MAP_BANDS', '')).strip().lower()
+    if flag in ('0', 'off', 'false', 'no'):
+        return False, keep, max_bytes, 'MAP_BANDS=%s' % env.get('MAP_BANDS')
+    if cfg.get('mapBands') is False:
+        return False, keep, max_bytes, 'mapBands is false in the config'
+    return True, keep, max_bytes, None
+
+
+def _encode_jpeg(image, quality):
+    ok, buf = cv2.imencode('.jpg', image, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+    return buf.tobytes() if ok else None
+
+
+def map_band_meta(offer_id, parsed, geom, where=None, keep_places=True, at=None):
+    """The sidecar's fields that the loop knows at the offer line: the offer,
+    the screen it was read off, the card's own numbers and the fix the row got.
+    The band's own geometry is added when it is cut (MapBands._job)."""
+    parsed = parsed or {}
+    kind = OP.screen_type(parsed.get('text') or '')
+    roi = getattr(geom, 'roi', None)
+    quad = getattr(geom, 'quad', None)
+    meta = {'v': 1, 'offerId': offer_id,
+            'at': int((time.time() if at is None else at) * 1000),
+            'app': kind['app'], 'screen': kind['screen'],
+            'geom': {'quad': (np.asarray(quad, dtype=float).reshape(4, 2).round(1).tolist()
+                              if quad is not None else None),
+                     'roi': list(roi) if roi else None},
+            'pay': parsed.get('pay'), 'miles': parsed.get('miles'),
+            'minutes': parsed.get('minutes'),
+            'pickup': parsed.get('pickup'), 'pickupLine': parsed.get('pickupLine'),
+            'dropoff': parsed.get('dropoff')}
+    fix = JR.fix_fields(where, keep_places=keep_places)
+    meta.update({k: fix[k] for k in ('lat', 'lon', 'gpsOk', 'gpsErr', 'gpsAge')})
+    return meta
+
+
+class MapBands(object):
+    """The map band of each offer, kept once, off the loop. See MAP_BANDS_DIR.
+
+    `submit` never blocks and never raises: a band already being cut keeps its
+    turn and this one is tried on the card's next read. `latest()` is the
+    newest band written, for a 📷 Snap. `threaded` False (--no-thread) does
+    the work in `submit`, capped as ever."""
+
+    def __init__(self, where, keep=MAP_BANDS_KEEP, max_bytes=MAP_BANDS_MB * 1024 * 1024,
+                 threaded=True, encode=None, clock=time.monotonic,
+                 cap_s=MAP_BANDS_CAP_S, band=None):
+        self.where = where
+        self.keep = keep
+        self.max_bytes = max_bytes
+        self.encode = encode or _encode_jpeg
+        self.band = band or map_band
+        self.clock = clock
+        self.cap_s = cap_s
+        self.threaded = threaded
+        self.saved = []              # offer ids kept, newest last (bounded)
+        self.tries = {}
+        self.outcomes = []           # (offer_id, what) — for the tests and the log
+        self._latest = None
+        self._lock = threading.Lock()
+        self._said = set()
+        self._work = queue.Queue(maxsize=1)
+        self._thread = None
+        if threaded:
+            self._thread = threading.Thread(target=self._serve, name='mapband', daemon=True)
+            self._thread.start()
+
+    def submit(self, offer_id, frame, geom, meta=None):
+        try:
+            with self._lock:
+                if offer_id is None or offer_id in self.saved \
+                        or self.tries.get(offer_id, 0) >= MAP_BANDS_TRIES:
+                    return False
+            job = (offer_id, frame, geom, dict(meta or {}))
+            if self.threaded:
+                try:
+                    self._work.put_nowait(job)
+                except queue.Full:
+                    return False
+            with self._lock:
+                self.tries[offer_id] = self.tries.get(offer_id, 0) + 1
+                if len(self.tries) > 64:
+                    for k in list(self.tries)[:32]:
+                        self.tries.pop(k, None)
+            if not self.threaded:
+                self._job(*job)
+            return True
+        except Exception:                           # noqa: BLE001 — never the loop's
+            return False
+
+    def latest(self, now=None, max_age=SNAP_BAND_AGE_S):
+        """{'offerId', 'jpg', 'json', 'savedAt'} of the newest band written in
+        the last `max_age` seconds and still on disk, or None."""
+        with self._lock:
+            got = dict(self._latest) if self._latest else None
+        now = time.time() if now is None else now
+        if not got or not 0 <= now - got['savedAt'] <= max_age \
+                or not os.path.isfile(got['jpg']):
+            return None
+        return got
+
+    def _say_once(self, key, message):
+        if key not in self._said:
+            self._said.add(key)
+            log(message)
+
+    def _done(self, offer_id, what):
+        with self._lock:
+            self.outcomes = (self.outcomes + [(offer_id, what)])[-64:]
+        return what
+
+    def _job(self, offer_id, frame, geom, meta):
+        try:
+            band = self.band(frame, geom)
+        except Exception:                           # noqa: BLE001
+            band = None
+        if band is None or band.size == 0:
+            return self._done(offer_id, 'no band')
+        if float(band.mean()) < MAP_BANDS_DIM:
+            return self._done(offer_id, 'dim')
+        scale = 1.0
+        if band.shape[0] > MAP_BANDS_MAX_ROWS:
+            scale = MAP_BANDS_MAX_ROWS / float(band.shape[0])
+            band = cv2.resize(band, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        began = self.clock()
+        try:
+            data = self.encode(band, MAP_BANDS_QUALITY)
+        except Exception:                           # noqa: BLE001
+            data = None
+        took = self.clock() - began
+        if not data:
+            return self._done(offer_id, 'encode failed')
+        if took > self.cap_s:
+            self._say_once('slow', 'map band: encoding took %.2fs, over its %.1fs cap; '
+                                   'skipped (said once)' % (took, self.cap_s))
+            return self._done(offer_id, 'slow')
+        h = getattr(geom, 'roi', None)
+        top, bottom = MAP_LABEL_BAND
+        if h and top + 0.2 < float(h[1]) < bottom:
+            bottom = float(h[1])
+        meta['band'] = {'warpHeight': MAP_LABEL_HEIGHT, 'top': top, 'bottom': bottom,
+                        'width': int(band.shape[1]), 'height': int(band.shape[0]),
+                        'scale': round(scale, 4), 'quality': MAP_BANDS_QUALITY,
+                        'bytes': len(data), 'encodeMs': int(took * 1000)}
+        meta['geom']['frame'] = (list(frame.shape[:2]) if hasattr(frame, 'shape') else None)
+        safe = re.sub(r'[^A-Za-z0-9_.-]', '_', str(offer_id))[:60] or 'offer'
+        jpg = os.path.join(self.where, safe + '.jpg')
+        side = os.path.join(self.where, safe + '.json')
+        try:
+            os.makedirs(self.where, exist_ok=True)
+            with open(jpg + '.part', 'wb') as fh:
+                fh.write(data)
+            os.replace(jpg + '.part', jpg)
+            with open(side + '.part', 'w') as fh:
+                json.dump(meta, fh, indent=1)
+            os.replace(side + '.part', side)
+        except (IOError, OSError, TypeError, ValueError) as e:
+            for p in (jpg + '.part', side + '.part'):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            self._say_once('disk', 'map band: could not write into %s (%s); bands are '
+                                   'skipped while that lasts (said once)' % (self.where, e))
+            return self._done(offer_id, 'disk')
+        with self._lock:
+            self.saved = (self.saved + [offer_id])[-256:]
+            self._latest = {'offerId': offer_id, 'jpg': jpg, 'json': side,
+                            'savedAt': time.time()}
+        self.prune()
+        return self._done(offer_id, 'saved')
+
+    def prune(self):
+        """Oldest first until both caps hold: MAP_BANDS_KEEP files and
+        MAP_BANDS_MB megabytes. A .json goes with its .jpg."""
+        try:
+            found = []
+            for name in os.listdir(self.where):
+                if not name.endswith('.jpg'):
+                    continue
+                p = os.path.join(self.where, name)
+                st = os.stat(p)
+                side = p[:-len('.jpg')] + '.json'
+                size = st.st_size + (os.path.getsize(side) if os.path.isfile(side) else 0)
+                found.append((st.st_mtime, name, p, side, size))
+        except OSError:
+            return 0
+        found.sort()
+        total = sum(f[4] for f in found)
+        count = len(found)
+        dropped = 0
+        for _, _, p, side, size in found:
+            if count <= self.keep and total <= self.max_bytes:
+                break
+            for q in (p, side):
+                try:
+                    os.remove(q)
+                except OSError:
+                    pass
+            count -= 1
+            total -= size
+            dropped += 1
+        if dropped:
+            self._say_once('cap', 'map band: %s is at its cap (%d files, %dMB); the '
+                                  'oldest now go as new ones arrive'
+                           % (self.where, self.keep, self.max_bytes // (1024 * 1024)))
+        return dropped
+
+    def _serve(self):
+        while True:
+            job = self._work.get()
+            if job is None:
+                return
+            try:
+                self._job(*job)
+            except Exception:                       # noqa: BLE001
+                pass
+
+    def close(self):
+        if self._thread is None:
+            return
+        try:
+            self._work.put_nowait(None)
+        except queue.Full:
+            pass
+
+
 def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
     """Which offer is now on the record, so the driver can say they took it.
 
@@ -4248,6 +4557,15 @@ def main():
     # with, so the line can be told again carrying the label.
     map_labels = MapLabels(threaded=not args.no_thread)
     labels = {'for': {}, 'told': None}
+    # ...and every offer's map band, kept once on a thread of its own after
+    # its offer line. Collection only; see MAP_BANDS_DIR.
+    bands_on, bands_keep, bands_bytes, bands_off = map_bands_setting(cfg)
+    map_bands = None
+    if bands_on and not args.no_journal:
+        map_bands = MapBands(map_bands_dir(args.journal), keep=bands_keep,
+                             max_bytes=bands_bytes, threaded=not args.no_thread)
+    elif bands_off:
+        log('map bands off (%s)' % bands_off)
 
     def tell_label():
         got = map_labels.take()
@@ -5291,10 +5609,27 @@ def main():
                 # "Customer dropoff", once per card, AFTER its own line: the
                 # read is on MapLabels' thread, and its answer is told on a
                 # second offer line (tell_label). Not on a whole-screen read,
-                # which is a ⌖ press's question.
-                if not whole and geom is not None and wants_map_label(parsed):
+                # which is a ⌖ press's question — asked of the GEOMETRY, as
+                # MapBands asks it: `whole` by here is OP.is_whole, a card with
+                # its whole journey on it, and a DoorDash card read well is
+                # exactly that, so "not whole" sent only half-read cards and
+                # the reader never saw a good one (the owner's shifts of 26-29
+                # Oct: 31 DoorDash offers, not one label read).
+                if geom is not None and not getattr(geom, 'whole', False) \
+                        and wants_map_label(parsed):
                     map_labels.submit(offer_log.id, frame, geom,
                                       store=[parsed.get('pickup'), parsed.get('pickupLine')])
+            # ...and the map band above the card, kept once per offer for the
+            # map-geometry study (MAP_BANDS_DIR): every offer card, Uber's and
+            # DoorDash's, AFTER its offer line, on MapBands' thread. Collection
+            # only — nothing the panel shows comes from it. Not `whole`, which
+            # by here is OP.is_whole (a card with its whole journey on it), not
+            # a ⌖ read: map_band refuses a whole-screen geometry itself.
+            if map_bands is not None and offer_log.id is not None \
+                    and geom is not None and not getattr(geom, 'whole', False):
+                map_bands.submit(offer_log.id, frame, geom, map_band_meta(
+                    offer_log.id, parsed, geom, where=where,
+                    keep_places=offer_log.keep_places))
 
         if args.display:
             cv2.imshow('uber-scan', render_panel(rate, parsed, whole=whole,
@@ -5602,7 +5937,10 @@ def main():
                     # The health window is timed on the monotonic clock
                     # (Health.report's callers), and so is how long it has run.
                     counters=health.counters(time.monotonic()), beat=last_beat,
-                    phone=phone))
+                    phone=phone),
+                    # ...and the newest offer's map band, when one was kept
+                    # in the last two minutes (MAP_BANDS_DIR).
+                    band=map_bands.latest(now_snap) if map_bands is not None else None)
             request = cam.capture_request()
             try:
                 # The Y plane leads the YUV420 buffer, and luma is all the gate
@@ -6219,6 +6557,8 @@ def main():
             updown.stop()
         reader.close()
         map_labels.close()
+        if map_bands is not None:
+            map_bands.close()
         if phone is not None:
             phone.stop()
         cam.stop()
