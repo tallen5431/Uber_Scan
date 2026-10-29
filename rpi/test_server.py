@@ -9318,6 +9318,35 @@ try:
 finally:
     stop(_sp)
 
+# The owner's snap of 29 Oct, 17:47 (names, streets and towns invented): two
+# Uber orders held, the add-on's card a CORNER, and the Trip Planner read in
+# the card box only, listing three dropoffs. The door on the corner's street
+# is the add-on's (cardStreet, off a box read now); the base order's door is
+# its own; the first customer's door, on no card's street, waits — it is not
+# the add-on's by elimination, as the add-on's card names other streets.
+_xp, _xb, _xj, _xh = _cserver('boxcorner', CARRY_TWO='0')
+try:
+    _took2(_xb, _card('x-a', 14.07, minutes=30.0, pickup='Fable Grill',
+                      dropoff='Tamsin Pkwy SE, Dunmore'))
+    _took2(_xb, _card('x-b', 15.30, minutes=18.0, addon=True, pickup='Kestrel Noodle Bar',
+                      dropoff='Vesper St & Corrow Dr NE, Dunmore'))
+    _xbox = _ppage(False, [('Ines B.', '820 Halden Rd NE', 'Dunmore', 1107),
+                           ('Rhea A.', '631 Corrow Dr NE', 'Dunmore', 1113),
+                           ('Jules K.', '1100 S Tamsin Pkwy SE', 'Dunmore', 1122)])
+    _xbox['sighting']['whole'] = False
+    _say(_xbox)
+    time.sleep(0.3)
+    _st = get(_xb, '/api/status')
+    eq('[box corner] a card-box planner with two held: each door on one card\'s street is '
+       'that order\'s (cardStreet), the add-on\'s off its corner; the third waits, never '
+       'the add-on\'s by elimination',
+       ([(o.get('dropoff'), o.get('cue')) for o in _orders(_xb)], _st.get('unowned'),
+        _st.get('chooser')),
+       ([('1100 S Tamsin Pkwy SE, Dunmore', 'cardStreet'),
+         ('631 Corrow Dr NE, Dunmore', 'cardStreet')], 1, None))
+finally:
+    stop(_xp)
+
 # ...and with carrying two ON the trip is one order to the cap: an add-on
 # joins past it, and a Took past two TRIPS puts down the trip that ends
 # soonest, every order of it, said by the trip's pay.

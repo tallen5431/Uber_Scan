@@ -749,8 +749,32 @@
    * only: the stop keeps its text as read on the hold and in the journal. */
   function plannerName(name) {
     var s = String(name == null ? '' : name).replace(/\s+/g, ' ').trim();
+    s = nameNoise(s);
     var m = /^[a-z]{1,2} (?=[A-Z])/.exec(s);
     return m ? s.slice(m[0].length) : s;
+  }
+
+  /* ...and the litter round a CUSTOMER's name (the owner's snaps of 28-29
+     Oct: "i © anise v. .", "7 © JesusR. te", "oe jonathan |."): the screen's
+     edge, the icon and the initial's dot read as letters and marks. Only
+     where the read carries a mark (a token of no letter or digit, "©",
+     "|."), which no name on file does: the tokens of one or two characters
+     and marks before the first word of three letters or more go, and the
+     marks and one- or two-lowercase-letter tokens after the last. An
+     initial ("v.", "Q.") stays. Assemble's nameWords asks the same of a
+     name's words. Display only, as above; a read with no word is left be. */
+  function nameNoise(s) {
+    var ws = s.split(' ').filter(Boolean);
+    function mark(w) { return !/[A-Za-z0-9]/.test(w); }
+    function word(w) { return /[A-Za-z]{3,}/.test(w); }
+    if (!ws.some(mark) || !ws.some(word)) return s;
+    var i = 0;
+    while (i < ws.length && !word(ws[i]) && (mark(ws[i]) || ws[i].length <= 2)) i += 1;
+    ws = ws.slice(i);
+    while (ws.length > 1 && (mark(ws[ws.length - 1]) || /^[a-z]{1,2}$/.test(ws[ws.length - 1]))) {
+      ws.pop();
+    }
+    return ws.join(' ');
   }
 
   /* The held order's pickups off its Trip Planner, in the order the planner
@@ -1439,9 +1463,10 @@
    *
    * { lat, lon, name, approx: true, n, miles }: the middle of them
    * (middleOf, as a pin's), how many, and how far apart the two farthest
-   * are. Never for 'together', never for a corner, a merchant's name or a
-   * place by its name (pickPlace), and never with no disc: a spread is only
-   * small against a card's reach.
+   * are. Never for 'together', a merchant's name or a place by its name
+   * (pickPlace), and never with no disc: a spread is only small against a
+   * card's reach. A corner met more than once is cornerArea's, by the same
+   * rule (the owner, 29 Oct).
    *
    * ...and (the owner's DoorDash snap of 24 Oct, 19:23: "It is better to
    * route something than nothing at all") two more, for routing still:
@@ -1492,6 +1517,22 @@
     res.area = { lat: mid.lat, lon: mid.lon, name: pts[0].name || '', approx: true,
                  n: pts.length, miles: spreadOf(pts) };
     if (cut) res.area.cut = true;
+    return res;
+  }
+
+  /* A corner whose streets meet more than once inside the disc ('corners':
+     a street that loops, a divided road met twice) where every meeting lies
+     within AREA_MI of the others: their middle as the general area, as
+     withArea gives a door's (the owner, 29 Oct: an add-on's corner held,
+     "it doesnt need to be perfect but close"). Never a pin — `at` stays
+     null and the refusal stands — so drawing only (areaEnd, dropPoint). */
+  function cornerArea(res, meets, disc) {
+    if (!res || res.at || res.why !== 'corners' || !disc || !disc.at) return res;
+    var inside = (meets || []).filter(function (m) { return crowMiles(disc.at, m) <= disc.miles; });
+    if (inside.length < 2 || !agreeing(inside, AREA_MI)) return res;
+    var mid = middleOf(inside);
+    res.area = { lat: mid.lat, lon: mid.lon, name: inside[0].name || '', approx: true,
+                 n: inside.length, miles: spreadOf(inside) };
     return res;
   }
 
@@ -2608,6 +2649,36 @@
     var miles = figs.map(function (f) { return f.miles; });
     var lo = Math.min.apply(null, miles), hi = Math.max.apply(null, miles);
     return { lo: lo, hi: hi, stated: oneAnswer(lo, hi), gap: figs[0] };
+  }
+
+  /* The run through two orders AS DRAWN, approximate ends allowed (the
+   * owner's snap of 29 Oct: ① refused "4 fit its card and disagree" with its
+   * answers one area, ② at its corner — and the run went car -> D2, straight,
+   * ① left out; commit 7972d72's known gap, "with two orders in the car the
+   * run through both orders doesn't use an area"). `runs` is heldRuns'
+   * answer, `at` every place's point to draw by its key: a pin, or what the
+   * single-order ladder would route to (an area, `approx: true`; a corner's
+   * meeting or one of its streets). The lines heldRuns' own drawing takes —
+   * the one run when the planner gave the order, else each order's own — as
+   * points, each place with no point left out, and `skip` the words for the
+   * ends left out (dropsSkipped's). Null with no runs.
+   *
+   * DRAWING ONLY. The figure is detourOrders' over `found` alone, so an
+   * approximate end never reaches it, never a pin, never the GPS drop. */
+  function heldRunsDrawn(runs, at) {
+    if (!runs || !Array.isArray(runs.runs)) return null;
+    var pts = at || {};
+    function ok(p) { return !!p && isFinite(p.lat) && isFinite(p.lon); }
+    var draws = runs.known ? [runs.runs[0] || []] : (runs.own || []);
+    var missed = 0;
+    var lines = draws.map(function (r) {
+      return (r || []).map(function (e) {
+        var p = e && ok(pts[e.q]) ? pts[e.q] : null;
+        if (!p && e && e.n) missed += 1;
+        return p;
+      }).filter(Boolean);
+    });
+    return { lines: lines, skip: missed ? dropsSkipped(missed) : null };
   }
 
   /* --- how each place was found, to draw ------------------------------------
@@ -4008,7 +4079,7 @@
       if (res.why === 'several') res.why = 'corners';
       else if (res.why === 'none') res.why = 'nomeet';
       res.seen = seen;
-      return res;
+      return cornerArea(res, meets, disc);
     });
   };
 
@@ -4841,6 +4912,7 @@
            clipToDisc: clipToDisc, stretchInDisc: stretchInDisc, nearestOn: nearestOn,
            stretchSpan: stretchSpan, spanRefusal: spanRefusal, ON_WAY_MI: ON_WAY_MI,
            heldRuns: heldRuns, oneAnswer: oneAnswer, detourOrders: detourOrders,
+           heldRunsDrawn: heldRunsDrawn,
            SPAN_STEP_MI: SPAN_STEP_MI,
            NbxSearch: NbxSearch, nbxSettings: nbxSettings,
            AGREE_MI: AGREE_MI, STREET_AGREE_MI: STREET_AGREE_MI, AREA_MI: AREA_MI,

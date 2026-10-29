@@ -267,6 +267,33 @@ eq('...each order\'s own run, for the map when the order is not known: its picku
 eq('...and an end nobody named is no run at all',
    MV.heldRuns(PLAN2, [ORD2[0], Object.assign({}, ORD2[1], { end: null })], []), null);
 
+/* ...and DRAWN with an approximate end (the owner's snap of 29 Oct: ① no
+   pin, its answers one area; ② at its corner — the run went car -> D2 and
+   left ① out): each end its pin or its area, faded, in the run's order;
+   a place with no point at all left out and said. Drawing only: the figure
+   (detourOrders over pins) is not handed these points. Invented places. */
+var AREA1 = { lat: 34.01, lon: -84.52, approx: true, n: 4, miles: 0.24 },
+    CORNER2 = { lat: 34.03, lon: -84.36 }, MILL = { lat: 34.02, lon: -84.36 },
+    WREN = { lat: 33.96, lon: -84.55 };
+var atAll = {};
+atAll[ORD2[0].end] = AREA1; atAll[ORD2[1].end] = CORNER2;
+atAll['310 Mill St, Roswell, GA 30075'] = MILL; atAll['12 Wren St, Marietta, GA 30060'] = WREN;
+var drawnKnown = MV.heldRunsDrawn(hr, atAll);
+eq('[two drawn] the planner\'s order through both ends, ①\'s area in its place',
+   JSON.stringify([drawnKnown.lines, drawnKnown.skip]),
+   JSON.stringify([[[MILL, CORNER2, WREN, AREA1]], null]));
+var atNo1 = Object.assign({}, atAll);
+delete atNo1[ORD2[0].end];
+var drawnOwn = MV.heldRunsDrawn(cross, atNo1);
+eq('[two drawn] ...the order not known: each order\'s own run; an end with no point left '
+   + 'out and said',
+   JSON.stringify([drawnOwn.lines, drawnOwn.skip]),
+   JSON.stringify([[[WREN], [MILL, CORNER2]], 'route skips 1 dropoff, not found']));
+eq('[two drawn] ...and no runs, nothing', MV.heldRunsDrawn(null, atAll), null);
+eq('[two drawn] ...the figure is still refused with an approximate end (no pin in `found`)',
+   MV.detourOrders({ lat: 33.95, lon: -84.55 }, { lat: 34.0, lon: -84.56 },
+                   [[null, CORNER2]]), null);
+
 // The car at Marietta Square; ① ends 7 mi north, ② 9 mi east, and the new
 // pickup a few blocks off the road north. North first, it is on the way
 // (0.09 mi); east first it is 2.27 mi out of the way: two answers.
@@ -1188,6 +1215,12 @@ async function nucbox() {
                      'oS Fable Grill', 'ab cd Fable'].map(MV.plannerName)),
      JSON.stringify(['Fable Crust Pizza - Kestrelton', 'Fable Grill', 'oe fable grill',
                      'oS Fable Grill', 'ab cd Fable']));
+  eq('...and a customer\'s name its litter of marks and stray letters round it (the owner, '
+     + '28-29 Oct; invented names), an initial kept, a name with no mark as it was',
+     JSON.stringify(['i \u00a9 anise v. .', '7 \u00a9 JesusR. te', 'oe jonathan |.',
+                     'y \u00a9 jonathan.', 'Pat Q.', '7 Leaves Cafe', '\u00a9 .'].map(MV.plannerName)),
+     JSON.stringify(['anise v.', 'JesusR.', 'jonathan', 'jonathan.', 'Pat Q.', '7 Leaves Cafe',
+                     '\u00a9 .']));
   var HELD_STOPS = [
     { kind: 'pickup', name: 'oe Fable Crust Pizza', street: '4410 Fable W Lantern Parkway Northwest',
       city: 'Kestrelton', zip: '30144',
@@ -2746,10 +2779,14 @@ async function nucbox() {
     got = await nbxS.place('Juniper Cir & Northgate Dr, Marietta', d3, ST);
     eq('two streets that meet in two places inside the card are refused, not pinned '
        + 'at one', JSON.stringify([got.at, got.why, got.n]), JSON.stringify([null, 'corners', 2]));
+    eq('...their middle kept as the general area, never a pin (cornerArea; the owner, 29 Oct): '
+       + 'the run may route there, the refusal stands',
+       JSON.stringify([got.at, !!(got.area && got.area.approx), got.area && got.area.n,
+                       got.area && got.area.miles <= 1.0]), JSON.stringify([null, true, 2, true]));
     got = await nbxS.place('Juniper Cir & Northgate Dr, Marietta',
                            MV.discFor(card({ miles: 0.2 })), ST);
     eq('...and where neither is inside the card, none, with the nearest',
-       [got.why, got.nearest && got.nearest.toFixed(1)].join(','), 'nomeet,0.9');
+       [got.why, got.nearest && got.nearest.toFixed(1), got.area].join(','), 'nomeet,0.9,');
     got = await nbxS.place('Church St SE & Northgate Dr, Marietta', d3, ST);
     eq('two streets that do not meet at all are said not to meet',
        [got.why, got.nearest].join(','), 'nomeet,');
@@ -3023,10 +3060,15 @@ async function nucbox() {
          .join(','), '10,1,true');
     var two2 = await nbxS.place('Juniper Cir & Northgate Dr, Marietta', d3, ST);
     var corners = MV.located(two2, d3, 'Juniper', 'held');
-    eq('a corner refused for meeting twice: both meetings drawn, each with the refusal',
+    // (29 Oct: the two meetings lie within AREA_MI, so the refusal now
+    // carries their general area, cornerArea, and each tip says so.)
+    eq('a corner refused for meeting twice: both meetings drawn, each with the refusal and '
+       + 'the area it is routed to',
        [corners.marks.length, corners.marks.every(function (m) {
-         return m.kind === 'candidate' && m.tip === MV.nbxRefusal(two2, d3, 'Juniper', 'held');
-       })].join(','), '2,true');
+         return m.kind === 'candidate' && m.tip === MV.nbxRefusal(two2, d3, 'Juniper', 'held')
+           + ' · ≈ routed to the area, not a door';
+       }), two2.at, !!(two2.area && two2.area.approx), two2.area && two2.area.n].join(','),
+       '2,true,,true,2');
     var fox = await nbxS.place('Foxglove Trl & Northgate Dr, Marietta', d3, ST);
     var foxL = MV.located(fox, d3, 'Foxglove', 'held');
     eq('...and a corner pinned: its meeting drawn under the pin, saying so',

@@ -11399,11 +11399,15 @@ try:
         and [round(h.get('radius'), 3) for h in _of(st.get('cornerHow'), 'mv-how mv-disc mv-held')]
         == [round(3.5 * _MI, 3)])
     _k = _of(st.get('twiceHow'), 'mv-how mv-cand mv-held')
+    # (29 Oct: the two meetings lie within a mile, so the refusal carries
+    # their general area, MV's cornerArea, and each tip says it is routed
+    # there; still no pin.)
     ok_('a corner refused for meeting twice: both meetings drawn, no pin, each with '
-        'the refusal (%r)' % (_k,),
+        'the refusal and the area it is routed to (%r)' % (_k,),
         sorted(k.get('ll')[0] for k in _k) == [33.965, 33.969]
         and st.get('twiceHeld') is None
-        and all(k.get('tip') == _bare(st.get('twice')) for k in _k))
+        and all(k.get('tip') == _bare(st.get('twice')).split(' · ≈ routed')[0]
+                + ' · ≈ routed to the area, not a door' for k in _k))
     def _crow(a, b):
         import math
         la, lb = math.radians(a[0]), math.radians(b[0])

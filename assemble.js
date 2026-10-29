@@ -1202,6 +1202,35 @@
     return held && !held.dropoffScanned && typeof held.dropoff === 'string' ? held.dropoff : null;
   }
 
+  /* The town the held card printed for its end, and the town a door read
+   * gives, as letters ("Kennesaw, GA 30144" is "kennesaw"); null where either
+   * has none (a card's "Customer dropoff", a line with no comma). The owner,
+   * 29 Oct: "make the parser and routing more flexible" — and with it, a door
+   * filed onto an order is held to that order's own card where the card can
+   * say no: a different town is not its door. Two readings one slip apart
+   * (wordsAlike: a letter misread, the state run on) are the same town. */
+  function townWord(text) {
+    var ws = String(text || '').toLowerCase().split(/[^a-z0-9]+/)
+      .filter(function (x) { return x && !/\d/.test(x); });
+    while (ws.length > 1 && ws[ws.length - 1].length <= 2) ws.pop();   // the state
+    var w = ws.join('');
+    return w.length >= 3 ? w : null;
+  }
+
+  function cardTown(o) {
+    var text = cardEndOf(o);
+    if (typeof text !== 'string' || text.indexOf(',') === -1) return null;
+    return townWord(text.split(',')[1]);
+  }
+
+  function townClash(o, d) {
+    var t = cardTown(o);
+    if (!t || !d) return false;
+    var c = townWord(typeof d.city === 'string' && d.city ? d.city
+      : typeof d.line === 'string' && d.line.indexOf(',') !== -1 ? d.line.split(',')[1] : null);
+    return !!c && c !== t && !wordsAlike(c, t);
+  }
+
   // Minutes past midnight, unwrapped across it: on a trip that runs past
   // twelve, 11:50 PM comes before 12:10 AM.
   function byKeys(drops) {
@@ -1919,7 +1948,7 @@
     // stop over the bar) rather than how much glass the read covered. So the
     // box's page is judged by those same rules, one page alone, with the same
     // rules on which order it belongs to (one order held here; two go to
-    // sightingMany, which still takes whole reads only).
+    // sightingMany, which asks a box read's doors the card's street alone).
     //
     // Two things the box cannot say and is not asked: `framed` — the top of a
     // box read is the box's edge, not the list's, so "nothing above the
@@ -2561,6 +2590,16 @@
     return cardStreets(cardEndOf(o)).indexOf(core) !== -1;
   }
 
+  // Whether a door may be the order's by its card: the card printed no
+  // street for its end, or names this door's street.
+  function cardFits(o, d) {
+    var streets = cardStreets(cardEndOf(o));
+    if (!streets.length) return true;
+    var core = streetCore(typeof d.street === 'string' && d.street ? d.street
+      : String(d.line || '').split(',')[0]);
+    return !!core && streets.indexOf(core) !== -1;
+  }
+
   function aPickupOfAny(orders, d) {
     return orders.some(function (o) {
       if (plannerPickup(o, d)) return true;
@@ -2579,6 +2618,9 @@
     if (!core) return;
     var naming = all.filter(function (o) { return cardHas(o, core); });
     if (naming.length > 1) return;
+    // (A card naming the street but printing another town is not naming
+    // this door: townClash. It still stops elimination below.)
+    if (naming.length === 1 && townClash(naming[0], d)) return;
     if (naming.length === 1) {
       var f = naming[0].fields && naming[0].fields.dropoff;
       if (live.indexOf(naming[0]) !== -1 && !(f && f.from === 'press')) {
@@ -2599,6 +2641,12 @@
     // (The first order's own door read again is on its card's street, so
     // cardStreet answered it above and it never reaches here.)
     if (filedEnd(other)) return;
+    // ...and only onto an order whose OWN card does not clash: one that
+    // printed a street for its end (the door is on no card's street, so not
+    // on its) or another town is never handed a door by elimination. The
+    // owner's snap of 29 Oct: three dropoffs on the planner, the add-on's
+    // card a corner — the first customer's door was not the add-on's.
+    if (cardStreets(cardEndOf(other)).length || townClash(other, d)) return;
     out.votes.push({ cue: 'elimination', order: other });
   }
 
@@ -2646,7 +2694,8 @@
     var partial = d.partial === true;
     var crowded = d.bounded === true && Array.isArray(d.others)
       && d.others.length + 1 > live.length;
-    if (live.length === 1 && !(ctx && ctx.card) && !crowded && !partial) {
+    if (live.length === 1 && !(ctx && ctx.card) && !crowded && !partial
+        && !(d.asked === false && townClash(live[0], d))) {
       out.order = live[0];
       out.cue = 'only';
       return out;
@@ -2690,7 +2739,9 @@
           return true;
         });
         var left = live.filter(function (o) { return owned.indexOf(o) === -1; });
-        if (whole && left.length === 1) {
+        // ...never onto an order whose card printed a street this door is
+        // not on (cardFits): the leftover door may be no order of ours.
+        if (whole && left.length === 1 && cardFits(left[0], d)) {
           out.votes.push({ cue: 'elimination', order: left[0] });
         }
       }
@@ -2713,6 +2764,15 @@
       }
     }
     streetCues(orders, live, d, out);
+    // An unprompted door in another town than an order's card printed is no
+    // vote for that order by a cue that reads the list or the card's street
+    // (townClash). The screen's own word for the order — the store, the
+    // bar's "Expected by" against its "Deliver by" — stands.
+    if (d.asked === false) {
+      out.votes = out.votes.filter(function (v) {
+        return v.cue === 'name' || v.cue === 'deadline' || !townClash(v.order, d);
+      });
+    }
     var picked = [];
     out.votes.forEach(function (v) { if (picked.indexOf(v.order) === -1) picked.push(v.order); });
     if (picked.length === 1) {
@@ -2824,7 +2884,35 @@
       if (nav) out.candidates.push(nav);
       return out;
     }
-    if (s.whole !== true || !pageStops(s.stops)) return out;
+    // A CARD-BOX READ with two held (the owner's snap of 29 Oct: an add-on
+    // whose card printed a corner, the planner listing three dropoffs — all
+    // of them box reads — and the door on the corner's street filed nowhere,
+    // as this took whole reads only): each dropoff read whole is offered
+    // `partial`, for the card's-street cue alone (streetCues), exactly as a
+    // list not seen whole is below. A box page is never pooled, stitched or
+    // a verdict (sighting(), the one-order case, says why); unprompted only,
+    // and only while a held card printed a street for its end.
+    if (s.whole !== true) {
+      if (s.asked === true || !pageStops(s.stops)) return out;
+      if (!orders.some(function (o) { return cardStreets(cardEndOf(o)).length; })) return out;
+      var box = { at: out.at === null ? now : out.at, app: app, asked: false,
+                  top: false, bottom: false,
+                  stops: s.stops.filter(function (x) { return x && typeof x === 'object'; }) };
+      out.candidates = plannerCandidates(pageView(box), box, false).filter(function (c) {
+        var seen = c.line + '|part';
+        if (st.said[seen]) return false;
+        st.said[seen] = true;
+        return true;
+      });
+      out.candidates.forEach(function (c) {
+        c.partial = true;
+        c.store = null;
+        c.listDrops = null;
+        c.pageAts = [box.at];
+      });
+      return out;
+    }
+    if (!pageStops(s.stops)) return out;
     var page = { at: out.at === null ? now : out.at, app: app,
                  epoch: st.epoch[app] || 0, asked: s.asked === true,
                  titled: s.titled === true,

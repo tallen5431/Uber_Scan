@@ -6893,6 +6893,13 @@
              heldId: held ? heldId : null,
              held2: held2, heldCard2: held2 ? (second.card || null) : null,
              heldId2: held2 ? (second.holdId || null) : null,
+             // ...the general area the server's refusal kept for ②'s end
+             // (endArea, heldEndState), drawing only as ①'s (areaEnd), and
+             // whether ② is an Uber add-on onto ①'s trip, whose places are
+             // searched in ①'s disc grown by its miles, as the server
+             // searches them (heldDisc; disc2Of).
+             heldArea2: held2 && !second.endPinned && second.endArea ? second.endArea : null,
+             heldOnto2: !!(held2 && second.addOn && second.of && second.of === heldId),
              runs: runs, noEnd2: noEnd2, carNow: carNow,
              // The number each order goes by on the pins: ① and ② by holdId.
              heldNs: heldList.reduce(function (m, x) { m[x.holdId] = x.n; return m; }, {}),
@@ -7008,7 +7015,7 @@
      searchHeldEnd). */
   async function askNucBox(want, names, here, nbx, found, gone, landed, post) {
     var discs = { card: MV.discFor(want.card), held: MV.discFor(want.heldCard),
-                  held2: MV.discFor(want.heldCard2) };
+                  held2: disc2Of(want) };
     var left = [];
     for (var n = 0; n < names.length; n++) {
       var q = names[n];
@@ -7101,6 +7108,8 @@
     if ((!a || !a.band) && held && heldSaid && !heldSaid.endPinned && heldSaid.endArea
         && heldSaid.endArea.band === true) a = heldSaid.endArea;
     if (!a && held && heldSaid && !heldSaid.endPinned) a = heldSaid.endArea;
+    // ...and ②'s, kept the same way on its own order (want.heldArea2).
+    if (!a && !held && q === want.held2 && want.heldArea2) a = want.heldArea2;
     if (!a || typeof a.lat !== 'number' || typeof a.lon !== 'number'
         || !isFinite(a.lat) || !isFinite(a.lon)) return null;
     // ...a list cut at the limit (`cut`) or the street's own area (`rough`)
@@ -7142,12 +7151,64 @@
     return p;
   }
 
-  async function cornerSide(q, card, car) {
+  async function cornerSide(q, card, car, inDisc) {
     var plan = MV.searchPlan ? MV.searchPlan(q) : null;
-    var disc = MV.discFor(card);
+    var disc = inDisc || MV.discFor(card);
     if (!plan || plan.kind !== 'cross' || !disc || !mapNbx.cornerStreet) return null;
     var res = await mapNbx.cornerStreet(plan, disc, car);
     return res && res.at ? res.at : null;
+  }
+
+  /* The disc ②'s places are searched in: its card's, or — an Uber add-on
+     onto ①'s trip (want.heldOnto2) — ①'s grown by the add-on's own miles
+     (MV.discFor's base; server.js heldDisc, the owner's 26 Oct shift). Its
+     own card's alone was a box round where the add-on came up, and the
+     corner it printed could fall outside it. */
+  function disc2Of(want) {
+    if (!want.heldCard2) return null;
+    if (!want.heldOnto2) return MV.discFor(want.heldCard2);
+    return MV.discFor(Object.assign({}, want.heldCard2, { addon: true }),
+                      MV.discFor(want.heldCard));
+  }
+
+  /* TWO ORDERS IN THE CAR, the run drawn where a pin is missing (the
+     owner's snap of 29 Oct): each order's end its pin where the map trusts
+     it, else what the one-order ladder routes to — a corner's street
+     (cornerSide), its general area (areaEnd: Map view's own, else the
+     server's endArea) — and each pickup its pin. Resolves { q: point } for
+     MV.heldRunsDrawn, filling `areas` (held, held2) and `notes` as the
+     ladder does, or null once the walk was left. DRAWING ONLY: never in
+     `found`, so never posted, never a figure's point, never the GPS drop. */
+  async function twoRunPoints(want, found, here, j, areas, notes, streets, gone) {
+    var at = {};
+    j.heldPicks.forEach(function (p) {
+      if (p.at && !p.off && !j.wrong[p.q]) at[p.q] = p.at;
+    });
+    var ends = [[want.held, j.held, j.off.held, want.heldCard, MV.discFor(want.heldCard), 'held'],
+                [want.held2, j.held2, j.off.held2, want.heldCard2, disc2Of(want), 'held2']];
+    for (var i = 0; i < ends.length; i++) {
+      var q = ends[i][0], pin = ends[i][1];
+      if (!q) continue;
+      if (pin) {
+        if (!ends[i][2] && !j.wrong[q]) {
+          at[q] = pin;
+          var pr = MV.routeRung(q, pin, null);
+          if (pr && pr !== 'door' && MV.ROUTE_NOTES[pr]) notes.push(MV.ROUTE_NOTES[pr]);
+        }
+        continue;
+      }
+      var side = streets ? await cornerSide(q, ends[i][3], here || want.carNow,   // eslint-disable-line no-await-in-loop
+                                            ends[i][4]) : null;
+      if (gone()) return null;
+      if (side) { at[q] = side; notes.push(MV.ROUTE_NOTES.street); continue; }
+      var area = areaEnd(want, q, i === 0, null);
+      if (area) {
+        at[q] = area;
+        areas[ends[i][5]] = area;
+        notes.push(MV.areaNote(area));
+      }
+    }
+    return at;
   }
 
   async function askRoad(want, found, here, gone, measuring) {
@@ -7429,6 +7490,25 @@
               [here].concat(draws[di].filter(Boolean))));
             if (viewMode !== 'map' || mapFor !== key) return;
           }
+        } else if (tj.runs && MV.heldRunsDrawn && MV.ROUTE_NOTES) {
+          /* ...and where the line states no figure, the run DRAWN all the
+             same (the owner, 29 Oct: "make the parser and routing more
+             flexible it doesnt need to be perfect but close"): each end its
+             pin, a corner's street or its general area, faded "≈", by road
+             as the one-order run is (twoRunPoints, MV.heldRunsDrawn). The
+             figure stays refused (mapRefusal, over `found`). */
+          var tat = await twoRunPoints(want, found, here, tj, areas, notes, nbx.streets, gone);
+          if (!tat) return;
+          var drawn = MV.heldRunsDrawn(want.runs, tat);
+          var tstart = here || want.carNow;
+          heldRoad = { lines: [], pts: drawn.lines };
+          for (var ti = 0; ti < drawn.lines.length; ti++) {
+            var tpts = (tstart ? [tstart] : []).concat(drawn.lines[ti]);
+            heldRoad.lines.push(tpts.length >= 2   // eslint-disable-line no-await-in-loop
+              ? await mapNbx.runLine(tpts) : null);
+            if (viewMode !== 'map' || mapFor !== key) return;
+          }
+          if (drawn.skip) notes.push(drawn.skip);
         }
       } else if (nbx.route && mapNbx && MV.routeLadder) {
         /* From the card's fix, or with none the live one (want.carNow); with
@@ -8309,6 +8389,10 @@
           + bandSaid(areas.held), want.held, true, '≈',
           { faded: true });
     }
+    if (!j.held2 && areas.held2) {
+      put(areas.held2, '#f5a524', '≈ the area order \u2461 in your car is going to — '
+          + bandSaid(areas.held2), want.held2, true, '≈', { faded: true });
+    }
     if (!drop && areas.drop) {
       put(areas.drop, '#f5a524', '≈ the area this one is dropped in — '
           + bandSaid(areas.drop), want.dropoff, false, '≈',
@@ -8423,8 +8507,10 @@
     // known and one line through both would draw an order nobody gave.
     // `heldRoad` is then { lines }, a road or null per line, in that order.
     if (j.runs) {
-      (j.runs.known ? [j.runs.runs[0]] : j.runs.own).forEach(function (r, i) {
+      (j.runs.known ? [j.runs.runs[0]] : j.runs.own).forEach(function (r0, i) {
         var line = heldRoad && heldRoad.lines ? heldRoad.lines[i] : null;
+        // (...through an approximate end where the walk drew one: twoRunPoints.)
+        var r = heldRoad && heldRoad.pts && heldRoad.pts[i] ? heldRoad.pts[i] : r0;
         var pts = line || MV.heldRun(here || want.carNow, r.slice(0, -1), r[r.length - 1]);
         if (pts.length) {
           runLine(pts, { color: '#f5a524', opacity: .9,
@@ -8589,6 +8675,7 @@
     // caption was the offer's own pickup's).
     var aboutAreas = [];
     if (areas.held) aboutAreas.push([shortPlace(want.held, DISC_PLACE_SHOWN), MV.areaNote(areas.held)]);
+    if (areas.held2) aboutAreas.push([shortPlace(want.held2, DISC_PLACE_SHOWN), MV.areaNote(areas.held2)]);
     if (areas.pick) {
       aboutAreas.push([shortPlace(want.pickup, DISC_PLACE_SHOWN),
                        'trip: ' + MV.areaNote(areas.pick, true), areas.pick]);

@@ -1661,9 +1661,15 @@ SEQ.forEach(function (seq) {
       run(Object.assign({}, box, { at: 500 }))[1]],
      [corner, corner, corner]);
   (function () {
-    var r = A.sighting(A.fresh(), [held(), held({ id: 'o-other', acceptedAt: 1200 })], box, 45000);
-    eq('[box 26 Oct] with two orders held a card-box page files nothing (sightingMany: whole '
-       + 'reads only)', r.candidates.length, 0);
+    var two = [held(), held({ id: 'o-other', acceptedAt: 1200 })];
+    var r = A.sighting(A.fresh(), two, box, 45000);
+    // (Changed 29 Oct: a box read with two held now offers its door `partial`,
+    // for the card's-street cue alone; it was nothing. This door is on
+    // neither card's street, so still nothing is filed.)
+    eq('[box 26 Oct] with two orders held a card-box page files nothing: its door is offered '
+       + '`partial` and no card names its street',
+       [r.candidates.map(function (c) { return c.partial; }),
+        A.attribute(A.fresh(), two, r.candidates[0]).why], [[true], 'no cue']);
   })();
   // A box page decided by the whole page's rules: its layout (a Pickup and a
   // Dropoff each with its time, "View details", the bar) stands in for the
@@ -2795,6 +2801,92 @@ SEQ.forEach(function (seq) {
      [said([A1, B1]), said([P, A1])]);
   eq('[press merge] ...and a pressed read with nothing kept is the read, copied',
      said(A.mergePlanner(null, [aPressed], null, true)), said([aPressed]));
+})();
+
+/* ---- an add-on's corner, the planner's doors off the card box (the owner, 29 Oct) ----
+ *
+ * Two Uber orders held, ② an add-on whose card printed a CORNER; the Trip
+ * Planner, read in the card box only, listed three dropoffs. The door on one
+ * side of ②'s corner is ②'s (cardStreet, now off a box read too); the first
+ * customer's door is nobody's by elimination, as ②'s card names another
+ * street; and a door in another town than a card printed is never that
+ * order's. Streets, towns and names invented. */
+(function () {
+  function order(id, at, more) {
+    var o = Object.assign({ id: id, acceptedAt: at, tookAt: at + 5, holdId: id + '@' + at,
+                            minutes: 40, app: 'uber', pickup: null, deliverBy: null,
+                            dropoff: null, dropoffScanned: false }, more || {});
+    o.seenAs = { dropoff: o.dropoff, tookAt: o.tookAt };
+    A.fieldsOf(o);
+    return o;
+  }
+  function trip() {
+    var base = order('b', 1000, { dropoff: 'Tamsin Pkwy SE, Dunmore', pickup: 'Fable Grill' });
+    A.file(base, { line: '1100 S Tamsin Pkwy SE, Dunmore', street: '1100 S Tamsin Pkwy SE',
+                   city: 'Dunmore', at: 2000 }, { to: 'hold', from: 'planner' }, null);
+    var add = order('a', 5000, { addOn: true, of: base.holdId, pickup: 'Kestrel Noodle Bar',
+                                 dropoff: 'Vesper St & Corrow Dr NE, Dunmore' });
+    return [base, add];
+  }
+  function stop(name, street, city, t) {
+    return { kind: 'dropoff', orders: 1, name: name, expectedBy: t, street: street,
+             city: city, state: 'GA', zip: null, line: street + ', ' + city, partial: null };
+  }
+  var STOPS = [stop('Ines B.', '820 Halden Rd NE', 'Dunmore', 1107),
+               stop('Rhea A.', '631 Corrow Dr NE', 'Dunmore', 1113),
+               stop('Jules K.', '1100 S Tamsin Pkwy SE', 'Dunmore', 1122)];
+  function boxRead(at, stops, more) {
+    return Object.assign({ at: at, asked: false, whole: false, titled: false, app: 'uber',
+                           screen: 'uber.planner', page: { top: false, bottom: false },
+                           stops: stops }, more || {});
+  }
+  function who(orders, x, st) {
+    var r = A.attribute(st || A.fresh(), orders, x);
+    return [r.order ? r.order.id : null, r.cue, r.why];
+  }
+  var t = trip(), st = A.fresh();
+  var cands = A.sighting(st, t, boxRead(9000, STOPS), 9000).candidates;
+  eq('[box two] a card-box read with two held offers each door read whole, `partial`',
+     cands.map(function (c) { return [c.line, c.partial, c.planner]; }),
+     [['820 Halden Rd NE, Dunmore', true, true], ['631 Corrow Dr NE, Dunmore', true, true],
+      ['1100 S Tamsin Pkwy SE, Dunmore', true, true]]);
+  eq('[box two] ...the same doors read again are not offered twice',
+     A.sighting(st, t, boxRead(9500, STOPS), 9500).candidates, []);
+  eq('[box two] ...nor a pressed box read (the press\'s rule), nor with no card street held',
+     [A.sighting(A.fresh(), t, boxRead(9000, STOPS, { asked: true }), 9000).candidates,
+      A.sighting(A.fresh(), [order('p', 1000), order('q', 5000)], boxRead(9000, STOPS),
+                 9000).candidates], [[], []]);
+  eq('[box two] the snap: the door on one side of the add-on\'s corner is the add-on\'s',
+     who(t, cands[1]), ['a', 'cardStreet', null]);
+  eq('[box two] ...and the base order\'s own door is its own',
+     who(t, cands[2]), ['b', 'cardStreet', null]);
+  eq('[box two] ...and the first customer\'s door, on no card\'s street, is NOT the add-on\'s '
+     + 'by elimination: its card names other streets (it used to be filed there)',
+     who(t, cands[0]), [null, null, 'no cue']);
+  A.file(t[1], cands[1], A.dropoff(t[1], cands[1], null), st);
+  eq('[box two] filed as server.js files it: the add-on\'s end is the door, rank planner',
+     [t[1].dropoff, t[1].fields.dropoff.from], ['631 Corrow Dr NE, Dunmore', 'planner']);
+  // A list seen whole: the leftover door is no order's whose card it clashes with.
+  eq('[box two] list elimination never onto an order whose card names another street',
+     who(trip(), Object.assign({}, cands[0], { partial: false, bounded: true,
+                                                others: ['1100 S Tamsin Pkwy SE, Dunmore'] })),
+     [null, null, 'no cue']);
+  // Another town.
+  var away = Object.assign({}, cands[1], { line: '631 Corrow Dr NE, Ashby', city: 'Ashby' });
+  eq('[town] a door on the card\'s street in ANOTHER town than the card printed: no cue',
+     who(trip(), away), [null, null, 'no cue']);
+  eq('[town] ...and the town read with a slip or its state is the same town',
+     [who(trip(), Object.assign({}, cands[1], { city: 'Dunmorc' })),
+      who(trip(), Object.assign({}, cands[1], { city: 'Dunmore GA' }))],
+     [['a', 'cardStreet', null], ['a', 'cardStreet', null]]);
+  var one = order('o', 1000, { dropoff: 'Vesper St & Corrow Dr NE, Dunmore' });
+  var label = { line: '77 Ostrander Way, Ashby', street: '77 Ostrander Way', city: 'Ashby',
+                asked: false, labelled: 'dropoff', planner: false, at: 3000 };
+  eq('[town] `only` is not given to an order whose card printed another town',
+     who([one], label), [null, null, 'no cue']);
+  eq('[town] ...but with ONE order held, filing is as before: the town is a rule of which '
+     + 'order, never a refusal of the only one (a border town would lose a real end)',
+     A.dropoff(one, label, null).to, 'hold');
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
