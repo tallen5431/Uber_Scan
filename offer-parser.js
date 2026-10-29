@@ -1581,6 +1581,16 @@
     return street.slice(0, m.index) + ' Dr' + street.slice(m.index + m[0].length);
   }
 
+  /* The phone's edge in front of the house number: "Te <n> <Name> Rd NW" and
+     "ie <n> <Name> Ln" on the owner's planner read of 28 Oct, 17:48. The
+     labels' edge word (PLANNER_EDGE_WORD) followed by a house number, only on
+     a line the planner grammar took for the street line. See
+     PLANNER_EDGE_HOUSE in offer_parser.py. */
+  var PLANNER_EDGE_HOUSE = /^([^A-Za-z0-9]{0,3})[A-Za-z]{1,2}[^A-Za-z0-9\s]{0,2} (?=\d{1,6} [A-Za-z])/;
+  function plannerEdgeHouse(line) {
+    return String(line || '').replace(PLANNER_EDGE_HOUSE, '$1');
+  }
+
   function plannerEdgeCut(line) {
     PLANNER_EDGE_MARK.lastIndex = 0;
     var m;
@@ -1631,7 +1641,7 @@
         tail = !!after;
       }
     }
-    var street = plannerEdgeCut(streetLine || '').replace(PLANNER_EDGE, '').replace(PLANNER_UNIT, '');
+    var street = plannerEdgeCut(plannerEdgeHouse(streetLine)).replace(PLANNER_EDGE, '').replace(PLANNER_UNIT, '');
     var lone = PLANNER_LONE_LETTER.exec(street);
     if (lone && tail) street = street.slice(0, lone.index + lone[0].length - 1).replace(/\s+$/, '');
     var quad = PLANNER_QUADRANT_LETTER.exec(street);
@@ -1782,7 +1792,7 @@
         break;
       }
       var cut = plannerCut(l);
-      if (cut !== -1 && /^\W{0,3}\d/.test(l)) {
+      if (cut !== -1 && /^\W{0,3}\d/.test(plannerEdgeHouse(l))) {
         townAt = k; streetLine = l.slice(0, cut); townLine = l.slice(cut + 1).trim();
         // A line over a street that carries its own town is the place's name.
         place = plannerPlace(under.slice(0, k), townLine);
@@ -1793,7 +1803,7 @@
     // whole read of 22 Oct: "<n> <Name> Dr NW" / "e" / "Kennesaw, GA"): the
     // town on the third line, only with no word on the second and a house
     // number opening the first. See _planner_address_lines.
-    if (townAt === -1 && under.length >= 3 && /^\W{0,3}\d/.test(under[0])
+    if (townAt === -1 && under.length >= 3 && /^\W{0,3}\d/.test(plannerEdgeHouse(under[0]))
         && !/[A-Za-z]{2}/.test(under[1]) && plannerTown(under[2])) {
       townAt = 2; streetLine = under[0]; townLine = under[2];
     }

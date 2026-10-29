@@ -1527,6 +1527,43 @@
     return !namesClash && sameStreet(a.line || a.street, b.line || b.street);
   }
 
+  // How far apart two reads' "Expected by" may be and still be one stop by
+  // its name alone (sameNameStop), in minutes. Chosen, not measured: the
+  // owner's shift of 28 Oct, 20:36, read one restaurant's pickup due 8:41 and
+  // then 8:42, no street on either read, and the hold kept the pickup twice.
+  // A run slips a minute or two between reads; five is room for that and
+  // still well under the spacing of two stops of one trip.
+  var NAME_SLIP_MINUTES = 5;
+
+  // A name's initial, the capital standing alone after a word ("Pat Q." is
+  // Q), or null. sameName reads words of three letters and more, so "Pat Q."
+  // and "Pat R." are alike there; for a stop matched by its name ALONE, with
+  // its time moved, two initials that differ are two customers.
+  function initialOf(name) {
+    var m = /[A-Za-z]{3,}\s+([A-Z])(?![A-Za-z])/.exec(typeof name === 'string' ? name : '');
+    return m ? m[1] : null;
+  }
+
+  // The same kind under the same name, its "Expected by" moved by a minute or
+  // a few (NAME_SLIP_MINUTES) and no door to go by: one stop. Both names must
+  // read (named) and be the one name (sameName), their initials must not
+  // differ, and doors both reads have must be one street — so two customers
+  // due the same minute under two names stay two (slotJoins' review of 27
+  // Oct), and so do two of one first name at two doors. mergePlanner asks
+  // this after samePlannerStop has had every pair, as sameDoorStop.
+  function sameNameStop(a, b) {
+    if (!a || !b || !a.kind || a.kind !== b.kind) return false;
+    if (!named(a) || !named(b) || !sameName(a, b)) return false;
+    var ia = initialOf(a.name), ib = initialOf(b.name);
+    if (ia && ib && ia !== ib) return false;
+    var timed = function (x) { return typeof x.expectedBy === 'number' && isFinite(x.expectedBy); };
+    if (!timed(a) || !timed(b)) return false;
+    var d = Math.abs(a.expectedBy - b.expectedBy) % 1440;
+    if (Math.min(d, 1440 - d) > NAME_SLIP_MINUTES) return false;
+    var da = a.line || a.street, db = b.line || b.street;
+    return !(da && db && !sameStreet(da, db));
+  }
+
   // Whether a header with nothing under it and a stop beside it can be one
   // stop where two reads meet.
   function headerJoins(a, b) {
@@ -1607,11 +1644,18 @@
         if (!used[j] && samePlannerStop(o, news[j])) { match[i] = j; used[j] = true; return; }
       }
     });
-    // ...then one whose "Expected by" moved, by its door (sameDoorStop).
+    // ...then one whose "Expected by" moved, by its door (sameDoorStop), or
+    // by a minute or a few under its name (sameNameStop).
     olds.forEach(function (o, i) {
       if (match[i] !== -1) return;
       for (var j = 0; j < news.length; j++) {
         if (!used[j] && sameDoorStop(o, news[j])) { match[i] = j; used[j] = true; return; }
+      }
+    });
+    olds.forEach(function (o, i) {
+      if (match[i] !== -1) return;
+      for (var j = 0; j < news.length; j++) {
+        if (!used[j] && sameNameStop(o, news[j])) { match[i] = j; used[j] = true; return; }
       }
     });
     // ...a header with nothing under it, beside a stop in common, is the stop

@@ -2916,7 +2916,10 @@ function bandHeldNow(h) {
 
 // pickInDisc's refusals, in the panel's words — and pickPlace's one of its
 // own, the place asked after the door and nothing of that name answered.
-var END_WHY = { nodoor: 'no house number', none: 'not inside the card\'s reach',
+// 'nodoor' is the NucBox finding the street and not the door, in Map view's
+// own words for it (map-view.js), never "no house number": that is the text
+// with no number printed at all, refused before anything is asked.
+var END_WHY = { nodoor: 'street found, not that door', none: 'not inside the card\'s reach',
                 several: 'several answers', capped: 'too many answers',
                 noplace: 'no door, place not found' };
 

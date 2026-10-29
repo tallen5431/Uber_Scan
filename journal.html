@@ -4478,6 +4478,10 @@
       return o.endBy === 'place' ? '\u25cf armed by place'
         : o.endBy === 'street' ? '\u25cf armed by street' : '\u25cf armed';
     }
+    // The NucBox found the street and not the door: the panel's short words
+    // (END_WHY_SHORT in live.html), its first three ("street found, not")
+    // saying nothing.
+    if (o.endWhy === 'street found, not that door') return 'not that door';
     if (o.endWhy) return String(o.endWhy).split(' ').slice(0, 3).join(' ');
     return '\u25cb not armed';
   }

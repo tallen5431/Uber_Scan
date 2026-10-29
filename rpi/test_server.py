@@ -6588,7 +6588,7 @@ try:
         _atook(_ab, 'a-street', _KES)
         _h = _settled(_ab)
         eq('[auto arm] a street-only answer does not arm, and says why',
-           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
         eq('[auto arm] ...asked once for that dropoff', len(_aasked('4821')), 1)
 
         _atook(_ab, 'a-far', _COBB, miles=2.0)
@@ -6649,11 +6649,11 @@ try:
         _h = _settled(_ab)
         eq('[directional retry] a house of that number on another street is not the door: the '
            'road\'s refusal stands', (_h.get('endPinned'), _h.get('endAsked'), _h.get('endWhy')),
-           (False, None, 'no house number'))
+           (False, None, 'street found, not that door'))
         _atook(_ab, 'a-dir-far', '810 Ardley West Corwin Parkway, Kennesaw, GA 30144', miles=1.0)
         _h = _settled(_ab)
         eq('[directional retry] ...nor the door outside the held card\'s disc',
-           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
 
         # The same order, its dropoff changed by a ⌖ Scan: asked again.
         _atook(_ab, 'a-change', _KES, miles=6.0)
@@ -6851,7 +6851,7 @@ try:
         # The other two have none: the index was to give theirs.)
         eq('[streets down] a door whose search answered keeps the search\'s refusal when the '
            'street index refuses the connection: the name rescue, the short court, the area',
-           _sdgot, [(False, 'not inside the card\'s reach', False), (False, 'no house number', True),
+           _sdgot, [(False, 'not inside the card\'s reach', False), (False, 'street found, not that door', True),
                     (False, 'not inside the card\'s reach', False)])
         _atook(_sdb, 'sd-next', _COBB)
         _settled(_sdb, lambda h: h.get('endPinned'))
@@ -6861,7 +6861,7 @@ try:
            [(r['id'], (r.get('end') or {}).get('why')) for r in _sdrows
             if r.get('kind') == 'drop' and r.get('id', '').startswith('sd-')
             and r.get('id') != 'sd-next'],
-           [('sd-name', 'not inside the card\'s reach'), ('sd-court', 'no house number'),
+           [('sd-name', 'not inside the card\'s reach'), ('sd-court', 'street found, not that door'),
             ('sd-area', 'not inside the card\'s reach')])
         eq('[streets down] ...while the panel\'s word for the index is down',
            (get(_sdb, '/api/status').get('nucbox') or {}).get('streets', {}).get('up'), False)
@@ -7164,7 +7164,7 @@ try:
         _atook(_db, 'd-why', _KES)
         _h = _settled(_db)
         eq('[auto arm] (the premise: the order\'s first dropoff was refused)',
-           _h.get('endWhy'), 'no house number')
+           _h.get('endWhy'), 'street found, not that door')
     finally:
         stop(_dp)
     _dfake = os.path.join(_adir, 'd', 'scan.py')
@@ -7912,11 +7912,11 @@ try:
         _h = _settled(_stb)
         eq('[street arm] a road of 1.2 km is never armed by its street: the refusal stands',
            (_h.get('endPinned'), _h.get('endBy'), _h.get('endWhy')),
-           (False, None, 'no house number'))
+           (False, None, 'street found, not that door'))
         _atook(_stb, 's-two', '77 Fennick Ct, Marietta')
         _h = _settled(_stb)
         eq('[street arm] two short courts of one name inside the disc are neither',
-           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
         # Mutation catch-up (21 Oct). A 0.7 mi card (a 1.2 mi disc): the box
         # still holds both Fennick Courts, the disc only the one by the Square.
         _atook(_stb, 's-near', '77 Fennick Ct, Marietta', miles=0.7)
@@ -7928,17 +7928,17 @@ try:
         _h = _settled(_stb)
         eq('[street arm] a street the index reads as the name only by its ocr rule is not the same '
            'name: the refusal stands',
-           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
         _atook(_stb, 's-long', '40 Quarrel Ct, Marietta')
         _h = _settled(_stb)
         eq('[street arm] a short court beside a street of its name too long to send its shape is '
            'one of two (unknown is not none): neither',
-           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
         _atook(_stb, 's-untyped', '12 Pembury, Marietta')
         _h = _settled(_stb)
         eq('[street arm] a street read with no type word is no street name to ask the index by, '
            'even one the index holds with none (Pembury, 120 m)',
-           (_h.get('endPinned'), _h.get('endWhy')), (False, 'no house number'))
+           (_h.get('endPinned'), _h.get('endWhy')), (False, 'street found, not that door'))
         # The court's door pressed with a place printed for its stop: the place
         # is asked first, and found nowhere (or too short to ask), the street.
         for _pn, _pl in (('s-place', 'Nowhere Hall'), ('s-shortplace', 'Inn')):
@@ -7979,7 +7979,7 @@ try:
         _h = _settled(_stb)
         eq('[street arm] with NUCBOX_STREETS unset the index is never asked, nothing armed',
            (_h.get('endPinned'), _h.get('endWhy'), len(_hkasked('/api/streets/whole')) - _n),
-           (False, 'no house number', 0))
+           (False, 'street found, not that door', 0))
     finally:
         stop(_stp)
 
@@ -8125,7 +8125,7 @@ try:
                 dropoff=_KES, app='uber')
         _h = _settled(_spb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
         eq('[server pickups] ...a house of that number on another street is not its door',
-           (_h.get('pickupsPinned'), _h.get('pickupsWhy')), (0, 'no house number'))
+           (_h.get('pickupsPinned'), _h.get('pickupsWhy')), (0, 'street found, not that door'))
         post(_spb, '/api/delivered', {})
 
         # Left held for the restart below.
@@ -8324,7 +8324,7 @@ try:
         _n = len(_hkasked('q='))
         eq('[place] no place, no place search: the door\'s refusal stands',
            (_plend(_hkb, 'p-none', None), len(_hkasked('q=')) - _n),
-           ((None, False, None, 'no house number'), 0))
+           ((None, False, None, 'street found, not that door'), 0))
         # ...and a place learnt for that same end text is searched for: the
         # same line pressed again, this time with its place.
         _hksays([_plpress('Wrenfield Parking Deck')])
@@ -8423,7 +8423,7 @@ try:
         _r = (_edrop(_hkj, 'e-street') or [{}])[0]
         eq('[pin log] a replaced order\'s row says its end was not pinned, and why',
            (_r.get('by'), _r.get('end'), _r.get('pickups')),
-           ('replaced', {'by': None, 'why': 'no house number', 'asked': 'door'},
+           ('replaced', {'by': None, 'why': 'street found, not that door', 'asked': 'door'},
             {'pinned': 0, 'why': 'no house number'}))
 
         # Every other screen, while an order is held: a planner page of nine

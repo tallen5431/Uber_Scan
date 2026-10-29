@@ -2964,6 +2964,27 @@ def _planner_or_slip(street):
     return street[:m.start()] + ' Dr' + street[m.end():]
 
 
+# THE PHONE'S EDGE IN FRONT OF THE HOUSE NUMBER. The owner's planner read of
+# 28 Oct, 17:48, gave both dropoffs' streets as "Te <n> <Name> Rd NW" and
+# "ie <n> <Name> Ln" (the numbers and names left out here): the edge and the
+# stop's icon beside the street line read as letters, STREET wants the house
+# number first, and both stops kept their town and lost their street. The
+# edge word is the labels' (PLANNER_EDGE_WORD): one or two letters and a mark
+# or two, then a space; here it must be followed by a house number — digits
+# and a space then a letter — which a street line opens with and no word of
+# a street's does. Only on a line the planner grammar has already taken for
+# the street line under an "Address" label (_planner_address,
+# _planner_address_lines); never anywhere else on the screen.
+PLANNER_EDGE_HOUSE = re.compile(
+    r'^([^A-Za-z0-9]{0,3})[A-Za-z]{1,2}[^A-Za-z0-9\s]{0,2} (?=\d{1,6} [A-Za-z])', ASCII)
+
+
+def _planner_edge_house(line):
+    """`line` less the edge's word in front of its house number: see
+    PLANNER_EDGE_HOUSE. Unchanged when no house number follows."""
+    return PLANNER_EDGE_HOUSE.sub(r'\1', line or '', count=1)
+
+
 def _planner_edge_cut(line):
     """`line` less the edge's mark and what follows it: see PLANNER_EDGE_MARK.
     Unchanged when what follows the mark holds a word."""
@@ -3063,7 +3084,8 @@ def _planner_address(street_line, town_line, label_line=None):
             if zipcode and PLANNER_COUNTRY_TAIL.match(after):
                 after = ''
             tail = bool(after)
-    street = PLANNER_UNIT.sub('', PLANNER_EDGE.sub('', _planner_edge_cut(street_line or '')))
+    street = PLANNER_UNIT.sub('', PLANNER_EDGE.sub('', _planner_edge_cut(
+        _planner_edge_house(street_line))))
     lone = PLANNER_LONE_LETTER.search(street)
     if lone and tail:
         street = street[:lone.start(1)].rstrip()
@@ -3200,7 +3222,7 @@ def _planner_address_lines(block, label):
             street_line = under[0] if j else None
             break
         cut = _planner_cut(l)
-        if cut is not None and re.match(r'\W{0,3}\d', l):
+        if cut is not None and re.match(r'\W{0,3}\d', _planner_edge_house(l)):
             town_at, street_line, town_line = j, l[:cut.start()], l[cut.end():].strip()
             # A line over a street that carries its own town is the place's
             # name: see the fourth layout, below.
@@ -3211,7 +3233,8 @@ def _planner_address_lines(block, label):
     # cloth beside the phone read as a line of its own. The town is taken off
     # the THIRD line only when the second holds no word (no two letters in a
     # row) and the first opens with a house number.
-    if town_at is None and len(under) >= 3 and re.match(r'\W{0,3}\d', under[0]) \
+    if town_at is None and len(under) >= 3 \
+            and re.match(r'\W{0,3}\d', _planner_edge_house(under[0])) \
             and not re.search(r'[A-Za-z]{2}', under[1]) and _planner_town(under[2]):
         town_at, street_line, town_line = 2, under[0], under[2]
     if town_at is None:

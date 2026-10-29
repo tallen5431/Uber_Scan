@@ -7417,6 +7417,98 @@
      "place": null
     }
    ]
+  },
+  {
+   "name": "the phone's edge read as two letters in front of the house number is not the street's",
+   "_why": "The owner's planner read of 28 Oct, 17:48: both dropoffs' street lines came back with the edge and the stop's icon in front, \"Te <n> <Name> Rd NW\" and \"ie <n> <Name> Ln\", STREET wanted the house number first, and both stops kept the town alone. One or two letters (and a mark or two) then a space, in front of a house number, on the street line under the label, are the edge's (PLANNER_EDGE_HOUSE). Names, numbers and streets invented; the layout and the noise as read.",
+   "text": "Trip Planner\nDropoff + 1 order\nPat Q.\nExpected by 6:23 PM\nbe Address\nTe 4821 Kestrel Fern Rd NW\n. Marietta, GA\nView details\nDropoff + 1 order\nLee R.\nExpected by 6:32 PM\noo Address\nie 1180 Wrenfield Ln\n. Marietta, GA\nView details\nStop New Requests",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 1103,
+     "street": "4821 Kestrel Fern Rd NW",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "4821 Kestrel Fern Rd NW, Marietta",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Lee R.",
+     "expectedBy": 1112,
+     "street": "1180 Wrenfield Ln",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "1180 Wrenfield Ln, Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...and with a mark after the letters, on a street that carries its own town",
+   "_why": "The edge word as the labels take it (PLANNER_EDGE_WORD): letters, a mark, a space. \"A. <n> <Name> Dr SE, <Town>, GA\" on one line is the third layout, split at its comma once the edge is off. Invented.",
+   "text": "Pickup - 1 order\nFable Bagels\nExpected by 9:10 PM\nAddress\nA. 2130 Wren Hollow Dr SE, Kennesaw, GA\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "pickup",
+     "orders": 1,
+     "name": "Fable Bagels",
+     "expectedBy": 1270,
+     "street": "2130 Wren Hollow Dr SE",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "2130 Wren Hollow Dr SE, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...but three letters in front of the number are a word, and no edge",
+   "_why": "\"Tee <n> <Name> Rd\": the edge reads as one or two letters, never a word of three, so the line is not a street line and the stop keeps its town (as before this rule). Invented.",
+   "text": "Dropoff - 1 order\nPat Q.\nExpected by 6:23 PM\nAddress\nTee 4821 Kestrel Rd\nMarietta, GA\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 1103,
+     "street": null,
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...nor two letters in front of something that is not a house number",
+   "_why": "\"Te Kestrel Rd\": the edge word is taken only before digits, a space and a letter, so a street with no number keeps none (and is still no street). Invented.",
+   "text": "Dropoff - 1 order\nPat Q.\nExpected by 6:23 PM\nAddress\nTe Kestrel Rd\nMarietta, GA\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Pat Q.",
+     "expectedBy": 1103,
+     "street": null,
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "Marietta",
+     "place": null
+    }
+   ]
   }
  ],
  "_screens_comment": "What screen a reading is, for a sighting: screen_type / screenType, {app, screen}. At least one case per screen type, and the traps the order of the recognisers is there for: an offer's furniture over the idle map, DoorDash's stops card whose 'Drop off 2 orders' reads as a planner stop header, a navigation bar's 'Expected by', and DoorDash's own screens that the list has no name for, which are 'unknown' rather than the nearest name. The app is 'doordash' for a dd. screen, null for 'unknown' and 'uber' otherwise. The layouts and the OCR's marks are the 12 Oct shift's; every name, street, number and zone is invented.",

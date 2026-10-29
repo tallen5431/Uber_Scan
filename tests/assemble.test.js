@@ -2703,6 +2703,38 @@ SEQ.forEach(function (seq) {
      [said(A.mergePlanner([cafe430], [cafe445, cafe430], null)),
       said(A.mergePlanner([cafe430, cafe445], [cafe430, cafe445], null))],
      [said([cafe445, cafe430]), said([cafe430, cafe445])]);
+  // A stop whose "Expected by" moved by a minute with no street on either
+  // read (the owner's shift of 28 Oct, 20:36: one restaurant's pickup due
+  // 8:41, then 8:42, kept twice; the store invented): one stop by its name,
+  // within NAME_SLIP_MINUTES (5), the newer time.
+  var shop41 = stop('pickup', 'Fable Pizza', 1241, null, null);
+  var shop42 = stop('pickup', 'Fable Pizza', 1242, null, null);
+  var kim = stop('dropoff', 'Kim B.', 1237, '4821 Kestrel Dr', 'Kennesaw');
+  eq('[planner names] a pickup whose time moved a minute, no street on either read, is one '
+     + 'stop under its name, the newer time',
+     [said(A.mergePlanner([kim, shop42], [shop41], null)),
+      said(A.mergePlanner([shop42], [kim, shop41], null)),
+      said(A.mergePlanner([shop41], [stop('pickup', 'oe Fable Pizza |.', 1246, null, null)],
+                          null)).length],
+     [said([kim, shop41]), said([kim, shop41]), 1]);
+  eq('[planner names] ...but not past five minutes, nor under two names, nor two initials, nor '
+     + 'two doors, nor with a name of marks alone',
+     [said(A.mergePlanner([shop41], [stop('pickup', 'Fable Pizza', 1247, null, null)],
+                          null)).length,
+      said(A.mergePlanner([mara], [stop('dropoff', 'Jules K.', 204, null, null)], null)).length,
+      said(A.mergePlanner([stop('dropoff', 'Pat Q.', 203, null, null)],
+                          [stop('dropoff', 'Pat R.', 204, null, null)], null)).length,
+      said(A.mergePlanner([stop('dropoff', 'Mara T.', 203, '9 Elm Dr', 'Kennesaw')],
+                          [stop('dropoff', 'Mara T.', 204, '1985 Cobb Parkway', 'Kennesaw')],
+                          null)).length,
+      said(A.mergePlanner([stop('dropoff', 'oe |.', 203, null, null)],
+                          [stop('dropoff', 'x =.', 204, null, null)], null)).length],
+     [2, 2, 2, 2, 2]);
+  eq('[planner names] ...and two customers due the same minute under two names stay two',
+     said(A.mergePlanner([mara, jules], [jules, mara], null)).length, 2);
+  eq('[planner names] ...past midnight the minutes wrap: 11:59 PM and 12:01 AM are two minutes',
+     said(A.mergePlanner([stop('pickup', 'Fable Pizza', 1439, null, null)],
+                         [stop('pickup', 'Fable Pizza', 1, null, null)], null)).length, 1);
   // A read that shows the top AND the foot is the whole list: a kept stop it
   // does not show is not there any more.
   eq('[planner pages] a read showing the top and the foot is the whole list; a kept stop it '

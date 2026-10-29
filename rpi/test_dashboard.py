@@ -1254,6 +1254,13 @@ const framed = (page) => page.waitForFunction(
                             endWhy: 'no door, place not found' } });
     await tick(300);
     const noPlace = await held();
+    // ...and the street found and not the door (server.js END_WHY 'nodoor'):
+    // a number was printed, so not "no house number" (28 Oct).
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: false, arrived: false, endBy: null,
+                            endWhy: 'street found, not that door' } });
+    await tick(300);
+    const notDoor = await held();
     // ...and the car arrives at the door: the pickup is behind it.
     await push({ alive: true, at: Date.now(), atDropoff: true,
                  heldEnd: { endPinned: true, arrived: true, endWhy: null } });
@@ -1320,7 +1327,7 @@ const framed = (page) => page.waitForFunction(
     out.heldCard = { tookUp: tookUp, tookGoneNow: tookGoneNow, tookGoneLater: tookGoneLater,
                      empty: empty, between: between, visited: visited,
                      refused: refused, byPlace: byPlace, byStreet: byStreet, noPlace: noPlace,
-                     arrived: arrived,
+                     notDoor: notDoor, arrived: arrived,
                      offerUp: offerUp, batchUp: batchUp, batchBetween: batchBetween,
                      batchReading: batchReading, oneDrop: oneDrop, detailTap: detailTap,
                      gone: gone };
@@ -8894,6 +8901,8 @@ try:
            (hc.get('byStreet') or {}).get('line'), '$28.08 in car · ● armed by street')
         eq('[place] ...and a place refused too, in a few words',
            (hc.get('noPlace') or {}).get('line'), '$28.08 in car · no door/place')
+        eq('[no door] ...and the street found, not that door, apart from no house number printed',
+           (hc.get('notDoor') or {}).get('line'), '$28.08 in car · not that door')
         _a = hc.get('arrived') or {}
         eq('...and at the door, the dropoff is next, with the planner\'s time for it',
            (_a.get('when'), _a.get('where'), _a.get('line')),
