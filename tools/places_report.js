@@ -1415,6 +1415,11 @@ var STOP_M = 100;
 var STOP_MIN_S = 60;
 var PRESS_AFTER_MIN = 10;
 var PRESS_BEFORE_MIN = 5;
+// A press's stop reached with the car's GPS miles since the Took under this
+// share of the card's miles is not the door (timePresses, notDriven). The
+// value tools/shift_report.py's SHORT_MILES holds an order to, for the same
+// fault, and chosen, not measured, as it is there.
+var SHORT_MILES = 0.35;
 // Offer size by card miles: [from, below, label].
 var SIZE_BANDS = [[0, 4, 'short, under 4 mi'], [4, 8, 'medium, 4–8 mi'], [8, 12, 'long, 8–12 mi'],
                   [12, Infinity, '12 mi and over']];
@@ -1512,10 +1517,43 @@ function topOf(list, tierOf, seed, noCi) {
  * All four figures CHOSEN, NOT MEASURED: 100 m is a kerb and a front door
  * past a ±25 m fix, a minute is longer than a light, ten minutes is a long
  * last mile, five a slow press after. The run is labelled
- * `by: 'drop (gps-timed)'`, its press kept as `pressedAt` / `pressedBy`. */
+ * `by: 'drop (gps-timed)'`, its press kept as `pressedAt` / `pressedBy`.
+ *
+ * ...BUT NOT A STOP THE CAR REACHED WITHOUT DRIVING THE ORDER (the 28 Oct
+ * shift). Four Drops were pressed at or just past the pickup — one 18 s after
+ * the GPS saw the car leave the restaurant, one in the middle of a 12.8 min
+ * stop at the store — and the stop such a press falls in, or the next, is the
+ * pickup's or the car park's: "timed" there, the order's real time is its
+ * wait for the food. So a stop is the door only if the car drove SHORT_MILES
+ * of the card's miles or more from the Took to the stop's end; under that,
+ * by a log that covers the whole of it (notDriven), the press is left out as
+ * one with no stop is, and counted `short`. An add-on is not held to it: its
+ * card's miles are only what it added. */
+function notDriven(t, hit, fixes) {
+  if (!(typeof t.miles === 'number' && t.miles > 0) || t.addon === true) return false;
+  var took = typeof t.tookAt === 'number' ? t.tookAt : null;
+  if (took === null) return false;
+  var inside = (fixes || []).filter(function (f) { return f[0] * 1000 >= took && f[0] * 1000 <= hit.to; });
+  // The whole of it logged: a fix within STOP_MIN_S of the Took and of the
+  // stop's end, and no two further apart (miles across a gap are a straight
+  // line, the least the car drove, and prove nothing short).
+  if (!inside.length || inside[0][0] * 1000 - took > STOP_MIN_S * 1000
+      || hit.to - inside[inside.length - 1][0] * 1000 > STOP_MIN_S * 1000) return false;
+  var mi = 0, anchor = inside[0];
+  for (var i = 1; i < inside.length; i++) {
+    if (inside[i][0] - inside[i - 1][0] > STOP_MIN_S) return false;
+    // A step counts once the car is STOP_M from where it was last counted: a
+    // parked receiver's wander is no driving (shift_report.py's JITTER_M, for
+    // the same reason, at this file's stop radius).
+    var d = MV.crowMiles({ lat: anchor[1], lon: anchor[2] }, { lat: inside[i][1], lon: inside[i][2] });
+    if (d * 1609.344 >= STOP_M) { mi += d; anchor = inside[i]; }
+  }
+  return mi < SHORT_MILES * t.miles;
+}
+
 function timePresses(taken, fixes) {
   var stops = stillRuns(fixes || [], STOP_M, STOP_MIN_S, SPELL_GAP_S);
-  var stats = { pressed: 0, timed: 0, inside: 0, early: 0, late: 0, none: 0 };
+  var stats = { pressed: 0, timed: 0, inside: 0, early: 0, late: 0, none: 0, short: 0 };
   var out = (taken || []).map(function (t) {
     if (!t || (t.by !== 'drop' && t.by !== 'chooser') || typeof t.endedAt !== 'number') return t;
     stats.pressed += 1;
@@ -1530,6 +1568,7 @@ function timePresses(taken, fixes) {
       if (ok[i].to < p && ok[i].to >= p - PRESS_BEFORE_MIN * 60000) { hit = ok[i]; how = 'late'; }
     }
     if (!hit) { stats.none += 1; return t; }
+    if (notDriven(t, hit, fixes)) { stats.short += 1; return t; }
     stats.timed += 1;
     stats[how] += 1;
     return Object.assign({}, t, { by: GPS_TIMED, pressedBy: t.by, pressedAt: p, endedAt: hit.to, timedHow: how });
@@ -2013,6 +2052,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
             takeSlackMin: TAKE_SLACK_MS / 60000, deadMaxMin: DEAD_MAX_MIN,
             dead: { gps: !!opts.fixes, n: trips.filter(function (t) { return t.dead && !t.dead.censored; }).length },
             presses: opts.presses || null, stopM: STOP_M, stopMinS: STOP_MIN_S, pressAfterMin: PRESS_AFTER_MIN,
+            shortMiles: SHORT_MILES,
             pressBeforeMin: PRESS_BEFORE_MIN, placeApproxMi: PLACE_APPROX_MI, areaMi: MV.AREA_MI,
             region: opts.region ? { box: opts.region.box, fixes: opts.region.fixes, marginMi: opts.region.marginMi,
                                     miles: opts.region.disc.miles } : null,
@@ -2607,8 +2647,11 @@ function METHOD(r) {
     + ' m for ' + b.stopMinS + ' s or more, beginning after the Took — that contains the press, else the first '
     + 'starting within ' + b.pressAfterMin + ' min after it, else the last ending within ' + b.pressBeforeMin
     + ' min before it; the real end is that stop\'s end, the car leaving the door. No stop: still left out. '
+    + 'A stop reached with the car\'s GPS miles since the Took under ' + b.shortMiles + ' of the card\'s (an '
+    + 'add-on aside) is the pickup\'s, not the door: left out too. '
     + (b.presses ? b.presses.timed + ' of ' + b.presses.pressed + ' presses timed (' + b.presses.inside + ' inside, '
-       + b.presses.early + ' early, ' + b.presses.late + ' late).' : 'No GPS log, so none timed.') + '</li>'
+       + b.presses.early + ' early, ' + b.presses.late + ' late; ' + (b.presses.short || 0)
+       + ' at a stop not driven to).' : 'No GPS log, so none timed.') + '</li>'
     + '<li><b>Top tiers, P75 and P90</b>: percentiles of $/hr (linear between order statistics); intervals are '
     + 'bootstraps at ' + r.minN + ' values or more, and the binomial order-statistic interval at ' + Q_BOOT_MAX
     + ' or more.</li>'
@@ -3572,7 +3615,8 @@ async function main(argv) {
     taken = tp.taken;
     presses = tp.stats;
     console.log('presses timed by the GPS: ' + presses.timed + ' of ' + presses.pressed + ' (' + presses.inside
-                + ' inside a stop, ' + presses.early + ' early, ' + presses.late + ' late; ' + presses.none + ' no stop)');
+                + ' inside a stop, ' + presses.early + ' early, ' + presses.late + ' late; ' + presses.none + ' no stop, '
+                + presses.short + ' at a stop the car had not driven the order to)');
   }
 
   // Taken trips: the GPS log at the drop, else the dropoff's door.
@@ -3696,6 +3740,7 @@ module.exports = {
   deadTable: deadTable, sizeTable: sizeTable, bestLines: bestLines, shareCsv: shareCsv, levelsCsv: levelsCsv,
   streetsBase: streetsBase, loadWaits: loadWaits, GPS_TIMED: GPS_TIMED, TIER_MIN_N: TIER_MIN_N,
   STOP_M: STOP_M, STOP_MIN_S: STOP_MIN_S, PRESS_AFTER_MIN: PRESS_AFTER_MIN, PRESS_BEFORE_MIN: PRESS_BEFORE_MIN,
+  SHORT_MILES: SHORT_MILES,
   DEAD_MAX_MIN: DEAD_MAX_MIN, SIZE_BANDS: SIZE_BANDS, TAKE_SLACK_MS: TAKE_SLACK_MS,
 };
 

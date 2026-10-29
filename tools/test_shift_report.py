@@ -367,7 +367,8 @@ eq('...and an expiry is "expired" with no end clock in it',
    [(r['how'], r['ended'], r['actual_minutes']) for r in rows if r['id'] == 'M'],
    [('expired', '', '')])
 ok_('the text summary names expired orders among those left out',
-    'replaced, expired, put down with another too soon or with no end is left out' in out)
+    'replaced, expired, put down with another too soon, pressed down too soon, driven well '
+    'short of its card or with no end is left out' in out)
 ok_('the text says the 1 unreadable journal line was skipped', '1 unreadable line skipped' in out)
 summary_text = out[out.index('Over the '):]
 said = re.findall(r'\b(should|recommend\w*|avoid|worth|better|prefer\w*|target|take more|skip)\b',
@@ -833,17 +834,93 @@ eq('[together] ...while the order whose press it was stays reliable',
 eq('[together] an add-on put down with its order, 27 min against "+10", is carried, not '
    'too soon: both reliable', (_tby['W1']['reliable'], _tby['W2']['reliable'],
                                round(_tby['W2']['actualMinutes'], 1)), (True, True, 27.0))
-eq('[together] a quick Drop with nothing else put down is not this rule\'s',
-   _tby['T5']['reliable'], True)
-eq('[together] ...nor two Drops 61 s apart, the second three minutes into 20',
-   (_tby['T6']['reliable'], _tby['T7']['reliable']), (True, True))
-eq('[together] ...nor a GPS drop beside a Drop: the GPS saw it leave the door',
-   (_tby['T8']['reliable'], _tby['T9']['reliable']), (True, True))
-eq('[together] ...nor a Drop 30 s after another order was replaced by its Took',
-   (_tby['R1']['how'], _tby['R2']['reliable']), ('replaced', True))
-eq('[together] the summary leaves it out', _trep['summary']['reliable'], 9)
+eq('[together] a quick Drop with nothing else put down names no other order...',
+   [n for n in _tby['T5']['notes'] if 'put down with' in n], [])
+eq('[too soon] ...but is unreliable on its own (the 28 Oct shift): a press 2 min into a '
+   '20 min card is not the door, and its row says so',
+   (_tby['T5']['reliable'], _tby['T5']['perHour'],
+    [n for n in _tby['T5']['notes'] if n.startswith('unreliable')]),
+   (False, None, ["unreliable: put down by a press (Drop) 2.0 min after its Took, under 0.3 of "
+                  "the card's 20 min; a press at the pickup or on the way, not a delivery"]))
+eq('[together] two Drops 61 s apart are not put down together; the second, three minutes '
+   'into 20, is too soon on its own',
+   (_tby['T6']['reliable'], _tby['T7']['reliable'],
+    [n for n in _tby['T6']['notes'] + _tby['T7']['notes'] if 'put down with' in n]),
+   (True, False, []))
+eq('[together] ...nor a GPS drop beside a Drop: the GPS saw it leave the door, and no '
+   'minutes test holds a GPS drop', (_tby['T8']['reliable'], _tby['T9']['reliable']), (True, True))
+eq('[together] ...nor a Drop 30 s after another order was replaced by its Took, which is '
+   'too soon on its own', (_tby['R1']['how'], _tby['R2']['reliable'],
+                           [n for n in _tby['R2']['notes'] if 'put down with' in n]),
+   ('replaced', False, []))
+eq('[together] the summary leaves them out', _trep['summary']['reliable'], 6)
 ok_('[together] ...and the text prints the reason under the table',
     "#4 unreliable: put down with #3 within 113 s of its Took" in SR.text(_trep))
+
+# --- pressed too soon, and never driven (the 28 Oct shift) ------------------------
+#
+# Four orders Dropped at or past the pickup read "reliable" at $105-$165/hr.
+# A press under TOO_SOON of the card's minutes is not the door; and by any end,
+# GPS miles under SHORT_MILES of the card's, over a log with no gap and a fix
+# at both ends, are an order not driven. On the invented track above: parked
+# 18:27-18:47, a gap 18:15-18:18, 5 m/s east from 18:47 (3,000 m by 18:57),
+# and nothing after 19:20. Every row invented.
+_sj = os.path.join(work, 'short.jsonl')
+_addon_mark = dict(mark('S6', at(18, 28), True), addon=True)
+with open(_sj, 'w') as fh:
+    for r in [
+        # S1: a GPS drop 19 min into a 20 min card, the car parked throughout.
+        offer('S1', at(18, 27, 20), 9.0, 20, 5.0), mark('S1', at(18, 27, 30), True),
+        drop('S1', at(18, 46, 30), by='gps'),
+        # S2: a Drop 18 min into 20 (its minutes pass), 4 mi on the card, parked.
+        offer('S2', at(18, 27, 50), 9.0, 20, 4.0), mark('S2', at(18, 28), True),
+        drop('S2', at(18, 46)),
+        # S3: 14 min of 25 across the 18:15 gap, 20 mi on the card: 5.2 mi read
+        # with the gap bridged, which is the least it drove, not the most.
+        offer('S3', at(18, 11, 50), 9.0, 25, 20.0), mark('S3', at(18, 12), True),
+        drop('S3', at(18, 26)),
+        # S4 and S5: 18:47 to 18:57, 1.86 mi driven, GPS drops: 5.0 on the
+        # card is 0.37 of it, 5.6 is 0.33.
+        offer('S4', at(18, 46, 50), 9.0, 10, 5.0), mark('S4', at(18, 47), True),
+        drop('S4', at(18, 57), by='gps'),
+        offer('S5', at(18, 46, 50), 9.0, 10, 5.6), mark('S5', at(18, 47), True),
+        drop('S5', at(18, 57), by='gps'),
+        # S6: an add-on ("+10 min", "+4 mi") Dropped 2 min in, parked: neither
+        # test is read for what an add-on's card only adds.
+        offer('S6', at(18, 27, 50), 6.0, 10, 4.0), _addon_mark,
+        drop('S6', at(18, 30)),
+        # S7: a GPS drop at 18:05, Took at 17:52, before the log's first fix
+        # after its frozen ten seconds (17:58): 1.9 mi logged of 10 on the
+        # card, and 6 min not logged.
+        offer('S7', at(17, 51, 50), 9.0, 13, 10.0), mark('S7', at(17, 52), True),
+        drop('S7', at(18, 5), by='gps'),
+    ]:
+        fh.write(json.dumps(r) + '\n')
+_srep2 = SR.report(_sj, GPSDIR, '2026-03-03')
+_sby = {o['id']: o for o in _srep2['orders']}
+eq('[never driven] a GPS drop with the car parked from Took to end, 0 of 5 mi, is unreliable: '
+   'no $/hr, no door minutes', (_sby['S1']['reliable'], _sby['S1']['perHour'],
+                                _sby['S1']['doorMinutes']), (False, None, None))
+eq('[never driven] ...and its row says the miles against the card\'s',
+   [n for n in _sby['S1']['notes'] if n.startswith('unreliable')],
+   ["unreliable: the GPS log, unbroken from Took to end, has the car drive 0.0 mi against "
+    "the card's 5, under 0.35 of it; put down before it was driven, so its minutes are not "
+    "a delivery's"])
+eq('[never driven] a Drop whose minutes pass (18 of 20) is held to the miles as well',
+   (_sby['S2']['reliable'], any('has the car drive 0.0 mi' in n for n in _sby['S2']['notes'])),
+   (False, True))
+eq('[never driven] miles read across a gap prove nothing: 5.2 of 20 with the 18:15 gap '
+   'bridged stays reliable', (_sby['S3']['reliable'], round(_sby['S3']['gpsMiles'], 1)),
+   (True, 5.2))
+eq("[never driven] ...nor a log that ends before the order does (the evening's D: 1.9 of "
+   "12 mi, its last 20 min unlogged)", (by['D']['reliable'], round(by['D']['gpsMiles'], 1)),
+   (True, 1.9))
+eq("[never driven] ...nor one that begins after the order's Took (1.9 of 10, its first 6 "
+   "min unlogged)", (_sby['S7']['reliable'], round(_sby['S7']['gpsMiles'], 1)), (True, 1.9))
+eq('[never driven] the line: 1.86 mi driven is reliable against 5.0 (0.37) and not against '
+   '5.6 (0.33)', (_sby['S4']['reliable'], _sby['S5']['reliable']), (True, False))
+eq('[too soon] [never driven] an add-on pressed down 2 min into "+10", parked, is held to '
+   'neither', (_sby['S6']['addon'], _sby['S6']['reliable']), (True, True))
 
 # --- as JSON, for the phone's shift page (22 Oct 2026) ---------------------------
 code_js, out_js = run(['--journal', JOURNAL, '--gps', GPSDIR, '--day', '2026-03-03', '--json'])

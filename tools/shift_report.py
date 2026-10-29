@@ -85,7 +85,7 @@ expired before the server wrote expiry rows. `replaced`, `expiry` and no-row
 are all UNRELIABLE, marked on the row, and left out of the summary.
 
 PUT DOWN WITH ANOTHER, AND TOO SOON, is not a delivery either (the 26 Oct
-shift's #8, put_down_together). One press of Drop or of the chooser can put
+shift's #8, too_soon). One press of Drop or of the chooser can put
 two orders down at once — both drop rows carry the same `at` — and on 26 Oct
 one of the two was an Uber "Early look" taken 113 s before: "1.9 min, $415/hr,
 reliable", against a card of 20 min. Whether that order was ever delivered
@@ -97,6 +97,34 @@ and how long after its Took, and it is left out of the summary like the rest.
 An order carried the whole way with another (an add-on put down with the
 order it was added to, at its own door) passes: its minutes are its card's
 or more.
+
+...AND TOO SOON ON ITS OWN, AND NEVER DRIVEN (the 28 Oct shift, too_soon and
+measure). Four of that evening's nine were Dropped by hand at or just past
+the pickup and printed "reliable": 7.9 min and 0.3 GPS mi against a card of
+40 min and 10.1 mi ($145/hr), 13.7 and 1.2 against 52 and 12.1 (Drop 18 s
+after the GPS saw the car leave the restaurant), 3.6 and 0.8 against 19 and
+3.7 (the chooser, before the pickup: the customer was still the planner's
+next stop ten minutes later), 5.1 and 1.1 against 24 and 3.5 (Drop in the
+middle of a 12.8 min stop, ten seconds before an add-on from the same store
+was taken) — and the GPS log has the car drive
+on afterwards, each time, about as far as the card said. A median "actual
+$/hr" of $70 was the result. No other order was put down within TOGETHER_S
+of any of them, so the rule above did not see them. Two more tests, each
+enough alone:
+  - put down by a press (Drop or chooser) in under TOO_SOON of the card's
+    minutes, with no other order put down with it: the press was not the
+    door. (The four: 0.20, 0.26, 0.19, 0.21 of their cards.)
+  - by ANY end, the GPS miles under SHORT_MILES of the card's miles, where
+    the log covers the whole of Took to end (no gap, and a fix within GAP_S
+    of both): the car did not drive the order. (The four: 0.03, 0.10, 0.22,
+    0.30.) A gap is bridged in a straight line, the least the car drove, so
+    miles under the line across a gap prove nothing and are not read.
+Neither is read for an add-on: its card's minutes and miles are what it
+added, not a trip (above). Each row says which test and the figures. Over
+the other orders of the 19, 22, 26 and 28 Oct shifts with a delivery end and
+a GPS track (19 of them, add-ons aside), the lowest were 0.53 of the card's
+minutes and 0.64 of its miles (both the 26 Oct shift's #3), measured with
+this file; the early presses of those shifts ran 0.09-0.26 and 0.00-0.30.
 
 A DROP TAKEN BACK did not happen. Since 22 Oct 2026 the panel's Drop (and
 the offers page's In car Drop) reads "↶ Undo" for ten seconds, and a press
@@ -197,13 +225,24 @@ HOW = {None: 'Drop', 'gps': 'GPS drop', 'chooser': 'chooser'}
 
 # An order put down by a press within TOGETHER_S of another order's end, in
 # less than TOO_SOON of its card's minutes, was put down with it and not
-# delivered (put_down_together). Both CHOSEN, NOT MEASURED. 60 s: one press
+# delivered (too_soon). Both CHOSEN, NOT MEASURED. 60 s: one press
 # of the chooser writes both rows at the same `at` (26 Oct: 0 ms apart, twice),
 # and a minute is room for two presses of Drop one after the other. 0.3: the
 # 26 Oct order it is for was 1.9 min against 20 (0.095); the fastest reliable
-# order of that shift was 15.4 against 29 (0.53).
+# order of that shift was 15.4 against 29 (0.53). Since the 28 Oct shift the
+# same 0.3 holds a press with no other order beside it too (too_soon): its
+# four early presses were 0.19-0.26.
 TOGETHER_S = 60.0
 TOO_SOON = 0.3
+
+# GPS miles under this share of the card's miles, over a log that covers the
+# whole of Took to end, and the order was not driven (measure; the module
+# docstring's ...AND NEVER DRIVEN). CHOSEN, NOT MEASURED: between the 28 Oct
+# shift's early presses (0.03-0.30) and the lowest of the 19 other orders
+# with a delivery end on four shifts (0.64), nearer the presses, since a
+# card's miles can run long and an order driven half its card is still a
+# delivery.
+SHORT_MILES = 0.35
 
 _STAMP = re.compile(r'^(?:\d{4}-\d\d-\d\d \d\d:\d\d:\d\d )?(\d+(?:\.\d+)?): (\{.*)$')
 
@@ -384,10 +423,13 @@ def _order(oid, took, readings, drops, visits, addon=False):
     return o
 
 
-def put_down_together(orders_):
-    """In place, over the day's orders as numbered (#1 first): each order the
-    module docstring's PUT DOWN WITH ANOTHER, AND TOO SOON describes is made
-    unreliable, its note naming the other order by number."""
+def too_soon(orders_):
+    """In place, over the day's orders as numbered (#1 first): each order put
+    down by a press in under TOO_SOON of its card's minutes is made
+    unreliable — its note naming the other order by number where one was put
+    down within TOGETHER_S of it (the module docstring's PUT DOWN WITH
+    ANOTHER, AND TOO SOON), else saying the press came too soon on its own
+    (...AND TOO SOON ON ITS OWN), which an add-on is not held to."""
     for o in orders_:
         if not o['reliable'] or o['how'] not in (HOW[None], HOW['chooser']):
             continue
@@ -404,6 +446,13 @@ def put_down_together(orders_):
                     "the card's %g is that order's Drop, not this one's delivery"
                     % (n, round((o['end'] - o['took']) / 1000.0), actual, card))
                 break
+        else:
+            if not o['addon']:
+                o['reliable'] = False
+                o['notes'].append(
+                    'unreliable: put down by a press (%s) %.1f min after its Took, under %g of '
+                    "the card's %g min; a press at the pickup or on the way, not a delivery"
+                    % (o['how'], actual, TOO_SOON, card))
 
 
 # How long a store's name may print: a name, not the rest of a card.
@@ -819,6 +868,18 @@ def measure(o, fixes):
         o['notes'].append('no usable GPS fix between Took and end; miles blank')
         return
     o['gpsMiles'] = tr['miles']
+    # ...AND NEVER DRIVEN (the module docstring): the car drove under
+    # SHORT_MILES of the card's miles, by a log with no gap and a fix within
+    # GAP_S of both ends. Before the door's minutes, which a reliable order
+    # alone is given.
+    card = o.get('cardMiles')
+    if o['reliable'] and not o.get('addon') and card and not tr['gaps'] \
+            and tr['head'] <= GAP_S and tr['tail'] <= GAP_S and tr['miles'] < SHORT_MILES * card:
+        o['reliable'] = False
+        o['notes'].append(
+            "unreliable: the GPS log, unbroken from Took to end, has the car drive %.1f mi "
+            "against the card's %g, under %g of it; put down before it was driven, so its "
+            "minutes are not a delivery's" % (tr['miles'], card, SHORT_MILES))
     if tr['gaps']:
         o['notes'].append('%d GPS gap%s over %d s bridged in a straight line (%.1f min)'
                           % (tr['gaps'], '' if tr['gaps'] == 1 else 's', GAP_S,
@@ -1073,7 +1134,7 @@ def report(journal, gps_dir, day):
                 mine.append(o)
     # Before anything is measured off `reliable` (a door's minutes, the $/hr),
     # and numbered as the text numbers them.
-    put_down_together(mine)
+    too_soon(mine)
     # ...and only the GPS logs that can hold a fix those orders are measured
     # over: from the day's start to its end, or to the last of its orders'
     # ends and the NEAR_S a stop is looked for past it, if later. Every log in
@@ -1229,7 +1290,8 @@ def text(rep):
     s = rep['summary']
     out.append('')
     out.append('Over the %d reliable order%s of %d (an order replaced, expired, put down with '
-               'another too soon or with no end is left out):'
+               'another too soon, pressed down too soon, driven well short of its card or with '
+               'no end is left out):'
                % (s['reliable'], '' if s['reliable'] == 1 else 's', s['of']))
     if s.get('addOns'):
         out.append('  (%d add-on%s counted by app, and left out of every actual/card minutes '

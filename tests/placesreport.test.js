@@ -961,7 +961,7 @@ function nbx() {
   eq('...a press late, the stop ending within ' + P.PRESS_BEFORE_MIN + ' min before it', [tpBy.late.timedHow,
      (tpBy.late.endedAt / 1000 - PT) / 60], ['late', 24]);
   eq('...and no stop near it: still a press, still left out', [tpBy.none.by, P.realOf(tpBy.none)], ['drop', null]);
-  eq('...the counts', tp.stats, { pressed: 4, timed: 3, inside: 1, early: 1, late: 1, none: 1 });
+  eq('...the counts', tp.stats, { pressed: 4, timed: 3, inside: 1, early: 1, late: 1, none: 1, short: 0 });
   eq('...the press is kept beside it, and a GPS put-down is untouched', [tpBy['in'].pressedAt, tpBy['in'].pressedBy, tpBy.g.by],
      [(PT + 22 * 60) * 1000, 'drop', 'gps']);
   eq('...and real $/hr counts a timed press (24 minutes, $12)', P.realOf(tpBy.early).perHour, 30);
@@ -970,6 +970,27 @@ function nbx() {
   var tpRows = ['in', 'early', 'late', 'none', 'g'].map(function (id) { return card({ id: id, at: PT * 1000, pickup: 'Fernbrook Grill' }); });
   var tpTake = P.takesTable(tpRows, P.runsOf(tp.taken), function (o) { return o.pickup; }, function (k) { return k; }, 'place');
   eq('...the takes table counts them, and says how many were GPS-timed', [tpTake.rows[0].timed, tpTake.rows[0].gpsTimed], [4, 3]);
+  // The 28 Oct shift: Drops pressed at the pickup, "timed" at its stop. The
+  // fixture drives 0.05 degrees north (3.45 mi) from the Took to the door.
+  function pressMi(id, miles, addon) {
+    return Object.assign(press(id, 22), { miles: miles, addon: !!addon });
+  }
+  var tpShort = P.timePresses([pressMi('far', 12), pressMi('fair', 9), pressMi('add', 12, true)], pfix);
+  var tsBy = {}; tpShort.taken.forEach(function (t2) { tsBy[t2.id] = t2; });
+  eq('a press at a stop the car reached having driven 3.45 of the card\'s 12 mi (under ' + P.SHORT_MILES
+     + ') is not timed: left out, and counted short', [tsBy.far.by, P.realOf(tsBy.far), tpShort.stats.short, tpShort.stats.timed],
+     ['drop', null, 1, 2]);
+  eq('...while 3.45 of 9 (0.38) is the door, timed as before', [tsBy.fair.by, (tsBy.fair.endedAt / 1000 - PT) / 60],
+     [P.GPS_TIMED, 24]);
+  eq('...and an add-on, whose card miles are only what it added, is not held to it', tsBy.add.by, P.GPS_TIMED);
+  var pfixGap = pfix.filter(function (f) { return f[0] < PT + 300 || f[0] > PT + 420; });
+  eq('...nor miles over a log with a gap in them (two minutes unlogged on the way): the least it drove',
+     P.timePresses([pressMi('far', 12)], pfixGap).taken[0].by, P.GPS_TIMED);
+  eq('...nor over a log that begins two minutes after the Took',
+     P.timePresses([pressMi('far', 12)], pfix.filter(function (f) { return f[0] >= PT + 120; })).taken[0].by, P.GPS_TIMED);
+  ok('...and the Method says the rule and the count', /under 0\.35 of the card[^<]*left out too\. 1 of 2 presses timed[^<]*1 at a stop not driven to/
+     .test(P.html(P.analyse(adm, [], admPlaced, function () { return null; },
+                             { now: 0, presses: P.timePresses([pressMi('fair', 9), pressMi('far', 12)], pfix).stats }))));
 
   /* --- top tiers, hour-held --- */
 
