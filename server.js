@@ -1377,6 +1377,9 @@ function setHeld(list) {
   // ...and a dropped order back in the car (↶ Undo, a re-Took) is no longer
   // finished in the background (finishWatch).
   finishForget(scanner.held);
+  // ...and each order new to the car marks the odometer, for the miles
+  // driven since its Took (finishWatch's FINISH_DRIVEN).
+  finishTookMark(scanner.held);
   scanner.held.forEach(function (h) {
     armHeldEnd(h);
     armHeldPickups(h);
@@ -4460,7 +4463,7 @@ function putDown(now, by, done, which) {
   // pick) is finished quietly in the background (finishWatch): the computing
   // has already let it go, above; the GPS goes on looking for its door.
   if (by === null || by === 'chooser') {
-    dropped.forEach(function (d) { finishWatch(d, now, by, live); });
+    dropped.forEach(function (d) { finishWatch(d, now, by, live, dropped.length > 1); });
   }
 }
 
@@ -4528,6 +4531,50 @@ function putDown(now, by, done, which) {
  * the end), or for an order back on the list (setHeld forgets it: that is
  * how ↶ Undo cancels the watch its Drop opened, and how a re-Took does).
  *
+ * DRIVEN MILES (FINISH_DRIVEN). The owner presses Drop early, often while
+ * still waiting at the restaurant (whose pickup is seldom pinned: 7 of 10 on
+ * 29 Oct), and wants the GPS to finish it; but a press is also made AT the
+ * door, and then the stop rule finished the order at the first stop after
+ * the car LEFT. The 29 Oct shift, replayed through these rules on its GPS
+ * log (it ran an older build until 19:01; the two `finished` rows after it
+ * matched the replay to 8 s and 26 s): order #8's chooser was pressed in a
+ * 5.6 min stop at its door, and the rule finished it 4.3 min later at a stop
+ * of 1.1 min 0.42 mi on (a traffic light, by its length). What tells the two
+ * presses apart is how far the order has been driven: the shift report's
+ * SHORT_MILES evidence, delivered orders at 0.64 of their card's miles and
+ * up, early presses at 0.00-0.30. So the GPS miles since the order's Took
+ * (finishOdo, the shift report's own measure: a step counted once the car
+ * is FINISH_JITTER_M from the last one counted, a silence bridged in a
+ * straight line, which can only undercount) are put against FINISH_DRIVEN
+ * of the card's miles (`need`; an add-on's are what it adds, so its trip's
+ * card miles plus them, `of` still held, else none):
+ *   - A press made STANDING STILL (the car within the arrive radius of where
+ *     it stood for DWELL_MS: finishStand) with the miles already driven is
+ *     the end, as `arrivedAt`'s is: no watch. On 29 Oct #5, #8 and #10 were
+ *     pressed standing in stops of 4.0-5.6 min at their doors, driven 1.7-2.5
+ *     times their `need`; #2 (a 0.5 mi card, 0.24 of 0.30 mi driven) stays
+ *     a door watch, or none once the GPS has seen it arrive.
+ *   - Otherwise the watch opens, and a stop ('stop', or 'area') finishes it
+ *     only once the miles are driven. A door's arrival needs no miles. With
+ *     no `need` (no card miles, an add-on whose trip is gone) no 'stop'
+ *     watch is opened, and a door or an area is watched without the test.
+ * Replayed, #3 and #4, put down together at a light 18 min after the Took
+ * with 2.06 of 5.76 and 7.26 mi driven, do not finish at the 1.0 min stop
+ * 0.49 mi on (#3 is an area watch, #4 has no watch: below), and #6 (pressed driving away from its restaurant, 7.35 of 2.58
+ * mi) still finishes at its 2.6 min stop. #1, put down standing at the
+ * restaurant 2 min after its Took for an order its trip no longer held, is
+ * still finished by the weakest rule at the first stop past its miles (a 1.0
+ * min stop at 18:04): no GPS rule tells a cancelled order from a carried one.
+ *
+ * ...AND NO 'stop' WATCH when ONE PRESS PUT DOWN MORE THAN ONE ORDER (the
+ * chooser's "both"): the stop rule asks no place, so both watches would end
+ * at the same first stop, though the two orders have two doors. The shift's
+ * 18:02 chooser put down a trip and its add-on, two customers; the stop rule
+ * finished the add-on at a 1.0 min stop 2 min later, 0.49 mi on, and the
+ * trip's next stops of two minutes or more (2.4 and 8.0 min, its doors by
+ * every sign the log gives) came 19 and 34 min after the press. A watch with
+ * a door or an area of its own is still kept for each.
+ *
  * NOTHING ELSE. No panel word, no control (Settled: no seventh bar control),
  * no verdict, advice or stack line, no GPS drop of any order in the car, and
  * nothing is pressed on the phone (Settled). The row carries ids and times
@@ -4544,11 +4591,31 @@ var FINISH_MAX = 3;
 var FINISH_AREA_M = 150;        // chosen, not measured: a block either way
 var FINISH_AREA_CAP_M = 400;    // ...and no wider than this, however spread
 var FINISH_MOVE_MI = 0.2;       // chosen: past a restaurant's car park
+// The share of the card's miles driven since the Took that makes a stop a
+// delivery's (see DRIVEN MILES above). CHOSEN, NOT MEASURED: under the 0.64
+// the lowest delivered order on file reached (the end-of-shift report's SHORT_MILES
+// note), well over the 0.30 the highest early press did.
+var FINISH_DRIVEN = 0.6;
+// A step of the odometer: the shift report's JITTER_M (the GPS gate's own
+// FIX_ERR_MAX), so a car parked does not drive by its fixes' wander.
+var FINISH_JITTER_M = 50;
 // How old the last good fix may be and still say where the press was made.
 var FINISH_PRESS_FIX_MS = 120000;
 var finishing = [];             // the watches, oldest first
 var finishLive = {};            // holdId -> the dwell under way (memory)
 var finishLastFix = null;       // {lat, lon, at}: the newest good fix seen
+// ...and where the car stands, and since when: {lat, lon, from, to}, the
+// first and newest good fix of the run within the arrive radius of its first
+// (ARRIVE_M plus the fix's error, capped, no silence over GAP_MS: stepAt's
+// circle). Memory only: after a restart a press is watched as before it.
+var finishStand = null;
+// ...and the odometer: {miles, at: {lat, lon}} the GPS miles counted since
+// this process started, and the last fix a step was counted to; and each
+// order in the car's reading at its Took (holdId -> miles), memory only, so
+// an order carried over a restart counts from the restart (fewer miles: a
+// press more often watched, a stop later accepted, never earlier).
+var finishOdo = { miles: 0, at: null };
+var finishTookOdo = {};
 
 function finishPath() {
   return path.join(path.dirname(JOURNAL_PATH), 'finishing.json');
@@ -4578,6 +4645,8 @@ function finishFromFile(w) {
   if (w.to.kind !== 'none' && !(isFinite(w.to.lat) && isFinite(w.to.lon))) return null;
   if (w.from !== null && !(w.from && isFinite(w.from.lat) && isFinite(w.from.lon))) w.from = null;
   if (typeof w.movedAt !== 'number') w.movedAt = null;
+  if (typeof w.need !== 'number' || !isFinite(w.need)) w.need = null;
+  if (typeof w.driven !== 'number' || !isFinite(w.driven)) w.driven = 0;
   return w;
 }
 
@@ -4609,8 +4678,9 @@ function finishForget(list) {
 
 /* Open the watch for `d`, put down at `now` by a press (`by` null) or the
  * chooser. `list` is the car as it stood before the press, whose pickups the
- * restaurant guard reads. */
-function finishWatch(d, now, by, list) {
+ * restaurant guard reads; `many`, whether the same press put down another
+ * order too. */
+function finishWatch(d, now, by, list, many) {
   var ends = holdEnds(d);
   if (ends === null || now >= ends || d.arrivedAt) return;
   var pin = heldEndPin(d);
@@ -4625,14 +4695,60 @@ function finishWatch(d, now, by, list) {
     to = { kind: 'area', lat: d.endArea.lat, lon: d.endArea.lon,
            m: Math.min(FINISH_AREA_CAP_M, Math.max(FINISH_AREA_M, spread)) };
   }
+  // The miles a stop needs driven since the Took, and those driven so far
+  // (DRIVEN MILES, above). Pressed standing with them driven: the end.
+  var need = finishNeed(d, list);
+  var took = finishTookOdo[holdIdOf(d)];
+  var driven = typeof took === 'number' ? finishOdo.miles - took : 0;
+  if (need !== null && driven >= need && finishStood(now)) return;
+  // No end at all, and the stop rule could not tell this order's door from
+  // the other order's (one press, two orders), or has no miles to go by.
+  if (to.kind === 'none' && (many || need === null)) return;
   var from = finishLastFix && now - finishLastFix.at <= FINISH_PRESS_FIX_MS
     ? { lat: finishLastFix.lat, lon: finishLastFix.lon } : null;
   finishing = finishing.filter(function (w) { return w.holdId !== holdIdOf(d); });
   finishing.push({ id: d.id, holdId: holdIdOf(d), dropAt: now, by: by || 'drop', ends: ends,
-                   to: to, from: from, movedAt: null });
+                   to: to, from: from, movedAt: null, need: need, driven: driven });
   while (finishing.length > FINISH_MAX) delete finishLive[finishing.shift().holdId];
   delete finishLive[holdIdOf(d)];
   saveFinishing();
+}
+
+// FINISH_DRIVEN of the card's miles for `d` (its `card`, cardOf), or null with
+// no figure to go by.
+// An add-on's card says what it ADDS to its trip (holdEnds says the same of
+// its minutes), so its trip's card miles go with it, the trip read off the
+// car as it stood (`list`); no trip there, no figure.
+function finishNeed(d, list) {
+  var cardMiles = function (h) {
+    var m = h && h.card && h.card.miles;
+    return typeof m === 'number' && isFinite(m) && m > 0 ? m : null;
+  };
+  var own = cardMiles(d);
+  if (own === null) return null;
+  if (d.addOn) {
+    var base = cardMiles((list || []).filter(function (o) { return o && holdIdOf(o) === d.of; })[0]);
+    if (base === null) return null;
+    own += base;
+  }
+  return FINISH_DRIVEN * own;
+}
+
+// Mark the odometer for each order new to the car. Kept through the press
+// that puts it down (putDown rewrites the list before finishWatch reads the
+// mark); an order no longer in the car is forgotten on the next beat
+// (finishStep), a watch keeping its own count.
+function finishTookMark(list) {
+  (list || []).map(holdIdOf).forEach(function (id) {
+    if (id && typeof finishTookOdo[id] !== 'number') finishTookOdo[id] = finishOdo.miles;
+  });
+}
+
+// Whether the car stood DWELL_MS where the newest good fix has it, that fix
+// still fresh by GAP_MS (finishStand).
+function finishStood(now) {
+  return !!finishStand && now - finishStand.to <= GAP_MS
+    && finishStand.to - finishStand.from >= DWELL_MS;
 }
 
 /* One watch's step on one beat: {at, how} when this fix finishes it, else
@@ -4670,6 +4786,8 @@ function finishOne(w, beat, now) {
   live.spent = true;                // one stop is asked once
   if (live.anchor.at > w.ends) return null;
   if (w.to.kind === 'area' && pinMetres(live.anchor, w.to) > w.to.m) return null;
+  // ...and only once the order has been driven its miles (DRIVEN MILES).
+  if (w.need !== null && w.driven < w.need) return null;
   return { at: live.anchor.at, how: w.to.kind === 'area' ? 'area' : 'stop' };
 }
 
@@ -4680,8 +4798,34 @@ function finishStep(beat, now) {
   if (f && f.gpsOk === true && typeof f.freshFor === 'number' && f.freshFor > 0
       && typeof f.lat === 'number' && typeof f.lon === 'number' && isFinite(f.lat)
       && isFinite(f.lon) && typeof f.gpsAge === 'number' && isFinite(f.gpsAge) && f.gpsAge >= 0) {
+    var fresh = !finishLastFix || now - f.gpsAge * 1000 > finishLastFix.at;
     finishLastFix = { lat: f.lat, lon: f.lon, at: now - f.gpsAge * 1000 };
+    // The odometer, on each new fix: a step once FINISH_JITTER_M from the
+    // last one counted, onto every watch's own count as well.
+    if (fresh && !finishOdo.at) finishOdo.at = { lat: f.lat, lon: f.lon };
+    var step = fresh ? MV.crowMiles(finishLastFix, finishOdo.at) : 0;
+    if (step * 1609.344 >= FINISH_JITTER_M) {
+      finishOdo.miles += step;
+      finishOdo.at = { lat: f.lat, lon: f.lon };
+      finishing.forEach(function (w) {
+        var short = w.need !== null && w.driven < w.need;
+        w.driven += step;
+        if (short && w.driven >= w.need) w.dirty = true;   // kept on file once met
+      });
+    }
+    var r = ARRIVE_M + Math.min(typeof f.gpsErr === 'number' && isFinite(f.gpsErr)
+      ? f.gpsErr : ARRIVE_ERR_CAP_M, ARRIVE_ERR_CAP_M);
+    if (!finishStand || finishLastFix.at - finishStand.to > GAP_MS
+        || MV.crowMiles(finishLastFix, finishStand) * 1609.344 > r) {
+      finishStand = { lat: f.lat, lon: f.lon, from: finishLastFix.at, to: finishLastFix.at };
+    } else if (finishLastFix.at > finishStand.to) {
+      finishStand.to = finishLastFix.at;
+    }
   }
+  var held = (scanner.held || []).map(holdIdOf);
+  Object.keys(finishTookOdo).forEach(function (id) {
+    if (held.indexOf(id) === -1) delete finishTookOdo[id];
+  });
   if (!finishing.length) return;
   var changed = false;
   var rows = [];
@@ -4690,7 +4834,13 @@ function finishStep(beat, now) {
     var hit = finishOne(w, beat, now);
     if (w.dirty) { delete w.dirty; changed = true; }
     if (!hit) return true;
-    var at = Math.round(hit.at);
+    // ...never before the press it finishes. A fix is dated by its own age
+    // (countableFix: the beat's arrival less gpsAge), so the first fix of a
+    // stop under way at the press can date from before it, by up to its age;
+    // a row with `at` before `dropAt` is one every reader refuses (takenRuns
+    // here, and the end-of-shift report: `at >= dropAt`), kept in the journal
+    // and read by nobody.
+    var at = Math.max(Math.round(hit.at), w.dropAt);
     rows.push(JSON.stringify({ v: 1, kind: 'finished', at: at, id: w.id, seq: at,
                                holdId: w.holdId, how: hit.how, dropAt: w.dropAt }) + '\n');
     delete finishLive[w.holdId];

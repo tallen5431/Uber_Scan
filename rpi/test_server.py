@@ -12551,11 +12551,14 @@ def _fstay(dlat, dlon=0.0, n=7):
     return [_ff(dlat, dlon)] * n       # 1.5 s at one spot: past the 1 s dwell
 
 
-def _ftook(base, oid, minutes=40.0, dropoff=_DOOR):
-    post(base, '/api/offers/mark', {
-        'id': oid, 'accepted': True,
-        'offer': {'id': oid, 'pay': 12.0, 'minutes': minutes, 'billedMinutes': minutes,
-                  'miles': 5.0, 'cost': 1.75, 'dropoff': dropoff, 'multiOrder': False}})
+def _ftook(base, oid, minutes=40.0, dropoff=_DOOR, miles=5.0, addon=False, app=None):
+    o = {'id': oid, 'pay': 12.0, 'minutes': minutes, 'billedMinutes': minutes,
+         'miles': miles, 'cost': 1.75, 'dropoff': dropoff, 'multiOrder': False}
+    if app:
+        o['app'] = app
+    if addon:
+        o.update(addon=True, app='uber')
+    post(base, '/api/offers/mark', {'id': oid, 'accepted': True, 'offer': o})
     return (get(base, '/api/status').get('holding') or {})
 
 
@@ -12593,7 +12596,7 @@ try:
         for w in _fwatch(_fj)], [(_h.get('holdId'), 'door', _fdrop[0]['at'], 'drop')])
     # A new order taken while the old one is being finished is held alone: the
     # watch is not in the car, and its door puts the new one down for nothing.
-    _h2 = _ftook(_fb, 'fin-next', dropoff='17 Wren Way, Marietta')
+    _h2 = _ftook(_fb, 'fin-next', dropoff='17 Wren Way, Marietta', miles=0.4)
     _st = get(_fb, '/api/status')
     eq('[finish] a watch is not an order in the car: a new Took is held alone',
        ((_st.get('holding') or {}).get('holdId'), len(_st.get('orders') or [None])),
@@ -12615,20 +12618,65 @@ try:
     no_('[finish] ...and the panel is told nothing of it (no finished word on the stream)',
         any('finished' in json.dumps(m) or 'finish' in m for m in _ev))
     # No end at all: the first stop once the car is 0.2 mi from the press.
-    # The press is made here, at the old door (the last good fix).
+    # The press is made ON THE MOVE, ~130 m past the old door and under the
+    # dwell there (a press made standing opens no watch: below).
+    _fbeats([_ff(_IN + 0.0012)] * 2)
     _c, _d = post(_fb, '/api/delivered', {})
     eq('[finish] an order with no end pinned is watched with no end',
        [(w.get('holdId'), (w.get('to') or {}).get('kind')) for w in _fwatch(_fj)],
        [(_h2.get('holdId'), 'none')])
-    _fbeats(_fstay(_IN, n=9))
+    _fbeats(_fstay(_IN + 0.0012, n=9))
     eq('[finish] ...a stop where the press was made does not finish it',
        _frows(_fj, 'finished', 'fin-next'), [])
-    _fbeats(_fstay(_IN + 0.0025, n=9))      # ~245 m on: not yet 0.2 mi
+    _fbeats(_fstay(_IN + 0.0025, n=9))      # ~145 m on: not yet 0.2 mi
     eq('[finish] ...nor one before the car has gone 0.2 mi', _frows(_fj, 'finished', 'fin-next'), [])
-    _fbeats(_fstay(_IN + 0.0045))           # ~500 m (0.31 mi) on, and stopped
+    _fbeats(_fstay(_IN + 0.0045))           # ~365 m (0.23 mi) on, and stopped
     eq('[finish] ...the first stop after moving 0.2 mi does, `how: stop` (the weakest)',
        [r.get('how') for r in _frows(_fj, 'finished', 'fin-next')], ['stop'])
     eq('[finish] ...and no finish ever wrote a drop row', len(_frows(_fj, 'drop')), 2)
+
+    # The owner's 29 Oct shift: presses made standing at the customer's door,
+    # and the stop rule finished the one it watched at a traffic light past
+    # it. A press made where the car has stood the dwell (here GPS_DWELL_MS,
+    # 1 s), the order already driven FINISH_DRIVEN (0.6) of its card's miles
+    # since the Took, is the end: no watch. Card 1.0 mi: 0.6 mi to drive.
+    _h3 = _ftook(_fb, 'fin-stood', dropoff='Wren Way, Marietta', miles=1.0)
+    _fbeats([_ff(0.01), _ff(0.015)])        # ~0.69 mi driven since the Took
+    _fbeats(_fstay(0.02))                   # ...then standing 1.5 s, and Drop
+    post(_fb, '/api/delivered', {})
+    eq('[finish] a Drop pressed standing still, the order driven 0.6 of its card\'s miles, opens '
+       'no watch: the press is the end', (_holding(_fb), _fwatch(_fj)), (None, []))
+    _fbeats(_fstay(0.02 + 0.0045))          # the next stop, 0.31 mi on
+    eq('[finish] ...so no stop after it finishes it', _frows(_fj, 'finished', 'fin-stood'), [])
+    # ...but standing NOT yet driven (the restaurant, an early press: the
+    # owner's main use) it is watched, and a stop finishes it only once the
+    # miles are driven.
+    _fbeats([_ff(0.03)])                    # the car where the order is taken...
+    _h4 = _ftook(_fb, 'fin-rest', dropoff='Wren Way, Marietta', miles=1.0)
+    _fbeats(_fstay(0.03))                   # ...standing there
+    post(_fb, '/api/delivered', {})
+    eq('[finish] a Drop pressed standing, not yet driven its miles, is watched with no end',
+       [(w.get('holdId'), (w.get('to') or {}).get('kind'), round(w.get('need'), 2))
+        for w in _fwatch(_fj)], [(_h4.get('holdId'), 'none', 0.6)])
+    _fbeats(_fstay(0.03 + 0.0045))          # 0.31 mi on, and stopped
+    eq('[finish] ...a stop 0.2 mi on, the miles not yet driven (0.31 of 0.6), does not finish it',
+       _frows(_fj, 'finished', 'fin-rest'), [])
+    _fbeats(_fstay(0.03 + 0.0105))          # 0.73 mi from the Took, and stopped
+    eq('[finish] ...the first stop once they are driven does, `how: stop`',
+       [r.get('how') for r in _frows(_fj, 'finished', 'fin-rest')], ['stop'])
+    # A door watch opened with the car already inside the door's circle, under
+    # the dwell (so not `arrived`), the fixes 5 s old: the first of the stop
+    # dates from before the press. The row is never dated before it, which
+    # every reader of it refuses (at >= dropAt).
+    _h5 = _ftook(_fb, 'fin-early')
+    _pin(_fb, _h5)
+    _old = lambda: dict(_ff(_IN), gpsAge=5.0)
+    _fbeats([_ff(0.02)] * 2 + [_old()])
+    post(_fb, '/api/delivered', {})
+    _fbeats([_old() for _ in range(7)])
+    eq('[finish] a stop under way at the press finishes it at the press, never before it',
+       [(r.get('how'), r['at'] >= r['dropAt']) for r in _frows(_fj, 'finished', 'fin-early')],
+       [('door', True)])
 finally:
     stop(_fp)
 
@@ -12712,6 +12760,69 @@ try:
        [r.get('how') for r in _frows(_fj2, 'finished', 'fin-boot')], ['door'])
 finally:
     stop(_fp)
+
+# Two orders put down by ONE press (the chooser's both), neither with an end:
+# the stop rule asks no place, so both would end at the same first stop. The
+# 29 Oct shift's 18:02 chooser put down a trip and its add-on, two customers,
+# and the replay finished both at a 1.0 min stop 2 min later. No 'stop' watch
+# is opened for either; one with a door of its own still is.
+for _f in os.listdir(_fdir):
+    if _f.startswith(('beats-', 'done-', 'next')):
+        os.remove(os.path.join(_fdir, _f))
+_fseq[0] = 0
+_fdir3 = tempfile.mkdtemp()
+_fj3 = os.path.join(_fdir3, 'offers.jsonl')
+open(_fj3, 'w').close()
+_fp, _fb = start(dict(_FENV, CARRY_TWO='1'), _fj3)
+try:
+    _a = _ftook(_fb, 'fin-two-a', dropoff='Wren Way, Marietta')
+    _ftook(_fb, 'fin-two-b', dropoff='Larch Ct, Marietta')
+    _two = [o.get('holdId') for o in (get(_fb, '/api/status').get('orders') or [])]
+    _fbeats([_ff(0.03)] * 2)                # on the move
+    _c, _d = post(_fb, '/api/delivered', {'holdIds': _two})
+    eq('[finish] the chooser puts down two orders with no end at once: both down, two '
+       'chooser rows', (len(_two), _holding(_fb), sorted(r.get('by') for r in _frows(_fj3, 'drop'))),
+       (2, None, ['chooser', 'chooser']))
+    eq('[finish] ...and no watch for either: one stop cannot be both doors', _fwatch(_fj3), [])
+    _fbeats(_fstay(0.03 + 0.0045))
+    eq('[finish] ...so the next stop finishes neither', _frows(_fj3, 'finished'), [])
+    # One of the two with its door pinned: that one is watched, at its door.
+    _a = _ftook(_fb, 'fin-two-c')
+    _pin(_fb, _a)
+    _ftook(_fb, 'fin-two-d', dropoff='Larch Ct, Marietta')
+    _two = [o.get('holdId') for o in (get(_fb, '/api/status').get('orders') or [])]
+    _fbeats([_ff(0.02)] * 2)
+    post(_fb, '/api/delivered', {'holdIds': _two})
+    eq('[finish] ...but one of two with a door of its own is watched, at that door',
+       [(w.get('holdId'), (w.get('to') or {}).get('kind')) for w in _fwatch(_fj3)],
+       [(_a.get('holdId'), 'door')])
+    # An add-on's card miles are what it ADDS: its trip's go with them. Put
+    # down alone while its trip is held, it needs 0.6 x (5.0 + 1.5) mi.
+    _r = _ftook(_fb, 'fin-trip', app='uber')
+    _ftook(_fb, 'fin-add', dropoff='Larch Ct, Marietta', miles=1.5, addon=True)
+    _ad = [o.get('holdId') for o in (get(_fb, '/api/status').get('orders') or [])
+           if o.get('holdId') != _r.get('holdId')]
+    _fbeats([_ff(0.04)] * 2)
+    post(_fb, '/api/delivered', {'holdIds': _ad})
+    eq('[finish] an add-on put down alone needs its trip\'s card miles and its own driven',
+       [(w.get('holdId'), round(w.get('need'), 2)) for w in _fwatch(_fj3) if w.get('holdId') in _ad],
+       [(_ad[0], 3.9)])
+    # ...and with its trip already gone there is no figure: no 'stop' watch.
+    post(_fb, '/api/delivered', {'holdIds': [_r.get('holdId')]})
+    _r = _ftook(_fb, 'fin-trip2', app='uber')
+    _ftook(_fb, 'fin-add2', dropoff='Larch Ct, Marietta', miles=1.5, addon=True)
+    _ad = [o.get('holdId') for o in (get(_fb, '/api/status').get('orders') or [])
+           if o.get('holdId') != _r.get('holdId')]
+    _fbeats([_ff(0.05)] * 2)
+    post(_fb, '/api/delivered', {'holdIds': [_r.get('holdId')]})
+    _fw = [w.get('holdId') for w in _fwatch(_fj3)]
+    _fbeats([_ff(0.06)] * 2)
+    post(_fb, '/api/delivered', {})
+    eq('[finish] ...an add-on put down after its trip has no miles to go by: no \'stop\' watch',
+       [h for h in [w.get('holdId') for w in _fwatch(_fj3)] if h not in _fw], [])
+finally:
+    stop(_fp)
+shutil.rmtree(_fdir3, ignore_errors=True)
 
 # The offers page and the places report read the press's real end off takenRuns:
 # a Drop or chooser row a finished row names ends at the finish.
