@@ -4612,6 +4612,97 @@ finally:
     SP.log = _real_log_b
     shutil.rmtree(_bands_dir, ignore_errors=True)
 
+# --- a black crop is not handed to tesseract (PL.DARK_SKIP_BELOW) -------------
+#
+# 29 Oct: the phone's screen off, the box holding the sensor's noise, and every
+# read 16-25s of tesseract finding words in it. Synthetic frames through the
+# real Scanner and the real engine: the black one is skipped, fast, and reads
+# as an empty read; a dim dark-mode card — dark on average, its text bright —
+# and a normal card are read as before; and a ⌖ press's geometry reads the
+# black one anyway.
+_DW = 760
+_dq = TC.screen_corners(_DW)
+_drng = np.random.RandomState(29)
+# Mean 1, the 29 Oct crops' 1.0-2.5, and a sigma that puts its hot pixels at
+# 6-7, the brightest of theirs.
+_black = np.clip(_drng.normal(1.0, 2.0, (TC.SENSOR[0], TC.SENSOR[1], 3)),
+                 0, 255).astype(np.uint8)
+
+
+def _dread(frame, **geo):
+    sc = PL.Scanner(quad=_dq)
+    t = time.perf_counter()
+    out = sc.settle(sc.look_many([frame], 1.0, sc.geometry(**geo)))[0]
+    return out, time.perf_counter() - t
+
+
+_bo, _bt = _dread(_black)
+eq('a black noise frame is not read: skipped as dark, bright end %r under %d'
+   % (_bo.get('peak'), PL.DARK_SKIP_BELOW), _bo.get('skipped'), 'dark')
+eq('...and reports itself as an empty read does: no text, no payout, no offer',
+   (_bo['text'], _bo['parsed']['pay'], _bo['parsed']['complete'], _bo['clipped']),
+   ('', None, False, False))
+ok_('...fast: %.0fms, no OCR at all (%.1fms of it)' % (_bt * 1000, _bo['ms']['ocr']),
+    _bt < 0.5 and _bo['ms']['ocr'] == 0.0)
+_bw, _ = _dread(_black, whole=True)
+eq('...a whole-screen read nobody pressed for skips it too', _bw.get('skipped'), 'dark')
+_bp, _bpt = _dread(_black, whole=True, skip_dark=False)
+eq('...but a ⌖ press\'s geometry reads it: the driver asked (%.1fs)' % _bpt,
+   (_bp.get('skipped'), _bp['parsed']['pay']), (None, None))
+
+# The dark-mode card at 6% — the box's own brightness reading 4, the card the
+# note under scan_pi's STALL_SAY records the reader reading.
+_dim = (TC.uberx_screen(TC.DARK).astype(np.float32) * 0.06).astype(np.uint8)
+_do, _ = _dread(TC.mount(_dim, _DW, cabin=2))
+_dbox = cv2.cvtColor(PL.warp(TC.mount(_dim, _DW, cabin=2), np.float32(_dq), 600),
+                     cv2.COLOR_BGR2GRAY)
+ok_('a dim dark-mode card is dark on average (mean %.1f) and bright where its text is'
+    % float(_dbox.mean()), float(_dbox.mean()) < 8)
+eq('...and is NOT skipped (bright end %r): it reads $16.05' % _do.get('peak'),
+   (_do.get('skipped'), _do['parsed']['pay']), (None, 16.05))
+_no, _ = _dread(TC.mount(TC.uberx_screen(), _DW))
+eq('a normal card is not skipped, and reads as it did',
+   (_no.get('skipped'), _no['parsed']['pay'], _no['parsed']['minutes']), (None, 16.05, 23.0))
+ok_('the floor has room under the dim card\'s bright end (%r against %d)'
+    % (_do.get('peak'), PL.DARK_SKIP_BELOW), _do['peak'] >= PL.DARK_SKIP_BELOW + 3)
+
+# The health line and the log: counted as "dark: not read", left out of the
+# median, and said at most once a DARK_SAY_EVERY with how many it stood for.
+_dh = SP.Health()
+_dh.since = 0.0
+_dsaid = [_dh.not_read_dark(t, 3.0) for t in (1.0, 2.0, 3.0)]
+eq('a black read is said once, not per read', [s is not None for s in _dsaid],
+   [True, False, False])
+ok_('...naming the bright end and the floor (%r)' % _dsaid[0],
+    '3/255' in _dsaid[0] and 'under the %d' % PL.DARK_SKIP_BELOW in _dsaid[0])
+_dagain = _dh.not_read_dark(1.0 + SP.DARK_SAY_EVERY, 2.0)
+ok_('...and again a DARK_SAY_EVERY later, with the reads it stood for (%r)' % _dagain,
+    _dagain is not None and '(3 reads like it' in _dagain)
+_dh.add(dict(_bo, ms={'total': 1.0}), _bo['parsed'], None, None)
+_dh.add({'ms': {'total': 1800.0}}, {'complete': True, 'pay': 9.0})
+_dc = _dh.counters(10.0)
+eq('the window counts them as darkSkipped, and both reads as reads',
+   (_dc['darkSkipped'], _dc['reads']), (4, 2))
+eq('...and a skipped read is kept out of the median read time', _dc['medianMs'], 1800)
+_dlines = []
+_was = SP.log
+SP.log = _dlines.append
+try:
+    _dh.report(SP.HEALTH_EVERY + 1, None, PL.Scanner(quad=None))
+    _dh2 = SP.Health()
+    _dh2.since = 0.0
+    _dh2.not_read_dark(1.0, 1.0)
+    _dt2 = _dh2.report(SP.HEALTH_EVERY + 1, None, PL.Scanner(quad=None))
+finally:
+    SP.log = _was
+ok_('the health line says "4 dark: not read" (%r)' % _dlines[:1],
+    _dlines and '4 dark: not read' in _dlines[0])
+ok_('...and a window of nothing but skipped whole-screen reads is still said (%r)'
+    % _dlines[1:], len(_dlines) == 2 and '1 dark: not read' in _dlines[1]
+    and (_dt2 or {}).get('darkSkipped') == 1)
+eq('read_why names it for the sample line', SP.read_why(_bo, _bo['parsed']),
+   'too dark to read, so not read')
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -1287,6 +1287,26 @@ bright" was answering a different question from the one the exposure loop steers
 by. It comes off the raw screen window now, at the same beat, so the log and the
 controller are talking about the same picture.
 
+### A black screen is not read at all
+
+With the phone's screen off, the box holds nothing but the sensor's noise, and
+tesseract finds a word in every speck of it: on 29 Oct each read of such a
+screen took 16-25 s, against 1.5-2.6 s either side, and a card arriving waited
+behind it. So before a crop is handed to the reader, its bright end is
+measured (the 99.5th percentile, on every fourth pixel), and a crop under
+`pipeline.DARK_SKIP_BELOW` (9 of 255) is not read. The bright end and not the
+average, because a dark-mode card is dim on average but its text is bright: a
+rendered dark-mode card with the box reading 4 has a bright end of 13 and
+still reads; the dimmest real card on file is 23; the 29 Oct black screens
+were 3-6. `pipeline.py` has the full measurement.
+
+A skipped read is an empty read: no offer, no verdict, nothing changed. The
+health line counts it as `N dark: not read` (the `seen` row as
+`darkSkipped`), skipped reads are left out of its median read time, and the
+log says `screen too dark to read: ...` at most once a minute. A ⌖ press is
+never skipped: the driver asked, so the reader reads it however dark, and a
+press over a black screen is answered the way any press that found nothing is.
+
 ### Measure the screen, not the room
 
 A rig logged `card brightness 233/205 ... gain 8.00`, then `237/205 ... gain

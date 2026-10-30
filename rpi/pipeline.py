@@ -1396,6 +1396,65 @@ def money_is_clipped(lines, image_height):
 MAX_READ_HEIGHT = 2200
 
 
+# A CROP WITH NOTHING BRIGHT IN IT IS NOT HANDED TO TESSERACT.
+#
+# 29 Oct, two windows (20:04-20:25 and 21:32-21:37): the phone's screen was
+# off, the box held a black screen and the sensor's noise, and every read of it
+# took a median 15.9-25.0s against 1.5-2.6s either side — CPU 67-74°C, no
+# throttling. The time was tesseract's: handed a crop of noise it finds a word
+# in every speck, and the seven crops kept from those windows read 1.2-2.3KB of
+# noise words each, where a card reads 50-230 bytes. Twenty seconds of the
+# reader on a black screen is twenty seconds a card arriving waits behind it.
+#
+# The test is the crop's BRIGHT end, not its average. A dark-mode card is dim on
+# average — this repo has a lit screen on record reading 4 and a night-time card
+# reading 6 (exposure.LIT_ENOUGH's note) — but its text is the brightest thing
+# on the phone, so a high percentile finds it where the mean cannot. 99.5th,
+# because the noise's own hot pixels sit in the top half-per-cent of a black
+# crop and a payout's strokes are far more than that of a card.
+#
+# Measured on `fitted` crops (what this is asked of; scans/unparsed keeps the
+# same picture), the 99.5th percentile:
+#
+#   no text at all — 24 crops kept on the owner's shifts 12-29 Oct, the 29
+#   Oct black-screen crops among them, every one looked at:  1-9, of which
+#   the black screens 1-6 (29 Oct's six: 3-6) and the other two a dim cabin
+#   seen through an empty mount (8 and 9)
+#   real text — the dimmest card on file, a light-mode Exclusive card on a
+#   screen turned nearly all the way down (17 Oct, mean 13.8):  23
+#   rendered — testcards' UberX card, dimmed and mounted with sensor noise in
+#   a cabin reading 2, read through this Scanner: the payout still read at 14
+#   (light) and 13 (dark mode, the box reading 4 — the card the note under
+#   scan_pi's STALL_SAY says the reader can read) and not at 12 or under in
+#   either theme, where those reads ran 1.6-2.9s against 0.1-0.4s
+#   rendered black noise like 29 Oct's (mean 1, sigma 1-3): 2-4
+#
+# The floor is 9: the bottom of the readable rendered cards (13) is 4 levels
+# and half as bright again above it, the dimmest real card (23) two and a half
+# times it, and the brightest of 29 Oct's black crops (6) 3 levels under it.
+# Not wider on the dark side on purpose: a skip that drops a readable card
+# costs a fare, a read that wastes 20s costs 20s, so the floor sits just under
+# where the reader stops reading anyway rather than in the middle of the gap.
+#
+# Taken on every fourth pixel of every fourth row: the crop is about 900x800,
+# so that is ~45,000 pixels and well under a millisecond, and over the 365
+# pictures on file it gave the full picture's figure to within a level on 362
+# of them, 2-9 levels off on three bright ones, and moved none across the
+# floor. Strided, not averaged down: an area resize smooths the
+# strokes of small text toward the background as well as the noise.
+DARK_SKIP_BELOW = 9
+DARK_SKIP_STRIDE = 4
+DARK_SKIP_PERCENTILE = 99.5
+
+
+def bright_end(grey):
+    """The 99.5th percentile of a greyscale crop, on a strided sample of it."""
+    sample = np.asarray(grey)[::DARK_SKIP_STRIDE, ::DARK_SKIP_STRIDE]
+    if sample.size == 0:
+        return 0.0
+    return float(np.percentile(sample, DARK_SKIP_PERCENTILE))
+
+
 class Geometry:
     """The corners and the crop one read is taken against, frozen.
 
@@ -1416,14 +1475,19 @@ class Geometry:
     """
 
     __slots__ = ('quad', 'roi', 'fixed_card_share', 'card_share',
-                 'card_height', 'ocr_height', 'dark_mode', 'whole', 'card_finder')
+                 'card_height', 'ocr_height', 'dark_mode', 'whole', 'card_finder',
+                 'skip_dark')
 
     def __init__(self, quad=None, roi=None, fixed_card_share=None,
                  card_share=CARD_SHARE, card_height=CARD_HEIGHT,
                  ocr_height=OCR_CARD_HEIGHT, dark_mode=None, whole=False,
-                 card_finder=True):
+                 card_finder=True, skip_dark=True):
         self.quad = quad
         self.roi = roi
+        # Whether a crop with nothing bright in it is left unread (see
+        # DARK_SKIP_BELOW). scan_pi turns it off for a ⌖ press's reads: the
+        # driver asked, so the reader is asked, however dark the screen.
+        self.skip_dark = skip_dark
         # Whether a read that found a journey and no payout may look above the
         # drawn card box for a taller card. See Scanner._look and cardfind.py;
         # config "cardFinder": false and --no-card-find turn it off.
@@ -1639,11 +1703,12 @@ class Scanner:
         self.locked = False
         self.last = None
 
-    def geometry(self, whole=False):
+    def geometry(self, whole=False, skip_dark=True):
         """A frozen copy of everything a read is taken against. See Geometry.
 
         `whole`: read the whole screen box rather than the card crop — see
-        Geometry.whole.
+        Geometry.whole. `skip_dark`: leave a crop with nothing bright in it
+        unread — see DARK_SKIP_BELOW.
         """
         return Geometry(quad=self.quad, roi=self.roi,
                         fixed_card_share=self.fixed_card_share,
@@ -1652,7 +1717,8 @@ class Scanner:
                         ocr_height=self.ocr_height,
                         dark_mode=self.dark_mode,
                         whole=whole,
-                        card_finder=self.card_finder)
+                        card_finder=self.card_finder,
+                        skip_dark=skip_dark)
 
     @property
     def crop_box(self):
@@ -2016,6 +2082,12 @@ class Scanner:
             # the read of the card it found was refused. None when it was not
             # asked or its read was kept.
             'finder': finder_said,
+            # 'dark' when the crop had nothing bright enough in it to be text
+            # and was never handed to tesseract (DARK_SKIP_BELOW), else None;
+            # and `peak`, the crop's bright end that decided it, either way.
+            # A skipped read is otherwise an empty one: parse(''), text ''.
+            'skipped': got.get('skipped'),
+            'peak': got.get('peak'),
             'crop': list(got['crop']),
             # The exact picture the reader was given, so a caller can measure how
             # bright it was and whether it was rippling.
@@ -2051,6 +2123,19 @@ class Scanner:
         """
         t0 = time.perf_counter()
         fitted = to_grey(fit_for_ocr(crop(screen, box), g.ocr_height))
+        # Nothing bright enough in it to be text: reported exactly as a read
+        # that found nothing — parse('') — and said as `skipped`, so the loop
+        # counts it apart. The polarity is not decided off noise: the last
+        # answer stands. `prepped` is the crop as it is, for the callers that
+        # measure banding off it. See DARK_SKIP_BELOW.
+        peak = bright_end(fitted)
+        if g.skip_dark and peak < DARK_SKIP_BELOW:
+            t1 = time.perf_counter()
+            return {'fitted': fitted, 'dark': g.dark_mode if dark is None else dark,
+                    'prepped': fitted, 'text': '', 'lines': [],
+                    'parsed': OP.parse(''), 'recovered': 0, 'clipped': False,
+                    'crop': list(box), 'skipped': 'dark', 'peak': peak,
+                    'ms': {'prep': (t1 - t0) * 1000, 'ocr': 0.0}}
         if dark is None:
             dark = is_dark_mode(fitted, was=g.dark_mode)
         prepped = preprocess(fitted, dark=dark)
@@ -2119,7 +2204,7 @@ class Scanner:
             parsed = OP.parse('')
         return {'fitted': fitted, 'dark': dark, 'prepped': prepped, 'text': text,
                 'lines': lines, 'parsed': parsed, 'recovered': recovered,
-                'clipped': clipped, 'crop': list(box),
+                'clipped': clipped, 'crop': list(box), 'skipped': None, 'peak': peak,
                 'ms': {'prep': (t1 - t0) * 1000, 'ocr': (t2 - t1) * 1000}}
 
     def _consider(self, parsed):

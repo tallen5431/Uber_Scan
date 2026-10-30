@@ -220,7 +220,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         planners=None,
         freeze_at=None, stall_say=None, empty=None, noise=True, offer_dim=None,
         ring=1, stall_again=None, offer=None, real_look=None, found_for=None,
-        pi=None):
+        pi=None, dark_for=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return — on the reader's thread only, with `hang_on_loop` False, so a read
@@ -256,6 +256,10 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     `pi`: what main() builds in place of scan_pi.PiHealth() — the Pi's
     temperature and throttling from a fake source, since this machine has
     neither, for the heat guard.
+    `dark_for(n, k)`: with the stubbed reader, true when frame k of read call
+    n is to come back as the real reader answers a black crop it left unread
+    (pipeline.DARK_SKIP_BELOW): empty, `skipped: 'dark'`. `skip_darks` in the
+    result is each read handed over as (whole screen or not, skip_dark).
     Returns the journal rows, the announcements, the alive beats and what rode
     them, the log lines, how many reads were asked of the reader and how many
     it began, the exception main() raised, if any, and the handoff directory —
@@ -318,6 +322,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
             box = found_for(calls[0], k) if found_for else None
             if box:
                 one.update(cropFrom='found', crop=list(box), rescued=1)
+            if dark_for and dark_for(calls[0], k):
+                one.update(out_for(''), skipped='dark', peak=3.0)
         return outs
 
     announced, verdicts, beats, logs, alive, dropoffs = [], [], [], [], [], []
@@ -338,10 +344,13 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     # panel was told a read had started.
     submitted_whole = []
     stamps = []
+    skip_darks = []
     readings = [0]
 
     def submit(self, frames, now, geom):
         submitted[0] += 1
+        skip_darks.append((bool(getattr(geom, 'whole', False)),
+                           getattr(geom, 'skip_dark', None)))
         submitted_whole.append(bool(getattr(geom, 'whole', False)))
         stamps.append((now, bool(getattr(geom, 'whole', False))))
         return real[12](self, frames, now, geom)
@@ -504,7 +513,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                 popups=popups,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
-                raised=raised, handoff=handoff, finder=finder[0])
+                raised=raised, handoff=handoff, finder=finder[0], skip_darks=skip_darks)
 
 
 def _stall_note_age(handoff):
@@ -3788,6 +3797,55 @@ _ud22 = os.path.join(os.path.dirname(r22['config']), 'scans', SP.UNPARSED_DIR)
 ok_('a ⌖ press was read whole', any(r22['wholes']))
 eq('...and a ⌖ read keeps no unparsed picture',
    sorted(os.listdir(_ud22)) if os.path.isdir(_ud22) else [], [])
+
+# --- a black crop left unread: an empty read, counted, said once ------------
+#
+# pipeline.DARK_SKIP_BELOW: a crop with nothing bright enough in it to be text
+# is never handed to tesseract, which on 29 Oct spent 16-25s a read on a screen
+# that was off. The loop must take one as the empty read it is — no offer, no
+# verdict — count it on the health line as "dark: not read" and on the `seen`
+# row as darkSkipped, and say it in the log once a DARK_SAY_EVERY, not per read.
+_dk = run(lambda n, k: '', seconds=4.0, health_every=0.3,
+          dark_for=lambda n, k: True,
+          until=lambda rows, ann, calls: calls >= 3)
+eq('reads of a black screen announce nothing', _dk['announced'], [])
+_dk_said = [l for l in _dk['logs'] if l.startswith('screen too dark to read')]
+eq('...are said once in the log over %d reads, not once a read (%r)'
+   % (_dk['calls'], _dk_said[:1]), len(_dk_said), 1)
+ok_('...and counted on the health line as "dark: not read" (%r)'
+    % [l for l in _dk['logs'] if l.startswith('health over')][:1],
+    any(l.startswith('health over') and 'dark: not read' in l for l in _dk['logs']))
+
+# ...and the `seen` row, written for a window that saw a card, carries the
+# count beside `reads` (nought here: the screen was lit). The count itself is
+# Health's, held in test_scan_pi; a card read and then a black screen does not
+# reach a second window here, because a read with no payout stops the verify
+# beat and the still fake gives the motion gate nothing to send another.
+_dk2 = run(lambda n, k: WHOLE, seconds=8.0, health_every=0.05,
+           until=lambda rows, ann, calls: any(x.get('kind') == 'seen' for x in rows))
+_dk2_seen = [x for x in _dk2['rows'] if x.get('kind') == 'seen']
+eq('the `seen` row carries darkSkipped (%r)'
+   % [(x.get('saw'), x.get('reads'), x.get('darkSkipped', 'absent')) for x in _dk2_seen],
+   bool(_dk2_seen) and all(x.get('darkSkipped') == 0 for x in _dk2_seen), True)
+
+# A ⌖ press's reads are never skipped: the driver asked. Every other read is
+# handed over with the skip on.
+_dkho = tempfile.mkdtemp()
+
+
+def _press_then_card(n, k):
+    if n == 1 and k == 0:
+        open(os.path.join(_dkho, 'uberscan-dropoff'), 'w').close()
+    return WHOLE
+
+
+_dk3 = run(_press_then_card, seconds=8.0, handoff=_dkho, whole_text=_SNAP_NAV,
+           until=lambda rows, ann, calls: calls >= 3)
+eq('a ⌖ press\'s whole-screen reads go out with the dark skip off (%r)'
+   % (_dk3['skip_darks'],),
+   sorted(set(sd for w, sd in _dk3['skip_darks'] if w)), [False])
+eq('...and the card-box reads with it on',
+   sorted(set(sd for w, sd in _dk3['skip_darks'] if not w)), [True])
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)

@@ -1487,6 +1487,8 @@ def read_why(out, parsed):
     """
     if parsed.get('complete'):
         return None
+    if out.get('skipped') == 'dark':
+        return 'too dark to read, so not read'
     if out.get('clipped'):
         return 'the payout sat against the top edge of the crop'
     if parsed.get('pay') is None:
@@ -1588,6 +1590,15 @@ def log(message):
 HEALTH_EVERY = 120.0
 SAMPLE_EVERY = 20.0
 
+# READS LEFT UNREAD BECAUSE THE CROP WAS BLACK (PL.DARK_SKIP_BELOW), said at
+# most this often. On 29 Oct the screen sat off for twenty minutes at a stretch,
+# and a line per read would have been a line every couple of seconds saying the
+# same thing; one a minute says it and how many reads it covered. Counted in
+# the health line as "dark: not read" and on the `seen` row as `darkSkipped`,
+# whole-screen reads nobody pressed for included — those return from digest()
+# before the health tally, so the count is taken where every read arrives.
+DARK_SAY_EVERY = 60.0
+
 
 class Health:
     """Counts what happened, and says so occasionally.
@@ -1599,6 +1610,10 @@ class Health:
 
     def __init__(self):
         self.reset(None)
+        # When the last "screen too dark to read" line was said, on the
+        # caller's monotonic clock, and how many skips since. See not_read_dark.
+        self._dark_said = None
+        self._dark_unsaid = 0
         self.relocks = 0
         self.rebaselines = 0
         # The destination scan's two blind spots, counted for the whole run
@@ -1690,10 +1705,16 @@ class Health:
         # it is labelled that way everywhere it is shown.
         self.saw = self.kept = 0
         self.ms = []
+        # Reads whose crop had nothing bright enough in it to be text, and so
+        # were never handed to tesseract (PL.DARK_SKIP_BELOW). Kept out of
+        # `ms`: a skipped read costs a millisecond, and the median read time is
+        # what says whether the Pi is reading slowly.
+        self.dark_skipped = 0
 
     def add(self, out, parsed, card=None, previous=None):
         self.reads += 1
-        self.ms.append(out['ms']['total'])
+        if out.get('skipped') != 'dark':
+            self.ms.append(out['ms']['total'])
         if card is not None:
             # Banding only. `card` here is the image handed to the reader, which
             # has been through CLAHE and, on a dark-mode phone, inverted — and
@@ -1720,6 +1741,27 @@ class Health:
         if out.get('cropFrom') == 'found':
             self.rescued += 1
 
+    def not_read_dark(self, now, peak):
+        """Count one read left unread for a black crop; the log line, when due.
+
+        Every read the loop collects that PL skipped comes here, card-box and
+        whole-screen alike (see DARK_SAY_EVERY), and the count is the window's,
+        like `reads`. The line is rate-limited on its own clock — `now` is the
+        caller's monotonic one — and says how many skips it stands for.
+        """
+        self.dark_skipped += 1
+        self._dark_unsaid += 1
+        if self._dark_said is not None and now - self._dark_said < DARK_SAY_EVERY:
+            return None
+        self._dark_said = now
+        n, self._dark_unsaid = self._dark_unsaid, 0
+        return ('screen too dark to read: the brightest of the crop was %s/255, '
+                'under the %d a card\'s text reaches at its dimmest, so it was not '
+                'handed to the reader (%d read%s like it since this was last said) '
+                '— is the phone\'s screen on?'
+                % ('?' if peak is None else '%d' % round(peak), PL.DARK_SKIP_BELOW,
+                   n, '' if n == 1 else 's'))
+
     def counters(self, now):
         """Every figure report() speaks of, as it stands, without saying it.
 
@@ -1733,6 +1775,7 @@ class Health:
                 'reads': self.reads, 'complete': self.complete,
                 'failed': self.failed, 'noPay': self.no_pay,
                 'clipped': self.clipped, 'rescued': self.rescued,
+                'darkSkipped': self.dark_skipped,
                 'medianMs': (int(round(sorted(self.ms)[len(self.ms) // 2]))
                              if self.ms else None),
                 'saw': self.saw, 'kept': self.kept,
@@ -1758,9 +1801,19 @@ class Health:
         """
         if self.since is None:
             self.since = now
-        if now - self.since < HEALTH_EVERY or not (self.reads or self.failed):
+        if now - self.since < HEALTH_EVERY or not (self.reads or self.failed
+                                                   or self.dark_skipped):
             return None
         tally = self.counters(now)
+        if not self.reads and not self.failed:
+            # Nothing but whole-screen reads left unread for a black crop,
+            # which never reach add(). Said, because a window of them is a
+            # screen that was off.
+            log('health over %ds: %d dark: not read'
+                % (now - self.since, self.dark_skipped))
+            tally.update(self._window(tracker))
+            self.reset(now)
+            return tally
         if not self.reads:
             # Every read raised. There are no timings to summarise and nothing
             # else here is meaningful, but saying so is the whole point.
@@ -1774,7 +1827,11 @@ class Health:
             self.reset(now)
             return tally
         bits = ['%d reads, %d complete' % (self.reads, self.complete),
-                'median %.0fms' % tally['medianMs']]
+                # None when every read in the window was skipped as dark.
+                'median %s' % ('-' if tally['medianMs'] is None
+                               else '%.0fms' % tally['medianMs'])]
+        if self.dark_skipped:
+            bits.append('%d dark: not read' % self.dark_skipped)
         if self.failed:
             bits.append('%d failed' % self.failed)
         # `or self.kept`, because the two are counted at different moments and
@@ -5678,6 +5735,9 @@ def main():
             'reads': tally.get('reads'), 'failed': tally.get('failed'),
             'complete': tally.get('complete'), 'noPay': tally.get('noPay'),
             'clipped': tally.get('clipped'), 'rescued': tally.get('rescued'),
+            # ...and how many reads were left unread for a black crop (see
+            # DARK_SAY_EVERY): on 29 Oct each of those was 16-25s of tesseract.
+            'darkSkipped': tally.get('darkSkipped'),
             'medianMs': tally.get('medianMs'),
             'tooDim': tally.get('tooDim'), 'tooBright': tally.get('tooBright'),
             'corners': tally.get('corners'), 'relocks': tally.get('relocks'),
@@ -5740,6 +5800,17 @@ def main():
         # destination branch needs: a genuinely payout-free screen still
         # digests as itself.
         chosen = read_the_money(batch)
+        # A read PL left unread for a black crop, counted and said here rather
+        # than in digest(), which a whole-screen read leaves before the tally.
+        # Otherwise it goes on as the empty read it is. See DARK_SAY_EVERY.
+        if batch[chosen].get('skipped') == 'dark':
+            said = health.not_read_dark(time.monotonic(), batch[chosen].get('peak'))
+            if said:
+                log(said)
+            # ...and a whole-screen one gives the health line its chance here,
+            # since digest() returns before asking for it on such a read.
+            if getattr(done.get('geom'), 'whole', False):
+                note_tally(health.report(time.monotonic(), tracker, scanner))
         # The other frames are evidence: the accumulator merges partial reads,
         # and a leg lost to glare in one frame is often present in the other.
         # Every frame but the chosen one, because digest() adds that one itself
@@ -6521,11 +6592,18 @@ def main():
             # ...and for the whole-screen read digest() asked for without a
             # press (`screen_auto`), once: the request is spent by this
             # hand-over.
-            whole_read = (dropoff_asked and time.monotonic() < dropoff_until) or screen_auto
+            pressed_read = dropoff_asked and time.monotonic() < dropoff_until
+            whole_read = pressed_read or screen_auto
             screen_auto = False
+            # ...and a ⌖ press's read is read however dark the crop: the driver
+            # asked, so the reader is asked. Every other read — the card box,
+            # the verify beat, the whole-screen read nobody pressed for — skips
+            # a crop with nothing bright enough in it to be text. See
+            # PL.DARK_SKIP_BELOW and DARK_SAY_EVERY.
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(),
-                          scanner.geometry(whole=whole_read))
+                          scanner.geometry(whole=whole_read,
+                                           skip_dark=not pressed_read))
             looked = True
             # Before the read, not after it. The dashboard has nothing else to
             # go on for the second and a half this takes — see emit_reading.
