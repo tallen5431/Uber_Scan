@@ -1530,8 +1530,21 @@
   function sameName(a, b) {
     if (!a.name || !b.name) return false;
     if (norm(a.name) === norm(b.name)) return true;
-    var wa = nameWords(a.name), wb = nameWords(b.name);
+    var wa = runOnForms(a.name), wb = runOnForms(b.name);
     return wa.some(function (x) { return wb.some(function (y) { return wordsAlike(x, y); }); });
+  }
+
+  // A name's words, and each word run on into the initial after it, as the
+  // planner reads a name tight to its initial ("Herbie P." read "terbieP.",
+  // the owner's 29 Oct shift: its first letter misread too, so neither word
+  // was alike the other — "herbiep" and "terbiep" are, one letter apart).
+  // No more lenient than wordsAlike: the run-on form is the name as printed.
+  function runOnForms(name) {
+    var out = nameWords(name);
+    var re = /([A-Za-z]{3,})\s+([A-Z])(?![A-Za-z])/g, m;
+    var t = typeof name === 'string' ? name.replace(/['\u2019]/g, '') : '';
+    while ((m = re.exec(t)) !== null) out.push((m[1] + m[2]).toLowerCase());
+    return out;
   }
 
   function samePlannerStop(a, b) {
@@ -1580,17 +1593,36 @@
   // due the same minute under two names stay two (slotJoins' review of 27
   // Oct), and so do two of one first name at two doors. mergePlanner asks
   // this after samePlannerStop has had every pair, as sameDoorStop.
+  //
+  // ...and (the owner's 29 Oct shift) a read with NO "Expected by" agrees with
+  // any time — the stop read once with its time cut off is the timed stop,
+  // not a second one — and only a DOOR differs (stopDoor): a town-only line,
+  // "<Town>, GA <zip>", is no door, so a pickup read once with its town and
+  // its time a slip early (17:58 against 18:00, the street on the second read
+  // alone) was kept twice. Two different names are still two stops.
   function sameNameStop(a, b) {
     if (!a || !b || !a.kind || a.kind !== b.kind) return false;
     if (!named(a) || !named(b) || !sameName(a, b)) return false;
     var ia = initialOf(a.name), ib = initialOf(b.name);
     if (ia && ib && ia !== ib) return false;
     var timed = function (x) { return typeof x.expectedBy === 'number' && isFinite(x.expectedBy); };
-    if (!timed(a) || !timed(b)) return false;
-    var d = Math.abs(a.expectedBy - b.expectedBy) % 1440;
-    if (Math.min(d, 1440 - d) > NAME_SLIP_MINUTES) return false;
-    var da = a.line || a.street, db = b.line || b.street;
+    if (timed(a) && timed(b)) {
+      var d = Math.abs(a.expectedBy - b.expectedBy) % 1440;
+      if (Math.min(d, 1440 - d) > NAME_SLIP_MINUTES) return false;
+    }
+    var da = stopDoor(a), db = stopDoor(b);
     return !(da && db && !sameStreet(da, db));
+  }
+
+  // A stop's door line — its line or its street, whichever starts with a
+  // house number ("4821 Kestrel Dr, ...") — or null: a town alone, or a
+  // street with no number, is not a door two reads can differ by.
+  function stopDoor(s) {
+    var cands = [s.line, s.street];
+    for (var i = 0; i < cands.length; i++) {
+      if (/^\d+[a-z]? \S/.test(streetKey(cands[i]))) return cands[i];
+    }
+    return null;
   }
 
   // Whether a header with nothing under it and a stop beside it can be one
@@ -1642,6 +1674,55 @@
     // read's answer where it gave one, else the kept.
     if (!read.of && kept.of) out.of = kept.of;
     return out;
+  }
+
+  // Where a timed stop goes among `list`'s entries ({s}) by its time: after
+  // the last timed entry due earlier, before the first due later — or null
+  // where it has no time, the list none or one due the same minute, or the
+  // list's own times are not in order (then position is all there is to go
+  // by). Minutes wrap at midnight, read against the stop's own time.
+  function timedSlot(list, o) {
+    var t = o && o.expectedBy;
+    if (typeof t !== 'number' || !isFinite(t)) return null;
+    var rel = function (x) {
+      var d = (x - t) % 1440;
+      if (d > 720) d -= 1440;
+      if (d <= -720) d += 1440;
+      return d;
+    };
+    var seen = [];
+    list.forEach(function (e, k) {
+      var x = e.s && e.s.expectedBy;
+      if (typeof x === 'number' && isFinite(x)) seen.push({ k: k, d: rel(x) });
+    });
+    // A tie is not decided by time: two due the same minute keep their places.
+    if (!seen.length || seen.some(function (x) { return x.d === 0; })) return null;
+    for (var j = 1; j < seen.length; j++) if (seen[j].d < seen[j - 1].d) return null;
+    var after = -1;
+    seen.forEach(function (x) { if (x.d < 0) after = x.k; });
+    if (after !== -1) return after + 1;
+    return seen[0].k;
+  }
+
+  // Whether a stop put at `k` of `list` keeps time with the nearest timed
+  // entry each side of it (due no later before it, no earlier after it), or
+  // has no time to keep.
+  function inTime(list, k, o) {
+    var t = o && o.expectedBy;
+    if (typeof t !== 'number' || !isFinite(t)) return true;
+    var rel = function (x) {
+      var d = (x - t) % 1440;
+      if (d > 720) d -= 1440;
+      if (d <= -720) d += 1440;
+      return d;
+    };
+    var timed = function (e) {
+      return e && e.s && typeof e.s.expectedBy === 'number' && isFinite(e.s.expectedBy);
+    };
+    var j;
+    for (j = k - 1; j >= 0; j--) if (timed(list[j])) { if (rel(list[j].s.expectedBy) > 0) return false; break; }
+    for (j = k; j < list.length; j++) if (timed(list[j])) { if (rel(list[j].s.expectedBy) < 0) return false; break; }
+    return true;
   }
 
   // The first and last "Expected by" of a list, as minutes, or null.
@@ -1742,8 +1823,20 @@
           }
         }
         var entry = { s: o, fromNew: false, old: i };
-        if (at !== -1) { list.splice(at + 1, 0, entry); return; }
-        for (k = 0; k < list.length; k++) if (list[k].old > i) break;
+        if (at !== -1) {
+          k = at + 1;
+        } else {
+          for (k = 0; k < list.length; k++) if (list[k].old > i) break;
+        }
+        // ...unless that place puts it out of time with the stops round it
+        // and its time has a place in the list (timedSlot): a kept stop
+        // matched to a newer read's elsewhere — a name read once with no
+        // time, before an add-on put stops in between (the owner's 29 Oct
+        // shift) — does not drag its old neighbours there with it.
+        if (!inTime(list, k, o)) {
+          var byTime = timedSlot(list, o);
+          if (byTime !== null) k = byTime;
+        }
         list.splice(k, 0, entry);
       });
     }

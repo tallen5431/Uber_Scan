@@ -1292,6 +1292,67 @@ async function nucbox() {
      MV.againstCard(addOnCard, MV.cardFix(addOnCard).at, { lat: SQ.lat, lon: SQ.lon },
                     'Fable Grill', 'held'),
      'the order in your car is an add-on card — no yardstick yet for its end');
+  /* ...and a card TAKEN WITH ANOTHER ORDER IN THE CAR (the owner's 29 Oct
+     shift, order #6: not an add-on, no Early look, its 4.3 mi from the held
+     order's door to its restaurant to its door, and its door 5.3 mi from the
+     card's fix — outside the 4.8 mi disc, "not inside the card's reach").
+     The server keeps where the held order ends on the hold (`after`, MV.endAnchor)
+     and the card is searched in the fix's disc AND one of the card's miles
+     and the slack round that end. Invented coordinates and names. */
+  var heldEnd = { lat: SQ.lat + 0.04, lon: SQ.lon };            // 2.76 mi north
+  var door6 = { lat: SQ.lat + 0.076, lon: SQ.lon };             // 5.25 mi north
+  var c6 = card({ miles: 4.3 });
+  var c6after = card({ miles: 4.3, after: [{ of: 'h5', lat: heldEnd.lat, lon: heldEnd.lon,
+                                             widen: 0, from: 'pin' }] });
+  var hits6 = [{ lat: door6.lat, lon: door6.lon, name: '77, Fable Lane, Kestrelton' }];
+  var plan6 = MV.searchPlan('77 Fable Ln, Kestrelton');
+  eq('a card taken with no order in the car: the door 5.25 mi out is outside its 4.8 mi',
+     MV.pickInDisc(hits6, MV.discFor(c6), plan6).why, 'none');
+  var d6 = MV.discFor(c6after);
+  eq('...taken with one: its disc is the fix\'s and the reach from that order\'s end, '
+     + 'the card\'s miles and the slack round it',
+     JSON.stringify([d6.at.lat, d6.miles.toFixed(2), d6.card, d6.also.length,
+                     d6.also[0].at.lat, d6.also[0].miles.toFixed(2)]),
+     JSON.stringify([SQ.lat, '4.80', 4.3, 1, heldEnd.lat, '4.80']));
+  eq('...and the door inside that reach is pinned',
+     (MV.pickInDisc(hits6, d6, plan6).at || {}).lat, door6.lat);
+  eq('...one outside both is still refused',
+     MV.pickInDisc([{ lat: SQ.lat - 0.076, lon: SQ.lon, name: '77, Fable Lane, Kestrelton' }],
+                   d6, plan6).why, 'none');
+  eq('...the box asked holds both parts',
+     Number(MV.discBox(d6).split(',')[1]) >= heldEnd.lat + 4.8 / 69, true);
+  eq('...and the card refuses no pin inside the reach it was searched in, as before '
+     + 'one past both',
+     JSON.stringify([MV.cardRefuses(c6, MV.cardFix(c6).at, door6) !== null,
+                     MV.cardRefuses(c6after, MV.cardFix(c6after).at, door6),
+                     MV.cardRefuses(c6after, MV.cardFix(c6after).at,
+                                    { lat: SQ.lat - 0.076, lon: SQ.lon }) !== null]),
+     JSON.stringify([true, null, true]));
+  eq('...a street\'s stretch inside only the reach is kept by the clip',
+     MV.clipToDisc([[[door6.lat, door6.lon - 0.002], [door6.lat, door6.lon + 0.002]]], d6).length,
+     1);
+  eq('...a segment crossing only the reach, both ends outside, is kept too',
+     MV.clipToDisc([[[door6.lat, door6.lon - 0.2], [door6.lat, door6.lon + 0.2]]], d6).length, 1);
+  eq('...the drawn shape carries the reach as its own circle',
+     JSON.stringify(MV.discShape(d6).also.map(function (c) { return c.lat; })),
+     JSON.stringify([heldEnd.lat]));
+  eq('...an add-on keeps its own rule (its trip\'s disc grown), never the reach',
+     MV.discFor(Object.assign({}, c6after, { addon: true }), d94).also, undefined);
+  eq('...a card of no yardstick is the sixty miles, with no reach beside it',
+     MV.discFor(Object.assign({}, c6after, { legs: 1, hasTotal: false })).also, undefined);
+  eq('...a widen that is no distance is no reach',
+     MV.discFor(card({ miles: 4.3, after: [{ lat: 1, lon: 2, widen: -1 }] })).also, undefined);
+  eq('where a held order ends: its door pin exactly, its street pin by the stretch\'s '
+     + 'length, its area by its spread',
+     JSON.stringify([MV.endAnchor({ pin: { lat: 1, lon: 2 }, area: { lat: 3, lon: 4 } }),
+                     MV.endAnchor({ pin: { lat: 1, lon: 2, metres: 600 } }).widen,
+                     MV.endAnchor({ area: { lat: 3, lon: 4, miles: 0.2 } })]),
+     JSON.stringify([{ lat: 1, lon: 2, widen: 0, from: 'pin' }, 0.37,
+                     { lat: 3, lon: 4, widen: 0.2, from: 'area' }]));
+  eq('...and no point from its disc alone (it would hold nearly any door), nor from nothing',
+     JSON.stringify([MV.endAnchor({ disc: d94 }), MV.endAnchor({ pin: { lat: NaN, lon: 2 } }),
+                     MV.endAnchor(null)]),
+     JSON.stringify([null, null, null]));
   /* ...and a card whose fix the gate refused ONLY as rough (MV.discFix): the
      owner's 17 Oct afternoon, a held card stamped mode 3, 0.2 s, 73 m,
      `rough`, and the held end never searched ("no card fix"). The disc is

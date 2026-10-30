@@ -2741,6 +2741,43 @@ SEQ.forEach(function (seq) {
   eq('[planner names] ...past midnight the minutes wrap: 11:59 PM and 12:01 AM are two minutes',
      said(A.mergePlanner([stop('pickup', 'Fable Pizza', 1439, null, null)],
                          [stop('pickup', 'Fable Pizza', 1, null, null)], null)).length, 1);
+  // The owner's 29 Oct shift (names and places invented): a pickup read once
+  // with its town alone and due 5:58, then with its street and due 6:00, was
+  // kept twice — a town-only line is no door to differ by — and a customer
+  // read once with no "Expected by" and their initial run on ("Corbin P."
+  // then "torbinP.", the first letter misread too) was kept beside the timed
+  // read. Two different names are still two stops.
+  var townOnly = stop('pickup', 'Fable Pizza', 1078, null, null,
+                      { city: 'Kestrelton', state: 'GA', zip: '30144', line: 'Kestrelton, GA 30144' });
+  var withDoor = stop('pickup', 'Fable Pizza', 1080, '12 Fable St NW', 'Kestrelton');
+  eq('[planner names] a town-only line is no door: the pickup due two minutes later with its '
+     + 'street is the same stop, the newer read\'s',
+     said(A.mergePlanner([townOnly], [withDoor], null)), said([withDoor]));
+  eq('[planner names] ...but a town-only line under another name stays two, and two house '
+     + 'numbers still differ',
+     [A.mergePlanner([townOnly], [stop('pickup', 'Wren Noodles', 1080, '12 Fable St NW',
+                                       'Kestrelton')], null).length,
+      A.mergePlanner([stop('pickup', 'Fable Pizza', 1078, '9 Elm Dr', 'Kestrelton')],
+                     [withDoor], null).length], [2, 2]);
+  var corbin = stop('dropoff', 'Corbin P.', null, null, null);
+  var torbin = stop('dropoff', 'torbinP.', 1122, null, null);
+  eq('[planner names] a name read with its initial run on and a letter misread is the name: '
+     + 'one stop, untimed against timed',
+     said(A.mergePlanner([corbin], [torbin], null)), said([torbin]));
+  eq('[planner names] ...but never two names: another first name, another initial run on',
+     [A.mergePlanner([corbin], [stop('dropoff', 'Dana P.', 1122, null, null)], null).length,
+      A.mergePlanner([stop('dropoff', 'Pat Q.', 1122, null, null)],
+                     [stop('dropoff', 'PatR.', 1122, null, null)], null).length], [2, 2]);
+  // ...and where the untimed stop was kept beside the first page's pickup,
+  // before an add-on put stops in between, the stops the newer read did not
+  // show keep time with it rather than follow their old neighbour.
+  var fp = stop('pickup', 'Fable Pizza', 1080, '12 Fable St NW', 'Kestrelton');
+  var wn = stop('pickup', 'Wren Noodles', 1088, '4 Wren Rd', 'Kestrelton');
+  var ad = stop('dropoff', 'Ada D.', 1107, '30 Birch Ln', 'Roswell');
+  var jr = stop('dropoff', 'Jules R.', 1113, null, null);
+  eq('[planner names] ...the kept stops round it keep time with the newer read\'s',
+     said(A.mergePlanner([fp, corbin, wn, ad], [jr, torbin], null)),
+     said([fp, wn, ad, jr, torbin]));
   // A read that shows the top AND the foot is the whole list: a kept stop it
   // does not show is not there any more.
   eq('[planner pages] a read showing the top and the foot is the whole list; a kept stop it '

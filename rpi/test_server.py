@@ -9018,6 +9018,46 @@ try:
 finally:
     stop(_dp)
 
+# An order taken with another in the car, not an add-on (the owner's 29 Oct
+# shift, order #6: its card's 4.3 mi ran from the held order's door, and the
+# door was outside the disc round the car). The hold keeps where the order in
+# the car ends (`after`, MV.endAnchor), its card carries it to Map view, and
+# heldDisc searches from there too (MV.discFor's `also`). Invented places.
+_FIX = {'gpsAge': 0.5, 'gpsErr': 10.0, 'gpsMode': 3, 'gpsOk': True, 'gpsWhy': None,
+        'legs': 2, 'hasTotal': True, 'whole': True}
+_fp, _fb, _fj, _fh = _cserver('after', CARRY_TWO='1')
+try:
+    _took2(_fb, _card('f-a', 11.0, minutes=40.0, miles=9.4, dropoff=_AD,
+                      lat=_PA[0] - 0.05, lon=_PA[1], **_FIX))
+    _took2(_fb, _card('f-b', 12.28, minutes=21.0, miles=4.3, dropoff=_BD,
+                      lat=_PA[0] - 0.02, lon=_PA[1], **_FIX))
+    _o = _orders(_fb)
+    eq('[after] the order taken with one in the car keeps nothing while that one\'s end '
+       'is neither pinned nor an area (its disc alone would hold nearly any door); the '
+       'first keeps nothing',
+       ['after' in (x.get('card') or {}) for x in _o], [False, False])
+    _pin2(_fb, _o[0]['holdId'], _AD, _PA, '4821, Kestrel Drive, Marietta')
+    _o = _orders(_fb)
+    eq('[after] ...and once that end is pinned, the door itself, read again',
+       (_o[1].get('card') or {}).get('after'),
+       [{'of': _o[0]['holdId'], 'lat': _PA[0], 'lon': _PA[1], 'widen': 0, 'from': 'pin'}])
+    _hf = json.load(open(os.path.join(os.path.dirname(_fj), 'holding.json')))['orders']
+    eq('[after] ...kept on the hold, not on its card as written',
+       ([h.get('after', [{}])[0].get('from') for h in _hf],
+        ['after' in (h.get('card') or {}) for h in _hf]),
+       ([None, 'pin'], [False, False]))
+    post(_fb, '/api/delivered', {'holdIds': [x['holdId'] for x in _o]})
+    # An add-on keeps its own rule (its trip's disc grown), never `after`.
+    _took2(_fb, _card('f-c', 11.0, minutes=40.0, miles=9.4, dropoff=_AD,
+                      lat=_PA[0], lon=_PA[1], **_FIX))
+    _took2(_fb, _card('f-d', 4.0, minutes=8.0, miles=0.6, addon=True,
+                      lat=_PA[0], lon=_PA[1], **_FIX))
+    _o = _orders(_fb)
+    eq('[after] an add-on taken onto the trip keeps no `after`',
+       [('after' in (x.get('card') or {})) for x in _o], [False, False])
+finally:
+    stop(_fp)
+
 # A re-offer, a different card, an add-on, a two-order DoorDash card, and a
 # planner that grows with nobody pressing Took.
 _rp, _rb2, _rj, _rh = _cserver('reoffer', CARRY_TWO='1')

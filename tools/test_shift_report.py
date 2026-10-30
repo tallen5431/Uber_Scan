@@ -728,6 +728,28 @@ eq('[waits] the store is the card\'s pickup less its bracketed street; a door, a
                                '1981 Cobb Pkwy NW, Kennesaw', 'Elm St & Oak Ave, Faketown',
                                None, '', 'oe Larkspur Tacos')],
    ['Imaginary Bistro', 'Larkspur Tacos', None, None, None, None, 'Larkspur Tacos'])
+# The owner's 29 Oct shift: a pickup returned as the card's store line and the
+# whole line under it, the trip's address, run together ("<Store> <n> <Street>
+# Pkwy W, <Town>"), printed and grouped by that. unglued takes the address
+# off where the card's text shows the two lines; names and places invented.
+_GLUE = 'xs Larkspur Tacos\n4821 Kestrel Pkwy W, Faketown\n$8.12'
+eq('[waits] a pickup that is a card line and the whole next line, an address, is the store '
+   'line alone — however much of the address the parser kept',
+   [SR.store_name(SR.unglued(p, [_GLUE])) for p in
+    ('Larkspur Tacos 4821 Kestrel Pkwy W, Faketown', 'Larkspur Tacos 4821 Kestrel Pkwy W, Fak')],
+   ['Larkspur Tacos', 'Larkspur Tacos'])
+eq('[waits] ...but not with no text to show it, nor a bracketed street ("Rd)" is no store), '
+   'nor a name wrapped onto a line ("Center, Faketown"), nor a door, nor another line under it',
+   [SR.unglued('Larkspur Tacos 4821 Kestrel Pkwy W, Faketown', [None, '']),
+    SR.unglued('Wren Noodles (12 Oak Rd) 4821 Kestrel Pkwy W, Faketown',
+               ['Wren Noodles (12 Oak\nRd) 4821 Kestrel Pkwy W, Faketown']),
+    SR.unglued('Gateway Center, Faketown', ['Gateway\nCenter, Faketown']),
+    SR.unglued('12 Oak Rd 4821 Kestrel Pkwy W, Faketown',
+               ['12 Oak Rd\n4821 Kestrel Pkwy W, Faketown']),
+    SR.unglued('Larkspur Tacos Grill, Faketown', [_GLUE])],
+   ['Larkspur Tacos 4821 Kestrel Pkwy W, Faketown',
+    'Wren Noodles (12 Oak Rd) 4821 Kestrel Pkwy W, Faketown', 'Gateway Center, Faketown',
+    '12 Oak Rd 4821 Kestrel Pkwy W, Faketown', 'Larkspur Tacos Grill, Faketown'])
 
 
 def _wo(store, minutes, by=('gps',)):

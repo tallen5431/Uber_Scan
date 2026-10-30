@@ -658,6 +658,13 @@
     var yard = cardYardstick(o);
     if (!yard.miles) return null;
     var out = outsideCard(fix, pin, yard);
+    // ...nor one inside the reach from where an order already in the car
+    // ends (afterParts: a card taken with one held), the disc discFor
+    // searches it in beside the fix's — one edge for the search and the
+    // accusation.
+    if (out && afterParts(o, yard.miles).some(function (a) {
+      return crowMiles(a.at, pin) <= a.miles;
+    })) return null;
     return out ? { crow: out.crow, miles: yard.miles,
                    corrected: yard.corrected } : null;
   }
@@ -1322,7 +1329,83 @@
     // centre from one round a fix the gate passed. Absent on the latter, so
     // every disc built before this reads the same.
     if (fix.rough !== undefined) d.rough = fix.rough;
+    if (yard.miles) {
+      var also = afterParts(card, yard.miles);
+      if (also.length) d.also = also;
+    }
     return d;
+  }
+
+  /* ...AND A CARD TAKEN WITH ANOTHER ORDER IN THE CAR IS SEARCHED FROM THAT
+   * ORDER'S END TOO. The owner's 29 Oct shift, order #6: taken while #5 was
+   * held — not an Uber add-on, no Early look badge — its card printed 4.3 mi,
+   * and that was #5's door to #6's restaurant to #6's door (1.8 + 2.7 road
+   * mi), not a trip from the car: the restaurant was 4.19 mi crow from the
+   * card's fix and the door 5.32 mi, outside the 4.8 mi disc, and the door was
+   * refused "not inside the card's reach" for the whole delivery. Nothing on
+   * the card says which of the two places its miles start from, so the disc
+   * is BOTH: the fix's, as always, and round each order in the car's end
+   * (`card.after`, endAnchor's, kept on the hold at the Took by server.js),
+   * the card's miles and SLACK_MI plus how far that end may be from the
+   * point kept for it (`widen`: 0 for a door pin, the stretch's length for a
+   * street's, an area's spread) — the triangle inequality again. An end with
+   * neither pin nor area gives no point: the held card's own disc centre
+   * would widen the reach by that whole disc (9.9 mi and the card's 4.8 round
+   * a 9.4 mi card's fix), which holds nearly any door either order could
+   * name and so undoes the map's tie-break between them (rpi/test_server.py,
+   * "a tie is broken only by the card whose reach holds the door"). The
+   * server reads the end again once it is pinned (refreshAfter). `also` on
+   * the disc is that list, [{at, miles, from}]; inDisc and discBox read every
+   * part, and nothing reads `also` for a figure. An add-on keeps its own rule
+   * (`base` above). */
+  var AFTER_MAX = 3;
+  function afterParts(card, miles) {
+    var list = card && Array.isArray(card.after) ? card.after.slice(0, AFTER_MAX) : [];
+    if (!(typeof miles === 'number' && isFinite(miles) && miles > 0)) return [];
+    return list.filter(function (a) {
+      return a && typeof a.lat === 'number' && typeof a.lon === 'number'
+        && isFinite(a.lat) && isFinite(a.lon)
+        && typeof a.widen === 'number' && isFinite(a.widen) && a.widen >= 0;
+    }).map(function (a) {
+      var part = { at: { lat: a.lat, lon: a.lon }, miles: miles + SLACK_MI + a.widen };
+      if (a.from) part.from = a.from;
+      return part;
+    });
+  }
+
+  /* Where an order in the car ends, as a point and how far its end may be
+     from it, for afterParts: { lat, lon, widen, from }, or null. `end` is
+     { pin, area } of that order — its pin (a street's carries its length,
+     `metres`), else the general area kept beside a refusal; neither, null
+     (see above: no disc centre). */
+  function endAnchor(end) {
+    if (!end) return null;
+    var ok = function (p) {
+      return p && typeof p.lat === 'number' && typeof p.lon === 'number'
+        && isFinite(p.lat) && isFinite(p.lon);
+    };
+    var r2 = function (v) { return Math.round(v * 100) / 100; };
+    if (ok(end.pin)) {
+      var m = typeof end.pin.metres === 'number' && isFinite(end.pin.metres) && end.pin.metres > 0
+        ? end.pin.metres / METRES_PER_MILE : 0;
+      return { lat: end.pin.lat, lon: end.pin.lon, widen: r2(m), from: 'pin' };
+    }
+    if (ok(end.area)) {
+      var s = typeof end.area.miles === 'number' && isFinite(end.area.miles) && end.area.miles > 0
+        ? end.area.miles : 0;
+      return { lat: end.area.lat, lon: end.area.lon, widen: r2(s), from: 'area' };
+    }
+    return null;
+  }
+
+  // Every circle of a disc: its own, then `also`'s.
+  function discParts(disc) {
+    return [{ at: disc.at, miles: disc.miles }].concat(Array.isArray(disc.also) ? disc.also : []);
+  }
+
+  // Whether a point lies in the disc: in any of its parts.
+  function inDisc(disc, p) {
+    return discParts(disc).some(function (c) { return crowMiles(c.at, p) <= c.miles; });
   }
 
   /* --- a rough fix as a disc's centre, and as nothing else ------------------
@@ -1414,12 +1497,18 @@
      question and the server's small cache answers the second. */
   function discBox(disc) {
     if (!disc) return null;
-    var dLat = disc.miles / 69.0;
-    var dLon = disc.miles / (69.0 * Math.max(0.2, Math.cos(
-      (Math.abs(disc.at.lat) + dLat) * Math.PI / 180)));
+    // ...round every part of it (`also`), so the box holds the union.
+    var w = Infinity, n = -Infinity, e = -Infinity, s = Infinity;
+    discParts(disc).forEach(function (c) {
+      var dLat = c.miles / 69.0;
+      var dLon = c.miles / (69.0 * Math.max(0.2, Math.cos(
+        (Math.abs(c.at.lat) + dLat) * Math.PI / 180)));
+      w = Math.min(w, c.at.lon - dLon); e = Math.max(e, c.at.lon + dLon);
+      n = Math.max(n, c.at.lat + dLat); s = Math.min(s, c.at.lat - dLat);
+    });
     function out(v, up) { return (up ? Math.ceil(v * 100) : Math.floor(v * 100)) / 100; }
-    return [out(disc.at.lon - dLon, false).toFixed(2), out(disc.at.lat + dLat, true).toFixed(2),
-            out(disc.at.lon + dLon, true).toFixed(2), out(disc.at.lat - dLat, false).toFixed(2)]
+    return [out(w, false).toFixed(2), out(n, true).toFixed(2),
+            out(e, true).toFixed(2), out(s, false).toFixed(2)]
       .join(',');
   }
 
@@ -1528,7 +1617,7 @@
      null and the refusal stands — so drawing only (areaEnd, dropPoint). */
   function cornerArea(res, meets, disc) {
     if (!res || res.at || res.why !== 'corners' || !disc || !disc.at) return res;
-    var inside = (meets || []).filter(function (m) { return crowMiles(disc.at, m) <= disc.miles; });
+    var inside = (meets || []).filter(function (m) { return inDisc(disc, m); });
     if (inside.length < 2 || !agreeing(inside, AREA_MI)) return res;
     var mid = middleOf(inside);
     res.area = { lat: mid.lat, lon: mid.lon, name: inside[0].name || '', approx: true,
@@ -1591,7 +1680,7 @@
         return l.map(function (p) { return { lat: p[0], lon: p[1] }; });
       });
       var inside = mine.some(function (r) {
-        return r.some(function (p) { return crowMiles(disc.at, p) <= disc.miles; });
+        return r.some(function (p) { return inDisc(disc, p); });
       });
       if (!inside) return;
       n++;
@@ -1818,7 +1907,7 @@
         var t = until / s.m;
         var p = { lat: s.a.lat + t * (s.b.lat - s.a.lat), lon: s.a.lon + t * (s.b.lon - s.a.lon),
                   name: name || '' };
-        if (crowMiles(disc.at, p) <= disc.miles) out.push(p);
+        if (inDisc(disc, p)) out.push(p);
         until += step;
       }
       until -= s.m;
@@ -1888,7 +1977,7 @@
     // one general area, that area beside it (withArea, `cut`).
     if (cutAt) {
       var cutIn = disc ? all.filter(function (h) {
-        return crowMiles(disc.at, h) <= disc.miles;
+        return inDisc(disc, h);
       }) : [];
       // ...of the doors with the asked number where any are there, as
       // 'several' below is: a cut list's other houses are the street, not
@@ -1905,13 +1994,13 @@
       if (!doors.length) {
         return withArea({ at: null, why: 'nodoor', n: all.length },
                         disc ? all.filter(function (h) {
-                          return crowMiles(disc.at, h) <= disc.miles;
+                          return inDisc(disc, h);
                         }) : [], disc, plan);
       }
       all = doors;
     }
     var inside = disc ? all.filter(function (h) {
-      return crowMiles(disc.at, h) <= disc.miles;
+      return inDisc(disc, h);
     }) : all;
     if (!inside.length) {
       var nearest = null;
@@ -2059,7 +2148,7 @@
     if (!res || res.at) return false;
     if (res.why === 'none') return true;
     return res.why === 'nodoor' && !!disc && !pointsAmong(hits).some(function (h) {
-      return crowMiles(disc.at, h) <= disc.miles;
+      return inDisc(disc, h);
     });
   }
 
@@ -2148,7 +2237,7 @@
   // WHEN: a door asked, its street found INSIDE the disc and not the door.
   function dirWanted(res, hits, disc) {
     return !!res && !res.at && res.why === 'nodoor' && !!disc
-      && pointsAmong(hits).some(function (h) { return crowMiles(disc.at, h) <= disc.miles; });
+      && pointsAmong(hits).some(function (h) { return inDisc(disc, h); });
   }
 
   // The retry's answer only when it pinned the door; else the first's.
@@ -2367,7 +2456,7 @@
     var lo = 0, hi = 1;
     for (var i = 0; i < 40; i++) {
       var mid = (lo + hi) / 2;
-      if (crowMiles(disc.at, lerp(inP, outP, mid)) <= disc.miles) lo = mid; else hi = mid;
+      if (inDisc(disc, lerp(inP, outP, mid))) lo = mid; else hi = mid;
     }
     return lerp(inP, outP, lo);
   }
@@ -2375,20 +2464,25 @@
   /* The parts of `lines` inside the disc, as runs of {lat, lon}: a line that
      leaves the disc and comes back is two runs, each ending at the edge. */
   function clipToDisc(lines, disc) {
-    var xy = flat(disc.at), runs = [];
+    var runs = [];
     (lines || []).forEach(function (line) {
       var run = null;
       for (var i = 0; i + 1 < line.length; i++) {
         var a = { lat: line[i][0], lon: line[i][1] }, b = { lat: line[i + 1][0], lon: line[i + 1][1] };
-        var ina = crowMiles(disc.at, a) <= disc.miles, inb = crowMiles(disc.at, b) <= disc.miles;
+        var ina = inDisc(disc, a), inb = inDisc(disc, b);
         var from = null, to = null;
         if (ina && inb) { from = a; to = b; }
         else if (ina) { from = a; to = edgeOf(a, b, disc); }
         else if (inb) { from = edgeOf(b, a, disc); to = b; }
         else {
           // Both ends out: the segment may still pass through.
-          var m = lerp(a, b, nearestT(a, b, disc.at, xy));
-          if (crowMiles(disc.at, m) <= disc.miles) { from = edgeOf(m, a, disc); to = edgeOf(m, b, disc); }
+          // (Nearest each part's centre: a disc of two parts, `also`.)
+          var m = null;
+          discParts(disc).forEach(function (c) {
+            var mc = lerp(a, b, nearestT(a, b, c.at, flat(c.at)));
+            if (!m && crowMiles(c.at, mc) <= c.miles) m = mc;
+          });
+          if (m) { from = edgeOf(m, a, disc); to = edgeOf(m, b, disc); }
         }
         if (!from) continue;
         // A run goes on only through a point inside the disc: a segment that
@@ -2701,8 +2795,16 @@
    * and the pins (see drawHow). */
   function discShape(disc) {
     if (!disc || disc.card === null || disc.card === undefined) return null;
-    return { lat: disc.at.lat, lon: disc.at.lon, miles: disc.miles,
-             metres: disc.miles * METRES_PER_MILE };
+    var shape = { lat: disc.at.lat, lon: disc.at.lon, miles: disc.miles,
+                  metres: disc.miles * METRES_PER_MILE };
+    // ...and the reach from an order in the car's end (afterParts), drawn
+    // as a circle of its own. Absent on every other disc.
+    if (Array.isArray(disc.also) && disc.also.length) {
+      shape.also = disc.also.map(function (c) {
+        return { lat: c.at.lat, lon: c.at.lon, miles: c.miles, metres: c.miles * METRES_PER_MILE };
+      });
+    }
+    return shape;
   }
 
   /* What to draw of how ONE place was found, as plain data: `res` is what
@@ -2745,7 +2847,7 @@
     var counted = res.n || 0;
     hits.forEach(function (h) {
       var away = disc ? crowMiles(disc.at, h) : null;
-      var outside = away !== null && away > disc.miles;
+      var outside = away !== null && !inDisc(disc, h);
       var notDoor = door && !hasDoor(h, door);
       var said = outside ? away.toFixed(1) + ' mi from the card\'s fix, outside' + edge
                : notDoor ? 'its street, not door ' + door
@@ -4888,6 +4990,7 @@
            FAR_MILES: FAR_MILES, GAP_MS: GAP_MS,
            searchPlan: searchPlan, searchText: searchText, storeName: storeName,
            discFor: discFor, discBox: discBox,
+           inDisc: inDisc, endAnchor: endAnchor, AFTER_MAX: AFTER_MAX,
            plannerName: plannerName, heldPickups: heldPickups, pickupKey: pickupKey,
            heldRun: heldRun, routeFrom: routeFrom, ROUTE_MOVE_M: ROUTE_MOVE_M,
            ROUTE_NOTES: ROUTE_NOTES, routeRung: routeRung, routeLadder: routeLadder,

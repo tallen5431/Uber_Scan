@@ -8115,14 +8115,19 @@
       // 1px and .45 it did not show at all over the muted tiles (looked at
       // in a browser, Leaflet 1.9.4). Shown only while it is no bigger than
       // the view; see sizeDiscs.
-      var disc = L.circle([d.lat, d.lon], {
-        radius: d.metres, weight: 1.25, color: HOW_COLOUR[c[0]], opacity: DISC_OPACITY,
-        dashArray: '4 6', fillColor: HOW_COLOUR[c[0]], fillOpacity: DISC_FILL,
-        interactive: false, className: 'mv-how mv-disc mv-' + c[0]
+      // ...and, for an order taken with another in the car, the reach from
+      // that order's end (MV.discFor's `also`), drawn the same way: the
+      // disc it was searched in is both.
+      [d].concat(d.also || []).forEach(function (one) {
+        var disc = L.circle([one.lat, one.lon], {
+          radius: one.metres, weight: 1.25, color: HOW_COLOUR[c[0]], opacity: DISC_OPACITY,
+          dashArray: '4 6', fillColor: HOW_COLOUR[c[0]], fillOpacity: DISC_FILL,
+          interactive: false, className: 'mv-how mv-disc mv-' + c[0]
+        });
+        disc.mvDisc = { lat: one.lat, lon: one.lon, miles: one.miles };
+        discLayers.push(disc);
+        made.push(disc);
       });
-      disc.mvDisc = { lat: d.lat, lon: d.lon, miles: d.miles };
-      discLayers.push(disc);
-      made.push(disc);
     });
     var seen = want.nbxSeen || {};
     Object.keys(seen).forEach(function (q) {

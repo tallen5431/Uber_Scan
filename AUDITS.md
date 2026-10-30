@@ -4353,6 +4353,84 @@ and `keepPlaces: false` drops it (Done, "The GPS").
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
 
+**A card taken with another order in the car is searched from that order's
+end too (the owner's 29 Oct shift, 30 Oct 2026).** Order #6 was taken while
+#5 was held — not an Uber add-on, no Early look — and its card's 4.3 mi ran
+#5's door → #6's restaurant → #6's door (1.8 + 2.7 road mi); the door was
+5.3 mi crow from the card's fix, outside its 4.8 mi disc, and refused "not
+inside the card's reach" for the whole delivery (#5's door → #6's door: 2.6 mi
+crow, off the GPS log). One rule in map-view.js: `MV.discFor` gives such a
+card's disc an `also` part — the card's miles and SLACK_MI round each held
+order's end, plus how far that end may be from its point (`MV.endAnchor`: a
+door pin exactly, a street pin by its stretch, a kept area by its spread) —
+and `MV.inDisc`/`discBox`/`clipToDisc`/`located`/`cardRefuses` read every
+part, so the search and the accusation keep one edge. server.js keeps the
+ends on the hold at the Took (`afterOf`/`after`, only orders that STAY in the
+car, never one the Took replaces; refreshed by saveHold when a held end is
+pinned later), heldDisc reads them through `cardForSearch`, and the held
+card the panel hands Map view carries them, so the page draws the second
+circle and searches as the server does. *Not* the held card's disc centre:
+that widens the reach by the whole held disc (9.9 + 4.8 mi round a 9.4 mi
+card), which holds nearly any door and undid the map's tie-break between two
+orders ("a tie is broken only by the card whose reach holds the door" failed
+with it). *Open:* an offer card on screen while an order is held is still
+searched in its own disc only (earlyDoor, the card's pickup pin); a held end
+pinned after the new order's end was already refused is not searched again
+until something re-asks. Tests: tests/mapview.test.js ("taken with one"),
+rpi/test_server.py `[after]`.
+
+**Planner stop splits: a town-only line is no door, a missing time agrees,
+a name run into its initial is the name (29 Oct, 30 Oct 2026).** assemble.js
+`sameNameStop` held a town-only line ("<Town>, GA <zip>") to be a differing
+door (`stopDoor`: only a line or street with a house number is a door now),
+and asked both reads to be timed. "Herbie P." read untimed and then
+"terbieP." was not the time at all: two edits apart, first letter misread and
+the initial run on; `sameName` now also compares each word run into the
+initial after it ("herbiep" against "terbiep", one letter apart, wordsAlike's
+own rule) — never two different names ("Pat Q."/"PatR." and two first names
+stay two). Merging the untimed stop moved it to its timed read's place and
+left its old neighbours behind it out of time, so a kept stop placed by
+position is moved by `timedSlot` only where that place breaks time with the
+stops either side (`inTime`; ties keep their places). Replayed over every
+journaled planner row of 19-29 Oct: 29 Oct 3P/4D → 2P/3D (Fire Stone 5:58/6:00
+one, Herbie one), in time order; 21 Oct "Lynn C"/"tynnc" and 22 Oct
+"Tom S."/"Toms" one stop each; five lists reordered into time order; one
+two-read join that had been right by accident now lands a lone dropoff first
+(the no-common branch puts reads side by side, unchanged) and the next read
+puts it right. Tests: tests/assemble.test.js `[planner names]`.
+
+**A store name with the trip's address glued on (29 Oct, 30 Oct 2026).**
+tools/shift_report.py `unglued`: where a card text shows a line that starts
+the pickup and the next line (a comma after two words or more) is the rest
+of it, the store is that first line; never with a bracket, a first line with
+a comma or a leading digit, or a wrapped name ("Gateway Center, <Town>").
+Over the 242 orders the five journals hold: 8 stores change, all to the store
+alone (e.g. "Tacos La Villa <Street> Pkwy W," → "Tacos La Villa"; two cross-
+street pickups that were no store get theirs). The root is in the parser:
+rpi/offer_parser.py `find_pickup`'s leg tail (the 130-character window that
+"holds the merchant AND the address", split by `ends_at_town`) keeps the
+store line and the destination line as one place when no bracket or town
+splits them. Not changed there: the split is shared with the dropoff and the
+corpus, and is not a small change. Tests: tools/test_shift_report.py `[waits]`.
+
+**Slow reads at no heat are OCR on a black frame (29 Oct, 30 Oct 2026).**
+20:04-20:25 and 21:32-21:37: the `seen` rows show 3-7 reads per two minutes
+at a median 15.9-25.0 s (1.5-2.6 s either side), cpuC 67-74, no throttle bit,
+saw 1 kept 0, and the camera's `up` rows flip dark (bright 1-7) and seeing
+through both windows. The seven frames kept as unparsed scans in them
+(ep37-ep40, ep46-ep48) read mean 1.0-2.5 and max 7-9 of 255 (ep40: 12.8/46),
+against 71-190 mean for every other unparsed frame that day, and their OCR
+texts are 1.2-2.3 KB of noise words against 50-230 bytes elsewhere: the
+phone's screen was off or black, the timer reads (verify, resample, screen_auto
+with an order held) went out anyway, and tesseract spent 15-25 s each making
+words of sensor noise. The car was driving in both windows (67 % and 92 % of
+fixes moving, as in the windows either side), and nothing was queued: the
+reader takes one read at a time (queue of 1) and reads per window fell, not
+rose. Not fixed: a floor on the frame's brightest pixels before OCR (a black
+screen's max is under 10, a dark-mode card's text is far over) is the shape,
+but where to put it against exposure.LIT_ENOUGH's own record of a lit card
+reading 4-6 needs a dark-mode card frame measured, and it touches the loop.
+
 **Targets: what to aim for, described — on the offers page and the places
 report (30 Oct 2026).** The owner, verbatim: *"It would be helpful to know in
 the offers page and or report the best areas to work in and realistic $/hr

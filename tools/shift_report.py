@@ -390,7 +390,8 @@ def _order(oid, took, readings, drops, visits, addon=False, finished=None):
             card = r
     card = card or (readings[0] if readings else {})
     o['app'] = OP.screen_type(card.get('text') or '')['app'] if card.get('text') else None
-    o['store'] = store_name(card.get('pickup'))
+    o['store'] = store_name(unglued(card.get('pickup'),
+                                    [card.get('text')] + list(card.get('scans') or [])))
     o['pay'] = _num(card.get('pay'))
     o['cardMinutes'] = _num(card.get('minutes'))
     o['cardMiles'] = _num(card.get('miles'))
@@ -497,6 +498,43 @@ def too_soon(orders_):
 
 # How long a store's name may print: a name, not the rest of a card.
 NAME_MAX = 40
+
+
+# A card line's edge noise, as unglued compares lines: the icon marks before
+# it (and a lowercase letter or two the reader made of an icon) and the marks
+# after it.
+_LINE_EDGE = re.compile(r'^[^A-Za-z0-9(]*(?:[A-Za-z]{1,2} (?=[A-Z]))?|[^A-Za-z0-9).]+$')
+
+
+def unglued(pickup, texts):
+    """`pickup` with the destination line it was run into taken off, else as
+    it came. THE FAULT (the owner's 29 Oct shift, "Restaurant waits"): the
+    parser returned a pickup as "<Store> <n> <Street> Pkwy W, <Town>" — the
+    card's store line and the whole line under it, the trip's address, joined
+    with a space — and the store was printed and grouped by that. Undone only
+    where a card text shows it: a line of the text is the pickup's start, and
+    the next line, an address's (two words or more before a comma), is all
+    the rest of the pickup or begins it. Never for a pickup with a bracket in it (Uber's
+    "(street)", which store_name takes off itself) or a first line that ends
+    in one — "Rd)" is no store — or that starts with a digit or has a comma
+    (an address, not a store line)."""
+    if not isinstance(pickup, str) or '(' in pickup or ')' in pickup:
+        return pickup
+    for t in texts:
+        if not isinstance(t, str):
+            continue
+        lines = [_LINE_EDGE.sub('', ln.strip()) for ln in t.split('\n')]
+        for a, b in zip(lines, lines[1:]):
+            # ...and the line under it an address's: a comma after two words
+            # or more ("Center, College Park" is a name wrapped, not a street).
+            if not a or not b or ',' in a or ',' not in b or a[:1].isdigit() \
+                    or len(b.split(',')[0].split()) < 2:
+                continue
+            rest = pickup[len(a) + 1:]
+            if pickup.startswith(a + ' ') and rest and b.startswith(rest[:len(b)]) \
+                    and re.search(r'[A-Za-z]{2}', a):
+                return a
+    return pickup
 
 
 def store_name(t):

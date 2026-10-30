@@ -1124,7 +1124,7 @@ function cardOf(offer) {
  * cardOf's `addon`. With the trip's other orders put down, no base: the
  * add-on's own fix, no yardstick (MV.discFor says how wide). */
 function heldDisc(h, depth) {
-  var card = h && h.card || null;
+  var card = cardForSearch(h);
   if (!h || !h.addOn) return MV.discFor(card);
   card = Object.assign({}, card || {}, { addon: true });
   var trip = typeof h.of === 'string' && h.of ? h.of : null;
@@ -1140,6 +1140,55 @@ function heldDisc(h, depth) {
 // (A trip is a handful of orders; the bound is only against a loop in a hand-
 // edited holding.json.)
 var MAX_HELD_TRIP_DEPTH = 8;
+
+/* An order taken with others in the car — not an add-on — keeps where each of
+ * them ended at its Took, `after`: [{of, lat, lon, widen, from}] (MV.endAnchor),
+ * and its card is searched from those ends as well as from the car
+ * (MV.discFor's `also`; the owner's 29 Oct shift, order #6, whose card's 4.3
+ * mi ran from #5's door). Only an end pinned or kept as an area is a place to
+ * start from (MV.endAnchor says why not a disc), so `afterOf` names the orders
+ * and each end is read again while both are held (saveHold, refreshAfter): a
+ * held end pinned after the Took becomes its anchor then. Both absent on
+ * every other hold, so their shape is unchanged. */
+function afterOf(o) {
+  var pin = o && o.endPin && o.endPin.dropoff === o.dropoff ? o.endPin : null;
+  var area = o && o.endArea && o.endWhyFor === endTextOf(o) ? o.endArea : null;
+  var a = MV.endAnchor({ pin: pin, area: area });
+  return a ? Object.assign({ of: holdIdOf(o) }, a) : null;
+}
+
+function aftersOf(others) {
+  return others.map(afterOf).filter(function (a) { return a; }).slice(0, MV.AFTER_MAX);
+}
+
+// The card a held order's places are searched by: its own, with `after`.
+function cardForSearch(h) {
+  var c = h && h.card || null;
+  if (!c || !Array.isArray(h.after) || !h.after.length) return c;
+  return Object.assign({}, c, { after: h.after });
+}
+
+// The orders a Took is held beside (`afterOf`, their holdIds, kept whether
+// or not their ends are placed yet) and where those ends are (`after`).
+function setAfter(took, others) {
+  var ids = others.map(holdIdOf);
+  var after = aftersOf(others);
+  if (ids.length) took.afterOf = ids; else delete took.afterOf;
+  if (after.length) took.after = after; else delete took.after;
+}
+
+// A hold's end changed: every other hold taken beside it reads it again.
+function refreshAfter(h) {
+  var id = holdIdOf(h);
+  scanner.held.forEach(function (o) {
+    if (o === h || !Array.isArray(o.afterOf) || o.afterOf.indexOf(id) === -1) return;
+    var now = afterOf(h);
+    var after = (Array.isArray(o.after) ? o.after : []).filter(function (a) {
+      return a && a.of !== id;
+    }).concat(now ? [now] : []).slice(0, MV.AFTER_MAX);
+    if (after.length) o.after = after; else delete o.after;
+  });
+}
 
 /* ---------- the orders in the car: a list ----------------------------------
  *
@@ -1164,6 +1213,10 @@ var MAX_HELD_TRIP_DEPTH = 8;
  *   ofEnds    for an add-on, when that trip ended as it stood at the Took
  *             (the holdEnds of its order taken last, which is the latest of
  *             its orders'), which the add-on outlives: see holdEnds
+ *   afterOf   for any other order taken with orders staying in the car, their
+ *             holdIds; absent otherwise (setAfter)
+ *   after     ...and where those orders end, pinned or as an area, for its
+ *             card's search (MV.discFor's `also`); absent with none
  *
  * Read through heldOrders(now) and holding(now), never off `scanner.held`:
  * those are the questions "which orders are being carried RIGHT NOW", and an
@@ -1390,6 +1443,7 @@ function setHeld(list) {
  * the rest. A no-op for an order no longer on the list. */
 function saveHold(h) {
   if (scanner.held.indexOf(h) === -1) return;
+  refreshAfter(h);
   setHeld(scanner.held);
 }
 
@@ -1974,8 +2028,15 @@ function placeTook(took, marked, inCar, now) {
       took.ofEnds = holdEnds(base);
     }
   }
+  // ...and anything else, where the orders it is held beside end (afterOf),
+  // for its card's search — the ones that STAY in the car, never one this
+  // Took replaces. `placed` is setHeld for every branch but the add-on's.
+  var placed = function (list) {
+    if (!took.addOn) setAfter(took, list.filter(function (o) { return o !== took; }));
+    setHeld(list);
+  };
   if (same) {
-    setHeld(inCar.map(function (o) { return o === same ? took : o; }));
+    placed(inCar.map(function (o) { return o === same ? took : o; }));
     return out;
   }
   if (base) {
@@ -1998,7 +2059,7 @@ function placeTook(took, marked, inCar, now) {
       out.replaced = before;
       shadows = before.slice();
     }
-    setHeld(inCar.filter(function (o) { return before.indexOf(o) === -1; }).concat([took]));
+    placed(inCar.filter(function (o) { return before.indexOf(o) === -1; }).concat([took]));
     return out;
   }
   var again = inCar.filter(function (o) {
@@ -2006,7 +2067,7 @@ function placeTook(took, marked, inCar, now) {
   })[0];
   if (again) {
     out.replaced = [again];
-    setHeld(inCar.map(function (o) { return o === again ? took : o; }));
+    placed(inCar.map(function (o) { return o === again ? took : o; }));
     return out;
   }
   var list = inCar.concat([took]);
@@ -2024,7 +2085,7 @@ function placeTook(took, marked, inCar, now) {
     list = list.filter(function (o) { return gone.indexOf(o) === -1; });
   }
   out.added = inCar.length >= 1;
-  setHeld(list);
+  placed(list);
   return out;
 }
 
@@ -3272,7 +3333,7 @@ function shortStreetIn(ans, disc) {
   var touching = ans.streets.filter(function (st) {
     return st.lines === null || st.lines.some(function (l) {
       return l.some(function (pt) {
-        return MV.crowMiles(disc.at, { lat: pt[0], lon: pt[1] }) <= disc.miles;
+        return MV.inDisc(disc, { lat: pt[0], lon: pt[1] });
       });
     });
   });
@@ -5153,8 +5214,9 @@ function heldForPanel(held) {
         // What /api/held-end is told the pin is for. See holdIdOf.
         holdId: holdIdOf(held),
         // Its card's fix and size, so Map view can check this order's end
-        // against them — see cardOf.
-        card: held.card || null,
+        // against them — see cardOf — and where the orders in the car at
+        // its Took end (`after`, cardForSearch), searched from as well.
+        card: cardForSearch(held),
         // ...and, on a batched trip (Assemble.batchPlan), how many doors it
         // has: the panel's "2 drops" beside the pay. Null otherwise.
         drops: batchDrops(held) },
