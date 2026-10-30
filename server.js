@@ -4085,6 +4085,36 @@ function refigured(offers, taken) {
   };
 }
 
+/* --- what to aim for (the owner, 30 Oct: "the best areas to work in and
+ * realistic $/hr and $/mile to target based on the data") ----------------
+ *
+ * For the offers page's Targets box: Advice.targets over the window, with the
+ * line the page itself judges against (the newest counted row's own target
+ * that is not in the future, else 25, journal.html render's rule) and towns
+ * off the card (MV.townFor with Advice.area, the map's and the places
+ * report's rule; no geocoding). Descriptive: no verdict, state, target or
+ * panel reads it. See Advice.targets for the floors and what each part
+ * reuses. Aggregates and town names only. */
+function targetsOut(offers, taken) {
+  var now = Date.now(), line = null;
+  for (var i = (offers || []).length - 1; i >= 0; i--) {
+    var o = offers[i];
+    if (Advice.trustworthy(o) && typeof o.perHour === 'number' && (o.at || 0) <= now) {
+      line = typeof o.target === 'number' ? o.target : 25;
+      break;
+    }
+  }
+  try {
+    return Advice.targets(offers, taken, {
+      target: line === null ? 25 : line,
+      key: function (r) { return MV.townFor(r, Advice.area); }
+    });
+  } catch (e) {
+    console.error('targets: ' + e.message);
+    return null;
+  }
+}
+
 function storeWaits() {
   if (storeWaitList) return storeWaitList;
   storeWaitList = [];
@@ -11940,6 +11970,11 @@ function route(req, res) {
                                       cardVsReal: cardVsReal(taken),
                                       realByPerMile: realByPerMile(taken),
                                       refigured: refigured(windowed, taken),
+                                      // What to aim for: $/hr and $/mi by
+                                      // time of day, the replay's line, the
+                                      // towns (targetsOut). Over the offers
+                                      // listed, as the page's own replay is.
+                                      targets: targetsOut(offers, taken),
                                       offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });
     });

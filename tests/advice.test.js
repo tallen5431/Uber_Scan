@@ -2439,6 +2439,134 @@ eq('...and says nothing when the second card named nowhere', blind.ends, null);
     });
 })();
 
+/* ---- targets: what to aim for, described (the owner, 30 Oct 2026) ---- */
+/* Advice.targets: realistic $/hr per three-hour block and overall, the $/mi
+   of the offers that cleared the line, advise's own line reused, and the
+   towns that beat chance. Every fixture invented. Descriptive: nothing it
+   returns may change an offer. */
+(function () {
+  function at(day, h, m) { return new Date(2026, 2, day, h, m || 0).getTime(); }
+  var TOWN = function (o) { return o.town || null; };
+  function row(id, when, perHour, extra) {
+    var o = { id: id, at: when, perHour: perHour, pay: perHour * 30 / 60, minutes: 30,
+              billedMinutes: 30, miles: 5, cost: 0, whole: true, target: 25, state: 'no' };
+    Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+    return o;
+  }
+  // 6-9pm: 40 offers on two evenings at $10..$49; 9pm-12: 29 offers.
+  var rows = [];
+  for (var i = 0; i < 40; i++) rows.push(row('e' + i, at(2 + i % 2, 19, i), 10 + i));
+  for (i = 0; i < 29; i++) rows.push(row('n' + i, at(2 + i % 2, 22, i), 10 + i));
+  var before = JSON.stringify(rows);
+  var eve = A.blockOf(at(2, 19)), late = A.blockOf(at(2, 22));
+  var t = A.targets(rows, [], { target: 25 });
+  var bE = t.blocks.filter(function (b) { return b.block === eve; })[0];
+  var bL = t.blocks.filter(function (b) { return b.block === late; })[0];
+  eq('targets: a block at the floor of ' + A.TARGET_OFFERS + ' offers has its P90 (type 7, the places report\'s)',
+     bE.p90, 45.1);
+  eq('...and its P50 and P75', [bE.p50, bE.p75].join(), [29.5, 39.25].join());
+  eq('...a block one under it has none', bL.p90, null);
+  ok_('...and says "not enough" with its count', /9pm–12: not enough offers yet for percentiles \(29 of 30\)/
+     .test(t.lines.rate.join('\n')));
+  eq('...the top-10% line names the block\'s threshold',
+     t.lines.rate.filter(function (l) { return l.indexOf('6–9pm:') === 0; })[0]
+       .indexOf('6–9pm: offers worth $45.10/hr or more are your top 10%'), 0);
+  // $/mi: pay over the card's miles of offers that cleared the line. 6-9pm
+  // has 25 at or over $25 ($25..$49), each 5 miles at 30 min.
+  eq('$/mi of the offers that cleared the line: their median and P75 (pay / miles)',
+     [bE.cleared, bE.ppm50, bE.ppm75].join(), [25, 3.7, 4.3].join());
+  var t7 = A.targets(rows.filter(function (o) { return !(o.at >= at(2, 19) && o.at < at(4, 0) && o.perHour >= 25)
+    || o.perHour < 32; }), [], { target: 25 });
+  var b7 = t7.blocks.filter(function (b) { return b.block === eve; })[0];
+  eq('...under ' + A.TARGET_CLEARED + ' cleared, no $/mi, its count kept', [b7.cleared, b7.ppm50].join(), [7, null].join());
+  ok_('...and no $/mi line is ever a rule: the note says it earned less', /24% less/.test(t.lines.notes.join(' ')));
+  eq('nothing the targets read is changed', JSON.stringify(rows), before);
+
+  // Timed takes: real $/hr = (pay - the card's cost) / (Took to put-down).
+  function take(id, by, mins, extra) {
+    var o = rows.filter(function (r) { return r.id === id; })[0];
+    var x = { id: id, pay: 20, tookAt: o.at, endedAt: o.at + mins * 60000, by: by };
+    Object.keys(extra || {}).forEach(function (k) { x[k] = extra[k]; });
+    return x;
+  }
+  rows[0].cost = 2;
+  var four = [take('e0', 'gps', 60), take('e1', 'screen', 60), take('e2', 'finished-door', 30),
+              take('e3', 'finished-stop', 40)];
+  var noise = [take('e4', 'drop', 10), take('e5', 'chooser', 10), take('e6', 'replaced', 1),
+               take('e7', 'gps', 60, { addon: true })];
+  var tt = A.targets(rows, four.concat(noise), { target: 25 });
+  var b4 = tt.blocks.filter(function (b) { return b.block === eve; })[0];
+  eq('timed takes: GPS, screen and finished-*; a Drop press, chooser, replaced and an add-on left out',
+     b4.timed, 4);
+  eq('...under ' + A.TARGET_TIMED + ' timed, no median', b4.real, null);
+  var five = four.concat([take('e8', 'gps', 30)]);
+  var b5 = A.targets(rows, five, { target: 25 }).blocks.filter(function (b) { return b.block === eve; })[0];
+  // $18 (e0: 20-2 over 1 h), $20, $40, $30, $40 -> median $30.
+  eq('...at ' + A.TARGET_TIMED + ', the median, net of the card\'s cost', [b5.timed, b5.real].join(), [5, 30].join());
+  eq('...a caller\'s own rule of what is timed is used', A.targets(rows, noise, {
+    target: 25, isTimed: function (x) { return x.by === 'drop' || x.by === 'chooser'; } }).overall.timed, 2);
+  rows[0].cost = 0;
+
+  // The replay is advise's, reused: its plateau, and where the line sits.
+  var shift = [];
+  for (var k = 0; k < 400; k++) {
+    var r = (k * 37) % 41;
+    shift.push(row('s' + k, at(2 + Math.floor(k / 100), 18) + (k % 100) * 3 * 60000, r < 30 ? 8 + r / 3 : 30 + r,
+                   { minutes: 20, billedMinutes: 20 }));
+    shift[k].pay = shift[k].perHour * 20 / 60;
+  }
+  var adv = A.advise(shift, { target: 25 });
+  var ts = A.targets(shift, [], { target: 25 });
+  ok_('the replay answer is advise\'s: ready, the same plateau', adv.ready && ts.replay.ready
+     && ts.replay.low === adv.low && ts.replay.high === adv.high && ts.replay.suggested === adv.suggested);
+  eq('...and says where the driver\'s line sits in it', ts.replay.side,
+     25 < adv.low ? 'below' : 25 > adv.high ? 'above' : 'inside');
+  ok_('...in one line, over all hours', ts.lines.rate.filter(function (l) {
+    return l.indexOf('The replay\'s best $/hr line, over all hours: $' + adv.low + '–$' + adv.high + '/hr (yours: $25') === 0;
+  }).length === 1);
+  ok_('...and no block carries a line of its own (AUDITS: a line per block earned less)',
+     !ts.blocks.some(function (b) { return 'low' in b || 'suggested' in b; })
+     && /not one per block/.test(ts.lines.notes.join(' ')));
+  var thin = A.targets(rows.slice(0, 10), [], { target: 25 });
+  eq('...a refusal is advise\'s refusal, said as not enough yet', [thin.replay.ready, thin.replay.reason].join(),
+     [false, 'thin'].join());
+  ok_('...with its counts', /not enough yet \(\d+ of 40 offers/.test(thin.lines.rate.join(' ')));
+
+  // Towns: no effect -> indistinguishable; a real effect -> named.
+  function world(boost) {
+    var out = [];
+    ['Aster', 'Briar', 'Clove'].forEach(function (town, ti) {
+      for (var j = 0; j < 60; j++) {
+        var base = 10 + ((j * 7 + ti * 3) % 20);
+        out.push(row(town + j, at(2 + j % 3, 19, j % 60), base + (ti === 0 ? boost : 0), { town: town }));
+      }
+    });
+    return out;
+  }
+  var flat = A.targets(world(0), [], { target: 25, key: TOWN });
+  ok_('towns with no effect: no town named, "indistinguishable" (' + flat.lines.areas[0] + ')',
+     !flat.overall.towns.real && /indistinguishable/.test(flat.lines.areas[0])
+     && !/Aster \(/.test(flat.lines.areas.join(' ')));
+  var sharp = A.targets(world(12), [], { target: 25, key: TOWN });
+  var top = sharp.overall.towns.groups[0];
+  ok_('a town that pays more in the same hours is named first, with its score and top-10% share ('
+     + sharp.lines.areas[0] + ')',
+     sharp.overall.towns.real && top.name === 'Aster' && top.beats && top.score > 0
+     && /^All hours \(hours held\): Aster \(\+\$\d+\.\d\d\/hr vs the other towns in the same hours, \d+% top-10% against their \d+%\)/
+       .test(sharp.lines.areas[0]));
+  var few = A.targets(world(12).filter(function (o) { return o.town === 'Aster' || /^Briar[0-6]$/.test(o.id); }),
+                      [], { target: 25, key: TOWN });
+  ok_('...under the floor a town is not ranked, and two are needed to test', !few.overall.towns.tested
+     && /not enough yet — fewer than two towns have 8 offers on 2 shift days/.test(few.lines.areas[0]));
+  eq('...the caller\'s floor is used and said', A.targets(world(12), [], { target: 25, key: TOWN, townFloor: 61 })
+    .overall.towns.tested, false);
+  eq('no key, no town lines', A.targets(rows, [], { target: 25 }).lines.areas.length, 0);
+  eq('an empty window: no blocks, nothing to say about towns, the replay not ready',
+     (function () { var e = A.targets([], [], { target: 25, key: TOWN }); return [e.blocks.length, e.overall.offers,
+       e.overall.towns.tested, e.replay.ready, e.lines.rate.length, e.lines.areas.length].join(); }()),
+     [0, 0, false, false, 0, 0].join());
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                  : '\nAll ' + pass + ' target-advice checks passed');
 process.exit(fail ? 1 : 0);

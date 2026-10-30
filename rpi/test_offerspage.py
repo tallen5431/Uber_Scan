@@ -918,6 +918,26 @@ FEEDS['per mile'] = dict(FEEDS['took six'], perMileSeen={
         {'app': 'uber', 'offers': 140, 'runs': 3, 'ratio': None, 'n': 0,
          'toPass': 0, 'toAccept': 0}]})
 
+# [targets] The Targets box (30 Oct: "the best areas to work in and realistic
+# $/hr and $/mile to target"): server.js sends the lines, worded by
+# Advice.targets (rpi/test_server.py and tests/advice.test.js check them);
+# the page draws them as they come, and hides the areas heading when there
+# are no area lines.
+_TG_LINES = {
+    'rate': ['All hours: offers worth $31.00/hr or more are your top 10% (typical $15, top quarter '
+             'from $22; 212 offers on 3 days); your timed takes earned a median $29/hr (n=12); offers '
+             'that cleared your $25 line had a median $1.85/mi, top quarter $2.30/mi (n=40).',
+             'The replay\'s best $/hr line, over all hours: $20–$24/hr (yours: $25, above it). Any line '
+             'in that range earned within 5% of the best.',
+             '9pm–12: not enough offers yet for percentiles (12 of 30); timed takes: 2 (5 needed for '
+             'a median); 3 cleared your $25 line (8 needed for a $/mi).'],
+    'areas': ['All hours (hours held): Atlanta (+$2.00/hr vs the other towns in the same hours, 16% '
+              'top-10% against their 9%); 3 others indistinguishable (p = 0.004, 4 towns).'],
+    'notes': ['One $/hr line for all hours, not one per block.', '$/mi earned 24% less.']}
+FEEDS['targets'] = dict(FEEDS['took six'], targets={'target': 25, 'lines': _TG_LINES})
+FEEDS['targets no towns'] = dict(FEEDS['took six'], targets={
+    'target': 25, 'lines': dict(_TG_LINES, areas=[])})
+
 DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, feedsPath, queriesJson] = process.argv.slice(2);
@@ -1124,6 +1144,15 @@ const TEXT = (sel) => {
         // thing standing behind that promise.
         csv: document.getElementById('csv').getAttribute('href'),
         days: list('.day'),
+        // [targets] The Targets box: null while hidden, else its three lists
+        // and whether the areas heading shows; and whether it sits above the
+        // list of every offer.
+        targets: document.getElementById('targets').hidden ? null : {
+          rate: list('#targetsRate li'), areas: list('#targetsAreas li'),
+          areasHead: !document.getElementById('targetsAreasHead').hidden,
+          notes: list('#targetsNotes li'),
+          aboveLog: !!(document.getElementById('targets').compareDocumentPosition(
+            document.getElementById('log')) & Node.DOCUMENT_POSITION_FOLLOWING) },
         // [per mile] The four tables: each heading (null while hidden), its
         // line, and its rows as their class and cells.
         perMile: ['ppm', 'err', 'ppmReal', 'refig'].reduce(function (o, id) {
@@ -2349,6 +2378,18 @@ try:
         eq('[per mile] %s: none of the four tables is drawn' % _f,
            (got.get(_f) or {}).get('perMile'),
            {'ppm': None, 'err': None, 'ppmReal': None, 'refig': None})
+
+    # --- the Targets box (30 Oct 2026) ------------------------------------
+    _tg = (got.get('targets') or {}).get('targets') or {}
+    eq('[targets] the box draws the server\'s lines as they come, rate and areas',
+       (_tg.get('rate'), _tg.get('areas'), _tg.get('areasHead'), _tg.get('notes')),
+       (_TG_LINES['rate'], _TG_LINES['areas'], True, _TG_LINES['notes']))
+    ok_('[targets] ...near the top, above the list of every offer', _tg.get('aboveLog'))
+    _tgn = (got.get('targets no towns') or {}).get('targets') or {}
+    eq('[targets] no area lines: the areas heading hidden, the rate lines still drawn',
+       (_tgn.get('areasHead'), _tgn.get('areas'), len(_tgn.get('rate') or [])), (False, [], 3))
+    for _f in ('genuinely empty', 'took six', 'unreadable'):
+        eq('[targets] %s: no targets sent, no box' % _f, (got.get(_f) or {}).get('targets'), None)
 
     # --- the cost sweep, and the sentence under it ------------------------
     #

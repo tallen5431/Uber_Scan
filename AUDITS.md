@@ -4353,6 +4353,39 @@ and `keepPlaces: false` drops it (Done, "The GPS").
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
 
+**Targets: what to aim for, described — on the offers page and the places
+report (30 Oct 2026).** The owner, verbatim: *"It would be helpful to know in
+the offers page and or report the best areas to work in and realistic $/hr
+and $/mile to target based on the data."* One computation, `Advice.targets`
+(advice.js), used by server.js `targetsOut` (`/api/journal`'s `targets`, the
+offers page's Targets box) and by tools/places_report.js (its Targets tab,
+first). Per three-hour block and overall: P50/P75/P90 of the card $/hr
+offered (type-7 quantiles, the places report's own, so its "top 10% from
+$22.01" is the same number); the median real $/hr of timed takes (GPS,
+screen, `finished-*`; the report also counts its GPS-timed Drops), net of the
+card's cost so it sits on the card's scale; and the median and P75 raw $/mi
+of the offers that cleared the driver's $/hr line. Floors: 30 offers per
+block, 5 timed takes, 8 cleared offers; a town on `areas`' floor (8 on 2
+outings) on the rig and the report's MIN_N (30) there. Towns are
+`Advice.areas` with the hours held, named only where the test beats chance
+AND the town's order-statistic 95% interval of its hour-held score is clear
+of zero, with its top-10% share against the other towns' in the same hours;
+otherwise "indistinguishable". *What it does not do, by the Settled list:*
+the $/hr line is `advise`'s plateau over ALL hours and whether the target is
+inside it — no line per block ("Do not tune the acceptance line to the
+hour"), and the note under the box says so; $/mi is printed as "the $/mi the
+good offers tend to have" beside the one-liner that ranking by $/mi earned
+24% less, never a rule; no re-timing, no weekday term, no geocoding on the
+rig, nothing into a verdict. *Open:* the rig's town scores (floor 8) and the
+report's (floor 30) can differ for a thin town; the real $/hr is gross pay
+less the card's estimated cost, not fuel measured; per-block town lines rest
+on few outings until the record grows; `targetsOut` runs `advise` and up to
+nine `areas` permutations per `/api/journal` load (about 25 ms on 480 offers
+on the dev box, more on a Pi asked for All). Tests: tests/advice.test.js
+(targets: floors, the replay reused, no-effect towns "indistinguishable",
+nothing changed), rpi/test_server.py `[targets]`, rpi/test_offerspage.py
+`[targets]`, tests/placesreport.test.js (the Targets tab).
+
 **EXPERIMENTAL — the map band above every offer card is kept, for an offline
 study; nothing reads it (29 Oct 2026).** The owner, verbatim: *"Yes add the map
 saving, fast track to experimental."* Purpose: an offline prototype estimates

@@ -2188,7 +2188,333 @@
     return out;
   }
 
+  /* --- what to aim for, read off the record --------------------------------
+   *
+   * The owner (30 Oct 2026): "It would be helpful to know in the offers page
+   * and or report the best areas to work in and realistic $/hr and $/mile to
+   * target based on the data." One computation for both places that show it:
+   * server.js puts it on /api/journal as `targets` for the offers page, and
+   * tools/places_report.js puts it at the head of its Targets tab.
+   *
+   * DESCRIPTIVE, AND NOTHING ELSE. No verdict, state, target, band or panel
+   * line reads this. AUDITS.md, Settled, binds every part of it:
+   *
+   *   - the $/hr line is `advise`'s, over all hours. Its plateau and whether
+   *     the driver's own line sits inside it are reused as they are; no new
+   *     rule. And ONE line, not one per block: fitted per block, a line
+   *     earned less on the nights it was not fitted to ("Do not tune the
+   *     acceptance line to the hour"). The blocks carry percentiles of what
+   *     was offered and what the timed takes earned, which describe an hour
+   *     and recommend nothing.
+   *   - $/mi is "the $/mi the good offers tend to have": the raw pay over the
+   *     card's miles of offers that cleared the driver's $/hr line. Never a
+   *     line (a $/mile rule replayed 24% below $/hr), never re-timed.
+   *   - towns come off the card (the caller's `key`, map-view.js townFor on
+   *     both sides), never a geocoder, and are named only where `areas`' own
+   *     permutation test beats chance with the hours held still AND the
+   *     town's interval of its hour-held score is clear of zero. A town
+   *     needs `areas`' floor (AREA_FLOOR offers on AREA_DAYS outings, the
+   *     map's), or the caller's `townFloor`: the places report passes its
+   *     own MIN_N so its Targets tab agrees with its Towns tab.
+   *
+   * `taken` is server.js takenRuns' list. A take's real $/hr is its card's
+   * pay less its card's running cost (the offer row's `cost`, so it is net
+   * like every card figure beside it) over Took to put-down, for runs
+   * `isTimed` vouches for: by default put down at the door by the GPS or the
+   * app's screen, or a Drop the GPS went on to finish ('finished-*'). An
+   * Uber add-on is left out: its card's minutes are an increment and its
+   * real time is the trip's.
+   */
+  // Offers in a block before its percentiles are given: the places report's
+  // MIN_N / TIER_MIN_N, so its "top 10% from $X" and this one are one number.
+  var TARGET_OFFERS = 30;
+  // Timed takes before a median real $/hr is given: server.js's
+  // REFIGURED_MIN_RUNS, the floor under the other per-take figure it prints.
+  var TARGET_TIMED = 5;
+  // Offers that cleared the line before their $/mi is given: AREA_FLOOR.
+  var TARGET_CLEARED = AREA_FLOOR;
+  // Values before a town's score gets an interval (and so can be "clear").
+  var TARGET_CI_MIN = AREA_FLOOR;
+
+  // R's type 7, which is what server.js percentileOf and the places report's
+  // quantile both are: the same offers give the same P90 in all three.
+  function quantile(sorted, q) {
+    if (!sorted.length) return null;
+    var h = (sorted.length - 1) * q, lo = Math.floor(h);
+    var hi = Math.min(sorted.length - 1, lo + 1);
+    return sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo]);
+  }
+  function r2(v) { return typeof v === 'number' && isFinite(v) ? Math.round(v * 100) / 100 : null; }
+  function sortedOf(xs) { return xs.slice().sort(function (a, b) { return a - b; }); }
+
+  function timedRun(t) {
+    return !!t && (t.by === 'gps' || t.by === 'screen' || t.by === 'finished-door'
+                   || t.by === 'finished-area' || t.by === 'finished-stop');
+  }
+
+  // A 95% interval of a median by order statistics (the binomial interval,
+  // ranks n/2 -/+ 1.96 sqrt(n)/2): distribution-free, the same answer every
+  // time over the same window, and one sort rather than a bootstrap's
+  // hundreds, which matters on a Pi asked for All. Under TARGET_CI_MIN values
+  // there is no interval, so no town is "clear".
+  function medianCI(values) {
+    var n = values.length;
+    if (n < TARGET_CI_MIN) return null;
+    var v = sortedOf(values), half = 1.96 * Math.sqrt(n) / 2;
+    return [v[Math.max(0, Math.floor(n / 2 - half) - 1)], v[Math.min(n - 1, Math.ceil(n / 2 + half) - 1)]];
+  }
+
+  /* Towns over `rows`, hours held: `areas` decides whether the ranking
+   * beats chance; each kept town's score is its offers against the median
+   * of the OTHER kept towns' offers in the same block (areas' own baseFor,
+   * restated over the groups it returns), with a seeded interval; its
+   * top-10% share against the others' in the same hours. */
+  function townsHeld(rows, key, tierOf, shuffles, floor) {
+    var at = function (o) { return blockOf(o.at); };
+    var a = areas(rows, { key: key, strata: at, shuffles: shuffles, floor: floor });
+    var out = { tested: a.groups.length >= 2, p: a.p, real: !!a.real, floor: a.floor,
+                shuffles: typeof shuffles === 'number' ? shuffles : AREA_SHUFFLES,
+                days: a.days, thin: a.thin, named: a.named, groups: [] };
+    if (!out.tested) return out;
+    var inBlock = Object.create(null);
+    a.groups.forEach(function (g) {
+      g.offers.forEach(function (o) {
+        var b = String(at(o));
+        (inBlock[b] = inBlock[b] || []).push({ g: g.name, v: o.perHour, t: tierOf(o) });
+      });
+    });
+    // Once per block-and-town pair, as areas' baseFor is, not once per offer.
+    var memo = Object.create(null);
+    function elsewhere(b, town) {
+      var k = b + '\u0000' + town;
+      if (!(k in memo)) {
+        var others = (inBlock[b] || []).filter(function (x) { return x.g !== town; });
+        var ot = others.filter(function (x) { return x.t !== null; });
+        memo[k] = { base: others.length ? median(others.map(function (x) { return x.v; })) : null,
+                    share: ot.length ? ot.filter(function (x) { return x.t; }).length / ot.length : null };
+      }
+      return memo[k];
+    }
+    out.groups = a.groups.map(function (g) {
+      var diffs = [], tiered = 0, top = 0, expect = [];
+      g.offers.forEach(function (o) {
+        var e = elsewhere(String(at(o)), g.name);
+        if (e.base !== null) diffs.push(o.perHour - e.base);
+        var t = tierOf(o);
+        if (t === null) return;
+        tiered += 1;
+        if (t) top += 1;
+        if (e.share !== null) expect.push(e.share);
+      });
+      var ci = medianCI(diffs);
+      var clear = ci ? (ci[0] > 0 ? 'above' : ci[1] < 0 ? 'below' : null) : null;
+      return { name: g.name, n: g.n, days: g.days, median: g.median,
+               score: diffs.length ? r2(median(diffs)) : null, lo: ci ? r2(ci[0]) : null,
+               hi: ci ? r2(ci[1]) : null, clear: clear, beats: !!(a.real && clear),
+               tiered: tiered, top10: tiered ? r2(top / tiered) : null,
+               others10: expect.length ? r2(expect.reduce(function (s, v) { return s + v; }, 0)
+                                            / expect.length) : null };
+    }).sort(function (x, y) { return (y.score === null ? -1e9 : y.score) - (x.score === null ? -1e9 : x.score); });
+    return out;
+  }
+
+  function targets(offers, taken, opts) {
+    var o = opts || {};
+    var line = typeof o.target === 'number' && isFinite(o.target) && o.target > 0 ? o.target : null;
+    var isTimed = typeof o.isTimed === 'function' ? o.isTimed : timedRun;
+    var pool = (offers || []).filter(function (r) {
+      return trustworthy(r) && typeof r.perHour === 'number' && isFinite(r.perHour)
+        && blockOf(r.at) !== null;
+    });
+    var byId = Object.create(null);
+    (offers || []).forEach(function (r) { if (r && typeof r.id === 'string') byId[r.id] = r; });
+    var takes = [];
+    (taken || []).forEach(function (t) {
+      if (!t || !isTimed(t) || t.addon === true || typeof t.pay !== 'number' || !isFinite(t.pay)
+          || typeof t.tookAt !== 'number' || typeof t.endedAt !== 'number' || !(t.endedAt > t.tookAt)) return;
+      var off = byId[t.id];
+      var cost = off && typeof off.cost === 'number' && isFinite(off.cost) ? off.cost : 0;
+      takes.push({ block: blockOf(t.tookAt), perHour: (t.pay - cost) / ((t.endedAt - t.tookAt) / 3600000) });
+    });
+
+    // The top tier per block, off every counted offer in it (the places
+    // report's tiersOf): null for an offer whose block is under the floor.
+    var p90 = Object.create(null);
+    BLOCK_NAMES.forEach(function (n, i) {
+      var v = sortedOf(pool.filter(function (r) { return blockOf(r.at) === i; })
+                           .map(function (r) { return r.perHour; }));
+      if (v.length >= TARGET_OFFERS) p90[i] = quantile(v, 0.9);
+    });
+    function tierOf(r) {
+      var t = p90[blockOf(r.at)];
+      return t === undefined ? null : r.perHour >= t;
+    }
+
+    function figures(rows, ts) {
+      var v = sortedOf(rows.map(function (r) { return r.perHour; }));
+      var enough = v.length >= TARGET_OFFERS;
+      var real = ts.map(function (t) { return t.perHour; });
+      var cleared = line === null ? [] : rows.filter(function (r) {
+        return r.perHour >= line && typeof r.pay === 'number' && typeof r.miles === 'number'
+          && isFinite(r.miles) && r.miles >= 0.1;
+      }).map(function (r) { return r.pay / r.miles; });
+      var c = sortedOf(cleared);
+      return { offers: v.length, days: daysIn(rows),
+               p50: enough ? r2(quantile(v, 0.5)) : null, p75: enough ? r2(quantile(v, 0.75)) : null,
+               p90: enough ? r2(quantile(v, 0.9)) : null,
+               timed: real.length, real: real.length >= TARGET_TIMED ? r2(median(real)) : null,
+               cleared: c.length, ppm50: c.length >= TARGET_CLEARED ? r2(quantile(c, 0.5)) : null,
+               ppm75: c.length >= TARGET_CLEARED ? r2(quantile(c, 0.75)) : null };
+    }
+
+    var blocks = [];
+    BLOCK_NAMES.forEach(function (name, i) {
+      var rows = pool.filter(function (r) { return blockOf(r.at) === i; });
+      var ts = takes.filter(function (t) { return t.block === i; });
+      if (!rows.length && !ts.length) return;
+      var b = figures(rows, ts);
+      b.block = i;
+      b.name = name;
+      if (typeof o.key === 'function' && rows.length) {
+        b.towns = townsHeld(rows, o.key, tierOf, o.shuffles, o.townFloor);
+      }
+      blocks.push(b);
+    });
+    var overall = figures(pool, takes);
+    overall.name = 'All hours';
+    if (typeof o.key === 'function') overall.towns = townsHeld(pool, o.key, tierOf, o.shuffles, o.townFloor);
+
+    // advise, as it is: the plateau over all hours and where the line sits.
+    var a = null;
+    try { a = advise(offers, { target: line === null ? undefined : line }); } catch (e) { a = null; }
+    var rep = null;
+    if (a && a.ready) {
+      rep = { ready: true, low: a.low, high: a.high, suggested: a.suggested, target: line,
+              side: line === null ? null : line < a.low ? 'below' : line > a.high ? 'above' : 'inside' };
+    } else if (a) {
+      rep = { ready: false, reason: a.reason || 'thin', offers: a.offers, needOffers: a.needOffers,
+              hours: r2(a.hours), needHours: a.needHours,
+              low: typeof a.low === 'number' ? a.low : null, high: typeof a.high === 'number' ? a.high : null,
+              target: line };
+    }
+
+    var out = { floors: { offers: TARGET_OFFERS, timed: TARGET_TIMED, cleared: TARGET_CLEARED,
+                          town: typeof o.townFloor === 'number' ? o.townFloor : AREA_FLOOR,
+                          townDays: AREA_DAYS },
+                target: line, overall: overall, blocks: blocks, replay: rep };
+    // An empty window says nothing, rather than eight lines of "not enough".
+    out.lines = pool.length || takes.length ? targetLines(out, o) : { rate: [], areas: [], notes: [] };
+    return out;
+  }
+
+  /* The plain lines, one per block, worded once for both pages. */
+  function dollars(v, dp) { return '$' + v.toFixed(dp); }
+
+  function figureLine(b, t) {
+    var f = t.floors, bits = [];
+    if (b.p90 !== null) {
+      bits.push('offers worth ' + dollars(b.p90, 2) + '/hr or more are your top 10% (typical '
+                + dollars(b.p50, 0) + ', top quarter from ' + dollars(b.p75, 0) + '; ' + b.offers + ' offers on '
+                + b.days + (b.days === 1 ? ' day' : ' days') + ')');
+    } else {
+      bits.push('not enough offers yet for percentiles (' + b.offers + ' of ' + f.offers + ')');
+    }
+    bits.push(b.real !== null
+      ? 'your timed takes earned a median ' + dollars(b.real, 0) + '/hr (n=' + b.timed + ')'
+      : 'timed takes: ' + b.timed + ' (' + f.timed + ' needed for a median)');
+    if (t.target !== null) {
+      bits.push(b.ppm50 !== null
+        ? 'offers that cleared your ' + dollars(t.target, 0) + ' line had a median ' + dollars(b.ppm50, 2)
+          + '/mi, top quarter ' + dollars(b.ppm75, 2) + '/mi (n=' + b.cleared + ')'
+        : b.cleared + ' cleared your ' + dollars(t.target, 0) + ' line (' + f.cleared + ' needed for a $/mi)');
+    }
+    return b.name + ': ' + bits.join('; ') + '.';
+  }
+
+  function replayLine(rep) {
+    if (!rep) return 'The replay\'s best $/hr line: not worked out.';
+    var mine = rep.target === null ? '' : ' (yours: ' + dollars(rep.target, 0);
+    if (rep.ready) {
+      return 'The replay\'s best $/hr line, over all hours: ' + dollars(rep.low, 0) + '–' + dollars(rep.high, 0)
+        + '/hr' + (mine ? mine + (rep.side === 'inside' ? ', inside it)' : ', ' + rep.side + ' it)') : '')
+        + '. Any line in that range earned within 5% of the best.';
+    }
+    if (rep.reason === 'unsettled') {
+      return 'The replay\'s best $/hr line is not settled yet: it moved between ' + dollars(rep.low, 0) + ' and '
+        + dollars(rep.high, 0) + ' depending on how breaks are cut' + (mine ? mine + ')' : '') + '.';
+    }
+    if (rep.reason === 'nolinehelps') {
+      return 'The replay found no line that beat taking everything by more than 5% here'
+        + (mine ? mine + ')' : '') + '.';
+    }
+    if (rep.reason === 'trips') {
+      return 'The replay\'s best $/hr line: not enough yet (too few trips at the best line)' + (mine ? mine + ')' : '') + '.';
+    }
+    return 'The replay\'s best $/hr line: not enough yet (' + rep.offers + ' of ' + rep.needOffers + ' offers, '
+      + (rep.hours || 0).toFixed(1) + ' of ' + rep.needHours + ' hours of scanning)' + (mine ? mine + ')' : '') + '.';
+  }
+
+  function townLine(name, tw, f) {
+    if (!tw) return null;
+    if (!tw.tested) {
+      return name + ': not enough yet — fewer than two towns have ' + f.town + ' offers on ' + f.townDays
+        + ' shift days.';
+    }
+    var p = tw.p === 0 ? 'p < ' + (1 / tw.shuffles).toFixed(4) : 'p = ' + tw.p.toFixed(3);
+    if (!tw.real) {
+      return name + ': no town stands out beyond chance (' + p + ', ' + tw.groups.length
+        + ' towns) — indistinguishable.';
+    }
+    // The first named says what the figures are against; the rest are short.
+    var said = 0;
+    function one(g) {
+      var full = said++ === 0;
+      return g.name + ' (' + (g.score > 0 ? '+' : '−') + dollars(Math.abs(g.score), 2) + '/hr'
+        + (full ? ' vs the other towns in the same hours' : '')
+        + (g.top10 !== null && g.others10 !== null
+          ? ', ' + Math.round(g.top10 * 100) + '% top-10%' + (full ? ' against their ' : ' vs ')
+            + Math.round(g.others10 * 100) + '%' : '') + ')';
+    }
+    var up = tw.groups.filter(function (g) { return g.beats && g.clear === 'above'; });
+    var down = tw.groups.filter(function (g) { return g.beats && g.clear === 'below'; });
+    if (!up.length && !down.length) {
+      return name + ': the towns differ beyond chance (' + p + ') but no single town is clear of the rest.';
+    }
+    var rest = tw.groups.length - up.length - down.length;
+    return name + ': ' + (up.length ? up.map(one).join('; ') : 'no town clearly better')
+      + (down.length ? '; weaker: ' + down.map(one).join('; ') : '')
+      + (rest ? '; ' + rest + (rest === 1 ? ' other' : ' others') + ' indistinguishable' : '')
+      + ' (' + p + ', ' + tw.groups.length + ' towns).';
+  }
+
+  function targetLines(t, opts) {
+    var o = opts || {};
+    var rate = [figureLine(t.overall, t), replayLine(t.replay)];
+    t.blocks.forEach(function (b) { rate.push(figureLine(b, t)); });
+    var areasSaid = [];
+    if (typeof o.key === 'function') {
+      areasSaid.push(townLine('All hours (hours held)', t.overall.towns, t.floors));
+      t.blocks.forEach(function (b) { if (b.towns) areasSaid.push(townLine(b.name, b.towns, t.floors)); });
+    }
+    return {
+      rate: rate,
+      areas: areasSaid.filter(Boolean),
+      notes: [
+        'One $/hr line for all hours, not one per block: fitted per block, a line earned less on the nights it '
+          + 'was not fitted to (AUDITS.md, Settled).',
+        '$/mi is the $/mi the good offers tend to have, to read and not to accept by: ranking offers by $/mi '
+          + 'instead of $/hr earned 24% less on a replayed shift (AUDITS.md, Settled).',
+        'Timed takes: ' + (o.timedSaid || 'put down at the door by the GPS or the app\'s screen, or a Drop the '
+          + 'GPS finished') + '; their $/hr is net of the car\'s cost, like the card\'s. Towns are the card\'s own '
+          + 'town, named only where the test beats chance with the hours held still and the town\'s interval is '
+          + 'clear of zero. Nothing here changes a verdict.'
+      ]
+    };
+  }
+
   return { advise: advise, usable: usable, runs: runs, replay: replay,
+           targets: targets, TARGET_OFFERS: TARGET_OFFERS, TARGET_TIMED: TARGET_TIMED,
+           TARGET_CLEARED: TARGET_CLEARED,
            busy: busy, freeAgain: freeAgain,
            bestAt: bestAt, trustworthy: trustworthy, grossRate: grossRate,
            unexplained: unexplained, stack: stack, stackMany: stackMany,

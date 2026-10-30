@@ -1056,6 +1056,42 @@ function nbx() {
   ok('...and it keeps the caveats: offered not earned, only near where you wait, coverage',
      /Offered, not earned; only near where you wait/.test(P.html(repW)));
 
+  /* --- the Targets tab (30 Oct 2026): advice.js targets, then the richer areas --- */
+
+  var pageW = P.html(repW);
+  ok('the Targets tab comes first, ahead of Best offers, and opens by default',
+     pageW.indexOf('data-tab="targets"') >= 0
+     && pageW.indexOf('<section data-tab="targets">') < pageW.indexOf('<section data-tab="best">')
+     && pageW.indexOf('<button type="button" data-tab="targets">') < pageW.indexOf('<button type="button" data-tab="best">')
+     && /\|\| 'targets'\)/.test(pageW));
+  var tgt = A.targets(wRows, wTaken, { target: 25, key: function (o) { return MV.townFor(o, A.area); },
+                                      shuffles: 2000, townFloor: P.MIN_N,
+                                      isTimed: function (t) { return P.realOf(t) !== null; },
+                                      timedSaid: 'x' });
+  eq('...its figures are advice.js targets\' over the report\'s offers and takes (one computation)',
+     [repW.targets.overall, repW.targets.blocks, repW.targets.replay],
+     [tgt.overall, tgt.blocks, tgt.replay]);
+  function esc0(l) { return l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/'/g, '&#39;'); }
+  ok('...and its lines are on the page word for word', repW.targets.lines.rate.concat(repW.targets.lines.areas)
+     .every(function (l) { return pageW.indexOf(esc0(l)) >= 0; }));
+  var wBlock = repW.targets.blocks.filter(function (b) { return b.name === '6–9pm'; })[0];
+  eq('...the block\'s takes timed by the report\'s own rule (realOf), its median net $/hr',
+     [wBlock.timed, wBlock.real], [5, 30]);
+  ok('...its floors said, and the replay\'s line for all hours',
+     /Floors: 30 offers in a block for its percentiles, 5 timed takes/.test(pageW)
+     && pageW.indexOf(esc0(repW.targets.lines.rate[1])) >= 0 && /^The replay/.test(repW.targets.lines.rate[1]));
+  ok('...$/mi read, not a rule, with the AUDITS one-liner', /earned 24% less on a replayed shift/.test(pageW));
+  var areaW = P.targetAreaLines(repW);
+  ok('...the richer areas: waiting from the GPS spells, per block (' + areaW[1] + ')',
+     areaW.length === 1 + repW.targets.blocks.length
+     && /^6–9pm — .*waiting: Faketown 2\.00 top-10% offers an hour waiting, working it paid \$10\.00\/hr \(10 spells\)\.$/
+       .test(areaW.filter(function (l) { return l.indexOf('6–9pm') === 0; })[0]));
+  ok('...and without a GPS log it says so', /waiting: no GPS log reached this report/.test(P.targetAreaLines(
+    P.analyse(wRows, wTaken, [], function () { return null; }, { now: 0 })).join(' ')));
+  eq('the line is the newest counted row\'s own target, not one stamped later than now',
+     [P.targetLine([card({ at: 5, target: 22 }), card({ at: 9, target: 30 })], 7),
+      P.targetLine([card({ at: 5 })], 7), P.targetLine([], 7)], [22, 25, 25]);
+
   /* --- does top-10% share differ by area? --- */
 
   function shareWorld(seed, boost) {

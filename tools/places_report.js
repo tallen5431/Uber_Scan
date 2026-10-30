@@ -1872,6 +1872,62 @@ function bestLines(r) {
  * for a row not asked about), `dropAt(t, o)` a taken trip's position or null. */
 var VIEWS = ['all', 0, 1, 2, 3, 4, 5, 6, 7];
 
+/* The line the driver judges against: the newest counted row's own target
+ * not stamped after `now`, else 25 (journal.html render's and server.js
+ * targetsOut's rule). */
+function targetLine(counts, now) {
+  var at = typeof now === 'number' && now > 0 ? now : Date.now();
+  var sorted = counts.slice().sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
+  for (var i = sorted.length - 1; i >= 0; i--) {
+    if ((sorted[i].at || 0) <= at) return typeof sorted[i].target === 'number' ? sorted[i].target : 25;
+  }
+  return 25;
+}
+
+/* The Targets tab's richer area lines, per hours view, off what the report
+ * already worked out: the places, restaurants and 2-mile cells that beat
+ * chance with their interval clear of zero (cells' `beats`), and, where the
+ * GPS gave waiting spells, the town to wait in by top-10% offers an hour and
+ * what working it paid (waitTable). Nothing new is tested here. */
+function targetAreaLines(r) {
+  var out = [];
+  var views = ['all'].concat((r.targets.blocks || []).map(function (b) { return b.block; }));
+  views.forEach(function (v) {
+    var view = r.views[v];
+    if (!view) return;
+    var bits = [];
+    [['place', 'places', view.place], ['rest', 'restaurants', view.rest], ['grid', r.gridMi + '-mile cells', view.grid]]
+      .forEach(function (k) {
+        var c = k[2];
+        if (!c) return;
+        var up = (c.groups || []).filter(function (g) { return g.beats && g.clear === 'above'; });
+        if (c.p === null) bits.push(k[1] + ': not enough yet');
+        else if (!c.significant) bits.push(k[1] + ': none beats chance (' + pText(c.p) + ')');
+        else if (!up.length) bits.push(k[1] + ': differ beyond chance (' + pText(c.p) + '), none clearly better');
+        else {
+          bits.push(k[1] + ': ' + up.slice(0, 3).map(function (g) {
+            return shareName(r, k[0], g.name) + ' (+$' + g.score.toFixed(2) + '/hr'
+              + (g.top10 !== null && g.top10 !== undefined ? ', ' + Math.round(g.top10 * 100) + '% top-10%' : '') + ')';
+          }).join('; '));
+        }
+      });
+    var waits = (view.best && view.best.waitTown ? view.best.waitTown.rows : []).filter(function (w) {
+      return w.top10PerHour !== null && (v === 'all' || w.block === A.BLOCK_NAMES[v]);
+    }).sort(function (a, b) { return b.top10PerHour - a.top10PerHour; });
+    if (!r.spells.gps) bits.push('waiting: no GPS log reached this report');
+    else if (!waits.length) bits.push('waiting: no town has ' + SPELL_MIN_N + ' spells on ' + MIN_OUTINGS + ' shift days');
+    else {
+      bits.push('waiting: ' + waits.slice(0, 2).map(function (w) {
+        return w.name + (v === 'all' ? ' (' + w.block + ')' : '') + ' ' + w.top10PerHour.toFixed(2)
+          + ' top-10% offers an hour waiting, working it paid '
+          + (w.expected === null ? '—' : '$' + w.expected.toFixed(2) + '/hr') + ' (' + w.n + ' spells)';
+      }).join('; '));
+    }
+    out.push((v === 'all' ? 'All hours' : A.BLOCK_NAMES[v]) + ' — ' + bits.join('; ') + '.');
+  });
+  return out;
+}
+
 function analyse(offers, taken, placed, dropAt, opts) {
   opts = opts || {};
   // Filtered as pairs, so `placed` stays beside the row it answers.
@@ -2026,6 +2082,17 @@ function analyse(offers, taken, placed, dropAt, opts) {
                 town: trendTable(diffs.town, same, 'town') };
   var cov = coverage(offers, answer);
   var counts = offers.filter(counted);
+  // The Targets tab's headline: advice.js's own computation, the one the
+  // offers page shows (server.js targetsOut), over this report's offers and
+  // takes, with the card's town as the rig's (townKey) and the report's real
+  // time (realOf, which also counts a Drop it timed off the GPS).
+  var targets = A.targets(offers, taken, {
+    target: targetLine(counts, opts.now), key: townKey, shuffles: SHUFFLES,
+    townFloor: typeof opts.minN === 'number' ? opts.minN : MIN_N,
+    isTimed: function (t) { return realOf(t) !== null; },
+    timedSaid: 'put down at the door by the GPS or the app\'s screen, a Drop the GPS finished, or a Drop this '
+      + 'report timed off the GPS log'
+  });
   var times = counts.map(function (o) { return o.at; }).filter(isFinite);
   return {
     made: opts.now || Date.now(),
@@ -2064,6 +2131,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
             region: opts.region ? { box: opts.region.box, fixes: opts.region.fixes, marginMi: opts.region.marginMi,
                                     miles: opts.region.disc.miles } : null,
             streets: opts.streetsSaid || null, road: opts.roadSaid || null },
+    targets: targets,
     places: grouped.places,
     restNames: names.labels,
     cells: cellBoxes,
@@ -2445,6 +2513,7 @@ function html(r) {
     + '<nav class="tabs" id="tabs">' + TABS.map(function (t) {
       return '<button type="button" data-tab="' + t[0] + '">' + esc(t[1]) + '</button>';
     }).join('') + '</nav>\n'
+    + TARGETS_SECTION(r)
     + BEST_SECTION(r)
     + '<section data-tab="places"><h2>Places — a store at a location</h2><p class="note">A place is a pin at door, '
     + 'corner or name level, or an approximate placement where it is that store\'s: within ' + PLACE_SAME_MI
@@ -2504,8 +2573,30 @@ function html(r) {
     + '<script>\n' + PAGE_JS + '\n</script>\n</body>\n</html>\n';
 }
 
+/* The Targets tab: advice.js's lines (the offers page's box, word for word),
+ * then the richer area lines only this report can give. */
+function TARGETS_SECTION(r) {
+  var t = r.targets, L = t.lines;
+  function ul(xs) { return '<ul class="lines">' + xs.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>'; }
+  return '<section data-tab="targets"><h2>Targets — what the record says to aim for</h2>'
+    + '<p class="exp">Descriptive. The same lines the offers page shows (advice.js targets): realistic $/hr by '
+    + 'three-hour block, the replay\'s one line for all hours, the $/mi good offers tend to have, and the towns '
+    + 'that beat chance. Nothing here is an accept rule or changes a verdict.</p>'
+    + '<h3>$/hr and $/mi, by time of day</h3>' + ul(L.rate)
+    + '<h3>Best areas to work: towns</h3>' + ul(L.areas)
+    + '<h3>Best areas to work: places, restaurants, cells and waiting</h3>'
+    + '<p class="note">From the tables in the other tabs, by the same tests: named only where the grouping beats '
+    + 'chance and the interval of its hour-held score is clear of zero; waiting from the GPS spells (Best offers tab).</p>'
+    + ul(targetAreaLines(r))
+    + '<p class="note">Floors: ' + t.floors.offers + ' offers in a block for its percentiles, ' + t.floors.timed
+    + ' timed takes for a median real $/hr, ' + t.floors.cleared + ' offers over the line for a $/mi, '
+    + t.floors.town + ' offers on ' + t.floors.townDays + ' shift days for a town.</p>'
+    + ul(L.notes).replace('class="lines"', 'class="note"')
+    + '</section>\n';
+}
+
 // The page's tabs, in order: [id, label].
-var TABS = [['best', 'Best offers'], ['places', 'Places'], ['restaurants', 'Restaurants'], ['map', 'Map'], ['towns', 'Towns'], ['grid', 'Grid'],
+var TABS = [['targets', 'Targets'], ['best', 'Best offers'], ['places', 'Places'], ['restaurants', 'Restaurants'], ['map', 'Map'], ['towns', 'Towns'], ['grid', 'Grid'],
             ['after', 'After a drop'], ['takes', 'Your takes'], ['apps', 'Uber vs DoorDash'],
             ['ppm', '$/mi'], ['waits', 'Store waits'], ['strand', 'Strand risk'], ['busy', 'Busy'],
             ['stack', 'Add-ons'], ['quiet', 'Gone quiet'], ['trend', 'Trend'], ['coverage', 'Coverage'],
@@ -3155,7 +3246,7 @@ var PAGE_JS = String(function page() {
   var current = null;
   function showTab(id) {
     var known = Array.prototype.some.call(tabs.children, function (b) { return b.getAttribute('data-tab') === id; });
-    if (!known) id = 'best';
+    if (!known) id = 'targets';
     current = id;
     Array.prototype.forEach.call(tabs.children, function (b) {
       b.setAttribute('aria-pressed', b.getAttribute('data-tab') === id ? 'true' : 'false');
@@ -3209,7 +3300,7 @@ var PAGE_JS = String(function page() {
   levelsTable();
   shareTests();
   draw();
-  showTab((location.hash || '').slice(1) || 'best');
+  showTab((location.hash || '').slice(1) || 'targets');
 }).replace(/^function page\(\) \{/, '(function () {').replace(/\}$/, '}());');
 
 /* --- talking to the server, the NucBox and the GPS log -------------------- */
@@ -3744,7 +3835,8 @@ module.exports = {
   printedTown: printedTown, regionOf: regionOf, isPoint: isPoint, gridOk: gridOk, PLACE_APPROX_MI: PLACE_APPROX_MI,
   REGION_MARGIN_MI: REGION_MARGIN_MI, quantile: quantile, qOf: qOf, tiersOf: tiersOf, topOf: topOf, timePresses: timePresses,
   stillRuns: stillRuns, shareTest: shareTest, goodTable: goodTable, waitTable: waitTable, deadOf: deadOf,
-  deadTable: deadTable, sizeTable: sizeTable, bestLines: bestLines, shareCsv: shareCsv, levelsCsv: levelsCsv,
+  deadTable: deadTable, sizeTable: sizeTable, bestLines: bestLines, targetLine: targetLine,
+  targetAreaLines: targetAreaLines, shareCsv: shareCsv, levelsCsv: levelsCsv,
   streetsBase: streetsBase, loadWaits: loadWaits, GPS_TIMED: GPS_TIMED, TIER_MIN_N: TIER_MIN_N,
   STOP_M: STOP_M, STOP_MIN_S: STOP_MIN_S, PRESS_AFTER_MIN: PRESS_AFTER_MIN, PRESS_BEFORE_MIN: PRESS_BEFORE_MIN,
   SHORT_MILES: SHORT_MILES,

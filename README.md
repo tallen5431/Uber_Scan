@@ -573,6 +573,23 @@ So the Pi scanner keeps one line per offer it was confident about, in
   counted, and says what your current target is costing. It shows its working, it
   leans deliberately low, and it says nothing at all until there is enough behind
   it to be worth acting on.
+* **targets**, a box near the top: plain lines on what to aim for, worked out
+  by `Advice.targets` on the server (`/api/journal`'s `targets`). Per
+  three-hour block and for all hours: the $/hr your top 10% of offers start
+  at (with the typical offer and the top quarter), the median real $/hr of
+  your timed takes (put down at the door by the GPS or the app's screen, or
+  a Drop the GPS finished; net of the car's cost like the card's), and the
+  median and top-quarter $/mi of the offers that cleared your $/hr line —
+  **the $/mi the good offers tend to have, to read and not to accept by**
+  (ranking by $/mi earned 24% less on a replayed shift). One line from the
+  replay below for all hours, its plateau and whether your target is inside
+  it — never a line per block, which earned less on nights it was not fitted
+  to. Then the towns, off the card's own town: named only where the ranking
+  beats chance with the hours held still and the town's interval is clear of
+  zero, otherwise "indistinguishable". Floors: 30 offers in a block for its
+  percentiles, 5 timed takes for a median, 8 offers over the line for a
+  $/mi, 8 offers on 2 shift days for a town; under them a line says "not
+  enough yet" with its count. Nothing in it changes a verdict.
 * **by time of day**, in three-hour blocks, each bar drawn on the same scale so
   the halfway mark is always your target.
 * **rides against shop orders**.
@@ -892,6 +909,18 @@ grouping beats chance and the interval clears zero).
     only, 10 trips to name a cell).
   * *Offer size*: short < 4 mi, 4–8, 8–12, 12+ by card miles, per town, app and
     restaurant: n, median and P90 $/hr, top-10% share, $/mi (read only).
+
+### The Targets tab
+
+The report opens on **Targets**: the offers page's Targets lines word for
+word (`Advice.targets`, one computation), over the report's window, with the
+card's town as on the rig, the report's own town floor (30 offers on 2 shift
+days, as its Towns tab), and its own real time (which also counts a Drop it
+timed off the GPS log). Under them, per three-hour block, the richer areas
+only the report has: the places, restaurants and 2-mile cells that beat
+chance with their interval clear of zero (from the tables in the other
+tabs), and, where GPS waiting spells exist, the town to wait in by top-10%
+offers an hour and what working it paid. Descriptive, like the rest.
 
 ### Every night, on the NucBox
 

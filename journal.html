@@ -59,6 +59,10 @@
   .advice p { margin: 0; font-size: 14px; line-height: 1.5; }
   .advice b { font-variant-numeric: tabular-nums; }
   .advice .note { margin-top: 8px; }
+  .targets h3 { margin: 10px 0 4px; font-size: 15px; }
+  .targets h3[hidden] { display: none; }
+  ul.tlines { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.5; }
+  ul.tlines li { margin-bottom: 4px; overflow-wrap: anywhere; }
   /* Close the shift. Folded to its one line until pressed, because it can hold
      a whole evening of cards — 86 unanswered on the owner's Saturday — and the
      log under it is what this page is opened for: the driver's own complaint
@@ -489,6 +493,7 @@
     h2 { font-size: 16px; }
     .hint, .note, #headline { font-size: 17px; line-height: 1.5; }
     .advice p { font-size: 18px; }
+    ul.tlines { font-size: 17px; max-width: 72ch; }
     .stats .unit { font-size: 16px; }
     .unit { font-size: 15px; }
     .stats small { font-size: 15px; }
@@ -664,6 +669,20 @@
   </div>
 
   <p class="hint" id="headline">Reading the journal…</p>
+
+  <!-- TARGETS (the owner, 30 Oct: "the best areas to work in and realistic
+       $/hr and $/mile to target based on the data"). Plain lines worked out
+       by server.js targetsOut, worded by Advice.targets — the same lines the
+       places report's Targets tab opens with. Descriptive: the $/hr line is
+       the replay's below ("Where to draw the line"), over all hours; $/mi is
+       read, never a rule; towns only where they beat chance. -->
+  <section class="advice targets" id="targets" hidden>
+    <h2>Targets <em>· what this stretch says to aim for</em></h2>
+    <ul class="tlines" id="targetsRate"></ul>
+    <h3 id="targetsAreasHead">Best areas to work</h3>
+    <ul class="tlines" id="targetsAreas"></ul>
+    <ul class="note" id="targetsNotes"></ul>
+  </section>
   <!-- Shown instead of the charts when there is nothing to chart, or nothing
        to chart *with*. Three labelled empty axes and an 11px sentence is a
        page that looks broken; so is a stale one with a grey line under it. -->
@@ -910,7 +929,8 @@
    'review', 'reviewSays', 'reviewDays', 'reviewBack', 'reviewOn', 'reviewLead',
    'reviewList',
    'sheet', 'sheetHead', 'sheetWhere', 'sheetShut', 'sheetMap', 'sheetFoot',
-   'sheetNote', 'sheetOut', 'incar', 'incarList'].forEach(function (id) {
+   'sheetNote', 'sheetOut', 'incar', 'incarList',
+   'targets', 'targetsRate', 'targetsAreas', 'targetsAreasHead', 'targetsNotes'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -2865,6 +2885,29 @@
     el[name + 'Head'].hidden = el[name + 'Lead'].hidden = false;
   }
 
+  /* TARGETS. server.js targetsOut's lines (Advice.targets), drawn as they
+     come: one per time-of-day block for $/hr and $/mi, the replay's line,
+     and the towns. Hidden when the server sent none. */
+  function showTargets(t) {
+    var lines = t && t.lines;
+    var rate = lines && Array.isArray(lines.rate) ? lines.rate : [];
+    var areas = lines && Array.isArray(lines.areas) ? lines.areas : [];
+    var notes = lines && Array.isArray(lines.notes) ? lines.notes : [];
+    if (!rate.length) {
+      el.targets.hidden = true;
+      el.targetsRate.innerHTML = el.targetsAreas.innerHTML = el.targetsNotes.innerHTML = '';
+      return;
+    }
+    function items(xs) {
+      return xs.map(function (x) { return '<li>' + esc(String(x)) + '</li>'; }).join('');
+    }
+    el.targets.hidden = false;
+    el.targetsRate.innerHTML = items(rate);
+    el.targetsAreas.innerHTML = items(areas);
+    el.targetsAreasHead.hidden = !areas.length;
+    el.targetsNotes.innerHTML = items(notes);
+  }
+
   function showPerMile(seen) {
     var apps = (seen && Array.isArray(seen.apps) ? seen.apps : []).filter(function (a) {
       return a && a.all && a.all.n > 0;
@@ -3295,6 +3338,7 @@
     showPairs(data.pairs);
     showReal(data.taken);
     showWaits(data.waits);
+    showTargets(data.targets);
     showPerMile(data.perMileSeen);
     showCardVsReal(data.cardVsReal);
     showRealByPerMile(data.realByPerMile);

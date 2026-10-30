@@ -2798,6 +2798,22 @@ const SNAP_MEASURE = (fixture) => {
           };
         });
 
+        // [targets] The Targets box (30 Oct): shown off the fixture's
+        // offers, and no line of it past the glass.
+        out[panel[0] + ' targets'] = await page.evaluate(() => {
+          const d = document.documentElement;
+          const lis = [].slice.call(document.querySelectorAll('#targets li, #targets h2, #targets h3'));
+          return {
+            shown: !document.getElementById('targets').hidden,
+            lines: document.querySelectorAll('#targetsRate li').length,
+            outside: lis.filter((el) => {
+              const r = el.getBoundingClientRect();
+              return r.right > d.clientWidth + 1 || r.left < -1;
+            }).length,
+            pageWide: d.scrollWidth > d.clientWidth + 1,
+          };
+        });
+
         /* The map sheet, on every panel this gets bolted to.
          *
          * Opened by hand rather than by pressing a control: the fixture's
@@ -6171,6 +6187,15 @@ try:
                    (pm or {}).get('outside'), 0)
                 eq('...and the page not scrolling sideways for them at %s' % panel,
                    (pm or {}).get('pageWide'), False)
+
+            # [targets] The Targets box, near the top, on every panel.
+            tg = got.get('%s targets' % panel)
+            if name == 'journal.html':
+                ok_('[targets] the Targets box is on the page at %s, with its lines (%r)'
+                    % (panel, tg), (tg or {}).get('shown') and (tg or {}).get('lines', 0) >= 2)
+                eq('...no line of it off the glass at %s' % panel, (tg or {}).get('outside'), 0)
+                eq('...and the page not scrolling sideways for it at %s' % panel,
+                   (tg or {}).get('pageWide'), False)
 
             # Close the shift, opened, on every panel: two answers a row at the
             # 52px every control on this page keeps, beside a payout, a

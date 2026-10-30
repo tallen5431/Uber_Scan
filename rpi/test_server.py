@@ -12320,6 +12320,49 @@ _pm_out = json.dumps({k: _pm.get(k) for k in ('perMileSeen', 'cardVsReal', 'real
 no_('[per mile] ...and no id, place or coordinate in the four fields',
     any(w in _pm_out for w in ('pmu', 'pmd', 'lat', 'lon', 'places', 'pickup', 'dropoff')))
 
+# --- what to aim for, the offers page's Targets box (30 Oct 2026) -----------
+# The owner: "the best areas to work in and realistic $/hr and $/mile to
+# target based on the data". /api/journal gains `targets` (server.js
+# targetsOut, Advice.targets; tests/advice.test.js checks the arithmetic in
+# depth). Over the same invented evening: 18 counted offers, under the 30 a
+# block needs for percentiles; 10 timed takes (5 Uber by the GPS, 5 DoorDash
+# by the screen; the Drop press, the replaced one and the add-on left out),
+# their $/hr net of each card's $1.20 cost; 9 offers at or over the $25 line,
+# their pay over the card's miles $1, $1, $2, $2, $2, $3, $4, $5, $10.
+_tg = _pm.get('targets') or {}
+_tg_blocks = {b.get('name'): b for b in _tg.get('blocks') or []}
+_tg_eve = _tg_blocks.get('6–9pm') or {}
+_tg_real = sorted([(pay - 1.2) / (m / 60.0) for pay, m in
+                   zip([2, 4, 6, 8, 10], [22, 24, 24, 26, 30])]
+                  + [(10 - 1.2) / (m / 60.0) for m in [24, 24, 27, 30, 33]])
+eq('[targets] one block, the line the page judges by, and the floors said',
+   (sorted(_tg_blocks), _tg.get('target'), _tg.get('floors')),
+   (['6–9pm'], 25, {'offers': 30, 'timed': 5, 'cleared': 8, 'town': 8, 'townDays': 2}))
+eq('[targets] ...18 offers, under 30: no percentiles',
+   (_tg_eve.get('offers'), _tg_eve.get('p50'), _tg_eve.get('p90')), (18, None, None))
+eq('[targets] ...the timed takes (at the door; a press, a replaced one and an add-on out), '
+   'their median $/hr net of the card\'s cost',
+   (_tg_eve.get('timed'), _tg_eve.get('real')),
+   (10, round((_tg_real[4] + _tg_real[5]) / 2, 2)))
+eq('[targets] ...the $/mi of the offers that cleared the $25 line: n, median, P75',
+   (_tg_eve.get('cleared'), _tg_eve.get('ppm50'), _tg_eve.get('ppm75')), (9, 2.0, 4.0))
+eq('[targets] ...the replay is the advice\'s, and 18 offers is not enough for it',
+   ((_tg.get('replay') or {}).get('ready'), (_tg.get('replay') or {}).get('reason')), (False, 'thin'))
+_tg_lines = _tg.get('lines') or {}
+ok_('[targets] ...said in plain lines: the block, its takes, its $/mi, the replay (%r)'
+    % (_tg_lines.get('rate') or [None])[-1:],
+    any(l.startswith('6–9pm: not enough offers yet for percentiles (18 of 30); your timed takes '
+                     'earned a median $') and 'offers that cleared your $25 line had a median $2.00/mi, '
+                     'top quarter $4.00/mi (n=9)' in l for l in _tg_lines.get('rate') or [])
+    and any(l.startswith('The replay\'s best $/hr line: not enough yet') for l in _tg_lines.get('rate') or []))
+ok_('[targets] ...towns off the card only: none printed, so not enough yet (%r)' % _tg_lines.get('areas'),
+    (_tg_lines.get('areas') or [''])[0].startswith('All hours (hours held): not enough yet'))
+ok_('[targets] ...and the notes: one line for all hours, $/mi earned less',
+    'not one per block' in ' '.join(_tg_lines.get('notes') or [])
+    and '24% less' in ' '.join(_tg_lines.get('notes') or []))
+no_('[targets] ...no id, coordinate or address in it',
+    any(w in json.dumps(_tg) for w in ('pmu', 'pmd', 'lat', 'lon', 'pickup', 'dropoff')))
+
 # An app with too few orders measured is not re-figured, and says how many it
 # has; an empty journal says nothing at all.
 _pm_few = [r for r in _pm_rows if r.get('id') != 'pmu4']
@@ -12339,6 +12382,10 @@ try:
     _none = get(_pmbase, '/api/journal?days=0')
 finally:
     stop(_pmproc)
+eq('[targets] an empty journal: no blocks, nothing timed, the replay not ready',
+   ((_none.get('targets') or {}).get('blocks'), ((_none.get('targets') or {}).get('overall') or {}).get('timed'),
+    ((_none.get('targets') or {}).get('replay') or {}).get('ready')),
+   ([], 0, False))
 eq('[per mile] an empty journal: four empty tables',
    ((_none.get('perMileSeen') or {}).get('apps'), (_none.get('cardVsReal') or {}).get('apps'),
     [b.get('n') for b in (_none.get('realByPerMile') or {}).get('bands') or []],
