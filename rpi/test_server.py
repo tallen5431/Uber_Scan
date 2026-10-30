@@ -1689,8 +1689,10 @@ if shutil.which('python3'):
         eq('held end: the mark reply carries the order in the car as the stream describes it',
            sorted((reply.get('held') or {}).keys()),
            # (`endArea`: the general area a refusal kept, the owner's 24 Oct.)
+           # (`plannerHeld`, 30 Oct: whether the Trip Planner is kept on it,
+           # which the panel's copy of the stops follows — forgetPlanner.)
            ['arrived', 'card', 'dropoff', 'drops', 'endArea', 'endAt', 'endBy', 'endPinned',
-            'endWhy', 'holdId', 'minutes', 'pay', 'pickAt', 'place', 'visited'])
+            'endWhy', 'holdId', 'minutes', 'pay', 'pickAt', 'place', 'plannerHeld', 'visited'])
         eq('held end: ...its `drops` null for an order of one door (a batch\'s count, '
            'server.js batchDrops)', (reply.get('held') or {}).get('drops', 'missing'), None)
         # Started after the mark, before the scanner's 2s sleep ends.
@@ -2452,10 +2454,22 @@ if shutil.which('python3'):
            ('12 Oak St, Marietta, GA 30060', True, 2))
         ok_('the premise: a planner is held again before the next card',
             bool(_held_planner(True).get('planner')))
-        held = _held_planner(False)
-        eq('...and a different offer on the record takes it off too, and leaves '
-           'the order its end', (held.get('planner'), held.get('dropoff')),
-           (None, '12 Oak St, Marietta, GA 30060'))
+        # Changed 30 Oct (the owner: "after getting 3 correct drop off
+        # locations the rig dropped it on the map after some time"): this
+        # pinned that a different offer took the planner off the order. Offers
+        # come up all through a batch, and on 26-29 Oct that took the stops
+        # off 15 of 21 planner trips mid-delivery; it is kept now, and goes at
+        # a Took of another trip or with the trip (forgetPlanner).
+        for _ in range(200):
+            if (get(base, '/api/status').get('offer') or {}).get('id') == 'o-next-card':
+                break
+            time.sleep(0.05)
+        held = _held_planner(True)
+        eq('...and a different offer on the record leaves it on the order, with its end',
+           ((get(base, '/api/status').get('offer') or {}).get('id'),
+            [s.get('name') for s in (held.get('planner') or {}).get('stops') or []],
+            held.get('dropoff')),
+           ('o-next-card', ['Pat Q.', 'Lee M.'], '12 Oak St, Marietta, GA 30060'))
     finally:
         stop(proc)
         shutil.rmtree(work, ignore_errors=True)
@@ -8790,7 +8804,7 @@ try:
     # with the stops kept since 24 Oct (the owner's "Would there be a way to
     # have the scan button also merge?"), so a read leaving ①'s end out would
     # no longer take it off. A different card on the record between them
-    # forgets the planner (forgetPlanner), the one moment that still does.
+    # forgot the planner until 30 Oct; it no longer does (forgetPlanner).
     _say(_plan(_PU, _DB, _DK))
     _both = [o.get('planAt') for o in _orders(_cb)]
     _say(_card('c-forget-1', 5.0))
@@ -8799,10 +8813,15 @@ try:
     _say(_card('c-forget-2', 5.0))
     _say(_plan(_PU, _DB, dict(_DB, name='Lee M. again')))
     _twice = [o.get('planAt') for o in _orders(_cb)]
+    # Changed 30 Oct: the cards between the reads no longer forget the planner
+    # (forgetPlanner; the owner's "dropped it on the map after some time"), so
+    # each read MERGES into the stops kept: the half read leaves ①'s end where
+    # it was ([2, 1], where it was [None, 1] read alone), and the read with ②'s
+    # street twice places ② nowhere while ① keeps its place ([2, None]).
     eq('[carry two] one planner listing both orders sets the run order: each order says '
        'where its end is on it, and only when it is there once',
        (_both, _half, _twice, 'planAt' in (_one[0] if _one else {'planAt': 0})),
-       ([2, 1], [None, 1], [None, None], False))
+       ([2, 1], [2, 1], [2, None], False))
 
     # A card offered while both are in the car: its pair row names the first
     # as `held` and the second beside it, and since Stage 6 its range is
@@ -10519,6 +10538,209 @@ try:
        ([9.40], [], [('doordash', 'put down', 'only', False)]))
 finally:
     stop(_sop)
+
+# --- a held trip kept whole (30 Oct 2026) -------------------------------------
+#
+# The owner: "I noticed after getting 3 correct drop off locations the rig
+# dropped it on the map after some time". Three ways a trip's doors left the
+# car's picture mid-delivery: an offer card took the Trip Planner off the order
+# (15 of the 21 planner trips of 26-29 Oct); the planner went with the first
+# order when it was put down, though the trip went on; and an order of a batch
+# ran out on its own card's minutes while its trip-mate was still carried. And
+# a dropped order's door read after its press was filed onto the order still
+# held (28 Oct #5). Every name, store and street here is invented.
+_KP = {'kind': 'pickup', 'name': 'Larkspur Tacos', 'street': '310 Mill St',
+       'line': '310 Mill St, Roswell, GA 30075', 'orders': 1, 'expectedBy': None,
+       'city': 'Roswell', 'state': 'GA', 'zip': '30075'}
+_KD1 = {'kind': 'dropoff', 'name': 'Pat Q.', 'street': '4821 Kestrel Dr',
+        'line': '4821 Kestrel Dr, Marietta', 'orders': 1, 'expectedBy': None,
+        'city': 'Marietta', 'state': 'GA', 'zip': None}
+_KD2 = {'kind': 'dropoff', 'name': 'Lee M.', 'street': '77 Birch Ln',
+        'line': '77 Birch Ln, Roswell', 'orders': 1, 'expectedBy': None,
+        'city': 'Roswell', 'state': 'GA', 'zip': None}
+
+
+def _kplan(*stops):
+    return {'planner': {'stops': [dict(x) for x in stops], 'unfiled': None,
+                        'asked': True, 'ms': 10}}
+
+
+def _kwatch(path):
+    try:
+        return json.load(open(os.path.join(os.path.dirname(path), 'finishing.json')))['watches']
+    except (OSError, ValueError):
+        return []
+
+
+def _kdrops(path, n):
+    # The expiry row is appended after the status call that ran the order out.
+    for _ in range(40):
+        got = [(r.get('id'), r.get('by')) for r in _rows(path, 'drop')]
+        if len(got) >= n:
+            break
+        time.sleep(0.05)
+    return got
+
+
+def _kstops(base):
+    return [x.get('name') for x in (((get(base, '/api/status').get('holding') or {})
+                                     .get('planner') or {}).get('stops') or [])]
+
+
+_kp, _kb, _kj, _kh = _cserver('keep-planner', CARRY_TWO='1')
+try:
+    _took2(_kb, _card('k-a', 14.0, minutes=40.0, pickup='Larkspur Tacos'))
+    _say(_kplan(_KP, _KD1, _KD2))
+    eq('[trip kept] the premise: the order in the car keeps the planner\'s stops',
+       _kstops(_kb), ['Larkspur Tacos', 'Pat Q.', 'Lee M.'])
+    _say(_card('k-offer-1', 6.0, minutes=20.0, pickup='Wren Street Noodles'))
+    _say(_card('k-offer-2', 7.0, minutes=25.0, pickup='Juniper Taqueria'))
+    eq('[trip kept] offer cards on the record leave the planner on the order (they took it '
+       'off before 30 Oct)',
+       ((get(_kb, '/api/status').get('offer') or {}).get('id'), _kstops(_kb)),
+       ('k-offer-2', ['Larkspur Tacos', 'Pat Q.', 'Lee M.']))
+    eq('[trip kept] ...and the order says so to the panel (`plannerHeld`)',
+       (_orders(_kb) or [{}])[0].get('plannerHeld'), True)
+    # A second Uber order from the same store, stacked onto the trip: on the
+    # planner by its store, so the planner stays.
+    _took2(_kb, _card('k-b', 9.0, minutes=30.0, pickup='Larkspur Tacos'))
+    eq('[trip kept] a Took on the same trip (its store on the planner) keeps it',
+       (len(_orders(_kb)), _kstops(_kb)), (2, ['Larkspur Tacos', 'Pat Q.', 'Lee M.']))
+    # ...and the first put down: the planner moves onto the order now first.
+    post(_kb, '/api/delivered', {'holdIds': [_orders(_kb)[0].get('holdId')]})
+    _kh1 = get(_kb, '/api/status').get('holding') or {}
+    eq('[trip kept] the first order put down, the trip going on: the planner moves onto the '
+       'order now first', ([o.get('pay') for o in _orders(_kb)] or [_kh1.get('pay')],
+                           _kstops(_kb), (_orders(_kb) or [_kh1])[0].get('plannerHeld')),
+       ([9.0], ['Larkspur Tacos', 'Pat Q.', 'Lee M.'], True))
+finally:
+    stop(_kp)
+
+_kp, _kb, _kj, _kh = _cserver('forget-planner', CARRY_TWO='1')
+try:
+    _took2(_kb, _card('f-a', 14.0, minutes=40.0, pickup='Larkspur Tacos'))
+    _say(_kplan(_KP, _KD1, _KD2))
+    _took2(_kb, _card('f-b', 9.0, minutes=30.0, pickup='Wren Street Noodles',
+                      dropoff='Quarry Bend Rd & Teal Ct, Kennesaw'))
+    eq('[trip kept] a Took of another trip (on none of the planner\'s stops) forgets it',
+       (len(_orders(_kb)), _kstops(_kb), [o.get('plannerHeld') for o in _orders(_kb)]),
+       (2, [], [False, False]))
+finally:
+    stop(_kp)
+
+_kp, _kb, _kj, _kh = _cserver('move-not', CARRY_TWO='1')
+try:
+    _took2(_kb, _card('m-a', 14.0, minutes=40.0, pickup='Larkspur Tacos'))
+    _took2(_kb, _card('m-b', 9.0, minutes=30.0, pickup='Wren Street Noodles'))
+    _say(_kplan(_KP, _KD1, _KD2))
+    post(_kb, '/api/delivered', {'holdIds': [_orders(_kb)[0].get('holdId')]})
+    _kh2 = get(_kb, '/api/status').get('holding') or {}
+    eq('[trip kept] ...and the first put down with the order left on another trip: the '
+       'planner goes with it', (_kh2.get('pay'), _kstops(_kb),
+                                [o.get('plannerHeld') for o in _orders(_kb)]),
+       (9.0, [], [False]))
+finally:
+    stop(_kp)
+
+# A batch's clock. HOLD_GRACE_MS 0: a 0.05-minute card runs out 4.5 s after its
+# Took (x 1.5), a 0.5-minute one 45 s.
+_kp, _kb, _kj, _kh = _cserver('batch-clock', CARRY_TWO='1', HOLD_GRACE_MS='0')
+try:
+    _took2(_kb, _card('c-short', 8.0, minutes=0.05, pickup='Larkspur Tacos'))
+    _took2(_kb, _card('c-long', 9.0, minutes=0.5, pickup='Wren Street Noodles'))
+    _say(_kplan(_KP, dict(_KP, name='Wren Street Noodles', street='12 Wren St',
+                          line='12 Wren St, Roswell, GA 30075'), _KD1, _KD2))
+    time.sleep(5.5)
+    eq('[batch clock] two orders on one held planner: the shorter card does not run out '
+       'while its trip-mate is carried', [o.get('pay') for o in _orders(_kb)], [8.0, 9.0])
+    eq('[batch clock] ...no expiry row for it', [r.get('id') for r in _rows(_kj, 'drop')], [])
+    post(_kb, '/api/delivered', {'holdIds': [_orders(_kb)[1].get('holdId')]})
+    _kleft = [o.get('pay') for o in _orders(_kb)] or \
+        [(get(_kb, '/api/status').get('holding') or {}).get('pay')]
+    eq('[batch clock] its trip-mate put down: it is still carried, on its own minutes from '
+       'that moment', _kleft, [8.0])
+    time.sleep(5.5)
+    eq('[batch clock] ...and then runs out on them, an expiry row for it',
+       (get(_kb, '/api/status').get('holding'), _kdrops(_kj, 2)),
+       (None, [('c-long', 'chooser'), ('c-short', 'expiry')]))
+finally:
+    stop(_kp)
+
+_kp, _kb, _kj, _kh = _cserver('batch-apart', CARRY_TWO='1', HOLD_GRACE_MS='0')
+try:
+    _took2(_kb, _card('a-short', 8.0, minutes=0.05, pickup='Larkspur Tacos'))
+    _took2(_kb, _card('a-long', 9.0, minutes=0.5, pickup='Wren Street Noodles'))
+    time.sleep(5.5)
+    eq('[batch clock] two orders with nothing tying them (no planner, no add-on): each on '
+       'its own clock, as before', ([o.get('pay') for o in _orders(_kb)]
+                                    or [(get(_kb, '/api/status').get('holding') or {})
+                                        .get('pay')],
+                                    _kdrops(_kj, 1)),
+       ([9.0], [('a-short', 'expiry')]))
+finally:
+    stop(_kp)
+
+# A dropped order's door, read after its press. Pat Q.'s door is filed on ①
+# by the chooser; ① is put down by Drop (a finishing watch opens: no end
+# pinned, its card's miles to drive); then a label read unprompted names Pat
+# Q. at another door. Before 30 Oct the "only" cue filed it onto ②.
+_kp, _kb, _kj, _kh = _cserver('dropped-door', CARRY_TWO='1', CHOOSER_MS='3000')
+try:
+    _took2(_kb, _card('d-a', 14.0, minutes=40.0, pickup='Larkspur Tacos'))
+    _took2(_kb, _card('d-b', 9.0, minutes=30.0, pickup='Wren Street Noodles'))
+    _say(_nav('4821 Kestrel Dr, Marietta, GA 30064', '4821 Kestrel Dr', 'Marietta',
+              stop={'name': 'Pat Q.', 'expectedBy': None}))
+    _kc = get(_kb, '/api/status').get('chooser') or {}
+    post(_kb, '/api/choose', {'id': _kc.get('id'), 'pick': _orders(_kb)[0].get('holdId')})
+    time.sleep(0.3)
+    _kfa = (_orders(_kb)[0].get('fields') or {}) if _orders(_kb) else {}
+    _kst = get(_kb, '/api/status').get('holding') or {}
+    ok_('[dropped door] the premise: ① has Pat Q.\'s door and name (%r)'
+        % ((_kst.get('fields') or {}).get('customer'),),
+        _kst.get('dropoff') == '4821 Kestrel Dr, Marietta, GA 30064'
+        and ((_kst.get('fields') or {}).get('customer') or {}).get('value') == 'Pat Q.')
+    post(_kb, '/api/delivered', {'holdIds': [_orders(_kb)[0].get('holdId')]})
+    _kw = _kwatch(_kj)
+    ok_('[dropped door] the premise: ① is down, watched; ② alone in the car (%r)' % _kw,
+        len(_kw) == 1 and (get(_kb, '/api/status').get('holding') or {}).get('pay') == 9.0)
+    _say(_nav('9 Elm Ct, Smyrna, GA 30080', '9 Elm Ct', 'Smyrna', asked=False,
+              stop={'name': 'Pat Q.', 'expectedBy': None}))
+    time.sleep(0.3)
+    eq('[dropped door] a label naming the dropped order\'s customer is not filed onto the '
+       'order still held', ((get(_kb, '/api/status').get('holding') or {}).get('dropoff'),
+                            [r.get('id') for r in _rows(_kj, 'mark')
+                             if r.get('dropoff') == '9 Elm Ct, Smyrna, GA 30080']),
+       (None, []))
+    eq('[dropped door] ...it goes to the dropped order\'s finishing watch',
+       [w.get('door') for w in _kwatch(_kj)], ['9 Elm Ct, Smyrna, GA 30080'])
+    # ...and a label naming nobody dropped is ②'s, by the "only" cue, as ever.
+    _say(_nav('61 Saddlebrook Ln, Acworth, GA 30101', '61 Saddlebrook Ln', 'Acworth',
+              asked=False, stop={'name': 'Lee M.', 'expectedBy': None}))
+    time.sleep(0.3)
+    eq('[dropped door] ...and one naming another customer is filed onto the held order as '
+       'before', (get(_kb, '/api/status').get('holding') or {}).get('dropoff'),
+       '61 Saddlebrook Ln, Acworth, GA 30101')
+finally:
+    stop(_kp)
+
+# ...and the same customer ordering again after the drop is a new order of
+# theirs: a door read for an order TAKEN after the drop is filed as ever.
+_kp, _kb, _kj, _kh = _cserver('dropped-again', CARRY_TWO='1')
+try:
+    _took2(_kb, _card('g-a', 14.0, minutes=40.0, pickup='Larkspur Tacos'))
+    _say(_nav('4821 Kestrel Dr, Marietta, GA 30064', '4821 Kestrel Dr', 'Marietta',
+              asked=False, stop={'name': 'Pat Q.', 'expectedBy': None}))
+    time.sleep(0.3)
+    post(_kb, '/api/delivered', {})
+    _took2(_kb, _card('g-b', 9.0, minutes=30.0, pickup='Wren Street Noodles'))
+    _say(_nav('9 Elm Ct, Smyrna, GA 30080', '9 Elm Ct', 'Smyrna', asked=False,
+              stop={'name': 'Pat Q.', 'expectedBy': None}))
+    time.sleep(0.3)
+    eq('[dropped door] a door naming a dropped order\'s customer, read for an order taken '
+       'after the drop, is filed onto it', (get(_kb, '/api/status').get('holding') or {})
+       .get('dropoff'), '9 Elm Ct, Smyrna, GA 30080')
+finally:
+    stop(_kp)
 
 shutil.rmtree(_cdir, ignore_errors=True)
 

@@ -1534,6 +1534,17 @@
     return wa.some(function (x) { return wb.some(function (y) { return wordsAlike(x, y); }); });
   }
 
+  /* Two customer names as one customer, by sameName's rule — a word of one
+   * alike a word of the other, the screen's litter round a read ignored —
+   * for server.js (onPlanner, and a dropped order's door kept off the order
+   * still held: doorOfDropped). A name with no word of three letters is
+   * nobody's, and the same as nobody. */
+  function sameCustomer(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    if (!nameWords(a).length || !nameWords(b).length) return false;
+    return sameName({ name: a }, { name: b });
+  }
+
   // A name's words, and each word run on into the initial after it, as the
   // planner reads a name tight to its initial ("Herbie P." read "terbieP.",
   // the owner's 29 Oct shift: its first letter misread too, so neither word
@@ -3145,6 +3156,9 @@
   return { RANK: RANK, FIELDS: FIELDS, STITCH_MS: STITCH_MS, PAGES_MAX: PAGES_MAX,
            cardFields: cardFields, fieldsOf: fieldsOf, outranks: outranks,
            plannerPickup: plannerPickup, forgetPlanner: forgetPlanner,
+           // ...and the planner's name rule for one customer read twice
+           // (server.js: a door filed only onto its own customer's order).
+           sameCustomer: sameCustomer,
            // ...and the street rule they stand on, for server.js's planAtOf
            // (where on a planner each order's end is).
            sameStreet: sameStreet, VOTE_READS: VOTE_READS, plannerVote: plannerVote,

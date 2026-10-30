@@ -553,9 +553,16 @@ function startScanner() {
           // ✓ Took finds them answered (searchCardEarly).
           searchCardEarly(scanner.offer, Date.now());
           scanner.offerSeenAt = Date.now();
-          // ...and the Trip Planner a press read goes, as it goes off the
-          // panel at this moment. See forgetPlanner.
-          if (!sameCard) forgetPlanner(Date.now());
+          // ...and the Trip Planner the order in the car keeps is NOT forgotten
+          // here any more (the owner, 30 Oct: "after getting 3 correct drop
+          // off locations the rig dropped it on the map after some time").
+          // Offers come up all through a batch, and each one took the held
+          // planner off the order: on 26, 28 and 29 Oct 15 of the 21 trips
+          // that had a planner lost it this way mid-trip, and no later read
+          // put it back — a reload, a restart or the next planner page then
+          // had no D1/D2, no planner pickup and no customer names. It goes now
+          // when a Took starts a different trip (placeTook) and with the
+          // trip itself (setHeld). See forgetPlanner.
           // ...and if there is an order in the car, WRITE THE PAIRING DOWN.
           //
           // Without this a shift produces no evidence about the one feature it
@@ -1402,6 +1409,22 @@ function setHeld(list) {
     while (goneOutcomes.size > GONE_KEEP) goneOutcomes.delete(goneOutcomes.keys().next().value);
   });
   scanner.held = (list || []).filter(Boolean);
+  // ...the Trip Planner kept on the order leaving, onto the order now first
+  // when it is on the same trip (plannerStays; see forgetPlanner).
+  var was0 = was[0];
+  var now0 = scanner.held[0];
+  if (was0 && was0.planner && now0 && !now0.planner && scanner.held.indexOf(was0) === -1
+      && plannerStays(now0, was0)) {
+    now0.planner = was0.planner;
+  }
+  // ...each order leaving kept a while by its customers and its end, so a
+  // door of theirs read later is not filed onto an order still in the car
+  // (doorOfDropped); and one back on the list (↶ Undo, a re-Took) is not.
+  droppedKeep(leaving, was, scanner.held);
+  // ...and each order on a trip with another still in the car outlives it
+  // (tripTill; holdEnds), and one whose trip-mate was put down gets its own
+  // minutes from then (afterMate).
+  tripClock(leaving, was, scanner.held, Date.now());
   var tmp = null;
   try {
     if (scanner.held.length) {
@@ -1579,6 +1602,25 @@ function loadHolding() {
  * scanner's handoff (tellScannerHeld), so the two cannot disagree about when an
  * order ends. */
 function holdEnds(h) {
+  var own = ownEnds(h);
+  if (own === null) return null;
+  // ...and an order of a BATCH (the owner, 30 Oct): while another order of
+  // the same trip is in the car — an add-on of it, or an order listed on the
+  // same held Trip Planner (sameTrip) — it does not run out before the
+  // latest of theirs (`tripTill`), and once one of them is put down it has
+  // its own card's minutes from that moment (`afterMate`): both set by
+  // setHeld (tripClock), never worked out here, so this stays a function of
+  // the hold and every reader of it (holding(), the scanner's handoff, the
+  // finishing watch's window, the expiry row's date) agrees.
+  [h.tripTill, h.afterMate].forEach(function (t) {
+    if (typeof t === 'number' && isFinite(t) && t > own) own = t;
+  });
+  return own;
+}
+
+// The order's own clock, holdEnds before a batch: the card's minutes, half
+// again, and the grace — an add-on's no sooner than its trip at the Took.
+function ownEnds(h) {
   var stated = (typeof h.minutes === 'number' && isFinite(h.minutes) && h.minutes > 0)
     ? h.minutes : null;
   if (stated === null) return null;
@@ -1598,6 +1640,173 @@ function holdEnds(h) {
     return Math.max(own, h.ofEnds + stated * HOLD_OVERRUN * 60000);
   }
   return own;
+}
+
+/* ---------- a batch's clock (the owner, 30 Oct) ------------------------------
+ *
+ * An order ran out on its own card's minutes x HOLD_OVERRUN + HOLD_GRACE_MS
+ * whatever else was in the car, so on a batch the order with the shorter card
+ * left the list — its end pin, its doors, its place in the run — while the
+ * driver was still carrying it with the rest of the trip. An add-on already
+ * outlived its trip at the Took (ofEnds); this is the same thing both ways
+ * and for a planner's batch too.
+ *
+ * ONE TRIP, by positive evidence only (sameTrip): an add-on and the trip it
+ * was taken onto (tripOf), or two orders both on the held Trip Planner
+ * (onPlanner: an end's street, a filed customer, or the store, on its stops).
+ * Two orders taken side by side with nothing tying them stay on their own
+ * clocks: 29 Oct #7 and #9 ran out beside another order with no planner and
+ * no add-on between them, and on the GPS #7 had stopped at what was most
+ * likely its door (20:15-20:21) before it ran out at 20:26 — a Drop not
+ * pressed, which no extension should have kept in the car.
+ *
+ * `tripTill`: while one or more of its trip-mates are held, the latest of
+ * their own clocks (ownEnds), set afresh at every write of the list, so a
+ * mate leaving takes it away. `afterMate`: once a mate is put down early (a
+ * Drop, the chooser, the GPS, a screen, a Took — anything but running out),
+ * the moment it went plus this order's own minutes x HOLD_OVERRUN and the
+ * grace, the later kept. holdEnds is the latest of its own clock and these.
+ * The finishing watch (finishWatch) reads holdEnds at the press, so its
+ * window is the clock the order would have had, and nothing here reads the
+ * watch. */
+function plannerStopsOf(h) {
+  return h && h.planner && Array.isArray(h.planner.stops) ? h.planner.stops : null;
+}
+
+function sameTrip(a, b, stops) {
+  if (!a || !b || a === b) return false;
+  if (tripOf(a) === tripOf(b)) return true;
+  return !!stops && onPlanner(a, stops) && onPlanner(b, stops);
+}
+
+function tripClock(leaving, was, list, now) {
+  var stopsWas = plannerStopsOf(was[0]);
+  var stops = plannerStopsOf(list[0]) || stopsWas;
+  list.forEach(function (h) {
+    if (ownEnds(h) === null) return;
+    var till = null;
+    list.forEach(function (o) {
+      if (!sameTrip(o, h, stops)) return;
+      var e = ownEnds(o);
+      if (e !== null && (till === null || e > till)) till = e;
+    });
+    if (till !== null) h.tripTill = till;
+    else delete h.tripTill;
+    leaving.forEach(function (o) {
+      var ends = holdEnds(o);
+      if (ends === null || now > ends || !sameTrip(o, h, stopsWas)) return;
+      var mine = now + h.minutes * HOLD_OVERRUN * 60000 + HOLD_GRACE_MS;
+      if (!(typeof h.afterMate === 'number' && h.afterMate >= mine)) h.afterMate = mine;
+    });
+  });
+}
+
+/* ---------- a dropped order's door, kept off the orders still held -----------
+ *
+ * The owner's 28 Oct shift, #5: the chooser put #6 down, and a minute later
+ * #6's customer's door, read unprompted off a label, was filed onto #5 — the
+ * only order left, so the hard rules' "only" cue gave it to #5. With the
+ * finishing watch (finishWatch) the driver now puts orders down BEFORE their
+ * doors, so a dropped order's door being read after its press is the
+ * ordinary case.
+ *
+ * So each order leaving the car is kept DROPPED_KEEP_MS (60 min, chosen) by
+ * the customers it was known to be going to (customersOf, read while its
+ * planner was still on record) and its end, and an UNPROMPTED door (a label,
+ * a planner stop, a navigation screen: `asked: false`) is that order's, not
+ * a held one's, when:
+ *   - its customer's name is a dropped order's (Assemble.sameCustomer), or
+ *   - that order is still being finished (a watch on `finishing`) and the
+ *     door is on its end's street (Assemble.sameStreet);
+ * and an order in the car now was in the car with it when it went (`with`:
+ * a new order taken after the drop, the same customer ordering again, is
+ * filed as ever), and NO order in the car has that name or that street — a name or street
+ * both share decides nothing here and the rules as they were go on. A watched
+ * order's door goes to its watch (watchDoor): the GPS then finishes it at
+ * that door, searched in the order's own disc, where it had no door before.
+ * A press is the driver's answer and is never diverted. Memory only: a
+ * restart forgets the list (the watches it keeps on file). */
+var DROPPED_KEEP_MS = envNumber('DROPPED_KEEP_MS', 60 * 60000);
+var DROPPED_MAX = 8;
+var droppedLately = [];
+
+function droppedKeep(leaving, was, list) {
+  var now = Date.now();
+  var ids = list.map(holdIdOf);
+  var stops = plannerStopsOf(was[0]) || [];
+  droppedLately = droppedLately.filter(function (g) {
+    return now - g.at <= DROPPED_KEEP_MS && ids.indexOf(g.holdId) === -1;
+  });
+  leaving.forEach(function (h) {
+    var names = heldNames(h, stops);
+    var end = typeof h.dropoff === 'string' && h.dropoff ? h.dropoff : null;
+    if (!names.length && !end) return;
+    // ...and the orders it was carried with, which stay: only a door read
+    // while one of THEM is held is kept off it, so a new order taken after
+    // the drop — the same customer ordering again — is filed as ever.
+    droppedLately.push({ holdId: holdIdOf(h), id: h.id, at: now, names: names, dropoff: end,
+                         with: ids.slice() });
+  });
+  while (droppedLately.length > DROPPED_MAX) droppedLately.shift();
+}
+
+// The names an order in the car is known by, as droppedKeep keeps them.
+function heldNames(h, stops) {
+  var names = [];
+  var filed = h.fields && h.fields.customer;
+  if (filed && typeof filed.value === 'string') names.push(filed.value);
+  var at = planAtOf(stops, h);
+  if (at !== null && stops[at] && stops[at].name) names.push(stops[at].name);
+  (Array.isArray(h.drops) ? h.drops : []).forEach(function (x) {
+    if (x && typeof x.name === 'string') names.push(x.name);
+  });
+  return names;
+}
+
+/* The dropped order an unprompted door `d` is, {g, watch, by}, or null. */
+function doorOfDropped(d, orders, now) {
+  if (!d || d.asked !== false || typeof d.line !== 'string' || !droppedLately.length) return null;
+  var name = d.stop && typeof d.stop.name === 'string' ? d.stop.name : null;
+  var stops = plannerStopsOf(orders[0]) || [];
+  var held = orders.some(function (h) {
+    return (name && heldNames(h, stops).some(function (n) { return Assemble.sameCustomer(n, name); }))
+      || (typeof h.dropoff === 'string' && Assemble.sameStreet(h.dropoff, d.line));
+  });
+  if (held) return null;
+  for (var i = droppedLately.length - 1; i >= 0; i--) {
+    var g = droppedLately[i];
+    if (now - g.at > DROPPED_KEEP_MS) continue;
+    if (orders.length && !orders.some(function (h) { return g.with.indexOf(holdIdOf(h)) !== -1; })) {
+      continue;
+    }
+    var watch = finishing.filter(function (w) { return w.holdId === g.holdId; })[0] || null;
+    if (name && g.names.some(function (n) { return Assemble.sameCustomer(n, name); })) {
+      return { g: g, watch: watch, by: 'name' };
+    }
+    if (watch && g.dropoff && Assemble.sameStreet(g.dropoff, d.line)) {
+      return { g: g, watch: watch, by: 'street' };
+    }
+  }
+  return null;
+}
+
+/* A watched order's door, read after its press: kept on the watch (`door`)
+ * and, where the watch has no door to finish at, searched in the order's own
+ * disc (`disc`, kept at the press) by the held end's chain (earlyDoor); a
+ * door found makes it a 'door' watch, finished by the door rule. */
+function watchDoor(hit, d) {
+  var w = hit && hit.watch;
+  if (!w) return;
+  w.door = d.line;
+  saveFinishing();
+  if (w.to.kind === 'door' || !w.disc) return;
+  earlyDoor(d.line, w.disc, true, function (r) {
+    var now = finishing.filter(function (x) { return x.holdId === w.holdId; })[0];
+    if (!now || now.door !== d.line || now.to.kind === 'door' || !r || !r.at) return;
+    now.to = { kind: 'door', lat: r.at.lat, lon: r.at.lon, from: 'read' };
+    delete finishLive[now.holdId];
+    saveFinishing();
+  });
 }
 
 /* One sighting, counted by its screen type (rpi/scan_pi.py's emit_sighting;
@@ -1766,6 +1975,17 @@ function whoseDropoff(read, force, now) {
     return out;
   }
   var orders = heldOrders(now);
+  // ...and a door of an order already put down is that order's: to its
+  // finishing watch, and onto nobody in the car (doorOfDropped).
+  var gone = doorOfDropped(d, orders, now);
+  if (gone) {
+    console.log('dropoff seen is a dropped order\'s door (' + gone.by + '): not filed'
+                + (gone.watch ? ', given to its finishing watch' : ''));
+    watchDoor(gone, d);
+    out.stop = true;
+    out.dropped = gone.g.holdId;
+    return out;
+  }
   if (!carryingTwo(now)) {
     if (!orders.length) return out;
     var w = Assemble.attribute(assembly, shadowsNow(now).concat(orders), d);
@@ -2014,6 +2234,15 @@ function ownPickups(stops, now, page, at) {
  * A DoorDash card for two orders ("Drop off 2 orders") is one card and one
  * Took, so one order here: nothing counts its stops. */
 function placeTook(took, marked, inCar, now) {
+  // The order keeping the Trip Planner before this Took (holding(): the
+  // first-taken), whose planner goes if the new order is another trip.
+  var holder = inCar[0] && inCar[0].planner ? inCar[0] : null;
+  var out = placeTookIn(took, marked, inCar, now);
+  if (!out.replaced.some(function (o) { return o.id === took.id; })) plannerTook(holder, took);
+  return out;
+}
+
+function placeTookIn(took, marked, inCar, now) {
   var out = { replaced: [], added: false, putDownPay: null };
   var same = inCar.filter(function (o) { return o.id === took.id; })[0] || null;
   var base = null;
@@ -4769,7 +4998,10 @@ function finishWatch(d, now, by, list, many) {
     ? { lat: finishLastFix.lat, lon: finishLastFix.lon } : null;
   finishing = finishing.filter(function (w) { return w.holdId !== holdIdOf(d); });
   finishing.push({ id: d.id, holdId: holdIdOf(d), dropAt: now, by: by || 'drop', ends: ends,
-                   to: to, from: from, movedAt: null, need: need, driven: driven });
+                   to: to, from: from, movedAt: null, need: need, driven: driven,
+                   // ...and the disc its door is searched in, should one be
+                   // read after the press (watchDoor).
+                   disc: heldDisc(d) || null });
   while (finishing.length > FINISH_MAX) delete finishLive[finishing.shift().holdId];
   delete finishLive[holdIdOf(d)];
   saveFinishing();
@@ -5219,7 +5451,12 @@ function heldForPanel(held) {
         card: cardForSearch(held),
         // ...and, on a batched trip (Assemble.batchPlan), how many doors it
         // has: the panel's "2 drops" beside the pay. Null otherwise.
-        drops: batchDrops(held) },
+        drops: batchDrops(held),
+        // ...and whether the Trip Planner is kept on it (forgetPlanner): the
+        // panel's own copy of the stops (live.html heldPlan) follows the
+        // planner onto the order now first when the first is put down and
+        // the trip goes on (setHeld), and goes when this says it went.
+        plannerHeld: !!held.planner },
         // ...and the GPS drop's state, which the in-car line on the panel
         // says. It was on /api/status alone — fetched once, at load — so a
         // panel left open never learned that a pin had armed or been refused.
@@ -6245,7 +6482,10 @@ function writePairing(offer, now, reading, held, hint) {
  * mid-delivery shows what the live one showed, and not stops it had already
  * dropped.
  *
- * ONE moment now: a different offer on the record. A ⌖ press was the other
+ * NO LONGER at a different offer on the record (30 Oct, below): the
+ * planner now goes at a Took of another trip and with the trip, and this is
+ * what plannerTook asks. What follows is the history. It was ONE moment
+ * then: a different offer on the record. A ⌖ press was the other
  * until the owner asked, on 24 Oct, for the press to merge ("Would there be
  * a way to have the scan button also merge?"): /api/dropoff no longer calls
  * this, its planner read merges into the kept stops with its own fields
@@ -6265,6 +6505,68 @@ function writePairing(offer, now, reading, held, hint) {
  * dropped here: only the answer to the press is. */
 function forgetPlanner(now) {
   Assemble.forgetPlanner(holding(now));
+}
+
+/* ...and since 30 Oct, NOT at a different offer on the record (the owner:
+ * "after getting 3 correct drop off locations the rig dropped it on the map
+ * after some time"). Replayed over the 26, 28 and 29 Oct journals, an offer
+ * card took the planner off the order mid-trip on 15 of the 21 trips that
+ * had one (26 Oct 8 of 8), and no later planner read on the same trip put it
+ * back. The order's filed end (fields.dropoff) survived, so the END pin did
+ * not go; what went was every reader of the stops: a reload or restart of
+ * the panel (no D1/D2, no planner pickups — /api/status sent `planner:
+ * null`), the next planner page (merged from nothing, so a page showing one
+ * door replaced the panel's whole list and MV.heldDrops, which needs two,
+ * drew none), the completion screen's customer names (screenPick) and the
+ * held pickups asked off the planner (pickupAsks). The planner now goes:
+ *   - at a ✓ Took that starts a different trip (placeTook, plannerTook): not
+ *     an add-on joined to the trip, and not on the planner's stops by its
+ *     store, its end's street or its customer (onPlanner);
+ *   - with the trip: when the order keeping it leaves the car and the order
+ *     that is now first is not on the same trip, it goes with it; when that
+ *     order IS on the trip (an add-on of it, or on its stops), the planner
+ *     moves onto it (setHeld, plannerStays) — it went with the first order
+ *     before, which was the other way the map lost the trip's doors after
+ *     the first delivery (28 Oct 20:34, 29 Oct 17:29 and 19:20).
+ * The panel's own copy (live.html heldPlan) follows: `plannerHeld` on the
+ * order the server sends says the planner is still kept on it. */
+
+/* Whether order `h` is one of the Trip Planner `stops`: its end's street is
+ * one dropoff stop's (planAtOf), its filed customer is a dropoff stop's name
+ * (Assemble.sameCustomer, the planner's own name rule), or its card's store
+ * is a pickup stop's (Assemble.sameStore). Positive evidence only: a stop
+ * with no name and no street matches nothing. */
+function onPlanner(h, stops) {
+  if (!h || !Array.isArray(stops) || !stops.length) return false;
+  if (planAtOf(stops, h) !== null) return true;
+  var cust = h.fields && h.fields.customer && h.fields.customer.value;
+  var store = typeof h.pickup === 'string' ? h.pickup : '';
+  return stops.some(function (s) {
+    if (!s || !s.name) return false;
+    if (s.kind === 'dropoff') return !!cust && Assemble.sameCustomer(cust, s.name);
+    if (s.kind !== 'pickup' || !store) return false;
+    var name = MV.plannerName(s.name);
+    return Assemble.sameStore(store, name) || Assemble.sameStore(Assemble.storeOf(store), name);
+  });
+}
+
+// Whether `n`, staying in the car, is on the trip of `o`, leaving it with the
+// planner: one trip by its add-ons (tripOf), or one of its stops (onPlanner).
+function plannerStays(n, o) {
+  return !!n && !!o && !!o.planner
+    && (tripOf(n) === tripOf(o) || onPlanner(n, o.planner.stops));
+}
+
+/* At a ✓ Took (placeTook): the planner the first order kept goes when the new
+ * order is a different trip. `holder` is the order that kept it before the
+ * Took, `took` the new order, both as placed. */
+function plannerTook(holder, took) {
+  if (!holder || !holder.planner || holder === took || holder.id === took.id) return;
+  if (scanner.held.indexOf(holder) === -1 || scanner.held.indexOf(took) === -1) return;
+  if (took.addOn && took.of) return;
+  if (onPlanner(took, holder.planner.stops)) return;
+  Assemble.forgetPlanner(holder);
+  saveHold(holder);
 }
 
 /* The Trip Planner, written down: collection only. Nothing reads these rows

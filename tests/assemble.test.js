@@ -2926,6 +2926,17 @@ SEQ.forEach(function (seq) {
      A.dropoff(one, label, null).to, 'hold');
 })();
 
+// --- one customer read twice (sameCustomer; server.js onPlanner and the
+// dropped order's door, 30 Oct). Invented names.
+(function () {
+  eq('[customer] a planner read with its litter and the name filed are one customer',
+     [A.sameCustomer('Pat Q.', 'i \u00a9 Pat Q. .'), A.sameCustomer('Herbie P.', 'terbieP.'),
+      A.sameCustomer('Lee M.', 'LeeM')], [true, true, true]);
+  eq('[customer] ...two names are two, and a read with no word of three letters is nobody',
+     [A.sameCustomer('Pat Q.', 'Lee M.'), A.sameCustomer('Pat Q.', 'Q.'),
+      A.sameCustomer(null, 'Pat Q.'), A.sameCustomer('', '')], [false, false, false, false]);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

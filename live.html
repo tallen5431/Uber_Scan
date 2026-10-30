@@ -4057,6 +4057,17 @@
   /* The order in the car as a message describes it — `holding` on a reading,
      `held` on a reply — in the five names this page keeps it under. */
   function setHeldFrom(h, msg) {
+    // The Trip Planner's stops follow the planner the server keeps (the
+    // owner, 30 Oct: the trip's doors left the map "after some time"): when
+    // the order that kept them goes and the server moved them onto the order
+    // now first, on the same trip (`plannerHeld`, server.js setHeld), they
+    // are that order's here too; when it says none is kept, they go.
+    var wasOwner = heldOwner();
+    var nextOwner = h ? (h.holdId || holdSignature(h)) : null;
+    if (heldPlan && h && typeof h.plannerHeld === 'boolean' && nextOwner) {
+      if (!h.plannerHeld) heldPlan = null;
+      else if (heldPlan.of === wasOwner && nextOwner !== wasOwner) heldPlan.of = nextOwner;
+    }
     holdingNow = !!h;
     heldSig = holdSignature(h);
     heldEnds = h ? (h.dropoff || null) : undefined;
