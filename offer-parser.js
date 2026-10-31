@@ -1437,6 +1437,8 @@
       var sme = STREET.exec(head);
       var street = sme ? sme[1].replace(/\s+/g, ' ')
                             .replace(/^[\s.,]+|[\s.,]+$/g, '') : null;
+      // (Its quadrant read with a slip of the W mended: quadrantSlip.)
+      street = quadrantSlip(street);
       var parts = [];
       if (street) parts.push(street);
       if (city) parts.push(city);
@@ -1581,6 +1583,25 @@
     return street.slice(0, m.index) + ' Dr' + street.slice(m.index + m[0].length);
   }
 
+  /* The quadrant's "W" read as its look-alikes: "<n> <Name> Brook Way NUP" off
+     the owner's planner of 30 Oct, 20:21, the server's search refusing it. A
+     closed list ("NUP" "NVV" "NIW" "N W" "NW.", the same for S), only as a
+     street's LAST word (its end, or before a corner's "&" or the town's
+     comma), after a word; "N W"/"S W" also after a street type only. See
+     QUADRANT_SLIP in offer_parser.py. */
+  var QUADRANT_SLIP = /([A-Za-z.] )(?:([NS])(?:UP|VV|IW)|([NS]) W|([NS])W\.)(?=\s*(?:$|[,&\n]))(?!\s*,\s*(?:[Ss]uite|[Ss]te|[Uu]nit|[Aa]pt)\b)/g;
+  function quadrantSlip(text) {
+    if (typeof text !== 'string' || !text) return text;
+    return text.replace(QUADRANT_SLIP, function (all, lead, a, b, c, at) {
+      if (b) {
+        var before = text.slice(0, at + 1).split(/\s+/).filter(Boolean);
+        var last = (before[before.length - 1] || '').replace(/\.$/, '');
+        if (!STREET_TYPE_WORD.test(last)) return all;
+      }
+      return lead + (a || b || c) + 'W';
+    });
+  }
+
   /* The phone's edge in front of the house number: "Te <n> <Name> Rd NW" and
      "ie <n> <Name> Ln" on the owner's planner read of 28 Oct, 17:48. The
      labels' edge word (PLANNER_EDGE_WORD) followed by a house number, only on
@@ -1651,7 +1672,7 @@
     var s = STREET.exec(street);
     street = (s && s.index === 0)
       ? s[1].replace(/\s+/g, ' ').replace(/^[\s.,]+|[\s.,]+$/g, '') : null;
-    if (street) street = plannerOrSlip(plannerPlSlip(street));
+    if (street) street = quadrantSlip(plannerOrSlip(plannerPlSlip(street)));
     var parts = [];
     if (street) parts.push(street);
     if (city) parts.push(city);
@@ -3848,6 +3869,8 @@
     // The reader's own line breaks go with it, as offsets into `text` - which
     // are offsets into `mine` too, because onlyCard blanks rather than slices.
     var places = findPlaces(mine, legs, lineStarts(rawText), whose);
+    // A corner's or a door's quadrant read with a slip of its W: quadrantSlip.
+    places = places.map(quadrantSlip);
     /* Which end of the job the card printed each name against, from this same
        pass's record of where they sat. Asked before the two ends, because it
        is what decides them when the card stated it. */
@@ -4361,6 +4384,7 @@
            mapLabel: mapLabel,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner, sheetDropoff: sheetDropoff,
+           quadrantSlip: quadrantSlip,
            placePopup: placePopup,
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
            plannerTitled: plannerTitled, plannerLaidOut: plannerLaidOut,

@@ -186,6 +186,13 @@
     // (A press already there falls through to null: nothing below lets a
     // label, a planner, a navigation screen or a sighting past one.)
     if (cur.from === 'card') return RANK[next.from] > RANK.card ? 'over the card' : null;
+    // The same door read better (betterRead): its last word a quadrant or a
+    // type where the one kept ended on a word that is neither ("NUP" for
+    // "NW"), by anything the screen said after the Took. Never over a press.
+    if (cur.from !== 'press' && (RANK[next.from] >= RANK.planner || next.from === cur.from)
+        && betterRead(next.value, cur.value)) {
+      return 'better read';
+    }
     // A place popup's address: over a sighting, which no label proved; and
     // replaced by anything read after the Took (RANK), or by the same street
     // read fuller off another popup.
@@ -227,6 +234,33 @@
     }
     var x = door(a), y = door(b);
     return !!x && !!y && x.house === y.house && x.typed && !y.typed;
+  }
+
+  /* THE SAME DOOR READ BETTER. The owner's snap of 30 Oct, 20:21: the held
+   * order's door was filed off the Trip Planner as "3344 <Name> Brook Way NUP,
+   * <Town>" — the planner's "NW" read "NUP" — and its search refused it (not
+   * inside the card's reach); later reads of the same stop said "... Way NW",
+   * and the hold kept the NUP: a label is not replaced by a planner read, and
+   * typedOver asks a planner street filed WITHOUT a type. So `a` is a better
+   * read of `b` when both are a house number and words, the same number and
+   * the same words up to the last, `a`'s last word is a quadrant or a street
+   * type, and `b`'s last is neither (a slip, a mark, a cut word); `b` has at
+   * least a name and the slipped word after its number. The towns, where both
+   * name one, are one town (wordsAlike). Never the other way, never another
+   * number or another street. The held end's search runs again on the new
+   * text (server.js, as for any change of it). */
+  var ANY_QUADRANT = /^(?:n|s|e|w|ne|nw|se|sw|north|south|east|west|northeast|northwest|southeast|southwest)$/;
+  function betterRead(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    var x = streetKey(a).split(' '), y = streetKey(b).split(' ');
+    if (x.length !== y.length || y.length < 3 || !/^\d+[a-z]?$/.test(y[0])) return false;
+    var lx = x[x.length - 1], ly = y[y.length - 1];
+    var known = function (w) { return ANY_QUADRANT.test(w) || STREET_SUFFIX.test(w); };
+    if (!known(lx) || known(ly) || /\d/.test(ly)) return false;
+    for (var i = 0; i < x.length - 1; i++) if (x[i] !== y[i]) return false;
+    if (!/[a-z]{2}/.test(x.slice(1, -1).join(' '))) return false;
+    var ta = townWord(a.split(',')[1] || ''), tb = townWord(b.split(',')[1] || '');
+    return !ta || !tb || wordsAlike(ta, tb);
   }
 
   /* Two address lines on the same street: the part before the first comma,
@@ -496,7 +530,9 @@
           && cur.screen === 'uber.planner' && sameStreet(d.line, cur.value)) {
         why = 'same door';
       }
-      if (!why && won) why = 'most read';
+      // (...never a worse read of the door filed back over its better read:
+      // betterRead, the box's slipped reads outnumbering the clean one.)
+      if (!why && won && !(cur && betterRead(cur.value, d.line))) why = 'most read';
       if (why) {
         out.to = 'hold';
         out.kept = true;
@@ -1186,10 +1222,80 @@
 
   // The streets the card's end names: its corner's two ("A Rd & B St, Town")
   // or its door's one, before the town.
+  /* ...and a CORNER as the reader glued it (the owner's snap of 30 Oct,
+   * 20:21, an add-on's card parsed as "Kennesaw J <E> Way & <S> Plains Rd
+   * Marietta"): the town of the line above and a stray letter in front of
+   * the first street, and the town run on after the second with no comma.
+   * The planner listed "1433 <E> Way, Marietta" — on the corner's first
+   * street — and nothing was filed ("2 dropoffs read · whose?"), as the
+   * card's streets came out "kennesaw j <e>" and "<s> plains marietta". So
+   * in a corner's part (cornerPart): the words after its last street type
+   * go where the text gave no comma (the town); and in front, stray
+   * one- and two-letter words, and a word that is the card's own town or
+   * stands before a lone letter, go — only while a name and a type are left.
+   * That is the planner door's street compared as a word-boundary suffix
+   * of the corner's part, past a town and stray letters only: "<E> Way"
+   * matches "Kennesaw J <E> Way"; "Brook Way" never matches "Wexmoor Brook
+   * Way" (no stray letter before it). The part as read stays a match too. A
+   * door's line (no "&") is as it was. */
   function cardStreets(text) {
     if (typeof text !== 'string') return [];
-    return text.split(',')[0].split(/\s*(?:&|\band\b|\bat\b|\/)\s*/i)
-      .map(streetCore).filter(Boolean);
+    var comma = text.indexOf(',') !== -1;
+    var parts = text.split(',')[0].split(/\s*(?:&|\band\b|\bat\b|\/)\s*/i);
+    if (parts.length < 2) return parts.map(streetCore).filter(Boolean);
+    var town = comma ? townWord(text.split(',')[1]) : null;
+    var words = parts.map(function (p) { return p.split(/\s+/).filter(Boolean); });
+    if (!comma) {
+      var last = words[words.length - 1], cut = typedEnd(last);
+      if (cut > 0 && cut < last.length) {
+        town = townWord(last.slice(cut).join(' ')) || town;
+        words[words.length - 1] = last.slice(0, cut);
+      }
+    }
+    // (The part as read is kept beside it where the front was cut: a street
+    // whose own name is a word and a letter, "<A> B <C> Rd", still matches.)
+    var out = [];
+    words.forEach(function (w) {
+      var cut = cornerPart(w, town);
+      [streetCore(cut.join(' ')), cut.length < w.length ? streetCore(w.join(' ')) : null]
+        .forEach(function (c) { if (c && out.indexOf(c) === -1) out.push(c); });
+    });
+    return out;
+  }
+
+  // Where a corner part's street ends: after its last street type (and the
+  // quadrants after it) with a name in front, or -1.
+  function typedEnd(w) {
+    var bare = function (x) { return x.toLowerCase().replace(/[^a-z0-9]/g, ''); };
+    for (var i = w.length - 1; i >= 1; i--) {
+      if (STREET_SUFFIX.test(bare(w[i])) || BATCH_STREET_WORDS.test(bare(w[i])) && !ANY_QUADRANT.test(bare(w[i]))) {
+        var j = i + 1;
+        while (j < w.length && ANY_QUADRANT.test(bare(w[j]))) j++;
+        return j;
+      }
+    }
+    return -1;
+  }
+
+  // A corner part less the town and stray letters glued in front of it.
+  function cornerPart(w, town) {
+    var bare = function (x) { return x.toLowerCase().replace(/[^a-z0-9]/g, ''); };
+    var stray = function (x) { return /^[a-z]{1,2}$/.test(bare(x)) && !BATCH_STREET_WORDS.test(bare(x)); };
+    var i = 0;
+    for (;;) {
+      var rest = w.slice(i);
+      // A name and a type must be left: at least two words, typed.
+      if (rest.length < 3 || typedEnd(rest.slice(1)) === -1) break;
+      if (stray(rest[0])) { i++; continue; }
+      var b = bare(rest[0]);
+      if (/^[a-z]{3,}$/.test(b) && ((town && b === town)
+          || (/^[a-z]$/.test(bare(rest[1])) && !BATCH_STREET_WORDS.test(bare(rest[1]))))) {
+        i++;
+        continue;
+      }
+      break;
+    }
+    return w.slice(i);
   }
 
   // The card's own end as the driver took it: what it printed (seenAs, kept
@@ -2717,6 +2823,21 @@
     if (d.asked !== false || d.planner !== true || typeof d.line !== 'string') return;
     var all = (orders || []).filter(Boolean);
     if (all.length < 2 || aPickupOfAny(all, d)) return;
+    // The door one order's end was filed as, read better (betterRead: the
+    // same number and words, a quadrant or type where the filed one slipped;
+    // the owner's snap of 30 Oct, "... Way NUP" filed and "... Way NW" read
+    // after) is that order's, off a list seen whole or not: the screen
+    // already gave that door to that order. One order's only, never over a
+    // press (the chooser's word).
+    var better = live.filter(function (o) {
+      var e = o.fields && o.fields.dropoff;
+      return !!e && RANK[e.from] > RANK.card && e.from !== 'press'
+        && betterRead(d.line, String(e.value));
+    });
+    if (better.length === 1) {
+      out.votes.push({ cue: 'sameDoor', order: better[0] });
+      return;
+    }
     var core = streetCore(typeof d.street === 'string' && d.street ? d.street
       : d.line.split(',')[0]);
     if (!core) return;
@@ -3161,7 +3282,7 @@
            sameCustomer: sameCustomer,
            // ...and the street rule they stand on, for server.js's planAtOf
            // (where on a planner each order's end is).
-           sameStreet: sameStreet, VOTE_READS: VOTE_READS, plannerVote: plannerVote,
+           sameStreet: sameStreet, betterRead: betterRead, VOTE_READS: VOTE_READS, plannerVote: plannerVote,
            dropoff: dropoff, file: file, fileCard: fileCard, cardRank: cardRank,
            pressBetween: pressBetween, ownPopup: ownPopup, cardCandidate: cardCandidate,
            storeScreen: storeScreen, placeOf: placeOf, bracketDoor: bracketDoor,

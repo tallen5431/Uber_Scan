@@ -2178,6 +2178,39 @@ async function nucbox() {
                      MV.afterDir(first, null) === first]),
      JSON.stringify([{ lat: 1 }, true, true, true]));
 
+  /* A word after the type that is no quadrant (unknownTail; the owner's snap
+     of 30 Oct, "3344 <Name> Brook Way NUP" not inside the card's reach): the
+     door is asked once more with that word left out, by the type retry and
+     the directional retry alike. Invented streets (Tansy Creek, Ardley). */
+  var TAILS = [
+    ['1830 Tansy Creek Ct NUP, Marietta', '1830 Tansy Creek Ct', 'NUP', 'a slipped quadrant after the type'],
+    ['1830 Tansy Creek Ct Xq, Marietta', '1830 Tansy Creek Ct', 'Xq', 'any short word of letters'],
+    ['1830 Tansy Creek Ct NW, Marietta', null, null, 'a quadrant is no unknown word'],
+    ['1830 Tansy Creek Ct Dr, Marietta', null, null, 'nor a type'],
+    ['1830 Tansy Creek Ct 12, Marietta', null, null, 'nor a number'],
+    ['1830 Tansy Creek NUP, Marietta', null, null, 'nor a word after no type'],
+    ['1830 Ct NUP, Marietta', null, null, 'nor a type with no name in front']
+  ];
+  TAILS.forEach(function (c) {
+    var again = MV.streetRetry(MV.searchPlan(c[0]));
+    var tail = again && again.retry.tail ? [again.street, again.retry.tail] : null;
+    eq('streetRetry (a word after the type): ' + c[3] + ' (' + JSON.stringify(c[0]) + ')',
+       JSON.stringify(tail), JSON.stringify(c[1] ? [c[1], c[2]] : null));
+  });
+  var nup = MV.streetRetry(MV.searchPlan('1830 Tansy Creek Ct NUP, Marietta'));
+  var nupDir = MV.dirRetry(MV.searchPlan('1830 Tansy Creek Ct NUP, Marietta'));
+  eq('dirRetry: a word after the type left out is a second question by itself; with a '
+     + 'directional in the name, both',
+     JSON.stringify([nupDir && nupDir.street,
+                     (MV.dirRetry(MV.searchPlan('810 Ardley West Corwin Parkway NUP, X')) || {}).street]),
+     JSON.stringify(['1830 Tansy Creek Ct', '810 Ardley W Corwin Parkway']));
+  eq('pickRetry (a word after the type): the Court\'s door is found, the Drive\'s never',
+     JSON.stringify([[nup, nupDir].map(function (pl) {
+                       var at = MV.pickRetry(hitsOf(FAKE.TANSY_1830), d50r, pl, null).at;
+                       return at && [at.lat, at.lon];
+                     }), MV.pickRetry(hitsOf(FAKE.TANSY_2040), d50r, nup, null).why]),
+     JSON.stringify([[[33.98, -84.57], [33.98, -84.57]], 'none']));
+
   /* The door by the one street the street index says the name as read is
      (the owner's 19 Oct night fault, "1106 <Name> Ln" read "<Nam..>r").
      Invented streets throughout (tests/fake-nucbox.js, Tamarons Lane). */

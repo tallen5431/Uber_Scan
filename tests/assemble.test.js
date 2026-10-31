@@ -2937,6 +2937,122 @@ SEQ.forEach(function (seq) {
       A.sameCustomer(null, 'Pat Q.'), A.sameCustomer('', '')], [false, false, false, false]);
 })();
 
+/* ---- a slipped quadrant, a corner glued to its town (the owner, 30 Oct, 20:21) ----
+ *
+ * Two Uber orders held. ① had its door filed off the Trip Planner as "...
+ * Way NUP, <Town>" (the planner's NW read "NUP"; its search refused it), and
+ * later reads gave "... Way NW". ② an add-on whose card parsed as "Kennesaw J
+ * <E> Way & <S> Plains Rd Marietta" — the town and a stray letter in front of
+ * its first street, its own town run on with no comma — and the planner's
+ * "1433 <E> Way, Marietta" was filed nowhere ("2 dropoffs read · whose?").
+ * The snap's card-box texts, names and streets invented. */
+(function () {
+  function order(id, at, more) {
+    var o = Object.assign({ id: id, acceptedAt: at, tookAt: at + 5, holdId: id + '@' + at,
+                            minutes: 33, app: 'uber', pickup: null, deliverBy: null,
+                            dropoff: null, dropoffScanned: false }, more || {});
+    o.seenAs = { dropoff: o.dropoff, tookAt: o.tookAt };
+    A.fieldsOf(o);
+    return o;
+  }
+  var NUP = '3344 Wexmoor Brook Way NUP, Kennesaw', NW = '3344 Wexmoor Brook Way NW, Kennesaw';
+  function trip() {
+    var base = order('b', 1000, { pickup: 'Fable Grill (77 Halden Rd NW)', dropoff: 'Kennesaw' });
+    A.file(base, { line: NUP, street: NUP.split(',')[0], city: 'Kennesaw', at: 2000,
+                   screen: 'uber.planner' }, { to: 'hold', from: 'label' }, null);
+    var add = order('a', 5000, { addOn: true, of: base.holdId, pickup: 'Granite Tavern - Kennesaw',
+                                 dropoff: 'Kennesaw J Fernbrook Way & Sallow Plains Rd Marietta' });
+    return [base, add];
+  }
+  function box(at, text) {
+    return { at: at, asked: false, whole: false, titled: false, app: 'uber',
+             screen: 'uber.planner', page: { top: false, bottom: false },
+             stops: OP.findPlanner(text) };
+  }
+  var LENA = 'Dropoff - 1 order\n© Lena Ruth.\nExpected by 8:52 PM\nAddress\n1433 Fernbrook Way\n'
+    + 'Marietta, GA\nView details\nDropoff 1 order\n25 Q\n~o\nStop New Requests';
+  // (The snap's next read was this stop's block with its header cropped off,
+  // which a box read offers nobody; the hold's planner had the same door
+  // under its header, as here.)
+  var STACIA = 'Dropoff - 1 order\nStacia A.\nExpected by 9:08 PM\nAddress\n3344 Wexmoor Brook Way NW\n'
+    + 'Kennesaw, GA\nView details\nWaybill\n25 Q\n—o\nStop New Requests';
+  function who(orders, st, c) {
+    var r = A.attribute(st, orders, c);
+    return [r.order ? r.order.id : null, r.cue, r.why];
+  }
+
+  // betterRead, alone.
+  eq('[slip] betterRead: the same door with its quadrant where the kept one slipped',
+     [A.betterRead(NW, NUP), A.betterRead('3344 Wexmoor Brook Way, Kennesaw',
+                                          '3344 Wexmoor Brook Wxy, Kennesaw')],
+     [true, true]);
+  eq('[slip] ...never the other way, another number, another street or another town, nor '
+     + 'over a last word that is itself a quadrant or a type',
+     [A.betterRead(NUP, NW), A.betterRead('3345 Wexmoor Brook Way NW, Kennesaw', NUP),
+      A.betterRead('3344 Wexmoor Creek Way NW, Kennesaw', NUP),
+      A.betterRead('3344 Wexmoor Brook Way NW, Ashby', NUP),
+      A.betterRead('3344 Wexmoor Brook Way NE, Kennesaw', NW),
+      A.betterRead('3344 Wexmoor Brook Way NW, Kennesaw', '3344 Wexmoor Brook Way, Kennesaw')],
+     [false, false, false, false, false, false]);
+  eq('[slip] outranks: a planner read of the door replaces the label\'s slipped one; a press '
+     + 'is never replaced',
+     [A.outranks({ value: NW, from: 'planner', conf: 2 }, { value: NUP, from: 'label', conf: 2 }),
+      A.outranks({ value: NW, from: 'planner', conf: 2 }, { value: NUP, from: 'press', conf: 2 }),
+      A.outranks({ value: NUP, from: 'label', conf: 2 }, { value: NW, from: 'planner', conf: 2 })],
+     ['better read', null, null]);
+
+  // The add-on's corner.
+  eq('[corner] the card\'s streets past the glued town and stray letter, and less the town '
+     + 'run on (the part as read kept beside)',
+     A.cardStreets('Kennesaw J Fernbrook Way & Sallow Plains Rd Marietta'),
+     ['fernbrook', 'kennesaw j fernbrook', 'sallow plains']);
+  eq('[corner] ...a clean corner and a door are as they were; a street in front of no stray '
+     + 'letter is never cut ("Brook Way" is not "Wexmoor Brook Way")',
+     [A.cardStreets('Vesper St & Corrow Dr NE, Dunmore'), A.cardStreets('Tamsin Pkwy SE, Dunmore'),
+      A.cardStreets('Wexmoor Brook Way & Corrow Dr, Dunmore')],
+     [['vesper', 'corrow'], ['tamsin'], ['wexmoor brook', 'corrow']]);
+
+  // The replay.
+  var t = trip(), st = A.fresh();
+  var c1 = A.sighting(st, t, box(9000, LENA), 9000).candidates;
+  eq('[snap 30 Oct] the box read of "1433 <E> Way" is the add-on\'s, on its corner\'s first '
+     + 'street (it was "no cue")', [c1.length, who(t, st, c1[0])], [1, ['a', 'cardStreet', null]]);
+  A.file(t[1], c1[0], A.dropoff(t[1], c1[0], null), st);
+  var c2 = A.sighting(st, t, box(9500, STACIA), 9500).candidates;
+  eq('[snap 30 Oct] ...and "... Way NW" read under its header is ①\'s, its filed door read better '
+     + '(sameDoor), and replaces the NUP', [who(t, st, c2[0]), A.dropoff(t[0], c2[0], null).why],
+     [['b', 'sameDoor', null], 'better read']);
+  A.file(t[0], c2[0], A.dropoff(t[0], c2[0], null), st);
+  eq('[snap 30 Oct] filed: ① the NW door, ② 1433 <E> Way, nothing waiting "whose?"',
+     [t[0].dropoff, t[1].dropoff, A.unowned(st)],
+     [NW, '1433 Fernbrook Way, Marietta', 0]);
+  eq('[snap 30 Oct] ...and a box read of the slipped door again does not put it back',
+     A.dropoff(t[0], { line: NUP, street: NUP.split(',')[0], city: 'Kennesaw', asked: false,
+                       labelled: 'dropoff', planner: false, at: 9900 }, null).to, null);
+  // The planner seen whole, as server.js pools what no cue decides.
+  var w = trip(), st2 = A.fresh();
+  var stops = [
+    { kind: 'pickup', orders: 1, name: 'Granite Tavern - Kennesaw', expectedBy: 1223,
+      street: '745 Halden Rd NW', city: 'Kennesaw', state: 'GA', zip: null,
+      line: '745 Halden Rd NW, Kennesaw', place: null },
+    { kind: 'dropoff', orders: 1, name: 'Lena R.', expectedBy: 1250, street: '1433 Fernbrook Way',
+      city: 'Marietta', state: 'GA', zip: null, line: '1433 Fernbrook Way, Marietta', place: null },
+    { kind: 'pickup', orders: 1, name: 'Fable Grill', expectedBy: 1219, street: '77 Halden Rd NW',
+      city: 'Kennesaw', state: 'GA', zip: null, line: '77 Halden Rd NW, Kennesaw', place: null },
+    { kind: 'dropoff', orders: 1, name: 'Stacia A.', expectedBy: 1268, street: NW.split(',')[0],
+      city: 'Kennesaw', state: 'GA', zip: null, line: NW, place: null }];
+  var cw = A.sighting(st2, w, { at: 12000, asked: false, whole: true, titled: true, app: 'uber',
+                                screen: 'uber.planner', page: { top: true, bottom: true },
+                                stops: stops }, 12000).candidates;
+  cw.forEach(function (c) {
+    var r = A.attribute(st2, w, c);
+    if (r.order) A.file(r.order, c, A.dropoff(r.order, c, null), st2); else A.park(st2, c, w);
+  });
+  eq('[snap 30 Oct] the list seen whole files both doors and pools none (it pooled two: '
+     + '"2 dropoffs read · whose?")', [w[0].dropoff, w[1].dropoff, A.unowned(st2)],
+     [NW, '1433 Fernbrook Way, Marietta', 0]);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

@@ -9441,6 +9441,38 @@ try:
 finally:
     stop(_xp)
 
+# The owner's snap of 30 Oct, 20:21 (names and streets invented): the first
+# order's door filed with its quadrant slipped ("... Way NUP"), and an add-on
+# whose card parsed as "Kennesaw J <E> Way & <S> Plains Rd Marietta" — a town
+# and a stray letter glued in front of its corner, its town run on. A box read
+# of the planner then listing "1433 <E> Way, Marietta" and "... Way NW": the
+# first is the add-on's (cardStreet, past the glued town), the second the
+# first order's door read better (sameDoor), which replaces the NUP; nothing
+# waits "whose?".
+_qp, _qb, _qj, _qh = _cserver('quadslip', CARRY_TWO='0')
+try:
+    _took2(_qb, _card('q-a', 19.01, minutes=33.0, pickup='Fable Grill (77 Halden Rd NW)'))
+    _say(_ppage(True, [('Stacia A.', '3344 Wexmoor Brook Way NUP', 'Kennesaw', 1266)]))
+    _q0 = [(get(_qb, '/api/status').get('holding') or {}).get('dropoff')]
+    _took2(_qb, _card('q-b', 15.02, minutes=31.0, addon=True, pickup='Granite Tavern - Kennesaw',
+                      dropoff='Kennesaw J Fernbrook Way & Sallow Plains Rd Marietta'))
+    _qbox = _ppage(False, [('Lena R.', '1433 Fernbrook Way', 'Marietta', 1250),
+                           ('Stacia A.', '3344 Wexmoor Brook Way NW', 'Kennesaw', 1268)])
+    _qbox['sighting']['whole'] = False
+    _say(_qbox)
+    time.sleep(0.3)
+    _st = get(_qb, '/api/status')
+    eq('[quadrant slip] the slipped door filed alone; then the box read files the add-on\'s '
+       'door past its corner\'s glued town, and the first order\'s door read better over the '
+       'NUP; nothing waits',
+       (_q0, [(o.get('dropoff'), o.get('cue')) for o in _orders(_qb)], _st.get('unowned'),
+        _st.get('chooser')),
+       (['3344 Wexmoor Brook Way NUP, Kennesaw'],
+        [('3344 Wexmoor Brook Way NW, Kennesaw', 'sameDoor'),
+         ('1433 Fernbrook Way, Marietta', 'cardStreet')], 0, None))
+finally:
+    stop(_qp)
+
 # ...and with carrying two ON the trip is one order to the cap: an add-on
 # joins past it, and a Took past two TRIPS puts down the trip that ends
 # soonest, every order of it, said by the trip's pay.

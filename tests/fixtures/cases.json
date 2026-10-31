@@ -3792,6 +3792,15 @@
     "Fable Grill Noodle House",
     "Wren Deli Taproom"
    ]
+  },
+  {
+   "name": "a corner's quadrant read \"NUP\" before its \"&\" is NW, and \"SW.\" before the town's comma is SW",
+   "_why": "The owner's snap of 30 Oct, 20:21: the planner's \"NW\" read \"NUP\", and the held door's search refused it. A slip of the quadrant's W is mended from a closed list, as a street's last word only (QUADRANT_SLIP / quadrantSlip). Invented.",
+   "text": "Add-on\n$9.40\nIncludes expected tip\n22 min (6.1 mi) total\nKestrel Noodle Bar (40 Fable Rd)\nVantry Ln NUP & Orrin Ct SW., Marietta\nAccept",
+   "expect": [
+    "Kestrel Noodle Bar (40 Fable Rd)",
+    "Vantry Ln NW & Orrin Ct SW, Marietta"
+   ]
   }
  ],
  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day — so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",
@@ -4060,6 +4069,16 @@
    "_why": "A card printing \"28 min (11.2 mi) total 100 Rosemont Ct\" satisfies a loose street rule from the \"28\", and the driver is shown the offer's own arithmetic dressed up as a street name.",
    "text": "Exclusive $6.44 Verified 28 min (11.2 mi) total 100 Rosemont Ct, Hiram, GA 30141",
    "expect": ["100 Rosemont Ct, Hiram, GA 30141", "Hiram", "30141"]
+  },
+  {
+   "name": "a door's \"NW\" read \"NIW\" off a navigation screen is NW",
+   "_why": "The owner's snap of 30 Oct, 20:21: the planner's \"NW\" read \"NUP\", and the held door's search refused it. A slip of the quadrant's W is mended from a closed list, as a street's last word only (QUADRANT_SLIP / quadrantSlip). Invented.",
+   "text": "Head to\n52 Pellam Ridge Dr NIW, Acworth, GA 30101",
+   "expect": [
+    "52 Pellam Ridge Dr NW, Acworth, GA 30101",
+    "Acworth",
+    "30101"
+   ]
   }
  ],
  "_whole_comment": "Whether a reading is finished, as opposed to merely judgeable. Its own block because it is a function of the reading rather than a field on it, and because it was written out by hand in two places that both got delivery cards wrong.",
@@ -7506,6 +7525,78 @@
      "state": "GA",
      "zip": null,
      "line": "Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "a planner door's \"NW\" read \"NUP\" is NW (the owner, 30 Oct)",
+   "_why": "The owner's snap of 30 Oct, 20:21: the planner's \"NW\" read \"NUP\", and the held door's search refused it. A slip of the quadrant's W is mended from a closed list, as a street's last word only (QUADRANT_SLIP / quadrantSlip). Invented.",
+   "text": "Dropoff - 1 order\nStacia R.\nExpected by 9:08 PM\nAddress\n3344 Wexmoor Brook Way NUP\nKennesaw, GA\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Stacia R.",
+     "expectedBy": 1268,
+     "street": "3344 Wexmoor Brook Way NW",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "3344 Wexmoor Brook Way NW, Kennesaw",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...\"SVV\" is SW, and \"N W\" after a street type is NW",
+   "_why": "The owner's snap of 30 Oct, 20:21: the planner's \"NW\" read \"NUP\", and the held door's search refused it. A slip of the quadrant's W is mended from a closed list, as a street's last word only (QUADRANT_SLIP / quadrantSlip). Invented.",
+   "text": "Dropoff - 1 order\nOrla T.\nExpected by 9:08 PM\nAddress\n81 Tolliver Ct SVV\nMarietta, GA\nView details\nDropoff - 1 order\nBram K.\nExpected by 9:20 PM\nAddress\n17 Quenby Rd N W\nMarietta, GA\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Orla T.",
+     "expectedBy": 1268,
+     "street": "81 Tolliver Ct SW",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "81 Tolliver Ct SW, Marietta",
+     "place": null
+    },
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Bram K.",
+     "expectedBy": 1280,
+     "street": "17 Quenby Rd NW",
+     "city": "Marietta",
+     "state": "GA",
+     "zip": null,
+     "line": "17 Quenby Rd NW, Marietta",
+     "place": null
+    }
+   ]
+  },
+  {
+   "name": "...but a word that is no slip of the W is left as read",
+   "_why": "The owner's snap of 30 Oct, 20:21: the planner's \"NW\" read \"NUP\", and the held door's search refused it. A slip of the quadrant's W is mended from a closed list, as a street's last word only (QUADRANT_SLIP / quadrantSlip). Invented.",
+   "text": "Dropoff - 1 order\nStacia R.\nExpected by 9:08 PM\nAddress\n3344 Wexmoor Brook Way NUPS\nKennesaw, GA\nView details",
+   "bounded": false,
+   "expect": [
+    {
+     "kind": "dropoff",
+     "orders": 1,
+     "name": "Stacia R.",
+     "expectedBy": 1268,
+     "street": "3344 Wexmoor Brook Way NUPS",
+     "city": "Kennesaw",
+     "state": "GA",
+     "zip": null,
+     "line": "3344 Wexmoor Brook Way NUPS, Kennesaw",
      "place": null
     }
    ]

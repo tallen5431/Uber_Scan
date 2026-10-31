@@ -2102,9 +2102,35 @@
      the street less its trailing type word, or null where it has none to
      leave out — no type word, or no name in front of it ("100 Court" is a
      name, not a type). */
+  /* ...AND A WORD AFTER THE TYPE THAT IS NO QUADRANT: the owner's snap of 30
+     Oct, 20:21, the planner's "NW" read "NUP" ("3344 <Name> Brook Way NUP"),
+     and the NucBox's search found nothing — "not inside the card's reach".
+     The parsers mend the slips they know (QUADRANT_SLIP); one they miss is
+     a short word of letters after a street type that is neither a type nor
+     a quadrant. Such a door is asked ONCE more with that word left out and
+     nothing else changed ("3344 <Name> Brook Way"), held to the same street
+     as any retry (retryFits: the name, the type's family or none, then a
+     quadrant or none). The words and the word left out, or null. */
+  function unknownTail(words) {
+    var n = words.length;
+    if (n < 4 || !/^\d+[A-Za-z]?$/.test(words[0])) return null;
+    var last = words[n - 1];
+    if (!/^[A-Za-z]{1,5}\.?$/.test(last) || streetType(last)
+        || QUADRANTS.indexOf(last.toLowerCase().replace(/\.$/, '')) >= 0) return null;
+    if (!streetType(words[n - 2]) || !/[A-Za-z]{2}/.test(words[n - 3])) return null;
+    return { words: words.slice(0, -1), tail: last };
+  }
+
   function streetRetry(plan) {
     if (!plan || plan.kind !== 'street' || !plan.door) return null;
     var words = plan.street.replace(/\s+/g, ' ').trim().split(' ');
+    var cut = unknownTail(words);
+    if (cut) {
+      return { kind: 'street', street: cut.words.join(' '), door: true, house: plan.house,
+               retry: { name: cut.words.slice(1, -1).map(function (w) { return w.toLowerCase(); }),
+                        type: streetType(cut.words[cut.words.length - 1]), quadrant: null,
+                        tail: cut.tail } };
+    }
     var quad = words.length > 2 && QUADRANTS.indexOf(words[words.length - 1].toLowerCase()) >= 0
       ? words.pop() : null;
     var type = words.length > 2 ? streetType(words[words.length - 1]) : null;
@@ -2213,6 +2239,10 @@
   function dirRetry(plan) {
     if (!plan || plan.kind !== 'street' || !plan.door) return null;
     var words = plan.street.replace(/\s+/g, ' ').trim().split(' ');
+    // A word after the type that is no quadrant (unknownTail) is left out,
+    // and that alone is a second question to ask.
+    var cut = unknownTail(words);
+    if (cut) words = cut.words;
     var house = words.shift();
     var quad = words.length > 2 && QUADRANTS.indexOf(words[words.length - 1].toLowerCase()
       .replace(/\.$/, '')) >= 0 ? words.pop() : null;
@@ -2228,7 +2258,7 @@
     if (!name.some(function (w) { return /[A-Za-z]{2}/.test(w) && !dirFlip(w); })) return null;
     var q2 = quad ? dirFlip(quad) : null;
     if (q2) flipped = true;
-    if (!flipped) return null;
+    if (!flipped && !cut) return null;
     return { kind: 'street', street: [house].concat(name, [typeWord], q2 ? [q2] : []).join(' '),
              door: true, house: plan.house,
              retry: { name: name.map(dirFold), type: type, quadrant: q2, dirs: true } };
@@ -5024,6 +5054,7 @@
            STREET_TYPES: STREET_TYPES, streetType: streetType, bareDoor: bareDoor, streetRetry: streetRetry,
            retryFits: retryFits, pickRetry: pickRetry, retryWanted: retryWanted,
            afterRetry: afterRetry, dirFlip: dirFlip, dirRetry: dirRetry, dirWanted: dirWanted,
+           unknownTail: unknownTail,
            afterDir: afterDir, nameWanted: nameWanted, nameAsked: nameAsked,
            nameRetry: nameRetry, pickNamed: pickNamed,
            howFound: howFound };

@@ -2613,6 +2613,8 @@ def _find_address(text):
         head = text[after:city_at].rstrip(' ,')
         street = STREET.search(head)
         street = re.sub(r'\s+', ' ', street.group(1)).strip(' .,') if street else None
+        # (Its quadrant read with a slip of the W mended: QUADRANT_SLIP.)
+        street = quadrant_slip(street)
         # What to show, as opposed to what to decide on. When the city could not
         # be trusted, the driver still gets everything that was read — they are
         # looking at this to judge whether the scan worked, and "GA 30127" does
@@ -2964,6 +2966,42 @@ def _planner_or_slip(street):
     return street[:m.start()] + ' Dr' + street[m.end():]
 
 
+# THE QUADRANT'S "W" READ AS ITS LOOK-ALIKES. The owner's snap of 30 Oct,
+# 20:21: the held order's door off the Trip Planner was "<n> <Name> Brook Way
+# NUP, <Town>" — the planner's "NW" with its W read as "UP" — and the server's
+# search refused it ("not inside the card's reach"); a later read of the same
+# stop gave "NW". A wide W is what this reader splits: "UP", "VV", "IW", a
+# space inside it ("N W"), or a period after it ("NW."). A CLOSED list, and
+# only for the north- and south-WEST quadrants (the slips are all of the W),
+# only as the LAST word of a street (end of the street, or before its
+# corner's "&" or its town's comma), and only after a word: no street name is
+# "NUP" or "SVV", and nowhere else is a quadrant read. "N W" and "S W" also
+# want a street type in front: after a bare name a lone "N" or "S" may be
+# part of it. Not before a suite's comma ("Dallas Hwy SW., Suite 200" is
+# the abbreviation's period, inside a store's bracket). MEASURED over every text on file (meas1022's journals
+# and the shared corpus, 31 Oct): see AUDITS.md, the quadrant-slip entry.
+# The JavaScript twin is QUADRANT_SLIP in offer-parser.js.
+QUADRANT_SLIP = re.compile(
+    r'(?<=[A-Za-z.] )(?:([NS])(?:UP|VV|IW)|([NS]) W|([NS])W\.)(?=\s*(?:$|[,&\n]))'
+    r'(?!\s*,\s*(?:[Ss]uite|[Ss]te|[Uu]nit|[Aa]pt)\b)', ASCII)
+
+
+def quadrant_slip(text):
+    """`text` with a slip of a street's trailing NW/SW quadrant mended: see
+    QUADRANT_SLIP. Anything not a string is passed back."""
+    if not isinstance(text, str) or not text:
+        return text
+
+    def mend(m):
+        if m.group(2):
+            before = text[:m.start()].split()
+            if not before or not re.fullmatch(STREET_SUFFIX, before[-1].rstrip('.'),
+                                              re.IGNORECASE):
+                return m.group(0)
+        return (m.group(1) or m.group(2) or m.group(3)) + 'W'
+    return QUADRANT_SLIP.sub(mend, text)
+
+
 # THE PHONE'S EDGE IN FRONT OF THE HOUSE NUMBER. The owner's planner read of
 # 28 Oct, 17:48, gave both dropoffs' streets as "Te <n> <Name> Rd NW" and
 # "ie <n> <Name> Ln" (the numbers and names left out here): the edge and the
@@ -3095,7 +3133,7 @@ def _planner_address(street_line, town_line, label_line=None):
     s = STREET.match(street)
     street = re.sub(r'\s+', ' ', s.group(1)).strip(' .,') if s else None
     if street:
-        street = _planner_or_slip(_planner_pl_slip(street))
+        street = quadrant_slip(_planner_or_slip(_planner_pl_slip(street)))
     # What to show and to store. The state goes in only beside a ZIP, which
     # is find_address's line exactly; without one, "…, Marietta, GA" would end
     # on a word Advice.area cannot take for a town, and the geography would go
@@ -5853,6 +5891,8 @@ def parse(raw_text):
     # The reader's own line breaks go with it, as offsets into `text` — which
     # are offsets into `mine` too, because only_card blanks rather than slices.
     places = find_places(mine, legs, line_starts(raw_text), _whose)
+    # A corner's or a door's quadrant read with a slip of its W: QUADRANT_SLIP.
+    places = [quadrant_slip(p) for p in places]
     # Which end of the job the card printed each name against, from this same
     # pass's record of where they sat. Asked before the two ends, because it is
     # what decides them when the card stated it.
