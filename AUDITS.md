@@ -4503,6 +4503,50 @@ payout floors, no pace re-timing, no heat map, no silence as accept, no
 seventh bar control, and the rig never presses the phone. Open: how good the
 estimate is has not been measured — that is what the bands are for.
 
+**EXPERIMENTAL — every 📷 Snap keeps more of what the rig knew at the press
+(31 Oct 2026).** The owner, verbatim: *"Yes add all of them, fast track to
+experimental."* Beside the files a snap had, each press now keeps, local to
+the rig: `build.json` (the commit, short hash and subject, read once from
+`git log -1` with a fallback when git is not there; the server's start and
+uptime, the machine's uptime), shown at the top of the snap's bundle;
+`frame.jpg` (the scanner's newest full-resolution frame, JPEG 85, scaled down
+only past 2000 px wide, re-encoded lower while over 900kB, encoded on a thread
+of its own and dropped past 2 s — `answer_snap` in rpi/scan_pi.py);
+`reads.json` (the scanner's last ten reads — time, kind: card box / ⌖ press /
+auto whole-screen / map label, screen type, crop source, ms, text cut to 2kB,
+dark-skip flag, the parse's pay/minutes/miles/pickup/dropoff; `ReadLog`);
+`searches.json` (per held order, the last eight: the end search's key, plan
+and disc with its `also` circles, the last five questions to the NucBox and up
+to five trimmed candidates each, pickInDisc's/pickPlace's answer and the
+verdict and why, the distance band's answer — and the same per pickup;
+`searchMemo` in server.js, memory only, written by endAsk, pickupAsk,
+pinHeldEnd, refuseHeldEnd, settleHeldEnd/Pickup and bandHeldNow, read back by
+nothing); `mapwalk.json` (Map view's newest settled walk — each mark and its
+kind: car, door pin, area, band, corner, street, guess; each place not drawn
+and why; the caption — posted by live.html to `POST /api/mapwalk`, kept in
+memory, newest only, 32kB at most, no file; "the page is not open" when none
+came); `held.json` (holding.json as stored, each order's trip, `of`,
+`afterOf`, holdEnds/ownEnds, tripTill/afterMate and its pickups' owners, the
+merged planner, finishing.json's watches); `journal-tail.jsonl` (the last 50
+rows, held to 200kB); `gps.json` and `health.json` (the beats' fixes and the
+Pi's temperature, throttling, heat guard and camera word over ten minutes,
+one per 5 s, the `seen` rows of that window off the journal tail — read time,
+dark skips — and the scanner's counters off reader.json). **None is a part:**
+the snap's line, `contents` and journal row are unchanged; snap.json says each
+under `extras`, saved or why not. Every server file is held to 200kB; a snap
+grows by well under 1.5 MB. A piece that cannot be had is logged once and the
+snap goes on. **Privacy:** these hold addresses and positions; same rule as a
+snap's pictures — `rpi/snaps/` is in `.gitignore`, served only by
+`/api/snaps` and its bundle, never synced (rpi/sync.py sends journal rows and
+the config only). Tests: rpi/test_scan_pi.py (reads ring, frame caps, thread,
+failures), rpi/test_server.py (each file's shape, caps, the walk POST newest
+only and refused when not JSON or too big, the page-not-open case, the bundle
+and the build line, failures tolerated). The Settled list binds this as it
+binds the map bands: no $/mile rules, no payout floors, no pace re-timing, no heat
+map, no silence as accept, no seventh bar control, and the rig never presses
+the phone. Open: frame.jpg's size and encode time on the Pi itself are not
+measured; a Map view walk is posted only while the page is open on Map view.
+
 **A card with one readable place calls it the pickup, and 474 of 1,166 rows
 rest on that.** Where the card's own layout names the end, the rig now follows
 it: that is `place_ends`, shipped with the two-ends fix recorded under Done. It

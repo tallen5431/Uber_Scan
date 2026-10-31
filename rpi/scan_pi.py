@@ -939,8 +939,183 @@ def reader_record(last, now, offer_log=None, counters=None, beat=None,
     return record
 
 
-def answer_snap(folder, last, record, band=None):
+# --- 📷 Snap, the richer kind (EXPERIMENTAL; the owner, 31 Oct 2026: "Yes add
+# all of them, fast track to experimental") ----------------------------------
+#
+# Two more files only this process has, beside reader.json: frame.jpg, the
+# newest full-resolution sensor frame the loop holds, and reads.json, the last
+# SNAP_READS_KEEP reads. Local to the rig like every file in a snap (snaps/ is
+# in .gitignore, served only through server.js's /api/snaps, never synced),
+# and they leave it only when the owner uploads that snap.
+#
+# frame.jpg: JPEG SNAP_FRAME_QUALITY, scaled down only past SNAP_FRAME_MAX_W,
+# and encoded again lower while it is over SNAP_FRAME_MAX_BYTES. Encoding a
+# full sensor frame is tens of milliseconds on a Pi, so with a reader thread it
+# is done on a thread of its own (answer_snap's `threaded`) and the camera loop
+# never waits for it; past SNAP_FRAME_CAP_S it is dropped and said, and
+# reader.json still goes.
+SNAP_READS_KEEP = 10
+SNAP_READ_TEXT_MAX = 2048
+SNAP_FRAME_MAX_W = 2000
+SNAP_FRAME_QUALITY = 85
+SNAP_FRAME_MAX_BYTES = 900 * 1024
+SNAP_FRAME_CAP_S = 2.0
+
+
+class ReadLog(object):
+    """The last SNAP_READS_KEEP reads, for a snap's reads.json. Memory only.
+
+    One entry per read the loop collected: when, what kind (card box, a ⌖
+    press, a whole-screen read nobody pressed, DoorDash's map label), the
+    screen type, the crop's source, how long it took, the text cut to
+    SNAP_READ_TEXT_MAX, whether it was skipped as too dark, and the parse's
+    pay, minutes, miles, pickup and dropoff. Nothing here is read back by
+    anything but a snap."""
+
+    def __init__(self, keep=SNAP_READS_KEEP):
+        self.keep = keep
+        self.items = []
+
+    def add(self, at, kind, out=None, parsed=None, ms=None, skipped_dark=False,
+            text=None, crop_from=None):
+        out = out or {}
+        parsed = parsed if isinstance(parsed, dict) else (out.get('parsed') or {})
+        text = text if text is not None else (out.get('text') or '')
+        if ms is None:
+            got = out.get('ms')
+            ms = got.get('total') if isinstance(got, dict) else got
+        try:
+            screen = OP.screen_type(text or '')['screen']
+        except Exception:                           # noqa: BLE001 — never fatal
+            screen = None
+        entry = {'at': int(at * 1000) if at else None, 'kind': kind,
+                 'screen': screen,
+                 'cropFrom': crop_from or out.get('cropFrom') or None,
+                 'ms': int(round(ms)) if isinstance(ms, (int, float)) else None,
+                 'skippedDark': bool(skipped_dark),
+                 'text': (text or '')[:SNAP_READ_TEXT_MAX],
+                 'textCut': len(text or '') > SNAP_READ_TEXT_MAX}
+        for k in ('pay', 'minutes', 'miles', 'pickup', 'dropoff'):
+            entry[k] = parsed.get(k)
+        self.items.append(entry)
+        del self.items[:-self.keep]
+        return entry
+
+    def snapshot(self):
+        return [dict(e) for e in self.items]
+
+
+def snap_frame_jpeg(frame, max_w=SNAP_FRAME_MAX_W, quality=SNAP_FRAME_QUALITY,
+                    max_bytes=SNAP_FRAME_MAX_BYTES):
+    """(bytes, info) for frame.jpg, or (None, why). Never raises."""
+    try:
+        if frame is None or not hasattr(frame, 'shape') or frame.size == 0:
+            return None, 'no frame held yet'
+        h, w = frame.shape[:2]
+        img = frame
+        if w > max_w:
+            img = cv2.resize(frame, (max_w, max(1, int(round(h * max_w / float(w))))),
+                             interpolation=cv2.INTER_AREA)
+        q = int(quality)
+        while True:
+            ok, buf = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), q])
+            if not ok:
+                return None, 'jpeg encoding failed'
+            if len(buf) <= max_bytes or q <= 40:
+                break
+            q -= 15
+        if len(buf) > max_bytes:
+            return None, 'frame.jpg would be %d bytes, over its %d' % (len(buf), max_bytes)
+        return buf.tobytes(), {'width': int(img.shape[1]), 'height': int(img.shape[0]),
+                               'sourceWidth': int(w), 'sourceHeight': int(h),
+                               'quality': q, 'bytes': int(len(buf))}
+    except Exception as e:                          # noqa: BLE001 — never fatal
+        return None, 'could not encode frame.jpg: %s' % e
+
+
+def _write_bytes(where, data):
+    with open(where + '.part', 'wb') as fh:
+        fh.write(data)
+    os.replace(where + '.part', where)
+
+
+def answer_snap(folder, last, record, band=None, reads=None, frame=None,
+                threaded=False, clock=time.monotonic):
     """reader.jpg, then reader.json, into the folder a press named. Never fatal.
+
+    ...and, the richer snap (EXPERIMENTAL), `reads` (ReadLog.snapshot()) as
+    reads.json and `frame` ({'frame', 'at', 'source'}: the newest sensor frame
+    the loop holds) as frame.jpg. reads.json is written here; frame.jpg, with a
+    thread, on its own thread, which then writes reader.json — so reader.json
+    is still the last file and still means "complete". A piece that cannot be
+    written is said in reader.json (`reads`, `frame`) and the rest goes on.
+    With `threaded` the answer is True once the thread is started.
+    """
+    if reads is not None:
+        try:
+            _write_bytes(os.path.join(folder, 'reads.json'),
+                         json.dumps({'v': 1, 'keep': SNAP_READS_KEEP, 'reads': reads},
+                                    indent=1).encode('utf-8'))
+            record['reads'] = {'file': 'reads.json', 'n': len(reads)}
+        except (IOError, OSError, TypeError, ValueError) as e:
+            record['reads'] = 'could not write reads.json: %s' % e
+            _snap_extra_said('reads.json', e)
+    if frame is None:
+        return _answer_snap(folder, last, record, band)
+    if not threaded:
+        record['frame'] = _snap_frame(folder, frame, clock)
+        return _answer_snap(folder, last, record, band)
+
+    def job():
+        try:
+            record['frame'] = _snap_frame(folder, frame, clock)
+        except Exception as e:                      # noqa: BLE001 — never fatal
+            record['frame'] = 'could not write frame.jpg: %s' % e
+        _answer_snap(folder, last, record, band)
+    try:
+        threading.Thread(target=job, name='snap-frame', daemon=True).start()
+    except RuntimeError as e:
+        record['frame'] = 'could not start the frame thread: %s' % e
+        return _answer_snap(folder, last, record, band)
+    return True
+
+
+_snap_extras_told = set()
+
+
+def _snap_extra_said(name, e):
+    """Log a snap piece that could not be written, once per piece and reason."""
+    key = (name, type(e).__name__, getattr(e, 'errno', None))
+    if key in _snap_extras_told:
+        return
+    _snap_extras_told.add(key)
+    log('snap: could not write %s (%s); the snap goes on without it, and this '
+        'is said once' % (name, e))
+
+
+def _snap_frame(folder, frame, clock=time.monotonic):
+    """frame.jpg written; what reader.json says of it."""
+    began = clock()
+    data, info = snap_frame_jpeg((frame or {}).get('frame'))
+    if data is None:
+        return info
+    took = clock() - began
+    if took > SNAP_FRAME_CAP_S:
+        return 'frame.jpg dropped: encoding took %.1fs, over its %gs' % (took, SNAP_FRAME_CAP_S)
+    try:
+        _write_bytes(os.path.join(folder, 'frame.jpg'), data)
+    except (IOError, OSError) as e:
+        _snap_extra_said('frame.jpg', e)
+        return 'could not write frame.jpg: %s' % e
+    at = frame.get('at')
+    info.update(file='frame.jpg', source=frame.get('source') or 'sensor',
+                ageMs=age_ms(at, time.time()) if isinstance(at, (int, float)) else None,
+                encodeMs=int(round(took * 1000)))
+    return info
+
+
+def _answer_snap(folder, last, record, band=None):
+    """reader.jpg, then reader.json — answer_snap's original half.
 
     reader.jpg is `last['fitted']`: the greyscale card as it came off the warp,
     before preprocess() — the picture tesseract's input was made from, which is
@@ -4596,6 +4771,11 @@ def main():
     # from, and the beat is what the panel was told.
     last_read = None
     last_beat = None
+    # ...and, for the richer snap (EXPERIMENTAL), the last reads and the newest
+    # full-resolution frame: a reference to the sensor array a read or the
+    # phone view already made, never a copy. See ReadLog and answer_snap.
+    read_log = ReadLog()
+    full_frame = {'frame': None, 'at': None, 'source': None}
     # The accumulator episode whose payout a card found above the drawn card
     # box gave, and that card, or None; and the card the live view outlines
     # now. See payout_from.
@@ -4633,6 +4813,8 @@ def main():
         if not line:
             return
         labels['for'][offer_id] = line
+        read_log.add(time.time(), 'map label', text=answer.get('raw') or line,
+                     parsed={}, ms=answer.get('ms'))
         if len(labels['for']) > 32:
             labels['for'].pop(next(iter(labels['for'])))
         told = labels['told']
@@ -5800,6 +5982,17 @@ def main():
         # destination branch needs: a genuinely payout-free screen still
         # digests as itself.
         chosen = read_the_money(batch)
+        # Kept for a snap's reads.json: what kind of read, as the loop asked
+        # for it — see ReadLog.
+        geom_done = done.get('geom')
+        if not getattr(geom_done, 'whole', False):
+            read_kind = 'card box'
+        elif getattr(geom_done, 'skip_dark', True) is False:
+            read_kind = 'press'
+        else:
+            read_kind = 'auto whole-screen'
+        read_log.add(done.get('at') or time.time(), read_kind, batch[chosen],
+                     skipped_dark=batch[chosen].get('skipped') == 'dark')
         # A read PL left unread for a black crop, counted and said here rather
         # than in digest(), which a whole-screen read leaves before the tally.
         # Otherwise it goes on as the empty read it is. See DARK_SAY_EVERY.
@@ -6011,7 +6204,13 @@ def main():
                     phone=phone),
                     # ...and the newest offer's map band, when one was kept
                     # in the last two minutes (MAP_BANDS_DIR).
-                    band=map_bands.latest(now_snap) if map_bands is not None else None)
+                    band=map_bands.latest(now_snap) if map_bands is not None else None,
+                    # ...and the richer snap's two (EXPERIMENTAL): the last
+                    # reads, and the newest full-resolution frame, encoded on a
+                    # thread of its own when reads have one.
+                    reads=read_log.snapshot(),
+                    frame=full_frame,
+                    threaded=not args.no_thread)
             request = cam.capture_request()
             try:
                 # The Y plane leads the YUV420 buffer, and luma is all the gate
@@ -6526,6 +6725,7 @@ def main():
                     # which is exactly what OpenCV expects. The name is the odd
                     # one out.
                     frame, preview_scale = request.make_array('main'), None
+                    full_frame = {'frame': frame, 'at': time.time(), 'source': 'sensor'}
                 else:
                     # Copied, because `luma` is a view onto the request's own
                     # buffer and the request is released a few lines below —

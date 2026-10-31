@@ -2222,6 +2222,21 @@ connection dot, just above the bar of buttons — not on the bar, which holds si
 | `reader.json` | the scanner's own account of that read: when, and how long before it answered; the text, the parse and the rate; whether it was a ⌖ read of the whole screen; the offer it has on record and the card's episode; its health counters as they stand; the flags its last heartbeat carried; and the GPS's state and its fix, with the gate's `ok`/`why` on it, or "gps off" |
 | `snap.json` | which of those it kept, and for each one it did not, why |
 | `map.jpg`, `map.json` | experimental, only when there is one: the newest offer's map band from the last two minutes and its sidecar (see 🗺 Map bands below) — never listed as missing |
+| `frame.jpg` | experimental: the scanner's newest full-resolution frame (JPEG 85, scaled down only past 2000 px wide, under 900kB), encoded off the camera loop |
+| `reads.json` | experimental: the scanner's last ten reads — time, kind (card box, ⌖ press, auto whole-screen, map label), screen type, crop source, ms, text (to 2kB), dark-skipped, the parse's pay, minutes, miles, pickup and dropoff |
+| `build.json` | experimental: the commit the rig runs (short hash and subject), when the server started, its uptime and the machine's — also the first line of the snap's bundle |
+| `searches.json` | experimental: per held order, what the NucBox was asked (the end search's key, plan, disc and `also` circles; the last five questions and their candidates, trimmed), its answer and why, the distance band's — and the same for each pickup |
+| `mapwalk.json` | experimental: what Map view last drew — each mark and its kind, each place not drawn and why, the caption — as the driving page posted it (`POST /api/mapwalk`, memory only); "not open" when no page sent one |
+| `held.json` | experimental: the held orders as `holding.json` stores them, each one's owners and clocks (`of`, `afterOf`, `holdEnds`, `tripTill`, `afterMate`, its pickups' owners), the merged planner, and the finishing watches |
+| `journal-tail.jsonl` | experimental: the journal's last 50 rows (held to 200kB) |
+| `gps.json`, `health.json` | experimental: the last ten minutes of GPS fixes, and of the Pi's temperature, throttling, heat guard and camera word, one per 5 s; with the `seen` rows of that window and the scanner's counters |
+
+The experimental files are no part: the line the control shows and the
+journal row are as before, and `snap.json` lists them under `extras`, each
+saved or why not. Each server file is held to 200kB, so a snap grows by well
+under 1.5 MB, and one that cannot be written is logged once and left out.
+They hold addresses and positions, so they follow the rule below: on the rig,
+served only by `/api/snaps`, never synced.
 
 **Why the scanner is asked.** Everything above `reader.jpg` is what the
 *panel* knew. A misread is a question about what the *reader* was looking at,

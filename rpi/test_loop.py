@@ -3024,6 +3024,17 @@ ok_('the request is taken, so it is answered once',
 eq('...and the log says where the answer went, once',
    [l for l in r14['logs'] if l.startswith('snap:')],
    ['snap: said what the reader last read into %s' % _snfold])
+# ...and the richer snap's two (EXPERIMENTAL): the loop's last reads, each the
+# card box it read, and its newest full-resolution frame, written on a thread
+# of its own before reader.json.
+_snreads = (_json_or_none(os.path.join(_snfold, 'reads.json')) or {}).get('reads') or []
+eq('reads.json holds the reads the loop collected, as card-box reads of what they saw',
+   [(r.get('kind'), r.get('pay'), r.get('skippedDark')) for r in _snreads],
+   [('card box', 16.05, False)] * 3)
+_snframe = _said.get('frame') if isinstance(_said.get('frame'), dict) else {}
+ok_('frame.jpg is the newest sensor frame the loop held, said in reader.json (%r)' % (_snframe,),
+    os.path.exists(os.path.join(_snfold, 'frame.jpg')) and _snframe.get('source') == 'sensor'
+    and _snframe.get('width', 0) <= 2000)
 
 # ...and before any read has come back there is no crop to give, and it says so.
 # --no-journal as well, so there is no card on record to name either.
@@ -3044,7 +3055,9 @@ run(lambda n, k: WHOLE, extra_argv=['--no-journal'], seconds=15.0, handoff=_snho
 _said2 = _json_or_none(os.path.join(_snfold2, 'reader.json')) or {}
 eq('a scanner that has not read anything yet answers with no read and says why',
    (_said2.get('read', '?'), _said2.get('noCrop')), (None, 'no read yet'))
-eq('...and leaves no reader.jpg', sorted(os.listdir(_snfold2)), ['reader.json'])
+eq('...and leaves no reader.jpg', 'reader.jpg' in os.listdir(_snfold2), False)
+eq('...its last reads (EXPERIMENTAL) an empty ring, none having come back',
+   (_json_or_none(os.path.join(_snfold2, 'reads.json')) or {}).get('reads'), [])
 eq('...and says no journal keeps an offer on record, rather than naming none',
    _said2.get('offer'), 'not kept: --no-journal')
 

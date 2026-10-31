@@ -1674,6 +1674,18 @@ try:
         _fh.write(_jpeg)
     with open(os.path.join(_rig, 'mapbands', 'off0.json'), 'w') as _fh:
         json.dump({'offerId': 'off0', 'pickup': 'MAPBANDSIDECAR'}, _fh)
+    # ...and a 📷 Snap's richer files (EXPERIMENTAL, 31 Oct): addresses and
+    # positions, local to the rig like the bands.
+    _sdir = os.path.join(_rig, 'snaps', '2026-10-31_12-00-00')
+    os.makedirs(_sdir)
+    for _f in ('build.json', 'held.json', 'searches.json', 'mapwalk.json', 'gps.json',
+               'health.json', 'reads.json'):
+        with open(os.path.join(_sdir, _f), 'w') as _fh:
+            json.dump({'secret': 'SNAPEXTRASECRET'}, _fh)
+    with open(os.path.join(_sdir, 'journal-tail.jsonl'), 'w') as _fh:
+        _fh.write('{"x": "SNAPEXTRASECRET"}\n')
+    with open(os.path.join(_sdir, 'frame.jpg'), 'wb') as _fh:
+        _fh.write(b'\xff\xd8\xff\xe0SNAPFRAMESECRET\xff\xd9')
     import io as _io
     _argv, _err = sys.argv, sys.stderr
     sys.argv = ['sync', '--to', _rec.base, '--journal', _rj, '--quiet', '--config', _cfg,
@@ -1688,6 +1700,10 @@ try:
     _all = b''.join(p.encode() + b for p, b in _rec.seen)
     eq('...and no map band, sidecar or folder name in anything it sent',
        [w for w in (b'\xff\xd8\xff', b'MAPBANDSECRET', b'MAPBANDSIDECAR', b'mapbands')
+        if w in _all], [])
+    eq('...nor any of a snap\'s richer files: frame, reads, searches, the held list, the '
+       'journal tail, the GPS and the health',
+       [w for w in (b'SNAPEXTRASECRET', b'SNAPFRAMESECRET', b'snaps', b'journal-tail')
         if w in _all], [])
 finally:
     _rec.close()

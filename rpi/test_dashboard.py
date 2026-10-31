@@ -5121,8 +5121,11 @@ const framed = (page) => page.waitForFunction(
         // ...and the pickup's own pin, which the server's restaurant guard
         // (pickupNearEnd) is fed from: POST /api/held-pickup.
         const heldPickupPosts = [];
+        // ...and the walk's summary, for a 📷 Snap's mapwalk.json.
+        const mapWalkPosts = [];
         page.on('request', (q) => {
           const p = new URL(q.url()).pathname;
+          if (/\/api\/mapwalk$/.test(p)) mapWalkPosts.push(q.postData());
           if (/\/api\/held-end$/.test(p)) heldEndPosts.push(q.postData());
           if (/\/api\/held-pickup$/.test(p)) heldPickupPosts.push(q.postData());
         });
@@ -5159,6 +5162,7 @@ const framed = (page) => page.waitForFunction(
         r.heldPickSeen = relayAsked.filter((u) => /street=1985/.test(u));
         r.heldPickPosts = heldEndPosts.slice();
         r.heldPickupPosts = heldPickupPosts.map((p) => JSON.parse(p || 'null'));
+        r.mapWalkPosts = mapWalkPosts.map((p) => JSON.parse(p || 'null'));
         // ...and the next card, the same order still held: the restaurant
         // is where that order is collected from whatever card is up.
         await page.evaluate((SQ) => {
@@ -8845,8 +8849,12 @@ try:
         % _br.get('said'), 'route skips 1 dropoff, not found' in (_br.get('said') or ''))
     ok_('[batch run] ...searched each dropoff on the NucBox by its street (%r)' % _br.get('asked'),
         '77 Birch Ln' in (_br.get('asked') or []) and '4821 Kestrel Dr' in (_br.get('asked') or []))
+    # ...but for the walk's own summary for a 📷 Snap (POST /api/mapwalk,
+    # EXPERIMENTAL): kept in the rig's memory for the next snap's mapwalk.json
+    # and read back by nothing that searches, pins or drops.
     eq('[batch run] ...and nothing about those dropoffs left the page: drawing only',
-       [x for x in _br.get('sent') or [] if 'Kestrel' in x or 'Birch' in x], [])
+       [x for x in _br.get('sent') or [] if ('Kestrel' in x or 'Birch' in x)
+        and '/api/mapwalk ' not in x], [])
     _bp = _br.get('passed') or {}
     eq('[drop passed] the car at D2\'s door, the pickup made, then 0.41 mi on: D2 is off the '
        'run, car -> the end along the road',
@@ -11135,6 +11143,17 @@ try:
     # drop's restaurant guard (pickupNearEnd in server.js) is fed from: with
     # no post, a door 50-75 m from the restaurant arms and drops the order as
     # the car leaves with the food. Nothing checked that the page sent it.
+    # Each settled walk is summed up and posted for a 📷 Snap's mapwalk.json
+    # (EXPERIMENTAL): its marks with their kind, and the caption it drew.
+    _mw = [p for p in both.get('mapWalkPosts') or [] if p]
+    ok_('a settled Map view walk is posted to /api/mapwalk with its marks, each with its '
+        'kind, and its caption (%r)' % (_mw[-1:],),
+        _mw and all(isinstance(p.get('points'), list) and p.get('points')
+                    and all(q.get('kind') in ('car', 'door pin', 'area', 'band', 'corner',
+                                              'street', 'guess') for q in p['points'])
+                    and isinstance(p.get('caption'), str) and isinstance(p.get('skipped'), list)
+                    for p in _mw)
+        and any(q.get('kind') == 'door pin' for p in _mw for q in p['points']))
     _pp = [p for p in both.get('heldPickupPosts') or [] if p]
     ok_('...and its pin is sent to the server as the held order\'s pickup, for the '
         'restaurant guard (%r)' % (_pp,),

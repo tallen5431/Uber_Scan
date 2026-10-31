@@ -8317,6 +8317,8 @@
     var numberOf = {};
     if (order) runKeys.forEach(function (q, i) { numberOf[q] = String(order.stops[i]); });
     var bounds = [];
+    // ...and every mark put down, for a 📷 Snap's mapwalk.json (postWalk).
+    var walkPts = [];
     /* ...and what the view frames: the car and every stop of the run with
        the new pickup among them — the question the driver opened the map
        to see. Not the new job's own end, which is past where the figure
@@ -8332,6 +8334,7 @@
        over whatever the ring shows of the map. */
     function put(at, colour, label, name, ring, letter, how) {
       if (!at) return;
+      walkPts.push(walkPoint(at, label, name, letter, colour));
       var faded = !!(how && how.faded);
       if (!(how && how.aside)) frame.push([at.lat, at.lon]);
       mapDot(at, colour, label, name, ring, letter, faded).addTo(mapLayer);
@@ -8703,10 +8706,64 @@
       aboutAreas.push([shortPlace(pa.q, DISC_PLACE_SHOWN), MV.areaNote(pa.at, true), pa.at]);
     });
     mapDrew(MV.routeSaid ? MV.routeSaid(ans.said, ladder.notes, aboutAreas) : ans.said);
+    // ...and what this walk drew, told to the server for a 📷 Snap. Guarded:
+    // a summary that throws costs the summary alone.
+    try {
+      postWalk(want, found, walkPts, ladder);
+    } catch (e) {
+      if (window.console) console.error('summing up the walk for a snap:', e);
+    }
     // ...and the card's line, off the same answer: with the press behind it
     // this walk may have asked the public map too, which the card's own walk
     // never does, so this one is the card's answer from here on (wayAnswered).
     wayAnswered(want.key, ans, 'map');
+  }
+
+  /* --- what Map view drew, for a 📷 Snap (EXPERIMENTAL; the owner, 31 Oct
+     2026: "Yes add all of them") -------------------------------------------
+     Each settled walk is summed up — every mark put down, what kind of place
+     it is, each place asked about and not drawn and why, and the caption —
+     and posted to /api/mapwalk, which keeps the newest in memory for the next
+     snap's mapwalk.json and writes nothing. Fire and forget: a lost post costs
+     only that summary. Drawing only; nothing here is read back by the map. */
+  var WALK_POST_MAX = 30000;
+  function walkKind(at, label, letter) {
+    var said = String(label || '');
+    if (at.band) return 'band';
+    if (/best guess/.test(said)) return 'guess';
+    if (at.rough) return 'street';
+    if (at.corner || /corner/i.test(said)) return 'corner';
+    if (letter === '\u2248' || at.approx) return 'area';
+    if (/where you were/.test(said)) return 'car';
+    return 'door pin';
+  }
+  function walkPoint(at, label, name, letter, colour) {
+    var r5 = function (v) { return typeof v === 'number' ? Math.round(v * 1e5) / 1e5 : null; };
+    return { lat: r5(at.lat), lon: r5(at.lon), kind: walkKind(at, label, letter),
+             letter: letter || null, name: name ? String(name).slice(0, 80) : null,
+             said: String(label || '').slice(0, 160), wrong: colour === '#f31260' };
+  }
+  function postWalk(want, found, pts, ladder) {
+    var skipped = (want.names || []).filter(function (q) { return !found[q]; })
+      .map(function (q) { return { q: String(q).slice(0, 80), why: 'not found' }; });
+    (ladder.drops || []).forEach(function (d) {
+      if (d && !d.at) {
+        skipped.push({ q: String(d.q || d.name || '').slice(0, 80),
+                       why: 'a run door the walk could not place: the run skips it' });
+      }
+    });
+    var body = { v: 1, at: Date.now(), key: String(want.key || '').slice(0, 200),
+                 caption: String(captionSaid || lastLine || '').slice(0, 600),
+                 hat: String(viewNote.textContent || '').slice(0, 300),
+                 points: pts.slice(0, 40), skipped: skipped.slice(0, 20) };
+    var text = JSON.stringify(body);
+    if (text.length > WALK_POST_MAX) {
+      body.points = body.points.slice(0, 10);
+      body.cut = true;
+      text = JSON.stringify(body);
+    }
+    ask('/api/mapwalk', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                          body: text }).catch(function () {});
   }
 
   /* The one line of words under the map, and the only figure this mode

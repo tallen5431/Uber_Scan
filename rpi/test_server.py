@@ -3750,6 +3750,12 @@ def _snapper(case, env, cwd=None):
     return proc, url, os.path.join(home, 'snaps'), log
 
 
+# The richer snap's files the server writes into every snap (EXPERIMENTAL;
+# keepSnapExtras), which the checks below that list a snap's files allow for.
+_RXS = ['build.json', 'gps.json', 'health.json', 'held.json', 'journal-tail.jsonl',
+        'mapwalk.json', 'searches.json']
+
+
 def _snap(url, timeout=20):
     req = urllib.request.Request(url + '/api/snap', data=b'', method='POST')
     try:
@@ -3926,7 +3932,8 @@ try:
        [(s['name'], sorted((f['file'], f['bytes']) for f in s['files'])) for s in _list['snaps']],
        [(_name, sorted([('panel.png', len(_PNG)), ('camera.jpg', len(_frame_bytes)),
                         ('status.json', _size(os.path.join(_dir, 'status.json'))),
-                        ('snap.json', _size(os.path.join(_dir, 'snap.json')))]))])
+                        ('snap.json', _size(os.path.join(_dir, 'snap.json')))]
+                       + [(f, _size(os.path.join(_dir, f))) for f in _RXS]))])
     eq('...and says where they are on the rig', _list.get('where'), _snaps)
     # The default, with nothing set: what snaps.html tells the driver it keeps.
     eq('...and keeps the newest 100 unless told otherwise', _list.get('keep'), 100)
@@ -4465,7 +4472,7 @@ if _have_reader:
     os.makedirs(_rho)
     _rplan = os.path.join(_pdir, 'reader-plan.txt')
     with open(_rplan, 'w') as _fh:
-        _fh.write('agree disagree noread garbage none agree agree band')
+        _fh.write('agree disagree noread garbage none agree agree band rich')
     _rfake = os.path.join(_pdir, 'answers.py')
     with open(_rfake, 'w') as _fh:
         _fh.write('import json, os, sys, time\n'
@@ -4495,6 +4502,14 @@ if _have_reader:
                   '        now = time.time()\n'
                   '        if how == "garbage":\n'
                   '            open(os.path.join(folder, "reader.json"), "w").write("not json")\n'
+                  '        elif how == "rich":\n'
+                  '            rl = SP.ReadLog()\n'
+                  '            rl.add(now, "card box", {"text": "UberX $16.05", "ms": {"total": 900}, '
+                  '"parsed": {"pay": 16.05}})\n'
+                  '            SP.answer_snap(folder, last, SP.reader_record(last, now, '
+                  'offer_log=OnRecord("o-snap"), counters=SP.Health().counters(now)), '
+                  'reads=rl.snapshot(), threaded=True, frame={"frame": np.full((300, 2400, 3), 80, '
+                  'np.uint8), "at": now, "source": "sensor"})\n'
                   '        elif how == "band":\n'
                   '            import tempfile\n'
                   '            src = tempfile.mkdtemp()\n'
@@ -4536,7 +4551,7 @@ if _have_reader:
            ('o-snap', 'o-snap', None, 'saved — no camera picture: no camera picture yet'))
         eq('...and the two are listed and served with the rest',
            sorted(f['file'] for f in _listed(_u, _rep.get('name')).get('files') or []),
-           ['panel.png', 'reader.jpg', 'reader.json', 'snap.json', 'status.json'])
+           sorted(['panel.png', 'reader.jpg', 'reader.json', 'snap.json', 'status.json'] + _RXS))
         _st, _body, _type = _fetch(_u, '/api/snaps/%s/reader.jpg' % _rep.get('name'))
         eq('...reader.jpg as the JPEG the scanner wrote',
            (_st, _type, _body == open(os.path.join(_dir, 'reader.jpg'), 'rb').read()),
@@ -4620,8 +4635,8 @@ if _have_reader:
            'saved — no camera picture: no camera picture yet')
         eq('...listed with its sidecar among the snap\'s files',
            sorted(f['file'] for f in _listed(_u, _name).get('files') or []),
-           ['map.jpg', 'map.json', 'panel.png', 'reader.jpg', 'reader.json', 'snap.json',
-            'status.json'])
+           sorted(['map.jpg', 'map.json', 'panel.png', 'reader.jpg', 'reader.json', 'snap.json',
+                   'status.json'] + _RXS))
         _st, _body, _type = _fetch(_u, '/api/snaps/%s/map.jpg' % _name)
         eq('...served as the JPEG the scanner copied',
            (_st, _type, _body == open(os.path.join(_dir, 'map.jpg'), 'rb').read()),
@@ -4630,6 +4645,32 @@ if _have_reader:
         _body = _body.decode('utf-8', 'replace') if isinstance(_body, bytes) else _body
         ok_('...and carried in the snap\'s bundle, picture and sidecar',
             _st == 200 and 'map.jpg — ' in _body and 'map.json — ' in _body)
+
+        # The richer snap (EXPERIMENTAL): the scanner's frame.jpg and
+        # reads.json, written on its thread before reader.json.
+        _code, _rep = _snap(_u)
+        _name = _rep.get('name') or '?'
+        _dir = os.path.join(_snaps, _name)
+        eq('a scanner that answers with its frame and reads leaves frame.jpg and reads.json',
+           [((_rep.get('extras') or {}).get(f) or {}).get('saved') for f in ('frame.jpg', 'reads.json')],
+           [True, True])
+        eq('...the frame scaled to 2000 px wide', (_json_in(_dir, 'reader.json') or {}).get('frame', {})
+           .get('width') if isinstance((_json_in(_dir, 'reader.json') or {}).get('frame'), dict) else None,
+           2000)
+        eq('...reads.json the ring as the scanner kept it',
+           [(r.get('kind'), r.get('pay')) for r in (_json_in(_dir, 'reads.json') or {}).get('reads') or []],
+           [('card box', 16.05)])
+        _hc = (_json_in(_dir, 'health.json') or {}).get('counters')
+        ok_('...health.json carrying the scanner\'s counters off reader.json (%r)' % (_hc,),
+            _hc and _hc == (_json_in(_dir, 'reader.json') or {}).get('health'))
+        eq('...nothing about them on the panel\'s line', _rep.get('said'),
+           'saved — no camera picture: no camera picture yet')
+        _st, _body, _type = _fetch(_u, '/api/snaps/bundle?snap=%s' % _name)
+        _body = _body.decode('utf-8', 'replace') if isinstance(_body, bytes) else _body
+        ok_('...and the bundle shows frame.jpg as a picture and reads.json as its text',
+            _st == 200 and re.search(r'<img src="data:image/jpeg;base64,[^"]+" alt="the camera\'s '
+                                     r'newest full-resolution frame">', _body)
+            and 'reads.json — ' in _body)
     finally:
         stop(_p)
 
@@ -4945,7 +4986,8 @@ try:
     no_('...and leaves no torn snap.json behind', os.path.exists(os.path.join(_dir, 'snap.json')))
     _first = _listed(_u, _rep.get('name'))
     eq('...so the list shows only the picture that was kept, and that nothing records the rest',
-       ([(f['file'], f['bytes']) for f in _first.get('files') or []], _first.get('said')),
+       ([(f['file'], f['bytes']) for f in _first.get('files') or [] if f['file'] not in _RXS],
+        _first.get('said')),
        ([('panel.png', len(_PNG))], 'no snap.json in this folder, so nothing says what is missing'))
     # ...but the journal does: its row is written either way, and says which
     # files went missing, snap.json among them.
@@ -5054,7 +5096,7 @@ def _records(text):
     return [(m.group(1).split(' — ')[0], _html.unescape(m.group(2)), base64.b64decode(m.group(4)),
              m.group(3)) for m in re.finditer(
         r'<details><summary>([^<]*)</summary>\n<pre>\n(.*?)</pre>\n<a download="([^"]+)" '
-        r'href="data:application/json;base64,([A-Za-z0-9+/=]*)">', text, re.S)]
+        r'href="data:application/[a-z-]+;base64,([A-Za-z0-9+/=]*)">', text, re.S)]
 
 
 def _raw(path):
@@ -5106,15 +5148,18 @@ try:
        [(f, b == _raw(os.path.join(_adir, f))) for f, b in _pictures(_text)],
        [('panel.png', True), ('camera.jpg', True), ('reader.jpg', True)])
     eq('...all three pictures before any record',
-       re.findall(r'<(?:figcaption|summary)>([a-z]+\.[a-z]+) — ', _text),
+       [f for f in re.findall(r'<(?:figcaption|summary)>([a-z-]+\.[a-z]+) — ', _text)
+        if f not in _RXS],
        ['panel.png', 'camera.jpg', 'reader.jpg', 'status.json', 'snap.json', 'reader.json'])
     _recs = _records(_text)
     eq('...and each record shown as its text, exactly, a leading line break and markup '
        'in it included',
-       [(f, shown.encode('utf-8') == _raw(os.path.join(_adir, f))) for f, shown, _s, _n in _recs],
+       [(f, shown.encode('utf-8') == _raw(os.path.join(_adir, f))) for f, shown, _s, _n in _recs
+        if f not in _RXS],
        [('status.json', True), ('snap.json', True), ('reader.json', True)])
     eq('...and carried again as the file itself, byte for byte, saved under the snap\'s name',
-       [(f, saved == _raw(os.path.join(_adir, f)), name) for f, _t, saved, name in _recs],
+       [(f, saved == _raw(os.path.join(_adir, f)), name) for f, _t, saved, name in _recs
+        if f not in _RXS],
        [(f, True, '%s-%s' % (_a, f)) for f in ('status.json', 'snap.json', 'reader.json')])
     # Markup in a record is text in the bundle. Written as it is, `<!--` would
     # open a comment that swallows the rest of the file, and the <pre> above
@@ -5327,7 +5372,8 @@ try:
     _st, _hd, _text = _bundle(_u, _n)
     eq('a file that cannot be read when a bundle is made is said in its place, the rest kept',
        (_st, re.findall(r'<p class="lost">([^<]*)</p>', _text),
-        [f for f, _x in _pictures(_text)], [f for f, _t, _s, _x in _records(_text)]),
+        [f for f, _x in _pictures(_text)],
+        [f for f, _t, _s, _x in _records(_text) if f not in _RXS]),
        (200, ['camera.jpg — the camera\'s last picture: could not be read when this file '
               'was made (EIO)'], ['panel.png'], ['status.json', 'snap.json']))
     _ndir = os.path.join(_snaps, _n)
@@ -5422,13 +5468,212 @@ try:
     eq('a bundle taken slowly reads the next snap only once the one before it has gone out, '
        'so one removed meanwhile is said in its place, file by file',
        (re.findall(r'<section id="([^"]+)">', _text),
-        re.findall(r'<p class="lost">([a-z]+\.[a-z]+) — [^<]*\((\w+)\)</p>', _text)),
+        [x for x in re.findall(r'<p class="lost">([a-z-]+\.[a-z]+) — [^<]*\((\w+)\)</p>', _text)
+         if x[0] not in _RXS]),
        ([_first, _second], [(f, 'ENOENT') for f in ('panel.png', 'camera.jpg', 'reader.jpg',
                                                      'status.json', 'snap.json', 'reader.json')
                             if f in _held]))
     ok_('...a snap with something in it to lose (%r)' % (_held,), len(_held) >= 3)
 finally:
     stop(_p)
+
+# --- the richer 📷 Snap (EXPERIMENTAL): what only the server knows -------------
+#
+# The owner, 31 Oct 2026: "Yes add all of them, fast track to experimental."
+# Every snap also keeps build.json, held.json, searches.json, mapwalk.json,
+# journal-tail.jsonl, gps.json and health.json (keepSnapExtras), none of them
+# a part: listed, served, bundled, said in snap.json's `extras`, each capped,
+# and a snap goes on without any that cannot be had. Map view's walk reaches
+# the server as POST /api/mapwalk, memory only and newest only.
+_RX = _RXS
+_rxfake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_rxbase = 'http://127.0.0.1:%d' % json.loads(_rxfake.stdout.readline())['port']
+# A scanner that only beats, every 30ms, with a fix and the Pi's figures.
+_rxbeat = os.path.join(_pdir, 'beats.py')
+with open(_rxbeat, 'w') as _fh:
+    _fh.write('import json, time\n'
+              'n = 0\n'
+              'while True:\n'
+              '    n += 1\n'
+              '    print(json.dumps({"alive": True, "at": int(time.time() * 1000), '
+              '"tooBright": False, "tooDim": False, "notSaving": None, "blind": None, '
+              '"gps": {"state": "ok", "ageSeconds": 0.5, "fix": {"lat": 33.95 + n * 1e-5, '
+              '"lon": -84.55, "gpsAge": 0.5, "gpsErr": 8.0, "gpsMode": 3, "gpsOk": True, '
+              '"freshFor": 19, "speed": 3.0, "driving": True}}, "cpuC": 61.5, '
+              '"throttled": "0x0", "heatGuard": False}), flush=True)\n'
+              '    time.sleep(0.03)\n')
+_rxhome = os.path.join(_pdir, 'rich')
+os.makedirs(_rxhome)
+# Eighty rows in the journal, ten of them `seen` rows of the last minutes,
+# each row big enough that fifty of them are past the cap.
+with open(os.path.join(_rxhome, 'journal.jsonl'), 'w') as _fh:
+    for _i in range(80):
+        _fh.write(json.dumps({'v': 1, 'kind': 'seen' if _i % 8 == 0 else 'tag',
+                              'id': 'rx-%d' % _i, 'seq': 1,
+                              'at': int(time.time() * 1000) - (80 - _i) * 1000,
+                              'medianMs': 1500, 'darkSkipped': 1,
+                              'pad': 'p' * 6000}) + '\n')
+_rp, _ru, _rsnaps, _rlog = _snapper('rich', {
+    'XDG_RUNTIME_DIR': _wl, 'PATH': _bins['grim'], 'SCANNER': '1',
+    'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _rxbeat, 'SNAP_RING_EVERY_MS': '100',
+    'NUCBOX_SEARCH': _rxbase, 'NUCBOX_TIMEOUT_MS': '800'})
+try:
+    # Before any walk: said as no page open.
+    time.sleep(0.8)
+    _code, _rep = _snap(_ru)
+    _rdir = os.path.join(_rsnaps, _rep.get('name') or '?')
+    eq('a richer snap is answered ok, its line unchanged by the extras',
+       (_code, _rep.get('ok'), 'build.json' in (_rep.get('said') or '')), (200, True, False))
+    eq('...and keeps each of the server\'s extras, saved, in snap.json\'s extras',
+       sorted(f for f, x in (_rep.get('extras') or {}).items() if x.get('saved')), _RX)
+    eq('...none of them a part', [p.get('file') for p in _rep.get('contents') or []
+                                  if p.get('file') in _RX], [])
+    _mw = _json_in(_rdir, 'mapwalk.json') or {}
+    ok_('mapwalk.json with no walk posted says the page is not open (%r)' % _mw.get('why'),
+        _mw.get('walk') is None and 'not open' in (_mw.get('why') or ''))
+    _b = _json_in(_rdir, 'build.json') or {}
+    _git = subprocess.run(['git', '-C', ROOT, 'log', '-1', '--format=%h%n%s'],
+                          capture_output=True, text=True).stdout.split('\n')
+    eq('build.json names the commit and its subject, as git says them',
+       (_b.get('commit'), _b.get('subject')), (_git[0] or None, _git[1] or None))
+    ok_('...and when the server started, and how long it and the machine have been up (%r)' % _b,
+        isinstance(_b.get('startedAt'), int) and isinstance(_b.get('upMs'), int)
+        and _b['upMs'] >= 0 and isinstance(_b.get('machineUpS'), int))
+    _gj = _json_in(_rdir, 'gps.json') or {}
+    _gat = [f.get('at') for f in _gj.get('fixes') or []]
+    ok_('gps.json holds the beats\' fixes, thinned to one per SNAP_RING_EVERY_MS (%d, %r)'
+        % (len(_gat), _gat[:4]),
+        len(_gat) >= 3 and all(b - a >= 100 for a, b in zip(_gat, _gat[1:]))
+        and all(isinstance(f.get('lat'), float) for f in _gj['fixes']))
+    _hj = _json_in(_rdir, 'health.json') or {}
+    ok_('health.json holds the beats\' temperature and throttling (%r)' % (_hj.get('beats') or [None])[:1],
+        _hj.get('beats') and all(b.get('cpuC') == 61.5 and b.get('throttled') == '0x0'
+                                 for b in _hj['beats']))
+    eq('...and the `seen` rows of the last ten minutes among the journal\'s last fifty',
+       sorted(r.get('id') for r in _hj.get('seen') or []),
+       sorted('rx-%d' % i for i in range(32, 80, 8)))
+    _tail = open(os.path.join(_rdir, 'journal-tail.jsonl')).read().splitlines()
+    ok_('journal-tail.jsonl is the journal\'s last rows, cut to fit its cap (%d rows, %d bytes)'
+        % (len(_tail), _size(os.path.join(_rdir, 'journal-tail.jsonl'))),
+        0 < len(_tail) <= 50 and json.loads(_tail[-1]).get('id') == 'rx-79'
+        and _size(os.path.join(_rdir, 'journal-tail.jsonl')) <= 200 * 1024)
+    _hd = _json_in(_rdir, 'held.json') or {}
+    eq('held.json says nothing held, in its shape',
+       (sorted(_hd.keys()), _hd.get('holding'), _hd.get('orders')),
+       (['at', 'finishing', 'holding', 'orders', 'planner', 'v'], None, []))
+
+    # A walk posted, then another: the newest is what the next snap keeps.
+    _w1 = {'v': 1, 'key': 'k1', 'caption': 'first', 'points': [{'kind': 'door pin'}]}
+    _w2 = {'v': 1, 'key': 'k2', 'caption': 'ON THE WAY', 'hat': 'ON THE WAY',
+           'points': [{'kind': 'car'}, {'kind': 'area'}], 'skipped': [{'q': 'x', 'why': 'not found'}]}
+    eq('POST /api/mapwalk keeps a walk', post(_ru, '/api/mapwalk', _w1), (200, {'ok': True}))
+    eq('...and another', post(_ru, '/api/mapwalk', _w2)[0], 200)
+    _req = urllib.request.Request(_ru + '/api/mapwalk', data=b'not json', method='POST')
+    try:
+        _bad = urllib.request.urlopen(_req, timeout=5).status
+    except urllib.error.HTTPError as e:
+        _bad = e.code
+    eq('...refuses one that is not JSON', _bad, 400)
+    _req = urllib.request.Request(_ru + '/api/mapwalk', data=b'{"x": "' + b'y' * 40000 + b'"}',
+                                  method='POST')
+    try:
+        _big = urllib.request.urlopen(_req, timeout=5).status
+    except urllib.error.HTTPError as e:
+        _big = e.code
+    except Exception:
+        _big = 'cut'
+    ok_('...and one past its cap (%r)' % _big, _big in (413, 'cut'))
+    no_('...writing no file anywhere for it',
+        [f for f in os.listdir(_rxhome) if 'walk' in f])
+
+    # An order held, searched for on the fake NucBox: searches.json says what
+    # was asked and what came back.
+    _o = {'id': 'rx-door', 'pay': 12.0, 'minutes': 40.0, 'billedMinutes': 40.0, 'miles': 5.0,
+          'cost': 1.75, 'dropoff': '1985 Cobb Parkway, Kennesaw', 'lat': 33.9526,
+          'lon': -84.5499, 'gpsOk': True, 'gpsErr': 10.0, 'gpsMode': 3, 'gpsAge': 0.5,
+          'hasTotal': True, 'whole': True, 'multiOrder': False}
+    post(_ru, '/api/offers/mark', {'id': 'rx-door', 'accepted': True, 'offer': _o})
+    for _ in range(120):
+        _hh = get(_ru, '/api/status').get('holding') or {}
+        if _hh.get('endPinned') or _hh.get('endWhy'):
+            break
+        time.sleep(0.05)
+    _code, _rep = _snap(_ru)
+    _rdir = os.path.join(_rsnaps, _rep.get('name') or '?')
+    _mw = _json_in(_rdir, 'mapwalk.json') or {}
+    eq('mapwalk.json is the newest walk posted, and only that',
+       ((_mw.get('walk') or {}).get('key'), (_mw.get('walk') or {}).get('caption'),
+        isinstance(_mw.get('ageMs'), int)), ('k2', 'ON THE WAY', True))
+    _sj = _json_in(_rdir, 'searches.json') or {}
+    _end = ((_sj.get('orders') or [{}])[0].get('end') or {})
+    ok_('searches.json names the held order\'s end search: its key, plan and disc (%r)'
+        % {k: _end.get(k) for k in ('key', 'plan', 'disc')},
+        (_sj.get('orders') or [{}])[0].get('held') is True
+        and 'Cobb Parkway' in (_end.get('key') or '') and (_end.get('plan') or {}).get('door')
+        and (_end.get('disc') or {}).get('miles'))
+    ok_('...each question asked and the candidates it returned, trimmed (%r)'
+        % (_end.get('asks') or [])[:1],
+        _end.get('asks') and len(_end['asks']) <= 5
+        and all(len(a.get('cands') or []) <= 5 for a in _end['asks'])
+        and any((a.get('cands') or [{}])[0].get('lat') for a in _end['asks']))
+    eq('...and the verdict, as pinInDisc gave it', ((_end.get('verdict') or {}).get('pinned'),
+                                                      (_end.get('verdict') or {}).get('by')),
+       (_hh.get('endPinned') is True, 'server' if _hh.get('endPinned') else None))
+    _hd = _json_in(_rdir, 'held.json') or {}
+    ok_('held.json has the held list as stored, and each order\'s clocks and owners (%r)'
+        % (_hd.get('orders') or [None])[:1],
+        len((_hd.get('holding') or {}).get('orders') or []) == 1
+        and (_hd.get('orders') or [{}])[0].get('holdId', '').startswith('rx-door@')
+        and isinstance((_hd.get('orders') or [{}])[0].get('holdEnds'), int)
+        and 'trip' in (_hd.get('orders') or [{}])[0] and 'tripTill' in (_hd.get('orders') or [{}])[0])
+    ok_('...and the finishing watches', isinstance(_hd.get('finishing'), list))
+
+    # Listed, served, bundled.
+    _names = sorted(f['file'] for f in _listed(_ru, _rep.get('name')).get('files') or [])
+    ok_('the list names every extra among the snap\'s files (%r)' % _names,
+        all(f in _names for f in _RX))
+    _st, _body, _type = _fetch(_ru, '/api/snaps/%s/held.json' % _rep.get('name'))
+    eq('...each served through /api/snaps, the JSON as JSON',
+       (_st, _type), (200, 'application/json; charset=utf-8'))
+    _st, _body, _type = _fetch(_ru, '/api/snaps/%s/journal-tail.jsonl' % _rep.get('name'))
+    eq('...and the journal tail as NDJSON', (_st, _type), (200, 'application/x-ndjson; charset=utf-8'))
+    _st, _body, _type = _fetch(_ru, '/api/snaps/bundle?snap=%s' % _rep.get('name'))
+    _body = _body.decode('utf-8', 'replace')
+    ok_('...and the bundle carries each as its text',
+        _st == 200 and all('%s — ' % f in _body for f in _RX))
+    ok_('...under the build it was taken on, at the top',
+        ('<p class="build">Build: %s' % _git[0]) in _body
+        and _body.index('class="build"') < _body.index('build.json — '))
+    ok_('...each extra well under its cap, together under 1.5 MB (%d bytes)'
+        % sum(_size(os.path.join(_rdir, f)) for f in _RX),
+        all(_size(os.path.join(_rdir, f)) <= 200 * 1024 for f in _RX)
+        and sum(_size(os.path.join(_rdir, f)) for f in _RX) < 1500000)
+finally:
+    stop(_rp)
+
+# ...a held list that cannot be read and a journal that is gone: said, and the
+# snap goes on with the rest, the failure logged once.
+_rp, _ru, _rsnaps, _rlog = _snapper('rich-broken', {'XDG_RUNTIME_DIR': _wl,
+                                                   'PATH': _bins['grim']})
+try:
+    _bh = os.path.join(os.path.dirname(_rsnaps), 'holding.json')
+    os.makedirs(_bh)
+    os.remove(os.path.join(os.path.dirname(_rsnaps), 'journal.jsonl'))
+    _code, _rep = _snap(_ru)
+    _rdir = os.path.join(_rsnaps, _rep.get('name') or '?')
+    eq('a held list that cannot be read is said in held.json, and the snap goes on',
+       (_code, (_json_in(_rdir, 'held.json') or {}).get('holding')), (200, {'unreadable': 'EISDIR'}))
+    eq('...a journal that is not there leaves an empty tail, said in extras',
+       (_size(os.path.join(_rdir, 'journal-tail.jsonl')),
+        ((_rep.get('extras') or {}).get('journal-tail.jsonl') or {}).get('note')),
+       (0, 'no journal yet'))
+    eq('...and with no scanner here, the scanner\'s two are said not to apply',
+       [((_rep.get('extras') or {}).get(f) or {}).get('why') for f in ('frame.jpg', 'reads.json')],
+       ['no scanner runs on this machine'] * 2)
+finally:
+    stop(_rp)
+    _rxfake.terminate()
 
 # --- ...and the hang pressed at the top, on the deadline nobody set -----------
 try:

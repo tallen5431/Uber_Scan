@@ -4703,6 +4703,127 @@ ok_('...and a window of nothing but skipped whole-screen reads is still said (%r
 eq('read_why names it for the sample line', SP.read_why(_bo, _bo['parsed']),
    'too dark to read, so not read')
 
+# --- the richer 📷 Snap (EXPERIMENTAL): reads.json and frame.jpg -------------
+#
+# The owner, 31 Oct 2026: "Yes add all of them". The scanner's two: its last
+# ten reads, each bounded, and its newest full-resolution frame, downscaled
+# only past SNAP_FRAME_MAX_W and held under SNAP_FRAME_MAX_BYTES; written on a
+# thread when asked, reader.json still last; a piece that cannot be written
+# said in reader.json, the rest going on.
+_rl = SP.ReadLog()
+for _i in range(14):
+    _rl.add(1790000000.0 + _i, 'card box',
+            {'text': 'UberX $%d.00 ' % _i + 'x' * 3000, 'cropFrom': 'found',
+             'ms': {'total': 1234.4},
+             'parsed': {'pay': float(_i), 'minutes': 20, 'miles': 5.5,
+                        'pickup': 'Store', 'dropoff': None}})
+_rl.add(1790000100.0, 'press', {'text': '', 'skipped': 'dark'}, skipped_dark=True)
+_rl.add(1790000101.0, 'map label', text='Customer: Elm St', parsed={}, ms=40)
+_rs = _rl.snapshot()
+eq('reads.json keeps the last ten reads', (len(_rs), _rs[0]['pay']), (10, 6.0))
+eq('...each with its shape', sorted(_rs[0].keys()),
+   sorted(['at', 'kind', 'screen', 'cropFrom', 'ms', 'skippedDark', 'text', 'textCut',
+           'pay', 'minutes', 'miles', 'pickup', 'dropoff']))
+eq('...its text cut to SNAP_READ_TEXT_MAX and said cut',
+   (len(_rs[0]['text']), _rs[0]['textCut']), (SP.SNAP_READ_TEXT_MAX, True))
+eq('...the kinds as the loop named them, a dark skip flagged',
+   [(r['kind'], r['skippedDark']) for r in _rs[-2:]], [('press', True), ('map label', False)])
+eq('...and the time in ms, the read time rounded', (_rs[0]['at'], _rs[0]['ms']),
+   (1790000006000, 1234))
+
+_big = np.random.RandomState(3).randint(0, 255, (1500, 3000, 3)).astype(np.uint8)
+_fb, _fi = SP.snap_frame_jpeg(_big)
+ok_('a frame wider than SNAP_FRAME_MAX_W is scaled down to it (%r)' % (_fi,),
+    _fb is not None and _fi['width'] == SP.SNAP_FRAME_MAX_W and _fi['height'] == 1000
+    and _fi['sourceWidth'] == 3000)
+ok_('...and held under SNAP_FRAME_MAX_BYTES, noise and all (%r bytes)' % (_fi or {}).get('bytes'),
+    _fb is not None and len(_fb) <= SP.SNAP_FRAME_MAX_BYTES)
+_small = np.full((480, 640, 3), 120, np.uint8)
+_sb, _si = SP.snap_frame_jpeg(_small)
+eq('...one narrower is kept at its size, at quality 85',
+   (_si['width'], _si['height'], _si['quality']), (640, 480, SP.SNAP_FRAME_QUALITY))
+eq('...and no frame is said, not raised', SP.snap_frame_jpeg(None), (None, 'no frame held yet'))
+eq('...nor a frame over the cap however it is encoded',
+   SP.snap_frame_jpeg(_big, max_bytes=100)[0], None)
+
+_rich = tempfile.mkdtemp()
+try:
+    _rec = {'v': 1}
+    SP.answer_snap(_rich, None, _rec, reads=_rs,
+                   frame={'frame': _small, 'at': time.time() - 2, 'source': 'sensor'})
+    eq('a richer snap writes reads.json and frame.jpg beside reader.json',
+       sorted(os.listdir(_rich)), ['frame.jpg', 'reader.json', 'reads.json'])
+    _rj = json.load(open(os.path.join(_rich, 'reads.json')))
+    eq('...reads.json the ring as kept', (_rj['keep'], len(_rj['reads'])), (10, 10))
+    _said_rich = json.load(open(os.path.join(_rich, 'reader.json')))
+    eq('...and reader.json says both',
+       ((_said_rich.get('reads') or {}).get('n'), (_said_rich.get('frame') or {}).get('file'),
+        (_said_rich.get('frame') or {}).get('source')), (10, 'frame.jpg', 'sensor'))
+    ok_('...frame.jpg a JPEG of the frame',
+        cv2.imread(os.path.join(_rich, 'frame.jpg')).shape == (480, 640, 3))
+    ok_('...the whole richer answer well under 1.5 MB (%d bytes)'
+        % sum(os.path.getsize(os.path.join(_rich, f)) for f in os.listdir(_rich)),
+        sum(os.path.getsize(os.path.join(_rich, f)) for f in os.listdir(_rich)) < 1500000)
+
+    # On a thread: answered at once, reader.json last.
+    _rich2 = os.path.join(_rich, 'threaded')
+    os.makedirs(_rich2)
+    eq('threaded, the answer is given at once',
+       SP.answer_snap(_rich2, None, {'v': 1}, reads=[], threaded=True,
+                      frame={'frame': _big, 'at': time.time(), 'source': 'sensor'}), True)
+    for _ in range(100):
+        if os.path.exists(os.path.join(_rich2, 'reader.json')):
+            break
+        time.sleep(0.05)
+    eq('...and the thread writes frame.jpg, then reader.json',
+       sorted(os.listdir(_rich2)), ['frame.jpg', 'reader.json', 'reads.json'])
+
+    # No frame held yet: said, and the snap goes on.
+    _rich3 = os.path.join(_rich, 'noframe')
+    os.makedirs(_rich3)
+    SP.answer_snap(_rich3, None, {'v': 1}, reads=[],
+                   frame={'frame': None, 'at': None, 'source': None})
+    eq('with no frame held yet, reader.json says so and the rest is written',
+       (sorted(os.listdir(_rich3)),
+        json.load(open(os.path.join(_rich3, 'reader.json'))).get('frame')),
+       (['reader.json', 'reads.json'], 'no frame held yet'))
+
+    # An encoding past its cap is dropped and said.
+    _ticks = iter([0.0, SP.SNAP_FRAME_CAP_S + 1.0])
+    _rich4 = os.path.join(_rich, 'slow')
+    os.makedirs(_rich4)
+    SP.answer_snap(_rich4, None, {'v': 1}, frame={'frame': _small, 'at': None},
+                   clock=lambda: next(_ticks))
+    ok_('a frame that took past SNAP_FRAME_CAP_S to encode is dropped and said (%r)'
+        % json.load(open(os.path.join(_rich4, 'reader.json'))).get('frame'),
+        'frame.jpg' not in os.listdir(_rich4)
+        and 'dropped' in json.load(open(os.path.join(_rich4, 'reader.json'))).get('frame', ''))
+
+    # A piece that cannot be written: said in reader.json and logged once,
+    # and reader.json still goes.
+    _rich5 = os.path.join(_rich, 'blocked')
+    os.makedirs(_rich5)
+    os.makedirs(os.path.join(_rich5, 'reads.json.part'))
+    os.makedirs(os.path.join(_rich5, 'frame.jpg.part'))
+    _blog = []
+    _was = SP.log
+    SP.log = _blog.append
+    try:
+        SP.answer_snap(_rich5, None, {'v': 1}, reads=[], frame={'frame': _small, 'at': None})
+        SP.answer_snap(_rich5, None, {'v': 1}, reads=[], frame={'frame': _small, 'at': None})
+    finally:
+        SP.log = _was
+    _b5 = json.load(open(os.path.join(_rich5, 'reader.json')))
+    ok_('reads.json and frame.jpg that cannot be written are said in reader.json (%r, %r)'
+        % (_b5.get('reads'), _b5.get('frame')),
+        str(_b5.get('reads')).startswith('could not write reads.json')
+        and str(_b5.get('frame')).startswith('could not write frame.jpg'))
+    eq('...each logged once however many snaps hit it',
+       (sum('could not write reads.json' in l for l in _blog),
+        sum('could not write frame.jpg' in l for l in _blog)), (1, 1))
+finally:
+    shutil.rmtree(_rich, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d main-loop checks passed' % ok)
 sys.exit(1 if bad else 0)

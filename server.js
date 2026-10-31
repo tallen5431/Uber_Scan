@@ -62,6 +62,7 @@ var TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.jsonl': 'application/x-ndjson; charset=utf-8',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -706,6 +707,8 @@ function startScanner() {
           // ...and the orders Drop let go of, finished quietly from the same
           // fix (finishStep): nothing on the beat is changed by it.
           finishStep(read, Date.now());
+          // ...and kept, thinned, for a 📷 Snap's gps.json and health.json.
+          snapBeatKeep(read, Date.now());
           // ...and the NucBox services not answering, by name (nbxDown).
           read.nucboxDown = nbxDown();
           // ...and the rest of the GPS drop's state, on the same beat. Between
@@ -3107,6 +3110,7 @@ function endHold(key) {
  * armed. Read only beside endWhyFor (heldEndState), so a changed dropoff
  * does not wear the old area; any refusal without one takes it off. */
 function refuseHeldEnd(h, why, area) {
+  memoVerdict(holdIdOf(h), undefined, { pinned: false, why: why, area: area || null });
   h.endWhy = why;
   h.endWhyFor = endTextOf(h);
   if (area && isFinite(area.lat) && isFinite(area.lon)) {
@@ -3192,6 +3196,10 @@ function bandHeldNow(h) {
     if (finished) return;
     finished = true;
     clearTimeout(timer);
+    memoSafe(function () {
+      memoSide(memoId(key), undefined).band = { at: Date.now(), cands: cands.length,
+        area: area ? { lat: area.lat, lon: area.lon, cardMi: area.cardMi, n: area.n } : null };
+    });
     var now = endHold(key);
     if (!area || !now || heldEndPin(now) || now.endWhy !== why || now.endWhyFor !== whyFor) return;
     refuseHeldEnd(now, why, area);
@@ -3241,10 +3249,15 @@ var END_WHY = { nodoor: 'street found, not that door', none: 'not inside the car
  * down" (nbxHealth), not a word on one order's end. */
 function endAsk(key, attempt, target, answered, read, unanswered) {
   read = read || function (body) { return Array.isArray(body) ? nbxHits(body) : null; };
-  if (nbxCache.has(target)) return answered(nbxCache.get(target));
+  if (nbxCache.has(target)) {
+    memoAsk(memoId(key), undefined, target, nbxCache.get(target));
+    return answered(nbxCache.get(target));
+  }
   nbxAsk(target, function (err, body) {
     var out = err ? null : read(body);
     if (!err && !out) err = 'not an answer';
+    // ...and kept for a 📷 Snap's searches.json (searchMemo).
+    memoAsk(memoId(key), undefined, target, out, err);
     if (err) {
       var now = endHold(key);
       if (!now || heldEndPin(now)) return;
@@ -3270,6 +3283,8 @@ function endAsk(key, attempt, target, answered, read, unanswered) {
  * restaurant guard (pickupNearEnd) and the customer guard (notOneCustomer)
  * hold it to the same rules whoever chose it. */
 function pinHeldEnd(h, at, by, asked, via) {
+  memoVerdict(holdIdOf(h), undefined, { pinned: true, by: by, asked: asked || null,
+                                        via: via || null, lat: at.lat, lon: at.lon });
   h.endPin = { dropoff: h.dropoff, lat: at.lat, lon: at.lon,
                doorLevel: true, pinnedAt: Date.now(), by: by };
   // ...and the street the door was found by when it was not the dropoff's
@@ -3293,6 +3308,8 @@ function searchHeldEnd(key, attempt) {
   var plan = MV.searchPlan(h.dropoff);
   if (!plan || plan.kind !== 'street' || !plan.door) return refuseHeldEnd(h, 'no house number');
   var disc = heldDisc(h);
+  memoStart(holdIdOf(h), undefined, { key: key, attempt: attempt, dropoff: h.dropoff,
+                                      place: placeOf(h), plan: plan, disc: disc });
   if (!disc) return refuseHeldEnd(h, 'no card fix');
   if (!nbxTerm(plan.street)) return refuseHeldEnd(h, 'no house number');
   // Every question through endAsk (nbxCache first, a NucBox not answering
@@ -3401,6 +3418,7 @@ function doorChain(plan, disc, named, ask, done) {
  * not the door, and the phone printed a place for the stop: the place is
  * asked next, in the same disc (the owner, 17 Oct). */
 function settleHeldEnd(key, attempt, disc, res, asked, via) {
+  memoPick(memoId(key), undefined, 'door' + (via ? ' (' + via + ')' : ''), res);
   var now = endHold(key);
   if (!now || heldEndPin(now)) return;
   // (`res.area`, the street's general area, rides down both to the refusal
@@ -3453,6 +3471,7 @@ function searchHeldPlace(key, attempt, disc, asked, area) {
     var now = endHold(key);
     if (!now || heldEndPin(now)) return;
     var res = MV.pickPlace(out.hits, disc, placeOf(now), out.cutAt);
+    memoPick(holdIdOf(now), undefined, 'place', res);
     if (!res.at) {
       return searchHeldStreet(key, attempt, disc, asked, END_WHY[res.why] || END_WHY.noplace,
                               area);
@@ -3762,6 +3781,8 @@ function searchHeldPickup(id, a, attempt) {
   var plan = pickupDoorPlan(a.q);
   var disc = heldDisc(h);
   var said = plan ? nbxTerm(plan.street) : null;
+  memoStart(id, a.q, { from: a.from, attempt: attempt, plan: plan, disc: disc,
+                       skipped: !said ? 'no street to ask' : !disc ? 'no disc' : null });
   if (!said || !disc) return;
   doorChain(plan, disc, false, function (target, read, answered) {
     pickupAsk(id, a, attempt, target, answered);
@@ -3778,6 +3799,8 @@ function searchHeldPickupName(id, a, attempt, h) {
   var plan = pickupNamePlan(a.q);
   var disc = heldDisc(h);
   var said = plan ? nbxTerm(plan.q) : null;
+  memoStart(id, a.q, { from: a.from, byName: true, attempt: attempt, plan: plan, disc: disc,
+                       skipped: !said ? 'no name to ask' : !disc ? 'no disc' : null });
   if (!said || !disc) return;
   var target = nbxSearchTarget('q', said, MV.discBox(disc));
   pickupAsk(id, a, attempt, target, function (out) {
@@ -3794,12 +3817,14 @@ function searchHeldPickupName(id, a, attempt, h) {
  * place that rule is. */
 function pickupAsk(id, a, attempt, target, answered) {
   function go(out) {
+    memoAsk(id, a.q, target, out);
     if (pickHold(id)) answered(out);
   }
   if (nbxCache.has(target)) return go(nbxCache.get(target));
   nbxAsk(target, function (err, body) {
     if (!err && !Array.isArray(body)) err = 'not a list';
     if (err) {
+      memoAsk(id, a.q, target, null, err);
       if (!pickHold(id)) return;
       pickSearch[id].why[a.q] = 'NucBox down';
       if (attempt === 1) {
@@ -3819,6 +3844,9 @@ function pickupAsk(id, a, attempt, target, answered) {
  * /api/status in pickInDisc's words (END_WHY, the end's). `asked` is the
  * street the type-word retry found it by, else null. */
 function settleHeldPickup(id, a, res, asked) {
+  memoPick(id, a.q, a.name ? 'name' : 'door', res);
+  memoVerdict(id, a.q, res && res.at ? { pinned: true, asked: asked || null, lat: res.at.lat, lon: res.at.lon }
+                                     : { pinned: false, why: END_WHY[res && res.why] || 'no house number' });
   var now = pickHold(id);
   if (!now) return;
   if (!res.at) {
@@ -8431,6 +8459,421 @@ function statusNow() {
   };
 }
 
+/* ---------- 📷 Snap, the richer kind: EXPERIMENTAL ---------------------------
+ *
+ * The owner, 31 Oct 2026: "Yes add all of them, fast track to experimental."
+ * Every snap also keeps, beside the files below, what this server alone
+ * knows at the press (SNAP_EXTRAS, written by keepSnapExtras):
+ *
+ *   build.json         the commit this server runs (short hash and subject,
+ *                      read once at start), when it started and how long the
+ *                      machine has been up
+ *   held.json          the held list as holding.json stores it, each order's
+ *                      owners and clocks (of, afterOf, holdEnds, tripTill,
+ *                      afterMate, its pickups' owners), the merged planner,
+ *                      and finishing.json's watches
+ *   searches.json      what the NucBox was asked for each held order and what
+ *                      it said: the end's key, plan and disc (with `also`),
+ *                      the last SEARCH_MEMO_ASKS questions and their trimmed
+ *                      candidates, the verdict and why, the band's answer —
+ *                      and the same for each pickup (searchMemo)
+ *   mapwalk.json       Map view's latest settled walk as live.html posted it
+ *                      (POST /api/mapwalk, memory only, newest only), or why
+ *                      there is none
+ *   journal-tail.jsonl the last SNAP_JOURNAL_ROWS rows of the journal
+ *   gps.json           the beats' fixes over the last SNAP_RING_MS, one per
+ *                      SNAP_RING_EVERY_MS (snapBeatKeep)
+ *   health.json        the beats' temperature, throttling, heat guard and
+ *                      camera word over the same ten minutes, the `seen`
+ *                      rows of that window off the journal tail, and the
+ *                      scanner's own counters from reader.json
+ *
+ * ...and the scanner writes two more beside reader.json (answer_snap in
+ * rpi/scan_pi.py): frame.jpg, its newest full-resolution frame, and
+ * reads.json, its last ten reads.
+ *
+ * NONE IS A PART. A snap's `contents` and its line (snapSaid) stay the five
+ * parts they were; these are collection, kept in snap.json under `extras` as
+ * {file: {saved, bytes} | {saved: false, why}}. One that cannot be written is
+ * logged once (snapExtraSaid) and the snap goes on with the rest. Each is
+ * capped (SNAP_EXTRA_MAX, frame.jpg its own) so a snap grows by well under
+ * 1.5 MB. Local like every file in a snap: snaps/ is in .gitignore, served
+ * only by /api/snaps and its bundle, and rpi/sync.py carries none of it. */
+var SNAP_EXTRAS = ['build.json', 'held.json', 'searches.json', 'mapwalk.json',
+                   'journal-tail.jsonl', 'gps.json', 'health.json'];
+var SNAP_SCANNER_EXTRAS = ['frame.jpg', 'reads.json'];
+var SNAP_EXTRA_MAX = 200 * 1024;
+var SNAP_JOURNAL_ROWS = 50;
+var SNAP_JOURNAL_READ = 512 * 1024;
+var SNAP_RING_MS = 10 * 60000;
+// Settable for the suite, like GPS_DWELL_MS.
+var SNAP_RING_EVERY_MS = envNumber('SNAP_RING_EVERY_MS', 5000);
+var SEARCH_MEMO_ORDERS = 8;
+var SEARCH_MEMO_ASKS = 5;
+var SEARCH_MEMO_CANDS = 5;
+var SEARCH_MEMO_PICKS = 6;
+var MAPWALK_MAX = 32 * 1024;
+
+/* The commit, read once, the first time it is asked (lazily, so nothing at
+ * load waits on git); null fields and `why` where git or the checkout is not
+ * there. */
+var serverStartedAt = Date.now();
+var buildRead = null;
+function buildInfo() {
+  if (!buildRead) {
+    buildRead = { commit: null, subject: null };
+    // On PATH, and where git lives when a service's PATH does not have it.
+    var bins = ['git', '/usr/bin/git', '/usr/local/bin/git'];
+    for (var i = 0; i < bins.length && !buildRead.commit; i++) {
+      try {
+        var out = require('child_process').execFileSync(
+          bins[i], ['-C', ROOT, 'log', '-1', '--format=%h%n%s'],
+          { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' });
+        var two = String(out).split('\n');
+        buildRead.commit = two[0] || null;
+        buildRead.subject = two[1] || null;
+        buildRead.why = buildRead.commit ? undefined : 'git said nothing';
+      } catch (e) {
+        buildRead.why = 'git could not say: ' + (e.code || e.message);
+      }
+    }
+    if (buildRead.commit) delete buildRead.why;
+  }
+  return buildRead;
+}
+function buildNow(now) {
+  var b = buildInfo();
+  var out = { v: 1, commit: b.commit, subject: b.subject, startedAt: serverStartedAt,
+              upMs: now - serverStartedAt, machineUpS: Math.round(os.uptime()),
+              node: process.version };
+  if (b.why) out.why = b.why;
+  return out;
+}
+
+/* The beats of the last ten minutes, one per SNAP_RING_EVERY_MS: the fix and
+ * the Pi's figures, for gps.json and health.json. Memory only. */
+var snapBeats = null;
+function snapBeatKeep(beat, now) {
+  if (!snapBeats) snapBeats = [];
+  var last = snapBeats[snapBeats.length - 1];
+  if (last && now - last.at < SNAP_RING_EVERY_MS && now >= last.at) return;
+  var g = beat && beat.gps && typeof beat.gps === 'object' ? beat.gps : {};
+  var f = g.fix && typeof g.fix === 'object' ? g.fix : null;
+  snapBeats.push({
+    at: now,
+    fix: f ? { lat: f.lat, lon: f.lon, gpsAge: f.gpsAge, gpsErr: f.gpsErr, gpsMode: f.gpsMode,
+               gpsOk: f.gpsOk, speed: f.speed, driving: f.driving } : null,
+    gpsState: g.state || null,
+    cpuC: beat.cpuC === undefined ? null : beat.cpuC,
+    throttled: beat.throttled === undefined ? null : beat.throttled,
+    heatGuard: !!beat.heatGuard, blind: beat.blind || null,
+    tooDim: !!beat.tooDim, tooBright: !!beat.tooBright, notSaving: beat.notSaving || null
+  });
+  while (snapBeats.length && (now - snapBeats[0].at > SNAP_RING_MS || now < snapBeats[0].at)) {
+    snapBeats.shift();
+  }
+  if (snapBeats.length > SNAP_RING_MS / SNAP_RING_EVERY_MS + 10) snapBeats.shift();
+}
+
+/* What the NucBox was asked for each held order, and what it said: one entry
+ * per holdId (the last SEARCH_MEMO_ORDERS orders), an `end` and up to
+ * SEARCH_MEMO_PICKS `picks` by pickup text, each with its last
+ * SEARCH_MEMO_ASKS questions. Memory only, written down by nothing but a
+ * snap; nothing reads it back into a search. */
+var searchMemo = null;
+function memoOrder(id) {
+  if (!searchMemo) searchMemo = new Map();
+  var m = searchMemo.get(id);
+  if (!m) {
+    m = { holdId: id, end: null, picks: {} };
+    searchMemo.set(id, m);
+    while (searchMemo.size > SEARCH_MEMO_ORDERS) searchMemo.delete(searchMemo.keys().next().value);
+  }
+  return m;
+}
+function memoSide(id, q) {
+  var m = memoOrder(id);
+  if (q === undefined) return m.end || (m.end = { asks: [] });
+  if (!m.picks[q]) {
+    var ks = Object.keys(m.picks);
+    if (ks.length >= SEARCH_MEMO_PICKS) delete m.picks[ks[0]];
+    m.picks[q] = { asks: [] };
+  }
+  return m.picks[q];
+}
+function memoId(key) { return typeof key === 'string' ? key.split('\n')[0] : null; }
+function memoDisc(disc) {
+  if (!disc || !disc.at) return null;
+  var out = { at: { lat: disc.at.lat, lon: disc.at.lon }, miles: disc.miles, card: disc.card };
+  if (disc.addOn) out.addOn = true;
+  if (Array.isArray(disc.also)) out.also = disc.also.slice(0, 6);
+  return out;
+}
+// Safe for any caller: a memo that throws must never cost a search.
+function memoSafe(fn) {
+  try { fn(); } catch (e) { /* collection only */ }
+}
+function memoStart(id, q, info) {
+  memoSafe(function () {
+    var s = memoSide(id, q);
+    s.startedAt = Date.now();
+    Object.keys(info).forEach(function (k) { s[k] = info[k]; });
+    if (s.disc) s.disc = memoDisc(s.disc);
+    delete s.verdict;
+  });
+}
+function memoTarget(target) {
+  var t = String(target || '');
+  [NBX.search, NBX.streets, NBX.route].forEach(function (base) {
+    if (base && t.indexOf(base) === 0) t = t.slice(base.length);
+  });
+  try { t = decodeURIComponent(t); } catch (e) { /* as it is */ }
+  return t.slice(0, 400);
+}
+function memoAsk(id, q, target, out, err) {
+  memoSafe(function () {
+    var s = memoSide(id, q);
+    var ask = { at: Date.now(), asked: memoTarget(target) };
+    if (err) ask.error = String(err).slice(0, 200);
+    else if (out && Array.isArray(out.hits)) {
+      ask.n = out.hits.length;
+      ask.cutAt = out.cutAt || null;
+      ask.cands = out.hits.slice(0, SEARCH_MEMO_CANDS).map(function (h) {
+        return { lat: h.lat, lon: h.lon, name: String(h.name || '').slice(0, 120),
+                 kind: h.kind || null };
+      });
+    } else if (out && typeof out === 'object') {
+      ask.names = Array.isArray(out.names) ? out.names.slice(0, SEARCH_MEMO_CANDS) : null;
+      ask.lines = Array.isArray(out.lines) ? out.lines.length : null;
+      ask.cutAt = out.cutAt || null;
+    }
+    s.asks.push(ask);
+    if (s.asks.length > SEARCH_MEMO_ASKS) s.asks.splice(0, s.asks.length - SEARCH_MEMO_ASKS);
+  });
+}
+function memoVerdict(id, q, verdict) {
+  memoSafe(function () {
+    var s = memoSide(id, q);
+    var v = Object.assign({ at: Date.now() }, verdict);
+    if (v.area && typeof v.area === 'object') {
+      v.area = { lat: v.area.lat, lon: v.area.lon, n: v.area.n, miles: v.area.miles,
+                 band: !!v.area.band, rough: !!v.area.rough, cut: !!v.area.cut };
+    }
+    s.verdict = v;
+  });
+}
+// The pick's own answer (pickInDisc, pickPlace), as kept: where, why, area.
+function memoPick(id, q, step, res) {
+  memoSafe(function () {
+    var s = memoSide(id, q);
+    var r = res || {};
+    (s.picks || (s.picks = [])).push({
+      step: step, at: r.at ? { lat: r.at.lat, lon: r.at.lon, name: String(r.at.name || '').slice(0, 120) } : null,
+      why: r.why || null, area: r.area ? { lat: r.area.lat, lon: r.area.lon, n: r.area.n } : null
+    });
+    if (s.picks.length > SEARCH_MEMO_ASKS) s.picks.splice(0, s.picks.length - SEARCH_MEMO_ASKS);
+  });
+}
+function searchesNow(now) {
+  var held = (scanner.held || []).map(holdIdOf);
+  var orders = [];
+  if (searchMemo) searchMemo.forEach(function (m) {
+    orders.push(Object.assign({ held: held.indexOf(m.holdId) !== -1 }, m));
+  });
+  return { v: 1, at: now, nucbox: { search: !!NBX.search, streets: !!NBX.streets, route: !!NBX.route },
+           keep: { orders: SEARCH_MEMO_ORDERS, asks: SEARCH_MEMO_ASKS }, orders: orders };
+}
+
+/* Map view's latest settled walk, as live.html posts it: memory only, the
+ * newest replacing the last. */
+var mapWalk = null;
+function keepMapWalk(text, now) {
+  var body = null;
+  try { body = JSON.parse(text); } catch (e) { body = null; }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return 'not JSON';
+  mapWalk = { receivedAt: now, walk: body };
+  return null;
+}
+function mapWalkNow(now) {
+  if (!mapWalk) {
+    return { v: 1, walk: null,
+             why: 'no Map view walk since this server started: the driving page is not open, '
+                + 'or has not been on Map view' + (listeners.length ? '' : ' (no page is listening now)') };
+  }
+  return { v: 1, ageMs: now - mapWalk.receivedAt, pagesOpen: listeners.length,
+           walk: mapWalk.walk };
+}
+
+/* held.json: the list as holding.json has it, and what each order's clocks
+ * and owners are as this server works them out now. */
+function heldNow(now) {
+  var file = null;
+  try { file = JSON.parse(fs.readFileSync(holdPath(), 'utf8')); } catch (e) {
+    file = e.code === 'ENOENT' ? null : { unreadable: e.code || e.message };
+  }
+  var orders = (scanner.held || []).map(function (h) {
+    return { holdId: holdIdOf(h), trip: tripOf(h), of: h.of || null, addOn: !!h.addOn,
+             afterOf: Array.isArray(h.after) ? h.after.map(function (a) { return a && a.of; }) : null,
+             holdEnds: holdEnds(h), ownEnds: ownEnds(h),
+             tripTill: typeof h.tripTill === 'number' ? h.tripTill : null,
+             afterMate: typeof h.afterMate === 'number' ? h.afterMate : null,
+             pickups: Array.isArray(h.pickups) ? h.pickups.map(function (p) {
+               return { q: p && p.q, of: p && p.of, visited: !!(p && p.visited) };
+             }) : null };
+  });
+  return { v: 1, at: now, holding: file, orders: orders,
+           planner: scanner.held && scanner.held[0] ? scanner.held[0].planner || null : null,
+           finishing: finishing };
+}
+
+// Logged once per file and reason; the snap goes on without that file.
+var snapExtraTold = {};
+function snapExtraSaid(file, why) {
+  var k = file + '\n' + why;
+  if (snapExtraTold[k]) return;
+  snapExtraTold[k] = true;
+  console.error('snap: could not keep ' + file + ' (' + why + '); snaps go on without it, said once');
+}
+
+// Text for a file, held to SNAP_EXTRA_MAX: past it, its head and that it was cut.
+function cappedJson(obj) {
+  var text = JSON.stringify(obj, null, 1) + '\n';
+  if (Buffer.byteLength(text) <= SNAP_EXTRA_MAX) return text;
+  return JSON.stringify({ v: 1, cut: true, bytes: Buffer.byteLength(text),
+                          head: text.slice(0, SNAP_EXTRA_MAX - 1024) }) + '\n';
+}
+
+/* The last SNAP_JOURNAL_ROWS rows, off the last SNAP_JOURNAL_READ bytes of the
+ * journal, read without blocking: `done(text, rows, why)`. */
+function journalTail(done) {
+  fs.open(JOURNAL_PATH, 'r', function (err, fd) {
+    if (err) return done(null, [], err.code === 'ENOENT' ? 'no journal yet' : err.code || err.message);
+    fs.fstat(fd, function (stErr, st) {
+      if (stErr) return fs.close(fd, function () { done(null, [], stErr.code || stErr.message); });
+      var len = Math.min(st.size, SNAP_JOURNAL_READ);
+      var buf = Buffer.alloc(len);
+      fs.read(fd, buf, 0, len, st.size - len, function (rErr, got) {
+        fs.close(fd, function () {
+          if (rErr) return done(null, [], rErr.code || rErr.message);
+          var lines = buf.slice(0, got).toString('utf8').split('\n');
+          if (len < st.size) lines.shift();       // the first is cut
+          lines = lines.filter(function (l) { return l.trim(); }).slice(-SNAP_JOURNAL_ROWS);
+          // Every one of the fifty read for health.json's `seen` rows; the file
+          // itself held to its cap, oldest rows first out.
+          var rows = [];
+          lines.forEach(function (l) { try { rows.push(JSON.parse(l)); } catch (e) { /* torn */ } });
+          while (lines.length && Buffer.byteLength(lines.join('\n')) > SNAP_EXTRA_MAX) lines.shift();
+          done(lines.length ? lines.join('\n') + '\n' : '', rows, null);
+        });
+      });
+    });
+  });
+}
+
+/* The server's extras, written into `dir`: `done(parts)` once each has landed
+ * or given its reason, never later than SNAP_EXTRAS_MS. `pressed` is the
+ * moment of the press; what is in memory is taken now, synchronously. The
+ * reader's answer is waited for (`reader`, a function given the callback) for
+ * health.json's counters. */
+var SNAP_EXTRAS_MS = envNumber('SNAP_EXTRAS_MS', 6000);
+function keepSnapExtras(dir, pressed, readerDone, done) {
+  var out = {};
+  var finished = false;
+  var left = SNAP_EXTRAS.length;
+  var timer = setTimeout(function () {
+    SNAP_EXTRAS.forEach(function (f) {
+      if (!out[f]) out[f] = { saved: false, why: 'not written in ' + spellAge(SNAP_EXTRAS_MS) };
+    });
+    finish();
+  }, SNAP_EXTRAS_MS);
+  function finish() {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    done(out);
+  }
+  function write(file, make, note) {
+    var text;
+    try { text = make(); } catch (e) { text = null; out[file] = { saved: false, why: 'could not make it: ' + e.message }; }
+    if (text === null) {
+      snapExtraSaid(file, out[file] ? out[file].why : 'nothing to write');
+      if (!out[file]) out[file] = { saved: false, why: 'nothing to write' };
+      if (--left === 0) finish();
+      return;
+    }
+    var at = path.join(dir, file);
+    fs.writeFile(at, text, function (err) {
+      if (finished) return;
+      if (err) {
+        out[file] = { saved: false, why: 'could not write it: ' + (err.code || err.message) };
+        snapExtraSaid(file, err.code || err.message);
+        return fs.unlink(at, function () { if (--left === 0) finish(); });
+      }
+      out[file] = { saved: true, bytes: Buffer.byteLength(text) };
+      if (note) out[file].note = note;
+      if (--left === 0) finish();
+    });
+  }
+  // In memory at the press: taken now.
+  var mem = {};
+  [['build.json', function () { return buildNow(pressed); }],
+   ['held.json', function () { return heldNow(pressed); }],
+   ['searches.json', function () { return searchesNow(pressed); }],
+   ['mapwalk.json', function () { return mapWalkNow(pressed); }],
+   ['gps.json', function () {
+     return { v: 1, at: pressed, everyMs: SNAP_RING_EVERY_MS, overMs: SNAP_RING_MS,
+              fixes: (snapBeats || []).filter(function (b) { return b.fix; })
+                .map(function (b) { return Object.assign({ at: b.at, gpsState: b.gpsState }, b.fix); }) };
+   }]].forEach(function (pair) {
+    try { mem[pair[0]] = cappedJson(pair[1]()); } catch (e) {
+      mem[pair[0]] = null;
+      out[pair[0]] = { saved: false, why: 'could not make it: ' + e.message };
+    }
+  });
+  var beats = (snapBeats || []).map(function (b) {
+    var c = Object.assign({}, b);
+    delete c.fix;
+    return c;
+  });
+  Object.keys(mem).forEach(function (f) { write(f, function () { return mem[f]; }); });
+  journalTail(function (text, rows, why) {
+    // Always written, empty where the journal has no rows (or none can be
+    // read, said beside it), so every snap holds the same files.
+    write('journal-tail.jsonl', function () { return text || ''; },
+          why || (text ? null : 'the journal has no rows yet'));
+    var seen = rows.filter(function (r) {
+      return r && r.kind === 'seen' && typeof r.at === 'number' && pressed - r.at <= SNAP_RING_MS;
+    });
+    readerDone(function (counters) {
+      write('health.json', function () {
+        return cappedJson({ v: 1, at: pressed, everyMs: SNAP_RING_EVERY_MS, overMs: SNAP_RING_MS,
+                            scanner: scannerAbsent() ? scannerAbsent().why : 'running',
+                            counters: counters, beats: beats, seen: seen });
+      });
+    });
+  });
+}
+
+/* The server's extras, and the scanner's two beside them: each there, or
+ * why not — the scanner's reason off reader.json where it gave one. */
+function scannerExtras(dir, extras) {
+  var out = Object.assign({}, extras);
+  var said = null;
+  try { said = JSON.parse(fs.readFileSync(path.join(dir, 'reader.json'), 'utf8')); } catch (e) { said = null; }
+  var absent = scannerAbsent();
+  SNAP_SCANNER_EXTRAS.forEach(function (file) {
+    var st = null;
+    try { st = fs.lstatSync(path.join(dir, file)); } catch (e) { st = null; }
+    if (st && st.isFile()) { out[file] = { saved: true, bytes: st.size }; return; }
+    var why = said && typeof said[file === 'frame.jpg' ? 'frame' : 'reads'] === 'string'
+      ? said[file === 'frame.jpg' ? 'frame' : 'reads']
+      : absent ? absent.why : said ? 'the scanner kept none and did not say why'
+      : 'the scanner did not answer';
+    out[file] = { saved: false, why: why };
+  });
+  return out;
+}
+
 /* ---------- 📷 Snap: the panel as it looked, kept to be shown to someone ----
  *
  * Asked for in the driver's own words: "a button to take a screenshot on the
@@ -8539,7 +8982,11 @@ var SNAP_FRAME_STALE_MS = 12000;
 // URL is ever a path.
 var SNAP_NAME = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d{2})?$/;
 var SNAP_FILES = ['panel.png', 'camera.jpg', 'status.json', 'snap.json',
-                  'reader.jpg', 'reader.json', 'map.jpg', 'map.json'];
+                  'reader.jpg', 'reader.json', 'map.jpg', 'map.json',
+                  // ...and the richer snap's (EXPERIMENTAL; see SNAP_EXTRAS).
+                  'frame.jpg', 'build.json', 'reads.json', 'searches.json',
+                  'mapwalk.json', 'held.json', 'journal-tail.jsonl', 'gps.json',
+                  'health.json'];
 // How every PNG opens — its signature, then its image header, which the format
 // requires first — and how every PNG ends: the empty IEND chunk and its CRC.
 // The tail is what a tool cut off part way, or a card that filled under it,
@@ -9169,22 +9616,48 @@ function takeSnap(done) {
     var parts = [null, null, null, null, null];
     // ...and the map band, after them, when the scanner answered with one.
     var extra = [];
-    var waiting = parts.length;
+    // ...and the richer snap's extras (EXPERIMENTAL), which are no part:
+    // see keepSnapExtras. Waited for like one, so snap.json can say them.
+    var extras = null;
+    var waiting = parts.length + 1;
+    var sealIfDone = function () {
+      if (--waiting === 0) seal(name, dir, parts.concat(extra), extras);
+    };
     var landed = function (i) {
       return function (part) {
         parts[i] = part;
-        if (--waiting === 0) seal(name, dir, parts.concat(extra));
+        sealIfDone();
       };
+    };
+    // What the scanner said in reader.json, once it has answered (or not),
+    // for health.json's counters and the scanner's own extras.
+    var readerSaid;
+    var readerWaits = [];
+    var readerDone = function (cb) {
+      if (readerSaid !== undefined) return cb(readerSaid && readerSaid.health || null);
+      readerWaits.push(cb);
     };
     takePanel(path.join(dir, 'panel.png'), landed(0));
     keepCamera(path.join(dir, 'camera.jpg'), landed(1));
+    keepSnapExtras(dir, at, readerDone, function (got) {
+      extras = got;
+      sealIfDone();
+    });
     // Resolved, because the scanner is handed this path and its working
     // directory is not necessarily this one's.
     askReader(path.resolve(dir), pressed.offer ? pressed.offer.id || null : null,
               function (two) {
                 if (two[2]) extra.push(two[2]);
-                landed(2)(two[0]);
-                landed(4)(two[1]);
+                fs.readFile(path.join(dir, 'reader.json'), 'utf8', function (rErr, text) {
+                  var said = null;
+                  try { said = rErr ? null : JSON.parse(text); } catch (e) { said = null; }
+                  readerSaid = said && typeof said === 'object' ? said : null;
+                  readerWaits.splice(0).forEach(function (cb) {
+                    cb(readerSaid && readerSaid.health || null);
+                  });
+                  landed(2)(two[0]);
+                  landed(4)(two[1]);
+                });
               });
     var statusAt = path.join(dir, 'status.json');
     fs.writeFile(statusAt, status, function (err) {
@@ -9200,7 +9673,7 @@ function takeSnap(done) {
     });
   }
 
-  function seal(name, dir, parts) {
+  function seal(name, dir, parts, extras) {
     // The one way out, so the folder stops being one in progress — open to
     // pruning — however the press ends.
     var answer = function (err, record) {
@@ -9236,7 +9709,8 @@ function takeSnap(done) {
       v: 1, name: name, at: at,
       contents: parts, notes: notes,
       said: snapSaid(parts, notes),
-      pruned: pruned, keep: SNAPS_KEEP
+      pruned: pruned, keep: SNAPS_KEEP,
+      extras: scannerExtras(dir, extras || {})
     };
     var sealed = path.join(dir, 'snap.json');
     fs.writeFile(sealed, JSON.stringify(record, null, 2) + '\n', function (err) {
@@ -9535,7 +10009,16 @@ var SNAP_ABOUT = {
   'reader.json': 'the scanner\'s account of its last read',
   'snap.json': 'what the press kept, and why anything is missing',
   'map.jpg': 'the newest offer\'s map band, kept for a study',
-  'map.json': 'where that map band came from'
+  'map.json': 'where that map band came from',
+  'frame.jpg': 'the camera\'s newest full-resolution frame',
+  'build.json': 'the commit the rig runs, and how long it has been up',
+  'reads.json': 'the scanner\'s last ten reads',
+  'searches.json': 'what the NucBox was asked for each held order, and said',
+  'mapwalk.json': 'what Map view last drew',
+  'held.json': 'the held orders as stored, their owners and clocks, and the finishing watches',
+  'journal-tail.jsonl': 'the last fifty rows of the journal',
+  'gps.json': 'the last ten minutes of GPS fixes',
+  'health.json': 'the last ten minutes of the Pi\'s health'
 };
 // Which of them are pictures, in the order they are laid side by side — on
 // snaps.html, which is handed this list, and at the head of a bundle's
@@ -9593,6 +10076,9 @@ function bundleHead(snaps) {
                                 : 'Every file kept for each of these snaps, oldest first')
     + ': the pictures as they are, and each record as its text, with the file itself'
     + ' behind the link under it.</p>\n';
+  // ...and the build the newest of them was taken on (one snap's is at the
+  // top of its own section).
+  if (!one) head += bundleBuild(snaps[snaps.length - 1].name);
   if (!one) {
     head += '<ol class="toc">\n' + snaps.map(function (s) {
       return '<li><a href="#' + s.name + '">' + s.name
@@ -9602,13 +10088,30 @@ function bundleHead(snaps) {
   return head;
 }
 
+/* The build the snap was taken on (build.json), one line at the top of its
+ * section, or nothing for a snap from before it was kept. */
+function bundleBuild(name) {
+  if (!snapFiles(name).some(function (f) { return f.file === 'build.json'; })) return '';
+  try {
+    var b = JSON.parse(fs.readFileSync(path.join(SNAPS_DIR, name, 'build.json'), 'utf8'));
+    return '<p class="build">Build: ' + escapeHtml(b.commit || 'unknown')
+      + (b.subject ? ' — ' + escapeHtml(b.subject) : '') + (b.why ? ' (' + escapeHtml(b.why) + ')' : '')
+      + '; server up ' + escapeHtml(spellAge(b.upMs || 0))
+      + (typeof b.machineUpS === 'number' ? ', machine up ' + escapeHtml(spellAge(b.machineUpS * 1000)) : '')
+      + '</p>\n';
+  } catch (e) {
+    return '<p class="build lost">build.json could not be read</p>\n';
+  }
+}
+
 /* One snap's section, `done(html)` once its files have been read in turn. */
 function bundleSection(snap, done) {
   var have = snap.files.map(function (f) { return f.file; });
   var files = BUNDLE_ORDER.filter(function (f) { return have.indexOf(f) !== -1; });
   var html = '<section id="' + snap.name + '">\n<h2>' + snap.name
     + (snap.note ? ' <span class="note">— ' + escapeHtml(snap.note) + '</span>' : '')
-    + '</h2>\n<p class="said">' + escapeHtml(snap.said) + '</p>\n';
+    + '</h2>\n<p class="said">' + escapeHtml(snap.said) + '</p>\n'
+    + bundleBuild(snap.name);
   var i = 0;
   (function next() {
     if (i === files.length) return done(html + '</section>\n');
@@ -12054,6 +12557,20 @@ function route(req, res) {
                { 'Content-Type': 'application/json; charset=utf-8' });
         });
       });
+    });
+  }
+
+  // Map view's latest settled walk, from live.html, for a 📷 Snap's
+  // mapwalk.json (EXPERIMENTAL; see keepMapWalk). Memory only, newest only,
+  // no file written; at most MAPWALK_MAX bytes.
+  if (req.method === 'POST' && req.url.split('?')[0] === '/api/mapwalk') {
+    return readBody(req, MAPWALK_MAX, function (err, text) {
+      var json = { 'Content-Type': 'application/json; charset=utf-8' };
+      if (err) return send(res, err.message === 'too big' ? 413 : 400,
+                           JSON.stringify({ ok: false, error: err.message }), json);
+      var why = keepMapWalk(text, Date.now());
+      if (why) return send(res, 400, JSON.stringify({ ok: false, error: why }), json);
+      send(res, 200, JSON.stringify({ ok: true }), json);
     });
   }
 
