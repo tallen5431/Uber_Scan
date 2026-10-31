@@ -1766,6 +1766,11 @@ function heldNames(h, stops) {
 /* The dropped order an unprompted door `d` is, {g, watch, by}, or null. */
 function doorOfDropped(d, orders, now) {
   if (!d || d.asked !== false || typeof d.line !== 'string' || !droppedLately.length) return null;
+  // With nothing in the car there is no order to keep the door off, and
+  // orders[0] is no order to read a planner off: a throw here lands in the
+  // handler that parses the scanner's stdout and the panel never hears the
+  // address (test_stacking, "the panel is still told ... nothing in the car").
+  if (!orders || !orders.length) return null;
   var name = d.stop && typeof d.stop.name === 'string' ? d.stop.name : null;
   var stops = plannerStopsOf(orders[0]) || [];
   var held = orders.some(function (h) {
