@@ -1989,6 +1989,33 @@ _door = said(lambda: SP.emit_offer('x', SP.OP.parse(
 eq('the offer carries the store\'s door off the card beside its name, and no dropoff',
    (_door.get('pickup'), _door.get('pickupLine'), _door.get('dropoff')),
    ('Lark Owl Grill', '2530 Kestrel Plains Road, Marietta, GA 30066', None))
+eq('...and a one-store card lists no stores beyond what pickupLine says',
+   (_door.get('stores'), _door.get('dropoffs'), _door.get('dropoffOrders')), ([], 1, None))
+# ...and on a two-store card (the owner's snaps of 31 Oct), every store with
+# its own door in the card's order, and the card's dropoff shape: server.js
+# keeps both onto the order at the Took, and Map view pins each store and
+# routes through them. Invented stores and streets.
+_two = said(lambda: SP.emit_offer('y', SP.OP.parse(
+    '$14.10 incl. tips\n3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza\n'
+    '4410 Fernhill Road Northwest, ...\nff Maple Run Creamery\n'
+    '2516 Quillon Street, Brookvale, 301...\n8 Customer dropoff\nDrop off 2 orders'),
+    {'ready': True, 'perHour': 20.0, 'cardMinutes': 33.0}))['offer']
+eq('a two-store card\'s offer carries every store with its door, in the card\'s order, '
+   'one customer and two orders, and is not "many dropoffs"',
+   (_two.get('stores'), _two.get('dropoffs'), _two.get('dropoffOrders'),
+    _two.get('manyDropoffs'), _two.get('pickupLine')),
+   ([{'name': 'Lark Owl Pizza', 'door': '4410 Fernhill Road Northwest'},
+     {'name': 'Maple Run Creamery', 'door': '2516 Quillon Street, Brookvale'}], 1, 2, False,
+    '4410 Fernhill Road Northwest'))
+_many = SP.OP.parse('$21.35 incl. tips\n4 stops (15.0 mi) - 53 min\n@ Wren Shack\n'
+                    '880 Wrenfield Highway, Brookvale, 30199 GA\n@ Lark Owl Burgers\n'
+                    '912 Wrenfield Highway, Brookvale, 30199 GA\n83 Multiple dropoffs (2 stops)')
+eq('..."Multiple dropoffs (2 stops)" is two dropoffs, and many off the count alone',
+   (_many['dropoffs'], SP.says_many_dropoffs({'dropoffs': 2}), SP.says_many_dropoffs({}),
+    SP.says_many_dropoffs(dict(_many, text='$21.35'))), (2, True, False, True))
+eq('...and stores_of gives nothing where the doors are not beside the places',
+   (SP.stores_of({'places': ['A', 'B'], 'placeDoors': ['1 A Rd']}),
+    SP.stores_of({'places': ['A'], 'placeDoors': []}), SP.stores_of({})), ([], [], []))
 ok_('...and no state to be mistaken for one',
     not [k for k in told if k in ('state', 'doubt', 'grossPerHour')])
 

@@ -1869,6 +1869,91 @@
       && g.line ? g.line : null;
   }
 
+  /* --- DoorDash's stores, every one a pickup (the owner's snaps, 31 Oct) ---
+   *
+   * "How could the doordash orders be routed on the map with the given
+   * information on the screen? It would be great if the pins for the pickup
+   * and drop off could be captured and mapped." The card:
+   *
+   *     $14.10 incl. tips / 3 stops (8.7 mi) · 33 min
+   *     <Store A> / 4410 <Name> Road Northwest, ...
+   *     <Store B> / 2516 <Name> Street, <Town>, 301...
+   *     Customer dropoff / Drop off 2 orders       (or "Multiple dropoffs
+   *                                                  (2 stops)")
+   *
+   * Two pickups, and the map pinned the first alone (its printed door,
+   * `pickupLine`) and ran car -> store A -> the map label, past store B. Now
+   * the offer line and the order taken off it carry every store with its
+   * door (`stores`, server.js storesOf), and the run goes car -> store A ->
+   * store B -> the end: the door when a screen gives it, else DoorDash's map
+   * label "≈" (guessOf), searched round the LAST store (guessDisc).
+   *
+   * Each store is pinned by its printed door, searched as every door is (in
+   * the card's disc, a door by its number): a door found is a pin; one whose
+   * answers are a general area is "≈", like any refused pickup's area
+   * (dropPoint). A store with no door read is never searched by its name (a
+   * chain's name in a disc is whichever branch) — the run skips it and says
+   * so (storesSkipped). With two or more stores only: a one-store card's
+   * run is exactly what it was.
+   *
+   * cardStores(o): the stores AFTER the first on an offer (the first is the
+   * card's own pickup, `pickupLine` or its name, searched as before), as
+   * [{q, name, n}] — `q` the printed door or null, `n` 2, 3, ... for its
+   * mark (P2, P3). [] on every other offer. */
+  function storesOn(o) {
+    var list = o && Array.isArray(o.stores) ? o.stores.filter(function (st) {
+      return st && typeof st.name === 'string' && st.name;
+    }) : [];
+    return list.length >= 2 ? list : null;
+  }
+
+  function cardStores(o) {
+    var list = storesOn(o);
+    if (!list) return [];
+    return list.slice(1).map(function (st, i) {
+      return { q: typeof st.door === 'string' && st.door ? st.door : null, name: st.name, n: i + 2 };
+    });
+  }
+
+  /* ...and an order's stores as the server described them (heldEndState's
+     `stores`, in the card's order, each with its pickup pin or none), for the
+     held run: {pts, marks, skipped} — the points of the stores not behind
+     the car that are pinned, in order; every store's mark ({n, name, at,
+     visited}); how many not behind the car have no pin. Null for an order
+     with no `stores`. A store behind the car is off the run (visitPickups),
+     drawn done. */
+  function heldStores(stores) {
+    if (!Array.isArray(stores) || stores.length < 2) return null;
+    var pts = [], marks = [], skipped = 0;
+    stores.forEach(function (st, i) {
+      var at = st && st.at && typeof st.at.lat === 'number' && typeof st.at.lon === 'number'
+        && isFinite(st.at.lat) && isFinite(st.at.lon) ? { lat: st.at.lat, lon: st.at.lon } : null;
+      var visited = !!(st && st.visited);
+      marks.push({ n: i + 1, name: (st && st.name) || '', at: at, visited: visited });
+      if (visited) return;
+      if (at) pts.push(at);
+      else skipped++;
+    });
+    return { pts: pts, marks: marks, skipped: skipped };
+  }
+
+  // The words for the stores the run could not place, after the caption.
+  function storesSkipped(n) {
+    return n ? 'route skips ' + n + ' store' + (n === 1 ? '' : 's') + ', not pinned' : null;
+  }
+
+  /* The words under a map label on a card for more than one customer
+     ("Multiple dropoffs (2 stops)", the card's `dropoffs`): the map labels
+     one of them, and which one is not known — "≈ 1 of 2 dropoffs from
+     DoorDash's map; the other not known yet". Null for one customer or a
+     count the card did not give. */
+  function guessShare(dropoffs) {
+    var n = typeof dropoffs === 'number' && dropoffs >= 2 ? Math.floor(dropoffs) : 0;
+    if (!n) return null;
+    return '\u2248 1 of ' + n + ' dropoffs from DoorDash\'s map; the other'
+      + (n > 2 ? 's' : '') + ' not known yet';
+  }
+
   /* The candidates a band may choose among, from a refusal: a door plan's
      'several' or 'capped' (pickInDisc's `cands`, the ones inside the disc).
      Null for anything else. */
@@ -5031,6 +5116,9 @@
            bandCands: bandCands, bandSamples: bandSamples, tripLeg: tripLeg,
            // ...and DoorDash's map label as the trip's end (27 Oct).
            GUESS_FROM: GUESS_FROM, guessDisc: guessDisc, guessOf: guessOf,
+           // ...and DoorDash's stores, every one a pickup (31 Oct).
+           cardStores: cardStores, heldStores: heldStores, storesSkipped: storesSkipped,
+           guessShare: guessShare,
            BAND_MIN_MI: BAND_MIN_MI, BAND_FRAC: BAND_FRAC, BAND_ASKS_MAX: BAND_ASKS_MAX,
            BAND_CARD_ASKS: BAND_CARD_ASKS, BAND_WAIT_MS: BAND_WAIT_MS, BAND_STEP_M: BAND_STEP_M,
            // ...and a batched trip's other doors, drawn on the run (24 Oct).

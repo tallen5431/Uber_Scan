@@ -5737,6 +5737,12 @@
         // ...and its pickups behind the car (visitPickups), which move the
         // next stop on and take the restaurant out of Map view's run.
         heldSaid.visited = Array.isArray(msg.heldEnd.visited) ? msg.heldEnd.visited : [];
+        // ...and, on a DoorDash order off a card with two stores or more,
+        // each store in the card's order with its pin or none (heldStoresOf
+        // in server.js; the owner, 31 Oct): pins land on beats, between
+        // offers, and the run car -> store 1 -> store 2 -> the end moves
+        // with them (MV.heldStores).
+        heldSaid.stores = Array.isArray(msg.heldEnd.stores) ? msg.heldEnd.stores : null;
       }
       // ...and every order's, with two in the car.
       if (msg.alive && Array.isArray(msg.orders) && holdingNow) heldList = msg.orders;
@@ -6899,7 +6905,40 @@
        `found`, never posted, never a figure's point; guarded for a
        map-view.js from before it. */
     var guess = MV && MV.guessOf ? MV.guessOf(o) : null;
+    /* ...and, on DoorDash's card with two stores or more (the offer's
+       `stores`; the owner's snaps of 31 Oct: "It would be great if the pins
+       for the pickup and drop off could be captured and mapped"), the stores
+       AFTER the first, each by its printed door (MV.cardStores): searched by
+       the walk in the card's disc, a door found pinned P2, P3, an area "≈",
+       and the trip run car -> P -> P2 -> the end, the map label searched
+       round the LAST store. NOT in `names`: never `found`, never posted,
+       never a figure's stop (the detour stops at the order in the car's end,
+       and this card's own miles price its job). [] on every other card, and
+       from a map-view.js from before them. */
+    var stores = card && MV && MV.cardStores ? MV.cardStores(o) : [];
+    /* ...and the order in the car's stores the same way, ONE order held (two
+       are MV.heldRuns'): each store in the card's order with the server's pin
+       for its door (heldSaid.stores, heldStoresOf), so its run is car -> each
+       store not behind the car -> the end. With no end read yet, DoorDash's
+       map label for it (the hold's `dropoffGuess`), drawn "≈" round its last
+       store, "DoorDash dropoff not read yet". Drawing only, as the card's.
+       Null with no stores on the hold, so every other order's run is as it
+       was. */
+    var hStores = holdingNow && !second && heldSaid && MV && MV.heldStores
+      ? MV.heldStores(heldSaid.stores) : null;
+    var heldGuess = hStores && !held && MV.guessOf && heldSaid.dropoffGuess
+      ? MV.guessOf({ dropoffGuess: heldSaid.dropoffGuess }) : null;
+    // ...and, on a card for more than one customer, which of them the label
+    // is not known: "≈ 1 of 2 dropoffs …; the other not known yet".
+    var guessShare = guess && MV.guessShare ? MV.guessShare(o.dropoffs) : null;
+    var heldShare = heldGuess && MV.guessShare ? MV.guessShare(heldSaid.dropoffs) : null;
     return { pickup: pickQ, dropoff: o.dropoff || null, guess: guess,
+             stores: stores, guessShare: guessShare,
+             heldStores: hStores, heldGuess: heldGuess, heldShare: heldShare,
+             // (The held card's fix and miles, for the held guess's disc:
+             // `heldCard` below is null with no end, which is when it is
+             // searched.)
+             heldCardG: heldGuess ? heldCard : null,
              // Which of this card's two ends came off a tap, for the pins'
              // words and the figure's.
              tapped: { pickup: !!tapped, dropoff: !!o.dropoff && o.dropoffFrom === 'popup' },
@@ -6939,6 +6978,14 @@
              key: names.join('|') + '#' + (o.id || '') + '@' + (held || '')
                // ...and DoorDash's map label, which arrives on a later line.
                + (guess ? '\u2248g' + guess : '')
+               // ...and the card's other stores, and the held order's with
+               // which of them are pinned and behind the car (a pin lands
+               // on a beat; a visit moves the run).
+               + (stores.length ? '>s' + stores.map(function (st) { return st.q || '?'; }).join('>') : '')
+               + (hStores ? '>hs' + hStores.marks.map(function (m) {
+                   return (m.at ? m.at.lat.toFixed(5) + ',' + m.at.lon.toFixed(5) : '?')
+                     + (m.visited ? '✓' : ''); }).join('>') : '')
+               + (heldGuess ? '\u2248hg' + heldGuess : '')
                // ...and ②'s, carried on its hold.
                + (guess2 ? '\u2248g2' + guess2 : '')
                // ...and its place, learnt for the same end text.
@@ -7496,7 +7543,10 @@
       var notes = [], pickRoad = null;
       // ...and the ends refused and routed to their general area (areaEnd),
       // which drawMap marks "≈" — the held order's, and this card's own.
-      var areas = { held: null, drop: null, pick: null, picks: [], guess: null };
+      var areas = { held: null, drop: null, pick: null, picks: [], guess: null,
+                    // ...and DoorDash's: the card's other stores, and the
+                    // order in the car's end by its map label (31 Oct).
+                    stores: [], heldGuess: null };
       // ...and the road questions the distance band may ask on this walk.
       var bandLeft = { left: MV.BAND_CARD_ASKS || 0 };
       // ...and the batched trip's other doors the run went through, with
@@ -7549,6 +7599,14 @@
         var heldOk = hj.held && !hj.off.held && !hj.wrong[want.held] ? hj.held : null;
         var picksOk = hj.heldPicks.filter(function (p) { return p.at && !p.off && !hj.wrong[p.q]; })
           .map(function (p) { return p.at; });
+        /* ...and a DoorDash order off a card with two stores or more (the
+           owner's snaps of 31 Oct): its stores not behind the car, in the
+           card's order, each at the server's pin for its printed door
+           (want.heldStores, heldStoresOf in server.js) — door-level pins,
+           the restaurant guard's own. No planner lists a DoorDash order's
+           pickups, so this is where its run gets them; a store with no pin
+           yet is skipped and said. */
+        if (want.heldStores && !hj.heldPicks.length) picksOk = want.heldStores.pts.slice();
         /* ...and a held pickup with no pin whose door's answers are one
            general area (areaEnd, Map view's own search; the owner's DoorDash
            snap of 24 Oct): the run goes through it, a faded "≈" ring.
@@ -7603,6 +7661,28 @@
           var area = areaEnd(want, want.held, true, heldBand);
           if (area) { heldOk = area; rung = MV.routeRung(want.held, area, null); areas.held = area; }
         }
+        /* ...and that order with no end read yet: DoorDash's map label for it
+           (want.heldGuess, the hold's `dropoffGuess`), searched as the card's
+           is (MV.guessDisc) round its LAST store pinned, its point the door
+           or the area (MV.dropPoint) — ALWAYS approximate: faded "≈", never
+           D, the rung "≈ from DoorDash's map". Drawing only: never `found`,
+           never posted, never the order's end, never the GPS drop's. */
+        var heldGuessAt = null;
+        if (!heldOk && !want.held && want.heldGuess && picksOk.length && want.heldCardG
+            && nbx.search && mapNbx.place && MV.guessDisc && MV.dropPoint) {
+          var hlast = picksOk[picksOk.length - 1];
+          var hgdisc = MV.guessDisc(want.heldCardG, hlast);
+          var hgres = hgdisc ? await mapNbx.place(want.heldGuess, hgdisc,
+                                                  { streets: nbx.streets, car: hlast }) : null;
+          if (gone()) return;
+          var hgpt = MV.dropPoint(hgres);
+          if (hgpt) {
+            heldGuessAt = { lat: hgpt.lat, lon: hgpt.lon, approx: true, guess: true };
+            heldOk = heldGuessAt;
+            rung = 'guess';
+            areas.heldGuess = heldGuessAt;
+          }
+        }
         if (!heldOk && !picksOk.length && heldSaid && heldSaid.pickAt) picksOk = [heldSaid.pickAt];
         /* ...and a batched trip's other doors (want.heldDrops; the owner's
            snap of 24 Oct, 03:03): each searched on the NucBox as the end is,
@@ -7644,10 +7724,17 @@
         var lad = want.held || picksOk.length
           ? MV.routeLadder(here || want.carNow, picksOk, heldOk, rung, ahead)
           : null;
+        // (A card for more than one customer says the label is one of them.)
+        if (lad && heldGuessAt && want.heldShare) lad.note = want.heldShare;
         if (lad) {
           heldRoad = await mapNbx.runLine(lad.pts);
           if (viewMode !== 'map' || mapFor !== key) return;
           if (heldRoad && lad.note) notes.push(lad.note);
+          // ...and its stores with no pin, which the run leaves out.
+          if (heldRoad && want.heldStores && MV.storesSkipped
+              && MV.storesSkipped(want.heldStores.skipped)) {
+            notes.push(MV.storesSkipped(want.heldStores.skipped));
+          }
           if (heldRoad) {
             pickAreas.forEach(function (pa) { notes.push(MV.areaNote(pa.at, true)); });
           }
@@ -7692,6 +7779,34 @@
           pickArea = areaEnd(want, want.pickup, false, pickBand);
           if (pickArea) { pickOk = pickArea; areas.pick = pickArea; }
         }
+        /* ...and its other stores on DoorDash's card with two or more
+           (want.stores, MV.cardStores; the owner's snaps of 31 Oct): each
+           searched by its printed door in the card's disc, as the end and
+           the held order's other doors are (NbxSearch.place), its point the
+           door — a pin, P2 — or its answers' general area, "≈"
+           (MV.dropPoint); one with no door read, or none found, is left out
+           of the run and said. In the card's order, after its pickup.
+           DRAWING ONLY: never `found`, never posted, never a figure's stop. */
+        var storePts = [], storeMarks = [];
+        if (pickOk && want.stores && want.stores.length && nbx.search && mapNbx.place
+            && MV.dropPoint) {
+          var sdisc = MV.discFor(want.card);
+          for (var si = 0; si < want.stores.length; si++) {
+            var wst = want.stores[si];
+            var sres = wst.q && sdisc
+              ? await mapNbx.place(wst.q, sdisc,   // eslint-disable-line no-await-in-loop
+                                   { streets: nbx.streets, car: pickOk })
+              : null;
+            if (gone()) return;
+            var spt = MV.dropPoint(sres);
+            storeMarks.push({ n: wst.n, name: wst.name, q: wst.q, at: spt });
+            if (spt) storePts.push(spt);
+          }
+          areas.stores = storeMarks;
+        }
+        // The last store the run reaches: where the guessed end is searched
+        // round (the customer is no further by road than the job from it).
+        var lastPick = storePts.length ? storePts[storePts.length - 1] : pickOk;
         var dropOk = jj.drop && !jj.wrong[want.dropoff] ? jj.drop : null;
         var dropRung = MV.routeRung(want.dropoff, dropOk, null);
         if (pickOk && !jj.drop && want.dropoff && nbx.streets) {
@@ -7723,9 +7838,9 @@
         var guessAt = null;
         if (pickOk && !dropOk && !want.dropoff && want.guess && nbx.search && mapNbx
             && mapNbx.place && MV.guessDisc && MV.dropPoint) {
-          var gdisc = MV.guessDisc(want.card, pickOk);
+          var gdisc = MV.guessDisc(want.card, lastPick);
           var gres = gdisc ? await mapNbx.place(want.guess, gdisc,
-                                                { streets: nbx.streets, car: pickOk }) : null;
+                                                { streets: nbx.streets, car: lastPick }) : null;
           if (gone()) return;
           if (gres && !gres.at && mapNbx.band && MV.bandTarget) {
             var gband = await mapNbx.band(want.guess, gres, gdisc, MV.bandTarget(want.card, 'dropoff'),
@@ -7744,7 +7859,9 @@
         // (From the car where no pickup pin draws its dashed leg: DoorDash's
         // guessed end with the pickup an area, nothing in the car.)
         var jstart = !dropOk || (guessAt && !jj.pick && !want.held) ? here : null;
-        var jl = pickOk ? MV.routeLadder(jstart, [pickOk], dropOk, dropRung) : null;
+        var jl = pickOk ? MV.routeLadder(jstart, [pickOk].concat(storePts), dropOk, dropRung) : null;
+        // (A card for more than one customer says the label is one of them.)
+        if (jl && guessAt && want.guessShare) jl.note = want.guessShare;
         if (jl && (dropOk || !want.held)) {
           var jr = await mapNbx.runLine(jl.pts);
           if (viewMode !== 'map' || mapFor !== key) return;
@@ -7753,6 +7870,9 @@
           // (A pickup area's own words stand for "pickup only".)
           if (jr && pickArea) notes.push('trip: ' + MV.areaNote(pickArea, true));
           if (jr && jl.note && !(pickArea && !dropOk)) notes.push('trip: ' + jl.note);
+          // ...and its stores the run could not place.
+          var sskip = storeMarks.filter(function (m) { return !m.at; }).length;
+          if (jr && sskip && MV.storesSkipped) notes.push('trip: ' + MV.storesSkipped(sskip));
         }
       }
       /* ②'s end, not read yet, by DoorDash's map label (want.guess2): a
@@ -8355,7 +8475,8 @@
        has already left behind. With nothing in the car, the car and this
        job's two ends, as it always was. */
     var frame = [];
-    var inCar = !!(held || j.held2 || j.heldPicks.length);
+    var inCar = !!(held || j.held2 || j.heldPicks.length
+                   || (want.heldStores && want.heldStores.pts.length));
     /* `letter` is what the pin says without being clicked: P where something
        is picked up, D where it is dropped. A divIcon over the dot, not part
        of it, and deaf to the pointer, so the dot's popup is still what a
@@ -8464,8 +8585,39 @@
     var guessEnd = !drop && !want.dropoff && areas.guess ? areas.guess : null;
     if (guessEnd) {
       put(guessEnd, '#f5a524', '≈ where DoorDash\'s map labels the customer — a best guess, '
-          + 'not the door', want.guess, false, '≈', { faded: true, aside: inCar });
+          + 'not the door' + (want.guessShare ? ', one of ' + (want.card || {}).dropoffs : ''),
+          want.guess, false, '≈', { faded: true, aside: inCar });
     }
+    /* ...and the order in the car's end by DoorDash's map label, no screen
+       having given one (want.heldGuess; the owner, 31 Oct): a faded ring
+       "≈", never D, said as the guess it is. */
+    if (!held && areas.heldGuess) {
+      put(areas.heldGuess, '#f5a524', '≈ where DoorDash\'s map labels the customer of the order '
+          + 'in your car — a best guess, not the door; DoorDash dropoff not read yet',
+          want.heldGuess, true, '≈', { faded: true });
+    }
+    /* ...and DoorDash's other stores (the owner's snaps of 31 Oct): this
+       card's (areas.stores, the walk's search of each printed door) green,
+       P2, P3 where the door was found and faded "≈" where only its area
+       was; the held order's (want.heldStores, the server's pins) a green
+       RING, P1, P2 in the card's order, and ticked and faded once the car
+       has been there and left. Drawing only, every one. */
+    (areas.stores || []).forEach(function (st) {
+      if (!st.at) return;
+      put(st.at, '#17c964', st.at.approx
+            ? '≈ the area of this card\'s store ' + st.n + ' — what its answers share, not the door'
+            : 'pick this one up at store ' + st.n + ' too, on the way',
+          [st.name, st.q].filter(Boolean).join(' · '), false,
+          st.at.approx ? '≈' : 'P' + st.n, { faded: !!st.at.approx });
+    });
+    ((want.heldStores && want.heldStores.marks) || []).forEach(function (m) {
+      if (!m.at) return;
+      put(m.at, '#17c964', m.visited
+            ? 'collected — the order in your car was picked up here'
+            : 'pick up the order in your car at store ' + m.n,
+          m.name, true, m.visited ? '\u2713' : 'P' + m.n,
+          m.visited ? { faded: true, aside: true } : undefined);
+    });
     // ...and the pickups routed to their general area (the owner's DoorDash
     // snap of 24 Oct): this card's own, and the held order's, faded green
     // "≈" and never P — not the restaurant's door, not the guard's.
@@ -8557,6 +8709,11 @@
     // (MV.heldRun) — along the roads when the NucBox's router drew them
     // (`heldRoad`, see showMap), straight otherwise.
     var heldAt = j.heldPicks.map(function (p) { return p.at; });
+    // ...and, a DoorDash order's stores (want.heldStores), the run's pickups
+    // when no planner gave it any: for the straight run below only, never
+    // the detour's stops (`stopsAt`), so no figure is measured through them.
+    var storeAt = !heldAt.length && want.heldStores ? want.heldStores.pts : [];
+    var runEnd = held || (areas.heldGuess && !want.held ? areas.heldGuess : null);
     // What of the lines below was drawn, for the key: the run, solid in the
     // order's amber, and the miles this card adds to it, dashed in violet.
     var drewRun = false, drewExtra = false;
@@ -8582,11 +8739,11 @@
     } else {
       // (...through the batched trip's other doors, as the ladder ran it.)
       var run = heldRoad || (MV.heldRun ? MV.heldRun(here || want.carNow, held
-          ? heldAt.concat(aheadAt) : heldAt, held)
+          ? heldAt.concat(aheadAt) : storeAt.length ? storeAt : heldAt, runEnd)
         : (here && held ? [[here.lat, here.lon], [held.lat, held.lon]] : []));
       // (A road to a rung below the door — a corner's street, the pickups
       // alone — is drawn with no D under it: MV.routeLadder.)
-      if (run.length && (heldRoad || held || heldAt.some(Boolean))) {
+      if (run.length && (heldRoad || held || heldAt.some(Boolean) || storeAt.length)) {
         runLine(run, { color: '#f5a524', opacity: .9,
                        className: 'mv-held-run' + (heldRoad ? ' mv-road' : '') });
         drewRun = true;
@@ -8636,9 +8793,12 @@
     // line read as one more pickup ring.
     var drewJob = false;
     // (...or to a point on one of its corner's streets, by road only: no D.)
+    // (...through the card's other stores, in the card's order: areas.stores.)
+    var jobVia = (areas.stores || []).filter(function (st) { return st.at; })
+      .map(function (st) { return [st.at.lat, st.at.lon]; });
     if (!guessEnd && pick && (drop || jobRoad)) {
       drewJob = true;
-      runLine(jobRoad || [[pick.lat, pick.lon], [drop.lat, drop.lon]],
+      runLine(jobRoad || [[pick.lat, pick.lon]].concat(jobVia, [[drop.lat, drop.lon]]),
               { color: '#2dd4bf', opacity: .9,
                 className: 'mv-job' + (jobRoad ? ' mv-road' : '') });
     }
@@ -8646,7 +8806,7 @@
     // so it reads as the approximate run it is.
     if (guessEnd && (jobRoad || pick)) {
       drewJob = true;
-      runLine(jobRoad || [[pick.lat, pick.lon], [guessEnd.lat, guessEnd.lon]],
+      runLine(jobRoad || [[pick.lat, pick.lon]].concat(jobVia, [[guessEnd.lat, guessEnd.lon]]),
               { color: '#2dd4bf', opacity: .6, dashArray: '8 8',
                 className: 'mv-job mv-guess' + (jobRoad ? ' mv-road' : '') });
     }

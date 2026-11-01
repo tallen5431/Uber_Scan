@@ -3462,9 +3462,29 @@ MANY_DROPOFFS = re.compile(r'multiple\s*drop\s*-?\s*offs', re.I)
 
 def says_many_dropoffs(parsed):
     """Whether any text this reading was built from names more than one
-    dropoff. Every frame the window kept, as says_early_look."""
+    dropoff. Every frame the window kept, as says_early_look — or the
+    reading's own count of them (OP.dropoff_shape's `dropoffs`, the window's
+    vote) is two or more, which is the same words read."""
+    if (parsed.get('dropoffs') or 0) >= 2:
+        return True
     texts = list(parsed.get('scans') or []) + [parsed.get('text') or '']
     return any(MANY_DROPOFFS.search(t or '') for t in texts)
+
+
+def stores_of(parsed):
+    """DoorDash's stores on the card, in the card's order, each with the door
+    printed under its name: [{'name', 'door'}], `door` None where the line
+    under it was no door. [] on every card that is not a stops card (OP's
+    `placeDoors` is [] there), on a reading whose doors are not beside its
+    places — one list for both, or nothing — and on a card with one store,
+    which says nothing `pickup` and `pickupLine` do not: its line stays the
+    shape it was."""
+    places = parsed.get('places') or []
+    doors = parsed.get('placeDoors') or []
+    if len(doors) < 2 or len(doors) != len(places):
+        return []
+    return [{'name': n, 'door': d if isinstance(d, str) and d else None}
+            for n, d in zip(places, doors)]
 
 
 def says_multi_order(parsed):
@@ -4140,6 +4160,20 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
         # whole job: server.js's CARD_FIELDS has asked for it, and the
         # reading carried it, but this line never did.
         'stops': parsed.get('stops'),
+        # ...and, on DoorDash's stops card, every store in the card's order
+        # with the door printed under its name (stores_of; OP's `placeDoors`),
+        # and the card's dropoff shape: how many customers ("Multiple
+        # dropoffs (2 stops)" 2, "Customer dropoff" 1) and the orders under a
+        # lone one ("Drop off 2 orders"). The owner, 31 Oct: "It would be
+        # great if the pins for the pickup and drop off could be captured and
+        # mapped" — a two-store card has two pickups and `pickupLine` names
+        # the first one's door alone. server.js keeps `stores` on the offer
+        # and on its order at the Took (cardOf, the hold's `stores`), and Map
+        # view pins each from its door and routes through them in this order.
+        # [] / None on every other card, so their lines carry nothing new.
+        'stores': stores_of(parsed),
+        'dropoffs': parsed.get('dropoffs'),
+        'dropoffOrders': parsed.get('dropoffOrders'),
         # Whether the card REFUSED a destination or the reader merely found
         # none. Both arrive as `dropoff: null` and only the first is a state
         # the driver can do something about — Uber prints "Customer dropoff"

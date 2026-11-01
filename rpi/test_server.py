@@ -8460,6 +8460,72 @@ try:
     finally:
         stop(_spp)
 
+    # --- DoorDash's two-store card: every store a pickup (the owner, 31 Oct) ---
+    #
+    # "It would be great if the pins for the pickup and drop off could be
+    # captured and mapped", over a card with two stores, each with its door
+    # printed under its name, and one "Customer dropoff" with two orders. The
+    # offer line's `stores` (scan_pi.stores_of) rides onto the order at the
+    # Took (storesOf), each door is asked as `pickupLine` is (pickupAsks), and
+    # the status and the beat give them back in the CARD's order with each
+    # one's pin (heldStoresOf) for Map view's run. The fake's two restaurants
+    # on one invented block stand in for the two stores.
+    _SM_DOOR1 = '1975 Cobb Parkway'
+    _smj = os.path.join(_hkdir, 'sm', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_smj))
+    open(_smj, 'w').close()
+    _smp, _smb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base,
+                        'NUCBOX_TIMEOUT_MS': '800'}, _smj)
+    try:
+        _so = dict(_SQ, id='s-two', pay=14.1, minutes=33.0, billedMinutes=33.0, miles=8.7,
+                   cost=1.5, pickup='Example Diner', pickupLine=_SM_DOOR1, app='doordash',
+                   stores=[{'name': 'Example Diner', 'door': _SM_DOOR1},
+                           {'name': 'Example Taqueria', 'door': _SP_DOOR},
+                           {'name': 'Example Bakery', 'door': None}],
+                   dropoffs=1, dropoffOrders=2,
+                   dropoffGuess={'line': '4821 Kestrel Dr', 'from': 'dd map label'})
+        post(_smb, '/api/offers/mark', {'id': 's-two', 'accepted': True, 'offer': _so})
+        _h = _settled(_smb, lambda h: (h.get('pickupsPinned') or 0) >= 2 or h.get('pickupsWhy'))
+        _f = json.load(open(os.path.join(os.path.dirname(_smj), 'holding.json')))
+        _o = [o for o in _f.get('orders') or [] if o.get('id') == 's-two'][0]
+        eq('[dd stores] a DoorDash order taken off a two-store card keeps every store with its '
+           'printed door, in the card\'s order, and the card\'s dropoff shape',
+           (_o.get('stores'), _o.get('dropoffs'), _o.get('dropoffOrders')),
+           ([{'name': 'Example Diner', 'door': _SM_DOOR1},
+             {'name': 'Example Taqueria', 'door': _SP_DOOR},
+             {'name': 'Example Bakery', 'door': None}], 1, 2))
+        eq('[dd stores] ...each store\'s door is asked and pinned by the server, from the card',
+           (_h.get('pickupsPinned'),
+            sorted(p[2] for p in (_sporders(_smj).get('s-two') or (None, []))[1])),
+           (2, sorted([_SM_DOOR1, _SP_DOOR])))
+        eq('[dd stores] ...and the status gives them back in the card\'s order with each one\'s '
+           'pin, the store with no door listed with none',
+           [(st.get('name'), st.get('door'), bool(st.get('at')), st.get('visited'))
+            for st in _h.get('stores') or []],
+           [('Example Diner', _SM_DOOR1, True, False), ('Example Taqueria', _SP_DOOR, True, False),
+            ('Example Bakery', None, False, False)])
+        eq('[dd stores] ...the second store\'s pin where the server put it',
+           (_h.get('stores') or [{}, {}])[1].get('at'), {'lat': _SP_AT[0], 'lon': _SP_AT[1]})
+        eq('[dd stores] ...and the map label still rides on as a guess, never the order\'s end',
+           (_o.get('dropoff'), (_o.get('dropoffGuess') or {}).get('line')),
+           (None, '4821 Kestrel Dr'))
+        post(_smb, '/api/delivered', {})
+        # A one-store DoorDash card, and an Uber card that somehow carried a
+        # list: neither keeps `stores`, so their orders' shape is as it was.
+        for _oid, _app, _st in (('s-one', 'doordash', [{'name': 'Example Diner', 'door': _SM_DOOR1}]),
+                                ('s-uber2', 'uber', _so['stores'])):
+            post(_smb, '/api/offers/mark', {'id': _oid, 'accepted': True,
+                                            'offer': dict(_so, id=_oid, app=_app, stores=_st)})
+            _h = _settled(_smb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
+            _f = json.load(open(os.path.join(os.path.dirname(_smj), 'holding.json')))
+            _o = [o for o in _f.get('orders') or [] if o.get('id') == _oid][0]
+            eq('[dd stores] %s keeps no stores, and its status lists none' % (
+                'a one-store DoorDash card' if _app == 'doordash' else 'an Uber card'),
+               (_o.get('stores'), 'stores' in _h), (None, False))
+            post(_smb, '/api/delivered', {})
+    finally:
+        stop(_smp)
+
     # A hold restored at boot whose store's door a place popup filed
     # (`fields.pickupAddr`, from 'popup'), no pickup pinned: asked at boot —
     # and its card's own "Store (<n> <street>)" as well, which the popup's

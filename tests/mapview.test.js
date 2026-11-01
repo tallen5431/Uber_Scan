@@ -1935,6 +1935,58 @@ async function nucbox() {
                      MV.guessOf({ dropoffGuess: { line: '418 Fable Ave NE', from: 'popup' } }),
                      MV.guessOf({ dropoffGuess: '418 Fable Ave NE' }), MV.guessOf(null)]),
      JSON.stringify(['418 Fable Ave NE', null, null, null, null]));
+  /* ---- DoorDash's stores, every one a pickup (the owner's snaps, 31 Oct) --
+   *
+   * "It would be great if the pins for the pickup and drop off could be
+   * captured and mapped": a card with two stores, each door printed under its
+   * name. The card's first store is its pickup as before; the others are
+   * searched by their doors (cardStores) and the run goes through them. Store
+   * names and streets invented. */
+  var twoStores = { app: 'doordash', stores: [
+    { name: 'Lark Owl Pizza', door: '4410 Fernhill Road Northwest' },
+    { name: 'Maple Run Creamery', door: '2516 Quillon Street, Brookvale' },
+    { name: 'Wren Shack', door: null }] };
+  eq('[stores] a card\'s stores after its first, each by its printed door, numbered from 2; '
+     + 'a store with no door kept with none (never searched by its name)',
+     JSON.stringify(MV.cardStores(twoStores)),
+     JSON.stringify([{ q: '2516 Quillon Street, Brookvale', name: 'Maple Run Creamery', n: 2 },
+                     { q: null, name: 'Wren Shack', n: 3 }]));
+  eq('[stores] ...none on a one-store card, a card with no list, or a list of nothing',
+     JSON.stringify([MV.cardStores({ stores: [twoStores.stores[0]] }), MV.cardStores({}),
+                     MV.cardStores(null), MV.cardStores({ stores: [null, { door: 'x' }] })]),
+     JSON.stringify([[], [], [], []]));
+  var hs = MV.heldStores([{ name: 'A', door: '1 A Rd', at: { lat: 34.01, lon: -84.6 } },
+                          { name: 'B', door: '2 B St', at: null },
+                          { name: 'C', door: '3 C Ln', at: { lat: 34.03, lon: -84.62 },
+                            visited: true },
+                          { name: 'D', door: '4 D Way', at: { lat: 34.04, lon: -84.63 } }]);
+  eq('[stores] an order\'s stores as the server gave them: the run through those pinned and '
+     + 'not behind the car, in the card\'s order; the one with no pin counted as skipped',
+     JSON.stringify([hs.pts, hs.skipped, hs.marks.map(function (m) {
+       return m.n + (m.at ? '@' : '-') + (m.visited ? 'v' : ''); })]),
+     JSON.stringify([[{ lat: 34.01, lon: -84.6 }, { lat: 34.04, lon: -84.63 }], 1,
+                     ['1@', '2-', '3@v', '4@']]));
+  eq('[stores] ...none for an order with fewer than two, and the words for the skipped',
+     JSON.stringify([MV.heldStores(null), MV.heldStores([{ name: 'A' }]),
+                     MV.storesSkipped(0), MV.storesSkipped(1), MV.storesSkipped(2)]),
+     JSON.stringify([null, null, null, 'route skips 1 store, not pinned',
+                     'route skips 2 stores, not pinned']));
+  eq('[stores] a map label on a card for more than one customer says it is one of them; one '
+     + 'customer or no count says nothing more',
+     JSON.stringify([MV.guessShare(2), MV.guessShare(3), MV.guessShare(1), MV.guessShare(null)]),
+     JSON.stringify(['≈ 1 of 2 dropoffs from DoorDash\'s map; the other not known yet',
+                     '≈ 1 of 3 dropoffs from DoorDash\'s map; the others not known yet',
+                     null, null]));
+  eq('[stores] the run through two stores to a guessed end: car -> store 1 -> store 2 -> the '
+     + 'label, its rung "≈ from DoorDash\'s map"',
+     JSON.stringify(MV.routeLadder({ lat: 34, lon: -84.5 },
+                                   [{ lat: 34.01, lon: -84.6 }, { lat: 34.04, lon: -84.63 }],
+                                   { lat: 34.05, lon: -84.64, approx: true, guess: true }, 'guess')),
+     JSON.stringify({ pts: [{ lat: 34, lon: -84.5 }, { lat: 34.01, lon: -84.6 },
+                            { lat: 34.04, lon: -84.63 },
+                            { lat: 34.05, lon: -84.64, approx: true, guess: true }],
+                      note: '≈ from DoorDash\'s map' }));
+
   var gDisc = MV.guessDisc(dash({ miles: 1.5 }), ddPick);
   var gBand = await bandNbx().band(tPlan, tRes, gDisc, MV.bandTarget(dash({ miles: 1.5 }), 'dropoff'),
                                    ddPick, { left: 24 }, true);

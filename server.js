@@ -1153,6 +1153,36 @@ function dropoffGuessOf(offer) {
   return { line: t, from: MV.GUESS_FROM || 'dd map label' };
 }
 
+/* DoorDash's stores on a stops card, in the card's order, each with the door
+ * printed under its name (the offer line's `stores`, scan_pi.stores_of; the
+ * parser's `placeDoors`): [{name, door}], `door` a string or null. The owner's
+ * snaps of 31 Oct: "It would be great if the pins for the pickup and drop off
+ * could be captured and mapped", over a card with two stores and one
+ * "Customer dropoff". Only a list of two or more is kept — a one-store card
+ * says nothing `pickup` and `pickupLine` did not, and its order's shape stays
+ * exactly as it was — and only DoorDash's (no other app prints it). Capped at
+ * the parser's own MAX_PLACES (4), names and doors at 120 characters, so a
+ * line of another shape is never carried. A STORE's door: a pickup, never a
+ * dropoff, and nothing here makes it one. */
+var STORES_MAX = 4;
+function storesOf(offer) {
+  var list = offer && offer.app === 'doordash' && Array.isArray(offer.stores) ? offer.stores : [];
+  var out = list.slice(0, STORES_MAX).filter(function (st) {
+    return st && typeof st.name === 'string' && st.name && st.name.length <= 120;
+  }).map(function (st) {
+    return { name: st.name,
+             door: typeof st.door === 'string' && st.door && st.door.length <= 120 ? st.door : null };
+  });
+  return out.length >= 2 ? out : null;
+}
+
+/* ...and the card's dropoff shape beside them: how many customers it printed
+ * ("Multiple dropoffs (2 stops)" 2, "Customer dropoff" 1) and the orders under
+ * a lone one ("Drop off 2 orders"), whole numbers 1-20, else null each. */
+function countOf(v, lo) {
+  return typeof v === 'number' && v === Math.floor(v) && v >= lo && v <= 20 ? v : null;
+}
+
 function cardOf(offer) {
   var out = {};
   CARD_FIELDS.forEach(function (k) {
@@ -3744,6 +3774,16 @@ function pickupAsks(h) {
   var f = Assemble.fieldsOf(h).pickupAddr;
   if (f) add(f.value, f.from);
   add(h.pickupLine, 'card');
+  // ...and every OTHER store's printed door on a DoorDash card with two or
+  // more (the hold's `stores`, storesOf; the owner's snaps of 31 Oct): each a
+  // pickup of this order, asked exactly as `pickupLine` is (door level only,
+  // in the held card's disc), so each store gets its pin, the GPS drop's
+  // guard holds every restaurant of the order, and visitPickups marks each
+  // behind the car on its own. The first store's door IS `pickupLine`, and a
+  // text on the list twice is asked once.
+  (Array.isArray(h.stores) ? h.stores : []).forEach(function (st) {
+    if (st && typeof st.door === 'string') add(st.door, 'card');
+  });
   add(h.pickup, 'card');
   // ...and, with no door on record at all, the card's STORE by its name (the
   // owner's 23 Oct ride: "Momoyama Ramen & Hawaiian BBQ" on the card and no
@@ -5415,7 +5455,7 @@ function heldEndState(h) {
     return p && typeof p.lat === 'number' && typeof p.lon === 'number'
       && gone.indexOf(p.q) === -1;
   })[0] || null;
-  return { endPinned: !!pin, arrived: !!h.arrivedAt,
+  var out = { endPinned: !!pin, arrived: !!h.arrivedAt,
            pickAt: pick ? { lat: pick.lat, lon: pick.lon } : null,
            // ...who pinned it: 'server' (the door, searchHeldEnd), 'place'
            // (its place, searchHeldPlace), 'street' (a short street,
@@ -5442,6 +5482,35 @@ function heldEndState(h) {
            // the same three messages, for the same reason: a visit happens
            // between offers.
            visited: gone };
+  // ...and, on a DoorDash order taken off a card with two stores or more (the
+  // hold's `stores`), each store in the CARD'S order with its pin, or none
+  // yet (heldStoresOf). Absent on every other order, so their beat is the
+  // shape it was.
+  var stores = heldStoresOf(h, gone);
+  if (stores) out.stores = stores;
+  return out;
+}
+
+/* Each store of a multi-store DoorDash order in the card's order, for Map
+ * view's run car -> store 1 -> store 2 -> the end (the owner's snaps of 31
+ * Oct): [{name, door, at, visited}], `at` this order's pickup pin for that
+ * store's printed door ({lat, lon}, keepPickupPin's — this server's search,
+ * or Map view's post), null while it is not pinned; `visited` whether the car
+ * has been there and left (visitPickups). Null with no `stores` on the hold.
+ * The pins are in the order they landed, which is not the card's; this puts
+ * them back in the card's. A store with no door is listed with no pin: the
+ * run skips it and says so, it never searches its name. */
+function heldStoresOf(h, gone) {
+  if (!h || !Array.isArray(h.stores) || h.stores.length < 2) return null;
+  var pins = Array.isArray(h.pickupPins) ? h.pickupPins : [];
+  return h.stores.map(function (st) {
+    var pin = st.door ? pins.filter(function (p) {
+      return p && p.q === st.door && typeof p.lat === 'number' && typeof p.lon === 'number';
+    })[0] : null;
+    return { name: st.name, door: st.door || null,
+             at: pin ? { lat: pin.lat, lon: pin.lon } : null,
+             visited: !!(st.door && (gone || []).indexOf(st.door) !== -1) };
+  });
 }
 
 /* ---------- how the order's end was pinned, journaled when it goes ---------
@@ -5543,6 +5612,11 @@ function heldForPanel(held) {
         // one (the hold's `dropoffGuess`): Map view draws it, faded, "≈".
         // Only where there is one, so every other order's shape is as it was.
         !held.dropoff && held.dropoffGuess ? { dropoffGuess: held.dropoffGuess } : null,
+        // ...and the card's dropoff shape off a multi-store DoorDash card
+        // (the hold's `dropoffs`, `dropoffOrders`): Map view says "1 of 2
+        // dropoffs" under a lone map label. Only where the hold has stores.
+        Array.isArray(held.stores) && held.stores.length >= 2
+          ? { dropoffs: held.dropoffs || null, dropoffOrders: held.dropoffOrders || null } : null,
         // ...and the GPS drop's state, which the in-car line on the panel
         // says. It was on /api/status alone — fetched once, at load — so a
         // panel left open never learned that a pin had armed or been refused.
@@ -11436,6 +11510,21 @@ function route(req, res) {
               addOn: false,
               of: null
             });
+            // ...and, off DoorDash's card with two stores or more, every
+            // store in the card's order with its printed door (storesOf; the
+            // owner, 31 Oct: "the pins for the pickup and drop off could be
+            // captured and mapped"): each door asked for its pin as
+            // `pickupLine` is (pickupAsks), and the run drawn car -> each
+            // store -> the end (heldStoresOf, live.html), with the card's
+            // dropoff shape — how many customers, and the orders under one.
+            // Set only on such an order, so every other hold is the shape it
+            // was, key for key.
+            var tookStores = storesOf(marked);
+            if (tookStores) {
+              took.stores = tookStores;
+              took.dropoffs = countOf(marked.dropoffs, 1);
+              took.dropoffOrders = countOf(marked.dropoffOrders, 1);
+            }
             // ...and which surface took it, for the offers page's alone.
             if (offersHolds) took.tookOn = 'offers';
             keepTookPress(took.id, tookAt);
