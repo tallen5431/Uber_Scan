@@ -2109,12 +2109,79 @@
   }
  },
  {
-  "name": "a street whose town the card's edge cut is no door: the name is all the pickup has",
+  "name": "a street whose town the card's edge cut is the street alone: the whole street before the comma is the door (31 Oct; null before)",
   "text": "$7.75\n2 stops (7.8 mi) - 30 min\n& Corner Bagel Co\n123 Maple Grove Road Northwest, Sm...\n& Customer dropoff",
   "expect": {
    "pickup": "Corner Bagel Co",
-   "pickupLine": null,
-   "dropoff": null
+   "pickupLine": "123 Maple Grove Road Northwest",
+   "dropoff": null,
+   "dropoffs": 1,
+   "dropoffOrders": null
+  }
+ },
+ {
+  "name": "DoorDash's two-store card, one customer with two orders: both stores' doors, the first's town all cut away, the second's ZIP cut; one dropoff, two orders (the owner's snaps of 31 Oct)",
+  "_why": "\"It would be great if the pins for the pickup and drop off could be captured and mapped.\" Shaped as the rig's reader gave the card (icons read as &, ff and 8); every name and street invented. Both parsers dropped the line under each store, and the first store's (comma, then the card's edge) was no door at all.",
+  "text": "$14.10 incl. tips\n3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza\n4410 Fernhill Road Northwest, ...\nff Maple Run Creamery\n2516 Quillon Street, Brookvale, 301...\n8 Customer dropoff\nDrop off 2 orders\nAccept 0:36",
+  "expect": {
+   "pay": 14.1,
+   "minutes": 33,
+   "miles": 8.7,
+   "stops": 3,
+   "pickup": "Lark Owl Pizza",
+   "pickupLine": "4410 Fernhill Road Northwest",
+   "dropoff": null,
+   "dropoffs": 1,
+   "dropoffOrders": 2,
+   "endRefused": true
+  }
+ },
+ {
+  "name": "...and two stores with two customers: both doors whole, \"Multiple dropoffs (2 stops)\" is two dropoffs and no order count (31 Oct)",
+  "text": "$21.35 incl. tips\n4 stops (15.0 mi) - 53 min\n@ Wren Shack\n880 Wrenfield Highway, Brookvale, 30199 GA\n@ Lark Owl Burgers\n912 Wrenfield Highway, Brookvale, 30199 GA\n83 Multiple dropoffs (2 stops)\nAccept 0:17",
+  "expect": {
+   "pay": 21.35,
+   "stops": 4,
+   "pickup": "Wren Shack",
+   "pickupLine": "880 Wrenfield Highway, Brookvale, GA 30199",
+   "dropoff": null,
+   "dropoffs": 2,
+   "dropoffOrders": null
+  }
+ },
+ {
+  "name": "...a read that starts below the payout keeps the doors and the shape: the journey, the stores, no pay",
+  "text": "3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza\n4410 Fernhill Road Northwest, ...\n@ Maple Run Creamery\n2516 Quillon Street, Brookvale, 301...\n8 Customer dropoff\nDrop off 2 orders",
+  "expect": {
+   "pay": null,
+   "stops": 3,
+   "dropoffs": 1,
+   "dropoffOrders": 2
+  }
+ },
+ {
+  "name": "...\"Multiple dropoffs\" whose count did not read is many, but no number",
+  "text": "$21.35 incl. tips\n4 stops (15.0 mi) - 53 min\n@ Wren Shack\n880 Wrenfield Highway, Brookvale, 30199 GA\n83 Multiple dropoffs (Z stops)",
+  "expect": {
+   "dropoffs": null,
+   "dropoffOrders": null
+  }
+ },
+ {
+  "name": "...a store whose line under it is no door keeps its place in placeDoors as null",
+  "text": "$9.10 incl. tips\n3 stops (6.1 mi) - 28 min\n@ Wren Shack\n880 Wrenfield Highway, Brookvale, 30199 GA\n@ Lark Owl Burgers\nPick up 2 orders\n912 Wrenfield Highway, Brookvale, 30199 GA\nCustomer dropoff",
+  "expect": {
+   "dropoffs": 1,
+   "dropoffOrders": null
+  }
+ },
+ {
+  "name": "Uber's \"Customer dropoff\" is no dropoff shape, and an Uber card has no placeDoors",
+  "text": "$9.12\nGuaranteed (incl. tip)\n26 min (7.1 mi) total\nFable Grill (1200 Lantern Rd)\nCustomer dropoff",
+  "expect": {
+   "dropoffs": null,
+   "dropoffOrders": null,
+   "endRefused": true
   }
  },
  {
@@ -8456,6 +8523,39 @@
    "expect": null
   }
  ],
+ "_placeDoors_comment": "Every store's door on DoorDash's stops card, beside `places` and the same length (`placeDoors`): store_door / storeDoor off the line directly under each store's name, null where that line is no door, [] on every card that is not a stops card. Checked as exact lists, [places, placeDoors], by each port's own runner (a list in `parse` is one runner's === against the other's ==). The owner's snaps of 31 Oct; every store and street invented.",
+ "placeDoors": [
+  {
+   "name": "two stores, one customer with two orders: the first's town all cut away after its comma, the second's ZIP cut",
+   "text": "$14.10 incl. tips\n3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza\n4410 Fernhill Road Northwest, ...\nff Maple Run Creamery\n2516 Quillon Street, Brookvale, 301...\n8 Customer dropoff\nDrop off 2 orders\nAccept 0:36",
+   "expect": [["Lark Owl Pizza", "Maple Run Creamery"], ["4410 Fernhill Road Northwest", "2516 Quillon Street, Brookvale"]]
+  },
+  {
+   "name": "two stores, two customers: both doors whole, ZIP before the state written state first",
+   "text": "$21.35 incl. tips\n4 stops (15.0 mi) - 53 min\n@ Wren Shack\n880 Wrenfield Highway, Brookvale, 30199 GA\n@ Lark Owl Burgers\n912 Wrenfield Highway, Brookvale, 30199 GA\n83 Multiple dropoffs (2 stops)\nAccept 0:17",
+   "expect": [["Wren Shack", "Lark Owl Burgers"], ["880 Wrenfield Highway, Brookvale, GA 30199", "912 Wrenfield Highway, Brookvale, GA 30199"]]
+  },
+  {
+   "name": "a read that starts below the payout keeps the doors",
+   "text": "3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza\n4410 Fernhill Road Northwest, ...\n@ Maple Run Creamery\n2516 Quillon Street, Brookvale, 301...\n8 Customer dropoff\nDrop off 2 orders",
+   "expect": [["Lark Owl Pizza", "Maple Run Creamery"], ["4410 Fernhill Road Northwest", "2516 Quillon Street, Brookvale"]]
+  },
+  {
+   "name": "a store whose line under it is no door (a chip line between) keeps its place, null",
+   "text": "$9.10 incl. tips\n3 stops (6.1 mi) - 28 min\n@ Wren Shack\n880 Wrenfield Highway, Brookvale, 30199 GA\n@ Lark Owl Burgers\nPick up 2 orders\n912 Wrenfield Highway, Brookvale, 30199 GA\nCustomer dropoff",
+   "expect": [["Wren Shack", "Lark Owl Burgers"], ["880 Wrenfield Highway, Brookvale, GA 30199", null]]
+  },
+  {
+   "name": "one store whose town the card's edge cut: its street alone",
+   "text": "$7.75\n2 stops (7.8 mi) - 30 min\n& Corner Bagel Co\n123 Maple Grove Road Northwest, Sm...\n& Customer dropoff",
+   "expect": [["Corner Bagel Co"], ["123 Maple Grove Road Northwest"]]
+  },
+  {
+   "name": "an Uber card has places and no doors",
+   "text": "$9.12\nGuaranteed (incl. tip)\n26 min (7.1 mi) total\nFable Grill (1200 Lantern Rd)\nCustomer dropoff",
+   "expect": [["Fable Grill (1200 Lantern Rd)"], []]
+  }
+ ],
  "_doors_comment": "The store's door off the line under its name on DoorDash's stops card: store_door / storeDoor, the rule parse() takes `pickupLine` by. A house number, a street, a comma, a town, then only the ZIP and the state in either order; a ZIP the card's edge cut is dropped. `expect` is the line as \"<n> <street>, <town>[, <ST> <ZIP>]\", or null when the line is refused. The shapes are the owner's 17 Oct afternoon shift; every street is invented.",
  "doors": [
   {
@@ -8499,8 +8599,33 @@
    "expect": "12 Ab Rd, Marietta, 30066"
   },
   {
-   "name": "a town the card's edge cut is no town",
+   "name": "a town the card's edge cut is no town, and the whole street before its comma is the door (31 Oct; null before)",
    "line": "123 Maple Grove Road Northwest, Sm...",
+   "expect": "123 Maple Grove Road Northwest"
+  },
+  {
+   "name": "...and with the town all cut away after the comma, the compass word kept: the comma ended the street (31 Oct)",
+   "line": "4410 Fernhill Road Northwest, ...",
+   "expect": "4410 Fernhill Road Northwest"
+  },
+  {
+   "name": "...the edge's ellipsis as one mark, behind the reader's icon",
+   "line": "| 4410 Fernhill Road NW, \u2026",
+   "expect": "4410 Fernhill Road NW"
+  },
+  {
+   "name": "...but not a street with two words after its type",
+   "line": "4410 Fernhill Road Suite 2, ...",
+   "expect": null
+  },
+  {
+   "name": "...nor one with no street type before the comma",
+   "line": "4410 Fernhill Hollow, ...",
+   "expect": null
+  },
+  {
+   "name": "...nor one with no house number",
+   "line": "Fernhill Road Northwest, ...",
    "expect": null
   },
   {

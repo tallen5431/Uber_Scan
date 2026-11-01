@@ -2606,6 +2606,28 @@
 
   var DROPOFF_NOT_STATED = /custom[ea]r\s*drop\s*-?\s*off/i;
 
+  /* The dropoff's shape on DoorDash's stops card (the owner's snaps of 31
+     Oct): "Customer dropoff" over "Drop off 2 orders" is one customer with
+     two orders; "Multiple dropoffs (2 stops)" is two customers. [dropoffs,
+     orders], or [null, null] off any card that is not a stops card (Uber
+     prints "Customer dropoff" too, meaning something else). Real digits; many
+     beats one. See dropoff_shape / DROPOFFS_MANY in offer_parser.py. */
+  var DROPOFFS_MANY = /multiple\s*drop\s*-?\s*offs?\s*(?:\(\s*(\d{1,2})\s*stops?)?/i;
+  var DROPOFF_ORDERS = /drop\s*-?\s*off\s*(\d{1,2})\s*orders?\b/i;
+  function dropoffShape(text) {
+    text = String(text || '');
+    if (!STORES_LINE.test(text)) return [null, null];
+    var m = DROPOFFS_MANY.exec(text);
+    if (m) {
+      var n = m[1] ? parseInt(m[1], 10) : null;
+      return [n !== null && n >= 2 ? n : null, null];
+    }
+    if (!DROPOFF_NOT_STATED.test(text)) return [null, null];
+    m = DROPOFF_ORDERS.exec(text);
+    var k = m ? parseInt(m[1], 10) : null;
+    return [1, k !== null && k >= 1 ? k : null];
+  }
+
   function placeKey(value) {
     return (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   }
@@ -2775,8 +2797,39 @@
     return keep.join(' ').replace(/^\W+/, '').replace(/\.+$/, '');
   }
 
+  /* ...and the door cut just after its comma (the owner's DoorDash snaps of
+     31 Oct: "4410 <Name> Road Northwest, ..." under the store, the town all
+     cut away, or "..., Sm..."): the street before the comma is whole, so a
+     compass word after its type is kept; after the comma only the edge's
+     mark, or one capitalised word it took. Written out as the street alone.
+     See _DOOR_TOWN_CUT in offer_parser.py. */
+  var DOOR_TOWN_CUT = /^(.*?)\s*,\s*(?:[A-Z][A-Za-z]{0,15}\s*)?(?:\.\s*){2,}$|^(.*?)\s*,\s*(?:[A-Z][A-Za-z]{0,15}\s*)?\u2026\s*$/;
+  var DOOR_COMPASS = /^(?:N|S|E|W|NE|NW|SE|SW|North|South|East|West|Northeast|Northwest|Southeast|Southwest)\.?$/;
+  function storeDoorTownCut(line) {
+    var flat = String(line || '').replace(DOOR_SPACE, ' ').trim();
+    var m = DOOR_TOWN_CUT.exec(flat);
+    if (!m) return null;
+    var street = m[1] !== undefined ? m[1] : m[2];
+    if (street.indexOf(',') >= 0) return null;
+    var words = street.split(' ');
+    if (words.length && /^\W{1,4}$/.test(words[0])) words = words.slice(1);
+    if (words.length > 1 && words[0].length === 1 && DOOR_HOUSE.test(words[1])) words = words.slice(1);
+    if (words.length < 3 || !DOOR_HOUSE.test(words[0])) return null;
+    var k = -1;
+    for (var i = 2; i < words.length; i++) if (DOOR_TYPE.test(words[i])) k = i;
+    if (k < 0) return null;
+    var after = words.slice(k + 1);
+    if (after.length > 1 || (after.length && !DOOR_COMPASS.test(after[0]))) return null;
+    if (!words.slice(1).every(function (w) { return DOOR_WORD.test(w); })
+        || !words.slice(1, k).some(function (w) { return /[A-Za-z]{2}/.test(w); })) return null;
+    return words.join(' ').replace(/^\W+/, '').replace(/\.+$/, '');
+  }
+
   function storeDoor(line) {
-    var m = STORE_DOOR.exec(String(line || '').replace(DOOR_SPACE, ' ').trim());
+    var flat = String(line || '').replace(DOOR_SPACE, ' ').trim();
+    var cut = storeDoorTownCut(flat);
+    if (cut !== null) return cut;
+    var m = STORE_DOOR.exec(flat);
     if (!m) return storeDoorCut(line);
     var street = m[1], town = m[2], tail = m[3] || '';
     // Asked here, not in the pattern, which would backtrack n². See store_door.
@@ -3917,6 +3970,8 @@
        become the dropoff. See storeDoor. */
     var pickupLine = stores.length && stores.indexOf(pickup) >= 0
       ? doors[stores.indexOf(pickup)] : null;
+    // How the card ends its list. See dropoffShape.
+    var shape = dropoffShape(mine);
     /* The card can name its approach leg in words or by where it printed the
        pickup, and this is the second one. Written onto the leg rather than
        handed to toPickup, so the one rule that decides keeps deciding and so
@@ -3951,6 +4006,16 @@
       // (live.html mapWants). Never a place, never the dropoff. See
       // pickupLine in offer_parser.py.
       pickupLine: pickupLine,
+      // ...and EVERY store's door, beside `places` and the same length, on
+      // DoorDash's stops card (null where the line under a name was no door),
+      // else []. A two-store offer has two pickups (the owner, 31 Oct: "the
+      // pins for the pickup and drop off ... captured and mapped"). See
+      // placeDoors in offer_parser.py.
+      placeDoors: stores.length ? doors.slice() : [],
+      // The card's dropoff shape: customers printed (1, N, or null) and the
+      // orders under a lone customer. See dropoffShape.
+      dropoffs: shape[0],
+      dropoffOrders: shape[1],
       // ...and which end the CARD said each entry of `places` was, beside it,
       // so an accumulator can ask the same question of the merged list.
       // Travels for the same reason `legDetail[].isApproach` travels: this

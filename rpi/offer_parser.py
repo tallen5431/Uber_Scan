@@ -4852,6 +4852,48 @@ NOT_AN_OFFER = re.compile(
 DROPOFF_NOT_STATED = re.compile(r'custom[ea]r\s*drop\s*-?\s*off', re.IGNORECASE | ASCII)
 
 
+# THE DROPOFF'S SHAPE on DoorDash's stops card. The owner's snaps of 31 Oct
+# show the two ways the card ends its list of stores:
+#
+#     Customer dropoff                     <- ONE customer...
+#     [Drop off 2 orders]                  <- ...with this many orders, or
+#     Multiple dropoffs (2 stops)          <- this many customers
+#
+# The first is two bags to one door; the second is two doors. The rig had
+# `manyDropoffs` on the offer line (scan_pi.says_many_dropoffs, true or false)
+# and nothing that said HOW many: Map view drew the one map label it had as if
+# it were the whole job's end. dropoff_shape gives the number of dropoffs the
+# card printed (1 for "Customer dropoff", N for "Multiple dropoffs (N stops)",
+# None when the card said neither or the count did not read) and the orders
+# under a lone "Customer dropoff" ("Drop off N orders", else None). Asked only
+# of a stops card (STORES_LINE): Uber prints "Customer dropoff" too, where it
+# means the address is held back, not that there is one door — endRefused
+# already says that, and this is not a second word for it. Real digits, as
+# STOPS_COUNT: a count is shown, never priced, and a slipped one is no count.
+# Many beats one on a frame that holds both words, the cautious side for
+# anything that files a popup onto the card (Assemble.popup).
+DROPOFFS_MANY = re.compile(r'multiple\s*drop\s*-?\s*offs?\s*(?:\(\s*(\d{1,2})\s*stops?)?',
+                           re.IGNORECASE | ASCII)
+DROPOFF_ORDERS = re.compile(r'drop\s*-?\s*off\s*(\d{1,2})\s*orders?\b', re.IGNORECASE | ASCII)
+
+
+def dropoff_shape(text):
+    """(dropoffs, orders) off DoorDash's stops card, or (None, None). See
+    DROPOFFS_MANY above."""
+    text = text or ''
+    if not STORES_LINE.search(text):
+        return None, None
+    m = DROPOFFS_MANY.search(text)
+    if m:
+        n = int(m.group(1)) if m.group(1) else None
+        return (n if n is not None and n >= 2 else None), None
+    if not DROPOFF_NOT_STATED.search(text):
+        return None, None
+    m = DROPOFF_ORDERS.search(text)
+    n = int(m.group(1)) if m else None
+    return 1, (n if n is not None and n >= 1 else None)
+
+
 def _the_other_end(ends, i, mine):
     """Whether the card put entry `i` at the end that is NOT the one asked for.
 
@@ -5141,11 +5183,77 @@ def store_door_cut(line):
     return re.sub(r'^\W+', '', ' '.join(keep)).rstrip('.')
 
 
+# ...and THE DOOR CUT JUST AFTER ITS COMMA. The owner's DoorDash snaps of 31
+# Oct, a two-store offer (names and streets invented here, the shape the
+# card's):
+#
+#     & Lark Owl Pizza
+#     4410 Fernhill Road Northwest, ...          <- the town all cut away
+#     ff Maple Run Creamery
+#     2516 Quillon Street, Brookvale, 301...     <- STORE_DOOR's cut ZIP
+#
+# The second is STORE_DOOR's and always was. The first has its comma, so
+# store_door_cut refused it, and nothing after the comma for STORE_DOOR's town:
+# the first store had no door and no pin, on the card the owner asked to have
+# "the pins for the pickup and drop off ... captured and mapped". The street
+# before the comma is WHOLE — the comma is the card's own end of it — so,
+# unlike the cut-before-the-town shape, a quadrant or compass word after the
+# type is kept as it is: "Northwest" there is the road's, not half of one.
+# After the comma only the edge: a mark of it ("...", "…", "..") alone, or one
+# capitalised word the edge took ("Sm...", a town of which nothing can be
+# searched — the town is never sent anyway). That second shape was refused
+# before as "a town the card's edge took is no town", which is still true; the
+# street in front of it was a door all along, and is the same search a cut-
+# before-the-town door is. Written out as the street alone.
+_DOOR_TOWN_CUT = re.compile(r'^(.*?)\s*,\s*(?:[A-Z][A-Za-z]{0,15}\s*)?(?:\.\s*){2,}$'
+                            r'|^(.*?)\s*,\s*(?:[A-Z][A-Za-z]{0,15}\s*)?…\s*$', ASCII)
+_DOOR_COMPASS = re.compile(r'^(?:N|S|E|W|NE|NW|SE|SW|North|South|East|West|'
+                           r'Northeast|Northwest|Southeast|Southwest)\.?$', ASCII)
+
+
+def store_door_town_cut(line):
+    """The street of a store's door whose town the card's edge took just after
+    the comma, or None. "<n> <name> <type>[ <compass>]": a house number (icon
+    marks in front dropped, as store_door_cut drops them), names with two
+    letters in a row among them, a street type, and at most one word after it,
+    a whole compass word. See _DOOR_TOWN_CUT."""
+    flat = WHITESPACE.sub(' ', line or '').strip()
+    m = _DOOR_TOWN_CUT.match(flat)
+    if not m:
+        return None
+    street = m.group(1) if m.group(1) is not None else m.group(2)
+    if ',' in street:
+        return None
+    words = street.split(' ')
+    if words and re.match(r'^\W{1,4}$', words[0]):
+        words = words[1:]
+    if len(words) > 1 and len(words[0]) == 1 and _DOOR_HOUSE.match(words[1]):
+        words = words[1:]
+    if len(words) < 3 or not _DOOR_HOUSE.match(words[0]):
+        return None
+    types = [i for i in range(2, len(words)) if _DOOR_TYPE.match(words[i])]
+    if not types:
+        return None
+    k = types[-1]
+    after = words[k + 1:]
+    if len(after) > 1 or (after and not _DOOR_COMPASS.match(after[0])):
+        return None
+    if not all(_DOOR_WORD.match(w) for w in words[1:]) \
+            or not any(re.search(r'[A-Za-z]{2}', w) for w in words[1:k]):
+        return None
+    return re.sub(r'^\W+', '', ' '.join(words)).rstrip('.')
+
+
 def store_door(line):
     """The store's address off the line under its name, or None. See
-    STORE_DOOR for the shape and why each part is asked, and STORE_DOOR_CUT
-    for a door the card cut before its town."""
-    m = STORE_DOOR.match(WHITESPACE.sub(' ', line or '').strip())
+    STORE_DOOR for the shape and why each part is asked, store_door_cut for a
+    door the card cut before its town, and store_door_town_cut for one cut
+    just after its comma."""
+    flat = WHITESPACE.sub(' ', line or '').strip()
+    cut = store_door_town_cut(flat)
+    if cut is not None:
+        return cut
+    m = STORE_DOOR.match(flat)
     if not m:
         return store_door_cut(line)
     street, town, tail = m.group(1), m.group(2), m.group(3) or ''
@@ -6011,6 +6119,9 @@ def parse(raw_text):
     # become the dropoff — find_dropoff never sees it. See STORE_DOOR.
     pickup_line = (doors[stores.index(pickup)]
                    if stores and pickup in stores else None)
+    # How the card ends its list: one customer and how many orders, or how
+    # many customers. See dropoff_shape.
+    dropoffs, dropoff_orders = dropoff_shape(mine)
     # The card can name its approach leg in words or by where it printed the
     # pickup, and this is the second one. Written onto the leg rather than
     # handed to to_pickup, so that the one rule that decides keeps deciding and
@@ -6051,6 +6162,24 @@ def parse(raw_text):
         # and a door is one. Never a place and never the dropoff: `places`
         # and the journal are unchanged by it. See STORE_DOOR.
         'pickupLine': pickup_line,
+        # ...and EVERY store's door, beside `places` and the same length, on
+        # DoorDash's stops card (None where the line under a name was not a
+        # door), else []. The owner, 31 Oct: "It would be great if the pins
+        # for the pickup and drop off could be captured and mapped" — a
+        # two-store offer has two pickups, and `pickupLine` is the first
+        # one's alone. The same rule as `pickupLine` (find_stores' `doors`),
+        # so `placeDoors[places.index(pickup)]` IS `pickupLine`; never a
+        # dropoff, for the same reason. Map view pins each store from its own
+        # door and routes through them in the card's order (live.html
+        # mapWants, server.js cardOf).
+        'placeDoors': list(doors) if stores else [],
+        # The card's dropoff shape: how many customers it printed (1 for
+        # "Customer dropoff", N for "Multiple dropoffs (N stops)", None when
+        # it said neither or the count did not read), and the orders under a
+        # lone customer ("Drop off 2 orders"). DoorDash's stops card only;
+        # see dropoff_shape.
+        'dropoffs': dropoffs,
+        'dropoffOrders': dropoff_orders,
         # ...and which end the CARD said each entry of `places` was, beside it,
         # so the accumulator can ask the same question of the merged list.
         # Travels for the same reason `legDetail[].isApproach` travels: this

@@ -101,6 +101,10 @@ class OfferAccumulator:
         # the same answer (rpi/test_accumulate.py, "a card read 10,000 times").
         self.items = {}
         self.stops = {}         # DoorDash's printed stop count, per frame
+        # ...and its dropoff shape, per frame (OP.dropoff_shape): customers
+        # printed, and the orders under a lone one. Voted as `stops` is.
+        self.dropoffs = {}
+        self.dropoff_orders = {}
         # Deadlines seen this window. A delivery card gives one instead of a
         # duration, so it is the denominator of the whole verdict — and it was
         # the only money-moving field taken from the last frame rather than
@@ -140,6 +144,10 @@ class OfferAccumulator:
         # The store's door each frame read under a pickup's name, by the same
         # index as `places` (OP's `pickupLine`). See where it is filled.
         self.pickup_lines = {}
+        # ...and EVERY store's door each frame read under its name, by the
+        # same index (OP's `placeDoors`, DoorDash's stops card). See where it
+        # is filled.
+        self.place_doors = {}
         # Which end of the job the CARD printed each of those against, beside
         # them and the same length: 0 a start, 1 an end, None the card did not
         # say. See OP.place_ends for what it is read off and the nine rows of
@@ -726,6 +734,10 @@ class OfferAccumulator:
             _tally(self.items, parsed['items'])
         if parsed.get('stops') is not None:
             _tally(self.stops, parsed['stops'])
+        if parsed.get('dropoffs') is not None:
+            _tally(self.dropoffs, parsed['dropoffs'])
+        if parsed.get('dropoffOrders') is not None:
+            _tally(self.dropoff_orders, parsed['dropoffOrders'])
         if parsed.get('deliverBy') is not None:
             _tally(self.deadlines, parsed['deliverBy'])
         # Capped where the parser caps its own list, so a window of frames that
@@ -754,6 +766,16 @@ class OfferAccumulator:
             # over the same line with the edge's "30." — longest, an earlier
             # one on a tie. Asked of THIS frame's pickup only, so a door is
             # never kept against a name the frame did not call the start.
+            # ...and every store's door the same way (OP's `placeDoors`),
+            # beside its own name: the owner's 31 Oct two-store card has a
+            # pickup at each. Only off a frame whose `placeDoors` IS beside
+            # its `places` (the same length: a stops card), fuller reading
+            # standing, as the pickup's.
+            _doors = parsed.get('placeDoors') or []
+            if len(_doors) == len(parsed.get('places') or []) and _i < len(_doors):
+                _door = _doors[_i]
+                if _door and len(_door) > len(self.place_doors.get(at) or ''):
+                    self.place_doors[at] = _door
             _line = parsed.get('pickupLine')
             if _line and place == parsed.get('pickup') and (
                     len(_line) > len(self.pickup_lines.get(at) or '')):
@@ -1007,6 +1029,10 @@ class OfferAccumulator:
         # ...and the stop count the same way, for the same reason: the last
         # frame alone would let one misread ("1 stops" for 4) stand.
         merged['stops'] = _consensus(self.stops) if self.stops else parsed.get('stops')
+        merged['dropoffs'] = (_consensus(self.dropoffs) if self.dropoffs
+                              else parsed.get('dropoffs'))
+        merged['dropoffOrders'] = (_consensus(self.dropoff_orders) if self.dropoff_orders
+                                   else parsed.get('dropoffOrders'))
         # Kept rather than voted on — see `self.places`. Everything above this
         # line is a number a verdict is computed from, where a misread has to be
         # outvoted; an address is read by a driver deciding whether they
@@ -1102,6 +1128,11 @@ class OfferAccumulator:
         _pk = merged['pickup']
         merged['pickupLine'] = (self.pickup_lines.get(merged['places'].index(_pk))
                                 if _pk in merged['places'] else None)
+        # ...and every store's door by the merged list's own index, [] when no
+        # frame read one — what a frame alone gives on a card that is no stops
+        # card. Built here, beside `places`, so the two stay one length.
+        merged['placeDoors'] = ([self.place_doors.get(i) for i in range(len(merged['places']))]
+                                if self.place_doors else [])
         # ...and WHY there is none, which is not the same fact and is the one
         # the driving screen needs.
         #

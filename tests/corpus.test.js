@@ -69,6 +69,17 @@ function sameList(a, b) {
                             + ' want ' + JSON.stringify(c.expect)); }
 });
 
+/* Every store's door on DoorDash's stops card, beside its name (the owner's
+   snaps of 31 Oct): [places, placeDoors], each list exact, a door null where
+   the line under its store was no door. See placeDoors in offer_parser.py. */
+(cases.placeDoors || []).forEach(function (c) {
+  var p = P.parse(c.text);
+  if (sameList(p.places, c.expect[0]) && sameList(p.placeDoors, c.expect[1])) ok++;
+  else { bad++; console.log('FAIL  placeDoors / ' + c.name + ': got '
+                            + JSON.stringify([p.places, p.placeDoors]) + ' want '
+                            + JSON.stringify(c.expect)); }
+});
+
 /* The address off the screen after the accept. [line, city, zip] rather than
    field by field: those three are what the rest of the rig consumes - `line` is
    shown and stored, `city` and `zip` are what the geography is decided on. */

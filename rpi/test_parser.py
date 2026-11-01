@@ -93,6 +93,13 @@ for c in cases.get('coerce', {}).get('doubt', []):
 for c in cases.get('places', []):
     eq('places / ' + c['name'], P.parse(c['text'])['places'], c['expect'])
 
+# Every store's door on DoorDash's stops card, beside its name (the owner's
+# snaps of 31 Oct): [places, placeDoors], exact, as tests/corpus.test.js
+# compares them. See OP's `placeDoors`.
+for c in cases.get('placeDoors', []):
+    _pd = P.parse(c['text'])
+    eq('placeDoors / ' + c['name'], [_pd['places'], _pd['placeDoors']], c['expect'])
+
 # The address off the screen after the accept. Compared as [line, city, zip]
 # rather than field by field, because those three are what the rest of the rig
 # actually consumes: `line` is shown and stored, `city` and `zip` are what the

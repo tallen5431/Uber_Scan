@@ -1690,6 +1690,35 @@ eq('a store\'s door read under its name is kept across frames, the fullest readi
 eq('...and the episode is one card throughout', [_d1['episode'], _d3['episode']],
    [_d1['episode']] * 2)
 
+# ...and EVERY store's door on a two-store card (the owner's 31 Oct snaps;
+# invented stores and streets), each beside its own name: one frame reads both,
+# the next loses the second store's line to the card's edge, the last reads the
+# second with its ZIP whole. The dropoff shape is voted as the stop count is.
+def _two_store(second_line, tail='8 Customer dropoff\nDrop off 2 orders'):
+    return P.parse('$14.10 incl. tips\n3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza\n'
+                   '4410 Fernhill Road Northwest, ...\nff Maple Run Creamery\n'
+                   + second_line + tail)
+
+
+_tw = OfferAccumulator()
+_t1 = _tw.add(_two_store('2516 Quillon Street, Brookvale, 301...\n'), now=720.0)
+_t2 = _tw.add(_two_store(''), now=720.5)
+_t3 = _tw.add(_two_store('2516 Quillon Street, Brookvale, 30144 GA\n'), now=721.0)
+eq('the premise: the middle frame, its second store\'s line lost, read one store alone',
+   (_two_store('')['places'], _two_store('')['placeDoors']),
+   (['Lark Owl Pizza'], ['4410 Fernhill Road Northwest']))
+eq('every store\'s door is kept beside its own name across frames, the fullest standing',
+   [_d['placeDoors'] for _d in (_t1, _t2, _t3)],
+   [['4410 Fernhill Road Northwest', '2516 Quillon Street, Brookvale']] * 2
+   + [['4410 Fernhill Road Northwest', '2516 Quillon Street, Brookvale, GA 30144']])
+eq('...the dropoff shape voted across the window: one customer, two orders',
+   (_t3['dropoffs'], _t3['dropoffOrders'], _t3['pickupLine']),
+   (1, 2, '4410 Fernhill Road Northwest'))
+eq('...and a card that is no stops card carries no doors',
+   OfferAccumulator().add(P.parse('$9.12\nGuaranteed (incl. tip)\n26 min (7.1 mi) total\n'
+                                  'Fable Grill (1200 Lantern Rd)\nBirch Ct, Marietta'))
+   ['placeDoors'], [])
+
 # --- the wall clock stepping --------------------------------------------------
 # add() times only gaps — QUIET, and the window that closes after `window`
 # seconds of nothing — so its own clock is the monotonic one. It was the wall
