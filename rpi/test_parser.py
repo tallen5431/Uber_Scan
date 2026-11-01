@@ -723,6 +723,36 @@ eq('dd_pickup_door: the task screen (no door) and Uber\'s navigation give none',
                      'Deliver to Lee R.\nThis offer $11.10'),
     P.dd_pickup_door('o= 4min \u00a9 2mi \u2014\nDeliver to Lee R.\n2210 Larkspur Dr NW')],
    [None, None])
+# ...and the same store screen after an accept in the popup's dress (the
+# owner's snap of 31 Oct, 19:14): "Pickup from / <Store> / Order includes /
+# <items> / <door> / <town> / Directions". It typed dd.placePopup and filed
+# nothing; now its door is the DoorDash order's pickup, as "Pickup for"'s is,
+# and the offer's own popup is still the popup. Invented.
+_TAKEN = ('-@ a Co\n\u00a9)Fqe Toa ha,\nYW Pickup from\nLark Owl Pizza *\nOrder includes\n'
+          'f Drink\n@ 1200 Fable W Lantern Pkwy NW\nBrookvale, GA 30199, USA\nDirections\n'
+          'crad PT rel (lat')
+_DOOR = {'line': '1200 Fable W Lantern Pkwy NW, Brookvale, GA 30199',
+         'street': '1200 Fable W Lantern Pkwy NW', 'city': 'Brookvale', 'state': 'GA',
+         'zip': '30199', 'name': 'Lark Owl Pizza'}
+eq('dd_pickup_door: "Pickup from" with "Order includes" under it is the taken order\'s store: '
+   'its door and its name, the items left out; and it is no place popup',
+   (P.screen_type(_TAKEN)['screen'], P.dd_pickup_door(_TAKEN), P.place_popup(_TAKEN)),
+   ('dd.pickup', _DOOR, None))
+eq('dd_pickup_door: ...four items, the door past the popup\'s reach, an item with a number '
+   'in front of it no door',
+   P.dd_pickup_door('Pickup from\nLark Owl Pizza\nOrder includes\nDrink\n2 Garden Salad\n'
+                    'Fries\nCookie\n@ 1200 Fable W Lantern Pkwy NW\nBrookvale, GA 30199, USA\n'
+                    'Directions'), _DOOR)
+eq('dd_pickup_door: ...and the offer\'s popup (no "Order includes") stays dd.placePopup, '
+   'no pickup screen',
+   [(P.screen_type(t)['screen'], P.dd_pickup_door(t)) for t in (
+       'Pickup from\nFable Pasta\n2080 Lantern Ave NW #100\nAtlanta, GA 30318, USA\nDirections',
+       '. cyv F \u2018\nYJ Pickup from\nThe Fable Orient %\nG? 3050 Quill Hill Rd SE\n'
+       'Atlanta, GA 30339, USA\nDirections\n") 4items v')],
+   [('dd.placePopup', None), ('dd.placePopup', None)])
+eq('dd_pickup_door: ...nor a "Pickup from" whose "Order includes" is past DD_FROM_REACH',
+   P.dd_pickup_from('Pickup from\nLark Owl Pizza\n' + 'x line\n' * 8 + 'Order includes\n'),
+   False)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)
 sys.exit(1 if bad else 0)

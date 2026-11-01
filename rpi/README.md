@@ -6750,6 +6750,17 @@ street is given nothing, even with one dropoff left over. And once every
 order of the app has an end the screen filed, the planner's "N dropoffs:
 end not guessed" is not said any more — it was true of no order in the car.
 
+**DoorDash's pickup screen after an accept.** Taken, a DoorDash order's
+store screen can look like the place popup an offer card opens: "Pickup
+from / <Store> / Order includes / <items> / <door> / <town> / Directions"
+(the snap of 31 Oct, 19:14). The words "Order includes" are its own — the
+popup's five reads on file have none, and nobody sees an order's contents
+before taking it — so that screen types `dd.pickup`, as "Pickup for <name>"
+does, and is no popup: its door (`dd_pickup_door`) goes out on the
+`pickupSeen` line and is filed as the one DoorDash order's pickup, never a
+dropoff and never onto a card being screened. The offer's own popup types
+`dd.placePopup` as before.
+
 **On the glass.** The driving screen lists the stops in the card between
 offers, when it otherwise holds only the phase and the notice (not while the
 rig is aiming), one line each — `▸ Dropoff by 4:18 · Pat Q. ·

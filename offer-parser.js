@@ -2355,6 +2355,13 @@
   var POPUP_NAME_JUNK = /(?:\s+(?:[a-z]{1,2}|[^A-Za-z0-9\s]+))+$/;
   var POPUP_REACH = 4;
   var POPUP_TAIL = 4;
+  // ...and DoorDash's pickup screen for an order TAKEN, in the popup's dress:
+  // "Pickup from / <Store> / Order includes / <items> / <door> / <town> /
+  // Directions" (the owner's snap of 31 Oct, 19:14, read after an accept).
+  // Not a place popup: placePopup refuses it, and screenOf types it dd.pickup
+  // (ddPickupFrom). Why, and the one read it rests on: POPUP_ORDER in
+  // offer_parser.py.
+  var POPUP_ORDER = /^[^A-Za-z]{0,3}order ?includes\b/i;
 
   function placePopup(text) {
     var lines = String(text || '').split(/[\r\n]+/).map(normalize)
@@ -2390,6 +2397,8 @@
     for (i = Math.max(0, s - POPUP_REACH); i <= e; i++) {
       if (other.test(lines[i])) return null;
       if (i > r && i < e && i !== s && POPUP_HOUSE.test(lines[i])) return null;
+      // (...and never the taken order's pickup screen, POPUP_ORDER.)
+      if (i > r && i < e && POPUP_ORDER.test(lines[i])) return null;
     }
     var name = null;
     if (role === 'pickup') {
@@ -2462,6 +2471,23 @@
     for (var i = 0; i < lines.length; i++) {
       var m = /\bdeliver(?:ing)? to\b(.*)$/i.exec(lines[i]);
       if (m) return /[A-Za-z]{2}/.test(m[1]) && i + 1 < lines.length && DD_TOWN_ZIP.test(lines[i + 1]);
+    }
+    return false;
+  }
+  // "Pickup from" with "Order includes" under it, within DD_FROM_REACH lines,
+  // and no offer's furniture on the frame: the taken order's store screen
+  // (dd.pickup). See dd_pickup_from in offer_parser.py.
+  var DD_FROM_REACH = 8;
+  function ddPickupFrom(text) {
+    text = String(text || '');
+    if (SCREEN_DD_OFFER.test(text)) return false;
+    var lines = text.split(/[\r\n]+/).map(normalize).filter(Boolean);
+    for (var i = 0; i < lines.length; i++) {
+      if (POPUP_PICKUP.test(lines[i])) {
+        return lines.slice(i + 1, i + 1 + DD_FROM_REACH).some(function (x) {
+          return POPUP_ORDER.test(x);
+        });
+      }
     }
     return false;
   }
@@ -2540,7 +2566,8 @@
     if (SCREEN_DD_DELIVER.test(text) && (SCREEN_DD_OWN.test(text) || ddTownAfterDeliver(text))) {
       return 'dd.deliver';
     }
-    if (text.split(/[\r\n]+/).some(function (l) { return SCREEN_DD_PICKUP.test(normalize(l)); })) {
+    if (text.split(/[\r\n]+/).some(function (l) { return SCREEN_DD_PICKUP.test(normalize(l)); })
+        || ddPickupFrom(text)) {
       return 'dd.pickup';
     }
     if (SCREEN_DD_ELSEWHERE.test(text)) return 'unknown';
@@ -4473,7 +4500,7 @@
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner, sheetDropoff: sheetDropoff,
            quadrantSlip: quadrantSlip,
-           placePopup: placePopup,
+           placePopup: placePopup, ddPickupFrom: ddPickupFrom,
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
            plannerTitled: plannerTitled, plannerLaidOut: plannerLaidOut,
            plannerFramed: plannerFramed, plannerFoot: plannerFoot,

@@ -4344,6 +4344,29 @@ POPUP_NAME_JUNK = re.compile(r'(?:\s+(?:[a-z]{1,2}|[^A-Za-z0-9\s]+))+$', ASCII)
 # and one more, CHOSEN, as SHEET_REACH is.
 POPUP_REACH = 4
 POPUP_TAIL = 4
+# ...and the screen that looks like it and is not it (the owner's snap of 31
+# Oct, 19:14): DoorDash's own pickup screen for an order TAKEN, read 14.6 s
+# after a DoorDash ✓ Took with the card gone —
+#
+#     YW Pickup from                 the same label, behind the same icon
+#     <Store> *                      the store, its icon read as a mark
+#     Order includes                 what the ORDER holds: a line the offer
+#     f Drink                        popup never prints, its items under it
+#     @ <n> <Name> W <Name> Pkwy NW  the store's door, the pin icon in front
+#     <Town>, GA <zip>, USA
+#     Directions
+#
+# The popup's five reads on file (12 Oct, cases.json `popups`) have no "Order
+# includes" — the nearest is a count, "4 items", under the button — and the
+# driver cannot see an order's contents before taking it. So a "Pickup from"
+# with "Order includes" under it is the store of the order in the car:
+# dd.pickup (dd_pickup_from), its door read by dd_pickup_door and filed as
+# that order's pickup (server.js pickupSeenArrived), and NOT a place popup —
+# place_popup refuses it, so it is never filed onto a card being screened.
+# Until this it typed dd.placePopup, its store name came out "<Store> Order
+# includes f Drink", and nothing was filed (AUDITS.md, the two-app entry's
+# Open note). One read on record: the rule is that read's shape, no wider.
+POPUP_ORDER = re.compile(r'^[^A-Za-z]{0,3}order ?includes\b', re.IGNORECASE | ASCII)
 
 
 def place_popup(text):
@@ -4383,6 +4406,10 @@ def place_popup(text):
     other = POPUP_DROPOFF if role == 'pickup' else POPUP_PICKUP
     if any(other.match(l) for l in lines[max(0, s - POPUP_REACH):e + 1]) \
             or any(POPUP_HOUSE.match(lines[i]) for i in range(r + 1, e) if i != s):
+        return None
+    # ...and never the taken order's pickup screen (POPUP_ORDER): its store
+    # is the order in the car's, and dd_pickup_door reads it.
+    if any(POPUP_ORDER.match(l) for l in lines[r + 1:e]):
         return None
     name = None
     if role == 'pickup':
@@ -4532,7 +4559,10 @@ SCREEN_DD_ELSEWHERE = re.compile(
 #               "Deliver to <name>" sits under the bar with nothing after.
 #   dd.pickup   "Pickup for <name>" opening a line: DoorDash's store screen
 #               (the store's name, its branch in brackets, its door), never a
-#               customer's.
+#               customer's. And "Pickup from <store>" with "Order includes"
+#               under it (dd_pickup_from; the snap of 31 Oct, 19:14, read after
+#               an accept): the same store screen in the popup's dress, the
+#               order's contents on it — see POPUP_ORDER.
 SCREEN_DD_DELIVER = re.compile(r'\bdeliver(?:ing)? to\b|(?:^|\n)[^A-Za-z0-9\n]{0,3}dropoff[^A-Za-z0-9\n]{0,3}(?:\n|$)',
                                re.IGNORECASE | ASCII)
 SCREEN_DD_OWN = re.compile(r'current task|pause orders|\d ?min to complete|this offer\b'
@@ -4564,6 +4594,75 @@ DD_PICKUP_TAIL = re.compile(r'^\W{0,3}((?:north|south|east|west|n|s|e|w|ne|nw|se
                             r'(?:,? ?([A-Z]{2})(?: ?(\d{5}))?)?\W{0,3}$', re.IGNORECASE | ASCII)
 
 
+# How far under "Pickup from" the store's door may sit on the taken order's
+# screen, in lines: the one read had it 4 under (the store, "Order includes",
+# one item between). An order of several items lists each, so the popup's
+# POPUP_REACH would lose the door behind a third item; 8 is the label, a
+# wrapped name, "Order includes" and four items. CHOSEN, not measured.
+DD_FROM_REACH = 8
+
+
+def dd_pickup_from(text):
+    """Whether `text` is DoorDash's pickup screen for an order taken in the
+    popup's dress: a "Pickup from" line with an "Order includes" line under
+    it, within DD_FROM_REACH (see POPUP_ORDER). Never with an offer's own
+    furniture on the frame (SCREEN_DD_OFFER: a payout's "incl. tips", "3
+    stops (", "Customer dropoff"): the popup drawn over a card stays the
+    popup, whatever it lists."""
+    t = str(text or '')
+    if SCREEN_DD_OFFER.search(t):
+        return False
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', t)]
+    lines = [l for l in lines if l]
+    for i, l in enumerate(lines):
+        if POPUP_PICKUP.match(l):
+            return any(POPUP_ORDER.match(x) for x in lines[i + 1:i + 1 + DD_FROM_REACH])
+    return False
+
+
+def _dd_from_door(lines):
+    """The store's door off the "Pickup from ... Order includes" screen
+    (dd_pickup_from), read as place_popup reads its street and town: the
+    first house-number line under the label within DD_FROM_REACH that cuts
+    as a street (_sheet_street — an item such as "2 Garden Salad" has no
+    street type), the town after it on its line or on the line under it.
+    The store's name: the lines between the label and "Order includes", the
+    icon at their right taken off. None when no door reads."""
+    head = next((i for i, l in enumerate(lines) if POPUP_PICKUP.match(l)), None)
+    if head is None:
+        return None
+    order = next((i for i in range(head + 1, min(len(lines), head + 1 + DD_FROM_REACH))
+                  if POPUP_ORDER.match(lines[i])), None)
+    for s in range(head + 1, min(len(lines), head + 1 + DD_FROM_REACH)):
+        m = POPUP_HOUSE.match(lines[s])
+        if not m:
+            continue
+        street = _sheet_street(m.group(1))
+        if street is None:
+            continue
+        street, rest = street
+        tail = re.match(r'^\s*,\s*(.+)$', rest)
+        bare = POPUP_STATE_ZIP.match(rest)
+        town = None
+        if tail and _sheet_town(tail.group(1)):
+            town = _sheet_town(tail.group(1))
+        elif bare and bare.group(1).upper() in STATES and a_zip(bare.group(2)):
+            town = (None, bare.group(1).upper(), a_zip(bare.group(2)))
+        elif s + 1 < len(lines):
+            town = _sheet_town(lines[s + 1])
+        if town is None:
+            continue
+        upto = order if order is not None and order < s else s
+        words = [POPUP_NAME_JUNK.sub('', PLANNER_EDGE.sub('', l)) for l in lines[head + 1:upto]]
+        name = ' '.join(w for w in words if re.search(r'[A-Za-z]{2}', w)) or None
+        city, state, zipcode = town
+        parts = [street] + ([city] if city else []) \
+            + (['%s %s' % (state, zipcode)] if zipcode else [])
+        return {'line': ', '.join(parts), 'street': street, 'city': city,
+                'state': state, 'zip': zipcode, 'name': name}
+    return None
+
+
 def dd_pickup_door(text):
     """The store's door on DoorDash's pickup screen (dd.pickup): {'line',
     'street', 'city', 'state', 'zip', 'name'} or None. The house-number line
@@ -4572,7 +4671,8 @@ def dd_pickup_door(text):
     <Town>": DoorDash spells the type and the quadrant out and wraps the
     line). `name` is the store's, the first line after the header, its
     bracketed branch label cut off. Never a customer's: the screen names the
-    customer only in its header."""
+    customer only in its header. On the "Pickup from ... Order includes"
+    screen (dd_pickup_from), the popup's layout: _dd_from_door."""
     t = str(text or '')
     if screen_type(t)['screen'] != 'dd.pickup':
         return None
@@ -4580,7 +4680,7 @@ def dd_pickup_door(text):
     lines = [l for l in lines if l]
     head = next((i for i, l in enumerate(lines) if SCREEN_DD_PICKUP.match(l)), None)
     if head is None:
-        return None
+        return _dd_from_door(lines) if dd_pickup_from(t) else None
     for i in range(head + 1, min(len(lines), head + 6)):
         m = DD_PICKUP_HOUSE.match(lines[i])
         if not m or not re.search(r'[A-Za-z]{3}', m.group(1)):
@@ -4756,7 +4856,8 @@ def _screen(text):
     if SCREEN_DD_DELIVER.search(text) and (SCREEN_DD_OWN.search(text)
                                            or dd_town_after_deliver(text)):
         return 'dd.deliver'
-    if any(SCREEN_DD_PICKUP.match(normalize(l)) for l in re.split(r'[\r\n]+', text)):
+    if any(SCREEN_DD_PICKUP.match(normalize(l)) for l in re.split(r'[\r\n]+', text)) \
+            or dd_pickup_from(text):
         return 'dd.pickup'
     if SCREEN_DD_ELSEWHERE.search(text):
         return 'unknown'

@@ -7904,6 +7904,22 @@
    }
   },
   {
+   "name": "...and after an accept in the popup's dress: 'Pickup from' the store with 'Order includes' under it (31 Oct: it typed the offer's place popup, and filed nothing)",
+   "text": "-@ a Co\n©)Fqe Toa ha,\nYW Pickup from\nLark Owl Pizza *\nOrder includes\nf Drink\n@ 1200 Fable W Lantern Pkwy NW\nBrookvale, GA 30199, USA\nDirections\ncrad PT rel (lat",
+   "expect": {
+    "app": "doordash",
+    "screen": "dd.pickup"
+   }
+  },
+  {
+   "name": "...an order of four items, its door past the popup's reach",
+   "text": "Pickup from\nLark Owl Pizza\nOrder includes\nDrink\n2 Garden Salad\nFries\nCookie\n@ 1200 Fable W Lantern Pkwy NW\nBrookvale, GA 30199, USA\nDirections",
+   "expect": {
+    "app": "doordash",
+    "screen": "dd.pickup"
+   }
+  },
+  {
    "name": "Uber's wait after an Early look, which keeps the badge and no offer",
    "text": "Early look - Order in progress\nMatching may take longer\nMatching in progress",
    "expect": {
@@ -8515,6 +8531,11 @@
   {
    "name": "a town whose state is no state is no address",
    "text": "Pickup from\nFable Pasta\n2080 Lantern Ave NW\nAtlanta, GX 30318\nDirections",
+   "expect": null
+  },
+  {
+   "name": "the taken order's pickup screen, 'Order includes' under the label, is no popup: refused (it is dd.pickup, the order in the car's store)",
+   "text": "-@ a Co\n©)Fqe Toa ha,\nYW Pickup from\nLark Owl Pizza *\nOrder includes\nf Drink\n@ 1200 Fable W Lantern Pkwy NW\nBrookvale, GA 30199, USA\nDirections\ncrad PT rel (lat",
    "expect": null
   },
   {
