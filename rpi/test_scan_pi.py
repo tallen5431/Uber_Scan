@@ -3023,6 +3023,42 @@ eq('the tally counts reads rescued off a found card beside the clipped ones',
 ok_('...and the health line says it in words (%r)' % _said_hr[-1:],
     any('1 read the payout off a taller card found above the card box' in l
         for l in _said_hr))
+eq('...and a window with no raised box says nothing of one, and counts none',
+   ([l for l in _said_hr if ' raised +' in l], _tr.get('raised'), _tr.get('raisedMs')),
+   ([], 0, None))
+
+# ...and the DoorDash stops card's raised re-read (the owner's snaps of 31
+# Oct; pipeline.Scanner._look): its Pi cost was an estimate, so the reads that
+# raised the box are counted with their median extra ms, kept or refused —
+# on the health line after the rescued count, in the tally (the `seen` row
+# and a Snap's reader.json), and only in a window that had one.
+_hq = SP.Health()
+_hq.reset(0.0)
+_hq.add({'ms': {'total': 2600, 'raise': 1180.4}, 'clipped': False, 'cropFrom': 'found'},
+        {'pay': 14.10, 'complete': True})
+_hq.add({'ms': {'total': 2400, 'raise': 1290.0}, 'clipped': False, 'cropFrom': 'drawn'},
+        {'pay': None, 'complete': False})
+_hq.add({'ms': {'total': 1400, 'raise': 1100.0}, 'clipped': False, 'cropFrom': 'found'},
+        {'pay': 14.10, 'complete': True})
+_hq.add({'ms': {'total': 1300, 'raise': None}, 'clipped': False, 'cropFrom': 'drawn'},
+        {'pay': 9.0, 'complete': True})
+_said_hq = []
+try:
+    SP.log = _said_hq.append
+    _tq = _hq.report(SP.HEALTH_EVERY + 1.0, None, type('AScanner', (), {'crop_box': None})())
+finally:
+    SP.log = _real_log2
+eq('the reads that raised the box are counted with their median extra ms, a refused raise '
+   'included and a read that did not raise left out',
+   (_tq.get('raised'), _tq.get('raisedMs')), (3, 1180))
+ok_('...and the health line says "3 raised +1180ms median" after the rescued count, its '
+    'other parts unchanged (%r)' % _said_hq[-1:],
+    any(': 4 reads, 3 complete; median 2400ms;' in l
+        and '; 2 read the payout off a taller card found above the card box; '
+            '3 raised +1180ms median;' in l for l in _said_hq))
+eq('...and a new window starts with none',
+   (_hq.counters(SP.HEALTH_EVERY + 2.0)['raised'],
+    _hq.counters(SP.HEALTH_EVERY + 2.0)['raisedMs']), (0, None))
 
 # --- the setup line says whether the finder will ever be asked ----------------
 _off_args = type('Args', (), {'no_card_find': True})()

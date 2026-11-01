@@ -1864,6 +1864,17 @@ class Health:
         # same question from the other side: how often the box the driver drew
         # was the wrong height for the card in front of it.
         self.rescued = 0
+        # ...and what the DoorDash stops card's raised re-read cost (the
+        # owner's snaps of 31 Oct; pipeline.Scanner._look, raise_journey): the
+        # ms each read that raised the box spent on its raised reads, kept or
+        # refused — `ms['raise']`, None on a read that did not raise. Its Pi
+        # cost was an ESTIMATE off the development box's ratios (0.8-1.0s,
+        # rpi/README.md); this window's count and median are the first
+        # measurement of it on the rig, said on the health line ("2 raised
+        # +1180ms median") and on the `seen` row and a Snap's reader.json
+        # (counters: `raised`, `raisedMs`). Nothing when no read raised, so
+        # every line from a shift with no stops card reads as it did.
+        self.raised_ms = []
         # Reads that raised. Counted here so the health line can still appear
         # when every one of them did: the guard in report() used to be `not
         # self.reads`, which is exactly true when the reader is broken, so the
@@ -1915,6 +1926,9 @@ class Health:
             self.clipped += 1
         if out.get('cropFrom') == 'found':
             self.rescued += 1
+        raised = (out.get('ms') or {}).get('raise')
+        if isinstance(raised, (int, float)):
+            self.raised_ms.append(raised)
 
     def not_read_dark(self, now, peak):
         """Count one read left unread for a black crop; the log line, when due.
@@ -1950,6 +1964,9 @@ class Health:
                 'reads': self.reads, 'complete': self.complete,
                 'failed': self.failed, 'noPay': self.no_pay,
                 'clipped': self.clipped, 'rescued': self.rescued,
+                'raised': len(self.raised_ms),
+                'raisedMs': (int(round(sorted(self.raised_ms)[len(self.raised_ms) // 2]))
+                             if self.raised_ms else None),
                 'darkSkipped': self.dark_skipped,
                 'medianMs': (int(round(sorted(self.ms)[len(self.ms) // 2]))
                              if self.ms else None),
@@ -2027,6 +2044,10 @@ class Health:
         if self.rescued:
             bits.append('%d read the payout off a taller card found above the '
                         'card box' % self.rescued)
+        # ...and what the raised box cost, the reads that paid it and their
+        # median extra time (see reset): after the count it may be part of.
+        if self.raised_ms:
+            bits.append('%d raised +%dms median' % (len(self.raised_ms), tally['raisedMs']))
         # Outside the tracker block on purpose: these say nothing about the
         # corners, and a rig started with --no-track is exactly the one whose
         # destination scan is worth watching.
@@ -5978,6 +5999,11 @@ def main():
             'reads': tally.get('reads'), 'failed': tally.get('failed'),
             'complete': tally.get('complete'), 'noPay': tally.get('noPay'),
             'clipped': tally.get('clipped'), 'rescued': tally.get('rescued'),
+            # ...and the reads that raised the box over a DoorDash stops card,
+            # with their median extra ms (Health.reset): the Pi's measurement
+            # of a cost rpi/README.md could only estimate. 0 and None in a
+            # window with none.
+            'raised': tally.get('raised'), 'raisedMs': tally.get('raisedMs'),
             # ...and how many reads were left unread for a black crop (see
             # DARK_SAY_EVERY): on 29 Oct each of those was 16-25s of tesseract.
             'darkSkipped': tally.get('darkSkipped'),

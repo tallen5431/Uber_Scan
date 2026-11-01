@@ -2117,9 +2117,17 @@ class Scanner:
         # text). Measured in rpi/README.md, under "A DoorDash stops card
         # taller than the card box".
         rescued_by = 'finder' if rescued else None
+        # ...and what the raise cost this read, in ms, when it was made: every
+        # raised read of it, kept or refused, from the first raise to the
+        # last answer. None on a read that never raised. On the Pi the cost
+        # above is an ESTIMATE; this is the measurement, carried on `ms` as
+        # 'raise' to scan_pi's health tally, which says how many reads paid
+        # it and their median (Health.add: "2 raised +1180ms median").
+        raise_ms = None
         if (g.card_finder and not g.whole and not rescued and room_above(g.roi)
                 and not (finder_said or '').startswith('read the card found')):
             held_to = raise_journey(got)
+            raise_from = time.perf_counter()
             for step in (RAISE_STEPS if held_to is not None else ()):
                 top = max(0.0, float(g.roi[1]) - step)
                 raised = [float(g.roi[0]), top, float(g.roi[2]),
@@ -2143,6 +2151,8 @@ class Scanner:
                 else:
                     finder_said = 'raised the box %.2f and refused it: %s' % (step, refused)
                 break
+            if held_to is not None:
+                raise_ms = (time.perf_counter() - raise_from) * 1000
         t4 = time.perf_counter()
         text, parsed, clipped = got['text'], got['parsed'], got['clipped']
         prepped, fitted = got['prepped'], got['fitted']
@@ -2211,6 +2221,9 @@ class Scanner:
                 'ocr': first['ocr'],
                 # The finder and the found card's read, when there were any.
                 'find': (t4 - t3) * 1000,
+                # ...of which the raised box's reads (see raise_ms above), or
+                # None when the box was not raised.
+                'raise': raise_ms,
                 'total': (t4 - t0) * 1000,
             },
         }

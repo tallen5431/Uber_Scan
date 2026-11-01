@@ -1456,11 +1456,19 @@ if TC.available():
         _ddm['rescuedBy']), (21.35, 15.0, 53.0, 'raised'))
     _ddd = look(TC.dd_stores_screen(TC.DARK), box=TC.BOX_DD_PAY, width=DD_WIDTH)
     eq('...and in dark mode', (_ddd['parsed']['pay'], _ddd['rescuedBy']), (14.1, 'raised'))
+    # ...and what the raise cost, on `ms` as `raise` (scan_pi's health line
+    # counts it: the Pi's cost of this was an estimate): the raised reads'
+    # time, inside the read's total; None on a read that never raised.
+    ok_('a raised read carries its raised reads\' time on `ms` as `raise`, within the total '
+        '(%r of %r)' % (_ddd['ms'].get('raise'), _ddd['ms']['total']),
+        isinstance(_ddd['ms'].get('raise'), float)
+        and 0 < _ddd['ms']['raise'] <= _ddd['ms']['total'])
     # With the finder off, nothing is raised: cardFinder is the one switch for
     # reading outside the drawn box.
     _ddo = look(DD, box=TC.BOX_DD_BELOW, finder=False, width=DD_WIDTH)
     eq('cardFinder off raises nothing, and the payout stays lost',
-       (_ddo['parsed']['pay'], _ddo['cropFrom']), (None, 'drawn'))
+       (_ddo['parsed']['pay'], _ddo['cropFrom'], _ddo['ms'].get('raise', 'absent')),
+       (None, 'drawn', None))
     # A card stacked above it on one sheet, no button of its own and a bigger
     # payout: the raise reaches DoorDash's own payout first, and the card
     # above's never reaches the panel.
@@ -1495,6 +1503,9 @@ if TC.available():
             _rf['parsed']['pay'] is None and _rf['cropFrom'] == 'drawn'
             and (_rf['finder'] or '').startswith('raised the box 0.09 and refused it: ' + _want)
             and len(_calls) == 2)
+        ok_('...and its raised read\'s time is on `ms` all the same, as `raise` (%r): a refused '
+            'raise costs what a kept one does' % (_rf['ms'].get('raise'),),
+            isinstance(_rf['ms'].get('raise'), float) and _rf['ms']['raise'] > 0)
     # ...a box that read no stops line, or no journey, is never raised: an
     # Uber card (the unsure finder above changed nothing on EARLY), and
     # DoorDash's text with its journey lost.

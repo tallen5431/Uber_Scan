@@ -2679,6 +2679,18 @@ an **estimate**: the same ratio on its 1.4s read, about 1.2s more per read of
 such a card. A card rescued this way has a payout, so the verify beat reads it
 again and pays it again on every beat while the card is up.
 
+**What the raise costs on the Pi, measured where it runs.** Each read that
+raises the box carries what its raised reads took, kept or refused, from the
+first raise to the last answer (`ms.raise` in the reader's output, `None` on
+a read that did not raise). The health line counts them in its window and
+says the median — `2 raised +1180ms median`, after the rescued count, and
+only in a window that had one, so every line from a shift with no stops card
+reads as it did — and the same two figures go on the `seen` row and into a
+📷 Snap's `reader.json` (its `health` counters) as `raised` and `raisedMs` (0
+and `null` in a window with none). The 1.2s above stays an estimate until a
+shift with a stops card on it has said otherwise; the first snap after one
+has the figure.
+
 **▣ Set box again is the way to change them.** A box drawn by hand stays until
 another is drawn, and nothing on the panel throws it away. There used to be:
 ⟳ Re-find, pressed with a box in force, looked for the screen on the next frame
