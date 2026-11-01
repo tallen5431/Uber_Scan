@@ -2636,6 +2636,49 @@ again only when its picture changes and settles, not on a beat, and how often
 that happens in a shift has not been measured; the health line's median read
 time carries whatever it costs.
 
+**A DoorDash stops card taller than the card box.** DoorDash's card with its
+stores listed ("$14.10 incl. tips / 3 stops (8.7 mi) · 33 min / <store> /
+<its door> / … / Customer dropoff", the owner's snaps of 31 Oct) is a
+full-width sheet under a map that fills the top half of the screen, and the
+box drawn round an Uber card cut it: "$21.35" flush on the crop's top
+(clipped, "pay at the box edge — not trusted") or the read starting at "3
+stops (8.7 mi) - 33 min" (journey, no payout). The finder was never sure of
+it — its full-width red Accept pill, two reds with the countdown, is "not
+solid" on the rendered card and was "not set in a card" on the rig's frames —
+and the clipped read, which has no journey, never asked it.
+
+So a read through a drawn card box whose text names DoorDash's stops line
+("N stops (X mi)", `OP.STORES_LINE`) and has no payout, with its journey read
+(the box's own, or for a clipped read the clipped text's — only its journey,
+never the shaved figure), is read again through the box **raised** 0.09 of the
+screen, then 0.18 if that found no payout, its bottom where it was
+(`pipeline.RAISE_STEPS`, `raise_journey`). The raised read is kept under every
+rule a found card is — its own clipping test, no journey figure moved, one
+dollar figure, a payout printed as a card prints one — and a stops line in its
+own text; never after the finder was sure and its read refused; never with
+`cardFinder` off. It is said as `cropFrom: "found"` (PAY ?, the amber outline,
+the `rescued` count), with `rescuedBy: "raised"` beside it in the reader's
+output (`"finder"` for the finder's). No other card's read changes: an Uber
+card or DoorDash's older card has no stops line.
+
+Measured on `testcards.dd_stores_screen` (development box, x86) — one customer
+with two orders, two customers ("Multiple dropoffs (2 stops)") and dark mode;
+clean and under glare, blur, a left-hand shadow and a band of glare; three
+mount distances; the box flush on the payout (`BOX_DD_PAY`) and just under it
+(`BOX_DD_BELOW`), 90 frames: the box alone gave a payout on **none**; with the
+raise **78 of 90** carry the card's own payout, journey and all (66 by the
+raise, 12 by the finder, which is sure of the card under a band of glare), 12
+none (a light card in a left-hand shadow whose stops line did not read, so
+nothing was raised), **no wrong figure**. A card stacked above it on one sheet
+with a bigger payout and no button gives the DoorDash card's own $14.10 at
+three widths, never the card above's. **Cost**: one extra read of the raised
+crop on each such read, two where the first raise finds nothing — 123ms
+median (32–276ms) on top of a 141ms median box read on the 66 rescued frames;
+nothing on any other read but a regex over the box's text. On the Pi that is
+an **estimate**: the same ratio on its 1.4s read, about 1.2s more per read of
+such a card. A card rescued this way has a payout, so the verify beat reads it
+again and pays it again on every beat while the card is up.
+
 **▣ Set box again is the way to change them.** A box drawn by hand stays until
 another is drawn, and nothing on the panel throws it away. There used to be:
 ⟳ Re-find, pressed with a box in force, looked for the screen on the next frame

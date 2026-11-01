@@ -438,6 +438,90 @@ def dash_stacked_screen(pal=DASH_CARD, upper=DASH_UPPER, top=DASH_TOP):
     return _bgr(im)
 
 
+# DoorDash's stops card, as the owner's snaps of 31 Oct show it: the map fills
+# the top of the screen (a black label naming the customer's street on it),
+# and the card is a full-width sheet from 0.42 of the screen down to the
+# bottom, the phone's own buttons drawn on its white. Its payout sits at 0.45
+# of the screen, its journey line under it, the stores with their doors, the
+# dropoff, and a full-width red Accept pill with its countdown at 0.84-0.91.
+# A card box drawn round an Uber card ([0, 0.44, 1, 0.54] on that rig) cuts it
+# at the payout or just under it. Every name and street invented.
+DD_TOP = 985                 # the sheet's top, 0.42 of the screen
+DD_PAY_Y = 1050              # the payout line's draw origin
+DD_STORES = (('Lark Owl Pizza', '4410 Fernhill Road Northwest, ...'),
+             ('Maple Run Creamery', '2516 Quillon Street, Brookvale, 301...'))
+
+
+def dd_pay_box(pay='$14.10'):
+    """Where DoorDash's payout's ink sits, as (top, bottom) fractions of the
+    screen, as dd_stores_screen draws it."""
+    im = Image.new('RGB', (W, H))
+    box = ImageDraw.Draw(im).textbbox((46, DD_PAY_Y), pay, font=font(86))
+    return box[1] / float(H), box[3] / float(H)
+
+
+def dd_stores_screen(pal=LIGHT, pay='$14.10', journey='3 stops (8.7 mi) • 33 min',
+                     stores=DD_STORES, tail=('Customer dropoff', 'Drop off 2 orders'),
+                     label='1256 Maple Run Ln NW', countdown='0:36', upper=None):
+    """DoorDash's offer card with its stores listed, taller than an Uber card.
+
+    `tail` is the dropoff block: ('Customer dropoff', <chip>) or
+    ('Multiple dropoffs (2 stops)', None). The map's label is drawn white on
+    black at the map's top, as the phone draws it. `upper`, when given, is
+    (sheet top, rows) — another card on the same sheet above this one, with
+    no button of its own, its rows (y, text, size, bold) and a hairline under
+    them: the stacked card the raised box must not take a payout from."""
+    im, d = _canvas(pal)
+    if label:
+        d.rounded_rectangle([300, 470, 860, 560], radius=44, fill=(12, 12, 12))
+        d.text((340, 488), label, font=font(40), fill=(255, 255, 255))
+    d.rounded_rectangle([0, upper[0] if upper else DD_TOP, W, H + 60], radius=40,
+                        fill=pal['bg'])
+    for y, text, size, bold in (upper[1] if upper else ()):
+        d.text((46, y), text, font=font(size, bold), fill=pal['fg'] if bold else pal['sub'])
+    if upper:
+        d.line([(46, DD_TOP - 10), (W - 46, DD_TOP - 10)], fill=pal['rule'], width=3)
+    d.rounded_rectangle([W // 2 - 50, DD_TOP + 22, W // 2 + 50, DD_TOP + 32], radius=5,
+                        fill=pal['rule'])
+    d.text((46, DD_PAY_Y), pay, font=font(86), fill=pal['fg'])
+    d.text((46 + int(font(86).getlength(pay)) + 24, DD_PAY_Y + 40), 'incl. tips',
+           font=font(40, False), fill=pal['sub'])
+    d.text((46, DD_PAY_Y + 140), journey, font=font(44, False), fill=pal['fg'])
+    d.line([(46, DD_PAY_Y + 235), (W - 46, DD_PAY_Y + 235)], fill=pal['rule'], width=3)
+    y = DD_PAY_Y + 280
+    for name, door in stores:
+        # The store icon, a red outline the reader turns into "&" or "ff".
+        d.rectangle([50, y + 8, 84, 40 + y], outline=(220, 30, 40), width=4)
+        d.text((110, y), name, font=font(42), fill=pal['fg'])
+        d.text((110, y + 62), door, font=font(38, False), fill=pal['sub'])
+        y += 170
+    d.ellipse([54, y + 6, 80, 32 + y], outline=pal['fg'], width=4)
+    d.text((110, y), tail[0], font=font(42), fill=pal['fg'])
+    if tail[1]:
+        d.rounded_rectangle([110, y + 78, 520, y + 168], radius=8, outline=pal['rule'],
+                            width=3, fill=pal['bg'])
+        d.text((140, y + 100), tail[1], font=font(36, False), fill=pal['fg'])
+    # The Accept pill, nearly the screen's width, its countdown burning down
+    # in a darker red from the left.
+    top = 1965
+    d.rounded_rectangle([44, top, W - 44, top + 176], radius=88, fill=(232, 28, 36))
+    d.rounded_rectangle([W - 330, top, W - 44, top + 176], radius=88, fill=(176, 12, 22))
+    d.rectangle([W - 330, top, W - 250, top + 176], fill=(176, 12, 22))
+    d.text((W // 2 - 90, top + 56), 'Accept', font=font(52), fill=(255, 255, 255))
+    d.text((W - 190, top + 60), countdown, font=font(46), fill=(255, 255, 255))
+    # The phone's own buttons, on the card's white.
+    for x in (250, 540, 830):
+        d.rectangle([x - 22, 2245, x + 22, 2289], outline=pal['sub'], width=4)
+    return _bgr(im)
+
+
+# The card box an Uber card was drawn round on that rig, as fractions of the
+# screen box, and the same box a few millimetres lower: the first cuts
+# DoorDash's payout at its top, the second starts at its journey line.
+BOX_DD_PAY = [0.0, 0.452, 1.0, 0.54]
+BOX_DD_BELOW = [0.0, 0.497, 1.0, 0.50]
+
+
 def degrade(screen, kind, seed=0, strength=1.0):
     """What a windscreen and a car do to a screen, applied in the phone's pixels.
 

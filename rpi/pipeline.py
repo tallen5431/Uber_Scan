@@ -1594,6 +1594,42 @@ def room_above(roi):
 JOURNEY = ('minutes', 'miles', 'deliverBy')
 
 
+# How far the drawn card box is raised over a DoorDash stops card, as
+# fractions of the screen box's height, its bottom kept (Scanner._look). The
+# owner's 31 Oct reads came in two shapes: the payout flush on the box's top,
+# which any raise clears, and the box starting at the journey line, whose top
+# is 0.06 of the screen under the payout's (testcards.dd_stores_screen draws
+# them 0.455 and 0.515 apart, the rig's frame 0.453 and 0.513). The first
+# step clears that with the 2% of the crop money_is_clipped asks of a payout
+# to spare; the second is for a screen box drawn looser than the one the
+# frames were read through. Not further: past 0.18 the crop takes in the map's
+# label and most of the map, and a crop that far from the box is no longer
+# the card the box was drawn for.
+RAISE_STEPS = (0.09, 0.18)
+
+
+def raise_journey(got):
+    """The journey a raised read of a DoorDash stops card must agree with, or
+    None when the box's read is not one to raise (Scanner._look).
+
+    A read with no payout whose text names a stops line (OP.STORES_LINE) and
+    whose journey is read: its own parse, or — the payout flush on the box's
+    top, money_is_clipped having emptied it to parse('') — the parse of the
+    clipped text, for its journey alone (rescue_refused reads nothing else of
+    it). None for every other read: one with a payout, one with no journey
+    (as the finder's: nothing for a raised read to be held to — see
+    rescue_refused's stacked card), and every card that is not DoorDash's
+    stops card.
+    """
+    text = got.get('text') or ''
+    if got['parsed']['pay'] is not None or not OP.STORES_LINE.search(text):
+        return None
+    journey = OP.parse(text) if got.get('clipped') else got['parsed']
+    if not (journey['minutes'] or journey['deliverBy'] is not None):
+        return None
+    return journey
+
+
 def rescue_refused(box, found, found_text):
     """Why the read of the found card may NOT replace the read of the drawn box,
     or None when it may.
@@ -2044,6 +2080,69 @@ class Scanner:
                     rescued = 1
                 else:
                     finder_said = 'read the card found above the box and refused it: %s' % refused
+
+        # A DOORDASH STOPS CARD TALLER THAN THE BOX, WHEN THE FINDER CANNOT
+        # SAY WHERE IT STARTS (the owner's snaps of 31 Oct).
+        #
+        # DoorDash's card with its stores listed ("$14.10 incl. tips / 3 stops
+        # (8.7 mi) · 33 min / <store> / <its door> / ... / Customer dropoff",
+        # testcards.dd_stores_screen) is a full-width sheet under a map that
+        # fills the top half of the screen, so its payout sits higher than an
+        # Uber card's, and the box drawn round an Uber card cut it: the reads
+        # came back with "$21.35" flush on the crop's top (money_is_clipped,
+        # so parse('') and "pay at the box edge — not trusted"), or starting
+        # at "3 stops (8.7 mi) - 33 min" (the journey, no payout). The finder
+        # above was never sure of it: its full-width red Accept pill, two reds
+        # with the countdown, is "not solid" to it on the rendered card and
+        # was "not set in a card" on the rig's frames; and the clipped read,
+        # parse('') with no journey, never asked it.
+        #
+        # So for THIS card only — a read through a drawn card box that names a
+        # stops line (OP.STORES_LINE, "N stops (X mi)", DoorDash's own and
+        # nobody else's) and has no payout, whose journey is read (the box's,
+        # or for a clipped read the clipped text's: the half-shaved figure is
+        # never what is kept, only the journey under it) — the box is read
+        # again raised by RAISE_STEPS of the screen, its bottom where it was,
+        # and kept under every rule a found card is: its own money_is_clipped
+        # (in _read_box), rescue_refused against the journey the box read (no
+        # journey figure moved, one dollar figure, printed as a card prints
+        # it), and a stops line in its own text. Not after the finder was sure
+        # and its read was refused: that answer stands. Said as cropFrom
+        # 'found' — a payout off a crop the driver did not draw, "pay ?" on
+        # the panel and the amber outline — with `rescuedBy` 'raised'.
+        #
+        # What it costs: one read of the raised crop on such a card's read
+        # that would otherwise show no payout, two when the first raise still
+        # finds none; nothing on any other read (one regex search of the box's
+        # text). Measured in rpi/README.md, under "A DoorDash stops card
+        # taller than the card box".
+        rescued_by = 'finder' if rescued else None
+        if (g.card_finder and not g.whole and not rescued and room_above(g.roi)
+                and not (finder_said or '').startswith('read the card found')):
+            held_to = raise_journey(got)
+            for step in (RAISE_STEPS if held_to is not None else ()):
+                top = max(0.0, float(g.roi[1]) - step)
+                raised = [float(g.roi[0]), top, float(g.roi[2]),
+                          float(g.roi[1]) + float(g.roi[3]) - top]
+                again = self._read_box(screen, raised, g, dark=g.dark_mode)
+                if again['parsed']['pay'] is None:
+                    finder_said = ('raised the box %.2f and still no payout%s'
+                                   % (step, ' (clipped)' if again['clipped'] else ''))
+                    if top <= 0.0:
+                        break
+                    continue
+                refused = rescue_refused(held_to, again['parsed'], again['text'])
+                if refused is None and not OP.STORES_LINE.search(again['text'] or ''):
+                    refused = 'no stops line in it'
+                if refused is None:
+                    got = again
+                    crop_from = 'found'
+                    rescued = 1
+                    rescued_by = 'raised'
+                    finder_said = None
+                else:
+                    finder_said = 'raised the box %.2f and refused it: %s' % (step, refused)
+                break
         t4 = time.perf_counter()
         text, parsed, clipped = got['text'], got['parsed'], got['clipped']
         prepped, fitted = got['prepped'], got['fitted']
@@ -2077,6 +2176,10 @@ class Scanner:
             # reader.json and the health tally all say it from here.
             'rescued': rescued,
             'cropFrom': crop_from,
+            # ...and which way a 'found' crop was found: 'finder' (cardfind,
+            # by the card's shape) or 'raised' (the drawn box raised over a
+            # DoorDash stops card, raise_journey); None for 'drawn'.
+            'rescuedBy': rescued_by,
             # ...and, when the finder was asked and the read is still the
             # box's, why: its own `why` when it was not sure, or the reason
             # the read of the card it found was refused. None when it was not
