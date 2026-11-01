@@ -6717,6 +6717,24 @@ and front doors, and this server does not read the scanner's settings. Nothing
 reads those rows back: the fold and `resume()` skip the kind, and the sync
 carries it on its `id` and `seq`.
 
+**One stop, however many ways it was read.** The pages a hold keeps are
+merged (assemble.js `mergePlanner`), and a stop read twice is kept once — by
+its name and time, by its door, by its name a few minutes apart. The owner's
+snap of 31 Oct held TWELVE dropoffs for a trip of three: the scrolled reads
+lost a house number's first digits at the screen's left edge, misread one
+digit, read "Bivd" for "Blvd", mangled the customer's name and slid the time
+a minute, all at once, and each slip was a stop. `slipStop` now calls two
+stops one when they are the same kind on the same street, the numbers equal,
+one ending the other (two digits at least), or one digit apart at the same
+length (three digits and more, and only with both names read), the times
+within five minutes or missing, and the names not two people — initials that
+differ are two people, and so are two words more than an edit per three
+letters apart. "Pat Q." and "Jules K." at one door due the same minute stay
+two. The door kept is the full number, never the digits the edge left, and
+between two numbers a digit apart the one read more often (`doorReads` on the
+stop). The merged list is also run against itself, so a hold already holding
+the slips heals at its next read.
+
 **On the glass.** The driving screen lists the stops in the card between
 offers, when it otherwise holds only the phase and the notice (not while the
 rig is aiming), one line each — `▸ Dropoff by 4:18 · Pat Q. ·

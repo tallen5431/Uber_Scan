@@ -3164,6 +3164,127 @@ SEQ.forEach(function (seq) {
      A.sameAppOrders([t5[0], Object.assign({}, t5[1], { app: 'uber' })], page), null);
 })();
 
+/* ---- one stop read with its door AND its name slipped (Assemble.slipStop) --
+ *
+ * The owner's snap of 31 Oct, 21:46, in invented names and doors of the same
+ * shapes: an Uber batch and its add-on held, the phone listing two pickups
+ * (one of "2 orders") and THREE dropoffs. The rig's held planner listed
+ * twelve, "12 dropoffs: end not guessed": every read slipped a customer's
+ * house number (its first digits lost at the left edge, or one misread),
+ * "Bivd" for "Blvd", the name mangled past every name rule, and the
+ * "Expected by" a minute or two between reads. Each slip was a stop. */
+(function () {
+  function st(kind, name, by, street, city, extra) {
+    return Object.assign({ kind: kind, orders: 1, name: name || null, place: null,
+                           expectedBy: by === undefined ? null : by, street: street || null,
+                           city: city || null, state: city ? 'GA' : null, zip: null,
+                           line: street ? (city ? street + ', ' + city : street) : null,
+                           label: kind }, extra || {});
+  }
+  function said(stops) {
+    return stops.map(function (s) { return [s.kind, s.name, s.expectedBy, s.line]; });
+  }
+  var fable = st('pickup', 'Fable Pizza', 1310, '12 Fernhill Pkwy NW', 'Brookvale');
+  var wren = st('pickup', 'Wren Wings', 1316, '780 Tansy Ln', null, { orders: 2 });
+  var kam = function (name, by, street) {
+    return st('dropoff', name, by, street, /^\d{4}/.test(street) ? 'Brookvale' : null,
+              { place: 'Oakridge at Tansy Village' });
+  };
+  var tez = function (name, by, street) {
+    return st('dropoff', name, by, street, /^\d{4}/.test(street) ? 'Brookvale' : null);
+  };
+  var quin = function (name, by, house) {
+    return st('dropoff', name, by, house + ' Brookvale Place Bivd', 'Kestrelton',
+              { place: 'Larkspur Suites' });
+  };
+  // The reads as they came, scrolling down the list and back.
+  var reads = [
+    { stops: [fable, wren, kam('kamris', 1326, '16 Fernhill Ct')], page: { top: true, bottom: false } },
+    { stops: [kam('kanrnis.', 1326, '16 Fernhill Ct'), tez('tezv', 1332, '471 Fernhill Ct')], page: null },
+    { stops: [kam('kamnris.', 1328, '2416 Fernhill Ct'), tez('TezL', 1333, '2471 Fernhill Ct')],
+      page: null },
+    { stops: [kam('kawnis.', 1327, '2416 Fernhill Ct'), tez('tez', 1332, '2471 Fernhill Ct'),
+              quin('Quin C.', 1342, '315')], page: null },
+    { stops: [kam('kanrnis.', 1328, '2416 Fernhill Ct'), tez('jez.', 1334, '2471 Fernhill Ct'),
+              quin('QuinC.', 1343, '915')], page: null },
+    { stops: [quin('Quin C.', 1342, '915')], page: null }
+  ];
+  // (The pages after the first are not known to show the top or the foot —
+  // no sighting placed them — so no trim takes a slip out by luck: before
+  // slipStop these six reads were held as two pickups and ELEVEN dropoffs,
+  // the pickups in the middle of them.)
+  var held = null;
+  reads.forEach(function (r) { held = A.mergePlanner(held, r.stops, r.page); });
+  var kinds = function (stops) {
+    return [stops.filter(function (s) { return s.kind === 'pickup'; }).length,
+            stops.filter(function (s) { return s.kind === 'dropoff'; }).length];
+  };
+  eq('[slip] the snap: six reads of two pickups and three dropoffs are held as two pickups '
+     + 'and three dropoffs (it was twelve dropoffs)', kinds(held), [2, 3]);
+  eq('[slip] ...each dropoff at its full door: the four-digit numbers, not the digits the edge '
+     + 'left, and "915" read twice over "315" read once',
+     held.filter(function (s) { return s.kind === 'dropoff'; }).map(function (s) { return s.street; }),
+     ['2416 Fernhill Ct', '2471 Fernhill Ct', '915 Brookvale Place Bivd']);
+  eq('[slip] ...in the list\'s order, the pickups first',
+     held.map(function (s) { return s.name; }).slice(0, 2), ['Fable Pizza', 'Wren Wings']);
+  // (Counted from the first merge of two numbers: the two reads of "16"
+  // before it were one door read twice, merged as such, and count as one.)
+  eq('[slip] ...and what each number was read as, counted from the first slip',
+     held[2].doorReads, { 16: 1, 2416: 3 });
+  // A hold that already holds the slips — written before this rule — heals
+  // at its next read, though that read shows one stop.
+  var polluted = [fable, wren, kam('kamris', 1326, '16 Fernhill Ct')];
+  reads.slice(1).forEach(function (r) { polluted = polluted.concat(r.stops); });
+  var healed = A.mergePlanner(polluted, [quin('Quin C.', 1342, '915')], { top: false, bottom: true });
+  eq('[slip] a hold already holding every slip as a stop heals at its next read: two pickups, '
+     + 'three dropoffs (from the snap\'s twelve)', [kinds(polluted), kinds(healed),
+                          healed.filter(function (s) { return s.kind === 'dropoff'; })
+                            .map(function (s) { return s.street; })],
+     [[2, 12], [2, 3], ['2416 Fernhill Ct', '2471 Fernhill Ct', '915 Brookvale Place Bivd']]);
+  // The leaves of the rule, one at a time.
+  var pat = st('dropoff', 'Pat Q.', 1326, '4410 Fernhill Ct', 'Brookvale');
+  var jules = st('dropoff', 'Jules K.', 1326, '4410 Fernhill Ct', 'Brookvale');
+  eq('[slip] two customers at one door due the same minute stay two: merged, or already kept '
+     + 'side by side',
+     [A.mergePlanner([pat], [jules], null).length,
+      A.mergePlanner([fable, pat, jules], [fable], { top: true, bottom: false }).length,
+      A.slipStop(pat, st('dropoff', 'Jules K.', 1327, '10 Fernhill Ct', null))], [2, 3, false]);
+  eq('[slip] ...and never: a digit apart with a name lost, or two names; two minutes past five; '
+     + 'one digit kept; two initials; another street; another kind',
+     [A.slipStop(pat, st('dropoff', null, 1326, '4418 Fernhill Ct', 'Brookvale')),
+      A.slipStop(pat, st('dropoff', 'Kamri S.', 1326, '4418 Fernhill Ct', 'Brookvale')),
+      A.slipStop(pat, st('dropoff', 'Pat Q.', 1340, '10 Fernhill Ct', null)),
+      A.slipStop(pat, st('dropoff', 'Pat Q.', 1326, '0 Fernhill Ct', null)),
+      A.slipStop(pat, st('dropoff', 'Pat R.', 1326, '10 Fernhill Ct', null)),
+      A.slipStop(pat, st('dropoff', 'Pat Q.', 1326, '10 Fernhill Way', null)),
+      A.slipStop(pat, st('pickup', 'Pat Q.', 1326, '10 Fernhill Ct', null))],
+     [false, false, false, false, false, false, false]);
+  eq('[slip] ...but yes: digits lost at the front, a time lost, "Bivd" for "Blvd", a name '
+     + 'lost, a short name two letters off',
+     [A.slipStop(pat, st('dropoff', 'patq', 1328, '410 Fernhill Ct', null)),
+      A.slipStop(pat, st('dropoff', 'Pat Q.', null, '10 Fernhill Ct', null)),
+      A.slipStop(st('dropoff', 'Quin C.', 1342, '915 Brookvale Place Blvd', 'Kestrelton'),
+                 st('dropoff', 'QuinC.', 1343, '915 Brookvale Place Bivd', 'Kestrelton')),
+      A.slipStop(pat, st('dropoff', null, 1326, '10 Fernhill Ct', null)),
+      A.slipStop(st('dropoff', 'Tez L.', 1332, '2471 Fernhill Ct', null),
+                 st('dropoff', 'jez.', 1334, '71 Fernhill Ct', null))],
+     [true, true, true, true, true]);
+  // A press does not put back a number with its first digits lost.
+  var full = st('dropoff', 'Pat Q.', 1326, '4410 Fernhill Ct', 'Brookvale');
+  eq('[slip] a ⌖ press that read the number with its first digits lost keeps the full door; '
+     + 'one that read a digit differently wins, as a press does',
+     [A.mergePlanner([full], [st('dropoff', 'Pat Q.', 1326, '10 Fernhill Ct', null)], null,
+                     true)[0].street,
+      A.mergePlanner([full], [st('dropoff', 'Pat Q.', 1326, '4416 Fernhill Ct', null)], null,
+                     true)[0].street],
+     ['4410 Fernhill Ct', '4416 Fernhill Ct']);
+  eq('[slip] ...and unpressed, a digit apart with no reads to go by: the kept door stands',
+     A.mergePlanner([full], [st('dropoff', 'Pat Q.', 1326, '4416 Fernhill Ct', 'Brookvale')],
+                    null)[0].street, '4410 Fernhill Ct');
+  eq('[slip] a read that slips nothing writes no reads count (the hold stays byte for byte)',
+     'doorReads' in A.mergePlanner([full], [full], null)[0], false);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);

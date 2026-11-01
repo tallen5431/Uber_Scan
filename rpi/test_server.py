@@ -7944,6 +7944,20 @@ try:
         eq('[press merge] ...its reason the pressed read\'s, and the end still the card\'s',
            (((_holding(_mpb) or {}).get('planner') or {}).get('unfiled'),
             (_holding(_mpb) or {}).get('dropoff')), ('dropoffs', _COBB))
+        # The owner's snap of 31 Oct (invented here): a scrolled read that
+        # lost the house number's first digits at the screen's left edge,
+        # read the name tight to its initial and the time a minute on, used
+        # to be a stop of its own (the hold listed twelve dropoffs for three).
+        # It is the same stop (Assemble.slipStop), and its door stays the
+        # full number the press read.
+        _mpsays([{'planner': {'stops': [
+            dict(_MP_NONE, kind='dropoff', orders=1, name='PatQ.', expectedBy=1404,
+                 street='23 Kestrel Dr', line='23 Kestrel Dr')],
+            'unfiled': None, 'asked': False}}])
+        eq('[slip] a read with the door\'s first digits lost and the name and time slipped is '
+           'the same stop on the hold, at the full door; the end still the card\'s',
+           ([x[2] for x in _mpstops(_holding(_mpb))], (_holding(_mpb) or {}).get('dropoff')),
+           (['250 Example Road', '4823 Kestrel Dr', '1985 Cobb Parkway, Kennesaw'], _COBB))
     finally:
         stop(_mpp)
     # (A scanner of its own: the first one's would say its pages again.)

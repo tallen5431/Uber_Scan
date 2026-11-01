@@ -1809,6 +1809,153 @@
     return !(da && db && !sameStreet(da, db));
   }
 
+  /* ---------- one stop read with its door AND its name slipped ---------------
+   *
+   * The owner's snap of 31 Oct, 21:46 (an Uber batch and its add-on held; names
+   * and doors here invented in the same shapes): three dropoffs on the phone,
+   * and the rig's held planner listed TWELVE — "12 dropoffs: end not guessed".
+   * Every read of the scrolled list slipped the same customer's door and name
+   * at once, and each slip became a stop of its own:
+   *   - the house number lost its first digits at the screen's left edge
+   *     ("24" and "079" for a four-digit number, numberFuller's fault on the
+   *     navigation sheet of 12 Oct), or one digit misread ("315" for "915");
+   *   - "Bivd" for "Blvd" (the i/l slip streetCore already takes);
+   *   - the name mangled past wordsAlike: one customer read "kamris",
+   *     "kanrnis.", "kamnris.", "kawnis."; another "tezv", "TezL", "jez.";
+   *   - the "Expected by" a minute or two apart between reads (1326, 1328).
+   * samePlannerStop needs the times equal; sameDoorStop the street key equal,
+   * number and all; sameNameStop and slotJoins the names alike. With the door
+   * and the name both off, none of them could say "the same stop".
+   *
+   * slipStop says it, all of:
+   *   - the same kind;
+   *   - both read a door (stopDoor) and its street after the number is the
+   *     same, its type words made one ("Bivd" is "Blvd", "Boulevard" too);
+   *   - the two house numbers are the same, or one ENDS the other with at
+   *     least two digits ("16" in "2416": digits lost at the front, never at
+   *     the back), or they are as long, three digits and more, and differ in
+   *     one digit ("315"/"915");
+   *   - the "Expected by" within NAME_SLIP_MINUTES, or either read none;
+   *   - the names not two people (namesSlip): either read no name, or they
+   *     are sameName, or their initials do not differ and their words are
+   *     close by letters — an edit or two (NAME_SLIP_RATIO of the longer
+   *     word; one of three letters may be two edits off a word of four,
+   *     "jez" for "tezl"). "Pat Q." and "Jules K." at one door, due the same
+   *     minute, are two customers (slotJoins' review of 27 Oct), and stay two.
+   * A digit misread at the same length is the one slip that can make two
+   * neighbours' doors one ("2416" and "2418" on one court), so it is taken
+   * only where BOTH reads printed a name and the names agree: a name lost
+   * there is not evidence of anything.
+   *
+   * Asked by mergePlanner after every rule above has had every pair, and of
+   * the merged list against itself (collapsePlanner), so a hold already
+   * holding the twelve heals at its next read. */
+  var NAME_SLIP_RATIO = 0.34;
+  var SLIP_TYPES = { bivd: 'blvd', boulevard: 'blvd', street: 'st', road: 'rd', drive: 'dr',
+                     lane: 'ln', avenue: 'ave', av: 'ave', court: 'ct', parkway: 'pkwy',
+                     pky: 'pkwy', place: 'pl', circle: 'cir', trail: 'trl', terrace: 'ter',
+                     highway: 'hwy', crossing: 'xing', square: 'sq' };
+
+  // A stop's door as {house, street}: its number, and the street after it with
+  // its type words made one, or null with no door (stopDoor).
+  function slipDoor(s) {
+    var door = s ? stopDoor(s) : null;
+    var m = door ? /^(\d+)[a-z]? (.+)$/.exec(streetKey(door)) : null;
+    if (!m) return null;
+    return { house: m[1], street: m[2].split(' ').map(function (w) {
+      return SLIP_TYPES[w] || w;
+    }).join(' ') };
+  }
+
+  // How two house numbers can be one door: 'same', 'lost' (one ends the
+  // other, two digits at least), 'one' (as long, three digits and more, one
+  // digit apart), or null.
+  function housesSlip(x, y) {
+    if (x === y) return 'same';
+    var lo = x.length < y.length ? x : y, hi = x.length < y.length ? y : x;
+    if (lo.length !== hi.length) {
+      return lo.length >= 2 && hi.slice(-lo.length) === lo ? 'lost' : null;
+    }
+    if (x.length < 3) return null;
+    var diff = 0;
+    for (var i = 0; i < x.length; i++) if (x[i] !== y[i]) diff += 1;
+    return diff === 1 ? 'one' : null;
+  }
+
+  // Letters to turn one word into the other (Levenshtein), for two short
+  // name words; no word here is longer than a name.
+  function editsApart(x, y) {
+    var row = [], i, j;
+    for (j = 0; j <= y.length; j++) row.push(j);
+    for (i = 1; i <= x.length; i++) {
+      var diag = row[0];
+      row[0] = i;
+      for (j = 1; j <= y.length; j++) {
+        var up = row[j];
+        row[j] = Math.min(row[j] + 1, row[j - 1] + 1, diag + (x[i - 1] === y[j - 1] ? 0 : 1));
+        diag = up;
+      }
+    }
+    return row[y.length];
+  }
+
+  // Two names that are not two people: see slipStop. The leniency is for a
+  // name's OWN word mangled — the screen's litter round it is already gone
+  // (nameWords, runOnForms) — and initials that both read and differ are two
+  // people whatever the letters say ("Pat Q." and "Pat R.").
+  function namesSlip(a, b) {
+    if (!named(a) || !named(b)) return true;
+    // (Before sameName, which reads words of three letters and calls "Pat Q."
+    // and "Pat R." one: sameNameStop asks the initials the same way.)
+    var ia = initialOf(a.name), ib = initialOf(b.name);
+    if (ia && ib && ia !== ib) return false;
+    if (sameName(a, b)) return true;
+    var fa = runOnForms(a.name), fb = runOnForms(b.name);
+    return fa.some(function (x) {
+      return fb.some(function (y) {
+        var d = editsApart(x, y), long = Math.max(x.length, y.length);
+        return d / long <= NAME_SLIP_RATIO
+          || (Math.min(x.length, y.length) === 3 && long <= 4 && d <= 2);
+      });
+    });
+  }
+
+  function slipStop(a, b) {
+    if (!a || !b || !a.kind || a.kind !== b.kind) return false;
+    var da = slipDoor(a), db = slipDoor(b);
+    if (!da || !db || da.street !== db.street) return false;
+    var how = housesSlip(da.house, db.house);
+    if (!how) return false;
+    var timed = function (x) { return typeof x.expectedBy === 'number' && isFinite(x.expectedBy); };
+    if (timed(a) && timed(b)) {
+      var d = Math.abs(a.expectedBy - b.expectedBy) % 1440;
+      if (Math.min(d, 1440 - d) > NAME_SLIP_MINUTES) return false;
+    }
+    if (how === 'one' && !(named(a) && named(b))) return false;
+    return namesSlip(a, b);
+  }
+
+  /* Which of two door readings of ONE stop stands: the best supported.
+   *   - A number that ends in the other's is the fuller read and stands
+   *     (numberFuller's rule: a number does not lose digits by being read
+   *     better) — "2416", never "16", however often "16" was read.
+   *   - Otherwise (a digit misread at the same length) the reading read more
+   *     often, by the stop's `doorReads` — {house number: reads}, kept on the
+   *     stop from the first time two numbers were merged into it, and counted
+   *     at every merge after, so "915" read twice beats "315" read once.
+   *   - A tie: the block with more of street, town and ZIP (addressConf),
+   *     then the kept one, so a door already standing is not swapped back and
+   *     forth by reads that alternate.
+   * Returns 'kept' or 'read'. */
+  function doorWinner(kept, read, votes) {
+    var dk = slipDoor(kept), dr = slipDoor(read);
+    var how = housesSlip(dk.house, dr.house);
+    if (how === 'lost') return dr.house.length > dk.house.length ? 'read' : 'kept';
+    var vk = votes[dk.house] || 0, vr = votes[dr.house] || 0;
+    if (vk !== vr) return vr > vk ? 'read' : 'kept';
+    return addressConf(read) > addressConf(kept) ? 'read' : 'kept';
+  }
+
   // Whether a stop read any of its address block.
   function hasAddress(s) {
     return ADDRESS_KEYS.some(function (k) { return !!s[k]; });
@@ -1829,6 +1976,24 @@
     // pressed read's own whenever it read one.
     var addr = pressed ? (hasAddress(read) ? read : kept)
       : addressConf(kept) > addressConf(read) ? kept : read;
+    // ...unless the two read DIFFERENT house numbers for the one stop
+    // (slipStop; the owner's snap of 31 Oct): then the best-supported door
+    // (doorWinner), each reading counted on `doorReads` from then on. Not
+    // even a press puts back a number with its first digits lost: the driver
+    // pressed for this page, not for the screen's left edge. A press whose
+    // number differs by a digit still wins, as a press always has.
+    var dk = slipDoor(kept), dr = slipDoor(read);
+    if ((dk && dr && dk.house !== dr.house) || kept.doorReads || read.doorReads) {
+      var votes = Object.assign({}, kept.doorReads || (dk ? oneRead(dk.house) : {}));
+      var rv = read.doorReads || (dr ? oneRead(dr.house) : {});
+      Object.keys(rv).forEach(function (h) { votes[h] = (votes[h] || 0) + rv[h]; });
+      out.doorReads = votes;
+      if (dk && dr && dk.house !== dr.house) {
+        var lost = housesSlip(dk.house, dr.house) === 'lost';
+        addr = pressed && !(lost && dr.house.length < dk.house.length) ? read
+          : doorWinner(kept, read, votes) === 'read' ? read : kept;
+      }
+    }
     ADDRESS_KEYS.forEach(function (k) {
       if (has(k)) out[k] = addr[k] === undefined ? null : addr[k];
     });
@@ -1836,6 +2001,43 @@
     // read's answer where it gave one, else the kept.
     if (!read.of && kept.of) out.of = kept.of;
     return out;
+  }
+
+  function oneRead(house) {
+    var o = {};
+    o[house] = 1;
+    return o;
+  }
+
+  /* The merged list against itself, before mergePlanner's top and foot trims
+   * (entries {s, fromNew, old}): two entries slipStop calls one stop are
+   * made one (mergePlannerStop), where the earlier of them stands in the
+   * list, a newer read's entry if either was — but never two entries both of
+   * the newer read. The newer read's entry is the `read` (its words win, as they do
+   * between two reads); between two kept entries, the later one. Only
+   * slipStop's rule, never the looser ones above: sameDoorStop takes one
+   * door "whatever the times say", and two pickups at one store, each due
+   * its own minute, are two stops on one list (the review's cafe at 7:10
+   * and 7:25); slipStop wants the times within NAME_SLIP_MINUTES. */
+  function collapsePlanner(entries) {
+    var list = entries.slice();
+    for (var i = 0; i < list.length; i++) {
+      for (var j = i + 1; j < list.length; j++) {
+        // Never two stops of the read in hand: what ONE read lists twice the
+        // app listed twice (test_server's carry-two planner, one street
+        // listed twice, places neither order's end on it — planAtOf's
+        // refusal, which this must not undo). Only reads apart can slip.
+        if (list[i].fromNew && list[j].fromNew) continue;
+        if (!slipStop(list[i].s, list[j].s)) continue;
+        var newer = list[i].fromNew && !list[j].fromNew ? i : j;
+        var older = newer === i ? j : i;
+        list[i] = { s: mergePlannerStop(list[older].s, list[newer].s, false),
+                    fromNew: list[i].fromNew || list[j].fromNew, old: list[i].old };
+        list.splice(j, 1);
+        j = i;
+      }
+    }
+    return list;
   }
 
   // Where a timed stop goes among `list`'s entries ({s}) by its time: after
@@ -1930,6 +2132,15 @@
         if (!used[j] && sameNameStop(o, news[j])) { match[i] = j; used[j] = true; return; }
       }
     });
+    // ...then one whose door AND name slipped at once (slipStop; the owner's
+    // snap of 31 Oct), last, so a stop any stricter rule takes is never taken
+    // by a slip.
+    olds.forEach(function (o, i) {
+      if (match[i] !== -1) return;
+      for (var j = 0; j < news.length; j++) {
+        if (!used[j] && slipStop(o, news[j])) { match[i] = j; used[j] = true; return; }
+      }
+    });
     // ...a header with nothing under it, beside a stop in common, is the stop
     // the other read shows there — and so is one in the same slot due at the
     // same minute (slotJoins).
@@ -2007,6 +2218,15 @@
     // and the Waybill under the last stop) is the whole list, and no kept
     // stop it does not show stands (the matched ones are merged above, press
     // precedence and all).
+    //
+    // First, two entries that are one slipped stop are made one
+    // (collapsePlanner), so a kept list already holding a stop twice heals
+    // here — BEFORE the trims: a kept twin of a stop this read shows is that
+    // stop, shown, and its reading counts toward the door (doorReads) rather
+    // than going with the trim. (The owner's snap of 31 Oct: the foot read
+    // matched the "315" twin by name and minute and trimmed the "915" one
+    // below it, and the door left standing was the misread.)
+    list = collapsePlanner(list);
     var whole = !!(page && page.top && page.bottom);
     var firstNew = -1, lastNew = -1;
     list.forEach(function (e, k) {
@@ -3380,6 +3600,8 @@
            keyOf: keyOf, placements: placements, linked: linked,
            // ...and the planner the hold keeps, pages merged (24 Oct).
            mergePlanner: mergePlanner,
+           // ...and one stop read with its door and name slipped (31 Oct).
+           slipStop: slipStop,
            fresh: fresh, took: took, sighting: sighting, pending: pending,
            verdictFor: verdictFor, pageOf: pageOf, plannerRowDue: plannerRowDue,
            cardSeen: cardSeen, heldOwnCard: heldOwnCard, holdIdOf: holdIdOf,
