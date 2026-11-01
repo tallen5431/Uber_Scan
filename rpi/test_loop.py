@@ -644,10 +644,17 @@ ok_('...and told again, same id and same journey, when its verdict moved (%r)'
 #
 # DoorDash's stops card prints the store's address under its name (OP's
 # `pickupLine`), and Map view searches it for the pickup's pin. The first
-# frames read the line with the town cut by the card's edge, which is no door;
-# the later ones read it whole. Minutes, miles, dropoff and verdict are the
-# same throughout, so without the door in the told tuple the offer on record
-# never gained it and the map went on searching the store's name. Invented.
+# frames read the line with the town cut by the card's edge; the later ones
+# read it whole. Minutes, miles, dropoff and verdict are the same throughout,
+# so without the door in the told tuple the offer on record never gained the
+# fuller door. Invented.
+#
+# The first telling's door changed at 9a8c97a, on purpose: a door cut just
+# after its comma ("2530 <Name> Road, Sm...") is the street alone
+# (offer_parser.store_door_town_cut — the street in front of the cut was a door
+# all along, the same search a door cut before its town is), where it was
+# refused as no door. This check still said None and failed the gate on
+# 4b6e148; it now holds the street alone first, and the whole door told again.
 _DD = ('$7.70 incl. tips\n2 stops (2.4 mi) - 18 min\n& Lark Owl Grill\n'
        '2530 Kestrel Plains Road, %s\n& Customer dropoff\nAccept')
 r = run(lambda n, k: _DD % ('Sm...' if n <= 1 else 'Marietta, 30066 GA'), seconds=25.0,
@@ -655,8 +662,8 @@ r = run(lambda n, k: _DD % ('Sm...' if n <= 1 else 'Marietta, 30066 GA'), second
         and calls >= 4)
 told = [(a[0], a[1].get('pickup'), a[1].get('pickupLine'), a[1].get('dropoff'))
         for a in r['announced']]
-ok_('a stops card was told first with no door (%r)' % (told[:1],),
-    told and told[0][1] == 'Lark Owl Grill' and told[0][2] is None)
+ok_('a stops card was told first with the street its cut line gives (%r)' % (told[:1],),
+    told and told[0][1] == 'Lark Owl Grill' and told[0][2] == '2530 Kestrel Plains Road')
 ok_('...and told again, same id and same store, when its door read (%r)' % (told[-1:],),
     len(told) >= 2 and told[-1][0] == told[0][0] and told[-1][1] == 'Lark Owl Grill'
     and told[-1][2] == '2530 Kestrel Plains Road, Marietta, GA 30066'

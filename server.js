@@ -62,7 +62,6 @@ var TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
-  '.jsonl': 'application/x-ndjson; charset=utf-8',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -114,6 +113,16 @@ function isPrivate(pathname) {
  * appearing next to the server is then safe by default rather than safe if
  * somebody remembers.
  */
+/* ...and a snap's journal tail (`journal-tail.jsonl`, 4c40cbf) is typed here
+ * and NOT in TYPES. 4c40cbf put '.jsonl' in TYPES so /api/snaps could name its
+ * type, and TYPES is also isServable's allowlist: from then on a
+ * `journal-backup.jsonl` in the root and a `backup/journal.jsonl` were served
+ * in full again to anyone on the car's wifi — the very leak the paragraph
+ * above closed (rpi/test_liveview.py caught it at the gate on 4b6e148). The
+ * snap route and the snap bundle ask SNAP_TYPES; the static handler never
+ * does. */
+var SNAP_TYPES = Object.assign({ '.jsonl': 'application/x-ndjson; charset=utf-8' }, TYPES);
+
 function isServable(pathname) {
   return Object.prototype.hasOwnProperty.call(
     TYPES, path.extname(pathname).toLowerCase());
@@ -6315,13 +6324,25 @@ function warmEarly(read, now) {
 }
 
 // Minutes since midnight as the nearest such moment to `now` (ms).
+//
+// Set as the WALL CLOCK's hour and minute on that day, and moved by a calendar
+// day, never as midnight plus so many minutes. On a day the clocks change the
+// two differ by an hour all day: on 1 Nov 2026 (US Eastern falls back) a
+// "Deliver by" due this minute came out 60 minutes past, and test_server's
+// on-time checks said "late 66" for an order due now, all of that day — the
+// release gate's run on 4b6e148 was made on it. Measured: the six on-time and
+// store-wait checks failed at 01:23 and 02:36 EST and pass with this.
 function dueAt(minOfDay, now) {
   if (typeof minOfDay !== 'number' || !isFinite(minOfDay)) return null;
-  var d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  var t = d.getTime() + minOfDay * 60000;
-  if (t < now - 12 * 3600000) t += 86400000;
-  else if (t > now + 12 * 3600000) t -= 86400000;
+  var at = function (dayShift) {
+    var d = new Date(now);
+    d.setDate(d.getDate() + dayShift);
+    d.setHours(Math.floor(minOfDay / 60), Math.round(minOfDay % 60), 0, 0);
+    return d.getTime();
+  };
+  var t = at(0);
+  if (t < now - 12 * 3600000) t = at(1);
+  else if (t > now + 12 * 3600000) t = at(-1);
   return t;
 }
 
@@ -10303,7 +10324,7 @@ function bundleSection(snap, done) {
       // Each file's size is in snap.json, which is in here too; said again
       // beside each picture it would be a second formatter of a size to keep
       // in step with snaps.html's.
-      var uri = 'data:' + TYPES[path.extname(file)].split(';')[0] + ';base64,'
+      var uri = 'data:' + SNAP_TYPES[path.extname(file)].split(';')[0] + ';base64,'
               + data.toString('base64');
       if (isPicture(file)) {
         html += '<figure><img src="' + uri + '" alt="' + SNAP_ABOUT[file]
@@ -12939,7 +12960,8 @@ function route(req, res) {
     var snapHeld = snapAsk && isSnap(snapAsk[1])
       && snapFiles(snapAsk[1]).some(function (f) { return f.file === snapAsk[2]; });
     if (!snapHeld) return send(res, 404, 'not found', { 'Content-Type': 'text/plain' });
-    return serveFile(req, res, path.join(SNAPS_DIR, snapAsk[1], snapAsk[2]));
+    return serveFile(req, res, path.join(SNAPS_DIR, snapAsk[1], snapAsk[2]),
+                     SNAP_TYPES[path.extname(snapAsk[2]).toLowerCase()]);
   }
 
   // The scanner writes this every couple of seconds while it runs. Serving it

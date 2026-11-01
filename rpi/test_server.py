@@ -17,6 +17,7 @@ a fake scanner that reads a card, reads it again, then reads another, for the
 order in the car.
 """
 
+import datetime
 import json
 import math
 import os
@@ -12908,9 +12909,16 @@ try:
     _sj = json.loads(_sh) if _sc == 200 else {}
     _srep = _sj.get('report') or {}
     _sa = [o for o in _srep.get('orders') or []]
+    # The shift's day turns at 04:00 on the WALL CLOCK (live.html dayStart,
+    # the server's own), not four hours of elapsed time back: on 1 Nov, the
+    # clocks fallen back, "now less 4 h" at 03:30 EST was 00:30 EDT the same
+    # date, and this said 1 Nov while the server rightly said 31 Oct.
+    _wall = time.localtime()
+    _sday = (datetime.date(_wall.tm_year, _wall.tm_mon, _wall.tm_mday)
+             - datetime.timedelta(days=1 if _wall.tm_hour < 4 else 0)).isoformat()
     eq('[shift] /api/shift answers today\'s shift as the report computes it',
        (_sc, _sj.get('ok'), _sj.get('day'), sorted(_srep)),
-       (200, True, time.strftime('%Y-%m-%d', time.localtime(time.time() - 4 * 3600)),
+       (200, True, _sday,
         ['day', 'end', 'gps', 'orders', 'pinning', 'start', 'summary', 'totals',
          'unreadable']))
     _sdrops = [r for r in _rows(_uj, 'drop') if r.get('id') == 'ud-a']

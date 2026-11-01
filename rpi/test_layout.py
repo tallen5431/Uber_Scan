@@ -933,6 +933,14 @@ CAPTION_LINES = [
     ('the order of two orders\' stops unknown', 'order of stops unknown — no figure'),
     ('the second order with no end on record',
      '② has no address on record — ⌖ Scan reads it off your phone'),
+    # ...and the same for a DoorDash ② (6ae05c4, the owner's snaps of 31 Oct):
+    # said by its app, with or without its map label drawn as the "≈" guess.
+    # Added at the gate on 4b6e148, where the caption had grown both and this
+    # table measured neither ("every sentence the map caption can say...").
+    ('the DoorDash second order with no end read',
+     'DoorDash dropoff not read yet — ⌖ Scan reads it off your phone'),
+    ('the DoorDash second order drawn from its map label',
+     'DoorDash dropoff not read yet — ② drawn ≈ from DoorDash\'s map'),
     ('no figure, a street with two orders',
      "no figure for " + WIDEST_DISC + " — a street, with two orders"),
     # ...and the pickup's door off DoorDash's place popup rather than off the
@@ -1026,7 +1034,7 @@ _DECLARED = {row[0] for row in CAPTION_LINES if len(row) > 2}
 # are three, and the comment at the foot of the file said the row can say
 # twenty things where it can say twenty-one. A number in a comment that
 # nothing counts is a number that rots; these fail rather than rot.
-eq('the caption table is the size its comments say', len(CAPTION_LINES), 116)
+eq('the caption table is the size its comments say', len(CAPTION_LINES), 118)
 eq('...and fifty-six of its entries declare a tail the clamp may eat',
    len(_DECLARED), 56)
 CAPTION_LINES = [(row[0], row[1], row[2] if len(row) > 2 else row[1])
@@ -5854,7 +5862,7 @@ try:
                 #
                 # Everything above measures the ONE sentence this offline
                 # harness happens to land on. The row is the map's other
-                # occupant and it can say a hundred and three things, so all
+                # occupant and it can say a hundred and eighteen things, so all
                 # of them are put in it and measured. Three rules, and they are not the same
                 # rule asked three ways:
                 #

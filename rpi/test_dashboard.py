@@ -790,7 +790,15 @@ const framed = (page) => page.waitForFunction(
 
     // ...and the new one marks and unmarks as its own.
     out.tookClickedNext = await press();
-    await page.waitForTimeout(200);
+    // Waited for, not slept on: the mark is a POST answered by the fake rig,
+    // and the button turns when the answer lands. A flat 200 ms here failed
+    // the release gate on 4b6e148 ("...and can be marked in its own right")
+    // while thirty suites ran beside it, and passed alone on the same tree —
+    // the load, not the panel. Two seconds is a ceiling, not a wait: it
+    // returns the moment aria-pressed says true.
+    await page.waitForFunction(
+      () => document.getElementById('took').getAttribute('aria-pressed') === 'true',
+      null, { timeout: 2000 }).catch(() => {});
     out.tookNextMarked = await look();
     out.tookClickedAgain = await press();
     await page.waitForTimeout(200);

@@ -4385,11 +4385,19 @@
     }).catch(function () { return null; });
     return new Promise(function (resolve) {
       var done = false;
-      var spent = function () {
-        if (budget) budget.waited = (budget.waited > 0 ? budget.waited : 0) + (Date.now() - began);
+      // `atLeast`: a band given up on has spent ALL of its wait. Node's timer
+      // can fire a millisecond before Date.now() says the wait is over, and
+      // measured that way a hung band left "1 ms" of the walk's wait for the
+      // next, which then asked the router too: the gate on 4b6e148 failed
+      // mapview's "[band] a hanging router" with two bands asking, not one.
+      var spent = function (atLeast) {
+        if (budget) {
+          budget.waited = (budget.waited > 0 ? budget.waited : 0)
+            + Math.max(Date.now() - began, atLeast || 0);
+        }
       };
       var t = setTimeout(function () {
-        if (!done) { done = true; spent(); resolve(null); }
+        if (!done) { done = true; spent(wait); resolve(null); }
       }, wait);
       work.then(function (a) {
         if (done) return;
