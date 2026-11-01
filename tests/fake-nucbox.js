@@ -572,6 +572,23 @@ function start(done) {
       }
       return json(200, search(u.query));
     }
+    /* OSRM's table service (server.js's /api/nbx/table relay, the planner's
+       fastest order; 31 Oct): the drive seconds between every two points, at
+       the same road a quarter longer than the straight line and the same
+       13.4 m/s as route() above. Any point at 34.1, -84.6 is refused with a
+       code that is not Ok, as route() refuses it. */
+    var tm = /^\/table\/v1\/driving\/([-0-9.,;]+)$/.exec(u.pathname);
+    if (tm) {
+      var tp = tm[1].split(';').map(function (c) { return c.split(',').map(Number); });
+      if (tp.some(function (p) { return Math.abs(p[0] + 84.6) < 1e-6 && Math.abs(p[1] - 34.1) < 1e-6; })) {
+        return json(400, { code: 'InvalidQuery', message: 'Query string malformed' });
+      }
+      return json(200, { code: 'Ok', durations: tp.map(function (a) {
+        return tp.map(function (b) {
+          return Math.round(miles(a, b) * 1.25 * 1609.344 / 13.4 * 10) / 10;
+        });
+      }) });
+    }
     var m = /^\/route\/v1\/driving\/([-0-9.,;]+)$/.exec(u.pathname);
     if (m) {
       var r = route(m[1]);

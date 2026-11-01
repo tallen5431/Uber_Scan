@@ -4167,6 +4167,127 @@ async function nucbox() {
      JSON.stringify([{ pts: [CAR, PK, D2, END], note: null }, [null],
                      [[NEW.lat, NEW.lon], [D2.lat, D2.lon], [END.lat, END.lon]]]));
 
+  /* ---- every planner door mapped, the fastest order through them -----------
+   *
+   * The owner on the snap of 31 Oct 21:46 (invented here: names, doors and
+   * points): "the addresses do not need to be linked to the order, it just
+   * needs to be mapped. Though it would be helpful if it optimized the
+   * shortest/fastest route". Two pickups (one of "2 orders") and three
+   * dropoffs, two orders held, no end guessed. Compared as JSON. */
+  function eqJ(name, got, want) { eq(name, JSON.stringify(got), JSON.stringify(want)); }
+  (function () {
+    var plan = [
+      { kind: 'pickup', name: 'oe Fable Pizza', street: '12 Fernhill Pkwy NW', city: 'Brookvale',
+        line: '12 Fernhill Pkwy NW, Brookvale', of: 'o-1' },
+      { kind: 'pickup', name: 'Wren Wings', street: '780 Tansy Ln', city: null, line: null,
+        orders: 2 },
+      { kind: 'dropoff', name: 'Kamri S.', street: '2416 Fernhill Ct', city: 'Brookvale',
+        line: '2416 Fernhill Ct, Brookvale' },
+      { kind: 'dropoff', name: 'Tez L.', street: '2471 Fernhill Ct', city: 'Brookvale',
+        line: '2471 Fernhill Ct, Brookvale' },
+      { kind: 'dropoff', name: 'Quin C.', street: 'Larkspur Way', city: 'Kestrelton',
+        line: 'Larkspur Way, Kestrelton' },
+      { kind: 'dropoff', name: 'Quin C.', street: '915 Brookvale Place Blvd', city: 'Kestrelton',
+        line: '915 Brookvale Place Blvd, Kestrelton' },
+      { kind: 'dropoff', name: null, street: null, city: 'Kestrelton', line: 'Kestrelton, GA' }
+    ];
+    var doors = MV.plannerDoors(plan, ['780 Tansy Ln,']);
+    eqJ('[planner doors] every stop with a door, pickups and dropoffs, whoever\'s, in the app\'s '
+       + 'order, lettered by kind as the app lists them; a street with no number, and a town, '
+       + 'are not doors',
+       doors.map(function (d) { return [d.label, d.q, d.name, d.of || null, d.done]; }),
+       [['P1', '12 Fernhill Pkwy NW, Brookvale', 'Fable Pizza', 'o-1', false],
+        ['P2', '780 Tansy Ln,', 'Wren Wings', null, true],
+        ['D1', '2416 Fernhill Ct, Brookvale', 'Kamri S.', null, false],
+        ['D2', '2471 Fernhill Ct, Brookvale', 'Tez L.', null, false],
+        ['D3', '915 Brookvale Place Blvd, Kestrelton', 'Quin C.', null, false]]);
+    eqJ('[planner doors] ...a pickup\'s key is the one it is visited by (pickupKey), and nothing '
+       + 'for no planner',
+       [doors[0].q === MV.pickupKey(plan[0]), MV.plannerDoors(null).length,
+        MV.plannerDoors(plan.concat([plan[2]])).length], [true, 0, 5]);
+
+    // A cost matrix off points on a line (row/col 0 the car): |a - b| * 60 s.
+    function lineCost(xs) {
+      return xs.map(function (a) { return xs.map(function (b) { return Math.abs(a - b) * 60; }); });
+    }
+    var P = function (of) { return of ? { kind: 'pickup', of: of } : { kind: 'pickup' }; };
+    var D = function (of) { return of ? { kind: 'dropoff', of: of } : { kind: 'dropoff' }; };
+    // The app's order P1 P2 D1 D2 D3; the car at 0, P1 at 1, P2 at 2, D1 at
+    // 10, D2 at 9, D3 at 3: fastest is P1 P2 D3 D2 D1.
+    var five = [P(), P(), D(), D(), D()];
+    var r = MV.fastestOrder(five, lineCost([0, 1, 2, 10, 9, 3]));
+    eqJ('[fastest order] every order tried under the pickups-first rule: P1 P2 D3 D2 D1, against '
+       + 'the app\'s P1 P2 D1 D2 D3',
+       [r.order, r.cost, r.appCost], [[0, 1, 4, 3, 2], 600, 1020]);
+    eqJ('[fastest order] ...said as the app labels them, with the router\'s minutes saved',
+       MV.orderWords([{ label: 'P1' }, { label: 'P2' }, { label: 'D1' }, { label: 'D2' },
+                      { label: 'D3' }], r, 'road'),
+       'fastest order: P1 P2 D3 D2 D1 · saves 7 min vs the app\'s');
+    // A dropoff nearer the car than a pickup still waits for every pickup
+    // whose order is not known to be another's.
+    var near = MV.fastestOrder([P(), D()], lineCost([0, 5, 1]));
+    var linked = MV.fastestOrder([P('o-1'), P('o-2'), D('o-1')], lineCost([0, 1, 9, 2]));
+    var unknownP = MV.fastestOrder([P('o-1'), P(), D('o-1')], lineCost([0, 1, 9, 2]));
+    eqJ('[fastest order] a dropoff never before a pickup it may be for: links unknown, every '
+       + 'pickup first; linked (`of`), only its own order\'s and the unknown ones',
+       [near.order, linked.order, unknownP.order], [[0, 1], [0, 2, 1], [0, 1, 2]]);
+    eqJ('[fastest order] ...the app\'s order already fastest is said so, and a saving under a '
+       + 'minute is the app\'s',
+       [MV.orderWords([{ label: 'P1' }, { label: 'D1' }], near, 'road'),
+        MV.orderWords([{ label: 'A' }, { label: 'B' }],
+                      { order: [1, 0], cost: 100, appCost: 159 }, 'road')],
+       ['app\'s order is already fastest', 'app\'s order is already fastest']);
+    eqJ('[fastest order] ...straight-line metres (the router down) are said in miles and as '
+       + 'straight line, never as minutes',
+       [MV.orderWords([{ label: 'P1' }, { label: 'D1' }, { label: 'D2' }],
+                      { order: [0, 2, 1], cost: 3000, appCost: 3000 + 1931 }, 'line'),
+        MV.orderWords([{ label: 'P1' }, { label: 'D1' }], near, 'line')],
+       ['shortest order (straight line): P1 D2 D1 · 1.2 mi less than the app\'s',
+        'app\'s order is already shortest (straight line)']);
+    eqJ('[fastest order] ...nothing for no stops, a matrix of the wrong size, or a hole in it '
+       + '(OSRM\'s null for a point it could not reach)',
+       [MV.fastestOrder([], [[0]]), MV.fastestOrder([P()], lineCost([0, 1, 2])),
+        MV.fastestOrder([P(), D()], [[0, 1, null], [1, 0, 1], [1, 1, 0]])], [null, null, null]);
+    // Past FASTEST_EXACT_MAX: nearest legal stop, then 2-opt, still legal.
+    var many = [P(), P()].concat([1, 2, 3, 4, 5, 6, 7, 8].map(function () { return D(); }));
+    var xs = [0, 20, 21, 30, 3, 25, 6, 28, 9, 27, 12];
+    var g = MV.fastestOrder(many, lineCost(xs));
+    var at = {};
+    g.order.forEach(function (s, k) { at[s] = k; });
+    eqJ('[fastest order] ten stops (past the exact search\'s eight): every stop once, both pickups '
+       + 'before every dropoff, and no longer than the app\'s',
+       [g.order.slice().sort(function (a, b) { return a - b; }).join(','),
+        [2, 3, 4, 5, 6, 7, 8, 9].every(function (d) { return at[d] > at[0] && at[d] > at[1]; }),
+        g.cost <= g.appCost, MV.FASTEST_EXACT_MAX],
+       ['0,1,2,3,4,5,6,7,8,9', true, true, 8]);
+    eqJ('[fastest order] straight-line metres between points, and a key to keep an answer by '
+       + '(the car to about 100 m, each stop to about a metre)',
+       [Math.round(MV.crowMatrix([{ lat: 34, lon: -84.5 }, { lat: 34.01, lon: -84.5 }])[0][1]),
+        MV.orderKey({ lat: 34.00012, lon: -84.50049 }, [{ lat: 34.1, lon: -84.2 }]),
+        MV.orderKey({ lat: 34.00049, lon: -84.50012 }, [{ lat: 34.1, lon: -84.2 }])
+          === MV.orderKey({ lat: 34.00012, lon: -84.50049 }, [{ lat: 34.1, lon: -84.2 }])],
+       [1112, '34.000,-84.500>34.10000,-84.20000', true]);
+  })();
+  // The router's table through the relay, as the walk asks it.
+  var tableAsked = [];
+  var tabled = new MV.NbxSearch({ gap: 0, fetch: function (u) {
+    tableAsked.push(u);
+    var down = /34\.10000/.test(u);
+    return Promise.resolve({ ok: !down, status: down ? 502 : 200, json: function () {
+      return Promise.resolve(down ? { ok: false, unreachable: true, error: 'the NucBox did not answer' }
+                                  : { ok: true, seconds: [[0, 60], [60, 0]] });
+    } });
+  } });
+  var tA = await tabled.table([{ lat: 34, lon: -84.5 }, { lat: 34.01, lon: -84.5 }]);
+  var tB = await tabled.table([{ lat: 34, lon: -84.5 }, { lat: 34.01, lon: -84.5 }]);
+  var tDown = await tabled.table([{ lat: 34.1, lon: -84.5 }, { lat: 34.01, lon: -84.5 }]);
+  eqJ('[fastest order] the table asked of the relay with lon,lat points, kept, and a NucBox '
+     + 'down said as unreachable (the walk then goes by straight lines)',
+     [tA, tB === tA || JSON.stringify(tB) === JSON.stringify(tA), tableAsked.length,
+      tableAsked[0].replace(/^.*\/table/, '/table'), tDown.why],
+     [{ seconds: [[0, 60], [60, 0]] }, true, 2,
+      '/table?points=-84.50000,34.00000;-84.50000,34.01000', 'unreachable']);
+
   /* ---- Leaflet that will not load (needLeaflet) ----------------------------
    *
    * A document of the page's shape, whose script never arrives: what a failed

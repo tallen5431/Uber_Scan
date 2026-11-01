@@ -10533,7 +10533,8 @@ function nbxBase(name) {
 var NBX = { search: nbxBase('NUCBOX_SEARCH'), route: nbxBase('NUCBOX_ROUTER'),
             streets: nbxBase('NUCBOX_STREETS') };
 // Which setting names each relayed question's service, for the words.
-var NBX_SETTING = { search: 'NUCBOX_SEARCH', route: 'NUCBOX_ROUTER', cross: 'NUCBOX_STREETS',
+var NBX_SETTING = { search: 'NUCBOX_SEARCH', route: 'NUCBOX_ROUTER', table: 'NUCBOX_ROUTER',
+                    cross: 'NUCBOX_STREETS',
                     stretch: 'NUCBOX_STREETS', named: 'NUCBOX_STREETS',
                     whole: 'NUCBOX_STREETS' };
 // The questions the NucBox's street index answers (streetsRoute there, the
@@ -11003,6 +11004,12 @@ var NBX_LINE_MAX = 5000;
 // The most points one route question carries: the car and two orders' four
 // stops (onTimeHint).
 var NBX_ROUTE_POINTS_MAX = 5;
+// ...and one table question (/api/nbx/table, the planner's fastest order;
+// the owner, 31 Oct): the car and up to nine planner doors. OSRM's own
+// default limit is 100 (--max-table-size); nine is past the most stops a
+// trip on file has listed (two pickups and three dropoffs), and keeps the
+// question one the NucBox answers at once.
+var NBX_TABLE_POINTS_MAX = 10;
 function nbxLine(g) {
   var c = g && g.type === 'LineString' && Array.isArray(g.coordinates) ? g.coordinates : null;
   if (!c || c.length < 2 || c.length > NBX_LINE_MAX) return null;
@@ -11031,10 +11038,12 @@ function nbxRoute(req, res) {
   }
   var which = { '/api/nbx/search': 'search', '/api/nbx/route': 'route',
                 '/api/nbx/cross': 'cross', '/api/nbx/stretch': 'stretch',
-                '/api/nbx/named': 'named', '/api/nbx/whole': 'whole' }[p] || null;
+                '/api/nbx/named': 'named', '/api/nbx/whole': 'whole',
+                '/api/nbx/table': 'table' }[p] || null;
   if (!which) return reply(404, { ok: false, error: 'no such NucBox endpoint' });
   var streetish = STREET_ASKS.indexOf(which) >= 0;
-  var base = NBX[streetish ? 'streets' : which];
+  // (The table is the router's other service, on the same OSRM.)
+  var base = NBX[streetish ? 'streets' : which === 'table' ? 'route' : which];
   if (!base) {
     return reply(404, { ok: false, configured: false,
                         error: 'no NucBox ' + (streetish ? 'street index' : which)
@@ -11067,6 +11076,44 @@ function nbxRoute(req, res) {
       if (!vb) return reply(400, { ok: false, error: 'viewbox is left,top,right,bottom' });
     }
     target = nbxSearchTarget(term, said, vb);
+  } else if (which === 'table') {
+    /* The drive seconds between every two of the points, OSRM's table
+     * service (/table/v1/driving, annotations=duration), for Map view's
+     * fastest order through the held planner's doors (MV.fastestOrder; the
+     * owner, 31 Oct: "it would be helpful if it optimized the
+     * shortest/fastest route"). The router's own free-flow time, as the
+     * on-time hint's (the owner's decision of 20 Oct): not a pace, not
+     * minutes made of miles. ADVICE ONLY: the page says which order is
+     * fastest and draws it; no figure, end, GPS drop or finish reads it. */
+    var tq = nbxQuery(req, ['points']);
+    if (tq.error) return reply(400, { ok: false, error: tq.error });
+    var tpts = String(tq.q.points || '').split(';').map(nbxPoint);
+    if (tpts.length < 2 || tpts.length > NBX_TABLE_POINTS_MAX
+        || tpts.some(function (x) { return !x; })) {
+      return reply(400, { ok: false, error: 'points is two to ' + NBX_TABLE_POINTS_MAX
+                                            + ' lon,lat pairs, ;-separated' });
+    }
+    target = NBX.route + '/table/v1/driving/' + tpts.join(';') + '?annotations=duration';
+    if (nbxCache.has(target)) return reply(200, nbxCache.get(target));
+    return nbxAsk(target, function (err, body) {
+      if (err) return reply(502, { ok: false, unreachable: true, error: err });
+      var rows = body && body.code === 'Ok' && Array.isArray(body.durations) ? body.durations : null;
+      // Square, one row per point asked, each cell a number of seconds or
+      // null (OSRM's word for a point it could not reach, which the page's
+      // fastestOrder refuses). Anything else is not a table.
+      if (!rows || rows.length !== tpts.length || !rows.every(function (r) {
+        return Array.isArray(r) && r.length === tpts.length && r.every(function (x) {
+          return x === null || (typeof x === 'number' && isFinite(x) && x >= 0);
+        });
+      })) {
+        return reply(502, { ok: false, unreachable: true,
+                            error: 'the NucBox router answered '
+                                   + String((body && body.code) || '?').slice(0, 40) + ', not a table' });
+      }
+      var tout = { ok: true, seconds: rows };
+      nbxRemember(target, tout);
+      reply(200, tout);
+    });
   } else {
     var rq = nbxQuery(req, ['points']);
     if (rq.error) return reply(400, { ok: false, error: rq.error });
@@ -11139,7 +11186,9 @@ function nbxRoute(req, res) {
       // not a pace and not minutes from distance, both still refused
       // (Settled: "Do not re-time an offer at a pace"). One use is allowed:
       // the on-time hint beside the pair line (onTimeHint). Map view does
-      // not read it.
+      // not read it. (The planner's fastest order reads the router's time
+      // off the TABLE relay above, and says only which order is faster and
+      // by how many of the router's minutes — the owner, 31 Oct.)
       out = { ok: true, metres: r0.distance, snaps: snaps, line: nbxLine(r0.geometry),
               duration: typeof r0.duration === 'number' && isFinite(r0.duration) && r0.duration >= 0
                 ? r0.duration : null };

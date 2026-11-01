@@ -1106,6 +1106,207 @@
     return [pick].concat(via, [to]).map(function (p) { return [p.lat, p.lon]; });
   }
 
+  /* --- every planner door on the map, and the fastest order through them ---
+   *
+   * The owner, on the snap of 31 Oct 21:46 (an Uber batch and its add-on held,
+   * the Trip Planner scrolled, two pickups and three dropoffs on the phone):
+   * "the addresses do not need to be linked to the order, it just needs to be
+   * mapped. Though it would be helpful if it optimized the shortest/fastest
+   * route". Until then a planner dropoff reached the map only as one order's
+   * end (holding.dropoff) or, with ONE order in the car, as a door listed
+   * before that end (heldDrops); with two in the car, or with no end filed
+   * ("3 dropoffs: end not guessed"), the other doors were drawn nowhere.
+   *
+   * plannerDoors(stops, done): every stop of the held planner that has a door
+   * — a street that starts with its house number, so searchPlan asks it as a
+   * door, never a chain's name or a town — pickups and dropoffs alike, in the
+   * planner's order, whoever's they are: { q, kind, label, name, of, done }.
+   * `q` is the line as pickupKey and dropKey make one (the pickups' is
+   * exactly pickupKey, so a pickup the server marked visited — `done`, the
+   * panel's visitedNow() — is told by the same key); `label` is P1, P2, ...
+   * and D1, D2, ... by kind in the APP'S order, which is how the fastest
+   * order is said ("P1 P2 D3 D1 D2"). `of` is the order a pickup's card names
+   * (server.js ownPickups), absent where none does. DRAWING AND ADVICE ONLY:
+   * none of these is posted, `found`, a figure's stop, the GPS drop's door or
+   * an order's end. */
+  function plannerDoors(stops, done) {
+    var seen = {}, n = { pickup: 0, dropoff: 0 };
+    var visited = Array.isArray(done) ? done : [];
+    var out = [];
+    (Array.isArray(stops) ? stops : []).forEach(function (s) {
+      if (!s || (s.kind !== 'pickup' && s.kind !== 'dropoff')) return;
+      if (typeof s.street !== 'string' || !/^\d+[A-Za-z]? \S/.test(s.street.trim())) return;
+      var q = s.kind === 'pickup' ? pickupKey(s) : dropKey(s);
+      // One stop listed twice (one store, "2 orders" read as two headers) is
+      // one door to pin and one place to call at.
+      if (!q || seen[s.kind + '|' + q]) return;
+      seen[s.kind + '|' + q] = true;
+      n[s.kind] += 1;
+      var d = { q: q, kind: s.kind, label: (s.kind === 'pickup' ? 'P' : 'D') + n[s.kind],
+                name: plannerName(s.name) || null, done: visited.indexOf(q) !== -1 };
+      if (s.of) d.of = s.of;
+      out.push(d);
+    });
+    return out;
+  }
+
+  /* The fastest order to call at `stops` from the car, under the one rule a
+   * delivery cannot break: a pickup before every dropoff it may be for.
+   *
+   *   - A dropoff whose order is known (`of`) waits for the pickups of that
+   *     order AND for every pickup whose order is not known — the unknown one
+   *     may be its.
+   *   - A dropoff whose order is not known (most of them: the planner does
+   *     not say whose a stop is) waits for EVERY pickup not yet done. That is
+   *     conservative on purpose: it can only cost the advice a faster order
+   *     that is legal, never offer one that delivers food not yet collected.
+   *
+   * `cost` is a square matrix, row and column 0 the car and i + 1 the stop
+   * `stops[i]`: the router's drive seconds (OSRM's table) or, the router
+   * down, straight-line metres (crowMatrix) — never minutes made of miles
+   * (Settled: no pace). The route is open: it ends at its last stop. Up to
+   * FASTEST_EXACT_MAX stops every order is tried (8! is 40,320 paths, a few
+   * milliseconds, and the rule cuts most of them early); past that, the
+   * nearest legal stop each time, then 2-opt (a stretch reversed wherever
+   * that is shorter and still legal) until nothing improves. Returns
+   * { order, cost, appCost } — `order` the stops' indexes, `appCost` the
+   * planner's own order from the car — or null for no stops or a matrix
+   * with a hole in it (OSRM's null for a point it could not reach). */
+  var FASTEST_EXACT_MAX = 8;
+
+  function fastestOrder(stops, cost) {
+    var n = Array.isArray(stops) ? stops.length : 0;
+    if (!n || !Array.isArray(cost) || cost.length !== n + 1) return null;
+    for (var r = 0; r <= n; r++) {
+      if (!Array.isArray(cost[r]) || cost[r].length !== n + 1) return null;
+      for (var c = 0; c <= n; c++) {
+        if (typeof cost[r][c] !== 'number' || !isFinite(cost[r][c]) || cost[r][c] < 0) return null;
+      }
+    }
+    // needs[i]: the stops that must come before stop i.
+    var needs = stops.map(function (s, i) {
+      if (!s || s.kind !== 'dropoff') return [];
+      var out = [];
+      stops.forEach(function (p, j) {
+        if (j === i || !p || p.kind !== 'pickup') return;
+        if (s.of && p.of && p.of !== s.of) return;
+        out.push(j);
+      });
+      return out;
+    });
+    var legal = function (order) {
+      var at = [];
+      order.forEach(function (s, k) { at[s] = k; });
+      return order.every(function (s) {
+        return needs[s].every(function (j) { return at[j] < at[s]; });
+      });
+    };
+    var pathCost = function (order) {
+      var t = 0, from = 0;
+      order.forEach(function (s) { t += cost[from][s + 1]; from = s + 1; });
+      return t;
+    };
+    var app = stops.map(function (s, i) { return i; });
+    var best = null, bestCost = Infinity;
+    if (n <= FASTEST_EXACT_MAX) {
+      var used = [], path = [];
+      var walk = function (from, sofar) {
+        if (sofar >= bestCost) return;
+        if (path.length === n) { best = path.slice(); bestCost = sofar; return; }
+        for (var i = 0; i < n; i++) {
+          if (used[i]) continue;
+          if (!needs[i].every(function (j) { return used[j]; })) continue;
+          used[i] = true;
+          path.push(i);
+          walk(i + 1, sofar + cost[from][i + 1]);
+          path.pop();
+          used[i] = false;
+        }
+      };
+      walk(0, 0);
+    } else {
+      // The nearest legal stop each time...
+      var left = app.slice(), from = 0, done = [];
+      best = [];
+      while (left.length) {
+        var pick = -1;
+        for (var k = 0; k < left.length; k++) {
+          var s = left[k];
+          if (!needs[s].every(function (j) { return done[j]; })) continue;
+          if (pick === -1 || cost[from][s + 1] < cost[from][left[pick] + 1]) pick = k;
+        }
+        var chosen = left.splice(pick, 1)[0];
+        best.push(chosen);
+        done[chosen] = true;
+        from = chosen + 1;
+      }
+      bestCost = pathCost(best);
+      // ...then 2-opt, a stretch reversed while that is shorter and legal.
+      var better = true;
+      while (better) {
+        better = false;
+        for (var a = 0; a < n - 1 && !better; a++) {
+          for (var b = a + 1; b < n && !better; b++) {
+            var trial = best.slice(0, a).concat(best.slice(a, b + 1).reverse(), best.slice(b + 1));
+            var tc = pathCost(trial);
+            if (tc < bestCost - 1e-9 && legal(trial)) { best = trial; bestCost = tc; better = true; }
+          }
+        }
+      }
+    }
+    if (!best) return null;
+    return { order: best, cost: bestCost, appCost: pathCost(app) };
+  }
+
+  // Straight-line metres between every two points, for fastestOrder with the
+  // router down: an order by distance, said in miles, never in minutes.
+  function crowMatrix(points) {
+    return points.map(function (a) {
+      return points.map(function (b) { return crowMiles(a, b) * METRES_PER_MILE; });
+    });
+  }
+
+  /* Below these the app's order is called fastest: a minute of the router's
+     free-flow time, or a tenth of a mile in a straight line, is inside what
+     either can tell apart (the road's lights, a pin's ±25 m). Chosen, not
+     measured. */
+  var ORDER_SAME_S = 60;
+  var ORDER_SAME_M = 0.1 * 1609.344;
+
+  /* The words for it, after the map's caption: "fastest order: P1 P2 D3 D1
+     D2 · saves 6 min vs the app's", or "app's order is already fastest".
+     `by` is 'road' for the router's drive seconds — OSRM's own duration, the
+     same free-flow figure the on-time hint stands on (server.js, the owner's
+     decision of 20 Oct), not a pace — or 'line' for straight-line metres,
+     said in miles and as straight-line: "shortest order (straight line): ...
+     · 1.2 mi less than the app's". `stops` are plannerDoors' left ahead, in
+     the app's order. Null with nothing to say. */
+  function orderWords(stops, res, by) {
+    if (!res || !Array.isArray(stops) || !stops.length) return null;
+    var road = by === 'road';
+    var saves = res.appCost - res.cost;
+    var same = res.order.every(function (s, i) { return s === i; });
+    if (same || saves < (road ? ORDER_SAME_S : ORDER_SAME_M)) {
+      return road ? 'app\'s order is already fastest'
+        : 'app\'s order is already shortest (straight line)';
+    }
+    var labels = res.order.map(function (s) { return stops[s].label; }).join(' ');
+    return road
+      ? 'fastest order: ' + labels + ' · saves ' + Math.round(saves / 60) + ' min vs the app\'s'
+      : 'shortest order (straight line): ' + labels + ' · '
+        + (saves / METRES_PER_MILE).toFixed(1) + ' mi less than the app\'s';
+  }
+
+  /* A cache key for one set of stops from one car: each point to five
+     decimals (about a metre), the car's to three (about 100 m) — a car that
+     has moved less than that is asked nothing again. Map view keeps the
+     answer under it, so the NucBox is asked once per stop set per move, not
+     once per walk. */
+  function orderKey(car, pts) {
+    var f = function (p, d) { return Number(p.lat).toFixed(d) + ',' + Number(p.lon).toFixed(d); };
+    return (car ? f(car, 3) : '-') + '>' + pts.map(function (p) { return f(p, 5); }).join(';');
+  }
+
   /* The caption with the runs' words after it: "<said> · route to corner",
      each note once, `said` alone with none. captionChip reads the sentence
      through them (routeTail).
@@ -4410,6 +4611,26 @@
       });
   };
 
+  /* The router's drive seconds between every two of `points` (OSRM's table
+     service, relayed by server.js as /api/nbx/table), for the planner's
+     fastest order (fastestOrder) and nothing else: { seconds } — a square
+     matrix, row i the drive from points[i] — or { why }. The relay checks
+     the shape; a hole (OSRM's null for a point it could not reach) is left
+     for fastestOrder to refuse. Through the cache like every question. */
+  NbxSearch.prototype.table = function (points) {
+    var path = '/table?points=' + points.map(function (p) {
+      return Number(p.lon).toFixed(5) + ',' + Number(p.lat).toFixed(5);
+    }).join(';');
+    return this.get(path).then(function (body) {
+      if (body.unreachable) return { why: 'unreachable', error: body.unreachable };
+      if (body.refused) return { why: 'refused', error: body.refused };
+      if (!Array.isArray(body.seconds) || body.seconds.length !== points.length) {
+        return { why: 'shape' };
+      }
+      return { seconds: body.seconds };
+    });
+  };
+
   var METRES_PER_MILE = 1609.344;
 
   /* How far OSRM may move a point to reach a road before the road figure is
@@ -5127,6 +5348,11 @@
            // ...the doors passed, and the dashed leg through those ahead.
            DROP_NEAR_MI: DROP_NEAR_MI, DROP_LEFT_MI: DROP_LEFT_MI,
            dropPassStep: dropPassStep, dropsAhead: dropsAhead, detourOnward: detourOnward,
+           // ...and every planner door mapped, the fastest order through
+           // them said (the owner, 31 Oct).
+           plannerDoors: plannerDoors, fastestOrder: fastestOrder, crowMatrix: crowMatrix,
+           orderWords: orderWords, orderKey: orderKey, FASTEST_EXACT_MAX: FASTEST_EXACT_MAX,
+           ORDER_SAME_S: ORDER_SAME_S, ORDER_SAME_M: ORDER_SAME_M,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
            placeWords: placeWords, placeNamed: placeNamed, namedFeature: namedFeature,
            placeQuery: placeQuery, pickPlace: pickPlace, PLACE_KINDS: PLACE_KINDS,

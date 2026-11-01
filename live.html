@@ -832,6 +832,13 @@
   /* ...and ✓ on a pickup the car has called at (visitPickups in server.js),
      at the faded dot's strength. */
   #liveMap .mv-done { opacity: .55; }
+  /* ...and each stop's place in the fastest order through the held planner
+     (drawMap's planRun; the owner, 31 Oct): a small sky-blue disc above and
+     to the right of its pin, so the pin's own P or D stays readable. */
+  #liveMap .mv-plan-n { display: flex; align-items: center; justify-content: center;
+                        font: 700 11px/1 'DejaVu Sans', sans-serif; color: #0b0d10;
+                        background: #38bdf8; border-radius: 50%; border: 0;
+                        pointer-events: none; }
   /* Drawn for a driver, not for a desk: the popups on this panel are read at
      arm's length and dismissed with a bluetooth mouse. */
   #liveMap .leaflet-popup-content { font-size: 13px; line-height: 1.45; }
@@ -6859,6 +6866,17 @@
       d.key = dropPassKey(d);
       d.passed = dropsPassed[d.key] === 'passed';
     });
+    /* ...and EVERY door on the held planner, whoever's it is (MV.plannerDoors;
+       the owner on the snap of 31 Oct: "the addresses do not need to be
+       linked to the order, it just needs to be mapped. Though it would be
+       helpful if it optimized the shortest/fastest route"): searched by the
+       walk (plannerRun), pinned where no mark above already stands for it,
+       and the fastest order through those still ahead said and drawn.
+       ADVICE AND DRAWING ONLY: never in `names`, so never posted, never
+       `found`, never a figure's stop, the GPS drop's door or an order's end.
+       Guarded for a map-view.js from before it. */
+    var planDoors = holdingNow && plan && MV && MV.plannerDoors && MV.fastestOrder
+      ? MV.plannerDoors(plan, done) : [];
     /* ...and where the held order's run starts when no card's fix starts it
        (between offers, or a card that came up with none): the live fix,
        kept per leg and per ROUTE_MOVE_M (MV.routeFrom), so the run goes car
@@ -6944,7 +6962,7 @@
              tapped: { pickup: !!tapped, dropoff: !!o.dropoff && o.dropoffFrom === 'popup' },
              held: held, heldPlace: heldPlace,
              heldPicks: heldPicks, donePicks: donePicks, names: names,
-             heldDrops: heldDrops,
+             heldDrops: heldDrops, planDoors: planDoors,
              // The two cards the line is measured with: this one, whose fix
              // is where the car was when it came up, and the one the order in
              // the car came from, whose own fix and distance its end is
@@ -7007,6 +7025,11 @@
                // ...and the batched trip's other doors the run goes through.
                + (heldDrops.length ? '>d' + heldDrops.map(function (d) {
                    return (d.q || '?') + (d.passed ? '✓' : ''); }).join('>') : '')
+               // ...and every planner door, in the app's order, and which of
+               // them are behind the car: a read that adds, heals or moves
+               // one walks again.
+               + (planDoors.length ? '>pd' + planDoors.map(function (d) {
+                   return d.label + '=' + d.q + (d.done ? '✓' : ''); }).join('>') : '')
                // ...and the order of the run through both: a planner read
                // that places both ends moves the run under the same places.
                + (runs ? '>' + runs.runs.map(function (r) {
@@ -7153,6 +7176,131 @@
      once `gone()` says the walk was left. `measuring` is told just before
      the router is asked. Map view's walk and the card's both ask here. */
   var WALK_LEFT = { left: true };
+
+  /* --- every planner door mapped, and the fastest order through them -------
+     (the owner on the snap of 31 Oct 21:46: "the addresses do not need to be
+     linked to the order, it just needs to be mapped. Though it would be
+     helpful if it optimized the shortest/fastest route").
+
+     Each of want.planDoors gets a point: the mark this walk already has for
+     it — a held pickup's pin by its pickupKey, the held end's or ②'s by its
+     street, a batched door the ladder placed — else its door on the NucBox
+     in the held card's disc (② 's where ①'s has none), the door only. An
+     answer that is only a general area (MV.dropPoint's `approx`) is drawn
+     faded "≈" and is NOT a stop of the order: approximate points are
+     drawing only, never a figure, and "saves 6 min" through a guess would be
+     one. Then, with the car's point and every stop still ahead placed at its
+     door, the router's drive seconds between them (mapNbx.table, OSRM's table
+     service through server.js), else — the router down or refusing —
+     straight-line metres (MV.crowMatrix), and MV.fastestOrder under the
+     pickups-first rule. Kept per stop set and car (MV.orderKey, the car to
+     about 100 m) in `planOrderKept`, so the NucBox is asked once per set and
+     move, not once per walk; the road to draw is runLine's pieces of three,
+     through NbxSearch's cache. Router down: straight lines and the
+     straight-line words, nothing said about the NucBox (the caption already
+     says when it is down).
+
+     Resolves { doors, line, pts, words, order } — `doors` each with `at`,
+     `pinned` (another mark stands there already) and `n`, its place in the
+     fastest order (1, 2, ...), absent for a stop not in it — or null with
+     nothing to draw, or WALK_LEFT. NEVER the server's: nothing here is
+     posted, `found`, a figure, the armed end, the GPS drop or a finish. */
+  var planOrderKept = {};
+  var PLAN_ORDERS_KEPT = 12;
+  async function plannerRun(want, found, here, nbx, gone, ladDrops) {
+    var doors = (want.planDoors || []).map(function (d) { return Object.assign({}, d); });
+    if (!doors.length || !mapNbx) return null;
+    var j = mapJudge(want, found, here);
+    var street = function (t) {
+      return typeof t === 'string' ? t.split(',')[0].toLowerCase().replace(/[\s,.]+/g, ' ').trim() : '';
+    };
+    var ok = function (p) { return !!p && isFinite(p.lat) && isFinite(p.lon); };
+    var disc = (MV.discFor && (MV.discFor(want.heldCard) || MV.discFor(want.heldCard2))) || null;
+    for (var i = 0; i < doors.length; i++) {
+      var d = doors[i];
+      var pin = null;
+      if (d.kind === 'pickup') {
+        var hp = (j.heldPicks || []).concat(j.donePicks || []).filter(function (p) {
+          return p.q === d.q && p.at && !p.off && !j.wrong[p.q];
+        })[0];
+        if (hp) pin = hp.at;
+      } else {
+        // (Not a pin the map calls wrong, or its card refuses: a door no
+        // one vouches for is searched again rather than borrowed.)
+        if (want.held && ok(j.held) && !j.wrong[want.held] && !j.off.held
+            && street(want.held) === street(d.q)) {
+          pin = j.held;
+        } else if (want.held2 && ok(j.held2) && !j.wrong[want.held2] && !j.off.held2
+                   && street(want.held2) === street(d.q)) {
+          pin = j.held2;
+        } else {
+          var ld = (ladDrops || []).filter(function (x) {
+            return x.q === d.q && x.at && !x.at.approx;
+          })[0];
+          if (ld) pin = ld.at;
+        }
+      }
+      if (pin) { d.at = { lat: pin.lat, lon: pin.lon }; d.pinned = true; continue; }
+      if (d.done || !nbx.search || !disc) continue;
+      var res = await mapNbx.place(d.q, disc, { streets: nbx.streets, car: here || want.carNow });   // eslint-disable-line no-await-in-loop
+      if (gone()) return WALK_LEFT;
+      var pt = MV.dropPoint ? MV.dropPoint(res) : (res && res.at ? res.at : null);
+      if (pt) d.at = pt;
+    }
+    var placed = doors.filter(function (x) { return ok(x.at); });
+    if (!placed.length) return null;
+    var out = { doors: doors, line: null, pts: null, words: null, order: null };
+    var ahead = doors.filter(function (x) { return !x.done; });
+    var car = here || want.carNow;
+    // The order only with the car and every stop ahead at its DOOR: a stop
+    // left out, or a guessed area in, would be an order through some other
+    // trip.
+    if (!car || ahead.length < 2 || !ahead.every(function (x) { return ok(x.at) && !x.at.approx; })) {
+      return out;
+    }
+    var pts = ahead.map(function (x) { return x.at; });
+    var okey = MV.orderKey(car, pts);
+    var res2 = Object.prototype.hasOwnProperty.call(planOrderKept, okey) ? planOrderKept[okey] : undefined;
+    if (res2 === undefined) {
+      var tab = nbx.route && mapNbx.table ? await mapNbx.table([car].concat(pts)) : null;
+      if (gone()) return WALK_LEFT;
+      var r = tab && tab.seconds ? MV.fastestOrder(ahead, tab.seconds) : null;
+      res2 = r ? Object.assign({ by: 'road' }, r) : null;
+      if (!res2) {
+        r = MV.fastestOrder(ahead, MV.crowMatrix([car].concat(pts)));
+        res2 = r ? Object.assign({ by: 'line' }, r) : null;
+      }
+      // Kept only when the router answered: a straight-line order is asked
+      // of the router again at the next walk, so a NucBox back up is used.
+      if (res2 && res2.by === 'road') {
+        planOrderKept[okey] = res2;
+        var keys = Object.keys(planOrderKept);
+        for (var k = 0; k < keys.length - PLAN_ORDERS_KEPT; k++) delete planOrderKept[keys[k]];
+      }
+    }
+    if (!res2) return out;
+    res2.order.forEach(function (s, pos) { ahead[s].n = pos + 1; });
+    out.order = res2;
+    out.words = MV.orderWords(ahead, res2, res2.by);
+    out.pts = [car].concat(res2.order.map(function (s) { return pts[s]; }));
+    out.line = nbx.route ? await mapNbx.runLine(out.pts) : null;
+    if (gone()) return WALK_LEFT;
+    return out;
+  }
+
+  /* Whether the planner's run adds anything to the map, so the map and its
+     caption change only where it does (and stay byte for byte as they were
+     on every trip whose doors are all already marked and driven in the
+     app's order): a door no other mark stands for, or an order faster than
+     the app's by more than MV's ORDER_SAME_S / ORDER_SAME_M. */
+  function plannerRunShown(pr) {
+    if (!pr) return false;
+    var unpinned = pr.doors.some(function (d) { return d.at && !d.pinned; });
+    var o = pr.order;
+    var faster = !!o && !o.order.every(function (s, i) { return s === i; })
+      && o.appCost - o.cost >= (o.by === 'road' ? MV.ORDER_SAME_S : MV.ORDER_SAME_M);
+    return unpinned || faster;
+  }
 
   /* A corner that gave no meeting to route to: a point on either of its
      streets (MV.NbxSearch.cornerStreet), in `card`'s disc, nearest `car`;
@@ -7890,8 +8038,20 @@
           notes.push('\u2461: \u2248 from DoorDash\'s map');
         }
       }
+      /* ...and every planner door, and the fastest order through them
+         (plannerRun; the owner, 31 Oct). Last, so it never delays the
+         figure's own questions, and said after the caption only where it
+         adds something to the map (plannerRunShown). */
+      var planRun = null;
+      if (want.planDoors && want.planDoors.length && mapNbx && MV.fastestOrder) {
+        planRun = await plannerRun(want, found, here, nbx, gone, ladDrops);
+        if (planRun === WALK_LEFT) return;
+        if (!plannerRunShown(planRun)) planRun = null;
+        if (planRun && planRun.words) notes.push(planRun.words);
+      }
       drawMap(want, found, here, true, road, heldRoad, jobRoad,
-              { notes: notes, pickRoad: pickRoad, areas: areas, drops: ladDrops });
+              { notes: notes, pickRoad: pickRoad, areas: areas, drops: ladDrops,
+                planRun: planRun });
       if (want.refit) { fitFor = cardId; fitWanted = false; }
     } finally {
       mapBusy = false;
@@ -8820,6 +8980,51 @@
       var onward = MV.detourOnward ? MV.detourOnward(pick, gap.to, held, aheadAt) : null;
       runLine(onward || [[pick.lat, pick.lon], [gap.to.lat, gap.to.lon]],
               { color: '#c084fc', dashArray: '2 9', opacity: .95, className: 'mv-detour' });
+    }
+
+    /* ...and every door on the held planner, whoever's it is, and the
+       fastest order through those still ahead (ladder.planRun, plannerRun;
+       the owner, 31 Oct: "it just needs to be mapped. Though it would be
+       helpful if it optimized the shortest/fastest route"). A door no mark
+       above stands for is a RING — green for a pickup, amber for a dropoff,
+       context the driver is committed to, as the held order's marks are —
+       lettered as the app lists it (P2, D3), faded "≈" where only its
+       general area was found. Each stop of the fastest order carries its
+       place in it as a small sky-blue number beside its pin, and the order
+       is drawn in the same sky blue, thin and dashed under the run's amber,
+       along the roads where the router drew it. DRAWING AND ADVICE ONLY: not
+       the end (its D is the held order's own), not a figure's stop, not
+       posted, not what the GPS drop is armed by — and the armed end, the
+       finishes and every figure are exactly as they were without it. */
+    var planRun = ladder.planRun || null;
+    if (planRun) {
+      if (planRun.pts && planRun.pts.length >= 2) {
+        L.polyline(planRun.line || planRun.pts.map(function (p) { return [p.lat, p.lon]; }),
+                   { color: '#38bdf8', weight: 3, opacity: .9, dashArray: '6 6',
+                     interactive: false, lineCap: 'round', lineJoin: 'round',
+                     className: 'mv-plan-run' + (planRun.line ? ' mv-road' : '') })
+          .addTo(mapLayer);
+      }
+      planRun.doors.forEach(function (d) {
+        if (!d.at) return;
+        var approx = !!d.at.approx;
+        if (!d.pinned) {
+          put(d.at, d.kind === 'pickup' ? '#17c964' : '#f5a524',
+              (approx ? '≈ the area of ' : '') + (d.kind === 'pickup'
+                ? 'a pickup on the Trip Planner' : 'a dropoff on the Trip Planner')
+                + (d.done ? ' — collected' : ''),
+              [d.name, String(d.q || '').replace(/,$/, '')].filter(Boolean).join(' · '), true,
+              approx ? '≈' : d.done ? '✓' : d.label,
+              { faded: approx || !!d.done, aside: !!d.done });
+        }
+        if (d.n) {
+          L.marker([d.at.lat, d.at.lon], {
+            interactive: false, keyboard: false,
+            icon: L.divIcon({ className: 'mv-plan-n', html: String(d.n),
+                              iconSize: [16, 16], iconAnchor: [-6, 22] })
+          }).addTo(mapLayer);
+        }
+      });
     }
 
     /* How each place was found, AFTER everything above and guarded, so that

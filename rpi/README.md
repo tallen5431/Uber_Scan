@@ -6762,6 +6762,32 @@ held order would be the wrong attribution `planner_destination` exists to
 refuse, and plotting them on their own is a new map feature, which this was
 not asked to build.
 
+...and since the owner asked for it (the snap of 31 Oct: "the addresses do not
+need to be linked to the order, it just needs to be mapped. Though it would be
+helpful if it optimized the shortest/fastest route"), the PANEL's Map view
+plots every planner stop that has a door, whoever's it is, without filing it
+on anyone (map-view.js `plannerDoors`, live.html `plannerRun`): each searched
+on the NucBox in the held card's disc, pinned as a ring lettered as the app
+lists it (P2, D3) where no other mark already stands for it, faded "≈" where
+only its general area was found. With the car's fix and every stop still
+ahead placed at its door, the router's table of drive seconds between them
+(OSRM's `/table/v1/driving`, relayed as `/api/nbx/table`, at most ten points)
+picks the fastest order a delivery can drive — a pickup before any dropoff it
+may be for; where the planner does not say whose a dropoff is, which is
+nearly always, every pickup not yet collected before every dropoff — tried
+exhaustively up to eight stops, else nearest-first then 2-opt
+(`fastestOrder`). The order is drawn as a thin dashed sky-blue line with each
+stop's place in it beside its pin, and said after the caption: "fastest
+order: P1 P2 D3 D1 D2 · saves 6 min vs the app's", or "app's order is already
+fastest". The minutes are the router's own free-flow drive time, the figure
+the on-time hint already stands on; with the router down the order is by
+straight line and said in miles, "shortest order (straight line): … · 1.2 mi
+less than the app's", never as minutes. Kept per set of stops and car
+position (to ~100 m), so the NucBox is asked once per set and move. Advice and
+drawing only: no stop of it is posted or becomes an order's end, the GPS drop,
+a finish or a figure, and the map and caption are unchanged on a trip whose
+doors are all already marked and whose app order is already the fastest.
+
 #### A read that outlived the window it went out in
 
 `digest()` judged the window by `time.time()` at the moment the reading LANDED.

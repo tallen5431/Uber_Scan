@@ -6116,7 +6116,13 @@ try:
                 ('/api/nbx/route?points=-84.5,33.9;../../etc', 'points is two to five'),
                 ('/api/nbx/route?points=-84.5,33.9;-84.4,33.8&alternatives=true',
                  'refused: alternatives'),
-                ('/api/nbx/table?points=-84.5,33.9;-84.4,33.8', 'no such NucBox endpoint'),
+                # (The table is relayed since the planner's fastest order, 31
+                # Oct: its own refusals in place of "no such endpoint".)
+                ('/api/nbx/table?points=-84.5,33.9', 'points is two to 10'),
+                ('/api/nbx/table?points=' + ';'.join(['-84.5,33.9'] * 11), 'points is two to 10'),
+                ('/api/nbx/table?points=-84.5,33.9;-84.4,33.8&annotations=distance',
+                 'refused: annotations'),
+                ('/api/nbx/table?points=-84.5,33.9;../../etc', 'points is two to 10'),
                 ('/api/nbx/cross?a=x&b=y&limit=5', 'refused: limit'),
                 ('/api/nbx/cross?a=x&a=y&b=z', 'given more than once: a'),
                 ('/api/nbx/cross?a=x', 'a and b must each be'),
@@ -6138,6 +6144,28 @@ try:
         except urllib.error.HTTPError as e:
             _s = e.code
         eq('...and it answers GET only', _s, 405)
+
+        # The router's table (the owner, 31 Oct: the planner's fastest order,
+        # map-view.js fastestOrder): the drive seconds between every two
+        # points, square, cached; a refusal is the router not answering.
+        _n = len(_asked())
+        _tq = '/api/nbx/table?points=-84.5,33.9;-84.4,33.8;-84.45,33.85'
+        _s, _r = _nbx(_b1, _tq)
+        _sec = _r.get('seconds') or []
+        ok_('[fastest order] the table relay answers the drive seconds between every two points, '
+            'square, nothing on the diagonal (%r)' % (_r,),
+            _s == 200 and _r.get('ok') is True and len(_sec) == 3
+            and all(len(row) == 3 for row in _sec)
+            and all(_sec[i][i] == 0 for i in range(3)) and _sec[0][1] > _sec[0][2] > 0)
+        _nbx(_b1, _tq)
+        eq('[fastest order] ...asked of the NucBox once, the second from the cache',
+           [x for x in _asked()[_n:] if x.startswith('/table/v1/driving/')],
+           ['/table/v1/driving/-84.5,33.9;-84.4,33.8;-84.45,33.85?annotations=duration'])
+        _s, _r = _nbx(_b1, '/api/nbx/table?points=-84.6,34.1;-84.4,33.8')
+        eq('[fastest order] ...and a router refusing the table is the router not answering, '
+           'which the page falls back to straight lines on',
+           (_s, _r.get('unreachable'), 'not a table' in str(_r.get('error', ''))),
+           (502, True, True))
 
         # A NucBox that does not answer in time is said, with the time.
         _t0 = time.time()
