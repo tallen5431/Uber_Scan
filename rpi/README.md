@@ -6735,6 +6735,21 @@ between two numbers a digit apart the one read more often (`doorReads` on the
 stop). The merged list is also run against itself, so a hold already holding
 the slips heals at its next read.
 
+**The add-on's door off the list the hold keeps.** On the same snap the
+add-on's card printed "<Name> Place Bivd, <Town>" with no house number, the
+held list's last dropoff was "<n> <Name> Place Bivd", and the add-on still
+had no end: every read that showed its door was a ⌖ press, which with two
+orders held is the chooser's, and the chooser closed unanswered. So after
+each planner read merges into the hold, the merged list is asked by each
+card's street alone (assemble.js `heldPlanEnds`, server.js `heldPlanFiled`):
+an order whose end the screen has not filed is given the one dropoff on its
+own card's street — exactly one there, not another order's filed end, no
+other card naming that street, the same town — filed as an unprompted
+planner door is, cue `cardStreet`. Never by position: a card that printed no
+street is given nothing, even with one dropoff left over. And once every
+order of the app has an end the screen filed, the planner's "N dropoffs:
+end not guessed" is not said any more — it was true of no order in the car.
+
 **On the glass.** The driving screen lists the stops in the card between
 offers, when it otherwise holds only the phase and the notice (not while the
 rig is aiming), one line each — `▸ Dropoff by 4:18 · Pat Q. ·

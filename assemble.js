@@ -3357,6 +3357,100 @@
     return out;
   }
 
+  /* ---------- the end of a two-order trip: the owner's snap of 31 Oct, 21:46 --
+   *
+   * An Uber order held ($18.68, two customers from one store), then an add-on
+   * taken onto its trip ("+$9.57 / +16 min (+2.8 mi)", its card's end "<Name>
+   * Place Bivd, <Town>" — a street with no house number). The planner the
+   * hold keeps, merged and slip-healed (mergePlanner, slipStop), listed two
+   * pickups and three dropoffs, the LAST of them "<n> <Name> Place Bivd,
+   * <Town>"; the first order's end was already filed (by cardStreet) as
+   * another of them. And the panel said "3 dropoffs: end not guessed", and ②
+   * "<Name> Place Bivd · no house no.", for the whole of the delivery.
+   *
+   * Why nothing filed it: every read that showed the add-on's door was a ⌖
+   * PRESS (the journal's planner rows, all `asked: true`), and a pressed
+   * read with two held is the chooser's — streetCues answers unprompted reads
+   * only — and the chooser closed with nobody picking. The pressed pages were
+   * merged into the hold all the same (the owner's ask of 24 Oct), so the
+   * door was on the list the hold keeps, and nothing ever asked that list.
+   *
+   * So the list the hold keeps is asked, after every planner read merges into
+   * it, by the card's street alone — the same evidence cardStreet stands on,
+   * never a position: for each order in the car whose end the screen has NOT
+   * filed (filedEnd: its card's end only, or none), and whose card printed a
+   * street for its end (cardStreets — "Bivd" and "Blvd" both type words, so
+   * "<n> <Name> Place Bivd" and the card's "<Name> Place Blvd" are one
+   * street), the dropoffs on that street are counted, and the door is that
+   * order's when ALL of these hold:
+   *   - exactly one dropoff the list keeps is on it, read with its street
+   *     and town (two doors on the card's street are two customers, and
+   *     which is this order's the card cannot say);
+   *   - that one is not another order's filed end (sameStreet): the screen
+   *     already gave that door away;
+   *   - no other order's card names the street (two cards naming it is no
+   *     cue at all, as for cardStreet);
+   *   - the card's town does not clash with the door's (townClash);
+   *   - it is no held order's pickup (aPickupOfAny).
+   * Never by position: with the other order's end filed and ONE dropoff left
+   * unclaimed by any card's street, that dropoff is still filed only if this
+   * order's card names its street. "The last stop is the add-on's" is true of
+   * this snap, and nothing on record says Uber always lists the add-on's
+   * door last: the app orders stops by its route, not by who took what.
+   * And never over a screen-filed end, a press above all: an order that has
+   * one is not asked.
+   *
+   * `orders` every order in the car, first-taken first; `stops` the planner
+   * the hold keeps (holding()'s, merged); `ctx` {app, at}: the planner's app
+   * (only that app's orders are asked, and two of them must be held) and the
+   * read's time, which each door is filed at — rank `planner`, labelled, as
+   * a dropoff off the planner is (candidate). Returns {files, settled}:
+   * `files` [{order, d, cue: 'cardStreet'}] for server.js to file through
+   * the one road (dropoffArrived, forced), and `settled` whether every order
+   * of the app has a screen-filed end now — asked again once they are filed,
+   * since the road may still refuse one; the planner's "N dropoffs: end not
+   * guessed" is then not true of any order in the car.
+   * Read only: nothing here writes an order. */
+  function heldPlanEnds(orders, stops, ctx) {
+    var out = { files: [], settled: false };
+    var app = ctx && typeof ctx.app === 'string' ? ctx.app : null;
+    var at = ctx && typeof ctx.at === 'number' ? ctx.at : null;
+    var mine = (orders || []).filter(function (o) {
+      return o && (!app || !o.app || o.app === app);
+    });
+    if (mine.length < 2 || at === null) return out;
+    var drops = headed(stops).filter(function (s) {
+      return s.kind === 'dropoff' && s.street && s.city;
+    });
+    mine.forEach(function (o) {
+      if (filedEnd(o)) return;
+      // (Never a door from a read older than this order's Took: the list
+      // the hold keeps may be older, but the read asking it is not.)
+      if (typeof o.tookAt === 'number' && at < o.tookAt) return;
+      var streets = cardStreets(cardEndOf(o));
+      if (!streets.length) return;
+      var hits = drops.filter(function (s) {
+        var core = streetCore(s.street);
+        return !!core && streets.indexOf(core) !== -1;
+      });
+      if (hits.length !== 1) return;
+      var s = hits[0];
+      var line = addressOf(s).line || (s.street + ', ' + s.city);
+      var core = streetCore(s.street);
+      var taken = mine.some(function (x) {
+        return x !== o && (sameStreet(filedEnd(x), line) || cardHas(x, core));
+      });
+      if (taken) return;
+      var d = candidate(addressOf(s), s, { at: at }, false, false);
+      if (!d.line) d.line = line;
+      d.app = app;
+      if (townClash(o, d) || aPickupOfAny(orders.filter(Boolean), d)) return;
+      out.files.push({ order: o, d: d, cue: 'cardStreet' });
+    });
+    out.settled = mine.every(function (o) { return !!filedEnd(o); });
+    return out;
+  }
+
   /* The planner with two orders held: every dropoff a list seen whole shows,
    * read whole (street and town), as a candidate of its own — with what the
    * cues need: its key and time, the store when the list is ONE pickup and
@@ -3614,5 +3708,7 @@
            sameDoor: sameDoor, pickupSide: pickupSide, samePickup: samePickup,
            attribute: attribute, park: park, unpark: unpark, unowned: unowned,
            retryUnowned: retryUnowned,
+           // ...and the held planner's doors by the card's street (31 Oct, 21:46).
+           heldPlanEnds: heldPlanEnds,
            plannerCandidates: plannerCandidates, reOffer: reOffer };
 }));

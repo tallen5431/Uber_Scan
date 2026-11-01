@@ -682,6 +682,10 @@ function startScanner() {
             // restaurant guard (searchHeldPickup); a no-op for one already
             // asked about on this hold.
             armHeldPickups(heldNow);
+            // ...and, with two orders in the car, the list it keeps asked for
+            // an end the screen has not filed, by each card's street alone
+            // (heldPlanEnds; the owner's snap of 31 Oct, 21:46).
+            heldPlanFiled(heldNow, read.planner, plannerPage, plannedAt);
           }
           if (read.planner.keep === true) recordPlanner(read.planner, plannedAt);
         }
@@ -2255,6 +2259,52 @@ function retryPool() {
   });
   if (found.length || Assemble.unowned(assembly) !== before) {
     broadcast({ unowned: Assemble.unowned(assembly) });
+  }
+}
+
+/* The planner the order in the car keeps, asked for the ends the screen has
+ * not filed (Assemble.heldPlanEnds: the door on an order's own card street,
+ * exactly one, nobody else's), and each one found filed through the one road
+ * with cue 'cardStreet', as the pool's are (retryPool). Then, when every order
+ * of the planner's app has an end the screen filed, the planner's 'dropoffs'
+ * — "N dropoffs: end not guessed" on the panel — is said no longer, on the
+ * hold and on the line about to be broadcast: it was true of no order in the
+ * car. On 31 Oct, 21:46, it stood beside two ends for a whole delivery, one
+ * filed and one that this now files.
+ *
+ * With two orders or more held, carrying two on or off: an add-on joins its
+ * trip both ways (placeTook), and it is an add-on's end this was written
+ * for. A forced filing skips whoseDropoff's cues and chooser (force), so it
+ * is as strong as the evidence heldPlanEnds asked for and no stronger — and
+ * an open chooser over the same door is closed, as discBreak closes it: the
+ * question it asked has been answered. `planner` is the line as read,
+ * `page` its sighting (Assemble.pageOf), for the app; `now` the line's
+ * arrival. */
+function heldPlanFiled(held, planner, page, now) {
+  var orders = heldOrders(now);
+  if (orders.length < 2 || !held.planner) return;
+  var at = typeof planner.at === 'number' ? planner.at : now;
+  var app = page && page.app ? page.app : 'uber';
+  var ends = Assemble.heldPlanEnds(orders, held.planner.stops, { app: app, at: at });
+  ends.files.forEach(function (f) {
+    if (choosing && Assemble.sameStreet(choosing.d && choosing.d.line, f.d.line)) {
+      choosing = null;
+      broadcast({ chooser: null });
+    }
+    console.log('planner door on one order\'s card street only: filed by ' + f.cue);
+    var said = { dropoff: f.d, at: Date.now() };
+    dropoffArrived(said, { order: f.order, cue: f.cue });
+    if (said.dropoff) broadcast(said);
+  });
+  // (Asked again, the filings made: one the road refused leaves its order
+  // without an end, and the planner's reason stands for it.)
+  if (ends.files.length) {
+    ends = Assemble.heldPlanEnds(heldOrders(Date.now()), held.planner.stops,
+                                 { app: app, at: at });
+  }
+  if (ends.settled && held.planner && held.planner.unfiled === 'dropoffs') {
+    held.planner.unfiled = null;
+    planner.unfiled = null;
   }
 }
 

@@ -9826,6 +9826,59 @@ try:
 finally:
     stop(_qp)
 
+# The owner's snap of 31 Oct, 21:46 (names, streets and towns invented): a
+# two-customer Uber order held, its card's end "Fernhill Ct, Brookvale"; an
+# add-on onto its trip, its card's end "Kestrel Place Bivd, Brookvale" — no
+# house number; the first order's door filed off an unprompted page
+# (cardStreet); and every read that showed the add-on's door a ⌖ PRESS, which no cue asks.
+# The pressed page merged into the hold's planner all the same; the panel said
+# "3 dropoffs: end not guessed" and ② "no house no." for the whole delivery.
+# The hold's planner is now asked by the add-on's card street
+# (Assemble.heldPlanEnds): its one door there is its end, and with both ends
+# filed the planner's 'dropoffs' is said no longer.
+_ep, _eb, _ej, _eh = _cserver('trip-end', CARRY_TWO='0')
+try:
+    _took2(_eb, _card('e-a', 18.68, minutes=33.0, pickup='Juniper Wings (412 Quillon Ln)',
+                      dropoff='Fernhill Ct, Brookvale'))
+    _took2(_eb, _card('e-b', 9.57, minutes=16.0, miles=2.8, addon=True, screen='uber.addon',
+                      pickup='Lark Owl Pizza 2215 Tamsin St',
+                      dropoff='Kestrel Place Bivd, Brookvale'))
+    _say(_ppage(True, [('Jules K.', '4479 Fernhill Ct', 'Brookvale', 1334)]))
+    time.sleep(0.3)
+    _e0 = [(o.get('dropoff'), o.get('cue')) for o in _orders(_eb)]
+    _estops = [{'kind': 'pickup', 'orders': 1, 'name': 'Lark Owl Pizza', 'expectedBy': 1309,
+                'street': '2215 Tamsin St NW', 'city': 'Brookvale', 'state': 'GA', 'zip': None,
+                'line': '2215 Tamsin St NW, Brookvale', 'place': None},
+               {'kind': 'pickup', 'orders': 2, 'name': 'Juniper Wings', 'expectedBy': 1316,
+                'street': '412 Quillon Ln', 'city': 'Brookvale', 'state': 'GA', 'zip': None,
+                'line': '412 Quillon Ln, Brookvale', 'place': None}]
+    _estops += [{'kind': 'dropoff', 'orders': 1, 'name': nm, 'expectedBy': by, 'street': st,
+                 'city': 'Brookvale', 'state': 'GA', 'zip': None, 'line': st + ', Brookvale',
+                 'place': None}
+                for nm, st, by in (('Pat Q.', '4410 Fernhill Ct', 1328),
+                                   ('Jules K.', '4479 Fernhill Ct', 1334),
+                                   ('Quin C.', '212 Kestrel Place Bivd', 1344))]
+    _eat = int(time.time() * 1000)
+    _say({'sighting': {'asked': True, 'whole': True, 'titled': False, 'app': 'uber',
+                       'screen': 'uber.planner', 'page': {'top': False, 'bottom': False},
+                       'stops': _estops, 'orderCount': None, 'keep': False, 'at': _eat}},
+         {'planner': {'stops': _estops, 'unfiled': 'dropoffs', 'asked': True, 'keep': False,
+                      'ms': None, 'at': _eat}})
+    time.sleep(0.4)
+    _st = get(_eb, '/api/status')
+    eq('[trip end] a pressed planner page with both orders\' doors: the add-on\'s end is the '
+       'one door on its card\'s street ("Bivd"), cue cardStreet, the first order\'s untouched; '
+       'no chooser, and "end not guessed" is no longer said',
+       (_e0, [(o.get('dropoff'), o.get('cue')) for o in _orders(_eb)], _st.get('chooser'),
+        ((_st.get('holding') or {}).get('planner') or {}).get('unfiled'),
+        sorted((r.get('id'), r.get('cue')) for r in _rows(_ej, 'mark') if r.get('dropoff'))),
+       ([('4479 Fernhill Ct, Brookvale', 'cardStreet'), ('Kestrel Place Bivd, Brookvale', None)],
+        [('4479 Fernhill Ct, Brookvale', 'cardStreet'),
+         ('212 Kestrel Place Bivd, Brookvale', 'cardStreet')], None, None,
+        [('e-a', 'cardStreet'), ('e-b', 'cardStreet')]))
+finally:
+    stop(_ep)
+
 # ...and with carrying two ON the trip is one order to the cap: an add-on
 # joins past it, and a Took past two TRIPS puts down the trip that ends
 # soonest, every order of it, said by the trip's pay.

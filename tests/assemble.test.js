@@ -3285,6 +3285,101 @@ SEQ.forEach(function (seq) {
      'doorReads' in A.mergePlanner([full], [full], null)[0], false);
 })();
 
+/* ---- the end of a two-order trip: the owner's snap of 31 Oct, 21:46 ----
+ *
+ * A two-customer Uber order held, its card's end "Fernhill Ct, Brookvale"; an
+ * add-on onto its trip, its card's end "Kestrel Place Bivd, Brookvale" (no
+ * house number). Every read that showed the add-on's door was a press, so no
+ * cue ever asked it; the hold's planner, merged, listed three dropoffs, the
+ * first order's end filed as one of them, and the add-on's door the last.
+ * heldPlanEnds files it by the add-on's card street, and by nothing else.
+ * Names and streets invented. */
+(function () {
+  function order(id, at, more) {
+    var o = Object.assign({ id: id, acceptedAt: at, tookAt: at + 5, holdId: id + '@' + at,
+                            minutes: 40, app: 'uber', pickup: null, deliverBy: null,
+                            dropoff: null, dropoffScanned: false }, more || {});
+    o.seenAs = { dropoff: o.dropoff, tookAt: o.tookAt };
+    A.fieldsOf(o);
+    return o;
+  }
+  function st(kind, name, by, street, city) {
+    return { kind: kind, orders: kind === 'pickup' ? 1 : 1, name: name, expectedBy: by,
+             street: street, city: city, state: city ? 'GA' : null, zip: null,
+             line: street && city ? street + ', ' + city : null, place: null };
+  }
+  var PLAN = [st('pickup', 'Lark Owl Pizza', 1309, '2215 Tamsin St NW', 'Brookvale'),
+              st('pickup', 'Juniper Wings', 1316, '412 Quillon Ln', 'Brookvale'),
+              st('dropoff', 'Pat Q.', 1328, '4410 Fernhill Ct', 'Brookvale'),
+              st('dropoff', 'Jules K.', 1334, '4479 Fernhill Ct', 'Brookvale'),
+              st('dropoff', 'Quin C.', 1344, '212 Kestrel Place Blvd', 'Brookvale')];
+  function trip(addCard, rootMore) {
+    var root = order('r', 1000, Object.assign({ dropoff: 'Fernhill Ct, Brookvale',
+                                                pickup: 'Juniper Wings (412 Quillon Ln)' },
+                                              rootMore || {}));
+    // The first order's end, filed off the planner as server.js files it.
+    var mine = { line: '4479 Fernhill Ct, Brookvale', street: '4479 Fernhill Ct',
+                 city: 'Brookvale', at: 4000, asked: false, labelled: 'dropoff',
+                 planner: true, screen: 'uber.planner' };
+    A.file(root, mine, A.dropoff(root, mine, null), null);
+    var add = order('x', 5000, { addOn: true, of: root.holdId, pickup: 'Lark Owl Pizza 2215 Tamsin St',
+                                 dropoff: addCard === undefined ? 'Kestrel Place Bivd, Brookvale'
+                                   : addCard });
+    return [root, add];
+  }
+  function ends(orders, plan, at) {
+    var r = A.heldPlanEnds(orders, plan || PLAN, { app: 'uber', at: at || 9000 });
+    return [r.files.map(function (f) { return [f.order.id, f.d.line, f.cue]; }), r.settled];
+  }
+  var t = trip();
+  eq('[planEnd] the premise: the first order\'s end is filed, the add-on\'s is its card\'s',
+     [t[0].fields.dropoff.from, t[1].fields.dropoff.from], ['planner', 'card']);
+  eq('[planEnd] the snap: the one dropoff on the add-on\'s card street ("Bivd" for "Blvd") '
+     + 'is its end', ends(t),
+     [[['x', '212 Kestrel Place Blvd, Brookvale', 'cardStreet']], false]);
+  // Filed as server.js files it, through the one road.
+  var f = A.heldPlanEnds(t, PLAN, { app: 'uber', at: 9000 }).files[0];
+  var said = A.dropoff(f.order, f.d, null);
+  A.file(f.order, f.d, said, null);
+  eq('[planEnd] ...filed at rank planner, with the stop\'s customer and time; and then every '
+     + 'order has its end (the panel\'s "end not guessed" goes) and nothing more is offered',
+     [said.to, t[1].dropoff, t[1].fields.dropoff.from, t[1].fields.customer.value,
+      t[1].fields.expectedBy.value, ends(t)],
+     ['hold', '212 Kestrel Place Blvd, Brookvale', 'planner', 'Quin C.', 1344, [[], true]]);
+  eq('[planEnd] two doors on the card\'s street: no end (the card cannot say which)',
+     ends(trip(), PLAN.concat([st('dropoff', 'Ana T.', 1350, '218 Kestrel Place Blvd',
+                                  'Brookvale')]))[0], []);
+  var given = trip(undefined, { dropoff: 'Customer dropoff' });
+  A.file(given[0], { line: '212 Kestrel Place Blvd, Brookvale', street: '212 Kestrel Place Blvd',
+                     city: 'Brookvale', at: 6000 }, { to: 'hold', from: 'press' }, null);
+  eq('[planEnd] the one door on its street the other order\'s filed end: not this order\'s',
+     ends(given)[0], []);
+  eq('[planEnd] another order\'s card naming the street too: no cue',
+     ends(trip(undefined, { dropoff: 'Kestrel Place Blvd & Fernhill Ct, Brookvale' }))[0], []);
+  eq('[planEnd] never by position: an add-on card with no street ("Customer dropoff") and one '
+     + 'dropoff left unclaimed is no end',
+     ends(trip('Customer dropoff'), PLAN.filter(function (s) { return s.name !== 'Pat Q.'; })),
+     [[], false]);
+  eq('[planEnd] ...nor a card street the list has no door on, the last stop notwithstanding',
+     ends(trip('Wexmoor Way, Brookvale'))[0], []);
+  eq('[planEnd] ...nor a door in another town than the card printed',
+     ends(trip('Kestrel Place Bivd, Ashgrove'))[0], []);
+  eq('[planEnd] ...nor a door read without its town',
+     ends(trip(), PLAN.slice(0, 4).concat([st('dropoff', 'Quin C.', 1344,
+                                              '212 Kestrel Place Blvd', null)]))[0], []);
+  eq('[planEnd] ...nor off a read older than the add-on\'s Took',
+     ends(trip(), PLAN, 4500)[0], []);
+  var pressed = trip();
+  A.file(pressed[1], { line: '12 Elm Ct, Brookvale', street: '12 Elm Ct', city: 'Brookvale',
+                       at: 6000 }, { to: 'hold', from: 'press' }, null);
+  eq('[planEnd] ...nor over an end the screen filed, a press above all',
+     ends(pressed), [[], true]);
+  eq('[planEnd] ...nor with one order of the planner\'s app: a DoorDash order beside is not '
+     + 'asked', ends([trip()[1], order('d', 2000, { app: 'doordash',
+                                                     dropoff: 'Kestrel Place Blvd, Brookvale' })]),
+     [[], false]);
+})();
+
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
   : '\nAll ' + pass + ' assembler checks passed');
 process.exit(fail ? 1 : 0);
