@@ -12235,6 +12235,17 @@ try:
     # orderDown(), as Drop's reply and the GPS drop do, since a hold that
     # ended went with only half of its names cleared.
     _live = open(os.path.join(ROOT, 'live.html'), encoding='utf-8').read()
+    # The owner's snaps of 31 Oct: an Uber and a DoorDash order at once, the
+    # DoorDash one with no end read. The caption names the app and what is
+    # drawn for it, and ②'s map label is drawing only: searched for the walk,
+    # never among `names` (so never `found`, posted or a figure's point).
+    eq('two apps, the DoorDash end not read: the caption says so, and its map label is '
+       'drawn only (never among the names searched for pins)',
+       ("'DoorDash dropoff not read yet'" in _live,
+        "drawn ≈ from DoorDash\\'s map" in _live,
+        bool(re.search(r"var names = \[pickQ, o\.dropoff, held, held2\]", _live)),
+        'guess2: guess2' in _live and 'areas.guess2' in _live),
+       (True, True, True, True))
     eq('live.html forgets the destination and the stops in one place, at every '
        'moment it forgets either',
        (len(re.findall(r"(?<!var )\bdestSaid = ''", _live)),

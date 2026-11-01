@@ -2412,7 +2412,8 @@
      holds the two SCREENS lists equal. */
   var SCREENS = ['uber.offer', 'uber.addon', 'uber.planner', 'uber.pickupNav',
                  'uber.nav', 'uber.finding', 'uber.delivered', 'tripRadar', 'dd.offer',
-                 'dd.finding', 'dd.switch', 'dd.placePopup', 'dd.delivered', 'unknown'];
+                 'dd.finding', 'dd.switch', 'dd.placePopup', 'dd.delivered', 'dd.pickup',
+                 'dd.deliver', 'unknown'];
   var SCREEN_DD_SWITCH = /switch to dash|busier zone|don.?t switch/i;
   var SCREEN_PLANNER = /^[^A-Za-z0-9]{0,3}(?:trip ?planner|address|stop new requests|way ?[A-Za-z]? ?bill)\b/i;
   var SCREEN_RADAR = /\btrip ?radar\b/i;
@@ -2448,6 +2449,22 @@
   var SCREEN_DD_ELSEWHERE = new RegExp(
     'pick ?up from\\b|current task|pause orders|decline this offer|this dash so far'
     + '|dash summary|continue dashing', 'i');
+  // DoorDash's screens of an order taken: dd.deliver and dd.pickup. What each
+  // rests on (the owner's snaps of 31 Oct): see offer_parser.py.
+  var SCREEN_DD_DELIVER = /\bdeliver(?:ing)? to\b|(?:^|\n)[^A-Za-z0-9\n]{0,3}dropoff[^A-Za-z0-9\n]{0,3}(?:\n|$)/i;
+  var SCREEN_DD_OWN = /current task|pause orders|\d ?min to complete|this offer\b|this dash\b|\d ?min start\b/i;
+  var SCREEN_DD_PICKUP = /^[^A-Za-z0-9]{0,4}pick ?up for\b/i;
+  var DD_TOWN_ZIP = /^[A-Za-z][A-Za-z .'-]{1,30},? ?[A-Z]{2} ?\d{5}(?:-\d{4})?$/;
+  var DD_NAV_BAR = /(?:\d|\b[lLIO])[\dlI]? ?min ?[©Oo0@] ?[\dO]{0,3}(?:[.,]\d)? ?mi\b/i;
+  function ddTownAfterDeliver(text) {
+    if (DD_NAV_BAR.test(text)) return false;
+    var lines = text.split(/[\r\n]+/).map(normalize).filter(Boolean);
+    for (var i = 0; i < lines.length; i++) {
+      var m = /\bdeliver(?:ing)? to\b(.*)$/i.exec(lines[i]);
+      if (m) return /[A-Za-z]{2}/.test(m[1]) && i + 1 < lines.length && DD_TOWN_ZIP.test(lines[i + 1]);
+    }
+    return false;
+  }
   var SCREEN_PICKUP_NAV = /note from business|pick ?up in store|pick ?up order/i;
   var SCREEN_NAV = new RegExp(
     '\\bdeliver(?:ing)? to\\b|dropoff type|meet at (?:the )?door|complete delivery'
@@ -2520,6 +2537,12 @@
     var done = deliveredScreen(text);
     if (done !== null && done.app === 'doordash') return 'dd.delivered';
     if (done !== null) return 'uber.delivered';
+    if (SCREEN_DD_DELIVER.test(text) && (SCREEN_DD_OWN.test(text) || ddTownAfterDeliver(text))) {
+      return 'dd.deliver';
+    }
+    if (text.split(/[\r\n]+/).some(function (l) { return SCREEN_DD_PICKUP.test(normalize(l)); })) {
+      return 'dd.pickup';
+    }
     if (SCREEN_DD_ELSEWHERE.test(text)) return 'unknown';
     if (SCREEN_PICKUP_NAV.test(text)) return 'uber.pickupNav';
     if (SCREEN_NAV.test(text)) return 'uber.nav';

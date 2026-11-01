@@ -10350,7 +10350,11 @@ def _guesses():
         held = [h for h in json.load(open(os.path.join(os.path.dirname(sj),
                                                        'holding.json')))['orders']
                 if h.get('id') == 'gl-t']
-        out['took'] = ([h.get('dropoff') for h in held], '418 Fable' in json.dumps(held))
+        # (31 Oct: the label now rides onto the hold as `dropoffGuess`, for
+        # the two-order run to draw ② by — never as its end.)
+        out['took'] = ([h.get('dropoff') for h in held],
+                       [h.get('dropoffGuess') for h in held],
+                       '418 Fable' in json.dumps([dict(h, dropoffGuess=None) for h in held]))
     finally:
         stop(sp)
     return out
@@ -10366,8 +10370,9 @@ eq('...and with an order in the car the pair row says the same with it as withou
 ok_('...and so does the reading\'s stack (no figure moves)', _gl.get('stack same'))
 eq('...an Uber card\'s label is not kept', _gl.get('uber'), None)
 eq('...nor one on a DoorDash card that named its own dropoff', _gl.get('own end'), None)
-eq('...and a Took on a guessed card holds no end from it',
-   _gl.get('took'), ([None], False))
+eq('...and a Took on a guessed card holds no end from it: the label rides on as its '
+   'dropoffGuess alone (31 Oct), nowhere else on the hold',
+   _gl.get('took'), ([None], [{'line': '418 Fable Ave NE', 'from': 'dd map label'}], False))
 
 # --- whether each NucBox service is answering ----------------------------------
 #
@@ -11018,6 +11023,57 @@ try:
        .get('dropoff'), '9 Elm Ct, Smyrna, GA 30080')
 finally:
     stop(_kp)
+
+# --- the owner's snaps of 31 Oct: an Uber and a DoorDash order at once --------
+# Carrying two on. Every read files by its screen's app onto that app's one
+# order; a town only never goes over a door; DoorDash's pickup screen is the
+# DoorDash order's pickup; its card's map label rides onto its hold for the
+# run. Invented names and streets.
+def _town(app, screen):
+    return {'dropoff': {'found': True, 'line': 'Fabletown, GA 30199', 'street': None,
+                        'city': 'Fabletown', 'state': 'GA', 'zip': '30199', 'asked': True,
+                        'labelled': None, 'ms': 10, 'app': app, 'screen': screen,
+                        'expectedBy': None, 'at': int(time.time() * 1000)}}
+
+
+_xp, _xb, _xj, _xh = _cserver('crossapp', CARRY_TWO='1', CHOOSER_MS='1500')
+try:
+    _took2(_xb, _card('x-u', 21.01, minutes=40.0, pickup='Fable Grill (120 Quillon Pkwy NW)',
+                      dropoff='Larkspur Dr NW & Tansy Cv NW, Fabletown'))
+    _took2(_xb, _card('x-d', 11.10, minutes=32.0, app='doordash', screen='dd.offer',
+                      pickup='Quillon Steakhouse', pickupLine='410 Quillon Parkway',
+                      mapLabel='61 Saddle Cv'))
+    _x0 = [(o.get('dropoffGuess') or {}).get('line') for o in _orders(_xb)]
+    _say(_sline('2210 Larkspur Dr NW, Fabletown', 'uber.nav', app='uber'))
+    _say(_town('uber', 'uber.nav'))
+    _x1 = [(o.get('app'), o.get('dropoff'), o.get('cue')) for o in _orders(_xb)]
+    _say(_town('doordash', 'dd.deliver'))
+    _x2 = [(o.get('app'), o.get('dropoff'), o.get('cue')) for o in _orders(_xb)]
+    _say({'pickupSeen': {'line': '410 Quillon Parkway Northwest, Fabletown',
+                         'street': '410 Quillon Parkway Northwest', 'city': 'Fabletown',
+                         'state': None, 'zip': None, 'name': 'Quillon Steakhouse',
+                         'app': 'doordash', 'screen': 'dd.pickup',
+                         'at': int(time.time() * 1000)}})
+    _xheld = json.load(open(os.path.join(os.path.dirname(_xj), 'holding.json')))
+    _xorders = (_xheld.get('orders') if isinstance(_xheld, dict) else _xheld) or []
+    _xpanel = _orders(_xb)
+finally:
+    stop(_xp)
+eq('[31 Oct] two apps: a press off Uber\'s navigation is the Uber order\'s by the app, and a '
+   'town only pressed after it does not replace its door',
+   _x1, [('uber', '2210 Larkspur Dr NW, Fabletown', 'app'), ('doordash', None, None)])
+eq('[31 Oct] ...and the same town off DoorDash\'s "Deliver to" is the DoorDash order\'s',
+   _x2, [('uber', '2210 Larkspur Dr NW, Fabletown', 'app'),
+         ('doordash', 'Fabletown, GA 30199', 'app')])
+eq('[31 Oct] DoorDash\'s pickup screen files the store\'s door as the DoorDash order\'s pickup, '
+   'and nothing on the Uber order',
+   [((o.get('fields') or {}).get('pickupAddr') or {}).get('value') for o in _xorders],
+   ['Fable Grill (120 Quillon Pkwy NW)', '410 Quillon Parkway Northwest, Fabletown'])
+eq('[31 Oct] the DoorDash card\'s map label rides onto its hold, for the run to draw (no end '
+   'read yet), and onto the panel\'s order', [(_xorders[1].get('dropoffGuess') or {}).get('line'), _x0],
+   ['61 Saddle Cv', [None, '61 Saddle Cv']])
+eq('[31 Oct] ...and the panel is not given it once a screen gave the order an end',
+   [o.get('dropoffGuess') for o in _xpanel], [None, None])
 
 shutil.rmtree(_cdir, ignore_errors=True)
 

@@ -3211,6 +3211,21 @@ class DeliveredSaid(object):
         return was is None or now - was >= DELIVERED_GAP_S
 
 
+def emit_pickup_seen(door, at=None):
+    """DoorDash's pickup screen, read while an order is held: the store's
+    door it prints (OP.dd_pickup_door), on its own line. Never a dropoff line
+    — the screen is the store's, never a customer's — and never a popup line,
+    which is about a card being screened. server.js files it as the pickup
+    of the one DoorDash order in the car, or nowhere (pickupSeenArrived), and
+    the NucBox is asked for it as for any pickup on record (pickupAsks). The
+    store's name rides along; no customer's name is read."""
+    print(json.dumps({'pickupSeen': {
+        'line': door.get('line'), 'street': door.get('street'),
+        'city': door.get('city'), 'state': door.get('state'), 'zip': door.get('zip'),
+        'name': door.get('name'), 'app': 'doordash', 'screen': 'dd.pickup',
+        'at': at if at is not None else int(time.time() * 1000)}}), flush=True)
+
+
 def emit_delivered(said, at=None):
     """The delivery app's own screen from after a delivery
     (OP.delivered_screen): its app and screen, the pay it printed and the
@@ -4685,6 +4700,7 @@ def main():
     # said once per card and address, like the dropoff line's repeat rule, and
     # again for the next card. See emit_popup.
     popup_said = None
+    pickup_said = None
     # ...and when each app's completion screen was last read: said once while
     # it stays up. See DeliveredSaid.
     delivered_said = DeliveredSaid()
@@ -4867,7 +4883,7 @@ def main():
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
         nonlocal unparsed_kept_for
-        nonlocal last_read, found_box, found_kept, popup_said
+        nonlocal last_read, found_box, found_kept, popup_said, pickup_said
         # Not merged when it was a whole-screen read — see collect().
         parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
@@ -5421,6 +5437,17 @@ def main():
                     emit_popup(popup, at=int(started * 1000))
                 log('place popup read: the %s\'s address' % (
                     'store' if popup['role'] == 'pickup' else 'customer'))
+        # ...and DoorDash's pickup screen while an order is held: the store's
+        # door, once per held list and door (emit_pickup_seen). The kind in
+        # the log, never the door.
+        ddpick = OP.dd_pickup_door(out.get('text')) if held_now is not None else None
+        if ddpick is not None:
+            pick_key = (held_now, ddpick['line'])
+            if pick_key != pickup_said:
+                pickup_said = pick_key
+                if args.json:
+                    emit_pickup_seen(ddpick, at=int(started * 1000))
+                log('DoorDash pickup screen read: the store\'s door')
         # ...and the delivery app's own screen from AFTER a delivery, card box
         # or whole screen, offer-shaped or not (its "This offer $8.95" reads as
         # a payout): once while it stays up, stamped with when its frame was

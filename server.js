@@ -447,6 +447,13 @@ function startScanner() {
           popupArrived(read.popup, Date.now());
           return;
         }
+        // DoorDash's pickup screen (rpi/scan_pi.py, emit_pickup_seen): the
+        // store's door, onto the one DoorDash order in the car as its pickup,
+        // or nowhere. See pickupSeenArrived.
+        if (read.pickupSeen) {
+          pickupSeenArrived(read.pickupSeen, Date.now());
+          return;
+        }
         // The delivery app's own screen from after a delivery (rpi/scan_pi.py,
         // emit_delivered): a put-down, or the Drop chooser, for an order of
         // that app in the car. See deliveredArrived.
@@ -999,6 +1006,41 @@ function popupArrived(p, now) {
     });
   }
   broadcast({ offer: card, popup: { role: p.role, field: said.field, line: p.line } });
+}
+
+/* DoorDash's pickup screen while orders are held (the owner's snaps of 31
+ * Oct): "Pickup for <name> / <Store> - (<branch>) / <n> <Name> Parkway /
+ * Northwest, <Town>". A STORE's door: never anyone's dropoff (the dropoff
+ * path refuses the screen, Assemble.storeScreen), and the pickup of the ONE
+ * order of its app in the car — by app, as every read with two apps in the
+ * car is filed (Assemble.attribute's `app`) — or of nobody: two DoorDash
+ * orders, or none, and nothing is filed. Onto `fields.pickupAddr` from
+ * 'label' (a role the screen printed, read after the Took) where it outranks
+ * what is there, and the NucBox asked for it (pickupAsks, armHeldPickups):
+ * the store's pin is the GPS drop's guard and the run's pickup. */
+function pickupSeenArrived(p, now) {
+  if (!p || typeof p.line !== 'string' || !p.line) return;
+  var mine = heldOrders(now).filter(function (o) { return o.app && o.app === p.app; });
+  if (mine.length !== 1) {
+    console.log('pickup screen read: ' + (mine.length ? 'two orders of its app' : 'no order of its app')
+                + ' in the car, not filed');
+    return;
+  }
+  var h = mine[0];
+  var since = typeof h.tookAt === 'number' ? h.tookAt : h.acceptedAt;
+  if (typeof p.at === 'number' && typeof since === 'number' && p.at < since) {
+    console.log('pickup screen read before the order\'s Took: not filed');
+    return;
+  }
+  var f = Assemble.fieldsOf(h);
+  var conf = (p.street ? 1 : 0) + (p.city ? 1 : 0) + (p.zip ? 1 : 0);
+  var next = { value: p.line, from: 'label', conf: conf, at: typeof p.at === 'number' ? p.at : now,
+               screen: p.screen || 'dd.pickup' };
+  if (!Assemble.outranks(next, f.pickupAddr)) return;
+  f.pickupAddr = next;
+  console.log('pickup screen read: the store\'s door filed as the ' + (p.app || '') + ' order\'s pickup');
+  saveHold(h);
+  armHeldPickups(h);
 }
 
 /* The order the driver is currently carrying, or null.
@@ -2416,7 +2458,14 @@ function dropoffArrived(read, force) {
   // or two restored with the flag off — the planner's doors are two orders'
   // and are filed on cues (attribute), never as one order's batch. Dropped
   // whole, and not said.
-  if (read.dropoff && read.dropoff.batch && heldOrders(dNow).length !== 1) {
+  // ...except beside orders of another app only (the owner's snaps of 31
+  // Oct): the batch is then the one order of its app's, as the assembler
+  // decided it (Assemble.sameAppOrders), and attribute() files it by `app`.
+  var batchMates = read.dropoff && read.dropoff.batch
+    ? heldOrders(dNow).filter(function (o) {
+      return !read.dropoff.app || !o.app || o.app === read.dropoff.app;
+    }) : [];
+  if (read.dropoff && read.dropoff.batch && batchMates.length !== 1) {
     delete read.dropoff;
     return;
   }
@@ -5490,6 +5539,10 @@ function heldForPanel(held) {
         // planner onto the order now first when the first is put down and
         // the trip goes on (setHeld), and goes when this says it went.
         plannerHeld: !!held.planner },
+        // ...and DoorDash's map label for its end while no screen has given
+        // one (the hold's `dropoffGuess`): Map view draws it, faded, "≈".
+        // Only where there is one, so every other order's shape is as it was.
+        !held.dropoff && held.dropoffGuess ? { dropoffGuess: held.dropoffGuess } : null,
         // ...and the GPS drop's state, which the in-car line on the panel
         // says. It was on /api/status alone — fetched once, at load — so a
         // panel left open never learned that a pin had armed or been refused.
@@ -11335,6 +11388,14 @@ function route(req, res) {
               // alone, and a chain's name is no place.
               pickupLine: typeof marked.pickupLine === 'string' && marked.pickupLine
                 ? marked.pickupLine : null,
+              // ...and DoorDash's map label for a card that named no dropoff
+              // (`dropoffGuess`, dropoffGuessOf), so the run with two orders
+              // in the car can draw this order's end as "≈ from DoorDash's
+              // map" until a screen gives it one (the owner, 31 Oct). Drawing
+              // only: never `dropoff`, never searched for a pin, never armed.
+              dropoffGuess: !marked.dropoff && marked.dropoffGuess
+                && typeof marked.dropoffGuess.line === 'string' && marked.dropoffGuess.line
+                ? { line: marked.dropoffGuess.line, from: marked.dropoffGuess.from || null } : null,
               // Whether this reading was one the rig would state a verdict
               // about. A doubted order in the car makes every pair judged
               // against it nonsense, and an uncosted one makes the pair's

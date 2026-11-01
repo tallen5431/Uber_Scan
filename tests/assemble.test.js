@@ -650,9 +650,11 @@ SEQ.forEach(function (seq) {
   };
   var st = A.fresh();
   eq('two orders, no cue: nobody\'s', who(st, [a, b], d()), [null, null, 'no cue']);
+  // (Two apps in the car, the read's app leaving one order: cue `app`, as
+  // strong as `only`, under its guards; the owner's snaps of 31 Oct.)
   eq('the app is a hard rule: a DoorDash screen is not an Uber order\'s',
      who(st, [a, order('dd', 5000, { app: 'doordash' })], d({ app: 'doordash' })),
-     ['dd', 'only', null]);
+     ['dd', 'app', null]);
   eq('a read older than an order\'s Took is not that order\'s',
      who(st, [a, b], d({ at: 3000 })), ['a', 'only', null]);
   eq('...and older than both is nobody\'s', who(st, [a, b], d({ at: 500 })),
@@ -669,7 +671,7 @@ SEQ.forEach(function (seq) {
   eq('...but a cue that names the one order left still decides',
      who(st, [a, dd], d(Object.assign({ expectedBy: 1171 }, two))), ['a', 'deadline', null]);
   eq('...and a list of one dropoff is that order\'s, as before',
-     who(st, [a, dd], d({ bounded: true, others: [] })), ['a', 'only', null]);
+     who(st, [a, dd], d({ bounded: true, others: [] })), ['a', 'app', null]);
   eq('the deadline cue: "Expected by" within 2 minutes of one card\'s "Deliver by"',
      who(st, [a, b], d({ expectedBy: 1207 })), ['b', 'deadline', null]);
   eq('...and not at 3 minutes', who(st, [a, b], d({ expectedBy: 1208 })),
@@ -1163,7 +1165,7 @@ SEQ.forEach(function (seq) {
       [A.attribute(A.fresh(), two, dd, { card: true }).order,
        A.attribute(A.fresh(), two, dd, { card: true }).why],
       A.attribute(A.fresh(), twoDue, due, { card: true }).cue],
-     ['only', [null, 'no cue'], 'deadline']);
+     ['app', [null, 'no cue'], 'deadline']);
 
   // The customer's popup read on its own, unpressed, on the whole screen: the
   // popup's own line files it on the card; this read files it on no order.
@@ -3051,6 +3053,115 @@ SEQ.forEach(function (seq) {
   eq('[snap 30 Oct] the list seen whole files both doors and pools none (it pooled two: '
      + '"2 dropoffs read · whose?")', [w[0].dropoff, w[1].dropoff, A.unowned(st2)],
      [NW, '1433 Fernbrook Way, Marietta', 0]);
+})();
+
+/* ---- the owner's snaps of 31 Oct: an Uber and a DoorDash order at once ----
+ * Uber held with its Trip Planner's door; DoorDash held, no end yet. A press
+ * over DoorDash's "Deliver to <name> / <Town>, GA <zip>" was typed Uber's
+ * navigation and its town filed over the Uber door; every planner read after
+ * was "outranked by press". Invented names, streets and towns. */
+(function () {
+  function hold(o) { A.fieldsOf(o); return o; }
+  function pair() {
+    var u = hold({ id: 'u', acceptedAt: 1000, tookAt: 1005, holdId: 'u@1000', app: 'uber',
+                   card: { legs: 1, multiOrder: false }, pickup: 'Fable Grill (120 Quillon Pkwy NW)',
+                   dropoff: 'Larkspur Dr NW & Tansy Cv NW, Fabletown', dropoffScanned: false });
+    u.seenAs = { dropoff: u.dropoff, tookAt: u.tookAt };
+    var door = { found: true, line: '2210 Larkspur Dr NW, Fabletown', street: '2210 Larkspur Dr NW',
+                 city: 'Fabletown', asked: false, labelled: 'dropoff', at: 1500,
+                 screen: 'uber.planner', app: 'uber' };
+    A.file(u, door, A.dropoff(u, door, null), null);
+    var d = hold({ id: 'd', acceptedAt: 3000, tookAt: 3005, holdId: 'd@3000', app: 'doordash',
+                   card: { legs: 1, multiOrder: false, stops: 2 }, pickup: 'Quillon Steakhouse',
+                   pickupLine: '410 Quillon Parkway', dropoff: null, dropoffScanned: false });
+    d.seenAs = { dropoff: null, tookAt: d.tookAt };
+    return [u, d];
+  }
+  var TOWN = { found: true, line: 'Fabletown, GA 30199', street: null, city: 'Fabletown',
+               state: 'GA', zip: '30199', asked: true, at: 4000 };
+  function arrive(st, orders, d) {
+    var a = A.attribute(st, orders, d);
+    var said = a.order ? A.dropoff(a.order, d, null) : null;
+    if (said && said.to === 'hold') A.file(a.order, d, said, st);
+    return [a.order ? a.order.app : null, a.cue, said ? said.why : a.why];
+  }
+
+  // The classifier: the press's screen is DoorDash's now, by its own words.
+  var bare = OP.screenType('Deliver to Lee R.\nFabletown, GA 30199');
+  eq('[snap 31 Oct] "Deliver to <name>" over a town and ZIP is DoorDash\'s delivery',
+     [bare.app, bare.screen], ['doordash', 'dd.deliver']);
+
+  // HEAD's road, the screen typed Uber's: the press is the Uber order's by
+  // the app, and a town only never goes over its door.
+  var t = pair(), st = A.fresh();
+  eq('[snap 31 Oct] a town only pressed off a screen typed Uber\'s: the Uber order\'s by the '
+     + 'app, and refused over its door', arrive(st, t, Object.assign({}, TOWN,
+       { screen: 'uber.nav', app: 'uber' })), ['uber', 'app', 'a town only']);
+  eq('[snap 31 Oct] ...the Uber door stays, and DoorDash gets nothing',
+     [t[0].dropoff, t[0].fields.dropoff.from, t[1].dropoff],
+     ['2210 Larkspur Dr NW, Fabletown', 'label', null]);
+  // ...and typed DoorDash's: the DoorDash order's, filling its blank.
+  var t2 = pair();
+  eq('[snap 31 Oct] the same press off DoorDash\'s screen: the DoorDash order\'s by the app',
+     arrive(A.fresh(), t2, Object.assign({}, TOWN, { screen: 'dd.deliver', app: 'doordash' })),
+     ['doordash', 'app', 'blank']);
+  eq('[snap 31 Oct] ...a town only on the DoorDash order, the Uber door untouched',
+     [t2[1].dropoff, t2[0].dropoff], ['Fabletown, GA 30199', '2210 Larkspur Dr NW, Fabletown']);
+  // ...and a street-level read replaces a town only, unprompted included.
+  var door2 = { found: true, line: '61 Saddle Cv, Fabletown, GA 30199', street: '61 Saddle Cv',
+                city: 'Fabletown', asked: false, labelled: 'dropoff', at: 5000, nav: true,
+                screen: 'dd.deliver', app: 'doordash' };
+  eq('[snap 31 Oct] a door read later replaces the DoorDash order\'s town',
+     arrive(A.fresh(), t2, door2), ['doordash', 'app', 'over a town']);
+  eq('[snap 31 Oct] ...its end now the door', t2[1].dropoff, '61 Saddle Cv, Fabletown, GA 30199');
+  // A pressed town over a pressed door: still never.
+  var t3 = pair();
+  var pressedDoor = Object.assign({}, door2, { asked: true, nav: false, labelled: null,
+                                               screen: 'uber.nav', app: 'uber',
+                                               line: '2210 Larkspur Dr NW, Fabletown' });
+  arrive(A.fresh(), t3, pressedDoor);
+  eq('[snap 31 Oct] a later press of a town only does not replace a pressed door',
+     arrive(A.fresh(), t3, Object.assign({}, TOWN, { screen: 'uber.nav', app: 'uber', at: 6000 })),
+     ['uber', 'app', 'a town only']);
+  eq('[town only] what has a street and what has not',
+     ['2210 Larkspur Dr NW, Fabletown', 'Larkspur Dr NW & Tansy Cv NW, Fabletown', 'Tansy Creek Bivd',
+      'Fabletown, GA 30199', 'GA 30199', 'to Lee R Fabletown, GA 30199', 'Fable Parking Deck']
+       .map(A.hasStreet), [true, true, true, false, false, false, false]);
+
+  // DoorDash's pickup screen is a store's: no dropoff for either order.
+  var t4 = pair();
+  var pick = { found: true, line: '410 Quillon Parkway Northwest, Fabletown',
+               street: '410 Quillon Parkway Northwest', city: 'Fabletown', asked: true, at: 4000,
+               screen: 'dd.pickup', app: 'doordash' };
+  eq('[snap 31 Oct] a press over DoorDash\'s pickup screen files on neither order',
+     [A.dropoff(t4[1], pick, null).why, A.dropoff(t4[0], pick, null).why, A.storeScreen(null, pick)],
+     ['a pickup screen', 'a pickup screen', 'a pickup screen']);
+  var unpressed = A.sighting(A.fresh(), t4, { at: 4000, asked: false, whole: true, app: 'doordash',
+    screen: 'dd.pickup', page: { top: false, bottom: false },
+    stops: [{ kind: 'dropoff', line: pick.line, street: pick.street, city: 'Fabletown' }] }, 4000);
+  eq('[snap 31 Oct] ...nor unpressed (navCandidate refuses the screen)', unpressed.candidates.length, 0);
+  ok_('[snap 31 Oct] the DoorDash pickup screen is typed so', OP.screenType(
+    'Pickup for Lee R.\nQuillon Steakhouse - (0042\n- FABLETOWN GA)\n410 Quillon Parkway\n'
+    + 'Northwest, Fabletown').screen === 'dd.pickup');
+
+  // The Uber Trip Planner with a DoorDash order also held: decided as with
+  // the Uber order alone (one page, its one dropoff), filed by the app.
+  var t5 = pair(), st5 = A.fresh();
+  t5[0].fields.dropoff = null; t5[0].dropoff = 'Larkspur Dr NW & Tansy Cv NW, Fabletown';
+  t5[0].dropoffScanned = false; A.fieldsOf(t5[0]); t5[0].fields.dropoff = A.cardFields(t5[0], 1000).dropoff;
+  var page = pageOf('Trip Planner\nPickup • 1 order\nFable Grill\nExpected by 7:17 PM\nAddress\n'
+    + '120 Quillon Parkway\nNorthwest, Fabletown, GA 30199\nView details\nDropoff • 1 order\n'
+    + 'Lee R.\nExpected by 7:54 PM\nAddress\n2210 Larkspur Dr NW\nFabletown, GA\nView details\n'
+    + 'Stop New Requests', 4500, false);
+  var c5 = A.sighting(st5, t5, page, 4500).candidates;
+  eq('[snap 31 Oct] an Uber planner with a DoorDash order held too: its door is a candidate, '
+     + 'the app on it', c5.map(function (c) { return [c.line, c.app]; }),
+     [['2210 Larkspur Dr NW, Fabletown', 'uber']]);
+  eq('[snap 31 Oct] ...filed on the Uber order by the app', arrive(st5, t5, c5[0]),
+     ['uber', 'app', 'over the card']);
+  eq('[snap 31 Oct] ...and never on the DoorDash order', t5[1].dropoff, null);
+  eq('[snap 31 Oct] same-app pairs keep the old road (no one-order shortcut)',
+     A.sameAppOrders([t5[0], Object.assign({}, t5[1], { app: 'uber' })], page), null);
 })();
 
 console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'

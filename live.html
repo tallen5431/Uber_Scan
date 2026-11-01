@@ -6828,6 +6828,16 @@
     // can be drawn, and one through the first alone ignores an order in the
     // car (mapRefusal says so).
     var noEnd2 = !!second && !second.dropoff;
+    /* ...and, for that second order with no end yet, DoorDash's map label for
+       it (the hold's `dropoffGuess`, carried from its card at ✓ Took; the
+       owner, 31 Oct: "being able to route the drop off points for them is
+       most important"): searched by the walk in its card's disc and drawn
+       faded "≈" with a dashed leg from the first order's end. NOT in
+       `names`: never `found`, never posted, never a figure's point, never
+       armed. `app2` says whose app it is, for the caption: "DoorDash
+       dropoff not read yet". */
+    var guess2 = noEnd2 && MV && MV.guessOf ? MV.guessOf(second) : null;
+    var app2 = second ? (second.app || null) : null;
     /* ...and with ONE order in the car whose planner lists more than one
        dropoff — a batched Uber trip, one pickup and two doors (the owner's
        snap of 24 Oct, 03:03: the run went car -> D past the first door) —
@@ -6912,6 +6922,8 @@
              heldArea2: held2 && !second.endPinned && second.endArea ? second.endArea : null,
              heldOnto2: !!(held2 && second.addOn && second.of && second.of === heldId),
              runs: runs, noEnd2: noEnd2, carNow: carNow,
+             guess2: guess2, app2: app2,
+             guessCard2: guess2 ? (second.card || null) : null,
              // The number each order goes by on the pins: ① and ② by holdId.
              heldNs: heldList.reduce(function (m, x) { m[x.holdId] = x.n; return m; }, {}),
              // The card is part of the key: two cards naming the same places
@@ -6927,6 +6939,8 @@
              key: names.join('|') + '#' + (o.id || '') + '@' + (held || '')
                // ...and DoorDash's map label, which arrives on a later line.
                + (guess ? '\u2248g' + guess : '')
+               // ...and ②'s, carried on its hold.
+               + (guess2 ? '\u2248g2' + guess2 : '')
                // ...and its place, learnt for the same end text.
                + (heldPlace ? '[' + heldPlace : '')
                // ...and the server's pin for it, learnt on a beat (serverEnd).
@@ -7741,6 +7755,21 @@
           if (jr && jl.note && !(pickArea && !dropOk)) notes.push('trip: ' + jl.note);
         }
       }
+      /* ②'s end, not read yet, by DoorDash's map label (want.guess2): a
+         door or area in its own card's disc, ALWAYS approximate (MV.dropPoint),
+         drawn faded "≈" with a dashed leg from ①'s end. Drawing only. */
+      if (want.guess2 && want.guessCard2 && nbx.search && mapNbx && mapNbx.place && MV.dropPoint) {
+        var g2disc = MV.discFor(want.guessCard2);
+        var g2res = g2disc ? await mapNbx.place(want.guess2, g2disc,
+                                                { streets: nbx.streets, car: here || want.carNow })
+          : null;
+        if (gone()) return;
+        var g2pt = MV.dropPoint(g2res);
+        if (g2pt) {
+          areas.guess2 = { lat: g2pt.lat, lon: g2pt.lon, approx: true, guess: true };
+          notes.push('\u2461: \u2248 from DoorDash\'s map');
+        }
+      }
       drawMap(want, found, here, true, road, heldRoad, jobRoad,
               { notes: notes, pickRoad: pickRoad, areas: areas, drops: ladDrops });
       if (want.refit) { fitFor = cardId; fitWanted = false; }
@@ -8412,6 +8441,18 @@
       put(areas.held2, '#f5a524', '≈ the area order \u2461 in your car is going to — '
           + bandSaid(areas.held2), want.held2, true, '≈', { faded: true });
     }
+    // ...and ②'s end by DoorDash's map label, no screen having given one
+    // (want.guess2): faded "≈", a dashed leg to it from ①'s end (or the car).
+    if (areas.guess2) {
+      put(areas.guess2, '#f5a524', '≈ where DoorDash\'s map labels order \u2461\'s customer — '
+          + 'a best guess, not the door', want.guess2, true, '≈', { faded: true });
+      var g2from = held || here || want.carNow;
+      if (g2from) {
+        runLine([[g2from.lat, g2from.lon], [areas.guess2.lat, areas.guess2.lon]],
+                { color: '#f5a524', opacity: .55, weight: 3, dashArray: '6 8',
+                  className: 'mv-held mv-guess' });
+      }
+    }
     if (!drop && areas.drop) {
       put(areas.drop, '#f5a524', '≈ the area this one is dropped in — '
           + bandSaid(areas.drop), want.dropoff, false, '≈',
@@ -8908,7 +8949,11 @@
       : 'nothing in the car to compare this against';
     // ...and with two in the car, the second's end too: a figure through
     // the first alone would leave an order in the car out of the run.
-    if (want.noEnd2) return '② has no address on record — ⌖ Scan reads it off your phone';
+    if (want.noEnd2) {
+      return (want.app2 === 'doordash' ? 'DoorDash dropoff not read yet'
+        : '② has no address on record')
+        + (want.guess2 ? ' — ② drawn ≈ from DoorDash\'s map' : ' — ⌖ Scan reads it off your phone');
+    }
     // ...and a map-view.js from before the run through both (sw.js may
     // serve one), which has no way to put the two ends in an order.
     if (want.held2 && !want.runs) return 'order of stops unknown — no figure';

@@ -699,5 +699,23 @@ if _was['POPUP_STATE_ZIP'] is not None:
            P.POPUP_STATE_ZIP.match(c), _was['POPUP_STATE_ZIP'].match(c)))], [])
 
 
+# DoorDash's pickup screen (the owner's snaps of 31 Oct): the store's door
+# after "Pickup for <name>", its type and quadrant spelled out and wrapped onto
+# the next line with the town; scan_pi sends it as the DoorDash order's pickup
+# (emit_pickup_seen). Python only: the scanner is its one reader. Invented.
+eq('dd_pickup_door: the door wrapped over two lines, the store\'s name without its branch',
+   P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse - (0042\n- FABLETOWN GA)\n'
+                    '410 Quillon Parkway\nNorthwest, Fabletown\n@ Drink'),
+   {'line': '410 Quillon Parkway Northwest, Fabletown', 'street': '410 Quillon Parkway Northwest',
+    'city': 'Fabletown', 'state': None, 'zip': None, 'name': 'Quillon Steakhouse'})
+eq('dd_pickup_door: ...its town line torn by the reader keeps the street alone',
+   (P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse - (0042\n410 Quillon Parkway\n'
+                     'Northwest, Fable >own') or {}).get('line'), '410 Quillon Parkway')
+eq('dd_pickup_door: the task screen (no door) and Uber\'s navigation give none',
+   [P.dd_pickup_door('Pickup for Lee R.\nby 7:26 PM - Quillon Steakhouse\nCurrent task\n'
+                     'Deliver to Lee R.\nThis offer $11.10'),
+    P.dd_pickup_door('o= 4min \u00a9 2mi \u2014\nDeliver to Lee R.\n2210 Larkspur Dr NW')],
+   [None, None])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad else '\nAll %d python parser checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -270,6 +270,37 @@
     return !!x && x === y;
   }
 
+  /* A TOWN ONLY: the owner's snaps of 31 Oct. An Uber and a DoorDash order in
+   * the car, the Uber order's end its Trip Planner's door; a press over
+   * DoorDash's "Deliver to <name> / <Town>, GA <zip>" (the DoorDash
+   * customer's town, typed Uber's navigation then) filed "<Town>, GA <zip>"
+   * over that door — a press replaces anything — and every planner read of
+   * the door after it was "outranked by press". So an end with a street on
+   * it (hasStreet) is never replaced by one without (a town, a town and ZIP,
+   * a name), a press included; and an end that is a town only is replaced by
+   * any read with a street on it. A town only may still fill a blank or ride
+   * over a card's town: the server never searches it for a door ("no house
+   * number") nor arms the GPS drop by it, and the map draws it as an area at
+   * most. `hasStreet`: the part before the first comma has a house number
+   * and a word, a corner's "&", or ends on a street's type or quadrant. */
+  function hasStreet(line) {
+    if (typeof line !== 'string') return false;
+    var head = line.split(',')[0].replace(/\s+/g, ' ').trim();
+    if (!head) return false;
+    if (/^\d+[A-Za-z]? +[A-Za-z]{2}/.test(head) || /\S\s*&\s*\S/.test(head)) return true;
+    var w = head.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(' ').filter(Boolean);
+    if (w.length < 2) return false;
+    var typed = function (x) { return STREET_SUFFIX.test(x) || BATCH_STREET_WORDS.test(x); };
+    var last = w[w.length - 1];
+    if (QUADRANT.test(last) && w.length > 2 && typed(w[w.length - 2])) return true;
+    return typed(last) && !QUADRANT.test(last);
+  }
+
+  // A read with no street on it: its street field empty and its line none.
+  function townOnly(d) {
+    return !!d && typeof d.line === 'string' && !!d.line.trim() && !d.street && !hasStreet(d.line);
+  }
+
   /* Whether `a` is `b` with digits read that `b` lost off the front of its
    * house number: the same street after the number, the same town, and a's
    * number longer and ending in b's ("4416 Fable Dr NW" over "16 Fable Dr
@@ -356,7 +387,10 @@
    * the label; dropoff() holds a press to the same two (its rule 5). */
   function storeScreen(held, d) {
     if (!d) return null;
-    if (d.screen === 'uber.pickupNav') return 'a pickup screen';
+    // ...and DoorDash's pickup screen ("Pickup for <name>", the store, its
+    // door: offer_parser's dd.pickup; the owner's snaps of 31 Oct), the same
+    // for either app's order: a store's door, never where anyone goes.
+    if (d.screen === 'uber.pickupNav' || d.screen === 'dd.pickup') return 'a pickup screen';
     return heldPickup(held, d) ? 'a pickup' : null;
   }
 
@@ -498,7 +532,18 @@
     }
     if (held) {
       var cur = fieldsOf(held).dropoff;
+      // A town only over an end with a street on it: never (hasStreet). And
+      // an end that is a town only gives way to any read with a street.
+      var bare = townOnly(d);
+      if (bare && cur && hasStreet(String(cur.value))) {
+        out.why = 'a town only';
+        return out;
+      }
       var why = outranks(field(d.line, out.from, addressConf(d), d.at, d.screen, d.key), cur);
+      if (!why && !bare && out.from !== 'seen' && cur && typeof cur.value === 'string'
+          && !hasStreet(cur.value) && hasStreet(d.line)) {
+        why = 'over a town';
+      }
       // A batch's last door (batchPlan) is filed over anything the screen
       // gave unprompted — a navigation screen or a planner read before the
       // list showed both doors may have filed the FIRST customer's — and over
@@ -766,7 +811,7 @@
       }
       return out;
     }
-    if (d.screen === 'uber.nav' || d.screen === 'uber.planner') {
+    if (d.screen === 'uber.nav' || d.screen === 'uber.planner' || d.screen === 'dd.deliver') {
       var since = typeof held.tookAt === 'number' ? held.tookAt : held.acceptedAt;
       out.why = typeof d.at !== 'number' || d.at < since ? 'before the Took'
         : d.app && held.app && d.app !== held.app ? 'another app'
@@ -775,7 +820,7 @@
         : null;
       if (!out.why) {
         out.to = 'hold';
-        out.cue = d.screen === 'uber.nav' ? 'nav' : 'planner';
+        out.cue = d.screen === 'uber.planner' ? 'planner' : 'nav';
       }
       return out;
     }
@@ -807,7 +852,7 @@
     if (card.heldCard || card.accepted === true) return false;
     if ((orders || []).some(function (o) { return o && o.id === card.id; })) return false;
     if (d.app && card.app && d.app !== card.app) return false;
-    return d.screen !== 'uber.nav' && d.screen !== 'uber.planner';
+    return d.screen !== 'uber.nav' && d.screen !== 'uber.planner' && d.screen !== 'dd.deliver';
   }
 
   /* ---------- a place popup, read while a card is screened -----------------
@@ -2128,12 +2173,40 @@
     // The orders in the car as a list: one is decided exactly as below, two
     // by sightingMany.
     if (Array.isArray(held)) {
-      return held.length < 2 ? sighting(st, held[0] || null, s, now)
-        : sightingMany(st, held, s, now);
+      if (held.length < 2) return sighting(st, held[0] || null, s, now);
+      // Orders of two apps in the car (the owner's snaps of 31 Oct): a
+      // screen that names its app is about that app's order alone, so with
+      // ONE order of it held it is decided exactly as with that order alone
+      // — the Trip Planner's one dropoff, its lone dropoff, its batch, the
+      // trip's foot, a navigation destination — and every candidate carries
+      // the app, for attribute()'s `app` cue. The pool and the epoch stay
+      // the whole list's (took): the other app's order is still in the car.
+      var own = sameAppOrders(held, s);
+      if (own) {
+        took(st, held);
+        var one = sightingOne(st, own, s, now, true);
+        one.candidates.forEach(function (c) { if (!c.app) c.app = s.app; });
+        return one;
+      }
+      return sightingMany(st, held, s, now);
     }
+    return sightingOne(st, held, s, now, false);
+  }
+
+  /* The one order of the sighting's app, when the orders held are of more
+   * than one app and exactly one is of that app; else null. */
+  function sameAppOrders(orders, s) {
+    if (!s || typeof s.app !== 'string' || !s.app) return null;
+    var apps = orders.map(function (o) { return o && o.app; }).filter(Boolean);
+    if (apps.length !== orders.length || apps.every(function (a) { return a === apps[0]; })) return null;
+    var mine = orders.filter(function (o) { return o.app === s.app; });
+    return mine.length === 1 ? mine[0] : null;
+  }
+
+  function sightingOne(st, held, s, now, tookDone) {
     var out = { candidates: [], why: null, at: s && typeof s.at === 'number' ? s.at : null };
     if (!s || typeof s !== 'object') return out;
-    took(st, held);
+    if (!tookDone) took(st, held);
     var app = typeof s.app === 'string' ? s.app : null;
     if (s.screen !== 'uber.planner') {
       if (app) st.epoch[app] = (st.epoch[app] || 0) + 1;
@@ -2414,7 +2487,7 @@
     }) : [];
     if (stops.length !== 1 || typeof stops[0].line !== 'string' || !stops[0].line) return null;
     var a = stops[0];
-    var why = s.screen === 'uber.pickupNav' ? 'a pickup screen'
+    var why = s.screen === 'uber.pickupNav' || s.screen === 'dd.pickup' ? 'a pickup screen'
       // DoorDash's place popup is about the card being screened and never
       // about an order taken (popup(), rule 2): its own line files it on the
       // card. A customer's prints its address under its role label, so the
@@ -2911,6 +2984,15 @@
       return true;
     });
     if (!live.length) { out.why = 'nobody'; return out; }
+    // THE APP (the owner's snaps of 31 Oct: "automatically associate the
+    // information with the correct order"): with orders of more than one app
+    // in the car, a read whose screen named its app (uber.* Uber, dd.*
+    // DoorDash) that leaves exactly one order of that app is that order's —
+    // cue `app`, as strong as `only` and under the same guards. The hard rule
+    // above already keeps it off the other app's order.
+    var apps = (orders || []).filter(Boolean).map(function (o) { return o.app || null; });
+    var mixed = apps.some(function (a, i) { return a && apps.some(function (b) { return b && b !== a; }); });
+    var byApp = mixed && !!d.app && live.length === 1 && live[0].app === d.app;
     // A dropoff off a list NOT seen whole (sightingMany's `partial`) is
     // decided by the card's street alone (streetCues): what the screen did
     // not show may be anyone's, so neither `only` nor a cue that reads the
@@ -2922,7 +3004,7 @@
     if (live.length === 1 && !(ctx && ctx.card) && !crowded && !partial
         && !(d.asked === false && townClash(live[0], d))) {
       out.order = live[0];
-      out.cue = 'only';
+      out.cue = byApp ? 'app' : 'only';
       return out;
     }
     var older = live[0], newer = live[live.length - 1];
@@ -3282,7 +3364,9 @@
            sameCustomer: sameCustomer,
            // ...and the street rule they stand on, for server.js's planAtOf
            // (where on a planner each order's end is).
-           sameStreet: sameStreet, betterRead: betterRead, VOTE_READS: VOTE_READS, plannerVote: plannerVote,
+           sameStreet: sameStreet, betterRead: betterRead,
+           // ...and a town only against a street (the owner's snaps of 31 Oct).
+           hasStreet: hasStreet, townOnly: townOnly, sameAppOrders: sameAppOrders, VOTE_READS: VOTE_READS, plannerVote: plannerVote,
            dropoff: dropoff, file: file, fileCard: fileCard, cardRank: cardRank,
            pressBetween: pressBetween, ownPopup: ownPopup, cardCandidate: cardCandidate,
            storeScreen: storeScreen, placeOf: placeOf, bracketDoor: bracketDoor,

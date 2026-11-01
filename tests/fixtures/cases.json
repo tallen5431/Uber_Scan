@@ -7805,11 +7805,35 @@
    }
   },
   {
-   "name": "...nor its current task, whose 'Deliver to' is not Uber's navigation",
+   "name": "...and its current task, whose 'Deliver to' is not Uber's navigation: DoorDash's delivery (31 Oct: it was 'unknown', and its app went unsaid)",
    "text": "Pickup for Pat Q.\nby 7:09 PM - Fable Grill\nCurrent task\nDeliver to Pat Q.\n9 min to complete\nPause orders after delivery",
    "expect": {
-    "app": null,
-    "screen": "unknown"
+    "app": "doordash",
+    "screen": "dd.deliver"
+   }
+  },
+  {
+   "name": "DoorDash's customer before the pickup: 'Deliver to' a name over a town and ZIP, no street, no bar (31 Oct: typed Uber's navigation, and filed on the Uber order)",
+   "text": "Deliver to Lee R.\nFabletown, GA 30199",
+   "expect": {
+    "app": "doordash",
+    "screen": "dd.deliver"
+   }
+  },
+  {
+   "name": "...but Uber's collapsed sheet under its bar stays Uber's navigation",
+   "text": "45\nLIMIT v\no= 6 min \u00a9 1.7 mi \u2014\nDeliver to Pat Q.\nFabletown, GA 30199",
+   "expect": {
+    "app": "uber",
+    "screen": "uber.nav"
+   }
+  },
+  {
+   "name": "DoorDash's pickup screen: 'Pickup for' the customer, the store, its door wrapped over two lines",
+   "text": "Pickup for Lee R.\nFable Grill - (0042\n- FABLETOWN GA)\n120 Quillon Parkway\nNorthwest, Fabletown\n@ Drink",
+   "expect": {
+    "app": "doordash",
+    "screen": "dd.pickup"
    }
   },
   {
@@ -8021,7 +8045,7 @@
    "name": "DoorDash's current task: 'Deliver to' a name, and no address",
    "text": "Pickup for Pat Q.\nby 7:09 PM - Fable Grill\nCurrent task\nDeliver to Pat Q.\n9 min to complete\nPause orders after delivery",
    "expect": [
-    "unknown",
+    "dd.deliver",
     null,
     null,
     false,
@@ -8032,7 +8056,7 @@
    "name": "DoorDash's navigation: 'Dropoff' over its address",
    "text": "Dropoff\n61 Saddlebrook Ln, Acworth, GA 30101\n12 min Start",
    "expect": [
-    "unknown",
+    "dd.deliver",
     "61 Saddlebrook Ln, Acworth, GA 30101",
     "dropoff",
     true,

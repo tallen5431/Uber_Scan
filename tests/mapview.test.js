@@ -290,6 +290,18 @@ eq('[two drawn] ...the order not known: each order\'s own run; an end with no po
    JSON.stringify([drawnOwn.lines, drawnOwn.skip]),
    JSON.stringify([[[WREN], [MILL, CORNER2]], 'route skips 1 dropoff, not found']));
 eq('[two drawn] ...and no runs, nothing', MV.heldRunsDrawn(null, atAll), null);
+/* ...and a held DoorDash order with no end read yet (the owner's snaps of 31
+   Oct, an Uber and a DoorDash order at once): its hold carries its card's map
+   label (server.js, `dropoffGuess` at the Took), which Map view searches and
+   draws for ② as it does a card's — the same rule, MV.guessOf, on the hold's
+   shape — and nothing once a screen gave it an end, a town only included. */
+eq('[two drawn] a held DoorDash order\'s map label is its guessed end until an end is read',
+   JSON.stringify([MV.guessOf({ app: 'doordash', dropoff: null,
+                                dropoffGuess: { line: '61 Saddle Cv', from: MV.GUESS_FROM } }),
+                   MV.guessOf({ app: 'doordash', dropoff: 'Fabletown, GA 30199',
+                                dropoffGuess: { line: '61 Saddle Cv', from: MV.GUESS_FROM } }),
+                   MV.guessOf({ app: 'doordash', dropoff: null, dropoffGuess: null })]),
+   JSON.stringify(['61 Saddle Cv', null, null]));
 eq('[two drawn] ...the figure is still refused with an approximate end (no pin in `found`)',
    MV.detourOrders({ lat: 33.95, lon: -84.55 }, { lat: 34.0, lon: -84.56 },
                    [[null, CORNER2]]), null);

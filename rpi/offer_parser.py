@@ -4462,7 +4462,8 @@ def place_popup(text):
 # nothing alone.
 SCREENS = ('uber.offer', 'uber.addon', 'uber.planner', 'uber.pickupNav',
            'uber.nav', 'uber.finding', 'uber.delivered', 'tripRadar', 'dd.offer',
-           'dd.finding', 'dd.switch', 'dd.placePopup', 'dd.delivered', 'unknown')
+           'dd.finding', 'dd.switch', 'dd.placePopup', 'dd.delivered', 'dd.pickup',
+           'dd.deliver', 'unknown')
 SCREEN_DD_SWITCH = re.compile(r"switch to dash|busier zone|don.?t switch",
                               re.IGNORECASE | ASCII)
 SCREEN_PLANNER = re.compile(r'^[^A-Za-z0-9]{0,3}(?:trip ?planner|address|stop new requests'
@@ -4514,6 +4515,96 @@ SCREEN_UBER_OFFER = re.compile(
 SCREEN_DD_ELSEWHERE = re.compile(
     r'pick ?up from\b|current task|pause orders|decline this offer|this dash so far'
     r'|dash summary|continue dashing', re.IGNORECASE | ASCII)
+# DoorDash's screens of an order TAKEN (the owner's snaps of 31 Oct, an Uber
+# and a DoorDash order in the car at once). Until then all of them were
+# 'unknown' (SCREEN_DD_ELSEWHERE), so nothing read off them said which app it
+# was, and a bare "Deliver to <name> / <Town>, GA <zip>" fell through to
+# SCREEN_NAV's "deliver to" and was typed Uber's navigation: its town filed as
+# the UBER order's end.
+#
+#   dd.deliver  "Deliver to <name>" with DoorDash's own words on the frame
+#               ("Current task", "Pause orders", "<n> min to complete", "This
+#               offer $", "This dash"), its navigation's "Dropoff" alone on a
+#               line over "<n> min Start", or with a town and a ZIP and no street
+#               on the line under it — DoorDash prints the customer's town and
+#               ZIP before the pickup; Uber's sheet prints "<Town>, GA" with
+#               no ZIP under a street (the corpus's sheets), and its collapsed
+#               "Deliver to <name>" sits under the bar with nothing after.
+#   dd.pickup   "Pickup for <name>" opening a line: DoorDash's store screen
+#               (the store's name, its branch in brackets, its door), never a
+#               customer's.
+SCREEN_DD_DELIVER = re.compile(r'\bdeliver(?:ing)? to\b|(?:^|\n)[^A-Za-z0-9\n]{0,3}dropoff[^A-Za-z0-9\n]{0,3}(?:\n|$)',
+                               re.IGNORECASE | ASCII)
+SCREEN_DD_OWN = re.compile(r'current task|pause orders|\d ?min to complete|this offer\b'
+                           r'|this dash\b|\d ?min start\b', re.IGNORECASE | ASCII)
+SCREEN_DD_PICKUP = re.compile(r'^[^A-Za-z0-9]{0,4}pick ?up for\b', re.IGNORECASE | ASCII)
+DD_TOWN_ZIP = re.compile(r'^[A-Za-z][A-Za-z .\'-]{1,30},? ?[A-Z]{2} ?\d{5}(?:-\d{4})?$', ASCII)
+
+
+def dd_town_after_deliver(text):
+    """Whether a "Deliver to <name>" line (a name on it) has straight under it
+    a town with its state and ZIP and nothing else, and the frame carries no
+    navigation bar: DoorDash's customer before the pickup (dd.deliver). Uber's
+    "Deliver to" over a street, or a bare "Deliver to", is not."""
+    if NAV_BAR_LINE.search(text):
+        return False
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', text)]
+    lines = [l for l in lines if l]
+    for i, l in enumerate(lines):
+        m = re.search(r'\bdeliver(?:ing)? to\b(.*)$', l, re.IGNORECASE)
+        if m:
+            return bool(re.search(r'[A-Za-z]{2}', m.group(1))) and i + 1 < len(lines) \
+                and bool(DD_TOWN_ZIP.match(lines[i + 1]))
+    return False
+
+
+DD_PICKUP_HOUSE = re.compile(r'^\W{0,3}(\d{1,6}[A-Za-z]? [A-Za-z0-9][A-Za-z0-9 .\'-]{2,60})$', ASCII)
+DD_PICKUP_TAIL = re.compile(r'^\W{0,3}((?:north|south|east|west|n|s|e|w|ne|nw|se|sw|northeast'
+                            r'|northwest|southeast|southwest)\b)?\s*,?\s*([A-Za-z][A-Za-z .\'-]{1,30})'
+                            r'(?:,? ?([A-Z]{2})(?: ?(\d{5}))?)?\W{0,3}$', re.IGNORECASE | ASCII)
+
+
+def dd_pickup_door(text):
+    """The store's door on DoorDash's pickup screen (dd.pickup): {'line',
+    'street', 'city', 'state', 'zip', 'name'} or None. The house-number line
+    after "Pickup for <name>", and the line under it when that line is the
+    street's quadrant and the town ("810 <Name> Parkway / Northwest,
+    <Town>": DoorDash spells the type and the quadrant out and wraps the
+    line). `name` is the store's, the first line after the header, its
+    bracketed branch label cut off. Never a customer's: the screen names the
+    customer only in its header."""
+    t = str(text or '')
+    if screen_type(t)['screen'] != 'dd.pickup':
+        return None
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', t)]
+    lines = [l for l in lines if l]
+    head = next((i for i, l in enumerate(lines) if SCREEN_DD_PICKUP.match(l)), None)
+    if head is None:
+        return None
+    for i in range(head + 1, min(len(lines), head + 6)):
+        m = DD_PICKUP_HOUSE.match(lines[i])
+        if not m or not re.search(r'[A-Za-z]{3}', m.group(1)):
+            continue
+        street, city, state, z = m.group(1).strip().rstrip('.,'), None, None, None
+        if ',' in street:
+            street, rest = [x.strip() for x in street.split(',', 1)]
+            city = rest or None
+        elif i + 1 < len(lines):
+            tail = DD_PICKUP_TAIL.match(lines[i + 1])
+            if tail and (tail.group(1) or ',' in lines[i + 1]):
+                if tail.group(1):
+                    street = street + ' ' + tail.group(1).capitalize()
+                city = tail.group(2).strip().title()
+                state = tail.group(3).upper() if tail.group(3) else None
+                z = tail.group(4)
+        name = re.split(r'\s+[-(]', lines[head + 1])[0].strip() if head + 1 < i else None
+        parts = [street] + ([city] if city else []) + (
+            [state + (' ' + z if z else '')] if state else [])
+        return {'line': ', '.join(parts), 'street': street, 'city': city,
+                'state': state, 'zip': z, 'name': name or None}
+    return None
+
+
 SCREEN_PICKUP_NAV = re.compile(r'note from business|pick ?up in store|pick ?up order',
                                re.IGNORECASE | ASCII)
 # Uber's navigation bar, "6 min © 1.7 mi": minutes, a dot, miles, no bracket.
@@ -4662,6 +4753,11 @@ def _screen(text):
         return 'dd.delivered'
     if done is not None:
         return 'uber.delivered'
+    if SCREEN_DD_DELIVER.search(text) and (SCREEN_DD_OWN.search(text)
+                                           or dd_town_after_deliver(text)):
+        return 'dd.deliver'
+    if any(SCREEN_DD_PICKUP.match(normalize(l)) for l in re.split(r'[\r\n]+', text)):
+        return 'dd.pickup'
     if SCREEN_DD_ELSEWHERE.search(text):
         return 'unknown'
     if SCREEN_PICKUP_NAV.search(text):
