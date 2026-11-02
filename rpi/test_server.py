@@ -8557,6 +8557,83 @@ try:
     finally:
         stop(_spp)
 
+    # --- a store's door whose street the card printed short (2 Nov 16:31) ---
+    #
+    # The owner's snap, invented: DoorDash's card printed "164 Wrenley Pkwy"
+    # under "Lark Owl Grill"; the fake's index holds the road as "Ossian W
+    # Wrenley Parkway Northwest", its search no house on it, and "164 Wrenley
+    # Pkwy" two looser answers that disagree. The server pins the restaurant by
+    # its name along that street (pickupTail, MV.pickStoreAlong) — the card's
+    # own search the moment it is read, and the Took's from the cache — and
+    # never asks any of it for a dropoff.
+    _TW = '164 Wrenley Pkwy, Marietta, GA 30066'
+    _twj = os.path.join(_hkdir, 'tw', 'offers.jsonl')
+    os.makedirs(os.path.dirname(_twj))
+    open(_twj, 'w').close()
+    _twp, _twb = start({'SCANNER': '0', 'NUCBOX_SEARCH': _hkfake_base,
+                        'NUCBOX_STREETS': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800'}, _twj)
+    try:
+        _n = len(_hkasked(''))
+        _sptook(_twb, 't-wr', 'Lark Owl Grill', _TW, dropoff=_KES)
+        _h = _settled(_twb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
+        _tws = [urllib.parse.unquote(a) for a in _hkasked('')[_n:]]
+        eq('[store along] a DoorDash store\'s door on a street printed short: the index asked '
+           'which streets it ends, and the one place of the store\'s name along that street '
+           'pinned, by the server from the card',
+           (_h.get('pickupsPinned'), _h.get('pickupsHow'), _sporders(_twj).get('t-wr')),
+           (1, [{'by': 'server', 'from': 'card', 'asked': None}],
+            (_TW, [(33.9612, -84.545, _TW, 'server', 'card')])))
+        ok_('[store along] ...asked as /api/streets/tail in the disc\'s box, then the store by '
+            'name in the street\'s box (%r)' % _tws,
+            any(a.startswith('/api/streets/tail?name=Wrenley Pkwy&box=') for a in _tws)
+            and any('q=Lark Owl Grill' in a and 'bounded=1' in a for a in _tws))
+        post(_twb, '/api/delivered', {})
+        _n = len(_hkasked(''))
+        _sptook(_twb, 't-pz', 'Fable Pizza', '180 Wrenley Pkwy, Marietta, GA 30066', dropoff=_KES)
+        _h = _settled(_twb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
+        eq('[store along] ...two places of that name along the street: no pin, the door\'s own '
+           'refusal said', (_h.get('pickupsPinned'), _h.get('pickupsWhy')),
+           (0, 'not inside the card\'s reach'))
+        post(_twb, '/api/delivered', {})
+        # The same door as a customer's: nothing of the store's rule is asked.
+        _n = len(_hkasked(''))
+        _sptook(_twb, 't-drop', 'Example Wok', dropoff=_TW)
+        _settled(_twb)
+        time.sleep(0.5)
+        _twd = [urllib.parse.unquote(a) for a in _hkasked('')[_n:]]
+        eq('[store along] ...and a dropoff on that street is never asked by name or by the tail',
+           [a for a in _twd if '/api/streets/tail' in a or 'Lark Owl' in a], [])
+        post(_twb, '/api/delivered', {})
+    finally:
+        stop(_twp)
+    # ...the card's own search the moment it is read (earlyDoor, searchCardEarly),
+    # so the Took's questions are the cache's.
+    _tec = dict(_SQ, id='t-early', pay=4.6, minutes=22.0, billedMinutes=22.0, miles=5.0,
+                cost=0.9, pickup='Wren Hollow Deli', pickupLine='200 Wrenley Pkwy, Marietta, GA 30066',
+                app='doordash', screen='dd.offer', stops=2, dropoffs=1, endRefused=True)
+    _tes, _tesays, _tesj = _hksayer('tail-early')
+    _tep, _teb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _tes,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_STREETS': _hkfake_base,
+                        'NUCBOX_TIMEOUT_MS': '800'}, _tesj)
+    try:
+        _nd = len(_hkasked('Wren%20Hollow%20Deli'))
+        _tesays([{'offer': _tec}])
+        for _ in range(80):
+            if len(_hkasked('Wren%20Hollow%20Deli')) > _nd:
+                break
+            time.sleep(0.05)
+        time.sleep(0.3)
+        _nall = len(_hkasked(''))
+        post(_teb, '/api/offers/mark', {'id': 't-early', 'accepted': True, 'offer': _tec})
+        _h = _settled(_teb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
+        eq('[store along] the card read asks the store along its street at once, and ✓ Took pins '
+           'it from those answers with no new request (one of two branches on the street)',
+           (len(_hkasked('Wren%20Hollow%20Deli')) - _nd, _h.get('pickupsPinned'),
+            len(_hkasked('')) - _nall, _sporders(_tesj).get('t-early', (None, []))[1]),
+           (1, 1, 0, [(33.9603, -84.548, _tec['pickupLine'], 'server', 'card')]))
+    finally:
+        stop(_tep)
+
     # --- DoorDash's two-store card: every store a pickup (the owner, 31 Oct) ---
     #
     # "It would be great if the pins for the pickup and drop off could be

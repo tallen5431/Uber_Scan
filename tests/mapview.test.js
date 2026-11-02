@@ -2885,6 +2885,121 @@ async function nucbox() {
       got = await nbxN.place('1106 Tamaror, Marietta', null, { streets: true });
       eq('...nor with no disc', got.asked, undefined);
 
+      // The owner's snap of 2 Nov 16:31, invented, through the server: a
+      // DoorDash stops card's store door "164 Wrenley Pkwy" under "Lark Owl
+      // Grill", the road "Ossian W Wrenley Parkway Northwest" in the index,
+      // no house on it in the search, and two looser answers that disagree.
+      // The card is no yardstick ("2 stops (3.0 mi)", one leg, no total), so
+      // its disc is the sixty-mile one, as the snap's was.
+      var ddDisc = MV.discFor(card({ miles: 3.0, hasTotal: false, legs: 1 }));
+      var WR = '164 Wrenley Pkwy, Marietta, GA 30066';
+      var ofSent = function (from) {
+        return fake.asked.slice(from).map(decodeURIComponent).map(function (u) {
+          var m = /^\/api\/streets\/(\w+)\?name=([^&]*)/.exec(u) || /[?&](q|street)=([^&]*)/.exec(u);
+          return m ? m[1] + ' ' + m[2] : u;
+        });
+      };
+      eq('[store] the disc is the card\'s sixty miles', ddDisc && ddDisc.miles, 60);
+      // The rule's own parts, off the fake's answers.
+      var wrPlan = MV.searchPlan(WR);
+      eq('[store] what the index is asked: the street less its number, ending in a type (a '
+         + 'quadrant after it allowed), with a name word before it',
+         JSON.stringify([MV.tailAsked(wrPlan), MV.tailAsked(MV.searchPlan('9 Wrenley Pkwy NW, X')),
+                         MV.tailAsked(MV.searchPlan('1106 Tamaror, X')),
+                         MV.tailAsked(MV.searchPlan('Wrenley Pkwy, X'))]),
+         JSON.stringify(['Wrenley Pkwy', 'Wrenley Pkwy NW', null, null]));
+      eq('[store] the store asked by its name, never a street or a corner',
+         JSON.stringify([MV.storeQuery('Lark Owl Grill'), MV.storeQuery('164 Wrenley Pkwy'),
+                         MV.storeQuery('Ab'), MV.storeQuery(null)]),
+         JSON.stringify(['Lark Owl Grill', null, null, null]));
+      eq('[store] asked after any refusal, never after a NucBox down or a refused question',
+         JSON.stringify(['several', 'none', 'nodoor', 'capped', 'unreachable', 'refused']
+           .map(function (w) { return MV.tailWanted({ at: null, why: w }); })
+           .concat([MV.tailWanted({ at: { lat: 1, lon: 1 } })])),
+         JSON.stringify([true, true, true, true, false, false, false]));
+      var wrAns = { names: ['Ossian W Wrenley Parkway Northwest'], how: 'tail', among: 1,
+                    lines: [[[33.96, -84.56], [33.96, -84.53]]], cutAt: null };
+      eq('[store] the door by the full name only for ONE street found by the tail',
+         JSON.stringify([(MV.tailRetry(wrPlan, wrAns) || {}).street,
+                         MV.tailRetry(wrPlan, Object.assign({}, wrAns, { among: 2, names: [] })),
+                         MV.tailRetry(wrPlan, Object.assign({}, wrAns, { how: 'exact' }))]),
+         JSON.stringify(['164 Ossian W Wrenley Parkway Northwest', null, null]));
+      var sa = function (list, ans, cut) {
+        var r = MV.pickStoreAlong(hitsOf(list), ddDisc, list[0].name, ans || wrAns, cut);
+        return r.at ? r.by : r.why;
+      };
+      eq('[store] pickStoreAlong: one along, two along, one off, one along and one off, a list '
+         + 'cut, no shape sent',
+         JSON.stringify([sa(FAKE.LARK_GRILL), sa(FAKE.FABLE_PIZZA), sa(FAKE.KESTREL_TACOS),
+                         sa(FAKE.WREN_DELI), sa(FAKE.LARK_GRILL, null, 10),
+                         sa(FAKE.LARK_GRILL, Object.assign({}, wrAns, { lines: [], cutAt: 8000 }))]),
+         JSON.stringify(['store', 'several', 'offstreet', 'store', 'capped', 'offstreet']));
+      var twice = FAKE.LARK_GRILL.concat([Object.assign({}, FAKE.LARK_GRILL[0],
+                                                        { lat: '33.9613000', category: 'building' })]);
+      eq('[store] ...a restaurant mapped twice, its node and its building 11 m apart, is one place',
+         sa(twice), 'store');
+      eq('[store] ...and not inside the reach is not along the street that is',
+         MV.pickStoreAlong(hitsOf(FAKE.LARK_GRILL), MV.discFor(card({ lat: 33.92, miles: 1.0 })),
+                           'Lark Owl Grill', wrAns, null).why, 'offstreet');
+      eq('[store] the box the name is asked in: the street\'s shape, ALONG_M (' + MV.ALONG_M
+         + ' m, chosen) wider, inside the disc\'s box, to the hundredth; none with no shape',
+         JSON.stringify([MV.alongBox(wrAns, ddDisc), MV.alongBox({ lines: [] }, ddDisc)]),
+         JSON.stringify(['-84.57,33.97,-84.52,33.95', null]));
+      n0 = fake.asked.length;
+      got = await nbxN.place(WR, ddDisc, { streets: true });
+      eq('[store] with no store\'s name (a dropoff, or a card with none) the refusal is as today: '
+         + '"2 found and they disagree", and nothing more is asked',
+         JSON.stringify([got.at, got.why, ofSent(n0)]),
+         JSON.stringify([null, 'several', ['street 164 Wrenley Pkwy']]));
+      n0 = fake.asked.length;
+      got = await nbxN.place(WR, ddDisc, { streets: true, store: 'Lark Owl Grill' });
+      eq('[store] with the store\'s name, the street printed short is asked of the index (the '
+         + 'door asked again by the one full name it knows by the tail, and not there), and the '
+         + 'one place of that name along its street is the pin, by the store',
+         JSON.stringify([got.at && [got.at.lat, got.at.lon], got.by, ofSent(n0)]),
+         JSON.stringify([[33.9612, -84.545], 'store',
+                         ['tail Wrenley Pkwy', 'street 164 Ossian W Wrenley Parkway Northwest',
+                          'q Lark Owl Grill']]));
+      ok_('...the name asked in the box round the street\'s own shape, not the disc\'s (' +
+          fake.asked[fake.asked.length - 1] + ')',
+          /viewbox=-84\.57%2C33\.97%2C-84\.52%2C33\.95&bounded=1$/.test(
+            fake.asked[fake.asked.length - 1]));
+      n0 = fake.asked.length;
+      got = await new MV.NbxSearch({ base: named.base + '/api/nbx' })
+        .place(WR, ddDisc, { streets: true, store: 'Lark Owl Grill' });
+      eq('[store] ...and another page\'s same question is the server\'s cache',
+         JSON.stringify([!!got.at, fake.asked.length - n0]), JSON.stringify([true, 0]));
+      got = await nbxN.place(WR, ddDisc, { store: 'Lark Owl Grill' });
+      eq('[store] ...without the street index set, never asked', got.why, 'several');
+      // Two branches along the street; one off it; one along and one off.
+      var pz = await nbxN.place('180 Wrenley Pkwy, Marietta', ddDisc,
+                                { streets: true, store: 'Fable Pizza' });
+      var tc = await nbxN.place('190 Wrenley Pkwy, Marietta', ddDisc,
+                                { streets: true, store: 'Kestrel Tacos' });
+      var dl = await nbxN.place('200 Wrenley Pkwy, Marietta', ddDisc,
+                                { streets: true, store: 'Wren Hollow Deli' });
+      eq('[store] two places of the name along the street are none, one off the street is none '
+         + '(the door search\'s refusal stands), and one along it beside one off it is the pin',
+         JSON.stringify([[pz.at, pz.why], [tc.at, tc.why], dl.at && [dl.at.lat, dl.at.lon]]),
+         JSON.stringify([[null, 'none'], [null, 'none'], [33.9603, -84.548]]));
+      n0 = fake.asked.length;
+      got = await nbxN.place('212 Wrenley Pkwy, Marietta', ddDisc,
+                             { streets: true, store: 'Lark Owl Grill' });
+      sent = ofSent(n0);
+      eq('[store] where the index knows ONE street by the tail, the door is asked by its full '
+         + 'name, and found there it is the door — the store never asked by name ('
+         + sent.join(' | ') + ')',
+         JSON.stringify([got.at && [got.at.lat, got.at.lon], got.asked, got.by || null,
+                         sent.indexOf('street 212 Ossian W Wrenley Parkway Northwest') >= 0,
+                         sent.filter(function (u) { return /^q /.test(u); })]),
+         JSON.stringify([[33.9601, -84.535], '212 Ossian W Wrenley Parkway Northwest', null,
+                         true, []]));
+      got = await nbxN.place(WR, MV.discFor(card({ lat: 33.92, miles: 1.0 })),
+                             { streets: true, store: 'Lark Owl Grill' });
+      eq('[store] ...and from a 1.0 mi card 2 mi south, out of its reach, the store is not its '
+         + 'pickup',
+         [got.at, got.why].join(','), ',none');
+
       // The owner's DoorDash snap of 24 Oct, invented, through the server: a
       // door NOTHING answered, its street asked alone of the index.
       n0 = fake.asked.length;

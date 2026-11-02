@@ -2803,6 +2803,163 @@
     return res;
   }
 
+  /* --- a STORE's door, its street printed short --------------------------
+   *
+   * The owner's snap of 2 Nov 16:31: "Here is another door dash page being
+   * read and failing to route, why did it not map it?" A DoorDash stops card
+   * read perfectly — its one store and the store's door under it, "<Store>
+   * / 164 <B> Pkwy, <Town>", and "Customer dropoff" — and Map view said "NO
+   * PIN · 164 <B>…, 2 found and they disagree", the pickup drawn as a band
+   * "≈". The card prints the end of the road's name; OSM names that road
+   * "<A> W <B> Parkway Northwest", the NucBox's Nominatim holds no house
+   * number there, and every question the door search asks (as printed,
+   * without its type word, by the index's `named`, a directional the other
+   * way) is about a street called "<B> Pkwy", which neither the search nor
+   * the index's own rules hold. The car's other order's pickup was on the
+   * same road under its full name, and got only an area.
+   *
+   * So, for a PICKUP only — a store's door, with the store's name beside it
+   * — where the door search ended with no pin (tailWanted), and only with the
+   * NucBox's street index set, the index is asked ONE more question
+   * (streets.js tail, by tailAsked's words in the disc's box): which streets
+   * inside the box the printed name is — as printed, else the streets whose
+   * name ENDS with the printed words at a word boundary ("wrenley pkwy" ends
+   * "ossian w wrenley pkwy nw"), with their shapes in the box. Then, in turn:
+   *
+   *   (b) the door by the full name, where the index knows exactly ONE such
+   *       street by the tail (tailRetry, nameRetry's plan: "164 <A> W <B>
+   *       Parkway Northwest"), held to that street at door level inside the
+   *       disc (pickNamed) — a door, as any other door;
+   *   (a) else the STORE BY ITS NAME near the card's street (storeQuery:
+   *       Nominatim's free text, the card's store name alone, the town never
+   *       sent, in alongBox — the box round the street's own shape, ALONG_M
+   *       wider, inside the disc's box), pinned only where pickStoreAlong
+   *       says: exactly ONE place of that name lies inside the card's reach
+   *       (the disc, `also` and all) AND along the card's street — within
+   *       ALONG_M of the shape of a street the printed name is. Several such,
+   *       none, a list cut at the limit, or a street the index could not
+   *       send whole: no pin, and the door search's own refusal is what the
+   *       driver is told, as today.
+   *
+   * WHY THE STREET'S BOX AND NOT THE DISC'S. The snap's card, "2 stops (3.0
+   * mi)" with no total and one leg, is no yardstick (cardYardstick 'shape'),
+   * so its disc is the sixty-mile one ("within 60 mi of you" on that very
+   * caption). A chain's name in a sixty-mile box is a list cut at ten
+   * (NBX_LIMIT), which no rule may choose from; round the street it is the
+   * few branches near that road, and only one of them may be on it.
+   *
+   * NEVER A DROPOFF. A customer's door is a house, not a named place, and a
+   * name search of a customer is no question at all; nothing here is asked
+   * for one (server.js asks it in pickupTail only, Map view only for the
+   * card's own pickup with its store's name, `opts.store`). One rule, here:
+   * the server's pickup pins (searchHeldPickup, and the card's search the
+   * moment it is read, earlyDoor) and Map view's preview (NbxSearch.place)
+   * ask the same questions in the same words and share the server's cache.
+   *
+   * ALONG_M is CHOSEN, not measured: no store's footprint is in the
+   * repository. A pad restaurant on an arterial has its OSM node or building
+   * centre 30-80 m from the road's centre line, a strip mall's shops 100-180
+   * m back across the lot; 200 m keeps those and refuses a branch a block
+   * off the road. What stands behind it is the rule's other half: one place
+   * of that name in the whole disc. STORE_ONE_M: a restaurant OSM maps twice
+   * (its building and its amenity node, both named) is ONE place; two
+   * branches are never within 100 m of each other. */
+  var ALONG_M = 200;
+  var STORE_ONE_M = 100;
+
+  // The store's street as asked of the index: the street as printed less
+  // its number (nameAsked), ending in a type word (a quadrant after it
+  // allowed), with a name word of three letters before it; else null.
+  function tailAsked(plan) {
+    var name = nameAsked(plan);
+    if (!name) return null;
+    var words = name.split(' ');
+    if (words.length > 2 && QUADRANTS.indexOf(words[words.length - 1].toLowerCase()
+      .replace(/\.$/, '')) >= 0) words.pop();
+    if (words.length < 2 || !streetType(words[words.length - 1])) return null;
+    return words.slice(0, -1).some(function (w) { return /[A-Za-z]{3}/.test(w); }) ? name : null;
+  }
+
+  // The store's name as asked by name (searchPlan's 'name'), or null: never
+  // a street, a corner, or under three letters.
+  function storeQuery(store) {
+    var plan = typeof store === 'string' && store ? searchPlan(store) : null;
+    return plan && plan.kind === 'name' && plan.q && /[A-Za-z]{3}/.test(plan.q)
+      ? placeQuery(plan.q) : null;
+  }
+
+  // WHEN: the door search answered and pinned nothing — whatever its
+  // refusal, but never a NucBox down or a question refused.
+  function tailWanted(res) {
+    return !!res && !res.at && res.why !== 'unreachable' && res.why !== 'refused';
+  }
+
+  // (b): the door by the ONE street the index knows by the tail, or null.
+  function tailRetry(plan, ans) {
+    return ans && ans.how === 'tail' && ans.among === 1 ? nameRetry(plan, ans) : null;
+  }
+
+  // The index's street shapes as runs of {lat, lon}; [] where it sent none.
+  function tailRuns(ans) {
+    return ans && !ans.cutAt && Array.isArray(ans.lines) ? ans.lines.map(function (l) {
+      return l.map(function (p) { return { lat: p[0], lon: p[1] }; });
+    }) : [];
+  }
+
+  /* The viewbox the store's name is asked in: round every point of the
+     index's street shapes, ALONG_M wider each way, inside the disc's box,
+     widened outward to the next hundredth of a degree as discBox's is (so
+     the server and Map view ask one question); null with no shape. */
+  function alongBox(ans, disc) {
+    var runs = tailRuns(ans);
+    if (!runs.length || !disc) return null;
+    var w = Infinity, n = -Infinity, e = -Infinity, s = Infinity;
+    runs.forEach(function (r) {
+      r.forEach(function (p) {
+        w = Math.min(w, p.lon); e = Math.max(e, p.lon);
+        s = Math.min(s, p.lat); n = Math.max(n, p.lat);
+      });
+    });
+    var dLat = ALONG_M / METRES_PER_MILE / 69.0;
+    var dLon = dLat / Math.max(0.2, Math.cos((Math.abs(n) + dLat) * Math.PI / 180));
+    var d = discBox(disc).split(',').map(Number);     // w, n, e, s
+    w = Math.max(w - dLon, d[0]); n = Math.min(n + dLat, d[1]);
+    e = Math.min(e + dLon, d[2]); s = Math.max(s - dLat, d[3]);
+    if (!(w < e && s < n)) return null;
+    function out(v, up) { return (up ? Math.ceil(v * 100) : Math.floor(v * 100)) / 100; }
+    return [out(w, false).toFixed(2), out(n, true).toFixed(2),
+            out(e, true).toFixed(2), out(s, false).toFixed(2)].join(',');
+  }
+
+  /* (a): the store by its name, along the card's street. `hits` the name
+     search's answers (asked in alongBox), `ans` the index's tail answer. A
+     pin `by: 'store'` where exactly ONE place of the store's name (a named
+     feature, placeNamed) lies inside the disc and within ALONG_M of the
+     street's shape — places within STORE_ONE_M of each other being one —
+     or { at: null, why }: 'capped' (a list cut at the limit: a branch not
+     sent may be on the street too), 'noplace' (nothing of that name),
+     'offstreet' (none of it inside the disc and along the street, or no
+     shape sent), 'several' (more than one place so). */
+  function pickStoreAlong(hits, disc, store, ans, cutAt) {
+    if (!disc || !ans) return { at: null, why: 'none', n: 0 };
+    if (cutAt) return { at: null, why: 'capped', n: cutAt };
+    var all = pointsAmong(hits);
+    var named = all.filter(function (h) { return namedFeature(h) && placeNamed(store, h.called); });
+    if (!named.length) return { at: null, why: 'noplace', n: all.length };
+    var runs = tailRuns(ans);
+    var on = runs.length ? named.filter(function (h) {
+      var near = inDisc(disc, h) ? nearestOn(runs, h) : null;
+      return !!near && near.miles * METRES_PER_MILE <= ALONG_M;
+    }) : [];
+    if (!on.length) return { at: null, why: 'offstreet', n: named.length };
+    var one = on[0];
+    if (!on.every(function (h) {
+      return crowMiles(one, h) * METRES_PER_MILE <= STORE_ONE_M;
+    })) return { at: null, why: 'several', n: on.length };
+    return { at: { lat: one.lat, lon: one.lon, name: one.name || '' }, why: null,
+             n: on.length, by: 'store' };
+  }
+
   /* --- the stretch of a street inside the disc ------------------------------
    *
    * The street index answers a numberless street ("Shadowood Pkwy SE,
@@ -4338,6 +4495,20 @@
         });
       });
     }
+    // ...and a STORE's door none of those pinned, with the store's name
+    // beside it (`opts.store`: the card's own pickup only, live.html) and the
+    // street index set: its street printed short asked of the index, then
+    // the door by the one full name, else the store by its name along that
+    // street (storeTail, tailRetry, pickStoreAlong; the owner's snap of 2
+    // Nov). The server's pickup search asks the same (pickupTail). Never a
+    // dropoff: no `store` is ever given for one.
+    var store = opts.store && opts.streets && disc && plan.kind === 'street' && plan.door
+      ? storeQuery(opts.store) : null;
+    if (store) {
+      asked = asked.then(function (res) {
+        return tailWanted(res) ? me.storeTail(plan, disc, store, res) : res;
+      });
+    }
     // ...and a door whose every question found NOTHING ('none'), with the
     // street index set, its street alone (streetArea; the owner's DoorDash
     // snap of 24 Oct): a rough area beside the refusal, or the refusal as
@@ -4504,6 +4675,43 @@
         var res = afterRetry(first, two);
         if (res === two) res.asked = p2.street;
         return res;
+      });
+    });
+  };
+
+  /* A store's door the door search did not pin (`first`, its answer), by its
+     street printed short (tailAsked, the index's /tail in the disc's box):
+     the door by the ONE full name the index knows by the tail (tailRetry,
+     held to that street), else the store `store` (storeQuery's words) by
+     its name along the street (pickStoreAlong). `first` stands — its
+     refusal, its `seen`, its area — whenever neither pins, or the index or
+     the search does not answer: never the public map. A pin found this way
+     says how (`by: 'store'`, or `asked` the full name for the door). */
+  NbxSearch.prototype.storeTail = function (plan, disc, store, first) {
+    var me = this;
+    var name = tailAsked(plan);
+    if (!name) return Promise.resolve(first);
+    var box = encodeURIComponent(discBox(disc));
+    return this.get('/tail?name=' + encodeURIComponent(name) + '&box=' + box).then(function (ans) {
+      if (nbxDown(ans) || !(ans.among > 0)) return first;
+      var p2 = tailRetry(plan, ans);
+      var door = p2 ? me.search(p2, disc) : Promise.resolve(null);
+      return door.then(function (two) {
+        if (two && two.at) {
+          two.asked = p2.street;
+          return two;
+        }
+        var near = alongBox(ans, disc);
+        if (!near) return first;
+        return me.get('/search?q=' + encodeURIComponent(store) + '&viewbox='
+                      + encodeURIComponent(near))
+          .then(function (body) {
+            if (nbxDown(body)) return first;
+            var res = pickStoreAlong(body.hits, disc, store, ans, body.cutAt);
+            if (!res.at) return first;
+            res.seen = { hits: pointsAmong(body.hits), door: null };
+            return res;
+          });
       });
     });
   };
@@ -5441,5 +5649,8 @@
            unknownTail: unknownTail,
            afterDir: afterDir, nameWanted: nameWanted, nameAsked: nameAsked,
            nameRetry: nameRetry, pickNamed: pickNamed,
+           ALONG_M: ALONG_M, STORE_ONE_M: STORE_ONE_M, tailAsked: tailAsked,
+           storeQuery: storeQuery, tailWanted: tailWanted, tailRetry: tailRetry,
+           pickStoreAlong: pickStoreAlong, alongBox: alongBox,
            howFound: howFound };
 }));

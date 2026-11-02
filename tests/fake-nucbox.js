@@ -262,7 +262,8 @@ var NAMED_INDEX = Streets.build({
   format: Streets.FORMAT, e: 6,
   names: ['Tamarons Lane', 'Brindlewood Way', 'Brindleton Court',
           'Larkmoor Court', 'Hollin Road', 'Fennick Court', 'Ellis Court', 'Quarrel Court',
-          'Pembury', 'Corbins Drive', 'Pellmore Street', 'Dunmere Parkway'],
+          'Pembury', 'Corbins Drive', 'Pellmore Street', 'Dunmere Parkway',
+          'Ossian W Wrenley Parkway Northwest'],
   nodes: [-84561000, 33975000, 2000, 400,            // Tamarons Lane
           21000, -10400, 2000, 0,                    // Brindlewood Way
           -6000, 3000, 0, 2000,                      // Brindleton Court
@@ -276,11 +277,52 @@ var NAMED_INDEX = Streets.build({
           -20000, 56000, 1300, 0,                    // Pembury, no type word, 120 m
           16700, 14000, 2000, 0,                     // Corbins Drive, 1.3 mi north-east
           -13000, -12000, 4000, 0,                   // Pellmore Street, 369 m by the Square
-          -28000, -8000, 40000, 0],                  // Dunmere Parkway, 3.7 km
+          -28000, -8000, 40000, 0,                   // Dunmere Parkway, 3.7 km
+          -30000, 10000, 30000, 0],                  // Ossian W Wrenley Parkway NW, 2.8 km
   ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]],
          [[3], [6, 1]], [[3], [7, 1]], [[4], [9, 1]], [[5], [11, 1]], [[5], [13, 1]],
          [[6], [15, 1]], [[7], [17, 1]], [[7], [19, 1]], [[8], [21, 1]],
-         [[9], [23, 1]], [[10], [25, 1]], [[11], [27, 1]]] });
+         [[9], [23, 1]], [[10], [25, 1]], [[11], [27, 1]], [[12], [29, 1]]] });
+
+/* A store's door printed short (server.js pickupTail, map-view.js
+   storeTail; the owner's snap of 2 Nov 16:31): DoorDash's card prints "164
+   Wrenley Pkwy" under its store's name, and the road is "Ossian W Wrenley
+   Parkway Northwest" in the index above, running east-west 0.5 mi north of
+   the Square (33.96, -84.56 to -84.53). This fake's search holds no house
+   on it by either name, and answers "164 Wrenley Pkwy" as the real install
+   answered the owner's: two looser answers, houses 164 on a court of a like
+   name in two places, which disagree. By NAME (q=, as Nominatim answers a
+   named feature): "Lark Owl Grill" one place 133 m north of the road;
+   "Fable Pizza" two branches both along it, 1.4 km apart; "Kestrel Tacos"
+   one place 670 m north of it; "Wren Hollow Deli" one branch by the road
+   and one 1 km north of it. "212 Ossian W Wrenley Parkway Northwest"
+   (the full name) answers its door. Invented, every one. */
+var WRENLEY_164 = [
+  place(171, 33.9400, -84.5300, 'place', 'house', '',
+        '164, Wrenley Court, Marietta, Cobb County, Georgia, 30060, United States'),
+  place(172, 33.9800, -84.5800, 'place', 'house', '',
+        '164, Wrenley Court, Marietta, Cobb County, Georgia, 30064, United States')];
+var WRENLEY_212 = [place(173, 33.9601, -84.5350, 'place', 'house', '',
+                         '212, Ossian W Wrenley Parkway Northwest, Marietta, Cobb County, '
+                         + 'Georgia, 30066, United States')];
+var LARK_GRILL = [place(174, 33.9612, -84.5450, 'amenity', 'restaurant', 'Lark Owl Grill',
+                        'Lark Owl Grill, Ossian W Wrenley Parkway Northwest, Marietta, Cobb '
+                        + 'County, Georgia, 30066, United States')];
+var FABLE_PIZZA = [
+  place(175, 33.9605, -84.5400, 'amenity', 'fast_food', 'Fable Pizza',
+        'Fable Pizza, Ossian W Wrenley Parkway Northwest, Marietta, Cobb County, Georgia, '
+        + '30066, United States'),
+  place(176, 33.9590, -84.5550, 'amenity', 'fast_food', 'Fable Pizza',
+        'Fable Pizza, Ossian W Wrenley Parkway Northwest, Marietta, Cobb County, Georgia, '
+        + '30066, United States')];
+var KESTREL_TACOS = [place(177, 33.9660, -84.5450, 'amenity', 'fast_food', 'Kestrel Tacos',
+                           'Kestrel Tacos, Marietta, Cobb County, Georgia, 30066, United States')];
+var WREN_DELI = [
+  place(178, 33.9603, -84.5480, 'amenity', 'restaurant', 'Wren Hollow Deli',
+        'Wren Hollow Deli, Ossian W Wrenley Parkway Northwest, Marietta, Cobb County, '
+        + 'Georgia, 30066, United States'),
+  place(179, 33.9690, -84.5500, 'amenity', 'restaurant', 'Wren Hollow Deli',
+        'Wren Hollow Deli, Marietta, Cobb County, Georgia, 30066, United States')];
 
 /* Streets the NucBox's search holds without their house numbers, for the
    held end by its street (server.js searchHeldStreet; the owner's fault of 19
@@ -391,8 +433,14 @@ function search(q) {
     else if (/^wrenfield (parking dec|parking deck|deck)$/.test(term)) all = DECK;
     else if (term === 'quarry hall') all = QUARRY;
     else if (term === 'lantern parking deck') all = LANTERN;
+    else if (term === 'lark owl grill') all = LARK_GRILL;
+    else if (term === 'fable pizza') all = FABLE_PIZZA;
+    else if (term === 'kestrel tacos') all = KESTREL_TACOS;
+    else if (term === 'wren hollow deli') all = WREN_DELI;
   } else if (q.street !== undefined) {
-    if (/^shadowood (pkwy|parkway)/.test(term)) all = SHADOWOOD;
+    if (term === '164 wrenley pkwy') all = WRENLEY_164;
+    else if (term === '212 ossian w wrenley parkway northwest') all = WRENLEY_212;
+    else if (/^shadowood (pkwy|parkway)/.test(term)) all = SHADOWOOD;
     else if (/^1985 cobb (pkwy|parkway)/.test(term)) all = COBB_1985;
     else if (/^4821 kestrel (dr|drive)/.test(term)) all = KESTREL;
     else if (/^church st/.test(term)) all = CHURCH;
@@ -539,6 +587,13 @@ function start(done) {
       wh.ok = true;
       return json(200, wh);
     }
+    // ...and /api/streets/tail (a store's street printed short), the same way.
+    if (u.pathname === '/api/streets/tail') {
+      var tb = Streets.tail(NAMED_INDEX, String(u.query.name || ''),
+                            u.query.box ? Streets.boxOf(String(u.query.box)) : null);
+      tb.ok = true;
+      return json(200, tb);
+    }
     if (u.pathname === '/api/streets/named') {
       var nb = Streets.named(NAMED_INDEX, String(u.query.name || ''),
                              u.query.box ? Streets.boxOf(String(u.query.box)) : null);
@@ -613,6 +668,8 @@ module.exports = { start: start, MCD: MCD, SHADOWOOD: SHADOWOOD,
                    CORBINS_2282: CORBINS_2282,
                    THORNBURY_3150: THORNBURY_3150, THORNBURY_3152: THORNBURY_3152,
                    VESSINGTON_10800: VESSINGTON_10800, VESSINGTON_10900: VESSINGTON_10900,
+                   WRENLEY_164: WRENLEY_164, WRENLEY_212: WRENLEY_212, LARK_GRILL: LARK_GRILL,
+                   FABLE_PIZZA: FABLE_PIZZA, KESTREL_TACOS: KESTREL_TACOS, WREN_DELI: WREN_DELI,
                    NAMED_INDEX: NAMED_INDEX };
 
 if (require.main === module) {

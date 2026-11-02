@@ -751,9 +751,87 @@ function whole(ix, name, box) {
   return out;
 }
 
+/* --- a store's street, printed short ----------------------------------------
+ *
+ * THE FAULT (the owner's snap of 2 Nov 16:31). DoorDash's stops card printed
+ * the store's door as "164 <B> Pkwy, <Town>": the street's own last words.
+ * OSM names that road "<A> W <B> Parkway Northwest", the card's words are the
+ * end of that name, and match's rules never find it — `exact` wants every
+ * word, `dir` lets only a directional go, and "<A> W" is a name and an
+ * initial. The NucBox's search did no better (no house number there, two
+ * looser answers that disagree), so the restaurant had no pin, and Map view
+ * drew the pickup as a band "≈" on a card read perfectly.
+ *
+ * So, for a STORE's door only (map-view.js tailAsked; server.js pickupTail
+ * and NbxSearch.place's `store`, never a customer's), this answers which
+ * streets inside `box` the name as printed can be:
+ *
+ *   as printed   match's own rules, counted among the streets with a way into
+ *                the box (the name the index holds as read is the street, and
+ *                is never widened: match's rule);
+ *   tail         else — none of those inside the box — the streets with a way
+ *                into it whose name ENDS with the printed words, at
+ *                a word boundary, on the short forms both sides ("wrenley
+ *                pkwy" ends "ossian w wrenley pkwy"), the index's name longer
+ *                than the printed one, a quadrant the card printed agreeing
+ *                with the index's (none printed agrees with any), and a
+ *                leading directional printed counted as a word of the name.
+ *                The printed words must end in a street type and hold a name
+ *                word of three letters in front of it: "Pkwy" alone, or a
+ *                name with no type, ends too many streets to say anything.
+ *
+ * { names, how, among, lines, points, cutAt }: `names` (as OSM spells them)
+ * only when `among` is exactly 1, as for `named`; `lines` every such street's
+ * polylines inside the box, cut at its edge as `stretch` cuts them, for the
+ * rig to ask whether a place lies along the street; none past `most` points
+ * (`cutAt`), which no place is held to. No box, no answer. */
+function tail(ix, asked, box, most) {
+  var out = { names: [], how: null, among: 0, lines: [], points: 0, cutAt: null };
+  if (!box) return out;
+  var inside = function (key) { return waysIn(ix, [key], box).length > 0; };
+  var m = match(ix, asked, box);
+  var keys = m.keys.filter(inside), how = m.how;
+  // (Inside the box, not anywhere: a store's door is a door in the card's
+  // reach, and the printed short form being some other road's whole name
+  // across the state says nothing about the road the card's store is on.)
+  if (!keys.length) {
+    var sq = split(words(asked));
+    var core = (sq.pre ? sq.pre.split(' ') : []).concat(sq.base);
+    var n = core.length;
+    if (n < 2 || !isType(core[n - 1])
+        || !core.slice(0, -1).some(function (w) { return /^[a-z]{3,}$/.test(w) && !isWord(w); })) {
+      return out;
+    }
+    keys = ix.keys.filter(function (o) {
+      var oc = (o.sp.pre ? o.sp.pre.split(' ') : []).concat(o.sp.base);
+      if (oc.length <= n) return false;
+      for (var i = 1; i <= n; i++) if (oc[oc.length - i] !== core[n - i]) return false;
+      return (!sq.post || sq.post === o.sp.post) && inside(o.key);
+    }).map(function (o) { return o.key; }).sort();
+    how = 'tail';
+  }
+  if (!keys.length) return out;
+  out.how = how;
+  out.among = keys.length;
+  if (keys.length === 1) out.names = ix.byKey.get(keys[0]).names.slice().sort();
+  // The streets' shapes in the box: `stretch`'s cut, asked of each key by its
+  // own name, so a street is what the index holds under that key and nothing
+  // its name might also match.
+  var lines = [];
+  keys.forEach(function (k) {
+    var s = stretch(ix, ix.byKey.get(k).names[0], box, Infinity);
+    lines = lines.concat(s.lines);
+  });
+  out.points = lines.reduce(function (s, l) { return s + l.length; }, 0);
+  if (out.points > (most || POINTS_MAX)) out.cutAt = most || POINTS_MAX;
+  else out.lines = lines;
+  return out;
+}
+
 module.exports = { FORMAT: FORMAT, words: words, split: split, cleaned: cleaned,
                    oneEdit: oneEdit, ocrMay: ocrMay, build: build, load: load,
                    match: match, cross: cross, stretch: stretch, metres: metres,
-                   named: named, whole: whole, WHOLE_LINE_M: WHOLE_LINE_M, cutFits: cutFits, CUT_KEEP: CUT_KEEP,
+                   named: named, whole: whole, tail: tail,
+                   WHOLE_LINE_M: WHOLE_LINE_M, cutFits: cutFits, CUT_KEEP: CUT_KEEP,
                    boxOf: boxOf, CLUSTER_M: CLUSTER_M, MEETS_MAX: MEETS_MAX,
                    POINTS_MAX: POINTS_MAX, TYPES: TYPES, DIRS: DIRS };

@@ -3843,13 +3843,24 @@ function pickupDoorPlan(q) {
  * (armHeldPickups' `asked`), under the first source. */
 function pickupAsks(h) {
   var out = [];
-  function add(q, from) {
-    if (pickupDoorPlan(q)) out.push({ q: q, from: from });
+  // ...each with the STORE's name beside its door where the order says which
+  // store that door is (`store`): the planner stop's own name, the card's
+  // store for its printed door or a tap's, each listed store for its own.
+  // Asked by name along the street only where the door is not found
+  // (pickupTail; the owner's snap of 2 Nov), and never for a dropoff.
+  var cardStore = typeof h.pickup === 'string' && h.pickup ? h.pickup : null;
+  function add(q, from, store) {
+    if (!pickupDoorPlan(q)) return;
+    var a = { q: q, from: from };
+    if (typeof store === 'string' && store && store !== q) a.store = store;
+    out.push(a);
   }
-  if (h.planner) MV.heldPickups(h.planner.stops).forEach(function (p) { add(p.q, 'planner'); });
+  if (h.planner) {
+    MV.heldPickups(h.planner.stops).forEach(function (p) { add(p.q, 'planner', p.name); });
+  }
   var f = Assemble.fieldsOf(h).pickupAddr;
-  if (f) add(f.value, f.from);
-  add(h.pickupLine, 'card');
+  if (f) add(f.value, f.from, f.from === 'popup' ? cardStore : null);
+  add(h.pickupLine, 'card', cardStore);
   // ...and every OTHER store's printed door on a DoorDash card with two or
   // more (the hold's `stores`, storesOf; the owner's snaps of 31 Oct): each a
   // pickup of this order, asked exactly as `pickupLine` is (door level only,
@@ -3858,7 +3869,7 @@ function pickupAsks(h) {
   // behind the car on its own. The first store's door IS `pickupLine`, and a
   // text on the list twice is asked once.
   (Array.isArray(h.stores) ? h.stores : []).forEach(function (st) {
-    if (st && typeof st.door === 'string') add(st.door, 'card');
+    if (st && typeof st.door === 'string') add(st.door, 'card', st.name);
   });
   add(h.pickup, 'card');
   // ...and, with no door on record at all, the card's STORE by its name (the
@@ -3949,11 +3960,69 @@ function searchHeldPickup(id, a, attempt) {
   memoStart(id, a.q, { from: a.from, attempt: attempt, plan: plan, disc: disc,
                        skipped: !said ? 'no street to ask' : !disc ? 'no disc' : null });
   if (!said || !disc) return;
-  doorChain(plan, disc, false, function (target, read, answered) {
-    pickupAsk(id, a, attempt, target, answered);
-  }, function (res, asked) {
-    settleHeldPickup(id, a, res, asked);
+  var ask = function (target, read, answered, unanswered) {
+    pickupAsk(id, a, attempt, target, answered, read, unanswered);
+  };
+  doorChain(plan, disc, false, ask, function (res, asked) {
+    // ...and, no pin, the store's street printed short (pickupTail).
+    pickupTail(plan, a.store, disc, res, ask, function (res2, asked2, via) {
+      if (via) memoPick(id, a.q, via, res2);
+      settleHeldPickup(id, a, res2, via ? asked2 : asked);
+    });
   });
+}
+
+/* ...AND A STORE'S DOOR WHOSE STREET THE CARD PRINTED SHORT: the owner's snap
+ * of 2 Nov 16:31, a DoorDash card's "164 <B> Pkwy, <Town>" under its store's
+ * name, OSM's "<A> W <B> Parkway Northwest" with no house number on the
+ * NucBox, and the door search's two looser answers disagreeing — no pin for
+ * the restaurant, on the offer or the hold. Map view's rule (map-view.js,
+ * "a STORE's door, its street printed short"), asked in its words so the two
+ * share nbxCache: where `first`, doorChain's answer, pinned nothing
+ * (MV.tailWanted) and the pickup has a store's name (`store`) and the street
+ * index is set, the index's /tail by MV.tailAsked in the disc's box; then
+ * the door by the ONE full name it knows by the tail (MV.tailRetry, held to
+ * that street, MV.pickNamed: via 'tail', the full name kept as `asked`),
+ * else the store by its name along the street (MV.storeQuery,
+ * MV.pickStoreAlong: one place of that name in the disc, within MV.ALONG_M
+ * of the street; via 'store'). Otherwise, or with no answer from the NucBox,
+ * `first` stands — its refusal is what /api/status says, as before.
+ * `ask(target, read, answered, unanswered)` is the caller's, as doorChain's;
+ * `done(res, asked, via)` likewise. A pickup's only: no caller hands a
+ * dropoff here. */
+function pickupTail(plan, store, disc, first, ask, done) {
+  var name = NBX.streets && disc ? MV.tailAsked(plan) : null;
+  var q = store ? MV.storeQuery(store) : null;
+  var said = name ? nbxTerm(name) : null;
+  if (!said || !q || !nbxTerm(q) || !MV.tailWanted(first)) return done(first, null, null);
+  var box = MV.discBox(disc);
+  var stand = function () { done(first, null, null); };
+  // Marked, so a caller whose own questions end a search as "none" when not
+  // answered (earlyDoor) ends these on `first` instead.
+  stand.tail = true;
+  ask(streetTarget('tail', { name: said, box: box }), function (body) {
+    var t = streetAnswer('tail', body);
+    return t.error ? null : t;
+  }, function (ans) {
+    if (!(ans.among > 0)) return stand();
+    var byName = function () {
+      var near = MV.alongBox(ans, disc);
+      if (!near) return stand();
+      ask(nbxSearchTarget('q', nbxTerm(q), near), null, function (out) {
+        var res = MV.pickStoreAlong(out.hits, disc, q, ans, out.cutAt);
+        if (!res.at) return stand();
+        done(res, null, 'store');
+      }, stand);
+    };
+    var p2 = MV.tailRetry(plan, ans);
+    var said2 = p2 ? nbxTerm(p2.street) : null;
+    if (!said2) return byName();
+    ask(nbxSearchTarget('street', said2, box), null, function (out) {
+      var two = MV.pickNamed(out.hits, disc, p2, out.cutAt);
+      if (two.at) return done(two, p2.street, 'tail');
+      byName();
+    }, stand);
+  }, stand);
 }
 
 /* ...the store by its name (pickupAsks' `name`): ONE question, the name as
@@ -3980,17 +4049,25 @@ function searchHeldPickupName(id, a, attempt, h) {
  * the top, after END_RETRY_MS. A text the page pinned while this was out is
  * not asked about here a second time: keepPickupPin keeps the first, the one
  * place that rule is. */
-function pickupAsk(id, a, attempt, target, answered) {
+function pickupAsk(id, a, attempt, target, answered, read, unanswered) {
   function go(out) {
     memoAsk(id, a.q, target, out);
     if (pickHold(id)) answered(out);
   }
   if (nbxCache.has(target)) return go(nbxCache.get(target));
   nbxAsk(target, function (err, body) {
-    if (!err && !Array.isArray(body)) err = 'not a list';
+    // `read` turns a street index's answer into what is kept (pickupTail's
+    // /tail); a search's is a list, as ever.
+    var got = err ? null : read ? read(body) : Array.isArray(body) ? nbxHits(body) : null;
+    if (!err && !got) err = read ? 'not an answer' : 'not a list';
     if (err) {
       memoAsk(id, a.q, target, null, err);
       if (!pickHold(id)) return;
+      // ...and a question past the door's own (pickupTail's) that is not
+      // answered ends the search on the door's answer: the pickup is not
+      // said to be "NucBox down" for a question asked after its refusal,
+      // and a NucBox on a server from before /tail (a 404) is that.
+      if (unanswered) return unanswered();
       pickSearch[id].why[a.q] = 'NucBox down';
       if (attempt === 1) {
         pickSearch[id].timers.push(setTimeout(function () {
@@ -3999,9 +4076,8 @@ function pickupAsk(id, a, attempt, target, answered) {
       }
       return;
     }
-    var out = nbxHits(body);
-    nbxRemember(target, out);
-    go(out);
+    nbxRemember(target, got);
+    go(got);
   });
 }
 
@@ -6251,7 +6327,7 @@ function offerPin(offer, side) {
     on[side + 'Asking'] = false;
     on[side] = r && r.at ? { lat: r.at.lat, lon: r.at.lon } : null;
     onTimeAgain(offer);
-  });
+  }, null, side === 'pickup' && offer.pickupLine ? offer.pickup : null);
   return on[side + 'Asking'] ? undefined : on[side];
 }
 
@@ -6324,14 +6400,18 @@ function earlyKeep(key, on) {
  * `named` is an end's search (doorChain's street-index step), not a
  * pickup's. Returns what it did: 'no', 'cached', 'asking' (joined a search
  * already out) or 'asked'. Callers that must not ask pass `onlyIf` and get
- * 'skip' when it says no. */
-function earlyDoor(text, disc, named, done, onlyIf) {
+ * 'skip' when it says no. `store`, a pickup's only, is the store's name
+ * beside its door: where the door chain pins nothing, the store's street
+ * printed short is asked as the Took's search will ask it (pickupTail). */
+function earlyDoor(text, disc, named, done, onlyIf, store) {
   var plan = pickupDoorPlan(text);
   if (!NBX.search || !plan || !disc || !nbxTerm(plan.street)) {
     done(null);
     return 'no';
   }
-  var key = (named ? 'end' : 'pickup') + '\n' + MV.discBox(disc) + '\n' + text;
+  store = !named && typeof store === 'string' && store && store !== text ? store : null;
+  var key = (named ? 'end' : 'pickup') + '\n' + MV.discBox(disc) + '\n' + text
+          + (store ? '\n' + store : '');
   var on = early.get(key);
   if (on && on.done && on.until && Date.now() > on.until) {
     early.delete(key);
@@ -6356,18 +6436,27 @@ function earlyDoor(text, disc, named, done, onlyIf) {
     on.waiters = [];
     w.forEach(function (f) { f(r); });
   };
-  doorChain(plan, disc, named, function (target, read, answered) {
+  var ask = function (target, read, answered, unanswered) {
     if (nbxCache.has(target)) return answered(nbxCache.get(target));
     nbxAsk(target, function (err, body) {
       var out = err ? null
         : read ? read(body) : Array.isArray(body) ? nbxHits(body) : null;
-      if (!out) return finish(null, false);
+      // (pickupTail's questions, past the door's own answer, end on that
+      // answer when not answered; doorChain's own end the search as none.)
+      if (!out) return unanswered && unanswered.tail ? unanswered() : finish(null, false);
       nbxRemember(target, out);
       answered(out);
     });
-  }, function (res, asked, via) {
+  };
+  var settle = function (res, asked, via) {
     finish(res.at ? { at: { lat: res.at.lat, lon: res.at.lon }, asked: asked, via: via }
                   : { at: null, why: res.why }, true);
+  };
+  doorChain(plan, disc, named, ask, function (res, asked, via) {
+    if (!store) return settle(res, asked, via);
+    pickupTail(plan, store, disc, res, ask, function (res2, asked2, via2) {
+      settle(res2, via2 ? asked2 : asked, via2 || via);
+    });
   });
   return 'asked';
 }
@@ -6381,8 +6470,12 @@ function searchCardEarly(offer, now) {
   if (!disc) return;
   earlyCards = earlyCards.concat([offer.id]).slice(-EARLY_CARDS);
   var none = function () {};
+  // (The printed door with its store's name beside it, for the store's
+  // street printed short: pickupTail, as the Took's pickupAsks has it.)
   [offer.pickupLine, offer.pickup].forEach(function (t) {
-    if (typeof t === 'string') earlyDoor(t, disc, false, none);
+    if (typeof t === 'string') {
+      earlyDoor(t, disc, false, none, null, t === offer.pickupLine ? offer.pickup : null);
+    }
   });
   if (typeof offer.dropoff === 'string') earlyDoor(offer.dropoff, disc, true, none);
   // ...and every OTHER store's printed door on a DoorDash stops card
@@ -6402,7 +6495,7 @@ function searchCardEarly(offer, now) {
   // simply left to the Took, as every store was before.
   (storesOf(offer) || []).forEach(function (st) {
     if (!st.door || st.door === offer.pickupLine) return;
-    earlyDoor(st.door, disc, false, none, function () { return earlyRoom(now); });
+    earlyDoor(st.door, disc, false, none, function () { return earlyRoom(now); }, st.name);
   });
 }
 
@@ -10747,10 +10840,13 @@ var NBX = { search: nbxBase('NUCBOX_SEARCH'), route: nbxBase('NUCBOX_ROUTER'),
 var NBX_SETTING = { search: 'NUCBOX_SEARCH', route: 'NUCBOX_ROUTER', table: 'NUCBOX_ROUTER',
                     cross: 'NUCBOX_STREETS',
                     stretch: 'NUCBOX_STREETS', named: 'NUCBOX_STREETS',
-                    whole: 'NUCBOX_STREETS' };
+                    whole: 'NUCBOX_STREETS', tail: 'NUCBOX_STREETS' };
 // The questions the NucBox's street index answers (streetsRoute there, the
-// relay and doorChain and searchHeldStreet here).
-var STREET_ASKS = ['cross', 'stretch', 'named', 'whole'];
+// relay and doorChain and searchHeldStreet here). 'tail' is a store's street
+// printed short (streets.js tail, pickupTail; the owner's snap of 2 Nov): a
+// NucBox still on an older copy of this server answers it 404, which the rig
+// takes as no answer, and the pickup is refused as it was before.
+var STREET_ASKS = ['cross', 'stretch', 'named', 'whole', 'tail'];
 /* Short, because the one caller is a panel read while driving and the
  * alternative it falls back to is already there. Three seconds is chosen,
  * not measured: nobody has timed the real install over Tailscale, and a
@@ -11119,8 +11215,9 @@ function streetQuestion(req, which) {
   }
   // ...except 'named', which is a guess between streets and is only ever
   // asked inside a card's box (streets.js named answers nothing without one),
-  // and 'whole', the streets of a name that reach into a card's box.
-  if ((which === 'named' || which === 'whole') && !out.box) {
+  // and 'whole', the streets of a name that reach into a card's box, and
+  // 'tail', the streets a store's door printed short can be inside one.
+  if ((which === 'named' || which === 'whole' || which === 'tail') && !out.box) {
     return { error: which + ' needs a box' };
   }
   return out;
@@ -11159,6 +11256,25 @@ function streetAnswer(which, body) {
       return { error: 'the NucBox street index answered something that is not one street' };
     }
     return { ok: true, names: one.names, how: one.how, among: body.among };
+  }
+  if (which === 'tail') {
+    // The streets a store's door printed short can be (streets.js tail):
+    // `among` a count, names only with exactly one, and every street's
+    // polylines in the box, all or nothing — a line quietly missing is a
+    // store said to be off a street it is on, or the other way about.
+    var tl = names(body);
+    if (!body || body.ok !== true || !tl || !fin(body.among) || body.among < 0
+        || (tl.names.length > 0 && body.among !== 1) || !Array.isArray(body.lines)
+        || !body.lines.every(function (l) {
+          return Array.isArray(l) && l.length >= 2 && l.every(function (pt) {
+            return Array.isArray(pt) && pt.length === 2 && fin(pt[0]) && fin(pt[1]);
+          });
+        })) {
+      return { error: 'the NucBox street index answered something that is not the streets '
+                      + 'a name can end' };
+    }
+    return { ok: true, names: tl.names, how: tl.how, among: body.among, cutAt: cut,
+             lines: body.lines };
   }
   if (which === 'whole') {
     var w = names(body);
@@ -11250,7 +11366,7 @@ function nbxRoute(req, res) {
   var which = { '/api/nbx/search': 'search', '/api/nbx/route': 'route',
                 '/api/nbx/cross': 'cross', '/api/nbx/stretch': 'stretch',
                 '/api/nbx/named': 'named', '/api/nbx/whole': 'whole',
-                '/api/nbx/table': 'table' }[p] || null;
+                '/api/nbx/tail': 'tail', '/api/nbx/table': 'table' }[p] || null;
   if (!which) return reply(404, { ok: false, error: 'no such NucBox endpoint' });
   var streetish = STREET_ASKS.indexOf(which) >= 0;
   // (The table is the router's other service, on the same OSRM.)
@@ -11468,6 +11584,7 @@ function streetsRoute(req, res) {
   var out = which === 'cross' ? Streets.cross(STREETS.ix, st.a, st.b, box)
     : which === 'named' ? Streets.named(STREETS.ix, st.name, box)
     : which === 'whole' ? Streets.whole(STREETS.ix, st.name, box)
+    : which === 'tail' ? Streets.tail(STREETS.ix, st.name, box, STREETS_POINTS_MAX)
     : Streets.stretch(STREETS.ix, st.name, box, STREETS_POINTS_MAX);
   out.ok = true;
   return reply(200, out);

@@ -294,6 +294,55 @@ eq('[fragment] ...nor is one after a word shorter than CUT_KEEP, read whole or n
    + '"Wexley Elm r"', fr('Wexley Elm r'), ' (null, 0)');
 eq('[fragment] ...nor after a word with a digit in it: "Gable 14th r"', fr('Gable 14th r'),
    ' (null, 0)');
+/* ---- a store's street printed short (tail) ------------------------------- */
+// The owner's snap of 2 Nov 16:31, invented: a DoorDash card's store door on
+// "<B> Pkwy", OSM's road "<A> W <B> Parkway Northwest". Ossian W Wrenley
+// Parkway Northwest runs east-west inside CARD; Corlan Pike and Hester Corlan
+// Pike are two streets "Corlan Pike" ends; Pellan Way is held as printed;
+// Hollin Bower Trail Southeast ends "Bower Trl" and is quadranted.
+var tailIx = S.build({ format: S.FORMAT, e: 6,
+  names: ['Ossian W Wrenley Parkway Northwest', 'Corlan Pike', 'Hester Corlan Pike',
+          'Pellan Way', 'Mid Pellan Way', 'Hollin Bower Trail Southeast'],
+  nodes: [-84560000, 33960000, 30000, 0, 0, 5000, 2000, 0, 0, 3000, 2000, 0,
+          0, 3000, 2000, 0, 0, 3000, 2000, 0, 0, 3000, 2000, 0],
+  ways: [[[0], [0, 1]], [[1], [2, 1]], [[2], [4, 1]], [[3], [6, 1]], [[4], [8, 1]],
+         [[5], [10, 1]]] });
+function tl(name, box) {
+  var x = S.tail(tailIx, name, box === undefined ? CARD : box);
+  return x.names.join(' | ') + ' (' + x.how + ', ' + x.among + ', ' + x.lines.length + ')';
+}
+eq('tail: "Wrenley Pkwy" is the one street inside the box whose name ends with it, at a word '
+   + 'boundary, its shape sent', tl('Wrenley Pkwy'),
+   'Ossian W Wrenley Parkway Northwest (tail, 1, 1)');
+eq('...and with the quadrant printed that the street has, or a leading initial printed',
+   [tl('Wrenley Parkway NW'), tl('W Wrenley Pkwy')].join(' / '),
+   'Ossian W Wrenley Parkway Northwest (tail, 1, 1) / '
+   + 'Ossian W Wrenley Parkway Northwest (tail, 1, 1)');
+eq('...a quadrant the street does not have is none', tl('Wrenley Pkwy SE'), ' (null, 0, 0)');
+eq('...a word cut short is no word boundary: "renley Pkwy"', tl('renley Pkwy'), ' (null, 0, 0)');
+eq('...a name the index holds as printed inside the box is that street, never widened: '
+   + '"Pellan Way" is Pellan Way, not Mid Pellan Way', tl('Pellan Way'),
+   'Pellan Way (exact, 1, 1)');
+eq('...two streets "Corlan Pike" can be — itself, held as printed, wins; "Bower Trl" ends one',
+   [tl('Corlan Pike'), tl('Bower Trl')].join(' / '),
+   'Corlan Pike (exact, 1, 1) / Hollin Bower Trail Southeast (tail, 1, 1)');
+eq('...the printed name must end in a type with a name word before it: "Pkwy", "Wrenley", '
+   + '"W Pkwy"', [tl('Pkwy'), tl('Wrenley'), tl('W Pkwy')].join(' / '),
+   ' (null, 0, 0) /  (null, 0, 0) /  (null, 0, 0)');
+eq('...no street of it inside the box is none, and no box is no answer',
+   [tl('Wrenley Pkwy', S.boxOf('-84.4,33.9,-84.3,33.8')), tl('Wrenley Pkwy', null)].join(' / '),
+   ' (null, 0, 0) /  (null, 0, 0)');
+var tail2 = S.build({ format: S.FORMAT, e: 6, names: ['Ossian W Wrenley Parkway Northwest',
+                                                      'Ardo Wrenley Parkway'],
+                      nodes: [-84560000, 33960000, 30000, 0, 0, 5000, 2000, 0],
+                      ways: [[[0], [0, 1]], [[1], [2, 1]]] });
+var two = S.tail(tail2, 'Wrenley Pkwy', CARD);
+eq('...two streets it ends inside the box: no names, both shapes (a store along either is '
+   + 'along a street the card can mean)', [two.names.length, two.how, two.among,
+                                           two.lines.length].join(','), '0,tail,2,2');
+eq('...and past `most` points, no shapes, cut said',
+   JSON.stringify([S.tail(tailIx, 'Wrenley Pkwy', CARD, 1).lines,
+                   S.tail(tailIx, 'Wrenley Pkwy', CARD, 1).cutAt]), '[[],1]');
 eq('the fixture through named: "Foxglov" is Foxglove Trail, and "Church St" (two of that name '
    + 'in the box) is none', [S.named(ix, 'Foxglov', ALL).names.join(),
                             S.named(ix, 'Church St', ALL).among].join(' / '),
@@ -469,7 +518,15 @@ async function get(srv, u, init) {
        JSON.stringify([g.status, g.body.names, g.body.how, g.body.streets.length,
                        typeof g.body.streets[0].metres]),
        JSON.stringify([200, ['Foxglove Trail'], 'exact', 1, 'number']));
+    g = await get(nuc, '/api/streets/tail?name=' + encodeURIComponent('Foxglove Trl')
+                  + '&box=-84.6,34.0,-84.5,33.9');
+    eq('/api/streets/tail answers the streets a store\'s printed street can be inside the box, '
+       + 'with their shapes (a name held as printed is that street)',
+       JSON.stringify([g.status, g.body.names, g.body.how, g.body.among,
+                       g.body.lines.length > 0, g.body.cutAt]),
+       JSON.stringify([200, ['Foxglove Trail'], 'exact', 1, true, null]));
     var refused = [
+      ['/api/streets/tail?name=Foxglov', 'tail needs a box'],
       ['/api/streets/whole?name=Foxglov', 'whole needs a box'],
       ['/api/streets/named?name=Foxglov', 'named needs a box'],
       ['/api/streets/cross?a=x&b=y&limit=5', 'refused: limit'],

@@ -7001,7 +7001,15 @@
     // is not known: "≈ 1 of 2 dropoffs …; the other not known yet".
     var guessShare = guess && MV.guessShare ? MV.guessShare(o.dropoffs) : null;
     var heldShare = heldGuess && MV.guessShare ? MV.guessShare(heldSaid.dropoffs) : null;
-    return { pickup: pickQ, dropoff: o.dropoff || null, guess: guess,
+    /* ...and the store's NAME beside its door, when the door is what is
+       searched (a tap's or the card's printed one): asked by name along the
+       card's street where the door is not found (MV.NbxSearch.place's
+       `store`, MV.pickStoreAlong; the owner's snap of 2 Nov, "164 <B> Pkwy"
+       on the card and OSM's "<A> W <B> Parkway Northwest"). A pickup's only:
+       nothing of the kind is ever given for a dropoff. */
+    var pickStore = pickQ && pickQ !== o.pickup && typeof o.pickup === 'string' && o.pickup
+      ? o.pickup : null;
+    return { pickup: pickQ, pickupStore: pickStore, dropoff: o.dropoff || null, guess: guess,
              stores: stores, guessShare: guessShare,
              heldStores: hStores, heldGuess: heldGuess, heldShare: heldShare,
              // (The held card's fix and miles, for the held guess's disc:
@@ -7184,10 +7192,15 @@
       // ...and the held end's place, for its door's search to fall back to
       // (MV.NbxSearch.place). Never posted as the held end: pinHeldEnd sends
       // a door and nothing else, and the server pins a place itself.
+      // ...and this card's store's name beside its door, for its pickup only
+      // (want.pickupStore): the store along its street when the door is not
+      // found (MV.NbxSearch.storeTail).
       var got = await mapNbx.place(q, disc,            // eslint-disable-line no-await-in-loop
                                    { streets: nbx.streets, car: here,
                                      place: whose === 'held' && q === want.held
-                                       ? want.heldPlace : null });
+                                       ? want.heldPlace : null,
+                                     store: whose === 'new' && q === want.pickup
+                                       ? want.pickupStore || null : null });
       if (gone()) return null;
       if (got.why === 'unreachable') {
         // Today's path for this place and every one after it, under the

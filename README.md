@@ -291,9 +291,9 @@ heap Y MB" — the real figures, which nobody has yet read off the NucBox.
 be read is said at start and on every question, never as "no such street".
 
 What it answers, `GET /api/streets/cross?a=&b=&box=`,
-`/api/streets/stretch?name=&box=`, `/api/streets/named?name=&box=` and
-`/api/streets/whole?name=&box=` (box `left,top,right,bottom`, optional but for
-`named` and `whole`):
+`/api/streets/stretch?name=&box=`, `/api/streets/named?name=&box=`,
+`/api/streets/whole?name=&box=` and `/api/streets/tail?name=&box=` (box
+`left,top,right,bottom`, optional but for `named`, `whole` and `tail`):
 
 * **Where two streets meet** — ways that share a node meet there, and ways
   that cross without one (a bridge) where their segments cross. Points within
@@ -346,6 +346,19 @@ What it answers, `GET /api/streets/cross?a=&b=&box=`,
   was found: exactly one such street touching the card's disc, 600 m long at
   most, arms the GPS drop on the street ("● armed by street"). **The NucBox
   needs a `git pull` and a restart before the rig can ask this one too.**
+* **The streets a store's door printed short can be** (`tail`, asked only
+  inside a card's box, and only for a PICKUP with its store's name) — the
+  names above counted inside the box, else the streets there whose name ENDS
+  with the printed words at a word boundary ("Wrenley Pkwy" ends "Ossian W
+  Wrenley Pkwy NW"; a quadrant printed must agree; the printed words must end
+  in a street type with a name word before it), with their polylines in the
+  box. The rig asks it when a store's door was not pinned (the owner's snap of
+  2 Nov: DoorDash printed "<n> <B> Pkwy" under the store, OSM's road is
+  "<A> W <B> Parkway Northwest"): the door again by the one full name, else the store by its
+  name round that street, pinned only when exactly one place of that name
+  lies in the card's reach within 200 m of the street. Never for a dropoff.
+  **A NucBox without it answers 404, and the pickup is refused as before;
+  `git pull` and a restart there.**
 
 Measured: the suite's synthetic streets load in 1 ms. The real metro's size
 is **not known** here, and every figure that follows is for a synthetic grid
