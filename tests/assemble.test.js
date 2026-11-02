@@ -3283,6 +3283,49 @@ SEQ.forEach(function (seq) {
                     null)[0].street, '4410 Fernhill Ct');
   eq('[slip] a read that slips nothing writes no reads count (the hold stays byte for byte)',
      'doorReads' in A.mergePlanner([full], [full], null)[0], false);
+  // Both slips at once (the slip entry's Open in AUDITS): the first digit
+  // lost at the screen's edge AND one of the rest misread — "416" for
+  // "4410". One door only where both reads printed a name namesSlip calls
+  // one person; the fuller number stands whichever came first, pressed or not.
+  var lostOne = st('dropoff', 'patq', 1328, '416 Fernhill Ct', null);
+  eq('[slip] both slips at once: "416" for "4410" with the names agreeing is one door, the '
+     + 'four digits kept whichever read came first, and a press of "416" does not put it back',
+     [A.slipStop(pat, lostOne), A.slipStop(lostOne, pat),
+      A.mergePlanner([full], [lostOne], null).map(function (s) { return s.street; }),
+      A.mergePlanner([lostOne], [full], null).map(function (s) { return s.street; }),
+      A.mergePlanner([full], [lostOne], null, true).map(function (s) { return s.street; }),
+      A.mergePlanner([lostOne], [full], null)[0].doorReads],
+     [true, true, ['4410 Fernhill Ct'], ['4410 Fernhill Ct'], ['4410 Fernhill Ct'],
+      { 416: 1, 4410: 1 }]);
+  eq('[slip] ...and never: a name lost on either read, two names, initials apart, past five '
+     + 'minutes, two digits misread, two digits left, another street, another kind',
+     [A.slipStop(pat, st('dropoff', null, 1326, '416 Fernhill Ct', null)),
+      A.slipStop(st('dropoff', null, 1326, '4410 Fernhill Ct', 'Brookvale'), lostOne),
+      A.slipStop(pat, st('dropoff', 'Kamri S.', 1326, '416 Fernhill Ct', null)),
+      A.slipStop(pat, st('dropoff', 'Pat R.', 1326, '416 Fernhill Ct', null)),
+      A.slipStop(pat, st('dropoff', 'Pat Q.', 1340, '416 Fernhill Ct', null)),
+      A.slipStop(pat, st('dropoff', 'Pat Q.', 1326, '426 Fernhill Ct', null)),
+      A.slipStop(pat, st('dropoff', 'Pat Q.', 1326, '16 Fernhill Ct', null)),
+      A.slipStop(pat, st('dropoff', 'Pat Q.', 1326, '416 Fernhill Way', null)),
+      A.slipStop(pat, st('pickup', 'Pat Q.', 1326, '416 Fernhill Ct', null))],
+     [false, false, false, false, false, false, false, false, false]);
+  eq('[slip] ...a time lost on one read is no bar, and the neighbours stay two: "4418" with a '
+     + 'name lost, "418" for another customer, both listed side by side',
+     [A.slipStop(pat, st('dropoff', 'Pat Q.', null, '416 Fernhill Ct', null)),
+      A.mergePlanner([pat], [st('dropoff', null, 1326, '4418 Fernhill Ct', 'Brookvale')],
+                     null).length,
+      A.mergePlanner([pat], [st('dropoff', 'Jules K.', 1326, '418 Fernhill Ct', null)],
+                     null).length],
+     [true, 2, 2]);
+  // The snap's polluted hold with the edge's "416" read among its slips heals
+  // to its three dropoffs too.
+  var polluted2 = polluted.concat([kam('kamris', 1327, '416 Fernhill Ct')]);
+  var healed2 = A.mergePlanner(polluted2, [quin('Quin C.', 1342, '915')],
+                               { top: false, bottom: true });
+  eq('[slip] ...and a polluted hold holding "416" for "2416" heals to three dropoffs',
+     healed2.filter(function (s) { return s.kind === 'dropoff'; }).map(function (s) {
+       return s.street; }),
+     ['2416 Fernhill Ct', '2471 Fernhill Ct', '915 Brookvale Place Bivd']);
 })();
 
 /* ---- the end of a two-order trip: the owner's snap of 31 Oct, 21:46 ----

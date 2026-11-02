@@ -1834,7 +1834,8 @@
    *   - the two house numbers are the same, or one ENDS the other with at
    *     least two digits ("16" in "2416": digits lost at the front, never at
    *     the back), or they are as long, three digits and more, and differ in
-   *     one digit ("315"/"915");
+   *     one digit ("315"/"915"), or both at once: the shorter, three digits
+   *     and more, is the longer's last digits but for one ("416" for "2416");
    *   - the "Expected by" within NAME_SLIP_MINUTES, or either read none;
    *   - the names not two people (namesSlip): either read no name, or they
    *     are sameName, or their initials do not differ and their words are
@@ -1842,8 +1843,9 @@
    *     word; one of three letters may be two edits off a word of four,
    *     "jez" for "tezl"). "Pat Q." and "Jules K." at one door, due the same
    *     minute, are two customers (slotJoins' review of 27 Oct), and stay two.
-   * A digit misread at the same length is the one slip that can make two
-   * neighbours' doors one ("2416" and "2418" on one court), so it is taken
+   * A digit misread is the one slip that can make two neighbours' doors one
+   * ("2416" and "2418" on one court; "418" and "2416" with the "2" lost), so
+   * at the same length or on a number with its first digits lost it is taken
    * only where BOTH reads printed a name and the names agree: a name lost
    * there is not evidence of anything.
    *
@@ -1869,17 +1871,30 @@
 
   // How two house numbers can be one door: 'same', 'lost' (one ends the
   // other, two digits at least), 'one' (as long, three digits and more, one
-  // digit apart), or null.
+  // digit apart), 'lostOne' (both slips at once: the shorter, three digits
+  // and more, is the longer's last digits with one of them read differently
+  // — "416" for "2416", the "2" gone at the screen's left edge and the "2"
+  // after it read "4"; the slip entry's Open in AUDITS, the owner's snap of
+  // 31 Oct), or null.
   function housesSlip(x, y) {
     if (x === y) return 'same';
     var lo = x.length < y.length ? x : y, hi = x.length < y.length ? y : x;
     if (lo.length !== hi.length) {
-      return lo.length >= 2 && hi.slice(-lo.length) === lo ? 'lost' : null;
+      if (lo.length >= 2 && hi.slice(-lo.length) === lo) return 'lost';
+      // Three digits at least: a two-digit read one digit off the end of a
+      // longer number is one digit of two left to agree — most doors of a
+      // street would pass.
+      return lo.length >= 3 && digitsApart(lo, hi.slice(-lo.length)) === 1 ? 'lostOne' : null;
     }
     if (x.length < 3) return null;
+    return digitsApart(x, y) === 1 ? 'one' : null;
+  }
+
+  // Digits differing between two numbers as long.
+  function digitsApart(x, y) {
     var diff = 0;
     for (var i = 0; i < x.length; i++) if (x[i] !== y[i]) diff += 1;
-    return diff === 1 ? 'one' : null;
+    return diff;
   }
 
   // Letters to turn one word into the other (Levenshtein), for two short
@@ -1931,7 +1946,12 @@
       var d = Math.abs(a.expectedBy - b.expectedBy) % 1440;
       if (Math.min(d, 1440 - d) > NAME_SLIP_MINUTES) return false;
     }
-    if (how === 'one' && !(named(a) && named(b))) return false;
+    // A digit misread — alone ('one') or on a number with its first digits
+    // lost too ('lostOne') — is the slip that can make two neighbours' doors
+    // one ("2416" and "2418"; "418" and "2416"), so it is taken only where
+    // BOTH reads printed a name and namesSlip calls the names one person. A
+    // name lost there is not evidence of anything.
+    if ((how === 'one' || how === 'lostOne') && !(named(a) && named(b))) return false;
     return namesSlip(a, b);
   }
 
@@ -1950,7 +1970,13 @@
   function doorWinner(kept, read, votes) {
     var dk = slipDoor(kept), dr = slipDoor(read);
     var how = housesSlip(dk.house, dr.house);
-    if (how === 'lost') return dr.house.length > dk.house.length ? 'read' : 'kept';
+    // ('lostOne' too: "2416" over "416" — the longer read is the one that
+    // lost no digits. The shorter's other digit is not put back onto it:
+    // which read misread it is not known, and the fuller printed a whole
+    // number.)
+    if (how === 'lost' || how === 'lostOne') {
+      return dr.house.length > dk.house.length ? 'read' : 'kept';
+    }
     var vk = votes[dk.house] || 0, vr = votes[dr.house] || 0;
     if (vk !== vr) return vr > vk ? 'read' : 'kept';
     return addressConf(read) > addressConf(kept) ? 'read' : 'kept';
@@ -1989,7 +2015,8 @@
       Object.keys(rv).forEach(function (h) { votes[h] = (votes[h] || 0) + rv[h]; });
       out.doorReads = votes;
       if (dk && dr && dk.house !== dr.house) {
-        var lost = housesSlip(dk.house, dr.house) === 'lost';
+        var slip = housesSlip(dk.house, dr.house);
+        var lost = slip === 'lost' || slip === 'lostOne';
         addr = pressed && !(lost && dr.house.length < dk.house.length) ? read
           : doorWinner(kept, read, votes) === 'read' ? read : kept;
       }

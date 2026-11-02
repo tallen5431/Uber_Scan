@@ -6738,7 +6738,9 @@ digit, read "Bivd" for "Blvd", mangled the customer's name and slid the time
 a minute, all at once, and each slip was a stop. `slipStop` now calls two
 stops one when they are the same kind on the same street, the numbers equal,
 one ending the other (two digits at least), or one digit apart at the same
-length (three digits and more, and only with both names read), the times
+length (three digits and more, and only with both names read), or both at
+once — "416" for "2416", the first digit lost and one misread (three digits
+and more, again only with both names read and agreeing), the times
 within five minutes or missing, and the names not two people — initials that
 differ are two people, and so are two words more than an edit per three
 letters apart. "Pat Q." and "Jules K." at one door due the same minute stay
