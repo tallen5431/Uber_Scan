@@ -11075,6 +11075,50 @@ try:
 finally:
     stop(_stp)
 
+# --- a planner door behind the car leaves the fastest order (planPassed) ------
+#
+# Map view's fastest order ran through every door on the held planner, ①'s
+# customer already served or not (AUDITS' fastest-order entry, "dropoffs
+# passed are not taken off the order"). An order put down AT its door — here
+# the app's completion screen naming ②'s customer — puts that door behind the
+# car: heldEndState's `dropsPassed`, Map view's key for it. A press of Drop is
+# no such word (the owner drops early on purpose), and with nothing passed
+# the field is absent. The same invented orders as above.
+_PPSTOPS = _SSTOPS + [{'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'line': _SPAT,
+                       'street': '4821 Kestrel Dr', 'city': 'Marietta', 'expectedBy': None}]
+for _pname, _pby in (('pass-press', 'press'), ('pass-screen', 'screen')):
+    _ppp, _ppb, _ppj, _pph = _cserver(_pname, hold={'v': 2, 'orders': [dict(_sta), dict(_stbh)]},
+                                      SCREEN_DROP='1', CARRY_TWO='1')
+    try:
+        _say({'planner': {'stops': _PPSTOPS, 'unfiled': None, 'asked': False}})
+        _pp0 = get(_ppb, '/api/status').get('holding') or {}
+        if _pby == 'press':
+            post(_ppb, '/api/delivered', {'holdIds': ['t-b@%d' % _stbh['acceptedAt']]})
+        else:
+            _say(_done(app='uber', name='Lee R.', pay=28.08))
+        _pp1 = get(_ppb, '/api/status').get('holding') or {}
+        if _pby == 'press':
+            eq('[fastest order] with nothing behind the car the status has no dropsPassed, and a '
+               'press of Drop on ② puts no door behind it (the owner drops early)',
+               ('dropsPassed' in _pp0, [o.get('pay') for o in _orders(_ppb)],
+                'dropsPassed' in _pp1), (False, [9.48], False))
+        else:
+            eq('[fastest order] ② put down by the app\'s completion screen puts its door behind '
+               'the car on ①\'s planner, by Map view\'s key; ①\'s own door stays ahead',
+               ([o.get('pay') for o in _orders(_ppb)], _pp1.get('dropsPassed'),
+                len((_pp1.get('planner') or {}).get('stops') or [])),
+               ([9.48], [_SLEE], 3))
+            # A planner read after it, still listing the door (not from its
+            # top), does not bring it back.
+            _say({'planner': {'stops': _PPSTOPS, 'unfiled': None, 'asked': False}})
+            eq('[fastest order] ...and a planner read still listing the door keeps it behind '
+               'the car; ①\'s end and the figures\' orders untouched',
+               ((get(_ppb, '/api/status').get('holding') or {}).get('dropsPassed'),
+                (get(_ppb, '/api/status').get('holding') or {}).get('dropoff')),
+               ([_SLEE], _SPAT))
+    finally:
+        stop(_ppp)
+
 # Off unless the setting says exactly true: the row, and nothing else.
 _sop, _sob, _soj, _soh = _cserver('screen-off')
 try:

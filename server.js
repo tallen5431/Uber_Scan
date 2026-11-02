@@ -675,11 +675,15 @@ function startScanner() {
             // /api/dropoff), and its read merges with PRESS PRECEDENCE: for a
             // stop both show, its fields win wherever it read them, its
             // address block included (mergePlanner's `pressed`).
+            var passedWas = heldWasPassed(heldNow);
             heldNow.planner = {
               stops: Assemble.mergePlanner(heldNow.planner && heldNow.planner.stops,
                                            read.planner.stops, plannerPage,
                                            read.planner.asked === true),
               unfiled: read.planner.unfiled || null };
+            // ...and the doors already behind the car (planPassed) kept with
+            // the list they are about: a read does not un-deliver a door.
+            if (passedWas) heldNow.planner.passed = passedWas;
             read.planner.held = heldNow.planner.stops;
             // ...and a pickup it lists no longer marked visited, by the
             // planner's word (plannerVisits) — only off a read that shows
@@ -4949,6 +4953,14 @@ function putDown(now, by, done, which) {
   if (by === null || by === 'chooser') {
     dropped.forEach(function (d) { finishWatch(d, now, by, live, dropped.length > 1); });
   }
+  // ...and an order put down AT its door — the GPS (the car stopped at its
+  // pinned door and left) or the app's own completion screen — is a planner
+  // door behind the car (planPassed). Not a press: the owner drops orders
+  // early on purpose (finishWatch, 29 Oct), so Drop says nothing about where
+  // the car has been; its watch says it later, if it finishes at the door.
+  if (by === 'gps' || by === 'screen') {
+    planPassed(dropped.map(function (d) { return d.dropoff; }), by, now);
+  }
 }
 
 /* ---------- finishing a dropped order: the GPS goes on watching -------------
@@ -5171,6 +5183,8 @@ function finishWatch(d, now, by, list, many) {
   var to = { kind: 'none' };
   if (pin && !pickupNearEnd(d, pin, list) && !notOneCustomer(d)) {
     to = { kind: 'door', lat: pin.lat, lon: pin.lon };
+    // (The door's line rides on the watch, `end`, for planPassed when it
+    // finishes there: the order itself is gone from the list by then.)
     if (Array.isArray(pin.lines)) to.lines = pin.lines;
   } else if (!pin && d.endArea && d.endWhyFor === endTextOf(d)
              && isFinite(d.endArea.lat) && isFinite(d.endArea.lon)) {
@@ -5193,6 +5207,7 @@ function finishWatch(d, now, by, list, many) {
   finishing = finishing.filter(function (w) { return w.holdId !== holdIdOf(d); });
   finishing.push({ id: d.id, holdId: holdIdOf(d), dropAt: now, by: by || 'drop', ends: ends,
                    to: to, from: from, movedAt: null, need: need, driven: driven,
+                   end: to.kind === 'door' && typeof d.dropoff === 'string' ? d.dropoff : null,
                    // ...and the disc its door is searched in, should one be
                    // read after the press (watchDoor).
                    disc: heldDisc(d) || null });
@@ -5328,6 +5343,13 @@ function finishStep(beat, now) {
     // here, and the end-of-shift report: `at >= dropAt`), kept in the journal
     // and read by nobody.
     var at = Math.max(Math.round(hit.at), w.dropAt);
+    // ...and a watch finished at its DOOR (not an area, not 'stop', which a
+    // red light can make) puts that door behind the car on the planner the
+    // car still drives by (planPassed): the door the GPS drop would have
+    // armed on, or the one read after the press and found (watchDoor).
+    if (hit.how === 'door') {
+      planPassed([w.to && w.to.from === 'read' ? w.door : w.end], 'finished', at);
+    }
     rows.push(JSON.stringify({ v: 1, kind: 'finished', at: at, id: w.id, seq: at,
                                holdId: w.holdId, how: hit.how, dropAt: w.dropAt }) + '\n');
     delete finishLive[w.holdId];
@@ -5560,6 +5582,12 @@ function heldEndState(h) {
   // shape it was.
   var stores = heldStoresOf(h, gone);
   if (stores) out.stores = stores;
+  // ...and the held planner's dropoffs behind the car (planPassed), by Map
+  // view's key for a dropoff (MV.dropKey): its fastest order leaves them
+  // out. Advice only; absent with none, so every other beat is the shape it
+  // was.
+  var passed = plannerPassedKeys(h);
+  if (passed.length) out.dropsPassed = passed;
   return out;
 }
 
@@ -5910,6 +5938,77 @@ function planAtOf(stops, h) {
     }
   });
   return at.length === 1 ? at[0] : null;
+}
+
+/* ---------- a planner door behind the car (the fastest order's gap) --------
+ *
+ * Map view's fastest order (MV.fastestOrder, the owner's ask of 31 Oct) ran
+ * from the car through EVERY door on the held planner, so on a batch whose
+ * first order was delivered — its door still on the list the hold keeps
+ * until a read shows the list's top, which a phone left on the map never
+ * gives — the advice routed the car back to a customer already served, and
+ * its "saves N min" was measured through that door too (AUDITS: "dropoffs
+ * passed are not taken off the order").
+ *
+ * A door is behind the car only on POSITIVE evidence that the car finished
+ * there:
+ *   - an order the GPS put down (putDown 'gps': stopped at its pinned door,
+ *     then left), or the delivery app's own completion screen put down
+ *     (putDown 'screen');
+ *   - a Drop's watch finished at its door (finishStep, how 'door').
+ * Never a press of Drop (the owner drops early, before the door, on
+ * purpose), the chooser, a watch finished by 'area' or 'stop', or an order
+ * running out. Kept on the planner the car still drives by (the first-
+ * taken's, which setHeld moves onto the trip's next order) as `passed`:
+ * [{line, by, at}], the door as the order's end said it, matched to a stop
+ * as planAtOf matches an end (the street with its number, one stop only),
+ * so a door that is on the list twice, or not at all, marks nothing. At most
+ * PLAN_PASSED_MAX, the newest kept. Goes with the planner (forgetPlanner).
+ *
+ * ADVICE ONLY: read by heldEndState's `dropsPassed` and nothing else — not
+ * the armed end, not the GPS drop, not a finish, not a figure, not
+ * attribution (planAtOf itself is untouched). */
+var PLAN_PASSED_MAX = 12;
+
+function planPassed(lines, by, now) {
+  var h = scanner.held && scanner.held[0];
+  var stops = plannerStopsOf(h);
+  if (!stops) return;
+  var was = Array.isArray(h.planner.passed) ? h.planner.passed : [];
+  var add = [];
+  (lines || []).forEach(function (line) {
+    // A door: a street that starts with its house number (a town or a bare
+    // street is no stop's door), on the list once.
+    if (typeof line !== 'string' || !/^\s*\d+[A-Za-z]? +\S/.test(line.split(',')[0])) return;
+    if (planAtOf(stops, { dropoff: line }) === null) return;
+    if (was.concat(add).some(function (x) { return Assemble.sameStreet(x.line, line); })) return;
+    add.push({ line: line, by: by, at: now });
+  });
+  if (!add.length) return;
+  h.planner = Object.assign({}, h.planner, { passed: was.concat(add).slice(-PLAN_PASSED_MAX) });
+  saveHold(h);
+}
+
+// The doors a hold's planner has behind the car, as kept (planPassed), or
+// null with none: carried over a planner read onto the merged list.
+function heldWasPassed(h) {
+  var p = h && h.planner && Array.isArray(h.planner.passed) ? h.planner.passed : null;
+  return p && p.length ? p : null;
+}
+
+// ...as the stops they are on the planner now, by MV.dropKey: matched
+// afresh each time, so a door read fuller since is still the stop it was.
+function plannerPassedKeys(h) {
+  var stops = plannerStopsOf(h);
+  var passed = heldWasPassed(h);
+  if (!stops || !passed) return [];
+  var out = [];
+  passed.forEach(function (x) {
+    var i = planAtOf(stops, { dropoff: x.line });
+    var k = i === null ? null : MV.dropKey(stops[i]);
+    if (k && out.indexOf(k) === -1) out.push(k);
+  });
+  return out;
 }
 
 /* ---------- put down by the delivery app's own screen ----------------------

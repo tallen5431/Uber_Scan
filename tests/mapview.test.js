@@ -4206,6 +4206,64 @@ async function nucbox() {
        [doors[0].q === MV.pickupKey(plan[0]), MV.plannerDoors(null).length,
         MV.plannerDoors(plan.concat([plan[2]])).length], [true, 0, 5]);
 
+    // A dropoff behind the car (the gap of 31 Oct: "dropoffs passed are not
+    // taken off the order"): `passed`, by its dropKey, is done like a visited
+    // pickup; a pickup is never made done by a dropoff's key, and an unknown
+    // key marks nothing.
+    var behind = MV.plannerDoors(plan, ['780 Tansy Ln,'],
+                                 ['2416 Fernhill Ct, Brookvale', '12 Fernhill Pkwy NW, Brookvale',
+                                  '1 Nowhere Rd,']);
+    eqJ('[planner doors] a dropoff passed is done, by its key; a pickup\'s key in `passed` marks '
+       + 'no pickup, and an unknown key nothing',
+       behind.map(function (d) { return [d.label, d.done]; }),
+       [['P1', false], ['P2', true], ['D1', true], ['D2', false], ['D3', false]]);
+    // ...so the fastest order runs from the car through the stops still
+    // ahead only, and its "saves" is measured against the app's order of
+    // THOSE: P1 at 1, D2 at 9, D3 at 3 — the passed D1 (at 10) is no stop.
+    var aheadDoors = behind.filter(function (d) { return !d.done; });
+    var rAhead = MV.fastestOrder(aheadDoors, (function (xs) {
+      return xs.map(function (a) { return xs.map(function (b) { return Math.abs(a - b) * 60; }); });
+    })([0, 1, 9, 3]));
+    eqJ('[fastest order] with D1 passed the order is through P1, D2, D3 only, and the saving is '
+       + 'against the app\'s order of those',
+       [aheadDoors.map(function (d) { return d.label; }), rAhead.order, rAhead.cost,
+        rAhead.appCost, MV.orderWords(aheadDoors, rAhead, 'road')],
+       [['P1', 'D2', 'D3'], [0, 2, 1], 540, 900, 'fastest order: P1 D3 D2 · saves 6 min vs the app\'s']);
+
+    // A GPS STOP at a door (doorStopStep): the server's arrival rule, not a
+    // drive-past. Fixes at the door every 10 s; 0.0009° of latitude is ~100 m.
+    var door = { lat: 34.0, lon: -84.5 };
+    var fx = function (dLat, err) { return { lat: 34.0 + dLat, lon: -84.5, err: err || 10 }; };
+    var walkStop = function (fixes, t0) {
+      var st;
+      fixes.forEach(function (f, i) { st = MV.doorStopStep(st, door, f, (t0 || 0) + i * 10000); });
+      return st;
+    };
+    var at = [fx(0), fx(0), fx(0), fx(0), fx(0), fx(0), fx(0)];   // 60 s at the door
+    var away = [fx(0.004), fx(0.004)];                            // ~440 m, twice
+    eqJ('[planner doors] a dropoff is passed after a stop of a minute at its door and two fixes '
+       + 'past 300 m; driving by, a short stop, one fix away, or a silence in the stop is not',
+       [walkStop(at.concat(away)),
+        walkStop([fx(0.004), fx(0), fx(0), fx(0.004), fx(0.004)]),
+        walkStop(at.slice(0, 5).concat(away)),
+        walkStop(at.concat([fx(0.004)])) === 'passed',
+        (function () {
+          var st;
+          [0, 10, 20, 50, 60, 70, 80].forEach(function (s) {   // a 30 s silence at 20-50
+            st = MV.doorStopStep(st, door, fx(0), s * 1000);
+          });
+          return away.reduce(function (s2, f, i) {
+            return MV.doorStopStep(s2, door, f, 90000 + i * 10000); }, st);
+        })() === 'passed'],
+       ['passed', { lastAt: 40000 }, { lastAt: 60000 }, false, false]);
+    eqJ('[planner doors] ...and never off an area, a refused or grey fix; passed stays passed',
+       [walkStop(at.concat(away).map(function (f) { return f; }), 0) === 'passed',
+        MV.doorStopStep(undefined, { lat: 34.0, lon: -84.5, approx: true }, fx(0), 0),
+        MV.doorStopStep(undefined, door, { line: 'GPS fix refused' }, 0),
+        MV.doorStopStep(undefined, door, { lat: 34.0, lon: -84.5, err: 10, grey: true }, 0),
+        MV.doorStopStep('passed', door, fx(0), 0)],
+       [true, undefined, undefined, undefined, 'passed']);
+
     // A cost matrix off points on a line (row/col 0 the car): |a - b| * 60 s.
     function lineCost(xs) {
       return xs.map(function (a) { return xs.map(function (b) { return Math.abs(a - b) * 60; }); });

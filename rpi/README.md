@@ -6829,6 +6829,13 @@ position (to ~100 m), so the NucBox is asked once per set and move. Advice and
 drawing only: no stop of it is posted or becomes an order's end, the GPS drop,
 a finish or a figure, and the map and caption are unchanged on a trip whose
 doors are all already marked and whose app order is already the fastest.
+A door the car has finished at leaves the order and its "saves N min", which
+then run from the car through the stops still ahead: only on positive
+evidence — an order put down at its door by the GPS or by the app's
+completion screen, a Drop's watch finished at its door (the server's
+`dropsPassed`), or a GPS stop of a minute at a door the map placed at its
+door, then the car gone 300 m. A press of Drop is not evidence (orders are
+dropped early on purpose), and neither is driving past.
 
 #### A read that outlived the window it went out in
 

@@ -3419,6 +3419,37 @@
   var dropsPassed = {};
   var dropSpots = [];
 
+  /* ...and the planner doors the car has STOPPED at and left, for the fastest
+   * order alone (MV.doorStopStep: the server's own arrival rule at a door,
+   * not a drive-past), keyed like dropsPassed by the order in the car and
+   * the door's key (MV.dropKey). Page memory only: a reload forgets them, and
+   * the server's word (heldSaid.dropsPassed) is what outlives one. ADVICE
+   * ONLY: the run's figure, the GPS drop, a finish and the hold never hear of
+   * it. `planSpots` is where the last walk placed each planner dropoff at its
+   * door. */
+  var planStops = {};
+  var planSpots = [];
+
+  function planStopKey(q) {
+    return heldOwner() + '\n' + (q || '');
+  }
+
+  // The planner's dropoffs behind the car: the server's (an order put down
+  // at its door by the GPS or the app's screen, a watch finished at its
+  // door) and the page's stops (planStops), by MV.dropKey.
+  function plannerPassedNow() {
+    var out = holdingNow && heldSaid && Array.isArray(heldSaid.dropsPassed)
+      ? heldSaid.dropsPassed.slice() : [];
+    // (Off planStops itself, not planSpots: a door once passed is left out
+    // of the next walk's spots, and must stay behind the car all the same.)
+    var pre = planStopKey('');
+    Object.keys(planStops).forEach(function (k) {
+      var q = k.slice(pre.length);
+      if (k.indexOf(pre) === 0 && planStops[k] === 'passed' && out.indexOf(q) === -1) out.push(q);
+    });
+    return out;
+  }
+
   function dropPassKey(d) {
     return heldOwner() + '\n' + (d.q || '') + '\n' + (d.name || '');
   }
@@ -3426,7 +3457,8 @@
   // A beat's fix against each placed dropoff; Map view redrawn when one
   // has just been passed.
   function stepDrops() {
-    if (!MV || !MV.dropPassStep || !holdingNow || !dropSpots.length || !gpsNow) return;
+    if (!MV || !MV.dropPassStep || !holdingNow || !gpsNow) return;
+    if (!dropSpots.length && !planSpots.length) return;
     var dot = MV.hereDot(gpsNow.fix, 0);
     var passed = false;
     dropSpots.forEach(function (d) {
@@ -3436,6 +3468,18 @@
       dropsPassed[d.key] = now;
       if (now === 'passed') passed = true;
     });
+    // ...and each planner door at its door, by the stricter stop rule
+    // (guarded for a map-view.js from before it).
+    if (MV.doorStopStep) {
+      var t = Date.now();
+      planSpots.forEach(function (d) {
+        var k = planStopKey(d.q);
+        var was = planStops[k];
+        var now = MV.doorStopStep(was, d.at, dot, t);
+        planStops[k] = now;
+        if (now === 'passed' && was !== 'passed') passed = true;
+      });
+    }
     if (passed && viewMode === 'map') showMap();
   }
 
@@ -3562,6 +3606,7 @@
     heldId = null; atDropoff = false; heldPlan = null; heldSaid = null;
     // (...and the doors it passed: a new order's are its own, dropPassKey.)
     dropSpots = [];
+    planSpots = [];
     heldList = []; unownedNow = 0;
     // ...and the card's line with the pair line it qualifies, in the same
     // moment: no order, nothing to be on the way of.
@@ -5750,6 +5795,10 @@
         // offers, and the run car -> store 1 -> store 2 -> the end moves
         // with them (MV.heldStores).
         heldSaid.stores = Array.isArray(msg.heldEnd.stores) ? msg.heldEnd.stores : null;
+        // ...and the planner's dropoffs the server knows are behind the car
+        // (planPassed in server.js): out of the fastest order, nothing else.
+        heldSaid.dropsPassed = Array.isArray(msg.heldEnd.dropsPassed)
+          ? msg.heldEnd.dropsPassed : [];
       }
       // ...and every order's, with two in the car.
       if (msg.alive && Array.isArray(msg.orders) && holdingNow) heldList = msg.orders;
@@ -6875,8 +6924,10 @@
        ADVICE AND DRAWING ONLY: never in `names`, so never posted, never
        `found`, never a figure's stop, the GPS drop's door or an order's end.
        Guarded for a map-view.js from before it. */
+    // ...less the dropoffs behind the car (plannerPassedNow: positive
+    // evidence only), which the order and its "saves N min" leave out.
     var planDoors = holdingNow && plan && MV && MV.plannerDoors && MV.fastestOrder
-      ? MV.plannerDoors(plan, done) : [];
+      ? MV.plannerDoors(plan, done, plannerPassedNow()) : [];
     /* ...and where the held order's run starts when no card's fix starts it
        (between offers, or a card that came up with none): the live fix,
        kept per leg and per ROUTE_MOVE_M (MV.routeFrom), so the run goes car
@@ -8050,6 +8101,11 @@
       if (want.planDoors && want.planDoors.length && mapNbx && MV.fastestOrder) {
         planRun = await plannerRun(want, found, here, nbx, gone, ladDrops);
         if (planRun === WALK_LEFT) return;
+        // ...each dropoff still ahead that it placed at its DOOR, for each
+        // beat's fix (stepDrops' stop rule): an area is never stepped.
+        planSpots = planRun ? planRun.doors.filter(function (d) {
+          return d.kind === 'dropoff' && !d.done && d.at && !d.at.approx;
+        }).map(function (d) { return { q: d.q, at: d.at }; }) : [];
         if (!plannerRunShown(planRun)) planRun = null;
         if (planRun && planRun.words) notes.push(planRun.words);
       }
@@ -9016,7 +9072,7 @@
           put(d.at, d.kind === 'pickup' ? '#17c964' : '#f5a524',
               (approx ? '≈ the area of ' : '') + (d.kind === 'pickup'
                 ? 'a pickup on the Trip Planner' : 'a dropoff on the Trip Planner')
-                + (d.done ? ' — collected' : ''),
+                + (d.done ? (d.kind === 'pickup' ? ' — collected' : ' — behind the car') : ''),
               [d.name, String(d.q || '').replace(/,$/, '')].filter(Boolean).join(' · '), true,
               approx ? '≈' : d.done ? '✓' : d.label,
               { faded: approx || !!d.done, aside: !!d.done });

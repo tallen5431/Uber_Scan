@@ -1082,6 +1082,52 @@
     return state === 'near' && mi > DROP_LEFT_MI ? 'passed' : state;
   }
 
+  /* --- a planner door the car STOPPED at, then left (for the fastest order) --
+   *
+   * dropPassStep above is a drawing's guess: a car that only drives within
+   * 0.1 mi of a door "passes" it. The fastest order is advice the driver acts
+   * on, and a stop wrongly taken off it sends the car past a customer still
+   * waiting, so it asks more: the server's own arrival rule at a door
+   * (server.js stepAt, the 12 Oct replay's numbers), on the page. The car's
+   * fix within DOOR_ARRIVE_M plus its error (capped at DOOR_ERR_CAP_M, so
+   * 100 m at most) for DOOR_DWELL_MS with no silence over DOOR_GAP_MS is a
+   * stop there; after it, DOOR_LEAVE_FIXES fixes in a row past DOOR_LEAVE_M
+   * is left: PASSED. Only a point found at its DOOR (never an `approx` area:
+   * approximate points are drawing only), and only a fix the gate passed and
+   * still fresh (a hereDot that is no refusal and not grey).
+   *
+   * `state` the stop's last (undefined, an object, or 'passed'), `now` the
+   * page's clock at the beat. Returns the new state, a new object, never
+   * changing the one given. ADVICE ONLY: the hold, the GPS drop, its door pin,
+   * a finish and every figure never hear of it. */
+  var DOOR_ARRIVE_M = 75;
+  var DOOR_ERR_CAP_M = 25;
+  var DOOR_DWELL_MS = 60000;
+  var DOOR_GAP_MS = 20000;
+  var DOOR_LEAVE_M = 300;
+  var DOOR_LEAVE_FIXES = 2;
+
+  function doorStopStep(state, at, fix, now) {
+    if (state === 'passed') return state;
+    if (!at || at.approx || !fix || fix.line || fix.grey || typeof now !== 'number'
+        || !isFinite(at.lat) || !isFinite(at.lon) || !isFinite(fix.lat) || !isFinite(fix.lon)) {
+      return state;
+    }
+    var s = state && typeof state === 'object' ? state : {};
+    var m = crowMiles(fix, at) * METRES_PER_MILE;
+    if (s.stopped) {
+      if (m <= DOOR_LEAVE_M) return { stopped: true, out: 0, lastAt: now };
+      var out = (s.out || 0) + 1;
+      return out >= DOOR_LEAVE_FIXES ? 'passed' : { stopped: true, out: out, lastAt: now };
+    }
+    var err = typeof fix.err === 'number' && isFinite(fix.err) ? fix.err : DOOR_ERR_CAP_M;
+    if (m > DOOR_ARRIVE_M + Math.min(err, DOOR_ERR_CAP_M)) return { lastAt: now };
+    var gap = typeof s.lastAt === 'number' ? now - s.lastAt : Infinity;
+    var since = typeof s.inSince === 'number' && gap <= DOOR_GAP_MS ? s.inSince : now;
+    return now - since >= DOOR_DWELL_MS ? { stopped: true, out: 0, lastAt: now }
+      : { inSince: since, lastAt: now };
+  }
+
   /* The run's dropoffs as routeLadder is handed them: each one's point, null
      for one not found (counted as skipped), and the PASSED left out
      altogether (dropPassStep) — not skipped, done. */
@@ -1128,10 +1174,23 @@
    * order is said ("P1 P2 D3 D1 D2"). `of` is the order a pickup's card names
    * (server.js ownPickups), absent where none does. DRAWING AND ADVICE ONLY:
    * none of these is posted, `found`, a figure's stop, the GPS drop's door or
-   * an order's end. */
-  function plannerDoors(stops, done) {
+   * an order's end.
+   *
+   * `passed` (the gap of AUDITS' fastest-order entry: "dropoffs passed are
+   * not taken off the order"): the DROPOFFS behind the car, by this same key
+   * (dropKey), `done` like a visited pickup, so the fastest order and its
+   * "saves N min" run from the car through the stops still ahead only. Only
+   * on positive evidence, which the caller gathers: the server's word
+   * (heldEndState's `dropsPassed` — an order put down at its own door by the
+   * GPS or by the app's completion screen, or a Drop's watch finished at its
+   * door) and a GPS STOP at the door on the page (doorStopStep), never a car
+   * that drove past (dropPassStep's drawing guess). A dropoff the app's own
+   * planner no longer lists from its top is already gone from the list the
+   * hold keeps (Assemble.mergePlanner's top trim), so it needs no word here. */
+  function plannerDoors(stops, done, passed) {
     var seen = {}, n = { pickup: 0, dropoff: 0 };
     var visited = Array.isArray(done) ? done : [];
+    var behind = Array.isArray(passed) ? passed : [];
     var out = [];
     (Array.isArray(stops) ? stops : []).forEach(function (s) {
       if (!s || (s.kind !== 'pickup' && s.kind !== 'dropoff')) return;
@@ -1143,7 +1202,9 @@
       seen[s.kind + '|' + q] = true;
       n[s.kind] += 1;
       var d = { q: q, kind: s.kind, label: (s.kind === 'pickup' ? 'P' : 'D') + n[s.kind],
-                name: plannerName(s.name) || null, done: visited.indexOf(q) !== -1 };
+                name: plannerName(s.name) || null,
+                done: visited.indexOf(q) !== -1
+                  || (s.kind === 'dropoff' && behind.indexOf(q) !== -1) };
       if (s.of) d.of = s.of;
       out.push(d);
     });
@@ -5356,6 +5417,7 @@
            // ...the doors passed, and the dashed leg through those ahead.
            DROP_NEAR_MI: DROP_NEAR_MI, DROP_LEFT_MI: DROP_LEFT_MI,
            dropPassStep: dropPassStep, dropsAhead: dropsAhead, detourOnward: detourOnward,
+           doorStopStep: doorStopStep,
            // ...and every planner door mapped, the fastest order through
            // them said (the owner, 31 Oct).
            plannerDoors: plannerDoors, fastestOrder: fastestOrder, crowMatrix: crowMatrix,
