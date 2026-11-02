@@ -937,6 +937,11 @@ _TG_LINES = {
 FEEDS['targets'] = dict(FEEDS['took six'], targets={'target': 25, 'lines': _TG_LINES})
 FEEDS['targets no towns'] = dict(FEEDS['took six'], targets={
     'target': 25, 'lines': dict(_TG_LINES, areas=[])})
+# ...and 'in the car' again in a browser whose locale writes the 24-hour clock
+# (en-GB), as the owner's does: the offers page says "4:31 PM" whatever the
+# locale (the owner, 2 Nov: "it would also be nice to have the 12 hr clock on
+# the offers page"; journal.html clock12).
+FEEDS['in the car 24h'] = FEEDS['in the car']
 
 DRIVER = r'''
 const { chromium } = require('playwright');
@@ -1102,7 +1107,8 @@ const TEXT = (sel) => {
     // the hour had one digit and a 1px sideways scroll went unseen.
     const ctx = await browser.newContext(Object.assign(
       { viewport: { width: 900, height: 900 } },
-      name === 'in the car' ? { timezoneId: 'UTC' } : {}));
+      name === 'in the car' || name === 'in the car 24h' ? { timezoneId: 'UTC' } : {},
+      name === 'in the car 24h' ? { locale: 'en-GB' } : {}));
     const page = await ctx.newPage();
     await page.addInitScript(STUB(feed));
     await page.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' })
@@ -1114,6 +1120,8 @@ const TEXT = (sel) => {
         .map((e) => (e.textContent || '').replace(/\s+/g, ' ').trim());
       return {
         headline: text('#headline'),
+        // Every row's clock, for the 12-hour check (clock12).
+        whens: list('.offer .when'),
         // The advice block. Shown for a refusal as well as an answer — a
         // refusal says what the window is short of, which is not nothing — so
         // the two are told apart by `working`, which only an answer fills in.
@@ -1580,7 +1588,7 @@ const TEXT = (sel) => {
       // The clock times of the day's first and last card, as the page's own
       // locale writes them, for the lead to be held against.
       rv.clock = await page.evaluate((ats) => ats.map((t) => new Date(t)
-        .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })),
+        .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })),
         [feed.offers.filter((o) => o.id === 'q7')[0].at,
          feed.offers.filter((o) => o.id === 'q1')[0].at]);
       // ...and the names of p1's day and q1's, as the page's own locale writes
@@ -2222,6 +2230,17 @@ try:
         ok_('%s was rendered' % name, got.get(name) is not None)
     if any(got.get(n) is None for n in FEEDS):
         raise SystemExit(1)
+
+    # --- the 12-hour clock, whatever the browser's locale (the owner, 2 Nov) ---
+    _w12 = (got.get('in the car 24h') or {}).get('whens') or []
+    _w = (got.get('in the car') or {}).get('whens') or []
+    ok_('[12 hr clock] every row\'s time is the 12-hour clock with AM/PM in a browser whose '
+        'locale writes 24-hour (%r)' % _w12[:3],
+        len(_w12) >= 3 and all(re.match(r'^(1[0-2]|[1-9]):[0-5]\d\s?(AM|PM|am|pm)$', w)
+                                for w in _w12))
+    ok_('[12 hr clock] ...the same rows the en-US page shows (%r)' % _w[:3],
+        _w and [re.sub(r'\s', '', w.upper()) for w in _w12]
+        == [re.sub(r'\s', '', w.upper()) for w in _w])
 
     # --- what the page opens on ---------------------------------------------
     #

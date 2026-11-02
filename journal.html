@@ -1047,6 +1047,17 @@
   // them.
   var BLOCK_NAMES = Advice.BLOCK_NAMES;
 
+  // EVERY CLOCK TIME ON THIS PAGE IS THE 12-HOUR CLOCK, "4:31 PM" (the owner,
+  // 2 Nov: "it would also be nice to have the 12 hr clock on the offers
+  // page"). The times were toLocaleTimeString with the viewer's locale
+  // deciding, and the owner's browser decides 24-hour, while the panel, the
+  // hour blocks above (Advice.BLOCK_NAMES, "12–3pm") and the cards themselves
+  // all speak AM/PM. One helper, so no row of the page keeps the other clock.
+  // Words only: every sort, key and day boundary here reads the stamp itself.
+  function clock12(d) {
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+
   var unitTags = document.querySelectorAll('.stats .unit');
 
   function showUnits(on) {
@@ -1385,8 +1396,7 @@
       + (pair ? '<span class="tag">stacked on</span>'
          : busy ? '<span class="tag">' + (busy.stacked ? 'stacked on' : 'during a job')
                   + '</span>' : '')
-      + '<span class="when">' + when.toLocaleTimeString(undefined,
-          { hour: 'numeric', minute: '2-digit' }) + '</span>'
+      + '<span class="when">' + clock12(when) + '</span>'
       + '</summary>'
       + (aside ? '<p class="why">' + whyAside(r) + '</p>' : '')
       // One list per heading. `<h3>` inside a `<dl>` is not valid, and a screen
@@ -1437,8 +1447,7 @@
              return row('Arrived',
                Math.max(0, Math.round((r.at - job.at) / 60000))
                + ' min into a job you ticked at '
-               + new Date(job.at).toLocaleTimeString(undefined,
-                   { hour: 'numeric', minute: '2-digit' })
+               + clock12(new Date(job.at))
                + (more ? ' (and ' + more + ' other ticked job'
                          + (more === 1 ? '' : 's') + ' still running)' : '')
                + (busy.stacked
@@ -1507,7 +1516,8 @@
       + '</dl><h3>How it was read</h3>'
       + '<dl class="facts">'
       + row('Seen as', read.join(', ') || null, 'quiet')
-      + row('Read at', when.toLocaleString(), 'quiet')
+      + row('Read at', when.toLocaleDateString() + ', ' + when.toLocaleTimeString(undefined,
+          { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }), 'quiet')
       + row('Time to read', typeof r.ms === 'number' ? r.ms + ' ms' : null, 'quiet')
       + (flags.length ? row('Worth knowing', flags.join('; '), 'quiet') : '')
       + '</dl>'
@@ -2315,7 +2325,7 @@
       // every one of them wrapped anyway.
       return '<div class="block"><span class="label runlabel">'
            + from.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-           + '<em>' + from.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+           + '<em>' + clock12(from)
            + '</em><em>' + length + '</em></span>'
            + '<span class="bar ' + verdictFor(mid, target, band) + '" style="background-size:'
            + Math.max(1, Math.min(100, mid / full * 100)).toFixed(1) + '% 100%"></span>'
@@ -2474,8 +2484,7 @@
          // a missing range and not a missing answer: "no answer" beside
          // "Called it: pass" would contradict itself.
          + (p.stackShown === false ? 'no range' : 'no answer') + '</span>')
-      + '<span class="when">' + when.toLocaleTimeString(undefined,
-          { hour: 'numeric', minute: '2-digit' }) + '</span>'
+      + '<span class="when">' + clock12(when) + '</span>'
       // Where the two jobs go, on the row rather than only inside it — the
       // same thing the offer log puts under its figures, and what turns this
       // from rows of arithmetic into jobs a driver can recognise. Shortened;
@@ -3912,8 +3921,7 @@
     };
     var dayName = nameOf(days[pos]);
     var clock = function (at) {
-      return new Date(at).toLocaleTimeString(undefined,
-        { hour: 'numeric', minute: '2-digit' });
+      return clock12(new Date(at));
     };
     // Still unlabelled on every OTHER day of the window, so the line folded
     // up says where the rest of the advice note's count is waiting.
