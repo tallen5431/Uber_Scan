@@ -52,6 +52,33 @@ and the top was placed 2% of the screen up into the map — square, sure, and
 wrong. References per block, followed up the card: sure of 348, wrong about
 none.
 
+DoorDash's stops card is the one card the rig reads that none of this knew
+(the owner's snaps of 31 Oct; testcards.dd_stores_screen). It is a sheet the
+full width of the screen under a map, and its button is a pill nearly as wide,
+in two reds — the countdown burns down it in a darker red. Asked as above, it
+was never sure: rendered, "not solid" (the two reds are 28 grey levels apart,
+past BAR_STEP); on the rig's frames "not set in a card"; and where the bar
+was found (the same frames through a quad placed by hand), the walk ran off
+the top, because on the rig the sheet's white and the map's are 215 against
+203 — inside WALK. So when the answer above is not sure and the screen came
+in colour, the card is looked for once more as DoorDash draws it:
+
+  - its button is found by its COLOUR, not its edges (_dd_pill): rows that
+    are red right across, one pill-height deep. Red is the one thing about it
+    no Uber card has — Uber's buttons are black, grey and white — so no Uber
+    screen gets past it, and every Uber picture in rpi/test_cardfind.py gives
+    the answer in colour that it gives in grey;
+  - the walk up is the walk above with DoorDash's tolerances (DD_WALK,
+    DD_CREEP, DD_SOME) and a reference per column, not per block (_walk);
+  - and every test on the answer is the one above — square (one end block
+    excused, for the sheet's edge-to-edge shadow), 15–85% tall, mostly
+    background, three lines of text, not off the top.
+
+What it is sure of is said in `why` as DD_SHEET, so a caller can tell it from
+a card found by its button bar: the walk sees no hairline, so a card stacked
+above on the same sheet is walked through, exactly as above — and the
+reader, not the finder, refuses that (pipeline.rescue_refused).
+
 No deskew. The box is drawn square round the screen and the warp makes it
 square, so the card is square in it, or the phone has moved inside the box —
 which is a reason to be unsure, not a thing to correct.
@@ -137,6 +164,55 @@ MIN_BACKGROUND = 0.55
 MIN_TEXT_ROWS = 3
 INK = 30
 SQUARE = 0.006             # the spread of the top across blocks, of the height
+
+# DoorDash's stops card (_dd_pill, and the walk's `doordash`). A pixel is the
+# pill's red when its hue is within RED_HUE of red either side (OpenCV's hue
+# runs 0-180), it is at least RED_S saturated and RED_V bright. Measured on
+# the pill: on the rig's frames of 31 Oct both reds come in at saturation
+# 200-255, brightness 145-205; rendered, a glare blob at its peak lifts the
+# brighter red to (255, 138, 146), saturation 117, and a left-hand shadow at
+# its deepest takes the darker red to brightness 44. RED_V is also what keeps
+# a dark card's noise out: near black, a few levels of sensor noise can make a
+# pixel any hue at any saturation.
+RED_HUE = 10
+RED_S = 90
+RED_V = 40
+# ...and the share of a row, across the middle of the screen, that must be red
+# for the row to be pill. The word and the countdown on it are white, and a
+# row through them is still 79-87% red on the rig's frames.
+PILL_ACROSS = 0.70
+# The walk up DoorDash's sheet. Three things differ from the Uber walk, each
+# for frames it failed on; with all three the rig's frames (a quad placed by
+# hand round the screen on each) are sure at the sheet's top on the two with
+# a red pill whose phone sat square, and on the third through one of the two
+# boxes — through the other, its top spread 4 rows across the blocks, past
+# SQUARE's 3.6, and it is refused as turned. Every rendered frame in
+# rpi/test_cardfind.py is sure at the top or refused, never elsewhere.
+#
+# DD_WALK: how far from its reference a pixel may be and still be sheet. The
+# rig has the sheet at 215 and the map at 203 (dd_stores_screen: 255 and 233),
+# so WALK, at 12, took the map for sheet and walked to the top of the screen
+# box on every frame.
+DD_WALK = 6
+# DD_CREEP: the most a reference may move in one row. With FOLLOW alone, a
+# tolerance this tight follows the sheet's edge itself: the rig's camera
+# spreads the 12-level step from sheet to map over three rows of the finder's
+# copy, each inside DD_WALK of the reference the row below had dragged down
+# to it. A glare gradient is gentler than any edge: the steepest
+# testcards.degrade draws is about one level a row at FIND_HEIGHT (a blob's
+# flank, 110 levels over a sigma of 64 rows; a band of sheen, 0.8).
+DD_CREEP = 2.0
+# DD_SOME: the share of a block that must be the sheet's background for the
+# block to be sheet — SOME_BACKGROUND's job. At a quarter, the rig's map, with
+# its pale roads, kept three blocks in the middle "sheet" a hundred rows up
+# it, and the top was refused as not square. At half, the map is off the
+# sheet on every block. Text does not end the walk at half: DoorDash's lines
+# are short of the width, so the 85% of blocks OFF_ACROSS needs are never off
+# at once inside the sheet, and the walk goes on through them.
+DD_SOME = 0.5
+# What a sure answer from it says, for a caller that needs to tell the two
+# apart (pipeline.Scanner._look).
+DD_SHEET = "DoorDash's sheet from its Accept pill up"
 
 
 def _unsure(why):
@@ -317,13 +393,14 @@ def _side(profile, start, direction):
     return last
 
 
-def _walk(g, left, right, b0, s0, s1):
+def _walk(g, left, right, b0, s0, s1, doordash=False):
     """Up from the bar to the card's top.
 
     Returns (top, starts, background, text_rows): the card's top row (None if
     the walk reached the screen's own top), the row at which each block of
-    columns left the card, the share of the body that was the card's own
-    background, and how many lines of text were crossed on the way.
+    columns left the card (None for one still on it), the share of the body
+    that was the card's own background, and how many lines of text were
+    crossed on the way.
 
     Each block of columns is judged against its own reference, taken from the
     blank strip above the bar and carried up the card a row at a time — only
@@ -334,30 +411,46 @@ def _walk(g, left, right, b0, s0, s1):
     the first thing tried, and a line of 32px bold text pulled half the blocks'
     medians off the background for five rows — every card ended at its own
     second line of text.
+
+    On DoorDash's sheet (`doordash`) the same walk is made with three things
+    changed, each for a frame it failed on — see DD_WALK, DD_SOME and
+    DD_CREEP — and the reference kept per COLUMN rather than per block: a
+    left-hand shadow ramps 40 levels across one block of a light sheet, so
+    against one level for the block a third of it was ever near enough, and
+    the four shadowed blocks were off the sheet from the row above the pill.
     """
     h = g.shape[0]
     k = BLOCKS - 2
     bw = max(1, (right - left) // k)
     span = g[:, left:left + bw * k].astype(np.int16).reshape(h, k, bw)
-    ref = np.median(span[s0:s1], axis=(0, 2)).astype(np.float32)
+    tol, some = (DD_WALK, DD_SOME) if doordash else (WALK, SOME_BACKGROUND)
+    if doordash:
+        ref = np.median(span[s0:s1], axis=0).astype(np.float32)
+    else:
+        ref = np.median(span[s0:s1], axis=(0, 2)).astype(np.float32)[:, None]
     persist = max(2, int(round(PERSIST * h)))
     off_since = [None] * k
     off_run = 0
     shares, inked = [], []
     r = b0 - 1
     while r >= 0:
-        dist = np.abs(span[r] - ref[:, None])
-        near_px = dist <= WALK
+        dist = np.abs(span[r] - ref)
+        near_px = dist <= tol
         share = near_px.mean(axis=1)
-        near = share >= SOME_BACKGROUND
+        near = share >= some
         for j in range(k):
             if near[j]:
                 off_since[j] = None
             elif off_since[j] is None:
                 off_since[j] = r
         if (~near).mean() < OFF_ACROSS:
-            got = np.where(near_px, span[r], 0).sum(axis=1) / np.maximum(1, near_px.sum(axis=1))
-            ref = np.where(near, ref + FOLLOW * (got - ref), ref).astype(np.float32)
+            if doordash:
+                move = np.clip(FOLLOW * (span[r] - ref), -DD_CREEP, DD_CREEP)
+                ref = np.where(near[:, None] & near_px, ref + move, ref).astype(np.float32)
+            else:
+                got = np.where(near_px, span[r], 0).sum(axis=1) / np.maximum(1, near_px.sum(axis=1))
+                ref = np.where(near, ref[:, 0] + FOLLOW * (got - ref[:, 0]),
+                               ref[:, 0]).astype(np.float32)[:, None]
             off_run = 0
             shares.append(float(share.mean()))
             inked.append(bool((dist > INK).mean() >= 0.01))
@@ -367,36 +460,103 @@ def _walk(g, left, right, b0, s0, s1):
                 top = r + off_run
                 ink = np.array(inked[:max(0, b0 - top)], bool)
                 lines = int(np.sum(ink[1:] & ~ink[:-1]) + (1 if len(ink) and ink[0] else 0))
-                return (top, [s for s in off_since if s is not None],
+                return (top, list(off_since),
                         float(np.mean(shares)) if shares else 0.0, lines)
         r -= 1
     return None, [], 0.0, 0
 
 
-def find_card(screen_grey, box):
+def _dd_pill(bgr, r0, r1):
+    """DoorDash's Accept pill: (top, bottom, left, right), or None.
+
+    Found by its colour, on the finder's small copy of the screen in colour:
+    the rows between r0 and r1 that are red (RED_HUE, RED_S, RED_V) across at
+    least PILL_ACROSS of the middle of the screen, one run of them a button's
+    height deep (BAR_MIN-BAR_MAX), its ends the widest run of columns red over
+    most of those rows — joined across GAP, as _bar's are, for the word and
+    the countdown. Both reds are red: the darker countdown that made the pill
+    "not solid" to _bar is no step at all here.
+
+    Short of the screen's sides, as _bar asks of a button: a band of colour
+    edge to edge is not a pill. Not "set in a card": that test is for the
+    strip of card under a button, which is the card's colour, never red.
+    """
+    h, w = bgr.shape[:2]
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    red = ((hue <= RED_HUE) | (hue >= 180 - RED_HUE)) & (sat >= RED_S) & (val >= RED_V)
+    a, b = int(0.05 * w), int(0.95 * w)
+    across = red[:, a:b].mean(axis=1) >= PILL_ACROSS
+    lo, hi = int(BAR_MIN * h), int(BAR_MAX * h)
+    r = max(0, r0)
+    while r < min(h, r1):
+        if not across[r]:
+            r += 1
+            continue
+        end = r
+        while end < h and across[end]:
+            end += 1
+        if lo <= end - r <= hi:
+            run = _widest(red[r:end].mean(axis=0) >= 0.5, max(1, int(GAP * w)))
+            if run is not None and run[1] - run[0] >= EDGE_SHARE * (b - a) \
+                    and not (run[0] <= 1 and run[1] >= w - 2):
+                return r, end, run[0], run[1]
+        r = end
+    return None
+
+
+def find_card(screen, box):
     """The card the drawn box was meant to hold. {sure, box, why}.
 
-    `screen_grey` is the warped screen box, grey; `box` is the drawn card box
-    as fractions of it (x, y, w, h). The answer's `box` is in the same terms:
-    the card's sides, its top, and the TOP of its button — the button holds no
-    figure, and its edge is the one thing below the text that is always there.
+    `screen` is the warped screen box, grey or in colour (BGR); `box` is the
+    drawn card box as fractions of it (x, y, w, h). The answer's `box` is in
+    the same terms: the card's sides, its top, and the TOP of its button — the
+    button holds no figure, and its edge is the one thing below the text that
+    is always there.
+
+    Colour is used for one thing only: DoorDash's red pill, looked for after
+    the answer from the grey screen is not sure (see the module docstring).
+    The grey screen is the one cv2 makes of it either way, so the grey answer
+    is the same answer whichever is handed in.
     """
-    if screen_grey is None or box is None:
+    if screen is None or box is None:
         return _unsure('no screen or no card box')
-    g = screen_grey if screen_grey.ndim == 2 else cv2.cvtColor(screen_grey, cv2.COLOR_BGR2GRAY)
+    colour = screen if screen.ndim == 3 else None
+    g = screen if colour is None else cv2.cvtColor(screen, cv2.COLOR_BGR2GRAY)
     H0, W0 = g.shape[:2]
     if H0 < 50 or W0 < 20:
         return _unsure('no screen or no card box')
     scale = FIND_HEIGHT / float(H0)
-    g = cv2.resize(g, (max(BLOCKS * 2, int(round(W0 * scale))), FIND_HEIGHT),
-                   interpolation=cv2.INTER_AREA)
+    size = (max(BLOCKS * 2, int(round(W0 * scale))), FIND_HEIGHT)
+    g = cv2.resize(g, size, interpolation=cv2.INTER_AREA)
     h, w = g.shape
     bottom = float(box[1]) + float(box[3])
     r0, r1 = int((bottom - BAR_ABOVE) * h), int(min(1.0, bottom + BAR_BELOW) * h)
     bar = _bar(g, r0, r1)
-    if isinstance(bar, str):
-        return _unsure(bar)
-    b0, b1, _, bar_l, bar_r = bar
+    found = _unsure(bar) if isinstance(bar, str) else \
+        _from_bar(g, bar[0], bar[1], bar[3], bar[4])
+    if found['sure'] or colour is None:
+        return found
+
+    # DoorDash's stops card, once the grey answer has said it is not sure.
+    # Its own answer is given only when it is sure; when it is not, both
+    # reasons are said, the pill's first. Every Uber screen says what it said
+    # before: no Uber card has a red pill, so none gets past _dd_pill.
+    pill = _dd_pill(cv2.resize(colour, size, interpolation=cv2.INTER_AREA), r0, r1)
+    if pill is None:
+        return found
+    dd = _from_bar(g, pill[0], pill[1], pill[2], pill[3], doordash=True)
+    if not dd['sure']:
+        return _unsure("DoorDash's Accept pill, but %s (and %s)" % (dd['why'], found['why']))
+    return dict(dd, why=DD_SHEET)
+
+
+def _from_bar(g, b0, b1, bar_l, bar_r, doordash=False):
+    """The card above a button found at rows b0-b1, columns bar_l-bar_r: its
+    sides, its top, and every test on the answer. {sure, box, why}. The same
+    for both buttons but for two things on DoorDash's sheet (`doordash`): the
+    walk's (see _walk), and the one end block the square test excuses."""
+    h, w = g.shape
 
     # The sides, along a strip just above the bar: the bottom of the card's
     # body, which is blank on every card here.
@@ -409,12 +569,30 @@ def find_card(screen_grey, box):
     # rounded corners are not what is measured; each carries its own reference
     # up the card.
     m = max(1, int(0.03 * w))
-    top, starts, background, lines = _walk(g, left + m, right + 1 - m, b0, s0, s1)
+    top, starts, background, lines = _walk(g, left + m, right + 1 - m, b0, s0, s1, doordash)
     if top is None:
         return _unsure('the card runs off the top of the screen box')
 
     # Square: every block should have left the card within a row or two of
     # the others. A slanted top is a phone turned inside its box.
+    #
+    # On DoorDash's sheet one END block may be left out of that, as the walk
+    # may leave one block behind (OFF_ACROSS): the sheet runs to the screen's
+    # sides, and the outermost block is where a left-hand shadow is deepest.
+    # Rendered (testcards.degrade 'shadow'), at the screen's edge the light
+    # sheet is 64 and the map 58, a quarter of 255 and 233; the end block
+    # left the sheet 4 rows above the other nine, which left it within a row
+    # of each other, and SQUARE is 3.6. Only an end: an edge slanted by a roll
+    # spreads every block, and nine of ten still spread 8/9 as far.
+    if doordash and len(starts) > 2:
+        def spread(ss):
+            return max(ss) - min(ss) if ss else h
+        starts = min(([s for s in starts if s is not None],
+                      [s for s in starts[1:] if s is not None],
+                      [s for s in starts[:-1] if s is not None]),
+                     key=lambda ss: (spread(ss) > SQUARE * h, -len(ss)))
+    else:
+        starts = [s for s in starts if s is not None]
     if len(starts) < (BLOCKS - 2) * OFF_ACROSS or \
             (max(starts) - min(starts)) > SQUARE * h:
         return _unsure('the card\'s top edge is not square to the box — the phone '

@@ -1412,9 +1412,10 @@ if TC.available():
     # top half, its payout at 0.45 of the screen, and a box drawn round an Uber
     # card cutting it at the payout (BOX_DD_PAY: "$14.10" flush on the crop's
     # top, money_is_clipped, parse('')) or just under it (BOX_DD_BELOW: the
-    # journey and no payout). The finder is not sure of it (its two-red Accept
-    # pill), so the box is raised over it (PL.raise_journey, RAISE_STEPS) and
-    # the raised read kept under the found card's rules. Invented stores.
+    # journey and no payout). The finder knows the card by its red pill now
+    # (cardfind.DD_SHEET) and is asked first — for the clipped read too, held
+    # to the journey under the shaved figure (PL.raise_journey) — and the box
+    # raised (RAISE_STEPS) is the fallback when it cannot say. Invented stores.
     DD = TC.dd_stores_screen()
     DD_WIDTH = 680
     _ddb = look(DD, box=TC.BOX_DD_PAY, finder=False, width=DD_WIDTH)
@@ -1425,20 +1426,72 @@ if TC.available():
     eq('...and a box just under it reads the journey and no payout',
        (_ddl['parsed']['pay'], _ddl['parsed']['miles'], _ddl['parsed']['minutes']),
        (None, 8.7, 33.0))
-    with Asked() as _asked:
-        _ddf = look(DD, box=TC.BOX_DD_BELOW, width=DD_WIDTH)
-    ok_('...the finder is asked and is not sure of it (%r)' % (_asked.calls,), _asked.calls == 1)
+    _dd_top, _dd_pill = TC.DD_TOP / float(TC.H), 1965 / float(TC.H)
     for _bn, _bx in (('flush on the box\'s top', TC.BOX_DD_PAY),
                      ('just above the box', TC.BOX_DD_BELOW)):
         _reads = []
         _rb = PL.Scanner._read_box
         PL.Scanner._read_box = lambda self, *a, **k: _reads.append(list(a[1])) or _rb(self, *a, **k)
         try:
-            _dr = look(DD, box=_bx, width=DD_WIDTH)
+            with Asked() as _asked:
+                _dr = look(DD, box=_bx, width=DD_WIDTH)
         finally:
             PL.Scanner._read_box = _rb
         eq('a DoorDash stops card whose payout is %s gets its payout, journey and all, off the '
-           'box raised' % _bn,
+           'sheet the finder found' % _bn,
+           (_dr['parsed']['pay'], _dr['parsed']['miles'], _dr['parsed']['minutes'],
+            _dr['parsed']['complete'], _dr['cropFrom'], _dr['rescuedBy'], _dr['rescued']),
+           (14.1, 8.7, 33.0, True, 'found', 'finder', 1))
+        ok_('...the finder asked once, and read twice: the box, then the sheet from its top to '
+            'its pill (%r)' % ([[round(v, 3) for v in r] for r in _reads],),
+            _asked.calls == 1 and len(_reads) == 2 and _reads[0] == list(_bx)
+            and abs(_reads[1][1] - _dd_top) < 0.01
+            and abs(_reads[1][1] + _reads[1][3] - _dd_pill) < 0.01)
+        eq('...with nothing raised', _dr['ms'].get('raise', 'absent'), None)
+    _ddm = look(TC.dd_stores_screen(pay='$21.35', journey='4 stops (15.0 mi) • 53 min',
+                                    tail=('Multiple dropoffs (2 stops)', None)),
+                box=TC.BOX_DD_BELOW, width=DD_WIDTH)
+    eq('...and the card for two customers the same way',
+       (_ddm['parsed']['pay'], _ddm['parsed']['miles'], _ddm['parsed']['minutes'],
+        _ddm['rescuedBy']), (21.35, 15.0, 53.0, 'finder'))
+    _ddd = look(TC.dd_stores_screen(TC.DARK), box=TC.BOX_DD_PAY, width=DD_WIDTH)
+    eq('...and in dark mode', (_ddd['parsed']['pay'], _ddd['rescuedBy']), (14.1, 'finder'))
+    # The twelve frames the raise alone never rescued: a light sheet in a
+    # left-hand shadow whose stops line did not read, so nothing was raised.
+    # The finder needs no stops line, and is sure of the sheet now — but its
+    # crop reads no payout either: "$14.10" sits at the left, in the deepest
+    # of the shadow, and the reader loses it as it loses the stops line
+    # (")* 33 min" is all that is left of that). Refused for no payout, said
+    # so, and never a figure that is not the card's.
+    for _name, _scr, _pay in (('one customer', DD, 14.1),
+                              ('two customers', TC.dd_stores_screen(
+                                  pay='$21.35', journey='4 stops (15.0 mi) • 53 min',
+                                  tail=('Multiple dropoffs (2 stops)', None)), 21.35)):
+        _dsh = look(TC.degrade(_scr, 'shadow'), box=TC.BOX_DD_BELOW, width=DD_WIDTH, seed=2)
+        ok_('a light DoorDash sheet (%s) in a left-hand shadow: the finder is sure of it and its '
+            'read is refused for no payout, or kept with its own (%r, %r)'
+            % (_name, _dsh['parsed']['pay'], _dsh['finder']),
+            _dsh['parsed']['pay'] == _pay
+            or (_dsh['parsed']['pay'] is None and (_dsh['finder'] or '').startswith(
+                'read the card found above the box and refused it: no payout')))
+
+    # THE RAISE: the fallback, when the finder cannot say where the sheet
+    # starts. Answered unsure here, so each of its rules is still held.
+    def _unsure_finder(grey, box):
+        return {'sure': False, 'box': None, 'why': 'held unsure by the test'}
+
+    for _bn, _bx in (('flush on the box\'s top', TC.BOX_DD_PAY),
+                     ('just above the box', TC.BOX_DD_BELOW)):
+        _reads = []
+        _rb = PL.Scanner._read_box
+        PL.Scanner._read_box = lambda self, *a, **k: _reads.append(list(a[1])) or _rb(self, *a, **k)
+        try:
+            with Asked(_unsure_finder):
+                _dr = look(DD, box=_bx, width=DD_WIDTH)
+        finally:
+            PL.Scanner._read_box = _rb
+        eq('with the finder unsure, a DoorDash stops card whose payout is %s gets its payout off '
+           'the box raised' % _bn,
            (_dr['parsed']['pay'], _dr['parsed']['miles'], _dr['parsed']['minutes'],
             _dr['parsed']['complete'], _dr['cropFrom'], _dr['rescuedBy'], _dr['rescued']),
            (14.1, 8.7, 33.0, True, 'found', 'raised', 1))
@@ -1448,21 +1501,16 @@ if TC.available():
            [[round(v, 3) for v in _bx],
             [_bx[0], round(_bx[1] - PL.RAISE_STEPS[0], 3), _bx[2],
              round(_bx[3] + PL.RAISE_STEPS[0], 3)]])
-    _ddm = look(TC.dd_stores_screen(pay='$21.35', journey='4 stops (15.0 mi) • 53 min',
-                                    tail=('Multiple dropoffs (2 stops)', None)),
-                box=TC.BOX_DD_BELOW, width=DD_WIDTH)
-    eq('...and the card for two customers the same way',
-       (_ddm['parsed']['pay'], _ddm['parsed']['miles'], _ddm['parsed']['minutes'],
-        _ddm['rescuedBy']), (21.35, 15.0, 53.0, 'raised'))
-    _ddd = look(TC.dd_stores_screen(TC.DARK), box=TC.BOX_DD_PAY, width=DD_WIDTH)
-    eq('...and in dark mode', (_ddd['parsed']['pay'], _ddd['rescuedBy']), (14.1, 'raised'))
+    with Asked(_unsure_finder):
+        _ddr = look(TC.dd_stores_screen(TC.DARK), box=TC.BOX_DD_PAY, width=DD_WIDTH)
+    eq('...and in dark mode', (_ddr['parsed']['pay'], _ddr['rescuedBy']), (14.1, 'raised'))
     # ...and what the raise cost, on `ms` as `raise` (scan_pi's health line
     # counts it: the Pi's cost of this was an estimate): the raised reads'
     # time, inside the read's total; None on a read that never raised.
     ok_('a raised read carries its raised reads\' time on `ms` as `raise`, within the total '
-        '(%r of %r)' % (_ddd['ms'].get('raise'), _ddd['ms']['total']),
-        isinstance(_ddd['ms'].get('raise'), float)
-        and 0 < _ddd['ms']['raise'] <= _ddd['ms']['total'])
+        '(%r of %r)' % (_ddr['ms'].get('raise'), _ddr['ms']['total']),
+        isinstance(_ddr['ms'].get('raise'), float)
+        and 0 < _ddr['ms']['raise'] <= _ddr['ms']['total'])
     # With the finder off, nothing is raised: cardFinder is the one switch for
     # reading outside the drawn box.
     _ddo = look(DD, box=TC.BOX_DD_BELOW, finder=False, width=DD_WIDTH)
@@ -1470,20 +1518,43 @@ if TC.available():
        (_ddo['parsed']['pay'], _ddo['cropFrom'], _ddo['ms'].get('raise', 'absent')),
        (None, 'drawn', None))
     # A card stacked above it on one sheet, no button of its own and a bigger
-    # payout: the raise reaches DoorDash's own payout first, and the card
-    # above's never reaches the panel.
+    # payout. The finder walks through both to the upper card's top (the
+    # sheet's walk sees no hairline), and its read holds both dollar figures
+    # and is refused; the raise then reaches DoorDash's own payout first. At
+    # every width and both boxes, the card above's never reaches the panel.
     _up = (762, [(782, 'Order in progress', 34, False), (872, '$22.75', 86, True)])
-    _dds = look(TC.dd_stores_screen(upper=_up), box=TC.BOX_DD_PAY, width=DD_WIDTH)
-    eq('a card stacked above the DoorDash card gives the panel the DoorDash card\'s payout, '
-       'never its own', (_dds['parsed']['pay'], _dds['parsed']['miles']), (14.1, 8.7))
-    # ...and a raised read is refused by every rule a found card is, said as
-    # `finder`: two dollar figures (a card above in the crop), a journey moved.
-    for _what, _txt, _want in (
+    _stk = TC.dd_stores_screen(upper=_up)
+    _stacked = []
+    for _w in (600, 680, 760):
+        for _bx in (TC.BOX_DD_PAY, TC.BOX_DD_BELOW):
+            _dds = look(_stk, box=_bx, width=_w)
+            _stacked.append((_dds['parsed']['pay'], _dds['parsed']['miles']))
+            if _w == DD_WIDTH and _bx is TC.BOX_DD_PAY:
+                eq('a card stacked above the DoorDash card gives the panel the DoorDash card\'s '
+                   'payout, never its own, off the box raised after the sheet was refused',
+                   (_dds['parsed']['pay'], _dds['parsed']['miles'], _dds['rescuedBy']),
+                   (14.1, 8.7, 'raised'))
+    ok_('...and never the card above\'s $22.75, at three widths and both boxes (%r)' % (_stacked,),
+        all(_p in (None, 14.1) for _p, _m in _stacked)
+        and all(_m == 8.7 for _p, _m in _stacked if _p is not None))
+    # ...and a found or raised read is refused by every rule a found card is,
+    # said as `finder`: two dollar figures (a card above in the crop), a
+    # journey moved, and — DoorDash's sheet's read held to the raise's rule —
+    # no stops line. Faked from the second read on: with the finder asked as
+    # it is, the sheet's read is refused, then the raise is read and refused
+    # for the same reason (three reads); with it held unsure, the raise alone
+    # (two).
+    for _what, _txt, _want, _finder_on in (
             ('a second dollar figure', '$22.75\n3 stops (8.7 mi) - 33 min\n'
              '$14.10 incl. tips\n3 stops (8.7 mi) - 33 min',
-             'it holds a second dollar figure'),
+             'it holds a second dollar figure', False),
             ('a journey figure moved', '$14.10 incl. tips\n3 stops (9.7 mi) - 33 min',
-             'it reads a different miles from the box')):
+             'it reads a different miles from the box', False),
+            ('a second dollar figure', '$22.75\n3 stops (8.7 mi) - 33 min\n'
+             '$14.10 incl. tips\n3 stops (8.7 mi) - 33 min',
+             'it holds a second dollar figure', True),
+            ('no stops line', '$14.10 incl. tips\n8.7 mi - 33 min\n& Lark Owl Pizza',
+             'no stops line in it', True)):
         _rb = PL.Scanner._read_box
         _calls = []
 
@@ -1496,13 +1567,15 @@ if TC.available():
 
         PL.Scanner._read_box = _fake
         try:
-            _rf = look(DD, box=TC.BOX_DD_BELOW, width=DD_WIDTH)
+            with Asked(None if _finder_on else _unsure_finder) as _asked:
+                _rf = look(DD, box=TC.BOX_DD_BELOW, width=DD_WIDTH)
         finally:
             PL.Scanner._read_box = _rb
-        ok_('a raised read with %s is refused, and says so (%r)' % (_what, _rf['finder']),
+        ok_('a %s read with %s is refused, and says so (%r)'
+            % ('found and a raised' if _finder_on else 'raised', _what, _rf['finder']),
             _rf['parsed']['pay'] is None and _rf['cropFrom'] == 'drawn'
             and (_rf['finder'] or '').startswith('raised the box 0.09 and refused it: ' + _want)
-            and len(_calls) == 2)
+            and len(_calls) == (3 if _finder_on else 2) and _asked.calls == 1)
         ok_('...and its raised read\'s time is on `ms` all the same, as `raise` (%r): a refused '
             'raise costs what a kept one does' % (_rf['ms'].get('raise'),),
             isinstance(_rf['ms'].get('raise'), float) and _rf['ms']['raise'] > 0)
@@ -1519,6 +1592,15 @@ if TC.available():
                      ('Est. delivery 4:15 PM • 8.6 mi\nDave\'s', False),
                      ('3 stops\n& Lark Owl Pizza', False))],
        [True, True, False, False, False])
+    # ...and a clipped read that is not DoorDash's stops card asks the finder
+    # no more than it did: the clipped Uber card has no journey to hold a
+    # found read to, and no stops line.
+    # (The box's top at 0.528 shaves "$14.48" on the Early-look card: clipped,
+    # parse(''), at 720px.)
+    with Asked() as _asked:
+        _cl = look(TC.early_look_screen(), box=[BOX[0], 0.528, BOX[2], 1 - 0.528])
+    eq('a clipped read of an Uber card is not a reason to ask the finder',
+       (_cl['clipped'], _cl['parsed']['pay'], _asked.calls), (True, None, 0))
 
     # A left-hand shadow on the cards the finder cannot see the edge of ends
     # with no payout; on the one it can, with the card's own. Never another.

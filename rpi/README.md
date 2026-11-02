@@ -2691,6 +2691,38 @@ and `null` in a window with none). The 1.2s above stays an estimate until a
 shift with a stops card on it has said otherwise; the first snap after one
 has the figure.
 
+**The finder knows DoorDash's stops card now, and the raise is behind it.**
+`cardfind.find_card` is handed the warped screen in colour. When its grey
+answer is not sure, it looks once more for DoorDash's Accept pill by its red
+(`_dd_pill`: rows red across 70% of the screen, one pill-height deep, short
+of its sides — both reds, so the countdown is no step) and walks up the sheet
+from it with tolerances of its own (`DD_WALK` 6, `DD_CREEP` 2 levels a row,
+`DD_SOME` half a block) and a reference per column: the rig's map is only 12
+levels off its sheet (215 against 203), and a left-hand shadow ramps 40 levels
+across one block. Every test on the answer is the Uber walk's, but one end
+block may be left out of the square test. A sure answer says `DD_SHEET`, and
+the read of it is held to everything the raised read is: the box's journey
+(for a clipped read, the clipped text's — the finder is asked on that read now
+too), one dollar figure, a payout printed as one, and a stops line in its own
+text. Refused, the raise still runs: a card stacked above on the sheet is in
+the sheet's crop, two figures, while the box raised 0.09 reaches DoorDash's
+payout first. No Uber card has red, so no Uber screen takes this path; every
+Uber picture in `test_cardfind.py` answers in colour what it answers in grey.
+
+Over the same 90 rendered frames: still 78 right, 12 none, **no wrong
+figure**, now 77 off the sheet the finder found and 1 off the raised box
+(was 12 and 66). The 12 none are the light sheet in a left-hand shadow: the
+finder is sure of it now, but the payout is in the deepest of the shadow and
+the read of the sheet loses it, as the box's read loses the stops line —
+refused for no payout. A card stacked above with a bigger payout reaches the
+panel at no width, through neither box. Cost (development box, x86): 171ms
+median for the finder and its read on a rescued frame against 166ms for the
+raise before — one read of the sheet in place of one of the raised box — on
+a 210–224ms box read; the look alone is about 6ms. Dearer on those 12 shadow
+frames: about 170ms (the look, then a read refused) where the unsure look
+cost 6ms. On the Pi, estimates as above; the `raise` figure on the health line
+now counts only the reads the finder could not settle.
+
 **▣ Set box again is the way to change them.** A box drawn by hand stays until
 another is drawn, and nothing on the panel throws it away. There used to be:
 ⟳ Re-find, pressed with a box in force, looked for the screen on the next frame

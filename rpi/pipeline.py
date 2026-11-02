@@ -2061,9 +2061,24 @@ class Scanner:
         # the loop's rate-limited sample line quotes beside the reader's text:
         # a rescue that never happens otherwise looks exactly like the box
         # reading "Pit." with no finder at all.
-        if (g.card_finder and not g.whole and worth_a_second_look(got['parsed'])
-                and room_above(g.roi)):
-            found = CF.find_card(to_grey(screen), g.roi)
+        #
+        # DoorDash's stops card is asked about on one more read: one whose
+        # payout sat flush on the box's top. money_is_clipped leaves that read
+        # parse(''), no journey, so worth_a_second_look never asked for it —
+        # but raise_journey (below) reads its journey off the clipped text,
+        # and with a journey there is something for the found card to be held
+        # to. The finder knows that card now (cardfind's DD_SHEET, by its red
+        # pill), so it is asked first and the raise is the fallback. Its read
+        # is held to the same journey the raise would be, and to the raise's
+        # one extra rule: a stops line in its own text, still DoorDash's card.
+        # It is handed the screen in colour for that pill; its grey answer for
+        # every other card is the one it gave the grey screen before.
+        dd_journey = (raise_journey(got) if g.card_finder and not g.whole
+                      and room_above(g.roi) else None)
+        dd_sheet_refused = False
+        if (g.card_finder and not g.whole and room_above(g.roi)
+                and (worth_a_second_look(got['parsed']) or dd_journey is not None)):
+            found = CF.find_card(screen, g.roi)
             if not found['sure']:
                 finder_said = 'not sure: %s' % found['why']
             elif found['box'][1] >= float(g.roi[1]) - TALLER:
@@ -2073,7 +2088,17 @@ class Scanner:
                 # A found read whose payout sits against the found top was
                 # emptied by money_is_clipped in _read_box, and has no payout
                 # for rescue_refused to take.
-                refused = rescue_refused(got['parsed'], again['parsed'], again['text'])
+                refused = rescue_refused(got['parsed'] if dd_journey is None else dd_journey,
+                                         again['parsed'], again['text'])
+                if refused is None and dd_journey is not None \
+                        and not OP.STORES_LINE.search(again['text'] or ''):
+                    refused = 'no stops line in it'
+                # A DoorDash sheet refused leaves the raise below to try: the
+                # sheet's walk sees no hairline, so a card stacked above on the
+                # same sheet is in its crop (two dollar figures, refused) while
+                # the box raised 0.09 reaches DoorDash's own payout first. A
+                # card found by its button bar refused stands, as it did.
+                dd_sheet_refused = refused is not None and found['why'] == CF.DD_SHEET
                 if refused is None:
                     got = again
                     crop_from = 'found'
@@ -2095,7 +2120,10 @@ class Scanner:
         # above was never sure of it: its full-width red Accept pill, two reds
         # with the countdown, is "not solid" to it on the rendered card and
         # was "not set in a card" on the rig's frames; and the clipped read,
-        # parse('') with no journey, never asked it.
+        # parse('') with no journey, never asked it. (Both are answered above
+        # now — cardfind's DD_SHEET, asked for the clipped read too — and this
+        # is what is left when the finder still cannot say: the sheet's top
+        # lost in glare or a shadow, or a sheet whose crop it refused.)
         #
         # So for THIS card only — a read through a drawn card box that names a
         # stops line (OP.STORES_LINE, "N stops (X mi)", DoorDash's own and
@@ -2107,7 +2135,8 @@ class Scanner:
         # (in _read_box), rescue_refused against the journey the box read (no
         # journey figure moved, one dollar figure, printed as a card prints
         # it), and a stops line in its own text. Not after the finder was sure
-        # and its read was refused: that answer stands. Said as cropFrom
+        # of a card by its button bar and its read was refused: that answer
+        # stands. (After DoorDash's sheet was refused, yes: see above.) Said as cropFrom
         # 'found' — a payout off a crop the driver did not draw, "pay ?" on
         # the panel and the amber outline — with `rescuedBy` 'raised'.
         #
@@ -2125,8 +2154,10 @@ class Scanner:
         # it and their median (Health.add: "2 raised +1180ms median").
         raise_ms = None
         if (g.card_finder and not g.whole and not rescued and room_above(g.roi)
-                and not (finder_said or '').startswith('read the card found')):
-            held_to = raise_journey(got)
+                and (dd_sheet_refused
+                     or not (finder_said or '').startswith('read the card found'))):
+            # The box's read, unchanged when nothing was rescued above.
+            held_to = dd_journey
             raise_from = time.perf_counter()
             for step in (RAISE_STEPS if held_to is not None else ()):
                 top = max(0.0, float(g.roi[1]) - step)

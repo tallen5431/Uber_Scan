@@ -276,6 +276,153 @@ for _kind in ('blur', 'banding', 'shadow'):
 _r = find(TC.degrade(TC.early_look_screen(TC.DAY_CARD), 'dark'))
 ok_('a dimmed light card on a light map is not guessed at (%r)' % _r['why'], not _r['sure'])
 
+# --- DoorDash's stops card: a sheet under a map, its red pill at the bottom ------
+#
+# The owner's snaps of 31 Oct (testcards.dd_stores_screen; every store and
+# street invented). Handed in grey, the finder was never sure of it: the pill's
+# two reds are 28 grey levels apart, past BAR_STEP. Handed in colour, it is
+# found by its red, walked up with DoorDash's own tolerances, and sure of the
+# sheet's top — the row its map ends — with its bottom the top of the pill.
+DD_PILL_TOP = 1965           # where dd_stores_screen draws the Accept pill
+
+
+def colour(screen):
+    return PL.resize_height(screen, READ_H)
+
+
+def find_dd(screen, box=TC.BOX_DD_BELOW, grey_only=False):
+    return CF.find_card(grey(screen) if grey_only else colour(screen), box)
+
+
+DD_SCREENS = (('one customer', TC.dd_stores_screen()),
+              ('two customers', TC.dd_stores_screen(
+                  pay='$21.35', journey='4 stops (15.0 mi) • 53 min',
+                  tail=('Multiple dropoffs (2 stops)', None))),
+              ('dark mode', TC.dd_stores_screen(TC.DARK)))
+for _name, _scr in DD_SCREENS:
+    for _bn, _bx in (('just under the payout', TC.BOX_DD_BELOW),
+                     ('flush on the payout', TC.BOX_DD_PAY)):
+        _r = find_dd(_scr, _bx)
+        _b = _r['box'] or [None] * 4
+        ok_("DoorDash's stops card (%s), the box %s, is sure as DoorDash's sheet (%r)"
+            % (_name, _bn, _r['why']), _r['sure'] and _r['why'] == CF.DD_SHEET)
+        ok_('...its top the sheet\'s, where the map ends (%r)' % (_b[1],),
+            near(_b[1], top_of(TC.DD_TOP)))
+        ok_('...its bottom the top of the pill (%r)' % ((_b[1] or 0) + (_b[3] or 0),),
+            near((_b[1] or 0) + (_b[3] or 0), top_of(DD_PILL_TOP)))
+        ok_('...and its sides the screen\'s: the sheet runs edge to edge (%r)' % (_b[0],),
+            near(_b[0], 0.0, 0.012) and near(_b[0] + _b[2], 1.0, 0.012))
+_r = find_dd(DD_SCREENS[0][1], grey_only=True)
+eq('...while handed it in grey, the finder says what it always said',
+   (_r['sure'], _r['why']),
+   (False, 'the band near the bottom is not solid — a picture, not a button'))
+
+# The rig's map is 12 levels off the sheet (215 against 203 on the frames of
+# 31 Oct), not dd_stores_screen's 22: inside WALK, so the walk the Uber cards
+# get ran up the map to the top of the screen box on every one of them. Drawn
+# here with the map 12 levels under the sheet's white.
+_close = TC.dd_stores_screen(dict(TC.LIGHT, above=(243, 243, 243)))
+_r = find_dd(_close)
+ok_('a map only 12 levels off the sheet, as the rig sees it, still ends the walk at the '
+    'sheet\'s top (%r)' % (_r['box'],),
+    _r['sure'] and _r['why'] == CF.DD_SHEET and near(_r['box'][1], top_of(TC.DD_TOP)))
+_b0 = CF.WALK
+try:
+    CF.WALK = CF.DD_WALK + 100           # any walk tolerance but DoorDash's own
+    _r2 = find_dd(_close)
+finally:
+    CF.WALK = _b0
+eq('...which is DD_WALK\'s doing, not WALK\'s: the Uber walk\'s tolerance is not used on it',
+   (_r2['sure'], _r2['box']), (_r['sure'], _r['box']))
+
+# What a windscreen does. The 12 frames the raise could not rescue in the
+# last build were a light sheet in a left-hand shadow; the sheet is found
+# under it now, by a reference per column (see cardfind._walk). (Its crop
+# still reads no payout: the figure is in the deepest of the shadow. That is
+# the reader's, in rpi/test_pipeline.py.) Under every degradation, sure means
+# right.
+_dd_sure = _dd_right = 0
+for _name, _scr in DD_SCREENS:
+    for _kind in ('glare', 'blur', 'shadow', 'sheen', 'banding'):
+        for _seed in range(2):
+            _r = find_dd(TC.degrade(_scr, _kind, seed=_seed))
+            _dd_sure += _r['sure']
+            _dd_right += bool(_r['sure'] and near(_r['box'][1], top_of(TC.DD_TOP)))
+            if _kind == 'shadow' and _scr is not DD_SCREENS[2][1]:
+                ok_('a light DoorDash sheet in a left-hand shadow (%s, seed %d) is found at its '
+                    'top (%r)' % (_name, _seed, _r['why']),
+                    _r['sure'] and near(_r['box'][1], top_of(TC.DD_TOP)))
+# 25 of 30 when written. Not sure of: a light sheet under banding, all four
+# (the stripes are 30 levels either way on white, so the walk at DD_WALK
+# stops at the first one and the card would be 9% tall), and one glare blob
+# on the dark sheet (its top spread past SQUARE).
+ok_('DoorDash\'s sheet under glare, blur, shadow, sheen and banding: most sure (%d of 30)'
+    % _dd_sure, _dd_sure >= 24)
+eq('...and every sure one at the sheet\'s top', _dd_right, _dd_sure)
+
+# A phone turned inside its box: the top slants and is refused, as on Uber's.
+_r = find_dd(TC.degrade(DD_SCREENS[0][1], 'roll', strength=0.75))
+ok_('a DoorDash sheet on a phone turned 1.5° inside its box is not sure (%r)' % _r['why'],
+    not _r['sure'])
+# A dimmed light sheet: the edge is under DD_WALK too, and it says so.
+_r = find_dd(TC.degrade(DD_SCREENS[0][1], 'dark'))
+ok_('a dimmed light DoorDash sheet is not guessed at either (%r)' % _r['why'],
+    not _r['sure'] or near(_r['box'][1], top_of(TC.DD_TOP)))
+
+# A card stacked above on the same sheet, no button of its own, a bigger
+# payout: walked through, as Uber's stacked card is, to the upper card's top.
+# What the picture shows; the reader refuses its two dollar figures
+# (rpi/test_pipeline.py holds that the panel never sees $22.75).
+_up = (762, [(782, 'Order in progress', 34, False), (872, '$22.75', 86, True)])
+_r = find_dd(TC.dd_stores_screen(upper=_up))
+ok_('a card stacked above the DoorDash card is one sheet with it, as on Uber\'s (%r)'
+    % (_r['box'],), _r['sure'] and near(_r['box'][1], top_of(_up[0])))
+
+
+def pill_painted(screen, bgr):
+    """dd_stores_screen with its Accept pill painted one colour: the black of
+    DoorDash's "Declined" state, or red right across the screen."""
+    out = screen.copy()
+    if bgr is None:                       # red edge to edge
+        out[DD_PILL_TOP:DD_PILL_TOP + 176, :] = (36, 28, 232)
+    else:
+        mask = (np.abs(out[DD_PILL_TOP:DD_PILL_TOP + 176].astype(int)
+                       - np.array([255, 255, 255])).sum(axis=2) > 60)
+        out[DD_PILL_TOP:DD_PILL_TOP + 176][mask] = bgr
+    return out
+
+
+# Red is the whole of how the pill is known, so what is not a red pill is not
+# one. "Declined": the pill turns black when the offer is gone (a 31 Oct
+# frame), and the answer is the grey one, never DoorDash's sheet.
+_r = find_dd(pill_painted(DD_SCREENS[0][1], (0, 0, 0)))
+ok_('DoorDash\'s pill turned black ("Declined") is no red pill: never DoorDash\'s sheet (%r)'
+    % _r['why'], _r['why'] != CF.DD_SHEET)
+_r = find_dd(pill_painted(DD_SCREENS[0][1], None))
+ok_('...nor is a red band from one side of the screen to the other (%r)' % _r['why'],
+    _r['why'] != CF.DD_SHEET)
+
+# And none of it touches an Uber screen: handed in colour, every Uber picture
+# in this file gives the very answer it gave in grey. They have no red, so
+# none of them gets past the pill; DoorDash's older card, red but one red and
+# set in a card, is found by its button bar as it was.
+_same = []
+for _scr, _bx in ([(TC.early_look_screen(_p), BOX) for _p in (TC.NIGHT_CARD, TC.DAY_CARD,
+                                                              TC.NIGHT_ALL)]
+                  + [(TC.two_order_screen(), BOX), (TC.exclusive_screen(), BOX),
+                     (TC.stacked_screen(), BOX), (TC.early_look_screen(TC.DAY_CARD, nav=True), BOX),
+                     (TC.dash_stacked_screen(), TC.BOX_DASH),
+                     (TC.dash_stacked_screen(TC.DASH_DAY), TC.BOX_DASH),
+                     (without_button(TC.early_look_screen(), TC.NIGHT_CARD), BOX),
+                     (TC.degrade(TC.early_look_screen(TC.DAY_CARD), 'roll', strength=1.0), BOX),
+                     (TC.degrade(TC.early_look_screen(TC.DAY_CARD), 'dark'), BOX)]
+                  + [(TC.degrade(TC.early_look_screen(_p), _k, seed=1), BOX)
+                     for _p in (TC.NIGHT_CARD, TC.DAY_CARD)
+                     for _k in ('glare', 'sheen', 'shadow', 'blur')]):
+    _same.append(CF.find_card(colour(_scr), _bx) == CF.find_card(grey(_scr), _bx))
+eq('every Uber picture, and DoorDash\'s older card, in colour is the answer it was in grey '
+   '(%d pictures)' % len(_same), _same, [True] * len(_same))
+
 # --- pure and cheap ------------------------------------------------------------
 _g = grey(TC.early_look_screen())
 _before = _g.copy()
@@ -287,6 +434,13 @@ for _ in range(5):
     CF.find_card(_g, BOX)
 _ms = (time.perf_counter() - _t) * 200
 ok_('a look costs tens of milliseconds, not a read\'s hundreds (%.1fms)' % _ms, _ms < 100)
+# ...DoorDash's included: the grey look, then the pill and the walk again.
+_c = colour(TC.dd_stores_screen())
+_t = time.perf_counter()
+for _ in range(5):
+    CF.find_card(_c, TC.BOX_DD_BELOW)
+_ms = (time.perf_counter() - _t) * 200
+ok_('...and a look at DoorDash\'s sheet in colour too (%.1fms)' % _ms, _ms < 100)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d card finder checks passed' % ok)
