@@ -6286,6 +6286,34 @@ function searchCardEarly(offer, now) {
     if (typeof t === 'string') earlyDoor(t, disc, false, none);
   });
   if (typeof offer.dropoff === 'string') earlyDoor(offer.dropoff, disc, true, none);
+  // ...and every OTHER store's printed door on a DoorDash stops card
+  // (storesOf: two stores or more, DoorDash's only; the dd stores entry's
+  // Open in AUDITS.md). Map view searched the second store by its door for
+  // the preview, while this server asked only after ✓ Took (pickupAsks), so
+  // its pin — the restaurant guard's, visitPickups', the run's — landed a
+  // round trip after the press. Asked here as pickupAsks will ask it at the
+  // Took: a pickup's door (earlyDoor `named` false), door level, in THIS
+  // card's disc, so the Took's questions are answered from nbxCache and the
+  // status carries every store's pin at once. A store, never a dropoff (the
+  // card's customers are `dropoff` above, a store's door never one). The
+  // first store's door is `pickupLine`, asked above, and earlyDoor skips a
+  // text already searched in this disc. The others are counted against the
+  // warming budget (EARLY_WARM_PER_MIN): the card's own two stay free as
+  // they were, and a third or fourth store past the minute's budget is
+  // simply left to the Took, as every store was before.
+  (storesOf(offer) || []).forEach(function (st) {
+    if (!st.door || st.door === offer.pickupLine) return;
+    earlyDoor(st.door, disc, false, none, function () { return earlyRoom(now); });
+  });
+}
+
+// One more warming search allowed this minute (EARLY_WARM_PER_MIN), counted
+// when it is: warmEarly's budget, shared.
+function earlyRoom(now) {
+  earlyWarmAts = earlyWarmAts.filter(function (t) { return now - t < EARLY_WARM_MS; });
+  if (earlyWarmAts.length >= EARLY_WARM_PER_MIN) return false;
+  earlyWarmAts.push(now);
+  return true;
 }
 
 /* Every address with a house number a scanner line reports, as [{text,

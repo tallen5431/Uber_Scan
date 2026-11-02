@@ -8623,6 +8623,57 @@ try:
     finally:
         stop(_smp)
 
+    # ...and every store's door searched the moment the CARD is read, not at
+    # the Took (searchCardEarly; the dd stores entry's Open in AUDITS.md): Map
+    # view searched the second store for its preview while the server asked
+    # only after ✓ Took, so the pins landed a round trip after the press. The
+    # same doorChain questions in the same card's disc, so the Took finds
+    # every answer in nbxCache and the status carries both pins at once. A
+    # dropoff is never asked as a store, and an Uber card's list is no
+    # DoorDash list. The fake's two invented restaurants again.
+    _ssc = dict(_SQ, id='s-early2', pay=14.1, minutes=33.0, billedMinutes=33.0, miles=8.7,
+                cost=1.5, pickup='Example Diner', pickupLine=_SM_DOOR1, app='doordash',
+                stores=[{'name': 'Example Diner', 'door': _SM_DOOR1},
+                        {'name': 'Example Taqueria', 'door': _SP_DOOR},
+                        {'name': 'Example Bakery', 'door': None}],
+                dropoffs=1, dropoffOrders=2)
+    _sss, _sssays, _sssj = _hksayer('stores-early')
+    _ssp, _ssb = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _sss,
+                        'NUCBOX_SEARCH': _hkfake_base, 'NUCBOX_TIMEOUT_MS': '800'}, _sssj)
+    try:
+        _n75, _n81 = len(_hkasked('street=1975')), len(_hkasked('street=1981'))
+        _sssays([{'offer': _ssc}])
+        for _ in range(80):
+            if len(_hkasked('street=1981')) > _n81 and len(_hkasked('street=1975')) > _n75:
+                break
+            time.sleep(0.05)
+        _q81 = _hkasked('street=1981')[_n81:]
+        ok_('[dd stores] a DoorDash stops card read is searched at once for EVERY store\'s door, '
+            'the second store\'s too, inside the card\'s disc, before any Took (%r)' % _q81,
+            len(_hkasked('street=1975')) > _n75 and len(_q81) >= 1
+            and all('viewbox=' in q and 'bounded=1' in q for q in _q81))
+        _sssays([{'offer': dict(_ssc, pay=14.6)}])
+        _nall = len(_hkasked(''))
+        post(_ssb, '/api/offers/mark', {'id': 's-early2', 'accepted': True, 'offer': _ssc})
+        _h = _settled(_ssb, lambda h: (h.get('pickupsPinned') or 0) >= 2 or h.get('pickupsWhy'))
+        eq('[dd stores] ...so ✓ Took pins both stores from the early answers with no new '
+           'request, and the status carries each store\'s pin in the card\'s order',
+           (_h.get('pickupsPinned'), len(_hkasked('')) - _nall,
+            [(st.get('door'), bool(st.get('at'))) for st in _h.get('stores') or []]),
+           (2, 0, [(_SM_DOOR1, True), (_SP_DOOR, True), (None, False)]))
+        post(_ssb, '/api/delivered', {})
+        # An Uber card carrying a list is no DoorDash stops card: its second
+        # "store" is not asked.
+        _n82 = len(_hkasked('street=1982'))
+        _sssays([{'offer': dict(_ssc, id='s-early-uber', app='uber', pickupLine=None,
+                                stores=[{'name': 'Example Diner', 'door': _SM_DOOR1},
+                                        {'name': 'Example Grill', 'door': '1982 Cobb Pkwy'}])}])
+        time.sleep(0.5)
+        eq('[dd stores] ...an Uber card\'s list asks nothing for its stores',
+           len(_hkasked('street=1982')) - _n82, 0)
+    finally:
+        stop(_ssp)
+
     # A hold restored at boot whose store's door a place popup filed
     # (`fields.pickupAddr`, from 'popup'), no pickup pinned: asked at boot —
     # and its card's own "Store (<n> <street>)" as well, which the popup's
