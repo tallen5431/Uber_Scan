@@ -2417,6 +2417,17 @@ against the GPS stops. A ring of the newest 400 files and at most 150MB
 (`"mapBandsKeep"`, `"mapBandsMB"` in `rpi/config.json`); `"mapBands": false`,
 or `MAP_BANDS=0` in the scanner's environment, turns it off.
 
+**A DoorDash band can be the map before it settles.** The band is cut from
+the card's first frame read, and on the owner's snap of 2 Nov 16:31 that
+frame's DoorDash map was still zoomed in on the car — no route, no pins, no
+label — before the app fitted the route and labelled the customer's street.
+A study scoring bands should expect some like it. DoorDash's map LABEL is not
+read off that one frame any more: the scanner asks it again on later frames
+of the same card, two seconds apart and five times at most, until a label is
+read (`MAP_LABEL_AGAIN_S`, `MAP_LABEL_TRIES` in `scan_pi.py`), and a label the
+app cut with its ellipsis — which tesseract reads as "..." — is the street
+before it, as "…" always was.
+
 **They stay on the rig.** The map shows street names round a customer's door,
 so the folder is in `.gitignore`, the sync never sends it, and the server never
 serves it. A 📷 Snap carries the newest band (from the last two minutes) into

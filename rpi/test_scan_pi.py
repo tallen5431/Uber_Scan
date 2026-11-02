@@ -4503,6 +4503,62 @@ _inline = SP.MapLabels(threaded=False, read=lambda f, g, store=None: None)
 _inline.submit('o2', None, None)
 eq('...and under --no-thread it reads in submit, answering none found', _inline.take(), ('o2', None))
 
+# The owner's snap of 2 Nov 16:31, its shape on SYNTHETIC screens (invented
+# streets): the label too long for its pill, cut with DoorDash's ellipsis,
+# which the reader reads as three dots, sitting at the band's top left by the
+# "Uber" bubble. Read by hand off the snap's frame, the reader found that
+# pill and read it, and map_label refused its "..." (offer_parser
+# MAP_LABEL_CUT); the read itself had only ever been asked of the card's
+# FIRST frame, before DoorDash's map had fitted the route and put the label
+# up.
+_ml = _dd_map('2900 Kestrel Plains Pkwy N...', at=(40, 100))
+_got = SP.read_map_label(_ml, _MapGeom(_ml), store=['Lark Owl Grill',
+                                                    '164 Wren Hollow Pkwy, Brookvale, GA 30066'])
+eq('the map label cut by the app\'s ellipsis, read as "...", at the band\'s top left: its street',
+   (_got or {}).get('line'), '2900 Kestrel Plains Pkwy N')
+_lt = [100.0]
+_lreads = []
+
+
+def _late_read(frame, geom, store=None):
+    # The map with no label until its fourth frame, as DoorDash's settles.
+    _lreads.append(frame)
+    return {'line': '418 Fable Ave NE', 'clipped': False, 'raw': 'x', 'ms': 1} \
+        if frame >= 4 else None
+
+
+_late = SP.MapLabels(threaded=False, read=_late_read, clock=lambda: _lt[0])
+_said = []
+for _f in range(1, 12):                  # a card read every 0.75 s
+    _late.submit('o3', _f, None)
+    _said.append(_late.take())
+    _lt[0] += 0.75
+eq('MapLabels: an offer whose read found no label is asked again on a later frame, '
+   'MAP_LABEL_AGAIN_S apart, until one is read — and never after',
+   (_lreads, [s for s in _said if s and s[1]]),
+   ([1, 4], [('o3', {'line': '418 Fable Ave NE', 'clipped': False, 'raw': 'x', 'ms': 1})]))
+eq('...the spacing and the cap chosen: two seconds, five asks',
+   (SP.MAP_LABEL_AGAIN_S, SP.MAP_LABEL_TRIES), (2.0, 5))
+_lt[0] = 100.0
+_none = SP.MapLabels(threaded=False, read=lambda f, g, store=None: None, clock=lambda: _lt[0])
+_n = 0
+for _f in range(40):
+    _n += 1 if _none.submit('o4', _f, None) else 0
+    _lt[0] += 0.75
+eq('...and a map that never shows one is read at most MAP_LABEL_TRIES times', _n, SP.MAP_LABEL_TRIES)
+_lt[0] = 100.0
+_thr = SP.MapLabels(threaded=True, read=lambda f, g, store=None: {'line': '9 Wren St', 'raw': 'x'},
+                    clock=lambda: _lt[0])
+_thr.submit('o5', None, None)
+for _ in range(200):
+    if _thr.take():
+        break
+    _REAL_SLEEP(0.01)
+_lt[0] += 10.0
+eq('...on its thread too: once read, the offer is not taken again',
+   _thr.submit('o5', None, None), False)
+_thr.close()
+
 # The offer line carries it, and DoorDash's stop count, and nothing that
 # reads as a verdict.
 _with_label = said(lambda: SP.emit_offer('x', _dd_card, {'ready': True, 'perHour': 20.0,

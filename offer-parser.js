@@ -2894,13 +2894,20 @@
     + 'Northeast|Northwest|Southeast|Southwest)\\.?$', 'i');
   var LABEL_TYPE = new RegExp('^(?:' + STREET_SUFFIX + ')\\.?$', 'i');
   var MAP_LABEL_LONGEST = 48;
+  /* ...and DoorDash's ellipsis as the reader reads it, "..." or ".." or
+     ". . ." far more often than "…" (the owner's snap of 2 Nov 16:31: the
+     label "<n> <Name> Pkwy N..." refused, its "…" form taken): a trailing
+     run of two dots or more, or a "…", taken off as "…" always was. One dot
+     stays, an abbreviation's. See MAP_LABEL_CUT in offer_parser.py. */
+  var MAP_LABEL_CUT = /\s*(?:…|\.\s*\.)[\s.…]*$/;
 
   function labelKey(text) {
     return (String(text || '').toLowerCase().match(/[a-z0-9]+/g) || []).join(' ');
   }
 
   function mapLabel(text, clipped, store) {
-    var flat = normalize(text).replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9.]+$/g, '');
+    var flat = normalize(text).replace(MAP_LABEL_CUT, '')
+      .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9.]+$/g, '');
     if (!flat || flat.length > MAP_LABEL_LONGEST || MAP_LABEL_MARKS.test(flat)) return null;
     var words = flat.split(' ');
     if (words.length > 1 && words[0].length === 1 && !/^\d$/.test(words[0])

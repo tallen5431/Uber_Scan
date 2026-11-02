@@ -3562,6 +3562,30 @@ MAP_LABEL_MOST = 3
 MAP_LABEL_CAP_S = 1.5
 MAP_LABEL_OCR = '--oem 1 --psm 7 -c tessedit_do_invert=0'
 MAP_LABEL_TEXT_ROWS = 70         # a label's box, scaled to this many rows to read
+# ...ASKED AGAIN WHILE THE CARD STAYS UP, until a label is read. The owner's
+# snap of 2 Nov 16:31 ("why did it not map it?"): a DoorDash stops card read
+# perfectly, "Customer dropoff", and the offer's dropoffGuess stayed null for
+# the 34 s it was up, with the label "<n> <Name> Pkwy N..." plain on the
+# phone's map. Read by hand off that snap's full frame, read_map_label finds
+# the pill (one box, at the band's top left beside the "Uber" bubble) and
+# reads it right; OP.map_label then refused its "..." (see MAP_LABEL_CUT in
+# offer_parser.py, fixed there). But the reader had never seen that frame:
+# MapLabels took ONE read per offer, on the card's FIRST frame, and the map
+# band the rig kept off that same frame (map.jpg, MapBands, 17 ms after the
+# offer's id) shows DoorDash's map still zoomed in on the car — no route, no
+# pins, no label — before it fits the route and puts the label up. The read
+# found nothing there, said so, and the offer was never asked again. So an
+# offer whose read found no label is asked again on a later frame of the same
+# card, at least MAP_LABEL_AGAIN_S after the last ask and at most
+# MAP_LABEL_TRIES asks in all; one that found a label is never asked again.
+# Both CHOSEN, not measured: how long DoorDash's map takes to settle is not
+# in any snap (the first frame is before it, the snap 34 s after), and five
+# asks two seconds apart cover the first ten seconds of a card that is up for
+# thirty or more, at most five bounded reads (MAP_LABEL_CAP_S each, on the
+# label's own thread) per offer. Only frames the label is asked of anyway
+# (a card read, not ⌖'s whole screen; wants_map_label) are asked again.
+MAP_LABEL_TRIES = 5
+MAP_LABEL_AGAIN_S = 2.0
 
 
 def map_band(frame, geom, height=MAP_LABEL_HEIGHT):
@@ -3727,36 +3751,66 @@ class MapLabels(object):
     """read_map_label, off the camera's loop and the card's reader: one at a
     time, the newest offer's only, on a thread of its own. `submit` never
     blocks (a label already being read keeps its turn); `take` hands back
-    (offer_id, answer) once, answer None for none found. With `threaded`
-    False (--no-thread) the read runs in `submit`, capped as ever."""
+    (offer_id, answer) once per read, answer None for none found. An offer
+    whose read found none is taken again on a later frame (MAP_LABEL_TRIES,
+    MAP_LABEL_AGAIN_S): DoorDash's map puts its label up only once it has
+    fitted the route, after the card's first frame. With `threaded` False
+    (--no-thread) the read runs in `submit`, capped as ever."""
 
-    def __init__(self, threaded=True, read=None):
+    def __init__(self, threaded=True, read=None, clock=time.monotonic):
         self.read = read or read_map_label
         self.threaded = threaded
+        self.clock = clock
         self._work = queue.Queue(maxsize=1)
         self._done = queue.Queue()
-        self._asked = set()
+        # offer id -> {'tries', 'at' (the last ask, on `clock`), 'found'}.
+        # `found` is set by the read's own thread; a dict entry's one key
+        # set under the GIL, read here only to refuse a later ask.
+        self._asked = {}
         self._thread = None
         if threaded:
             self._thread = threading.Thread(target=self._serve, name='maplabel', daemon=True)
             self._thread.start()
 
+    def _may(self, offer_id, now):
+        seen = self._asked.get(offer_id)
+        return seen is None or (not seen['found'] and seen['tries'] < MAP_LABEL_TRIES
+                                and now - seen['at'] >= MAP_LABEL_AGAIN_S)
+
+    def _note(self, offer_id, now):
+        """Count an ask, and hand back what was there before it (None for
+        a first), so an ask the queue refused can be put back."""
+        was = self._asked.pop(offer_id, None)
+        seen = dict(was) if was else {'tries': 0, 'found': False}
+        seen['tries'] += 1
+        seen['at'] = now
+        # Re-inserted, so the newest offer is last and the oldest go first.
+        self._asked[offer_id] = seen
+        if len(self._asked) > 64:
+            for k in list(self._asked)[:-32]:
+                del self._asked[k]
+        return was
+
     def submit(self, offer_id, frame, geom, store=None):
-        if offer_id is None or offer_id in self._asked:
+        now = self.clock()
+        if offer_id is None or not self._may(offer_id, now):
             return False
         job = (offer_id, frame, geom, store)
+        # Counted BEFORE the job is queued: the read's thread marks the
+        # entry found, and an entry made after the read finished would
+        # lose that and ask again.
+        was = self._note(offer_id, now)
         if not self.threaded:
-            self._asked.add(offer_id)
             self._done.put(self._job(*job))
             return True
         try:
             self._work.put_nowait(job)
         except queue.Full:
+            if was is None:
+                self._asked.pop(offer_id, None)
+            else:
+                self._asked[offer_id] = was
             return False
-        self._asked.add(offer_id)
-        if len(self._asked) > 64:
-            self._asked = set(list(self._asked)[-32:])
-            self._asked.add(offer_id)
         return True
 
     def take(self):
@@ -3767,9 +3821,14 @@ class MapLabels(object):
 
     def _job(self, offer_id, frame, geom, store):
         try:
-            return offer_id, self.read(frame, geom, store=store)
+            answer = self.read(frame, geom, store=store)
         except Exception:                           # noqa: BLE001
-            return offer_id, None
+            answer = None
+        if answer and answer.get('line'):
+            seen = self._asked.get(offer_id)
+            if seen is not None:
+                seen['found'] = True
+        return offer_id, answer
 
     def _serve(self):
         while True:
@@ -5927,9 +5986,13 @@ def main():
                                whole=whole, map_label=labels['for'].get(offer_log.id))
                     labels['told'] = (offer_log.id, parsed, rate, where, whole)
                 # ...and DoorDash's map label for a card that printed only
-                # "Customer dropoff", once per card, AFTER its own line: the
-                # read is on MapLabels' thread, and its answer is told on a
-                # second offer line (tell_label). Not on a whole-screen read,
+                # "Customer dropoff", AFTER its own line: the read is on
+                # MapLabels' thread, and its answer is told on a second offer
+                # line (tell_label). Asked on every card read and taken by
+                # MapLabels until a label is read (MAP_LABEL_TRIES asks,
+                # MAP_LABEL_AGAIN_S apart): the card's first frame comes
+                # before DoorDash's map has fitted its route and put the label
+                # up (the owner's snap of 2 Nov). Not on a whole-screen read,
                 # which is a ⌖ press's question — asked of the GEOMETRY, as
                 # MapBands asks it: `whole` by here is OP.is_whole, a card with
                 # its whole journey on it, and a DoorDash card read well is

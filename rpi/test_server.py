@@ -10641,6 +10641,47 @@ eq('...and a Took on a guessed card holds no end from it: the label rides on as 
    'dropoffGuess alone (31 Oct), nowhere else on the hold',
    _gl.get('took'), ([None], [{'line': '418 Fable Ave NE', 'from': 'dd map label'}], False))
 
+
+# ...and as the rig now says it (the owner's snap of 2 Nov 16:31): a DoorDash
+# stops card with ONE store and its printed door, "Customer dropoff", told
+# first with no label (the card's first frame, before DoorDash's map has
+# fitted its route) and again once MapLabels read the label off a later frame
+# — the same id, the same figures, `mapLabel` added (scan_pi tell_label). The
+# guess lands on the offer the preview draws from, rides onto the hold at
+# ✓ Took, and is nothing else of either. Invented store, door and street.
+def _late_guess():
+    sp, sb, sj, _sh = _cserver('ddguess2')
+    out = {}
+    try:
+        one = dict(app='doordash', screen='dd.offer', pickup='Lark Owl Grill',
+                   pickupLine='164 Wren Hollow Pkwy, Brookvale, GA 30066', stops=2,
+                   dropoffs=1, endRefused=True, minutes=22.0, miles=3.0)
+        _say(_card('lg-1', 4.60, **one))
+        out['first'] = (get(sb, '/api/status').get('offer') or {}).get('dropoffGuess')
+        _say(_card('lg-1', 4.60, mapLabel='2900 Kestrel Plains Pkwy N', **one))
+        o = get(sb, '/api/status').get('offer') or {}
+        out['then'] = (o.get('dropoffGuess'), o.get('dropoff'), o.get('pickupLine'))
+        _took2(sb, _card('lg-1', 4.60, **one))
+        held = [h for h in json.load(open(os.path.join(os.path.dirname(sj),
+                                                       'holding.json')))['orders']
+                if h.get('id') == 'lg-1']
+        out['took'] = ([h.get('dropoff') for h in held], [h.get('dropoffGuess') for h in held],
+                       [h.get('pickupLine') for h in held])
+    finally:
+        stop(sp)
+    return out
+
+
+_lg = _late_guess()
+_LG = {'line': '2900 Kestrel Plains Pkwy N', 'from': 'dd map label'}
+eq('dd map label told late on a one-store card: none on the first line, then the offer\'s '
+   'dropoffGuess, its dropoff still none and its store\'s door kept',
+   (_lg.get('first'), _lg.get('then')),
+   (None, (_LG, None, '164 Wren Hollow Pkwy, Brookvale, GA 30066')))
+eq('...and ✓ Took on it (the line re-read without the label) holds it as the order\'s '
+   'dropoffGuess, never its dropoff, its store\'s door kept beside it',
+   _lg.get('took'), ([None], [_LG], ['164 Wren Hollow Pkwy, Brookvale, GA 30066']))
+
 # --- whether each NucBox service is answering ----------------------------------
 #
 # The owner, 22 Oct: the map drew nothing for a held order and nothing said

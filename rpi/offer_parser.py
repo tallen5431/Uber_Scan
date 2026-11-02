@@ -5416,6 +5416,19 @@ _LABEL_DIR = re.compile(r'(?:N|S|E|W|NE|NW|SE|SW|North|South|East|West|'
                         r'Northeast|Northwest|Southeast|Southwest)\.?', re.IGNORECASE | ASCII)
 _LABEL_TYPE = re.compile(r'(?:' + STREET_SUFFIX + r')\.?', re.IGNORECASE | ASCII)
 MAP_LABEL_LONGEST = 48
+# ...AND THE APP'S ELLIPSIS, AS THE READER READS IT. A label too long for its
+# pill ends in DoorDash's ellipsis ("2900 <Name> Pkwy N…"), and tesseract
+# reads that one character as "..." or ".." far more often than as "…": the
+# owner's snap of 2 Nov 16:31, the reader's own box off the phone's map read
+# "<n> <Name> <Name> Pkwy N...", and map_label refused it — "N..." is no
+# quadrant, no type and no name word — while the same label with "…" gave the
+# street. So a trailing run of two or more dots, spaced or not (". . ."), or
+# a "…" with spaces or dots round it, is the truncation mark and is taken off
+# exactly as "…" always was (the edge strip below took "…" as a mark). ONE
+# dot stays: it is an abbreviation's ("Ave.", "N."), and two are never one.
+# What is left is judged as before; a word the ellipsis cut ("Pk...") is
+# still no type, and the label is refused for it as the "…" form is.
+MAP_LABEL_CUT = re.compile(r'\s*(?:…|\.\s*\.)[\s.…]*$')
 
 
 def _label_key(text):
@@ -5425,7 +5438,7 @@ def _label_key(text):
 def map_label(text, clipped=False, store=None):
     """DoorDash's map label as "<n> <street>" (the street alone when
     `clipped`), or None. See MAP_LABEL_JUNK above for the rule."""
-    flat = normalize(text)
+    flat = MAP_LABEL_CUT.sub('', normalize(text))
     flat = re.sub(r"^[^A-Za-z0-9]+|[^A-Za-z0-9.]+$", '', flat)
     if not flat or len(flat) > MAP_LABEL_LONGEST or MAP_LABEL_MARKS.search(flat):
         return None

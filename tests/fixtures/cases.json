@@ -8836,6 +8836,61 @@
    "name": "too long to be a label",
    "text": "1200 Kestrel Plains Wren Lark Owl Fable Road",
    "expect": null
+  },
+  {
+   "name": "the app's ellipsis on a label too long for its pill, read as the one character",
+   "text": "2900 Kestrel Plains Pkwy N…",
+   "expect": "2900 Kestrel Plains Pkwy N"
+  },
+  {
+   "name": "...read as three dots, as the reader reads it most (the owner's snap of 2 Nov)",
+   "text": "2900 Kestrel Plains Pkwy N...",
+   "expect": "2900 Kestrel Plains Pkwy N"
+  },
+  {
+   "name": "...as two dots",
+   "text": "2900 Kestrel Plains Pkwy N..",
+   "expect": "2900 Kestrel Plains Pkwy N"
+  },
+  {
+   "name": "...as dots with spaces between",
+   "text": "2900 Kestrel Plains Pkwy N. . .",
+   "expect": "2900 Kestrel Plains Pkwy N"
+  },
+  {
+   "name": "...as the one character with a space before it and a dot after",
+   "text": "2900 Kestrel Plains Pkwy N … .",
+   "expect": "2900 Kestrel Plains Pkwy N"
+  },
+  {
+   "name": "...and the edge said, the street alone",
+   "text": "900 Kestrel Plains Pkwy N...",
+   "clipped": true,
+   "expect": "Kestrel Plains Pkwy N"
+  },
+  {
+   "name": "the ellipsis cutting the type itself leaves no type: refused, dots or not",
+   "text": "2900 Kestrel Plains Pk...",
+   "expect": null
+  },
+  {
+   "name": "one dot is an abbreviation's, kept",
+   "text": "418 Fable Ave.",
+   "expect": "418 Fable Ave."
+  },
+  {
+   "name": "the dots alone are nothing",
+   "text": "...",
+   "expect": null
+  },
+  {
+   "name": "the store's own door, cut by the ellipsis, is still the store's",
+   "text": "164 Wren Hollow Pkwy...",
+   "store": [
+    "Lark Owl Grill",
+    "164 Wren Hollow Pkwy, Brookvale, GA 30066"
+   ],
+   "expect": null
   }
  ]
 }
