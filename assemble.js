@@ -2067,6 +2067,28 @@
     return list;
   }
 
+  /* A kept list healed on its own, with no read in hand: every entry kept
+   * (none `fromNew`), so collapsePlanner asks slipStop of every pair — what
+   * the next planner read does to the kept stops it does not show. For a
+   * hold restored from disk at boot (server.js loadHolding): a list written
+   * polluted before slipStop, or by a build that wrote the slips, showed its
+   * twelve dropoffs on the panel, Map view's doors and the fastest order
+   * until the next planner read healed it (the slip entry's Open in AUDITS).
+   * The file does not say which stops came off one read, so collapsePlanner's
+   * "never two of the read in hand" cannot be asked here; it is the same
+   * pass the next read gives every kept stop it does not show, so nothing is
+   * merged at boot that the next read would not merge — and a read listing
+   * both again lists the second as its own stop (mergePlanner leaves a read's
+   * stop it matched to nothing as it is). Returns `stops` itself where
+   * nothing slipped, so a clean hold stays the object (and the bytes) it was. */
+  function healPlanner(stops) {
+    if (!Array.isArray(stops) || stops.length < 2) return stops;
+    var entries = stops.map(function (s, i) { return { s: s, fromNew: false, old: i }; });
+    var healed = collapsePlanner(entries);
+    if (healed.length === stops.length) return stops;
+    return healed.map(function (e) { return e.s; });
+  }
+
   // Where a timed stop goes among `list`'s entries ({s}) by its time: after
   // the last timed entry due earlier, before the first due later — or null
   // where it has no time, the list none or one due the same minute, or the
@@ -3722,7 +3744,7 @@
            // ...and the planner the hold keeps, pages merged (24 Oct).
            mergePlanner: mergePlanner,
            // ...and one stop read with its door and name slipped (31 Oct).
-           slipStop: slipStop,
+           slipStop: slipStop, healPlanner: healPlanner,
            fresh: fresh, took: took, sighting: sighting, pending: pending,
            verdictFor: verdictFor, pageOf: pageOf, plannerRowDue: plannerRowDue,
            cardSeen: cardSeen, heldOwnCard: heldOwnCard, holdIdOf: holdIdOf,

@@ -3403,6 +3403,60 @@ try:
 finally:
     stop(_v4proc)
 
+# A held planner polluted by slips, restored at boot (the slip entry's Open in
+# AUDITS.md): the owner's snap of 31 Oct held twelve dropoffs for three, and a
+# restart mid-delivery showed all twelve until the scanner next read the
+# planner. Healed at boot now (Assemble.healPlanner in loadHolding). Invented
+# customers and doors in the snap's shapes: "16" for "2416" with the name
+# mangled, "315" for "915", "Bivd" for "Blvd", "416" for "2416"; and Pat Q.
+# and Jules K. at one door due the same minute, two customers, kept two.
+_bpdir = tempfile.mkdtemp()
+_bpj = os.path.join(_bpdir, 'offers.jsonl')
+open(_bpj, 'w').close()
+_bpat = int(time.time() * 1000) - 5 * 60000
+
+
+def _bpstop(kind, name, by, street, city=None):
+    return {'kind': kind, 'orders': 1, 'name': name, 'place': None, 'expectedBy': by,
+            'street': street, 'city': city, 'state': 'GA' if city else None, 'zip': None,
+            'line': street + (', ' + city if city else ''), 'label': kind}
+
+
+_bpstops = [_bpstop('pickup', 'Fable Pizza', 1310, '12 Fernhill Pkwy NW', 'Brookvale'),
+            _bpstop('dropoff', 'kamris', 1326, '2416 Fernhill Ct', 'Brookvale'),
+            _bpstop('dropoff', 'kanrnis.', 1327, '16 Fernhill Ct'),
+            _bpstop('dropoff', 'Pat Q.', 1330, '4410 Fernhill Ct', 'Brookvale'),
+            _bpstop('dropoff', 'Jules K.', 1330, '4410 Fernhill Ct', 'Brookvale'),
+            _bpstop('dropoff', 'Quin C.', 1342, '915 Brookvale Place Blvd', 'Kestrelton'),
+            _bpstop('dropoff', 'kawnis.', 1328, '416 Fernhill Ct'),
+            _bpstop('dropoff', 'QuinC.', 1343, '315 Brookvale Place Bivd', 'Kestrelton'),
+            _bpstop('dropoff', 'Quin C.', 1342, '915 Brookvale Place Bivd', 'Kestrelton')]
+with open(os.path.join(_bpdir, 'holding.json'), 'w') as _fh:
+    json.dump({'v': 2, 'orders': [{'id': 'h-boot-plan', 'pay': 14.2, 'minutes': 40,
+                                   'acceptedAt': _bpat, 'app': 'uber',
+                                   'dropoff': 'Fernhill Ct, Brookvale',
+                                   'planner': {'stops': _bpstops, 'unfiled': 'dropoffs'}}]},
+              _fh)
+_bphand = os.path.join(_bpdir, 'handoff')
+os.mkdir(_bphand)
+_bpp, _bpb = start({'SCANNER': '0', 'UBERSCAN_HANDOFF_DIR': _bphand}, _bpj)
+try:
+    _bph = (get(_bpb, '/api/status') or {}).get('holding') or {}
+    _bpl = [(x.get('name'), x.get('street'))
+            for x in ((_bph.get('planner') or {}).get('stops') or [])]
+    eq('[slip] a held planner polluted by slips is healed when it is restored at boot: the '
+       'pickup, the full doors in the list\'s order, the two customers at one door kept two',
+       _bpl,
+       [('Fable Pizza', '12 Fernhill Pkwy NW'), ('kawnis.', '2416 Fernhill Ct'),
+        ('Pat Q.', '4410 Fernhill Ct'), ('Jules K.', '4410 Fernhill Ct'),
+        ('Quin C.', '915 Brookvale Place Bivd')])
+    eq('[slip] ...the order\'s own end and the planner\'s word untouched',
+       (_bph.get('dropoff'), (_bph.get('planner') or {}).get('unfiled')),
+       ('Fernhill Ct, Brookvale', 'dropoffs'))
+finally:
+    stop(_bpp)
+shutil.rmtree(_bpdir, ignore_errors=True)
+
 # ...and the build before the list, given the file this one now writes. Run as
 # that build, out of git, not as a copy of its rule written here: the rule is
 # `typeof h.acceptedAt === 'number'` on the file's top level, and the v2 file

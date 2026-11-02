@@ -1669,6 +1669,19 @@ function loadHolding() {
     var one = heldFromFile(f);
     if (one) list = [one];
   }
+  // A held planner polluted by slips — written before slipStop, or by a build
+  // that kept them — healed now (Assemble.healPlanner, slipStop's pass over
+  // the kept stops) rather than at the next planner read: a restart
+  // mid-delivery showed the snap's twelve dropoffs on the panel, Map view's
+  // doors and the fastest order until the scanner happened to read the
+  // planner again (the slip entry's Open, AUDITS.md). In memory only: the
+  // file is rewritten by the next write of the list as it always is, and a
+  // clean planner is left the object it was.
+  list.forEach(function (h) {
+    if (!h.planner || !Array.isArray(h.planner.stops)) return;
+    var healed = Assemble.healPlanner(h.planner.stops);
+    if (healed !== h.planner.stops) h.planner = Object.assign({}, h.planner, { stops: healed });
+  });
   scanner.held = firstTrips(list, MAX_HELD_FILE);
   // Through heldOrders(), so an order that has outlived its own clock is put
   // down here rather than waiting to be noticed — and so the answer to "is

@@ -6747,7 +6747,9 @@ letters apart. "Pat Q." and "Jules K." at one door due the same minute stay
 two. The door kept is the full number, never the digits the edge left, and
 between two numbers a digit apart the one read more often (`doorReads` on the
 stop). The merged list is also run against itself, so a hold already holding
-the slips heals at its next read.
+the slips heals at its next read — and a hold restored from disk when the
+server starts heals then, rather than showing its slips until the scanner next
+reads the planner.
 
 **The add-on's door off the list the hold keeps.** On the same snap the
 add-on's card printed "<Name> Place Bivd, <Town>" with no house number, the
