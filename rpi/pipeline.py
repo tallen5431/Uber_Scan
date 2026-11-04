@@ -1476,14 +1476,19 @@ class Geometry:
 
     __slots__ = ('quad', 'roi', 'fixed_card_share', 'card_share',
                  'card_height', 'ocr_height', 'dark_mode', 'whole', 'card_finder',
-                 'skip_dark')
+                 'skip_dark', 'card_box')
 
     def __init__(self, quad=None, roi=None, fixed_card_share=None,
                  card_share=CARD_SHARE, card_height=CARD_HEIGHT,
                  ocr_height=OCR_CARD_HEIGHT, dark_mode=None, whole=False,
-                 card_finder=True, skip_dark=True):
+                 card_finder=True, skip_dark=True, card_box=None):
         self.quad = quad
         self.roi = roi
+        # The crop that last rescued this card's payout, to be read first, or
+        # None (CARD_BOX_FOR; Scanner.card_box). Frozen here with the rest, so
+        # the read in flight is taken against the memory as it stood when its
+        # frame was handed over, whatever the loop forgets meanwhile.
+        self.card_box = card_box
         # Whether a crop with nothing bright in it is left unread (see
         # DARK_SKIP_BELOW). scan_pi turns it off for a ⌖ press's reads: the
         # driver asked, so the reader is asked, however dark the screen.
@@ -1630,6 +1635,72 @@ def raise_journey(got):
     return journey
 
 
+# THE CROP THAT LAST RESCUED THIS CARD'S PAYOUT IS READ FIRST, WHILE IT IS UP.
+#
+# The owner's rig, 2 Nov (build b309e12, Pi 4), one health line: "35 reads, 25
+# complete; median 2295ms; ... 2 read the payout off a taller card found above
+# the card box; 2 raised +4559ms median". A DoorDash stops card read through a
+# box drawn round an Uber card pays, on EVERY read, for the box's read (which
+# fails: no payout, or the payout flush on its top) and then the finder's read
+# of the sheet and/or the raised re-reads — four and a half seconds on top of
+# the read, during which nothing else is read. And that is not once per card:
+# a card with a payout is read again on every verify beat (scan_pi's
+# next_verify) for the thirty-odd seconds DoorDash leaves it up, and every one
+# of those reads starts from the box again, fails again, and is rescued again
+# by the same crop as the read before.
+#
+# So the crop that rescued it — the sheet the finder found, or the box raised —
+# is remembered (Scanner.card_box), and the next read of the SAME card is taken
+# through it first. Nothing about the payout is remembered: each read reads its
+# own payout off its own crop, and is kept only under every rule the rescue it
+# repeats was kept under (card_box_refused) — its own money_is_clipped (in
+# _read_box), the same journey to the figure, one dollar figure, printed as a
+# card prints one, and a stops line when the card it was learned on had one.
+# Refused, the read falls through to the drawn box and the whole chain exactly
+# as before, so what a refusal costs is the one read of the remembered crop.
+#
+# "The same card" is the journey. A different card is read the moment it is,
+# because a journey moved refuses the remembered crop — and the memory is
+# dropped by every read that did not keep it (Scanner.settle), by a whole-screen
+# read, by a box drawn or a calibration replaced (forget_card_box, from
+# scan_pi), by the accumulator starting a new card (scan_pi's digest), and when
+# it is CARD_BOX_FOR old.
+#
+# How long a crop is remembered after the read that last kept it, in seconds of
+# the monotonic clock. The verify beat is at most VERIFY_MAX (6s) apart on a
+# card that holds still, and a read is 2.3s median on the rig with the raise in
+# it, so a card still up is read again well inside this; a gap longer than it
+# is the card gone, or the reader stuck, and either way the next read is no
+# longer "the next read of this card". Short on purpose: the journey check is
+# what stops a wrong card, this only stops a stale crop being tried at all.
+CARD_BOX_FOR = 15.0
+
+
+def card_box_refused(memo, got):
+    """Why a read through the remembered crop may NOT stand, or None when it
+    may (Scanner._look; the crop is Scanner.card_box).
+
+    The rules are the rescue's own, because this read IS that rescue made again
+    without the reads that found it: no payout (money_is_clipped has already
+    emptied a clipped one, in _read_box), then rescue_refused against the
+    journey the rescued read had, then — when that read's text had DoorDash's
+    stops line — a stops line in this one, as the raise and the finder's sheet
+    demand. Stricter than rescue_refused on the journey: every figure must be
+    the one remembered, None included, so a read that lost a figure the
+    rescued read had is not held to less than the card it is claiming to be.
+    """
+    parsed = got['parsed']
+    if parsed['pay'] is None:
+        return 'no payout%s' % (' (clipped)' if got.get('clipped') else '')
+    for key in JOURNEY:
+        if parsed[key] != memo['journey'][key]:
+            return 'it reads a different %s from the card it was learned on' % key
+    refused = rescue_refused(memo['journey'], parsed, got.get('text') or '')
+    if refused is None and memo['stops'] and not OP.STORES_LINE.search(got.get('text') or ''):
+        refused = 'no stops line in it'
+    return refused
+
+
 def rescue_refused(box, found, found_text):
     """Why the read of the found card may NOT replace the read of the drawn box,
     or None when it may.
@@ -1738,6 +1809,47 @@ class Scanner:
         self.rescued = 0
         self.locked = False
         self.last = None
+        # The crop that last rescued a payout off the card on screen, read
+        # first on the next read of it (CARD_BOX_FOR), or None. A dict:
+        # `box` (fractions of the warped screen, as `crop`), `journey` (the
+        # rescued read's JOURNEY figures), `stops` (its text had a stops line),
+        # `by` ('finder' or 'raised', for rescuedBy), `dark` (the polarity it
+        # was read with), `roi` (the drawn box it was learned against) and `at`
+        # (the clock below, when a read last kept it). Written only by settle()
+        # and forget_card_box(), on the loop's thread.
+        self.card_box = None
+        # ...and why it was last forgotten, for the log; None until it is.
+        self.card_box_forgot = None
+        # The clock CARD_BOX_FOR is judged on: monotonic, because it is only
+        # ever an interval (a wall clock NTP steps would age a crop an hour in
+        # one tick, or keep one for ever). An attribute so a test can drive it.
+        self.clock = time.monotonic
+
+    def forget_card_box(self, why):
+        """Drop the remembered crop (see CARD_BOX_FOR). `why` is kept for the
+        log. A no-op when there is none."""
+        if self.card_box is not None:
+            self.card_box = None
+            self.card_box_forgot = why
+
+    def _card_box_for(self, whole):
+        """The remembered crop a read taken now may try first, or None.
+
+        Not on a whole-screen read (it reads the screen box, not a card), not
+        with the finder off (cardFinder is the one switch for reading outside
+        the drawn box, and this crop is the finder's or the raise's), not past
+        CARD_BOX_FOR, and only against the drawn box it was learned against —
+        a crop as fractions of the screen box means nothing under another box.
+        Not forgotten here: this is asked by properties as well as by reads.
+        """
+        memo = self.card_box
+        if memo is None or whole or not self.card_finder or not room_above(self.roi):
+            return None
+        if [float(v) for v in self.roi] != memo['roi']:
+            return None
+        if self.clock() - memo['at'] > CARD_BOX_FOR:
+            return None
+        return memo
 
     def geometry(self, whole=False, skip_dark=True):
         """A frozen copy of everything a read is taken against. See Geometry.
@@ -1754,7 +1866,8 @@ class Scanner:
                         dark_mode=self.dark_mode,
                         whole=whole,
                         card_finder=self.card_finder,
-                        skip_dark=skip_dark)
+                        skip_dark=skip_dark,
+                        card_box=self._card_box_for(whole))
 
     @property
     def crop_box(self):
@@ -1948,6 +2061,7 @@ class Scanner:
             self.dropped += out['dropped']
             self.recovered += out['recovered']
             self.rescued += out['rescued']
+            self._remember_card_box(out, geom)
         # The two things a read measures rather than is given, brought back to
         # where the next read will look for them. (The counters above are per
         # read and added up here for the same reason: two frames read at once
@@ -1983,6 +2097,55 @@ class Scanner:
             self.dark_mode = geom.dark_mode
         return outs
 
+    def _remember_card_box(self, out, geom):
+        """What one settled read teaches about the crop to read first next time.
+
+        Three outcomes, and only one of them keeps a memory:
+
+          - the read kept the remembered crop (`cardBox` 'kept'): its clock is
+            renewed, so a card held up is never aged out from under its reads;
+          - the read's payout was rescued off a crop the driver did not draw,
+            by the finder or the raise: THAT crop is remembered, with the
+            rescued read's journey for the next read to be held to;
+          - anything else — a read whose payout came off the drawn box (the
+            card fits the box: another card), one with no payout at all (the
+            card gone, a map, a glare frame the next read can re-learn from),
+            the remembered crop refused, a whole-screen read — forgets it.
+            Keeping a crop past a read that could not use it would make the
+            next read pay for it AND the chain.
+
+        Learned only against the drawn box still in force: a box drawn while
+        the read ran (geom.roi no longer self.roi, as settle's share test)
+        leaves nothing remembered, since a crop as fractions of the old box is
+        nowhere on the new one. And not without a journey to hold the next
+        read to — rescue_refused never kept a read without one, but the memory
+        does not lean on that.
+        """
+        if geom is None or geom.whole:
+            self.forget_card_box('a whole-screen read')
+            return
+        if out.get('cardBox') == 'kept':
+            if geom.card_box is not None and self.card_box is geom.card_box:
+                self.card_box['at'] = self.clock()
+            return
+        if out.get('cropFrom') != 'found' or out['parsed']['pay'] is None:
+            self.forget_card_box('the read through it was refused: %s' % out['cardBoxSaid']
+                                 if out.get('cardBoxSaid') else
+                                 'a read whose payout was not off a crop above the box')
+            return
+        journey = dict((k, out['parsed'][k]) for k in JOURNEY)
+        # (And only under a drawn card box with room above it, with a crop:
+        # the one place _look ever rescues, so the one place a crop can be
+        # offered back — see _card_box_for.)
+        if geom.roi is not self.roi or not room_above(self.roi) or not out.get('crop') \
+                or not (journey['minutes'] or journey['deliverBy'] is not None):
+            self.forget_card_box('nothing to hold the next read to')
+            return
+        self.card_box = {'box': [float(v) for v in out['crop']], 'journey': journey,
+                         'stops': bool(OP.STORES_LINE.search(out.get('text') or '')),
+                         'by': out.get('rescuedBy'), 'dark': geom.dark_mode,
+                         'roi': [float(v) for v in self.roi], 'at': self.clock()}
+
     def _look(self, frame, now=None, geom=None):
         """Everything a read does except change what the Scanner believes.
 
@@ -2002,15 +2165,43 @@ class Scanner:
             g.card_share = card_share_of_quad(g.quad, frame.shape)
         screen = warp(frame, g.quad, g.read_height) if g.quad is not None else frame
         t1 = time.perf_counter()
+        # THE CROP THAT RESCUED THIS CARD LAST TIME, FIRST (CARD_BOX_FOR).
+        #
+        # Read through, and kept only under card_box_refused: the payout this
+        # read reports is the one it read off that crop, now, and nothing of
+        # the read that taught the crop is carried but its journey to be held
+        # to. Kept, `got` has its payout, so worth_a_second_look and
+        # raise_journey below both say no and `rescued` stops the raise: the
+        # box's read, the finder and the raised reads are all skipped, which is
+        # the whole of the saving. Refused, the drawn box is read as it always
+        # was and everything below runs unchanged; the refusal is said as
+        # `cardBoxSaid` and settle() forgets the crop.
+        #
+        # With the polarity it was rescued with, not one decided off this crop:
+        # a found crop decided alone came out the other way up on 22 of 183
+        # rendered dark cards (see the finder's note below), and the card has
+        # not changed theme since. A read that is refused for it costs one read.
+        got = None
+        card_box_used = card_box_said = card_box_ms = None
+        memo = g.card_box
+        if memo is not None and not g.whole and g.card_finder and room_above(g.roi):
+            tried_from = time.perf_counter()
+            tried = self._read_box(screen, memo['box'], g, dark=memo['dark'])
+            card_box_ms = (time.perf_counter() - tried_from) * 1000
+            card_box_said = card_box_refused(memo, tried)
+            if card_box_said is None:
+                got = tried
+                card_box_used = 'kept'
         # Decided here rather than inside preprocess, and remembered, so two
         # consecutive reads of one still card cannot come back turned opposite
         # ways up — which is what the health line's banding number subtracts.
-        got = self._read_box(screen, g.crop_box, g)
+        if got is None:
+            got = self._read_box(screen, g.crop_box, g)
         g.dark_mode = got['dark']
         first = got['ms']
         t3 = time.perf_counter()
-        crop_from = 'drawn'
-        rescued = 0
+        crop_from = 'found' if card_box_used else 'drawn'
+        rescued = 1 if card_box_used else 0
         finder_said = None
 
         # A CARD TALLER THAN THE BOX IT IS READ THROUGH.
@@ -2145,7 +2336,10 @@ class Scanner:
         # finds none; nothing on any other read (one regex search of the box's
         # text). Measured in rpi/README.md, under "A DoorDash stops card
         # taller than the card box".
-        rescued_by = 'finder' if rescued else None
+        # (A read kept through the remembered crop says how that crop was first
+        # found: it is the same crop, and `cardBox` beside it says it was
+        # remembered rather than found again.)
+        rescued_by = (memo['by'] if card_box_used else 'finder') if rescued else None
         # ...and what the raise cost this read, in ms, when it was made: every
         # raised read of it, kept or refused, from the first raise to the
         # last answer. None on a read that never raised. On the Pi the cost
@@ -2221,6 +2415,13 @@ class Scanner:
             # by the card's shape) or 'raised' (the drawn box raised over a
             # DoorDash stops card, raise_journey); None for 'drawn'.
             'rescuedBy': rescued_by,
+            # ...and 'kept' when this read's payout came off the crop the last
+            # rescue of this card found, read first and kept (CARD_BOX_FOR) —
+            # the box, the finder and the raise never asked; else None. When
+            # that crop was tried and refused, why, as `cardBoxSaid` (the read
+            # is then the box's and the chain's, exactly as without it).
+            'cardBox': card_box_used,
+            'cardBoxSaid': card_box_said,
             # ...and, when the finder was asked and the read is still the
             # box's, why: its own `why` when it was not sure, or the reason
             # the read of the card it found was refused. None when it was not
@@ -2255,6 +2456,10 @@ class Scanner:
                 # ...of which the raised box's reads (see raise_ms above), or
                 # None when the box was not raised.
                 'raise': raise_ms,
+                # ...and the read of the remembered crop, kept or refused, or
+                # None when there was none to try: inside `total`, ahead of the
+                # box's read when refused, in place of it when kept.
+                'cardBox': card_box_ms,
                 'total': (t4 - t0) * 1000,
             },
         }

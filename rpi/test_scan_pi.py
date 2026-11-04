@@ -3060,6 +3060,67 @@ eq('...and a new window starts with none',
    (_hq.counters(SP.HEALTH_EVERY + 2.0)['raised'],
     _hq.counters(SP.HEALTH_EVERY + 2.0)['raisedMs']), (0, None))
 
+# ...and the reads whose payout came off the crop the card's last rescue found,
+# read first (pipeline.CARD_BOX_FOR, `cardBox` 'kept'): counted, said after the
+# raised count as "N via the card's last box", every other part of the line as
+# it was; in the tally as `cardBox`; nothing in a window with none.
+_hk = SP.Health()
+_hk.reset(0.0)
+_hk.add({'ms': {'total': 2600, 'raise': 1180.0}, 'clipped': False, 'cropFrom': 'found'},
+        {'pay': 14.10, 'complete': True})
+for _ms in (900, 950):
+    _hk.add({'ms': {'total': _ms, 'raise': None, 'cardBox': _ms - 10}, 'clipped': False,
+             'cropFrom': 'found', 'cardBox': 'kept'}, {'pay': 14.10, 'complete': True})
+_hk.add({'ms': {'total': 1300, 'raise': None}, 'clipped': False, 'cropFrom': 'drawn',
+         'cardBoxSaid': 'it reads a different miles from the card it was learned on'},
+        {'pay': 9.0, 'complete': True})
+_said_hk = []
+try:
+    SP.log = _said_hk.append
+    _tk = _hk.report(SP.HEALTH_EVERY + 1.0, None, type('AScanner', (), {'crop_box': None})())
+finally:
+    SP.log = _real_log2
+eq('the reads kept through the card\'s last box are counted, a refused one left out',
+   _tk.get('cardBox'), 2)
+ok_('...and the health line says "2 via the card\'s last box" after the raised count, the '
+    'parts before it unchanged (%r)' % _said_hk[-1:],
+    any(': 4 reads, 4 complete; median 1300ms;' in l
+        and '; 3 read the payout off a taller card found above the card box; '
+            '1 raised +1180ms median; 2 via the card\'s last box' in l for l in _said_hk))
+ok_('...and a window with none says nothing of it',
+    not any('last box' in l for l in _said_hq) and _tq.get('cardBox') == 0)
+
+
+# The scanner's side of "the same card": the accumulator's episode. A read
+# kept through the remembered crop in ANOTHER episode — a card on the same
+# journey with a different payout, which the crop reads perfectly well — forgets
+# it, so the new card's next read starts from the box and learns its own.
+class _BoxScanner(object):
+    def __init__(self):
+        self.card_box, self.forgot = {'box': [0, 0.35, 1, 0.63]}, None
+
+    def forget_card_box(self, why):
+        self.card_box, self.forgot = None, why
+
+
+_bs = _BoxScanner()
+_be = SP.card_box_episode(_bs, {'cropFrom': 'found', 'rescuedBy': 'finder'}, {'episode': 4}, None)
+_be2 = SP.card_box_episode(_bs, {'cropFrom': 'found', 'cardBox': 'kept'}, {'episode': 4}, _be)
+eq('the crop is for the episode it was learned in, and kept by a read of that episode',
+   (_be, _be2, _bs.card_box is not None), (4, 4, True))
+_be3 = SP.card_box_episode(_bs, {'cropFrom': 'found', 'cardBox': 'kept'}, {'episode': 5}, _be2)
+eq('...and a read kept through it in another episode forgets it, saying why',
+   (_be3, _bs.card_box, _bs.forgot), (None, None, 'the accumulator started another card'))
+eq('...and with no crop remembered there is no episode to keep',
+   SP.card_box_episode(_bs, {'cropFrom': 'found'}, {'episode': 6}, 4), None)
+
+# ...and a box drawn by hand forgets it: new corners put the crop somewhere else.
+_bm = _BoxScanner()
+_bm.quad = _bm.roi = _bm.fixed_card_share = _bm.card_share = None
+SP.use_manual_box(_bm, [[0, 0], [100, 0], [100, 200], [0, 200]], [0.0, 0.44, 1.0, 0.54])
+eq('a box drawn by hand forgets the remembered crop', (_bm.card_box, _bm.forgot),
+   (None, 'the box was drawn again'))
+
 # --- the setup line says whether the finder will ever be asked ----------------
 _off_args = type('Args', (), {'no_card_find': True})()
 _on_args = type('Args', (), {'no_card_find': False})()

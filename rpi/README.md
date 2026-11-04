@@ -2734,6 +2734,34 @@ frames: about 170ms (the look, then a read refused) where the unsure look
 cost 6ms. On the Pi, estimates as above; the `raise` figure on the health line
 now counts only the reads the finder could not settle.
 
+**The next read of that card goes straight to the crop that rescued it.** The
+rig's 2 Nov health line (build b309e12) said "2 raised +4559ms median": every
+read of a stops card through an Uber-shaped box paid for the box's failed read
+and then the rescue again, on every verify beat while the card was up. Now the
+crop a payout was rescued off (the finder's sheet or the raised box) is
+remembered with that read's journey (`pipeline.CARD_BOX_FOR`,
+`Scanner.card_box`), and the next read tries it **first**, keeping it only
+under the rescue's own rules (`card_box_refused`): its own clipping test, the
+same journey to the figure, one dollar figure, printed as a card prints one,
+and a stops line where the learned read had one. Kept, the box, the finder and
+the raise are skipped (`cardBox: "kept"` in the reader's output, `ms.cardBox`
+its time); refused, everything runs as before and the crop is forgotten. No
+payout is ever carried — each read reads its own off its own crop. Also
+forgotten by a whole-screen read, a box drawn, a corner re-lock, the
+accumulator starting another card, the finder turned off, and 15 s after the
+read that last kept it. The health line says `N via the card's last box`
+after the raised count (and `cardBox` on the `seen` row), only in a window
+with one.
+
+Measured over the same 90 frames, each card read four times (development box,
+x86): the 2nd–4th reads went from 369ms median to **129ms**, 232 of 270 of
+them through the remembered crop, still right 234 / none 36 / **wrong 0**. A
+card changed between reads to one on the same journey at $16.40 reads $16.40;
+one on another journey refuses the crop and is read by the chain; a card
+stacked above gives the DoorDash card's $14.10, never its own. On the Pi an
+**estimate**: about 2.4s for such a read where it was about 6.9s, some 4.4s
+saved on each read of the card after the first.
+
 **▣ Set box again is the way to change them.** A box drawn by hand stays until
 another is drawn, and nothing on the panel throws it away. There used to be:
 ⟳ Re-find, pressed with a box in force, looked for the screen on the next frame

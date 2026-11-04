@@ -1215,6 +1215,12 @@ def use_manual_box(scanner, quad_px, card=None):
     scanner.roi = list(card) if card else list(CX.PIN_WHOLE)
     scanner.fixed_card_share = CX.card_share(card)
     scanner.card_share = CX.card_share(card)
+    # The crop the reader reads a rescued card through first (pipeline's
+    # CARD_BOX_FOR) is fractions of the OLD screen box. The Scanner would
+    # refuse it anyway — it is offered only under the card box it was learned
+    # against — but a new screen box with the same card box is new corners,
+    # and the crop is somewhere else on the phone under them.
+    scanner.forget_card_box('the box was drawn again')
 
 
 _watch_cache = (None, VIEW_SCENE)
@@ -1653,6 +1659,34 @@ def payout_from(kept, out, parsed):
     return 'drawn', None, kept
 
 
+def card_box_episode(scanner, out, parsed, was):
+    """Forget the crop the reader reads first (pipeline.CARD_BOX_FOR) when the
+    accumulator says this is another card; returns the episode it is now for.
+
+    The reader drops the crop itself the moment a read cannot use it — a
+    journey moved, no payout, the payout off the drawn box — but it cannot see
+    what the accumulator sees: a card on the SAME journey with a different
+    payout, which the remembered crop reads perfectly well (its own payout,
+    off its own crop: nothing of a payout is ever carried) and which is still
+    another card. "Forget it when the card changes" is asked here, by the
+    same test payout_from uses for "the same card": the merged reading's
+    episode. `was` is the episode the crop was learned or last kept in, None
+    when there is none; a read that kept the crop in another episode forgets
+    it, so the next read of the new card starts from the box and the chain
+    and learns its own. Costs that card one rescue, which is what every card
+    paid on every read before.
+    """
+    if scanner.card_box is None:
+        return None
+    episode = parsed.get('episode')
+    if out.get('cardBox') == 'kept' and was is not None and episode != was:
+        scanner.forget_card_box('the accumulator started another card')
+        return None
+    if out.get('cropFrom') == 'found':
+        return episode
+    return was
+
+
 def read_why(out, parsed):
     """Why this read was not usable, or None when it was.
 
@@ -1875,6 +1909,16 @@ class Health:
         # (counters: `raised`, `raisedMs`). Nothing when no read raised, so
         # every line from a shift with no stops card reads as it did.
         self.raised_ms = []
+        # ...and reads whose payout came off the crop the card's last rescue
+        # found, read first and kept (pipeline's CARD_BOX_FOR; `cardBox`
+        # 'kept'): the box, the finder and the raise all skipped. The rig's 2
+        # Nov line said "2 raised +4559ms median" for a card whose every read
+        # paid the rescue again; this says how many of a window's reads no
+        # longer do ("4 via the card's last box"). Counted in `rescued` above
+        # as well, since their payout is still off a crop above the box —
+        # this is the part of that count that cost one read. Nothing when
+        # none was, so every other line reads as it did.
+        self.card_box = 0
         # Reads that raised. Counted here so the health line can still appear
         # when every one of them did: the guard in report() used to be `not
         # self.reads`, which is exactly true when the reader is broken, so the
@@ -1929,6 +1973,8 @@ class Health:
         raised = (out.get('ms') or {}).get('raise')
         if isinstance(raised, (int, float)):
             self.raised_ms.append(raised)
+        if out.get('cardBox') == 'kept':
+            self.card_box += 1
 
     def not_read_dark(self, now, peak):
         """Count one read left unread for a black crop; the log line, when due.
@@ -1967,6 +2013,7 @@ class Health:
                 'raised': len(self.raised_ms),
                 'raisedMs': (int(round(sorted(self.raised_ms)[len(self.raised_ms) // 2]))
                              if self.raised_ms else None),
+                'cardBox': self.card_box,
                 'darkSkipped': self.dark_skipped,
                 'medianMs': (int(round(sorted(self.ms)[len(self.ms) // 2]))
                              if self.ms else None),
@@ -2048,6 +2095,10 @@ class Health:
         # median extra time (see reset): after the count it may be part of.
         if self.raised_ms:
             bits.append('%d raised +%dms median' % (len(self.raised_ms), tally['raisedMs']))
+        # ...and how many took it through the crop the card's last rescue
+        # found, at the cost of one read (see reset).
+        if self.card_box:
+            bits.append('%d via the card\'s last box' % self.card_box)
         # Outside the tracker block on purpose: these say nothing about the
         # corners, and a rig started with --no-track is exactly the one whose
         # destination scan is worth watching.
@@ -4911,6 +4962,9 @@ def main():
     # now. See payout_from.
     found_kept = None
     found_box = None
+    # ...and the episode the reader's remembered crop (pipeline's CARD_BOX_FOR)
+    # was learned or last kept in, or None. See card_box_episode.
+    box_episode = None
     # The card currently being watched, and what has become of it. See
     # Health.saw — an episode that ends having shown a payout but written
     # nothing is a card the rig saw and failed to keep.
@@ -4998,6 +5052,7 @@ def main():
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
         nonlocal unparsed_kept_for
         nonlocal last_read, found_box, found_kept, popup_said, pickup_said
+        nonlocal box_episode
         # Not merged when it was a whole-screen read — see collect().
         parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
@@ -5049,6 +5104,8 @@ def main():
         # where this read came from — see payout_from. One answer, for the
         # panel's line, a Snap's reader.json and the live view's outline.
         pay_from, found_box, found_kept = payout_from(found_kept, out, parsed)
+        # ...and whether the crop the reader reads first is still this card's.
+        box_episode = card_box_episode(scanner, out, parsed, box_episode)
         # ...and kept for 📷 Snap, ⌖ reads included: the last card the reader
         # cut out — `fitted`, before preprocess() made tesseract's input from
         # it — is what "what was the reader looking at?" asks about. A
@@ -6067,6 +6124,11 @@ def main():
             # of a cost rpi/README.md could only estimate. 0 and None in a
             # window with none.
             'raised': tally.get('raised'), 'raisedMs': tally.get('raisedMs'),
+            # ...and how many reads took their payout through the crop the
+            # card's last rescue found, at one read's cost (pipeline's
+            # CARD_BOX_FOR; Health.reset): beside `raised`, so a shift's rows
+            # say how much of the rescue's cost the memory took back.
+            'cardBox': tally.get('cardBox'),
             # ...and how many reads were left unread for a black crop (see
             # DARK_SAY_EVERY): on 29 Oct each of those was 16-25s of tesseract.
             'darkSkipped': tally.get('darkSkipped'),
@@ -6519,6 +6581,11 @@ def main():
                     # that just happened; being on a different phone does.
                     if tracker.jumps > jumps_before or tracker.rebaselines > rebased_before:
                         moved = do_read = True
+                        # ...and a different rectangle is not the one the
+                        # remembered crop (pipeline's CARD_BOX_FOR) was found
+                        # on. An ease is a few pixels and leaves it; this is
+                        # the corners moved to somewhere else.
+                        scanner.forget_card_box('the corners re-locked')
                     if tracker.rebaselines > rebased_before:
                         health.rebaselines += 1
                         log('corners un-stuck: the screen in front of the camera '

@@ -1614,6 +1614,179 @@ if TC.available():
                 'another figure (%r)' % (_name, (_p['pay'], _p['miles'], _p['deliverBy'])),
                 _p['pay'] is None or (_p['pay'], _p['miles'], _p['deliverBy']) == (14.48, 8.6, 975))
 
+    # --- the crop that rescued this card, read first on its next read ---------
+    #
+    # The owner's rig, 2 Nov: "2 read the payout off a taller card found above
+    # the card box; 2 raised +4559ms median" — every read of a DoorDash stops
+    # card through a box drawn round an Uber card paid for the box's failed
+    # read and the rescue again, beat after beat. PL.CARD_BOX_FOR: the crop
+    # that rescued it is read first while the same card is up, and kept only
+    # under the rescue's own rules. Through Scanner.read (look, then settle),
+    # as the loop reads: the memory is settle's. A fresh sensor draw per read.
+    class Clock(object):
+        def __init__(self):
+            self.t = 1000.0
+
+        def __call__(self):
+            return self.t
+
+    def reader(box=TC.BOX_DD_BELOW, width=DD_WIDTH, finder=True):
+        s = PL.Scanner(quad=np.array(TC.screen_corners(width), np.float32), roi=list(box),
+                       card_share=box[3], card_finder=finder)
+        s.clock = Clock()
+        return s
+
+    def read_counted(s, screen, width=DD_WIDTH, seed=2, whole=False):
+        """One read through s, with every crop read and every finder ask counted."""
+        _crops = []
+        _rb = PL.Scanner._read_box
+        PL.Scanner._read_box = lambda self, *a, **k: _crops.append(list(a[1])) or _rb(self, *a, **k)
+        try:
+            with Asked() as _a:
+                if whole:
+                    g = s.geometry(whole=True)
+                    o = s.settle([s._look(TC.mount(screen, width, seed=seed), None, g)], g)[0]
+                else:
+                    o = s.read(TC.mount(screen, width, seed=seed))
+        finally:
+            PL.Scanner._read_box = _rb
+        return o, _crops, _a.calls
+
+    _sk = reader()
+    _o1, _c1, _f1 = read_counted(_sk, DD, seed=2)
+    eq('the first read of a DoorDash stops card is rescued off the sheet as before, and the '
+       'sheet\'s crop is remembered with its journey and its stops line',
+       (_o1['parsed']['pay'], _o1['rescuedBy'], _o1['cardBox'], _o1['ms']['cardBox'],
+        _sk.card_box is not None and _sk.card_box['box'] == _o1['crop'],
+        _sk.card_box and (_sk.card_box['journey'], _sk.card_box['stops'], _sk.card_box['by'])),
+       (14.1, 'finder', None, None, True,
+        ({'minutes': 33.0, 'miles': 8.7, 'deliverBy': None}, True, 'finder')))
+    _sk.clock.t += 5.0
+    _o2, _c2, _f2 = read_counted(_sk, DD, seed=3)
+    eq('...the next read of it is ONE read, through that crop, its own payout off it: the box '
+       'unread, the finder unasked, nothing raised',
+       (_o2['parsed']['pay'], _o2['parsed']['miles'], _o2['parsed']['minutes'],
+        _o2['parsed']['complete'], _o2['cropFrom'], _o2['rescuedBy'], _o2['cardBox'],
+        _c2 == [_o1['crop']], _f2, _o2['ms']['raise'], _o2['finder']),
+       (14.1, 8.7, 33.0, True, 'found', 'finder', 'kept', True, 0, None, None))
+    ok_('...its read of the crop timed on `ms` as `cardBox`, within the total (%r of %r)'
+        % (_o2['ms']['cardBox'], _o2['ms']['total']),
+        0 < _o2['ms']['cardBox'] <= _o2['ms']['total'])
+    eq('...and the memory\'s clock renewed by the read that kept it', _sk.card_box['at'],
+       _sk.clock.t)
+
+    # The card changes between reads. Another DoorDash card on the same
+    # journey with a different payout: read through the remembered crop, it
+    # reads ITS payout, not the last card's — nothing of a payout is carried.
+    _o3, _c3, _ = read_counted(_sk, TC.dd_stores_screen(pay='$16.40'), seed=4)
+    eq('a different card on the same journey read through the remembered crop gives its own '
+       '$16.40, never the last card\'s $14.10',
+       (_o3['parsed']['pay'], _o3['cardBox'], len(_c3)), (16.4, 'kept', 1))
+    # ...and one on another journey refuses the crop for it, and is read by the
+    # box and the chain exactly as a first read is, then remembered in its turn.
+    _many = TC.dd_stores_screen(pay='$21.35', journey='4 stops (15.0 mi) • 53 min',
+                                tail=('Multiple dropoffs (2 stops)', None))
+    _o4, _c4, _f4 = read_counted(_sk, _many, seed=5)
+    eq('a card on another journey refuses the remembered crop and is read as a first read is, '
+       'its own $21.35 off the sheet the finder found',
+       (_o4['parsed']['pay'], _o4['parsed']['miles'], _o4['cardBox'], _o4['rescuedBy'],
+        _c4[1] == list(TC.BOX_DD_BELOW), _f4),
+       (21.35, 15.0, None, 'finder', True, 1))
+    ok_('...said why (%r), and its own crop and journey remembered in place of the last'
+        % (_o4['cardBoxSaid'],),
+        (_o4['cardBoxSaid'] or '').startswith('it reads a different')
+        and _sk.card_box['journey']['miles'] == 15.0 and _sk.card_box['box'] == _o4['crop'])
+
+    # A card stacked above, arriving on the same journey after the crop was
+    # learned: never the card above's $22.75, at three widths and both boxes.
+    _up = (762, [(782, 'Order in progress', 34, False), (872, '$22.75', 86, True)])
+    _stk = TC.dd_stores_screen(upper=_up)
+    _after = []
+    for _w in (600, 680, 760):
+        for _bx in (TC.BOX_DD_PAY, TC.BOX_DD_BELOW):
+            _s = reader(box=_bx, width=_w)
+            read_counted(_s, DD, width=_w, seed=2)
+            _learned = _s.card_box is not None
+            _s.clock.t += 3.0
+            _os, _, _ = read_counted(_s, _stk, width=_w, seed=3)
+            # ...and learned ON the stacked screen, then read again.
+            _s2 = reader(box=_bx, width=_w)
+            _ot, _, _ = read_counted(_s2, _stk, width=_w, seed=2)
+            _s2.clock.t += 3.0
+            _ou, _, _ = read_counted(_s2, _stk, width=_w, seed=3)
+            _after.append((_learned, _os['parsed']['pay'], _os['parsed']['miles'],
+                           _ou['parsed']['pay'], _ou['parsed']['miles'], _ou['cardBox']))
+    ok_('a card stacked above, after the DoorDash card\'s crop was learned or learned on it: '
+        'the DoorDash card\'s $14.10 or nothing, never the card above\'s $22.75 (%r)' % (_after,),
+        all(_p in (None, 14.1) and _q in (None, 14.1) for _l, _p, _m, _q, _n, _k in _after)
+        and all(_m == 8.7 for _l, _p, _m, _q, _n, _k in _after if _p is not None)
+        and all(_n == 8.7 for _l, _p, _m, _q, _n, _k in _after if _q is not None))
+    ok_('...and the crop learned on the stacked screen is kept on its next read somewhere (%r)'
+        % ([_k for _l, _p, _m, _q, _n, _k in _after],),
+        any(_k == 'kept' for _l, _p, _m, _q, _n, _k in _after))
+
+    # What forgets it.
+    _sf = reader()
+    read_counted(_sf, DD, seed=2)
+    _remembered = _sf.card_box is not None
+    _sf.clock.t += PL.CARD_BOX_FOR + 0.1
+    eq('the crop is not offered once it is CARD_BOX_FOR old',
+       (_remembered, _sf.geometry().card_box), (True, None))
+    _sf.clock.t -= 0.2
+    _offered = _sf.geometry().card_box is not None
+    _sf.roi = [0.0, 0.40, 1.0, 0.58]
+    eq('...nor under a box drawn since it was learned (offered before: %r)' % _offered,
+       (_offered, _sf.geometry().card_box), (True, None))
+    _sf.roi = list(TC.BOX_DD_BELOW)
+    _sf.card_finder = False
+    eq('...nor with the card finder off', _sf.geometry().card_box, None)
+    _sf.card_finder = True
+    eq('...nor on a whole-screen read', _sf.geometry(whole=True).card_box, None)
+    _sf.forget_card_box('the box was drawn again')
+    eq('...and forget_card_box drops it, saying why',
+       (_sf.card_box, _sf.card_box_forgot), (None, 'the box was drawn again'))
+    _sw = reader()
+    read_counted(_sw, DD, seed=2)
+    _ow, _cw, _ = read_counted(_sw, DD, seed=3, whole=True)
+    eq('a whole-screen read neither tries the crop nor keeps it',
+       (_ow['cardBox'], _cw, _sw.card_box, _sw.card_box_forgot),
+       (None, [list(PL.WHOLE_SCREEN)], None, 'a whole-screen read'))
+    _sb = reader()
+    read_counted(_sb, DD, seed=2)
+    _blank = np.full_like(DD, 30)
+    _ob, _cb, _ = read_counted(_sb, _blank, seed=3)
+    eq('a read with no card in the crop tries it, falls back to the box, and forgets it',
+       (_ob['parsed']['pay'], _ob['cardBox'], len(_cb) >= 2, _cb[1] == list(TC.BOX_DD_BELOW),
+        _sb.card_box), (None, None, True, True, None))
+    _sd = reader()
+    read_counted(_sd, DD, seed=2)
+    _od, _cd, _ = read_counted(_sd, TC.early_look_screen(), seed=3)
+    eq('an Uber card on the next read refuses the crop (no stops line or another journey) and '
+       'is never priced off it', (_od['cardBox'], _od['parsed']['pay'] in (None, 14.48)),
+       (None, True))
+
+    # card_box_refused holds each of the rescue's rules, and one stricter.
+    _memo = {'journey': {'minutes': 33.0, 'miles': 8.7, 'deliverBy': None}, 'stops': True}
+
+    def _cbr(txt, clipped=False):
+        return PL.card_box_refused(_memo, {'parsed': OP2.parse('' if clipped else txt),
+                                           'text': txt, 'clipped': clipped})
+
+    eq('the remembered crop\'s read stands only as the rescue\'s would',
+       [_cbr('$14.10 incl. tips\n3 stops (8.7 mi) - 33 min\nCustomer dropoff'),
+        _cbr('$14.10 incl. tips\n3 stops (8.7 mi) - 33 min', clipped=True),
+        _cbr('$14.10 incl. tips\n3 stops (9.7 mi) - 33 min'),
+        _cbr('$14.10 incl. tips\n3 stops (8.7 mi)'),
+        _cbr('$22.75\n3 stops (8.7 mi) - 33 min\n$14.10 incl. tips\n3 stops (8.7 mi) - 33 min'),
+        _cbr('$14.\n3 stops (8.7 mi) - 33 min'),
+        _cbr('$14.10 incl. tips\n8.7 mi - 33 min')],
+       [None, 'no payout (clipped)',
+        'it reads a different miles from the card it was learned on',
+        'it reads a different minutes from the card it was learned on',
+        'it holds a second dollar figure — more than one card',
+        'its payout is not printed the way a card prints one',
+        'no stops line in it'])
+
 # --- a read that hangs does not hold the process open ----------------------------
 # The read pool's threads were a ThreadPoolExecutor's, which the interpreter
 # joins on the way out: a read stuck inside the engine kept the scanner alive
