@@ -13897,6 +13897,144 @@ ok_('[finish] ...and the offers page counts the finished ones as timed at the do
 shutil.rmtree(_fdir, ignore_errors=True)
 shutil.rmtree(_fdir2, ignore_errors=True)
 
+
+# --- a pin that did not come, said once in the log ---------------------------
+#
+# A shift's misses could not be counted: "NO PIN · <door>, <why>" was on the
+# panel while it was looked at and nowhere after. server.js pinSaidNone /
+# pinSaidFound: one line the first time an order's end, pickup or store N is
+# known unpinned for a reason, one more if it is pinned later, nothing for a
+# pin found at once, nothing again for the same reason. Through the real
+# server's console (what ~/HTTP_Server/logs/uberscan.log holds), against
+# tests/fake-nucbox.js: "4821 Kestrel Dr" is a street it knows with no
+# numbers, "1985 Cobb Parkway" a door it answers. Invented addresses.
+_plfake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_plfake_base = 'http://127.0.0.1:%d' % json.loads(_plfake.stdout.readline())['port']
+_pldir = tempfile.mkdtemp()
+_plsay = os.path.join(_pldir, 'say.py')
+with open(_plsay, 'w') as _fh:
+    _fh.write(
+        'import json, os, time\n'
+        'd = os.path.dirname(os.path.abspath(__file__))\n'
+        'n = 0\n'
+        'end = time.time() + 600\n'
+        'while time.time() < end:\n'
+        '    p = os.path.join(d, "say-%d.json" % n)\n'
+        '    if not os.path.exists(p):\n'
+        '        time.sleep(0.05)\n'
+        '        continue\n'
+        '    for x in json.load(open(p)):\n'
+        '        print(json.dumps(x), flush=True)\n'
+        '    n += 1\n')
+_plj = os.path.join(_pldir, 'offers.jsonl')
+open(_plj, 'w').close()
+_pllog = []
+
+
+def _plsaid(word, seconds=4.0):
+    """The server's `pin:` lines naming `word`, waiting up to `seconds` for one."""
+    for _ in range(int(seconds / 0.05)):
+        got = [l for l in list(_pllog) if l.startswith('pin: ') and word in l]
+        if got:
+            return got
+        time.sleep(0.05)
+    return []
+
+
+try:
+    _plp, _plb = _start_loud({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                              'SCANNER_ARGS': _plsay, 'NUCBOX_SEARCH': _plfake_base,
+                              'NUCBOX_TIMEOUT_MS': '800'}, _plj)
+    threading.Thread(target=lambda: [_pllog.append(l.rstrip('\n')) for l in _plp.stdout],
+                     daemon=True).start()
+    try:
+        _atook(_plb, 'pl-street', _KES)
+        _h = _settled(_plb)
+        _hid = _h.get('holdId')
+        eq('[pin said] an end refused says so once, in the server\'s words, with its door cut '
+           'short and no town',
+           _plsaid(_hid), ['pin: none end #%s "street found, not that door" (4821 Kestrel Dr)'
+                           % _hid])
+        # The status is asked over and over, as the panel asks it: the same
+        # reason is not said twice.
+        for _ in range(5):
+            get(_plb, '/api/status')
+        time.sleep(0.5)
+        eq('[pin said] ...and not again for the same reason, however often it is asked about',
+           len(_plsaid(_hid)), 1)
+        post(_plb, '/api/held-end', {'holdId': _hid, 'dropoff': _KES, 'lat': 33.9600,
+                                     'lon': -84.5400, 'doorLevel': True,
+                                     'name': '4821, Kestrel Drive, Marietta, Cobb County'})
+        _found = [l for l in _plsaid('pin: found end #' + _hid)]
+        eq('[pin said] ...and once more when Map view pins it after all, with the questions the '
+           'NucBox was asked for it', _found, ['pin: found end #%s by page after 1 ask' % _hid])
+
+        _atook(_plb, 'pl-cobb', _COBB)
+        _h = _settled(_plb)
+        time.sleep(0.4)
+        eq('[pin said] an end pinned at its first ask says nothing at all',
+           (_h.get('endPinned'), [l for l in _pllog if _h.get('holdId') in l and 'pin:' in l]),
+           (True, []))
+
+        _atook(_plb, 'pl-nonum', 'Kestrel Dr, Marietta')
+        _h = _settled(_plb)
+        eq('[pin said] a dropoff with no house number says so',
+           _plsaid(_h.get('holdId')),
+           ['pin: none end #%s "no house number" (Kestrel Dr)' % _h.get('holdId')])
+        # (These cards name no pickup at all: nothing is missing there, so no
+        # pickup line — the suite's first run said "pickup 'no house number'"
+        # with no door for each of them.)
+        eq('[pin said] an order whose card names no pickup says nothing of one',
+           [l for l in _pllog if l.startswith('pin: none pickup')], [])
+
+        # A DoorDash card with two stores: the first door answered (no line),
+        # the second a street with no numbers — "store 2", in the card's order.
+        _plo = dict(_SQ, id='pl-two', pay=14.1, minutes=33.0, billedMinutes=33.0, miles=8.7,
+                    cost=1.5, pickup='Example Diner', pickupLine=_COBB, app='doordash',
+                    stores=[{'name': 'Example Diner', 'door': _COBB},
+                            {'name': 'Example Taqueria', 'door': _KES}],
+                    dropoffs=1, dropoffOrders=2)
+        post(_plb, '/api/offers/mark', {'id': 'pl-two', 'accepted': True, 'offer': _plo})
+        _h = _settled(_plb, lambda h: (h.get('pickupsPinned') or 0) >= 1)
+        _hid2 = _h.get('holdId')
+        eq('[pin said] a DoorDash store refused is said as "store 2", its door cut short',
+           [l for l in _plsaid('store 2 #' + _hid2)],
+           ['pin: none store 2 #%s "street found, not that door" (4821 Kestrel Dr)' % _hid2])
+        eq('[pin said] ...and the store pinned at its first ask says nothing',
+           [l for l in _pllog if 'store 1 #' + _hid2 in l], [])
+        post(_plb, '/api/held-pickup', {'holdId': _hid2, 'lat': 33.9610, 'lon': -84.5410,
+                                        'q': _KES})
+        eq('[pin said] ...and once when the page pins it',
+           [l for l in _plsaid('pin: found store 2 #' + _hid2)],
+           ['pin: found store 2 #%s by page after 1 ask' % _hid2])
+
+        # An offer, read off the scanner before any Took (searchCardEarly):
+        # said with "offer", only where the NucBox was asked and refused.
+        with open(os.path.join(_pldir, 'say-0.json.tmp'), 'w') as _fh:
+            json.dump([{'offer': dict(_SQ, id='pl-offer', pay=9.0, minutes=20.0,
+                                      billedMinutes=20.0, miles=5.0, cost=0.9,
+                                      dropoff=_KES, app='uber', screen='uber.offer')},
+                       {'offer': dict(_SQ, id='pl-offer2', pay=9.0, minutes=20.0,
+                                      billedMinutes=20.0, miles=5.0, cost=0.9,
+                                      dropoff='Kestrel Dr, Marietta', app='uber',
+                                      screen='uber.offer')}], _fh)
+        os.rename(os.path.join(_pldir, 'say-0.json.tmp'), os.path.join(_pldir, 'say-0.json'))
+        eq('[pin said] an offer whose dropoff the NucBox refused is said as an offer\'s',
+           _plsaid('#pl-offer '), ['pin: none offer end #pl-offer "street found, not that door" '
+                                   '(4821 Kestrel Dr)'])
+        time.sleep(0.5)
+        eq('[pin said] ...and an offer with no house number to ask says nothing',
+           [l for l in _pllog if 'pl-offer2' in l and l.startswith('pin:')], [])
+    finally:
+        stop(_plp)
+finally:
+    _plfake.kill()
+    shutil.rmtree(_pldir, ignore_errors=True)
+_plsrc = open(os.path.join(ROOT, 'server.js'), encoding='utf-8').read()
+ok_('[pin said] the log line never stands in a search\'s way: both sayers swallow their own '
+    'faults', _plsrc.count('} catch (e) { /* the log only */ }') == 2)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

@@ -3266,6 +3266,7 @@ function endHold(key) {
  * does not wear the old area; any refusal without one takes it off. */
 function refuseHeldEnd(h, why, area) {
   memoVerdict(holdIdOf(h), undefined, { pinned: false, why: why, area: area || null });
+  pinSaidNone(holdIdOf(h), 'end', why, h.dropoff, null);
   h.endWhy = why;
   h.endWhyFor = endTextOf(h);
   if (area && isFinite(area.lat) && isFinite(area.lon)) {
@@ -3274,6 +3275,109 @@ function refuseHeldEnd(h, why, area) {
     delete h.endArea;
   }
   saveHold(h);
+}
+
+/* --- a pin that did not come, said once in the log ----------------------------
+ *
+ * A shift's misses could not be counted. Map view says "NO PIN · <door>,
+ * <why>" and /api/status carries the held end's `endWhy` and the pickups'
+ * `pickupsWhy` — but only while it is looked at, and only for now: by the
+ * evening, which orders went unpinned, at which end, why, and which of them a
+ * later ask or the page pinned after all, was nowhere. searchMemo has some of
+ * it for the last SEARCH_MEMO_ORDERS orders, in memory, and only a 📷 Snap
+ * writes it down. The log (~/HTTP_Server/logs/uberscan.log, this process's
+ * console) is kept for the shift and is local to the owner's machines.
+ *
+ * So ONE line, the first time a held order's end, pickup or store N is known
+ * to be without a pin for a given reason, in the server's own words for it
+ * (END_WHY, 'no house number', 'no card fix', 'NucBox down'):
+ *
+ *   pin: none end #<holdId> "no house number" (<door, short>)
+ *   pin: none store 2 #<holdId> "several answers" (<door, short>)
+ *
+ * and ONE more if that same order's same pin is later found, by this server's
+ * own search (a retry after END_RETRY_MS, the band, a place) or by Map view's
+ * post, with how many questions the NucBox was asked for it (searchMemo's
+ * count, `n`, which is not cut at SEARCH_MEMO_ASKS):
+ *
+ *   pin: found end #<holdId> by server after 2 asks
+ *
+ * A pin found with no "none" said before it says nothing: the line is for
+ * counting misses and the misses mended, and a pin at the first ask is
+ * neither. The same reason again — every beat's armHeldEnd, the band's second
+ * refusal in the same words, a retry refused as before — says nothing either:
+ * one line per (order, which, reason), and for the end per dropoff text, so a
+ * dropoff the order was given later is asked about afresh. Kept in memory,
+ * the newest PIN_SAID_MAX, and a restart says each again once.
+ *
+ * An OFFER's pins (searchCardEarly, at the card's read, before any Took) are
+ * said the same way with "offer" after "none", but only where the NucBox was
+ * asked and refused: a card read with no house number on it is every Uber
+ * offer there is (Uber prints no door until the Took), and a line per card
+ * for that would bury the rest. An offer is asked once (EARLY_CARDS), so it
+ * has no "found" to say; the order taken off it is asked again under its own
+ * holdId, and says its own.
+ *
+ * Addresses as the scanner's lines already put them in this log ("scanner:
+ * destination read: <line>"): the door cut short as the panel cuts it
+ * (live.html's shortPlace, PIN_DOOR_SHOWN letters), enough to find the order
+ * on the offers page, never the town. */
+var PIN_SAID_MAX = 400;
+var PIN_DOOR_SHOWN = 20;
+var pinSaid = new Map();        // key -> { which, id, whys: [..], found: bool }
+
+function pinDoorShort(text) {
+  var s = String(text == null ? '' : text).split('\n')[0].split(',')[0]
+    .replace(/[\s,]+$/, '').trim();
+  if (s.length <= PIN_DOOR_SHOWN) return s;
+  var cut = s.slice(0, PIN_DOOR_SHOWN);
+  var space = cut.lastIndexOf(' ');
+  if (space >= PIN_DOOR_SHOWN - 8) cut = cut.slice(0, space);
+  return cut.replace(/[\s,]+$/, '') + '…';
+}
+
+function pinKey(id, which, text) {
+  return String(id) + '\n' + which + (which === 'end' ? '\n' + String(text || '') : '');
+}
+
+/* What a held order's pickup text is: 'store N' where the hold lists
+ * DoorDash's stores (storesOf) and the text is the Nth one's door, else
+ * 'pickup'. */
+function pinWhichPickup(h, q) {
+  var list = h && Array.isArray(h.stores) ? h.stores : [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].door === q) return 'store ' + (i + 1);
+  }
+  return 'pickup';
+}
+
+// Never in the way of a search or a pin: a log line that throws costs nothing.
+function pinSaidNone(id, which, why, door, offer) {
+  try {
+    if (!id || !why) return;
+    var key = (offer ? 'offer\n' : '') + pinKey(id, which, door);
+    var on = pinSaid.get(key);
+    if (on && (on.found || on.whys.indexOf(why) !== -1)) return;
+    if (!on) {
+      on = { which: which, id: id, whys: [], found: false };
+      pinSaid.set(key, on);
+      while (pinSaid.size > PIN_SAID_MAX) pinSaid.delete(pinSaid.keys().next().value);
+    }
+    on.whys.push(why);
+    console.log('pin: none ' + (offer ? 'offer ' : '') + which + ' #' + id + ' "' + why + '"'
+                + (door ? ' (' + pinDoorShort(door) + ')' : ''));
+  } catch (e) { /* the log only */ }
+}
+
+function pinSaidFound(id, which, door, by, asks) {
+  try {
+    var on = pinSaid.get(pinKey(id, which, door));
+    if (!on || on.found) return;
+    on.found = true;
+    console.log('pin: found ' + which + ' #' + id + ' by ' + (by || 'page')
+                + (typeof asks === 'number' && asks > 0
+                  ? ' after ' + asks + ' ask' + (asks === 1 ? '' : 's') : ''));
+  } catch (e) { /* the log only */ }
 }
 
 /* An area as it is kept and said: `approx` always, and (the owner's DoorDash
@@ -3442,6 +3546,7 @@ function pinHeldEnd(h, at, by, asked, via) {
                                         via: via || null, lat: at.lat, lon: at.lon });
   h.endPin = { dropoff: h.dropoff, lat: at.lat, lon: at.lon,
                doorLevel: true, pinnedAt: Date.now(), by: by };
+  pinSaidFound(holdIdOf(h), 'end', h.dropoff, by, memoAsked(holdIdOf(h)));
   // ...and the street the door was found by when it was not the dropoff's
   // own (doorChain: the type word left out; the one street the street index
   // says the name as read is; a directional the other way).
@@ -3909,7 +4014,18 @@ function armHeldPickups(h) {
   if (!NBX.search || !h) return;
   var id = holdIdOf(h);
   var on = pickSearch[id] || (pickSearch[id] = { asked: {}, timers: [], why: {} });
-  pickupAsks(h).forEach(function (a) {
+  var asks = pickupAsks(h);
+  // Nothing on record this server may ask — /api/status's `pickupsWhy: 'no
+  // house number'` — said once in the log (pinSaidNone), unless the page has
+  // pinned a pickup of this order already. Only for an order whose card NAMES
+  // a pickup: a card that names none (an order taken off the offers page with
+  // nothing read) has no pickup to be missing, and said "pickup 'no house
+  // number'" with no door for every such order in the suite's first run.
+  var named = h.pickupLine || h.pickup || null;
+  if (named && !asks.length && !(Array.isArray(h.pickupPins) && h.pickupPins.length)) {
+    pinSaidNone(id, 'pickup', 'no house number', named, null);
+  }
+  asks.forEach(function (a) {
     if (on.asked[a.q] || pickupPinFor(a.q)) return;
     on.asked[a.q] = true;
     searchHeldPickup(id, a, 1);
@@ -3959,6 +4075,8 @@ function searchHeldPickup(id, a, attempt) {
   var said = plan ? nbxTerm(plan.street) : null;
   memoStart(id, a.q, { from: a.from, attempt: attempt, plan: plan, disc: disc,
                        skipped: !said ? 'no street to ask' : !disc ? 'no disc' : null });
+  // (No disc is /api/status's 'no card fix' (pickupsWhyOf), said once.)
+  if (said && !disc) pinSaidNone(id, pinWhichPickup(h, a.q), 'no card fix', a.q, null);
   if (!said || !disc) return;
   var ask = function (target, read, answered, unanswered) {
     pickupAsk(id, a, attempt, target, answered, read, unanswered);
@@ -4035,6 +4153,7 @@ function searchHeldPickupName(id, a, attempt, h) {
   var said = plan ? nbxTerm(plan.q) : null;
   memoStart(id, a.q, { from: a.from, byName: true, attempt: attempt, plan: plan, disc: disc,
                        skipped: !said ? 'no name to ask' : !disc ? 'no disc' : null });
+  if (said && !disc) pinSaidNone(id, 'pickup', 'no card fix', a.q, null);
   if (!said || !disc) return;
   var target = nbxSearchTarget('q', said, MV.discBox(disc));
   pickupAsk(id, a, attempt, target, function (out) {
@@ -4069,6 +4188,7 @@ function pickupAsk(id, a, attempt, target, answered, read, unanswered) {
       // and a NucBox on a server from before /tail (a 404) is that.
       if (unanswered) return unanswered();
       pickSearch[id].why[a.q] = 'NucBox down';
+      pinSaidNone(id, pinWhichPickup(pickHold(id), a.q), 'NucBox down', a.q, null);
       if (attempt === 1) {
         pickSearch[id].timers.push(setTimeout(function () {
           searchHeldPickup(id, a, 2);
@@ -4092,6 +4212,7 @@ function settleHeldPickup(id, a, res, asked) {
   if (!now) return;
   if (!res.at) {
     pickSearch[id].why[a.q] = END_WHY[res.why] || 'no house number';
+    pinSaidNone(id, pinWhichPickup(now, a.q), pickSearch[id].why[a.q], a.q, null);
     return;
   }
   keepPickupPin(now, res.at, a.q, { by: 'server', from: a.from, asked: asked });
@@ -4174,6 +4295,12 @@ function keepPickupPin(h, at, q, how) {
   }
   picks.push(pin);
   h.pickupPins = picks.slice(-PICKUP_PINS_MAX);
+  // ...said in the log when this pickup was said unpinned (pinSaidFound):
+  // `by` 'server' for this server's search, 'page' for Map view's post.
+  if (typeof q === 'string' && q) {
+    pinSaidFound(holdIdOf(h), pinWhichPickup(h, q), q, how && how.by ? how.by : 'page',
+                 memoAsked(holdIdOf(h), q));
+  }
   // Every order's door, since the guard is every order's pickups (see
   // pickupNearEnd): a second order's restaurant can sit beside the first's.
   heldOrders(Date.now()).forEach(function (o) {
@@ -6469,15 +6596,32 @@ function searchCardEarly(offer, now) {
   var disc = MV.discFor(cardOf(offer));
   if (!disc) return;
   earlyCards = earlyCards.concat([offer.id]).slice(-EARLY_CARDS);
-  var none = function () {};
+  // What each search found, said in the log when the NucBox was asked and
+  // refused (pinSaidNone's "offer" line; never for a text it could not ask:
+  // no house number, no NucBox, a NucBox not answering). Which pin it is in
+  // the hold's words: 'store N' on a DoorDash card listing its stores, else
+  // 'pickup', and 'end' for the dropoff.
+  var stores = storesOf(offer) || [];
+  var whichOf = function (t) {
+    for (var i = 0; i < stores.length; i++) if (stores[i].door === t) return 'store ' + (i + 1);
+    return 'pickup';
+  };
+  var said = function (which, door) {
+    return function (r) {
+      if (r && !r.at && r.why) pinSaidNone(offer.id, which, END_WHY[r.why] || r.why, door, true);
+    };
+  };
   // (The printed door with its store's name beside it, for the store's
   // street printed short: pickupTail, as the Took's pickupAsks has it.)
   [offer.pickupLine, offer.pickup].forEach(function (t) {
     if (typeof t === 'string') {
-      earlyDoor(t, disc, false, none, null, t === offer.pickupLine ? offer.pickup : null);
+      earlyDoor(t, disc, false, said(whichOf(t), t), null,
+                t === offer.pickupLine ? offer.pickup : null);
     }
   });
-  if (typeof offer.dropoff === 'string') earlyDoor(offer.dropoff, disc, true, none);
+  if (typeof offer.dropoff === 'string') {
+    earlyDoor(offer.dropoff, disc, true, said('end', offer.dropoff));
+  }
   // ...and every OTHER store's printed door on a DoorDash stops card
   // (storesOf: two stores or more, DoorDash's only; the dd stores entry's
   // Open in AUDITS.md). Map view searched the second store by its door for
@@ -6495,7 +6639,8 @@ function searchCardEarly(offer, now) {
   // simply left to the Took, as every store was before.
   (storesOf(offer) || []).forEach(function (st) {
     if (!st.door || st.door === offer.pickupLine) return;
-    earlyDoor(st.door, disc, false, none, function () { return earlyRoom(now); }, st.name);
+    earlyDoor(st.door, disc, false, said(whichOf(st.door), st.door),
+              function () { return earlyRoom(now); }, st.name);
   });
 }
 
@@ -9080,7 +9225,18 @@ function memoAsk(id, q, target, out, err) {
     }
     s.asks.push(ask);
     if (s.asks.length > SEARCH_MEMO_ASKS) s.asks.splice(0, s.asks.length - SEARCH_MEMO_ASKS);
+    // ...and every question counted, not cut at SEARCH_MEMO_ASKS: the log's
+    // "found ... after N asks" (pinSaidFound) reads it.
+    s.n = (s.n || 0) + 1;
   });
+}
+// How many questions searchMemo counted for one side of an order, or null
+// when it holds none (never asked, or the order fell out of the memo).
+// Asks nothing into being: memoSide would make the side it is asked of.
+function memoAsked(id, q) {
+  var m = searchMemo ? searchMemo.get(id) : null;
+  var s = m ? (q === undefined ? m.end : m.picks[q]) : null;
+  return s && typeof s.n === 'number' ? s.n : null;
 }
 function memoVerdict(id, q, verdict) {
   memoSafe(function () {
@@ -12301,6 +12457,8 @@ function route(req, res) {
       if (!heldEndPin(h)) {
         h.endPin = { dropoff: h.dropoff, lat: body.lat, lon: body.lon,
                      doorLevel: true, pinnedAt: Date.now() };
+        // ...said in the log when this end was said unpinned (pinSaidFound).
+        pinSaidFound(holdIdOf(h), 'end', h.dropoff, 'page', memoAsked(holdIdOf(h)));
         // A new end: whatever was learnt about being at an old one (for a
         // dropoff the hold no longer names) is not about this one.
         delete h.arrivedAt;
