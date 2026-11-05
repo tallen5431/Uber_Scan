@@ -1787,6 +1787,22 @@ if TC.available():
         'its payout is not printed the way a card prints one',
         'no stops line in it'])
 
+# --- the polarity's figures, off one histogram ----------------------------
+#
+# The three figures is_dark_mode decides on (PL._order_levels) are numpy's
+# own: np.percentile(5, 95) and np.median to the bit, odd and even
+# sizes, one pixel, flat, two-level and noise.
+_rng = np.random.RandomState(7)
+_pics = [np.array([[200]], np.uint8), np.full((3, 4), 17, np.uint8),
+         np.array([[0, 255]], np.uint8)]
+_pics += [_rng.randint(0, 256, (_rng.randint(1, 90), _rng.randint(1, 90))).astype(np.uint8)
+          for _ in range(60)]
+_pics += [np.where(_rng.rand(41, 37) < 0.3, 30, 220).astype(np.uint8) for _ in range(10)]
+eq('the polarity\'s figures off a histogram are np.percentile\'s and np.median\'s, to the bit',
+   [PL._order_levels(_p) == (float(np.percentile(_p, 5)), float(np.percentile(_p, 95)),
+                             float(np.median(_p))) for _p in _pics], [True] * len(_pics))
+
+
 # --- a read that hangs does not hold the process open ----------------------------
 # The read pool's threads were a ThreadPoolExecutor's, which the interpreter
 # joins on the way out: a read stuck inside the engine kept the scanner alive
