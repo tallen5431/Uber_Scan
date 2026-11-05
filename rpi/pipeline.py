@@ -1227,6 +1227,163 @@ def _read_pool():
     return _READ_POOL
 
 
+# THE RESCUE'S NEXT READ, STARTED ON A SPARE CORE BEFORE IT IS KNOWN TO BE WANTED.
+#
+# A read through a drawn card box that loses the payout is rescued in a
+# chain, one read after another: the box's read (and its second look), then
+# the card finder and its read of the card it found, then the box raised
+# 0.09 and, when that finds no payout, 0.18 (Scanner._look). The owner's rig
+# measured what that costs on its health lines: +3.5 to +4.6 s on top of a
+# 1.7-2.4 s read, every second of it after the box's read waiting on the
+# read before. And on 3 Nov, banding 28.5, two raised reads in a row found
+# nothing — four seconds spent, one after the other.
+#
+# Each link reads a crop that does not depend on the read before it: the
+# finder looks at the screen, not at the box's text, and the raised boxes
+# are fixed steps above the drawn one. Only the DECISION of which to take
+# does. So the next link is started on a spare core while this one is read,
+# and when the chain reaches it the answer is already there, or nearly:
+#
+#   - the finder and its read of the card it found, beside the box's read
+#     (Scanner._finder_ahead), whenever the box is a drawn one with room
+#     above it — the only reads the finder can ever be asked on;
+#   - the box raised 0.18, beside the read raised 0.09.
+#
+# THE ANSWER IS THE ONE THE CHAIN GAVE, NOT A FASTER APPROXIMATION OF IT. The
+# chain decides exactly as before, in the same order, on the same rules
+# (worth_a_second_look, rescue_refused, raise_journey and the rest are not
+# touched); a link started ahead is the same function on the same crop with
+# the same polarity, and is used only where the chain would have read it
+# itself — otherwise it is dropped. Tesseract's LSTM is deterministic per
+# image, and every engine is the same model (_Tesseract). Measured against
+# the reader as it stood (86eb82a) over every rendered set this repo draws —
+# see rpi/README.md, under "The rescue's next read is started early" —
+# every frame gave the same figures, crop, text and rescue.
+#
+# Two threads, because a read is two frames at once (_READ_WORKERS): with
+# one, the frame that got it finished early and the paired read still
+# waited on the frame that did not — a stops card's paired read measured
+# 407ms median before and 400 with one, 259 with two (x86, beside the
+# stand-in camera loop below). An answer asked for before its thread has
+# begun on it is taken back and read in place (_taken), and a job is only
+# offered to an idle thread (_SparePool.offer), so a busy spare never makes
+# the chain wait longer than it would have.
+#
+# NICED, because the cores were never the camera loop's to give. Two frames
+# each with a link ahead is four tesseracts on a four-core Pi, and the loop
+# that holds the camera — capture, the gate, the tracker, the live view — is
+# the fifth thing wanting a core. At the kernel's niceness 10 these threads
+# get about a tenth of a core's share against anything at 0, so they run on
+# what the loop and the paired read leave idle and give it back the moment
+# either wants it. Measured on the development box (4 cores, like the Pi)
+# with a stand-in loop on its own thread — every 33ms, a sensor frame shrunk
+# to the gate's thumbnail and a 640x480 JPEG encoded, ~15ms of work a tick
+# — through 24 paired first reads of DoorDash stops cards: the loop's tick
+# took 15.4ms median, 20.7 p95 with no spare threads; 14.8 / 19.4 with two
+# niced; 15.2 / 27.4 with two at the loop's own priority. Not a frame late
+# in any of them. The paired read: 407ms median before, 259 after (-36%).
+#
+# A rig too hot, or throttling, has them switched off (spare_cores, from
+# scan_pi's heat guard): a link ahead is work that may be thrown away, and
+# work thrown away on a Pi the firmware is already slowing is heat for
+# nothing. So is a rig started --no-parallel, which asked for one read at a
+# time.
+_SPARE_WORKERS = 2
+_SPARE_NICE = 10
+_SPARE_POOL = None
+_SPARE_ON = True
+
+
+def spare_cores(on):
+    """Allow or forbid starting the rescue's next read early (see above).
+    Returns whether it changed."""
+    global _SPARE_ON
+    was, _SPARE_ON = _SPARE_ON, bool(on)
+    return was != _SPARE_ON
+
+
+class _SparePool(object):
+    """Daemon threads that take a job only when one of them is idle.
+
+    Not _DaemonPool, whose map() queues whatever it is given: a link queued
+    behind another frame's would start late, and the chain would wait on
+    it longer than reading it in place. offer() says no instead, and the
+    caller reads in place exactly as it always did. Daemons for _DaemonPool's
+    reason (a read hung in the engine must not hold the process at exit);
+    the same threads for the life of the process, because the engine
+    belongs to the thread (_in_process)."""
+
+    def __init__(self, workers, name, nice):
+        self._jobs = queue.Queue()
+        self._idle = workers
+        self._lock = threading.Lock()
+        self._nice = nice
+        for i in range(workers):
+            threading.Thread(target=self._serve, name='%s_%d' % (name, i),
+                             daemon=True).start()
+
+    def _serve(self):
+        try:
+            os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), self._nice)
+        except (AttributeError, OSError):
+            pass
+        while True:
+            done, fn = self._jobs.get()
+            try:
+                if done.set_running_or_notify_cancel():
+                    try:
+                        done.set_result(fn())
+                    except BaseException as e:    # noqa: BLE001 — handed back
+                        done.set_exception(e)
+            finally:
+                with self._lock:
+                    self._idle += 1
+
+    def offer(self, fn):
+        """A Future for fn() on an idle thread, or None when none is idle."""
+        with self._lock:
+            if self._idle <= 0:
+                return None
+            self._idle -= 1
+        done = futures.Future()
+        self._jobs.put((done, fn))
+        return done
+
+
+def _spare_pool():
+    global _SPARE_POOL
+    if _SPARE_POOL is None and _SPARE_WORKERS > 0:
+        with _READ_POOL_LOCK:
+            if _SPARE_POOL is None:
+                _SPARE_POOL = _SparePool(_SPARE_WORKERS, 'spare', _SPARE_NICE)
+    return _SPARE_POOL
+
+
+def _ahead(fn):
+    """fn() started on a spare core, or None (no spare idle, or none at all)."""
+    if not _SPARE_ON:
+        return None
+    pool = _spare_pool()
+    return pool.offer(fn) if pool is not None else None
+
+
+def _taken(ahead, fn):
+    """What fn() returns: the spare core's answer when it was started there and
+    is no longer queued, else fn() here and now."""
+    if ahead is not None and not ahead.cancel():
+        try:
+            return ahead.result()
+        except Exception:                         # noqa: BLE001 — asked again
+            pass
+    return fn()
+
+
+def _drop(ahead):
+    """Let go of an answer nobody is going to ask for."""
+    if ahead is not None:
+        ahead.cancel()
+
+
 # A ceiling on engines, whatever the threading above does.
 #
 # Each holds its own copy of the model — 11.7MB for the first, 14.2MB for the
@@ -1234,7 +1391,16 @@ def _read_pool():
 # Pi. The pool above is the fix; this is the backstop, because the failure it
 # guards against is a rig running out of memory mid-shift and the cost of being
 # wrong about it is one slow read.
-MAX_ENGINES = 4
+#
+# SIX, where it was four: the two spare threads (_SPARE_WORKERS) hold an
+# engine each, beside the paired read's two and the map label's one
+# (scan_pi.MapLabels) — five in a running rig, and at four the fifth to ask
+# would have been refused and read on the binary, a whole model load per
+# read. One over, for --no-parallel's reader thread. Measured on the
+# development box, the RSS each new engine added after the first (26.7MB,
+# which loads the library): 9.5-14.2MB, so the two spares are ~25MB of a Pi
+# 4's memory.
+MAX_ENGINES = 6
 
 
 def _close_engines():
@@ -2252,7 +2418,16 @@ class Scanner:
         # Decided here rather than inside preprocess, and remembered, so two
         # consecutive reads of one still card cannot come back turned opposite
         # ways up — which is what the health line's banding number subtracts.
+        # ...and the finder, and its read of the card it finds, on a spare
+        # core while the box is read (_SPARE_WORKERS): asked below only if
+        # the box's read loses the payout, and then already answered. The
+        # condition is the finder's own outer one; `was` is the polarity hint
+        # as the box's read is handed it, frozen before that read moves it.
+        chain = None
         if got is None:
+            if g.card_finder and not g.whole and room_above(g.roi):
+                was = g.dark_mode
+                chain = _ahead(lambda: self._finder_ahead(screen, g, was))
             got = self._read_box(screen, g.crop_box, g)
         g.dark_mode = got['dark']
         first = got['ms']
@@ -2326,13 +2501,19 @@ class Scanner:
         dd_sheet_refused = False
         if (g.card_finder and not g.whole and room_above(g.roi)
                 and (worth_a_second_look(got['parsed']) or dd_journey is not None)):
-            found = CF.find_card(screen, g.roi)
+            # The answer started beside the box's read, when there is one and
+            # it read the found card the way up the box's read decided — it
+            # decides it the same way, so always; asked here otherwise.
+            dark = g.dark_mode
+            ahead = _taken(chain, lambda: None)
+            if ahead is None or ahead[0] != dark:
+                ahead = (dark,) + self._found_card(screen, g, dark)
+            found, again = ahead[1], ahead[2]
             if not found['sure']:
                 finder_said = 'not sure: %s' % found['why']
-            elif found['box'][1] >= float(g.roi[1]) - TALLER:
+            elif again is None:
                 finder_said = 'the card it found starts inside the drawn box'
             else:
-                again = self._read_box(screen, found['box'], g, dark=g.dark_mode)
                 # A found read whose payout sits against the found top was
                 # emptied by money_is_clipped in _read_box, and has no payout
                 # for rescue_refused to take.
@@ -2353,6 +2534,9 @@ class Scanner:
                     rescued = 1
                 else:
                     finder_said = 'read the card found above the box and refused it: %s' % refused
+        else:
+            # The box's read stood: the finder's answer is nobody's.
+            _drop(chain)
 
         # A DOORDASH STOPS CARD TALLER THAN THE BOX, WHEN THE FINDER CANNOT
         # SAY WHERE IT STARTS (the owner's snaps of 31 Oct).
@@ -2410,11 +2594,26 @@ class Scanner:
             # The box's read, unchanged when nothing was rescued above.
             held_to = dd_journey
             raise_from = time.perf_counter()
+            # Every raised box up front, so the next can be read on a spare
+            # core while this one is (_SPARE_WORKERS): the 0.18 read is
+            # taken only when the 0.09 one found no payout, exactly as when
+            # it was read after it, and dropped otherwise. The 3 Nov pair
+            # that both found nothing cost one read's wait, not two.
+            boxes = []
             for step in (RAISE_STEPS if held_to is not None else ()):
                 top = max(0.0, float(g.roi[1]) - step)
-                raised = [float(g.roi[0]), top, float(g.roi[2]),
-                          float(g.roi[1]) + float(g.roi[3]) - top]
-                again = self._read_box(screen, raised, g, dark=g.dark_mode)
+                boxes.append((step, top, [float(g.roi[0]), top, float(g.roi[2]),
+                                          float(g.roi[1]) + float(g.roi[3]) - top]))
+                if top <= 0.0:
+                    break
+            dark = g.dark_mode
+            ahead = None
+            for i, (step, top, raised) in enumerate(boxes):
+                this, ahead = ahead, None
+                if i + 1 < len(boxes):
+                    nxt = boxes[i + 1][2]
+                    ahead = _ahead(lambda b=nxt: self._read_box(screen, b, g, dark=dark))
+                again = _taken(this, lambda b=raised: self._read_box(screen, b, g, dark=dark))
                 if again['parsed']['pay'] is None:
                     finder_said = ('raised the box %.2f and still no payout%s'
                                    % (step, ' (clipped)' if again['clipped'] else ''))
@@ -2433,6 +2632,7 @@ class Scanner:
                 else:
                     finder_said = 'raised the box %.2f and refused it: %s' % (step, refused)
                 break
+            _drop(ahead)
             if held_to is not None:
                 raise_ms = (time.perf_counter() - raise_from) * 1000
         t4 = time.perf_counter()
@@ -2520,6 +2720,30 @@ class Scanner:
                 'total': (t4 - t0) * 1000,
             },
         }
+
+    def _found_card(self, screen, g, dark):
+        """(the finder's answer, the read of the card it found or None).
+
+        None when it is not sure, or sure of a card that starts inside the
+        drawn box (TALLER): the two answers on which _look reads nothing."""
+        found = CF.find_card(screen, g.roi)
+        if not found['sure'] or found['box'][1] >= float(g.roi[1]) - TALLER:
+            return found, None
+        return found, self._read_box(screen, found['box'], g, dark=dark)
+
+    def _finder_ahead(self, screen, g, was):
+        """_found_card, asked on a spare core while the box is being read:
+        (the polarity the box's read will decide, found, again), or None
+        when the box's read will be left unread as dark (and so never asks).
+
+        The polarity is the box read's own, decided here the way _read_box
+        decides it — the same crop, fitted the same way, `was` the hint it
+        is handed — because the found card is read the way up the box was."""
+        fitted = to_grey(fit_for_ocr(crop(screen, g.crop_box), g.ocr_height))
+        if g.skip_dark and bright_end(fitted) < DARK_SKIP_BELOW:
+            return None
+        dark = is_dark_mode(fitted, was=was)
+        return (dark,) + self._found_card(screen, g, dark)
 
     def _read_box(self, screen, box, g, dark=None):
         """Read one crop of the warped screen: the drawn box, or a found card.

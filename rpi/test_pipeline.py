@@ -1136,6 +1136,13 @@ ok_('...and asks before taking its answer',
 import testcards as TC                                        # noqa: E402
 import cardfind as CF                                         # noqa: E402
 
+# Held with nothing started ahead on a spare core (PL._SPARE_WORKERS): what
+# this block holds is the chain's own decisions, read by read and in order —
+# several checks count the crops read and the finder's asks, and a link
+# started ahead is a read and an ask made early on another thread. The block
+# after it holds that the spare cores give every one of these answers.
+PL.spare_cores(False)
+
 if TC.available():
     BOX = TC.BOX_8OCT
     WIDTH = 720
@@ -1786,6 +1793,80 @@ if TC.available():
         'it holds a second dollar figure — more than one card',
         'its payout is not printed the way a card prints one',
         'no stops line in it'])
+
+# --- the rescue's next read, started ahead on a spare core -----------------
+#
+# PL._SPARE_WORKERS: the finder and its read of the card it found start beside
+# the box's read, and the box raised 0.18 beside the read raised 0.09. Held:
+# every answer is the one the chain gives reading each link in place —
+# figures, crop, text, which rescue, and why not — over the screens the
+# block above reads, both themes, both DoorDash boxes, the stacked cards and
+# the raise.
+if TC.available():
+    def _both(screen, box, width, seed=1, finder=None):
+        got = []
+        for on in (False, True):
+            PL.spare_cores(on)
+            if finder is None:
+                o = look(screen, box=box, width=width, seed=seed)
+            else:
+                with Asked(finder):
+                    o = look(screen, box=box, width=width, seed=seed)
+            got.append((o['parsed']['pay'], o['parsed']['miles'], o['parsed']['minutes'],
+                        o['parsed']['deliverBy'], o['crop'], o['cropFrom'], o['rescuedBy'],
+                        o['finder'], o['text'], o['clipped']))
+        return got
+
+    _same = []
+    for _scr, _bx, _w in ((TC.early_look_screen(), BOX, 720),
+                          (TC.early_look_screen(TC.DAY_CARD), BOX, 600),
+                          (TC.two_order_screen(), BOX, 760),
+                          (TC.stacked_screen(), BOX, 720),
+                          (TC.exclusive_screen(), BOX, 720),
+                          (TC.dash_stacked_screen(), TC.BOX_DASH, 680),
+                          (DD, TC.BOX_DD_PAY, 600), (DD, TC.BOX_DD_BELOW, 760),
+                          (TC.dd_stores_screen(TC.DARK), TC.BOX_DD_BELOW, 680),
+                          (TC.degrade(DD, 'shadow', seed=0), TC.BOX_DD_PAY, 680),
+                          (_stk, TC.BOX_DD_PAY, 680)):
+        _b = _both(_scr, _bx, _w, seed=2)
+        _same.append(_b[0] == _b[1])
+        if _b[0] != _b[1]:
+            print('  spare cores changed %r into %r' % (_b[0][:8], _b[1][:8]))
+    eq('with the rescue\'s next read started ahead on a spare core, every read gives what the '
+       'chain gives reading each link in place: figures, crop, text and rescue',
+       _same, [True] * len(_same))
+    # The raise, both steps: the finder held unsure, the 0.18 read started
+    # beside the 0.09 one — taken where 0.09 found no payout, dropped where
+    # it found one.
+    _rs = [_both(DD, _bx, DD_WIDTH, seed=2, finder=_unsure_finder)
+           for _bx in (TC.BOX_DD_PAY, TC.BOX_DD_BELOW)]
+    eq('...and so does the raise, the next step started beside it',
+       [_r[0] == _r[1] for _r in _rs], [True, True])
+    eq('...the stops card still off the box raised', [_r[1][6] for _r in _rs],
+       ['raised', 'raised'])
+
+    # Started ahead only where the chain could ask: none on a read with no
+    # drawn box above it to look in, nor with the spare cores switched off
+    # (scan_pi's heat guard, --no-parallel).
+    _offered = []
+    _real_ahead = PL._ahead
+    PL._ahead = lambda fn: _offered.append(1) or _real_ahead(fn)
+    try:
+        PL.spare_cores(True)
+        _s = PL.Scanner(quad=np.array(TC.screen_corners(WIDTH), np.float32))
+        _s._look(TC.mount(TC.uberx_screen(), WIDTH), None, _s.geometry())
+        _n_centred = len(_offered)
+        look(EARLY)
+        _n_drawn = len(_offered) - _n_centred
+        PL.spare_cores(False)
+        _before = PL._spare_pool() and PL._ahead(lambda: 1)
+    finally:
+        PL._ahead = _real_ahead
+    eq('nothing is started ahead on a read through the centred crop, and the finder\'s answer '
+       'is on a read through a drawn box', (_n_centred, _n_drawn >= 1), (0, True))
+    eq('...and with the spare cores switched off, nothing is offered one', _before, None)
+    eq('switching them returns whether it changed',
+       (PL.spare_cores(False), PL.spare_cores(True), PL.spare_cores(True)), (False, True, False))
 
 # --- the polarity's figures, off one histogram ----------------------------
 #

@@ -1919,6 +1919,18 @@ class Health:
         # this is the part of that count that cost one read. Nothing when
         # none was, so every other line reads as it did.
         self.card_box = 0
+        # ...and how long the reads that went past the box's read waited for
+        # the rest of the chain — the finder asked, its read, the raise:
+        # `ms['find']`, on a read the finder was asked on or whose payout a
+        # rescue found, but not one kept through the card's last box. Since
+        # the rescue's next read is started ahead on a spare core (pipeline's
+        # _SPARE_WORKERS), this is what the spare cores bought on the rig.
+        # Its Pi figure is an ESTIMATE off the development box's ratios
+        # (rpi/README.md); this count and median ("2 rescues waited +1800ms
+        # median"), against the +3.5-4.6 s the owner's lines put on a rescued
+        # read before, are the measurement. Nothing in a window with none, so
+        # every other line reads as it did.
+        self.rescue_wait_ms = []
         # Reads that raised. Counted here so the health line can still appear
         # when every one of them did: the guard in report() used to be `not
         # self.reads`, which is exactly true when the reader is broken, so the
@@ -1975,6 +1987,10 @@ class Health:
             self.raised_ms.append(raised)
         if out.get('cardBox') == 'kept':
             self.card_box += 1
+        waited = (out.get('ms') or {}).get('find')
+        if isinstance(waited, (int, float)) and out.get('cardBox') != 'kept' \
+                and (out.get('finder') or out.get('cropFrom') == 'found'):
+            self.rescue_wait_ms.append(waited)
 
     def not_read_dark(self, now, peak):
         """Count one read left unread for a black crop; the log line, when due.
@@ -2014,6 +2030,9 @@ class Health:
                 'raisedMs': (int(round(sorted(self.raised_ms)[len(self.raised_ms) // 2]))
                              if self.raised_ms else None),
                 'cardBox': self.card_box,
+                'rescueWait': len(self.rescue_wait_ms),
+                'rescueWaitMs': (int(round(sorted(self.rescue_wait_ms)[len(self.rescue_wait_ms) // 2]))
+                                 if self.rescue_wait_ms else None),
                 'darkSkipped': self.dark_skipped,
                 'medianMs': (int(round(sorted(self.ms)[len(self.ms) // 2]))
                              if self.ms else None),
@@ -2099,6 +2118,12 @@ class Health:
         # found, at the cost of one read (see reset).
         if self.card_box:
             bits.append('%d via the card\'s last box' % self.card_box)
+        # ...and what the reads past the box waited for the rest of the chain
+        # (see reset), last of the rescue's figures.
+        if self.rescue_wait_ms:
+            bits.append('%d rescue%s waited +%dms median'
+                        % (len(self.rescue_wait_ms), '' if len(self.rescue_wait_ms) == 1 else 's',
+                           tally['rescueWaitMs']))
         # Outside the tracker block on purpose: these say nothing about the
         # corners, and a rig started with --no-track is exactly the one whose
         # destination scan is worth watching.
@@ -2635,7 +2660,8 @@ STALL_AGAIN = 600.0
 PI_EVERY = 30.0
 
 # The heat guard: the whole-screen reads nobody pressed for, put off while the Pi
-# is hot (SCREEN_AUTO_HOT in place of SCREEN_AUTO_EVERY), and nothing else.
+# is hot (SCREEN_AUTO_HOT in place of SCREEN_AUTO_EVERY), and the rescue's reads
+# started ahead on the spare cores (below) — nothing an offer needs.
 #
 # The owner reports their Pi 4 at 60-80°C on a shift, and vcgencmd's 0x80000 —
 # the soft temperature limit, reached since boot. Past that limit the firmware
@@ -2668,6 +2694,21 @@ PI_EVERY = 30.0
 # drawn box is read at all — the Early-look card's $14.48 on 73 of 144 frames,
 # and the panel said no offer before it. Skipping it while hot loses that
 # payout, and it is an offer read.
+#
+# ...and, since, the rescue's reads started AHEAD on the spare cores
+# (pipeline's _SPARE_WORKERS): those it does stop, because they are work the
+# chain may throw away, not reads it needs — off, the chain reads each link
+# in place, the same reads in the same order, only later. Nothing an offer
+# shows changes; a hot rig's rescued read is as slow as it was before them.
+#
+# KEPT AS IT WAS WHEN THE OWNER FITTED A COOLER (4 Nov: "the temps are well
+# controlled now"). It never held anything back on a cool Pi: it reacts to
+# the temperature and the firmware's own throttle word NOW, and a Pi that
+# stays under 70°C never turns it on. With the cooler it should simply stay
+# off — and if a summer afternoon beats the cooler, or the supply sags
+# (under-voltage turns it on too, whatever the temperature), it is the same
+# answer for the same reason. Relaxing 75/70 would buy nothing a cool Pi
+# can use. What the cooler DID free is the headroom the spare cores spend.
 HEAT_ON_C = 75.0
 HEAT_OFF_C = 70.0
 
@@ -4793,6 +4834,10 @@ def main():
     # inside this process and libgomp reads the environment when it starts, not
     # when a subprocess is spawned. See PL.OMP_THREAD_LIMIT for why it is pinned.
     pair_reads = not args.no_parallel
+    # ...and one read at a time means no rescue read started ahead on a
+    # spare core either (PL._SPARE_WORKERS): what --no-parallel is for is a
+    # rig reading one thing at once.
+    PL.spare_cores(pair_reads)
 
     # Everything that decides what gets read, in one place, once. A log without
     # this is a log where every question starts with "what was it set to?".
@@ -6395,6 +6440,15 @@ def main():
                     # one that may have just moved it: the beat says the state
                     # its own `cpuC` and `throttled` put the guard in.
                     pi_now = pi.sample(time.monotonic())
+                    # ...and the rescue's reads started ahead on the spare
+                    # cores (PL._SPARE_WORKERS) stop while the guard is on:
+                    # work that may be thrown away is heat for nothing on a
+                    # Pi the firmware is slowing. The offer's own reads are
+                    # untouched — the chain reads in place, as it did.
+                    if pair_reads and PL.spare_cores(not pi.guard.on):
+                        log('rescue reads %s' % ('one after another while the Pi is hot'
+                                                 if pi.guard.on else
+                                                 'started ahead on the spare cores again'))
                     extra = {'gps': updown.beat(beat_fix(phone)),
                              'pi': pi_now, 'heat_guard': pi.guard.on}
                     emit_alive(**dict(flags, **extra))

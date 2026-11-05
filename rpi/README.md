@@ -357,6 +357,7 @@ Not from tuning the OCR engine. From refusing to run it:
 | **Hand over a file, not an array** | pytesseract's array path routes the image through PIL, whose PNG encoder measured **93ms** — over a third of a read, spent compressing a picture tesseract immediately decompresses. An uncompressed PGM encodes in 0.1ms and reads identically: **262ms → 157ms**. It goes in `/dev/shm`, so the SD card is never in the hot path. Now only the fallback path: the kept engine is handed the array itself. |
 | **Do not start tesseract at all** | Every read spawned a `tesseract`, and a fresh process re-loads and unpacks the LSTM model before it looks at a pixel — **81.8ms of a 129.1ms read, 63% of it**, paid again on each of the 4 (median) to 14 (worst) reads merged into one offer. The engine is now initialised once and kept: same `libtesseract.so.5` the binary wraps, already on the box as its dependency, so nothing is installed. Byte-identical output, checked row for row across light and dark cards at four mount distances in both page-segmentation modes. A whole read goes **187.1ms → 88.3ms**. See [Keeping the engine](#keeping-the-engine). |
 | **Decide which way up from a histogram** | Whether a card is dark mode (`is_dark_mode`) is three order statistics of the crop — its 5th and 95th percentiles and its median — and numpy found them by partitioning all ~900×1000 pixels twice: **10–15ms of every read**, profiled stage by stage over rendered Uber, DoorDash and planner reads, the largest thing in a read after tesseract and about a tenth of a whole 93–141ms read (development box). Eight-bit pixels have 256 levels, so one histogram is the whole sorted order: **10.9ms → 1.7ms** a crop, with the same figures to the bit — numpy's own index and interpolation, checked against `np.percentile` and `np.median` over 3,147 pictures, every polarity the same. Not sampled, the way the dark-screen test is: inverting a light card destroys the reading. |
+| **Read the rescue's next crop early** | When a read through a drawn box loses the payout, the card finder's read and the raised box's were each read after the one before. Each is started on a spare, niced core while the read before it runs, and used only where the chain would have read it: a DoorDash stops card's paired first read **407ms → 259ms** beside a stand-in camera loop that lost nothing, 1,076 rendered frames read the same to the letter. See [A card taller than the card box](#draw-the-box-yourself). |
 | **Look in the middle first** | The screen is the biggest bright thing *that the middle of the frame is inside*, falling back to plain biggest. Size alone is a guess about the scene and it loses to a lit dashboard panel or a window at dusk; with a panel larger and brighter than the phone beside it, the old rule locked onto the panel and read nothing while this one reads the card. |
 | **Track on the small stream** | Re-finding the corners uses the 640×480 luma the motion gate already has, not a shrunk-down sensor frame: **0.96ms against 6.98ms**, almost all of the difference being the shrinking. It also means tracking needs no full-resolution capture at all, so it keeps working at full rate while the scanner is otherwise idle. |
 | **Confirm in parallel, not in series** | A verdict waits for two reads that agree, and that confirmation earns its keep: over rippling, soft, glared and dim frames, one read claiming a whole offer was **wrong 1 time in 36**, and two agreeing were wrong none. So the checking is not what gets shortened — the waiting is. The frame after the trigger is captured too and both are read at once, which measured **56% of the cost of two in a row** and halves the time to a verdict for exactly the same evidence. Requires `OMP_THREAD_LIMIT=1`, which scan_pi sets: unpinned, two tesseract instances fight over all four cores and the same pair took **46 seconds** against 435ms. `--no-parallel` goes back to one at a time. |
@@ -2766,6 +2767,61 @@ one on another journey refuses the crop and is read by the chain; a card
 stacked above gives the DoorDash card's $14.10, never its own. On the Pi an
 **estimate**: about 2.4s for such a read where it was about 6.9s, some 4.4s
 saved on each read of the card after the first.
+
+**The rescue's next read is started early.** Every link of the chain above
+reads a crop that does not depend on the read before it — the finder looks at
+the screen, not the box's text, and the raised boxes are fixed steps — only
+the choice of which to keep does. So while the box is read, the finder and
+its read of the card it finds run on a spare core, and while the box raised
+0.09 is read, the box raised 0.18 does (`pipeline._SPARE_WORKERS`); when the
+chain reaches a link the answer is there or nearly. The decisions are the
+chain's own, in the same order, on the same rules — a link started early is
+used only where the chain would have read it, and dropped otherwise.
+
+Two spare threads, one per frame of a paired read (with one, the frame that
+got it finished early and the pair still waited on the other: 407ms → 400),
+at niceness 10, so they run on what the camera loop and the paired read
+leave idle. Measured on the development box (x86, four cores like the Pi),
+24 paired first reads of DoorDash stops cards beside a stand-in camera loop
+(every 33ms, the gate's thumbnail off a sensor frame and a 640×480 JPEG,
+~15ms of work, on its own thread in the same process): **407ms → 259ms**
+median per paired read, the loop's tick 15.4/20.7ms median/p95 before and
+14.8/19.4 after, no tick a frame late. Unniced the read was the same and the
+loop's p95 went to 27.4ms. The Early-look card through the 8 Oct box: 391ms →
+270ms. Uber cards that fit their box: 120 → 119 (nothing is read early; the
+finder alone runs, and says the card is inside the box).
+
+Accuracy, against the reader as it stood (86eb82a), over 1,076 rendered
+frames — the 576 taller-card screens above, the stacked DoorDash-shaped card
+at ten widths with and without the card above, the 192 DoorDash stops
+frames (the four drawings, eight degradations, three widths, both boxes),
+60 under banding up to four times as strong, 72 reads of one card four
+times over, and the centred UberX, Shop and DoorDash cards, the planner and
+the stops card read whole: **every frame the same figures, crop, text and
+rescue**, right 597 / none 417 / wrong 8 both sides (the 8 are single reads
+through the drawn box — $4.00 and once $421.00 for an Exclusive card's
+$4.21 under banding or all-dark, $5.00 for UberX's $16.05 under glare — no
+rescue in any of them, there before and unchanged). Time over those frames,
+one read at a time with the spare cores idle: 659 that went past the box,
+295ms → 195ms median. On the Pi these are **estimates**: the same ratio on a
+first rescued read of ~2.3 s + 3.5–4.6 s puts it near 4.5 s; the health line
+now says what it is (`N rescues waited +Xms median`, the reads past the box
+and the median of what they waited after the box's read; `rescueWait` and
+`rescueWaitMs` in its tally).
+
+Stopped while the heat guard is on (a hot or throttling Pi: work that may
+be thrown away is heat for nothing) and under `--no-parallel`; the chain then
+reads each link in place, as before. It costs two more engines (MAX_ENGINES
+6, ~25MB).
+
+**Not done, measured: skipping the rescue on a rippling frame.** On 3 Nov,
+banding 28.5, two raised reads found nothing. Rendered, the stops card under
+banding that scores 25–48 between two frames of the light card: the dark
+card was rescued on all 24 frames at those strengths, so a threshold
+anywhere near 28.5 would have lost 24 payouts the chain reads; the light
+card lost its stops line under it, so on 23 of its 24 nothing was raised and
+the rescue cost nothing. The time the
+3 Nov reads lost is what the raise-ahead saves (one read's wait, not two).
 
 **▣ Set box again is the way to change them.** A box drawn by hand stays until
 another is drawn, and nothing on the panel throws it away. There used to be:

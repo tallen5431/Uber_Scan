@@ -3090,6 +3090,40 @@ ok_('...and the health line says "2 via the card\'s last box" after the raised c
 ok_('...and a window with none says nothing of it',
     not any('last box' in l for l in _said_hq) and _tq.get('cardBox') == 0)
 
+# ...and what the reads past the box waited for the rest of the chain, now
+# that its next read is started ahead on a spare core (pipeline's
+# _SPARE_WORKERS): `ms['find']` on a read the finder was asked on or whose
+# payout a rescue found, not one kept through the card's last box nor one
+# that never went past the box; said last of the rescue's figures, every
+# part before it unchanged, and nothing in a window with none.
+_hw = SP.Health()
+_hw.reset(0.0)
+_hw.add({'ms': {'total': 2600, 'raise': None, 'find': 1800.4}, 'clipped': False,
+         'cropFrom': 'found', 'rescuedBy': 'finder'}, {'pay': 14.10, 'complete': True})
+_hw.add({'ms': {'total': 2500, 'raise': None, 'find': 1500.0}, 'clipped': False,
+         'cropFrom': 'drawn', 'finder': 'not sure: not solid'}, {'pay': None, 'complete': False})
+_hw.add({'ms': {'total': 900, 'raise': None, 'find': 2.0, 'cardBox': 890}, 'clipped': False,
+         'cropFrom': 'found', 'cardBox': 'kept'}, {'pay': 14.10, 'complete': True})
+_hw.add({'ms': {'total': 1300, 'raise': None, 'find': 0.1}, 'clipped': False,
+         'cropFrom': 'drawn', 'finder': None}, {'pay': 9.0, 'complete': True})
+_said_hw = []
+try:
+    SP.log = _said_hw.append
+    _tw = _hw.report(SP.HEALTH_EVERY + 1.0, None, type('AScanner', (), {'crop_box': None})())
+finally:
+    SP.log = _real_log2
+eq('the reads past the box are counted with their median wait, a kept or unrescued read left out',
+   (_tw.get('rescueWait'), _tw.get('rescueWaitMs')), (2, 1800))
+ok_('...and the health line says "2 rescues waited +1800ms median" after the last box (%r)'
+    % _said_hw[-1:],
+    any(': 4 reads, 3 complete; median 2500ms;' in l
+        and "; 2 read the payout off a taller card found above the card box; "
+            "1 via the card's last box; 2 rescues waited +1800ms median;" in l
+        for l in _said_hw))
+ok_('...and a window with none says nothing of it, and counts none',
+    not any('waited' in l for l in _said_hq + _said_hk) and _tq.get('rescueWait') == 0
+    and _tq.get('rescueWaitMs') is None)
+
 
 # The scanner's side of "the same card": the accumulator's episode. A read
 # kept through the remembered crop in ANOTHER episode — a card on the same
