@@ -3002,6 +3002,19 @@ SEQ.forEach(function (seq) {
       A.outranks({ value: NW, from: 'planner', conf: 2 }, { value: NUP, from: 'press', conf: 2 }),
       A.outranks({ value: NUP, from: 'label', conf: 2 }, { value: NW, from: 'planner', conf: 2 })],
      ['better read', null, null]);
+  // A real street type the assembler's own list lacked (review of 6 Nov;
+  // invented): "Pt", "Cv", "Lndg", "Rdg", "Trce", "Gln" read as slips, so a
+  // correct "120 Oak Pt" end was replaced by a misread "120 Oak Pl", and the
+  // correct read could not come back over it.
+  eq('[slip] betterRead: never over a last word that is a type Map view knows (Pt, Cv, Lndg, '
+     + 'Rdg, Trce, Gln), and so outranks keeps the end',
+     [A.betterRead('120 Oak Pl, Kennesaw', '120 Oak Pt, Kennesaw'),
+      A.betterRead('120 Oak Ct', '120 Oak Cv'), A.betterRead('120 Oak Ln', '120 Oak Lndg'),
+      A.betterRead('120 Oak Rd', '120 Oak Rdg'), A.betterRead('120 Oak Trl', '120 Oak Trce'),
+      A.betterRead('120 Oak Ln', '120 Oak Gln'),
+      A.outranks({ value: '120 Oak Pl, Kennesaw', from: 'planner', conf: 2 },
+                 { value: '120 Oak Pt, Kennesaw', from: 'label', conf: 2 })],
+     [false, false, false, false, false, false, null]);
 
   // The add-on's corner.
   eq('[corner] the card\'s streets past the glued town and stray letter, and less the town '

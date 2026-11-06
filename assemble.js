@@ -39,10 +39,17 @@
  * answered the same way, with carrying two off as well as on (pressBetween):
  * a cue the screen gave, or the chooser.
  */
+/* (Map view's street types are the one list of them the assembler reads —
+ * streetType below, betterRead and typedOver — not a copy of its own: the
+ * copy this file kept lacked "Pt", "Cv", "Lndg" and the others map-view.js
+ * knows, and read a correct "120 Oak Pt" as a slip of "120 Oak Pl" (review
+ * of 6 Nov). This file runs in node only — server.js and the tests require
+ * it, no page loads it — so map-view.js is required beside it, as server.js
+ * requires both; a page that ever loads it loads map-view.js first.) */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.Assemble = factory();
-}(this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./map-view.js'));
+  else root.Assemble = factory(root.MapView);
+}(this, function (MV) {
   'use strict';
 
   /* ---------- the hold's fields and where each came from -------------------
@@ -220,7 +227,22 @@
    * after a garbled frame. 19 Oct night: "1106 Commor" on several frames,
    * the phone printing "1106 Commons Ln"; both read a street and nothing
    * more, so conf alone never let the clean one past. The type words are
-   * offer-parser.js's STREET_SUFFIX (a copy: this file loads nothing). */
+   * map-view.js's STREET_TYPES, every family's every form (streetType). */
+  /* ...ONE list, not two. This file kept a copy of offer-parser.js's
+   * STREET_SUFFIX, which lacks "Pt", "Cv", "Lndg", "Rdg", "Trce", "Gln" and
+   * the other USPS types Map view's retry knows (review of 6 Nov, invented):
+   * betterRead took "Pt" for a slipped word like the snap's "NUP", so a
+   * planner's misread "120 Oak Pl" replaced a correct "120 Oak Pt" end, and
+   * the ~580 guard then stopped the correct read coming back. The search
+   * was then asked for a door on a street that is not the customer's. */
+  function streetType(w) {
+    return !!(MV && MV.streetType && MV.streetType(w));
+  }
+  // The short list stays for the two rules that read a TOWN beside a street
+  // (hasStreet, typedEnd), where a wider list is wrong the other way: "West
+  // Point, GA" ends on a USPS type ("Point"), and read with Map view's list a
+  // town alone would be a street and ride over a door. Only betterRead and
+  // typedOver, which compare two reads of one door's street, ask streetType.
   var STREET_SUFFIX = new RegExp('^(?:st|street|rd|road|dr|drive|ln|lane|ave|avenue|blvd'
     + '|boulevard|ct|court|way|pkwy|parkway|cir|circle|trl|trail|hwy|highway|ter|terrace'
     + '|pl|place|xing|crossing|sq|square|loop|run|walk|path|row|bnd|bend)$');
@@ -230,7 +252,7 @@
       var w = streetKey(v).split(' ');
       if (w.length > 2 && QUADRANT.test(w[w.length - 1])) w.pop();
       return /^\d+[a-z]?$/.test(w[0]) && w.length > 1
-        ? { house: w[0], typed: w.length > 2 && STREET_SUFFIX.test(w[w.length - 1]) } : null;
+        ? { house: w[0], typed: w.length > 2 && streetType(w[w.length - 1]) } : null;
     }
     var x = door(a), y = door(b);
     return !!x && !!y && x.house === y.house && x.typed && !y.typed;
@@ -255,7 +277,7 @@
     var x = streetKey(a).split(' '), y = streetKey(b).split(' ');
     if (x.length !== y.length || y.length < 3 || !/^\d+[a-z]?$/.test(y[0])) return false;
     var lx = x[x.length - 1], ly = y[y.length - 1];
-    var known = function (w) { return ANY_QUADRANT.test(w) || STREET_SUFFIX.test(w); };
+    var known = function (w) { return ANY_QUADRANT.test(w) || streetType(w); };
     if (!known(lx) || known(ly) || /\d/.test(ly)) return false;
     for (var i = 0; i < x.length - 1; i++) if (x[i] !== y[i]) return false;
     if (!/[a-z]{2}/.test(x.slice(1, -1).join(' '))) return false;

@@ -962,7 +962,8 @@ ok_("map-view.js's ROUGH_DISC_MAX_M is above gps.py's FIX_ERR_MAX",
 # server.js searches an Uber card's "Store (<n> <street>)" for the restaurant
 # guard by map-view.js searchPlan's bracket, and assemble.js heldPickup refuses
 # a navigation screen's address as that store's by its own copy (bracketDoor:
-# assemble.js loads without map-view.js). Two copies of one rule drift, so
+# written when assemble.js loaded without map-view.js; it reads map-view.js's
+# street types since 6 Nov, and this copy stays held here). Two copies of one rule drift, so
 # the expression and its three-letter test are held to be the same.
 # (map-view.js has named it BRACKET_DOOR too since bracketStore, an Uber
 # store's name before it, came to share it with searchPlan: one bracketDoor

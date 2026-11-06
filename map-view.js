@@ -2515,7 +2515,12 @@
    * One rule for a street's type, not a list of the owner's streets: every
    * door this rig asks the NucBox for, the server's held end (searchHeldEnd)
    * and Map view's (NbxSearch.place), goes through streetRetry, so the two ask
-   * the same second question and share its answer in the server's cache. */
+   * the same second question and share its answer in the server's cache.
+   *
+   * ...and the one list of street types assemble.js reads too (betterRead,
+   * typedOver: review of 6 Nov, its own copy lacked "Pt", "Cv" and the rest
+   * here and read a real type as a slipped word). "Row" came over from that
+   * copy, so nothing it called a type stopped being one. */
   var STREET_TYPES = {
     alley: ['aly', 'alley'], avenue: ['ave', 'av', 'avenue', 'aves', 'avenues'],
     bend: ['bnd', 'bend'], boulevard: ['blvd', 'boulevard'],
@@ -2527,7 +2532,7 @@
     landing: ['lndg', 'landing'], loop: ['loop'], overlook: ['ovlk', 'overlook'],
     parkway: ['pkwy', 'pky', 'parkway'], pass: ['pass'], path: ['path'],
     place: ['pl', 'place'], point: ['pt', 'point'], ridge: ['rdg', 'ridge'],
-    road: ['rd', 'road'], run: ['run'], square: ['sq', 'square'],
+    road: ['rd', 'road'], row: ['row'], run: ['run'], square: ['sq', 'square'],
     street: ['st', 'str', 'street'], terrace: ['ter', 'terr', 'terrace'],
     trace: ['trce', 'trace'], trail: ['trl', 'trail'], view: ['vw', 'view'],
     walk: ['walk'], way: ['wy', 'way']
