@@ -8862,6 +8862,28 @@ The `read size` rows show what scaling the card up before OCR costs and buys;
 `as-is` is the old behaviour, and it is worth seeing the difference on your own
 frames rather than taking the table above on trust.
 
+**What each kind of read costs on the rig**, with no frame of your own:
+
+```sh
+python3 tools/pi_bench.py          # on the Pi, from the repo; under 3 min
+python3 tools/pi_bench.py --n 3    # fewer reads of each
+```
+
+It draws its own screens (rpi/testcards.py: invented cards, no camera, no
+owner's data) and times, five reads each, the six reads the rig makes: an
+Uber card through the centred box; DoorDash's stops card through a box drawn
+round an Uber card, rescued by the finder and its evened-out second read,
+and again with the finder's sheet refused and the box raised; that card's
+next read through the crop the rescue taught; the Trip Planner read across
+the whole screen as ⌖ reads it; and DoorDash's map label. Each with the spare
+threads on and off, as median and p90 in ms with how many gave the card's own
+answer, and the CPU's temperature and throttle flags before and after. Safe
+with the scanner running — it opens no camera, writes nothing and runs at
+nice 10 — but then it shares the cores, and its last line says the service
+was up; stop it (`sudo systemctl stop uberscan`) for the rig's own figures.
+A time budget (`--budget`, 150 s of reads by default) ends each cell early
+on a slow or hot Pi, and `n` says how many were taken. `--json` for a file.
+
 If reads fail in the car but the preview looked fine, the usual causes are, in
 order: glare across the card, exposure too short (raise `--exposure`; below
 ~10000µs OLED dimming shows as dark bands), and focus (`--lens`, in dioptres —
