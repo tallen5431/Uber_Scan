@@ -2277,7 +2277,16 @@ async function nucbox() {
     ['1830 Tansy Creek Ct Dr, Marietta', null, null, 'nor a type'],
     ['1830 Tansy Creek Ct 12, Marietta', null, null, 'nor a number'],
     ['1830 Tansy Creek NUP, Marietta', null, null, 'nor a word after no type'],
-    ['1830 Ct NUP, Marietta', null, null, 'nor a type with no name in front']
+    ['1830 Ct NUP, Marietta', null, null, 'nor a type with no name in front'],
+    // A designator is part of the road's name, not a slip (review of 6 Nov;
+    // invented): "1450 Tansy Springs Rd Ext" asked as "1450 Tansy Springs Rd"
+    // took the base road's 1450 — another road, and the GPS drop armed on it.
+    ['1450 Tansy Springs Rd Ext, Canton', null, null, 'nor a road\'s extension'],
+    ['1450 Tansy Springs Rd Conn, Canton', null, null, 'nor a connector'],
+    ['1450 Tansy Springs Rd Spur, Canton', null, null, 'nor a spur'],
+    ['1450 Tansy Springs Hwy Byp, Canton', null, null, 'nor a bypass'],
+    ['1450 Tansy Springs Hwy Alt, Canton', null, null, 'nor an alternate'],
+    ['1450 Tansy Springs Hwy Bus, Canton', null, null, 'nor a business route']
   ];
   TAILS.forEach(function (c) {
     var again = MV.streetRetry(MV.searchPlan(c[0]));
@@ -2285,6 +2294,24 @@ async function nucbox() {
     eq('streetRetry (a word after the type): ' + c[3] + ' (' + JSON.stringify(c[0]) + ')',
        JSON.stringify(tail), JSON.stringify(c[1] ? [c[1], c[2]] : null));
   });
+  eq('streetRetry/dirRetry: no second question at all for a road with a designator after its '
+     + 'type (Ext), with a quadrant too, or with a directional in its name',
+     JSON.stringify([MV.streetRetry(MV.searchPlan('1450 Tansy Springs Rd Ext, Canton')),
+                     MV.dirRetry(MV.searchPlan('1450 Tansy Springs Rd Ext, Canton')),
+                     MV.streetRetry(MV.searchPlan('1450 Tansy Springs Rd Ext NW, Canton')),
+                     MV.dirRetry(MV.searchPlan('810 Ardley West Corwin Pkwy Ext, X'))]),
+     JSON.stringify([null, null, null, null]));
+  // ...and retryFits, by itself, never takes a road without the designator
+  // the asked line printed (a retry built another way still cannot land on
+  // the base road).
+  var extPlan = { house: '1450', retry: { name: ['tansy', 'springs'], type: 'road', quadrant: null,
+                                          keep: ['ext'] } };
+  eq('retryFits: a hit on the base road is not the extension\'s door; the extension\'s is',
+     JSON.stringify([MV.retryFits({ name: '1450, Tansy Springs Road, Canton, GA' }, extPlan),
+                     MV.retryFits({ name: '1450, Tansy Springs Road Extension, Canton, GA' },
+                                  extPlan),
+                     MV.retryFits({ name: '1450, Tansy Springs Rd Ext, Canton, GA' }, extPlan)]),
+     JSON.stringify([false, true, true]));
   var nup = MV.streetRetry(MV.searchPlan('1830 Tansy Creek Ct NUP, Marietta'));
   var nupDir = MV.dirRetry(MV.searchPlan('1830 Tansy Creek Ct NUP, Marietta'));
   eq('dirRetry: a word after the type left out is a second question by itself; with a '

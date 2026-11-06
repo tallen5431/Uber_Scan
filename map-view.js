@@ -2564,11 +2564,46 @@
      nothing else changed ("3344 <Name> Brook Way"), held to the same street
      as any retry (retryFits: the name, the type's family or none, then a
      quadrant or none). The words and the word left out, or null. */
+  /* ...BUT NEVER A DESIGNATOR. "Ext", "Conn", "Spur", "Byp", "Alt", "Bus" are
+     short words after a type too, and they are the road's own name: "1450
+     <Name> Springs Rd Ext, Canton" asked as "1450 <Name> Springs Rd" is the
+     BASE road, and retryFits took its 1450 (review of 6 Nov, invented) — a
+     door pin on another road and the GPS drop armed on it, where none was
+     only the timer and Drop. So a recognised designator (DESIGNATORS) is
+     never the word left out; the retry stays for junk tails, the 30 Oct
+     "NUP" and its kind. Closed list: a slip the readers have not met is
+     still a short word of letters, and a designator OSM writes is in this
+     list or spelt out past five letters (which unknownTail never takes). */
+  var DESIGNATORS = { ext: 'ext', extn: 'ext', extension: 'ext', conn: 'conn', cnctr: 'conn',
+                      connector: 'conn', spur: 'spur', byp: 'byp', byps: 'byp', bypass: 'byp',
+                      alt: 'alt', alternate: 'alt', bus: 'bus', business: 'bus' };
+  // The designator a word is ("Extension" -> 'ext'), or null.
+  function designator(word) {
+    var w = String(word || '').toLowerCase().replace(/\.$/, '');
+    return Object.prototype.hasOwnProperty.call(DESIGNATORS, w) ? DESIGNATORS[w] : null;
+  }
+  // The designators a door's street prints AFTER its last type word ("Rd Ext
+  // NW" -> ['ext']): those are the road's and must be in an answer's road
+  // name (retryFits); one inside the name is held as a name word already.
+  function keptDesignators(words) {
+    var at = -1;
+    for (var i = 1; i < words.length; i++) if (streetType(words[i])) at = i;
+    if (at < 0) return [];
+    return words.slice(at + 1).map(designator).filter(Boolean);
+  }
+
+  // A retry's words with the designators it must keep, where it has any (a
+  // retry with none is the object it always was).
+  function kept(retry, keep) {
+    if (keep && keep.length) retry.keep = keep;
+    return retry;
+  }
+
   function unknownTail(words) {
     var n = words.length;
     if (n < 4 || !/^\d+[A-Za-z]?$/.test(words[0])) return null;
     var last = words[n - 1];
-    if (!/^[A-Za-z]{1,5}\.?$/.test(last) || streetType(last)
+    if (!/^[A-Za-z]{1,5}\.?$/.test(last) || streetType(last) || designator(last)
         || QUADRANTS.indexOf(last.toLowerCase().replace(/\.$/, '')) >= 0) return null;
     if (!streetType(words[n - 2]) || !/[A-Za-z]{2}/.test(words[n - 3])) return null;
     return { words: words.slice(0, -1), tail: last };
@@ -2577,12 +2612,13 @@
   function streetRetry(plan) {
     if (!plan || plan.kind !== 'street' || !plan.door) return null;
     var words = plan.street.replace(/\s+/g, ' ').trim().split(' ');
+    var asked = words.slice();
     var cut = unknownTail(words);
     if (cut) {
       return { kind: 'street', street: cut.words.join(' '), door: true, house: plan.house,
-               retry: { name: cut.words.slice(1, -1).map(function (w) { return w.toLowerCase(); }),
-                        type: streetType(cut.words[cut.words.length - 1]), quadrant: null,
-                        tail: cut.tail } };
+               retry: kept({ name: cut.words.slice(1, -1).map(function (w) { return w.toLowerCase(); }),
+                             type: streetType(cut.words[cut.words.length - 1]), quadrant: null,
+                             tail: cut.tail }, keptDesignators(words)) };
     }
     var quad = words.length > 2 && QUADRANTS.indexOf(words[words.length - 1].toLowerCase()) >= 0
       ? words.pop() : null;
@@ -2593,8 +2629,8 @@
     if (!name.some(function (w) { return /[A-Za-z]{2}/.test(w); })) return null;
     return { kind: 'street', street: words.concat(quad ? [quad] : []).join(' '),
              door: true, house: plan.house,
-             retry: { name: name.map(function (w) { return w.toLowerCase(); }), type: type,
-                      quadrant: quad } };
+             retry: kept({ name: name.map(function (w) { return w.toLowerCase(); }), type: type,
+                           quadrant: quad }, keptDesignators(asked)) };
   }
 
   /* Rule 2: whether an answer's street is the retried plan's street. The
@@ -2611,6 +2647,21 @@
     var fold = plan.retry.dirs ? dirFold : function (w) { return w; };
     for (var i = 0; i < name.length; i++) if (fold(words[i]) !== name[i]) return false;
     var rest = words.slice(name.length);
+    // A designator the asked line printed after its type ("Rd Ext") is the
+    // road's own name: an answer without it is the base road, another road
+    // with a 1450 of its own (review of 6 Nov), and is refused. Taken out
+    // wherever it stands after the name ("Road Extension Northwest"), then
+    // the rest held as before. With none asked, nothing here changes.
+    var keep = plan.retry.keep || [];
+    if (keep.length) {
+      var found = {};
+      rest = rest.filter(function (w) {
+        var d = designator(w);
+        if (d && keep.indexOf(d) >= 0) { found[d] = true; return false; }
+        return true;
+      });
+      if (!keep.every(function (k) { return found[k]; })) return false;
+    }
     if (rest.length && streetType(rest[0]) === plan.retry.type) rest.shift();
     if (rest.length && QUADRANTS.indexOf(rest[0]) >= 0) rest.shift();
     return rest.length === 0;
@@ -2692,6 +2743,7 @@
   function dirRetry(plan) {
     if (!plan || plan.kind !== 'street' || !plan.door) return null;
     var words = plan.street.replace(/\s+/g, ' ').trim().split(' ');
+    var keep = keptDesignators(words);
     // A word after the type that is no quadrant (unknownTail) is left out,
     // and that alone is a second question to ask.
     var cut = unknownTail(words);
@@ -2714,7 +2766,7 @@
     if (!flipped && !cut) return null;
     return { kind: 'street', street: [house].concat(name, [typeWord], q2 ? [q2] : []).join(' '),
              door: true, house: plan.house,
-             retry: { name: name.map(dirFold), type: type, quadrant: q2, dirs: true } };
+             retry: kept({ name: name.map(dirFold), type: type, quadrant: q2, dirs: true }, keep) };
   }
 
   // WHEN: a door asked, its street found INSIDE the disc and not the door.
