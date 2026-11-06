@@ -4240,6 +4240,16 @@
     "Acworth",
     "30101"
    ]
+  },
+  {
+   "name": "...but \"S W\" after a type read with two dots (\"Dr..\") is left as read, by both ports",
+   "_why": "Review of 6 Nov: QUADRANT_SLIP mends \"N W\"/\"S W\" only after a street type, and the two ports took the dot off that type differently - Python's rstrip('.') every dot, JavaScript's /\\.$/ one - so \"Dr..\" was a type in Python (\"SW\") and not in JavaScript (\"S W\"). Both now take one dot, as every other type test in both parsers allows one (DOOR_TYPE, LABEL_TYPE: \\.?): a type with two marks after it is not known to be a type, and the slip is not mended. Invented.",
+   "text": "Head to\n52 Pellam Ridge Dr.. S W, Acworth, GA 30101",
+   "expect": [
+    "52 Pellam Ridge Dr.. S W, Acworth, GA 30101",
+    "Acworth",
+    "30101"
+   ]
   }
  ],
  "_printed_comment": "Whether the payout a text gives is printed the way a card prints one: to the cent, or a whole dollar followed at once by the card's label or the rider's star (pay_is_printed / payIsPrinted). A figure that is not is held off the panel until a second frame reads it the same (scan_pi.unsure_payout), and a found crop's read is refused for it (pipeline.rescue_refused). Its own block because it is a function of the text, not a field parse() returns, and because both ports answer it and must answer it alike. Cards invented.",

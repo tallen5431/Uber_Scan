@@ -1663,6 +1663,8 @@
     return text.replace(QUADRANT_SLIP, function (all, lead, a, b, c, at) {
       if (b) {
         var before = text.slice(0, at + 1).split(/\s+/).filter(Boolean);
+        // (One dot off the type, never more: "Dr.. S W" stays as read. The
+        // Python port took every dot until 6 Nov; cases.json holds the two.)
         var last = (before[before.length - 1] || '').replace(/\.$/, '');
         if (!STREET_TYPE_WORD.test(last)) return all;
       }

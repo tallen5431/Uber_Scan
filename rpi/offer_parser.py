@@ -3079,8 +3079,13 @@ def quadrant_slip(text):
 
     def mend(m):
         if m.group(2):
+            # ONE dot off the type, as the twin's /\.$/ takes (review of 6 Nov:
+            # rstrip('.') took every dot, so "Dr.. S W" was "SW" here and "S W"
+            # in offer-parser.js). Every other type test in both ports allows
+            # one dot (DOOR_TYPE, LABEL_TYPE): a type with two marks after it is
+            # not known to be a type, and the slip is left as read.
             before = text[:m.start()].split()
-            if not before or not re.fullmatch(STREET_SUFFIX, before[-1].rstrip('.'),
+            if not before or not re.fullmatch(STREET_SUFFIX, re.sub(r'\.$', '', before[-1]),
                                               re.IGNORECASE):
                 return m.group(0)
         return (m.group(1) or m.group(2) or m.group(3)) + 'W'
