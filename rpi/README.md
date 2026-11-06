@@ -2434,6 +2434,16 @@ read (`MAP_LABEL_AGAIN_S`, `MAP_LABEL_TRIES` in `scan_pi.py`), and a label the
 app cut with its ellipsis — which tesseract reads as "..." — is the street
 before it, as "…" always was.
 
+**A band starts at the top of the screen box.** It started 6% down, to keep
+the phone's status bar out, and the owner's 2 Nov label sat only 15 rows of
+1400 under that edge: a phone sitting a little higher in the mount (2% was
+enough on the rendered DoorDash screen) lost it. The map label is now looked
+for from the screen box's top (`MAP_LABEL_BAND` in `scan_pi.py`), and the band
+kept here is the same, 868 rows of 1400 where it was 784. The status bar is
+no label: its glyphs are too thin to be a pill on a light map, and a dark bar
+runs the screen's whole width, which the reader never reads; DoorDash's
+"Decline" pill reads "Decline", which the parser refuses.
+
 **They stay on the rig.** The map shows street names round a customer's door,
 so the folder is in `.gitignore`, the sync never sends it, and the server never
 serves it. A 📷 Snap carries the newest band (from the last two minutes) into

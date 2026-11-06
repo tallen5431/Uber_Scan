@@ -3641,7 +3641,39 @@ def says_multi_order(parsed):
 # On its own thread (MapLabels), so the camera loop never waits on it and the
 # card's reader never shares its time: the card's verdict is out before this
 # starts. A GUESS FOR DRAWING ONLY — see emit_offer's `mapLabel`.
-MAP_LABEL_BAND = (0.06, 0.62)
+#
+# ...THE BAND STARTS AT THE SCREEN BOX'S TOP. It started 6% down, to keep the
+# phone's status bar out, and on the owner's snap of 2 Nov 16:31 the label's
+# top sat 15 rows of 1400 under that edge (7.1% of the screen, beside the
+# "Uber" bubble at the map's top left): a phone sitting 1.1% higher in the
+# camera's frame than on that mount — the corners the read froze are the
+# screen box's, and the screen moves inside them — would have cut the pill's
+# top, and at 2% the reader no longer finds it at all. Measured on the repo's
+# rendered DoorDash stops screen (testcards.dd_stores_screen) with that
+# snap's label drawn at 7.1%, a phone's status bar over it (light: dark
+# glyphs over the map; dark: a black bar of white glyphs) and a "Decline"
+# pill at the top left (white with dark words, and black with white words),
+# the whole screen moved up 0-6% inside its box: at the old 6% the label is
+# read at 0% only and lost from 2% up; from the top, read at every shift, in
+# every one of the eighteen screens. And nothing up there reads as a label:
+# a light status bar's glyphs are thinner than the opening and go with the
+# route's line (no box); a dark one holds too little white for a label's
+# text (4% of its box, map_label_boxes) with a few glyphs, and with more is a
+# box the whole screen wide, which runs into the right edge and is never read
+# — taken off before the MAP_LABEL_MOST boxes are counted (read_map_label),
+# so it costs no read either; a black "Decline" pill is a box and reads "Decline", which
+# OP.map_label refuses (no house number, an app word). None of the twenty
+# screens testcards draws (light and dark) gives a label it did not have.
+# The cost: 84 more rows of 1400 for the boxes to look through (784 -> 868,
+# +11%; 25 -> 33 ms a band in that run, on a machine shared with another
+# job; the whole read 44 -> 42 ms, within its noise), on the label's own
+# thread, under MAP_LABEL_CAP_S as before. MapBands keeps the same band, so
+# a kept map band is now the screen box from its top.
+MAP_LABEL_BAND = (0.0, 0.62)
+# ...and a drawn card box ends the band only below this (its top fraction): the
+# band's old top plus the 0.2 that guard wanted, kept where it was, so moving
+# the top moved nothing else.
+MAP_LABEL_ROI_FLOOR = 0.26
 MAP_LABEL_HEIGHT = 1400          # the screen box warped to this many rows
 MAP_LABEL_DIM = 90               # mean grey of the band below which: not looked for
 MAP_LABEL_DARK_SHARE = 0.35
@@ -3695,7 +3727,7 @@ def map_band(frame, geom, height=MAP_LABEL_HEIGHT):
         screen = cv2.cvtColor(screen, cv2.COLOR_GRAY2BGR)
     top, bottom = MAP_LABEL_BAND
     roi = getattr(geom, 'roi', None)
-    if roi and top + 0.2 < float(roi[1]) < bottom:
+    if roi and MAP_LABEL_ROI_FLOOR < float(roi[1]) < bottom:
         bottom = float(roi[1])
     h = screen.shape[0]
     return screen[int(top * h):int(bottom * h)]
@@ -3810,12 +3842,16 @@ def read_map_label(frame, geom, store=None, ocr=None, cap_s=MAP_LABEL_CAP_S,
         if band is None:
             return None
         W = band.shape[1]
-        for box in map_label_boxes(band, MAP_LABEL_HEIGHT)[:MAP_LABEL_MOST]:
+        # A box that runs into the right edge is not read (its type is what was
+        # cut), and is taken off BEFORE the MAP_LABEL_MOST are counted: a dark
+        # status bar, the whole screen wide, is the biggest box in the band
+        # since the band starts at the screen box's top, and would otherwise
+        # take a read's place from the label (MAP_LABEL_BAND).
+        boxes = [b for b in map_label_boxes(band, MAP_LABEL_HEIGHT) if b[0] + b[2] < W - 2]
+        for box in boxes[:MAP_LABEL_MOST]:
             if clock() - began > cap_s:
                 return None
-            x, _, w, _ = box
-            if x + w >= W - 2:
-                continue
+            x = box[0]
             clipped = x <= 2
             image = map_label_image(band, box)
             if image is None:
@@ -3979,7 +4015,7 @@ MAP_BANDS_CAP_S = 0.5
 # Mean grey under this: no picture of a screen at all (screen off, camera
 # blind). Low, because a dark-mode map at night is dark and is still a map.
 MAP_BANDS_DIM = 16
-MAP_BANDS_MAX_ROWS = 1400        # map_band gives ~780 at MAP_LABEL_HEIGHT; a guard
+MAP_BANDS_MAX_ROWS = 1400        # map_band gives ~870 at MAP_LABEL_HEIGHT; a guard
 MAP_BANDS_TRIES = 3
 SNAP_BAND_AGE_S = 120
 
@@ -4140,7 +4176,7 @@ class MapBands(object):
             return self._done(offer_id, 'slow')
         h = getattr(geom, 'roi', None)
         top, bottom = MAP_LABEL_BAND
-        if h and top + 0.2 < float(h[1]) < bottom:
+        if h and MAP_LABEL_ROI_FLOOR < float(h[1]) < bottom:
             bottom = float(h[1])
         meta['band'] = {'warpHeight': MAP_LABEL_HEIGHT, 'top': top, 'bottom': bottom,
                         'width': int(band.shape[1]), 'height': int(band.shape[0]),

@@ -4611,6 +4611,93 @@ _got = SP.read_map_label(_ml, _MapGeom(_ml), store=['Lark Owl Grill',
                                                     '164 Wren Hollow Pkwy, Brookvale, GA 30066'])
 eq('the map label cut by the app\'s ellipsis, read as "...", at the band\'s top left: its street',
    (_got or {}).get('line'), '2900 Kestrel Plains Pkwy N')
+
+# ...and that label nearer the top: the snap's pill sat 15 rows of 1400 under
+# the band's old top (6%), so a phone sitting higher in the camera's frame
+# would have cut it. The band now starts at the screen box's top
+# (MAP_LABEL_BAND). The repo's rendered DoorDash stops screen
+# (testcards.dd_stores_screen), the snap's label drawn at its 7.1% of the
+# screen, the phone's status bar over the map and DoorDash's "Decline" pill
+# at the top left, and the WHOLE screen moved up inside its box, as a phone
+# higher in the mount moves it. Invented street; the bar and the pill drawn
+# both ways (light and dark, white and black).
+def _dd_top(label='2900 Kestrel Plains Pkwy N...', bar='light', decline='white', up=0.0):
+    im = _Img.fromarray(cv2.cvtColor(TC.dd_stores_screen(label=None), cv2.COLOR_BGR2RGB))
+    d = _Draw.Draw(im)
+    fg = (20, 20, 20)
+    if bar == 'dark':
+        d.rectangle([0, 0, TC.W, 80], fill=(0, 0, 0))
+        fg = (255, 255, 255)
+    if bar:
+        d.text((60, 18), '4:31', font=TC.font(40), fill=fg)
+        for i in range(4):                                       # signal
+            d.rectangle([800 + i * 16, 58 - i * 10, 810 + i * 16, 62], fill=fg)
+        d.text((880, 20), '5G', font=TC.font(34), fill=fg)
+        d.rounded_rectangle([950, 24, 1010, 56], 6, outline=fg, width=4)   # battery
+        d.rectangle([956, 30, 994, 50], fill=fg)
+        d.rectangle([1012, 34, 1018, 46], fill=fg)
+        # ...and its percentage: with it a dark bar holds a label's share of
+        # white (MAP_LABEL's 4% at least), so it IS a box, the case to show.
+        d.text((660, 20), '87%', font=TC.font(34), fill=fg)
+    if decline:
+        back, ink = (((255, 255, 255), (20, 20, 20)) if decline == 'white'
+                     else ((18, 18, 18), (255, 255, 255)))
+        d.rounded_rectangle([40, 100, 330, 190], 45, fill=back)
+        d.text((80, 118), 'X  Decline', font=TC.font(40), fill=ink)
+    if label:
+        y = int(round(0.0707 * TC.H))
+        tw = int(d.textlength(label, font=TC.font(40)))
+        d.rounded_rectangle([380, y, 460 + tw, y + 90], 44, fill=(12, 12, 12))
+        d.text((420, y + 18), label, font=TC.font(40), fill=(255, 255, 255))
+    a = cv2.cvtColor(np.asarray(im), cv2.COLOR_RGB2BGR)
+    n = int(round(up * TC.H))
+    return np.concatenate([a[n:], np.full((n, TC.W, 3), 250, np.uint8)]) if n else a
+
+
+eq('the band starts at the screen box\'s top, a card box ending it only below 0.26 as before',
+   (SP.MAP_LABEL_BAND, SP.MAP_LABEL_ROI_FLOOR), ((0.0, 0.62), 0.26))
+_tops = []
+for _bar, _dec, _up in (('light', 'white', 0.0), ('light', 'white', 0.02),
+                        ('dark', 'black', 0.035), ('light', 'black', 0.05),
+                        ('dark', 'white', 0.05)):
+    _s = _dd_top(bar=_bar, decline=_dec, up=_up)
+    _tops.append((SP.read_map_label(_s, _MapGeom(_s)) or {}).get('line'))
+eq('...so the snap\'s label is read with the screen moved up 2%, 3.5% and 5% inside its box, '
+   'under a light or a dark status bar, beside a white or a black "Decline" pill',
+   _tops, ['2900 Kestrel Plains Pkwy N'] * 5)
+_old_band = SP.MAP_LABEL_BAND
+SP.MAP_LABEL_BAND = (0.06, 0.62)
+try:
+    _s = _dd_top(up=0.02)
+    _was = SP.read_map_label(_s, _MapGeom(_s))
+finally:
+    SP.MAP_LABEL_BAND = _old_band
+eq('...where the band\'s old top (6%) lost it at 2%', _was, None)
+_noise = []
+for _bar, _dec in (('light', 'white'), ('light', 'black'), ('dark', 'white'), ('dark', 'black')):
+    _s = _dd_top(label=None, bar=_bar, decline=_dec)
+    _noise.append(SP.read_map_label(_s, _MapGeom(_s)))
+eq('...and with no label, neither the status bar (light or dark) nor the "Decline" pill (white '
+   'or black) is read as one', _noise, [None] * 4)
+_s = _dd_top(label=None, bar='dark', decline=None)
+_bx = SP.map_label_boxes(SP.map_band(_s, _MapGeom(_s)), SP.MAP_LABEL_HEIGHT)
+_handed = []
+SP.read_map_label(_s, _MapGeom(_s), ocr=lambda im: (_handed.append(im.shape), '')[1])
+eq('...a dark status bar is a box the whole band wide, which is never handed to the reader '
+   '(taken off before MAP_LABEL_MOST are counted)',
+   ([(b[0], b[2]) for b in _bx], _handed),
+   ([(0, SP.map_band(_s, _MapGeom(_s)).shape[1])], []))
+# ...nor takes a read's place: with one box allowed, the bar (the biggest box)
+# counted first would leave the label unread.
+_old_most = SP.MAP_LABEL_MOST
+SP.MAP_LABEL_MOST = 1
+try:
+    _s = _dd_top(bar='dark', decline=None, up=0.02)
+    _one = (SP.read_map_label(_s, _MapGeom(_s)) or {}).get('line')
+finally:
+    SP.MAP_LABEL_MOST = _old_most
+eq('...nor takes the label\'s place among the boxes read (one allowed, the label still read)',
+   _one, '2900 Kestrel Plains Pkwy N')
 _lt = [100.0]
 _lreads = []
 
@@ -4687,8 +4774,9 @@ try:
     _jpg = os.path.join(_bands_dir, 'mapbands', 'o-dd1.jpg')
     _side = json.load(open(os.path.join(_bands_dir, 'mapbands', 'o-dd1.json')))
     _img = cv2.imread(_jpg)
-    eq('...written as <offer id>.jpg, the band at full resolution (784 of 1400 rows)',
-       (_img is not None, _img.shape[0] if _img is not None else None), (True, 784))
+    eq('...written as <offer id>.jpg, the band at full resolution (868 of 1400 rows: from the '
+       'screen box\'s top, MAP_LABEL_BAND)',
+       (_img is not None, _img.shape[0] if _img is not None else None), (True, 868))
     eq('...with a sidecar naming the offer, the app and the screen',
        (_side['offerId'], _side['app'], _side['screen']), ('o-dd1', 'doordash', 'dd.offer'))
     eq('...the card\'s miles, minutes and store',
@@ -4700,7 +4788,7 @@ try:
     eq('...and what relates its pixels to the screen box',
        (_side['band']['warpHeight'], _side['band']['top'], _side['band']['bottom'],
         _side['band']['scale'], len(_side['geom']['quad']), _side['geom']['frame']),
-       (1400, 0.06, 0.62, 1.0, 4, [1400, 700]))
+       (1400, 0.0, 0.62, 1.0, 4, [1400, 700]))
     eq('...and once per offer, not once per read', _mb.submit('o-dd1', _ddm, _MapGeom(_ddm), _meta),
        False)
     eq('...latest() names it for a snap', (_mb.latest() or {}).get('offerId'), 'o-dd1')
