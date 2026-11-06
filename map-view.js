@@ -2281,10 +2281,40 @@
      DoorDash's map; the other not known yet". Null for one customer or a
      count the card did not give. */
   function guessShare(dropoffs) {
-    var n = typeof dropoffs === 'number' && dropoffs >= 2 ? Math.floor(dropoffs) : 0;
+    var n = guessOneOf(dropoffs);
     if (!n) return null;
     return '\u2248 1 of ' + n + ' dropoffs from DoorDash\'s map; the other'
       + (n > 2 ? 's' : '') + ' not known yet';
+  }
+
+  /* ...and where that label goes on the run. It is ONE of the card's
+   * dropoffs, and which of them the car reaches first is not known \u2014 the
+   * card says "Multiple dropoffs (2 stops)" and the map labels one street.
+   * Routed as the run's end (cdfe959: car -> store 1 -> store 2 -> the
+   * label, the road found through them to it), the label was drawn as the
+   * LAST stop, the other customer somewhere before it: an order nobody gave,
+   * under a caption saying the other is not known. The same fault the
+   * two-orders run refuses ("one line through both would draw an order
+   * nobody gave", heldRuns).
+   *
+   * So on such a card the run, the road asked for, goes to the pickups only,
+   * and the label hangs off the last of them on a dashed leg of its own,
+   * straight (oneOfLeg): never a road \u2014 a road to it is a route, and a route
+   * has an order \u2014 and drawn as "one of the 2 dropoffs". It still starts at
+   * the last store because every pickup comes before any dropoff, which the
+   * card does say. The caption is guessShare's, as it was.
+   *
+   * guessOneOf(dropoffs): how many dropoffs the label is one of \u2014 2 or more,
+   * the card's `dropoffs` \u2014 or 0 for one customer or no count. */
+  function guessOneOf(dropoffs) {
+    return typeof dropoffs === 'number' && dropoffs >= 2 ? Math.floor(dropoffs) : 0;
+  }
+
+  /* That leg, from the last pickup the run reaches to the label, as two
+     [lat, lon] points for the map's line; null with either end missing. */
+  function oneOfLeg(from, at) {
+    function ok(p) { return !!p && isFinite(p.lat) && isFinite(p.lon); }
+    return ok(from) && ok(at) ? [[from.lat, from.lon], [at.lat, at.lon]] : null;
   }
 
   /* The candidates a band may choose among, from a refusal: a door plan's
@@ -5696,6 +5726,8 @@
            // ...and DoorDash's stores, every one a pickup (31 Oct).
            cardStores: cardStores, heldStores: heldStores, storesSkipped: storesSkipped,
            guessShare: guessShare,
+           // ...and that label drawn as one of them, not the last (6 Nov).
+           guessOneOf: guessOneOf, oneOfLeg: oneOfLeg,
            BAND_MIN_MI: BAND_MIN_MI, BAND_FRAC: BAND_FRAC, BAND_ASKS_MAX: BAND_ASKS_MAX,
            BAND_CARD_ASKS: BAND_CARD_ASKS, BAND_WAIT_MS: BAND_WAIT_MS, BAND_STEP_M: BAND_STEP_M,
            // ...and a batched trip's other doors, drawn on the run (24 Oct).

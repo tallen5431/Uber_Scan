@@ -1986,6 +1986,30 @@ async function nucbox() {
                             { lat: 34.04, lon: -84.63 },
                             { lat: 34.05, lon: -84.64, approx: true, guess: true }],
                       note: '≈ from DoorDash\'s map' }));
+  /* ...but on a card for two customers ("Multiple dropoffs (2 stops)") the
+     label is ONE of the dropoffs and which comes first is not known, so it
+     is not the run's end: cdfe959 ran car -> store 1 -> store 2 -> the label,
+     the label drawn as the last stop. The run goes to the stores only, and
+     the label hangs off the last of them on a straight leg of its own. */
+  eq('[stores] a label on a card for two customers or more is one of that many; one customer '
+     + 'or no count, not',
+     JSON.stringify([MV.guessOneOf(2), MV.guessOneOf(3), MV.guessOneOf(1), MV.guessOneOf(null),
+                     MV.guessOneOf('2')]),
+     JSON.stringify([2, 3, 0, 0, 0]));
+  eq('[stores] ...its leg from the last store to the label, two points and no more; none with '
+     + 'either end missing',
+     JSON.stringify([MV.oneOfLeg({ lat: 34.04, lon: -84.63 },
+                                 { lat: 34.05, lon: -84.64, approx: true, guess: true }),
+                     MV.oneOfLeg(null, { lat: 34.05, lon: -84.64 }),
+                     MV.oneOfLeg({ lat: 34.04, lon: -84.63 }, { lat: NaN, lon: -84.64 })]),
+     JSON.stringify([[[34.04, -84.63], [34.05, -84.64]], null, null]));
+  eq('[stores] ...and the run the road is asked for ends at the last store, the label nowhere '
+     + 'on it',
+     JSON.stringify(MV.routeLadder({ lat: 34, lon: -84.5 },
+                                   [{ lat: 34.01, lon: -84.6 }, { lat: 34.04, lon: -84.63 }],
+                                   null, null).pts),
+     JSON.stringify([{ lat: 34, lon: -84.5 }, { lat: 34.01, lon: -84.6 },
+                     { lat: 34.04, lon: -84.63 }]));
 
   var gDisc = MV.guessDisc(dash({ miles: 1.5 }), ddPick);
   var gBand = await bandNbx().band(tPlan, tRes, gDisc, MV.bandTarget(dash({ miles: 1.5 }), 'dropoff'),

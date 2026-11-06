@@ -5078,6 +5078,25 @@ const framed = (page) => page.waitForFunction(
             (k) => String(k.popup || '').indexOf('and drop it here') >= 0).length),
           pick: await pick(),
           posts: areaPosts.slice() };
+        // ...and the same card for two customers ("Multiple dropoffs (2
+        // stops)", `dropoffs: 2`): the label is ONE of the two, which first
+        // not known, so it is not the run's end. Every line on the map, by
+        // class, points and dash, and the ring the label is drawn at.
+        await push({ id: 'n-guess2', pickup: '250 Example Road', holdId: 'h-guess',
+                     card: Object.assign({ dropoffs: 2,
+                                           dropoffGuess: { line: '1981 Cobb Parkway',
+                                                           from: 'dd map label' } }, dash) });
+        await page.waitForTimeout(2500);
+        r.guessTwo = {
+          note: await note(),
+          ring: await page.evaluate(() => (window.__marks || []).filter(
+            (k) => String(k.popup || '').indexOf('DoorDash\'s map labels the customer') >= 0)
+            .map((k) => ({ ll: k.ll, popup: String(k.popup || '') }))),
+          pick: await pick(),
+          lines: await page.evaluate(() => (window.__lines || []).map((l) => ({
+            cls: String((l.opts || {}).className || ''), pts: l.pts,
+            dashed: !!(l.opts || {}).dashArray }))),
+          posts: areaPosts.slice() };
         page.off('request', onPost);
         // The same street-only door, no place, but the SERVER armed it by
         // the short street (endBy 'street', its point): Map view draws that
@@ -11107,6 +11126,32 @@ try:
         (_gg.get('note') or '').replace(' \u00b7 trip: \u2248 from DoorDash\'s map', '')
         == _gg.get('before'), 'DoorDash\'s map' in (_gg.get('note') or ''), _gg.get('posts')),
        ([(True, True)], 0, True, True, True, []))
+    # ...and the same card for two customers: the label is one of the two
+    # dropoffs, which first not known (MV.guessOneOf). cdfe959 routed the run
+    # to it as the end, the last stop; now it hangs off the pickup on a dashed
+    # straight leg of its own, and nothing else ends there.
+    _g2 = both.get('guessTwo') or {}
+    _g2ring = (_g2.get('ring') or [{}])[0].get('ll')
+    _g2lines = _g2.get('lines') or []
+    _g2leg = [l for l in _g2lines if 'mv-one-of' in l['cls']]
+
+    def _ends_at(l, at):
+        return bool(at and l.get('pts')) and all(
+            abs(a - b) < 1e-6 for a, b in zip(l['pts'][-1], at))
+    eq('[dd map label, 2 customers] the label is drawn on one dashed straight leg from the '
+       'store, "one of the 2 dropoffs", and the caption says "1 of 2 dropoffs ... the other '
+       'not known yet" (%r)' % (_g2.get('note'),),
+       ([(l['dashed'], len(l['pts'] or []), _ends_at(l, _g2ring),
+          bool(_g2.get('pick')) and _ends_at({'pts': (l['pts'] or [])[:1]}, _g2.get('pick')))
+         for l in _g2leg],
+        'one of the 2 dropoffs' in ((_g2.get('ring') or [{}])[0].get('popup') or ''),
+        'trip: ≈ 1 of 2 dropoffs from DoorDash\'s map; the other not known yet'
+        in (_g2.get('note') or ''), _g2.get('posts')),
+       ([(True, 2, True, True)], True, True, []))
+    eq('[dd map label, 2 customers] ...and no other line of the job ends at it: no run, by '
+       'road or straight, routes the label as its last stop',
+       [l['cls'] for l in _g2lines if 'mv-job' in l['cls'] and 'mv-one-of' not in l['cls']
+        and _ends_at(l, _g2ring)], [])
     ok_('[server pin] Map view draws the held end the server armed by street as D, at its '
         'point, and does not say NO PIN; a pin by no server rule is not drawn (%r)'
         % both.get('serverNote'),

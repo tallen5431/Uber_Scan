@@ -7001,6 +7001,11 @@
     // is not known: "≈ 1 of 2 dropoffs …; the other not known yet".
     var guessShare = guess && MV.guessShare ? MV.guessShare(o.dropoffs) : null;
     var heldShare = heldGuess && MV.guessShare ? MV.guessShare(heldSaid.dropoffs) : null;
+    // ...and how many it is one of, so the run is not routed to it as the
+    // last stop (MV.guessOneOf): 0 for one customer, no count, or a
+    // map-view.js from before it, which keeps the run as it was.
+    var guessOneOf = guess && MV.guessOneOf ? MV.guessOneOf(o.dropoffs) : 0;
+    var heldOneOf = heldGuess && MV.guessOneOf ? MV.guessOneOf(heldSaid.dropoffs) : 0;
     /* ...and the store's NAME beside its door, when the door is what is
        searched (a tap's or the card's printed one): asked by name along the
        card's street where the door is not found (MV.NbxSearch.place's
@@ -7022,6 +7027,7 @@
     return { pickup: pickQ, pickupStore: pickStore, dropoff: o.dropoff || null, guess: guess,
              stores: stores, guessShare: guessShare,
              heldStores: hStores, heldGuess: heldGuess, heldShare: heldShare,
+             guessOneOf: guessOneOf, heldOneOf: heldOneOf,
              // (The held card's fix and miles, for the held guess's disc:
              // `heldCard` below is null with no end, which is when it is
              // searched.)
@@ -7947,11 +7953,19 @@
         // skipped: done (MV.dropsAhead).
         var ahead = !drops.length ? undefined : MV.dropsAhead ? MV.dropsAhead(drops)
           : drops.map(function (d) { return d.at; });
+        // (The label as ONE of two dropoffs or more, which first not known:
+        // the road goes to the stores only, and drawMap hangs the label off
+        // the last of them on a dashed straight leg — MV.guessOneOf.)
+        var heldOneOf = !!(heldGuessAt && want.heldOneOf);
+        if (heldOneOf) areas.heldOneOf = true;
         var lad = want.held || picksOk.length
-          ? MV.routeLadder(here || want.carNow, picksOk, heldOk, rung, ahead)
+          ? MV.routeLadder(here || want.carNow, picksOk, heldOneOf ? null : heldOk,
+                           heldOneOf ? null : rung, ahead)
           : null;
-        // (A card for more than one customer says the label is one of them.)
+        // (A card for more than one customer says the label is one of them —
+        // with no road to say it after, a lone store and no car, all the same.)
         if (lad && heldGuessAt && want.heldShare) lad.note = want.heldShare;
+        if (!lad && heldOneOf && want.heldShare) notes.push(want.heldShare);
         if (lad) {
           heldRoad = await mapNbx.runLine(lad.pts);
           if (viewMode !== 'map' || mapFor !== key) return;
@@ -8085,9 +8099,18 @@
         // (From the car where no pickup pin draws its dashed leg: DoorDash's
         // guessed end with the pickup an area, nothing in the car.)
         var jstart = !dropOk || (guessAt && !jj.pick && !want.held) ? here : null;
-        var jl = pickOk ? MV.routeLadder(jstart, [pickOk].concat(storePts), dropOk, dropRung) : null;
+        // (The label as ONE of two dropoffs or more, which first not known:
+        // the road goes to the pickups only and drawMap hangs the label off
+        // the last of them, dashed and straight — MV.guessOneOf. A lone
+        // pickup with no car to start from is then no road at all, and the
+        // caption is said all the same.)
+        var oneOf = !!(guessAt && want.guessOneOf);
+        if (oneOf) areas.guessOneOf = true;
+        var jl = pickOk ? MV.routeLadder(jstart, [pickOk].concat(storePts),
+                                         oneOf ? null : dropOk, oneOf ? null : dropRung) : null;
         // (A card for more than one customer says the label is one of them.)
         if (jl && guessAt && want.guessShare) jl.note = want.guessShare;
+        if (!jl && oneOf && want.guessShare) notes.push('trip: ' + want.guessShare);
         if (jl && (dropOk || !want.held)) {
           var jr = await mapNbx.runLine(jl.pts);
           if (viewMode !== 'map' || mapFor !== key) return;
@@ -8827,8 +8850,12 @@
     // figure's point, said as the guess it is.
     var guessEnd = !drop && !want.dropoff && areas.guess ? areas.guess : null;
     if (guessEnd) {
+      // (On a card for more than one customer, one of them, which first not
+      // known: said here, where the dashed leg to it says nothing more.)
       put(guessEnd, '#f5a524', '≈ where DoorDash\'s map labels the customer — a best guess, '
-          + 'not the door' + (want.guessShare ? ', one of ' + (want.card || {}).dropoffs : ''),
+          + 'not the door' + (want.guessOneOf ? '; one of the ' + want.guessOneOf
+                              + ' dropoffs, which comes first not known'
+                              : want.guessShare ? ', one of ' + (want.card || {}).dropoffs : ''),
           want.guess, false, '≈', { faded: true, aside: inCar });
     }
     /* ...and the order in the car's end by DoorDash's map label, no screen
@@ -8836,7 +8863,9 @@
        "≈", never D, said as the guess it is. */
     if (!held && areas.heldGuess) {
       put(areas.heldGuess, '#f5a524', '≈ where DoorDash\'s map labels the customer of the order '
-          + 'in your car — a best guess, not the door; DoorDash dropoff not read yet',
+          + 'in your car — a best guess, not the door; DoorDash dropoff not read yet'
+          + (want.heldOneOf ? '; one of the ' + want.heldOneOf + ' dropoffs, which comes '
+                              + 'first not known' : ''),
           want.heldGuess, true, '≈', { faded: true });
     }
     /* ...and DoorDash's other stores (the owner's snaps of 31 Oct): this
@@ -8956,7 +8985,10 @@
     // when no planner gave it any: for the straight run below only, never
     // the detour's stops (`stopsAt`), so no figure is measured through them.
     var storeAt = !heldAt.length && want.heldStores ? want.heldStores.pts : [];
-    var runEnd = held || (areas.heldGuess && !want.held ? areas.heldGuess : null);
+    // (...not to the label of an order for two customers or more, which is
+    // one of its dropoffs and not known to be the last: areas.heldOneOf.)
+    var runEnd = held || (areas.heldGuess && !want.held && !areas.heldOneOf
+                          ? areas.heldGuess : null);
     // What of the lines below was drawn, for the key: the run, solid in the
     // order's amber, and the miles this card adds to it, dashed in violet.
     var drewRun = false, drewExtra = false;
@@ -8990,6 +9022,18 @@
         runLine(run, { color: '#f5a524', opacity: .9,
                        className: 'mv-held-run' + (heldRoad ? ' mv-road' : '') });
         drewRun = true;
+      }
+      /* ...and that label, one of the order's dropoffs (areas.heldOneOf,
+         MV.guessOneOf): a dashed straight leg from the last store still
+         ahead — or the car, all of them behind it — as ②'s guessed end is
+         drawn, never the run's end and never a road. */
+      if (!held && areas.heldGuess && areas.heldOneOf && MV.oneOfLeg) {
+        var hFrom = storeAt.length ? storeAt[storeAt.length - 1] : here || want.carNow;
+        var hLeg = MV.oneOfLeg(hFrom, areas.heldGuess);
+        if (hLeg) {
+          runLine(hLeg, { color: '#f5a524', opacity: .55, weight: 3, dashArray: '6 8',
+                          className: 'mv-held mv-guess mv-one-of' });
+        }
       }
     }
     // The detour, car -> pickup -> held end, along the road the router
@@ -9047,11 +9091,37 @@
     }
     // ...and to DoorDash's guessed end: the same teal, dashed and fainter,
     // so it reads as the approximate run it is.
-    if (guessEnd && (jobRoad || pick)) {
+    if (guessEnd && (jobRoad || pick) && !areas.guessOneOf) {
       drewJob = true;
       runLine(jobRoad || [[pick.lat, pick.lon]].concat(jobVia, [[guessEnd.lat, guessEnd.lon]]),
               { color: '#2dd4bf', opacity: .6, dashArray: '8 8',
                 className: 'mv-job mv-guess' + (jobRoad ? ' mv-road' : '') });
+    }
+    /* ...and on a card for more than one customer, where the label is ONE of
+       the dropoffs and which comes first is not known (areas.guessOneOf,
+       MV.guessOneOf): the run to its pickups solid, as a job's — the road
+       when one came back (it stops at the last store), straight through
+       the stores otherwise — and the label on a dashed straight leg from
+       the last of them, never a road and never the run's end, so no line
+       says the other customer comes before it. */
+    if (guessEnd && areas.guessOneOf) {
+      var oneOfFrom = jobVia.length ? { lat: jobVia[jobVia.length - 1][0],
+                                        lon: jobVia[jobVia.length - 1][1] }
+        : pick || (jobRoad && jobRoad.length
+                   ? { lat: jobRoad[jobRoad.length - 1][0], lon: jobRoad[jobRoad.length - 1][1] }
+                   : null);
+      var toStores = jobRoad || (pick && jobVia.length ? [[pick.lat, pick.lon]].concat(jobVia) : null);
+      if (toStores) {
+        drewJob = true;
+        runLine(toStores, { color: '#2dd4bf', opacity: .9,
+                            className: 'mv-job' + (jobRoad ? ' mv-road' : '') });
+      }
+      var oneOfLine = MV.oneOfLeg ? MV.oneOfLeg(oneOfFrom, guessEnd) : null;
+      if (oneOfLine) {
+        drewJob = true;
+        runLine(oneOfLine, { color: '#2dd4bf', opacity: .6, dashArray: '8 8',
+                             className: 'mv-job mv-guess mv-one-of' });
+      }
     }
     /* ...and on from the pickup to where the figure rejoins the run: to the
        end THROUGH the batched trip's dropoffs still ahead, in order, as the
