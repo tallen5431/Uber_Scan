@@ -1053,11 +1053,30 @@ function pickupSeenArrived(p, now) {
   var conf = (p.street ? 1 : 0) + (p.city ? 1 : 0) + (p.zip ? 1 : 0);
   var next = { value: p.line, from: 'label', conf: conf, at: typeof p.at === 'number' ? p.at : now,
                screen: p.screen || 'dd.pickup' };
-  if (!Assemble.outranks(next, f.pickupAddr)) return;
+  // ...and a door on a street over one that is no street. A build before
+  // offer_parser's _dd_door_shaped sent any number and words as the store's
+  // door — "9 min to complete", an item's "2 Chicken Sandwich" — and filed at
+  // 'label' it outranked the card's pickup, while the right door read next,
+  // at the same rank with no planner key, outranked nothing (review of 6
+  // Nov). So a filed pickup off this screen whose line names no street type
+  // after its number (typedDoor) gives way to one that does. Only this
+  // screen's own: a press or the card is left to outranks.
+  var junk = f.pickupAddr && f.pickupAddr.from === 'label' && f.pickupAddr.screen === 'dd.pickup'
+    && !typedDoor(f.pickupAddr.value) && typedDoor(next.value);
+  if (!junk && !Assemble.outranks(next, f.pickupAddr)) return;
   f.pickupAddr = next;
   console.log('pickup screen read: the store\'s door filed as the ' + (p.app || '') + ' order\'s pickup');
   saveHold(h);
   armHeldPickups(h);
+}
+
+// Whether an address line is a door on a typed street: a house number, then
+// a word Map view knows as a street type (MV.streetType: "Parkway", "Hwy",
+// "Pt"), before the town's comma. "9 min to complete" is not.
+function typedDoor(line) {
+  var w = String(line || '').split(',')[0].trim().split(/\s+/);
+  return w.length > 2 && /^\d+[A-Za-z]?$/.test(w[0])
+    && w.slice(2).some(function (x) { return !!MV.streetType(x); });
 }
 
 /* The order the driver is currently carrying, or null.

@@ -728,6 +728,25 @@ eq('dd_pickup_door: the task screen (no door) and Uber\'s navigation give none',
                      'Deliver to Lee R.\nThis offer $11.10'),
     P.dd_pickup_door('o= 4min \u00a9 2mi \u2014\nDeliver to Lee R.\n2210 Larkspur Dr NW')],
    [None, None])
+# ...and a number and words that are no street (review of 6 Nov; invented):
+# DD_PICKUP_HOUSE took any of them as the store's door \u2014 "9 min to complete",
+# an item's count \u2014 scan_pi sent it, and server.js filed it at rank 'label'
+# over the card's pickup, where the right door read next could not replace it.
+eq('dd_pickup_door: no door off a time, an item\'s count, or an item with a type word inside '
+   'it; the door after them still read, a highway\'s number and a suite kept',
+   [P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse - (0042\n9 min to complete\n'
+                     '@ Drink'),
+    P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse - (0042\n2 Chicken Sandwich\n'
+                     '1 Drink'),
+    P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse - (0042\n3 Way Combo\n'
+                     '1 Street Taco'),
+    (P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse - (0042\n2 Chicken Sandwich\n'
+                      '410 Quillon Parkway\nNorthwest, Fabletown') or {}).get('line'),
+    (P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse\n1450 Hwy 92\nFabletown, GA')
+     or {}).get('street'),
+    (P.dd_pickup_door('Pickup for Lee R.\nQuillon Steakhouse\n410 Quillon Pkwy NW Ste 100\n'
+                      'Fabletown, GA') or {}).get('city')],
+   [None, None, None, '410 Quillon Parkway Northwest, Fabletown', '1450 Hwy 92', 'Fabletown'])
 # ...and the same store screen after an accept in the popup's dress (the
 # owner's snap of 31 Oct, 19:14): "Pickup from / <Store> / Order includes /
 # <items> / <door> / <town> / Directions". It typed dd.placePopup and filed

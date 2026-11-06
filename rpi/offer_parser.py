@@ -4748,6 +4748,41 @@ def _dd_from_door(lines):
     return None
 
 
+# What may follow a door's street type on DoorDash's pickup screen: a road's
+# number ("Hwy 92"), a quadrant, then the line's end, the town's comma, or a
+# suite. See _dd_door_shaped.
+DD_DOOR_AFTER_TYPE = re.compile(r'^\.?(?:\s+\d{1,4}\b)?(?:\s+(?:NW|NE|SW|SE|N|S|E|W)\b\.?)?'
+                                r'\s*(?:$|[,#]|(?:ste|suite|unit|apt|bldg)\b)', re.IGNORECASE | ASCII)
+# A count of minutes or items is never a door ("9 min to complete", "2 items").
+DD_NOT_DOOR = re.compile(r'^\d{1,3} ?(?:min|mins|minutes?|items?|orders?|x)\b', re.IGNORECASE | ASCII)
+
+
+def _dd_door_shaped(body):
+    """Whether a house-number line on DoorDash's pickup screen is a door: its
+    LAST street type ends the street (DD_DOOR_AFTER_TYPE), and it is no count
+    of minutes or items.
+
+    DD_PICKUP_HOUSE alone took any number and words as the store's door
+    (review of 6 Nov; invented): "9 min to complete" and an item's "2 Chicken
+    Sandwich" were sent as the DoorDash order's pickup (scan_pi
+    emit_pickup_seen), and server.js filed them at rank 'label' over the
+    card's pickup. _dd_from_door asks the same of the popup-dressed screen
+    (_sheet_street: no street type, no door); the LAST type is asked here so
+    an item with a type word inside it ("3 Way Combo", "1 Street Taco") is
+    still no door, while "120 Court St" is one. A store whose line printed
+    no type is not pinned off this screen: the card's pickup stands."""
+    if DD_NOT_DOOR.match(body):
+        return False
+    ends = list(SHEET_STREET_END.finditer(body))
+    if not ends:
+        return False
+    # (SHEET_STREET_END takes a quadrant after the type; the type's own end
+    # is wanted, so the quadrant is read again by DD_DOOR_AFTER_TYPE.)
+    last = ends[-1]
+    typed = re.match(r'[A-Za-z]+', body[last.start():])
+    return bool(DD_DOOR_AFTER_TYPE.match(body[last.start() + typed.end():]))
+
+
 def dd_pickup_door(text):
     """The store's door on DoorDash's pickup screen (dd.pickup): {'line',
     'street', 'city', 'state', 'zip', 'name'} or None. The house-number line
@@ -4768,7 +4803,7 @@ def dd_pickup_door(text):
         return _dd_from_door(lines) if dd_pickup_from(t) else None
     for i in range(head + 1, min(len(lines), head + 6)):
         m = DD_PICKUP_HOUSE.match(lines[i])
-        if not m or not re.search(r'[A-Za-z]{3}', m.group(1)):
+        if not m or not re.search(r'[A-Za-z]{3}', m.group(1)) or not _dd_door_shaped(m.group(1)):
             continue
         street, city, state, z = m.group(1).strip().rstrip('.,'), None, None, None
         if ',' in street:

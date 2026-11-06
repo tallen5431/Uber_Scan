@@ -11531,6 +11531,13 @@ try:
     _x1 = [(o.get('app'), o.get('dropoff'), o.get('cue')) for o in _orders(_xb)]
     _say(_town('doordash', 'dd.deliver'))
     _x2 = [(o.get('app'), o.get('dropoff'), o.get('cue')) for o in _orders(_xb)]
+    # A door no street (review of 6 Nov): a build before _dd_door_shaped sent
+    # "9 min to complete" as the store's door, filed at rank 'label'; the
+    # right door read next could not replace it (outranks: same rank, no key).
+    _say({'pickupSeen': {'line': '9 min to complete', 'street': '9 min to complete',
+                         'city': None, 'state': None, 'zip': None, 'name': 'Quillon Steakhouse',
+                         'app': 'doordash', 'screen': 'dd.pickup',
+                         'at': int(time.time() * 1000)}})
     _say({'pickupSeen': {'line': '410 Quillon Parkway Northwest, Fabletown',
                          'street': '410 Quillon Parkway Northwest', 'city': 'Fabletown',
                          'state': None, 'zip': None, 'name': 'Quillon Steakhouse',
@@ -11548,7 +11555,7 @@ eq('[31 Oct] ...and the same town off DoorDash\'s "Deliver to" is the DoorDash o
    _x2, [('uber', '2210 Larkspur Dr NW, Fabletown', 'app'),
          ('doordash', 'Fabletown, GA 30199', 'app')])
 eq('[31 Oct] DoorDash\'s pickup screen files the store\'s door as the DoorDash order\'s pickup, '
-   'and nothing on the Uber order',
+   'and nothing on the Uber order (a door with no street type filed before it replaced)',
    [((o.get('fields') or {}).get('pickupAddr') or {}).get('value') for o in _xorders],
    ['Fable Grill (120 Quillon Pkwy NW)', '410 Quillon Parkway Northwest, Fabletown'])
 eq('[31 Oct] the DoorDash card\'s map label rides onto its hold, for the run to draw (no end '

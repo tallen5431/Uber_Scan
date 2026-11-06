@@ -6998,6 +6998,16 @@ does, and is no popup: its door (`dd_pickup_door`) goes out on the
 dropoff and never onto a card being screened. The offer's own popup types
 `dd.placePopup` as before.
 
+**Only a door is a door.** The house-number line after "Pickup for <name>"
+must END on a street type — a road's number ("Hwy 92"), a quadrant, the
+town's comma or a suite after it at most — and be no count of minutes or
+items (`_dd_door_shaped`). Until 6 Nov any number and words were taken:
+"9 min to complete" or an item's "2 Chicken Sandwich" went out as the
+store's door and were filed over the card's pickup, and the right door read
+next could not replace them. The server now lets a door on a typed street
+replace a pickup this screen filed that names none (`typedDoor`), so a hold
+written by the old build mends at its next read.
+
 **On the glass.** The driving screen lists the stops in the card between
 offers, when it otherwise holds only the phase and the notice (not while the
 rig is aiming), one line each — `▸ Dropoff by 4:18 · Pat Q. ·
