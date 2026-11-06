@@ -9125,6 +9125,24 @@ that is visible at a glance without needing the rig. Two rounds of fixes here
 were diagnosed from exactly this kind of evidence: `S 4S Rhodes` out of a street
 address became a $45 offer, and `ZIM` out of map texture became a 21-minute leg.
 
+A screen the health line counts as "had a street on it and no address the rig
+would accept" is quoted too, three times a minute at most, with what it was and
+why no address came off it:
+
+```
+read 41: a street and no address the rig would accept (12 since start) - uber.nav:
+       '<n> <Name> St NW' a door, no ", ST ZIP" after it; '<Town>, GA' a town, no street or ZIP
+```
+
+The reasons are a Trip Planner whose stops were read (they go to the server on
+the sighting, which needs no ZIP), Uber's opened sheet, DoorDash's pickup
+screen, the app's own idle screen ("a good place to wait" is all the street
+there is), and for any other screen, line by line: a door with no `, ST ZIP`
+after it, a cross-street, no house number, a town alone, a state or ZIP that
+is not one. The count is unchanged; over the owner's 📷 Snap pages of 12 Oct –
+2 Nov most of what it counted was planners and idle screens, not doors
+refused. Doors are quoted as read: the log is the rig's own, kept on the Pi.
+
 `health` lines appear at most every two minutes and only when reads have
 happened, so a quiet scanner stays quiet. The same detail is on `live.html`
 under **what the reader read**, which is quicker if you are standing at the car.

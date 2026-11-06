@@ -1850,6 +1850,42 @@ ok_('the loop tells a screen row whether a card was up a moment ago',
 ok_('the empty dropoff answer waits for a read that could still answer it',
     'reader.since < dropoff_until' in _loop_src)
 
+# --- a street and no address: what it was, in the log -------------------------
+#
+# The health line said "73 screens since start had a street on it and no
+# address the rig would accept" on 2 Nov, and nothing about any of them. Two
+# of that shift's seven orders ended unpinned. A navigation screen with no
+# payout, its door printed with no town, state or ZIP, read over and over: the
+# log quotes it with the reason, and at most once per STREET_SAY_EVERY.
+_NAV_DOOR = 'Dropoff 3100 Esquire Dr N 14 min Start'
+r = run(lambda n, k: _NAV_DOOR, extra_argv=['--no-parallel'], seconds=6.0,
+        until=lambda rows, ann, calls: calls >= 3)
+_street = [l for l in r['logs'] if 'no address the rig would accept' in l]
+ok_('a screen with a street and no address it would accept is quoted in the log with '
+    'its line and the reason (%r)' % (_street[:1],),
+    _street and "'Dropoff 3100 Esquire Dr N 14 min Start' a door, no \", ST ZIP\" after it"
+    in _street[0] and '(1 since start)' in _street[0])
+eq('...once, over %d reads inside STREET_SAY_EVERY' % r['calls'], len(_street), 1)
+# ...and each reason, asked directly, on invented screens.
+for _text, _want in (
+        ('Trip Planner\nDropoff • 1 order\nLee R.\nExpected by 7:45 PM\nAddress\n'
+         '283 Quillon St NW\nSmyrna, GA\nView details\nWaybill',
+         "uber.planner: a Trip Planner, 1 stop read with a door (on the sighting); "
+         "'283 Quillon St NW' a door, no \", ST ZIP\" after it; 'Smyrna, GA' a town, no street or ZIP"),
+        ("Finding offers\nYou're in a good place to wait for offers\nZone offer wait 2-15 min",
+         "dd.finding: the app's idle screen; \"You're in a good place to wait for offer\" "
+         "no house number"),
+        ('4 min 0.6 mi\nOak St & Elm Ave', "uber.nav: 'Oak St & Elm Ave' a cross-street, no door"),
+        ('2080 Lantern Ave NW\nAtlanta, GX 30318',
+         "unknown: '2080 Lantern Ave NW' a door, no \", ST ZIP\" after it; "
+         "'Atlanta, GX 30318' the state reads \"GX\""),
+        ('Lantern Ave NW\nAtlanta, GA 00012', "unknown: 'Lantern Ave NW' no house number; "
+         "'Atlanta, GA 00012' the ZIP reads \"00012\""),
+        ('12 Lantern Ave NW Atlanta GA 30318',
+         "unknown: '12 Lantern Ave NW Atlanta GA 30318' a ZIP, no \"Town, ST\" before it")):
+    eq('...%s' % _want.split(': ', 1)[1][:60],
+       SP.why_no_address(_text, OP.find_planner(_text), OP.sheet_dropoff(_text)), _want)
+
 # --- a dropoff scan that finds nothing says so -------------------------------
 #
 # The rig emitted only from inside `if found:`, so a press that found no

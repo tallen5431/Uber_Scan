@@ -1741,6 +1741,104 @@ def read_why(out, parsed):
     return NO_JOURNEY
 
 
+# How often at most the log quotes a screen the health line counts as "had a
+# street on it and no address the rig would accept" (why_no_address): three a
+# minute. A navigation screen or a planner sits in front of the camera for a
+# whole delivery and is read again and again; one line per read would bury
+# the log, and none at all is how the 2 Nov shift's 73 went by with nothing to
+# say what any of them were.
+STREET_SAY_EVERY = 20.0
+
+# Lines of a screen that look like part of an address: a street suffix, a
+# state and ZIP, or a town and a state at the end of the line.
+_ADDR_ANCHOR = re.compile(r'(?<![A-Za-z])([A-Za-z]{2})\s+(' + OP.ZIP + r')(?![\dA-Za-z])', re.ASCII)
+_ADDR_TOWN_STATE = re.compile(r'[A-Za-z]{3,}\s*,?\s+([A-Z]{2})\W{0,2}$', re.ASCII)
+_ADDR_HOUSE = re.compile(r'(?<![A-Za-z0-9])\d' + OP.DC + r'{0,5}\s+[A-Za-z]', re.ASCII)
+# ...a corner, two names either side of "&" or "at" — not the icon row's "&"
+# glued to the end of a door ("3361 <Name> Cir OP &", the corpus's sheet).
+_ADDR_CROSS = re.compile(r'[A-Za-z]{2}\.?\s*(?:&|\bat\b)\s*[A-Za-z]{2}', re.IGNORECASE | re.ASCII)
+
+
+def why_no_address(text, stops=None, sheet=None, keep=3, width=40):
+    """What a screen counted as "a street on it and no address the rig would
+    accept" had on it, and why find_address took none of it: the screen's type
+    (OP.screen_type), then up to `keep` address-looking lines, each cut to
+    `width` letters, with its reason —
+
+        'the state reads "GX"'            a state and ZIP that is no state
+        'the ZIP reads "3O1A4"'           ...or no ZIP in use
+        'a ZIP, no "Town, ST" before it'  find_address wants the comma
+        'a cross-street, no door'         "Oak St & Elm Ave", "Cobb Pkwy at Elm"
+        'a door, no ", ST ZIP" after it'  a house number and street, no town
+        'no house number'                 a street name alone
+        'a town, no street or ZIP'        "Kennesaw, GA"
+
+    — or, ahead of the lines, what took the screen's doors instead: a Trip
+    Planner whose stops find_planner read (they go on the sighting, and the
+    assembler decides them), Uber's opened sheet (OP.sheet_dropoff),
+    DoorDash's pickup screen (OP.dd_pickup_door, the store's door), or the
+    app's own idle screen, where a word like "place" ("a good place to wait")
+    is all the street there is.
+
+    What those are, measured: over the shared corpus (cases.json and
+    sequences.json, 684 distinct texts) the loop would count 104 screens, and
+    this leads with a planner whose stops were read on 54, the opened sheet on
+    15 and DoorDash's pickup screen on 1; of the rest, 26 a door with no town,
+    state or ZIP, 4 a cross-street, 2 no house number, 1 the idle screen, 1 a
+    ZIP with no "Town, ST". Over the 201 distinct read texts on the owner's
+    📷 Snap pages of 12 Oct - 2 Nov, 46: a planner on 16, DoorDash's idle
+    screen on 14, DoorDash's pickup screen on 7, a door with no ZIP on 9 (8 of
+    them a planner's page read flat or with its stop headers lost, 1 a road's
+    label on Uber's map). None of the 150 was a customer's door in a shape the
+    parsers could safely take that they do not.
+
+    For the log only: nothing is decided off it. The health line's count is
+    what it was; this says, three times a minute at most, what it is made of,
+    so a shift's "73 screens" can be read as doors refused or as planners and
+    idle screens that never had one to give.
+    """
+    kind = OP.screen_type(text or '')['screen']
+    said = []
+    if stops:
+        doors = sum(1 for s in stops if s.get('street'))
+        said.append('a Trip Planner, %d stop%s read with a door (on the sighting)'
+                    % (doors, '' if doors == 1 else 's'))
+    if sheet:
+        said.append("Uber's opened sheet, its address on the sighting")
+    if OP.dd_pickup_door(text or '') is not None:
+        said.append("DoorDash's pickup screen, the store's door read")
+    if kind.endswith('.finding'):
+        said.append("the app's idle screen")
+    lines = [OP.normalize(l) for l in re.split(r'[\r\n]+', text or '')]
+    picked = []
+    for line in lines:
+        if not line:
+            continue
+        street = OP.STREET_ENDS.search(line + ' ')
+        anchor = _ADDR_ANCHOR.search(line)
+        town = _ADDR_TOWN_STATE.search(line)
+        if anchor and anchor.group(1).upper() not in OP.STATES:
+            why = 'the state reads "%s"' % anchor.group(1)
+        elif anchor and OP.a_zip(anchor.group(2)) is None:
+            why = 'the ZIP reads "%s"' % anchor.group(2)
+        elif anchor:
+            why = 'a ZIP, no "Town, ST" before it'
+        elif street and _ADDR_CROSS.search(line):
+            why = 'a cross-street, no door'
+        elif street and _ADDR_HOUSE.search(line[:street.start()]):
+            why = 'a door, no ", ST ZIP" after it'
+        elif street:
+            why = 'no house number'
+        elif town and town.group(1) in OP.STATES:
+            why = 'a town, no street or ZIP'
+        else:
+            continue
+        picked.append('%r %s' % (line[:width], why))
+        if len(picked) >= keep:
+            break
+    return '%s: %s' % (kind, '; '.join(said + picked) or 'no line read as part of one')
+
+
 def doubted(row):
     """Is this journal row one the reader was unsure of? See DOUBT_DIR."""
     return bool(row and (row.get('milesCorrected') or row.get('milesUncertain')
@@ -4976,6 +5074,9 @@ def main():
     # ...and the last (episode, payout) a payout was held back for and said in
     # the log. See unsure_payout.
     unsure_said = None
+    # ...and when the log last quoted a screen with a street and no address on
+    # it, on the monotonic clock. See STREET_SAY_EVERY.
+    street_said_at = None
     # ...and what that card read as when it was told. A later, fuller reading
     # of the same card — the second leg, the address a single frame lost —
     # is told again, because the first was what the panel, the order in the
@@ -5170,7 +5271,7 @@ def main():
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
-        nonlocal unparsed_kept_for, unsure_said
+        nonlocal unparsed_kept_for, unsure_said, street_said_at
         nonlocal last_read, found_box, found_kept, popup_said, pickup_said
         nonlocal box_episode
         # Not merged when it was a whole-screen read — see collect().
@@ -5650,6 +5751,15 @@ def main():
         elif not an_offer and not frame_address \
                 and OP.STREET_ENDS.search(out.get('text') or ''):
             health.street_seen_no_address += 1
+            # ...and what it was, three times a minute at most (why_no_address):
+            # the count alone said "73 screens" on 2 Nov and nothing about
+            # whether any of them was a door refused.
+            if street_said_at is None \
+                    or time.monotonic() - street_said_at >= STREET_SAY_EVERY:
+                street_said_at = time.monotonic()
+                log('read %d: a street and no address the rig would accept (%d since '
+                    'start) - %s' % (frames, health.street_seen_no_address,
+                                     why_no_address(out.get('text'), seen_stops, sheet)))
         # ...and said ONCE, not on every read that catches the same screen.
         #
         # A navigation screen can sit in front of the camera for the whole of a
