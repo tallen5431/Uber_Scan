@@ -3265,7 +3265,9 @@ SEQ.forEach(function (seq) {
       A.slipStop(pat, st('dropoff', 'Pat Q.', null, '10 Fernhill Ct', null)),
       A.slipStop(st('dropoff', 'Quin C.', 1342, '915 Brookvale Place Blvd', 'Kestrelton'),
                  st('dropoff', 'QuinC.', 1343, '915 Brookvale Place Bivd', 'Kestrelton')),
-      A.slipStop(pat, st('dropoff', null, 1326, '10 Fernhill Ct', null)),
+      // (Three digits left: at two, "10", a lost name is no longer one door —
+      // the neighbours' check below, review of 6 Nov.)
+      A.slipStop(pat, st('dropoff', null, 1326, '410 Fernhill Ct', null)),
       A.slipStop(st('dropoff', 'Tez L.', 1332, '2471 Fernhill Ct', null),
                  st('dropoff', 'jez.', 1334, '71 Fernhill Ct', null))],
      [true, true, true, true, true]);
@@ -3326,6 +3328,33 @@ SEQ.forEach(function (seq) {
      healed2.filter(function (s) { return s.kind === 'dropoff'; }).map(function (s) {
        return s.street; }),
      ['2416 Fernhill Ct', '2471 Fernhill Ct', '915 Brookvale Place Bivd']);
+  // Two REAL neighbours (review of 6 Nov; invented): namesSlip's edit ratio
+  // let any two three-letter names a letter or two apart through, so a
+  // court's 2416 "Kim" and 2418 "Tim", due two minutes apart, were one stop
+  // — per read, and at boot (healPlanner) off a hold that listed both.
+  var kim = st('dropoff', 'Kim', 1326, '2416 Oak Ct', 'Brookvale');
+  eq('[slip] neighbours with short names stay two: "Kim"/"Tim" and "Joe"/"Jon" a digit apart, '
+     + '"Ann" at 120 and "Dan" at 20, "Ann" at 120 and an unread name at 20, a name lost at '
+     + '"10" for "4410"',
+     [A.slipStop(kim, st('dropoff', 'Tim', 1328, '2418 Oak Ct', 'Brookvale')),
+      A.slipStop(st('dropoff', 'Joe', 1326, '2416 Oak Ct', null),
+                 st('dropoff', 'Jon', 1327, '2418 Oak Ct', null)),
+      A.slipStop(st('dropoff', 'Ann', 1326, '120 Oak Ct', null),
+                 st('dropoff', 'Dan', 1327, '20 Oak Ct', null)),
+      A.slipStop(st('dropoff', 'Ann', 1326, '120 Oak Ct', null),
+                 st('dropoff', null, 1327, '20 Oak Ct', null)),
+      A.slipStop(pat, st('dropoff', null, 1326, '10 Fernhill Ct', null))],
+     [false, false, false, false, false]);
+  eq('[slip] ...and a hold restored listing both is not made one at boot',
+     A.healPlanner([kim, st('dropoff', 'Tim', 1328, '2418 Oak Ct', 'Brookvale')])
+       .map(function (s) { return s.name; }), ['Kim', 'Tim']);
+  eq('[slip] ...while a name lost at three digits kept ("410" for "4410"), one short name '
+     + 'read the same a digit apart, and a long name mangled a digit apart are still one',
+     [A.slipStop(pat, st('dropoff', null, 1326, '410 Fernhill Ct', null)),
+      A.slipStop(st('dropoff', 'Kim T.', 1326, '2416 Oak Ct', null),
+                 st('dropoff', 'KimT.', 1327, '2418 Oak Ct', null)),
+      A.slipStop(kam('kamnris.', 1328, '2416 Fernhill Ct'), kam('kawnis.', 1327, '2418 Fernhill Ct'))],
+     [true, true, true]);
 })();
 
 /* ---- the end of a two-order trip: the owner's snap of 31 Oct, 21:46 ----

@@ -1843,11 +1843,14 @@
    *     word; one of three letters may be two edits off a word of four,
    *     "jez" for "tezl"). "Pat Q." and "Jules K." at one door, due the same
    *     minute, are two customers (slotJoins' review of 27 Oct), and stay two.
+   *     A name of four letters or fewer is held tighter off one door (namesSlip):
+   *     "Kim" and "Tim" are an edit apart and two neighbours.
    * A digit misread is the one slip that can make two neighbours' doors one
    * ("2416" and "2418" on one court; "418" and "2416" with the "2" lost), so
    * at the same length or on a number with its first digits lost it is taken
    * only where BOTH reads printed a name and the names agree: a name lost
-   * there is not evidence of anything.
+   * there is not evidence of anything. So is a number lost down to two
+   * digits ("20" of "120"): with a name lost there too, two stops are kept.
    *
    * Asked by mergePlanner after every rule above has had every pair, and of
    * the merged list against itself (collapsePlanner), so a hold already
@@ -1918,7 +1921,28 @@
   // name's OWN word mangled — the screen's litter round it is already gone
   // (nameWords, runOnForms) — and initials that both read and differ are two
   // people whatever the letters say ("Pat Q." and "Pat R.").
-  function namesSlip(a, b) {
+  //
+  // ...and how lenient depends on the door (review of 6 Nov: a court's 2416
+  // "Kim" and 2418 "Tim", due two minutes apart, were one stop — per read
+  // and at boot). An edit per three letters is ONE letter of a three-letter
+  // name, and the short names a batch carries are a letter apart all the
+  // time: Kim/Tim, Joe/Jon, Ann/Dan. So for a word of four letters or fewer:
+  //   - at one door ('same') as before — the same number on the same street
+  //     due within five minutes is one stop unless two names say otherwise,
+  //     and "jez." beside "TezL" (the snap's) is a mangled name, not two;
+  //   - a number with its first digits lost ('lost'): one letter at most,
+  //     never two — "jez." for "Tez L." (one, the first letter misread, the
+  //     29 Oct shift's "terbieP." slip) is the snap's mangling; "Ann" and
+  //     "Dan" at 120 and 20 are two edits and two customers;
+  //   - a digit misread ('one', 'lostOne') — the slip that makes two
+  //     neighbours' doors one — sameName only, the name read the same: the
+  //     snap's digit slips are "Quin C."/"QuinC." (sameName) and a long name
+  //     mangled ("kamnris."/"kawnis.", which the ratio still takes). A short
+  //     name one letter off a digit apart is the neighbour, as likely as not.
+  // A word of five letters and more keeps the ratio everywhere: two letters
+  // of seven is a name mangled, and the snap's five readings of one customer
+  // need it.
+  function namesSlip(a, b, how) {
     if (!named(a) || !named(b)) return true;
     // (Before sameName, which reads words of three letters and calls "Pat Q."
     // and "Pat R." one: sameNameStop asks the initials the same way.)
@@ -1929,6 +1953,9 @@
     return fa.some(function (x) {
       return fb.some(function (y) {
         var d = editsApart(x, y), long = Math.max(x.length, y.length);
+        var short = Math.min(x.length, y.length) <= 4;
+        if (short && (how === 'one' || how === 'lostOne')) return false;
+        if (short && how === 'lost') return d <= 1;
         return d / long <= NAME_SLIP_RATIO
           || (Math.min(x.length, y.length) === 3 && long <= 4 && d <= 2);
       });
@@ -1952,7 +1979,16 @@
     // BOTH reads printed a name and namesSlip calls the names one person. A
     // name lost there is not evidence of anything.
     if ((how === 'one' || how === 'lostOne') && !(named(a) && named(b))) return false;
-    return namesSlip(a, b);
+    // ...and a number with its first digits lost is a neighbour too where
+    // what is left is two digits: "20" ends "120", "1420" and every other
+    // door on the street ending 20 (review of 6 Nov: "Ann" at 120 and an
+    // unread name at 20 were one stop). With a name on both reads namesSlip
+    // still asks who; with one lost, two digits left are not evidence of
+    // anything, and the stop is kept twice rather than a customer lost. Three
+    // digits left ("471" for "2471", the snap's) are a door all but read.
+    if (how === 'lost' && Math.min(da.house.length, db.house.length) < 3
+        && !(named(a) && named(b))) return false;
+    return namesSlip(a, b, how);
   }
 
   /* Which of two door readings of ONE stop stands: the best supported.
