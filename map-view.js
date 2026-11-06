@@ -3027,7 +3027,16 @@
    * centre 30-80 m from the road's centre line, a strip mall's shops 100-180
    * m back across the lot; 200 m keeps those and refuses a branch a block
    * off the road. What stands behind it is the rule's other half: one place
-   * of that name in the whole disc. STORE_ONE_M: a restaurant OSM maps twice
+   * of that name along the street inside the disc — NOT one in the whole
+   * disc, which this comment once said and the code never asked (review of
+   * 6 Nov). The name is asked in alongBox only, so a branch elsewhere in the
+   * disc is never seen, and a branch off the street beside one on it is
+   * pinned on purpose (mapview.test.js '[store]': "one along it beside one
+   * off it is the pin"); asked in the disc instead, the snap's sixty-mile
+   * disc is a chain's list cut at ten, and nothing is pinned. What it does
+   * not catch: the real branch missing from OSM and another of the chain
+   * within ALONG_M of the same road, which is pinned (AUDITS.md, Open: "A
+   * store pinned along its street"). STORE_ONE_M: a restaurant OSM maps twice
    * (its building and its amenity node, both named) is ONE place; two
    * branches are never within 100 m of each other. */
   var ALONG_M = 200;
