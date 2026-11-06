@@ -3439,6 +3439,18 @@ SEQ.forEach(function (seq) {
   eq('[planEnd] ...nor a door read without its town',
      ends(trip(), PLAN.slice(0, 4).concat([st('dropoff', 'Quin C.', 1344,
                                               '212 Kestrel Place Blvd', null)]))[0], []);
+  // A second door on the card's street whose town line was cut (review of 6
+  // Nov; invented): counted only where the town read, it was invisible, so
+  // "exactly one door on the street" held and server.js filed the one with
+  // the town by force, past the chooser. A missing town is not another street.
+  eq('[planEnd] ...nor one door on the card\'s street with its town beside a second read '
+     + 'without (street, or line alone)',
+     [ends(trip(), PLAN.concat([st('dropoff', 'Ana T.', 1350, '218 Kestrel Place Blvd',
+                                   null)]))[0],
+      ends(trip(), PLAN.concat([{ kind: 'dropoff', orders: 1, name: 'Ana T.', expectedBy: 1350,
+                                  street: null, city: null, state: null, zip: null,
+                                  line: '218 Kestrel Place Bivd', place: null }]))[0]],
+     [[], []]);
   eq('[planEnd] ...nor off a read older than the add-on\'s Took',
      ends(trip(), PLAN, 4500)[0], []);
   var pressed = trip();

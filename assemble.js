@@ -3468,9 +3468,11 @@
    * "<n> <Name> Place Bivd" and the card's "<Name> Place Blvd" are one
    * street), the dropoffs on that street are counted, and the door is that
    * order's when ALL of these hold:
-   *   - exactly one dropoff the list keeps is on it, read with its street
+   *   - exactly one dropoff the list keeps is on it, counting every one that
+   *     read the street, its town or not, and that one read with its street
    *     and town (two doors on the card's street are two customers, and
-   *     which is this order's the card cannot say);
+   *     which is this order's the card cannot say — a town cut off one of
+   *     them does not make it the only one);
    *   - that one is not another order's filed end (sameStreet): the screen
    *     already gave that door away;
    *   - no other order's card names the street (two cards naming it is no
@@ -3504,8 +3506,15 @@
       return o && (!app || !o.app || o.app === app);
     });
     if (mine.length < 2 || at === null) return out;
+    // Every dropoff that read a street — its town or not. The one filed must
+    // have read both (below), but a door on the card's street whose town line
+    // was cut is still a door on that street (review of 6 Nov): counted only
+    // where its town read, a second customer there was invisible, "exactly one
+    // door on the street" held, and server.js filed the other by force, past
+    // the chooser. A missing town is not a different street. (A stop that read
+    // its door only as its line counts by the line's street, before a comma.)
     var drops = headed(stops).filter(function (s) {
-      return s.kind === 'dropoff' && s.street && s.city;
+      return s.kind === 'dropoff' && !!dropStreet(s);
     });
     mine.forEach(function (o) {
       if (filedEnd(o)) return;
@@ -3515,11 +3524,15 @@
       var streets = cardStreets(cardEndOf(o));
       if (!streets.length) return;
       var hits = drops.filter(function (s) {
-        var core = streetCore(s.street);
+        var core = streetCore(dropStreet(s));
         return !!core && streets.indexOf(core) !== -1;
       });
       if (hits.length !== 1) return;
       var s = hits[0];
+      // ...and the one door filed read its street and its town: a door with
+      // no town is not one this rule files (the card's town is asked of it,
+      // townClash, and a door without one cannot answer).
+      if (!(s.street && s.city)) return;
       var line = addressOf(s).line || (s.street + ', ' + s.city);
       var core = streetCore(s.street);
       var taken = mine.some(function (x) {
@@ -3534,6 +3547,13 @@
     });
     out.settled = mine.every(function (o) { return !!filedEnd(o); });
     return out;
+  }
+
+  // A planner stop's street for heldPlanEnds' count: its street, or its line
+  // up to the town's comma, or null.
+  function dropStreet(s) {
+    if (s.street) return s.street;
+    return typeof s.line === 'string' && s.line ? s.line.split(',')[0] : null;
   }
 
   /* The planner with two orders held: every dropoff a list seen whole shows,
