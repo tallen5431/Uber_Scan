@@ -2353,6 +2353,33 @@ the distinction. All four drift directions were mutated and each killed a
 named check. A driver who genuinely pays nothing to drive a mile still sets it
 to zero, and `ui.js` already relabels "net pay" to "trip pay" when they do.
 
+**One read's whole dollar, printed with neither cents nor label, was priced on
+the phone (16596d3's Open: "the phone's scanner (scan.js) reads single frames
+and has no pair to wait for").** The Pi holds such a figure off its panel
+until a second frame agrees (`scan_pi.unsure_payout`); `scan.js` painted
+every complete read as it came, so the UberX glare frame's text — `$ 5 eee at
+MRCS RE IN 8`, $5.00 for a $16.05 card, one sensor seed of five — put "PASS ?",
+$5.00 and a rate over 23 minutes on the glass for a read. It never locked
+(the read after did not agree), so it reached neither the buzz nor the
+journal. The lock's own count is the agreement: `payHeld` holds a read's
+payout when it is printed neither to the cent nor with its label or star
+(`OfferParser.payIsPrinted`, asked of the read's text in `readOnce`) and
+`agree` is under AGREE_TO_LOCK. Held is shown, never hidden: no payout and no
+verdict, the card's minutes and miles still there, CONFIRMING THE PAY where
+POINT AT THE OFFER would stand, and the note "Pay read without its cents or
+its label — waiting for a second read to agree." A photo, which has no read
+after it, holds it the same way and neither locks nor records it; another
+photo is another read. Agreement, the lock and the journal are otherwise
+untouched, and the harness's `consider(parsed)` with no text is not asked.
+Checks: test_scanjs +9 (the glare text through `consider` with its text: held,
+"--", the label and the note; the card's next read shown at $16.05; `$19 |
+Guaranteed` held one read, then shown and locked when the next agrees; `$7
+Guaranteed` and `$14 incl. tips` shown off one read; no text, not held).
+Open: a photo of a whole-dollar card with a mark before its label (`$19 |
+Guaranteed`) is never priced by Photo, as two photos do not agree with each
+other; and the photo's hold is driven by no check (no rendered card reads
+unprinted through the browser's reader to drive it with).
+
 ### The keypad
 
 **The "storage that will not answer" block was never run with storage off.**

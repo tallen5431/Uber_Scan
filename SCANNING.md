@@ -136,6 +136,14 @@ Comfortably. Two agreeing reads are required before a verdict is trusted, so
 call it **1–3 seconds** to a confirmed answer on phone-class hardware — against
 an offer window measured in tens of seconds. Speed was never the risk here.
 
+One read is enough to show a card printed the way cards print their pay — to
+the cent, or a whole dollar with its label right after it ("$7 Guaranteed",
+"$14 incl. tips"). A whole dollar with neither waits for the next read to
+agree: until then the screen says **CONFIRMING THE PAY** and shows no pay, the
+same rule the rig's panel keeps, because a glare frame read `$ 5` off a $16.05
+card and the phone priced it. A photo has no next read, so such a figure off a
+photo is not priced at all.
+
 ## The real risk is the decimal point
 
 Pay and minutes survived every single test configuration. The distance did not:

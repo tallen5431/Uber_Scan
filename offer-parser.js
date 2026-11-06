@@ -455,9 +455,9 @@
 
      The Python twin, pay_is_printed, is what the Pi asks before it prices a
      reading no second frame has agreed with (scan_pi.unsure_payout) and of
-     every crop it found rather than was drawn (pipeline.rescue_refused). This
-     side had no such question, so the one rule that decides whether a lone
-     read is priced could drift between the ports with nothing to see it.
+     every crop it found rather than was drawn (pipeline.rescue_refused).
+     Here the phone's scanner asks it of every read (scan.js payHeld): it
+     reads one frame at a time, and painted the glare frame's `$ 5` at $5.00.
      Held to the same corpus section, `printed`, as its twin. */
   function payIsPrinted(text) {
     var flag = [];

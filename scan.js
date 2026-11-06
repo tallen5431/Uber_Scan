@@ -76,6 +76,10 @@
   var running = false, frozen = false, busy = false;
   var lastSig = null, agree = 0, misses = 0, locked = false;
   var lastResult = null;
+  // Whether lastResult's payout is held off the screen: printed neither to
+  // the cent nor with the card's label or the rider's star, and not yet read
+  // the same by a second read. See payHeld().
+  var lastHeld = false;
   // The last card that went to the journal — its payout, and when this page
   // last saw it. Not cleared when the lock is: that is what separates the
   // card from the lock. See record().
@@ -406,7 +410,10 @@
     var res = await withDeadline(pending, deadline, 'a read');
     var ms = Math.round(performance.now() - t);
     var parsed = OfferParser.parse(res.data.text);
-    return { parsed: parsed, ms: ms };
+    // ...and whether its payout is printed the way a card prints one, which
+    // only the text can say: parse() hands back $5 whether the card said
+    // "$5 Guaranteed" or the reader made `$ 5 eee` out of glare. See payHeld.
+    return { parsed: parsed, ms: ms, printed: OfferParser.payIsPrinted(res.data.text) };
   }
 
   /* One read, with the failure handled the same way whoever asked for it:
@@ -421,10 +428,45 @@
     }
   }
 
-  function consider(parsed) {
+  /* Whether a reading's payout is to be held off the screen: a payout,
+   * printed neither to the cent nor with the card's label or the rider's star
+   * right after it (OfferParser.payIsPrinted), on a reading no second read has
+   * agreed with. The caller says whether one has.
+   *
+   * The Pi's rule, scan_pi.unsure_payout, and for the reason it was written:
+   * rpi/testcards.py's UberX card under glare read `$ 5 eee at MRCS RE IN 8`
+   * on one sensor seed of five — $5.00 for a $16.05 card, its journey whole —
+   * and the rig's panel priced it, "PASS ?" at $5.00, for a read. The Pi's
+   * frames come in pairs, so a figure only one of them reads waits there for
+   * the next. This page reads ONE frame at a time and painted every complete
+   * read as it came: the same `$ 5` frame through consider() put "PASS ?",
+   * $5.00 and a verdict over 23 minutes on the glass until the next read
+   * (rpi/test_scanjs.py, "a payout printed without its cents"). It never
+   * locked — the read after it did not agree — so it never reached the buzz
+   * or the journal; it reached the screen.
+   *
+   * What waits is a whole-dollar figure with nothing of a headline after it,
+   * for ONE read (about 200ms here — an ESTIMATE, AGREE_TO_LOCK's): every card this
+   * project draws prints its payout to the cent, and a whole-dollar card read
+   * clean — "$7 Guaranteed", "$18 * 5.00", "$14 incl. tips" — is printed and
+   * shown off one read as before. One read with something between the figure
+   * and its label (`$19 | Guaranteed`) waits for the read after it to agree.
+   * Only what is SHOWN: agreement, the lock and the journal are as they were,
+   * and a lock needs two agreeing reads, which a held payout has not had. */
+  function payHeld(parsed, printed, agreed) {
+    return !agreed && printed === false && !!parsed
+      && typeof parsed.pay === 'number' && parsed.pay > 0;
+  }
+
+  /* `printed` is the read's OfferParser.payIsPrinted. Left out — the harness
+     handing a parsed reading in with no text behind it — it is not asked, and
+     nothing is held. */
+  function consider(parsed, printed) {
     if (!parsed.complete) {
       misses++;
-      if (misses >= MISSES_TO_RESET) { locked = false; agree = 0; lastSig = null; lastResult = null; }
+      if (misses >= MISSES_TO_RESET) {
+        locked = false; agree = 0; lastSig = null; lastResult = null; lastHeld = false;
+      }
       return;
     }
     misses = 0;
@@ -459,6 +501,10 @@
     // and what earns the accept buzz.
     locked = agree >= AGREE_TO_LOCK && isWhole(parsed);
     lastResult = parsed;
+    // "A second read agreed" is the same count the lock asks, without the
+    // card having to be whole: the Pi's `locked` is two frames agreeing, and
+    // a half card that two reads agree on is shown with its "?" as before.
+    lastHeld = payHeld(parsed, printed, agree >= AGREE_TO_LOCK);
     if (locked && !wasLocked) {
       var r = judged(parsed);
       buzz(r.state === 'go' ? [18, 40, 18] : [45]);
@@ -608,7 +654,7 @@
       busy = true;
       var out = await readGuarded(el.video, settings.fullFrame ? null : sourceRect());
       if (out) {
-        consider(out.parsed);
+        consider(out.parsed, out.printed);
         render(out.ms);
       }
       busy = false;
@@ -631,6 +677,18 @@
 
   function render(ms) {
     var p = lastResult;
+    // A payout held for a second read (payHeld) is not on the glass: the
+    // reading is shown with no payout and so no verdict — "--" where the pay
+    // goes, the card's minutes and miles still under it — as the Pi's panel
+    // shows its held read as "no pay read". A copy: lastResult itself is what
+    // the next read is agreed against.
+    if (p && lastHeld) {
+      var held = {};
+      for (var k in p) held[k] = p[k];
+      held.pay = null;
+      held.complete = false;
+      p = held;
+    }
     var r = p ? judged(p) : { ready: false, state: 'empty' };
 
     el.verdict.className = 'verdict ' + r.state;
@@ -639,8 +697,11 @@
     // A reading that cannot be true gets no verdict, and names the figure to
     // look at instead. Indexing the three-verdict map with anything else put
     // the word "undefined" on screen where ACCEPT or PASS belongs.
+    // A payout held for a second read is not "point at the offer": the camera
+    // is on it and a figure was read. Eighteen letters, as that one is, so the
+    // label sits where it always has on the narrowest phone.
     el.verdictLabel.textContent = !r.ready
-      ? 'POINT AT THE OFFER'
+      ? (lastHeld && lastResult ? 'CONFIRMING THE PAY' : 'POINT AT THE OFFER')
       : r.state === 'doubt'
       ? ({ pay: 'CHECK THE PAY', time: 'CHECK THE TIME',
            speed: 'CHECK THE DISTANCE',
@@ -733,6 +794,13 @@
       notes.push('Still reading this card — the journey may not be all there '
                  + 'yet, which makes it look better than it is.');
     }
+    // ...and a payout held for a second read, said, so a figure the reader
+    // saw is never one that vanished with nothing saying why — the Pi says
+    // the same of its held read in its log, which this page has none of.
+    if (lastHeld && lastResult) {
+      notes.push('Pay read without its cents or its label — waiting for a '
+                 + 'second read to agree.');
+    }
     // A rate with no running cost taken off it is a CEILING, not the offer —
     // the number may be anywhere below itself. rate() caps the verdict at
     // CLOSE CALL for it, and live.html and the offers page both say so in
@@ -762,7 +830,8 @@
 
     var queue = queueNote();
     status((queue ? queue + ' · ' : '') +
-      ms + 'ms · ' + (locked ? 'confirmed' : (r.ready ? 'confirming…' : 'searching…')) +
+      ms + 'ms · ' + (locked ? 'confirmed'
+                      : (r.ready || lastHeld ? 'confirming…' : 'searching…')) +
       (settings.fullFrame ? ' · whole frame' : ' · in box'));
   }
 
@@ -803,7 +872,12 @@
         var out = await readGuarded(img, null);
         if (out) {
           lastResult = out.parsed;
-          locked = isWhole(out.parsed);
+          // ...and a payout printed without its cents or its label is the
+          // one thing one read is not enough for (payHeld): a still has no
+          // read after it to agree, so it is held — no payout shown, no lock,
+          // no row — and the note says why. Another photo is another read.
+          lastHeld = payHeld(out.parsed, out.printed, false);
+          locked = !lastHeld && isWhole(out.parsed);
           // A whole card off a photo is a lock, and goes to the journal as
           // one. It showed ACCEPT, "confirmed" and the green corners, and
           // reached nothing — on the night the rig cannot read, which is
@@ -1100,20 +1174,24 @@
       var out = await readGuarded(img, null);
       if (!out) return { parsed: null, failed: true, ms: 0, rate: { ready: false } };
       lastResult = out.parsed;
-      locked = isWhole(out.parsed);
+      // Held as a photo's is: one read, nothing after it to agree.
+      lastHeld = payHeld(out.parsed, out.printed, false);
+      locked = !lastHeld && isWhole(out.parsed);
       // A lock here records, as a lock in the loop does. The harness has no
       // three agreeing frames to offer, so the whole card is the lock.
       if (locked) record(out.parsed, judged(out.parsed));
       else sighted(out.parsed);
       render(out.ms);
-      return { parsed: out.parsed, ms: out.ms, rate: judged(out.parsed) };
+      return { parsed: out.parsed, ms: out.ms, rate: judged(out.parsed), held: lastHeld };
     },
     /* The loop's own path, frame by frame, with a reading already in hand:
        this is where a lock is lost and found again on the same card, which a
-       single readImage() cannot do. */
-    consider: function (parsed) {
-      consider(parsed);
-      return { locked: locked, agree: agree };
+       single readImage() cannot do. `text`, when given, is what the reader
+       saw, asked whether its payout is printed as the loop asks a real read's
+       (payHeld); without it nothing is held. */
+    consider: function (parsed, text) {
+      consider(parsed, text === undefined ? undefined : OfferParser.payIsPrinted(text));
+      return { locked: locked, agree: agree, held: lastHeld };
     },
     /* Move the last recorded card's last sighting back in time, so a test
        can reach the far side of the ninety seconds without waiting there. */

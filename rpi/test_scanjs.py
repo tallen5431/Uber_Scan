@@ -598,6 +598,59 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
 
   // The note on the glass says which mode the box is actually in, after the
   // checkbox that decides it has been flipped.
+  // A payout printed without its cents or its label, read once (payHeld). The
+  // Pi's frames come in pairs and its panel waits for two to agree on such a
+  // figure (scan_pi.unsure_payout); this page reads one frame at a time, and
+  // painted the UberX glare frame's `$ 5` (rpi/testcards.py, one sensor seed
+  // of five; 16596d3) as "PASS ?" at $5.00 for a $16.05 card. Driven through
+  // the loop's own consider() with the text the reader saw, and read back off
+  // the page's own render (the cost-per-mile nudge, as the cases above).
+  out.held = await page.evaluate(() => {
+    var GLARE = '$ 5 eee at MRCS RE IN 8\n4.95 fied a\n3 min (1.1 mi) a : as\n'
+              + 'E 61 St &S Rhodes A ee\n20 min (7.3 mi) -\nS Cottage Grove Av poe:';
+    var RIGHT = '$16.05\n3 min (1.1 mi)\nE 61 St & S Rhodes Ave\n20 min (7.3 mi)\n'
+              + 'S Cottage Grove Ave';
+    // A whole-dollar card with a mark between the figure and its label, as
+    // the Pi's control has it: shown once two reads agree, which is the next.
+    var W19 = 'Uber Eats Exclusive\n$19 | Guaranteed (incl. tip)\n23 min (5.2 mi) total\n'
+            + 'Corner Bagel Co (Maple Grove)\nOak St & Elm Ave, Smalltown';
+    // ...and two printed with their labels, shown off one read: Uber's
+    // `Guaranteed`, and DoorDash's `incl. tips`.
+    var W7 = W19.replace('$19 | Guaranteed', '$7 Guaranteed');
+    var DD14 = '$14 incl. tips\n3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza\n'
+             + '4410 Fernhill Road Northwest, ...\n8 Customer dropoff';
+    var blank = OfferParser.parse('');
+    var clear = function () { for (var i = 0; i < 4; i++) window.__scan.consider(blank); };
+    var txt = function (id) {
+      return (document.getElementById(id).textContent || '').replace(/\s+/g, ' ').trim();
+    };
+    var read = function (text) {
+      var s = window.__scan.consider(OfferParser.parse(text), text);
+      var cost = document.getElementById('setCost');
+      cost.value = '0.30';
+      cost.dispatchEvent(new Event('input', { bubbles: true }));
+      return { held: s.held, locked: s.locked, label: txt('verdictLabel'),
+               pay: txt('vPay'), min: txt('vMin'), perHour: txt('perHour'),
+               warn: document.getElementById('warn').hidden ? '' : txt('warn') };
+    };
+    var out = {};
+    clear();
+    out.glare = read(GLARE);
+    out.afterGlare = read(RIGHT);
+    clear();
+    out.w19 = [read(W19), read(W19)];
+    clear();
+    out.w7 = read(W7);
+    clear();
+    out.dd14 = read(DD14);
+    // The harness's own consider(), with no text behind the reading, is not
+    // asked — every check above it hands parsed readings in that way.
+    clear();
+    out.noText = window.__scan.consider(OfferParser.parse(GLARE)).held;
+    clear();
+    return out;
+  });
+
   out.boxNote = await page.evaluate(() => {
     var note = function () {
       var n = document.getElementById('adjustNote');
@@ -1499,6 +1552,41 @@ try:
         ok_('...and the note that says a decimal was recovered is on the glass '
             '(%r)' % (dec.get('warn') or '')[:70],
             'decimal' in (dec.get('warn') or ''))
+
+    # --- a payout printed without its cents, read once ----------------------
+    #
+    # The Pi holds such a figure off its panel until a second frame reads it the
+    # same (scan_pi.unsure_payout); its frames come in pairs. This page reads
+    # one frame at a time, and the UberX glare frame's `$ 5` — $5.00 for a
+    # $16.05 card — was "PASS ?" at $5.00 on the glass for a read.
+    held = got.get('held') or {}
+    ok_('the held-payout probe ran', bool(held))
+    if held:
+        _g = held.get('glare') or {}
+        eq('a payout printed without its cents, read once, is held: no payout and no verdict '
+           'on the glass, the card\'s minutes still there',
+           (_g.get('held'), _g.get('pay'), _g.get('perHour'), _g.get('min'), _g.get('locked')),
+           (True, '--', '--', '23', False))
+        eq('...the label saying a figure is being confirmed, not "point at the offer"',
+           _g.get('label'), 'CONFIRMING THE PAY')
+        ok_('...and the note saying why (%r)' % (_g.get('warn') or '')[:80],
+            'waiting for a second read' in (_g.get('warn') or ''))
+        _a = held.get('afterGlare') or {}
+        eq('...and the card\'s own read after it is shown at its own figure',
+           (_a.get('held'), _a.get('pay')), (False, '$16.05'))
+        _w = held.get('w19') or [{}, {}]
+        eq('a whole-dollar figure with a mark before its label waits one read, and is shown '
+           'and locked once the next agrees',
+           [(_r.get('held'), _r.get('pay'), _r.get('locked')) for _r in _w],
+           [(True, '--', False), (False, '$19.00', True)])
+        eq('...and one printed with its label is shown off one read: Uber\'s `Guaranteed`',
+           ((held.get('w7') or {}).get('held'), (held.get('w7') or {}).get('pay')),
+           (False, '$7.00'))
+        eq('...and DoorDash\'s `incl. tips`',
+           ((held.get('dd14') or {}).get('held'), (held.get('dd14') or {}).get('pay')),
+           (False, '$14.00'))
+        eq('...and a reading handed in with no text behind it is not asked',
+           held.get('noText'), False)
 
     # --- two readings that disagree must not lock -------------------------
     #
