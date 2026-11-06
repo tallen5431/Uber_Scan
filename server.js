@@ -3953,7 +3953,11 @@ function pickupAsks(h) {
   // store for its printed door or a tap's, each listed store for its own.
   // Asked by name along the street only where the door is not found
   // (pickupTail; the owner's snap of 2 Nov), and never for a dropoff.
-  var cardStore = typeof h.pickup === 'string' && h.pickup ? h.pickup : null;
+  // (An Uber card's pickup is "<Store> (<n> <street>)" on one line, its
+  // store's name the part before the bracket: MV.bracketStore, the owner's
+  // Uber offers of 2 Nov. That name is the card's store, for its own
+  // bracketed door below and for a tap's.)
+  var cardStore = cardPickupStore(h);
   function add(q, from, store) {
     if (!pickupDoorPlan(q)) return;
     var a = { q: q, from: from };
@@ -3964,7 +3968,14 @@ function pickupAsks(h) {
     MV.heldPickups(h.planner.stops).forEach(function (p) { add(p.q, 'planner', p.name); });
   }
   var f = Assemble.fieldsOf(h).pickupAddr;
-  if (f) add(f.value, f.from, f.from === 'popup' ? cardStore : null);
+  // (A field 'card' is the card's own pickup, Assemble.cardFields: on an Uber
+  // order the "<Store> (<n> <street>)" line itself, asked here first, so it
+  // takes the name before its bracket here, or the card's own text below
+  // would be the same question already asked without it.)
+  if (f) {
+    add(f.value, f.from, f.from === 'popup' ? cardStore
+      : f.from === 'card' ? MV.bracketStore(f.value) : null);
+  }
   add(h.pickupLine, 'card', cardStore);
   // ...and every OTHER store's printed door on a DoorDash card with two or
   // more (the hold's `stores`, storesOf; the owner's snaps of 31 Oct): each a
@@ -3976,7 +3987,7 @@ function pickupAsks(h) {
   (Array.isArray(h.stores) ? h.stores : []).forEach(function (st) {
     if (st && typeof st.door === 'string') add(st.door, 'card', st.name);
   });
-  add(h.pickup, 'card');
+  add(h.pickup, 'card', MV.bracketStore(h.pickup));
   // ...and, with no door on record at all, the card's STORE by its name (the
   // owner's 23 Oct ride: "Momoyama Ramen & Hawaiian BBQ" on the card and no
   // planner pickup, so the run had no pickup and the guard nothing). Asked
@@ -3985,6 +3996,16 @@ function pickupAsks(h) {
   // still a refusal, 'several answers'.
   if (!out.length && pickupNamePlan(h.pickup)) out.push({ q: h.pickup, from: 'card', name: true });
   return out;
+}
+
+/* The STORE's name an order or offer gives beside its pickup's door, or
+ * null: Uber's name before its bracketed door ("<Store> (<n> <street>)",
+ * MV.bracketStore; the owner's Uber offers of 2 Nov), else the card's pickup
+ * as printed (DoorDash's store, its door apart in `pickupLine`). For a
+ * pickup's door only (pickupTail): a dropoff is never handed one. */
+function cardPickupStore(o) {
+  var p = o && typeof o.pickup === 'string' && o.pickup ? o.pickup : null;
+  return p ? MV.bracketStore(p) || p : null;
 }
 
 /* The card's pickup as a store's name to search (searchPlan's 'name'), or
@@ -4107,7 +4128,10 @@ function searchHeldPickup(id, a, attempt) {
  * `first` stands — its refusal is what /api/status says, as before.
  * `ask(target, read, answered, unanswered)` is the caller's, as doorChain's;
  * `done(res, asked, via)` likewise. A pickup's only: no caller hands a
- * dropoff here. */
+ * dropoff here. ...and an Uber card's pickup the same, its store's name
+ * the part before "(<n> <street>)" (MV.bracketStore, cardPickupStore; the
+ * owner's Uber offers of 2 Nov), where until then no name was handed and
+ * the door's refusal always stood. */
 function pickupTail(plan, store, disc, first, ask, done) {
   var name = NBX.streets && disc ? MV.tailAsked(plan) : null;
   var q = store ? MV.storeQuery(store) : null;
@@ -6454,7 +6478,8 @@ function offerPin(offer, side) {
     on[side + 'Asking'] = false;
     on[side] = r && r.at ? { lat: r.at.lat, lon: r.at.lon } : null;
     onTimeAgain(offer);
-  }, null, side === 'pickup' && offer.pickupLine ? offer.pickup : null);
+  }, null, side !== 'pickup' ? null
+    : offer.pickupLine ? offer.pickup : MV.bracketStore(offer.pickup));
   return on[side + 'Asking'] ? undefined : on[side];
 }
 
@@ -6612,11 +6637,14 @@ function searchCardEarly(offer, now) {
     };
   };
   // (The printed door with its store's name beside it, for the store's
-  // street printed short: pickupTail, as the Took's pickupAsks has it.)
+  // street printed short: pickupTail, as the Took's pickupAsks has it. And
+  // Uber's "<Store> (<n> <street>)" with the name before its bracket,
+  // MV.bracketStore, the owner's Uber offers of 2 Nov: pickupAsks hands the
+  // same name for the same text, so the Took's questions are these.)
   [offer.pickupLine, offer.pickup].forEach(function (t) {
     if (typeof t === 'string') {
       earlyDoor(t, disc, false, said(whichOf(t), t), null,
-                t === offer.pickupLine ? offer.pickup : null);
+                t === offer.pickupLine ? offer.pickup : MV.bracketStore(t));
     }
   });
   if (typeof offer.dropoff === 'string') {

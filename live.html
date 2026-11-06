@@ -7007,8 +7007,18 @@
        `store`, MV.pickStoreAlong; the owner's snap of 2 Nov, "164 <B> Pkwy"
        on the card and OSM's "<A> W <B> Parkway Northwest"). A pickup's only:
        nothing of the kind is ever given for a dropoff. */
-    var pickStore = pickQ && pickQ !== o.pickup && typeof o.pickup === 'string' && o.pickup
-      ? o.pickup : null;
+    /* ...and Uber's store, whose card prints no name apart: its pickup is
+       "<Store> (<n> <street>)" on one line (the owner's Uber offers of 2
+       Nov), searched as the bracketed door, and MV.bracketStore is the name
+       before the bracket. That name too where a tap's door is searched in
+       place of the line, so the name asked is never the whole line (a
+       street plan, which MV.storeQuery refuses). Guarded for a map-view.js
+       from before it. Still the card's pickup only. */
+    var bracketName = typeof o.pickup === 'string' && o.pickup && MV && MV.bracketStore
+      ? MV.bracketStore(o.pickup) : null;
+    var pickStore = !pickQ ? null
+      : bracketName ? bracketName
+      : pickQ !== o.pickup && typeof o.pickup === 'string' && o.pickup ? o.pickup : null;
     return { pickup: pickQ, pickupStore: pickStore, dropoff: o.dropoff || null, guess: guess,
              stores: stores, guessShare: guessShare,
              heldStores: hStores, heldGuess: heldGuess, heldShare: heldShare,

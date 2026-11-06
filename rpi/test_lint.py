@@ -964,13 +964,18 @@ ok_("map-view.js's ROUGH_DISC_MAX_M is above gps.py's FIX_ERR_MAX",
 # a navigation screen's address as that store's by its own copy (bracketDoor:
 # assemble.js loads without map-view.js). Two copies of one rule drift, so
 # the expression and its three-letter test are held to be the same.
+# (map-view.js has named it BRACKET_DOOR too since bracketStore, an Uber
+# store's name before it, came to share it with searchPlan: one bracketDoor
+# there, read here by name.)
 _as_src = open(os.path.join(ROOT, 'assemble.js'), encoding='utf-8').read()
 _as_br = re.search(r'var BRACKET_DOOR = (/.*?/);', _as_src)
-_mv_br = re.search(r'var br = (/.*?/)\.exec\(s\);\n\s*if \(br && (/\[A-Za-z\]\{3\}/)', _mv_src)
+_mv_br = re.search(r'var BRACKET_DOOR = (/.*?/);', _mv_src)
+_mv_three = re.search(r'function bracketDoor\(s\) \{\n\s*var br = BRACKET_DOOR\.exec\(s\);\n'
+                      r'\s*return br && /\[A-Za-z\]\{3\}/\.test\(br\[1\]\)', _mv_src)
 eq("assemble.js's BRACKET_DOOR is map-view.js searchPlan's bracket",
    _as_br.group(1) if _as_br else None, _mv_br.group(1) if _mv_br else 'missing')
 ok_("...and both ask the same three letters of it",
-    _mv_br is not None and "/[A-Za-z]{3}/.test(br[1])" in _as_src)
+    _mv_three is not None and "/[A-Za-z]{3}/.test(br[1])" in _as_src)
 
 # --- a request the scan loop takes sits under its own comment --------------
 #

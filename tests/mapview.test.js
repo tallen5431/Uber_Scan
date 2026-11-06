@@ -3000,6 +3000,75 @@ async function nucbox() {
          + 'pickup',
          [got.at, got.why].join(','), ',none');
 
+      // ...and UBER's store, whose card prints "<Store> (<n> <street>)" on one
+      // line (the owner's Uber offers of 2 Nov, invented here on the fake's
+      // road): the name before the bracket is the store, the bracket its door,
+      // and the same rule asks the same questions.
+      eq('[uber store] bracketStore: the name before Uber\'s bracketed door, closed or cut off '
+         + 'by the card\'s edge',
+         JSON.stringify([MV.bracketStore('Lark Owl Grill (164 Wrenley Pkwy)'),
+                         MV.bracketStore('Lark Owl Grill (164 Wrenley Pkwy'),
+                         MV.bracketStore('Lark Owl Grill - (164 Wrenley Pkwy)')]),
+         JSON.stringify(['Lark Owl Grill', 'Lark Owl Grill', 'Lark Owl Grill']));
+      eq('[uber store] ...and none for a bare door, a name with no bracket, a bracket with no '
+         + 'house number, a count, or a name under three letters',
+         JSON.stringify([MV.bracketStore(WR), MV.bracketStore('Lark Owl Grill'),
+                         MV.bracketStore('Kroger (Shiloh Square)'),
+                         MV.bracketStore('Wasabi (2 orders)'),
+                         MV.bracketStore('Ab (164 Wrenley Pkwy)'), MV.bracketStore(null)]),
+         JSON.stringify([null, null, null, null, null, null]));
+      eq('[uber store] the slips on those frames put back before any question: a stray "l" or '
+         + '"|" before the type word, and "Phy" for Pkwy',
+         JSON.stringify(['Lark Owl Grill (164 Wrenley l Pkwy)', 'Lark Owl Grill (164 Wrenley | Pkwy)',
+                         'Lark Owl Grill (164 Wrenley Phy)', 'Lark Owl Grill (164 Wrenley l Phy)',
+                         '12 Brindle l St NW, X']
+           .map(function (s) { return MV.searchPlan(s).street; })),
+         JSON.stringify(['164 Wrenley Pkwy', '164 Wrenley Pkwy', '164 Wrenley Pkwy',
+                         '164 Wrenley Pkwy', '12 Brindle St NW']));
+      eq('[uber store] ...but never a capital initial, a lone l with no name before it, or one '
+         + 'not before a type word',
+         JSON.stringify(['164 Ossian W Wrenley Pkwy, X', '12 l St, X', '12 Brindle l Oak, X']
+           .map(function (s) { return MV.searchPlan(s).street; })),
+         JSON.stringify(['164 Ossian W Wrenley Pkwy', '12 l St', '12 Brindle l Oak']));
+      // Uber's card is a yardstick ("26 min (5.0 mi) total"), so its disc is
+      // the card's own, not the sixty miles: questions the DoorDash case above
+      // never asked, so the fake sees them.
+      var ubDisc = MV.discFor(card({ miles: 5.0, hasTotal: true, legs: 1 }));
+      var UB = 'Lark Owl Grill (164 Wrenley Pkwy)';
+      n0 = fake.asked.length;
+      got = await nbxN.place(UB, ubDisc, { streets: true });
+      eq('[uber store] Uber\'s pickup with no store handed (as a dropoff is always asked): the '
+         + 'door\'s own refusal, and nothing more asked',
+         JSON.stringify([got.at, got.why, ofSent(n0)]),
+         JSON.stringify([null, 'several', ['street 164 Wrenley Pkwy']]));
+      n0 = fake.asked.length;
+      got = await nbxN.place(UB, ubDisc, { streets: true, store: MV.bracketStore(UB) });
+      // (The name's own question is asked in the box round the street's shape,
+      // which is the same box from either card's disc: the server's cache
+      // answers it from the DoorDash case above, so the fake sees two.)
+      eq('[uber store] ...and with the name before its bracket as the store: the street asked of '
+         + 'the index, the door by the full name, then the one place of that name along the '
+         + 'street, the pin by the store',
+         JSON.stringify([got.at && [got.at.lat, got.at.lon], got.by, ofSent(n0)]),
+         JSON.stringify([[33.9612, -84.545], 'store',
+                         ['tail Wrenley Pkwy', 'street 164 Ossian W Wrenley Parkway Northwest']]));
+      n0 = fake.asked.length;
+      var slips = [];
+      for (var si = 0; si < 2; si++) {
+        var slipped = ['Lark Owl Grill (164 Wrenley l Pkwy)', 'Lark Owl Grill (164 Wrenley Phy)'][si];
+        var sg = await new MV.NbxSearch({ base: named.base + '/api/nbx' })   // eslint-disable-line no-await-in-loop
+          .place(slipped, ubDisc, { streets: true, store: MV.bracketStore(slipped) });
+        slips.push(sg.at && [sg.at.lat, sg.at.lon, sg.by]);
+      }
+      eq('[uber store] ...and its misreads "<B> l Pkwy" and "<B> Phy" are the same questions, the '
+         + 'same pin, from the server\'s cache',
+         JSON.stringify([slips, fake.asked.length - n0]),
+         JSON.stringify([[[33.9612, -84.545, 'store'], [33.9612, -84.545, 'store']], 0]));
+      got = await nbxN.place('Fable Pizza (180 Wrenley Pkwy)', ubDisc,
+                             { streets: true, store: MV.bracketStore('Fable Pizza (180 Wrenley Pkwy)') });
+      eq('[uber store] ...two places of that name along the street are none, as DoorDash\'s',
+         [got.at, got.why].join(','), ',none');
+
       // The owner's DoorDash snap of 24 Oct, invented, through the server: a
       // door NOTHING answered, its street asked alone of the index.
       n0 = fake.asked.length;

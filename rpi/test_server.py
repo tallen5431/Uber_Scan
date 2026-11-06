@@ -8604,6 +8604,31 @@ try:
         eq('[store along] ...and a dropoff on that street is never asked by name or by the tail',
            [a for a in _twd if '/api/streets/tail' in a or 'Lark Owl' in a], [])
         post(_twb, '/api/delivered', {})
+        # ...and UBER's store (the owner's Uber offers of 2 Nov, invented): the
+        # card prints "<Store> (<n> <street>)" on one line, no store apart, and
+        # its door read with a stray "l" before the type word. The name before
+        # the bracket is the store (MV.bracketStore, cardPickupStore), so the
+        # same rule pins it — every question the DoorDash order's above, so
+        # from the cache.
+        _TU = 'Lark Owl Grill (164 Wrenley l Pkwy)'
+        _sptook(_twb, 't-ub', _TU, dropoff=_KES, app='uber')
+        _h = _settled(_twb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
+        eq('[uber store] an Uber store\'s bracketed door on a street printed short, read with a '
+           'slip: pinned by the name before its bracket along that street, by the server from '
+           'the card', (_h.get('pickupsPinned'), _sporders(_twj).get('t-ub')),
+           (1, (None, [(33.9612, -84.545, _TU, 'server', 'card')])))
+        post(_twb, '/api/delivered', {})
+        # The same shape as an Uber DROPOFF, with a store's name no question has
+        # asked on this server: never asked by that name.
+        _n = len(_hkasked(''))
+        _sptook(_twb, 't-ubdrop', 'Example Wok (1981 Cobb Pkwy)',
+                dropoff='Kestrel Tacos (190 Wrenley Pkwy)', app='uber')
+        _settled(_twb)
+        time.sleep(0.5)
+        _twu = [urllib.parse.unquote(a) for a in _hkasked('')[_n:]]
+        eq('[uber store] ...and a dropoff printed "<Store> (<n> <street>)" is never asked by the '
+           'name before its bracket', [a for a in _twu if 'Kestrel Tacos' in a], [])
+        post(_twb, '/api/delivered', {})
     finally:
         stop(_twp)
     # ...the card's own search the moment it is read (earlyDoor, searchCardEarly),
@@ -8631,6 +8656,34 @@ try:
            (len(_hkasked('Wren%20Hollow%20Deli')) - _nd, _h.get('pickupsPinned'),
             len(_hkasked('')) - _nall, _sporders(_tesj).get('t-early', (None, []))[1]),
            (1, 1, 0, [(33.9603, -84.548, _tec['pickupLine'], 'server', 'card')]))
+        post(_teb, '/api/delivered', {})
+        # ...and an Uber card's "<Store> (<n> <street>)" the same: the name
+        # before the bracket asked along the street the moment the card is read
+        # (searchCardEarly hands MV.bracketStore's name), and ✓ Took's
+        # pickupAsks hands the same name for the same text, so it pins from
+        # those answers. "Lark Owl Grill" is asked on this server for the first
+        # time here.
+        _tuc = dict(_SQ, id='t-early-ub', pay=9.1, minutes=26.0, billedMinutes=26.0, miles=5.0,
+                    cost=0.9, pickup='Lark Owl Grill (164 Wrenley Phy)', dropoff=_KES,
+                    app='uber', screen='uber.offer')
+        _nl = len(_hkasked('Lark%20Owl%20Grill'))
+        _tesays([{'offer': _tuc}])
+        for _ in range(80):
+            if len(_hkasked('Lark%20Owl%20Grill')) > _nl:
+                break
+            time.sleep(0.05)
+        time.sleep(0.3)
+        # (Counted on the pickup's own questions: the card's dropoff, a street
+        # with no house on the fake, is the held end's to ask at the Took.)
+        _pick_asks = lambda: [a for a in _hkasked('') if 'Wrenley' in a or 'Lark' in a]
+        _nall = len(_pick_asks())
+        post(_teb, '/api/offers/mark', {'id': 't-early-ub', 'accepted': True, 'offer': _tuc})
+        _h = _settled(_teb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
+        eq('[uber store] an Uber card read asks its store along the street at once by the name '
+           'before its bracket ("Phy" read for Pkwy), and ✓ Took pins it with no new request',
+           (len(_hkasked('Lark%20Owl%20Grill')) - _nl, _h.get('pickupsPinned'),
+            len(_pick_asks()) - _nall, _sporders(_tesj).get('t-early-ub', (None, []))[1]),
+           (1, 1, 0, [(33.9612, -84.545, _tuc['pickup'], 'server', 'card')]))
     finally:
         stop(_tep)
 

@@ -357,6 +357,9 @@ What it answers, `GET /api/streets/cross?a=&b=&box=`,
   "<A> W <B> Parkway Northwest"): the door again by the one full name, else the store by its
   name round that street, pinned only when exactly one place of that name
   lies in the card's reach within 200 m of the street. Never for a dropoff.
+  Uber's pickup too: its card prints "<Store> (<n> <street>)" on one line,
+  and the name before the bracket is the store (the owner's Uber offers of 2
+  Nov), the same questions in the same words.
   **A NucBox without it answers 404, and the pickup is refused as before;
   `git pull` and a restart there.**
 

@@ -1432,13 +1432,59 @@
     return m ? { said: text.slice(0, m.index), tail: m[1] } : { said: text, tail: '' };
   }
 
+  // A bracket that opens with a house number, closed or cut off by the
+  // card's edge ("Culver's (1275 Hwy" is how the reader often leaves it):
+  // Uber's "<Store> (<n> <street>)", the store's door. searchPlan's and
+  // bracketStore's, one rule.
+  var BRACKET_DOOR = /\(\s*(\d+[A-Za-z]?\s+[^()]*?)\s*\)?\s*$/;
+  function bracketDoor(s) {
+    var br = BRACKET_DOOR.exec(s);
+    return br && /[A-Za-z]{3}/.test(br[1]) ? br : null;
+  }
+
+  /* --- an Uber store's name beside its bracketed door ----------------------
+   *
+   * Uber's delivery card prints the pickup as ONE line, "<Store> (<n>
+   * <street>)" — the owner's Uber offers of 2 Nov, one restaurant's "<Store>
+   * (<n> <A> <B> Pkwy)" on card after card — where DoorDash prints the store
+   * and its door apart (the parser's `pickup` and `pickupLine`). The parsers
+   * keep Uber's whole line as `pickup` (tests/fixtures/cases.json, "Uber's
+   * bracketed store keeps its door in `pickup`... and has no pickupLine"),
+   * and searchPlan already asks the bracket as the door. But the rule for a
+   * store's door that finds no pin (storeTail, server.js pickupTail: the
+   * door by the street's one full name, else the store by its NAME along
+   * that street) wanted the store's name handed beside the door, and an Uber
+   * card had none to hand: its pickup's door, not found, was never asked
+   * the store's way, where DoorDash's same door would have been.
+   *
+   * So this is the name: the text before the bracket searchPlan reads as the
+   * door (searchText's leading noise off first, as searchPlan's), or null
+   * when the place is no "<Store> (<n> <street>)" — a bare door, a name with
+   * no bracket, a bracket with no house number ("Kroger (Shiloh Square)",
+   * DoorDash's "Wasabi (2 orders)") — or the name before it holds no word of
+   * three letters. Handed as `store` by the callers that know the place is
+   * the card's PICKUP (live.html's pickupStore, server.js pickupAsks and the
+   * card's early search); never for a dropoff, which has no store, even a
+   * dropoff printed in the same shape. The name, the door and the stored
+   * text are untouched: this is what is asked, not what is kept. */
+  // (DoorDash's count in brackets, "Wasabi (2 orders)", is a number and a
+  // word too, and no door: the parsers take it off the pickup, and it is
+  // refused here all the same, so a count is never a store's door.)
+  var BRACKET_COUNT = /^\d+\s+(?:orders?|items?|units?|stops?)\b/i;
+  function bracketStore(place) {
+    var s = searchText(place);
+    var br = s ? bracketDoor(s) : null;
+    if (br && BRACKET_COUNT.test(br[1])) br = null;
+    var name = br ? s.slice(0, br.index).replace(/[\s,.\-–—]+$/, '').trim() : '';
+    return /[A-Za-z]{3}/.test(name) ? name : null;
+  }
+
   function searchPlan(place) {
     var s = searchText(place);
     if (!s) return null;
-    // A bracket that opens with a house number, closed or cut off by the
-    // card's edge ("Culver's (1275 Hwy" is how the reader often leaves it).
-    var br = /\(\s*(\d+[A-Za-z]?\s+[^()]*?)\s*\)?\s*$/.exec(s);
-    if (br && /[A-Za-z]{3}/.test(br[1])) {
+    // A bracket that opens with a house number (BRACKET_DOOR).
+    var br = bracketDoor(s);
+    if (br) {
       return streetPlan(br[1].replace(/[\s,.]+$/, ''));
     }
     var comma = s.indexOf(',');
@@ -1509,14 +1555,39 @@
      before a quadrant — after a name of two letters or more; a name that is
      the word itself ("Or Rd") has a type after it and is not touched. */
   // ...and "Lr" for Ln (the owner's batch of 23 Oct, "1301 <Name> Lr").
-  var TYPE_SLIPS = { bivd: 'Blvd', b1vd: 'Blvd', tri: 'Trl', pi: 'Pl', or: 'Dr', lr: 'Ln' };
+  // ...and "Phy" for Pkwy (the owner's Uber offers of 2 Nov: one store's
+  // "<Store> (<n> <A> <B> Pkwy)" came back across the night's frames as
+  // "... <B> | Phy)", the parser keeping "<B> Phy" — "kw" read as one "h",
+  // by the look of it). One store's frames, so one slip, and safe for the
+  // same reason as the rest: no street type, and no word a card prints in
+  // the type's place, is "Phy".
+  var TYPE_SLIPS = { bivd: 'Blvd', b1vd: 'Blvd', tri: 'Trl', pi: 'Pl', or: 'Dr', lr: 'Ln',
+                     phy: 'Pkwy' };
+  /* ...and a STRAY MARK the reader made between the name and its type word,
+     left out: the same store's door read "<n> <A> <B> l Pkwy" on those
+     frames, the gap before "Pkwy" read as a lowercase l (the parser drops a
+     "|" itself; an "l" is a letter and stays). Asked as read, every question
+     is about a street called "<B> l Pkwy", which neither the NucBox's search
+     nor the street index holds: the door found nowhere, and the store's
+     street not found by its tail (tailAsked), so never pinned by its name.
+     Only a lone "l" or "|", only right before a type word (or its slip), and
+     only after a name word of two letters with the house number in front:
+     no street's name holds a lone lowercase l, and a capital initial ("<A> W
+     <B> Pkwy") is a name's and stays. */
+  var STRAY_MARK = /^[l|]$/;
   function typeSlip(street) {
     var w = String(street).split(' ');
     var at = w.length - 1;
     if (at > 1 && QUADRANTS.indexOf(w[at].toLowerCase().replace(/\.$/, '')) >= 0) at--;
-    if (at < 2 || !/[A-Za-z]{2}/.test(w[at - 1])) return street;
-    var fix = TYPE_SLIPS[w[at].toLowerCase().replace(/\.$/, '')];
-    if (!fix) return street;
+    var typeWord = w[at].toLowerCase().replace(/\.$/, '');
+    // (Own keys only: a word such as "constructor" is no slip.)
+    var fix = Object.prototype.hasOwnProperty.call(TYPE_SLIPS, typeWord) ? TYPE_SLIPS[typeWord] : null;
+    if (at >= 3 && STRAY_MARK.test(w[at - 1]) && /[A-Za-z]{2}/.test(w[at - 2])
+        && (streetType(typeWord) || fix)) {
+      w.splice(at - 1, 1);
+      at--;
+    }
+    if (at < 2 || !/[A-Za-z]{2}/.test(w[at - 1]) || !fix) return w.join(' ');
     w[at] = fix;
     return w.join(' ');
   }
@@ -2855,6 +2926,14 @@
    * the server's pickup pins (searchHeldPickup, and the card's search the
    * moment it is read, earlyDoor) and Map view's preview (NbxSearch.place)
    * ask the same questions in the same words and share the server's cache.
+   *
+   * ...AND UBER'S STORE TOO. Uber prints its pickup as "<Store> (<n>
+   * <street>)" on one line, with no store's name apart, so until the owner's
+   * Uber offers of 2 Nov ("<Store> (<n> <A> <B> Pkwy)" and its misreads)
+   * none of this was asked for an Uber pickup. bracketStore splits that line
+   * into the name before the bracket and the door inside it (searchPlan's
+   * own bracket rule), and the same callers hand that name as `store` for
+   * the card's pickup only; the rule here is the same rule, word for word.
    *
    * ALONG_M is CHOSEN, not measured: no store's footprint is in the
    * repository. A pad restaurant on an arterial has its OSM node or building
@@ -5652,5 +5731,7 @@
            ALONG_M: ALONG_M, STORE_ONE_M: STORE_ONE_M, tailAsked: tailAsked,
            storeQuery: storeQuery, tailWanted: tailWanted, tailRetry: tailRetry,
            pickStoreAlong: pickStoreAlong, alongBox: alongBox,
+           // ...and an Uber store's name beside its bracketed door (2 Nov).
+           bracketStore: bracketStore,
            howFound: howFound };
 }));
