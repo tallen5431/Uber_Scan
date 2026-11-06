@@ -859,8 +859,10 @@ eq('a number is drawn as itself', SP._fig(20.0), '20.0')
 # ...and the loop actually says. A panel that can qualify a reading and a loop
 # that never tells it are different facts, which is the shape of fault this
 # project keeps finding.
+# The panel's copy of the reading (`shown`): the reading itself, unless its
+# payout is held back for one frame's word (SP.unsure_payout).
 ok_('the loop hands the panel what it knows about the journey',
-    'render_panel(rate, parsed, whole=whole,' in inspect.getsource(SP.main))
+    'render_panel(shown_rate, shown, whole=whole,' in inspect.getsource(SP.main))
 
 # --- a payout read off a card found above the box is marked here too --------
 #

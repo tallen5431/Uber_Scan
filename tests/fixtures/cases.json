@@ -424,13 +424,85 @@
   },
   {
    "name": "a payout with a stray mark in it is refused, not half-read",
+   "_why": "This case said so in its name and expected the half-read $16.00: MONEY_STRICT stopped at the mark and handed back the dollars. The point and the cents are still there behind the mark, so the cents were printed and did not read (CENTS_LOST). No payout, so no verdict; the leg stands.",
    "text": "$16\".l87 12 min (3.0 mi) total",
    "expect": {
-    "pay": 16.0,
+    "pay": null,
     "minutes": 12.0,
     "miles": 3.0,
     "legs": 1,
+    "complete": false
+   }
+  },
+  {
+   "name": "a headline whose point read as a colon is refused, not read as the dollars",
+   "_why": "Rendered: rpi/testcards.py's Uber Eats Exclusive card under banding read `$4:21` (and `$4\u00b021`) on every one of five sensor seeds, and MONEY_STRICT took $4.00 for a $4.21 card on both frames of a read, so the read locked and the card was journalled at $4.00. The cents were printed and did not read: no payout (CENTS_LOST). Card around it made up.",
+   "text": "Uber Eats Exclusive\n$4:21\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\nCorner Bagel Co (Maple Grove)\nOak St & Elm Ave, Smalltown",
+   "expect": {
+    "pay": null,
+    "minutes": 23.0,
+    "miles": 5.2,
+    "complete": false
+   }
+  },
+  {
+   "name": "a headline whose point read as a degree sign is refused the same way",
+   "text": "Uber Eats Exclusive\n$4\u00b021\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\nCorner Bagel Co (Maple Grove)",
+   "expect": {
+    "pay": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "a headline read with a space in front of its point is refused, not read as the dollars",
+   "_why": "Rendered: rpi/testcards.py's Shop & Deliver card rolled two degrees at 600px read `$7 .09` on 4 of 5 sensor seeds, and MONEY_STRICT took $7.00 for a $7.09 card on both frames of a read. The cents were printed and did not join (CENTS_LOST). Card around it made up.",
+   "text": "Shop & Deliver\n$7 .09\nGuaranteed (incl. tip)\n6 items (6 units)\n34 min (3.6 mi) total\nCorner Bagel Co (Maple Grove)",
+   "expect": {
+    "pay": null,
+    "minutes": 34.0,
+    "miles": 3.6,
+    "complete": false
+   }
+  },
+  {
+   "name": "a headline whose cents went dark behind the point is refused, not read as the dollars",
+   "_why": "Rendered: the Exclusive card in an all-dark frame read `$4. io 1`, and MONEY_STRICT took $4.00. A point with nothing numeric after it is cents that did not read (CENTS_LOST). Card around it made up.",
+   "text": "$4. io 1\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\nCorner Bagel Co (Maple Grove)\nOak St & Elm Ave, Smalltown",
+   "expect": {
+    "pay": null,
+    "minutes": 23.0,
+    "miles": 5.2,
+    "complete": false
+   }
+  },
+  {
+   "name": "...but cents split off by a space after the point still join to the whole figure",
+   "_why": "The same all-dark frame, another sensor seed: `$4. 2 1`. PAY_CENTS_SPLIT joins it to $4.21, which outranks the $4 CENTS_LOST refuses.",
+   "text": "| Uber Eats\n$4. 2 1\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\nCorner Bagel Co (Maple Grove)",
+   "expect": {
+    "pay": 4.21,
+    "minutes": 23.0,
+    "miles": 5.2,
     "complete": true
+   }
+  },
+  {
+   "name": "...and a whole-dollar headline glued to its leg's minutes is not a lost cents",
+   "_why": "Two digits after a mark are a leg's minutes when a unit follows them, as PAY_CENTS_SPLIT refuses `$12 68 min`; the rider's star glued to a ride's whole dollars is its label. Neither is refused. Cards made up.",
+   "text": "$19|20 min (7.3 mi) total",
+   "expect": {
+    "pay": 19.0,
+    "minutes": 20.0,
+    "miles": 7.3,
+    "complete": true
+   }
+  },
+  {
+   "name": "...nor a smaller figure promoted when the headline's cents are lost",
+   "_why": "The headline is the largest figure, so a figure below one whose cents did not read is a chip or a glyph. It never takes the payout's place: no payout.",
+   "text": "$5. x\n$3 Includes\n12 min (3.0 mi) total",
+   "expect": {
+    "pay": null
    }
   },
   {

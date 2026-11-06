@@ -1659,6 +1659,42 @@ def payout_from(kept, out, parsed):
     return 'drawn', None, kept
 
 
+def unsure_payout(out, parsed):
+    """True when the payout of this reading is not to be priced yet: printed
+    neither to the cent nor with the card's label or the rider's star after it
+    (OP.pay_is_printed), and not yet read the same by a second frame
+    (out['locked']: the frame before it, the other of its pair or the last of
+    the read before, parsed to the same payout, minutes and miles).
+
+    Rendered (rpi/testcards.py, the 1,076 frames every screen it draws makes),
+    the UberX card in glare read `$ 5 eee at MRCS RE IN 8` on one sensor seed
+    of five — $5.00 for a $16.05 card, its journey whole — and nothing on the
+    other four: no payout, $16.05, $16.05, no payout. A paired read of it was
+    a $5.00 frame and a frame with no payout, so the loop published the $5.00
+    frame (read_the_money) and the panel priced it, "PASS ?" at $5.00 over 23
+    minutes, until the next read (rpi/test_loop.py, "a payout printed without
+    its cents, read by one frame"). It never locked — its partner did not
+    agree — so it never reached the journal or the voice; it reached the glass.
+
+    Every right payout of those 1,076 frames is printed (to the cent: the
+    cards print it so), so this holds back none of them. A whole-dollar card
+    is printed without cents ("$7 Guaranteed", "$18 * 5.00") and read clean is
+    still printed; read with something between the figure and its label
+    ("$19 | Guaranteed") it is priced once two frames agree on it, which a
+    paired read whose frames both read it is at once. What waits is a figure
+    without cents that the two frames do not agree on: one read, about 1.5-2 s
+    on the Pi (an ESTIMATE, from the read times the rig logs).
+
+    Not a found crop's: rescue_refused already refuses a found card whose
+    payout is not printed.
+    """
+    pay = parsed.get('pay')
+    if out.get('locked') or not isinstance(pay, (int, float)) \
+            or isinstance(pay, bool) or pay <= 0:
+        return False
+    return not OP.pay_is_printed(out.get('text') or '')
+
+
 def card_box_episode(scanner, out, parsed, was):
     """Forget the crop the reader reads first (pipeline.CARD_BOX_FOR) when the
     accumulator says this is another card; returns the episode it is now for.
@@ -4937,6 +4973,9 @@ def main():
     doubt_kept_for = None
     # ...and the card whose unparsed picture has been kept. See UNPARSED_DIR.
     unparsed_kept_for = None
+    # ...and the last (episode, payout) a payout was held back for and said in
+    # the log. See unsure_payout.
+    unsure_said = None
     # ...and what that card read as when it was told. A later, fuller reading
     # of the same card — the second leg, the address a single frame lost —
     # is told again, because the first was what the panel, the order in the
@@ -5131,7 +5170,7 @@ def main():
         nonlocal seen_episode, seen_pay, seen_kept
         nonlocal verify_every, verify_signature, last_verify, previous_card
         nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
-        nonlocal unparsed_kept_for
+        nonlocal unparsed_kept_for, unsure_said
         nonlocal last_read, found_box, found_kept, popup_said, pickup_said
         nonlocal box_episode
         # Not merged when it was a whole-screen read — see collect().
@@ -5146,6 +5185,27 @@ def main():
             settings['nowMinutes'] = minutes_now
         rate = OP.rate(parsed, settings)
         out['parsed'], out['rate'] = parsed, rate
+        # ...and what the panel is SHOWN of it, which is the same reading
+        # unless its payout is one frame's word for a figure the card did not
+        # print the way it prints one (unsure_payout): then no payout and no
+        # verdict on the glass for this read — "no pay read", which is true of
+        # it — until a second frame reads the same. Only the panel's copy:
+        # everything below goes on with the reading as read, so a card with a
+        # payout on it is still an offer and not a destination, and the
+        # journal and the voice were never reached by it (both wait for
+        # `locked`, which is what it lacks). Said in the log once per card and
+        # figure, so a held-back figure is never a verdict that vanished with
+        # nothing saying why.
+        shown, shown_rate = parsed, rate
+        if not whole and unsure_payout(out, parsed):
+            shown = dict(parsed, pay=None, complete=False)
+            shown_rate = {'ready': False, 'state': 'empty'}
+            if unsure_said != (parsed.get('episode'), parsed.get('pay')):
+                unsure_said = (parsed.get('episode'), parsed.get('pay'))
+                log('read %d: payout $%.2f not priced - printed without its cents '
+                    'or its label, and no second frame read it the same. Reader '
+                    'saw: %r' % (frames, parsed['pay'],
+                                 (out.get('text') or '').strip()[:160]))
 
         # The destination, with or without the button, when this reading has
         # one.
@@ -5902,11 +5962,11 @@ def main():
         note_tally(tally)
 
         if args.json:
-            emit(rate, parsed, out['ms'], out['locked'], tracker, scanner, whole=whole,
+            emit(shown_rate, shown, out['ms'], out['locked'], tracker, scanner, whole=whole,
                  clipped=bool(out.get('clipped')),
                  crop_from=pay_from)
         else:
-            show('#%d' % frames, rate, parsed, out['ms'], out['locked'])
+            show('#%d' % frames, shown_rate, shown, out['ms'], out['locked'])
 
         if args.save_misses and not parsed['complete']:
             cv2.imwrite(os.path.join(args.save_misses, 'miss-%d.png' % int(time.time())), frame)
@@ -6154,7 +6214,7 @@ def main():
                     keep_places=offer_log.keep_places))
 
         if args.display:
-            cv2.imshow('uber-scan', render_panel(rate, parsed, whole=whole,
+            cv2.imshow('uber-scan', render_panel(shown_rate, shown, whole=whole,
                                                  pay_from=pay_from))
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 return True

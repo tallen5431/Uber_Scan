@@ -434,6 +434,71 @@ eq('the stored distance is the one the rate was worked out over',
 ok_('...and the row says so', row['milesCorrected'])
 eq('...and the cost in the row matches it', row['cost'], 0.72)
 
+# --- the frames that read a payout wrong, read again in pairs -----------------
+#
+# Of the 1,076 frames rpi/testcards.py renders, 8 read a payout wrong through
+# the drawn box as b77b1d9 and ea623ed scored them: the Uber Eats Exclusive
+# card's $4.21 as $4.00 (`$4:21`, `$4°21`, `$4. io 1`) or $421.00 under banding
+# or all-dark, and UberX's $16.05 as $5.00 under glare — and a ninth in a set
+# they did not score, the Shop & Deliver card's $7.09 as $7.00. Each is read
+# here as the loop reads a card — two sensor frames at once, through the real
+# Scanner, the frame that read the money published (scan_pi.read_the_money),
+# the other merged first — over two pairs of sensor seeds. No frame may read
+# a payout but the card's, unless it cannot be true (OP.doubt: $421.00 over 23
+# minutes is CHECK THE PAY, never priced) or is printed without its cents or
+# label (the glare frame's `$ 5`, which the parser cannot tell from a
+# whole-dollar card and the loop does not price on one frame's word); and
+# whatever the loop would price (rate ready, and not held back by
+# scan_pi.unsure_payout) is the card's own figure.
+import scan_pi as SP   # noqa: E402  (here, with the one block that asks it)
+
+_WRONG = [('exclusive', TC.NIGHT_CARD, False, 'dark', 600, 4.21),
+          ('exclusive', TC.NIGHT_CARD, True, 'dark', 600, 4.21),
+          ('exclusive', TC.NIGHT_CARD, True, 'dark', 680, 4.21),
+          ('exclusive', TC.DAY_CARD, False, 'banding', 600, 4.21),
+          ('exclusive', TC.DAY_CARD, False, 'banding', 760, 4.21),
+          ('exclusive', TC.DAY_CARD, True, 'banding', 680, 4.21),
+          ('exclusive', TC.DAY_CARD, True, 'banding', 760, 4.21),
+          ('uberx', TC.DARK, None, 'glare', 680, 16.05),
+          # ...and the ninth, which the count left out (its set was not
+          # scored): the Shop & Deliver card's $7.09 read `$7 .09`, $7.00,
+          # rolled two degrees at 600px, on 4 of 5 seeds.
+          ('shop', TC.LIGHT, None, 'roll', 600, 7.09)]
+for _name, _pal, _nav, _kind, _w, _truth in _WRONG:
+    _img = TC.degrade(TC.exclusive_screen(_pal, nav=_nav) if _name == 'exclusive'
+                      else uberx_screen(_pal) if _name == 'uberx' else shop_screen(_pal),
+                      _kind, seed=0)
+    _quad = np.array(TC.screen_corners(_w), np.float32)
+    _box = TC.BOX_8OCT if _name == 'exclusive' else None
+    _where = '%s, %s, map %s, %s, %dpx' % (_name, 'night' if _pal is TC.NIGHT_CARD else
+                                           'day' if _pal is TC.DAY_CARD else
+                                           'light' if _pal is TC.LIGHT else 'dark',
+                                           _nav, _kind, _w)
+    for _seeds in ((1, 2), (3, 11)):
+        _sc = (PL.Scanner(quad=_quad) if _box is None
+               else PL.Scanner(quad=_quad, roi=list(_box), card_share=_box[3]))
+        _acc = OfferAccumulator()
+        _outs = _sc.read_many([TC.mount(_img, _w, seed=_s) for _s in _seeds])
+        _pays = [o['parsed']['pay'] for o in _outs]
+        ok_('a frame that read wrong, read again (%s, seeds %r): every payout is the '
+            "card's, cannot be true, or is printed without its cents (%r)"
+            % (_where, _seeds, _pays),
+            all(p is None or abs(p - _truth) < 0.005
+                or OP.doubt(p, o['parsed']['minutes'], o['parsed']['miles']) is not None
+                or not OP.pay_is_printed(o['text'] or '')
+                for p, o in zip(_pays, _outs)))
+        _chosen = SP.read_the_money(_outs)
+        for _i, _o in enumerate(_outs):
+            if _i != _chosen:
+                _acc.add(_o['parsed'], now=100.0)
+        _merged = _acc.add(_outs[_chosen]['parsed'], now=100.0)
+        _rate = OP.rate(_merged, {'target': 25})
+        _priced = (_rate['ready'] and _rate['state'] != 'doubt'
+                   and not SP.unsure_payout(_outs[_chosen], _merged))
+        ok_("...and what the loop would price is the card's own figure (%r)"
+            % (_merged['pay'] if _priced else None,),
+            not _priced or abs(_merged['pay'] - _truth) < 0.005)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d end-to-end money checks passed' % ok)
 sys.exit(1 if bad else 0)

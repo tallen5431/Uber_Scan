@@ -762,6 +762,94 @@ eq('two different cards are two cards on disk',
 eq('...and two cards seen', sum(x['saw'] for x in seen2), 2)
 eq('...and two recorded', sum(x['kept'] for x in seen2), 2)
 
+# --- a payout whose cents did not read is never priced ------------------------
+#
+# The 1,076 frames rpi/testcards.py renders read 8 payouts wrong, each a single
+# read through the drawn box with no rescue in it. These are those reads'
+# texts, verbatim as tesseract gave them (the cards are testcards' own,
+# invented), driven through main() with the frames of each read as a sensor
+# pair would give them. Before OP.CENTS_LOST, every read below that is not
+# EXCL_RIGHT priced the $4.21 Exclusive card at $4.00 — and under banding the
+# rendered card read `$4:21` on all five sensor seeds tried, so both frames of
+# a read agreed, locked, and the card was journalled, announced and spoken at
+# $4.00. Before unsure_payout, the UberX card's glare frame put "PASS ?" at
+# $5.00 on the panel for a read. Read in pairs, as the rig reads — not
+# --no-parallel, which reads one frame at a time and so has no pair to agree.
+EXCL_RIGHT = ("| Uber Eats\n$4. 2 1\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\n"
+              "McDonald's (2500 Cobb Pkwy)\nOak Rd, Marietta")
+EXCL_BANDED = ("Uber Eats Exclusive\n$4:21\nGuaranteed (incl: tip)\n23 min (5.2 mi) total\n"
+               "McDonald's (2500. Cobb Pkwy)\nOak.Rd,.Marietta")
+EXCL_DEGREE = ("Uber Eats Exclusive\n$4°21\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\n"
+               "McDonald's (2500 Cobb Pkwy)\nOak.Rd,.Marieita")
+EXCL_DARK = ("$4. io 1\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\n"
+             "McDonald's (2500 Cobb Pkwy)\nOak Rd, Marietta")
+# The UberX glare frames, cut to the lines that carry anything: the $5.00 frame,
+# a frame that read no payout, and a frame that read the card right.
+UBERX_GLARE5 = ('$ 5 eee at MRCS RE IN 8\n4.95 fied a\n3 min (1.1 mi) a : as\n'
+                'E 61 St &S Rhodes A ee\n20 min (7.3 mi) -\nS Cottage Grove Av poe:')
+UBERX_GLARE0 = '3 min (1.1 mi) Pe\nE61 St&S Rhodes A a\n20 min (7.3 mi)\nS Cottage Grove Ave, eo'
+UBERX_RIGHT = ('$16 05 a erin ee\n3 min (1.1 mi) é a\nE61 St&S Rhodes A a\n'
+               '20 min (7.3 mi) t\nS Cottage Grove Ave, eo')
+
+
+def _priced(r):
+    """Every payout the panel was given a verdict on, and every one journalled
+    and announced."""
+    return (sorted(set(a[1].get('pay') for a, k, t in r['verdicts'] if a[0].get('ready'))),
+            sorted(set(x['pay'] for x in r['rows'] if not x.get('kind'))),
+            sorted(set(a[1].get('pay') for a in r['announced'])))
+
+
+r = run(lambda n, k: EXCL_BANDED, seconds=8.0,
+        until=lambda rows, ann, calls: calls >= 4)
+eq('a payout whose cents did not read: a card read `$4:21` on every frame is never '
+   'priced, journalled or announced (%d reads)' % r['calls'], _priced(r), ([], [], []))
+# ...and the Shop & Deliver card rolled two degrees at 600px, `$7 .09` on 4 of
+# 5 sensor seeds — $7.00 for $7.09 before.
+SHOP_SPACED = ('$7 .09\nGuaranteed (incl. tip)\n6 items (6 units)\n34 min (3.6 mi) total\n'
+               'Corner Bagel Co (Maple Grove)')
+r = run(lambda n, k: SHOP_SPACED, seconds=8.0,
+        until=lambda rows, ann, calls: calls >= 4)
+eq('...nor one read `$7 .09` on every frame (%d reads)' % r['calls'], _priced(r), ([], [], []))
+for _name, _seq in (
+        ('banded and dark frames among right ones',
+         lambda n, k: ((EXCL_BANDED, EXCL_BANDED), (EXCL_DARK, EXCL_RIGHT),
+                       (EXCL_DEGREE, EXCL_RIGHT))[n - 1][k] if n <= 3 else EXCL_RIGHT),
+        ('right frames first, then the misreads',
+         lambda n, k: EXCL_RIGHT if n <= 2 else (EXCL_DEGREE, EXCL_BANDED, EXCL_DARK)[(n + k) % 3])):
+    r = run(_seq, seconds=14.0,
+            until=lambda rows, ann, calls: calls >= 7 and any(not x.get('kind') for x in rows))
+    eq('...%s: only $4.21 is ever priced, journalled and announced (%d reads)'
+       % (_name, r['calls']), _priced(r), ([4.21], [4.21], [4.21]))
+
+r = run(lambda n, k: (UBERX_GLARE5, UBERX_GLARE0)[k] if n == 1 else UBERX_RIGHT,
+        seconds=10.0,
+        until=lambda rows, ann, calls: calls >= 4 and any(not x.get('kind') for x in rows))
+eq('a payout printed without its cents, read by one frame: the glare frame\'s $5.00 is '
+   'never priced, and the card is at $16.05 (%d reads)' % r['calls'],
+   _priced(r), ([16.05], [16.05], [16.05]))
+_first = r['verdicts'][0][0][1] if r['verdicts'] else {}
+eq('...its read shows no payout rather than a figure', (_first.get('pay'), _first.get('minutes')),
+   (None, 23.0))
+ok_('...and says in the log which figure it held back and why (%r)'
+    % [l for l in r['logs'] if 'not priced' in l][:1],
+    any('payout $5.00 not priced' in l and 'no second frame' in l for l in r['logs']))
+# The controls: a figure without cents that both frames of a read agree on is
+# priced at once — a whole-dollar card read with a mark between the figure and
+# its label — and one printed with its label is priced off one frame.
+_W19 = ('Uber Eats Exclusive\n$19 | Guaranteed (incl. tip)\n23 min (5.2 mi) total\n'
+        'Corner Bagel Co (Maple Grove)\nOak St & Elm Ave, Smalltown')
+r = run(lambda n, k: _W19, seconds=8.0,
+        until=lambda rows, ann, calls: calls >= 2 and any(not x.get('kind') for x in rows))
+eq('...but a whole-dollar figure both frames read the same is priced on the first read',
+   (_priced(r), r['verdicts'][0][0][1].get('pay') if r['verdicts'] else None),
+   (([19.0], [19.0], [19.0]), 19.0))
+_W7 = _W19.replace('$19 | Guaranteed', '$7 Guaranteed')
+r = run(lambda n, k: _W7 if k == 0 else UBERX_GLARE0, seconds=6.0,
+        until=lambda rows, ann, calls: calls >= 2)
+ok_('...and one printed with its label is priced off one frame (%r)' % (_priced(r)[0],),
+    7.0 in _priced(r)[0])
+
 # --- a read that never returns stops the heartbeat ---------------------------
 # Twelve seconds: a heartbeat every four would leave the last one under four
 # seconds old; a rig that went quiet at 1.5s leaves it about twelve.

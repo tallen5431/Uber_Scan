@@ -227,6 +227,22 @@
     '\\$\\s*(' + DC + '{1,3})[.,]?\\s+(\\d)\\s?(\\d)(?![.,])(?!\\s?\\d)'
     + '(?!\\s*m(?:i|[il1|]n))', 'gi');
 
+  /* ...and the cents the card printed and the reader did not: a decimal point
+     with nothing after it ("$4. io 1" for $4.21), or a mark where the point
+     goes with the digits still behind it ("$4:21", "$4°21", "$16\".l87"),
+     or a space read in front of the point ("$7 .09"),
+     after a whole-dollar figure MONEY_STRICT took. Not the rider's star ("$18
+     * 5.00"), and not two digits that are a leg's minutes ("$19|20 min").
+     MONEY_STRICT stopped at the mark and handed back $4.00 for a $4.21 card,
+     on both frames of a read, which locked it. Refused, not mended, and only
+     as the largest figure: it still competes, a larger figure still wins, and
+     a smaller one never wins in its place. The Python twin, CENTS_LOST, has
+     the measurements. */
+  var CENTS_LOST = new RegExp(
+    '^(?:[.,](?!' + DC + ')'
+    + '|(?:[^\\w\\s$.,*]{1,2}[.,]?|\\s+[.,]\\s?)(?:\\d' + DC + '|' + DC + '\\d)'
+    + '(?!\\d*\\s*m(?:i|[il1|]n)))', 'i');
+
   /* A number that is a duration or a distance, wearing a dollar sign.
    *
    * The rig photographs whatever is on the phone, and between jobs that is the
@@ -374,9 +390,19 @@
         found.push({ value: v, at: all[i].index,
                      headline: !!all[i].halves || CENTS.test(all[i].value)
                        || HEADLINE_LABEL.test(text.slice(all[i].index
-                                                         + all[i].match.length)) });
+                                                         + all[i].match.length)),
+                     // ...whose cents the reader lost: a whole-dollar figure
+                     // with the point, or a mark where the point goes, after
+                     // it. See CENTS_LOST.
+                     lost: !all[i].halves && !/[.,]/.test(all[i].value)
+                       && CENTS_LOST.test(text.slice(all[i].index + all[i].match.length)) });
         if (best === null || v > best) best = v;
       }
+    }
+    // The largest figure is one whose cents were lost, and nothing of the same
+    // value read whole: no payout at all, not the next figure down.
+    if (best !== null && found.every(function (f) { return f.value !== best || f.lost; })) {
+      best = null;
     }
     if (where) {
       // The chosen payout is kept whatever it printed: the FIRST of its value

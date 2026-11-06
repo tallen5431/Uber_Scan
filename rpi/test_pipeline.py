@@ -1785,6 +1785,7 @@ if TC.available():
         _cbr('$14.10 incl. tips\n3 stops (9.7 mi) - 33 min'),
         _cbr('$14.10 incl. tips\n3 stops (8.7 mi)'),
         _cbr('$22.75\n3 stops (8.7 mi) - 33 min\n$14.10 incl. tips\n3 stops (8.7 mi) - 33 min'),
+        _cbr('$14 x\n3 stops (8.7 mi) - 33 min'),
         _cbr('$14.\n3 stops (8.7 mi) - 33 min'),
         _cbr('$14.10 incl. tips\n8.7 mi - 33 min')],
        [None, 'no payout (clipped)',
@@ -1792,6 +1793,8 @@ if TC.available():
         'it reads a different minutes from the card it was learned on',
         'it holds a second dollar figure — more than one card',
         'its payout is not printed the way a card prints one',
+        # "$14." is cents the reader lost, no payout at all (OP.CENTS_LOST).
+        'no payout',
         'no stops line in it'])
 
 # --- the rescue's next read, started ahead on a spare core -----------------

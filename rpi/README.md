@@ -3431,6 +3431,54 @@ so a card has to be misread rather than unusual to trip them. The row is still
 written, still complete, and now carries a `doubt` field naming the figure. A
 reading this project got wrong is the most useful row in the file.
 
+### A payout the reader saw and could not read
+
+Two agreeing reads are what a verdict waits for, and over rendered frames that
+check earned its keep — until the two frames of a read agreed on the same
+wrong figure. Of the 1,076 frames `testcards.py` renders (see [A card taller
+than the card box](#draw-the-box-yourself)), 9 read a payout wrong, every one
+a single read through the drawn box with no rescue in it: the Uber Eats
+Exclusive card's **$4.21 as $4.00** (`$4:21`, `$4°21`, `$4. io 1`) or
+$421.00 under banding or all-dark, UberX's **$16.05 as $5.00** under glare,
+and the Shop & Deliver card's **$7.09 as $7.00** (`$7 .09`) rolled two
+degrees. Under banding at 680 and 760 the Exclusive card read wrong on every
+one of five sensor seeds tried, and the Shop card on four of five, so both
+frames of a read agreed, locked, and through `main()` the card was
+journalled, announced and spoken at the wrong figure.
+
+**Cents the card printed and the reader lost are no payout** (`CENTS_LOST`,
+in both parsers): a whole-dollar figure followed by a bare decimal point, by a
+mark where the point goes with the digits still behind it, or by a space and
+then the point. It still competes as the largest figure — a larger one still
+wins, and a smaller one never wins in its place — so it can only take a payout
+away. `$12. 78` still joins to $12.78. Over the 366 texts with a dollar sign in
+the shared corpus no payout moves but one case that already said, in its name,
+that such a figure "is refused, not half-read".
+
+**A figure printed without its cents, that no second frame read the same, is
+not priced** (`scan_pi.unsure_payout`): the panel shows that read as "no pay
+read" rather than a verdict, and the log says which figure it held back. A
+whole-dollar card read clean — `$7 Guaranteed`, `$18 * 5.00` — is printed and
+priced off one frame as before; one read with something between the figure
+and its label (`$19 | Guaranteed`) is priced as soon as two frames agree,
+which a paired read whose frames both read it is at once. The journal and the
+voice were never reached by the $5.00: both wait for two frames to agree.
+
+Measured over the same 1,076 frames against ea623ed: right 597 / none 417 /
+wrong 8 in the sets scored against a known figure became **600 / 420 / 2**,
+and the Shop set's one wrong figure is now right. Of the seven figures whose
+cents were lost, four now read the card's — the read with no payout gets the
+reader's own second look, which reads the headline whole — and three read no
+payout; no right figure was lost and no other frame's payout moved. The two
+left are the $421.00, which cannot be true and is shown as CHECK THE PAY with
+no rate (see above), and the $5.00, which no second frame reads and so is not
+priced. Read in pairs over two pairs of sensor seeds through the real Scanner
+(rpi/test_money.py), every one of the nine now reads the card's figure, none,
+one that cannot be true, or — the glare frame — a figure printed without its
+cents, and nothing but the card's figure is priced. Two
+agreeing frames reading a whole-dollar figure the same wrong way would still be
+priced; nothing rendered does that.
+
 ## Run
 
 ```sh

@@ -136,6 +136,53 @@ PAY_CENTS_SPLIT = re.compile(
     r'\$\s*(' + DC + r'{1,3})[.,]?\s+(\d)\s?(\d)(?![.,])(?!\s?\d)(?!\s*m(?:i|[il1|]n))',
     re.IGNORECASE | ASCII)
 
+# ...and the cents the card printed and the reader did not: a decimal point
+# with nothing after it, or a mark where the point should be with the two
+# digits still behind it. Asked at the end of a whole-dollar figure
+# MONEY_STRICT took (one with cents of its own is not asked).
+#
+#     $4. io 1          $4.21, the cents gone to an all-dark frame
+#     $4:21   $4°21     $4.21, the point read as a colon or a degree sign
+#     $16".l87          a mark in the way, the point and the cents behind it
+#     $7 .09            $7.09, a space read in front of the point
+#
+# MONEY_STRICT stops at the point or the mark and hands back the dollars, and
+# that was the payout: $4.00 for a $4.21 card, a whole reading and a figure
+# no card printed. Rendered (the 1,076 frames rpi/testcards.py draws — every
+# taller-card screen in three palettes, with and without the map, under seven
+# degradations at three widths, and the rest), it was 6 of the 8 wrong
+# payouts counted against a known figure: the Uber Eats Exclusive card under
+# banding and all-dark, as $4.00 — and under banding at 680 and 760 the same
+# $4:21 or $4°21 on every one of five sensor seeds tried, so the two frames
+# of a read agreed with each other, locked, and the card was journalled and
+# spoken at $4.00 (rpi/test_loop.py, "a payout whose cents did not read").
+# And a ninth the count had left out (its set was not scored): the Shop &
+# Deliver card's $7.09 read `$7 .09`, so $7.00, rolled two degrees at 600px,
+# on 4 of 5 seeds. Such a figure is a payout the reader SAW and could not
+# read, so it is refused, not mended: a mark and two digits
+# could as well be a time behind a map glyph ("$4:21 PM"), and a guess at the
+# cents is the fabricated figure this rule exists to stop.
+#
+# Refused by find_pay as the largest figure only. It still competes: a larger
+# figure ($12.34 with a stray "$5." beside it) still wins, and a smaller one
+# never wins in its place — the headline is the largest figure, so whatever is
+# below a headline whose cents were lost is a chip or a glyph, not the payout.
+# So this can only ever take a payout away, never put a different one there.
+# `$12. 78` is not lost: PAY_CENTS_SPLIT joins it to $12.78, which outranks the
+# $12 this refuses. Over the 366 distinct texts with a dollar sign the shared
+# corpus held (cases.json and sequences.json), no payout moves but its own
+# `$16".l87`, whose case was already named "a payout with a stray mark in it
+# is refused, not half-read" and expected the half-read $16.00.
+#
+# Not the rider's star, which follows a whole-dollar ride at once ("$18 *
+# 5.00", HEADLINE_LABEL), and not two digits that are a leg's minutes ("$19|20
+# min" is a whole-dollar card glued to its leg, as PAY_CENTS_SPLIT refuses
+# "$12 68 min").
+CENTS_LOST = re.compile(
+    r'[.,](?!' + DC + r')'
+    r'|(?:[^\w\s$.,*]{1,2}[.,]?|\s+[.,]\s?)(?:\d' + DC + r'|' + DC + r'\d)(?!\d*\s*m(?:i|[il1|]n))',
+    re.IGNORECASE | ASCII)
+
 # A component of the payout, printed beside it, and never the payout.
 #
 # Uber puts a chip under the headline — "+$0.50 included", "+$2.39 included for
@@ -1101,6 +1148,9 @@ def find_pay(text, where=None, printed=None, figures=None):
 
     matches = list(MONEY_STRICT.finditer(text)) or list(MONEY_LOOSE.finditer(text))
     best = None
+    # Which of `found` are figures whose cents did not read, by index: the
+    # joins below start at the same `$` as the figure they mend. See CENTS_LOST.
+    lost = set()
     for m in matches:
         if in_chip(m):
             continue
@@ -1133,6 +1183,11 @@ def find_pay(text, where=None, printed=None, figures=None):
             found.append((v, m.start(),
                           bool(CENTS.search(m.group(1))
                                or HEADLINE_LABEL.match(text, m.end()))))
+            # ...whose cents the reader lost, if it printed none of its own and
+            # the point or a mark where the point goes follows it. See
+            # CENTS_LOST: it competes, and if it wins there is no payout.
+            if not re.search(r'[.,]', m.group(1)) and CENTS_LOST.match(text, m.end()):
+                lost.add(len(found) - 1)
             if best is None or v > best:
                 best = v
 
@@ -1166,6 +1221,11 @@ def find_pay(text, where=None, printed=None, figures=None):
             found.append((v, m.start(), True))
             if best is None or v > best:
                 best = v
+    # The largest figure is one whose cents the reader lost, and nothing of the
+    # same value read whole: no payout at all, not the next figure down. See
+    # CENTS_LOST.
+    if best is not None and all(i in lost for i, one in enumerate(found) if one[0] == best):
+        best = None
     if figures is not None:
         figures.extend(sorted(set(at for _, at, _ in found)))
     if printed is not None and best is not None:
