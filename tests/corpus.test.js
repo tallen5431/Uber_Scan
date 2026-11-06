@@ -200,6 +200,15 @@ function stopFields(stops) {
                             + ' want ' + c.expect); }
 });
 
+/* Whether the payout is printed the way a card prints one. rpi/test_parser.py
+   asks pay_is_printed the same list. */
+(cases.printed || []).forEach(function (c) {
+  var got = P.payIsPrinted(c.text);
+  if (got === c.expect) ok++;
+  else { bad++; console.log('FAIL  printed / ' + c.name + ': got ' + got
+                            + ' want ' + c.expect); }
+});
+
 /* How much of the journey is the drive to the pickup. A pair rather than two
    sections, because the two halves are one claim: minutes without miles is a
    split that cannot be subtracted from a distance, and reporting them

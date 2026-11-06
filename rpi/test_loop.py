@@ -849,6 +849,29 @@ r = run(lambda n, k: _W7 if k == 0 else UBERX_GLARE0, seconds=6.0,
         until=lambda rows, ann, calls: calls >= 2)
 ok_('...and one printed with its label is priced off one frame (%r)' % (_priced(r)[0],),
     7.0 in _priced(r)[0])
+# ...and DoorDash's label, `incl. tips`, which HEADLINE_LABEL did not take:
+# 16596d3 left "a whole-dollar DoorDash card prints 'incl. tips' ... read with
+# its frames disagreeing it waits a read" open. testcards.dd_stores_screen's
+# card drawn at a whole $14 (stores invented), one frame reading it and the
+# other the card with its payout lost, on every read — so no two frames ever
+# agree and the panel prices it on its label or never.
+_DD14 = ('$14 incl. tips\n3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza\n'
+         '4410 Fernhill Road Northwest, ...\nff Maple Run Creamery\n'
+         '2516 Quillon Street, Brookvale, 301...\n8 Customer dropoff\nDrop off 2 orders')
+_DD_NOPAY = _DD14.replace('$14 incl. tips\n', '')
+r = run(lambda n, k: _DD14 if k == 0 else _DD_NOPAY, seconds=6.0,
+        until=lambda rows, ann, calls: calls >= 2)
+ok_("...and a whole-dollar DoorDash card printed with its `incl. tips` is priced off one "
+    "frame, as Uber's label is (%r)" % (_priced(r)[0],),
+    _priced(r)[0] == [14.0])
+eq('...its log holding nothing back for it',
+   [l for l in r['logs'] if 'not priced' in l], [])
+# ...but the label lets no lost cents through: CENTS_LOST is asked of the figure
+# alone, so `$14:10 incl. tips` on every frame is still no payout at all.
+_DD_LOST = _DD14.replace('$14 incl. tips', '$14:10 incl. tips')
+r = run(lambda n, k: _DD_LOST, seconds=8.0, until=lambda rows, ann, calls: calls >= 4)
+eq('...nor its cents lost behind a colon before the label, on every frame (%d reads)'
+   % r['calls'], _priced(r), ([], [], []))
 
 # --- a read that never returns stops the heartbeat ---------------------------
 # Twelve seconds: a heartbeat every four would leave the last one under four

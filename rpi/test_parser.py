@@ -243,6 +243,11 @@ for c in cases.get('navStops', []):
 for c in cases.get('whole', []):
     eq('whole / ' + c['name'], P.is_whole(P.parse(c['text'])), c['expect'])
 
+# Whether the payout is printed the way a card prints one. tests/corpus.test.js
+# asks payIsPrinted the same list.
+for c in cases.get('printed', []):
+    eq('printed / ' + c['name'], P.pay_is_printed(c['text']), c['expect'])
+
 # How much of the journey is the drive to the pickup. A pair rather than two
 # sections, because the two halves are one claim: minutes without miles is a
 # split that cannot be subtracted from a distance, and reporting them

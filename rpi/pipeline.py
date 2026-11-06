@@ -2000,7 +2000,11 @@ def rescue_refused(box, found, found_text):
         that one is printed to the cent and passes; and reads "$14." as no
         payout at all — OP.CENTS_LOST — so that one is refused by the first
         clause. This one still holds a whole dollar with nothing of a
-        headline after it, "$14 x".)
+        headline after it, "$14 x". It also held DoorDash's whole-dollar
+        "$14 incl. tips" until OP.HEADLINE_LABEL took that label: through
+        an Uber-shaped box every one of 48 rendered frames of such a stops
+        card read no payout, the finder's sheet refused here; now each
+        reads $14.00 off it — rpi/test_money.py.)
       - its text holds a second dollar figure (OP.payout_figures). A found
         crop is one card from its button up; two figures in it are two cards,
         and the larger one — the one find_pay takes — need not be this

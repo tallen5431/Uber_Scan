@@ -1678,8 +1678,10 @@ def unsure_payout(out, parsed):
 
     Every right payout of those 1,076 frames is printed (to the cent: the
     cards print it so), so this holds back none of them. A whole-dollar card
-    is printed without cents ("$7 Guaranteed", "$18 * 5.00") and read clean is
-    still printed; read with something between the figure and its label
+    is printed without cents ("$7 Guaranteed", "$18 * 5.00", DoorDash's "$14
+    incl. tips" since OP.HEADLINE_LABEL took that label — it had waited a read
+    here) and read clean is still printed; read with something between the
+    figure and its label
     ("$19 | Guaranteed") it is priced once two frames agree on it, which a
     paired read whose frames both read it is at once. What waits is a figure
     without cents that the two frames do not agree on: one read, about 1.5-2 s

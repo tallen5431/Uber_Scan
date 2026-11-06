@@ -112,8 +112,30 @@ MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'
 # figure cut the card instead is what put row 2's `$ 3` between its own two legs
 # and $188.10/hr on the panel. The week holds no second card without a label or
 # cents (row 410's `$6.53` is its only one).
+#
+# ...and DoorDash's newer card, which prints its label as `incl. tips` right
+# after the figure (`$14.10 incl. tips` over `3 stops (8.7 mi) • 33 min`; the
+# corpus's stops cards and testcards.dd_stores_screen draw it so) and not as
+# "Guaranteed" or "Includes". `includ` never matched `incl.`, so a whole-dollar
+# card of that shape — `$14 incl. tips` — was a figure printed with no label:
+# pay_is_printed said no, and scan_pi.unsure_payout held its read back from the
+# panel until a second frame agreed (16596d3 left it open: "a whole-dollar
+# DoorDash card prints 'incl. tips', which HEADLINE_LABEL does not take"). The
+# word `tip` is required, and only at once: `incl. $3 tip` is Uber's chip
+# (PAY_PART) and starts with a dollar figure, not the word, so `$14 incl. $3
+# tip` is unlabelled as before. The colon is the reader's point, as in the
+# rendered Exclusive card's `Guaranteed (incl: tip)` (rpi/test_loop.py).
+#
+# A label only ever says how a figure was printed; it never chooses one, joins
+# one or lets one through. CENTS_LOST is asked of the same figure on its own,
+# so `$14:10 incl. tips` is still cents lost and no payout at all. Measured
+# over the 667 distinct texts in cases.json and sequences.json before this
+# rule's own cases (373 with a dollar sign): none moves — no payout, minutes,
+# miles, place or `printed` flag — because every `incl. tips` card in them
+# prints its cents. Both ports give the same `printed` answer on all 677 with
+# those cases (cases.json's `printed` section holds the edges).
 CENTS = re.compile(r'[.,]' + DC + r'{2}$', ASCII)
-HEADLINE_LABEL = re.compile(r'\s*(?:guarant|includ|\*)', re.IGNORECASE)
+HEADLINE_LABEL = re.compile(r'\s*(?:guarant|includ|incl[.,:]?\s?tips?\b|\*)', re.IGNORECASE)
 
 PAY_SPLIT = re.compile(
     r'\$\s*(' + DC + r'{1,3})\s+(' + DC + r'{1,2}[.,]' + DC + r'{2})'
@@ -1248,13 +1270,16 @@ def pay_is_printed(text):
 
     To the cent, or a whole dollar followed at once by the card's own label or
     the rider's star: Uber prints "$7 Guaranteed", "$10 Includes expected tip",
-    "$18 * 5.00". Asked by pipeline.py of a reading taken through a crop it
-    FOUND rather than one the driver drew (see Scanner._look), and of nothing
-    else: a found card printing "$14." read as $14.00, a whole reading and a
-    confident wrong figure (pipeline.rescue_refused says where that was seen).
-    The drawn box's own reads are not held to this — it would refuse every
-    whole-dollar card read with something between the figure and its label,
-    which is 144 of the week's 208 (see CENTS).
+    "$18 * 5.00"; DoorDash "$14 incl. tips" (HEADLINE_LABEL). Asked by
+    pipeline.py of a reading taken through a crop it FOUND rather than one the
+    driver drew (see Scanner._look): a found card printing "$14." read as
+    $14.00, a whole reading and a confident wrong figure
+    (pipeline.rescue_refused says where that was seen). The drawn box's own
+    reads are not refused for it — that would refuse every whole-dollar card
+    read with something between the figure and its label, which is 144 of the
+    week's 208 (see CENTS) — only held off the panel until a second frame
+    agrees (scan_pi.unsure_payout). The JavaScript twin is payIsPrinted, and
+    cases.json's `printed` section holds the two to one answer.
     """
     flag = []
     return find_pay(normalize(text or ''), printed=flag) is not None and bool(flag and flag[0])

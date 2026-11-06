@@ -499,6 +499,32 @@ for _name, _pal, _nav, _kind, _w, _truth in _WRONG:
             % (_merged['pay'] if _priced else None,),
             not _priced or abs(_merged['pay'] - _truth) < 0.005)
 
+# --- a whole-dollar DoorDash stops card, its label `incl. tips` ---------------
+#
+# testcards.dd_stores_screen drawn at a whole $14 (stores invented), through
+# the two boxes an Uber card was drawn round (BOX_DD_PAY cuts the payout at
+# its top, BOX_DD_BELOW starts under it), so the card finder has to find the
+# sheet. Its found read is held to OP.pay_is_printed (pipeline.rescue_refused),
+# and `incl. tips` was no label to HEADLINE_LABEL: measured before it was, all
+# 48 frames of this sweep (both palettes, both tails, both boxes, 600/680/760px,
+# two seeds) read `$14 incl. tips` and NO payout — the found crop refused, the
+# drawn box's own read clipped or under the figure — and with it all 48 read
+# $14.00, 33 min, 8.7 mi off the found sheet. Read in pairs as the loop reads.
+for _pal_name, _pal in (('light', TC.LIGHT), ('dark', TC.DARK)):
+    for _bn, _box in (('flush on the box\'s top', TC.BOX_DD_PAY),
+                      ('just above the box', TC.BOX_DD_BELOW)):
+        _quad = np.array(TC.screen_corners(680), np.float32)
+        _sc = PL.Scanner(quad=_quad, roi=list(_box), card_share=_box[3])
+        _scr = TC.dd_stores_screen(_pal, pay='$14')
+        _outs = _sc.read_many([TC.mount(_scr, 680, seed=_s) for _s in (1, 2)])
+        eq('a whole-dollar DoorDash stops card (%s, its payout %s) reads its $14 and journey off '
+           'the sheet found, `incl. tips` counted as its label' % (_pal_name, _bn),
+           [(o['parsed']['pay'], o['parsed']['minutes'], o['parsed']['miles'],
+             OP.pay_is_printed(o['text'] or '')) for o in _outs],
+           [(14.0, 33.0, 8.7, True)] * 2)
+        eq('...and the loop holds neither frame back for its whole dollar',
+           [SP.unsure_payout(dict(o, locked=False), o['parsed']) for o in _outs], [False, False])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d end-to-end money checks passed' % ok)
 sys.exit(1 if bad else 0)

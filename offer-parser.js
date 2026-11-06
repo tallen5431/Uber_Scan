@@ -209,8 +209,16 @@
   // at once by a label or a star, so the map glyphs stay out. A second card
   // with neither is still summed in, which errs long; the Python twin has the
   // measurements.
+  //
+  // ...and DoorDash's `incl. tips`, its newer card's label right after the
+  // figure (`$14.10 incl. tips`), which `includ` never matched: a whole-dollar
+  // `$14 incl. tips` was a figure with no label, and the Pi held its read off
+  // the panel for a second frame. The word `tip` at once, so Uber's `incl. $3
+  // tip` chip is not it. A label never chooses or lets through a figure:
+  // CENTS_LOST still refuses `$14:10 incl. tips`. The Python twin has the
+  // measurements.
   var CENTS = new RegExp('[.,]' + DC + '{2}$');
-  var HEADLINE_LABEL = /^\s*(?:guarant|includ|\*)/i;
+  var HEADLINE_LABEL = /^\s*(?:guarant|includ|incl[.,:]?\s?tips?\b|\*)/i;
 
   var PAY_SPLIT = new RegExp(
     '\\$\\s*(' + DC + '{1,3})\\s+(' + DC + '{1,2}[.,]' + DC + '{2})'
@@ -313,8 +321,14 @@
    * approach. The 2 with cents are row 410's `$6.53`, the week's one real
    * second card. A figure without cents still counts when the card's label or
    * the rider's star follows it at once — see HEADLINE_LABEL. The Python twin
-   * says the rest. */
-  function findPay(text, where) {
+   * says the rest.
+   *
+   * `printed`, when given an array, has one flag pushed: whether the payout
+   * chosen is printed the way a card prints its headline — to the cent, or
+   * followed at once by its label or the rider's star. The same test `where`
+   * applies to the figures NOT chosen, asked of the one that is. Only
+   * payIsPrinted asks it. */
+  function findPay(text, where, printed) {
     var chips = collect(text, PAY_CHIP).concat(collectSpans(text, PAY_PART));
     var units = collectSpans(text, PAY_IS_A_DURATION)
       .concat(collectSpans(text, PAY_IS_PER_ORDER));
@@ -404,6 +418,18 @@
     if (best !== null && found.every(function (f) { return f.value !== best || f.lost; })) {
       best = null;
     }
+    if (printed && best !== null) {
+      // The FIRST figure of the chosen value by position, ties to the one
+      // gathered first, as the Python twin's min(..., key=position) over the
+      // same order (the plain figures, then the joins).
+      var first = null;
+      for (i = 0; i < found.length; i++) {
+        if (found[i].value === best && (first === null || found[i].at < first.at)) {
+          first = found[i];
+        }
+      }
+      printed.push(!!(first && first.headline));
+    }
     if (where) {
       // The chosen payout is kept whatever it printed: the FIRST of its value
       // by position, found by index because the `$1` fragment and the join
@@ -420,6 +446,22 @@
       }
     }
     return best;
+  }
+
+  /* Is the payout in this text printed the way an offer card prints one? To
+     the cent, or a whole dollar followed at once by the card's own label or
+     the rider's star: "$7 Guaranteed", "$10 Includes expected tip", "$18 *
+     5.00", "$14 incl. tips".
+
+     The Python twin, pay_is_printed, is what the Pi asks before it prices a
+     reading no second frame has agreed with (scan_pi.unsure_payout) and of
+     every crop it found rather than was drawn (pipeline.rescue_refused). This
+     side had no such question, so the one rule that decides whether a lone
+     read is priced could drift between the ports with nothing to see it.
+     Held to the same corpus section, `printed`, as its twin. */
+  function payIsPrinted(text) {
+    var flag = [];
+    return findPay(normalize(text || ''), null, flag) !== null && flag.length > 0 && flag[0];
   }
 
   /* Whether a card printed ABOVE the only payout in shot is in the frame too.
@@ -4521,7 +4563,7 @@
   // drifted, and nothing could see that because it was not reachable from a
   // test.
   return { parse: parse, rate: rate, normalize: normalize, lineStarts: lineStarts,
-           toNumber: toNumber,
+           toNumber: toNumber, payIsPrinted: payIsPrinted,
            setting: setting, doubt: doubt, round2: round2,
            DOUBT_REASONS: DOUBT_REASONS,
            TYPED_DOUBT_REASONS: TYPED_DOUBT_REASONS,

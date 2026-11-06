@@ -3496,6 +3496,20 @@ cents, and nothing but the card's figure is priced. Two
 agreeing frames reading a whole-dollar figure the same wrong way would still be
 priced; nothing rendered does that.
 
+**DoorDash's `incl. tips` is a label.** Its stops card prints `$14.10 incl.
+tips`, and the label test knew only "Guaranteed", "Includes" and the rider's
+star, so a whole-dollar DoorDash card — `$14 incl. tips` — was a figure printed
+with no label. Held off the panel for a read where its frames disagreed, and,
+worse, refused outright where it mattered most: a found crop must print its
+payout (`pipeline.rescue_refused`), so through a box drawn round an Uber card
+all 48 rendered frames of such a stops card (both palettes, both dropoff
+tails, both boxes, 600/680/760px, two seeds) read **no payout**. Now `incl.
+tips` right after the figure is its label, in both parsers: the same 48 read
+$14.00, 33 min, 8.7 mi off the found sheet. Only the word `tip` at once —
+Uber's `incl. $3 tip` chip is not it — and the label never lets a figure
+through: `$14:10 incl. tips` is still cents lost and no payout. No text in the
+shared corpus moves.
+
 ## Run
 
 ```sh

@@ -465,6 +465,28 @@
    }
   },
   {
+   "name": "a whole-dollar DoorDash stops card is read at its dollars, its label `incl. tips`",
+   "_why": "DoorDash's stops card prints its label as `incl. tips` right after the figure. testcards.dd_stores_screen's card with its payout drawn `$14`; stores and doors invented. The payout was always $14.00; what changed is that the figure now counts as printed with its label (see the `printed` section).",
+   "text": "$14 incl. tips\n3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza\n4410 Fernhill Road Northwest, ...\nff Maple Run Creamery\n2516 Quillon Street, Brookvale, 301...\n8 Customer dropoff\nDrop off 2 orders\nAccept 0:36",
+   "expect": {
+    "pay": 14.0,
+    "minutes": 33.0,
+    "miles": 8.7,
+    "complete": true
+   }
+  },
+  {
+   "name": "...and its label does not let lost cents through: `$14:10 incl. tips` is still no payout",
+   "_why": "A label says how a figure was printed and never chooses one. CENTS_LOST is asked of the figure on its own, so the colon where the point goes is cents printed and not read, whatever follows. The journey stands.",
+   "text": "$14:10 incl. tips\n3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza\n4410 Fernhill Road Northwest, ...",
+   "expect": {
+    "pay": null,
+    "minutes": 33.0,
+    "miles": 8.7,
+    "complete": false
+   }
+  },
+  {
    "name": "a headline whose cents went dark behind the point is refused, not read as the dollars",
    "_why": "Rendered: the Exclusive card in an all-dark frame read `$4. io 1`, and MONEY_STRICT took $4.00. A point with nothing numeric after it is cents that did not read (CENTS_LOST). Card around it made up.",
    "text": "$4. io 1\nGuaranteed (incl. tip)\n23 min (5.2 mi) total\nCorner Bagel Co (Maple Grove)\nOak St & Elm Ave, Smalltown",
@@ -4220,7 +4242,54 @@
    ]
   }
  ],
- "_whole_comment": "Whether a reading is finished, as opposed to merely judgeable. Its own block because it is a function of the reading rather than a field on it, and because it was written out by hand in two places that both got delivery cards wrong.",
+ "_printed_comment": "Whether the payout a text gives is printed the way a card prints one: to the cent, or a whole dollar followed at once by the card's label or the rider's star (pay_is_printed / payIsPrinted). A figure that is not is held off the panel until a second frame reads it the same (scan_pi.unsure_payout), and a found crop's read is refused for it (pipeline.rescue_refused). Its own block because it is a function of the text, not a field parse() returns, and because both ports answer it and must answer it alike. Cards invented.",
+ "printed": [
+  {
+   "name": "a whole-dollar DoorDash payout with `incl. tips` after it is printed with its label",
+   "_why": "16596d3 left it open: `includ` never matched `incl.`, so this read waited a frame on the Pi before it was priced.",
+   "text": "$14 incl. tips\n3 stops (8.7 mi) - 33 min\n& Lark Owl Pizza",
+   "expect": true
+  },
+  {
+   "name": "...read with a comma for the point, the same",
+   "text": "$14 incl, tips\n3 stops (8.7 mi) - 33 min",
+   "expect": true
+  },
+  {
+   "name": "...and one printed to the cent was printed before the label counted",
+   "text": "$14.10 incl. tips\n3 stops (8.7 mi) - 33 min",
+   "expect": true
+  },
+  {
+   "name": "...but not with something between the figure and the label",
+   "_why": "At once, as `Guaranteed` is asked: row 505's map glyph read `$5 | Guaranteed`.",
+   "text": "$14 | incl. tips\n3 stops (8.7 mi) - 33 min",
+   "expect": false
+  },
+  {
+   "name": "...nor its cents lost behind a colon, which is no payout at all",
+   "text": "$14:10 incl. tips\n3 stops (8.7 mi) - 33 min",
+   "expect": false
+  },
+  {
+   "name": "Uber's `incl. $3 tip` chip after a whole dollar is not the label",
+   "_why": "The chip starts with a dollar figure, not the word `tip`; the label has to be the word at once.",
+   "text": "Delivery $14 incl. $3 tip\nEst. delivery 4:15 PM • 8.6 mi",
+   "expect": false
+  },
+  {
+   "name": "Uber's whole-dollar `Guaranteed` is printed with its label",
+   "text": "$7 Guaranteed (incl. tip)\n23 min (5.2 mi) total",
+   "expect": true
+  },
+  {
+   "name": "the glare frame's lone `$ 5` is printed with neither",
+   "_why": "rpi/testcards.py's UberX card under glare, one sensor seed of five: $5.00 for a $16.05 card (16596d3).",
+   "text": "$ 5 eee at MRCS RE IN 8\n3 min (1.1 mi) a : as\n20 min (7.3 mi) -",
+   "expect": false
+  }
+ ],
+ "_whole_comment":"Whether a reading is finished, as opposed to merely judgeable. Its own block because it is a function of the reading rather than a field on it, and because it was written out by hand in two places that both got delivery cards wrong.",
  "whole": [
   {
    "name": "a total is a whole journey by itself",
