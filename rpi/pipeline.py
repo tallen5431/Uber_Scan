@@ -713,7 +713,54 @@ def is_dark_mode(gray, was=None):
     return background < middle
 
 
-def preprocess(card, dark=None):
+# How wide a dark mark has to be before even_light takes it for the light
+# falling on the card rather than ink on it, in pixels of a crop fitted to
+# OCR_CARD_HEIGHT: a closing this wide removes every stroke of the payout's
+# type (the widest, a bold "$" or "4" of the 900px-high crop, is well under it)
+# and keeps the shade, which runs across the whole card. 41 and 81 measured
+# alike on the stops card in shadow (18 of 18 frames each); 41 is the cheaper.
+EVEN_LIGHT_SPAN = 41
+
+
+def even_light(gray):
+    """The card's own background divided out of it: dark ink on a ground
+    that is the same white however the light falls across it.
+
+    For a second read of a crop the card finder FOUND whose first read gave
+    no payout (Scanner._found_card), and nothing else. rpi/testcards.py's
+    DoorDash stops card under `shadow` — the left of the screen in the
+    pillar's shade, down to a quarter of its light — read no payout on 12 of
+    the 90 frames of the stops sweep (both light drawings, three widths, both
+    boxes): the finder found the card every time (b309e12), and the found
+    crop's read gave the journey and no "$14.10", which sits in the deepest of
+    the shade where CLAHE's 8x8 tiles stretch the ramp and the ink together.
+    A morphological closing (dilate, then erode, EVEN_LIGHT_SPAN wide) is the
+    ground with the ink lifted out of it; the crop over it is the ink alone.
+
+    Measured (development box, x86): the 90-frame sweep 78 right / 12 none ->
+    90 / 0, none wrong. Over the 1,076 rendered frames (rpi/README.md, A card
+    in the pillar's shadow) 17 more payouts read — those 12, a stacked stops
+    card in shadow, three Early-look cards and a two-order card in daylight —
+    and no frame that read a payout or a journey before reads a different one;
+    none wrong. 2.3ms a call on a 900x992 crop; the read it adds is the cost,
+    ~100ms on a frame whose found read lost its payout (those 17: 132 -> 238ms
+    median), and nothing on any other.
+
+    A second chance, not a second opinion, and measured so: evening out EVERY
+    found read instead turned two right $21.35s into $21.38 (the two-customer
+    stops card under blur) for 31 more payouts — a wrong figure added, so not
+    done. Not on the drawn box's read either: it is the read every card gets,
+    and nothing measured asks it there. A Gaussian background (sigma 40) and
+    per-column 90th percentiles read the same 18 shadow frames too, at 71ms
+    and 17ms a crop for the evening out and preprocess() together, against 9ms
+    for this; CLAHE with a clip of 4 instead of 2.5 read none of the 12.
+    """
+    bg = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, cv2.getStructuringElement(
+        cv2.MORPH_RECT, (EVEN_LIGHT_SPAN, EVEN_LIGHT_SPAN)))
+    return cv2.divide(gray, np.maximum(bg, 1), scale=255)
+
+
+def preprocess(card, dark=None, flatten=False):
     """Grey, put the ink dark side up, even out the glare, stretch contrast.
 
     CLAHE rather than a global stretch because a windshield puts a bright band
@@ -734,12 +781,17 @@ def preprocess(card, dark=None):
     exposure. Both of those subtract consecutive frames, so both need every
     frame in a batch turned the same way up whatever each one would have decided
     on its own.
+
+    `flatten` divides the card's own background out first (even_light), with
+    the ink already dark side up: for a crop the card finder found.
     """
     gray = to_grey(card)
     if dark is None:
         dark = is_dark_mode(gray)
     if dark:
         gray = cv2.bitwise_not(gray)
+    if flatten:
+        gray = even_light(gray)
     return cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
 
 
@@ -2732,7 +2784,17 @@ class Scanner:
         found = CF.find_card(screen, g.roi)
         if not found['sure'] or found['box'][1] >= float(g.roi[1]) - TALLER:
             return found, None
-        return found, self._read_box(screen, found['box'], g, dark=dark)
+        got = self._read_box(screen, found['box'], g, dark=dark)
+        # ...and once more with its light evened out (even_light), when that
+        # read gave no payout and was not refused for one at the crop's edge:
+        # a second chance, never a second opinion. Read first as it always
+        # was, so every found read that gave a payout gives the same one.
+        if got['parsed'].get('pay') is None and not got.get('clipped') \
+                and not got.get('skipped'):
+            again = self._read_box(screen, found['box'], g, dark=dark, flatten=True)
+            if again['parsed'].get('pay') is not None:
+                return found, again
+        return found, got
 
     def _finder_ahead(self, screen, g, was):
         """_found_card, asked on a spare core while the box is being read:
@@ -2748,7 +2810,7 @@ class Scanner:
         dark = is_dark_mode(fitted, was=was)
         return (dark,) + self._found_card(screen, g, dark)
 
-    def _read_box(self, screen, box, g, dark=None):
+    def _read_box(self, screen, box, g, dark=None, flatten=False):
         """Read one crop of the warped screen: the drawn box, or a found card.
 
         ONE helper for both, so a crop the finder chose is fitted, read, given
@@ -2774,7 +2836,7 @@ class Scanner:
                     'ms': {'prep': (t1 - t0) * 1000, 'ocr': 0.0}}
         if dark is None:
             dark = is_dark_mode(fitted, was=g.dark_mode)
-        prepped = preprocess(fitted, dark=dark)
+        prepped = preprocess(fitted, dark=dark, flatten=flatten)
         t1 = time.perf_counter()
         # Asked for its layout as well as its text, at no extra cost, because
         # where the payout landed is the only way to tell a crop that read

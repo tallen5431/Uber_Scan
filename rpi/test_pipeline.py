@@ -1465,22 +1465,49 @@ if TC.available():
     eq('...and in dark mode', (_ddd['parsed']['pay'], _ddd['rescuedBy']), (14.1, 'finder'))
     # The twelve frames the raise alone never rescued: a light sheet in a
     # left-hand shadow whose stops line did not read, so nothing was raised.
-    # The finder needs no stops line, and is sure of the sheet now — but its
-    # crop reads no payout either: "$14.10" sits at the left, in the deepest
-    # of the shadow, and the reader loses it as it loses the stops line
-    # (")* 33 min" is all that is left of that). Refused for no payout, said
-    # so, and never a figure that is not the card's.
+    # The finder needs no stops line, and is sure of the sheet — but its crop
+    # read no payout either: "$14.10" sits at the left, in the deepest of the
+    # shadow, and was refused for no payout on all twelve of the stops sweep's
+    # shadow frames. The found crop is read with its light evened out now
+    # (PL.even_light), and reads its own payout off the found card, both
+    # drawings, both boxes; the drawn box is read as it was.
     for _name, _scr, _pay in (('one customer', DD, 14.1),
                               ('two customers', TC.dd_stores_screen(
                                   pay='$21.35', journey='4 stops (15.0 mi) • 53 min',
                                   tail=('Multiple dropoffs (2 stops)', None)), 21.35)):
-        _dsh = look(TC.degrade(_scr, 'shadow'), box=TC.BOX_DD_BELOW, width=DD_WIDTH, seed=2)
-        ok_('a light DoorDash sheet (%s) in a left-hand shadow: the finder is sure of it and its '
-            'read is refused for no payout, or kept with its own (%r, %r)'
-            % (_name, _dsh['parsed']['pay'], _dsh['finder']),
-            _dsh['parsed']['pay'] == _pay
-            or (_dsh['parsed']['pay'] is None and (_dsh['finder'] or '').startswith(
-                'read the card found above the box and refused it: no payout')))
+        for _bn, _bx in (('pay', TC.BOX_DD_PAY), ('below', TC.BOX_DD_BELOW)):
+            _dsh = look(TC.degrade(_scr, 'shadow'), box=_bx, width=DD_WIDTH, seed=2)
+            eq('a light DoorDash sheet (%s, box %s) in a left-hand shadow reads its own payout '
+               'off the card the finder found, its light evened out (%r)'
+               % (_name, _bn, _dsh['finder']),
+               (_dsh['parsed']['pay'], _dsh['cropFrom'], _dsh['rescuedBy']),
+               (_pay, 'found', 'finder'))
+    # ...evened out on the found crop and only there: a card read through its
+    # own box, and the box read before the finder is asked, never are.
+    _evened = []
+    _el = PL.even_light
+    PL.even_light = lambda g: _evened.append(g.shape) or _el(g)
+    try:
+        look(DD, box=TC.BOX_DD_PAY, finder=False, width=DD_WIDTH)
+        look(TC.early_look_screen(), box=BOX, finder=False)
+        _n_box = len(_evened)
+        look(TC.degrade(DD, 'shadow'), box=TC.BOX_DD_BELOW, width=DD_WIDTH, seed=2)
+    finally:
+        PL.even_light = _el
+    eq('...and no drawn box is evened out, read alone or before its rescue (%d, then %d)'
+       % (_n_box, len(_evened) - _n_box), (_n_box, len(_evened) - _n_box), (0, 1))
+    _ramp = np.tile(np.clip(np.linspace(60, 240, 400), 0, 255).astype(np.uint8), (300, 1))
+    _ramp[140:160, 50:350] = (_ramp[140:160, 50:350] * 0.3).astype(np.uint8)
+    _flat = PL.even_light(_ramp)
+    # Away from the crop's left and right edges by half the span: there the
+    # closing's window runs off the picture and the ground it takes is the
+    # lightest within reach (222 at the very edge of this ramp).
+    _in = slice(PL.EVEN_LIGHT_SPAN // 2, 400 - PL.EVEN_LIGHT_SPAN // 2)
+    ok_('even_light turns a ground lit from a quarter to full into one white, and keeps the ink '
+        'dark across it (ground %d-%d, ink %d-%d)' % (
+            _flat[:100, _in].min(), _flat[:100, _in].max(), _flat[145:155, 60:340].min(),
+            _flat[145:155, 60:340].max()),
+        _flat[:100, _in].min() >= 250 and _flat[145:155, 60:340].max() <= 90)
 
     # THE RAISE: the fallback, when the finder cannot say where the sheet
     # starts. Answered unsure here, so each of its rules is still held.

@@ -2833,6 +2833,23 @@ card lost its stops line under it, so on 23 of its 24 nothing was raised and
 the rescue cost nothing. The time the
 3 Nov reads lost is what the raise-ahead saves (one read's wait, not two).
 
+**A card in the pillar's shadow is read again with its light evened out.**
+The stops card in a left-hand shadow down to a quarter of its light read no
+payout on 12 of the 90 stops-sweep frames: the finder found the sheet, and its
+read gave the journey and lost "$14.10", which sits in the deepest of the
+shade. When a found card's read gives no payout, the same crop is read once
+more with the card's own background divided out first (`pipeline.even_light`:
+a 41px closing is the ground, the crop over it the ink); a read that gave a
+payout is never read again. The sweep went 78 right / 12 none to **90 / 0**,
+none wrong; the 1,076 rendered frames read 17 more payouts (those 12, a stacked
+stops card in shadow, three Early-look cards and a two-order card in daylight)
+and no figure or journey that read before moved. It costs one read where the
+found read lost its payout (~100ms on the development box; those 17 frames
+132 → 238ms median; on the Pi an **estimate** of one more read, ~1.4 s) and
+nothing anywhere else. Evening out every found read instead read 31 more but
+turned two right $21.35s into $21.38 under blur, so it is a second chance and
+not a second opinion.
+
 **▣ Set box again is the way to change them.** A box drawn by hand stays until
 another is drawn, and nothing on the panel throws it away. There used to be:
 ⟳ Re-find, pressed with a box in force, looked for the screen on the next frame
