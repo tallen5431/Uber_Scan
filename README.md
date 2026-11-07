@@ -783,8 +783,25 @@ xdg-open ~/places-report/index.html      # or copy the folder to a laptop
 ```
 
 The NucBox's own server serves the report at `/places/` (from `~/places-report`,
-or `PLACES_REPORT_DIR`), read-only and confined to that folder, and the offers
-page links it ("⌖ Where the good offers start") wherever one has been written.
+or `PLACES_REPORT_DIR`), read-only and confined to that folder.
+
+**From the offers page.** A row under the page's top figures, "Strategy &
+places report", opens the report on its Strategy tab (`places/#strategy`).
+`GET /api/placeslink` says where it goes: the server's own `places/` where it
+has a report (the NucBox); else `NUCBOX_SITE`, if set; else the address
+`rpi/sync.py` last reached, read from the `.synced` stamp it leaves beside the
+journal — the machine that keeps the copy is the one that builds and serves
+the report, so the rig already knows where it is. Only the address's scheme,
+host, port and path are passed on (no password, query or token). With none of
+the three the row stays hidden. From the rig the link leaves the car's
+server, so it opens only where the phone reaches the NucBox too (the same VPN
+the sync uses).
+
+```sh
+# on the rig, only if the sync goes somewhere other than the server that
+# serves the report, or the rig has never synced:
+NUCBOX_SITE=http://<the NucBox's address>:8082 npm start
+```
 
 `--since YYYY-MM-DD` narrows the window (the server sends at most 20,000
 offers, and the report says when it was cut); `--gps` is the directory of
@@ -925,7 +942,7 @@ grouping beats chance and the interval clears zero).
   (pressed late); the real end is that stop's end. No stop: still left out.
   Labelled `drop (gps-timed)`, counted apart, and used in real $/hr with a
   column saying how many. Chosen, not measured.
-* **Best offers** (the first tab; `good_*.csv`, `waiting_*.csv`,
+* **Best offers** (under Record; `good_*.csv`, `waiting_*.csv`,
   `top_share_tests.csv`, `dead_miles_*.csv`, `size_*.csv`):
   * *Top 25% / top 10%*: at or over the 75th / 90th percentile $/hr of every
     offer in the same three-hour block (30 offers for a block to have one);
@@ -949,9 +966,35 @@ grouping beats chance and the interval clears zero).
   * *Offer size*: short < 4 mi, 4–8, 8–12, 12+ by card miles, per town, app and
     restaurant: n, median and P90 $/hr, top-10% share, $/mi (read only).
 
+### How the page is laid out
+
+The report opens on an **Overview** (`#overview`): the few numbers that
+matter, each a tile that links to the tab it comes from, with its n under it —
+the best line to hold out for and the range that paid about the same, the
+$/hr on shift at it (gross and net), offers per free hour, card against
+actual, the typical offer, and the record (with the Strategy tab's own "thin"
+warning where it gives one, and when the report was made). Under them the
+Strategy tab's sentence on the best line, word for word; the curve, small;
+time of day as bars (each block's $/hr on shift at its own best line, a tick
+for taking everything; point estimates, no test between blocks); the Targets
+tab's town lines; the share of pickups that could not be placed; the caveats
+that used to head every tab ("Read before the numbers"); and every tab listed
+under the question it answers. It works nothing out of its own.
+
+The other tabs are grouped by question, in a nav that stays at the top: **What
+to take** (Strategy, Targets, Uber vs DoorDash, $/mi), **Where & when**
+(Places, Restaurants, Map, Towns, Grid, Busy, Store waits, After a drop,
+Strand risk, Add-ons) and **Record** (Best offers, Your takes, Gone quiet,
+Trend, Coverage, Method). Every tab's old address still works (`#targets`,
+`#strategy`, `#best`, ...), and so does the id of a part inside one
+(`#s-blocks`: the Strategy tab's blocks). The Hours picker shows on the tabs
+it changes. On a phone the long tables start folded under their headings
+(tap one to open it), the name column stays put while a table scrolls, and
+the curve is drawn small enough to read; on a laptop everything is open.
+
 ### The Targets tab
 
-The report opens on **Targets**: the offers page's Targets lines word for
+The **Targets** tab (under What to take) gives the offers page's Targets lines word for
 word (`Advice.targets`, one computation), over the report's window, with the
 card's town as on the rig, the report's own town floor (30 offers on 2 shift
 days, as its Towns tab), and its own real time (which also counts a Drop it
@@ -965,7 +1008,8 @@ offers an hour and what working it paid. Descriptive, like the rest.
 
 The owner, 7 Nov 2026: "being able to know what is a good $/hr and $/mi
 metrics to expect would help decide which offers to take and which to
-decline." The tab after Targets answers from the record itself
+decline." The Strategy tab (the first under What to take, and where the
+offers page's link lands) answers from the record itself
 (`tools/strategy.js`, one computation, which the end-of-shift report also
 prints with `--strategy`; `strategy_curve.csv` beside the page):
 
