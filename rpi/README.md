@@ -3247,7 +3247,10 @@ and when, it lives on a card in a vehicle, and it is copied to a machine at home
 
 turns it off and changes nothing else. The Trip Planner's stops follow it too:
 the scanner says on the planner line whether the journal may keep them, and
-server.js writes the row only when it may. Two kinds of row server.js writes do
+server.js writes the row only when it may. So does each order's record (the
+`order` row below): the scanner says the same on its sighting lines, and with
+it off the row keeps times, counts and words — no store, door, dropoff text,
+pin or area — and says `places: false`. Two kinds of row server.js writes do
 NOT follow it yet, and that is open rather than settled: a destination read off
 the phone — the ⌖ `mark` row, and the ends on a `pair` row — is written
 whatever this says, because the server does not read the scanner's settings.
@@ -4269,6 +4272,37 @@ another Drop, an expiry). The GPS drop, an expiry and a Took that replaced an
 order are not undone here. The snapshot is process memory: a restart forgets
 it.
 
+**Each order leaves one record behind** (the owner, 7 Nov 2026: "document as
+much as possible about an order ... It is helpful for records later"). When an
+order leaves the car, by any road — Drop, the chooser, the GPS drop, the
+completion screen, the offers page's untick, a Took that replaced it, its own
+clock, the panel's Took taken back, a boot that could not restore it — server.js
+writes one `kind: "order"` row (`orderRow`), in the same append as that end's
+drop row: `id` the holdId, `offer` the card's id, `how` and `rule` (how it
+ended, in a word and in words), `card` (pay, card and billed minutes, miles,
+deadline, stops, the verdict and $/hr the panel showed, how many times it was
+read, the pickup and dropoff as printed), `times` (offered, took, at the door,
+pressed, ended, the restarts it lived through), `pickups` (each store, its
+door, its pin and who pinned it or why not, whether and how the car was there,
+from when to when, the odometer then), `dropoff` (the end as filed, its rank
+and cue, its pin or why not, a refused end's area marked `approx`), `guess`
+(DoorDash's map label, `approx`), `planner` (the stops counted), `drive` (the
+odometer's miles since the Took and to the pickup, the fixes counted, the
+refused ones, the gaps), `money` (the card's pay over the minutes and the
+miles, worked out as `tools/shift_report.py`'s `rates` does, and only for a
+delivery's end), `pinning` (the drop row's words), `with` (the orders carried
+beside it), `snaps`, `flags` and `missing`. Text is cut at 120 characters,
+lists at eight, null fields left out: about a kilobyte. A Drop the GPS goes on
+finishing writes its row when the watch ends, the record kept in
+`finishing.json` meanwhile, so the row's end is the stop the GPS saw; an Undo
+inside the watch takes the record back with the order. A restart mid-order
+keeps everything holding.json holds; what was only memory — the odometer at
+the Took — is counted from the restart and said so in `missing`. Stamped when
+written (`at`, and `seq` for the sync), its end in `times.ended`. Nothing reads
+it to decide anything; the offers page shows it and the shift report prefers
+it. The sync carries it like any row with an id and a seq, and the NucBox's
+copy, which never rolls, keeps every one.
+
 **What it cost the bar of controls.** Two of the six are conditional — "Took
 $8.04" with an offer on the record, "Drop" with an order in the car — so with
 both up the bar goes from five buttons to seven, and measured across every panel
@@ -4952,7 +4986,20 @@ driven in it are not counted (the line says so, and how far apart the fixes
 either side are), no stop runs across it, its minutes are neither moving nor
 stopped, and a departure seen first after a gap says it may have been earlier.
 `--csv` gives the per-order rows only. It prints no address and no
-coordinate, recommends nothing, and nothing on the rig decides on it. There is no
+coordinate, recommends nothing, and nothing on the rig decides on it. Where an
+order left a record (above) the report reads its end, its pinning and its card
+off that row rather than rebuilding them, prints a "Records" line per order
+(read and shown, the pickups visited, the door, the odometer, the snaps — no
+place), and with no GPS log here takes its miles from the record's odometer and
+says so; older days are rebuilt as before. `--csv PATH` writes the **records
+CSV** to PATH instead: one row per order with the day, the app, offered, taken
+and ended, how it ended, the card's pay, minutes and miles, the minutes it
+really took, the GPS miles and where they came from, $/hr and $/mi, and the
+store, pickup and dropoff in full — the one output of this tool with places in
+it, because it is the owner's own file (`--to YYYY-MM-DD` for a range of days in
+one file). The GPS miles there are a driven-miles record per order, Took to end.
+The offers page's **⤓ Download CSV** writes the same columns from the records
+alone. There is no
 panel button for it, deliberately: the bar holds six.
 
 **And on the phone, today's so far:** `http://<rig>:8080/shift.html` (◷ Shift

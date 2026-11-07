@@ -649,6 +649,26 @@ So the Pi scanner keeps one line per offer it was confident about, in
   record only — nothing on the offers page reads it, and not at all with
   `"keepPlaces": false`. The stops are not put on the map; only the one
   dropoff it files is, as any read destination is.
+* **each order's own record.** When an order leaves the car — Drop, the
+  chooser, the GPS at its door, the app's completion screen, a Took that
+  replaced it, its own clock, a Took taken back — the server writes one row
+  saying everything it knew about it: the card as offered (pay, minutes,
+  miles, how many times it was read, the verdict and $/hr the panel showed),
+  when it was offered, taken and put down and how, each pickup's store and
+  door, where it was pinned and when the car stood there, the dropoff as
+  filed and how its pin was found or why not, the miles on the rig's own
+  odometer from the Took, the orders carried beside it, the snaps taken
+  meanwhile, and what it did not know (an order brought back after a restart
+  says its miles count from the restart). A Drop the GPS goes on finishing
+  writes its row when the GPS sees the end, so the one row has the real end.
+  Open a ticked offer's row for its **Order record**; **⤓ Download CSV** under
+  "Order records" saves one row per order for the days shown — the day, the
+  app, offered, taken and ended, how it ended, the card's pay, minutes and
+  miles, the minutes it really took, the miles driven, the pay over each, the
+  store, the pickup and the dropoff — made in your browser from what the page
+  already has. DoorDash's map label is kept marked as a guess and is never a
+  figure. The miles column is a **driven-miles record per order**, from the
+  Took to the end: useful for a mileage record; what you do with it is yours.
 * **tick the ones you took.** The scanner cannot see the Accept button and never
   touches it, so it cannot know — but you can tell it, and once you do the page
   shows what you actually worked against what you were offered, per day and
@@ -735,7 +755,9 @@ Two things it is careful about:
   It is a real trade: this is a record of where you were and when, it lives on a
   card in a vehicle, and it is copied to the machine at home. `"keepPlaces":
   false` alongside the other settings in `rpi/config.json` turns it off and
-  changes nothing else, and the Trip Planner's stops follow it too. A
+  changes nothing else, and the Trip Planner's stops follow it too, and so
+  does each order's record, which then keeps times, counts and words and no
+  store, door, dropoff or pin. A
   destination read off the phone is still written on the `mark` and `pair`
   rows server.js writes whatever it says — the server does not read that
   setting — and that is open. A 📷 Snap keeps the card's places and the car's
