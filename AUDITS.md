@@ -3978,6 +3978,55 @@ mid-trip scan the old arithmetic was right, which is backwards: a row being
 *seen* made the record worse. `busy()` had it right all along, which is why
 `occupancy()` now exists and all three read it.
 
+**What a card turns into, and what holding out for a line paid, measured
+offline (7 Nov 2026).** The owner: "being able to know what is a good $/hr and
+$/mi metrics to expect would help decide which offers to take and which to
+decline." The replay above answers which line earns most at the cards' own
+minutes; nothing said what a card of a given $/hr had actually turned into, or
+priced a line with the measured time in it. `tools/strategy.js` does both, for
+the NucBox report's Strategy tab (`tools/places_report.js`) and the end-of-shift
+report's `--strategy` (`tools/shift_report.py`, which runs it under node rather
+than keeping a Python copy), and each report hands it the orders as its OWN
+rule timed them — the module never decides whether an order was delivered.
+
+  - *The curve is a renewal model, not a second replay.* Free time is the
+    shift (every card seen and every hold, joined across silences under
+    `SHOWN_AT`) less every hold; λ(T) is the cards at T or more seen while
+    free, per free hour; effective $/hr(T) = pay(T) / (1/λ(T) + time(T)) =
+    P / (H + r(T) × C / 60), with time the card's minutes × the measured
+    actual/card ratio r(T). r is taken over the timed orders whose card was at
+    T or more, because picking high $/hr picks optimistic minutes (the
+    re-timing entry in Settled): one ratio for every line flattered the high
+    ones. Minutes times a ratio of minutes is `refigured`'s scaling, not a
+    pace.
+  - *A thin point is never the best.* Under `TARGET_OFFERS` offers at a line
+    it is drawn hollow and kept out of the best and of the flat region
+    (within `PLATEAU`, now exported from advice.js so both call one width a
+    plateau). On the hand-worked fixture in `tests/strategy.test.js` the $26
+    point is 22.50 on 10 offers against a best of 23.48: one more thin card
+    and the tail would have "won".
+  - *The per-block curves carry their own held-out check.* The Settled entry
+    against a line per hour is run again on the record in hand: fitted on the
+    other shift days, scored on the one left out, a line per block against
+    one line. On the fixture whose answer is worked by hand, one line $26.34
+    an hour on shift, a line per block $25.71, everything $18.62.
+  - *What is not counted*: a card read twice (one per id, seen at its first
+    reading), an untrusted card (it still says the rig was on), a card seen
+    with an order in the car or an add-on card (not a free driver's choice),
+    a card alone in a silence, an order with no time at the door, one put down
+    in under 0.3 of its card, one whose clock stepped or ran past four hours,
+    and every approximate point: nothing in the module reads a position.
+
+What it does not see, and says: stacking (the curve is a driver who takes
+nothing while carrying, so it reads low by what stacking earns); an order with
+a Took and no drop row is free time in the NucBox report (takenRuns never lists
+it); the miles between orders cost nothing on the net curve. How much record a
+±$2 answer needs is arithmetic on the one measured week's night-to-night swing
+($13.92 to $27.06): about 25 shift days, and 20 timed orders for a ratio inside
+about 10%. Under 10 shift days, 12 timed orders or 20 free hours the summary
+says "thin". tests/strategy.test.js 80, tests/placesreport.test.js 308 → 326,
+tools/test_shift_report.py 233 → 244.
+
 ---
 
 ## Settled — do not re-propose

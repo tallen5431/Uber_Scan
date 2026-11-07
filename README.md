@@ -562,6 +562,7 @@ used. A one-line key across the map's foot names the marks on it.
 | `tools/street_index.py` | Makes the street index once, on the NucBox, from the Georgia extract it already holds — osmium-tool for the cutting, Python's standard library for the rest |
 | `tools/install-sync.sh` | Puts the rig's journal on a timer to the machine at home; see the rig's README |
 | `tools/places_report.js`, `tools/places_nightly.sh` | The NucBox's offline report of where good offers start, and its nightly rebuild; see *Where the good offers start* |
+| `tools/strategy.js` | What $/hr to expect and what holding out for a line paid, off the record: one computation for the report's Strategy tab and `tools/shift_report.py --strategy`; see *The Strategy tab* |
 | [`AUDITS.md`](AUDITS.md) | What has already been looked at: what was fixed, what is known and still open, and — the point of the file — proposals that were checked against the code and found to be wrong, so the same ground is not dug twice. Read it before starting anything that sounds like an improvement |
 
 ## Looking at a shift afterwards
@@ -959,6 +960,44 @@ only the report has: the places, restaurants and 2-mile cells that beat
 chance with their interval clear of zero (from the tables in the other
 tabs), and, where GPS waiting spells exist, the town to wait in by top-10%
 offers an hour and what working it paid. Descriptive, like the rest.
+
+### The Strategy tab
+
+The owner, 7 Nov 2026: "being able to know what is a good $/hr and $/mi
+metrics to expect would help decide which offers to take and which to
+decline." The tab after Targets answers from the record itself
+(`tools/strategy.js`, one computation, which the end-of-shift report also
+prints with `--strategy`; `strategy_curve.csv` beside the page):
+
+* **Plain lines first**, each with its n: what the typical card showed, what
+  cards turned into, the line that paid best per hour on shift and the range
+  that paid about the same, the same per three-hour block, and how far to
+  trust it.
+* **What offers look like**: the panel's $/hr and the card's $/mi (pay over
+  its miles, nothing off), quartiles and the 90th percentile, by app, block,
+  weekday or weekend (a Saturday or Sunday shift day) and the card's town; and
+  how many offers came in per hour with no order in the car.
+* **How cards turn into actuals**: over the orders this report timed at the
+  door (the Your takes tab's rule), actual over card minutes and GPS over card
+  miles (the order record's odometer, else the GPS log), and the median card
+  and actual $/hr, by app, card length, card $/hr, block and town — "card ÷
+  ratio" is what a card in that band has turned into.
+* **The accept-threshold curve**: for each line from $10 to $40, of the
+  offers seen while free, those at the line or above arrive at λ an hour, pay
+  pay(T) and take their card minutes × the measured actual/card ratio, and
+  **effective $/hr on shift = pay(T) ÷ (1/λ(T) + time(T))**. Gross, and net
+  of the running cost the rows carry on the miles driven. A point under 30
+  offers is thin and is never the best; the flat region is every line within
+  5% of the best; the band is a 95% interval with shift days resampled. Per
+  block, app and weekday too, with the held-out check of a line per block
+  beside them. The same on $/mi, for reading only.
+
+It describes the record; it is not an accept rule, it changes no verdict, and
+nothing on the rig reads it (no $/mile rule, no payout floor, no pace, no line
+tuned to the hour: AUDITS.md, Settled). It ignores stacking, so the curve
+reads low by what a second order earns. It wants about 25 shift days and 20
+timed orders before its best line is good to a couple of dollars, and says
+"thin" until then.
 
 ### Every night, on the NucBox
 
