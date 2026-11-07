@@ -14101,10 +14101,15 @@ try:
         _atook(_plb, 'pl-street', _KES)
         _h = _settled(_plb)
         _hid = _h.get('holdId')
+        # ...and, after the door, what the refusal measured (server.js reachOf,
+        # reachSaid): the street's one answer 1.66 mi from the card's fix,
+        # inside its 5.5 mi disc, and no door of that number among it.
         eq('[pin said] an end refused says so once, in the server\'s words, with its door cut '
-           'short and no town',
+           'short and no town, and what the refusal measured after it',
            _plsaid(_hid), ['pin: none end #%s "street found, not that door" (4821 Kestrel Dr)'
-                           % _hid])
+                           ' - 1 answered, 0 at the door, the nearest 1.66 mi from the centre, '
+                           'radius 5.5 mi (card 5 mi + 0.5 slack); nearest: highway '
+                           '"Kestrel Drive, Marietta, Cobb "' % _hid])
         # The status is asked over and over, as the panel asks it: the same
         # reason is not said twice.
         for _ in range(5):
@@ -14149,7 +14154,10 @@ try:
         _hid2 = _h.get('holdId')
         eq('[pin said] a DoorDash store refused is said as "store 2", its door cut short',
            [l for l in _plsaid('store 2 #' + _hid2)],
-           ['pin: none store 2 #%s "street found, not that door" (4821 Kestrel Dr)' % _hid2])
+           ['pin: none store 2 #%s "street found, not that door" (4821 Kestrel Dr)'
+            ' - 1 answered, 0 at the door, the nearest 1.66 mi from the centre, radius 9.2 mi '
+            '(card 8.7 mi + 0.5 slack); nearest: highway "Kestrel Drive, Marietta, Cobb "'
+            % _hid2])
         eq('[pin said] ...and the store pinned at its first ask says nothing',
            [l for l in _pllog if 'store 1 #' + _hid2 in l], [])
         post(_plb, '/api/held-pickup', {'holdId': _hid2, 'lat': 33.9610, 'lon': -84.5410,
@@ -14167,14 +14175,40 @@ try:
                        {'offer': dict(_SQ, id='pl-offer2', pay=9.0, minutes=20.0,
                                       billedMinutes=20.0, miles=5.0, cost=0.9,
                                       dropoff='Kestrel Dr, Marietta', app='uber',
-                                      screen='uber.offer')}], _fh)
+                                      screen='uber.offer')},
+                       # ...and an Uber offer whose bracketed door the NucBox
+                       # holds 3.35 mi north of the fix, past its 2.8 mi
+                       # card's 3.3 mi disc and inside the disc's box (rounded
+                       # out to 34.01): the one refusal that is the reach.
+                       {'offer': dict(_SQ, id='pl-reach', pay=7.0, minutes=15.0,
+                                      billedMinutes=15.0, miles=2.8, toPickupMiles=0.9,
+                                      legs=2, cost=0.5, app='uber', screen='uber.offer',
+                                      pickup='Example Diner (1985 Cobb Parkway)')}], _fh)
         os.rename(os.path.join(_pldir, 'say-0.json.tmp'), os.path.join(_pldir, 'say-0.json'))
-        eq('[pin said] an offer whose dropoff the NucBox refused is said as an offer\'s',
+        # (The DoorDash two-store order taken above is still in the car when
+        # these cards are read: one order, said beside the radius.)
+        _plcar = '; 1 order in the car'
+        eq('[pin said] an offer whose dropoff the NucBox refused is said as an offer\'s, with '
+           'what it measured and the orders in the car when the card was read',
            _plsaid('#pl-offer '), ['pin: none offer end #pl-offer "street found, not that door" '
-                                   '(4821 Kestrel Dr)'])
+                                   '(4821 Kestrel Dr) - 1 answered, 0 at the door, the nearest '
+                                   '1.66 mi from the centre, radius 5.5 mi (card 5 mi + 0.5 slack'
+                                   '%s); nearest: highway "Kestrel Drive, Marietta, Cobb "'
+                                   % _plcar])
         time.sleep(0.5)
         eq('[pin said] ...and an offer with no house number to ask says nothing',
            [l for l in _pllog if 'pl-offer2' in l and l.startswith('pin:')], [])
+        # The 7 Nov line, `pin: none offer pickup #… "not inside the card's
+        # reach" (Utopia at the…)`, said nothing of how far outside. Now: the
+        # three doors' nearest 3.35 mi out against a 3.3 mi radius, how that
+        # radius was set, and the card's own 0.9 mi to the pickup beside it.
+        eq('[reach] an offer pickup refused as outside the reach says how far out its answer '
+           'was, the radius and how it was set, and the card\'s miles to the pickup',
+           _plsaid('#pl-reach '),
+           ['pin: none offer pickup #pl-reach "not inside the card\'s reach" (Example Diner '
+            '(1985…) - 3 answered, 3 at the door, the nearest 3.35 mi from the centre, '
+            'radius 3.3 mi (card 2.8 mi + 0.5 slack; card says 0.9 mi to the pickup%s); '
+            'nearest: place "1985, Cobb Parkway, Kennesaw, "' % _plcar])
     finally:
         stop(_plp)
 finally:
@@ -14183,6 +14217,124 @@ finally:
 _plsrc = open(os.path.join(ROOT, 'server.js'), encoding='utf-8').read()
 ok_('[pin said] the log line never stands in a search\'s way: both sayers swallow their own '
     'faults', _plsrc.count('} catch (e) { /* the log only */ }') == 2)
+
+# --- [reach] what a refusal measured, the functions themselves --------------
+#
+# server.js reachOf / discSet / reachCard / reachSaid, taken out of its source
+# into a context of their own (the file starts a server when run), over
+# invented answers round Marietta Square as the fake's own. Measurement only:
+# the last checks hold that nothing that pins or decides reads `reach`.
+_REACHJS = r'''
+var fs = require('fs'), vm = require('vm'), path = require('path');
+var ROOT = process.argv[2];
+var src = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
+function grab(name) {
+  var i = src.indexOf('\nfunction ' + name + '(');
+  if (i === -1) throw new Error('server.js has no function ' + name);
+  return src.slice(i, src.indexOf('\n}\n', i) + 3);
+}
+function grabVar(name) {
+  var i = src.indexOf('\nvar ' + name + ' = ');
+  if (i === -1) throw new Error('server.js has no var ' + name);
+  return src.slice(i, src.indexOf(';\n', i) + 2);
+}
+var MV = require(path.join(ROOT, 'map-view.js'));
+var ctx = { MV: MV, Math: Math, String: String, Array: Array, Object: Object };
+vm.createContext(ctx);
+['END_WHY', 'REACH_NAME_SHOWN', 'REACH_WHYS'].forEach(function (n) { vm.runInContext(grabVar(n), ctx); });
+['reachRound', 'reachOf', 'discSet', 'reachCard', 'reachSaid'].forEach(function (n) {
+  vm.runInContext(grab(n), ctx);
+});
+var SQ = { lat: 33.9526, lon: -84.5499, gpsOk: true, gpsErr: 10, gpsMode: 3, gpsAge: 0.5,
+           hasTotal: true, whole: true };
+function card(x) { return Object.assign({}, SQ, x || {}); }
+function at(dLat, dLon, name, kind) { return { lat: SQ.lat + dLat, lon: SQ.lon + dLon, name: name, kind: kind }; }
+var door = MV.searchPlan('Example Diner (410 Pellmore Rd)');
+var out = {};
+var d3 = MV.discFor(card({ miles: 2.8, toPickupMiles: 0.9 }));
+var far = [at(0.0484, 0, '410, Pellmore Road, Faketown', 'building'),
+           at(0.03, 0.03, 'Pellmore Road, Faketown', 'highway')];
+var r1 = MV.pickInDisc(far, d3, door, null);
+out.outside = ctx.reachCard(ctx.reachOf(r1, far, d3, door), card({ miles: 2.8, toPickupMiles: 0.9 }));
+out.empty = ctx.reachOf({ at: null, why: 'none', n: 0 }, [], d3, door);
+out.emptySaid = ctx.reachSaid(out.empty);
+var street = [at(0.01, 0.01, 'Pellmore Road, Faketown', 'highway')];
+out.nodoor = ctx.reachOf(MV.pickInDisc(street, d3, door, null), street, d3, door);
+var ten = [];
+for (var i = 0; i < 10; i++) ten.push(at(0.005 * i, -0.004 * i, '410, Pellmore Road, Faketown', 'building'));
+var dd = card({ miles: 7.8, hasTotal: false, legs: 1 });
+var d60 = MV.discFor(dd);
+out.capped = ctx.reachCard(ctx.reachOf(MV.pickInDisc(ten, d60, door, 10), ten, d60, door), dd);
+out.cappedSaid = ctx.reachSaid(out.capped);
+var two = [at(0.01, 0, '410, Pellmore Road, Faketown', 'building'),
+           at(-0.02, 0, '410, Pellmore Road, Othertown', 'building')];
+out.several = ctx.reachOf(MV.pickInDisc(two, d3, door, null), two, d3, door);
+out.pinned = ctx.reachOf(MV.pickInDisc([two[0]], d3, door, null), [two[0]], d3, door);
+out.nohouse = ctx.reachOf({ at: null, why: 'NucBox down' }, far, d3, door);
+out.nodisc = ctx.reachOf(r1, far, null, door);
+out.sets = [ctx.discSet(d3), ctx.discSet(d60),
+            ctx.discSet(MV.discFor({ addon: true, miles: 0.4, hasTotal: true, whole: true }, d3)),
+            ctx.discSet(MV.discFor(card({ miles: 2.8, gpsOk: false, gpsWhy: 'rough', gpsErr: 80 }))),
+            ctx.discSet(MV.discFor(card({ miles: 2.8, after: [{ lat: 33.99, lon: -84.55, widen: 0 }] })))];
+out.long = ctx.reachOf(r1, [at(0.0484, 0, 'A very long display name, Faketown, Cobb County', 'shop')],
+                       d3, door).name;
+out.said = ctx.reachSaid(out.outside);
+out.none = [ctx.reachSaid(null), ctx.reachSaid(undefined)];
+console.log(JSON.stringify(out));
+'''
+_rdir = tempfile.mkdtemp()
+try:
+    with open(os.path.join(_rdir, 'reach.js'), 'w') as fh:
+        fh.write(_REACHJS)
+    _rr = subprocess.run(['node', os.path.join(_rdir, 'reach.js'), ROOT], capture_output=True,
+                         text=True, timeout=60)
+    try:
+        _ro = json.loads(_rr.stdout)
+    except ValueError:
+        _ro = {'error': (_rr.stderr or _rr.stdout)[-400:]}
+    eq('[reach] a door answered past the disc\'s edge: how many answered and were the door, '
+       'the nearest one\'s miles from the centre, the radius and how it was set, the card\'s '
+       'own miles to the pickup', _ro.get('outside'),
+       {'why': "not inside the card's reach", 'n': 2, 'doors': 1, 'r': 3.3,
+        'set': 'card 2.8 mi + 0.5 slack', 'mi': 3.34, 'kind': 'building',
+        'name': '410, Pellmore Road, Faketown', 'toPickup': 0.9, 'cardMi': 2.8})
+    eq('[reach] nothing answered in the box: no distance to give, and the line says so',
+       ((_ro.get('empty') or {}).get('n'), (_ro.get('empty') or {}).get('mi'), _ro.get('emptySaid')),
+       (0, None, " - nothing answered in the disc's box; radius 3.3 mi (card 2.8 mi + 0.5 slack)"))
+    eq('[reach] the street found and not the door: its nearest answer, inside the disc',
+       {k: (_ro.get('nodoor') or {}).get(k) for k in ('why', 'n', 'doors', 'mi', 'kind')},
+       {'why': 'street found, not that door', 'n': 1, 'doors': 0, 'mi': 0.9, 'kind': 'highway'})
+    eq('[reach] "too many answers": the count, the cut, how many inside and their spread, and '
+       'why the card set no radius of its own', _ro.get('cappedSaid'),
+       ' - 10 answered (cut at 10), 10 at the door, 10 inside, 3.73 mi apart; radius 60 mi '
+       '(no yardstick: the 60 mi default; yardstick refused: shape)')
+    eq('[reach] two doors that disagree: both inside, 2.07 mi apart',
+       {k: (_ro.get('several') or {}).get(k) for k in ('why', 'inside', 'spread')},
+       {'why': 'several answers', 'inside': 2, 'spread': 2.07})
+    eq('[reach] nothing for a pin, a refusal with nothing measured, or no disc',
+       (_ro.get('pinned'), _ro.get('nohouse'), _ro.get('nodisc')), (None, None, None))
+    eq('[reach] the radius said as it was set: the card, the default, an add-on\'s trip, a '
+       'rough fix\'s widening, the circles round held ends', _ro.get('sets'),
+       ['card 2.8 mi + 0.5 slack', 'no yardstick: the 60 mi default',
+        'trip and add-on 3.2 mi + 0.5 slack', 'card 2.8 mi + 0.5 slack, widened for a 80 m fix',
+        'card 2.8 mi + 0.5 slack; also 1 circle round held ends (3.3 mi)'])
+    eq('[reach] the answer\'s name cut to thirty letters', _ro.get('long'),
+       'A very long display name, Fake')
+    eq('[reach] ...and the whole tail as the log says it', _ro.get('said'),
+       ' - 2 answered, 1 at the door, the nearest 3.34 mi from the centre, radius 3.3 mi '
+       '(card 2.8 mi + 0.5 slack; card says 0.9 mi to the pickup); nearest: building '
+       '"410, Pellmore Road, Faketown"')
+    eq('[reach] no measurement, no tail', _ro.get('none'), ['', ''])
+finally:
+    shutil.rmtree(_rdir, ignore_errors=True)
+# Nothing that pins, files or decides reads it: the on-time hint takes `r.at`
+# alone, the pickup's status word is END_WHY's, and the drop row's words are
+# untouched (tools/shift_report.py WORD_MAX reads them).
+_offer_pin = _plsrc[_plsrc.index('\nfunction offerPin('):]
+_offer_pin = _offer_pin[:_offer_pin.index('\n}\n')]
+ok_('[reach] the on-time hint never reads what a refusal measured', 'reach' not in _offer_pin)
+ok_('[reach] ...nor the pickups\' status word', "pickSearch[id].why[a.q] = END_WHY[res.why] || "
+    "'no house number';" in _plsrc)
 
 # --- the order record: one row as each order leaves the car (7 Nov 2026) --------
 #

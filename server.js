@@ -3339,8 +3339,16 @@ function endHold(key) {
  * armed. Read only beside endWhyFor (heldEndState), so a changed dropoff
  * does not wear the old area; any refusal without one takes it off. */
 function refuseHeldEnd(h, why, area) {
-  memoVerdict(holdIdOf(h), undefined, { pinned: false, why: why, area: area || null });
-  pinSaidNone(holdIdOf(h), 'end', why, h.dropoff, null);
+  // ...and what the search that ended in this refusal measured (reachOf,
+  // kept on the end's search by settleHeldEnd and searchHeldPlace), said
+  // only beside the refusal it was measured for: a 'NucBox down' or a later
+  // step's own word is not that search's answer.
+  var on = endSearch[holdIdOf(h)];
+  var reach = on && on.reach && on.reach.why === why ? on.reach : null;
+  var verdict = { pinned: false, why: why, area: area || null };
+  if (reach) verdict.reach = reach;
+  memoVerdict(holdIdOf(h), undefined, verdict);
+  pinSaidNone(holdIdOf(h), 'end', why, h.dropoff, null, reach);
   h.endWhy = why;
   h.endWhyFor = endTextOf(h);
   if (area && isFinite(area.lat) && isFinite(area.lon)) {
@@ -3426,7 +3434,9 @@ function pinWhichPickup(h, q) {
 }
 
 // Never in the way of a search or a pin: a log line that throws costs nothing.
-function pinSaidNone(id, which, why, door, offer) {
+// `reach` (reachOf's, or null) is what the refusal measured, said after the
+// door (reachSaid) — the words in quotes stay the server's own.
+function pinSaidNone(id, which, why, door, offer, reach) {
   try {
     if (!id || !why) return;
     var key = (offer ? 'offer\n' : '') + pinKey(id, which, door);
@@ -3439,8 +3449,160 @@ function pinSaidNone(id, which, why, door, offer) {
     }
     on.whys.push(why);
     console.log('pin: none ' + (offer ? 'offer ' : '') + which + ' #' + id + ' "' + why + '"'
-                + (door ? ' (' + pinDoorShort(door) + ')' : ''));
+                + (door ? ' (' + pinDoorShort(door) + ')' : '') + reachSaid(reach));
   } catch (e) { /* the log only */ }
+}
+
+/* --- what a refusal measured, said beside it ---------------------------------
+ *
+ * WHY. The NucBox places report over 45 shift days: "Pickups placed: 1536 of
+ * 7984 (19.2%)", and the largest single reason for the rest, "not found
+ * inside the card's reach: 1342". The rig's own log said the same of offer
+ * pickups on 7 Nov — `pin: none offer pickup #… "not inside the card's
+ * reach" (Utopia at the…)`, `(CVS (1554 North…)` — and "too many answers" of
+ * a third, and nothing more. Whether such a door lay a hair past the disc's
+ * edge, miles off, or was never answered at all could not be told from the
+ * line, and those three want three different fixes: a wider disc, a disc
+ * centred elsewhere, or a better question. So the measurements go beside the
+ * words. The words do not change — they are END_WHY's, read by the status,
+ * the drop row and the offline shift report's WORD_MAX) — and nothing here is
+ * read by anything that chooses, pins, files or decides.
+ *
+ * reachOf(res, hits, disc, plan): for a refusal pickInDisc or pickPlace made
+ * over `hits` (the answers it chose among, which the NucBox sent from inside
+ * the disc's BOX: every question this rig asks is `bounded=1`, so `n` is
+ * what the box held, not what the NucBox holds), as
+ *
+ *   why     the refusal's word as the panel says it (END_WHY)
+ *   n       answers that are points
+ *   doors   of those, at the house number asked (a door plan; else null)
+ *   mi      the nearest REFUSED answer's crow miles from the disc's centre
+ *           ('none': the doors outside it, or every answer where none is a
+ *           door; 'nodoor', 'noplace': every answer), 2 dp; null with none
+ *   r       the disc's radius in miles, 2 dp, and `set` how it was set
+ *           (discSet: the card's miles and the slack, the default, a rough
+ *           fix's widening, an add-on's trip, `also` circles)
+ *   alsoMi  where the disc has `also` circles: the same answer's miles from
+ *           the nearest of THEIR centres (the radius is each circle's own)
+ *   kind    the nearest answer's Nominatim category ('highway' is a road
+ *           answered for a door, 'building' or 'shop' a place) and `name`
+ *           its display name cut to REACH_NAME_SHOWN, as the panel cuts
+ *   inside, spread   'several' and 'capped' ("too many answers"): how many
+ *           were inside the disc (the doors among them where any are, as
+ *           pickInDisc counts) and the miles between the farthest two of
+ *           those, and `cut` the NucBox's limit where the list was cut
+ *
+ * or null for a pin, a refusal of a kind nothing is measured for ('no house
+ * number', 'NucBox down', a corner), or no disc. Never throws on a list it
+ * does not like: a measurement that fails is a measurement not said. */
+var REACH_NAME_SHOWN = 30;
+var REACH_WHYS = ['none', 'nodoor', 'noplace', 'several', 'capped'];
+
+function reachRound(v) { return Math.round(v * 100) / 100; }
+
+function reachOf(res, hits, disc, plan) {
+  try {
+    if (!res || res.at || REACH_WHYS.indexOf(res.why) === -1 || !disc || !disc.at) return null;
+    var pts = (Array.isArray(hits) ? hits : []).filter(function (h) {
+      return h && typeof h.lat === 'number' && typeof h.lon === 'number'
+        && isFinite(h.lat) && isFinite(h.lon);
+    });
+    var door = !!(plan && plan.door && plan.house);
+    var doors = door ? pts.filter(function (h) { return MV.hasDoor(h, plan.house); }) : null;
+    var out = { why: END_WHY[res.why] || res.why, n: pts.length,
+                doors: doors ? doors.length : null,
+                r: reachRound(disc.miles), set: discSet(disc) };
+    if (res.why === 'several' || res.why === 'capped') {
+      var among = doors && doors.length ? doors : pts;
+      var inside = among.filter(function (h) { return MV.inDisc(disc, h); });
+      var most = 0;
+      for (var i = 0; i < inside.length; i++) {
+        for (var j = i + 1; j < inside.length; j++) most = Math.max(most, MV.crowMiles(inside[i], inside[j]));
+      }
+      out.inside = inside.length;
+      out.spread = reachRound(most);
+      if (res.why === 'capped') out.cut = typeof res.n === 'number' ? res.n : null;
+      return out;
+    }
+    // The answers the refusal turned down: for 'none', the doors (all of
+    // them outside, or there would have been no refusal), else every answer.
+    var refused = res.why === 'none' && doors && doors.length ? doors : pts;
+    var near = null, nearMi = null;
+    refused.forEach(function (h) {
+      var d = MV.crowMiles(disc.at, h);
+      if (nearMi === null || d < nearMi) { near = h; nearMi = d; }
+    });
+    out.mi = nearMi === null ? null : reachRound(nearMi);
+    if (near && Array.isArray(disc.also) && disc.also.length) {
+      out.alsoMi = reachRound(Math.min.apply(null, disc.also.map(function (c) {
+        return MV.crowMiles(c.at, near);
+      })));
+    }
+    if (near) {
+      out.kind = near.kind || null;
+      out.name = String(near.name || '').slice(0, REACH_NAME_SHOWN);
+    }
+    return out;
+  } catch (e) {
+    return null;
+  }
+}
+
+/* How a disc's radius was set, in words for the log: the card's own miles
+ * and SLACK_MI (MV.discFor), an add-on's trip grown by its miles, the
+ * sixty-mile default of a card that is no yardstick, the widening round a
+ * rough fix (MV.discFix: twice its error), and the `also` circles round the
+ * ends of orders already in the car (MV.afterParts). */
+function discSet(disc) {
+  if (!disc) return null;
+  var s = typeof disc.card === 'number'
+    ? (disc.addOn ? 'trip and add-on ' : 'card ') + reachRound(disc.card) + ' mi + '
+      + MV.SLACK_MI + ' slack'
+    : (disc.addOn ? 'add-on, ' : '') + 'no yardstick: the ' + MV.BOX_MILES + ' mi default';
+  if (typeof disc.rough === 'number') s += ', widened for a ' + Math.round(disc.rough) + ' m fix';
+  var also = Array.isArray(disc.also) ? disc.also.length : 0;
+  if (also) {
+    s += '; also ' + also + ' circle' + (also === 1 ? '' : 's') + ' round held ends ('
+      + disc.also.map(function (c) { return reachRound(c.miles); }).join(', ') + ' mi)';
+  }
+  return s;
+}
+
+/* ...and what the CARD said of its miles, where the caller has the card:
+ * Uber's drive to the pickup (`toPickupMiles`, the approach leg the card
+ * printed apart) and, for a card that set no radius of its own, why not
+ * (MV.cardYardstick: 'shape' a one-leg card, 'early', 'untrusted', 'none',
+ * 'addon'). Put on `reach` in place; null in, null out. */
+function reachCard(reach, card) {
+  if (!reach || !card) return reach;
+  if (typeof card.toPickupMiles === 'number' && isFinite(card.toPickupMiles)) {
+    reach.toPickup = card.toPickupMiles;
+  }
+  if (typeof card.miles === 'number' && isFinite(card.miles)) reach.cardMi = card.miles;
+  var yard = MV.cardYardstick(card);
+  if (!yard.miles && yard.why) reach.yard = yard.why;
+  return reach;
+}
+
+// The measurements as the log line's tail: '' for none.
+function reachSaid(reach) {
+  if (!reach || typeof reach !== 'object') return '';
+  var radius = 'radius ' + reach.r + ' mi (' + reach.set
+    + (reach.yard ? '; yardstick refused: ' + reach.yard : '')
+    + (typeof reach.toPickup === 'number' ? '; card says ' + reach.toPickup + ' mi to the pickup' : '')
+    + (reach.held ? '; ' + reach.held + ' order' + (reach.held === 1 ? '' : 's') + ' in the car' : '')
+    + ')';
+  if (typeof reach.inside === 'number') {
+    return ' - ' + reach.n + ' answered' + (reach.cut ? ' (cut at ' + reach.cut + ')' : '')
+      + (reach.doors !== null ? ', ' + reach.doors + ' at the door' : '')
+      + ', ' + reach.inside + ' inside, ' + reach.spread + ' mi apart; ' + radius;
+  }
+  if (!reach.n) return ' - nothing answered in the disc\'s box; ' + radius;
+  return ' - ' + reach.n + ' answered' + (reach.doors !== null ? ', ' + reach.doors + ' at the door' : '')
+    + ', the nearest ' + reach.mi + ' mi from the centre'
+    + (typeof reach.alsoMi === 'number' ? ' (' + reach.alsoMi + ' from an also circle\'s)' : '')
+    + ', ' + radius
+    + (reach.kind || reach.name ? '; nearest: ' + (reach.kind || '?') + ' "' + (reach.name || '') + '"' : '');
 }
 
 function pinSaidFound(id, which, door, by, asks) {
@@ -3655,8 +3817,8 @@ function searchHeldEnd(key, attempt) {
       if (!now || heldEndPin(now)) return;
       answered(out);
     }, read, unanswered);
-  }, function (res, asked, via) {
-    settleHeldEnd(key, attempt, disc, res, asked, via);
+  }, function (res, asked, via, seen) {
+    settleHeldEnd(key, attempt, disc, res, asked, via, seen);
   });
 }
 
@@ -3698,12 +3860,20 @@ function searchHeldEnd(key, attempt) {
  * Never the public geocoder. Each question is asked at most once a chain. */
 function doorChain(plan, disc, named, ask, done) {
   var box = MV.discBox(disc);
+  // ...and, fourth to `done`, what its answer was chosen FROM: {hits, plan},
+  // the list and the plan of the question whose answer `res` is (the
+  // first's, unless a retry's answer was kept), for reachOf's measurements
+  // beside a refusal. Read by the log and the search memo only; nothing
+  // chooses by it, and a caller that takes three arguments loses nothing.
+  var seen1 = null;
+  var seenOf = function (hits, p) { return { hits: hits || [], plan: p }; };
   ask(nbxSearchTarget('street', nbxTerm(plan.street), box), null, function (out) {
     var res = MV.pickInDisc(out.hits, disc, plan, out.cutAt);
+    seen1 = seenOf(out.hits, plan);
     var again = MV.streetRetry(plan);
     if (again && MV.retryWanted(res, out.hits, disc)) {
       var said = nbxTerm(again.street);
-      if (!said) return done(res, null, null);
+      if (!said) return done(res, null, null, seen1);
       return ask(nbxSearchTarget('street', said, box), null, function (out2) {
         var two = MV.pickRetry(out2.hits, disc, again, out2.cutAt);
         // Neither the street as printed nor without its type word: the
@@ -3712,36 +3882,39 @@ function doorChain(plan, disc, named, ask, done) {
         // A pin here is only ever the retry's own (the first had none), so
         // the street it was found by is the retry's.
         var kept = MV.afterRetry(res, two);
-        done(kept, again.street, kept.at ? 'type' : null);
+        done(kept, again.street, kept.at ? 'type' : null,
+             kept === res ? seen1 : seenOf(out2.hits, again));
       });
     }
     if (named && NBX.streets && MV.nameWanted(res, out.hits, disc, null)) return byName(res);
     var dir = MV.dirRetry(plan);
     if (dir && MV.dirWanted(res, out.hits, disc)) {
       var said3 = nbxTerm(dir.street);
-      if (!said3) return done(res, null, null);
+      if (!said3) return done(res, null, null, seen1);
       return ask(nbxSearchTarget('street', said3, box), null, function (out3) {
         var two = MV.afterDir(res, MV.pickRetry(out3.hits, disc, dir, out3.cutAt));
-        done(two, two === res ? null : dir.street, two === res ? null : 'dir');
+        done(two, two === res ? null : dir.street, two === res ? null : 'dir',
+             two === res ? seen1 : seenOf(out3.hits, dir));
       });
     }
-    done(res, null, null);
+    done(res, null, null, seen1);
   });
   function byName(first) {
     var said = nbxTerm(MV.nameAsked(plan) || '');
-    if (!said) return done(first, null, null);
+    if (!said) return done(first, null, null, seen1);
     ask(streetTarget('named', { name: said, box: box }), function (body) {
       var a = streetAnswer('named', body);
       return a.error ? null : a;
     }, function (ans) {
       var p2 = MV.nameRetry(plan, ans);
       var said2 = p2 ? nbxTerm(p2.street) : null;
-      if (!said2) return done(first, null, null);
+      if (!said2) return done(first, null, null, seen1);
       ask(nbxSearchTarget('street', said2, box), null, function (out) {
         var kept = MV.afterRetry(first, MV.pickNamed(out.hits, disc, p2, out.cutAt));
-        done(kept, p2.street, kept.at ? 'rescue' : null);
+        done(kept, p2.street, kept.at ? 'rescue' : null,
+             kept === first ? seen1 : seenOf(out.hits, p2));
       });
-    }, function () { done(first, null, null); });
+    }, function () { done(first, null, null, seen1); });
   }
 }
 
@@ -3751,10 +3924,17 @@ function doorChain(plan, disc, named, ask, done) {
  * retry, kept on the pin for the drop row's word, pinOutcome). The street and
  * not the door, and the phone printed a place for the stop: the place is
  * asked next, in the same disc (the owner, 17 Oct). */
-function settleHeldEnd(key, attempt, disc, res, asked, via) {
+function settleHeldEnd(key, attempt, disc, res, asked, via, seen) {
   memoPick(memoId(key), undefined, 'door' + (via ? ' (' + via + ')' : ''), res);
   var now = endHold(key);
   if (!now || heldEndPin(now)) return;
+  // What the door's refusal measured (reachOf, doorChain's `seen`), kept on
+  // the end's search for refuseHeldEnd to say beside the refusal it ends in.
+  var on = endSearch[holdIdOf(now)];
+  if (on) {
+    on.reach = reachCard(reachOf(res, seen && seen.hits, disc, seen && seen.plan),
+                         cardForSearch(now));
+  }
   // (`res.area`, the street's general area, rides down both to the refusal
   // they may end in: refuseHeldEnd's endArea, never a pin.)
   if (!res.at && res.why === 'nodoor' && placeOf(now)) {
@@ -3806,6 +3986,9 @@ function searchHeldPlace(key, attempt, disc, asked, area) {
     if (!now || heldEndPin(now)) return;
     var res = MV.pickPlace(out.hits, disc, placeOf(now), out.cutAt);
     memoPick(holdIdOf(now), undefined, 'place', res);
+    // ...and the place's refusal measured the same way, for refuseHeldEnd.
+    var on = endSearch[holdIdOf(now)];
+    if (on && !res.at) on.reach = reachCard(reachOf(res, out.hits, disc, null), cardForSearch(now));
     if (!res.at) {
       return searchHeldStreet(key, attempt, disc, asked, END_WHY[res.why] || END_WHY.noplace,
                               area);
@@ -4176,11 +4359,15 @@ function searchHeldPickup(id, a, attempt) {
   var ask = function (target, read, answered, unanswered) {
     pickupAsk(id, a, attempt, target, answered, read, unanswered);
   };
-  doorChain(plan, disc, false, ask, function (res, asked) {
+  doorChain(plan, disc, false, ask, function (res, asked, via0, seen) {
     // ...and, no pin, the store's street printed short (pickupTail).
     pickupTail(plan, a.store, disc, res, ask, function (res2, asked2, via) {
       if (via) memoPick(id, a.q, via, res2);
-      settleHeldPickup(id, a, res2, via ? asked2 : asked);
+      // (The door's refusal stands whenever pickupTail pinned nothing, so
+      // what it measured is the door search's: reachOf over doorChain's.)
+      settleHeldPickup(id, a, res2, via ? asked2 : asked,
+                       res2 === res ? reachCard(reachOf(res, seen && seen.hits, disc,
+                                                        seen && seen.plan), h.card) : null);
     });
   });
 }
@@ -4256,7 +4443,8 @@ function searchHeldPickupName(id, a, attempt, h) {
   var target = nbxSearchTarget('q', said, MV.discBox(disc));
   pickupAsk(id, a, attempt, target, function (out) {
     var res = MV.pickPlace(out.hits, disc, plan.q, out.cutAt);
-    settleHeldPickup(id, a, res.at ? res : { why: res.why || 'none' }, null);
+    settleHeldPickup(id, a, res.at ? res : { why: res.why || 'none' }, null,
+                     reachCard(reachOf(res, out.hits, disc, null), h.card));
   });
 }
 
@@ -4302,15 +4490,20 @@ function pickupAsk(id, a, attempt, target, answered, read, unanswered) {
 /* The answer acted on: a door kept `by: 'server'`, or the refusal kept for
  * /api/status in pickInDisc's words (END_WHY, the end's). `asked` is the
  * street the type-word retry found it by, else null. */
-function settleHeldPickup(id, a, res, asked) {
+function settleHeldPickup(id, a, res, asked, reach) {
   memoPick(id, a.q, a.name ? 'name' : 'door', res);
-  memoVerdict(id, a.q, res && res.at ? { pinned: true, asked: asked || null, lat: res.at.lat, lon: res.at.lon }
-                                     : { pinned: false, why: END_WHY[res && res.why] || 'no house number' });
+  // ...and `reach`, what the refusal measured (reachOf), on the memo's
+  // verdict and the log line, nowhere that decides.
+  var verdict = res && res.at ? { pinned: true, asked: asked || null, lat: res.at.lat, lon: res.at.lon }
+                              : { pinned: false, why: END_WHY[res && res.why] || 'no house number' };
+  if (reach && !(res && res.at)) verdict.reach = reach;
+  memoVerdict(id, a.q, verdict);
   var now = pickHold(id);
   if (!now) return;
   if (!res.at) {
     pickSearch[id].why[a.q] = END_WHY[res.why] || 'no house number';
-    pinSaidNone(id, pinWhichPickup(now, a.q), pickSearch[id].why[a.q], a.q, null);
+    pinSaidNone(id, pinWhichPickup(now, a.q), pickSearch[id].why[a.q], a.q, null,
+                reach || null);
     return;
   }
   keepPickupPin(now, res.at, a.q, { by: 'server', from: a.from, asked: asked });
@@ -7285,14 +7478,20 @@ function earlyDoor(text, disc, named, done, onlyIf, store) {
       answered(out);
     });
   };
-  var settle = function (res, asked, via) {
-    finish(res.at ? { at: { lat: res.at.lat, lon: res.at.lon }, asked: asked, via: via }
-                  : { at: null, why: res.why }, true);
+  // A refusal carries what it measured (`reach`, reachOf over the answers
+  // doorChain chose among): the log's, through searchCardEarly. Nothing that
+  // reads the outcome to pin or decide (offerPin, warmEarly) reads it.
+  var settle = function (res, asked, via, seen) {
+    if (res.at) return finish({ at: { lat: res.at.lat, lon: res.at.lon }, asked: asked, via: via }, true);
+    var out = { at: null, why: res.why };
+    var reach = seen ? reachOf(res, seen.hits, disc, seen.plan) : null;
+    if (reach) out.reach = reach;
+    finish(out, true);
   };
-  doorChain(plan, disc, named, ask, function (res, asked, via) {
-    if (!store) return settle(res, asked, via);
+  doorChain(plan, disc, named, ask, function (res, asked, via, seen) {
+    if (!store) return settle(res, asked, via, seen);
     pickupTail(plan, store, disc, res, ask, function (res2, asked2, via2) {
-      settle(res2, via2 ? asked2 : asked, via2 || via);
+      settle(res2, via2 ? asked2 : asked, via2 || via, res2 === res ? seen : null);
     });
   });
   return 'asked';
@@ -7316,9 +7515,23 @@ function searchCardEarly(offer, now) {
     for (var i = 0; i < stores.length; i++) if (stores[i].door === t) return 'store ' + (i + 1);
     return 'pickup';
   };
+  // ...with what the refusal measured (r.reach, earlyDoor's) and what THIS
+  // card said of its miles beside it (reachCard): a copy, as the outcome is
+  // shared by every card that asks the same text in the same box.
+  // ...and how many orders were in the car when the card was read: an offer
+  // shown while one is held may print miles that start at THAT order's end
+  // (the 29 Oct shift's #6, MV.afterParts), and an offer's disc has no
+  // `also` circle for it — the one case where the reach itself is too small.
+  var card = cardOf(offer);
+  var inCar = 0;
+  try { inCar = heldOrders(typeof now === 'number' ? now : Date.now()).length; } catch (e) { inCar = 0; }
   var said = function (which, door) {
     return function (r) {
-      if (r && !r.at && r.why) pinSaidNone(offer.id, which, END_WHY[r.why] || r.why, door, true);
+      if (r && !r.at && r.why) {
+        var reach = r.reach ? reachCard(Object.assign({}, r.reach), card) : null;
+        if (reach && inCar) reach.held = inCar;
+        pinSaidNone(offer.id, which, END_WHY[r.why] || r.why, door, true, reach);
+      }
     };
   };
   // (The printed door with its store's name beside it, for the store's
