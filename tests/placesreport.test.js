@@ -1050,8 +1050,10 @@ function nbx() {
   var gT = repW.views.all.best.goodApp.rows[0];
   ok('good offers by area: the rig\'s take and the top tiers, counted and shared (' + gT.top10N + ' of ' + gT.n + ')',
      gT.name === 'every app' && gT.go === 10 && gT.top10N >= 10 && gT.top10 === Math.round(gT.top10N / gT.tiered * 100) / 100);
-  ok('the Best tab leads, with its plain lines', /data-tab="best"/.test(P.html(repW))
-     && P.html(repW).indexOf('data-tab="best"') < P.html(repW).indexOf('data-tab="places"')
+  // The Best tab led the page until the layout of 7 Nov 2026 grouped the
+  // tabs by question; it heads the Record group now, its lines unchanged.
+  ok('the Best tab heads the Record group, with its plain lines', /<section data-tab="best">/.test(P.html(repW))
+     && /<span class="tg" data-group="record"><button type="button" data-tab="best">Best offers<\/button>/.test(P.html(repW))
      && /Waiting in Faketown \(6–9pm\): 2\.00 top-10% offers/.test(P.html(repW)));
   ok('...and it keeps the caveats: offered not earned, only near where you wait, coverage',
      /Offered, not earned; only near where you wait/.test(P.html(repW)));
@@ -1059,11 +1061,11 @@ function nbx() {
   /* --- the Targets tab (30 Oct 2026): advice.js targets, then the richer areas --- */
 
   var pageW = P.html(repW);
-  ok('the Targets tab comes first, ahead of Best offers, and opens by default',
+  ok('the Targets tab is in What to take, after Strategy and ahead of Best offers (the Overview opens by default now)',
      pageW.indexOf('data-tab="targets"') >= 0
      && pageW.indexOf('<section data-tab="targets">') < pageW.indexOf('<section data-tab="best">')
      && pageW.indexOf('<button type="button" data-tab="targets">') < pageW.indexOf('<button type="button" data-tab="best">')
-     && /\|\| 'targets'\)/.test(pageW));
+     && /data-group="take"><button type="button" data-tab="strategy">Strategy<\/button><button type="button" data-tab="targets">/.test(pageW));
   var tgt = A.targets(wRows, wTaken, { target: 25, key: function (o) { return MV.townFor(o, A.area); },
                                       shuffles: 2000, townFloor: P.MIN_N,
                                       isTimed: function (t) { return P.realOf(t) !== null; },
@@ -1095,12 +1097,12 @@ function nbx() {
   /* --- the Strategy tab (7 Nov 2026): tools/strategy.js, drawn here --- */
 
   var S = require('../tools/strategy.js');
-  ok('the Strategy tab sits after Targets and before Best offers, and Targets still opens by default',
-     pageW.indexOf('<section data-tab="targets">') < pageW.indexOf('<section data-tab="strategy">')
+  ok('the Strategy tab opens What to take, ahead of Targets and Best offers',
+     pageW.indexOf('<section data-tab="overview">') < pageW.indexOf('<section data-tab="strategy">')
+     && pageW.indexOf('<section data-tab="strategy">') < pageW.indexOf('<section data-tab="targets">')
      && pageW.indexOf('<section data-tab="strategy">') < pageW.indexOf('<section data-tab="best">')
      && pageW.indexOf('<button type="button" data-tab="strategy">Strategy</button>')
-        > pageW.indexOf('<button type="button" data-tab="targets">')
-     && /\|\| 'targets'\)/.test(pageW));
+        < pageW.indexOf('<button type="button" data-tab="targets">'));
   var sOrders = P.strategyOrders(wTaken, [], null);
   var sOwn = S.analyse({ offers: wRows, orders: sOrders, areaOf: function (o) { return MV.townFor(o, A.area); },
                          appOf: P.appOf, target: 25 });
@@ -1162,6 +1164,171 @@ function nbx() {
     var a = page.indexOf('<section data-tab="strategy">');
     return a < 0 ? '' : page.slice(a, page.indexOf('</section>', a));
   }
+
+  /* --- the layout of 7 Nov 2026: an Overview, the tabs grouped by question --- */
+  //
+  // The owner: "consider how the page and tabs are laid out, is there a
+  // better format for all this information?" Reorganised, not cut: every tab
+  // and every hash the page had is still there, the Overview only picks
+  // figures out of the report object (never works one out), and the Targets
+  // text stays advice.js's word for word.
+
+  function SECTION_OF(page, id) {
+    var a = page.indexOf('<section data-tab="' + id + '"');
+    return a < 0 ? '' : page.slice(a, page.indexOf('</section>', a));
+  }
+  var OLD_TABS = ['targets', 'strategy', 'best', 'places', 'restaurants', 'map', 'towns', 'grid', 'after', 'takes', 'apps',
+                  'ppm', 'waits', 'strand', 'busy', 'stack', 'quiet', 'trend', 'coverage', 'method'];
+  ok('every tab the page ever had is still a button and a section, so every old #hash still opens one',
+     OLD_TABS.every(function (t) {
+       return pageW.split('<button type="button" data-tab="' + t + '">').length === 2
+         && pageW.split('<section data-tab="' + t + '"').length === 2;
+     }));
+  eq('the groups, in order, each tab in exactly one', [P.GROUPS.map(function (g) { return g[1]; }),
+     P.TABS.map(function (t) { return t[0]; }).sort()],
+     [['Overview', 'What to take', 'Where & when', 'Record'], ['overview'].concat(OLD_TABS).sort()]);
+  ok('...What to take holds Strategy and Targets; Where & when the places, map, towns, grid and restaurants; Record Best offers',
+     ['strategy', 'targets'].every(function (t) { return groupOfTab(t) === 'take'; })
+     && ['places', 'map', 'towns', 'grid', 'restaurants'].every(function (t) { return groupOfTab(t) === 'where'; })
+     && groupOfTab('best') === 'record');
+  function groupOfTab(t) {
+    return P.GROUPS.filter(function (g) { return g[2].some(function (x) { return x[0] === t; }); }).map(function (g) { return g[0]; })[0];
+  }
+  var secOrder = [];
+  pageW.replace(/<section data-tab="([a-z]+)"/g, function (m0, id) { secOrder.push(id); return m0; });
+  eq('the sections are written in the nav\'s order, the Overview first', secOrder, P.TABS.map(function (t) { return t[0]; }));
+  ok('a bare address opens the Overview: the script\'s fallback is overview, and targets is nobody\'s default now',
+     /if \(!groupOf\(id\)\) id = 'overview';/.test(pageW) && /showTab\('overview'\)/.test(pageW) && !/\|\| 'targets'\)/.test(pageW));
+  ok('...and the address is read on every change, not only at load, so a link inside the page opens its tab',
+     /addEventListener\('hashchange', route\)/.test(pageW));
+
+  var ov = SECTION_OF(pageW, 'overview'), sW = repW.strategy;
+  ok('the Overview leads with the Strategy tab\'s own sentence on the best line, word for word',
+     sW.lines.filter(function (l) { return /^Holding out for/.test(l); }).every(function (l) { return ov.indexOf(esc0(l)) >= 0; }));
+  var cvW = sW.curve;
+  ok('...its tiles carry the best line, the flat range round it and the $/hr on shift, each with its n (' + (cvW.best && cvW.best.T) + ')',
+     cvW.best && ov.indexOf('$' + cvW.best.T + '+<small>/hr</small>') >= 0
+     && ov.indexOf('flat from $' + cvW.best.from + ' to $' + cvW.best.to) >= 0
+     && ov.indexOf('$' + cvW.best.value.toFixed(2)) >= 0 && ov.indexOf('n=' + cvW.best.n + ' offers at $' + cvW.best.T + '+') >= 0);
+  ok('...offers per free hour, card against actual and the typical offer, from strategy.js\'s own rows',
+     ov.indexOf('>' + sW.seen.all.perFreeHour.toFixed(1) + '<') >= 0
+     && ov.indexOf('>' + sW.actual.all.ratio.toFixed(2) + '×<') >= 0
+     && ov.indexOf('n=' + sW.actual.all.timed + ' timed orders') >= 0
+     && ov.indexOf('$' + sW.seen.all.ph.p50.toFixed(2)) >= 0);
+  ok('...the record\'s thin warning in the Strategy tab\'s words, and when the report was made',
+     /class="tile warn"/.test(ov) && ov.indexOf('How far to trust it') >= 0 && /made \d{4}-\d\d-\d\d \d\d:\d\d UTC/.test(ov));
+  ok('...the Targets tab\'s town lines, word for word', repW.targets.lines.areas.every(function (l) { return ov.indexOf(esc0(l)) >= 0; }));
+  ok('...and the banner, whole, under "Read before the numbers" — said once on the page, not on every tab',
+     /Read before the numbers<\/h3><\/summary><div class="banner"><p><b>Offered, not earned\.<\/b>/.test(ov)
+     && pageW.split('It ranks only places near where you already wait.').length === 2
+     && /<p class="strip" id="strip"><b>Offered, not earned<\/b>; only places near where you wait;/.test(pageW));
+  var hrefs = [];
+  ov.replace(/href="#([^"]+)"/g, function (m0, h) { hrefs.push(h); return m0; });
+  var idsInSections = [];
+  pageW.replace(/<section data-tab="[a-z]+"[\s\S]*?<\/section>/g, function (sec) {
+    sec.replace(/ id="([^"]+)"/g, function (m0, id) { idsInSections.push(id); return m0; });
+    return sec;
+  });
+  var tabIds = P.TABS.map(function (t) { return t[0]; });
+  ok('every link on the Overview opens a tab, or a part inside one (' + hrefs.length + ' links)', hrefs.length > 20
+     && hrefs.every(function (h) { return tabIds.indexOf(h) >= 0 || idsInSections.indexOf(h) >= 0; }));
+  var foldIds = [];
+  pageW.replace(/<details class="fold" id="([^"]+)" open>/g, function (m0, id) { foldIds.push(id); return m0; });
+  ok('the long tables sit in folds, open as written (a laptop, or no script), each id once (' + foldIds.length + ')',
+     foldIds.length > 30 && foldIds.every(function (id, i) { return foldIds.indexOf(id) === i; })
+     && !/<details class="fold"(?! id="[^"]+" open>)/.test(pageW));
+  var stratW = STRATEGY_OF(pageW);
+  // Sixteen tables as before, each a table or, with no rows, "None."
+  eq('...not one of the Strategy tab\'s sixteen tables is gone',
+     (stratW.split('<table>').length - 1) + (stratW.split('<p class="note">None.</p>').length - 1), 16);
+  ok('the curve is drawn twice: wide for a laptop, small for a phone and the Overview',
+     /<div class="plot wide"><svg viewBox="0 0 640 260"/.test(stratW) && /<div class="plot small"><svg viewBox="0 0 360 220"/.test(stratW)
+     && /<svg viewBox="0 0 360 220"/.test(ov));
+  var blk = P.blockChart(sW.slices.block);
+  eq('time of day: a bar per block with a curve, labelled with its line and n, and a tick for taking everything',
+     [(blk.match(/<rect /g) || []).length, (blk.match(/<line /g) || []).length,
+      sW.slices.block.filter(function (b) { return b.drawn && b.best; }).every(function (b) {
+        return blk.indexOf('$' + b.best.value.toFixed(2) + '/hr at $' + b.best.T + '+ · n=' + b.offers) >= 0; })],
+     [sW.slices.block.length, sW.slices.block.filter(function (b) { return typeof b.everything.gross === 'number'; }).length, true]);
+  var thinBlock = P.blockChart([{ name: '6–9am', drawn: false, best: null, offers: 3, days: 1, everything: { gross: null } }]);
+  ok('...a block under its floors gets a dashed outline and its counts, never a bar', /stroke-dasharray="3 3"/.test(thinBlock)
+     && /too few for a curve · n=3 seen free · 1 days/.test(thinBlock) && !/fill="var\(--up\)"/.test(thinBlock));
+  ok('...and is drawn on the Overview and the Strategy tab alike', ov.indexOf(blk) >= 0 && stratW.indexOf(blk) >= 0);
+  ok('a row under its floor is muted in the Strategy tables (thin points, slices with no curve)',
+     /<tr class="thinrow"><td>\$\d+\.00<\/td>/.test(stratW));
+  var repEmpty = P.analyse([], [], [], function () { return null; }, { now: 0 });
+  var pageEmpty = P.html(repEmpty);
+  ok('an empty record still builds an Overview, saying there is nothing yet rather than throwing',
+     /<section data-tab="overview">/.test(pageEmpty) && /not enough record for a curve yet/.test(pageEmpty));
+  ok('...and its script still parses', (function () {
+    try { new Function(pageEmpty.split('<script>\n')[1].split('\n</script>')[0]); return true; } catch (e) { return false; }
+  }()));
+  ok('no dropoff text reaches the Overview', !/742 Ombre|Larkspur/.test(ov));
+
+  /* ...and in a real browser, where it is wanted most: the hashes, the
+   * groups, the Hours picker, the folds at phone width. Skipped (said, not
+   * failed) where playwright cannot be had, as the browser suites skip. */
+  await (async function browser() {
+    var pw = null;
+    try { pw = require('playwright'); } catch (e) { pw = null; }
+    if (!pw) { console.log('(the browser checks of the layout skipped: no playwright)'); return; }
+    var b = null;
+    try { b = await pw.chromium.launch(); } catch (e) { b = null; }
+    if (!b) { console.log('(the browser checks of the layout skipped: no chromium)'); return; }
+    var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'places-layout-'));
+    var file = path.join(dir, 'index.html');
+    fs.writeFileSync(file, pageW);
+    var errors = [];
+    async function look(width, hash) {
+      var pg = await b.newPage({ viewport: { width: width, height: 800 } });
+      pg.on('pageerror', function (e) { errors.push(String(e)); });
+      // Offline: Leaflet's CDN is refused, as on a NucBox with no internet.
+      await pg.route(/^https?:\/\//, function (rt) { rt.abort(); });
+      await pg.goto('file://' + file + hash);
+      var got = await pg.evaluate(function () {
+        function shown() {
+          return Array.prototype.filter.call(document.querySelectorAll('section[data-tab]'), function (s) { return !s.hidden; })
+            .map(function (s) { return s.getAttribute('data-tab'); });
+        }
+        var de = document.documentElement;
+        var g = document.querySelector('#groups button[aria-selected="true"]');
+        return { shown: shown(), group: g && g.getAttribute('data-group'), hours: !document.getElementById('hoursBar').hidden,
+                 tabsRow: !document.getElementById('tabs').hidden, sideways: de.scrollWidth > de.clientWidth,
+                 groupsFit: document.getElementById('groups').scrollWidth <= document.getElementById('groups').clientWidth,
+                 blocksOpen: document.getElementById('s-blocks').open, pointsOpen: document.getElementById('s-points').open };
+      });
+      // A link inside the page: the hash changes and its tab opens in place.
+      await pg.evaluate(function () { location.hash = '#best'; });
+      await pg.waitForTimeout(50);
+      got.afterLink = await pg.evaluate(function () {
+        return Array.prototype.filter.call(document.querySelectorAll('section[data-tab]'), function (s) { return !s.hidden; })
+          .map(function (s) { return s.getAttribute('data-tab'); });
+      });
+      await pg.close();
+      return got;
+    }
+    try {
+      var bare = await look(375, ''), tgt = await look(375, '#targets'), str = await look(1280, '#strategy');
+      var deep = await look(375, '#s-blocks'), junk = await look(375, '#no-such-tab'), plc = await look(375, '#places');
+      eq('[browser] a bare address opens the Overview, its group chosen, no tab row and no Hours picker',
+         [bare.shown, bare.group, bare.tabsRow, bare.hours], [['overview'], 'overview', false, false]);
+      eq('[browser] #targets and #strategy still open their tabs, in What to take', [tgt.shown, tgt.group, str.shown, str.group],
+         [['targets'], 'take', ['strategy'], 'take']);
+      eq('[browser] #places opens Places with the Hours picker, which reaches it', [plc.shown, plc.group, plc.hours],
+         [['places'], 'where', true]);
+      eq('[browser] #s-blocks opens the Strategy tab with that fold opened, even on a phone where the folds start shut',
+         [deep.shown, deep.blocksOpen, deep.pointsOpen], [['strategy'], true, false]);
+      eq('[browser] ...on a laptop the folds are open as written', [str.blocksOpen, str.pointsOpen], [true, true]);
+      eq('[browser] an unknown hash is the Overview', junk.shown, ['overview']);
+      eq('[browser] a hash changed after load opens its tab in place (the Overview\'s links)', bare.afterLink, ['best']);
+      ok('[browser] at 375px no page-wide sideways scroll, and the four groups fit the row whole',
+         [bare, tgt, deep, plc].every(function (x) { return !x.sideways && x.groupsFit; }) && !str.sideways);
+      eq('[browser] ...and no script error, offline', errors, []);
+    } finally {
+      await b.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }());
 
   /* --- does top-10% share differ by area? --- */
 

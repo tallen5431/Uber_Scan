@@ -87,6 +87,17 @@
  * numbers with --strategy — off this report's offers and its takes as realOf
  * times them; see strategyOrders below for the miles. Descriptive, like the
  * rest: no verdict, target or panel reads it.
+ *
+ * THE LAYOUT (7 Nov 2026, the owner, on a phone and a laptop: "consider how
+ * the page and tabs are laid out, is there a better format for all this
+ * information?"). Reorganised, nothing cut: an Overview that opens the page
+ * (the few numbers that matter, picked out of the report object, each
+ * linking to its tab with its n under it), the twenty tabs grouped by the
+ * question each answers (GROUPS), a sticky nav of groups over the chosen
+ * group's tabs, long tables folded under their headings on a phone (fold),
+ * the curve drawn small for a phone and time of day as bars (blockChart).
+ * Every old #hash still opens its tab; #overview is the new default, and a
+ * fold's id opens the tab it sits in.
  */
 
 'use strict';
@@ -2618,35 +2629,32 @@ function banner(r) {
 }
 
 function html(r) {
-  var data = JSON.stringify(r).replace(/</g, '\\u003c');
+  // The page's data is the report, plus which tabs the Hours picker reaches
+  // (GROUPS' fourth field), so the script does not keep a second list.
+  var hourly = [];
+  GROUPS.forEach(function (g) { g[2].forEach(function (t) { if (t[3]) hourly.push(t[0]); }); });
+  var data = JSON.stringify(Object.assign({}, r, { hourly: hourly })).replace(/</g, '\\u003c');
   var span = r.span ? new Date(r.span[0]).toISOString().slice(0, 10) + ' to '
     + new Date(r.span[1]).toISOString().slice(0, 10) : 'no offers';
-  return '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
-    + '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-    + '<title>Where Offers Start</title>\n'
-    + '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">\n'
-    + '<style>\n' + PAGE_CSS + '\n</style>\n</head>\n<body>\n<main>\n'
-    + '<h1>Where the good offers start</h1>\n'
-    + '<p class="sub">' + esc(span) + ' · ' + r.coverage.offers + ' offers the rig stands behind, '
-    + r.outings + ' shift days · made ' + esc(new Date(r.made).toISOString().slice(0, 16).replace('T', ' '))
-    + ' UTC on the NucBox · offline report, nothing on the rig reads it</p>\n'
-    + '<section class="banner">' + banner(r) + '</section>\n'
-    + '<div class="bar"><label>Hours <select id="when"></select></label>'
-    + '<span id="whenNote" class="note"></span></div>\n'
-    + '<nav class="tabs" id="tabs">' + TABS.map(function (t) {
-      return '<button type="button" data-tab="' + t[0] + '">' + esc(t[1]) + '</button>';
-    }).join('') + '</nav>\n'
-    + TARGETS_SECTION(r)
-    + STRATEGY_SECTION(r)
-    + BEST_SECTION(r)
-    + '<section data-tab="places"><h2>Places — a store at a location</h2><p class="note">A place is a pin at door, '
+  var cvAll = r.coverage.all, placedTotal = cvAll.placed.n + cvAll.unplaced.n;
+  // Every section, keyed by its tab, so they can be written in the nav's
+  // order whatever order they were built in: a reader paging through the
+  // source, or a screen reader, meets them as the tabs list them.
+  var SEC = Object.create(null);
+  SEC.overview = OVERVIEW_SECTION(r, span);
+  SEC.targets = TARGETS_SECTION(r);
+  SEC.strategy = STRATEGY_SECTION(r);
+  SEC.best = BEST_SECTION(r);
+  SEC.places = '<section data-tab="places"><h2>Places — a store at a location</h2><p class="note">A place is a pin at door, '
     + 'corner or name level, or an approximate placement where it is that store\'s: within ' + PLACE_SAME_MI
     + ' mi of a door or name pin of the same store, or its own candidates no more than ' + r.best.placeApproxMi
     + ' mi apart (see Coverage for every level). <b>P75 / P90</b> are the 75th and 90th percentiles of the '
     + 'place\'s $/hr; <b>top 10%</b> is the share of its offers at or over the 90th percentile of every offer in '
     + 'their own three hours. Click a heading to sort.</p><p class="note" id="placeTest"></p>'
-    + '<div id="placePlot" class="plot"></div><div id="placeTable"></div><div id="placeThin" class="thin"></div></section>\n'
-    + '<section data-tab="restaurants"><h2>Restaurants — by the name on the card, placed or not</h2>'
+    + '<div id="placePlot" class="plot"></div>'
+    + fold('placesTable', 'The table, every place over the floor', '<div id="placeTable"></div>')
+    + fold('placesThin', 'Too few to rank', '<div id="placeThin" class="thin"></div>') + '</section>\n';
+  SEC.restaurants = '<section data-tab="restaurants"><h2>Restaurants — by the name on the card, placed or not</h2>'
     + '<p class="note">One row per name, every branch together: the pickup\'s name as the card printed it (Uber\'s '
     + 'bracketed street off), merged by the rig\'s own store-name rule (Assemble.storeKey: case, marks and a '
     + '“ – Town” tail aside; Assemble.sameStore: one i/l slip). <b>No map pin is needed</b>, so this holds the bare '
@@ -2659,42 +2667,212 @@ function html(r) {
     + 'the name cannot be a guess — for a chain the wait is per branch, and the waits on record carry no place, so '
     + 'a chain\'s branches go without. <b>$/mi is for reading, not an accept rule.</b> Click ▸ for the placed '
     + 'branches; click a heading to sort.</p>'
-    + '<p class="note" id="restTest"></p><div id="restPlot" class="plot"></div><div id="restTable"></div>'
-    + '<div id="restThin"></div></section>\n'
-    + '<section data-tab="map"><h2>Map</h2><p class="note">One dot per place, sized by its offers. Coloured only where it '
+    + '<p class="note" id="restTest"></p><div id="restPlot" class="plot"></div>'
+    + fold('restTableFold', 'The table, every restaurant over the floor', '<div id="restTable"></div>')
+    + '<div id="restThin"></div></section>\n';
+  SEC.map = '<section data-tab="map"><h2>Map</h2><p class="note">One dot per place, sized by its offers. Coloured only where it '
     + 'beats chance: <span class="k up">●</span> pays more than the same hours elsewhere, '
     + '<span class="k down">●</span> less; <span class="k grey">●</span> not distinguishable from the rest; '
     + 'small hollow dots are too few to rank. Squares are the ' + r.gridMi + '-mile grid, by the same rule.</p>'
-    + '<div id="map"></div></section>\n'
-    + '<section data-tab="towns"><h2>Towns — the card\'s own town</h2><p class="note">The town the card printed, dropoff first and '
+    + '<div id="map"></div></section>\n';
+  SEC.towns = '<section data-tab="towns"><h2>Towns — the card\'s own town</h2><p class="note">The town the card printed, dropoff first and '
     + 'then pickup, the rule the rig\'s map ranks towns by (map-view.js townFor). No geocoder.</p>'
-    + '<p class="note" id="townTest"></p><div id="townPlot" class="plot"></div><div id="townTable"></div>'
-    + '<div id="townThin" class="thin"></div></section>\n'
-    + '<section data-tab="grid"><h2>' + r.gridMi + '-mile grid — by the pickup\'s pin</h2><p class="note">Every '
+    + '<p class="note" id="townTest"></p><div id="townPlot" class="plot"></div>'
+    + fold('townsTable', 'The table, every town over the floor', '<div id="townTable"></div>')
+    + fold('townsThin', 'Too few to rank', '<div id="townThin" class="thin"></div>') + '</section>\n';
+  SEC.grid = '<section data-tab="grid"><h2>' + r.gridMi + '-mile grid — by the pickup\'s pin</h2><p class="note">Every '
     + 'placement level, an approximate one only where its candidates lie within ' + r.best.areaMi + ' mi of each '
     + 'other (the rig\'s general area, half a cell).</p><p class="note" id="gridTest"></p>'
-    + '<div id="gridPlot" class="plot"></div><div id="gridTable"></div><div id="gridThin" class="thin"></div></section>\n'
-    + '<section data-tab="after"><h2>Where trips leave you</h2><p class="note">For each order you took and put down at the door: '
+    + '<div id="gridPlot" class="plot"></div>'
+    + fold('gridTableFold', 'The table, every cell over the floor', '<div id="gridTable"></div>')
+    + fold('gridThinFold', 'Too few to rank', '<div id="gridThin" class="thin"></div>') + '</section>\n';
+  SEC.after = '<section data-tab="after"><h2>Where trips leave you</h2><p class="note">For each order you took and put down at the door: '
     + 'how long until the next offer the rig said <b>take</b>, and what it paid. Placed by the GPS log at the drop '
     + '(' + r.trips.gps + ' trips) or the dropoff\'s door inside its card\'s reach (' + r.trips.pin + '); the town '
     + 'off the card for the town table (' + r.trips.town + '). A silence longer than ' + r.nextGapMin
     + ' minutes before one came is you stopping, counted as "ended", not as a long wait. Counted by area only: '
     + 'no dropoff is named, and a grid cell with fewer than ' + r.dropMinN + ' trips is not shown at all. '
     + r.trips.n + ' trips in all.</p>'
-    + '<p class="note" id="dropTest"></p><div id="dropTown"></div><div id="dropGrid"></div></section>\n'
-    + MORE_SECTIONS(r)
-    + '<section data-tab="coverage"><h2>Coverage, shift day by shift day</h2><p class="note">Pickups placed and not, and what each paid. '
+    + '<p class="note" id="dropTest"></p>'
+    + fold('afterTown', 'By town', '<div id="dropTown"></div>')
+    + fold('afterGrid', 'By ' + r.gridMi + '-mile cell', '<div id="dropGrid"></div>') + '</section>\n';
+  var more = MORE_SECTIONS(r);
+  Object.keys(more).forEach(function (k) { SEC[k] = more[k]; });
+  SEC.coverage = '<section data-tab="coverage"><h2>Coverage, shift day by shift day</h2><p class="note">Pickups placed and not, and what each paid. '
     + 'A gap that keeps the same sign day after day is a bias in what the map can show, not a fact about places.</p>'
-    + '<h3>Placed, by level</h3><p class="note">door, corner and name are a point; band, area and street are '
-    + 'approximate (an area, with its spread). "Stood in for" is the refusal an approximate placement was found '
-    + 'beside. Street index: ' + esc(r.best.streets || 'none') + '. Router (for the band): '
-    + esc(r.best.road || 'none') + '.</p><div id="levels"></div>'
-    + '<div id="coverage"></div></section>\n'
-    + '<section data-tab="method" class="method"><h2>How this was measured</h2>' + METHOD(r) + '</section>\n'
+    + fold('coverageLevels', 'Placed, by level', '<p class="note">door, corner and name are a point; band, area and street are '
+      + 'approximate (an area, with its spread). "Stood in for" is the refusal an approximate placement was found '
+      + 'beside. Street index: ' + esc(r.best.streets || 'none') + '. Router (for the band): '
+      + esc(r.best.road || 'none') + '.</p><div id="levels"></div>')
+    + fold('coverageDays', 'Placed and not, by shift day', '<div id="coverage"></div>') + '</section>\n';
+  SEC.method = '<section data-tab="method" class="method"><h2>How this was measured</h2>' + METHOD(r) + '</section>\n';
+
+  /* The top of the page. The title and the window, then the nav — the one
+   * part that stays put while a long table scrolls under it — then the Hours
+   * picker, which scrolls away with the page and shows only on the tabs it
+   * reaches. The banner that opened the page (four paragraphs, taller than a
+   * phone's screen, before a single figure) is the Overview's "Read before
+   * the numbers" now, whole; every other tab keeps its gist in one line
+   * under the nav, with a link back to it, so no tab reads without it. */
+  var nav = '<div id="navAt"></div><nav class="nav" id="nav" aria-label="Report sections">'
+    + '<div class="groups" id="groups" role="tablist">' + GROUPS.map(function (g) {
+      return '<button type="button" role="tab" data-group="' + g[0] + '">' + esc(g[1]) + '</button>';
+    }).join('') + '</div>'
+    + '<div class="tabs" id="tabs">' + GROUPS.map(function (g) {
+      return '<span class="tg" data-group="' + g[0] + '">' + g[2].map(function (t) {
+        return '<button type="button" data-tab="' + t[0] + '">' + esc(t[1]) + '</button>';
+      }).join('') + '</span>';
+    }).join('') + '</div></nav>\n';
+  var strip = '<p class="strip" id="strip"><b>Offered, not earned</b>; only places near where you wait; '
+    + pct(cvAll.unplaced.n, placedTotal) + ' of pickups unplaced. <a href="#overview">Read before the numbers</a></p>\n';
+  return '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+    + '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+    + '<title>Strategy &amp; Places Report</title>\n'
+    + '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">\n'
+    + '<style>\n' + PAGE_CSS + '\n</style>\n</head>\n<body>\n<main>\n'
+    + '<header class="head"><h1>Strategy &amp; places report</h1>\n'
+    + '<p class="sub">' + esc(span) + ' · ' + r.coverage.offers + ' offers the rig stands behind, '
+    + r.outings + ' shift days · made ' + esc(new Date(r.made).toISOString().slice(0, 16).replace('T', ' '))
+    + ' UTC on the NucBox · offline report, nothing on the rig reads it</p></header>\n'
+    + nav + strip
+    + '<div class="bar" id="hoursBar"><label>Hours <select id="when"></select></label>'
+    + '<span id="whenNote" class="note"></span></div>\n'
+    + TABS.map(function (t) { return SEC[t[0]] || ''; }).join('')
     + '</main>\n<div id="tip" hidden></div>\n'
     + '<script type="application/json" id="data">' + data + '</script>\n'
     + '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>\n'
     + '<script>\n' + PAGE_JS + '\n</script>\n</body>\n</html>\n';
+}
+
+/* A long table behind its heading: a <details> that is open as written, so
+ * a laptop (and a page with its script off) shows everything as before, and
+ * that the page's script closes on a phone, where the tables are wider than
+ * the screen and a tab of fourteen of them is a scroll of seven screens.
+ * Its id is a deep link: #<id> opens the tab it sits in, opens it and
+ * scrolls to it. Nothing is dropped; the heading says what is inside. */
+function fold(id, title, inner) {
+  return '<details class="fold"' + (id ? ' id="' + esc(id) + '"' : '') + ' open><summary><h3>' + esc(title)
+    + '</h3></summary>' + inner + '</details>';
+}
+
+/* The Overview (7 Nov 2026), where a bare address now opens. The owner
+ * asked whether there was "a better format for all this information"; the
+ * answer here is a landing page of the few numbers that matter, each one a
+ * link to the tab that works it out, with its sample size under it — and no
+ * figure of its own. Everything on it is already in the report object
+ * (strategy.js's answer, advice.js's Targets lines, the coverage), picked
+ * out, never recomputed, so it cannot disagree with the tab it points to:
+ *
+ *   - the Strategy tab's own sentence on the best line, word for word;
+ *   - tiles: the best line and the flat range round it, $/hr on shift gross
+ *     and net, offers per free hour, card against actual, the typical offer,
+ *     the record and how far to trust it (the Strategy tab's own "thin"
+ *     line where it has one), and when this was made;
+ *   - the curve, small, and time of day as bars;
+ *   - where the good offers start: the Targets tab's town lines, word for
+ *     word, and how much of the record could be placed at all;
+ *   - the banner that used to head every tab, whole, under "Read before the
+ *     numbers";
+ *   - and a directory of every tab under its question.
+ *
+ * Descriptive, like the rest: nothing here is an accept rule or reaches the
+ * rig. Formatting is one rule throughout: a rate carries its unit ($/hr,
+ * $/mi), a count says n=. */
+function fmtPH(v) { return typeof v === 'number' ? '$' + v.toFixed(2) + '/hr' : '—'; }
+function fmtPM(v) { return typeof v === 'number' ? '$' + v.toFixed(2) + '/mi' : '—'; }
+
+function OVERVIEW_SECTION(r, span) {
+  var s = r.strategy, cv = s.curve, c = s.counts, all = s.seen.all, act = s.actual.all;
+  function line(re) { return s.lines.filter(function (l) { return re.test(l); })[0] || null; }
+  function tile(href, label, value, sub, foot, cls) {
+    return '<a class="tile' + (cls ? ' ' + cls : '') + '" href="' + href + '"><span class="tl">' + esc(label) + '</span>'
+      + '<span class="tv">' + value + '</span>' + (sub ? '<span class="ts">' + sub + '</span>' : '')
+      + (foot ? '<span class="tf">' + foot + '</span>' : '') + '</a>';
+  }
+  var best = cv.drawn ? cv.best : null;
+  var lead = line(/^Holding out for/), yours = line(/^Your line/), trust = line(/^How far to trust it/);
+  var pct0 = Math.round((1 - s.floors.plateau) * 100);
+  var tiles = [];
+  tiles.push(tile('#strategy', 'Best line to hold out for',
+    best ? '$' + best.T + '+<small>/hr</small>' : '—',
+    best ? (best.from === best.to ? 'no other line within ' + pct0 + '%' : 'flat from $' + best.from + ' to $' + best.to
+            + ' (within ' + pct0 + '% of the best)') + (cv.target && cv.target.side ? '; your $' + cv.target.T + ' is '
+            + (cv.target.side === 'inside' ? 'inside it' : cv.target.side + ' it') : '')
+      : 'not enough record for a curve yet',
+    best ? 'n=' + best.n + ' offers at $' + best.T + '+ seen free · Strategy' : 'Strategy'));
+  tiles.push(tile('#s-curve', '$/hr on shift at that line',
+    best ? '$' + best.value.toFixed(2) + (cv.bestNet && cv.cost.perMile !== null
+      ? ' <small>gross</small><br>$' + cv.bestNet.value.toFixed(2) + ' <small>net</small>' : '') : '—',
+    'every hour on shift, waiting included' + (cv.bestCi ? '; 95% $' + cv.bestCi[0].toFixed(2) + '–$' + cv.bestCi[1].toFixed(2) : '')
+      + (typeof cv.everything.gross === 'number' ? '; taking everything ' + fmtPH(cv.everything.gross) : ''),
+    cv.days + ' shift days, ' + (cv.freeHours || 0) + ' h free · Strategy'));
+  tiles.push(tile('#s-seen', 'Offers per free hour',
+    typeof all.perFreeHour === 'number' ? all.perFreeHour.toFixed(1) : '—',
+    'seen with no order in the car',
+    'n=' + (c.free || 0) + ' offers in ' + c.freeHours + ' h free of ' + c.shiftHours + ' h on shift · Strategy'));
+  tiles.push(tile('#s-actual', 'Card against actual',
+    typeof act.ratio === 'number' ? act.ratio.toFixed(2) + '×' : '—',
+    typeof act.ratio === 'number' ? 'minutes really taken ÷ the card\'s; a $25/hr card ≈ ' + fmtPH(25 / act.ratio) + ' actual'
+      : 'fewer than ' + s.floors.ratio + ' timed orders: cards taken at their word',
+    'n=' + act.timed + ' timed orders · Strategy'));
+  tiles.push(tile('#s-seen', 'The typical offer',
+    all.ph.p50 !== null ? fmtPH(all.ph.p50).replace('/hr', '<small>/hr</small>') : '—',
+    all.ph.p50 !== null ? 'half between $' + all.ph.p25.toFixed(2) + ' and $' + all.ph.p75.toFixed(2) + '; top 10% from '
+      + fmtPH(all.ph.p90) + (all.pm.p50 !== null ? '; ' + fmtPM(all.pm.p50) + ' median (read only)' : '') : '',
+    'n=' + all.n + ' offers on ' + all.outings + ' shift days · Strategy'));
+  // The record, and how far to trust it: the Strategy tab's own sentence
+  // where it calls the record thin, so the warning is worded once.
+  tiles.push(tile('#strategy', trust ? 'How far to trust it' : 'The record',
+    trust ? 'thin' : c.outings + ' <small>shift days</small>',
+    trust ? esc(trust.replace(/^How far to trust it: thin — /, '')) : c.offers + ' offers, ' + act.timed
+      + ' timed orders, ' + (cv.freeHours || 0) + ' h free: not flagged thin',
+    'made ' + esc(new Date(r.made).toISOString().slice(0, 16).replace('T', ' ')) + ' UTC · ' + esc(span),
+    trust ? 'warn' : ''));
+
+  // Time of day in words: the blocks with a curve of their own, highest
+  // $/hr on shift first. An ordering of point estimates, said as such.
+  var ranked = (s.slices.block || []).filter(function (b) { return b.drawn && b.best; })
+    .sort(function (a, b) { return b.best.value - a.best.value; });
+  var blocksSaid = ranked.length
+    ? 'Highest $/hr on shift, each block at its own best line: ' + ranked.slice(0, 3).map(function (b) {
+      return esc(b.name) + ' ' + fmtPH(b.best.value) + ' (n=' + b.offers + ')';
+    }).join(', ') + '. Point estimates with no test between them; the held-out check in the Strategy tab says '
+      + 'whether a line per block beat one line on this record.'
+    : 'No block has a curve of its own yet.';
+
+  var cvAll = r.coverage.all, total = cvAll.placed.n + cvAll.unplaced.n;
+  var areas = r.targets && r.targets.lines ? r.targets.lines.areas : [];
+  return '<section data-tab="overview"><h2>Overview — the few numbers that matter</h2>'
+    + '<p class="exp">Descriptive. Every figure is from the tab it links to, with its sample size under it; nothing '
+    + 'here is an accept rule or changes a verdict, and nothing on the rig reads it.</p>'
+    // The figures first, then the Strategy tab's own sentence on them: on a
+    // phone the sentence is a screen long, and the tiles are what a glance
+    // is for.
+    + '<div class="tiles">' + tiles.join('') + '</div>'
+    + (lead ? '<p class="lead">' + esc(lead) + (yours ? ' ' + esc(yours) : '') + ' <a href="#strategy">Strategy ›</a></p>' : '')
+    + '<div class="pair">'
+    + '<div><h3>Holding out for a line <a class="more" href="#s-curve">curve ›</a></h3>'
+    + '<div class="plot fluid">' + strategyChart(cv, 'small') + '</div>'
+    + '<p class="note">Gross (solid) and net (dashed) $/hr on shift against the line held out for; shaded, within '
+    + pct0 + '% of the best; hollow points are thin (under ' + s.floors.curveOffers + ' offers).</p></div>'
+    + '<div><h3>Time of day <a class="more" href="#s-blocks">blocks ›</a></h3>'
+    + '<div class="plot fluid">' + blockChart(s.slices.block) + '</div>'
+    + '<p class="note">' + blocksSaid + '</p></div>'
+    + '</div>'
+    + '<h3>Where the good offers start <a class="more" href="#targets">Targets ›</a></h3>'
+    + '<ul class="lines">' + areas.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>'
+    + '<p class="note">' + pct(cvAll.unplaced.n, total) + ' of pickups could not be placed (' + cvAll.unplaced.n + ' of '
+    + total + '), so the Places, Map and Grid tabs describe a slice of the record: <a href="#coverage">Coverage ›</a>. '
+    + 'Towns and Restaurants need no pin.</p>'
+    + '<details class="caveats" id="caveats" open><summary><h3>Read before the numbers</h3></summary>'
+    + '<div class="banner">' + banner(r) + '</div></details>'
+    + '<h3>Every tab, by the question it answers</h3><div class="dir">'
+    + GROUPS.filter(function (g) { return g[0] !== 'overview'; }).map(function (g) {
+      return '<div><h4>' + esc(g[1]) + '</h4><ul>' + g[2].map(function (t) {
+        return '<li><a href="#' + t[0] + '">' + esc(t[1]) + '</a> — ' + esc(t[2]) + '</li>';
+      }).join('') + '</ul></div>';
+    }).join('') + '</div>'
+    + '</section>\n';
 }
 
 /* The Targets tab: advice.js's lines (the offers page's box, word for word),
@@ -2725,8 +2903,15 @@ function TARGETS_SECTION(r) {
  * table, the slices, and the two descriptive halves under it. Static HTML:
  * the hours picker above does not reach it, because the curve is over all
  * hours and its blocks are rows of their own. */
-function strategyChart(cv) {
-  var pts = cv.points, W = 640, H = 260, L = 52, R = 16, T = 14, B = 34;
+/* Two sizes of one drawing. 'wide' is the 640 x 260 the tab always drew,
+ * for a laptop; 'small' is 360 x 220 with fewer labels, for a phone and for
+ * the Overview: the wide one squeezed to a 343px screen prints its labels at
+ * six pixels, and given its old 520px floor it scrolled sideways instead,
+ * hiding the right half of the curve — where the best line usually is. */
+function strategyChart(cv, size) {
+  var small = size === 'small';
+  var pts = cv.points, W = small ? 360 : 640, H = small ? 220 : 260, L = small ? 40 : 52, R = small ? 10 : 16, T = 14,
+      B = small ? 32 : 34;
   var vals = [];
   pts.forEach(function (p) {
     [p.gross, p.net, p.ci && p.ci[0], p.ci && p.ci[1]].forEach(function (v) { if (typeof v === 'number') vals.push(v); });
@@ -2745,15 +2930,16 @@ function strategyChart(cv) {
              + '" height="' + (H - T - B) + '" fill="var(--grid)" opacity="0.7"><title>Within '
              + Math.round((1 - S.PLATEAU) * 100) + '% of the best: $' + cv.best.from + ' to $' + cv.best.to + '</title></rect>');
   }
-  for (var gy = lo; gy <= hi; gy += 5) {
+  for (var gy = lo; gy <= hi; gy += (small && hi - lo > 20 ? 10 : 5)) {
     out.push('<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(gy).toFixed(1) + '" y2="' + Y(gy).toFixed(1)
              + '" stroke="var(--grid)"/><text x="' + (L - 6) + '" y="' + (Y(gy) + 4).toFixed(1) + '" text-anchor="end">$' + gy + '</text>');
   }
   cv.grid.forEach(function (gx, i) {
-    if (i % 2) return;
+    if (i % (small ? 3 : 2)) return;
     out.push('<text x="' + X(gx).toFixed(1) + '" y="' + (H - B + 16) + '" text-anchor="middle">$' + gx + '</text>');
   });
-  out.push('<text x="' + ((L + W - R) / 2) + '" y="' + (H - 4) + '" text-anchor="middle">cards held out for: the panel\'s $/hr or more</text>');
+  out.push('<text x="' + ((L + W - R) / 2) + '" y="' + (H - 4) + '" text-anchor="middle">'
+           + (small ? 'line held out for ($/hr on the panel)' : 'cards held out for: the panel\'s $/hr or more') + '</text>');
   // The 95% band, where shift days were resampled.
   var band = pts.filter(function (p) { return p.ci; });
   if (band.length >= 2) {
@@ -2776,7 +2962,7 @@ function strategyChart(cv) {
              + seg.map(function (p) { return X(p.T).toFixed(1) + ',' + Y(p[s[0]]).toFixed(1); }).join(' ') + '"/>');
     seg.forEach(function (p) {
       // A thin point is hollow: it can be neither the best nor in the flat region.
-      out.push('<circle cx="' + X(p.T).toFixed(1) + '" cy="' + Y(p[s[0]]).toFixed(1) + '" r="4" stroke="' + s[1] + '" stroke-width="2" fill="'
+      out.push('<circle cx="' + X(p.T).toFixed(1) + '" cy="' + Y(p[s[0]]).toFixed(1) + '" r="' + (small ? 3 : 4) + '" stroke="' + s[1] + '" stroke-width="2" fill="'
                + (p.thin ? 'var(--surface)' : s[1]) + '"><title>$' + p.T + '+: ' + s[0] + ' $' + p[s[0]].toFixed(2) + '/hr on shift, '
                + p.n + ' offers seen free' + (p.thin ? ' (thin)' : '') + '</title></circle>');
     });
@@ -2790,7 +2976,11 @@ function strategyChart(cv) {
   return out.join('');
 }
 
-function strategyTable(cols, rows) {
+/* A table of strategy.js's rows. `thin`, where given, marks a row whose
+ * sample is under its floor (a hollow point, a slice with no curve, a row
+ * with no quartile): drawn muted and in italics, so a figure over too few
+ * offers never reads as loud as one over enough, and its n stays beside it. */
+function strategyTable(cols, rows, thin) {
   if (!rows || !rows.length) return '<p class="note">None.</p>';
   function cell(v, f) {
     if (v === null || v === undefined) return '—';
@@ -2803,8 +2993,58 @@ function strategyTable(cols, rows) {
   }
   return '<div class="tw"><table><thead><tr>' + cols.map(function (c) { return '<th>' + esc(c[1]) + '</th>'; }).join('')
     + '</tr></thead><tbody>' + rows.map(function (r) {
-      return '<tr>' + cols.map(function (c) { return '<td>' + cell(typeof c[0] === 'function' ? c[0](r) : r[c[0]], c[2]) + '</td>'; }).join('') + '</tr>';
+      return '<tr' + (thin && thin(r) ? ' class="thinrow"' : '') + '>'
+        + cols.map(function (c) { return '<td>' + cell(typeof c[0] === 'function' ? c[0](r) : r[c[0]], c[2]) + '</td>'; }).join('') + '</tr>';
     }).join('') + '</tbody></table></div>';
+}
+
+/* Time of day, drawn: one bar per three-hour block, its length the $/hr on
+ * shift that holding out for that block's own best line gave (strategy.js's
+ * slices), a tick where taking everything in that block would have been, and
+ * the line, the offers seen free and the shift days under it. A block with
+ * no curve of its own (under its floors) gets no bar, only its counts, in
+ * grey. Every bar is one colour: these are point estimates with no test
+ * between them, and AUDITS.md's Settled entry found a line tuned to the hour
+ * earned less on the nights it was not fitted to — the held-out check under
+ * the Strategy tab's lines says how that went on this record. Inline SVG off
+ * the page's own colours, so it needs no library, works offline and follows
+ * light and dark. */
+function blockChart(blocks) {
+  blocks = blocks || [];
+  if (!blocks.length) return '<p class="note">No three-hour block saw an offer while free.</p>';
+  var W = 360, rowH = 32, L = 64, Rr = 8, T = 6, H = T + blocks.length * rowH + 2;
+  var top = 0;
+  blocks.forEach(function (b) {
+    [b.best && b.drawn ? b.best.value : null, b.everything && b.everything.gross].forEach(function (v) {
+      if (typeof v === 'number') top = Math.max(top, v);
+    });
+  });
+  top = Math.max(5, Math.ceil(top / 5) * 5);
+  function X(v) { return L + v / top * (W - L - Rr); }
+  var out = ['<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="$/hr on shift by three-hour block">'];
+  blocks.forEach(function (b, i) {
+    var y = T + i * rowH, has = b.drawn && b.best;
+    out.push('<text x="' + (L - 6) + '" y="' + (y + 12) + '" text-anchor="end">' + esc(b.name) + '</text>');
+    if (has) {
+      out.push('<rect x="' + L + '" y="' + (y + 2) + '" width="' + Math.max(1, X(b.best.value) - L).toFixed(1)
+               + '" height="12" rx="2" fill="var(--up)"><title>' + esc(b.name) + ': $' + b.best.value.toFixed(2)
+               + '/hr on shift holding out for $' + b.best.T + '+ (n=' + b.best.n + ' offers)</title></rect>');
+      out.push('<text x="' + L + '" y="' + (y + 27) + '" class="sm">$' + b.best.value.toFixed(2) + '/hr at $' + b.best.T
+               + '+ · n=' + b.offers + ' seen free · ' + b.days + ' days</text>');
+    } else {
+      out.push('<rect x="' + L + '" y="' + (y + 2) + '" width="' + (W - L - Rr) + '" height="12" rx="2" fill="none" '
+               + 'stroke="var(--axis)" stroke-dasharray="3 3"/><text x="' + L + '" y="' + (y + 27)
+               + '" class="sm">too few for a curve · n=' + b.offers + ' seen free · ' + b.days + ' days</text>');
+    }
+    if (b.everything && typeof b.everything.gross === 'number') {
+      var xe = X(b.everything.gross).toFixed(1);
+      out.push('<line x1="' + xe + '" x2="' + xe + '" y1="' + y + '" y2="' + (y + 16) + '" stroke="var(--ink)" stroke-width="2">'
+               + '<title>' + esc(b.name) + ': taking everything $' + b.everything.gross.toFixed(2) + '/hr</title></line>');
+    }
+  });
+  out.push('</svg>');
+  return out.join('') + '<p class="note">Bar: $/hr on shift at the block\'s own best line. Tick: taking everything in '
+    + 'that block. Point estimates, no test between blocks.</p>';
 }
 
 function STRATEGY_SECTION(r) {
@@ -2816,14 +3056,15 @@ function STRATEGY_SECTION(r) {
       [function (x) { return x.ph.p75; }, 'P75', '$'], [function (x) { return x.ph.p90; }, 'P90', '$'],
       [function (x) { return x.pm.p25; }, '$/mi P25', '$'], [function (x) { return x.pm.p50; }, 'median', '$'],
       [function (x) { return x.pm.p75; }, 'P75', '$'], [function (x) { return x.pm.p90; }, 'P90', '$'],
-      ['freeHours', 'hours free', 'h'], ['perFreeHour', 'offers / hr free', 'r']], list);
+      ['freeHours', 'hours free', 'h'], ['perFreeHour', 'offers / hr free', 'r']], list,
+      function (x) { return x.ph.p50 === null; });
   }
   function actRows(list, expected) {
     var cols = [['name', ''], ['timed', 'timed'], ['together', 'carried with another'], ['ratio', 'actual ÷ card min', 'x'],
                 ['ratioMedian', 'typical order', 'x'], ['cardPH', 'median card $/hr', '$'], ['actualPH', 'median actual $/hr', '$'],
                 ['milesN', 'with miles'], ['mileRatio', 'GPS ÷ card mi', 'x']];
     if (expected) cols.push(['expected', 'card ÷ ratio', '$']);
-    return strategyTable(cols, list);
+    return strategyTable(cols, list, function (x) { return x.ratio === null; });
   }
   function sliceRows(list) {
     return strategyTable([['name', ''], ['days', 'shift days'], ['freeHours', 'hours free', 'h'], ['offers', 'offers seen free'],
@@ -2831,7 +3072,8 @@ function STRATEGY_SECTION(r) {
       [function (x) { return x.best ? x.best.value : null; }, '$/hr on shift', '$'],
       [function (x) { return x.best ? '$' + x.best.from + '–$' + x.best.to : null; }, 'about the same'],
       [function (x) { return x.everything.gross; }, 'taking everything', '$'],
-      ['actualAtBest', 'actual $/hr of cards at the best line', '$']], list);
+      ['actualAtBest', 'actual $/hr of cards at the best line', '$']], list,
+      function (x) { return !x.drawn || !x.best; });
   }
   var pointCols = [['T', 'line ($/hr+)', '$'], ['n', 'offers seen free'], ['perFreeHour', 'per hour free', 'r'],
                    ['pay', 'mean pay', '$'], ['cardMin', 'mean card min', 'r'], ['ratio', 'actual ÷ card', 'x'],
@@ -2841,13 +3083,19 @@ function STRATEGY_SECTION(r) {
   var mileCols = pointCols.filter(function (col) { return col[1] !== '95%'; }).map(function (col) {
     return col[0] === 'T' ? ['T', 'line ($/mi+)', '$'] : col;
   });
+  function isThin(p) { return p.thin; }
   var mi = s.miles || {};
+  // The order is the tab's own, top to bottom: the lines; the curve drawn,
+  // its table folded under it; the slices drawn, their tables folded; the
+  // $/mi curve folded whole (for reading only); then the two descriptive
+  // halves, each with its all-offers row open and its breakdowns folded.
+  // Every heading that opens a part has an id, so the Overview links to it.
   return '<section data-tab="strategy"><h2>Strategy — what $/hr to expect, and what holding out paid</h2>'
     + '<p class="exp">Descriptive. What your own record shows about the offers seen, what cards turned into, and what '
     + 'holding out for a line would have paid per hour on shift. Nothing here is an accept rule or changes a verdict; '
     + 'the $/mi figures are for reading only (AUDITS.md, Settled: a $/mile rule replayed 24% below $/hr).</p>'
     + ul(s.lines)
-    + '<h3>The accept-threshold curve</h3>'
+    + '<h3 id="s-curve">The accept-threshold curve</h3>'
     + '<p class="note">For each line T on the panel\'s $/hr: of the offers seen with no order in the car, those at T or more '
     + 'came at λ(T) an hour; each paid pay(T) and took time(T), its card minutes × the actual ÷ card ratio of the timed '
     + 'orders whose card was at T or more. <b>Effective $/hr on shift = pay(T) ÷ (1/λ(T) + time(T))</b> — every free hour '
@@ -2859,31 +3107,36 @@ function STRATEGY_SECTION(r) {
       : 'nothing: the rows carry no running cost') + ' on the card\'s miles × '
     + (cv.cost.mileRatio !== null ? cv.cost.mileRatio.toFixed(2) + ' (GPS ÷ card miles over ' + cv.cost.milesN + ' orders)' : '1 (too few orders with miles)')
     + '. Dotted: taking everything. It reads low by whatever stacking earns: a driver who takes nothing while carrying.</p>'
-    + '<div class="plot">' + strategyChart(cv) + '</div>'
-    + strategyTable(pointCols, cv.points)
-    + '<h3>The same, by time of day, app and weekday</h3>'
+    // The wide drawing on a laptop, the small one on a phone (the CSS picks).
+    + '<div class="plot wide">' + strategyChart(cv) + '</div>'
+    + '<div class="plot small">' + strategyChart(cv, 'small') + '</div>'
+    + fold('s-points', 'Every point of the curve', strategyTable(pointCols, cv.points, isThin))
+    + '<h3 id="s-slices">The same, by time of day, app and weekday</h3>'
     + '<p class="note">Point estimates, each slice\'s own free hours, offers and (with ' + f.ratio + ' or more) its own timed '
     + 'orders for the ratio. An app\'s curve is that app\'s cards alone in the same free hours. Read as description: a line '
     + 'tuned to the hour earned less on the nights it was not fitted to (AUDITS.md, Settled), and the held-out check in '
     + 'the lines above runs that test again on this record.</p>'
-    + '<h3>By three-hour block</h3>' + sliceRows(s.slices.block)
-    + '<h3>By app</h3>' + sliceRows(s.slices.app)
-    + '<h3>Weekday and weekend</h3>' + sliceRows(s.slices.week)
-    + '<h3>The curve on $/mi — for reading only</h3>'
-    + '<p class="note">The same arithmetic with the line on pay ÷ card miles. Not an accept rule: printed because it was asked for.</p>'
-    + strategyTable(mileCols, s.curveMile.points)
-    + '<h3>What offers look like</h3>'
+    + '<div class="plot fluid">' + blockChart(s.slices.block) + '</div>'
+    + fold('s-blocks', 'By three-hour block', sliceRows(s.slices.block))
+    + fold('s-apps', 'By app', sliceRows(s.slices.app))
+    + fold('s-week', 'Weekday and weekend', sliceRows(s.slices.week))
+    + fold('s-mile', 'The curve on $/mi — for reading only',
+           '<p class="note">The same arithmetic with the line on pay ÷ card miles. Not an accept rule: printed because it was asked for.</p>'
+           + strategyTable(mileCols, s.curveMile.points, isThin))
+    + '<h3 id="s-seen">What offers look like</h3>'
     + '<p class="note">Every offer seen that the rig stands behind (' + c.offers + ', once per offer; ' + c.untrusted
     + ' untrusted and ' + c.unrated + ' with no rate left out). $/hr is the panel\'s; $/mi is pay over the card\'s miles, '
     + 'nothing off. Weekend is a Saturday or Sunday shift day (4am to 4am). A quartile needs ' + f.dist + ' offers. '
     + 'Offers per hour free counts only offers seen with no order in the car, over the hours with none (' + c.freeHours
     + ' h of ' + c.shiftHours + ' h on shift); an area has no free hours of its own here (the Busy tab has them, off the GPS).</p>'
-    + seenRows([s.seen.all]) + '<h3>By app</h3>' + seenRows(s.seen.byApp) + '<h3>By three-hour block</h3>' + seenRows(s.seen.byBlock)
-    + '<h3>Weekday and weekend</h3>' + seenRows(s.seen.byWeek)
-    + '<h3>By town (the card\'s own)</h3>' + seenRows(s.seen.byArea || [])
-    + (s.seen.areaThin ? '<p class="note">' + s.seen.areaThin.areas + ' towns under ' + f.dist + ' offers (' + s.seen.areaThin.offers
-       + ' offers) and ' + s.seen.areaThin.noArea + ' offers with no town are not listed.</p>' : '')
-    + '<h3>How cards turn into actuals</h3>'
+    + seenRows([s.seen.all])
+    + fold('s-seen-app', 'By app', seenRows(s.seen.byApp))
+    + fold('s-seen-block', 'By three-hour block', seenRows(s.seen.byBlock))
+    + fold('s-seen-week', 'Weekday and weekend', seenRows(s.seen.byWeek))
+    + fold('s-seen-town', 'By town (the card\'s own)', seenRows(s.seen.byArea || [])
+      + (s.seen.areaThin ? '<p class="note">' + s.seen.areaThin.areas + ' towns under ' + f.dist + ' offers (' + s.seen.areaThin.offers
+         + ' offers) and ' + s.seen.areaThin.noArea + ' offers with no town are not listed.</p>' : ''))
+    + '<h3 id="s-actual">How cards turn into actuals</h3>'
     + '<p class="note">Over the orders this report timed at the door (as the Your takes tab: ' + c.timed + ' of ' + c.orders
     + ' taken; ' + c.unmeasured + ' with no time at the door, ' + c.addons + ' add-ons (their card minutes are an increment), '
     + c.tooSoon + ' put down in under ' + f.tooSoon + ' of the card, ' + c.clock + ' with a clock that stepped or held over '
@@ -2892,10 +3145,12 @@ function STRATEGY_SECTION(r) {
     + 'card\'s running cost, as the panel\'s figure is. <b>Card ÷ ratio</b> is what a card in that band has turned into. '
     + 'Miles: the order record\'s odometer (' + (mi.odometer || 0) + ') or the GPS log (' + (mi.log || 0) + ')'
     + (mi.gps ? '' : '; no GPS log reached this report') + '.</p>'
-    + actRows([s.actual.all]) + '<h3>By card $/hr</h3>' + actRows(s.actual.byRate, true)
-    + '<h3>By app</h3>' + actRows(s.actual.byApp) + '<h3>By card length</h3>' + actRows(s.actual.byLength)
-    + '<h3>By three-hour block (of the Took)</h3>' + actRows(s.actual.byBlock)
-    + '<h3>By town (the card\'s own)</h3>' + actRows(s.actual.byArea || [])
+    + actRows([s.actual.all])
+    + fold('s-act-rate', 'By card $/hr', actRows(s.actual.byRate, true))
+    + fold('s-act-app', 'By app', actRows(s.actual.byApp))
+    + fold('s-act-length', 'By card length', actRows(s.actual.byLength))
+    + fold('s-act-block', 'By three-hour block (of the Took)', actRows(s.actual.byBlock))
+    + fold('s-act-town', 'By town (the card\'s own)', actRows(s.actual.byArea || []))
     + '<p class="note">The shift: every offer seen and every order\'s hold, joined across silences under ' + f.breakMin
     + ' minutes; free is that less every hold (Took to its end, however it ended; the card\'s minutes where it has none). '
     + c.duplicates + ' repeat readings folded, ' + c.alone + ' offers alone in a silence, ' + c.held + ' seen with an order '
@@ -2903,24 +3158,67 @@ function STRATEGY_SECTION(r) {
     + '</section>\n';
 }
 
-// The page's tabs, in order: [id, label].
-var TABS = [['targets', 'Targets'], ['strategy', 'Strategy'], ['best', 'Best offers'], ['places', 'Places'], ['restaurants', 'Restaurants'], ['map', 'Map'], ['towns', 'Towns'], ['grid', 'Grid'],
-            ['after', 'After a drop'], ['takes', 'Your takes'], ['apps', 'Uber vs DoorDash'],
-            ['ppm', '$/mi'], ['waits', 'Store waits'], ['strand', 'Strand risk'], ['busy', 'Busy'],
-            ['stack', 'Add-ons'], ['quiet', 'Gone quiet'], ['trend', 'Trend'], ['coverage', 'Coverage'],
-            ['method', 'Method']];
+/* The page's tabs, grouped by the question each answers (7 Nov 2026, the
+ * owner: "consider how the page and tabs are laid out, is there a better
+ * format for all this information?"). Twenty tabs in one wrapping row of
+ * pills was four rows of buttons on a phone, below a banner taller than the
+ * screen, before a single figure. Now four groups — the overview, what to
+ * take, where and when, and the record — one row of groups and, under it,
+ * the chosen group's tabs, which scroll sideways on a narrow screen. Every
+ * tab and every hash the page ever had is still here (#targets, #strategy,
+ * #best, ... a bookmark keeps working); only #overview is new, and it is
+ * where a bare address opens.
+ *
+ * [group id, group label, [[tab id, tab label, what it answers, hours?], ...]]
+ * `hours` marks the tabs the Hours picker reaches (they draw a view of
+ * R.views); on the others it is hidden rather than left offering a choice
+ * that changes nothing on the page. */
+var GROUPS = [
+  ['overview', 'Overview', [
+    ['overview', 'Overview', 'The few numbers that matter, each linking to its tab.', false]]],
+  ['take', 'What to take', [
+    ['strategy', 'Strategy', 'What $/hr to expect, what cards turn into, what holding out for a line paid.', false],
+    ['targets', 'Targets', 'The offers page\'s Targets lines, word for word, and the richer areas.', false],
+    ['apps', 'Uber vs DoorDash', 'Each app\'s offers, $/hr, $/mi and your take, per area.', true],
+    ['ppm', '$/mi', 'Pay over the card\'s miles per area — for reading, not a rule.', true]]],
+  ['where', 'Where & when', [
+    ['places', 'Places', 'Pinned pickups ranked against the same hours elsewhere.', true],
+    ['restaurants', 'Restaurants', 'Pay by the name on the card, placed or not.', true],
+    ['map', 'Map', 'The places and the 2-mile grid on a map (needs the internet).', true],
+    ['towns', 'Towns', 'The card\'s own town, ranked.', true],
+    ['grid', 'Grid', 'A 2-mile grid by the pickup\'s pin, ranked.', true],
+    ['busy', 'Busy', 'Offers per hour while parked, by area and hours (GPS).', true],
+    ['waits', 'Store waits', 'The rig\'s measured waits beside a place\'s pay.', true],
+    ['after', 'After a drop', 'Where trips leave you: minutes to the next take.', true],
+    ['strand', 'Strand risk', 'How far a store\'s cards run and where its trips end.', true],
+    ['stack', 'Add-ons', 'Add-on and stacking chance per store.', true]]],
+  ['record', 'Record', [
+    ['best', 'Best offers', 'Where the top 10% turns up, per hour of waiting, dead miles, offer size.', true],
+    ['takes', 'Your takes', 'What you took and what it really paid.', true],
+    ['quiet', 'Gone quiet', 'Places and towns with fewer offers lately.', false],
+    ['trend', 'Trend', 'Each area\'s score by week.', false],
+    ['coverage', 'Coverage', 'What could be placed, by day and level, and what that biases.', false],
+    ['method', 'Method', 'How every figure was measured.', false]]]
+];
+// ...and flat, in that order: [id, label], as the page has always listed them.
+var TABS = [];
+GROUPS.forEach(function (g) { g[2].forEach(function (t) { TABS.push([t[0], t[1]]); }); });
 
 var EXPERIMENTAL = '<p class="exp">Experimental, descriptive: counts, medians and intervals. Nothing in this tab '
   + 'is ranked by a test or coloured, and none of it is a rule.</p>';
 
+// The second pass's tabs, keyed by tab id (html() writes them in the nav's
+// order). Each table sits in a fold() under its heading.
 function MORE_SECTIONS(r) {
+  var out = Object.create(null);
   function sec(id, title, note, divs) {
-    return '<section data-tab="' + id + '"><h2>' + title + '</h2>' + EXPERIMENTAL + '<p class="note">' + note + '</p>'
-      + divs.map(function (d) { return '<h3>' + esc(d[1]) + '</h3><div id="m-' + d[0] + '"></div>'; }).join('')
+    out[id] = '<section data-tab="' + id + '"><h2>' + title + '</h2>' + EXPERIMENTAL + '<p class="note">' + note + '</p>'
+      + divs.map(function (d) { return fold('f-' + d[0], d[1], '<div id="m-' + d[0] + '"></div>'); }).join('')
       + '</section>\n';
+    return '';
   }
   var tk = r.takes;
-  return sec('takes', 'Your takes, and what they really paid',
+  sec('takes', 'Your takes, and what they really paid',
              'Taken = the offer\'s id is one of the journal\'s taken orders (server.js takenRuns: a put-down row '
              + 'carrying its Took), ' + tk.taken + ' in the window, ' + tk.onCounted + ' on rows the rig stands behind. '
              + 'Take rate is taken over offered, with a Wilson 95% interval. <b>Real $/hr</b> is the card\'s pay over '
@@ -2988,13 +3286,14 @@ function MORE_SECTIONS(r) {
           + 'left out of the line, not drawn as zero; hover a line for its weeks). The dashed rule is zero; every '
           + 'line is on one scale. All hours only.',
           [['trendPlace', 'By place'], ['trendTown', 'By town']]);
+  return out;
 }
 
 /* The Best offers tab: plain lines first, then where good offers turn up
  * per hour of waiting and what working an area paid, then the share tests,
  * then the descriptive tables. */
 function BEST_SECTION(r) {
-  function tbl(id, title) { return '<h3>' + esc(title) + '</h3><div id="b-' + id + '"></div>'; }
+  function tbl(id, title) { return fold('f-b-' + id, title, '<div id="b-' + id + '"></div>'); }
   var b = r.best;
   return '<section data-tab="best"><h2>Best offers — where the top of the pay turns up</h2>'
     + '<p class="exp">Experimental. Offered, not earned; only near where you wait; and see Coverage for what could '
@@ -3015,7 +3314,7 @@ function BEST_SECTION(r) {
     + 'top-10% marks within each three-hour block (' + r.shuffles + ' shuffles); the score is a group\'s share less '
     + 'what the other groups showed in the same hours, with a 95% bootstrap interval. Coloured only where the test '
     + 'beats chance and the interval is clear of zero. ' + r.minN + ' offers on ' + r.minOutings + ' shift days.</p>'
-    + '<div id="shareTests"></div>'
+    + fold('shareTestsFold', 'The tests, group by group', '<div id="shareTests"></div>')
     + tbl('goodTown', 'Good offers by town') + tbl('goodRest', 'Good offers by restaurant (the name on the card)')
     + tbl('goodGrid', 'Good offers by ' + r.gridMi + '-mile cell') + tbl('goodApp', 'Good offers by app')
     + '<h3>Offer size</h3><p class="note">By card miles: under 4, 4–8, 8–12, 12 and over. Median and P90 $/hr, '
@@ -3108,7 +3407,7 @@ var PAGE_CSS = [
   '.tag{display:inline-block;padding:0 6px;border-radius:4px;font-size:12px}.tag.up{color:#fff;background:var(--up)}',
   '.tag.down{color:#fff;background:var(--down)}.tag.grey{color:var(--ink2);border:1px solid var(--grid)}',
   '#tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--ink);border:1px solid var(--axis);',
-  'border-radius:6px;padding:6px 8px;font-size:12px;max-width:300px;z-index:1000;box-shadow:0 2px 8px rgba(0,0,0,.2)}',
+  'border-radius:6px;padding:6px 8px;font-size:12px;max-width:300px;z-index:1100;box-shadow:0 2px 8px rgba(0,0,0,.2)}',
   '.method li{margin:4px 0;color:var(--ink2);font-size:13px}code{font-size:12px}',
   '.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 4px}.tabs button{font:inherit;font-size:13px;',
   'padding:4px 10px;border-radius:14px;border:1px solid var(--axis);background:var(--surface);color:var(--ink);cursor:pointer}',
@@ -3125,6 +3424,62 @@ var PAGE_CSS = [
   '.lines{padding-left:20px}.lines li{margin:6px 0}',
   '.xb{font:inherit;font-size:12px;padding:0 6px;margin-right:4px;border-radius:4px;border:1px solid var(--axis);',
   'background:var(--surface);color:var(--ink);cursor:pointer}',
+  /* The layout of 7 Nov 2026 (html()'s nav, OVERVIEW_SECTION, fold()), from
+   * here down, overriding what is above where the two meet. */
+  // Wider on a laptop: the tables are wide and 1000px left half a 1280 screen empty.
+  'main{max-width:1120px}.head h1{margin-bottom:2px}',
+  // The nav: the one part that stays put. Groups on one row, the chosen
+  // group's tabs under it, sideways-scrolling on a phone and wrapping on a
+  // laptop. Above Leaflet's panes and controls (400-1000), under the tooltip.
+  '.nav{position:sticky;top:0;z-index:1050;background:var(--bg);margin:8px -16px 0;padding:0 16px;',
+  'border-bottom:1px solid var(--grid)}',
+  '.groups{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}.groups::-webkit-scrollbar{display:none}',
+  '.groups button{flex:none;font:inherit;font-size:14px;font-weight:600;min-height:44px;padding:8px 10px;border:0;',
+  'border-bottom:3px solid transparent;background:none;color:var(--ink2);cursor:pointer}',
+  '.groups button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--up)}',
+  // On a phone the four share the width equally and a long name wraps onto
+  // two lines: measured at 375px, the four in one line need 384px of a 343px
+  // column, and a group scrolled off the edge is a group nobody finds.
+  '@media (max-width:480px){.groups{display:grid;grid-template-columns:repeat(4,1fr)}',
+  '.groups button{font-size:13px;padding:6px 2px;line-height:1.15;white-space:normal}}',
+  '.nav .tabs{position:relative;flex-wrap:nowrap;overflow-x:auto;margin:0;padding:6px 0 8px;scrollbar-width:thin}',
+  '.nav .tabs[hidden]{display:none}.tg{display:contents}.tg[hidden]{display:none}',
+  '.nav .tabs button{flex:none;min-height:36px;padding:4px 12px}',
+  '@media (min-width:760px){.nav .tabs{flex-wrap:wrap;overflow:visible}}',
+  // The gist of the old banner, under the nav on every tab but the Overview.
+  '.strip{font-size:12px;color:var(--ink2);margin:6px 0 0}.strip[hidden]{display:none}',
+  '.bar{position:static;border-bottom:0;padding:8px 0 0}.bar[hidden]{display:none}',
+  // A heading a link lands on clears the sticky nav.
+  'h3,details.fold{scroll-margin-top:110px}',
+  // Folds: the heading is the handle, with a marker that says which way.
+  'details.fold{margin:4px 0}details.fold>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;min-height:40px}',
+  'details.fold>summary::-webkit-details-marker{display:none}',
+  'details.fold>summary:before{content:"\\25B8";color:var(--muted);font-size:12px;width:12px}',
+  'details.fold[open]>summary:before{content:"\\25BE"}details.fold>summary h3{margin:8px 0}',
+  // Tables on a phone: the name column stays while the figures scroll under it.
+  '.tw th:first-child,.tw td:first-child{position:sticky;left:0;z-index:1;background:var(--bg)}',
+  // A row under its floor: muted, so it never reads as loud as one over it.
+  'tr.thinrow td{color:var(--muted);font-style:italic}',
+  // Charts: the wide curve on a laptop, the small one on a phone; a fluid
+  // plot scales to its box instead of scrolling inside it.
+  '.plot.small{display:none}@media (max-width:640px){.plot.wide{display:none}.plot.small{display:block}}',
+  '.plot.small svg,.plot.fluid svg{min-width:0}.plot text.sm{font-size:11px}',
+  // The Overview.
+  '.lead{font-size:16px;line-height:1.5;margin:12px 0}',
+  '.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:10px;margin:12px 0}',
+  '.tile{display:flex;flex-direction:column;gap:2px;background:var(--surface);border:1px solid var(--grid);',
+  'border-radius:10px;padding:10px 12px;color:inherit;text-decoration:none;min-width:0}',
+  '.tile:hover,.tile:focus{border-color:var(--axis)}.tile .tl{font-size:12px;color:var(--ink2);font-weight:600}',
+  '.tile .tv{font-size:24px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}',
+  '.tile .tv small{font-size:13px;font-weight:600;color:var(--ink2)}',
+  '.tile .ts{font-size:13px;color:var(--ink)}.tile .tf{font-size:11px;color:var(--muted);margin-top:auto;padding-top:4px}',
+  '.tile.warn{background:var(--warn);border-color:var(--warnline)}',
+  '.pair{display:grid;grid-template-columns:1fr;gap:16px}@media (min-width:760px){.pair{grid-template-columns:1fr 1fr}}',
+  '.pair .plot{max-width:460px}a.more{font-size:13px;font-weight:400;margin-left:6px}',
+  'details.caveats>summary{cursor:pointer}details.caveats>summary h3{display:inline}',
+  '.dir{display:grid;grid-template-columns:1fr;gap:4px 24px}@media (min-width:760px){.dir{grid-template-columns:repeat(3,1fr)}}',
+  '.dir h4{margin:10px 0 2px;font-size:14px}.dir ul{margin:0;padding-left:18px;font-size:13px;color:var(--ink2)}',
+  '.dir li{margin:3px 0}a{color:var(--up)}',
 ].join('\n');
 
 /* The page's script: it switches between views computed above and draws them.
@@ -3272,8 +3627,8 @@ var PAGE_JS = String(function page() {
          + ' trips) have too few to show, and are not named.</p>' : '')
       : (c.thin.length ? '<p class="thin"><b>Too few</b> (under ' + c.floor + ' measured waits): '
          + c.thin.map(function (t) { return esc(t.name) + ' (' + t.n + ')'; }).join(', ') + '.</p>' : '');
-    el.innerHTML = '<h3>' + (what === 'cell' ? 'By ' + R.gridMi + '-mile cell' : 'By town') + '</h3>'
-      + (c.groups.length ? '<div class="tw"><table><thead><tr><th>' + (what === 'cell' ? 'cell' : 'town')
+    // Its heading is the fold's round it now (html()), so none is written here.
+    el.innerHTML = (c.groups.length ? '<div class="tw"><table><thead><tr><th>' + (what === 'cell' ? 'cell' : 'town')
         + '</th><th>trips</th><th>measured</th><th>ended</th><th>median wait</th><th>95%</th><th>vs same hours</th>'
         + '<th>next take $/hr</th><th>next take pay</th><th></th></tr></thead><tbody>' + rows
         + '</tbody></table></div>' : '<p class="note">No area clears the floor here.</p>') + thin;
@@ -3549,31 +3904,110 @@ var PAGE_JS = String(function page() {
     Array.prototype.forEach.call(document.querySelectorAll('th'), function (h) { h.classList.add('sortable'); });
   }
 
-  // Tabs: one section at a time, the pick kept in the address.
+  /* Tabs: one section at a time, the pick kept in the address, in two rows
+     (html()'s nav): the groups, and the chosen group's tabs. A tab's group
+     is the span it sits in, so the page needs no second list of them. */
   var tabs = document.getElementById('tabs');
+  var groups = document.getElementById('groups');
   var current = null;
+  var lastIn = {};     // the tab last open in each group, for a press on the group
+  function buttons() { return Array.prototype.slice.call(tabs.querySelectorAll('button[data-tab]')); }
+  function groupOf(id) {
+    var b = tabs.querySelector('button[data-tab="' + id + '"]');
+    return b ? b.parentNode.getAttribute('data-group') : null;
+  }
+  // The tabs the Hours picker reaches (GROUPS' fourth field, carried over in
+  // the data as R.hourly); elsewhere it is hidden, not left changing nothing.
+  var HOURLY = {};
+  (R.hourly || []).forEach(function (t) { HOURLY[t] = true; });
+  var navAt = document.getElementById('navAt');
   function showTab(id) {
-    var known = Array.prototype.some.call(tabs.children, function (b) { return b.getAttribute('data-tab') === id; });
-    if (!known) id = 'targets';
+    if (!groupOf(id)) id = 'overview';
     current = id;
-    Array.prototype.forEach.call(tabs.children, function (b) {
+    var g = groupOf(id);
+    lastIn[g] = id;
+    buttons().forEach(function (b) {
       b.setAttribute('aria-pressed', b.getAttribute('data-tab') === id ? 'true' : 'false');
     });
+    Array.prototype.forEach.call(groups.children, function (b) {
+      b.setAttribute('aria-selected', b.getAttribute('data-group') === g ? 'true' : 'false');
+    });
+    // The chosen group's tabs only; the Overview is one tab and needs no row.
+    Array.prototype.forEach.call(tabs.children, function (sp) { sp.hidden = sp.getAttribute('data-group') !== g; });
+    tabs.hidden = g === 'overview';
     Array.prototype.forEach.call(document.querySelectorAll('section[data-tab]'), function (sec) {
       sec.hidden = sec.getAttribute('data-tab') !== id;
     });
+    document.getElementById('hoursBar').hidden = !HOURLY[id];
+    document.getElementById('strip').hidden = id === 'overview';
+    // The pressed tab into view in its sideways row (a phone's), without
+    // moving the page.
+    var on = tabs.querySelector('button[aria-pressed="true"]');
+    if (on && tabs.scrollWidth > tabs.clientWidth) tabs.scrollLeft = on.offsetLeft - tabs.clientWidth / 2 + on.offsetWidth / 2;
     if (id === 'map') {
       drawMap(R.views[sel.value]);
       if (map) map.invalidateSize();
     }
   }
+  // A new tab starts at its top: a press from far down a long table would
+  // otherwise open the next tab somewhere in its middle.
+  function toTop() {
+    var y = navAt.getBoundingClientRect().top + window.pageYOffset;
+    if (window.pageYOffset > y) window.scrollTo(0, y);
+  }
+  function remember(id) {
+    try { history.replaceState(null, '', '#' + id); } catch (err) { /* a file: page */ }
+  }
   tabs.addEventListener('click', function (e) {
     var b = e.target.closest && e.target.closest('button[data-tab]');
     if (!b) return;
     showTab(b.getAttribute('data-tab'));
-    try { history.replaceState(null, '', '#' + b.getAttribute('data-tab')); } catch (err) { /* a file: page */ }
+    remember(b.getAttribute('data-tab'));
+    toTop();
   });
-
+  groups.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('button[data-group]');
+    if (!b) return;
+    var g = b.getAttribute('data-group');
+    var first = tabs.querySelector('.tg[data-group="' + g + '"] button[data-tab]');
+    var id = lastIn[g] || (first && first.getAttribute('data-tab'));
+    showTab(id);
+    remember(id);
+    toTop();
+  });
+  /* The address: a tab's id (#strategy, #targets, every one the page ever
+     had), or the id of a part inside one (#s-blocks, a fold's id): that tab
+     opens, the part's folds open, and it is scrolled to. Anything else is the
+     Overview. Read on load and on every change, so the Overview's links (and
+     a link from elsewhere, like the offers page's #strategy) work in place. */
+  function route() {
+    var h = '';
+    try { h = decodeURIComponent((location.hash || '').slice(1)); } catch (err) { h = ''; }
+    if (groupOf(h)) { showTab(h); toTop(); return; }
+    var el = h ? document.getElementById(h) : null;
+    var sec = el && el.closest ? el.closest('section[data-tab]') : null;
+    if (!sec) { showTab('overview'); return; }
+    showTab(sec.getAttribute('data-tab'));
+    for (var d = el; d; d = d.parentNode) if (d.tagName === 'DETAILS') d.open = true;
+    el.scrollIntoView();
+  }
+  window.addEventListener('hashchange', route);
+  // On a phone the folds start shut: the tables are wider than the screen,
+  // and the Strategy tab's fourteen of them were seven screens of scrolling.
+  // As written they are open, which is what a laptop (and a page with no
+  // script) gets.
+  if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
+    Array.prototype.forEach.call(document.querySelectorAll('details.fold'), function (d) { d.open = false; });
+  }
+  // A fold with nothing in it (no "too few" list this time) is not shown,
+  // rather than offering a heading that opens on nothing. Asked after every
+  // draw, because the hours picked change what each holds.
+  function tidyFolds() {
+    Array.prototype.forEach.call(document.querySelectorAll('details.fold'), function (d) {
+      var body = Array.prototype.slice.call(d.children, 1);
+      d.hidden = !body.some(function (n) { return (n.textContent || '').trim() || n.querySelector('table,svg'); });
+    });
+  }
   var sel = document.getElementById('when');
   ['all'].concat([0, 1, 2, 3, 4, 5, 6, 7]).forEach(function (k) {
     var v = R.views[k];
@@ -3601,6 +4035,7 @@ var PAGE_JS = String(function page() {
     dropTable(document.getElementById('dropGrid'), v.dropGrid, 'cell');
     drawMore(v);
     markSortable();
+    tidyFolds();
     if (current === 'map') drawMap(v);
   }
   sel.addEventListener('change', draw);
@@ -3608,7 +4043,7 @@ var PAGE_JS = String(function page() {
   levelsTable();
   shareTests();
   draw();
-  showTab((location.hash || '').slice(1) || 'targets');
+  route();
 }).replace(/^function page\(\) \{/, '(function () {').replace(/\}$/, '}());');
 
 /* --- talking to the server, the NucBox and the GPS log -------------------- */
@@ -4155,6 +4590,7 @@ module.exports = {
   STOP_M: STOP_M, STOP_MIN_S: STOP_MIN_S, PRESS_AFTER_MIN: PRESS_AFTER_MIN, PRESS_BEFORE_MIN: PRESS_BEFORE_MIN,
   SHORT_MILES: SHORT_MILES,
   DEAD_MAX_MIN: DEAD_MAX_MIN, SIZE_BANDS: SIZE_BANDS, TAKE_SLACK_MS: TAKE_SLACK_MS,
+  GROUPS: GROUPS, TABS: TABS, blockChart: blockChart, fold: fold,
 };
 
 if (require.main === module) main(process.argv.slice(2));
