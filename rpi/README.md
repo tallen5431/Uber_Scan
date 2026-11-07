@@ -8991,7 +8991,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 42 suites
+npm test                # all 45 suites
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -9026,6 +9026,13 @@ node tests/placesreport.test.js # 178 on the NucBox's offline report of where
                                 #     split, add-on share, gone quiet, the
                                 #     weekly trend's floor, $/mi, and the
                                 #     nightly script's swap and failed run
+node tests/strategy.test.js     #  80 on what $/hr to expect and what holding
+                                #     out for a line paid: the curve's answer
+                                #     worked by hand, a thin tail never the
+                                #     best, free time with every hold cut out,
+                                #     a card read twice counted once, a clock
+                                #     step never a delivery, and the held-out
+                                #     check of a line per block
 python3 rpi/test_parser.py      # 1603 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 322 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on

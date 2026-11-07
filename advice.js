@@ -2540,5 +2540,9 @@
            // be able to say what "settled" was allowed to mean, and a check
            // that the wording matches has to read the same number this does.
            THRESHOLDS: THRESHOLDS, SHOWN_AT: SHOWN_AT,
-           UNSTABLE_SPREAD: UNSTABLE_SPREAD };
+           UNSTABLE_SPREAD: UNSTABLE_SPREAD,
+           // ...and how near the best a line may earn and still be "about the
+           // same": tools/strategy.js draws its flat region by this number, so
+           // the offline curve and this replay call one width a plateau.
+           PLATEAU: PLATEAU };
 }));
