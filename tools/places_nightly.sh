@@ -160,7 +160,14 @@ if command -v timeout >/dev/null 2>&1; then
 else
     log "WARNING: no timeout command; the report runs with no time limit"
 fi
-${LIMIT[@]+"${LIMIT[@]}"} "$PLACES_NODE" "${ARGS[@]}" >> "$PLACES_LOG" 2>&1
+# Stdin from /dev/null, never the terminal. The owner's run of 7 Nov, by hand
+# from an ssh session: the report wrote its page ("Written: …/index.html") and
+# then node itself aborted while exiting — node::ResetStdio()'s assertion, the
+# Node 18 teardown restoring a terminal's settings and failing — so `timeout`
+# said "dumped core", the status was not 0, and the finished build below was
+# thrown away with the old report left up. The report never reads stdin; with
+# no terminal on it there is nothing for node to restore at exit.
+${LIMIT[@]+"${LIMIT[@]}"} "$PLACES_NODE" "${ARGS[@]}" < /dev/null >> "$PLACES_LOG" 2>&1
 status=$?
 if [ "$status" -ne 0 ]; then
     if [ "${#LIMIT[@]}" -gt 0 ] && { [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; }; then
