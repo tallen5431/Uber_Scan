@@ -2272,6 +2272,45 @@ no_('a run with neither says nothing about them',
     'since start had a street' in quiet_counts
     or 'since start refused' in quiet_counts)
 
+# --- [no address] litter is counted apart from screens a door could be on ----
+#
+# The count reached 298 in one shift, and its samples were OCR litter on
+# screens nobody could type (`"'a sie ee 2 e. ° ray st 1%" a door, no ", ST
+# ZIP"`). scan_pi.door_could_matter: a screen typed as one that shows a door,
+# its planner stops or sheet read, or a street-like line in real words; the
+# rest is "N unreadable screens since start with street-like words", apart.
+# Invented screens.
+for _txt, _want in (("'a sie ee 2 e. ° ray st 1%", False),
+                    ('| ee rd .. Ii', False),
+                    ('ST 3 = ~ ws Way', False),
+                    ('Turn right onto Cobb Pkwy NW', True),
+                    ('1554 Ombre Hills Rd', True),
+                    ('Dropoff 3100 Esquire Dr N 14 min Start', True),
+                    ('4 min 0.6 mi\nOak St & Elm Ave', True)):
+    eq('[no address] %r is %s' % (_txt[:30], 'a screen a door could be on' if _want else 'litter'),
+       SP.door_could_matter(_txt), _want)
+eq('[no address] ...and litter beside a planner\'s stops or Uber\'s sheet still counts, read or not',
+   (SP.door_could_matter('| ee rd .. Ii', stops=[{'street': '9 Elm St'}]),
+    SP.door_could_matter('| ee rd .. Ii', sheet='9 Elm St, Faketown, GA 30060')), (True, True))
+eq('[no address] a screen typed as one that shows a door is counted, however littered its '
+   'street line', (OP2.screen_type('4 min 0.6 mi\n| ee rd .. Ii')['screen'],
+                   SP.door_could_matter('4 min 0.6 mi\n| ee rd .. Ii')), ('uber.nav', True))
+eq('[no address] a real-words line: a word with a vowel, and no more than half of it noise',
+   [SP.real_words(l) for l in ("'a sie ee 2 e. ° ray st 1%", 'Elm St', 'Rd 12 N',
+                               'xx yy zz St')],
+   [False, True, False, False])
+_apart = health_line(street_seen_no_address=4, street_unreadable=7)
+ok_('[no address] the health line says the litter apart, as a run total (%r)' % _apart.strip()[:160],
+    '4 screens since start had a street on it and no address the rig would accept; '
+    '7 unreadable screens since start with street-like words' in _apart)
+ok_('[no address] ...one of it in English, and none of it nothing at all',
+    '1 unreadable screen since start with' in health_line(street_unreadable=1)
+    and 'unreadable' not in health_line(street_seen_no_address=2))
+_hu = SP.Health()
+_hu.street_unreadable = 3
+eq('[no address] ...and the tally carries it for the seen row',
+   _hu.counters(0.0).get('streetUnreadable'), 3)
+
 # The heartbeat is what the live page reads, and it is a separate path from the
 # health line: a rig can be perfectly healthy in every other respect and still
 # need the driver to touch their phone.
@@ -4085,6 +4124,31 @@ ok_('a street the rig would not accept is counted, so the strict rule can be '
     _bare_health is not None and _bare_health.street_seen_no_address >= 1)
 ok_('...and not counted as the payout refusal, which did not happen here',
     _bare_health is not None and _bare_health.address_refused_as_offer == 0)
+ok_('[no address] ...and that navigation label, a door in real words, is not set apart as litter',
+    _bare_health is not None and _bare_health.street_unreadable == 0)
+
+
+# ...and OCR litter with an "st" in it, off a screen nobody can type, through
+# the real loop: counted apart, never as a street with no address, never quoted
+# (the 298 of one shift, a0ca7d2's samples). Invented litter.
+def _street_litter(self, frames, now=None, geom=None):
+    text = "'a sie ee 2 e. ° ray st 1%"
+    parsed = OP2.parse(text)
+    return [{'parsed': dict(parsed), 'rate': OP2.rate(parsed, {'target': 25}),
+             'locked': True, 'text': text, 'clipped': False, 'dropped': 0,
+             'recovered': 0, 'rescued': 0, 'crop': [0.0, 0.0, 1.0, 1.0], 'card': None,
+             'ms': {'warp': 0, 'prep': 0, 'ocr': 0, 'parse': 0, 'total': 0}}
+            for _ in frames]
+
+
+run_litter = run(TC.uberx_screen(), seconds=6.0, extra_argv=['--no-parallel'],
+                 look=_street_litter, press_dropoff=False)
+_litter_health = run_litter.get('health')
+ok_('[no address] litter read through the loop is counted apart from the screens a door '
+    'could be on (%r)' % ((_litter_health.street_unreadable, _litter_health.street_seen_no_address)
+                          if _litter_health else None,),
+    _litter_health is not None and _litter_health.street_unreadable >= 1
+    and _litter_health.street_seen_no_address == 0)
 
 
 def _slow_address(self, frames, now=None, geom=None):

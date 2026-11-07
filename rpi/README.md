@@ -9281,9 +9281,24 @@ the sighting, which needs no ZIP), Uber's opened sheet, DoorDash's pickup
 screen, the app's own idle screen ("a good place to wait" is all the street
 there is), and for any other screen, line by line: a door with no `, ST ZIP`
 after it, a cross-street, no house number, a town alone, a state or ZIP that
-is not one. The count is unchanged; over the owner's 📷 Snap pages of 12 Oct –
-2 Nov most of what it counted was planners and idle screens, not doors
-refused. Doors are quoted as read: the log is the rig's own, kept on the Pi.
+is not one. Over the owner's 📷 Snap pages of 12 Oct – 2 Nov most of what it
+counted was planners and idle screens, not doors refused. Doors are quoted as
+read: the log is the rig's own, kept on the Pi.
+
+It counts only a screen a door could be on: one typed as a navigation screen,
+the Trip Planner, a delivered screen, DoorDash's deliver, pickup or place
+screen, one whose planner stops or opened sheet were read, or one whose
+street-like line is in real words (a word of three letters with a vowel, and
+no more than half the line noise). OCR litter with an "st" in it — one shift
+counted 298 and quoted lines like `'a sie ee 2 e. ° ray st 1%'` — is counted
+apart and never quoted (figures invented):
+
+```
+... 12 screens since start had a street on it and no address the rig would accept;
+       286 unreadable screens since start with street-like words; ...
+```
+
+The `seen` row carries it as `streetUnreadable` beside `streetNoAddress`.
 
 `health` lines appear at most every two minutes and only when reads have
 happened, so a quiet scanner stays quiet. The same detail is on `live.html`

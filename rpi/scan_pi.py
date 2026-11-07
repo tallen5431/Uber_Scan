@@ -1849,6 +1849,82 @@ def why_no_address(text, stops=None, sheet=None, keep=3, width=40):
     return '%s: %s' % (kind, '; '.join(said + picked) or 'no line read as part of one')
 
 
+# --- which screens the "street and no address" count is about -----------------
+#
+# THE JUNK. With why_no_address quoting what the count was made of (a0ca7d2),
+# the count reached 298 in one shift and the lines it quoted were OCR litter
+# off screens the parser could not type at all — `unknown: "'a sie ee 2 e. °
+# ray st 1%" a door, no ", ST ZIP"` — a map's texture or a half-lit glass read
+# as letters with an "st" among them. Such a screen never had a door to give,
+# so it says nothing about whether find_address's strict rule costs the driver
+# a destination, which is the one question the count is kept to answer (see
+# Health: `street_seen_no_address`), and it drowned the screens that do.
+#
+# So the count, and its quoted samples, take only a screen where a door could
+# matter:
+#
+#   - one the parser TYPED as a screen that shows a door: a navigation screen,
+#     the Trip Planner, a delivered screen, DoorDash's deliver and pickup
+#     screens and its place popup (DOOR_SCREENS) — or one whose planner stops
+#     or Uber's opened sheet were read (why_no_address says which);
+#   - or one with a street-like line that passes a minimal real-words test
+#     (real_words): a word of three letters or more with a vowel in it, and
+#     no more than half the line's tokens noise — a mark, a stray letter or
+#     two, a figure that is no number. "'a sie ee 2 e. ° ray st 1%" is five
+#     noise tokens in nine; "Turn right onto Cobb Pkwy NW", "1554 Ombre Hills
+#     Rd" and "Dropoff 3100 Esquire Dr N 14 min Start" have none.
+#
+# The rest is counted APART, "N unreadable screens since start with
+# street-like words" (`street_unreadable`, `streetUnreadable` on the `seen`
+# row), and never quoted: a figure for how much litter the camera saw, not a
+# door refused. Measured over the shared corpus (tests/fixtures cases.json and
+# sequences.json, 678 distinct texts): of the 96 screens the count took, 95
+# are still counted — every planner, sheet, navigation screen and door with
+# no town — and the one set apart is a map's litter under an offer's title
+# ("= = £ \ The Townes at CHastain © f = g e"). The corpus was chosen for
+# readable screens; the road's 298 were not. Counted, not acted on, as the
+# count always was: nothing reads either figure to decide a read, a
+# destination, a row or a word on the panel.
+DOOR_SCREENS = frozenset(['uber.planner', 'uber.nav', 'uber.pickupNav', 'uber.delivered',
+                          'dd.deliver', 'dd.pickup', 'dd.delivered', 'dd.placePopup'])
+_REAL_WORD = re.compile(r"[A-Za-z][a-z'’]{2,}[.,]?$")
+_REAL_NUMBER = re.compile(r'\d+(?:[.,:]\d+)?[A-Za-z]?[.,]?$')
+_REAL_QUADRANT = re.compile(r'(?:N|S|E|W|NE|NW|SE|SW)[.,]?$')
+_REAL_SUFFIX = re.compile(r'(?:' + OP.STREET_SUFFIX + r')[.,]?$', re.IGNORECASE)
+
+
+def real_words(line):
+    """Whether one line reads as words rather than OCR litter: a word of three
+    letters or more with a vowel, and noise in at most half its tokens. A
+    number, a quadrant and a street's type word are neither word nor noise."""
+    tokens = (line or '').split()
+    words = noise = 0
+    for t in tokens:
+        if _REAL_SUFFIX.match(t) or _REAL_NUMBER.match(t) or _REAL_QUADRANT.match(t):
+            continue
+        if _REAL_WORD.match(t) and re.search(r'[aeiouyAEIOUY]', t):
+            words += 1
+        else:
+            noise += 1
+    return words >= 1 and noise * 2 <= len(tokens)
+
+
+def door_could_matter(text, stops=None, sheet=None):
+    """Whether a payout-free screen with something street-shaped on it is one
+    the "no address" count is about (see DOOR_SCREENS): typed as a door's
+    screen, its planner stops or sheet read, or a street-like line of it in
+    real words."""
+    if stops or sheet:
+        return True
+    if OP.screen_type(text or '')['screen'] in DOOR_SCREENS:
+        return True
+    for line in re.split(r'[\r\n]+', text or ''):
+        line = OP.normalize(line)
+        if line and OP.STREET_ENDS.search(line + ' ') and real_words(line):
+            return True
+    return False
+
+
 def doubted(row):
     """Is this journal row one the reader was unsure of? See DOUBT_DIR."""
     return bool(row and (row.get('milesCorrected') or row.get('milesUncertain')
@@ -2125,6 +2201,10 @@ class Health:
         # missing destination is find_address being strict on purpose.
         self.address_refused_as_offer = 0
         self.street_seen_no_address = 0
+        # ...and, counted APART from it, the screens with street-like words
+        # where no door could matter: untyped OCR litter that fails
+        # real_words (see DOOR_SCREENS). A run total like it; never quoted.
+        self.street_unreadable = 0
         # `address_not_dropoff` is the label guard's firing rate: an address
         # off a payout-free screen that was refused because the screen did not
         # print it under a Dropoff label — under a Pickup one, or, unprompted,
@@ -2331,6 +2411,7 @@ class Health:
                 'saw': self.saw, 'kept': self.kept,
                 # Run totals, not window totals — see __init__.
                 'streetNoAddress': self.street_seen_no_address,
+                'streetUnreadable': self.street_unreadable,
                 'addressAsOffer': self.address_refused_as_offer,
                 'addressNotDropoff': self.address_not_dropoff,
                 'screensKept': self.screens_kept,
@@ -2448,6 +2529,12 @@ class Health:
                         'address the rig would accept'
                         % (self.street_seen_no_address,
                            '' if self.street_seen_no_address == 1 else 's'))
+        # ...and the litter set apart from it (door_could_matter), beside it
+        # and only when there was any, so a shift's lines read as before.
+        if self.street_unreadable:
+            bits.append('%d unreadable screen%s since start with street-like words'
+                        % (self.street_unreadable,
+                           '' if self.street_unreadable == 1 else 's'))
         if self.address_refused_as_offer:
             bits.append('%d address%s since start refused for being on an '
                         'offer card'
@@ -5946,6 +6033,13 @@ def main():
         if an_offer and frame_address:
             health.address_refused_as_offer += 1
         elif not an_offer and not frame_address \
+                and OP.STREET_ENDS.search(out.get('text') or '') \
+                and not door_could_matter(out.get('text'), seen_stops, sheet):
+            # Litter with "st" in it on a screen no door could be on (see
+            # DOOR_SCREENS): counted apart and never quoted, so the count
+            # below and its samples are the screens that could have had one.
+            health.street_unreadable += 1
+        elif not an_offer and not frame_address \
                 and OP.STREET_ENDS.search(out.get('text') or ''):
             health.street_seen_no_address += 1
             # ...and what it was, three times a minute at most (why_no_address):
@@ -6558,6 +6652,8 @@ def main():
             # carries the whole shift and reading two of them does not mean
             # adding them up.
             'streetNoAddress': tally.get('streetNoAddress'),
+            # ...and the screens set apart from it as litter (door_could_matter).
+            'streetUnreadable': tally.get('streetUnreadable'),
             'addressAsOffer': tally.get('addressAsOffer'),
             'addressNotDropoff': tally.get('addressNotDropoff'),
             # ...and how the reading went in the window, which was the rest of
