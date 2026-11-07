@@ -3126,6 +3126,91 @@ ok_('...and a window with none says nothing of it, and counts none',
     not any('waited' in l for l in _said_hq + _said_hk) and _tq.get('rescueWait') == 0
     and _tq.get('rescueWaitMs') is None)
 
+# --- [time] where a live read's time goes (ReadTimes) ------------------------
+#
+# The owner's Pi read an Uber card in 392 ms on the bench (tools/pi_bench.py)
+# and the road's health lines said 847-975 ms median idle, 1.7-2.4 s on shift,
+# with scan_pi.py at 42-72% of one core. Each read's hand-overs are timed and
+# the window's medians said as ONE part of the line, only when the time
+# outside the read itself reaches TIME_SAY_MS or a read ran beside a label
+# read; the figures ride the `seen` row's `time` either way. Invented reads.
+_rt = SP.ReadTimes()
+for _w, _q in ((640.0, 170.0), (600.0, 190.0), (620.0, 180.0)):
+    _rt.add({'wait': _w, 'held': 0.0, 'queue': _q, 'pair': 33.0, 'age': 240.0,
+             'warp': 40.0, 'read': 390.0, 'acc': 4.0, 'tell': 10.0})
+_rt.add({'wait': 0.0, 'read': 1200.0, 'warp': None}, overlapped=True, whole=True)
+_rt.labels = 2
+eq('[time] each stage\'s median over the reads that had it, a missing figure not counted',
+   _rt.medians(), {'wait': 620, 'held': 0, 'queue': 180, 'pair': 33, 'age': 240, 'warp': 40,
+                   'read': 390, 'acc': 4, 'tell': 10})
+eq('[time] the part: the stages in order, a 0 ms one left out, then the counts, then the CPU',
+   _rt.part(63, 1.2),
+   'time: wait 620 queue 180 pair 33 age 240 warp 40 read 390 acc 4 tell 10 ms median; '
+   '1 overlapped a label read, 2 label reads, 1 nav/planner read; cpu 63%, load 1.20')
+eq('[time] ...and the row\'s figures, every stage kept', _rt.counters(63, 1.2),
+   {'waitMs': 620, 'heldMs': 0, 'queueMs': 180, 'pairMs': 33, 'ageMs': 240, 'warpMs': 40,
+    'readMs': 390, 'accMs': 4, 'tellMs': 10, 'n': 4, 'overlapped': 1, 'labelReads': 2,
+    'wholeReads': 1, 'cpuPct': 63, 'load1': 1.2})
+_quiet = SP.ReadTimes()
+_quiet.add({'wait': 30.0, 'queue': 5.0, 'warp': 20.0, 'read': 380.0, 'acc': 3.0, 'tell': 4.0,
+            'age': 900.0})
+eq('[time] a window whose reads lost under TIME_SAY_MS outside the read says nothing — the '
+   'frame\'s age is pair and queue again and not added twice', (_quiet.outside(), _quiet.part(40, 0.5)),
+   (62, None))
+eq('[time] ...and nothing timed is no part and no row figure',
+   (SP.ReadTimes().part(10, 0.1), SP.ReadTimes().counters(10, 0.1)), (None, None))
+# Through Health: the part after the rescue's figures, every part before it
+# as it was, and `time` in the tally; a window with nothing worth a part says
+# nothing more than before.
+_ht = SP.Health()
+_ht.reset(0.0)
+_ht.add({'ms': {'total': 430, 'warp': 40}, 'clipped': False}, {'pay': 9.0, 'complete': True})
+_ht.times = _rt
+_said_ht = []
+try:
+    SP.log = _said_ht.append
+    _tt = _ht.report(SP.HEALTH_EVERY + 1.0, None, type('AScanner', (), {'crop_box': None})())
+finally:
+    SP.log = _real_log2
+ok_('[time] the health line carries the part after the reads\' own figures, the parts before '
+    'it unchanged (%r)' % _said_ht[-1:],
+    any(l.startswith('health over 121s: 1 reads, 1 complete; median 430ms; time: wait 620 '
+                     'queue 180 ') for l in _said_ht))
+eq('[time] ...and the tally carries the figures for the row',
+   {k: (_tt.get('time') or {}).get(k) for k in ('n', 'waitMs', 'readMs', 'overlapped')},
+   {'n': 4, 'waitMs': 620, 'readMs': 390, 'overlapped': 1})
+ok_('[time] ...and a window whose reads were quick outside the read says nothing of time',
+    not any('time:' in l for l in _said_hq + _said_hk + _said_hw))
+# This process's CPU, as a share of one core over the window: worked off the
+# process clock, not the caller's `now`, and None over too short a window.
+_was_cpu = SP.process_cpu
+try:
+    _cpu = [(100.0, 50.0)]
+    SP.process_cpu = lambda: _cpu[0]
+    _hc = SP.Health()
+    _cpu[0] = (220.0, 125.6)
+    _share = _hc.cpu_share()
+    _cpu[0] = (100.5, 50.4)
+    _short = _hc.cpu_share()
+finally:
+    SP.process_cpu = _was_cpu
+eq('[time] the CPU share is this process\'s CPU over the window\'s wall time, of one core',
+   (_share, _short), (63, None))
+ok_('[time] the load average is a number or None, never an exception',
+    SP.load_average() is None or isinstance(SP.load_average(), float))
+# The motion gate's own wait (pipeline's Scanner.gate_ms): the first moving
+# frame to the frame it settled on, on the monotonic clock.
+_gs = PL.Scanner()
+_still = np.zeros((90, 160), np.uint8)
+_moved = np.full((90, 160), 200, np.uint8)
+_gs.should_read(_still)
+_gs.should_read(_still)
+_gs.should_read(_moved)
+time.sleep(0.05)
+_fired = _gs.should_read(_moved)
+eq('[time] the gate fired on the frame the picture settled, and timed the wait from the first '
+   'that moved', (_fired, _gs.gate_ms is not None and 45.0 <= _gs.gate_ms < 2000.0), (True, True))
+
 
 # The scanner's side of "the same card": the accumulator's episode. A read
 # kept through the remembered crop in ANOTHER episode — a card on the same

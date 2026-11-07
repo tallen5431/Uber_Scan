@@ -2079,6 +2079,15 @@ class Scanner:
         self._prev = None
         self._dirty = True      # first frame always reads
         self.last_diff = 0.0    # how much the picture moved, for callers that care
+        # How long the motion gate held the last read back, in ms: from the
+        # first frame that moved to the frame it settled on (should_read's
+        # True), on the monotonic clock; None before any, or for the first
+        # frame, which reads with nothing to settle from. A measurement for
+        # scan_pi's health line ("time: wait ..."), never a decision: the
+        # owner's Pi read a card in 392 ms on the bench and took 847-975 ms a
+        # read idle on the road, and this is one of the places the rest goes.
+        self.gate_ms = None
+        self._dirty_at = None
         self._sig = None
         self._agree = 0
         self.dropped = 0
@@ -2251,10 +2260,17 @@ class Scanner:
         """
         diff = self.last_diff = self._motion(frame, scale)
         if diff > CHANGE_T:
+            # (The first moving frame starts the wait gate_ms measures; one
+            # monotonic read a moving frame, nothing on a still one.)
+            if not self._dirty or self._dirty_at is None:
+                self._dirty_at = time.monotonic()
             self._dirty = True
             return False        # still moving; reading now would blur
         if self._dirty and diff <= STILL_T:
             self._dirty = False
+            self.gate_ms = (None if self._dirty_at is None
+                            else (time.monotonic() - self._dirty_at) * 1000.0)
+            self._dirty_at = None
             return True
         return False
 

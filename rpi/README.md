@@ -9289,6 +9289,31 @@ refused. Doors are quoted as read: the log is the rig's own, kept on the Pi.
 happened, so a quiet scanner stays quiet. The same detail is on `live.html`
 under **what the reader read**, which is quicker if you are standing at the car.
 
+**Where a read's time goes.** The `median` on the line is the reader's own
+clock, and on the road it ran two to five times the bench's (tools/pi_bench.py:
+an Uber card 392 ms on the owner's Pi 4; the health lines 847–975 ms idle,
+1.7–2.4 s on shift) while `ps` had the scanner at 42–72% of one core. So each
+read is timed at every hand-over, and when the reads of a window spent 100 ms
+or more median outside the read itself (`TIME_SAY_MS`), or one ran beside a
+map-label read, the line gains one part:
+
+```
+time: wait 620 queue 180 pair 33 age 240 warp 40 read 390 acc 4 tell 10 ms median;
+       1 overlapped a label read, 2 label reads, 1 nav/planner read; cpu 63%, load 1.20
+```
+
+`wait` is the motion gate holding a trigger until the picture settled, `held`
+a trigger kept back while the reader was busy or the corners were disputed,
+`queue` the hand-over to the reader thread and the finished read waiting for
+the loop, `pair` the partner frame's capture, `age` how old the frame was when
+the reader began, `warp` and `read` the reader's own (`ms.warp`, and the rest
+of `ms.total`), `acc` the loop's settle, accumulator and rate, `tell` the
+journal, emit and voice. A stage at 0 ms is left out. The CPU is this
+process's, all its threads, as a share of one core over the window; the load
+is the one-minute average. The figures ride the `seen` row as `time` whether
+the line said them or not. The bookkeeping is a few clock reads and list
+appends a read: 3 µs on the development box against a 390 ms read.
+
 `corners` says three things, not two: `held` is the tracker following the
 phone, `stuck` is a candidate found on every check that is not the phone, and
 `lost` is no candidate at all. Both distances are given because they answer

@@ -346,14 +346,18 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     stamps = []
     skip_darks = []
     readings = [0]
+    metas = []
 
-    def submit(self, frames, now, geom):
+    # (`meta`, the loop's clocks for the read — scan_pi's ReadTimes — is
+    # recorded too, and passed on as the loop handed it.)
+    def submit(self, frames, now, geom, meta=None):
         submitted[0] += 1
         skip_darks.append((bool(getattr(geom, 'whole', False)),
                            getattr(geom, 'skip_dark', None)))
         submitted_whole.append(bool(getattr(geom, 'whole', False)))
         stamps.append((now, bool(getattr(geom, 'whole', False))))
-        return real[12](self, frames, now, geom)
+        metas.append(meta)
+        return real[12](self, frames, now, geom, meta)
 
     SP.Reader.submit = submit
     # What the loop tells the server it is pricing a mile at, as a copy: the
@@ -513,7 +517,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
                 popups=popups,
                 logs=logs, alive=alive, dropoffs=dropoffs, verdicts=verdicts,
                 settings=said_settings, config=config, wholes=wholes, crops=crops,
-                raised=raised, handoff=handoff, finder=finder[0], skip_darks=skip_darks)
+                raised=raised, handoff=handoff, finder=finder[0], skip_darks=skip_darks,
+                metas=metas)
 
 
 def _stall_note_age(handoff):
@@ -694,6 +699,22 @@ eq('a seen row carries the window\'s reads and how they went (%r)'
     if k not in _first], [])
 ok_('...with the reads counted, not a placeholder',
     isinstance(_first.get('reads'), int) and _first.get('reads') >= 1)
+# ...and where the reads' time went (scan_pi's ReadTimes), off the real loop's
+# own hand-overs: every read handed over with the frame's clock, and the row's
+# `time` carrying the window's medians and this process's CPU. Asked of the
+# real row, as above: a figure the tally had and note_tally dropped would be
+# a health line on the Pi and nothing more.
+_tm = [x.get('time') for x in seen if x.get('time')]
+_tm0 = _tm[0] if _tm else {}
+ok_('[time] every read was handed over with its clocks (%r)' % (r['metas'][:1],),
+    r['metas'] and all(isinstance(m, dict) and isinstance(m.get('frameAt'), float)
+                       and 'gate' in m and 'held' in m for m in r['metas']))
+ok_('[time] a seen row carries the window\'s read timings (%r)' % (_tm0,),
+    isinstance(_tm0.get('n'), int) and _tm0.get('n') >= 1
+    and all(isinstance(_tm0.get(k), int) for k in ('queueMs', 'ageMs', 'readMs', 'accMs', 'tellMs'))
+    and 'cpuPct' in _tm0 and 'load1' in _tm0)
+ok_('[time] ...and the part, when the line says it, is one part beginning "time: "',
+    all(l.count('time: ') <= 1 for l in r['logs'] if l.startswith('health over')))
 # ...and the stall watch's own evidence: frames since start that were the same
 # picture as one of the eight before. Nought here, a working camera with a
 # sensor's noise, over a still card read again and again — and on the row,

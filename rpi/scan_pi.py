@@ -353,7 +353,7 @@ class Reader:
                                             daemon=True)
             self._thread.start()
 
-    def submit(self, frames, now, geom):
+    def submit(self, frames, now, geom, meta=None):
         """Hand over frames to read. Call only when not busy.
 
         `now` comes back on the finished read as `at`, and it is the only clock
@@ -364,13 +364,18 @@ class Reader:
         ...and `since` comes back on it as `began`: the same moment on the
         monotonic clock, for the intervals digest() times off it. `at` is a
         stamp for the wire and the journal; `began` is never written anywhere.
+
+        ...and `meta`, the loop's clocks for this read (ReadTimes: the gate's
+        wait, a held trigger, the partner frame, when the frame arrived),
+        comes back as `clock` with when the reader started and finished it
+        added, all monotonic. A measurement only; None is no measurement.
         """
         self.busy = True
         self.since = time.monotonic()
         if not self.threaded:
-            self._done.put(self._job(frames, now, geom, self.since))
+            self._done.put(self._job(frames, now, geom, self.since, meta))
             return
-        self._work.put((frames, now, geom, self.since))
+        self._work.put((frames, now, geom, self.since, meta))
 
     def take(self):
         """The finished read, or None if there is not one yet.
@@ -391,11 +396,14 @@ class Reader:
             done['outs'] = self.scanner.settle(done['outs'], done['geom'])
         return done
 
-    def _job(self, frames, now, geom, began=None):
+    def _job(self, frames, now, geom, began=None, meta=None):
+        clock = dict(meta or {}, submitted=began, started=time.monotonic())
         try:
-            return {'outs': self.scanner.look_many(frames, now, geom=geom),
+            outs = self.scanner.look_many(frames, now, geom=geom)
+            clock['ended'] = time.monotonic()
+            return {'outs': outs,
                     'geom': geom, 'frames': frames, 'at': now, 'began': began,
-                    'error': None}
+                    'error': None, 'clock': clock}
         except BaseException as e:                 # noqa: BLE001 — see take()
             # ...except the two that are not a failed read at all.
             #
@@ -1944,6 +1952,145 @@ SAMPLE_EVERY = 20.0
 # before the health tally, so the count is taken where every read arrives.
 DARK_SAY_EVERY = 60.0
 
+# --- where a live read's time goes -------------------------------------------
+#
+# THE GAP. tools/pi_bench.py on the owner's Pi 4 (cooler on, never throttled):
+# an Uber card read 392 ms median, DoorDash's rescue 995-1231 ms, a remembered
+# crop 536, the planner 331, the map label 140. The health lines from the road
+# said 847-975 ms median idle and 1.7-2.4 s on shift, the rescue +3.5-4.6 s
+# more, one window 4877 ms — while `ps` had scan_pi.py at 42-72% of ONE core
+# and the rest of the machine mostly idle. So the reads were not short of CPU,
+# and the median the line prints (`ms.total`, the reader's own clock) could not
+# say where the other half-second to two seconds went: the motion gate waiting
+# for the picture to settle, a trigger held while the reader was busy, the
+# reader's queue, the partner frame, the loop taking the answer late, the
+# accumulator and the emit, or the map label's OCR on its own thread beside it.
+#
+# So each read is timed on the monotonic clock at every hand-over, and the
+# window's medians said as ONE part of the health line when they are worth a
+# part (TIME_SAY_MS, below), and as `time` on the `seen` row:
+#
+#   wait   the motion gate: the first frame that moved to the frame it
+#          settled on (PL.Scanner.gate_ms); 0 for a read nobody's motion
+#          triggered (the verify beat, a whole-screen read)
+#   held   a trigger held back while the reader was busy or the tracker
+#          disputed the corners, to the frame that was read in its place
+#   queue  submit to the reader thread starting, plus the finished read
+#          waiting for the loop to take it
+#   pair   capturing the partner frame of a paired read
+#   age    how old the frame was when the reader started on it
+#   warp   the perspective warp (`ms.warp`)
+#   read   the rest of the reader's own time (`ms.total` less the warp:
+#          preprocess, tesseract, the finder, the parse)
+#   acc    the loop's side of the answer: settle, the accumulator, the rate
+#   tell   digest's rest: journal, emit and voice
+#
+# and counted: reads that overlapped a map-label read (its OCR on its own
+# thread), map-label reads, and whole-screen (nav/planner/⌖) reads; with this
+# process's CPU over the window as a share of one core, and the load average.
+# Measurement only: nothing reads any of it to decide a read, a verdict, a
+# row or a word on the panel.
+
+# The part is said when the window's reads spent at least this many ms median
+# OUTSIDE the reader's own read (every stage but `read`, `age` — which is
+# pair and queue again — and nothing for a stage with no figure), or any read
+# overlapped a label read. CHOSEN, not measured: a quarter of the bench's 392
+# ms card read. On a desk with nothing in the way every line reads as before.
+TIME_SAY_MS = 100.0
+TIME_STAGES = ('wait', 'held', 'queue', 'pair', 'age', 'warp', 'read', 'acc', 'tell')
+
+
+def _median(values):
+    return sorted(values)[len(values) // 2] if values else None
+
+
+class ReadTimes(object):
+    """One health window's per-read timings and counts; see TIME_STAGES.
+
+    `add` takes one read's stages in ms (a stage missing or None is not
+    counted for that read). Cheap by design — a dict of lists and a sort per
+    health line — because it runs on the loop that holds the camera.
+    """
+
+    def __init__(self):
+        self.stages = dict((k, []) for k in TIME_STAGES)
+        self.n = 0
+        self.overlapped = 0
+        self.labels = 0
+        self.whole = 0
+
+    def add(self, stages, overlapped=False, whole=False):
+        self.n += 1
+        for k in TIME_STAGES:
+            v = stages.get(k)
+            if isinstance(v, (int, float)) and v >= 0:
+                self.stages[k].append(float(v))
+        if overlapped:
+            self.overlapped += 1
+        if whole:
+            self.whole += 1
+
+    def medians(self):
+        """{stage: median ms, rounded} for every stage with a figure."""
+        return dict((k, int(round(_median(v)))) for k, v in self.stages.items() if v)
+
+    def outside(self):
+        """Median ms spent outside the reader's own read, summed over the
+        stages that are not `read` and not `age` (age is pair + queue)."""
+        m = self.medians()
+        return sum(v for k, v in m.items() if k not in ('read', 'age'))
+
+    def worth_saying(self):
+        return self.n > 0 and (self.outside() >= TIME_SAY_MS or self.overlapped > 0)
+
+    def counters(self, cpu=None, load=None):
+        """The `seen` row's `time`, or None with no read timed."""
+        if not self.n:
+            return None
+        out = dict(('%sMs' % k, v) for k, v in self.medians().items())
+        out.update({'n': self.n, 'overlapped': self.overlapped,
+                    'labelReads': self.labels, 'wholeReads': self.whole,
+                    'cpuPct': cpu, 'load1': load})
+        return out
+
+    def part(self, cpu=None, load=None):
+        """The health line's one part, or None when not worth a part."""
+        if not self.worth_saying():
+            return None
+        # (A stage whose median is 0 ms is left out — `held` on most lines —
+        # so the part stays one short run; the row's `time` keeps every one.)
+        m = self.medians()
+        bits = ['time: ' + ' '.join('%s %d' % (k, m[k]) for k in TIME_STAGES if m.get(k))
+                + ' ms median']
+        counts = []
+        if self.overlapped:
+            counts.append('%d overlapped a label read' % self.overlapped)
+        if self.labels:
+            counts.append('%d label read%s' % (self.labels, '' if self.labels == 1 else 's'))
+        if self.whole:
+            counts.append('%d nav/planner read%s' % (self.whole, '' if self.whole == 1 else 's'))
+        if counts:
+            bits.append(', '.join(counts))
+        machine = ([] if cpu is None else ['cpu %d%%' % cpu]) \
+            + ([] if load is None else ['load %.2f' % load])
+        if machine:
+            bits.append(', '.join(machine))
+        return '; '.join(bits)
+
+
+def process_cpu():
+    """(monotonic s, this process's CPU s over all its threads): the health
+    line's CPU share is the difference of two over the window."""
+    return time.monotonic(), time.process_time()
+
+
+def load_average():
+    """The one-minute load average, or None where the OS has none."""
+    try:
+        return round(os.getloadavg()[0], 2)
+    except (OSError, AttributeError):
+        return None
+
 
 class Health:
     """Counts what happened, and says so occasionally.
@@ -2088,6 +2235,12 @@ class Health:
         # `ms`: a skipped read costs a millisecond, and the median read time is
         # what says whether the Pi is reading slowly.
         self.dark_skipped = 0
+        # ...and where each read's time went outside the reader's own read,
+        # and this process's CPU over the window (see ReadTimes): the part
+        # "time: ..." on the line, `time` on the row. The CPU clock is the
+        # real one whatever `now` the caller judges windows by.
+        self.times = ReadTimes()
+        self._cpu0 = process_cpu()
 
     def add(self, out, parsed, card=None, previous=None):
         self.reads += 1
@@ -2159,6 +2312,9 @@ class Health:
         `over` is None before the first read has opened a window.
         """
         return {'over': None if self.since is None else int(now - self.since),
+                # Where the window's reads spent their time (ReadTimes), with
+                # this process's CPU and the load; None with no read timed.
+                'time': self.times.counters(self.cpu_share(), load_average()),
                 'reads': self.reads, 'complete': self.complete,
                 'failed': self.failed, 'noPay': self.no_pay,
                 'clipped': self.clipped, 'rescued': self.rescued,
@@ -2184,6 +2340,14 @@ class Health:
                 'gain': self.gain, 'exposure': self.exposure,
                 'measuredExposure': self.measured_exposure,
                 'tooBright': bool(self.too_bright), 'tooDim': bool(self.too_dim)}
+
+    def cpu_share(self):
+        """This process's CPU since the window opened, as a whole percent of
+        one core (all its threads: the reader, the map label's, the loop), or
+        None over a window too short to divide by."""
+        t0, c0 = self._cpu0
+        t1, c1 = process_cpu()
+        return int(round((c1 - c0) / (t1 - t0) * 100)) if t1 - t0 >= 1.0 else None
 
     def report(self, now, tracker, scanner):
         """Say what has happened lately. Returns the tally, or None if silent.
@@ -2260,6 +2424,13 @@ class Health:
             bits.append('%d rescue%s waited +%dms median'
                         % (len(self.rescue_wait_ms), '' if len(self.rescue_wait_ms) == 1 else 's',
                            tally['rescueWaitMs']))
+        # ...and where the reads' time went outside the reader's own read
+        # (ReadTimes), one part, only when it was worth one: every other line
+        # reads as it did.
+        timed = tally.get('time') or {}
+        said = self.times.part(timed.get('cpuPct'), timed.get('load1'))
+        if said:
+            bits.append(said)
         # Outside the tracker block on purpose: these say nothing about the
         # corners, and a rig started with --no-track is exactly the one whose
         # destination scan is worth watching.
@@ -4031,6 +4202,8 @@ class MapLabels(object):
         # `found` is set by the read's own thread; a dict entry's one key
         # set under the GIL, read here only to refuse a later ask.
         self._asked = {}
+        self.reads = 0
+        self.reading = False
         self._thread = None
         if threaded:
             self._thread = threading.Thread(target=self._serve, name='maplabel', daemon=True)
@@ -4084,10 +4257,18 @@ class MapLabels(object):
             return None
 
     def _job(self, offer_id, frame, geom, store):
+        # `reading` while the label's OCR runs, and `reads` begun: the loop
+        # asks both across a card read to count the reads that ran beside a
+        # label read (ReadTimes' `overlapped`). Written on this thread, read
+        # on the loop's; a bool and an int under the GIL, a measurement only.
+        self.reads += 1
+        self.reading = True
         try:
             answer = self.read(frame, geom, store=store)
         except Exception:                           # noqa: BLE001
             answer = None
+        finally:
+            self.reading = False
         if answer and answer.get('line'):
             seen = self._asked.get(offer_id)
             if seen is not None:
@@ -5168,6 +5349,14 @@ def main():
     # one. Remembered rather than dropped: the gate fires once, on the frame a
     # moving picture settles, so a trigger thrown away is a card never read.
     read_wanted = False
+    # ...and the clocks of the read on its way (ReadTimes; all monotonic):
+    # `gate` the motion gate's wait for the trigger this read answers,
+    # `wantedAt` when a trigger was first held back, `parsed` when digest()
+    # had the rate (the end of `acc`), `labels`/`labelling` the map label's
+    # reader as it stood when the read was handed over. A dict, so digest()
+    # and collect() write it with no `nonlocal`. Measurement only.
+    read_clock = {'gate': None, 'wantedAt': None, 'parsed': None,
+                  'labels': 0, 'labelling': False}
     last_alive = 0.0
     # What 📷 Snap asks this process for — see reader_record. The read digest()
     # took last, crop and all, and the last beat with when it went. Kept, not
@@ -5215,6 +5404,9 @@ def main():
         got = map_labels.take()
         if got is None:
             return
+        # A map-label read finished, found or not: counted for the health
+        # line's "N label reads" (ReadTimes).
+        health.times.labels += 1
         offer_id, answer = got
         line = answer.get('line') if answer else None
         if not line:
@@ -5288,6 +5480,9 @@ def main():
             settings['nowMinutes'] = minutes_now
         rate = OP.rate(parsed, settings)
         out['parsed'], out['rate'] = parsed, rate
+        # (The end of the read's `acc` and the start of its `tell`, for
+        # collect()'s ReadTimes. One clock read; nothing reads it but that.)
+        read_clock['parsed'] = time.monotonic()
         # ...and what the panel is SHOWN of it, which is the same reading
         # unless its payout is one frame's word for a figure the card did not
         # print the way it prints one (unsure_payout): then no payout and no
@@ -6386,6 +6581,12 @@ def main():
             # DARK_SAY_EVERY): on 29 Oct each of those was 16-25s of tesseract.
             'darkSkipped': tally.get('darkSkipped'),
             'medianMs': tally.get('medianMs'),
+            # ...and where the window's reads spent their time outside the
+            # reader's own read, the label and whole-screen reads beside them,
+            # and this process's CPU and the load (ReadTimes): the line's
+            # "time: ..." part as figures, kept whether the line said it or
+            # not. None in a window with no read timed.
+            'time': tally.get('time'),
             'tooDim': tally.get('tooDim'), 'tooBright': tally.get('tooBright'),
             'corners': tally.get('corners'), 'relocks': tally.get('relocks'),
             # ...and how many preview frames since start were the same picture
@@ -6405,6 +6606,9 @@ def main():
     def collect():
         """Take a finished read, if there is one, and act on it."""
         tell_label()
+        # (When the loop came for the answer: the end of the read's `queue`
+        # and the start of its `acc`, ReadTimes. One clock read a pass.)
+        taken_at = time.monotonic()
         done = reader.take()
         if done is None:
             return False
@@ -6483,8 +6687,46 @@ def main():
             for i, other in enumerate(batch):
                 if i != chosen:
                     accumulator.add(other['parsed'])
-        return digest(batch[chosen], done['frames'][0], done.get('at'), whole=whole,
-                      began=done.get('began'), geom=done.get('geom'))
+        read_clock['parsed'] = None
+        quit_now = digest(batch[chosen], done['frames'][0], done.get('at'), whole=whole,
+                          began=done.get('began'), geom=done.get('geom'))
+        # ...and where this read's time went (ReadTimes), after digest() so
+        # its own share is in it. Never in the read's way: a measurement that
+        # throws is a measurement not taken.
+        try:
+            time_read(done.get('clock') or {}, batch[chosen], whole, taken_at)
+        except Exception:                           # noqa: BLE001
+            pass
+        return quit_now
+
+    def time_read(clock, out, whole, taken_at):
+        """One read's stages (ReadTimes, TIME_STAGES) into the window's tally,
+        off the clocks the loop and the reader stamped on it."""
+        ended = time.monotonic()
+        ms = out.get('ms') or {}
+        started, submitted = clock.get('started'), clock.get('submitted')
+
+        def gap(a, b):
+            return (b - a) * 1000.0 if a is not None and b is not None else None
+
+        queue_in = gap(submitted, started)
+        queue_out = gap(clock.get('ended'), taken_at)
+        warp = ms.get('warp')
+        total = ms.get('total')
+        parsed = read_clock['parsed']
+        overlapped = bool(clock.get('labelling') or getattr(map_labels, 'reading', False)
+                          or getattr(map_labels, 'reads', 0) != clock.get('labels', 0))
+        health.times.add({
+            'wait': clock.get('gate') or 0.0,
+            'held': clock.get('held') or 0.0,
+            'queue': (None if queue_in is None else queue_in + (queue_out or 0.0)),
+            'pair': clock.get('pair'),
+            'age': gap(clock.get('frameAt'), started),
+            'warp': warp,
+            'read': (total - warp if isinstance(total, (int, float))
+                     and isinstance(warp, (int, float)) else total),
+            'acc': gap(taken_at, parsed),
+            'tell': gap(parsed, ended)}, overlapped=overlapped, whole=whole)
 
     # What the server answers GET /api/settings with, from the moment the loop
     # runs. See emit_settings.
@@ -6720,6 +6962,10 @@ def main():
                 # mean is taken over the whole cabin and a card appearing on a
                 # dark-mode screen scores below the threshold — see _motion.
                 do_read = scanner.should_read(luma, track_scale)
+                # ...and how long the gate held this trigger back (ReadTimes'
+                # `wait`), kept until the read that answers it is handed over.
+                if do_read:
+                    read_clock['gate'] = scanner.gate_ms
                 moved = False           # did the corners shift on this frame?
 
                 # "The screen in front of you is the destination."
@@ -7153,6 +7399,13 @@ def main():
                 # later and slightly fresher frame of the same card.
                 if do_read and reader.busy:
                     read_wanted, do_read = True, False
+                # (When a trigger was first held back, by the reader or the
+                # tracker's dispute — ReadTimes' `held`; and nothing held
+                # once a stalled camera dropped it. Measurement only.)
+                if read_wanted and read_clock['wantedAt'] is None:
+                    read_clock['wantedAt'] = now
+                elif not read_wanted and not do_read and read_clock['wantedAt'] is not None:
+                    read_clock['wantedAt'] = read_clock['gate'] = None
 
                 # Grab the full frame for a read, or when the live view is due —
                 # otherwise nothing is ever seen between offers.
@@ -7248,12 +7501,24 @@ def main():
             # evidence, gathered at the same time instead of one after the
             # other. --no-parallel falls back to one at a time.
             partner = None
+            pair_from = time.monotonic()
             if pair_reads:
                 partner_request = cam.capture_request()
                 try:
                     partner = partner_request.make_array('main')
                 finally:
                     partner_request.release()
+            # What the read cost before the reader saw it (ReadTimes): the
+            # partner frame's capture, the trigger held back, the gate's
+            # wait, and when this frame arrived (`now`, the frame's clock).
+            read_meta = {'frameAt': now, 'gate': read_clock['gate'],
+                         'pair': ((time.monotonic() - pair_from) * 1000.0
+                                  if pair_reads else None),
+                         'held': (None if read_clock['wantedAt'] is None
+                                  else (now - read_clock['wantedAt']) * 1000.0),
+                         'labels': getattr(map_labels, 'reads', 0),
+                         'labelling': bool(getattr(map_labels, 'reading', False))}
+            read_clock['gate'] = read_clock['wantedAt'] = None
 
             frames += 1
             # Handed over rather than done here. The geometry goes with the
@@ -7282,7 +7547,8 @@ def main():
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(),
                           scanner.geometry(whole=whole_read,
-                                           skip_dark=not pressed_read))
+                                           skip_dark=not pressed_read),
+                          meta=read_meta)
             looked = True
             # Before the read, not after it. The dashboard has nothing else to
             # go on for the second and a half this takes — see emit_reading.
