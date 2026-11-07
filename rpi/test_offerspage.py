@@ -4135,6 +4135,165 @@ finally:
     except Exception:
         _eproc.kill()
 
+# --- [report link] the offers page's way to the Strategy tab (the owner, 7 Nov) -
+#
+# "How can I get to the strategy tab from the offers page?" ... "Yes add
+# that". The link was an 11px hint, hidden wherever this server had no report
+# of its own — which is the rig, where the panel's Offers button opens this
+# page — so from the car there was no way across. Now /api/placeslink says
+# where the report is: this server's places/ ('here'), NUCBOX_SITE
+# ('setting'), or the address rpi/sync.py last reached, read from its
+# `.synced` stamp beside the journal ('sync'); with none of them the link
+# stays hidden. Each server here is its own, with its own journal and report
+# folder, and every address is invented (.invalid never resolves).
+REPORT_LINK = r"""
+const { chromium } = require('playwright');
+(async () => {
+  const bases = JSON.parse(process.argv[2]);
+  let browser = null;
+  for (const exe of JSON.parse(process.env.PW_EXES || '[]').concat([null])) {
+    try { browser = await chromium.launch(exe ? { executablePath: exe } : {}); break; }
+    catch (e) {}
+  }
+  if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
+  const out = {};
+  for (const [name, base] of Object.entries(bases)) {
+    // The phone the owner reads it on, the narrowest panel size the layout
+    // suite holds the page to.
+    const page = await browser.newPage({ viewport: { width: 360, height: 640 } });
+    await page.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#toPlaces:not([hidden])', { timeout: 4000 }).catch(() => {});
+    // ...and long enough for a slow answer to land on the hidden ones too.
+    await page.waitForTimeout(500);
+    out[name] = await page.evaluate(() => {
+      const box = document.getElementById('toPlaces');
+      const a = box.querySelector('a');
+      const r = a.getBoundingClientRect();
+      const before = (x, y) => !!(x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING);
+      return {
+        shown: !box.hidden && r.height > 0,
+        href: a.getAttribute('href'),
+        text: (a.textContent || '').replace(/\s+/g, ' ').trim(),
+        height: Math.round(r.height), top: Math.round(r.top),
+        afterHeadline: before(document.getElementById('headline'), box),
+        beforeTargets: before(box, document.getElementById('targets')),
+        sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    });
+    await page.close();
+  }
+  await browser.close();
+  console.log(JSON.stringify(out));
+})().catch((e) => console.log(JSON.stringify({ __crashed: String((e && e.stack) || e) })));
+"""
+_lwork = tempfile.mkdtemp()
+_lreport = os.path.join(_lwork, 'report')
+os.makedirs(_lreport)
+with open(os.path.join(_lreport, 'index.html'), 'w') as _fh:
+    _fh.write('<h1>Strategy &amp; places report</h1>')
+_lnone = os.path.join(_lwork, 'no-report-here')
+
+
+def _lserver(name, env, stamp=None):
+    """A server of its own: its journal, its `.synced` stamp if given, and
+    PLACES_REPORT_DIR always set, so a report in the tester's own home can
+    never answer for one of these."""
+    jdir = os.path.join(_lwork, name)
+    os.makedirs(jdir)
+    jpath = os.path.join(jdir, 'journal.jsonl')
+    open(jpath, 'w').close()
+    if stamp is not None:
+        with open(jpath + '.synced', 'w') as fh:
+            fh.write(stamp if isinstance(stamp, str) else json.dumps(stamp))
+    lport = free_port()
+    lenv = dict(os.environ, SCANNER='0', PORT=str(lport), JOURNAL=jpath, PLACES_REPORT_DIR=_lnone)
+    lenv.pop('NUCBOX_SITE', None)
+    lenv.update(env)
+    return (subprocess.Popen(['node', os.path.join(ROOT, 'server.js')], env=lenv,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
+            'http://127.0.0.1:%d' % lport)
+
+
+# The stamp exactly as rpi/sync.py's stamp() writes it, with a user:password
+# in the address and a query and fragment after it, none of which may reach
+# the page.
+_lstamp = {'at': 1700000000000, 'to': 'http://drv:s3cret@nucbox.invalid:8082/?k=v#frag', 'have': 12}
+_lservers = {
+    'here': _lserver('here', {'PLACES_REPORT_DIR': _lreport}, _lstamp),
+    'sync': _lserver('sync', {}, _lstamp),
+    'setting': _lserver('setting', {'NUCBOX_SITE': 'https://nucbox.invalid/copy/'}, _lstamp),
+    'none': _lserver('none', {}),
+    'not a url': _lserver('not a url', {'NUCBOX_SITE': 'javascript:alert(1)'},
+                          {'at': 1, 'to': 'file:///etc/passwd', 'have': 0}),
+    'torn stamp': _lserver('torn stamp', {}, '{"at": 17000'),
+}
+try:
+    import urllib.request as _lurl
+    import time as _ltime
+    _lans = {}
+    for _lname, (_lp, _lb) in _lservers.items():
+        for _ in range(120):
+            try:
+                _lans[_lname] = json.loads(_lurl.urlopen(_lb + '/api/placeslink', timeout=1).read())
+                break
+            except Exception:
+                _ltime.sleep(0.1)
+    eq('[report link] a server with a report of its own links its own places/, at the Strategy tab '
+       '(the stamp beside its journal notwithstanding)',
+       (_lans.get('here') or {}).get('href'), 'places/#strategy')
+    eq('[report link] ...said to be here', (_lans.get('here') or {}).get('from'), 'here')
+    eq('[report link] the rig, with no report: the NucBox the sync last reached, its /places/ at the '
+       'Strategy tab, and no password, query or fragment from the address',
+       ((_lans.get('sync') or {}).get('href'), (_lans.get('sync') or {}).get('from')),
+       ('http://nucbox.invalid:8082/places/#strategy', 'sync'))
+    no_('[report link] ...the password is nowhere in the answer',
+        's3cret' in json.dumps(_lans.get('sync')) or 'drv' in json.dumps(_lans.get('sync')))
+    eq('[report link] NUCBOX_SITE, where it is set, wins over the sync\'s address, its path kept',
+       ((_lans.get('setting') or {}).get('href'), (_lans.get('setting') or {}).get('from')),
+       ('https://nucbox.invalid/copy/places/#strategy', 'setting'))
+    eq('[report link] no report, no setting, never synced: no link',
+       ((_lans.get('none') or {}).get('ok'), (_lans.get('none') or {}).get('href')), (True, None))
+    eq('[report link] a setting or a stamp that is not an http(s) address is no link',
+       (_lans.get('not a url') or {}).get('href'), None)
+    eq('[report link] ...nor is a stamp torn half way through its write',
+       (_lans.get('torn stamp') or {}).get('href'), None)
+
+    _ldriver = os.path.join(_lwork, 'reportlink.js')
+    open(_ldriver, 'w').write(REPORT_LINK)
+    _lrun = subprocess.run(
+        ['node', _ldriver, json.dumps({k: _lservers[k][1] for k in ('here', 'sync', 'none')})],
+        env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
+                 PW_EXES=json.dumps([os.environ.get('CHROMIUM', ''),
+                                     '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'])),
+        capture_output=True, text=True, timeout=120)
+    _lout = json.loads((_lrun.stdout or '{}').strip().split('\n')[-1] or '{}')
+    no_('[report link] the browser driver ran (%r)' % _lout.get('__crashed'),
+        _lout.get('__crashed') or _lout.get('skip'))
+    _lh, _ls, _ln = _lout.get('here') or {}, _lout.get('sync') or {}, _lout.get('none') or {}
+    eq('[report link] on the NucBox the offers page shows the link, named for both halves, to its own '
+       'places/ at the Strategy tab',
+       (_lh.get('shown'), _lh.get('href'), (_lh.get('text') or '').startswith('Strategy & places report')),
+       (True, 'places/#strategy', True))
+    eq('[report link] on the rig it shows too, to the NucBox\'s copy, and says it is the NucBox\'s',
+       (_ls.get('shown'), _ls.get('href'), 'On the NucBox' in (_ls.get('text') or '')),
+       (True, 'http://nucbox.invalid:8082/places/#strategy', True))
+    eq('[report link] ...and with nowhere to send it, it stays hidden', _ln.get('shown'), False)
+    ok_('[report link] it sits under the top figures and their headline, above Targets and the log (%r)'
+        % ((_lh.get('afterHeadline'), _lh.get('beforeTargets')),),
+        _lh.get('afterHeadline') and _lh.get('beforeTargets'))
+    ok_('[report link] ...on the first screen of a 360x640 phone, a finger\'s 52px tall (top %r, %rpx)'
+        % (_lh.get('top'), _lh.get('height')),
+        0 <= (_lh.get('top') or -1) < 640 and (_lh.get('height') or 0) >= 52)
+    no_('[report link] ...and the longer words on the rig do not push the page sideways at 360px',
+        _ls.get('sideways') or _lh.get('sideways'))
+finally:
+    for _lp, _lb in _lservers.values():
+        _lp.terminate()
+        try:
+            _lp.wait(timeout=5)
+        except Exception:
+            _lp.kill()
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d offers-page checks passed' % ok)
 sys.exit(1 if bad else 0)

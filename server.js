@@ -14499,6 +14499,8 @@ function route(req, res) {
     return res.end();
   }
   if (pathname.indexOf('/places/') === 0) return servePlaces(req, res, pathname);
+  // Where the offers page's "Strategy & places report" link goes: see placesLink.
+  if (pathname === '/api/placeslink') return placesLink(res);
 
   if (pathname.endsWith('/')) pathname += 'index.html';
 
@@ -14551,6 +14553,65 @@ function servePlaces(req, res, pathname) {
         return send(res, 403, 'forbidden', { 'Content-Type': 'text/plain' });
       }
       serveFile(req, res, real, type);
+    });
+  });
+}
+
+/* Where the offers page's "Strategy & places report" link goes (the owner,
+ * 7 Nov 2026: "How can I get to the strategy tab from the offers page?" ...
+ * "Yes add that"). The report is built on the NucBox (tools/places_nightly.sh)
+ * and served there at /places/; the rig keeps none, so until now its offers
+ * page hid the link and the driver had no way across from the panel's Offers
+ * button. Three answers, in this order:
+ *
+ *   'here'     this server has a report in PLACES_DIR: the page's own
+ *              places/ (the NucBox, and any machine the report was copied to).
+ *   'setting'  NUCBOX_SITE, the NucBox's own server as a browser reaches it,
+ *              e.g. http://<the NucBox's address>:8082 — for a rig whose sync
+ *              goes somewhere other than the server that serves the report,
+ *              or that has never synced.
+ *   'sync'     the address rpi/sync.py last reached, from the `.synced` stamp
+ *              it leaves beside the journal (its `to`: tools/install-sync.sh's
+ *              SYNC_TO). The machine that keeps the copy is the machine that
+ *              builds and serves the report — places_nightly.sh reads its
+ *              journal from that same server — so the rig already knows the
+ *              address and nobody has to type it twice. The stamp is written
+ *              only by a sync that got through, so an address that never
+ *              answered is never offered.
+ *
+ * None of them: `href` null, and the page keeps the link hidden, as before.
+ *
+ * WHAT LEAVES. A URL's scheme, host, port and path, and nothing else: a
+ * user:password in the address, a query or a fragment is dropped, and
+ * SYNC_TOKEN is never read here (it lives in the sync unit, not in this
+ * server's environment, and it is not in the stamp). The address itself is
+ * no secret from this page's readers: anyone who can open the offers page
+ * already reads every offer the rig holds, which is more than where its copy
+ * goes. Read-only, asks nothing of the NucBox, and changes nothing anywhere: a link
+ * is a link. Kept to this one function so it touches no other route. */
+function placesLink(res) {
+  function answer(href, from) {
+    send(res, 200, JSON.stringify({ ok: true, href: href, from: from }),
+         { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  }
+  // The report's own page on another machine: its base made safe, then
+  // /places/ and the tab the link is for. null for anything that is not an
+  // http(s) URL, so a typo is no link rather than a broken one.
+  function site(v) {
+    var u;
+    try { u = new URL(String(v || '').trim()); } catch (e) { return null; }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return u.origin + u.pathname.replace(/\/+$/, '') + '/places/#strategy';
+  }
+  fs.stat(path.join(PLACES_DIR, 'index.html'), function (err, st) {
+    if (!err && st.isFile()) return answer('places/#strategy', 'here');
+    var set = site(process.env.NUCBOX_SITE);
+    if (set) return answer(set, 'setting');
+    fs.readFile(JOURNAL_PATH + '.synced', 'utf8', function (e2, text) {
+      var row = null;
+      try { row = e2 ? null : JSON.parse(text); } catch (e3) { row = null; }
+      var synced = row && typeof row === 'object' ? site(row.to) : null;
+      answer(synced, synced ? 'sync' : null);
     });
   });
 }
