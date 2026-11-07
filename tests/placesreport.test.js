@@ -1092,6 +1092,77 @@ function nbx() {
      [P.targetLine([card({ at: 5, target: 22 }), card({ at: 9, target: 30 })], 7),
       P.targetLine([card({ at: 5 })], 7), P.targetLine([], 7)], [22, 25, 25]);
 
+  /* --- the Strategy tab (7 Nov 2026): tools/strategy.js, drawn here --- */
+
+  var S = require('../tools/strategy.js');
+  ok('the Strategy tab sits after Targets and before Best offers, and Targets still opens by default',
+     pageW.indexOf('<section data-tab="targets">') < pageW.indexOf('<section data-tab="strategy">')
+     && pageW.indexOf('<section data-tab="strategy">') < pageW.indexOf('<section data-tab="best">')
+     && pageW.indexOf('<button type="button" data-tab="strategy">Strategy</button>')
+        > pageW.indexOf('<button type="button" data-tab="targets">')
+     && /\|\| 'targets'\)/.test(pageW));
+  var sOrders = P.strategyOrders(wTaken, [], null);
+  var sOwn = S.analyse({ offers: wRows, orders: sOrders, areaOf: function (o) { return MV.townFor(o, A.area); },
+                         appOf: P.appOf, target: 25 });
+  eq('...its figures are strategy.js\'s over the report\'s offers and takes (one computation)',
+     [repW.strategy.curve, repW.strategy.seen, repW.strategy.actual, repW.strategy.lines],
+     [sOwn.curve, sOwn.seen, sOwn.actual, sOwn.lines]);
+  ok('...its lines are on the page word for word', repW.strategy.lines.every(function (l) { return pageW.indexOf(esc0(l)) >= 0; }));
+  eq('...and the takes are timed by the report\'s own rule: the five GPS drops, 30 minutes each',
+     [repW.strategy.counts.timed, sOrders.map(function (o) { return o.actualMinutes; })], [5, [30, 30, 30, 30, 30]]);
+  ok('...a curve is drawn, with its flat region, and the table beside it',
+     /<section data-tab="strategy">[\s\S]*<svg viewBox="0 0 640 260"[\s\S]*Within 5% of the best/.test(pageW)
+     && /gross \$\/hr on shift/.test(pageW));
+  ok('...$/mi is labelled for reading only, with the AUDITS one-liner',
+     /The curve on \$\/mi — for reading only/.test(pageW) && /a \$\/mile rule replayed 24% below \$\/hr/.test(pageW));
+  ok('...and it says it is descriptive and changes no verdict',
+     /<section data-tab="strategy"><h2>[^<]*<\/h2><p class="exp">Descriptive\.[^<]*changes a verdict/.test(pageW));
+  ok('the report\'s stdout carries the same lines', P.summary(repW).indexOf('Strategy (descriptive; the Strategy tab):\n  '
+     + repW.strategy.lines[0]) >= 0);
+  var sCsv = P.strategyCsv(repW).split('\n');
+  eq('strategy_curve.csv: a line per threshold, $/hr then $/mi (for reading only)',
+     [sCsv[0].split(',').slice(0, 3), sCsv.filter(function (l) { return /^per_hour,/.test(l); }).length,
+      sCsv.filter(function (l) { return /^per_mile_reading_only,/.test(l); }).length],
+     [['on', 'line', 'offers_seen_free'], S.GRID.length, S.MILE_GRID.length]);
+
+  // An order's miles: its record's odometer, else the GPS log, and only where
+  // its minutes are a delivery's. A record joins by offer and a Took within a
+  // minute; a press is not timed; a record whose clock stepped is no timing;
+  // and nothing the record says of a place — its `approx` area, its pins —
+  // moves a figure.
+  var tRun = { id: 'q1', tookAt: at(3, 18, 0), endedAt: at(3, 18, 40), by: 'gps', pay: 14, minutes: 30, miles: 6, app: 'uber' };
+  var tPress = { id: 'q2', tookAt: at(3, 19, 0), endedAt: at(3, 19, 30), by: 'drop', pay: 9, minutes: 20, miles: 3 };
+  var rec1 = { kind: 'order', id: 'q1@1', offer: 'q1', times: { took: at(3, 18, 0) + 40, ended: at(3, 18, 40) },
+               drive: { miles: 6.6 }, flags: [] };
+  var recFar = { kind: 'order', id: 'q1@2', offer: 'q1', times: { took: at(3, 18, 0) + 61000 }, drive: { miles: 99 } };
+  eq('a record is the order\'s by offer and a Took within a minute, the nearest', P.recordFor([recFar, rec1], 'q1', tRun.tookAt), rec1);
+  eq('...and not past a minute', P.recordFor([recFar], 'q1', tRun.tookAt), null);
+  var sq = P.strategyOrders([tRun, tPress], [rec1, recFar], null);
+  eq('a GPS drop is timed, with the record\'s odometer for its miles; a press is neither',
+     sq.map(function (o) { return [o.actualMinutes, o.actualMiles, o.milesFrom]; }), [[40, 6.6, 'odometer'], [null, null, null]]);
+  var recStep = Object.assign({}, rec1, { flags: ['the clock stepped 2x while it was carried'] });
+  eq('a record that says the clock stepped makes the order no timing', P.strategyOrders([tRun], [recStep], null)[0].clockStepped, true);
+  var recApprox = Object.assign({}, rec1, { dropoff: { area: { lat: 1, lon: 2, miles: 3, approx: true } },
+                                            guess: { line: 'Somewhere', approx: true },
+                                            pickups: [{ at: { lat: 9, lon: 9 }, approx: true }] });
+  eq('...and an approximate point in a record changes nothing',
+     P.strategyOrders([tRun], [recApprox], null), P.strategyOrders([tRun], [rec1], null));
+  // Fixes along a line of latitude, ten seconds apart, 150 m a step: 1.5 km
+  // from the Took to the end. A gap past SPELL_GAP_S in the log is no figure.
+  var fx0 = [], tk = tRun.tookAt / 1000;
+  for (var fi = 0; fi <= 10; fi++) fx0.push([tk + fi * 10, BASE.lat, BASE.lon + fi * 150 / (111320 * Math.cos(BASE.lat * Math.PI / 180))]);
+  var mb = P.milesBetween(fx0, tRun.tookAt, tRun.tookAt + 100000);
+  ok('the GPS log\'s miles from Took to end, a step at a time (' + mb + ')', Math.abs(mb - 1500 / 1609.344) < 0.01);
+  var fxGap = fx0.slice(0, 2).concat(fx0.slice(9).map(function (f) { return [f[0] + P.SPELL_GAP_S, f[1], f[2]]; }));
+  eq('...none where the log has a gap', P.milesBetween(fxGap, tRun.tookAt, tRun.tookAt + (100 + P.SPELL_GAP_S) * 1000), null);
+  eq('...and with no record, the log gives a timed order its miles',
+     P.strategyOrders([Object.assign({}, tRun, { endedAt: tRun.tookAt + 100000 })], [], fx0)[0].milesFrom, 'log');
+  eq('no dropoff text reaches the Strategy tab', /742 Ombre|Larkspur/.test(STRATEGY_OF(pageW)), false);
+  function STRATEGY_OF(page) {
+    var a = page.indexOf('<section data-tab="strategy">');
+    return a < 0 ? '' : page.slice(a, page.indexOf('</section>', a));
+  }
+
   /* --- does top-10% share differ by area? --- */
 
   function shareWorld(seed, boost) {
@@ -1219,7 +1290,7 @@ function nbx() {
     ok('...the page\'s script parses, and the new CSVs are written', (function () {
       try { new Function(page2.split('<script>\n')[1].split('\n</script>')[0]); } catch (e2) { return false; }
       return ['top_share_tests.csv', 'coverage_levels.csv', 'good_towns.csv', 'waiting_towns.csv', 'dead_miles_towns.csv',
-              'size_restaurants.csv'].every(function (f3) { return fs.existsSync(path.join(tmp, 'out', f3)); });
+              'size_restaurants.csv', 'strategy_curve.csv'].every(function (f3) { return fs.existsSync(path.join(tmp, 'out', f3)); });
     }()));
     ok('...the cache holds the street index\'s answer', /\/cross\?/.test(fs.readFileSync(path.join(tmp, 'cache.json'), 'utf8')));
     // A Nominatim down for the whole run (review, 27 Oct): every pickup

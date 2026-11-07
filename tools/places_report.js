@@ -78,6 +78,15 @@
  * hour-held top-25% / top-10% offers, P75 / P90, good offers per hour of
  * waiting, the expected $/hr of working an area, dead miles after a drop and
  * offer size bands. See "the third pass" below for each rule and floor.
+ *
+ * THE STRATEGY TAB (7 Nov 2026, the owner: "being able to know what is a good
+ * $/hr and $/mi metrics to expect would help decide which offers to take and
+ * which to decline"): what offers looked like, what cards turned into, and
+ * what holding out for each line of the panel's $/hr paid per hour on shift.
+ * Worked out by tools/strategy.js — the end-of-shift report prints the same
+ * numbers with --strategy — off this report's offers and its takes as realOf
+ * times them; see strategyOrders below for the miles. Descriptive, like the
+ * rest: no verdict, target or panel reads it.
  */
 
 'use strict';
@@ -91,6 +100,9 @@ var A = require('../advice.js');
 var MV = require('../map-view.js');
 var AS = require('../assemble.js');
 var OP = require('../offer-parser.js');
+// What $/hr to expect and what holding out paid (the Strategy tab), shared
+// with the end-of-shift report so the two print one answer.
+var S = require('./strategy.js');
 
 var ROOT = path.resolve(__dirname, '..');
 
@@ -1866,6 +1878,85 @@ function bestLines(r) {
   return out;
 }
 
+/* --- the Strategy tab's orders (7 Nov 2026) --------------------------------
+ *
+ * tools/strategy.js works out what $/hr to expect and what holding out paid
+ * (the owner, 7 Nov: "being able to know what is a good $/hr and $/mi
+ * metrics to expect would help decide which offers to take"); it never
+ * decides whether an order was delivered. This report does, by its own rule,
+ * and hands it the answer: each takenRuns run, its real minutes by realOf
+ * (at the door by the GPS, the screen, a Drop the GPS finished, or a press
+ * this report timed off the log) and nothing for any other end — the same
+ * minutes the Your takes tab prints, so the two tabs cannot disagree about
+ * an order.
+ *
+ * MILES. Where the order left a record (server.js orderRow, since 7 Nov) its
+ * odometer (`drive.miles`: the server's own count, the end-of-shift report's
+ * JITTER_M step) is the order's miles; for a day before the record, the GPS
+ * log's fixes from the Took to the end (milesBetween). Only for an order
+ * with real minutes, whose end is the door. Never a pin, never an `approx`
+ * area, never DoorDash's map label: the record carries those, and none is
+ * read here.
+ *
+ * A record is an order's when its offer is the run's and its Took is within
+ * RECORD_MATCH_MS of the run's (the end-of-shift report's RECORD_MATCH_S:
+ * both stamped by one handler milliseconds apart). A record that says the
+ * clock stepped while the order was carried is no timing. */
+var RECORD_MATCH_MS = 60000;
+
+function recordFor(records, id, tookAt) {
+  var best = null;
+  (records || []).forEach(function (r) {
+    if (!r || r.offer !== id || !r.times || typeof r.times.took !== 'number' || typeof tookAt !== 'number') return;
+    var d = Math.abs(r.times.took - tookAt);
+    if (d <= RECORD_MATCH_MS && (!best || d < best.d)) best = { d: d, r: r };
+  });
+  return best ? best.r : null;
+}
+
+/* The GPS log's miles from `from` to `to` (ms), off the thinned fixes
+ * [[tSec, lat, lon]]: a step counts once the car is STOP_M from where it was
+ * last counted (notDriven's rule, so a parked receiver's wander is no
+ * driving), and null unless the log covers the whole of it — a fix within
+ * SPELL_GAP_S of both ends and no two further apart. Straight lines between
+ * fixes ten seconds apart: a little under the road. */
+function milesBetween(fixes, from, to) {
+  if (!fixes || !fixes.length || !(to > from)) return null;
+  var inside = fixes.filter(function (f) { return f[0] * 1000 >= from && f[0] * 1000 <= to; });
+  if (!inside.length || inside[0][0] * 1000 - from > SPELL_GAP_S * 1000
+      || to - inside[inside.length - 1][0] * 1000 > SPELL_GAP_S * 1000) return null;
+  var mi = 0, anchor = inside[0];
+  for (var i = 1; i < inside.length; i++) {
+    if (inside[i][0] - inside[i - 1][0] > SPELL_GAP_S) return null;
+    var d = MV.crowMiles({ lat: anchor[1], lon: anchor[2] }, { lat: inside[i][1], lon: inside[i][2] });
+    if (d * 1609.344 >= STOP_M) { mi += d; anchor = inside[i]; }
+  }
+  return mi;
+}
+
+function strategyOrders(taken, records, fixes) {
+  return (taken || []).filter(function (t) { return t && typeof t.tookAt === 'number'; }).map(function (t) {
+    var real = realOf(t);
+    var rec = recordFor(records, t.id, t.tookAt);
+    var stepped = !!(rec && Array.isArray(rec.flags) && rec.flags.some(function (f) {
+      return typeof f === 'string' && f.indexOf('the clock stepped') === 0;
+    }));
+    var miles = null, from = null;
+    if (real) {
+      var odo = rec && rec.drive && typeof rec.drive.miles === 'number' && isFinite(rec.drive.miles) ? rec.drive.miles : null;
+      if (odo !== null) { miles = odo; from = 'odometer'; }
+      else {
+        var g = milesBetween(fixes, t.tookAt, t.endedAt);
+        if (g !== null) { miles = g; from = 'log'; }
+      }
+    }
+    return { id: t.id, tookAt: t.tookAt, endedAt: typeof t.endedAt === 'number' ? t.endedAt : null,
+             app: t.app || null, pay: t.pay, cardMinutes: t.minutes, cardMiles: t.miles,
+             addon: t.addon === true, carried: t.carried, actualMinutes: real ? real.mins : null,
+             actualMiles: miles, milesFrom: from, clockStepped: stepped };
+  });
+}
+
 /* --- the whole analysis, given placements --------------------------------
  *
  * `placed[i]` is offers[i]'s pickup answer { at, why, kind } (or undefined
@@ -2093,6 +2184,16 @@ function analyse(offers, taken, placed, dropAt, opts) {
     timedSaid: 'put down at the door by the GPS or the app\'s screen, a Drop the GPS finished, or a Drop this '
       + 'report timed off the GPS log'
   });
+  // The Strategy tab: tools/strategy.js over every row (an untrusted card
+  // still says the rig was on), this report's takes as its own realOf timed
+  // them, the card's town as the area (townKey, as every town table here),
+  // and the driver's line beside the curve.
+  var strategyIn = strategyOrders(taken, opts.records, opts.fixes);
+  var strategy = S.analyse({ offers: offers, orders: strategyIn, areaOf: townKey, appOf: appOf,
+                             target: targetLine(counts, opts.now), boots: opts.boots });
+  strategy.miles = { odometer: strategyIn.filter(function (o) { return o.milesFrom === 'odometer'; }).length,
+                     log: strategyIn.filter(function (o) { return o.milesFrom === 'log'; }).length,
+                     records: (opts.records || []).length, gps: !!opts.fixes };
   var times = counts.map(function (o) { return o.at; }).filter(isFinite);
   return {
     made: opts.now || Date.now(),
@@ -2132,6 +2233,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
                                     miles: opts.region.disc.miles } : null,
             streets: opts.streetsSaid || null, road: opts.roadSaid || null },
     targets: targets,
+    strategy: strategy,
     places: grouped.places,
     restNames: names.labels,
     cells: cellBoxes,
@@ -2203,6 +2305,10 @@ function summary(r) {
                  + (g.sci[1] * 100).toFixed(1) + ' points], n=' + g.n);
       });
     });
+  }
+  if (r.strategy) {
+    out.push('Strategy (descriptive; the Strategy tab):');
+    r.strategy.lines.forEach(function (l) { out.push('  ' + l); });
   }
   out.push(testLine('Places', all.place));
   if (all.rest) {
@@ -2452,6 +2558,23 @@ function restBranchCsv(r) {
   return lines.join('\n') + '\n';
 }
 
+/* The Strategy tab's curves as one CSV: a line per threshold, $/hr then
+ * $/mi (the second for reading only, as the tab says). */
+function strategyCsv(r) {
+  var s = r.strategy;
+  var head = ['on', 'line', 'offers_seen_free', 'per_free_hour', 'mean_pay', 'mean_card_minutes', 'actual_over_card',
+              'ratio_from', 'gross_per_hour_on_shift', 'ci_lo', 'ci_hi', 'net_per_hour_on_shift', 'thin'];
+  var lines = [head.join(',')];
+  [['per_hour', s.curve.points], ['per_mile_reading_only', s.curveMile.points]].forEach(function (k) {
+    k[1].forEach(function (p) {
+      lines.push([k[0], p.T, p.n, p.perFreeHour, p.pay, p.cardMin, p.ratio,
+                  p.ratioFrom === 'carried' ? 'carried from ' + p.ratioAt : p.ratioFrom, p.gross,
+                  p.ci ? p.ci[0] : null, p.ci ? p.ci[1] : null, p.net, p.thin ? 'thin' : ''].map(csvCell).join(','));
+    });
+  });
+  return lines.join('\n') + '\n';
+}
+
 function coverageCsv(r) {
   var lines = ['day,placed,unplaced,placed_per_hour,unplaced_per_hour,gap_per_hour,placed_pay,unplaced_pay,gap_pay,p'];
   r.coverage.days.concat([Object.assign({ day: 'all' }, r.coverage.all)]).forEach(function (d) {
@@ -2514,6 +2637,7 @@ function html(r) {
       return '<button type="button" data-tab="' + t[0] + '">' + esc(t[1]) + '</button>';
     }).join('') + '</nav>\n'
     + TARGETS_SECTION(r)
+    + STRATEGY_SECTION(r)
     + BEST_SECTION(r)
     + '<section data-tab="places"><h2>Places — a store at a location</h2><p class="note">A place is a pin at door, '
     + 'corner or name level, or an approximate placement where it is that store\'s: within ' + PLACE_SAME_MI
@@ -2595,8 +2719,192 @@ function TARGETS_SECTION(r) {
     + '</section>\n';
 }
 
+/* The Strategy tab (7 Nov 2026): tools/strategy.js's answer, drawn here and
+ * worked out there. The plain lines first (strategy.js words them, for this
+ * page and the end-of-shift report alike), then the curve as a chart and a
+ * table, the slices, and the two descriptive halves under it. Static HTML:
+ * the hours picker above does not reach it, because the curve is over all
+ * hours and its blocks are rows of their own. */
+function strategyChart(cv) {
+  var pts = cv.points, W = 640, H = 260, L = 52, R = 16, T = 14, B = 34;
+  var vals = [];
+  pts.forEach(function (p) {
+    [p.gross, p.net, p.ci && p.ci[0], p.ci && p.ci[1]].forEach(function (v) { if (typeof v === 'number') vals.push(v); });
+  });
+  if (cv.everything && typeof cv.everything.gross === 'number') vals.push(cv.everything.gross);
+  if (!vals.length) return '<p class="note">Nothing to draw yet.</p>';
+  var lo = Math.max(0, Math.floor(Math.min.apply(null, vals) / 5) * 5), hi = Math.ceil(Math.max.apply(null, vals) / 5) * 5;
+  if (hi <= lo) hi = lo + 5;
+  var x0 = cv.grid[0], x1 = cv.grid[cv.grid.length - 1];
+  function X(v) { return L + (v - x0) / (x1 - x0) * (W - L - R); }
+  function Y(v) { return T + (hi - v) / (hi - lo) * (H - T - B); }
+  var out = ['<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Effective $/hr on shift against the line held out for">'];
+  // The flat region first, under everything: "anything in here gives about the same".
+  if (cv.best) {
+    out.push('<rect x="' + X(cv.best.from).toFixed(1) + '" y="' + T + '" width="' + Math.max(2, X(cv.best.to) - X(cv.best.from)).toFixed(1)
+             + '" height="' + (H - T - B) + '" fill="var(--grid)" opacity="0.7"><title>Within '
+             + Math.round((1 - S.PLATEAU) * 100) + '% of the best: $' + cv.best.from + ' to $' + cv.best.to + '</title></rect>');
+  }
+  for (var gy = lo; gy <= hi; gy += 5) {
+    out.push('<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(gy).toFixed(1) + '" y2="' + Y(gy).toFixed(1)
+             + '" stroke="var(--grid)"/><text x="' + (L - 6) + '" y="' + (Y(gy) + 4).toFixed(1) + '" text-anchor="end">$' + gy + '</text>');
+  }
+  cv.grid.forEach(function (gx, i) {
+    if (i % 2) return;
+    out.push('<text x="' + X(gx).toFixed(1) + '" y="' + (H - B + 16) + '" text-anchor="middle">$' + gx + '</text>');
+  });
+  out.push('<text x="' + ((L + W - R) / 2) + '" y="' + (H - 4) + '" text-anchor="middle">cards held out for: the panel\'s $/hr or more</text>');
+  // The 95% band, where shift days were resampled.
+  var band = pts.filter(function (p) { return p.ci; });
+  if (band.length >= 2) {
+    out.push('<polygon fill="var(--up)" opacity="0.15" points="' + band.map(function (p) { return X(p.T).toFixed(1) + ',' + Y(p.ci[1]).toFixed(1); })
+      .concat(band.slice().reverse().map(function (p) { return X(p.T).toFixed(1) + ',' + Y(p.ci[0]).toFixed(1); })).join(' ') + '"/>');
+  }
+  if (cv.everything && typeof cv.everything.gross === 'number') {
+    out.push('<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(cv.everything.gross).toFixed(1) + '" y2="' + Y(cv.everything.gross).toFixed(1)
+             + '" stroke="var(--ink2)" stroke-dasharray="2 4"><title>Taking everything: $' + cv.everything.gross.toFixed(2) + '/hr</title></line>');
+  }
+  if (cv.target && typeof cv.target.T === 'number' && cv.target.T >= x0 && cv.target.T <= x1) {
+    out.push('<line x1="' + X(cv.target.T).toFixed(1) + '" x2="' + X(cv.target.T).toFixed(1) + '" y1="' + T + '" y2="' + (H - B)
+             + '" stroke="var(--ink2)" stroke-dasharray="4 3"/><text x="' + (X(cv.target.T) + 4).toFixed(1) + '" y="' + (T + 10)
+             + '">your line</text>');
+  }
+  [['gross', 'var(--up)', ''], ['net', 'var(--ink2)', ' stroke-dasharray="6 4"']].forEach(function (s) {
+    var seg = pts.filter(function (p) { return typeof p[s[0]] === 'number'; });
+    if (seg.length < 2) return;
+    out.push('<polyline fill="none" stroke="' + s[1] + '" stroke-width="2"' + s[2] + ' points="'
+             + seg.map(function (p) { return X(p.T).toFixed(1) + ',' + Y(p[s[0]]).toFixed(1); }).join(' ') + '"/>');
+    seg.forEach(function (p) {
+      // A thin point is hollow: it can be neither the best nor in the flat region.
+      out.push('<circle cx="' + X(p.T).toFixed(1) + '" cy="' + Y(p[s[0]]).toFixed(1) + '" r="4" stroke="' + s[1] + '" stroke-width="2" fill="'
+               + (p.thin ? 'var(--surface)' : s[1]) + '"><title>$' + p.T + '+: ' + s[0] + ' $' + p[s[0]].toFixed(2) + '/hr on shift, '
+               + p.n + ' offers seen free' + (p.thin ? ' (thin)' : '') + '</title></circle>');
+    });
+    // Labelled at the left end, gross above its line and net below its own:
+    // at the right end both curves fall to the same few offers and meet.
+    var first = seg[0];
+    out.push('<text x="' + (X(first.T) + 6).toFixed(1) + '" y="' + (Y(first[s[0]]) + (s[0] === 'gross' ? -10 : 18)).toFixed(1)
+             + '">' + s[0] + '</text>');
+  });
+  out.push('</svg>');
+  return out.join('');
+}
+
+function strategyTable(cols, rows) {
+  if (!rows || !rows.length) return '<p class="note">None.</p>';
+  function cell(v, f) {
+    if (v === null || v === undefined) return '—';
+    if (f === '$') return '$' + v.toFixed(2);
+    if (f === '$ci') return '[$' + v[0].toFixed(2) + ', $' + v[1].toFixed(2) + ']';
+    if (f === 'x') return v.toFixed(2) + '×';
+    if (f === 'r') return v.toFixed(2);
+    if (f === 'h') return v.toFixed(1);
+    return esc(v);
+  }
+  return '<div class="tw"><table><thead><tr>' + cols.map(function (c) { return '<th>' + esc(c[1]) + '</th>'; }).join('')
+    + '</tr></thead><tbody>' + rows.map(function (r) {
+      return '<tr>' + cols.map(function (c) { return '<td>' + cell(typeof c[0] === 'function' ? c[0](r) : r[c[0]], c[2]) + '</td>'; }).join('') + '</tr>';
+    }).join('') + '</tbody></table></div>';
+}
+
+function STRATEGY_SECTION(r) {
+  var s = r.strategy, cv = s.curve, f = s.floors, c = s.counts;
+  function ul(xs) { return '<ul class="lines">' + xs.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>'; }
+  function seenRows(list) {
+    return strategyTable([['name', ''], ['n', 'offers'], ['outings', 'shift days'],
+      [function (x) { return x.ph.p25; }, '$/hr P25', '$'], [function (x) { return x.ph.p50; }, 'median', '$'],
+      [function (x) { return x.ph.p75; }, 'P75', '$'], [function (x) { return x.ph.p90; }, 'P90', '$'],
+      [function (x) { return x.pm.p25; }, '$/mi P25', '$'], [function (x) { return x.pm.p50; }, 'median', '$'],
+      [function (x) { return x.pm.p75; }, 'P75', '$'], [function (x) { return x.pm.p90; }, 'P90', '$'],
+      ['freeHours', 'hours free', 'h'], ['perFreeHour', 'offers / hr free', 'r']], list);
+  }
+  function actRows(list, expected) {
+    var cols = [['name', ''], ['timed', 'timed'], ['together', 'carried with another'], ['ratio', 'actual ÷ card min', 'x'],
+                ['ratioMedian', 'typical order', 'x'], ['cardPH', 'median card $/hr', '$'], ['actualPH', 'median actual $/hr', '$'],
+                ['milesN', 'with miles'], ['mileRatio', 'GPS ÷ card mi', 'x']];
+    if (expected) cols.push(['expected', 'card ÷ ratio', '$']);
+    return strategyTable(cols, list);
+  }
+  function sliceRows(list) {
+    return strategyTable([['name', ''], ['days', 'shift days'], ['freeHours', 'hours free', 'h'], ['offers', 'offers seen free'],
+      ['timed', 'timed orders'], [function (x) { return x.best ? x.best.T : null; }, 'best line', '$'],
+      [function (x) { return x.best ? x.best.value : null; }, '$/hr on shift', '$'],
+      [function (x) { return x.best ? '$' + x.best.from + '–$' + x.best.to : null; }, 'about the same'],
+      [function (x) { return x.everything.gross; }, 'taking everything', '$'],
+      ['actualAtBest', 'actual $/hr of cards at the best line', '$']], list);
+  }
+  var pointCols = [['T', 'line ($/hr+)', '$'], ['n', 'offers seen free'], ['perFreeHour', 'per hour free', 'r'],
+                   ['pay', 'mean pay', '$'], ['cardMin', 'mean card min', 'r'], ['ratio', 'actual ÷ card', 'x'],
+                   [function (p) { return p.ratioFrom === 'carried' ? 'carried from $' + p.ratioAt : p.ratioFrom; }, 'ratio from'],
+                   ['gross', 'gross $/hr on shift', '$'], ['ci', '95%', '$ci'], ['net', 'net $/hr on shift', '$'],
+                   [function (p) { return p.thin ? 'thin' : ''; }, '']];
+  var mileCols = pointCols.filter(function (col) { return col[1] !== '95%'; }).map(function (col) {
+    return col[0] === 'T' ? ['T', 'line ($/mi+)', '$'] : col;
+  });
+  var mi = s.miles || {};
+  return '<section data-tab="strategy"><h2>Strategy — what $/hr to expect, and what holding out paid</h2>'
+    + '<p class="exp">Descriptive. What your own record shows about the offers seen, what cards turned into, and what '
+    + 'holding out for a line would have paid per hour on shift. Nothing here is an accept rule or changes a verdict; '
+    + 'the $/mi figures are for reading only (AUDITS.md, Settled: a $/mile rule replayed 24% below $/hr).</p>'
+    + ul(s.lines)
+    + '<h3>The accept-threshold curve</h3>'
+    + '<p class="note">For each line T on the panel\'s $/hr: of the offers seen with no order in the car, those at T or more '
+    + 'came at λ(T) an hour; each paid pay(T) and took time(T), its card minutes × the actual ÷ card ratio of the timed '
+    + 'orders whose card was at T or more. <b>Effective $/hr on shift = pay(T) ÷ (1/λ(T) + time(T))</b> — every free hour '
+    + 'waiting plus every order\'s time, over what they paid. A point with fewer than ' + f.curveOffers + ' offers is '
+    + '<b>thin</b> (hollow): it is never the best and never in the flat region (shaded: within '
+    + Math.round((1 - f.plateau) * 100) + '% of the best). The band is a 95% interval with shift days resampled ('
+    + (cv.boots ? cv.boots + ' times' : 'not drawn: it needs ' + f.bootOutings + ' shift days') + '). '
+    + '<b>Net</b> takes off ' + (cv.cost.perMile !== null ? '$' + cv.cost.perMile.toFixed(2) + '/mi (the rate the rows carry)'
+      : 'nothing: the rows carry no running cost') + ' on the card\'s miles × '
+    + (cv.cost.mileRatio !== null ? cv.cost.mileRatio.toFixed(2) + ' (GPS ÷ card miles over ' + cv.cost.milesN + ' orders)' : '1 (too few orders with miles)')
+    + '. Dotted: taking everything. It reads low by whatever stacking earns: a driver who takes nothing while carrying.</p>'
+    + '<div class="plot">' + strategyChart(cv) + '</div>'
+    + strategyTable(pointCols, cv.points)
+    + '<h3>The same, by time of day, app and weekday</h3>'
+    + '<p class="note">Point estimates, each slice\'s own free hours, offers and (with ' + f.ratio + ' or more) its own timed '
+    + 'orders for the ratio. An app\'s curve is that app\'s cards alone in the same free hours. Read as description: a line '
+    + 'tuned to the hour earned less on the nights it was not fitted to (AUDITS.md, Settled), and the held-out check in '
+    + 'the lines above runs that test again on this record.</p>'
+    + '<h3>By three-hour block</h3>' + sliceRows(s.slices.block)
+    + '<h3>By app</h3>' + sliceRows(s.slices.app)
+    + '<h3>Weekday and weekend</h3>' + sliceRows(s.slices.week)
+    + '<h3>The curve on $/mi — for reading only</h3>'
+    + '<p class="note">The same arithmetic with the line on pay ÷ card miles. Not an accept rule: printed because it was asked for.</p>'
+    + strategyTable(mileCols, s.curveMile.points)
+    + '<h3>What offers look like</h3>'
+    + '<p class="note">Every offer seen that the rig stands behind (' + c.offers + ', once per offer; ' + c.untrusted
+    + ' untrusted and ' + c.unrated + ' with no rate left out). $/hr is the panel\'s; $/mi is pay over the card\'s miles, '
+    + 'nothing off. Weekend is a Saturday or Sunday shift day (4am to 4am). A quartile needs ' + f.dist + ' offers. '
+    + 'Offers per hour free counts only offers seen with no order in the car, over the hours with none (' + c.freeHours
+    + ' h of ' + c.shiftHours + ' h on shift); an area has no free hours of its own here (the Busy tab has them, off the GPS).</p>'
+    + seenRows([s.seen.all]) + '<h3>By app</h3>' + seenRows(s.seen.byApp) + '<h3>By three-hour block</h3>' + seenRows(s.seen.byBlock)
+    + '<h3>Weekday and weekend</h3>' + seenRows(s.seen.byWeek)
+    + '<h3>By town (the card\'s own)</h3>' + seenRows(s.seen.byArea || [])
+    + (s.seen.areaThin ? '<p class="note">' + s.seen.areaThin.areas + ' towns under ' + f.dist + ' offers (' + s.seen.areaThin.offers
+       + ' offers) and ' + s.seen.areaThin.noArea + ' offers with no town are not listed.</p>' : '')
+    + '<h3>How cards turn into actuals</h3>'
+    + '<p class="note">Over the orders this report timed at the door (as the Your takes tab: ' + c.timed + ' of ' + c.orders
+    + ' taken; ' + c.unmeasured + ' with no time at the door, ' + c.addons + ' add-ons (their card minutes are an increment), '
+    + c.tooSoon + ' put down in under ' + f.tooSoon + ' of the card, ' + c.clock + ' with a clock that stepped or held over '
+    + f.holdMaxMin + ' min, left out). <b>Actual ÷ card</b> is the sum of actual minutes over the sum of card minutes, with '
+    + 'the typical order\'s ratio beside it; a ratio needs ' + f.ratio + ' orders. Card and actual $/hr are both net of the '
+    + 'card\'s running cost, as the panel\'s figure is. <b>Card ÷ ratio</b> is what a card in that band has turned into. '
+    + 'Miles: the order record\'s odometer (' + (mi.odometer || 0) + ') or the GPS log (' + (mi.log || 0) + ')'
+    + (mi.gps ? '' : '; no GPS log reached this report') + '.</p>'
+    + actRows([s.actual.all]) + '<h3>By card $/hr</h3>' + actRows(s.actual.byRate, true)
+    + '<h3>By app</h3>' + actRows(s.actual.byApp) + '<h3>By card length</h3>' + actRows(s.actual.byLength)
+    + '<h3>By three-hour block (of the Took)</h3>' + actRows(s.actual.byBlock)
+    + '<h3>By town (the card\'s own)</h3>' + actRows(s.actual.byArea || [])
+    + '<p class="note">The shift: every offer seen and every order\'s hold, joined across silences under ' + f.breakMin
+    + ' minutes; free is that less every hold (Took to its end, however it ended; the card\'s minutes where it has none). '
+    + c.duplicates + ' repeat readings folded, ' + c.alone + ' offers alone in a silence, ' + c.held + ' seen with an order '
+    + 'in the car, ' + c.addOnCards + ' add-on cards: none of them in λ.</p>'
+    + '</section>\n';
+}
+
 // The page's tabs, in order: [id, label].
-var TABS = [['targets', 'Targets'], ['best', 'Best offers'], ['places', 'Places'], ['restaurants', 'Restaurants'], ['map', 'Map'], ['towns', 'Towns'], ['grid', 'Grid'],
+var TABS = [['targets', 'Targets'], ['strategy', 'Strategy'], ['best', 'Best offers'], ['places', 'Places'], ['restaurants', 'Restaurants'], ['map', 'Map'], ['towns', 'Towns'], ['grid', 'Grid'],
             ['after', 'After a drop'], ['takes', 'Your takes'], ['apps', 'Uber vs DoorDash'],
             ['ppm', '$/mi'], ['waits', 'Store waits'], ['strand', 'Strand risk'], ['busy', 'Busy'],
             ['stack', 'Add-ons'], ['quiet', 'Gone quiet'], ['trend', 'Trend'], ['coverage', 'Coverage'],
@@ -3790,6 +4098,9 @@ async function main(argv) {
 
   var report = analyse(offers, taken, placed, dropAt, {
     minN: o.minN, waits: waits, spells: spells, cellTown: cellTown, fixes: fx ? fx.fixes : null,
+    // The order records (server.js orderRecords, since 7 Nov): the Strategy
+    // tab's miles where an order left one. An older server sends none.
+    records: Array.isArray(body.records) ? body.records : [],
     presses: presses, region: region, streetsSaid: st.said, roadSaid: roadSaid, waitsFrom: waitsFrom,
     source: { server: o.server, count: body.count, total: body.total,
               truncated: !!body.truncated, since: o.since } });
@@ -3805,11 +4116,12 @@ async function main(argv) {
   fs.writeFileSync(path.join(outDir, 'restaurant_branches.csv'), restBranchCsv(report));
   fs.writeFileSync(path.join(outDir, 'top_share_tests.csv'), shareCsv(report));
   fs.writeFileSync(path.join(outDir, 'coverage_levels.csv'), levelsCsv(report));
+  fs.writeFileSync(path.join(outDir, 'strategy_curve.csv'), strategyCsv(report));
   Object.keys(MORE_CSVS).forEach(function (name) {
     fs.writeFileSync(path.join(outDir, name), tableCsv(report, MORE_CSVS[name][0], MORE_CSVS[name][1]));
   });
   console.log(summary(report));
-  console.log('\nWritten: ' + path.join(outDir, 'index.html') + ' (and ' + (10 + Object.keys(MORE_CSVS).length)
+  console.log('\nWritten: ' + path.join(outDir, 'index.html') + ' (and ' + (11 + Object.keys(MORE_CSVS).length)
               + ' CSVs beside it)');
   console.log('NucBox questions: ' + cache.fresh + ' asked, ' + cache.hits + ' answered from ' + cacheFile);
 }
@@ -3837,6 +4149,8 @@ module.exports = {
   stillRuns: stillRuns, shareTest: shareTest, goodTable: goodTable, waitTable: waitTable, deadOf: deadOf,
   deadTable: deadTable, sizeTable: sizeTable, bestLines: bestLines, targetLine: targetLine,
   targetAreaLines: targetAreaLines, shareCsv: shareCsv, levelsCsv: levelsCsv,
+  strategyOrders: strategyOrders, recordFor: recordFor, milesBetween: milesBetween, strategyCsv: strategyCsv,
+  RECORD_MATCH_MS: RECORD_MATCH_MS,
   streetsBase: streetsBase, loadWaits: loadWaits, GPS_TIMED: GPS_TIMED, TIER_MIN_N: TIER_MIN_N,
   STOP_M: STOP_M, STOP_MIN_S: STOP_MIN_S, PRESS_AFTER_MIN: PRESS_AFTER_MIN, PRESS_BEFORE_MIN: PRESS_BEFORE_MIN,
   SHORT_MILES: SHORT_MILES,

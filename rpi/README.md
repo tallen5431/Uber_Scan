@@ -9013,7 +9013,7 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-node tests/placesreport.test.js # 178 on the NucBox's offline report of where
+node tests/placesreport.test.js # 326 on the NucBox's offline report of where
                                 #     good offers start: a pin only where one
                                 #     place answers inside the card's disc, no
                                 #     colour on a no-effect fixture or on an
@@ -9025,7 +9025,12 @@ node tests/placesreport.test.js # 178 on the NucBox's offline report of where
                                 #     spells with held time cut out, the app
                                 #     split, add-on share, gone quiet, the
                                 #     weekly trend's floor, $/mi, and the
-                                #     nightly script's swap and failed run
+                                #     nightly script's swap and failed run;
+                                #     the Strategy tab one computation with
+                                #     tools/strategy.js, its takes timed by
+                                #     the report's own rule, an order's miles
+                                #     its record's odometer or the GPS log,
+                                #     and no approximate point moving a figure
 node tests/strategy.test.js     #  80 on what $/hr to expect and what holding
                                 #     out for a line paid: the curve's answer
                                 #     worked by hand, a thin tail never the
