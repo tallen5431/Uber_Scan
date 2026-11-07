@@ -1154,6 +1154,177 @@ eq('[log name] gpslog_name\'s name is read back as its minute; its unsynced one 
    (SR._log_began(GN.name_for(_nt) + '.jsonl')[0] / 1000.0,
     SR._log_began(GN.name_for(_nt, synced=False) + '.jsonl')), (_nt, None))
 
+# --- the order record (the owner, 7 Nov 2026) ------------------------------------
+#
+# "Can you improve the logging to also document as much as possible about an
+# order? It is helpful for records later." server.js now writes one `order`
+# row as each order leaves the car (orderRow), and this report reads it in
+# preference to rebuilding the order from drop, finished and undo rows, keeps
+# its extra fields, prints them without a place, and writes them with the
+# places to the owner's own file (--csv PATH). Invented throughout, in the
+# writer's shape; a day of its own, the 6th, with no GPS log.
+def record(oid, took, ended, how, pay=10.0, minutes=30, miles=5.0, finish=None, pressed=None,
+           driven=None, places=True, store='Imaginary Bistro', door='1 Nowhere Ln, Faketown',
+           end='742 Example Ave, Faketown', written=None, **more):
+    r = {'v': 1, 'kind': 'order', 'id': '%s@%d' % (oid, took - 5000), 'offer': oid,
+         'at': written or ended + 1000, 'seq': written or ended + 1000, 'app': 'uber',
+         'how': how, 'places': places,
+         'card': {'pay': pay, 'minutes': minutes, 'billedMinutes': minutes, 'miles': miles,
+                  'reads': 3, 'perHour': 22.5, 'verdict': 'go'},
+         'times': {'offered': took - 5000, 'took': took + 3, 'ended': ended, 'atDropoff': ended - 60000},
+         'pickups': [{'visited': True, 'by': 'gps', 'arrived': took + 300000,
+                      'left': took + 480000, 'miles': 1.2, 'pinned': 'server'}],
+         'dropoff': {'from': 'nav', 'pinned': 'server', 'asked': 'door', 'armed': True},
+         'pinning': {'end': {'by': 'server', 'asked': 'door'}, 'pickups': {'pinned': 1}},
+         'drive': {'miles': driven, 'from': 'took', 'fixes': 900},
+         'snaps': ['2026-03-06_1815'], 'flags': [], 'missing': []}
+    if places:
+        r['pickups'][0].update(name=store, door=door)
+        r['dropoff']['text'] = end
+        r['card'].update(pickup=store, dropoff=end)
+    if finish:
+        r['finish'] = finish
+    if pressed:
+        r['times']['pressed'] = pressed
+    r.update(more)
+    return r
+
+
+_rj = os.path.join(work, 'records.jsonl')
+_R = lambda h, m, s=0: at(h, m, s, day=6)                     # noqa: E731
+_rrows = [
+    # R1: Drop at 18:20, the GPS finished it at the door at 18:31 (the record
+    # says so; no finished row is in the file, so only the record can).
+    offer('R1', _R(17, 59, 50), 12.00, 30, 6.0), mark('R1', _R(18, 0), True),
+    drop('R1', _R(18, 20)),
+    record('R1', _R(18, 0), _R(18, 31), 'drop', pay=12.0, finish='door', pressed=_R(18, 20),
+           driven=5.8),
+    # R2: an expiry, by the record: not timed.
+    offer('R2', _R(18, 39, 50), 7.00, 20, 3.0), mark('R2', _R(18, 40), True),
+    record('R2', _R(18, 40), _R(19, 20), 'expiry', pay=7.0, minutes=20, miles=3.0, driven=2.0),
+    # R3: Dropped, undone, Dropped again: the first record's press is undone,
+    # and the second is the order's end.
+    offer('R3', _R(19, 29, 50), 9.00, 25, 4.0), mark('R3', _R(19, 30), True),
+    drop('R3', _R(19, 40)), record('R3', _R(19, 30), _R(19, 40), 'drop', pay=9.0,
+                                   pressed=_R(19, 40), driven=1.0),
+    {'v': 1, 'kind': 'undo', 'at': _R(19, 40, 5), 'id': 'R3', 'seq': _R(19, 40, 5),
+     'undoes': 'drop', 'dropAt': _R(19, 40), 'holdId': 'R3@%d' % (_R(19, 30) - 5000)},
+    drop('R3', _R(19, 58)), record('R3', _R(19, 30), _R(19, 58), 'drop', pay=9.0,
+                                   pressed=_R(19, 58), driven=4.4),
+    # R4: keepPlaces off when its record was written.
+    offer('R4', _R(20, 9, 50), 8.00, 20, 3.5), mark('R4', _R(20, 10), True),
+    drop('R4', _R(20, 30)), record('R4', _R(20, 10), _R(20, 30), 'drop', pay=8.0, minutes=20,
+                                   miles=3.5, pressed=_R(20, 30), driven=3.3, places=False),
+    # R5: a day before the record: rebuilt, its places off the card and the
+    # end a press filed.
+    offer('R5', _R(20, 39, 50), 6.00, 15, 2.0), mark('R5', _R(20, 40), True),
+    {'v': 1, 'kind': 'mark', 'id': 'R5', 'at': _R(20, 45), 'dropoff': '9 Filed Ct, Faketown',
+     'asked': True},
+    drop('R5', _R(20, 58)),
+]
+with open(_rj, 'w') as fh:
+    for r in _rrows:
+        fh.write(json.dumps(r) + '\n')
+_rr = SR.report(_rj, None, '2026-03-06')
+_rb = {o['id']: o for o in _rr['orders']}
+eq('[record] the report prefers the order record: R1 ended where the GPS finished it, though '
+   'no finished row is in the file', (_rb['R1']['how'], _rb['R1']['end'], _rb['R1']['source'],
+                                       _rb['R1']['reliable']),
+   ("Drop -> GPS 'door'", _R(18, 31), 'record', True))
+eq('[record] ...an expiry by the record is not timed, as by the drop row',
+   (_rb['R2']['how'], _rb['R2']['end'], _rb['R2'].get('actualMinutes'), _rb['R2']['reliable']),
+   ('expired', None, None, False))
+eq('[record] ...a record whose press was undone is not the end; the next one is',
+   (_rb['R3']['end'], _rb['R3']['how']), (_R(19, 58), 'Drop'))
+eq('[record] ...and a day before the record is rebuilt from the drop rows, as it always was',
+   (_rb['R5']['source'], _rb['R5']['how'], _rb['R5']['end']), ('rebuilt', 'Drop', _R(20, 58)))
+eq('[record] with no GPS log, the miles are the server\'s odometer off the record, said so',
+   (_rb['R1']['gpsMiles'], _rb['R1']['milesFrom'],
+    any('odometer' in n for n in _rb['R1']['notes'])), (5.8, 'odometer', True))
+eq('[record] ...and none for an order with no record: blank, as before',
+   (_rb['R5']['gpsMiles'], _rb['R5']['milesFrom']), (None, None))
+eq('[record] $/hr and $/mi by the one formula (rates): pay over the hours, pay over the miles',
+   (round(_rb['R1']['perHour'], 2), round(_rb['R1']['perMile'], 2)),
+   (round(12.0 / (31 / 60.0), 2), round(12.0 / 5.8, 2)))
+eq('[record] ...rates() itself: no rate without minutes, no $/mi under PER_MILE_MIN_MILES',
+   (SR.rates(10.0, None, 5.0), SR.rates(10.0, 30, 0.05), SR.rates(None, 30, 5.0)),
+   ((None, 2.0), (20.0, None), (None, None)))
+_srv_src = open(os.path.join(ROOT, 'server.js'), encoding='utf-8').read()
+eq('[record] ...the fewest miles a $/mi is worked out over is server.js\'s own '
+   '(ORDER_PER_MILE_MIN, on the order record)',
+   float(re.search(r'var ORDER_PER_MILE_MIN = ([0-9.]+);', _srv_src).group(1)),
+   SR.PER_MILE_MIN_MILES)
+eq('[record] ...as are the ends a rate is worked out for (ORDER_DELIVERY_ENDS, HOW)',
+   sorted(re.search(r"var ORDER_DELIVERY_ENDS = \[([^\]]*)\];", _srv_src).group(1)
+          .replace("'", '').replace(' ', '').split(',')),
+   sorted(k if k else 'drop' for k in SR.RECORD_HOW))
+
+_rtext = SR.text(_rr)
+_rsec = _rtext[_rtext.index('Records ('):]
+ok_('[record] the text has a Records section, one line per order: read and shown, the pickup '
+    'visited, the odometer, the snaps',
+    '#1 offered' in _rsec and 'read 3x' in _rsec and 'shown $22.50/hr go' in _rsec
+    and '1 pickup, 1 visited (gps' in _rsec and 'odometer 5.8 mi from the Took' in _rsec
+    and '1 snap' in _rsec)
+ok_('[record] ...and says which were rebuilt', '#5 rebuilt from the journal' in _rsec)
+_rjs = SR.as_json(_rr)
+eq('[record] the JSON keeps each order\'s source, where its miles came from, and the record\'s '
+   'line', [(o['source'], o['milesFrom'], o['record'][:7]) for o in _rjs['orders']][:1],
+   [('record', 'odometer', 'offered')])
+_rcsv_out = run(['--journal', _rj, '--day', '2026-03-06', '--csv'])[1]
+_rjson_out = json.dumps(_rjs)
+for _name, _got in (('text', _rtext), ('stdout CSV', _rcsv_out), ('JSON', _rjson_out)):
+    eq('[record] no place in the %s, records and all (the store only in Restaurant waits)' % _name,
+       [p for p in ('Nowhere Ln', 'Example Ave', 'Filed Ct') if p in _got], [])
+
+# --csv PATH: the records CSV, the one file with the places in it.
+_rcsv = os.path.join(work, 'records.csv')
+code_r, out_r = run(['--journal', _rj, '--day', '2026-03-06', '--csv', _rcsv])
+eq('[record csv] --csv PATH writes the file and says how many orders, nothing of them',
+   (code_r, out_r), (0, 'wrote 5 orders to %s\n' % _rcsv))
+with open(_rcsv, encoding='utf-8') as fh:
+    _rcrows = list(csv.DictReader(fh))
+eq('[record csv] the columns, one row per order',
+   (tuple(_rcrows[0].keys()) if _rcrows else None, len(_rcrows)), (SR.RECORD_COLUMNS, 5))
+_rc = {r['took'][11:16]: r for r in _rcrows}
+eq('[record csv] a recorded order: the day, the app, offered/took/ended, how, card, actual, '
+   'GPS miles and where they came from, $/hr and $/mi',
+   tuple(_rc['18:00'][k] for k in ('date', 'app', 'offered', 'ended', 'how_ended', 'card_pay',
+                                   'card_minutes', 'card_miles', 'actual_minutes', 'gps_miles',
+                                   'miles_from', 'actual_per_hour', 'actual_per_mile', 'source')),
+   ('2026-03-06', 'uber', '2026-03-06 17:59:55', '2026-03-06 18:31:00', "Drop -> GPS 'door'",
+    '12.00', '30', '6', '31.00', '5.80', 'odometer', '23.23', '2.07', 'record'))
+eq('[record csv] ...and where: the store, its door and the dropoff as the server had them',
+   tuple(_rc['18:00'][k] for k in ('pickup_name', 'pickup', 'dropoff')),
+   ('Imaginary Bistro', '1 Nowhere Ln, Faketown', '742 Example Ave, Faketown'))
+eq('[record csv] a record written with keepPlaces off has its places blank, and says why',
+   (tuple(_rc['20:10'][k] for k in ('pickup_name', 'pickup', 'dropoff')),
+    'places withheld' in _rc['20:10']['notes']), (('', '', ''), True))
+eq('[record csv] a day before the record: the store and pickup off the card, the dropoff a '
+   'press filed', tuple(_rc['20:40'][k] for k in ('pickup_name', 'pickup', 'dropoff', 'source')),
+   ('Imaginary Bistro', PICKUP, '9 Filed Ct, Faketown', 'rebuilt'))
+_rcsv2 = os.path.join(work, 'records-range.csv')
+code_r2, out_r2 = run(['--journal', _rj, '--day', '2026-03-05', '--to', '2026-03-07',
+                       '--csv', _rcsv2])
+eq('[record csv] --to: every day from --day through it, in one file',
+   (code_r2, out_r2, len(list(csv.DictReader(open(_rcsv2, encoding='utf-8'))))),
+   (0, 'wrote 5 orders to %s\n' % _rcsv2, 5))
+with contextlib.redirect_stderr(io.StringIO()):
+    try:
+        run(['--journal', _rj, '--day', '2026-03-06', '--to', '2026-03-07'])
+        _to_refused = False
+    except SystemExit:
+        _to_refused = True
+ok_('[record csv] ...and --to without --csv PATH is refused', _to_refused)
+# The offers page's "Download CSV" writes the same columns under the same
+# names (journal.html RECORD_COLUMNS), so a file saved off the phone and one
+# written here read alike.
+with open(os.path.join(ROOT, 'journal.html'), encoding='utf-8') as fh:
+    _jh = fh.read()
+_jcols = re.search(r'var RECORD_COLUMNS = \[([^\]]*)\];', _jh)
+eq('[record csv] the offers page\'s CSV has these columns, word for word',
+   tuple(re.findall(r"'([a-z_]+)'", _jcols.group(1))) if _jcols else None, SR.RECORD_COLUMNS)
+
 shutil.rmtree(work)
 print('FAILED: %d of %d' % (bad, ok + bad) if bad
       else '\nAll %d shift report checks passed' % ok)

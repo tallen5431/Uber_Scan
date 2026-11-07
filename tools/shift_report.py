@@ -4,6 +4,8 @@
     python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12
     python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12 --csv
     python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12 --json
+    python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12 \
+        --to 2026-10-18 --csv ~/order-records.csv
 
 One row per order taken: its app and card pay, the card's minutes and miles,
 when Took was pressed, when and how the order ended, the minutes that really
@@ -33,11 +35,16 @@ needs elapsed times, not a model of them", and this is those elapsed times,
 measured, after the shift. Turning them into a rule — a pace, a floor, a
 per-app line — is what Settled refuses, and this file does not take the step.
 
-NO COST, AND NO $/MILE. The GPS miles are a measurement printed beside the
-card's own miles. Nothing here multiplies them by anything: a car-cost ledger
-is refused in Settled, and pay over miles is the $/mile rule refused there too.
-Nothing here works minutes out of miles either; every minute printed is a
-clock reading subtracted from another.
+NO COST, AND NO $/MILE RULE. The GPS miles are a measurement printed beside
+the card's own miles. Nothing here multiplies them by a cost: a car-cost ledger
+is refused in Settled. Pay over those miles is written in one place, the
+records CSV below (`actual_per_mile`, rates()), at the owner's request of 7
+Nov 2026 to "document as much as possible about an order", as a RECORD of what
+an order paid against what was driven — the offers page already reads $/mi off
+the card the same way — and nothing anywhere decides on it: judging offers by
+$/mile is the rule Settled refuses, and that stands. Nothing here works
+minutes out of miles either; every minute printed is a clock reading
+subtracted from another.
 
 NO ADDRESS AND NO COORDINATE IN THE OUTPUT. The journal's offer rows carry the
 card's text, pickup and dropoff, and the GPS log is nothing but positions. The
@@ -47,7 +54,25 @@ text goes no further. Positions are used for distances and stops and are
 never printed, in the text or the CSV. One thing off the pickup is printed,
 in one place: the STORE'S NAME in the "Restaurant waits" section (below), the
 pickup less Uber's bracketed street, and nothing for a pickup that is a door
-or a corner (store_name).
+or a corner (store_name). The one exception is a FILE, not the output: `--csv
+PATH` writes the records CSV (to_records_csv) with each order's store, pickup
+and dropoff in it, to a path the owner names, from the owner's own journal —
+a record nobody can match to a delivery a year on is not much of a record.
+It holds no coordinate either. The text, the stdout CSV and the --json the
+phone's shift page shows stay as this paragraph says.
+
+THE ORDER RECORD, since 7 Nov 2026: server.js writes one `kind: 'order'` row
+as each order leaves the car (orderRow), saying how it ended and everything
+the server knew of it. Where an order has one (records(), _record_for: the
+newest per order, an undone press left out, its Took within RECORD_MATCH_S of
+the mark's), its end, its pinning and — where the offer rows are gone — its
+card are read off that row (ended_by_record) by the same rules and in the same
+words the drop rows below are read by, and the rest of this docstring applies
+unchanged: too soon, never driven, the summary. A day before the record, or an
+order whose record was never written, is rebuilt from the drop rows as it
+always was, and says so ("rebuilt"). With no GPS log here, an order's miles are
+the record's odometer (the server's own count by this file's JITTER_M step),
+and the row says so; with a log, the log.
 
 RESTAURANT WAITS, the owner's request of 22 Oct 2026: by store, how many of
 the day's orders were measured waiting at it and the median minutes. An
@@ -328,6 +353,49 @@ def _finished(rows):
                 and r['at'] >= r['dropAt'] and r.get('how') in ('door', 'area', 'stop'))
 
 
+# How far an order record's Took (server.js orderRow, `times.took`: the
+# moment the server put the order in the car) may be from the mark's press and
+# still be that order's. The two are stamped by the same handler a few
+# milliseconds apart; a minute is room for a slow disk and no room for a
+# second Took of the same card, which is a new press and a new mark.
+RECORD_MATCH_S = 60.0
+
+
+def records(rows, undone=None):
+    """The order records (server.js orderRow, `kind: 'order'`), newest per
+    order by `at`, less any whose press an undo row names, as
+    {offer id: [record, ...]}. The server writes a second row for an order
+    taken back by Undo and ended again, and the newer is its end."""
+    undone = _undone(rows) if undone is None else undone
+    newest = {}
+    for r in rows:
+        if r.get('kind') != 'order' or not isinstance(r.get('id'), str) \
+                or not isinstance(r.get('offer'), str) or _num(r.get('at')) is None:
+            continue
+        t = r.get('times') if isinstance(r.get('times'), dict) else {}
+        if _num(t.get('pressed')) is not None and (r['offer'], t['pressed']) in undone:
+            continue
+        if r['id'] not in newest or r['at'] >= newest[r['id']]['at']:
+            newest[r['id']] = r
+    out = collections.defaultdict(list)
+    for r in newest.values():
+        out[r['offer']].append(r)
+    return out
+
+
+def _record_for(recs, took):
+    """The record among `recs` whose Took is nearest `took`, within
+    RECORD_MATCH_S, or None."""
+    best = None
+    for r in recs or []:
+        t = _num(r['times'].get('took')) if isinstance(r.get('times'), dict) else None
+        if t is None or took is None or abs(t - took) > RECORD_MATCH_S * 1000.0:
+            continue
+        if best is None or abs(t - took) < abs(best[0] - took):
+            best = (t, r)
+    return best[1] if best else None
+
+
 def orders(rows):
     """Every order taken in the journal, as dicts, ordered by Took (an order
     with no Took last). See the module docstring for the rules."""
@@ -335,10 +403,16 @@ def orders(rows):
     drops = collections.defaultdict(list)
     visits = collections.defaultdict(list)
     readings = collections.defaultdict(list)
+    ends = collections.defaultdict(list)
     undone = _undone(rows)
     finished = _finished(rows)
+    recs = records(rows, undone)
     for r in rows:
         kind = r.get('kind')
+        # The end a mark filed (a press, a label, the chooser): where the
+        # records CSV finds the dropoff on a day before the order record.
+        if kind == 'mark' and r.get('id') and isinstance(r.get('dropoff'), str) and r['dropoff']:
+            ends[r['id']].append(r)
         if kind == 'mark' and r.get('id') and 'accepted' in r:
             marks[r['id']].append(r)
         elif kind == 'drop' and r.get('id') and _num(r.get('at')) is not None \
@@ -369,15 +443,17 @@ def orders(rows):
         out.append(_order(oid, took, readings.get(oid, []),
                           drops.get(oid, []), visits.get(oid, []),
                           addon=any(m.get('addon') is True for m in ms),
-                          finished=finished))
+                          finished=finished, record=_record_for(recs.get(oid), took),
+                          ends=ends.get(oid, [])))
     out.sort(key=lambda o: (o['took'] is None, o['took'] or 0))
     _alongside(out)
     return out
 
 
-def _order(oid, took, readings, drops, visits, addon=False, finished=None):
+def _order(oid, took, readings, drops, visits, addon=False, finished=None, record=None,
+           ends=()):
     o = {'id': oid, 'took': took, 'end': None, 'how': None, 'reliable': False,
-         'finished': None,
+         'finished': None, 'record': record, 'source': 'record' if record else 'rebuilt',
          'carried': None, 'visits': [], 'visitsBy': [], 'notes': [], 'pin': None}
     # The card as it stood when Took was pressed: the last reading of it
     # written at or before the press. Not the server's vote over every reading
@@ -389,13 +465,25 @@ def _order(oid, took, readings, drops, visits, addon=False, finished=None):
         if took is None or (_num(r.get('at')) or 0) <= took:
             card = r
     card = card or (readings[0] if readings else {})
-    o['app'] = OP.screen_type(card.get('text') or '')['app'] if card.get('text') else None
-    o['store'] = store_name(unglued(card.get('pickup'),
-                                    [card.get('text')] + list(card.get('scans') or [])))
-    o['pay'] = _num(card.get('pay'))
-    o['cardMinutes'] = _num(card.get('minutes'))
-    o['cardMiles'] = _num(card.get('miles'))
-    o['billedMinutes'] = _num(card.get('billedMinutes'))
+    # ...and the card as the order record kept it, for an order whose offer
+    # rows this file does not hold (a journal that rolled between the offer
+    # and the end: rpi/journal.py's MAX_BYTES) — the reading wins where
+    # there is one, as it always has.
+    rc = record.get('card') if record and isinstance(record.get('card'), dict) else {}
+    o['app'] = OP.screen_type(card.get('text') or '')['app'] if card.get('text') \
+        else (_word(record.get('app')) if record else None)
+    pickup = unglued(card.get('pickup'), [card.get('text')] + list(card.get('scans') or []))
+    o['store'] = store_name(pickup) or (store_name(rc.get('pickup')) if not card else None)
+    o['pay'] = _num(card.get('pay')) if card else _num(rc.get('pay'))
+    o['cardMinutes'] = _num(card.get('minutes')) if card else _num(rc.get('minutes'))
+    o['cardMiles'] = _num(card.get('miles')) if card else _num(rc.get('miles'))
+    o['billedMinutes'] = _num(card.get('billedMinutes')) if card \
+        else _num(rc.get('billedMinutes'))
+    o['places'] = order_places(pickup, card, record, ends)
+    # When the card first came up: the record's (the slot's arrival, which
+    # is what the server dates the order from), else the reading's own.
+    rt = record.get('times') if record and isinstance(record.get('times'), dict) else {}
+    o['offered'] = _num(rt.get('offered')) or _num(card.get('firstAt')) or _num(card.get('at'))
     # AN UBER ADD-ON'S CARD PRINTS WHAT IT ADDS ("+10 min", "+0.4 mi") to the
     # trip in progress, not a trip: the owner's 26 Oct shift, order #5, "+10
     # min" onto #4 and delivered with it 27 minutes after its Took, read as
@@ -404,7 +492,9 @@ def _order(oid, took, readings, drops, visits, addon=False, finished=None):
     # ("+10"), and summary() leaves it out of the actual/card ratios and the
     # card-minutes bands, saying how many.
     o['addon'] = bool(addon or card.get('addon') is True
-                      or any(d.get('addon') is True for d in drops))
+                      or any(d.get('addon') is True for d in drops)
+                      or (record and isinstance(record.get('links'), dict)
+                          and record['links'].get('addon') is True))
     if o['addon']:
         o['notes'].append('an add-on: its card minutes and miles are what it added to the '
                           'trip in progress, not a trip, so actual over card minutes is not '
@@ -414,7 +504,12 @@ def _order(oid, took, readings, drops, visits, addon=False, finished=None):
         o['notes'].append('marked taken on the offers page; never pressed in the car, so not timed')
         return o
     after = sorted((d for d in drops if d['at'] >= took), key=lambda d: d['at'])
-    if after:
+    if record is not None:
+        # The order's own record says how it ended, in the server's words at
+        # the moment it went (ended_by_record); the drop rows beside it say
+        # the same thing with less, and are the fallback for a day before it.
+        ended_by_record(o, record)
+    elif after:
         d = after[0]
         o['pin'] = pin_of(d)
         o['end'] = d['at']
@@ -462,6 +557,119 @@ def _order(oid, took, readings, drops, visits, addon=False, finished=None):
     o['visitsBy'] = [v.get('by') for v in kept]
     o['actualMinutes'] = (o['end'] - took) / 60000.0 if o['end'] is not None else None
     return o
+
+
+# The record's word for each end that is a delivery, as the drop row's `by`
+# says it: a press of Drop, the GPS at its door, the chooser. Every other end
+# is read as the drop row's would be.
+RECORD_HOW = {'drop': None, 'gps': 'gps', 'chooser': 'chooser'}
+
+
+def ended_by_record(o, r):
+    """How the order ended, off its record (server.js orderRow), in place:
+    the same words, the same reliability and the same notes the drop rows
+    would have given — a press the GPS went on to finish ended at the stop,
+    a replaced order at the Took that replaced it, an expired one not timed —
+    so a day with records and a day without read alike. `times.ended` is the
+    end: the press, the GPS's stop, the expiry's moment."""
+    t = r.get('times') if isinstance(r.get('times'), dict) else {}
+    how, fin, ended = r.get('how'), r.get('finish'), _num(t.get('ended'))
+    pinning = r.get('pinning') if isinstance(r.get('pinning'), dict) else {}
+    o['pin'] = pin_of({'end': pinning.get('end') if isinstance(pinning.get('end'), dict) else {},
+                       'pickups': pinning.get('pickups')}) if pinning else None
+    o['carried'] = _num(r.get('carried'))
+    if how in RECORD_HOW and ended is not None:
+        by = RECORD_HOW[how]
+        o['end'] = ended
+        o['reliable'] = True
+        if fin in ('door', 'area', 'stop') and by in (None, 'chooser'):
+            o['finished'] = fin
+            o['pressedAt'] = _num(t.get('pressed'))
+            o['how'] = "%s -> GPS '%s'" % (HOW[by], fin)
+            if fin == 'stop':
+                o['notes'].append("finished by the GPS at the first stop after the car moved "
+                                  "0.2 mi from the press: no end was pinned, so the weakest end")
+        else:
+            o['how'] = HOW[by]
+    elif how == 'replaced':
+        o['end'] = ended
+        o['how'] = 'replaced'
+        o['notes'].append('unreliable: put down by the next Took, so its end is that Took, '
+                          'not a delivery')
+    elif how == 'expiry':
+        o['expiredAt'] = ended
+        o['how'] = 'expired'
+        o['notes'].append('unreliable: expired on its own clock at %s; the card\'s minutes '
+                          'x 1.5 + 10, not a measurement, so not timed' % _clock(ended))
+    else:
+        # A completion screen, the offers page, a boot, or a newer build's
+        # word: printed short, a server field and never a place.
+        o['end'] = ended
+        o['how'] = 'drop by %s' % str(how)[:16]
+        o['notes'].append('unreliable: an end this report does not read as a delivery')
+    d = r.get('drive') if isinstance(r.get('drive'), dict) else {}
+    if d.get('from') == 'restart':
+        o['notes'].append('the server restarted while it was carried; its odometer counts '
+                          'from the restart')
+
+
+# How long a place may print in the records CSV: a door, not a paragraph.
+PLACE_MAX = 120
+
+
+def _place(v):
+    if not isinstance(v, str):
+        return None
+    t = re.sub(r'\s+', ' ', v).strip()
+    return t[:PLACE_MAX] or None
+
+
+def order_places(pickup, card, record, ends):
+    """Where the order went, for the records CSV ONLY (to_records_csv):
+    {'pickupName', 'pickup', 'dropoff', 'withheld'}. Off the order record
+    where there is one — each pickup's store and door as the server had
+    them, the end as filed — else off the card's pickup and the newest end a
+    mark filed (a press before a sighting), else the card's own dropoff.
+    The text, the --json and the stdout CSV never print these: the owner's
+    own file is the one place they go (the module docstring)."""
+    if record is not None:
+        if record.get('places') is False:
+            return {'pickupName': None, 'pickup': None, 'dropoff': None, 'withheld': True}
+        picks = [p for p in (record.get('pickups') or []) if isinstance(p, dict)]
+        rc = record.get('card') if isinstance(record.get('card'), dict) else {}
+        names = [_place(p.get('name')) for p in picks if _place(p.get('name'))]
+        doors = [_place(p.get('door')) for p in picks if _place(p.get('door'))]
+        end = record.get('dropoff') if isinstance(record.get('dropoff'), dict) else {}
+        return {'pickupName': ' + '.join(names) or store_name(rc.get('pickup')),
+                'pickup': ' + '.join(doors) or _place(rc.get('pickup')),
+                'dropoff': _place(end.get('text')) or _place(rc.get('dropoff')),
+                'withheld': False}
+    filed = sorted(ends or [], key=lambda m: (m.get('asked') is not False,
+                                              _num(m.get('at')) or 0))
+    return {'pickupName': store_name(pickup), 'pickup': _place(pickup),
+            'dropoff': _place(filed[-1]['dropoff']) if filed else _place(card.get('dropoff')),
+            'withheld': False}
+
+
+# The fewest GPS miles a $/mi is worked out over (server.js's
+# ORDER_PER_MILE_MIN is held to this by tools/test_shift_report.py): a pay over
+# a few hundred feet of driving is a number, not a rate.
+PER_MILE_MIN_MILES = 0.1
+
+
+def rates(pay, minutes, miles):
+    """(per hour, per mile) for one order: pay / (minutes / 60) and pay /
+    miles, each None where its divisor is missing, zero or (miles) under
+    PER_MILE_MIN_MILES. THE ONE FORMULA: report() puts these on a reliable
+    order, server.js orderMoney writes the same two on the order record, and
+    the suite holds the two to the same answer. Both are a RECORD of what an
+    order paid against what it took; nothing on the rig reads either, and
+    $/mi is never a rule (the module docstring's NO COST)."""
+    if pay is None:
+        return None, None
+    per_hour = pay / (minutes / 60.0) if minutes else None
+    per_mile = pay / miles if miles is not None and miles >= PER_MILE_MIN_MILES else None
+    return per_hour, per_mile
 
 
 def too_soon(orders_):
@@ -935,10 +1143,24 @@ def dwell(fixes, lo, event):
 def measure(o, fixes):
     """Put the GPS figures on one order, in place."""
     o['gpsMiles'] = o['restaurantMinutes'] = o['doorMinutes'] = None
+    o['milesFrom'] = None
     if o['took'] is None or o['end'] is None:
         return
     if fixes is None:
-        o['notes'].append('no GPS log; miles blank')
+        # ...but an order record carries the server's own odometer for it
+        # (server.js orderBeat/finishOdo: this file's JITTER_M step, a
+        # silence bridged in a straight line), which is the same measure taken
+        # live. Used only with no log to measure from: the log is read whole
+        # and after the fact, and is the better witness where it exists.
+        rec = o.get('record') or {}
+        miles = _num((rec.get('drive') or {}).get('miles')) \
+            if isinstance(rec.get('drive'), dict) else None
+        if miles is not None:
+            o['gpsMiles'] = miles
+            o['milesFrom'] = 'odometer'
+            o['notes'].append("no GPS log; miles are the server's odometer from the order record")
+        else:
+            o['notes'].append('no GPS log; miles blank')
         return
     t0, t1 = o['took'] / 1000.0, o['end'] / 1000.0
     tr = track(fixes, t0, t1)
@@ -946,6 +1168,7 @@ def measure(o, fixes):
         o['notes'].append('no usable GPS fix between Took and end; miles blank')
         return
     o['gpsMiles'] = tr['miles']
+    o['milesFrom'] = 'log'
     # ...AND NEVER DRIVEN (the module docstring): the car drove under
     # SHORT_MILES of the card's miles, by a log with no gap and a fix within
     # GAP_S of both ends. Before the door's minutes, which a reliable order
@@ -1225,9 +1448,8 @@ def report(journal, gps_dir, day):
         measure(o, fixes)
         # Only over a delivery. A replaced order's minutes run to the next
         # Took, and its pay over them would be a rate nobody earned.
-        o['perHour'] = (o['pay'] / (o['actualMinutes'] / 60.0)
-                        if o['reliable'] and o['pay'] is not None and o.get('actualMinutes')
-                        else None)
+        o['perHour'], o['perMile'] = rates(o['pay'], o.get('actualMinutes'), o.get('gpsMiles')) \
+            if o['reliable'] else (None, None)
     info['unreadable'] = bad
     info['gpsMissing'] = fixes is None
     return {'orders': mine, 'summary': summary(mine), 'info': info,
@@ -1365,6 +1587,10 @@ def text(rep):
                 if pn['recorded'] else 'no order has a record')
         out.append('  Pinned: %s%s' % (rate, '; %d without one' % pn['unrecorded']
                                        if pn['unrecorded'] and pn['recorded'] else ''))
+        out.append('')
+        out.append("Records (each order's own row from the server, where it wrote one):")
+        for i, o in enumerate(rep['orders']):
+            out.append('  #%d %s' % (i + 1, record_text(o)))
     s = rep['summary']
     out.append('')
     out.append('Over the %d reliable order%s of %d (an order replaced, expired, put down with '
@@ -1386,6 +1612,65 @@ def text(rep):
     return '\n'.join(out) + '\n'
 
 
+def record_text(o):
+    """One order's record as a phrase for the text's "Records" section: what
+    the server knew that the table does not say — when the card came up and
+    how often it was read, the verdict it was shown, the pickups and when the
+    car was at them, the door, the odometer, the snaps, the orders beside it,
+    what the record says it is missing. Counts, times and words only: no
+    place, as the rest of the text (the module docstring)."""
+    r = o.get('record')
+    if not r:
+        return 'rebuilt from the journal (no order record: a day before it, or none written)'
+    t = r.get('times') if isinstance(r.get('times'), dict) else {}
+    c = r.get('card') if isinstance(r.get('card'), dict) else {}
+    d = r.get('drive') if isinstance(r.get('drive'), dict) else {}
+    out = []
+    shown = []
+    if _num(c.get('reads')) is not None:
+        shown.append('read %dx' % c['reads'])
+    if _num(c.get('perHour')) is not None:
+        shown.append('shown $%.2f/hr%s' % (c['perHour'], ' ' + _word(c['verdict'])
+                                           if _word(c.get('verdict')) else ''))
+    if _num(t.get('offered')) is not None:
+        out.append('offered %s%s' % (_clock(t['offered']),
+                                     ' (%s)' % ', '.join(shown) if shown else ''))
+    picks = [p for p in (r.get('pickups') or []) if isinstance(p, dict)]
+    if picks:
+        been = [p for p in picks if p.get('visited') is True]
+        part = '%d pickup%s, %d visited' % (len(picks), '' if len(picks) == 1 else 's', len(been))
+        for p in been[:ORDER_PICKS_SAID]:
+            bits = [_word(p.get('by')) or '?']
+            if _num(p.get('arrived')) is not None:
+                bits.append('from %s' % _clock(p['arrived']))
+            if _num(p.get('left')) is not None:
+                bits.append('left %s' % _clock(p['left']))
+            if _num(p.get('miles')) is not None:
+                bits.append('%.1f mi in' % p['miles'])
+            part += ' (%s)' % ', '.join(bits)
+        out.append(part)
+    if _num(t.get('atDropoff')) is not None:
+        out.append('at the door %s' % _clock(t['atDropoff']))
+    if _num(t.get('ended')) is not None:
+        out.append('ended %s (%s)' % (_clock(t['ended']), str(r.get('rule') or r.get('how'))[:96]))
+    if _num(d.get('miles')) is not None:
+        out.append('odometer %.1f mi from the %s' % (d['miles'], 'restart' if d.get('from') ==
+                                                     'restart' else 'Took'))
+    snaps = [s for s in (r.get('snaps') or []) if isinstance(s, str)]
+    if snaps:
+        out.append('%d snap%s' % (len(snaps), '' if len(snaps) == 1 else 's'))
+    beside = [w for w in (r.get('with') or []) if isinstance(w, str)]
+    if beside:
+        out.append('carried with %d other%s' % (len(beside), '' if len(beside) == 1 else 's'))
+    for m in [m for m in (r.get('missing') or []) if isinstance(m, str)][:3]:
+        out.append('missing: %s' % m[:96])
+    return '; '.join(out) or 'an order record with nothing in it'
+
+
+# How many visited pickups a record's phrase spells out.
+ORDER_PICKS_SAID = 3
+
+
 CSV_COLUMNS = ('id', 'app', 'card_pay', 'card_minutes', 'card_miles', 'took', 'ended',
                'how', 'actual_minutes', 'gps_miles', 'restaurant_minutes', 'door_minutes',
                'with_another', 'actual_per_hour', 'reliable', 'notes')
@@ -1404,6 +1689,71 @@ def to_csv(rep):
                     _f(o.get('restaurantMinutes'), '%.2f'), _f(o.get('doorMinutes'), '%.2f'),
                     o['alongside'], _f(o.get('perHour'), '%.2f'),
                     'yes' if o['reliable'] else 'no', '; '.join(o['notes'])))
+    return buf.getvalue()
+
+
+# --- the records CSV: one row per order, for the owner's own records -----------
+#
+# `--csv PATH` (the owner, 7 Nov 2026: "document as much as possible about an
+# order ... It is helpful for records later"). One row per order taken, with
+# what a record kept for later wants: the day, the app, when it was offered,
+# taken and ended and how, the card's pay, minutes and miles, the minutes it
+# really took, the GPS miles driven between Took and end, the pay over those,
+# and WHERE: the store, the pickup and the dropoff as the server had them.
+#
+# THE ONE PLACE THIS FILE PRINTS A PLACE. The text, the stdout CSV and the
+# --json (which the phone's shift page shows) still print none, and the suite
+# holds them to it; this file is written to a path the owner names, on the
+# owner's machine, from the owner's own journal, and a record without the
+# places in it is one nobody can match to a delivery a year on. An order whose
+# record was written with keepPlaces off has its places blank here too.
+#
+# GPS MILES ARE A DRIVEN-MILES RECORD PER ORDER: the miles the GPS log has the
+# car drive from Took to end (track(): steps past JITTER_M, a gap bridged in a
+# straight line, so never more than was driven), or, with no log here, the
+# server's own odometer off the order record (`miles_from` says which). What
+# anyone does with a mileage record is theirs; this file says what was driven.
+#
+# The same columns, with the same names, are what the offers page's
+# "Download CSV" writes from the records alone (journal.html RECORD_COLUMNS;
+# the suite holds the two lists equal). There, with no GPS log and no day's
+# judgement, `reliable` is blank and the miles are the odometer's.
+RECORD_COLUMNS = ('date', 'app', 'offered', 'took', 'ended', 'how_ended', 'card_pay',
+                  'card_minutes', 'card_miles', 'actual_minutes', 'gps_miles', 'miles_from',
+                  'actual_per_hour', 'actual_per_mile', 'pickup_name', 'pickup', 'dropoff',
+                  'with_another', 'reliable', 'source', 'notes')
+
+
+def _stamp(ms):
+    return '' if ms is None else time.strftime('%Y-%m-%d %H:%M:%S',
+                                               time.localtime(ms / 1000.0))
+
+
+def record_cells(o):
+    """One order as RECORD_COLUMNS' values, strings."""
+    when = o['took'] if o['took'] is not None else o.get('offered')
+    day = '' if when is None else time.strftime(
+        '%Y-%m-%d', time.localtime(when / 1000.0 - day_starts_at() * 3600))
+    pl = o.get('places') or {}
+    return (day, o['app'] or '', _stamp(o.get('offered')), _stamp(o['took']),
+            _stamp(o['end'] if o['end'] is not None else o.get('expiredAt')), o['how'] or '',
+            _f(o['pay'], '%.2f'), _f(o['cardMinutes'], '%g'), _f(o['cardMiles'], '%g'),
+            _f(o.get('actualMinutes'), '%.2f'), _f(o.get('gpsMiles'), '%.2f'),
+            o.get('milesFrom') or '', _f(o.get('perHour'), '%.2f'), _f(o.get('perMile'), '%.2f'),
+            pl.get('pickupName') or '', pl.get('pickup') or '', pl.get('dropoff') or '',
+            o['alongside'], 'yes' if o['reliable'] else 'no', o.get('source') or '',
+            '; '.join(o['notes'] + (['places withheld: keepPlaces was off'] if pl.get('withheld')
+                                    else [])))
+
+
+def to_records_csv(reps):
+    """The records CSV over one report or several (a range of days), as text."""
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator='\n')
+    w.writerow(RECORD_COLUMNS)
+    for rep in reps:
+        for o in rep['orders']:
+            w.writerow(record_cells(o))
     return buf.getvalue()
 
 
@@ -1466,7 +1816,11 @@ def as_json(rep):
                     'doorMinutes': o.get('doorMinutes'), 'alongside': o['alongside'],
                     'perHour': o.get('perHour'), 'reliable': bool(o['reliable']),
                     'addon': bool(o.get('addon')), 'finished': o.get('finished'),
-                    'notes': list(o['notes']), 'pin': pin_text(o.get('pin'))}
+                    'notes': list(o['notes']), 'pin': pin_text(o.get('pin')),
+                    # ...and the order record, as the text's Records line says
+                    # it (record_text: no place), and where its miles came from.
+                    'source': o.get('source'), 'milesFrom': o.get('milesFrom'),
+                    'record': record_text(o)}
                    for i, o in enumerate(rep['orders'])],
         'pinning': dict(pn, rate=(round(100.0 * pn['pinned'] / pn['recorded'])
                                   if pn['recorded'] else None)),
@@ -1481,13 +1835,43 @@ def main(argv=None):
                                   '(missing or absent: the GPS columns are blank)')
     ap.add_argument('--day', required=True, help="the driver's day, YYYY-MM-DD "
                                                  '(it starts at advice.js\'s DAY_STARTS_AT)')
-    ap.add_argument('--csv', action='store_true', help='CSV instead of text')
+    # Bare, the table as CSV on stdout, as it always was (no place in it);
+    # with a PATH, the records CSV written there (to_records_csv: one row per
+    # order, places included, for the owner's own records).
+    ap.add_argument('--csv', nargs='?', const=True, default=None, metavar='PATH',
+                    help='CSV instead of text; with PATH, write the order records CSV '
+                         '(one row per order, pickup and dropoff included) to PATH')
+    ap.add_argument('--to', metavar='YYYY-MM-DD',
+                    help='with --csv PATH: every day from --day through this one, in one file')
     ap.add_argument('--json', action='store_true',
                     help='JSON instead of text, for the phone\'s shift page (as_json)')
     args = ap.parse_args(argv)
     if not re.match(r'^\d{4}-\d\d-\d\d$', args.day):
         ap.error('--day must be YYYY-MM-DD')
-    rep = report(args.journal, os.path.expanduser(args.gps) if args.gps else None, args.day)
+    gps_dir = os.path.expanduser(args.gps) if args.gps else None
+    if isinstance(args.csv, str):
+        days = [args.day]
+        if args.to:
+            if not re.match(r'^\d{4}-\d\d-\d\d$', args.to) or args.to < args.day:
+                ap.error('--to must be YYYY-MM-DD, on or after --day')
+            y, mo, d = (int(x) for x in args.day.split('-'))
+            n = 1
+            while days[-1] < args.to and n < 3660:
+                days.append(time.strftime('%Y-%m-%d', time.localtime(
+                    time.mktime((y, mo, d + n, 12, 0, 0, 0, 0, -1)))))
+                n += 1
+        elif args.to:
+            ap.error('--to needs --csv PATH')
+        reps = [report(args.journal, gps_dir, day) for day in days]
+        with open(args.csv, 'w', encoding='utf-8', newline='') as fh:
+            fh.write(to_records_csv(reps))
+        n = sum(len(rep['orders']) for rep in reps)
+        # The count and the file's name only: nothing of what is in it.
+        sys.stdout.write('wrote %d order%s to %s\n' % (n, '' if n == 1 else 's', args.csv))
+        return 0
+    if args.to:
+        ap.error('--to needs --csv PATH')
+    rep = report(args.journal, gps_dir, args.day)
     if args.json:
         sys.stdout.write(json.dumps(as_json(rep), allow_nan=False) + '\n')
     else:
