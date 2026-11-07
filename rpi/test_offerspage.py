@@ -937,6 +937,44 @@ _TG_LINES = {
 FEEDS['targets'] = dict(FEEDS['took six'], targets={'target': 25, 'lines': _TG_LINES})
 FEEDS['targets no towns'] = dict(FEEDS['took six'], targets={
     'target': 25, 'lines': dict(_TG_LINES, areas=[])})
+# [order record] Each order's own record (server.js orderRow; the owner, 7 Nov:
+# "document as much as possible about an order ... It is helpful for records
+# later"), as /api/journal hands them back (`records`, orderRecords): r1 put
+# down by Drop and finished by the GPS at its door, places kept; r2 written
+# with keepPlaces off. Every store, street and figure invented.
+_REC_TOOK = NOW - 1 * 600000
+REC_ONE = {
+    'v': 1, 'kind': 'order', 'id': 'r1@%d' % _REC_TOOK, 'offer': 'r1', 'app': 'uber',
+    'at': _REC_TOOK + 2000000, 'seq': _REC_TOOK + 2000000, 'how': 'drop', 'finish': 'door',
+    'rule': 'Drop pressed; then the GPS finished it (door)', 'places': True,
+    'card': {'pay': 12.0, 'minutes': 30, 'billedMinutes': 30, 'miles': 5.0, 'reads': 3,
+             'perHour': 22.5, 'verdict': 'go', 'pickup': 'Imaginary Bistro',
+             'dropoff': '742 Example Ave, Faketown'},
+    'times': {'offered': _REC_TOOK - 5000, 'took': _REC_TOOK, 'pressed': _REC_TOOK + 1200000,
+              'atDropoff': _REC_TOOK + 1740000, 'ended': _REC_TOOK + 1800000},
+    'pickups': [{'name': 'Imaginary Bistro', 'door': '1 Nowhere Ln, Faketown',
+                 'at': {'lat': 12.34567, 'lon': 45.67891}, 'pinned': 'server', 'visited': True,
+                 'by': 'gps', 'arrived': _REC_TOOK + 300000, 'left': _REC_TOOK + 480000,
+                 'miles': 1.2}],
+    'dropoff': {'text': '742 Example Ave, Faketown', 'from': 'nav', 'cue': 'only',
+                'pinned': 'server', 'asked': 'door', 'armed': True,
+                'at': {'lat': 12.3, 'lon': 45.7}},
+    'guess': {'line': '74 Example Av', 'from': 'dd map label', 'approx': True},
+    'drive': {'miles': 4.2, 'from': 'took', 'toPickup': 1.2, 'fixes': 1500},
+    'money': {'pay': 12.0, 'minutes': 30.0, 'miles': 4.2, 'perHour': 24.0, 'perMile': 2.86,
+              'delivery': True},
+    'with': ['r9@1'], 'snaps': ['2026-11-07_1815'], 'flags': [], 'missing': []}
+REC_TWO = {
+    'v': 1, 'kind': 'order', 'id': 'r2@%d' % (NOW - 2 * 600000), 'offer': 'r2', 'app': 'uber',
+    'at': NOW, 'seq': NOW, 'how': 'drop', 'rule': 'Drop pressed', 'places': False,
+    'card': {'pay': 10.0, 'minutes': 20, 'miles': 4.0},
+    'times': {'took': NOW - 2 * 600000, 'pressed': NOW - 2 * 600000 + 900000,
+              'ended': NOW - 2 * 600000 + 900000},
+    'pickups': [{'visited': False}], 'dropoff': {'why': 'no dropoff'},
+    'money': {'pay': 10.0, 'minutes': 15.0, 'perHour': 40.0, 'delivery': True},
+    'flags': [], 'missing': ['drive: no odometer reading kept for this order']}
+FEEDS['records'] = dict(FEEDS['took six'], records=[REC_TWO, REC_ONE])
+
 # ...and 'in the car' again in a browser whose locale writes the 24-hour clock
 # (en-GB), as the owner's does: the offers page says "4:31 PM" whatever the
 # locale (the owner, 2 Nov: "it would also be nice to have the 12 hr clock on
@@ -1371,6 +1409,28 @@ const TEXT = (sel) => {
           (id) => document.getElementById(id).textContent.trim()),
         rows: document.querySelectorAll('#log details.offer').length,
       }));
+    }
+    // [order record] The block under an order's row, and the CSV the page
+    // makes of the records, read back through the link itself.
+    if (name === 'records' || name === 'took six') {
+      out[name].records = await page.evaluate(async () => {
+        const flat = (el) => el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        const row = (id) => document.querySelector('#log details.offer[data-id="' + id + '"]');
+        const d1 = row('r1');
+        if (d1) d1.open = true;
+        const block = (d) => d && d.querySelector('dl.record');
+        const a = document.getElementById('recordsCsv');
+        let csv = null;
+        if (!a.hidden && a.href) {
+          try { csv = await (await fetch(a.href)).text(); } catch (e) { csv = 'ERR ' + e; }
+        }
+        return { head: document.getElementById('recordsHead').hidden ? null
+                   : flat(document.getElementById('recordsHead')),
+                 lead: flat(document.getElementById('recordsLead')),
+                 one: flat(block(d1)), two: flat(block(row('r2'))), three: !!block(row('r3')),
+                 csvShown: !a.hidden, download: a.getAttribute('download'), csv: csv,
+                 asked: (window.__asked || []).filter((u) => u.indexOf('blob:') !== 0) };
+      });
     }
     if (name === 'leg') {
       out[name].detail = await page.evaluate(() => {
@@ -2241,6 +2301,66 @@ try:
     ok_('[12 hr clock] ...the same rows the en-US page shows (%r)' % _w[:3],
         _w and [re.sub(r'\s', '', w.upper()) for w in _w12]
         == [re.sub(r'\s', '', w.upper()) for w in _w])
+
+    # --- the order record (the owner, 7 Nov) -----------------------------------
+    _rec = (got.get('records') or {}).get('records') or {}
+    eq('[order record] the window\'s records are named, with a way to save them',
+       (_rec.get('head'), _rec.get('csvShown')), ('Order records \u00b7 2 orders', True))
+    _one = _rec.get('one') or ''
+    ok_('[order record] the order\'s row opens on its record: when it was offered, read and '
+        'shown, and how it ended in the report\'s own words (%r)' % _one[:160],
+        _one.startswith('Took') and 'read 3\u00d7' in _one and 'shown $22.50/hr ACCEPT' in _one
+        and "Drop -> GPS 'door' \u2014 Drop pressed; then the GPS finished it (door)" in _one)
+    ok_('[order record] ...its pickup, visited by the GPS and pinned, and its dropoff as filed',
+        'Imaginary Bistro \u2014 visited (gps) from' in _one and 'pinned by server' in _one
+        and '742 Example Ave, Faketown (nav, only)' in _one and 'by server, armed' in _one)
+    ok_('[order record] ...DoorDash\'s map label said to be a guess, never a figure',
+        '\u2248 74 Example Av (approximate, a guess off the map)' in _one)
+    ok_('[order record] ...the odometer, what it really took, the orders beside it, the snaps',
+        '4.2 mi on the odometer since the Took, 1.2 mi to the pickup' in _one
+        and '30.0 min \u00b7 $24.00/hr \u00b7 $2.86/mi' in _one and '1 other order' in _one
+        and '2026-11-07_1815' in _one)
+    _two = _rec.get('two') or ''
+    ok_('[order record] a record kept with keepPlaces off says so, and shows no place (%r)'
+        % _two[:120], 'places withheld: keepPlaces was off' in _two and 'Example' not in _two
+        and 'no odometer reading' in _two)
+    no_('[order record] an order with no record has no block', _rec.get('three'))
+    eq('[order record] ...and a window with none says nothing about records',
+       (((got.get('took six') or {}).get('records') or {}).get('head'),
+        ((got.get('took six') or {}).get('records') or {}).get('csvShown')), (None, False))
+    _cols = re.search(r'var RECORD_COLUMNS = \[([^\]]*)\];',
+                      open(os.path.join(ROOT, 'journal.html'), encoding='utf-8').read())
+    _cols = re.findall(r"'([a-z_]+)'", _cols.group(1)) if _cols else []
+    import csv as _csv
+    import io as _io
+    _crows = list(_csv.reader(_io.StringIO(_rec.get('csv') or '')))
+    eq('[order record csv] the download is a CSV: the page\'s own columns, one row per record, '
+       'as the server ordered them (oldest Took first)', ((_crows or [[]])[0], len(_crows) - 1),
+       (_cols, 2))
+    _c1 = dict(zip(_cols, _crows[2])) if len(_crows) > 2 else {}
+    _d = time.localtime((_REC_TOOK) / 1000.0 - 4 * 3600)
+    eq('[order record csv] a row: the day, the app, the times, how it ended, the card, what it '
+       'really took, the odometer\'s miles, the places as filed, and no day\'s judgement',
+       tuple(_c1.get(k) for k in ('date', 'app', 'took', 'how_ended', 'card_pay', 'card_minutes',
+                                  'card_miles', 'actual_minutes', 'gps_miles', 'miles_from',
+                                  'actual_per_hour', 'actual_per_mile', 'pickup_name', 'pickup',
+                                  'dropoff', 'with_another', 'reliable', 'source')),
+       (time.strftime('%Y-%m-%d', _d), 'uber',
+        time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(_REC_TOOK / 1000.0)),
+        "Drop -> GPS 'door'", '12.00', '30', '5', '30.00', '4.20', 'odometer', '24.00', '2.86',
+        'Imaginary Bistro', '1 Nowhere Ln, Faketown', '742 Example Ave, Faketown', 'yes', '',
+        'record'))
+    _c2 = dict(zip(_cols, _crows[1])) if len(_crows) > 1 else {}
+    eq('[order record csv] ...a record kept with keepPlaces off: no place, and the note says why',
+       (_c2.get('pickup'), _c2.get('dropoff'), 'places withheld' in (_c2.get('notes') or '')),
+       ('', '', True))
+    ok_('[order record csv] ...named for its day (%r)' % _rec.get('download'),
+        re.match(r'^order-records-\d{4}-\d\d-\d\d\.csv$', _rec.get('download') or ''))
+    eq('[order record csv] ...made here from the rows the page already has: nothing asked of the '
+       'server but what every load asks',
+       sorted(set(u.split('?')[0] for u in _rec.get('asked') or [])),
+       sorted(set(u.split('?')[0] for u in ((got.get('took six') or {}).get('records') or {})
+                  .get('asked') or [])))
 
     # --- what the page opens on ---------------------------------------------
     #

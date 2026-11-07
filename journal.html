@@ -175,6 +175,13 @@
     color: var(--text); border-color: var(--muted); }
   #runsAll { display: block; margin: 4px auto 0; }
   #runsAll[hidden] { display: none; }
+  /* The order records' download, shaped like the button above it: a link
+     because it is one (a file made here, from rows already on the page). */
+  #recordsCsv { display: inline-block; font-size: 12px; font-weight: 700;
+                min-height: 52px; line-height: 38px; padding: 6px 12px;
+                color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+                text-decoration: none; }
+  #recordsCsv[hidden] { display: none; }
   .offer.hiddenrow > summary { opacity: .5; }
   /* The way back, always in reach.
      This page is one continuous list — a week of offers is fourteen thousand
@@ -826,6 +833,14 @@
   <h2 id="realHead" hidden>Card against what it took</h2>
   <p class="hint" id="realLead" hidden></p>
   <div id="real"></div>
+  <!-- Each order's own record (server.js orderRow; the owner, 7 Nov: "document
+       as much as possible about an order ... It is helpful for records
+       later"), one per order in this range, as a CSV made here from the rows
+       the page already has: no second endpoint, nothing asked of the server.
+       Each record is also shown under its offer's row in the log below. -->
+  <h2 id="recordsHead" hidden>Order records</h2>
+  <p class="hint" id="recordsLead" hidden></p>
+  <a id="recordsCsv" hidden href="#" download="order-records.csv">⤓ Download CSV</a>
   <h2 id="waitsHead" hidden>Restaurant waits</h2>
   <p class="hint" id="waitsLead" hidden></p>
   <div id="waits"></div>
@@ -924,6 +939,7 @@
    'took', 'tookHead', 'chips', 'sorts', 'week', 'weekHead',
    'pairs', 'pairsHead', 'pairsLead', 'runsAll',
    'real', 'realHead', 'realLead', 'waits', 'waitsHead', 'waitsLead',
+   'recordsHead', 'recordsLead', 'recordsCsv',
    'ppm', 'ppmHead', 'ppmLead', 'err', 'errHead', 'errLead',
    'ppmReal', 'ppmRealHead', 'ppmRealLead', 'refig', 'refigHead', 'refigLead',
    'review', 'reviewSays', 'reviewDays', 'reviewBack', 'reviewOn', 'reviewLead',
@@ -1290,7 +1306,7 @@
      is the pairing the rig recorded at the time, or undefined. Both are passed
      in rather than looked up here so the join happens once per render instead
      of once per row, and so this function stays a pure formatter. */
-  function offerRow(r, when, target, band, busy, pair) {
+  function offerRow(r, when, target, band, busy, pair, recs) {
     var aside = !counted(r);
     // The verdict the panel gave at the time, when the row carries one, and
     // only re-judged for rows written before `state` existed. The dot was
@@ -1513,7 +1529,11 @@
          ? row('Time from', 'the delivery deadline, not a stated duration',
                'prose')
          : '')
-      + '</dl><h3>How it was read</h3>'
+      + '</dl>'
+      // ...and, for an order taken, what the server knew of it as it left the
+      // car (recordBlock; `recs` is recordsBy's, every record for this card).
+      + recordBlock(recs)
+      + '<h3>How it was read</h3>'
       + '<dl class="facts">'
       + row('Seen as', read.join(', ') || null, 'quiet')
       + row('Read at', when.toLocaleDateString() + ', ' + when.toLocaleTimeString(undefined,
@@ -2876,6 +2896,216 @@
       }).join('') + '</tbody></table>';
   }
 
+  /* ORDER RECORDS (the owner, 7 Nov: "Can you improve the logging to also
+     document as much as possible about an order? It is helpful for records
+     later"). server.js writes one `order` row as each order leaves the car
+     (orderRow), and /api/journal hands this window's back as `records`,
+     newest per order, an undone press left out (orderRecords). Two things
+     are made of them here and nothing else: the "Order record" block under
+     each order's offer row (recordBlock), and a CSV of the range (recordsCsv)
+     with the columns, the names and the words of the end-of-shift report's
+     own records CSV (its RECORD_COLUMNS, in tools/, held equal by its
+     suite), so a file saved off the phone and one written at the rig read
+     alike. Read as written: no figure here is worked out again, and the
+     approximate places are said to be approximate. */
+  var recordsBy = {};
+  var recordsUrl = null;
+
+  // The record's end in the report's words (its ended_by_record, tools/):
+  // "Drop", "GPS drop", "chooser", "Drop -> GPS 'door'", "replaced",
+  // "expired", else "drop by <word>".
+  var RECORD_HOW = { drop: 'Drop', gps: 'GPS drop', chooser: 'chooser' };
+  function recordHow(rec) {
+    var how = rec && rec.how;
+    var fin = rec && rec.finish;
+    if (RECORD_HOW[how]) {
+      return (how === 'drop' || how === 'chooser') && /^(door|area|stop)$/.test(fin || '')
+        ? RECORD_HOW[how] + " -> GPS '" + fin + "'" : RECORD_HOW[how];
+    }
+    if (how === 'replaced') return 'replaced';
+    if (how === 'expiry') return 'expired';
+    return 'drop by ' + String(how).slice(0, 16);
+  }
+
+  // Each pickup's name, and its door (else the card's pickup as printed),
+  // and the end as filed (else the card's): the report's order_places.
+  function recordPlaces(rec) {
+    if (!rec || rec.places === false) return { pickupName: '', pickup: '', dropoff: '', withheld: true };
+    var picks = Array.isArray(rec.pickups) ? rec.pickups : [];
+    var card = rec.card || {};
+    var names = picks.map(function (p) { return p && p.name; }).filter(Boolean);
+    var doors = picks.map(function (p) { return p && p.door; }).filter(Boolean);
+    return { pickupName: names.join(' + ') || card.pickup || '',
+             pickup: doors.join(' + ') || card.pickup || '',
+             dropoff: (rec.dropoff && rec.dropoff.text) || card.dropoff || '',
+             withheld: false };
+  }
+
+  function recordClock(at) {
+    return typeof at === 'number' && isFinite(at) ? clock12(new Date(at)) : null;
+  }
+
+  /* The "Order record" block under an offer's row: what the server knew of
+     the order as it left the car, in the page's own rows (row()), each value
+     escaped — store names and doors are what a reader made of a phone. */
+  function recordBlock(recs) {
+    if (!recs || !recs.length) return '';
+    return recs.map(function (rec) {
+      var t = rec.times || {};
+      var card = rec.card || {};
+      var drive = rec.drive || {};
+      var m = rec.money || {};
+      var end = rec.dropoff || {};
+      var pl = recordPlaces(rec);
+      var picks = (Array.isArray(rec.pickups) ? rec.pickups : []).map(function (p) {
+        var name = p.name || p.door || 'a pickup';
+        var bits = [];
+        if (p.visited) {
+          bits.push('visited' + (p.by ? ' (' + p.by + ')' : '')
+            + (recordClock(p.arrived) ? ' from ' + recordClock(p.arrived) : '')
+            + (recordClock(p.left) ? ' to ' + recordClock(p.left) : ''));
+        } else {
+          bits.push('not marked visited');
+        }
+        bits.push(p.pinned ? 'pinned by ' + p.pinned : 'not pinned' + (p.why ? ': ' + p.why : ''));
+        return esc(name) + ' — ' + esc(bits.join(', '));
+      });
+      var took = [];
+      if (recordClock(t.offered)) took.push('offered ' + recordClock(t.offered));
+      if (typeof card.reads === 'number') took.push('read ' + card.reads + '×');
+      if (typeof card.perHour === 'number') {
+        took.push('shown ' + money(card.perHour, 2) + '/hr'
+          + (card.verdict ? ' ' + ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[card.verdict]
+                                   || card.verdict) : ''));
+      }
+      var real = [];
+      if (typeof m.minutes === 'number') real.push(num(m.minutes, 1) + ' min');
+      if (typeof m.perHour === 'number') real.push(money(m.perHour, 2) + '/hr');
+      if (typeof m.perMile === 'number') real.push(money(m.perMile, 2) + '/mi');
+      var worth = (rec.flags || []).concat(rec.missing || []);
+      if (pl.withheld) worth.push('places withheld: keepPlaces was off');
+      return '<h3>Order record</h3><dl class="facts record">'
+        + row('Took', recordClock(t.took) ? esc(recordClock(t.took)
+              + (took.length ? ' · ' + took.join(', ') : '')) : null)
+        + row('Ended', recordClock(t.ended) ? esc(recordClock(t.ended) + ' · '
+              + recordHow(rec) + (rec.rule ? ' — ' + rec.rule : '')) : null, 'prose')
+        + row(picks.length === 1 ? 'Pickup' : 'Pickups', picks.join('<br>') || null, 'prose')
+        + row('At the door', recordClock(t.atDropoff))
+        + row('Dropoff', pl.dropoff
+              ? esc(pl.dropoff + (end.from ? ' (' + end.from + (end.cue ? ', ' + end.cue : '') + ')' : ''))
+              : null, 'prose')
+        + row('End pin', end.pinned ? esc('by ' + end.pinned + (end.armed ? ', armed' : '')
+                                          + (end.why ? ' — ' + end.why : ''))
+              : end.why ? esc('none: ' + end.why) : null, 'prose')
+        // DoorDash's map label and a refused end's area are DRAWING ONLY on
+        // the panel, and said so here: never a figure.
+        + row('Map label', rec.guess && rec.guess.line
+              ? esc('≈ ' + rec.guess.line + ' (approximate, a guess off the map)') : null, 'prose')
+        + row('Drive', typeof drive.miles === 'number'
+              ? esc(num(drive.miles, 1) + ' mi on the odometer since the '
+                    + (drive.from === 'restart' ? 'restart' : 'Took')
+                    + (typeof drive.toPickup === 'number' ? ', ' + num(drive.toPickup, 1)
+                       + ' mi to the pickup' : '')) : null, 'prose')
+        + row('Really took', real.length ? esc(real.join(' · ')) : null)
+        + row('Carried with', Array.isArray(rec['with']) && rec['with'].length
+              ? rec['with'].length + (rec['with'].length === 1 ? ' other order' : ' other orders') : null)
+        + row('Snaps', Array.isArray(rec.snaps) && rec.snaps.length ? esc(rec.snaps.join(', ')) : null,
+              'prose')
+        + row('Worth knowing', worth.length ? esc(worth.join('; ')) : null, 'quiet')
+        + '</dl>';
+    }).join('');
+  }
+
+  // The report's RECORD_COLUMNS, word for word (its suite reads this list).
+  var RECORD_COLUMNS = ['date', 'app', 'offered', 'took', 'ended', 'how_ended', 'card_pay',
+                        'card_minutes', 'card_miles', 'actual_minutes', 'gps_miles', 'miles_from',
+                        'actual_per_hour', 'actual_per_mile', 'pickup_name', 'pickup', 'dropoff',
+                        'with_another', 'reliable', 'source', 'notes'];
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  // Local 'YYYY-MM-DD HH:MM:SS', the report's _stamp.
+  function stampOf(at) {
+    if (typeof at !== 'number' || !isFinite(at)) return '';
+    var d = new Date(at);
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' '
+      + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+  }
+  function dateOf(at) {
+    if (typeof at !== 'number' || !isFinite(at)) return '';
+    var d = dayOf(at);
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
+  // A number as the report's '%.2f' and '%g' print it (the latter enough for
+  // a card's minutes and miles, which carry one decimal at most).
+  function f2(v) { return typeof v === 'number' && isFinite(v) ? v.toFixed(2) : ''; }
+  function fg(v) { return typeof v === 'number' && isFinite(v) ? String(+v.toFixed(6)) : ''; }
+  // Quoted as Python's csv module quotes: only a field holding a comma, a
+  // quote or a line break, with its quotes doubled.
+  function csvCell(v) {
+    var s = String(v === null || v === undefined ? '' : v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function recordCells(rec) {
+    var t = rec.times || {};
+    var card = rec.card || {};
+    var m = rec.money || {};
+    var drive = rec.drive || {};
+    var pl = recordPlaces(rec);
+    var notes = (rec.flags || []).concat(rec.missing || []);
+    if (pl.withheld) notes.push('places withheld: keepPlaces was off');
+    var miles = typeof m.miles === 'number' ? m.miles : drive.miles;
+    return [dateOf(typeof t.took === 'number' ? t.took : t.offered), rec.app || '',
+            stampOf(t.offered), stampOf(t.took), stampOf(t.ended), recordHow(rec),
+            f2(card.pay), fg(typeof card.minutes === 'number' ? card.minutes : card.billedMinutes),
+            fg(card.miles), f2(m.minutes), f2(miles),
+            typeof miles === 'number' ? 'odometer' : '', f2(m.perHour), f2(m.perMile),
+            pl.pickupName, pl.pickup, pl.dropoff,
+            Array.isArray(rec['with']) && rec['with'].length ? 'yes' : 'no',
+            // No day's judgement here (too soon, never driven): the report's.
+            '', 'record', notes.join('; ')];
+  }
+
+  function recordsCsv(records) {
+    return [RECORD_COLUMNS].concat(records.map(recordCells)).map(function (cells) {
+      return cells.map(csvCell).join(',');
+    }).join('\n') + '\n';
+  }
+
+  function showRecords(records) {
+    var recs = (records || []).filter(function (r) {
+      return r && r.kind === 'order' && typeof r.offer === 'string';
+    });
+    recordsBy = {};
+    recs.forEach(function (r) { (recordsBy[r.offer] = recordsBy[r.offer] || []).push(r); });
+    if (recordsUrl && window.URL && URL.revokeObjectURL) URL.revokeObjectURL(recordsUrl);
+    recordsUrl = null;
+    if (!recs.length) {
+      el.recordsHead.hidden = el.recordsLead.hidden = el.recordsCsv.hidden = true;
+      el.recordsCsv.removeAttribute('href');
+      return;
+    }
+    el.recordsHead.hidden = el.recordsLead.hidden = el.recordsCsv.hidden = false;
+    el.recordsHead.innerHTML = 'Order records <em>· ' + recs.length
+      + (recs.length === 1 ? ' order' : ' orders') + '</em>';
+    el.recordsLead.textContent = 'What the rig knew about each order as it left the car: '
+      + 'when it was offered, taken and put down and how, its pickups and dropoff, the '
+      + 'miles on the odometer between. Open an order\'s row below for its record, or save '
+      + 'them all. The miles are a driven-miles record per order.';
+    var first = recs[0].times && recs[0].times.took;
+    var last = recs[recs.length - 1].times && recs[recs.length - 1].times.took;
+    el.recordsCsv.setAttribute('download', 'order-records-' + dateOf(first)
+      + (dateOf(last) !== dateOf(first) ? '-to-' + dateOf(last) : '') + '.csv');
+    var text = recordsCsv(recs);
+    try {
+      recordsUrl = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+      el.recordsCsv.href = recordsUrl;
+    } catch (e) {
+      // No Blob URL (an old browser): the same text as a data: link.
+      el.recordsCsv.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(text);
+    }
+  }
+
   /* WHAT $/MI TO ACCEPT, READ OFF THE RECORD. Four descriptions of the
      window that server.js works out (perMileSeen, cardVsReal, realByPerMile,
      refigured) over every offer in it, not only the rows listed here. History
@@ -3346,6 +3576,8 @@
     // a driver wants to see what it said.
     showPairs(data.pairs);
     showReal(data.taken);
+    // ...before the list is drawn, which reads recordsBy for each row.
+    showRecords(data.records);
     showWaits(data.waits);
     showTargets(data.targets);
     showPerMile(data.perMileSeen);
@@ -3817,7 +4049,7 @@
                   + money(tookPay, 2) : '')
                + '</span></div>');
       }
-      out.push(offerRow(r, when, target, band, busyBy[r.id], pairedBy[r.id]));
+      out.push(offerRow(r, when, target, band, busyBy[r.id], pairedBy[r.id], recordsBy[r.id]));
     });
     // Rebuilt in place, not from scratch: the rows that were open stay open
     // and the page stays where it was. Ticking an offer refetches and redrew
@@ -4071,6 +4303,7 @@
         view = null;
         showPairs([]);
         showReal([]);
+        showRecords([]);
         showWaits([]);
         // ...and the questions about the last window's day, whose buttons
         // would post marks against rows this page can no longer show.
