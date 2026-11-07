@@ -200,7 +200,12 @@ var scanner = {
   // the stream, not a file on this machine. A fact about the PROCESS, so
   // startScanner() clears it: the next one reads config.json afresh and says
   // again. See /api/settings.
-  costPerMile: null
+  costPerMile: null,
+  // ...and whether the journal may hold places ("keepPlaces"), as the
+  // scanner says on its sighting and planner lines (`keep`); null until it
+  // has said. An order's record leaves its places out on `false`
+  // (orderKeepsPlaces). Kept across scanner restarts: a later line corrects it.
+  keepPlaces: null
 };
 
 var listeners = [];    // open server-sent-event responses
@@ -434,6 +439,9 @@ function startScanner() {
         // somewhere they have not been before. See countSighting.
         if (read.sighting) {
           countSighting(read.sighting);
+          // ...and whether the record may hold places, the scanner's word for
+          // keepPlaces (an order's record follows it: orderKeepsPlaces).
+          if (typeof read.sighting.keep === 'boolean') scanner.keepPlaces = read.sighting.keep;
           var sightedNow = Date.now();
           // The orders in the car, as the assembler takes them: one is the
           // order (Stage 3, unchanged), two only while carrying two is on.
@@ -557,6 +565,12 @@ function startScanner() {
           read.offer.dropoffGuess = dropoffGuessOf(read.offer)
             || (sameCard && !read.offer.dropoff ? scanner.offer.dropoffGuess || null : null);
           delete read.offer.mapLabel;
+          // ...and how many times the scanner has read this card on the slot,
+          // carried across re-reads like the rest: an order's record says it
+          // (offeredOf), a card read once and taken being weaker evidence of
+          // what it printed than one read a dozen times alike.
+          read.offer.reads = (sameCard && typeof scanner.offer.reads === 'number'
+            ? scanner.offer.reads : 0) + 1;
           scanner.offer = read.offer;
           if (!sameCard) {
             scanner.offerAt = Date.now();
@@ -641,6 +655,7 @@ function startScanner() {
         // are customers' names and front doors.
         if (read.planner && Array.isArray(read.planner.stops)) {
           var plannedAt = Date.now();
+          if (typeof read.planner.keep === 'boolean') scanner.keepPlaces = read.planner.keep;
           if (!('unfiled' in read.planner)) {
             var verdict = Assemble.verdictFor(assembly, read.planner.at);
             read.planner.unfiled = verdict === undefined ? null : verdict;
@@ -731,6 +746,9 @@ function startScanner() {
           // ...and the orders Drop let go of, finished quietly from the same
           // fix (finishStep): nothing on the beat is changed by it.
           finishStep(read, Date.now());
+          // ...and each order's record counts the fix, or the silence, or a
+          // step of the clock (orderBeat): a few additions, nothing written.
+          orderBeat(read, Date.now());
           // ...and kept, thinned, for a 📷 Snap's gps.json and health.json.
           snapBeatKeep(read, Date.now());
           // ...and the NucBox services not answering, by name (nbxDown).
@@ -1518,8 +1536,25 @@ function setHeld(list) {
   leaving.forEach(function (h) {
     goneOutcomes.set(holdIdOf(h), pinOutcome(h, was));
     while (goneOutcomes.size > GONE_KEEP) goneOutcomes.delete(goneOutcomes.keys().next().value);
+    // ...and its whole record, from the same moment and for the same reason
+    // (orderDraft): its end's row fills in the end.
+    goneRecords.set(holdIdOf(h), orderDraft(h, was));
+    while (goneRecords.size > GONE_KEEP) goneRecords.delete(goneRecords.keys().next().value);
   });
   scanner.held = (list || []).filter(Boolean);
+  // ...and each order remembers the others it was carried with, for its
+  // record's `with` (holdIds only), on the hold so a restart keeps it.
+  scanner.held.forEach(function (h) {
+    var mine = holdIdOf(h);
+    var withIds = Array.isArray(h.withIds) ? h.withIds : [];
+    scanner.held.forEach(function (o) {
+      var id = holdIdOf(o);
+      if (id !== mine && withIds.indexOf(id) === -1 && withIds.length < ORDER_LIST_MAX) {
+        withIds = withIds.concat([id]);
+      }
+    });
+    if (withIds.length) h.withIds = withIds;
+  });
   // ...the Trip Planner kept on the order leaving, onto the order now first
   // when it is on the same trip (plannerStays; see forgetPlanner).
   var was0 = was[0];
@@ -1567,6 +1602,8 @@ function setHeld(list) {
   // ...and each order new to the car marks the odometer, for the miles
   // driven since its Took (finishWatch's FINISH_DRIVEN).
   finishTookMark(scanner.held);
+  // ...and its record's own memory: the odometer and the fixes from here.
+  orderLiveMark(scanner.held, 'took');
   scanner.held.forEach(function (h) {
     armHeldEnd(h);
     armHeldPickups(h);
@@ -1706,6 +1743,22 @@ function loadHolding() {
     if (healed !== h.planner.stops) h.planner = Object.assign({}, h.planner, { stops: healed });
   });
   scanner.held = firstTrips(list, MAX_HELD_FILE);
+  // Each restored order's record says the server restarted while it was
+  // carried, and counts its drive from here (orderLiveMark, `restart`): the
+  // odometer at its Took was memory. Before heldOrders, so an order found
+  // already expired says so too. In memory, written with the next write of
+  // the list as the planner healed above is.
+  var bootAt = Date.now();
+  scanner.held.forEach(function (h) {
+    h.restarts = (Array.isArray(h.restarts) ? h.restarts : []).concat([bootAt])
+      .slice(-ORDER_LIST_MAX);
+  });
+  orderLiveMark(scanner.held, 'restart');
+  // ...and an order the file held past MAX_HELD_FILE trips ended here, by
+  // the boot: it gets its record, which is the only word anywhere that it
+  // left (no drop row was ever written for it).
+  orderRowsAlone(list.filter(function (h) { return scanner.held.indexOf(h) === -1; }),
+                 'boot', bootAt);
   // Through heldOrders(), so an order that has outlived its own clock is put
   // down here rather than waiting to be noticed — and so the answer to "is
   // there an order in the car" is the same function at boot as it is
@@ -2015,7 +2068,9 @@ function expiredRows(gone) {
     var ends = holdEnds(h);
     return JSON.stringify(asAddOnRow(withOutcome({ v: 1, kind: 'drop', at: ends, id: h.id,
                                                    seq: ends, acceptedAt: h.acceptedAt,
-                                                   by: 'expiry' }, h), h)) + '\n';
+                                                   by: 'expiry' }, h), h)) + '\n'
+      // ...and its record, ended at the same moment (orderRow).
+      + orderLine(orderRow(h, 'expiry', ends));
   });
   appendLines(rows.join(''), function (err) {
     if (err) console.error('journal: could not record an expiry: ' + err.message);
@@ -4468,6 +4523,15 @@ function markVisited(list, now, by) {
     x.e.visited = true;
     x.e.visitedAt = now;
     x.e.by = by;
+    // ...and, for the order's record, when the car's stop there began (the
+    // dwell's start, else the arrival) and the odometer since the Took then
+    // (orderDriven): the two lines below take them off the pickup, and the
+    // record is written after they have gone.
+    var cameAt = typeof x.e.dwellFrom === 'number' ? x.e.dwellFrom
+      : typeof x.e.arrivedAt === 'number' ? x.e.arrivedAt : null;
+    if (cameAt !== null) x.e.reachedAt = cameAt;
+    var milesAt = orderDriven(holdIdOf(x.h));
+    if (milesAt !== null) x.e.milesAt = Math.round(milesAt * 100) / 100;
     delete x.e.arrivedAt;
     delete x.e.dwellFrom;
     delete x.e.after;
@@ -4601,6 +4665,39 @@ function takenRuns(rows, floor, offers) {
     out.push(run);
   });
   return out;
+}
+
+/* The order records in a window, for the offers page (/api/journal's
+ * `records`): every `order` row (orderRow) whose Took is at or after
+ * `floor`, the NEWEST per order by `at` — an order taken back by ↶ Undo and
+ * ended again has two, and the second is its end — less any whose press an
+ * undo row names (its offer id and `times.pressed`, the undo row's id and
+ * dropAt), as the report leaves that press's drop row out. Oldest Took
+ * first, at most ORDER_RECORDS_MAX, the newest kept. Rows as written: the
+ * page reads them, nothing here re-derives a figure. */
+var ORDER_RECORDS_MAX = 2000;
+
+function orderRecords(rows, floor) {
+  var undone = {};
+  (rows || []).forEach(function (r) {
+    if (r && r.kind === 'undo' && r.undoes === 'drop' && typeof r.id === 'string'
+        && typeof r.dropAt === 'number') undone[JSON.stringify([r.id, r.dropAt])] = true;
+  });
+  var byId = {};
+  (rows || []).forEach(function (r) {
+    if (!r || r.kind !== 'order' || typeof r.id !== 'string' || typeof r.at !== 'number'
+        || r.at < CLOCK_BELIEVABLE_AFTER) return;
+    var t = r.times || {};
+    if (typeof t.pressed === 'number' && undone[JSON.stringify([r.offer, t.pressed])]) return;
+    var took = typeof t.took === 'number' ? t.took : r.at;
+    if (floor && took < floor) return;
+    if (!byId[r.id] || r.at >= byId[r.id].at) byId[r.id] = r;
+  });
+  var out = Object.keys(byId).map(function (k) { return byId[k]; });
+  out.sort(function (a, b) {
+    return ((a.times || {}).took || a.at) - ((b.times || {}).took || b.at);
+  });
+  return out.slice(-ORDER_RECORDS_MAX);
 }
 
 /* The restaurants' waits for the offers page: each store with STORE_WAITS_MIN
@@ -5174,9 +5271,15 @@ function putDown(now, by, done, which) {
   });
   // ...and, asked for no order in particular, one with no stated time goes as
   // well: it is never counted as carried, and Drop always cleared the slot.
+  var cleared = which ? [] : scanner.held.filter(function (h) {
+    return dropped.indexOf(h) === -1 && holdEnds(h) === null;
+  });
   setHeld(scanner.held.filter(function (h) {
     return dropped.indexOf(h) === -1 && (which || holdEnds(h) !== null);
   }));
+  // ...and that order's record, which is the only row it gets (no drop row:
+  // nothing ever counted it), so the record of what left the car is whole.
+  orderRowsAlone(cleared, 'drop', now, { pressed: now });
   if (!dropped.length) return done(false);
   var rows = dropped.map(function (d) {
     var row = { v: 1, kind: 'drop', at: now, id: d.id, seq: now,
@@ -5186,6 +5289,33 @@ function putDown(now, by, done, which) {
     // ...and how its end was pinned, or why not (pinOutcome).
     return JSON.stringify(asAddOnRow(withOutcome(row, d), d)) + '\n';
   });
+  // ...and an order the DRIVER put down (a press of Drop, or the chooser's
+  // pick) is finished quietly in the background (finishWatch): the computing
+  // has already let it go, above; the GPS goes on looking for its door.
+  // Before the append, so each order's record below knows whether a watch
+  // opened for it (the append is the only wait here, and nothing in the
+  // watch reads the row).
+  if (by === null || by === 'chooser') {
+    dropped.forEach(function (d) { finishWatch(d, now, by, live, dropped.length > 1); });
+  }
+  // ...and each order's record (orderRow): in this append, or — for an order
+  // the GPS is now watching — kept on its watch until the watch ends, so the
+  // one row has the end the GPS saw (orderWatchLine).
+  var waited = false;
+  dropped.forEach(function (d) {
+    // A press (Drop, the chooser, the offers page) is the driver's moment
+    // and is kept as `pressed`; the GPS and a screen are no press.
+    var rec = orderRow(d, by || 'drop', now, {
+      pressed: !by || by === 'chooser' || by === 'offers' ? now : null, carried: carried });
+    var w = finishing.filter(function (x) { return x.holdId === holdIdOf(d) && x.dropAt === now; })[0];
+    if (w) {
+      w.record = rec;
+      waited = true;
+    } else {
+      rows.push(orderLine(rec));
+    }
+  });
+  if (waited) saveFinishing();
   appendLines(rows.join(''), function (err) {
     if (err) console.error('journal: could not record a drop: ' + err.message);
     done(true);
@@ -5193,12 +5323,6 @@ function putDown(now, by, done, which) {
   // ...and an address waiting to be someone's is dropped if one of the orders
   // it was waiting between has gone (Assemble.retryUnowned).
   retryPool();
-  // ...and an order the DRIVER put down (a press of Drop, or the chooser's
-  // pick) is finished quietly in the background (finishWatch): the computing
-  // has already let it go, above; the GPS goes on looking for its door.
-  if (by === null || by === 'chooser') {
-    dropped.forEach(function (d) { finishWatch(d, now, by, live, dropped.length > 1); });
-  }
   // ...and an order put down AT its door — the GPS (the car stopped at its
   // pinned door and left) or the app's own completion screen — is a planner
   // door behind the car (planPassed). Not a press: the owner drops orders
@@ -5399,10 +5523,23 @@ function loadFinishing() {
   try { f = JSON.parse(fs.readFileSync(finishPath(), 'utf8')); } catch (e) { f = null; }
   var now = Date.now();
   var held = (scanner.held || []).map(holdIdOf);
-  finishing = (f && f.v === 1 && Array.isArray(f.watches) ? f.watches : [])
-    .map(finishFromFile).filter(function (w) {
-      return w && w.ends > now && w.dropAt <= now && held.indexOf(w.holdId) === -1;
-    }).slice(-FINISH_MAX);
+  var all = (f && f.v === 1 && Array.isArray(f.watches) ? f.watches : []).map(finishFromFile)
+    .filter(Boolean);
+  finishing = all.filter(function (w) {
+    return w.ends > now && w.dropAt <= now && held.indexOf(w.holdId) === -1;
+  }).slice(-FINISH_MAX);
+  // ...and the order record each forgotten watch was keeping (orderWatchLine):
+  // one whose window ran out while the server was down, or one past
+  // FINISH_MAX, ended at its press, as the report reads it; one for an order
+  // back in the car is not an end, and its next end writes the row.
+  var lines = all.filter(function (w) {
+    return finishing.indexOf(w) === -1 && held.indexOf(w.holdId) === -1;
+  }).map(function (w) { return orderWatchLine(w, 'none', w.dropAt); }).join('');
+  if (lines) {
+    appendLines(lines, function (err) {
+      if (err) console.error('journal: could not record an order: ' + err.message);
+    });
+  }
   saveFinishing();
   return finishing.length;
 }
@@ -5457,7 +5594,18 @@ function finishWatch(d, now, by, list, many) {
                    // ...and the disc its door is searched in, should one be
                    // read after the press (watchDoor).
                    disc: heldDisc(d) || null });
-  while (finishing.length > FINISH_MAX) delete finishLive[finishing.shift().holdId];
+  var pushed = '';
+  while (finishing.length > FINISH_MAX) {
+    var out = finishing.shift();
+    delete finishLive[out.holdId];
+    // ...its waiting order record written as it is, the press its end.
+    pushed += orderWatchLine(out, 'none', out.dropAt);
+  }
+  if (pushed) {
+    appendLines(pushed, function (err) {
+      if (err) console.error('journal: could not record an order: ' + err.message);
+    });
+  }
   delete finishLive[holdIdOf(d)];
   saveFinishing();
 }
@@ -5578,7 +5726,15 @@ function finishStep(beat, now) {
   var changed = false;
   var rows = [];
   finishing = finishing.filter(function (w) {
-    if (now >= w.ends) { changed = true; delete finishLive[w.holdId]; return false; }
+    if (now >= w.ends) {
+      changed = true;
+      delete finishLive[w.holdId];
+      // ...and its order record, with the press as its end: no stop in the
+      // window, as the report reads it.
+      var none = orderWatchLine(w, 'none', w.dropAt);
+      if (none) rows.push(none);
+      return false;
+    }
     var hit = finishOne(w, beat, now);
     if (w.dirty) { delete w.dirty; changed = true; }
     if (!hit) return true;
@@ -5598,6 +5754,9 @@ function finishStep(beat, now) {
     }
     rows.push(JSON.stringify({ v: 1, kind: 'finished', at: at, id: w.id, seq: at,
                                holdId: w.holdId, how: hit.how, dropAt: w.dropAt }) + '\n');
+    // ...and the order record the watch was keeping, ended at the same stop.
+    var done = orderWatchLine(w, hit.how, at);
+    if (done) rows.push(done);
     delete finishLive[w.holdId];
     changed = true;
     return false;
@@ -5691,7 +5850,7 @@ function restoreDrop(u, now, done) {
   var restore = function () {
     // Its drop row's outcome was kept as it left (goneOutcomes); the order is
     // back, and its next drop works its outcome out afresh.
-    u.gone.forEach(function (g) { goneOutcomes.delete(g.holdId); });
+    u.gone.forEach(function (g) { goneOutcomes.delete(g.holdId); goneRecords.delete(g.holdId); });
     setHeld(u.before.map(cloneHold));
     var waiting = (assembly.unowned || []).map(function (x) { return x.d.line; });
     assembly.unowned = u.unowned.filter(function (x) {
@@ -5932,6 +6091,513 @@ function withOutcome(row, h) {
 function batchDrops(h) {
   return h && h.batch === true && Array.isArray(h.drops) && h.drops.length >= 2
     ? h.drops.length : null;
+}
+
+/* ---------- the order's record: one row when it leaves the car -------------
+ *
+ * The owner, 7 Nov 2026: "Can you improve the logging to also document as
+ * much as possible about an order? It is helpful for records later."
+ *
+ * An order's story was in a dozen places and most of them did not last. The
+ * card was an offer row; the Took a mark; its end a drop row, a finished row
+ * or an undo row; each pickup visited a visit row with an index and no name.
+ * Everything else the server knew — which store each pickup was and where it
+ * was pinned, when the car stood at it, the end as filed and who pinned it,
+ * the miles the odometer counted since the Took, the snaps taken while it was
+ * carried, the other orders beside it — lived in holding.json and in this
+ * process's memory, and went when the order did. The end-of-shift report
+ * (tools/) rebuilt what it could the next morning from the journal and the GPS logs;
+ * what had only ever been in memory it could not rebuild at all.
+ *
+ * So when an order leaves the car, ONE row says everything the server knew
+ * about it (orderRow writes it; the field list is there):
+ *
+ *   {v: 1, kind: 'order', at, id: holdId, seq: at, offer, app, how, ...}
+ *
+ * EVERY WAY AN ORDER ENDS writes it: Drop, the chooser, the GPS leaving its
+ * pinned door, the app's completion screen, the offers page's untick, a Took
+ * that replaced it, its own clock (expiry), the panel's ✓ taken back, a
+ * boot that could not bring it back (MAX_HELD_FILE), and a bare Drop's
+ * clearing of an order with no stated minutes. Beside the drop row of
+ * the same end and in the same append, so it costs no write of its own and
+ * the beat never waits on it.
+ *
+ * ...EXCEPT A DROP THE GPS GOES ON FINISHING (finishWatch). Written at the
+ * press, its row would say the press was the end, and the owner presses Drop
+ * early on purpose (29 Oct). So its row waits on the watch, kept in
+ * finishing.json beside it so a restart keeps it too, and is written when the
+ * watch ends: finished at a door, an area or a stop (its `ended` the stop's
+ * start, as the finished row's `at`), its window out with no stop (the press
+ * stands as the end, as it does for the report), or pushed out by FINISH_MAX
+ * newer watches. One row either way. An ↶ Undo inside the watch takes the
+ * order back into the car and the waiting row goes with the watch
+ * (finishForget): the order's next end writes it.
+ *
+ * AN UNDO OF A PRESS WITH NO WATCH comes after its row is on disk, since an
+ * order put down at its door (`arrivedAt`, or standing there with its miles
+ * driven) is the end and nothing waits. The order's next end writes a second
+ * row with the same id; a reader takes the newest by `at`, and leaves out a
+ * row whose press an undo row names (`offer` and `times.pressed`, the undo
+ * row's id and dropAt), as the report already does for the drop row.
+ *
+ * BUILT AS IT LEAVES (orderDraft, called by setHeld for each order leaving
+ * the list, beside pinOutcome and for the same reason): the order's searches,
+ * pins and arrivals are forgotten by the next write of the list, so a row
+ * built afterwards from what is left would say "not pinned" of an order that
+ * was. Kept GONE_KEEP deep (goneRecords) until its end's row claims it.
+ *
+ * WHAT THE SERVER DID NOT KNOW IS SAID, NOT GUESSED. A hold restored from
+ * holding.json after a restart has its pins, pickups, fields and planner; it
+ * does not have this process's memory of it — the odometer's reading at its
+ * Took and the GPS fixes counted since. Its drive counts from the restart
+ * (`drive.from: 'restart'`) and `missing` says so in words; the restarts
+ * themselves are on the hold (`restarts`, the boot times, loadHolding). A
+ * hold taken by a build before this one has no card as offered, and says
+ * that. A reader never has to tell "none" from "not known" by a blank alone.
+ *
+ * BOUNDED. Text cut at ORDER_TEXT_MAX, every list at ORDER_LIST_MAX, null
+ * fields left out (orderCompact), no image and no OCR text: about a
+ * kilobyte, against 5.7MB a week of offers (rpi/journal.py's WEEK_BYTES).
+ *
+ * PLACES FOLLOW keepPlaces. The row restates the places the journal already
+ * holds — the card's pickup and dropoff, the end the mark rows filed — and it
+ * adds one thing no row carried before: the coordinates of the pins this
+ * server and Map view found for the pickups and the end, and the approximate
+ * area a refused end kept. That is the Settled rule ("a row carries ids and
+ * words, and no address it did not already carry") narrowed for this row at
+ * the owner's request, the way rpi/journal.py's `places` narrowed the rule
+ * before it. So it obeys the switch that rule's docstring names: with
+ * `"keepPlaces": false` (the scanner says `keep` on every sighting and
+ * planner line; scanner.keepPlaces), the row carries no store, no door, no
+ * dropoff text, no pin and no area — counts, words and times only — and
+ * says `places: false`. Never heard (a server started with no scanner line
+ * yet), it is keepPlaces' own default, kept. The row goes nowhere new: the
+ * journal is the rig's file, the NucBox's copy is the owner's, and the
+ * offers page reads it through /api/journal like every other row.
+ *
+ * APPROXIMATE IS DRAWING, NEVER A FIGURE. DoorDash's map label (`guess`) and
+ * a refused end's area (`dropoff.area`) are kept marked `approx: true`, for
+ * a person reading the record later; nothing here measures from them, and
+ * `money` is the card's pay over the clock and the odometer alone.
+ *
+ * NOTHING DECIDES ON IT. It is written after the order has gone; no verdict,
+ * advice, stack line, pin or drop reads it, on this server or the panel. The
+ * shift report prefers it to its own reconstruction, the offers page shows
+ * it under the order's offer row, and both export it as CSV. */
+var ORDER_ROW_V = 1;
+var ORDER_TEXT_MAX = 120;
+var ORDER_LIST_MAX = 8;
+// The fewest miles a $/mi is worked out over, the report's own figure
+// (its PER_MILE_MIN_MILES, tools/; its suite holds the two equal):
+// a pay over a few hundred feet of odometer is a number, not a rate.
+var ORDER_PER_MILE_MIN = 0.1;
+// How the report's $/hr and $/mi are worked out, and which ends they are
+// worked out for — the report's `HOW` (tools/): a press of Drop, the GPS,
+// the chooser, and a press the GPS went on to finish. An order replaced,
+// expired, taken back or put down by a screen or a page is given no rate, as
+// the report gives it none.
+var ORDER_DELIVERY_ENDS = ['drop', 'gps', 'chooser'];
+var goneRecords = new Map();      // holdId -> orderDraft, the last GONE_KEEP
+
+// The record's memory of each order while it is carried or watched: the
+// odometer's reading at its Took and the GPS fixes counted since. Memory
+// only, which is the whole reason the row says where it counts from.
+var orderLive = {};               // holdId -> {odo, from, fixes, refused, gaps, gapMs, lastFixAt, steps}
+var orderClockAt = null;          // {wall, mono}: the last beat's clocks, for a step
+// How long that memory outlives its order (orderBeat): past an Undo's window.
+var ORDER_LIVE_KEEP_MS = 60000;
+
+function orderText(v, max) {
+  if (typeof v !== 'string') return null;
+  var t = v.replace(/\s+/g, ' ').trim();
+  return t ? t.slice(0, max || ORDER_TEXT_MAX) : null;
+}
+
+function orderNum(v) {
+  return typeof v === 'number' && isFinite(v) ? v : null;
+}
+
+function orderRound(v, dp) {
+  if (typeof v !== 'number' || !isFinite(v)) return null;
+  var f = Math.pow(10, dp);
+  return Math.round(v * f) / f;
+}
+
+// A pin as the row keeps it: five places (about a metre), and only where
+// places are kept.
+function orderAt(p) {
+  if (!p || typeof p.lat !== 'number' || typeof p.lon !== 'number'
+      || !isFinite(p.lat) || !isFinite(p.lon)) return null;
+  return { lat: orderRound(p.lat, 5), lon: orderRound(p.lon, 5) };
+}
+
+// Null and undefined left out, all the way down, so the row says what was
+// known and is no longer than that. `false` and 0 are answers and stay.
+function orderCompact(v) {
+  if (Array.isArray(v)) {
+    return v.map(orderCompact).filter(function (x) { return x !== null && x !== undefined; });
+  }
+  if (v && typeof v === 'object') {
+    var out = {};
+    Object.keys(v).forEach(function (k) {
+      var x = orderCompact(v[k]);
+      if (x === null || x === undefined) return;
+      if (Array.isArray(x) && !x.length) return;
+      if (typeof x === 'object' && !Array.isArray(x) && !Object.keys(x).length) return;
+      out[k] = x;
+    });
+    return out;
+  }
+  return v;
+}
+
+// Whether the record may hold places: the scanner's own word (`keep`), else
+// keepPlaces' default, which is yes.
+function orderKeepsPlaces() {
+  return scanner.keepPlaces !== false;
+}
+
+/* The card as it was offered, kept on the hold at its Took (`offered`): what
+ * the order in the car does not otherwise keep — the card's own minutes
+ * beside the billed ones, the verdict and the $/hr the panel showed, the
+ * card's pickup and dropoff as printed, and how many times the scanner read
+ * it (`reads`, counted on the slot as it was re-read). Figures as the offer
+ * line gave them; nothing is worked out again here. */
+function offeredOf(marked) {
+  var m = marked || {};
+  return {
+    minutes: orderNum(m.minutes),
+    billedMinutes: orderNum(m.billedMinutes),
+    perHour: orderNum(m.perHour),
+    state: typeof m.state === 'string' ? m.state.slice(0, 12) : null,
+    reads: typeof m.reads === 'number' && m.reads >= 1 ? Math.floor(m.reads) : null,
+    pickup: orderText(m.pickup),
+    dropoff: orderText(m.dropoff),
+    screen: typeof m.screen === 'string' ? m.screen.slice(0, 40) : null
+  };
+}
+
+// The record's memory, begun for each order new to the car (setHeld) and for
+// each one a boot restores (loadHolding, `restart`).
+function orderLiveMark(list, from) {
+  (list || []).forEach(function (h) {
+    var id = holdIdOf(h);
+    if (!id || orderLive[id]) return;
+    orderLive[id] = { odo: finishOdo.miles, from: from || 'took', fixes: 0, refused: 0,
+                      gaps: 0, gapMs: 0, lastFixAt: null, steps: 0 };
+  });
+}
+
+/* Every beat: each order carried or watched counts this beat's fix (a new
+ * good one, a refused one, or the silence before it), and a step of the wall
+ * clock against the monotonic one — the Pi's NTP arriving mid-order, which
+ * makes every time on the row before it suspect — is counted on each. A few
+ * additions per order; nothing is written. */
+function orderBeat(beat, now) {
+  var ids = (scanner.held || []).map(holdIdOf).concat(finishing.map(function (w) {
+    return w.holdId;
+  }));
+  // ...and forgotten a while after its order is neither, not at once: an
+  // order put down is put back by ↶ Undo for UNDO_DROP_MS, and its record's
+  // odometer should still count from its Took, not from the Undo.
+  Object.keys(orderLive).forEach(function (id) {
+    var o = orderLive[id];
+    if (ids.indexOf(id) !== -1) { o.goneAt = null; return; }
+    if (typeof o.goneAt !== 'number') o.goneAt = now;
+    else if (now - o.goneAt > ORDER_LIVE_KEEP_MS) delete orderLive[id];
+  });
+  var hr = process.hrtime();
+  var mono = hr[0] * 1000 + hr[1] / 1e6;
+  var step = orderClockAt ? (now - orderClockAt.wall) - (mono - orderClockAt.mono) : 0;
+  orderClockAt = { wall: now, mono: mono };
+  var stepped = Math.abs(step) > NBX_CLOCK_STEP_MS;
+  var f = beat && beat.gps && beat.gps.fix;
+  var fixAt = f && typeof f.gpsAge === 'number' && isFinite(f.gpsAge) ? now - f.gpsAge * 1000 : null;
+  ids.forEach(function (id) {
+    var o = orderLive[id];
+    if (!o) return;
+    if (stepped) o.steps += 1;
+    if (!f || fixAt === null || (o.lastFixAt !== null && fixAt <= o.lastFixAt)) return;
+    if (f.gpsOk !== true) { o.refused += 1; return; }
+    if (o.lastFixAt !== null && fixAt - o.lastFixAt > GAP_MS) {
+      o.gaps += 1;
+      o.gapMs += fixAt - o.lastFixAt;
+    }
+    o.lastFixAt = fixAt;
+    o.fixes += 1;
+  });
+}
+
+// The odometer since the order's Took (or the restart), miles, or null with
+// no reading kept for it.
+function orderDriven(id) {
+  var o = orderLive[id];
+  return o ? Math.max(0, finishOdo.miles - o.odo) : null;
+}
+
+/* Each pickup of the order, in the card's order where the card listed its
+ * stores, else the card's one store, then any pickup the planner or a pin
+ * named that the card did not: name, door, where it was pinned and by whom
+ * or why not, whether the car has been and how it was known, when the car's
+ * dwell there began (`arrived`) and when it was marked (`left`), and the
+ * odometer then (`miles`). */
+function orderPickups(h, places, why) {
+  var pins = Array.isArray(h.pickupPins) ? h.pickupPins : [];
+  var entries = Array.isArray(h.pickups) ? h.pickups : [];
+  var list = Array.isArray(h.stores) && h.stores.length >= 2
+    ? h.stores.map(function (st) { return { name: st.name, q: st.door || null }; })
+    : [{ name: h.pickup || null,
+         q: h.pickupLine || (h.fields && h.fields.pickupAddr && h.fields.pickupAddr.from === 'popup'
+           ? h.fields.pickupAddr.value : null) }];
+  var named = list.map(function (p) { return p.q; });
+  entries.concat(pins).forEach(function (e) {
+    if (e && typeof e.q === 'string' && e.q && named.indexOf(e.q) === -1) {
+      named.push(e.q);
+      list.push({ name: null, q: e.q });
+    }
+  });
+  return list.slice(0, ORDER_LIST_MAX).map(function (p) {
+    var pin = p.q ? pins.filter(function (x) { return x && x.q === p.q; })[0] : null;
+    var e = p.q ? entries.filter(function (x) { return x && x.q === p.q; })[0] : null;
+    return {
+      name: places ? orderText(p.name) : null,
+      door: places ? orderText(p.q) : null,
+      at: places && pin ? orderAt(pin) : null,
+      pinned: pin ? (pin.by || 'page') : null,
+      why: pin ? null : (why || null),
+      visited: !!(e && e.visited),
+      by: e && e.visited ? (e.by || null) : null,
+      arrived: e ? orderNum(e.reachedAt || e.dwellFrom || e.arrivedAt) : null,
+      left: e && e.visited ? orderNum(e.visitedAt) : null,
+      miles: e ? orderRound(e.milesAt, 2) : null
+    };
+  });
+}
+
+/* The record of `h` as it leaves the list (setHeld, beside pinOutcome), all
+ * but its end: the end is the caller's (orderRow). `list` is the car as it
+ * stood, which pinOutcome's restaurant guard reads. */
+function orderDraft(h, list) {
+  var id = holdIdOf(h);
+  var places = orderKeepsPlaces();
+  var card = h.card || {};
+  var off = h.offered || null;
+  var outcome = goneOutcomes.get(id) || pinOutcome(h, list);
+  var pin = heldEndPin(h);
+  var field = h.fields && h.fields.dropoff ? h.fields.dropoff : null;
+  var live = orderLive[id] || null;
+  var picks = orderPickups(h, places, outcome.pickups && outcome.pickups.why);
+  var visited = picks.filter(function (p) { return p.visited && typeof p.miles === 'number'; });
+  var stops = plannerStopsOf(h);
+  var area = !pin && h.endArea && h.endWhyFor === endTextOf(h) ? h.endArea : null;
+  var missing = [];
+  if (!off) missing.push('the card as offered: taken by a build before the order record');
+  if (!live) missing.push('drive: no odometer reading kept for this order');
+  else if (live.from === 'restart') {
+    missing.push('drive: counted from the restart, not the Took; the miles and fixes before it are lost');
+  }
+  // ...and no fix at all while it was carried is no miles, not "0 miles": the
+  // odometer only moves on a fix, so its standing still says nothing.
+  var noFix = !!live && !live.fixes;
+  if (noFix) missing.push('drive: no good GPS fix while it was carried, so no miles');
+  var flags = [];
+  if (card.doubt || h.doubt) flags.push('doubt: ' + String(card.doubt || h.doubt).slice(0, 24));
+  if (card.milesUncertain) flags.push('the card\'s miles were not trusted');
+  if (card.milesCorrected) flags.push('a decimal was put back in the card\'s miles');
+  if (h.uncosted) flags.push('no running cost on the card');
+  if (card.earlyLook) flags.push('an Early look card');
+  if (live && live.steps) flags.push('the clock stepped ' + live.steps + 'x while it was carried');
+  if (Array.isArray(h.restarts) && h.restarts.length) {
+    flags.push('the server restarted ' + h.restarts.length + 'x while it was carried');
+  }
+  return {
+    v: ORDER_ROW_V, kind: 'order', id: id, offer: h.id,
+    app: typeof h.app === 'string' ? h.app : null,
+    places: places,
+    links: { addon: !!h.addOn, addonTo: typeof h.of === 'string' && h.of ? h.of : null,
+             batch: batchDrops(h), tookOn: h.tookOn || 'panel' },
+    card: {
+      pay: orderNum(h.pay),
+      minutes: off ? off.minutes : null,
+      billedMinutes: orderNum(h.minutes),
+      miles: orderNum(h.miles),
+      deliverBy: orderNum(h.deliverBy),
+      stops: orderNum(card.stops),
+      dropoffs: orderNum(h.dropoffs),
+      dropoffOrders: orderNum(h.dropoffOrders),
+      multiOrder: card.multiOrder === true ? true : null,
+      addon: card.addon === true ? true : null,
+      verdict: off ? off.state : null,
+      perHour: off ? off.perHour : null,
+      reads: off ? off.reads : null,
+      screen: off ? off.screen : null,
+      pickup: places && off ? off.pickup : null,
+      dropoff: places && off ? off.dropoff : null,
+      stores: places && Array.isArray(h.stores)
+        ? h.stores.slice(0, ORDER_LIST_MAX).map(function (st) { return orderText(st.name, 60); })
+        : null
+    },
+    times: { offered: orderNum(h.acceptedAt), took: orderNum(h.tookAt),
+             atDropoff: orderNum(h.arrivedAt),
+             restarts: Array.isArray(h.restarts) ? h.restarts.slice(-ORDER_LIST_MAX) : null },
+    pickups: picks,
+    dropoff: {
+      text: places ? orderText(h.dropoff) : null,
+      from: field ? field.from || null : null,
+      filedAt: field ? orderNum(field.at) : null,
+      screen: field && typeof field.screen === 'string' ? field.screen.slice(0, 40) : null,
+      cue: typeof h.endCue === 'string' ? h.endCue.slice(0, 24) : null,
+      scanned: h.dropoffScanned === true ? true : null,
+      at: places && pin ? orderAt(pin) : null,
+      pinned: outcome.end.by,
+      asked: outcome.end.asked,
+      why: outcome.end.why,
+      armed: !!(pin && !outcome.end.why),
+      area: places && area && orderAt(area)
+        ? Object.assign(orderAt(area), { miles: orderRound(area.miles, 2), approx: true }) : null
+    },
+    // DRAWING ONLY, kept so: DoorDash's map label for an end no screen gave.
+    guess: places && h.dropoffGuess && typeof h.dropoffGuess.line === 'string'
+      ? { line: orderText(h.dropoffGuess.line, 60), from: h.dropoffGuess.from || null, approx: true }
+      : null,
+    planner: stops ? { stops: stops.length } : null,
+    drive: {
+      miles: live && !noFix ? orderRound(orderDriven(id), 2) : null,
+      from: live ? live.from : null,
+      toPickup: visited.length ? visited[0].miles : null,
+      fixes: live ? live.fixes : null,
+      refused: live ? live.refused : null,
+      gaps: live ? live.gaps : null,
+      gapMinutes: live ? orderRound(live.gapMs / 60000, 1) : null
+    },
+    pinning: outcome,
+    with: Array.isArray(h.withIds) ? h.withIds.slice(0, ORDER_LIST_MAX) : null,
+    snaps: Array.isArray(h.snaps) ? h.snaps.slice(-ORDER_LIST_MAX) : null,
+    flags: flags,
+    missing: missing
+  };
+}
+
+/* The pay over the clock and over the odometer, as the report works them
+ * out (the end-of-shift report's `rates`, tools/, the one formula; its suite holds the
+ * two to the same answer): $/hr = pay / (minutes / 60), $/mi = pay / miles
+ * with ORDER_PER_MILE_MIN miles or more, both only for a delivery's end.
+ * The report may still call the order unreliable — put down too soon, never
+ * driven — and print no rate; that is its judgement, made over the whole
+ * day, and this row does not pre-empt it. A RECORD, NOT A RULE: nothing
+ * decides on either figure (AUDITS.md, Settled: no $/mile rule). */
+function orderMoney(pay, minutes, miles, delivery) {
+  var out = { pay: pay, minutes: orderRound(minutes, 2), miles: orderRound(miles, 2),
+              perHour: null, perMile: null, delivery: delivery };
+  if (!delivery || typeof pay !== 'number') return out;
+  if (typeof minutes === 'number' && minutes > 0) out.perHour = orderRound(pay / (minutes / 60), 2);
+  if (typeof miles === 'number' && miles >= ORDER_PER_MILE_MIN) out.perMile = orderRound(pay / miles, 2);
+  return out;
+}
+
+/* The row for `h`, ended now by `how` at `ended` (ms): the draft kept as it
+ * left (orderDraft), its end filled in. `extra` is {pressed, rule, carried}:
+ * a press's own moment, a rule's words in place of ORDER_RULES', and how many
+ * orders were in the car. Returns the row object; orderLine makes it a
+ * journal line, and a watch keeps it as an object until it ends
+ * (orderWatchLine fills in how the GPS finished it). */
+function orderRow(h, how, ended, extra) {
+  var id = holdIdOf(h);
+  var row = goneRecords.get(id) || orderDraft(h, scanner.held);
+  goneRecords.delete(id);
+  var x = extra || {};
+  // Stamped when it is written, not when the order ended: rpi/doctor.py reads
+  // a row stamped before the one written ahead of it as NTP stepping the
+  // clock back, and a watch's row is written minutes after its end.
+  // `times.ended` is the end. `seq` the same moment, so the sync keys one
+  // row as one (syncKey's fallback, [kind, id, seq]).
+  var at = Date.now();
+  row.at = at;
+  row.seq = at;
+  row.how = how;
+  row.rule = x.rule || ORDER_RULES[how] || null;
+  if (typeof x.carried === 'number' && x.carried >= 2) row.carried = x.carried;
+  row.times.pressed = typeof x.pressed === 'number' ? x.pressed : null;
+  row.times.ended = ended;
+  var took = row.times.took;
+  var minutes = typeof took === 'number' && typeof ended === 'number' && ended >= took
+    ? (ended - took) / 60000 : null;
+  row.money = orderMoney(row.card.pay, minutes, row.drive.miles,
+                         ORDER_DELIVERY_ENDS.indexOf(how) !== -1);
+  return row;
+}
+
+// A short sentence for each way an order ends, so a reader of the row needs
+// no copy of this file to know what `how` means.
+var ORDER_RULES = {
+  drop: 'Drop pressed',
+  gps: 'the GPS saw the car at its pinned door and then leave it',
+  chooser: 'Drop with two in the car, the driver picking which',
+  screen: 'the app\'s completion screen',
+  offers: 'the offers page\'s tick taken back',
+  replaced: 'a later Took put it down',
+  expiry: 'its own clock ran out (card minutes x HOLD_OVERRUN + HOLD_GRACE_MS)',
+  untick: 'the panel\'s Took taken back',
+  boot: 'not restored at boot: more trips on file than MAX_HELD_FILE'
+};
+
+function orderLine(row) {
+  return JSON.stringify(orderCompact(row)) + '\n';
+}
+
+/* A watch's waiting row, written: the watch ended `finish` ('door', 'area',
+ * 'stop', or 'none' — its window out, or pushed out) at `ended`. Returns the
+ * journal line, or '' for a watch with no row waiting (one opened by a build
+ * before the record). */
+function orderWatchLine(w, finish, ended) {
+  var r = w && w.record;
+  if (!r || typeof r !== 'object') return '';
+  delete w.record;
+  // Off a file a hand may have edited: the three parts written to here are
+  // made whole rather than trusted.
+  ['times', 'drive', 'card'].forEach(function (k) {
+    if (!r[k] || typeof r[k] !== 'object') r[k] = {};
+  });
+  r.at = r.seq = Date.now();
+  r.finish = finish;
+  r.times.ended = ended;
+  r.rule = finish === 'none'
+    ? (r.rule || 'Drop pressed') + '; the GPS watched for its end and saw none, so the press stands'
+    : (r.rule || 'Drop pressed') + '; then the GPS finished it (' + finish + ')';
+  // ...the watch's own count to its end, and the fixes counted meanwhile
+  // (orderBeat counts a watched order's too), where any fix was seen.
+  var live = orderLive[w.holdId];
+  if (live) {
+    r.drive.fixes = live.fixes;
+    r.drive.refused = live.refused;
+    r.drive.gaps = live.gaps;
+    r.drive.gapMinutes = orderRound(live.gapMs / 60000, 1);
+  }
+  if (typeof w.driven === 'number' && isFinite(w.driven) && (r.drive.fixes || 0) > 0) {
+    r.drive.miles = orderRound(w.driven, 2);
+    if (Array.isArray(r.missing)) {
+      r.missing = r.missing.filter(function (m) { return m.indexOf('drive: no good GPS fix') !== 0; });
+    }
+  }
+  var took = r.times.took;
+  var minutes = typeof took === 'number' && ended >= took ? (ended - took) / 60000 : null;
+  // A press the GPS finished is a delivery's end, as the report reads it
+  // (its "Drop -> GPS 'door'"), and so is a press it watched and did not:
+  // the press then stands as the end, the report's rule for a press.
+  var delivery = ORDER_DELIVERY_ENDS.indexOf(r.how) !== -1;
+  r.money = orderMoney(orderNum(r.card.pay), minutes, orderNum(r.drive.miles), delivery);
+  return orderLine(r);
+}
+
+/* The rows for orders that ended with no drop row to ride with — the panel's
+ * ✓ taken back, a boot that could not restore them, an order with no stated
+ * minutes a bare Drop cleared — appended on their own. */
+function orderRowsAlone(list, how, ended, extra) {
+  if (!list || !list.length) return;
+  appendLines(list.map(function (h) { return orderLine(orderRow(h, how, ended, extra)); }).join(''),
+    function (err) {
+      if (err) console.error('journal: could not record an order: ' + err.message);
+    });
 }
 
 function heldForPanel(held) {
@@ -10354,6 +11020,14 @@ function takeSnap(done) {
       // reading half of one.
       var then = function () {
         console.log('snap: ' + name + ' ' + record.said);
+        // ...and named on each order in the car, for its record (`snaps`):
+        // which snaps were taken while it was carried is the first thing to
+        // look for when a record is checked later. The name only, the last
+        // ORDER_LIST_MAX, on the hold so a restart keeps them.
+        heldOrders(Date.now()).forEach(function (h) {
+          h.snaps = (Array.isArray(h.snaps) ? h.snaps : []).concat([name]).slice(-ORDER_LIST_MAX);
+        });
+        if (scanner.held.length) setHeld(scanner.held);
         // Answered once the row is down, so a journal read straight after the
         // reply finds it.
         appendLines(JSON.stringify(snapRow(record, err)) + '\n', function (rowErr) {
@@ -12088,7 +12762,12 @@ function route(req, res) {
               tookAt: tookAt,
               deliverBy: typeof marked.deliverBy === 'number' ? marked.deliverBy : null,
               addOn: false,
-              of: null
+              of: null,
+              // ...and the card as it was offered, for the order's record
+              // when it leaves (offeredOf, orderDraft): the verdict and $/hr
+              // the panel showed, the card's own minutes, its places as
+              // printed and how often it was read. Nothing computes off it.
+              offered: offeredOf(marked)
             });
             // ...and, off DoorDash's card with two stores or more, every
             // store in the card's order with its printed door (storesOf; the
@@ -12128,6 +12807,11 @@ function route(req, res) {
             });
             if (carried.length) {
               setHeld(scanner.held.filter(function (h) { return carried.indexOf(h) === -1; }));
+              // No drop row is written for a Took taken back (it was not
+              // delivered, and AUDITS.md's pin log names it open), but the
+              // order did leave the car, and its record says how. The
+              // offers page's untick is putDown's `offers` instead, below.
+              if (note.via !== 'offers') orderRowsAlone(carried, 'untick', Date.now());
             }
           }
         }
@@ -12173,7 +12857,9 @@ function route(req, res) {
                             by: 'replaced' };
             // ...with two in the car at the press, as putDown says it.
             if (carriedAtTook >= 2) dropRow.carried = carriedAtTook;
-            return JSON.stringify(asAddOnRow(withOutcome(dropRow, r), r)) + '\n';
+            return JSON.stringify(asAddOnRow(withOutcome(dropRow, r), r)) + '\n'
+              // ...and its record (orderRow), ended by this Took.
+              + orderLine(orderRow(r, 'replaced', dropNow, { carried: carriedAtTook }));
           });
           appendLines(dropRows.join(''), function (dropErr) {
             if (dropErr) console.error('journal: could not record a replaced hold: '
@@ -13699,6 +14385,9 @@ function route(req, res) {
       // Newest first, because a shift is read from its end: the pairing a
       // driver wants is nearly always the one they just made.
       var taken = takenRuns(rows, floor, windowed);
+      // ...and each order's own record, for the offers page's "Order record"
+      // under its offer row and its CSV (orderRecords).
+      var records = orderRecords(rows, floor);
       var window = pairs.filter(function (r) { return !floor || (r.at || 0) >= floor; })
                         .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
       send(res, 200, JSON.stringify({ count: offers.length, total: total,
@@ -13731,6 +14420,11 @@ function route(req, res) {
                                       // really took, and the restaurants'
                                       // waits (takenRuns, storeWaitsOut).
                                       taken: taken,
+                                      // The order rows themselves, newest
+                                      // per order (orderRecords): the same
+                                      // rows this journal holds, through
+                                      // the same door and nothing else.
+                                      records: records,
                                       waits: storeWaitsOut(),
                                       // What $/mi to accept, read off the
                                       // window: four descriptions, no rule

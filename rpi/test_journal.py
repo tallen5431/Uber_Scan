@@ -458,6 +458,24 @@ after.journal.append({'v': 1, 'kind': 'visit', 'at': JR.now_ms(),
                       'holdId': 'o1@1700000000000', 'pickup': 0, 'by': 'gps'})
 eq('a pickup visit row last in the file is not the last offer',
    (after.journal.last() or {}).get('pay'), 12.45)
+# ...and an order's record (server.js orderRow, the owner's 7 Nov "document as
+# much as possible about an order"), which carries the card's pay inside it
+# and the offer's id beside its own: the newest kind of all, and the one most
+# like an offer. Invented, in the writer's shape.
+_rec = {'v': 1, 'kind': 'order', 'at': JR.now_ms(), 'seq': JR.now_ms(),
+        'id': 'o1@1700000000000', 'offer': 'o1', 'app': 'uber', 'how': 'drop',
+        'places': True, 'card': {'pay': 99.0, 'minutes': 30, 'miles': 5.0},
+        'times': {'took': 1700000000000, 'ended': 1700001800000},
+        'pickups': [{'name': 'Imaginary Bistro', 'visited': True, 'by': 'gps'}],
+        'dropoff': {'text': '742 Example Ave, Faketown', 'from': 'card'},
+        'money': {'pay': 99.0, 'minutes': 30.0, 'perHour': 198.0, 'delivery': True}}
+eq('an order record appends like any row and reads back whole',
+   (after.journal.append(_rec), after.journal.rows()[-1]), (True, _rec))
+eq('an order record last in the file is not the last offer (its pay is the card\'s, inside it), '
+   'so the card a restart resumes from is still the offer',
+   (after.journal.last() or {}).get('pay'), 12.45)
+eq('...and the offers the file holds are the offers: the record is not one',
+   len([r for r in after.journal.rows() if not r.get('kind')]), 1)
 
 # --- "settled" means the reading stopped moving, so it has to be able to -----
 # A row is only ever written on the read where the reading *changed*, so at that

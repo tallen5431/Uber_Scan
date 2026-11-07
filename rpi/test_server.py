@@ -9184,8 +9184,9 @@ finally:
 # Every name, store and street is invented.
 _cdir = tempfile.mkdtemp()
 _cfake = os.path.join(_cdir, 'say.py')
-with open(_cfake, 'w') as _fh:
-    _fh.write(
+# Kept by name: the order record's section at the foot of this file starts
+# the same scanner again, after this section has cleared its directory.
+_CFAKE_SRC = (
         'import json, os, time\n'
         'd = os.path.dirname(os.path.abspath(__file__))\n'
         'n = 0\n'
@@ -9201,6 +9202,8 @@ with open(_cfake, 'w') as _fh:
         '        time.sleep(0.05)\n'
         '    open(os.path.join(d, "done-%d" % n), "w").close()\n'
         '    n += 1\n')
+with open(_cfake, 'w') as _fh:
+    _fh.write(_CFAKE_SRC)
 _cseq = [0]
 
 
@@ -11166,6 +11169,11 @@ try:
        ([('s-1', 'screen')], [], ('doordash', 'put down', 'only', True)))
     ok_('[screen drop] ...and the panel is told the car is empty',
         bool(_told) and all(m.get('holding') is None for m in _told))
+    eq('[order record] a completion screen\'s put-down writes the order\'s row with its drop row: '
+       'by the screen, in words, and no rate (the report reads a screen as no delivery\'s end)',
+       [(r.get('how'), r.get('rule'), (r.get('money') or {}).get('delivery'),
+         (r.get('money') or {}).get('perHour')) for r in _rows(_scj, 'order')],
+       [('screen', "the app's completion screen", False, None)])
     # The same screen, still up: the order taken since is not put down by it.
     _took2(_scb, _card('s-2', 7.25, app='doordash', screen='dd.offer'))
     _say(_done())
@@ -13658,6 +13666,11 @@ def _frows(path, kind, oid=None):
     return [r for r in rows if r.get('kind') == kind and (oid is None or r.get('id') == oid)]
 
 
+def _forder(path, oid):
+    """The order records (server.js orderRow) for offer `oid`, oldest first."""
+    return [r for r in _frows(path, 'order') if r.get('offer') == oid]
+
+
 def _fwatch(path):
     try:
         return json.load(open(os.path.join(os.path.dirname(path), 'finishing.json')))['watches']
@@ -13685,6 +13698,11 @@ try:
     eq('[finish] ...and a watch is kept for it, at its door, until its own clock runs out',
        [(w.get('holdId'), (w.get('to') or {}).get('kind'), w.get('dropAt'), w.get('by'))
         for w in _fwatch(_fj)], [(_h.get('holdId'), 'door', _fdrop[0]['at'], 'drop')])
+    eq('[order record] a Drop the GPS goes on watching writes no order row at the press: the '
+       'row waits on the watch, in finishing.json',
+       (_forder(_fj, 'fin-door'), [((w.get('record') or {}).get('kind'),
+                                    (w.get('record') or {}).get('how')) for w in _fwatch(_fj)]),
+       ([], [('order', 'drop')]))
     # A new order taken while the old one is being finished is held alone: the
     # watch is not in the car, and its door puts the new one down for nothing.
     _h2 = _ftook(_fb, 'fin-next', dropoff='17 Wren Way, Marietta', miles=0.4)
@@ -13708,6 +13726,31 @@ try:
        (_h2.get('holdId'), [], []))
     no_('[finish] ...and the panel is told nothing of it (no finished word on the stream)',
         any('finished' in json.dumps(m) or 'finish' in m for m in _ev))
+    _ord = _forder(_fj, 'fin-door')
+    eq('[order record] ...and the watch finished at the door writes it, once: Drop, then the GPS '
+       '(door), ended at the stop, the press kept, the order as id',
+       [(r.get('id'), r.get('how'), r.get('finish'), r['times'].get('ended'),
+         r['times'].get('pressed'), r['times'].get('took') == _h.get('tookAt') or
+         r['times'].get('took') is not None) for r in _ord],
+       [(_h.get('holdId'), 'drop', 'door', _fin[0]['at'], _fdrop[0]['at'], True)])
+    _o = _ord[0] if _ord else {}
+    eq('[order record] ...the end as filed and the pin the page posted, with its place '
+       '(keepPlaces is on by default)',
+       ((_o.get('dropoff') or {}).get('text'), (_o.get('dropoff') or {}).get('pinned'),
+        (_o.get('dropoff') or {}).get('at'), (_o.get('dropoff') or {}).get('armed'), _o.get('places')),
+       (_DOOR, 'page', {'lat': _PIN[0], 'lon': _PIN[1]}, True, True))
+    eq('[order record] ...the card as it was taken: pay, minutes, miles, app',
+       [(_o.get('card') or {}).get(k) for k in ('pay', 'billedMinutes', 'miles')] + [_o.get('app')],
+       [12.0, 40.0, 5.0, None])
+    eq('[order record] ...the rule in words, and the money: the card\'s pay over the clock, a '
+       'delivery\'s end',
+       (_o.get('rule'), (_o.get('money') or {}).get('delivery'),
+        (_o.get('money') or {}).get('perHour') == round(
+            12.0 / (((_o.get('times') or {}).get('ended', 0) - (_o.get('times') or {}).get('took', 0))
+                    / 3600000.0), 2)),
+       ('Drop pressed; then the GPS finished it (door)', True, True))
+    eq('[order record] ...versioned, keyed for the sync as one row (seq its at), and bounded',
+       (_o.get('v'), _o.get('seq') == _o.get('at'), len(json.dumps(_o)) < 4096), (1, True, True))
     # No end at all: the first stop once the car is 0.2 mi from the press.
     # The press is made ON THE MOVE, ~130 m past the old door and under the
     # dwell there (a press made standing opens no watch: below).
@@ -13724,6 +13767,9 @@ try:
     _fbeats(_fstay(_IN + 0.0045))           # ~365 m (0.23 mi) on, and stopped
     eq('[finish] ...the first stop after moving 0.2 mi does, `how: stop` (the weakest)',
        [r.get('how') for r in _frows(_fj, 'finished', 'fin-next')], ['stop'])
+    eq('[order record] ...and its order row says so, ended at that stop',
+       [(r.get('finish'), r['times'].get('ended')) for r in _forder(_fj, 'fin-next')],
+       [('stop', _frows(_fj, 'finished', 'fin-next')[0]['at'])])
     eq('[finish] ...and no finish ever wrote a drop row', len(_frows(_fj, 'drop')), 2)
 
     # The owner's 29 Oct shift: presses made standing at the customer's door,
@@ -13737,6 +13783,19 @@ try:
     post(_fb, '/api/delivered', {})
     eq('[finish] a Drop pressed standing still, the order driven 0.6 of its card\'s miles, opens '
        'no watch: the press is the end', (_holding(_fb), _fwatch(_fj)), (None, []))
+    _ost = _forder(_fj, 'fin-stood')
+    eq('[order record] a press with no watch writes its order row with the drop row: Drop, the '
+       'press its end, and the odometer since the Took — the same count as the finishing '
+       'watch\'s, which let the press be the end only with 0.6 mi or more driven',
+       [(r.get('how'), r.get('finish'), r['times'].get('ended') == r['times'].get('pressed'),
+         ((r.get('drive') or {}).get('miles') or 0) >= 0.6,
+         (r.get('drive') or {}).get('from')) for r in _ost],
+       [('drop', None, True, True, 'took')])
+    eq('[order record] ...the GPS fixes counted while it was carried, and the $/mi over the '
+       'odometer as the report works it out (pay / miles)',
+       [(((r.get('drive') or {}).get('fixes') or 0) >= 5,
+         (r.get('money') or {}).get('perMile') == round(12.0 / r['money']['miles'], 2))
+        for r in _ost], [(True, True)])
     _fbeats(_fstay(0.02 + 0.0045))          # the next stop, 0.31 mi on
     eq('[finish] ...so no stop after it finishes it', _frows(_fj, 'finished', 'fin-stood'), [])
     # ...but standing NOT yet driven (the restaurant, an early press: the
@@ -13755,6 +13814,10 @@ try:
     _fbeats(_fstay(0.03 + 0.0105))          # 0.73 mi from the Took, and stopped
     eq('[finish] ...the first stop once they are driven does, `how: stop`',
        [r.get('how') for r in _frows(_fj, 'finished', 'fin-rest')], ['stop'])
+    eq('[order record] ...its row\'s drive runs to the stop, past the press (the watch\'s own '
+       'count: 0.73 mi)',
+       [(r.get('finish'), ((r.get('drive') or {}).get('miles') or 0) >= 0.6)
+        for r in _forder(_fj, 'fin-rest')], [('stop', True)])
     # A door watch opened with the car already inside the door's circle, under
     # the dwell (so not `arrived`), the fixes 5 s old: the first of the stop
     # dates from before the press. The row is never dated before it, which
@@ -13803,6 +13866,20 @@ try:
     _fbeats(_fstay(0.03 + 0.0007))          # stopped ~80 m from it
     eq('[finish] ...one 80 m from it does, `how: area`',
        [(r.get('id'), r.get('how')) for r in _frows(_fj2, 'finished')], [('fin-area', 'area')])
+    _oa = _forder(_fj2, 'fin-area')
+    eq('[order record] an order restored from holding.json at boot gets its row too: ended at the '
+       'area, the restart on it, its drive counted from the restart and said missing',
+       [(r.get('finish'), len((r.get('times') or {}).get('restarts') or []),
+         (r.get('drive') or {}).get('from'),
+         any('restart' in m for m in r.get('missing') or []),
+         any('restarted' in f for f in r.get('flags') or [])) for r in _oa],
+       [('area', 1, 'restart', True, True)])
+    eq('[order record] ...a hold from before the record has no card as offered, and says so',
+       [any('the card as offered' in m for m in r.get('missing') or []) for r in _oa], [True])
+    eq('[order record] ...the refused end\'s area kept, marked approximate, and why no pin (the '
+       'drop row\'s own word: this server has no NucBox search here)',
+       [((r.get('dropoff') or {}).get('area') or {}).get('approx') for r in _oa]
+       + [(r.get('dropoff') or {}).get('why') for r in _oa], [True, 'no NucBox search'])
 
     # ↶ Undo cancels the watch its Drop opened: the order is back in the car,
     # and its door is the GPS drop's again, not a finish.
@@ -13813,6 +13890,8 @@ try:
     _c, _u = post(_fb, '/api/drop-undo', {'id': (_d.get('undo') or {}).get('id')})
     eq('[finish] ...↶ Undo puts the order back and the watch is gone',
        (_c, (_holding(_fb) or {}).get('holdId'), _fwatch(_fj2)), (200, _h.get('holdId'), []))
+    eq('[order record] ...and the row the watch kept goes with it: no order row for an order '
+       'back in the car', _forder(_fj2, 'fin-undo'), [])
     _fbeats(_fstay(_IN))
     eq('[finish] ...so the car at its door is an arrival, not a finished row',
        (bool((_holding(_fb) or {}).get('arrived')), _frows(_fj2, 'finished', 'fin-undo')),
@@ -13820,6 +13899,10 @@ try:
     post(_fb, '/api/delivered', {})
     eq('[finish] ...and a Drop pressed AT the door (arrived) opens no watch: the press is the end',
        _fwatch(_fj2), [])
+    eq('[order record] ...so its one row is written at that press, with when the GPS had the car '
+       'at the door',
+       [(r.get('how'), bool((r.get('times') or {}).get('atDropoff')))
+        for r in _forder(_fj2, 'fin-undo')], [('drop', True)])
 
     # The window: the order's own clock (here 0.05 min x 1.5, no grace). A
     # stop after it finishes nothing, and the watch is forgotten.
@@ -13832,6 +13915,10 @@ try:
     _fbeats(_fstay(_IN))
     eq('[finish] a watch past its window writes no row and is forgotten',
        (_fw, _frows(_fj2, 'finished', 'fin-late'), _fwatch(_fj2)), ([_h.get('holdId')], [], []))
+    eq('[order record] ...but the order row it kept is written: no finish seen, the press its end',
+       [(r.get('finish'), r['times'].get('ended') == r['times'].get('pressed'),
+         'saw none' in (r.get('rule') or '')) for r in _forder(_fj2, 'fin-late')],
+       [('none', True, True)])
 
     # A restart keeps the watch (finishing.json), and finishes it after.
     _h = _ftook(_fb, 'fin-boot')
@@ -13849,6 +13936,8 @@ try:
     _fbeats(_fstay(_IN))
     eq('[finish] ...and finishes it at its door after the restart',
        [r.get('how') for r in _frows(_fj2, 'finished', 'fin-boot')], ['door'])
+    eq('[order record] ...and the order row the watch kept across the restart is written there, '
+       'once', [r.get('finish') for r in _forder(_fj2, 'fin-boot')], ['door'])
 finally:
     stop(_fp)
 
@@ -14094,6 +14183,179 @@ finally:
 _plsrc = open(os.path.join(ROOT, 'server.js'), encoding='utf-8').read()
 ok_('[pin said] the log line never stands in a search\'s way: both sayers swallow their own '
     'faults', _plsrc.count('} catch (e) { /* the log only */ }') == 2)
+
+# --- the order record: one row as each order leaves the car (7 Nov 2026) --------
+#
+# The owner: "Can you improve the logging to also document as much as possible
+# about an order? It is helpful for records later." server.js writes one
+# `kind: 'order'` row (orderRow) for every way an order ends; the GPS finishes
+# are checked in the [finish] section above, beside the watches they wait on,
+# and the completion screen in [screen drop]. Here: a Took that replaced it,
+# the panel's Took taken back, keepPlaces off, its own clock, an undone Drop,
+# the chooser, the offers page's untick, a boot that could not restore it, a
+# restored order put down, and what /api/journal hands the offers page. Every
+# store, street and figure is invented. Cards with no miles open no finishing
+# watch (finishWatch: no figure to drive), so each row is written at its end.
+# The report's own formula and its fewest miles for a $/mi are held to the
+# row's by tools/test_shift_report.py, which may name the report: nothing in
+# rpi/ may import it (that suite's "nothing reads the report").
+
+_RSTORE = 'Imaginary Bistro'
+_RDOOR = '742 Example Ave, Faketown'
+# Stage 5's scanner, in a directory of its own (that section removed its own).
+_cdir = tempfile.mkdtemp()
+_cfake = os.path.join(_cdir, 'say.py')
+with open(_cfake, 'w') as _fh:
+    _fh.write(_CFAKE_SRC)
+
+
+def _rorder(j, oid):
+    return [r for r in _rows(j, 'order') if r.get('offer') == oid]
+
+
+def _rheld(base):
+    # (Stage 5's _orders, by its own name: a later section reuses that name.)
+    return get(base, '/api/status').get('orders') or []
+
+
+def _rsight(keep):
+    return {'sighting': {'asked': False, 'whole': True, 'titled': False, 'laidOut': False,
+                         'framed': False, 'footed': False, 'app': 'uber', 'screen': 'uber.nav',
+                         'page': None, 'stops': [], 'orderCount': None, 'keep': keep}}
+
+
+_rp, _rb, _rj, _rh = _cserver('records', HOLD_GRACE_MS='0')
+try:
+    # Read three times on the slot, then taken; then another taken over it.
+    _r1 = _card('r-1', 13.25, minutes=30.0, miles=None, pickup=_RSTORE, dropoff=_RDOOR)
+    _say(_r1)
+    _say(_r1)
+    _took2(_rb, _r1)
+    _took2(_rb, _card('r-2', 8.0, minutes=30.0, miles=None))
+    _o1 = _rorder(_rj, 'r-1')
+    _d1 = [d['at'] for d in _rows(_rj, 'drop') if d.get('id') == 'r-1']
+    eq('[order record] a Took that replaces the order writes its row beside the drop row: '
+       'replaced, the Took its end, no rate for an end that is no delivery',
+       [(r.get('how'), (r.get('money') or {}).get('delivery'), (r.get('money') or {}).get('perHour'),
+         r['times'].get('ended') == (_d1 or [None])[0]) for r in _o1],
+       [('replaced', False, None, True)])
+    eq('[order record] ...the card as it was offered: read 3 times, shown $20.00/hr go, the '
+       'pickup and the dropoff as the card printed them',
+       [((r.get('card') or {}).get('reads'), (r.get('card') or {}).get('perHour'),
+         (r.get('card') or {}).get('verdict'), (r.get('card') or {}).get('pickup'),
+         (r.get('card') or {}).get('dropoff'), (r.get('pickups') or [{}])[0].get('name'),
+         (r.get('dropoff') or {}).get('text'), (r.get('dropoff') or {}).get('from'))
+        for r in _o1], [(3, 20.0, 'go', _RSTORE, _RDOOR, _RSTORE, _RDOOR, 'card')])
+    eq('[order record] ...ids and links: the order\'s holdId, the offer, the app, how it was taken',
+       [(r.get('id').split('@')[0], r.get('offer'), r.get('app'),
+         (r.get('links') or {}).get('tookOn')) for r in _o1], [('r-1', 'r-1', 'uber', 'panel')])
+    # The panel's Took taken back: no drop row (it was never delivered), but
+    # the order left the car, and its row says how.
+    post(_rb, '/api/offers/mark', {'id': 'r-2', 'accepted': None, 'via': 'panel'})
+    time.sleep(0.3)
+    eq('[order record] the panel\'s Took taken back writes the order\'s row and no drop row',
+       ([r.get('how') for r in _rorder(_rj, 'r-2')],
+        [d.get('id') for d in _rows(_rj, 'drop') if d.get('id') == 'r-2']), (['untick'], []))
+    # keepPlaces off, as the scanner says it on a sighting line: the row keeps
+    # counts, words and times, and no place.
+    _say(_rsight(False))
+    _took2(_rb, _card('r-3', 10.0, minutes=30.0, miles=None, pickup=_RSTORE, dropoff=_RDOOR))
+    post(_rb, '/api/delivered', {})
+    time.sleep(0.3)
+    _o3 = _rorder(_rj, 'r-3')
+    eq('[order record] with keepPlaces off (the scanner\'s `keep`) the row says so and holds no '
+       'store, no door, no dropoff: counts, words and times only',
+       [(r.get('places'), _RSTORE in json.dumps(r), 'Example Ave' in json.dumps(r),
+         r.get('how')) for r in _o3], [(False, False, False, 'drop')])
+    eq('[order record] ...a press of Drop is a delivery\'s end, and its $/hr is the card\'s pay '
+       'over the minutes from its Took to its end, pay / (minutes / 60)',
+       [(r['money'].get('delivery'),
+         r['money'].get('perHour') == round(10.0 / ((r['times']['ended'] - r['times']['took'])
+                                                     / 3600000.0), 2))
+        for r in _o3], [(True, True)])
+    _say(_rsight(True))
+    # Its own clock: 0.02 min x 1.5, no grace.
+    _took2(_rb, _card('r-4', 6.0, minutes=0.02, miles=None))
+    time.sleep(2.5)
+    get(_rb, '/api/status')
+    time.sleep(0.4)
+    _e4 = [d for d in _rows(_rj, 'drop') if d.get('id') == 'r-4']
+    eq('[order record] an order that runs out on its own clock writes its row with the expiry '
+       'row, ended when the clock ran out, stamped when written',
+       [(r.get('how'), r['times'].get('ended') == (_e4 or [{}])[0].get('at'),
+         r['at'] >= r['times']['ended']) for r in _rorder(_rj, 'r-4')], [('expiry', True, True)])
+    # Drop, Undo, Drop: two rows for one order; the offers page is handed the
+    # newest, and none while its only row's press is undone.
+    _took2(_rb, _card('r-5', 9.0, minutes=30.0, miles=None, pickup=_RSTORE))
+    _c, _d5 = post(_rb, '/api/delivered', {})
+    time.sleep(0.3)
+    post(_rb, '/api/drop-undo', {'id': (_d5.get('undo') or {}).get('id')})
+    time.sleep(0.3)
+    _recs = get(_rb, '/api/journal?days=0').get('records') or []
+    eq('[order record] /api/journal hands the offers page no record for an order whose only '
+       'row\'s press was undone', [r.get('offer') for r in _recs if r.get('offer') == 'r-5'], [])
+    time.sleep(0.05)
+    post(_rb, '/api/delivered', {})
+    time.sleep(0.3)
+    _recs = get(_rb, '/api/journal?days=0').get('records') or []
+    _o5 = _rorder(_rj, 'r-5')
+    eq('[order record] ...Dropped again, two rows on file, and the page is handed the newest',
+       (len(_o5), [r['times'].get('pressed') for r in _recs if r.get('offer') == 'r-5']),
+       (2, [_o5[-1]['times']['pressed'] if _o5 else None]))
+    eq('[order record] ...the page gets every order of the window, oldest Took first, one row each',
+       [r.get('offer') for r in _recs], ['r-1', 'r-2', 'r-3', 'r-4', 'r-5'])
+    eq('[order record] an order row is no offer: the sync\'s offer count and the offers list '
+       'leave it out', (get(_rb, '/api/journal/newest').get('offers'),
+                        get(_rb, '/api/journal?days=0').get('count')), (0, 0))
+finally:
+    stop(_rp)
+
+# Two in the car: the chooser's pick, and the offers page's untick.
+_rp, _rb, _rj, _rh = _cserver('records-two', CARRY_TWO='1', CHOOSER_MS='1500')
+try:
+    _took2(_rb, _card('r-6', 11.0, minutes=40.0, miles=None))
+    _took2(_rb, _card('r-7', 7.5, minutes=40.0, miles=None))
+    _two = _rheld(_rb)
+    post(_rb, '/api/delivered', {})
+    post(_rb, '/api/delivered', {'holdIds': [(_two[0] if _two else {}).get('holdId')]})
+    time.sleep(0.3)
+    eq('[order record] the chooser\'s pick writes the row: by the chooser, two carried, the '
+       'other order named as carried with it, the press kept',
+       [(r.get('how'), r.get('carried'), r.get('with'), bool(r['times'].get('pressed')))
+        for r in _rorder(_rj, 'r-6')],
+       [('chooser', 2, [(_two[1] if len(_two) > 1 else {}).get('holdId')], True)])
+    post(_rb, '/api/offers/mark', {'id': 'r-7', 'accepted': None, 'via': 'offers'})
+    time.sleep(0.3)
+    eq('[order record] the offers page\'s untick puts the order down and writes its row, a press',
+       [(r.get('how'), bool(r['times'].get('pressed'))) for r in _rorder(_rj, 'r-7')],
+       [('offers', True)])
+finally:
+    stop(_rp)
+
+# A boot: three trips on file where MAX_HELD_FILE is two, and a restored order
+# put down. The third was never written a drop row; its record is the only
+# word that it left.
+_rn = int(time.time() * 1000)
+_rhold = {'v': 2, 'orders': [
+    {'id': 'rb-%d' % i, 'acceptedAt': _rn - 120000 + i, 'tookAt': _rn - 120000 + i,
+     'pay': 9.0 + i, 'minutes': 40.0, 'miles': None, 'app': 'uber', 'dropoff': None,
+     'card': {'multiOrder': False}} for i in (1, 2, 3)]}
+_rp, _rb, _rj, _rh = _cserver('records-boot', hold=_rhold, CARRY_TWO='1')
+try:
+    time.sleep(0.4)
+    eq('[order record] a boot that cannot restore an order (past MAX_HELD_FILE trips) writes its '
+       'row: by the boot', [r.get('how') for r in _rorder(_rj, 'rb-3')], ['boot'])
+    post(_rb, '/api/delivered', {'holdIds': ['rb-1@%d' % (_rn - 119999)]})
+    time.sleep(0.3)
+    eq('[order record] a restored order put down writes its row: the restart on it, its drive '
+       'from the restart, and what it lacks said in words',
+       [(r.get('how'), len(r['times'].get('restarts') or []), (r.get('drive') or {}).get('from'),
+         sorted(set(m.split(':')[0] for m in r.get('missing') or [])))
+        for r in _rorder(_rj, 'rb-1')],
+       [('chooser', 1, 'restart', ['drive', 'the card as offered'])])
+finally:
+    stop(_rp)
+shutil.rmtree(_cdir, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)

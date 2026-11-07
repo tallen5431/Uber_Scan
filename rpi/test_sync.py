@@ -259,8 +259,11 @@ try:
                 headers={'Content-Type': 'application/json'}, method='POST')
             return json.loads(urllib.request.urlopen(req, timeout=5).read()
                               .decode('utf-8'))
+        # No miles: a card with a distance has each Drop's order record wait
+        # on the GPS's finishing watch (server.js finishWatch), and this rig
+        # has no GPS to end one; the drop rows are the same either way.
         _card = {'id': 'drop-7', 'pay': 11.0, 'minutes': 22.0,
-                 'billedMinutes': 22.0, 'miles': 5.0, 'cost': 1.5}
+                 'billedMinutes': 22.0, 'cost': 1.5}
         for _ in range(2):
             _press('/api/offers/mark', {'id': 'drop-7', 'accepted': True,
                                         'offer': _card})
@@ -280,6 +283,37 @@ try:
         eq('...with nothing refused as malformed', dropsent['malformed'], 0)
         eq('...and a second sync adds no duplicate',
            SY.send(far.base, rigrows)['added'], 0)
+        # ...and each order's record (server.js orderRow, the owner's 7 Nov
+        # "document as much as possible about an order"): a row of a kind
+        # this sync was never told about, carried by syncKey's fallback on
+        # its id (the holdId) and seq (when it was written), with no change
+        # to sync.py or to the far end's ingest. The card had no miles, so no
+        # finishing watch held either row back: one per press, both here.
+        orders_written = [r for r in lines(rig.journal) if r.get('kind') == 'order']
+        eq('the rig writes an order record for each order put down',
+           [(r.get('offer'), r.get('how')) for r in orders_written],
+           [('drop-7', 'drop'), ('drop-7', 'drop')])
+        orders_far = [r for r in lines(far.journal) if r.get('kind') == 'order']
+        eq('...both reach the copy whole, as the rig wrote them, by the same send',
+           sorted(json.dumps(r, sort_keys=True) for r in orders_far),
+           sorted(json.dumps(r, sort_keys=True) for r in orders_written))
+        eq('...two orders, two keys: the copy holds both, and a third send adds neither again',
+           (len(set((r['id'], r['seq']) for r in orders_far)),
+            SY.send(far.base, SY.rows_since(rig.journal, 0)[0])['added']), (2, 0))
+        # The copy at home runs this same server: what it serves the offers
+        # page is the same records, so a record looked up at home is the one
+        # the rig wrote — the newest per order. (One card ticked twice is one
+        # holdId, the card's own arrival, so the second press's row is the
+        # one handed over, as a re-ended order's is.)
+        far_records = json.loads(urllib.request.urlopen(
+            far.base + '/api/journal?days=0', timeout=5).read().decode('utf-8')).get('records')
+        newest = {}
+        for r in orders_written:
+            if r['id'] not in newest or r['at'] >= newest[r['id']]['at']:
+                newest[r['id']] = r
+        eq('...and the copy hands its offers page the records, newest per order',
+           sorted(json.dumps(r, sort_keys=True) for r in far_records or []),
+           sorted(json.dumps(r, sort_keys=True) for r in newest.values()))
     finally:
         rig.close()
 
