@@ -46,6 +46,14 @@ os.environ['NUCBOX_PROBE_MS'] = '0'
 # The rig's own panel, and the small hat, which has rules of its own.
 PANELS = [('800x480', 800, 480), ('1280x800', 1280, 800), ('480x320', 480, 320)]
 
+# ...and the screens ▣ Set box is drawn on, for that one question: the rig's
+# 7" panel and its 1024x600 one, the owner's phone upright at two common
+# sizes, and the same phone on its side — the live page is opened on the
+# phone as well as on the panel (the owner, 7 Nov: "when I try to set the
+# area to read on my phone I cant confirm the box").
+DRAW_SIZES = [('1024x600', 1024, 600), ('800x480', 800, 480), ('390x844', 390, 844),
+              ('360x780', 360, 780), ('844x390', 844, 390)]
+
 ok = bad = 0
 
 
@@ -307,6 +315,8 @@ const NBX = nbxJson ? JSON.parse(nbxJson) : null;
 const FAKE = NBX ? NBX.fake : null;
 const FRAMES = JSON.parse(framesJson || '{}');
 const PANELS = JSON.parse(panelsJson), READINGS = JSON.parse(readingsJson);
+// The screens the drawing is held on (DRAW_SIZES, in the Python above).
+const DRAW_SIZES = JSON.parse(process.env.DRAW_SIZES || '[]');
 
 // The page's own socket, replaced before its script runs. Everything above the
 // socket — the message handler, render(), the stylesheet — is the real thing.
@@ -2872,6 +2882,184 @@ const framed = (page) => page.waitForFunction(
     await page.waitForTimeout(150);
     await page.unroute('**/api/crop');
     await page.close();
+  }
+  // --- ▣ Set box on every screen it is drawn on ---------------------------
+  //
+  // The owner, 7 Nov: "when I try to set the area to read on my phone I cant
+  // confirm the box as the text gets stuck behind the offer panel." The
+  // drawing's instruction and its three buttons were items in the pane's
+  // flex row beside the scene picture, so they went into the width the
+  // picture had already taken: a 47px column of words between the picture
+  // and the card at 1024x600, the buttons' centres on the CARD, and after
+  // Next the pane scrolled 165px sideways to the focused button, leaving
+  // "✓ Read both boxes" where no press reached it. Every check above drew
+  // at one size, 800x480, on a portrait frame standing in for the scene,
+  // and there every press landed. So this asks the glass, at each screen the owner draws on: the
+  // rig's two panels, a phone upright at two sizes, and a phone on its side;
+  // from the scene, from the phone view and from Map view, which both lend
+  // the scene for the drawing; at both steps, with a landscape scene.
+  //
+  // What has to hold, each time: the instruction and every button shown are
+  // on the glass, inside the pane (which clips), whole (no line of them cut
+  // off in their own box), at least 44px tall — a fingertip — and the
+  // element five points across each of them hit, so nothing (the card, the
+  // status row, the bar) is drawn over any of it. The picture is on the
+  // glass and its box has the picture's own shape, because a drag is sent
+  // as fractions of that box (at()); it is where it was at the first step
+  // when the second is drawn; the dashed screen box is drawn where the
+  // screen box is. And the boxes are dragged and read with real presses, and
+  // what reaches /api/crop is the fractions dragged.
+  stage = 'the drawing on every screen';
+  out.drawEvery = {};
+  {
+    const SHEET = () => {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const wrapR = document.getElementById('viewWrap').getBoundingClientRect();
+      const rect = (el) => { const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom,
+                 width: r.width, height: r.height }; };
+      const inside = (r, b) => r.left >= b.left - 0.5 && r.top >= b.top - 0.5
+        && r.right <= b.right + 0.5 && r.bottom <= b.bottom + 0.5;
+      const glass = { left: 0, top: 0, right: vw, bottom: vh };
+      // Five points: the centre and halfway to each corner, which stays
+      // clear of a button's rounded corners (hit testing honours them).
+      const hits = (el, r) => [[.5, .5], [.25, .25], [.75, .25], [.25, .75], [.75, .75]]
+        .every(([fx, fy]) => {
+          const h = document.elementFromPoint(r.left + r.width * fx, r.top + r.height * fy);
+          return !!h && (h === el || el.contains(h));
+        });
+      const one = (el) => {
+        const r = rect(el);
+        return { id: el.id, text: (el.textContent || '').trim(),
+                 height: Math.round(r.height * 10) / 10,
+                 onGlass: inside(r, glass), inPane: inside(r, wrapR), hit: hits(el, r),
+                 whole: el.scrollHeight <= el.clientHeight + 1
+                        && el.scrollWidth <= el.clientWidth + 1 };
+      };
+      const hint = document.getElementById('drawHint');
+      const view = document.getElementById('view');
+      const v = rect(view);
+      const ds = document.getElementById('drawnScreen');
+      const d = rect(ds);
+      const r3 = (x) => Math.round(x * 1000) / 1000;
+      const ch = document.elementFromPoint(v.left + v.width / 2, v.top + v.height / 2);
+      return {
+        drawing: document.getElementById('viewWrap').classList.contains('drawing'),
+        hint: hint.hidden ? null : one(hint),
+        buttons: [].slice.call(document.querySelectorAll('#drawTools button'))
+          .filter((b) => !b.hidden && getComputedStyle(b).display !== 'none')
+          .map(one),
+        // Against the pane rather than the glass, so a page scrolled upright
+        // between the two steps is not a picture that moved.
+        use: (() => { const u = rect(document.getElementById('drawUse'));
+          return [u.left - wrapR.left, u.top - wrapR.top, u.width, u.height]; })(),
+        pic: { onGlass: inside(v, glass), inPane: inside(v, wrapR),
+               hit: !!ch && (ch === view),
+               box: [v.left - wrapR.left, v.top - wrapR.top, v.width, v.height]
+                 .map((x) => Math.round(x)),
+               // The box's shape against the picture's own.
+               shape: r3((v.width / v.height) / (view.naturalWidth / view.naturalHeight)) },
+        dashed: ds.hidden ? null : [(d.left - v.left) / v.width, (d.top - v.top) / v.height,
+                                    d.width / v.width, d.height / v.height].map(r3),
+      };
+    };
+    const reading = { ready: true, state: 'no', perHour: 15.1, grossPerHour: 18.0,
+                      pay: 6.29, minutes: 21.0, miles: 3.3, cost: 0.99, target: 25, band: 15 };
+    // Both pictures, or none of this: with no frame the pane is `gone` and
+    // there is nothing to draw on (see FRAMES in the Python).
+    for (const [name, w, h] of (FRAMES.landscape && FRAMES.portrait) ? DRAW_SIZES : []) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h },
+                                             deviceScaleFactor: 1 });
+      for (const from of ['scene', 'screen', 'map']) {
+        stage = 'the drawing on every screen: ' + name + ' from ' + from;
+        const page = await ctx.newPage();
+        await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+        await page.addInitScript((v) => {
+          try { localStorage.setItem('uberscan.liveView', v); } catch (e) { /* none */ }
+        }, from === 'screen' ? 'screen' : 'scene');
+        // The scene a landscape picture of the cabin and the phone view a
+        // portrait one, as the rig sends them, so the phone view is laid out
+        // as a phone and the drawing is on the scene it borrows.
+        await page.route('**/api/frame.*', (route) => route.fulfill({
+          status: 200, contentType: 'image/jpeg',
+          body: Buffer.from(/view=screen/.test(route.request().url())
+                            ? FRAMES.portrait : FRAMES.landscape, 'base64') }));
+        const bodies = [];
+        await page.route('**/api/crop', async (r) => {
+          bodies.push(r.request().postDataJSON());
+          await r.fulfill({ status: 200, contentType: 'application/json',
+                            body: JSON.stringify({ ok: true }) });
+        });
+        await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+        await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+        await framed(page);
+        await page.evaluate((r) => {
+          if (window.__es.onopen) window.__es.onopen();
+          window.__es.push(r);
+        }, reading);
+        await page.waitForTimeout(250);
+        const press = (sel) => page.click(sel, { timeout: 3000 }).then(() => true, () => false);
+        // Measured between frames. Off the stream the picture is a still
+        // fetched again every few seconds, and for the moment a new one is
+        // loading the <img> has no natural size (measured: one press in
+        // twelve from Map view upright caught it) — so its shape is not a
+        // number and says nothing either way. Asked again, a tenth of a
+        // second at a time, until the frame is in.
+        const sheet = async () => {
+          let s = null;
+          for (let i = 0; i < 20; i++) {
+            s = await page.evaluate(SHEET);
+            if (Number.isFinite(s.pic.shape)) break;
+            await page.waitForTimeout(100);
+          }
+          return s;
+        };
+        const res = { from: from };
+        if (from === 'map') res.toMap = await press('#viewMode');
+        res.phoneFirst = await page.evaluate(() => document.body.classList.contains('phoneview'));
+        res.setBox = await press('#setBox');
+        // The stream's next frame, which is the scene — loaded, not only
+        // asked for: the press restarts the stream, and a picture between
+        // two sources measures nothing — and the smooth scroll that brings
+        // the pane into view upright.
+        await page.waitForFunction(() => {
+          const v = document.getElementById('view');
+          return v.complete && v.naturalWidth > v.naturalHeight
+            && v.getBoundingClientRect().width > 0;
+        }, null, { timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(700);
+        res.start = await sheet();
+        const drag = async (x0, y0, x1, y1) => {
+          const vb = await page.locator('#view').boundingBox();
+          if (!vb) return false;
+          await page.mouse.move(vb.x + vb.width * x0, vb.y + vb.height * y0);
+          await page.mouse.down();
+          await page.mouse.move(vb.x + vb.width * x1, vb.y + vb.height * y1, { steps: 5 });
+          await page.mouse.up();
+          await page.waitForTimeout(100);
+          return true;
+        };
+        res.dragged = await drag(0.2, 0.1, 0.8, 0.9);
+        res.drew = await sheet();
+        res.next = await press('#drawUse');
+        await page.waitForTimeout(150);
+        res.card = await sheet();
+        await drag(0.1, 0.5, 0.9, 0.7);
+        res.carded = await sheet();
+        // Read both from the scene and from Map view; the screen box alone,
+        // through No card box, from the phone view — both ways of sending,
+        // at every screen.
+        res.sent = await press(from === 'screen' ? '#drawSkip' : '#drawUse');
+        await page.waitForTimeout(300);
+        res.after = await page.evaluate(() => ({
+          drawing: document.getElementById('viewWrap').classList.contains('drawing'),
+          phone: document.body.classList.contains('phoneview') }));
+        res.bodies = bodies;
+        out.drawEvery[name + ' ' + from] = res;
+        await page.close();
+      }
+      await ctx.close();
+    }
   }
   // --- a connection that opens and never closes ---------------------------
   stage = 'a connection that opens and never closes';
@@ -8334,7 +8522,8 @@ try:
                      '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
                  ]),
                  # Where 📷 Snaps' downloads are kept, for the checks to read.
-                 SNAP_SAVE_DIR=work),
+                 SNAP_SAVE_DIR=work,
+                 DRAW_SIZES=json.dumps(DRAW_SIZES)),
         capture_output=True, text=True, timeout=1100)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
     try:
@@ -10246,6 +10435,98 @@ try:
         # ...and given back afterwards, or the button is broken from then on.
         eq('the view can be switched again once the drawing ends',
            sn['viewAfter'].get('viewEnabled'), True)
+
+    # --- ▣ Set box on every screen it is drawn on ---------------------------
+    #
+    # The owner's 7 Nov snap: the drawing's instruction a few letters wide
+    # between the scene picture and the card, its buttons under the card, and
+    # "I cant confirm the box". See the driver's section of the same name.
+    every = got.get('drawEvery') or {}
+    _near = lambda a, b: (isinstance(a, list) and len(a) == len(b)
+                          and all(abs(x - y) < 0.02 for x, y in zip(a, b)))
+    if FRAMES.get('landscape') and FRAMES.get('portrait'):
+        eq('the drawing was driven at every screen, from every view',
+           sorted(every), sorted('%s %s' % (s[0], f) for s in DRAW_SIZES
+                                 for f in ('scene', 'screen', 'map')))
+    for where in sorted(every):
+        d = every[where]
+        if d.get('from') == 'map':
+            ok_('%s: Map view was reached to press Set box from' % where, d.get('toMap'))
+        if d.get('from') == 'screen':
+            ok_('%s: the phone view was up when Set box was pressed' % where,
+                d.get('phoneFirst'))
+        ok_('%s: ▣ Set box could be pressed' % where, d.get('setBox'))
+        for step, label in (('start', 'the screen box'), ('card', 'the card box')):
+            s = d.get(step) or {}
+            ok_('%s, %s: drawing' % (where, label), s.get('drawing'))
+            h = s.get('hint') or {}
+            ok_('%s, %s: the instruction is up (%r)' % (where, label, h.get('text')),
+                h.get('text'))
+            for el in [h] + (s.get('buttons') or []):
+                name = el.get('id') or 'drawHint'
+                ok_('%s, %s: %s (%r) on the glass and inside the pane'
+                    % (where, label, name, el.get('text')),
+                    el.get('onGlass') and el.get('inPane'))
+                ok_('%s, %s: %s whole in its own box' % (where, label, name), el.get('whole'))
+                # Five points across it, so nothing — the card above all —
+                # is drawn over any of it.
+                ok_('%s, %s: %s is what a press on it reaches, nothing over it'
+                    % (where, label, name), el.get('hit'))
+            want = (['drawUse', 'drawCancel'] if step == 'start'
+                    else ['drawUse', 'drawSkip', 'drawCancel'])
+            eq('%s, %s: the buttons this step offers' % (where, label),
+               [b.get('id') for b in s.get('buttons') or []], want)
+            short = [(b.get('id'), b.get('height')) for b in s.get('buttons') or []
+                     if (b.get('height') or 0) < 44]
+            eq('%s, %s: every button at least 44px tall, a fingertip' % (where, label),
+               short, [])
+            p = s.get('pic') or {}
+            ok_('%s, %s: the picture on the glass, inside the pane, nothing over it (%r)'
+                % (where, label, p.get('box')),
+                p.get('onGlass') and p.get('inPane') and p.get('hit'))
+            # A drag is sent as fractions of the picture's BOX (at()), so the
+            # box has to be the picture: a letterboxed box sends fractions of
+            # the black bands too.
+            ok_('%s, %s: the picture\'s box has the picture\'s own shape (%r)'
+                % (where, label, p.get('shape')),
+                abs((p.get('shape') or 0) - 1) < 0.02)
+        st, cd, ce = d.get('start') or {}, d.get('card') or {}, d.get('carded') or {}
+        # Neither the picture nor the green button moves between the steps:
+        # the card box is drawn on the picture the screen box was, and
+        # "✓ Read both boxes" is under the point the press on Next just
+        # landed on — narrower, with No card box beside it, but on the same
+        # row and from the same edge.
+        eq('%s: the picture has not moved by the card box' % where,
+           (cd.get('pic') or {}).get('box'), (st.get('pic') or {}).get('box'))
+        _u0, _u1 = st.get('use') or [0, 0, 0, 0], cd.get('use') or [0, 0, 0, 0]
+        _at = (_u0[0] + _u0[2] / 2, _u0[1] + _u0[3] / 2)
+        ok_('%s: ...and ✓ Read both boxes is under where Next was pressed (%r in %r)'
+            % (where, [round(v) for v in _at], [round(v) for v in _u1]),
+            _u1[0] <= _at[0] <= _u1[0] + _u1[2] and _u1[1] <= _at[1] <= _u1[1] + _u1[3])
+        ok_('%s: a screen box was dragged and Next pressed' % where,
+            d.get('dragged') and d.get('next'))
+        ok_('%s: ...and No card box is offered with the card box asked for (%r)'
+            % (where, (cd.get('hint') or {}).get('text')),
+            'offer cards' in ((cd.get('hint') or {}).get('text') or '')
+            and 'drawSkip' in [b.get('id') for b in cd.get('buttons') or []])
+        ok_('%s: the dashed screen box is drawn where the screen box is (%r)'
+            % (where, ce.get('dashed')), _near(ce.get('dashed'), [0.2, 0.1, 0.6, 0.8]))
+        skip_ = d.get('from') == 'screen'
+        ok_('%s: %s pressed' % (where, 'No card box' if skip_ else '✓ Read both boxes'),
+            d.get('sent'))
+        bodies = d.get('bodies') or []
+        eq('%s: one request reached the rig' % where, len(bodies), 1)
+        if len(bodies) == 1:
+            ok_('%s: the screen box as fractions of the picture (%r)'
+                % (where, bodies[0].get('box')), _near(bodies[0].get('box'), [0.2, 0.1, 0.6, 0.8]))
+            if skip_:
+                ok_('%s: ...and no card box with it' % where, 'card' not in bodies[0])
+            else:
+                ok_('%s: ...and the card box as fractions of the screen box (%r)'
+                    % (where, bodies[0].get('card')),
+                    _near(bodies[0].get('card'), [0.0, 0.5, 1.0, 0.25]))
+        eq('%s: the drawing ends once the box is taken' % where,
+           (d.get('after') or {}).get('drawing'), False)
 
     # --- the phone view is for a picture of a phone ------------------------
     land = got.get('frame landscape') or {}

@@ -139,7 +139,17 @@
        -29px, so a box dragged from near that edge started off the screen and
        was never drawn (rpi/test_dashboard.py, "snap: two boxes"). `safe`
        starts the row at the pane's edge when it does not fit and spills it
-       toward the card, as before; when it fits, nothing moves. */
+       toward the card, as before; when it fits, nothing moves.
+
+       And "spills it toward the card" was the next fault, which `safe` could
+       not reach: the spilt end went UNDER the card, and that end was the
+       instruction and the buttons that confirm the box — the owner's 7 Nov
+       snap, "the text gets stuck behind the offer panel". The drawing is no
+       longer a row at all (#viewWrap.drawing, a grid of its own), and the
+       six-second "boxes sent" line is over the pane's top rather than beside
+       the picture (below). `safe` stays: a row that nothing now overfills
+       costs nothing to keep safe, and the day something does, its left edge
+       stays on the glass. */
     /* Bounded by the row it is in rather than by the viewport. It used to be
        `100dvh - 132px`, which is a guess at what the bars below it cost, and a
        guess that is too big overflows the page — the whole reason the bottom
@@ -259,8 +269,23 @@
        card sits on its button bar at the bottom of the phone's screen
        (rpi/cardfind.py), and that is what the six seconds should not hide.
        rpi/test_layout.py holds every control on the bar to its width with the
-       line up. */
-    body.phoneview #drawHint {
+       line up.
+
+       ...and over the scene's pane too, for the same six seconds and the
+       fault the drawing itself had (#viewWrap.drawing): beside the scene
+       picture the line is an item in a row the picture already fills.
+       Measured on the unchanged page with the line up, the sentence was a
+       column 45px wide and 262 tall at 1024x600, at 800x480 and on a phone
+       on its side (844x390), and at the first two the point at its centre
+       was not the line at all — the news that the box was taken, painted in
+       the gap and under the card. On the phone the picture was squeezed from
+       410px to 373 to make the room, and back six seconds later.
+       Over the pane's top it is the pane's width; beside a scene picture
+       centred in a taller pane it sits in the black above it. Not while
+       drawing, when the sentence is the drawing's own instruction and has its
+       own place in the drawing's grid. */
+    body.phoneview #drawHint,
+    #viewWrap:not(.drawing) > #drawHint {
       position: absolute; left: 0; right: 0; top: 0; z-index: 2;
       padding: 6px 8px; background: var(--bg);
     }
@@ -974,7 +999,9 @@
     border: 2px solid #17c964;          /* the outline the scanner draws, same green */
     border-radius: 4px;
     /* A tint rather than a hole punched in a full-page dim: this page keeps the
-       verdict above and the buttons below usable while the box is being drawn. */
+       verdict above and the buttons below usable while the box is being drawn.
+       (Upright. Across a landscape screen the drawing's own instruction and
+       buttons take the card's half for its length; see #viewWrap.drawing.) */
     background: rgba(23, 201, 100, .14);
     pointer-events: none;
   }
@@ -1007,6 +1034,147 @@
   #drawTools button[disabled] { opacity: .45; }
   #drawTools button[hidden] { display: none; }
   #drawHint { font-size: 12px; color: var(--muted); text-align: center; padding: 6px 0 0; }
+  /* While ▣ Set box is drawing, the instruction and the three buttons are
+     laid out as a sheet of their own, and never as items beside the picture.
+
+     They were children of a pane that is a flex ROW around the picture — the
+     row built so the picture is centred in the pane — so drawing put a line of
+     prose and a bar of buttons into the width the picture had already taken.
+     The owner's snap of 7 Nov 16:36 (build 8be872e, 1024x600): "▣ Set box" lit,
+     and between the picture and the verdict card a column of "d / ag / cha /
+     it / go / to / c / b" — the instruction, a few letters wide — with the
+     buttons under the card. In the owner's words: "when I try to set the area
+     to read on my phone I cant confirm the box as the text gets stuck behind
+     the offer panel." Measured on the unchanged page, Set box pressed over an
+     offer: at 1024x600 the instruction was a 47px column 125px tall, Next 57px
+     wide and ✕ Cancel 70, and the point at the centre of each was the CARD, so
+     a tap there pressed nothing. At 800x480 the same, against the scene picture
+     at the same width. Then it got worse: pressing Next focused it, and a box
+     with `overflow: hidden` still scrolls to bring a focused child into view,
+     so the pane slid 165px sideways (183 at 800x480, 147 on a phone held on
+     its side, 844x390): the picture's left edge at -157px, the card box drawn
+     on a picture two-thirds off the glass, and "✓ Read both boxes" under the
+     card where no press could reach it — the box could not be confirmed at
+     all, on any landscape screen. Upright on a phone it all fitted, below the
+     picture, but Next and Cancel were 42px tall, under the 44 a finger needs.
+
+     So the pane becomes a grid while drawing, with a place named for each
+     part. Upright, a column: the instruction, the picture, its caption, the
+     buttons — the page scrolls there and has the room. On a landscape screen
+     the drawing takes the card's half as well (the @media block after this):
+     the picture keeps exactly the column it had before the press, and the
+     instruction and the buttons sit where the card was. The card is
+     what they were behind; for the length of a drawing it is hidden, and it is
+     back the moment the drawing ends — cancelled, or read.
+
+     Not the same column on a landscape screen, which was tried first and
+     measured: under the picture, the instruction and the buttons came out of
+     the picture's height. 361x272 at 800x480 for the screen box and 315x237
+     for the card box, as the longer second instruction and the wrapped "✓ Read
+     both boxes" took two more lines; 241x182 then 221x166 on the phone on its
+     side. Beside the card's half, 388x292 and 373x281, the picture's size
+     when nothing is being drawn, and the same at both steps — a picture that
+     shrinks between the first box and the second is a picture that moves
+     under the finger drawing the second. The box is only as good as the
+     picture it is drawn on: it is sent as fractions of that picture (at()),
+     and 221px of picture where there could be 373 makes every pixel under
+     the finger 1.7 times as much of the frame.
+
+     The picture is sized by its own shape while drawing — `width` and
+     `height` auto, held inside its place by `max-width` and `max-height` —
+     and not by the pane's `width: 100%` with `object-fit: contain`. That pair
+     fills the box and letterboxes the picture inside it whenever the height
+     binds, and at() and placeBox measure the BOX: kept for the sheet, it was
+     a 410x281 box round a 375x281 picture on the phone on its side, and every
+     fraction sent was off by up to 4% of the frame. Sized by its shape, the
+     box is the picture at every size and the fractions are the picture's.
+     The cost is that it is never drawn larger than the frame the rig sends
+     for the scene, 480x360: 482x362 at 1024x600 against 500x376 at rest, and
+     the same on panels wider than the rig's. Nothing in the frame is lost;
+     the rest was the browser scaling up pixels it does not have.
+     rpi/test_dashboard.py draws both boxes at 1024x600, 800x480, 390x844,
+     360x780 and 844x390, from the scene, the phone view and Map view, and
+     holds the instruction and every button on the glass, inside the pane,
+     whole, at least 44px tall, and the element five points across each of
+     them hit — nothing drawn over any of it. */
+  #viewWrap.drawing {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "hint" "pic" "note" "tools";
+  }
+  #viewWrap.drawing > img {
+    grid-area: pic; justify-self: center; align-self: center;
+    width: auto; height: auto; max-width: 100%; max-height: 100%;
+  }
+  #viewWrap.drawing > #viewNote { grid-area: note; }
+  #viewWrap.drawing > #drawTools { grid-area: tools; }
+  /* The instruction is the one thing on the glass that says what to do next,
+     so it is set in the words' colour rather than the labels' grey, and at
+     the size the landscape panels already give it. Above the picture
+     upright, so it is read before the drag rather than after.
+
+     Three lines of room whatever it says, the words at the foot of them, for
+     the reason the bar is one height in every state (.bottombar below): the
+     screen box's instruction is one line and the card box's three, and left
+     to its words the row grew by two lines at Next — measured at 390x844,
+     the picture 41px further down the pane than when the screen box was
+     drawn on it, and on the landscape sheet at 800x480 every button 19px
+     further down than the press that had just landed on Next. */
+  #viewWrap.drawing > #drawHint {
+    grid-area: hint; padding: 0 4px 8px;
+    font-size: 15px; line-height: 1.35; color: var(--text);
+    min-height: calc(4.05em + 8px);
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  /* ...which is an author `display`, and the browser's own `[hidden]` loses
+     to any of those: the six-second line's timer would set it hidden and it
+     would stay up. */
+  #viewWrap.drawing > #drawHint[hidden] { display: none; }
+  /* Two lines of a label and the padding as the floor, whatever the label
+     says, for the same reason: "Next: card box" is one line and "✓ Read
+     both boxes" two in the same width, and the row was 9px taller at the
+     second step than the first. That floor is 57px upright and 63 on the
+     landscape sheet, past the 44 a fingertip needs — the two buttons of the
+     first step were 42 upright on a phone, 12px of padding round a 14px
+     line. At 1.1, the bar's own leading, rather than the page's 1.45, which
+     spent eleven more pixels on the same two lines. */
+  #drawTools button { min-height: calc(2.2em + 26px); line-height: 1.1; }
+  @media (orientation: landscape) {
+    /* Both columns of the page, the pane's own grid splitting them as the
+       page's does — two equal columns and the page's 8px between — so the
+       picture's column is the width it was, to the pixel. The sheet is
+       centred down the card's half: the instruction, and the buttons under
+       it, with the two `.` rows taking what is left above and below. */
+    #viewWrap.drawing {
+      grid-column: pic-start / card-end;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      column-gap: 8px;
+      grid-template-rows: minmax(0, 1fr) auto auto minmax(0, 1fr);
+      grid-template-areas: "pic ." "pic hint" "pic tools" "pic .";
+      align-items: center; justify-content: stretch;
+    }
+    /* The card goes for the drawing's length, and by `visibility` rather
+       than `display`: it keeps its box, its rate keeps the size it was fitted
+       to, and nothing on it moves when it comes back. */
+    #app:has(> #viewWrap.drawing) > .live { visibility: hidden; }
+    /* The sheet has half the panel to itself, so the instruction is set as
+       large as the bar's own labels and the buttons as tall as the bar's. */
+    #viewWrap.drawing > #drawHint { font-size: 17px; padding: 0 6px 12px;
+                                    min-height: calc(4.05em + 12px); }
+    #viewWrap.drawing > #drawTools button { font-size: 17px; }
+  }
+  /* ...and on the 3.5" hat the card's half is 228px wide and 211 tall, and
+     at 17px the second step's instruction took six lines and the buttons
+     three each: 228px of sheet in 211, the buttons' feet under the status
+     row. At 14px, the size the buttons are upright on a phone, it is four
+     lines and two and fits. The block is the hat's, by height, so a smaller
+     phone on its side (740x360) takes it too, where 17px had fitted; a
+     390-tall one (844x390) does not. */
+  @media (orientation: landscape) and (max-height: 380px) {
+    #viewWrap.drawing > #drawHint { font-size: 14px; padding-bottom: 6px;
+                                    min-height: calc(4.05em + 6px); }
+    #viewWrap.drawing > #drawTools button { font-size: 14px; }
+  }
   /* A label that does not fit is allowed a second line.
    *
    * This said `white-space: nowrap`, written when this bar had four buttons and
@@ -9927,6 +10095,23 @@
   // one layout is wrong in the next if the image changed size.
   window.addEventListener('resize', showBox);
   view.addEventListener('load', showBox);
+  // ...and the picture also moves when the words above it change. Upright,
+  // the instruction is above the picture (#viewWrap.drawing in the
+  // stylesheet), one line for the screen box and three for the card box, and
+  // Next places the dashed screen box BEFORE it changes the words: measured
+  // at 390x844 before the instruction was given three lines of room, the
+  // picture went 41px down under a box that stayed where it was, -0.046 of
+  // its height from the picture's top where 0.1 had been dragged. The room
+  // covers the words this page writes today; this covers the next sentence
+  // that is a line longer. Neither a resize nor a new frame says so, so the
+  // boxes are placed again whenever the picture, the instruction, the
+  // buttons or the pane change size — after the layout and before the
+  // paint, so a box is not drawn in the wrong place even for a frame.
+  if (window.ResizeObserver) {
+    var boxFollows = new ResizeObserver(function () { showBox(); });
+    [view, drawHint, document.getElementById('drawTools'), viewWrap]
+      .forEach(function (el) { boxFollows.observe(el); });
+  }
 
   setBox.addEventListener('click', function () {
     clearTimeout(hintBack);
