@@ -6,6 +6,9 @@
     python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12 --json
     python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12 \
         --to 2026-10-18 --csv ~/order-records.csv
+    python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12 --strategy
+    python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12 \
+        --to 2026-10-18 --strategy
 
 One row per order taken: its app and card pay, the card's minutes and miles,
 when Took was pressed, when and how the order ended, the minutes that really
@@ -73,6 +76,22 @@ order whose record was never written, is rebuilt from the drop rows as it
 always was, and says so ("rebuilt"). With no GPS log here, an order's miles are
 the record's odometer (the server's own count by this file's JITTER_M step),
 and the row says so; with a log, the log.
+
+WHAT $/HR TO EXPECT, with --strategy (the owner, 7 Nov 2026: "being able to
+know what is a good $/hr and $/mi metrics to expect would help decide which
+offers to take and which to decline"): a short section, for the day or for
+--day through --to, worked out by tools/strategy.js — the module the NucBox
+report's Strategy tab is drawn from, so the two say one thing in one set of
+words — and run as a child (`node`), not copied: what offers looked like, what
+the cards turned into, and what holding out for each line of the panel's $/hr
+would have paid per hour on shift. This file hands it the window's offer
+readings as the journal holds them (it folds them, one per card; a card the
+driver hid stays hidden) and its orders as THIS file judged them: an order's
+minutes only where it is reliable here, its miles the GPS log's or the
+record's odometer (measure). It prints no place: no area is asked for. A
+description, like the rest; without node on the machine the section says so
+and the report is otherwise unchanged. The phone's shift page never asks for
+it.
 
 RESTAURANT WAITS, the owner's request of 22 Oct 2026: by store, how many of
 the day's orders were measured waiting at it and the median minutes. An
@@ -207,7 +226,9 @@ import io
 import json
 import os
 import re
+import shutil
 import statistics
+import subprocess
 import sys
 import time
 
@@ -1408,9 +1429,11 @@ def totals_text(t, n_orders):
 
 # --- the report -------------------------------------------------------------
 
-def report(journal, gps_dir, day):
-    """Everything the CLI prints, as data: {'orders', 'summary', 'info'}."""
-    rows, bad = read_journal(journal)
+def report(journal, gps_dir, day, read=None):
+    """Everything the CLI prints, as data: {'orders', 'summary', 'info'}.
+    `read` is read_journal's answer when the caller has it already (a range
+    of days reads the file once)."""
+    rows, bad = read if read is not None else read_journal(journal)
     start, end = day_window(day)
     every = orders(rows)
     mine = []
@@ -1828,6 +1851,130 @@ def as_json(rep):
     }
 
 
+# --- what $/hr to expect (--strategy) ------------------------------------------
+
+STRATEGY_JS = os.path.join(ROOT, 'tools', 'strategy.js')
+# How long the child may take. It is a second or two over a month; a minute
+# is a machine in trouble, and the report says so rather than hang.
+STRATEGY_TIMEOUT_S = 60.0
+
+
+def strategy_offers(rows, start, end):
+    """The offer readings first seen in [start, end), as the journal holds
+    them (strategy.js folds them, one per card), each with the driver's
+    newest `hidden` word from a mark applied: a test card the driver hid is
+    no offer here either, as it is none on the offers page."""
+    hidden = {}
+    for r in sorted((r for r in rows if r.get('kind') == 'mark' and r.get('id')
+                     and isinstance(r.get('hidden'), bool)), key=lambda r: _num(r.get('at')) or 0):
+        hidden[r['id']] = r['hidden']
+    first = {}
+    for r in rows:
+        if r.get('kind') is None and isinstance(r.get('id'), str):
+            t = _num(r.get('firstAt')) or _num(r.get('at'))
+            if t is not None and (r['id'] not in first or t < first[r['id']]):
+                first[r['id']] = t
+    out = []
+    for r in rows:
+        if r.get('kind') is not None or not isinstance(r.get('id'), str):
+            continue
+        t = first.get(r['id'])
+        if t is None or not start <= t < end:
+            continue
+        if hidden.get(r['id']):
+            r = dict(r, hidden=True)
+        out.append(r)
+    return out
+
+
+def strategy_orders(orders_):
+    """This file's orders in strategy.js's shape. The hold runs Took to the
+    order's end however it ended (an expiry's moment for an expired one); the
+    minutes and miles are given only for a RELIABLE order, so an order this
+    report would not time is not timed there either."""
+    out = []
+    for o in orders_:
+        if o.get('took') is None:
+            continue
+        rec = o.get('record') or {}
+        flags = rec.get('flags') if isinstance(rec.get('flags'), list) else []
+        end = o['end'] if o.get('end') is not None else o.get('expiredAt')
+        out.append({'id': o['id'], 'tookAt': o['took'], 'endedAt': end, 'app': o.get('app'),
+                    'pay': o.get('pay'), 'cardMinutes': o.get('cardMinutes'),
+                    'cardMiles': o.get('cardMiles'), 'addon': bool(o.get('addon')),
+                    'carried': o.get('carried'),
+                    'actualMinutes': o.get('actualMinutes') if o['reliable'] else None,
+                    'actualMiles': o.get('gpsMiles') if o['reliable'] else None,
+                    'clockStepped': any(isinstance(f, str) and f.startswith('the clock stepped')
+                                        for f in flags)})
+    return out
+
+
+def strategy(rows, reps, node=None):
+    """tools/strategy.js's answer over the days in `reps`, or {'error': why}.
+    The driver's line is the newest offer row's own `target` in the window
+    (the line the panel judged it on), else none."""
+    start, end = reps[0]['start'], reps[-1]['end']
+    offers = strategy_offers(rows, start, end)
+    target = None
+    for r in sorted(offers, key=lambda r: _num(r.get('at')) or 0):
+        if _num(r.get('target')) is not None:
+            target = r['target']
+    req = {'offers': offers, 'orders': strategy_orders([o for rep in reps for o in rep['orders']]),
+           'target': target}
+    node = node or shutil.which('node') or shutil.which('nodejs')
+    if not node:
+        return {'error': 'node is not on this machine, so tools/strategy.js could not be run'}
+    try:
+        got = subprocess.run([node, STRATEGY_JS], input=json.dumps(req, allow_nan=False).encode('utf-8'),
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             timeout=STRATEGY_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {'error': 'tools/strategy.js did not answer: %s' % str(e)[:120]}
+    if got.returncode != 0:
+        return {'error': 'tools/strategy.js failed: %s'
+                % got.stderr.decode('utf-8', 'replace').strip()[:160]}
+    try:
+        return json.loads(got.stdout.decode('utf-8'))
+    except ValueError:
+        return {'error': 'tools/strategy.js answered with something that is not JSON'}
+
+
+def strategy_text(st, first, last):
+    """The compact section: strategy.js's own lines, then the curve one line
+    per threshold that saw an offer."""
+    span = first if first == last else '%s to %s' % (first, last)
+    out = ['What $/hr to expect, %s (descriptive; nothing on the rig reads it):' % span]
+    if st.get('error'):
+        out.append('  not worked out: %s' % st['error'])
+        return out
+    out.extend('  - %s' % line for line in st.get('lines', []))
+    cv = st.get('curve') or {}
+    pts = [p for p in cv.get('points', []) if p.get('n')]
+    if pts:
+        out.append("  The curve: the panel's $/hr held out for, the offers at it seen with no order "
+                   'in the car, and what it paid per hour on shift (thin: under %d offers)'
+                   % st['floors']['curveOffers'])
+        for p in pts:
+            out.append('    $%-3d+ %5d offers  gross %-7s net %-7s%s%s'
+                       % (p['T'], p['n'], _f(p.get('gross'), '$%.2f'), _f(p.get('net'), '$%.2f'),
+                          '  95%% $%.2f-$%.2f' % tuple(p['ci']) if p.get('ci') else '',
+                          '  thin' if p.get('thin') else ''))
+    return out
+
+
+def _days(first, last):
+    """Every driver's day from `first` through `last`, 'YYYY-MM-DD'."""
+    days = [first]
+    y, mo, d = (int(x) for x in first.split('-'))
+    n = 1
+    while days[-1] < last and n < 3660:
+        days.append(time.strftime('%Y-%m-%d', time.localtime(
+            time.mktime((y, mo, d + n, 12, 0, 0, 0, 0, -1)))))
+        n += 1
+    return days
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--journal', required=True, help='the journal, e.g. rpi/journal.jsonl')
@@ -1842,26 +1989,42 @@ def main(argv=None):
                     help='CSV instead of text; with PATH, write the order records CSV '
                          '(one row per order, pickup and dropoff included) to PATH')
     ap.add_argument('--to', metavar='YYYY-MM-DD',
-                    help='with --csv PATH: every day from --day through this one, in one file')
+                    help='with --csv PATH or --strategy: every day from --day through this one')
+    ap.add_argument('--strategy', action='store_true',
+                    help='add what $/hr to expect and what holding out for a line paid '
+                         '(tools/strategy.js, run with node); with --to, that section alone '
+                         'over the range')
     ap.add_argument('--json', action='store_true',
                     help='JSON instead of text, for the phone\'s shift page (as_json)')
     args = ap.parse_args(argv)
     if not re.match(r'^\d{4}-\d\d-\d\d$', args.day):
         ap.error('--day must be YYYY-MM-DD')
     gps_dir = os.path.expanduser(args.gps) if args.gps else None
-    if isinstance(args.csv, str):
-        days = [args.day]
+    if args.to and not (re.match(r'^\d{4}-\d\d-\d\d$', args.to) and args.to >= args.day):
+        ap.error('--to must be YYYY-MM-DD, on or after --day')
+    if args.strategy and args.csv:
+        ap.error('--strategy is text or --json, not a CSV')
+    if args.strategy:
+        read = read_journal(args.journal)
+        days = _days(args.day, args.to or args.day)
+        reps = [report(args.journal, gps_dir, day, read=read) for day in days]
+        st = strategy(read[0], reps)
         if args.to:
-            if not re.match(r'^\d{4}-\d\d-\d\d$', args.to) or args.to < args.day:
-                ap.error('--to must be YYYY-MM-DD, on or after --day')
-            y, mo, d = (int(x) for x in args.day.split('-'))
-            n = 1
-            while days[-1] < args.to and n < 3660:
-                days.append(time.strftime('%Y-%m-%d', time.localtime(
-                    time.mktime((y, mo, d + n, 12, 0, 0, 0, 0, -1)))))
-                n += 1
-        elif args.to:
-            ap.error('--to needs --csv PATH')
+            # A range: the section alone, over every day of it.
+            if args.json:
+                sys.stdout.write(json.dumps({'from': days[0], 'to': days[-1], 'strategy': st},
+                                            allow_nan=False) + '\n')
+            else:
+                sys.stdout.write('\n'.join(strategy_text(st, days[0], days[-1])) + '\n')
+            return 0
+        if args.json:
+            sys.stdout.write(json.dumps(dict(as_json(reps[0]), strategy=st), allow_nan=False) + '\n')
+        else:
+            sys.stdout.write(text(reps[0]) + '\n' + '\n'.join(strategy_text(st, args.day, args.day))
+                             + '\n')
+        return 0
+    if isinstance(args.csv, str):
+        days = _days(args.day, args.to or args.day)
         reps = [report(args.journal, gps_dir, day) for day in days]
         with open(args.csv, 'w', encoding='utf-8', newline='') as fh:
             fh.write(to_records_csv(reps))
@@ -1870,7 +2033,7 @@ def main(argv=None):
         sys.stdout.write('wrote %d order%s to %s\n' % (n, '' if n == 1 else 's', args.csv))
         return 0
     if args.to:
-        ap.error('--to needs --csv PATH')
+        ap.error('--to needs --csv PATH or --strategy')
     rep = report(args.journal, gps_dir, args.day)
     if args.json:
         sys.stdout.write(json.dumps(as_json(rep), allow_nan=False) + '\n')

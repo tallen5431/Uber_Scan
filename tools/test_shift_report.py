@@ -1325,6 +1325,91 @@ _jcols = re.search(r'var RECORD_COLUMNS = \[([^\]]*)\];', _jh)
 eq('[record csv] the offers page\'s CSV has these columns, word for word',
    tuple(re.findall(r"'([a-z_]+)'", _jcols.group(1))) if _jcols else None, SR.RECORD_COLUMNS)
 
+# --- what $/hr to expect (--strategy, the owner's of 7 Nov) ----------------------
+#
+# Two invented evenings, 16 and 17 March, each the shape tests/strategy.test.js
+# works by hand: fifty cards from 18:00 to 19:30 (30 at $12/hr, 15 at $24,
+# 5 at $36, all 30 min), then three $10 orders of 20 card minutes back to
+# back from 19:30, each put down by the GPS 30 minutes after its Took. Their
+# own cards are read at the Took, with the order already in the car, so they
+# are not a free driver's choices. One more card, $50, hidden by the driver.
+# Over both days: ratio 1.5 from six reliable orders, and the best line $14 at
+# 540 / (3 + 1.5 x 20) = $16.36 an hour on shift.
+def _strategy_rows(day):
+    rows = []
+    kinds = [36 if i % 10 == 9 else 24 if i % 10 >= 6 else 12 for i in range(50)]
+    start = at(18, 0, day=day)
+    for i, k in enumerate(kinds):
+        when = start + int(round(i * (90.0 / 49) * 60000))
+        pay, miles = {12: (6.0, 3.0), 24: (12.0, 6.0), 36: (18.0, 6.0)}[k]
+        rows.append(offer('s%d-%d' % (day, i), when, pay, 30, miles))
+    for k in range(3):
+        took = at(19, 30, day=day) + 1 + k * 30 * 60000
+        oid = 's%d-o%d' % (day, k)
+        rows += [offer(oid, took, 10.0, 20, 5.0), mark(oid, took, True),
+                 dict(drop(oid, took + 30 * 60000, by='gps'), acceptedAt=took)]
+    hid = 's%d-hidden' % day
+    rows += [offer(hid, at(18, 45, day=day), 50.0, 30, 5.0),
+             {'v': 1, 'kind': 'mark', 'id': hid, 'at': at(18, 46, day=day), 'hidden': True}]
+    return rows
+
+
+_sj = os.path.join(work, 'strategy.jsonl')
+with open(_sj, 'w') as fh:
+    for r in _strategy_rows(16) + _strategy_rows(17):
+        fh.write(json.dumps(r) + '\n')
+_sread = SR.read_journal(_sj)
+_sreps = [SR.report(_sj, None, d, read=_sread) for d in ('2026-03-16', '2026-03-17')]
+_st = SR.strategy(_sread[0], _sreps)
+eq('[strategy] the hand-worked answer: six timed orders at 1.5x, best $14 at $16.36 on shift, flat to $24',
+   (_st['counts']['timed'], _st['actual']['all']['ratio'], _st['curve']['best']['T'],
+    _st['curve']['best']['value'], _st['curve']['best']['to']), (6, 1.5, 14, 16.36, 24))
+eq('[strategy] a card the driver hid is no offer; the orders\' own cards, read in the car, are not free',
+   (_st['counts']['offers'], _st['counts']['free'], _st['counts']['held']), (106, 100, 6))
+_sin = {'offers': SR.strategy_offers(_sread[0], _sreps[0]['start'], _sreps[-1]['end']),
+        'orders': SR.strategy_orders([o for rep in _sreps for o in rep['orders']]), 'target': None}
+_child = subprocess.run(['node', os.path.join(ROOT, 'tools', 'strategy.js')],
+                        input=json.dumps(_sin).encode('utf-8'), stdout=subprocess.PIPE)
+eq('[strategy] one computation: what the report prints is strategy.js\'s over this file\'s orders',
+   json.loads(_child.stdout.decode('utf-8'))['lines'], _st['lines'])
+# An order this file would not time is not timed there either: B of the
+# invented evening above was put down by the GPS (reliable), C replaced.
+_so = {o['id']: o for o in SR.strategy_orders(rep['orders'])}
+eq('[strategy] only a reliable order carries minutes; every order carries its hold',
+   (_so['B']['actualMinutes'] is not None, _so['C']['actualMinutes'], _so['C']['endedAt'] is not None,
+    _so['M']['endedAt'] == by['M'].get('expiredAt')), (True, None, True, True))
+code_s, out_s = run(['--journal', _sj, '--day', '2026-03-16', '--to', '2026-03-17', '--strategy'])
+ok_('[strategy] --to: the section alone over the range, its lines and the curve (%r)' % out_s[:60],
+    code_s == 0 and out_s.startswith('What $/hr to expect, 2026-03-16 to 2026-03-17')
+    and 'Holding out for cards at $14+/hr gave the best shift rate in your record: about $16.36/hr' in out_s
+    and re.search(r'^    \$14 +\+ +40 offers  gross \$16\.36', out_s, re.M) is not None)
+ok_('[strategy] ...and it prints no place', 'Nowhere' not in out_s and 'Example' not in out_s
+    and 'Imaginary' not in out_s and '12.34' not in out_s)
+code_s1, out_s1 = run(['--journal', _sj, '--day', '2026-03-16', '--strategy'])
+ok_('[strategy] one day: the report as ever, the section after it, saying one shift day is not enough',
+    code_s1 == 0 and out_s1.startswith('Shift of 2026-03-16')
+    and '\nWhat $/hr to expect, 2026-03-16 (' in out_s1
+    and 'Holding out for a line: not enough yet' in out_s1)
+code_sj, out_sj = run(['--journal', _sj, '--day', '2026-03-16', '--to', '2026-03-17', '--strategy',
+                       '--json'])
+_sjo = json.loads(out_sj)
+eq('[strategy] --json carries the whole answer',
+   (_sjo['from'], _sjo['to'], _sjo['strategy']['curve']['best']['T']),
+   ('2026-03-16', '2026-03-17', 14))
+eq('[strategy] without node the section says so and nothing else changes',
+   SR.strategy_text(SR.strategy(_sread[0], _sreps, node=os.path.join(work, 'no-such-node')),
+                    'a', 'a')[1][:41],
+   '  not worked out: tools/strategy.js did n')
+with contextlib.redirect_stderr(io.StringIO()):
+    try:
+        run(['--journal', _sj, '--day', '2026-03-16', '--strategy', '--csv'])
+        _s_refused = False
+    except SystemExit:
+        _s_refused = True
+ok_('[strategy] ...and it is text or --json, never the CSV', _s_refused)
+ok_('[strategy] the phone\'s shift page never asks for it: server.js runs this file without it',
+    '--strategy' not in _srv)
+
 shutil.rmtree(work)
 print('FAILED: %d of %d' % (bad, ok + bad) if bad
       else '\nAll %d shift report checks passed' % ok)

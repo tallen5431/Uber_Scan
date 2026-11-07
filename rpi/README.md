@@ -5002,6 +5002,24 @@ The offers page's **⤓ Download CSV** writes the same columns from the records
 alone. There is no
 panel button for it, deliberately: the bar holds six.
 
+**What $/hr to expect, from the same tool.** `--strategy` adds a short section
+after the report: what the day's offers looked like (the panel's $/hr and the
+card's $/mi, quartiles and the 90th percentile, and offers an hour with no
+order in the car), what the timed orders' cards turned into (actual over card
+minutes, GPS over card miles), and, for each line from $10 to $40, what
+holding out for cards at that line would have paid per hour on shift — the
+curve, its best line and the flat region round it, with its n. With `--to
+YYYY-MM-DD` it is that section alone over the range, which is where the curve
+starts to mean something (it needs two shift days to be drawn and three for
+its interval). Worked out by `tools/strategy.js`, run with `node`, the module
+the NucBox report's Strategy tab is drawn from; only orders this report calls
+reliable are timed. No place is printed. `--json` carries the whole answer.
+The phone's shift page never asks for it, and nothing on the rig reads it:
+
+```sh
+python3 tools/shift_report.py --journal rpi/journal.jsonl --gps ~/gpslog --day 2026-10-12 --to 2026-11-06 --strategy
+```
+
 **And on the phone, today's so far:** `http://<rig>:8080/shift.html` (◷ Shift
 on the route view's bar beside ▤ Offers, and near the top of the offers page)
 shows the same report for the driver's day now — the totals, each order's card
@@ -9167,11 +9185,13 @@ python3 rpi/test_loop.py        # 401 on the scan loop re-telling a card once
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
 python3 tools/test_gpslog_tidy.py   #  45 on tidying the GPS logs unattended
-python3 tools/test_shift_report.py  # 159 on what each order really took and
+python3 tools/test_shift_report.py  # 244 on what each order really took and
                                     #     what the shift adds up to: a gap in
                                     #     the GPS log never a stop and never
                                     #     miles, a parked receiver's wander
-                                    #     never miles, and no place printed
+                                    #     never miles, and no place printed;
+                                    #     --strategy's answer worked by hand,
+                                    #     only a reliable order timed
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.
