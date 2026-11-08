@@ -12701,7 +12701,7 @@ finally:
 # --- carrying two, turned off with two in the car -----------------------------
 #
 # The flag is read off <root>/rpi/config.json (no CARRY_TWO here), so this
-# server runs from a copy of the five files it is made of, beside a config of
+# server runs from a copy of the six files it is made of, beside a config of
 # its own. Two orders are taken with it on; the owner turns it off. Neither
 # order leaves the car for that — each stays until its own end, or Drop — and a
 # Took with it off replaces the first-taken, as one order's Took always did,
@@ -12709,7 +12709,9 @@ finally:
 _croot = tempfile.mkdtemp()
 _q11 = None
 try:
-    for _f in ('server.js', 'advice.js', 'streets.js', 'map-view.js', 'assemble.js'):
+    # ...earnings.js the sixth since the server reads earnings screenshots
+    # (its require is at load, as the other four's are).
+    for _f in ('server.js', 'advice.js', 'streets.js', 'map-view.js', 'assemble.js', 'earnings.js'):
         shutil.copy(os.path.join(ROOT, _f), _croot)
     os.mkdir(os.path.join(_croot, 'rpi'))
     # scannerEnabled() asks only that the autopilot is there; SCANNER_CMD runs
