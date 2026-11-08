@@ -32,6 +32,12 @@
  *      takes time(T), its card minutes scaled by the measured actual/card
  *      ratio; effective $/hr(T) = pay(T) / (1/λ(T) + time(T)).
  *   4. A PLAIN-WORDS SUMMARY of the three.
+ *   5. CARD AGAINST WHAT WAS PAID (cardVsPaid), where the caller has the
+ *      app's own figures: the trips read off its earnings screenshots and
+ *      matched to orders (earnings.js, server.js /api/earnings). What the
+ *      app paid less what the card said, by app, restaurant and three-hour
+ *      block, each with its n; a tip still processing is left out of every
+ *      total and counted beside them, since its order's figure is not final.
  *
  * DESCRIPTIVE, AND NOTHING ELSE. Nothing on the rig requires this file: no
  * verdict, state, target, band or panel line reads it. AUDITS.md's Settled
@@ -66,6 +72,10 @@
 'use strict';
 
 var A = require('../advice.js');
+// What an earnings entry's moment is (its day and time, the small hours
+// after its heading) and what its restaurant's name is compared on: the one
+// reading the server matched with, not a copy of it.
+var E = require('../earnings.js');
 
 /* --- the numbers it works to ---------------------------------------------- */
 
@@ -128,6 +138,12 @@ var TOO_SOON = 0.3;
 var BANDS = [[0, 20], [20, 30], [30, 45], [45, Infinity]];
 // Card $/hr bands for "a card at $X has turned into": the panel's figure.
 var RATE_BANDS = [[0, 15], [15, 20], [20, 25], [25, 30], [30, 40], [40, Infinity]];
+
+// Card against paid: a group under this many orders is printed with its n
+// and marked thin, its total never the headline. Chosen, not measured: five
+// is the fewest at which one big tip stops being the whole of a group's
+// difference on the owner's one screenshot (a $19.54 tip on a $5.51 base).
+var PAID_MIN_N = 5;
 
 /* --- small pieces --------------------------------------------------------- */
 
@@ -641,7 +657,9 @@ function heldOut(perAll, perBlock, days, grid, opts) {
  * input: { offers: journal rows (raw or folded), orders: the caller's orders,
  *          areaOf(row) -> name|null (optional), appOf(row) (optional),
  *          target: the driver's line (optional), costPerMile (optional:
- *          else advice.js costPerMileIn over the rows), boots, seed }. */
+ *          else advice.js costPerMileIn over the rows), boots, seed,
+ *          earnings: /api/earnings' entries (optional: the card-against-
+ *          paid half, `paid`, and its line) }. */
 function analyse(input) {
   var inp = input || {};
   var dd = dedupe(inp.offers);
@@ -878,12 +896,18 @@ function analyse(input) {
   });
   var held = heldOut(perAll, perBlock, days, GRID, opts);
 
+  // 5. card against paid, where the caller handed the app's own figures
+  // (the places report does; the end-of-shift report, whose text names no
+  // place, does not).
+  var paid = Array.isArray(inp.earnings) ? cardVsPaid(inp.earnings) : null;
+
   var res = {
     floors: { dist: DIST_MIN_N, curveOffers: CURVE_MIN_OFFERS, ratio: RATIO_MIN_N, outings: CURVE_MIN_OUTINGS,
               bootOutings: BOOT_MIN_OUTINGS, breakMin: BREAK_MIN, plateau: PLATEAU, holdMaxMin: HOLD_MAX_MIN,
               tooSoon: TOO_SOON },
     counts: counts, seen: seen, actual: actual, curve: curve, curveMile: curveMile, slices: slices, heldOut: held
   };
+  if (paid) res.paid = paid;
   res.lines = lines(res);
   return res;
 }
@@ -899,6 +923,84 @@ function groupBy(rows, key) {
   var by = Object.create(null);
   rows.forEach(function (o) { var k = key(o); if (k !== null && k !== undefined) (by[k] = by[k] || []).push(o); });
   return by;
+}
+
+/* --- 5. card against what was paid -----------------------------------------
+ *
+ * `earnings` is /api/earnings' entries (earnings.js fold: the newest row of
+ * each trip read off an upload). Only a trip matched to an order — by the
+ * matcher or picked by the driver — with the card's pay on its match counts;
+ * one still with its tip processing is counted as pending and left out of
+ * every figure, because what it paid is not yet what it will have paid.
+ * Descriptive: nothing reads it but the two reports. */
+function cardVsPaid(earnings) {
+  var used = [];
+  var counts = { entries: 0, matched: 0, pending: 0, unmatched: 0, noCard: 0 };
+  (earnings || []).forEach(function (e) {
+    if (!e || typeof e.key !== 'string') return;
+    counts.entries += 1;
+    var m = e.match || {};
+    if (m.status !== 'matched' && m.status !== 'picked') { counts.unmatched += 1; return; }
+    counts.matched += 1;
+    if (num(e.amount) === null || num(m.cardPay) === null) { counts.noCard += 1; return; }
+    if (e.tipStatus === 'pending' || e.tip === 'processing') { counts.pending += 1; return; }
+    var at = E.finishMs(e);
+    var name = e.pickup && e.pickup.name ? String(e.pickup.name) : null;
+    used.push({ app: e.app === 'uber' || e.app === 'doordash' ? e.app : 'unknown', name: name,
+                nameKey: name ? E.words(name).join(' ') : null, block: at === null ? null : A.blockOf(at),
+                card: m.cardPay, paid: e.amount, diff: e.amount - m.cardPay,
+                tip: e.tipStatus === 'settled' && num(e.tip) !== null ? e.tip : 0 });
+  });
+  function group(name, list) {
+    var diffs = list.map(function (x) { return x.diff; });
+    return { name: name, n: list.length, thin: list.length < PAID_MIN_N,
+             card: r2(sum(list.map(function (x) { return x.card; }))),
+             paid: r2(sum(list.map(function (x) { return x.paid; }))),
+             diff: r2(sum(diffs)), medianDiff: list.length ? r2(median(diffs)) : null,
+             tips: r2(sum(list.map(function (x) { return x.tip; }))),
+             over: list.filter(function (x) { return x.diff > 0.005; }).length,
+             under: list.filter(function (x) { return x.diff < -0.005; }).length };
+  }
+  var byName = groupBy(used.filter(function (x) { return x.nameKey; }), function (x) { return x.nameKey; });
+  return {
+    floor: PAID_MIN_N, counts: counts,
+    all: group('every matched order', used),
+    byApp: ['uber', 'doordash', 'unknown'].map(function (a) {
+      var l = used.filter(function (x) { return x.app === a; });
+      return l.length ? group(a === 'uber' ? 'Uber' : a === 'doordash' ? 'DoorDash' : 'app not read', l) : null;
+    }).filter(Boolean),
+    // Named as the app first printed it; grouped on the words earnings.js
+    // compares names on, so "Make-Believe Burgers" and "Make Believe
+    // Burgers" are one row. Most orders first.
+    byRestaurant: Object.keys(byName).map(function (k) { return group(byName[k][0].name, byName[k]); })
+      .sort(function (a, b) { return b.n - a.n || (a.name < b.name ? -1 : 1); }),
+    byBlock: A.BLOCK_NAMES.map(function (n, b) {
+      var l = used.filter(function (x) { return x.block === b; });
+      return l.length ? group(n, l) : null;
+    }).filter(Boolean)
+  };
+}
+
+/* The one line both reports print of it: the overall figure and each app's,
+ * with n; no restaurant (the end-of-shift report's text never names a place,
+ * and the places report's table under the line names them). */
+function paidLines(p) {
+  if (!p || !p.counts.entries) return [];
+  var a = p.all, c = p.counts;
+  var pend = c.pending ? ' (' + plural(c.pending, 'more', 'more') + ' with a tip still processing, left out)' : '';
+  if (!a.n) {
+    return ['Card against what the app paid: no matched order with a settled figure yet' + pend
+            + '; ' + plural(c.unmatched, 'trip') + ' not matched to an order.'];
+  }
+  var sign = function (v) { return (v < 0 ? '-$' : '+$') + Math.abs(v).toFixed(2); };
+  var apps = p.byApp.length > 1 ? ' By app: ' + p.byApp.map(function (g) {
+    return g.name + ' ' + sign(g.diff) + ' over ' + g.n + (g.thin ? ' (thin)' : '');
+  }).join(', ') + '.' : '';
+  return ['Card against what the app paid: over ' + plural(a.n, 'matched order') + pend + ', the app paid '
+          + d2(a.paid) + ' against cards of ' + d2(a.card) + ' (' + sign(a.diff) + ' in all, the typical order '
+          + sign(a.medianDiff) + '; ' + d2(a.tips) + ' of it settled tips; ' + a.over + ' paid more than the card, '
+          + a.under + ' less).' + apps + (a.thin ? ' Thin: fewer than ' + p.floor + ' orders.' : '')
+          + ' Descriptive: no verdict reads it.'];
 }
 
 /* --- the words -------------------------------------------------------------
@@ -1001,6 +1103,7 @@ function lines(r) {
     out.push('How far to trust it: thin — ' + thin.join(', ') + '. The interval and the resampled range say how far the '
              + 'best line could move; about 25 shift days and 20 timed orders before a ±$2 answer is likely.');
   }
+  if (r.paid) paidLines(r.paid).forEach(function (l) { out.push(l); });
   out.push('Descriptive: what the record shows. Nothing on the rig reads it; the verdict, the target and the panel do not change.');
   return out;
 }
@@ -1030,5 +1133,6 @@ module.exports = {
   holdOf: holdOf, quantile: quantile, outingOf: outingOf, weekOf: weekOf, ladder: ladder, bestOf: bestOf,
   GRID: GRID, MILE_GRID: MILE_GRID, BREAK_MIN: BREAK_MIN, DIST_MIN_N: DIST_MIN_N, CURVE_MIN_OFFERS: CURVE_MIN_OFFERS,
   RATIO_MIN_N: RATIO_MIN_N, CURVE_MIN_OUTINGS: CURVE_MIN_OUTINGS, BOOT_MIN_OUTINGS: BOOT_MIN_OUTINGS, BOOTS: BOOTS,
+  cardVsPaid: cardVsPaid, paidLines: paidLines, PAID_MIN_N: PAID_MIN_N,
   PLATEAU: PLATEAU, HOLD_MAX_MIN: HOLD_MAX_MIN, TOO_SOON: TOO_SOON, BANDS: BANDS, RATE_BANDS: RATE_BANDS
 };

@@ -2200,8 +2200,12 @@ function analyse(offers, taken, placed, dropAt, opts) {
   // them, the card's town as the area (townKey, as every town table here),
   // and the driver's line beside the curve.
   var strategyIn = strategyOrders(taken, opts.records, opts.fixes);
+  // ...and, where the server has them, the trips read off the app's own
+  // earnings screenshots and matched to orders (/api/earnings): the card
+  // against what was paid, under the curve.
   var strategy = S.analyse({ offers: offers, orders: strategyIn, areaOf: townKey, appOf: appOf,
-                             target: targetLine(counts, opts.now), boots: opts.boots });
+                             target: targetLine(counts, opts.now), boots: opts.boots,
+                             earnings: Array.isArray(opts.earnings) ? opts.earnings : undefined });
   strategy.miles = { odometer: strategyIn.filter(function (o) { return o.milesFrom === 'odometer'; }).length,
                      log: strategyIn.filter(function (o) { return o.milesFrom === 'log'; }).length,
                      records: (opts.records || []).length, gps: !!opts.fixes };
@@ -3047,6 +3051,33 @@ function blockChart(blocks) {
     + 'that block. Point estimates, no test between blocks.</p>';
 }
 
+/* Card against what the app paid (the owner, 7 Nov 2026: "compare what uber
+ * actually paid compared to the expected pay of the order"): strategy.js's
+ * cardVsPaid over the trips read off the app's earnings screenshots and
+ * matched to orders (server.js /api/earnings, earnings.js). By app, by
+ * three-hour block of the trip's end and by restaurant, each with its n; a
+ * group under its floor is thin (muted, italic, never the headline), and a
+ * trip whose tip is still processing is left out of every figure and
+ * counted. A server with no earnings, or none uploaded: one sentence. */
+function paidSection(p) {
+  if (!p) return '';
+  var cols = [['name', ''], ['n', 'orders'], ['card', 'cards', '$'], ['paid', 'paid', '$'], ['diff', 'paid − card', '$'],
+              ['medianDiff', 'typical order', '$'], ['tips', 'settled tips', '$'], ['over', 'paid more'], ['under', 'paid less']];
+  function thin(g) { return g.thin; }
+  var c = p.counts;
+  return '<h3 id="s-paid">Card vs paid</h3>'
+    + '<p class="note">What the app paid, read off its own earnings screenshots uploaded on the offers page, against what '
+    + 'the card said, for the trips matched to an order (' + c.matched + ' of ' + c.entries + ' read; ' + c.unmatched
+    + ' not matched — no order on file, or waiting for you to pick). <b>' + c.pending + '</b> with a tip still processing '
+    + 'are left out of every figure until a later upload settles them' + (c.noCard ? '; ' + c.noCard + ' with no card pay on file' : '')
+    + '. A group under ' + p.floor + ' orders is <b>thin</b>. Descriptive: nothing on the rig reads it.</p>'
+    + (c.entries ? strategyTable(cols, [p.all], thin)
+       + fold('s-paid-app', 'By app', strategyTable(cols, p.byApp, thin))
+       + fold('s-paid-block', 'By three-hour block (of the trip\'s end)', strategyTable(cols, p.byBlock, thin))
+       + fold('s-paid-rest', 'By restaurant (as the app names it)', strategyTable(cols, p.byRestaurant, thin))
+       : '<p class="note">No earnings screenshots have been uploaded yet.</p>');
+}
+
 function STRATEGY_SECTION(r) {
   var s = r.strategy, cv = s.curve, f = s.floors, c = s.counts;
   function ul(xs) { return '<ul class="lines">' + xs.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>'; }
@@ -3151,6 +3182,7 @@ function STRATEGY_SECTION(r) {
     + fold('s-act-length', 'By card length', actRows(s.actual.byLength))
     + fold('s-act-block', 'By three-hour block (of the Took)', actRows(s.actual.byBlock))
     + fold('s-act-town', 'By town (the card\'s own)', actRows(s.actual.byArea || []))
+    + paidSection(s.paid)
     + '<p class="note">The shift: every offer seen and every order\'s hold, joined across silences under ' + f.breakMin
     + ' minutes; free is that less every hold (Took to its end, however it ended; the card\'s minutes where it has none). '
     + c.duplicates + ' repeat readings folded, ' + c.alone + ' offers alone in a silence, ' + c.held + ' seen with an order '
@@ -4189,6 +4221,18 @@ async function streetsBase(server, url) {
 
 /* The rig's store waits, for a source whose /api/journal carries none (the
  * NucBox's copy holds no store-waits file): `url`'s /api/journal `waits`. */
+/* The trips read off the app's earnings screenshots (server.js
+ * /api/earnings, since 8 Nov 2026), for the Strategy tab's card vs paid. A
+ * server from before it answers 404, and the tab says none were uploaded. */
+async function loadEarnings(base) {
+  try {
+    var got = await getJson(base.replace(/\/+$/, '') + '/api/earnings?days=3650');
+    return got.ok && got.body && Array.isArray(got.body.entries) ? got.body.entries : [];
+  } catch (e) {
+    return [];
+  }
+}
+
 async function loadWaits(url) {
   var got = await getJson(url.replace(/\/+$/, '') + '/api/journal?days=1&limit=1');
   if (!got.ok || !got.body || !Array.isArray(got.body.waits)) throw new Error(url + ' answered ' + got.status + ' with no waits');
@@ -4531,8 +4575,12 @@ async function main(argv) {
   }
   console.log('store waits: ' + waits.length + (waitsFrom ? ' from ' + waitsFrom : ' (none on record)'));
 
+  var earnings = await loadEarnings(o.server);
+  console.log('earnings: ' + earnings.length + ' trips read off uploaded screenshots');
+
   var report = analyse(offers, taken, placed, dropAt, {
     minN: o.minN, waits: waits, spells: spells, cellTown: cellTown, fixes: fx ? fx.fixes : null,
+    earnings: earnings,
     // The order records (server.js orderRecords, since 7 Nov): the Strategy
     // tab's miles where an order left one. An older server sends none.
     records: Array.isArray(body.records) ? body.records : [],
@@ -4567,6 +4615,7 @@ module.exports = {
   placesOf: placesOf, cellOf: cellOf, bootCI: bootCI, cells: cells, coverage: coverage,
   nextTake: nextTake, timelineOf: timelineOf, tripsOf: tripsOf, dropTable: dropTable,
   analyse: analyse, summary: summary, testLine: testLine, html: html, csvOf: csvOf, dropCsv: dropCsv,
+  paidSection: paidSection, loadEarnings: loadEarnings,
   coverageCsv: coverageCsv, restCsv: restCsv, restBranchCsv: restBranchCsv, nameOf: nameOf,
   restaurantNames: restaurantNames, restaurantsTable: restaurantsTable, waitOf: waitOf, hitsOf: hitsOf, nbxFetch: nbxFetch,
   degraded: degraded, DEGRADED_SHARE: DEGRADED_SHARE, DEGRADED_MIN: DEGRADED_MIN, gpsAt: gpsAt, parseArgs: parseArgs,

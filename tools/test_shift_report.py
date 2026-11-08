@@ -1325,6 +1325,67 @@ _jcols = re.search(r'var RECORD_COLUMNS = \[([^\]]*)\];', _jh)
 eq('[record csv] the offers page\'s CSV has these columns, word for word',
    tuple(re.findall(r"'([a-z_]+)'", _jcols.group(1))) if _jcols else None, SR.RECORD_COLUMNS)
 
+# --- what the app paid (8 Nov 2026) ------------------------------------------------
+#
+# The owner: "compare what uber actually paid compared to the expected pay of
+# the order". server.js writes a `kind: 'earning'` row per trip read off an
+# uploaded earnings screenshot (earnings.js matched it to an order), again
+# whenever it changes; the newest row of a key is the trip. Here, the records
+# day above with rows in the writer's shape: R1's trip seen with its tip
+# processing and then settled, R4's picked by the driver with its tip still
+# processing, R5's (a day before the record: a rebuilt order) with no tip, R2's
+# still waiting for the driver, and one naming R3 at a Took two hours off.
+def earning(key, offer_id, took, amount, tip, written, status='matched', by='auto', card=None):
+    tip_status = 'pending' if tip == 'processing' else 'settled' if isinstance(tip, float) else 'none'
+    m = {'status': status, 'by': by}
+    if status in ('matched', 'picked'):
+        m.update(offer=offer_id, tookAt=took, cardPay=card, source='record')
+    else:
+        m['candidates'] = [{'offer': offer_id, 'tookAt': took, 'pay': card}]
+    return {'v': 1, 'kind': 'earning', 'id': 'earn:' + key, 'seq': written, 'at': written, 'key': key,
+            'app': 'uber', 'date': '2026-03-06', 'finishedAt': '18:30', 'amount': amount,
+            'tip': tip, 'tipStatus': tip_status, 'pickup': {'name': 'Pretend Pizza', 'detail': 'Faketown'},
+            'dropoff': {'street': 'Placeholder Ct', 'town': 'Faketown'}, 'match': m}
+
+
+_pj = os.path.join(work, 'paid.jsonl')
+_prows = _rrows + [
+    earning('k1', 'R1', _R(18, 0) + 3, 15.50, 3.50, _R(23, 0), card=12.0),
+    earning('k1', 'R1', _R(18, 0) + 3, 12.00, 'processing', _R(22, 0), card=12.0),
+    earning('k4', 'R4', _R(20, 10) + 3, 8.00, 'processing', _R(22, 0), status='picked', by='you', card=8.0),
+    earning('k5', 'R5', _R(20, 40), 6.00, None, _R(22, 0), card=6.0),
+    earning('k2', 'R2', _R(18, 40) + 3, 7.50, None, _R(22, 0), status='needs', card=7.0),
+    earning('k3', 'R3', _R(17, 30), 9.00, None, _R(22, 0), card=9.0),
+]
+with open(_pj, 'w') as fh:
+    for r in _prows:
+        fh.write(json.dumps(r) + '\n')
+eq('[paid] the newest row of each trip, as earnings.js folds them',
+   sorted((e['key'], e['amount']) for e in SR.earnings(_prows)),
+   [('k1', 15.5), ('k2', 7.5), ('k3', 9.0), ('k4', 8.0), ('k5', 6.0)])
+_pcsv = os.path.join(work, 'paid.csv')
+run(['--journal', _pj, '--day', '2026-03-06', '--csv', _pcsv])
+with open(_pcsv, encoding='utf-8') as fh:
+    _pc = {r['took'][11:16]: r for r in csv.DictReader(fh)}
+_PAID = ('paid_total', 'paid_tip', 'tip_status', 'paid_minus_card')
+eq('[paid] the records CSV gains the four paid columns, last',
+   SR.RECORD_COLUMNS[-4:], _PAID)
+eq('[paid] a trip whose tip settled: its newest row, the total, the tip, paid less the card',
+   tuple(_pc['18:00'][k] for k in _PAID), ('15.50', '3.50', 'settled', '3.50'))
+eq('[paid] the driver\'s pick, its tip still processing: the total, no tip yet, said pending',
+   tuple(_pc['20:10'][k] for k in _PAID), ('8.00', '', 'pending', '0.00'))
+eq('[paid] a rebuilt order (a day before the record) matched too: no tip',
+   tuple(_pc['20:40'][k] for k in _PAID), ('6.00', '', 'none', '0.00'))
+eq('[paid] a trip still waiting for the driver, and one naming an order at another Took: blank',
+   [tuple(_pc[t][k] for k in _PAID) for t in ('18:40', '19:30')], [('', '', '', '')] * 2)
+eq('[paid] ...paid_cells, the offers page\'s paidCells: the card rounded off as the page rounds it',
+   SR.paid_cells({'pay': 7.0, 'paid': {'amount': 25.05, 'tip': 19.54, 'tipStatus': 'settled'}}),
+   ('25.05', '19.54', 'settled', '18.05'))
+_ptext = SR.text(SR.report(_pj, None, '2026-03-06'))
+_pjson = json.dumps(SR.as_json(SR.report(_pj, None, '2026-03-06')))
+eq('[paid] the text and the JSON name no figure or place of it: the CSV is where it goes',
+   [p for p in ('Pretend Pizza', 'Placeholder Ct', '15.50', 'tip') if p in _ptext or p in _pjson], [])
+
 # --- what $/hr to expect (--strategy, the owner's of 7 Nov) ----------------------
 #
 # Two invented evenings, 16 and 17 March, each the shape tests/strategy.test.js

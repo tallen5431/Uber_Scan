@@ -224,6 +224,7 @@ import functools
 import gzip
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -415,6 +416,69 @@ def _record_for(recs, took):
         if best is None or abs(t - took) < abs(best[0] - took):
             best = (t, r)
     return best[1] if best else None
+
+
+# --- what the app paid (8 Nov 2026) --------------------------------------------
+#
+# The owner, 7 Nov: "compare what uber actually paid compared to the expected
+# pay of the order". The offers page uploads screenshots of the app's own
+# earnings screen; server.js reads each, matches its trips to orders
+# (earnings.js) and writes one `kind: 'earning'` row per trip, again whenever
+# a trip changes (a tip settling, the driver's pick). The newest row of a key
+# is the trip, as earnings.js's fold has it; its `match` names the order by
+# its offer id and its Took. Read here only for the records CSV's four paid
+# columns: the text and --json name no figure of it, as they name no place.
+
+def earnings(rows):
+    """The newest earning row of each trip (by `key`, the latest `at`, then
+    `seq`): earnings.js's fold, the same rule."""
+    by = {}
+    for r in rows:
+        if r.get('kind') != 'earning' or not isinstance(r.get('key'), str) \
+                or _num(r.get('at')) is None:
+            continue
+        was = by.get(r['key'])
+        if was is None or r['at'] > was['at'] or (
+                r['at'] == was['at'] and (_num(r.get('seq')) or 0) >= (_num(was.get('seq')) or 0)):
+            by[r['key']] = r
+    return list(by.values())
+
+
+def paid_for(earned, oid, took):
+    """The trip matched to the order `oid` taken at `took` (ms): a match by
+    the matcher or the driver's pick, its Took within RECORD_MATCH_S of the
+    order's (the server stamps both off one row). None where no screenshot
+    was matched to it."""
+    if took is None:
+        return None
+    for e in earned:
+        m = e.get('match') if isinstance(e.get('match'), dict) else {}
+        if m.get('status') in ('matched', 'picked') and m.get('offer') == oid \
+                and _num(m.get('tookAt')) is not None \
+                and abs(m['tookAt'] - took) <= RECORD_MATCH_S * 1000.0:
+            return e
+    return None
+
+
+def _cents(v):
+    """Rounded to the cent half up, as the offers page's Math.round does, so
+    the two CSVs print one figure."""
+    return math.floor(v * 100 + 0.5) / 100.0
+
+
+def paid_cells(o):
+    """The records CSV's paid columns for one order: the total the app paid,
+    the tip where it has settled, the tip's status ('settled', 'pending' or
+    'none'), and the total less the card's pay. Blank where no screenshot was
+    matched. The offers page's paidCells, word for word."""
+    e = o.get('paid')
+    if not e or _num(e.get('amount')) is None:
+        return ('', '', '', '')
+    status = e.get('tipStatus') if isinstance(e.get('tipStatus'), str) else ''
+    tip = _num(e.get('tip')) if status == 'settled' else None
+    pay = o.get('pay')
+    return ('%.2f' % e['amount'], '' if tip is None else '%.2f' % tip, status,
+            '' if _num(pay) is None else '%.2f' % _cents(e['amount'] - pay))
 
 
 def orders(rows):
@@ -1456,6 +1520,11 @@ def report(journal, gps_dir, day, read=None):
             at = first.get(o['id'])
             if at is not None and start <= at < end:
                 mine.append(o)
+    # What the app paid, where an earnings screenshot was matched to the
+    # order (earnings, paid_for): for the records CSV's paid columns only.
+    earned = earnings(rows)
+    for o in mine:
+        o['paid'] = paid_for(earned, o['id'], o['took'])
     # Before anything is measured off `reliable` (a door's minutes, the $/hr),
     # and numbered as the text numbers them.
     too_soon(mine)
@@ -1744,7 +1813,10 @@ def to_csv(rep):
 RECORD_COLUMNS = ('date', 'app', 'offered', 'took', 'ended', 'how_ended', 'card_pay',
                   'card_minutes', 'card_miles', 'actual_minutes', 'gps_miles', 'miles_from',
                   'actual_per_hour', 'actual_per_mile', 'pickup_name', 'pickup', 'dropoff',
-                  'with_another', 'reliable', 'source', 'notes')
+                  'with_another', 'reliable', 'source', 'notes',
+                  # ...and what the app paid, where an earnings screenshot was
+                  # matched to the order (paid_cells).
+                  'paid_total', 'paid_tip', 'tip_status', 'paid_minus_card')
 
 
 def _stamp(ms):
@@ -1766,7 +1838,7 @@ def record_cells(o):
             pl.get('pickupName') or '', pl.get('pickup') or '', pl.get('dropoff') or '',
             o['alongside'], 'yes' if o['reliable'] else 'no', o.get('source') or '',
             '; '.join(o['notes'] + (['places withheld: keepPlaces was off'] if pl.get('withheld')
-                                    else [])))
+                                    else []))) + paid_cells(o)
 
 
 def to_records_csv(reps):

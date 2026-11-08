@@ -1160,6 +1160,34 @@ function nbx() {
   eq('...and with no record, the log gives a timed order its miles',
      P.strategyOrders([Object.assign({}, tRun, { endedAt: tRun.tookAt + 100000 })], [], fx0)[0].milesFrom, 'log');
   eq('no dropoff text reaches the Strategy tab', /742 Ombre|Larkspur/.test(STRATEGY_OF(pageW)), false);
+
+  // Card vs paid (8 Nov 2026; the owner: "compare what uber actually paid
+  // compared to the expected pay of the order"): /api/earnings' trips, read
+  // off uploaded screenshots and matched to orders, through strategy.js's
+  // cardVsPaid and drawn under the Strategy tab's actuals. Invented trips:
+  // two matched and settled at Pretend Pizza, one with its tip processing.
+  function earnedE(key, card, paid, tip, h) {
+    return { kind: 'earning', key: key, at: 1, app: 'uber', date: '2026-03-03', finishedAt: h + ':30',
+             amount: paid, tip: tip, tipStatus: tip === 'processing' ? 'pending' : 'settled',
+             pickup: { name: 'Pretend Pizza' }, match: { status: 'matched', offer: key, tookAt: 1, cardPay: card } };
+  }
+  var eIn = [earnedE('e1', 7, 9, 2, 19), earnedE('e2', 8, 11, 3, 20), earnedE('e3', 6, 6, 'processing', 20)];
+  var repE = P.analyse(wRows, wTaken, [], function () { return null; },
+                       { now: 0, spells: wSpells, cellTown: wTown, earnings: eIn });
+  var pageE = P.html(repE);
+  eq('card vs paid: the report\'s is strategy.js\'s cardVsPaid over the trips the server matched (one computation)',
+     repE.strategy.paid, S.cardVsPaid(eIn));
+  ok('...drawn in the Strategy tab under the actuals, by app, block and restaurant, with n and thin marked',
+     /<h3 id="s-paid">Card vs paid<\/h3>/.test(STRATEGY_OF(pageE))
+     && STRATEGY_OF(pageE).indexOf('id="s-actual"') < STRATEGY_OF(pageE).indexOf('id="s-paid"')
+     && /By restaurant \(as the app names it\)/.test(pageE) && /<tr class="thinrow"><td>Pretend Pizza<\/td><td>2<\/td>/.test(pageE));
+  ok('...the tip still processing left out and said', /<b>1<\/b> with a tip still processing are left out/.test(pageE));
+  ok('...its line among the tab\'s lines, on the page', repE.strategy.lines.some(function (l) {
+    return l.indexOf('Card against what the app paid: over 2 matched orders (1 more with a tip still processing') === 0
+      && pageE.indexOf(esc0(l)) >= 0; }));
+  ok('...with no trips uploaded, one sentence', /No earnings screenshots have been uploaded yet/.test(
+    P.html(P.analyse(wRows, wTaken, [], function () { return null; }, { now: 0, earnings: [] }))));
+  eq('...and a report with no earnings handed (an older server) has no such part', /id="s-paid"/.test(pageW), false);
   function STRATEGY_OF(page) {
     var a = page.indexOf('<section data-tab="strategy">');
     return a < 0 ? '' : page.slice(a, page.indexOf('</section>', a));
@@ -1415,6 +1443,12 @@ function nbx() {
     for (var e = 0; e < 40; e++) jrows.push(card({ id: 'e' + e, at: at(2 + e % 3, 19, e), pickup: 'Larkspur Ct & Ombre Rd, Faketown', perHour: 10 + e }));
     var mainJ = { count: 40, total: 40, truncated: false, waits: [], taken: [], offers: jrows };
     var rigJ = { count: 0, total: 0, truncated: false, waits: [{ name: 'Fernbrook Grill', n: 4, medianMin: 6.5 }], taken: [], offers: [] };
+    // ...and the trips read off its uploaded earnings screenshots (server.js
+    // /api/earnings): two, both matched.
+    var mainE = [{ kind: 'earning', key: 'm1', at: 1, app: 'uber', date: '2026-03-02', finishedAt: '19:30', amount: 9,
+                   tip: 2, tipStatus: 'settled', match: { status: 'matched', offer: 'e0', tookAt: 1, cardPay: 7 } },
+                 { kind: 'earning', key: 'm2', at: 1, app: 'uber', date: '2026-03-03', finishedAt: '19:30', amount: 5,
+                   tipStatus: 'none', match: { status: 'none' } }];
     function server(handler) {
       return new Promise(function (ok3) {
         var sv = http2.createServer(handler);
@@ -1423,6 +1457,7 @@ function nbx() {
     }
     var srvM = await server(function (req, res) {
       if (/^\/api\/journal/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify(mainJ)); return; }
+      if (/^\/api\/earnings\?/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify({ ok: true, entries: mainE })); return; }
       if (/^\/api\/nbx$/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify({ ok: true, search: false, streets: false, route: false })); return; }
       if (/^\/api\/streets$/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify({ ok: true, loaded: true })); return; }
       if (/^\/api\/streets\/cross/.test(req.url)) {
@@ -1453,12 +1488,15 @@ function nbx() {
     ok('...the store waits came from --waits, the main source having none', new RegExp('store waits: 1 from ' + bR.replace(/\./g, '\\.')).test(said));
     ok('...the thresholds are printed', /Top-tier thresholds[^\n]*\n  6–9pm: top 25% >= \$\d/.test(said));
     ok('...and the share tests', /Top-10% share, Towns: /.test(said));
+    ok('...the earnings uploaded to the source are read and counted', /earnings: 2 trips read off uploaded screenshots/.test(said));
     var page2 = fs.readFileSync(path.join(tmp, 'out', 'index.html'), 'utf8');
     ok('...the page\'s script parses, and the new CSVs are written', (function () {
       try { new Function(page2.split('<script>\n')[1].split('\n</script>')[0]); } catch (e2) { return false; }
       return ['top_share_tests.csv', 'coverage_levels.csv', 'good_towns.csv', 'waiting_towns.csv', 'dead_miles_towns.csv',
               'size_restaurants.csv', 'strategy_curve.csv'].every(function (f3) { return fs.existsSync(path.join(tmp, 'out', f3)); });
     }()));
+    ok('...and drawn as the Strategy tab\'s card vs paid', /<h3 id="s-paid">Card vs paid<\/h3>/.test(page2)
+       && /over 1 matched order/.test(page2));
     ok('...the cache holds the street index\'s answer', /\/cross\?/.test(fs.readFileSync(path.join(tmp, 'cache.json'), 'utf8')));
     // A Nominatim down for the whole run (review, 27 Oct): every pickup
     // unplaced for it, not for where it is. Nothing is written and the run

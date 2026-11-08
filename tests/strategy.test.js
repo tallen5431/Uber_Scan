@@ -305,6 +305,67 @@ eq('a ratio\'s floor is advice.js\'s TARGET_TIMED', S.RATIO_MIN_N, A.TARGET_TIME
 eq('the break that ends a run is advice.js\'s SHOWN_AT', S.BREAK_MIN, A.SHOWN_AT);
 eq('the lines run $10 to $40 in $2 steps', [S.GRID[0], S.GRID[S.GRID.length - 1], S.GRID.length], [10, 40, 16]);
 
+/* --- 5. card against what the app paid (8 Nov 2026) ------------------------------
+ *
+ * The owner: "compare what uber actually paid compared to the expected pay of
+ * the order". /api/earnings' entries, in the writer's shape: six Uber trips
+ * matched to orders, each card $7.00 and paid $9.00 (a $2.00 tip settled),
+ * four from Pretend Pizza at 6:30 PM and two from Make-Believe Burgers at 1 PM;
+ * one DoorDash trip matched, card $10.00, paid $8.00; one Uber trip matched
+ * with its tip still processing; one waiting for the driver; one with no
+ * order on file. Worked by hand: seven counted, cards $52.00, paid $62.00,
+ * +$10.00 in all, the typical order +$2.00, $12.00 of settled tips. */
+function earned(key, app, h, card, paid, tip, status, name) {
+  return { kind: 'earning', key: key, at: 1, app: app, date: '2026-03-16',
+           finishedAt: (h < 10 ? '0' : '') + h + ':30', amount: paid, tip: tip,
+           tipStatus: tip === 'processing' ? 'pending' : typeof tip === 'number' ? 'settled' : 'none',
+           pickup: name ? { name: name } : null,
+           match: status === 'matched' || status === 'picked'
+             ? { status: status, offer: key, tookAt: 1, cardPay: card } : { status: status } };
+}
+var paidIn = [
+  earned('p1', 'uber', 18, 7, 9, 2, 'matched', 'Pretend Pizza'),
+  earned('p2', 'uber', 18, 7, 9, 2, 'matched', 'Pretend Pizza'),
+  earned('p3', 'uber', 18, 7, 9, 2, 'picked', 'Pretend Pizza'),
+  earned('p4', 'uber', 18, 7, 9, 2, 'matched', 'Pretend  pizza'),
+  earned('b1', 'uber', 13, 7, 9, 2, 'matched', 'Make-Believe Burgers'),
+  earned('b2', 'uber', 13, 7, 9, 2, 'matched', 'Make Believe Burgers'),
+  earned('d1', 'doordash', 13, 10, 8, null, 'matched', 'Nowhere Noodles'),
+  earned('w1', 'uber', 19, 6, 6, 'processing', 'matched', 'Pretend Pizza'),
+  earned('n1', 'uber', 19, null, 5, null, 'needs', 'Imaginary Bistro'),
+  earned('z1', 'uber', 20, null, 4, null, 'none', 'Imaginary Bistro')
+];
+var pv = S.cardVsPaid(paidIn);
+eq('card vs paid: the matched and settled are counted, the tip still processing left out and counted, '
+   + 'the unmatched counted', [pv.all.n, pv.counts.pending, pv.counts.unmatched, pv.counts.entries], [7, 1, 2, 10]);
+eq('...cards, paid, the difference in all and the typical order\'s, the settled tips, more and less',
+   [pv.all.card, pv.all.paid, pv.all.diff, pv.all.medianDiff, pv.all.tips, pv.all.over, pv.all.under],
+   [52, 62, 10, 2, 12, 6, 1]);
+eq('...by app, each with its n, a group under the floor thin',
+   pv.byApp.map(function (g) { return [g.name, g.n, g.diff, g.thin]; }),
+   [['Uber', 6, 12, false], ['DoorDash', 1, -2, true]]);
+eq('...by restaurant, named as first printed, grouped on its words, most orders first',
+   pv.byRestaurant.map(function (g) { return [g.name, g.n, g.thin]; }),
+   [['Pretend Pizza', 4, true], ['Make-Believe Burgers', 2, true], ['Nowhere Noodles', 1, true]]);
+eq('...by three-hour block of the trip\'s end', pv.byBlock.map(function (g) { return [g.name, g.n]; }),
+   [[A.BLOCK_NAMES[4], 3], [A.BLOCK_NAMES[6], 4]]);
+eq('...the floor for a group', [pv.floor, S.PAID_MIN_N], [5, 5]);
+var rp = S.analyse({ offers: two, orders: ords, costPerMile: 0.3, target: 25, earnings: paidIn });
+var paidLine = rp.lines.filter(function (l) { return l.indexOf('Card against what the app paid') === 0; });
+eq('the lines say it once, with n, the pending left out, each app\'s, and that no verdict reads it',
+   paidLine, ['Card against what the app paid: over 7 matched orders (1 more with a tip still processing, left out), '
+              + 'the app paid $62.00 against cards of $52.00 (+$10.00 in all, the typical order +$2.00; $12.00 of it '
+              + 'settled tips; 6 paid more than the card, 1 less). By app: Uber +$12.00 over 6, DoorDash -$2.00 over 1 '
+              + '(thin). Descriptive: no verdict reads it.']);
+eq('...and name no restaurant (the end-of-shift report prints these lines, and names no place)',
+   rp.lines.filter(function (l) { return /Pizza|Burgers|Noodles|Bistro/.test(l); }), []);
+eq('...the rest of the answer as it was without earnings; and with none handed, no paid half and no line',
+   [rp.curve.best, rp.lines.filter(function (l) { return paidLine.indexOf(l) === -1; }),
+    S.analyse({ offers: two, orders: ords, costPerMile: 0.3, target: 25 }).paid],
+   [r1.curve.best, r1.lines, undefined]);
+eq('...and with earnings handed but no trip uploaded yet, no line',
+   S.paidLines(S.cardVsPaid([])), []);
+
 // Run as a child, it answers one JSON request with the same analysis.
 var cp = require('child_process'), path = require('path');
 var child = cp.spawnSync(process.execPath, [path.join(__dirname, '..', 'tools', 'strategy.js')],
