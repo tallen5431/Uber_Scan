@@ -4294,6 +4294,229 @@ finally:
         except Exception:
             _lp.kill()
 
+# --- [earnings] what the app paid, on the offers page (8 Nov 2026) --------------
+#
+# The owner, 7 Nov: "compare what uber actually paid compared to the expected
+# pay of the order" ... "That is a good idea to upload screenshots as it takes
+# time for it to settle. Can it automatically figure out which order it
+# belongs to in the journal?" A real server with a journal of three orders on
+# Sat 7 Nov (one Pretend Pizza order; two of Make-Believe Burgers' minutes
+# apart), and a screenshot of that day drawn by rpi/testearnings.py, uploaded
+# through the page's own "Add earnings screenshots" in a phone's 360x640 and
+# read by the real tesseract: what the box says, the trip it leaves to the
+# driver and the one-tap pick, "Card $X -> Paid $Y" in an order's record,
+# the records CSV's paid columns, deleting the picture; and a machine with no
+# tesseract saying how to install it. Every place and figure is invented.
+EARNINGS_PAGE = r"""
+const { chromium } = require('playwright');
+(async () => {
+  const args = JSON.parse(process.argv[2]);
+  let browser = null;
+  for (const exe of JSON.parse(process.env.PW_EXES || '[]').concat([null])) {
+    try { browser = await chromium.launch(exe ? { executablePath: exe } : {}); break; }
+    catch (e) {}
+  }
+  if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
+  const out = {};
+  const page = await browser.newPage({ viewport: { width: 360, height: 640 } });
+  await page.goto(args.base + '/journal.html', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#earnings:not([hidden])', { timeout: 8000 }).catch(() => {});
+  await page.click('#ranges button[data-days="0"]');
+  await page.waitForSelector('details.offer[data-id="e-pizza"]', { timeout: 8000 }).catch(() => {});
+  const box = () => page.evaluate(() => {
+    const ip = document.getElementById('earningsFiles');
+    const lab = document.getElementById('earningsPick');
+    const r = lab.getBoundingClientRect();
+    const paid = (id) => {
+      const d = document.querySelector('details.offer[data-id="' + id + '"]');
+      if (!d) return null;
+      const row = Array.from(d.querySelectorAll('dl.record > div')).find((x) => x.querySelector('dt').textContent === 'Paid');
+      return row ? row.querySelector('dd').textContent : null;
+    };
+    return {
+      shown: !document.getElementById('earnings').hidden,
+      input: { type: ip.type, multiple: ip.multiple, accept: ip.accept },
+      label: (lab.textContent || '').trim(), labelH: Math.round(r.height),
+      says: document.getElementById('earningsSays').textContent,
+      install: document.getElementById('earningsInstall').hidden ? null
+        : document.getElementById('earningsInstall').textContent,
+      needs: Array.from(document.querySelectorAll('#earningsNeeds .entry')).map((e) => ({
+        text: e.textContent, buttons: Array.from(e.querySelectorAll('button')).map((b) => b.textContent),
+        offers: Array.from(e.querySelectorAll('button[data-offer]')).map((b) => b.getAttribute('data-offer')),
+        heights: Array.from(e.querySelectorAll('button')).map((b) => Math.round(b.getBoundingClientRect().height)) })),
+      none: (document.getElementById('earningsNone').textContent || '').trim(),
+      forget: document.getElementById('earningsForget').hidden ? null : document.getElementById('earningsForget').textContent,
+      paid: { pizza: paid('e-pizza'), burg1: paid('e-burg1'), burg2: paid('e-burg2') },
+      sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+  out.before = await box();
+  if (args.shot) {
+    await page.setInputFiles('#earningsFiles', args.shot);
+    await page.waitForFunction(() => /Read 1 screenshot/.test(document.getElementById('earningsSays').textContent),
+                               null, { timeout: 60000 }).catch(() => {});
+    await page.waitForTimeout(400);
+    out.after = await box();
+    // The one-tap pick: the first Make-Believe Burgers order.
+    const pick = await page.$('#earningsNeeds button[data-offer="e-burg1"]');
+    if (pick) {
+      await pick.click();
+      await page.waitForFunction(() => !document.querySelector('#earningsNeeds .entry'), null, { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(400);
+    }
+    out.picked = await box();
+    out.csv = await page.evaluate(async () => {
+      const a = document.getElementById('recordsCsv');
+      return a && a.href ? await (await fetch(a.href)).text() : null;
+    });
+    // Delete the picture: two presses.
+    await page.click('#earningsForget').catch(() => {});
+    out.armed = await page.evaluate(() => document.getElementById('earningsForget').textContent);
+    await page.click('#earningsForget').catch(() => {});
+    await page.waitForFunction(() => /Deleted/.test(document.getElementById('earningsSays').textContent), null,
+                               { timeout: 8000 }).catch(() => {});
+    out.deleted = await box();
+  }
+  await browser.close();
+  console.log(JSON.stringify(out));
+})().catch((e) => console.log(JSON.stringify({ __crashed: String((e && e.stack) || e) })));
+"""
+
+sys.path.insert(0, os.path.join(ROOT, 'rpi'))
+import testearnings as _ET                                    # noqa: E402
+
+_ework = tempfile.mkdtemp()
+
+
+def _ems(h, m, s=0):
+    return int(_dt.datetime(2026, 11, 7, h, m, s).timestamp() * 1000)
+
+
+def _eserver(name, rows, env):
+    home = os.path.join(_ework, name)
+    os.makedirs(home)
+    jpath = os.path.join(home, 'journal.jsonl')
+    with open(jpath, 'w') as fh:
+        fh.write(''.join(json.dumps(r) + '\n' for r in rows))
+    port = free_port()
+    penv = dict(os.environ, SCANNER='0', PORT=str(port), HTTPS_PORT='0', JOURNAL=jpath,
+                PLACES_REPORT_DIR=os.path.join(_ework, 'no-report'), NUCBOX_PROBE_MS='0', GPSLOG_DIR='')
+    penv.update(env)
+    return (subprocess.Popen(['node', os.path.join(ROOT, 'server.js')], env=penv,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
+            'http://127.0.0.1:%d' % port, jpath)
+
+
+def _eorder(offer, ended, minutes, pay, miles, store, door=None, drop=None):
+    took = ended - int(minutes * 60000)
+    reading = {'id': offer, 'at': took - 60000, 'firstAt': took - 60000, 'pay': pay, 'minutes': 30.0,
+               'miles': 8.0, 'perHour': round((pay - 2.4) / 0.5, 2), 'grossPerHour': round(pay / 0.5, 2),
+               'cost': 2.4, 'costPerMile': 0.3, 'target': 25, 'band': 15, 'legs': 2, 'whole': True,
+               'app': 'uber', 'state': 'go', 'pickup': store}
+    mark = {'v': 1, 'kind': 'mark', 'id': offer, 'at': took, 'accepted': True, 'via': 'panel'}
+    rec = {'v': 1, 'kind': 'order', 'id': '%s@%d' % (offer, took), 'offer': offer, 'app': 'uber',
+           'places': True, 'at': ended + 1500, 'seq': ended + 1500, 'how': 'gps',
+           'card': {'pay': pay, 'minutes': 30, 'miles': 8, 'pickup': store},
+           'times': {'took': took, 'ended': ended}, 'pickups': [{'name': store, 'door': door, 'visited': True}],
+           'dropoff': {'text': drop} if drop else {}, 'drive': {'miles': miles},
+           'money': {'pay': pay, 'minutes': minutes, 'miles': miles, 'delivery': True}}
+    return [reading, mark, rec]
+
+
+_erows = (_eorder('e-pizza', _ems(17, 40, 30), 39.6, 6.5, 12.1, 'Pretend Pizza',
+                  '10 Placeholder Rd, Faketown', '12 Placeholder Ct, Faketown')
+          + _eorder('e-burg1', _ems(16, 48), 40.0, 7.0, 9.0, 'Make-Believe Burgers')
+          + _eorder('e-burg2', _ems(16, 52), 41.0, 8.0, 9.5, 'Make-Believe Burgers'))
+_eshot = os.path.join(_ework, 'earnings-nov-7.png')
+_ET.save(_ET.screen(), _eshot)
+_eservers = {
+    'here': _eserver('here', _erows, {}),
+    'none': _eserver('none', [], {'TESSERACT': '/nonexistent/tesseract'}),
+}
+try:
+    import urllib.request as _eurl
+    import time as _etime
+    for _ename, (_eproc, _ebase, _ej) in _eservers.items():
+        for _ in range(120):
+            try:
+                _eurl.urlopen(_ebase + '/api/earnings', timeout=1).read()
+                break
+            except Exception:
+                _etime.sleep(0.1)
+    _edriver = os.path.join(_ework, 'earnings.js')
+    open(_edriver, 'w').write(EARNINGS_PAGE)
+    _eenv = dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
+                 PW_EXES=json.dumps([os.environ.get('CHROMIUM', ''),
+                                     '/opt/pw-browsers/chromium-1194/chrome-linux/chrome']))
+
+    def _edrive(name, shot):
+        run = subprocess.run(['node', _edriver, json.dumps({'base': _eservers[name][1], 'shot': shot})],
+                             env=_eenv, capture_output=True, text=True, timeout=180)
+        return json.loads((run.stdout or '{}').strip().split('\n')[-1] or '{}')
+
+    _eh = _edrive('here', _eshot)
+    no_('[earnings] the browser driver ran (%r)' % _eh.get('__crashed'), _eh.get('__crashed') or _eh.get('skip'))
+    _b = _eh.get('before') or {}
+    eq('[earnings] the box is there, its control a file picker for several pictures, phone-friendly',
+       (_b.get('shown'), _b.get('input'), _b.get('label')),
+       (True, {'type': 'file', 'multiple': True, 'accept': 'image/png,image/jpeg,image/webp'},
+        'Add earnings screenshots'))
+    ok_('[earnings] ...a finger\'s 52px tall at 360x640 (%r), no sideways scroll' % _b.get('labelH'),
+        (_b.get('labelH') or 0) >= 52 and not _b.get('sideways'))
+    eq('[earnings] ...and before an upload no record says what was paid, and nothing is asked of you',
+       (_b.get('paid'), _b.get('needs'), _b.get('install')),
+       ({'pizza': None, 'burg1': None, 'burg2': None}, [], None))
+    _a = _eh.get('after') or {}
+    ok_('[earnings] the upload is read and said: one screenshot, three trips, and the day\'s tally (%r)'
+        % _a.get('says'), 'Read 1 screenshot: 3 trips (3 new' in (_a.get('says') or '')
+        and '3 trips — 1 matched to orders, 1 needs you, 1 with no order on file.' in (_a.get('says') or ''))
+    eq('[earnings] the order the trip clearly was says what it paid against its card, the tip still processing',
+       _a.get('paid', {}).get('pizza'), 'Card $6.50 → Paid $2.00 (base $2.00, tip pending)')
+    _n = (_a.get('needs') or [{}])[0]
+    eq('[earnings] the chain\'s trip needs you: its two orders offered, best first or not, and "None of these"',
+       (len(_a.get('needs') or []), sorted(_n.get('offers') or []), (_n.get('buttons') or [])[-1:]),
+       (1, ['e-burg1', 'e-burg2'], ['None of these']))
+    ok_('[earnings] ...each a finger\'s 52px (%r), saying when each was taken and ended and its card'
+        % _n.get('heights'), all(h >= 52 for h in _n.get('heights') or [0])
+        and all(re.search(r'Took \d+:\d\d\s?[AP]M, ended \d+:\d\d\s?[AP]M, card \$\d+\.\d\d', t)
+                for t in (_n.get('buttons') or [])[:-1]))
+    ok_('[earnings] the trip with no order on file is kept and said (%r)' % _a.get('none')[:80],
+        (_a.get('none') or '').startswith('1 trip with no order on file') and 'Nowhere Noodles' in (_a.get('none') or ''))
+    _p = _eh.get('picked') or {}
+    eq('[earnings] one tap files it: the picked order\'s record says what it paid, a settled tip, by you',
+       (_p.get('needs'), (_p.get('paid') or {}).get('burg1'), (_p.get('paid') or {}).get('burg2')),
+       ([], 'Card $7.00 → Paid $25.05 (base $5.51 + tip $19.54); matched by you', None))
+    import csv as _ecsv
+    import io as _eio
+    _er = list(_ecsv.DictReader(_eio.StringIO(_eh.get('csv') or '')))
+    _eby = {}
+    for _row in _er:
+        _eby[_row.get('pickup_name', '') + '@' + _row.get('card_pay', '')] = _row
+    eq('[earnings csv] the records CSV gains the paid columns: total, tip, its status, paid less card',
+       [(_eby.get(k) or {}).get(c) for k in ('Pretend Pizza@6.50', 'Make-Believe Burgers@7.00',
+                                              'Make-Believe Burgers@8.00')
+        for c in ('paid_total', 'paid_tip', 'tip_status', 'paid_minus_card')],
+       ['2.00', '', 'pending', '-4.50', '25.05', '19.54', 'settled', '18.05', '', '', '', ''])
+    eq('[earnings] delete asks twice, then the picture goes and what was read stays',
+       (_eh.get('armed'), (_eh.get('deleted') or {}).get('forget'),
+        ((_eh.get('deleted') or {}).get('paid') or {}).get('pizza')),
+       ('Press again to delete them', None, 'Card $6.50 → Paid $2.00 (base $2.00, tip pending)'))
+    ok_('[earnings] ...and says so (%r)' % (_eh.get('deleted') or {}).get('says'),
+        'Deleted 1 screenshot; what was read off them is kept.' in ((_eh.get('deleted') or {}).get('says') or ''))
+    _en = _edrive('none', None).get('before') or {}
+    ok_('[earnings] a machine with no tesseract says so plainly, and how to install it (%r)' % _en.get('install'),
+        'tesseract is not installed' in (_en.get('install') or '')
+        and 'sudo apt install tesseract-ocr' in (_en.get('install') or ''))
+finally:
+    for _eproc, _ebase, _ej in _eservers.values():
+        _eproc.terminate()
+        try:
+            _eproc.wait(timeout=5)
+        except Exception:
+            _eproc.kill()
+    import shutil as _eshutil
+    _eshutil.rmtree(_ework, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d offers-page checks passed' % ok)
 sys.exit(1 if bad else 0)

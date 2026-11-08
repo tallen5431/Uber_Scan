@@ -182,6 +182,39 @@
                 color: var(--text); border: 1px solid var(--line); border-radius: 8px;
                 text-decoration: none; }
   #recordsCsv[hidden] { display: none; }
+  /* What the app paid (the owner, 7 Nov: "compare what uber actually paid
+     compared to the expected pay of the order"). A box like the review's,
+     its one big control the file picker's label, a finger's 52px like every
+     control here (rpi/test_layout.py); the input itself is hidden behind it,
+     still the one a screen reader and a keyboard reach. */
+  #earnings { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+              padding: 8px 12px 10px; margin: 8px 0 14px; }
+  #earnings[hidden] { display: none; }
+  #earnings h2 { margin: 0 0 4px; }
+  #earnings .note { font-size: 13px; line-height: 1.5; color: var(--muted); margin: 4px 0; }
+  #earnings .note[hidden], #earnings button[hidden] { display: none; }
+  #earningsInstall { color: var(--text); }
+  #earningsInstall code { font-weight: 700; overflow-wrap: anywhere; }
+  #earningsPick { display: flex; align-items: center; justify-content: center; min-height: 52px;
+                  padding: 6px 14px; font-size: 15px; font-weight: 800; color: var(--text);
+                  border: 1px solid var(--muted); border-radius: 10px; background: var(--panel-2);
+                  cursor: pointer; text-align: center; }
+  #earningsFiles { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+  #earningsFiles:focus-visible + #earningsPick { outline: 2px solid var(--text); }
+  #earnings .tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
+  #earnings .tools button, #earnings .cands button {
+    min-height: 52px; padding: 6px 12px; font: inherit; font-size: 13px; font-weight: 700;
+    color: var(--text); background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 8px; cursor: pointer; text-align: left; }
+  #earnings .tools button { flex: 1 1 140px; min-width: 0; }
+  #earnings .entry { border-top: 1px solid var(--line); padding: 8px 0 4px; font-size: 13px;
+                     overflow-wrap: anywhere; }
+  #earnings .entry b { margin-right: 6px; }
+  #earnings .entry em { display: block; font-style: normal; font-size: 12px; color: var(--muted); }
+  #earnings .cands { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 0; }
+  #earnings .cands button { width: 100%; }
+  #earnings details > summary { min-height: 44px; display: flex; align-items: center;
+                                font-size: 13px; cursor: pointer; }
   .offer.hiddenrow > summary { opacity: .5; }
   /* The way back, always in reach.
      This page is one continuous list — a week of offers is fourteen thousand
@@ -863,6 +896,32 @@
   <h2 id="recordsHead" hidden>Order records</h2>
   <p class="hint" id="recordsLead" hidden></p>
   <a id="recordsCsv" hidden href="#" download="order-records.csv">⤓ Download CSV</a>
+  <!-- What the app paid, off its own earnings screen (the owner, 7 Nov: "compare
+       what uber actually paid compared to the expected pay of the order" ...
+       "Can it automatically figure out which order it belongs to in the
+       journal?"). Screenshots of Uber's Earnings Activity are posted to this
+       server (/api/earnings/shot), read with tesseract and matched to the
+       orders on file; each order's record block below then says what it paid
+       against its card. The pictures stay on this machine, in a folder no page
+       is served from, and can be deleted once read. Shown when the server
+       answers /api/earnings: an older one does not, and the box stays hidden. -->
+  <section id="earnings" hidden>
+    <h2 id="earningsHead">What the app paid <em>· its earnings screen</em></h2>
+    <p class="note" id="earningsLead">Screenshots of Uber&rsquo;s Earnings Activity for a day.
+      Each trip on them is matched to its order here, and the order&rsquo;s record says what
+      it paid against the card. Upload again once tips have settled: a tip that was
+      processing is updated, nothing is counted twice.</p>
+    <input type="file" id="earningsFiles" accept="image/png,image/jpeg,image/webp" multiple>
+    <label id="earningsPick" for="earningsFiles">Add earnings screenshots</label>
+    <p class="note" id="earningsSays" aria-live="polite" hidden></p>
+    <p class="note" id="earningsInstall" hidden></p>
+    <div id="earningsNeeds"></div>
+    <div id="earningsNone"></div>
+    <div class="tools">
+      <button type="button" id="earningsReread">Read again and match again</button>
+      <button type="button" id="earningsForget" hidden></button>
+    </div>
+  </section>
   <h2 id="waitsHead" hidden>Restaurant waits</h2>
   <p class="hint" id="waitsLead" hidden></p>
   <div id="waits"></div>
@@ -962,6 +1021,8 @@
    'pairs', 'pairsHead', 'pairsLead', 'runsAll',
    'real', 'realHead', 'realLead', 'waits', 'waitsHead', 'waitsLead',
    'recordsHead', 'recordsLead', 'recordsCsv',
+   'earnings', 'earningsFiles', 'earningsSays', 'earningsInstall', 'earningsNeeds',
+   'earningsNone', 'earningsReread', 'earningsForget',
    'ppm', 'ppmHead', 'ppmLead', 'err', 'errHead', 'errLead',
    'ppmReal', 'ppmRealHead', 'ppmRealLead', 'refig', 'refigHead', 'refigLead',
    'review', 'reviewSays', 'reviewDays', 'reviewBack', 'reviewOn', 'reviewLead',
@@ -3029,6 +3090,9 @@
                     + (typeof drive.toPickup === 'number' ? ', ' + num(drive.toPickup, 1)
                        + ' mi to the pickup' : '')) : null, 'prose')
         + row('Really took', real.length ? esc(real.join(' · ')) : null)
+        // What the app paid, off its earnings screen, where an upload matched
+        // an entry to this order (paidLine).
+        + row('Paid', paidLine(rec), 'prose')
         + row('Carried with', Array.isArray(rec['with']) && rec['with'].length
               ? rec['with'].length + (rec['with'].length === 1 ? ' other order' : ' other orders') : null)
         + row('Snaps', Array.isArray(rec.snaps) && rec.snaps.length ? esc(rec.snaps.join(', ')) : null,
@@ -3042,7 +3106,10 @@
   var RECORD_COLUMNS = ['date', 'app', 'offered', 'took', 'ended', 'how_ended', 'card_pay',
                         'card_minutes', 'card_miles', 'actual_minutes', 'gps_miles', 'miles_from',
                         'actual_per_hour', 'actual_per_mile', 'pickup_name', 'pickup', 'dropoff',
-                        'with_another', 'reliable', 'source', 'notes'];
+                        'with_another', 'reliable', 'source', 'notes',
+                        // ...and what the app paid, where an earnings screenshot
+                        // was matched to the order (paidCells).
+                        'paid_total', 'paid_tip', 'tip_status', 'paid_minus_card'];
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   // Local 'YYYY-MM-DD HH:MM:SS', the report's _stamp.
@@ -3085,7 +3152,7 @@
             pl.pickupName, pl.pickup, pl.dropoff,
             Array.isArray(rec['with']) && rec['with'].length ? 'yes' : 'no',
             // No day's judgement here (too soon, never driven): the report's.
-            '', 'record', notes.join('; ')];
+            '', 'record', notes.join('; ')].concat(paidCells(rec));
   }
 
   function recordsCsv(records) {
@@ -3127,6 +3194,317 @@
       el.recordsCsv.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(text);
     }
   }
+
+  /* WHAT THE APP PAID (the owner, 7 Nov: "compare what uber actually paid
+     compared to the expected pay of the order" ... "Can it automatically
+     figure out which order it belongs to in the journal?"). The server reads
+     each uploaded screenshot of Uber's Earnings Activity, matches its trips
+     to the orders on file (earnings.js) and keeps one journal row per trip;
+     GET /api/earnings hands them back, newest version of each, and this page
+     shows three things of them and decides nothing:
+
+       - "Paid" in an order's record block: the card against what the app
+         paid, its base and its tip, or that the tip is still processing;
+       - four columns on the records CSV, the end-of-shift report's own;
+       - the "What the app paid" box: the upload, what it read, the trips it
+         could not place for sure with the top candidates to pick from, and
+         the trips with no order on file.
+
+     A tip still processing is said so, never counted as nothing. */
+  var earningsList = [];
+  var earningsInfo = null;
+  var earningsSaid = '';
+  var earningsForgetArmed = 0;
+  // A slow answer must not hold the page: past this the page draws without
+  // the app's figures, and the next load asks again.
+  var EARNINGS_WAIT_MS = 5000;
+  // What one press of the picker sends at most. A day is three to six
+  // screenshots; twenty is a long day scrolled finely, and the server keeps
+  // sixty (EARNINGS_SHOTS_MAX) until they are deleted.
+  var EARNINGS_PICK_MAX = 20;
+  // The record's Took and the match's, as the end-of-shift report joins a
+  // record to its order (RECORD_MATCH_S).
+  var EARNINGS_TOOK_MS = 60000;
+
+  // The window the page shows and a day before it: a day's screenshots are
+  // taken after the day, and Today's own records may be matched by trips
+  // filed under yesterday's heading past midnight.
+  function askEarnings() {
+    var span = days === 0 ? 0 : days + 1;
+    var ask = fetch('/api/earnings?days=' + span, { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+    var late = new Promise(function (resolve) { setTimeout(function () { resolve(null); }, EARNINGS_WAIT_MS); });
+    return Promise.race([ask, late]);
+  }
+
+  function paidFor(rec) {
+    var t = rec && rec.times && rec.times.took;
+    if (typeof t !== 'number') return null;
+    for (var i = 0; i < earningsList.length; i++) {
+      var m = earningsList[i].match || {};
+      if ((m.status === 'matched' || m.status === 'picked') && m.offer === rec.offer
+          && typeof m.tookAt === 'number' && Math.abs(m.tookAt - t) <= EARNINGS_TOOK_MS) {
+        return earningsList[i];
+      }
+    }
+    return null;
+  }
+
+  // "17:40" -> "5:40 PM", the page's 12-hour clock, with no date worked out.
+  function clockOfHm(hm) {
+    var m = /^(\d\d):(\d\d)$/.exec(hm || '');
+    if (!m) return hm || '';
+    var h = parseInt(m[1], 10);
+    return ((h % 12) || 12) + ':' + m[2] + ' ' + (h < 12 ? 'AM' : 'PM');
+  }
+  function dayLabel(iso) {
+    var m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(iso || '');
+    if (!m) return iso || 'no day';
+    return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString(undefined,
+      { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+  function tipWords(e) {
+    if (e.tipStatus === 'pending') return 'tip pending';
+    if (e.tipStatus === 'settled') return 'tip ' + money(e.tip, 2);
+    return 'no tip';
+  }
+
+  /* "Card $7.00 → Paid $25.05 (base $5.51 + tip $19.54)", or "(base $2.00,
+     tip pending)", or "(no tip)"; and when the tip settled after it was seen
+     processing, when that was. */
+  function paidLine(rec) {
+    var e = paidFor(rec);
+    if (!e || typeof e.amount !== 'number') return null;
+    var card = rec.card && typeof rec.card.pay === 'number' ? rec.card.pay : null;
+    var how = e.tipStatus === 'settled' ? 'base ' + money(e.base, 2) + ' + tip ' + money(e.tip, 2)
+      : e.tipStatus === 'pending' ? 'base ' + money(e.base, 2) + ', tip pending' : 'no tip';
+    var text = (card !== null ? 'Card ' + money(card, 2) + ' → ' : '') + 'Paid ' + money(e.amount, 2)
+      + ' (' + how + ')';
+    var hist = Array.isArray(e.history) ? e.history : [];
+    var wasPending = hist.filter(function (h) { return h && h.tip === 'processing'; })[0];
+    if (e.tipStatus === 'settled' && wasPending && typeof wasPending.at === 'number') {
+      text += '; the tip was still processing at ' + clock12(new Date(wasPending.at));
+    }
+    if ((e.match || {}).by === 'you') text += '; matched by you';
+    return esc(text);
+  }
+
+  // The records CSV's four columns: the total paid, the tip where it has
+  // settled, the tip's status, and the total less the card's pay — blank
+  // where no screenshot was matched to the order. The end-of-shift
+  // report's paid_cells (in tools/, held equal by its suite), word for word.
+  function paidCells(rec) {
+    var e = paidFor(rec);
+    if (!e || typeof e.amount !== 'number') return ['', '', '', ''];
+    var card = rec.card && typeof rec.card.pay === 'number' ? rec.card.pay : null;
+    return [f2(e.amount), e.tipStatus === 'settled' ? f2(e.tip) : '', e.tipStatus || '',
+            card !== null ? f2(Math.round((e.amount - card) * 100) / 100) : ''];
+  }
+
+  function entryLine(e) {
+    var bits = [money(e.amount, 2) + ' (' + tipWords(e) + ')'];
+    if (e.pickup && e.pickup.name) bits.push(e.pickup.name + (e.pickup.detail ? ' (' + e.pickup.detail + ')' : ''));
+    if (typeof e.minutes === 'number') bits.push(e.minutes + ' min' + (typeof e.miles === 'number' ? ', ' + e.miles + ' mi' : ''));
+    return '<b>' + esc(dayLabel(e.date) + ' ' + clockOfHm(e.finishedAt)) + '</b>' + esc(bits.join(' · '));
+  }
+
+  function showEarnings(ans) {
+    if (!ans || !ans.ok) {
+      earningsList = [];
+      earningsInfo = null;
+      el.earnings.hidden = true;
+      return;
+    }
+    earningsInfo = ans;
+    earningsList = Array.isArray(ans.entries) ? ans.entries : [];
+    el.earnings.hidden = false;
+    var t = ans.tesseract || {};
+    var shots = ans.shots || {};
+    if (!t.found) {
+      el.earningsInstall.hidden = false;
+      el.earningsInstall.innerHTML = 'This machine cannot read screenshots yet: <b>tesseract is not installed</b>. '
+        + 'On it, run <code>' + esc(t.install || 'sudo apt install tesseract-ocr') + '</code>, then press '
+        + '&ldquo;Read again&rdquo;. Screenshots uploaded meanwhile are kept and read then'
+        + (shots.unread ? ' (' + shots.unread + ' waiting now)' : '') + '.';
+    } else if (shots.unread) {
+      el.earningsInstall.hidden = false;
+      el.earningsInstall.textContent = shots.unread + (shots.unread === 1 ? ' screenshot has' : ' screenshots have')
+        + ' not been read yet: press “Read again”.';
+    } else {
+      el.earningsInstall.hidden = true;
+    }
+    // Each day's trips in this range, and what became of them.
+    var byDay = {};
+    earningsList.forEach(function (e) { (byDay[e.date] = byDay[e.date] || []).push(e); });
+    var said = Object.keys(byDay).sort().map(function (d) {
+      var l = byDay[d];
+      var n = function (st) { return l.filter(function (e) { return (e.match || {}).status === st; }).length; };
+      var parts = [];
+      if (n('matched') + n('picked')) parts.push((n('matched') + n('picked')) + ' matched to orders');
+      if (n('needs')) parts.push(n('needs') + ' need' + (n('needs') === 1 ? 's' : '') + ' you');
+      if (n('none')) parts.push(n('none') + ' with no order on file');
+      return dayLabel(d) + ': ' + l.length + (l.length === 1 ? ' trip' : ' trips') + ' — ' + parts.join(', ') + '.';
+    });
+    var text = [earningsSaid].concat(said).filter(Boolean).join(' ');
+    el.earningsSays.hidden = !text;
+    el.earningsSays.textContent = text;
+    // The trips it could not place for sure, each with its top candidates:
+    // one press files it.
+    var needs = earningsList.filter(function (e) { return (e.match || {}).status === 'needs'; });
+    el.earningsNeeds.innerHTML = needs.map(function (e) {
+      var cands = ((e.match || {}).candidates || []).map(function (c) {
+        var what = 'Took ' + (typeof c.tookAt === 'number' ? clock12(new Date(c.tookAt)) : '?')
+          + (typeof c.endedAt === 'number' ? ', ended ' + clock12(new Date(c.endedAt)) : '')
+          + (typeof c.pay === 'number' ? ', card ' + money(c.pay, 2) : '')
+          + (c.pickup ? ' · ' + c.pickup : '');
+        return '<button type="button" data-key="' + esc(e.key) + '" data-offer="' + esc(c.offer)
+          + '" data-took="' + esc(c.tookAt) + '">' + esc(what) + '</button>';
+      });
+      cands.push('<button type="button" data-key="' + esc(e.key) + '" data-none="1">None of these</button>');
+      return '<div class="entry needs">' + entryLine(e)
+        + '<em>Needs you: more than one order fits. Which was it?</em><div class="cands">' + cands.join('') + '</div></div>';
+    }).join('');
+    var none = earningsList.filter(function (e) { return (e.match || {}).status === 'none'; });
+    el.earningsNone.innerHTML = none.length
+      ? '<details><summary>' + none.length + (none.length === 1 ? ' trip' : ' trips')
+        + ' with no order on file (the rig was off, or none was close enough)</summary>'
+        + none.map(function (e) {
+          return '<div class="entry none">' + entryLine(e)
+            + ((e.match || {}).by === 'you' ? '<em>You said it was none of the orders on file.</em>' : '') + '</div>';
+        }).join('') + '</details>'
+      : '';
+    el.earningsForget.hidden = !shots.kept;
+    el.earningsForget.textContent = 'Delete the ' + shots.kept + (shots.kept === 1 ? ' screenshot' : ' screenshots')
+      + ' (what was read is kept)';
+    earningsForgetArmed = 0;
+  }
+
+  function postEarnings(path, body, type) {
+    return fetch(path, { method: 'POST', headers: { 'Content-Type': type || 'application/json' },
+                         body: type ? body : JSON.stringify(body || {}) })
+      .then(function (r) {
+        return r.json().catch(function () { return { ok: false, error: 'HTTP ' + r.status }; });
+      })
+      .catch(function () { return { ok: false, error: 'could not reach the server' }; });
+  }
+
+  // Sent one at a time, in the order picked: the first screenshot of a day
+  // shows its heading and the ones scrolled below it do not, and the server
+  // files those under their batch's day.
+  function uploadEarnings(files) {
+    var limits = (earningsInfo && earningsInfo.limits) || {};
+    var types = limits.types || ['image/png', 'image/jpeg', 'image/webp'];
+    var skipped = [];
+    if (files.length > EARNINGS_PICK_MAX) {
+      skipped.push((files.length - EARNINGS_PICK_MAX) + ' past the first ' + EARNINGS_PICK_MAX + ' (send them next)');
+      files = files.slice(0, EARNINGS_PICK_MAX);
+    }
+    files = files.filter(function (f) {
+      if (f.type && types.indexOf(f.type) === -1) { skipped.push(f.name + ' is not a PNG, JPEG or WebP picture'); return false; }
+      if (limits.bytes && f.size > limits.bytes) {
+        skipped.push(f.name + ' is over ' + Math.round(limits.bytes / 1048576) + ' MB');
+        return false;
+      }
+      return true;
+    });
+    var batch = 'b' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+    var got = [];
+    var say = function (t) { earningsSaid = t; el.earningsSays.hidden = false; el.earningsSays.textContent = t; };
+    var finish = function () {
+      var read = got.filter(function (a) { return a && a.ok && a.read; });
+      var trips = read.reduce(function (s, a) { return s + (a.trips || 0); }, 0);
+      var added = read.reduce(function (s, a) { return s + (a.added || 0); }, 0);
+      var changed = read.reduce(function (s, a) { return s + (a.changed || 0); }, 0);
+      var waiting = got.filter(function (a) { return a && a.ok && !a.read; });
+      var failed = got.filter(function (a) { return !a || !a.ok; });
+      var undated = read.filter(function (a) { return !a.day; }).length;
+      var notes = [];
+      read.forEach(function (a) {
+        (a.notes || []).forEach(function (n) { if (notes.indexOf(n) === -1) notes.push(n); });
+      });
+      var words = [];
+      if (read.length) {
+        words.push('Read ' + read.length + (read.length === 1 ? ' screenshot' : ' screenshots') + ': '
+          + trips + (trips === 1 ? ' trip' : ' trips') + ' (' + added + ' new, ' + changed
+          + ' updated, the rest already on file).');
+      }
+      if (waiting.length) {
+        words.push(waiting.length + (waiting.length === 1 ? ' screenshot is' : ' screenshots are')
+          + ' kept but not read: ' + (waiting[0].why || 'no reader') + '.');
+      }
+      if (undated) {
+        words.push(undated + (undated === 1 ? ' screenshot shows' : ' screenshots show') + ' no day: '
+          + 'send it with the screenshot from the top of that day, in one go.');
+      }
+      if (failed.length) {
+        words.push('Refused: ' + failed.map(function (a) { return (a && a.error) || 'no answer'; }).join('; ') + '.');
+      }
+      if (skipped.length) words.push('Not sent: ' + skipped.join('; ') + '.');
+      if (notes.length) words.push(notes.join('; ') + '.');
+      earningsSaid = words.join(' ');
+      load();
+    };
+    var next = function (i) {
+      if (i >= files.length) return finish();
+      say('Reading screenshot ' + (i + 1) + ' of ' + files.length + '…');
+      postEarnings('/api/earnings/shot?batch=' + batch, files[i], files[i].type || 'image/png')
+        .then(function (ans) { got.push(ans); next(i + 1); });
+    };
+    next(0);
+  }
+
+  el.earningsFiles.addEventListener('change', function () {
+    var files = Array.prototype.slice.call(el.earningsFiles.files || []);
+    el.earningsFiles.value = '';
+    if (files.length) uploadEarnings(files);
+  });
+  el.earningsNeeds.addEventListener('click', function (ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest('button[data-key]') : null;
+    if (!b) return;
+    var body = { key: b.getAttribute('data-key') };
+    if (b.getAttribute('data-none')) body.none = true;
+    else { body.offer = b.getAttribute('data-offer'); body.tookAt = Number(b.getAttribute('data-took')); }
+    b.disabled = true;
+    postEarnings('/api/earnings/pick', body).then(function (ans) {
+      earningsSaid = ans && ans.ok ? '' : 'Could not file that: ' + ((ans && ans.error) || 'no answer') + '.';
+      load();
+    });
+  });
+  el.earningsReread.addEventListener('click', function () {
+    el.earningsReread.disabled = true;
+    earningsSaid = 'Reading and matching again…';
+    el.earningsSays.hidden = false;
+    el.earningsSays.textContent = earningsSaid;
+    postEarnings('/api/earnings/reread', {}).then(function (ans) {
+      el.earningsReread.disabled = false;
+      earningsSaid = !ans || !ans.ok ? 'Could not read again: ' + ((ans && ans.error) || 'no answer') + '.'
+        : (ans.read ? 'Read ' + ans.read + (ans.read === 1 ? ' screenshot' : ' screenshots') + ' that were waiting. ' : '')
+          + (ans.install ? 'Still no tesseract on this machine. ' : '')
+          + 'Matched again: ' + ((ans.added || 0) + (ans.changed || 0)) + ' changed.';
+      load();
+    });
+  });
+  // Two presses, like the panel's Took: a mis-tap costs nothing. The second
+  // within EARNINGS_FORGET_MS deletes the pictures; what was read stays.
+  var EARNINGS_FORGET_MS = 5000;
+  el.earningsForget.addEventListener('click', function () {
+    var now = Date.now();
+    if (now - earningsForgetArmed > EARNINGS_FORGET_MS) {
+      earningsForgetArmed = now;
+      el.earningsForget.textContent = 'Press again to delete them';
+      return;
+    }
+    earningsForgetArmed = 0;
+    postEarnings('/api/earnings/forget', {}).then(function (ans) {
+      earningsSaid = ans && ans.ok
+        ? 'Deleted ' + ans.deleted + (ans.deleted === 1 ? ' screenshot' : ' screenshots')
+          + '; what was read off them is kept.'
+          + (ans.unread ? ' ' + ans.unread + ' not read yet ' + (ans.unread === 1 ? 'is' : 'are') + ' kept.' : '')
+        : 'Could not delete them: ' + ((ans && ans.error) || 'no answer') + '.';
+      load();
+    });
+  });
 
   /* WHAT $/MI TO ACCEPT, READ OFF THE RECORD. Four descriptions of the
      window that server.js works out (perMileSeen, cardVsReal, realByPerMile,
@@ -4309,9 +4687,19 @@
     // be silent either.
     el.csv.href = '/api/journal.csv?limit=0&' + windowQuery();
     askInCar();
+    // What the app paid, asked beside the journal and drawn before the list
+    // (whose record blocks read it); an older server's 404, or no answer in
+    // EARNINGS_WAIT_MS, is none, and the page draws as before.
+    var earned = askEarnings();
     fetch('/api/journal?' + windowQuery())
       .then(function (r) { return r.json(); })
-      .then(function (data) { if (seq === loadSeq) render(data); })
+      .then(function (data) {
+        return earned.then(function (ans) {
+          if (seq !== loadSeq) return;
+          showEarnings(ans);
+          render(data);
+        });
+      })
       .catch(function () {
         if (seq !== loadSeq) return;
         // Clear the figures. Leaving the previous window's numbers on screen
