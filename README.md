@@ -554,6 +554,7 @@ used. A one-line key across the map's foot names the marks on it.
 | `offer-parser.js` | Turns the text off a card into pay, minutes and miles — one corpus, shared with the Pi's port |
 | `vendor/` | The OCR engine the phone's scanner runs, kept here so the page works with no signal |
 | `advice.js` | What target the offers themselves argue for — shared, and tested on its own |
+| `earnings.js` | What the app actually paid, read off screenshots of its earnings screen, and which order on file each trip was: the reader (Uber's Earnings Activity; DoorDash's has a place and no reader yet — no screenshot of it has been seen), one trip however often it is uploaded, and the match. No I/O; `server.js` keeps the pictures and the rows. Tested on its own over `tests/fixtures/earnings.json`, and on drawn screenshots through the real tesseract |
 | `assemble.js` | Where the order in the car ends: an address the scanner read, a Trip Planner over one page or several, a lone dropoff on a single-trip card — each value on the hold with where it came from (press, label, planner, card, seen). No I/O; `server.js` writes and says what it decides. Tested on its own over `tests/fixtures/sequences.json` |
 | `sw.js` | Offline cache — stale-while-revalidate, so a changed file is picked up on the next open. `SHELL` is a convenience to bump when a page changes; `BLOB` is the OCR engine, bumped only when that changes |
 | `manifest.webmanifest` | Home-screen install metadata |
@@ -670,6 +671,28 @@ So the Pi scanner keeps one line per offer it was confident about, in
   already has. DoorDash's map label is kept marked as a guess and is never a
   figure. The miles column is a **driven-miles record per order**, from the
   Took to the end: useful for a mileage record; what you do with it is yours.
+* **what the app actually paid.** Uber's own figure for an order — and its
+  tip, which can take hours to settle — is on its **Earnings Activity**
+  screen, not on the card. Take screenshots of a day there (scroll and take
+  more; they may overlap), then on the offers page press **Add earnings
+  screenshots** in "What the app paid" and pick them all at once. The server
+  reads each one, works out which order on file each trip was — by when it
+  finished, the restaurant, the dropoff's street, and Uber's minutes and
+  miles against the rig's — and the order's record then says **Card $6.50 →
+  Paid $2.00 (base $2.00, tip pending)**, or **(base $5.51 + tip $19.54)**
+  once it has settled; the records CSV gains `paid_total`, `paid_tip`,
+  `tip_status` and `paid_minus_card`. Upload the day again later and a tip
+  that was processing is updated; nothing is counted twice. Where more than
+  one order fits (two from one chain minutes apart) it **needs you**: the box
+  shows the two or three it could be, and one press files it. A trip with no
+  order on file — the rig was off — is kept and listed as such. The
+  screenshots stay on the machine they were uploaded to, in a folder no page
+  is served from, and **Delete the screenshots** removes them once read,
+  keeping what was read off them. Reading needs `tesseract` on that machine;
+  where it is missing (the NucBox may not have it) the box says so and how:
+  `sudo apt install tesseract-ocr`, then **Read again**. Descriptive, like
+  the rest of the page: nothing the rig decides reads what was paid. Only
+  Uber's screen can be read for now.
 * **tick the ones you took.** The scanner cannot see the Accept button and never
   touches it, so it cannot know — but you can tell it, and once you do the page
   shows what you actually worked against what you were offered, per day and
@@ -758,7 +781,8 @@ Two things it is careful about:
   false` alongside the other settings in `rpi/config.json` turns it off and
   changes nothing else, and the Trip Planner's stops follow it too, and so
   does each order's record, which then keeps times, counts and words and no
-  store, door, dropoff or pin. A
+  store, door, dropoff or pin, and so does what the app paid, whose rows
+  then keep the figures and the match and no restaurant or street. A
   destination read off the phone is still written on the `mark` and `pair`
   rows server.js writes whatever it says — the server does not read that
   setting — and that is open. A 📷 Snap keeps the card's places and the car's
@@ -1035,6 +1059,12 @@ prints with `--strategy`; `strategy_curve.csv` beside the page):
   5% of the best; the band is a 95% interval with shift days resampled. Per
   block, app and weekday too, with the held-out check of a line per block
   beside them. The same on $/mi, for reading only.
+* **Card vs paid**, once earnings screenshots have been uploaded (see *what
+  the app actually paid*, above): what the app paid against the card for the
+  orders a screenshot was matched to, by app, three-hour block and restaurant,
+  each with its n; under five orders a group is marked thin, and an order
+  whose tip is still processing is left out of every figure and counted
+  beside them.
 
 It describes the record; it is not an accept rule, it changes no verdict, and
 nothing on the rig reads it (no $/mile rule, no payout floor, no pace, no line
@@ -1103,6 +1133,13 @@ phone would believe, for any site. It was served with a 200.
 `.crt` are now refused outright, and paths are re-checked after following
 symlinks rather than only being resolved lexically — resolving a path proves
 nothing about where a link inside the root actually points.
+
+The earnings screenshots the offers page uploads are a picture of your pay and
+of every street you delivered to that day. They are kept in `earnings/` beside
+the journal — `rpi/` unless `JOURNAL` moves it — under names whose endings
+(`.shot`, `.ocr`) are not a kind of file the site is made of, so they are not
+served wherever that folder ends up, and no endpoint hands one back: the page
+gets what was read off them, never the picture.
 
 If you ran an earlier version on an untrusted network, regenerate the CA
 (`rm -rf ssl && npm run cert`) and re-install the new one on the phone.

@@ -4303,6 +4303,47 @@ it to decide anything; the offers page shows it and the shift report prefers
 it. The sync carries it like any row with an id and a seq, and the NucBox's
 copy, which never rolls, keeps every one.
 
+**What the app paid for it, afterwards** (the owner, 7 Nov 2026: "compare what
+uber actually paid compared to the expected pay of the order" ... "Can it
+automatically figure out which order it belongs to in the journal?"). The
+offers page's **Add earnings screenshots** posts each screenshot of Uber's
+Earnings Activity to `POST /api/earnings/shot` (the picture is the body; PNG,
+JPEG or WebP, said on its first bytes; 12 MB at most, `EARNINGS_SHOT_MAX`; 60
+kept at once, `EARNINGS_SHOTS_MAX`). server.js keeps it as `<id>.shot` in
+`earnings/` beside the journal (0600 in a 0700 folder; gitignored), reads it
+with the `tesseract` command (`--psm 4 -l eng`, one OpenMP thread; `TESSERACT`
+names another binary) and `earnings.js`, keeps what it read as `<id>.ocr`, and
+for every trip on it writes or updates one `kind: "earning"` row: `key` (app,
+day, Uber's time, the pickup's name), `date`, `finishedAt`, `amount`, `tip` (a
+figure, `"processing"`, or none) and `tipStatus`, `base`, `type`, Uber's
+`minutes`, `seconds` and `miles`, `pickup` {name, the bracket} and `dropoff`
+{street, town} (none with keepPlaces off), `history` (each change of amount or
+tip with when it was seen), `shots`, and `match`: `matched` (by the matcher),
+`picked` (by the driver), `needs` (with the top three `candidates`) or `none`
+(no order on file), with the order's `offer`, holdId, Took and end, the card's
+pay, and whether it was an order record or a run rebuilt from took/drop rows.
+The newest row of a key is the trip; the sync carries it on `[kind, id, seq]`
+as it carries every row. A screenshot scrolled past the day's heading takes
+the day of the upload it came in (`batch`). `GET /api/earnings` answers with
+the trips, whether tesseract is installed and the command that installs it,
+and how many screenshots are kept and waiting; `POST /api/earnings/pick`
+files the driver's pick, `/reread` reads what is waiting and matches the last
+60 days again, `/forget` deletes the pictures that have been read. How a trip
+is matched — its time against the order's end, the restaurant, a chain's
+corner against the pickup's door, the dropoff's street, Uber's minutes and
+miles against the rig's, the app's clock offset found from the day — is
+written out at `score` and `matchDay` in `earnings.js`. Nothing the rig
+decides reads any of it.
+
+**On the NucBox**, where the owner uploads, reading needs tesseract and the
+NucBox may not have it; the offers page says so and how. One command:
+
+```sh
+sudo apt install tesseract-ocr     # then "Read again" on the offers page
+```
+
+Screenshots uploaded before it was installed are kept and read then.
+
 **What it cost the bar of controls.** Two of the six are conditional — "Took
 $8.04" with an offer on the record, "Drop" with an order in the car — so with
 both up the bar goes from five buttons to seven, and measured across every panel
@@ -4994,8 +5035,10 @@ place), and with no GPS log here takes its miles from the record's odometer and
 says so; older days are rebuilt as before. `--csv PATH` writes the **records
 CSV** to PATH instead: one row per order with the day, the app, offered, taken
 and ended, how it ended, the card's pay, minutes and miles, the minutes it
-really took, the GPS miles and where they came from, $/hr and $/mi, and the
-store, pickup and dropoff in full — the one output of this tool with places in
+really took, the GPS miles and where they came from, $/hr and $/mi, the
+store, pickup and dropoff in full, and — where an earnings screenshot was
+matched to the order — `paid_total`, `paid_tip` (once settled), `tip_status`
+and `paid_minus_card` — the one output of this tool with places in
 it, because it is the owner's own file (`--to YYYY-MM-DD` for a range of days in
 one file). The GPS miles there are a driven-miles record per order, Took to end.
 The offers page's **⤓ Download CSV** writes the same columns from the records
@@ -9009,7 +9052,7 @@ read, the scanner therefore keeps sampling for a few seconds. Reads report
 All of it, in one command:
 
 ```sh
-npm test                # all 45 suites
+npm test                # all 47 suites
 npm run test:quick      # ...minus the two that run tesseract
 ```
 
@@ -9031,7 +9074,7 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-node tests/placesreport.test.js # 326 on the NucBox's offline report of where
+node tests/placesreport.test.js # 366 on the NucBox's offline report of where
                                 #     good offers start: a pin only where one
                                 #     place answers inside the card's disc, no
                                 #     colour on a no-effect fixture or on an
@@ -9048,14 +9091,30 @@ node tests/placesreport.test.js # 326 on the NucBox's offline report of where
                                 #     tools/strategy.js, its takes timed by
                                 #     the report's own rule, an order's miles
                                 #     its record's odometer or the GPS log,
-                                #     and no approximate point moving a figure
-node tests/strategy.test.js     #  80 on what $/hr to expect and what holding
+                                #     and no approximate point moving a figure;
+                                #     card vs paid, the server's earnings read
+                                #     and drawn under the actuals
+node tests/strategy.test.js     #  90 on what $/hr to expect and what holding
                                 #     out for a line paid: the curve's answer
                                 #     worked by hand, a thin tail never the
                                 #     best, free time with every hold cut out,
                                 #     a card read twice counted once, a clock
                                 #     step never a delivery, and the held-out
-                                #     check of a line per block
+                                #     check of a line per block; card against
+                                #     what the app paid by app, restaurant and
+                                #     block, a pending tip left out
+node tests/earnings.test.js     # 139 on what the app paid and which order it
+                                #     was: Uber's earnings screen as tesseract
+                                #     reads it (tests/fixtures/earnings.json),
+                                #     one trip however often it is uploaded, a
+                                #     tip settling and never un-settling, a
+                                #     clear match, a chain's two orders left to
+                                #     the driver, the rig off, the app's clock
+                                #     off the rig's, one order per trip
+python3 rpi/test_earnings.py    #  15 on the same screen drawn at the phone's
+                                #     size and read by the real tesseract, as
+                                #     the server runs it: PNG, JPEG, the time on
+                                #     either line, a scroll past the top
 python3 rpi/test_parser.py      # 1603 — the same corpus, plus the Pi's own
 python3 rpi/test_accumulate.py  # 322 on merging readings across frames, on a
                                 #     recovered leg staying recovered, and on
@@ -9185,13 +9244,15 @@ python3 rpi/test_loop.py        # 401 on the scan loop re-telling a card once
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
 python3 tools/test_gpslog_tidy.py   #  45 on tidying the GPS logs unattended
-python3 tools/test_shift_report.py  # 244 on what each order really took and
+python3 tools/test_shift_report.py  # 252 on what each order really took and
                                     #     what the shift adds up to: a gap in
                                     #     the GPS log never a stop and never
                                     #     miles, a parked receiver's wander
                                     #     never miles, and no place printed;
                                     #     --strategy's answer worked by hand,
-                                    #     only a reliable order timed
+                                    #     only a reliable order timed; the
+                                    #     records CSV's paid columns off the
+                                    #     newest earning row of each trip
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.
