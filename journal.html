@@ -550,6 +550,11 @@
     .stats .unit { font-size: 16px; }
     .unit { font-size: 15px; }
     .stats small { font-size: 15px; }
+    /* What the app paid: its own sizes are an id deep, so the two lines above
+       do not reach them; the same arm's-length floor (rpi/test_layout.py). */
+    #earnings .note { font-size: 17px; }
+    #earnings .entry, #earnings .entry em, #earnings details > summary,
+    #earnings .tools button, #earnings .cands button { font-size: 15px; }
 
     .block { padding: 6px 0; }
     .block .label { width: 88px; font-size: 16px; }
