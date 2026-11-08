@@ -5554,10 +5554,38 @@ MAP_LABEL_LONGEST = 48
 # What is left is judged as before; a word the ellipsis cut ("Pk...") is
 # still no type, and the label is refused for it as the "…" form is.
 MAP_LABEL_CUT = re.compile(r'\s*(?:…|\.\s*\.)[\s.…]*$')
+# ...AND NEVER THE STORE'S PRINTED DOOR, HOWEVER THE MAP SPELLS IT. The owner's
+# snap of 7 Nov 21:34 ("It read the business address as it is a full address
+# but the customer is usually just the number and street"): DoorDash's
+# one-store card printed the store's door in full, "<n> <Name> Road Northwest,
+# Atla…", and the customer's label on the map was "<n> <Name> Dr NW" — a house
+# number and a street, abbreviated the way the map abbreviates, and no town.
+# `store` was only ever compared word for word, so a label "<n> <Name> Rd NW"
+# for a store printed "<n> <Name> Road Northwest" went through: the two spell
+# the type and the quadrant differently. A label is the store's when its
+# house number and its first street word are the store door's first two
+# words (_label_same_door): a customer on the store's own street has another
+# number, and a store with the customer's number on another street is not
+# this card's. And a label that runs on past its street's type and quadrant —
+# "<n> <Name> Road Northwest <Town>", a whole door with its town read off one
+# line — is a full address, which DoorDash's customer label never is (a
+# type, then a quadrant, then any word, in map_label). A comma, a ZIP and a two-letter state were refused
+# already: a comma or a ZIP is no label word, and "GA" is two letters where a
+# street with no type wants every word of three (cases.json mapLabels holds
+# all three). Refusing costs a guess the map draws; taking it puts the
+# customer's ≈ at the restaurant.
 
 
 def _label_key(text):
     return ' '.join(re.findall(r'[a-z0-9]+', str(text or '').lower()))
+
+
+def _label_same_door(number, first, store_key):
+    """Whether a store's door (its _label_key) starts with this label's house
+    number and first street word: the store's own door, however spelt."""
+    words = store_key.split(' ')
+    return bool(number) and len(words) > 1 and words[0] == number \
+        and words[1] == (first or '').lower()
 
 
 def map_label(text, clipped=False, store=None):
@@ -5583,6 +5611,11 @@ def map_label(text, clipped=False, store=None):
     if not all(_LABEL_WORD.fullmatch(w) for w in words) \
             or any(MAP_LABEL_JUNK.match(w.rstrip('.')) for w in words):
         return None
+    # A type, then a quadrant, then more words: a town after the street, a
+    # whole door's (MAP_LABEL_CUT's note above, the owner's snap of 7 Nov).
+    if any(_LABEL_TYPE.fullmatch(words[i]) and _LABEL_DIR.fullmatch(words[i + 1])
+           for i in range(len(words) - 2)):
+        return None
     quadrant = None
     if len(words) > 1 and _LABEL_DIR.fullmatch(words[-1]):
         quadrant = words[-1].rstrip('.')
@@ -5605,7 +5638,8 @@ def map_label(text, clipped=False, store=None):
     key = _label_key(line)
     for s in ([store] if isinstance(store, str) else (store or [])):
         k = _label_key(s)
-        if k and (k == key or k.startswith(key + ' ')):
+        if k and (k == key or k.startswith(key + ' ')
+                  or (not clipped and _label_same_door(number, words[0], k))):
             return None
     return line
 

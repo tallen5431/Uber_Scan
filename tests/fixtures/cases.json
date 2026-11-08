@@ -9042,6 +9042,78 @@
     "164 Wren Hollow Pkwy, Brookvale, GA 30066"
    ],
    "expect": null
+  },
+  {
+   "name": "the store's door as the map abbreviates it, Rd NW for Road Northwest (the owner's snap of 7 Nov)",
+   "text": "1761 Fernhill Rd NW",
+   "store": [
+    "Lark Owl Tacos",
+    "1761 Fernhill Road Northwest, Atla"
+   ],
+   "expect": null
+  },
+  {
+   "name": "...and another number on the store's own street is the customer's",
+   "text": "286 Fernhill Rd NW",
+   "store": [
+    "Lark Owl Tacos",
+    "1761 Fernhill Road Northwest, Atla"
+   ],
+   "expect": "286 Fernhill Rd NW"
+  },
+  {
+   "name": "...the store's number on another street is not the store's",
+   "text": "1761 Wrenfield Dr NW",
+   "store": [
+    "Lark Owl Tacos",
+    "1761 Fernhill Road Northwest, Atla"
+   ],
+   "expect": "1761 Wrenfield Dr NW"
+  },
+  {
+   "name": "the second store's door of a two-store card, abbreviated",
+   "text": "2516 Quillon St",
+   "store": [
+    "Lark Owl Pizza",
+    "4410 Fernhill Road Northwest, ...",
+    "Maple Run Creamery",
+    "2516 Quillon Street, Brookvale, 301..."
+   ],
+   "expect": null
+  },
+  {
+   "name": "a whole door with its town read off one line, no comma",
+   "text": "1761 Fernhill Road Northwest Brookvale",
+   "expect": null
+  },
+  {
+   "name": "...with its comma",
+   "text": "1761 Fernhill Road Northwest, Brookvale",
+   "expect": null
+  },
+  {
+   "name": "...with its state and ZIP",
+   "text": "1761 Fernhill Rd NW Brookvale GA 30318",
+   "expect": null
+  },
+  {
+   "name": "...with its state and no ZIP",
+   "text": "1761 Fernhill Road Brookvale GA",
+   "expect": null
+  },
+  {
+   "name": "a compass word in front of the type is the street's own name",
+   "text": "418 North Ave NE",
+   "expect": "418 North Ave NE"
+  },
+  {
+   "name": "the customer's label as the snap's map printed it: a number and a street, no town",
+   "text": "286 Wrenfield Dr NW",
+   "store": [
+    "Lark Owl Tacos",
+    "1761 Fernhill Road Northwest, Atla"
+   ],
+   "expect": "286 Wrenfield Dr NW"
   }
  ]
 }

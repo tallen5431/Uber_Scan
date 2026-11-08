@@ -2429,10 +2429,35 @@ frame's DoorDash map was still zoomed in on the car — no route, no pins, no
 label — before the app fitted the route and labelled the customer's street.
 A study scoring bands should expect some like it. DoorDash's map LABEL is not
 read off that one frame any more: the scanner asks it again on later frames
-of the same card, two seconds apart and five times at most, until a label is
-read (`MAP_LABEL_AGAIN_S`, `MAP_LABEL_TRIES` in `scan_pi.py`), and a label the
-app cut with its ellipsis — which tesseract reads as "..." — is the street
-before it, as "…" always was.
+of the same card, two seconds apart, for as long as that offer's card is
+read and no label has been (`MAP_LABEL_AGAIN_S`; `MAP_LABEL_LIFE_S`, 75 s from
+the first ask, over DoorDash's minute-long countdown), and a label the app
+cut with its ellipsis — which tesseract reads as "..." — is the street before
+it, as "…" always was. It was five asks at most, and on the owner's snap of
+7 Nov all five were spent in the card's first twelve seconds on DoorDash's
+**overview heat map** — orange zones, round flame pins, restaurant names in
+plain text, no label — while the route and the customer's pill came up only
+by the 0:21 frame. An ask whose map holds no label-shaped box (the overview,
+or the map still on the car) runs no OCR and is not counted; `MAP_LABEL_TRIES`
+(20) caps only the asks that had a box to read and read no street. Measured
+on this machine: 33-40 ms an overview ask, 45-48 ms a read of the route's
+pill (medians); the Pi's map label read is 140 ms median by
+`tools/pi_bench.py`, so an ask every two seconds is under a tenth of one core,
+on the label's own thread.
+
+**⌖ over a DoorDash card reads the map's label too.** The press reads the
+screen's text, whose one full address on a "Customer dropoff" card is the
+store's printed door — never the dropoff — and the customer's white-on-black
+pill is not in that text. So the press's own frame is read for the pill, as
+a card read's would be, and a street found there becomes the offer's
+`dropoffGuess`: approximate, drawn "≈" on the map, never a pin, the GPS drop,
+a figure or the press's dropoff answer, which stays "no address". The log
+says what the press found — the label, or why there was none ("no label pill
+on the map", or the pill it read and refused). The card's store names and
+doors are refused as the label however the map spells them ("Rd NW" for
+"Road Northwest": the house number and first street word decide), and so is
+a label running on past its street into a town: DoorDash's customer label is
+a house number and a street, nothing more.
 
 **A band starts at the top of the screen box.** It started 6% down, to keep
 the phone's status bar out, and the owner's 2 Nov label sat only 15 rows of

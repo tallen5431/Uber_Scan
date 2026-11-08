@@ -137,11 +137,15 @@ class FakeCam(object):
     same as the one before it. A list of (from, to) spans instead is a camera
     that stalls and comes back, `to` None for one that stays stalled.
     `noise=False` leaves the dither off, for the pictures that repeat on a
-    working camera: ones with nothing in them that could show noise."""
+    working camera: ones with nothing in them that could show noise.
+    `scenes`: [(from, frame)], the card's screen changing under the camera
+    once it is up — `frame` shown from `from` seconds in, the last one
+    reached winning: DoorDash's map going from its overview to the route."""
 
     def __init__(self, offer, empty, appear_at=0.4, fail_after=None, freeze_at=None,
-                 noise=True, ring=1):
+                 noise=True, ring=1, scenes=None):
         self.offer, self.empty = offer, empty
+        self.scenes = sorted(scenes or [], key=lambda sc: sc[0])
         self.appear_at = appear_at
         self.started = time.time()
         self.fail_after = fail_after
@@ -155,6 +159,10 @@ class FakeCam(object):
     def _show(self):
         t = time.time() - self.started
         self.frame = self.offer if t >= self.appear_at else self.empty
+        if t >= self.appear_at:
+            for at, scene in self.scenes:
+                if t >= at:
+                    self.frame = scene
         grey = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
         small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA).ravel()
         if self.noise:
@@ -220,7 +228,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         planners=None,
         freeze_at=None, stall_say=None, empty=None, noise=True, offer_dim=None,
         ring=1, stall_again=None, offer=None, real_look=None, found_for=None,
-        pi=None, dark_for=None):
+        pi=None, dark_for=None, scenes=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return — on the reader's thread only, with `hang_on_loop` False, so a read
@@ -260,6 +268,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     n is to come back as the real reader answers a black crop it left unread
     (pipeline.DARK_SKIP_BELOW): empty, `skipped: 'dark'`. `skip_darks` in the
     result is each read handed over as (whole screen or not, skip_dark).
+    `scenes`: the card's screen changing once it is up — see FakeCam.
     Returns the journal rows, the announcements, the alive beats and what rode
     them, the log lines, how many reads were asked of the reader and how many
     it began, the exception main() raised, if any, and the handoff directory —
@@ -283,7 +292,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     if offer_dim is not None:
         offer = (offer.astype(np.float32) * offer_dim).astype(np.uint8)
     cam = FakeCam(offer, TC.blank() if empty is None else empty, appear_at=appear_at,
-                  fail_after=fail_after, freeze_at=freeze_at, noise=noise, ring=ring)
+                  fail_after=fail_after, freeze_at=freeze_at, noise=noise, ring=ring,
+                  scenes=scenes)
     # Handed out so a check can ask what is really in the mount right now. The
     # stubbed reader answers with whatever text the check asked for whether or
     # not there is a card in front of it, so an announced offer is NOT evidence
@@ -398,9 +408,12 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     del LABELS[:]
     real_label_submit = SP.MapLabels.submit
 
-    def label_submit(self, offer_id, frame, geom, store=None):
-        LABELS.append((offer_id, time.monotonic()))
-        return real_label_submit(self, offer_id, frame, geom, store=store)
+    def label_submit(self, offer_id, frame, geom, store=None, press=False):
+        # ...when, on both clocks (FakeCam's scenes are on the wall clock),
+        # whether a ⌖ press asked, and whether the ask was taken.
+        took = real_label_submit(self, offer_id, frame, geom, store=store, press=press)
+        LABELS.append((offer_id, time.monotonic(), time.time(), press, took))
+        return took
 
     SP.MapLabels.submit = label_submit
 
@@ -614,6 +627,133 @@ ok_('...after its offer line went out',
     r['labels'] and r['offer_at'] and min(l[1] for l in r['labels']) >= r['offer_at'][0])
 r = run(lambda n, k: WHOLE, seconds=6.0, appear_at=0.0, until=lambda rows, ann, calls: calls >= 4)
 eq('...and an Uber card is not', r['labels'], [])
+
+# ...AND KEPT ASKING WHILE THE CARD IS UP, past DoorDash's overview map. The
+# owner's snap of 7 Nov 21:34, on RENDERED screens (invented store, door and
+# street): a one-store card, "Customer dropoff", its map first DoorDash's
+# overview heat map (no pill) and only later the route with the customer's
+# pill. The five asks two seconds apart were all spent before the pill came
+# up. Here the spacing is cut to half a second (so five asks span two
+# seconds), the overview held for seven with the map changing under it (the
+# overview, and the map still on the car), and the label must still be told —
+# after the route, as the customer's. The verify beat is cut to half a second
+# too: on the snap the card was read every 1-6 s, and with the stubbed reader
+# under a loaded machine the beat's backoff (VERIFY_MAX) left two reads in
+# seven seconds, too few to tell the rules apart.
+_DD_ONE = (('Lark Owl Tacos', '1761 Fernhill Road Northwest, Atla...'),)
+_DD_ONE_TEXT = ('$7.10\n2 stops (4.8 mi) - 42 min\nLark Owl Tacos\n'
+                '1761 Fernhill Road Northwest, Atla...\nCustomer dropoff')
+
+
+def _dd_one(view, label='286 Wrenfield Dr NW'):
+    return TC.mount(TC.dd_stores_screen(pay='$7.10', journey='2 stops (4.8 mi) • 42 min',
+                                        stores=_DD_ONE, tail=('Customer dropoff', None),
+                                        label=label if view == 'route' else None,
+                                        map_view=view), 720)
+
+
+_DD_OV, _DD_CAR, _DD_RT = _dd_one('overview'), _dd_one(None), _dd_one('route')
+_ROUTE_AT = 7.0
+_scenes = [(0.8 * i, _DD_OV if i % 2 == 0 else _DD_CAR) for i in range(9)] + [(_ROUTE_AT, _DD_RT)]
+
+
+_was_again = (SP.MAP_LABEL_AGAIN_S, SP.VERIFY_EVERY, SP.VERIFY_MAX)
+SP.MAP_LABEL_AGAIN_S, SP.VERIFY_EVERY, SP.VERIFY_MAX = 0.5, 0.5, 0.5
+try:
+    _cam = []
+    # Until an ask was taken of the route and two seconds have passed for its
+    # answer to be told: LABELS is filled as the loop asks.
+    r = run(lambda n, k: _DD_ONE_TEXT, seconds=25.0, appear_at=0.0, offer=_DD_OV,
+            scenes=_scenes, cam_out=_cam,
+            until=lambda rows, ann, calls: bool(_cam) and any(
+                l[4] and l[2] - _cam[0].started >= _ROUTE_AT for l in LABELS)
+            and time.time() - _cam[0].started >= _ROUTE_AT + 3.0)
+finally:
+    SP.MAP_LABEL_AGAIN_S, SP.VERIFY_EVERY, SP.VERIFY_MAX = _was_again
+_ids = sorted(set(a[0] for a in r['announced']))
+_t0 = _cam[0].started if _cam else 0.0
+_told = [(a[0], k.get('map_label')) for a, k in zip(r['announced'], r['offer_kw'])
+         if k.get('map_label')]
+_before = [l for l in r['labels'] if l[2] - _t0 < _ROUTE_AT and l[4]]
+eq('DoorDash\'s overview, then the route: the customer\'s label told on the card\'s offer line '
+   '(%d asks taken before the route)' % len(_before),
+   sorted(set(_told)), [(_ids[0], '286 Wrenfield Dr NW')] if _ids else [])
+ok_('...after more asks on the overview than the five that were all the old rule allowed '
+    '(%d)' % len(_before), len(_before) > 5)
+ok_('...and only once the route was up (the first label line at %.1f s, the route at %.1f s)'
+    % ((min(t for t, k in zip(r['offer_at'], r['offer_kw']) if k.get('map_label'))
+        - r['offer_at'][0]) if _told else -1, _ROUTE_AT),
+    _told and any(l[2] - _t0 >= _ROUTE_AT and l[4] for l in r['labels']))
+ok_('...and the dropoff stays the card\'s none: the label is a guess, never the dropoff (%r)'
+    % [a[1].get('dropoff') for a in r['announced']][:3],
+    all(a[1].get('dropoff') is None for a in r['announced']) and r['dropoffs'] == [])
+
+
+# ⌖ ON THE CARD READS THE MAP'S LABEL TOO. The same card, its automatic asks
+# made rare (MAP_LABEL_AGAIN_S an hour, so only the first, on the overview, is
+# made) and ⌖ pressed once the route is up: the press's own frame is read for
+# the pill, the label is told on the offer line (the server's dropoffGuess),
+# the log says what the press found, and the press's dropoff answer is still
+# "no address" — the store's printed door on the card is never taken.
+def _press_run(scenes, press_at, label_view='route'):
+    hand = tempfile.mkdtemp()
+    state = {'pressed': None}
+    was = SP.MAP_LABEL_AGAIN_S
+    SP.MAP_LABEL_AGAIN_S = 3600.0
+    cam = []
+
+    def texts(n, k):
+        if state['pressed'] is None and cam and time.time() - cam[0].started >= press_at:
+            open(os.path.join(hand, 'uberscan-dropoff'), 'w').close()
+            state['pressed'] = time.time()
+        return _DD_ONE_TEXT
+
+    try:
+        out = run(texts, seconds=16.0, appear_at=0.0, offer=scenes[0][1], scenes=scenes,
+                  cam_out=cam, handoff=hand, whole_text=_DD_ONE_TEXT, dropoff_window=4.0,
+                  until=lambda rows, ann, calls: state['pressed'] is not None
+                  and time.time() - state['pressed'] > 6.0)
+    finally:
+        SP.MAP_LABEL_AGAIN_S = was
+    out['pressed'] = state['pressed']
+    return out
+
+
+r = _press_run([(0.0, _DD_OV), (2.0, _DD_RT)], press_at=4.0)
+_presses = [l for l in r['labels'] if l[3]]
+_told = [k.get('map_label') for k in r['offer_kw'] if k.get('map_label')]
+_said = [l for l in r['logs'] if l.startswith('⌖ on a DoorDash card')]
+_auto = [l for l in r['labels'] if not l[3] and l[4]]
+ok_('the premise: ⌖ was pressed with the route up, and the automatic ask was taken once, '
+    'before it (%d)' % len(_auto),
+    r['pressed'] is not None and len(_auto) == 1 and _auto[0][2] < r['pressed'])
+ok_('⌖ over a DoorDash card asks the map label of the press\'s frame (%d asks)' % len(_presses),
+    any(l[4] for l in _presses))
+eq('...and the label it read is told on the offer line, the offer\'s ≈ guess', sorted(set(_told)),
+   ['286 Wrenfield Dr NW'])
+ok_('...the log says what the press found (%r)' % _said[:1],
+    any('"286 Wrenfield Dr NW"' in l and '≈' in l for l in _said))
+eq('...and the press\'s dropoff answer is still no address: neither the label nor the '
+   'store\'s door is ever the dropoff', [d[0] for d in r['dropoffs']], [None])
+
+# ...on the overview, the press finds no pill and says so; nothing is told.
+r = _press_run([(0.0, _DD_OV)], press_at=2.0)
+_said = [l for l in r['logs'] if l.startswith('⌖ on a DoorDash card')]
+eq('⌖ over the overview map: no label told', [k.get('map_label') for k in r['offer_kw']
+                                              if k.get('map_label')], [])
+ok_('...and the log says why, once (%r)' % _said,
+    len(_said) == 1 and 'no label pill' in _said[0])
+
+# ...and a pill that is the store's own door, abbreviated as a map spells it,
+# is refused by the press as by any ask.
+_DD_STORE_PILL = _dd_one('route', label='1761 Fernhill Rd NW')
+r = _press_run([(0.0, _DD_STORE_PILL)], press_at=2.0)
+_said = [l for l in r['logs'] if l.startswith('⌖ on a DoorDash card')]
+eq('⌖ with the store\'s door on the pill: no label told, the dropoff answer still none',
+   ([k.get('map_label') for k in r['offer_kw'] if k.get('map_label')],
+    [d[0] for d in r['dropoffs']]), ([], [None]))
+ok_('...and the log names the pill it refused (%r)' % _said,
+    any('1761 Fernhill Rd NW' in l and 'no customer' in l for l in _said))
 
 r = run(lambda n, k: WHOLE, seconds=4.0, config_extra={'mapBands': False},
         until=lambda rows, ann, calls: calls >= 4)

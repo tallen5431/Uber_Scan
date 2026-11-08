@@ -460,9 +460,63 @@ def dd_pay_box(pay='$14.10'):
     return box[1] / float(H), box[3] / float(H)
 
 
+def _overview_map(d):
+    """DoorDash's opening heat map over the map area (dd_stores_screen's
+    'overview'): what its first frames showed on the owner's snap of 7 Nov."""
+    for x0, y0, x1, y1 in ((560, 250, 760, 380), (380, 430, 560, 560),
+                           (600, 470, 820, 640), (300, 640, 450, 720)):
+        d.ellipse([x0, y0, x1, y1], fill=(240, 186, 140))          # busy zones
+    # The flame pins: round, black-ringed white ones as the snap shows, and a
+    # filled black one, which is still round and no label's shape.
+    for (cx, cy), filled in (((660, 230), False), ((450, 420), False),
+                             ((700, 470), True), ((370, 650), False)):
+        d.ellipse([cx - 40, cy - 40, cx + 40, cy + 40],
+                  fill=(25, 25, 25) if filled else (250, 250, 250),
+                  outline=(25, 25, 25), width=6)
+        ink = (250, 250, 250) if filled else (25, 25, 25)
+        d.polygon([(cx, cy - 24), (cx + 15, cy + 4), (cx + 9, cy + 20),
+                   (cx - 9, cy + 20), (cx - 15, cy + 4)], fill=ink)
+    # The names, plain dark text on the map: no pill round any of them.
+    for (x, y), name in (((520, 300), 'Fernhill Wine & Spirits'),
+                         ((330, 480), 'Lark Owl Tacos'),
+                         ((480, 560), 'Quillon Mexican Grill'),
+                         ((520, 680), 'Hungry Wren'), ((300, 760), 'Maple Burger')):
+        d.text((x, y), name, font=font(40), fill=(40, 40, 40))
+    d.ellipse([400, 280, 470, 350], fill=(200, 205, 240))           # the car
+    d.ellipse([420, 300, 450, 330], fill=(50, 60, 230))
+    d.text((480, 620), 'Brookvale', font=font(46, False), fill=(200, 60, 70))
+
+
+def _route_map(d, label):
+    """DoorDash's map once it has fitted the route (dd_stores_screen's
+    'route'): the store's pin, the route, the customer's pin and, just above
+    it, the customer's label pill — the snap of 7 Nov's second frame."""
+    store, person = (520, 520), (420, 830)
+    d.line([store, (store[0], 600), (380, 600), (380, 760), person],
+           fill=(45, 45, 45), width=7)
+    for (cx, cy) in (store, person):
+        d.ellipse([cx - 46, cy - 46, cx + 46, cy + 46], fill=(25, 25, 25))
+    d.rectangle([store[0] - 16, store[1] - 12, store[0] + 16, store[1] + 14],
+                outline=(250, 250, 250), width=4)                  # a store
+    d.ellipse([person[0] - 10, person[1] - 22, person[0] + 10, person[1] - 2],
+              outline=(250, 250, 250), width=4)                   # a person
+    d.arc([person[0] - 18, person[1], person[0] + 18, person[1] + 30], 180, 360,
+          fill=(250, 250, 250), width=4)
+    for (cx, cy) in ((store[0] + 6, store[1] + 70), (person[0], person[1] + 70)):
+        d.ellipse([cx - 10, cy - 10, cx + 10, cy + 10], outline=(45, 45, 45), width=4)
+    d.text((520, 960 - 110), 'Brookvale', font=font(46, False), fill=(110, 110, 110))
+    if label:
+        f = font(40)
+        tw = int(f.getlength(label))
+        x0, y0 = max(20, person[0] - tw // 2 - 40), person[1] - 160
+        d.rounded_rectangle([x0, y0, x0 + tw + 80, y0 + 90], radius=44, fill=(12, 12, 12))
+        d.text((x0 + 40, y0 + 18), label, font=f, fill=(255, 255, 255))
+
+
 def dd_stores_screen(pal=LIGHT, pay='$14.10', journey='3 stops (8.7 mi) • 33 min',
                      stores=DD_STORES, tail=('Customer dropoff', 'Drop off 2 orders'),
-                     label='1256 Maple Run Ln NW', countdown='0:36', upper=None):
+                     label='1256 Maple Run Ln NW', countdown='0:36', upper=None,
+                     map_view=None):
     """DoorDash's offer card with its stores listed, taller than an Uber card.
 
     `tail` is the dropoff block: ('Customer dropoff', <chip>) or
@@ -470,8 +524,24 @@ def dd_stores_screen(pal=LIGHT, pay='$14.10', journey='3 stops (8.7 mi) • 33 m
     black at the map's top, as the phone draws it. `upper`, when given, is
     (sheet top, rows) — another card on the same sheet above this one, with
     no button of its own, its rows (y, text, size, bold) and a hairline under
-    them: the stacked card the raised box must not take a payout from."""
+    them: the stacked card the raised box must not take a payout from.
+
+    `map_view` draws the map the way DoorDash does in the first seconds of a
+    card and after (the owner's snap of 7 Nov 21:34): 'overview' is the heat
+    map it opens on — orange busy zones, black round flame pins, restaurant
+    names in plain dark text, the car's blue dot, a town in red, and no
+    label pill (a `label` given is not drawn on it); 'route' is the map once
+    it has fitted the route — the store's black round pin, a thin dark route
+    down to the customer's black round person pin, and the label pill just
+    above that pin, where the phone puts it. None keeps the plain map with
+    the label at its top, as before. Every name on it is invented."""
     im, d = _canvas(pal)
+    if map_view == 'overview':
+        _overview_map(d)
+        label = None
+    elif map_view == 'route':
+        _route_map(d, label)
+        label = None
     if label:
         d.rounded_rectangle([300, 470, 860, 560], radius=44, fill=(12, 12, 12))
         d.text((340, 488), label, font=font(40), fill=(255, 255, 255))

@@ -2971,8 +2971,22 @@
      stays, an abbreviation's. See MAP_LABEL_CUT in offer_parser.py. */
   var MAP_LABEL_CUT = /\s*(?:…|\.\s*\.)[\s.…]*$/;
 
+  /* ...and never the store's printed door, however the map spells it (the
+     owner's snap of 7 Nov 21:34: the store printed "<n> <Name> Road
+     Northwest, Atla…", the customer's label "<n> <Name> Dr NW"): a label
+     whose house number and first street word are a store door's first two
+     words is that store's (labelSameDoor), and one running on past its
+     type and quadrant ("<n> <Name> Road Northwest <Town>") is a whole door
+     with its town, which the customer's label never is. See MAP_LABEL_CUT's
+     note in offer_parser.py. */
   function labelKey(text) {
     return (String(text || '').toLowerCase().match(/[a-z0-9]+/g) || []).join(' ');
+  }
+
+  function labelSameDoor(number, first, storeKey) {
+    var words = storeKey.split(' ');
+    return !!number && words.length > 1 && words[0] === number
+      && words[1] === String(first || '').toLowerCase();
   }
 
   function mapLabel(text, clipped, store) {
@@ -2992,6 +3006,10 @@
     if (!words.every(function (w) { return LABEL_WORD.test(w); })
         || words.some(function (w) { return MAP_LABEL_JUNK.test(w.replace(/\.+$/, '')); })) {
       return null;
+    }
+    // A type, then a quadrant, then more words: a town after the street.
+    for (var t = 0; t < words.length - 2; t++) {
+      if (LABEL_TYPE.test(words[t]) && LABEL_DIR.test(words[t + 1])) return null;
     }
     var quadrant = null;
     if (words.length > 1 && LABEL_DIR.test(words[words.length - 1])) {
@@ -3014,7 +3032,8 @@
     var stores = typeof store === 'string' ? [store] : Array.isArray(store) ? store : [];
     for (var i = 0; i < stores.length; i++) {
       var k = labelKey(stores[i]);
-      if (k && (k === key || k.indexOf(key + ' ') === 0)) return null;
+      if (k && (k === key || k.indexOf(key + ' ') === 0
+                || (!clipped && labelSameDoor(number, words[0], k)))) return null;
     }
     return line;
   }

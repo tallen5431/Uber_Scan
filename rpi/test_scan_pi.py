@@ -4726,7 +4726,7 @@ eq('wants_map_label: DoorDash\'s card with "Customer dropoff", and not an Uber c
 _seen_reads = []
 
 
-def _fake_read(frame, geom, store=None):
+def _fake_read(frame, geom, store=None, seen=None):
     _seen_reads.append(store)
     return {'line': '418 Fable Ave NE', 'clipped': False, 'raw': 'x', 'ms': 1}
 
@@ -4742,12 +4742,13 @@ for _ in range(200):
     _REAL_SLEEP(0.01)
 eq('...its answer comes back once, with the offer it is for',
    (_answer, _labels.take()), (('o1', {'line': '418 Fable Ave NE', 'clipped': False,
-                                       'raw': 'x', 'ms': 1}), None))
+                                       'raw': 'x', 'ms': 1}, {'press': False}), None))
 eq('...the card\'s store handed to the read', _seen_reads, [['Lark Owl Grill']])
 _labels.close()
-_inline = SP.MapLabels(threaded=False, read=lambda f, g, store=None: None)
+_inline = SP.MapLabels(threaded=False, read=lambda f, g, store=None, seen=None: None)
 _inline.submit('o2', None, None)
-eq('...and under --no-thread it reads in submit, answering none found', _inline.take(), ('o2', None))
+eq('...and under --no-thread it reads in submit, answering none found', _inline.take(),
+   ('o2', None, {'press': False}))
 
 # The owner's snap of 2 Nov 16:31, its shape on SYNTHETIC screens (invented
 # streets): the label too long for its pill, cut with DoorDash's ellipsis,
@@ -4853,7 +4854,7 @@ _lt = [100.0]
 _lreads = []
 
 
-def _late_read(frame, geom, store=None):
+def _late_read(frame, geom, store=None, seen=None):
     # The map with no label until its fourth frame, as DoorDash's settles.
     _lreads.append(frame)
     return {'line': '418 Fable Ave NE', 'clipped': False, 'raw': 'x', 'ms': 1} \
@@ -4869,18 +4870,11 @@ for _f in range(1, 12):                  # a card read every 0.75 s
 eq('MapLabels: an offer whose read found no label is asked again on a later frame, '
    'MAP_LABEL_AGAIN_S apart, until one is read — and never after',
    (_lreads, [s for s in _said if s and s[1]]),
-   ([1, 4], [('o3', {'line': '418 Fable Ave NE', 'clipped': False, 'raw': 'x', 'ms': 1})]))
-eq('...the spacing and the cap chosen: two seconds, five asks',
-   (SP.MAP_LABEL_AGAIN_S, SP.MAP_LABEL_TRIES), (2.0, 5))
+   ([1, 4], [('o3', {'line': '418 Fable Ave NE', 'clipped': False, 'raw': 'x', 'ms': 1},
+              {'press': False})]))
 _lt[0] = 100.0
-_none = SP.MapLabels(threaded=False, read=lambda f, g, store=None: None, clock=lambda: _lt[0])
-_n = 0
-for _f in range(40):
-    _n += 1 if _none.submit('o4', _f, None) else 0
-    _lt[0] += 0.75
-eq('...and a map that never shows one is read at most MAP_LABEL_TRIES times', _n, SP.MAP_LABEL_TRIES)
-_lt[0] = 100.0
-_thr = SP.MapLabels(threaded=True, read=lambda f, g, store=None: {'line': '9 Wren St', 'raw': 'x'},
+_thr = SP.MapLabels(threaded=True,
+                    read=lambda f, g, store=None, seen=None: {'line': '9 Wren St', 'raw': 'x'},
                     clock=lambda: _lt[0])
 _thr.submit('o5', None, None)
 for _ in range(200):
@@ -4891,6 +4885,197 @@ _lt[0] += 10.0
 eq('...on its thread too: once read, the offer is not taken again',
    _thr.submit('o5', None, None), False)
 _thr.close()
+
+# The owner's snap of 7 Nov 21:34, its shape on RENDERED screens (invented
+# store, door and street): a one-store DoorDash card printing "Customer
+# dropoff", the phone's map first DoorDash's OVERVIEW heat map (orange zones,
+# round flame pins, restaurant names in plain dark text, no pill) and only
+# 27 s later the route with the customer's pill above its person pin. Five
+# asks two seconds apart were all spent on the overview; the label is now
+# asked for as long as the card is read, and an ask with no pill to read is
+# no attempt.
+_DD_ONE = (('Lark Owl Tacos', '1761 Fernhill Road Northwest, Atla...'),)
+
+
+def _dd_one(view, label='286 Wrenfield Dr NW'):
+    return TC.dd_stores_screen(pay='$7.10', journey='2 stops (4.8 mi) • 42 min',
+                               stores=_DD_ONE, tail=('Customer dropoff', None),
+                               label=label, map_view=view)
+
+
+_dd_one_card = SP.OP.parse('$7.10\n2 stops (4.8 mi) - 42 min\nLark Owl Tacos\n'
+                           '1761 Fernhill Road Northwest, Atla...\nCustomer dropoff')
+_one_stores = SP.label_stores(_dd_one_card)
+eq('label_stores: the card\'s store name and its printed door (as the parser keeps it), '
+   'each once', _one_stores, ['Lark Owl Tacos', '1761 Fernhill Road Northwest'])
+_two_card = SP.OP.parse('$14.10 incl. tips\n3 stops (8.7 mi) - 33 min\nLark Owl Pizza\n'
+                        '4410 Fernhill Road Northwest, ...\nMaple Run Creamery\n'
+                        '2516 Quillon Street, Brookvale, 301...\nCustomer dropoff')
+ok_('...and on a two-store card both stores\' doors (%r)' % SP.label_stores(_two_card),
+    '2516 Quillon Street, Brookvale' in SP.label_stores(_two_card)
+    and '4410 Fernhill Road Northwest' in SP.label_stores(_two_card))
+eq('the spacing, the offer\'s life and the cap on attempts, all chosen',
+   (SP.MAP_LABEL_AGAIN_S, SP.MAP_LABEL_LIFE_S, SP.MAP_LABEL_TRIES), (2.0, 75.0, 20))
+
+_ov, _rt = _dd_one('overview'), _dd_one('route')
+_ov_seen, _rt_seen, _ocrs = {}, {}, []
+
+
+def _counting_ocr(image):
+    _ocrs.append(image.shape)
+    return SP.PL.ocr(image, SP.MAP_LABEL_OCR)
+
+
+eq('the overview map: no label, no box found, and tesseract never run on it',
+   (SP.read_map_label(_ov, _MapGeom(_ov), store=_one_stores, ocr=_counting_ocr,
+                      seen=_ov_seen), _ov_seen.get('boxes'), _ocrs), (None, 0, []))
+_got = SP.read_map_label(_rt, _MapGeom(_rt), store=_one_stores, seen=_rt_seen)
+eq('the route map: the pill above the person pin read as the customer\'s street, '
+   'number and street, no town',
+   ((_got or {}).get('line'), _rt_seen.get('boxes')), ('286 Wrenfield Dr NW', 1))
+# ...and its overview names are plain text: drawn as the snap draws them, the
+# heat map's names and its filled black flame pin are no pill.
+eq('...the overview\'s restaurant names (plain text) and flame pins are no box',
+   SP.map_label_boxes(SP.map_band(_ov, _MapGeom(_ov)), SP.MAP_LABEL_HEIGHT), [])
+# The store's own door on the pill, spelt as a map spells it, is never taken.
+_st = _dd_one('route', label='1761 Fernhill Rd NW')
+_st_seen = {}
+eq('a pill reading the store\'s printed door, abbreviated ("Rd NW" for "Road Northwest"), '
+   'is refused: the store\'s door is never the dropoff',
+   (SP.read_map_label(_st, _MapGeom(_st), store=_one_stores, seen=_st_seen),
+    _st_seen.get('boxes'), _st_seen.get('raws')), (None, 1, ['1761 Fernhill Rd NW']))
+
+# The card's life, on MapLabels with the real reader and a clock of its own:
+# reads 1.5 s apart, the overview for the first 27 s, then the route.
+_ct = [100.0]
+_life = SP.MapLabels(threaded=False, clock=lambda: _ct[0])
+_answers, _asked_at = [], []
+for _i in range(30):
+    _frame = _ov if _ct[0] - 100.0 < 27.0 else _rt
+    if _life.submit('dd7', _frame, _MapGeom(_frame), store=_one_stores):
+        _asked_at.append(round(_ct[0] - 100.0, 1))
+        _answers.append(_life.take())
+    _ct[0] += 1.5
+_found = [a for a in _answers if a and a[1]]
+eq('MapLabels over the card\'s life: the label read on the first ask after the route came up '
+   '(27 s in), after the overview',
+   ([(a[0], a[1]['line']) for a in _found], [t for t, a in zip(_asked_at, _answers) if a[1]]),
+   ([('dd7', '286 Wrenfield Dr NW')], [27.0]))
+eq('...the overview\'s asks were each no attempt (no box to read), and once read never again',
+   (_life.asks('dd7'), [a[2]['boxes'] for a in _answers[:-1]].count(0) == len(_answers) - 1),
+   ((len(_asked_at), 0), True))
+ok_('...where five asks two seconds apart would have ended before it (%d asks on the '
+    'overview, the last %.1f s in)' % (len(_asked_at) - 1, _asked_at[-2]),
+    len(_asked_at) - 1 > 5 and _asked_at[4] < 27.0)
+
+# Bounded: a map with no pill is asked until the offer's life is up; one with a
+# pill that never reads as a street, MAP_LABEL_TRIES times.
+_ct[0] = 100.0
+
+
+def _no_pill(frame, geom, store=None, seen=None):
+    seen.update(boxes=0, raws=[], ms=30)
+    return None
+
+
+def _bad_pill(frame, geom, store=None, seen=None):
+    seen.update(boxes=1, raws=['Decline'], ms=60)
+    return None
+
+
+_np = SP.MapLabels(threaded=False, read=_no_pill, clock=lambda: _ct[0])
+_np_at = []
+for _i in range(200):
+    if _np.submit('np', _i, None):
+        _np_at.append(_ct[0] - 100.0)
+    _ct[0] += 0.75
+eq('a map with no pill is asked every MAP_LABEL_AGAIN_S until MAP_LABEL_LIFE_S, then never: '
+   'asks, attempts, the last ask',
+   (_np.asks('np'), max(_np_at) < SP.MAP_LABEL_LIFE_S), ((34, 0), True))
+_ct[0] = 100.0
+_bp = SP.MapLabels(threaded=False, read=_bad_pill, clock=lambda: _ct[0])
+for _i in range(200):
+    _bp.submit('bp', _i, None)
+    _ct[0] += 0.75
+eq('...one whose pill never reads as a street ("Decline") is read MAP_LABEL_TRIES times',
+   _bp.asks('bp'), (SP.MAP_LABEL_TRIES, SP.MAP_LABEL_TRIES))
+# The cost bound: at most 1 + LIFE/AGAIN asks an offer, of which at most TRIES
+# run tesseract, each held to MAP_LABEL_CAP_S, on the label's own thread.
+ok_('...so an offer costs at most %d asks, %d of them read, %.0f s of reading in all, '
+    'never on the camera\'s loop' % (1 + int(SP.MAP_LABEL_LIFE_S / SP.MAP_LABEL_AGAIN_S),
+                                     SP.MAP_LABEL_TRIES, SP.MAP_LABEL_TRIES * SP.MAP_LABEL_CAP_S),
+    1 + int(SP.MAP_LABEL_LIFE_S / SP.MAP_LABEL_AGAIN_S) <= 38
+    and SP.MAP_LABEL_TRIES * SP.MAP_LABEL_CAP_S <= 30)
+# Measured, the two kinds of ask on the rendered screens: the overview's (warp
+# and box search, no tesseract) and the route's (one box read). Five each; the
+# medians are printed for the record, held only to the cap.
+_ms = {'overview': [], 'route': []}
+for _k, _img in (('overview', _ov), ('route', _rt)):
+    for _ in range(5):
+        _s = {}
+        SP.read_map_label(_img, _MapGeom(_img), store=_one_stores, seen=_s)
+        _ms[_k].append(_s['ms'])
+_med = {k: sorted(v)[2] for k, v in _ms.items()}
+print('map label ask, median of 5 on this machine: overview %d ms, route %d ms'
+      % (_med['overview'], _med['route']))
+ok_('...and each ask inside MAP_LABEL_CAP_S (%r)' % _med,
+    max(_med.values()) < SP.MAP_LABEL_CAP_S * 1000)
+
+# ⌖ over the card: a press asks whatever the spacing, life or count, one read
+# of an offer at a time, and not once a label is read.
+_ct[0] = 100.0
+_pr = SP.MapLabels(threaded=False, read=_no_pill, clock=lambda: _ct[0])
+_pr.submit('pr', 0, None)
+_ct[0] += 0.5
+eq('a press is asked inside MAP_LABEL_AGAIN_S of the last ask, and said a press',
+   (_pr.submit('pr', 1, None), _pr.submit('pr', 2, None, press=True), _pr.take(),
+    _pr.take()[2]['press']), (False, True, ('pr', None, {'boxes': 0, 'raws': [], 'ms': 30,
+                                                          'press': False}), True))
+_ct[0] += 500.0
+eq('...and past the offer\'s life', _pr.submit('pr', 3, None, press=True), True)
+_pf = SP.MapLabels(threaded=False, read=lambda f, g, store=None, seen=None: {'line': '9 Wren St'},
+                   clock=lambda: _ct[0])
+_pf.submit('pf', 0, None)
+eq('...but not once the label is read', (_pf.found('pf'), _pf.submit('pf', 1, None, press=True)),
+   (True, False))
+# On the thread: a press takes the place of a card read's ask still waiting.
+import threading as _thr_mod                                   # noqa: E402
+_gate = _thr_mod.Event()
+_order = []
+
+
+def _gated(frame, geom, store=None, seen=None):
+    _gate.wait(5)
+    _order.append(frame)
+    return None
+
+
+_pq = SP.MapLabels(threaded=True, read=_gated, clock=lambda: _ct[0])
+_pq.submit('a', 'a', None)                  # running, held at the gate
+for _ in range(100):
+    if _pq._work.empty():
+        break
+    _REAL_SLEEP(0.01)
+_pq.submit('b', 'b', None)                  # waiting
+_waited = _pq.submit('c', 'c', None)        # refused: the queue is full
+_pressed = _pq.submit('d', 'd', None, press=True)
+_gate.set()
+for _ in range(300):
+    if len(_order) >= 2:
+        break
+    _REAL_SLEEP(0.01)
+_REAL_SLEEP(0.05)
+eq('...a press takes the waiting card read\'s place on the thread; a card read waits its turn',
+   (_waited, _pressed, _order, _pq.asks('b')), (False, True, ['a', 'd'], (0, 0)))
+_pq.close()
+
+# The press's frame is read against the card's corners, not the whole-screen
+# crop its text was read through.
+_pg = _MapGeom(_rt, whole=True)
+eq('label_geometry: a press\'s whole-screen geometry, as a card read\'s, reads the pill',
+   ((SP.read_map_label(_rt, _pg) or {}).get('line'),
+    (SP.read_map_label(_rt, SP.label_geometry(_pg), store=_one_stores) or {}).get('line'),
+    SP.label_geometry(None)), (None, '286 Wrenfield Dr NW', None))
 
 # The offer line carries it, and DoorDash's stop count, and nothing that
 # reads as a verdict.
