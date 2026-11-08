@@ -14509,6 +14509,273 @@ finally:
     stop(_rp)
 shutil.rmtree(_cdir, ignore_errors=True)
 
+# --- [earnings] what the app paid, off its own earnings screen (8 Nov 2026) -----
+#
+# The owner, 7 Nov: "compare what uber actually paid compared to the expected
+# pay of the order" ... "Can it automatically figure out which order it belongs
+# to in the journal?" The offers page posts screenshots of Uber's Earnings
+# Activity to /api/earnings/shot; the server keeps each beside the journal,
+# reads it with the `tesseract` command and earnings.js, matches its trips to
+# the orders on file and writes one `kind: 'earning'` row per trip. Here,
+# against the real server and the real tesseract, on screens drawn by
+# rpi/testearnings.py: the limits and the guards; a day read, matched where
+# clear, left to the driver for a chain, "no order on file" for the rig off;
+# a re-upload, an overlapping scroll in one batch and a tip settling, each
+# kept as one trip; the driver's pick; a machine with no tesseract told how to
+# install it; the pictures deleted and what was read kept; and no picture,
+# its reading or the journal ever served as a file, even with the journal
+# moved inside the site. Every restaurant, street and figure is invented.
+
+import re
+import stat as _estat
+sys.path.insert(0, os.path.join(ROOT, 'rpi'))
+import testearnings as _ET                                    # noqa: E402
+
+
+def _eraw(base, path, data, ctype, extra=None):
+    req = urllib.request.Request(base + path, data=data, method='POST',
+                                 headers=dict({'Content-Type': ctype}, **(extra or {})))
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return r.status, json.loads(r.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode('utf-8') or '{}')
+        except ValueError:
+            return e.code, {}
+
+
+def _epng(im):
+    import io as _io
+    buf = _io.BytesIO()
+    im.save(buf, 'PNG')
+    return buf.getvalue()
+
+
+def _ems(h, m, s=0):
+    return int(datetime.datetime(2026, 11, 7, h, m, s).timestamp() * 1000)
+
+
+def _erecord(offer, ended, minutes, pay, miles, store=None, door=None, drop=None):
+    took = ended - int(minutes * 60000)
+    return {'v': 1, 'kind': 'order', 'id': '%s@%d' % (offer, took), 'offer': offer, 'app': 'uber',
+            'places': True, 'at': ended + 1500, 'seq': ended + 1500, 'how': 'gps',
+            'card': {'pay': pay, 'minutes': 30, 'miles': 8, 'pickup': store},
+            'times': {'took': took, 'ended': ended},
+            'pickups': [{'name': store, 'door': door}] if store else [],
+            'dropoff': {'text': drop} if drop else {}, 'drive': {'miles': miles}}
+
+
+_ework = tempfile.mkdtemp()
+_ehome = os.path.join(_ework, 'main')
+os.makedirs(_ehome)
+_ej = os.path.join(_ehome, 'journal.jsonl')
+# Sat 7 Nov: Pretend Pizza's order ended 5:40:30 (Uber says 5:40 PM); two of
+# Make-Believe Burgers' orders ended 4:48 and 4:52 with nothing on file to tell
+# them apart (Uber's trip says 4:50 PM); nothing near Nowhere Noodles' 3:58 PM,
+# the rig was off. Each a record of its own, as orderRow writes them.
+_erecs = [_erecord('e-pizza', _ems(17, 40, 30), 39.6, 6.5, 12.1, 'Pretend Pizza',
+                   '10 Placeholder Rd, Faketown', '12 Placeholder Ct, Faketown'),
+          _erecord('e-burg1', _ems(16, 48), 40.0, 7.0, 9.0, 'Make-Believe Burgers'),
+          _erecord('e-burg2', _ems(16, 52), 41.0, 8.0, 9.5, 'Make-Believe Burgers')]
+with open(_ej, 'w') as _fh:
+    _fh.write(''.join(json.dumps(r) + '\n' for r in _erecs))
+_ep, _eb = start({'SCANNER': '0', 'EARNINGS_SHOT_MAX': '3000000'}, _ej)
+try:
+    _eg = get(_eb, '/api/earnings?days=0')
+    eq('[earnings] the server says what it can read and keeps: tesseract here, none kept yet, '
+       'the limits, and no entries', (_eg.get('ok'), (_eg.get('tesseract') or {}).get('found'),
+                                      (_eg.get('shots') or {}).get('kept'), (_eg.get('limits') or {}).get('bytes'),
+                                      _eg.get('entries')), (True, True, 0, 3000000, []))
+    eq('[earnings] ...Uber read, DoorDash with a place and no reader yet',
+       _eg.get('apps'), [{'app': 'uber', 'reads': True}, {'app': 'doordash', 'reads': False}])
+
+    # --- the guards -----------------------------------------------------------
+    _day = _epng(_ET.screen())
+    eq('[earnings] a body that is not an image is refused before it is kept (415)',
+       _eraw(_eb, '/api/earnings/shot', b'{"a": 1}', 'application/json')[0], 415)
+    eq('[earnings] ...and one that says it is an image and is not, on its first bytes (415)',
+       _eraw(_eb, '/api/earnings/shot', b'<html>not a picture at all</html>', 'image/png')[0], 415)
+    eq('[earnings] ...an iPhone\'s HEIC is refused with what to send instead',
+       _eraw(_eb, '/api/earnings/shot', b'\x00\x00\x00\x18ftypheic' + b'\x00' * 64, 'image/heic'),
+       (415, {'ok': False, 'error': 'an iPhone\'s HEIC picture cannot be read here; send the screenshot as PNG or JPEG'}))
+    eq('[earnings] ...a picture over the cap is refused (413), and nothing is kept',
+       (_eraw(_eb, '/api/earnings/shot', b'\x89PNG\r\n\x1a\n' + b'\x00' * 3000001, 'image/png')[0],
+        os.path.isdir(os.path.join(_ehome, 'earnings'))
+        and [n for n in os.listdir(os.path.join(_ehome, 'earnings')) if n.endswith('.shot')]),
+       (413, False))
+    try:
+        urllib.request.urlopen(_eb + '/api/earnings/shot', timeout=5)
+        _eget = 200
+    except urllib.error.HTTPError as _e:
+        _eget = _e.code
+    eq('[earnings] a GET of the upload is refused (405): it writes', _eget, 405)
+    eq('[earnings] the JSON requests insist on JSON, as a cross-site form cannot send it (415)',
+       [_eraw(_eb, '/api/earnings/' + w, b'{}', 'text/plain')[0] for w in ('pick', 'reread', 'forget')],
+       [415, 415, 415])
+
+    # --- a day, read and matched ----------------------------------------------
+    _s, _a = _eraw(_eb, '/api/earnings/shot?batch=b1', _day, 'image/png')
+    eq('[earnings] a screenshot of the day: kept, read, its day off the end line, three trips, all new',
+       (_s, _a.get('read'), _a.get('app'), _a.get('day'), _a.get('dayFrom'), _a.get('trips'), _a.get('added')),
+       (200, True, 'uber', '2026-11-07', 'end', 3, 3))
+    _ent = {r.get('finishedAt'): r for r in _a.get('entries') or []}
+    _pz, _bg, _nd = _ent.get('17:40') or {}, _ent.get('16:50') or {}, _ent.get('15:58') or {}
+    eq('[earnings] Pretend Pizza\'s trip is matched to its order alone: the card\'s pay beside what was paid, '
+       'its tip still processing', ((_pz.get('match') or {}).get('status'), (_pz.get('match') or {}).get('offer'),
+                                    (_pz.get('match') or {}).get('cardPay'), _pz.get('amount'), _pz.get('tipStatus')),
+       ('matched', 'e-pizza', 6.5, 2.0, 'pending'))
+    eq('[earnings] Make-Believe Burgers\' trip, between two of the chain\'s orders, needs you: both offered',
+       ((_bg.get('match') or {}).get('status'),
+        sorted(c.get('offer') for c in (_bg.get('match') or {}).get('candidates') or [])),
+       ('needs', ['e-burg1', 'e-burg2']))
+    eq('[earnings] Nowhere Noodles\' trip, with the rig off: kept, no order on file',
+       ((_nd.get('match') or {}).get('status'), _nd.get('amount')), ('none', 7.25))
+    _erows = _rows(_ej, 'earning')
+    eq('[earnings] one journal row per trip, versioned, named for the sync ([kind, id, seq])',
+       sorted((r.get('v'), r.get('id', '').startswith('earn:uber 2026-11-07 '), r.get('seq') == r.get('at'))
+              for r in _erows), [(1, True, True)] * 3)
+    ok_('[earnings] ...each bounded: under 1.5 kB (%r)' % max(len(json.dumps(r)) for r in _erows),
+        max(len(json.dumps(r)) for r in _erows) < 1500)
+    eq('[earnings] an earning row is no offer and no order record: the offers list, the sync\'s offer count '
+       'and the records are as they were',
+       (get(_eb, '/api/journal?days=0').get('count'), get(_eb, '/api/journal/newest').get('offers'),
+        [r.get('offer') for r in get(_eb, '/api/journal?days=0').get('records') or []]),
+       (0, 0, ['e-burg1', 'e-burg2', 'e-pizza']))
+
+    # --- kept as one trip -----------------------------------------------------
+    _s, _a = _eraw(_eb, '/api/earnings/shot?batch=b1', _day, 'image/png')
+    eq('[earnings] the same screenshot again: nothing new, nothing changed, no row written',
+       (_a.get('added'), _a.get('changed'), len(_rows(_ej, 'earning'))), (0, 0, 3))
+    # A scroll of the same day sent in the same go: no header, no end line —
+    # filed under the batch's day, and the trips it shares are the same trips.
+    _s, _a = _eraw(_eb, '/api/earnings/shot?batch=b1',
+                   _epng(_ET.screen(header=False, end=None, top_skip=200)), 'image/png')
+    eq('[earnings] an overlapping scroll in the same go: its day the batch\'s, its trips already on file',
+       (_a.get('day'), _a.get('dayFrom'), _a.get('trips'), _a.get('added'), len(_rows(_ej, 'earning'))),
+       ('2026-11-07', 'batch', 2, 0, 3))
+    _s, _a = _eraw(_eb, '/api/earnings/shot', _epng(_ET.screen(header=False, end=None, top_skip=200)), 'image/png')
+    eq('[earnings] ...the same scroll alone, in no batch: read, no day, nothing filed',
+       (_a.get('read'), _a.get('day'), _a.get('added'), len(_rows(_ej, 'earning'))), (True, None, 0, 3))
+    # The tip settles: re-uploaded the next morning, Pretend Pizza's "Tip
+    # processing" is "$4.00 Tip" and the trip $6.00.
+    _settled = list(_ET.TRIPS)
+    _settled[0] = ('$6.00',) + _settled[0][1:6] + ('$4.00 Tip',) + _settled[0][7:]
+    _s, _a = _eraw(_eb, '/api/earnings/shot', _epng(_ET.screen(trips=_settled)), 'image/png')
+    _pzr = [r for r in _rows(_ej, 'earning') if r.get('finishedAt') == '17:40']
+    eq('[earnings] the tip settles: one row more for that trip alone, $6.00 with a $4.00 tip and a $2.00 base',
+       (_a.get('added'), _a.get('changed'), len(_pzr), _pzr[-1].get('amount'), _pzr[-1].get('tip'),
+        _pzr[-1].get('base'), _pzr[-1].get('tipStatus')), (0, 1, 2, 6.0, 4.0, 2.0, 'settled'))
+    eq('[earnings] ...its story kept: seen processing at $2.00, then settled at $4.00; still its order',
+       ([(h.get('amount'), h.get('tip')) for h in _pzr[-1].get('history') or []],
+        (_pzr[-1].get('match') or {}).get('offer')), ([(2.0, 'processing'), (6.0, 4.0)], 'e-pizza'))
+
+    # --- the driver's pick ----------------------------------------------------
+    _bkey = _bg.get('key')
+    _c1 = [c for c in (_bg.get('match') or {}).get('candidates') or [] if c.get('offer') == 'e-burg1'][0]
+    eq('[earnings] a pick of an order not among that day\'s is refused (400)',
+       post(_eb, '/api/earnings/pick', {'key': _bkey, 'offer': 'e-nowhere', 'tookAt': 1})[0], 400)
+    eq('[earnings] ...and of an entry there is not (404)',
+       post(_eb, '/api/earnings/pick', {'key': 'uber 2026-11-07 09:00 nobody', 'none': True})[0], 404)
+    _s, _a = post(_eb, '/api/earnings/pick', {'key': _bkey, 'offer': 'e-burg1', 'tookAt': _c1.get('tookAt')})
+    _bgr = [r for r in _rows(_ej, 'earning') if r.get('key') == _bkey][-1]
+    eq('[earnings] the driver\'s pick: picked, by you, that order and its card',
+       (_s, (_bgr.get('match') or {}).get('status'), (_bgr.get('match') or {}).get('by'),
+        (_bgr.get('match') or {}).get('offer'), (_bgr.get('match') or {}).get('cardPay')),
+       (200, 'picked', 'you', 'e-burg1', 7.0))
+    _s, _a = post(_eb, '/api/earnings/pick', {'key': _nd.get('key'), 'none': True})
+    eq('[earnings] ..."none of these", kept as the driver said',
+       ([r for r in _rows(_ej, 'earning') if r.get('key') == _nd.get('key')][-1].get('match') or {}).get('by'),
+       'you')
+
+    # --- nothing served -------------------------------------------------------
+    _edir = os.path.join(_ehome, 'earnings')
+    _shots = sorted(n for n in os.listdir(_edir) if n.endswith('.shot'))
+    eq('[earnings] the screenshots are kept beside the journal, a reading beside each, named by the server',
+       (len(_shots), all(re.match(r'^\d{8}-\d{6}-[0-9a-f]{6}\.shot$', n) for n in _shots),
+        all(os.path.exists(os.path.join(_edir, n[:-5] + '.ocr')) for n in _shots)), (5, True, True))
+    eq('[earnings] ...the folder 0700 and each file 0600: the driver\'s pay and streets',
+       (oct(_estat.S_IMODE(os.stat(_edir).st_mode)),
+        sorted(set(oct(_estat.S_IMODE(os.stat(os.path.join(_edir, n)).st_mode)) for n in os.listdir(_edir)))),
+       ('0o700', ['0o600']))
+    eq('[earnings] GET /api/earnings answers with what was read, never a picture or a path',
+       ('.shot' in json.dumps(get(_eb, '/api/earnings?days=0')), _edir in json.dumps(get(_eb, '/api/earnings?days=0'))),
+       (False, False))
+
+    # --- the pictures deleted, what was read kept ----------------------------
+    _s, _a = post(_eb, '/api/earnings/forget', {})
+    eq('[earnings] "delete the screenshots": every read picture goes, every reading and row stays',
+       (_s, _a.get('deleted'), [n for n in os.listdir(_edir) if n.endswith('.shot')],
+        len([n for n in os.listdir(_edir) if n.endswith('.ocr')]),
+        len(get(_eb, '/api/earnings?days=0').get('entries') or [])),
+       (200, 5, [], 5, 3))
+    _s, _a = post(_eb, '/api/earnings/reread', {})
+    eq('[earnings] "read again" with nothing waiting: matched again, nothing changed',
+       (_s, _a.get('read'), _a.get('added'), _a.get('changed')), (200, 0, 0, 0))
+finally:
+    stop(_ep)
+
+# A machine with no tesseract (the NucBox, as it may be), a small cap and two
+# shots at most: told how to install it, the picture kept for later.
+_nhome = os.path.join(_ework, 'none')
+os.makedirs(_nhome)
+_nj = os.path.join(_nhome, 'journal.jsonl')
+open(_nj, 'w').close()
+_np, _nb = start({'SCANNER': '0', 'TESSERACT': '/nonexistent/tesseract', 'EARNINGS_SHOTS_MAX': '2'}, _nj)
+try:
+    _ng = get(_nb, '/api/earnings')
+    eq('[earnings] no tesseract on this machine: said, with the command that installs it',
+       _ng.get('tesseract'), {'found': False, 'install': 'sudo apt install tesseract-ocr'})
+    _s, _a = _eraw(_nb, '/api/earnings/shot', _day, 'image/png')
+    eq('[earnings] ...an upload is kept, not read, and says why and how',
+       (_s, _a.get('read'), _a.get('why'), _a.get('install')),
+       (200, False, 'tesseract is not installed on this machine', 'sudo apt install tesseract-ocr'))
+    eq('[earnings] ...and counted as waiting', (get(_nb, '/api/earnings').get('shots') or {}).get('unread'), 1)
+    _eraw(_nb, '/api/earnings/shot', _day, 'image/png')
+    eq('[earnings] past the most it keeps, refused (429) with what to do',
+       _eraw(_nb, '/api/earnings/shot', _day, 'image/png'),
+       (429, {'ok': False, 'error': '2 screenshots are kept already, the most this keeps; '
+                                    'delete the ones that have been read first'}))
+    _s, _a = post(_nb, '/api/earnings/reread', {})
+    eq('[earnings] "read again" without tesseract: each waiting picture said, the install said again',
+       (_a.get('read'), [f.get('why') for f in _a.get('failed') or []], _a.get('install')),
+       (0, ['tesseract is not installed'] * 2, 'sudo apt install tesseract-ocr'))
+    eq('[earnings] ...and "delete" keeps a picture not read yet',
+       post(_nb, '/api/earnings/forget', {})[1].get('deleted'), 0)
+finally:
+    stop(_np)
+
+# The journal moved inside the site, in a folder the denylist does not name:
+# the pictures, their readings and the journal itself are still never served
+# (isServable's allowlist has none of .shot, .ocr or .jsonl).
+_inside = os.path.join(ROOT, 'tmp-earnings-test-%d' % os.getpid())
+os.makedirs(_inside)
+try:
+    _ij = os.path.join(_inside, 'journal.jsonl')
+    open(_ij, 'w').close()
+    _ip, _ib = start({'SCANNER': '0', 'TESSERACT': '/nonexistent/tesseract'}, _ij)
+    try:
+        _s, _a = _eraw(_ib, '/api/earnings/shot', _day, 'image/png')
+        _iid = _a.get('shot')
+        open(os.path.join(_inside, 'earnings', _iid + '.ocr'), 'w').write('{"text": "Pretend Pizza"}')
+        _codes = []
+        for _path in ('/%s/earnings/%s.shot' % (os.path.basename(_inside), _iid),
+                      '/%s/earnings/%s.ocr' % (os.path.basename(_inside), _iid),
+                      '/%s/journal.jsonl' % os.path.basename(_inside),
+                      '/rpi/earnings/%s.shot' % _iid):
+            try:
+                urllib.request.urlopen(_ib + _path, timeout=5)
+                _codes.append(200)
+            except urllib.error.HTTPError as _e:
+                _codes.append(_e.code)
+        eq('[earnings] with the journal moved inside the site, no picture, reading or journal is served as a '
+           'file (404 off the allowlist; the default rpi/ refused by name, 403)', _codes, [404, 404, 404, 403])
+    finally:
+        stop(_ip)
+finally:
+    shutil.rmtree(_inside, ignore_errors=True)
+shutil.rmtree(_ework, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

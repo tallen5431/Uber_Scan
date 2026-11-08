@@ -14236,6 +14236,10 @@ function route(req, res) {
     });
   }
 
+  // Earnings screenshots, every method: see earningsRoute (the owner, 7 Nov:
+  // "compare what uber actually paid compared to the expected pay").
+  if (/^\/api\/earnings(\/|$)/.test(req.url.split('?')[0])) return earningsRoute(req, res);
+
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return send(res, 405, 'method not allowed', { 'Content-Type': 'text/plain' });
   }
@@ -14827,6 +14831,646 @@ function placesLink(res) {
       answer(synced, synced ? 'sync' : null);
     });
   });
+}
+
+/* ---------- earnings screenshots: what the app actually paid ----------
+ *
+ * The owner, 7 Nov 2026: "For future work it would be a good idea to compare
+ * what uber actually paid compared to the expected pay of the order, here is
+ * a screen shot of the daily summary page." ... "That is a good idea to upload
+ * screenshots as it takes time for it to settle. Can it automatically figure
+ * out which order it belongs to in the journal?"
+ *
+ * The offers page's "Add earnings screenshots" posts each picture here
+ * (POST /api/earnings/shot, the image itself as the body). It is kept in
+ * EARNINGS_DIR, read with the `tesseract` command, parsed by earnings.js
+ * (Uber's Earnings Activity; DoorDash's has a place there and no reader yet),
+ * and each trip on it is matched to an order on file and written to the
+ * journal as a `kind: 'earning'` row (earningRow) — so it keeps and syncs with
+ * the journal, and the NucBox's copy is the long-term one, as for every row.
+ *
+ * EVERYTHING IN THIS SECTION, AND ONE LINE IN route(). Another hand is working
+ * on the pin logging further up, and nothing here reads or changes the hold,
+ * the scanner, the pins or any other endpoint: the journal is read through
+ * readJournal and appended through appendLines like every writer, and the
+ * order records and runs are read through orderRecords and takenRuns as they
+ * stand.
+ *
+ * WHAT STAYS ON THIS MACHINE. The screenshots are a picture of the driver's
+ * pay and the streets they drove to. They are kept in `earnings/` beside the
+ * journal — rpi/ by default, which the static handler refuses by name — and
+ * named `<id>.shot` and `<id>.ocr`: extensions TYPES does not have, so
+ * isServable answers 404 for them wherever JOURNAL moves the folder, even
+ * inside ROOT (the allowlist that closed the journal-backup leak; AUDITS.md).
+ * No route here serves a file: GET /api/earnings answers with the parsed rows
+ * the offers page shows, never a picture, and nothing takes a path from the
+ * request — a shot is named by an id this server made, checked against
+ * EARNINGS_ID. Mode 0600 in a 0700 folder. "Delete the screenshots" removes
+ * the pictures and keeps what was read off them (the rows, and the `.ocr`).
+ *
+ * THE SAME GUARDS AS THE OTHER WRITE ENDPOINTS: POST only; a body capped and
+ * refused past it (EARNINGS_SHOT_MAX, and a Content-Length past it before a
+ * byte is read); nothing free-text from the request is stored — the rows are
+ * what tesseract read off a picture, as a card's rows are what it read off a
+ * phone; and a fixed set of fields on each JSON request. Two more, because a
+ * picture is bigger than a mark: the image must say it is one on its first
+ * bytes (PNG, JPEG or WebP — not only on its Content-Type), and at most
+ * EARNINGS_SHOTS_MAX are kept at once. A cross-site page cannot send one
+ * either: an image/* body is not a type a browser sends across origins without
+ * asking first, and this server answers no such asking; the JSON requests
+ * below insist on application/json for the same reason.
+ *
+ * DESCRIPTIVE. A row of what was paid; nothing the rig decides reads it. */
+var Earnings = require('./earnings.js');
+var earningsCrypto = require('crypto');
+var EARNINGS_DIR = path.join(path.dirname(JOURNAL_PATH), 'earnings');
+// A phone screenshot is 0.3-2MB as PNG; twelve is room for a tall one from a
+// phone with a big screen, and short of what a day of them should cost.
+var EARNINGS_SHOT_MAX = envNumber('EARNINGS_SHOT_MAX', 12 * 1024 * 1024);
+// A day is three to six screenshots; sixty is a fortnight of not deleting
+// them, and the page offers to as soon as they are read.
+var EARNINGS_SHOTS_MAX = envNumber('EARNINGS_SHOTS_MAX', 60);
+// One read of a 756x2000 screenshot took 0.5 s on the development box; a Pi
+// or a NucBox under load, several. Past this it is stopped and said.
+var EARNINGS_OCR_MS = envNumber('EARNINGS_OCR_MS', 90000);
+var EARNINGS_TEXT_MAX = 65536;         // what is kept of tesseract's text per shot
+var EARNINGS_ROW_V = 1;
+var EARNINGS_SHOTS_PER_ROW = 8;        // shot ids an entry's row names
+var EARNINGS_DAYS_DEFAULT = 30;        // what GET /api/earnings answers with, unasked
+var EARNINGS_REMATCH_DAYS = 60;        // how far back "Read again" matches again
+var EARNINGS_ID = /^\d{8}-\d{6}-[0-9a-f]{6}$/;
+var EARNINGS_BATCH = /^[A-Za-z0-9_-]{1,32}$/;
+var EARNINGS_INSTALL = 'sudo apt install tesseract-ocr';
+var EARNINGS_JSON = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
+
+// Which tesseract: TESSERACT names one (a path, or a name looked for on PATH;
+// the suites point it at nothing to see the page say how to install it), else
+// `tesseract` on PATH. Asked every time, not once at boot: the point of saying
+// "sudo apt install tesseract-ocr" on the page is that it works as soon as the
+// owner has, with no restart.
+function earningsTesseract() {
+  var want = process.env.TESSERACT || 'tesseract';
+  if (want.indexOf('/') === -1) return onPath(want);
+  try {
+    fs.accessSync(want, fs.constants.X_OK);
+    return fs.statSync(want).isFile() ? want : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// What kind of picture the first bytes say it is, or null.
+function earningsImageKind(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf.toString('latin1', 1, 4) === 'PNG') return 'png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpeg';
+  if (buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return 'webp';
+  return null;
+}
+
+// The body as bytes. readBody reads text, and a picture is not text; capped
+// the same way, drained rather than destroyed (readBody says why).
+function earningsBody(req, cap, done) {
+  var chunks = [], size = 0, over = false;
+  req.on('data', function (c) {
+    if (over) return;
+    size += c.length;
+    if (size > cap) { over = true; chunks = []; done(new Error('too big')); return; }
+    chunks.push(c);
+  });
+  req.on('error', function () { if (!over) { over = true; done(new Error('aborted')); } });
+  req.on('end', function () { if (!over) { over = true; done(null, Buffer.concat(chunks)); } });
+}
+
+function earningsId(now) {
+  var d = new Date(now);
+  var p = function (n) { return (n < 10 ? '0' : '') + n; };
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours())
+    + p(d.getMinutes()) + p(d.getSeconds()) + '-' + earningsCrypto.randomBytes(3).toString('hex');
+}
+
+function earningsPath(id, ext) { return path.join(EARNINGS_DIR, id + ext); }
+
+// The shots kept, and which have been read: {id: {shot, ocr, bytes}}.
+function earningsShots(done) {
+  fs.readdir(EARNINGS_DIR, function (err, names) {
+    var out = {};
+    if (err) return done(out);
+    names.forEach(function (n) {
+      var m = /^(.+)\.(shot|ocr)$/.exec(n);
+      if (!m || !EARNINGS_ID.test(m[1])) return;
+      var o = out[m[1]] || (out[m[1]] = { shot: false, ocr: false, bytes: 0 });
+      o[m[2]] = true;
+      if (m[2] === 'shot') {
+        try { o.bytes = fs.statSync(path.join(EARNINGS_DIR, n)).size; } catch (e) { /* gone */ }
+      }
+    });
+    done(out);
+  });
+}
+
+// Published through a temporary with this process's own name (partName), as
+// every file this server writes beside the journal is.
+function earningsWrite(file, data, done) {
+  fs.mkdir(EARNINGS_DIR, { recursive: true, mode: 0o700 }, function (dirErr) {
+    if (dirErr && dirErr.code !== 'EEXIST') return done(dirErr);
+    var tmp = partName(file);
+    fs.writeFile(tmp, data, { mode: 0o600 }, function (err) {
+      if (err) { fs.unlink(tmp, function () {}); return done(err); }
+      fs.rename(tmp, file, function (renameErr) {
+        if (renameErr) fs.unlink(tmp, function () {});
+        done(renameErr || null);
+      });
+    });
+  });
+}
+
+/* tesseract over one shot: `done(err, text)`. `--psm 4` (a single column of
+ * text of variable sizes) keeps each trip's right-hand time on its own line's
+ * row, where the default page segmentation can file it as a column of its
+ * own; one OpenMP thread, as tools/test.sh and scan_pi set, so a read on the
+ * rig cannot take the scanner's cores. */
+function earningsOcr(file, done) {
+  var bin = earningsTesseract();
+  if (!bin) { var e = new Error('tesseract is not installed'); e.code = 'NOTESS'; return done(e); }
+  var out = [], size = 0, finished = false;
+  var child;
+  try {
+    child = spawn(bin, [file, 'stdout', '--psm', '4', '-l', 'eng'],
+                  { env: Object.assign({}, process.env, { OMP_THREAD_LIMIT: '1' }),
+                    stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch (spawnErr) {
+    return done(spawnErr);
+  }
+  var timer = setTimeout(function () {
+    if (finished) return;
+    finished = true;
+    try { child.kill('SIGKILL'); } catch (e2) { /* gone */ }
+    done(new Error('tesseract took longer than ' + Math.round(EARNINGS_OCR_MS / 1000) + ' s'));
+  }, EARNINGS_OCR_MS);
+  child.stdout.on('data', function (c) {
+    if (size < EARNINGS_TEXT_MAX) { out.push(c); size += c.length; }
+  });
+  child.on('error', function (err) {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    done(err);
+  });
+  child.on('close', function (code) {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    if (code !== 0) return done(new Error('tesseract exited ' + code));
+    done(null, Buffer.concat(out).toString('utf8').slice(0, EARNINGS_TEXT_MAX));
+  });
+}
+
+/* A day the screenshots of one upload agree on. The page names its upload
+ * (`batch`): the first screenshot of a day shows its heading, and the ones
+ * scrolled below it do not, so a shot that says no day takes its batch's.
+ * Memory only, and forgotten after EARNINGS_BATCH_MS: a batch is one go at
+ * the file picker. */
+var EARNINGS_BATCH_MS = 30 * 60000;
+var earningsBatches = new Map();         // batch -> {day, at, undated: [ids]}
+
+function earningsBatch(name, now) {
+  earningsBatches.forEach(function (b, k) {
+    if (now - b.at > EARNINGS_BATCH_MS) earningsBatches.delete(k);
+  });
+  if (!name || !EARNINGS_BATCH.test(name)) return null;
+  var b = earningsBatches.get(name);
+  if (!b) { b = { day: null, at: now, undated: [] }; earningsBatches.set(name, b); }
+  b.at = now;
+  return b;
+}
+
+/* Read one shot: its `.ocr` if it has one (and `again` is not asked), else
+ * tesseract and earnings.js, kept as `.ocr`. `done(err, parsed)`; parsed is
+ * {shot, at, app, day, entries, others, notes}. */
+function earningsRead(id, again, now, done) {
+  var ocrFile = earningsPath(id, '.ocr');
+  fs.readFile(ocrFile, 'utf8', function (readErr, text) {
+    var kept = null;
+    if (!readErr && !again) {
+      try { kept = JSON.parse(text); } catch (e) { kept = null; }
+    }
+    if (kept && kept.v === EARNINGS_ROW_V) return done(null, kept);
+    earningsOcr(earningsPath(id, '.shot'), function (err, said) {
+      if (err) return done(err);
+      var p = Earnings.parse(said, { now: now });
+      var rec = { v: EARNINGS_ROW_V, shot: id, at: now, app: p.app, day: p.day ? p.day.iso : null,
+                  dayFrom: p.day ? p.day.from : null, entries: p.entries, others: p.others,
+                  notes: p.notes, text: said };
+      earningsWrite(ocrFile, JSON.stringify(rec), function (writeErr) {
+        if (writeErr) console.error('earnings: could not keep what was read off ' + id + ': ' + writeErr.message);
+        done(null, rec);
+      });
+    });
+  });
+}
+
+/* The orders on file around a day, in earnings.js's one shape (ordersFrom):
+ * every order record, and the runs takenRuns rebuilds from took/drop rows for
+ * days before the records, each with its offer's own pickup and dropoff as
+ * printed (the offer rows carry them; takenRuns does not). From the day
+ * before to the day after, so a trip near midnight finds its order. */
+function earningsOrders(rows, days) {
+  var lo = Infinity, hi = -Infinity;
+  days.forEach(function (d) {
+    var at = Earnings.finishMs({ date: d, finishedAt: '12:00' });
+    if (at === null) return;
+    lo = Math.min(lo, at - 36 * 3600000);
+    hi = Math.max(hi, at + 36 * 3600000);
+  });
+  if (!isFinite(lo)) return [];
+  var offers = latestPerOffer(rows, lo);
+  var byId = {};
+  offers.forEach(function (o) { if (o && typeof o.id === 'string') byId[o.id] = o; });
+  var runs = takenRuns(rows, lo, offers).map(function (u) {
+    var o = byId[u.id] || {};
+    return Object.assign({}, u, { pickup: typeof o.pickup === 'string' ? o.pickup : null,
+                                  dropoff: typeof o.dropoff === 'string' ? o.dropoff : null });
+  });
+  return Earnings.ordersFrom(orderRecords(rows, lo), runs).filter(function (c) {
+    var t = c.endedAt !== null ? c.endedAt : c.tookAt;
+    return t !== null && t >= lo && t <= hi;
+  });
+}
+
+/* An entry as the journal keeps it: one row, the whole of it, so the newest
+ * row of a key is the answer (Earnings.fold) and the sync carries it on
+ * syncKey's fallback ([kind, id, seq]) with no change there. Bounded: names
+ * cut at earnings.js's TEXT_MAX, a few candidates, the last few changes of
+ * amount, the last few shots — well under a kilobyte. With keepPlaces off
+ * (the scanner's `keep`), no pickup and no dropoff, as an order record keeps
+ * none: the match was made with them in memory and is kept. */
+function earningRow(e, at) {
+  var places = orderKeepsPlaces();
+  var paid = Earnings.paidOf(e) || {};
+  var m = e.match || { status: 'none', by: 'auto' };
+  var match = { status: m.status, by: m.by, offer: m.offer, order: m.order, tookAt: m.tookAt,
+                endedAt: m.endedAt, cardPay: m.cardPay, source: m.source, score: m.score,
+                margin: m.margin, offsetS: m.offsetS, pickedAt: m.pickedAt };
+  if (m.status === 'needs') {
+    match.candidates = (m.candidates || []).slice(0, Earnings.CANDIDATES_SHOWN).map(function (c) {
+      return { offer: c.offer, order: c.order, tookAt: c.tookAt, endedAt: c.endedAt, pay: c.pay,
+               pickup: places ? c.pickup : null, source: c.source, score: c.score };
+    });
+  }
+  return orderCompact({
+    v: EARNINGS_ROW_V, kind: 'earning', id: 'earn:' + e.key, seq: at, at: at,
+    key: e.key, app: e.app, date: e.date, finishedAt: e.finishedAt,
+    amount: e.amount, tip: e.tip === undefined ? null : e.tip, tipStatus: paid.tipStatus, base: paid.base,
+    type: e.type, minutes: e.minutes, seconds: e.seconds, miles: e.miles,
+    pickup: places ? e.pickup : null, dropoff: places ? e.dropoff : null, places: places,
+    match: match,
+    history: Array.isArray(e.history) ? e.history.slice(-Earnings.HISTORY_MAX) : null,
+    shots: Array.isArray(e.shots) ? e.shots.slice(-EARNINGS_SHOTS_PER_ROW) : null,
+    firstSeen: e.firstSeen
+  });
+}
+
+// What about a match is worth a new row: not its score moving a point.
+function earningsMatchSays(m) {
+  if (!m) return 'none';
+  return JSON.stringify([m.status, m.by, m.offer || null, m.tookAt || null,
+                         (m.candidates || []).map(function (c) { return c.offer + '@' + c.tookAt; })]);
+}
+
+/* File what was read: merge each trip into the entries on file (one entry
+ * however often it is seen; a tip settling kept with when), match every
+ * entry of each day touched — or of `alsoDays` — again, and append a row for
+ * each entry that is new or changed. Under the earnings lock (earningsRoute),
+ * so two uploads cannot both decide a trip is new. `done(err, summary)`. */
+function earningsFile(parses, alsoDays, pick, now, done) {
+  readJournal(function (rows, readErr) {
+    if (!rows) return done(new Error('the journal could not be read (' + (readErr && readErr.code || 'unknown') + ')'));
+    var byKey = {};
+    Earnings.fold(rows).forEach(function (r) {
+      var e = JSON.parse(JSON.stringify(r));
+      byKey[e.key] = e;
+    });
+    var changed = {}, fresh = {}, days = {};
+    (alsoDays || []).forEach(function (d) { days[d] = true; });
+    parses.forEach(function (p) {
+      if (!p.day || !p.app) return;
+      (p.entries || []).forEach(function (raw) {
+        var e = Object.assign({ app: p.app, date: p.day }, raw);
+        var same = null, best = -1;
+        Object.keys(byKey).forEach(function (k) {
+          var x = byKey[k];
+          if (!Earnings.sameEntry(x, e)) return;
+          var s = x.pickup && e.pickup ? Earnings.similar(x.pickup.name, e.pickup.name) : 0;
+          if (s > best) { best = s; same = x; }
+        });
+        days[e.date] = true;
+        if (same) {
+          var m = Earnings.mergeEntry(same, e, now);
+          var shots = Array.isArray(same.shots) ? same.shots : [];
+          if (p.shot && shots.indexOf(p.shot) === -1) {
+            m.entry.shots = shots.concat([p.shot]).slice(-EARNINGS_SHOTS_PER_ROW);
+          }
+          byKey[same.key] = m.entry;
+          if (m.changed) changed[same.key] = true;
+          return;
+        }
+        // A second trip of the same minute and name that is not the same trip
+        // (sameEntry said no: another amount, no tip pending between them)
+        // gets a key of its own.
+        var base = Earnings.keyOf(e), key = base, n = 2;
+        while (byKey[key]) key = base + ' #' + (n++);
+        e.key = key;
+        e.history = [{ at: now, amount: e.amount, tip: e.tip }];
+        e.firstSeen = now;
+        e.shots = p.shot ? [p.shot] : [];
+        e.match = null;
+        byKey[key] = e;
+        changed[key] = fresh[key] = true;
+      });
+    });
+    if (pick) {
+      var pe = byKey[pick.key];
+      if (pe) {
+        pe.match = pick.match;
+        days[pe.date] = true;
+        changed[pe.key] = true;
+      }
+    }
+    var dayList = Object.keys(days).sort();
+    var orders = earningsOrders(rows, dayList);
+    dayList.forEach(function (d) {
+      var list = Object.keys(byKey).map(function (k) { return byKey[k]; })
+        .filter(function (e) { return e.date === d; });
+      var res = Earnings.matchDay(list, orders);
+      list.forEach(function (e) {
+        var m = res[e.key];
+        if (!m) return;
+        if (earningsMatchSays(m) !== earningsMatchSays(e.match)) changed[e.key] = true;
+        e.match = m;
+      });
+    });
+    var keys = Object.keys(changed);
+    var text = keys.map(function (k) { return JSON.stringify(earningRow(byKey[k], now)) + '\n'; }).join('');
+    var summary = { days: dayList, added: Object.keys(fresh).length, changed: keys.length - Object.keys(fresh).length,
+                    entries: dayList.length ? Object.keys(byKey).map(function (k) { return byKey[k]; })
+                      .filter(function (e) { return days[e.date]; })
+                      .map(function (e) { return earningRow(e, now); }) : [] };
+    if (!text) return done(null, summary);
+    withDirectory(JOURNAL_PATH, function (dirErr) {
+      if (dirErr) return done(dirErr);
+      appendLines(text, function (err) { done(err || null, summary); });
+    });
+  });
+}
+
+/* The earnings route, every method. One lock over all of it ('earnings'):
+ * a read of a picture, the filing after it, a pick, a delete — each sees the
+ * last one finished. */
+function earningsRoute(req, res) {
+  var pathname = req.url.split('?')[0];
+  var q = url.parse(req.url, true).query || {};
+  var answer = function (code, body) { send(res, code, JSON.stringify(body), EARNINGS_JSON); };
+
+  if (pathname === '/api/earnings' && (req.method === 'GET' || req.method === 'HEAD')) {
+    var days = clampNumber(q.days, 0, 3650, EARNINGS_DAYS_DEFAULT);
+    var since = clampNumber(q.since, 0, 4102444800000, 0);
+    var floor = since || (days > 0 ? Date.now() - days * 86400000 : 0);
+    return readJournal(function (rows, readErr) {
+      earningsShots(function (shots) {
+        var ids = Object.keys(shots);
+        var bin = earningsTesseract();
+        var entries = (rows ? Earnings.fold(rows) : []).filter(function (r) {
+          var at = Earnings.finishMs(r);
+          return !floor || (at !== null && at >= floor);
+        });
+        answer(200, {
+          ok: true, unreadable: rows ? null : (readErr && readErr.code || 'unknown'),
+          tesseract: { found: !!bin, install: bin ? null : EARNINGS_INSTALL },
+          shots: { kept: ids.filter(function (i) { return shots[i].shot; }).length,
+                   unread: ids.filter(function (i) { return shots[i].shot && !shots[i].ocr; }).length,
+                   bytes: ids.reduce(function (s, i) { return s + shots[i].bytes; }, 0) },
+          limits: { bytes: EARNINGS_SHOT_MAX, shots: EARNINGS_SHOTS_MAX, types: ['image/png', 'image/jpeg', 'image/webp'] },
+          apps: Object.keys(Earnings.PARSERS).map(function (a) {
+            return { app: a, reads: a !== 'doordash' };
+          }),
+          places: orderKeepsPlaces(),
+          entries: entries
+        });
+      });
+    });
+  }
+
+  if (req.method !== 'POST') {
+    return answer(405, { ok: false, error: 'method not allowed' });
+  }
+
+  // A screenshot: the picture is the body.
+  if (pathname === '/api/earnings/shot') {
+    var type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    var refuse = function (code, why) {
+      // Read and dropped, so the sender is not cut off mid-write (readBody).
+      req.resume();
+      answer(code, { ok: false, error: why });
+    };
+    if (type.indexOf('image/') !== 0) {
+      return refuse(415, 'send the screenshot itself, as a PNG, JPEG or WebP image');
+    }
+    if (type === 'image/heic' || type === 'image/heif') {
+      return refuse(415, 'an iPhone\'s HEIC picture cannot be read here; send the screenshot as PNG or JPEG');
+    }
+    var said = parseInt(req.headers['content-length'], 10);
+    if (isFinite(said) && said > EARNINGS_SHOT_MAX) {
+      return refuse(413, 'a screenshot is at most ' + Math.round(EARNINGS_SHOT_MAX / 1048576) + ' MB');
+    }
+    return earningsBody(req, EARNINGS_SHOT_MAX, function (err, buf) {
+      if (err) {
+        return answer(err.message === 'too big' ? 413 : 400,
+                      { ok: false, error: err.message === 'too big'
+                        ? 'a screenshot is at most ' + Math.round(EARNINGS_SHOT_MAX / 1048576) + ' MB' : err.message });
+      }
+      if (!earningsImageKind(buf)) {
+        return answer(415, { ok: false, error: 'that is not a PNG, JPEG or WebP picture' });
+      }
+      fileLock('earnings', function (release) {
+        var reply = function (code, body) { release(); answer(code, body); };
+        earningsShots(function (shots) {
+          var kept = Object.keys(shots).filter(function (i) { return shots[i].shot; }).length;
+          if (kept >= EARNINGS_SHOTS_MAX) {
+            return reply(429, { ok: false, error: kept + ' screenshots are kept already, the most this keeps; '
+                                + 'delete the ones that have been read first' });
+          }
+          var now = Date.now();
+          var id = earningsId(now);
+          earningsWrite(earningsPath(id, '.shot'), buf, function (writeErr) {
+            if (writeErr) {
+              console.error('earnings: could not keep a screenshot: ' + writeErr.message);
+              return reply(500, { ok: false, error: 'could not keep the screenshot in ' + EARNINGS_DIR });
+            }
+            var batch = earningsBatch(typeof q.batch === 'string' ? q.batch : null, now);
+            earningsRead(id, false, now, function (readErr, parsed) {
+              if (readErr) {
+                var none = readErr.code === 'NOTESS';
+                return reply(200, { ok: true, shot: id, read: false,
+                                    why: none ? 'tesseract is not installed on this machine' : readErr.message,
+                                    install: none ? EARNINGS_INSTALL : null });
+              }
+              var parses = [parsed];
+              if (batch) {
+                if (parsed.day) {
+                  batch.day = parsed.day;
+                } else if (batch.day) {
+                  parsed.day = batch.day;
+                  parsed.dayFrom = 'batch';
+                } else {
+                  batch.undated.push(id);
+                }
+              }
+              // Shots of this batch read before its day was known: their
+              // `.ocr`, filed now under it.
+              var late = batch && batch.day && batch.undated.length ? batch.undated.splice(0) : [];
+              var readLate = function (k) {
+                if (k >= late.length) return file();
+                earningsRead(late[k], false, now, function (e2, p2) {
+                  if (!e2 && p2) { p2.day = batch.day; p2.dayFrom = 'batch'; parses.push(p2); }
+                  readLate(k + 1);
+                });
+              };
+              var file = function () {
+                earningsFile(parses, [], null, now, function (fileErr, summary) {
+                  if (fileErr) return reply(500, { ok: false, shot: id, read: true, error: fileErr.message });
+                  reply(200, { ok: true, shot: id, read: true, app: parsed.app, day: parsed.day,
+                               dayFrom: parsed.dayFrom || null, trips: (parsed.entries || []).length,
+                               others: (parsed.others || []).length, notes: parsed.notes || [],
+                               added: summary.added, changed: summary.changed, entries: summary.entries });
+                });
+              };
+              readLate(0);
+            });
+          });
+        });
+      });
+    });
+  }
+
+  // The rest are JSON, and insist on saying so (a cross-site form cannot).
+  var jsonType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (jsonType !== 'application/json') {
+    req.resume();
+    return answer(415, { ok: false, error: 'send JSON' });
+  }
+
+  // The driver's pick for an entry that needs one: {key, offer, tookAt} for
+  // an order among the day's, {key, none: true} for "no order of mine", or
+  // {key, auto: true} to hand it back to the matcher.
+  if (pathname === '/api/earnings/pick') {
+    return readJsonBody(req, function (err, body) {
+      if (err || !body || typeof body.key !== 'string' || body.key.length > 200) {
+        return answer(400, { ok: false, error: 'name the entry' });
+      }
+      fileLock('earnings', function (release) {
+        var reply = function (code, b) { release(); answer(code, b); };
+        readJournal(function (rows) {
+          var e = rows ? Earnings.fold(rows).filter(function (r) { return r.key === body.key; })[0] : null;
+          if (!e) return reply(404, { ok: false, error: 'no such entry' });
+          var now = Date.now();
+          var match;
+          if (body.none === true) {
+            match = { status: 'none', by: 'you', pickedAt: now };
+          } else if (body.auto === true) {
+            match = null;
+          } else if (typeof body.offer === 'string' && typeof body.tookAt === 'number') {
+            // Only an order of that day, of that app or an unread one: the
+            // page offers the candidates, and a pick is one of the day's
+            // orders or nothing.
+            var c = earningsOrders(rows, [e.date]).filter(function (o) {
+              return o.offer === body.offer && o.tookAt === body.tookAt && (!o.app || o.app === e.app);
+            })[0];
+            if (!c) return reply(400, { ok: false, error: 'no such order on that day' });
+            match = { status: 'picked', by: 'you', offer: c.offer, order: c.order, tookAt: c.tookAt,
+                      endedAt: c.endedAt, cardPay: c.pay, source: c.source, pickedAt: now };
+          } else {
+            return reply(400, { ok: false, error: 'pick an order, none or auto' });
+          }
+          earningsFile([], [], { key: e.key, match: match }, now, function (fileErr, summary) {
+            if (fileErr) return reply(500, { ok: false, error: fileErr.message });
+            reply(200, { ok: true, entries: summary.entries });
+          });
+        });
+      });
+    });
+  }
+
+  // Read again: every kept shot not read yet (tesseract installed since, or
+  // a read that failed), and every day of the last EARNINGS_REMATCH_DAYS
+  // matched again — the records the rig synced since the upload are then
+  // found.
+  if (pathname === '/api/earnings/reread') {
+    return readJsonBody(req, function (err) {
+      if (err) return answer(400, { ok: false, error: 'bad body' });
+      fileLock('earnings', function (release) {
+        var reply = function (code, b) { release(); answer(code, b); };
+        earningsShots(function (shots) {
+          var ids = Object.keys(shots).filter(function (i) { return shots[i].shot && !shots[i].ocr; }).sort();
+          var now = Date.now();
+          var parses = [], failed = [];
+          var next = function (k) {
+            if (k >= ids.length) return filed();
+            earningsRead(ids[k], false, now, function (e2, p) {
+              if (e2) failed.push({ shot: ids[k], why: e2.code === 'NOTESS' ? 'tesseract is not installed' : e2.message });
+              else parses.push(p);
+              next(k + 1);
+            });
+          };
+          var filed = function () {
+            readJournal(function (rows) {
+              var floor = now - EARNINGS_REMATCH_DAYS * 86400000;
+              var days = {};
+              (rows ? Earnings.fold(rows) : []).forEach(function (r) {
+                var at = Earnings.finishMs(r);
+                if (at !== null && at >= floor) days[r.date] = true;
+              });
+              earningsFile(parses, Object.keys(days), null, now, function (fileErr, summary) {
+                if (fileErr) return reply(500, { ok: false, error: fileErr.message });
+                reply(200, { ok: true, read: parses.length, failed: failed,
+                             install: earningsTesseract() ? null : EARNINGS_INSTALL,
+                             undated: parses.filter(function (p) { return !p.day; }).length,
+                             added: summary.added, changed: summary.changed });
+              });
+            });
+          };
+          next(0);
+        });
+      });
+    });
+  }
+
+  // Delete the screenshots that have been read: the pictures go, what was
+  // read off them stays (the rows, and each `.ocr`). One not read yet is
+  // kept, said, and can be read later.
+  if (pathname === '/api/earnings/forget') {
+    return readJsonBody(req, function (err) {
+      if (err) return answer(400, { ok: false, error: 'bad body' });
+      fileLock('earnings', function (release) {
+        earningsShots(function (shots) {
+          var gone = Object.keys(shots).filter(function (i) { return shots[i].shot && shots[i].ocr; });
+          var left = gone.length;
+          var deleted = 0;
+          var unread = Object.keys(shots).filter(function (i) { return shots[i].shot && !shots[i].ocr; }).length;
+          if (!left) { release(); return answer(200, { ok: true, deleted: 0, unread: unread }); }
+          gone.forEach(function (i) {
+            fs.unlink(earningsPath(i, '.shot'), function (e2) {
+              if (!e2) deleted += 1;
+              if (--left === 0) { release(); answer(200, { ok: true, deleted: deleted, unread: unread }); }
+            });
+          });
+        });
+      });
+    });
+  }
+
+  req.resume();
+  return answer(404, { ok: false, error: 'no such earnings endpoint' });
 }
 
 function serveFile(req, res, file, type) {

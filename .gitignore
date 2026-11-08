@@ -88,3 +88,9 @@ rpi/snaps/
 # customer's door, with its street names: the same fact as the scans, and
 # local to the rig.
 rpi/mapbands/
+
+# ...and the earnings screenshots the offers page uploads (server.js,
+# EARNINGS_DIR): a picture of the app's pay screen with every pickup and
+# dropoff street of the day on it, and what tesseract read off each. The same
+# fact as the scans, and local to the machine they were uploaded to.
+rpi/earnings/
