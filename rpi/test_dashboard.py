@@ -1279,6 +1279,20 @@ const framed = (page) => page.waitForFunction(
                             endWhy: 'street found, not that door' } });
     await tick(300);
     const notDoor = await held();
+    // ...and 'none' in the words that say what was measured (server.js
+    // endWhyOf, MV.refusalWords, 9 Nov): the door found past the reach, its
+    // miles left off ("door found 4.4" said nothing), and nothing answered in
+    // the reach's box.
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: false, arrived: false, endBy: null,
+                            endWhy: 'door found 4.4 mi out, past the reach' } });
+    await tick(300);
+    const pastReach = await held();
+    await push({ alive: true, at: Date.now(), atDropoff: false,
+                 heldEnd: { endPinned: false, arrived: false, endBy: null,
+                            endWhy: "no such door in the reach's box" } });
+    await tick(300);
+    const noSuchDoor = await held();
     // ...and the car arrives at the door: the pickup is behind it.
     await push({ alive: true, at: Date.now(), atDropoff: true,
                  heldEnd: { endPinned: true, arrived: true, endWhy: null } });
@@ -1345,7 +1359,7 @@ const framed = (page) => page.waitForFunction(
     out.heldCard = { tookUp: tookUp, tookGoneNow: tookGoneNow, tookGoneLater: tookGoneLater,
                      empty: empty, between: between, visited: visited,
                      refused: refused, byPlace: byPlace, byStreet: byStreet, noPlace: noPlace,
-                     notDoor: notDoor, arrived: arrived,
+                     notDoor: notDoor, pastReach: pastReach, noSuchDoor: noSuchDoor, arrived: arrived,
                      offerUp: offerUp, batchUp: batchUp, batchBetween: batchBetween,
                      batchReading: batchReading, oneDrop: oneDrop, detailTap: detailTap,
                      gone: gone };
@@ -9127,6 +9141,10 @@ try:
            (hc.get('noPlace') or {}).get('line'), '$28.08 in car · no door/place')
         eq('[no door] ...and the street found, not that door, apart from no house number printed',
            (hc.get('notDoor') or {}).get('line'), '$28.08 in car · not that door')
+        eq('[no door] ...the door found past the reach said in two words, its miles left off',
+           (hc.get('pastReach') or {}).get('line'), '$28.08 in car · past reach')
+        eq('[no door] ...and nothing answered in the reach\'s box, as no such door',
+           (hc.get('noSuchDoor') or {}).get('line'), '$28.08 in car · no such door')
         _a = hc.get('arrived') or {}
         eq('...and at the door, the dropoff is next, with the planner\'s time for it',
            (_a.get('when'), _a.get('where'), _a.get('line')),

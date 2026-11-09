@@ -4603,6 +4603,53 @@ async function nucbox() {
      [firstTry, secondTry].join(','), 'false,false');
   eq('...and leaves nothing of itself in <head>', head.kids.length, 0);
 
+  /* ---- a refusal in words (refusalWords): the rig's and the report's -------
+   *
+   * The 7 Nov log and the places report said "not inside the card's reach"
+   * of a door the bounded box never answered, of a street found without its
+   * number, of a name OSM spells otherwise and of a corner run together. The
+   * words now say what was measured, through the real pickInDisc and
+   * pickPlace over invented answers round 12.3 N 45.6 E (open water). */
+  var rwDisc = MV.discFor({ lat: 12.3, lon: 45.6, gpsOk: true, gpsAge: 1, gpsErr: 5, gpsMode: 3,
+                            miles: 3.4, hasTotal: true, whole: true });
+  var rwPlan = MV.searchPlan('410 Pellmore Rd');
+  var rwOut = { lat: 12.345, lon: 45.645, name: '410, Pellmore Road, Faketown' };   // ~4.4 mi NE
+  var rwNone = MV.pickInDisc([rwOut], rwDisc, rwPlan, null);
+  eq('[words] a door answered from the box\'s corner, outside the disc, is said with its miles',
+     MV.refusalWords(rwNone), 'door found ' + rwNone.nearest.toFixed(1) + ' mi out, past the reach');
+  ok_('[words] ...which are past the radius (' + rwNone.nearest + ' > ' + rwDisc.miles + ')',
+     rwNone.nearest > rwDisc.miles);
+  eq('[words] ...and counted with none, one label for every such door',
+     MV.refusalWords(rwNone, { count: true }), 'door found past the reach');
+  var rwEmpty = MV.pickInDisc([], rwDisc, rwPlan, null);
+  eq('[words] a box that held nothing is no such door in it, never a reach',
+     MV.refusalWords(rwEmpty), "no such door in the reach's box");
+  eq('[words] ...counted the same', MV.refusalWords(rwEmpty, { count: true }),
+     "no such door in the reach's box");
+  eq('[words] ...and a \'none\' carrying no distance at all (pickStoreAlong\'s) likewise',
+     MV.refusalWords({ at: null, why: 'none', n: 0 }), "no such door in the reach's box");
+  var rwStreet = MV.pickInDisc([{ lat: 12.31, lon: 45.6, name: 'Pellmore Road, Faketown' }],
+                               rwDisc, rwPlan, null);
+  eq('[words] the street found and not its number keeps the rig\'s words',
+     MV.refusalWords(rwStreet), 'street found, not that door');
+  var rwName = MV.pickPlace([{ lat: 12.31, lon: 45.61, name: 'Utopian Bowl, 3, Ash Row', kind: 'amenity',
+                               called: 'Utopian Bowl' }], rwDisc, 'Utopian Bowl Kitchen', null);
+  eq('[words] a store asked by name, OSM\'s name a word short, is no place of that exact name',
+     rwName.why + ': ' + MV.refusalWords(rwName, { byName: true }),
+     "noplace: no place of that exact name in the reach's box");
+  eq('[words] ...and the held end\'s place asked after its door keeps its own words',
+     MV.refusalWords(rwName), 'no door, place not found');
+  eq('[words] a corner run together, several and too many say themselves',
+     [MV.refusalWords({ why: 'together' }), MV.refusalWords({ why: 'several', n: 2 }),
+      MV.refusalWords({ why: 'capped', n: 10 })].join(' | '),
+     'a corner whose streets run together | several answers | too many answers');
+  eq('[words] a pin, a `why` it does not word and nothing are no words',
+     [MV.refusalWords({ at: { lat: 1, lon: 2 } }), MV.refusalWords({ why: 'cross' }),
+      MV.refusalWords(null)].join(','), ',,');
+  var rwAll = Object.keys(MV.REFUSAL_WORDS).map(function (k) { return MV.REFUSAL_WORDS[k]; });
+  ok_('[words] no word claims the card\'s reach any more',
+     rwAll.every(function (w) { return !/card's reach/.test(w); }));
+
   console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
                    : '\nAll ' + pass + ' map-view checks passed');
   process.exit(fail ? 1 : 0);

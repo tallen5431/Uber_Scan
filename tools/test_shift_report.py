@@ -698,6 +698,10 @@ eq('[pinning] ...a replaced order\'s row says too', _pby['P3']['by'], 'place')
 eq('[pinning] ...a row from before the field says nothing', _pby['P4'], None)
 eq('[pinning] ...a newer build\'s long word is cut, and pickups not a dict are unknown',
    (len(_pby['P5']['by']), _pby['P5']['pickups']), (SR.WORD_MAX, None))
+# ...but never one server.js writes: the door found past a 60 mi disc's reach,
+# two figures of miles (endWhyOf, map-view.js refusalWords), is the longest.
+eq('[pinning] ...and the longest word server.js writes is kept whole',
+   SR._word('door found 61.2 mi out, past the reach'), 'door found 61.2 mi out, past the reach')
 eq('[pinning] the rate: ends pinned over the orders whose row says',
    SR.pinning(_prep['orders']), {'recorded': 4, 'pinned': 3, 'unrecorded': 1})
 _ptext = SR.text(_prep)

@@ -3464,16 +3464,18 @@ function pinSaidNone(id, which, why, door, offer, reach) {
  * edge, miles off, or was never answered at all could not be told from the
  * line, and those three want three different fixes: a wider disc, a disc
  * centred elsewhere, or a better question. So the measurements go beside the
- * words. The words do not change — they are END_WHY's, read by the status,
- * the drop row and the offline shift report's WORD_MAX) — and nothing here is
- * read by anything that chooses, pins, files or decides.
+ * words — and nothing here is read by anything that chooses, pins, files or
+ * decides. (The words themselves were END_WHY's, unchanged, when this was
+ * added; since 9 Nov they say what was measured too, endWhyOf: "no such door
+ * in the reach's box", "door found N mi out, past the reach".)
  *
- * reachOf(res, hits, disc, plan): for a refusal pickInDisc or pickPlace made
+ * reachOf(res, hits, disc, plan, how): for a refusal pickInDisc or pickPlace made
  * over `hits` (the answers it chose among, which the NucBox sent from inside
  * the disc's BOX: every question this rig asks is `bounded=1`, so `n` is
  * what the box held, not what the NucBox holds), as
  *
- *   why     the refusal's word as the panel says it (END_WHY)
+ *   why     the refusal's word as the log and the status say it (endWhyOf;
+ *           `how` {place} or {byName} for a place asked by its name)
  *   n       answers that are points
  *   doors   of those, at the house number asked (a door plan; else null)
  *   mi      the nearest REFUSED answer's crow miles from the disc's centre
@@ -3500,7 +3502,7 @@ var REACH_WHYS = ['none', 'nodoor', 'noplace', 'several', 'capped'];
 
 function reachRound(v) { return Math.round(v * 100) / 100; }
 
-function reachOf(res, hits, disc, plan) {
+function reachOf(res, hits, disc, plan, how) {
   try {
     if (!res || res.at || REACH_WHYS.indexOf(res.why) === -1 || !disc || !disc.at) return null;
     var pts = (Array.isArray(hits) ? hits : []).filter(function (h) {
@@ -3509,7 +3511,7 @@ function reachOf(res, hits, disc, plan) {
     });
     var door = !!(plan && plan.door && plan.house);
     var doors = door ? pts.filter(function (h) { return MV.hasDoor(h, plan.house); }) : null;
-    var out = { why: END_WHY[res.why] || res.why, n: pts.length,
+    var out = { why: endWhyOf(res, null, how), n: pts.length,
                 doors: doors ? doors.length : null,
                 r: reachRound(disc.miles), set: discSet(disc) };
     if (res.why === 'several' || res.why === 'capped') {
@@ -3720,9 +3722,30 @@ function bandHeldNow(h) {
 // 'nodoor' is the NucBox finding the street and not the door, in Map view's
 // own words for it (map-view.js), never "no house number": that is the text
 // with no number printed at all, refused before anything is asked.
-var END_WHY = { nodoor: 'street found, not that door', none: 'not inside the card\'s reach',
-                several: 'several answers', capped: 'too many answers',
-                noplace: 'no door, place not found' };
+//
+// ...THE WORDS ARE MAP VIEW'S NOW (MV.refusalWords, MV.REFUSAL_WORDS), the
+// places report's too, so the log, /api/status, the drop row and the report
+// say one thing of one refusal. 'none' was "not inside the card's reach"
+// here, of a door the bounded box never answered as much as of one found
+// past the edge (the 7 Nov log: Wingstop, CVS and Wendy's, all three, said
+// to be outside a reach nothing had measured). It is said by endWhyOf from
+// the answer itself: "no such door in the reach's box" where nothing
+// answered, "door found N mi out, past the reach" where the door answered
+// outside every circle. END_WHY.none is the first, the words for a 'none'
+// that carries no `nearest` (pickStoreAlong's, a hand-built one).
+var END_WHY = { nodoor: MV.REFUSAL_WORDS.nodoor, none: MV.REFUSAL_WORDS.nobox,
+                several: MV.REFUSAL_WORDS.several, capped: MV.REFUSAL_WORDS.capped,
+                noplace: MV.REFUSAL_WORDS.noplace };
+
+/* A refusal in the words the log, /api/status and the drop row say: Map
+ * view's (MV.refusalWords: the miles a door was found out for 'none'; `how`
+ * {place} for a place asked by its name after the door, {byName} for a
+ * store asked by its name alone), else END_WHY's, else `fallback` — 'no
+ * house number' at the callers that said it before. */
+function endWhyOf(res, fallback, how) {
+  var w = MV.refusalWords(res, how || null);
+  return w || END_WHY[res && res.why] || fallback || (res && res.why) || null;
+}
 
 /* One search question for the held end, answered from nbxCache or asked;
  * `answered(out)` with nbxHits' answer. A NucBox that does not answer is
@@ -3949,13 +3972,13 @@ function settleHeldEnd(key, attempt, disc, res, asked, via, seen) {
   // a rough area beside the refusal (searchHeldStreetArea; the owner's
   // DoorDash snap of 24 Oct, "better to route something than nothing").
   if (!res.at && res.why === 'none') {
-    return searchHeldStreetArea(key, attempt, disc, END_WHY.none);
+    return searchHeldStreetArea(key, attempt, disc, endWhyOf(res));
   }
   // ...and 'several' doors that are one general area (the owner, 24 Oct),
   // or a list cut at the limit that is (the DoorDash snap, 19:25), refused
   // as ever, the area kept beside the refusal.
   if (!res.at) {
-    refuseHeldEnd(now, END_WHY[res.why] || 'no house number', res.area);
+    refuseHeldEnd(now, endWhyOf(res, 'no house number'), res.area);
     // ...and narrowed by the held card's own miles where they can
     // (bandHeldEnd; the owner, 25 Oct): still the refusal, an area beside it.
     return bandHeldEnd(key, MV.bandCands(res));
@@ -3988,9 +4011,11 @@ function searchHeldPlace(key, attempt, disc, asked, area) {
     memoPick(holdIdOf(now), undefined, 'place', res);
     // ...and the place's refusal measured the same way, for refuseHeldEnd.
     var on = endSearch[holdIdOf(now)];
-    if (on && !res.at) on.reach = reachCard(reachOf(res, out.hits, disc, null), cardForSearch(now));
+    if (on && !res.at) {
+      on.reach = reachCard(reachOf(res, out.hits, disc, null, { place: true }), cardForSearch(now));
+    }
     if (!res.at) {
-      return searchHeldStreet(key, attempt, disc, asked, END_WHY[res.why] || END_WHY.noplace,
+      return searchHeldStreet(key, attempt, disc, asked, endWhyOf(res, END_WHY.noplace, { place: true }),
                               area);
     }
     pinHeldEnd(now, res.at, 'place');
@@ -4443,8 +4468,10 @@ function searchHeldPickupName(id, a, attempt, h) {
   var target = nbxSearchTarget('q', said, MV.discBox(disc));
   pickupAsk(id, a, attempt, target, function (out) {
     var res = MV.pickPlace(out.hits, disc, plan.q, out.cutAt);
-    settleHeldPickup(id, a, res.at ? res : { why: res.why || 'none' }, null,
-                     reachCard(reachOf(res, out.hits, disc, null), h.card));
+    // (A refusal keeps how far out the nearest place of that name was, its
+    // words' miles: endWhyOf, "place found N mi out, past the reach".)
+    settleHeldPickup(id, a, res.at ? res : { why: res.why || 'none', nearest: res.nearest }, null,
+                     reachCard(reachOf(res, out.hits, disc, null, { byName: true }), h.card));
   });
 }
 
@@ -4495,13 +4522,13 @@ function settleHeldPickup(id, a, res, asked, reach) {
   // ...and `reach`, what the refusal measured (reachOf), on the memo's
   // verdict and the log line, nowhere that decides.
   var verdict = res && res.at ? { pinned: true, asked: asked || null, lat: res.at.lat, lon: res.at.lon }
-                              : { pinned: false, why: END_WHY[res && res.why] || 'no house number' };
+                              : { pinned: false, why: endWhyOf(res, 'no house number', { byName: !!a.name }) };
   if (reach && !(res && res.at)) verdict.reach = reach;
   memoVerdict(id, a.q, verdict);
   var now = pickHold(id);
   if (!now) return;
   if (!res.at) {
-    pickSearch[id].why[a.q] = END_WHY[res.why] || 'no house number';
+    pickSearch[id].why[a.q] = endWhyOf(res, 'no house number', { byName: !!a.name });
     pinSaidNone(id, pinWhichPickup(now, a.q), pickSearch[id].why[a.q], a.q, null,
                 reach || null);
     return;
@@ -6225,8 +6252,9 @@ function heldStoresOf(h, gone) {
  *            (Map view's post), or null for no pin.
  *     why    heldEndState's endWhy: with a pin, why it did not arm ('door
  *            next to the pickup', 'two customers', 'customer count unread')
- *            or null; with none, the refusal ('no house number', 'not inside
- *            the card's reach', 'NucBox down', ...), 'no dropoff', 'no NucBox
+ *            or null; with none, the refusal ('no house number', 'no such
+ *            door in the reach's box', 'door found 4.4 mi out, past the
+ *            reach', 'NucBox down', ...; endWhyOf), 'no dropoff', 'no NucBox
  *            search' (NUCBOX_SEARCH unset) or 'still asking'.
  *     asked  what the server asked the NucBox for: 'door' (the door as
  *            printed), 'street' (the door found under another spelling of its
@@ -7484,6 +7512,10 @@ function earlyDoor(text, disc, named, done, onlyIf, store) {
   var settle = function (res, asked, via, seen) {
     if (res.at) return finish({ at: { lat: res.at.lat, lon: res.at.lon }, asked: asked, via: via }, true);
     var out = { at: null, why: res.why };
+    // ...and how far out the nearest such door was ('none': pickInDisc's
+    // `nearest`, null where the box held nothing), for the words the log
+    // says it in (endWhyOf): without it every 'none' read as nothing answered.
+    if (res.why === 'none' && res.nearest !== undefined) out.nearest = res.nearest;
     var reach = seen ? reachOf(res, seen.hits, disc, seen.plan) : null;
     if (reach) out.reach = reach;
     finish(out, true);
@@ -7530,7 +7562,7 @@ function searchCardEarly(offer, now) {
       if (r && !r.at && r.why) {
         var reach = r.reach ? reachCard(Object.assign({}, r.reach), card) : null;
         if (reach && inCar) reach.held = inCar;
-        pinSaidNone(offer.id, which, END_WHY[r.why] || r.why, door, true, reach);
+        pinSaidNone(offer.id, which, endWhyOf(r), door, true, reach);
       }
     };
   };

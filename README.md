@@ -425,7 +425,14 @@ all:
   pin for McDonald's — 2 fit the card and disagree · within 9.4 mi of you",
   "...none fit the card · within 0.6 mi of you, nearest 1.2 mi". A card with
   no yardstick is searched within sixty miles, one with no fix across
-  Georgia, under the same rules.
+  Georgia, under the same rules. The rig's own refusals — the `pin: none`
+  line in its log, the order in the car's reason on `/api/status`, the drop
+  row — say what the search measured, in map-view.js's words
+  (`refusalWords`), the places report's too: "no such door in the reach's
+  box" where the NucBox's bounded search held nothing, "door found 4.4 mi
+  out, past the reach" where it answered the door outside the card's circle
+  ("no such door" and "past reach" on the in-car line); never "not inside
+  the card's reach" for a door nothing measured.
 * **Road.** "+N mi out of your way" becomes **"+N road mi out of your way"**:
   the road from the car by the new pickup to where the order in the car is
   going, less the road from the car straight there. Never minutes — OSRM's
@@ -843,7 +850,10 @@ What it does:
   distance, and **only where one place answers**. A chain with several
   branches in reach, a card with no fix, a name the map does not hold: not
   placed, counted, and the pay gap between placed and unplaced printed with
-  its test, shift day by shift day.
+  its test, shift day by shift day. A refusal is counted in the rig's words
+  for what was measured: "no such door in the reach's box", "door found past
+  the reach", "street found, not that door", "no place of that exact name in
+  the reach's box", "a corner whose streets run together".
 * **Ranks places, towns and a 2-mile grid** by each offer's $/hr against what
   the other cells paid in the same three-hour block (advice.js `matched`),
   with 95% bootstrap intervals, the median $/hr and pay, and the share the

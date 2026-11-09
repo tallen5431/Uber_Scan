@@ -3140,7 +3140,14 @@
     // The NucBox found the street and not the door ('nodoor'): a number was
     // printed, unlike 'no house number' above.
     'street found, not that door': 'not that door',
+    // 'none' in the words that say what was measured (MV.refusalWords, the
+    // 9 Nov fix): nothing answered in the reach's box, or the door found out
+    // past it, whose words carry its miles and are matched below. The old
+    // words stay for a hold restored from a build before them.
+    'no such door in the reach\'s box': 'no such door',
     'not inside the card\'s reach': 'outside reach',
+    // ...and a held pickup asked by its store's name alone, no such name.
+    'no place of that exact name in the reach\'s box': 'no such place',
     'several answers': 'several answers',
     'too many answers': 'too many answers',
     'no card fix': 'no card fix',
@@ -3150,6 +3157,17 @@
     // (server.js searchHeldPlace).
     'no door, place not found': 'no door/place'
   };
+
+  /* A server's reason in the in-car line's few words: END_WHY_SHORT's, the
+     door found past the reach with its miles left off ("door found 4.4 mi
+     out, past the reach": its first three words, "door found 4.4", said
+     nothing of why), else its first three words. */
+  var PAST_REACH = /^door found .* past the reach$/;
+  function endWhyShort(why) {
+    if (Object.prototype.hasOwnProperty.call(END_WHY_SHORT, why)) return END_WHY_SHORT[why];
+    if (PAST_REACH.test(String(why))) return 'past reach';
+    return String(why).split(' ').slice(0, 3).join(' ');
+  }
 
   /* The GPS drop's state in a few words: "at door" once the car has arrived
    * (the beat's atDropoff, or the hold's own arrival, which survives a reload),
@@ -3165,9 +3183,7 @@
   // `arrived` instead.
   function gpsSaidOf(h, here) {
     if (here || h.arrived) return 'at door';
-    if (h.endWhy) {
-      return END_WHY_SHORT[h.endWhy] || String(h.endWhy).split(' ').slice(0, 3).join(' ');
-    }
+    if (h.endWhy) return endWhyShort(h.endWhy);
     // ...and an end the server pinned by the place the phone printed for it,
     // its door not being on the NucBox (searchHeldPlace, `endBy` 'place'):
     // armed all the same, and said, since that pin is a building's and not a

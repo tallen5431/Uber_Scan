@@ -871,9 +871,11 @@ def waits(orders_):
 
 
 # How long a word off the row may print. Every word server.js writes there is
-# shorter ("not inside the card's reach" is 27); a longer one is a newer
-# build's, cut rather than let run on.
-WORD_MAX = 32
+# shorter; a longer one is a newer build's, cut rather than let run on. 32
+# until 9 Nov 2026, when 'none' became "door found N mi out, past the reach"
+# (server.js endWhyOf, map-view.js refusalWords): 38 letters at a 60 mi
+# disc's two-figure miles ("door found 61.2 mi out, past the reach"), so 40.
+WORD_MAX = 40
 
 
 def _word(v):

@@ -6971,7 +6971,7 @@ try:
         _atook(_ab, 'a-far', _COBB, miles=2.0)
         _h = _settled(_ab)
         eq('[auto arm] an answer outside the held card\'s disc does not arm',
-           (_h.get('endPinned'), _h.get('endWhy')), (False, 'not inside the card\'s reach'))
+           (_h.get('endPinned'), _h.get('endWhy')), (False, "no such door in the reach's box"))
 
         # The 17 Oct evening snap, invented: the planner's door printed with
         # the app's "Cts", which the NucBox answers with nothing; asked once
@@ -6998,11 +6998,11 @@ try:
         eq('[street retry] the same number on another type of street is not the door: the '
            'first question\'s refusal stands',
            (_h.get('endPinned'), _h.get('endAsked'), _h.get('endWhy')),
-           (False, None, 'not inside the card\'s reach'))
+           (False, None, "no such door in the reach's box"))
         _atook(_ab, 'a-retry-far', '1830 Tansy Creek Cts SW, Marietta', miles=1.0)
         _h = _settled(_ab)
         eq('[street retry] ...and the door found outside the held card\'s disc is refused',
-           (_h.get('endPinned'), _h.get('endWhy')), (False, 'not inside the card\'s reach'))
+           (_h.get('endPinned'), _h.get('endWhy')), (False, "no such door in the reach's box"))
         _atook(_ab, 'a-door2', _COBB)
         _h = _settled(_ab)
         eq('[street retry] a door found as printed says no other street',
@@ -7092,11 +7092,11 @@ try:
            'and no door is asked by either name',
            (_h.get('endPinned'), _h.get('endAsked'), _h.get('endWhy'),
             len(_aasked('Brindlewood')) + len(_aasked('Brindleton'))),
-           (False, None, 'not inside the card\'s reach', 0))
+           (False, None, "no such door in the reach's box", 0))
         _atook(_nmb, 'n-far', '1106 Tamaror, Marietta', miles=1.0)
         _h = _settled(_nmb)
         eq('[name rescue] ...and the door found outside a 1.0 mi card is refused',
-           (_h.get('endPinned'), _h.get('endWhy')), (False, 'not inside the card\'s reach'))
+           (_h.get('endPinned'), _h.get('endWhy')), (False, "no such door in the reach's box"))
         # A door the NucBox holds only the street of, pinned by Map view's
         # post: its row says the page pinned it and asks nothing of how.
         _atook(_nmb, 'n-page', _KES)
@@ -7174,8 +7174,8 @@ try:
     _badix = _badix_app()
     _badix_base = 'http://127.0.0.1:%d' % _badix.server_address[1]
     for _ixname, _ixenv, _ixwant in (
-            ('unset', {}, 'not inside the card\'s reach'),
-            ('bad', {'NUCBOX_STREETS': _badix_base}, 'not inside the card\'s reach')):
+            ('unset', {}, "no such door in the reach's box"),
+            ('bad', {'NUCBOX_STREETS': _badix_base}, "no such door in the reach's box")):
         _ixj = os.path.join(_adir, 'ix-' + _ixname, 'offers.jsonl')
         os.makedirs(os.path.dirname(_ixj))
         open(_ixj, 'w').close()
@@ -7228,8 +7228,8 @@ try:
         # The other two have none: the index was to give theirs.)
         eq('[streets down] a door whose search answered keeps the search\'s refusal when the '
            'street index refuses the connection: the name rescue, the short court, the area',
-           _sdgot, [(False, 'not inside the card\'s reach', False), (False, 'street found, not that door', True),
-                    (False, 'not inside the card\'s reach', False)])
+           _sdgot, [(False, "no such door in the reach's box", False), (False, 'street found, not that door', True),
+                    (False, "no such door in the reach's box", False)])
         _atook(_sdb, 'sd-next', _COBB)
         _settled(_sdb, lambda h: h.get('endPinned'))
         time.sleep(0.3)
@@ -7238,8 +7238,8 @@ try:
            [(r['id'], (r.get('end') or {}).get('why')) for r in _sdrows
             if r.get('kind') == 'drop' and r.get('id', '').startswith('sd-')
             and r.get('id') != 'sd-next'],
-           [('sd-name', 'not inside the card\'s reach'), ('sd-court', 'street found, not that door'),
-            ('sd-area', 'not inside the card\'s reach')])
+           [('sd-name', "no such door in the reach's box"), ('sd-court', 'street found, not that door'),
+            ('sd-area', "no such door in the reach's box")])
         eq('[streets down] ...while the panel\'s word for the index is down',
            (get(_sdb, '/api/status').get('nucbox') or {}).get('streets', {}).get('up'), False)
     finally:
@@ -7282,7 +7282,7 @@ try:
            'and the search\'s refusal still',
            (sorted(_DownIx.asked), _h.get('endWhy')),
            (['/api/streets/named'] * 2 + ['/api/streets/whole'] * 2,
-            'not inside the card\'s reach'))
+            "no such door in the reach's box"))
     finally:
         stop(_sdp)
         _downix.shutdown()
@@ -7780,7 +7780,7 @@ try:
            'once more without its street\'s type word (as the end is), and not kept',
            (len(_hkasked('street=250')) - _n, (_holding(_hkb) or {}).get('pickupsPinned'),
             (_holding(_hkb) or {}).get('pickupsWhy')),
-           (2, 0, 'not inside the card\'s reach'))
+           (2, 0, 'door found 1.7 mi out, past the reach'))
         post(_hkb, '/api/delivered', {})
     finally:
         stop(_hkp)
@@ -7870,7 +7870,7 @@ try:
            (_h.get('endPinned'), _h.get('endAt'), _h.get('endWhy'), _ea.get('approx'),
             _ea.get('rough'), round(_ea.get('lat') or 0, 4),
             len(_hkasked('/api/streets/whole?name=Pellmore')) - _n),
-           (False, None, 'not inside the card\'s reach', True, True, 33.958, 1))
+           (False, None, "no such door in the reach's box", True, True, 33.958, 1))
         _hksays([_areabeat(_ea.get('lat'), _ea.get('lon'))] * 7
                 + [_areabeat(_ea.get('lat') + 0.02, _ea.get('lon'))] * 3)
         _h = _holding(_hkb) or {}
@@ -7881,7 +7881,7 @@ try:
         _h = _settled(_hkb)
         eq('[area more] a door nothing answered on a street too long to be one area: refused, '
            'no area', (_h.get('endPinned'), _h.get('endWhy'), _h.get('endArea')),
-           (False, 'not inside the card\'s reach', None))
+           (False, "no such door in the reach's box", None))
         post(_hkb, '/api/delivered', {})
         # A held pickup whose door is the cut list's: the area is the page's
         # to draw and nothing of it is kept as a pin.
@@ -8488,7 +8488,7 @@ try:
            'inside the disc, nothing pinned, the door armed, and /api/status says why',
            (len(_spn), all('q=Example%20Taqueria' in a and 'bounded=1' in a for a in _spn),
             _h.get('pickupsPinned'), _h.get('pickupsWhy'), _h.get('endPinned'), _h.get('endWhy')),
-           (1, True, 0, 'no door, place not found', True, None))
+           (1, True, 0, "no place of that exact name in the reach's box", True, None))
         post(_spb, '/api/delivered', {})
 
         # The street-type retry, as the end's: "Cts" asked again without it.
@@ -8593,7 +8593,7 @@ try:
         _h = _settled(_twb, lambda h: h.get('pickupsPinned') or h.get('pickupsWhy'))
         eq('[store along] ...two places of that name along the street: no pin, the door\'s own '
            'refusal said', (_h.get('pickupsPinned'), _h.get('pickupsWhy')),
-           (0, 'not inside the card\'s reach'))
+           (0, "no such door in the reach's box"))
         post(_twb, '/api/delivered', {})
         # The same door as a customer's: nothing of the store's rule is asked.
         _n = len(_hkasked(''))
@@ -8950,7 +8950,7 @@ try:
         post(_hkb, '/api/delivered', {})
         eq('[place] a feature of that name outside the held card\'s disc is refused',
            _plend(_hkb, 'p-far', 'Lantern Parking Deck'),
-           ('Lantern Parking Deck', False, None, 'not inside the card\'s reach'))
+           ('Lantern Parking Deck', False, None, 'place found 6.9 mi out, past the reach'))
         post(_hkb, '/api/delivered', {})
         # The door on the NucBox: the place is never asked.
         _n = len(_hkasked('q='))
@@ -9114,7 +9114,7 @@ try:
         time.sleep(0.3)
         eq('[pin log] a pickup the NucBox refused says why on the Drop row',
            (_edrop(_hkj, 'e-pick') or [{}])[0].get('pickups'),
-           {'pinned': 0, 'why': 'not inside the card\'s reach'})
+           {'pinned': 0, 'why': "no such door in the reach's box"})
         # [early search] A card read before its fix is asked on the next reading.
         _n90 = len(_hkasked('street=1990'))
         _nofix = dict(_ECARD, id='e-nofix', dropoff='1990 Cobb Parkway, Kennesaw',
@@ -14207,7 +14207,7 @@ try:
         eq('[reach] an offer pickup refused as outside the reach says how far out its answer '
            'was, the radius and how it was set, and the card\'s miles to the pickup',
            _plsaid('#pl-reach '),
-           ['pin: none offer pickup #pl-reach "not inside the card\'s reach" (Example Diner '
+           ['pin: none offer pickup #pl-reach "door found 3.4 mi out, past the reach" (Example Diner '
             '(1985…) - 3 answered, 3 at the door, the nearest 3.35 mi from the centre, '
             'radius 3.3 mi (card 2.8 mi + 0.5 slack; card says 0.9 mi to the pickup%s); '
             'nearest: place "1985, Cobb Parkway, Kennesaw, "' % _plcar])
@@ -14244,7 +14244,7 @@ var MV = require(path.join(ROOT, 'map-view.js'));
 var ctx = { MV: MV, Math: Math, String: String, Array: Array, Object: Object };
 vm.createContext(ctx);
 ['END_WHY', 'REACH_NAME_SHOWN', 'REACH_WHYS'].forEach(function (n) { vm.runInContext(grabVar(n), ctx); });
-['reachRound', 'reachOf', 'discSet', 'reachCard', 'reachSaid'].forEach(function (n) {
+['reachRound', 'endWhyOf', 'reachOf', 'discSet', 'reachCard', 'reachSaid'].forEach(function (n) {
   vm.runInContext(grab(n), ctx);
 });
 var SQ = { lat: 33.9526, lon: -84.5499, gpsOk: true, gpsErr: 10, gpsMode: 3, gpsAge: 0.5,
@@ -14282,6 +14282,18 @@ out.long = ctx.reachOf(r1, [at(0.0484, 0, 'A very long display name, Faketown, C
                        d3, door).name;
 out.said = ctx.reachSaid(out.outside);
 out.none = [ctx.reachSaid(null), ctx.reachSaid(undefined)];
+// ...and the words the log and the status say each refusal in (endWhyOf,
+// MV.refusalWords): the door past the edge with its miles, a box that held
+// nothing, a place asked after its door and one asked by name alone.
+var placeOut = MV.pickPlace([Object.assign(at(0.06, 0, 'Lantern Deck, 2, Pell Lane', 'amenity'),
+                                           { called: 'Lantern Deck' })], d3, 'Lantern Deck', null);
+out.words = [ctx.endWhyOf(r1), ctx.endWhyOf({ at: null, why: 'none', nearest: null, n: 0 }),
+             ctx.endWhyOf({ at: null, why: 'none', n: 0 }, 'no house number'),
+             ctx.endWhyOf(placeOut, null, { place: true }),
+             ctx.endWhyOf({ at: null, why: 'noplace', n: 0 }, null, { place: true }),
+             ctx.endWhyOf({ at: null, why: 'noplace', n: 0 }, 'no house number', { byName: true }),
+             ctx.endWhyOf({ at: null, why: 'nodoor', n: 1 }),
+             ctx.endWhyOf({ at: null, why: 'mystery' }, 'no house number')];
 console.log(JSON.stringify(out));
 '''
 _rdir = tempfile.mkdtemp()
@@ -14297,7 +14309,7 @@ try:
     eq('[reach] a door answered past the disc\'s edge: how many answered and were the door, '
        'the nearest one\'s miles from the centre, the radius and how it was set, the card\'s '
        'own miles to the pickup', _ro.get('outside'),
-       {'why': "not inside the card's reach", 'n': 2, 'doors': 1, 'r': 3.3,
+       {'why': 'door found 3.3 mi out, past the reach', 'n': 2, 'doors': 1, 'r': 3.3,
         'set': 'card 2.8 mi + 0.5 slack', 'mi': 3.34, 'kind': 'building',
         'name': '410, Pellmore Road, Faketown', 'toPickup': 0.9, 'cardMi': 2.8})
     eq('[reach] nothing answered in the box: no distance to give, and the line says so',
@@ -14327,6 +14339,16 @@ try:
        '(card 2.8 mi + 0.5 slack; card says 0.9 mi to the pickup); nearest: building '
        '"410, Pellmore Road, Faketown"')
     eq('[reach] no measurement, no tail', _ro.get('none'), ['', ''])
+    # The words (9 Nov): "not inside the card's reach" was said of a door the
+    # bounded box never answered as much as of one found past the edge.
+    eq('[words] each refusal said as what was measured: the door past the edge and its miles, '
+       'a box that held nothing, a place past the edge, no place after the door, no place of '
+       'that name asked alone, the street without its number, and an unknown one\'s fallback',
+       _ro.get('words'),
+       ['door found 3.3 mi out, past the reach', "no such door in the reach's box",
+        "no such door in the reach's box", 'place found 4.1 mi out, past the reach',
+        'no door, place not found', "no place of that exact name in the reach's box",
+        'street found, not that door', 'no house number'])
 finally:
     shutil.rmtree(_rdir, ignore_errors=True)
 # Nothing that pins, files or decides reads it: the on-time hint takes `r.at`
@@ -14335,8 +14357,8 @@ finally:
 _offer_pin = _plsrc[_plsrc.index('\nfunction offerPin('):]
 _offer_pin = _offer_pin[:_offer_pin.index('\n}\n')]
 ok_('[reach] the on-time hint never reads what a refusal measured', 'reach' not in _offer_pin)
-ok_('[reach] ...nor the pickups\' status word', "pickSearch[id].why[a.q] = END_WHY[res.why] || "
-    "'no house number';" in _plsrc)
+ok_('[reach] ...nor the pickups\' status word', "pickSearch[id].why[a.q] = endWhyOf(res, 'no house "
+    "number', { byName: !!a.name });" in _plsrc)
 
 # --- the order record: one row as each order leaves the car (7 Nov 2026) --------
 #

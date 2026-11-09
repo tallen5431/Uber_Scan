@@ -5182,6 +5182,11 @@
     // (END_WHY_SHORT in live.html), its first three ("street found, not")
     // saying nothing.
     if (o.endWhy === 'street found, not that door') return 'not that door';
+    // ...and the door found past the reach, said with its miles (server.js
+    // endWhyOf, MV.refusalWords): "door found 4.4" said nothing; and nothing
+    // answered in the reach's box, the panel's own short words for it.
+    if (/^door found .* past the reach$/.test(String(o.endWhy))) return 'past reach';
+    if (o.endWhy === 'no such door in the reach\'s box') return 'no such door';
     if (o.endWhy) return String(o.endWhy).split(' ').slice(0, 3).join(' ');
     return '\u25cb not armed';
   }

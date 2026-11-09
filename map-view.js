@@ -2477,6 +2477,92 @@
                      inside, disc, plan);
   }
 
+  /* --- a refusal in words: ONE vocabulary for the rig's log and status and
+   * the places report ---------------------------------------------------------
+   *
+   * THE FAULT (the places report and the rig's log, 7 Nov 2026). Over 45 shift
+   * days the NucBox report left 1342 of 7984 pickups "not found inside the
+   * card's reach", and the rig's log said "not inside the card's reach" of
+   * offer pickups at Wingstop (three), CVS (three) and Wendy's. Read against
+   * the code (AUDITS.md, Done, "Four refusals were one label"), those words
+   * were a claim the search had not made:
+   *
+   *   - the report printed them for FOUR refusals, pickInDisc's 'none',
+   *     'nodoor' and 'together' and pickPlace's 'noplace', where the rig said
+   *     them of 'none' alone: a street found without its number, a name OSM
+   *     spells with a word fewer, and a corner whose streets run together
+   *     were all "outside the reach", and none of them is about the reach;
+   *   - and 'none' itself is two things. Every question is `bounded=1` to the
+   *     disc's BOX (discBox), so the NucBox returns only what lies in that
+   *     square: a 'none' whose box held nothing (`nearest` null — the door is
+   *     not on the NucBox under that street, or lies past the box's edge,
+   *     which nothing can tell apart) is not a door found too far away. Only
+   *     a 'none' with `nearest` — the asked door answered from the box's
+   *     corners, outside every circle — says the reach was too small, and by
+   *     how much.
+   *
+   * So the words say what was measured. Keyed on the refusal's own `why`:
+   *
+   *   none, nearest null    "no such door in the reach's box"
+   *   none, nearest N       "door found N mi out, past the reach" (the rig: the
+   *                         miles are the card's fix to the nearest such door,
+   *                         pickInDisc's `nearest`, to one decimal), or "door
+   *                         found past the reach" where refusals are COUNTED
+   *                         (`opts.count`, the report), so one label is one
+   *                         count and not one per tenth of a mile
+   *                         ...and "place" for "door" in both where a place
+   *                         was asked by its name (`opts.place`, or
+   *                         `opts.byName`): pickPlace's 'none' is the named
+   *                         features none of which lies inside, not a door
+   *   nodoor                "street found, not that door" (Map view's and the
+   *                         rig's words since the 17 Oct fault, unchanged)
+   *   noplace               "no door, place not found" — a door refused and
+   *                         the place the phone printed asked after it
+   *                         (server.js searchHeldPlace), unchanged; or, where
+   *                         a store was asked by its NAME alone (`opts.byName`:
+   *                         the report's name pickups, a held pickup searched
+   *                         by name), "no place of that exact name in the
+   *                         reach's box" — pickPlace wants a named feature
+   *                         with the same words (placeNamed), one slip, so
+   *                         "Utopian Bowl Kitchen" against OSM's "Utopian
+   *                         Bowl" is this, not a reach
+   *   together              "a corner whose streets run together"
+   *   several, capped       "several answers", "too many answers", unchanged
+   *
+   * and null for anything else (no pin refused, or a `why` this does not word),
+   * which each caller says in its own words as before (server.js END_WHY,
+   * the report's WHY). Words only: nothing that pins, files or decides reads
+   * them. */
+  var REFUSAL_WORDS = {
+    nobox: 'no such door in the reach\'s box',
+    past: 'door found past the reach',
+    placeBox: 'no such place in the reach\'s box',
+    placePast: 'place found past the reach',
+    nodoor: 'street found, not that door',
+    noplace: 'no door, place not found',
+    noname: 'no place of that exact name in the reach\'s box',
+    together: 'a corner whose streets run together',
+    several: 'several answers',
+    capped: 'too many answers'
+  };
+  // The `why`s worded as themselves; 'none' and 'noplace' are split above.
+  var REFUSAL_SAME = ['nodoor', 'together', 'several', 'capped'];
+  function refusalWords(res, opts) {
+    opts = opts || {};
+    if (!res || res.at || typeof res.why !== 'string') return null;
+    if (res.why === 'none') {
+      var place = !!(opts.place || opts.byName);
+      var mi = res.nearest;
+      if (typeof mi !== 'number' || !isFinite(mi)) {
+        return place ? REFUSAL_WORDS.placeBox : REFUSAL_WORDS.nobox;
+      }
+      return opts.count ? (place ? REFUSAL_WORDS.placePast : REFUSAL_WORDS.past)
+        : (place ? 'place' : 'door') + ' found ' + mi.toFixed(1) + ' mi out, past the reach';
+    }
+    if (res.why === 'noplace') return opts.byName ? REFUSAL_WORDS.noname : REFUSAL_WORDS.noplace;
+    return REFUSAL_SAME.indexOf(res.why) >= 0 ? REFUSAL_WORDS[res.why] : null;
+  }
+
   /* --- the door asked again, the street's type word left out ------------------
    *
    * The owner's snap of 17 Oct 2026 (evening): an Uber order held, its card's
@@ -5809,6 +5895,8 @@
            orderWords: orderWords, orderKey: orderKey, FASTEST_EXACT_MAX: FASTEST_EXACT_MAX,
            ORDER_SAME_S: ORDER_SAME_S, ORDER_SAME_M: ORDER_SAME_M,
            pickInDisc: pickInDisc, nbxRefusal: nbxRefusal,
+           // ...and a refusal in words, the rig's and the report's (9 Nov).
+           refusalWords: refusalWords, REFUSAL_WORDS: REFUSAL_WORDS,
            placeWords: placeWords, placeNamed: placeNamed, namedFeature: namedFeature,
            placeQuery: placeQuery, pickPlace: pickPlace, PLACE_KINDS: PLACE_KINDS,
            clipToDisc: clipToDisc, stretchInDisc: stretchInDisc, nearestOn: nearestOn,

@@ -259,10 +259,17 @@ var WHY = {
   long: 'a street with no door number',
   several: 'several places answer (a chain, or branches)',
   capped: 'several places answer (a chain, or branches)',
-  noplace: 'not found inside the card\'s reach',
-  none: 'not found inside the card\'s reach',
-  nodoor: 'not found inside the card\'s reach',
-  together: 'not found inside the card\'s reach',
+  // The search's own refusals, in the rig's words (MV.REFUSAL_WORDS; AUDITS.md,
+  // Done, "Four refusals were one label"). All four were "not found inside the
+  // card's reach" until 9 Nov 2026, where the rig said that of 'none' alone,
+  // and three of them are not about the reach: a street found without its
+  // number, a store's name OSM spells otherwise, a corner run together. A
+  // placement carries its own words (`said`, `refusedSaid`: wordsOf, which
+  // splits 'none' by what the box held); these are for one that does not.
+  noplace: MV.REFUSAL_WORDS.noname,
+  none: MV.REFUSAL_WORDS.nobox,
+  nodoor: MV.REFUSAL_WORDS.nodoor,
+  together: MV.REFUSAL_WORDS.together,
   cross: 'a corner, and no street index to ask',
   street: 'a street with no door number',
   notext: 'nothing searchable',
@@ -363,6 +370,23 @@ function townAt(res, at, said) {
   });
 }
 
+/* The words a refusal is counted under in the Coverage tab and the summary:
+ * the rig's for the search's own four (MV.refusalWords with `count`, so a
+ * 'none' is "no such door in the reach's box" or "door found past the reach"
+ * by what the bounded box held, one label each and no miles; a store asked by
+ * its name alone, `byName`), WHY's for the rest — "several places answer (a
+ * chain, or branches)" is the report's own, and says more here than the
+ * rig's "several answers". `res` is the search's answer, `why` the key kept. */
+var RIG_WORDED = ['none', 'noplace', 'nodoor', 'together'];
+function wordsOf(res, why, kind) {
+  if (RIG_WORDED.indexOf(why) >= 0) {
+    var r = res && res.why === why ? res : { why: why };
+    var w = MV.refusalWords(r, { count: true, byName: kind === 'name' });
+    if (w) return w;
+  }
+  return WHY[why] || why;
+}
+
 function placedAt(at, kind, level, spread, extra) {
   return Object.assign({ at: { lat: at.lat, lon: at.lon }, why: null, kind: kind, level: level,
                          spread: spread ? Math.round(spread * 100) / 100 : 0 }, extra || {});
@@ -407,18 +431,22 @@ async function placePickup(nbx, text, card, streets, ctx) {
   }
   var why = res && res.why;
   why = WHY[why] ? why : 'none';
-  if (region || k.kind !== 'door') return { at: null, why: why, kind: k.kind };
+  var said = wordsOf(res, why, k.kind);
+  if (region || k.kind !== 'door') return { at: null, why: why, said: said, kind: k.kind };
   // The door refused: the band first (it narrows; an area it found is tighter
   // than the one it was chosen from), else the area beside the refusal.
   if (ctx.road) {
     var spec = MV.bandTarget(card, 'pickup');
     var band = spec ? await nbx.band(text, res, disc, spec, null, ctx.budget || null, !!streets) : null;
-    if (band) return placedAt(band, k.kind, 'band', band.miles, { refused: why, cardMi: band.cardMi });
+    if (band) {
+      return placedAt(band, k.kind, 'band', band.miles, { refused: why, refusedSaid: said, cardMi: band.cardMi });
+    }
   }
   if (res && res.area) {
-    return placedAt(res.area, k.kind, res.area.rough ? 'street' : 'area', res.area.miles, { refused: why });
+    return placedAt(res.area, k.kind, res.area.rough ? 'street' : 'area', res.area.miles,
+                    { refused: why, refusedSaid: said });
   }
-  return { at: null, why: why, kind: k.kind };
+  return { at: null, why: why, said: said, kind: k.kind };
 }
 
 /* A taken order's dropoff, placed to be COUNTED by area and nothing else:
@@ -645,11 +673,14 @@ function coverage(rows, placedRow) {
       var e = levels[lv] || (levels[lv] = { level: lv, n: 0, rates: [], refused: Object.create(null), region: 0 });
       e.n += 1;
       e.rates.push(o.perHour);
-      if (r.refused) e.refused[WHY[r.refused] || r.refused] = (e.refused[WHY[r.refused] || r.refused] || 0) + 1;
+      if (r.refused) {
+        var rw = r.refusedSaid || WHY[r.refused] || r.refused;
+        e.refused[rw] = (e.refused[rw] || 0) + 1;
+      }
       if (r.region) e.region += 1;
       return;
     }
-    var w = WHY[r.why] || r.why;
+    var w = r.said || WHY[r.why] || r.why;
     why[w] = (why[w] || 0) + 1;
   });
   var byDay = Object.create(null);
@@ -4628,7 +4659,7 @@ module.exports = {
   stackTable: stackTable, quietTable: quietTable, trendTable: trendTable, spellsOf: spellsOf,
   heldOf: heldOf, gpsFixes: gpsFixes, cellTownOf: cellTownOf, tableCsv: tableCsv,
   inside: inside, realish: realish, outingOf: outingOf, main: main,
-  printedTown: printedTown, regionOf: regionOf, isPoint: isPoint, gridOk: gridOk, PLACE_APPROX_MI: PLACE_APPROX_MI,
+  printedTown: printedTown, regionOf: regionOf, wordsOf: wordsOf, WHY: WHY, isPoint: isPoint, gridOk: gridOk, PLACE_APPROX_MI: PLACE_APPROX_MI,
   REGION_MARGIN_MI: REGION_MARGIN_MI, quantile: quantile, qOf: qOf, tiersOf: tiersOf, topOf: topOf, timePresses: timePresses,
   stillRuns: stillRuns, shareTest: shareTest, goodTable: goodTable, waitTable: waitTable, deadOf: deadOf,
   deadTable: deadTable, sizeTable: sizeTable, bestLines: bestLines, targetLine: targetLine,

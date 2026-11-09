@@ -129,6 +129,65 @@ function nbx() {
   var near = await P.placePickup(n, 'Fernbrook Grill', card({ miles: 0.2 }), false);
   eq('a place outside the card\'s own distance plus slack is not placed', near.at, null);
 
+  /* --- the words an unplaced pickup is counted under (wordsOf) ---
+   *
+   * The 45-day report's "not found inside the card's reach: 1342" was four
+   * refusals under one label, and three of them not about the reach (AUDITS,
+   * Done, "Four refusals were one label"). Four invented pickups, one each:
+   * a door answered from the box's corner 4.4 mi out of a 3.9 mi disc, a door
+   * the box held nothing for, a store OSM names a word shorter (a DoorDash
+   * one-leg card, so the 60 mi default disc: nothing is outside that), and a
+   * corner whose two streets run together. */
+  var wordsAnswers = {
+    '410 Pellmore Rd': [hit('410, Pellmore Road, Faketown', 'building', '', off(0.045, 0.045))],
+    'Utopian Bowl Kitchen': [hit('Utopian Bowl, 3, Ash Row, Faketown', 'amenity', 'Utopian Bowl', off(0.01, 0.01))],
+  };
+  var wordsNbx = new MV.NbxSearch({ gap: 0, fetch: function (u) {
+    var q = new URLSearchParams(u.split('?')[1] || '');
+    var list = (q.has('q') ? wordsAnswers[q.get('q')] : wordsAnswers[q.get('street')]) || [];
+    // ...the relay's bounded box: only what lies inside viewbox comes back.
+    var b = (q.get('viewbox') || '').split(',').map(Number);
+    if (b.length === 4) {
+      list = list.filter(function (h) { return h.lon >= b[0] && h.lon <= b[2] && h.lat <= b[1] && h.lat >= b[3]; });
+    }
+    return Promise.resolve({ ok: true, status: 200, json: function () {
+      return Promise.resolve({ ok: true, cutAt: null, hits: list });
+    } });
+  } });
+  var wRows = [card({ id: 'w-past', pickup: 'Fernbrook Grill (410 Pellmore Rd)', miles: 3.4 }),
+               card({ id: 'w-box', pickup: 'Larkspur Pharmacy (1554 N Ombre Hls Rd)' }),
+               card({ id: 'w-name', pickup: 'Utopian Bowl Kitchen', app: 'doordash', hasTotal: false, legs: 1 })];
+  var wPlaced = [];
+  for (var wi = 0; wi < wRows.length; wi++) {
+    wPlaced.push(await P.placePickup(wordsNbx, wRows[wi].pickup, wRows[wi], false));
+  }
+  eq('[words] each refusal keeps the search\'s own key',
+     wPlaced.map(function (r) { return r.why; }), ['none', 'none', 'noplace']);
+  eq('[words] ...and is counted in words that say what was measured',
+     wPlaced.map(function (r) { return r.said; }),
+     ['door found past the reach', "no such door in the reach's box",
+      "no place of that exact name in the reach's box"]);
+  var wCov = P.coverage(wRows, function (o) { return wPlaced[wRows.indexOf(o)] || { at: null }; });
+  eq('[words] the Coverage tab and the summary count them apart, one label each',
+     wCov.why.map(function (w) { return w.why + ' ' + w.n; }).sort(),
+     ['door found past the reach 1', "no place of that exact name in the reach's box 1",
+      "no such door in the reach's box 1"]);
+  eq('[words] a corner run together and a street found without its number say so',
+     [P.wordsOf({ why: 'together' }, 'together', 'cross'), P.wordsOf({ why: 'nodoor' }, 'nodoor', 'door')],
+     ['a corner whose streets run together', 'street found, not that door']);
+  eq('[words] ...a chain keeps the report\'s own words',
+     P.wordsOf({ why: 'several' }, 'several', 'name'), 'several places answer (a chain, or branches)');
+  ok('[words] and no label the report counts under claims the card\'s reach for a door, a name or a corner '
+     + 'run together',
+     ['none', 'noplace', 'nodoor', 'together'].every(function (k) { return !/card's reach/.test(P.WHY[k]); }));
+  // ...and an area that stood in for a refusal says which, in the same words.
+  var wArea = P.coverage([card({ id: 'w-a', pickup: 'x' })], function () {
+    return { at: { lat: 12.3, lon: 45.6 }, level: 'area', kind: 'door', spread: 0.1,
+             refused: 'nodoor', refusedSaid: 'street found, not that door' };
+  });
+  eq('[words] ...the level\'s "stood in for" says the refusal\'s words', wArea.levels[0].refused,
+     'street found, not that door 1');
+
   eq('the store label drops Uber\'s bracket', P.storeLabel('Tallow Noodle (77 Quillon Way)'), 'Tallow Noodle');
   eq('...and a printed door keeps the line before its comma',
      P.storeLabel('77 Quillon Way, Faketown, ZZ 99999'), '77 Quillon Way');
