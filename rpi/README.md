@@ -117,7 +117,12 @@ rectangle Error in pixScanForForeground: invalid box" — leptonica, inside
 tesseract, narrating a crop while the scanner went on reading — and the panel
 shows `error` as the reason a scanner is not running, so a crash with nothing to
 say would have been blamed on that. Both are cleared when the next process
-starts.
+starts. (Those two leptonica lines are not a box of the rig's past the image:
+every crop the reader is handed is clamped first, `pipeline.clamp_box`, and the
+reader is handed whole images. Measured on rendered cards, they come from
+tesseract's own page layout under the second look's psm 4, over a crop whose
+content is cut at its edge, and the read returns its text — AUDITS.md, "Leptonica's
+'box outside rectangle' came back".)
 
 It is also restarted if it stops working **without** dying. A CSI camera that
 stops delivering frames leaves `capture_request()` blocked forever: the process

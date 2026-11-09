@@ -4230,8 +4230,12 @@ def map_band(frame, geom, height=MAP_LABEL_HEIGHT):
     roi = getattr(geom, 'roi', None)
     if roi and MAP_LABEL_ROI_FLOOR < float(roi[1]) < bottom:
         bottom = float(roi[1])
+    # Clamped to the screen box, as every crop the reader is handed is
+    # (PL.clamp_box): a slice past the end in numpy is silently short, and a
+    # negative start silently wraps to the bottom of the picture.
+    top, bottom = min(1.0, max(0.0, top)), min(1.0, max(0.0, bottom))
     h = screen.shape[0]
-    return screen[int(top * h):int(bottom * h)]
+    return screen[int(top * h):max(int(top * h) + 1, int(bottom * h))]
 
 
 def _runs(flags):
@@ -4297,8 +4301,13 @@ def map_label_boxes(band, screen_h):
 def map_label_image(band, box):
     """One label box, deskewed, cut in from its rounded ends and inverted to
     dark text on light, at MAP_LABEL_TEXT_ROWS rows: what tesseract reads."""
-    x, y, w, h = box
     H, W = band.shape[:2]
+    # The box clamped to the band before anything is cut from it (PL.clamp_box's
+    # rule, in pixels): map_label_boxes finds its boxes inside the band, and a
+    # box handed in from anywhere else is held to the same.
+    x0, y0 = min(W - 1, max(0, int(box[0]))), min(H - 1, max(0, int(box[1])))
+    x1, y1 = max(x0 + 1, min(W, int(box[0] + box[2]))), max(y0 + 1, min(H, int(box[1] + box[3])))
+    x, y, w, h = x0, y0, x1 - x0, y1 - y0
     pad = int(h * 0.3)
     x0, y0, x1, y1 = max(0, x - pad), max(0, y - pad), min(W, x + w + pad), min(H, y + h + pad)
     grey = cv2.cvtColor(band[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)

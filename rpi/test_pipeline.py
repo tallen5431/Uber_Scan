@@ -1964,6 +1964,101 @@ finally:
 eq('at exit an engine a read is still inside is left alone, and an idle one is closed',
    (_busy.closed, _idle.closed), (False, True))
 
+# --- every box clamped to the image before it is read (the 7 Nov 2026 log) ----
+#
+# The rig's log that night had leptonica's "Error in boxClipToRectangle: box
+# outside rectangle" / "Error in pixScanForForeground: invalid box" again and
+# again. A box past the image is what those words suggest, so every crop the
+# reader is handed passes PL.clamp_box (in crop(), and where the raised and
+# remembered boxes are made): a box past each edge reads the very pixels and
+# the very text of the box clamped by hand, and leptonica says nothing about
+# it on stderr — the process's own fd 2, where the engine in this process
+# writes, captured around the read.
+import tempfile                                               # noqa: E402
+import testcards as TC                                        # noqa: E402
+
+
+def _stderr_of(fn):
+    """(fn's answer, what was written to fd 2 while it ran)."""
+    keep = os.dup(2)
+    with tempfile.TemporaryFile() as tmp:
+        os.dup2(tmp.fileno(), 2)
+        try:
+            got = fn()
+        finally:
+            os.dup2(keep, 2)
+            os.close(keep)
+        tmp.seek(0)
+        return got, tmp.read().decode('utf-8', 'replace')
+
+
+eq('clamp_box: a box inside the image is the same floats',
+   PL.clamp_box([0.1, 0.25, 0.7, 0.5]), [0.1, 0.25, 0.7, 0.5])
+_r9 = lambda b: [round(v, 9) for v in b]                      # noqa: E731
+eq('...past each edge, the edge moved to the image\'s, the other axis as it was',
+   [_r9(PL.clamp_box(b)) for b in ([-0.2, 0.3, 0.8, 0.4], [0.3, -0.1, 0.4, 0.5],
+                                   [0.5, 0.3, 0.7, 0.4], [0.2, 0.7, 0.6, 0.5])],
+   [[0.0, 0.3, 0.6, 0.4], [0.3, 0.0, 0.4, 0.4], [0.5, 0.3, 0.5, 0.4], [0.2, 0.7, 0.6, 0.3]])
+eq('...an edge that is not a number is the image\'s own, and a box wholly outside has no '
+   'width at that edge',
+   (_r9(PL.clamp_box([float('nan'), 0.2, 0.5, 0.5])), _r9(PL.clamp_box([1.4, 0.2, 0.3, 0.5])),
+    PL.clamp_box(None)),
+   ([0.0, 0.2, 1.0, 0.5], [1.0, 0.2, 0.0, 0.5], [0.0, 0.0, 1.0, 1.0]))
+_cb_screen = TC.uberx_screen() if TC.available() else None
+if _cb_screen is not None:
+    _cb_scanner = PL.Scanner(quad=None, roi=None)
+    _cb_g = _cb_scanner.geometry()
+    _cb_card = [0.0, 0.42, 1.0, 0.5]
+    _cb_edges = {'left': ([-0.25, 0.42, 1.25, 0.5], _cb_card),
+                 'top': ([0.0, -0.3, 1.0, 1.22], [0.0, 0.0, 1.0, 0.92]),
+                 'right': ([0.0, 0.42, 1.4, 0.5], _cb_card),
+                 'bottom': ([0.0, 0.42, 1.0, 0.9], [0.0, 0.42, 1.0, 0.58])}
+    _cb_got = {}
+    for _edge, (_past, _inside) in _cb_edges.items():
+        _same_px = np.array_equal(PL.crop(_cb_screen, _past), PL.crop(_cb_screen, _inside))
+        (_a, _b), _err = _stderr_of(lambda: (_cb_scanner._read_box(_cb_screen, _past, _cb_g),
+                                             _cb_scanner._read_box(_cb_screen, _inside, _cb_g)))
+        _cb_got[_edge] = (_same_px, _a['text'] == _b['text'] and bool(_a['text'].strip()),
+                          'box outside rectangle' in _err or 'invalid box' in _err,
+                          _a['parsed']['pay'])
+    eq('a read box past each edge of the screen reads the pixels and the text of the box '
+       'clamped by hand, with nothing from leptonica on stderr (%r)' % (_cb_got,),
+       {k: v[:3] for k, v in _cb_got.items()},
+       {k: (True, True, False) for k in _cb_edges})
+    eq('...and the card\'s payout off every one of them', sorted({v[3] for v in _cb_got.values()}),
+       [16.05])
+    # The remembered rescue crop and a raised box are kept clamped, so what
+    # reader.json says was read is the box that was.
+    _cb_s2 = PL.Scanner(quad=None, roi=[0.0, 0.4, 1.0, 0.7])
+    _cb_s2.card_box = None
+    _cb_s2._remember_card_box({'cardBox': None, 'cropFrom': 'found', 'crop': [-0.1, 0.3, 1.3, 0.8],
+                               'parsed': {'pay': 9.0, 'minutes': 20, 'miles': 4.0,
+                                          'deliverBy': None}, 'text': ''},
+                              _cb_s2.geometry())
+    eq('...the remembered rescue crop is stored clamped',
+       (_cb_s2.card_box or {}).get('box'), [0.0, 0.3, 1.0, 0.7])
+    # The map label's band and its pill boxes: a box past the band's edges is
+    # cut as the box clamped to it.
+    import scan_pi as SP                                      # noqa: E402
+    _cb_band = cv2.cvtColor(_cb_screen[:300], cv2.COLOR_GRAY2BGR) if _cb_screen.ndim == 2 \
+        else _cb_screen[:300].copy()
+    cv2.rectangle(_cb_band, (40, 100), (520, 150), (30, 30, 30), -1)
+    cv2.putText(_cb_band, '4821 Kestrel Dr', (70, 138), cv2.FONT_HERSHEY_SIMPLEX, 1.2,
+                (255, 255, 255), 2)
+    _cb_bw = _cb_band.shape[1]
+    _cb_lab = {}
+    for _edge, _box in (('left', (-60, 100, 580, 50)), ('top', (40, -20, 480, 170)),
+                        ('right', (40, 100, _cb_bw + 200, 50)), ('bottom', (40, 100, 480, 900))):
+        _x0, _y0 = max(0, _box[0]), max(0, _box[1])
+        _x1 = min(_cb_bw, _box[0] + _box[2])
+        _y1 = min(_cb_band.shape[0], _box[1] + _box[3])
+        _a = SP.map_label_image(_cb_band, _box)
+        _b = SP.map_label_image(_cb_band, (_x0, _y0, _x1 - _x0, _y1 - _y0))
+        _cb_lab[_edge] = (_a is None and _b is None) or (
+            _a is not None and _b is not None and np.array_equal(_a, _b))
+    eq('...and a map label box past each edge of the band is cut as the box clamped to it',
+       _cb_lab, {k: True for k in ('left', 'top', 'right', 'bottom')})
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d pipeline checks passed' % ok)
 sys.exit(1 if bad else 0)

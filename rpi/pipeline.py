@@ -27,6 +27,7 @@ to 88.3ms. See _Tesseract.
 
 import atexit
 import ctypes
+import math
 import os
 import queue
 import shlex
@@ -597,10 +598,53 @@ def warp(frame, quad, height=CARD_HEIGHT):
     return cv2.warpPerspective(frame, cv2.getPerspectiveTransform(quad, dst), (w, h))
 
 
+def clamp_box(box):
+    """A fractional (x, y, w, h) box with every edge inside [0, 1]: the box as
+    it was when it already is (the same floats, so crop() cuts the same
+    pixels it always cut), else each edge past the image moved to it, an edge
+    that is not a number to the image's own, and a box wholly outside one of
+    no width or height at that edge (crop() still hands back one pixel).
+
+    EVERY CROP HANDED TO THE READER PASSES THROUGH HERE, by crop() — the drawn
+    box, a raised box (RAISE_STEPS), the remembered rescue crop, the card the
+    finder found, the flattened second read — and the remembered and raised
+    boxes are clamped where they are made as well, so what the log and
+    reader.json say was read is the box that was read. The 7 Nov 2026 rig log
+    had leptonica's "Error in boxClipToRectangle: box outside rectangle" and
+    "Error in pixScanForForeground: invalid box" over and over, and a box past
+    the image is the first thing those words suggest. It was not this: crop()
+    has clamped by pixel since it was written, and the reader is handed whole
+    images (no SetRectangle). Measured on rendered cards, the two lines come
+    from tesseract's own page layout under RECOVER_CONFIG (psm 4: its image
+    finder clips a box it worked out itself) on a crop whose content is cut
+    at its edge — 18 of 450 psm 4 reads of screens warped through quads past
+    the frame, none of the 450 psm 6 reads of the same crops — and the read
+    goes on and returns its text. See
+    AUDITS.md. This makes the clamp a named rule, with an edge that is not a
+    number answered too, rather than an accident of int() and max()."""
+    try:
+        x, y, w, h = (float(v) for v in box)
+    except (TypeError, ValueError):
+        return [0.0, 0.0, 1.0, 1.0]
+    def axis(a, n):
+        # One axis at a time, and as it was when it is already inside: the
+        # same floats, so crop() cuts the pixels it always cut.
+        if math.isfinite(a) and math.isfinite(n) and n >= 0 and 0.0 <= a and a + n <= 1.0:
+            return a, n
+        lo = min(1.0, max(0.0, a)) if math.isfinite(a) else 0.0
+        hi = min(1.0, max(0.0, a + n)) if math.isfinite(a + n) else 1.0
+        return lo, max(lo, hi) - lo
+    x, w = axis(x, w)
+    y, h = axis(y, h)
+    return [x, y, w, h]
+
+
 def crop(image, roi):
-    """Crop to a fractional (x, y, w, h) box, clamped to the image."""
+    """Crop to a fractional (x, y, w, h) box, clamped to the image
+    (clamp_box, then by pixel: at least one pixel either way)."""
     if not roi:
         return image
+    roi = clamp_box(roi)
     h, w = image.shape[:2]
     x0 = max(0, min(w - 1, int(roi[0] * w)))
     y0 = max(0, min(h - 1, int(roi[1] * h)))
@@ -2439,7 +2483,7 @@ class Scanner:
                 or not (journey['minutes'] or journey['deliverBy'] is not None):
             self.forget_card_box('nothing to hold the next read to')
             return
-        self.card_box = {'box': [float(v) for v in out['crop']], 'journey': journey,
+        self.card_box = {'box': clamp_box(out['crop']), 'journey': journey,
                          'stops': bool(OP.STORES_LINE.search(out.get('text') or '')),
                          'by': out.get('rescuedBy'), 'dark': geom.dark_mode,
                          'roi': [float(v) for v in self.roi], 'at': self.clock()}
@@ -2677,8 +2721,10 @@ class Scanner:
             boxes = []
             for step in (RAISE_STEPS if held_to is not None else ()):
                 top = max(0.0, float(g.roi[1]) - step)
-                boxes.append((step, top, [float(g.roi[0]), top, float(g.roi[2]),
-                                          float(g.roi[1]) + float(g.roi[3]) - top]))
+                # (clamped where it is made, so `crop` on the reading is the
+                # box read: clamp_box.)
+                boxes.append((step, top, clamp_box([float(g.roi[0]), top, float(g.roi[2]),
+                                                    float(g.roi[1]) + float(g.roi[3]) - top])))
                 if top <= 0.0:
                     break
             dark = g.dark_mode
@@ -2802,6 +2848,10 @@ class Scanner:
         None when it is not sure, or sure of a card that starts inside the
         drawn box (TALLER): the two answers on which _look reads nothing."""
         found = CF.find_card(screen, g.roi)
+        if found['sure'] and found.get('box'):
+            # The finder's box clamped before it is compared or read
+            # (clamp_box): a card it is sure of runs to the screen's edge.
+            found = dict(found, box=clamp_box(found['box']))
         if not found['sure'] or found['box'][1] >= float(g.roi[1]) - TALLER:
             return found, None
         got = self._read_box(screen, found['box'], g, dark=dark)
