@@ -724,8 +724,10 @@ eq('[pinning] a shift with no order prints no Pinning section',
 # the one: 'Imaginary Bistro (1 Nowhere Ln)', 6.5 min before its GPS visit.
 _wtext = SR.text(rep)
 _wsec = _wtext[_wtext.index('Restaurant waits'):_wtext.index('Pinning')]
-ok_('[waits] the text prints a Restaurant waits section: A\'s store, one visit, its minutes '
-    '(%r)' % _wsec, re.search(r'\n  Imaginary Bistro  1 visit  median 6\.[4-6] min\n', _wsec))
+ok_('[waits] the text prints a Restaurant waits section: A\'s store, one wait at its GPS visit, '
+    'its minutes and the worst (%r)' % _wsec,
+    re.search(r'\n  Imaginary Bistro  1 wait \(1 at a GPS visit\)  median 6\.[4-6] min  '
+              r'worst 6\.[4-6] min\n', _wsec))
 eq('[waits] the store is the card\'s pickup less its bracketed street; a door, a corner and '
    'no text are no store; the planner\'s icon letters go',
    [SR.store_name(t) for t in ('Imaginary Bistro (1 Nowhere Ln)', 'Larkspur Tacos (113 Quil',
@@ -987,9 +989,10 @@ eq('[too soon] [never driven] an add-on pressed down 2 min into "+10", parked, i
 code_js, out_js = run(['--journal', JOURNAL, '--gps', GPSDIR, '--day', '2026-03-03', '--json'])
 eq('[json] the CLI exits 0 with --json', code_js, 0)
 _js = json.loads(out_js)
-eq('[json] one object: the day, the GPS, the totals, the orders, the pinning, the summary',
+eq('[json] one object: the day, the GPS, the totals, the orders, the pinning, the summary, '
+   'the waits',
    sorted(_js), ['day', 'end', 'gps', 'orders', 'pinning', 'start', 'summary', 'totals',
-                 'unreadable'])
+                 'unreadable', 'waits'])
 eq('[json] the orders as the text has them, by number and with no id',
    [(o['n'], o['how'], o['reliable']) for o in _js['orders']],
    [(i + 1, o['how'], o['reliable']) for i, o in enumerate(rep['orders'])])
@@ -1474,6 +1477,177 @@ with contextlib.redirect_stderr(io.StringIO()):
 ok_('[strategy] ...and it is text or --json, never the CSV', _s_refused)
 ok_('[strategy] the phone\'s shift page never asks for it: server.js runs this file without it',
     '--strategy' not in _srv)
+
+# --- store waits from the stop pattern (the owner, 7 Nov 2026) ---------------
+#
+# "I seemed to spend too long waiting for orders that reduced how much I could
+# make substantially": that night's report measured one store, because a wait
+# was measured only at a pinned pickup's GPS visit and 6 of 9 pickups were
+# unpinned. A pickup with no GPS visit is now timed off the stop pattern.
+# Invented evening, the 12th, the same invented line of latitude as above:
+#
+#   W1 uber $8.14 14 min, Larkspur Tacos, unpinned. Took 18:00; a 90 s light
+#      at 18:02 (under 2 min: not a store); the store 18:05-18:21:48 (16.8
+#      min); its door 18:28-18:31; Drop 18:31:36 (31.6 min against 14).
+#   W2 dd   $9.00 20 min, Wren Noodles, unpinned. Took 18:40, with W3 taken
+#      18:41: Example Grill 18:45-18:51 (W3's pinned pickup, its GPS visit
+#      at 18:52), Wren Noodles 18:55-19:04 (9 min), W2's door 19:10-19:13,
+#      Drop 19:13; W3's door 19:18-19:21:30, GPS drop.
+#   W4 dd   $12.00 30 min, a batch: its record's card names Larkspur Tacos
+#      and Wren Noodles, neither pinned. Took 19:40: Larkspur 19:45-19:52
+#      (7 min), Wren 19:56-20:08 (12 min), the door 20:15-20:18, Drop.
+#   W5 uber $6.00 12 min, Larkspur Tacos with no stop of 2 min anywhere
+#      before its door (Took 20:30, a 100 s stop, the door 20:40-20:43, Drop).
+_W = lambda h, m, s=0: at(h, m, s, day=12)                    # noqa: E731
+_WPICK = {'W1': 'Larkspur Tacos (12 Oak Rd)', 'W2': 'Wren Noodles',
+          'W3': 'Example Grill (5 Elm St)', 'W4': 'Larkspur Tacos', 'W5': 'Larkspur Tacos (12 Oak Rd)'}
+
+
+def _woffer(oid, when, pay, minutes, miles, app='uber'):
+    r = offer(oid, when, pay, minutes, miles, app=app)
+    r['pickup'] = _WPICK[oid]
+    r['text'] = r['text'].replace(PICKUP, _WPICK[oid])
+    return r
+
+
+_wrows = [
+    _woffer('W1', _W(17, 59, 50), 8.14, 14, 4.0), mark('W1', _W(18, 0), True),
+    drop('W1', _W(18, 31, 36)),
+    _woffer('W2', _W(18, 39, 50), 9.00, 20, 4.0, app='dd'), mark('W2', _W(18, 40), True),
+    _woffer('W3', _W(18, 40, 50), 7.00, 25, 5.0), mark('W3', _W(18, 41), True),
+    {'v': 1, 'kind': 'visit', 'at': _W(18, 52), 'id': 'W3@1#0', 'seq': _W(18, 52),
+     'holdId': 'W3@1', 'pickup': 0, 'by': 'gps'},
+    drop('W2', _W(19, 13), carried=2), drop('W3', _W(19, 21, 30), by='gps'),
+    _woffer('W4', _W(19, 39, 50), 12.00, 30, 6.0, app='dd'), mark('W4', _W(19, 40), True),
+    _woffer('W5', _W(20, 29, 50), 6.00, 12, 2.0), mark('W5', _W(20, 30), True),
+    drop('W5', _W(20, 43, 30)),
+]
+_w4 = record('W4', _W(19, 40), _W(20, 18, 30), 'drop', pay=12.0, minutes=30, miles=6.0)
+_w4['card']['stores'] = ['Larkspur Tacos', 'Wren Noodles']
+_w4['pickups'] = [{'name': 'Larkspur Tacos', 'visited': False, 'pinned': None},
+                  {'name': 'Wren Noodles', 'visited': False, 'pinned': None}]
+_w4['pinning'] = {'end': {'by': None, 'why': 'no house number'},
+                  'pickups': {'pinned': 0, 'why': "not inside the card's reach"}}
+_wrows.append(_w4)
+_wj = os.path.join(work, 'waits.jsonl')
+with open(_wj, 'w') as fh:
+    for r in _wrows:
+        fh.write(json.dumps(r) + '\n')
+
+
+def _wtrack(segs):
+    """[(t, lat, lon, eph, speed)] at one a second off [(from, to, speed)]:
+    speed 0 is the car standing, with a parked receiver's two metres of
+    wander; anything else is driving east at that many m/s."""
+    pts, pos = [], 0.0
+    for t0, t1, v in segs:
+        for t in range(t0 // 1000, t1 // 1000):
+            if v:
+                pts.append((t, LAT0, lon_at(pos), 8.0, v))
+                pos += v
+            else:
+                pts.append((t, LAT0, lon_at(pos + (2.0 if t % 2 else -2.0)), 8.0, 0.0))
+    return pts
+
+
+_WSEGS = [(_W(17, 58), _W(18, 0), 0), (_W(18, 0), _W(18, 2), 12),
+          (_W(18, 2), _W(18, 3, 30), 0),                       # a 90 s light
+          (_W(18, 3, 30), _W(18, 5), 12), (_W(18, 5), _W(18, 21, 48), 0),   # Larkspur, 16.8
+          (_W(18, 21, 48), _W(18, 28), 12), (_W(18, 28), _W(18, 31, 36), 0),   # W1's door
+          (_W(18, 31, 36), _W(18, 45), 12), (_W(18, 45), _W(18, 51), 0),     # Example Grill
+          (_W(18, 51), _W(18, 55), 12), (_W(18, 55), _W(19, 4), 0),          # Wren, 9
+          (_W(19, 4), _W(19, 10), 12), (_W(19, 10), _W(19, 13), 0),          # W2's door
+          (_W(19, 13), _W(19, 18), 12), (_W(19, 18), _W(19, 21, 30), 0),     # W3's door
+          (_W(19, 21, 30), _W(19, 45), 12), (_W(19, 45), _W(19, 52), 0),     # Larkspur, 7
+          (_W(19, 52), _W(19, 56), 12), (_W(19, 56), _W(20, 8), 0),          # Wren, 12
+          (_W(20, 8), _W(20, 15), 12), (_W(20, 15), _W(20, 18, 30), 0),      # W4's door
+          (_W(20, 18, 30), _W(20, 33), 12), (_W(20, 33), _W(20, 34, 40), 0),  # 100 s
+          (_W(20, 34, 40), _W(20, 40), 12), (_W(20, 40), _W(20, 43, 30), 0),  # W5's door
+          (_W(20, 43, 30), _W(20, 50), 12)]
+_wgps = os.path.join(work, 'waits-gps')
+os.mkdir(_wgps)
+with open(os.path.join(_wgps, '2026-03-12_1758.jsonl'), 'w') as fh:
+    for p in _wtrack(_WSEGS):
+        fh.write(stamped(p[0], tpv(*p)))
+_wrep = SR.report(_wj, _wgps, '2026-03-12')
+_wby = {o['id']: o for o in _wrep['orders']}
+# Whole minutes: a stop takes in the car's last seconds rolling up and its first
+# pulling away, within STOP_M (totals()' own note), a few seconds either side.
+_wsaid = lambda oid: [(w['store'], round(w['minutes']), w['from'])            # noqa: E731
+                      for w in _wby[oid]['pickupWaits']]
+eq('[stop waits] an unpinned pickup is timed off the first stop of 2 min or more after the '
+   'Took: the 90 s light before it is not a store, the door after it is not either',
+   _wsaid('W1'), [('Larkspur Tacos', 17, 'stops')])
+eq('[stop waits] a stop at another order\'s pinned pickup (its GPS visit there) is that '
+   'order\'s, so the first stop that is this order\'s is its store',
+   _wsaid('W2'), [('Wren Noodles', 9, 'stops')])
+eq('[stop waits] ...and the pinned pickup is timed at its GPS visit, as ever',
+   _wsaid('W3'), [('Example Grill', 6, 'visit')])
+eq('[stop waits] a batch: one stop per pickup, in the order the record lists the stores',
+   _wsaid('W4'), [('Larkspur Tacos', 7, 'stops'), ('Wren Noodles', 12, 'stops')])
+eq('[stop waits] no stop of 2 min or more before the door is no wait, and says why — never '
+   'the door put to the store',
+   (_wsaid('W5'), _wby['W5']['pickupWaitWhy']),
+   ([], "no stop of 2 min or more between its Took and its door that was not another order's"))
+_wst = {g['store']: g for g in SR.waits(_wrep['orders'])['stores']}
+eq('[stop waits] by store: n, the GPS visits and the stop pattern counted apart, the median '
+   'and the worst',
+   sorted((k, g['n'], g['visits'], g['stopWaits'], round(g['median']), round(g['worst']))
+          for k, g in _wst.items()),
+   [('Example Grill', 1, 1, 0, 6, 6), ('Larkspur Tacos', 2, 0, 2, 12, 17),
+    ('Wren Noodles', 2, 0, 2, 11, 12)])
+_wt = _wrep['waitTotals']
+near('[stop waits] the shift\'s time at stores: every wait, each stop once',
+     _wt['waitSeconds'] / 60.0, 16.8 + 9 + 6 + 7 + 12, 0.5)
+near('[stop waits] ...as a share of the time the rig was on (17:58 to 20:50)',
+     _wt['share'], (16.8 + 9 + 6 + 7 + 12) / (172 - 1 / 60.0), 0.004)
+eq('[stop waits] what waits cost: the reliable orders with a wait and card minutes, their '
+   'pay over the card\'s minutes against over the clock, the minutes split into waiting and '
+   'the rest',
+   (_wt['cost']['orders'], round(_wt['cost']['cardMinutes']), round(_wt['cost']['waitMinutes']),
+    round(_wt['cost']['cardPerHour'], 2)),
+   (4, 14 + 20 + 25 + 30, round(16.8 + 9 + 6 + 7 + 12),
+    round((8.14 + 9 + 7 + 12) / ((14 + 20 + 25 + 30) / 60.0), 2)))
+_wtext = SR.text(_wrep)
+_wsec2 = _wtext[_wtext.index('Restaurant waits'):_wtext.index('Pinning')]
+ok_('[stop waits] the text: each store with its waits, how they were found, median and worst '
+    '(%r)' % _wsec2,
+    re.search(r'\n  Larkspur Tacos  2 waits \(2 from the stop pattern\)  median 1[12]\.\d min  '
+              r'worst 16\.[89] min\n', _wsec2)
+    and '  Example Grill   1 wait (1 at a GPS visit)  median 6.0 min  worst 6.0 min\n' in _wsec2)
+ok_('[stop waits] ...a line per order with its pickup wait, and its card against the clock '
+    'split into waiting and the rest, $/hr both ways',
+    re.search(r'\n    #1 Larkspur Tacos 16\.[89] min \(from the stop pattern\); card 14 min, '
+              r'took 31\.6: 16\.[89] waiting at the store, 14\.[78] the rest; card \$34\.89/hr, '
+              r'actual \$15\.46/hr\n', _wsec2)
+    and re.search(r'\n    #4 Larkspur Tacos 7\.\d min \(from the stop pattern\); Wren Noodles '
+                  r'12\.\d min \(from the stop pattern\); card 30 min', _wsec2))
+ok_('[stop waits] ...the shift\'s minutes at stores and their share, and what waits cost',
+    re.search(r'\n  time spent waiting at stores: 51 min of the 2 h 52 min the rig was on '
+              r'\(30%\)\n', _wsec2)
+    and '  what waits cost, over the 4 reliable orders with a wait' in _wsec2)
+_wjs = SR.as_json(_wrep)
+eq('[stop waits] the --json carries the minutes and how found, and no store name',
+   ([w for o in _wjs['orders'] for w in o['pickupWaits']][:2],
+    'Larkspur' in json.dumps(_wjs), 'Wren' in json.dumps(_wjs)),
+   ([{'n': 1, 'minutes': _wby['W1']['pickupWaits'][0]['minutes'], 'from': 'stops'},
+     {'n': 1, 'minutes': _wby['W2']['pickupWaits'][0]['minutes'], 'from': 'stops'}], False, False))
+ok_('[stop waits] no coordinate in the text or the --json',
+    not re.findall(r'12\.34|45\.67', _wtext + json.dumps(_wjs)))
+# With no log here, the server's own stop pattern on the order record
+# (server.js orderPickups' `stop`), where it kept one, and said so.
+_w4r = dict(_w4, pickups=[dict(_w4['pickups'][0], stop={'from': _W(19, 45), 's': 420}),
+                          dict(_w4['pickups'][1])])
+_wj2 = os.path.join(work, 'waits-rec.jsonl')
+with open(_wj2, 'w') as fh:
+    for r in _wrows[:-1] + [_w4r]:
+        fh.write(json.dumps(r) + '\n')
+_wnolog = {o['id']: o for o in SR.report(_wj2, None, '2026-03-12')['orders']}
+eq('[stop waits] with no GPS log, the record\'s stop where it has one; the other pickup '
+   'unmeasured and said',
+   ([(w['store'], w['minutes'], w['from']) for w in _wnolog['W4']['pickupWaits']],
+    _wnolog['W4']['pickupWaitWhy'], _wnolog['W1']['pickupWaits']),
+   ([('Larkspur Tacos', 7.0, 'record')], 'no GPS log here, and no stop on the order record', []))
 
 shutil.rmtree(work)
 print('FAILED: %d of %d' % (bad, ok + bad) if bad

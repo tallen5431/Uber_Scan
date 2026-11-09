@@ -1154,12 +1154,19 @@ function waitsTable(rows, places, waits, placeKey) {
     var j = waitOf(label, ws, sameName[AS.storeKey(label)] || 0);
     var why = j.why, w = j.w;
     var pays = list.map(function (o) { return o.pay; }).filter(function (v) { return typeof v === 'number'; });
+    // ...and the worst wait and how many of the store's waits the rig found
+    // from the stop pattern (server.js storeWaitsOut since the 7 Nov shift:
+    // a pickup never pinned is timed off the car's first stop of two
+    // minutes after the Took). Null from a rig older than those fields.
     return { name: label, n: list.length, pay: med(pays), perHour: med(list.map(function (o) { return o.perHour; })),
-             wait: w ? w.medianMin : null, waitN: w ? w.n : null, why: why };
+             wait: w ? w.medianMin : null, waitN: w ? w.n : null, why: why,
+             waitWorst: w && typeof w.worstMin === 'number' ? w.worstMin : null,
+             waitStops: w && typeof w.stops === 'number' ? w.stops : null };
   }).filter(function (r) { return r.wait !== null || r.n >= DESC_MIN_N; })
     .sort(function (a, b) { return (b.wait === null ? -1 : b.wait) - (a.wait === null ? -1 : a.wait) || b.n - a.n; });
   return { cols: [C('name', 'place', 't'), C('n', 'offers', 'n'), C('pay', 'median pay', '$'),
                   C('perHour', 'median $/hr', '$'), C('wait', 'median wait', 'min'), C('waitN', 'waits', 'n'),
+                  C('waitWorst', 'worst wait', 'min'), C('waitStops', 'from the stop pattern', 'n'),
                   C('why', 'not joined', 't')], rows: out };
 }
 
@@ -1577,6 +1584,7 @@ function restaurantsTable(rows, ctx) {
     var out = Object.assign(d, { name: k, label: label, ranked: !!g, chain: AS.chainName(label),
                                  placedN: list.length - un.length, branchN: branchesOf[k] || 0,
                                  wait: j.w ? j.w.medianMin : null, waitN: j.w ? j.w.n : null, waitWhy: j.why,
+                                 waitWorst: j.w && typeof j.w.worstMin === 'number' ? j.w.worstMin : null,
                                  branches: branches });
     if (g) {
       ['score', 'sci', 'median', 'ci', 'clear', 'beats', 'matched', 'compared'].forEach(function (f) { out[f] = g[f]; });
@@ -3460,7 +3468,9 @@ function MORE_SECTIONS(r) {
           + r.descMinN + ' or more; per app where that app has ' + r.descMinN + '. Click a column to sort.',
           [['ppmPlace', 'By place'], ['ppmTown', 'By town'], ['ppmGrid', 'By ' + r.gridMi + '-mile cell']])
     + sec('waits', 'Restaurant waits beside pay',
-          'The rig\'s measured waits at a store (server.js storeWaitsOut: name, how many, the median minutes; '
+          'The rig\'s measured waits at a store (server.js storeWaitsOut: name, how many, the median and the worst '
+          + 'minutes, and how many were found from the stop pattern — the car\'s first stop of two minutes or more '
+          + 'after the Took, for a pickup the GPS never visited because it was never pinned; '
           + r.waitsOnRecord + ' stores on record' + (r.waitsFrom ? ', from ' + esc(r.waitsFrom) : '') + ') joined to a place by its name as Assemble.sameStore compares '
           + 'two, and only where the join is not a guess: not a chain\'s name, one store of that name on record, and '
           + 'one place of that name here. The waits are all hours; the pay follows the hours picked.',
@@ -3863,7 +3873,9 @@ var PAGE_JS = String(function page() {
                    'Uber · DD', ''];
   function restCells(g, isBranch) {
     function td(v, text) { return '<td data-v="' + esc(v === null || v === undefined ? '' : String(v)) + '">' + text + '</td>'; }
+    // (and the worst, where the rig sends it: storeWaitsOut's worstMin)
     var wait = g.wait !== null && g.wait !== undefined ? g.wait.toFixed(1) + ' min (' + g.waitN + ')'
+      + (typeof g.waitWorst === 'number' ? ', worst ' + g.waitWorst.toFixed(1) : '')
       : g.waitWhy && g.waitWhy !== 'none on record' ? '<span title="' + esc(g.waitWhy) + '">— ' + esc(g.waitWhy) + '</span>' : '—';
     var score = isBranch ? (g.placeScore !== null && g.placeScore !== undefined
       ? '<span title="as a place, against the other places">' + sg(g.placeScore) + ' (place)</span>' : '—') : sg(g.score);

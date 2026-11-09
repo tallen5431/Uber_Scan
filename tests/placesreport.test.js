@@ -654,7 +654,7 @@ function nbx() {
     qr.pin = QUINCE;
     mRows.push(qr);
   }
-  var mWaits = [{ name: 'Fernbrook Grill', n: 4, medianMin: 6.5 },
+  var mWaits = [{ name: 'Fernbrook Grill', n: 4, medianMin: 6.5, worstMin: 16.8, stops: 3 },
                 { name: 'Quince Tea', n: 2, medianMin: 3 }, { name: 'Quince Tea', n: 3, medianMin: 9 }];
   var otherFix = off(0.4123, 0.4123);
   var rep6 = P.analyse(mRows, mTaken, byHand(mRows), function (t, o) {
@@ -682,6 +682,17 @@ function nbx() {
   var wt = more.waits;
   eq('waits: one store of the name, one place of it here: joined', [rowOf(wt, 'Fernbrook Grill').wait,
      rowOf(wt, 'Fernbrook Grill').waitN], [6.5, 4]);
+  // ...and the worst of them, and how many the rig found from the stop
+  // pattern (server.js storeWaitsOut since the 7 Nov shift); none said for a
+  // rig that sends neither.
+  eq('waits: the worst wait and the stop pattern\'s count beside the median, as the rig sends them',
+     [rowOf(wt, 'Fernbrook Grill').waitWorst, rowOf(wt, 'Fernbrook Grill').waitStops], [16.8, 3]);
+  ok('...as columns of the Store waits tab', wt.cols.some(function (c) { return c.k === 'waitWorst'; })
+     && wt.cols.some(function (c) { return c.k === 'waitStops' && /stop pattern/.test(c.h); }));
+  eq('...and the Restaurants tab says the worst after the median',
+     (rep6.views.all.rest.groups.concat(rep6.views.all.rest.thin).filter(function (g) {
+       return g.label === 'Fernbrook Grill';
+     })[0] || {}).waitWorst, 16.8);
   eq('...two stores of a name on record: not joined, and says why', [rowOf(wt, 'Quince Tea').wait,
      rowOf(wt, 'Quince Tea').why], [null, 'several stores of this name on record']);
   var chainRows = [];

@@ -11949,6 +11949,63 @@ try:
            (get(_wb, '/api/status').get('last') or {}).get('storeWait'), {'n': 2, 'avgMin': 3})
     finally:
         stop(_wp)
+
+    # FROM THE STOP PATTERN (the owner's 7 Nov night: 6 of 9 pickups never
+    # pinned, so one store's wait measured). An order with no pickup pin, a
+    # stop and away, its door, Drop: the record's pickup carries the stop and
+    # the wait is kept under the card's store at the car's own cell, `how:
+    # 'stop'`. The fake scanner speaks in quarter seconds, so the stop's
+    # floor and the door's margin are made seconds for this server alone
+    # (STOP_WAIT_MIN_MS, STOP_NEAR_MS), as GPS_GAP_MS is elsewhere here.
+    _ss, _ssay, _sj = _vsayer('stops')
+    _senv = {'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _ss,
+             'STOP_WAIT_MIN_MS': '1200', 'STOP_NEAR_MS': '700'}
+    _sp, _sb = start(_senv, _sj)
+    _SDOOR = (33.95, -84.55)
+    try:
+        def _sstop(at, n):
+            return [_vbeat(at, -0.0003)] * n            # n fresh fixes, a quarter second apart
+
+        def _sorder(oid, n):
+            _swtook(_sb, oid, 'Larkspur Tacos (310 Mill St)')
+            _ssay(_sstop(_SW, n) + _vleave(_SW) + _sstop(_SDOOR, 2))
+            time.sleep(0.8)
+            _ssay(_sstop(_SDOOR, 8))                    # the door, up to the Drop
+            post(_sb, '/api/delivered', {})
+
+        _sorder('s-1', 8)
+        # A Drop press's record waits on the GPS's watch for its door
+        # (finishWatch, finishing.json beside the journal) until the watch
+        # ends; the record there is the row that will be written.
+        try:
+            _swat = json.load(open(os.path.join(os.path.dirname(_sj), 'finishing.json')))
+        except (OSError, ValueError):
+            _swat = {}
+        _srec = [w.get('record') or {} for w in _swat.get('watches') or []
+                 if (w.get('record') or {}).get('offer') == 's-1']
+        _srec += [r for r in (json.loads(l) for l in open(_sj) if l.strip())
+                  if r.get('kind') == 'order' and r.get('offer') == 's-1']
+        _spk = ((_srec or [{}])[-1].get('pickups') or [{}])[0]
+        ok_('[stop waits] an unpinned pickup: the record carries the first stop after the Took, '
+            'two times and no place (got %r)' % (_spk,),
+            isinstance(_spk.get('stop'), dict) and sorted(_spk['stop']) == ['from', 's']
+            and 1 <= _spk['stop']['s'] <= 4)
+        _sf = _swfile(_sj) or {}
+        eq('[stop waits] ...and the wait is kept under the card\'s store at the car\'s stop, '
+           'said as the stop pattern\'s; the door\'s stop, running into the Drop, is no wait',
+           [(s.get('name'), [w.get('how') for w in s.get('waits') or []])
+            for s in _sf.get('stores') or []], [('Larkspur Tacos', ['stop'])])
+        _sorder('s-2', 14)
+        eq('[stop waits] a second: the offers page\'s waits say how many came from the stop '
+           'pattern, and the worst, the longer stop',
+           [(w.get('name'), w.get('n'), w.get('stops'),
+             w.get('worstMin') is not None and w['worstMin'] >= w['medianMin'])
+            for w in get(_sb, '/api/journal?days=1').get('waits') or []],
+           [('Larkspur Tacos', 2, 2, True)])
+        no_('[stop waits] no coordinate on the record\'s pickup',
+            any(k in json.dumps(_spk) for k in ('33.9', '84.5')))
+    finally:
+        stop(_sp)
 finally:
     shutil.rmtree(_vdir, ignore_errors=True)
 
@@ -13257,7 +13314,7 @@ try:
        (_sc, _sj.get('ok'), _sj.get('day'), sorted(_srep)),
        (200, True, _sday,
         ['day', 'end', 'gps', 'orders', 'pinning', 'start', 'summary', 'totals',
-         'unreadable']))
+         'unreadable', 'waits']))
     _sdrops = [r for r in _rows(_uj, 'drop') if r.get('id') == 'ud-a']
     eq('[shift] ...an undone Drop is no end: the order ends at the Drop that stood',
        [(o.get('how'), o.get('end'), o.get('pay'), o.get('cardMinutes')) for o in _sa],

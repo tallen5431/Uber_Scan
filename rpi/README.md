@@ -5070,6 +5070,43 @@ The offers page's **⤓ Download CSV** writes the same columns from the records
 alone. There is no
 panel button for it, deliberately: the bar holds six.
 
+**Restaurant waits, at a GPS visit or from the stop pattern** (the owner, after
+the 7 Nov 2026 shift: "I seemed to spend too long waiting for orders that
+reduced how much I could make substantially"). That night's report measured
+one store, because a wait was measured only at a pinned pickup's GPS visit and
+6 of the 9 pickups were never pinned. Now a pickup with no GPS visit is timed
+off the car's first stop of 2 minutes or more after the Took (every fix within
+50 m of the first) that is not the order's own door (a stop running into its
+end) and not another order's (a stop where another order's pinned pickup had
+its GPS visit, or another order ended); on a batch, one stop per pickup in the
+order the record lists the stores. Each such wait says "from the stop pattern"
+and is counted apart from the visits. The section prints each store with its
+waits, the median and the worst; a line per order with its pickup wait, its
+card minutes against the clock split into waiting and the rest, and the card's
+$/hr against the actual; the shift's minutes at stores and their share of the
+time the rig was on; and "what waits cost" over the orders with a wait. A
+description, every figure a clock reading less another: no pace, no
+approximate point. The server does the same live (`stopWaitsOf`): each order
+that ends by a delivery carries `stop: {from, s}` on its record's unvisited
+pickups (two times, no place) and the wait joins `store-waits.json` as `how:
+'stop'` under the car's stop cell, so the offers page's and the NucBox
+report's store waits count them too, with the worst. The `--json` the phone
+shows carries the minutes and never the store's name.
+
+```
+Restaurant waits (minutes stopped at the store, off the GPS log: at its GPS visit, or from the stop pattern where the pickup had none):
+  Example Grill   1 wait (1 at a GPS visit)  median 6.0 min  worst 6.0 min
+  Larkspur Tacos  2 waits (2 from the stop pattern)  median 12.0 min  worst 16.9 min
+  each order's pickup wait (a stop of 2 min or more after the Took, before its door):
+    #1 Larkspur Tacos 16.9 min (from the stop pattern); card 14 min, took 31.6: 16.9 waiting at the store, 14.7 the rest; card $34.89/hr, actual $15.46/hr
+    #5 pickup unmeasured: no stop of 2 min or more between its Took and its door that was not another order's
+  time spent waiting at stores: 51 min of the 2 h 52 min the rig was on (30%)
+```
+
+(Invented stores, the suite's own evening.) A two-minute stop on the way (a
+long light, a drive-through queue) is taken for the store, and a store waited
+at under two minutes is left unmeasured rather than given a later stop.
+
 **What $/hr to expect, from the same tool.** `--strategy` adds a short section
 after the report: what the day's offers looked like (the panel's $/hr and the
 card's $/mi, quartiles and the 90th percentile, and offers an hour with no
@@ -9099,7 +9136,7 @@ node tests/measure.test.js      #  64 on the measurement that decides how this
                                 #     rig should learn geography — held hardest
                                 #     to the rule that a table may not be
                                 #     scored on rows it was built from
-node tests/placesreport.test.js # 366 on the NucBox's offline report of where
+node tests/placesreport.test.js # 369 on the NucBox's offline report of where
                                 #     good offers start: a pin only where one
                                 #     place answers inside the card's disc, no
                                 #     colour on a no-effect fixture or on an
@@ -9269,7 +9306,7 @@ python3 rpi/test_loop.py        # 401 on the scan loop re-telling a card once
                                 #     a read never returns, and saying so when
                                 #     a button press is refused
 python3 tools/test_gpslog_tidy.py   #  45 on tidying the GPS logs unattended
-python3 tools/test_shift_report.py  # 252 on what each order really took and
+python3 tools/test_shift_report.py  # 267 on what each order really took and
                                     #     what the shift adds up to: a gap in
                                     #     the GPS log never a stop and never
                                     #     miles, a parked receiver's wander
@@ -9277,7 +9314,9 @@ python3 tools/test_shift_report.py  # 252 on what each order really took and
                                     #     --strategy's answer worked by hand,
                                     #     only a reliable order timed; the
                                     #     records CSV's paid columns off the
-                                    #     newest earning row of each trip
+                                    #     newest earning row of each trip;
+                                    #     a pickup's wait from the stop
+                                    #     pattern, never the door's
 ```
 
 If the two parsers ever disagree, that suite fails. Edit one, re-run both.

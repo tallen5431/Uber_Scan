@@ -102,6 +102,15 @@ the car left, and two visits are two stores. The rig keeps its own history
 of the same thing, keyed by the store's pin (server.js storeWaitFor,
 store-waits.json); the journal holds no position and no dwell start, so
 this is how a past day's waits are seen. A description, like the rest.
+Since the 7 Nov 2026 shift (6 of its 9 pickups unpinned, so one store
+measured), a pickup with no GPS visit is timed FROM THE STOP PATTERN: the
+first stop of STOP_WAIT_MIN_S or more after the Took that is not the door
+and not another order's (stop_waits, and the comment above it), counted
+apart from the visits. Each store prints its waits, the median and the
+worst; each order its pickup wait and its card against the clock split
+into waiting and the rest; the shift its minutes at stores and their share
+of the time the rig was on, and what the waits cost: card $/hr against
+actual (wait_totals). Descriptive, every figure a clock less a clock.
 
 WHAT COUNTS AS AN ORDER, read off the journal's marks the way server.js's
 latestPerOfferUncached folds them: the newest mark wins, by its `at`, and an
@@ -640,6 +649,11 @@ def _order(oid, took, readings, drops, visits, addon=False, finished=None, recor
                   key=lambda v: v['at'])
     o['visits'] = [v['at'] for v in kept]
     o['visitsBy'] = [v.get('by') for v in kept]
+    # ...and which of the order's pickups each visit row was for (server.js
+    # markVisited writes the index as `pickup`): the store waits put a GPS
+    # visit's minutes to the pickup it measured (stop_waits), not to the first.
+    o['visitsPickup'] = [int(v['pickup']) if _num(v.get('pickup')) is not None else None
+                         for v in kept]
     o['actualMinutes'] = (o['end'] - took) / 60000.0 if o['end'] is not None else None
     return o
 
@@ -847,27 +861,273 @@ def store_name(t):
     return s[:NAME_MAX]
 
 
+def store_key(name):
+    """One store however its name was spelt: assemble.js storeKey's key."""
+    return re.sub(r'[^a-z0-9]', '', re.split(r' [\u2013\u2014-] ', name)[0].lower())
+
+
 def waits(orders_):
-    """{'stores': [{store, visits, median}] by name, 'uncounted': n}: each
-    store's measured waits over the orders given (module docstring,
-    RESTAURANT WAITS). `uncounted` is the orders with restaurant minutes
-    that could not be put to one store."""
+    """{'stores': [{store, n, visits, stopWaits, median, worst}] by name,
+    'uncounted': n}: each store's measured waits over the orders given
+    (module docstring, RESTAURANT WAITS, and stop_waits). `visits` are the
+    waits measured at a GPS visit of a pinned pickup, `stopWaits` those
+    found from the stop pattern, `n` both, and the median and the worst are
+    over both: a stop the GPS log saw is a measurement whichever found it.
+    One stop two orders shared (two orders from one store, picked up
+    together) is one wait, as server.js files two stores at one stop as one.
+    `uncounted` is the waits that could not be put to one store.
+
+    An order without `pickupWaits` (one built by hand, or a report from
+    before stop_waits) is read as this function always read it: its
+    restaurant minutes at one GPS visit, to its card's store."""
     groups = collections.OrderedDict()
     uncounted = 0
+    seen = set()
     for o in orders_:
-        if o.get('restaurantMinutes') is None:
-            continue
-        if o.get('visitsBy') != ['gps'] or not o.get('store'):
-            uncounted += 1
-            continue
-        # One store however its name was spelt: assemble.js storeKey's key.
-        key = re.sub(r'[^a-z0-9]', '', re.split(r' [\u2013\u2014-] ', o['store'])[0].lower())
-        g = groups.setdefault(key, {'store': o['store'], 'minutes': []})
-        g['minutes'].append(o['restaurantMinutes'])
-    stores = [{'store': g['store'], 'visits': len(g['minutes']),
-               'median': statistics.median(g['minutes'])} for g in groups.values()]
+        got = o.get('pickupWaits')
+        if got is None:
+            if o.get('restaurantMinutes') is None:
+                continue
+            if o.get('visitsBy') != ['gps'] or not o.get('store'):
+                uncounted += 1
+                continue
+            got = [{'store': o['store'], 'minutes': o['restaurantMinutes'], 'from': 'visit',
+                    'at': None}]
+        for w in got:
+            if w.get('minutes') is None:
+                continue
+            if not w.get('store'):
+                uncounted += 1
+                continue
+            key = store_key(w['store'])
+            if w.get('at') is not None:
+                if (key, w['at']) in seen:
+                    continue
+                seen.add((key, w['at']))
+            g = groups.setdefault(key, {'store': w['store'], 'minutes': [], 'visits': 0,
+                                        'stopWaits': 0})
+            g['minutes'].append(w['minutes'])
+            g['visits' if w.get('from') == 'visit' else 'stopWaits'] += 1
+    stores = [{'store': g['store'], 'n': len(g['minutes']), 'visits': g['visits'],
+               'stopWaits': g['stopWaits'], 'median': statistics.median(g['minutes']),
+               'worst': max(g['minutes'])} for g in groups.values()]
     stores.sort(key=lambda g: g['store'].lower())
     return {'stores': stores, 'uncounted': uncounted}
+
+
+# --- store waits from the stop pattern (the owner, 7 Nov 2026) ---------------
+#
+# "tonight seemed worse than usual with long wait times for many restaurants
+# ... I seemed to spend too long waiting for orders that reduced how much I
+# could make substantially". That night's report: 7 reliable orders, a median
+# actual/card of 1.32 against a usual 1.13, a 14-minute card that took 31.6
+# ($34.89/hr on the card, $17.45/hr as driven) \u2014 and "Restaurant waits"
+# measured ONE store, with "1 order waited with no one store to put it to".
+# The wait was measured only at a pickup's GPS VISIT, which needs the pickup
+# pinned, and 6 of the 9 pickups were not ("not inside the card's reach",
+# "no door, place not found", "no house number"). The car stood at those
+# stores all the same, and the GPS log saw it stand.
+#
+# So a pickup with no GPS visit is timed off the stop pattern: the first stop
+# of STOP_WAIT_MIN_S or more after the Took (stops(), the rule the rest of
+# this file finds stops by: every fix within STOP_M of the first), that is
+#   - not the order's own end: a stop ending within NEAR_S of the end, or
+#     after it, is the door (dwell's own rule for the door's minutes);
+#   - not another order's: a stop at which another order of the day had a
+#     GPS visit (its pickup pinned there) or its end (the door of an order
+#     carried alongside), by the same dwell rule, is that order's stop;
+#   - not one of this order's own GPS visits (that pickup is timed there).
+# On a batch (the record's card names two stores or more) the stops are put
+# to the pickups not visited by the GPS in the order the record lists them \u2014
+# the card's, which is the order the app sends the car in \u2014 one stop each.
+# Each wait is said "from the stop pattern" and counted apart from the
+# visits. It is a MEASUREMENT: a clock reading at the stop's last fix less
+# one at its first, off fixes the gate passed. No approximate point \u2014 no
+# pin, no area, no planner guess \u2014 is read to make it: the store's name is
+# the card's, and the stop is the car's.
+#
+# What it can get wrong, said so it is not taken for more: a stop of two
+# minutes or more on the way to the store (a long light, a queue at a
+# drive-through, fuel) is taken for the store; a store waited at under two
+# minutes leaves the pickup unmeasured, never a later stop put to it \u2014 the
+# first qualifying stop is the store's or nothing's, and a stop past the
+# door was cut away above. CHOSEN, NOT MEASURED: 120 s, the owner's "2 min",
+# twice the dwell the server arrives on (STOP_MIN_S), so a red light of a
+# minute or so is not a store.
+STOP_WAIT_MIN_S = 120.0
+
+
+def _at_stop(span, t):
+    """Whether the event at `t` seconds (a visit row, an end: both written as
+    the car leaves) belongs to the stop `span`, by dwell_span's rule."""
+    return span[0] <= t and span[1] >= t - NEAR_S
+
+
+def pickup_names(o):
+    """The order's pickups' store names, in the order the record lists them:
+    the card's stores where the record has two or more (a batch), else the
+    card's one store. None for a pickup whose name is a door or not kept."""
+    rec = o.get('record') or {}
+    card = rec.get('card') if isinstance(rec.get('card'), dict) else {}
+    stores = [s for s in (card.get('stores') or []) if isinstance(s, str) or s is None]
+    if len(stores) >= 2:
+        return [store_name(s) for s in stores]
+    return [o.get('store')]
+
+
+def stop_waits(orders_, fixes):
+    """Put each order's pickup waits on it, in place: `pickupWaits`, one
+    {'n', 'store', 'minutes', 'from', 'at'} per pickup measured \u2014 `from`
+    'visit' (its GPS visit's stop), 'stops' (the stop pattern, off the log),
+    or 'record' (the server's own stop pattern on the order record, used with
+    no log here) \u2014 and `pickupWaitWhy`, said when a pickup is not measured.
+    `at` is the stop's start, seconds, which is how two orders that shared a
+    stop count it once. Only an order with a delivery's end (reliable): the
+    window is Took to the door, and no other end bounds one."""
+    ends = [(o, o['end'] / 1000.0) for o in orders_ if o.get('end') is not None]
+    gps_visits = [(o, v / 1000.0) for o in orders_
+                  for v, by in zip(o.get('visits') or [], o.get('visitsBy') or []) if by == 'gps']
+    for o in orders_:
+        o['pickupWaits'] = []
+        o['pickupWaitWhy'] = None
+        if o.get('took') is None or o.get('end') is None or not o.get('reliable'):
+            continue
+        names = pickup_names(o)
+        out = [None] * len(names)
+        # A pickup's GPS visit, where it has one and its stop was found.
+        for at, by, i, sp in zip(o.get('visits') or [], o.get('visitsBy') or [],
+                                 o.get('visitsPickup') or [], o.get('visitSpans') or []):
+            i = 0 if i is None and len(names) == 1 else i
+            if by == 'gps' and sp is not None and i is not None and 0 <= i < len(names) \
+                    and out[i] is None:
+                out[i] = {'n': i + 1, 'store': names[i], 'minutes': (sp[1] - sp[0]) / 60.0,
+                          'from': 'visit', 'at': sp[0]}
+        want = [i for i, w in enumerate(out) if w is None]
+        if want and fixes is None:
+            # No log here: the server's own stop pattern, where its record
+            # kept one per pickup (server.js stopWaitsOf).
+            picks = [p for p in ((o.get('record') or {}).get('pickups') or [])
+                     if isinstance(p, dict)]
+            for i in want:
+                st = picks[i].get('stop') if i < len(picks) else None
+                if isinstance(st, dict) and _num(st.get('s')) is not None:
+                    out[i] = {'n': i + 1, 'store': names[i], 'minutes': st['s'] / 60.0,
+                              'from': 'record', 'at': (_num(st.get('from')) or 0) / 1000.0 or None}
+        elif want:
+            t0, t1 = o['took'] / 1000.0, o['end'] / 1000.0
+            free = []
+            for span in stops(_between(fixes, t0, t1 + NEAR_S), STOP_WAIT_MIN_S):
+                if span[1] >= t1 - NEAR_S:
+                    continue        # the door, or past it
+                if any(_at_stop(span, t) for p, t in ends if p is not o):
+                    continue        # another order's door
+                if any(_at_stop(span, t) for p, t in gps_visits):
+                    continue        # a pinned pickup's GPS visit, this order's or another's
+                free.append(span)
+            for i, span in zip(want, free):
+                out[i] = {'n': i + 1, 'store': names[i], 'minutes': (span[1] - span[0]) / 60.0,
+                          'from': 'stops', 'at': span[0]}
+        o['pickupWaits'] = [w for w in out if w is not None]
+        if any(w is None for w in out):
+            t0, t1 = o['took'] / 1000.0, o['end'] / 1000.0
+            o['pickupWaitWhy'] = (
+                'no GPS log here, and no stop on the order record'
+                if fixes is None else
+                # ...a log with nothing in this order's window is not "no
+                # stop": nobody was looking.
+                'no GPS fix between its Took and its door'
+                if not _between(fixes, t0, t1) else
+                'no stop of %d min or more between its Took and its door that was not '
+                "another order's" % (STOP_WAIT_MIN_S / 60))
+
+
+def _union_seconds(spans):
+    """The seconds the spans cover, each second once."""
+    total, end = 0.0, None
+    for s, e in sorted(spans):
+        if end is None or s > end:
+            total += e - s
+            end = e
+        elif e > end:
+            total += e - end
+            end = e
+    return total
+
+
+def wait_totals(orders_, t=None):
+    """The shift's time at stores, and what the waits cost, as data:
+    {'waitSeconds', 'shiftSeconds', 'share', 'cost': {...} or None}.
+
+    `waitSeconds` is every pickup wait measured (stop_waits), a stop two
+    orders shared counted once. `shiftSeconds` is the rig's logging span off
+    the GPS log (totals: the first usable fix to the last), and `share` the
+    one over the other; both None with no log.
+
+    `cost` is DESCRIPTIVE ONLY, over the reliable orders with a wait and card
+    minutes (an add-on's card minutes are an increment, and left out):
+    their pay, card minutes, actual minutes and waited minutes summed, and
+    from those the card's $/hr (pay over the card's minutes) and the actual
+    (pay over the clock), and how the actual minutes past the cards' split
+    into waiting at the store and the rest (driving and the door). Every
+    figure is a clock reading less another, or pay over one; no pace, no
+    minutes from distance, and nothing anywhere decides on it (AUDITS.md,
+    Settled: no re-timing at a pace). A stop two orders shared counts for
+    each order here, as their actual minutes do."""
+    spans = {}
+    for o in orders_:
+        for w in o.get('pickupWaits') or []:
+            if w.get('at') is not None:
+                spans[(store_key(w['store'] or ''), w['at'])] = (w['at'], w['at'] + w['minutes'] * 60.0)
+    loose = sum(w['minutes'] * 60.0 for o in orders_ for w in o.get('pickupWaits') or []
+                if w.get('at') is None)
+    wait_s = _union_seconds(list(spans.values())) + loose
+    shift_s = (t['off'] - t['on']) if t else None
+    picked = [o for o in orders_ if o.get('reliable') and o.get('pickupWaits')
+              and o.get('cardMinutes') and not o.get('addon') and o.get('actualMinutes')
+              and o.get('pay') is not None]
+    cost = None
+    if picked:
+        pay = sum(o['pay'] for o in picked)
+        card = sum(o['cardMinutes'] for o in picked)
+        actual = sum(o['actualMinutes'] for o in picked)
+        waited = sum(w['minutes'] for o in picked for w in o['pickupWaits'])
+        cost = {'orders': len(picked), 'pay': pay, 'cardMinutes': card,
+                'actualMinutes': actual, 'waitMinutes': waited,
+                'overMinutes': actual - card, 'restMinutes': actual - waited,
+                'cardPerHour': pay / (card / 60.0), 'actualPerHour': pay / (actual / 60.0)}
+    return {'waitSeconds': wait_s, 'shiftSeconds': shift_s,
+            'share': wait_s / shift_s if shift_s else None, 'cost': cost}
+
+
+def pickup_wait_text(o, named=True):
+    """One order's pickup wait as a phrase for the text's per-order lines:
+    each pickup measured, its store, minutes and how it was found, then the
+    card against the clock split into waiting and the rest, descriptively.
+    `named` False says "pickup N" for the store: the --json's form."""
+    if o.get('took') is None or o.get('end') is None or not o.get('reliable'):
+        return 'not timed: %s' % ('no Took' if o.get('took') is None else
+                                  'its end is not a delivery\'s')
+    bits = []
+    for w in o.get('pickupWaits') or []:
+        bits.append('%s %.1f min (%s)' % ((w['store'] or 'a pickup with no name') if named
+                                          else 'pickup %d' % w['n'],
+                                          w['minutes'],
+                                          {'visit': 'at its GPS visit',
+                                           'stops': 'from the stop pattern',
+                                           'record': "from the stop pattern, the server's"}
+                                          [w['from']]))
+    if o.get('pickupWaitWhy'):
+        bits.append(('%s unmeasured: ' % ('one pickup' if bits else 'pickup')) + o['pickupWaitWhy'])
+    out = '; '.join(bits)
+    waited = sum(w['minutes'] for w in o.get('pickupWaits') or [])
+    if o.get('pickupWaits') and o.get('cardMinutes') and not o.get('addon') \
+            and o.get('actualMinutes'):
+        out += ('; card %g min, took %.1f: %.1f waiting at the store, %.1f the rest'
+                % (o['cardMinutes'], o['actualMinutes'], waited, o['actualMinutes'] - waited))
+        if o.get('pay') is not None and o.get('perHour') is not None:
+            out += '; card $%.2f/hr, actual $%.2f/hr' % (o['pay'] / (o['cardMinutes'] / 60.0),
+                                                         o['perHour'])
+    return out
 
 
 # How long a word off the row may print. Every word server.js writes there is
@@ -1216,14 +1476,21 @@ def stops(fixes, min_s=STOP_MIN_S):
     return out
 
 
-def dwell(fixes, lo, event):
-    """Minutes stopped at the place `event` (seconds) marks leaving, or None:
-    the last stop after `lo` that had begun by `event` and ended no more than
-    NEAR_S before it, counted up to `event` at the latest."""
+def dwell_span(fixes, lo, event):
+    """(start, end) seconds of the stop at the place `event` (seconds) marks
+    leaving, or None: the last stop after `lo` that had begun by `event` and
+    ended no more than NEAR_S before it, counted up to `event` at the latest."""
     best = None
     for s, e in stops(_between(fixes, lo, event + NEAR_S)):
         if s <= event and e >= event - NEAR_S:
             best = (s, min(e, event))
+    return best
+
+
+def dwell(fixes, lo, event):
+    """Minutes stopped at the place `event` (seconds) marks leaving, or None
+    (dwell_span's stop, as minutes)."""
+    best = dwell_span(fixes, lo, event)
     return None if best is None else (best[1] - best[0]) / 60.0
 
 
@@ -1231,6 +1498,7 @@ def measure(o, fixes):
     """Put the GPS figures on one order, in place."""
     o['gpsMiles'] = o['restaurantMinutes'] = o['doorMinutes'] = None
     o['milesFrom'] = None
+    o['visitSpans'] = []
     if o['took'] is None or o['end'] is None:
         return
     if fixes is None:
@@ -1277,8 +1545,11 @@ def measure(o, fixes):
             o['notes'].append('no GPS fix for the %s %.1f min; not in the miles'
                               % (word, tr[edge] / 60.0))
     visits = [v / 1000.0 for v in o['visits']]
+    # Each visit's own stop, kept for the store waits (stop_waits), which put
+    # a GPS visit's minutes to the pickup that visit row names.
+    o['visitSpans'] = [dwell_span(fixes, t0, v) for v in visits]
     if visits:
-        got = [dwell(fixes, t0, v) for v in visits]
+        got = [None if sp is None else (sp[1] - sp[0]) / 60.0 for sp in o['visitSpans']]
         if any(g is not None for g in got):
             o['restaurantMinutes'] = sum(g for g in got if g is not None)
     if o['reliable']:
@@ -1439,6 +1710,11 @@ def _mins(seconds):
     return '%.0f min' % (seconds / 60.0)
 
 
+def _hm(seconds):
+    m = int(round(seconds / 60.0))
+    return '%d h %02d min' % (m // 60, m % 60) if m >= 60 else '%d min' % m
+
+
 def totals_text(t, n_orders):
     """The shift's totals as lines of text. A time is a clock reading and a
     distance is miles from start to one decimal; no place, no coordinate."""
@@ -1544,10 +1820,15 @@ def report(journal, gps_dir, day, read=None):
         # Took, and its pay over them would be a rate nobody earned.
         o['perHour'], o['perMile'] = rates(o['pay'], o.get('actualMinutes'), o.get('gpsMiles')) \
             if o['reliable'] else (None, None)
+    # ...and every pickup's wait, at its GPS visit or from the stop pattern,
+    # once every order's end and visits are known: a stop at another order's
+    # door or pinned pickup is that order's (stop_waits).
+    stop_waits(mine, fixes)
     info['unreadable'] = bad
     info['gpsMissing'] = fixes is None
+    shift = totals(fixes, start / 1000.0, end / 1000.0)
     return {'orders': mine, 'summary': summary(mine), 'info': info,
-            'totals': totals(fixes, start / 1000.0, end / 1000.0),
+            'totals': shift, 'waitTotals': wait_totals(mine, shift),
             'day': day, 'start': start, 'end': end}
 
 
@@ -1657,19 +1938,44 @@ def text(rep):
         out.extend('  #%d %s' % n for n in notes)
     if rep['orders']:
         out.append('')
-        out.append('Restaurant waits (minutes stopped at the store, off the GPS log at its '
-                   'GPS visit):')
+        out.append('Restaurant waits (minutes stopped at the store, off the GPS log: at its '
+                   'GPS visit, or from the stop pattern where the pickup had none):')
         w = waits(rep['orders'])
         width = max([len(g['store']) for g in w['stores']] + [0])
         for g in w['stores']:
-            out.append('  %s  %d visit%s  median %.1f min'
-                       % (g['store'].ljust(width), g['visits'], '' if g['visits'] == 1 else 's',
-                          g['median']))
+            how = [p for p in (('%d at a GPS visit' % g['visits']) if g['visits'] else None,
+                               ('%d from the stop pattern' % g['stopWaits'])
+                               if g['stopWaits'] else None) if p]
+            out.append('  %s  %d wait%s (%s)  median %.1f min  worst %.1f min'
+                       % (g['store'].ljust(width), g['n'], '' if g['n'] == 1 else 's',
+                          ', '.join(how), g['median'], g['worst']))
         if not w['stores']:
             out.append('  none measured')
         if w['uncounted']:
-            out.append('  %d order%s waited with no one store to put it to (no name, or not '
-                       'one GPS visit)' % (w['uncounted'], '' if w['uncounted'] == 1 else 's'))
+            out.append('  %d wait%s with no one store to put it to (a pickup with no name, '
+                       'a door or a corner)' % (w['uncounted'], '' if w['uncounted'] == 1 else 's'))
+        # ...each order's pickup wait, and what it did to the card's $/hr.
+        out.append("  each order's pickup wait (a stop of %d min or more after the Took, "
+                   "before its door):" % (STOP_WAIT_MIN_S / 60))
+        for i, o in enumerate(rep['orders']):
+            out.append('    #%d %s' % (i + 1, pickup_wait_text(o)))
+        wt = rep.get('waitTotals') or wait_totals(rep['orders'])
+        if wt['shiftSeconds']:
+            out.append('  time spent waiting at stores: %.0f min of the %s the rig was on '
+                       '(%.0f%%)' % (wt['waitSeconds'] / 60.0, _hm(wt['shiftSeconds']),
+                                     100.0 * wt['share']))
+        else:
+            out.append('  time spent waiting at stores: %.0f min (no GPS log: no shift time '
+                       'to set it against)' % (wt['waitSeconds'] / 60.0))
+        c = wt['cost']
+        if c:
+            out.append('  what waits cost, over the %d reliable order%s with a wait (a '
+                       'description; nothing decides on it): cards %.0f min, actual %.0f min, '
+                       '%.0f of them waiting at stores and %.0f the rest (driving and the '
+                       'door); card $%.2f/hr, actual $%.2f/hr'
+                       % (c['orders'], '' if c['orders'] == 1 else 's', c['cardMinutes'],
+                          c['actualMinutes'], c['waitMinutes'], c['restMinutes'],
+                          c['cardPerHour'], c['actualPerHour']))
         out.append('')
         out.append("Pinning (how each order's end was pinned for the GPS drop, or why not):")
         for i, o in enumerate(rep['orders']):
@@ -1917,10 +2223,22 @@ def as_json(rep):
                     # ...and the order record, as the text's Records line says
                     # it (record_text: no place), and where its miles came from.
                     'source': o.get('source'), 'milesFrom': o.get('milesFrom'),
-                    'record': record_text(o)}
+                    'record': record_text(o),
+                    # ...and its pickups' waits (stop_waits): the minutes
+                    # and how they were found, and NOT the store's name,
+                    # which the text alone prints (the module docstring):
+                    # the phone's page has held to "no place" since it was
+                    # made, and a name is the first thing that would leak.
+                    'pickupWaits': [{'n': w['n'], 'minutes': w['minutes'], 'from': w['from']}
+                                    for w in o.get('pickupWaits') or []],
+                    'pickupWait': pickup_wait_text(o, named=False)}
                    for i, o in enumerate(rep['orders'])],
         'pinning': dict(pn, rate=(round(100.0 * pn['pinned'] / pn['recorded'])
                                   if pn['recorded'] else None)),
+        # The shift's time at stores and what the waits cost (wait_totals):
+        # minutes and dollars, no store.
+        'waits': dict(rep.get('waitTotals') or wait_totals(rep['orders']),
+                      stopWaitMinS=STOP_WAIT_MIN_S),
         'summary': rep['summary'],
     }
 

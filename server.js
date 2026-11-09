@@ -757,6 +757,9 @@ function startScanner() {
           // ...and each order's record counts the fix, or the silence, or a
           // step of the clock (orderBeat): a few additions, nothing written.
           orderBeat(read, Date.now());
+          // ...and the car's stops, for the store waits of pickups the GPS
+          // never visited (stopWatchStep): kept in memory, nothing written.
+          stopWatchStep(read, Date.now());
           // ...and kept, thinned, for a 📷 Snap's gps.json and health.json.
           snapBeatKeep(read, Date.now());
           // ...and the NucBox services not answering, by name (nbxDown).
@@ -4966,7 +4969,12 @@ function storeWaitsOut() {
   return storeWaits().map(function (st) {
     var s = st.waits.map(function (w) { return w.s; }).sort(function (a, b) { return a - b; });
     var mid = s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
-    return { name: st.name, n: s.length, medianMin: Math.round(mid / 6) / 10 };
+    // ...and how many were found from the stop pattern (stopWaitsOf, the
+    // owner's 7 Nov night: most pickups never pinned), and the worst: what
+    // the places report's Store waits tab shows beside the median.
+    return { name: st.name, n: s.length, medianMin: Math.round(mid / 6) / 10,
+             stops: st.waits.filter(function (w) { return w.how === 'stop'; }).length,
+             worstMin: Math.round(s[s.length - 1] / 6) / 10 };
   }).filter(function (w) { return w.n >= STORE_WAITS_MIN; })
     .sort(function (a, b) { return b.medianMin - a.medianMin; });
 }
@@ -5324,6 +5332,157 @@ function storeWaitOfHold(h) {
     return typeof p.q === 'string';
   })[0] || null;
   return storeWaitFor(storeNameOf(h, pin ? pin.q : null), pin);
+}
+
+/* ---------- store waits from the stop pattern (the owner, 7 Nov 2026) ------
+ *
+ * "tonight seemed worse than usual with long wait times for many
+ * restaurants ... I seemed to spend too long waiting for orders that reduced
+ * how much I could make substantially." The end-of-shift report for that
+ * night measured ONE store's wait: a wait was kept only for a pickup pinned
+ * and visited by the GPS (storeWaitHeard, above), and 6 of the night's 9
+ * pickups were never pinned ("not inside the card's reach", "no door, place
+ * not found", "no house number"). The car stood at those stores all the same,
+ * and the GPS saw it stand.
+ *
+ * So every beat's fix also keeps the car's STOPS (stopWatchStep): a run of
+ * fixes all within STOP_WAIT_M of the first, no silence over GAP_MS, of
+ * STOP_WAIT_MIN_MS or more, kept as {from, to, lat, lon} in memory
+ * (stopLog), the newest STOP_LOG_MAX. And when an order leaves the car by a
+ * delivery's end (orderRow: Drop, the GPS drop, the chooser), each of its
+ * pickups the GPS did not visit is given the first such stop after its Took
+ * (stopWaitsOf) that is
+ *   - over before its end, by more than STOP_NEAR_MS: a stop running into
+ *     the end is the door (and one still going is no stop yet);
+ *   - not another order's: not during another order's end (stopEnds: its
+ *     door, an order carried alongside), and not within SAME_SPOT_M of a
+ *     pickup pin of another order in the car, or of one of this order's own
+ *     pickups the GPS visited (that pickup's wait is its visit's);
+ * one stop per pickup, in the card's order of its stores (the order the
+ * app sends the car in). The record's pickup carries `stop: {from, s}`, two
+ * times — no position: journal rows carry none (Settled) — and the wait is
+ * kept with the rest (storeStopHeard): in store-waits.json, `how: 'stop'`,
+ * under the card's store name and the cell of the CAR'S stop, the measured
+ * place, never a pin or an area. A stop two orders shared is one wait.
+ *
+ * A MEASUREMENT: the stop's last fix less its first, off fixes the gate
+ * passed. No pace, no minutes from distance, no approximate point. It moves
+ * no verdict, state, rate or range (AUDITS.md, Settled). What it can get
+ * wrong is said beside the end-of-shift report's STOP_WAIT_MIN_S, the same
+ * rule over the GPS log after the shift: a two-minute stop on the way (a
+ * long light, a drive-through queue) is taken for the store, and a store
+ * waited at under two minutes is left unmeasured. CHOSEN, NOT MEASURED:
+ * 120 s and the gate's FIX_ERR_MAX (50 m) for the stop's reach, the
+ * report's own STOP_M; 120 s for STOP_NEAR_MS, the report's NEAR_S. */
+// (Both settable from the environment for rpi/test_server.py alone, as
+// GPS_GAP_MS is: its fake scanner speaks in seconds, not minutes.)
+var STOP_WAIT_MIN_MS = envNumber('STOP_WAIT_MIN_MS', 120000);
+var STOP_WAIT_M = 50;
+var STOP_NEAR_MS = envNumber('STOP_NEAR_MS', 120000);
+var STOP_LOG_MAX = 60;
+var stopLog = [];             // [{from, to, lat, lon}], oldest first
+var stopStand = null;         // the run of fixes under way: {lat, lon, from, to}
+var stopEnds = [];            // [{at, id}]: the newest orders' ends, for stopWaitsOf
+
+/* One beat's fix, for the stops: the run under way grows, or ends (a fix
+ * past STOP_WAIT_M of its first, or after a silence over GAP_MS) and is kept
+ * when it lasted STOP_WAIT_MIN_MS. The fix as finishStep reads it: the gate
+ * passed it and it is inside gps.py's staleness rule. */
+function stopWatchStep(beat, now) {
+  var f = beat && beat.gps && beat.gps.fix;
+  if (!f || f.gpsOk !== true || typeof f.freshFor !== 'number' || !(f.freshFor > 0)
+      || typeof f.lat !== 'number' || typeof f.lon !== 'number' || !isFinite(f.lat)
+      || !isFinite(f.lon) || typeof f.gpsAge !== 'number' || !isFinite(f.gpsAge)
+      || f.gpsAge < 0) return;
+  var at = now - f.gpsAge * 1000;
+  var s = stopStand;
+  if (s && at <= s.to) return;                              // a fix already counted
+  if (s && at - s.to <= GAP_MS && MV.crowMiles(s, f) * 1609.344 <= STOP_WAIT_M) {
+    s.to = at;
+    return;
+  }
+  if (s && s.to - s.from >= STOP_WAIT_MIN_MS) {
+    stopLog.push({ from: s.from, to: s.to, lat: s.lat, lon: s.lon });
+    if (stopLog.length > STOP_LOG_MAX) stopLog.splice(0, stopLog.length - STOP_LOG_MAX);
+  }
+  stopStand = { lat: f.lat, lon: f.lon, from: at, to: at };
+}
+
+/* The pickups of `h` the stop pattern times, in place on `row.pickups`
+ * (orderPickups' list): see the section's head. `ended` is the order's end,
+ * `list` the car as it stood (scanner.held). Returns the waits filed. */
+function stopWaitsOf(row, h, ended, list) {
+  var took = row && row.times ? row.times.took : null;
+  if (typeof took !== 'number' || typeof ended !== 'number' || !Array.isArray(row.pickups)) return [];
+  var id = holdIdOf(h);
+  // The card's stores, in its order: a batch's two or more, else its one.
+  var count = Array.isArray(h.stores) && h.stores.length >= 2 ? h.stores.length : 1;
+  var picks = row.pickups.slice(0, count);
+  var entries = Array.isArray(h.pickups) ? h.pickups : [];
+  var ownPins = Array.isArray(h.pickupPins) ? h.pickupPins : [];
+  var visitedPins = ownPins.filter(function (p) {
+    return entries.some(function (e) { return e && e.q === p.q && e.visited && e.by === 'gps'; });
+  });
+  var otherPins = [];
+  (list || []).forEach(function (o) {
+    if (o === h || holdIdOf(o) === id) return;
+    otherPins = otherPins.concat(Array.isArray(o.pickupPins) ? o.pickupPins : []);
+  });
+  var near = function (st, pins) {
+    return pins.some(function (p) {
+      return p && typeof p.lat === 'number' && typeof p.lon === 'number'
+        && MV.crowMiles(st, p) * 1609.344 <= SAME_SPOT_M;
+    });
+  };
+  // A stop under way at the Took counts from the Took (the driver took the
+  // order standing at its store), as the report slices its log at the Took;
+  // one at another order's door is refused just below, by that order's end.
+  var free = stopLog.map(function (st) {
+    return { from: Math.max(st.from, took), to: st.to, lat: st.lat, lon: st.lon };
+  }).filter(function (st) {
+    if (st.to - st.from < STOP_WAIT_MIN_MS || st.to >= ended - STOP_NEAR_MS) return false;
+    if (stopEnds.some(function (e) {
+      return e.id !== id && e.at >= st.from && e.at <= st.to + STOP_NEAR_MS;
+    })) return false;
+    return !near(st, otherPins) && !near(st, visitedPins);
+  });
+  var filed = [];
+  picks.forEach(function (p) {
+    if (!p || (p.visited && p.by === 'gps') || !free.length) return;
+    var st = free.shift();
+    p.stop = { from: Math.round(st.from), s: Math.round((st.to - st.from) / 1000) };
+    var name = storeNameSaid(Array.isArray(h.stores) && h.stores.length >= 2
+      ? (h.stores[picks.indexOf(p)] || {}).name : h.pickup);
+    if (name) filed.push({ name: name, stop: st });
+  });
+  filed.forEach(function (x) { storeStopHeard(x.name, x.stop); });
+  return filed;
+}
+
+/* A stop-pattern wait kept with the rest (storeWaits), `how: 'stop'`, under
+ * the cell of the car's stop. One stop is one wait however many orders it
+ * served: a wait of the same store ending at the same moment is not added
+ * twice. */
+function storeStopHeard(name, st) {
+  var cell = gridOf(st);
+  var key = Assemble.storeKey(name) + '@' + Math.round(cell.lat / STORE_GRID_DEG)
+    + ',' + Math.round(cell.lon / STORE_GRID_DEG);
+  var at = Math.round(st.to);
+  var list = storeWaits();
+  if (list.some(function (x) {
+    return Assemble.sameStore(x.name, name) && x.waits.some(function (w) { return w.at === at; });
+  })) return;
+  var found = null;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].key === key) { found = list.splice(i, 1)[0]; break; }
+  }
+  found = found || { key: key, name: name, lat: +cell.lat.toFixed(6), lon: +cell.lon.toFixed(6),
+                     waits: [] };
+  found.waits = found.waits.concat([{ at: at, s: Math.round((st.to - st.from) / 1000), how: 'stop' }])
+    .slice(-STORE_WAITS_KEEP);
+  list.push(found);
+  if (list.length > STORE_WAITS_MAX) list.splice(0, list.length - STORE_WAITS_MAX);
+  saveStoreWaits();
 }
 
 /* One heartbeat, for the pickups: each named pin of each order in the car,
@@ -6784,6 +6943,14 @@ function orderRow(h, how, ended, extra) {
     ? (ended - took) / 60000 : null;
   row.money = orderMoney(row.card.pay, minutes, row.drive.miles,
                          ORDER_DELIVERY_ENDS.indexOf(how) !== -1);
+  // ...and, at a delivery's end, the pickups the GPS never visited timed off
+  // the car's stops (stopWaitsOf), each kept with the store waits. Every end
+  // is remembered first, so a stop at this order's door is no other order's.
+  if (typeof ended === 'number') {
+    stopEnds.push({ at: ended, id: id });
+    if (stopEnds.length > STOP_LOG_MAX) stopEnds.splice(0, stopEnds.length - STOP_LOG_MAX);
+  }
+  if (ORDER_DELIVERY_ENDS.indexOf(how) !== -1) stopWaitsOf(row, h, ended, scanner.held);
   return row;
 }
 
