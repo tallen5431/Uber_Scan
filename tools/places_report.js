@@ -420,13 +420,24 @@ async function placePickup(nbx, text, card, streets, ctx) {
                                + encodeURIComponent(MV.discBox(disc)));
       var a = body && !body.unreachable && !body.refused ? MV.streetArea(body, disc) : null;
       return a ? placedAt(a, k.kind, 'street', a.miles) : { at: null, why: 'street', kind: k.kind };
-    } else res = await nbx.place(text, disc, { streets: !!streets });
+    } else {
+      // ...a printed door with its store's name beside it (`ctx.store`,
+      // placeRow's), for the street printed short: the index's /tail, the
+      // door by the one full name, else the store by its name along that
+      // street (NbxSearch.place `store`, MV.pickStoreAlong) — the rig's own
+      // order (server.js pickupTail), and only after the door refused.
+      res = await nbx.place(text, disc, { streets: !!streets,
+                                          store: k.kind === 'door' && ctx.store ? ctx.store : null });
+    }
   } catch (e) {
     return { at: null, why: 'refused', kind: k.kind };
   }
   if (res && res.at) {
     if (region && !townAt(res, res.at, region)) return { at: null, why: 'regiontown', kind: k.kind };
-    return placedAt(res.at, k.kind, k.kind === 'name' ? 'name' : k.kind === 'cross' ? 'corner' : 'door', 0,
+    // (A store found by its name along its street is a place by its name,
+    // not its door: 'name' level, a point all the same.)
+    return placedAt(res.at, k.kind, k.kind === 'name' || res.by === 'store' ? 'name'
+                    : k.kind === 'cross' ? 'corner' : 'door', 0,
                     region ? { region: true } : null);
   }
   var why = res && res.why;
@@ -447,6 +458,72 @@ async function placePickup(nbx, text, card, streets, ctx) {
                     { refused: why, refusedSaid: said });
   }
   return { at: null, why: why, said: said, kind: k.kind };
+}
+
+/* --- a DoorDash pickup by the door its card printed, before its name -------
+ *
+ * THE FAULT (AUDITS.md, Done, "Four refusals were one label", and the Open
+ * entry of 7 Nov it came from, (4)). A DoorDash stops card prints the store's
+ * NAME (`pickup`, "Utopian Bowl Kitchen") and under it the store's DOOR
+ * (`pickupLine`, "164 Ash Row, Faketown"; with two stores or more every one
+ * is listed, `stores` [{name, door}], the parser's `places`/`placeDoors`).
+ * The rig searches the printed door — server.js searchCardEarly asks
+ * `pickupLine` first for an offer, pickupAsks for a held order, door level in
+ * the card's disc, the store's name beside it for pickupTail — and asks a
+ * store by its bare name only when no door is on record at all. This report
+ * read `row.pickup` alone. So every DoorDash pickup was asked as a NAME, and
+ * MV.pickPlace pins a name only where OSM holds a feature with the same words
+ * (placeNamed, one slip) and only one inside the disc — and a one-leg DoorDash
+ * card ('shape', 528 of the real week's 1,166 offers) sets no radius, so its
+ * disc is the sixty-mile default, where a chain's name is every branch. The
+ * printed door, which pins at door level wherever the NucBox holds its
+ * number, was never asked.
+ *
+ * So, in the rig's order: the row's printed door (printedDoor) through
+ * placePickup — door level inside the card's disc, the retries, and the
+ * store's name beside it for MV.pickStoreAlong ONLY after the door refused
+ * (`ctx.store`) — and a POINT from it is kept: 'door', or 'name' for the
+ * store along its street. No point: the store's name as this report always
+ * asked it (pickPlace: one place of that name in the disc, the justified
+ * exact place the rig's held pickup by name takes), so nothing placed before
+ * is lost; and with neither, the door's approximate area or band, or the
+ * DOOR's refusal, which is what is counted (the rig's rule: the door's
+ * refusal stands). The band is asked only then, so its road questions are
+ * not spent on a pickup the name places. `asked` says which text placed it
+ * ('door' or 'name'). A row with no printed door is placed as before. */
+function printedDoor(row) {
+  if (!row || typeof row.pickup !== 'string' || !row.pickup.trim()) return null;
+  var door = typeof row.pickupLine === 'string' && row.pickupLine.trim() ? row.pickupLine.trim() : null;
+  if (!door) {
+    // ...else the door the card listed beside the store this row names:
+    // `stores` (the offer line's, server.js storesOf), or the parser's two
+    // lists side by side. The FIRST store's is `pickupLine` itself.
+    var list = Array.isArray(row.stores) ? row.stores
+      : Array.isArray(row.places) && Array.isArray(row.placeDoors) && row.places.length === row.placeDoors.length
+        ? row.places.map(function (n, i) { return { name: n, door: row.placeDoors[i] }; }) : [];
+    for (var i = 0; i < list.length; i++) {
+      var st = list[i];
+      if (st && typeof st.name === 'string' && typeof st.door === 'string' && st.door.trim()
+          && AS.sameStore(st.name, row.pickup)) { door = st.door.trim(); break; }
+    }
+  }
+  if (!door || door === row.pickup.trim()) return null;
+  return pickupKind(door).kind === 'door' ? door : null;
+}
+
+async function placeRow(nbx, row, streets, ctx) {
+  ctx = ctx || {};
+  var door = printedDoor(row);
+  if (!door) return placePickup(nbx, row.pickup, row, streets, ctx);
+  var first = await placePickup(nbx, door, row, streets, Object.assign({}, ctx, { road: false, store: row.pickup }));
+  if (first.at && isPoint(first)) return Object.assign(first, { asked: 'door' });
+  if (pickupKind(row.pickup).kind === 'name') {
+    var byName = await placePickup(nbx, row.pickup, row, streets, ctx);
+    if (byName.at) return Object.assign(byName, { asked: 'name', doorWhy: first.at ? first.refused : first.why });
+  }
+  var last = ctx.road ? await placePickup(nbx, door, row, streets, Object.assign({}, ctx, { store: row.pickup }))
+    : first;
+  return Object.assign(last, { asked: 'door' });
 }
 
 /* A taken order's dropoff, placed to be COUNTED by area and nothing else:
@@ -3405,6 +3482,10 @@ function METHOD(r) {
     + 'spread). <b>Places</b> take a point, and an area only within ' + PLACE_SAME_MI + ' mi of a point of the same store '
     + 'or with its candidates within ' + b.placeApproxMi + ' mi (chosen); <b>the grid</b> every level within '
     + b.areaMi + ' mi; towns unchanged.</li>'
+    + '<li><b>A DoorDash pickup by its printed door</b>, as the rig asks it: the store\'s door the card printed under '
+    + 'its name (<code>pickupLine</code>, or its line among the card\'s stores) first, at door level, the store\'s '
+    + 'name along that street only after the door refused; then the name alone as before (one place of that name '
+    + 'in the disc). With neither, the door\'s refusal is what is counted.</li>'
     + '<li><b>Cards with no fix</b>: a printed door with its town or ZIP is searched in the region '
     + (b.region ? 'from ' + b.region.box.s.toFixed(2) + ',' + b.region.box.w.toFixed(2) + ' to ' + b.region.box.n.toFixed(2)
        + ',' + b.region.box.e.toFixed(2) + ' (the box round ' + b.region.fixes + ' good card fixes, ' + b.region.marginMi
@@ -4510,10 +4591,12 @@ async function main(argv) {
     if (!counted(row) || !row.pickup) continue;
     var disc = MV.discFor(row);
     var spec = settings.route ? MV.bandTarget(row, 'pickup') : null;
-    var k = row.pickup + '\u0000' + (disc ? MV.discBox(disc) + '/' + disc.miles.toFixed(2)
+    // (Its printed door in the key as well: one store's name with two doors
+    // is two questions — placeRow asks the door first.)
+    var k = (printedDoor(row) || '') + '\u0001' + row.pickup + '\u0000' + (disc ? MV.discBox(disc) + '/' + disc.miles.toFixed(2)
                                           + '/' + disc.at.lat.toFixed(3) + ',' + disc.at.lon.toFixed(3) : '-')
       + (spec ? '/' + spec.miles + (spec.upper ? '+' : '') : '');
-    if (!memo.has(k)) memo.set(k, await placePickup(nbx, row.pickup, row, !!st.base, ctx));
+    if (!memo.has(k)) memo.set(k, await placeRow(nbx, row, !!st.base, ctx));
     placed[i] = memo.get(k);
     done += 1;
     if (done % 200 === 0) console.error('  pickups ' + done + ' of ' + todo + ' (' + cache.fresh + ' asked, '
@@ -4643,6 +4726,7 @@ async function main(argv) {
 module.exports = {
   MIN_N: MIN_N, DROP_MIN_N: DROP_MIN_N, GRID_MI: GRID_MI, NEXT_GAP_MIN: NEXT_GAP_MIN, VIEWS: VIEWS,
   pickupKind: pickupKind, placePickup: placePickup, placeDropoff: placeDropoff, storeLabel: storeLabel,
+  printedDoor: printedDoor, placeRow: placeRow,
   placesOf: placesOf, cellOf: cellOf, bootCI: bootCI, cells: cells, coverage: coverage,
   nextTake: nextTake, timelineOf: timelineOf, tripsOf: tripsOf, dropTable: dropTable,
   analyse: analyse, summary: summary, testLine: testLine, html: html, csvOf: csvOf, dropCsv: dropCsv,

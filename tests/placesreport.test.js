@@ -188,6 +188,77 @@ function nbx() {
   eq('[words] ...the level\'s "stood in for" says the refusal\'s words', wArea.levels[0].refused,
      'street found, not that door 1');
 
+  /* --- a DoorDash pickup by the door its card printed (printedDoor, placeRow) ---
+   *
+   * The report read `row.pickup` alone, a DoorDash store's NAME, where the rig
+   * asks the door printed under it first (server.js searchCardEarly,
+   * pickupAsks). Invented stores round the open-water point: one whose door
+   * the NucBox holds and whose name OSM spells a word shorter, one whose door
+   * it does not hold and whose name is one place, one of neither, and a chain
+   * whose door is held. */
+  var ddAnswers = {
+    '164 Ash Row': [hit('Utopian Bowl, 164, Ash Row, Faketown', 'amenity', 'Utopian Bowl', off(0.012, 0.01))],
+    'Utopian Bowl Kitchen': [hit('Utopian Bowl, 164, Ash Row, Faketown', 'amenity', 'Utopian Bowl', off(0.012, 0.01))],
+    '12 Pell Lane': [hit('Pell Lane, Faketown', 'highway', 'Pell Lane', off(0.01, 0.012))],
+    'Fernbrook Grill': [hit('Fernbrook Grill, Pell Lane, Faketown', 'amenity', 'Fernbrook Grill', off(0.01, 0.01))],
+    '88 Quillon Way': [],
+    'Tallow Noodle House': [],
+    '9 Elm Row': [hit('Bramble Burger, 9, Elm Row, Faketown', 'amenity', 'Bramble Burger', off(-0.03, 0.02))],
+    'Bramble Burger': ANSWERS['Bramble Burger'],
+  };
+  var ddOpts = [];
+  var ddBase = new MV.NbxSearch({ gap: 0, fetch: function (u) {
+    var q = new URLSearchParams(u.split('?')[1] || '');
+    var list = (q.has('q') ? ddAnswers[q.get('q')] : ddAnswers[q.get('street')]) || [];
+    return Promise.resolve({ ok: true, status: 200, json: function () {
+      return Promise.resolve({ ok: true, cutAt: null, hits: list });
+    } });
+  } });
+  var ddNbx = Object.create(ddBase);
+  ddNbx.place = function (t, d, o) { ddOpts.push([t, o && o.store]); return ddBase.place(t, d, o); };
+  function ddRow(x) { return card(Object.assign({ app: 'doordash', hasTotal: false, legs: 1 }, x)); }
+
+  eq('[dd door] the door a DoorDash card printed under its store is the one asked',
+     P.printedDoor(ddRow({ pickup: 'Utopian Bowl Kitchen', pickupLine: '164 Ash Row, Faketown' })), '164 Ash Row, Faketown');
+  eq('[dd door] ...else the door its stores list beside that store',
+     P.printedDoor(ddRow({ pickup: 'Utopian Bowl Kitchen',
+                           stores: [{ name: 'Tallow Noodle House', door: '88 Quillon Way, Faketown' },
+                                    { name: 'Utopian Bowl Kitchen', door: '164 Ash Row, Faketown' }] })),
+     '164 Ash Row, Faketown');
+  eq('[dd door] ...or the parser\'s two lists side by side',
+     P.printedDoor(ddRow({ pickup: 'Utopian Bowl Kitchen', places: ['Utopian Bowl Kitchen'],
+                           placeDoors: ['164 Ash Row, Faketown'] })), '164 Ash Row, Faketown');
+  eq('[dd door] ...and none for a card that printed no door, nor for a line that is no door',
+     [P.printedDoor(ddRow({ pickup: 'Utopian Bowl Kitchen' })),
+      P.printedDoor(ddRow({ pickup: 'Utopian Bowl Kitchen', pickupLine: 'Ash Row, Faketown' })),
+      P.printedDoor(card({ pickup: 'Tallow Noodle (77 Quillon Way)' }))], [null, null, null]);
+
+  var ddDoor = ddRow({ pickup: 'Utopian Bowl Kitchen', pickupLine: '164 Ash Row, Faketown' });
+  var ddWas = await P.placePickup(ddNbx, ddDoor.pickup, ddDoor, false);
+  var ddNow = await P.placeRow(ddNbx, ddDoor, false);
+  eq('[dd door] by its name alone it was refused: OSM spells it a word shorter, sixty miles round',
+     [ddWas.at, ddWas.why], [null, 'noplace']);
+  eq('[dd door] by its printed door it is placed, at door level, the door asked',
+     [!!ddNow.at, ddNow.level, ddNow.asked, ddNow.kind], [true, 'door', 'door', 'door']);
+  eq('[dd door] ...asked with the store\'s name beside it, for the street printed short only after',
+     ddOpts[ddOpts.length - 1], ['164 Ash Row, Faketown', 'Utopian Bowl Kitchen']);
+
+  var ddName = await P.placeRow(ddNbx, ddRow({ pickup: 'Fernbrook Grill', pickupLine: '12 Pell Lane, Faketown' }), false);
+  eq('[dd door] a door the NucBox does not hold, a name that is one place: placed by the name, as before',
+     [!!ddName.at, ddName.level, ddName.asked, ddName.doorWhy], [true, 'name', 'name', 'nodoor']);
+  var ddNeither = await P.placeRow(ddNbx, ddRow({ pickup: 'Tallow Noodle House', pickupLine: '88 Quillon Way, Faketown' }), false);
+  eq('[dd door] neither: the DOOR\'s refusal is what is counted, in its words',
+     [ddNeither.at, ddNeither.why, ddNeither.said, ddNeither.asked],
+     [null, 'none', "no such door in the reach's box", 'door']);
+  var ddChain = await P.placeRow(ddNbx, ddRow({ pickup: 'Bramble Burger', pickupLine: '9 Elm Row, Faketown' }), false);
+  var ddChainWas = await P.placePickup(ddNbx, 'Bramble Burger', ddRow({ pickup: 'Bramble Burger' }), false);
+  eq('[dd door] a chain: its name is every branch, its printed door is one place',
+     [ddChainWas.at, ddChainWas.why, !!ddChain.at, ddChain.level], [null, 'several', true, 'door']);
+  ok('[dd door] ...the branch at that door', ddChain.at && MV.crowMiles(ddChain.at, off(-0.03, 0.02)) < 0.01);
+  var ddUber = await P.placeRow(ddNbx, card({ pickup: 'Fernbrook Grill' }), false);
+  eq('[dd door] a row with no printed door is placed exactly as before',
+     JSON.stringify(ddUber), JSON.stringify(await P.placePickup(ddNbx, 'Fernbrook Grill', card({ pickup: 'Fernbrook Grill' }), false)));
+
   eq('the store label drops Uber\'s bracket', P.storeLabel('Tallow Noodle (77 Quillon Way)'), 'Tallow Noodle');
   eq('...and a printed door keeps the line before its comma',
      P.storeLabel('77 Quillon Way, Faketown, ZZ 99999'), '77 Quillon Way');

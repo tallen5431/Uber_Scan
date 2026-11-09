@@ -847,7 +847,10 @@ What it does:
 * **Places each pickup by the rig's own rules** (map-view.js, as the server
   pins a held order's pickup): a printed door by its door, a store's name by
   `pickPlace`, both inside the disc round the card's GPS fix and its own
-  distance, and **only where one place answers**. A chain with several
+  distance, and **only where one place answers**. A DoorDash pickup is asked
+  by the door its card printed under the store's name first (`pickupLine`,
+  or its line among the card's stores), as the rig asks it, and by the
+  store's name only where the door placed nothing. A chain with several
   branches in reach, a card with no fix, a name the map does not hold: not
   placed, counted, and the pay gap between placed and unplaced printed with
   its test, shift day by shift day. A refusal is counted in the rig's words
