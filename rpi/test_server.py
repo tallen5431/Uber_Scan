@@ -11062,16 +11062,20 @@ eq('[on time] an offer due before any order of the stops reaches it, the 5 min a
 def _otwaits(*secs):
     return {'v': 1, 'stores': [{'key': 'examplegrill@67940,-169060', 'name': 'Example Grill',
                                 'lat': 33.97, 'lon': -84.53,
-                                'waits': [{'at': 1000 * i, 's': s} for i, s in enumerate(secs)]}]}
+                                # Stamped this hour: the card's note counts
+                                # only waits at similar hours (storeWaitNote).
+                                'waits': [{'at': int(time.time() * 1000) - 60000 * (i + 1), 's': s}
+                                          for i, s in enumerate(secs)]}]}
 
 
 _otw1 = _ontime('ontime-wait-short', (_NOWMIN + 40) % 1440, minutes=11.0,
                 waits=_otwaits(50, 60, 70))
 eq('[store waits] the on-time hint allows the store\'s median wait at its pickup in place of '
-   'PICKUP_ALLOW_S: 60 s, both on time; the verdict unmoved; the card says "3 visits, ~1 min"',
+   'PICKUP_ALLOW_S: 60 s, both on time; the verdict unmoved; the card says "usually ~1 min '
+   'wait (n=3)"',
    (_otw1['stack'], _otw1['row'], _otw1['state'], _otw1['storeWait']),
    ({'onTime': 'both', 'lateMin': None, 'offWayMi': None},
-    {'onTime': 'both', 'lateMin': None, 'offWayMi': None}, 'go', {'n': 3, 'avgMin': 1}))
+    {'onTime': 'both', 'lateMin': None, 'offWayMi': None}, 'go', {'n': 3, 'usualMin': 1}))
 _otw2 = _ontime('ontime-wait-long', (_NOWMIN + 40) % 1440, minutes=11.0,
                 waits=_otwaits(600, 540, 660, 600))
 eq('[store waits] ...a median of 10 min: ② late ~8 min',
@@ -11927,17 +11931,23 @@ try:
                                           for s in _wf.get('stores') or []],
            [('Larkspur Tacos', 2)])
         _wsay([_swread('Larkspur Tacos')])
-        eq('[store waits] two visits: the card naming the store, with no pin, a distinctive name '
-           'at one place, carries how many and the mean in whole minutes; the verdict its own',
-           ((get(_wb, '/api/status').get('last') or {}).get('storeWait'),
-            (get(_wb, '/api/status').get('last') or {}).get('state')),
-           ({'n': 2, 'avgMin': 3}, 'go'))
+        no_('[store waits] two visits: not yet "usually" (server.js storeWaitNote wants three '
+            'at similar hours, since the 7 Nov shift)',
+            'storeWait' in (get(_wb, '/api/status').get('last') or {}))
+        _swvisit(_wb, _wsay, 'w-4', 'Larkspur Tacos', 200)
+        _wsay([_swread('Larkspur Tacos')])
+        eq('[store waits] three: the card naming the store, with no pin, a distinctive name '
+           'at one place, carries how many and the median in whole minutes; the verdict, the '
+           '$/hr and the target its own (no pace re-timing)',
+           tuple((get(_wb, '/api/status').get('last') or {}).get(k)
+                 for k in ('storeWait', 'state', 'perHour', 'target')),
+           ({'n': 3, 'usualMin': 3}, 'go', 30.0, 25))
         _wsay([_swread('Wren Street Noodles')])
         no_('[store waits] ...a card naming another store carries none',
             'storeWait' in (get(_wb, '/api/status').get('last') or {}))
         _wrow = [sorted(r) for r in _vrows(_wj)]
         eq('[store waits] ...and the journal\'s visit rows are as they were: no wait, no place',
-           _wrow, [['at', 'by', 'holdId', 'id', 'kind', 'pickup', 'seq', 'v']] * 3)
+           _wrow, [['at', 'by', 'holdId', 'id', 'kind', 'pickup', 'seq', 'v']] * 4)
     finally:
         stop(_wp)
     # A history beside the journal survives a restart, and nothing is
@@ -11946,7 +11956,22 @@ try:
     try:
         _wsay([_swread('Larkspur Tacos (310 Mill St)')])
         eq('[store waits] after a restart the card still says it',
-           (get(_wb, '/api/status').get('last') or {}).get('storeWait'), {'n': 2, 'avgMin': 3})
+           (get(_wb, '/api/status').get('last') or {}).get('storeWait'), {'n': 3, 'usualMin': 3})
+    finally:
+        stop(_wp)
+    # ...and only at similar hours: the same three waits six hours from now's
+    # time of day are not this evening's usual (STORE_WAIT_HOURS_MS, two).
+    _wfile = os.path.join(os.path.dirname(_wj), 'store-waits.json')
+    _wf = json.load(open(_wfile))
+    for _st in _wf['stores']:
+        for _w in _st['waits']:
+            _w['at'] -= 6 * 3600 * 1000
+    json.dump(_wf, open(_wfile, 'w'))
+    _wp, _wb = start(_wenv, _wj)
+    try:
+        _wsay([_swread('Larkspur Tacos (310 Mill St)')])
+        no_('[store waits] three waits six hours from now\'s time of day: the card says nothing',
+            'storeWait' in (get(_wb, '/api/status').get('last') or {}))
     finally:
         stop(_wp)
 
@@ -12002,6 +12027,14 @@ try:
              w.get('worstMin') is not None and w['worstMin'] >= w['medianMin'])
             for w in get(_sb, '/api/journal?days=1').get('waits') or []],
            [('Larkspur Tacos', 2, 2, True)])
+        # ...and a third: the stop pattern's waits make the card's note too.
+        _sorder('s-3', 10)
+        _ssay([_swread('Larkspur Tacos')])
+        eq('[stop waits] three from the stop pattern, at this hour: the card says the store\'s '
+           'usual wait, its verdict its own',
+           tuple(((get(_sb, '/api/status').get('last') or {}).get('storeWait') or {}).get(k)
+                 for k in ('n',)) + ((get(_sb, '/api/status').get('last') or {}).get('state'),),
+           (3, 'go'))
         no_('[stop waits] no coordinate on the record\'s pickup',
             any(k in json.dumps(_spk) for k in ('33.9', '84.5')))
     finally:

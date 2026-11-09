@@ -7198,23 +7198,23 @@ const framed = (page) => page.waitForFunction(
                                                       stack: null }));
     await tick(300);
     const sameNoStack = await look();
-    // The store's measured waits (server.js storeWaitFor, the owner's
-    // request of 22 Oct 2026): "waited ~4 min avg (3)" on the address line,
-    // beside the same-store note or alone, nothing under two visits, and
-    // nothing else on the card moved.
+    // The store's usual wait at similar hours (server.js storeWaitNote,
+    // since the owner's 7 Nov shift): "usually ~4 min wait (n=3)" on the
+    // address line, beside the same-store note or alone, nothing under
+    // three waits, and nothing else on the card moved (no pace re-timing).
     const waitOne = { holding: A, orders: [A], unowned: 0,
       stack: { pay: 40.0, worst: 18.2, best: 31.0, minMinutes: 40, maxMinutes: 65,
                leftMinutes: 40, state: 'warn', sure: false, uncosted: false, ends: null,
                sameStore: 'c-a@1', sameStoreN: 1 } };
     const waits = {};
-    for (const [k, w] of [['with', { n: 3, avgMin: 4 }], ['one', { n: 1, avgMin: 4 }],
+    for (const [k, w] of [['with', { n: 3, usualMin: 4 }], ['one', { n: 2, usualMin: 4 }],
                           ['without', null]]) {
       await push(Object.assign({}, READINGS.deducted, waitOne, w ? { storeWait: w } : {}));
       await tick(300);
       waits[k] = await look();
     }
     await push(Object.assign({}, READINGS.deducted, { holding: null, stack: null,
-                                                      storeWait: { n: 2, avgMin: 0.4 } }));
+                                                      storeWait: { n: 3, usualMin: 0.4 } }));
     await tick(300);
     waits.alone = await look();
     // The on-time hint (server.js onTimeHint, the owner's decision of 20 Oct
@@ -8796,18 +8796,18 @@ try:
            (None, None))
         _sw = ct.get('waits') or {}
         _swi, _swo = _sw.get('with') or {}, _sw.get('without') or {}
-        eq('store waits: the address line says "waited ~4 min avg (3)" after the same-store '
-           'note, before the pickup',
+        eq('store waits: the address line says "usually ~4 min wait (n=3)" after the '
+           'same-store note, before the pickup',
            (_swi.get('wait'), _swi.get('same'), _swi.get('ends') == _swo.get('ends')),
-           ('waited ~4 min avg (3) ·', 'same store as in car', True))
+           ('usually ~4 min wait (n=3) ·', 'same store as in car', True))
         eq('...and nothing else on the card moves: the verdict, the pair line\'s words, the ends',
            [(_swi.get(k) == _swo.get(k), k) for k in ('verdict', 'more', 'ontime', 'ends')],
            [(True, 'verdict'), (True, 'more'), (True, 'ontime'), (True, 'ends')])
-        eq('...one visit says nothing; with no order in the car it is said alone, a wait under '
+        eq('...two waits say nothing; with no order in the car it is said alone, a wait under '
            'half a minute as ~1 min',
            ((_sw.get('one') or {}).get('wait'), _swo.get('wait'),
             (_sw.get('alone') or {}).get('wait'), (_sw.get('alone') or {}).get('same')),
-           (None, None, 'waited ~1 min avg (2) ·', None))
+           (None, None, 'usually ~1 min wait (n=3) ·', None))
         _ot = ct.get('onTimes') or {}
         eq('on time: the pair line says "both on time", "② late ~7 min", and nothing with no '
            'hint',

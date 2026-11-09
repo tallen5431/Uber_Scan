@@ -5107,6 +5107,16 @@ Restaurant waits (minutes stopped at the store, off the GPS log: at its GPS visi
 long light, a drive-through queue) is taken for the store, and a store waited
 at under two minutes is left unmeasured rather than given a later stop.
 
+**A store's usual wait, on the offer card.** With three or more waits on
+record at the card's store (at a GPS visit or from the stop pattern) whose time
+of day is within two hours of now's, the panel's address line says "usually
+~12 min wait (n=5)" before the pickup: the median in whole minutes and how many
+(server.js `storeWaitNote`; it was "waited ~4 min avg (3)" over every hour from
+two). Which stores are the old rule's: the name near the card's pickup pin, or
+with no pin a name that is not a chain's and is on record at one place. It is
+descriptive only: the $/hr, the verdict, the target, the state and the range are
+what they would be without it (AUDITS.md, Settled: no re-timing at a pace).
+
 **What $/hr to expect, from the same tool.** `--strategy` adds a short section
 after the report: what the day's offers looked like (the panel's $/hr and the
 card's $/mi, quartiles and the 90th percentile, and offers an hour with no

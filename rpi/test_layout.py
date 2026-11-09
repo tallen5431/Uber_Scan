@@ -4032,10 +4032,10 @@ const SNAP_MEASURE = (fixture) => {
       // ...and the pair line with both in the car, under an offer: against
       // both (Advice.stackMany: `heldCount`, and no route link, which end is
       // last being Map view's question), at the most the row holds.
-      // ...and the store's measured waits at their widest beside the note
-      // (server.js storeWaitFor): two figures of minutes, ten visits.
+      // ...and the store's usual wait at its widest beside the note
+      // (server.js storeWaitNote): two figures of minutes, ten waits.
       await push(Object.assign({}, HELD.offer, { holding: A, orders: [A, B], unowned: 0,
-        storeWait: { n: 10, avgMin: 12 },
+        storeWait: { n: 10, usualMin: 12 },
         stack: Object.assign({}, HELD.offer.stack, { heldCount: 2, leftEach: [55, 60],
                                                      maxMinutes: 137, route: null,
                                                      sameStore: 'l-b@2', sameStoreN: 2 }) }));
@@ -5057,15 +5057,15 @@ try:
             # away, "same store ②" on the pair line's first row.
             eq('...and "%s" whole at %s' % (_same2(h), where),
                (_pr.get('same'), _pr.get('sameCut')), (_same2(h), ''))
-            # ...and the store's measured waits at their widest, "waited ~12
-            # min avg (10)", whole on the address line after the note
+            # ...and the store's usual wait at its widest, "usually ~12 min
+            # wait (n=10)", whole on the address line after the note
             # (live.html waitNote): the pickup's text is what gives way. On
             # the 3.5" hat the answer on the card puts the address line away
             # (as for "same store" above), and the note goes with it:
             # AUDITS.md's Open note.
-            eq('...and "waited ~12 min avg (10)" whole on the address line at %s' % where,
+            eq('...and "usually ~12 min wait (n=10)" whole on the address line at %s' % where,
                (_pr.get('placesUp'), _pr.get('wait'), _pr.get('waitCut')),
-               (False, None, None) if h <= 380 else (True, 'waited ~12 min avg (10) ·', ''))
+               (False, None, None) if h <= 380 else (True, 'usually ~12 min wait (n=10) ·', ''))
             # ...and the on-time hint at its widest, first in the words that
             # give way: whole on every panel but the 3.5" hat beside the
             # scene picture, where the ellipsis takes "n ·" and leaves

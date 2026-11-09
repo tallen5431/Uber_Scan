@@ -4817,8 +4817,10 @@ function markVisited(list, now, by) {
  * card that names the store again. A MEASUREMENT, NOT A RULE: it moves no
  * verdict, no state, no rate and no range (AUDITS.md, Settled: no payout
  * floor, no $/mile rule, no re-timing at a pace, no minutes from distance).
- * Two places read it. The card's place line says "waited ~4 min avg (3)"
- * (live.html showPlaces), and the on-time hint, the one place the owner's
+ * Two places read it. The card's place line says "usually ~12 min wait
+ * (n=5)" (live.html showPlaces; storeWaitNote, the waits at similar hours,
+ * since the 7 Nov shift — it said "waited ~4 min avg (3)" over every hour
+ * from two), and the on-time hint, the one place the owner's
  * 20 Oct decision lets times be added up, allows that store's MEDIAN wait at
  * its pickup in place of PICKUP_ALLOW_S (onTimeInputs).
  *
@@ -5334,6 +5336,14 @@ function storeWaitOfHold(h) {
   return storeWaitFor(storeNameOf(h, pin ? pin.q : null), pin);
 }
 
+// ...and its usual wait at similar hours, for the card (storeWaitNote).
+function storeWaitNoteOfHold(h, now) {
+  var pin = (Array.isArray(h && h.pickupPins) ? h.pickupPins : []).filter(function (p) {
+    return typeof p.q === 'string';
+  })[0] || null;
+  return storeWaitNote(storeNameOf(h, pin ? pin.q : null), pin, now);
+}
+
 /* ---------- store waits from the stop pattern (the owner, 7 Nov 2026) ------
  *
  * "tonight seemed worse than usual with long wait times for many
@@ -5483,6 +5493,58 @@ function storeStopHeard(name, st) {
   list.push(found);
   if (list.length > STORE_WAITS_MAX) list.splice(0, list.length - STORE_WAITS_MAX);
   saveStoreWaits();
+}
+
+/* ---------- a store's usual wait, on the offer card (the owner, 7 Nov) -----
+ *
+ * The note on the card's address line: "usually ~12 min wait (n=5)", the
+ * MEDIAN of the measured waits at this card's store — at its GPS visits and
+ * from the stop pattern alike, both clock readings less clock readings — at
+ * SIMILAR HOURS: those whose time of day is within STORE_WAIT_HOURS_MS of
+ * now, either way round the clock, since "tonight seemed worse than usual"
+ * is about the evening's waits, not the lunch hour's. Said only with
+ * STORE_WAIT_NOTE_MIN of them, which replaces the old note's two: one wait
+ * is an anecdote, and two at the same hour are not yet "usually". The
+ * stores are storeWaitFor's (the same name near the pin, or a name that is
+ * not a chain's with one place on record); a chain's branch with no pin is
+ * still a guess, and says nothing.
+ *
+ * DESCRIPTIVE ONLY. It does not move the $/hr, the verdict, the target, the
+ * state or the range — no pace re-timing (AUDITS.md, Settled: "Do not re-time
+ * an offer at a pace"). The on-time hint goes on reading storeWaitFor's
+ * median, as the owner's decision of 20 Oct allows, and nothing else does.
+ * CHOSEN, NOT MEASURED: two hours either way, three waits. */
+var STORE_WAIT_HOURS_MS = 2 * 3600000;
+var STORE_WAIT_NOTE_MIN = 3;
+
+function storeWaitNote(name, pin, now) {
+  var said = storeNameSaid(name);
+  // storeWaitFor's own answer first, for its rule of which stores: null for
+  // a chain with no pin, or a name on record at more than one place.
+  if (!said || !storeWaitFor(name, pin)) return null;
+  var near = function (a, b) { return MV.crowMiles(a, b) * 1609.344 <= STORE_NEAR_M; };
+  var hits = storeWaits().filter(function (st) { return Assemble.sameStore(st.name, said); });
+  if (pin && typeof pin.lat === 'number' && typeof pin.lon === 'number') {
+    hits = hits.filter(function (st) { return near(st, pin); });
+  }
+  var day = 86400000;
+  var clock = function (t) {
+    var d = new Date(t);
+    return ((d.getHours() * 60 + d.getMinutes()) * 60 + d.getSeconds()) * 1000;
+  };
+  var here = clock(now);
+  var s = [];
+  hits.forEach(function (st) {
+    st.waits.forEach(function (w) {
+      var apart = Math.abs(clock(w.at) - here);
+      if (Math.min(apart, day - apart) <= STORE_WAIT_HOURS_MS) s.push(w.s);
+    });
+  });
+  if (s.length < STORE_WAIT_NOTE_MIN) return null;
+  s.sort(function (a, b) { return a - b; });
+  var mid = s.length >> 1;
+  var median = s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  return { n: s.length, usualMin: Math.max(1, Math.round(median / 60)) };
 }
 
 /* One heartbeat, for the pickups: each named pin of each order in the car,
@@ -7079,10 +7141,13 @@ function withStack(read, now) {
   // pickup, where the reading names none). Said on the place line; nothing
   // is judged by it.
   var onRecord = offerIsReading(scanner.offer, read) ? scanner.offer : null;
-  var waited = own ? storeWaitOfHold(own)
-    : storeWaitFor(read.pickup || (onRecord && onRecord.pickup),
-                   onRecord && offerPins[onRecord.id] ? offerPins[onRecord.id].pickup : null);
-  if (waited) read.storeWait = { n: waited.n, avgMin: waited.avgMin };
+  // ...as the store's usual wait at this hour of the day (storeWaitNote: the
+  // median of three or more measured waits within two hours of now's time of
+  // day), "usually ~12 min wait (n=5)" on the card. Said, never weighed.
+  var waited = own ? storeWaitNoteOfHold(own, now)
+    : storeWaitNote(read.pickup || (onRecord && onRecord.pickup),
+                    onRecord && offerPins[onRecord.id] ? offerPins[onRecord.id].pickup : null, now);
+  if (waited) read.storeWait = { n: waited.n, usualMin: waited.usualMin };
   else delete read.storeWait;
   // Against every order in the car while carrying two is on (Stage 6,
   // Advice.stackMany), and the panel says which: "with ① + ②". With one

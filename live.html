@@ -2657,7 +2657,7 @@
             var wt = document.createElement('span');
             wt.className = 'wait';
             wt.textContent = wait + ' ·';
-            wt.title = 'How long the car stood at this store on its last visits, '
+            wt.title = 'How long the car usually stood at this store at about this hour, '
               + 'measured by the GPS from stopping to leaving. It judges nothing.';
             var wsp = document.createElement('span');
             wsp.className = 'wsp';
@@ -2675,17 +2675,24 @@
     setHidden(el.places, !where.length);
   }
 
-  /* "waited ~4 min avg (3)": the GPS's measured waits at this card's store
-   * (server.js storeWaitFor, the owner's request of 22 Oct 2026), the mean
-   * in whole minutes and how many visits, two at least; null otherwise. A
-   * FACT about the store, like the same-store note beside it: nothing on the
-   * card is drawn differently for it. The pair line's on-time hint already
-   * allows that store's median wait at its pickup, worked out on the server. */
+  /* "usually ~12 min wait (n=5)": this card's store's measured waits at
+   * similar hours (server.js storeWaitNote: the median of three or more
+   * waits, at a GPS visit or from the stop pattern, within two hours of
+   * now's time of day), in whole minutes, and how many; null otherwise. It
+   * was "waited ~4 min avg (3)" over every hour from two visits (the
+   * owner's request of 22 Oct 2026), and after the 7 Nov shift ("long wait
+   * times for many restaurants") it is the evening's usual, which needs
+   * more than two. A FACT about the store, like the same-store note beside
+   * it: the $/hr, the verdict, the target and everything else on the card
+   * are drawn as they would be without it — no pace re-timing (AUDITS.md,
+   * Settled). The store's name is the pickup right after it on the line.
+   * The pair line's on-time hint allows that store's median wait at its
+   * pickup, worked out on the server, as before. */
   function waitNote(r) {
     var w = r && r.storeWait;
-    if (!w || typeof w.n !== 'number' || w.n < 2 || typeof w.avgMin !== 'number'
-        || !isFinite(w.avgMin)) return null;
-    return 'waited ~' + Math.max(1, Math.round(w.avgMin)) + ' min avg (' + w.n + ')';
+    if (!w || typeof w.n !== 'number' || w.n < 3 || typeof w.usualMin !== 'number'
+        || !isFinite(w.usualMin)) return null;
+    return 'usually ~' + Math.max(1, Math.round(w.usualMin)) + ' min wait (n=' + w.n + ')';
   }
 
   /* "same store as ①" — or "same store as in car" with one order, which
