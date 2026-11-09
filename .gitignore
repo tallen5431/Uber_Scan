@@ -70,6 +70,9 @@ rpi/finishing.json*
 rpi/places.json*
 rpi/config-backup.json*
 rpi/store-waits.json*
+# ...and whether the server's last run stopped when it was told to (server.js
+# runStateStarted): a boot id and two times, this machine's and nobody else's.
+rpi/run-state.json*
 
 # ...and the pictures those offers were read from, which sit beside the journal
 # by default and are the same fact in a stronger form: a photograph of the

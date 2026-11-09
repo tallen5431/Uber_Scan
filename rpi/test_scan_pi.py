@@ -2594,6 +2594,81 @@ eq('...and it moves only when PiHealth samples, the reading the beat carries',
 eq('...and the sample the journal is handed is still the four fields',
    sorted(_hph.sample(_hclock[0] + 2.0)), ['cpuC', 'cpuCWhy', 'throttled', 'throttledWhy'])
 
+# --- the power, in the log (the 7 Nov 2026 shift) ------------------------------
+#
+# An unclean reboot in the car — `last -x` showing a boot with no shutdown
+# before it, the server back at 04:09Z right after an order, no crash message
+# — and the firmware's under-voltage bits were in no line the driver pastes
+# back. vcgencmd is stubbed: what a real Pi on a weak supply answers.
+import subprocess as _pw_sp                                    # noqa: E402
+
+
+def _vc(hexbits):
+    return lambda *a, **k: _pw_sp.CompletedProcess(
+        ['vcgencmd', 'get_throttled'], 0, 'throttled=%s\n' % hexbits, '')
+
+
+_pw_said = []
+_pw_real = SP.log
+try:
+    SP.log = lambda m: _pw_said.append(m)
+    _pw_bits = {'v': '0x0'}
+    _pw = SP.PiHealth(every=30.0, temp=lambda: (55.0, None),
+                      throttle=lambda: SP.throttling(run=_vc(_pw_bits['v'])))
+    _pw.sample(0.0)
+    _pw_quiet = list(_pw_said)
+    _pw_bits['v'] = '0x50005'           # under-voltage and throttled, now and since boot
+    _pw.sample(30.0)
+    _pw_first = list(_pw_said)
+    _pw.sample(60.0)
+    _pw.sample(90.0)
+    _pw_again = list(_pw_said)
+    _pw_bits['v'] = '0x50000'           # gone now; still since boot
+    _pw.sample(120.0)
+    _pw_after = list(_pw_said)
+finally:
+    SP.log = _pw_real
+eq('[power] a Pi with no throttle word warns of nothing', _pw_quiet, [])
+eq('[power] the first sample with a word warns once per word, now and since boot, '
+   'under-voltage naming the lead',
+   [m for m in _pw_first],
+   ['WARNING: the Pi reports under-voltage now (vcgencmd get_throttled) — check the power '
+    'lead and the car\'s socket',
+    'WARNING: the Pi reports throttled now (vcgencmd get_throttled)',
+    'WARNING: the Pi reports under-voltage since boot (vcgencmd get_throttled) — check the '
+    'power lead and the car\'s socket',
+    'WARNING: the Pi reports throttled since boot (vcgencmd get_throttled)'])
+eq('[power] ...and never again while the words stay, nor when one goes from now and stays '
+   'since boot', (_pw_again, _pw_after), (_pw_first, _pw_first))
+eq('[power] the health line\'s part: nothing with no word, now and since boot as each is',
+   [SP.power_part(p) for p in (
+       None, {'throttled': None}, {'throttled': {'now': [], 'sinceBoot': []}},
+       {'throttled': {'now': ['under-voltage'], 'sinceBoot': ['under-voltage']}},
+       {'throttled': {'now': [], 'sinceBoot': ['under-voltage']}},
+       {'throttled': {'now': ['under-voltage'], 'sinceBoot': ['under-voltage', 'throttled']}})],
+   [None, None, None, 'power: under-voltage now', 'power: under-voltage since boot',
+    'power: under-voltage now, throttled since boot'])
+
+
+def _pw_line(pi):
+    h = SP.Health()
+    h.reset(0.0)
+    h.reads = 1
+    h.ms.append(200)
+    grab = io.StringIO()
+    with contextlib.redirect_stdout(grab):
+        h.report(121.0, None, PL.Scanner(quad=None, roi=None), pi)
+    return grab.getvalue()
+
+
+_pw_l1 = _pw_line({'cpuC': 61.0, 'throttled': {'now': ['under-voltage'],
+                                               'sinceBoot': ['under-voltage']}})
+_pw_l0 = _pw_line({'cpuC': 61.0, 'throttled': {'now': [], 'sinceBoot': []}})
+ok_('[power] the health line says "power: under-voltage now" when the firmware does (%r)'
+    % _pw_l1[-160:], '; power: under-voltage now; crop ' in _pw_l1)
+ok_('[power] ...and nothing about power when no word is set, or with no sample at all',
+    'power' not in _pw_l0 and 'power' not in _pw_line(None))
+
 # --- a state that has to last before it is news ------------------------------
 _h = SP.Held('back', 60.0, quick=('back',))
 eq('bad news is not news until it has lasted', _h.update('gone', 0.0), None)

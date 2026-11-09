@@ -2430,8 +2430,11 @@ class Health:
         t1, c1 = process_cpu()
         return int(round((c1 - c0) / (t1 - t0) * 100)) if t1 - t0 >= 1.0 else None
 
-    def report(self, now, tracker, scanner):
+    def report(self, now, tracker, scanner, pi=None):
         """Say what has happened lately. Returns the tally, or None if silent.
+
+        `pi` is PiHealth's newest sample (its `last`), whose throttle words
+        are said as one part when any is set (power_part); None says nothing.
 
         The tally goes back to the caller because the counts are worth keeping
         as well as printing: the log is on the machine nobody reads, and how
@@ -2582,6 +2585,13 @@ class Health:
         if self.too_bright:
             bits.append('OVER-EXPOSED with nothing left to give — turn the '
                         'phone brightness down')
+        # ...and the Pi's supply and clock, only when the firmware says one of
+        # them is or was wrong (power_part): a sag in the car is otherwise in
+        # no line the driver pastes back. Before the crop and the corners,
+        # which are on every line.
+        power = power_part(pi)
+        if power:
+            bits.append(power)
         bits.append('crop %s' % _fmt_roi(scanner.crop_box))
         if tracker is not None:
             status = tracker.status()
@@ -3262,6 +3272,10 @@ class PiHealth(object):
         self.at = None
         self.last = None
         self.guard = HeatGuard()
+        # Every throttle word already warned about, now and since boot, so a
+        # flag is said in the log the FIRST time it appears and not on every
+        # sample after (see warn_new).
+        self.warned = set()
 
     def sample(self, now):
         if self.at is None or now - self.at >= self.every:
@@ -3271,7 +3285,51 @@ class PiHealth(object):
                          'throttled': thr, 'throttledWhy': thr_why}
             self.at = now
             self.guard.see(self.last)
+            self.warn_new(thr)
         return dict(self.last)
+
+    def warn_new(self, thr):
+        """A warning line in the log the first time a throttle word appears,
+        NOW or SINCE BOOT, and never again for that word and that half.
+
+        THE 7 NOV 2026 SHIFT. `last -x` on the rig shows a boot with no
+        shutdown before it, the server's "Uber Scan serving" at 04:09Z right
+        after an order taken at 23:02 EST, and no software crash message: the
+        Pi lost its power in the car, or browned out. The firmware's own
+        since-boot bit (16, under-voltage occurred) is exactly the witness
+        for a sag that did not go all the way down, and nothing on the rig
+        put it in the log the driver pastes back: the beat carried it to the
+        panel, which showed LOW POWER only while the guard was on, and the
+        journal's `seen` rows carried it only beside a health window worth
+        keeping. Once per word, because the since-boot bits never clear
+        until the next boot and a line every thirty seconds would be the
+        noise that hides the next real fault."""
+        if not thr:
+            return
+        for half, words in (('now', thr.get('now') or []),
+                            ('since boot', thr.get('sinceBoot') or [])):
+            for w in words:
+                if (half, w) in self.warned:
+                    continue
+                self.warned.add((half, w))
+                log('WARNING: the Pi reports %s %s (vcgencmd get_throttled)%s'
+                    % (w, half, ' — check the power lead and the car\'s socket'
+                       if w == 'under-voltage' else ''))
+
+
+def power_part(pi):
+    """The health line's power part, or None when no throttle word is set:
+    "power: under-voltage now", "power: under-voltage since boot", and any
+    other word the firmware gives beside it the same way ("throttled since
+    boot"). Off PiHealth.sample()'s `throttled`; nothing when it could not be
+    asked. See PiHealth.warn_new for the shift that asked for it."""
+    thr = (pi or {}).get('throttled') or {}
+    now = list(thr.get('now') or [])
+    since = [w for w in thr.get('sinceBoot') or [] if w not in now]
+    if not now and not since:
+        return None
+    said = ['%s now' % w for w in now] + ['%s since boot' % w for w in since]
+    return 'power: ' + ', '.join(said)
 
 
 def uptime(path='/proc/uptime'):
@@ -6588,7 +6646,7 @@ def main():
                          os.path.join(scans_where, UNPARSED_DIR),
                          text=out.get('text') or ''):
                 unparsed_kept_for = parsed['episode']
-        tally = health.report(now, tracker, scanner)
+        tally = health.report(now, tracker, scanner, pi.last)
         note_tally(tally)
 
         if args.json:

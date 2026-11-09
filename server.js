@@ -8506,9 +8506,96 @@ var shuttingDown = false;
   process.on(sig, function () {
     shuttingDown = true;
     if (scanner.proc) scanner.proc.kill('SIGTERM');
+    // ...and the run marked as one that stopped when it was told to
+    // (runStateStopped): the next start can then tell a shutdown from a
+    // power cut. Synchronous, before the exit, or it is never written.
+    runStateStopped();
     process.exit(0);
   });
 });
+
+/* ---------- did the last run end with a shutdown? (the 7 Nov 2026 shift) -----
+ *
+ * That night the rig rebooted uncleanly: `last -x` shows a boot with no
+ * shutdown before it, this server's "Uber Scan serving" came at 04:09Z right
+ * after an order taken at 23:02 EST, and no software crash message was
+ * anywhere — the Pi lost its power in the car, or browned out. Nothing the
+ * rig itself prints said so; it took `last -x` by hand to see it.
+ *
+ * So the server keeps run-state.json beside the journal: at start it writes
+ * {v, boot, startedAt, clean: false} — `boot` the kernel's own boot id
+ * (/proc/sys/kernel/random/boot_id, new on every boot, null where there is
+ * none) — and on SIGTERM or SIGINT, which systemd sends on a shutdown or a
+ * stop, {v, boot, stoppedAt, clean: true}. A start that finds `clean: false`
+ * left behind knows the last run never got that signal, and says which:
+ *   - another boot: "previous boot ended without a shutdown (power?)" — the
+ *     Pi went down under a running server, which is a power loss, a brownout,
+ *     or a hard reset, and nothing else;
+ *   - this boot: the server's own previous run was killed or crashed;
+ *   - no boot id to compare: the run ended without a clean stop, cause unknown.
+ * Said once, in the log the driver pastes back; nothing reads it but a
+ * person, and nothing on the panel moves. The scanner's own `up` rows say
+ * the same from its side (a start with no stop before it); this says it for
+ * the whole Pi, in words, at the top of the log. No first-run message: with
+ * no file there is nothing to compare. Kept to two times and an id: no
+ * place, nothing about an order. */
+function runStatePath() {
+  return path.join(path.dirname(JOURNAL_PATH), 'run-state.json');
+}
+
+// The kernel's boot id, or null on a machine that has none (not Linux).
+function bootId() {
+  try {
+    return fs.readFileSync(process.env.BOOT_ID_FILE || '/proc/sys/kernel/random/boot_id',
+                           'utf8').trim() || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeRunState(state) {
+  var tmp = partName(runStatePath());
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(state));
+    fs.renameSync(tmp, runStatePath());
+  } catch (e) {
+    console.error('run state: ' + e.message);
+    try { fs.unlinkSync(tmp); } catch (e2) { /* never written */ }
+  }
+}
+
+/* What the last run's end was, as a sentence for the start's log, or null
+ * when there is nothing to say (a clean stop, or no file); this run is then
+ * marked as started and not yet stopped. */
+function runStateStarted(now) {
+  var prev = null;
+  try {
+    prev = JSON.parse(fs.readFileSync(runStatePath(), 'utf8'));
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('run state: ' + runStatePath() + ': ' + e.message);
+  }
+  var boot = bootId();
+  var said = null;
+  if (prev && typeof prev === 'object' && prev.clean === false) {
+    var since = typeof prev.startedAt === 'number'
+      ? ' (it was started ' + new Date(prev.startedAt).toISOString() + ')' : '';
+    if (typeof prev.boot === 'string' && boot && prev.boot !== boot) {
+      said = 'previous boot ended without a shutdown (power?): the server was running'
+        + since + ' and was never told to stop';
+    } else if (typeof prev.boot === 'string' && boot) {
+      said = 'the server\'s previous run, this boot, ended without a clean stop (killed or crashed)'
+        + since;
+    } else {
+      said = 'the server\'s previous run ended without a clean stop' + since;
+    }
+  }
+  writeRunState({ v: 1, boot: boot, startedAt: now, clean: false });
+  return said;
+}
+
+function runStateStopped() {
+  writeRunState({ v: 1, boot: bootId(), stoppedAt: Date.now(), clean: true });
+}
 
 // Where the scanner keeps its offers. Overridable for the same reason the
 // scanner's --journal is: the two have to name the same file, and a mismatch is
@@ -15859,6 +15946,11 @@ var tls = findCert();
 
 listen(http.createServer(handler), PORT, 'http', true, function () {
   console.log('Uber Scan serving ' + ROOT);
+  // ...and how the last run ended, when it did not end with a shutdown
+  // (runStateStarted): the first thing after the banner, as the 7 Nov
+  // power loss would have wanted it.
+  var lastRun = runStateStarted(Date.now());
+  if (lastRun) console.log('  ' + lastRun);
   console.log('  http://localhost:' + PORT + '/');
   lanAddresses().forEach(function (ip) {
     console.log('  http://' + ip + ':' + PORT + '/   (keypad only — see below)');

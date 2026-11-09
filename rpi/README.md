@@ -4858,7 +4858,19 @@ recorded instead, on the start row below. Nothing for a working GPS either:
 "GPS ok" at every glance is a word the driver learns to skip, and then skips
 the one that is not ok. The Pi's temperature on its own is never a warning;
 the firmware has its own limits and the row repeats them, it does not invent
-one.
+one. (Under-voltage now is drawn on that row as the chip **LOW POWER**, live.html heatNote.)
+
+**And in the log, a power loss** (the 7 Nov 2026 shift, an unclean reboot in
+the car that only `last -x` showed). The scanner logs `WARNING: the Pi reports
+under-voltage now (vcgencmd get_throttled) — check the power lead and the
+car's socket` the first time each throttle word appears, now or since boot,
+and never again for it; and its health line carries `power: under-voltage now`
+(or `since boot`, and any other word beside it) only while one is set. The
+server keeps `run-state.json` beside the journal — marked started at start,
+stopped on SIGTERM (what systemd sends at a shutdown) — and a start that finds
+the last run never stopped says, under the banner, `previous boot ended without
+a shutdown (power?)` when the kernel's boot id has changed, or that the
+server's previous run this boot ended without a clean stop when it has not.
 
 **In the journal**, `kind: "up"` rows, written only when something CHANGES:
 

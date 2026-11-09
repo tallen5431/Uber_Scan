@@ -12042,6 +12042,78 @@ try:
 finally:
     shutil.rmtree(_vdir, ignore_errors=True)
 
+# --- how the last run ended (the 7 Nov 2026 shift) -----------------------------
+#
+# An unclean reboot in the car: `last -x` showed a boot with no shutdown before
+# it, the server back at 04:09Z right after an order, and no crash message. The
+# server now keeps run-state.json beside the journal (server.js
+# runStateStarted / runStateStopped) and says at start when the last run was
+# never told to stop. The boot id is read from a file this suite names
+# (BOOT_ID_FILE), so "another boot" can be staged without rebooting anything.
+_rsdir = tempfile.mkdtemp()
+try:
+    _rsj = os.path.join(_rsdir, 'journal.jsonl')
+    _rsboot = os.path.join(_rsdir, 'boot_id')
+    _rsfile = os.path.join(_rsdir, 'run-state.json')
+
+    def _rsstart(boot):
+        """Start a server with this boot id; (proc, base, the log's lines up to
+        and a moment past "Uber Scan serving")."""
+        with open(_rsboot, 'w') as fh:
+            fh.write(boot + '\n')
+        port = free_port()
+        proc = subprocess.Popen(
+            ['node', os.path.join(ROOT, 'server.js')],
+            env=dict(os.environ, PORT=str(port), HTTPS_PORT='0', JOURNAL=_rsj,
+                     BOOT_ID_FILE=_rsboot, SCANNER='0'),
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        lines = []
+        reader = threading.Thread(target=lambda: lines.extend(iter(proc.stdout.readline, '')),
+                                  daemon=True)
+        reader.start()
+        base = 'http://127.0.0.1:%d' % port
+        for _ in range(120):
+            try:
+                urllib.request.urlopen(base + '/api/status', timeout=1).read()
+                break
+            except Exception:
+                time.sleep(0.1)
+        time.sleep(0.3)
+        # The lines after the banner, which is where the last run is said.
+        at = [i for i, l in enumerate(lines) if l.startswith('Uber Scan serving')]
+        return proc, base, [l.rstrip('\n') for l in (lines[at[0] + 1:] if at else lines)]
+
+    _rp, _rb, _rl = _rsstart('boot-one')
+    no_('[run state] a first start says nothing of a last run (%r)' % (_rl[:3],),
+        any('without' in l for l in _rl))
+    _rs1 = json.load(open(_rsfile))
+    eq('[run state] ...and marks this run started, not stopped, with the boot id and no more',
+       (sorted(_rs1), _rs1.get('boot'), _rs1.get('clean')),
+       (['boot', 'clean', 'startedAt', 'v'], 'boot-one', False))
+    stop(_rp)                                   # SIGTERM: what systemd sends at a shutdown
+    eq('[run state] a stop it was told of is marked clean',
+       json.load(open(_rsfile)).get('clean'), True)
+    _rp, _rb, _rl = _rsstart('boot-two')
+    no_('[run state] after a clean stop, the next boot says nothing',
+        any('without' in l for l in _rl))
+    _rp.kill()                                  # the power goes: no signal at all
+    _rp.wait()
+    _rp, _rb, _rl = _rsstart('boot-three')
+    ok_('[run state] a server still running when its boot ended: "previous boot ended without '
+        'a shutdown (power?)", next to the banner (%r)' % (_rl[:3],),
+        any(l.startswith('  previous boot ended without a shutdown (power?)') for l in _rl[:2]))
+    _rp.kill()
+    _rp.wait()
+    _rp, _rb, _rl = _rsstart('boot-three')
+    ok_('[run state] ...and one killed within the same boot is said as the server\'s own run '
+        'ending, not the power (%r)' % (_rl[:3],),
+        any('previous run, this boot, ended without a clean stop' in l for l in _rl[:2])
+        and not any('power?' in l for l in _rl))
+    stop(_rp)
+finally:
+    shutil.rmtree(_rsdir, ignore_errors=True)
+
+
 # --- DoorDash's place popup, read while a card is screened -------------------
 #
 # The driver taps a stop on a DoorDash card before deciding and the phone shows
@@ -14986,6 +15058,7 @@ try:
 finally:
     shutil.rmtree(_inside, ignore_errors=True)
 shutil.rmtree(_ework, ignore_errors=True)
+
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
