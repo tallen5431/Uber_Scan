@@ -1348,6 +1348,16 @@ async function nucbox() {
   eq('...the drawn shape carries the reach as its own circle',
      JSON.stringify(MV.discShape(d6).also.map(function (c) { return c.lat; })),
      JSON.stringify([heldEnd.lat]));
+  // ...and an OFFER read while that order is in the car (server.js offerCard,
+  // 9 Nov): the offer line carries the same `after` beside every field the
+  // scanner sends, and Map view's preview (live.html, MV.discFor of the line)
+  // searches it in exactly the disc the server's search and its Took use.
+  var offerLine6 = Object.assign({ id: 'o6', pay: 9.5, minutes: 21, pickup: 'Fable Grill (77 Fable Ln)',
+                                   app: 'uber', screen: 'uber.offer', heldCard: null }, c6after);
+  eq('...an offer line carrying `after` is searched in the same disc as the hold taken from it',
+     JSON.stringify(MV.discFor(offerLine6)), JSON.stringify(d6));
+  eq('...and pins the door inside the reach from the held end, as the hold would',
+     (MV.pickInDisc(hits6, MV.discFor(offerLine6), plan6).at || {}).lat, door6.lat);
   eq('...an add-on keeps its own rule (its trip\'s disc grown), never the reach',
      MV.discFor(Object.assign({}, c6after, { addon: true }), d94).also, undefined);
   eq('...a card of no yardstick is the sixty miles, with no reach beside it',

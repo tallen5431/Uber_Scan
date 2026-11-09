@@ -411,7 +411,12 @@ all:
 
 * **Search.** Each place is searched inside its card's **disc** — where the
   car was when that card came up (its GPS fix), out to the card's own
-  distance plus half a mile — for up to ten candidates. A pin is used only if
+  distance plus half a mile — and, for a card read or taken while another
+  order is in the car, the same distance round where that order ends too
+  (its pinned door, or its area): such a card's miles may start there. The
+  rig searches an offer's places the same way before ✓ Took, and the places
+  report rebuilds those circles from the orders taken and not yet put down
+  when the card came up. Up to ten candidates; a pin is used only if
   exactly one candidate is inside the disc, or every one inside is the same
   place, and only from a list that did not stop at ten: a cut list cannot
   show there is only one ("no pin for Starbucks — too many to be sure · the

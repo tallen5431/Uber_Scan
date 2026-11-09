@@ -2111,6 +2111,84 @@ contradicts)'.
 
 **The places report asked a DoorDash pickup by its store's name and never by the door its card printed (the Open entry of 7 Nov, (4); 9 Nov 2026).** tools/places_report.js placed every row by `row.pickup`, and on a DoorDash stops card that is the store's NAME: the door printed under it (`pickupLine`; `stores`, the parser's `places`/`placeDoors`, on a card with two stores or more) was never read. So a DoorDash pickup was placed only where `MV.pickPlace` found a feature with the same name words, alone in the disc — and a one-leg card sets no radius, so the disc is sixty miles, where a chain's name is every branch and OSM's "Utopian Bowl" is not "Utopian Bowl Kitchen". The rig searches the printed door first (server.js `searchCardEarly`, `pickupAsks`). Now the report does, in the rig's order: `printedDoor` (the row's `pickupLine`, else the door its stores list beside the store it names, Assemble `sameStore`), then `placeRow`: the door through `placePickup` at door level in the card's disc with every retry, the store's name beside it for the street printed short (NbxSearch.place `store`, `MV.pickStoreAlong`, a 'name'-level point) only after the door refused; no point from it, the name alone as the report always asked it (pickPlace, one place of that name), so nothing placed before is lost; neither, the door's area, band or refusal, and the door's refusal is what is counted (`asked` says which text placed it; the band's road questions are spent only then). **Measured on invented stores, not on the record** (a scratch simulation, 400 stores round open water, 1000 DoorDash rows, the card's fix within 3 mi, 45% one-leg; the NucBox holding the door's number for 60% of stores, OSM's name the card's exact words for 50%, 40% a chain): points 244 → 657 (+413), none lost, none moved, none wrong against the invented truth; 548 by the door, 109 by the name; 343 more an approximate area beside the door's refusal (the street found inside the disc), counted at their level. The gain is the mix's: with doors held for 30% and exact names 80%, 682 → 786 (+104); with doors 80% and names 30%, 114 → 870 (+756), the four the name had put on a chain's wrong branch moved to the door. The Method tab says the rule. Tests: tests/placesreport.test.js `[dd door]` (the door from `pickupLine`, the stores list and the parser's lists, and none from a card that printed no door or a line that is no door; a name a word short refused by name and placed by its door with the store's name handed beside it; a door not held and a name that is one place, by the name; neither, the door's refusal in its words; a chain's name every branch and its door one; a row with no printed door placed exactly as before).
 
+**An offer read with an order in the car was searched from the car alone; it gets the held orders' `also` circles now, on the rig and in the report (the Open entry of 7 Nov, (5); 9 Nov 2026).** The one real reach miss: an offer shown while another order is held may print miles that start at THAT order's end (the 29 Oct shift's #6), and the `also` circles that cure it (MV.afterParts round each held end, the card's miles + SLACK_MI + the end's `widen`) were put on a HELD order's card only (server.js `setAfter` at the Took, `cardForSearch`, `heldDisc`) — never on the offer before its Took (`searchCardEarly`, `offerPin`, Map view's preview), nor in the places report, whose rows carry no `after`. server.js `offerAfter`/`offerCard` give the offer the circles its Took would: `afterOf` of every order in the car when it is read, its own order aside (`heldCard`), at most MV.AFTER_MAX — in its pickup and dropoff search, the on-time hint's pins, and on the offer line itself (`after`, read afresh at every reading, absent with nothing held), which live.html's preview hands to MV.discFor as it is, so the preview searches and draws the same union the server searched and the hold will. The places report rebuilds `after` (`heldEndsOf`, `afterFor`) from the orders TAKEN and not yet put down when the card was first seen: each one's end the GPS at its drop where the GPS, the app's screen, a GPS-timed press or a GPS finish put it down (`widen` AFTER_GPS_WIDEN_MI, the rig's AGREE_MI — chosen, not measured; an untimed Drop press is no position), else its dropoff placed by the same chain (a door `widen` 0, an area its spread up to AREA_MI) — the rig's endAnchor. **Measured on invented geometry, the reachsim way** (10,000 stacked offers: the held end 0.5–8 mi crow from the car, the new store 0.3–5 road mi past it, trip 1–10 mi, road 1.3× crow): stores outside the disc 1,521 (15.2%) → 0. With an invented NucBox (the store's own door held 70% of the time, a door of the same text somewhere within 15 mi of the car 30%), through the real pickInDisc in the bounded box: right pins 4,761 → 5,601 (944 new; 104 lost to "several answers" where the decoy came inside the union too), wrong pins 630 → 589 — 101 gone (the true door now inside as well, so "several"), and **60 new wrong pins** (0.6%): the store's own door not on the NucBox and the same-text decoy inside the new circle only. That is the risk any circle of that size carries, the one a held order's `also` already took; no rule was loosened — a pin still needs door level, or one place of that name, inside the union, and a card with nothing held is searched in exactly the disc it was (10,000 of 10,000 identical). Tests: rpi/test_server.py `[stacked]` (an order held ending at its pinned door, an offer read at the Square whose store is that door and whose 2.8 mi start there: the offer line carries the held end, its pickup asked in the box round that end's circle, no `pin: none` for it — the `[reach]` offer beside it, read with no end in the car, still refused 3.4 mi out); tests/mapview.test.js (an offer line with `after` is the hold's disc and pins the door in the reach); tests/placesreport.test.js `[stacked]` (the GPS end, an untimed press falling to the dropoff's door, no circle with neither; a card before the Took, after the drop or the order's own gets none; the store outside the box from the car alone placed at door level from the end; a door inside neither circle still no pin).
+
+**What "not inside the card's reach" is made of, and the one part of it that
+is the reach (7 Nov 2026).** The NucBox places report over 45 shift days:
+"Pickups placed: 1536 of 7984 (19.2%)", and its largest reason for the 6448
+unplaced, "not found inside the card's reach: 1342" (20.8% of the unplaced,
+16.8% of all), with 35 more "placed at area level [stood in for: not found
+inside the card's reach]". The rig's log that day: `pin: none offer pickup
+#… "not inside the card's reach" (Utopia at the…)`, `(CVS (1554 North…)`,
+and "too many answers" for a third. **Measured 7 Nov, acted on 9 Nov.**
+server.js `reachOf`/`discSet`/`reachCard`/`reachSaid` put, after the door on
+every `pin: none` line whose refusal had answers to measure (and on the
+search memo's verdict, a 📷 Snap's searches.json), how many answered and how
+many were the door asked, the nearest refused answer's crow miles from the
+disc's centre (and from an `also` circle's), the radius and how it was set
+(the card's miles + SLACK_MI, the 60 mi default and why the card set none,
+an add-on's trip, a rough fix's widening, `also` circles), the answer's
+Nominatim kind and name cut to 30 letters, the card's own `toPickupMiles`,
+and for an offer how many orders were in the car; for "too many answers"
+the count, the cut, how many inside and their spread:
+`... (Example Diner (1985…) - 3 answered, 3 at the door, the nearest 3.35 mi
+from the centre, radius 3.3 mi (card 2.8 mi + 0.5 slack; card says 0.9 mi
+to the pickup); nearest: place "1985, Cobb Parkway, Kennesaw, "` (invented,
+the suite's fake). The words in quotes are END_WHY's, unchanged; nothing
+that pins, files or decides reads `reach` (doorChain hands it as a fourth
+argument; offerPin and the status word never see it). **What the code says
+the 1342 are**, checked by reading and on invented data
+(tools/places_report.js's own `placePickup` and `coverage`, never edited):
+(1) *The report's label is four refusals, the rig's one.* Its WHY table
+prints 'none', 'nodoor', 'noplace' and 'together' all as "not found inside
+the card's reach"; the rig's END_WHY says it of 'none' only ('nodoor' is
+"street found, not that door"). Four invented pickups through `placePickup`:
+a door 4.35 mi out of a 3.9 mi disc, a door nothing answered, a store name
+OSM spells with a word fewer ("Utopian Bowl Kitchen" against "Utopian
+Bowl") in a 60 mi disc, and a street found without its number — the first
+three all counted under the label, the fourth placed "at area level [stood
+in for]" it. One of the four is the reach. (2) *A bounded search cannot see
+far.* Every question is `bounded=1` in the disc's box, so an answer outside
+the circle comes back only from the box's corners — 21.5% of its area, out
+to 1.41 radii; anything farther is "nothing answered", the same line as a
+door the NucBox does not hold. (3) *An Uber card with both legs or a printed
+total cannot be too small for its pickup.* Its `miles` is the approach and
+the trip summed (`toPickupMiles` is the approach split out of that same
+sum, offer-parser.js `toPickup`), so the radius is at least the approach +
+0.5 mi, and a crow distance is never longer than the road's: the pickup lies
+inside unless the fix is more than 0.5 mi plus the whole trip from where
+Uber measured — and the fix gate's 20 s staleness at 60 mph is 0.33 mi.
+10,000 invented such cards (approach 0.3–8 mi, trip 1–12, road 1.3× crow):
+0 outside, 0 with the fix 0.33 mi off. So "Uber's miles are trip miles, the
+disc is too small when the car is far from the store" is wrong for every
+card that sets a radius. (4) *A card that sets none is searched in sixty
+miles.* DoorDash's one-leg cards ('shape', 528 of the week's 1,166) and
+Early look (27) get BOX_MILES: nothing is outside that. And the report asks
+such a pickup by the store's NAME — it reads `row.pickup`, never
+`pickupLine` — where `MV.pickPlace` refuses 'noplace' unless OSM holds a
+feature with the same words in the same number (`placeNamed`, one slip):
+reach plays no part, the label says it did. (5) *The one real reach miss: a
+card whose miles do not start at the car.* An offer read while an order is
+held may print miles from that order's end (the 29 Oct shift's #6, the entry
+below); the `also` circles that cure it are put on a HELD order's card only
+(`heldDisc` via `cardForSearch`), never on an offer's (`earlyDoor`,
+`searchCardEarly`) nor in the report, whose rows carry no `after`. 10,000
+invented stacked offers (the held door 0.5–8 mi crow from the car, approach
+0.3–5 mi, trip 1–10): 1,506 (15.1%) outside the disc, and only 521 of those
+answered by the bounded box at all — the other 985 read "nothing answered".
+**The fix, shipped 9 Nov:** (a), (b) and (c), each Done above: "Four
+refusals were one label", "An offer read with an order in the car" and
+"The places report asked a DoorDash pickup".
+What settles it still: the next shift's `pin: none` lines, counted as nothing
+answered / the door found outside / orders in the car. Tests:
+rpi/test_server.py `[reach]` (the functions over invented answers: a door
+past the edge, nothing answered, the street without its number, a cut list's
+spread, two that disagree, nothing for a pin, a 'NucBox down' or no disc,
+every way a radius is set, the name's cut, the tail as said; an offer
+pickup's line through the real server and the fake NucBox; offerPin and the
+pickups' status word never read it) and `[pin said]`'s three lines with the
+tail.
+
 ### The GPS
 
 **Every position the rig kept was two bare numbers, and `keepPlaces: false`
@@ -4529,86 +4607,6 @@ and `keepPlaces: false` drops it (Done, "The GPS").
 
 None of these are bugs on the road today. They are things worth doing that
 nobody has done, listed so they are not rediscovered as news.
-
-**What "not inside the card's reach" is made of, and the one part of it that
-is the reach (7 Nov 2026).** The NucBox places report over 45 shift days:
-"Pickups placed: 1536 of 7984 (19.2%)", and its largest reason for the 6448
-unplaced, "not found inside the card's reach: 1342" (20.8% of the unplaced,
-16.8% of all), with 35 more "placed at area level [stood in for: not found
-inside the card's reach]". The rig's log that day: `pin: none offer pickup
-#… "not inside the card's reach" (Utopia at the…)`, `(CVS (1554 North…)`,
-and "too many answers" for a third. **Measured now, not yet acted on.**
-server.js `reachOf`/`discSet`/`reachCard`/`reachSaid` put, after the door on
-every `pin: none` line whose refusal had answers to measure (and on the
-search memo's verdict, a 📷 Snap's searches.json), how many answered and how
-many were the door asked, the nearest refused answer's crow miles from the
-disc's centre (and from an `also` circle's), the radius and how it was set
-(the card's miles + SLACK_MI, the 60 mi default and why the card set none,
-an add-on's trip, a rough fix's widening, `also` circles), the answer's
-Nominatim kind and name cut to 30 letters, the card's own `toPickupMiles`,
-and for an offer how many orders were in the car; for "too many answers"
-the count, the cut, how many inside and their spread:
-`... (Example Diner (1985…) - 3 answered, 3 at the door, the nearest 3.35 mi
-from the centre, radius 3.3 mi (card 2.8 mi + 0.5 slack; card says 0.9 mi
-to the pickup); nearest: place "1985, Cobb Parkway, Kennesaw, "` (invented,
-the suite's fake). The words in quotes are END_WHY's, unchanged; nothing
-that pins, files or decides reads `reach` (doorChain hands it as a fourth
-argument; offerPin and the status word never see it). **What the code says
-the 1342 are**, checked by reading and on invented data
-(tools/places_report.js's own `placePickup` and `coverage`, never edited):
-(1) *The report's label is four refusals, the rig's one.* Its WHY table
-prints 'none', 'nodoor', 'noplace' and 'together' all as "not found inside
-the card's reach"; the rig's END_WHY says it of 'none' only ('nodoor' is
-"street found, not that door"). Four invented pickups through `placePickup`:
-a door 4.35 mi out of a 3.9 mi disc, a door nothing answered, a store name
-OSM spells with a word fewer ("Utopian Bowl Kitchen" against "Utopian
-Bowl") in a 60 mi disc, and a street found without its number — the first
-three all counted under the label, the fourth placed "at area level [stood
-in for]" it. One of the four is the reach. (2) *A bounded search cannot see
-far.* Every question is `bounded=1` in the disc's box, so an answer outside
-the circle comes back only from the box's corners — 21.5% of its area, out
-to 1.41 radii; anything farther is "nothing answered", the same line as a
-door the NucBox does not hold. (3) *An Uber card with both legs or a printed
-total cannot be too small for its pickup.* Its `miles` is the approach and
-the trip summed (`toPickupMiles` is the approach split out of that same
-sum, offer-parser.js `toPickup`), so the radius is at least the approach +
-0.5 mi, and a crow distance is never longer than the road's: the pickup lies
-inside unless the fix is more than 0.5 mi plus the whole trip from where
-Uber measured — and the fix gate's 20 s staleness at 60 mph is 0.33 mi.
-10,000 invented such cards (approach 0.3–8 mi, trip 1–12, road 1.3× crow):
-0 outside, 0 with the fix 0.33 mi off. So "Uber's miles are trip miles, the
-disc is too small when the car is far from the store" is wrong for every
-card that sets a radius. (4) *A card that sets none is searched in sixty
-miles.* DoorDash's one-leg cards ('shape', 528 of the week's 1,166) and
-Early look (27) get BOX_MILES: nothing is outside that. And the report asks
-such a pickup by the store's NAME — it reads `row.pickup`, never
-`pickupLine` — where `MV.pickPlace` refuses 'noplace' unless OSM holds a
-feature with the same words in the same number (`placeNamed`, one slip):
-reach plays no part, the label says it did. (5) *The one real reach miss: a
-card whose miles do not start at the car.* An offer read while an order is
-held may print miles from that order's end (the 29 Oct shift's #6, the entry
-below); the `also` circles that cure it are put on a HELD order's card only
-(`heldDisc` via `cardForSearch`), never on an offer's (`earlyDoor`,
-`searchCardEarly`) nor in the report, whose rows carry no `after`. 10,000
-invented stacked offers (the held door 0.5–8 mi crow from the car, approach
-0.3–5 mi, trip 1–10): 1,506 (15.1%) outside the disc, and only 521 of those
-answered by the bounded box at all — the other 985 read "nothing answered".
-**Proposed fix, not shipped:** (a) and (c) shipped 9 Nov — Done, "Four
-refusals were one label" and "The places report asked a DoorDash pickup";
-(b) give an offer read with orders in
-the car the `also` circles a held order's card gets (`afterOf` of each
-order held at the card's read, in `searchCardEarly`), and in the report
-rebuild `after` from the orders taken and not yet dropped at the offer's
-`firstAt`.
-What settles it: the next shift's `pin: none` lines, counted as nothing
-answered / the door found outside / orders in the car. Tests:
-rpi/test_server.py `[reach]` (the functions over invented answers: a door
-past the edge, nothing answered, the street without its number, a cut list's
-spread, two that disagree, nothing for a pin, a 'NucBox down' or no disc,
-every way a radius is set, the name's cut, the tail as said; an offer
-pickup's line through the real server and the fake NucBox; offerPin and the
-pickups' status word never read it) and `[pin said]`'s three lines with the
-tail.
 
 **A card taken with another order in the car is searched from that order's
 end too (the owner's 29 Oct shift, 30 Oct 2026).** Order #6 was taken while

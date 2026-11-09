@@ -255,6 +255,71 @@ function nbx() {
   eq('[dd door] a chain: its name is every branch, its printed door is one place',
      [ddChainWas.at, ddChainWas.why, !!ddChain.at, ddChain.level], [null, 'several', true, 'door']);
   ok('[dd door] ...the branch at that door', ddChain.at && MV.crowMiles(ddChain.at, off(-0.03, 0.02)) < 0.01);
+  /* --- a card read with an order in the car (heldEndsOf, afterFor) ---
+   *
+   * Its miles may start at that order's end (the 29 Oct shift's #6). The
+   * report rebuilds the `also` circles the rig gives it from the orders taken
+   * and not yet put down when the card was first seen. Invented: an order
+   * held from 20:00 to 20:40 ending ~5 mi north of the fix, a card at 20:10
+   * whose store is 0.7 mi past that end, its own miles 2.8 (a 3.3 mi disc). */
+  var stEnd = off(0.072, 0);                       // ~5 mi north
+  var stStore = off(0.072 + 0.01, 0);              // ~0.7 mi past it
+  var stAnswers = {
+    '410 Pellmore Rd': [hit('410, Pellmore Road, Faketown', 'building', '', stStore)],
+    // ...and a door of the same number on a street of the same name, 9 mi
+    // the other way: inside neither circle, never pinned.
+    '18 Larch Row': [hit('18, Larch Row, Faketown', 'building', '', off(-0.13, 0))],
+    '7 Held Way': [hit('7, Held Way, Faketown', 'building', '', stEnd)],
+  };
+  var stNbx = new MV.NbxSearch({ gap: 0, fetch: function (u) {
+    var q = new URLSearchParams(u.split('?')[1] || '');
+    var list = (q.has('q') ? stAnswers[q.get('q')] : stAnswers[q.get('street')]) || [];
+    var b = (q.get('viewbox') || '').split(',').map(Number);
+    if (b.length === 4) {
+      list = list.filter(function (h) { return h.lon >= b[0] && h.lon <= b[2] && h.lat <= b[1] && h.lat >= b[3]; });
+    }
+    return Promise.resolve({ ok: true, status: 200, json: function () {
+      return Promise.resolve({ ok: true, cutAt: null, hits: list });
+    } });
+  } });
+  var heldRow = card({ id: 'st-held', at: at(1, 20), firstAt: at(1, 20), dropoff: '7 Held Way, Faketown', miles: 6 });
+  var stTaken = [{ id: 'st-held', tookAt: at(1, 20), endedAt: at(1, 20, 40), by: 'gps' },
+               { id: 'st-gone', tookAt: at(1, 18), endedAt: at(1, 19), by: 'gps' }];
+  var stById = { 'st-held': heldRow };
+  // The GPS at the drop for the order put down by the GPS...
+  var stGps = {};
+  stGps['st-held@' + at(1, 20, 40)] = stEnd;
+  var ends = await P.heldEndsOf(stNbx, stTaken, stById, stGps, false, null);
+  eq('[stacked] an order put down by the GPS ends where the GPS was at its drop, within the rig\'s one place',
+     ends[0].anchor, { lat: stEnd.lat, lon: stEnd.lon, widen: P.AFTER_GPS_WIDEN_MI, from: 'gps' });
+  eq('[stacked] ...and one with no position and no dropoff on record gives no circle', ends[1].anchor, null);
+  // ...else its dropoff placed at door level (an untimed Drop press is no position).
+  var stGps2 = {};
+  stGps2['st-held@' + at(1, 20, 40)] = off(0.2, 0.2);
+  var ends2 = await P.heldEndsOf(stNbx, [Object.assign({}, stTaken[0], { by: 'drop' })], stById, stGps2, false, null);
+  eq('[stacked] an untimed Drop press is no position: the dropoff\'s door is the end, widened by nothing',
+     ends2[0].anchor, { lat: stEnd.lat, lon: stEnd.lon, widen: 0, from: 'pin' });
+  var stRow = card({ id: 'st-offer', at: at(1, 20, 10), firstAt: at(1, 20, 10), miles: 2.8,
+                     pickup: 'Fernbrook Grill (410 Pellmore Rd)' });
+  var stAfter = P.afterFor(stRow, ends);
+  eq('[stacked] a card first seen while that order was in the car gets its end as a circle',
+     stAfter, [{ of: 'st-held', lat: stEnd.lat, lon: stEnd.lon, widen: P.AFTER_GPS_WIDEN_MI, from: 'gps' }]);
+  eq('[stacked] ...and none for a card seen before its Took, after its drop, or the order\'s own',
+     [P.afterFor(Object.assign({}, stRow, { firstAt: at(1, 19, 50) }), ends).length,
+      P.afterFor(Object.assign({}, stRow, { firstAt: at(1, 20, 50) }), ends).length,
+      P.afterFor(Object.assign({}, stRow, { id: 'st-held' }), ends).length], [0, 0, 0]);
+  var stWas = await P.placeRow(stNbx, stRow, false);
+  var stNow = await P.placeRow(stNbx, Object.assign({}, stRow, { after: stAfter }), false);
+  eq('[stacked] from the car alone the store was outside the box: no such door in it',
+     [stWas.at, stWas.said], [null, "no such door in the reach's box"]);
+  eq('[stacked] from the held order\'s end too, the door is placed, at door level',
+     [!!stNow.at, stNow.level], [true, 'door']);
+  ok('[stacked] ...at the store', stNow.at && MV.crowMiles(stNow.at, stStore) < 0.01);
+  var stDecoy = await P.placeRow(stNbx, Object.assign({}, stRow, { pickup: 'Larch Deli (18 Larch Row)',
+                                                                    after: stAfter }), false);
+  eq('[stacked] a door inside neither circle is still no pin: the circles widen where a door may be, not '
+     + 'what a pin needs', stDecoy.at, null);
+
   var ddUber = await P.placeRow(ddNbx, card({ pickup: 'Fernbrook Grill' }), false);
   eq('[dd door] a row with no printed door is placed exactly as before',
      JSON.stringify(ddUber), JSON.stringify(await P.placePickup(ddNbx, 'Fernbrook Grill', card({ pickup: 'Fernbrook Grill' }), false)));

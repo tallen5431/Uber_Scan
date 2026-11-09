@@ -14220,6 +14220,103 @@ _plsrc = open(os.path.join(ROOT, 'server.js'), encoding='utf-8').read()
 ok_('[pin said] the log line never stands in a search\'s way: both sayers swallow their own '
     'faults', _plsrc.count('} catch (e) { /* the log only */ }') == 2)
 
+# --- [stacked] an offer read with an order in the car: the held end's circle --
+#
+# An offer shown while an order is held may print miles that start at THAT
+# order's end (the 29 Oct shift's #6). A held order taken beside another had
+# the `also` circle round that end (setAfter); an offer read before its Took
+# did not, so its pickup was searched from the car alone. server.js offerCard
+# now gives the offer the circles its Took would: here the held order ends at
+# "1985 Cobb Parkway" (pinned, 3.35 mi north of the Square), and an Uber offer
+# read at the Square whose store is at that same door and whose 2.8 mi start
+# there — its own disc 3.3 mi, the door outside it (the [reach] line above
+# refused it so, with no end in the car). Invented, the fake's own places.
+_stfake = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_stfake_base = 'http://127.0.0.1:%d' % json.loads(_stfake.stdout.readline())['port']
+_stdir = tempfile.mkdtemp()
+_stsay = os.path.join(_stdir, 'say.py')
+with open(_stsay, 'w') as _fh:
+    _fh.write(
+        'import json, os, time\n'
+        'd = os.path.dirname(os.path.abspath(__file__))\n'
+        'n = 0\n'
+        'end = time.time() + 600\n'
+        'while time.time() < end:\n'
+        '    p = os.path.join(d, "say-%d.json" % n)\n'
+        '    if not os.path.exists(p):\n'
+        '        time.sleep(0.05)\n'
+        '        continue\n'
+        '    for x in json.load(open(p)):\n'
+        '        print(json.dumps(x), flush=True)\n'
+        '    n += 1\n')
+_stj = os.path.join(_stdir, 'offers.jsonl')
+open(_stj, 'w').close()
+_stlog = []
+
+
+def _stasked(word):
+    return [a for a in json.loads(urllib.request.urlopen(
+        _stfake_base + '/__asked', timeout=5).read()) if word in a]
+
+
+def _stbox_n(q):
+    m = re.search(r'viewbox=([^&]+)', q)
+    return float(urllib.parse.unquote(m.group(1)).split(',')[1]) if m else None
+
+
+try:
+    _stp, _stb = _start_loud({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
+                              'SCANNER_ARGS': _stsay, 'NUCBOX_SEARCH': _stfake_base,
+                              'NUCBOX_TIMEOUT_MS': '800'}, _stj)
+    threading.Thread(target=lambda: [_stlog.append(l.rstrip('\n')) for l in _stp.stdout],
+                     daemon=True).start()
+    try:
+        _atook(_stb, 'st-held', _COBB)
+        _sth = _settled(_stb)
+        eq('[stacked] the order in the car ends at its door, pinned', _sth.get('endPinned'), True)
+        with open(os.path.join(_stdir, 'say-0.json.tmp'), 'w') as _fh:
+            json.dump([{'offer': dict(_SQ, id='st-offer', pay=7.0, minutes=15.0,
+                                      billedMinutes=15.0, miles=2.8, toPickupMiles=0.9,
+                                      legs=2, cost=0.5, app='uber', screen='uber.offer',
+                                      pickup='Example Diner (1985 Cobb Parkway)')}], _fh)
+        os.rename(os.path.join(_stdir, 'say-0.json.tmp'), os.path.join(_stdir, 'say-0.json'))
+        _sto = {}
+        for _ in range(80):
+            _sto = get(_stb, '/api/status').get('offer') or {}
+            if _sto.get('id') == 'st-offer':
+                break
+            time.sleep(0.05)
+        _sta = _sto.get('after') or []
+        eq('[stacked] the offer line carries where the order in the car ends, as its Took would',
+           [(a.get('of'), a.get('from'), a.get('widen')) for a in _sta],
+           [(_sth.get('holdId'), 'pin', 0)])
+        # The store's door asked in the box of the disc AND the circle round
+        # the held end: its north edge past the end's 34.00 by the card's
+        # miles and the slack, where the car's own disc stops at 34.01.
+        _stq = []
+        for _ in range(80):
+            _stq = [q for q in _stasked('street=1985%20Cobb%20Parkway') if (_stbox_n(q) or 0) > 34.04]
+            if _stq:
+                break
+            time.sleep(0.05)
+        ok_('[stacked] ...its pickup asked in the box round the held end\'s circle too (%r)'
+            % [_stbox_n(q) for q in _stasked('street=1985%20Cobb%20Parkway')], bool(_stq))
+        time.sleep(0.6)
+        eq('[stacked] ...and not refused: the door is inside the circle round the held end, where '
+           'the card\'s miles start',
+           [l for l in _stlog if l.startswith('pin: none') and '#st-offer' in l], [])
+    finally:
+        stop(_stp)
+finally:
+    _stfake.kill()
+    shutil.rmtree(_stdir, ignore_errors=True)
+_st_src = _plsrc[_plsrc.index('\nfunction searchCardEarly('):]
+_st_src = _st_src[:_st_src.index('\n}\n')]
+ok_('[stacked] the offer\'s own search and the on-time hint search the card with the held ends',
+    'MV.discFor(card)' in _st_src and 'var card = offerCard(offer, now);' in _st_src
+    and 'MV.discFor(offerCard(offer, Date.now()))' in _plsrc)
+
 # --- [reach] what a refusal measured, the functions themselves --------------
 #
 # server.js reachOf / discSet / reachCard / reachSaid, taken out of its source

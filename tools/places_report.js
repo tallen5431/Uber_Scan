@@ -536,6 +536,83 @@ async function placeDropoff(nbx, text, card, streets, ctx) {
   return r && r.at && !(r.spread > MV.AREA_MI) ? { lat: r.at.lat, lon: r.at.lon } : null;
 }
 
+/* --- a card read with an order in the car, searched from that order's end --
+ *
+ * THE FAULT (AUDITS.md, the Open entry of 7 Nov, (5)): the one real reach
+ * miss. An offer shown while another order is held may print miles that
+ * start at THAT order's end, not at the car (the owner's 29 Oct shift, #6:
+ * 4.3 mi from #5's door). The rig gives a held order taken beside another
+ * the `also` circles that cure it (MV.afterParts, round each such end the
+ * card's miles and SLACK_MI and the end's own `widen`), and since 9 Nov an
+ * offer read while orders are held the same (server.js offerCard). This
+ * report's rows carry no `after`, so a stacked offer was searched from the
+ * car alone: 10,000 invented stacked offers, 15.1% of their stores outside
+ * the disc, most of those "no such door in the reach's box" because the
+ * bounded box never reached them.
+ *
+ * So the report rebuilds `after` the rig's way, from the record: every order
+ * TAKEN (the journal's `taken`, takenRuns) whose Took was before the card was
+ * first seen and which was not yet put down then, the card's own order
+ * aside — its end as one anchor (MV.endAnchor's shape, {lat, lon, widen,
+ * from}), at most MV.AFTER_MAX. The anchor is where the order ENDED:
+ *
+ *   - the GPS at its drop, for an order the GPS or the app's screen put down
+ *     at the door (or a press the GPS log timed, a finish the GPS made):
+ *     `widen` AFTER_GPS_WIDEN_MI, from 'gps' — the car at the door, give or
+ *     take the gate's error and where it stopped (CHOSEN, NOT MEASURED: the
+ *     rig's AGREE_MI, its "one place" for two pins); an untimed Drop press is
+ *     no position, as timePresses says;
+ *   - else its dropoff placed by the same chain as a pickup (placePickup in
+ *     its own card's disc): a door or a corner `widen` 0 ('pin'), an area
+ *     its spread when that is a general area (MV.AREA_MI or less: 'area'),
+ *     exactly the rig's endAnchor over an end pin or an end area.
+ *
+ * An order with neither gives no circle (MV.endAnchor says why not a disc).
+ * A pin still needs door level, or one place of that name, INSIDE the union
+ * of circles — the circles widen where a door may be, never what a pin
+ * needs. Customers' doors: placed only to anchor, never written anywhere
+ * (the answer cache aside, as for every dropoff). */
+var AFTER_GPS_WIDEN_MI = MV.AGREE_MI;
+var GPS_ANCHOR_BY = ['gps', 'screen', GPS_TIMED].concat(FINISHED);
+
+/* Each taken order's end as an anchor: [{id, tookAt, endedAt, anchor}],
+ * anchor null where neither the GPS nor its dropoff gives one. `gpsPos` is
+ * main's, keyed id@endedAt. */
+async function heldEndsOf(nbx, taken, byId, gpsPos, streets, region) {
+  var out = [];
+  for (var i = 0; i < (taken || []).length; i++) {
+    var t = taken[i];
+    if (!t || typeof t.tookAt !== 'number' || typeof t.endedAt !== 'number' || !(t.endedAt > t.tookAt)) continue;
+    var anchor = null;
+    var g = gpsPos && gpsPos[t.id + '@' + t.endedAt];
+    if (g && GPS_ANCHOR_BY.indexOf(t.by || 'drop') >= 0) {
+      anchor = { lat: g.lat, lon: g.lon, widen: AFTER_GPS_WIDEN_MI, from: 'gps' };
+    } else if (byId[t.id] && typeof byId[t.id].dropoff === 'string') {
+      var row = byId[t.id];
+      var r = await placePickup(nbx, row.dropoff, row, streets, { region: region });
+      if (r && r.at) {
+        anchor = MV.endAnchor(isPoint(r) ? { pin: r.at }
+          : gridOk(r) ? { area: { lat: r.at.lat, lon: r.at.lon, miles: r.spread } } : null);
+      }
+    }
+    out.push({ id: t.id, tookAt: t.tookAt, endedAt: t.endedAt, anchor: anchor });
+  }
+  return out;
+}
+
+/* The `after` a row's card gets: the anchors of the orders in the car when it
+ * was first seen (seenAt), its own order aside, the earliest-taken first,
+ * at most MV.AFTER_MAX. [] when none was held, so its disc is as before. */
+function afterFor(row, held) {
+  var when = row ? seenAt(row) : null;
+  if (typeof when !== 'number' || !isFinite(when)) return [];
+  return (held || []).filter(function (h) {
+    return h.anchor && h.id !== row.id && h.tookAt < when && when < h.endedAt;
+  }).sort(function (a, b) { return a.tookAt - b.tookAt; }).slice(0, MV.AFTER_MAX).map(function (h) {
+    return Object.assign({ of: h.id }, h.anchor);
+  });
+}
+
 /* PLACES TAKE A POINT, AND AN AREA ONLY WHERE IT IS ONE STORE'S. A place is
  * a store at a location, and an area is not a location: so an approximate
  * placement joins Places only (a) within PLACE_SAME_MI (AGREE_MI) of a point
@@ -4581,29 +4658,6 @@ async function main(argv) {
               + ' mi wider each way)' : 'none (no good card fix in the record)'));
   var ctx = { region: region, road: settings.route, budget: { left: o.roadAsks } };
 
-  // Every pickup the rig stands behind, asked once per (text, card disc box).
-  var placed = new Array(offers.length);
-  var memo = new Map();
-  var todo = 0, done = 0;
-  offers.forEach(function (row) { if (counted(row) && row.pickup) todo += 1; });
-  for (var i = 0; i < offers.length; i++) {
-    var row = offers[i];
-    if (!counted(row) || !row.pickup) continue;
-    var disc = MV.discFor(row);
-    var spec = settings.route ? MV.bandTarget(row, 'pickup') : null;
-    // (Its printed door in the key as well: one store's name with two doors
-    // is two questions — placeRow asks the door first.)
-    var k = (printedDoor(row) || '') + '\u0001' + row.pickup + '\u0000' + (disc ? MV.discBox(disc) + '/' + disc.miles.toFixed(2)
-                                          + '/' + disc.at.lat.toFixed(3) + ',' + disc.at.lon.toFixed(3) : '-')
-      + (spec ? '/' + spec.miles + (spec.upper ? '+' : '') : '');
-    if (!memo.has(k)) memo.set(k, await placeRow(nbx, row, !!st.base, ctx));
-    placed[i] = memo.get(k);
-    done += 1;
-    if (done % 200 === 0) console.error('  pickups ' + done + ' of ' + todo + ' (' + cache.fresh + ' asked, '
-                                        + cache.hits + ' from the cache)');
-  }
-  saveCache();
-
   // The GPS log, once: presses timed, drops placed, spells, dead miles.
   var taken = Array.isArray(body.taken) ? body.taken : [];
   var spanTimes = offers.filter(counted).map(seenAt).filter(isFinite);
@@ -4637,6 +4691,43 @@ async function main(argv) {
     if (at) dropPins[key] = at;
   }
   saveCache();
+  // Where each taken order ended, for the cards read while it was in the car
+  // (heldEndsOf, afterFor): the GPS at its drop, else its dropoff placed.
+  var heldEnds = await heldEndsOf(nbx, taken, byId, gpsPos, !!st.base, region);
+  saveCache();
+
+  // Every pickup the rig stands behind, asked once per (text, card disc box).
+  var placed = new Array(offers.length);
+  var memo = new Map();
+  var todo = 0, done = 0, inCar = 0;
+  offers.forEach(function (row) { if (counted(row) && row.pickup) todo += 1; });
+  for (var i = 0; i < offers.length; i++) {
+    var row = offers[i];
+    if (!counted(row) || !row.pickup) continue;
+    // ...searched from the ends of the orders in the car when it came up as
+    // well (afterFor: the `also` circles the rig gives such a card).
+    var after = afterFor(row, heldEnds);
+    if (after.length) inCar += 1;
+    var card = after.length ? Object.assign({}, row, { after: after }) : row;
+    var disc = MV.discFor(card);
+    var spec = settings.route ? MV.bandTarget(row, 'pickup') : null;
+    // (Its printed door in the key as well: one store's name with two doors
+    // is two questions — placeRow asks the door first.)
+    var k = (printedDoor(row) || '') + '\u0001' + row.pickup + '\u0000' + (disc ? MV.discBox(disc) + '/' + disc.miles.toFixed(2)
+                                          + '/' + disc.at.lat.toFixed(3) + ',' + disc.at.lon.toFixed(3) : '-')
+      + (spec ? '/' + spec.miles + (spec.upper ? '+' : '') : '')
+      + (after.length ? '/also ' + MV.discBox(disc) + ' ' + after.map(function (e) {
+        return e.lat.toFixed(4) + ',' + e.lon.toFixed(4) + '+' + e.widen;
+      }).join(';') : '');
+    if (!memo.has(k)) memo.set(k, await placeRow(nbx, card, !!st.base, ctx));
+    placed[i] = memo.get(k);
+    done += 1;
+    if (done % 200 === 0) console.error('  pickups ' + done + ' of ' + todo + ' (' + cache.fresh + ' asked, '
+                                        + cache.hits + ' from the cache)');
+  }
+  saveCache();
+  console.log('offers read with an order in the car, searched from its end too: ' + inCar);
+
   // A NucBox down for the run: nothing written, so the nightly keeps the
   // report it has (review, 27 Oct: it used to write one with the offers
   // unplaced and swap it in).
@@ -4726,7 +4817,8 @@ async function main(argv) {
 module.exports = {
   MIN_N: MIN_N, DROP_MIN_N: DROP_MIN_N, GRID_MI: GRID_MI, NEXT_GAP_MIN: NEXT_GAP_MIN, VIEWS: VIEWS,
   pickupKind: pickupKind, placePickup: placePickup, placeDropoff: placeDropoff, storeLabel: storeLabel,
-  printedDoor: printedDoor, placeRow: placeRow,
+  printedDoor: printedDoor, placeRow: placeRow, heldEndsOf: heldEndsOf, afterFor: afterFor,
+  AFTER_GPS_WIDEN_MI: AFTER_GPS_WIDEN_MI,
   placesOf: placesOf, cellOf: cellOf, bootCI: bootCI, cells: cells, coverage: coverage,
   nextTake: nextTake, timelineOf: timelineOf, tripsOf: tripsOf, dropTable: dropTable,
   analyse: analyse, summary: summary, testLine: testLine, html: html, csvOf: csvOf, dropCsv: dropCsv,

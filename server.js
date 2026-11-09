@@ -558,6 +558,14 @@ function startScanner() {
           } else if (!sameCard && carriedNow) {
             read.offer.heldCard = holdIdOf(carriedNow);
           }
+          // ...and where the orders in the car end (offerAfter): Map view's
+          // preview searches this card's places from those ends too, through
+          // MV.discFor on the offer line, as searchCardEarly does here. Read
+          // afresh at every reading, so a held end pinned since the last one
+          // is a circle now. Absent with nothing held, so every other offer
+          // line is the shape it was; never on a hold (cardOf's fields).
+          var offerEnds = offerAfter(read.offer, Date.now());
+          if (offerEnds.length) read.offer.after = offerEnds; else delete read.offer.after;
           // ...and DoorDash's map label for a card that printed only "Customer
           // dropoff" (dropoffGuessOf; the owner, 27 Oct), kept as the offer's
           // `dropoffGuess` and carried across re-reads like the tap above.
@@ -1302,6 +1310,37 @@ function cardForSearch(h) {
   var c = h && h.card || null;
   if (!c || !Array.isArray(h.after) || !h.after.length) return c;
   return Object.assign({}, c, { after: h.after });
+}
+
+/* ...AND AN OFFER READ WHILE ORDERS ARE HELD GETS THE SAME CIRCLES (9 Nov
+ * 2026; AUDITS.md, Done, "An offer read with an order in the car"). Its card
+ * may print miles that start at the held order's end, not at the car — the
+ * 29 Oct shift's #6 was such a card, and was cured only once TAKEN, when
+ * setAfter gave its hold `after`. Read before the Took, the same card was
+ * searched from the car alone (searchCardEarly, offerPin, Map view's
+ * preview): 10,000 invented stacked offers (the held door 0.5-8 mi from the
+ * car, the new store 0.3-5 road mi past it), 15.2% of their stores outside
+ * the disc, and every one inside once the held end's circle is added. So the
+ * offer's card carries the `after` its Took would set — afterOf of every
+ * order in the car when it is read, the card's own order aside (its card
+ * come back, `heldCard`), at most MV.AFTER_MAX — and MV.discFor adds the
+ * circles (afterParts). A pin still needs door level, or one place of that
+ * name, inside the union: the circles widen where a door may be, never what
+ * a pin needs. An order whose end is neither pinned nor kept as an area
+ * gives none (MV.endAnchor says why not a disc), and with nothing held the
+ * card is exactly cardOf's. */
+function offerAfter(offer, now) {
+  var inCar;
+  try { inCar = heldOrders(typeof now === 'number' ? now : Date.now()); } catch (e) { return []; }
+  return aftersOf(inCar.filter(function (h) {
+    return h.id !== offer.id && !(offer.heldCard && holdIdOf(h) === offer.heldCard);
+  }));
+}
+
+function offerCard(offer, now) {
+  var card = cardOf(offer);
+  var after = offer ? offerAfter(offer, now) : [];
+  return after.length ? Object.assign({}, card, { after: after }) : card;
 }
 
 // The orders a Took is held beside (`afterOf`, their holdIds, kept whether
@@ -7380,7 +7419,7 @@ function offerPin(offer, side) {
   if (on[side] !== undefined || on[side + 'Asking']) return on[side];
   var text = side === 'pickup' ? (offer.pickupLine || offer.pickup) : offer.dropoff;
   on[side + 'Asking'] = true;
-  earlyDoor(text, MV.discFor(cardOf(offer)), side === 'dropoff', function (r) {
+  earlyDoor(text, MV.discFor(offerCard(offer, Date.now())), side === 'dropoff', function (r) {
     on[side + 'Asking'] = false;
     on[side] = r && r.at ? { lat: r.at.lat, lon: r.at.lon } : null;
     onTimeAgain(offer);
@@ -7534,7 +7573,9 @@ function earlyDoor(text, disc, named, done, onlyIf, store) {
 function searchCardEarly(offer, now) {
   if (!NBX.search || !offer || typeof offer.id !== 'string') return;
   if (earlyCards.indexOf(offer.id) !== -1) return;
-  var disc = MV.discFor(cardOf(offer));
+  // (Its card with the held orders' ends, offerCard: searched from them too.)
+  var card = offerCard(offer, now);
+  var disc = MV.discFor(card);
   if (!disc) return;
   earlyCards = earlyCards.concat([offer.id]).slice(-EARLY_CARDS);
   // What each search found, said in the log when the NucBox was asked and
@@ -7552,9 +7593,9 @@ function searchCardEarly(offer, now) {
   // shared by every card that asks the same text in the same box.
   // ...and how many orders were in the car when the card was read: an offer
   // shown while one is held may print miles that start at THAT order's end
-  // (the 29 Oct shift's #6, MV.afterParts), and an offer's disc has no
-  // `also` circle for it — the one case where the reach itself is too small.
-  var card = cardOf(offer);
+  // (the 29 Oct shift's #6, MV.afterParts) — the one case where the reach
+  // itself was too small, and since 9 Nov the disc has an `also` circle
+  // round each such end that is placed (offerCard); the radius says them.
   var inCar = 0;
   try { inCar = heldOrders(typeof now === 'number' ? now : Date.now()).length; } catch (e) { inCar = 0; }
   var said = function (which, door) {
