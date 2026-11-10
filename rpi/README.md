@@ -9091,6 +9091,30 @@ was up; stop it (`sudo systemctl stop uberscan`) for the rig's own figures.
 A time budget (`--budget`, 150 s of reads by default) ends each cell early
 on a slow or hot Pi, and `n` says how many were taken. `--json` for a file.
 
+**What the rig's other work costs a read**, the same screens with the rest of
+the scanner running beside them:
+
+```sh
+sudo systemctl stop uberscan
+python3 tools/pi_bench.py --busy        # three runs of 40 s, ~2.5 min
+```
+
+Paired reads taken back to back by the scanner's own `Reader`, an Uber card
+then DoorDash's stops card (a new offer each, so its first read is rescued),
+with `MapLabels` asked after every DoorDash read (its label given as a store
+so it is never found: every 2 s, the worst case), `MapBands` once an offer,
+and a stand-in camera loop every 33 ms (the real motion gate, the live view
+by the real `write_snapshot`) whose every tick is timed. Three runs: the
+reads `alone`, then busy with the engines' gate off and on (`--slots`). Each
+says the Uber and DoorDash reads' median and p90 with how many gave the
+card's own answer, the loop's tick (median, p95, max, ticks a frame late),
+the health line's `time:` stages, and the gate's engines at once and waits.
+`--view screen` composes the phone view (15/s off the sensor frame) instead,
+`--no-label`, `--no-band`, `--no-spare`, `--no-pair` leave each out. Not
+niced, unlike the table — the stand-in is the camera loop — so stop the
+service first. Writes nothing in the repository (a temporary folder for the
+live view and the bands, removed after).
+
 If reads fail in the car but the preview looked fine, the usual causes are, in
 order: glare across the card, exposure too short (raise `--exposure`; below
 ~10000µs OLED dimming shows as dark bands), and focus (`--lens`, in dioptres —
@@ -9480,6 +9504,94 @@ process's, all its threads, as a share of one core over the window; the load
 is the one-minute average. The figures ride the `seen` row as `time` whether
 the line said them or not. The bookkeeping is a few clock reads and list
 appends a read: 3 µs on the development box against a 390 ms read.
+
+**One gate for every engine.** The 9 Nov shift (build 931c50c) put the read
+itself at `read 979–1526` ms median, against 392 ms for the same card on the
+bench with the service stopped, the process at 120–169% of a core and a load
+of 2.1–5.3. Every tesseract the rig runs had been given its thread alone —
+the paired frame, the rescue's two links started ahead, DoorDash's map label
+— and a DoorDash card's first read can ask for five at once on four cores.
+Now every engine call takes a slot first (`pipeline.OCR_SLOTS`, 4: one per
+core), ranked: a card read (the paired frames, a ⌖ or planner read), then a
+rescue link on a spare thread, then the map label, which besides reads only
+while fewer than two engines are (`LABEL_BELOW`: never beside a paired read
+in full flow). Neither lower rank is given a slot while a card read waits,
+and each gives it back after every engine call. A link the chain has let go
+of — the box's read found the payout, so the finder's read ahead of it will
+never be asked — is stopped at its next slot instead of read for nobody.
+Nothing about what is read or decided changes: tesseract gives one image one
+answer, and the chain's rules are untouched.
+
+Measured with `tools/pi_bench.py --busy` (below) on the development box,
+four cores like the Pi, a new card every 1–1.5 s so a DoorDash card's first
+read is always the rescue, 40 s a setting, 30 rescues each:
+
+| slots         | rescue read | Uber read | DD remembered crop | loop tick p95 |
+|---------------|-------------|-----------|--------------------|---------------|
+| off (cf10ded) | 182–186 ms  | 70        | 94–95              | 9.6 ms        |
+| 2             | **278**     | 70        | 94                 | 8.6           |
+| 3             | 218         | 70        | 96                 | 8.4           |
+| 4             | 190         | 71        | 96                 | 8.4           |
+| 4, label < 2  | 182         | 69        | 94                 | 9.2           |
+
+Two — the paired read's frames, the other cores the loop's, which was the
+first guess — made every rescue link wait for the box's reads (30 of 30,
+143 ms median) and the rescue read 50% longer, so it is four: never a card
+read kept waiting, the label kept out from beside a paired read. Pinned to
+two cores (a machine the engines oversubscribe) every setting read alike, the
+rescue 313 ms. No tick of the stand-in loop was late at any setting.
+
+**What it did not find is the gap.** Over the bench's busy load — paired
+reads back to back, the label asked every 2 s, the map band, the live view
+at 30/s — the reads on that box took what they take alone: Uber 70–72 ms
+busy against 76 ms on the plain bench, DoorDash's remembered crop 94–97
+against 98; switching off the label, the spare threads, the live view or
+the map band moved no median by more than the run-to-run spread (±5 ms); and
+three or more engines were reading under 5% of the time. Engines sharing
+cores do not turn 392 ms into 1–1.5 s there. On the Pi the gate's effect is
+an **estimate**: about nothing on the read the line prints — it never makes
+a card read wait, and on this box the crowding it removes cost nothing —
+with the label's 140 ms reads moved out from beside paired reads. Where the
+Pi's time does go, two figures now say:
+
+  - `tools/pi_bench.py --busy` on the Pi, service stopped: its `alone` row
+    against its `busy` rows. Busy ≈ alone means the shift's cards themselves
+    (real frames, the DoorDash share, second looks) are slower than the
+    bench's, not the machine's other work.
+  - the health line's new part, after `time:`, said when the gate held
+    anything back or beside a `time:` part (and as `ocr` on the `seen` row
+    always):
+
+```
+ocr slots 4, reads waited 0ms median (0 of 41 waited), label OCRs 3 of 12 waited
+       +80ms median, spare OCRs 0 of 4 waited, engines at once 1:14% 2:54% 3:1%
+```
+
+`reads waited` is each card read's own wait for a slot (`ms.slot`), which
+should stay at 0; `label OCRs` and `spare OCRs` the engine calls held back
+for a card read's; `stopped as dropped` links let go of while waiting;
+`engines at once` the share of the window each count of engines was reading.
+A Pi spending much of its time at 3 or 4 is crowding its cores; one at 1–2
+with reads at 1.5 s is not. `UBERSCAN_OCR_SLOTS=0` turns the gate off
+exactly as before it (the line then says `ocr slots off` beside a `time:`
+part); a number sets the slots. `--no-parallel` and the heat guard are
+untouched: they stop the spare threads as before, and the gate has then
+fewer engines to rank.
+
+Accuracy, against cf10ded, over every rendered set this repo draws (the
+1,076 frames under "The rescue's next read is started early", read in pairs —
+two frames at once through `look_many`, each card's links ahead on the spare
+threads — 2,152 frames, through two slots and through one, where 1,156 of
+them waited for a slot): every frame the same payout, journey, crop, text,
+rescue and finder's word, 1,318 with a payout on each side.
+
+**Not done, measured.** Lowering the live view's rate while a read runs: the
+view off altogether moved the busy reads by nothing (Uber 72 ms either way),
+and its 5–6 ms phone-view frames are the loop's own, not the reader's.
+Reading the paired frame only when the first is unsure: alone on that box a
+single frame read 69 ms against a pair's 72 per frame, so the second frame
+costs the read almost nothing, and it is the evidence `unsure_payout` and
+the verdict's two agreeing reads stand on.
 
 `corners` says three things, not two: `held` is the tracker following the
 phone, `stuck` is a candidate found on every check that is not the phone, and
