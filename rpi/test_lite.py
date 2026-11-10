@@ -431,8 +431,40 @@ try:
             .get('search', {}).get('up') is True)
     finally:
         stop(_fp)
+
+    # The NucBox out of reach (server.js nbxOff, the panel's red NO NUCBOX on
+    # live.html): a lite rig has no NucBox to miss, so the warning must never
+    # come up there, even with an environment that names a NucBox nobody
+    # answers at. Port 9 on loopback refuses at once; NUCBOX_OFF_MS shortens
+    # the minute the warning waits for. The same settings on a full server
+    # raise it, which is what makes its absence under lite mean something.
+    _dead = 'http://127.0.0.1:9'
+    _off_env = {'NUCBOX_SEARCH': _dead, 'NUCBOX_ROUTER': _dead, 'NUCBOX_STREETS': _dead,
+                'NUCBOX_PROBE_MS': '150', 'NUCBOX_OFF_MS': '300', 'NUCBOX_TIMEOUT_MS': '500',
+                'SCANNER': '0'}
+    for _mode in ('1', '0'):
+        _oj = os.path.join(_work, 'off-%s.jsonl' % _mode)
+        open(_oj, 'w').close()
+        _op, _ob = start(dict(_off_env, LITE=_mode), _oj)
+        try:
+            _seen = None
+            for _ in range(40):
+                _seen = (as_json(raw(_ob, '/api/status')[1]) or {}).get('nucboxOff')
+                if _seen:
+                    break
+                time.sleep(0.1)
+            if _mode == '1':
+                eq('[lite] a NucBox nobody answers at never raises NO NUCBOX', _seen, None)
+            else:
+                ok_('[full] ...where the full rig raises it (%r)' % (_seen,), bool(_seen))
+        finally:
+            stop(_op)
 finally:
     _fake.kill()
+
+_lite_page = open(os.path.join(ROOT, 'lite', 'lite.html'), encoding='utf-8').read()
+ok_('the lite card has no NucBox line of its own to show',
+    'nucbox' not in _lite_page.lower())
 
 # --- the card, on every panel lite lists ------------------------------------------
 #

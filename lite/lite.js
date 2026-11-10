@@ -138,7 +138,13 @@ function answer(lite, req, res, send) {
 
 /* The NucBox's three bases, emptied: what every NucBox path in server.js
  * already reads as "not set here" — no probe, no search, no route, no pin.
- * In place, so anything holding the object sees it. */
+ * In place, so anything holding the object sees it.
+ *
+ * ...and so the full rig's NucBox-out-of-reach warning (server.js nbxOff,
+ * live.html's red NO NUCBOX) can never rise on a lite rig: it is raised only
+ * when every SET service is failing, and with none set there is nothing to
+ * fail. A lite driver would otherwise be told, in red, that a server they
+ * never had is missing. rpi/test_lite.py holds it against a dead NucBox. */
 function noNucbox(nbx) {
   Object.keys(nbx).forEach(function (k) { nbx[k] = null; });
   return nbx;

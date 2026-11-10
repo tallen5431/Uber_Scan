@@ -9290,7 +9290,7 @@ python3 rpi/test_handoff.py     #   76 on the three files the browser and the
 python3 rpi/test_service.py     #  58 on the systemd units BOTH installers
                                 #     write, asking systemd itself whether an
                                 #     environment assignment survived
-python3 rpi/test_lite.py        # 642 on the lite edition (lite/README.md): every
+python3 rpi/test_lite.py        # 645 on the lite edition (lite/README.md): every
                                 #     door its switch shuts, checked shut with it
                                 #     and open without; no NucBox question asked;
                                 #     the verdict still arriving; and its card
