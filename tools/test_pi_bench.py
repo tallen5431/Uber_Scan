@@ -108,6 +108,60 @@ ok_('...and the heat before and after it',
 eq('...and by default the timed reads share 150 s, so a Pi 4 is done inside three minutes',
    res.get('budgetS'), 150.0)
 
+# --- --busy: the reads with the rig's concurrent work beside them --------------
+#
+# Run end to end, a few seconds a run (the reads, the label asks, the band,
+# the live view and the stand-in camera loop all turning over), and held to
+# what it is for: three runs — the reads alone, then busy with the engines'
+# gate off and on — each timing reads that all gave the card's own answer,
+# the loop's tick timed, the label asked only where it is on, the gate's
+# figures on the gated run only, and nothing written in the repository (the
+# snapshot and the map bands go to a temporary folder, removed after).
+was = tree()
+done = subprocess.run([sys.executable, os.path.join(HERE, 'pi_bench.py'), '--busy',
+                       '--seconds', '22', '--json'],
+                      capture_output=True, text=True, env=env, timeout=600)
+eq('pi_bench --busy --json exits 0 (%s)' % (done.stderr or '').strip()[-200:],
+   done.returncode, 0)
+try:
+    busy = json.loads(done.stdout)
+except ValueError:
+    busy = {}
+runs = busy.get('runs') or []
+eq('--busy: three runs, the reads alone, then busy with the gate off and on',
+   [(r.get('run'), r.get('slots')) for r in runs],
+   [('alone', 0), ('busy, ocr slots off', 0), ('busy, ocr slots 4', 4)])
+for r in runs:
+    k = r.get('kinds') or {}
+    ok_('%s: both cards read, every read the card\'s own answer (%r)' % (r.get('run'), k),
+        all((k.get(c) or {}).get('n', 0) > 0 and k[c]['ok'] == k[c]['n']
+            and isinstance(k[c].get('median'), int) for c in ('uber', 'dd')))
+    t = r.get('tick') or {}
+    ok_('%s: the camera loop\'s tick timed (%r)' % (r.get('run'), t),
+        t.get('n', 0) > 0 and all(isinstance(t.get(x), (int, float)) for x in ('median', 'p95', 'max')))
+    ok_('%s: the time: stages a health line would print (%r)' % (r.get('run'), r.get('time')),
+        all(isinstance((r.get('time') or {}).get(x), int) for x in ('queue', 'warp', 'read')))
+eq('--busy: the label asked only beside the busy runs',
+   [r.get('labelReads', 0) > 0 for r in runs], [False, True, True])
+eq('--busy: only the gated run says the gate held anything back',
+   [sum(w.get('waited', 0) for w in (r.get('waited') or {}).values()) > 0 or bool(r.get('stopped'))
+    for r in runs][:2], [False, False])
+ok_('--busy: ...and the gated run never had more than four engines reading, one a core (%r)'
+    % (runs[2].get('engines') if len(runs) > 2 else None),
+    len(runs) > 2 and runs[2].get('engines')
+    and max(int(e) for e in runs[2]['engines']) <= 4)
+ok_('--busy: the busy run with the gate off says its engines at once too (%r)'
+    % (runs[1].get('engines') if len(runs) > 1 else None),
+    len(runs) > 1 and max(int(e) for e in (runs[1].get('engines') or {'0': 0})) >= 2)
+ok_('--busy runs at the rig\'s own priority, not niced (%r)' % busy.get('nice'),
+    busy.get('nice') == os.nice(0))
+eq('--busy: it wrote nothing in the repository',
+   sorted(p for p, v in tree().items() if was.get(p) != v), [])
+lines = B.busy_table(busy).splitlines() if runs else []
+ok_('--busy: the table, a line for each run with its cards and its tick (%r)' % lines[3:4],
+    bool(lines) and all(any(l.startswith(r['run'] + ' ') for l in lines) for r in runs))
+ok_('...and each run\'s time: stages', sum(1 for l in lines if ': time: ' in l) == 3)
+
 print('FAILED: %d of %d' % (bad, ok + bad) if bad
       else '\nAll %d pi_bench smoke checks passed' % ok)
 sys.exit(1 if bad else 0)
