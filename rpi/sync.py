@@ -37,6 +37,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import journal as JR                                          # noqa: E402
+import lite as LT                                             # noqa: E402
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                               'config.json')
@@ -425,6 +426,16 @@ def main():
                     help='send only; do not bring tags back from the copy')
     ap.add_argument('--quiet', action='store_true')
     args = ap.parse_args()
+
+    # The lite edition keeps its offers log on the rig and sends it nowhere
+    # (rpi/lite.py, CLAUDE.md): there is no copy machine in a lite install, and
+    # lite/install.sh installs no timer. Said and exit 0 rather than refused,
+    # so a timer left over from a full install is a quiet no-op and not a
+    # fault reported every ten minutes. LITE=0 sends anyway.
+    if LT.on_file(args.config):
+        if not args.quiet:
+            print('lite edition: the journal stays on this rig - nothing sent')
+        return 0
 
     if not args.to:
         sys.exit('nowhere to send to — pass --to or set SYNC_TO')

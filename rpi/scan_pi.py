@@ -37,6 +37,7 @@ import handoff as HO
 import offer_parser as OP
 import pipeline as PL
 import journal as JR
+import lite as LT
 import track as TR
 from accumulate import OfferAccumulator
 
@@ -5483,6 +5484,12 @@ def main():
         return
 
     cfg = load_config(args.config)
+    # The lite edition (rpi/lite.py, CLAUDE.md): read ONCE, here, because what
+    # it gates are threads started below. It never reaches the reader, the
+    # parser or the verdict — those are shared with the full rig on purpose.
+    lite = LT.on(cfg)
+    if lite:
+        log(LT.SAYS)
     health = Health()
 
     # Say so once, at the top, when a number in the settings block cannot be
@@ -5818,7 +5825,10 @@ def main():
     # offer line is out (MapLabels, read_map_label). `labels` holds what each
     # offer's label read as, and the arguments its offer line was last told
     # with, so the line can be told again carrying the label.
-    map_labels = MapLabels(threaded=not args.no_thread)
+    # Not threaded under lite: the label's one consumer is Map view, which lite
+    # has none of, and a thread idling on a queue is RAM a Zero 2 W lacks. The
+    # submits below are gated on `lite` too, so nothing is ever read.
+    map_labels = MapLabels(threaded=not args.no_thread and not lite)
     # ...and, for a ⌖ press over a DoorDash card (digest), which press window
     # asked the label (`window`, its dropoff_until) and the last press whose
     # empty answer was said (`said`), so each press says once what it found.
@@ -5853,7 +5863,11 @@ def main():
     # its offer line. Collection only; see MAP_BANDS_DIR.
     bands_on, bands_keep, bands_bytes, bands_off = map_bands_setting(cfg)
     map_bands = None
-    if bands_on and not args.no_journal:
+    if lite:
+        # Collection for a study, written to disk, on its own thread: not a
+        # thing a lite rig is for (rpi/lite.py).
+        log('map bands off (lite)')
+    elif bands_on and not args.no_journal:
         map_bands = MapBands(map_bands_dir(args.journal), keep=bands_keep,
                              max_bytes=bands_bytes, threaded=not args.no_thread)
     elif bands_off:
@@ -6638,7 +6652,7 @@ def main():
         # card on record (`told_offer`) and the same payout — the press's
         # card is the offer's, not one that replaced it — and once found,
         # not read again: the press is told what was read.
-        if whole and asked and an_offer and told_offer is not None \
+        if not lite and whole and asked and an_offer and told_offer is not None \
                 and wants_map_label(shot) and labels['told'] \
                 and labels['told'][0] == told_offer \
                 and labels['told'][1].get('pay') == shot.get('pay'):
@@ -7015,7 +7029,7 @@ def main():
                 # exactly that, so "not whole" sent only half-read cards and
                 # the reader never saw a good one (the owner's shifts of 26-29
                 # Oct: 31 DoorDash offers, not one label read).
-                if geom is not None and not getattr(geom, 'whole', False) \
+                if not lite and geom is not None and not getattr(geom, 'whole', False) \
                         and wants_map_label(parsed):
                     map_labels.submit(offer_log.id, frame, geom, store=label_stores(parsed))
             # ...and the map band above the card, kept once per offer for the

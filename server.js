@@ -56,6 +56,13 @@ var PORT = parseInt(process.env.PORT, 10) || 8080;
 var HTTPS_PORT = parseInt(process.env.HTTPS_PORT, 10) || 8443;
 var HOST = process.env.HOST || '0.0.0.0';
 var SSL_DIR = path.join(ROOT, 'ssl');
+// The lite edition (lite/lite.js, CLAUDE.md): the camera, the reader and one
+// big card, with the NucBox, the reports and the uploads shut. One bit, read
+// once here; asked by name at three places only — the handler's first line,
+// the NucBox's bases (NBX) and the startup banner — so the full rig's code is
+// the lite rig's code everywhere else, every money rule included.
+var Lite = require('./lite/lite.js');
+var LITE = Lite.on(ROOT, process.env);
 
 var TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -12345,6 +12352,9 @@ function send(res, status, body, headers) {
 // being the fragile half.
 function handler(req, res) {
   try {
+    // The lite edition's shut doors, `/` to its panel, and /api/lite (which
+    // answers in either mode). Nothing here when it is not lite but that one.
+    if (Lite.answer(LITE, req, res, send)) return;
     route(req, res);
   } catch (e) {
     console.error('request failed: ' + req.method + ' ' + req.url + ' — ' + e.message);
@@ -12566,6 +12576,9 @@ function nbxBase(name) {
 }
 var NBX = { search: nbxBase('NUCBOX_SEARCH'), route: nbxBase('NUCBOX_ROUTER'),
             streets: nbxBase('NUCBOX_STREETS') };
+// Lite: no NucBox, whatever the environment names — "not set here" is the
+// state every NucBox path below already handles (lite/lite.js noNucbox).
+if (LITE) Lite.noNucbox(NBX);
 // Which setting names each relayed question's service, for the words.
 var NBX_SETTING = { search: 'NUCBOX_SEARCH', route: 'NUCBOX_ROUTER', table: 'NUCBOX_ROUTER',
                     cross: 'NUCBOX_STREETS',
@@ -16360,6 +16373,7 @@ var tls = findCert();
 
 listen(http.createServer(handler), PORT, 'http', true, function () {
   console.log('Uber Scan serving ' + ROOT);
+  if (LITE) console.log('  lite edition: the card at ' + Lite.PAGE + '; no NucBox, reports or uploads');
   // ...and how the last run ended, when it did not end with a shutdown
   // (runStateStarted): the first thing after the banner, as the 7 Nov
   // power loss would have wanted it.
