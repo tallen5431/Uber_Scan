@@ -764,6 +764,10 @@ function startScanner() {
           snapBeatKeep(read, Date.now());
           // ...and the NucBox services not answering, by name (nbxDown).
           read.nucboxDown = nbxDown();
+          // ...and the whole NucBox out of reach for a minute or more, with
+          // since when and why (nbxOffOut; the owner's 9 Nov shift): the
+          // panel's red line on the status row, null while it answers.
+          read.nucboxOff = nbxOffOut(Date.now());
           // ...and the rest of the GPS drop's state, on the same beat. Between
           // offers no reading arrives to carry heldForPanel, and that is when
           // the panel's in-car line is the card's whole message: a pin armed
@@ -3308,8 +3312,9 @@ function notOneCustomer(h) {
  * outside the VPN, and a pin the GPS ends a delivery on is the NucBox's or
  * none. With NUCBOX_SEARCH unset nothing here sends anything.
  *
- * ONE search per hold and dropoff text (`endSearch.key`); a failure or a
- * timeout is asked once more after END_RETRY_MS and then left. A refusal is
+ * ONE search per hold and dropoff text (`endSearch.key`); a NucBox that did
+ * not answer is asked again after END_RETRY_MS and then at longer waits for
+ * as long as the order is held (NBX_RETRY_STEPS, below). A refusal is
  * kept on the hold as `endWhy` (with `endWhyFor`, the text it is about, so a
  * changed dropoff does not wear the old reason) and /api/status says it, so
  * the driver can see why the GPS drop is not armed. The first valid pin for a
@@ -3317,8 +3322,205 @@ function notOneCustomer(h) {
  * hold or its text changed is dropped. END_RETRY_MS is settable for the suite,
  * like GPS_DWELL_MS; 30 s is chosen, not measured. */
 var END_RETRY_MS = envNumber('NUCBOX_RETRY_MS', 30000);
-// One per order, by holdId: {key, timer}.
+// One per order, by holdId: {key, timer, attempt}.
 var endSearch = {};
+
+/* ...and NOT ONLY ONCE when the NucBox did not answer at all (the owner's 9
+ * Nov shift: the car's hotspot out of data from 19:12 to 00:27 EST, every
+ * end and pickup refused 'NucBox down', asked once more 30 s later and then
+ * never again, though most of those orders were held for twenty minutes or
+ * more after). A search refused 'NucBox down' is asked again for as long as
+ * its order is held, each wait longer than the last: END_RETRY_MS times 1,
+ * 2, 4 and then 10 — 30 s, 1 min, 2 min, then every 5 min — so a NucBox back
+ * within the minute is used within the minute, and one gone for the evening
+ * costs it one search an order every five minutes, not a stream. The steps
+ * are chosen, not measured. The NucBox coming back is also heard by the
+ * health probe, which asks every refused pin again at once (nbxRecover);
+ * these retries are for a rig with the probe off, and between probes.
+ *
+ * A question asked only to RESCUE a search that had already answered (the
+ * street index, endAsk's `unanswered`) is still asked once more and left:
+ * the order's refusal there is the search's own answer, not 'NucBox down',
+ * and the index being down is its own word on the panel. */
+var NBX_RETRY_STEPS = [1, 2, 4, 10];
+
+function nbxRetryDelay(attempt) {
+  var i = Math.max(0, Math.min(NBX_RETRY_STEPS.length - 1, (attempt || 1) - 1));
+  return END_RETRY_MS * NBX_RETRY_STEPS[i];
+}
+
+/* --- the NucBox back: every pin it refused asked again (9 Nov) --------------
+ *
+ * When the health probe hears a service answer after it was down (nbxNote),
+ * or the whole NucBox come back after being out of reach (nbxOffStep), every
+ * held order's end and every pickup or store refused 'NucBox down' is asked
+ * again from the top, and so is the offer on the slot (screeningCard): its
+ * pickup, dropoff and stores, and its on-time hint if the router did not
+ * answer it. Nothing else is asked, nothing answered is asked twice (each
+ * question goes through nbxCache and nbxAsk's one-request-per-question), and
+ * nothing here decides anything a search did not already decide — a pin
+ * found is kept by the same road as any other (pinHeldEnd, keepPickupPin),
+ * first valid one winning.
+ *
+ * NOT ALL AT ONCE. A shift's worth of orders refused over an evening would
+ * otherwise be one burst at the NucBox the second the hotspot is topped up.
+ * Each re-ask takes a slot of the warming budget (earlyRoom:
+ * EARLY_WARM_PER_MIN new searches a minute, shared with warmEarly), and what
+ * does not fit waits in nbxReaskQueue, looked at again every
+ * EARLY_WARM_MS / EARLY_WARM_PER_MIN (10 s), each re-checked when its turn
+ * comes so an order delivered or pinned meanwhile is not asked. The offer on
+ * the slot is asked as its card always was (searchCardEarly: its own two
+ * free, its stores in the budget), because it is the card in front of the
+ * driver.
+ *
+ * Coalesced over NBX_RECOVER_SETTLE_MS: the three services' probes go out
+ * together and come back within milliseconds, and three recoveries are one.
+ * The log says it once:
+ *
+ *   nucbox: back after 4 h 12 min; asking again for 3 pins
+ *
+ * and each pin found then says its own `pin: found ... by server after N
+ * asks`, as any later find does (pinSaidFound). */
+var NBX_RECOVER_SETTLE_MS = 1000;
+var nbxRecoverTimer = null;
+var nbxRecoverFrom = null;    // the off state that ended, for the "back" line
+var nbxReaskQueue = [];       // [{key, still, run}] waiting for a slot
+var nbxReaskTimer = null;
+
+function nbxRecoverSoon(off) {
+  if (off) nbxRecoverFrom = { since: off.since, backAt: Date.now() };
+  if (nbxRecoverTimer) return;
+  nbxRecoverTimer = setTimeout(function () {
+    nbxRecoverTimer = null;
+    var from = nbxRecoverFrom;
+    nbxRecoverFrom = null;
+    nbxRecover(Date.now(), from);
+  }, NBX_RECOVER_SETTLE_MS);
+  if (nbxRecoverTimer.unref) nbxRecoverTimer.unref();
+}
+
+function nbxRecover(now, from) {
+  // Out of reach again inside the settle: nothing would be answered.
+  if (nbxOff) return;
+  var n = 0;
+  heldOrders(now).forEach(function (h) {
+    var id = holdIdOf(h);
+    var es = endSearch[id];
+    var endStill = function () {
+      var hh = es && es.key ? endHold(es.key) : null;
+      return !!hh && !heldEndPin(hh) && hh.endWhy === 'NucBox down'
+        && hh.endWhyFor === endTextOf(hh);
+    };
+    if (endStill()) {
+      n += 1;
+      nbxReask('end\n' + id, endStill, function () {
+        // The backoff's timer gives way to this ask, and the next one, if
+        // this too goes unanswered, waits one step longer.
+        if (es.timer) clearTimeout(es.timer);
+        es.timer = null;
+        searchHeldEnd(es.key, (es.attempt || 1) + 1);
+      });
+    }
+    if (!pickSearch[id]) return;
+    // (A text on record twice — the card's door and its pickup, say — is one
+    // pin and one ask, as armHeldPickups asks it.)
+    var seen = {};
+    pickupAsks(h).forEach(function (a) {
+      if (seen[a.q]) return;
+      seen[a.q] = true;
+      var still = function () {
+        var ps = pickSearch[id];
+        return !!ps && !!pickHold(id) && ps.why[a.q] === 'NucBox down' && !pickupPinFor(a.q);
+      };
+      if (!still()) return;
+      n += 1;
+      nbxReask('pickup\n' + id + '\n' + a.q, still, function () {
+        var ps = pickSearch[id];
+        var r = ps.retry[a.q];
+        if (r) clearTimeout(r.timer);
+        delete ps.retry[a.q];
+        searchHeldPickup(id, a, (r ? r.attempt : 1) + 1);
+      });
+    });
+  });
+  var card = screeningCard(now);
+  var offerToo = card ? nbxReaskOffer(card, now) : false;
+  if (from) {
+    console.log('nucbox: back after ' + spanWords((from.backAt || now) - from.since)
+                + '; asking again for ' + n + ' pin' + (n === 1 ? '' : 's')
+                + (offerToo ? ' and the offer on the slot' : ''));
+  } else if (n || offerToo) {
+    console.log('nucbox: answering again; asking again for ' + n + ' pin' + (n === 1 ? '' : 's')
+                + (offerToo ? ' and the offer on the slot' : ''));
+  }
+}
+
+// One re-ask queued, once per key, and the queue drained as far as the
+// budget allows (earlyRoom). `still()` is asked before a slot is spent.
+function nbxReask(key, still, run) {
+  if (nbxReaskQueue.some(function (q) { return q.key === key; })) return;
+  nbxReaskQueue.push({ key: key, still: still, run: run });
+  nbxReaskDrain();
+}
+
+function nbxReaskDrain() {
+  while (nbxReaskQueue.length) {
+    var q = nbxReaskQueue[0];
+    if (!q.still()) { nbxReaskQueue.shift(); continue; }
+    if (!earlyRoom(Date.now())) break;
+    nbxReaskQueue.shift();
+    try { q.run(); } catch (e) {
+      console.error('nucbox: a re-ask could not be made: ' + (e && e.stack ? e.stack : e));
+    }
+  }
+  if (nbxReaskQueue.length && !nbxReaskTimer) {
+    nbxReaskTimer = setTimeout(function () {
+      nbxReaskTimer = null;
+      nbxReaskDrain();
+    }, Math.ceil(EARLY_WARM_MS / EARLY_WARM_PER_MIN));
+    if (nbxReaskTimer.unref) nbxReaskTimer.unref();
+  }
+}
+
+/* The card on the slot asked again where the NucBox did not answer it: its
+ * searches' outcomes kept as "not answered" (earlyDoor keeps those for
+ * END_RETRY_MS so every read of a screen does not ask a dead NucBox) let go,
+ * its on-time pins and any hint the router did not answer forgotten
+ * (offerPin's `Down`, onTimes' `down`), and searchCardEarly run again for it.
+ * Answers already in are answered from the cache; nothing is asked of a card
+ * the NucBox answered. True when something was let go to be asked. */
+function nbxReaskOffer(offer, now) {
+  var texts = [offer.pickupLine, offer.pickup, offer.dropoff]
+    .concat((storesOf(offer) || []).map(function (st) { return st.door; }))
+    .filter(function (t) { return typeof t === 'string' && t; });
+  var again = false;
+  early.forEach(function (on, key) {
+    // Every "not answered" goes, this card's or not: they are all the dead
+    // NucBox's, and the next read of their screen should ask.
+    if (!on.done || on.res !== null || !on.until) return;
+    if (texts.indexOf(key.split('\n')[2]) !== -1) again = true;
+    early.delete(key);
+  });
+  var pins = offerPins[offer.id];
+  if (pins) {
+    ['pickup', 'dropoff'].forEach(function (s) {
+      if (pins[s] === null && pins[s + 'Down']) {
+        pins[s] = undefined;
+        again = true;
+      }
+    });
+  }
+  Object.keys(onTimes).forEach(function (k) {
+    if (k.indexOf(offer.id + '\n') === 0 && onTimes[k].down) {
+      delete onTimes[k];
+      again = true;
+    }
+  });
+  if (!again) return false;
+  earlyCards = earlyCards.filter(function (id) { return id !== offer.id; });
+  searchCardEarly(offer, now);
+  return true;
+}
 
 function endKeyOf(h) {
   return h && typeof h.dropoff === 'string' && h.dropoff
@@ -3791,10 +3993,11 @@ function endWhyOf(res, fallback, how) {
 
 /* One search question for the held end, answered from nbxCache or asked;
  * `answered(out)` with nbxHits' answer. A NucBox that does not answer is
- * 'NucBox down' on the hold and is asked once more, the whole search from the
- * top, after END_RETRY_MS. The door's question and the place's both come
- * through here — and the street index's (doorChain's byName, searchHeldStreet,
- * searchHeldStreetArea), whose answer `read` turns into what is kept
+ * 'NucBox down' on the hold and is asked again, the whole search from the
+ * top, after END_RETRY_MS and then at longer waits (nbxRetryDelay), or at
+ * once when the health probe hears it back (nbxRecover). The door's question
+ * and the place's both come through here — and the street index's
+ * (doorChain's byName, searchHeldStreet, searchHeldStreetArea), whose answer `read` turns into what is kept
  * (streetAnswer), or null for one that is not an answer.
  *
  * ...EXCEPT a question asked AFTER the search answered: those pass
@@ -3823,11 +4026,15 @@ function endAsk(key, attempt, target, answered, read, unanswered) {
       if (!now || heldEndPin(now)) return;
       if (!unanswered) refuseHeldEnd(now, 'NucBox down');
       var on = endSearch[holdIdOf(now)];
-      if (attempt === 1 && on && !on.timer) {
+      // Asked again after nbxRetryDelay: every time for a NucBox that did not
+      // answer, once for a rescue question past the search's answer (see
+      // NBX_RETRY_STEPS). One timer a search, whatever its questions did.
+      if ((attempt === 1 || !unanswered) && on && !on.timer) {
+        on.attempt = attempt;
         on.timer = setTimeout(function () {
           on.timer = null;
-          searchHeldEnd(key, 2);
-        }, END_RETRY_MS);
+          searchHeldEnd(key, attempt + 1);
+        }, nbxRetryDelay(attempt));
       }
       if (unanswered) unanswered(now);
       return;
@@ -4243,15 +4450,17 @@ function pinMetres(p, pin) {
  *
  * The public geocoder is never asked; with NUCBOX_SEARCH unset nothing here
  * sends anything. ONE search per hold and pickup text (`pickSearch.asked`); a
- * failure or a timeout is asked once more after END_RETRY_MS, as the end's
- * is, and an answer that comes back after the hold changed is dropped. A
+ * NucBox that did not answer is asked again after END_RETRY_MS and at longer
+ * waits after, as the end's is (NBX_RETRY_STEPS), and an answer that comes
+ * back after the hold changed is dropped. A
  * refusal is kept in memory by text (`pickSearch.why`) — a restart asks again
  * — and /api/status says how many pickups the guard holds and how each was
  * pinned (pickupState). With two orders in the car, or a trip and its Uber
  * add-ons, each order's own card is asked under that order, and the
  * planner's pickups (kept on the first-taken) land on the order whose card
  * names the store (keepPickupPin, pickupOwner). */
-// One per order, by holdId: {asked, timers, why}.
+// One per order, by holdId: {asked, why, retry} (retry: by text, {a, attempt,
+// timer}, a pickup's next ask after 'NucBox down').
 var pickSearch = {};
 
 /* The named check: a pickup text's search plan when it is a street with a
@@ -4358,7 +4567,7 @@ function pickupPinFor(q) {
 function armHeldPickups(h) {
   if (!NBX.search || !h) return;
   var id = holdIdOf(h);
-  var on = pickSearch[id] || (pickSearch[id] = { asked: {}, timers: [], why: {} });
+  var on = pickSearch[id] || (pickSearch[id] = { asked: {}, why: {}, retry: {} });
   var asks = pickupAsks(h);
   // Nothing on record this server may ask — /api/status's `pickupsWhy: 'no
   // house number'` — said once in the log (pinSaidNone), unless the page has
@@ -4394,7 +4603,11 @@ function forgetHoldsGone(list) {
   });
   Object.keys(pickSearch).forEach(function (id) {
     if (ids.indexOf(id) !== -1) return;
-    pickSearch[id].timers.forEach(clearTimeout);
+    // Its pickups' retries (NBX_RETRY_STEPS), which run for as long
+    // as the order is held and not a moment past it.
+    Object.keys(pickSearch[id].retry || {}).forEach(function (q) {
+      clearTimeout(pickSearch[id].retry[q].timer);
+    });
     delete pickSearch[id];
   });
   Object.keys(arrivals).forEach(function (id) {
@@ -4519,10 +4732,10 @@ function searchHeldPickupName(id, a, attempt, h) {
 
 /* One question for a pickup, answered from nbxCache or asked; `answered(out)`
  * only while the order is still held. A NucBox that does not answer is
- * 'NucBox down' for that text, and the whole search is asked once more, from
- * the top, after END_RETRY_MS. A text the page pinned while this was out is
- * not asked about here a second time: keepPickupPin keeps the first, the one
- * place that rule is. */
+ * 'NucBox down' for that text, and the whole search is asked again, from the
+ * top, after nbxRetryDelay (or at once on recovery, nbxRecover). A text the
+ * page pinned while this was out is not asked about here a second time:
+ * keepPickupPin keeps the first, the one place that rule is. */
 function pickupAsk(id, a, attempt, target, answered, read, unanswered) {
   function go(out) {
     memoAsk(id, a.q, target, out);
@@ -4544,10 +4757,18 @@ function pickupAsk(id, a, attempt, target, answered, read, unanswered) {
       if (unanswered) return unanswered();
       pickSearch[id].why[a.q] = 'NucBox down';
       pinSaidNone(id, pinWhichPickup(pickHold(id), a.q), 'NucBox down', a.q, null);
-      if (attempt === 1) {
-        pickSearch[id].timers.push(setTimeout(function () {
-          searchHeldPickup(id, a, 2);
-        }, END_RETRY_MS));
+      // Asked again after nbxRetryDelay, every time, for as long as the order
+      // is held (NBX_RETRY_STEPS; it was once, after END_RETRY_MS) — one
+      // timer per text, kept by text so the NucBox coming back can ask it at
+      // once instead (nbxRecover) — and not at all once the text is pinned,
+      // by Map view's post or another order's search.
+      var retry = pickSearch[id].retry;
+      if (!retry[a.q]) {
+        retry[a.q] = { a: a, attempt: attempt, timer: setTimeout(function () {
+          delete retry[a.q];
+          if (pickupPinFor(a.q)) return;
+          searchHeldPickup(id, a, attempt + 1);
+        }, nbxRetryDelay(attempt)) };
       }
       return;
     }
@@ -7651,12 +7872,19 @@ function offerPin(offer, side) {
   if (on[side] !== undefined || on[side + 'Asking']) return on[side];
   var text = side === 'pickup' ? (offer.pickupLine || offer.pickup) : offer.dropoff;
   on[side + 'Asking'] = true;
-  earlyDoor(text, MV.discFor(offerCard(offer, Date.now())), side === 'dropoff', function (r) {
+  var how = earlyDoor(text, MV.discFor(offerCard(offer, Date.now())), side === 'dropoff', function (r) {
     on[side + 'Asking'] = false;
     on[side] = r && r.at ? { lat: r.at.lat, lon: r.at.lon } : null;
+    // ...and whether that null is the NucBox not answering (earlyDoor's
+    // null from a search it asked), which the NucBox coming back lets go to
+    // be asked again (nbxReaskOffer); a refusal is an answer and stands, and
+    // a side that cannot be asked at all (no house number, no disc) is put
+    // right below.
+    on[side + 'Down'] = !r;
     onTimeAgain(offer);
   }, null, side !== 'pickup' ? null
     : offer.pickupLine ? offer.pickup : MV.bracketStore(offer.pickup));
+  if (how === 'no') on[side + 'Down'] = false;
   return on[side + 'Asking'] ? undefined : on[side];
 }
 
@@ -8024,7 +8252,10 @@ function roadLegs(pts, done) {
                 ? legs.map(function (l) { return l.duration; }) : null };
     }
     if (out) nbxRemember(target, out);
-    done(out);
+    // ...and, second, whether the router did not answer at all (onTimeWork's
+    // `down`): a hint worked out without it is asked again when the NucBox
+    // is back (nbxReaskOffer), where a refusal about the points is not.
+    done(out, !!err);
   });
 }
 
@@ -8034,6 +8265,17 @@ function sumOf(xs) {
 
 /* The hint from the inputs: { onTime, lateMin, offWayMi }, through done(). */
 function onTimeWork(inp, done) {
+  // Whether any road question went unanswered (roadLegs' second argument),
+  // handed on beside the hint so onTimeHint can mark it to ask again.
+  var down = false;
+  var said = done;
+  done = function (hint) { said(hint, down); };
+  var legs = function (pts, then) {
+    roadLegs(pts, function (r, failed) {
+      if (failed) down = true;
+      then(r);
+    });
+  };
   var P = 'P', D = 'D';
   var seqs = inp.aPick
     ? [[[inp.aPick, P, 1], [inp.aDrop, D, 1], [inp.bPick, P, 2], [inp.bDrop, D, 2]],
@@ -8052,7 +8294,7 @@ function onTimeWork(inp, done) {
       : [[inp.car, inp.bPick, inp.aDrop]]);
     var got = [], left = asks.length;
     asks.forEach(function (pts, i) {
-      roadLegs(pts, function (r) {
+      legs(pts, function (r) {
         got[i] = r;
         if (--left) return;
         if (got.some(function (g) { return !g; })) return done(none);
@@ -8066,7 +8308,7 @@ function onTimeWork(inp, done) {
   if (inp.aDue === null || inp.bDue === null || !inp.bPick || !inp.bDrop) return distance();
   var left = seqs.length, best = null;
   seqs.forEach(function (seq) {
-    roadLegs([inp.car].concat(seq.map(function (s) { return s[0]; })), function (r) {
+    legs([inp.car].concat(seq.map(function (s) { return s[0]; })), function (r) {
       if (r && r.seconds) {
         var t = inp.now, late = { 1: 0, 2: 0 };
         seq.forEach(function (s, i) {
@@ -8111,8 +8353,10 @@ function onTimeHint(offer, now, waiter) {
   on = { hint: undefined, waiters: [] };
   onTimeKeep(onTimes, key, on);
   inp.now = now;
-  onTimeWork(inp, function (hint) {
+  onTimeWork(inp, function (hint, down) {
     on.hint = hint;
+    // (The router not answering, for nbxReaskOffer to let it go.)
+    on.down = !!down;
     var w = on.waiters;
     on.waiters = [];
     w.forEach(function (f) { f(hint); });
@@ -10319,6 +10563,10 @@ function statusNow() {
     carryTwo: carryTwo(),
     // Whether each NucBox service set is answering (nbxHealthOut).
     nucbox: nbxHealthOut(),
+    // ...and the whole of it out of reach for NBX_OFF_MS or more, or null
+    // (nbxOffOut): since when, which services, why, and whether the rig
+    // itself appears to have no network (`rigOffline`, ENETUNREACH only).
+    nucboxOff: nbxOffOut(Date.now()),
     orders: carryingTwo(Date.now()) ? ordersForPanel(Date.now()) : undefined,
     unowned: carryingTwo(Date.now()) ? Assemble.unowned(assembly) : undefined,
     // ...and the chooser, if one is open (openChooser).
@@ -12422,7 +12670,10 @@ function nbxNote(service, err, probe) {
     Object.keys(nbxHealth).forEach(function (s) {
       if (typeof nbxHealth[s].since === 'number') nbxHealth[s].since += step;
       if (typeof nbxHealth[s].at === 'number') nbxHealth[s].at += step;
+      // ...and when its run of failures began (nbxOffStep), the same way.
+      if (typeof nbxHealth[s].failSince === 'number') nbxHealth[s].failSince += step;
     });
+    if (nbxOff) nbxOff.since += step;
     console.log('nucbox health: the clock stepped ' + Math.round(step / 1000)
                 + ' s; each service\'s "since" moved with it');
   }
@@ -12431,9 +12682,172 @@ function nbxNote(service, err, probe) {
   h.at = now;
   h.fails = err ? h.fails + 1 : 0;
   var up = err ? (probe || h.fails >= 2 ? false : h.up) : true;
+  var was = h.up;
   if (up !== h.up) h.since = now;
   h.up = up;
   h.why = up === false ? String(err) : null;
+  // ...and, for the whole NucBox out of reach (nbxOffStep), when this run of
+  // failures began and what kind each was. Kept apart from `since` and
+  // `up`: one failed question is not "down" (two in a row are), but it IS
+  // the first second of an outage, and the 9 Nov line says the time the
+  // NucBox stopped answering, not the time the second probe agreed.
+  if (err) {
+    if (h.failSince === undefined || h.failSince === null) h.failSince = now;
+    h.kind = nbxWhyKind(err);
+  } else {
+    h.failSince = null;
+    h.kind = null;
+  }
+  nbxOffStep(now);
+  // A service answering again after it was down: the pins it refused are
+  // asked again (nbxRecoverSoon), not left to their next retry.
+  if (!err && was === false) nbxRecoverSoon();
+}
+
+/* --- the NucBox out of reach altogether (the owner's 9 Nov shift) -----------
+ *
+ * Every pin of that evening failed — the rig's log has `pin: none pickup …
+ * "NucBox down"` and `pin: none end … "NucBox down"` for every order from
+ * 19:12 to 00:27 EST — while the NucBox itself was up all night (17 days of
+ * uptime, its streets relay active since 7 Nov). The car's hotspot had run out
+ * of data: the rig was on Wi-Fi with no internet behind it, so Tailscale could
+ * not reach home. The panel's only word for it was healthNote's "NucBox:
+ * down", grey, in the status row's small type beside the takings, and the
+ * owner's account is that nothing on the panel said so; the scanner went on
+ * reading offers, and each order's end was asked once more after 30 s and
+ * then never again.
+ *
+ * So the state "OFF": EVERY service that is set (search, route, streets) has
+ * failed every question and probe since some moment, and that moment is at
+ * least NBX_OFF_MS ago. One service down while the others answer is that
+ * service (the 26 Oct street index on 8081) and stays the existing "NucBox:
+ * streets down"; all of them at once for a minute is the road to the NucBox,
+ * and that is what the panel's line and the log's say. `since` is the LAST of
+ * the services' first failures — the moment all of them were failing — so a
+ * street index dead since the afternoon does not date an evening's outage.
+ *
+ * 60 s is chosen, not measured: the probe runs every NBX_PROBE_MS (60 s), so
+ * it is the second probe failing that says it, never one slow answer; and a
+ * minute without pins is not yet worth a line on a panel read while driving.
+ * NUCBOX_OFF_MS moves it (the suite's minute is shorter). */
+var NBX_OFF_MS = envNumber('NUCBOX_OFF_MS', 60000);
+var nbxOff = null;           // {since, services, why, kind, rigOffline} while off
+var nbxOffTimer = null;
+
+/* What a failed question's sentence says went wrong, as {kind, words}: the
+ * kinds the 9 Nov question needs told apart. Read off nbxAskOnce's own
+ * sentences, which carry the request error's code in brackets:
+ *   'timeout'      nothing came back inside NBX_TIMEOUT_MS: a Tailscale peer
+ *                  that cannot be reached drops the packets, so this is the
+ *                  hotspot-out-of-data case (the connection never answers);
+ *   'dns'          ENOTFOUND / EAI_AGAIN: the NucBox's NAME could not be
+ *                  looked up (a MagicDNS name with no tailnet behind it);
+ *   'refused'      ECONNREFUSED: something answered at that address and
+ *                  refused — the NucBox is reached, its service is not
+ *                  running;
+ *   'unreachable'  ENETUNREACH / EHOSTUNREACH: the kernel has no route to it
+ *                  at all; `net` is ENETUNREACH, no route to the network;
+ *   'answered'     anything else (an HTTP 503, not JSON...): the NucBox
+ *                  reached and saying no. */
+function nbxWhyKind(err) {
+  var s = String(err || '');
+  if (/did not answer within/.test(s)) {
+    return { kind: 'timeout', words: 'timed out after ' + (NBX_TIMEOUT_MS / 1000) + ' s' };
+  }
+  if (/\b(ENOTFOUND|EAI_AGAIN|EAI_NONAME|EAI_FAIL)\b/.test(s)) {
+    return { kind: 'dns', words: 'name lookup failed' };
+  }
+  if (/\bECONNREFUSED\b/.test(s)) return { kind: 'refused', words: 'refused' };
+  if (/\b(ENETUNREACH|EHOSTUNREACH)\b/.test(s)) {
+    return { kind: 'unreachable', words: 'network unreachable', net: /\bENETUNREACH\b/.test(s) };
+  }
+  return { kind: 'answered', words: s.replace(/^the NucBox /, '') };
+}
+
+// The set services, in the order the log and the panel name them.
+function nbxSetServices() {
+  return ['search', 'route', 'streets'].filter(function (s) { return !!NBX[s]; });
+}
+
+/* Whether the whole NucBox is out of reach NOW, and the line in the log on
+ * each change. Asked on every question's outcome (nbxNote), by a timer for
+ * the minute's end, and by the beat and /api/status, so the state is right
+ * whoever looks first. */
+function nbxOffStep(now) {
+  var set = nbxSetServices();
+  var failing = set.length > 0 && set.every(function (s) {
+    var h = nbxHealth[s];
+    return h && typeof h.failSince === 'number';
+  });
+  var since = failing
+    ? Math.max.apply(null, set.map(function (s) { return nbxHealth[s].failSince; })) : null;
+  var off = failing && now - since >= NBX_OFF_MS;
+  if (failing && !off && !nbxOffTimer) {
+    // ...and the minute's end looked at even if nothing is asked by then
+    // (NUCBOX_PROBE_MS 0, a quiet panel).
+    nbxOffTimer = setTimeout(function () {
+      nbxOffTimer = null;
+      nbxOffStep(Date.now());
+    }, Math.max(0, since + NBX_OFF_MS - now) + 5);
+    if (nbxOffTimer.unref) nbxOffTimer.unref();
+  }
+  if (off && !nbxOff) {
+    var kinds = set.map(function (s) {
+      return nbxHealth[s].kind || { kind: 'answered', words: '?' };
+    });
+    var words = kinds.map(function (k) { return k.words; })
+      .filter(function (w, i, all) { return all.indexOf(w) === i; });
+    nbxOff = { since: since, services: set, why: words.join('; '),
+               kind: kinds.every(function (k) { return k.kind === kinds[0].kind; })
+                 ? kinds[0].kind : 'mixed',
+               // Item 4 of the 9 Nov brief, "the rig offline, or only the
+               // NucBox?", answered only where it is cheap AND reliable:
+               // ENETUNREACH on every service is the kernel saying it has no
+               // route to that network at all, which is no network on the
+               // rig. The 9 Nov case itself is not that: with Tailscale up
+               // its route to the tailnet exists and the packets are dropped
+               // beyond it, a timeout, indistinguishable from the NucBox
+               // being off without asking some host on the public internet
+               // — which this rig does not do on its own (the public map is
+               // asked only under a ⛶ Map press). So false there, and the
+               // panel's words say "usually no internet", not "no internet".
+               rigOffline: kinds.every(function (k) {
+                 return k.kind === 'unreachable' && k.net;
+               }) };
+    console.log('nucbox: unreachable (' + set.join(', ') + ') — ' + nbxOff.why
+                + ', failing since ' + clock12(since)
+                + (nbxOff.rigOffline ? ' (the rig has no network)' : ''));
+  } else if (!off && nbxOff) {
+    // Back: said with how many pins are asked again, by the recovery run
+    // that counts them (nbxRecover), once they are counted.
+    nbxRecoverSoon(nbxOff);
+    nbxOff = null;
+  }
+}
+
+// "7:12:04 PM" on this machine's clock, for the log.
+function clock12(ms) {
+  var d = new Date(ms);
+  var h = d.getHours() % 12 || 12;
+  var two = function (n) { return (n < 10 ? '0' : '') + n; };
+  return h + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds())
+    + (d.getHours() < 12 ? ' AM' : ' PM');
+}
+
+// "4 h 12 min", "38 min": how long an outage was, whole minutes, rounded down.
+function spanWords(ms) {
+  var min = Math.max(0, Math.floor(ms / 60000));
+  if (min < 60) return min + ' min';
+  return Math.floor(min / 60) + ' h ' + (min % 60) + ' min';
+}
+
+/* The off state for the beat and /api/status: null while the NucBox is in
+ * reach (or none is set), else {since, services, why, kind, rigOffline}. The
+ * panel draws its line off this (live.html nbxOffNote). */
+function nbxOffOut(now) {
+  nbxOffStep(now);
+  return nbxOff ? { since: nbxOff.since, services: nbxOff.services.slice(), why: nbxOff.why,
+                    kind: nbxOff.kind, rigOffline: nbxOff.rigOffline } : null;
 }
 
 function nbxProbe() {

@@ -52,7 +52,14 @@
  * router with a code that is not NoRoute, a route touching 33.9, -84.7
  * comes back with a shape that is not one, and GET /__asked lists every
  * question this fake was asked, so a suite can read exactly what left the
- * rig. */
+ * rig.
+ *
+ * GET /__unreachable?on=1 makes it the owner's 9 Nov NucBox seen from a car
+ * whose hotspot has run out of data: every request after it, the health
+ * probes too, is taken and never answered, so the rig's own wall clock
+ * (server.js NBX_TIMEOUT_MS) ends each one as a timeout. Questions are
+ * still listed in /__asked, so a suite can count the retries. ?on=0 brings
+ * it back. */
 'use strict';
 
 var http = require('http');
@@ -553,6 +560,7 @@ function routeBody(pts, legs, secs) {
 
 function start(done) {
   var asked = [];
+  var unreachable = false;
   var server = http.createServer(function (req, res) {
     var u = url.parse(req.url, true);
     function json(code, body) {
@@ -560,6 +568,15 @@ function start(done) {
       res.end(JSON.stringify(body));
     }
     if (u.pathname === '/__asked') return json(200, asked);
+    if (u.pathname === '/__unreachable') {
+      unreachable = u.query.on === '1';
+      return json(200, { unreachable: unreachable });
+    }
+    // Out of reach: listed if it is a question, and left unanswered.
+    if (unreachable) {
+      if (!/^\/(status|health|api\/streets)$/.test(u.pathname)) asked.push(req.url);
+      return;
+    }
     // The health probes (server.js nbxProbe), answered as the real services
     // answer them and never recorded: they are no question about a place,
     // and the suites read `asked` for the order of those.

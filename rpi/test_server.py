@@ -7480,7 +7480,11 @@ try:
         _atook(_bb, 'b-down', _COBB)
         time.sleep(4.0)
         _h = _holding(_bb) or {}
-        eq('[auto arm] NucBox down: no arm, said, and asked exactly once more',
+        # (Asked again at NUCBOX_RETRY_MS, 1.5 s, and next at twice that, 4.5
+        # s from the first: server.js NBX_RETRY_STEPS. The whole schedule is
+        # checked under "the NucBox out of reach".)
+        eq('[auto arm] NucBox down: no arm, said, and asked again after NUCBOX_RETRY_MS, '
+           'the next ask not yet',
            (_h.get('endPinned'), _h.get('endWhy'), len(_Stub.searches)),
            (False, 'NucBox down', 2))
         post(_bb, '/api/delivered', {})
@@ -8872,10 +8876,12 @@ try:
         _sptook(_spb, 's-down', 'Example Taqueria', _SP_DOOR)
         _h = _settled(_spb, lambda h: h.get('pickupsWhy'))
         time.sleep(3.5)
+        # (Asked at once, again 1 s after, again 2 s after that, and the
+        # next 4 s later: NUCBOX_RETRY_MS x 1, 2, 4, server.js NBX_RETRY_STEPS.)
         eq('[server pickups] a NucBox that does not answer pins nothing, says so, and is asked '
-           'exactly once more',
+           'again at longer and longer waits',
            (_h.get('pickupsPinned'), _h.get('pickupsWhy'),
-            len([u for u in _HkDown.searches if 'street=1981' in u]) - _n), (0, 'NucBox down', 2))
+            len([u for u in _HkDown.searches if 'street=1981' in u]) - _n), (0, 'NucBox down', 3))
         post(_spb, '/api/held-pickup', {'holdId': _h.get('holdId'), 'lat': _SP_AT[0],
                                         'lon': _SP_AT[1], 'q': _SP_DOOR})
         _h = _holding(_spb) or {}
@@ -10929,6 +10935,219 @@ finally:
     _hf.kill()
     if os.path.exists(_stepflag):
         os.remove(_stepflag)
+
+# --- the NucBox out of reach, and back (the owner's 9 Nov shift) --------------
+#
+# Every pin of that evening failed "NucBox down" from 19:12 to 00:27 EST with
+# the NucBox up all night: the car's hotspot had run out of data, so the rig
+# had no road home. Nothing on the panel said so, and each order was asked
+# once more after 30 s and then never. server.js now: the whole NucBox failing
+# for NUCBOX_OFF_MS is `nucboxOff` (status and beat) and one log line; a pin
+# refused 'NucBox down' is asked again at NUCBOX_RETRY_MS x 1, 2, 4, 10 for as
+# long as its order is held; and the probe hearing it back asks every such pin
+# and the card on the slot again at once, within the warming budget, said in
+# one more line. Staged with tests/fake-nucbox.js's /__unreachable (every
+# request taken and never answered, as a Tailscale peer behind a dead hotspot
+# is), at a tenth of the rig's clock. Addresses invented.
+def _offserver(name, **env):
+    """_cserver with the server's console kept, line by line, in a list."""
+    home = os.path.join(_cdir, name)
+    os.mkdir(home)
+    j = os.path.join(home, 'offers.jsonl')
+    open(j, 'w').close()
+    hand = os.path.join(home, 'hand')
+    os.mkdir(hand)
+    e = {'SCANNER': '1', 'SCANNER_CMD': sys.executable, 'SCANNER_ARGS': _cfake,
+         'UBERSCAN_HANDOFF_DIR': hand, 'HOLD_GRACE_MS': '600000'}
+    e.update(env)
+    for f in os.listdir(_cdir):
+        if f.startswith('lines-') or f.startswith('done-'):
+            os.remove(os.path.join(_cdir, f))
+    _cseq[0] = 0
+    proc, base = _start_loud(e, j)
+    log = []
+    threading.Thread(target=lambda: [log.append(l.rstrip('\n')) for l in proc.stdout],
+                     daemon=True).start()
+    return proc, base, log
+
+
+def _offtook(base, oid, dropoff, pickup):
+    o = dict(_SQ, id=oid, pay=12.0, minutes=40.0, billedMinutes=40.0, miles=5.0,
+             cost=1.75, dropoff=dropoff, pickup=pickup)
+    post(base, '/api/offers/mark', {'id': oid, 'accepted': True, 'offer': o})
+
+
+_of = subprocess.Popen(['node', os.path.join(ROOT, 'tests', 'fake-nucbox.js')],
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+_ofb = 'http://127.0.0.1:%d' % json.loads(_of.stdout.readline())['port']
+
+
+def _ofasked(word):
+    return [a for a in json.loads(urllib.request.urlopen(_ofb + '/__asked', timeout=5).read())
+            if word in a]
+
+
+def _ofreach(on):
+    urllib.request.urlopen(_ofb + '/__unreachable?on=%d' % (0 if on else 1), timeout=5).read()
+
+
+_OFF_TACO = 'Example Taqueria (250 Example Rd)'
+_OFF_CARD = dict(_SQ, id='off-card', pay=9.0, minutes=35.0, billedMinutes=35.0, miles=5.0,
+                 cost=1.5, pickup='Example Burger (1981 Cobb Pkwy)',
+                 dropoff='1975 Cobb Parkway, Kennesaw', app='uber')
+_op, _ob, _olog = _offserver('nbx-off', NUCBOX_SEARCH=_ofb, NUCBOX_ROUTER=_ofb,
+                             NUCBOX_STREETS=_ofb, NUCBOX_PROBE_MS='300',
+                             NUCBOX_TIMEOUT_MS='400', NUCBOX_OFF_MS='1500',
+                             NUCBOX_RETRY_MS='500')
+try:
+    time.sleep(1.0)
+    eq('[nucbox off] every service answering: not off', get(_ob, '/api/status').get('nucboxOff'),
+       None)
+    _ofreach(False)
+    _odown = time.time()
+    _offtook(_ob, 'off-a', _COBB, _OFF_TACO)
+    # The card on the slot, read while the NucBox cannot be reached.
+    _say({'offer': _OFF_CARD})
+    _n75 = len(_ofasked('street=1975'))
+    _oat, _ooff, _oearly = [], None, None
+    _oseen = 0
+    while time.time() - _odown < 6.6:
+        _k = len(_ofasked('street=1985'))
+        if _k > _oseen:
+            _oat.extend([time.time()] * (_k - _oseen))
+            _oseen = _k
+        if _ooff is None:
+            _st = get(_ob, '/api/status').get('nucboxOff')
+            if _st:
+                _ooff = (time.time(), _st)
+            elif time.time() - _odown < 1.2:
+                _oearly = _st
+        time.sleep(0.05)
+    _oh = _holding(_ob) or {}
+    eq('[nucbox off] a NucBox gone under a minute (here 1.5 s) is not yet said off, and the '
+       'pins it did not answer are refused "NucBox down", end and pickup',
+       (_oearly, _oh.get('endWhy'), _oh.get('pickupsWhy')), (None, 'NucBox down', 'NucBox down'))
+    ok_('[nucbox off] ...then said off once every service has failed for NUCBOX_OFF_MS: in %.2f s'
+        % ((_ooff[0] - _odown) if _ooff else -1),
+        _ooff and 1.5 <= _ooff[0] - _odown <= 1.5 + 0.3 + 0.4 + 0.6)
+    _os = (_ooff or (0, {}))[1]
+    eq('[nucbox off] ...with which services, why and what kind, and the rig not said offline '
+       'on a timeout', (_os.get('services'), _os.get('why'), _os.get('kind'), _os.get('rigOffline')),
+       (['search', 'route', 'streets'], 'timed out after 0.4 s', 'timeout', False))
+    ok_('[nucbox off] ...since the first failure, not the second (%r)' % (_os.get('since'),),
+        isinstance(_os.get('since'), (int, float))
+        and _odown * 1000 <= _os['since'] <= _odown * 1000 + 800)
+    _say({'alive': True})
+    ok_('[nucbox off] ...and the beat carries it for the panel',
+        ((get(_ob, '/api/status').get('beat') or {}).get('nucboxOff') or {}).get('since')
+        == _os.get('since'))
+    _oline = [l for l in _olog if l.startswith('nucbox: unreachable')]
+    ok_('[nucbox off] ...said in the log once, with the reason and the first failure\'s time '
+        '(%r)' % (_oline,),
+        len(_oline) == 1 and re.match(r'^nucbox: unreachable \(search, route, streets\) \u2014 '
+                                      r'timed out after 0\.4 s, failing since '
+                                      r'\d{1,2}:\d\d:\d\d [AP]M$', _oline[0]))
+    # Asked at once, then NUCBOX_RETRY_MS (0.5 s) after its failure, then 1 s,
+    # then 2 s: each failure is the 0.4 s timeout, so 0.9, 1.4 and 2.4 apart.
+    _ogaps = [round(b - a, 2) for a, b in zip(_oat, _oat[1:])]
+    ok_('[nucbox off] the end refused "NucBox down" is asked again and again, each wait '
+        'longer: NUCBOX_RETRY_MS x 1, 2, 4 (gaps %r)' % (_ogaps,),
+        len(_ogaps) >= 3 and all(abs(g - w) <= 0.35 for g, w in zip(_ogaps, [0.9, 1.4, 2.4])))
+    # The fourth wait is x 10, 5 s: nothing more until then.
+    time.sleep(max(0, _oat[-1] + 3.5 - time.time()) if _oat else 0)
+    eq('[nucbox off] ...and then 5 s (NUCBOX_RETRY_MS x 10), not sooner',
+       len(_ofasked('street=1985')), len(_oat))
+    eq('[nucbox off] ...each "NucBox down" said in the log once, however often it is asked',
+       sorted(l.split(' #')[0] for l in _olog if '"NucBox down"' in l),
+       ['pin: none end', 'pin: none pickup'])
+    _ofreach(True)
+    _oup = time.time()
+    _oh = _settled(_ob, lambda h: h.get('endPinned') and h.get('pickupsPinned'), seconds=4.0)
+    _oback = time.time() - _oup
+    eq('[nucbox off] back: the end and the pickup refused "NucBox down" are asked again at '
+       'once and pinned, by the server',
+       (_oh.get('endPinned'), _oh.get('endBy'), _oh.get('pickupsPinned')), (True, 'server', 1))
+    ok_('[nucbox off] ...within a probe and the settle, not at the next 5 s retry (%.2f s)'
+        % _oback, _oback < 0.3 + 0.4 + 1.0 + 0.8)
+    time.sleep(0.4)
+    eq('[nucbox off] ...said in the log once, with how long and how many, the card on the slot '
+       'with them', [l for l in _olog if l.startswith('nucbox: back')],
+       ['nucbox: back after 0 min; asking again for 2 pins and the offer on the slot'])
+    _ofound = [l for l in _olog if l.startswith('pin: found')]
+    ok_('[nucbox off] ...and each pin found says so as any later find does, with its asks (%r)'
+        % (_ofound,),
+        sorted(l.split(' #')[0] for l in _ofound) == ['pin: found end', 'pin: found pickup']
+        and all(re.search(r' by server after (\d+) asks$', l)
+                and int(re.search(r'after (\d+) asks$', l).group(1)) >= 4 for l in _ofound))
+    ok_('[nucbox off] ...and the card on the slot, read while down, is searched again (%d new)'
+        % (len(_ofasked('street=1975')) - _n75), len(_ofasked('street=1975')) > _n75)
+    _say({'alive': True})
+    eq('[nucbox off] ...and off is cleared, in the status and on the beat',
+       (get(_ob, '/api/status').get('nucboxOff'),
+        (get(_ob, '/api/status').get('beat') or {}).get('nucboxOff')), (None, None))
+finally:
+    stop(_op)
+
+# Why, told apart: a port nothing listens on is "refused" (the NucBox reached,
+# its service not running), a name that cannot be looked up "name lookup
+# failed" (.invalid never resolves). Neither is the rig offline.
+_odead = 'http://127.0.0.1:%d' % free_port()
+for _oname, _obase, _owhy in (('refused', _odead, ('refused', 'refused')),
+                              ('dns', 'http://nucbox.invalid:9', ('name lookup failed', 'dns'))):
+    _op, _ob, _olog = _offserver('nbx-off-' + _oname, NUCBOX_SEARCH=_obase, NUCBOX_ROUTER=_obase,
+                                 NUCBOX_STREETS='', NUCBOX_PROBE_MS='200',
+                                 NUCBOX_TIMEOUT_MS='3000', NUCBOX_OFF_MS='300')
+    try:
+        _os = None
+        for _ in range(80):
+            _os = get(_ob, '/api/status').get('nucboxOff')
+            if _os:
+                break
+            time.sleep(0.05)
+        eq('[nucbox off] %s: off, said why (%r)' % (_oname, _os),
+           ((_os or {}).get('services'), (_os or {}).get('why'), (_os or {}).get('kind'),
+            (_os or {}).get('rigOffline')), (['search', 'route'], _owhy[0], _owhy[1], False))
+        time.sleep(0.2)
+        ok_('[nucbox off] ...and the log line says it (%r)' % ([l for l in _olog if 'nucbox:' in l],),
+            any(l.startswith('nucbox: unreachable (search, route) \u2014 %s, failing since ' % _owhy[0])
+                for l in _olog))
+    finally:
+        stop(_op)
+
+# NOT ALL AT ONCE: the re-asks on recovery take slots of the warming budget
+# (EARLY_WARM_PER_MIN, 6 in EARLY_WARM_MS, here 4 s), so with this window's
+# six spent by a planner page read just before, they wait for the window and
+# are asked then. NUCBOX_RETRY_MS a minute, so no retry stands in for them.
+_op, _ob, _olog = _offserver('nbx-off-budget', NUCBOX_SEARCH=_ofb, NUCBOX_ROUTER=_ofb,
+                             NUCBOX_STREETS=_ofb, NUCBOX_PROBE_MS='300', NUCBOX_TIMEOUT_MS='400',
+                             NUCBOX_OFF_MS='1000', NUCBOX_RETRY_MS='60000', EARLY_WARM_MS='4000')
+try:
+    time.sleep(0.8)
+    _ofreach(False)
+    _offtook(_ob, 'off-b', '1985 Cobb Parkway, Kennesaw, GA 30152', _OFF_TACO)
+    for _ in range(80):
+        if get(_ob, '/api/status').get('nucboxOff'):
+            break
+        time.sleep(0.05)
+    _say({'planner': {'stops': [
+        {'kind': 'dropoff', 'orders': 1, 'name': 'Pat Q.', 'street': None, 'city': None,
+         'state': None, 'zip': None, 'line': '%d Quillon Way, Marietta' % (700 + i)}
+        for i in range(6)], 'unfiled': 'dropoffs', 'asked': False}})
+    _owarm = time.time()
+    _ofreach(True)
+    _n85 = len(_ofasked('street=1985'))
+    time.sleep(max(0, _owarm + 2.8 - time.time()))
+    _oh = _holding(_ob) or {}
+    eq('[nucbox off] back with this window\'s budget spent: the re-asks wait, said already',
+       (_oh.get('endPinned'), _oh.get('endWhy'), len(_ofasked('street=1985')) - _n85,
+        [l for l in _olog if l.startswith('nucbox: back')]),
+       (False, 'NucBox down', 0, ['nucbox: back after 0 min; asking again for 2 pins']))
+    _oh = _settled(_ob, lambda h: h.get('endPinned') and h.get('pickupsPinned'), seconds=4.5)
+    eq('[nucbox off] ...and are asked once the window passes, and pin',
+       (_oh.get('endPinned'), _oh.get('pickupsPinned')), (True, 1))
+finally:
+    stop(_op)
+    _of.kill()
 
 # --- on time for both ----------------------------------------------------------
 #
