@@ -9290,6 +9290,13 @@ python3 rpi/test_handoff.py     #   76 on the three files the browser and the
 python3 rpi/test_service.py     #  58 on the systemd units BOTH installers
                                 #     write, asking systemd itself whether an
                                 #     environment assignment survived
+python3 rpi/test_lite.py        # 642 on the lite edition (lite/README.md): every
+                                #     door its switch shuts, checked shut with it
+                                #     and open without; no NucBox question asked;
+                                #     the verdict still arriving; and its card
+                                #     fitting 800x480, 1024x600, 480x320 and a
+                                #     phone in both themes (skipped without
+                                #     Playwright)
 python3 rpi/test_camera.py      #  42 on which tuning file opens the camera, and
                                 #     on who is already holding it
 python3 rpi/test_doctor.py      # 138 on the preflight running to the end, on
