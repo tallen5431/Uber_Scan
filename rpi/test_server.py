@@ -13098,6 +13098,9 @@ try:
     # scannerEnabled() asks only that the autopilot is there; SCANNER_CMD runs
     # the fake in its place.
     open(os.path.join(_croot, 'rpi', 'autopilot.py'), 'w').close()
+    # ...and the lite switch (lite/lite.js), required at load like the six.
+    os.mkdir(os.path.join(_croot, 'lite'))
+    shutil.copy(os.path.join(ROOT, 'lite', 'lite.js'), os.path.join(_croot, 'lite'))
     _cfg11 = os.path.join(_croot, 'rpi', 'config.json')
 
     def _carry11(on):
