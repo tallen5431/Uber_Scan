@@ -6601,12 +6601,25 @@ const framed = (page) => page.waitForFunction(
                  w: Math.round(r.width), sw: e.scrollWidth,
                  // ...and the heat guard's chip in it, with its sentence.
                  chip: e.querySelector('.chip') ? e.querySelector('.chip').textContent : null,
-                 title: e.title || '' };
+                 title: e.title || '',
+                 // ...and the first chip's colour against the pass colour's
+                 // (the NucBox out of reach is drawn in it), and the words'.
+                 chipColor: e.querySelector('.chip') ? getComputedStyle(e.querySelector('.chip')).color : null,
+                 color: cs.color };
       };
+      const noColor = (() => {
+        const t = document.createElement('span');
+        t.style.color = 'var(--no)';
+        document.body.appendChild(t);
+        const c = getComputedStyle(t).color;
+        t.remove();
+        return c;
+      })();
       const d = document.documentElement;
       return { conn: m('conn'), health: m('health'), shift: m('shift'),
                fits: d.scrollWidth <= d.clientWidth + 1 && d.scrollHeight <= d.clientHeight + 1,
-               phone: document.body.classList.contains('phoneview') };
+               phone: document.body.classList.contains('phoneview'), noColor: noColor,
+               rowColor: getComputedStyle(document.querySelector('.connbar')).color };
     });
     const say = async (beat) => {
       await page.evaluate((b) => window.__es.push(Object.assign({ alive: true, at: 1,
@@ -6668,6 +6681,37 @@ const framed = (page) => page.waitForFunction(
                               nucboxDown: ['search', 'route', 'streets'] });
     slot.nbxBack = await say(Object.assign({ gps: { state: 'ok', ageSeconds: 0.4 },
                                              nucboxDown: [] }, NOPI));
+    // ...and the whole NucBox out of reach for a minute or more (server.js
+    // nbxOffOut; the owner's 9 Nov shift, the car's hotspot out of data from
+    // 19:12): alone, beside the widest Pi chip and a GPS sixteen hours stale,
+    // refused instead of timed out, with no route at all, and back.
+    const at712 = await page.evaluate(() => {
+      const d = new Date();
+      d.setHours(19, 12, 4, 0);
+      return d.getTime();
+    });
+    const off = (why, kind, rigOffline) => ({ since: at712, why: why, kind: kind, rigOffline: rigOffline,
+                                              services: ['search', 'route', 'streets'] });
+    slot.nbxOff = await say(Object.assign({ gps: { state: 'ok', ageSeconds: 0.4 },
+                                            nucboxDown: ['search', 'route', 'streets'],
+                                            nucboxOff: off('timed out after 3 s', 'timeout', false) },
+                                          NOPI));
+    slot.nbxOffAll = await say({ gps: { state: 'stale', ageSeconds: 60000 }, cpuC: 84.6,
+                                 cpuCWhy: null,
+                                 throttled: { now: ['temp limit'], sinceBoot: ['temp limit'] },
+                                 throttledWhy: null, heatGuard: true,
+                                 nucboxDown: ['search', 'route', 'streets'],
+                                 nucboxOff: off('timed out after 3 s', 'timeout', false) });
+    slot.nbxOffRefused = await say(Object.assign({ gps: { state: 'ok', ageSeconds: 0.4 },
+                                                   nucboxDown: ['search', 'route', 'streets'],
+                                                   nucboxOff: off('refused', 'refused', false) },
+                                                 NOPI));
+    slot.nbxOffNet = await say(Object.assign({ gps: { state: 'ok', ageSeconds: 0.4 },
+                                               nucboxDown: ['search', 'route', 'streets'],
+                                               nucboxOff: off('network unreachable', 'unreachable',
+                                                              true) }, NOPI));
+    slot.nbxOffBack = await say(Object.assign({ gps: { state: 'ok', ageSeconds: 0.4 },
+                                                nucboxDown: [], nucboxOff: null }, NOPI));
     // A Took that replaced the order in the car (server.js writes the old
     // one's drop row `by: 'replaced'`): said on this row for a minute.
     await page.evaluate(() => window.__es.push({ heldReplaced: { at: 1, saidForMs: 60000 } }));
@@ -10259,6 +10303,44 @@ try:
         ok_('[%s] ...on the glass (%r)' % (_pn, _note('nbxAll')), _note('nbxAll').get('shown'))
         eq('[%s] ...and nothing once every service answers' % _pn,
            _note('nbxBack').get('hidden'), True)
+        # The whole NucBox out of reach for a minute (the owner's 9 Nov shift:
+        # the hotspot out of data, every pin "NucBox down" all evening, and
+        # only the grey "NucBox: down" above on the panel): the note starts
+        # with it, a chip in the pass colour and its words at full strength,
+        # since when on this panel's clock and what stops; the grey word goes.
+        eq('[%s] the NucBox out of reach for a minute: said first, a chip, since when and '
+           'what is paused, the grey word gone' % _pn,
+           (_note('nbxOff').get('chip'), _note('nbxOff').get('text')),
+           ('NO NUCBOX', 'NO NUCBOX since 7:12 PM · pins and maps paused'))
+        ok_('[%s] ...on the glass and whole, the shift line standing down for it (%r)'
+            % (_pn, _note('nbxOff')),
+            _note('nbxOff').get('shown') and _note('nbxOff').get('whole')
+            and not ((_h.get('nbxOff') or {}).get('shift') or {}).get('shown'))
+        eq('[%s] ...the chip in the pass colour, its words not the row\'s grey' % _pn,
+           (_note('nbxOff').get('chipColor') == (_h.get('nbxOff') or {}).get('noColor'),
+            _note('nbxOff').get('color') == (_h.get('nbxOff') or {}).get('rowColor')),
+           (True, False))
+        eq('[%s] ...the sentence and what to do on its title: the hotspot' % _pn,
+           _note('nbxOff').get('title'),
+           'No connection to the NucBox since 7:12 PM — pins and maps paused (timed out '
+           'after 3 s). Usually the rig has no internet: check the hotspot\'s data, or switch '
+           'to the phone\'s hotspot.')
+        eq('[%s] ...first, before the Pi chip and the GPS' % _pn,
+           _note('nbxOffAll').get('text'),
+           'NO NUCBOX since 7:12 PM · pins and maps paused · HOT 85°C · GPS: '
+           'no fix for 1000 min')
+        ok_('[%s] ...its chip on the glass beside them (%r)' % (_pn, _note('nbxOffAll')),
+            _note('nbxOffAll').get('shown') and _note('nbxOffAll').get('chip') == 'NO NUCBOX')
+        ok_('[%s] ...a refused connection is the NucBox reached, its services stopped (%r)'
+            % (_pn, _note('nbxOffRefused').get('title')),
+            'services refuse the connection' in (_note('nbxOffRefused').get('title') or '')
+            and '(refused)' in (_note('nbxOffRefused').get('title') or ''))
+        ok_('[%s] ...no route at all is the rig with no network (%r)'
+            % (_pn, _note('nbxOffNet').get('title')),
+            'The rig has no network at all' in (_note('nbxOffNet').get('title') or ''))
+        eq('[%s] ...and gone when it answers, the shift line back' % _pn,
+           (_note('nbxOffBack').get('hidden'),
+            ((_h.get('nbxOffBack') or {}).get('shift') or {}).get('shown')), (True, True))
         # The heat guard, as a chip: the cause and its temperature, and alone on
         # the row what the rig is doing about it.
         eq('[%s] a Pi at its temperature limit says the heat guard is on: a chip, the '

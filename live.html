@@ -767,6 +767,29 @@
     padding: 0 6px; border: 1px solid currentColor; border-radius: 999px;
     font-weight: 700;
   }
+  /* ...and the NucBox out of reach (offNote; the owner's 9 Nov shift, when a
+     grey "NucBox: down" here was not seen all evening): the same chip in the
+     pass colour, its words after it at full strength, not the row's grey.
+     The colours alone, so the row's box is where it was (test_layout). While
+     it shows, the shift line stands down from the row — it is on "…" in
+     full — so the line is whole on every panel the rig is driven with.
+     Stood down to no width rather than taken out: its "✓" is drawn from a
+     fallback font a pixel taller than the note's letters, and on the 3.5"
+     hat, where 📷 is not drawn, it is what sets the row's height — measured,
+     `display: none` there made the row 25px from 26 and moved the card above
+     it a pixel down. Kept in the row invisibly, it holds the height — and
+     its gap is handed back (the row's 8px, as a margin), which on a phone
+     held upright is the 3px the line was short of whole.
+     ...and the note shrinks as an ordinary item while it is this line. Its
+     million-to-one resistance above is a weight against the shift line, and
+     with the shift line out of the share it is the only shrinkable item on
+     the row: flexbox hands out only the SUM of the factors' share of an
+     overflow when that sum is under one, so at 0.000001 the note took a
+     millionth of it and ran 643px wide off the 3.5" hat (test_dashboard,
+     beside the Pi chip and a stale GPS). At one it ends in its ellipsis. */
+  #health.off { color: var(--text); flex-shrink: 1; }
+  #health .chip.offchip { color: var(--no); }
+  .connbar:has(#health.off) #shift { visibility: hidden; flex: 0 0 0; width: 0; margin-left: -8px; }
   .dot.on { background: var(--go); }
   #viewWrap { margin: 0; }
   /* The camera's picture and nothing else: `>`, the one <img> that is the
@@ -5701,6 +5724,7 @@
     // word about a minute that has passed — and so is the heat guard's.
     var heat = null;
     var bits = [];
+    var off = null;
     if (!socketUp) {
       setText(el.conn, 'reconnecting to the server…');
     } else if (scannerState && !scannerState.enabled) {
@@ -5736,8 +5760,9 @@
       setText(el.conn, blind ? 'scanner running, cannot see' : 'scanner reading');
       heat = heatNote();
       bits = healthNote();
+      off = offNote();
     }
-    showHealth(heat, bits);
+    showHealth(heat, bits, off);
     // "scanner reading" is the steady state and the green dot says it; the
     // words are behind "…". Every other state keeps its words on the row.
     el.conn.classList.toggle('steady', el.conn.textContent === 'scanner reading');
@@ -5784,8 +5809,11 @@
     // ...and the NucBox's services that are not answering (server.js
     // nbxDown, on the beat): the reason a map draws nothing or a door is
     // never pinned, which said nowhere before (the owner's snap of 22 Oct).
-    // Nothing while each answers, as for the GPS.
-    if (nucboxDown.length) {
+    // Nothing while each answers, as for the GPS. And nothing here while the
+    // whole NucBox is out of reach (nucboxOff): that is the red line at the
+    // front of the note (offNote), and the grey word beside it would be the
+    // same fact twice.
+    if (nucboxDown.length && !nucboxOff) {
       bits.push('NucBox: ' + (nucboxDown.length >= 3 ? 'down'
         : nucboxDown.map(function (s) { return NBX_WORDS[s] || s; }).join(', ') + ' down'));
     }
@@ -5848,6 +5876,10 @@
   // The NucBox services down, off the beat (healthNote), and their names
   // there: "NucBox: streets down".
   var nucboxDown = [];
+  // ...and the whole NucBox out of reach for a minute or more (server.js
+  // nbxOffOut, on the beat): {since, services, why, kind, rigOffline}, or
+  // null. See offNote.
+  var nucboxOff = null;
   var NBX_WORDS = { search: 'search', route: 'routes', streets: 'streets' };
   var HEAT_WORDS = { 'under-voltage': 'LOW POWER', throttled: 'SLOWED', capped: 'SLOWED' };
   var HEAT_ALONE = ' \u00b7 fewer auto reads';
@@ -5870,24 +5902,105 @@
                    + 'Snap are read as fast as ever.' };
   }
 
+  /* THE NUCBOX OUT OF REACH, said so it is seen (the owner's 9 Nov shift).
+   *
+   * Every pin of that evening failed, 19:12 to 00:27 EST, with the NucBox up
+   * all night: the car's hotspot had run out of data, so the rig had Wi-Fi
+   * and no internet behind it, and no road home. This row's only word for it
+   * was healthNote's "NucBox: down", grey, in the row's small type beside the
+   * takings, and the owner's account is that nothing on the panel said so.
+   * The scanner went on reading offers; the ends, the pickups and the maps
+   * had nothing to ask.
+   *
+   * So, once every NucBox service has failed for a minute (server.js
+   * nbxOffStep), the note STARTS with it, in the notices' kind of chip in the
+   * pass colour, and the words after it at full strength, not the row's grey:
+   *
+   *   [NO NUCBOX] since 7:12 PM · pins and maps paused
+   *
+   * "since" the minute the NucBox stopped answering, on this panel's clock;
+   * "pins and maps paused" because that is what stops — the offer's verdict,
+   * its rate and the takings do not need the NucBox and go on. While it shows,
+   * the shift line stands down from the row (it is on "…" in full, as ever),
+   * so the line has the row's width on every panel: measured in
+   * rpi/test_layout.py, whole at the rig's 1024x600, the 800x480 and a phone
+   * held upright. The chip's title and "…" carry the sentence and what to do:
+   * the likely cause is the car's internet, not the NucBox, so the hint says
+   * the hotspot — "check the hotspot's data, or switch to the phone's
+   * hotspot" — unless the server saw something else: a refused connection is
+   * the NucBox reached with its services stopped, and no route at all
+   * (ENETUNREACH on every service, `rigOffline`) is the rig with no network.
+   * The words say "usually" for the rest: a timeout cannot tell a dead
+   * hotspot from a NucBox switched off at home without asking some public
+   * host, which this rig does not do by itself.
+   *
+   * Gone the moment the probe hears the NucBox again, and the server asks
+   * every pin it refused again then (nbxRecover). */
+  var OFF_HINT = {
+    net: 'The rig has no network at all: check the hotspot is on and has data, or switch '
+         + 'to the phone\'s hotspot.',
+    refused: 'The NucBox is reached but its services refuse the connection: they may have '
+             + 'stopped at home.',
+    answered: 'The NucBox is reached but its services are not answering properly.',
+    usual: 'Usually the rig has no internet: check the hotspot\'s data, or switch to the '
+           + 'phone\'s hotspot.'
+  };
+  function offNote() {
+    var o = nucboxOff;
+    if (!o || typeof o.since !== 'number') return null;
+    var at = clock12(o.since);
+    return { chip: 'NO NUCBOX', said: ' since ' + at + ' \u00b7 pins and maps paused',
+             full: 'No connection to the NucBox since ' + at + ' \u2014 pins and maps paused'
+                   + (o.why ? ' (' + o.why + ').' : '.'),
+             hint: o.rigOffline ? OFF_HINT.net : OFF_HINT[o.kind] || OFF_HINT.usual,
+             // ...and "…"'s one line, the time and what is paused left to the
+             // row right under it: on the 3.5" hat in the scene picture the
+             // sheet is the verdict's half of the glass, and the sentence and
+             // the hint as two lines put its top 34px off the glass
+             // (test_layout).
+             sheet: 'No connection to the NucBox' + (o.why ? ' (' + o.why + ').' : '.') };
+  }
+
+  // "7:12 PM" off a time in ms, on this panel's clock.
+  function clock12(ms) {
+    var d = new Date(ms);
+    var m = d.getMinutes();
+    return (d.getHours() % 12 || 12) + ':' + (m < 10 ? '0' : '') + m
+      + (d.getHours() < 12 ? ' AM' : ' PM');
+  }
+
   // The row's note: the chip, then the words, one line. What "…" shows is
-  // the chip's sentence and the words, a line each (`healthLines`).
+  // the chip's sentence and the words, a line each (`healthLines`). The
+  // NucBox out of reach (offNote) first, its sentence and its hint a line
+  // each.
   var healthLines = [];
-  function showHealth(heat, bits) {
+  function showHealth(heat, bits, off) {
     var rest = bits.join(' \u00b7 ');
-    healthLines = (heat ? [heat.full] : []).concat(rest ? [rest] : []);
+    healthLines = (off ? [off.sheet + ' ' + off.hint] : []).concat(heat ? [heat.full] : [])
+      .concat(rest ? [rest] : []);
     setHidden(el.health, !healthLines.length);
-    if (!drawnAs(el.health, JSON.stringify([heat, rest]))) return;
+    el.health.classList.toggle('off', !!off);
+    if (!drawnAs(el.health, JSON.stringify([heat, rest, off]))) return;
     el.health.textContent = '';
+    if (off) {
+      var oc = document.createElement('span');
+      oc.className = 'chip offchip';
+      oc.textContent = off.chip;
+      oc.title = off.full + ' ' + off.hint;
+      el.health.appendChild(oc);
+      el.health.appendChild(document.createTextNode(off.said + (heat || rest ? ' \u00b7 ' : '')));
+    }
     if (heat) {
       var c = document.createElement('span');
       c.className = 'chip';
-      c.textContent = heat.chip + (rest ? '' : HEAT_ALONE);
+      c.textContent = heat.chip + (rest || off ? '' : HEAT_ALONE);
       c.title = heat.full;
       el.health.appendChild(c);
     }
     if (rest) el.health.appendChild(document.createTextNode((heat ? ' \u00b7 ' : '') + rest));
-    el.health.title = healthLines.join(' ');
+    // (The title has the room the sheet has not: the whole sentence.)
+    el.health.title = (off ? [off.full + ' ' + off.hint] : []).concat(healthLines.slice(off ? 1 : 0))
+      .join(' ');
   }
 
   function connect() {
@@ -6027,6 +6140,14 @@
       // ...and the NucBox's services down (healthNote), also beat-only.
       if (msg.nucboxDown !== undefined) {
         nucboxDown = Array.isArray(msg.nucboxDown) ? msg.nucboxDown : [];
+      }
+      // ...and the whole of it out of reach (offNote), also beat-only. Its
+      // end is the NucBox back: the card's own way line, if it said "NUCBOX
+      // DOWN", is asked again (nucboxBack).
+      if (msg.nucboxOff !== undefined) {
+        var wasOff = !!nucboxOff;
+        nucboxOff = msg.nucboxOff && typeof msg.nucboxOff === 'object' ? msg.nucboxOff : null;
+        if (wasOff && !nucboxOff) nucboxBack();
       }
       // A new offer on the record. `tookState` resets with it — the mark
       // belongs to the offer, not to the button.
@@ -8458,6 +8579,24 @@
     return { chip: 'NUCBOX DOWN · ⛶ Map looks it up',
              said: 'The NucBox did not answer (' + error + '), and the public map is '
                    + 'asked only when ⛶ Map is pressed.' };
+  }
+
+  /* The NucBox back after it was out of reach (nucboxOff ended): the card's
+     own walk asked again where it said NUCBOX DOWN, so the way line under
+     the card on the glass comes from the NucBox now rather than standing as
+     a refusal until the next card. Only the card's walk: it asks only the
+     NucBox. Map view's walk is not re-run without a press, because a place
+     the NucBox still did not answer would be asked of the public map, which
+     is only ever asked under ⛶ Map; the next press asks the NucBox first, and
+     the planner's fastest order, never kept unless the router answered it
+     (plannerRun), asks the router again with it. The server asks its own
+     refused pins again by itself (server.js nbxRecover). */
+  function nucboxBack() {
+    if (way && way.from === 'card' && way.ans && typeof way.ans.chip === 'string'
+        && way.ans.chip.indexOf('NUCBOX DOWN') === 0) {
+      way = null;
+      showWay(last);
+    }
   }
 
   /* An answer for the card whose places make `key` (mapWants): Map view's

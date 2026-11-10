@@ -1411,6 +1411,37 @@ HEAT_SAYS = {'off': '', 'alone': 'HOT 76°C · fewer auto reads',
              'hot gps': 'HOT 85°C · GPS: no fix for 1000 min',
              'slowed gps': 'SLOWED 82°C · GPS: no fix for 1000 min',
              'low power gps': 'LOW POWER · GPS: no fix for 123 min'}
+# The NucBox out of reach on the same row (live.html offNote; the owner's 9
+# Nov shift, the car's hotspot out of data from 19:12 and every pin refused
+# "NucBox down" with only a grey "NucBox: down" on the panel): `none`, the row
+# with no note, which the others' layout is held to; `on`, the line alone,
+# since 7:12 PM on the panel's own clock; `all`, beside the widest Pi chip
+# and a GPS a day stale. Measured on the rig's 1024x600, the 800x480, a
+# phone held upright and the 3.5" hat, in both pictures.
+_OFF_SINCE = int(time.mktime(time.localtime()[:3] + (19, 12, 4, 0, 0, -1)) * 1000)
+_OFF_STATE = {'since': _OFF_SINCE, 'services': ['search', 'route', 'streets'],
+              'why': 'timed out after 3 s', 'kind': 'timeout', 'rigOffline': False}
+NBX_OFF_BEATS = {
+    'none': {'heatGuard': False, 'cpuC': 52.0, 'gps': _HEAT_OK, 'nucboxDown': [],
+             'nucboxOff': None, 'throttled': {'now': [], 'sinceBoot': []}},
+    'on': {'heatGuard': False, 'cpuC': 52.0, 'gps': _HEAT_OK,
+           'nucboxDown': ['search', 'route', 'streets'], 'nucboxOff': _OFF_STATE,
+           'throttled': {'now': [], 'sinceBoot': []}},
+    'all': {'heatGuard': True, 'cpuC': 84.6, 'gps': _HEAT_STALE,
+            'nucboxDown': ['search', 'route', 'streets'], 'nucboxOff': _OFF_STATE,
+            'throttled': {'now': ['temp limit'], 'sinceBoot': ['temp limit']}},
+}
+NBX_OFF_SAYS = {'none': '', 'on': 'NO NUCBOX since 7:12 PM · pins and maps paused',
+                'all': 'NO NUCBOX since 7:12 PM · pins and maps paused · HOT 85°C · '
+                       'GPS: no fix for 1000 min'}
+NBX_OFF_TITLE = ('No connection to the NucBox since 7:12 PM — pins and maps paused (timed out '
+                 "after 3 s). Usually the rig has no internet: check the hotspot's data, or "
+                 "switch to the phone's hotspot.")
+# ...and "…"'s one line for it: the time and what is paused are on the row
+# under it, and two lines put the sheet's top off the 3.5" hat's glass.
+NBX_OFF_SHEET = ("No connection to the NucBox (timed out after 3 s). Usually the rig has no "
+                 "internet: check the hotspot's data, or switch to the phone's hotspot.")
+NBX_OFF_PANELS = [p for p in PANELS if p[0] in ('1024x600', '800x480', '390x844', '480x320')]
 # The small type on a card, in px, as each panel renders it: the address
 # line, a figure's label and the figure, the line under the card, the notice
 # and the status row. The rig's own 1024x600 takes a fifth more than the
@@ -1735,6 +1766,9 @@ const [base, panelsJson, pagesJson, framesJson, captionJson, snapJson,
 // see HEAT_BEATS on the Python side.
 const HEAT_BEATS = JSON.parse(heatJson).beats;
 const HEAT_WAS = JSON.parse(heatJson).was;
+// ...and the NucBox out of reach on the same row; see NBX_OFF_BEATS.
+const NBX_OFF_BEATS = JSON.parse(heatJson).off;
+const NBX_OFF_PANELS = JSON.parse(heatJson).offPanels;
 // The order in the car and the offer beside it; see HELD on the Python side.
 const HELD = JSON.parse(heldJson);
 // A card's payout read off a card found above the box, and the same read
@@ -3398,6 +3432,113 @@ const SNAP_MEASURE = (fixture) => {
       await ctx.close();
     }
   }
+  // The NucBox out of reach on the status row (live.html offNote), beat by
+  // beat, beside the widest real shift line, on the panels NBX_OFF_PANELS
+  // names. See NBX_OFF_BEATS on the Python side.
+  for (const panel of NBX_OFF_PANELS) {
+    for (const view of ['screen', 'scene']) {
+      const ctx = await browser.newContext({
+        viewport: { width: panel[1], height: panel[2] }, deviceScaleFactor: 1,
+      });
+      const page = await ctx.newPage();
+      await page.addInitScript((v) => {
+        try { localStorage.setItem('uberscan.liveView', v); } catch (e) {}
+        class FakeEventSource {
+          constructor(url) { this.url = url; window.__es = this; }
+          close() {}
+          push(obj) { if (this.onmessage) this.onmessage({ data: JSON.stringify(obj) }); }
+        }
+        window.EventSource = FakeEventSource;
+      }, view);
+      await page.route('**/api/frame.*', (route) => {
+        const v = /view=screen/.test(route.request().url()) ? 'screen' : 'scene';
+        route.fulfill({ status: 200, contentType: 'image/jpeg',
+                        body: Buffer.from(FRAMES[v], 'base64') });
+      });
+      await page.route('**/api/status*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ scanner: { enabled: true, running: true, error: null },
+                               status: { phase: 'scanning', message: '' },
+                               last: null, lastAgeMs: null, heardAgeMs: 400,
+                               offer: null, holding: null }) }));
+      // The widest real shift, as the heat guard's chip is measured beside.
+      await page.route('**/api/today*', (route) => route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ offers: 435, counted: 428, setAside: 7, took: 10,
+                               median: -17, earned: 140.5, earnedCost: 31.0,
+                               beforeClock: 0, unreadable: null, rolled: false,
+                               clockSet: true }) }));
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction(() => document.getElementById('view').naturalWidth > 2,
+                                 null, { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(600);
+      await page.evaluate(() => { if (window.__es.onopen) window.__es.onopen(); });
+      const offAt = {};
+      for (const [key, beat] of Object.entries(NBX_OFF_BEATS)) {
+        await page.evaluate((b) => window.__es.push(Object.assign(
+          { alive: true, at: 1, notSaving: null, tooBright: false, tooDim: false,
+            cpuCWhy: null, throttledWhy: null }, b)), beat);
+        await page.waitForTimeout(150);
+        offAt[key] = await page.evaluate(() => {
+          const d = document.documentElement;
+          const h = document.getElementById('health');
+          const shift = document.getElementById('shift');
+          const chip = h.querySelector('.chip');
+          const box = (el) => {
+            const b = el.getBoundingClientRect();
+            return [b.left, b.top, b.width, b.height].map((v) => Math.round(v * 10) / 10);
+          };
+          const hr = h.getBoundingClientRect();
+          const cr = chip ? chip.getBoundingClientRect() : null;
+          // The line's own words, to "paused", inside the note's box and on
+          // the glass: what must be read, whatever is cut after them.
+          let saidIn = false;
+          const tn = chip ? chip.nextSibling : null;
+          if (tn && tn.nodeType === 3 && tn.nodeValue.indexOf('paused') !== -1) {
+            const rg = document.createRange();
+            rg.setStart(tn, 0);
+            rg.setEnd(tn, tn.nodeValue.indexOf('paused') + 'paused'.length);
+            const r = rg.getBoundingClientRect();
+            saidIn = r.right <= hr.right + 0.5 && r.right <= window.innerWidth + 0.5;
+          }
+          const sr = shift.getBoundingClientRect();
+          return {
+            text: h.hidden ? '' : h.textContent,
+            chip: chip ? chip.textContent : null,
+            title: chip ? chip.title : null,
+            shown: !h.hidden && hr.width > 0 && hr.left >= -0.5
+                   && hr.right <= window.innerWidth + 0.5 && hr.bottom <= window.innerHeight + 0.5,
+            whole: h.scrollWidth <= h.clientWidth + 1,
+            chipIn: !!cr && cr.left >= hr.left - 0.5 && cr.right <= hr.right + 0.5,
+            saidIn: saidIn,
+            shiftShown: sr.width > 0 && getComputedStyle(shift).visibility !== 'hidden',
+            layout: JSON.stringify({ row: box(document.querySelector('.connbar')),
+                                     bar: [].slice.call(document.querySelector('.bottombar')
+                                       .children).map(box),
+                                     view: box(document.getElementById('viewWrap')) }),
+            over: d.scrollWidth > d.clientWidth + 1 || d.scrollHeight > d.clientHeight + 1,
+          };
+        });
+        if (key === 'on') {
+          await page.click('#more', { timeout: 5000 }).catch(() => {});
+          await page.waitForTimeout(150);
+          offAt.sheet = await page.evaluate(() => {
+            const s = document.getElementById('moreSheet');
+            const r = s.getBoundingClientRect();
+            return { lines: [].slice.call(s.querySelectorAll('.m-health')).map((n) => n.textContent),
+                     onGlass: !s.hidden && r.left >= -0.5 && r.top >= -0.5
+                              && r.right <= window.innerWidth + 0.5
+                              && r.bottom <= window.innerHeight + 0.5 };
+          });
+          await page.click('#more', { timeout: 5000 }).catch(() => {});
+          await page.waitForTimeout(100);
+        }
+      }
+      out[panel[0] + ' ' + view + ' nbxoff'] = offAt;
+      await page.close();
+      await ctx.close();
+    }
+  }
   // The Trip Planner's stops between offers, where they are drawn. Measured
   // against the same panel a moment before they arrived, so "the bar, the
   // status row and the picture did not move" is a comparison and not a guess.
@@ -4619,7 +4760,8 @@ try:
          json.dumps(PLANNER_PANELS), json.dumps(HERE_LINES), json.dumps(FOUNDPAY),
          json.dumps(LIVE_HERE_LINES), json.dumps(HELD),
          json.dumps({'beat': CHIPS_BEAT, 'card': CHIPS_CARD, 'offer': CHIPS_OFFER}),
-         json.dumps({'beats': HEAT_BEATS, 'was': HEAT_WAS}),
+         json.dumps({'beats': HEAT_BEATS, 'was': HEAT_WAS, 'off': NBX_OFF_BEATS,
+                     'offPanels': NBX_OFF_PANELS}),
          json.dumps({'forms': DRIVE_FORMS, 'way': WAY_FORMS})],
         env=env, capture_output=True, text=True, timeout=600)
     line = (proc2.stdout or '').strip().split('\n')[-1] if proc2.stdout else ''
@@ -4896,6 +5038,41 @@ try:
                [_hoff.get('layout')])
             no_('...nothing past the glass at %s' % where,
                 any((hm.get(k) or {}).get('over') for k in HEAT_SAYS))
+
+    # The NucBox out of reach (live.html offNote): the line at the front of
+    # the note, whole and on the glass at the rig's 1024x600, the 800x480 and
+    # a phone held upright, in both pictures, with the shift line standing
+    # down for it; its chip and its own words on the glass on the 3.5" hat
+    # too. Beside the widest Pi chip and a GPS a day stale it still leads, its
+    # words on the glass. Its sentence and what to do on its title and on
+    # "…". And the row, the bar and the picture where the row with no note
+    # left them, whatever it says.
+    for panel, w, h in NBX_OFF_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            om = got.get('%s %s nbxoff' % (panel, view)) or {}
+            _oo, _oa, _on = om.get('on') or {}, om.get('all') or {}, om.get('none') or {}
+            eq('the panel says the NucBox is out of reach at %s: the chip, since when, what is '
+               'paused (%r)' % (where, _oo.get('text')),
+               (_oo.get('chip'), _oo.get('text'), _oo.get('shown'), _oo.get('chipIn'),
+                _oo.get('saidIn')), ('NO NUCBOX', NBX_OFF_SAYS['on'], True, True, True))
+            ok_('...whole at %s' % where, _oo.get('whole'))
+            no_('...the shift line standing down for it at %s' % where, _oo.get('shiftShown'))
+            eq('...the sentence and the hotspot on its title at %s' % where,
+               _oo.get('title'), NBX_OFF_TITLE)
+            eq('...and on "…", on the glass, at %s' % where,
+               ((((om.get('sheet') or {}).get('lines') or [None])[0]),
+                (om.get('sheet') or {}).get('onGlass')), (NBX_OFF_SHEET, True))
+            eq('...first beside the Pi chip and a stale GPS at %s, its words on the glass'
+               % where, (_oa.get('chip'), _oa.get('text'), _oa.get('saidIn')),
+               ('NO NUCBOX', NBX_OFF_SAYS['all'], True))
+            eq('...and nothing with every service answering at %s, the shift line on the row'
+               % where, (_on.get('text'), _on.get('shiftShown')), ('', True))
+            eq('...the row, the bar and the picture where a row with no note left them at %s'
+               % where, sorted(set((om.get(k) or {}).get('layout') for k in NBX_OFF_SAYS)),
+               [_on.get('layout')])
+            no_('...nothing past the glass at %s' % where,
+                any((om.get(k) or {}).get('over') for k in NBX_OFF_SAYS))
 
     # The night palette moves nothing: the card, its words, the row, the bar
     # and the picture where the day's palette left them, the page black.
