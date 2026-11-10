@@ -4536,6 +4536,10 @@ What is left is free and safe: an offer that expires is a decline to both
 apps, and a mouse right-click is Android's Back, which may or may not dismiss
 an offer card — a thirty-second test on the phone, not something to build.
 
+### The editions
+
+**Lite is a mode of this repository, not a second repository and not a fork (the owner, Nov 2026).** Asked for by drivers who want "just a means to read their phone screen with the camera, and the card pay output card", on a display with no touch, running at boot. A separate repository was the obvious way to keep it simple, and it was refused for what it would copy: the reader, both parser ports and every money-safety rule (`CENTS_LOST`, `unsure_payout`, `money_is_clipped`, the rescue rules, the card finder, DoorDash's raise and evened read, the remembered crop) are where this project's fixes land, often several a week, and a copy would receive them late or never — exactly the code that decides what a driver is told an offer pays. So lite is one switch read once at boot (`LITE=1`, or `"lite": true` in the config's settings; `rpi/lite.py` for the scanner, `lite/lite.js` for the server) that shuts the NucBox, the reports, the uploads, the sync and the scanner's map-label and map-band threads, and keeps the camera, calibration, ▣ Set box, the settings, the reader, the verdict, speech and the offers log. Its panel (`lite/lite.html`) draws what the scanner already decided and decides nothing itself. A `lite` branch takes only builds that passed the gate; a public face, if ever, is a small wrapper repository that pulls from this one, never a copy. Do not re-propose splitting lite out, and do not give it its own copy of anything that reads a card or judges one: lite may turn things off, never fork them. `rpi/test_lite.py` holds every door both ways; the decision and the rules are in `CLAUDE.md` and `lite/README.md`.
+
 ## Measured on a real week — 1,166 offers, 13–20 Sep 2026
 
 The numbers above this line came from a 272-card export. This is a bigger and

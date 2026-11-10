@@ -593,6 +593,8 @@ used. A one-line key across the map's foot names the marks on it.
 | `tools/install-sync.sh` | Puts the rig's journal on a timer to the machine at home; see the rig's README |
 | `tools/places_report.js`, `tools/places_nightly.sh` | The NucBox's offline report of where good offers start, and its nightly rebuild; see *Where the good offers start* |
 | `tools/strategy.js` | What $/hr to expect and what holding out for a line paid, off the record: one computation for the report's Strategy tab and `tools/shift_report.py --strategy`; see *The Strategy tab* |
+| [`lite/`](lite/README.md) | The lite edition: the camera, the reader and one big card on a display with nothing to touch, on at boot — the full rig with its experimental half switched off by one flag (`LITE=1`), not a copy of it. Its page, its server switch, its installer and kiosk, and its parts list; see [lite/README.md](lite/README.md) |
+| [`CLAUDE.md`](CLAUDE.md) | What a new working session needs before it starts: the lite decision and its rules, the standing conventions (twin parsers, signed commits, privacy, branches) and the settled list. Short on purpose; AUDITS.md has the reasons |
 | [`AUDITS.md`](AUDITS.md) | What has already been looked at: what was fixed, what is known and still open, and — the point of the file — proposals that were checked against the code and found to be wrong, so the same ground is not dug twice. Read it before starting anything that sounds like an improvement |
 
 ## Looking at a shift afterwards

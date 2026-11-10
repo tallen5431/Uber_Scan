@@ -1364,6 +1364,72 @@ ok_('assemble.js STITCH_MS (%s ms) is at least twice rpi/scan_pi.py SCREEN_AUTO_
     % (_stitch and _stitch.group(1), _hot and _hot.group(1)),
     _stitch and _hot and int(_stitch.group(1)) >= 2 * float(_hot.group(1)) * 1000)
 
+# --- what a new session reads first: CLAUDE.md --------------------------------
+#
+# The lite edition was decided once, with reasons, and a session that does not
+# know it will propose the obvious thing — a separate repository — or give lite
+# its own copy of a parser. CLAUDE.md is loaded at the start of every session,
+# so the decision is recorded there and held here: the file exists, says where
+# lite lives and that the money code never forks, carries the settled list,
+# and points at AUDITS.md, whose Settled section has the entry with the
+# reasons. Prose cannot be checked for truth, but these are the sentences
+# whose absence would cost a day.
+_claude_md_path = os.path.join(ROOT, 'CLAUDE.md')
+ok_('CLAUDE.md exists at the root, where each session finds it', os.path.exists(_claude_md_path))
+_claude_md = open(_claude_md_path, encoding='utf-8').read() if os.path.exists(_claude_md_path) else ''
+_cm = re.sub(r'\s+', ' ', _claude_md)
+ok_('...and is short enough to be read every time (%d lines)' % _claude_md.count('\n'),
+    0 < _claude_md.count('\n') <= 120)
+for _says, _why in (
+        ('## The lite edition', 'has a Lite edition section'),
+        ('mode of this repository', 'says lite is a mode, not a separate repository'),
+        ('`lite/`', 'says where lite lives'),
+        ('`LITE=1`', 'names the flag'),
+        ('`lite` branch', 'names the lite branch'),
+        ('must never fork', 'says the money code is shared and never forks'),
+        ('behind the full mode', 'says features go in behind the full mode'),
+        ('`rpi/offer_parser.py`', 'names the twin parsers'),
+        ('`tests/fixtures/cases.json`', '...and their corpus'),
+        ('`git commit -S`', 'says commits are signed'),
+        ('No model names', 'says no model names'),
+        ('Tailscale IPs', 'says what must never be committed'),
+        ('release gate', 'says main moves only through the gate'),
+        ('AUDITS.md', 'points at AUDITS.md'),
+        ('rpi/README.md', 'points at rpi/README.md')):
+    ok_('CLAUDE.md %s' % _why, _says in _cm)
+for _rule in ('$/mile', 'payout floors', 'pace', 'heat map', 'Silence is never read as an accept',
+              'seventh control', 'never presses the phone', 'never a pin, a GPS drop or a figure'):
+    ok_('CLAUDE.md carries the settled rule: %s' % _rule, _rule in _cm)
+# ...and the reasons are in the ledger, under Settled, where the rest are.
+_settled = _audits[_audits.index('## Settled'):_audits.index('\n## ', _audits.index('## Settled') + 3)]
+ok_("AUDITS.md's Settled has the lite decision", 'Lite is a mode of this repository' in _settled)
+# Every path the file names in backticks exists, as AUDITS.md's must.
+for _named in sorted(set(re.findall(r'`([A-Za-z0-9_./-]+\.(?:js|py|html|css|md|sh|json))`',
+                                    _claude_md))):
+    # ...but the calibration, which the rig writes at its first start and git
+    # ignores: named because it is where the config key lives.
+    if _named == 'rpi/config.json':
+        continue
+    ok_('CLAUDE.md names a file that exists: %s' % _named,
+        os.path.exists(os.path.join(ROOT, _named)))
+
+# No model names anywhere in the repository's text: a convention CLAUDE.md
+# states, held across every file the repo ships.
+_MODEL = re.compile(r'\b(Opus|Sonnet|Haiku)\b|claude-(?:opus|sonnet|haiku|instant|[0-9])', re.I)
+_named_models = []
+for _dir, _subdirs, _names in os.walk(ROOT):
+    _subdirs[:] = [d for d in _subdirs if d not in ('.git', 'node_modules', 'vendor', '.claude')]
+    for _name in _names:
+        if not _name.endswith(('.py', '.js', '.html', '.md', '.sh', '.css', '.json')):
+            continue
+        _f = os.path.join(_dir, _name)
+        if os.path.relpath(_f, ROOT) == os.path.join('rpi', 'test_lint.py'):
+            continue    # this file, whose pattern names what it looks for
+        with open(_f, encoding='utf-8', errors='replace') as _fh:
+            if _MODEL.search(_fh.read()):
+                _named_models.append(os.path.relpath(_f, ROOT))
+eq('no file names a model', _named_models, [])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d static checks passed' % ok)
 sys.exit(1 if bad else 0)
