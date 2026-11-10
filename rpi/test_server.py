@@ -15104,11 +15104,23 @@ try:
     eq('[earnings] ...an iPhone\'s HEIC is refused with what to send instead',
        _eraw(_eb, '/api/earnings/shot', b'\x00\x00\x00\x18ftypheic' + b'\x00' * 64, 'image/heic'),
        (415, {'ok': False, 'error': 'an iPhone\'s HEIC picture cannot be read here; send the screenshot as PNG or JPEG'}))
-    eq('[earnings] ...a picture over the cap is refused (413), and nothing is kept',
-       (_eraw(_eb, '/api/earnings/shot', b'\x89PNG\r\n\x1a\n' + b'\x00' * 3000001, 'image/png')[0],
+    # The server answers 413 and closes the moment the body passes the cap, so
+    # the client is often still writing the rest of the 3 MB when the socket
+    # goes: urllib then raises a broken pipe (or a reset) instead of handing
+    # back the 413. That is the refusal arriving early, not a fault — the same
+    # allowance the mapwalk cap check above makes ('cut') — and it failed the
+    # release gate of 06d3e05 and several full runs before it on that race
+    # alone. What must hold either way is that nothing was kept.
+    try:
+        _ebig = _eraw(_eb, '/api/earnings/shot', b'\x89PNG\r\n\x1a\n' + b'\x00' * 3000001,
+                      'image/png')[0]
+    except (urllib.error.URLError, ConnectionError, OSError):
+        _ebig = 'cut'
+    eq('[earnings] ...a picture over the cap is refused (413, or cut off mid-send), and nothing is kept',
+       (_ebig in (413, 'cut'),
         os.path.isdir(os.path.join(_ehome, 'earnings'))
         and [n for n in os.listdir(os.path.join(_ehome, 'earnings')) if n.endswith('.shot')]),
-       (413, False))
+       (True, False))
     try:
         urllib.request.urlopen(_eb + '/api/earnings/shot', timeout=5)
         _eget = 200
