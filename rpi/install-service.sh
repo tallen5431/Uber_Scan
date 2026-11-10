@@ -4,6 +4,7 @@
 #   sudo bash rpi/install-service.sh              # verdicts spoken aloud
 #   sudo SPEAK=0 bash rpi/install-service.sh      # printed to the journal only
 #   sudo ARGS="--keep-scans" bash rpi/install-service.sh   # flags for the scanner
+#   sudo LITE=1 bash rpi/install-service.sh       # the lite edition (lite/README.md)
 #
 # ...and on the machine at home that keeps the copy, which has no camera:
 #
@@ -47,6 +48,13 @@ ARGS="${ARGS:-}"
 # left at its default: the journal would land in rpi/journal.jsonl inside the
 # clone, which works and stands the only backup next to a `git clean`.
 COPY="${COPY:-}"
+# The lite edition: the camera, the reader and one card, no NucBox, reports or
+# uploads (lite/lite.js, rpi/lite.py). Baked into the unit as LITE=1 rather
+# than left to rpi/config.json, because the unit is what lite/install.sh owns
+# and the config is rewritten whole by the scanner. Anything but 1 is the full
+# rig, and the line is left out altogether, so a full install's unit is byte
+# for byte what it was.
+LITE="${LITE:-0}"
 
 # node, found the way the driver's own shell finds it — nvm installs live in
 # the home directory and root's PATH does not see them.
@@ -125,6 +133,11 @@ else
   DESCRIPTION="Uber Scan — the panel, and the scanner that reads offers off the phone"
   UNIT_ENV="Environment=SCANNER_SPEAK=$SPEAK
 Environment=\"SCANNER_ARGS=$ARGS\""
+  if [ "$LITE" = "1" ]; then
+    DESCRIPTION="Uber Scan lite — the offer card, read off the phone"
+    UNIT_ENV="$UNIT_ENV
+Environment=LITE=1"
+  fi
   UNIT_GROUPS="SupplementaryGroups=audio video"
 fi
 
