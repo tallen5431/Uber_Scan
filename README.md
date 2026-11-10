@@ -501,6 +501,23 @@ all:
   rig's own server refuses is a bug in the page, said as one ("no pin for X
   — a bug: the rig refused the question"), and is never handed to the public
   map instead.
+* **When the rig cannot reach the NucBox at all** — the owner's 9 Nov
+  shift, when the car's hotspot ran out of data at 19:12 and every pin until
+  00:27 was refused "NucBox down" with the NucBox up all night — the panel
+  says so once every service has failed for a minute: a red chip at the
+  front of the status row, "**NO NUCBOX** since 7:12 PM · pins and maps
+  paused", the shift line standing down for it, and on its title and "…"
+  the sentence and the likely fix: "Usually the rig has no internet: check
+  the hotspot's data, or switch to the phone's hotspot." (A refused
+  connection says the NucBox's services have stopped instead, and no route
+  at all, ENETUNREACH, that the rig has no network.) A pin refused "NucBox
+  down" is asked again 30 s, 1 min and 2 min later and then every 5 min for
+  as long as its order is held, and the moment the health probe hears the
+  NucBox again every such pin — ends, pickups, stores — and the card on the
+  slot are asked again, six new searches a minute at most. The log says
+  each change once: `nucbox: unreachable (search, route, streets) — timed
+  out after 3 s, failing since 7:12:04 PM` and `nucbox: back after 4 h 12
+  min; asking again for 3 pins`. NUCBOX_OFF_MS moves the minute.
 * **How each place was found, drawn under the pins.** The card's disc as a
   faint dashed circle round its fix (blue, the car's colour; the order in
   the car's own card's disc in amber): the card's distance plus half a mile.
