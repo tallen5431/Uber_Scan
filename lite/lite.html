@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Offer Card</title>
+<meta name="description" content="The lite edition's one card: whether the offer on the phone is worth taking, readable from the driver's seat.">
+<meta name="theme-color" content="#0b0f14">
+<link rel="icon" href="/icons/icon-192.png">
+<!--
+  THE LITE PANEL — one card, read at a glance from the driver's seat.
+
+  The lite edition (CLAUDE.md, lite/README.md) is a display with nothing to
+  touch, opened full screen at boot by lite/install.sh's kiosk. So this page
+  has no buttons it needs: it listens to the same event stream live.html does
+  (/api/events) and draws ONE card from it — the verdict word and its colour,
+  the hourly rate large, then the pay, the minutes, the miles and the rate per
+  mile — with one quiet line under it for the rig's own state.
+
+  WHY ITS OWN PAGE AND NOT A MODE OF live.html. live.html is ten thousand
+  lines of map, held orders, choosers and a driving bar, every one of which
+  lite turns off; a mode would be a `hidden` on most of the page and the page
+  would still load, parse and run all of it — on a board that may be a Zero
+  2 W. What must stay shared is not the drawing but the DECISION, and none of
+  that is here: the verdict, the rate, the doubts, the clipped and unsure
+  payouts are all worked out by the scanner (rpi/scan_pi.py emit, the parser,
+  pipeline.py's money rules) and arrive on the wire finished. This page only
+  paints what it is sent, with live.html's own words for each state, so a
+  driver who moves from one to the other reads the same thing.
+
+  Self-contained on purpose — no styles.css, no ui.js, no service worker: a
+  kiosk that boots before the network has nothing to fetch but this file and
+  the stream.
+
+  The phone setup (▣ Set box on live.html, the settings on index.html) is on
+  the same server for a phone on the same Wi-Fi; the two links in the corner
+  are for that phone and are not needed on the panel.
+-->
+<style>
+  /* Dark first: a car at night is where this is read most, and the full rig's
+     panel has only ever been dark. Light for a sunlit dashboard, by the
+     display's own preference or ?theme=light. */
+  :root {
+    --bg: #0b0f14;
+    --text: #eef4fb;
+    --muted: #9fb3c9;
+    --line: #5d738d;
+    --card: #141c26;
+    /* The full rig's verdict colours (styles.css), so ACCEPT is the same
+       green on both. Each with its dim fill for the card's background. */
+    --go: #33ff88;     --go-fill: #0e4a2a;
+    --warn: #ffce4b;   --warn-fill: #5a3d06;
+    --no: #ff5468;     --no-fill: #5a1520;
+    --doubt: #c9b6f2;  --doubt-fill: #2e2547;
+    --bad: #ff5468;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f4f6f9; --text: #0b1620; --muted: #44566a; --line: #8a9bb0; --card: #ffffff;
+      --go: #0b7a3b;   --go-fill: #d5f5e1;
+      --warn: #8a5a00; --warn-fill: #ffefc2;
+      --no: #b4122a;   --no-fill: #ffd9de;
+      --doubt: #5b3fa8; --doubt-fill: #ebe3ff;
+      --bad: #b4122a;
+      color-scheme: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6f9; --text: #0b1620; --muted: #44566a; --line: #8a9bb0; --card: #ffffff;
+    --go: #0b7a3b;   --go-fill: #d5f5e1;
+    --warn: #8a5a00; --warn-fill: #ffefc2;
+    --no: #b4122a;   --no-fill: #ffd9de;
+    --doubt: #5b3fa8; --doubt-fill: #ebe3ff;
+    --bad: #b4122a;
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "DejaVu Sans", sans-serif;
+    display: flex;
+    flex-direction: column;
+    /* The kiosk has no cursor to move and nothing to scroll to: a page that
+       scrolled would hide half the card on a 3.5" screen with no way back. */
+    overflow: hidden;
+    cursor: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* The card. Every size is a share of the screen's SHORT side (vmin) or of
+     its height, so one rule fits 480x320, 800x480 and 1024x600 alike — the
+     three panels lite/README.md lists — and a phone held either way. */
+  #card {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 2vmin 2vmin 0;
+    border: 0.8vmin solid var(--line);
+    border-radius: 2.4vmin;
+    background: var(--card);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 1vmin 2vmin;
+    text-align: center;
+    overflow: hidden;
+  }
+  #card.go    { background: var(--go-fill);    border-color: var(--go); }
+  #card.warn  { background: var(--warn-fill);  border-color: var(--warn); }
+  #card.no    { background: var(--no-fill);    border-color: var(--no); }
+  #card.doubt { background: var(--doubt-fill); border-color: var(--doubt); border-style: dashed; }
+  /* A fault is not a verdict: no fill, dashed, so a glance never reads a dead
+     camera as PASS (live.html's rule for its own card). */
+  #card.fault { border-style: dashed; border-color: var(--bad); }
+  /* Older than READ_STALE_MS: still there, but plainly not now. */
+  #card.stale { opacity: .35; }
+
+  #word {
+    font-weight: 800;
+    letter-spacing: .02em;
+    /* "WAITING FOR AN OFFER", the widest word, is 0.70 em a letter: 6.5vw
+       keeps its twenty letters inside a 480px card (rpi/test_lite.py). */
+    font-size: min(10vmin, 6.5vw);
+    line-height: 1.05;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #card.go #word    { color: var(--go); }
+  #card.warn #word  { color: var(--warn); }
+  #card.no #word    { color: var(--no); }
+  #card.doubt #word { color: var(--doubt); }
+  #card.fault #word { color: var(--bad); }
+  /* A mark beside the word, so the verdict is not carried by colour alone. */
+  #card.go #word::before   { content: '\2713\00a0'; }
+  #card.warn #word::before { content: '\2248\00a0'; }
+  #card.no #word::before   { content: '\2715\00a0'; }
+
+  .rate {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 1vmin;
+    line-height: 1;
+    margin: 1.2vmin 0 0.6vmin;
+    max-width: 100%;
+  }
+  #rate {
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    font-size: min(30vmin, 22vw);
+    white-space: nowrap;
+  }
+  .unit { font-size: min(9vmin, 7vw); font-weight: 700; color: var(--muted); }
+  #target { font-size: min(4.6vmin, 3.8vw); color: var(--muted); min-height: 1.2em; }
+
+  .figs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1.5vmin;
+    width: 100%;
+    margin-top: 1.6vmin;
+  }
+  .figs div { min-width: 0; }
+  .figs b {
+    display: block;
+    /* Four across: a share of the WIDTH as well, because "$123.45" over a
+       quarter of an 800px card is what decides it (rpi/test_lite.py). */
+    font-size: min(8.5vmin, 5vw);
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .figs small {
+    display: block;
+    font-size: min(4.4vmin, 3.6vw);
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    white-space: nowrap;
+  }
+
+  footer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 1.6vmin;
+    padding: 1.2vmin 3vmin 1.6vmin;
+    font-size: min(4.4vmin, 3.6vw);
+    color: var(--muted);
+    min-width: 0;
+  }
+  #dot {
+    flex: 0 0 auto;
+    width: 2.2vmin; height: 2.2vmin;
+    border-radius: 50%;
+    background: var(--line);
+  }
+  #dot.ok   { background: var(--go); }
+  #dot.warn { background: var(--warn); }
+  #dot.bad  { background: var(--bad); }
+  #status {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #status.warn { color: var(--warn); }
+  #status.bad  { color: var(--bad); font-weight: 700; }
+  .setup { flex: 0 0 auto; white-space: nowrap; }
+  .setup a { color: var(--muted); }
+  /* A phone held upright (the setup phone, or an old phone as the display):
+     the word may take two lines, the figures go two by two, and every size
+     is a share of the width, which is the short side here. */
+  @media (max-aspect-ratio: 1/1) {
+    #word { white-space: normal; font-size: 10vw; }
+    #rate { font-size: 25vw; }
+    .unit { font-size: 8vw; }
+    #target { font-size: 4vw; }
+    .figs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4vw 2vw; }
+    .figs b { font-size: 9vw; }
+    .figs small { font-size: 4vw; }
+    footer { font-size: 3.6vw; }
+  }
+  /* On a 3.5" panel the status line is worth every pixel and nobody points a
+     phone at the corner: the links go. They are on /index.html anyway. */
+  @media (max-width: 560px) { .setup { display: none; } }
+</style>
+</head>
+<body>
+
+<main id="card" class="empty" aria-live="polite">
+  <div id="word">STARTING</div>
+  <div class="rate"><span id="rate">--</span><span class="unit" id="unit">/hr</span></div>
+  <div id="target"></div>
+  <div class="figs">
+    <div><b id="pay">--</b><small id="lPay">pay</small></div>
+    <div><b id="min">--</b><small id="lMin">minutes</small></div>
+    <div><b id="mi">--</b><small>miles</small></div>
+    <div><b id="pmi">--</b><small id="lPmi">per mile</small></div>
+  </div>
+</main>
+
+<footer>
+  <span id="dot"></span>
+  <span id="status">connecting to the scanner…</span>
+  <span class="setup">phone: <a href="/live.html">Set box</a> · <a href="/index.html">settings</a></span>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  // ?theme=light|dark, for a display whose own preference is wrong for the
+  // car, and for the fit checks (rpi/test_lite.py) to see both.
+  var theme = /[?&]theme=(light|dark)\b/.exec(location.search);
+  if (theme) document.documentElement.setAttribute('data-theme', theme[1]);
+
+  // live.html's two clocks, with its reasons there: STALE_MS is how long the
+  // scanner may be silent before it is called gone; READ_STALE_MS how old a
+  // verdict may be before it is drawn as not now. Same numbers, same names,
+  // so a change to one is found by a search for the other.
+  var STALE_MS = 12000;
+  var READ_STALE_MS = 16000;
+
+  // live.html's words for each state, so both pages say the same thing.
+  var PHASE_LABEL = { check: 'CHECKING', aim: 'AIM THE CAMERA', calibrated: 'CALIBRATED',
+                      scanning: 'WAITING FOR AN OFFER', error: 'SCANNER PROBLEM' };
+  var STATE_LABEL = { go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' };
+  var DOUBT_LABEL = { pay: 'CHECK THE PAY', time: 'CHECK THE TIME', speed: 'CHECK THE DISTANCE',
+                      leg: 'CHECK THE TIME', rate: 'CHECK PAY AND TIME', screen: 'NOT AN OFFER' };
+  var BLIND_LABEL = { stalled: 'CAMERA STALLED', dark: 'TOO DARK TO BE SURE' };
+
+  var el = {};
+  ['card', 'word', 'rate', 'unit', 'target', 'pay', 'min', 'mi', 'pmi', 'lPay', 'lMin', 'lPmi',
+   'dot', 'status'].forEach(function (id) { el[id] = document.getElementById(id); });
+
+  var last = null;        // the newest reading (a message with `ready`)
+  var readAt = 0;         // ...when it was read, on THIS page's clock
+  var seenAt = 0;         // anything at all from the scanner, on this clock
+  var socketUp = false;
+  var phase = null;       // the autopilot's last phase message
+  var scanner = null;     // /api/status's scanner block, at load
+  var beat = { blind: null, tooBright: false, tooDim: false, notSaving: null,
+               heatGuard: false, throttled: null, cpuC: null };
+
+  function setText(node, text) { if (node.textContent !== text) node.textContent = text; }
+
+  function money(n, d) {
+    if (typeof n !== 'number' || !isFinite(n)) return '--';
+    return (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(d);
+  }
+  // live.html's rateText: one decimal under $100, whole dollars over.
+  function rateText(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return '--';
+    var a = Math.abs(n);
+    return (n < 0 ? '-$' : '$') + (a >= 100 ? Math.round(a) : a.toFixed(1));
+  }
+  // An age off the wire, made safe: a missing one is "too old to vouch for"
+  // (live.html's age()), never "fresh".
+  function age(ms) {
+    return (typeof ms === 'number' && isFinite(ms) && ms >= 0) ? ms : READ_STALE_MS + 1;
+  }
+
+  /* The one quiet line: the rig's own state, worst first. Returns
+   * [words, level] with level ok | warn | bad. Short, because at 480x320 the
+   * line has room for about forty characters. */
+  function statusLine() {
+    var quiet = Date.now() - seenAt;
+    if (!socketUp) return ['not connected to the rig', 'bad'];
+    if (scanner && scanner.enabled === false) return ['scanner is off on this server', 'bad'];
+    if (scanner && scanner.enabled && !scanner.running && scanner.error) {
+      return ['scanner stopped: ' + scanner.error, 'bad'];
+    }
+    if (phase && phase.phase === 'error') {
+      return ['scanner problem' + (phase.message ? ': ' + phase.message : ''), 'bad'];
+    }
+    if (!seenAt || quiet > STALE_MS) {
+      return [seenAt ? 'nothing from the camera for ' + Math.round(quiet / 1000) + ' s'
+                     : 'waiting for the camera', 'bad'];
+    }
+    if (beat.blind === 'stalled') return ['camera stalled — reseat its cable if it stays', 'bad'];
+    if (beat.blind === 'dark') return ['too dark — phone in the mount, screen on?', 'warn'];
+    // LOW POWER leads the rest: the cure is the power lead, and an
+    // under-voltage Pi reads slowly and can corrupt its card.
+    var word = beat.throttled && beat.throttled.now && beat.throttled.now.length
+      ? beat.throttled.now[0] : null;
+    if (word === 'under-voltage') return ['LOW POWER — check the power lead', 'bad'];
+    if (beat.notSaving) return ['offers log not saving', 'warn'];
+    if (phase && phase.phase === 'aim') return ['aim the camera at the phone', 'warn'];
+    if (phase && (phase.phase === 'check' || phase.phase === 'calibrated')) {
+      return ['calibrating', 'warn'];
+    }
+    if (beat.tooBright) return ['phone too bright — turn it down a notch', 'warn'];
+    if (beat.tooDim) return ['phone too dim — turn it up', 'warn'];
+    if (beat.heatGuard) {
+      return ['HOT' + (typeof beat.cpuC === 'number' ? ' ' + Math.round(beat.cpuC) + '°C' : ''),
+              'warn'];
+    }
+    var r = last;
+    var fresh = r && Date.now() - readAt <= READ_STALE_MS;
+    if (r && r.ready && fresh) return ['camera ok', 'ok'];
+    // live.html's noVerdictSaid, the part of it a lite card needs: a payout
+    // at the box's edge is refused by the money rules and said so.
+    if (r && fresh && r.clipped) return ['camera ok · pay at the box edge — not trusted', 'warn'];
+    if (r && fresh && typeof r.pay === 'number' && r.pay > 0 && !r.notAnOffer) {
+      return ['camera ok · pay, no time — box may cut it off', 'warn'];
+    }
+    return ['camera ok · no card', 'ok'];
+  }
+
+  function render() {
+    var s = statusLine();
+    setText(el.status, s[0]);
+    el.status.className = s[1] === 'ok' ? '' : s[1];
+    el.dot.className = s[1];
+
+    var r = last;
+    var faulty = !socketUp || (phase && phase.phase === 'error') || beat.blind;
+    if (!r || !r.ready || faulty) {
+      // No verdict to show. The word says what the rig is doing instead —
+      // never a verdict colour, so a dead rig is never read as PASS.
+      el.card.className = faulty ? 'fault' : 'empty';
+      var p = phase || {};
+      setText(el.word, !socketUp ? 'NOT CONNECTED'
+        : beat.blind ? (BLIND_LABEL[beat.blind] || 'CANNOT SEE')
+        : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER'));
+      setText(el.rate, '--'); setText(el.unit, '/hr'); setText(el.target, '');
+      setText(el.pay, '--'); setText(el.min, '--'); setText(el.mi, '--'); setText(el.pmi, '--');
+      setText(el.lPay, 'pay'); setText(el.lMin, 'minutes'); setText(el.lPmi, 'per mile');
+      return;
+    }
+
+    var stale = Date.now() - readAt > READ_STALE_MS;
+    var doubt = r.state === 'doubt';
+    el.card.className = (doubt ? 'doubt' : (STATE_LABEL[r.state] ? r.state : 'empty'))
+                        + (stale ? ' stale' : '');
+    // `locked` is two frames agreeing; `whole` is the card finished. Only
+    // both together are a verdict to act on, and anything less carries the
+    // "?" — live.html's `settled`, for the reason it gives: half a card
+    // always reads better than the whole one.
+    var settled = r.locked && r.whole !== false;
+    setText(el.word, doubt ? (DOUBT_LABEL[r.doubt] || 'READ AGAIN')
+      : (STATE_LABEL[r.state] || '') + (settled ? '' : ' ?'));
+    // A reading that cannot be true gets no rate, but keeps the rate's room.
+    setText(el.rate, doubt ? '--' : rateText(r.perHour));
+    setText(el.unit, '/hr');
+    // What the colour was judged against, and whether running costs came
+    // off it: the driver's own target and cost per mile, set on the phone.
+    var t = typeof r.target === 'number' ? 'target ' + money(r.target, 0) + '/hr' : '';
+    if (r.cost > 0 && typeof r.costPerMile === 'number') {
+      t += (t ? ' · ' : '') + 'after ' + money(r.costPerMile, 2) + '/mi costs';
+    } else if (r.uncosted) {
+      t += (t ? ' · ' : '') + 'no distance — rate is a ceiling';
+    }
+    setText(el.target, t);
+    // The card's own figures, raw, for checking against the phone; "pay ?"
+    // when the payout was read off a card found above the drawn box.
+    setText(el.lPay, r.cropFrom === 'found' ? 'pay ?' : 'pay');
+    setText(el.pay, money(r.pay, 2));
+    var shown = typeof r.cardMinutes === 'number' ? r.cardMinutes : r.minutes;
+    setText(el.min, typeof shown === 'number' && isFinite(shown) ? String(Math.round(shown)) : '--');
+    setText(el.lMin, r.fromDeadline ? 'min left' : 'minutes');
+    setText(el.mi, typeof r.miles === 'number' && isFinite(r.miles) ? r.miles.toFixed(1) : '--');
+    setText(el.pmi, money(r.perMile, 2));
+    setText(el.lPmi, r.cost > 0 ? 'net / mile' : 'per mile');
+  }
+
+  function take(msg) {
+    if (!msg.replay) seenAt = Date.now();
+    if (msg.phase) phase = msg;
+    else if (phase && phase.phase === 'scanning') phase = null;
+    // The beat's own fields: each only when present, as live.html reads them.
+    if (msg.blind !== undefined) beat.blind = msg.blind || null;
+    if (msg.phase) beat.blind = null;
+    if (msg.tooBright !== undefined) beat.tooBright = !!msg.tooBright;
+    if (msg.tooDim !== undefined) beat.tooDim = !!msg.tooDim;
+    if (msg.notSaving !== undefined) beat.notSaving = msg.notSaving || null;
+    if (msg.heatGuard !== undefined) beat.heatGuard = !!msg.heatGuard;
+    if (msg.throttled !== undefined) beat.throttled = msg.throttled || null;
+    if (msg.cpuC !== undefined) beat.cpuC = typeof msg.cpuC === 'number' ? msg.cpuC : null;
+    if (msg.ready !== undefined) {
+      last = msg;
+      // A replay is the last reading sent again to a new socket, with its
+      // age: never re-stamped as freshly read.
+      readAt = msg.replay ? Date.now() - age(msg.ageMs) : Date.now();
+    }
+    if (scanner && !msg.replay && scanner.enabled) { scanner.running = true; scanner.error = null; }
+    render();
+  }
+
+  function seed() {
+    var x = new XMLHttpRequest();
+    x.open('GET', '/api/status');
+    x.timeout = 4000;
+    x.onload = function () {
+      try {
+        var s = JSON.parse(x.responseText);
+        // Whether a scanner runs at all, and its error: the stream only
+        // carries what a running one says. Its liveness is the stream's.
+        scanner = s.scanner || null;
+      } catch (e) { /* the stream says the rest */ }
+      render();
+    };
+    x.send();
+  }
+
+  function connect() {
+    var src = new EventSource('/api/events');
+    src.onopen = function () { socketUp = true; seed(); render(); };
+    src.onmessage = function (e) {
+      var msg;
+      try { msg = JSON.parse(e.data); } catch (err) { return; }
+      if (msg && typeof msg === 'object') take(msg);
+    };
+    // EventSource reconnects by itself; this only says so meanwhile.
+    src.onerror = function () { socketUp = false; render(); };
+  }
+
+  // Ages move with nothing arriving: the stale dim, "nothing for N s".
+  // ...and while the scanner is quiet, the server is asked again every ten
+  // seconds whether it is running at all, so a scanner that died says why.
+  var ticks = 0;
+  setInterval(function () {
+    ticks++;
+    if (socketUp && Date.now() - seenAt > STALE_MS && ticks % 10 === 0) seed();
+    render();
+  }, 1000);
+  render();
+  connect();
+
+  // For the suites: draw a message as if it came off the stream.
+  window.__lite = { take: function (m) { socketUp = true; take(m); } };
+})();
+</script>
+</body>
+</html>
