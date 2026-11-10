@@ -3295,6 +3295,72 @@ eq('[time] ...and the tally carries the figures for the row',
    {'n': 4, 'waitMs': 620, 'readMs': 390, 'overlapped': 1})
 ok_('[time] ...and a window whose reads were quick outside the read says nothing of time',
     not any('time:' in l for l in _said_hq + _said_hk + _said_hw))
+# --- [slots] the engines' gate, seen working (PL.OCR_SLOTS; ocr_gate) ---------
+#
+# Each read's own wait for an engine slot (`ms['slot']`) and the window's
+# label and spare-link engine calls held back for a card read's, said as one
+# part after the `time:` part: when the gate held anything back, or beside a
+# `time:` part; the figures on the tally (`ocr`, for the `seen` row) either
+# way. Invented figures.
+_gw = {'card': {'asks': 90, 'waited': [4.0]},
+       'spare': {'asks': 2, 'waited': [179.0]},
+       'label': {'asks': 12, 'waited': [180.0, 210.0, 250.0, 300.0]},
+       'spent': {0: 10.0, 1: 50.0, 2: 60.0}, 'stopped': 2}
+_gf = SP.ocr_gate(2, [0.0] * 38 + [20.0, 35.0, 60.0], _gw)
+eq('[slots] the figures: the slots, each read\'s wait median and those that waited, and the '
+   'label\'s and the spare links\' engine calls held back',
+   _gf, {'slots': 2, 'reads': 41, 'readsWaited': 3, 'readWaitMs': 0, 'readsWaitedMs': 35,
+         'stopped': 2, 'labelAsks': 12, 'labelWaited': 4, 'labelWaitMs': 250,
+         'spareAsks': 2, 'spareWaited': 1, 'spareWaitMs': 179,
+         'engines': {'1': 42, '2': 50}})
+eq('[slots] ...said as one part', SP.ocr_gate_part(_gf),
+   'ocr slots 2, reads waited 0ms median (3 of 41 waited, +35ms median), label OCRs 4 of 12 '
+   'waited +250ms median, spare OCRs 1 of 2 waited +179ms median, 2 stopped as dropped, '
+   'engines at once 1:42% 2:50%')
+_gq = SP.ocr_gate(2, [0.0, 0.0], {'card': {'asks': 2, 'waited': []},
+                                  'spare': {'asks': 0, 'waited': []},
+                                  'label': {'asks': 3, 'waited': []}, 'stopped': 0})
+eq('[slots] a window the gate held nothing back in says nothing of it, unless a time: part '
+   'was said',
+   (SP.ocr_gate_part(_gq), SP.ocr_gate_part(_gq, time_said=True)),
+   (None, 'ocr slots 2, reads waited 0ms median (0 of 2 waited), label OCRs 0 of 3 waited'))
+_go = SP.ocr_gate(0, [0.0], {})
+eq('[slots] ...and with the gate off (UBERSCAN_OCR_SLOTS=0), "ocr slots off" beside a time: '
+   'part, nothing otherwise',
+   (SP.ocr_gate_part(_go, time_said=True), SP.ocr_gate_part(_go)), ('ocr slots off', None))
+# Through Health: the read's `ms['slot']` counted (not a dark-skipped read's),
+# the part after the reads' own figures, every part before it as it was.
+_was_waits = PL.ocr_slot_waits
+try:
+    PL.ocr_slot_waits = lambda reset=True: _gw
+    _hg = SP.Health()
+    _hg.reset(0.0)
+    _hg.add({'ms': {'total': 430, 'warp': 40, 'slot': 0.0}, 'clipped': False},
+            {'pay': 9.0, 'complete': True})
+    _hg.add({'ms': {'total': 470, 'warp': 40, 'slot': 35.0}, 'clipped': False},
+            {'pay': 9.0, 'complete': True})
+    _hg.add({'ms': {'total': 1, 'slot': 900.0}, 'clipped': False, 'skipped': 'dark'},
+            {'pay': None, 'complete': False})
+    _said_hg = []
+    SP.log = _said_hg.append
+    _tg = _hg.report(SP.HEALTH_EVERY + 1.0, None, type('AScanner', (), {'crop_box': None})())
+finally:
+    SP.log = _real_log2
+    PL.ocr_slot_waits = _was_waits
+eq('[slots] the tally carries the gate\'s figures for the row, a dark-skipped read\'s left out',
+   {k: (_tg.get('ocr') or {}).get(k) for k in ('slots', 'reads', 'readsWaited', 'labelWaited')},
+   {'slots': PL.ocr_slots(), 'reads': 2, 'readsWaited': 1, 'labelWaited': 4})
+ok_('[slots] ...and the health line says it after the reads\' own figures, the parts before it '
+    'unchanged (%r)' % _said_hg[-1:],
+    any(l.startswith('health over 121s: 3 reads, 2 complete; median 470ms; ')
+        and ('; ocr slots %d, reads waited 35ms median (1 of 2 waited, +35ms median), '
+                       'label OCRs 4 of 12 waited +250ms median, spare OCRs 1 of 2 waited '
+                       '+179ms median, 2 stopped as dropped, engines at once 1:42%% 2:50%%;'
+                       % PL.ocr_slots()) in l
+        for l in _said_hg))
+ok_('[slots] ...and the windows above, whose gate held nothing back, say nothing of it',
+    not any('ocr slots' in l for l in _said_hq + _said_hk + _said_hw))
+_ht.slot_ms = []
 # This process's CPU, as a share of one core over the window: worked off the
 # process clock, not the caller's `now`, and None over too short a window.
 _was_cpu = SP.process_cpu

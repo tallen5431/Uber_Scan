@@ -2059,6 +2059,213 @@ if _cb_screen is not None:
     eq('...and a map label box past each edge of the band is cut as the box clamped to it',
        _cb_lab, {k: True for k in ('left', 'top', 'right', 'bottom')})
 
+# --- one gate for every engine (PL.OCR_SLOTS) ----------------------------------
+#
+# At most OCR_SLOTS tesseracts at once, a card read first, then the rescue's
+# links on the spare threads, then the map label; a link the chain let go of
+# is stopped at its slot. Held with stand-in engine calls on real threads
+# (the order slots are handed out in), then with real reads (the answers).
+import threading                                               # noqa: E402
+
+
+def _hold(gate, role, began, release, order, job=None):
+    """A thread that takes a slot as `role`, says so, and holds it until
+    `release` is set. `job` is the spare link's Future, for a dropped one."""
+    def run():
+        PL._SLOT_LOCAL.role = role
+        PL._SLOT_LOCAL.job = job
+        try:
+            gate.take(role)
+        except PL._Dropped:
+            order.append(role + ' stopped')
+            began.set()
+            return
+        order.append(role)
+        began.set()
+        release.wait(5)
+        gate.give()
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    return t
+
+
+def _settle():
+    _time.sleep(0.15)
+
+
+_gate = PL._OcrSlots(2)
+_order, _go = [], [threading.Event() for _ in range(5)]
+_up = [threading.Event() for _ in range(5)]
+_a = _hold(_gate, 'card', _up[0], _go[0], _order)
+_b = _hold(_gate, 'card', _up[1], _go[1], _order)
+_up[0].wait(2), _up[1].wait(2)
+_c = _hold(_gate, 'label', _up[2], _go[2], _order)
+_settle()
+_d = _hold(_gate, 'spare', _up[3], _go[3], _order)
+_settle()
+_e = _hold(_gate, 'card', _up[4], _go[4], _order)
+_settle()
+eq('[slots] two engines read at once; a third waits, whatever asked', _order, ['card', 'card'])
+_go[0].set()
+_up[4].wait(2)
+_settle()
+eq('[slots] a slot given back goes to the card read that asked last, ahead of the label and '
+   'the spare link that asked before it', _order, ['card', 'card', 'card'])
+_go[1].set()
+_up[3].wait(2)
+_settle()
+eq('[slots] ...and the next to the spare link, ahead of the label', _order[3:], ['spare'])
+_go[4].set()
+_up[2].wait(2)
+_settle()
+eq('[slots] ...and the label last', _order[4:], ['label'])
+for _ev in _go:
+    _ev.set()
+for _t in (_a, _b, _c, _d, _e):
+    _t.join(2)
+_w = _gate.taken()
+eq('[slots] what waited is counted by role: the card read, the spare link and the label once '
+   'each, of three, one and one asks',
+   ({r: len(_w[r]['waited']) for r in PL.SLOT_ROLES}, {r: _w[r]['asks'] for r in PL.SLOT_ROLES}),
+   ({'card': 1, 'spare': 1, 'label': 1}, {'card': 3, 'spare': 1, 'label': 1}))
+eq('[slots] ...and never more than two engines read at once', (_gate.most, max(_w['spent'])), (2, 2))
+eq('[slots] ...and taking the figures starts them again',
+   {r: _gate.taken()[r]['asks'] for r in PL.SLOT_ROLES}, {'card': 0, 'spare': 0, 'label': 0})
+
+# A spare link the chain let go of while it waited for its slot is stopped
+# there — its answer was thrown away — and counted; one still wanted reads.
+_gate = PL._OcrSlots(1)
+_order, _go1, _up1 = [], threading.Event(), threading.Event()
+_holder = _hold(_gate, 'card', _up1, _go1, _order)
+_up1.wait(2)
+from concurrent import futures as _futures                     # noqa: E402
+_let_go, _wanted = _futures.Future(), _futures.Future()
+_upx, _upy, _goy = threading.Event(), threading.Event(), threading.Event()
+_x = _hold(_gate, 'spare', _upx, threading.Event(), _order, job=_let_go)
+_y = _hold(_gate, 'spare', _upy, _goy, _order, job=_wanted)
+_settle()
+_let_go.dropped = True
+_gate.poke()
+_upx.wait(2)
+_go1.set()
+_upy.wait(2)
+eq('[slots] a dropped link waiting for its slot is stopped there; the link still wanted reads',
+   sorted(_order), sorted(['card', 'spare stopped', 'spare']))
+eq('[slots] ...and the stopped one is counted', _gate.taken()['stopped'], 1)
+_goy.set()
+_y.join(2)
+
+# No limit (0, UBERSCAN_OCR_SLOTS=0): every engine reads when its thread asks.
+_gate = PL._OcrSlots(0)
+_order, _gos, _ups = [], [threading.Event() for _ in range(4)], [threading.Event() for _ in range(4)]
+_ts = [_hold(_gate, r, _ups[i], _gos[i], _order)
+       for i, r in enumerate(('card', 'card', 'spare', 'label'))]
+for _ev in _ups:
+    _ev.wait(2)
+eq('[slots] with no limit, four engines read at once and none waited',
+   (sorted(_order), sum(len(v['waited']) for k, v in _gate.taken().items()
+                        if k in PL.SLOT_ROLES)),
+   (sorted(['card', 'card', 'spare', 'label']), 0))
+for _ev in _gos:
+    _ev.set()
+eq('[slots] UBERSCAN_OCR_SLOTS: a whole number at or above 0 is the slots, anything else the '
+   'default',
+   [PL._slots_from_env(2, {'UBERSCAN_OCR_SLOTS': v}) for v in ('0', '3', ' 1 ', '-1', 'two', '')],
+   [0, 3, 1, 2, 2, 2])
+eq('[slots] four by default, one engine per core: at two the rescue\'s links waited for the box\'s '
+   'reads and the rescue took 50% longer (rpi/README.md); the label below the paired read\'s two',
+   (PL.OCR_SLOTS, PL.LABEL_BELOW, PL._SLOTS.label_below), (4, 2, 2))
+
+# ...and with slots to spare, the label still waits while the paired read has
+# both its frames in the engines, where a spare link does not.
+_gate = PL._OcrSlots(4)
+_order, _gl = [], [threading.Event() for _ in range(4)]
+_ul = [threading.Event() for _ in range(4)]
+_p1 = _hold(_gate, 'card', _ul[0], _gl[0], _order)
+_p2 = _hold(_gate, 'card', _ul[1], _gl[1], _order)
+_ul[0].wait(2), _ul[1].wait(2)
+_lb = _hold(_gate, 'label', _ul[2], _gl[2], _order)
+_settle()
+_sp = _hold(_gate, 'spare', _ul[3], _gl[3], _order)
+_ul[3].wait(2)
+_settle()
+eq('[slots] beside a paired read in full flow the label waits, and a spare link reads',
+   _order, ['card', 'card', 'spare'])
+_gl[0].set()
+_gl[3].set()
+_ul[2].wait(2)
+eq('[slots] ...and the label reads once fewer than two engines are', _order[3:], ['label'])
+for _ev in _gl:
+    _ev.set()
+for _t in (_p1, _p2, _lb, _sp):
+    _t.join(2)
+eq('[slots] ocr_slots sets them and says what they were', (PL.ocr_slots(3), PL.ocr_slots(2)),
+   (PL.OCR_SLOTS, 3))
+try:
+    PL.ocr_role('planner')
+    _bad_role = False
+except ValueError:
+    _bad_role = True
+ok_('[slots] a role the gate does not rank is refused, not ranked as a card', _bad_role)
+
+# Real reads: the same answers through one slot, two and none — figures, crop,
+# text and rescue — over the rescue chain's screens, paired, with a map
+# label's engine calls asked between them on a thread of their own. One slot
+# is the gate at its tightest: every spare link and every label waits behind
+# a card read, and links the chain let go of are stopped.
+if TC.available():
+    _label_stop = threading.Event()
+
+    def _labels():
+        with PL.ocr_role('label'):
+            _img = np.full((70, 400), 255, np.uint8)
+            cv2.putText(_img, '1256 Maple Run Ln', (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, 0, 2)
+            while not _label_stop.is_set():
+                PL.ocr(_img, '--oem 1 --psm 7 -c tessedit_do_invert=0')
+
+    def _paired(screen, box, width, slots):
+        PL.ocr_slots(slots)
+        q = np.array(TC.screen_corners(width), np.float32)
+        s = PL.Scanner(quad=q, roi=list(box), card_share=box[3])
+        g = s.geometry()
+        frames = [TC.mount(screen, width, seed=2), TC.mount(screen, width, seed=3)]
+        outs = s.settle(s.look_many(frames, None, g), g)
+        return [(o['parsed']['pay'], o['parsed']['miles'], o['parsed']['minutes'],
+                 o['parsed']['deliverBy'], o['crop'], o['cropFrom'], o['rescuedBy'],
+                 o['finder'], o['text'], o['clipped']) for o in outs], \
+            [o['ms']['slot'] for o in outs]
+
+    PL.spare_cores(True)
+    _lt = threading.Thread(target=_labels, daemon=True)
+    _lt.start()
+    _gsame, _slot_ms = [], []
+    PL.ocr_slot_waits(reset=True)
+    try:
+        for _scr, _bx, _w in ((TC.early_look_screen(), BOX, 720),
+                              (DD, TC.BOX_DD_PAY, 600), (DD, TC.BOX_DD_BELOW, 760),
+                              (TC.degrade(DD, 'shadow', seed=0), TC.BOX_DD_PAY, 680),
+                              (_stk, TC.BOX_DD_PAY, 680), (TC.uberx_screen(), BOX, 680)):
+            _got = {}
+            for _n in (0, 1, 2):
+                _got[_n], _ms_n = _paired(_scr, _bx, _w, _n)
+                _slot_ms += _ms_n
+            _gsame.append(_got[0] == _got[1] == _got[2])
+            if not _gsame[-1]:
+                print('  the gate changed %r into %r / %r' % (_got[0][0][:8], _got[1][0][:8],
+                                                             _got[2][0][:8]))
+    finally:
+        _label_stop.set()
+        _lt.join(10)
+        PL.ocr_slots(PL.OCR_SLOTS)
+    _seen = PL.ocr_slot_waits(reset=True)
+    eq('[slots] a paired read gives the same figures, crop, text and rescue through one slot, '
+       'two, and none, a label read asking beside it', _gsame, [True] * len(_gsame))
+    ok_('[slots] ...each read says what its engine calls waited for a slot, in ms (%r)'
+        % _slot_ms[:4], all(isinstance(v, float) and v >= 0 for v in _slot_ms))
+    ok_('[slots] ...and the label\'s engine calls waited for the card reads\' (%d of %d)'
+        % (len(_seen['label']['waited']), _seen['label']['asks']),
+        _seen['label']['waited'])
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d pipeline checks passed' % ok)
 sys.exit(1 if bad else 0)

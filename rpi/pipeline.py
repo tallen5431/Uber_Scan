@@ -1423,14 +1423,20 @@ class _SparePool(object):
             os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), self._nice)
         except (AttributeError, OSError):
             pass
+        # Every engine this thread reads with waits behind a card read for its
+        # slot (OCR_SLOTS), and gives up when the chain let go of its answer.
+        _SLOT_LOCAL.role = 'spare'
         while True:
             done, fn = self._jobs.get()
             try:
                 if done.set_running_or_notify_cancel():
+                    _SLOT_LOCAL.job = done
                     try:
                         done.set_result(fn())
                     except BaseException as e:    # noqa: BLE001 — handed back
                         done.set_exception(e)
+                    finally:
+                        _SLOT_LOCAL.job = None
             finally:
                 with self._lock:
                     self._idle += 1
@@ -1475,9 +1481,279 @@ def _taken(ahead, fn):
 
 
 def _drop(ahead):
-    """Let go of an answer nobody is going to ask for."""
-    if ahead is not None:
-        ahead.cancel()
+    """Let go of an answer nobody is going to ask for: taken back when it is
+    still queued, and when it has begun, stopped at its next engine (the
+    spare thread's next ask for a slot raises _Dropped; see OCR_SLOTS)."""
+    if ahead is not None and not ahead.cancel():
+        ahead.dropped = True
+        _SLOTS.poke()
+
+
+# ONE GATE FOR EVERY ENGINE: AT MOST OCR_SLOTS TESSERACTS READING AT ONCE, THE
+# CARD'S OWN READ FIRST, THE MAP LABEL NEVER BESIDE A PAIRED READ.
+#
+# Every engine above was given its thread for a reason measured alone — the
+# paired frame (_READ_WORKERS), the rescue's next link on a spare core
+# (_SPARE_WORKERS), DoorDash's map label on its own thread (scan_pi.MapLabels)
+# — and nothing counted them together. A DoorDash card's first read can be
+# two frames, two links started ahead and a label asked every 2 s: five
+# engines on a Pi 4's four cores, beside the camera loop that must never wait.
+# tools/pi_bench.py on the owner's Pi 4 read an Uber card in 392 ms median
+# with the service stopped; the 9 Nov shift's health lines, same build, said
+# `read 979-1526` ms median, the process at 120-169% of a core, load 2.1-5.3.
+#
+# So every tesseract call (ocr, tsv_rows; the library and the binary alike)
+# takes a slot first, and gives it back when the engine returns. A slot is
+# given to the highest-ranked asker: a card read ('card': the reader's
+# threads, the paired frame's, a ⌖ press's whole-screen read and the
+# planner's, which are read by the same reader), then the rescue's links
+# started ahead ('spare'), then the map label ('label'). Neither of the two
+# below a card read is given a slot while one waits, and each gives it back
+# after every engine call (a label's three boxes are three asks), so the
+# longest a card read can wait on one is the one engine call it began while
+# no card read was asking. The label besides reads only while fewer than
+# LABEL_BELOW engines are reading: not while the paired read has both its
+# frames in the engines. And a link the chain let go of (_drop) is stopped at
+# its next slot, not read for nobody: the box's read found the payout, so the
+# finder's read ahead of it was never going to be asked.
+#
+# WHY FOUR, NOT TWO. Two — the paired read's frames, the other two cores the
+# camera loop's — was the first guess, and measured it was wrong. With
+# tools/pi_bench.py --busy (the scanner's concurrent work, its real classes,
+# on rendered frames: paired reads back to back, the label asked every 2 s,
+# the map band, the live view at 30/s, a stand-in camera loop) on the
+# development box, 4 cores like the Pi, a new DoorDash card every 2.5 s so its
+# first read is the rescue: that read took 182-186 ms median with no gate,
+# 190 with 4 slots, 218 with 3 and 278 with 2 (+50%) — at 2 the finder's read
+# started ahead waited for the box's reads (143 ms median, 30 of 30) and the
+# spare cores bought nothing. The other reads, Uber 69-71 ms and DoorDash's
+# remembered crop 94-96, and the loop's tick p95 (8.4-9.6 ms), were the same
+# at every setting. Four is one engine per core, the most the rig ever wants
+# for a card (two frames, a link ahead of each), so it holds a card read's
+# engines to the cores without ever making one wait; the gate's work is the
+# ranking and the label. Pinned to 2 cores (an oversubscribed machine) every
+# setting read alike, the rescue 313 ms. See rpi/README.md, under "One gate
+# for every engine".
+#
+# WHAT IT DID NOT FIND: THE GAP. On that box the reads beside everything else
+# took what they take alone (an Uber card 70-72 ms busy, 69-76 alone), with
+# more than two engines reading under 5% of the time. Whatever turns 392 ms
+# into 1-1.5 s on the Pi, it was not reproduced here by engines sharing
+# cores; tools/pi_bench.py --busy on the Pi, and the health line's "ocr slots"
+# part (its share of time at each count of engines), are what will say.
+#
+# NOTHING HERE DECIDES WHAT A READ SAYS. A slot changes when an engine runs,
+# never what it is given or what it answers: tesseract's LSTM is deterministic
+# per image and every engine is the same model (_Tesseract). The chain decides
+# exactly as before; a link stopped as dropped was one whose answer the chain
+# had already thrown away. Measured over every rendered set this repo draws,
+# paired, through one slot and two (rpi/README.md): every frame gave the same
+# figures, crop, text and rescue as cf10ded.
+#
+# UBERSCAN_OCR_SLOTS=0 in the environment turns the gate off — every engine
+# reads when its thread asks and a dropped link reads on, exactly as before
+# it — without a code change, in the spirit of UBERSCAN_TESSERACT=binary; a
+# number sets the slots.
+OCR_SLOTS = 4
+SLOT_ROLES = ('card', 'spare', 'label')
+_LABEL_RANK = SLOT_ROLES.index('label')
+# The label reads only while fewer engines than this are: the paired read's
+# two (_READ_WORKERS). 0 would let it take any free slot.
+LABEL_BELOW = _READ_WORKERS
+# How many waits per role a health window keeps (ocr_slot_waits): a shift's
+# two minutes is a few hundred engine calls at most.
+SLOT_WAITS_KEEP = 512
+
+
+def _slots_from_env(default=OCR_SLOTS, env=None):
+    """The slots asked for by UBERSCAN_OCR_SLOTS, else `default`. A value that
+    is not a whole number at or above 0 is ignored, and the default kept."""
+    raw = str((os.environ if env is None else env).get('UBERSCAN_OCR_SLOTS', '')).strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        return default
+    return n if n >= 0 else default
+
+
+class _Dropped(Exception):
+    """A spare link whose answer the chain let go of, stopped at its next engine."""
+
+
+_SLOT_LOCAL = threading.local()
+
+
+class _OcrSlots(object):
+    """At most `slots` engines reading at once (0: no limit), a card read
+    first, then a spare link, then a label. See OCR_SLOTS."""
+
+    def __init__(self, slots):
+        self.slots = int(slots)
+        self.label_below = LABEL_BELOW
+        self._cond = threading.Condition(threading.Lock())
+        self._reading = 0
+        self._waiting = [0] * len(SLOT_ROLES)
+        # Per role: engine calls asked for, and the ms each one that had to
+        # wait waited, since the health window last took them (taken()).
+        self._asks = dict((r, 0) for r in SLOT_ROLES)
+        self._waits = dict((r, []) for r in SLOT_ROLES)
+        self.most = 0             # the most engines reading at once, ever
+        # Seconds spent with k engines reading, k = 0, 1, 2...: what the
+        # gate held the machine to, since the window last took it.
+        self._at = time.monotonic()
+        self._spent = {}
+        # ...and spare links stopped at a slot because the chain let go of
+        # their answer (_drop): engine calls not made for nobody.
+        self._stopped = 0
+
+    def _tick(self):
+        now = time.monotonic()
+        k = self._reading
+        self._spent[k] = self._spent.get(k, 0.0) + (now - self._at)
+        self._at = now
+
+    def _free(self, rank):
+        if self.slots <= 0:
+            return True
+        # The label, last, reads only while fewer than `label_below`
+        # engines are (LABEL_BELOW): not beside a paired read in full flow.
+        if rank == _LABEL_RANK and self.label_below and self._reading >= self.label_below:
+            return False
+        return self._reading < self.slots and not any(self._waiting[:rank])
+
+    def _dropped(self):
+        job = getattr(_SLOT_LOCAL, 'job', None)
+        return job is not None and getattr(job, 'dropped', False)
+
+    def take(self, role):
+        """Wait for a slot; returns the ms waited. Raises _Dropped for a
+        spare link whose answer was let go of."""
+        rank = SLOT_ROLES.index(role)
+        with self._cond:
+            self._asks[role] += 1
+            waited = 0.0
+            # Off (0): counted, and nothing else — every engine reads when
+            # its thread asks and a dropped link reads on, exactly as before
+            # the gate.
+            if self.slots > 0 and not self._free(rank):
+                began = time.monotonic()
+                self._waiting[rank] += 1
+                try:
+                    while not self._free(rank):
+                        if self._dropped():
+                            self._stopped += 1
+                            raise _Dropped()
+                        self._cond.wait(1.0)
+                finally:
+                    self._waiting[rank] -= 1
+                waited = (time.monotonic() - began) * 1000.0
+                kept = self._waits[role]
+                kept.append(waited)
+                del kept[:-SLOT_WAITS_KEEP]
+            if self.slots > 0 and self._dropped():
+                # Others may have been held back while this one waited.
+                self._stopped += 1
+                self._cond.notify_all()
+                raise _Dropped()
+            self._tick()
+            self._reading += 1
+            self.most = max(self.most, self._reading)
+        _SLOT_LOCAL.waited = getattr(_SLOT_LOCAL, 'waited', 0.0) + waited
+        return waited
+
+    def give(self):
+        with self._cond:
+            self._tick()
+            self._reading -= 1
+            self._cond.notify_all()
+
+    def poke(self):
+        """Wake the waiters: a link was dropped, or the slots changed."""
+        with self._cond:
+            self._cond.notify_all()
+
+    def taken(self, reset=True):
+        """{role: {'asks', 'waited': [ms, ...]}, 'spent': {engines: s},
+        'stopped': n} since the last reset."""
+        with self._cond:
+            self._tick()
+            out = dict((r, {'asks': self._asks[r], 'waited': list(self._waits[r])})
+                       for r in SLOT_ROLES)
+            out['spent'] = dict(self._spent)
+            out['stopped'] = self._stopped
+            if reset:
+                for r in SLOT_ROLES:
+                    self._asks[r] = 0
+                    self._waits[r] = []
+                self._spent = {}
+                self._stopped = 0
+        return out
+
+
+_SLOTS = _OcrSlots(_slots_from_env())
+
+
+def ocr_slots(n=None):
+    """Set how many engines may read at once (0: no limit); returns what it
+    was. None only asks."""
+    was = _SLOTS.slots
+    if n is not None:
+        _SLOTS.slots = max(0, int(n))
+        _SLOTS.poke()
+    return was
+
+
+def ocr_label_below(n=None):
+    """Set below how many engines reading the label may take a slot (0: any
+    free slot); returns what it was. None only asks."""
+    was = _SLOTS.label_below
+    if n is not None:
+        _SLOTS.label_below = max(0, int(n))
+        _SLOTS.poke()
+    return was
+
+
+def ocr_slot_waits(reset=True):
+    """What the gate did since this was last asked (see _OcrSlots.taken)."""
+    return _SLOTS.taken(reset)
+
+
+class ocr_role(object):
+    """`with ocr_role('label'):` — the engine calls made inside rank as
+    `role` (SLOT_ROLES) on this thread; outside, as they did."""
+
+    def __init__(self, role):
+        if role not in SLOT_ROLES:
+            raise ValueError('no such OCR role: %r' % role)
+        self.role = role
+
+    def __enter__(self):
+        self.was = getattr(_SLOT_LOCAL, 'role', None)
+        _SLOT_LOCAL.role = self.role
+        return self
+
+    def __exit__(self, *exc):
+        _SLOT_LOCAL.role = self.was
+        return False
+
+
+def slot_waited():
+    """The ms this thread's engine calls have waited for a slot, ever: a
+    read's share is the difference across it (Scanner._look)."""
+    return getattr(_SLOT_LOCAL, 'waited', 0.0)
+
+
+class _engine_slot(object):
+    """One engine call's slot, ranked by this thread's role ('card' unless
+    set: _SparePool's threads, ocr_role)."""
+
+    def __enter__(self):
+        _SLOTS.take(getattr(_SLOT_LOCAL, 'role', None) or 'card')
+        return self
+
+    def __exit__(self, *exc):
+        _SLOTS.give()
+        return False
 
 
 # A ceiling on engines, whatever the threading above does.
@@ -1578,10 +1854,13 @@ def _in_process(image, config, tsv):
 
 
 def ocr(image, config=OCR_CONFIG):
-    out = _in_process(image, config, tsv=False)
-    if out is not None:
-        return out
-    return pytesseract.image_to_string(stage_for_ocr(image), config=config)
+    # One engine call, in its slot (OCR_SLOTS): the binary's too, which is a
+    # whole process reading on a core.
+    with _engine_slot():
+        out = _in_process(image, config, tsv=False)
+        if out is not None:
+            return out
+        return pytesseract.image_to_string(stage_for_ocr(image), config=config)
 
 
 def tsv_rows(image, config=OCR_CONFIG):
@@ -1590,11 +1869,12 @@ def tsv_rows(image, config=OCR_CONFIG):
     The library returns the rows alone and the binary writes a header above
     them; the difference is dealt with here rather than by every caller.
     """
-    out = _in_process(image, config, tsv=True)
-    if out is not None:
-        return out.splitlines()
-    return pytesseract.image_to_data(stage_for_ocr(image),
-                                     config=config).splitlines()[1:]
+    with _engine_slot():
+        out = _in_process(image, config, tsv=True)
+        if out is not None:
+            return out.splitlines()
+        return pytesseract.image_to_data(stage_for_ocr(image),
+                                         config=config).splitlines()[1:]
 
 
 def ocr_lines(image, config=OCR_CONFIG):
@@ -2500,6 +2780,8 @@ class Scanner:
         now = time.time() if now is None else now
         g = self.geometry() if geom is None else geom
         t0 = time.perf_counter()
+        # (What this read's own engine calls waited for a slot: OCR_SLOTS.)
+        slot0 = slot_waited()
         if g.quad is not None and g.fixed_card_share is None:
             # Before anything is sized, work out what this quad actually is. A
             # tracked quad moves and a re-locked one can change shape, so this
@@ -2839,6 +3121,10 @@ class Scanner:
                 # box's read when refused, in place of it when kept.
                 'cardBox': card_box_ms,
                 'total': (t4 - t0) * 1000,
+                # ...and of `total`, what this read's engine calls spent
+                # waiting for a slot (OCR_SLOTS): 0 when none waited. The
+                # links it took from a spare thread are waited for in `find`.
+                'slot': slot_waited() - slot0,
             },
         }
 

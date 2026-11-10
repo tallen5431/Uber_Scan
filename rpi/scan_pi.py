@@ -2154,6 +2154,98 @@ class ReadTimes(object):
         return '; '.join(bits)
 
 
+# --- the engines' gate, seen working (PL.OCR_SLOTS) ---------------------------
+#
+# At most PL.OCR_SLOTS tesseracts read at once, a card read first, the
+# rescue's links started ahead next, DoorDash's map label last and never
+# beside a paired read in full flow (PL.LABEL_BELOW). Whether that
+# is what happened on a shift is a question the `time:` part cannot answer —
+# its `read` is the reader's own clock, slot wait and all — so the window's
+# gate is said as one more part, after it:
+#
+#   ocr slots 4, reads waited 0ms median (3 of 41 waited, +35ms median),
+#   label OCRs 4 of 12 waited +210ms median, spare OCRs 1 of 2 waited
+#   +179ms median, 2 stopped as dropped, engines at once 1:14% 2:54% 3:1%
+#
+#   reads waited     each card read's own engine calls' wait for a slot
+#                    (`ms['slot']`): the median over every read, and how many
+#                    waited at all with their median. Near 0 is the gate
+#                    working: a card read is ranked first.
+#   label OCRs       the map label's engine calls (a label read is up to
+#                    three), how many of them waited for a card read's slot,
+#                    and their median wait;
+#   spare OCRs       the same for the rescue's links on the spare threads;
+#   stopped          links the chain let go of while they waited, not read;
+#   engines at once  the share of the window's time 1, 2, 3... engines were
+#                    reading (the rest idle): on the development box under
+#                    the bench's busy load, 2 for ~55% and 3 or more under 5%.
+#                    The Pi's own figure is what says whether engines
+#                    crowding the cores is where its reads' time goes.
+#
+# Said when the gate held anything back in the window, or when the `time:`
+# part was said — a slow window is the one whose gate is worth seeing — and
+# as "ocr slots off" there when UBERSCAN_OCR_SLOTS=0 turned it off. The
+# figures ride the `seen` row as `ocr`, said or not. Measurement only.
+
+
+def _ms(values):
+    return int(round(_median(values))) if values else None
+
+
+def ocr_gate(slots, read_waits, gate):
+    """The window's gate as the `seen` row's `ocr` figures: `slots` (0 off),
+    `read_waits` each card read's ms['slot'], `gate` PL.ocr_slot_waits()."""
+    gate = gate or {}
+    waited = [w for w in read_waits if w > 0]
+    out = {'slots': slots, 'reads': len(read_waits), 'readsWaited': len(waited),
+           'readWaitMs': _ms(read_waits), 'readsWaitedMs': _ms(waited),
+           'stopped': gate.get('stopped', 0)}
+    for role, key in (('label', 'label'), ('spare', 'spare')):
+        got = gate.get(role) or {}
+        out['%sAsks' % key] = got.get('asks', 0)
+        out['%sWaited' % key] = len(got.get('waited') or [])
+        out['%sWaitMs' % key] = _ms(got.get('waited') or [])
+    # ...and the share of the window's time k engines were reading, k = 1,
+    # 2, ... (the idle share is the rest): whole percent, a level under half
+    # a percent left out.
+    spent = gate.get('spent') or {}
+    total = float(sum(spent.values()))
+    out['engines'] = dict(('%d' % k, int(round(100.0 * v / total)))
+                          for k, v in sorted(spent.items())
+                          if k > 0 and total > 0 and 100.0 * v / total >= 0.5)
+    return out
+
+
+def ocr_gate_part(figures, time_said=False):
+    """The health line's part for `figures` (ocr_gate), or None."""
+    if not figures:
+        return None
+    if not figures['slots']:
+        return 'ocr slots off' if time_said else None
+    held = figures['readsWaited'] or figures['labelWaited'] or figures['spareWaited'] \
+        or figures['stopped']
+    if not (held or time_said):
+        return None
+    bits = ['ocr slots %d' % figures['slots']]
+    if figures['reads']:
+        bits.append('reads waited %dms median (%d of %d waited%s)'
+                    % (figures['readWaitMs'], figures['readsWaited'], figures['reads'],
+                       ', +%dms median' % figures['readsWaitedMs']
+                       if figures['readsWaited'] else ''))
+    for key, name in (('label', 'label'), ('spare', 'spare')):
+        if figures['%sAsks' % key]:
+            bits.append('%s OCRs %d of %d waited%s'
+                        % (name, figures['%sWaited' % key], figures['%sAsks' % key],
+                           ' +%dms median' % figures['%sWaitMs' % key]
+                           if figures['%sWaited' % key] else ''))
+    if figures['stopped']:
+        bits.append('%d stopped as dropped' % figures['stopped'])
+    if figures.get('engines'):
+        bits.append('engines at once ' + ' '.join(
+            '%s:%d%%' % (k, v) for k, v in sorted(figures['engines'].items(), key=lambda kv: int(kv[0]))))
+    return ', '.join(bits)
+
+
 def process_cpu():
     """(monotonic s, this process's CPU s over all its threads): the health
     line's CPU share is the difference of two over the window."""
@@ -2321,6 +2413,10 @@ class Health:
         # real one whatever `now` the caller judges windows by.
         self.times = ReadTimes()
         self._cpu0 = process_cpu()
+        # ...and each read's wait for an engine slot (`ms['slot']`), with the
+        # gate's own window begun afresh (ocr_gate; PL.OCR_SLOTS).
+        self.slot_ms = []
+        PL.ocr_slot_waits(reset=True)
 
     def add(self, out, parsed, card=None, previous=None):
         self.reads += 1
@@ -2360,6 +2456,9 @@ class Health:
         if isinstance(waited, (int, float)) and out.get('cardBox') != 'kept' \
                 and (out.get('finder') or out.get('cropFrom') == 'found'):
             self.rescue_wait_ms.append(waited)
+        slot = (out.get('ms') or {}).get('slot')
+        if isinstance(slot, (int, float)) and out.get('skipped') != 'dark':
+            self.slot_ms.append(slot)
 
     def not_read_dark(self, now, peak):
         """Count one read left unread for a black crop; the log line, when due.
@@ -2395,6 +2494,9 @@ class Health:
                 # Where the window's reads spent their time (ReadTimes), with
                 # this process's CPU and the load; None with no read timed.
                 'time': self.times.counters(self.cpu_share(), load_average()),
+                # ...and the engines' gate over the window (ocr_gate): asked,
+                # never reset, so a 📷 Snap mid-window takes nothing from it.
+                'ocr': ocr_gate(PL.ocr_slots(), self.slot_ms, PL.ocr_slot_waits(reset=False)),
                 'reads': self.reads, 'complete': self.complete,
                 'failed': self.failed, 'noPay': self.no_pay,
                 'clipped': self.clipped, 'rescued': self.rescued,
@@ -2515,6 +2617,12 @@ class Health:
         said = self.times.part(timed.get('cpuPct'), timed.get('load1'))
         if said:
             bits.append(said)
+        # ...and the engines' gate (ocr_gate_part), after it: when it held
+        # something back, or beside a `time:` part. Every other line reads as
+        # it did.
+        gated = ocr_gate_part(tally.get('ocr'), time_said=bool(said))
+        if gated:
+            bits.append(gated)
         # Outside the tracker block on purpose: these say nothing about the
         # corners, and a rig started with --no-track is exactly the one whose
         # destination scan is worth watching.
@@ -4572,7 +4680,10 @@ class MapLabels(object):
         self.reading = True
         seen = {}
         try:
-            answer = self.read(frame, geom, store=store, seen=seen)
+            # Its engine calls ranked last for a slot (PL.OCR_SLOTS): a card
+            # read waiting for one is never kept waiting by a label.
+            with PL.ocr_role('label'):
+                answer = self.read(frame, geom, store=store, seen=seen)
         except Exception:                           # noqa: BLE001
             answer = None
         finally:
@@ -5530,6 +5641,12 @@ def main():
            'beside the camera loop, which keeps the live view and the corner '
            'tracking going through one' if not args.no_thread
            else 'on the camera loop (--no-thread)'))
+    # ...and how many engines may read at once, the card's first (PL.OCR_SLOTS):
+    # the health line's "ocr slots" part is measured against this.
+    log('setup: ocr slots %s'
+        % ('%d — at most that many tesseracts at once, a card read first, then the '
+           'rescue\'s links, then the map label' % PL.ocr_slots() if PL.ocr_slots()
+           else 'off (UBERSCAN_OCR_SLOTS=0) — every engine reads when its thread asks'))
     log('setup: exposure %dus (%s), gain %.2f (%s)'
         % (exposure_us,
            'a whole number of 60/120/240Hz cycles, so the screen should not band'
@@ -6982,6 +7099,11 @@ def main():
             # "time: ..." part as figures, kept whether the line said it or
             # not. None in a window with no read timed.
             'time': tally.get('time'),
+            # ...and the engines' gate over the window (ocr_gate): the slots,
+            # each read's wait for one, and the label's and spare links'
+            # engine calls held back for a card read's. Kept whether the
+            # line said it or not.
+            'ocr': tally.get('ocr'),
             'tooDim': tally.get('tooDim'), 'tooBright': tally.get('tooBright'),
             'corners': tally.get('corners'), 'relocks': tally.get('relocks'),
             # ...and how many preview frames since start were the same picture
