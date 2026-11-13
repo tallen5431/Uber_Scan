@@ -90,6 +90,19 @@ TRIPS = [
      'Nowhere Noodles (Inventon)', 'Imaginary Way, Inventon, GA, USA'),
 ]
 
+# The owner's 12 Nov screenshots showed two things the first layout lacked: a
+# tip and a surge on one line ("$6.00 Tip $1.25 Surge"), and a trip the
+# driver canceled ("$0.00", "Delivery · You canceled", its map and places).
+# Invented as everything here.
+TRIPS_12 = [
+    ('$9.50', 'Delivery', 24, 10, '6.40', '4:18 PM', '$6.00 Tip $1.25 Surge',
+     'Fabled Falafel (Faketown)', 'Storybook Ln, Faketown, GA, USA'),
+    ('$0.00', 'Delivery · You canceled', None, None, None, '5:30 PM', None,
+     'Sample Sushi (Notaville)', 'Fictional Ct SW, Notaville, GA, USA'),
+    ('$12.64', 'Delivery', 22, 0, '6.30', '6:23 PM', None,
+     'Nowhere Noodles (Inventon)', 'Imaginary Way, Inventon, GA, USA'),
+]
+
 
 def _map(d, x0, y0, w, h, seed):
     """A trip's map: blocks, roads and a route line, with a couple of short
@@ -139,7 +152,10 @@ def screen(trips=None, day='Sat, Nov 7', chip='11/7', end='End of activities dur
         y += 70
     for i, t in enumerate(trips):
         amount, kind, mins, secs, miles, clock, tip, pickup, dropoff = t
-        detail = '%s · %d min %d sec · %s mi' % (kind, mins, secs, miles)
+        # A canceled trip prints its kind and who canceled in place of its
+        # minutes and miles ("Delivery · You canceled"): `mins` None, the
+        # kind given whole.
+        detail = kind if mins is None else '%s · %d min %d sec · %s mi' % (kind, mins, secs, miles)
         d.text((24, y), amount, font=font(40, True), fill=INK)
         if time_row == 'amount':
             d.text((W - 24 - d.textlength(clock, font=font(26)), y + 8), clock, font=font(26), fill=GREY)

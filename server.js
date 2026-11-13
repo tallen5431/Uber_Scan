@@ -15945,6 +15945,10 @@ function earningRow(e, at) {
     v: EARNINGS_ROW_V, kind: 'earning', id: 'earn:' + e.key, seq: at, at: at,
     key: e.key, app: e.app, date: e.date, startedAt: Earnings.clockField(e),
     amount: e.amount, tip: e.tip === undefined ? null : e.tip, tipStatus: paid.tipStatus, base: paid.base,
+    // ...the pay's other parts as Uber named them ({surge: 1.00}), and a
+    // canceled trip said so, with who canceled where Uber said.
+    extras: paid.extras || null, status: e.status === 'canceled' ? 'canceled' : 'completed',
+    canceledBy: e.status === 'canceled' && typeof e.canceledBy === 'string' ? e.canceledBy : null,
     type: e.type, minutes: e.minutes, seconds: e.seconds, miles: e.miles,
     pickup: places ? e.pickup : null, dropoff: places ? e.dropoff : null, places: places,
     match: match,

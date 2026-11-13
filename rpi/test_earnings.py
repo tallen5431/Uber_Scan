@@ -93,11 +93,18 @@ def want(trip):
     h = int(h) % 12 + (12 if clock.endswith('PM') else 0)
     name, _, detail = pickup.partition(' (')
     street, town = dropoff.split(', ')[:2]
+    canceled = mins is None
+    extras = None
+    if tip and 'Surge' in tip:
+        extras = {'surge': float(tip.split()[2][1:])}
     return {'amount': float(amount[1:]), 'startedAt': '%02d:%s' % (h, m),
             'tip': 'processing' if tip == 'Tip processing' else (float(tip.split()[0][1:]) if tip else None),
-            'type': kind, 'minutes': mins, 'seconds': secs, 'miles': float(miles),
+            'type': kind.split(' · ')[0] if canceled else kind, 'minutes': mins, 'seconds': secs,
+            'miles': None if canceled else float(miles),
             'pickup': {'name': name, 'detail': detail.rstrip(')')},
-            'dropoff': {'street': street, 'town': town}}
+            'dropoff': {'street': street, 'town': town},
+            'status': 'canceled' if canceled else 'completed',
+            'canceledBy': 'you' if canceled else None, 'extras': extras}
 
 
 # The screens: the owner's layout as drawn; the time on the trip's line; the
@@ -116,6 +123,10 @@ SCREENS = {
         ('$9.80', 'Delivery', 31, 40, '7.25', '8:12 PM', 'Tip processing',
          'Make-Believe Burgers (Placeholder Rd & Mock Ln)', 'Fictional Ct SW, Notaville, GA, USA')],
         day='Fri, Nov 6', chip='11/6', end='End of activities during Nov 6, 2026'),
+    # The 12 Nov layout's two new lines: a tip and a surge on one line, and a
+    # trip canceled on the phone.
+    'surge and canceled': T.screen(trips=T.TRIPS_12, day='Thu, Nov 12', chip='11/12',
+                                   end='End of activities during Nov 12, 2026'),
 }
 paths = {}
 for name, im in SCREENS.items():
@@ -151,6 +162,14 @@ eq('[screen another day] its own day, a settled tip and a pending one, a chain\'
    ('2026-11-06', [('21:05', 14.1, 3.0, {'name': 'Imaginary Bistro', 'detail': 'Faketown'}),
                    ('20:12', 9.8, 'processing',
                     {'name': 'Make-Believe Burgers', 'detail': 'Placeholder Rd & Mock Ln'})]))
+
+# --- a surge, and a trip canceled on the phone ------------------------------------
+g = got['surge and canceled']
+eq('[screen surge and canceled] its day, and every trip with every field: the tip and the surge off one line, '
+   'the canceled trip with no minutes or miles and its places kept',
+   ((g['day'] or {}).get('iso'), g['entries']), ('2026-11-12', [want(t) for t in T.TRIPS_12]))
+eq('[screen surge and canceled] ...the surge no block of its own, nothing stepped over', (g['others'], g['notes']),
+   ([], []))
 
 # --- the size it is read at -----------------------------------------------------
 # The owner's phone: about 756 wide. Drawn at that width and no wider, so the

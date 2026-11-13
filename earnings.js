@@ -93,6 +93,20 @@
   var DETAIL = /^\s*([A-Za-z][A-Za-z &+'\/-]*?)\s*[-·•:.,=~]*\s*(\d{1,3})\s*min\w*\.?(?:\s*(\d{1,2})\s*s(?:ec)?\w*\.?)?\s*[-·•:.,=~]*\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*mi\b/i;
   var TIP_PENDING = /\btip\s+(?:is\s+)?(?:processing|pending)\b/i;
   var TIP_AMOUNT = /(?:\$|S(?=\d))\s?(\d{1,4}[.,]\d{2})\s*tip\b|\btip\b[^$\d]{0,12}(?:\$|S(?=\d))\s?(\d{1,4}[.,]\d{2})/i;
+  // The pay's parts beside the tip, "$1.25 Surge", and as many as Uber puts
+  // on one line ("$6.00 Tip $1.25 Surge", invented; the shape of the owner's 12 Nov
+  // screenshots). Read generically, "$X <Word>": Surge is the one seen, and
+  // a Promotion, Boost or Adjustment would be printed the same way, so each
+  // is kept under its own word rather than guessed into one of a list. A line
+  // that starts with an amount and a word, and has no clock on it, is such a
+  // part — never a new trip's block.
+  var EXTRA = /(?:\$|S(?=\d))\s?(\d{1,4}[.,]\d{2})\s*([A-Za-z]{3,16})\b/g;
+  var EXTRA_LINE = /^(?:\$|S(?=\d))\s?\d{1,4}[.,]\d{2}\s*[A-Za-z]{3,16}\b/;
+  var EXTRAS_MAX = 4;
+  // A canceled trip's line in place of its minutes and miles: "Delivery ·
+  // You canceled", "Customer canceled", or the word alone. Who canceled is
+  // kept where it is said.
+  var CANCELED = /^\s*([A-Za-z][A-Za-z &+'\/-]*?)?\s*[-·•:.,=~]*\s*(?:(you|customer|driver|store|merchant|restaurant)\s+)?cancell?ed\b/i;
   // The dropoff line ends in a state and the country, as Uber prints every
   // dropoff ("Example Ave NE, Notaville, GA, USA"); the pickup is the line
   // straight above it, whatever the map left above that.
@@ -170,6 +184,30 @@
     return TIP_PENDING.test(line) || /\btip\b/i.test(line) && TIP_AMOUNT.test(line);
   }
 
+  /* The trip's line, DETAIL's match or null. A zero before "min" or "sec"
+   * read as the letter O ("22 min O sec", tesseract on the drawn 12 Nov
+   * layout) is put back first. */
+  function detailOf(line) {
+    return DETAIL.exec(String(line || '').replace(/\b[Oo](\s*(?:min|sec|s\b))/g, '0$1'));
+  }
+
+  /* The pay's parts on one line: {tip: number | 'processing' | undefined,
+   * extras: {surge: 1.00, ...}}, each word lower case. */
+  function readExtras(line) {
+    var out = { tip: undefined, extras: {} };
+    if (TIP_PENDING.test(line)) out.tip = 'processing';
+    var t = TIP_AMOUNT.exec(line);
+    if (t && out.tip === undefined) out.tip = money(t[1] || t[2]);
+    var m;
+    EXTRA.lastIndex = 0;
+    while ((m = EXTRA.exec(line)) !== null) {
+      var w = m[2].toLowerCase();
+      if (w === 'tip' || w === 'mi' || w === 'min') continue;
+      if (out.extras[w] === undefined) out.extras[w] = money(m[1]);
+    }
+    return out;
+  }
+
   /* "Make-Believe Burgers (Sample St NW & Fictional Ct)" -> the store's name
    * and what Uber put in its bracket: a town for a one-off restaurant, a
    * street corner for a branch of a chain — the part that tells two of one
@@ -197,13 +235,14 @@
   function readBlock(lines) {
     var first = AMOUNT.exec(lines[0]);
     var e = { amount: money(first[1]), startedAt: clockOf(first[2]), tip: null, type: null,
-              minutes: null, seconds: null, miles: null, pickup: null, dropoff: null, trip: false };
+              minutes: null, seconds: null, miles: null, pickup: null, dropoff: null,
+              status: 'completed', canceledBy: null, extras: null, trip: false };
     var detailAt = -1, dropAt = -1;
     for (var i = 1; i < lines.length; i++) {
       var l = lines[i];
       if (!e.startedAt) e.startedAt = clockOf(l);
       if (detailAt === -1) {
-        var d = DETAIL.exec(l);
+        var d = detailOf(l);
         if (d) {
           detailAt = i;
           e.trip = true;
@@ -213,11 +252,27 @@
           e.miles = money(d[4]);
           continue;
         }
+        var c = CANCELED.exec(l);
+        if (c) {
+          // A canceled trip: no minutes and no miles, its amount what was
+          // shown ($0.00, or a cancellation's pay), its map and places as
+          // any trip's.
+          detailAt = i;
+          e.trip = true;
+          e.status = 'canceled';
+          e.type = c[1] ? cut(c[1]) : null;
+          e.canceledBy = c[2] ? c[2].toLowerCase() : null;
+          continue;
+        }
       }
-      if (e.tip === null && TIP_PENDING.test(l)) { e.tip = 'processing'; continue; }
-      if (e.tip === null && /\btip\b/i.test(l)) {
-        var t = TIP_AMOUNT.exec(l);
-        if (t) { e.tip = money(t[1] || t[2]); continue; }
+      if (dropAt === -1 && (isTipLine(l) || EXTRA_LINE.test(l) && !clockOf(l))) {
+        var parts = readExtras(l);
+        if (parts.tip !== undefined && e.tip === null) e.tip = parts.tip;
+        Object.keys(parts.extras).forEach(function (k) {
+          e.extras = e.extras || {};
+          if (Object.keys(e.extras).length < EXTRAS_MAX && e.extras[k] === undefined) e.extras[k] = parts.extras[k];
+        });
+        continue;
       }
       if (dropAt === -1 && DROPOFF.test(l)) dropAt = i;
     }
@@ -227,14 +282,14 @@
       // own lines (a cut-off map can leave nothing between them).
       for (var k = dropAt - 1; k > Math.max(0, detailAt); k--) {
         var above = lines[k];
-        if (isTipLine(above) || clockOf(above) === above) continue;
+        if (isTipLine(above) || EXTRA_LINE.test(above) || clockOf(above) === above) continue;
         if (/[A-Za-z]{2}/.test(above)) { e.pickup = pickupOf(above); break; }
       }
     } else {
       // No dropoff line — the screenshot ended inside the block. A line with
       // a bracket after the detail is the pickup, if there is one.
       for (var j = lines.length - 1; j > Math.max(0, detailAt); j--) {
-        if (/\(.+\)/.test(lines[j]) && !isTipLine(lines[j])) { e.pickup = pickupOf(lines[j]); break; }
+        if (/\(.+\)/.test(lines[j]) && !isTipLine(lines[j]) && !EXTRA_LINE.test(lines[j])) { e.pickup = pickupOf(lines[j]); break; }
       }
     }
     if (!e.trip) {
@@ -255,7 +310,10 @@
    *            'processing' or null), type ('Delivery': the trip's kind, as
    *            Uber names it — `type`, since a journal row's `kind` is the
    *            row's), minutes, seconds, miles,
-   *            pickup {name, detail}, dropoff {street, town}};
+   *            pickup {name, detail}, dropoff {street, town}, status
+   *            ('completed' or 'canceled'), canceledBy ('you', 'customer'
+   *            or null), extras ({surge: 1.00, ...} or null: the pay's parts
+   *            beside the tip, each under the word Uber printed)};
    *   others   blocks with an amount and no trip line (adjustments and the
    *            like): kept for the notes only;
    *   notes    what was stepped over, in words. */
@@ -265,9 +323,17 @@
     var out = { app: 'uber', day: dayOf(lines, o.now), entries: [], others: [], notes: [] };
     var starts = [];
     var endAt = lines.length;
+    // A pay part ("$1.25 Surge") straight under a trip's line, its tip line
+    // or another part is that trip's, not a block of its own. Anything else
+    // that starts with an amount opens a block (an adjustment or a quest on
+    // its own reads as one, and is kept in `others`).
+    var partOk = false;
     for (var i = 0; i < lines.length; i++) {
-      if (END_LINE.test(lines[i])) { endAt = i; break; }
-      if (AMOUNT.test(lines[i]) && !isTipLine(lines[i])) starts.push(i);
+      var li = lines[i];
+      if (END_LINE.test(li)) { endAt = i; break; }
+      var part = isTipLine(li) || EXTRA_LINE.test(li) && !clockOf(li) && partOk;
+      if (AMOUNT.test(li) && !part) starts.push(i);
+      partOk = part || !!detailOf(li) || CANCELED.test(li);
     }
     starts = starts.filter(function (s) { return s < endAt; });
     if (starts.length && starts[0] > 0) {
@@ -275,7 +341,7 @@
       // block whose top was scrolled off. Its amount and time are on another
       // screenshot, or nowhere; it is not guessed at.
       var tail = lines.slice(0, starts[0]).filter(function (l) {
-        return DROPOFF.test(l) || DETAIL.test(l) || isTipLine(l);
+        return DROPOFF.test(l) || !!detailOf(l) || isTipLine(l);
       });
       if (tail.length) out.notes.push('the top of the first trip was scrolled off; its rest was skipped');
     }
@@ -315,7 +381,9 @@
     var t = String(text || '');
     if (/door\s*dash|dasher|dash\s+summary/i.test(t)) return 'doordash';
     if (/earnings\s+activit/i.test(t) || /end of activit/i.test(t)) return 'uber';
-    if (/\d\s*min\w*\.?\s*\d{1,2}\s*sec/i.test(t) && /\d\s*mi\b/i.test(t)) return 'uber';
+    // ...or a canceled trip's line, which has no minutes to know it by.
+    if (/\b(?:you|customer)\s+cancell?ed\b/i.test(t)) return 'uber';
+    if (/\d\s*min\w*\.?\s*(?:\d{1,2}|[Oo])\s*sec/i.test(t) && /\d\s*mi\b/i.test(t)) return 'uber';
     return null;
   }
 
@@ -444,6 +512,8 @@
   var SAME_NAME = 0.6;
   function sameEntry(a, b) {
     if (!a || !b || a.app !== b.app || a.date !== b.date || clockField(a) !== clockField(b)) return false;
+    // A canceled trip and a completed one of the same minute are two trips.
+    if ((a.status === 'canceled') !== (b.status === 'canceled')) return false;
     var an = a.pickup && a.pickup.name, bn = b.pickup && b.pickup.name;
     if (an && bn) return similar(an, bn) >= SAME_NAME;
     if (a.amount === b.amount) return true;
@@ -478,7 +548,7 @@
         .concat([{ at: at, amount: fresh.amount, tip: fresh.tip }]).slice(-HISTORY_MAX);
       changed = true;
     }
-    ['type', 'minutes', 'seconds', 'miles', 'pickup', 'dropoff'].forEach(function (k) {
+    ['type', 'minutes', 'seconds', 'miles', 'pickup', 'dropoff', 'extras', 'canceledBy'].forEach(function (k) {
       if ((out[k] === null || out[k] === undefined) && fresh[k] !== null && fresh[k] !== undefined) {
         out[k] = fresh[k];
         changed = true;
@@ -505,14 +575,26 @@
 
   /* What it paid, as the record block and the CSV say it: the total, the tip
    * (a figure, or null while it is processing or where there is none), its
-   * status, and the base (the total less a settled tip; the total itself
-   * while the tip is processing, since the tip is not in it yet). */
+   * status, the pay's other parts (`extras`, {surge: 1.00}, or null) and
+   * the base (the total less a settled tip and those parts; the tip is not
+   * taken off while it is processing, since it is not in the total yet), and
+   * whether the trip was canceled. */
+  function extrasOf(e) {
+    var x = e && e.extras && typeof e.extras === 'object' ? e.extras : null;
+    if (!x) return null;
+    var out = {}, any = false;
+    Object.keys(x).forEach(function (k) { if (typeof x[k] === 'number') { out[k] = x[k]; any = true; } });
+    return any ? out : null;
+  }
   function paidOf(e) {
     if (!e || typeof e.amount !== 'number') return null;
     var st = tipStatus(e);
     var tip = st === 'settled' ? e.tip : null;
-    return { total: e.amount, tip: tip, tipStatus: st,
-             base: Math.round((e.amount - (tip || 0)) * 100) / 100 };
+    var extras = extrasOf(e), more = 0;
+    if (extras) Object.keys(extras).forEach(function (k) { more += extras[k]; });
+    return { total: e.amount, tip: tip, tipStatus: st, extras: extras,
+             base: Math.round((e.amount - (tip || 0) - more) * 100) / 100,
+             canceled: e.status === 'canceled' };
   }
 
   /* --- which order it was ----------------------------------------------------
@@ -703,6 +785,10 @@
   function score(e, c, offsetMs) {
     if (!e || !c) return null;
     if (e.app && c.app && e.app !== c.app) return null;
+    // A canceled trip was never delivered: never a delivered order's, and
+    // nothing of a delivery (its finish, miles, pay) is held against it.
+    var canceled = e.status === 'canceled';
+    if (canceled && c.delivered) return null;
     var st = startOf(e, c, offsetMs);
     if (!st || st.gap < -START_GATE_EARLY || st.gap > START_GATE_LATE) return null;
     var p = { start: W.start * st.pts };
@@ -738,7 +824,7 @@
       var span = Math.max(2, 0.35 * e.miles);
       p.miles = W.miles * Math.max(0, 1 - Math.abs(e.miles - c.miles) / span);
     }
-    if (typeof e.amount === 'number' && c.pay !== null && c.pay !== undefined && e.tip !== 'processing') {
+    if (!canceled && typeof e.amount === 'number' && c.pay !== null && c.pay !== undefined && e.tip !== 'processing') {
       var off = Math.abs(e.amount - c.pay);
       var zero = Math.max(PAY_ZERO, PAY_ZERO_SHARE * c.pay);
       p.pay = off <= PAY_FULL ? W.pay : W.pay * Math.max(0, 1 - (off - PAY_FULL) / (zero - PAY_FULL));

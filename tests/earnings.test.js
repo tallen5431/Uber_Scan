@@ -64,6 +64,11 @@ eq('[parse] every app has a parser\'s place, and DoorDash\'s reads nothing yet',
    [Object.keys(E.PARSERS).sort(), E.parse('Dasher', { app: 'doordash' }).entries.length], [['doordash', 'uber'], 0]);
 eq('[parse] the app can be named by the caller', E.parse('Sat, Nov 7\n$1.00 1:00 PM\nDelivery - 1 min 0 sec - 0.5 mi', { app: 'uber', now: 1794146400000 }).entries.length, 1);
 
+eq('[parse] a zero read as the letter O before "sec" (tesseract on the drawn 12 Nov layout) is a zero, not a block lost',
+   (E.parse('Thu, Nov 12\n$12.64 6:23 PM\nDelivery - 22 min O sec - 6.30 mi', { now: 1794578400000 }).entries[0] || {}).seconds, 0);
+eq('[parse] a canceled trip\'s line names Uber\'s screen when nothing else does',
+   E.detectApp('$0.00 5:30 PM\nDelivery - You canceled'), 'uber');
+
 /* [keep] ------------------------------------------------------------------- */
 var NOV7 = '2026-11-07';
 function entry(o) {
@@ -121,11 +126,18 @@ eq('[keep] the fold: the newest row of each key, whatever order they were writte
 
 /* [paid] ------------------------------------------------------------------- */
 eq('[paid] a settled tip: the total, the tip, the base',
-   E.paidOf(entry({ amount: 25.05, tip: 19.54 })), { total: 25.05, tip: 19.54, tipStatus: 'settled', base: 5.51 });
+   E.paidOf(entry({ amount: 25.05, tip: 19.54 })),
+   { total: 25.05, tip: 19.54, tipStatus: 'settled', extras: null, base: 5.51, canceled: false });
 eq('[paid] a tip processing: the total is the base, the tip not counted as nothing',
-   E.paidOf(entry()), { total: 2, tip: null, tipStatus: 'pending', base: 2 });
+   E.paidOf(entry()), { total: 2, tip: null, tipStatus: 'pending', extras: null, base: 2, canceled: false });
 eq('[paid] no tip line', E.paidOf(entry({ amount: 7.25, tip: null })),
-   { total: 7.25, tip: null, tipStatus: 'none', base: 7.25 });
+   { total: 7.25, tip: null, tipStatus: 'none', extras: null, base: 7.25, canceled: false });
+eq('[paid] a tip and a surge: the base is what is left of the total without either',
+   E.paidOf(entry({ amount: 9.5, tip: 6.0, extras: { surge: 1.25 } })),
+   { total: 9.5, tip: 6, tipStatus: 'settled', extras: { surge: 1.25 }, base: 2.25, canceled: false });
+eq('[paid] a canceled trip says so', E.paidOf(entry({ amount: 0, tip: null, status: 'canceled' })).canceled, true);
+eq('[keep] a canceled trip and a completed one of the same minute are two trips',
+   E.sameEntry(entry({ status: 'canceled', amount: 0, tip: null }), entry({ amount: 0, tip: null })), false);
 
 /* [match] ------------------------------------------------------------------ */
 // A record as orderRow writes one: offered/took/ended, how it ended, its
@@ -233,6 +245,31 @@ eq('[match] the evidence day with keepPlaces off: the clean deliveries matched, 
    bevE.map(function (e) { return [bevM[e.key].status, bevM[e.key].offer || null]; }),
    [['needs', null], ['matched', 'ev2'], ['matched', 'ev3'], ['matched', 'ev4'], ['matched', 'ev5'], ['needs', null],
     ['none', null]]);
+
+// The trip the driver canceled on the phone at 5:30 PM ("$0.00 · Delivery ·
+// You canceled", with its map and places): the rig had its card on the panel
+// at 5:31 and the Took taken back at 5:34. Two minutes later the next card
+// (ev2, delivered) came up — a better clock than the taken-back one, and
+// never a canceled trip's.
+var cancelRec = record({ offer: 'ev7', offered: t12(17, 31), took: t12(17, 31, 20), ended: t12(17, 34), how: 'untick',
+                         pay: 9.5, store: 'Sample Sushi', drop: '4 Fictional Ct SW, Notaville' });
+var cancelE = ev({ startedAt: '17:30', amount: 0, minutes: null, seconds: null, miles: null, status: 'canceled',
+                   canceledBy: 'you', pickup: { name: 'Sample Sushi', detail: 'Notaville' },
+                   dropoff: { street: 'Fictional Ct SW', town: 'Notaville' } });
+var withCancel = keyed(evEntries.concat([cancelE]));
+var wcO = E.ordersFrom(evOrders.concat([cancelRec]), []);
+var wcM = E.matchDay(withCancel, wcO);
+var wcK = withCancel[withCancel.length - 1].key;
+eq('[match] a canceled trip: matched to the order taken back on the rig, and the six on file still their own',
+   [wcM[wcK].status, wcM[wcK].offer, withCancel.slice(0, 6).map(function (e) { return wcM[e.key].offer; })],
+   ['matched', 'ev7', ['ev1', 'ev2', 'ev3', 'ev4', 'ev5', 'ev6']]);
+eq('[match] ...never a delivered order: ev2, whose card came up two minutes after it, is no candidate',
+   [E.score(cancelE, wcO[1], 0), E.score(cancelE, wcO[6], 0) !== null], [null, true]);
+eq('[match] ...and nothing of a delivery is held against it: no finish, miles or pay part',
+   Object.keys(E.score(cancelE, wcO[6], 0).parts).sort(), ['dropoff', 'name', 'start']);
+var cancelAlone = keyed([cancelE]);
+eq('[match] with only delivered orders near it, a canceled trip has no order on file',
+   E.matchDay(cancelAlone, evO)[cancelAlone[0].key].status, 'none');
 
 // The rig's clock 12 minutes ahead of the phone's all evening: past the
 // ordinary lag, found from the confident matches, and every trip still its own.

@@ -3270,9 +3270,17 @@
       { weekday: 'short', month: 'short', day: 'numeric' });
   }
   function tipWords(e) {
+    if (e.status === 'canceled') return 'canceled' + (e.canceledBy ? ' by ' + e.canceledBy : '');
     if (e.tipStatus === 'pending') return 'tip pending';
-    if (e.tipStatus === 'settled') return 'tip ' + money(e.tip, 2);
-    return 'no tip';
+    if (e.tipStatus === 'settled') return 'tip ' + money(e.tip, 2) + extrasWords(e);
+    return 'no tip' + extrasWords(e);
+  }
+  // The pay's other parts as Uber named them: " + surge $1.00".
+  function extrasWords(e) {
+    var x = e && e.extras && typeof e.extras === 'object' ? e.extras : {};
+    return Object.keys(x).filter(function (k) { return typeof x[k] === 'number'; }).map(function (k) {
+      return ' + ' + k + ' ' + money(x[k], 2);
+    }).join('');
   }
 
   /* "Card $7.00 → Paid $25.05 (base $5.51 + tip $19.54)", or "(base $2.00,
@@ -3284,8 +3292,13 @@
     var card = rec.card && typeof rec.card.pay === 'number' ? rec.card.pay : null;
     var how = e.tipStatus === 'settled' ? 'base ' + money(e.base, 2) + ' + tip ' + money(e.tip, 2)
       : e.tipStatus === 'pending' ? 'base ' + money(e.base, 2) + ', tip pending' : 'no tip';
+    how += extrasWords(e);
     var text = (card !== null ? 'Card ' + money(card, 2) + ' → ' : '') + 'Paid ' + money(e.amount, 2)
       + ' (' + how + ')';
+    if (e.status === 'canceled') {
+      text = (card !== null ? 'Card ' + money(card, 2) + ' → ' : '') + 'Canceled'
+        + (e.canceledBy ? ' (' + e.canceledBy + ' canceled)' : '') + ', paid ' + money(e.amount, 2);
+    }
     var hist = Array.isArray(e.history) ? e.history : [];
     var wasPending = hist.filter(function (h) { return h && h.tip === 'processing'; })[0];
     if (e.tipStatus === 'settled' && wasPending && typeof wasPending.at === 'number') {

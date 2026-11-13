@@ -935,13 +935,16 @@ function groupBy(rows, key) {
  * Descriptive: nothing reads it but the two reports. */
 function cardVsPaid(earnings) {
   var used = [];
-  var counts = { entries: 0, matched: 0, pending: 0, unmatched: 0, noCard: 0 };
+  var counts = { entries: 0, matched: 0, pending: 0, unmatched: 0, noCard: 0, canceled: 0 };
   (earnings || []).forEach(function (e) {
     if (!e || typeof e.key !== 'string') return;
     counts.entries += 1;
     var m = e.match || {};
     if (m.status !== 'matched' && m.status !== 'picked') { counts.unmatched += 1; return; }
     counts.matched += 1;
+    // A trip canceled on the phone paid nothing or a cancellation's pay, for
+    // an order never delivered: counted, and in no figure of card against paid.
+    if (e.status === 'canceled') { counts.canceled += 1; return; }
     if (num(e.amount) === null || num(m.cardPay) === null) { counts.noCard += 1; return; }
     if (e.tipStatus === 'pending' || e.tip === 'processing') { counts.pending += 1; return; }
     var at = E.startMs(e);

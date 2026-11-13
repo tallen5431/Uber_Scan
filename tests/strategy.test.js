@@ -336,6 +336,11 @@ var paidIn = [
   earned('z1', 'uber', 20, null, 4, null, 'none', 'Imaginary Bistro')
 ];
 var pv = S.cardVsPaid(paidIn);
+var withCanceled = paidIn.concat([Object.assign(earned('c1', 'uber', 18, 9.5, 0, null, 'matched', 'Sample Sushi'),
+                                                { status: 'canceled', canceledBy: 'you' })]);
+var pvc = S.cardVsPaid(withCanceled);
+eq('card vs paid: a trip canceled on the phone, matched to the order taken back, is counted and in no figure',
+   [pvc.counts.canceled, pvc.all.n, pvc.all.card, pvc.all.paid], [1, 7, 52, 62]);
 eq('card vs paid: the matched and settled are counted, the tip still processing left out and counted, '
    + 'the unmatched counted', [pv.all.n, pv.counts.pending, pv.counts.unmatched, pv.counts.entries], [7, 1, 2, 10]);
 eq('...cards, paid, the difference in all and the typical order\'s, the settled tips, more and less',
