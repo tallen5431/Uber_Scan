@@ -390,7 +390,10 @@ function timedOf(o, offer, area, stats) {
            cardMi: miles, actMi: actMi !== null && miles !== null && miles > 0 ? actMi : null,
            together: num(o.carried) !== null && o.carried >= 2,
            at: num(o.tookAt), block: A.blockOf(o.tookAt), outing: outingOf(o.tookAt),
-           week: weekOf(o.tookAt), area: area };
+           week: weekOf(o.tookAt), area: area,
+           // Who timed it: the rig, or Uber's earnings screen for an order the
+           // rig did not time (earnings.js uberTimingFor; the caller says so).
+           by: o.timedBy === 'uber' ? 'uber' : 'rig' };
 }
 
 /* What a set of timed orders says, card against actual. The ratio is the
@@ -402,7 +405,7 @@ function actualsOf(name, list) {
   var enough = list.length >= RATIO_MIN_N;
   var ratio = enough ? sum(list.map(function (t) { return t.actMin; })) / sum(list.map(function (t) { return t.cardMin; })) : null;
   return {
-    name: name, timed: list.length,
+    name: name, timed: list.length, byUber: list.filter(function (t) { return t.by === 'uber'; }).length,
     together: list.filter(function (t) { return t.together; }).length,
     ratio: r2(ratio),
     ratioMedian: enough ? r2(median(list.map(function (t) { return t.actMin / t.cardMin; }))) : null,
@@ -730,6 +733,7 @@ function analyse(input) {
   Object.keys(stats).forEach(function (k) { counts[k] = stats[k]; });
   counts.timed = timed.length;
   counts.together = timed.filter(function (t) { return t.together; }).length;
+  counts.timedByUber = timed.filter(function (t) { return t.by === 'uber'; }).length;
 
   var cpm = num(inp.costPerMile) !== null ? inp.costPerMile : A.costPerMileIn(inp.offers || []);
   if (cpm !== null && !(cpm > 0)) cpm = null;
@@ -1015,6 +1019,14 @@ function d2(v) { return '$' + v.toFixed(2); }
 function hrs(v) { return (Math.round(v * 10) / 10) + ' h'; }
 function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
 
+// The timed orders whose minutes are Uber's own, not the rig's: said beside
+// every figure they are in. Uber's minutes ran 9 to 13 short of the rig's on
+// the one evening compared (earnings.js uberTimingFor).
+function uberSaid(n) {
+  return n ? ' ' + plural(n, 'of them was', 'of them were') + ' timed by Uber\'s earnings screen, the rig not having '
+    + 'timed ' + (n === 1 ? 'it' : 'them') + ' (Uber\'s minutes run a little shorter than the rig\'s).' : '';
+}
+
 function lines(r) {
   var out = [], c = r.counts, s = r.seen.all, a = r.actual.all, cv = r.curve;
   if (!c.offers) {
@@ -1041,11 +1053,11 @@ function lines(r) {
              + (a.mileRatio !== null ? ' and the miles driven ' + a.mileRatio.toFixed(2) + 'x the card\'s (' + a.milesN + ' with miles)' : '')
              + ', so a card\'s $/hr has turned into about card ÷ ' + a.ratio.toFixed(2) + ': a $25/hr card about '
              + d2(at25) + '/hr actual. The median timed order showed ' + d2(a.cardPH) + '/hr and made '
-             + d2(a.actualPH) + '/hr.');
+             + d2(a.actualPH) + '/hr.' + uberSaid(a.byUber));
   } else {
     out.push('Cards against what they took: ' + plural(a.timed, 'timed order') + ', fewer than the ' + r.floors.ratio
              + ' a ratio is taken over' + (c.orders ? ' (' + c.orders + ' taken, ' + c.unmeasured + ' not measured at the door)' : '')
-             + ', so the curve below takes the cards at their word.');
+             + ', so the curve below takes the cards at their word.' + uberSaid(a.byUber));
   }
   // 3. the curve
   if (!cv.drawn || !cv.best) {

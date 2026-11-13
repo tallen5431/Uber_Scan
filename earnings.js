@@ -971,7 +971,41 @@
     return res;
   }
 
+  /* --- an untimed order, timed by Uber ---------------------------------------
+   *
+   * The owner, 12 Nov: an order the rig never timed — expired on its own
+   * clock, replaced by the next Took, never Took'd, marked on the offers
+   * page — still has Uber's own minutes and miles once its trip is matched.
+   * They are carried onto that order's money as `source: 'uber'` and said so
+   * everywhere they show (the records CSV's `timed_by`, the end-of-shift
+   * report's notes, the Strategy tab's count); A RIG-MEASURED TIMING IS
+   * NEVER OVERWRITTEN. They are not the rig's figure: on the 12 Nov evening
+   * Uber's minutes ended each trip 9 to 13 minutes before the rig's end
+   * (the walk back, the wait for the next screen), so an order timed by
+   * Uber reads a little faster, and its $/hr a little higher, than the
+   * rig's would have.
+   *
+   * uberTimingFor(entries, offer, tookAt): the newest matched or picked,
+   * completed entry for that order (its Took within RECORD_MATCH_MS, or no
+   * Took on either side) with Uber's minutes: {minutes, miles, source:
+   * 'uber', key}, else null. */
+  function uberTimingFor(entries, offer, tookAt) {
+    var best = null;
+    (entries || []).forEach(function (e) {
+      var m = e && e.match;
+      if (!m || (m.status !== 'matched' && m.status !== 'picked') || m.offer !== offer) return;
+      if (e.status === 'canceled' || typeof e.minutes !== 'number') return;
+      var t = num(m.tookAt), want = num(tookAt);
+      if (t === null ? want !== null : (want === null || Math.abs(t - want) > RECORD_MATCH_MS)) return;
+      if (!best || (e.at || 0) >= (best.at || 0)) best = e;
+    });
+    if (!best) return null;
+    return { minutes: Math.round((best.minutes + (best.seconds || 0) / 60) * 100) / 100,
+             miles: typeof best.miles === 'number' ? best.miles : null, source: 'uber', key: best.key };
+  }
+
   return {
+    uberTimingFor: uberTimingFor,
     parse: parse, parseUber: parseUber, parseDoorDash: parseDoorDash, detectApp: detectApp,
     PARSERS: PARSERS, dayOf: dayOf, clockOf: clockOf, yearFor: yearFor,
     words: words, similar: similar, within: within, clockField: clockField, startMs: startMs, endMs: endMs,

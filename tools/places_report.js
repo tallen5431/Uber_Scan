@@ -114,6 +114,8 @@ var OP = require('../offer-parser.js');
 // What $/hr to expect and what holding out paid (the Strategy tab), shared
 // with the end-of-shift report so the two print one answer.
 var S = require('./strategy.js');
+// ...and what the app paid, for an order this report could not time (uberTimingFor).
+var E = require('../earnings.js');
 
 var ROOT = path.resolve(__dirname, '..');
 
@@ -2138,9 +2140,20 @@ function milesBetween(fixes, from, to) {
   return mi;
 }
 
-function strategyOrders(taken, records, fixes) {
+function strategyOrders(taken, records, fixes, earnings) {
   return (taken || []).filter(function (t) { return t && typeof t.tookAt === 'number'; }).map(function (t) {
     var real = realOf(t);
+    // An order this report could not time, timed by Uber's own minutes and
+    // miles where its trip was matched (earnings.js uberTimingFor): labelled
+    // so for the Strategy tab, never in place of the rig's own timing.
+    var ub = real ? null : E.uberTimingFor(earnings, t.id, t.tookAt);
+    if (ub) {
+      return { id: t.id, tookAt: t.tookAt, endedAt: typeof t.endedAt === 'number' ? t.endedAt : null,
+               app: t.app || null, pay: t.pay, cardMinutes: t.minutes, cardMiles: t.miles,
+               addon: t.addon === true, carried: t.carried, actualMinutes: ub.minutes,
+               actualMiles: ub.miles, milesFrom: ub.miles !== null ? 'uber' : null, timedBy: 'uber',
+               clockStepped: false };
+    }
     var rec = recordFor(records, t.id, t.tookAt);
     var stepped = !!(rec && Array.isArray(rec.flags) && rec.flags.some(function (f) {
       return typeof f === 'string' && f.indexOf('the clock stepped') === 0;
@@ -2392,7 +2405,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
   // still says the rig was on), this report's takes as its own realOf timed
   // them, the card's town as the area (townKey, as every town table here),
   // and the driver's line beside the curve.
-  var strategyIn = strategyOrders(taken, opts.records, opts.fixes);
+  var strategyIn = strategyOrders(taken, opts.records, opts.fixes, opts.earnings);
   // ...and, where the server has them, the trips read off the app's own
   // earnings screenshots and matched to orders (/api/earnings): the card
   // against what was paid, under the curve.
@@ -2400,6 +2413,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
                              target: targetLine(counts, opts.now), boots: opts.boots,
                              earnings: Array.isArray(opts.earnings) ? opts.earnings : undefined });
   strategy.miles = { odometer: strategyIn.filter(function (o) { return o.milesFrom === 'odometer'; }).length,
+                     uber: strategyIn.filter(function (o) { return o.timedBy === 'uber'; }).length,
                      log: strategyIn.filter(function (o) { return o.milesFrom === 'log'; }).length,
                      records: (opts.records || []).length, gps: !!opts.fixes };
   var times = counts.map(function (o) { return o.at; }).filter(isFinite);

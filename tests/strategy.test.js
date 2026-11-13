@@ -162,6 +162,16 @@ ok('...the net figure, labelled with the rate and the miles ratio',
 ok('...the driver\'s line', r1.lines.indexOf('Your line, $25, is above that range.') >= 0);
 ok('...and that it changes nothing on the rig', /^Descriptive/.test(r1.lines[r1.lines.length - 1]));
 ok('no line of it tells anyone what to do', r1.lines.every(function (l) { return !/\byou should\b|\bset your\b|\btake only\b/i.test(l); }));
+// Two of the six timed by Uber's earnings screen, the rig not having timed
+// them (the caller's timedBy, earnings.js uberTimingFor): counted as timed,
+// and said so beside the figure.
+var ordsU = ords.map(function (o, i) { return i < 2 ? Object.assign({}, o, { timedBy: 'uber' }) : o; });
+var rU = S.analyse({ offers: two, orders: ordsU, costPerMile: 0.3, target: 25 });
+eq('orders timed by Uber count as timed, labelled', [rU.counts.timed, rU.counts.timedByUber, rU.actual.all.byUber],
+   [6, 2, 2]);
+ok('...and the summary says how many were Uber\'s',
+   rU.lines.some(function (l) { return /2 of them were timed by Uber's earnings screen/.test(l); })
+   && !r1.lines.some(function (l) { return /timed by Uber/.test(l); }));
 
 /* --- what is not counted --------------------------------------------------- */
 

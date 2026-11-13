@@ -457,16 +457,47 @@ def paid_for(earned, oid, took):
     """The trip matched to the order `oid` taken at `took` (ms): a match by
     the matcher or the driver's pick, its Took within RECORD_MATCH_S of the
     order's (the server stamps both off one row). None where no screenshot
-    was matched to it."""
-    if took is None:
-        return None
+    was matched to it. An order the rig never Took'd is matched to a trip
+    whose match has no Took either."""
     for e in earned:
         m = e.get('match') if isinstance(e.get('match'), dict) else {}
-        if m.get('status') in ('matched', 'picked') and m.get('offer') == oid \
-                and _num(m.get('tookAt')) is not None \
-                and abs(m['tookAt'] - took) <= RECORD_MATCH_S * 1000.0:
+        if m.get('status') not in ('matched', 'picked') or m.get('offer') != oid:
+            continue
+        mt = _num(m.get('tookAt'))
+        if (mt is None and took is None) or (
+                mt is not None and took is not None and abs(mt - took) <= RECORD_MATCH_S * 1000.0):
             return e
     return None
+
+
+def uber_timing(o):
+    """An order this report does not time — no delivery's end it can read
+    (expired, replaced, no end), no Took, marked on the offers page — timed
+    by Uber's own minutes and miles off its matched earnings trip, in place:
+    `actualMinutes`, `gpsMiles` (`milesFrom` 'uber'), `timedBy` 'uber', and
+    `reliable`, with a note saying whose figures they are. A rig-measured
+    timing (a reliable order with its own minutes) is never touched, nor a
+    trip canceled on the phone. earnings.js uberTimingFor and the offers
+    page's uberTiming, the same rule.
+
+    Uber's minutes are not the rig's: on the 12 Nov evening they ended each
+    trip 9 to 13 minutes before the rig's end, so such an order reads a
+    little faster, and its $/hr a little higher, than the rig would have
+    timed it. The text says how many it counted so."""
+    if o.get('reliable') and o.get('actualMinutes'):
+        o['timedBy'] = 'rig'
+        return
+    e = o.get('paid')
+    if not e or e.get('status') == 'canceled' or _num(e.get('minutes')) is None:
+        return
+    o['actualMinutes'] = round(e['minutes'] + (_num(e.get('seconds')) or 0) / 60.0, 2)
+    o['gpsMiles'] = _num(e.get('miles'))
+    o['milesFrom'] = 'uber' if o['gpsMiles'] is not None else None
+    o['timedBy'] = 'uber'
+    o['reliable'] = True
+    o['notes'].append("timed by Uber's earnings screen (%.1f min%s): the rig did not time it, and "
+                      "Uber's minutes run a little shorter than the rig's"
+                      % (o['actualMinutes'], '' if o['gpsMiles'] is None else ', %.1f mi' % o['gpsMiles']))
 
 
 def _cents(v):
@@ -1816,6 +1847,9 @@ def report(journal, gps_dir, day, read=None):
     fixes, info = load_fixes(gps_dir, (start, reach))
     for o in mine:
         measure(o, fixes)
+        # ...an order this report could not time, timed by Uber's own minutes
+        # and miles where its trip was matched (uber_timing): said so.
+        uber_timing(o)
         # Only over a delivery. A replaced order's minutes run to the next
         # Took, and its pay over them would be a rate nobody earned.
         o['perHour'], o['perMile'] = rates(o['pay'], o.get('actualMinutes'), o.get('gpsMiles')) \
@@ -1849,7 +1883,9 @@ def summary(rows):
     many were left out so."""
     good = [o for o in rows if o['reliable'] and o.get('actualMinutes')]
     out = {'reliable': len(good), 'of': len(rows), 'byApp': [], 'byBand': [],
-           'addOns': sum(1 for o in good if o.get('addon'))}
+           'addOns': sum(1 for o in good if o.get('addon')),
+           # ...of them timed by Uber's earnings screen, not the rig (uber_timing).
+           'timedByUber': sum(1 for o in good if o.get('timedBy') == 'uber')}
     for key, name in (('byApp', lambda o: o['app'] or 'unknown'),
                       ('byBand', lambda o: _band(o['cardMinutes']))):
         groups = collections.OrderedDict()
@@ -1997,6 +2033,10 @@ def text(rep):
                'another too soon, pressed down too soon, driven well short of its card or with '
                'no end is left out):'
                % (s['reliable'], '' if s['reliable'] == 1 else 's', s['of']))
+    if s.get('timedByUber'):
+        out.append("  (%d of them timed by Uber's earnings screen, which the rig did not time: Uber's own "
+                   "minutes and miles, which run a little shorter than the rig's, so those read a little "
+                   "faster)" % s['timedByUber'])
     if s.get('addOns'):
         out.append('  (%d add-on%s counted by app, and left out of every actual/card minutes '
                    'ratio and of the card-minutes bands: an add-on\'s card minutes are only '
@@ -2124,7 +2164,10 @@ RECORD_COLUMNS = ('date', 'app', 'offered', 'took', 'ended', 'how_ended', 'card_
                   'with_another', 'reliable', 'source', 'notes',
                   # ...and what the app paid, where an earnings screenshot was
                   # matched to the order (paid_cells).
-                  'paid_total', 'paid_tip', 'tip_status', 'paid_minus_card')
+                  'paid_total', 'paid_tip', 'tip_status', 'paid_minus_card',
+                  # ...and who timed it: 'rig', or 'uber' for an order the rig did
+                  # not time (uber_timing).
+                  'timed_by')
 
 
 def _stamp(ms):
@@ -2146,7 +2189,7 @@ def record_cells(o):
             pl.get('pickupName') or '', pl.get('pickup') or '', pl.get('dropoff') or '',
             o['alongside'], 'yes' if o['reliable'] else 'no', o.get('source') or '',
             '; '.join(o['notes'] + (['places withheld: keepPlaces was off'] if pl.get('withheld')
-                                    else []))) + paid_cells(o)
+                                    else []))) + paid_cells(o) + (o.get('timedBy') or '',)
 
 
 def to_records_csv(reps):
@@ -2286,12 +2329,18 @@ def strategy_orders(orders_):
     report would not time is not timed there either."""
     out = []
     for o in orders_:
-        if o.get('took') is None:
+        # An order with no Took is placed at its card's first sighting only
+        # where Uber timed it (uber_timing): its trip happened, and when.
+        took = o.get('took')
+        if took is None and o.get('timedBy') == 'uber':
+            took = o.get('offered')
+        if took is None:
             continue
         rec = o.get('record') or {}
         flags = rec.get('flags') if isinstance(rec.get('flags'), list) else []
         end = o['end'] if o.get('end') is not None else o.get('expiredAt')
-        out.append({'id': o['id'], 'tookAt': o['took'], 'endedAt': end, 'app': o.get('app'),
+        out.append({'id': o['id'], 'tookAt': took, 'endedAt': end, 'app': o.get('app'),
+                    'timedBy': o.get('timedBy'),
                     'pay': o.get('pay'), 'cardMinutes': o.get('cardMinutes'),
                     'cardMiles': o.get('cardMiles'), 'addon': bool(o.get('addon')),
                     'carried': o.get('carried'),

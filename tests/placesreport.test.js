@@ -1348,6 +1348,18 @@ function nbx() {
   var sq = P.strategyOrders([tRun, tPress], [rec1, recFar], null);
   eq('a GPS drop is timed, with the record\'s odometer for its miles; a press is neither',
      sq.map(function (o) { return [o.actualMinutes, o.actualMiles, o.milesFrom]; }), [[40, 6.6, 'odometer'], [null, null, null]]);
+  // ...and the press, untimed here, timed by Uber where its trip was matched
+  // (earnings.js uberTimingFor), labelled; the GPS drop keeps its own timing.
+  var eTimed = [{ kind: 'earning', key: 'eq2', at: 5, app: 'uber', date: '2026-03-03', startedAt: '19:00', amount: 9,
+                  minutes: 24, seconds: 30, miles: 3.3, status: 'completed',
+                  match: { status: 'matched', offer: 'q2', tookAt: tPress.tookAt } },
+                { kind: 'earning', key: 'eq1', at: 5, app: 'uber', date: '2026-03-03', startedAt: '18:00', amount: 14,
+                  minutes: 31, seconds: 0, miles: 6.1, status: 'completed',
+                  match: { status: 'matched', offer: 'q1', tookAt: tRun.tookAt } }];
+  eq('a press the report did not time, timed by Uber where its trip was matched, and said so; the GPS drop\'s own kept',
+     P.strategyOrders([tRun, tPress], [rec1, recFar], null, eTimed).map(function (o) {
+       return [o.actualMinutes, o.actualMiles, o.milesFrom, o.timedBy || null];
+     }), [[40, 6.6, 'odometer', null], [24.5, 3.3, 'uber', 'uber']]);
   var recStep = Object.assign({}, rec1, { flags: ['the clock stepped 2x while it was carried'] });
   eq('a record that says the clock stepped makes the order no timing', P.strategyOrders([tRun], [recStep], null)[0].clockStepped, true);
   var recApprox = Object.assign({}, rec1, { dropoff: { area: { lat: 1, lon: 2, miles: 3, approx: true } },

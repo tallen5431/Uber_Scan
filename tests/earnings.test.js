@@ -394,6 +394,20 @@ eq('[match] a row an earlier build wrote (`finishedAt`) is read as the same star
 eq('[match] Uber\'s finish is its start plus its own minutes and seconds',
    (E.endMs(trip({ minutes: 44, seconds: 50 })) - E.startMs(trip())) / 1000, 44 * 60 + 50);
 
+/* [timed] an untimed order timed by Uber ------------------------------------- */
+// The evidence day's expired order (ev6) and the one with no Took (ev5), with
+// their trips' matches as the server keeps them: Uber's minutes and miles.
+var evRows = evEntries.map(function (e) { return Object.assign({ at: 1 }, e, { match: evM[e.key] }); });
+eq('[timed] the expired order: Uber\'s minutes and seconds and its miles, said to be Uber\'s',
+   E.uberTimingFor(evRows, 'ev6', evOrders[5].times.took),
+   { minutes: 37.5, miles: 20.60, source: 'uber', key: evEntries[5].key });
+eq('[timed] ...the order with no Took, by its trip whose match has no Took either',
+   (E.uberTimingFor(evRows, 'ev5', null) || {}).minutes, 17.83);
+eq('[timed] ...not at another Took, not for an order with no trip matched, never off a canceled trip',
+   [E.uberTimingFor(evRows, 'ev6', evOrders[5].times.took + 120000), E.uberTimingFor(evRows, 'nope', null),
+    E.uberTimingFor([Object.assign({}, evRows[5], { status: 'canceled' })], 'ev6', evOrders[5].times.took)],
+   [null, null, null]);
+
 eq('[match] names are alike past OCR slips and abbreviations, and two restaurants are not',
    [E.similar('Make-Belleve Burgers', 'Make-Believe Burgers') >= E.NAME_MIN,
     E.similar('Sample Street Northwest', 'Sample St NW') === 1,

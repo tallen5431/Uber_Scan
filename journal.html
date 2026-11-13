@@ -3067,9 +3067,16 @@
                                    || card.verdict) : ''));
       }
       var real = [];
-      if (typeof m.minutes === 'number') real.push(num(m.minutes, 1) + ' min');
-      if (typeof m.perHour === 'number') real.push(money(m.perHour, 2) + '/hr');
-      if (typeof m.perMile === 'number') real.push(money(m.perMile, 2) + '/mi');
+      var ub = uberTiming(rec);
+      if (ub) {
+        // Never the rig's figure: Uber's own, said so.
+        real.push(num(ub.minutes, 1) + ' min' + (typeof ub.miles === 'number' ? ', ' + num(ub.miles, 1) + ' mi' : '')
+                  + ' by Uber\'s earnings screen (the rig did not time it)');
+      } else {
+        if (typeof m.minutes === 'number') real.push(num(m.minutes, 1) + ' min');
+        if (typeof m.perHour === 'number') real.push(money(m.perHour, 2) + '/hr');
+        if (typeof m.perMile === 'number') real.push(money(m.perMile, 2) + '/mi');
+      }
       var worth = (rec.flags || []).concat(rec.missing || []);
       if (pl.withheld) worth.push('places withheld: keepPlaces was off');
       return '<h3>Order record</h3><dl class="facts record">'
@@ -3114,7 +3121,11 @@
                         'with_another', 'reliable', 'source', 'notes',
                         // ...and what the app paid, where an earnings screenshot
                         // was matched to the order (paidCells).
-                        'paid_total', 'paid_tip', 'tip_status', 'paid_minus_card'];
+                        'paid_total', 'paid_tip', 'tip_status', 'paid_minus_card',
+                        // ...and who timed it: the rig, or Uber for an order
+                        // the rig did not time, its actual minutes and miles
+                        // Uber's own (uberTiming).
+                        'timed_by'];
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   // Local 'YYYY-MM-DD HH:MM:SS', the report's _stamp.
@@ -3149,15 +3160,31 @@
     var notes = (rec.flags || []).concat(rec.missing || []);
     if (pl.withheld) notes.push('places withheld: keepPlaces was off');
     var miles = typeof m.miles === 'number' ? m.miles : drive.miles;
+    var mins = m.minutes, milesFrom = typeof miles === 'number' ? 'odometer' : '';
+    var perHour = m.perHour, perMile = m.perMile;
+    var timedBy = rigTimed(rec) ? 'rig' : '';
+    // An order the rig did not time, timed by Uber's own minutes and miles
+    // (uberTiming), with the report's one formula for the rates over them.
+    var ub = uberTiming(rec);
+    if (ub) {
+      timedBy = 'uber';
+      mins = ub.minutes;
+      miles = ub.miles;
+      milesFrom = typeof ub.miles === 'number' ? 'uber' : '';
+      perHour = typeof card.pay === 'number' && mins > 0 ? Math.round(card.pay / (mins / 60) * 100) / 100 : null;
+      perMile = typeof card.pay === 'number' && typeof miles === 'number' && miles >= 0.1
+        ? Math.round(card.pay / miles * 100) / 100 : null;
+      notes.push('timed by Uber\'s earnings screen: the rig did not time it');
+    }
     return [dateOf(typeof t.took === 'number' ? t.took : t.offered), rec.app || '',
             stampOf(t.offered), stampOf(t.took), stampOf(t.ended), recordHow(rec),
             f2(card.pay), fg(typeof card.minutes === 'number' ? card.minutes : card.billedMinutes),
-            fg(card.miles), f2(m.minutes), f2(miles),
-            typeof miles === 'number' ? 'odometer' : '', f2(m.perHour), f2(m.perMile),
+            fg(card.miles), f2(mins), f2(miles),
+            milesFrom, f2(perHour), f2(perMile),
             pl.pickupName, pl.pickup, pl.dropoff,
             Array.isArray(rec['with']) && rec['with'].length ? 'yes' : 'no',
             // No day's judgement here (too soon, never driven): the report's.
-            '', 'record', notes.join('; ')].concat(paidCells(rec));
+            '', 'record', notes.join('; ')].concat(paidCells(rec)).concat([timedBy]);
   }
 
   function recordsCsv(records) {
@@ -3243,17 +3270,34 @@
     return Promise.race([ask, late]);
   }
 
+  // The trip matched to this order: its Took within EARNINGS_TOOK_MS of the
+  // match's, or — an order the rig never Took'd — no Took on either side.
   function paidFor(rec) {
-    var t = rec && rec.times && rec.times.took;
-    if (typeof t !== 'number') return null;
+    if (!rec) return null;
+    var t = rec.times && typeof rec.times.took === 'number' ? rec.times.took : null;
     for (var i = 0; i < earningsList.length; i++) {
       var m = earningsList[i].match || {};
-      if ((m.status === 'matched' || m.status === 'picked') && m.offer === rec.offer
-          && typeof m.tookAt === 'number' && Math.abs(m.tookAt - t) <= EARNINGS_TOOK_MS) {
-        return earningsList[i];
-      }
+      if ((m.status !== 'matched' && m.status !== 'picked') || m.offer !== rec.offer) continue;
+      var mt = typeof m.tookAt === 'number' ? m.tookAt : null;
+      if (t === null ? mt === null : (mt !== null && Math.abs(mt - t) <= EARNINGS_TOOK_MS)) return earningsList[i];
     }
     return null;
+  }
+
+  // An order the rig did not time (no delivery's end, or no Took), timed by
+  // Uber's own minutes and miles where its trip was matched (earnings.js
+  // uberTimingFor, the same rule): {minutes, miles}, or null. A rig-measured
+  // timing is never replaced.
+  function rigTimed(rec) {
+    var m = rec.money || {};
+    return m.delivery === true && typeof m.minutes === 'number';
+  }
+  function uberTiming(rec) {
+    if (rigTimed(rec)) return null;
+    var e = paidFor(rec);
+    if (!e || e.status === 'canceled' || typeof e.minutes !== 'number') return null;
+    return { minutes: Math.round((e.minutes + (e.seconds || 0) / 60) * 100) / 100,
+             miles: typeof e.miles === 'number' ? e.miles : null };
   }
 
   // "17:40" -> "5:40 PM", the page's 12-hour clock, with no date worked out.

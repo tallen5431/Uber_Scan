@@ -1375,8 +1375,8 @@ run(['--journal', _pj, '--day', '2026-03-06', '--csv', _pcsv])
 with open(_pcsv, encoding='utf-8') as fh:
     _pc = {r['took'][11:16]: r for r in csv.DictReader(fh)}
 _PAID = ('paid_total', 'paid_tip', 'tip_status', 'paid_minus_card')
-eq('[paid] the records CSV gains the four paid columns, last',
-   SR.RECORD_COLUMNS[-4:], _PAID)
+eq('[paid] the records CSV gains the four paid columns, before who timed it',
+   SR.RECORD_COLUMNS[-5:], _PAID + ('timed_by',))
 eq('[paid] a trip whose tip settled: its newest row, the total, the tip, paid less the card',
    tuple(_pc['18:00'][k] for k in _PAID), ('15.50', '3.50', 'settled', '3.50'))
 eq('[paid] the driver\'s pick, its tip still processing: the total, no tip yet, said pending',
@@ -1388,6 +1388,52 @@ eq('[paid] a trip still waiting for the driver, and one naming an order at anoth
 eq('[paid] ...paid_cells, the offers page\'s paidCells: the card rounded off as the page rounds it',
    SR.paid_cells({'pay': 7.0, 'paid': {'amount': 25.05, 'tip': 19.54, 'tipStatus': 'settled'}}),
    ('25.05', '19.54', 'settled', '18.05'))
+# An order the rig did not time, timed by Uber (the owner, 12 Nov): R2
+# expired on its own clock, and its trip — 18 min 30 s, 3.4 mi on Uber's
+# screen — is matched to it; R1, timed by the rig at the door, has Uber's
+# figures too and keeps its own. The same day with R2's trip canceled on the
+# phone instead times nothing.
+def _timed(e, minutes, seconds, miles):
+    e = dict(e, minutes=minutes, seconds=seconds, miles=miles)
+    return e
+
+
+_uj = os.path.join(work, 'uber-timed.jsonl')
+_urows = _rrows + [
+    _timed(earning('u1', 'R1', _R(18, 0) + 3, 12.00, None, _R(22, 0), card=12.0), 25, 0, 5.0),
+    _timed(earning('u2', 'R2', _R(18, 40) + 3, 7.00, None, _R(22, 0), card=7.0), 18, 30, 3.4),
+]
+with open(_uj, 'w') as fh:
+    fh.write(''.join(json.dumps(r) + '\n' for r in _urows))
+_ucsv = os.path.join(work, 'uber-timed.csv')
+run(['--journal', _uj, '--day', '2026-03-06', '--csv', _ucsv])
+with open(_ucsv, encoding='utf-8') as fh:
+    _uc = {r['took'][11:16]: r for r in csv.DictReader(fh)}
+_UT = ('actual_minutes', 'gps_miles', 'miles_from', 'reliable', 'timed_by')
+eq('[uber timed] an expired order the rig never timed: Uber\'s minutes and miles, said to be Uber\'s, '
+   'and counted as timed', tuple(_uc['18:40'][k] for k in _UT), ('18.50', '3.40', 'uber', 'yes', 'uber'))
+ok_('[uber timed] ...its notes say whose figures they are (%r)' % _uc['18:40']['notes'][-120:],
+    "timed by Uber's earnings screen" in _uc['18:40']['notes'])
+eq('[uber timed] ...and a rig-measured timing is never overwritten by Uber\'s',
+   (_uc['18:00']['actual_minutes'] != '25.00', _uc['18:00']['miles_from'], _uc['18:00']['timed_by']),
+   (True, 'odometer', 'rig'))
+_urep = SR.report(_uj, None, '2026-03-06')
+_ub = {o['id']: o for o in _urep['orders']}
+eq('[uber timed] the summary counts it among the reliable, and says how many Uber timed',
+   (_urep['summary']['timedByUber'], _ub['R2']['reliable'], round(_ub['R2']['perHour'], 2)),
+   (1, True, round(7.0 / (18.5 / 60), 2)))
+ok_('[uber timed] ...in the text', "1 of them timed by Uber's earnings screen" in SR.text(_urep))
+eq('[uber timed] ...and the Strategy tab is handed it, labelled',
+   [(s['id'], s['actualMinutes'], s['timedBy']) for s in SR.strategy_orders(_urep['orders']) if s['id'] == 'R2'],
+   [('R2', 18.5, 'uber')])
+_cj = os.path.join(work, 'uber-canceled.jsonl')
+with open(_cj, 'w') as fh:
+    fh.write(''.join(json.dumps(r) + '\n' for r in _rrows + [
+        dict(_timed(earning('c2', 'R2', _R(18, 40) + 3, 0.0, None, _R(22, 0), card=7.0), None, None, None),
+             status='canceled', canceledBy='you')]))
+_cb = {o['id']: o for o in SR.report(_cj, None, '2026-03-06')['orders']}
+eq('[uber timed] a trip canceled on the phone times nothing', (_cb['R2'].get('timedBy'), _cb['R2']['reliable']),
+   (None, False))
 _ptext = SR.text(SR.report(_pj, None, '2026-03-06'))
 _pjson = json.dumps(SR.as_json(SR.report(_pj, None, '2026-03-06')))
 eq('[paid] the text and the JSON name no figure or place of it: the CSV is where it goes',
