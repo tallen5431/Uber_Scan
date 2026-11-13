@@ -15257,6 +15257,91 @@ try:
 finally:
     stop(_ep)
 
+# --- [earnings] a past day, picked (the owner, 13 Nov) ------------------------------
+#
+# Mon 2 Nov, invented in the shape of the owner's 12 Nov evening: the rig
+# showed Fabled Falafel's card at 4:20 as "Took $9.27?" and never heard it was
+# taken (an offer row and nothing else); Sample Sushi's order was taken at
+# 5:31 and taken back at 5:34 (the trip canceled on the phone at 5:30);
+# Nowhere Noodles' order record (card at 6:24, Uber's 6:23 PM) reaches this
+# journal only after the upload, as a record synced late does. The day's
+# screenshot is uploaded with the day picked; then a scroll of it, a
+# screenshot of another day sent with the same day picked, the first again,
+# and "Match this day again" before and after the late record.
+def _pms(h, m, s=0):
+    return int(datetime.datetime(2026, 11, 2, h, m, s).timestamp() * 1000)
+
+
+_phome = os.path.join(_ework, 'past')
+os.makedirs(_phome)
+_pj = os.path.join(_phome, 'journal.jsonl')
+_psushi = _erecord('p-sushi', _pms(17, 31), 3.0, 9.5, 1.0, 'Sample Sushi', None, '4 Fictional Ct SW, Notaville')
+_psushi['how'] = 'untick'
+_pnoodle = _erecord('p-noodles', _pms(18, 24), 30.0, 12.64, 7.0, 'Nowhere Noodles', None, '9 Imaginary Way, Inventon')
+_pnoodle['card'].update(minutes=24, miles=6.5)
+with open(_pj, 'w') as _fh:
+    _fh.write(json.dumps({'v': 1, 'id': 'p-falafel', 'at': _pms(16, 20, 5), 'firstAt': _pms(16, 20), 'app': 'uber',
+                          'pay': 9.27, 'minutes': 25, 'miles': 6, 'pickup': 'Fabled Falafel'}) + '\n'
+              + json.dumps(_psushi) + '\n')
+_PDAY = dict(day='Mon, Nov 2', chip='11/2', end='End of activities during Nov 2, 2026')
+_pshot = _epng(_ET.screen(trips=_ET.TRIPS_12, **_PDAY))
+_pp, _pb = start({'SCANNER': '0'}, _pj)
+try:
+    _s, _a = _eraw(_pb, '/api/earnings/shot?batch=p1&day=2026-11-02', _pshot, 'image/png')
+    _pe = {r.get('startedAt'): r for r in _a.get('entries') or []}
+    eq('[earnings past day] a screenshot of an older day, uploaded with that day picked: filed under it, '
+       'no warning, its three trips new', (_s, _a.get('day'), _a.get('dayFrom'), _a.get('warning'), _a.get('added')),
+       (200, '2026-11-02', 'picked', None, 3))
+    _fm = (_pe.get('16:18') or {}).get('match') or {}
+    eq('[earnings past day] matched against THAT day\'s offers: the card the rig left on "Took $9.27?" is the '
+       '4:18 PM trip\'s, accepted on the phone, its surge kept',
+       (_fm.get('status'), _fm.get('offer'), _fm.get('source'), _fm.get('said'), (_pe.get('16:18') or {}).get('extras')),
+       ('matched', 'p-falafel', 'offer', 'accepted on the phone, no Took', {'surge': 1.25}))
+    eq('[earnings past day] ...the trip canceled on the phone matched to the order taken back; the late order '
+       'not yet on file, so none',
+       ((_pe.get('17:30') or {}).get('status'), ((_pe.get('17:30') or {}).get('match') or {}).get('offer'),
+        ((_pe.get('18:23') or {}).get('match') or {}).get('status')),
+       ('canceled', 'p-sushi', 'none'))
+    _s, _a = _eraw(_pb, '/api/earnings/shot?batch=p1&day=2026-11-02',
+                   _epng(_ET.screen(trips=_ET.TRIPS_12, header=False, end=None, top_skip=200)), 'image/png')
+    eq('[earnings past day] a scroll of it in the same go: the trips on both screenshots are the same trips',
+       (_a.get('day'), _a.get('added'), len(_rows(_pj, 'earning'))), ('2026-11-02', 0, 3))
+    _s, _a = _eraw(_pb, '/api/earnings/shot?batch=p2&day=2026-11-02',
+                   _epng(_ET.screen(trips=_ET.TRIPS_12, day='Tue, Nov 3', chip='11/3',
+                                    end='End of activities during Nov 3, 2026')), 'image/png')
+    eq('[earnings past day] a screenshot whose heading says another day: filed under the day picked, WITH a '
+       'warning naming both, not silently',
+       (_a.get('day'), _a.get('shownDay'), '2026-11-03' in (_a.get('warning') or ''),
+        '2026-11-02' in (_a.get('warning') or ''), _a.get('added')), ('2026-11-02', '2026-11-03', True, True, 0))
+    _s, _a = _eraw(_pb, '/api/earnings/shot?batch=p3&day=2026-11-02', _pshot, 'image/png')
+    eq('[earnings past day] the day uploaded again: nothing new, nothing changed, no row doubled',
+       (_a.get('added'), _a.get('changed'), len(_rows(_pj, 'earning'))), (0, 0, 3))
+    eq('[earnings past day] "match this day again" with nothing new on file changes nothing',
+       post(_pb, '/api/earnings/rematch', {'day': '2026-11-02'})[1].get('changed'), 0)
+    with open(_pj, 'a') as _fh:
+        _fh.write(json.dumps(_pnoodle) + '\n')
+    _s, _a = post(_pb, '/api/earnings/rematch', {'day': '2026-11-02'})
+    _rn = [e for e in _a.get('entries') or [] if e.get('startedAt') == '18:23']
+    eq('[earnings past day] the late record on file, matched again without a screenshot: the trip is its order, '
+       'one row more for it alone, the card beside Uber\'s figures',
+       (_s, _a.get('changed'), [((e.get('match') or {}).get('offer'), (e.get('match') or {}).get('cardMinutes'))
+                                for e in _rn], len(_rows(_pj, 'earning'))),
+       (200, 1, [('p-noodles', 24)], 4))
+    eq('[earnings past day] ...asked twice, nothing more', post(_pb, '/api/earnings/rematch', {'day': '2026-11-02'})[1]
+       .get('changed'), 0)
+    eq('[earnings past day] ...a day not named, or with nothing on file, is refused',
+       [post(_pb, '/api/earnings/rematch', {'day': 'Nov 2'})[0], post(_pb, '/api/earnings/rematch', {'day': '2026-10-01'})[0]],
+       [400, 404])
+    _pdays = get(_pb, '/api/earnings').get('days') or []
+    eq('[earnings past day] the days with earnings: that day, with its matched and unmatched counts',
+       [(d.get('date'), d.get('trips'), d.get('matched'), d.get('none'), d.get('canceled')) for d in _pdays],
+       [('2026-11-02', 3, 3, 0, 1)])
+    eq('[earnings past day] the picked day is kept beside the picture, so a later reading files it the same',
+       sorted(open(os.path.join(_phome, 'earnings', n)).read() for n in os.listdir(os.path.join(_phome, 'earnings'))
+              if n.endswith('.day')), ['2026-11-02'] * 4)
+finally:
+    stop(_pp)
+
 # A machine with no tesseract (the NucBox, as it may be), a small cap and two
 # shots at most: told how to install it, the picture kept for later.
 _nhome = os.path.join(_ework, 'none')

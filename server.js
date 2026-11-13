@@ -15869,8 +15869,17 @@ function earningsBatch(name, now) {
 /* Read one shot: its `.ocr` if it has one (and `again` is not asked), else
  * tesseract and earnings.js, kept as `.ocr`. `done(err, parsed)`; parsed is
  * {shot, at, app, day, entries, others, notes}. */
-function earningsRead(id, again, now, done) {
+function earningsRead(id, again, now, done0) {
   var ocrFile = earningsPath(id, '.ocr');
+  // ...with the day picked for it on the page, if one was (`<id>.day`).
+  var done = function (err, rec) {
+    if (err || !rec) return done0(err, rec);
+    fs.readFile(earningsPath(id, '.day'), 'utf8', function (dayErr, day) {
+      var d = dayErr ? '' : String(day).trim();
+      if (EARNINGS_DAY.test(d)) rec.picked = d;
+      done0(null, rec);
+    });
+  };
   fs.readFile(ocrFile, 'utf8', function (readErr, text) {
     var kept = null;
     if (!readErr && !again) {
@@ -15998,9 +16007,11 @@ function earningsFile(parses, alsoDays, pick, now, done) {
     var changed = {}, fresh = {}, days = {};
     (alsoDays || []).forEach(function (d) { days[d] = true; });
     parses.forEach(function (p) {
-      if (!p.day || !p.app) return;
+      // The day picked on the page wins over the screenshot's own.
+      var pday = p.picked || p.day;
+      if (!pday || !p.app) return;
       (p.entries || []).forEach(function (raw) {
-        var e = Object.assign({ app: p.app, date: p.day }, raw);
+        var e = Object.assign({ app: p.app, date: pday }, raw);
         var same = null, best = -1;
         Object.keys(byKey).forEach(function (k) {
           var x = byKey[k];
@@ -16169,7 +16180,20 @@ function earningsRoute(req, res) {
               return reply(500, { ok: false, error: 'could not keep the screenshot in ' + EARNINGS_DIR });
             }
             var batch = earningsBatch(typeof q.batch === 'string' ? q.batch : null, now);
-            earningsRead(id, false, now, function (readErr, parsed) {
+            // The day picked on the page, kept beside the picture as
+            // `<id>.day` before it is read, so a picture read later (Read
+            // again, once tesseract is installed) is filed under the same day
+            // and never becomes a second trip on the day its heading says
+            // (earningsRead puts it on the reading as `picked`).
+            var pickedDay = typeof q.day === 'string' && EARNINGS_DAY.test(q.day) ? q.day : null;
+            var keepDay = function (then) {
+              if (!pickedDay) return then();
+              earningsWrite(earningsPath(id, '.day'), pickedDay, function (dayErr) {
+                if (dayErr) console.error('earnings: could not keep the day picked for ' + id + ': ' + dayErr.message);
+                then();
+              });
+            };
+            keepDay(function () { earningsRead(id, false, now, function (readErr, parsed) {
               if (readErr) {
                 var none = readErr.code === 'NOTESS';
                 return reply(200, { ok: true, shot: id, read: false,
@@ -16177,6 +16201,24 @@ function earningsRoute(req, res) {
                                     install: none ? EARNINGS_INSTALL : null });
               }
               var parses = [parsed];
+              // A PAST DAY PICKED on the page (the owner, 13 Nov: pick a
+              // previous day and upload its screenshots): the picked day wins,
+              // and a screenshot whose own heading says another day is filed
+              // under the picked one WITH A WARNING in the answer, never
+              // silently. With no day picked, the screenshot's own (its end
+              // line, heading or chip), else its batch's, as before.
+              var picked = pickedDay;
+              var warning = null;
+              if (picked) {
+                if (parsed.day && parsed.day !== picked) {
+                  warning = 'this screenshot says ' + parsed.day + ' (' + (parsed.dayFrom || 'read') + '), and was '
+                    + 'filed under the day picked, ' + picked + '; pick its own day and upload it again if that '
+                    + 'was wrong';
+                }
+                parsed.shownDay = parsed.day || null;
+                parsed.day = picked;
+                parsed.dayFrom = 'picked';
+              }
               if (batch) {
                 if (parsed.day) {
                   batch.day = parsed.day;
@@ -16201,13 +16243,14 @@ function earningsRoute(req, res) {
                 earningsFile(parses, [], null, now, function (fileErr, summary) {
                   if (fileErr) return reply(500, { ok: false, shot: id, read: true, error: fileErr.message });
                   reply(200, { ok: true, shot: id, read: true, app: parsed.app, day: parsed.day,
-                               dayFrom: parsed.dayFrom || null, trips: (parsed.entries || []).length,
+                               dayFrom: parsed.dayFrom || null, shownDay: picked ? parsed.shownDay : undefined,
+                               warning: warning, trips: (parsed.entries || []).length,
                                others: (parsed.others || []).length, notes: parsed.notes || [],
                                added: summary.added, changed: summary.changed, entries: summary.entries });
                 });
               };
               readLate(0);
-            });
+            }); });
           });
         });
       });
@@ -16272,6 +16315,29 @@ function earningsRoute(req, res) {
   // a read that failed), and every day of the last EARNINGS_REMATCH_DAYS
   // matched again — the records the rig synced since the upload are then
   // found.
+  // Match one day again (the owner, 13 Nov): its trips as kept, against that
+  // day's records, runs and offers as they stand now — after a matcher fix,
+  // or once the rig's records have synced — with no screenshot sent again.
+  // {day: 'YYYY-MM-DD'}. The driver's picks are kept; a row is written only
+  // for a trip whose match changed, so asking twice changes nothing.
+  if (pathname === '/api/earnings/rematch') {
+    return readJsonBody(req, function (err, body) {
+      if (err || !body || typeof body.day !== 'string' || !EARNINGS_DAY.test(body.day)) {
+        return answer(400, { ok: false, error: 'name the day, YYYY-MM-DD' });
+      }
+      fileLock('earnings', function (release) {
+        var reply = function (code, b) { release(); answer(code, b); };
+        earningsFile([], [body.day], null, Date.now(), function (fileErr, summary) {
+          if (fileErr) return reply(500, { ok: false, error: fileErr.message });
+          var mine = summary.entries.filter(function (e) { return e.date === body.day; });
+          if (!mine.length) return reply(404, { ok: false, error: 'no earnings on file for ' + body.day });
+          reply(200, { ok: true, day: body.day, changed: summary.changed, summary: Earnings.daySummary(mine),
+                       entries: mine });
+        });
+      });
+    });
+  }
+
   if (pathname === '/api/earnings/reread') {
     return readJsonBody(req, function (err) {
       if (err) return answer(400, { ok: false, error: 'bad body' });
@@ -16301,7 +16367,7 @@ function earningsRoute(req, res) {
                 if (fileErr) return reply(500, { ok: false, error: fileErr.message });
                 reply(200, { ok: true, read: parses.length, failed: failed,
                              install: earningsTesseract() ? null : EARNINGS_INSTALL,
-                             undated: parses.filter(function (p) { return !p.day; }).length,
+                             undated: parses.filter(function (p) { return !(p.picked || p.day); }).length,
                              added: summary.added, changed: summary.changed });
               });
             });

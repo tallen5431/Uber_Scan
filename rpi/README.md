@@ -4362,7 +4362,12 @@ the day of the upload it came in (`batch`). `GET /api/earnings` answers with
 the trips, whether tesseract is installed and the command that installs it,
 and how many screenshots are kept and waiting; `POST /api/earnings/pick`
 files the driver's pick, `/reread` reads what is waiting and matches the last
-60 days again, `/forget` deletes the pictures that have been read. How a trip
+60 days again, `/rematch` {day} matches one day again with nothing re-sent,
+`/forget` deletes the pictures that have been read. An upload's `?day=` files
+it under a past day picked on the page (a screenshot whose heading says
+another day is filed there with a warning); `GET /api/earnings?day=` answers
+one day with its card-against-actual summary, and every answer lists the
+days with earnings and their counts. How a trip
 is matched — its start against the card's first sighting or Took, its finish (start plus Uber's minutes) against a delivery's end, the restaurant, a chain's
 corner against the pickup's door, the dropoff's street, Uber's miles against
 the odometer's, its pay against the card's, the app's clock offset found from
@@ -9235,7 +9240,7 @@ node tests/strategy.test.js     #  90 on what $/hr to expect and what holding
                                 #     check of a line per block; card against
                                 #     what the app paid by app, restaurant and
                                 #     block, a pending tip left out
-node tests/earnings.test.js     # 139 on what the app paid and which order it
+node tests/earnings.test.js     # 220 on what the app paid and which order it
                                 #     was: Uber's earnings screen as tesseract
                                 #     reads it (tests/fixtures/earnings.json),
                                 #     one trip however often it is uploaded, a
@@ -9243,7 +9248,7 @@ node tests/earnings.test.js     # 139 on what the app paid and which order it
                                 #     clear match, a chain's two orders left to
                                 #     the driver, the rig off, the app's clock
                                 #     off the rig's, one order per trip
-python3 rpi/test_earnings.py    #  15 on the same screen drawn at the phone's
+python3 rpi/test_earnings.py    #  17 on the same screen drawn at the phone's
                                 #     size and read by the real tesseract, as
                                 #     the server runs it: PNG, JPEG, the time on
                                 #     either line, a scroll past the top

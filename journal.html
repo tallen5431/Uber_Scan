@@ -221,6 +221,8 @@
                    overflow-wrap: anywhere; }
   #earnings .cmp span { display: block; }
   #earnings .cmp .flag { font-weight: 700; }
+  #earningsDay { display: block; width: 100%; box-sizing: border-box; min-height: 44px; margin: 4px 0 8px;
+                 font: inherit; }
   #earnings .daytools { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
   #earnings .daytools button { min-height: 44px; flex: 1 1 140px; }
   .offer.hiddenrow > summary { opacity: .5; }
@@ -924,6 +926,13 @@
       Each trip on them is matched to its order here, and the order&rsquo;s record says what
       it paid against the card. Upload again once tips have settled: a tip that was
       processing is updated, nothing is counted twice.</p>
+    <!-- A past day's screenshots (the owner, 13 Nov): left empty, each is
+         filed under the day its heading says ("Thu, Nov 12"); a day picked
+         here wins, and a screenshot saying another day is filed under it
+         with a warning, never silently. -->
+    <label class="note" id="earningsDayLabel" for="earningsDay">Day of these screenshots
+      (leave empty to use the date on each):</label>
+    <input type="date" id="earningsDay">
     <input type="file" id="earningsFiles" accept="image/png,image/jpeg,image/webp" multiple>
     <label id="earningsPick" for="earningsFiles">Add earnings screenshots</label>
     <p class="note" id="earningsSays" aria-live="polite" hidden></p>
@@ -1040,7 +1049,7 @@
    'real', 'realHead', 'realLead', 'waits', 'waitsHead', 'waitsLead',
    'recordsHead', 'recordsLead', 'recordsCsv',
    'earnings', 'earningsFiles', 'earningsSays', 'earningsInstall', 'earningsNeeds',
-   'earningsNone', 'earningsReread', 'earningsForget', 'earningsDays',
+   'earningsNone', 'earningsReread', 'earningsForget', 'earningsDays', 'earningsDay',
    'ppm', 'ppmHead', 'ppmLead', 'err', 'errHead', 'errLead',
    'ppmReal', 'ppmRealHead', 'ppmRealLead', 'refig', 'refigHead', 'refigLead',
    'review', 'reviewSays', 'reviewDays', 'reviewBack', 'reviewOn', 'reviewLead',
@@ -3517,8 +3526,11 @@
     el.earningsDays.innerHTML = (days || []).length
       ? '<details id="earningsDaysList"><summary>Days with earnings on file (' + days.length + ')</summary>'
         + days.map(function (d) {
+          // ...each with "Match this day again": its trips as kept, matched
+          // against the day's records as they stand now, nothing re-sent.
           return '<details class="eday" data-day="' + esc(d.date) + '"><summary>' + esc(dayLine(d)) + '</summary>'
-            + '<div class="daybody"></div></details>';
+            + '<div class="daytools"><button type="button" data-rematch="' + esc(d.date) + '">Match this day again'
+            + '</button></div><div class="daybody"></div></details>';
         }).join('') + '</details>'
       : '';
   }
@@ -3659,6 +3671,9 @@
       return true;
     });
     var batch = 'b' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+    // The day picked for these screenshots, or none: then each is filed
+    // under the day its own heading says (the server's rule).
+    var day = /^\d{4}-\d\d-\d\d$/.test(el.earningsDay.value || '') ? el.earningsDay.value : '';
     var got = [];
     var say = function (t) { earningsSaid = t; el.earningsSays.hidden = false; el.earningsSays.textContent = t; };
     var finish = function () {
@@ -3669,6 +3684,9 @@
       var waiting = got.filter(function (a) { return a && a.ok && !a.read; });
       var failed = got.filter(function (a) { return !a || !a.ok; });
       var undated = read.filter(function (a) { return !a.day; }).length;
+      // A screenshot whose heading says another day than the one picked:
+      // filed under the picked day, and said (never silently).
+      var warned = read.filter(function (a) { return a.warning; });
       var notes = [];
       read.forEach(function (a) {
         (a.notes || []).forEach(function (n) { if (notes.indexOf(n) === -1) notes.push(n); });
@@ -3687,6 +3705,12 @@
         words.push(undated + (undated === 1 ? ' screenshot shows' : ' screenshots show') + ' no day: '
           + 'send it with the screenshot from the top of that day, in one go.');
       }
+      if (warned.length) {
+        words.push('Check the day: ' + warned.length + (warned.length === 1 ? ' screenshot says' : ' screenshots say')
+          + ' another day than the one picked (' + warned.map(function (a) { return dayLabel(a.shownDay); }).join(', ')
+          + ') and ' + (warned.length === 1 ? 'was' : 'were') + ' filed under ' + dayLabel(day)
+          + '. If that was wrong, clear the day and send ' + (warned.length === 1 ? 'it' : 'them') + ' again.');
+      }
       if (failed.length) {
         words.push('Refused: ' + failed.map(function (a) { return (a && a.error) || 'no answer'; }).join('; ') + '.');
       }
@@ -3698,7 +3722,8 @@
     var next = function (i) {
       if (i >= files.length) return finish();
       say('Reading screenshot ' + (i + 1) + ' of ' + files.length + '…');
-      postEarnings('/api/earnings/shot?batch=' + batch, files[i], files[i].type || 'image/png')
+      postEarnings('/api/earnings/shot?batch=' + batch + (day ? '&day=' + encodeURIComponent(day) : ''),
+                   files[i], files[i].type || 'image/png')
         .then(function (ans) { got.push(ans); next(i + 1); });
     };
     next(0);
@@ -3715,6 +3740,20 @@
     var det = ev.target;
     if (det && det.classList && det.classList.contains('eday') && det.open) openEarningsDay(det);
   }, true);
+
+  el.earningsDays.addEventListener('click', function (ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest('button[data-rematch]') : null;
+    if (!b) return;
+    var day = b.getAttribute('data-rematch');
+    b.disabled = true;
+    postEarnings('/api/earnings/rematch', { day: day }).then(function (ans) {
+      earningsSaid = ans && ans.ok
+        ? 'Matched ' + dayLabel(day) + ' again: ' + (ans.changed || 0) + (ans.changed === 1 ? ' trip' : ' trips')
+          + ' changed.'
+        : 'Could not match ' + dayLabel(day) + ' again: ' + ((ans && ans.error) || 'no answer') + '.';
+      load();
+    });
+  });
 
   el.earningsNeeds.addEventListener('click', function (ev) {
     var b = ev.target && ev.target.closest ? ev.target.closest('button[data-key]') : null;

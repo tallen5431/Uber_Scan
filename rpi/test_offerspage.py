@@ -4336,6 +4336,8 @@ const { chromium } = require('playwright');
     return {
       shown: !document.getElementById('earnings').hidden,
       input: { type: ip.type, multiple: ip.multiple, accept: ip.accept },
+      dayPick: (() => { const d = document.getElementById('earningsDay'); return d ? { type: d.type, value: d.value,
+        h: Math.round(d.getBoundingClientRect().height) } : null; })(),
       label: (lab.textContent || '').trim(), labelH: Math.round(r.height),
       says: document.getElementById('earningsSays').textContent,
       install: document.getElementById('earningsInstall').hidden ? null
@@ -4474,6 +4476,9 @@ try:
        (_b.get('shown'), _b.get('input'), _b.get('label')),
        (True, {'type': 'file', 'multiple': True, 'accept': 'image/png,image/jpeg,image/webp'},
         'Add earnings screenshots'))
+    eq('[earnings] ...beside it a day picker for a past day\'s screenshots, empty (each screenshot\'s own date), '
+       'a finger tall', ((_b.get('dayPick') or {}).get('type'), (_b.get('dayPick') or {}).get('value'),
+                         ((_b.get('dayPick') or {}).get('h') or 0) >= 44), ('date', '', True))
     ok_('[earnings] ...a finger\'s 52px tall at 360x640 (%r), no sideways scroll' % _b.get('labelH'),
         (_b.get('labelH') or 0) >= 52 and not _b.get('sideways'))
     eq('[earnings] ...and before an upload no record says what was paid, and nothing is asked of you',
