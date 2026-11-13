@@ -5675,6 +5675,9 @@
   // starting over a screen that has just read as no offer is the rig
   // looking again, not a card being priced.
   var NO_OFFER_SAID = 'scanner running, no offer on screen';
+  // The screens a phone shows for an order it has taken, as OP.screen_type
+  // names them: never an offer card. See noVerdictSaid.
+  var TAKEN_SCREENS = ['uber.nav', 'uber.planner', 'uber.pickupNav', 'dd.deliver', 'dd.pickup'];
 
   function noVerdictSaid(r) {
     if (r.clipped) return 'pay at the box edge — not trusted';
@@ -5686,6 +5689,17 @@
     // read" — each a READING THE CARD on the next read, over a phone saying
     // it has no offers. Before the pay test, which is what it overrules.
     if (r.notAnOffer) return NO_OFFER_SAID;
+    // ...and a screen of an order already taken, by the reader's own type of
+    // it (`screen`, OP.screen_type): Uber's navigation and Trip Planner,
+    // DoorDash's deliver and pickup screens. screen_type asks an offer's own
+    // words first, so a card that lands over the map and keeps any of them is
+    // typed as the card and still gets the hedge below. Without this the map's
+    // "3 min · 1.1 mi" and "Expected by" said "no pay read — box may cut it
+    // off" for the whole of every delivery (the owner's snaps of 12 Nov, five
+    // presses of ten), sending the driver to ▣ Set box over a turn arrow.
+    // No payout only: a figure read off one of these is still said as one.
+    if (!(typeof r.pay === 'number' && r.pay > 0)
+        && TAKEN_SCREENS.indexOf(r.screen) !== -1) return NO_OFFER_SAID;
     if (typeof r.pay === 'number' && r.pay > 0) {
       return 'pay, no time — box may cut it off';
     }

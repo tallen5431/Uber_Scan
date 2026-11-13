@@ -272,12 +272,27 @@ MAP = dict(CUT_PAY, miles=1.0, minutes=39.0, legs=4, mergedFrom=1,
            text='The Townes at Chastain 3min 8 11 min $ 22 min & 3 min (1.0 mi) '
                 'Fastest route now due to traffic conditions')
 
+# Uber's navigation to a held order's door, as the card box reads it in the car
+# (the shape of the owner's snaps of 12 Nov; the places invented): the bar's
+# "3 min · 1.1 mi" and "Expected by" under a speed limit, and no offer's words.
+# emit() types it as the reader does, OP.screen_type, which answers 'uber.nav';
+# the line under the verdict said "no pay read — box may cut it off" over it.
+NAV_TEXT = ("Fable Grove Park | 40 | LIMIT | Kroger | o= 3 min © 1.1 mi = | "
+            "Expected by 6:37 PM")
+NAV = dict(CUT_PAY, miles=1.1, minutes=3.0, legs=1, mergedFrom=0,
+           text=NAV_TEXT, screen='uber.nav')
+# ...and the Trip Planner's stops, typed 'uber.planner'.
+PLANNER = dict(CUT_PAY, miles=None, minutes=None, legs=0, mergedFrom=0,
+               text='Dropoff - 1 order | Pat Q. | Expected by 8:21 PM | Address | '
+                    '12 Fable Ct, Marietta, GA | View details | Stop New Requests',
+               screen='uber.planner')
+
 READINGS = {'uncertain': UNCERTAIN, 'deducted': DEDUCTED, 'deadline': DEADLINE,
             'impossible': IMPOSSIBLE, 'untimed': UNTIMED, 'loss': LOSS,
             'divides': DIVIDES, 'cutpay': CUT_PAY, 'cutpaynow': CUT_PAY_NOW,
             'notime': NO_TIME, 'zone': ZONE, 'deadlineonly': DEADLINE_ONLY,
             'pickuponly': PICKUP_ONLY, 'blank': BLANK, 'clipped': CLIPPED,
-            'map': MAP}
+            'map': MAP, 'nav': NAV, 'planner': PLANNER}
 
 # ...and every field above has to be one the rig actually sends.
 #
@@ -3292,7 +3307,7 @@ const framed = (page) => page.waitForFunction(
     await page.evaluate(() => window.__es.push({ phase: 'scanning', message: '' }));
     out.noVerdict = {};
     for (const key of ['cutpay', 'cutpaynow', 'notime', 'zone', 'deadlineonly',
-                       'pickuponly', 'blank', 'clipped', 'map']) {
+                       'pickuponly', 'blank', 'clipped', 'map', 'nav', 'planner']) {
       await page.evaluate(() => window.__es.push({ alive: true, at: 1 }));
       await page.evaluate((r) => window.__es.push(r), READINGS[key]);
       await page.waitForTimeout(150);
@@ -10661,8 +10676,8 @@ try:
     # prompt reads exactly the way a card missing its pay does.
     nv = got.get('noVerdict') or {}
     eq('every reading with no verdict was measured', sorted(nv),
-       ['blank', 'clipped', 'cutpay', 'cutpaynow', 'deadlineonly', 'map', 'notime',
-        'pickuponly', 'zone'])
+       ['blank', 'clipped', 'cutpay', 'cutpaynow', 'deadlineonly', 'map', 'nav', 'notime',
+        'pickuponly', 'planner', 'zone'])
     cut = (nv.get('cutpay') or {}).get('detail') or ''
     no_('the 8 Oct Est. delivery card the box cut the pay off is not called '
         '"no offer on screen" (%r)' % cut, 'no offer on screen' in cut)
@@ -10699,8 +10714,14 @@ try:
     nav = (nv.get('map') or {}).get('detail') or ''
     ok_('Uber\'s map screen, as the corpus reads it, is a reading with no pay (%r)'
         % nav, nav.startswith('no pay read'))
+    # The navigation and the planner of an order taken, typed so by the reader
+    # (`screen`): no offer is on the phone, and the box is not the remedy.
+    for key in ('nav', 'planner'):
+        said = (nv.get(key) or {}).get('detail') or ''
+        ok_('[taken screen] %s says no offer is on screen, not that the box may '
+            'cut one (%r)' % (key, said), said.startswith('scanner running, no offer on screen'))
     for key in ('cutpay', 'cutpaynow', 'notime', 'zone', 'deadlineonly', 'pickuponly',
-                'clipped', 'map'):
+                'clipped', 'map', 'nav', 'planner'):
         s = nv.get(key) or {}
         said = s.get('detail') or ''
         # "a card's pay" is a card the box MAY have cut; what is refused is the

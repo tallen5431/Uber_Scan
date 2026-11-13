@@ -2971,7 +2971,11 @@ it did read, in words and never a figure:
   5,491 stored frames — the ones kept on offer rows, which the navigation
   screens are not — it would have shown over the zone prompt and nothing else:
   19 frames, five prompts, where `no offer on screen` was true as well.
-- `scanner running, no offer on screen` for a reading that got nothing.
+- `scanner running, no offer on screen` for a reading that got nothing, and
+  for one with no payout whose words the reader types as a screen of an order
+  taken (`screen` on the reading: `uber.nav`, `uber.planner`,
+  `uber.pickupNav`, `dd.deliver`, `dd.pickup`). Before 12 Nov the navigation's
+  bar said `no pay read` for the whole of every delivery.
 
 Each is no wider than the sentence it replaced, in the page's own font on the
 rig's own panel, the 800x480 one and the 3.5" hat, in either picture, so

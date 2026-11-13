@@ -5364,6 +5364,17 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         # app saying in words that it has no offers. See noVerdictSaid in
         # live.html.
         'notAnOffer': bool(parsed.get('notAnOffer')),
+        # What screen the reading's words are (OP.screen_type), for the same
+        # line under the verdict. Uber's navigation and its Trip Planner are
+        # not NOT_AN_OFFER — an add-on lands on top of either — so a read of
+        # one with no payout said "no pay read — box may cut it off" for the
+        # whole of every delivery: on the owner's snaps of 12 Nov, five of ten
+        # presses, over a turn arrow and a speed limit or the planner's stops,
+        # and READING THE CARD over the same map at every read. The type
+        # answers 'uber.nav' or 'uber.planner' only when no offer's words were
+        # read first (screen_type asks the offers before them), so it is the
+        # reader's own word that what it read was the order in the car.
+        'screen': OP.screen_type(parsed.get('text') or '')['screen'],
         # Which crop the PAYOUT on this line was read through: 'found' when
         # the drawn card box read a journey and no payout and the payout came
         # off a taller card found above it (pipeline.Scanner._look,

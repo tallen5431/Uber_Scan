@@ -531,6 +531,18 @@ eq("the app's idle screen says so on the wire, with no rate to withhold",
 eq('...and a card says it is not one',
    emitted(sample_rate, sample_parsed, True).get('notAnOffer'), False)
 
+# --- ...and what screen the reading's words are -----------------------------
+# Uber's navigation to the held order's door (the shape of the owner's snaps of
+# 12 Nov, the places invented) reads a time and a distance off its bar and no
+# payout, and is no NOT_AN_OFFER screen; the panel said "no pay read — box may
+# cut it off" over it. The reading carries the reader's own type of it.
+_nav = _OP.parse('Fable Grove Park\n40\nLIMIT\no= 3 min © 1.1 mi =\nExpected by 6:37 PM')
+eq('a read of the navigation goes out typed as the navigation',
+   (emitted(_OP.rate(_nav), _nav, False).get('screen'), _nav['pay']), ('uber.nav', None))
+_card = _OP.parse('$9.10\nGuaranteed (incl. tip)\n18 min (5.2 mi) total\nFable Burger\nOak Ln, Marietta')
+eq('...and a card as a card, so the panel keeps its hedge for one',
+   emitted(_OP.rate(_card), _card, False).get('screen'), 'uber.offer')
+
 # --- the journal -----------------------------------------------------------
 rows = run_uberx['rows']
 ok_('the offer was written down', len(rows) >= 1)
