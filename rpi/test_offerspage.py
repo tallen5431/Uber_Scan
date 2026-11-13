@@ -4369,6 +4369,15 @@ const { chromium } = require('playwright');
       const a = document.getElementById('recordsCsv');
       return a && a.href ? await (await fetch(a.href)).text() : null;
     });
+    // The days with earnings, and one opened: card against actual per trip.
+    await page.click('#earningsDaysList > summary').catch(() => {});
+    await page.click('#earningsDaysList details.eday > summary').catch(() => {});
+    await page.waitForSelector('#earningsDaysList .cmp', { timeout: 8000 }).catch(() => {});
+    out.days = await page.evaluate(() => ({
+      list: Array.from(document.querySelectorAll('#earningsDaysList details.eday > summary')).map((s) => s.textContent),
+      blocks: Array.from(document.querySelectorAll('#earningsDaysList .cmp')).map((b) => b.textContent),
+      sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    }));
     // Delete the picture: two presses.
     await page.click('#earningsForget').catch(() => {});
     out.armed = await page.evaluate(() => document.getElementById('earningsForget').textContent);
@@ -4501,6 +4510,20 @@ try:
                                               'Make-Believe Burgers@8.00')
         for c in ('paid_total', 'paid_tip', 'tip_status', 'paid_minus_card')],
        ['2.00', '', 'pending', '-4.50', '25.05', '19.54', 'settled', '18.05', '', '', '', ''])
+    _UC = ('uber_status', 'uber_start', 'uber_finish', 'uber_minutes', 'uber_miles', 'time_vs_card', 'miles_vs_card',
+           'timed_by')
+    eq('[earnings csv] ...and Uber\'s side beside the card\'s, never in it: status, start, the finish its minutes '
+       'imply, minutes, miles, and the card against it in its own words',
+       tuple((_eby.get('Pretend Pizza@6.50') or {}).get(c) for c in _UC),
+       ('completed', '17:40', '18:19', '39.55', '12.30', 'slower +9.55', 'longer +4.30', 'rig'))
+    _dv = _eh.get('days') or {}
+    ok_('[earnings] the days with earnings are listed with their counts (%r)' % (_dv.get('list') or [])[:1],
+        len(_dv.get('list') or []) == 1 and '3 trips, 2 matched, 1 with no order' in (_dv.get('list') or [''])[0])
+    _blk = ' | '.join(_dv.get('blocks') or [])
+    ok_('[earnings] ...a day opened shows each matched trip\'s card against Uber, in the card\'s own words, '
+        'no sideways scroll (%r)' % _blk[:300],
+        'Card: $6.50 · 30 min · 8.0 mi' in _blk and 'slower than the card said (+9.6 min; the rig timed 47.0 min)' in _blk
+        and 'Card: $7.00' in _blk and '+$18.05 more than the card' in _blk and not _dv.get('sideways'))
     eq('[earnings] delete asks twice, then the picture goes and what was read stays',
        (_eh.get('armed'), (_eh.get('deleted') or {}).get('forget'),
         ((_eh.get('deleted') or {}).get('paid') or {}).get('pizza')),

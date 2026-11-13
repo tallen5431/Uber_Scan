@@ -1889,7 +1889,96 @@ def report(journal, gps_dir, day, read=None):
     shift = totals(fixes, start / 1000.0, end / 1000.0)
     return {'orders': mine, 'summary': summary(mine), 'info': info,
             'totals': shift, 'waitTotals': wait_totals(mine, shift),
+            'cardVsActual': card_vs_actual(mine),
             'day': day, 'start': start, 'end': end}
+
+
+# How many of the widest pay gaps the card-against-actual section names.
+BIGGEST_GAPS = 3
+
+
+def card_vs_actual(orders_):
+    """The day's card against what happened, over the orders whose trip was
+    matched off an uploaded earnings screenshot: the card's pay and what was
+    paid in all (a trip with its tip still processing left out and counted,
+    a canceled one counted), how many Uber's minutes put faster than the card
+    said, on time or slower (earnings.js compareOf's bands), the median of
+    Uber's minutes less the card's, the median of the rig's less Uber's over
+    the orders the rig timed itself, and the BIGGEST_GAPS widest pay gaps by
+    order number and start. Numbers and order numbers; no place. DESCRIPTIVE
+    ONLY: nothing reads it, and no line says what should have been taken."""
+    out = {'compared': 0, 'pending': 0, 'canceled': 0, 'card': 0.0, 'paid': 0.0, 'diff': 0.0,
+           'faster': 0, 'onTime': 0, 'slower': 0, 'untimed': 0, 'medianMinutes': None,
+           'rigMinusUber': None, 'rigN': 0, 'flagged': 0, 'biggest': []}
+    gaps, rig, pays = [], [], []
+    for i, o in enumerate(orders_):
+        e = o.get('paid')
+        if not e or _num(e.get('amount')) is None:
+            continue
+        if e.get('status') == 'canceled':
+            out['canceled'] += 1
+            continue
+        if e.get('tipStatus') == 'pending' or e.get('tip') == 'processing' or _num(o.get('pay')) is None:
+            out['pending'] += 1 if e.get('tipStatus') == 'pending' or e.get('tip') == 'processing' else 0
+            continue
+        out['compared'] += 1
+        out['card'] += o['pay']
+        out['paid'] += e['amount']
+        d = _cents(e['amount'] - o['pay'])
+        if abs(d) > max(PAY_FLAG, PAY_FLAG_SHARE * o['pay']):
+            out['flagged'] += 1
+        pays.append((i + 1, e.get('startedAt') or e.get('finishedAt') or '', d))
+        um = uber_minutes(e)
+        tv = time_vs_card(um, o.get('cardMinutes')) if not o.get('addon') else None
+        if tv:
+            out[{'on time': 'onTime'}.get(tv[0], tv[0])] += 1
+            gaps.append(tv[1])
+        else:
+            out['untimed'] += 1
+        if um is not None and o.get('timedBy') == 'rig' and o.get('actualMinutes'):
+            rig.append(o['actualMinutes'] - um)
+    out['card'], out['paid'] = round(out['card'], 2), round(out['paid'], 2)
+    out['diff'] = _cents(out['paid'] - out['card'])
+    out['medianMinutes'] = round(statistics.median(gaps), 2) if gaps else None
+    out['rigMinusUber'] = round(statistics.median(rig), 2) if rig else None
+    out['rigN'] = len(rig)
+    out['biggest'] = [{'n': n, 'start': s, 'diff': d} for n, s, d in
+                      sorted((p for p in pays if abs(p[2]) > 0.005), key=lambda p: -abs(p[2]))[:BIGGEST_GAPS]]
+    return out
+
+
+def card_vs_actual_text(c):
+    """The section's lines, or none where no trip was matched."""
+    if not c or not (c['compared'] or c['pending'] or c['canceled']):
+        return []
+    hm = lambda s: s and time.strftime('%I:%M %p', time.strptime(s, '%H:%M')).lstrip('0')
+    out = ['', "Card vs actual (the cards as read against Uber's earnings screenshots; descriptive, "
+               'nothing reads it):']
+    if c['compared']:
+        out.append('  %d order%s compared: cards $%.2f, paid $%.2f (%s$%.2f), %d past $%.2f or %d%% off its card'
+                   % (c['compared'], '' if c['compared'] == 1 else 's', c['card'], c['paid'],
+                      '+' if c['diff'] >= 0 else '-', abs(c['diff']), c['flagged'], PAY_FLAG,
+                      round(PAY_FLAG_SHARE * 100)))
+        out.append('  by Uber\'s minutes: %d faster than the card said, %d on time, %d slower%s%s'
+                   % (c['faster'], c['onTime'], c['slower'],
+                      '; median %s min against the card' % _signed(c['medianMinutes'])
+                      if c['medianMinutes'] is not None else '',
+                      '; %d with no minutes to compare' % c['untimed'] if c['untimed'] else ''))
+        if c['rigN']:
+            out.append("  the rig's own minutes ran a median %s against Uber's, over the %d order%s it timed"
+                       % (_signed(c['rigMinusUber']), c['rigN'], '' if c['rigN'] == 1 else 's'))
+        if c['biggest']:
+            out.append('  widest pay gaps: ' + ', '.join(
+                '#%d (%s) %s$%.2f' % (b['n'], hm(b['start']) or '?', '+' if b['diff'] >= 0 else '-',
+                                      abs(b['diff'])) for b in c['biggest']))
+    more = []
+    if c['pending']:
+        more.append('%d with a tip still processing, left out' % c['pending'])
+    if c['canceled']:
+        more.append('%d canceled on the phone' % c['canceled'])
+    if more:
+        out.append('  (' + '; '.join(more) + ')')
+    return out
 
 
 def _band(m):
@@ -2075,6 +2164,7 @@ def text(rep):
             out.append('    %-16s n=%-3d median actual/card minutes %-6s median actual $/hr %s'
                        % (g['group'], g['n'], _f(g['ratio'], '%.2f'),
                           _f(g['perHour'], '$%.2f')))
+    out.extend(card_vs_actual_text(rep.get('cardVsActual')))
     return '\n'.join(out) + '\n'
 
 
@@ -2193,7 +2283,68 @@ RECORD_COLUMNS = ('date', 'app', 'offered', 'took', 'ended', 'how_ended', 'card_
                   'paid_total', 'paid_tip', 'tip_status', 'paid_minus_card',
                   # ...and who timed it: 'rig', or 'uber' for an order the rig did
                   # not time (uber_timing).
-                  'timed_by')
+                  'timed_by',
+                  # ...and the matched trip as Uber says it, beside the card's
+                  # columns and never in them (uber_cells).
+                  'uber_status', 'uber_start', 'uber_finish', 'uber_minutes', 'uber_miles',
+                  'uber_extras', 'time_vs_card', 'miles_vs_card')
+
+# The card against what happened (the owner, 13 Nov: "see if the orders were
+# completed on time, faster, or any other helpful comparisons"): earnings.js
+# compareOf's bands, the same numbers. DESCRIPTIVE ONLY — "faster than the
+# card said", never what to take; nothing on the rig reads it.
+ON_TIME_MIN, ON_TIME_SHARE = 3.0, 0.10
+MILES_SAME, MILES_SAME_SHARE = 0.5, 0.10
+PAY_FLAG, PAY_FLAG_SHARE = 0.5, 0.03
+
+
+def _signed(v):
+    return ('+' if v >= 0 else '-') + '%.2f' % abs(v)
+
+
+def uber_minutes(e):
+    """Uber's minutes for a completed trip (minutes + seconds / 60), else None."""
+    if not e or e.get('status') == 'canceled' or _num(e.get('minutes')) is None:
+        return None
+    return round(e['minutes'] + (_num(e.get('seconds')) or 0) / 60.0, 2)
+
+
+def time_vs_card(uber, card):
+    """('faster' | 'on time' | 'slower', Uber's minutes less the card's), or None."""
+    if uber is None or not card or card <= 0:
+        return None
+    g = round(uber - card, 2)
+    tol = max(ON_TIME_MIN, ON_TIME_SHARE * card)
+    return ('faster' if g < -tol else 'slower' if g > tol else 'on time', g)
+
+
+def miles_vs_card(uber, card):
+    if uber is None or not card or card <= 0:
+        return None
+    d = round(uber - card, 2)
+    tol = max(MILES_SAME, MILES_SAME_SHARE * card)
+    return ('shorter' if d < -tol else 'longer' if d > tol else 'as said', d)
+
+
+def uber_cells(o):
+    """The records CSV's Uber side for one order, strings: the matched trip's
+    status, start, the finish its minutes imply, minutes, miles, the pay's
+    other parts, and the card against it ("faster -4.50", "longer +1.20").
+    Blank where no trip was matched. The offers page's uberCells, word for
+    word."""
+    e = o.get('paid')
+    if not e:
+        return ('',) * 8
+    canceled = e.get('status') == 'canceled'
+    um = uber_minutes(e)
+    ui = None if canceled else _num(e.get('miles'))
+    x = e.get('extras') if isinstance(e.get('extras'), dict) else {}
+    extras = '; '.join('%s %.2f' % (k, x[k]) for k in sorted(x) if _num(x[k]) is not None)
+    tv = time_vs_card(um, o.get('cardMinutes'))
+    mv = miles_vs_card(ui, o.get('cardMiles'))
+    return ('canceled' if canceled else 'completed', e.get('startedAt') or e.get('finishedAt') or '',
+            e.get('finish') or '', _f(um, '%.2f'), _f(ui, '%.2f'), extras,
+            '%s %s' % (tv[0], _signed(tv[1])) if tv else '', '%s %s' % (mv[0], _signed(mv[1])) if mv else '')
 
 
 def _stamp(ms):
@@ -2215,7 +2366,7 @@ def record_cells(o):
             pl.get('pickupName') or '', pl.get('pickup') or '', pl.get('dropoff') or '',
             o['alongside'], 'yes' if o['reliable'] else 'no', o.get('source') or '',
             '; '.join(o['notes'] + (['places withheld: keepPlaces was off'] if pl.get('withheld')
-                                    else []))) + paid_cells(o) + (o.get('timedBy') or '',)
+                                    else []))) + paid_cells(o) + (o.get('timedBy') or '',) + uber_cells(o)
 
 
 def to_records_csv(reps):
@@ -2309,6 +2460,9 @@ def as_json(rep):
         'waits': dict(rep.get('waitTotals') or wait_totals(rep['orders']),
                       stopWaitMinS=STOP_WAIT_MIN_S),
         'summary': rep['summary'],
+        # The card against Uber's earnings screenshots (card_vs_actual):
+        # figures and order numbers, no place.
+        'cardVsActual': rep.get('cardVsActual'),
     }
 
 

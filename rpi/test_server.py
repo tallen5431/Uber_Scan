@@ -13640,7 +13640,7 @@ try:
     eq('[shift] /api/shift answers today\'s shift as the report computes it',
        (_sc, _sj.get('ok'), _sj.get('day'), sorted(_srep)),
        (200, True, _sday,
-        ['day', 'end', 'gps', 'orders', 'pinning', 'start', 'summary', 'totals',
+        ['cardVsActual', 'day', 'end', 'gps', 'orders', 'pinning', 'start', 'summary', 'totals',
          'unreadable', 'waits']))
     _sdrops = [r for r in _rows(_uj, 'drop') if r.get('id') == 'ud-a']
     eq('[shift] ...an undone Drop is no end: the order ends at the Drop that stood',
@@ -15164,6 +15164,26 @@ try:
        (get(_eb, '/api/journal?days=0').get('count'), get(_eb, '/api/journal/newest').get('offers'),
         [r.get('offer') for r in get(_eb, '/api/journal?days=0').get('records') or []]),
        (0, 0, ['e-burg1', 'e-burg2', 'e-pizza']))
+
+    # --- the card and what happened, both kept (13 Nov) -----------------------
+    _pm = _pz.get('match') or {}
+    eq('[earnings] the trip\'s row keeps the card as read beside Uber\'s figures: card pay, minutes, miles, '
+       'pickup, the rig\'s own minutes; Uber\'s amount, minutes, start and the finish they imply',
+       (_pm.get('cardPay'), _pm.get('cardMinutes'), _pm.get('cardMiles'), _pm.get('cardPickup'),
+        _pm.get('rigMinutes'), _pz.get('amount'), _pz.get('minutes'), _pz.get('startedAt'), _pz.get('finish'),
+        _pz.get('status')),
+       (6.5, 30, 8, 'Pretend Pizza', 47.0, 2.0, 39, '17:40', '18:19', 'completed'))
+    _dg = get(_eb, '/api/earnings?day=2026-11-07')
+    _ds = _dg.get('summary') or {}
+    eq('[earnings] ?day= answers that day\'s trips whatever the window, with its card-against-actual summary '
+       '(the matched trip\'s tip still processing: counted, not compared)',
+       (_dg.get('day'), len(_dg.get('entries') or []), _ds.get('trips'), _ds.get('matched'), _ds.get('needs'),
+        _ds.get('none'), _ds.get('pending'), _ds.get('compared')),
+       ('2026-11-07', 3, 3, 1, 1, 1, 1, 0))
+    eq('[earnings] ...and every answer lists the days with earnings on file, each with its counts',
+       [(d.get('date'), d.get('trips'), d.get('matched'), d.get('none')) for d in get(_eb, '/api/earnings').get('days') or []],
+       [('2026-11-07', 3, 1, 1)])
+    eq('[earnings] ...a ?day= that is not a day is no filter', get(_eb, '/api/earnings?day=nov7&days=0').get('day'), None)
 
     # --- kept as one trip -----------------------------------------------------
     _s, _a = _eraw(_eb, '/api/earnings/shot?batch=b1', _day, 'image/png')

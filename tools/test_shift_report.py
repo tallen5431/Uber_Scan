@@ -990,8 +990,8 @@ code_js, out_js = run(['--journal', JOURNAL, '--gps', GPSDIR, '--day', '2026-03-
 eq('[json] the CLI exits 0 with --json', code_js, 0)
 _js = json.loads(out_js)
 eq('[json] one object: the day, the GPS, the totals, the orders, the pinning, the summary, '
-   'the waits',
-   sorted(_js), ['day', 'end', 'gps', 'orders', 'pinning', 'start', 'summary', 'totals',
+   'the waits, the card against actual',
+   sorted(_js), ['cardVsActual', 'day', 'end', 'gps', 'orders', 'pinning', 'start', 'summary', 'totals',
                  'unreadable', 'waits'])
 eq('[json] the orders as the text has them, by number and with no id',
    [(o['n'], o['how'], o['reliable']) for o in _js['orders']],
@@ -1376,7 +1376,7 @@ with open(_pcsv, encoding='utf-8') as fh:
     _pc = {r['took'][11:16]: r for r in csv.DictReader(fh)}
 _PAID = ('paid_total', 'paid_tip', 'tip_status', 'paid_minus_card')
 eq('[paid] the records CSV gains the four paid columns, before who timed it',
-   SR.RECORD_COLUMNS[-5:], _PAID + ('timed_by',))
+   SR.RECORD_COLUMNS[-13:-8], _PAID + ('timed_by',))
 eq('[paid] a trip whose tip settled: its newest row, the total, the tip, paid less the card',
    tuple(_pc['18:00'][k] for k in _PAID), ('15.50', '3.50', 'settled', '3.50'))
 eq('[paid] the driver\'s pick, its tip still processing: the total, no tip yet, said pending',
@@ -1455,10 +1455,60 @@ with open(_phcsv, encoding='utf-8') as fh:
 eq('[phone] ...in the records CSV: its card, no Took, the source the earnings screen',
    [(r['how_ended'], r['took'], r['card_pay'], r['source'], r['paid_total'], r['timed_by']) for r in _phr],
    [('accepted on the phone', '', '9.27', 'earnings', '9.50', 'uber')])
+# --- card vs actual (the owner, 13 Nov) -------------------------------------------
+#
+# The invented evidence day of tests/earnings.test.js, as this report's orders:
+# six trips matched, the batch slower than its card (44.8 Uber minutes on a
+# 40-minute card), one tip raised by $3.00 and one cut by $2.00 after the
+# card, one order the rig timed itself (37.5 min) and one it did not; then a
+# trip with its tip processing and one canceled on the phone. Worked by hand:
+# cards $117.50, paid $118.61 (+$1.11), two past the flag, 0 faster, 5 on
+# time, 1 slower, median +2.00 min, widest #3 +$3.00, #4 -$2.00, #2 +$0.11.
+def _ev(pay, card_min, amount, minutes, seconds, start, timed=None, actual=None, **paid):
+    p = dict({'amount': amount, 'tip': None, 'tipStatus': 'none', 'status': 'completed', 'minutes': minutes,
+              'seconds': seconds, 'startedAt': start}, **paid)
+    return {'pay': pay, 'cardMinutes': card_min, 'paid': p, 'timedBy': timed, 'actualMinutes': actual}
+
+
+_evo = [_ev(23.47, 40, 23.47, 44, 50, '15:13', 'rig', 37.5),
+        _ev(27.83, 38, 27.94, 40, 20, '17:32'),
+        _ev(12.64, 24, 15.64, 22, 0, '18:23'),
+        _ev(16.38, 26, 14.38, 27, 40, '19:00'),
+        _ev(12.27, 20, 12.27, 17, 50, '19:31'),
+        _ev(24.91, 35, 24.91, 37, 30, '20:12'),
+        _ev(9.0, 20, 6.0, 20, 0, '22:00', tip='processing', tipStatus='pending'),
+        _ev(9.5, 25, 0.0, None, None, '17:30', status='canceled'),
+        {'pay': 7.0, 'cardMinutes': 20, 'paid': None}]
+_cva = SR.card_vs_actual(_evo)
+eq('[card vs actual] the evidence day: compared, cards against paid, flagged, faster/on time/slower, the median gap',
+   (_cva['compared'], _cva['card'], _cva['paid'], _cva['diff'], _cva['flagged'], _cva['faster'], _cva['onTime'],
+    _cva['slower'], _cva['medianMinutes']), (6, 117.5, 118.61, 1.11, 2, 0, 5, 1, 2.0))
+eq('[card vs actual] ...the rig\'s own minutes against Uber\'s where it timed the order, the widest gaps, and '
+   'the pending and canceled counted beside',
+   (_cva['rigMinusUber'], _cva['rigN'], [(b['n'], b['start'], b['diff']) for b in _cva['biggest']],
+    _cva['pending'], _cva['canceled']),
+   (-7.33, 1, [(3, '18:23', 3.0), (4, '19:00', -2.0), (2, '17:32', 0.11)], 1, 1))
+_cvt = '\n'.join(SR.card_vs_actual_text(_cva))
+ok_('[card vs actual] the text: the day\'s totals, the counts in the card\'s own words, the gaps by order (%r)'
+    % _cvt[:400],
+    'cards $117.50, paid $118.61 (+$1.11)' in _cvt and '0 faster than the card said, 5 on time, 1 slower' in _cvt
+    and 'median +2.00 min against the card' in _cvt and '#3 (6:23 PM) +$3.00' in _cvt
+    and '#4 (7:00 PM) -$2.00' in _cvt and '1 canceled on the phone' in _cvt)
+ok_('[card vs actual] ...descriptive: no line says what should have been taken',
+    not re.search(r'should|declin|accept', _cvt, re.I))
+eq('[card vs actual] the records CSV\'s Uber side: status, start, finish, minutes, miles, extras, and the card '
+   'against it in its own words',
+   SR.uber_cells({'cardMinutes': 40, 'cardMiles': 11, 'paid': {
+       'status': 'completed', 'startedAt': '15:13', 'finish': '15:57', 'minutes': 44, 'seconds': 50,
+       'miles': 11.40, 'extras': {'surge': 1.25}}}),
+   ('completed', '15:13', '15:57', '44.83', '11.40', 'surge 1.25', 'slower +4.83', 'as said +0.40'))
+eq('[card vs actual] ...a canceled trip: its status and start, nothing to compare',
+   SR.uber_cells({'cardMinutes': 25, 'cardMiles': 5, 'paid': {'status': 'canceled', 'startedAt': '17:30'}}),
+   ('canceled', '17:30', '', '', '', '', '', ''))
 _ptext = SR.text(SR.report(_pj, None, '2026-03-06'))
 _pjson = json.dumps(SR.as_json(SR.report(_pj, None, '2026-03-06')))
-eq('[paid] the text and the JSON name no figure or place of it: the CSV is where it goes',
-   [p for p in ('Pretend Pizza', 'Placeholder Ct', '15.50', 'tip') if p in _ptext or p in _pjson], [])
+eq('[paid] the text and the JSON name no place of it (its figures are the card-vs-actual section\'s; the places the CSV\'s)',
+   [p for p in ('Pretend Pizza', 'Placeholder Ct', 'Faketown') if p in _ptext or p in _pjson], [])
 
 # --- what $/hr to expect (--strategy, the owner's of 7 Nov) ----------------------
 #

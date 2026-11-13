@@ -215,6 +215,14 @@
   #earnings .cands button { width: 100%; }
   #earnings details > summary { min-height: 44px; display: flex; align-items: center;
                                 font-size: 13px; cursor: pointer; }
+  /* A day's card against actual: one block per trip, three short lines
+     (card, Uber, difference), so it reads at 360px with no table to scroll. */
+  #earnings .cmp { border-top: 1px solid var(--line); padding: 6px 0; font-size: 13px; line-height: 1.45;
+                   overflow-wrap: anywhere; }
+  #earnings .cmp span { display: block; }
+  #earnings .cmp .flag { font-weight: 700; }
+  #earnings .daytools { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+  #earnings .daytools button { min-height: 44px; flex: 1 1 140px; }
   .offer.hiddenrow > summary { opacity: .5; }
   /* The way back, always in reach.
      This page is one continuous list — a week of offers is fourteen thousand
@@ -922,6 +930,11 @@
     <p class="note" id="earningsInstall" hidden></p>
     <div id="earningsNeeds"></div>
     <div id="earningsNone"></div>
+    <!-- Every day with earnings on file, what was matched and not, and for
+         each the card as read against what Uber says happened, order by
+         order (the owner, 13 Nov). Descriptive: nothing here changes what the
+         rig decides. -->
+    <div id="earningsDays"></div>
     <div class="tools">
       <button type="button" id="earningsReread">Read again and match again</button>
       <button type="button" id="earningsForget" hidden></button>
@@ -1027,7 +1040,7 @@
    'real', 'realHead', 'realLead', 'waits', 'waitsHead', 'waitsLead',
    'recordsHead', 'recordsLead', 'recordsCsv',
    'earnings', 'earningsFiles', 'earningsSays', 'earningsInstall', 'earningsNeeds',
-   'earningsNone', 'earningsReread', 'earningsForget',
+   'earningsNone', 'earningsReread', 'earningsForget', 'earningsDays',
    'ppm', 'ppmHead', 'ppmLead', 'err', 'errHead', 'errLead',
    'ppmReal', 'ppmRealHead', 'ppmRealLead', 'refig', 'refigHead', 'refigLead',
    'review', 'reviewSays', 'reviewDays', 'reviewBack', 'reviewOn', 'reviewLead',
@@ -3149,7 +3162,11 @@
                         // ...and who timed it: the rig, or Uber for an order
                         // the rig did not time, its actual minutes and miles
                         // Uber's own (uberTiming).
-                        'timed_by'];
+                        'timed_by',
+                        // ...and the matched trip as Uber says it, beside the
+                        // card's columns and never in them (uberCells).
+                        'uber_status', 'uber_start', 'uber_finish', 'uber_minutes', 'uber_miles',
+                        'uber_extras', 'time_vs_card', 'miles_vs_card'];
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   // Local 'YYYY-MM-DD HH:MM:SS', the report's _stamp.
@@ -3208,7 +3225,8 @@
             pl.pickupName, pl.pickup, pl.dropoff,
             Array.isArray(rec['with']) && rec['with'].length ? 'yes' : 'no',
             // No day's judgement here (too soon, never driven): the report's.
-            '', rec.fromEarnings ? 'earnings' : 'record', notes.join('; ')].concat(paidCells(rec)).concat([timedBy]);
+            '', rec.fromEarnings ? 'earnings' : 'record', notes.join('; ')].concat(paidCells(rec)).concat([timedBy])
+      .concat(uberCells(rec));
   }
 
   function recordsCsv(records) {
@@ -3392,6 +3410,143 @@
             card !== null ? f2(Math.round((e.amount - card) * 100) / 100) : ''];
   }
 
+  /* The records CSV's Uber side, beside the card's columns and never in
+     them: the trip's status, start, the finish its minutes imply, its
+     minutes, miles and the pay's other parts, and the card against it —
+     "faster -4.50" (Uber's minutes less the card's; on time within 3 min or
+     10%), "longer +1.20" (miles; as said within 0.5 mi or 10%). Blank where
+     no trip was matched. earnings.js compareOf's words; the report's
+     uber_cells, word for word. Descriptive only. */
+  function signed(v) { return (v >= 0 ? '+' : '-') + Math.abs(v).toFixed(2); }
+  function uberCells(rec) {
+    var e = paidFor(rec);
+    if (!e) return ['', '', '', '', '', '', '', ''];
+    var card = rec.card || {};
+    var canceled = e.status === 'canceled';
+    var um = !canceled && typeof e.minutes === 'number' ? Math.round((e.minutes + (e.seconds || 0) / 60) * 100) / 100 : null;
+    var ui = !canceled && typeof e.miles === 'number' ? e.miles : null;
+    var cm = typeof card.minutes === 'number' ? card.minutes : card.billedMinutes;
+    var ci = card.miles;
+    var x = e.extras && typeof e.extras === 'object' ? e.extras : {};
+    var extras = Object.keys(x).sort().filter(function (k) { return typeof x[k] === 'number'; })
+      .map(function (k) { return k + ' ' + x[k].toFixed(2); }).join('; ');
+    var tv = '', mv = '';
+    if (um !== null && typeof cm === 'number' && cm > 0) {
+      var g = Math.round((um - cm) * 100) / 100, tol = Math.max(3, 0.1 * cm);
+      tv = (g < -tol ? 'faster' : g > tol ? 'slower' : 'on time') + ' ' + signed(g);
+    }
+    if (ui !== null && typeof ci === 'number' && ci > 0) {
+      var md = Math.round((ui - ci) * 100) / 100, mt = Math.max(0.5, 0.1 * ci);
+      mv = (md < -mt ? 'shorter' : md > mt ? 'longer' : 'as said') + ' ' + signed(md);
+    }
+    return [canceled ? 'canceled' : 'completed', e.startedAt || e.finishedAt || '', e.finish || '',
+            f2(um), f2(ui), extras, tv, mv];
+  }
+
+  /* One matched trip, the card as read against what Uber says happened:
+     earnings.js compareOf's bands and words (pay flagged past $0.50 or 3%,
+     on time within 3 min or 10%, miles as said within 0.5 mi or 10%), in
+     three lines. "Faster than the card said", never what to take. */
+  function cmpBlock(e) {
+    var m = e.match || {};
+    var hm = clockOfHm(e.startedAt || e.finishedAt) + (e.finish ? ' → ' + clockOfHm(e.finish) : '');
+    var card = typeof m.cardPay === 'number' ? m.cardPay : null;
+    var cm = typeof m.cardMinutes === 'number' ? m.cardMinutes : null;
+    var ci = typeof m.cardMiles === 'number' ? m.cardMiles : null;
+    var cardBits = [card !== null ? money(card, 2) : 'no card pay'];
+    if (cm !== null) cardBits.push(num(cm, 0) + ' min');
+    if (ci !== null) cardBits.push(num(ci, 1) + ' mi');
+    if (m.said) cardBits.push(m.said);
+    if (e.status === 'canceled') {
+      return '<div class="cmp"><b>' + esc(hm) + '</b><span>Card: ' + esc(cardBits.join(' · ')) + '</span>'
+        + '<span>Uber: ' + esc('canceled' + (e.canceledBy ? ' by ' + e.canceledBy : '') + ', paid ' + money(e.amount, 2))
+        + '</span></div>';
+    }
+    var um = typeof e.minutes === 'number' ? Math.round((e.minutes + (e.seconds || 0) / 60) * 100) / 100 : null;
+    var ui = typeof e.miles === 'number' ? e.miles : null;
+    var pending = e.tipStatus === 'pending';
+    var uberBits = [money(e.amount, 2) + ' (' + tipWords(e) + ')'];
+    if (um !== null) uberBits.push(num(um, 1) + ' min');
+    if (ui !== null) uberBits.push(num(ui, 1) + ' mi');
+    var diff = [];
+    var flagged = false;
+    if (card !== null) {
+      if (pending) diff.push('pay: tip still processing');
+      else {
+        var d = Math.round((e.amount - card) * 100) / 100;
+        flagged = Math.abs(d) > Math.max(0.5, 0.03 * card);
+        diff.push(Math.abs(d) < 0.005 ? 'paid as carded' : (d > 0 ? '+' : '−') + money(Math.abs(d), 2)
+                  + (d > 0 ? ' more than the card' : ' less than the card'));
+      }
+    }
+    if (um !== null && cm !== null && cm > 0) {
+      var g = Math.round((um - cm) * 100) / 100, tol = Math.max(3, 0.1 * cm);
+      var w = g < -tol ? 'faster than the card said' : g > tol ? 'slower than the card said' : 'on time';
+      diff.push(w + ' (' + (g >= 0 ? '+' : '−') + num(Math.abs(g), 1) + ' min'
+                + (typeof m.rigMinutes === 'number' ? '; the rig timed ' + num(m.rigMinutes, 1) + ' min' : '') + ')');
+    }
+    if (ui !== null && ci !== null && ci > 0) {
+      var md = Math.round((ui - ci) * 100) / 100, mt = Math.max(0.5, 0.1 * ci);
+      diff.push((md < -mt ? 'shorter' : md > mt ? 'longer' : 'miles as said') + ' (' + (md >= 0 ? '+' : '−')
+                + num(Math.abs(md), 1) + ' mi)');
+    }
+    if (card !== null && cm && um && !pending) {
+      diff.push('card ' + money(card / (cm / 60), 2) + '/hr, actual ' + money(e.amount / (um / 60), 2) + '/hr');
+    }
+    if (card !== null && ci >= 0.1 && ui >= 0.1 && !pending) {
+      diff.push('card ' + money(card / ci, 2) + '/mi, actual ' + money(e.amount / ui, 2) + '/mi');
+    }
+    return '<div class="cmp"><b>' + esc(hm) + '</b><span>Card: ' + esc(cardBits.join(' · ')) + '</span>'
+      + '<span>Uber: ' + esc(uberBits.join(' · ')) + '</span>'
+      + (diff.length ? '<span' + (flagged ? ' class="flag"' : '') + '>Difference: ' + esc(diff.join(' · ')) + '</span>' : '')
+      + '</div>';
+  }
+
+  // A day's line in the list of days with earnings: its trips, what was
+  // matched and not, and the card against what was paid (daySummary).
+  function dayLine(d) {
+    var parts = [d.trips + (d.trips === 1 ? ' trip' : ' trips'), d.matched + ' matched'];
+    if (d.needs) parts.push(d.needs + ' need' + (d.needs === 1 ? 's' : '') + ' you');
+    if (d.none) parts.push(d.none + ' with no order');
+    var paid = d.compared ? ' · cards ' + money(d.card, 2) + ' → paid ' + money(d.paid, 2)
+      + ' · ' + d.faster + ' faster, ' + d.onTime + ' on time, ' + d.slower + ' slower' : '';
+    return dayLabel(d.date) + ': ' + parts.join(', ') + paid;
+  }
+
+  function showEarningsDays(days) {
+    el.earningsDays.innerHTML = (days || []).length
+      ? '<details id="earningsDaysList"><summary>Days with earnings on file (' + days.length + ')</summary>'
+        + days.map(function (d) {
+          return '<details class="eday" data-day="' + esc(d.date) + '"><summary>' + esc(dayLine(d)) + '</summary>'
+            + '<div class="daybody"></div></details>';
+        }).join('') + '</details>'
+      : '';
+  }
+
+  // A day opened: its trips asked for whatever the window, card against
+  // actual for each matched one.
+  function openEarningsDay(det) {
+    var day = det.getAttribute('data-day');
+    var body = det.querySelector('.daybody');
+    if (!day || !body || body.getAttribute('data-shown')) return;
+    body.textContent = 'Asking…';
+    fetch('/api/earnings?day=' + encodeURIComponent(day), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; })
+      .then(function (ans) {
+        if (!ans || !ans.ok) { body.textContent = 'Could not ask the server for that day.'; return; }
+        body.setAttribute('data-shown', '1');
+        var list = (ans.entries || []).filter(function (e) {
+          var st = (e.match || {}).status;
+          return st === 'matched' || st === 'picked';
+        });
+        var other = (ans.entries || []).length - list.length;
+        body.innerHTML = (list.length ? list.map(cmpBlock).join('') : '<p class="note">No trip of that day is matched to an order yet.</p>')
+          + (other ? '<p class="note">' + other + (other === 1 ? ' trip' : ' trips')
+                     + ' of that day not matched (above, or with no order on file).</p>' : '');
+      });
+  }
+
   function entryLine(e) {
     var bits = [money(e.amount, 2) + ' (' + tipWords(e) + ')'];
     if (e.pickup && e.pickup.name) bits.push(e.pickup.name + (e.pickup.detail ? ' (' + e.pickup.detail + ')' : ''));
@@ -3468,6 +3623,7 @@
             + ((e.match || {}).by === 'you' ? '<em>You said it was none of the orders on file.</em>' : '') + '</div>';
         }).join('') + '</details>'
       : '';
+    showEarningsDays(ans.days);
     el.earningsForget.hidden = !shots.kept;
     el.earningsForget.textContent = 'Delete the ' + shots.kept + (shots.kept === 1 ? ' screenshot' : ' screenshots')
       + ' (what was read is kept)';
@@ -3553,6 +3709,13 @@
     el.earningsFiles.value = '';
     if (files.length) uploadEarnings(files);
   });
+  // A day in the list opened: its card against actual, asked then. 'toggle'
+  // does not bubble, so it is caught on the way down.
+  el.earningsDays.addEventListener('toggle', function (ev) {
+    var det = ev.target;
+    if (det && det.classList && det.classList.contains('eday') && det.open) openEarningsDay(det);
+  }, true);
+
   el.earningsNeeds.addEventListener('click', function (ev) {
     var b = ev.target && ev.target.closest ? ev.target.closest('button[data-key]') : null;
     if (!b) return;

@@ -448,6 +448,41 @@ eq('[timed] ...not at another Took, not for an order with no trip matched, never
     E.uberTimingFor([Object.assign({}, evRows[5], { status: 'canceled' })], 'ev6', evOrders[5].times.took)],
    [null, null, null]);
 
+/* [compare] the card against what happened, on the evidence day --------------- */
+// The six matched trips with two pays changed (invented): 6:23 PM's tip
+// raised by $3.00 after the card, 7:00 PM's cut by $2.00; and 3:13 PM's batch,
+// 44.8 Uber minutes against a 40-minute card, slower than the card said.
+var cmpRows = evRows.slice(0, 6).map(function (r, i) {
+  return Object.assign({}, r, i === 2 ? { amount: 15.64 } : i === 3 ? { amount: 14.38 } : {});
+});
+var c1 = E.compareOf(cmpRows[0]), c2 = E.compareOf(cmpRows[1]);
+eq('[compare] the match keeps the card as read beside Uber\'s figures: pay, minutes, miles, its places, the rig\'s timing',
+   [evM[evEntries[0].key].cardPay, evM[evEntries[0].key].cardMinutes, evM[evEntries[0].key].cardMiles,
+    evM[evEntries[0].key].cardPickup, evM[evEntries[0].key].cardDropoff, evM[evEntries[0].key].rigMinutes],
+   [23.47, 40, 11, 'Make-Believe Burgers', '31 Mock Ln, Faketown', 37.5]);
+eq('[compare] the batch: slower than the card said by 4.8 min, the rig\'s own minutes beside, the pay as carded',
+   [c1.time, c1.pay.word, c1.pay.flag],
+   [{ card: 40, uber: 44.83, diff: 4.83, word: 'slower', rig: 37.5 }, 'as carded', false]);
+eq('[compare] 5:32 PM: 11 cents more than the card (no flag), on time, longer by under the band',
+   [c2.pay.diff, c2.pay.word, c2.pay.flag, c2.time.word, c2.miles.word], [0.11, 'more', false, 'on time', 'as said']);
+eq('[compare] the tip raised: $3.00 more than the card, flagged',
+   [E.compareOf(cmpRows[2]).pay.diff, E.compareOf(cmpRows[2]).pay.flag], [3, true]);
+eq('[compare] the tip cut: $2.00 less than the card, flagged',
+   [E.compareOf(cmpRows[3]).pay.diff, E.compareOf(cmpRows[3]).pay.word, E.compareOf(cmpRows[3]).pay.flag],
+   [-2, 'less', true]);
+eq('[compare] the card\'s $/hr and $/mi against the actual (paid over Uber\'s minutes and miles)',
+   [c2.perHour, c2.perMile], [{ card: 43.94, actual: 41.57 }, { card: 1.8, actual: 1.85 }]);
+eq('[compare] a canceled trip compares nothing; a tip processing leaves the pay out',
+   [E.compareOf(Object.assign({}, cmpRows[1], { status: 'canceled' })),
+    E.compareOf(Object.assign({}, cmpRows[1], { tip: 'processing' })).pay.pending], [{ canceled: true }, true]);
+var sum12 = E.daySummary(cmpRows.concat([evRows[6]]));
+eq('[compare] the day: cards against paid, faster/on time/slower, the median minute gap, the widest pay gaps',
+   [sum12.trips, sum12.matched, sum12.none, sum12.compared, sum12.card, sum12.paid, sum12.diff,
+    sum12.faster, sum12.onTime, sum12.slower, sum12.medianMinutes,
+    sum12.biggest.map(function (b) { return [b.startedAt, b.diff]; })],
+   [7, 6, 1, 6, 117.5, 118.61, 1.11, 0, 5, 1, 2, [['18:23', 3], ['19:00', -2], ['17:32', 0.11]]]);
+ok_('[compare] no word of it says what to take', JSON.stringify([c1, c2, sum12]).indexOf('declin') === -1);
+
 eq('[match] names are alike past OCR slips and abbreviations, and two restaurants are not',
    [E.similar('Make-Belleve Burgers', 'Make-Believe Burgers') >= E.NAME_MIN,
     E.similar('Sample Street Northwest', 'Sample St NW') === 1,

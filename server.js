@@ -15719,6 +15719,8 @@ var EARNINGS_DAYS_DEFAULT = 30;        // what GET /api/earnings answers with, u
 var EARNINGS_REMATCH_DAYS = 60;        // how far back "Read again" matches again
 var EARNINGS_ID = /^\d{8}-\d{6}-[0-9a-f]{6}$/;
 var EARNINGS_BATCH = /^[A-Za-z0-9_-]{1,32}$/;
+var EARNINGS_DAY = /^\d{4}-\d\d-\d\d$/;      // a day named by the page: ?day=, a picked day
+var EARNINGS_DAYS_LISTED = 120;       // days with earnings GET /api/earnings lists
 var EARNINGS_INSTALL = 'sudo apt install tesseract-ocr';
 var EARNINGS_JSON = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
 
@@ -15930,13 +15932,24 @@ function earningsOrders(rows, days) {
  * amount, the last few shots — well under a kilobyte. With keepPlaces off
  * (the scanner's `keep`), no pickup and no dropoff, as an order record keeps
  * none: the match was made with them in memory and is kept. */
+function earningsClock(ms) {
+  if (typeof ms !== 'number' || !isFinite(ms)) return null;
+  var d = new Date(ms);
+  return (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+}
+
 function earningRow(e, at) {
   var places = orderKeepsPlaces();
   var paid = Earnings.paidOf(e) || {};
   var m = e.match || { status: 'none', by: 'auto' };
   var match = { status: m.status, by: m.by, offer: m.offer, order: m.order, offeredAt: m.offeredAt,
                 tookAt: m.tookAt, endedAt: m.endedAt, how: m.how, cardPay: m.cardPay, source: m.source,
-                score: m.score, startBy: m.startBy, said: m.said, margin: m.margin, offsetS: m.offsetS, pickedAt: m.pickedAt };
+                score: m.score, startBy: m.startBy, said: m.said, margin: m.margin, offsetS: m.offsetS, pickedAt: m.pickedAt,
+                // The card as read, beside Uber's figures and never written
+                // over by them (earnings.js compareOf); its places only with
+                // keepPlaces on.
+                cardMinutes: m.cardMinutes, cardMiles: m.cardMiles, rigMinutes: m.rigMinutes, rigMiles: m.rigMiles,
+                cardPickup: places ? m.cardPickup : null, cardDropoff: places ? m.cardDropoff : null };
   if (m.status === 'needs') {
     match.candidates = (m.candidates || []).slice(0, Earnings.CANDIDATES_SHOWN).map(function (c) {
       return { offer: c.offer, order: c.order, offeredAt: c.offeredAt, tookAt: c.tookAt, endedAt: c.endedAt, pay: c.pay,
@@ -15946,6 +15959,8 @@ function earningRow(e, at) {
   return orderCompact({
     v: EARNINGS_ROW_V, kind: 'earning', id: 'earn:' + e.key, seq: at, at: at,
     key: e.key, app: e.app, date: e.date, startedAt: Earnings.clockField(e),
+    // ...and the finish Uber's own minutes imply (start + duration), 'HH:MM'.
+    finish: earningsClock(Earnings.endMs(e)),
     amount: e.amount, tip: e.tip === undefined ? null : e.tip, tipStatus: paid.tipStatus, base: paid.base,
     // ...the pay's other parts as Uber named them ({surge: 1.00}), and a
     // canceled trip said so, with who canceled where Uber said.
@@ -16069,9 +16084,23 @@ function earningsRoute(req, res) {
       earningsShots(function (shots) {
         var ids = Object.keys(shots);
         var bin = earningsTesseract();
-        var entries = (rows ? Earnings.fold(rows) : []).filter(function (r) {
+        var all = rows ? Earnings.fold(rows) : [];
+        // ?day=YYYY-MM-DD: that day's trips alone, whenever it was, with its
+        // card-against-actual summary (the owner, 13 Nov: a past day's
+        // screenshots uploaded and compared).
+        var oneDay = typeof q.day === 'string' && EARNINGS_DAY.test(q.day) ? q.day : null;
+        var entries = all.filter(function (r) {
+          if (oneDay) return r.date === oneDay;
           var at = Earnings.startMs(r);
           return !floor || (at !== null && at >= floor);
+        });
+        // Every day with earnings on file, newest first, each with what was
+        // matched, what needs the driver and what has no order, and the
+        // card against what was paid (earnings.js daySummary). No place.
+        var byDate = {};
+        all.forEach(function (r) { (byDate[r.date] = byDate[r.date] || []).push(r); });
+        var dayList = Object.keys(byDate).sort().reverse().slice(0, EARNINGS_DAYS_LISTED).map(function (d) {
+          return Object.assign({ date: d }, Earnings.daySummary(byDate[d]));
         });
         answer(200, {
           ok: true, unreadable: rows ? null : (readErr && readErr.code || 'unknown'),
@@ -16084,6 +16113,9 @@ function earningsRoute(req, res) {
             return { app: a, reads: a !== 'doordash' };
           }),
           places: orderKeepsPlaces(),
+          day: oneDay,
+          summary: oneDay ? Earnings.daySummary(entries) : null,
+          days: dayList,
           entries: entries
         });
       });
@@ -16220,6 +16252,9 @@ function earningsRoute(req, res) {
             match = { status: 'picked', by: 'you', offer: c.offer, order: c.order, offeredAt: c.offeredAt,
                       tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: c.pay, source: c.source,
                       said: c.source === 'offer' ? Earnings.SAID_PHONE : null,
+                      cardMinutes: c.cardMinutes, cardMiles: c.cardMiles,
+                      rigMinutes: typeof c.minutes === 'number' ? Math.round(c.minutes * 100) / 100 : null,
+                      rigMiles: c.miles, cardPickup: c.names.length ? c.names[0] : null, cardDropoff: c.dropoff,
                       pickedAt: now };
           } else {
             return reply(400, { ok: false, error: 'pick an order, none or auto' });

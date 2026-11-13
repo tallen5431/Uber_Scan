@@ -892,6 +892,16 @@
     return { status: status, by: by, offer: c.offer, order: c.order, offeredAt: c.offeredAt,
              tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: c.pay, source: c.source,
              said: c.source === 'offer' ? SAID_PHONE : null,
+             // THE CARD AS READ, kept beside Uber's figures and never
+             // replaced by them (compareOf): its minutes and miles, its
+             // pickup and dropoff as the rig had them, and the rig's own
+             // minutes and miles where it timed a delivery.
+             cardMinutes: c.cardMinutes === undefined ? null : c.cardMinutes,
+             cardMiles: c.cardMiles === undefined ? null : c.cardMiles,
+             cardPickup: c.names && c.names.length ? cut(c.names[0]) : null,
+             cardDropoff: c.dropoff ? cut(c.dropoff) : null,
+             rigMinutes: typeof c.minutes === 'number' ? Math.round(c.minutes * 100) / 100 : null,
+             rigMiles: typeof c.miles === 'number' ? c.miles : null,
              score: s ? s.total : null, startBy: s ? s.startBy : null,
              margin: margin === null || margin === undefined ? null : Math.round(margin * 10) / 10,
              offsetS: Math.round((offsetMs || 0) / 1000) };
@@ -1037,7 +1047,126 @@
              miles: typeof best.miles === 'number' ? best.miles : null, source: 'uber', key: best.key };
   }
 
+  /* --- the card against what happened ---------------------------------------
+   *
+   * The owner, 13 Nov: "retain the OCR scanned info from the cards and the
+   * actual info at the end of the day to compare and see if the orders were
+   * completed on time, faster, or any other helpful comparisons." A matched
+   * trip's row keeps both sides apart — the card as read (its pay, minutes
+   * and miles, on the match) and Uber's figures (what it paid, its minutes
+   * and miles, its start and the finish they imply) — and nothing here ever
+   * writes one over the other.
+   *
+   * DESCRIPTIVE ONLY. These say what the card said and what happened: "faster
+   * than the card said", never what should have been taken. No $/mile rule,
+   * no floor, nothing re-timed at a pace, nothing on the live card (AUDITS.md,
+   * Settled). Nothing on the rig reads any of it.
+   *
+   * compareOf(e): each comparison only where both sides exist —
+   *   pay     paid less the card; `flag` past PAY_FLAG or PAY_FLAG_SHARE of
+   *           the card, `word` 'more' / 'less' / 'as carded'; left out while
+   *           a tip is processing (the total is not yet what it will be);
+   *   time    Uber's minutes against the card's: 'faster' / 'on time'
+   *           (within ON_TIME_MIN or ON_TIME_SHARE) / 'slower', and the gap;
+   *           where the rig timed the order too, the rig's minutes beside;
+   *   miles   Uber's against the card's: 'shorter' / 'as said' (within
+   *           MILES_SAME or MILES_SAME_SHARE) / 'longer';
+   *   perHour / perMile  the card's (its pay over its minutes or miles)
+   *           and the actual (what was paid over Uber's).
+   * A canceled trip is {canceled: true} and nothing else. */
+  var PAY_FLAG = 0.5;
+  var PAY_FLAG_SHARE = 0.03;
+  var ON_TIME_MIN = 3;
+  var ON_TIME_SHARE = 0.10;
+  var MILES_SAME = 0.5;
+  var MILES_SAME_SHARE = 0.10;
+
+  function r2(v) { return v === null || v === undefined ? null : Math.round(v * 100) / 100; }
+
+  function compareOf(e) {
+    var m = e && e.match;
+    if (!m || (m.status !== 'matched' && m.status !== 'picked')) return null;
+    if (e.status === 'canceled') return { canceled: true };
+    var out = {};
+    var paid = num(e.amount), card = num(m.cardPay);
+    var pending = e.tip === 'processing' || e.tipStatus === 'pending';
+    if (paid !== null && card !== null) {
+      if (pending) out.pay = { card: card, paid: paid, pending: true };
+      else {
+        var d = r2(paid - card);
+        out.pay = { card: card, paid: paid, diff: d, word: d > 0.005 ? 'more' : d < -0.005 ? 'less' : 'as carded',
+                    flag: Math.abs(d) > Math.max(PAY_FLAG, PAY_FLAG_SHARE * card) };
+      }
+    }
+    var um = typeof e.minutes === 'number' ? r2(e.minutes + (e.seconds || 0) / 60) : null;
+    var cm = num(m.cardMinutes);
+    if (um !== null && cm !== null && cm > 0) {
+      var g = r2(um - cm);
+      var tol = Math.max(ON_TIME_MIN, ON_TIME_SHARE * cm);
+      out.time = { card: cm, uber: um, diff: g, word: g < -tol ? 'faster' : g > tol ? 'slower' : 'on time' };
+      if (num(m.rigMinutes) !== null) out.time.rig = r2(m.rigMinutes);
+    }
+    var ui = num(e.miles), ci = num(m.cardMiles);
+    if (ui !== null && ci !== null && ci > 0) {
+      var md = r2(ui - ci);
+      var mt = Math.max(MILES_SAME, MILES_SAME_SHARE * ci);
+      out.miles = { card: ci, uber: ui, diff: md, word: md < -mt ? 'shorter' : md > mt ? 'longer' : 'as said' };
+    }
+    if (card !== null && cm !== null && cm > 0) {
+      out.perHour = { card: r2(card / (cm / 60)),
+                      actual: paid !== null && !pending && um ? r2(paid / (um / 60)) : null };
+    }
+    if (card !== null && ci !== null && ci >= 0.1) {
+      out.perMile = { card: r2(card / ci), actual: paid !== null && !pending && ui >= 0.1 ? r2(paid / ui) : null };
+    }
+    return out;
+  }
+
+  /* A day's card against actual, for /api/earnings and the offers page:
+   * over its matched, completed trips with a card's pay and a settled
+   * figure — the card's pay and what was paid in all, how many faster, on
+   * time and slower (and with no card minutes to say), the median minute gap
+   * (Uber's less the card's), and the BIGGEST_GAPS widest pay gaps by their
+   * trip's key and start, no place. Canceled and pending counted beside. */
+  var BIGGEST_GAPS = 3;
+  function daySummary(entries) {
+    var out = { trips: 0, matched: 0, needs: 0, none: 0, canceled: 0, pending: 0, compared: 0,
+                card: 0, paid: 0, diff: 0, faster: 0, onTime: 0, slower: 0, untimed: 0,
+                medianMinutes: null, biggest: [] };
+    var gaps = [], pays = [];
+    (entries || []).forEach(function (e) {
+      out.trips += 1;
+      var st = (e.match || {}).status;
+      if (st === 'needs') out.needs += 1;
+      else if (st === 'none' || !st) out.none += 1;
+      else out.matched += 1;
+      var c = compareOf(e);
+      if (!c) return;
+      if (c.canceled) { out.canceled += 1; return; }
+      if (!c.pay) return;
+      if (c.pay.pending) { out.pending += 1; return; }
+      out.compared += 1;
+      out.card += c.pay.card;
+      out.paid += c.pay.paid;
+      pays.push({ key: e.key, startedAt: clockField(e), diff: c.pay.diff });
+      if (c.time) { out[c.time.word === 'on time' ? 'onTime' : c.time.word] += 1; gaps.push(c.time.diff); }
+      else out.untimed += 1;
+    });
+    out.card = r2(out.card); out.paid = r2(out.paid); out.diff = r2(out.paid - out.card);
+    if (gaps.length) {
+      gaps.sort(function (a, b) { return a - b; });
+      var h = gaps.length;
+      out.medianMinutes = r2(h % 2 ? gaps[(h - 1) / 2] : (gaps[h / 2 - 1] + gaps[h / 2]) / 2);
+    }
+    out.biggest = pays.filter(function (p) { return Math.abs(p.diff) > 0.005; })
+      .sort(function (a, b) { return Math.abs(b.diff) - Math.abs(a.diff); }).slice(0, BIGGEST_GAPS);
+    return out;
+  }
+
   return {
+    compareOf: compareOf, daySummary: daySummary, PAY_FLAG: PAY_FLAG, PAY_FLAG_SHARE: PAY_FLAG_SHARE,
+    ON_TIME_MIN: ON_TIME_MIN, ON_TIME_SHARE: ON_TIME_SHARE, MILES_SAME: MILES_SAME,
+    MILES_SAME_SHARE: MILES_SAME_SHARE, BIGGEST_GAPS: BIGGEST_GAPS,
     uberTimingFor: uberTimingFor,
     parse: parse, parseUber: parseUber, parseDoorDash: parseDoorDash, detectApp: detectApp,
     PARSERS: PARSERS, dayOf: dayOf, clockOf: clockOf, yearFor: yearFor,
