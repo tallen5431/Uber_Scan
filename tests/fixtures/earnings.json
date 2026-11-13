@@ -8,13 +8,13 @@
    "expect": {
     "app": "uber", "day": "2026-11-07", "dayFrom": "end",
     "entries": [
-     {"amount": 2.0, "finishedAt": "17:40", "tip": "processing", "type": "Delivery", "minutes": 39, "seconds": 33,
+     {"amount": 2.0, "startedAt": "17:40", "tip": "processing", "type": "Delivery", "minutes": 39, "seconds": 33,
       "miles": 12.3, "pickup": {"name": "Pretend Pizza", "detail": "Faketown"},
       "dropoff": {"street": "Placeholder Ct", "town": "Faketown"}},
-     {"amount": 25.05, "finishedAt": "16:50", "tip": 19.54, "type": "Delivery", "minutes": 40, "seconds": 48,
+     {"amount": 25.05, "startedAt": "16:50", "tip": 19.54, "type": "Delivery", "minutes": 40, "seconds": 48,
       "miles": 9.38, "pickup": {"name": "Make-Believe Burgers", "detail": "Sample St NW & Fictional Ct"},
       "dropoff": {"street": "Example Ave NE", "town": "Notaville"}},
-     {"amount": 7.25, "finishedAt": "15:58", "tip": null, "minutes": 22, "seconds": 5, "miles": 4.1,
+     {"amount": 7.25, "startedAt": "15:58", "tip": null, "minutes": 22, "seconds": 5, "miles": 4.1,
       "pickup": {"name": "Nowhere Noodles", "detail": "Inventon"}}
     ]
    }
@@ -25,7 +25,7 @@
    "text": "Sat, Nov 7\n$2.00\nDelivery - 39 min 33 sec - 12.30 mi 5:40 PM\nTip processing\nPretend Pizza (Faketown)\nPlaceholder Ct, Faketown, GA, USA\n",
    "expect": {
     "app": "uber", "day": "2026-11-07", "dayFrom": "heading",
-    "entries": [{"amount": 2.0, "finishedAt": "17:40", "tip": "processing", "minutes": 39, "seconds": 33, "miles": 12.3}]
+    "entries": [{"amount": 2.0, "startedAt": "17:40", "tip": "processing", "minutes": 39, "seconds": 33, "miles": 12.3}]
    }
   },
   {
@@ -34,7 +34,7 @@
    "text": "Sat, Nov 7\nS14.10 9.05 P.M.\nDelivery : 18min 2sec 3,40 mi\n$3.00 Tip\nImaginary Bistro (Faketown)\nExample Ave, Faketown, GA, USA\n",
    "expect": {
     "app": "uber", "day": "2026-11-07",
-    "entries": [{"amount": 14.1, "finishedAt": "21:05", "tip": 3.0, "type": "Delivery", "minutes": 18, "seconds": 2,
+    "entries": [{"amount": 14.1, "startedAt": "21:05", "tip": 3.0, "type": "Delivery", "minutes": 18, "seconds": 2,
                  "miles": 3.4, "pickup": {"name": "Imaginary Bistro", "detail": "Faketown"}}]
    }
   },
@@ -44,7 +44,7 @@
    "text": "lock Rd\n\nPretend Pizza (Faketown)\nPlaceholder Ct, Faketown, GA, USA\n\n$25.05 4:50 PM\n\nDelivery - 40 min 48 sec - 9.38 mi\n$19.54 Tip\n\nMake-Believe Burgers (Sample St NW & Fictional Ct)\nExample Ave NE, Notaville, GA, USA\n",
    "expect": {
     "app": "uber", "day": null,
-    "entries": [{"amount": 25.05, "finishedAt": "16:50", "tip": 19.54}],
+    "entries": [{"amount": 25.05, "startedAt": "16:50", "tip": 19.54}],
     "notes": ["the top of the first trip was scrolled off; its rest was skipped"]
    }
   },
@@ -54,7 +54,7 @@
    "text": "Sat, Nov 7\n$7.25 3:58 PM\nDelivery - 22 min 5 sec - 4.10 mi\nMock Rd\n",
    "expect": {
     "app": "uber", "day": "2026-11-07",
-    "entries": [{"amount": 7.25, "finishedAt": "15:58", "pickup": null, "dropoff": null}]
+    "entries": [{"amount": 7.25, "startedAt": "15:58", "pickup": null, "dropoff": null}]
    }
   },
   {
@@ -63,7 +63,7 @@
    "text": "Sat, Nov 7\n$5.00 6:00 PM\nQuest promotion\n$7.25 3:58 PM\nDelivery - 22 min 5 sec - 4.10 mi\nNowhere Noodles (Inventon)\nImaginary Way, Inventon, GA, USA\n",
    "expect": {
     "app": "uber", "day": "2026-11-07",
-    "entries": [{"amount": 7.25, "finishedAt": "15:58"}],
+    "entries": [{"amount": 7.25, "startedAt": "15:58"}],
     "others": [{"amount": 5.0, "type": "Quest promotion"}]
    }
   },
@@ -71,7 +71,7 @@
    "name": "a heading with no year, read on 2 Jan: last December",
    "now": 1798884000000,
    "text": "Wed, Dec 30\n$9.00 7:15 PM\nDelivery - 25 min 0 sec - 5.00 mi\nPretend Pizza (Faketown)\nPlaceholder Ct, Faketown, GA, USA\n",
-   "expect": {"app": "uber", "day": "2026-12-30", "dayFrom": "heading", "entries": [{"amount": 9.0, "finishedAt": "19:15"}]}
+   "expect": {"app": "uber", "day": "2026-12-30", "dayFrom": "heading", "entries": [{"amount": 9.0, "startedAt": "19:15"}]}
   },
   {
    "name": "only the chip says the day",
@@ -83,7 +83,7 @@
    "name": "past midnight: 12:30 AM is 00:30 (finishMs files it on the next calendar day)",
    "now": 1794146400000,
    "text": "Sat, Nov 7\n$11.00 12:30 AM\nDelivery - 30 min 10 sec - 6.00 mi\nImaginary Bistro (Faketown)\nExample Ave, Faketown, GA, USA\n",
-   "expect": {"app": "uber", "day": "2026-11-07", "entries": [{"finishedAt": "00:30"}]}
+   "expect": {"app": "uber", "day": "2026-11-07", "entries": [{"startedAt": "00:30"}]}
   },
   {
    "name": "a trip with no time on it is skipped and said",

@@ -67,7 +67,7 @@ eq('[parse] the app can be named by the caller', E.parse('Sat, Nov 7\n$1.00 1:00
 /* [keep] ------------------------------------------------------------------- */
 var NOV7 = '2026-11-07';
 function entry(o) {
-  return Object.assign({ app: 'uber', date: NOV7, finishedAt: '17:40', amount: 2.0, tip: 'processing',
+  return Object.assign({ app: 'uber', date: NOV7, startedAt: '17:40', amount: 2.0, tip: 'processing',
                          type: 'Delivery', minutes: 39, seconds: 33, miles: 12.3,
                          pickup: { name: 'Pretend Pizza', detail: 'Faketown' },
                          dropoff: { street: 'Placeholder Ct', town: 'Faketown' } }, o || {});
@@ -92,7 +92,7 @@ eq('[keep] ...a tip settling raises the amount: still the same trip, by its name
    E.sameEntry(entry(), entry({ amount: 6.0, tip: 4.0 })), true);
 eq('[keep] ...and with no names, a pending tip and a larger settled amount are the same trip',
    E.sameEntry(entry({ pickup: null }), entry({ pickup: null, amount: 6.0, tip: 4.0 })), true);
-eq('[keep] ...another minute is another trip', E.sameEntry(entry(), entry({ finishedAt: '17:41' })), false);
+eq('[keep] ...another minute is another trip', E.sameEntry(entry(), entry({ startedAt: '17:41' })), false);
 eq('[keep] the key leaves out the amount, so the tip settling keeps it', E.keyOf(entry()) === E.keyOf(entry({ amount: 6, tip: 4 })), true);
 
 var first = entry({ history: [{ at: 1000, amount: 2.0, tip: 'processing' }] });
@@ -128,144 +128,221 @@ eq('[paid] no tip line', E.paidOf(entry({ amount: 7.25, tip: null })),
    { total: 7.25, tip: null, tipStatus: 'none', base: 7.25 });
 
 /* [match] ------------------------------------------------------------------ */
-function at(h, m, s) { return new Date(2026, 10, 7, h, m, s || 0).getTime(); }
+// A record as orderRow writes one: offered/took/ended, how it ended, its
+// pickups (a batch has two), its dropoff, the odometer, the card.
+function at(h, m, s, day) { return new Date(2026, 10, day || 7, h, m, s || 0).getTime(); }
 function record(o) {
-  var took = o.ended - Math.round(o.minutes * 60000);
-  return { kind: 'order', id: o.offer + '@' + took, offer: o.offer, app: o.app === undefined ? 'uber' : o.app,
-           places: o.places !== false, how: 'gps', times: { took: took, ended: o.ended },
-           card: { pay: o.pay, pickup: o.places === false ? undefined : o.store },
-           pickups: o.places === false ? [{}] : [{ name: o.store, door: o.door }],
-           dropoff: { text: o.places === false ? undefined : o.drop }, drive: { miles: o.miles } };
+  var places = o.places !== false;
+  var stores = o.stores || (o.store ? [o.store] : []);
+  return { kind: 'order', id: o.offer + '@' + (o.took || o.offered), offer: o.offer,
+           app: o.app === undefined ? 'uber' : o.app, places: places, how: o.how || 'gps',
+           times: { offered: o.offered === undefined ? null : o.offered, took: o.took === undefined ? null : o.took,
+                    ended: o.ended === undefined ? null : o.ended },
+           card: { pay: o.pay, minutes: o.cardMinutes, miles: o.cardMiles,
+                   pickup: places ? stores[0] : undefined, stores: places && stores.length > 1 ? stores : undefined },
+           pickups: places ? stores.map(function (s, i) { return { name: s, door: i === 0 ? o.door : undefined }; }) : [{}],
+           dropoff: { text: places ? o.drop : undefined }, drive: { miles: o.miles } };
 }
 function keyed(list) {
   return list.map(function (e) { e = Object.assign({}, e); e.key = E.keyOf(e); return e; });
 }
 
-// A clear match: Uber's 5:40 PM, the order ended 5:40:30, same store, street,
-// minutes and miles; the next order is 50 minutes away.
-var day = [
-  record({ offer: 'a', ended: at(17, 40, 30), minutes: 39.6, pay: 6.5, miles: 12.1, store: 'Pretend Pizza',
-           door: '10 Placeholder Rd, Faketown', drop: '12 Placeholder Ct, Faketown' }),
-  record({ offer: 'b', ended: at(16, 50, 20), minutes: 40.8, pay: 7.0, miles: 9.2, store: 'Make-Believe Burgers',
-           door: '1200 Sample St NW, Faketown', drop: '742 Example Ave NE, Notaville' })
+/* THE EVIDENCE DAY, invented. One real evening's Earnings Activity against
+ * the rig's records for it (AUDITS.md), with every name, street and figure
+ * made up but the SHAPE kept: Uber's time is the trip's start, the rig saw
+ * each card 0 to 9 minutes after it (one batch 18, accepted on the phone
+ * before the rig's Took), Uber's own minutes end 9 to 13 minutes before the
+ * rig's end, one order expired on the rig and was never timed, and one had no
+ * Took at all. */
+var D12 = '2026-11-12';
+function t12(h, m, s) { return at(h, m, s, 12); }
+var evOrders = [
+  // a batch: two pickups, two dropoffs; accepted on the phone 18 min before the rig's Took
+  record({ offer: 'ev1', offered: t12(15, 31), took: t12(15, 31, 30), ended: t12(16, 9), pay: 23.47, miles: 12.4,
+           stores: ['Make-Believe Burgers', 'Pretend Pizza'], door: '1200 Sample St, Faketown',
+           drop: '31 Mock Ln, Faketown', cardMinutes: 40, cardMiles: 11 }),
+  record({ offer: 'ev2', offered: t12(17, 35), took: t12(17, 54), ended: t12(18, 25), pay: 27.83, miles: 16.2,
+           store: 'Imaginary Bistro', drop: '8 Example Ave NE, Notaville', cardMinutes: 38, cardMiles: 15.5 }),
+  record({ offer: 'ev3', offered: t12(18, 23), took: t12(18, 24), ended: t12(18, 54), pay: 12.64, miles: 7.0,
+           store: 'Nowhere Noodles', drop: '9 Imaginary Way, Inventon', cardMinutes: 24, cardMiles: 6.5 }),
+  record({ offer: 'ev4', offered: t12(19, 8), took: t12(19, 8, 20), ended: t12(19, 42), pay: 16.38, miles: 7.3,
+           store: 'Pretend Pizza', drop: '12 Placeholder Ct, Faketown', cardMinutes: 26, cardMiles: 7 }),
+  // no Took: on the rig from its card to its end, never timed
+  record({ offer: 'ev5', offered: t12(19, 40), ended: t12(20, 2), how: 'drop', pay: 12.27,
+           store: 'Sample Sushi', drop: '4 Fictional Ct SW, Notaville', cardMinutes: 20, cardMiles: 9 }),
+  // expired on the rig's own clock: an end that is no delivery's
+  record({ offer: 'ev6', offered: t12(20, 12), took: t12(20, 13), ended: t12(21, 29), how: 'expiry', pay: 24.91,
+           miles: 30.5, store: 'Placeholder Pho', drop: '77 Mock Rd, Inventon', cardMinutes: 35, cardMiles: 20 })
 ];
-var orders = E.ordersFrom(day, []);
-var clear = keyed([entry()]);
-var m = E.matchDay(clear, orders)[clear[0].key];
-eq('[match] a clear match: matched by the matcher to its order, the card\'s pay on the match',
-   [m.status, m.by, m.offer, m.cardPay, m.source], ['matched', 'auto', 'a', 6.5, 'record']);
-ok_('[match] ...over the threshold and clear of any runner-up (' + m.score + ', margin ' + m.margin + ')',
-    m.score >= E.ACCEPT && m.margin >= E.MARGIN);
-var parts = E.score(clear[0], orders[0], 0).parts;
-eq('[match] ...every part agreeing: time, name, dropoff street, minutes, miles',
-   Object.keys(parts).sort(), ['dropoff', 'miles', 'minutes', 'name', 'time']);
-eq('[match] time alone can never be enough', E.W.time < E.ACCEPT, true);
+function ev(o) {
+  return Object.assign({ app: 'uber', date: D12, type: 'Delivery', tip: null }, o);
+}
+var evEntries = keyed([
+  ev({ startedAt: '15:13', minutes: 44, seconds: 50, miles: 11.40, amount: 23.47, tip: 12.80,
+       pickup: { name: 'Make-Believe Burgers', detail: '1200 Sample St' }, dropoff: { street: 'Mock Ln', town: 'Faketown' } }),
+  ev({ startedAt: '17:32', minutes: 40, seconds: 20, miles: 15.10, amount: 27.94, tip: 22.15,
+       pickup: { name: 'Imaginary Bistro', detail: 'Faketown' }, dropoff: { street: 'Example Ave NE', town: 'Notaville' } }),
+  ev({ startedAt: '18:23', minutes: 22, seconds: 0, miles: 6.30, amount: 12.64,
+       pickup: { name: 'Nowhere Noodles', detail: 'Inventon' }, dropoff: { street: 'Imaginary Way', town: 'Inventon' } }),
+  ev({ startedAt: '19:00', minutes: 27, seconds: 40, miles: 7.45, amount: 16.38,
+       pickup: { name: 'Pretend Pizza', detail: 'Faketown' }, dropoff: { street: 'Placeholder Ct', town: 'Faketown' } }),
+  ev({ startedAt: '19:31', minutes: 17, seconds: 50, miles: 8.90, amount: 12.27,
+       pickup: { name: 'Sample Sushi', detail: 'Notaville' }, dropoff: { street: 'Fictional Ct SW', town: 'Notaville' } }),
+  ev({ startedAt: '20:12', minutes: 37, seconds: 30, miles: 20.60, amount: 24.91, tip: 12.10,
+       pickup: { name: 'Placeholder Pho', detail: 'Inventon' }, dropoff: { street: 'Mock Rd', town: 'Inventon' } }),
+  // Took never pressed and the rig never saw the card: no order on file
+  ev({ startedAt: '16:40', minutes: 33, seconds: 10, miles: 14.2, amount: 33.80, tip: 20.0,
+       pickup: { name: 'Fabled Falafel', detail: 'Faketown' }, dropoff: { street: 'Storybook Ln', town: 'Faketown' } })
+]);
+var evO = E.ordersFrom(evOrders, []);
+var evM = E.matchDay(evEntries, evO);
+eq('[match] the evidence day, matched on Uber\'s START: all six on file matched to their orders, the one never '
+   + 'seen "no order on file"',
+   evEntries.map(function (e) { return [e.startedAt, evM[e.key].status, evM[e.key].offer || null]; }),
+   [['15:13', 'matched', 'ev1'], ['17:32', 'matched', 'ev2'], ['18:23', 'matched', 'ev3'], ['19:00', 'matched', 'ev4'],
+    ['19:31', 'matched', 'ev5'], ['20:12', 'matched', 'ev6'], ['16:40', 'none', null]]);
+eq('[match] ...on the rig\'s ordinary lag behind the phone: no clock offset found',
+   evM[evEntries[0].key].offsetS, 0);
+ok_('[match] ...each over the threshold and clear by the margin ('
+    + evEntries.slice(0, 6).map(function (e) { return evM[e.key].score + '/' + evM[e.key].margin; }).join(', ') + ')',
+    evEntries.slice(0, 6).every(function (e) { return evM[e.key].score >= E.ACCEPT && evM[e.key].margin >= E.MARGIN; }));
+eq('[match] ...the start taken from the card\'s first sighting where the Took came late (17:32 against offered 17:35, '
+   + 'took 17:54)', evM[evEntries[1].key].startBy, 'offered');
+var p1 = E.score(evEntries[0], evO[0], 0);
+ok_('[match] the batch accepted on the phone 18 min before the rig\'s Took: part of the start (' + p1.parts.start
+    + '), the finish in full (' + p1.parts.finish + ')',
+    p1.parts.start > 0 && p1.parts.start < E.W.start && p1.parts.finish === E.W.finish);
+var p6 = E.score(evEntries[5], evO[5], 0);
+eq('[match] an expired order: no finish and no miles held against it (its end is a clock, not a delivery)',
+   [p6.parts.finish, p6.parts.miles, p6.parts.start], [undefined, undefined, E.W.start]);
+eq('[match] an order with no Took is matched on its card\'s first sighting',
+   [evM[evEntries[4].key].startBy, evM[evEntries[4].key].tookAt], ['offered', null]);
 
-// A chain: two orders from Make-Believe Burgers ending 5:38 and 5:42, no doors
-// or dropoffs on file to tell them apart; Uber's trip at 5:40.
+// The same evening with keepPlaces off: no names, no streets. The clean
+// deliveries still match on the two clocks, the miles and the pay; the batch
+// and the expired order, with less to go on, are left to the driver.
+var blindEv = E.ordersFrom(evOrders.map(function (r) {
+  var b = JSON.parse(JSON.stringify(r));
+  b.places = false; b.pickups = [{}]; b.dropoff = {}; delete b.card.pickup; delete b.card.stores;
+  return b;
+}), []);
+var bevE = keyed(evEntries.map(function (e) { return Object.assign({}, e, { pickup: null, dropoff: null }); }));
+var bevM = E.matchDay(bevE, blindEv);
+eq('[match] the evidence day with keepPlaces off: the clean deliveries matched, the batch and the expired order '
+   + 'left to you, never guessed',
+   bevE.map(function (e) { return [bevM[e.key].status, bevM[e.key].offer || null]; }),
+   [['needs', null], ['matched', 'ev2'], ['matched', 'ev3'], ['matched', 'ev4'], ['matched', 'ev5'], ['needs', null],
+    ['none', null]]);
+
+// The rig's clock 12 minutes ahead of the phone's all evening: past the
+// ordinary lag, found from the confident matches, and every trip still its own.
+var skew = 12 * 60000;
+var skewO = E.ordersFrom(evOrders.map(function (r) {
+  var b = JSON.parse(JSON.stringify(r));
+  ['offered', 'took', 'ended'].forEach(function (k) { if (b.times[k] !== null) b.times[k] += skew; });
+  return b;
+}), []);
+var skM = E.matchDay(evEntries, skewO);
+ok_('[match] the rig\'s clock 12 min ahead: an offset found past the ordinary lag (' + skM[evEntries[0].key].offsetS + ' s)',
+    skM[evEntries[0].key].offsetS >= 120 && skM[evEntries[0].key].offsetS <= 720);
+eq('[match] ...and with it applied every trip on file is still matched to its own order',
+   evEntries.slice(0, 6).map(function (e) { return skM[e.key].offer || skM[e.key].status; }),
+   ['ev1', 'ev2', 'ev3', 'ev4', 'ev5', 'ev6']);
+
+// The old reading — Uber's time as the FINISH — would have put the 18:23 trip
+// against an order that ENDED at 18:25 (ev2) rather than the one that started
+// then: under the start reading it is no candidate's best.
+eq('[match] an order that ended at Uber\'s time is not the trip that started then',
+   evM[evEntries[2].key].offer !== 'ev2', true);
+
+eq('[match] neither clock alone, nor both, is enough: one more thing must agree',
+   [E.W.start < E.ACCEPT, E.W.start + E.W.finish < E.ACCEPT], [true, true]);
+
+// A chain: two orders from Make-Believe Burgers offered 5:38 and 5:42, no
+// doors or dropoffs on file to tell them apart; Uber's trip started 5:40.
+function trip(o) {
+  return Object.assign({ app: 'uber', date: NOV7, startedAt: '17:40', amount: 8, tip: null, type: 'Delivery',
+                         minutes: 30, seconds: 0, miles: 5, pickup: { name: 'Pretend Pizza', detail: 'Faketown' },
+                         dropoff: null }, o || {});
+}
+function plain(o) {
+  return record(Object.assign({ took: o.offered + 30000, ended: o.offered + 42 * 60000, miles: 5 }, o));
+}
 var chain = E.ordersFrom([
-  record({ offer: 'c1', ended: at(17, 38), minutes: 30, pay: 8, miles: 5, store: 'Make-Believe Burgers' }),
-  record({ offer: 'c2', ended: at(17, 42), minutes: 30, pay: 9, miles: 5, store: 'Make-Believe Burgers' })
+  plain({ offer: 'c1', offered: at(17, 38), pay: 8, store: 'Make-Believe Burgers' }),
+  plain({ offer: 'c2', offered: at(17, 42), pay: 9, store: 'Make-Believe Burgers' })
 ], []);
-var chainE = keyed([entry({ amount: 9.5, tip: null, minutes: 30, seconds: 0, miles: 5,
-                            pickup: { name: 'Make-Believe Burgers', detail: 'Sample St NW & Fictional Ct' },
-                            dropoff: null })]);
+var chainE = keyed([trip({ amount: 8.5, pickup: { name: 'Make-Believe Burgers', detail: 'Sample St NW & Fictional Ct' } })]);
 var cm = E.matchDay(chainE, chain)[chainE[0].key];
-eq('[match] a chain\'s two orders minutes apart: it needs you, both offered, best first',
+eq('[match] a chain\'s two orders minutes apart: it needs you, both offered',
    [cm.status, (cm.candidates || []).map(function (c) { return c.offer; }).sort()], ['needs', ['c1', 'c2']]);
-ok_('[match] ...at most ' + E.CANDIDATES_SHOWN + ' candidates, each with what tells them apart (took, ended, card)',
+ok_('[match] ...at most ' + E.CANDIDATES_SHOWN + ' candidates, each with what tells them apart (offered, took, card)',
     cm.candidates.length <= E.CANDIDATES_SHOWN && cm.candidates.every(function (c) {
-      return typeof c.tookAt === 'number' && typeof c.endedAt === 'number' && typeof c.pay === 'number';
+      return typeof c.offeredAt === 'number' && typeof c.tookAt === 'number' && typeof c.pay === 'number';
     }));
-// ...and the bracket's street found in one branch's door does tell them apart.
 var chainDoors = E.ordersFrom([
-  record({ offer: 'c1', ended: at(17, 38), minutes: 30, pay: 8, miles: 5, store: 'Make-Believe Burgers',
-           door: '1200 Sample St NW, Faketown' }),
-  record({ offer: 'c2', ended: at(17, 42), minutes: 30, pay: 9, miles: 5, store: 'Make-Believe Burgers',
-           door: '88 Other Rd, Faketown' })
+  plain({ offer: 'c1', offered: at(17, 38), pay: 8, store: 'Make-Believe Burgers', door: '1200 Sample St NW, Faketown' }),
+  plain({ offer: 'c2', offered: at(17, 42), pay: 9, store: 'Make-Believe Burgers', door: '88 Other Rd, Faketown' })
 ], []);
 var cd = E.matchDay(chainE, chainDoors)[chainE[0].key];
 eq('[match] ...with the branches\' doors on file, the branch on the bracket\'s corner comes first '
-   + '(still the driver\'s to confirm while the clock cannot tell them apart by ' + E.MARGIN + ')',
+   + '(still the driver\'s to confirm while it is not clear by ' + E.MARGIN + ')',
    [cd.status, cd.status === 'matched' ? cd.offer : (cd.candidates[0] || {}).offer], ['needs', 'c1']);
 ok_('[match] ...and the corner adds to that branch\'s score, not the other\'s',
     (E.score(chainE[0], chainDoors[0], 0).parts.street || 0) > 0 && !E.score(chainE[0], chainDoors[1], 0).parts.street);
 
 // The rig was off: no order within the gate.
-var off = keyed([entry({ finishedAt: '12:10' })]);
-eq('[match] a day the rig was off: no order on file', E.matchDay(off, orders)[off[0].key].status, 'none');
+var pz = E.ordersFrom([plain({ offer: 'a', offered: at(17, 41), pay: 8, store: 'Pretend Pizza' })], []);
+var off = keyed([trip({ startedAt: '12:10' })]);
+eq('[match] a day the rig was off: no order on file', E.matchDay(off, pz)[off[0].key].status, 'none');
 eq('[match] ...nor on a day with no orders at all', E.matchDay(off, [])[off[0].key].status, 'none');
 
-// The app's clock three minutes behind the rig's, all day: found from the
-// confident matches, and a third trip that is only clear once it is applied.
-var lag = 3 * 60000;
-var lagDay = E.ordersFrom([
-  record({ offer: 'l1', ended: at(15, 58) + lag, minutes: 22, pay: 7.25, miles: 4.0, store: 'Nowhere Noodles',
-           drop: '9 Imaginary Way, Inventon' }),
-  record({ offer: 'l2', ended: at(16, 50) + lag, minutes: 40.8, pay: 7.0, miles: 9.2, store: 'Make-Believe Burgers',
-           drop: '742 Example Ave NE, Notaville' }),
-  record({ offer: 'l3', ended: at(18, 30) + lag, minutes: 25, pay: 6.0, miles: 6.0, store: 'Imaginary Bistro' }),
-  record({ offer: 'l4', ended: at(18, 30) - 9 * 60000, minutes: 25, pay: 6.0, miles: 6.0, store: 'Imaginary Bistro' })
-], []);
-var lagE = keyed([
-  entry({ finishedAt: '15:58', amount: 7.25, tip: null, minutes: 22, seconds: 5, miles: 4.1,
-          pickup: { name: 'Nowhere Noodles' }, dropoff: { street: 'Imaginary Way' } }),
-  entry({ finishedAt: '16:50', amount: 25.05, tip: 19.54, minutes: 40, seconds: 48, miles: 9.38,
-          pickup: { name: 'Make-Believe Burgers' }, dropoff: { street: 'Example Ave NE' } }),
-  entry({ finishedAt: '18:30', amount: 6.0, tip: null, minutes: 25, seconds: 0, miles: 6.0,
-          pickup: { name: 'Imaginary Bistro' }, dropoff: null })
-]);
-var lm = E.matchDay(lagE, lagDay);
-eq('[match] the app\'s clock 3 minutes off the rig\'s: found from the day\'s confident matches',
-   lm[lagE[0].key].offsetS, 180);
-eq('[match] ...and with it applied, the trip with a same-store order 9 minutes the other way is matched to the right one',
-   lagE.map(function (e) { return [lm[e.key].status, lm[e.key].offer]; }),
-   [['matched', 'l1'], ['matched', 'l2'], ['matched', 'l3']]);
-
 // One order, two entries that both fit it: neither is forced.
-var one = E.ordersFrom([record({ offer: 'o1', ended: at(17, 40), minutes: 30, pay: 8, miles: 5, store: 'Pretend Pizza' })], []);
-var two = keyed([entry({ finishedAt: '17:40', amount: 8, tip: null, minutes: 30, seconds: 0, miles: 5 }),
-                 entry({ finishedAt: '17:41', amount: 9, tip: null, minutes: 30, seconds: 0, miles: 5 })]);
-var tm = E.matchDay(two, one);
+var two = keyed([trip({ startedAt: '17:40' }), trip({ startedAt: '17:41', amount: 8.1 })]);
+var tm = E.matchDay(two, pz);
 eq('[match] one order, two entries that fit it alike: neither is given it', two.map(function (e) { return tm[e.key].status; }),
    ['needs', 'needs']);
 
 // An order of the other app is never a candidate.
-var dd = E.ordersFrom([record({ offer: 'd1', app: 'doordash', ended: at(17, 40), minutes: 39.6, pay: 6.5,
-                                miles: 12.1, store: 'Pretend Pizza' })], []);
+var clear = keyed([trip()]);
+var dd = E.ordersFrom([plain({ offer: 'd1', app: 'doordash', offered: at(17, 41), pay: 8, store: 'Pretend Pizza' })], []);
 eq('[match] a DoorDash order is no candidate for an Uber trip', E.matchDay(clear, dd)[clear[0].key].status, 'none');
-var unread = E.ordersFrom([record({ offer: 'u1', app: null, ended: at(17, 40, 30), minutes: 39.6, pay: 6.5,
-                                    miles: 12.1, store: 'Pretend Pizza' })], []);
+var unread = E.ordersFrom([plain({ offer: 'u1', app: null, offered: at(17, 41), pay: 8, store: 'Pretend Pizza' })], []);
 eq('[match] ...an order whose app the rig did not read can be', E.matchDay(clear, unread)[clear[0].key].offer, 'u1');
 
 // The driver's pick: kept, and its order out of the other's running.
-var picked = keyed([Object.assign(entry({ finishedAt: '17:40', amount: 8, tip: null, minutes: 30, seconds: 0, miles: 5 })),
-                    entry({ finishedAt: '17:41', amount: 9, tip: null, minutes: 30, seconds: 0, miles: 5 })]);
-picked[0].match = { status: 'picked', by: 'you', offer: 'o1', tookAt: one[0].tookAt };
-var pm = E.matchDay(picked, one);
+var picked = keyed([trip({ startedAt: '17:40' }), trip({ startedAt: '17:41', amount: 8.1 })]);
+picked[0].match = { status: 'picked', by: 'you', offer: 'a', tookAt: pz[0].tookAt };
+var pm = E.matchDay(picked, pz);
 eq('[match] the driver\'s pick is kept as picked, and the order it took is no one else\'s',
    [pm[picked[0].key].status, pm[picked[1].key].status], ['picked', 'none']);
 picked[1].match = { status: 'none', by: 'you' };
-eq('[match] ...and "none of these" is kept as the driver said', E.matchDay(picked, one)[picked[1].key], { status: 'none', by: 'you' });
+eq('[match] ...and "none of these" is kept as the driver said', E.matchDay(picked, pz)[picked[1].key], { status: 'none', by: 'you' });
 
-// keepPlaces off: no names, no streets; the clock, minutes and miles still say.
-var blind = E.ordersFrom([record({ offer: 'p1', places: false, ended: at(17, 40, 30), minutes: 39.6, pay: 6.5, miles: 12.1 })], []);
+// keepPlaces off: no names, no streets; the two clocks, the miles and the pay still say.
+var blind = E.ordersFrom([plain({ offer: 'p1', places: false, offered: at(17, 41), pay: 8 })], []);
 var bm = E.matchDay(clear, blind)[clear[0].key];
-eq('[match] a record kept with keepPlaces off: matched on its clock, minutes and miles alone',
+eq('[match] a record kept with keepPlaces off: matched on its clocks, miles and pay alone',
    [bm.status, bm.offer], ['matched', 'p1']);
 
 // A day before the records: a run the report rebuilds from took/drop rows,
-// with the offer's own pickup.
-var rebuilt = E.ordersFrom([], [{ id: 'r9', app: 'uber', pay: 6.5, tookAt: at(17, 1), endedAt: at(17, 40, 30),
-                                  by: 'drop', pickup: 'Pretend Pizza', dropoff: '12 Placeholder Ct, Faketown' }]);
+// with the offer's own pickup and first sighting.
+var rebuilt = E.ordersFrom([], [{ id: 'r9', app: 'uber', pay: 8, offeredAt: at(17, 41), tookAt: at(17, 42),
+                                  endedAt: at(18, 22), by: 'drop', pickup: 'Pretend Pizza' }]);
 var rm = E.matchDay(clear, rebuilt)[clear[0].key];
 eq('[match] a day before the order record: matched to the rebuilt run, said to be rebuilt',
    [rm.status, rm.offer, rm.order, rm.source], ['matched', 'r9', null, 'rebuilt']);
 eq('[match] ...a run a record already covers is not offered twice',
-   E.ordersFrom([day[0]], [{ id: 'a', app: 'uber', tookAt: day[0].times.took + 200, endedAt: day[0].times.ended }]).length, 1);
+   E.ordersFrom([evOrders[2]], [{ id: 'ev3', app: 'uber', tookAt: evOrders[2].times.took + 200,
+                                  endedAt: evOrders[2].times.ended }]).length, 1);
 
 eq('[match] a trip at 12:30 AM under Sat\'s heading is the small hours of Sunday',
-   new Date(E.finishMs({ date: NOV7, finishedAt: '00:30' })).getDate(), 8);
+   new Date(E.startMs({ date: NOV7, startedAt: '00:30' })).getDate(), 8);
+eq('[match] a row an earlier build wrote (`finishedAt`) is read as the same start and keeps its key',
+   [E.startMs({ date: NOV7, finishedAt: '17:40' }) === E.startMs({ date: NOV7, startedAt: '17:40' }),
+    E.keyOf(trip({ startedAt: undefined, finishedAt: '17:40' })) === E.keyOf(trip())], [true, true]);
+eq('[match] Uber\'s finish is its start plus its own minutes and seconds',
+   (E.endMs(trip({ minutes: 44, seconds: 50 })) - E.startMs(trip())) / 1000, 44 * 60 + 50);
 
 eq('[match] names are alike past OCR slips and abbreviations, and two restaurants are not',
    [E.similar('Make-Belleve Burgers', 'Make-Believe Burgers') >= E.NAME_MIN,

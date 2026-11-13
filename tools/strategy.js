@@ -944,7 +944,7 @@ function cardVsPaid(earnings) {
     counts.matched += 1;
     if (num(e.amount) === null || num(m.cardPay) === null) { counts.noCard += 1; return; }
     if (e.tipStatus === 'pending' || e.tip === 'processing') { counts.pending += 1; return; }
-    var at = E.finishMs(e);
+    var at = E.startMs(e);
     var name = e.pickup && e.pickup.name ? String(e.pickup.name) : null;
     used.push({ app: e.app === 'uber' || e.app === 'doordash' ? e.app : 'unknown', name: name,
                 nameKey: name ? E.words(name).join(' ') : null, block: at === null ? null : A.blockOf(at),

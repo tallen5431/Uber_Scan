@@ -15897,7 +15897,7 @@ function earningsRead(id, again, now, done) {
 function earningsOrders(rows, days) {
   var lo = Infinity, hi = -Infinity;
   days.forEach(function (d) {
-    var at = Earnings.finishMs({ date: d, finishedAt: '12:00' });
+    var at = Earnings.startMs({ date: d, startedAt: '12:00' });
     if (at === null) return;
     lo = Math.min(lo, at - 36 * 3600000);
     hi = Math.max(hi, at + 36 * 3600000);
@@ -15909,10 +15909,14 @@ function earningsOrders(rows, days) {
   var runs = takenRuns(rows, lo, offers).map(function (u) {
     var o = byId[u.id] || {};
     return Object.assign({}, u, { pickup: typeof o.pickup === 'string' ? o.pickup : null,
-                                  dropoff: typeof o.dropoff === 'string' ? o.dropoff : null });
+                                  dropoff: typeof o.dropoff === 'string' ? o.dropoff : null,
+                                  // ...and when the card first came up: Uber's
+                                  // time is the trip's start (earnings.js).
+                                  offeredAt: typeof o.firstAt === 'number' ? o.firstAt
+                                    : typeof o.at === 'number' ? o.at : null });
   });
   return Earnings.ordersFrom(orderRecords(rows, lo), runs).filter(function (c) {
-    var t = c.endedAt !== null ? c.endedAt : c.tookAt;
+    var t = c.tookAt !== null ? c.tookAt : c.offeredAt !== null ? c.offeredAt : c.endedAt;
     return t !== null && t >= lo && t <= hi;
   });
 }
@@ -15928,18 +15932,18 @@ function earningRow(e, at) {
   var places = orderKeepsPlaces();
   var paid = Earnings.paidOf(e) || {};
   var m = e.match || { status: 'none', by: 'auto' };
-  var match = { status: m.status, by: m.by, offer: m.offer, order: m.order, tookAt: m.tookAt,
-                endedAt: m.endedAt, cardPay: m.cardPay, source: m.source, score: m.score,
-                margin: m.margin, offsetS: m.offsetS, pickedAt: m.pickedAt };
+  var match = { status: m.status, by: m.by, offer: m.offer, order: m.order, offeredAt: m.offeredAt,
+                tookAt: m.tookAt, endedAt: m.endedAt, how: m.how, cardPay: m.cardPay, source: m.source,
+                score: m.score, startBy: m.startBy, margin: m.margin, offsetS: m.offsetS, pickedAt: m.pickedAt };
   if (m.status === 'needs') {
     match.candidates = (m.candidates || []).slice(0, Earnings.CANDIDATES_SHOWN).map(function (c) {
-      return { offer: c.offer, order: c.order, tookAt: c.tookAt, endedAt: c.endedAt, pay: c.pay,
+      return { offer: c.offer, order: c.order, offeredAt: c.offeredAt, tookAt: c.tookAt, endedAt: c.endedAt, pay: c.pay,
                pickup: places ? c.pickup : null, source: c.source, score: c.score };
     });
   }
   return orderCompact({
     v: EARNINGS_ROW_V, kind: 'earning', id: 'earn:' + e.key, seq: at, at: at,
-    key: e.key, app: e.app, date: e.date, finishedAt: e.finishedAt,
+    key: e.key, app: e.app, date: e.date, startedAt: Earnings.clockField(e),
     amount: e.amount, tip: e.tip === undefined ? null : e.tip, tipStatus: paid.tipStatus, base: paid.base,
     type: e.type, minutes: e.minutes, seconds: e.seconds, miles: e.miles,
     pickup: places ? e.pickup : null, dropoff: places ? e.dropoff : null, places: places,
@@ -16060,7 +16064,7 @@ function earningsRoute(req, res) {
         var ids = Object.keys(shots);
         var bin = earningsTesseract();
         var entries = (rows ? Earnings.fold(rows) : []).filter(function (r) {
-          var at = Earnings.finishMs(r);
+          var at = Earnings.startMs(r);
           return !floor || (at !== null && at >= floor);
         });
         answer(200, {
@@ -16206,8 +16210,9 @@ function earningsRoute(req, res) {
               return o.offer === body.offer && o.tookAt === body.tookAt && (!o.app || o.app === e.app);
             })[0];
             if (!c) return reply(400, { ok: false, error: 'no such order on that day' });
-            match = { status: 'picked', by: 'you', offer: c.offer, order: c.order, tookAt: c.tookAt,
-                      endedAt: c.endedAt, cardPay: c.pay, source: c.source, pickedAt: now };
+            match = { status: 'picked', by: 'you', offer: c.offer, order: c.order, offeredAt: c.offeredAt,
+                      tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: c.pay, source: c.source,
+                      pickedAt: now };
           } else {
             return reply(400, { ok: false, error: 'pick an order, none or auto' });
           }
@@ -16246,7 +16251,7 @@ function earningsRoute(req, res) {
               var floor = now - EARNINGS_REMATCH_DAYS * 86400000;
               var days = {};
               (rows ? Earnings.fold(rows) : []).forEach(function (r) {
-                var at = Earnings.finishMs(r);
+                var at = Earnings.startMs(r);
                 if (at !== null && at >= floor) days[r.date] = true;
               });
               earningsFile(parses, Object.keys(days), null, now, function (fileErr, summary) {

@@ -317,7 +317,7 @@ eq('the lines run $10 to $40 in $2 steps', [S.GRID[0], S.GRID[S.GRID.length - 1]
  * +$10.00 in all, the typical order +$2.00, $12.00 of settled tips. */
 function earned(key, app, h, card, paid, tip, status, name) {
   return { kind: 'earning', key: key, at: 1, app: app, date: '2026-03-16',
-           finishedAt: (h < 10 ? '0' : '') + h + ':30', amount: paid, tip: tip,
+           startedAt: (h < 10 ? '0' : '') + h + ':30', amount: paid, tip: tip,
            tipStatus: tip === 'processing' ? 'pending' : typeof tip === 'number' ? 'settled' : 'none',
            pickup: name ? { name: name } : null,
            match: status === 'matched' || status === 'picked'

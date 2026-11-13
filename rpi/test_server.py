@@ -15061,12 +15061,16 @@ def _ems(h, m, s=0):
     return int(datetime.datetime(2026, 11, 7, h, m, s).timestamp() * 1000)
 
 
-def _erecord(offer, ended, minutes, pay, miles, store=None, door=None, drop=None):
-    took = ended - int(minutes * 60000)
+def _erecord(offer, offered, minutes, pay, miles, store=None, door=None, drop=None):
+    # Uber's time is the trip's START (earnings.js startMs): the rig sees the
+    # card a little after it, the Took half a minute later, the end the card's
+    # minutes after that.
+    took = offered + 30000
+    ended = took + int(minutes * 60000)
     return {'v': 1, 'kind': 'order', 'id': '%s@%d' % (offer, took), 'offer': offer, 'app': 'uber',
             'places': True, 'at': ended + 1500, 'seq': ended + 1500, 'how': 'gps',
             'card': {'pay': pay, 'minutes': 30, 'miles': 8, 'pickup': store},
-            'times': {'took': took, 'ended': ended},
+            'times': {'offered': offered, 'took': took, 'ended': ended},
             'pickups': [{'name': store, 'door': door}] if store else [],
             'dropoff': {'text': drop} if drop else {}, 'drive': {'miles': miles}}
 
@@ -15075,11 +15079,12 @@ _ework = tempfile.mkdtemp()
 _ehome = os.path.join(_ework, 'main')
 os.makedirs(_ehome)
 _ej = os.path.join(_ehome, 'journal.jsonl')
-# Sat 7 Nov: Pretend Pizza's order ended 5:40:30 (Uber says 5:40 PM); two of
-# Make-Believe Burgers' orders ended 4:48 and 4:52 with nothing on file to tell
-# them apart (Uber's trip says 4:50 PM); nothing near Nowhere Noodles' 3:58 PM,
-# the rig was off. Each a record of its own, as orderRow writes them.
-_erecs = [_erecord('e-pizza', _ems(17, 40, 30), 39.6, 6.5, 12.1, 'Pretend Pizza',
+# Sat 7 Nov: Pretend Pizza's card came up on the rig at 5:41 (Uber says its
+# trip started 5:40 PM); two of Make-Believe Burgers' came up at 4:48 and 4:52
+# with nothing on file to tell them apart (Uber's trip says 4:50 PM); nothing
+# near Nowhere Noodles' 3:58 PM, the rig was off. Each a record of its own, as
+# orderRow writes them.
+_erecs = [_erecord('e-pizza', _ems(17, 41), 47.0, 6.5, 12.1, 'Pretend Pizza',
                    '10 Placeholder Rd, Faketown', '12 Placeholder Ct, Faketown'),
           _erecord('e-burg1', _ems(16, 48), 40.0, 7.0, 9.0, 'Make-Believe Burgers'),
           _erecord('e-burg2', _ems(16, 52), 41.0, 8.0, 9.5, 'Make-Believe Burgers')]
@@ -15136,7 +15141,7 @@ try:
     eq('[earnings] a screenshot of the day: kept, read, its day off the end line, three trips, all new',
        (_s, _a.get('read'), _a.get('app'), _a.get('day'), _a.get('dayFrom'), _a.get('trips'), _a.get('added')),
        (200, True, 'uber', '2026-11-07', 'end', 3, 3))
-    _ent = {r.get('finishedAt'): r for r in _a.get('entries') or []}
+    _ent = {r.get('startedAt'): r for r in _a.get('entries') or []}
     _pz, _bg, _nd = _ent.get('17:40') or {}, _ent.get('16:50') or {}, _ent.get('15:58') or {}
     eq('[earnings] Pretend Pizza\'s trip is matched to its order alone: the card\'s pay beside what was paid, '
        'its tip still processing', ((_pz.get('match') or {}).get('status'), (_pz.get('match') or {}).get('offer'),
@@ -15179,7 +15184,7 @@ try:
     _settled = list(_ET.TRIPS)
     _settled[0] = ('$6.00',) + _settled[0][1:6] + ('$4.00 Tip',) + _settled[0][7:]
     _s, _a = _eraw(_eb, '/api/earnings/shot', _epng(_ET.screen(trips=_settled)), 'image/png')
-    _pzr = [r for r in _rows(_ej, 'earning') if r.get('finishedAt') == '17:40']
+    _pzr = [r for r in _rows(_ej, 'earning') if r.get('startedAt') == '17:40']
     eq('[earnings] the tip settles: one row more for that trip alone, $6.00 with a $4.00 tip and a $2.00 base',
        (_a.get('added'), _a.get('changed'), len(_pzr), _pzr[-1].get('amount'), _pzr[-1].get('tip'),
         _pzr[-1].get('base'), _pzr[-1].get('tipStatus')), (0, 1, 2, 6.0, 4.0, 2.0, 'settled'))

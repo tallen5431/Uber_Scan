@@ -93,7 +93,7 @@ def want(trip):
     h = int(h) % 12 + (12 if clock.endswith('PM') else 0)
     name, _, detail = pickup.partition(' (')
     street, town = dropoff.split(', ')[:2]
-    return {'amount': float(amount[1:]), 'finishedAt': '%02d:%s' % (h, m),
+    return {'amount': float(amount[1:]), 'startedAt': '%02d:%s' % (h, m),
             'tip': 'processing' if tip == 'Tip processing' else (float(tip.split()[0][1:]) if tip else None),
             'type': kind, 'minutes': mins, 'seconds': secs, 'miles': float(miles),
             'pickup': {'name': name, 'detail': detail.rstrip(')')},
@@ -139,7 +139,7 @@ g = got['scrolled']
 eq('[screen scrolled] no header and no end line: no day said (the server takes its batch\'s)',
    g['day'], None)
 eq('[screen scrolled] the first trip, its top scrolled off, is skipped and said; the two below read whole',
-   ([e['finishedAt'] for e in g['entries']], g['notes']),
+   ([e['startedAt'] for e in g['entries']], g['notes']),
    (['16:50', '15:58'], ['the top of the first trip was scrolled off; its rest was skipped']))
 eq('[screen scrolled] ...and they are the same trips the top of the day read', g['entries'],
    [want(t) for t in T.TRIPS[1:]])
@@ -147,7 +147,7 @@ eq('[screen scrolled] ...and they are the same trips the top of the day read', g
 # --- another day ----------------------------------------------------------------
 g = got['another day']
 eq('[screen another day] its own day, a settled tip and a pending one, a chain\'s corner in the bracket',
-   ((g['day'] or {}).get('iso'), [(e['finishedAt'], e['amount'], e['tip'], e['pickup']) for e in g['entries']]),
+   ((g['day'] or {}).get('iso'), [(e['startedAt'], e['amount'], e['tip'], e['pickup']) for e in g['entries']]),
    ('2026-11-06', [('21:05', 14.1, 3.0, {'name': 'Imaginary Bistro', 'detail': 'Faketown'}),
                    ('20:12', 9.8, 'processing',
                     {'name': 'Make-Believe Burgers', 'detail': 'Placeholder Rd & Mock Ln'})]))

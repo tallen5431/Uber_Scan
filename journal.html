@@ -3311,7 +3311,7 @@
     var bits = [money(e.amount, 2) + ' (' + tipWords(e) + ')'];
     if (e.pickup && e.pickup.name) bits.push(e.pickup.name + (e.pickup.detail ? ' (' + e.pickup.detail + ')' : ''));
     if (typeof e.minutes === 'number') bits.push(e.minutes + ' min' + (typeof e.miles === 'number' ? ', ' + e.miles + ' mi' : ''));
-    return '<b>' + esc(dayLabel(e.date) + ' ' + clockOfHm(e.finishedAt)) + '</b>' + esc(bits.join(' · '));
+    return '<b>' + esc(dayLabel(e.date) + ' ' + clockOfHm(e.startedAt || e.finishedAt)) + '</b>' + esc(bits.join(' · '));
   }
 
   function showEarnings(ans) {

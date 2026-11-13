@@ -15,7 +15,7 @@
  * with no I/O, so the server, the reports and the suites share one answer:
  *
  *   1. READ.  parse(text) turns tesseract's text of one screenshot into the
- *      day it shows and one entry per trip: when it finished, what it paid,
+ *      day it shows and one entry per trip: when it started, what it paid,
  *      the tip (a figure, or still "processing"), the kind, how long and how
  *      far Uber says it was, the pickup as Uber names it and the dropoff's
  *      street and town. App-aware: PARSERS.uber reads Uber's screen, and
@@ -196,12 +196,12 @@
   /* One block: the lines from an amount to the line before the next. */
   function readBlock(lines) {
     var first = AMOUNT.exec(lines[0]);
-    var e = { amount: money(first[1]), finishedAt: clockOf(first[2]), tip: null, type: null,
+    var e = { amount: money(first[1]), startedAt: clockOf(first[2]), tip: null, type: null,
               minutes: null, seconds: null, miles: null, pickup: null, dropoff: null, trip: false };
     var detailAt = -1, dropAt = -1;
     for (var i = 1; i < lines.length; i++) {
       var l = lines[i];
-      if (!e.finishedAt) e.finishedAt = clockOf(l);
+      if (!e.startedAt) e.startedAt = clockOf(l);
       if (detailAt === -1) {
         var d = DETAIL.exec(l);
         if (d) {
@@ -250,7 +250,8 @@
   /* Uber's Earnings Activity. Returns {app, day, entries, others, notes}:
    *   day      {iso, from} or null (a screenshot scrolled past the top and
    *            short of the bottom says no date: see the server's batch day);
-   *   entries  the trips, each {amount, finishedAt 'HH:MM', tip (number,
+   *   entries  the trips, each {amount, startedAt 'HH:MM' (the right-hand
+   *            time, which is when the trip STARTED: see startMs), tip (number,
    *            'processing' or null), type ('Delivery': the trip's kind, as
    *            Uber names it — `type`, since a journal row's `kind` is the
    *            row's), minutes, seconds, miles,
@@ -281,7 +282,7 @@
     starts.forEach(function (s, k) {
       var e = readBlock(lines.slice(s, k + 1 < starts.length ? starts[k + 1] : endAt));
       if (!e.trip) { out.others.push({ amount: e.amount, type: e.type }); return; }
-      if (!e.finishedAt) {
+      if (!e.startedAt) {
         out.notes.push('a $' + e.amount.toFixed(2) + ' trip with no time on it was skipped');
         return;
       }
@@ -383,20 +384,46 @@
     return wa.filter(function (w) { return wb.indexOf(w) !== -1; }).length / wa.length;
   }
 
-  /* The moment a trip finished, ms, on this machine's clock and zone: its day
-   * and its 'HH:MM'. A time before DAY_STARTS_AT (4am) under a day's heading
-   * is taken as the small hours after it, the way the offers page and the
-   * end-of-shift report count a driver's day; how Uber files a trip that ends
-   * at 12:30 AM has not been seen on a screenshot (AUDITS.md, Open). */
+  /* WHEN A TRIP WAS. The right-hand time on Uber's Earnings Activity is when
+   * the trip STARTED — the offer accepted — not when it finished. Compared by
+   * hand on the owner's screenshots of one evening against the rig's order
+   * records for it (AUDITS.md, in invented terms): six trips each came up on
+   * the rig 0 to 9 minutes after Uber's time, one 18 minutes after (a batch
+   * the phone accepted before the rig's Took), and Uber's minutes and miles
+   * cover the trip itself, ending 9 to 13 minutes before the rig's end. The
+   * first build read it as the finish.
+   *
+   * The entry's field was `finishedAt` in the rows that build wrote; the
+   * same clock reading under the old name is read as the start (clockField),
+   * so a journal written before keeps its keys and its trips.
+   *
+   * startMs: the moment, ms, on this machine's clock and zone, off its day
+   * and 'HH:MM'. A time before DAY_STARTS_AT (4am) under a day's heading is
+   * taken as the small hours after it, the way the offers page and the
+   * end-of-shift report count a driver's day; how Uber files a trip that
+   * starts at 12:30 AM has not been seen on a screenshot (AUDITS.md, Open).
+   * endMs: that plus Uber's own minutes and seconds — the finish Uber's
+   * figures imply; null where the trip line gave none (a canceled trip). */
   var DAY_STARTS_AT = 4;
-  function finishMs(e) {
-    if (!e || typeof e.date !== 'string' || typeof e.finishedAt !== 'string') return null;
+  function clockField(e) {
+    if (!e) return null;
+    if (typeof e.startedAt === 'string') return e.startedAt;
+    return typeof e.finishedAt === 'string' ? e.finishedAt : null;
+  }
+  function startMs(e) {
+    var c = clockField(e);
+    if (!e || typeof e.date !== 'string' || c === null) return null;
     var d = /^(\d{4})-(\d\d)-(\d\d)$/.exec(e.date);
-    var t = /^(\d\d):(\d\d)$/.exec(e.finishedAt);
+    var t = /^(\d\d):(\d\d)$/.exec(c);
     if (!d || !t) return null;
     var h = parseInt(t[1], 10);
     var at = new Date(+d[1], +d[2] - 1, +d[3], h, +t[2]).getTime();
     return h < DAY_STARTS_AT ? at + 86400000 : at;
+  }
+  function endMs(e) {
+    var s = startMs(e);
+    if (s === null || typeof e.minutes !== 'number') return null;
+    return s + (e.minutes * 60 + (typeof e.seconds === 'number' ? e.seconds : 0)) * 1000;
   }
 
   /* An entry's identity: its app, its day, its time and its pickup's name,
@@ -405,7 +432,7 @@
    * self by sameEntry, which looks past the key. */
   function keyOf(e) {
     var name = e.pickup && e.pickup.name ? words(e.pickup.name).join('-').slice(0, 24) : '?';
-    return [e.app || 'uber', e.date || '?', e.finishedAt || '?', name || '?'].join(' ');
+    return [e.app || 'uber', e.date || '?', clockField(e) || '?', name || '?'].join(' ');
   }
 
   /* Whether two sightings are one trip: the same app, day and minute, and
@@ -416,7 +443,7 @@
    * share one. */
   var SAME_NAME = 0.6;
   function sameEntry(a, b) {
-    if (!a || !b || a.app !== b.app || a.date !== b.date || a.finishedAt !== b.finishedAt) return false;
+    if (!a || !b || a.app !== b.app || a.date !== b.date || clockField(a) !== clockField(b)) return false;
     var an = a.pickup && a.pickup.name, bn = b.pickup && b.pickup.name;
     if (an && bn) return similar(an, bn) >= SAME_NAME;
     if (a.amount === b.amount) return true;
@@ -472,7 +499,7 @@
       if (!was || r.at > was.at || (r.at === was.at && (r.seq || 0) >= (was.seq || 0))) by[r.key] = r;
     });
     return Object.keys(by).map(function (k) { return by[k]; }).sort(function (a, b) {
-      return (finishMs(a) || 0) - (finishMs(b) || 0);
+      return (startMs(a) || 0) - (startMs(b) || 0);
     });
   }
 
@@ -491,12 +518,18 @@
   /* --- which order it was ----------------------------------------------------
    *
    * THE ORDERS. ordersFrom turns what the server has into one shape: each
-   * order record (server.js orderRow: `times.took`/`times.ended`, its
-   * pickups' names and doors, the dropoff as filed, the odometer's miles, the
-   * card's pay), and for a day before the records each run the report
-   * rebuilds from took/drop rows (server.js takenRuns, with the offer's own
-   * pickup and dropoff as printed) that no record covers. */
+   * order record (server.js orderRow: `times.offered`/`took`/`ended`, how it
+   * ended, its pickups' names and doors, the dropoff as filed, the odometer's
+   * miles, the card's pay), and for a day before the records each run the
+   * report rebuilds from took/drop rows (server.js takenRuns, with the
+   * offer's own pickup, dropoff and first sighting) that no record covers. */
   var RECORD_MATCH_MS = 60000;      // a record is a run's within a minute of its Took (the report's RECORD_MATCH_S)
+
+  // The ends that are a delivery's: the order's end is when it was handed
+  // over, and Uber's finish can be held to it. Not 'replaced' (the next
+  // Took), 'expiry' (a clock), 'untick'/'offers' (taken back) or 'boot'.
+  var DELIVERED = { drop: 1, gps: 1, chooser: 1, screen: 1, 'finished-door': 1, 'finished-area': 1,
+                    'finished-stop': 1 };
 
   function num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
 
@@ -513,10 +546,13 @@
       });
       (Array.isArray(card.stores) ? card.stores : []).forEach(function (s) { if (s) names.push(s); });
       if (card.pickup) { names.push(card.pickup); doors.push(card.pickup); }
+      var delivered = !!DELIVERED[r.how] && ended !== null;
       out.push({ offer: r.offer, order: typeof r.id === 'string' ? r.id : null, app: r.app || null,
-                 tookAt: took, endedAt: ended, pay: num(card.pay),
-                 minutes: took !== null && ended !== null && ended >= took ? (ended - took) / 60000 : null,
-                 miles: num(r.drive && r.drive.miles), names: names, doors: doors,
+                 offeredAt: num(t.offered), tookAt: took, endedAt: ended, delivered: delivered,
+                 pay: num(card.pay), cardMinutes: num(card.minutes) !== null ? card.minutes : num(card.billedMinutes),
+                 cardMiles: num(card.miles),
+                 minutes: delivered && took !== null && ended >= took ? (ended - took) / 60000 : null,
+                 miles: delivered ? num(r.drive && r.drive.miles) : null, names: names, doors: doors,
                  dropoff: (r.dropoff && r.dropoff.text) || card.dropoff || null,
                  how: r.how || null, source: 'record' });
     });
@@ -526,23 +562,38 @@
         return c.offer === u.id && c.tookAt !== null && Math.abs(c.tookAt - u.tookAt) <= RECORD_MATCH_MS;
       });
       if (covered) return;
-      out.push({ offer: u.id, order: null, app: u.app || null, tookAt: u.tookAt, endedAt: num(u.endedAt),
-                 pay: num(u.pay),
-                 minutes: num(u.endedAt) !== null && u.endedAt >= u.tookAt ? (u.endedAt - u.tookAt) / 60000 : null,
+      var delivered = !!DELIVERED[u.by || 'drop'] && num(u.endedAt) !== null;
+      out.push({ offer: u.id, order: null, app: u.app || null, offeredAt: num(u.offeredAt), tookAt: u.tookAt,
+                 endedAt: num(u.endedAt), delivered: delivered, pay: num(u.pay),
+                 cardMinutes: num(u.minutes), cardMiles: num(u.miles),
+                 minutes: delivered && u.endedAt >= u.tookAt ? (u.endedAt - u.tookAt) / 60000 : null,
                  miles: null, names: u.pickup ? [u.pickup] : [], doors: u.pickup ? [u.pickup] : [],
                  dropoff: u.dropoff || null, how: u.by || null, source: 'rebuilt' });
     });
     return out;
   }
 
-  /* THE SCORE. Points for each thing the two agree on, out of about 110:
+  /* THE SCORE. Points for each thing the two agree on, out of 125:
    *
-   *   time      40  Uber's time against the order's end (times.ended), after
-   *                 the day's clock offset: full within TIME_FULL_MIN, none
-   *                 from TIME_ZERO_MIN, and no candidate at all past
-   *                 TIME_GATE_MIN. The strongest single fact — the rig stamps
-   *                 an end within a minute or two of the app — and the only
-   *                 one every order has.
+   *   start     40  Uber's time — the trip's START — against the order's
+   *                 own start: the moment the rig first saw the card
+   *                 (times.offered) or its Took, whichever agrees better,
+   *                 after the day's clock offset. The rig sees a card after
+   *                 the phone does and the Took comes later still, so the
+   *                 band is lopsided: full from START_EARLY_FULL before
+   *                 Uber's time to START_LATE_FULL after it, none from
+   *                 START_EARLY_ZERO before or START_LATE_ZERO after, and no
+   *                 candidate at all past START_GATE_EARLY / START_GATE_LATE.
+   *                 Measured: 0 to 9 minutes on six trips of one evening, 18
+   *                 on a batch the phone accepted before the rig's Took.
+   *   finish    15  Uber's finish (its time plus its own minutes, endMs)
+   *                 against the order's end — only where that end is a
+   *                 delivery's (DELIVERED), never an expiry's clock or the
+   *                 Took that replaced it. Uber's minutes are the trip's and
+   *                 the rig's end is the car leaving the door, so the rig
+   *                 ends later: measured 9 to 13 minutes on that evening,
+   *                 full from FINISH_EARLY_FULL before to FINISH_LATE_FULL
+   *                 after, none from FINISH_EARLY_ZERO / FINISH_LATE_ZERO.
    *   name      25  the pickup's name against the record's (its stores, the
    *                 card's pickup), by `similar`, from NAME_MIN up; a name
    *                 clearly another restaurant's (both known, under
@@ -553,40 +604,57 @@
    *   dropoff   15  the dropoff's street found in the record's dropoff as
    *                 filed, from WITHIN_MIN of its words; a different street
    *                 (both known, none of it found) costs DROP_PENALTY.
-   *   minutes   10  Uber's minutes against the record's Took-to-end, full at
-   *                 the same and none MINUTES_SPAN apart.
-   *   miles     10  Uber's miles against the odometer's, full at the same and
-   *                 none at the larger of 2 mi or 35% apart.
+   *   miles     10  Uber's miles against the odometer's, over a delivery,
+   *                 full at the same and none at the larger of 2 mi or 35%
+   *                 apart.
+   *   pay       10  what Uber paid against the card's pay, full within
+   *                 PAY_FULL and none from the larger of PAY_ZERO or
+   *                 PAY_ZERO_SHARE of the card; never a penalty (a tip cut
+   *                 or added is what the comparison is for, and must not
+   *                 keep an order from matching), and not while a tip is
+   *                 processing (the amount is not yet what it will be). On
+   *                 that evening seven of eight trips were within 25 cents.
+   *
+   * Uber's own minutes are not compared with the rig's Took-to-end on their
+   * own any more: the finish says the same thing against the right moment.
    *
    * An order of another app is no candidate (an Uber entry is never a
    * DoorDash order); an order whose app the rig did not read can be.
    *
-   * CHOSEN, NOT MEASURED: there is one real screenshot and it is not in the
-   * repository, so these weights are the reasoning above and the suites' own
-   * invented days (tests/earnings.test.js), not a fit. AUDITS.md says so. */
-  var W = { time: 40, name: 25, street: 10, dropoff: 15, minutes: 10, miles: 10 };
-  var TIME_FULL_MIN = 2;
-  var TIME_ZERO_MIN = 15;
-  var TIME_GATE_MIN = 20;
+   * TUNED ON INVENTED DAYS BUILT LIKE ONE REAL EVENING (tests/earnings.test.js):
+   * the owner's screenshots are not in the repository, and one evening is
+   * not a fit. AUDITS.md says so. */
+  var W = { start: 40, finish: 15, name: 25, street: 10, dropoff: 15, miles: 10, pay: 10 };
+  var START_EARLY_FULL = 2;
+  var START_LATE_FULL = 10;
+  var START_EARLY_ZERO = 8;
+  var START_LATE_ZERO = 25;
+  var START_GATE_EARLY = 10;
+  var START_GATE_LATE = 30;
+  var FINISH_EARLY_FULL = 3;
+  var FINISH_LATE_FULL = 15;
+  var FINISH_EARLY_ZERO = 10;
+  var FINISH_LATE_ZERO = 25;
   var NAME_MIN = 0.5;
   var NAME_OTHER = 0.3;
   var NAME_PENALTY = 15;
   var WITHIN_MIN = 0.5;
   var DROP_PENALTY = 10;
-  var MINUTES_SPAN = 12;
+  var PAY_FULL = 0.25;
+  var PAY_ZERO = 2;
+  var PAY_ZERO_SHARE = 0.15;
   // A match is taken alone when it scores ACCEPT or more AND beats the
   // runner-up — the next candidate for this entry, and the next entry for this
-  // order — by MARGIN. Time alone (40) can never be enough; time with a name,
-  // or with Uber's minutes and miles agreeing, can.
-  var ACCEPT = 55;
+  // order — by MARGIN. Neither clock alone can be enough, nor the two clocks
+  // together (55): one more thing must agree — a name, the miles, the pay.
+  var ACCEPT = 60;
   var MARGIN = 15;
   // The app's clock against the rig's, taken from the day's confident matches
-  // (CONFIDENT or more, at least OFFSET_MIN_N of them) as their median gap,
-  // and never more than OFFSET_MAX_MIN either way: a phone and a Pi both on
-  // network time, an end stamped when the car left the door against Uber's
-  // when the driver swiped. Uber's time is to the minute and the rig's to the
-  // millisecond, so up to a minute of it is that alone.
-  var CONFIDENT = 70;
+  // (CONFIDENT or more, at least OFFSET_MIN_N of them) as the median of how
+  // far each one's start fell OUTSIDE the full band (zero for one inside it),
+  // never more than OFFSET_MAX_MIN either way. The band is the rig's ordinary
+  // lag behind the phone and is not a clock fault; what is left over is.
+  var CONFIDENT = 75;
   var OFFSET_MIN_N = 2;
   var OFFSET_MAX_MIN = 10;
 
@@ -603,16 +671,46 @@
     return b;
   }
 
+  // Points on a lopsided band: full from -earlyFull to +lateFull minutes,
+  // falling to none at -earlyZero and +lateZero.
+  function band(d, earlyFull, lateFull, earlyZero, lateZero) {
+    if (d >= -earlyFull && d <= lateFull) return 1;
+    if (d < -earlyFull) return d <= -earlyZero ? 0 : (d + earlyZero) / (earlyZero - earlyFull);
+    return d >= lateZero ? 0 : (lateZero - d) / (lateZero - lateFull);
+  }
+
+  // How far a start gap (minutes, rig less Uber) lies outside the full band.
+  function outside(d) {
+    return d > START_LATE_FULL ? d - START_LATE_FULL : d < -START_EARLY_FULL ? d + START_EARLY_FULL : 0;
+  }
+
+  // The rig's start nearest the band, with its gap in minutes: {at, gap, by}.
+  function startOf(e, c, offsetMs) {
+    var s = startMs(e);
+    if (s === null) return null;
+    var best = null;
+    [['offered', c.offeredAt], ['took', c.tookAt]].forEach(function (x) {
+      if (x[1] === null || x[1] === undefined) return;
+      var gap = (x[1] - s - (offsetMs || 0)) / 60000;
+      var pts = band(gap, START_EARLY_FULL, START_LATE_FULL, START_EARLY_ZERO, START_LATE_ZERO);
+      if (!best || pts > best.pts || (pts === best.pts && Math.abs(gap) < Math.abs(best.gap))) {
+        best = { at: x[1], gap: gap, by: x[0], pts: pts };
+      }
+    });
+    return best;
+  }
+
   function score(e, c, offsetMs) {
-    if (!e || !c || c.endedAt === null || c.endedAt === undefined) return null;
+    if (!e || !c) return null;
     if (e.app && c.app && e.app !== c.app) return null;
-    var fin = finishMs(e);
-    if (fin === null) return null;
-    var dMin = Math.abs(fin + (offsetMs || 0) - c.endedAt) / 60000;
-    if (dMin > TIME_GATE_MIN) return null;
-    var p = {};
-    p.time = dMin <= TIME_FULL_MIN ? W.time : dMin >= TIME_ZERO_MIN ? 0
-      : W.time * (TIME_ZERO_MIN - dMin) / (TIME_ZERO_MIN - TIME_FULL_MIN);
+    var st = startOf(e, c, offsetMs);
+    if (!st || st.gap < -START_GATE_EARLY || st.gap > START_GATE_LATE) return null;
+    var p = { start: W.start * st.pts };
+    var fin = endMs(e);
+    if (fin !== null && c.delivered && c.endedAt !== null) {
+      var h = (c.endedAt - fin - (offsetMs || 0)) / 60000;
+      p.finish = W.finish * band(h, FINISH_EARLY_FULL, FINISH_LATE_FULL, FINISH_EARLY_ZERO, FINISH_LATE_ZERO);
+    }
     var name = e.pickup && e.pickup.name;
     if (name && c.names.length) {
       var s = bestOf(c.names, function (n) { return similar(name, n); });
@@ -626,8 +724,8 @@
       // The bracket's streets, split at "&" (a corner names two), each looked
       // for in the doors: a branch is the one whose door is on its corner.
       var streets = detail.split(/\s*(?:&|\band\b|\/)\s*/i).filter(function (x) { return words(x).length; });
-      var found = bestOf(streets, function (st) {
-        return bestOf(c.doors, function (dr) { return within(st, dr); });
+      var found = bestOf(streets, function (sx) {
+        return bestOf(c.doors, function (dr) { return within(sx, dr); });
       });
       if (found >= WITHIN_MIN) p.street = W.street * found;
     }
@@ -636,17 +734,19 @@
       var w = within(street, c.dropoff);
       p.dropoff = w >= WITHIN_MIN ? W.dropoff * w : w === 0 ? -DROP_PENALTY : 0;
     }
-    if (typeof e.minutes === 'number' && c.minutes !== null) {
-      var um = e.minutes + (e.seconds || 0) / 60;
-      p.minutes = W.minutes * Math.max(0, 1 - Math.abs(um - c.minutes) / MINUTES_SPAN);
-    }
-    if (typeof e.miles === 'number' && c.miles !== null) {
+    if (typeof e.miles === 'number' && c.miles !== null && c.miles !== undefined) {
       var span = Math.max(2, 0.35 * e.miles);
       p.miles = W.miles * Math.max(0, 1 - Math.abs(e.miles - c.miles) / span);
     }
+    if (typeof e.amount === 'number' && c.pay !== null && c.pay !== undefined && e.tip !== 'processing') {
+      var off = Math.abs(e.amount - c.pay);
+      var zero = Math.max(PAY_ZERO, PAY_ZERO_SHARE * c.pay);
+      p.pay = off <= PAY_FULL ? W.pay : W.pay * Math.max(0, 1 - (off - PAY_FULL) / (zero - PAY_FULL));
+    }
     var total = 0;
     Object.keys(p).forEach(function (k) { total += p[k]; p[k] = Math.round(p[k] * 10) / 10; });
-    return { total: Math.round(total * 10) / 10, parts: p, minutesOff: Math.round(dMin * 10) / 10 };
+    return { total: Math.round(total * 10) / 10, parts: p, startBy: st.by,
+             minutesOff: Math.round(st.gap * 10) / 10, gapMs: st.at - startMs(e) };
   }
 
   function candKey(c) { return c.offer + '@' + c.tookAt; }
@@ -655,13 +755,14 @@
   // them apart and to name the order back.
   var CANDIDATES_SHOWN = 3;
   function candOut(c, s) {
-    return { offer: c.offer, order: c.order, tookAt: c.tookAt, endedAt: c.endedAt, pay: c.pay,
-             pickup: c.names.length ? cut(c.names[0]) : null, source: c.source, score: s.total };
+    return { offer: c.offer, order: c.order, offeredAt: c.offeredAt, tookAt: c.tookAt, endedAt: c.endedAt,
+             pay: c.pay, pickup: c.names.length ? cut(c.names[0]) : null, source: c.source, score: s.total };
   }
 
   function matchOut(c, s, status, by, margin, offsetMs) {
-    return { status: status, by: by, offer: c.offer, order: c.order, tookAt: c.tookAt,
-             endedAt: c.endedAt, cardPay: c.pay, source: c.source, score: s ? s.total : null,
+    return { status: status, by: by, offer: c.offer, order: c.order, offeredAt: c.offeredAt,
+             tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: c.pay, source: c.source,
+             score: s ? s.total : null, startBy: s ? s.startBy : null,
              margin: margin === null || margin === undefined ? null : Math.round(margin * 10) / 10,
              offsetS: Math.round((offsetMs || 0) / 1000) };
   }
@@ -675,8 +776,8 @@
    *   {status: 'picked',  by: 'you',  ...}  the driver's pick
    *   {status: 'needs', candidates: [...]}  candidates, none clearly it: the
    *                                         top CANDIDATES_SHOWN for the page
-   *   {status: 'none'}                      no order of its app within
-   *                                         TIME_GATE_MIN: "no order on file"
+   *   {status: 'none'}                      no order of its app within the
+   *                                         start gate: "no order on file"
    *                                         (or the driver said none, `by`)
    *
    * One-to-one: an order is any one entry's at most, so two of a chain's
@@ -710,14 +811,14 @@
     }
 
     // First pass at no offset; the confident ones say what the clocks differ
-    // by; second pass at that offset.
+    // by beyond the rig's ordinary lag; second pass at that offset.
     var offsetMs = 0;
     var first = scored(0);
     var gaps = [];
     first.forEach(function (x) {
       var b = x.list[0], r = x.list[1];
       if (b && b.s.total >= CONFIDENT && (!r || b.s.total - r.s.total >= MARGIN)) {
-        gaps.push(b.c.endedAt - finishMs(x.e));
+        gaps.push(outside(b.s.gapMs / 60000) * 60000);
       }
     });
     if (gaps.length >= OFFSET_MIN_N) {
@@ -772,12 +873,17 @@
   return {
     parse: parse, parseUber: parseUber, parseDoorDash: parseDoorDash, detectApp: detectApp,
     PARSERS: PARSERS, dayOf: dayOf, clockOf: clockOf, yearFor: yearFor,
-    words: words, similar: similar, within: within, finishMs: finishMs, keyOf: keyOf,
-    sameEntry: sameEntry, mergeEntry: mergeEntry, tipStatus: tipStatus, fold: fold, paidOf: paidOf,
-    ordersFrom: ordersFrom, score: score, matchDay: matchDay,
-    W: W, TIME_FULL_MIN: TIME_FULL_MIN, TIME_ZERO_MIN: TIME_ZERO_MIN, TIME_GATE_MIN: TIME_GATE_MIN,
+    words: words, similar: similar, within: within, clockField: clockField, startMs: startMs, endMs: endMs,
+    keyOf: keyOf, sameEntry: sameEntry, mergeEntry: mergeEntry, tipStatus: tipStatus, fold: fold, paidOf: paidOf,
+    ordersFrom: ordersFrom, score: score, matchDay: matchDay, DELIVERED: DELIVERED,
+    W: W, START_EARLY_FULL: START_EARLY_FULL, START_LATE_FULL: START_LATE_FULL,
+    START_EARLY_ZERO: START_EARLY_ZERO, START_LATE_ZERO: START_LATE_ZERO,
+    START_GATE_EARLY: START_GATE_EARLY, START_GATE_LATE: START_GATE_LATE,
+    FINISH_EARLY_FULL: FINISH_EARLY_FULL, FINISH_LATE_FULL: FINISH_LATE_FULL,
+    FINISH_EARLY_ZERO: FINISH_EARLY_ZERO, FINISH_LATE_ZERO: FINISH_LATE_ZERO,
     NAME_MIN: NAME_MIN, NAME_OTHER: NAME_OTHER, NAME_PENALTY: NAME_PENALTY, WITHIN_MIN: WITHIN_MIN,
-    DROP_PENALTY: DROP_PENALTY, MINUTES_SPAN: MINUTES_SPAN, ACCEPT: ACCEPT, MARGIN: MARGIN,
+    DROP_PENALTY: DROP_PENALTY, PAY_FULL: PAY_FULL, PAY_ZERO: PAY_ZERO, PAY_ZERO_SHARE: PAY_ZERO_SHARE,
+    ACCEPT: ACCEPT, MARGIN: MARGIN,
     CONFIDENT: CONFIDENT, OFFSET_MIN_N: OFFSET_MIN_N, OFFSET_MAX_MIN: OFFSET_MAX_MIN,
     CANDIDATES_SHOWN: CANDIDATES_SHOWN, HISTORY_MAX: HISTORY_MAX, TEXT_MAX: TEXT_MAX,
     SAME_NAME: SAME_NAME, DAY_STARTS_AT: DAY_STARTS_AT, RECORD_MATCH_MS: RECORD_MATCH_MS

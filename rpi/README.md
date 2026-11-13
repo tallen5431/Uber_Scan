@@ -4348,7 +4348,7 @@ kept at once, `EARNINGS_SHOTS_MAX`). server.js keeps it as `<id>.shot` in
 with the `tesseract` command (`--psm 4 -l eng`, one OpenMP thread; `TESSERACT`
 names another binary) and `earnings.js`, keeps what it read as `<id>.ocr`, and
 for every trip on it writes or updates one `kind: "earning"` row: `key` (app,
-day, Uber's time, the pickup's name), `date`, `finishedAt`, `amount`, `tip` (a
+day, Uber's time, the pickup's name), `date`, `startedAt` (the right-hand time, the trip's start; `finishedAt` in rows written before 13 Nov), `amount`, `tip` (a
 figure, `"processing"`, or none) and `tipStatus`, `base`, `type`, Uber's
 `minutes`, `seconds` and `miles`, `pickup` {name, the bracket} and `dropoff`
 {street, town} (none with keepPlaces off), `history` (each change of amount or
@@ -4363,9 +4363,10 @@ the trips, whether tesseract is installed and the command that installs it,
 and how many screenshots are kept and waiting; `POST /api/earnings/pick`
 files the driver's pick, `/reread` reads what is waiting and matches the last
 60 days again, `/forget` deletes the pictures that have been read. How a trip
-is matched — its time against the order's end, the restaurant, a chain's
-corner against the pickup's door, the dropoff's street, Uber's minutes and
-miles against the rig's, the app's clock offset found from the day — is
+is matched — its start against the card's first sighting or Took, its finish (start plus Uber's minutes) against a delivery's end, the restaurant, a chain's
+corner against the pickup's door, the dropoff's street, Uber's miles against
+the odometer's, its pay against the card's, the app's clock offset found from
+the day — is
 written out at `score` and `matchDay` in `earnings.js`. Nothing the rig
 decides reads any of it.
 

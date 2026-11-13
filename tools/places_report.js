@@ -3248,7 +3248,7 @@ function blockChart(blocks) {
  * actually paid compared to the expected pay of the order"): strategy.js's
  * cardVsPaid over the trips read off the app's earnings screenshots and
  * matched to orders (server.js /api/earnings, earnings.js). By app, by
- * three-hour block of the trip's end and by restaurant, each with its n; a
+ * three-hour block of the trip's start and by restaurant, each with its n; a
  * group under its floor is thin (muted, italic, never the headline), and a
  * trip whose tip is still processing is left out of every figure and
  * counted. A server with no earnings, or none uploaded: one sentence. */
@@ -3266,7 +3266,7 @@ function paidSection(p) {
     + '. A group under ' + p.floor + ' orders is <b>thin</b>. Descriptive: nothing on the rig reads it.</p>'
     + (c.entries ? strategyTable(cols, [p.all], thin)
        + fold('s-paid-app', 'By app', strategyTable(cols, p.byApp, thin))
-       + fold('s-paid-block', 'By three-hour block (of the trip\'s end)', strategyTable(cols, p.byBlock, thin))
+       + fold('s-paid-block', 'By three-hour block (of the trip\'s start)', strategyTable(cols, p.byBlock, thin))
        + fold('s-paid-rest', 'By restaurant (as the app names it)', strategyTable(cols, p.byRestaurant, thin))
        : '<p class="note">No earnings screenshots have been uploaded yet.</p>');
 }

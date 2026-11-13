@@ -4407,9 +4407,12 @@ def _eserver(name, rows, env):
             'http://127.0.0.1:%d' % port, jpath)
 
 
-def _eorder(offer, ended, minutes, pay, miles, store, door=None, drop=None):
-    took = ended - int(minutes * 60000)
-    reading = {'id': offer, 'at': took - 60000, 'firstAt': took - 60000, 'pay': pay, 'minutes': 30.0,
+def _eorder(offer, offered, minutes, pay, miles, store, door=None, drop=None):
+    # Uber's time is the trip's start (earnings.js startMs): the card comes
+    # up on the rig at `offered`, the Took half a minute later.
+    took = offered + 30000
+    ended = took + int(minutes * 60000)
+    reading = {'id': offer, 'at': offered, 'firstAt': offered, 'pay': pay, 'minutes': 30.0,
                'miles': 8.0, 'perHour': round((pay - 2.4) / 0.5, 2), 'grossPerHour': round(pay / 0.5, 2),
                'cost': 2.4, 'costPerMile': 0.3, 'target': 25, 'band': 15, 'legs': 2, 'whole': True,
                'app': 'uber', 'state': 'go', 'pickup': store}
@@ -4417,13 +4420,14 @@ def _eorder(offer, ended, minutes, pay, miles, store, door=None, drop=None):
     rec = {'v': 1, 'kind': 'order', 'id': '%s@%d' % (offer, took), 'offer': offer, 'app': 'uber',
            'places': True, 'at': ended + 1500, 'seq': ended + 1500, 'how': 'gps',
            'card': {'pay': pay, 'minutes': 30, 'miles': 8, 'pickup': store},
-           'times': {'took': took, 'ended': ended}, 'pickups': [{'name': store, 'door': door, 'visited': True}],
+           'times': {'offered': offered, 'took': took, 'ended': ended},
+           'pickups': [{'name': store, 'door': door, 'visited': True}],
            'dropoff': {'text': drop} if drop else {}, 'drive': {'miles': miles},
            'money': {'pay': pay, 'minutes': minutes, 'miles': miles, 'delivery': True}}
     return [reading, mark, rec]
 
 
-_erows = (_eorder('e-pizza', _ems(17, 40, 30), 39.6, 6.5, 12.1, 'Pretend Pizza',
+_erows = (_eorder('e-pizza', _ems(17, 41), 47.0, 6.5, 12.1, 'Pretend Pizza',
                   '10 Placeholder Rd, Faketown', '12 Placeholder Ct, Faketown')
           + _eorder('e-burg1', _ems(16, 48), 40.0, 7.0, 9.0, 'Make-Believe Burgers')
           + _eorder('e-burg2', _ems(16, 52), 41.0, 8.0, 9.5, 'Make-Believe Burgers'))
