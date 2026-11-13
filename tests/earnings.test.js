@@ -246,6 +246,19 @@ eq('[match] the evidence day with keepPlaces off: the clean deliveries matched, 
    [['needs', null], ['matched', 'ev2'], ['matched', 'ev3'], ['matched', 'ev4'], ['matched', 'ev5'], ['needs', null],
     ['none', null]]);
 
+// THE BATCH, as Uber may print it the other way: one entry naming the SECOND
+// store (Pretend Pizza) and the door the rig did not file. Still the order:
+// any of its pickups is its name, and a batch's other door costs nothing.
+var batchOther = keyed([Object.assign({}, evEntries[0], {
+  pickup: { name: 'Pretend Pizza', detail: 'Faketown' }, dropoff: { street: 'Storybook Way', town: 'Faketown' } })]);
+var bo = E.matchDay(batchOther, evO)[batchOther[0].key];
+var boP = E.score(batchOther[0], evO[0], 0).parts;
+eq('[match] a batch: one Uber entry naming its other store and its other door is still that order',
+   [bo.status, bo.offer, boP.name, boP.dropoff], ['matched', 'ev1', E.W.name, 0]);
+eq('[match] ...the order is said to be a batch (two pickups), and a single order\'s other street still costs it',
+   [evO[0].batch, evO[1].batch, E.score(Object.assign({}, evEntries[1], { dropoff: { street: 'Storybook Ln' } }),
+                                        evO[1], 0).parts.dropoff], [true, false, -E.DROP_PENALTY]);
+
 // The trip the driver canceled on the phone at 5:30 PM ("$0.00 · Delivery ·
 // You canceled", with its map and places): the rig had its card on the panel
 // at 5:31 and the Took taken back at 5:34. Two minutes later the next card

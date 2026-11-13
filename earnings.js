@@ -629,13 +629,25 @@
       (Array.isArray(card.stores) ? card.stores : []).forEach(function (s) { if (s) names.push(s); });
       if (card.pickup) { names.push(card.pickup); doors.push(card.pickup); }
       var delivered = !!DELIVERED[r.how] && ended !== null;
-      out.push({ offer: r.offer, order: typeof r.id === 'string' ? r.id : null, app: r.app || null,
+      // A BATCH: two pickups or two dropoffs on one order (the 12 Nov
+      // evening had one, two stores and two doors, and Uber printed it as
+      // ONE trip naming one store and one street). Its every pickup is
+      // already among `names` and `doors`; its dropoff as filed is only one
+      // of its doors, so Uber's street not being that one says nothing.
+      var stops = (Array.isArray(r.pickups) ? r.pickups.length : 0);
+      var batch = stops >= 2 || (num(card.dropoffs) || 0) >= 2 || (num(card.dropoffOrders) || 0) >= 2
+        || (Array.isArray(card.stores) && card.stores.length >= 2)
+        || !!(r.links && Array.isArray(r.links.batch) && r.links.batch.length);
+      out.push({ offer: r.offer, order: typeof r.id === 'string' ? r.id : null, app: r.app || null, batch: batch,
                  offeredAt: num(t.offered), tookAt: took, endedAt: ended, delivered: delivered,
                  pay: num(card.pay), cardMinutes: num(card.minutes) !== null ? card.minutes : num(card.billedMinutes),
                  cardMiles: num(card.miles),
                  minutes: delivered && took !== null && ended >= took ? (ended - took) / 60000 : null,
                  miles: delivered ? num(r.drive && r.drive.miles) : null, names: names, doors: doors,
                  dropoff: (r.dropoff && r.dropoff.text) || card.dropoff || null,
+                 dropoffs: [r.dropoff && r.dropoff.text, card.dropoff].filter(function (x) {
+                   return typeof x === 'string' && x;
+                 }),
                  how: r.how || null, source: 'record' });
     });
     (runs || []).forEach(function (u) {
@@ -650,7 +662,7 @@
                  cardMinutes: num(u.minutes), cardMiles: num(u.miles),
                  minutes: delivered && u.endedAt >= u.tookAt ? (u.endedAt - u.tookAt) / 60000 : null,
                  miles: null, names: u.pickup ? [u.pickup] : [], doors: u.pickup ? [u.pickup] : [],
-                 dropoff: u.dropoff || null, how: u.by || null, source: 'rebuilt' });
+                 dropoff: u.dropoff || null, batch: false, how: u.by || null, source: 'rebuilt' });
     });
     return out;
   }
@@ -817,8 +829,11 @@
     }
     var street = e.dropoff && e.dropoff.street;
     if (street && c.dropoff) {
-      var w = within(street, c.dropoff);
-      p.dropoff = w >= WITHIN_MIN ? W.dropoff * w : w === 0 ? -DROP_PENALTY : 0;
+      // Any of its doors on file; a batch's other door is not on file, so
+      // a street none of them names costs a batch nothing.
+      var drops = c.dropoffs && c.dropoffs.length ? c.dropoffs : [c.dropoff];
+      var w = bestOf(drops, function (dx) { return within(street, dx); });
+      p.dropoff = w >= WITHIN_MIN ? W.dropoff * w : w === 0 && !c.batch ? -DROP_PENALTY : 0;
     }
     if (typeof e.miles === 'number' && c.miles !== null && c.miles !== undefined) {
       var span = Math.max(2, 0.35 * e.miles);
