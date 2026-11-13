@@ -1434,6 +1434,27 @@ with open(_cj, 'w') as fh:
 _cb = {o['id']: o for o in SR.report(_cj, None, '2026-03-06')['orders']}
 eq('[uber timed] a trip canceled on the phone times nothing', (_cb['R2'].get('timedBy'), _cb['R2']['reliable']),
    (None, False))
+# An offer the rig showed at 21:00 and was never told was taken ("Took
+# $9.27?"), whose trip Uber's earnings screen paid for: matched to the offer
+# row (earnings.js, source 'offer'), it is an order here, placed by its card,
+# said to be the phone's, and timed by Uber.
+_phj = os.path.join(work, 'phone.jsonl')
+_phe = _timed(earning('ph', 'P9', None, 9.5, 6.0, _R(22, 0), card=9.27), 24, 10, 6.4)
+_phe['match'].update(source='offer', said='accepted on the phone, no Took')
+with open(_phj, 'w') as fh:
+    fh.write(''.join(json.dumps(r) + '\n' for r in _rrows + [offer('P9', _R(21, 0), 9.27, 25, 6.0), _phe]))
+_phrep = SR.report(_phj, None, '2026-03-06')
+_ph = [o for o in _phrep['orders'] if o['id'] == 'P9']
+eq('[phone] an offer accepted on the phone with no Took is an order of the day, said so, paid and timed by Uber',
+   [(o['how'], o['source'], o['took'], (o.get('paid') or {}).get('amount'), o.get('actualMinutes'), o.get('timedBy'))
+    for o in _ph], [('accepted on the phone', 'earnings', None, 9.5, 24.17, 'uber')])
+_phcsv = os.path.join(work, 'phone.csv')
+run(['--journal', _phj, '--day', '2026-03-06', '--csv', _phcsv])
+with open(_phcsv, encoding='utf-8') as fh:
+    _phr = [r for r in csv.DictReader(fh) if r['offered'].endswith('21:00:00')]
+eq('[phone] ...in the records CSV: its card, no Took, the source the earnings screen',
+   [(r['how_ended'], r['took'], r['card_pay'], r['source'], r['paid_total'], r['timed_by']) for r in _phr],
+   [('accepted on the phone', '', '9.27', 'earnings', '9.50', 'uber')])
 _ptext = SR.text(SR.report(_pj, None, '2026-03-06'))
 _pjson = json.dumps(SR.as_json(SR.report(_pj, None, '2026-03-06')))
 eq('[paid] the text and the JSON name no figure or place of it: the CSV is where it goes',

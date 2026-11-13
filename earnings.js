@@ -615,7 +615,7 @@
 
   function num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
 
-  function ordersFrom(records, runs) {
+  function ordersFrom(records, runs, offers) {
     var out = [];
     (records || []).forEach(function (r) {
       if (!r || r.kind !== 'order' || typeof r.offer !== 'string') return;
@@ -663,6 +663,29 @@
                  minutes: delivered && u.endedAt >= u.tookAt ? (u.endedAt - u.tookAt) / 60000 : null,
                  miles: null, names: u.pickup ? [u.pickup] : [], doors: u.pickup ? [u.pickup] : [],
                  dropoff: u.dropoff || null, batch: false, how: u.by || null, source: 'rebuilt' });
+    });
+    // OFFERS NEVER CONFIRMED. A card the rig showed and was never told was
+    // taken — the panel left on "Took $9.27?", the phone accepted it — has no
+    // order record and no run; Uber's screen is the only word that it was
+    // taken. Each offer row (the server's latestPerOffer) no record or run
+    // covers is a candidate, `source: 'offer'`, timed by its first sighting
+    // alone. Not one the driver passed (`accepted: false`) or hid. SILENCE IS
+    // STILL NOT AN ACCEPT (AUDITS.md, Settled): nothing here marks the offer
+    // taken or puts it in the car; the match is a record that Uber paid for
+    // it, said as "accepted on the phone, no Took".
+    var covered = {};
+    out.forEach(function (c) { covered[c.offer] = true; });
+    (offers || []).forEach(function (o) {
+      if (!o || typeof o.id !== 'string' || covered[o.id] || o.accepted === false || o.hidden === true) return;
+      if (o.kind !== undefined && o.kind !== null) return;
+      var seen = num(o.firstAt) !== null ? o.firstAt : num(o.at);
+      if (seen === null) return;
+      covered[o.id] = true;
+      var pickup = typeof o.pickup === 'string' && o.pickup ? o.pickup : null;
+      out.push({ offer: o.id, order: null, app: o.app || null, offeredAt: seen, tookAt: null, endedAt: null,
+                 delivered: false, batch: false, pay: num(o.pay), cardMinutes: num(o.minutes), cardMiles: num(o.miles),
+                 minutes: null, miles: null, names: pickup ? [pickup] : [], doors: pickup ? [pickup] : [],
+                 dropoff: typeof o.dropoff === 'string' && o.dropoff ? o.dropoff : null, how: null, source: 'offer' });
     });
     return out;
   }
@@ -743,6 +766,9 @@
   // together (55): one more thing must agree — a name, the miles, the pay.
   var ACCEPT = 60;
   var MARGIN = 15;
+  // An offer never confirmed needs this much besides its clock to be a
+  // candidate at all (matchDay).
+  var OFFER_MORE = 10;
   // The app's clock against the rig's, taken from the day's confident matches
   // (CONFIDENT or more, at least OFFSET_MIN_N of them) as the median of how
   // far each one's start fell OUTSIDE the full band (zero for one inside it),
@@ -850,7 +876,7 @@
              minutesOff: Math.round(st.gap * 10) / 10, gapMs: st.at - startMs(e) };
   }
 
-  function candKey(c) { return c.offer + '@' + c.tookAt; }
+  function candKey(c) { return c.offer + '@' + (typeof c.tookAt === 'number' ? c.tookAt : ''); }
 
   // What the page is shown of a candidate for a one-tap pick: enough to tell
   // them apart and to name the order back.
@@ -860,9 +886,12 @@
              pay: c.pay, pickup: c.names.length ? cut(c.names[0]) : null, source: c.source, score: s.total };
   }
 
+  // What a match to an offer never confirmed says it was (`said`).
+  var SAID_PHONE = 'accepted on the phone, no Took';
   function matchOut(c, s, status, by, margin, offsetMs) {
     return { status: status, by: by, offer: c.offer, order: c.order, offeredAt: c.offeredAt,
              tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: c.pay, source: c.source,
+             said: c.source === 'offer' ? SAID_PHONE : null,
              score: s ? s.total : null, startBy: s ? s.startBy : null,
              margin: margin === null || margin === undefined ? null : Math.round(margin * 10) / 10,
              offsetS: Math.round((offsetMs || 0) / 1000) };
@@ -892,7 +921,7 @@
       var m = e.match;
       if (m && m.by === 'you') {
         res[e.key] = m;
-        if (m.status === 'picked' && m.offer) taken[m.offer + '@' + m.tookAt] = true;
+        if (m.status === 'picked' && m.offer) taken[candKey(m)] = true;
       } else {
         free.push(e);
       }
@@ -904,6 +933,10 @@
         var list = [];
         cands.forEach(function (c) {
           var s = score(e, c, offsetMs);
+          // An offer never confirmed is one of many cards seen around any
+          // trip's start: a candidate only with OFFER_MORE points of
+          // something besides its clock (its name, its door, its pay).
+          if (s && c.source === 'offer' && s.total - (s.parts.start || 0) < OFFER_MORE) s = null;
           if (s) list.push({ c: c, s: s });
         });
         list.sort(function (a, b) { return b.s.total - a.s.total; });
@@ -1018,7 +1051,7 @@
     FINISH_EARLY_ZERO: FINISH_EARLY_ZERO, FINISH_LATE_ZERO: FINISH_LATE_ZERO,
     NAME_MIN: NAME_MIN, NAME_OTHER: NAME_OTHER, NAME_PENALTY: NAME_PENALTY, WITHIN_MIN: WITHIN_MIN,
     DROP_PENALTY: DROP_PENALTY, PAY_FULL: PAY_FULL, PAY_ZERO: PAY_ZERO, PAY_ZERO_SHARE: PAY_ZERO_SHARE,
-    ACCEPT: ACCEPT, MARGIN: MARGIN,
+    ACCEPT: ACCEPT, MARGIN: MARGIN, OFFER_MORE: OFFER_MORE, SAID_PHONE: SAID_PHONE,
     CONFIDENT: CONFIDENT, OFFSET_MIN_N: OFFSET_MIN_N, OFFSET_MAX_MIN: OFFSET_MAX_MIN,
     CANDIDATES_SHOWN: CANDIDATES_SHOWN, HISTORY_MAX: HISTORY_MAX, TEXT_MAX: TEXT_MAX,
     SAME_NAME: SAME_NAME, DAY_STARTS_AT: DAY_STARTS_AT, RECORD_MATCH_MS: RECORD_MATCH_MS

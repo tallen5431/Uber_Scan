@@ -394,6 +394,46 @@ eq('[match] a row an earlier build wrote (`finishedAt`) is read as the same star
 eq('[match] Uber\'s finish is its start plus its own minutes and seconds',
    (E.endMs(trip({ minutes: 44, seconds: 50 })) - E.startMs(trip())) / 1000, 44 * 60 + 50);
 
+/* [phone] an offer the rig showed and never Took'd ---------------------------- */
+// The evidence day's 4:18 PM trip, "$9.50 ($6.00 Tip, $1.25 Surge)": the rig
+// had shown its card at 4:20 as "Took $9.27?" and never heard it was taken.
+// Around it, the cards of the evening as offer rows: each order's own (taken,
+// so covered by its record), one the driver passed, and an unrelated card at
+// 4:42 two minutes after the trip the rig never saw.
+function offerRow(id, h, m, pay, pickup, extra) {
+  return Object.assign({ id: id, at: t12(h, m) + 5000, firstAt: t12(h, m), app: 'uber', pay: pay, minutes: 25,
+                         miles: 6, pickup: pickup }, extra || {});
+}
+var evOffers = [
+  offerRow('ev2', 17, 35, 27.83, 'Imaginary Bistro'), offerRow('ev3', 18, 23, 12.64, 'Nowhere Noodles'),
+  offerRow('ph1', 16, 20, 9.27, 'Fabled Falafel', { dropoff: '5 Storybook Ln, Faketown' }),
+  offerRow('px1', 16, 17, 10.0, 'Fabled Falafel', { accepted: false }),
+  offerRow('ox1', 16, 42, 22.40, 'Imaginary Bistro')
+];
+var phoneE = ev({ startedAt: '16:18', minutes: 24, seconds: 10, miles: 6.4, amount: 9.5, tip: 6.0,
+                  extras: { surge: 1.25 }, pickup: { name: 'Fabled Falafel', detail: 'Faketown' },
+                  dropoff: { street: 'Storybook Ln', town: 'Faketown' } });
+var phDay = keyed(evEntries.concat([phoneE]));
+var phO = E.ordersFrom(evOrders, [], evOffers);
+var phM = E.matchDay(phDay, phO);
+var phK = phDay[phDay.length - 1].key;
+eq('[phone] the unconfirmed offer ("Took $9.27?") is the trip\'s: matched to its offer row, said accepted on the phone',
+   [phM[phK].status, phM[phK].offer, phM[phK].source, phM[phK].tookAt, phM[phK].said, phM[phK].cardPay],
+   ['matched', 'ph1', 'offer', null, 'accepted on the phone, no Took', 9.27]);
+eq('[phone] ...an offer an order record covers is no second candidate, nor one the driver passed',
+   phO.filter(function (c) { return c.source === 'offer'; }).map(function (c) { return c.offer; }).sort(), ['ox1', 'ph1']);
+eq('[phone] ...the six on file still their own, and the trip the rig never saw still "no order on file" '
+   + 'beside an unrelated card two minutes after it',
+   phDay.slice(0, 7).map(function (e) { return phM[e.key].offer || phM[e.key].status; }),
+   ['ev1', 'ev2', 'ev3', 'ev4', 'ev5', 'ev6', 'none']);
+var bareOffer = E.ordersFrom([], [], [offerRow('ob1', 16, 20, 4.0, null)]);
+var bareE = keyed([Object.assign({}, phoneE, { pickup: null, dropoff: null })]);
+eq('[phone] a card whose only likeness is its clock is no candidate at all (' + E.OFFER_MORE + ' points besides it)',
+   E.matchDay(bareE, bareOffer)[bareE[0].key].status, 'none');
+var canPh = keyed([Object.assign({}, cancelE, { startedAt: '16:18', pickup: { name: 'Fabled Falafel' }, dropoff: null })]);
+eq('[phone] a canceled trip can be an offer never confirmed (the phone accepted it, then canceled)',
+   (E.matchDay(canPh, phO)[canPh[0].key] || {}).offer, 'ph1');
+
 /* [timed] an untimed order timed by Uber ------------------------------------- */
 // The evidence day's expired order (ev6) and the one with no Took (ev5), with
 // their trips' matches as the server keeps them: Uber's minutes and miles.

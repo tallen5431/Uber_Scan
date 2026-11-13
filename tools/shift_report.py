@@ -1832,6 +1832,32 @@ def report(journal, gps_dir, day, read=None):
     # What the app paid, where an earnings screenshot was matched to the
     # order (earnings, paid_for): for the records CSV's paid columns only.
     earned = earnings(rows)
+    # ...and an offer the rig showed and never Took'd whose trip Uber's
+    # earnings screen paid for (earnings.js: "accepted on the phone, no
+    # Took"): an order here, placed by its card's first reading, said so.
+    # Nothing in the journal marks it taken; this is the earnings row's word.
+    have = set(o['id'] for o in every)
+    readings = collections.defaultdict(list)
+    for r in rows:
+        if r.get('kind') is None and isinstance(r.get('id'), str):
+            readings[r['id']].append(r)
+    for e in earned:
+        m = e.get('match') if isinstance(e.get('match'), dict) else {}
+        oid = m.get('offer')
+        if m.get('status') not in ('matched', 'picked') or m.get('source') != 'offer' \
+                or not isinstance(oid, str) or oid in have:
+            continue
+        at = first.get(oid)
+        if at is None or not start <= at < end:
+            continue
+        have.add(oid)
+        o = _order(oid, None, readings.get(oid, []), [], [])
+        o['how'] = 'accepted on the phone'
+        o['source'] = 'earnings'
+        o['alongside'] = '?'
+        o['notes'] = ["accepted on the phone, no Took: known from Uber's earnings screen; "
+                      "the rig was never told, so nothing on the rig timed it"]
+        mine.append(o)
     for o in mine:
         o['paid'] = paid_for(earned, o['id'], o['took'])
     # Before anything is measured off `reliable` (a door's minutes, the $/hr),

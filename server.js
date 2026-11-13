@@ -15915,7 +15915,9 @@ function earningsOrders(rows, days) {
                                   offeredAt: typeof o.firstAt === 'number' ? o.firstAt
                                     : typeof o.at === 'number' ? o.at : null });
   });
-  return Earnings.ordersFrom(orderRecords(rows, lo), runs).filter(function (c) {
+  // ...and every offer the rig showed in the window, for a trip the phone
+  // accepted with no Took (earnings.js keeps those no record or run covers).
+  return Earnings.ordersFrom(orderRecords(rows, lo), runs, offers).filter(function (c) {
     var t = c.tookAt !== null ? c.tookAt : c.offeredAt !== null ? c.offeredAt : c.endedAt;
     return t !== null && t >= lo && t <= hi;
   });
@@ -15934,7 +15936,7 @@ function earningRow(e, at) {
   var m = e.match || { status: 'none', by: 'auto' };
   var match = { status: m.status, by: m.by, offer: m.offer, order: m.order, offeredAt: m.offeredAt,
                 tookAt: m.tookAt, endedAt: m.endedAt, how: m.how, cardPay: m.cardPay, source: m.source,
-                score: m.score, startBy: m.startBy, margin: m.margin, offsetS: m.offsetS, pickedAt: m.pickedAt };
+                score: m.score, startBy: m.startBy, said: m.said, margin: m.margin, offsetS: m.offsetS, pickedAt: m.pickedAt };
   if (m.status === 'needs') {
     match.candidates = (m.candidates || []).slice(0, Earnings.CANDIDATES_SHOWN).map(function (c) {
       return { offer: c.offer, order: c.order, offeredAt: c.offeredAt, tookAt: c.tookAt, endedAt: c.endedAt, pay: c.pay,
@@ -16206,16 +16208,18 @@ function earningsRoute(req, res) {
             match = { status: 'none', by: 'you', pickedAt: now };
           } else if (body.auto === true) {
             match = null;
-          } else if (typeof body.offer === 'string' && typeof body.tookAt === 'number') {
+          } else if (typeof body.offer === 'string' && (typeof body.tookAt === 'number' || body.tookAt === null)) {
             // Only an order of that day, of that app or an unread one: the
             // page offers the candidates, and a pick is one of the day's
-            // orders or nothing.
+            // orders or nothing. A Took of null is an order or offer the rig
+            // never Took'd.
             var c = earningsOrders(rows, [e.date]).filter(function (o) {
               return o.offer === body.offer && o.tookAt === body.tookAt && (!o.app || o.app === e.app);
             })[0];
             if (!c) return reply(400, { ok: false, error: 'no such order on that day' });
             match = { status: 'picked', by: 'you', offer: c.offer, order: c.order, offeredAt: c.offeredAt,
                       tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: c.pay, source: c.source,
+                      said: c.source === 'offer' ? Earnings.SAID_PHONE : null,
                       pickedAt: now };
           } else {
             return reply(400, { ok: false, error: 'pick an order, none or auto' });

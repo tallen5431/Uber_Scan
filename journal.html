@@ -3012,7 +3012,31 @@
     }
     if (how === 'replaced') return 'replaced';
     if (how === 'expiry') return 'expired';
+    if (how === 'phone') return 'accepted on the phone';
     return 'drop by ' + String(how).slice(0, 16);
+  }
+
+  // An offer the rig showed and never Took'd that Uber's earnings screen
+  // says was taken ("accepted on the phone, no Took", earnings.js): a
+  // record of it for the list and the CSV, made here from the trip's match
+  // and marked so. Nothing is written for it; the journal holds no order.
+  function phoneRecords(recs) {
+    var have = {};
+    recs.forEach(function (r) { have[r.offer] = true; });
+    return earningsList.filter(function (e) {
+      var m = e.match || {};
+      return (m.status === 'matched' || m.status === 'picked') && m.source === 'offer'
+        && typeof m.offer === 'string' && !have[m.offer];
+    }).map(function (e) {
+      var m = e.match;
+      return { kind: 'order', offer: m.offer, app: e.app || null, how: 'phone', fromEarnings: true,
+               times: { offered: typeof m.offeredAt === 'number' ? m.offeredAt : null, took: null, ended: null },
+               card: { pay: typeof m.cardPay === 'number' ? m.cardPay : null,
+                       minutes: typeof m.cardMinutes === 'number' ? m.cardMinutes : null,
+                       miles: typeof m.cardMiles === 'number' ? m.cardMiles : null },
+               money: {}, drive: {}, dropoff: {}, pickups: [],
+               flags: ['accepted on the phone, no Took: known from Uber\'s earnings screen, the rig never told'] };
+    });
   }
 
   // Each pickup's name, and its door (else the card's pickup as printed),
@@ -3184,7 +3208,7 @@
             pl.pickupName, pl.pickup, pl.dropoff,
             Array.isArray(rec['with']) && rec['with'].length ? 'yes' : 'no',
             // No day's judgement here (too soon, never driven): the report's.
-            '', 'record', notes.join('; ')].concat(paidCells(rec)).concat([timedBy]);
+            '', rec.fromEarnings ? 'earnings' : 'record', notes.join('; ')].concat(paidCells(rec)).concat([timedBy]);
   }
 
   function recordsCsv(records) {
@@ -3196,6 +3220,10 @@
   function showRecords(records) {
     var recs = (records || []).filter(function (r) {
       return r && r.kind === 'order' && typeof r.offer === 'string';
+    });
+    recs = recs.concat(phoneRecords(recs)).sort(function (a, b) {
+      var ta = a.times && (a.times.took || a.times.offered) || 0, tb = b.times && (b.times.took || b.times.offered) || 0;
+      return ta - tb;
     });
     recordsBy = {};
     recs.forEach(function (r) { (recordsBy[r.offer] = recordsBy[r.offer] || []).push(r); });
@@ -3416,12 +3444,16 @@
     var needs = earningsList.filter(function (e) { return (e.match || {}).status === 'needs'; });
     el.earningsNeeds.innerHTML = needs.map(function (e) {
       var cands = ((e.match || {}).candidates || []).map(function (c) {
-        var what = 'Took ' + (typeof c.tookAt === 'number' ? clock12(new Date(c.tookAt)) : '?')
+        // An order or offer the rig never Took'd is told by its card's
+        // first sighting ("Offered 5:33 PM, no Took").
+        var what = (typeof c.tookAt === 'number' ? 'Took ' + clock12(new Date(c.tookAt))
+                    : 'Offered ' + (typeof c.offeredAt === 'number' ? clock12(new Date(c.offeredAt)) : '?')
+                      + ', no Took')
           + (typeof c.endedAt === 'number' ? ', ended ' + clock12(new Date(c.endedAt)) : '')
           + (typeof c.pay === 'number' ? ', card ' + money(c.pay, 2) : '')
           + (c.pickup ? ' · ' + c.pickup : '');
         return '<button type="button" data-key="' + esc(e.key) + '" data-offer="' + esc(c.offer)
-          + '" data-took="' + esc(c.tookAt) + '">' + esc(what) + '</button>';
+          + '" data-took="' + esc(typeof c.tookAt === 'number' ? c.tookAt : '') + '">' + esc(what) + '</button>';
       });
       cands.push('<button type="button" data-key="' + esc(e.key) + '" data-none="1">None of these</button>');
       return '<div class="entry needs">' + entryLine(e)
@@ -3526,7 +3558,11 @@
     if (!b) return;
     var body = { key: b.getAttribute('data-key') };
     if (b.getAttribute('data-none')) body.none = true;
-    else { body.offer = b.getAttribute('data-offer'); body.tookAt = Number(b.getAttribute('data-took')); }
+    else {
+      body.offer = b.getAttribute('data-offer');
+      var took = b.getAttribute('data-took');
+      body.tookAt = took ? Number(took) : null;
+    }
     b.disabled = true;
     postEarnings('/api/earnings/pick', body).then(function (ans) {
       earningsSaid = ans && ans.ok ? '' : 'Could not file that: ' + ((ans && ans.error) || 'no answer') + '.';
