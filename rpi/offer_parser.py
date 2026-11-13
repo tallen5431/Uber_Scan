@@ -341,11 +341,34 @@ PAY_PART = re.compile(
 # and a name that begins "From F…" right under the distance is the one shape
 # this still refuses.
 NOT_THE_CHARGER = r'(?!\s*from\s+f)'
+
+# A whole hour, printed with no minutes: Uber's `1 hr (21.1 mi) total`.
+#
+# LEG wanted a minutes token after every hour unit, so a card that takes
+# exactly an hour had no leg at all: a payout, a distance no leg claimed, and
+# no journey. Every frame of such a card reads that way, so no other frame
+# supplies it and the card never reaches the journal. The rig's 400 kept
+# unread pictures (20 Oct-12 Nov) hold five such cards, each read cleanly —
+# `© 1hr (21.1 mi) total` and the like, every one an Uber Eats or Shop &
+# Deliver card the picture shows as `1 hr (… mi) total` — and four more whose
+# hour did not read (`Lhr (`, `1Lhr(`), which stay refused like any hour that
+# is no number.
+#
+# Narrow on purpose: the unit spelled `hr` or `hrs` with the bracket opening
+# straight after it, and find_legs keeps such a leg only with an hour that has
+# a real digit and is a number, and with the distance read inside the bracket.
+# A bare "1 hr" anywhere else is not a leg. An empty match by itself: the
+# hours group and the distance around it are what LEG captures.
+HOUR_ONLY = r'(?:(?<=hr)|(?<=hrs))(?=\s*\()'
+
 LEG = re.compile(
     r'(?:(' + DC + r'{1,3}(?:[.,]' + DC + r'{1,2})?)\s*m(?:i|ile|iles)\b'
     r'\s*[^\s\w()]{1,3}\s*)?'
     r'(?:(' + DC + r'{1,2})\s*h(?:r|rs|our|ours)?\s*)?'
-    r'(' + DC + r'{1,3})\s*m[il1|]n(?:s|ute|utes)?\b'
+    # ...or no minutes at all, where the card printed a whole hour: "1 hr
+    # (21.1 mi) total". See HOUR_ONLY: the minutes group is then empty, and
+    # find_legs takes such a leg only with a number of hours and the distance.
+    r'(?:(' + DC + r'{1,3})\s*m[il1|]n(?:s|ute|utes)?\b|' + HOUR_ONLY + r')'
     # ...and the trailing distance is not a badge's: "20 min trip 4 mi from
     # fast charger" with the trip's bracket lost. LONE_MILES has refused the
     # badge since it was written; this window did not. See NOT_THE_CHARGER.
@@ -1305,12 +1328,20 @@ def payout_figures(text):
 def find_legs(text):
     legs = []
     for m in LEG.finditer(text):
-        mins = to_number(m.group(3))
-        if mins is None:
-            continue
-        if not HAS_DIGIT.search(m.group(3)) \
-                and not hour_vouches_for_minutes(m.group(2), mins):
-            continue
+        # A whole hour with no minutes printed (HOUR_ONLY): kept only with its
+        # hours and the distance in its bracket. The hour's own digit and
+        # number are asked just below, as they are of every leg.
+        if m.group(3) is None:
+            if m.group(2) is None or m.group(4) is None:
+                continue
+            mins = 0
+        else:
+            mins = to_number(m.group(3))
+            if mins is None:
+                continue
+            if not HAS_DIGIT.search(m.group(3)) \
+                    and not hour_vouches_for_minutes(m.group(2), mins):
+                continue
         # An hour unit whose number has no real digit — "l hr" — is a leg
         # that did not read, not a leg with no hours; matched, it dropped
         # sixty minutes and called a ten-minute job whole.

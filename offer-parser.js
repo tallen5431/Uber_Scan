@@ -718,11 +718,19 @@
      6,657 frames and stored texts or the corpus: 476 readings, every one
      `from f...`, never a capital F. See NOT_THE_CHARGER in offer_parser.py. */
   var NOT_THE_CHARGER = '(?!\\s*from\\s+f)';
+  /* A whole hour, printed with no minutes: Uber's `1 hr (21.1 mi) total`. LEG
+     wanted minutes after every hour unit, so a card taking exactly an hour had
+     no leg at all, on every frame, and never reached the journal: five such
+     cards among the rig's 400 kept unread pictures (20 Oct-12 Nov). Only the
+     unit `hr`/`hrs` with the bracket straight after it, and findLegs keeps
+     the leg only with a real-digit hour that is a number and the distance in
+     the bracket. See HOUR_ONLY in offer_parser.py. */
+  var HOUR_ONLY = '(?:(?<=hr)|(?<=hrs))(?=\\s*\\()';
   var LEG = new RegExp(
     '(?:(' + DC + '{1,3}(?:[.,]' + DC + '{1,2})?)\\s*m(?:i|ile|iles)\\b' +
     '\\s*[^\\s\\w()]{1,3}\\s*)?' +                 // distance, then the card's bullet
     '(?:(' + DC + '{1,2})\\s*h(?:r|rs|our|ours)?\\s*)?' +   // optional hours, lookalikes too
-    '(' + DC + '{1,3})\\s*m[il1|]n(?:s|ute|utes)?\\b' +
+    '(?:(' + DC + '{1,3})\\s*m[il1|]n(?:s|ute|utes)?\\b|' + HOUR_ONLY + ')' +   // ...or a whole hour
     // ...and the trailing distance is not a badge's. "20 min trip 4 mi from
     // fast charger": with the trip's own bracket lost to glare, the charger
     // badge's 4 miles sat six characters past "min" and was charged as the
@@ -3294,6 +3302,10 @@
     var legs = [], m;
     LEG.lastIndex = 0;
     while ((m = LEG.exec(text)) !== null) {
+      // HOUR_ONLY is an empty match by itself, so `…hr (` with no hours and no
+      // distance matches nothing at all; stepped past here, before any
+      // `continue`, or exec finds the same empty match forever.
+      if (m[0] === '') { LEG.lastIndex++; continue; }
       // An hour unit whose number has no real digit — "l hr", the lookalike
       // this file calls the commonest there is — is a leg that did not read,
       // not a leg with no hours. Matched, it silently dropped sixty minutes:
@@ -3319,13 +3331,23 @@
       if ((m[2] === undefined || m[2] === null)
           && HOUR_UNREAD.test(text.slice(0, m.index))) continue;
       var hours = toNumber(m[2]) || 0;
-      var mins = toNumber(m[3]);
-      // The number has to contain a real digit. "SI min" is two guesses
-      // stacked, and stacked guesses are how noise becomes data - unless the
-      // hour beside it has one: `1hrO min`, DoorDash's "1 hr 0 min". See
-      // hourVouchesForMinutes.
-      if (mins === null) continue;
-      if (!/\d/.test(String(m[3])) && !hourVouchesForMinutes(m[2], mins)) continue;
+      var mins;
+      if (m[3] === undefined || m[3] === null) {
+        // A whole hour with no minutes printed (HOUR_ONLY): kept only with
+        // its hours and the distance in its bracket. The hour's digit and
+        // number were asked above, as they are of every leg.
+        if (m[2] === undefined || m[2] === null
+            || m[4] === undefined || m[4] === null) continue;
+        mins = 0;
+      } else {
+        mins = toNumber(m[3]);
+        // The number has to contain a real digit. "SI min" is two guesses
+        // stacked, and stacked guesses are how noise becomes data - unless the
+        // hour beside it has one: `1hrO min`, DoorDash's "1 hr 0 min". See
+        // hourVouchesForMinutes.
+        if (mins === null) continue;
+        if (!/\d/.test(String(m[3])) && !hourVouchesForMinutes(m[2], mins)) continue;
+      }
       var minutes = hours * 60 + mins;
       if (minutes <= 0 || minutes > 600) continue;
 

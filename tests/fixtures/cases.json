@@ -2063,6 +2063,69 @@
    }
   },
   {
+   "name": "a card that takes exactly an hour prints no minutes, and is a whole journey of sixty",
+   "_why": "Uber prints `1 hr (21.1 mi) total` for a job of exactly an hour. LEG wanted minutes after every hour unit, so the card had no leg at all on any frame: a payout, a distance no leg claimed, never journalled. The rig's 400 kept unread pictures (20 Oct-12 Nov) hold five such cards read cleanly, Uber Eats, Package and Shop & Deliver. Card made up.",
+   "text": "x\n$22.40\nGuaranteed (incl. tip)\n© 1 hr (21.3 mi) total\nLark Owl Grill (Smalltown)\nWren Dr & Kestrel Ct, Smalltown",
+   "expect": {
+    "pay": 22.4,
+    "minutes": 60,
+    "miles": 21.3,
+    "legs": 1,
+    "complete": true,
+    "pickup": "Lark Owl Grill (Smalltown)",
+    "dropoff": "Wren Dr & Kestrel Ct, Smalltown"
+   }
+  },
+  {
+   "name": "...glued as the reader gives it, `1hr (`, under a Shop & Deliver card's item count",
+   "_why": "The shape of the kept readings: `© 1hr (7.6 mi) total` under `© 16 items (18 units)`. The items still count; the hour is the journey. Card made up.",
+   "text": "$18.20\nGuaranteed (incl. tip)\n© 14 items (16 units)\n© 1hr (7.4 mi) total\nLark Market (Smalltown)\nWren Dr SE, Smalltown",
+   "expect": {
+    "pay": 18.2,
+    "minutes": 60,
+    "miles": 7.4,
+    "items": 14,
+    "complete": true
+   }
+  },
+  {
+   "name": "...and two whole hours, `2 hrs (`, are a hundred and twenty",
+   "_why": "The rule takes the hour unit spelled `hr` or `hrs`; the number in front is the hours, as on any leg. Card made up.",
+   "text": "$41.10\nGuaranteed (incl. tip)\n© 2 hrs (58.2 mi) total\nLark Owl Grill (Smalltown)\nWren Dr & Kestrel Ct, Smalltown",
+   "expect": {
+    "minutes": 120,
+    "miles": 58.2,
+    "complete": true
+   }
+  },
+  {
+   "name": "...but a whole hour whose number did not read stays refused: `Lhr (`",
+   "_why": "Four of the kept unread cards read the hour as `Lhr (19.3 mi)` or `1Lhr(8.7 mi)`. An hour with no real digit, or one that is no number, refuses its leg exactly as it does in front of minutes; nothing is guessed. Card made up.",
+   "text": "$20.60\nGuaranteed (incl. tip)\n© Lhr (19.4 mi) total\nLark Owl Grill (Smalltown)\nWren Dr & Kestrel Ct, Smalltown",
+   "expect": {
+    "pay": 20.6,
+    "minutes": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "...and `1Lhr(`, an hour with a digit that is still no number",
+   "text": "$15.10\nGuaranteed (incl. tip)\n© 15 items (15 units)\n© 1Lhr(8.4 mi) total\nLark Market (Smalltown)\nWren Dr NW, Smalltown",
+   "expect": {
+    "minutes": null,
+    "complete": false
+   }
+  },
+  {
+   "name": "...and an hour with a bracket after it that holds no distance is not a leg",
+   "_why": "The hour-only leg needs the distance read inside its bracket. A bare `1 hr (approx.)` is not a journey. Text made up.",
+   "text": "$12.30\nGuaranteed (incl. tip)\nReady in 1 hr (approx.)\nLark Owl Grill (Smalltown)",
+   "expect": {
+    "minutes": null,
+    "complete": false
+   }
+  },
+  {
    "name": "Uber's Est. delivery card with the E of Est lost and a space read into the rest is still a deadline card",
    "_why": "12 Oct, kept as unread: `s t. delivery 4:04 PM + 4.4 mi`, the E lost beside the clock icon. It read as a payout and a distance with no deadline: incomplete, no journey. The reader's lines kept in their shape; the merchant, streets, town and figures made up.",
    "text": ". ——— “~ »\n$ 9 A\nbe ri\nae Includes expected tip\n>¥,\nSe ;\ns t. delivery 6:12 PM + 3.9 mi\nx\n* Lark Owl Custard &\nBurgers (12 Fable Pkwy Nw)\n@ Wren Dr NE & Kestrel Dr NE,\nSmalltown\n@ Matching may take longer",
@@ -4304,6 +4367,12 @@
   {
    "name": "a total is a whole journey by itself",
    "text": "$7.09 34 min (3.6 mi) total",
+   "expect": true
+  },
+  {
+   "name": "...and so is a whole hour printed with no minutes",
+   "_why": "`1 hr (21.1 mi) total`: one total leg of sixty minutes, its distance read. Card made up.",
+   "text": "$22.40 Guaranteed (incl. tip) 1 hr (21.3 mi) total Lark Owl Grill (Smalltown) Wren Dr & Kestrel Ct, Smalltown",
    "expect": true
   },
   {
