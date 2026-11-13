@@ -1233,6 +1233,11 @@ async function nucbox() {
                      'y \u00a9 jonathan.', 'Pat Q.', '7 Leaves Cafe', '\u00a9 .'].map(MV.plannerName)),
      JSON.stringify(['anise v.', 'JesusR.', 'jonathan', 'jonathan.', 'Pat Q.', '7 Leaves Cafe',
                      '\u00a9 .']));
+  eq('...and one lowercase letter after a capitalised name (the owner\'s planner, 12 Nov; '
+     + 'invented names), not after a customer\'s lowercase one nor a capital initial',
+     JSON.stringify(['Fable Grill a', 'Fable Crust Pizza e', 'anise v', 'Pat Q', 'Fable Grill ab']
+       .map(MV.plannerName)),
+     JSON.stringify(['Fable Grill', 'Fable Crust Pizza', 'anise v', 'Pat Q', 'Fable Grill ab']));
   var HELD_STOPS = [
     { kind: 'pickup', name: 'oe Fable Crust Pizza', street: '4410 Fable W Lantern Parkway Northwest',
       city: 'Kestrelton', zip: '30144',

@@ -758,7 +758,13 @@
     var s = String(name == null ? '' : name).replace(/\s+/g, ' ').trim();
     s = nameNoise(s);
     var m = /^[a-z]{1,2} (?=[A-Z])/.exec(s);
-    return m ? s.slice(m[0].length) : s;
+    s = m ? s.slice(m[0].length) : s;
+    // ...and the scroll bar or the stop's chevron read as ONE lowercase
+    // letter after a capitalised name, with no mark beside it for nameNoise
+    // to go by: "Teriyaki Madness a" on the owner's planner reads of 12 Nov
+    // (the store's own name; the letter on the panel's big title). A
+    // customer's lowercase "anise v" has no capitalised word and keeps it.
+    return /[A-Z][a-z]{2}/.test(s) ? s.replace(/ [a-z]$/, '') : s;
   }
 
   /* ...and the litter round a CUSTOMER's name (the owner's snaps of 28-29
