@@ -280,6 +280,18 @@ SEQ.forEach(function (seq) {
   eq('...one under a Pickup label is a pickup',
      run(hold(), navSight(5000, LINE, null, { kind: 'pickup', label: 'pickup' })).refused,
      ['a pickup']);
+  // The navigation banner's door, as scan_pi's sighting types it (the owner's
+  // snaps of 12 Nov, the street invented): a dropoff labelled by the band, no
+  // ZIP. Filed at the navigation's rank over the card's corner...
+  var BANNER = '2716 Larkspur Ln, Acworth';
+  var hb = hold();
+  eq('the navigation banner\'s door is filed over the card\'s end, rank nav',
+     [run(hb, navSight(5000, BANNER, null, { label: 'banner', zip: null })).said,
+      hb.fields.dropoff.from], [[[BANNER, 'nav', 'over the card']], 'nav']);
+  // ...and refused where it is the held order's own store.
+  eq('...and refused as the held order\'s pickup when the card named that store\'s door',
+     run(hold({ pickup: 'Fable Grill (2716 Larkspur Ln)' }),
+         navSight(5000, BANNER, null, { label: 'banner', zip: null })).refused, ['a pickup']);
   eq('...a store\'s navigation files nothing, whatever label its address is under',
      run(hold(), navSight(5000, LINE, { screen: 'uber.pickupNav' })).refused,
      ['a pickup screen']);

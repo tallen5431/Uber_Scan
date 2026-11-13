@@ -4386,6 +4386,72 @@ def sheet_dropoff(text):
             'state': state, 'zip': zipcode, 'place': place}
 
 
+# UBER'S NAVIGATION BANNER, read on its own (pipeline.read_nav_banner): the
+# black band at the top of the navigation screen, which prints where the leg
+# ends. The owner's snaps of 12 Nov, six navigation screens (places invented
+# here, the layouts and the reader's marks the rig's):
+#
+#     ‹ 250 ft Fable Mill Rd         the turn, the road it is onto
+#     ⦿ 2716 Larkspur Ln             the customer's door: the pin read as
+#     Marietta, GA                   "9", "°" or nothing; the town, NO ZIP
+#
+#     Turn right
+#     Fable Sushi (Fable Pkwy)       a store: its name, its street in brackets
+#     4400 Fable Pkwy,              ...and its door WITH a ZIP
+#     Woodstock, GA 30188
+#
+# Two kinds of leg, one banner, and nothing on the band says which in words.
+# The layout says it, as Uber prints it everywhere this rig has read it: a
+# store's door carries its ZIP and its name above it in brackets (every pickup
+# on the planner reads "<Town>, GA 30067"; the three store banners did), a
+# customer's door is a street and "<Town>, GA" with no ZIP (every planner
+# dropoff, the opened sheet that sheet_dropoff reads, and both customer
+# banners). So the banner is a dropoff only in the customer's shape, all of:
+#   - one house-number street (_sheet_street, a street suffix to end it on),
+#     its town on the line or under it, a capitalised "Town, ST" and no ZIP;
+#   - no bracket anywhere on the band (a store's "Name (street)");
+#   - no "pick up" on the band nor on the screen under it ("First pickup",
+#     "Next pickup", "Pick up 1 order" on the bar and the sheet);
+#   - no second house-number street on the band, the turn's "250 ft <Road>"
+#     not counted (NAV_BANNER_TURN).
+# Anything else is None and the screen is left as it was read. The assembler
+# still refuses it as a pickup of any order in the car (heldPickup) and files
+# it at the navigation's own rank (navCandidate), never over a press.
+NAV_BANNER_ICON = re.compile(r'^\W{0,3}[9oO@Q]\s+(?=[1-9]\d{0,5} [A-Za-z])', ASCII)
+NAV_BANNER_PICKUP = re.compile(r'\bpick ?up\b', re.IGNORECASE | ASCII)
+# ...and the turn's distance, "250 ft Fable Mill Rd", which is a number and a
+# street with a suffix to _sheet_street: never the door.
+NAV_BANNER_TURN = re.compile(r'^\W{0,3}\d[\d.,]* ?(?:ft|mi|m|yd|km)\b', re.IGNORECASE | ASCII)
+
+
+def nav_banner(banner, text=None):
+    """The customer's door on Uber's navigation banner — {'line', 'street',
+    'city', 'state', 'zip', 'place'}, zip and place None — or None: see
+    above. `banner` is the band's own read, `text` the screen's."""
+    banner = str(banner or '')
+    if not banner.strip() or '(' in banner or ')' in banner \
+            or NAV_BANNER_PICKUP.search(banner) or NAV_BANNER_PICKUP.search(str(text or '')):
+        return None
+    lines = [normalize(l) for l in re.split(r'[\r\n]+', banner)]
+    lines = [NAV_BANNER_ICON.sub('', l) for l in lines if l]
+    streets = [i for i, l in enumerate(lines)
+               if not NAV_BANNER_TURN.match(l) and _sheet_street(l) is not None]
+    if len(streets) != 1:
+        return None
+    s = streets[0]
+    street, rest = _sheet_street(lines[s])
+    tail = re.match(r'^\s*,\s*(.+)$', rest)
+    if tail and re.search(r'[A-Za-z]{3}', tail.group(1)):
+        town = _sheet_town(tail.group(1))
+    else:
+        town = _sheet_town(lines[s + 1]) if s + 1 < len(lines) else None
+    if town is None or town[2] is not None:
+        return None
+    city, state = town[0], town[1]
+    return {'line': '%s, %s' % (street, city), 'street': street, 'city': city,
+            'state': state, 'zip': None, 'place': None}
+
+
 # DOORDASH'S PLACE POPUP: what the phone shows when the driver taps a stop on an
 # offer card BEFORE deciding (the driver, 12 Oct: "I can tap the icons of the
 # customer and business to get the address"). Two layouts are on file, and

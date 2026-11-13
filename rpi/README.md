@@ -7132,7 +7132,21 @@ before the frame may be called an offer (`screen_address`). Replayed over the
 12 Oct shift's screen rows against the orders ticked, 4 of the 18 orders held
 while navigation was read got their destination this way; no explicit "Deliver
 to"/"Dropoff" label sat over an address. See `navStops` and `sheets` in
-tests/fixtures/cases.json. It is not an accept detector — it
+tests/fixtures/cases.json.
+
+The navigation's own banner — the black band at the top that prints where the
+leg ends — is read too, since 12 Nov: on a whole-screen read typed `uber.nav`
+in the light theme, `pipeline.read_nav_banner` finds the band (the longest run
+of dark rows in the top 40% of the screen) and reads it again inverted, scaled
+1.5x, because the whole-screen read is told not to retry white-on-black and
+turned it to marks. Its door goes on the sighting as a dropoff (label
+`banner`) only in a customer's shape (`nav_banner` in both ports: a street and
+"Town, ST" with no ZIP, no store's bracket, no "pick up" on the band or the
+screen; `navBanners` in cases.json), and the assembler files it as it files
+the sheet. On the 12 Nov snaps it read the destination line on 5 of 5
+navigation frames warped from the sensor, for 0.31-0.47 of the whole-screen
+read's own time on the development box (0.6-1.8 s more on the Pi, an estimate
+from that ratio, once a `SCREEN_AUTO_EVERY` at most). It is not an accept detector — it
 needs "✓ Took" pressed first — and it touches nothing on the phone.
 
 **Where it goes.** server.js puts the stops, with that word, on the order in

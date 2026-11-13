@@ -214,6 +214,11 @@ for c in cases.get('delivered', []):
 for c in cases.get('sheets', []):
     eq('sheets / ' + c['name'], P.sheet_dropoff(c['text']), c['expect'])
 
+# Uber's navigation banner, read on its own: the customer's door, or None.
+# The same cases tests/corpus.test.js runs. See nav_banner in offer_parser.py.
+for c in cases.get('navBanners', []):
+    eq('navBanners / ' + c['name'], P.nav_banner(c['banner'], c['text']), c['expect'])
+
 # DoorDash's place popup, opened from a stop on an offer card: its role, the
 # store's name and the address, or None. The same cases tests/corpus.test.js
 # runs. See place_popup in offer_parser.py.

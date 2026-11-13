@@ -1969,6 +1969,81 @@ def centred_roi(card_share, slack=CROP_SLACK):
 TOP_EDGE = 0.02
 
 
+# UBER'S NAVIGATION BANNER: where the trip is going, in white on a black band
+# at the top of the screen — "<turn> <road>" over "<n> <Street> / <Town>, GA"
+# for a customer, "<Store> (<street>)" over the store's door for a pickup. The
+# card box is the lower half of the screen and never sees it, and the
+# whole-screen read did: preprocess() turns a page dark side up as a whole, a
+# light map is left as it is, and tesseract is told not to retry inverted
+# (OCR_CONFIG), so the banner's white letters came back as "GEE @ oe «ae |
+# r-) peste g eda". The owner's snaps of 12 Nov: 6 of 10 presses had the
+# navigation up, the held end said "no house no." under a banner printing the
+# whole door, and the rig's log said "a street and no address the rig would
+# accept" 144 times off the map's street labels.
+#
+# So on a whole-screen read typed uber.nav in the light theme, the band is
+# found and read again on its own, inverted. Found, not placed: the screen box
+# moves with the mount, and the band is the longest run of rows in the top
+# NAV_BANNER_TOP of the screen whose median is under NAV_BANNER_DARK of the
+# screen's own median (a light map is around 200 of 255, the banner under 60).
+# On the five navigation frames of those snaps, warped from the full sensor
+# frame, it was 0.05-0.30 of the screen on every one, and no run at all on the
+# planner. Scaled by NAV_BANNER_SCALE first: at the warp's own size the
+# second line's smaller type lost "<n> <Street> Ln" on two of five; at 1.5x
+# all five read their destination line, and at 2x nothing more.
+#
+# What it costs, measured on the development box over those frames: 26-54 ms
+# a band against 84-139 ms for the whole-screen read it follows, 0.31-0.47 of
+# it (one blurred frame, 1.0). On the Pi that is the same ratio of a whole read
+# — 1.8-4.5 s on that shift's `auto whole-screen` reads, so 0.6-1.8 s more —
+# an ESTIMATE, not measured on the Pi; and only on the unpressed navigation
+# read, once a SCREEN_AUTO_EVERY at most, never on a card read.
+NAV_BANNER_TOP = 0.40
+NAV_BANNER_DARK = 0.5
+NAV_BANNER_SCALE = 1.5
+# ...and a run shorter than this share of the screen is a dark line, a pill or
+# a button, not the banner: the banners on file were 18-28% of it.
+NAV_BANNER_MIN = 0.08
+
+
+def nav_banner_rows(grey):
+    """(top, bottom) rows of the navigation banner in a warped screen, or
+    None: see NAV_BANNER_TOP."""
+    h = grey.shape[0]
+    if h < 20:
+        return None
+    level = float(np.median(grey))
+    rows = np.median(grey[:int(h * NAV_BANNER_TOP)], axis=1) < level * NAV_BANNER_DARK
+    best, i = None, 0
+    while i < len(rows):
+        if rows[i]:
+            j = i
+            while j < len(rows) and rows[j]:
+                j += 1
+            if best is None or j - i > best[1] - best[0]:
+                best = (i, j)
+            i = j
+        else:
+            i += 1
+    if best is None or best[1] - best[0] < h * NAV_BANNER_MIN:
+        return None
+    return best
+
+
+def read_nav_banner(screen):
+    """The navigation banner's text off a warped screen, read inverted, or
+    None when the screen has no banner: see NAV_BANNER_TOP."""
+    grey = to_grey(screen)
+    rows = nav_banner_rows(grey)
+    if rows is None:
+        return None
+    band = cv2.bitwise_not(grey[rows[0]:rows[1]])
+    band = cv2.resize(band, None, fx=NAV_BANNER_SCALE, fy=NAV_BANNER_SCALE,
+                      interpolation=cv2.INTER_CUBIC)
+    band = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(band)
+    return ocr(band) or None
+
+
 def money_is_clipped(lines, image_height):
     """True when the payout sits flush against the top of the crop.
 
@@ -3041,6 +3116,15 @@ class Scanner:
         t4 = time.perf_counter()
         text, parsed, clipped = got['text'], got['parsed'], got['clipped']
         prepped, fitted = got['prepped'], got['fitted']
+        # UBER'S NAVIGATION BANNER, read the right way up (NAV_BANNER_*).
+        # Only on a whole-screen read the words of which are the navigation,
+        # light theme: the banner is the one dark band at its top.
+        banner = banner_ms = None
+        if g.whole and not got['dark'] and got.get('skipped') is None \
+                and OP.screen_type(text or '')['screen'] == 'uber.nav':
+            banner_from = time.perf_counter()
+            banner = read_nav_banner(screen)
+            banner_ms = (time.perf_counter() - banner_from) * 1000
 
         # No rate here. There was one — `OP.rate(parsed, self.settings)`, off a
         # copy of the settings block the Scanner was handed at startup — and
@@ -3071,6 +3155,11 @@ class Scanner:
             # reader.json and the health tally all say it from here.
             'rescued': rescued,
             'cropFrom': crop_from,
+            # The navigation banner's own words (read_nav_banner), or None
+            # when this read did not read one. Apart from `text`: nothing
+            # that prices or types the screen reads it, only the sighting
+            # (OP.nav_banner, scan_pi.sighting_stops).
+            'banner': banner,
             # ...and which way a 'found' crop was found: 'finder' (cardfind,
             # by the card's shape) or 'raised' (the drawn box raised over a
             # DoorDash stops card, raise_journey); None for 'drawn'.
@@ -3120,6 +3209,9 @@ class Scanner:
                 # None when there was none to try: inside `total`, ahead of the
                 # box's read when refused, in place of it when kept.
                 'cardBox': card_box_ms,
+                # ...and the navigation banner's read, or None (not in
+                # `total`, which ends with the card's own reads).
+                'banner': banner_ms,
                 'total': (t4 - t0) * 1000,
                 # ...and of `total`, what this read's engine calls spent
                 # waiting for a slot (OCR_SLOTS): 0 when none waited. The

@@ -2413,6 +2413,40 @@
              zip: town[2], place: place };
   }
 
+  /* Uber's navigation banner, read on its own (pipeline.read_nav_banner):
+     the customer's door, {line, street, city, state, zip: null, place: null},
+     or null. A dropoff only in the customer's shape — one house-number
+     street, "Town, ST" with no ZIP, no bracket and no "pick up" on the band
+     or the screen (`text`), the turn's "250 ft <Road>" not counted. Every
+     rule and the 12 Nov snaps behind them are at nav_banner in
+     offer_parser.py; tests/fixtures/cases.json `navBanners` holds the two
+     ports to one answer. */
+  var NAV_BANNER_ICON = /^\W{0,3}[9oO@Q]\s+(?=[1-9]\d{0,5} [A-Za-z])/;
+  var NAV_BANNER_PICKUP = /\bpick ?up\b/i;
+  var NAV_BANNER_TURN = /^\W{0,3}\d[\d.,]* ?(?:ft|mi|m|yd|km)\b/i;
+
+  function navBanner(banner, text) {
+    banner = String(banner || '');
+    if (!banner.trim() || /[()]/.test(banner) || NAV_BANNER_PICKUP.test(banner)
+        || NAV_BANNER_PICKUP.test(String(text || ''))) return null;
+    var lines = banner.split(/[\r\n]+/).map(normalize)
+      .filter(function (l) { return l; })
+      .map(function (l) { return l.replace(NAV_BANNER_ICON, ''); });
+    var streets = [];
+    lines.forEach(function (l, i) {
+      if (!NAV_BANNER_TURN.test(l) && sheetStreet(l) !== null) streets.push(i);
+    });
+    if (streets.length !== 1) return null;
+    var s = streets[0];
+    var st = sheetStreet(lines[s]);
+    var tail = /^\s*,\s*(.+)$/.exec(st[1]);
+    var town = tail && /[A-Za-z]{3}/.test(tail[1]) ? sheetTown(tail[1])
+      : (s + 1 < lines.length ? sheetTown(lines[s + 1]) : null);
+    if (!town || town[2] !== null) return null;
+    return { line: st[0] + ', ' + town[0], street: st[0], city: town[0], state: town[1],
+             zip: null, place: null };
+  }
+
   /* DoorDash's place popup, opened from a stop on an offer card before the
      driver decides: the role label ("Pickup from"), the store's name, the
      street with a house number, the town, and "Directions" under them.
@@ -4617,6 +4651,7 @@
            mapLabel: mapLabel,
            placeEnds: placeEndsOf, twoLegLayout: twoLegLayout,
            findAddress: findAddress, findPlanner: findPlanner, sheetDropoff: sheetDropoff,
+           navBanner: navBanner,
            quadrantSlip: quadrantSlip,
            placePopup: placePopup, ddPickupFrom: ddPickupFrom,
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,

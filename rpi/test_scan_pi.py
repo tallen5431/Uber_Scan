@@ -4546,6 +4546,19 @@ _sheet_seen = SP.sighting(_SHEET_BAR, None, None, False, True,
 eq('the opened sheet\'s sighting types its address a dropoff, under the label it printed',
    [(s['kind'], s['label'], s['line']) for s in _sheet_seen['stops']],
    [('dropoff', 'dropoff type', '4416 Wrenfield Dr NW, Kennesaw')])
+# ...and the navigation banner's door, read on its own (pipeline's `banner`;
+# the owner's snaps of 12 Nov, places invented): a dropoff, labelled by the
+# band, with the bar's "Expected by"; the screen's own read had marks for it.
+_NAV_UNDER = 'GEE @ oe «ae\nKroger\n40\nLIMIT\no= 3 min © 1.1 mi =\nExpected by 6:37 PM'
+_banner_seen = SP.sighting(_NAV_UNDER, None, None, False, True,
+                           banner=OP2.nav_banner('Fable Mill Rd\n9 2716 Larkspur Ln\nMarietta, GA',
+                                                 _NAV_UNDER))
+eq('the navigation banner\'s door goes on the sighting as a dropoff, labelled by the band',
+   [(s['kind'], s['label'], s['line'], s['expectedBy']) for s in _banner_seen['stops']]
+   + [_banner_seen['screen']],
+   [('dropoff', 'banner', '2716 Larkspur Ln, Marietta', 18 * 60 + 37), 'uber.nav'])
+eq('...and a sighting with no banner door carries none',
+   SP.sighting(_NAV_UNDER, None, None, False, True)['stops'], [])
 # ...and the customer sheet, the same sheet pulled all the way up (17 Oct, the
 # shared case; names, place and street invented): read as the sheet and not
 # as a planner of one dropoff off its "Drop off 1 order", so the sighting is

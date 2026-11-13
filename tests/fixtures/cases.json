@@ -8651,6 +8651,122 @@
    }
   }
  ],
+ "_navBanners_comment": "Uber's navigation banner, the black band at the top of the navigation screen, read on its own and inverted (pipeline.read_nav_banner): nav_banner / navBanner. `banner` is the band's read, `text` the screen's; `expect` is the customer's door {line, street, city, state, zip: null, place: null} or null. A dropoff only in the customer's shape: one house-number street, 'Town, ST' with no ZIP, no bracket and no 'pick up' on the band or the screen, the turn's '250 ft <Road>' not counted. The layouts and the reader's marks (the pin read as '9' or a degree sign, the turn's arrow as letters) are the owner's snaps of 12 Nov; every street, number, town and store is invented.",
+ "navBanners": [
+  {
+   "name": "a customer's door under the turn, the pin read as \"9\"",
+   "banner": "of, Fable Mill Rd\n9 2716 Larkspur Ln\nMarietta, GA\n",
+   "text": "",
+   "expect": {
+    "line": "2716 Larkspur Ln, Marietta",
+    "street": "2716 Larkspur Ln",
+    "city": "Marietta",
+    "state": "GA",
+    "zip": null,
+    "place": null
+   }
+  },
+  {
+   "name": "...the pin read as a degree sign, the road's last letter slipped",
+   "banner": "oe, Fable Mill Ra\n\u00b0 2716 Larkspur Ln\nMarietta, GA",
+   "text": "",
+   "expect": {
+    "line": "2716 Larkspur Ln, Marietta",
+    "street": "2716 Larkspur Ln",
+    "city": "Marietta",
+    "state": "GA",
+    "zip": null,
+    "place": null
+   }
+  },
+  {
+   "name": "...the turn's distance on the road's line is no second street",
+   "banner": "250 ft Fable Mill Rd\n2716 Larkspur Ln\nMarietta, GA",
+   "text": "",
+   "expect": {
+    "line": "2716 Larkspur Ln, Marietta",
+    "street": "2716 Larkspur Ln",
+    "city": "Marietta",
+    "state": "GA",
+    "zip": null,
+    "place": null
+   }
+  },
+  {
+   "name": "...the town after a comma on the street's line",
+   "banner": "0.2 mi Turn right\n44 Wrenfield Ct, Smyrna, GA",
+   "text": "",
+   "expect": {
+    "line": "44 Wrenfield Ct, Smyrna",
+    "street": "44 Wrenfield Ct",
+    "city": "Smyrna",
+    "state": "GA",
+    "zip": null,
+    "place": null
+   }
+  },
+  {
+   "name": "...with the screen under it saying Deliver to",
+   "banner": "a Fable Pkwy\n312 Tansy Ln\nWoodstock, GA",
+   "text": "Kroger\n40\nLIMIT\no= 3 min \u00a9 1.1 mi =\nDeliver to Pat Q.",
+   "expect": {
+    "line": "312 Tansy Ln, Woodstock",
+    "street": "312 Tansy Ln",
+    "city": "Woodstock",
+    "state": "GA",
+    "zip": null,
+    "place": null
+   }
+  },
+  {
+   "name": "a store: its name with its street in brackets, its door with a ZIP",
+   "banner": "> *\noom lurnright\nFable Sushi (Fable Pkwy)\n@ 4400 Fable Pkwy,\nWoodstock, GA 30188",
+   "text": "",
+   "expect": null
+  },
+  {
+   "name": "...a store whose bracket the band lost, refused for the ZIP",
+   "banner": "Turn right\nFable Sushi Fable Pkwy\n10020 Fable Pkwy,\nWoodstock, GA 30188",
+   "text": "",
+   "expect": null
+  },
+  {
+   "name": "...a customer's shape on a screen whose bar says Next pickup",
+   "banner": "a Fable Pkwy\n312 Tansy Ln\nWoodstock, GA",
+   "text": "Kroger\n40\nLIMIT\n5 3min O 0.5 mi a\nNext pickup",
+   "expect": null
+  },
+  {
+   "name": "...the store's name on the band with its door cut off",
+   "banner": "ae Turn left\nFable Mexican Grill\n. nowaeumenma.\nAtlanta, GA 30318",
+   "text": "",
+   "expect": null
+  },
+  {
+   "name": "two doors on the band is not one destination",
+   "banner": "Fable Rd\n12 Oak Ct\n90 Elm St\nSmyrna, GA",
+   "text": "",
+   "expect": null
+  },
+  {
+   "name": "the street with no town under it",
+   "banner": "Fable Mill Rd\n2716 Larkspur Ln",
+   "text": "",
+   "expect": null
+  },
+  {
+   "name": "the turn alone, the door not read",
+   "banner": "i Highway 92\n\u00a9. vnconenl.Ga",
+   "text": "",
+   "expect": null
+  },
+  {
+   "name": "nothing read off the band",
+   "banner": "",
+   "text": "",
+   "expect": null
+  }
+ ],
  "_popups_comment": "DoorDash's place popup, opened from a stop on an offer card before the driver decides: place_popup / placePopup. The role label, the store's name, the street with a house number, the town, and 'Directions' under them. `expect` is {role, name, line, street, city, state, zip}, or null when the popup does not read as one. The store's layout and the OCR's marks are the five reads of it in the journal copied with the 12 Oct shift, all five of which read; the customer's is INFERRED (no customer popup has been read) and its cases say so; the pill over the map is the 12 Oct snaps' 16-03-08 and 16-03-17, whose text was never read. Every name, street and number is invented.",
  "popups": [
   {

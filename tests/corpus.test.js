@@ -158,6 +158,13 @@ function stopFields(stops) {
   eq('sheets / ' + c.name, JSON.stringify(P.sheetDropoff(c.text)), JSON.stringify(c.expect));
 });
 
+/* Uber's navigation banner, read on its own: the customer's door, or null.
+   The same cases rpi/test_parser.py runs. See nav_banner in offer_parser.py. */
+(cases.navBanners || []).forEach(function (c) {
+  eq('navBanners / ' + c.name, JSON.stringify(P.navBanner(c.banner, c.text)),
+     JSON.stringify(c.expect));
+});
+
 /* DoorDash's place popup, opened from a stop on an offer card: its role, the
    store's name and the address, or null. The same cases rpi/test_parser.py
    runs. See place_popup in offer_parser.py. */

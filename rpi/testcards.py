@@ -296,6 +296,33 @@ def _screen(pal, nav):
     return im, d, H - (NAV_H if nav else 0)
 
 
+# Uber's navigation to a held order's next stop, light theme: the black banner
+# at the top (the turn, then the stop's lines in white), the map, the speed
+# limit and the bar under it — the layout of the owner's snaps of 12 Nov, the
+# places invented. pipeline.read_nav_banner reads the banner.
+NAV_DOOR = ('Fable Mill Rd', '2716 Larkspur Ln', 'Marietta, GA')
+NAV_STORE = ('Turn right', 'Fable Sushi (Fable Pkwy)', '4400 Fable Pkwy,',
+             'Woodstock, GA 30188')
+
+
+def nav_banner_screen(banner=NAV_DOOR, bar='Deliver to Pat Q.'):
+    im, d = _canvas(LIGHT)
+    top = 130
+    d.rounded_rectangle([40, top, W - 40, top + 150 + 90 * len(banner)], radius=30,
+                        fill=(18, 18, 18))
+    d.text((90, top + 50), banner[0], font=font(84), fill=(250, 250, 250))
+    for i, line in enumerate(banner[1:]):
+        d.text((150, top + 190 + 90 * i), line, font=font(56, bold=i == 0),
+               fill=(250, 250, 250) if i == 0 else (200, 200, 200))
+    d.rounded_rectangle([60, 1500, 230, 1660], radius=20, fill=(255, 255, 255))
+    d.text((100, 1520), '45', font=font(64), fill=(0, 0, 0))
+    d.text((85, 1600), 'LIMIT', font=font(34, bold=False), fill=(0, 0, 0))
+    d.rectangle([0, 1980, W, H], fill=(250, 250, 250))
+    d.text((330, 2040), '3 min · 1.1 mi', font=font(64), fill=(0, 0, 0))
+    d.text((330, 2150), bar, font=font(48, bold=False), fill=(60, 60, 60))
+    return _bgr(im)
+
+
 EXCLUSIVE_ROWS = [(120, '$4.21', 86, True, False),
                   (235, 'Guaranteed (incl. tip)', 32, False, True),
                   (305, '23 min (5.2 mi) total', 40, True, False),

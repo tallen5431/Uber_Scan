@@ -1253,6 +1253,38 @@ if TC.available():
         % ((_w['parsed']['pay'], _w['parsed']['deliverBy']),),
         _w['parsed']['pay'] is None and _w['parsed']['deliverBy'] is not None)
 
+    # Uber's navigation banner, white on black at the top of the screen, which
+    # the card box never sees and the whole-screen read turned to marks (the
+    # owner's snaps of 12 Nov): read on its own, inverted, on a whole-screen
+    # read of the navigation, and on nothing else.
+    _nav = look(TC.nav_banner_screen(), whole=True)
+    ok_('[banner] a whole-screen read of the navigation reads its banner (%r)'
+        % (_nav['banner'],), '2716 Larkspur Ln' in (_nav['banner'] or '')
+        and 'Marietta, GA' in (_nav['banner'] or ''))
+    eq('[banner] ...and the customer\'s door comes off it',
+       (OP2.nav_banner(_nav['banner'], _nav['text']) or {}).get('line'),
+       '2716 Larkspur Ln, Marietta')
+    ok_('[banner] ...its read timed apart from the card\'s (%r ms)' % _nav['ms']['banner'],
+        isinstance(_nav['ms']['banner'], float))
+    _store = look(TC.nav_banner_screen(TC.NAV_STORE, 'Next pickup'), whole=True)
+    ok_('[banner] a store\'s banner is read (%r)...' % (_store['banner'],),
+        '4400 Fable Pkwy' in (_store['banner'] or ''))
+    eq('[banner] ...and is no customer\'s door',
+       OP2.nav_banner(_store['banner'], _store['text']), None)
+    eq('[banner] a card-box read of the same screen reads no banner',
+       (look(TC.nav_banner_screen())['banner'],
+        look(TC.nav_banner_screen())['ms']['banner']), (None, None))
+    eq('[banner] ...nor a whole-screen read of a screen that is not the navigation',
+       look(TC.planner_screen(), whole=True)['banner'], None)
+    _plain = np.full((1100, 540), 205, np.uint8)
+    eq('[banner] a light screen with no dark band at its top has no banner rows',
+       PL.nav_banner_rows(_plain), None)
+    _plain[60:260] = 20
+    eq('[banner] ...and one with the band has them', PL.nav_banner_rows(_plain), (60, 260))
+    _plain[60:260] = 205
+    _plain[100:130] = 20
+    eq('[banner] ...but a dark line is not a banner', PL.nav_banner_rows(_plain), None)
+
     # A card box drawn from the very top of the screen box has nothing above it
     # to look in, and the finder is not asked.
     _top_box = [BOX[0], 0.0, BOX[2], 1.0]

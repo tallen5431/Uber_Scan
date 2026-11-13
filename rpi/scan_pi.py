@@ -3977,7 +3977,7 @@ SIGHTING_STOP = ('kind', 'orders', 'name', 'place', 'expectedBy', 'street', 'cit
                  'state', 'zip', 'line', 'partial', 'label')
 
 
-def sighting_stops(text, stops, address, sheet=None):
+def sighting_stops(text, stops, address, sheet=None, banner=None):
     """The stops a sighting carries, and the page's two ends, as
     (stops, {'top', 'bottom'}).
 
@@ -4012,6 +4012,18 @@ def sighting_stops(text, stops, address, sheet=None):
         one['label'] = 'dropoff type'
         one['expectedBy'] = screen_said(text)['expectedBy']
         return [one], {'top': None, 'bottom': None}
+    # ...and the navigation banner's door, read on its own and inverted
+    # (pipeline.read_nav_banner), in the customer's shape only (OP.nav_banner:
+    # a street and "Town, ST" with no ZIP, no store's bracket, no "pick up"):
+    # typed a dropoff, its label the band it was printed in. The assembler
+    # files it at the navigation's rank as it files the sheet (navCandidate),
+    # refused there as any held order's pickup.
+    if banner:
+        one = {k: banner.get(k) for k in SIGHTING_STOP}
+        one['kind'] = 'dropoff'
+        one['label'] = 'banner'
+        one['expectedBy'] = screen_said(text)['expectedBy']
+        return [one], {'top': None, 'bottom': None}
     if not address:
         return [], {'top': None, 'bottom': None}
     label = OP.address_stop(text)
@@ -4037,7 +4049,8 @@ def order_count(stops):
     return sum(s['orders'] for s in drops)
 
 
-def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None):
+def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None,
+                  banner=None):
     """Stage 2 of the multi-order design: what a whole-screen read or a planner
     read SAW, typed by its screen, and nothing more.
 
@@ -4071,13 +4084,15 @@ def emit_sighting(text, stops, address, asked, whole, keep=False, at=None, sheet
     later stage that does keep them has the answer the rig had.
     """
     print(json.dumps({'sighting': sighting(text, stops, address, asked, whole,
-                                           keep=keep, at=at, sheet=sheet)}), flush=True)
+                                           keep=keep, at=at, sheet=sheet,
+                                           banner=banner)}), flush=True)
 
 
-def sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None):
+def sighting(text, stops, address, asked, whole, keep=False, at=None, sheet=None,
+             banner=None):
     """The sighting line's body, built: see emit_sighting, which prints it."""
     kind = OP.screen_type(text)
-    listed, page = sighting_stops(text, stops, address, sheet)
+    listed, page = sighting_stops(text, stops, address, sheet, banner)
     return {'at': int(time.time() * 1000) if at is None else at,
             'asked': bool(asked), 'whole': bool(whole),
             'titled': OP.planner_titled(text),
@@ -6537,7 +6552,12 @@ def main():
                           None if an_offer else frame_address,
                           asked, whole,
                           keep=offer_log is not None and offer_log.keep_places,
-                          at=seen_at, sheet=sheet)
+                          at=seen_at, sheet=sheet,
+                          # The banner's door, off a whole-screen read that
+                          # read one and was no offer (pipeline's `banner`).
+                          banner=(OP.nav_banner(out.get('banner'), out.get('text'))
+                                  if whole and not an_offer and sheet is None
+                                  else None))
         # ...and the popup, once per card and address, stamped with when its
         # frame was TAKEN: the server files it only onto a card on the slot
         # from before that moment. The role, not the address, in the log.
