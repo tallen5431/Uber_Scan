@@ -1115,6 +1115,13 @@
      belongs to it, and four characters is not a scrap. */
   var PLACE_TRAIL_KEEP = ['nw', 'ne', 'sw', 'se', 'st', 'rd', 'dr', 'ct', 'ln', 'pl', 'ga'];
   var PLACE_LEAD_KEEP = PLACE_TRAIL_KEEP.concat(['n', 's', 'e', 'w']);
+  // ...a compass point only as a capital: a lowercase n, s, e or w alone in
+  // front is the route line's dot (the 12 Nov card's "s <Name> Blvd SW & ...").
+  // See PLACE_LEAD_COMPASS_SLIP in offer_parser.py.
+  var PLACE_LEAD_COMPASS_SLIP = ['n', 's', 'e', 'w'];
+  function leadScrap(token) {
+    return scrap(token, PLACE_LEAD_KEEP) || PLACE_LEAD_COMPASS_SLIP.indexOf(token) >= 0;
+  }
   var PLACE_EDGE = /^[^0-9A-Za-z]+|[^0-9A-Za-z]+$/g;
   var PLACE_STOP = /\b(?:accept|decline|verified|exclusive|guaranteed|add\s+to\s+route|\d+\s*mi\b)/i;
   var AFTER_DEADLINE_STOP = /\d|\b(?:accept|decline|pickup|customer|dropoff)\b/i;
@@ -1318,7 +1325,7 @@
     // kept the "oN".
     var parts = String(value || '').split(/\s+/).filter(Boolean);
     for (;;) {
-      while (parts.length && scrap(parts[0], PLACE_LEAD_KEEP)) parts.shift();
+      while (parts.length && leadScrap(parts[0])) parts.shift();
       // Two prefixes happen — "total Pickup Papa John's" — and the second is
       // only at the front once the first has gone.
       var shorter = parts.join(' ').trim().replace(PLACE_JUNK, '')

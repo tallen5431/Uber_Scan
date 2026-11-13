@@ -725,6 +725,18 @@ PLACE_TAIL = re.compile(
 PLACE_TRAIL_KEEP = frozenset(('nw', 'ne', 'sw', 'se', 'st', 'rd', 'dr', 'ct',
                               'ln', 'pl', 'ga'))
 PLACE_LEAD_KEEP = PLACE_TRAIL_KEEP | frozenset(('n', 's', 'e', 'w'))
+# ...but only as the card prints a compass point, a capital. The owner's card
+# of 12 Nov read its route line's dot as a lowercase "s" on a line of its own,
+# over "<Name> Blvd SW & <Name> St SW, Atlanta", and the held end, the panel's
+# big title and the NucBox's question all began "s <Name> Blvd": a lowercase
+# n, s, e or w standing alone in front of a place is a scrap like any other.
+PLACE_LEAD_COMPASS_SLIP = frozenset(('n', 's', 'e', 'w'))
+
+
+def _lead_scrap(token):
+    """_scrap at a place's front: PLACE_LEAD_KEEP, a compass letter kept
+    only as a capital (PLACE_LEAD_COMPASS_SLIP)."""
+    return _scrap(token, PLACE_LEAD_KEEP) or token in PLACE_LEAD_COMPASS_SLIP
 PLACE_EDGE = re.compile(r'^[^0-9A-Za-z]+|[^0-9A-Za-z]+$', ASCII)
 
 # How many places one card can name. A pickup and a dropoff on a ride card, a
@@ -2436,7 +2448,7 @@ def trim_place(value):
     # kept the "oN".
     parts = (value or '').split()
     while True:
-        while parts and _scrap(parts[0], PLACE_LEAD_KEEP):
+        while parts and _lead_scrap(parts[0]):
             parts.pop(0)
         # Two prefixes happen — "total Pickup Papa John's" — and the second is
         # only at the front once the first has gone.

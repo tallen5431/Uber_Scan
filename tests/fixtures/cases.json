@@ -4025,6 +4025,24 @@
     "Kestrel Noodle Bar (40 Fable Rd)",
     "Vantry Ln NW & Orrin Ct SW, Marietta"
    ]
+  },
+  {
+   "name": "the route line's dot read as a lowercase \"s\" on a line of its own is no compass point in front of the dropoff",
+   "_why": "The owner's card of 12 Nov: the held end and the panel's title began \"s <Name> Blvd SW & ...\". A compass point is kept at a place's front only as a capital (PLACE_LEAD_COMPASS_SLIP / leadScrap). Invented.",
+   "text": "$13.03\nGuaranteed (incl. tip)\n\u00a9 23 min (9.2 mi) total\nFable Grill (2020 Oak Rd Nw)\ns\nFable Memorial Blvd SW\n& Kestrel St SW, Atlanta",
+   "expect": [
+    "Fable Grill (2020 Oak Rd Nw)",
+    "Fable Memorial Blvd SW & Kestrel St SW, Atlanta"
+   ]
+  },
+  {
+   "name": "...while a capital S in front of a street is the street's own",
+   "_why": "The same card's shape with the dropoff on a south street: kept. Invented.",
+   "text": "$13.03\nGuaranteed (incl. tip)\n\u00a9 23 min (9.2 mi) total\nFable Grill (2020 Oak Rd Nw)\nS Kestrel St SW & Fable Ave SW, Atlanta",
+   "expect": [
+    "Fable Grill (2020 Oak Rd Nw)",
+    "S Kestrel St SW & Fable Ave SW, Atlanta"
+   ]
   }
  ],
  "_deadline_comment": "A delivery deadline is minutes since midnight, and the duration it implies depends on the time of day — so parse() reports the clock time and rate() does the subtraction. Checked separately because a parser that reads the clock cannot be held to a fixed corpus.",
