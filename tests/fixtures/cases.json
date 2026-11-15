@@ -2522,6 +2522,50 @@
     "addon": true,
     "milesUncertain": false
    }
+  },
+  {
+   "name": "Uber's Exclusive tag read over the pay is a label: exclusive true, the money read as without it",
+   "_why": "Uber Pro's acceptance rate counts exclusive requests only (the owner, 15 Nov 2026). The tag is read as 'Exclusive x' (its close button) over the pay; a label, no figure moves. Text made up in that shape.",
+   "text": "Exclusive x\n$9.40\nIncludes expected tip\n22 min (6.3 mi) total\nPretend Tacos (Juniper Ln)\nAlder Ct NE, Make Town",
+   "expect": {
+    "pay": 9.4,
+    "minutes": 22,
+    "miles": 6.3,
+    "exclusive": true
+   }
+  },
+  {
+   "name": "...clipped at the crop's left edge to 'xclusive', still the tag",
+   "_why": "Re-reads of one evening's cards read it clipped as 'xclusive' at times. Word-bounded, so it is never found inside another word. Text made up.",
+   "text": "xclusive\n$11.15\nGuaranteed (incl. tip)\n27 min (8.2 mi) total\nMake-Believe Noodles (Quill St)\nHeron Way, Make Town",
+   "expect": {
+    "pay": 11.15,
+    "minutes": 27,
+    "miles": 8.2,
+    "exclusive": true
+   }
+  },
+  {
+   "name": "...an Early look card is 'early', kept apart: Uber does not say whether it counts",
+   "_why": "'Early look - Order in progress' over an Uber card: not counted as exclusive or as not, its own small number in the acceptance count. Text made up.",
+   "text": "Early look - Order in progress\n$14.48\nIncludes expected tip\n31 min (9.0 mi) total\nPretend Pizza (Larkspur Rd)\nOsprey Ct, Make Town",
+   "expect": {
+    "pay": 14.48,
+    "minutes": 31,
+    "miles": 9.0,
+    "exclusive": "early"
+   }
+  },
+  {
+   "name": "...and a card with no tag read is unknown (null), never 'not exclusive'",
+   "_why": "Of 14 re-read cards without the tag, most were ordinary cards whose tag sat above the crop or was lost in the map. Text made up.",
+   "text": "$7.25\nIncludes expected tip\n18 min (4.4 mi) total\nImaginary Bagels (Fern Ave)\nWillow Ct, Make Town",
+   "expect": {
+    "pay": 7.25,
+    "minutes": 18,
+    "miles": 4.4,
+    "exclusive": null
+   }
   }
  ],
  "rate": [

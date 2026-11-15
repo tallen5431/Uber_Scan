@@ -15058,6 +15058,9 @@ function route(req, res) {
   // Earnings screenshots, every method: see earningsRoute (the owner, 7 Nov:
   // "compare what uber actually paid compared to the expected pay").
   if (/^\/api\/earnings(\/|$)/.test(req.url.split('?')[0])) return earningsRoute(req, res);
+  // Uber's acceptance rate and the line that keeps the goal, for the offers
+  // page's Gold card: see goldRoute (the owner, 15 Nov 2026).
+  if (/^\/api\/gold(\/|$)/.test(req.url.split('?')[0])) return goldRoute(req, res);
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return send(res, 405, 'method not allowed', { 'Content-Type': 'text/plain' });
@@ -15811,13 +15814,15 @@ function earningsWrite(file, data, done) {
  * row, where the default page segmentation can file it as a column of its
  * own; one OpenMP thread, as tools/test.sh and scan_pi set, so a read on the
  * rig cannot take the scanner's cores. */
-function earningsOcr(file, done) {
+// `psm`, where given, is another page segmentation mode (the Gold card's
+// reader asks '6' again when '4' left a figure of its box out: goldShot).
+function earningsOcr(file, done, psm) {
   var bin = earningsTesseract();
   if (!bin) { var e = new Error('tesseract is not installed'); e.code = 'NOTESS'; return done(e); }
   var out = [], size = 0, finished = false;
   var child;
   try {
-    child = spawn(bin, [file, 'stdout', '--psm', '4', '-l', 'eng'],
+    child = spawn(bin, [file, 'stdout', '--psm', psm === '6' ? '6' : '4', '-l', 'eng'],
                   { env: Object.assign({}, process.env, { OMP_THREAD_LIMIT: '1' }),
                     stdio: ['ignore', 'pipe', 'ignore'] });
   } catch (spawnErr) {
@@ -16404,6 +16409,186 @@ function earningsRoute(req, res) {
 
   req.resume();
   return answer(404, { ok: false, error: 'no such earnings endpoint' });
+}
+
+/* --- Uber's acceptance rate: the offers page's Gold card (15 Nov 2026) -----
+ *
+ * The owner: "To get the gold tier status for Uber I need to have a 25%
+ * acceptance rate, in the offers area where the data is stored could you
+ * make it so I can see the optimal threshold of offers to accept that would
+ * make the most money and help me reach the 25% acceptance rating." Then
+ * Uber's own screen: the share of the last 100 EXCLUSIVE requests accepted,
+ * Trip Radar left out.
+ *
+ * Worked out by tools/strategy.js section 6 — the module the places report's
+ * Strategy tab and the end-of-shift report's strategy section print it through —
+ * with `light` (no resampling, no held-out check, no $/mi curve), over the
+ * last GOLD_DAYS of the journal: the rig's last 100 Uber requests are a few
+ * shifts, and the curve wants more than they are. Asked on each load of the
+ * offers page, never by the scanner, the panel or a verdict. DESCRIPTIVE.
+ *
+ *   GET  /api/gold         {ok, settings, gold, lines, days}
+ *   POST /api/gold         {goal?, uber?} -> a `kind: 'gold'` row: the goal
+ *                          (a percent, 1-99) and Uber's own figures
+ *                          (strategy.js uberFigures: requests <= 100,
+ *                          accepted, declined, last10), or uber: null to
+ *                          forget them. The newest row is the setting. In
+ *                          the journal so the places report reads it too and
+ *                          the sync carries it home (rig -> NucBox only, as
+ *                          every row: one typed on the NucBox stays there).
+ *   POST /api/gold/shot    a screenshot of Uber's Acceptance rate screen
+ *                          (image/png, jpeg or webp, the earnings guards):
+ *                          read with tesseract (--psm 4, then --psm 6 where
+ *                          that left a figure of the box out) by
+ *                          earnings.js acceptanceScreen, answered, and
+ *                          deleted. Nothing is kept: the page shows what was
+ *                          read and the driver saves it with POST /api/gold.
+ *
+ * Shut under lite (lite/lite.js). Strategy is required here, on first use,
+ * so a server that never shows the card never loads it. */
+var GOLD_DAYS = 90;
+var GOLD_ROW_V = 1;
+var GoldStrategy = null;
+
+function goldStrategy() {
+  if (!GoldStrategy) GoldStrategy = require('./tools/strategy.js');
+  return GoldStrategy;
+}
+
+// The newest `gold` row's setting: {goal, uber, at}.
+function goldSettings(rows) {
+  var best = null;
+  (rows || []).forEach(function (r) {
+    if (r && r.kind === 'gold' && typeof r.at === 'number' && (!best || r.at >= best.at)) best = r;
+  });
+  var S = goldStrategy();
+  return { goal: best ? S.goalOf(best.goal) : S.GOLD_GOAL, uber: best ? S.uberFigures(best.uber) : null,
+           at: best ? best.at : null };
+}
+
+// takenRuns' runs in strategy.js's order shape: a real minute count only for
+// one put down at the door (atDoor), as cardVsReal measures.
+function goldOrders(runs) {
+  return runs.map(function (t) {
+    return { id: t.id, tookAt: t.tookAt, endedAt: t.endedAt, app: t.app, pay: t.pay, cardMinutes: t.minutes,
+             cardMiles: t.miles, addon: t.addon === true, carried: t.carried,
+             actualMinutes: atDoor(t) && t.endedAt > t.tookAt ? (t.endedAt - t.tookAt) / 60000 : null };
+  });
+}
+
+function goldAnswer(rows, now) {
+  var S = goldStrategy();
+  var floor = now - GOLD_DAYS * 86400000;
+  var offers = latestPerOffer(rows, floor).filter(function (r) {
+    return (r.at || 0) >= CLOCK_BELIEVABLE_AFTER && (r.at || 0) >= floor && !r.hidden;
+  });
+  var settings = goldSettings(rows);
+  var res = S.analyse({ offers: offers, orders: goldOrders(takenRuns(rows, floor, offers)),
+                        earnings: Earnings.fold(rows), light: true,
+                        gold: { goal: settings.goal, uber: settings.uber } });
+  return { ok: true, days: GOLD_DAYS, settings: settings, gold: res.gold,
+           lines: S.goldLines(res.gold, res.floors), floors: { curveOffers: res.floors.curveOffers },
+           tesseract: !!earningsTesseract() };
+}
+
+function goldRoute(req, res) {
+  var pathname = req.url.split('?')[0];
+  var answer = function (code, body) { send(res, code, JSON.stringify(body), EARNINGS_JSON); };
+
+  if (pathname === '/api/gold' && (req.method === 'GET' || req.method === 'HEAD')) {
+    return readJournal(function (rows, readErr) {
+      if (!rows) return answer(503, { ok: false, error: 'the journal could not be read (' + (readErr && readErr.code || 'unknown') + ')' });
+      answer(200, goldAnswer(rows, Date.now()));
+    });
+  }
+  if (req.method !== 'POST') {
+    req.resume();
+    return answer(405, { ok: false, error: 'GET or POST' });
+  }
+
+  if (pathname === '/api/gold/shot') {
+    var type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (['image/png', 'image/jpeg', 'image/webp'].indexOf(type) === -1) {
+      req.resume();
+      return answer(415, { ok: false, error: 'send the screenshot itself: image/png, image/jpeg or image/webp' });
+    }
+    var declared = parseInt(req.headers['content-length'], 10);
+    if (isFinite(declared) && declared > EARNINGS_SHOT_MAX) {
+      req.resume();
+      return answer(413, { ok: false, error: 'too big' });
+    }
+    return earningsBody(req, EARNINGS_SHOT_MAX, function (err, buf) {
+      if (err) return answer(err.message === 'too big' ? 413 : 400, { ok: false, error: err.message });
+      var kind = earningsImageKind(buf);
+      if (!kind) return answer(415, { ok: false, error: 'that is not a PNG, JPEG or WebP picture' });
+      if (!earningsTesseract()) {
+        return answer(200, { ok: true, read: false, why: 'tesseract is not installed on this machine', install: EARNINGS_INSTALL });
+      }
+      var file = path.join(os.tmpdir(), 'uberscan-gold-' + earningsCrypto.randomBytes(6).toString('hex') + '.' + kind);
+      fs.writeFile(file, buf, { mode: 384 }, function (writeErr) {
+        if (writeErr) return answer(500, { ok: false, error: 'could not read the screenshot' });
+        var done = function (code, body) { fs.unlink(file, function () {}); answer(code, body); };
+        earningsOcr(file, function (e1, first) {
+          if (e1) return done(200, { ok: true, read: false, why: e1.message });
+          var got = Earnings.acceptanceScreen([first]);
+          // Asked again for anything left out, the k/10 and the percentage too.
+          if (got.ok && got.last10 !== null && got.rate !== null) return done(200, { ok: true, read: true, figures: got });
+          earningsOcr(file, function (e2, second) {
+            done(200, { ok: true, read: true, figures: Earnings.acceptanceScreen(e2 ? [first] : [first, second]) });
+          }, '6');
+        });
+      });
+    });
+  }
+
+  var jsonType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (jsonType !== 'application/json') {
+    req.resume();
+    return answer(415, { ok: false, error: 'send JSON' });
+  }
+  if (pathname === '/api/gold') {
+    return readJsonBody(req, function (err, body) {
+      if (err || !body || Array.isArray(body)) return answer(400, { ok: false, error: 'not a JSON object' });
+      var others = Object.keys(body).filter(function (k) { return k !== 'goal' && k !== 'uber'; });
+      if (others.length) return answer(400, { ok: false, error: 'only goal and uber can be set here; refused: ' + others.join(', ') });
+      var S = goldStrategy();
+      if (body.goal !== undefined && (typeof body.goal !== 'number' || !(body.goal >= 1 && body.goal <= 99))) {
+        return answer(400, { ok: false, error: 'goal must be a percent from 1 to 99' });
+      }
+      var uber;
+      if (body.uber === null) uber = null;
+      else if (body.uber !== undefined) {
+        var u = body.uber;
+        if (!u || typeof u !== 'object' || Array.isArray(u)) return answer(400, { ok: false, error: 'uber must be an object or null' });
+        uber = S.uberFigures({ requests: u.requests, accepted: u.accepted, declined: u.declined, last10: u.last10,
+                               read: u.read });
+        if (!uber) {
+          return answer(400, { ok: false, error: 'Uber\'s figures: requests 1 to 100, accepted and declined adding up to them, '
+                                                 + 'last 10 from 0 to 10' });
+        }
+      }
+      fileLock('gold', function (release) {
+        readJournal(function (rows) {
+          var now = Date.now();
+          var was = goldSettings(rows || []);
+          var row = { v: GOLD_ROW_V, kind: 'gold', id: 'gold', seq: now, at: now,
+                      goal: body.goal !== undefined ? Math.round(body.goal) : Math.round(was.goal * 100),
+                      uber: uber === undefined ? was.uber : uber };
+          if (row.uber) {
+            row.uber = { requests: row.uber.requests, accepted: row.uber.accepted, declined: row.uber.declined,
+                         last10: row.uber.last10, read: row.uber.read, at: uber === undefined ? row.uber.at : now };
+          }
+          appendLines(JSON.stringify(row) + '\n', function (appendErr) {
+            release();
+            if (appendErr) return answer(500, { ok: false, error: 'could not save' });
+            answer(200, { ok: true, settings: goldSettings([row]) });
+          });
+        });
+      });
+    });
+  }
+  req.resume();
+  return answer(404, { ok: false, error: 'no such gold endpoint' });
 }
 
 function serveFile(req, res, file, type) {

@@ -1163,7 +1163,89 @@
     return out;
   }
 
+  /* --- Uber's Acceptance rate screen (the owner, 15 Nov 2026) -------------
+   *
+   * Uber Pro's own figures, read off a screenshot of that screen for the
+   * offers page's Gold card to show beside the rig's count (tools/strategy.js
+   * section 6). The screen, as tesseract reads it (rpi/testearnings.py
+   * acceptance_screen draws an invented copy):
+   *
+   *     23%
+   *     Acceptance rate
+   *     4/10 last 10 exclusive requests
+   *     ...Uber's explanation...
+   *     Based on your last 100 exclusive requests
+   *     Exclusive trip requests 100
+   *     Accepted 23
+   *     Declined 77
+   *
+   * At some sizes tesseract's `--psm 4` loses the right-hand figures of the
+   * box (server.js asks again with `--psm 6`), so a label with no figure on
+   * its line takes the next lines' bare numbers, in the box's order. What is
+   * returned is checked, never mended: the three must add up (requests =
+   * accepted + declined, at most 100) and the big percentage, where read,
+   * must be accepted ÷ requests to the percent; else `ok` is false and
+   * `problems` says why, and the page asks for the figures to be typed. */
+  var ACC_RATE = /^\s*(\d{1,3})\s?%\s*$/m;
+  // "4/10", and as tesseract has read it at one size, "2/110" (the slash's
+  // foot taken for a 1).
+  var ACC_LAST = /(?:^|\s)(\d{1,2})\s?\/\s?1?10\b[^\n]*last/im;
+  var ACC_ROWS = [['requests', /exclusive\s+trip\s+requests[ \t]*(\d{1,3})?[ \t]*$/im],
+                  ['accepted', /^\s*accepted[ \t]*(\d{1,3})?[ \t]*$/im],
+                  ['declined', /^\s*declined[ \t]*(\d{1,3})?[ \t]*$/im]];
+
+  function acceptanceFields(t) {
+    var out = { requests: null, accepted: null, declined: null, rate: null, last10: null };
+    var m = ACC_RATE.exec(t);
+    if (m && +m[1] <= 100) out.rate = +m[1];
+    m = ACC_LAST.exec(t);
+    if (m && +m[1] <= 10) out.last10 = +m[1];
+    var box = t.search(/based\s+on\s+your\s+last/i);
+    var tail = box >= 0 ? t.slice(box) : t;
+    var missing = [];
+    ACC_ROWS.forEach(function (r) {
+      var mm = r[1].exec(tail);
+      if (mm && mm[1] !== undefined) out[r[0]] = +mm[1];
+      else if (mm) missing.push(r[0]);
+    });
+    if (missing.length) {
+      // Figures read apart from their labels: the bare numbers after the
+      // last label, in the box's order.
+      var lastLabel = tail.search(/^\s*declined\b/im);
+      var bare = (lastLabel >= 0 ? tail.slice(lastLabel) : '').split(/\n/).map(function (l) { return l.trim(); })
+        .filter(function (l) { return /^\d{1,3}$/.test(l); }).map(Number);
+      if (bare.length === missing.length) missing.forEach(function (k, i) { out[k] = bare[i]; });
+    }
+    return out;
+  }
+
+  // `texts`: one reading, or several of the same picture (server.js reads it
+  // with --psm 4, then --psm 6 where that left a figure out): each figure is
+  // the first reading's that has it, and the whole is then checked.
+  function acceptanceScreen(texts) {
+    var list = (Array.isArray(texts) ? texts : [texts]).map(function (x) { return String(x || ''); });
+    var out = { requests: null, accepted: null, declined: null, rate: null, last10: null, ok: false, problems: [] };
+    var any = list.filter(function (t) { return /acceptance\s+rate/i.test(t); });
+    if (!any.length) { out.problems.push('not Uber\'s Acceptance rate screen'); return out; }
+    any.forEach(function (t) {
+      var f = acceptanceFields(t);
+      Object.keys(f).forEach(function (k) { if (out[k] === null && f[k] !== null) out[k] = f[k]; });
+    });
+    if (out.requests === null && out.accepted !== null && out.declined !== null) out.requests = out.accepted + out.declined;
+    ['requests', 'accepted', 'declined'].forEach(function (k) { if (out[k] === null) out.problems.push(k + ' not read'); });
+    if (!out.problems.length) {
+      if (out.accepted + out.declined !== out.requests) out.problems.push('accepted and declined do not add up to the requests');
+      if (out.requests < 1 || out.requests > 100) out.problems.push('requests outside 1 to 100');
+      if (out.rate !== null && out.requests && Math.abs(out.rate - Math.round(100 * out.accepted / out.requests)) > 1) {
+        out.problems.push('the percentage is not accepted ÷ requests');
+      }
+    }
+    out.ok = !out.problems.length;
+    return out;
+  }
+
   return {
+    acceptanceScreen: acceptanceScreen,
     compareOf: compareOf, daySummary: daySummary, PAY_FLAG: PAY_FLAG, PAY_FLAG_SHARE: PAY_FLAG_SHARE,
     ON_TIME_MIN: ON_TIME_MIN, ON_TIME_SHARE: ON_TIME_SHARE, MILES_SAME: MILES_SAME,
     MILES_SAME_SHARE: MILES_SAME_SHARE, BIGGEST_GAPS: BIGGEST_GAPS,

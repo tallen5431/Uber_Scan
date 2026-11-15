@@ -981,6 +981,36 @@ FEEDS['records'] = dict(FEEDS['took six'], records=[REC_TWO, REC_ONE])
 # the offers page"; journal.html clock12).
 FEEDS['in the car 24h'] = FEEDS['in the car']
 
+# The Gold card (the owner, 15 Nov 2026: Gold needs a 25% acceptance rate):
+# /api/gold as the server answers it, worked out here by tools/strategy.js
+# over rpi/testgold.py's invented record — four evenings of Uber cards, 19 of
+# the last 100 accepted (one on the phone), the best line under 25% and a
+# lower one keeping it — with Uber's own figures typed beside the rig's. The
+# page asks /api/gold itself; this feed answers it (`__gold`).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import testgold as _TGOLD                                     # noqa: E402
+_GOLD_JS = r'''
+const S = require(process.argv[1]);
+const req = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const r = S.analyse(req);
+console.log(JSON.stringify({ ok: true, days: 90, settings: { goal: r.gold.goal, uber: r.gold.uber, at: 1 },
+                             gold: r.gold, lines: S.goldLines(r.gold, r.floors), floors: { curveOffers: 30 },
+                             tesseract: false }));
+'''
+_gold_rows = _TGOLD.rows(NOW)
+_gold_took = set(r['id'] for r in _gold_rows if r.get('kind') == 'mark' and r.get('accepted') is True)
+_gold_ans = json.loads(subprocess.run(
+    ['node', '-e', _GOLD_JS, os.path.join(ROOT, 'tools', 'strategy.js')],
+    # The offers as the server's fold hands them over: a Took's mark as the
+    # row's `accepted`.
+    input=json.dumps({'offers': [dict(r, accepted=True) if r['id'] in _gold_took else r
+                                 for r in _gold_rows if r.get('kind') is None],
+                      'earnings': [r for r in _gold_rows if r.get('kind') == 'earning'],
+                      'orders': [], 'light': True,
+                      'gold': {'goal': 25, 'uber': {'requests': 100, 'accepted': 21, 'declined': 79, 'last10': 3}}}),
+    capture_output=True, text=True, timeout=60).stdout)
+FEEDS['gold'] = dict(FEEDS['took six'], __gold=_gold_ans)
+
 DRIVER = r'''
 const { chromium } = require('playwright');
 const [base, feedsPath, queriesJson] = process.argv.slice(2);
@@ -1089,6 +1119,12 @@ const STUB = (feed) => `
         }
         return r;
       });
+    }
+    // The Gold card's answer, on a feed that has one; every other feed's
+    // /api/gold goes to the real server (an empty journal there).
+    if (FEED.__gold && String(url).indexOf('/api/gold') === 0) {
+      return Promise.resolve({ ok: true, status: 200,
+        json: () => Promise.resolve(JSON.parse(JSON.stringify(FEED.__gold))) });
     }
     // The orders in the car, on a feed that names them (paintInCar).
     if (FEED.__status && String(url).indexOf('/api/status') === 0) {
@@ -1252,6 +1288,7 @@ const TEXT = (sel) => {
         firstAsked: ((window.__asked || []).filter(
           (u) => String(u).indexOf('/api/journal?') === 0)[0]) || '',
         rows: document.querySelectorAll('#log details.offer').length,
+        goldMini: !document.getElementById('goldMini').hidden,
         // Close the shift as it lands: absent, or the one line it folds to.
         review: document.getElementById('review').hidden ? null : text('#reviewSays'),
         asked: window.__asked.length,
@@ -1408,6 +1445,7 @@ const TEXT = (sel) => {
         figures: ['p25', 'p50', 'p75'].map(
           (id) => document.getElementById(id).textContent.trim()),
         rows: document.querySelectorAll('#log details.offer').length,
+        goldMini: !document.getElementById('goldMini').hidden,
       }));
     }
     // [order record] The block under an order's row, and the CSV the page
@@ -1430,6 +1468,23 @@ const TEXT = (sel) => {
                  one: flat(block(d1)), two: flat(block(row('r2'))), three: !!block(row('r3')),
                  csvShown: !a.hidden, download: a.getAttribute('download'), csv: csv,
                  asked: (window.__asked || []).filter((u) => u.indexOf('blob:') !== 0) };
+      });
+    }
+    if (name === 'gold') {
+      out[name].gold = await page.evaluate(() => {
+        const flat = (el) => el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        const card = document.getElementById('gold');
+        const mini = document.getElementById('goldMini');
+        return { shown: !card.hidden, rate: flat(document.getElementById('goldRate')),
+                 of: flat(document.getElementById('goldOf')),
+                 tiles: [].slice.call(document.querySelectorAll('#goldTiles > div')).map(
+                   (d) => [].slice.call(d.children).map(flat).join(' ')),
+                 lines: [].slice.call(document.querySelectorAll('#goldLines li')).map(flat),
+                 fill: document.getElementById('goldFill').style.width,
+                 goal: document.getElementById('goldGoal').style.left,
+                 form: ['goldGoalIn', 'goldReq', 'goldAcc', 'goldDec', 'goldLast'].map(
+                   (id) => document.getElementById(id).value),
+                 mini: mini.hidden ? null : [].slice.call(mini.querySelectorAll('b, small, .go')).map(flat).join(' ') };
       });
     }
     if (name === 'leg') {
@@ -1540,6 +1595,7 @@ const TEXT = (sel) => {
       // the rows underneath it, would be exactly the thing being replaced.
       out[name].stillThere = await page.evaluate(() => ({
         rows: document.querySelectorAll('#log details.offer').length,
+        goldMini: !document.getElementById('goldMini').hidden,
         padded: document.body.classList.contains('sheeted'),
         url: location.pathname,
       }));
@@ -1897,6 +1953,7 @@ const TEXT = (sel) => {
                  review: !document.getElementById('review').hidden,
                  reviewRows: document.querySelectorAll('#reviewList .ask').length,
                  rows: document.querySelectorAll('#log details.offer').length,
+        goldMini: !document.getElementById('goldMini').hidden,
                  days: document.querySelectorAll('#log .day').length,
                  nothing: document.getElementById('nothing').hidden ? null
                    : (document.getElementById('nothing').textContent || '').slice(0, 40),
@@ -2290,6 +2347,34 @@ try:
         ok_('%s was rendered' % name, got.get(name) is not None)
     if any(got.get(n) is None for n in FEEDS):
         raise SystemExit(1)
+
+    # --- the Gold card (the owner, 15 Nov 2026) ---------------------------------
+    _gd = (got.get('gold') or {}).get('gold') or {}
+    ok_('[gold] the card is shown, the big figure Uber\'s own rate, the rig\'s count beside it',
+        _gd.get('shown') and _gd.get('rate') == '21%'
+        and _gd.get('of') == 'Uber\u2019s screen: 21 of 100 \u00b7 the rig saw 19 of 100')
+    eq('[gold] ...the bar filled to the rate, the goal ticked at 25%', (_gd.get('fill'), _gd.get('goal')),
+       ('21%', 'calc(25% - 1px)'))
+    eq('[gold] the two lines and the gap, worded "the line that would have"', (_gd.get('tiles') or [])[:3],
+       ['The line that would have paid most $20+/hr ~$21.59/hr on shift \u00b7 18% of requests',
+        'The best that keeps 25% $18+/hr ~$20.74/hr \u00b7 27% of requests',
+        'Keeping 25% costs ~$0.85/hr on this record'])
+    ok_('[gold] ...the path to the goal from Uber\'s window, worst case',
+        any(t.startswith('To reach 25%') and 'worst case' in t for t in _gd.get('tiles') or []))
+    ok_('[gold] the full lines: the rig\'s count with phone accepts and what was left out, Uber\'s typed '
+        'figures beside it, the gap, and Uber Pro\'s own terms',
+        any('accepted 19 of the last 100 exclusive requests (19%)' in l and '1 was accepted on the phone' in l
+            and '2 Trip Radar cards' in l for l in _gd.get('lines') or [])
+        and any(l.startswith("Uber's own screen (typed): 21 of 100") for l in _gd.get('lines') or [])
+        and any('keeping 25% costs about $0.85/hr' in l and 'Not a rule' in l for l in _gd.get('lines') or [])
+        and any("Check Uber Pro's own terms" in l for l in _gd.get('lines') or []))
+    no_('[gold] ...and never tells the driver to accept or decline a card',
+        any(re.search(r'\b(accept|decline) (this|it)\b', l, re.I) for l in _gd.get('lines') or []))
+    eq('[gold] the form holds the goal and Uber\'s typed figures', _gd.get('form'), ['25', '100', '21', '79', '3'])
+    eq('[gold] Today\'s one line: the rate against the goal, whose figures they are',
+       _gd.get('mini'), 'Gold: 21% of a 25% goal Uber\u2019s own figures; the rig saw 19 of 100 \u203a')
+    no_('[gold] a feed with no /api/gold answer (the real server\'s empty journal) shows no Today line',
+        (got.get('took six') or {}).get('goldMini'))
 
     # --- the 12-hour clock, whatever the browser's locale (the owner, 2 Nov) ---
     _w12 = (got.get('in the car 24h') or {}).get('whens') or []

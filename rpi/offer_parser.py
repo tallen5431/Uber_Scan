@@ -4734,6 +4734,28 @@ def is_addon(text, pay, where):
         return True
     at = next((pos for v, pos in where if v == pay), None)
     return at is not None and bool(ADDON_PAY.search(text[max(0, at - 3):at]))
+# Uber's "Exclusive" tag, as a LABEL (the owner, 15 Nov 2026: Uber Pro's
+# acceptance rate counts exclusive requests only). True where the tag is read,
+# "Exclusive x" or clipped to "xclusive"; 'early' where "Early look" is (Uber
+# does not say whether those count, so they are kept apart); None otherwise —
+# unknown, never "not exclusive": in re-reads of one evening's Uber cards 29
+# of 43 carried the tag, and of the 14 without it most were ordinary cards
+# whose tag sat above the crop. Never on a DoorDash card. Feeds no pay,
+# minutes, miles, verdict or rate: tools/strategy.js counts requests with it.
+# The JavaScript twin is exclusiveTag.
+EXCLUSIVE_TAG = re.compile(r'\be?xclusive\b', re.IGNORECASE | ASCII)
+EARLY_LOOK = re.compile(r'\bearly [lt]ook\b', re.IGNORECASE | ASCII)
+
+
+def exclusive_tag(text):
+    """True, 'early' or None for a card's text: see EXCLUSIVE_TAG."""
+    if SCREEN_DD_OFFER.search(text):
+        return None
+    if EARLY_LOOK.search(text):
+        return 'early'
+    return True if EXCLUSIVE_TAG.search(text) else None
+
+
 SCREEN_UBER_OFFER = re.compile(
     r'\d ?min\w* ?\( ?\d|\bmi\)? ?total\b|includes expected tip|\bincl[.,]? ?tip\b'
     r'|\bexclusive\b|est[.,]? ?delivery|\bverified\b|avg[.,]? ?wait time'
@@ -6685,6 +6707,8 @@ def parse(raw_text):
         # one in the car on the same trip, never instead of it: server.js
         # holds it beside that order at ✓ Took (placeTook). See is_addon.
         'addon': is_addon(mine, pay, _where),
+        # ...and Uber's Exclusive tag, a label only. See exclusive_tag.
+        'exclusive': exclusive_tag(text),
         'text': text,
         # ...and the same reading before normalize() flattened it.
         #

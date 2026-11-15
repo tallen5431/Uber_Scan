@@ -2515,6 +2515,12 @@ def strategy_orders(orders_):
         if took is None and o.get('timedBy') == 'uber':
             took = o.get('offered')
         if took is None:
+            # ...and one accepted on the phone with no Took and no timing:
+            # no hold and no time, but an accept for Uber's acceptance rate
+            # (strategy.js section 6).
+            if o.get('how') == 'accepted on the phone':
+                out.append({'id': o['id'], 'tookAt': None, 'how': 'phone', 'app': o.get('app'),
+                            'addon': bool(o.get('addon'))})
             continue
         rec = o.get('record') or {}
         flags = rec.get('flags') if isinstance(rec.get('flags'), list) else []
@@ -2531,6 +2537,18 @@ def strategy_orders(orders_):
     return out
 
 
+def gold_setting(rows):
+    """The offers page's Gold card setting (server.js /api/gold): the newest
+    `gold` row's goal and Uber's own figures, else None (strategy.js then
+    takes 25% and no figures)."""
+    best = None
+    for r in rows:
+        if r.get('kind') == 'gold' and _num(r.get('at')) is not None \
+                and (best is None or r['at'] >= best['at']):
+            best = r
+    return {'goal': best.get('goal'), 'uber': best.get('uber')} if best else None
+
+
 def strategy(rows, reps, node=None):
     """tools/strategy.js's answer over the days in `reps`, or {'error': why}.
     The driver's line is the newest offer row's own `target` in the window
@@ -2542,7 +2560,7 @@ def strategy(rows, reps, node=None):
         if _num(r.get('target')) is not None:
             target = r['target']
     req = {'offers': offers, 'orders': strategy_orders([o for rep in reps for o in rep['orders']]),
-           'target': target}
+           'target': target, 'gold': gold_setting(rows)}
     node = node or shutil.which('node') or shutil.which('nodejs')
     if not node:
         return {'error': 'node is not on this machine, so tools/strategy.js could not be run'}

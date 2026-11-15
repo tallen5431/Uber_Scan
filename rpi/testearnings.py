@@ -182,6 +182,46 @@ def screen(trips=None, day='Sat, Nov 7', chip='11/7', end='End of activities dur
     return im.crop((0, 0, W, max(H, y + 20)))
 
 
+def acceptance_screen(rate=23, last10=4, requests=100, accepted=23, declined=77, scale=1.0):
+    """Uber's Acceptance rate screen (Uber Pro -> Acceptance rate), as the
+    owner's screenshot of 15 Nov 2026 laid it out, every figure invented: a
+    big "23%" over "Acceptance rate", a "4/10" for the last ten exclusive
+    requests, Uber's explanation in small grey type, and a box "Based on your
+    last 100 exclusive requests" with three rows. Black on white, as that
+    screen is. `scale` draws it at another phone's size."""
+    def f(size, bold=False):
+        return font(int(round(size * scale)), bold)
+
+    def at(v):
+        return int(round(v * scale))
+    w, h = at(W), at(1500)
+    im = Image.new('RGB', (w, h), (255, 255, 255))
+    d = ImageDraw.Draw(im)
+    d.text((at(24), at(8)), '7:41', font=f(22, True), fill=INK)
+    d.text((at(24), at(70)), '<', font=f(40), fill=INK)
+    d.text((at(24), at(170)), '%d%%' % rate, font=f(96, True), fill=INK)
+    d.text((at(24), at(300)), 'Acceptance rate', font=f(30), fill=GREY)
+    d.text((at(24), at(390)), '%d/10' % last10, font=f(40, True), fill=TIP_GREEN)
+    d.text((at(160), at(398)), 'last 10 exclusive requests', font=f(26), fill=GREY)
+    y = at(490)
+    for line in ('Your acceptance rate is the percentage of exclusive trip',
+                 'requests that you accepted over the last 100 requests.',
+                 'Exclusive trip requests are requests sent directly to you.',
+                 'Your acceptance rate excludes Trip Radar requests.'):
+        d.text((at(24), y), line, font=f(22), fill=GREY)
+        y += at(36)
+    y += at(40)
+    d.rounded_rectangle([at(24), y, w - at(24), y + at(330)], radius=at(18), outline=(220, 220, 220), width=2)
+    d.text((at(48), y + at(30)), 'Based on your last 100 exclusive requests', font=f(26, True), fill=INK)
+    y += at(110)
+    for label, v in (('Exclusive trip requests', requests), ('Accepted', accepted), ('Declined', declined)):
+        d.text((at(48), y), label, font=f(28), fill=INK)
+        s = str(v)
+        d.text((w - at(48) - d.textlength(s, font=f(28, True)), y), s, font=f(28, True), fill=INK)
+        y += at(70)
+    return im
+
+
 def save(im, path, kind='PNG'):
     im.save(path, kind)
     return path

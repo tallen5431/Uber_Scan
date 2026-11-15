@@ -2570,6 +2570,22 @@
     }
     return at !== null && ADDON_PAY.test(text.slice(Math.max(0, at - 3), at));
   }
+  /* Uber's "Exclusive" tag, as a LABEL (the owner, 15 Nov 2026: Uber Pro's
+     acceptance rate counts exclusive requests only). true where the tag is
+     read, "Exclusive x" or clipped to "xclusive"; 'early' where "Early look"
+     is (Uber does not say whether those count, so they are kept apart);
+     null otherwise — unknown, never "not exclusive": in re-reads of one
+     evening's Uber cards 29 of 43 carried the tag, and of the 14 without
+     it most were ordinary cards whose tag sat above the crop. Never on a
+     DoorDash card. Feeds no pay, minutes, miles, verdict or rate: tools/
+     strategy.js counts requests with it. The Python twin is exclusive_tag. */
+  var EXCLUSIVE_TAG = /\be?xclusive\b/i;
+  var EARLY_LOOK = /\bearly [lt]ook\b/i;
+  function exclusiveTag(text) {
+    if (SCREEN_DD_OFFER.test(text)) return null;
+    if (EARLY_LOOK.test(text)) return 'early';
+    return EXCLUSIVE_TAG.test(text) ? true : null;
+  }
   var SCREEN_UBER_OFFER = new RegExp(
     '\\d ?min\\w* ?\\( ?\\d|\\bmi\\)? ?total\\b|includes expected tip|\\bincl[.,]? ?tip\\b'
     + '|\\bexclusive\\b|est[.,]? ?delivery|\\bverified\\b|avg[.,]? ?wait time'
@@ -4299,6 +4315,8 @@
       // ...and whether it is Uber's add-on, carried WITH the order in the car
       // on one trip, never instead of it (server.js placeTook). See isAddon.
       addon: isAddon(mine, pay, payWhere),
+      // ...and Uber's Exclusive tag, a label only. See exclusiveTag.
+      exclusive: exclusiveTag(text),
       text: text,
       /* ...and the same reading before normalize() flattened it.
        *
@@ -4664,7 +4682,7 @@
            plannerBounded: plannerBounded, plannerEnds: plannerEnds,
            plannerTitled: plannerTitled, plannerLaidOut: plannerLaidOut,
            plannerFramed: plannerFramed, plannerFoot: plannerFoot,
-           screenType: screenType, SCREENS: SCREENS, deliveredScreen: deliveredScreen,
+           screenType: screenType, SCREENS: SCREENS, exclusiveTag: exclusiveTag, deliveredScreen: deliveredScreen,
            looksLikeAPlace: looksLikeAPlace,
            isComplete: isComplete, isWhole: isWhole, toPickup: toPickup,
            /* Exported so the default can be checked directly. Everything that

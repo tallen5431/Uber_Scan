@@ -15404,6 +15404,99 @@ finally:
 shutil.rmtree(_ework, ignore_errors=True)
 
 
+# --- Uber's acceptance rate: the offers page's Gold card (15 Nov 2026) -----------
+# The owner: "To get the gold tier status for Uber I need to have a 25%
+# acceptance rate ... see the optimal threshold of offers to accept that would
+# make the most money", and Uber's own screen: the last 100 exclusive
+# requests, Trip Radar left out. /api/gold is tools/strategy.js section 6 over
+# the journal; rpi/testgold.py is the invented record (four evenings, 180
+# Uber cards, 32 Took'd, one accepted on the phone, Trip Radar, Early look and
+# DoorDash beside them).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import testgold as TG                                          # noqa: E402
+
+
+
+def _gold_rows_of(path):
+    # `lines` is a list by this point in the file; the journal's rows read here.
+    return [json.loads(l) for l in open(path) if l.strip()]
+
+
+_gwork = tempfile.mkdtemp()
+try:
+    _gj = os.path.join(_gwork, 'journal.jsonl')
+    write(_gj, TG.rows(NOW))
+    _gp, _gb = start({'SCANNER': '0'}, _gj)
+    try:
+        _g = get(_gb, '/api/gold')
+        _gg = _g.get('gold') or {}
+        _rig = _gg.get('rig') or {}
+        eq('[gold] the rig\'s last 100 Uber requests: 19 accepted (18 Took\'d, 1 on the phone), 96 tagged, 2 of the last 10',
+           (_rig.get('n'), _rig.get('accepted'), _rig.get('phone'), _rig.get('tagged'), (_rig.get('last10') or {}).get('accepted')),
+           (100, 19, 1, 96, 2))
+        _c = _gg.get('counts') or {}
+        eq('[gold] ...Trip Radar, Early look and DoorDash left out and counted; the untagged cards counted',
+           (_c.get('radar'), _c.get('early'), _c.get('doordash'), _c.get('untagged')), (2, 1, 5, 4))
+        _ln = _gg.get('line') or {}
+        eq('[gold] the best Uber line keeps 18% and the best that keeps 25% is lower',
+           ((_ln.get('best') or {}).get('T'), (_ln.get('best') or {}).get('share'), (_ln.get('kept') or {}).get('T'),
+            _ln.get('already')), (20, 0.18, 18, False))
+        eq('[gold] the goal is 25% with nothing set, and no Uber figures', ((_g.get('settings') or {}).get('goal'),
+           (_g.get('settings') or {}).get('uber')), (0.25, None))
+        ok_('[gold] the lines say "as the rig saw it", the gap, and point at Uber Pro\'s own terms',
+            any('as the rig saw it' in l for l in _g.get('lines') or [])
+            and any('keeping 25% costs about $' in l for l in _g.get('lines') or [])
+            and any("Check Uber Pro's own terms" in l for l in _g.get('lines') or []))
+        # Uber's own figures, typed: kept as a `gold` row, shown beside the rig's.
+        _s, _a = post(_gb, '/api/gold', {'goal': 25, 'uber': {'requests': 100, 'accepted': 21, 'declined': 79,
+                                                                'last10': 3}})
+        eq('[gold] typed: Uber\'s figures saved', (_s, ((_a.get('settings') or {}).get('uber') or {}).get('rate')),
+           (200, 0.21))
+        _g2 = get(_gb, '/api/gold')
+        eq('[gold] ...shown beside the rig\'s, and the path starts from Uber\'s window, worst case',
+           ((_g2['gold'].get('uber') or {}).get('accepted'), (_g2['gold'].get('uber') or {}).get('read'),
+            (_g2['gold'].get('path') or {}).get('from'), [p['need'] for p in (_g2['gold'].get('path') or {}).get('worst', [])]),
+           (21, 'typed', 'uber', [14, 25, 25, 25]))
+        ok_('[gold] ...in words', any(l.startswith("Uber's own screen (typed): 21 of 100 exclusive requests (21%), 79 declined; 3/10")
+                                      for l in _g2.get('lines') or []))
+        _rowsg = [r for r in _gold_rows_of(_gj) if r.get('kind') == 'gold']
+        eq('[gold] ...one `gold` row in the journal, with the goal and the three figures',
+           (len(_rowsg), _rowsg[-1].get('goal'), (_rowsg[-1].get('uber') or {}).get('declined')), (1, 25, 79))
+        _s, _a = post(_gb, '/api/gold', {'goal': 30})
+        eq('[gold] the goal alone changes, Uber\'s figures kept', (_s, _a['settings']['goal'],
+           (_a['settings'].get('uber') or {}).get('accepted')), (200, 0.3, 21))
+        _bad = [post(_gb, '/api/gold', b)[0] for b in (
+            {'uber': {'requests': 100, 'accepted': 30, 'declined': 60}},     # does not add up
+            {'uber': {'requests': 140, 'accepted': 30, 'declined': 110}},    # past Uber's window
+            {'goal': 140}, {'goal': '25'}, {'target': 30})]
+        eq('[gold] refused: figures that do not add up, past 100, a goal out of range or not a number, another field',
+           _bad, [400, 400, 400, 400, 400])
+        _s, _a = _eraw(_gb, '/api/gold', b'goal=25', 'application/x-www-form-urlencoded')
+        eq('[gold] ...and anything that is not JSON (a cross-site form cannot)', _s, 415)
+        _s, _a = post(_gb, '/api/gold', {'uber': None})
+        eq('[gold] uber: null forgets Uber\'s figures', (_s, _a['settings'].get('uber')), (200, None))
+        # The reader: a screenshot of Uber's screen, read and NOT kept.
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import testearnings as TE                                    # noqa: E402
+        if shutil.which('tesseract') and TE.available():
+            _before = len(_gold_rows_of(_gj))
+            _s, _a = _eraw(_gb, '/api/gold/shot', _epng(TE.acceptance_screen(rate=17, last10=2, requests=100, accepted=17,
+                                                                                declined=83)), 'image/png')
+            _f = _a.get('figures') or {}
+            eq('[gold] a screenshot of Uber\'s screen is read: the three figures, the percentage and the last ten',
+               (_s, _a.get('read'), _f.get('requests'), _f.get('accepted'), _f.get('declined'), _f.get('rate'),
+                _f.get('last10'), _f.get('ok')), (200, True, 100, 17, 83, 17, 2, True))
+            eq('[gold] ...and nothing is written or kept for it: the page saves what it shows', len(_gold_rows_of(_gj)), _before)
+            ok_('[gold] ...no picture left behind in the temporary folder',
+                not [n for n in os.listdir(tempfile.gettempdir()) if n.startswith('uberscan-gold-')])
+        _s, _a = _eraw(_gb, '/api/gold/shot', b'not a picture at all', 'image/png')
+        eq('[gold] ...a body that is not a picture is refused', _s, 415)
+    finally:
+        stop(_gp)
+finally:
+    shutil.rmtree(_gwork, ignore_errors=True)
+
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)
 sys.exit(1 if bad else 0)

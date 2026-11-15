@@ -1406,6 +1406,28 @@ function nbx() {
   ok('...with no trips uploaded, one sentence', /No earnings screenshots have been uploaded yet/.test(
     P.html(P.analyse(wRows, wTaken, [], function () { return null; }, { now: 0, earnings: [] }))));
   eq('...and a report with no earnings handed (an older server) has no such part', /id="s-paid"/.test(pageW), false);
+
+  // Uber's acceptance rate (15 Nov 2026; the owner: Gold needs 25%):
+  // strategy.js section 6 through the Strategy tab, with the goal and Uber's
+  // own figures the offers page saved (/api/gold). Every card here made
+  // Uber's, tagged Exclusive; one computation, so the report's gold is the
+  // module's over the same rows and takes.
+  var uRows = wRows.map(function (o) { return Object.assign({}, o, { app: 'uber', exclusive: true }); });
+  var goldSet = { goal: 0.3, uber: { requests: 100, accepted: 22, declined: 78, last10: 3, read: 'typed' } };
+  var repG = P.analyse(uRows, wTaken, [], function () { return null; }, { now: 0, gold: goldSet });
+  var pageG = P.html(repG);
+  eq('gold: the report\'s acceptance figures are strategy.js\'s (one computation)',
+     [repG.strategy.gold.rig, repG.strategy.gold.uber, repG.strategy.gold.goal],
+     (function (g) { return [g.rig, g.uber, g.goal]; }(S.analyse({ offers: uRows, orders: P.strategyOrders(wTaken, [], null),
+                                                              gold: goldSet }).gold)));
+  ok('...its lines on the Strategy tab: as the rig saw it, Uber\'s typed figures, the goal set, Uber Pro\'s own terms',
+     /Uber acceptance, as the rig saw it: accepted/.test(STRATEGY_OF(pageG))
+     && STRATEGY_OF(pageG).indexOf(esc0("Uber's own screen (typed): 22 of 100 exclusive requests (22%), 78 declined")) >= 0
+     && /The goal is 30%/.test(STRATEGY_OF(pageG)) && STRATEGY_OF(pageG).indexOf(esc0("Check Uber Pro's own terms")) >= 0);
+  ok('...and Uber\'s curve with the share each line kept, under the curve\'s own points',
+     /<h3 id="s-gold">Uber acceptance — the line that keeps 30%<\/h3>/.test(STRATEGY_OF(pageG))
+     && STRATEGY_OF(pageG).indexOf('id="s-points"') < STRATEGY_OF(pageG).indexOf('id="s-gold"')
+     && /requests at or above it/.test(STRATEGY_OF(pageG)) && /Not a rule/.test(STRATEGY_OF(pageG)));
   function STRATEGY_OF(page) {
     var a = page.indexOf('<section data-tab="strategy">');
     return a < 0 ? '' : page.slice(a, page.indexOf('</section>', a));
@@ -1676,6 +1698,12 @@ function nbx() {
     var srvM = await server(function (req, res) {
       if (/^\/api\/journal/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify(mainJ)); return; }
       if (/^\/api\/earnings\?/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify({ ok: true, entries: mainE })); return; }
+      if (/^\/api\/gold$/.test(req.url)) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, settings: { goal: 0.3, uber: { requests: 100, accepted: 22, declined: 78, last10: 3,
+                                                                          read: 'screenshot' } } }));
+        return;
+      }
       if (/^\/api\/nbx$/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify({ ok: true, search: false, streets: false, route: false })); return; }
       if (/^\/api\/streets$/.test(req.url)) { res.writeHead(200); res.end(JSON.stringify({ ok: true, loaded: true })); return; }
       if (/^\/api\/streets\/cross/.test(req.url)) {
@@ -1715,6 +1743,8 @@ function nbx() {
     }()));
     ok('...and drawn as the Strategy tab\'s card vs paid', /<h3 id="s-paid">Card vs paid<\/h3>/.test(page2)
        && /over 1 matched order/.test(page2));
+    ok('...the Gold card\'s goal and Uber\'s figures are read from the source (/api/gold) for the acceptance lines',
+       page2.indexOf(esc0("Uber's own screen (screenshot): 22 of 100")) >= 0 && /The goal is 30%/.test(page2));
     ok('...the cache holds the street index\'s answer', /\/cross\?/.test(fs.readFileSync(path.join(tmp, 'cache.json'), 'utf8')));
     // A Nominatim down for the whole run (review, 27 Oct): every pickup
     // unplaced for it, not for where it is. Nothing is written and the run

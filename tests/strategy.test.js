@@ -374,12 +374,148 @@ eq('the lines say it once, with n, the pending left out, each app\'s, and that n
               + '(thin). Descriptive: no verdict reads it.']);
 eq('...and name no restaurant (the end-of-shift report prints these lines, and names no place)',
    rp.lines.filter(function (l) { return /Pizza|Burgers|Noodles|Bistro/.test(l); }), []);
+// ...less the acceptance lines, which a matched trip moves on purpose: a
+// trip the earnings screen matched to a card is an accept (section 6).
+function noGold(r) {
+  var g = S.goldLines(r.gold, r.floors);
+  return r.lines.filter(function (l) { return g.indexOf(l) === -1; });
+}
 eq('...the rest of the answer as it was without earnings; and with none handed, no paid half and no line',
-   [rp.curve.best, rp.lines.filter(function (l) { return paidLine.indexOf(l) === -1; }),
+   [rp.curve.best, noGold(rp).filter(function (l) { return paidLine.indexOf(l) === -1; }),
     S.analyse({ offers: two, orders: ords, costPerMile: 0.3, target: 25 }).paid],
-   [r1.curve.best, r1.lines, undefined]);
+   [r1.curve.best, noGold(r1), undefined]);
 eq('...and with earnings handed but no trip uploaded yet, no line',
    S.paidLines(S.cardVsPaid([])), []);
+
+/* --- 6. Uber's acceptance rate, and the line that keeps the goal ----------
+ *
+ * The owner: "the optimal threshold of offers to accept that would make the
+ * most money and help me reach the 25% acceptance rating", and Uber's own
+ * screen: the last 100 exclusive requests, Trip Radar left out.
+ *
+ * Record G: four evenings, each 50 cards over 1.5 h, all 30 min, no order in
+ * the car (H = 6 free hours), every card tagged Exclusive:
+ *   34 at $10/hr ($5), 8 at $20/hr ($10), 8 at $40/hr ($20).
+ * Over the four: 136 / 32 / 32.
+ *   T in (20, 40]: 32 x $20 / (6 + 32 x 0.5)          = 640 / 22  = 29.09
+ *   T in (10, 20]: (640 + 320) / (6 + 64 x 0.5)        = 960 / 38  = 25.26
+ *   T <= 10:       (960 + 680) / (6 + 200 x 0.5)       = 1640 / 106 = 15.47
+ * Shares of the 200 requests: 16% at $22+, 32% at $12-$20, 100% at $10.
+ * So the best line ($22, n=32, not thin) keeps 16%, under 25%; the best line
+ * keeping 25% is $20 (the highest of the equal $12-$20 points, 32%), and
+ * keeping it costs 29.09 - 25.26 = $3.83/hr. */
+function goldEvening(day, tag) {
+  var out = [];
+  var start = at(day, 18, 0);
+  for (var i = 0; i < 50; i++) {
+    var k = i % 25;
+    var rate = k < 17 ? 10 : k < 21 ? 20 : 40;
+    var when = start + Math.round(i * (90 / 49) * 60000);
+    out.push(card(tag + i, when, rate / 2, 30, 4, { exclusive: true }));
+  }
+  return out;
+}
+var G = goldEvening(9, 'g').concat(goldEvening(10, 'h'), goldEvening(11, 'i'), goldEvening(12, 'j'));
+var rg = S.analyse({ offers: G, orders: [] });
+var gl = rg.gold.line;
+eq('gold: the best Uber line, its n and the share of requests at it', [gl.best.T, gl.best.n, gl.best.share], [22, 32, 0.16]);
+near('...paying what the hand-worked curve says', gl.best.value, 29.09, 0.01);
+eq('...the best line that keeps 25% is lower, the highest of the equal points', [gl.kept.T, gl.kept.share, gl.highest], [20, 0.32, 20]);
+near('...and keeping 25% costs about $3.83/hr on this record', gl.gap, 3.83, 0.01);
+eq('...not already at the goal', gl.already, false);
+ok('...worded "the line that would have", with the gap, and never as advice',
+   rg.lines.some(function (l) {
+     return /line that would have paid most on this record: \$22\+\/hr/.test(l) && /keeping 25% costs about \$3\.83\/hr/.test(l)
+       && /Not a rule/.test(l);
+   }) && !rg.lines.some(function (l) { return /\b(accept|decline) (this|it)\b/i.test(l); }));
+eq('...the rig\'s window is the last 100 of the 200, none accepted', [rg.gold.rig.n, rg.gold.rig.accepted, rg.gold.rig.full],
+   [100, 0, true]);
+
+// Already above: the two plain evenings at the top (60/30/10 at $12/$24/$36):
+// the best line, $14, has 40% of the requests at it.
+var ra = S.analyse({ offers: two, orders: [] });
+eq('gold: a best line that already keeps 25% says so, with no gap', [ra.gold.line.best.T, ra.gold.line.best.share,
+   ra.gold.line.already, ra.gold.line.gap], [14, 0.4, true, 0]);
+ok('...in words', ra.lines.some(function (l) { return /That line already keeps 25% or more/.test(l); }));
+
+/* Accepts: on the newest evening of G, one card Took'd (an order handed in),
+ * one with a folded `accepted: true`, one known only from an earnings trip
+ * matched to it ("accepted on the phone, no Took"), and an add-on, taken.
+ * Plus, among the newest 100, what is left out: a Trip Radar card, an Early
+ * look card, a DoorDash offer, a reservation, and a card with no tag read
+ * (counted). Every one of them is newer than G, so the window is the last
+ * 100 Uber requests the rule counts. */
+var late = at(12, 20, 0);
+var extra = [
+  card('radar1', late + 60000, 6, 20, 3, { text: 'Trip Radar\n$6.00\n20 min (3.0 mi) total' }),
+  card('early1', late + 120000, 9, 25, 5, { exclusive: 'early', text: 'Early look - Order in progress\n$9.00' }),
+  card('dd1', late + 180000, 7, 20, 3, { app: 'doordash' }),
+  card('res1', late + 240000, 30, 60, 20, { text: 'Uber Reserve\nBe online by 6:30 PM\n$30.00' }),
+  card('plain1', late + 300000, 8, 24, 4, {}),
+  card('add1', late + 360000, 4, 10, 1, { addon: true, exclusive: true }),
+  card('acc1', late + 420000, 10, 30, 4, { exclusive: true, accepted: true })
+];
+var tookOrder = { id: 'j49', tookAt: at(12, 19, 31), app: 'uber', pay: 20, cardMinutes: 30 };
+var addOrder = { id: 'add1', tookAt: late + 400000, app: 'uber', pay: 4, cardMinutes: 10, addon: true };
+var phoneTrip = { key: 'tz1', app: 'uber', date: '2026-03-12', startedAt: '19:20', amount: 12,
+                  match: { status: 'matched', offer: 'j40', source: 'offer', said: 'accepted on the phone, no Took' } };
+var rx = S.analyse({ offers: G.concat(extra), orders: [tookOrder, addOrder], earnings: [phoneTrip] });
+var gx = rx.gold;
+eq('gold: left out and counted — Trip Radar, Early look, DoorDash, a reservation',
+   [gx.counts.radar, gx.counts.early, gx.counts.doordash, gx.counts.reserve], [1, 1, 1, 1]);
+eq('...a card with no tag read is counted, as unknown; add-ons counted by the same rule',
+   [gx.counts.untagged, gx.counts.addons, gx.rig.tagged], [1, 1, 99]);
+eq('...accepted: a Took, a folded accept, a trip accepted on the phone, and the add-on taken',
+   [gx.rig.n, gx.rig.accepted, gx.rig.phone, gx.rig.addonsTaken], [100, 4, 1, 1]);
+eq('...its last ten: 3 of 10', [gx.rig.last10.n, gx.rig.last10.accepted], [10, 3]);
+ok('...the lines give the split and say what was left out and why',
+   rx.lines.some(function (l) {
+     return /accepted 4 of the last 100 exclusive requests \(4%\)/.test(l) && /99 tagged Exclusive and 1 with the tag not read/.test(l)
+       && /1 Early look card \(Uber's screen does not say whether it counts them\)/.test(l) && /1 Trip Radar card/.test(l)
+       && /1 was accepted on the phone with no Took/.test(l) && /1 add-on in it, counted as requests \(1 taken\)/.test(l);
+   }));
+
+/* The rolling window. 100 requests with 5 accepted: each new request pushes
+ * the oldest out. Worst case, the 5 old accepts drop out first:
+ *   next 10:  window 100, 5 old accepts gone after 5 drops -> 25 needed of 10: not possible
+ *   next 25:  25 needed of 25; next 50: 25; next 100: 25.
+ * With the five accepts the NEWEST five (the rig knows the order), the next
+ * 25 drop only declines: 25 - 5 = 20 needed. */
+eq('rolling: 100 with 5 accepted, worst case, needs 25 — twenty more and then some — at every K it can be done',
+   S.pathAhead(0.25, 100, 5, null).map(function (p) { return [p.K, p.need, p.possible]; }),
+   [[10, 25, false], [25, 25, true], [50, 25, true], [100, 25, true]]);
+var seq = []; for (var si = 0; si < 100; si++) seq.push(si >= 95);
+eq('...from the rig\'s own order, the old accepts stay in for a while: 20 of the next 25',
+   S.pathAhead(0.25, 100, 5, seq).map(function (p) { return p.need; }), [20, 20, 20, 25]);
+eq('...a window still under 100 grows instead of rolling: 40 with 8 accepted needs 5 of the next 10',
+   S.pathAhead(0.25, 40, 8, null).slice(0, 1).map(function (p) { return [p.size, p.drops, p.need]; }), [[50, 0, 5]]);
+
+// Uber's own figures, typed (or read off its screen), beside the rig's.
+var ru = S.analyse({ offers: G.concat(extra), orders: [tookOrder, addOrder], earnings: [phoneTrip],
+                     gold: { goal: 25, uber: { requests: 100, accepted: 5, declined: 95, last10: 1 } } });
+eq('typed: Uber\'s three numbers and its last ten, beside the rig\'s', [ru.gold.uber.rate, ru.gold.uber.last10, ru.gold.rig.rate],
+   [0.05, 1, 0.04]);
+eq('...the path starts from Uber\'s window, worst case', [ru.gold.path.from, ru.gold.path.rigOrder,
+   ru.gold.path.worst[1].need], ['uber', null, 25]);
+ok('...and says so in words, with the 1-in-4 rule',
+   ru.lines.some(function (l) { return /Uber's own screen \(typed\): 5 of 100 exclusive requests \(5%\), 95 declined; 1\/10/.test(l); })
+   && ru.lines.some(function (l) {
+     return /not within the next 10 \(25 needed\), 25 of the next 25/.test(l) && /oldest accepts drop out of the window first/.test(l)
+       && /at least 1 in 4 from here would be at 25% after 100 more requests/.test(l);
+   }));
+eq('...figures that do not add up are refused, not mended', [S.uberFigures({ requests: 100, accepted: 30, declined: 60 }),
+   S.uberFigures({ requests: 140, accepted: 30 })], [null, null]);
+eq('...a goal typed as 30 means 30%', S.goalOf(30), 0.3);
+ok('...below the goal, what the Uber orders paid an hour beside the kept line',
+   ru.lines.some(function (l) { return /^Your Uber orders paid about \$[0-9.]+\/hr on shift .* against about \$[0-9.]+\/hr for the \$20\+ line\.$/.test(l); }));
+
+// Thin: one evening of 20 cards. No line, and the window is under 100.
+var thinG = goldEvening(9, 't').slice(0, 20);
+var rt = S.analyse({ offers: thinG, orders: [] });
+eq('thin: under 100 requests the rate is over all of them; no line drawn', [rt.gold.rig.n, rt.gold.rig.full, rt.gold.line.best],
+   [20, false, null]);
+ok('...said so', rt.lines.some(function (l) { return /fewer than 100 seen so the rate is over all of them/.test(l); })
+   && rt.lines.some(function (l) { return /not enough on record for a line yet \(20 exclusive requests\)/.test(l); }));
 
 // Run as a child, it answers one JSON request with the same analysis.
 var cp = require('child_process'), path = require('path');

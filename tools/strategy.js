@@ -38,6 +38,12 @@
  *      app paid less what the card said, by app, restaurant and three-hour
  *      block, each with its n; a tip still processing is left out of every
  *      total and counted beside them, since its order's figure is not final.
+ *   6. UBER'S ACCEPTANCE RATE (gold), as the rig saw it over Uber's own
+ *      window of the last 100 exclusive requests, Uber's own figures beside
+ *      it where given, the accepts the goal needs in the next requests, and
+ *      section 3's curve for Uber's cards with the share of requests each
+ *      line would have kept: the best line, the best that keeps the goal
+ *      (25%, the owner's Gold), and the $/hr between them.
  *
  * DESCRIPTIVE, AND NOTHING ELSE. Nothing on the rig requires this file: no
  * verdict, state, target, band or panel line reads it. AUDITS.md's Settled
@@ -76,6 +82,9 @@ var A = require('../advice.js');
 // after its heading) and what its restaurant's name is compared on: the one
 // reading the server matched with, not a copy of it.
 var E = require('../earnings.js');
+// Which screen a card's text is (Trip Radar's list, for the acceptance
+// rate): the reader's own screen typing, not a copy of it.
+var OP = require('../offer-parser.js');
 
 /* --- the numbers it works to ---------------------------------------------- */
 
@@ -144,6 +153,16 @@ var RATE_BANDS = [[0, 15], [15, 20], [20, 25], [25, 30], [30, 40], [40, Infinity
 // is the fewest at which one big tip stops being the whole of a group's
 // difference on the owner's one screenshot (a $19.54 tip on a $5.51 base).
 var PAID_MIN_N = 5;
+
+// Uber Pro's acceptance rate, as the owner's screen of 15 Nov 2026 words it:
+// "the percentage of exclusive trip requests that you accepted over the last
+// 100 requests", Trip Radar left out, and over all of them below 100. The
+// goal is the owner's (Gold, 25%), settable; the window is Uber's own count.
+var GOLD_GOAL = 0.25;
+var GOLD_WINDOW = 100;
+var GOLD_LAST = 10;
+// The next K requests the path to the goal is worked for.
+var GOLD_AHEAD = [10, 25, 50, 100];
 
 /* --- small pieces --------------------------------------------------------- */
 
@@ -257,9 +276,12 @@ function perMileOf(o) {
   return num(o.pay) !== null && num(o.miles) !== null && o.miles >= 0.1 ? o.pay / o.miles : null;
 }
 
+// The row's app, else the caller's reading of it, else the reader's own
+// screen typing of the row's text (the journal's offer rows carry no `app`;
+// the places report's appOf is the same reading).
 function appOf(o, appOfFn) {
   if (o.app === 'uber' || o.app === 'doordash') return o.app;
-  var a = appOfFn ? appOfFn(o) : null;
+  var a = appOfFn ? appOfFn(o) : typeof o.text === 'string' && o.text ? OP.screenType(o.text).app : null;
   return a === 'uber' || a === 'doordash' ? a : 'unknown';
 }
 
@@ -655,6 +677,240 @@ function heldOut(perAll, perBlock, days, grid, opts) {
   return { days: used, flat: rate(tot.flat), perBlock: rate(tot.block), everything: rate(tot.all) };
 }
 
+/* --- 6. Uber's acceptance rate, and the line that keeps it ----------------
+ *
+ * The owner, 15 Nov 2026: "To get the gold tier status for Uber I need to
+ * have a 25% acceptance rate ... could you make it so I can see the optimal
+ * threshold of offers to accept that would make the most money and help me
+ * reach the 25% acceptance rating." And then Uber's own Acceptance rate
+ * screen: the share of EXCLUSIVE trip requests accepted over the last 100
+ * (over all of them below 100), Trip Radar left out, and a k/10 for the last
+ * ten. So, here, and as the rig saw it:
+ *
+ *   REQUESTS. Each Uber card the rig read, one per offer id (dedupe), not
+ *   hidden, in the order it first appeared, whose Exclusive tag (the
+ *   parser's `exclusive`) was read OR not read: most cards print it, but in
+ *   re-reads of one evening 14 of 43 had lost it above the crop or in the
+ *   map, so a missing tag is unknown and counted, never "not exclusive".
+ *   Left out and counted: DoorDash; Trip Radar (the reader's own screen
+ *   typing says `tripRadar` and no Exclusive tag was read — the pill sits
+ *   behind ordinary cards too, offer_parser.py's NOT_AN_OFFER note); Early
+ *   look cards (`exclusive: 'early'`) and reservations ("Be online by",
+ *   "Reserve"), because Uber's screen does not say whether it counts either.
+ *   An add-on is a request sent to the driver and is IN by the same rule,
+ *   said so. A card the rig could not price is a request all the same (it is
+ *   in the count and cannot be at any line).
+ *   ACCEPTED. An order taken: a Took (an order handed in with its Took, or a
+ *   folded row's `accepted: true`), or an earnings trip matched to the card
+ *   (earnings.js: "accepted on the phone, no Took" for a card the rig never
+ *   heard about). Nothing else: silence is never an accept, so a card left
+ *   to time out is in "not accepted" with the ones declined.
+ *   THE RATE. Accepted over requests, over the newest GOLD_WINDOW requests.
+ *   The rig misses cards (camera off, a cloth on the lens) and Uber counts
+ *   what it sent, so the rig's figure is "as the rig saw it" beside Uber's
+ *   own three numbers when the owner gives them (typed, or read off a
+ *   screenshot of that screen: earnings.js acceptanceScreen).
+ *
+ *   THE PATH. Uber's window rolls: each new request pushes the oldest out.
+ *   For the next K requests, the fewest accepts that would put the window at
+ *   the goal, assuming the WORST — the old window's accepts drop out first —
+ *   because Uber's order is not known here; and, where the window is the
+ *   rig's own, exactly, from the order the rig saw them in. Arithmetic, not
+ *   advice: no card is named.
+ *
+ *   THE LINE. Section 3's curve for Uber's cards alone (the app slice: "took
+ *   only Uber's cards at T+, in the same free hours"), and beside each line
+ *   the share of the exclusive requests seen whose card was at T or more:
+ *   the acceptance that line would have given had every card at it been
+ *   taken (an upper bound: a card at T+ that came while an order was in the
+ *   car could not always have been). `shareKept` adds the orders actually
+ *   taken below the line. The best line, the best line whose share is at
+ *   the goal, and the $/hr of shift between them. On the panel's $/hr, the
+ *   curve's own figure; never $/mi, never a floor, and nothing reads it:
+ *   "the line that would have ...", never "accept this". */
+var RESERVE_WORDS = /\bbe online by\b|\buber reserve\b|\breserv(?:e|ed|ation|ations)\b/i;
+
+// The card's Exclusive tag: the row's own (the parser's `exclusive`, since
+// 15 Nov 2026), else read again off the row's text by the same rule
+// (OP.exclusiveTag) for a row written before the field. true, 'early' or null
+// (not read: unknown, never "not exclusive").
+function tagOf(o, t) {
+  if (o.exclusive === true || o.exclusive === 'early') return o.exclusive;
+  return t ? OP.exclusiveTag(t) : null;
+}
+
+// What kind of request a card is, for the acceptance rate: 'doordash',
+// 'unknown' (app not read), 'radar', 'early', 'reserve', else counted, as
+// 'tagged' (Exclusive read) or 'untagged' (not read).
+function requestKind(o, app) {
+  if (app === 'doordash') return 'doordash';
+  if (app !== 'uber') return 'unknown';
+  var t = typeof o.text === 'string' ? o.text : '';
+  var tag = tagOf(o, t);
+  if (o.screen === 'tripRadar' || (t && tag !== true && OP.screenType(t).screen === 'tripRadar')) return 'radar';
+  if (tag === 'early') return 'early';
+  if (o.reserve === true || RESERVE_WORDS.test(t)) return 'reserve';
+  return tag === true ? 'tagged' : 'untagged';
+}
+
+// Every offer id the record says was taken, and how: 'took' or 'phone'.
+function acceptedIds(list, orders, earnings) {
+  var by = Object.create(null);
+  (orders || []).forEach(function (o) {
+    if (!o || typeof o.id !== 'string') return;
+    if (num(o.tookAt) !== null) by[o.id] = 'took';
+    else if ((o.how === 'phone' || o.phone === true) && !by[o.id]) by[o.id] = 'phone';
+  });
+  list.forEach(function (x) {
+    if (x.row && typeof x.row.id === 'string' && x.row.accepted === true && by[x.row.id] !== 'took') by[x.row.id] = 'took';
+  });
+  (earnings || []).forEach(function (e) {
+    var m = e && e.match;
+    if (!m || (m.status !== 'matched' && m.status !== 'picked') || typeof m.offer !== 'string') return;
+    if (!by[m.offer]) by[m.offer] = m.source === 'offer' ? 'phone' : 'took';
+  });
+  return by;
+}
+
+/* The fewest accepts in the next K requests that put a rolling window of
+ * `n` requests with `a` accepted at `goal`. `seq` (oldest first, true for an
+ * accept) is the window's own order where it is known; else the old accepts
+ * are taken to drop out first, the worst case. */
+function pathAhead(goal, n, a, seq) {
+  return GOLD_AHEAD.map(function (K) {
+    var size = Math.min(GOLD_WINDOW, n + K), drop = Math.max(0, n + K - GOLD_WINDOW);
+    var lost = seq ? seq.slice(0, drop).filter(Boolean).length : Math.min(drop, a);
+    var need = Math.max(0, Math.ceil(goal * size - (a - lost) - 1e-9));
+    return { K: K, size: size, drops: drop, lost: lost, need: need, possible: need <= K };
+  });
+}
+
+function goalOf(v) {
+  var g = num(v);
+  if (g === null) return GOLD_GOAL;
+  if (g > 1) g = g / 100;          // 25 means 25%
+  return g > 0 && g < 1 ? g : GOLD_GOAL;
+}
+
+// Uber's own figures as given: {requests, accepted, declined, last10, at,
+// read}. Requests are Uber's window (at most GOLD_WINDOW); a figure that
+// does not add up is refused, not mended.
+function uberFigures(u) {
+  if (!u || typeof u !== 'object') return null;
+  var n = num(u.requests), a = num(u.accepted), d = num(u.declined);
+  if (n === null && a !== null && d !== null) n = a + d;
+  if (a === null && n !== null && d !== null) a = n - d;
+  if (n === null || a === null || n < 1 || n > GOLD_WINDOW || a < 0 || a > n
+      || n !== Math.round(n) || a !== Math.round(a)) return null;
+  if (d !== null && a + d !== n) return null;
+  var k = num(u.last10);
+  return { requests: n, accepted: a, declined: n - a, rate: r2(a / n),
+           last10: k !== null && k >= 0 && k <= GOLD_LAST && k === Math.round(k) ? k : null,
+           at: num(u.at), read: u.read === 'screenshot' ? 'screenshot' : 'typed' };
+}
+
+function trendOf(k, n, rate) {
+  if (k === null || !n || rate === null) return null;
+  var r = k / n;
+  return Math.abs(r - rate) < 0.005 ? 'level' : r > rate ? 'up' : 'down';
+}
+
+/* The gold section: `list` dedupe's, `inp` analyse's input, `uberSlice`
+ * section 3's Uber curve (points, best) or null, `shiftH` the hours on shift
+ * the curve covers. */
+function goldOf(list, inp, uberSlice, shiftH) {
+  var g = inp.gold || {};
+  var goal = goalOf(g.goal);
+  var took = acceptedIds(list, inp.orders, inp.earnings);
+  var counts = { uber: 0, tagged: 0, untagged: 0, addons: 0, radar: 0, early: 0, reserve: 0, doordash: 0, unknown: 0,
+                 unpriced: 0 };
+  var reqs = [];
+  list.forEach(function (x) {
+    var o = x.row;
+    if (!o || x.seen === null || o.hidden === true) return;
+    var app = appOf(o, inp.appOf);
+    var kind = requestKind(o, app);
+    if (kind !== 'tagged' && kind !== 'untagged') { counts[kind] += 1; return; }
+    counts.uber += 1;
+    counts[kind] += 1;
+    var addon = addOnCard(o);
+    if (addon) counts.addons += 1;
+    var ph = null;
+    if (A.trustworthy(o) && num(o.pay) !== null) ph = panelRate(o, cardMinutesOf(o));
+    if (ph === null) counts.unpriced += 1;
+    reqs.push({ id: o.id, seen: x.seen, addon: addon, tagged: kind === 'tagged', ph: ph, pay: num(o.pay),
+                how: typeof o.id === 'string' ? took[o.id] || null : null });
+  });
+  reqs.sort(function (a, b) { return a.seen - b.seen; });
+
+  // The rig's last GOLD_WINDOW, and its last ten.
+  var win = reqs.slice(-GOLD_WINDOW), last = reqs.slice(-GOLD_LAST);
+  var acc = win.filter(function (q) { return q.how; }).length;
+  var rig = { n: win.length, accepted: acc, declined: win.length - acc, rate: win.length ? r2(acc / win.length) : null,
+              phone: win.filter(function (q) { return q.how === 'phone'; }).length,
+              addons: win.filter(function (q) { return q.addon; }).length,
+              addonsTaken: win.filter(function (q) { return q.addon && q.how; }).length,
+              tagged: win.filter(function (q) { return q.tagged; }).length,
+              full: win.length >= GOLD_WINDOW, from: win.length ? win[0].seen : null,
+              to: win.length ? win[win.length - 1].seen : null,
+              last10: { n: last.length, accepted: last.filter(function (q) { return q.how; }).length } };
+  rig.trend = trendOf(rig.last10.accepted, rig.last10.n, rig.rate);
+  var uber = uberFigures(g.uber);
+  if (uber) uber.trend = trendOf(uber.last10, GOLD_LAST, uber.rate);
+
+  // The path, from Uber's own window where given (worst case: its order is
+  // not known here), else from the rig's, in the order the rig saw it.
+  var base = uber ? { from: 'uber', n: uber.requests, accepted: uber.accepted }
+    : { from: 'rig', n: rig.n, accepted: rig.accepted };
+  var path = base.n ? {
+    from: base.from, n: base.n, accepted: base.accepted, rate: r2(base.accepted / base.n),
+    reached: base.accepted / base.n >= goal - 1e-9,
+    worst: pathAhead(goal, base.n, base.accepted, null),
+    rigOrder: base.from === 'rig' ? pathAhead(goal, base.n, base.accepted, win.map(function (q) { return !!q.how; })) : null
+  } : null;
+
+  // The line, over every Uber request in the record handed in.
+  var line = null;
+  if (uberSlice && reqs.length) {
+    var N = reqs.length;
+    var points = uberSlice.points.map(function (p) {
+      var at = reqs.filter(function (q) { return q.ph !== null && q.ph >= p.T; }).length;
+      var kept = reqs.filter(function (q) { return (q.ph !== null && q.ph >= p.T) || q.how; }).length;
+      return { T: p.T, n: p.n, gross: p.gross, thin: p.thin, atLine: at, share: r2(at / N), shareKept: r2(kept / N) };
+    });
+    var bestP = uberSlice.best ? points.filter(function (p) { return p.T === uberSlice.best.T; })[0] : null;
+    var keptP = null, highest = null;
+    points.forEach(function (p) {
+      if (p.share === null || at2(p.atLine, N) < goal - 1e-9) return;
+      highest = p.T;
+      if (p.thin || p.gross === null) return;
+      // Of equal lines the higher: the same $/hr, and it is the one the
+      // share was asked about.
+      if (!keptP || p.gross >= keptP.gross) keptP = p;
+    });
+    // A best line that already keeps the goal is the kept line too.
+    if (bestP && at2(bestP.atLine, N) >= goal - 1e-9) keptP = bestP;
+    line = {
+      requests: N, unpriced: counts.unpriced, points: points, drawn: !!uberSlice.drawn,
+      best: bestP ? { T: bestP.T, value: bestP.gross, n: bestP.n, share: bestP.share, from: uberSlice.best.from,
+                      to: uberSlice.best.to } : null,
+      kept: keptP ? { T: keptP.T, value: keptP.gross, n: keptP.n, share: keptP.share } : null,
+      highest: highest,
+      already: !!(bestP && keptP && bestP.T === keptP.T),
+      gap: bestP && keptP ? r2(Math.max(0, bestP.gross - keptP.gross)) : null,
+      everything: uberSlice.everything ? uberSlice.everything.gross : null
+    };
+    // What the Uber orders taken actually paid per hour on shift (their
+    // cards' pay), beside the kept line, for a rate below the goal.
+    var paid = reqs.filter(function (q) { return q.how && q.pay !== null; });
+    line.earned = shiftH > 0 ? { orders: paid.length, perShiftHour: r2(sum(paid.map(function (q) { return q.pay; })) / shiftH),
+                                 hours: r2(shiftH) } : null;
+  }
+  return { goal: goal, window: GOLD_WINDOW, last: GOLD_LAST, ahead: GOLD_AHEAD, counts: counts, rig: rig, uber: uber,
+           path: path, line: line };
+}
+function at2(k, n) { return n ? k / n : 0; }
+
 /* --- the whole thing --------------------------------------------------------
  *
  * input: { offers: journal rows (raw or folded), orders: the caller's orders,
@@ -824,7 +1080,10 @@ function analyse(input) {
   var perAll = perOuting(free, pieces, timed, GRID, 'ph', 'cardPH');
   var days = Object.keys(perAll).filter(function (d) { return perAll[d].H > 0; }).sort();
   var overall = curveFrom(perAll, days, GRID, opts);
-  var boot = bootstrap(perAll, days, GRID, opts, seed);
+  // `light` (server.js /api/gold, asked on every load of the offers page):
+  // the curves without the resampling, the held-out check or the $/mi curve.
+  var light = inp.light === true;
+  var boot = light ? null : bootstrap(perAll, days, GRID, opts, seed);
   if (boot) overall.points.forEach(function (p, k) { p.ci = boot.ci[k]; });
   var target = num(inp.target);
   var curve = {
@@ -844,8 +1103,9 @@ function analyse(input) {
 
   // ...on the card's $/mi, information only: thresholds on pay over card
   // miles, the ratio ladder over the timed orders' own card $/mi.
-  var perMile = perOuting(free, pieces, timed, MILE_GRID, 'pm', 'cardPM');
-  var mileCurve = curveFrom(perMile, days, MILE_GRID, opts);
+  var perMile = light ? null : perOuting(free, pieces, timed, MILE_GRID, 'pm', 'cardPM');
+  var mileCurve = light ? { points: [], best: null, all: { n: 0, gross: null, net: null } }
+    : curveFrom(perMile, days, MILE_GRID, opts);
   var curveMile = { grid: MILE_GRID, points: mileCurve.points.map(roundPoint), best: mileCurve.best,
                     everything: roundAll(mileCurve.all) };
 
@@ -870,7 +1130,7 @@ function analyse(input) {
              points: c.points.map(roundPoint), drawn: ds.length >= CURVE_MIN_OUTINGS && c.H > 0 };
   }
   var slices = {
-    block: A.BLOCK_NAMES.map(function (n, b) {
+    block: light ? [] : A.BLOCK_NAMES.map(function (n, b) {
       if (!free.some(function (o) { return o.block === b; })) return null;
       return sliceCurve(n, function (o) { return o.block === b; }, function (p) { return p.block === b; },
                         function (t) { return t.block === b; });
@@ -882,7 +1142,7 @@ function analyse(input) {
       return sliceCurve(a === 'uber' ? 'Uber' : 'DoorDash', function (o) { return o.app === a; },
                         function () { return true; }, function (t) { return t.app === a; });
     }).filter(Boolean),
-    week: ['weekday', 'weekend'].map(function (w) {
+    week: light ? [] : ['weekday', 'weekend'].map(function (w) {
       if (!free.some(function (o) { return o.week === w; })) return null;
       return sliceCurve(w, function (o) { return o.week === w; }, function (p) { return p.week === w; },
                         function (t) { return t.week === w; });
@@ -891,14 +1151,14 @@ function analyse(input) {
 
   // The held-out check, per block.
   var perBlock = Object.create(null);
-  A.BLOCK_NAMES.forEach(function (n, b) {
+  if (!light) A.BLOCK_NAMES.forEach(function (n, b) {
     var tm = timed.filter(function (t) { return t.block === b; });
     var p = perOuting(free.filter(function (o) { return o.block === b; }),
                       pieces.filter(function (x) { return x.block === b; }),
                       tm.length >= RATIO_MIN_N ? tm : timed, GRID, 'ph', 'cardPH');
     if (Object.keys(p).length) perBlock[b] = p;
   });
-  var held = heldOut(perAll, perBlock, days, GRID, opts);
+  var held = light ? null : heldOut(perAll, perBlock, days, GRID, opts);
 
   // 5. card against paid, where the caller handed the app's own figures
   // (the places report does; the end-of-shift report, whose text names no
@@ -912,6 +1172,9 @@ function analyse(input) {
     counts: counts, seen: seen, actual: actual, curve: curve, curveMile: curveMile, slices: slices, heldOut: held
   };
   if (paid) res.paid = paid;
+  // 6. Uber's acceptance rate and the line that keeps the goal, over Uber's
+  // own curve above.
+  res.gold = goldOf(dd.list, inp, slices.app.filter(function (x) { return x.name === 'Uber'; })[0] || null, shiftH);
   res.lines = lines(res);
   return res;
 }
@@ -1008,6 +1271,83 @@ function paidLines(p) {
           + sign(a.medianDiff) + '; ' + d2(a.tips) + ' of it settled tips; ' + a.over + ' paid more than the card, '
           + a.under + ' less).' + apps + (a.thin ? ' Thin: fewer than ' + p.floor + ' orders.' : '')
           + ' Descriptive: no verdict reads it.'];
+}
+
+/* Uber's acceptance rate in words, for both reports and the offers page:
+ * what the rig saw, Uber's own figures beside it, the path to the goal and
+ * the line. Each figure with its n; nothing tells the driver which card. */
+function pct(v) { return Math.round(v * 100) + '%'; }
+function goldLines(gd, floors) {
+  var out = [], rg = gd.rig, u = gd.uber, goal = pct(gd.goal);
+  if (!rg.n && !u) return out;
+  var c = gd.counts;
+  var left = [];
+  if (c.radar) left.push(plural(c.radar, 'Trip Radar card'));
+  if (c.early) left.push(plural(c.early, 'Early look card') + ' (Uber\'s screen does not say whether it counts them)');
+  if (c.reserve) left.push(plural(c.reserve, 'reservation') + ' (Uber\'s screen does not say whether it counts them)');
+  if (c.doordash) left.push(plural(c.doordash, 'DoorDash offer'));
+  if (rg.n) {
+    out.push('Uber acceptance, as the rig saw it: accepted ' + rg.accepted + ' of the last ' + rg.n + ' exclusive requests ('
+             + pct(rg.accepted / rg.n) + ')' + (rg.full ? '' : ', fewer than ' + gd.window + ' seen so the rate is over all of them')
+             + '; ' + rg.last10.accepted + '/' + rg.last10.n + ' of the last ' + rg.last10.n
+             + (rg.trend && rg.trend !== 'level' ? ' (' + rg.trend + ')' : '') + '. Of the ' + rg.n + ' counted, '
+             + rg.tagged + ' tagged Exclusive and ' + (rg.n - rg.tagged) + ' with the tag not read (counted: most cards '
+             + 'print it, and a missing tag is unknown, not "not exclusive"). '
+             + (rg.phone ? plural(rg.phone, 'was', 'were') + ' accepted on the phone with no Took (Uber\'s earnings screen). ' : '')
+             + (rg.addons ? plural(rg.addons, 'add-on') + ' in it, counted as requests (' + rg.addonsTaken + ' taken). ' : '')
+             + (left.length ? 'Left out: ' + left.join(', ') + '. ' : '')
+             + 'The rig misses cards (camera off, a covered lens) and Uber counts what it sent.');
+  }
+  if (u) {
+    out.push('Uber\'s own screen (' + u.read + '): ' + u.accepted + ' of ' + u.requests + ' exclusive requests ('
+             + pct(u.accepted / u.requests) + '), ' + u.declined + ' declined'
+             + (u.last10 !== null ? '; ' + u.last10 + '/' + gd.last + ' of the last ' + gd.last
+                + (u.trend && u.trend !== 'level' ? ' (' + u.trend + ')' : '') : '') + '.');
+  }
+  var p = gd.path;
+  if (p) {
+    var whose = p.from === 'uber' ? 'Uber\'s ' + p.accepted + ' of ' + p.n : 'the rig\'s ' + p.accepted + ' of ' + p.n;
+    if (p.reached) {
+      out.push('The goal is ' + goal + ', and ' + whose + ' is at it (' + pct(p.rate) + ').');
+    } else {
+      var ks = (p.rigOrder || p.worst).map(function (s) {
+        return s.possible ? s.need + ' of the next ' + s.K : 'not within the next ' + s.K + ' (' + s.need + ' needed)';
+      });
+      out.push('The goal is ' + goal + '. From ' + whose + ' (' + pct(p.rate) + '), the fewest accepts that would reach it: '
+               + ks.join(', ') + (p.rigOrder ? ', from the order the rig saw its requests in'
+                 : ', if the oldest accepts drop out of the window first (Uber\'s order is not known here)')
+               + '. Accepting at least 1 in ' + Math.round(1 / gd.goal) + ' from here would be at ' + goal
+               + ' after ' + gd.window + ' more requests, whatever came before.');
+    }
+  }
+  var ln = gd.line;
+  if (ln && ln.best) {
+    var thin = ln.best.n < floors.curveOffers ? ' (thin)' : '';
+    var s = 'Uber\'s cards alone, the line that would have paid most on this record: ' + d0(ln.best.T) + '+/hr, about '
+      + d2(ln.best.value) + '/hr on shift (n=' + ln.best.n + ' seen free' + thin + '), with ' + pct(ln.best.share)
+      + ' of the ' + ln.requests + ' exclusive requests at or above it. ';
+    if (ln.already) {
+      s += 'That line already keeps ' + goal + ' or more.';
+    } else if (ln.kept) {
+      s += 'The best line that would have kept ' + goal + ': ' + d0(ln.kept.T) + '+/hr, about ' + d2(ln.kept.value)
+        + '/hr (' + pct(ln.kept.share) + ' at or above it, n=' + ln.kept.n + '); keeping ' + goal + ' costs about '
+        + d2(ln.gap) + '/hr on this record.';
+    } else {
+      s += 'No line drawn on the curve keeps ' + goal + ' of requests at or above it.';
+    }
+    out.push(s + ' The share counts every card at the line as taken, an upper bound. '
+             + (ln.unpriced ? plural(ln.unpriced, 'card') + ' the rig could not price are in the requests and at no line. ' : '')
+             + 'Not a rule: no verdict, target or panel line reads it.');
+    if (ln.kept && !ln.already && ln.earned && p && !p.reached) {
+      out.push('Your Uber orders paid about ' + d2(ln.earned.perShiftHour) + '/hr on shift (their cards\' pay, '
+               + plural(ln.earned.orders, 'order') + ' over ' + hrs(ln.earned.hours) + '), against about '
+               + d2(ln.kept.value) + '/hr for the ' + d0(ln.kept.T) + '+ line.');
+    }
+  } else if (ln) {
+    out.push('Uber\'s cards alone: not enough on record for a line yet (' + plural(ln.requests, 'exclusive request') + ').');
+  }
+  out.push('Check Uber Pro\'s own terms for what it counts and when; the figures above are the record\'s, not Uber\'s rules.');
+  return out;
 }
 
 /* --- the words -------------------------------------------------------------
@@ -1119,6 +1459,7 @@ function lines(r) {
              + 'best line could move; about 25 shift days and 20 timed orders before a ±$2 answer is likely.');
   }
   if (r.paid) paidLines(r.paid).forEach(function (l) { out.push(l); });
+  if (r.gold) goldLines(r.gold, r.floors).forEach(function (l) { out.push(l); });
   out.push('Descriptive: what the record shows. Nothing on the rig reads it; the verdict, the target and the panel do not change.');
   return out;
 }
@@ -1149,5 +1490,7 @@ module.exports = {
   GRID: GRID, MILE_GRID: MILE_GRID, BREAK_MIN: BREAK_MIN, DIST_MIN_N: DIST_MIN_N, CURVE_MIN_OFFERS: CURVE_MIN_OFFERS,
   RATIO_MIN_N: RATIO_MIN_N, CURVE_MIN_OUTINGS: CURVE_MIN_OUTINGS, BOOT_MIN_OUTINGS: BOOT_MIN_OUTINGS, BOOTS: BOOTS,
   cardVsPaid: cardVsPaid, paidLines: paidLines, PAID_MIN_N: PAID_MIN_N,
+  goldLines: goldLines, pathAhead: pathAhead, requestKind: requestKind, uberFigures: uberFigures, goalOf: goalOf,
+  GOLD_GOAL: GOLD_GOAL, GOLD_WINDOW: GOLD_WINDOW, GOLD_LAST: GOLD_LAST, GOLD_AHEAD: GOLD_AHEAD,
   PLATEAU: PLATEAU, HOLD_MAX_MIN: HOLD_MAX_MIN, TOO_SOON: TOO_SOON, BANDS: BANDS, RATE_BANDS: RATE_BANDS
 };

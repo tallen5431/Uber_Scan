@@ -488,5 +488,32 @@ eq('[match] names are alike past OCR slips and abbreviations, and two restaurant
     E.similar('Sample Street Northwest', 'Sample St NW') === 1,
     E.similar('Pretend Pizza', 'Nowhere Noodles') < E.NAME_OTHER], [true, true, true]);
 
+/* --- Uber's Acceptance rate screen (the owner, 15 Nov 2026) --------------
+ * The text tesseract gives of an invented copy (rpi/testearnings.py
+ * acceptance_screen), and the faults it is checked against. */
+var ACC_TEXT = '7:41\n\n23%\n\nAcceptance rate\n\n4/10 last 10 exclusive requests\n\n'
+  + 'Your acceptance rate is the percentage of exclusive trip\nrequests that you accepted over the last 100 requests.\n'
+  + 'Exclusive trip requests are requests sent directly to you.\nYour acceptance rate excludes Trip Radar requests.\n\n'
+  + 'Based on your last 100 exclusive requests\n\nExclusive trip requests 100\nAccepted 23\n\nDeclined 77\n';
+function accOf(t) {
+  var a = E.acceptanceScreen(t);
+  return [a.requests, a.accepted, a.declined, a.rate, a.last10, a.ok, a.problems];
+}
+eq('acceptance screen: the three figures, the percentage and the last ten; the explanation\'s words read as none',
+   accOf(ACC_TEXT), [100, 23, 23 + 54, 23, 4, true, []]);
+eq('...figures read apart from their labels are taken in the box\'s order',
+   accOf(ACC_TEXT.replace('requests 100\nAccepted 23\n\nDeclined 77\n', 'requests\nAccepted\n\nDeclined\n\n100\n23\n77\n')),
+   [100, 23, 77, 23, 4, true, []]);
+eq('...a second reading fills what the first left out (server.js asks again with --psm 6)',
+   accOf([ACC_TEXT.replace('Accepted 23', 'Accepted'), ACC_TEXT.replace('23%', '')]), [100, 23, 77, 23, 4, true, []]);
+eq('...a k/10 read "2/110" (the slash\'s foot taken for a 1) is still 2 of the last ten',
+   accOf(ACC_TEXT.replace('4/10 last', '2/110 last'))[4], 2);
+eq('...figures that do not add up are refused, not mended',
+   accOf(ACC_TEXT.replace('Declined 77', 'Declined 71')).slice(5), [false, ['accepted and declined do not add up to the requests']]);
+eq('...nor a percentage that is not accepted over requests',
+   accOf(ACC_TEXT.replace('23%', '32%')).slice(5), [false, ['the percentage is not accepted ÷ requests']]);
+eq('...and an earnings screenshot is not this screen', accOf('Earnings Activity\nSat, Nov 7\n$7.25 3:58 PM').slice(5),
+   [false, ['not Uber\'s Acceptance rate screen']]);
+
 console.log(bad ? '\n' + ok + ' passed, ' + bad + ' FAILED' : '\nAll ' + ok + ' earnings checks passed');
 process.exit(bad ? 1 : 0);

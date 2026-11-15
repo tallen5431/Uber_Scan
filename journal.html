@@ -674,6 +674,69 @@
     #sheetWhere { font-size: 12px; }
     #sheetFoot { font-size: 11px; }
   }
+
+  /* The Gold card (the owner, 15 Nov 2026: "To get the gold tier status for
+     Uber I need to have a 25% acceptance rate"). Uber's acceptance as the rig
+     saw it, against the goal, beside Uber's own figures; the line that would
+     have paid most and the best one that keeps the goal. A description of the
+     record in the Strategy tab's words (tools/strategy.js section 6, through
+     /api/gold): nothing on the rig reads it. */
+  .gold { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+          padding: 12px 14px; margin: 18px 0 4px; text-align: left; }
+  .gold[hidden], .goldmini[hidden] { display: none; }
+  .gold h2 { margin: 0 0 8px; }
+  .gold .rate { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .gold .rate b { font-size: 34px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .gold .rate span { font-size: 13px; color: var(--muted); }
+  /* The bar: the rate as a fill, the goal as a tick. Filled in the ladder's
+     colours (go at or past the goal, warn under it), and the words say the
+     same so colour is never the only channel. */
+  .goldbar { position: relative; height: 12px; margin: 10px 0 4px; border-radius: 6px;
+             background: var(--panel-2); overflow: visible; }
+  .goldbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: var(--warn); }
+  .goldbar i.met { background: var(--go); }
+  .goldbar u { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); }
+  .goldscale { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted);
+               font-variant-numeric: tabular-nums; }
+  .goldtiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 12px 0 4px; }
+  .goldtiles > div { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+  .goldtiles small { display: block; font-size: 11px; color: var(--muted); letter-spacing: .03em; }
+  .goldtiles b { display: block; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .goldtiles em { display: block; font-style: normal; font-size: 11px; color: var(--muted); }
+  .gold ul.tlines { margin-top: 8px; }
+  .gold .note { font-size: 12px; line-height: 1.5; color: var(--muted); margin: 8px 0 0; }
+  .gold details { margin-top: 10px; border-top: 1px solid var(--line); }
+  .gold details > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer;
+                            font-size: 14px; font-weight: 700; }
+  .goldform { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+  .goldform label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+  .goldform input { min-height: 44px; padding: 6px 10px; font: inherit; font-size: 16px; color: var(--text);
+                    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; min-width: 0;
+                    box-sizing: border-box; width: 100%; }
+  .goldtools { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+  .goldtools button, .goldtools label.btn { flex: 1 1 140px; min-height: 48px; padding: 6px 12px; font: inherit;
+                    font-size: 13px; font-weight: 700; color: var(--text); background: var(--panel-2);
+                    border: 1px solid var(--line); border-radius: 8px; cursor: pointer; display: flex;
+                    align-items: center; justify-content: center; text-align: center; }
+  #goldShot { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+  #goldShot:focus-visible + label { outline: 2px solid var(--text); }
+  /* ...and its one line on Today: the rate against the goal, a press away
+     from the card. */
+  .goldmini { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px;
+              margin: 0 0 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+              color: var(--text); text-decoration: none; }
+  .goldmini .what { flex: 1; min-width: 0; font-size: 14px; }
+  .goldmini .what small { display: block; font-size: 12px; color: var(--muted); }
+  .goldmini .goldbar { margin: 6px 0 0; height: 8px; }
+  .goldmini .go { flex: none; font-size: 24px; line-height: 1; color: var(--muted); }
+  @media (orientation: landscape) {
+    /* The card's small print at the floor every panel holds (rpi/test_layout.py). */
+    .goldtiles small, .goldtiles em, .goldscale, .gold .note, .gold .rate span,
+    .goldform label, .goldmini .what small { font-size: 15px; }
+    .goldtiles b { font-size: 22px; }
+    .gold details > summary, .goldtools button, .goldtools label.btn, .goldmini .what { font-size: 16px; }
+    .goldtiles { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  }
 </style>
 </head>
 <body>
@@ -732,6 +795,15 @@
   </div>
 
   <p class="hint" id="headline">Reading the journal…</p>
+
+  <!-- The Gold card's one line on Today (the owner, 15 Nov 2026): Uber's
+       acceptance as the rig saw it against the goal, a press away from the
+       card itself. Filled by the gold script at the foot; hidden where the
+       server has no /api/gold (an older build, or lite). -->
+  <a class="goldmini" id="goldMini" href="#gold" hidden>
+    <span class="what"><b id="goldMiniSays"></b><small id="goldMiniSub"></small>
+      <span class="goldbar" aria-hidden="true"><i id="goldMiniFill"></i><u id="goldMiniGoal"></u></span></span>
+    <span class="go" aria-hidden="true">&rsaquo;</span></a>
 
   <!-- The report (tools/places_report.js, built on the NucBox; the owner,
        25 Oct, and again 7 Nov: "How can I get to the strategy tab from the
@@ -835,6 +907,52 @@
        anything. It was picked once, and every verdict since has been measured
        against it. Setting it too high fails silently: the car sits still, the
        screen fills with PASS, and that looks like discipline. -->
+  <!-- GOLD (the owner, 15 Nov 2026: "To get the gold tier status for Uber I
+       need to have a 25% acceptance rate ... see the optimal threshold of
+       offers to accept that would make the most money and help me reach the
+       25% acceptance rating"; then Uber's own screen: the last 100 exclusive
+       requests, Trip Radar left out). tools/strategy.js section 6 through
+       /api/gold, over the last 90 days of the journal, whatever range is
+       pressed above: Uber's window is a count of requests, not days. The
+       rig's count is "as the rig saw it"; Uber's own three figures sit beside
+       it when typed or read off a screenshot. Descriptive: "the line that
+       would have", never "accept this"; no verdict, target or panel line
+       reads it. -->
+  <section class="gold" id="gold" hidden>
+    <h2>Gold tier <em>&middot; Uber acceptance, as the rig saw it</em></h2>
+    <div class="rate"><b id="goldRate">--</b><span id="goldOf"></span></div>
+    <div class="goldbar" aria-hidden="true"><i id="goldFill"></i><u id="goldGoal"></u></div>
+    <div class="goldscale" aria-hidden="true"><span>0%</span><span id="goldGoalSaid"></span><span>100%</span></div>
+    <div class="goldtiles" id="goldTiles"></div>
+    <p class="note">As the rig saw it: it misses some requests (camera off, a covered lens) and Uber counts what
+      it sent. The lines are what holding out would have paid on this record &mdash; not a rule; no verdict, target
+      or panel line reads them. Check Uber Pro&rsquo;s own terms for what it counts.</p>
+    <details id="goldWords">
+      <summary>In full, with every count</summary>
+      <ul class="tlines" id="goldLines"></ul>
+    </details>
+    <details id="goldSet">
+      <summary>Uber&rsquo;s own figures and the goal</summary>
+      <p class="note">From Uber Pro&rsquo;s Acceptance rate screen: its last 100 exclusive requests (or all of
+        them, under 100). Type them, or read a screenshot of that screen and check what was read before saving.
+        Check Uber Pro&rsquo;s own terms for what it counts.</p>
+      <div class="goldform">
+        <label>Goal %<input type="number" id="goldGoalIn" min="1" max="99" step="1" inputmode="numeric"></label>
+        <label>Exclusive requests<input type="number" id="goldReq" min="1" max="100" step="1" inputmode="numeric"></label>
+        <label>Accepted<input type="number" id="goldAcc" min="0" max="100" step="1" inputmode="numeric"></label>
+        <label>Declined<input type="number" id="goldDec" min="0" max="100" step="1" inputmode="numeric"></label>
+        <label>Last 10 (k of 10)<input type="number" id="goldLast" min="0" max="10" step="1" inputmode="numeric"></label>
+      </div>
+      <div class="goldtools">
+        <button type="button" id="goldSave">Save</button>
+        <input type="file" id="goldShot" accept="image/png,image/jpeg,image/webp">
+        <label class="btn" for="goldShot">Read a screenshot</label>
+        <button type="button" id="goldForget">Forget Uber&rsquo;s figures</button>
+      </div>
+      <p class="note" id="goldSays" aria-live="polite" hidden></p>
+    </details>
+  </section>
+
   <section class="advice" id="advice" hidden>
     <h2>Where to draw the line</h2>
     <p id="adviceLead"></p>
@@ -5794,6 +5912,139 @@
       var href = typeof ans.href === 'string' ? ans.href : '';
       if (href === 'places/#strategy' || /^https?:\/\/[^\s"<>]+$/.test(href)) show(href, ans.from);
     }).catch(asBefore);
+  })();
+
+  // The Gold card (#gold, #goldMini): /api/gold, drawn. Its own script, like
+  // the report's link above: it reads nothing of the page's state and the
+  // page reads nothing of it. A server with no /api/gold (an older build, or
+  // lite) answers 404 and both stay hidden.
+  (function () {
+    var card = document.getElementById('gold');
+    if (!card || typeof fetch !== 'function') return;
+    var $ = function (id) { return document.getElementById(id); };
+    var pct = function (v) { return Math.round(v * 100) + '%'; };
+    var money = function (v) { return '$' + v.toFixed(2); };
+    var last = null;
+    function says(text) { var p = $('goldSays'); p.textContent = text || ''; p.hidden = !text; }
+    function bar(fill, tick, rate, goal) {
+      fill.style.width = Math.max(0, Math.min(100, rate * 100)) + '%';
+      fill.className = rate >= goal - 1e-9 ? 'met' : '';
+      tick.style.left = 'calc(' + Math.round(goal * 100) + '% - 1px)';
+    }
+    function tile(label, big, sub) {
+      var d = document.createElement('div');
+      var s = document.createElement('small'); s.textContent = label; d.appendChild(s);
+      var b = document.createElement('b'); b.textContent = big; d.appendChild(b);
+      if (sub) { var e = document.createElement('em'); e.textContent = sub; d.appendChild(e); }
+      return d;
+    }
+    function fill(form) {
+      var u = form.uber || {};
+      $('goldGoalIn').value = Math.round((form.goal || 0.25) * 100);
+      $('goldReq').value = u.requests != null ? u.requests : '';
+      $('goldAcc').value = u.accepted != null ? u.accepted : '';
+      $('goldDec').value = u.declined != null ? u.declined : '';
+      $('goldLast').value = u.last10 != null ? u.last10 : '';
+    }
+    function draw(ans) {
+      last = ans;
+      var g = ans.gold || {}, rg = g.rig || {}, u = g.uber, goal = g.goal || 0.25;
+      // Uber's own rate where given, else the rig's: the bar is the one the
+      // goal is met on, and the words say whose it is.
+      var mine = u ? u.accepted / u.requests : rg.n ? rg.accepted / rg.n : null;
+      $('goldRate').textContent = mine === null ? '--' : pct(mine);
+      $('goldOf').textContent = u
+        ? 'Uber’s screen: ' + u.accepted + ' of ' + u.requests + ' · the rig saw ' + rg.accepted + ' of ' + rg.n
+        : rg.n ? 'accepted ' + rg.accepted + ' of the last ' + rg.n + ' exclusive requests, as the rig saw it'
+          : 'no Uber requests on record yet';
+      $('goldGoalSaid').textContent = 'goal ' + pct(goal);
+      bar($('goldFill'), $('goldGoal'), mine || 0, goal);
+      var tiles = $('goldTiles');
+      tiles.textContent = '';
+      var ln = g.line;
+      if (ln && ln.best) {
+        tiles.appendChild(tile('The line that would have paid most', '$' + ln.best.T + '+/hr',
+          '~' + money(ln.best.value) + '/hr on shift · ' + pct(ln.best.share) + ' of requests'));
+        if (ln.kept && !ln.already) {
+          tiles.appendChild(tile('The best that keeps ' + pct(goal), '$' + ln.kept.T + '+/hr',
+            '~' + money(ln.kept.value) + '/hr · ' + pct(ln.kept.share) + ' of requests'));
+          tiles.appendChild(tile('Keeping ' + pct(goal) + ' costs', '~' + money(ln.gap) + '/hr', 'on this record'));
+        } else if (ln.already) {
+          tiles.appendChild(tile('Keeps ' + pct(goal) + '?', 'Already', 'that line is at the goal'));
+        }
+      }
+      var p = g.path;
+      if (p && !p.reached) {
+        var s = (p.rigOrder || p.worst)[2];
+        tiles.appendChild(tile('To reach ' + pct(goal), s.possible ? s.need + ' of next ' + s.K : 'over ' + s.K,
+          'accepts, ' + (p.rigOrder ? 'by the rig’s order' : 'worst case')));
+      }
+      var ul = $('goldLines');
+      ul.textContent = '';
+      (ans.lines || []).forEach(function (l) {
+        var li = document.createElement('li'); li.textContent = l; ul.appendChild(li);
+      });
+      if (!$('goldSet').open) fill({ goal: goal, uber: u });
+      card.hidden = false;
+      // Today's one line.
+      var mini = $('goldMini');
+      if (mine !== null) {
+        $('goldMiniSays').textContent = 'Gold: ' + pct(mine) + ' of a ' + pct(goal) + ' goal';
+        $('goldMiniSub').textContent = u ? 'Uber’s own figures; the rig saw ' + rg.accepted + ' of ' + rg.n
+          : rg.accepted + ' of the last ' + rg.n + ' exclusive requests, as the rig saw it';
+        bar($('goldMiniFill'), $('goldMiniGoal'), mine, goal);
+        mini.hidden = false;
+      }
+    }
+    function load() {
+      fetch('/api/gold', { cache: 'no-store' }).then(function (r) {
+        return r.ok ? r.json() : null;
+      }).then(function (ans) { if (ans && ans.ok === true) draw(ans); }).catch(function () {});
+    }
+    function num(id) {
+      var v = $(id).value.trim();
+      return v === '' ? null : Number(v);
+    }
+    function post(body, done) {
+      fetch('/api/gold', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                           body: JSON.stringify(body) }).then(function (r) {
+        return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+      }).then(function (x) {
+        if (!x.ok || !x.j.ok) { says('Not saved: ' + (x.j && x.j.error || 'the server refused it')); return; }
+        says(done);
+        load();
+      }).catch(function () { says('Not saved: the server did not answer.'); });
+    }
+    $('goldSave').addEventListener('click', function () {
+      var body = { goal: num('goldGoalIn') };
+      if (body.goal === null) delete body.goal;
+      var req = num('goldReq'), acc = num('goldAcc'), dec = num('goldDec');
+      if (req !== null || acc !== null || dec !== null) {
+        body.uber = { requests: req, accepted: acc, declined: dec, last10: num('goldLast'),
+                      read: card.getAttribute('data-read') === 'screenshot' ? 'screenshot' : 'typed' };
+      }
+      post(body, 'Saved.');
+      card.removeAttribute('data-read');
+    });
+    $('goldForget').addEventListener('click', function () { post({ uber: null }, 'Uber’s figures forgotten.'); });
+    $('goldShot').addEventListener('change', function () {
+      var f = this.files && this.files[0];
+      this.value = '';
+      if (!f) return;
+      says('Reading the screenshot…');
+      fetch('/api/gold/shot', { method: 'POST', headers: { 'Content-Type': f.type || 'image/png' }, body: f })
+        .then(function (r) { return r.json(); }).then(function (j) {
+          if (!j || !j.ok) { says('Not read: ' + (j && j.error || 'the server refused it')); return; }
+          if (!j.read) { says('Not read: ' + j.why + (j.install ? ' (' + j.install + ')' : '')); return; }
+          var fg = j.figures || {};
+          fill({ goal: num('goldGoalIn') / 100 || (last && last.gold.goal), uber: fg });
+          card.setAttribute('data-read', 'screenshot');
+          says(fg.ok ? 'Read: ' + fg.accepted + ' accepted of ' + fg.requests + (fg.last10 != null ? ', ' + fg.last10
+            + '/10 of the last ten' : '') + '. Check them against the screen, then Save.'
+            : 'Read only in part (' + fg.problems.join('; ') + '): type what is missing, then Save.');
+        }).catch(function () { says('Not read: the server did not answer.'); });
+    });
+    load();
   })();
 </script>
 </body>

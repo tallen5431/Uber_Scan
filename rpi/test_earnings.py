@@ -171,6 +171,47 @@ eq('[screen surge and canceled] its day, and every trip with every field: the ti
 eq('[screen surge and canceled] ...the surge no block of its own, nothing stepped over', (g['others'], g['notes']),
    ([], []))
 
+# --- Uber's Acceptance rate screen (the owner, 15 Nov 2026) -----------------------
+# The Gold card's optional reader: Uber's own three figures and its k/10, read
+# as server.js goldShotRead reads them — `--psm 4`, and `--psm 6` again when
+# that leaves any of the three unread. Invented figures throughout.
+ACC = r"""
+const E = require(process.argv[1]);
+const texts = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+console.log(JSON.stringify(texts.map((t) => E.acceptanceScreen(t))));
+"""
+
+
+def acc_read(path):
+    def text(psm):
+        return subprocess.run(['tesseract', path, 'stdout', '--psm', psm, '-l', 'eng'],
+                              env=dict(os.environ, OMP_THREAD_LIMIT='1'),
+                              capture_output=True, text=True, timeout=120).stdout
+
+    def parse(texts):
+        out = subprocess.run(['node', '-e', ACC, os.path.join(ROOT, 'earnings.js')],
+                             input=json.dumps([texts]), capture_output=True, text=True, timeout=60)
+        return json.loads(out.stdout)[0]
+    first = text('4')
+    got = parse([first])
+    whole = got['ok'] and got['last10'] is not None and got['rate'] is not None
+    return got if whole else parse([first, text('6')])
+
+
+for name, im, want_ in (
+        ('2 of the last 10, read "2/110"', T.acceptance_screen(rate=17, last10=2, requests=100, accepted=17,
+                                                                declined=83),
+         {'requests': 100, 'accepted': 17, 'declined': 83, 'rate': 17, 'last10': 2}),
+        ('as drawn', T.acceptance_screen(),
+         {'requests': 100, 'accepted': 23, 'declined': 77, 'rate': 23, 'last10': 4}),
+        ('a bigger phone, under 100 requests', T.acceptance_screen(rate=6, last10=1, requests=48, accepted=3,
+                                                                    declined=45, scale=1.4),
+         {'requests': 48, 'accepted': 3, 'declined': 45, 'rate': 6, 'last10': 1})):
+    p = T.save(im, os.path.join(WORK, 'acc-%d.png' % len(name)))
+    g = acc_read(p)
+    eq('[acceptance %s] the three figures, the percentage and the last ten, checked' % name,
+       ({k: g[k] for k in want_}, g['ok'], g['problems']), (want_, True, []))
+
 # --- the size it is read at -----------------------------------------------------
 # The owner's phone: about 756 wide. Drawn at that width and no wider, so the
 # suite reads what an upload from that phone would be.

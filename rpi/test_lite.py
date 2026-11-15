@@ -328,6 +328,8 @@ NBX_ENV = {'NUCBOX_SEARCH': _fake_base, 'NUCBOX_ROUTER': _fake_base,
 SHUT = [
     ('GET', '/api/earnings', None),
     ('POST', '/api/earnings/shot', b'{}'),
+    ('GET', '/api/gold', None),
+    ('POST', '/api/gold/shot', b'{}'),
     ('GET', '/places/', None),
     ('GET', '/api/placeslink', None),
     ('GET', '/api/shift', None),

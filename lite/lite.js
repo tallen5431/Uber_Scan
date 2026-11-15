@@ -24,6 +24,8 @@
  *     /api/shift, shift.html): reports over weeks of data, run parked, on the
  *     full rig's machine at home.
  *   - earnings screenshots (/api/earnings*): an OCR job of its own on the Pi.
+ *   - the Gold acceptance card (/api/gold*): a report over the record, with
+ *     a screenshot reader of its own (AUDITS.md, 15 Nov 2026).
  *   - the journal's ingest (/api/journal/ingest): that is the copy machine's
  *     door, and a lite rig is never the copy. Its own sync is off in
  *     rpi/sync.py, and lite/install.sh installs no timer.
@@ -80,6 +82,7 @@ var OFF = [
   [/^\/api\/shift$/, 'the shift report'],
   [/^\/shift\.html$/, 'the shift report'],
   [/^\/api\/earnings(\/|$)/, 'earnings screenshots'],
+  [/^\/api\/gold(\/|$)/, 'the Gold acceptance card'],
   [/^\/api\/journal\/ingest$/, 'the journal copy (sync)'],
   [/^\/api\/held-(end|pickup)$/, 'map pins'],
   [/^\/api\/mapwalk$/, 'Map view'],

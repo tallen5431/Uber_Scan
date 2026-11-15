@@ -2411,7 +2411,10 @@ function analyse(offers, taken, placed, dropAt, opts) {
   // against what was paid, under the curve.
   var strategy = S.analyse({ offers: offers, orders: strategyIn, areaOf: townKey, appOf: appOf,
                              target: targetLine(counts, opts.now), boots: opts.boots,
-                             earnings: Array.isArray(opts.earnings) ? opts.earnings : undefined });
+                             earnings: Array.isArray(opts.earnings) ? opts.earnings : undefined,
+                             // The Gold card's goal and Uber's own figures,
+                             // as the offers page saved them (/api/gold).
+                             gold: opts.gold || undefined });
   strategy.miles = { odometer: strategyIn.filter(function (o) { return o.milesFrom === 'odometer'; }).length,
                      uber: strategyIn.filter(function (o) { return o.timedBy === 'uber'; }).length,
                      log: strategyIn.filter(function (o) { return o.milesFrom === 'log'; }).length,
@@ -3285,6 +3288,29 @@ function paidSection(p) {
        : '<p class="note">No earnings screenshots have been uploaded yet.</p>');
 }
 
+/* Uber's acceptance rate and the line that keeps the goal (strategy.js
+ * section 6; the owner, 15 Nov 2026: Gold needs 25%). Its lines are among
+ * the tab's own above; here, Uber's curve with the share of exclusive
+ * requests each line would have kept. Descriptive, as the rest. */
+function GOLD_PART(s) {
+  var g = s.gold;
+  if (!g || !g.line) return '';
+  var goal = Math.round(g.goal * 100) + '%';
+  var cols = [['T', 'line ($/hr+)', '$'], ['n', 'Uber offers seen free'], ['gross', 'gross $/hr on shift', '$'],
+              [function (p) { return Math.round(p.share * 100) + '%'; }, 'requests at or above it'],
+              [function (p) { return Math.round(p.shareKept * 100) + '%'; }, '…with your takes below it'],
+              [function (p) { return g.line.best && p.T === g.line.best.T ? 'best' : g.line.kept && p.T === g.line.kept.T
+                ? 'best keeping ' + goal : ''; }, ''],
+              [function (p) { return p.thin ? 'thin' : ''; }, '']];
+  return '<h3 id="s-gold">Uber acceptance — the line that keeps ' + esc(goal) + '</h3>'
+    + '<p class="note">Uber\'s cards alone, as the rig saw them: the share of the ' + g.line.requests + ' exclusive requests on '
+    + 'record whose card was at each line, beside what holding out for that line paid per hour on shift. The share counts '
+    + 'every card at the line as taken, an upper bound. Trip Radar, Early look, reservations and DoorDash are left out; a '
+    + 'card with no Exclusive tag read is counted. Not a rule: no verdict, target or panel line reads it. Check Uber Pro\'s '
+    + 'own terms for what it counts.</p>'
+    + fold('s-gold-points', 'Every line, with its share of requests', strategyTable(cols, g.line.points, function (p) { return p.thin; }));
+}
+
 function STRATEGY_SECTION(r) {
   var s = r.strategy, cv = s.curve, f = s.floors, c = s.counts;
   function ul(xs) { return '<ul class="lines">' + xs.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>'; }
@@ -3349,6 +3375,7 @@ function STRATEGY_SECTION(r) {
     + '<div class="plot wide">' + strategyChart(cv) + '</div>'
     + '<div class="plot small">' + strategyChart(cv, 'small') + '</div>'
     + fold('s-points', 'Every point of the curve', strategyTable(pointCols, cv.points, isThin))
+    + GOLD_PART(s)
     + '<h3 id="s-slices">The same, by time of day, app and weekday</h3>'
     + '<p class="note">Point estimates, each slice\'s own free hours, offers and (with ' + f.ratio + ' or more) its own timed '
     + 'orders for the ratio. An app\'s curve is that app\'s cards alone in the same free hours. Read as description: a line '
@@ -4448,6 +4475,20 @@ async function loadEarnings(base) {
   }
 }
 
+/* The Gold card's setting (server.js /api/gold, since 15 Nov 2026): the
+ * goal and Uber's own figures, for the Strategy tab's acceptance lines. A
+ * server from before it answers 404, and the defaults stand (25%, no
+ * figures). */
+async function loadGold(base) {
+  try {
+    var got = await getJson(base.replace(/\/+$/, '') + '/api/gold');
+    var st = got.ok && got.body && got.body.settings;
+    return st ? { goal: st.goal, uber: st.uber } : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function loadWaits(url) {
   var got = await getJson(url.replace(/\/+$/, '') + '/api/journal?days=1&limit=1');
   if (!got.ok || !got.body || !Array.isArray(got.body.waits)) throw new Error(url + ' answered ' + got.status + ' with no waits');
@@ -4809,9 +4850,11 @@ async function main(argv) {
   var earnings = await loadEarnings(o.server);
   console.log('earnings: ' + earnings.length + ' trips read off uploaded screenshots');
 
+  var gold = await loadGold(o.server);
+
   var report = analyse(offers, taken, placed, dropAt, {
     minN: o.minN, waits: waits, spells: spells, cellTown: cellTown, fixes: fx ? fx.fixes : null,
-    earnings: earnings,
+    earnings: earnings, gold: gold,
     // The order records (server.js orderRecords, since 7 Nov): the Strategy
     // tab's miles where an order left one. An older server sends none.
     records: Array.isArray(body.records) ? body.records : [],

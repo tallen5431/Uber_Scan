@@ -1594,6 +1594,32 @@ with contextlib.redirect_stderr(io.StringIO()):
 ok_('[strategy] ...and it is text or --json, never the CSV', _s_refused)
 ok_('[strategy] the phone\'s shift page never asks for it: server.js runs this file without it',
     '--strategy' not in _srv)
+# Uber's acceptance rate (the owner, 15 Nov 2026; strategy.js section 6): the
+# same two evenings, read as Uber's cards off their text (the journal's rows
+# carry no `app`), their Exclusive tag not read and so counted. The last 100
+# of the 106 Uber requests hold the six Took'd orders. With a `gold` row (the
+# offers page's Gold card): its goal and Uber's own figures, typed.
+_sg = SR.strategy(_sread[0], _sreps)
+eq('[strategy gold] the rig\'s last 100 Uber requests, six accepted, every tag unread and counted',
+   (_sg['gold']['rig']['n'], _sg['gold']['rig']['accepted'], _sg['gold']['rig']['tagged'], _sg['gold']['goal']),
+   (100, 6, 0, 0.25))
+_sgj = os.path.join(work, 'strategy-gold.jsonl')
+with open(_sgj, 'w') as fh:
+    for r in _strategy_rows(16) + _strategy_rows(17) + [
+            {'v': 1, 'kind': 'gold', 'id': 'gold', 'seq': at(23, 0, day=17), 'at': at(23, 0, day=17), 'goal': 30,
+             'uber': {'requests': 100, 'accepted': 9, 'declined': 91, 'last10': 2, 'read': 'typed'}}]:
+        fh.write(json.dumps(r) + '\n')
+code_g, out_g = run(['--journal', _sgj, '--day', '2026-03-16', '--to', '2026-03-17', '--strategy'])
+ok_('[strategy gold] --strategy prints the acceptance lines: as the rig saw it, Uber\'s typed figures, the goal '
+    'set, the path and Uber Pro\'s own terms',
+    code_g == 0 and 'Uber acceptance, as the rig saw it: accepted 6 of the last 100 exclusive requests (6%)' in out_g
+    and "Uber's own screen (typed): 9 of 100 exclusive requests (9%), 91 declined; 2/10" in out_g
+    and 'The goal is 30%. From Uber\'s 9 of 100 (9%)' in out_g and "Check Uber Pro's own terms" in out_g)
+_spo = SR.strategy_orders([{'id': 'Q1', 'took': None, 'how': 'accepted on the phone', 'app': 'uber', 'reliable': False},
+                           dict(_ph[0])])
+eq('[strategy gold] an order accepted on the phone goes to strategy.js as an accept with no hold; one Uber timed '
+   'keeps its card\'s moment as before',
+   [(o['id'], o['tookAt'], o.get('how')) for o in _spo], [('Q1', None, 'phone'), ('P9', _ph[0]['offered'], None)])
 
 # --- store waits from the stop pattern (the owner, 7 Nov 2026) ---------------
 #

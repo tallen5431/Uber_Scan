@@ -1443,6 +1443,10 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # rows had no such field, and a review could not tell the two add-on
         # cards that replaced an order from any other card.
         'addon': True if parsed.get('addon') else None,
+        # ...and Uber's Exclusive tag (OP.exclusive_tag): True, 'early' or
+        # None, a label tools/strategy.js counts acceptance requests with.
+        # None is "not read", never "not exclusive".
+        'exclusive': parsed.get('exclusive') if parsed.get('exclusive') in (True, 'early') else None,
         # --- what the scanner made of it ------------------------------------
         'perHour': _round(rate.get('perHour'), 2),
         'grossPerHour': _round(rate.get('grossPerHour'), 2),
