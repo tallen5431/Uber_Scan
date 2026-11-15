@@ -1185,7 +1185,7 @@ const TEXT = (sel) => {
       name === 'in the car 24h' ? { locale: 'en-GB' } : {}));
     const page = await ctx.newPage();
     await page.addInitScript(STUB(feed));
-    await page.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' })
+    await page.goto(base + '/journal.html#all', { waitUntil: 'domcontentloaded' })
               .catch(() => {});
     await page.waitForTimeout(1500);
     out[name] = await page.evaluate((sel) => {
@@ -4246,7 +4246,7 @@ const { chromium } = require('playwright');
     // The phone the owner reads it on, the narrowest panel size the layout
     // suite holds the page to.
     const page = await browser.newPage({ viewport: { width: 360, height: 640 } });
-    await page.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' });
+    await page.goto(base + '/journal.html#all', { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#toPlaces:not([hidden])', { timeout: 4000 }).catch(() => {});
     // ...and long enough for a slow answer to land on the hidden ones too.
     await page.waitForTimeout(500);
@@ -4404,7 +4404,7 @@ const { chromium } = require('playwright');
   if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
   const out = {};
   const page = await browser.newPage({ viewport: { width: 360, height: 640 } });
-  await page.goto(args.base + '/journal.html', { waitUntil: 'domcontentloaded' });
+  await page.goto(args.base + '/journal.html#all', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#earnings:not([hidden])', { timeout: 8000 }).catch(() => {});
   await page.click('#ranges button[data-days="0"]');
   await page.waitForSelector('details.offer[data-id="e-pizza"]', { timeout: 8000 }).catch(() => {});
@@ -4633,6 +4633,226 @@ finally:
             _eproc.kill()
     import shutil as _eshutil
     _eshutil.rmtree(_ework, ignore_errors=True)
+
+
+# --- [tabs] the page in groups (the owner, 15 Nov 2026) ---------------------
+#
+# "Consider improved ways to lay out the offers page for organizing all the
+# new information neatly that is easy to read and understand." Five tabs by
+# what each section is for, and All (the old page in one scroll, which every
+# driver above opens with #all). A real server over rpi/testgold.py's invented
+# record. Checked: every section is in exactly one tab; the page opens on
+# Today; a tab shows its own sections and none of another's; each tab has an
+# address and a section's own address opens its tab; the last tab is
+# remembered, and a browser that refuses localStorage still gets a page; and
+# from the panel's ▤ Offers (live.html's link) at 1024x600, and on a phone,
+# the tabs fit, are pressable, and nothing scrolls sideways.
+TABS_PAGE = r"""
+const { chromium } = require('playwright');
+(async () => {
+  const base = process.argv[2];
+  let browser = null;
+  for (const exe of JSON.parse(process.env.PW_EXES || '[]').concat([null])) {
+    try { browser = await chromium.launch(exe ? { executablePath: exe } : {}); break; }
+    catch (e) {}
+  }
+  if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
+  const out = {};
+  const state = (page) => page.evaluate(() => {
+    const vis = (id) => { const e = document.getElementById(id); return !!e && e.getClientRects().length > 0; };
+    const nav = document.getElementById('tabs');
+    const btns = [].slice.call(nav.querySelectorAll('button'));
+    return {
+      view: document.getElementById('app').getAttribute('data-view'),
+      hash: location.hash,
+      selected: btns.filter((b) => b.getAttribute('aria-selected') === 'true').map((b) => b.getAttribute('data-view')),
+      shown: ['incar', 'ladder', 'toShift', 'review', 'targets', 'log', 'find', 'chips', 'earnings', 'recordsHead',
+              'realHead', 'gold', 'advice', 'blocksHead', 'ppmHead', 'runsHead', 'pairsHead', 'waitsHead', 'caveats']
+        .filter(vis),
+      tallest: Math.max.apply(null, btns.map((b) => b.getBoundingClientRect().height)),
+      shortest: Math.min.apply(null, btns.map((b) => b.getBoundingClientRect().height)),
+      navTop: Math.round(nav.getBoundingClientRect().top),
+      sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      kept: (function () { try { return localStorage.getItem('uberscan.offers.tab'); } catch (e) { return 'refused'; } })(),
+    };
+  });
+  // Every <h2> in one tab, and the tab of each.
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e)));
+  await page.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1000);
+  // The record's evenings end last night: the whole of it, so every section has something.
+  await page.click('#ranges button[data-days="0"]');
+  await page.waitForTimeout(2000);
+  out.homes = await page.evaluate(() => [].slice.call(document.querySelectorAll('main h2')).map((h) => {
+    const t = h.closest('.tab');
+    return [h.id || (h.textContent || '').trim().slice(0, 20), t ? t.getAttribute('data-tab') : null];
+  }));
+  out.first = await state(page);
+  for (const v of ['offers', 'money', 'strategy', 'runs', 'all', 'today']) {
+    await page.click('#tabs button[data-view="' + v + '"]');
+    await page.waitForTimeout(300);
+    out[v] = await state(page);
+  }
+  // Remembered: Money pressed, the page opened again with no address.
+  await page.click('#tabs button[data-view="money"]');
+  await page.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(800);
+  out.remembered = await state(page);
+  // Addresses: a tab's, and a section's own.
+  for (const h of ['strategy', 'gold', 'earnings', 'incar', 'pairsHead']) {
+    await page.goto(base + '/journal.html#' + h, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(800);
+    out['#' + h] = await state(page);
+  }
+  // ...and changed after load, by a link inside the page (the Gold line).
+  await page.goto(base + '/journal.html#today', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#goldMini:not([hidden])', { timeout: 8000 }).catch(() => {});
+  await page.click('#goldMini').catch(() => {});
+  await page.waitForTimeout(500);
+  out.goldLink = await state(page);
+  out.errs = errs;
+  await ctx.close();
+  // A browser that refuses localStorage.
+  const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const p2 = await ctx2.newPage();
+  const errs2 = [];
+  p2.on('pageerror', (e) => errs2.push(String(e)));
+  await p2.addInitScript(() => {
+    Storage.prototype.getItem = function () { throw new Error('refused'); };
+    Storage.prototype.setItem = function () { throw new Error('refused'); };
+  });
+  await p2.goto(base + '/journal.html', { waitUntil: 'domcontentloaded' });
+  await p2.waitForTimeout(1200);
+  await p2.click('#tabs button[data-view="runs"]').catch(() => {});
+  await p2.waitForTimeout(300);
+  out.refused = await state(p2);
+  out.refusedErrs = errs2;
+  await ctx2.close();
+  // From the panel: live.html's ▤ Offers, at the panel's 1024x600.
+  const ctx3 = await browser.newContext({ viewport: { width: 1024, height: 600 } });
+  const p3 = await ctx3.newPage();
+  await p3.goto(base + '/live.html', { waitUntil: 'domcontentloaded' });
+  await p3.waitForTimeout(800);
+  out.offersHref = await p3.evaluate(() => {
+    const a = document.querySelector('.bottombar > [href="journal.html"]');
+    return a ? a.getAttribute('href') : null;
+  });
+  await p3.goto(base + '/' + (out.offersHref || 'journal.html'), { waitUntil: 'domcontentloaded' });
+  await p3.waitForTimeout(1000);
+  await p3.click('#ranges button[data-days="0"]');
+  await p3.waitForTimeout(2000);
+  out.panel = await state(p3);
+  for (const v of ['offers', 'money', 'strategy', 'runs', 'today']) {
+    await p3.click('#tabs button[data-view="' + v + '"]');
+    await p3.waitForTimeout(300);
+    out['panel ' + v] = (await state(p3)).sideways;
+  }
+  await p3.evaluate(() => window.scrollTo(0, 800));
+  await p3.waitForTimeout(300);
+  out.panelScrolled = await state(p3);
+  await ctx3.close();
+  await browser.close();
+  console.log(JSON.stringify(out));
+})().catch((e) => { console.log(JSON.stringify({ __crashed: String(e && e.stack || e) })); });
+"""
+
+import shutil as _tshutil
+import tempfile as _ttemp
+import time as _ttime
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import testgold as _TTG                                       # noqa: E402
+_twork = _ttemp.mkdtemp()
+_tj = os.path.join(_twork, 'journal.jsonl')
+with open(_tj, 'w') as _fh:
+    for _r in _TTG.rows(int(_ttime.time() * 1000)):
+        _fh.write(json.dumps(_r) + '\n')
+_tport = free_port()
+_tproc = subprocess.Popen(['node', os.path.join(ROOT, 'server.js')],
+                          env=dict(os.environ, SCANNER='0', PORT=str(_tport), HTTPS_PORT='0', JOURNAL=_tj),
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+_tbase = 'http://127.0.0.1:%d' % _tport
+try:
+    import urllib.request as _turl
+    for _ in range(120):
+        try:
+            _turl.urlopen(_tbase + '/api/status', timeout=1).read()
+            break
+        except Exception:
+            _ttime.sleep(0.1)
+    _tdrv = os.path.join(_twork, 'tabs.js')
+    open(_tdrv, 'w').write(TABS_PAGE)
+    _trun = subprocess.run(['node', _tdrv, _tbase],
+                           env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
+                                    PW_EXES=json.dumps([os.environ.get('CHROMIUM', ''),
+                                                        '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'])),
+                           capture_output=True, text=True, timeout=300)
+    _tline = (_trun.stdout or '').strip().split('\n')[-1] if _trun.stdout else ''
+    try:
+        _t = json.loads(_tline)
+    except Exception:
+        _t = {'__crashed': (_trun.stderr or '')[-400:]}
+    if _t.get('skip'):
+        print('[tabs] %s — skipping the tab checks' % _t['skip'])
+    elif _t.get('__crashed'):
+        eq('[tabs] the tab driver ran', _t['__crashed'], None)
+    else:
+        _homes = _t['homes']
+        eq('[tabs] every section heading is in one of the five tabs', [h for h in _homes if h[1] is None], [])
+        def _home(key):
+            return next((h[1] for h in _homes if h[0].startswith(key)), 'missing')
+        eq('[tabs] ...each where it belongs: in car and Targets on Today, every offer on Offers, what the app paid '
+           'and the records on Money, Gold, the line, the hours and $/mi on Strategy, runs, second jobs and waits on Runs',
+           [_home(k) for k in ('In car', 'Targets', 'Every offer', 'earningsHead',
+                                    'recordsHead', 'realHead', 'Gold tier', 'Where to draw the li',
+                                    'blocksHead', 'ppmHead', 'refigHead', 'runsHead', 'pairsHead', 'waitsHead')],
+           ['today', 'today', 'offers', 'money', 'money', 'money', 'strategy', 'strategy', 'strategy', 'strategy',
+            'strategy', 'runs', 'runs', 'runs'])
+        eq('[tabs] it opens on Today, the tab pressed and said so', (_t['first']['view'], _t['first']['selected']),
+           ('today', ['today']))
+        ok_('[tabs] Today: the figures, Close the shift and Targets, and not the list or the charts (%r)'
+            % _t['first']['shown'],
+            {'ladder', 'review', 'targets', 'caveats'} <= set(_t['first']['shown'])
+            and not {'log', 'gold', 'blocksHead', 'runsHead', 'earnings'} & set(_t['first']['shown']))
+        ok_('[tabs] Offers: the search, the chips and the list, nothing else (%r)' % _t['offers']['shown'],
+            {'find', 'chips', 'log'} <= set(_t['offers']['shown'])
+            and not {'ladder', 'gold', 'blocksHead', 'runsHead'} & set(_t['offers']['shown']))
+        ok_('[tabs] Strategy: the Gold card, the line and the charts (%r)' % _t['strategy']['shown'],
+            {'gold', 'advice', 'blocksHead'} <= set(_t['strategy']['shown'])
+            and not {'log', 'ladder', 'runsHead'} & set(_t['strategy']['shown']))
+        ok_('[tabs] Runs: the runs of scanning (%r)' % _t['runs']['shown'],
+            'runsHead' in _t['runs']['shown'] and not {'log', 'gold'} & set(_t['runs']['shown']))
+        ok_('[tabs] All: every one of them, the old page (%r)' % _t['all']['shown'],
+            {'ladder', 'review', 'targets', 'log', 'gold', 'advice', 'blocksHead', 'runsHead'} <= set(_t['all']['shown']))
+        eq('[tabs] each tab its own address', [_t[v]['hash'] for v in ('offers', 'money', 'strategy', 'runs', 'all')],
+           ['#offers', '#money', '#strategy', '#runs', '#all'])
+        eq('[tabs] the last tab picked is the one the page opens on next time', (_t['remembered']['view'],
+           _t['remembered']['kept']), ('money', 'money'))
+        eq('[tabs] a tab\'s address and a section\'s own open that tab (#strategy, #gold, #earnings, #incar, '
+           '#pairsHead)', [_t['#' + h]['view'] for h in ('strategy', 'gold', 'earnings', 'incar', 'pairsHead')],
+           ['strategy', 'strategy', 'money', 'today', 'runs'])
+        eq('[tabs] Today\'s Gold line opens the Gold card on Strategy', (_t['goldLink']['view'],
+           'gold' in _t['goldLink']['shown']), ('strategy', True))
+        eq('[tabs] no script error on the way', _t['errs'], [])
+        eq('[tabs] a browser that refuses localStorage still opens on Today and changes tab, with no error',
+           (_t['refused']['view'], _t['refused']['kept'], _t['refusedErrs']), ('runs', 'refused', []))
+        eq('[tabs] the panel\'s Offers button still opens the page', _t['offersHref'], 'journal.html')
+        ok_('[tabs] ...at 1024x600 the tabs are pressable (%dpx) and nothing scrolls sideways on any tab'
+            % _t['panel']['shortest'], _t['panel']['shortest'] >= 44 and not _t['panel']['sideways']
+            and not any(_t['panel ' + v] for v in ('offers', 'money', 'strategy', 'runs', 'today')))
+        eq('[tabs] ...and stay at the top of the glass when the page scrolls', _t['panelScrolled']['navTop'], 0)
+        ok_('[tabs] on a phone (390px) too: pressable, no sideways scroll',
+            _t['first']['shortest'] >= 44 and not any(_t[v]['sideways'] for v in ('offers', 'money', 'strategy',
+                                                                                   'runs', 'all', 'today')))
+finally:
+    _tproc.terminate()
+    try:
+        _tproc.wait(timeout=5)
+    except Exception:
+        _tproc.kill()
+    _tshutil.rmtree(_twork, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d offers-page checks passed' % ok)

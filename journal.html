@@ -685,9 +685,9 @@
           padding: 12px 14px; margin: 18px 0 4px; text-align: left; }
   .gold[hidden], .goldmini[hidden] { display: none; }
   .gold h2 { margin: 0 0 8px; }
-  .gold .rate { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .gold .rate b { font-size: 34px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
-  .gold .rate span { font-size: 13px; color: var(--muted); }
+  .gold .goldrate { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .gold .goldrate b { font-size: 34px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .gold .goldrate span { font-size: 13px; color: var(--muted); }
   /* The bar: the rate as a fill, the goal as a tick. Filled in the ladder's
      colours (go at or past the goal, warn under it), and the words say the
      same so colour is never the only channel. */
@@ -727,27 +727,72 @@
               color: var(--text); text-decoration: none; }
   .goldmini .what { flex: 1; min-width: 0; font-size: 14px; }
   .goldmini .what small { display: block; font-size: 12px; color: var(--muted); }
-  .goldmini .goldbar { margin: 6px 0 0; height: 8px; }
+  .goldmini .goldbar { display: block; margin: 6px 0 0; height: 8px; }
   .goldmini .go { flex: none; font-size: 24px; line-height: 1; color: var(--muted); }
   @media (orientation: landscape) {
     /* The card's small print at the floor every panel holds (rpi/test_layout.py). */
-    .goldtiles small, .goldtiles em, .goldscale, .gold .note, .gold .rate span,
+    .goldtiles small, .goldtiles em, .goldscale, .gold .note, .gold .goldrate span,
     .goldform label, .goldmini .what small { font-size: 15px; }
     .goldtiles b { font-size: 22px; }
     .gold details > summary, .goldtools button, .goldtools label.btn, .goldmini .what { font-size: 16px; }
     .goldtiles { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
   }
+
+  /* --- the tabs (the owner, 15 Nov 2026) --------------------------------
+   *
+   * Five groups and All, a sticky row at the top (see the note on #tabs).
+   * One group shows at a time (#app's data-view); All shows every one, in
+   * order, which is the old page and what the suites read. Each section is a
+   * card: its heading, a line in plain words saying what it is for, then its
+   * figures, its long table folded. The same colours, borders and radius as
+   * the cards already here (.advice, #earnings, #incar), so nothing new to
+   * learn; a card whose heading is hidden (nothing to show in this range) is
+   * hidden with it. */
+  :root { --navh: 56px; }
+  .tabs { position: sticky; top: 0; z-index: 7; display: flex; gap: 4px; margin: 0 0 12px;
+          padding: 6px 0; background: var(--bg); overflow-x: auto; scrollbar-width: none;
+          border-bottom: 1px solid var(--line); }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: 1 0 auto; min-height: 44px; padding: 0 8px; font: inherit; font-size: 13px;
+                 font-weight: 700; letter-spacing: .02em; color: var(--muted); background: transparent;
+                 border: 1px solid transparent; border-radius: 8px; cursor: pointer; }
+  .tabs button[aria-selected="true"] { color: var(--text); background: var(--panel);
+                                       border-color: var(--line); }
+  .tabs button:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+  /* The day headers in the log stick under the tabs, not behind them. */
+  .day { top: var(--navh); }
+  #app[data-view] .tab { display: none; }
+  #app[data-view="all"] .tab, #app[data-view="today"] .tab[data-tab="today"],
+  #app[data-view="offers"] .tab[data-tab="offers"], #app[data-view="money"] .tab[data-tab="money"],
+  #app[data-view="strategy"] .tab[data-tab="strategy"], #app[data-view="runs"] .tab[data-tab="runs"] {
+    display: block; }
+  /* In All, each group under a quiet rule, so the old long page still says
+     where one group ends. */
+  #app[data-view="all"] .tab + .tab { border-top: 1px dashed var(--line); margin-top: 18px; padding-top: 4px; }
+  .card { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+          padding: 2px 14px 12px; margin: 14px 0 4px; }
+  .card:has(> h2[hidden]) { display: none; }
+  .card > h2:first-child { margin-top: 12px; }
+  .card.loglist { background: transparent; border: 0; padding: 0; margin-top: 0; }
+  .card.loglist > h2:first-child { margin-top: 4px; }
+  .card .hint { text-align: left; }
+  p.sum { margin: -2px 0 8px; font-size: 13px; line-height: 1.45; color: var(--text); opacity: .9; }
+  details.more > summary { min-height: 44px; display: flex; align-items: center; gap: 8px; cursor: pointer;
+                           font-size: 13px; font-weight: 700; color: var(--muted); list-style: none; }
+  details.more > summary::-webkit-details-marker { display: none; }
+  details.more > summary::after { content: '\203A'; font-size: 17px; line-height: 1;
+                                  transform: rotate(90deg); }
+  details.more[open] > summary::after { transform: rotate(-90deg); }
+  @media (orientation: landscape) {
+    :root { --navh: 60px; }
+    .tabs button { font-size: 16px; min-height: 48px; }
+    p.sum { font-size: 17px; max-width: 72ch; }
+    details.more > summary { font-size: 15px; }
+  }
 </style>
 </head>
 <body>
-<main id="app">
-
-  <!-- The orders in the car, as /api/status has them, each with Drop: the
-       panel's own Drop (POST /api/delivered). Hidden when nothing is held. -->
-  <section id="incar" hidden>
-    <h2>In car</h2>
-    <ul id="incarList"></ul>
-  </section>
+<main id="app" data-view="today">
 
   <!-- A group, named, with the pressed one announced. It was four unlabelled
        buttons whose selected state existed only as a border colour. -->
@@ -760,17 +805,40 @@
   <!-- What changed, said once, for a reader who cannot see the page redraw. -->
   <p class="sr-only" id="live" role="status" aria-live="polite"></p>
 
-  <!-- Hiding is the one action here that can be set once and keep acting for
-       weeks — a rule hides every future offer matching a card. Being able to
-       do that and never see the result is how a driver ends up with a quiet
-       hole in their record and no idea it is there. Hidden offers stay out of
-       every figure either way; this only decides whether they are listed. -->
-  <p class="hint"><button type="button" id="showHidden" aria-pressed="false">
-    show hidden offers</button></p>
+  <!-- THE TABS (the owner, 15 Nov 2026: "consider improved ways to lay out
+       the offers page for organizing all the new information neatly that is
+       easy to read and understand"). It was one scroll of twenty-odd
+       headings. Now five groups by what each section is FOR, and All, which
+       is the old page in one scroll (and what the suites read). Each tab has
+       its own address (#today, #offers, #money, #strategy, #runs, #all) and
+       the last one picked is remembered on this browser; a section's own
+       address (#incar, #gold, #earnings ...) opens its tab. Sticky, so the
+       way between them is never a scroll away; the range above stays the
+       window for every tab. Nothing is removed by it: every figure, caveat
+       and link is in one tab or another, and in All. -->
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Sections of the offers page">
+    <button type="button" role="tab" data-view="today" aria-selected="true">Today</button>
+    <button type="button" role="tab" data-view="offers" aria-selected="false">Offers</button>
+    <button type="button" role="tab" data-view="money" aria-selected="false">Money</button>
+    <button type="button" role="tab" data-view="strategy" aria-selected="false">Strategy</button>
+    <button type="button" role="tab" data-view="runs" aria-selected="false">Runs</button>
+    <button type="button" role="tab" data-view="all" aria-selected="false">All</button>
+  </nav>
+
+  <!-- Today -->
+  <div class="tab" data-tab="today" id="tab-today" role="tabpanel" aria-label="Today">
+  <!-- The orders in the car, as /api/status has them, each with Drop: the
+       panel's own Drop (POST /api/delivered). Hidden when nothing is held. -->
+  <section id="incar" hidden>
+    <h2>In car</h2>
+    <ul id="incarList"></ul>
+  </section>
+
   <!-- Today's shift as the end-of-shift report has it (shift.html; the
        owner, 22 Oct): here and on the route view's bar, not on this page's
        bar, which already holds six links at 360px. -->
   <p class="hint"><a id="toShift" href="shift.html">◷ Today's shift: totals, orders, pinning</a></p>
+
 
   <!-- Percentiles, not an average. $/hour is a ratio with a small noisy
        denominator, and the characteristic failure here — a leg lost to glare —
@@ -796,14 +864,11 @@
 
   <p class="hint" id="headline">Reading the journal…</p>
 
-  <!-- The Gold card's one line on Today (the owner, 15 Nov 2026): Uber's
-       acceptance as the rig saw it against the goal, a press away from the
-       card itself. Filled by the gold script at the foot; hidden where the
-       server has no /api/gold (an older build, or lite). -->
-  <a class="goldmini" id="goldMini" href="#gold" hidden>
-    <span class="what"><b id="goldMiniSays"></b><small id="goldMiniSub"></small>
-      <span class="goldbar" aria-hidden="true"><i id="goldMiniFill"></i><u id="goldMiniGoal"></u></span></span>
-    <span class="go" aria-hidden="true">&rsaquo;</span></a>
+  <!-- Shown instead of the charts when there is nothing to chart, or nothing
+       to chart *with*. Three labelled empty axes and an 11px sentence is a
+       page that looks broken; so is a stale one with a grey line under it. -->
+  <div id="nothing" hidden></div>
+
 
   <!-- The report (tools/places_report.js, built on the NucBox; the owner,
        25 Oct, and again 7 Nov: "How can I get to the strategy tab from the
@@ -819,23 +884,14 @@
     <small id="toPlacesSub">What $/hr to expect, what holding out paid, where good offers start</small></span>
     <span class="go" aria-hidden="true">›</span></a></p>
 
-  <!-- TARGETS (the owner, 30 Oct: "the best areas to work in and realistic
-       $/hr and $/mile to target based on the data"). Plain lines worked out
-       by server.js targetsOut, worded by Advice.targets — the same lines the
-       places report's Targets tab opens with. Descriptive: the $/hr line is
-       the replay's below ("Where to draw the line"), over all hours; $/mi is
-       read, never a rule; towns only where they beat chance. -->
-  <section class="advice targets" id="targets" hidden>
-    <h2>Targets <em>· what this stretch says to aim for</em></h2>
-    <ul class="tlines" id="targetsRate"></ul>
-    <h3 id="targetsAreasHead">Best areas to work</h3>
-    <ul class="tlines" id="targetsAreas"></ul>
-    <ul class="note" id="targetsNotes"></ul>
-  </section>
-  <!-- Shown instead of the charts when there is nothing to chart, or nothing
-       to chart *with*. Three labelled empty axes and an 11px sentence is a
-       page that looks broken; so is a stale one with a grey line under it. -->
-  <div id="nothing" hidden></div>
+  <!-- The Gold card's one line on Today (the owner, 15 Nov 2026): Uber's
+       acceptance as the rig saw it against the goal, a press away from the
+       card itself. Filled by the gold script at the foot; hidden where the
+       server has no /api/gold (an older build, or lite). -->
+  <a class="goldmini" id="goldMini" href="#gold" hidden>
+    <span class="what"><b id="goldMiniSays"></b><small id="goldMiniSub"></small>
+      <span class="goldbar" aria-hidden="true"><i id="goldMiniFill"></i><u id="goldMiniGoal"></u></span></span>
+    <span class="go" aria-hidden="true">&rsaquo;</span></a>
 
   <!-- Close the shift: one day's ACCEPT and CLOSE CALL cards that nobody has
        answered for — the newest day, or any other day in the window, a press
@@ -854,6 +910,32 @@
     <div id="reviewList"></div>
   </details>
 
+  <!-- TARGETS (the owner, 30 Oct: "the best areas to work in and realistic
+       $/hr and $/mile to target based on the data"). Plain lines worked out
+       by server.js targetsOut, worded by Advice.targets — the same lines the
+       places report's Targets tab opens with. Descriptive: the $/hr line is
+       the replay's below ("Where to draw the line"), over all hours; $/mi is
+       read, never a rule; towns only where they beat chance. -->
+  <section class="advice targets" id="targets" hidden>
+    <h2>Targets <em>· what this stretch says to aim for</em></h2>
+    <ul class="tlines" id="targetsRate"></ul>
+    <h3 id="targetsAreasHead">Best areas to work</h3>
+    <ul class="tlines" id="targetsAreas"></ul>
+    <ul class="note" id="targetsNotes"></ul>
+  </section>
+  </div>
+
+  <!-- Offers -->
+  <div class="tab" data-tab="offers" id="tab-offers" role="tabpanel" aria-label="Offers">
+  <!-- Hiding is the one action here that can be set once and keep acting for
+       weeks — a rule hides every future offer matching a card. Being able to
+       do that and never see the result is how a driver ends up with a quiet
+       hole in their record and no idea it is there. Hidden offers stay out of
+       every figure either way; this only decides whether they are listed. -->
+  <p class="hint"><button type="button" id="showHidden" aria-pressed="false">
+    show hidden offers</button></p>
+
+  <section class="card loglist">
   <h2>Every offer <em id="recentNote">· tap one to see everything that was read</em></h2>
   <!-- The reason to open this list is to find one particular offer and check it
        against what the shift actually paid. At three hundred rows that is
@@ -902,133 +984,11 @@
   <p class="hint" id="findNote" hidden></p>
   <div id="log"></div>
   <p class="hint" id="more"></p>
-
-  <!-- The target is the one number here that was never checked against
-       anything. It was picked once, and every verdict since has been measured
-       against it. Setting it too high fails silently: the car sits still, the
-       screen fills with PASS, and that looks like discipline. -->
-  <!-- GOLD (the owner, 15 Nov 2026: "To get the gold tier status for Uber I
-       need to have a 25% acceptance rate ... see the optimal threshold of
-       offers to accept that would make the most money and help me reach the
-       25% acceptance rating"; then Uber's own screen: the last 100 exclusive
-       requests, Trip Radar left out). tools/strategy.js section 6 through
-       /api/gold, over the last 90 days of the journal, whatever range is
-       pressed above: Uber's window is a count of requests, not days. The
-       rig's count is "as the rig saw it"; Uber's own three figures sit beside
-       it when typed or read off a screenshot. Descriptive: "the line that
-       would have", never "accept this"; no verdict, target or panel line
-       reads it. -->
-  <section class="gold" id="gold" hidden>
-    <h2>Gold tier <em>&middot; Uber acceptance, as the rig saw it</em></h2>
-    <div class="rate"><b id="goldRate">--</b><span id="goldOf"></span></div>
-    <div class="goldbar" aria-hidden="true"><i id="goldFill"></i><u id="goldGoal"></u></div>
-    <div class="goldscale" aria-hidden="true"><span>0%</span><span id="goldGoalSaid"></span><span>100%</span></div>
-    <div class="goldtiles" id="goldTiles"></div>
-    <p class="note">As the rig saw it: it misses some requests (camera off, a covered lens) and Uber counts what
-      it sent. The lines are what holding out would have paid on this record &mdash; not a rule; no verdict, target
-      or panel line reads them. Check Uber Pro&rsquo;s own terms for what it counts.</p>
-    <details id="goldWords">
-      <summary>In full, with every count</summary>
-      <ul class="tlines" id="goldLines"></ul>
-    </details>
-    <details id="goldSet">
-      <summary>Uber&rsquo;s own figures and the goal</summary>
-      <p class="note">From Uber Pro&rsquo;s Acceptance rate screen: its last 100 exclusive requests (or all of
-        them, under 100). Type them, or read a screenshot of that screen and check what was read before saving.
-        Check Uber Pro&rsquo;s own terms for what it counts.</p>
-      <div class="goldform">
-        <label>Goal %<input type="number" id="goldGoalIn" min="1" max="99" step="1" inputmode="numeric"></label>
-        <label>Exclusive requests<input type="number" id="goldReq" min="1" max="100" step="1" inputmode="numeric"></label>
-        <label>Accepted<input type="number" id="goldAcc" min="0" max="100" step="1" inputmode="numeric"></label>
-        <label>Declined<input type="number" id="goldDec" min="0" max="100" step="1" inputmode="numeric"></label>
-        <label>Last 10 (k of 10)<input type="number" id="goldLast" min="0" max="10" step="1" inputmode="numeric"></label>
-      </div>
-      <div class="goldtools">
-        <button type="button" id="goldSave">Save</button>
-        <input type="file" id="goldShot" accept="image/png,image/jpeg,image/webp">
-        <label class="btn" for="goldShot">Read a screenshot</label>
-        <button type="button" id="goldForget">Forget Uber&rsquo;s figures</button>
-      </div>
-      <p class="note" id="goldSays" aria-live="polite" hidden></p>
-    </details>
   </section>
+  </div>
 
-  <section class="advice" id="advice" hidden>
-    <h2>Where to draw the line</h2>
-    <p id="adviceLead"></p>
-    <!-- What holding that line is LIKE, which the sentence above cannot say.
-         A line is a decision about waiting, and the three things under here are
-         the three halves of that a driver cannot see from the log: what share
-         of offers clear each line and how long until one does, the line they
-         actually keep as against the one they set, and how much of the clock
-         went on a job at all. -->
-    <div id="adviceCost"></div>
-    <p class="note" id="adviceWorking"></p>
-  </section>
-
-  <!-- A recording is not a shift. It is stretches of scanning separated by
-       gaps, and a gap can be a break, a trip, or the rig left switched on in a
-       driveway. Every figure above pools them, which is right for a median and
-       wrong to imply. So they are named. -->
-  <h2 id="blocksHead">By time of day <em>· median $/hr</em></h2>
-  <div id="blocks"></div>
-  <div class="scale" id="blockScale"></div>
-
-  <h2 id="kindsHead">Rides and shop orders <em>· median $/hr</em></h2>
-  <div id="kinds"></div>
-
-  <!-- The sibling of "By time of day": which days of the week pay. Hidden
-       until the window holds a fortnight, because with a week of offers each
-       bar rests on one day and is the per-day median the day headers already
-       print — a chart that repeats the list under it, dressed as a pattern. -->
-  <h2 id="weekHead" hidden></h2>
-  <div id="week"></div>
-
-  <!-- The comparison the rig is for, and the one the page never made: of the
-       jobs actually worked, what had the panel said about them. Read only in
-       that direction — see showTaken. Hidden until something is ticked,
-       because three empty bars over an untagged log is a claim about a shift
-       made out of nobody having pressed a button. -->
-  <h2 id="tookHead" hidden></h2>
-  <div id="took"></div>
-
-  <!-- After the charts that answer "when", not before them. This one is a
-       run-by-run log — one row per stretch of scanning — and a month of it
-       is thirty-odd rows: measured on a fortnight of offers at 800x480, it
-       put "By time of day" 1,911px down the page on a week and 2,675 on a
-       month, three to five screens of bars between the headline and the
-       chart that says which hours pay. It shows the latest few and offers
-       the rest, so a run that stands out is still findable. -->
-  <h2 id="runsHead">Runs of scanning</h2>
-  <div id="runs"></div>
-  <button type="button" id="runsAll" hidden aria-pressed="false"></button>
-
-  <!-- The one thing this rig says that nothing else on this page records.
-       Every figure above is about one offer at a time; this is about the only
-       question with two: a card arrived while a job was already in the car,
-       and the panel answered it in the four seconds before the card went away.
-       The answer was written to the journal from the moment that feature
-       existed and read back by nothing, so a driver could work a shift, be
-       advised a dozen times, and have no way to see any of it afterwards. -->
-  <h2 id="pairsHead" hidden>Second jobs</h2>
-  <p class="hint" id="pairsLead" hidden></p>
-  <div id="pairs"></div>
-
-  <!-- What the orders taken really took, and the restaurants' waits (the
-       owner, 23 Oct: "make better use of the data to optimize what orders I
-       should take"). Both are history, said as it is: nothing here moves the
-       verdict or the target. -->
-  <h2 id="realHead" hidden>Card against what it took</h2>
-  <p class="hint" id="realLead" hidden></p>
-  <div id="real"></div>
-  <!-- Each order's own record (server.js orderRow; the owner, 7 Nov: "document
-       as much as possible about an order ... It is helpful for records
-       later"), one per order in this range, as a CSV made here from the rows
-       the page already has: no second endpoint, nothing asked of the server.
-       Each record is also shown under its offer's row in the log below. -->
-  <h2 id="recordsHead" hidden>Order records</h2>
-  <p class="hint" id="recordsLead" hidden></p>
-  <a id="recordsCsv" hidden href="#" download="order-records.csv">⤓ Download CSV</a>
+  <!-- Money -->
+  <div class="tab" data-tab="money" id="tab-money" role="tabpanel" aria-label="Money">
   <!-- What the app paid, off its own earnings screen (the owner, 7 Nov: "compare
        what uber actually paid compared to the expected pay of the order" ...
        "Can it automatically figure out which order it belongs to in the
@@ -1067,9 +1027,134 @@
       <button type="button" id="earningsForget" hidden></button>
     </div>
   </section>
-  <h2 id="waitsHead" hidden>Restaurant waits</h2>
-  <p class="hint" id="waitsLead" hidden></p>
-  <div id="waits"></div>
+
+  <section class="card">
+  <!-- What the orders taken really took, and the restaurants' waits (the
+       owner, 23 Oct: "make better use of the data to optimize what orders I
+       should take"). Both are history, said as it is: nothing here moves the
+       verdict or the target. -->
+  <h2 id="realHead" hidden>Card against what it took</h2>
+  <p class="sum">What the orders you took really took, Took to the door, against what their card said.</p>
+  <p class="hint" id="realLead" hidden></p>
+  <div id="real"></div>
+  </section>
+
+  <section class="card">
+  <!-- Each order's own record (server.js orderRow; the owner, 7 Nov: "document
+       as much as possible about an order ... It is helpful for records
+       later"), one per order in this range, as a CSV made here from the rows
+       the page already has: no second endpoint, nothing asked of the server.
+       Each record is also shown under its offer's row in the log below. -->
+  <h2 id="recordsHead" hidden>Order records</h2>
+  <p class="sum">One record per order in this range, as the journal keeps it; the CSV is for your own files.</p>
+  <p class="hint" id="recordsLead" hidden></p>
+  <a id="recordsCsv" hidden href="#" download="order-records.csv">⤓ Download CSV</a>
+  </section>
+  </div>
+
+  <!-- Strategy -->
+  <div class="tab" data-tab="strategy" id="tab-strategy" role="tabpanel" aria-label="Strategy">
+  <!-- GOLD (the owner, 15 Nov 2026: "To get the gold tier status for Uber I
+       need to have a 25% acceptance rate ... see the optimal threshold of
+       offers to accept that would make the most money and help me reach the
+       25% acceptance rating"; then Uber's own screen: the last 100 exclusive
+       requests, Trip Radar left out). tools/strategy.js section 6 through
+       /api/gold, over the last 90 days of the journal, whatever range is
+       pressed above: Uber's window is a count of requests, not days. The
+       rig's count is "as the rig saw it"; Uber's own three figures sit beside
+       it when typed or read off a screenshot. Descriptive: "the line that
+       would have", never "accept this"; no verdict, target or panel line
+       reads it. -->
+  <section class="gold" id="gold" hidden>
+    <h2>Gold tier <em>&middot; Uber acceptance, as the rig saw it</em></h2>
+    <div class="goldrate"><b id="goldRate">--</b><span id="goldOf"></span></div>
+    <div class="goldbar" aria-hidden="true"><i id="goldFill"></i><u id="goldGoal"></u></div>
+    <div class="goldscale" aria-hidden="true"><span>0%</span><span id="goldGoalSaid"></span><span>100%</span></div>
+    <div class="goldtiles" id="goldTiles"></div>
+    <p class="note">As the rig saw it: it misses some requests (camera off, a covered lens) and Uber counts what
+      it sent. The lines are what holding out would have paid on this record &mdash; not a rule; no verdict, target
+      or panel line reads them. Check Uber Pro&rsquo;s own terms for what it counts.</p>
+    <details id="goldWords">
+      <summary>In full, with every count</summary>
+      <ul class="tlines" id="goldLines"></ul>
+    </details>
+    <details id="goldSet">
+      <summary>Uber&rsquo;s own figures and the goal</summary>
+      <p class="note">From Uber Pro&rsquo;s Acceptance rate screen: its last 100 exclusive requests (or all of
+        them, under 100). Type them, or read a screenshot of that screen and check what was read before saving.
+        Check Uber Pro&rsquo;s own terms for what it counts.</p>
+      <div class="goldform">
+        <label>Goal %<input type="number" id="goldGoalIn" min="1" max="99" step="1" inputmode="numeric"></label>
+        <label>Exclusive requests<input type="number" id="goldReq" min="1" max="100" step="1" inputmode="numeric"></label>
+        <label>Accepted<input type="number" id="goldAcc" min="0" max="100" step="1" inputmode="numeric"></label>
+        <label>Declined<input type="number" id="goldDec" min="0" max="100" step="1" inputmode="numeric"></label>
+        <label>Last 10 (k of 10)<input type="number" id="goldLast" min="0" max="10" step="1" inputmode="numeric"></label>
+      </div>
+      <div class="goldtools">
+        <button type="button" id="goldSave">Save</button>
+        <input type="file" id="goldShot" accept="image/png,image/jpeg,image/webp">
+        <label class="btn" for="goldShot">Read a screenshot</label>
+        <button type="button" id="goldForget">Forget Uber&rsquo;s figures</button>
+      </div>
+      <p class="note" id="goldSays" aria-live="polite" hidden></p>
+    </details>
+  </section>
+
+  <!-- The target is the one number here that was never checked against
+       anything. It was picked once, and every verdict since has been measured
+       against it. Setting it too high fails silently: the car sits still, the
+       screen fills with PASS, and that looks like discipline. -->
+
+  <section class="advice" id="advice" hidden>
+    <h2>Where to draw the line</h2>
+    <p id="adviceLead"></p>
+    <!-- What holding that line is LIKE, which the sentence above cannot say.
+         A line is a decision about waiting, and the three things under here are
+         the three halves of that a driver cannot see from the log: what share
+         of offers clear each line and how long until one does, the line they
+         actually keep as against the one they set, and how much of the clock
+         went on a job at all. -->
+    <div id="adviceCost"></div>
+    <p class="note" id="adviceWorking"></p>
+  </section>
+
+  <section class="card">
+  <!-- A recording is not a shift. It is stretches of scanning separated by
+       gaps, and a gap can be a break, a trip, or the rig left switched on in a
+       driveway. Every figure above pools them, which is right for a median and
+       wrong to imply. So they are named. -->
+  <h2 id="blocksHead">By time of day <em>· median $/hr</em></h2>
+  <p class="sum">The middle $/hr of the offers seen in each three-hour block; the tick is your line.</p>
+  <div id="blocks"></div>
+  <div class="scale" id="blockScale"></div>
+  </section>
+
+  <section class="card">
+  <h2 id="kindsHead">Rides and shop orders <em>· median $/hr</em></h2>
+  <p class="sum">The middle $/hr of rides and of shop-and-deliver orders.</p>
+  <div id="kinds"></div>
+  </section>
+
+  <section class="card">
+  <!-- The sibling of "By time of day": which days of the week pay. Hidden
+       until the window holds a fortnight, because with a week of offers each
+       bar rests on one day and is the per-day median the day headers already
+       print — a chart that repeats the list under it, dressed as a pattern. -->
+  <h2 id="weekHead" hidden></h2>
+  <p class="sum">Which days of the week paid, once the window holds a fortnight.</p>
+  <div id="week"></div>
+  </section>
+
+  <section class="card">
+  <!-- The comparison the rig is for, and the one the page never made: of the
+       jobs actually worked, what had the panel said about them. Read only in
+       that direction — see showTaken. Hidden until something is ticked,
+       because three empty bars over an untagged log is a claim about a shift
+       made out of nobody having pressed a button. -->
+  <h2 id="tookHead" hidden></h2>
+  <p class="sum">What the panel had said, in the car, about the jobs you took.</p>
+  <div id="took"></div>
+  </section>
 
   <!-- What $/mi to accept, read off the record (the owner, 24 Oct: "help me
        decide what $/mi I should accept ... the $/time can have error in it,
@@ -1077,19 +1162,71 @@
        out by server.js (perMileSeen, cardVsReal, realByPerMile, refigured).
        None of them is a rule: no verdict, target, advice or panel line moves,
        and the last one says what the verdicts WOULD have been, as a count. -->
+  <section class="card">
   <h2 id="ppmHead" hidden>Where an offer&rsquo;s $/mi sits</h2>
   <p class="hint" id="ppmLead" hidden></p>
+  <details class="more"><summary>The table</summary>
   <div id="ppm"></div>
+  </details>
+  </section>
+  <section class="card">
   <h2 id="errHead" hidden>Card minutes against real, by app</h2>
   <p class="hint" id="errLead" hidden></p>
+  <details class="more"><summary>The table</summary>
   <div id="err"></div>
+  </details>
+  </section>
+  <section class="card">
   <h2 id="ppmRealHead" hidden>Real $/hr by the card&rsquo;s $/mi</h2>
   <p class="hint" id="ppmRealLead" hidden></p>
+  <details class="more"><summary>The table</summary>
   <div id="ppmReal"></div>
+  </details>
+  </section>
+  <section class="card">
   <h2 id="refigHead" hidden>Verdicts with the measured time</h2>
   <p class="hint" id="refigLead" hidden></p>
+  <details class="more"><summary>The table</summary>
   <div id="refig"></div>
+  </details>
+  </section>
+  </div>
 
+  <!-- Runs -->
+  <div class="tab" data-tab="runs" id="tab-runs" role="tabpanel" aria-label="Runs">
+  <section class="card">
+  <!-- After the charts that answer "when", not before them. This one is a
+       run-by-run log — one row per stretch of scanning — and a month of it
+       is thirty-odd rows: measured on a fortnight of offers at 800x480, it
+       put "By time of day" 1,911px down the page on a week and 2,675 on a
+       month, three to five screens of bars between the headline and the
+       chart that says which hours pay. It shows the latest few and offers
+       the rest, so a run that stands out is still findable. -->
+  <h2 id="runsHead">Runs of scanning</h2>
+  <p class="sum">Each stretch of scanning: when it ran, how long, and what its offers paid.</p>
+  <div id="runs"></div>
+  <button type="button" id="runsAll" hidden aria-pressed="false"></button>
+  </section>
+
+  <section class="card">
+  <!-- The one thing this rig says that nothing else on this page records.
+       Every figure above is about one offer at a time; this is about the only
+       question with two: a card arrived while a job was already in the car,
+       and the panel answered it in the four seconds before the card went away.
+       The answer was written to the journal from the moment that feature
+       existed and read back by nothing, so a driver could work a shift, be
+       advised a dozen times, and have no way to see any of it afterwards. -->
+  <h2 id="pairsHead" hidden>Second jobs</h2>
+  <p class="hint" id="pairsLead" hidden></p>
+  <div id="pairs"></div>
+  </section>
+
+  <section class="card">
+  <h2 id="waitsHead" hidden>Restaurant waits</h2>
+  <p class="hint" id="waitsLead" hidden></p>
+  <div id="waits"></div>
+  </section>
+  </div>
 
   <ul class="note" id="caveats"></ul>
 
@@ -5912,6 +6049,61 @@
       var href = typeof ans.href === 'string' ? ans.href : '';
       if (href === 'places/#strategy' || /^https?:\/\/[^\s"<>]+$/.test(href)) show(href, ans.from);
     }).catch(asBefore);
+  })();
+
+  // The tabs (#tabs): which group shows. The address first (#money, or a
+  // section's own id such as #incar or #gold, which opens its tab), then the
+  // last tab picked on this browser, then Today. localStorage can be refused
+  // (a private window, a locked-down kiosk) and is only a convenience here.
+  (function () {
+    var app = document.getElementById('app'), nav = document.getElementById('tabs');
+    if (!app || !nav) return;
+    var VIEWS = ['today', 'offers', 'money', 'strategy', 'runs', 'all'];
+    var KEY = 'uberscan.offers.tab';
+    function stored() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+    function keep(v) { try { localStorage.setItem(KEY, v); } catch (e) { /* not kept */ } }
+    function tabOf(id) {
+      var el = id ? document.getElementById(id) : null;
+      var t = el && el.closest ? el.closest('.tab') : null;
+      return t ? { view: t.getAttribute('data-tab'), el: el } : null;
+    }
+    function show(view) {
+      app.setAttribute('data-view', view);
+      [].forEach.call(nav.querySelectorAll('button'), function (b) {
+        b.setAttribute('aria-selected', b.getAttribute('data-view') === view ? 'true' : 'false');
+      });
+      // All is the whole page: its folded tables open, as the page was.
+      if (view === 'all') {
+        [].forEach.call(document.querySelectorAll('details.more'), function (d) { d.open = true; });
+      }
+    }
+    function fromHash() {
+      var h = decodeURIComponent((location.hash || '').slice(1));
+      if (VIEWS.indexOf(h) !== -1) { show(h); return true; }
+      var t = tabOf(h);
+      if (t) {
+        if (app.getAttribute('data-view') !== 'all') show(t.view);
+        setTimeout(function () { t.el.scrollIntoView({ block: 'start' }); }, 0);
+        return true;
+      }
+      return false;
+    }
+    nav.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('button[data-view]') : null;
+      if (!b) return;
+      var v = b.getAttribute('data-view');
+      show(v);
+      keep(v);
+      if (history.replaceState) history.replaceState(null, '', '#' + v);
+      // Back to the top of the group, the tabs still in view.
+      var top = nav.getBoundingClientRect().top + window.scrollY - 2;
+      if (window.scrollY > top) window.scrollTo(0, top);
+    });
+    window.addEventListener('hashchange', fromHash);
+    if (!fromHash()) {
+      var s = stored();
+      show(VIEWS.indexOf(s) !== -1 ? s : 'today');
+    }
   })();
 
   // The Gold card (#gold, #goldMini): /api/gold, drawn. Its own script, like

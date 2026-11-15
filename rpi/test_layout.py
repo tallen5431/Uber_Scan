@@ -1932,7 +1932,7 @@ const SNAP_MEASURE = (fixture) => {
         route.fulfill({ status: 200, contentType: 'image/jpeg',
                         body: Buffer.from(FRAMES[view], 'base64') });
       });
-      await page.goto(base + '/' + name, { waitUntil: 'domcontentloaded' })
+      await page.goto(base + '/' + name + (name === 'journal.html' ? '#all' : ''), { waitUntil: 'domcontentloaded' })
                 .catch(() => {});
       await page.waitForTimeout(1800);
       out[panel[0] + ' ' + name] = await page.evaluate(() => {
