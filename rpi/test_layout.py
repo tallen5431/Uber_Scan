@@ -331,6 +331,16 @@ READABILITY = [
     ('--text', '--warn-dim', 4.5, 'the rate on a CLOSE CALL panel'),
     ('--text', '--no-dim', 4.5, 'the rate on a PASS panel'),
     ('--text', '--doubt-dim', 4.5, 'the rate on a panel that refused to judge'),
+    # ...and the small text on each fill: the labels under the figures (RAW
+    # $/HR, $/MI, PAY), the "/hr", the car-cost line and the address. Never
+    # held before, and the panel audit measured them at 2.68:1 on the ACCEPT
+    # green and 3.21:1 on the CLOSE CALL amber. Those two cards draw them in
+    # --muted-on-fill (styles.css, `.verdict.go, .verdict.warn`); PASS and
+    # the refused card in the page's own --muted.
+    ('--muted-on-fill', '--go-dim', 4.5, 'the labels and address on an ACCEPT panel'),
+    ('--muted-on-fill', '--warn-dim', 4.5, 'the labels and address on a CLOSE CALL panel'),
+    ('--muted', '--no-dim', 4.5, 'the labels and address on a PASS panel'),
+    ('--muted', '--doubt-dim', 4.5, 'the labels and address on a refused panel'),
     # The verdict words. Never drawn below 18px bold — see .verdict-label —
     # which is where the standard asks 3:1 rather than 4.5:1. Green saturates
     # before it reaches 4.5 against the green it sits on: there is no lighter

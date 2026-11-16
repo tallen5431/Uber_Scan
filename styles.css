@@ -18,6 +18,14 @@
      label under every figure — "PAY", "MINUTES", "NET $/MI" — and of the line
      that says what the scanner is doing. */
   --muted: #9fb3c9;
+  /* ...but on the ACCEPT green and the CLOSE CALL amber it was 2.68:1 and
+     3.21:1 (the panel audit, Nov 2026): the PAY / RAW $/HR / $/MI labels,
+     the "/hr", the car-cost line and the address, on the two cards a driver
+     most has to check, below even the 3:1 large text is allowed. Lighter on
+     those two fills only (the rule at .verdict.go below): 4.60:1 on the
+     green, 5.52 on the amber. Labels still stand apart from figures by size,
+     weight and capitals rather than by fading. */
+  --muted-on-fill: #dde7f1;
   /* The four verdicts, as a deliberate ladder from brightest to darkest.
      They used to be four hues at one luminance: the ACCEPT and CLOSE CALL
      panels measured 1.02:1 against each other and PASS against doubt 1.01:1,
@@ -96,6 +104,9 @@ html, body {
 .verdict.go   { background: var(--go-dim);   border-color: var(--go); }
 .verdict.warn { background: var(--warn-dim); border-color: var(--warn); }
 .verdict.no   { background: var(--no-dim);   border-color: var(--no); }
+/* PASS and the refused card are dark enough for the ordinary label grey
+   (6.77:1 and 5.42:1). */
+.verdict.go, .verdict.warn { --muted: var(--muted-on-fill); }
 /* Deliberately none of the three. This is not a worse ACCEPT or a softer PASS —
    it is the rig declining to answer, and a driver glancing across at a colour
    they know should not read it as any kind of verdict. */
