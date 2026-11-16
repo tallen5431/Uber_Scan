@@ -1329,6 +1329,25 @@ def content_of(parsed, places=None):
             tuple(parsed.get('places') or () if places is None else places))
 
 
+def card_app(parsed):
+    """Which app's card a reading is: 'uber', 'doordash' or None.
+
+    The reader's own typing of the card's text (OP.screen_type), and nothing
+    else: no guess off the pay, the shape of the figures or the app last seen.
+    None is the answer whenever the screen type is 'unknown' — a lone "$7.09
+    34 min total" is on both apps' cards, and the corpus's 17 such payouts
+    are exactly the readings with no app's own words in them.
+
+    ONE function for the row and the offer line (scan_pi.emit_offer), so the
+    file and what server.js holds the order in the car by can never name two
+    apps for one card. Off `text`, as the line always took it; the stored
+    `text` is `rawText`, and the two give the same app on all 438 of the
+    corpus's texts with a payout, so a reader working it out again from a
+    row (server.js rowApp, tools/places_report.js appOf) gets this answer.
+    """
+    return OP.screen_type(parsed.get('text') or '')['app']
+
+
 def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
             locked=None, settled=False, whole=True, keep_places=True,
             places=None, where=None):
@@ -1447,6 +1466,14 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # None, a label tools/strategy.js counts acceptance requests with.
         # None is "not read", never "not exclusive".
         'exclusive': parsed.get('exclusive') if parsed.get('exclusive') in (True, 'early') else None,
+        # ...and which app's card it was: 'uber', 'doordash', or None when the
+        # read could not tell (card_app). The owner, Nov 2026: "no need to
+        # display the tag but take note of it in the logged information from
+        # the ocr scan". The offer line has said it since the two-orders work
+        # and the row never did, so every per-app table server.js works out of
+        # the journal (perMileSeen, cardVsReal, refigured) filed every offer
+        # under "other", and tools/ worked it out again from the text.
+        'app': card_app(parsed),
         # --- what the scanner made of it ------------------------------------
         'perHour': _round(rate.get('perHour'), 2),
         'grossPerHour': _round(rate.get('grossPerHour'), 2),

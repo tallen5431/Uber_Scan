@@ -166,6 +166,13 @@ var JournalClient = (function () {
    * offers page drops kinds it has not heard of and this is an offer. `extra`
    * says what made it — `typed: true` or `browser: true` — and `prefix`
    * keeps their ids apart from the rig's. */
+  function cardApp(parsed) {
+    var t = parsed.text || parsed.rawText;
+    if (typeof t !== 'string' || !t || typeof OfferParser === 'undefined') return null;
+    var a = OfferParser.screenType(t).app;
+    return a === 'uber' || a === 'doordash' ? a : null;
+  }
+
   function row(parsed, rate, settings, extra) {
     extra = extra || {};
     var at = Date.now();
@@ -265,6 +272,11 @@ var JournalClient = (function () {
       // ...and capped, because the phone's scanner exists for the nights the
       // rig cannot read and its rows are the ones with no second copy.
       text: (parsed.rawText || parsed.text || '').slice(0, TEXT_KEPT) || undefined,
+      // ...and which app's card it was, the rig's rule (rpi/journal.py
+      // card_app): the reader's typing of the card's own text, null when it
+      // names neither app. A keypad row has no text, so it is null: three
+      // typed figures say nothing of whose card they were.
+      app: cardApp(parsed),
       // Rounded, because rpi/journal.py rounds. The same field, written by the
       // same project, into the same file, under two rules — and the second rule
       // was simply absent rather than different, which is the shape that drifts

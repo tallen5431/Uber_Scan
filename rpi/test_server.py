@@ -805,22 +805,23 @@ if shutil.which('python3'):
     with open(fake, 'w') as fh:
         fh.write(
             'import json, sys, time\n'
-            'def say(i, minutes, pay, state="go"):\n'
+            'def say(i, minutes, pay, state="go", app=None):\n'
             '    print(json.dumps({"ready": True, "state": "go", "perHour": 30.0,\n'
             '        "grossPerHour": 36.0, "pay": pay, "minutes": minutes, "miles": 5.0,\n'
             '        "cost": 1.75, "billedMinutes": minutes, "target": 25, "band": 15,\n'
             '        "costPerMile": 0.35, "at": int(time.time() * 1000),\n'
             '        "offer": {"id": i, "pay": pay, "minutes": minutes, "billedMinutes": minutes,\n'
             '                  "miles": 5.0, "cost": 1.75, "perHour": 30.0, "target": 25,\n'
-            '                  "band": 15, "costPerMile": 0.35, "state": state}}),\n'
+            '                  "band": 15, "costPerMile": 0.35, "state": state,\n'
+            '                  "app": app}}),\n'
             '          flush=True)\n'
             'say("o-1", 0.01, 9.0)\n'
             'time.sleep(2.5)\n'
-            'say("o-3", 30.0, 12.45)\n'
+            'say("o-3", 30.0, 12.45, app="uber")\n'
             'time.sleep(1.5)\n'
-            'say("o-3", 30.0, 12.45)\n'
+            'say("o-3", 30.0, 12.45, app="uber")\n'
             'time.sleep(1.5)\n'
-            'say("o-4", 20.0, 11.0, "no")\n'
+            'say("o-4", 20.0, 11.0, "no", app="doordash")\n'
             'time.sleep(600)\n')
     open(journal, 'w').close()
     proc, base = start({'SCANNER': '1', 'SCANNER_CMD': sys.executable,
@@ -863,6 +864,11 @@ if shutil.which('python3'):
            _o4[0].get('said'), 'no')
         eq('...and that the pair line\'s own verdict was not on the panel',
            _o4[0].get('stackShown'), False)
+        # ...and which app each card was, off the offer lines: the order in
+        # the car kept its card's at the Took, the offer its own.
+        eq('...naming the app of the order in the car and of the offer',
+           [(_o4[0].get('held') or {}).get('app'), (_o4[0].get('offer') or {}).get('app')],
+           ['uber', 'doordash'])
         before = get(base, '/api/status')
         ok_('the status carries the pair line while the order is held',
             (before.get('last') or {}).get('stack') is not None)
@@ -13327,13 +13333,16 @@ function grabVar(name) {
   return m[0];
 }
 var ctx = { Advice: require(path.join(ROOT, 'advice.js')), Set: Set, Date: Date, JSON: JSON,
-            Object: Object, console: console };
+            Object: Object, console: console,
+            require: function (m) { return require(path.join(ROOT, m)); } };
 vm.createContext(ctx);
-['CLOCK_BELIEVABLE_AFTER', 'WINDOWS_MAX', 'windows', 'latestCache'].forEach(function (n) {
+['CLOCK_BELIEVABLE_AFTER', 'WINDOWS_MAX', 'windows', 'latestCache', 'RowParser'].forEach(function (n) {
   vm.runInContext(grabVar(n), ctx);
 });
 ['inWindow', 'foldReads', 'windowTakes', 'windowOver', 'rowsFor', 'dayFloor', 'latestPerOffer',
- 'bestReading', 'latestPerOfferUncached'].forEach(function (n) { vm.runInContext(grab(n), ctx); });
+ 'bestReading', 'rowApp', 'withApp', 'latestPerOfferUncached'].forEach(function (n) {
+  vm.runInContext(grab(n), ctx);
+});
 function whole(rows, floor) {
   var inR = function (r) {
     var at = (typeof r.at === 'number' && isFinite(r.at)) ? r.at : 0;

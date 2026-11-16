@@ -710,7 +710,19 @@ const cards = JSON.parse(fs.readFileSync(path.join(dir, 'cards.json'), 'utf8'));
     // Re-parsing what is stored must give back what was parsed, or the stored
     // form is lossy in a way that matters.
     var back = OfferParser.parse(row.text);
+    // ...and which app's card each was, off the same text the rig types it by
+    // (rpi/journal.py card_app). DoorDash's newer stops card, and a lone
+    // total both apps print, which names neither.
+    var dd = OfferParser.parse('$7.39 incl. tips\n2 stops (4.3 mi) \u00b7 22 min\n'
+                               + 'Fable Grill\nCustomer dropoff');
+    var bare = OfferParser.parse('$7.09 34 min total');
+    var appOf = function (p) {
+      return JournalClient.row(p, OfferParser.rate(p, settings), settings,
+                               { browser: true, prefix: 'q' }).app;
+    };
     return {
+      rowApp: row.app, ddApp: appOf(dd), bareApp: appOf(bare),
+      typedApp: typed.app === undefined ? 'undefined' : typed.app,
       newlines: (row.text.match(/\n/g) || []).length,
       rawNewlines: (parsed.rawText.match(/\n/g) || []).length,
       flatNewlines: (parsed.text.match(/\n/g) || []).length,
@@ -1701,6 +1713,13 @@ try:
         eq('the stored row does not carry a second copy of its own minutes',
            rt.get('hasCardMinutes'), False)
         eq('...having already chosen between them', rt.get('rowMinutes'), 23)
+        # The app, noted and not guessed: the phone's row names the card's app
+        # by the rig's rule, and a reading or a keypad entry that names neither
+        # says null rather than leaving the key out.
+        eq('the phone\'s row of an Uber card notes the app', rt.get('rowApp'), 'uber')
+        eq('...and of a DoorDash card', rt.get('ddApp'), 'doordash')
+        eq('...and a total both apps print names neither', rt.get('bareApp'), None)
+        eq('...nor does a typed offer', rt.get('typedApp'), None)
 
     # --- a box being retyped is not a request for the default ---------------
     #

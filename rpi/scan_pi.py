@@ -5210,7 +5210,9 @@ def emit_offer(offer_id, parsed, rate, where=None, whole=None, map_label=None):
         # the screen to know Uber's add-on card (`uber.addon`, "+25 min (+ 9.6
         # mi) total"), which is held as part of the trip it joins. And the
         # card's "Deliver by", minutes since midnight, for the deadline cue.
-        'app': OP.screen_type(parsed.get('text') or '')['app'],
+        # The app through the journal's own card_app, which the offer's row
+        # is written with, so the line and the file name one app per card.
+        'app': JR.card_app(parsed),
         'screen': OP.screen_type(parsed.get('text') or '')['screen'],
         # ...and the parser's own word that this is Uber's add-on (OP.is_addon:
         # "+ $9.50" over "+8 min (+1.3 mi)"), the window's union of it. Wider

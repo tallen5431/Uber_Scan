@@ -8438,6 +8438,12 @@ function recordPairing(offer, now, reading) {
   setTimeout(function () { go(null); }, ONTIME_WAIT_MS);
 }
 
+// 'uber' or 'doordash' as a card's app, else null: the offer line's `app`
+// and a hold's, which a scanner older than either leaves out.
+function appOrNull(a) {
+  return a === 'uber' || a === 'doordash' ? a : null;
+}
+
 function writePairing(offer, now, reading, held, hint) {
   // The driver's money, off the READING — not off the offer line.
   //
@@ -8480,12 +8486,18 @@ function writePairing(offer, now, reading, held, hint) {
       pay: numOrNull(held.pay), minutes: numOrNull(held.minutes),
       dropoff: held.dropoff || null,
       scanned: !!held.dropoffScanned,
-      heldMs: Math.max(0, now - held.acceptedAt)
+      heldMs: Math.max(0, now - held.acceptedAt),
+      // Which app each card was (appOrNull): the hold's, kept off its offer
+      // line at the Took, and the offer line's own. A pair of two apps' orders
+      // and a pair of one app's are not the same question (attribution files
+      // a read by app first), and the row could not say which it had been.
+      app: appOrNull(held.app)
     },
     // ...and the one being judged against it.
     offer: {
       pay: numOrNull(offer.pay), minutes: numOrNull(offer.minutes),
-      dropoff: offer.dropoff || null, pickup: offer.pickup || null
+      dropoff: offer.dropoff || null, pickup: offer.pickup || null,
+      app: appOrNull(offer.app)
     },
     // What the pair line showed: the range, the span, the geography. Null
     // when it said nothing, which is a measurement in its own right and must
@@ -8544,7 +8556,7 @@ function writePairing(offer, now, reading, held, hint) {
     row.heldAlso = all.slice(1).map(function (o) {
       return { pay: numOrNull(o.pay), minutes: numOrNull(o.minutes),
                dropoff: o.dropoff || null, scanned: !!o.dropoffScanned,
-               heldMs: Math.max(0, now - o.acceptedAt) };
+               heldMs: Math.max(0, now - o.acceptedAt), app: appOrNull(o.app) };
     });
     row.heldCount = all.length;
     if (row.stack && all.length > 1) row.stack.over = all.length;
@@ -8907,7 +8919,13 @@ function framePath() {
 // Not every field in the row: `content` is an internal fingerprint and `v`,
 // `seq` and `id` only matter to whatever is collapsing the rows, which has
 // already happened by the time anything gets here.
-var CSV_COLUMNS = ['at', 'pay', 'minutes', 'billedMinutes', 'miles',
+var CSV_COLUMNS = ['at',
+                   // Which app's card: uber, doordash, or empty where the
+                   // read could not tell (rowApp). Beside the time, because
+                   // the two apps' offers are not one population and a sheet
+                   // that cannot split them averages one into the other.
+                   'app',
+                   'pay', 'minutes', 'billedMinutes', 'miles',
                    // How much of `minutes` and `miles` was the drive to the
                    // pickup rather than the job. Empty on a card that stated
                    // one total and never split it, which is most deliveries.
@@ -9497,6 +9515,34 @@ function latestPerOffer(rows, floor) {
   return hit.offers;
 }
 
+/* Which app an offer's card was, on the copy the fold hands out: the row's
+ * own `app` where the rig wrote one (rpi/journal.py card_app, from the
+ * owner's "take note of it in the logged information", Nov 2026), and for a
+ * row written before that, the same reading of the row's own `text`
+ * (offer-parser.js screenType, the twin of what card_app asks), which is how
+ * tools/places_report.js and tools/strategy.js have read it all along.
+ * 'uber', 'doordash' or null: null where the text names neither app, and on
+ * a typed row, which has no text. Never off the pay or the figures' shape.
+ *
+ * A row that SAYS `app: null` keeps it: the rig asked its own reading and
+ * the reading could not tell, and the same text will not tell better here.
+ *
+ * offer-parser.js is asked for only when an old row needs it, so a server
+ * whose journal the rig has always written app into (a lite rig's, from its
+ * first offer) never loads the parser at all: lite stays lean on a Zero. */
+var RowParser = null;
+function rowApp(r) {
+  if (r.app === 'uber' || r.app === 'doordash' || r.app === null) return r.app;
+  if (typeof r.text !== 'string' || !r.text) return null;
+  if (!RowParser) RowParser = require('./offer-parser.js');
+  var a = RowParser.screenType(r.text).app;
+  return a === 'uber' || a === 'doordash' ? a : null;
+}
+function withApp(o) {
+  o.app = rowApp(o);
+  return o;
+}
+
 function latestPerOfferUncached(rows) {
   var byId = Object.create(null);
   var out = [];
@@ -9613,7 +9659,7 @@ function latestPerOfferUncached(rows) {
     if (r.kind) return;                       // something newer than this reader
     // Copies, because `hidden` and `accepted` are written onto these below
     // and the rows readJournal hands over now live across requests.
-    if (!r.id) { out.push(Object.assign({}, r)); return; }
+    if (!r.id) { out.push(withApp(Object.assign({}, r))); return; }
     if (!(r.id in byId)) {
       // The slot is claimed here and filled below, so the order of `out` is
       // still the order the cards were first seen in the file.
@@ -9633,7 +9679,7 @@ function latestPerOfferUncached(rows) {
      and for more it is a pure function of the whole list, which is what it is
      handed here. */
   Object.keys(byId).forEach(function (id) {
-    out[byId[id]] = Object.assign({}, bestReading(readings[id]));
+    out[byId[id]] = withApp(Object.assign({}, bestReading(readings[id])));
   });
 
   out.forEach(function (o) {

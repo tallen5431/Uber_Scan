@@ -1743,6 +1743,77 @@ finally:
     _rec.close()
     shutil.rmtree(_rig, ignore_errors=True)
 
+# --- which app's card, from the rig's read to the NucBox's offers page ------
+#
+# The owner, Nov 2026: "no need to display the tag but take note of it in the
+# logged information from the ocr scan". Written by the rig's own OfferLog off
+# the accumulated reading (journal.card_app), carried across the sync as it
+# was written, and served by the far end's /api/journal and its CSV. A row
+# written before the field existed has its app read off its own text there
+# (server.js rowApp); a row that said null keeps null, since the same text
+# will not tell better at the far end; a row with no text (the keypad's) is
+# null. Every card is invented.
+import accumulate as _AC                                         # noqa: E402
+import csv as _acsv                                              # noqa: E402
+import io as _aio                                                # noqa: E402
+import offer_parser as _OP                                       # noqa: E402
+
+_adir = tempfile.mkdtemp()
+_apath = os.path.join(_adir, 'journal.jsonl')
+_alog = JR.OfferLog(JR.Journal(_apath))
+_at0 = JR.now_ms() / 1000.0 - 3600
+for _n, _text in enumerate((
+        '$12.45 5 min (1.2 mi) away 23 min (8.4 mi) trip',
+        '$7.39 incl. tips\n2 stops (4.3 mi) · 22 min\nFable Grill\nCustomer dropoff',
+        '$7.09 34 min total')):
+    _acc = _AC.OfferAccumulator()
+    for _i in range(4):
+        _t = _at0 + _n * 300 + _i * 0.5
+        _p = _acc.add(_OP.parse(_text), now=_t)
+        _alog.consider(_p, _OP.rate(_p, {'target': 25, 'band': 15, 'costPerMile': 0.3}),
+                       now=_t)
+_written = lines(_apath)
+eq('the rig wrote one row per card, each naming its app or None',
+   [(r['pay'], r.get('app', 'missing')) for r in _written],
+   [(12.45, 'uber'), (7.39, 'doordash'), (7.09, None)])
+_ids = dict((r['pay'], r['id']) for r in _written)
+# Old rows: the same cards as a rig from before the field wrote them, a typed
+# one, and one that said null.
+_olds = []
+for _r in _written:
+    _o = dict(_r, id='old-' + _r['id'])
+    _o.pop('app', None)
+    _olds.append(_o)
+_typed = dict(_written[0], id='typed-1', typed=True)
+for _k in ('app', 'text', 'scans'):
+    _typed.pop(_k, None)
+_said_null = dict(_written[0], id='said-null', app=None)
+_afar = FarEnd()
+try:
+    _res = SY.send(_afar.base, _written + _olds + [_typed, _said_null])
+    eq('...and the far end took every one', _res['added'], len(_written) + len(_olds) + 2)
+    eq('...stored exactly as the rig wrote it',
+       [r.get('app', 'missing') for r in lines(_afar.journal)[:3]], ['uber', 'doordash', None])
+    _body = json.loads(urllib.request.urlopen(_afar.base + '/api/journal?days=0',
+                                              timeout=5).read().decode('utf-8'))
+    _by = dict((o['id'], o.get('app', 'missing')) for o in _body['offers'])
+    eq('the far end\'s offers say the app the rig noted',
+       [_by.get(_ids[p]) for p in (12.45, 7.39, 7.09)], ['uber', 'doordash', None])
+    eq('...and a row from before the field gets the same app off its own text',
+       [_by.get('old-' + _ids[p]) for p in (12.45, 7.39, 7.09)], ['uber', 'doordash', None])
+    eq('...a typed row with no text is null, never a guess', _by.get('typed-1'), None)
+    eq('...and a row that said null keeps it', _by.get('said-null'), None)
+    _csv_rows = list(_acsv.DictReader(_aio.StringIO(
+        urllib.request.urlopen(_afar.base + '/api/journal.csv?days=0',
+                               timeout=5).read().decode('utf-8'))))
+    eq('the CSV has the app beside each offer, empty where none was read',
+       sorted((r['pay'], r['app']) for r in _csv_rows),
+       sorted([('12.45', 'uber')] * 2 + [('12.45', '')] * 2 + [('7.39', 'doordash')] * 2
+              + [('7.09', '')] * 2))
+finally:
+    _afar.close()
+    shutil.rmtree(_adir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d sync checks passed' % ok)
 sys.exit(1 if bad else 0)

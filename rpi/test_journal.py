@@ -615,6 +615,25 @@ for i, text in enumerate([WITH, WITHOUT]):
 eq('keepPlaces off stores no address at all',
    [r['places'] for r in log.journal.rows()], [[]] * len(log.journal.rows()))
 
+# Which app's card, noted on the row off the reading's own text (card_app),
+# through the real accumulator and OfferLog as the rig writes it: an Uber
+# card, a DoorDash card, and a lone total both apps print, which is None — the
+# read could not tell, and nothing guesses. The key is there on every row, so
+# a reader can tell "could not tell" from a row written before it existed.
+_app_rows = {}
+for _name, _text in (('uber', OFFER),
+                     ('doordash', '$7.39 incl. tips\n2 stops (4.3 mi) · 22 min\n'
+                                  'Fable Grill\nCustomer dropoff'),
+                     ('none', '$7.09 34 min total')):
+    _alog = fresh('app-%s.jsonl' % _name)
+    feed(_alog, [_text] * 4)
+    _app_rows[_name] = [r.get('app', 'missing') for r in _alog.journal.rows()]
+eq('an Uber card\'s rows say uber, a DoorDash card\'s doordash, and a total both '
+   'apps print says None', _app_rows,
+   {'uber': ['uber'], 'doordash': ['doordash'], 'none': [None]})
+eq('...the offer line and the row asking one function',
+   JR.card_app(P.parse(OFFER)), P.screen_type(P.parse(OFFER)['text'])['app'])
+
 shutil.rmtree(work, ignore_errors=True)
 
 
