@@ -1004,9 +1004,23 @@ eq('...and none it cannot be given',
 
 # And the voice, which is the whole of what a driver gets while watching the
 # road. "accept, three thousand five hundred an hour" was what this said.
-eq('an ordinary offer is priced', SP.spoken(_rate('go', 31.4)), 'accept. 31 an hour.')
-eq('a close one too', SP.spoken(_rate('warn', 22.0)), 'close. 22 an hour.')
-eq('a poor one too', SP.spoken(_rate('no', 8.0)), 'pass. 8 an hour.')
+# In the card's words and at the card's rounding (PLAN 3.5): CLOSE CALL is
+# "close call", and the figure is the headline's own, one decimal under $100
+# and whole dollars from there (live.html rateText), not a whole-dollar
+# round of its own: "close. 20 an hour." was said over CLOSE CALL $19.6.
+eq('an ordinary offer is priced', SP.spoken(_rate('go', 31.4)), 'accept. 31.4 an hour.')
+eq('a close one in the card\'s words', SP.spoken(_rate('warn', 19.6)),
+   'close call. 19.6 an hour.')
+eq('a poor one too, its decimal said as the card draws it',
+   SP.spoken(_rate('no', 8.0)), 'pass. 8.0 an hour.')
+# The rounding is the panel's, tie and all. The figures are what node prints
+# for live.html's rateText over each (toFixed(1) under 100, Math.round from
+# there), on the perHour emit() sends, rounded to the cent first.
+eq('the voice rounds as the card draws, ties upward as toFixed takes them',
+   [SP.rate_said(x) for x in (19.25, 19.65, 0.05, 99.95, 99.96, 100.5, 101.5,
+                               3548.49, -3.45, 19.649)],
+   ['19.3', '19.6', '0.1', '100.0', '100.0', '101', '102', '3548', 'minus 3.5',
+    '19.6'])
 eq('a lost decimal point is named, not priced',
    SP.spoken(_rate('doubt', 3548.49, 'pay')), 'check the pay.')
 eq('...and so is a misread time', SP.spoken(_rate('doubt', 90.0, 'time')),

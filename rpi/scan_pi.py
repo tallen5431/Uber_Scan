@@ -25,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+from decimal import ROUND_HALF_UP, Decimal
 
 import cv2
 import numpy as np
@@ -2807,9 +2808,33 @@ def spoken(rate):
                 'leg': 'check the time, most of the trip did not read.',
                 'screen': 'not an offer.'}.get(rate.get('doubt'),
                                                'read that again.')
-    dollars = int(round(rate['perHour']))
-    word = {'go': 'accept', 'warn': 'close', 'no': 'pass'}[rate['state']]
-    return '%s. %d an hour.' % (word, dollars)
+    # The card's words and the card's figure (the panel audit of Nov 2026,
+    # PLAN 3.5). This said "close. 20 an hour." over a card reading CLOSE CALL
+    # $19.6: the screen's own aria line already said "Close call, $19.6 an
+    # hour", and a driver who hears one figure and glances at another has two
+    # answers to check instead of one. Only the words change: the state and
+    # the rate are rate()'s, spoken as they are drawn.
+    word = {'go': 'accept', 'warn': 'close call', 'no': 'pass'}[rate['state']]
+    return '%s. %s an hour.' % (word, rate_said(rate['perHour']))
+
+
+def rate_said(per_hour):
+    """The headline $/hr as the panel draws it, without the dollar sign.
+
+    live.html's and lite/lite.html's rateText: one decimal under $100, whole
+    dollars from there, the sign kept. Of the figure emit() sends, which is
+    `perHour` rounded to the cent, so the voice rounds the number the panel
+    rounds. Decimal, not round() or '%.1f': JavaScript's toFixed and
+    Math.round take a tie upward on the number's exact value, and Python's
+    round and '%.1f' take it to the even digit — $19.25 is drawn "$19.3",
+    and '%.1f' says 19.2. ROUND_HALF_UP on the exact value is toFixed's own
+    rule, and Math.round's for the positive figure both are handed.
+    """
+    n = round(per_hour, 2)
+    a = Decimal(abs(n))
+    figure = (str(a.quantize(Decimal(1), rounding=ROUND_HALF_UP)) if a >= 100
+              else str(a.quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)))
+    return ('minus ' if n < 0 else '') + figure
 
 
 def show(frame_text, rate, parsed, ms, locked):
