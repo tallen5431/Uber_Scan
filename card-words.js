@@ -49,6 +49,19 @@
   // the opposite of reading it as one.
   var CHECK_THE_PHONE = 'CHECK THE PHONE';
 
+  // After the verdict word while the read is not settled (`locked` and
+  // `whole`, live.html's `settled`). It was " ?", and "?" was then three
+  // things on one panel: this, the doubt mark of CHECK THE PAY, and the
+  // question on the Took button. "?" is now the panel's mark for "check this"
+  // (CHECK …, PAY ?); this says the read is still coming in, as "…" already
+  // says it on the Took and Drop buttons while their press is under way.
+  // A mark and not the word READING, which the panel audit proposed: one
+  // character, as the "?" was, because "≈ CLOSE CALL ?" was measured at 201px
+  // of the 3.5" hat's 208px card, and lite's word at 480x320 has no room for
+  // seven more letters either. The notice under it says it in words whenever
+  // the journey may be short (STILL READING · may look better than it is).
+  var UNSETTLED = ' …';
+
   // The two figures' labels, the same on both panels, so a driver who has
   // seen both reads the box one way. Lite said "net / mile" here while the
   // full panel said "$/mi" for pay ÷ miles: both true, and the same box read
@@ -213,6 +226,7 @@
     NO_OFFER_SAID: NO_OFFER_SAID,
     TAKEN_SCREENS: TAKEN_SCREENS,
     CHECK_THE_PHONE: CHECK_THE_PHONE,
+    UNSETTLED: UNSETTLED,
     RAW_HOUR_LABEL: RAW_HOUR_LABEL,
     PER_MILE_LABEL: PER_MILE_LABEL,
     noVerdictSaid: noVerdictSaid,

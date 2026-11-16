@@ -8829,7 +8829,7 @@ try:
             # A trailing "?" is the page saying the reading is not settled yet,
             # which is a different claim from "no card here" and is allowed.
             ok_('%s: the verdict replaces it' % where,
-                r['verdict']['text'].rstrip(' ?')
+                r['verdict']['text'].rstrip(' \u2026')
                 in ('ACCEPT', 'CLOSE CALL', 'PASS'))
 
             # --- the number that was sent and never shown ------------------
@@ -10380,7 +10380,7 @@ try:
     # the class are the reading's own state, and $/mi is in neither.
     _verdict = {'accept': ('ACCEPT', 'go'), 'close': ('CLOSE CALL', 'warn'),
                 'pass': ('PASS', 'no'), 'doordash': ('CLOSE CALL', 'warn'),
-                'notices': ('CLOSE CALL ?', 'warn'), 'stacked': ('CLOSE CALL', 'warn'),
+                'notices': ('CLOSE CALL …', 'warn'), 'stacked': ('CLOSE CALL', 'warn'),
                 'moving': ('ACCEPT', 'go'), 'night': ('ACCEPT', 'go'),
                 'checkpay': ('CHECK THE PAY', 'doubt'), 'untimed': ('CHECK THE TIME', 'doubt'),
                 'nominutes': ('ACCEPT', 'go')}

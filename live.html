@@ -5344,7 +5344,7 @@
           screen: 'NOT AN OFFER' }[r.doubt] || 'READ AGAIN');
     } else {
       setText(el.verdictLabel, ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '')
-        + (settled ? '' : ' ?'));
+        + (settled ? '' : (CW ? CW.UNSETTLED : ' \u2026')));
     }
     // The headline is net of running costs when a cost per mile is set, and
     // saying so is not optional: a driver who checks 7.09 over 34 minutes gets

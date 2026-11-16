@@ -145,6 +145,10 @@
   #card.go #word::before   { content: '\2713\00a0'; }
   #card.warn #word::before { content: '\2248\00a0'; }
   #card.no #word::before   { content: '\2715\00a0'; }
+  /* ...and the doubt its "?", as live.html's (styles.css): CHECK THE PAY was
+     the one card here with no mark, so a reading the rig refused was told
+     from a verdict by its violet alone. */
+  #card.doubt #word::before { content: '\003F\00a0'; }
 
   .rate {
     display: flex;
@@ -420,7 +424,7 @@
     // always reads better than the whole one.
     var settled = r.locked && r.whole !== false;
     setText(el.word, doubt ? (DOUBT_LABEL[r.doubt] || 'READ AGAIN')
-      : (STATE_LABEL[r.state] || '') + (settled ? '' : ' ?'));
+      : (STATE_LABEL[r.state] || '') + (settled ? '' : CW.UNSETTLED));
     // A reading that cannot be true gets no rate, but keeps the rate's room.
     setText(el.rate, doubt ? '--' : rateText(r.perHour));
     setText(el.unit, '/hr');

@@ -596,7 +596,7 @@ STATES = {
                                                          'Quill St, Exampleton']},
     'lowpower': {'heatGuard': True, 'throttled': {'now': ['under-voltage']}, 'cpuC': 61},
 }
-WORDS = {'accept': 'ACCEPT', 'close': 'CLOSE CALL ?', 'pass': 'PASS',
+WORDS = {'accept': 'ACCEPT', 'close': 'CLOSE CALL \u2026', 'pass': 'PASS',
          'doubt': 'CHECK PAY AND TIME', 'waiting': 'WAITING FOR AN OFFER',
          'lowpower': 'WAITING FOR AN OFFER', 'nopay': 'CHECK THE PHONE'}
 
@@ -642,7 +642,8 @@ const fs = require('fs');
                      bg: getComputedStyle(e).backgroundColor, color: getComputedStyle(e).color }; };
           const figs = Array.from(document.querySelectorAll('.figs b, .figs small')).map((e) => ({
             sw: e.scrollWidth, cw: e.clientWidth, text: e.textContent }));
-          return { word: box('#word'), rate: box('#rate'), card: box('#card'),
+          const mark = getComputedStyle(document.getElementById('word'), '::before').content;
+          return { word: box('#word'), rate: box('#rate'), card: box('#card'), mark,
                    rawhr: box('#rawhr'), lRawhr: box('#lRawhr'), pmi: box('#pmi'), lPmi: box('#lPmi'),
                    footer: box('footer'), status: box('#status'), target: box('#target'), figs,
                    docW: document.documentElement.scrollWidth, docH: document.documentElement.scrollHeight,
@@ -774,6 +775,9 @@ for _key in sorted(_res):
     for _part in ('rawhr', 'pmi', 'lRawhr', 'lPmi'):
         _c = _cr(_m[_part]['color'], _m['card']['bg'])
         ok_('%s: %s reads on the card (%.2f:1)' % (_key, _part, _c), _c >= 4.5)
+eq('a refused card wears the "?" as live.html\'s does',
+   _res['800x480 dark doubt']['mark'], '"? "')
+eq('...and a verdict its own mark, not that one', _res['800x480 dark accept']['mark'], '"\u2713\u00a0"')
 eq('a card with no payout to price says why under CHECK THE PHONE',
    _res['800x480 dark nopay']['target']['text'], 'no pay read — box may cut it off')
 
