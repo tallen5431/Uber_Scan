@@ -28,6 +28,13 @@ What it never turns off: the reader, the parser, every money-safety rule, the
 verdict, speech and the journal (the small local offers log). Those are not
 features; they are the program.
 
+What it slows, and only that: the backstop read, the card box read on the
+clock while no card is up (scan_pi.IDLE_READ_S, 3 s; IDLE_READ_LITE_S, 6 s,
+here). Not off: the 12 Nov offer that waited 66 s for a read on a moving
+phone would wait on a Zero too, and a missed offer is the one failure this
+edition exists to avoid. Twice as long because a Zero 2 W reads 3-4x slower,
+so the backstop takes about the same share of it.
+
 THE ORDER OF ASKING. The environment's LITE wins when it says exactly '1' or
 '0' — the service sets it (lite/install.sh), and the suites set both ways.
 Otherwise `"lite": true` in rpi/config.json's `settings`, true only when it is

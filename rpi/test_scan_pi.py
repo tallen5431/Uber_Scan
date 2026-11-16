@@ -5507,6 +5507,41 @@ ok_('...and a window of nothing but skipped whole-screen reads is still said (%r
 eq('read_why names it for the sample line', SP.read_why(_bo, _bo['parsed']),
    'too dark to read, so not read')
 
+# --- the backstop's reads, on the health line and the tally -----------------
+#
+# IDLE_READ_S: the card box read on the clock when nothing has read it for
+# that long and no card is up. How many went in a window, and how many found
+# an offer no read had seen — the count that says whether the motion gate is
+# missing cards on a rig. Nothing on the line in a window with none.
+_bh = SP.Health()
+_bh.since = 0.0
+_bh.add({'ms': {'total': 900.0}}, {'complete': False, 'pay': None})
+_bh.backstop, _bh.backstop_found = 3, 1
+_bc = _bh.counters(10.0)
+_blines = []
+_was = SP.log
+SP.log = _blines.append
+try:
+    _bh.report(SP.HEALTH_EVERY + 1, None, PL.Scanner(quad=None))
+    _bq = SP.Health()
+    _bq.since = 0.0
+    _bq.add({'ms': {'total': 900.0}}, {'complete': False, 'pay': None})
+    _bq.report(SP.HEALTH_EVERY + 1, None, PL.Scanner(quad=None))
+finally:
+    SP.log = _was
+eq('[backstop] the tally carries the reads and the offers they found',
+   (_bc['backstop'], _bc['backstopFound']), (3, 1))
+ok_('[backstop] ...the health line says both (%r)' % _blines[:1],
+    _blines and '3 backstop reads, 1 found an offer the motion gate had not sent a '
+    'read for' in _blines[0])
+ok_('[backstop] ...and a window with none says nothing of them (%r)' % _blines[1:],
+    len(_blines) == 2 and 'backstop' not in _blines[1])
+eq('[backstop] ...and the window starts again from none',
+   (_bh.backstop, _bh.backstop_found), (0, 0))
+ok_('[backstop] the lite edition reads on a longer clock, not none (%r s against %r s)'
+    % (SP.IDLE_READ_LITE_S, SP.IDLE_READ_S),
+    SP.IDLE_READ_S and SP.IDLE_READ_LITE_S and SP.IDLE_READ_LITE_S > SP.IDLE_READ_S)
+
 # --- the richer 📷 Snap (EXPERIMENTAL): reads.json and frame.jpg -------------
 #
 # The owner, 31 Oct 2026: "Yes add all of them". The scanner's two: its last

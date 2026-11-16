@@ -125,6 +125,12 @@ eq('...and those two are every map-label submit there is',
    len(re.findall(r'map_labels\.submit\(', _sp)), 2)
 ok_('...and keeps no map bands under it', re.search(
     r'if lite:\n(?:\s*#.*\n)*\s*log\(\'map bands off \(lite\)\'\)\n\s*elif bands_on', _sp))
+# ...and the backstop read (IDLE_READ_S) on a longer clock under it, never
+# off: a missed offer is the failure lite exists to avoid, and the 12 Nov one
+# waited 66 s for a read on a moving phone.
+ok_('...and reads the card box on the backstop\'s longer clock under it, not never',
+    'IDLE_READ_LITE_S if lite else IDLE_READ_S' in _sp
+    and not re.search(r'IDLE_READ[A-Z_]* = None', _sp))
 # What it must NOT gate: the reader, the verdict, speech, the journal. If any
 # of those names ever sits beside `lite` the switch has reached the money.
 for _keep in ('Reader(', 'emit(', 'speak', 'JR.', 'OP.rate', 'unsure_payout'):
