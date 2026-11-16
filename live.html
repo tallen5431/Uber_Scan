@@ -592,9 +592,12 @@
   /* ...except the age, which is not a diagnostic. On a panel beside a phone
      being worked with a mouse, "does this rate belong to the card in front of
      me or the one before it" is the question the whole line exists to answer,
-     and it is answered in seconds. Full-strength text at the front of a dim
-     line, so it reads without being read. */
-  .pending .age { color: var(--text); font-weight: 700; }
+     and it is answered in seconds. At the front of the line, so it is found
+     without being looked for; in the line's own grey and weight since the
+     panel audit (Nov 2026), because full-strength bold made a seconds
+     counter the brightest small text on the glass, brighter than the
+     figures it dates. */
+  .pending .age { color: var(--muted); font-weight: 400; }
   .connbar {
     display: flex; align-items: center; justify-content: center; gap: 8px;
     font-size: 12px; color: var(--muted); padding: 8px;
@@ -5601,7 +5604,18 @@
     // indistinguishable at a glance from "1517ms". The age is the only part of
     // it a driver acts on.
     var age = Math.max(0, Math.round((Date.now() - readAt) / 1000));
-    var ageSaid = age < 1 ? 'just now' : age + 's ago';
+    // In ten-second steps, "now" for the first ten. It changed every
+    // second, bold and at full strength — the highest-contrast small text on
+    // the glass (17.4:1, brighter than the figures), ticking at the edge of
+    // the card it is meant to qualify (the panel audit's ninth finding). The
+    // question it answers, this card or the one before, is a question of
+    // tens of seconds; staleness past that is .stale's dimming and "nothing
+    // from the scanner for Ns", both unchanged. "now" and not "just now":
+    // the old line showed "just now" for one second and "1s ago" after, and
+    // at ten seconds of "just now" the held order beside it on this line
+    // lost a letter to the ellipsis in the 800x480 card while moving
+    // (rpi/test_layout.py).
+    var ageSaid = age < 10 ? 'now' : (Math.floor(age / 10) * 10) + 's ago';
     // The diagnostics get an element of their own so the 3.5" hat can drop them
     // and keep the age. They used to be bare text nodes, which CSS cannot
     // address, so the hat's only way to reclaim the line was to hide all of

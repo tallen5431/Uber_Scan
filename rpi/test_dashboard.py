@@ -8912,7 +8912,7 @@ try:
             ok_('%s: how old the reading is, is on the glass' % where,
                 r['age']['shown'])
             ok_('%s: ...as a time and not a blank' % where,
-                'ago' in r['age']['text'] or 'just now' in r['age']['text'])
+                'ago' in r['age']['text'] or r['age']['text'] == 'now')
             # ...and the half that genuinely has no room on the hat does give
             # way there, or this is just the old block back under a new name.
             if panel == '480x320':
@@ -10148,14 +10148,14 @@ try:
     _omm = _om.get('missing') or {}
     eq('[old map-view.js] a reading lands as on any panel (%r)' % (_omm.get('fresh') or {}),
        ((_omm.get('fresh') or {}).get('verdict'), (_omm.get('fresh') or {}).get('age')),
-       ('verdict no', 'just now'))
+       ('verdict no', 'now'))
     ok_('[old map-view.js] eighteen seconds of nothing: the card goes stale (%r)'
         % (_omm.get('quiet') or {}).get('verdict'),
         'stale' in ((_omm.get('quiet') or {}).get('verdict') or '').split())
     _omq = _omm.get('quiet') or {}
     ok_('[old map-view.js] ...the tick says how long it has been (%r)' % _omq,
         (_omq.get('conn') or '').startswith('nothing from the scanner for')
-        and re.match(r'^(1[89]|2\d)s ago$', _omq.get('age') or '')
+        and re.match(r'^(10|20)s ago$', _omq.get('age') or '')
         and _omq.get('dot') is False)
     ok_('[old map-view.js] ...and the next beat is read to the end, dot and all (%r)'
         % (_omm.get('back') or {}),
@@ -11225,8 +11225,8 @@ try:
         # now, so this says what a fresh one reads as rather than that it reads
         # as nothing — "does not carry an age" would still pass on "just now",
         # which is an age, and would have gone on passing on "0s ago".
-        eq('...and a fresh one says so in words',
-           (fresh['detail']['text'] or '').split(' · ')[0], 'just now')
+        eq('...and a fresh one says so in words ("now", for its first ten seconds)',
+           (fresh['detail']['text'] or '').split(' · ')[0], 'now')
         ok_('...rather than counting from zero',
             's ago' not in (fresh['detail']['text'] or ''))
 
@@ -11238,16 +11238,19 @@ try:
     ok_('the age has an element of its own', bool(aged))
     if aged:
         ok_('...at the front of the line', aged.get('first'))
-        ok_('...heavier than the diagnostics beside it (%s vs %s)'
-            % (aged.get('weight'), aged.get('lineWeight')),
-            (aged.get('weight') or 0) > (aged.get('lineWeight') or 0))
-        ok_('...and not in their grey (%s vs %s)'
-            % (aged.get('colour'), aged.get('lineColour')),
-            aged.get('colour') and aged.get('colour') != aged.get('lineColour'))
-    # ...and it counts on its own, with nothing arriving to make it.
+        # ...but no longer louder than them. Bold at full strength it was the
+        # highest-contrast small text on the glass (17.4:1, over figures at
+        # 5.2), changing every second at the edge of the card (the panel
+        # audit, Nov 2026). In the line's own grey and weight now; found by
+        # being first, not by being bright.
+        eq('...in the line\'s own grey and weight, not brighter than the figures',
+           (aged.get('colour'), aged.get('weight')), (aged.get('lineColour'), aged.get('lineWeight')))
+    # ...and it moves in ten-second steps, so three seconds on it still says
+    # what it said: the "[old map-view.js]" check below holds it counting on to
+    # "10s ago" with nothing arriving.
     later = (got.get('aged') or '').strip()
-    ok_('the age keeps counting while the page sits still (%r)' % later,
-        later.endswith('s ago') and later != '0s ago')
+    eq('the age does not tick every second: three seconds on, still (%r)' % later,
+       later, 'now')
 
     # The whole point of the notice case: a card whose distance could not be
     # read carries a notice for its entire life, and that is exactly when the
