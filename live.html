@@ -20,6 +20,9 @@
      on a dead hotspot; it is fetched the first time somebody switches to the
      map, and never otherwise. -->
 <script src="map-view.js"></script>
+<!-- ...and the words this card shares with the lite edition's (CHECK THE
+     PHONE and its reasons): one copy, both pages ask. See card-words.js. -->
+<script src="card-words.js"></script>
 <style>
   /* Read at arm's length, in a car, at a glance. Nothing subtle here. */
   #app { justify-content: center; }
@@ -576,6 +579,11 @@
      Between offers the panel says only what it knows, which is the phase. */
   .verdict.novalue .rate,
   .verdict.novalue .submetrics { display: none; }
+  /* Why the card says CHECK THE PHONE: under the word, in the card's own
+     text, larger than the line under the card it used to be. */
+  .phonewhy { margin-top: 10px; font-size: clamp(16px, 3.4vw, 24px); font-weight: 700;
+              color: var(--text); }
+  .phonewhy[hidden] { display: none; }
   /* The headline is the one number that cannot be shown here. $1184 over twenty
      minutes is $3548/hr, and at that size, in that position, it is read before
      the label above it is. The card's own pay, time and distance stay below,
@@ -1786,6 +1794,10 @@
   <div class="live">
     <section id="verdict" class="verdict empty">
       <div class="verdict-label" id="verdictLabel">WAITING FOR AN OFFER</div>
+      <!-- Why the card says CHECK THE PHONE, under the word, in the card:
+           it was a 19px grey line under the card, the one difference between
+           a card whose pay the box cut off and a blank phone. See render. -->
+      <div class="phonewhy" id="phoneWhy" hidden></div>
       <!-- The order in the car, between offers: where it goes next and by
            when, large, in the place WAITING FOR AN OFFER had to itself. See
            showHeld. -->
@@ -2164,9 +2176,15 @@
     });
   }
 
+  // card-words.js: the words shared with lite. Asked through the guards
+  // below, so a shell one release behind (sw.js) that has no such file
+  // says what it said before.
+  var CW = window.CardWords || null;
+
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
+   'phoneWhy',
    'working', 'places', 'spoken', 'took', 'shift', 'stack', 'way', 'drop', 'dest',
    'health', 'stops', 'heldNext', 'heldLine', 'heldLine2', 'whose', 'chooser', 'undo']
     .forEach(function (id) { el[id] = document.getElementById(id); });
@@ -5084,15 +5102,31 @@
       // reading that had something of an offer on it, or before any reading
       // at all, it is still READING THE CARD.
       var again = busy && r && noVerdictSaid(r) === NO_OFFER_SAID;
+      // CHECK THE PHONE: the last reading had part of an offer card on it —
+      // a payout the box cut, a payout with no time, or a deadline or a place
+      // with no payout — and no verdict. It said WAITING FOR AN OFFER, the
+      // word over a blank phone, with the reason in 19px grey under the card
+      // (the panel audit's first finding): a glance read "waiting" with an
+      // offer up. No verdict, no rate, no figure, nothing recorded; only
+      // where to look, and why, in card-words.js's words, which lite's card
+      // says too. Not while blind, faulted, aiming or reading (those words
+      // stand), and not once the scanner has gone quiet: a reason is about
+      // the screen as it was when last read.
+      var phoneWhy = (!blind && !busy && r && CW && (!p.phase || p.phase === 'scanning')
+                      && Date.now() - seenAt <= STALE_MS)
+        ? CW.phoneSaid(r, MV ? MV.ends : null) : null;
       setText(el.verdictLabel, blind ? BLIND_LABEL[blind] || 'CANNOT SEE'
         : again ? 'READING THE SCREEN'
         : busy ? 'READING THE CARD'
+        : phoneWhy ? CW.CHECK_THE_PHONE
         : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER'));
+      setText(el.phoneWhy, phoneWhy || '');
+      setHidden(el.phoneWhy, !phoneWhy);
       // ...and with an order in the car, where it goes next in that label's
       // place when the label would be WAITING FOR AN OFFER — the card has
       // nothing else to say — and its one line under anything else. Nothing
       // held, nothing changes. See showHeld.
-      showHeld(!blind && !busy && (!p.phase || p.phase === 'scanning')
+      showHeld(!blind && !busy && !phoneWhy && (!p.phase || p.phase === 'scanning')
                ? 'between' : 'line');
       // Only while aiming, where the number means pixels and says so. On any
       // other phase this put a four-digit camera measurement in the position
@@ -5156,6 +5190,9 @@
             : (blind ? ''
                : again ? 'no offer on screen · reading again'
                : busy ? 'working out the pay, the time and the distance'
+               // The reason is on the card under CHECK THE PHONE; said
+               // here as well it was the same words twice.
+               : phoneWhy ? trackNote(r).replace(/^ · /, '')
                : (r ? noVerdictSaid(r) + trackNote(r) : '')));
       if (drawnAs(el.detail, '\n' + detailSaid)) el.detail.textContent = detailSaid;
       el.verdict.classList.toggle('stale', quiet > STALE_MS);
@@ -5193,11 +5230,12 @@
       // is very likely that card's, which is the cue the half-width card is
       // for.
       setBetween(!blind && (!p.phase || p.phase === 'scanning') && (!busy || !!again)
-                 && quiet <= STALE_MS && el.warn.hidden && el.stops.hidden);
+                 && quiet <= STALE_MS && el.warn.hidden && el.stops.hidden && !phoneWhy);
       return;
     }
     // An offer: the verdict back on the glass, in this same render.
     setBetween(false);
+    setHidden(el.phoneWhy, true);
 
     var stale = Date.now() - readAt > READ_STALE_MS;
     verdictClass('verdict ' + r.state + (stale ? ' stale' : ''));
@@ -5606,113 +5644,22 @@
     return bits.length ? ' · ' + bits.join(' · ') : '';
   }
 
-  // What a reading with no verdict in it DID read, in words and no figures.
+  // What a reading with no verdict in it DID read, in words and no figures,
+  // and whether that is a card to go and look at: card-words.js, which lite
+  // asks too, so the two panels say one thing (its noVerdictSaid has the
+  // history: the 8 Oct card whose pay the box cut off, the zone prompt and
+  // the map screen that read like one, the taken screens of 12 Nov). The
+  // places are asked of MV.ends, as showPlaces asks: the one rule for what a
+  // reading named (rpi/test_lint.py holds the page to it).
   //
-  // Every one of them used to get "scanner running, no offer on screen", which
-  // is a claim about the phone this page has no way to know. On 8 Oct an Uber
-  // Est. delivery card sat square in front of the camera: the card box cut
-  // its $14.48 in half, the reader got "Includes expected tip", the deadline,
-  // "8.6 mi" and both addresses, and the panel told the driver there was no
-  // offer. A reading carries what it got — `pay`, `minutes`, `deliverBy`,
-  // `miles`, `places` and `clipped` are all on every message emit() sends —
-  // so this says what was got, and the one thing the driver can do about it.
-  //
-  // `clipped` first, because it is the one case where the rig KNOWS the box
-  // cut a card: the reader found a payout flush against the box's top edge
-  // and threw the whole parse away for it (pipeline.money_is_clipped), so the
-  // reading arrives as empty as one of a blank screen, and before `clipped`
-  // was on the wire it got the old sentence. The 8 Oct card missed that path
-  // only because its cut digits read as "gg Pit.", which is no payout to be
-  // flush against anything; a box edge a little lower would have left them
-  // readable, flush, and dropped. A payout is the rig's own test for a card
-  // (`card_on_screen` in rpi/scan_pi.py), so "pay" is said outright here.
-  //
-  // NOT "a card is in view" for the rest, which is the obvious sentence and
-  // is not true either. Of the corpus's 19 texts that read no payout, 18 read
-  // a time, a distance or a place, and 12 of those are not cards at all: the
-  // app's zone prompt (5) and Uber's map screen — "a map screen is not an
-  // offer" and its six variants (7), every one of which reads as 39 minutes
-  // and 1.0 mi. That map is the navigation screen, and a navigation screen
-  // sits in front of the camera for a whole delivery (AUDITS.md, the `screen`
-  // rows), so expect "no pay read" for long stretches of every delivery. The
-  // panel cannot tell a card missing its pay from a screen that never had
-  // one, so it says the half it knows, with the remedy hedged on the half it
-  // does not, and the hedge is what keeps it true over the map.
-  //
-  // A pay with no verdict has no time to divide it by: `> 0` as is_complete
-  // has it. Every reading that reaches this with a pay read no time at all,
-  // but for a deadline rate() could not count down — one due this very
-  // minute (minutes_until wraps anything earlier to tomorrow), or read before
-  // the Pi's clock was set (clock_minutes) — or a `pad` in config.json
-  // negative enough to cancel the card's own minutes; and "no time" is the
-  // truth about those as well.
-  //
-  // No figure, in any: no verdict was reached, and a number on this line is
-  // one the driver would read as the reading's. The box, not the card box: a
-  // driver who pressed No card box reads the whole screen box, and the
-  // control that fixes either is ▣ Set box.
-  //
-  // Each sentence is no wider than the one it replaced, in the page's own
-  // font on every panel (rpi/test_layout.py), because trackNote() appends to
-  // this line and the old sentence was already sized to what it appends:
-  // with " · tracking 30px" it was 226px of the 3.5" hat's 228px scene line.
-  // The first wordings here, 46 and 45 characters, wrapped beside that note at
-  // 480x320 and at 800x480 and lifted the verdict label 5px and 12px where
-  // the old line had left it alone. No wider means whatever fitted beside the
-  // old sentence fits beside these.
-  //
-  // Measured on the real week's 5,491 stored frames: 135, on 59 of the 1,166
-  // cards, read a pay and no time — each one a card until a frame of it with a
-  // time merges in. 19 read a time and no pay, and all 19 are the app's zone
-  // prompt, five prompts and not one card: a frame with no payout passes the
-  // accumulator untouched (accumulate.add's first guard), so over those this
-  // line now says "no pay read", where "no offer on screen" was true as well.
-  // Those are the frames kept on offer rows; the navigation screens between
-  // offers are not among them. The card it was written for, a pay the box
-  // cut off, is not in that week's frames at all; it is the 8 Oct one.
-  // What a reading with nothing offer-like on it is said as. Named, because
-  // render() asks whether that is what the last reading came to: a read
-  // starting over a screen that has just read as no offer is the rig
-  // looking again, not a card being priced.
-  var NO_OFFER_SAID = 'scanner running, no offer on screen';
-  // The screens a phone shows for an order it has taken, as OP.screen_type
-  // names them: never an offer card. See noVerdictSaid.
-  var TAKEN_SCREENS = ['uber.nav', 'uber.planner', 'uber.pickupNav', 'dd.deliver', 'dd.pickup'];
-
+  // NO_OFFER_SAID is what a reading with nothing offer-like on it is said
+  // as. Named, because render() asks whether that is what the last reading
+  // came to: a read starting over a screen that has just read as no offer is
+  // the rig looking again, not a card being priced. The literal is only for
+  // a shell one release behind with no card-words.js.
+  var NO_OFFER_SAID = CW ? CW.NO_OFFER_SAID : 'scanner running, no offer on screen';
   function noVerdictSaid(r) {
-    if (r.clipped) return 'pay at the box edge — not trusted';
-    // The app's own idle screen, by its own words (OP.NOT_AN_OFFER, sent as
-    // `notAnOffer`). Whatever else the read picked off the map is not part of
-    // a card: the corpus's Uber online frame reads the day's takings, $142.60,
-    // as a payout and said "pay, no time", and 3 of the journal's 54 "Finding
-    // trips" screens read a time or a place off the map and said "no pay
-    // read" — each a READING THE CARD on the next read, over a phone saying
-    // it has no offers. Before the pay test, which is what it overrules.
-    if (r.notAnOffer) return NO_OFFER_SAID;
-    // ...and a screen of an order already taken, by the reader's own type of
-    // it (`screen`, OP.screen_type): Uber's navigation and Trip Planner,
-    // DoorDash's deliver and pickup screens. screen_type asks an offer's own
-    // words first, so a card that lands over the map and keeps any of them is
-    // typed as the card and still gets the hedge below. Without this the map's
-    // "3 min · 1.1 mi" and "Expected by" said "no pay read — box may cut it
-    // off" for the whole of every delivery (the owner's snaps of 12 Nov, five
-    // presses of ten), sending the driver to ▣ Set box over a turn arrow.
-    // No payout only: a figure read off one of these is still said as one.
-    if (!(typeof r.pay === 'number' && r.pay > 0)
-        && TAKEN_SCREENS.indexOf(r.screen) !== -1) return NO_OFFER_SAID;
-    if (typeof r.pay === 'number' && r.pay > 0) {
-      return 'pay, no time — box may cut it off';
-    }
-    // The places asked of MV.ends, as showPlaces asks: the one rule for what
-    // a reading named (rpi/test_lint.py holds the page to it).
-    var named = MV ? MV.ends(r) : (r.places || []);
-    if ((typeof r.minutes === 'number' && r.minutes > 0)
-        || (r.deliverBy !== null && r.deliverBy !== undefined)
-        || typeof r.miles === 'number'
-        || named.length) {
-      return 'no pay read — box may cut it off';
-    }
-    return NO_OFFER_SAID;
+    return CW ? CW.noVerdictSaid(r, MV ? MV.ends : null) : NO_OFFER_SAID;
   }
 
   // What the dot means.

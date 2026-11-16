@@ -3,7 +3,9 @@
 A camera reads the offer on your phone, and a screen beside it shows one big
 card: **ACCEPT**, **CLOSE CALL** or **PASS**, the dollars per hour in large
 type, and under it the pay, the minutes, the miles and the dollars per mile —
-judged against *your* target and *your* cost per mile. Nothing to touch. It
+judged against *your* target and *your* cost per mile. When a card is on
+the phone but its pay could not be read, it says **CHECK THE PHONE** and
+why. Nothing to touch. It
 starts with the car.
 
 It is the same program as the full rig, with the experimental half switched

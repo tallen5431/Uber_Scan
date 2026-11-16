@@ -24,7 +24,7 @@
  * install would not have put it back: a phone with no signal would have lost
  * the scanner entirely, in the name of shipping a scanner fix.
  */
-var SHELL = 'uberscan-shell-v53';   // v53: shift.html joined the shell
+var SHELL = 'uberscan-shell-v54';   // v54: card-words.js joined the shell
 
 /* Bumped only when the vendored engine itself changes, which is rare and
  * deliberate. Held apart from the shell so that shipping app code never costs
@@ -51,6 +51,9 @@ var ASSETS = [
   // not happen is the offers page itself failing to open in a car park
   // because one of its scripts was missing from the shell.
   'map-view.js',
+  // ...and the words the driving panel shares with lite's card. live.html
+  // says what it said before without it rather than failing.
+  'card-words.js',
   // ...and the page that file was split out of. It was the only .html this
   // server serves that was not in the shell, and the navigate fallback below
   // used to answer for it with index.html — so offline, "Map check" opened the

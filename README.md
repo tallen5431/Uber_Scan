@@ -582,6 +582,7 @@ used. A one-line key across the map's foot names the marks on it.
 | `scan.html`, `scan.js`, `scan.css` | The phone's own scanner — a photo of the offer card, read on the phone; see [SCANNING.md](SCANNING.md) |
 | `offer-parser.js` | Turns the text off a card into pay, minutes and miles — one corpus, shared with the Pi's port |
 | `vendor/` | The OCR engine the phone's scanner runs, kept here so the page works with no signal |
+| `card-words.js` | What the offer card says, shared by the driving panel and the lite card: CHECK THE PHONE and its reasons when a card is on the phone with no payout to price. Display only — nothing in it decides an offer |
 | `advice.js` | What target the offers themselves argue for — shared, and tested on its own |
 | `earnings.js` | What the app actually paid, read off screenshots of its earnings screen, and which order on file each trip was: the reader (Uber's Earnings Activity; DoorDash's has a place and no reader yet — no screenshot of it has been seen), one trip however often it is uploaded, and the match. No I/O; `server.js` keeps the pictures and the rows. Tested on its own over `tests/fixtures/earnings.json`, and on drawn screenshots through the real tesseract |
 | `assemble.js` | Where the order in the car ends: an address the scanner read, a Trip Planner over one page or several, a lone dropoff on a single-trip card — each value on the hold with where it came from (press, label, planner, card, seen). No I/O; `server.js` writes and says what it decides. Tested on its own over `tests/fixtures/sequences.json` |

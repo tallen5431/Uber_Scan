@@ -3315,6 +3315,9 @@ const framed = (page) => page.waitForFunction(
         detail: document.getElementById('detail').textContent.trim(),
         label: document.getElementById('verdictLabel').textContent.trim(),
         verdict: document.getElementById('verdict').className,
+        // The reason under CHECK THE PHONE, in the card, when it is there.
+        why: document.getElementById('phoneWhy').hidden ? ''
+          : document.getElementById('phoneWhy').textContent.trim(),
       }));
       // Painted, not merely set: the headline and the four figures under it
       // hide themselves when there is nothing to report.
@@ -10678,7 +10681,14 @@ try:
     eq('every reading with no verdict was measured', sorted(nv),
        ['blank', 'clipped', 'cutpay', 'cutpaynow', 'deadlineonly', 'map', 'nav', 'notime',
         'pickuponly', 'planner', 'zone'])
-    cut = (nv.get('cutpay') or {}).get('detail') or ''
+    # What it read is said under CHECK THE PHONE, in the card, when the
+    # reading has something of an offer card on it (a payout the box cut, a
+    # payout with no time, a deadline or a place with no payout); else on the
+    # line under the card, as it always was (card-words.js phoneSaid). The
+    # sentences are the same either way.
+    _said = lambda k: ((nv.get(k) or {}).get('why') or (nv.get(k) or {}).get('detail') or '')
+    _PHONE = ('cutpaynow', 'notime', 'deadlineonly', 'pickuponly', 'clipped')
+    cut = _said('cutpay')
     no_('the 8 Oct Est. delivery card the box cut the pay off is not called '
         '"no offer on screen" (%r)' % cut, 'no offer on screen' in cut)
     ok_('...it says no pay was read, off the distance alone, as the rig sent it',
@@ -10686,24 +10696,24 @@ try:
     ok_('...and names the box as the thing that may have cut it off',
         'box may cut it off' in cut)
     eq('...and the same card as the parser reads it now, deadline and both ends, '
-       'says the same', (nv.get('cutpaynow') or {}).get('detail'), cut)
-    notime = (nv.get('notime') or {}).get('detail') or ''
+       'says the same', _said('cutpaynow'), cut)
+    notime = _said('notime')
     ok_('a card whose pay read and time did not says exactly that (%r)' % notime,
         notime.startswith('pay, no time'))
     ok_('...and names the box for it too', 'box may cut it off' in notime)
-    zone = (nv.get('zone') or {}).get('detail') or ''
+    zone = _said('zone')
     ok_('a zone prompt, whose wait reads as minutes, is a reading with no pay (%r)'
         % zone, zone.startswith('no pay read'))
-    alone = (nv.get('deadlineonly') or {}).get('detail') or ''
+    alone = _said('deadlineonly')
     ok_('a reading with the deadline alone is a reading with no pay (%r)' % alone,
         alone.startswith('no pay read'))
-    alone = (nv.get('pickuponly') or {}).get('detail') or ''
+    alone = _said('pickuponly')
     ok_('...and so is one with the pickup alone (%r)' % alone,
         alone.startswith('no pay read'))
     # The one card the rig KNOWS the box cut: the reader found its payout flush
     # against the top edge and dropped the parse, so the reading is as empty as
     # BLANK's and only `clipped` tells them apart.
-    clipped = (nv.get('clipped') or {}).get('detail') or ''
+    clipped = _said('clipped')
     ok_('a card the reader dropped for a payout at the box\'s edge says so, not '
         '"no offer on screen" (%r)' % clipped,
         clipped.startswith('pay at the box edge'))
@@ -10711,33 +10721,41 @@ try:
         'not trusted' in clipped)
     # What the panel says under a navigation screen, which is most of every
     # delivery: measured, so it is said on purpose and its hedge is held.
-    nav = (nv.get('map') or {}).get('detail') or ''
+    nav = _said('map')
     ok_('Uber\'s map screen, as the corpus reads it, is a reading with no pay (%r)'
         % nav, nav.startswith('no pay read'))
     # The navigation and the planner of an order taken, typed so by the reader
     # (`screen`): no offer is on the phone, and the box is not the remedy.
     for key in ('nav', 'planner'):
-        said = (nv.get(key) or {}).get('detail') or ''
+        said = _said(key)
         ok_('[taken screen] %s says no offer is on screen, not that the box may '
             'cut one (%r)' % (key, said), said.startswith('scanner running, no offer on screen'))
     for key in ('cutpay', 'cutpaynow', 'notime', 'zone', 'deadlineonly', 'pickuponly',
                 'clipped', 'map', 'nav', 'planner'):
-        s = nv.get(key) or {}
-        said = s.get('detail') or ''
+        s_ = nv.get(key) or {}
+        said = _said(key)
         # "a card's pay" is a card the box MAY have cut; what is refused is the
         # line saying one is there.
         no_('...and %s never says a card is there (%r)' % (key, said),
             re.search(r"\bcards? (is|are|in view|on (the )?screen)\b|\bcard (up|showing)\b",
                       said))
+        # No verdict on any of them. The ones with an offer card's words say
+        # CHECK THE PHONE — where to look, not a verdict: no fill, no rate, no
+        # figure — and the rest WAITING FOR AN OFFER, as before: the map's
+        # route chips, the zone prompt's wait and the 8 Oct card as that day's
+        # parser read it (its distance alone) are what a turn arrow reads as.
         eq('...no verdict on %s, which has none' % key,
-           (s.get('label'),
-            sorted(set((s.get('verdict') or '').split())
+           (s_.get('label'),
+            sorted(set((s_.get('verdict') or '').split())
                    & {'empty', 'go', 'warn', 'no', 'doubt', 'fault'})),
-           ('WAITING FOR AN OFFER', ['empty']))
-        eq('...no figure painted for %s' % key, s.get('painted'), [])
-        no_('...nor a digit in the line under it (%s, %r)' % (key, said),
+           ('CHECK THE PHONE' if key in _PHONE else 'WAITING FOR AN OFFER', ['empty']))
+        eq('...no figure painted for %s' % key, s_.get('painted'), [])
+        no_('...nor a digit in what is said (%s, %r)' % (key, said),
             re.search(r'\d', said))
-    blank = (nv.get('blank') or {}).get('detail') or ''
+        if key in _PHONE:
+            eq('...and the reason is not said twice, on the card and under it (%s)' % key,
+               s_.get('detail'), '')
+    blank = _said('blank')
     ok_('a reading that got nothing still says there is no offer on screen (%r)'
         % blank, blank.startswith('scanner running, no offer on screen'))
 

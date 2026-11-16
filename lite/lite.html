@@ -29,8 +29,11 @@
   driver who moves from one to the other reads the same thing.
 
   Self-contained on purpose — no styles.css, no ui.js, no service worker: a
-  kiosk that boots before the network has nothing to fetch but this file and
-  the stream.
+  kiosk that boots before the network has nothing to fetch but this file, the
+  stream and /card-words.js. That one is the words this card shares with
+  live.html (CHECK THE PHONE and its reasons), from the same local server: a
+  copy of them here is how lite came to say "camera ok · no card" over a card
+  whose pay the box cut off.
 
   The phone setup (▣ Set box on live.html, the settings on index.html) is on
   the same server for a phone on the same Wi-Fi; the two links in the corner
@@ -256,9 +259,11 @@
   <span class="setup">phone: <a href="/live.html">Set box</a> · <a href="/index.html">settings</a></span>
 </footer>
 
+<script src="/card-words.js"></script>
 <script>
 (function () {
   'use strict';
+  var CW = window.CardWords;
 
   // ?theme=light|dark, for a display whose own preference is wrong for the
   // car, and for the fit checks (rpi/test_lite.py) to see both.
@@ -349,11 +354,13 @@
     var r = last;
     var fresh = r && Date.now() - readAt <= READ_STALE_MS;
     if (r && r.ready && fresh) return ['camera ok', 'ok'];
-    // live.html's noVerdictSaid, the part of it a lite card needs: a payout
-    // at the box's edge is refused by the money rules and said so.
-    if (r && fresh && r.clipped) return ['camera ok · pay at the box edge — not trusted', 'warn'];
-    if (r && fresh && typeof r.pay === 'number' && r.pay > 0 && !r.notAnOffer) {
-      return ['camera ok · pay, no time — box may cut it off', 'warn'];
+    // What a reading with no verdict read, in live.html's words
+    // (card-words.js noVerdictSaid, never a copy here). When the card says
+    // CHECK THE PHONE the reason is under that word, so not again here.
+    if (r && fresh) {
+      if (CW.phoneSaid(r)) return ['camera ok', 'warn'];
+      var said = CW.noVerdictSaid(r);
+      if (said !== CW.NO_OFFER_SAID) return ['camera ok · ' + said, 'warn'];
     }
     return ['camera ok · no card', 'ok'];
   }
@@ -371,10 +378,16 @@
       // never a verdict colour, so a dead rig is never read as PASS.
       el.card.className = faulty ? 'fault' : 'empty';
       var p = phase || {};
+      // A reading with part of an offer card on it and no payout to price:
+      // CHECK THE PHONE and why, as live.html says it (card-words.js). Only
+      // a fresh one, on a rig that is scanning: a reason ages with its card.
+      var why = !faulty && r && (!p.phase || p.phase === 'scanning')
+        && Date.now() - readAt <= READ_STALE_MS ? CW.phoneSaid(r) : null;
       setText(el.word, !socketUp ? 'NOT CONNECTED'
         : beat.blind ? (BLIND_LABEL[beat.blind] || 'CANNOT SEE')
+        : why ? CW.CHECK_THE_PHONE
         : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER'));
-      setText(el.rate, '--'); setText(el.unit, '/hr'); setText(el.target, '');
+      setText(el.rate, '--'); setText(el.unit, '/hr'); setText(el.target, why || '');
       setText(el.pay, '--'); setText(el.min, '--'); setText(el.mi, '--'); setText(el.pmi, '--');
       setText(el.lPay, 'pay'); setText(el.lMin, 'minutes'); setText(el.lPmi, 'per mile');
       return;

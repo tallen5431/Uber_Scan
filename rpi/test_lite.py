@@ -493,11 +493,16 @@ STATES = {
               'perHour': 990, 'pay': 99.0, 'minutes': 6, 'miles': 1.1, 'perMile': 90,
               'target': 25, 'uncosted': True},
     'waiting': {'tooBright': True},
+    # A card whose payout the box cut off: no verdict, and the card says
+    # where to look (card-words.js), the reason under the word.
+    'nopay': {'ready': False, 'locked': False, 'state': 'empty', 'pay': None, 'minutes': None,
+              'miles': 8.6, 'deliverBy': 975, 'places': ['Fable Grill (12 Example Ct)',
+                                                         'Quill St, Exampleton']},
     'lowpower': {'heatGuard': True, 'throttled': {'now': ['under-voltage']}, 'cpuC': 61},
 }
 WORDS = {'accept': 'ACCEPT', 'close': 'CLOSE CALL ?', 'pass': 'PASS',
          'doubt': 'CHECK PAY AND TIME', 'waiting': 'WAITING FOR AN OFFER',
-         'lowpower': 'WAITING FOR AN OFFER'}
+         'lowpower': 'WAITING FOR AN OFFER', 'nopay': 'CHECK THE PHONE'}
 
 if subprocess.call(['node', '-e', 'require("playwright")'],
                    env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS)),
@@ -632,5 +637,10 @@ eq('...and a payout read off a found card is "pay ?", as on live.html',
 eq('...and a delivery\'s deadline minutes are "min left"',
    [f['text'] for f in _res['800x480 dark close']['figs']][3], 'min left')
 ok_('...and a doubt shows no rate', _res['800x480 dark doubt']['rate']['text'] == '--')
+eq('a card with no payout to price says why under CHECK THE PHONE',
+   _res['800x480 dark nopay']['target']['text'], 'no pay read — box may cut it off')
+ok_('lite loads the shared card words, and keeps no copy of their sentences',
+    '/card-words.js' in _lite_page and 'box may cut it off' not in _lite_page
+    and 'pay at the box edge' not in _lite_page)
 
 done()

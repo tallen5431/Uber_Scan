@@ -3115,7 +3115,34 @@ const SNAP_MEASURE = (fixture) => {
           }
           const labRange = document.createRange();
           labRange.selectNodeContents(lab);
+          // ...and the reason under CHECK THE PHONE, in the card: every letter
+          // inside it, and on how many lines.
+          const why = document.getElementById('phoneWhy');
+          const whyOff = [];
+          let whyLines = 0;
+          if (why && !why.hidden) {
+            const ww = document.createTreeWalker(why, NodeFilter.SHOW_TEXT);
+            while ((n = ww.nextNode())) {
+              for (let i = 0; i < n.length; i++) {
+                rg.setStart(n, i);
+                rg.setEnd(n, i + 1);
+                const c = rg.getBoundingClientRect();
+                if (!c.width && !c.height) continue;
+                if (c.left < Math.max(0, card.left) - 0.5
+                    || c.right > Math.min(window.innerWidth, card.right) + 0.5
+                    || c.top < Math.max(0, card.top) - 0.5
+                    || c.bottom > Math.min(window.innerHeight, card.bottom) + 0.5) whyOff.push(n.data[i]);
+              }
+            }
+            const wr = document.createRange();
+            wr.selectNodeContents(why);
+            whyLines = new Set(Array.from(wr.getClientRects()).map((q) => Math.round(q.top))).size;
+          }
           return {
+            why: why && !why.hidden ? why.textContent.trim() : '',
+            whyOff: whyOff.join(''),
+            whyLines,
+            whyFont: why ? parseFloat(getComputedStyle(why).fontSize) : 0,
             text: d.textContent.trim(),
             label: lab.textContent.trim(),
             labelOff: labOff.join(''),
@@ -4857,9 +4884,32 @@ try:
             _nolabel = lambda l: dict(l, label=l['label'][1:2] + l['label'][3:])
             eq('...moving nothing else on the panel at %s' % where,
                _nolabel(ag['layout']), _nolabel(was['layout']))
-            for key, opens in (('nopay', 'no pay read'),
-                               ('notime', 'pay, no time'),
+            # A payout with no time, and one at the box's edge, are cards on
+            # the phone: the card says CHECK THE PHONE, the reason under the
+            # word in the card (card-words.js phoneSaid), and the line under
+            # the card carries only the tracker's note. The reason was
+            # measured on this line until the panel audit (Nov 2026), whose
+            # first finding was that a glance read the card as WAITING.
+            for key, opens in (('notime', 'pay, no time'),
                                ('clipped', 'pay at the box edge')):
+                for track, note in [('alone', 'alone')] + list(NOTE.items()):
+                    s = nv['%s/%s' % (key, track)]
+                    eq('"%s" %s says CHECK THE PHONE, every letter in the card, on no more '
+                       'lines than WAITING FOR AN OFFER, at %s' % (opens, note, where),
+                       (s['label'], s['labelOff'], s['labelLines'] <= was['labelLines']),
+                       ('CHECK THE PHONE', '', True))
+                    ok_('...the reason under it in the card (%r) at %s' % (s['why'], where),
+                        s['why'].startswith(opens) and s['whyOff'] == '')
+                    ok_('...on no more than two lines (%d), at 16px or more (%.0f), at %s'
+                        % (s['whyLines'], s['whyFont'], where),
+                        1 <= s['whyLines'] <= 2 and s['whyFont'] >= 16)
+                    eq('...not said again on the line under the card at %s' % where,
+                       opens in s['text'], False)
+                    eq('...every letter of that line on the glass at %s' % where, s['off'], '')
+                    _still = lambda l: {k: l[k] for k in ('bar', 'row', 'view')}
+                    eq('...the bar, the status row and the picture where they were at %s' % where,
+                       _still(s['layout']), _still(was['layout']))
+            for key, opens in (('nopay', 'no pay read'),):
                 s = nv[key + '/alone']
                 ok_('"%s" is the line measured at %s (%r)' % (opens, where, s['text']),
                     s['text'].startswith(opens))
