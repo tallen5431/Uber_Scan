@@ -375,27 +375,22 @@ html, body {
 
 /* Four across on a phone held in one hand. auto-fit rather than a fixed count
    so a narrow screen wraps to two rows instead of squeezing the digits. */
-/* The arithmetic behind the headline. Sized between the rate and the labels:
-   big enough to take in without focusing, small enough that the rate is still
-   obviously the answer. Tabular figures so the digits do not shuffle as the
-   numbers change under a moving car. */
+/* What the headline took off the card's own rate: "−$2.10 car costs", one
+   small plain line under it. It was the whole sum in two bold lines with
+   both rates in the verdict's colour; the raw rate is a figure of its own
+   now (live.html's .submetrics) and the net is the headline. Plain text and
+   the labels' colour, so the verdict's colour is on the word and the border
+   and nowhere else. */
 .working {
   text-align: center;
-  font-size: clamp(15px, 4.4vw, 23px);
-  font-weight: 800;
+  font-size: clamp(14px, 3.6vw, 20px);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -.005em;
-  color: var(--text);
+  color: var(--muted);
   padding: 2px 0 6px;
 }
+/* Each part whole, a narrow card breaking between them. */
 .working span { white-space: nowrap; }
-.working div + div { padding-top: 2px; }
-.working i { font-style: normal; font-weight: 600; color: var(--muted); padding: 0 .12em; }
-.working b { font-weight: 800; }
-.verdict.go .working b   { color: var(--go); }
-.verdict.warn .working b { color: var(--warn); }
-.verdict.no .working b   { color: var(--no); }
-.verdict.doubt .working b { color: var(--doubt); }
 
 /* Four across on a phone held in one hand. auto-fit rather than a fixed count
    so a narrow screen wraps to two rows instead of squeezing the digits. */

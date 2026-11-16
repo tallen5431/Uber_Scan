@@ -1461,9 +1461,19 @@ NBX_OFF_PANELS = [p for p in PANELS if p[0] in ('1024x600', '800x480', '390x844'
 # went behind "…" (fillMore). Not the notice, whose chips would be taller than
 # the sentences at 19 (that rule says how much). The 800x480 and the 3.5" hat
 # are where they were.
-SMALL_SIZES = {'1024x600': [18, 19, 24, 19, 16, 18],
+# At 1024x600 the address, the labels and the figures went to 22, 20 and 34
+# with the panel audit (Nov 2026); the address stays 18 beside the scene
+# picture, whose card is narrower (see small_sizes).
+SMALL_SIZES = {'1024x600': [22, 20, 34, 19, 16, 18],
                '800x480': [15, 16, 20, 16, 16, 15],
                '480x320': [14.4, 12, 15, 10, 16, 15]}
+def small_sizes(panel, view):
+    sizes = list(SMALL_SIZES[panel])
+    if panel == '1024x600' and view == 'scene':
+        sizes[0] = 18
+    return sizes
+
+
 CHIPS_WANT = ['OFFERS NOT SAVED · Read-only file system',
               'PHONE TOO BRIGHT · turn it down a notch',
               'CEILING · miles unreadable',
@@ -4992,8 +5002,8 @@ try:
             cm = got.get('%s %s chips' % (panel, view)) or {}
             _c, _o = cm.get('chips') or {}, cm.get('open') or {}
             eq('the small type is %s at %s (address, label, figure, line under, '
-               'notice, status row)' % (SMALL_SIZES[panel], where),
-               _c.get('sizes'), SMALL_SIZES[panel])
+               'notice, status row)' % (small_sizes(panel, view), where),
+               _c.get('sizes'), small_sizes(panel, view))
             # Not on the 3.5" hat, where a notice hides the figures on
             # purpose (the rule under #verdict:has(#warn) in live.html).
             if h > 380:
@@ -5019,9 +5029,16 @@ try:
             ok_('...with the verdict label still inside the card at %s' % where,
                 _o.get('labelIn'))
             no_('...nothing past the glass at %s' % where, _o.get('over'))
-            ok_('...and the chips need less of the card than the sentences at %s '
-                '(%spx, %spx)' % (where, _c.get('need'), _o.get('need')),
-                (_c.get('need') or 1e9) < (_o.get('need') or 0))
+            # Not on the rig's own 1024x600 since the panel audit (Nov 2026):
+            # its chips went from 16 to 19px for the seat's distance, and at
+            # 19 the five-chip card takes more of the card than its sentences
+            # (131px to 93 beside the phone, 163 to 139 beside the scene,
+            # measured). The chips are kept for being five things at a glance;
+            # the card's figures are held above them either way.
+            if panel != '1024x600':
+                ok_('...and the chips need less of the card than the sentences at %s '
+                    '(%spx, %spx)' % (where, _c.get('need'), _o.get('need')),
+                    (_c.get('need') or 1e9) < (_o.get('need') or 0))
 
     # The status row, steady: the dot, the ticks, what they came to and the
     # median, 📷 and "…", with "scanner reading" left to the green dot. The
@@ -5179,7 +5196,7 @@ try:
                 % (where, now.get('fontPx')), (now.get('fontPx') or 0) >= 12)
             # ...and the address line's size, which they take (SMALL_SIZES).
             eq('...the stops at the address line\'s size at %s' % where,
-               now.get('fontPx'), SMALL_SIZES[panel][0])
+               now.get('fontPx'), small_sizes(panel, view)[0])
             eq('...and the card, the picture, the status row and the bar where they '
                'were at %s' % where, now.get('layout'), was.get('layout'))
             no_('...and nothing scrolls at %s' % where, now.get('over'))
@@ -5423,9 +5440,15 @@ try:
                (_b.get('stopsCut'), _b.get('spill')), ([], []))
             no_('...and nothing scrolls at %s' % where, _b.get('over'))
             _r = _o.get('range') or {}
-            eq('the pair range sits above the figures, unclipped at %s' % where,
+            # Above the figures, except on the rig's own panel and larger
+            # beside the phone picture, where the figures hold one line on
+            # every card and what varies — the pair line among it — goes
+            # under them (the 1024x600 block).
+            _fixed = w >= 1000 and h >= 560 and view == 'screen'
+            eq('the pair range sits %s the figures, unclipped at %s'
+               % ('under' if _fixed else 'above', where),
                (_r.get('text'), _r.get('cut'), _r.get('above')),
-               ('-$16 to $133/hr', '', True))
+               ('-$16 to $133/hr', '', not _fixed))
             ok_('...larger than the row\'s words at %s (%spx)' % (where, _r.get('px')),
                 (_r.get('px') or 0) >= 16)
             _sm = _o.get('same') or {}

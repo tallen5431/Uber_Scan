@@ -463,8 +463,12 @@ const framed = (page) => page.waitForFunction(
       await page.waitForTimeout(180);
       slot.verdict = await page.evaluate(LOOK, '#verdictLabel');
       slot.rate = await page.evaluate(LOOK, '#perHour');
-      slot.raw = await page.evaluate(LOOK, '.working .raw');
-      slot.net = await page.evaluate(LOOK, '.working .net');
+      // The raw $/hr: its own box, first in the figures row, on the rig's
+      // 1024x600 and larger; below that, the head of the working line, where
+      // it always was there (live.html, the `.rawline` rules).
+      slot.raw = await page.evaluate(LOOK, await page.evaluate(() =>
+        getComputedStyle(document.querySelector('.sub:has(#vRawHr)')).display === 'none'
+          ? '.working .rawline' : '.submetrics .rawfig:has(#vRawHr)'));
       slot.warn = await page.evaluate(LOOK, '#warn');
       slot.places = await page.evaluate(LOOK, '#places');
       // How old the reading is, and the diagnostics beside it. These are two
@@ -2506,10 +2510,144 @@ const framed = (page) => page.waitForFunction(
         Object.assign({}, READINGS.divides, { state: 'doubt', doubt: why }));
       await page.waitForTimeout(160);
       out.permileDoubt[why] = await page.evaluate(LOOK, '#vPerMile');
+      out.rawhrDoubt = out.rawhrDoubt || {};
+      out.rawhrDoubt[why] = await page.evaluate(LOOK, '#vRawHr');
     }
+    // ...and the raw $/hr of the same card, and of one with no minutes.
+    await page.evaluate((r) => window.__es.push(r), READINGS.divides);
+    await page.waitForTimeout(160);
+    out.rawhr = { value: await page.evaluate(LOOK, '#vRawHr'),
+                  label: await page.evaluate(LOOK, '#lRawHr'),
+                  line: await page.evaluate(LOOK, '.working .rawline') };
 
     await page.close();
     await ctx.close();
+  }
+
+
+  // --- the raw $/hr and $/mi, on every card, at 1024x600 --------------------
+  stage = 'the raw $/hr and $/mi on every card';
+  //
+  // The owner, Nov 2026: "ensure that the essential raw $/hr and $/mile
+  // numbers always show clearly when scanning the cards". So on the rig's own
+  // 1024x600 panel, in the phone layout, each kind of card is drawn and the
+  // two figures measured: what they say, their size and their labels', their
+  // contrast on the card's own fill, and where they are — the same line on
+  // every card, so the eye finds them where it found them on the last one.
+  // Night is the sun's (showNight): the page clock after dusk and a fix.
+  // The same readings go to lite's card, whose $/mi has to match.
+  {
+    const CARDS = [
+      ['accept', READINGS.divides, {}],
+      ['close', Object.assign({}, READINGS.divides, { state: 'warn', perHour: 19.6 }), {}],
+      ['pass', READINGS.loss, {}],
+      ['doordash', READINGS.deadline, {}],
+      ['notices', READINGS.uncertain, { tooBright: true }],
+      ['stacked', Object.assign({}, READINGS.divides, { state: 'warn', perHour: 19.6,
+         holding: { pay: 28.08, minutes: 40, holdId: 'h-fig@1', dropoff: '48 Example Dr',
+                    card: null, endPinned: true, endWhy: null, arrived: false },
+         stack: { pay: 42.08, minMinutes: 40, maxMinutes: 62, worst: 21.4, best: 33.1,
+                  state: 'warn', sure: true, uncosted: false, ends: 'same-town',
+                  route: 'https://www.google.com/maps/dir/?api=1&origin=A&destination=B' } }), {}],
+      ['moving', READINGS.divides, { moving: true }],
+      ['night', READINGS.divides, { night: true }],
+      ['checkpay', Object.assign({}, READINGS.impossible, { doubt: 'pay' }), {}],
+      ['untimed', READINGS.untimed, {}],
+      ['nominutes', Object.assign({}, READINGS.divides, { minutes: null, cardMinutes: null,
+                                                         billedMinutes: null }), {}],
+    ];
+    const FIX = { lat: 33.95, lon: -84.55, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3, gpsOk: true,
+                  gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false, drivingFor: 0.0 };
+    const FIGS = () => {
+      const L = (css) => {
+        const p = css.match(/rgba?\(([^)]+)\)/)[1].split(',').map(Number);
+        const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(p[0]) + 0.7152 * f(p[1]) + 0.0722 * f(p[2]);
+      };
+      const v = document.getElementById('verdict');
+      const fill = getComputedStyle(v).backgroundColor;
+      const one = (id) => {
+        const e = document.getElementById(id);
+        const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
+        const a = L(cs.color), b = L(fill);
+        return { text: e.innerText.trim(), font: parseFloat(cs.fontSize),
+                 cr: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05),
+                 color: cs.color, top: Math.round(r.top),
+                 shown: r.width > 0 && r.height > 0 && cs.visibility !== 'hidden'
+                        && r.top >= v.getBoundingClientRect().top
+                        && r.bottom <= v.getBoundingClientRect().bottom + 0.5 };
+      };
+      const out = {};
+      ['vRawHr', 'lRawHr', 'vPerMile', 'lPerMile', 'vPay', 'lPay', 'working'].forEach((id) => { out[id] = one(id); });
+      out.label = document.getElementById('verdictLabel').textContent.trim();
+      out.cls = v.className;
+      out.night = document.documentElement.classList.contains('night');
+      out.moving = document.querySelector('.live').classList.contains('moving');
+      out.verdictColor = getComputedStyle(document.getElementById('verdictLabel')).color;
+      out.headline = parseFloat(getComputedStyle(document.getElementById('perHour')).fontSize);
+      return out;
+    };
+    out.rawFigs = {};
+    for (const [key, reading, how] of CARDS) {
+      const ctx = await browser.newContext({ viewport: { width: 1024, height: 600 },
+                                             deviceScaleFactor: 1, timezoneId: 'America/New_York' });
+      const page = await ctx.newPage();
+      await page.clock.install({ time: new Date(how.night ? '2026-11-15T21:30:00-05:00'
+                                                          : '2026-11-15T12:30:00-05:00') });
+      await page.clock.resume();
+      await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
+      await phoneFrame(page);
+      await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
+      await framed(page);
+      const fix = Object.assign({}, FIX, how.moving ? { speed: 13.4, driving: true, drivingFor: 9.6 } : {});
+      await page.evaluate((m) => window.__es.push(m), { phase: 'scanning', message: '' });
+      await page.evaluate((m) => window.__es.push(m), { alive: true, at: Date.now(),
+        tooBright: !!how.tooBright, tooDim: false, gps: { state: 'ok', ageSeconds: 0.4, fix } });
+      if (reading.holding) await page.evaluate((m) => window.__es.push(m), { holding: reading.holding });
+      await page.evaluate((r) => window.__es.push(r), reading);
+      await page.waitForTimeout(250);
+      await page.evaluate((m) => window.__es.push(m), { alive: true, at: Date.now(),
+        tooBright: !!how.tooBright, tooDim: false, gps: { state: 'ok', ageSeconds: 0.4, fix } });
+      await page.waitForTimeout(250);
+      out.rawFigs[key] = await page.evaluate(FIGS);
+      await page.close();
+      // ...and lite's card, given the same reading.
+      if (['accept', 'pass', 'doordash', 'checkpay', 'notices'].includes(key)) {
+        const lp = await ctx.newPage();
+        await lp.route('**/api/status', (r) => r.fulfill({ contentType: 'application/json',
+          body: JSON.stringify({ scanner: { enabled: true, running: true } }) }));
+        await lp.goto(base + '/lite/lite.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+        await lp.waitForFunction(() => window.__lite, null, { timeout: 10000 }).catch(() => {});
+        await lp.evaluate((m) => window.__lite.take(m), reading);
+        out.rawFigs[key].lite = await lp.evaluate(() => ({
+          pmi: document.getElementById('pmi').textContent.trim(),
+          lPmi: document.getElementById('lPmi').textContent.trim(),
+          rawhr: document.getElementById('rawhr').textContent.trim(),
+          lRawhr: document.getElementById('lRawhr').textContent.trim(),
+          word: document.getElementById('word').textContent.trim() }));
+        await lp.close();
+      }
+      await ctx.close();
+    }
+    // CHECK THE PHONE on lite too, for the card whose pay the box cut off.
+    {
+      const ctx = await browser.newContext({ viewport: { width: 1024, height: 600 } });
+      const lp = await ctx.newPage();
+      await lp.route('**/api/status', (r) => r.fulfill({ contentType: 'application/json',
+        body: JSON.stringify({ scanner: { enabled: true, running: true } }) }));
+      await lp.goto(base + '/lite/lite.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await lp.waitForFunction(() => window.__lite, null, { timeout: 10000 }).catch(() => {});
+      out.litePhone = {};
+      for (const key of ['cutpaynow', 'notime', 'clipped', 'zone', 'map', 'nav', 'blank']) {
+        await lp.evaluate((m) => window.__lite.take(m), READINGS[key]);
+        out.litePhone[key] = await lp.evaluate(() => ({
+          word: document.getElementById('word').textContent.trim(),
+          why: document.getElementById('target').textContent.trim(),
+          cls: document.getElementById('card').className }));
+      }
+      await ctx.close();
+    }
   }
 
   // --- no ⟳ Re-find, and nothing left of it on the glass -------------------
@@ -8642,7 +8780,7 @@ try:
             # undefined used to vanish from the JSON and take its checks with
             # it, so the run passed by not looking.
             missing = [k for k in ('idle', 'reading', 'readingRate', 'verdict',
-                                   'rate', 'raw', 'net', 'warn', 'places',
+                                   'rate', 'raw', 'warn', 'places',
                                    'placesAfter', 'age', 'diag')
                        if not isinstance((r or {}).get(k), dict)]
             eq('%s: every element was measured' % where, missing, [])
@@ -10204,6 +10342,95 @@ try:
     eq('...and a doubt about the TIME alone leaves it standing',
        ((dbt.get('time') or {}).get('text') or '').strip(), '$2.00')
 
+    # --- the raw $/hr beside the $/mi -----------------------------------------
+    #
+    # The card's pay over its time, nothing taken off: the first figure in the
+    # row (card-words.js rawPerHour). It used to live in the working line only,
+    # in the verdict's colour; it has a box of its own now, and the same
+    # honesty as $/mi: "--" where the time is not known, and on every withheld
+    # verdict, since it is the same pay over the same time the reader refused.
+    rh = got.get('rawhr') or {}
+    eq('$14.00 over 30 min reads $28.0 raw $/hr',
+       ((rh.get('value') or {}).get('text') or ''), '$28.0')
+    eq('...labelled raw $/hr', ((rh.get('label') or {}).get('text') or ''), 'raw $/hr')
+    # This stage is the 800x480 panel, where the box is put away for want of
+    # a fifth column and the figure leads the working line instead.
+    ok_('...and at 800x480 at the head of the working line, on the glass (%r)'
+        % (rh.get('line') or {}).get('text'),
+        (rh.get('line') or {}).get('shown')
+        and ((rh.get('line') or {}).get('text') or '').startswith('$28.0/hr raw'))
+    rhd = got.get('rawhrDoubt') or {}
+    ok_('the six doubts were measured for the raw $/hr too', len(rhd) == 6)
+    for why in ('pay', 'time', 'rate', 'speed', 'leg', 'screen'):
+        eq('a %r doubt withholds the raw $/hr, as it does the headline' % why,
+           ((rhd.get(why) or {}).get('text') or '').strip(), '--')
+
+    # --- ...on every card, at 1024x600 ---------------------------------------
+    rf = got.get('rawFigs') or {}
+    eq('every card was drawn for the raw figures', sorted(rf),
+       sorted(['accept', 'close', 'pass', 'doordash', 'notices', 'stacked', 'moving',
+               'night', 'checkpay', 'untimed', 'nominutes']))
+    _want = {'accept': ('$28.0', '$2.00'), 'close': ('$28.0', '$2.00'),
+             'pass': ('$5.4', '$0.20'), 'doordash': ('$21.2', '--'),
+             'notices': ('$21.8', '--'), 'stacked': ('$28.0', '$2.00'),
+             'moving': ('$28.0', '$2.00'), 'night': ('$28.0', '$2.00'),
+             'checkpay': ('--', '--'), 'untimed': ('--', '--'),
+             'nominutes': ('--', '$2.00')}
+    # The verdict each reading carries, unchanged by any of this: the word and
+    # the class are the reading's own state, and $/mi is in neither.
+    _verdict = {'accept': ('ACCEPT', 'go'), 'close': ('CLOSE CALL', 'warn'),
+                'pass': ('PASS', 'no'), 'doordash': ('CLOSE CALL', 'warn'),
+                'notices': ('CLOSE CALL ?', 'warn'), 'stacked': ('CLOSE CALL', 'warn'),
+                'moving': ('ACCEPT', 'go'), 'night': ('ACCEPT', 'go'),
+                'checkpay': ('CHECK THE PAY', 'doubt'), 'untimed': ('CHECK THE TIME', 'doubt'),
+                'nominutes': ('ACCEPT', 'go')}
+    _tops = set()
+    for key, m in sorted(rf.items()):
+        eq('[%s] raw $/hr and $/mi' % key, (m['vRawHr']['text'], m['vPerMile']['text']), _want[key])
+        eq('[%s] ...labelled raw $/hr and $/mi' % key,
+           (m['lRawHr']['text'].lower(), m['lPerMile']['text'].lower()), ('raw $/hr', '$/mi'))
+        eq('[%s] the verdict is the reading\'s, as before' % key,
+           (m['label'], [c for c in m['cls'].split() if c in ('go', 'warn', 'no', 'doubt')]),
+           (_verdict[key][0], [_verdict[key][1]]))
+        for part in ('vRawHr', 'vPerMile'):
+            ok_('[%s] %s is on the glass inside the card' % (key, part), m[part]['shown'])
+            ok_('[%s] %s is 34px or more (%.0f)' % (key, part, m[part]['font']), m[part]['font'] >= 34)
+            ok_('[%s] %s reads on the card\'s fill (%.2f:1)' % (key, part, m[part]['cr']),
+                m[part]['cr'] >= 4.5)
+            ok_('[%s] %s is plain text, not the verdict\'s colour' % (key, part),
+                m[part]['color'] != m['verdictColor'])
+        for part in ('lRawHr', 'lPerMile', 'lPay'):
+            ok_('[%s] the %s label is 20px or more (%.0f)' % (key, part, m[part]['font']),
+                m[part]['font'] >= 20)
+            ok_('[%s] ...and reads on the fill (%.2f:1)' % (key, m[part]['cr']), m[part]['cr'] >= 4.5)
+        _tops.add(m['vRawHr']['top'])
+        ok_('[%s] the headline keeps its 156px, notice or none (%.0f)' % (key, m['headline']),
+            m['headline'] >= 150)
+    ok_('the moving card was moving and the night card at night',
+        (rf.get('moving') or {}).get('moving') and (rf.get('night') or {}).get('night'))
+    eq('the raw figures sit on the same line on every card (%r)' % sorted(_tops), len(_tops), 1)
+    eq('the car\'s cost is one plain line ("−$2.10 car costs")',
+       (rf.get('accept') or {}).get('working', {}).get('text'), '−$2.10 car costs')
+    for key in ('accept', 'pass', 'doordash', 'checkpay', 'notices'):
+        lt = (rf.get(key) or {}).get('lite') or {}
+        m = rf.get(key) or {}
+        eq('[%s] lite\'s $/mi and its label are the full panel\'s' % key,
+           (lt.get('pmi'), lt.get('lPmi')), (m.get('vPerMile', {}).get('text'), '$/mi'))
+        eq('[%s] ...and so is its raw $/hr' % key,
+           (lt.get('rawhr'), lt.get('lRawhr')), (m.get('vRawHr', {}).get('text'), 'raw $/hr'))
+    lph = got.get('litePhone') or {}
+    for key in ('cutpaynow', 'notime', 'clipped'):
+        eq('[lite %s] the card says CHECK THE PHONE, no verdict on it' % key,
+           ((lph.get(key) or {}).get('word'), (lph.get(key) or {}).get('cls')),
+           ('CHECK THE PHONE', 'empty'))
+    eq('[lite] ...with the reason the full panel gives',
+       [(lph.get(k) or {}).get('why') for k in ('cutpaynow', 'notime', 'clipped')],
+       ['no pay read — box may cut it off', 'pay, no time — box may cut it off',
+        'pay at the box edge — not trusted'])
+    for key in ('zone', 'map', 'nav', 'blank'):
+        eq('[lite %s] ...and never over a screen with no card words on it' % key,
+           (lph.get(key) or {}).get('word'), 'WAITING FOR AN OFFER')
+
     # --- no ⟳ Re-find --------------------------------------------------------
     #
     # Taken off the bar at the owner's request (AUDITS.md, Settled): pressed
@@ -11033,10 +11260,6 @@ try:
             r['warn']['shown'])
         ok_('%s: ...and the raw rate survives the announcement' % panel,
             r['raw']['shown'])
-        # There is no net line on this card — no distance trusted means no
-        # mileage cost — so hiding the working left an empty box on screen.
-        ok_('%s: ...which is the only line there is' % panel,
-            not r['net']['there'] or not r['net']['shown'])
 
     # --- the map mode -------------------------------------------------------
     #

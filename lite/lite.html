@@ -14,8 +14,9 @@
   touch, opened full screen at boot by lite/install.sh's kiosk. So this page
   has no buttons it needs: it listens to the same event stream live.html does
   (/api/events) and draws ONE card from it — the verdict word and its colour,
-  the hourly rate large, then the pay, the minutes, the miles and the rate per
-  mile — with one quiet line under it for the rig's own state.
+  the hourly rate large, then the card's raw $/hr and $/mi, then the pay,
+  the minutes and the miles — with one quiet line under it for the rig's own
+  state.
 
   WHY ITS OWN PAGE AND NOT A MODE OF live.html. live.html is ten thousand
   lines of map, held orders, choosers and a driving bar, every one of which
@@ -30,10 +31,10 @@
 
   Self-contained on purpose — no styles.css, no ui.js, no service worker: a
   kiosk that boots before the network has nothing to fetch but this file, the
-  stream and /card-words.js. That one is the words this card shares with
-  live.html (CHECK THE PHONE and its reasons), from the same local server: a
-  copy of them here is how lite came to say "camera ok · no card" over a card
-  whose pay the box cut off.
+  stream and /card-words.js. That one is the words and the two raw figures
+  this card shares with live.html (CHECK THE PHONE and its reasons, raw $/hr,
+  $/mi), from the same local server: a copy of them here is how lite came to
+  say "camera ok · no card" over a card whose pay the box cut off.
 
   The phone setup (▣ Set box on live.html, the settings on index.html) is on
   the same server for a phone on the same Wi-Fi; the two links in the corner
@@ -163,25 +164,34 @@
   .unit { font-size: min(9vmin, 7vw); font-weight: 700; color: var(--muted); }
   #target { font-size: min(4.6vmin, 3.8vw); color: var(--muted); min-height: 1.2em; }
 
+  /* Two rows. The first is the card's raw $/hr and $/mi, the owner's two
+     figures to judge the card by at a glance (Nov 2026), as large as the
+     four figures were; the second the pay, the minutes and the miles they
+     are divided from, for checking against the phone. Display only: nothing
+     here colours, ranks or decides (AUDITS.md, Settled). */
   .figs {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 1.5vmin;
     width: 100%;
-    margin-top: 1.6vmin;
+    margin-top: 1.2vmin;
   }
+  .figs.main { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 1.6vmin; }
   .figs div { min-width: 0; }
   .figs b {
     display: block;
     /* Four across: a share of the WIDTH as well, because "$123.45" over a
        quarter of an 800px card is what decides it (rpi/test_lite.py). */
-    font-size: min(8.5vmin, 5vw);
+    font-size: min(6.5vmin, 4.6vw);
     font-weight: 750;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Two across, so the width binds later: "$123.45" over half an 800px card
+     is 4.9em of DejaVu Sans Bold in 370px. */
+  .figs.main b { font-size: min(8.5vmin, 7vw); }
   .figs small {
     display: block;
     font-size: min(4.4vmin, 3.6vw);
@@ -229,8 +239,9 @@
     #rate { font-size: 25vw; }
     .unit { font-size: 8vw; }
     #target { font-size: 4vw; }
-    .figs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4vw 2vw; }
-    .figs b { font-size: 9vw; }
+    .figs { gap: 4vw 2vw; }
+    .figs b { font-size: 6vw; }
+    .figs.main b { font-size: 9vw; }
     .figs small { font-size: 4vw; }
     footer { font-size: 3.6vw; }
   }
@@ -245,11 +256,14 @@
   <div id="word">STARTING</div>
   <div class="rate"><span id="rate">--</span><span class="unit" id="unit">/hr</span></div>
   <div id="target"></div>
+  <div class="figs main">
+    <div><b id="rawhr">--</b><small id="lRawhr">raw $/hr</small></div>
+    <div><b id="pmi">--</b><small id="lPmi">$/mi</small></div>
+  </div>
   <div class="figs">
     <div><b id="pay">--</b><small id="lPay">pay</small></div>
     <div><b id="min">--</b><small id="lMin">minutes</small></div>
     <div><b id="mi">--</b><small>miles</small></div>
-    <div><b id="pmi">--</b><small id="lPmi">per mile</small></div>
   </div>
 </main>
 
@@ -286,7 +300,8 @@
   var BLIND_LABEL = { stalled: 'CAMERA STALLED', dark: 'TOO DARK TO BE SURE' };
 
   var el = {};
-  ['card', 'word', 'rate', 'unit', 'target', 'pay', 'min', 'mi', 'pmi', 'lPay', 'lMin', 'lPmi',
+  ['card', 'word', 'rate', 'unit', 'target', 'rawhr', 'lRawhr', 'pay', 'min', 'mi', 'pmi',
+   'lPay', 'lMin', 'lPmi',
    'dot', 'status'].forEach(function (id) { el[id] = document.getElementById(id); });
 
   var last = null;        // the newest reading (a message with `ready`)
@@ -388,8 +403,10 @@
         : why ? CW.CHECK_THE_PHONE
         : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER'));
       setText(el.rate, '--'); setText(el.unit, '/hr'); setText(el.target, why || '');
-      setText(el.pay, '--'); setText(el.min, '--'); setText(el.mi, '--'); setText(el.pmi, '--');
-      setText(el.lPay, 'pay'); setText(el.lMin, 'minutes'); setText(el.lPmi, 'per mile');
+      setText(el.rawhr, '--'); setText(el.pmi, '--');
+      setText(el.pay, '--'); setText(el.min, '--'); setText(el.mi, '--');
+      setText(el.lPay, 'pay'); setText(el.lMin, 'minutes');
+      setText(el.lRawhr, CW.RAW_HOUR_LABEL); setText(el.lPmi, CW.PER_MILE_LABEL);
       return;
     }
 
@@ -424,8 +441,17 @@
     setText(el.min, typeof shown === 'number' && isFinite(shown) ? String(Math.round(shown)) : '--');
     setText(el.lMin, r.fromDeadline ? 'min left' : 'minutes');
     setText(el.mi, typeof r.miles === 'number' && isFinite(r.miles) ? r.miles.toFixed(1) : '--');
-    setText(el.pmi, money(r.perMile, 2));
-    setText(el.lPmi, r.cost > 0 ? 'net / mile' : 'per mile');
+    // The card's raw $/hr and $/mi, worked out where live.html's are
+    // (card-words.js), with the same labels: pay over the time and pay over
+    // the miles, nothing taken off, "--" where a figure is not known or the
+    // verdict was withheld for the pay or the time it is divided from. It
+    // printed the reading's `perMile` here, net of the car's cost, and on a
+    // refused reading too: about $43 a mile beside CHECK THE PAY on a
+    // decimal-slipped $136 card (the panel audit's finding 8).
+    setText(el.rawhr, rateText(CW.rawPerHour(r)));
+    setText(el.lRawhr, CW.RAW_HOUR_LABEL);
+    setText(el.pmi, money(CW.rawPerMile(r), 2));
+    setText(el.lPmi, CW.PER_MILE_LABEL);
   }
 
   function take(msg) {

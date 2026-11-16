@@ -20,8 +20,9 @@
      on a dead hotspot; it is fetched the first time somebody switches to the
      map, and never otherwise. -->
 <script src="map-view.js"></script>
-<!-- ...and the words this card shares with the lite edition's (CHECK THE
-     PHONE and its reasons): one copy, both pages ask. See card-words.js. -->
+<!-- ...and the words and the two raw figures this card shares with the lite
+     edition's (CHECK THE PHONE and its reasons, raw $/hr, $/mi): one copy,
+     both pages ask. See card-words.js. -->
 <script src="card-words.js"></script>
 <style>
   /* Read at arm's length, in a car, at a glance. Nothing subtle here. */
@@ -328,28 +329,12 @@
       font-size: min(12vw, 17dvh, 96px,
                      calc((100cqw - 40px) / (var(--chars) * 0.62)));
     }
-    /* ...and the room comes out of the line that is already on screen twice.
-       This hid the whole working, which is where the raw $/hr lives and the
-       only place on this page it appears. A notice is showing for the whole
-       life of a card whenever the distance was unreadable — that flag is a
-       stored property of the merged reading and never clears — so on 52 of
-       one real shift's 121 offers the raw figure was not slow to arrive, it
-       never arrived at all. Those are also exactly the offers where no
-       mileage cost was taken off, so the working had no net line either and
-       the block rendered nothing: a hidden empty box, bought at the price of
-       the one number it was there to show.
-
-       The net line is the headline, in small type. Dropping that costs
-       nothing a glance needs and buys the same line of height. */
-    #verdict:has(#warn:not([hidden])) .working .net { display: none; }
-    /* The same line, for the same reason, when a pair is on screen. The stack
-       line is a row of its own under the address, and the card had no row to
-       give it: measured beside the phone on an 800x480 panel, the verdict's
-       contents ran 27px past its box, centred, so the word PASS started 4px
-       above the card's border and the stack line — the row a driver presses —
-       ended 2px below it. The net line is 32px there; without it the stack
-       line ends 11px inside the border. */
-    #verdict:has(#stack:not([hidden])) .working .net { display: none; }
+    /* (The net line these rules hid under a notice and under a pair is gone:
+       the working is one small line now, the car's cost, and the raw $/hr it
+       used to carry is the first figure of the row, which no rule hides. The
+       history — 52 of one shift's 121 offers whose raw rate never reached the
+       glass because a notice hid the block it lived in — is why that figure
+       has a box of its own.) */
     #raw, #viewNote { display: none; }
     /* ...except when it is the map's line, which is the one thing the caption
        has ever had worth a row. "camera view · inset is what the reader sees"
@@ -423,11 +408,6 @@
        two-row cap here would ellipsise the place or the map's figure. Measured when the cap was set, the third row cost the map
        155px instead of 172px, and the check under it wants 120. */
     #viewWrap:has(#liveMap:not([hidden])) #viewNote { -webkit-line-clamp: 3; }
-    .working .net { display: none; }
-    .working .raw span:first-child { display: none; }
-    .working .raw i { font-style: normal; }
-    /* `=` opens a sum whose left-hand side is no longer on screen. */
-    .working .raw i:first-of-type { display: none; }
     .working { font-size: 11px; margin-top: 2px; }
     /* This was `#detail { display: none; }`, and #detail is not only the
        diagnostics. It is also how old the reading is — the one figure on this
@@ -588,8 +568,9 @@
      minutes is $3548/hr, and at that size, in that position, it is read before
      the label above it is. The card's own pay, time and distance stay below,
      because those are what the driver checks against the phone in their hand. */
-  /* The working goes; the rate keeps its box and shows nothing. */
-  .verdict.doubt .working { display: none; }
+  /* The working goes; the rate keeps its box and shows nothing. Hidden and
+     not removed, so the figures under it stay where every card has them. */
+  .verdict.doubt .working { visibility: hidden; }
   .verdict.doubt .rate-value { color: var(--doubt); }
   /* A rig that cannot see — see `blind` in the script. Red, because it is the
      one state on this page where the rig is not working at all, and red only
@@ -1599,9 +1580,68 @@
    * took 110 — chips taller than the prose they shorten. At 16 they are the
    * shorter of the two, which is what they are for. */
   @media (orientation: landscape) and (min-width: 1000px) and (min-height: 560px) {
+    /* The panel audit of Nov 2026 measured these from the seat's distance
+       (a 7" panel at about 70 cm: cap height is about 0.53 arcmin a CSS px,
+       and in-car legibility guidance asks 16' at least and 20' for choice):
+       24px figures were 12.6', 19px labels 10', the 18px address 9.5' and
+       16px chips 8.4'. Figures to 34 (18'), labels 20, the address 22 and
+       the chips 19 — on this panel only; 800x480 and the hat keep theirs.
+       The address and the chips only beside the phone picture, the layout a
+       driver reads offers in: beside the scene picture (aiming) the card is
+       476px to the phone picture's 638, and at 22 and 19 a long dropoff and
+       the OFFERS NOT SAVED chip ran past it while moving. */
     .places, .stops { font-size: 18px; }
-    .sub { font-size: 24px; }
-    .sub small { font-size: 19px; }
+    body.phoneview .places, body.phoneview .stops { font-size: 22px; }
+    .sub { font-size: 34px; }
+    .sub small { font-size: 20px; }
+    body.phoneview #warn .chip { font-size: 19px; }
+    .phonewhy { font-size: 26px; }
+    /* THE FIGURES STAY PUT. The card was a centred column, so everything in
+       it moved with whatever else was up: the audit measured the figures row
+       at y = 327, 262, 332, 316 and 307 across a plain card, one with a
+       notice, a pair, one moving and CHECK THE PAY, and the headline at 156
+       or 96px. The raw $/hr and $/mi are what the owner asked to always find
+       at a glance, so on this panel the card is laid from the top in rows of
+       one height each — the word, the headline's 156px box, the one-line
+       working (kept at its height when empty or withheld) — and the figures
+       land on the same line on every offer card. What varies (the address
+       taking two lines while moving, the pair line, the on-the-way line, the
+       order in the car, the notices) goes UNDER them, in that order, with the
+       notice last as the item that gives way and scrolls
+       (`.live #verdict > #warn`). Not between offers (`novalue`): a card
+       saying only WAITING FOR AN OFFER or CHECK THE PHONE is centred as it
+       was. Beside the phone picture, the layout offers are read in; the
+       scene picture is the aiming view, and its narrower card (476px) ran
+       the moving card's notice out of the card in this form. */
+    body.phoneview .live #verdict:not(.novalue) { justify-content: flex-start; padding-top: 8px; }
+    /* One height for the word whichever mark leads it: ✓ is drawn from a
+       fallback font a pixel taller than ≈, which moved every row under
+       ACCEPT a pixel down from CLOSE CALL's. */
+    body.phoneview #verdict:not(.novalue) .verdict-label { flex: none; height: 36px; line-height: 36px; }
+    /* The headline's box is its figures' height, not its line's: numerals
+       have no descenders, and a 156px line at line-height 1 left 30px of
+       empty fill under them that the notices below had no other way to get. */
+    body.phoneview #verdict:not(.novalue) .rate.big { flex: none; height: 136px; margin: 0 0 4px;
+                                                      align-items: flex-end; line-height: .87; }
+    body.phoneview #verdict:not(.novalue) .working { flex: none; min-height: calc(1.25em + 6px); }
+    body.phoneview #verdict #places { order: 1; }
+    body.phoneview #verdict #stack { order: 2; }
+    body.phoneview #verdict #way { order: 3; }
+    body.phoneview #verdict .heldline { order: 4; }
+    body.phoneview #verdict #stops { order: 5; }
+    body.phoneview #verdict > #warn { order: 6; }
+    /* ...and the headline keeps its size under a notice, which the 96px cap
+       above (`#verdict:has(#warn...)`) took 38% of, on about 40% of cards
+       (the CEILING notice alone was 52 of 121 offers on one shift). The cap
+       was there to find the notice its room; with the headline's box fixed a
+       smaller figure finds it none, and the notice is the item that scrolls.
+       Beside the scene picture (aiming) the card is the centred column it
+       was and keeps the 96: raised to 132 there, the moving card ran the
+       long-pickup pair's first chip out of the card, and the moving card is
+       held to the parked one's sizes (rpi/test_layout.py, measured). */
+    body.phoneview #verdict:has(#warn:not([hidden])) #perHour {
+      font-size: min(16vw, 26dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
     .pending { font-size: 19px; }
     /* ...and the status row, now that it is short (fillMore): 15 to 18. */
     .connbar { font-size: 18px; }
@@ -1679,6 +1719,18 @@
   @media (max-width: 999px), (max-height: 559px) {
     .live.moving #working { display: none; }
   }
+  /* The raw $/hr's own box is the rig's panel's (1024x600 and up). Below it
+     the row is the four it was — pay, minutes, miles, $/mi, in that order —
+     and the raw $/hr leads the working line, as it did before it had a box:
+     a fifth column did not fit the 800x480 card beside a scene picture
+     (388px) or the hat's, and a second row ran the pair card past its
+     border (rpi/test_layout.py measured both). */
+  .rawline { display: none; }
+  @media (max-width: 999px), (max-height: 559px), (orientation: portrait) {
+    .live .sub:has(#vRawHr) { display: none; }
+    .live .sub:has(#vPerMile) { order: 1; }
+    .rawline { display: inline; color: var(--text); font-weight: 800; }
+  }
   /* On the 3.5" hat a notice puts the figures away parked (the rule under
      `#verdict:has(#warn...)` there): the notice is the reason to doubt them
      and the card has no room for both. Moving, they are back — the pay, the
@@ -1733,7 +1785,7 @@
     .live.moving #places .withsame > .end { min-width: 0; }
   }
   .live.driving { container-type: inline-size; }
-  .live.driving .submetrics .sub:not(:first-child),
+  .live.driving .submetrics .sub:not(:has(#vPay)),
   .live.driving #stops { display: none; }
   /* The pay's cell alone, across the card, its label beside it rather than
      under it, and no rule over it: the figures the rule divided it from are
@@ -1808,11 +1860,13 @@
         <span class="rate-value" id="perHour">--</span>
         <span class="rate-unit" id="rateUnit">/hr</span>
       </div>
-      <!-- The arithmetic behind the headline, spelled out, in two steps: what
-           the card pays per hour, and what is left after running the car. A
-           rate a driver cannot reconstruct at a glance is a rate they cannot
-           act on, and both halves are worth seeing — one is checkable against
-           the offer, the other is the one that decides. -->
+      <!-- What the headline took off the card's own rate: the car's cost, in
+           one small plain line ("−$2.10 car costs"). The raw $/hr it was
+           taken from is the first figure below; the net it comes to is the
+           headline. It was two lines that spelled out both rates, bold and
+           in the verdict colour, so on ACCEPT the second-brightest green on
+           the card was the raw rate, a higher figure than the headline,
+           directly under it, and the net line was the headline again. -->
       <div class="working" id="working" hidden></div>
       <!-- Both jobs at once, when there is already one in the car.
            A RANGE, never a single figure: the low end is the two jobs sharing
@@ -1828,15 +1882,22 @@
            TELL and why, its whole sentence one tap away. See showWay. -->
       <div class="wayline" id="way" hidden></div>
       <!-- As read off the card, so it can be checked against the phone in the
-           two seconds before the offer times out. All four are deliberately
+           two seconds before the offer times out. All five are deliberately
            the raw numbers: their whole job is to match what is on the screen.
-           $/mi belongs to that rule and not beside it — the pay and the miles
-           are the two boxes to its left, so the division has to come out. -->
+           The first two are the owner's, Nov 2026: "ensure that the essential
+           raw $/hr and $/mile numbers always show clearly when scanning the
+           cards" — the card's pay over its time and over its miles, nothing
+           taken off, first in the row and in the same place on every card.
+           Display only: neither feeds the verdict, its colour or any rule
+           (AUDITS.md, Settled: no $/mile rules, no payout floors), which is
+           why they are drawn in the card's plain text and not the verdict's
+           colour. card-words.js works both out, for lite as well. -->
       <div class="submetrics">
+        <div class="sub rawfig"><span id="vRawHr">--</span><small id="lRawHr">raw $/hr</small></div>
+        <div class="sub rawfig"><span id="vPerMile">--</span><small id="lPerMile">$/mi</small></div>
         <div class="sub"><span id="vPay">--</span><small id="lPay">pay</small></div>
         <div class="sub"><span id="vMin">--</span><small id="lMin">minutes</small></div>
         <div class="sub"><span id="vMile">--</span><small id="lMile">miles</small></div>
-        <div class="sub"><span id="vPerMile">--</span><small id="lPerMile">$/mi</small></div>
       </div>
       <!-- Where the job goes. Sent on every read since the scanner learned to
            read a map, and painted nowhere until now — so the one screen a
@@ -2178,15 +2239,15 @@
     });
   }
 
-  // card-words.js: the words shared with lite. Asked through the guards
-  // below, so a shell one release behind (sw.js) that has no such file
-  // says what it said before.
+  // card-words.js: the words and the raw figures shared with lite. Asked
+  // through the guards below, so a shell one release behind (sw.js) that
+  // has no such file draws "--" rather than nothing at all.
   var CW = window.CardWords || null;
 
   var el = {};
   ['verdict', 'verdictLabel', 'perHour', 'vPay', 'vMin', 'vMile', 'warn', 'detail', 'conn', 'dot',
    'lPay', 'lMin', 'lMile', 'raw', 'rawText', 'rateUnit', 'vPerMile', 'lPerMile',
-   'phoneWhy',
+   'vRawHr', 'lRawHr', 'phoneWhy',
    'working', 'places', 'spoken', 'took', 'shift', 'stack', 'way', 'drop', 'dest',
    'health', 'stops', 'heldNext', 'heldLine', 'heldLine2', 'whose', 'chooser', 'undo']
     .forEach(function (id) { el[id] = document.getElementById(id); });
@@ -5138,6 +5199,7 @@
       setRate(aimingNow && p.cardPixels ? String(p.cardPixels) : '--',
               aimingNow ? 'px' : '/hr');
       setText(el.vPay, '--'); setText(el.vMin, '--'); setText(el.vMile, '--');
+      setText(el.vRawHr, '--'); setText(el.vPerMile, '--');
 
       var aiming = p.phase === 'aim';
       setText(el.lPay, aiming ? 'card px' : 'pay');
@@ -5323,114 +5385,73 @@
       ? '--' : Math.round(shown));
     setText(el.lMin, r.fromDeadline ? 'min left' : 'minutes');
     setText(el.vMile, r.miles === null ? '--' : Number(r.miles).toFixed(1));
-    // Secondary on purpose: $/hr is what decides an offer, because an hour is
-    // the thing actually being spent. $/mi is the cross-check, for the case
-    // the driver named — "some apps have very bad time estimates but the $/mi
-    // could be used to judge it as well". Nothing else here covers it: an
-    // optimistic time raises no doubt at all (SANE_MINUTES runs 2 to 240, and
-    // an app twenty minutes hopeful sails through), so on exactly those offers
-    // $/hr is quietly wrong and this is quietly right. A cross-check, not a
-    // decision rule — AUDITS has the measurement that ranking on $/mile earns
-    // less, and that stands.
+    // The card's raw $/hr and $/mi, first in the row, worked out in
+    // card-words.js (lite's card asks the same functions) and drawn in the
+    // card's plain text, never the verdict's colour.
     //
-    // RAW, which is the whole of what makes it checkable, and what the row's
-    // own rule already demanded: `perMile` off the reading is
-    // (pay − miles × costPerMile) ÷ miles, the raw figure minus a constant
-    // thirty cents, so $14.00 over 7.0 mi printed $1.70 between two boxes that
-    // divide to $2.00. Nothing is lost — the working directly below spells the
-    // deduction out, and the offers page and keypad still carry the net rate.
+    // A cross-check, not a decision rule: $/hr is what decides an offer,
+    // because an hour is the thing actually being spent. $/mi is the case the
+    // driver named — "some apps have very bad time estimates but the $/mi
+    // could be used to judge it as well" — and nothing else here covers it:
+    // an optimistic time raises no doubt at all (SANE_MINUTES runs 2 to 240),
+    // so on exactly those offers $/hr is quietly wrong and this is quietly
+    // right. AUDITS has the measurement that ranking on $/mile earns less,
+    // and that stands: neither figure reaches a verdict, a colour or a rule.
     //
-    // It survives ONE of the six doubts, because `doubt` names which figure
-    // the reader cannot believe and only one leaves this one standing:
+    // RAW, which is the whole of what makes them checkable: `perMile` off the
+    // reading is (pay − miles × costPerMile) ÷ miles, so $14.00 over 7.0 mi
+    // printed $1.70 between two boxes that divide to $2.00.
     //
-    //   pay    the payout is outside SANE_PAY: the same impossible number,
-    //          divided.
-    //   rate   pay over time is impossible and either half could be the liar.
-    //   speed  miles over time is impossible; the miles could be the liar.
-    //   leg    part of the journey was never timed, so the distance is partial.
-    //   screen not an offer at all.
-    //   time   the MINUTES are outside SANE_MINUTES — the one case where the
-    //          pay and the distance have each passed their own test. This is
-    //          built from those two and nothing else, so it is the last figure
-    //          on the card still worth reading.
-    //
-    // `milesUncertain` refuses it whatever the verdict, for the same reason
-    // `perMile` is null there: a rate off a distance the reader itself doubts
-    // is a confident number with nothing behind it.
-    // One clause, because only one of them can change an answer. A guard on
-    // the denominator was written first — `r.miles > 0 &&`, mirroring
-    // offer_parser's `miles and not miles_uncertain` — and no input could make
-    // it matter: a delivery card states a deadline and no route, `miles`
-    // arrives null, and the division comes out Infinity, which `money` already
-    // answers '--' to along with a zero and a NaN. The mutation that weakens
-    // it to `!== 0` survives every check in the suite. So the missing-distance
-    // case is `money`'s refusal, and the check below pins it there.
-    //
-    // Nothing tests the types either: this runs only on a ready reading, and a
-    // reading is not ready until `net = pay - cost` has been worked out, so a
-    // pay that is not a number cannot arrive here.
-    var rawPerMile = r.milesUncertain ? null : r.pay / r.miles;
-    var mileStands = r.state !== 'doubt' || r.doubt === 'time';
-    setText(el.vPerMile, (rawPerMile === null || !mileStands)
-      ? '--' : money(rawPerMile, 2));
-    setText(el.lPerMile, '$/mi');
+    // "--" exactly where card-words.js says a figure cannot honestly be had:
+    // no minutes (raw $/hr) or no trusted distance (CEILING · miles
+    // unreadable, or a deadline card with no route: $/mi), and on a withheld
+    // verdict. The raw $/hr is blanked on every doubt, as the headline is,
+    // because it is the same pay over the same time the reader refused; $/mi
+    // keeps the one doubt it always survived, CHECK THE TIME, where the pay
+    // and the miles each passed their own test. Never one estimated from the
+    // other.
+    setText(el.vRawHr, CW ? rateText(CW.rawPerHour(r)) : '--');
+    setText(el.lRawHr, CW ? CW.RAW_HOUR_LABEL : 'raw $/hr');
+    setText(el.vPerMile, CW ? money(CW.rawPerMile(r), 2) : '--');
+    setText(el.lPerMile, CW ? CW.PER_MILE_LABEL : '$/mi');
 
-    // The working, in the panel rather than in the small print, and in two
-    // steps so both rates are on screen at once: what the offer itself pays
-    // per hour — checkable against the card, and the number most drivers
-    // already have a feel for — and what is left after running the car, which
-    // is the one the verdict is made on.
+    // What the headline took off the card's own rate, in one small plain
+    // line: "−$2.10 car costs". The raw rate is the first figure in the row
+    // and the net is the headline, so the two-line sum that spelled out both
+    // ($14.00 in 30 min = $28.0/hr raw, less $2.10 car costs = $23.8/hr net)
+    // said each of them twice, both bold in the verdict's colour — on ACCEPT
+    // the raw rate, a higher figure than the headline, was the brightest
+    // green under it (the panel audit's fifth finding).
     //
-    // Each line is a pair of unbreakable halves, so a narrow screen splits
-    // between them rather than stranding "min" on a line of its own.
-    // The card's own minutes where it states them, the time left to the
-    // deadline where it does not — the same fallback the submetric above uses.
-    // Without it a delivery card, which states a deadline and no duration,
-    // printed its raw rate over a dash: "$12.00 in -- min = $21.2/hr raw", a
-    // sum with nothing under the line. That is the whole DoorDash half of a
-    // shift, showing the one figure this panel had to be argued into showing
-    // at all and then failing to say what it was divided by.
+    // ...and the minutes the rates are divided by, when that is not the
+    // card's own: a shopping allowance or a pad makes the billed time longer
+    // than the MINUTES box, and without the extra the raw $/hr would not be
+    // the pay over the box beside it. The card's minutes, or the time left to
+    // a deadline where it states none — the fallback the box uses.
     var over = (typeof r.cardMinutes === 'number') ? r.cardMinutes : r.minutes;
-    var mins = (over === null || over === undefined) ? '--' : Math.round(over);
-    // Both rates come off the scanner, divided by the same minutes, so this
-    // sum is the scanner's arithmetic rather than a second version of it.
-    // Older payloads carried only the net rate; there, the card's own time is
-    // the denominator, which is what those versions meant by it.
-    var gross = (typeof r.grossPerHour === 'number') ? r.grossPerHour
-      : (over > 0 ? r.pay / (over / 60) : null);
-    // And the time it was divided by. Usually the card's own minutes, longer
-    // once a shopping allowance or a pad is configured — shown as an extra so
-    // the figure in the stat row below and the one these rates divide by are
-    // both accounted for, instead of silently disagreeing.
     var billed = (typeof r.billedMinutes === 'number') ? r.billedMinutes : over;
     var extra = (over === null || over === undefined)
       ? 0 : Math.round(billed) - Math.round(over);
-    var time = extra > 0 ? mins + ' <i>+</i> ' + extra + ' min'
-             : extra < 0 ? Math.round(billed) + ' min'
-             : mins + ' min';
-    // Formatted exactly as the headline is, so the net figure here and the
-    // big one above are visibly the same number rather than $10.60 sitting
-    // under $10.6 and reading as a second, slightly different answer.
-    // rateText, not a second copy of it. This one wrote "$-12.4" — the minus
-    // wedged between the dollar and the digits, which line 615 explains is a
-    // dash at a glance and which rateText has always got right. So the headline
-    // read "-$13.2" and the working line directly under it read "$-13.2": the
-    // same loss, on the same screen, one of them looking like a gain.
-    //
-    // Reachable on an ordinary card at the IRS rate the README recommends:
-    // $2.50 over 12.4 miles at $0.70/mile is -$13.24/hr.
-    var rate = rateText;
-    // Named, not just ordered. The landscape rules reclaim height when a
-    // notice appears and they have to take it from the net line — which is
-    // the headline repeated — rather than from the raw one, which is on this
-    // page exactly once. See the rule under #verdict:has(#warn...).
-    var rows = [['raw', '<span>' + money(r.pay, 2) + ' <i>in</i> ' + time + '</span>'
-                 + ' <span><i>=</i> <b>' + rate(gross) + '/hr</b> <i>raw</i></span>']];
-    if (deducted) {
-      rows.push(['net',
-                 '<span><i>less</i> ' + money(r.cost, 2) + ' <i>car costs</i></span>'
-                 + ' <span><i>=</i> <b>' + rate(r.perHour) + '/hr</b> <i>net</i></span>']);
+    var said = [];
+    // U+2212, a real minus, before the dollar: "$-2.10" is the dash this
+    // page's rateText exists to avoid.
+    if (deducted) said.push('\u2212' + money(r.cost, 2).replace(/^-/, '') + ' car costs');
+    if (extra !== 0 && r.state !== 'doubt') {
+      said.push('over ' + Math.round(billed) + ' min'
+                + (extra > 0 ? ' (' + Math.round(over) + ' + ' + extra + ')' : ''));
     }
+    // A no-break space when there is nothing to say, so the line keeps its
+    // height and the figures under it their place (the 1024x600 block).
+    // Below the rig's own 1024x600 the card has no room for a fifth figure
+    // (the 800x480 card beside a scene picture is 388px, the 3.5" hat's
+    // 208): there the raw $/hr box is put away and the figure leads this
+    // line instead, where it always was on those panels — the same function,
+    // the same "--". See the `.rawline` rules.
+    var rawSaid = CW ? rateText(CW.rawPerHour(r)) : '--';
+    var working = '<div class="cost"><span class="rawline">' + rawSaid + '/hr raw'
+      + (said.length ? ' \u00b7 ' : '') + '</span>'
+      + (said.length ? said.map(function (t) { return '<span>' + t + '</span>'; })
+                           .join(' \u00b7 ') : '\u00a0') + '</div>';
     // The two ends, not the union: `places` is in the order the frames
     // arrived. See MV.ends, which the offers page asks too. Without MV this
     // page still draws the list, which is what it always drew.
@@ -5466,9 +5487,6 @@
     showStack(holdingNow ? r.stack : null);
     // ...and under it whether this offer is on the way, by the same rule.
     showWay(r);
-    var working = rows.map(function (row) {
-      return '<div class="' + row[0] + '">' + row[1] + '</div>';
-    }).join('');
     if (drawnAs(el.working, working)) el.working.innerHTML = working;
     setHidden(el.working, false);
 

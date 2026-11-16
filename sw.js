@@ -51,8 +51,10 @@ var ASSETS = [
   // not happen is the offers page itself failing to open in a car park
   // because one of its scripts was missing from the shell.
   'map-view.js',
-  // ...and the words the driving panel shares with lite's card. live.html
-  // says what it said before without it rather than failing.
+  // ...and the words and raw figures the driving panel shares with lite's
+  // card. live.html draws "--" without it rather than failing, but a panel
+  // that came up from the shell with no signal would show no raw $/hr or
+  // $/mi at all.
   'card-words.js',
   // ...and the page that file was split out of. It was the only .html this
   // server serves that was not in the shell, and the navigate fallback below

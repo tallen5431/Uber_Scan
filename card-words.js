@@ -10,13 +10,16 @@
  * while the full panel at least said the reason in small type. CLAUDE.md's
  * rule for lite is that it may turn things off and never gets its own copy of
  * anything that decides what an offer pays; the same goes for what the card
- * says about it. So the words are worked out here, once, and both pages ask.
+ * says about it. So the words and the two raw figures are worked out here,
+ * once, and both pages ask.
  *
  * WHAT IS NOT HERE. Nothing in this file decides anything. The verdict, the
  * rate, the doubts and every money rule (CENTS_LOST, unsure_payout,
  * money_is_clipped, the rescue rules) are the scanner's, and arrive on the
  * wire finished. These functions read a finished reading and say what of it
- * may be shown.
+ * may be shown. The raw $/hr and $/mi are display figures for checking the
+ * card against the phone; they feed no verdict, colour, state or rule
+ * (AUDITS.md, Settled: no $/mile rules and no payout floors).
  *
  * A UMD like advice.js and map-view.js, touching no browser global at load,
  * so rpi/test_lite.py and the node suites can ask it directly.
@@ -45,6 +48,13 @@
   // recorded — only where to look. Silence is still never an accept; this is
   // the opposite of reading it as one.
   var CHECK_THE_PHONE = 'CHECK THE PHONE';
+
+  // The two figures' labels, the same on both panels, so a driver who has
+  // seen both reads the box one way. Lite said "net / mile" here while the
+  // full panel said "$/mi" for pay ÷ miles: both true, and the same box read
+  // two ways.
+  var RAW_HOUR_LABEL = 'raw $/hr';
+  var PER_MILE_LABEL = '$/mi';
 
   // What a reading with no verdict in it DID read, in words and no figures.
   //
@@ -144,11 +154,70 @@
       ? said : null;
   }
 
+  function num(n) { return typeof n === 'number' && isFinite(n); }
+
+  // The card's pay over its time, nothing taken off: the raw $/hr. The
+  // scanner's own `grossPerHour` (offer_parser rate(): pay over the minutes
+  // the net rate is divided by, so the net headline and this are the same
+  // division with and without the car's cost), else pay over the card's own
+  // minutes for an older payload.
+  //
+  // null — drawn "--" — where it cannot honestly be had:
+  //   - no verdict, or a withheld one (`state` 'doubt', every reason): the
+  //     headline is blanked there because the pay or the time is the one the
+  //     reader does not believe, and a raw rate is the same division of the
+  //     same two figures. Not even CHECK THE TIME, which $/mi survives: this
+  //     figure is divided BY the time the reader refused.
+  //   - no minutes on the reading, whatever `grossPerHour` says: never a time
+  //     estimated from the distance, nor the other way.
+  function rawPerHour(r) {
+    if (!r || !r.ready || r.state === 'doubt') return null;
+    var over = num(r.cardMinutes) ? r.cardMinutes : r.minutes;
+    var billed = num(r.billedMinutes) ? r.billedMinutes : over;
+    if (!num(over) || !(over > 0) || !num(billed) || !(billed > 0) || !num(r.pay)) return null;
+    var v = num(r.grossPerHour) ? r.grossPerHour : r.pay / (over / 60);
+    return num(v) ? v : null;
+  }
+
+  // The card's pay over its miles, nothing taken off: journal.html's
+  // payPerMile, the same rule (a distance of at least a tenth of a mile).
+  // RAW, because this box is checked against the phone, where $14.00 over
+  // 7.0 mi divides to $2.00 — the reading's own `perMile` is net of the car's
+  // cost and printed $1.70 between those two boxes.
+  //
+  // It survives ONE of the six doubts, because `doubt` names which figure
+  // the reader cannot believe and only one leaves this one standing:
+  //   pay    the payout is outside SANE_PAY: the same impossible number,
+  //          divided.
+  //   rate   pay over time is impossible and either half could be the liar.
+  //   speed  miles over time is impossible; the miles could be the liar.
+  //   leg    part of the journey was never timed, so the distance is partial.
+  //   screen not an offer at all.
+  //   time   the MINUTES are outside SANE_MINUTES — the one case where the
+  //          pay and the distance have each passed their own test, and this
+  //          is built from those two and nothing else.
+  // `milesUncertain` refuses it whatever the verdict (CEILING · miles
+  // unreadable), for the reason `perMile` is null there: a rate off a
+  // distance the reader itself doubts is a confident number with nothing
+  // behind it. No distance on the card (DoorDash's deadline cards) is none.
+  function rawPerMile(r) {
+    if (!r || !r.ready) return null;
+    if (r.state === 'doubt' && r.doubt !== 'time') return null;
+    if (r.milesUncertain) return null;
+    if (!num(r.pay) || !num(r.miles) || !(r.miles >= 0.1)) return null;
+    var v = r.pay / r.miles;
+    return num(v) ? v : null;
+  }
+
   return {
     NO_OFFER_SAID: NO_OFFER_SAID,
     TAKEN_SCREENS: TAKEN_SCREENS,
     CHECK_THE_PHONE: CHECK_THE_PHONE,
+    RAW_HOUR_LABEL: RAW_HOUR_LABEL,
+    PER_MILE_LABEL: PER_MILE_LABEL,
     noVerdictSaid: noVerdictSaid,
-    phoneSaid: phoneSaid
+    phoneSaid: phoneSaid,
+    rawPerHour: rawPerHour,
+    rawPerMile: rawPerMile
   };
 }));

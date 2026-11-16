@@ -468,6 +468,102 @@ _lite_page = open(os.path.join(ROOT, 'lite', 'lite.html'), encoding='utf-8').rea
 ok_('the lite card has no NucBox line of its own to show',
     'nucbox' not in _lite_page.lower())
 
+# --- the words and the raw figures: card-words.js, never a lite copy --------------
+#
+# The card's raw $/hr and $/mi and its CHECK THE PHONE are worked out in one
+# file both panels load. Asked here directly, in node, with the honesty rules
+# the owner set (Nov 2026): "--" for a figure whose minutes or miles are not
+# known, and nothing derived from a payout the rig withheld its verdict on.
+ok_('lite loads the shared card words', '/card-words.js' in _lite_page)
+ok_('...and keeps no copy of the sentences they hold',
+    'box may cut it off' not in _lite_page and 'pay at the box edge' not in _lite_page)
+ok_('...nor prints the reading\'s net `perMile` any more',
+    'r.perMile' not in _lite_page and 'net / mile' not in _lite_page)
+_CW_CASES = {
+    # a plain card: pay over the scanner's billed time, pay over the miles
+    'plain': {'ready': True, 'state': 'go', 'pay': 14.0, 'minutes': 30, 'cardMinutes': 30,
+              'billedMinutes': 30, 'grossPerHour': 28.0, 'miles': 7.0, 'perMile': 1.7},
+    # no minutes on it at all: raw $/hr is not estimated from the miles
+    'nominutes': {'ready': True, 'state': 'go', 'pay': 14.0, 'minutes': None,
+                  'cardMinutes': None, 'billedMinutes': None, 'grossPerHour': 28.0,
+                  'miles': 7.0},
+    # DoorDash: a deadline and no route — $/mi is not estimated from the time
+    'nomiles': {'ready': True, 'state': 'warn', 'pay': 12.0, 'minutes': None,
+                'cardMinutes': 34, 'billedMinutes': 34, 'grossPerHour': 21.18,
+                'miles': None, 'fromDeadline': True},
+    # CEILING · miles unreadable
+    'unreadable': {'ready': True, 'state': 'warn', 'pay': 8.0, 'minutes': 22,
+                   'cardMinutes': 22, 'billedMinutes': 22, 'grossPerHour': 21.82,
+                   'miles': 6.9, 'milesUncertain': True, 'uncosted': True},
+    # withheld: the decimal-slipped $136 card, and every other doubt
+    'doubt-pay': {'ready': True, 'state': 'doubt', 'doubt': 'pay', 'pay': 136.0,
+                  'minutes': 10, 'cardMinutes': 10, 'billedMinutes': 10,
+                  'grossPerHour': 816.0, 'miles': 3.1, 'perMile': 43.57},
+    'doubt-rate': {'ready': True, 'state': 'doubt', 'doubt': 'rate', 'pay': 99.0,
+                   'minutes': 6, 'grossPerHour': 990, 'miles': 1.1},
+    'doubt-leg': {'ready': True, 'state': 'doubt', 'doubt': 'leg', 'pay': 18.4,
+                  'minutes': 5, 'grossPerHour': 220.8, 'miles': 2.1},
+    'doubt-speed': {'ready': True, 'state': 'doubt', 'doubt': 'speed', 'pay': 9.0,
+                    'minutes': 3, 'grossPerHour': 180, 'miles': 9.0},
+    'doubt-screen': {'ready': True, 'state': 'doubt', 'doubt': 'screen', 'pay': 142.6,
+                     'minutes': 39, 'grossPerHour': 219, 'miles': 1.0},
+    # ...and CHECK THE TIME, the one doubt $/mi survives (pay and miles each
+    # passed their own test); the raw $/hr is over the refused minutes
+    'doubt-time': {'ready': True, 'state': 'doubt', 'doubt': 'time', 'pay': 14.0,
+                   'minutes': 400, 'grossPerHour': 2.1, 'miles': 7.0},
+    # an unsure or clipped payout reaches the panel with no payout and no verdict
+    'unsure': {'ready': False, 'state': 'empty', 'pay': None, 'minutes': None,
+               'miles': 8.6, 'deliverBy': 975, 'places': ['Fable Grill']},
+}
+_cw = subprocess.run(
+    ['node', '-e', 'const C = require(process.argv[1]); const cases = JSON.parse(process.argv[2]);'
+     'const out = {}; for (const k in cases) out[k] = [C.rawPerHour(cases[k]), C.rawPerMile(cases[k])];'
+     'out.labels = [C.RAW_HOUR_LABEL, C.PER_MILE_LABEL];'
+     'out.phone = {'
+     ' cut: C.phoneSaid({pay: null, miles: 8.6, deliverBy: 975, places: []}),'
+     ' clipped: C.phoneSaid({clipped: true, places: []}),'
+     ' notime: C.phoneSaid({pay: 4.21, places: []}),'
+     ' pickup: C.phoneSaid({pay: null, places: ["Fable Grill"]}),'
+     ' map: C.phoneSaid({pay: null, miles: 1.0, minutes: 39, places: []}),'
+     ' zone: C.phoneSaid({pay: null, minutes: 1, places: []}),'
+     ' nav: C.phoneSaid({pay: null, miles: 1.1, minutes: 3, deliverBy: 1, places: ["Fable Grove Park"],'
+     '   screen: "uber.nav"}),'
+     ' idle: C.phoneSaid({pay: 142.6, notAnOffer: true, places: []}),'
+     ' blank: C.phoneSaid({places: []}), word: C.CHECK_THE_PHONE};'
+     'console.log(JSON.stringify(out));',
+     os.path.join(ROOT, 'card-words.js'), json.dumps(_CW_CASES)],
+    capture_output=True, text=True, timeout=30)
+try:
+    _cwr = json.loads(_cw.stdout)
+except ValueError:
+    _cwr = {}
+    eq('card-words.js ran under node', _cw.stderr.strip()[-300:], '')
+if _cwr:
+    eq('[words] a plain card: raw $/hr $28.0 and $/mi $2.00 (pay ÷ miles, not the net $1.70)',
+       _cwr['plain'], [28.0, 2.0])
+    eq('[words] no minutes: raw $/hr is "--", never worked out from the miles',
+       _cwr['nominutes'][0], None)
+    eq('[words] no miles (a deadline card): $/mi is "--", never worked out from the time',
+       _cwr['nomiles'], [21.18, None])
+    eq('[words] CEILING · miles unreadable: $/mi is "--"', _cwr['unreadable'], [21.82, None])
+    for _k in ('doubt-pay', 'doubt-rate', 'doubt-leg', 'doubt-speed', 'doubt-screen'):
+        eq('[words] withheld (%s): neither figure, from pay the rig would not price' % _k,
+           _cwr[_k], [None, None])
+    eq('[words] CHECK THE TIME: $/mi stands, as it always did on the full panel; '
+       'raw $/hr, divided by the refused minutes, does not', _cwr['doubt-time'], [None, 2.0])
+    eq('[words] an unsure payout (no payout, no verdict): neither', _cwr['unsure'], [None, None])
+    eq('[words] the labels both panels print', _cwr['labels'], ['raw $/hr', '$/mi'])
+    _ph = _cwr['phone']
+    eq('[words] the card word', _ph['word'], 'CHECK THE PHONE')
+    eq('[words] CHECK THE PHONE for a card whose pay the box cut, a pay with no time, a '
+       'payout at the box edge and a pickup alone',
+       [_ph['cut'], _ph['notime'], _ph['clipped'], _ph['pickup']],
+       ['no pay read — box may cut it off', 'pay, no time — box may cut it off',
+        'pay at the box edge — not trusted', 'no pay read — box may cut it off'])
+    eq('[words] ...and not for the map\'s route chips, the zone prompt\'s wait, a taken '
+       'order\'s navigation, the app\'s idle screen or nothing at all',
+       [_ph['map'], _ph['zone'], _ph['nav'], _ph['idle'], _ph['blank']], [None] * 5)
+
 # --- the card, on every panel lite lists ------------------------------------------
 #
 # What a screenshot would show: the word, the rate and the four figures each
@@ -547,6 +643,7 @@ const fs = require('fs');
           const figs = Array.from(document.querySelectorAll('.figs b, .figs small')).map((e) => ({
             sw: e.scrollWidth, cw: e.clientWidth, text: e.textContent }));
           return { word: box('#word'), rate: box('#rate'), card: box('#card'),
+                   rawhr: box('#rawhr'), lRawhr: box('#lRawhr'), pmi: box('#pmi'), lPmi: box('#lPmi'),
                    footer: box('footer'), status: box('#status'), target: box('#target'), figs,
                    docW: document.documentElement.scrollWidth, docH: document.documentElement.scrollHeight,
                    bodyBg: getComputedStyle(document.body).backgroundColor,
@@ -633,14 +730,51 @@ for _panel in ('800x480',):
 eq('LOW POWER is said on the status line',
    _res['800x480 dark lowpower']['status']['text'], 'LOW POWER — check the power lead')
 eq('...and a payout read off a found card is "pay ?", as on live.html',
-   [f['text'] for f in _res['800x480 dark close']['figs']][1], 'pay ?')
+   [f['text'] for f in _res['800x480 dark close']['figs']][5], 'pay ?')
 eq('...and a delivery\'s deadline minutes are "min left"',
-   [f['text'] for f in _res['800x480 dark close']['figs']][3], 'min left')
+   [f['text'] for f in _res['800x480 dark close']['figs']][7], 'min left')
 ok_('...and a doubt shows no rate', _res['800x480 dark doubt']['rate']['text'] == '--')
+
+
+# The card's raw $/hr and $/mi (card-words.js): first, large, plain, and "--"
+# on a withheld verdict — lite printed about $43 a mile beside CHECK THE PAY
+# (the panel audit's finding 8).
+def _lum(css):
+    m = re.match(r'rgba?\(([^)]+)\)', css or '')
+    if not m:
+        return None
+    ch = []
+    for v in [float(x) for x in m.group(1).split(',')[:3]]:
+        v /= 255.0
+        ch.append(v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+
+
+def _cr(fg, bg):
+    a, b = _lum(fg), _lum(bg)
+    return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+
+
+_want = {'accept': ('$71.2', '$3.20'), 'close': ('$27.9', '$2.32'), 'pass': ('$4.5', '$0.25'),
+         'doubt': ('--', '--'), 'nopay': ('--', '--')}
+for _key in sorted(_res):
+    _m = _res[_key]
+    _state = _key.split(' ')[-1]
+    if _state not in _want:
+        continue
+    eq('%s: raw $/hr and $/mi' % _key, (_m['rawhr']['text'], _m['pmi']['text']), _want[_state])
+    eq('%s: ...labelled as on live.html' % _key, (_m['lRawhr']['text'], _m['lPmi']['text']),
+       ('raw $/hr', '$/mi'))
+    _panel = _key.split(' ')[0]
+    if _panel == '1024x600':
+        ok_('%s: ...at 34px or more (%.0f, %.0f)' % (_key, _m['rawhr']['font'], _m['pmi']['font']),
+            _m['rawhr']['font'] >= 34 and _m['pmi']['font'] >= 34)
+        ok_('%s: ...their labels at 20px or more (%.1f)' % (_key, _m['lPmi']['font']),
+            _m['lPmi']['font'] >= 20 and _m['lRawhr']['font'] >= 20)
+    for _part in ('rawhr', 'pmi', 'lRawhr', 'lPmi'):
+        _c = _cr(_m[_part]['color'], _m['card']['bg'])
+        ok_('%s: %s reads on the card (%.2f:1)' % (_key, _part, _c), _c >= 4.5)
 eq('a card with no payout to price says why under CHECK THE PHONE',
    _res['800x480 dark nopay']['target']['text'], 'no pay read — box may cut it off')
-ok_('lite loads the shared card words, and keeps no copy of their sentences',
-    '/card-words.js' in _lite_page and 'box may cut it off' not in _lite_page
-    and 'pay at the box edge' not in _lite_page)
 
 done()
