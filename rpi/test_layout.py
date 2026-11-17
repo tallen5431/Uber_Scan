@@ -1461,17 +1461,16 @@ NBX_OFF_PANELS = [p for p in PANELS if p[0] in ('1024x600', '800x480', '390x844'
 # went behind "…" (fillMore). Not the notice, whose chips would be taller than
 # the sentences at 19 (that rule says how much). The 800x480 and the 3.5" hat
 # are where they were.
-# At 1024x600 the address, the labels and the figures went to 22, 20 and 34
-# with the panel audit (Nov 2026); the address stays 18 beside the scene
-# picture, whose card is narrower (see small_sizes).
-SMALL_SIZES = {'1024x600': [22, 20, 34, 19, 16, 18],
+# At 1024x600 the labels and the figures went to 20 and 34 with the panel
+# audit (Nov 2026), and the address to 22 beside the phone; since the card is
+# half the panel beside either picture (the owner, Nov 2026) the address is
+# the 18 it always was beside the scene, where the card was already that
+# wide: at 22 a long dropoff was cut on its own line moving.
+SMALL_SIZES = {'1024x600': [18, 20, 34, 19, 16, 18],
                '800x480': [15, 16, 20, 16, 16, 15],
                '480x320': [14.4, 12, 15, 10, 16, 15]}
 def small_sizes(panel, view):
-    sizes = list(SMALL_SIZES[panel])
-    if panel == '1024x600' and view == 'scene':
-        sizes[0] = 18
-    return sizes
+    return list(SMALL_SIZES[panel])
 
 
 CHIPS_WANT = ['OFFERS NOT SAVED · Read-only file system',
@@ -4123,7 +4122,7 @@ const SNAP_MEASURE = (fixture) => {
         const cutOf = (el) => outside(el, [box(el), box(el === sm || el === wt
                                                         ? el.closest('#places, #stack') : st),
                                            card, glass]);
-        return { range: text(rg), rangeCut: cutOf(rg),
+        return { range: text(rg), rangeCut: cutOf(rg), title: st.title,
                  both: shown(bo) ? text(bo) : null, bothCut: shown(bo) ? cutOf(bo) : null,
                  // ...and "same store as ②" at the head of the address line
                  // (live.html sameNote), the same.
@@ -5009,8 +5008,21 @@ try:
             if h > 380:
                 ok_('...with the address and the figures inside the card at %s' % where,
                     _c.get('placesIn') and _c.get('subIn'))
-            eq('the notices are five chips, the end read with ⌖ last, at %s' % where,
-               _c.get('chips'), CHIPS_WANT)
+            # On the rig's own panel and larger, under an offer, the chips
+            # the slot under the address holds and a "+N" for the rest
+            # (live.html showNotes' fold): the first of them kept, in order,
+            # never a count alone, every one of the five accounted for.
+            _ch = _c.get('chips') or []
+            if w >= 1000 and h >= 560:
+                _kept = _ch[:-1] if _ch and _ch[-1].startswith('+') else _ch
+                ok_('the notices are the first of the five chips in order and "+N" for the '
+                    'rest, at %s (%r)' % (where, _ch),
+                    _kept and _kept == CHIPS_WANT[:len(_kept)]
+                    and (len(_kept) == len(CHIPS_WANT)
+                         or _ch[-1] == '+%d' % (len(CHIPS_WANT) - len(_kept))))
+            else:
+                eq('the notices are five chips, the end read with ⌖ last, at %s' % where,
+                   _ch, CHIPS_WANT)
             eq('...every letter of them inside the card and on the glass at %s' % where,
                _c.get('off'), '')
             ok_('...with the verdict label and the rate inside the card at %s' % where,
@@ -5324,11 +5336,20 @@ try:
             # give way: whole on every panel but the 3.5" hat beside the
             # scene picture, where the ellipsis takes "n ·" and leaves
             # "① late ~12 mi" — the call and its minutes, never the range.
+            # On the rig's own panel and larger the pair line is its short
+            # form (live.html stackCompact): the hint is on the line's title
+            # and a tap away, with the rest of the words, not drawn.
             _otc = _pr.get('ontimeCut') or ''
-            ok_('...and the on-time hint "\u2460 late ~12 min" at %s, cut by at most its last '
-                'letter and dot (%r)' % (where, (_pr.get('ontime'), _otc)),
-                _pr.get('ontime') == '\u2460 late ~12 min \u00b7'
-                and (_otc == '' or (h <= 380 and view == 'scene' and _otc == 'n \u00b7')))
+            if w >= 1000 and h >= 560:
+                ok_('...and the on-time hint "\u2460 late ~12 min" on the short line\'s title, '
+                    'a tap away, at %s (%r)' % (where, _pr.get('title')),
+                    _pr.get('ontime') is None
+                    and '\u2460 late ~12 min' in (_pr.get('title') or ''))
+            else:
+                ok_('...and the on-time hint "\u2460 late ~12 min" at %s, cut by at most its last '
+                    'letter and dot (%r)' % (where, (_pr.get('ontime'), _otc)),
+                    _pr.get('ontime') == '\u2460 late ~12 min \u00b7'
+                    and (_otc == '' or (h <= 380 and view == 'scene' and _otc == 'n \u00b7')))
             # ...and with carrying two off and two read back, "vs ① only"
             # beside the chip, whole, as before.
             _vs = (cm.get('offerFirst') or {}).get('vs') or {}
@@ -5440,11 +5461,11 @@ try:
                (_b.get('stopsCut'), _b.get('spill')), ([], []))
             no_('...and nothing scrolls at %s' % where, _b.get('over'))
             _r = _o.get('range') or {}
-            # Above the figures, except on the rig's own panel and larger
-            # beside the phone picture, where the figures hold one line on
+            # Above the figures, except on the rig's own panel and larger,
+            # beside either picture, where the figures hold one line on
             # every card and what varies — the pair line among it — goes
             # under them (the 1024x600 block).
-            _fixed = w >= 1000 and h >= 560 and view == 'screen'
+            _fixed = w >= 1000 and h >= 560
             eq('the pair range sits %s the figures, unclipped at %s'
                % ('under' if _fixed else 'above', where),
                (_r.get('text'), _r.get('cut'), _r.get('above')),
@@ -5545,7 +5566,19 @@ try:
                 # notices beside the scene picture: 9px), no less than that.
                 _wr, _pwr = _dr.get('warnRow'), _pk.get('warnRow') or {}
                 _scrolls = hat and _offer and _wr is not None
-                if _scrolls:
+                # ...and on the rig's own panel, since its card is half of it
+                # (Nov 2026), the one form with no row left for its notice
+                # moving: the widest pair (a loss to $133, a ceiling, ENDS
+                # ELSEWHERE on a row of its own), the on-the-way line and the
+                # long pickup a line each fill the slot under the address,
+                # and the notice is the item that gives way and scrolls
+                # (AUDITS.md, Open): squeezed to nothing on the card, its
+                # chips a scroll away, every sentence on its title.
+                _wideScroll = (w >= 1000 and h >= 560 and _offer and form == 'long pickup pair')
+                if _wideScroll:
+                    _cut.pop('chip', None)
+                    _scrolls = True
+                elif _scrolls:
                     _cut.pop('chip', None)
                     _need = min(_wr.get('line') or 99, _pwr.get('h') or 99)
                     ok_('...on the 3.5" hat the notice shows a row of its chips, or what the '
@@ -5597,11 +5630,22 @@ try:
                            ((_dp.get('same') or {}).get('text'), (_pp.get('same') or {}).get('text')),
                            (_sameWant[form], _sameWant[form]))
                     _pkd = _pk.get('detail') or []
+                    # On the rig's own panel the notice's chips are folded to
+                    # what the slot holds (showNotes), and moving the address
+                    # takes a second line of it: the same notices in the same
+                    # order, fewer of them drawn, the rest in the "+N".
+                    _dch = _dr.get('chips') or []
+                    _seen = lambda c: (c[:-1] if c and c[-1].startswith('+') else c)
+                    _count = lambda c: len(_seen(c)) + (int(c[-1][1:]) if c and c[-1].startswith('+') else 0)
+                    _chipsOk = (_dch == _chips) or (not _small and bool(_dch)
+                                and _seen(_dch) == _seen(_chips)[:len(_seen(_dch))]
+                                and _count(_dch) == _count(_chips))
                     eq('...every notice, and nothing out of sight but the read diagnostics and '
-                       'the route link%s, at %s' % (' and the working' if _small else '', where),
-                       (_dr.get('detail'), _dr.get('chips')),
+                       'the route link%s, at %s (%r, %r)' % (' and the working' if _small else '',
+                                                           where, _dch, _chips),
+                       (_dr.get('detail'), _chipsOk),
                        ([s for s in _DRIVE_DETAIL if s not in _away
-                         and (s in _pkd or s in ('#vMin', '#vMile', '#vPerMile'))], _chips))
+                         and (s in _pkd or s in ('#vMin', '#vMile', '#vPerMile'))], True))
                     # The pay, the minutes and the miles, wherever the card has
                     # them: on the hat a notice puts them away parked, and
                     # moving they are back.
@@ -6298,9 +6342,15 @@ try:
                     # bounded by height, so this only pays if it gets the
                     # height — and the picture it replaces was drawn at a third
                     # of the panel.
-                    ok_('the phone fills the panel at %s (%.0fpx of %.0f)'
-                        % (panel, phone['h'], phone['rowH']),
-                        phone['h'] > phone['rowH'] * 0.85)
+                    # On the rig's own panel and larger (the 1000px block),
+                    # since the card is half the panel, the status row and the
+                    # bar run under both columns and the phone has the row
+                    # above them: 487px of 600 at 1024x600, three quarters.
+                    _half = w >= 1000 and h >= 560
+                    ok_('the phone fills the panel%s at %s (%.0fpx of %.0f)'
+                        % (' above the status row and the bar' if _half else '',
+                           panel, phone['h'], phone['rowH']),
+                        phone['h'] > phone['rowH'] * (0.75 if _half else 0.85))
                     ok_('...taller than the row the scene view was boxed into '
                         'at %s (%.0fpx, was %.0f)' % (panel, phone['h'], phone['was']),
                         phone['h'] > phone['was'] + 40)

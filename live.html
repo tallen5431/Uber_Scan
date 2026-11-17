@@ -1269,6 +1269,11 @@
   #took .status { display: block; font-size: .9em; font-weight: 500;
                   white-space: nowrap; }
   #took:has(.status) { line-height: 1; padding-top: 1px; padding-bottom: 1px; }
+  /* Two minutes after its card left the phone (showTook's `old`): the
+     label's weight down to the age line's and the outline dashed, in the
+     bar's own grey (8.9:1 on the page by day), so it is still read and
+     still one press, and no longer the loudest control on the bar. */
+  .bottombar #took.old { font-weight: 500; border-style: dashed; }
 
   /* What the reader actually saw. Folded away by default, because it is only
      ever wanted after a wrong answer — and after a wrong answer it is the only
@@ -1589,72 +1594,152 @@
        24px figures were 12.6', 19px labels 10', the 18px address 9.5' and
        16px chips 8.4'. Figures to 34 (18'), labels 20, the address 22 and
        the chips 19 — on this panel only; 800x480 and the hat keep theirs.
-       The address and the chips only beside the phone picture, the layout a
-       driver reads offers in: beside the scene picture (aiming) the card is
-       476px to the phone picture's 638, and at 22 and 19 a long dropoff and
-       the OFFERS NOT SAVED chip ran past it while moving. */
+       The address is 18 again since the card is half the panel (below), as
+       it always was beside the scene picture, whose card was already this
+       wide: at 22 a long dropoff ("→ Old Alabama Rd & Holcomb Bridge Rd,
+       Roswell") was cut on its own line while moving, in the 476px inside
+       the card, and the two lines it takes moving cost the slot 9px more. */
     .places, .stops { font-size: 18px; }
-    body.phoneview .places, body.phoneview .stops { font-size: 22px; }
     .sub { font-size: 34px; }
     .sub small { font-size: 20px; }
-    body.phoneview #warn .chip { font-size: 19px; }
+    #warn .chip { font-size: 19px; }
     .phonewhy { font-size: 26px; }
-    /* THE FIGURES STAY PUT. The card was a centred column, so everything in
-       it moved with whatever else was up: the audit measured the figures row
-       at y = 327, 262, 332, 316 and 307 across a plain card, one with a
-       notice, a pair, one moving and CHECK THE PAY, and the headline at 156
-       or 96px. The raw $/hr and $/mi are what the owner asked to always find
-       at a glance, so on this panel the card is laid from the top in rows of
-       one height each — the word, the headline's 156px box, the one-line
-       working (kept at its height when empty or withheld) — and the figures
-       land on the same line on every offer card. What varies (the address
-       taking two lines while moving, the pair line, the on-the-way line, the
-       order in the car, the notices) goes UNDER them, in that order, with the
-       notice last as the item that gives way and scrolls
-       (`.live #verdict > #warn`). Not between offers (`novalue`): a card
-       saying only WAITING FOR AN OFFER or CHECK THE PHONE is centred as it
-       was. Beside the phone picture, the layout offers are read in; the
-       scene picture is the aiming view, and its narrower card (476px) ran
-       the moving card's notice out of the card in this form. */
-    body.phoneview .live #verdict:not(.novalue) { justify-content: flex-start; padding-top: 8px; }
-    /* One height for the word whichever mark leads it: ✓ is drawn from a
-       fallback font a pixel taller than ≈, which moved every row under
-       ACCEPT a pixel down from CLOSE CALL's. */
-    body.phoneview #verdict:not(.novalue) .verdict-label { flex: none; height: 36px; line-height: 36px; }
-    /* The headline's box is its figures' height, not its line's: numerals
-       have no descenders, and a 156px line at line-height 1 left 30px of
-       empty fill under them that the notices below had no other way to get. */
-    body.phoneview #verdict:not(.novalue) .rate.big { flex: none; height: 136px; margin: 0 0 4px;
-                                                      align-items: flex-end; line-height: .87; }
-    body.phoneview #verdict:not(.novalue) .working { flex: none; min-height: calc(1.25em + 6px); }
-    body.phoneview #verdict #places { order: 1; }
-    body.phoneview #verdict #stack { order: 2; }
-    body.phoneview #verdict #way { order: 3; }
-    body.phoneview #verdict .heldline { order: 4; }
-    body.phoneview #verdict #stops { order: 5; }
-    body.phoneview #verdict > #warn { order: 6; }
-    /* ...and the headline keeps its size under a notice, which the 96px cap
-       above (`#verdict:has(#warn...)`) took 38% of, on about 40% of cards
-       (the CEILING notice alone was 52 of 121 offers on one shift). The cap
-       was there to find the notice its room; with the headline's box fixed a
-       smaller figure finds it none, and the notice is the item that scrolls.
-       Beside the scene picture (aiming) the card is the centred column it
-       was and keeps the 96: raised to 132 there, the moving card ran the
-       long-pickup pair's first chip out of the card, and the moving card is
-       held to the parked one's sizes (rpi/test_layout.py, measured). */
-    body.phoneview #verdict:has(#warn:not([hidden])) #perHour {
-      font-size: min(16vw, 26dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    /* HALF THE PANEL FOR THE CARD (the owner, Nov 2026: "The panel for the
+       read off should roughly be half the display"). Beside the phone the
+       picture's column was sized to the picture, 338px, and the card took
+       the other 662; the phone is the magnifying glass a driver reads the
+       card through, and two columns of one width make it the same size as
+       the verdict beside it. The phone picture is height-bound in either
+       column, so its column's extra width is black either side of it; the
+       card is 500px where it was 662. The scene picture was split evenly
+       already, so both pictures now give the card the same box, and the
+       rows below are one layout for both. */
+    body.phoneview #app {
+      grid-template-columns: [pic-start] minmax(0, 1fr) [pic-end card-start] minmax(0, 1fr) [card-end];
     }
+    /* ...and the status row and the bar of six across the whole panel under
+       both, as they are beside the scene picture. Under a 500px card the
+       status row at 18px ran out of room — the NO NUCBOX chip cut, 📷 Snap
+       49px past where the row has space for it, the shift's median off the
+       glass — and "⌖ reading…" was cut to "r…" in an 83px control. The cost
+       is the phone picture's height: 487px of the 588 it had down the whole
+       panel (the 2x magnifier on a tap is unchanged). */
+    body.phoneview #viewWrap  { grid-row: 1; }
+    body.phoneview .connbar   { grid-column: 1 / -1; }
+    body.phoneview .bottombar { grid-column: 1 / -1; }
+    /* THE FIGURES STAY PUT. The card was a centred column, so everything in
+       it moved with whatever else was up: the panel audit measured the
+       figures row at y = 327, 262, 332, 316 and 307 across a plain card,
+       one with a notice, a pair, one moving and CHECK THE PAY, and the
+       headline at 156 or 96px. On this panel the card is laid from the top
+       in rows of one height each — the word, the headline's box, the
+       one-line working (kept at its height when empty or withheld), the
+       figures in two rows, the address — so every one of them lands on the
+       same line on every offer card, beside either picture. What varies
+       (the address taking two lines while moving, the pair line, the
+       on-the-way line, the order in the car, the notices) goes UNDER them,
+       in that order, in what is left of the card: the slot, with the
+       notice last as the item that gives way (`.live #verdict > #warn`
+       scrolls; showNotes folds the chips that do not fit into a "+N"
+       chip). Not between offers (`novalue`): a card saying only WAITING FOR
+       AN OFFER or CHECK THE PHONE is centred as it was. */
+    .live #verdict:not(.novalue) { justify-content: flex-start; padding-top: 6px; }
+    /* The word at up to 40px (the driving form's ceiling, and the plan's
+       for the decision itself, which was 30), on one line and inside the
+       card. At 40 most words fit the 476px inside it — "≈ CLOSE CALL …" is
+       417px — but not all: "? CHECK THE DISTANCE" fits at 32 and WAITING
+       FOR AN OFFER at 32, and a second line would move every row under it.
+       So its size is the card's width over its own letters (`--lchars`,
+       which render sets with the words, setLabel; 0.8em a letter with the
+       label's .14em spacing, the widest of these measured at 0.79 in DejaVu
+       Sans Bold), and 40 where that is more: ACCEPT, PASS, CLOSE CALL and
+       CHECK THE PAY 40, CHECK THE TIME 37. One height whichever word it is, so the
+       rows under it do not move: ✓ is drawn from a fallback font a pixel
+       taller than ≈, which put every row under ACCEPT a pixel below CLOSE
+       CALL's. */
+    .live:not(.driving) #verdict:not(.novalue) .verdict-label {
+      flex: none; height: 42px; line-height: 42px; white-space: nowrap;
+      font-size: min(40px, calc(100cqw / (var(--lchars, 20) * 0.8)));
+    }
+    /* Between offers every word is one size, WAITING FOR AN OFFER's on one
+       line (20 letters, about 30px), so READING THE SCREEN after it moves
+       nothing on the panel; at 30px on the 476px card it took two lines. */
+    .live:not(.driving) .verdict-label { font-size: min(30px, calc(100cqw / 16)); }
+    /* The headline: the same size on every offer card, notice, pair, moving
+       or none, so the whole family of rules that took room from it for one
+       of those (the 96px cap under a notice, 18dvh under a pair with the
+       answer on the card) is stated again here at one size. It is the
+       card's width that bites now, not the height: 140px for a five-place
+       figure ($23.8, $123) in the 476px inside the card, where the 662px
+       card had 156; a loss's six places ("-$13.2") take it to 117 as they
+       always took it smaller (RATE_CHARS). Still the largest thing on the
+       card by four times. Its box is its figures' height, not its line's:
+       numerals have no descenders, and a line at line-height 1 left a fifth
+       of the figure's height empty under them. */
+    #perHour,
+    #verdict:has(#warn:not([hidden])) #perHour,
+    .live:not(.driving) #verdict:has(#way:not([hidden])):not(:has(#warn:not([hidden]))) #perHour {
+      font-size: min(26dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
+    }
+    /* ...and the box is the five-place figure's, whatever this one's places:
+       the same terms at five characters, so a loss's smaller figure sits in
+       the same box and moves nothing under it (122px at 1024x600; on a
+       1280x800 the card's width gives the figure, and the box, more). */
+    #verdict:not(.novalue) .rate.big { flex: none; margin: 0 0 4px;
+                                       height: calc(.87 * min(26dvh, 240px, (100cqw - 40px) / 3.1));
+                                       align-items: flex-end; line-height: .87; }
+    #verdict:not(.novalue) .working { flex: none; min-height: calc(1.25em + 4px); padding: 0 0 4px; }
+    /* THE RAW $/HR AND $/MI FIRST, ON A ROW OF THEIR OWN. Five boxes of 34px
+       figures over 20px labels do not fit across 476px — RAW $/HR alone is
+       about 110px at 20px, a fifth of the card is 95, and beside the scene
+       picture, where this card was already 476, the label went onto two
+       lines and $14.00 touched $2.00. Smaller figures were not the answer
+       (the owner: the raw $/hr and $/mi always show clearly), so the row is
+       two: raw $/hr and $/mi across the top, half the card each, then pay,
+       minutes and miles, a third each, every figure 34px with a 20px label.
+       The top row's labels beside their figures ("$28.0 RAW $/HR"), which
+       half the card has the width for ($28.0 and RAW $/HR are about 205px
+       of 238) and a third does not ($14.00 PAY is 171 of 158): it gives the
+       slot under the address the 22px a second line of labels took, which
+       is what lets a pair line, its ENDS chip and the on-the-way line stay
+       whole on a moving card with two orders in the car. Not the driving
+       form between offers, whose one cell (the pay while aiming) is a grid
+       of its own. */
+    .live:not(.driving) .submetrics { grid-template-columns: repeat(6, minmax(0, 1fr));
+                                      row-gap: 2px; padding-top: 4px; }
+    .live:not(.driving) .submetrics .sub { grid-column: span 2; gap: 0; line-height: 1.1; }
+    .live:not(.driving) .submetrics .sub.rawfig { grid-column: span 3; flex-direction: row;
+                                                  align-items: baseline; justify-content: center;
+                                                  gap: .3em; }
+    #verdict:not(.novalue) .places { margin-top: 4px; line-height: 1.2; }
+    #verdict #places { order: 1; }
+    #verdict #stack { order: 2; }
+    #verdict #way { order: 3; }
+    #verdict .heldline { order: 4; }
+    #verdict #stops { order: 5; }
+    #verdict > #warn { order: 6; margin-top: 6px; }
+    /* The pair line in the slot, short (showStack's `compact`): BOTH, the
+       range at 24px in the card's own text, the minutes at 18, then the
+       ceiling, the ENDS chip, "with ① + ②" and the route link at 16. The
+       words that explained it ("with the one you have, … beats finishing
+       alone", the on-time hint) are a tap on the line away; at 16px after
+       the range on the 662px card they were cut to "over 40–62 mi…" anyway.
+       Nothing in it ellipsises: the sum wraps between the range and the
+       minutes, and the chips under it, where they do not share a row — the
+       widest pair (a loss to $133, 55–137 min, a ceiling, ENDS ELSEWHERE,
+       two orders) is two rows. */
+    .stackline.compact { font-size: 18px; margin-top: 4px; row-gap: 2px; column-gap: 6px; }
+    .stackline.compact .sum { flex: 0 1 auto; max-width: 100%; display: flex; flex-wrap: wrap;
+                              justify-content: center; align-items: baseline; column-gap: .3em; }
+    .stackline.compact .range { font-size: 24px; color: var(--text); }
+    .stackline.compact .bothk { font-size: 15px; letter-spacing: .09em; }
+    .stackline.compact .ends, .stackline.compact .ceil,
+    .stackline.compact .vs, .stackline.compact .both,
+    .stackline.compact .maplink { font-size: 16px; }
+    .stackline.compact .ceil { flex: none; }
     .pending { font-size: 19px; }
     /* ...and the status row, now that it is short (fillMore): 15 to 18. */
     .connbar { font-size: 18px; }
-    /* The headline keeps its 26dvh under a pair with the answer on the card:
-       this panel has the room (the line takes 24px of the 80 to 105 the
-       1024x600 pair's card had spare, measured), so the 18dvh above is not
-       taken. */
-    .live:not(.driving) #verdict:has(#way:not([hidden])):not(:has(#warn:not([hidden]))) #perHour {
-      font-size: min(16vw, 26dvh, 240px, calc((100cqw - 40px) / (var(--chars) * 0.62)));
-    }
   }
 
   /* ---------- Driving: the card at a glance ----------
@@ -2308,6 +2393,25 @@
     el.verdict.classList.toggle('novalue', text === '--' && !keepLayout);
   }
 
+  // The verdict's word, and how many letters it is (`--lchars`) for the
+  // rig's panel, where the word is sized to fit the half-width card on one
+  // line (the 1000px block). Two more than the words for the mark a verdict
+  // draws before them (✓, ≈, ✕, ?); the words between offers have none.
+  // After verdictClass, which says which this is.
+  function setLabel(text) {
+    setText(el.verdictLabel, text);
+    fitLabel();
+  }
+  // ...and the count alone, after a setText of the word (the refused card's
+  // table is written through setText, where rpi/test_lint.py reads it).
+  function fitLabel() {
+    var marked = /(^| )(go|warn|no|doubt)( |$)/.test(el.verdict.className);
+    var n = String(el.verdictLabel.textContent.length + (marked ? 2 : 0));
+    if (el.verdictLabel.style.getPropertyValue('--lchars') !== n) {
+      el.verdictLabel.style.setProperty('--lchars', n);
+    }
+  }
+
   // "-$10.60", not "$-10.6". A minus sign wedged between the dollar and the
   // digits is a dash at a glance, and the two parked screens already write it
   // the other way — so the same offer read as a loss on one screen and,
@@ -2875,6 +2979,42 @@
     return (n < 0 ? '-$' : '$') + Math.abs(Math.round(n));
   }
 
+  // The rig's own panel and larger (the 1000px block in the stylesheet),
+  // asked where a rule there needs the script's help: the pair line's short
+  // form and the notice's fold.
+  var WIDE_MQ = window.matchMedia
+    ? window.matchMedia('(orientation: landscape) and (min-width: 1000px) and (min-height: 560px)')
+    : null;
+  function wide() { return !!(WIDE_MQ && WIDE_MQ.matches); }
+
+  /* The pair line's short form, on the rig's panel: "BOTH $21–33/hr ·
+   * 40–62 min", then the chip and the route link. Its card is half the
+   * panel now (500px), and the long form — the range, then "with the one you
+   * have, over 40–62 min · beats finishing alone" at 16px — was cut to
+   * "over 40–62 mi…" on the 662px card already, the minutes the part that
+   * went. BOTH says what the old framing did in one word; the minutes are
+   * kept whole beside the range; the rest (the on-time hint, "beats
+   * finishing alone") is a tap on the line away (`stackOpenAt`), as a
+   * notice's sentence is. A ceiling stays in the short form ("· ceiling"):
+   * it is the one clause that changes what the range means.
+   *
+   * Still a RANGE: two figures with an en dash, the dollar sign once, when
+   * both ends are money above zero; " to " and both signs when either end
+   * is a loss, as the long form writes it, because "-$5–3" reads as one
+   * figure with a dash in it. One figure only where the two ends round to
+   * the same dollar, which is the long form's rule too. */
+  var stackOpenAt = 0;
+  var STACK_OPEN_MS = 20000;
+  function stackCompact() {
+    if (stackOpenAt && Date.now() - stackOpenAt >= STACK_OPEN_MS) stackOpenAt = 0;
+    return wide() && !stackOpenAt;
+  }
+  function compactRange(lo, hi) {
+    if (Math.round(lo) === Math.round(hi)) return dollars(lo) + '/hr';
+    if (lo < 0 || hi < 0) return dollars(lo) + ' to ' + dollars(hi) + '/hr';
+    return dollars(lo) + '\u2013' + Math.round(hi) + '/hr';
+  }
+
   function showStack(s) {
     if (!s) { setHidden(el.stack, true); setClass(el.stack, 'stackline'); return; }
     // Ordered by value, not by which field they came from. `worst` divides the
@@ -2884,7 +3024,9 @@
     // pair therefore printed its range backwards, low end first and larger.
     var lo = Math.min(s.worst, s.best), hi = Math.max(s.worst, s.best);
     // The base colour, whatever the state. See NO VERDICT COLOUR above.
-    setClass(el.stack, 'stackline' + (s.ends === 'elsewhere' ? ' elsewhere' : ''));
+    var compact = stackCompact();
+    setClass(el.stack, 'stackline' + (s.ends === 'elsewhere' ? ' elsewhere' : '')
+                       + (compact ? ' compact' : ''));
     showRoute(s.route);
     setHidden(el.stack, false);
     // The rest only when what it says has moved, and never the route link
@@ -2892,7 +3034,7 @@
     if (!drawnAs(el.stack, JSON.stringify([lo, hi, s.heldCount, s.minMinutes, s.maxMinutes,
                                            s.sure, s.uncosted, s.ends, s.vsFirst,
                                            s.sameStore, s.sameStoreN, s.onTime, s.lateMin,
-                                           s.offWayMi, waySearch]))) return;
+                                           s.offWayMi, waySearch, compact]))) return;
     // Built from parts rather than one string, because the parts have different
     // priorities when the row runs out of room. See .stackline in styles.css:
     // this is the half that gives way, and it can because the same figures are
@@ -2992,6 +3134,19 @@
       // placed dropoffs are in Atlanta, which is 135 square miles, and a metro
       // ZIP is a few.
       ));
+    // The short form (stackCompact): the same range and minutes, BOTH for
+    // the framing, and the long words on the line's title and a tap away.
+    setTitle(el.stack, compact ? range.textContent + more.textContent : '');
+    if (compact) {
+      var bothk = document.createElement('span');
+      bothk.className = 'bothk';
+      bothk.textContent = 'BOTH';
+      sum.appendChild(bothk);
+      range.textContent = compactRange(lo, hi);
+      more.textContent = '\u00b7 ' + (s.minMinutes === s.maxMinutes
+        ? Math.round(s.minMinutes)
+        : Math.round(s.minMinutes) + '\u2013' + Math.round(s.maxMinutes)) + ' min';
+    }
     sum.appendChild(range);
     sum.appendChild(more);
     // ...and the same-store note's short form, drawn on the 3.5" hat alone,
@@ -3008,6 +3163,14 @@
       sum.appendChild(tag);
     }
     put(sum);
+    if (compact && s.uncosted) {
+      var ceil = document.createElement('span');
+      ceil.className = 'ceil';
+      ceil.textContent = 'ceiling';
+      ceil.title = 'One of the two cards printed no distance the rig could charge: '
+        + 'the range is gross, a ceiling on the pair.';
+      put(ceil);
+    }
     // ...and the half that does not give way. Its own element, so the ellipsis
     // above can never reach it: these words are the only place this claim is
     // made, and losing them leaves the driver a range with nothing to say
@@ -3167,6 +3330,8 @@
       : m < 1440 ? Math.floor(m / 60) + 'h ago' : Math.floor(m / 1440) + 'd ago';
   }
 
+  var TOOK_FADE_MS = 2 * 60000;
+
   function showTook() {
     if (!onRecord || !onRecord.id) {
       setHidden(el.took, true);
@@ -3187,6 +3352,7 @@
       tookSays('\u2713 Took ' + what, 'in car');
       setTitle(el.took, 'The order you already took, on the phone again. Nothing to record.');
       el.took.classList.remove('failed');
+      el.took.classList.remove('old');
       el.took.classList.add('on');
       setAttr(el.took, 'aria-pressed', 'true');
       return;
@@ -3197,10 +3363,22 @@
     // when set, exactly as the same control on the offers page behaves.
     // ...and how old that card is, once it has gone, or that the press was
     // not saved: on the line under the label, never on the end of it.
+    // ...and two minutes after the card left the phone with no new card
+    // since, the question is put more quietly (`old`): no "?", lighter type,
+    // a dashed outline, the age line kept. It was the only label on the bar
+    // with a question mark and a ticking second line, so a prompt about a
+    // card four minutes gone read as something waiting on the driver (the
+    // panel audit's tenth finding). Faded, never gone and never marked:
+    // silence is not an accept (Settled), so it stays one press to record,
+    // as long as the card is on record, and the bar keeps its six.
+    var age = tookBusy ? '' : tookFailed ? 'not saved' : tookAge();
+    var old = !tookBusy && !tookFailed && !tookState && !!age && recordAt !== null
+      && Date.now() - recordAt >= TOOK_FADE_MS;
     tookSays(tookBusy ? '…'
              : tookFailed ? 'Took ' + what
-             : (tookState ? '\u2713 Took ' + what : 'Took ' + what + '?'),
-             tookBusy ? '' : tookFailed ? 'not saved' : tookAge(), !tookFailed);
+             : (tookState ? '\u2713 Took ' + what : 'Took ' + what + (old ? '' : '?')),
+             age, !tookFailed);
+    el.took.classList.toggle('old', old);
     setTitle(el.took, tookFailed
       ? 'The journal could not be written. Press again to retry.'
       : tookState
@@ -4183,6 +4361,49 @@
       list = [list[0], note('+' + (list.length - 1) + ' more', said)];
     }
     setHidden(el.warn, !list.length);
+    // ...and under an offer on the rig's panel, the chips the slot under the
+    // address has room for, the rest counted in a "+N" chip (the owner's
+    // reserved slot, Nov 2026). The card is laid in fixed rows there (the
+    // 1000px block) and what is left under the address is what the notice
+    // gets: two rows of chips parked, one while moving and the address takes
+    // two lines, none past a pair line and its chip. Scrolled, the cut chips
+    // were half a chip at the card's foot with nothing saying more were
+    // there. Folded from the end, so the first notices — not saving, the
+    // order in the car again, the phone too bright — are the ones kept, and
+    // never past the first: a "+N" alone says nothing about the offer. Every
+    // sentence stays on the notice's title and a tap away (toggleNotes).
+    var all = list;
+    var fold = !open && !drivingShown && list.length > 1 && wide() && last && last.ready;
+    var key = fold ? JSON.stringify([all, el.verdict.className,
+                                     document.querySelector('.live').className,
+                                     el.stack.hidden, el.stack.className, el.way.hidden, el.places.className,
+                                     window.innerWidth, window.innerHeight])
+                   : '';
+    var k = fold && foldKey === key ? foldKept : list.length;
+    drawChips(open, said, k < list.length ? foldTo(all, k, said) : list);
+    // Asked again on every render even when nothing it keys on has moved,
+    // since the rows above can settle a render later (a font, the moving
+    // form's second address line): what was kept is only where to start.
+    while (fold && k > 1 && foldCut()) {
+      k--;
+      drawChips(open, said, foldTo(all, k, said));
+    }
+    foldKey = key;
+    foldKept = k;
+  }
+  // The notice cut inside itself, or running past the card's foot (its 2px
+  // border) because the card could not shrink it far enough.
+  function foldCut() {
+    return noticeCut() || el.warn.getBoundingClientRect().bottom
+      > el.verdict.getBoundingClientRect().bottom - 2 + 0.5;
+  }
+  var foldKey = '';
+  var foldKept = 0;
+  function foldTo(list, k, said) {
+    return list.slice(0, k).concat([note('+' + (list.length - k), said)]);
+  }
+
+  function drawChips(open, said, list) {
     if (!drawnAs(el.warn, JSON.stringify([open, list]))) return;
     el.warn.textContent = '';
     if (open) {
@@ -4212,6 +4433,14 @@
     render();
   }
   el.warn.addEventListener('click', toggleNotes);
+  // ...and a tap on the pair line, on the rig's panel, is its long words
+  // (stackCompact) for twenty seconds, or back to the short form. Not on the
+  // route link, which is its own press.
+  el.stack.addEventListener('click', function (e) {
+    if (!wide() || (routeLink && routeLink.contains(e.target))) return;
+    stackOpenAt = stackOpenAt ? 0 : Date.now();
+    render();
+  });
   el.warn.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleNotes(); }
   });
@@ -5181,7 +5410,7 @@
       var phoneWhy = (!blind && !busy && r && CW && (!p.phase || p.phase === 'scanning')
                       && Date.now() - seenAt <= STALE_MS)
         ? CW.phoneSaid(r, MV ? MV.ends : null) : null;
-      setText(el.verdictLabel, blind ? BLIND_LABEL[blind] || 'CANNOT SEE'
+      setLabel(blind ? BLIND_LABEL[blind] || 'CANNOT SEE'
         : again ? 'READING THE SCREEN'
         : busy ? 'READING THE CARD'
         : phoneWhy ? CW.CHECK_THE_PHONE
@@ -5296,8 +5525,17 @@
       // flap; and after a reading with part of an offer on it the next read
       // is very likely that card's, which is the cue the half-width card is
       // for.
+      //
+      // ...nor with the order in the car on the card (showHeld's between
+      // form: where it goes next, by when, and its pay). That is the largest
+      // text about the job in the car, and Map view — the view chosen for
+      // that job — took the card's column and left a 15px caption chip,
+      // "NO CARD UP · your order only" (the panel audit's twelfth finding).
+      // With an order held the map keeps the picture's half and the card
+      // keeps the next stop.
       setBetween(!blind && (!p.phase || p.phase === 'scanning') && (!busy || !!again)
-                 && quiet <= STALE_MS && el.warn.hidden && el.stops.hidden && !phoneWhy);
+                 && quiet <= STALE_MS && el.warn.hidden && el.stops.hidden && !phoneWhy
+                 && el.heldNext.hidden && el.heldLine.hidden);
       return;
     }
     // An offer: the verdict back on the glass, in this same render.
@@ -5342,8 +5580,9 @@
           // which is the same decision shown larger, fell through to READ
           // AGAIN and sent the driver looking for a card that is not there.
           screen: 'NOT AN OFFER' }[r.doubt] || 'READ AGAIN');
+      fitLabel();
     } else {
-      setText(el.verdictLabel, ({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '')
+      setLabel(({ go: 'ACCEPT', warn: 'CLOSE CALL', no: 'PASS' }[r.state] || '')
         + (settled ? '' : (CW ? CW.UNSETTLED : ' \u2026')));
     }
     // The headline is net of running costs when a cost per mile is set, and
