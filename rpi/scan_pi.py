@@ -330,8 +330,12 @@ VERIFY_MAX = 6.0
 # is there. Its cost is a read every 3 s while nothing else reads — 392/3000 to
 # 975/3000, 13-33% of one core and 3-8% of the Pi's four, on a still idle
 # screen, and nothing while the gate or a beat is already reading. Measured on
-# the development box through main() over a still idle screen: see
-# IDLE_READ_MEASURED below. None turns it off (the suites' premise run).
+# the development box (x86, four cores, a card-box read ~90 ms there against
+# the Pi's 392), main() and the real reader for 30 s over a still screen with
+# no offer on it: 1 read without the backstop, 10 with it at 3 s, 5 at 6 s, and
+# the process at 82.3%, 79.9% and 80.6% of one core — the reads lost in the
+# loop's own noise there; the Pi figure above is the arithmetic to trust. None
+# turns it off (the suites' premise run).
 #
 # Not while the camera is blind ('stalled', or 'dark' — UpDown.blind): a frozen
 # picture is the past, and a box that has held nothing lit for PHONE_HOLD is a
