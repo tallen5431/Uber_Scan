@@ -304,6 +304,52 @@ READ_STUCK_S = 60.0
 # and is wide enough to notice it moving.
 VERIFY_MAX = 6.0
 
+# ...and the card box read at least this often while NO card is up, whatever
+# the motion gate says: the backstop read.
+#
+# The verify beat above is this backstop while a card is on screen. With none —
+# the app's idle screen, a navigation screen, a phone between offers — the gate
+# was the only thing that ever sent a read, and the gate fires only when the
+# picture moves by CHANGE_T and then holds under STILL_T. On the owner's rig on
+# 12 Nov (a box drawn by hand, corner tracking off, the car at 9-10 m/s) it read
+# DoorDash's idle screen three times in four minutes and then not at all for
+# 66 s, while a "$6.30+ … 2 stops (1.7 mi) - 15 min" card came up and waited:
+# read only when the driver pressed ⌖ a minute in, and recorded 60-90 s late.
+# A phone in a moving car does not hold still — the map scrolls with the car,
+# the mount shakes, the light through the windscreen moves — so the gate, moved
+# by the card arriving, never settled to send its read; and a picture that
+# shakes by less than CHANGE_T from the start never trips it at all. Neither is
+# a threshold to tune: a card landing on a dark-mode phone scores under
+# CHANGE_T (see _motion in pipeline.py and the note under STALL_SAY), and a
+# moving map can stay over STILL_T for as long as the car moves.
+#
+# 3.0 s, from the Pi's own figures (tools/pi_bench.py on the owner's Pi 4: an
+# Uber card 392 ms median; the road's health lines 847-975 ms a read idle): an
+# offer is on screen for tens of seconds, and this finds one within 3 s plus a
+# read, after which the resample burst confirms it on its own beat. One frame,
+# not the pair (see `backstop` in main()): the read only has to see that a card
+# is there. Its cost is a read every 3 s while nothing else reads — 392/3000 to
+# 975/3000, 13-33% of one core and 3-8% of the Pi's four, on a still idle
+# screen, and nothing while the gate or a beat is already reading. Measured on
+# the development box (x86, four cores, a card-box read ~90 ms there against
+# the Pi's 392), main() and the real reader for 30 s over a still screen with
+# no offer on it: 1 read without the backstop, 10 with it at 3 s, 5 at 6 s, and
+# the process at 82.3%, 79.9% and 80.6% of one core — the reads lost in the
+# loop's own noise there; the Pi figure above is the arithmetic to trust. None
+# turns it off (the suites' premise run).
+#
+# Not while the camera is blind ('stalled', or 'dark' — UpDown.blind): a frozen
+# picture is the past, and a box that has held nothing lit for PHONE_HOLD is a
+# phone out of the mount. Not counted as the rig looking for the camera's word
+# either (`looked`), or a backstop every 3 s would hold 'dark' back for ever.
+IDLE_READ_S = 3.0
+# ...and on the lite edition (rpi/lite.py), twice as long, not off: missing an
+# offer is worse there too, and a Pi Zero 2 W reads 3-4x slower than a Pi 4
+# (lite/README.md), so 6 s keeps the same share of a slower machine — a 1.2-1.6
+# s read every 6 s, 20-27% of one core. Scheduling only: what the read decides
+# is the same code on both.
+IDLE_READ_LITE_S = 6.0
+
 
 class Reader:
     """The OCR, moved off the loop that holds the camera.
@@ -2403,6 +2449,14 @@ class Health:
         # — so this is a floor on the miss rate rather than the whole of it, and
         # it is labelled that way everywhere it is shown.
         self.saw = self.kept = 0
+        # ...and the backstop's reads (IDLE_READ_S) — card-box reads sent on
+        # the clock because nothing else had read for that long — and how
+        # many of them found an offer up that no read had seen: a card the
+        # motion gate had sent no read for. The second is the evidence the
+        # backstop is for, and the one figure here that counts offers the
+        # rig would have missed; nothing when none, so every other line
+        # reads as it did.
+        self.backstop = self.backstop_found = 0
         self.ms = []
         # Reads whose crop had nothing bright enough in it to be text, and so
         # were never handed to tesseract (PL.DARK_SKIP_BELOW). Kept out of
@@ -2513,6 +2567,7 @@ class Health:
                 'medianMs': (int(round(sorted(self.ms)[len(self.ms) // 2]))
                              if self.ms else None),
                 'saw': self.saw, 'kept': self.kept,
+                'backstop': self.backstop, 'backstopFound': self.backstop_found,
                 # Run totals, not window totals — see __init__.
                 'streetNoAddress': self.street_seen_no_address,
                 'streetUnreadable': self.street_unreadable,
@@ -2591,6 +2646,13 @@ class Health:
             bits.append('%d card%s seen, %d recorded%s'
                         % (self.saw, '' if self.saw == 1 else 's', self.kept,
                            '' if self.saw else ' (first seen before this window)'))
+        # ...and the backstop's reads, beside the cards they are about: how
+        # many, and how many found a card no read had seen (see IDLE_READ_S).
+        if self.backstop:
+            bits.append('%d backstop read%s, %d found an offer the motion gate '
+                        'had not sent a read for'
+                        % (self.backstop, '' if self.backstop == 1 else 's',
+                           self.backstop_found))
         if self.no_pay:
             bits.append('%d found no payout' % self.no_pay)
         if self.clipped:
@@ -5839,6 +5901,19 @@ def main():
     # one. Remembered rather than dropped: the gate fires once, on the frame a
     # moving picture settles, so a trigger thrown away is a card never read.
     read_wanted = False
+    # When the card box was last handed to the reader, on the frame's clock,
+    # and how long the backstop read lets go by without one while no card is
+    # up (IDLE_READ_S; the lite edition's IDLE_READ_LITE_S). Begun at the
+    # start, so the first backstop is an interval in, not the first frame,
+    # which the gate reads anyway.
+    last_card_read = time.monotonic()
+    idle_every = (None if IDLE_READ_S is None
+                  else IDLE_READ_LITE_S if lite else IDLE_READ_S)
+    # ...and a card-box read a whole-screen read asked for because it saw an
+    # offer (digest: "⌖ saw an offer"), taken as the next read even inside a
+    # ⌖ window; and which press and payout that was last said for. A dict, so
+    # digest() writes it with no `nonlocal`.
+    card_turn = {'wanted': False, 'said': None}
     # ...and the clocks of the read on its way (ReadTimes; all monotonic):
     # `gate` the motion gate's wait for the trigger this read answers,
     # `wantedAt` when a trigger was first held back, `parsed` when digest()
@@ -6728,6 +6803,55 @@ def main():
                 stores += [s for s in label_stores(shot) if s not in stores]
                 map_labels.submit(told_offer, frame, label_geometry(geom),
                                   store=stores, press=True)
+        # ...AND A WHOLE-SCREEN READ THAT SAW AN OFFER ASKS FOR THE CARD BOX
+        # NEXT. The owner's rig, 12 Nov: a DoorDash card came up while the
+        # motion gate sent no read (see IDLE_READ_S), the driver pressed ⌖ a
+        # minute in, and every read of the twelve-second window — seven, 1.2 s
+        # apart — read the card whole: $6.30, 15 min, 1.7 mi. Each returned
+        # just below, judged nothing, and the next was of the whole screen
+        # again; the offer was judged only when the window ran out, 60-90 s
+        # after it arrived. The whole-screen read still judges nothing (the
+        # reason below holds: it reads the card and whatever is round it); it
+        # asks for the NEXT read to be of the card box (`card_turn`, taken in
+        # the loop), which judges the offer by the normal path, and the
+        # window's whole-screen reads go on beside it. An unpressed one
+        # (screen_auto) asks the same.
+        #
+        # The window is NOT ended, which was the first version of this and
+        # broke the press itself: a driver presses ⌖ with the offer still up
+        # and then brings the destination up, so the first reads of almost
+        # every window are of the card (the note on `an_offer` above) — and
+        # ending the window on the card answered the press "not read" before
+        # the address was on the phone (rpi/test_scan_pi.py, "the destination
+        # is read, not the card that was still on the phone"). The card-box
+        # reads inside the window cost the address hunt two reads, about one
+        # second of its twelve.
+        #
+        # Offer-shaped by the parser's own words: a payout, no NOT_AN_OFFER or
+        # promo, and a time or a distance — a planner, a navigation screen or
+        # the app's idle screen has none of those together — and never the
+        # app's screen after a delivery, whose "This offer $8.95" reads as a
+        # payout (`delivered`). Asked again on each such read until the card
+        # box has that card LOCKED (`card_on_screen`, the same payout as its
+        # last read, and the scanner's two reads agreeing): one card-box read
+        # is never a verdict, and inside the window every other read is of the
+        # whole screen, which the agreement passes over (pipeline's settle) —
+        # so card and screen take turns until the offer is judged, and then the
+        # window is the destination's alone. A press over a card judged already
+        # is for its map label or the destination, and reads as it did.
+        if whole and an_offer and shot.get('pay') is not None \
+                and not shot.get('notAnOffer') and not shot.get('promo') \
+                and (shot.get('minutes') or shot.get('miles')) and delivered is None \
+                and not (card_on_screen and settled_on is not None
+                         and settled_on[0] == shot.get('pay') and scanner.locked):
+            card_turn['wanted'] = True
+            # Said once a press (or once an unpressed read) and payout.
+            said_key = (dropoff_until if asked else None, shot.get('pay'))
+            if card_turn['said'] != said_key:
+                card_turn['said'] = said_key
+                log('⌖ saw an offer — reading the card' if asked else
+                    'a whole-screen read nobody pressed for saw an offer — reading '
+                    'the card')
         # A whole-screen read has answered the only question it was taken for.
         # Everything below is about an offer — the failure count, the verdict,
         # the health tally, the journal row — and this reading is of the card
@@ -7128,6 +7252,11 @@ def main():
             'id': 'seen-%d' % at, 'seq': 1,
             'over': tally.get('over'), 'saw': tally.get('saw'),
             'kept': tally.get('kept'),
+            # ...and the backstop's reads in the window and the offers they
+            # found that no read had seen (Health.reset; IDLE_READ_S): how
+            # many cards the motion gate alone would have let go by.
+            'backstop': tally.get('backstop'),
+            'backstopFound': tally.get('backstopFound'),
             # ...and the destination scan's two blind spots, so they leave the
             # Pi at all. Printing them in the health line puts them in a log on
             # a machine in a car, which is not somewhere the driver can read
@@ -7277,8 +7406,22 @@ def main():
                 if i != chosen:
                     accumulator.add(other['parsed'])
         read_clock['parsed'] = None
+        was_up, was_episode = card_on_screen, seen_episode
         quit_now = digest(batch[chosen], done['frames'][0], done.get('at'), whole=whole,
                           began=done.get('began'), geom=done.get('geom'))
+        # A backstop read (IDLE_READ_S) that found a card up where the read
+        # before it saw none, and a card no read had seen (a new accumulator
+        # episode — not one a glare frame had hidden for a read): an offer no
+        # read had been sent for. Counted for the health line and the `seen`
+        # row, and said, because it is the one thing that says whether the
+        # motion gate is missing offers on a rig.
+        if (done.get('clock') or {}).get('backstop') and not was_up and card_on_screen \
+                and seen_episode != was_episode:
+            health.backstop_found += 1
+            log('a backstop read found an offer that no read had been sent for '
+                '($%.2f): the motion gate had not settled on it — the picture '
+                'had not held still, or the card had not moved it'
+                % (batch[chosen]['parsed'].get('pay') or 0))
         # ...and where this read's time went (ReadTimes), after digest() so
         # its own share is in it. Never in the read's way: a measurement that
         # throws is a measurement not taken.
@@ -7923,6 +8066,29 @@ def main():
                 if not do_read and read_wanted and not reader.busy:
                     read_wanted, do_read = False, True
 
+                # ...and the card-box read a whole-screen read asked for when
+                # it saw an offer (digest, `card_turn`): taken as the next read,
+                # ⌖ window or not, and read as the card box below.
+                if not do_read and card_turn['wanted'] and not reader.busy:
+                    do_read = True
+
+                # ...and the backstop: the card box, read on the clock when
+                # nothing has read it for IDLE_READ_S and no card is up — the
+                # verify beat is the backstop while one is. The motion gate is
+                # the only other thing that reads a phone with no card read on
+                # it, and a phone in a moving car does not hold still enough
+                # for it to settle: the 12 Nov offer waited 66 s for a read
+                # here. Not while the reader is busy (a read is going on, which
+                # is what this is for), not off a blind camera, and not inside
+                # a ⌖ window, whose reads are all of the whole screen and read
+                # on their own beat.
+                backstop = False
+                if not do_read and idle_every is not None and not card_on_screen \
+                        and now - last_card_read >= idle_every \
+                        and not reader.busy and updown.blind() is None \
+                        and not (dropoff_asked and now < dropoff_until):
+                    do_read = backstop = True
+
                 # ...but not while the outline is visibly on the wrong thing.
                 #
                 # This used to be a feedback loop as well as a waste: a read
@@ -7995,6 +8161,9 @@ def main():
                     read_clock['wantedAt'] = now
                 elif not read_wanted and not do_read and read_clock['wantedAt'] is not None:
                     read_clock['wantedAt'] = read_clock['gate'] = None
+                # (A backstop the tracker's dispute or a stall held back is
+                # not one any more: it is taken later as the trigger it became.)
+                backstop = backstop and do_read
 
                 # Grab the full frame for a read, or when the live view is due —
                 # otherwise nothing is ever seen between offers.
@@ -8091,7 +8260,10 @@ def main():
             # other. --no-parallel falls back to one at a time.
             partner = None
             pair_from = time.monotonic()
-            if pair_reads:
+            # ...but not for a backstop read: it only has to see whether a card
+            # is up, and one that is arms the resample burst, whose reads are
+            # paired as before. One engine, not two, every IDLE_READ_S.
+            if pair_reads and not backstop:
                 partner_request = cam.capture_request()
                 try:
                     partner = partner_request.make_array('main')
@@ -8102,11 +8274,14 @@ def main():
             # wait, and when this frame arrived (`now`, the frame's clock).
             read_meta = {'frameAt': now, 'gate': read_clock['gate'],
                          'pair': ((time.monotonic() - pair_from) * 1000.0
-                                  if pair_reads else None),
+                                  if partner is not None else None),
                          'held': (None if read_clock['wantedAt'] is None
                                   else (now - read_clock['wantedAt']) * 1000.0),
                          'labels': getattr(map_labels, 'reads', 0),
-                         'labelling': bool(getattr(map_labels, 'reading', False))}
+                         'labelling': bool(getattr(map_labels, 'reading', False)),
+                         # ...and whether the backstop sent it (IDLE_READ_S),
+                         # for collect() to count what it found.
+                         'backstop': backstop}
             read_clock['gate'] = read_clock['wantedAt'] = None
 
             frames += 1
@@ -8126,8 +8301,20 @@ def main():
             # press (`screen_auto`), once: the request is spent by this
             # hand-over.
             pressed_read = dropoff_asked and time.monotonic() < dropoff_until
-            whole_read = pressed_read or screen_auto
-            screen_auto = False
+            # ...but the card box, once, when a whole-screen read saw an offer
+            # the card box has not judged (digest, `card_turn`): the window's
+            # whole-screen reads go on after it, and an unpressed one asked
+            # for is kept for the read after.
+            card_now = card_turn['wanted']
+            card_turn['wanted'] = False
+            whole_read = (pressed_read or screen_auto) and not card_now
+            if not card_now:
+                screen_auto = False
+            # The backstop's clock: when the card box was last handed over.
+            if not whole_read:
+                last_card_read = now
+            if backstop:
+                health.backstop += 1
             # ...and a ⌖ press's read is read however dark the crop: the driver
             # asked, so the reader is asked. Every other read — the card box,
             # the verify beat, the whole-screen read nobody pressed for — skips
@@ -8136,9 +8323,13 @@ def main():
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(),
                           scanner.geometry(whole=whole_read,
-                                           skip_dark=not pressed_read),
+                                           skip_dark=not (pressed_read and whole_read)),
                           meta=read_meta)
-            looked = True
+            # Not a backstop read: the camera's word is the rig asking itself
+            # whether it can see, and a read sent every IDLE_READ_S whatever
+            # the picture does would keep 'dark' from ever settling.
+            if not backstop:
+                looked = True
             # Before the read, not after it. The dashboard has nothing else to
             # go on for the second and a half this takes — see emit_reading.
             #
@@ -8149,7 +8340,11 @@ def main():
             # whole 8s READING_MS after every one, through the twelve-second
             # window, over a navigation screen. The ⌖ button says "⌖ reading…"
             # for that read itself.
-            if args.json and not whole_read:
+            # Nor a backstop read: on a phone with no card on it one goes out
+            # every IDLE_READ_S, and the panel would flash READING THE CARD
+            # over an idle screen every three seconds. One that finds a card
+            # says so with the verdict it brings.
+            if args.json and not whole_read and not backstop:
                 emit_reading()
             if not reader.threaded and collect():
                 break

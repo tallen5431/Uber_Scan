@@ -354,7 +354,7 @@ Not from tuning the OCR engine. From refusing to run it:
 
 | | |
 |---|---|
-| **Motion gate** | A 640×480 luma stream answers "did anything change?" for ~1ms. The full read only happens when the answer is yes, so idle cost is near zero. |
+| **Motion gate** | A 640×480 luma stream answers "did anything change?" for ~1ms. The full read happens when the answer is yes — and, with no card up, at least every `IDLE_READ_S` (3 s; 6 s on lite) whatever the gate says, one frame, because a phone in a moving car never holds still enough for the gate to settle (the 12 Nov offer waited 66 s; AUDITS.md). So idle costs one read every 3 s, not nothing. |
 | **Settle wait** | After a change, it waits for the picture to stop moving. Reading a frame mid-transition just wastes a read on motion blur. |
 | **Warp to the screen** | Tesseract's cost scales with pixels. Feeding it a card instead of a 16MP frame is worth more than every other optimisation combined. |
 | **Crop to the card** | The card is aimed at the middle of the frame, so the crop is the middle of the quad, sized to the card. On the rig's own health lines this is worth about **200ms of a 1100ms read** — real, but far less than the old self-fitting crop cost by wandering. |

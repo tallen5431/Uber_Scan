@@ -140,11 +140,17 @@ class FakeCam(object):
     working camera: ones with nothing in them that could show noise.
     `scenes`: [(from, frame)], the card's screen changing under the camera
     once it is up — `frame` shown from `from` seconds in, the last one
-    reached winning: DoorDash's map going from its overview to the route."""
+    reached winning: DoorDash's map going from its overview to the route.
+    `shake`: (from, px) — from `from` seconds in, every other capture is the
+    picture moved `px` preview pixels sideways: a phone in a moving car, whose
+    map scrolls under it and whose mount shakes, so the motion gate is never
+    still enough to settle (see the check "an offer on a picture that never
+    holds still")."""
 
     def __init__(self, offer, empty, appear_at=0.4, fail_after=None, freeze_at=None,
-                 noise=True, ring=1, scenes=None):
+                 noise=True, ring=1, scenes=None, shake=None):
         self.offer, self.empty = offer, empty
+        self.shake = shake
         self.scenes = sorted(scenes or [], key=lambda sc: sc[0])
         self.appear_at = appear_at
         self.started = time.time()
@@ -164,7 +170,10 @@ class FakeCam(object):
                 if t >= at:
                     self.frame = scene
         grey = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
-        small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA).ravel()
+        small = cv2.resize(grey, LORES, interpolation=cv2.INTER_AREA)
+        if self.shake is not None and t >= self.shake[0] and self.captures % 2:
+            small = np.roll(small, self.shake[1], axis=1)
+        small = small.ravel()
         if self.noise:
             small = small ^ dither(self.captures)
         self.lores = np.concatenate([small,
@@ -228,7 +237,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         planners=None,
         freeze_at=None, stall_say=None, empty=None, noise=True, offer_dim=None,
         ring=1, stall_again=None, offer=None, real_look=None, found_for=None,
-        pi=None, dark_for=None, scenes=None):
+        pi=None, dark_for=None, scenes=None, shake=None):
     """Run main() with the reader answering texts_for_call(n, k) for frame k of
     read call n (1-based). `hang_from`: read calls from this one on never
     return — on the reader's thread only, with `hang_on_loop` False, so a read
@@ -268,7 +277,8 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
     n is to come back as the real reader answers a black crop it left unread
     (pipeline.DARK_SKIP_BELOW): empty, `skipped: 'dark'`. `skip_darks` in the
     result is each read handed over as (whole screen or not, skip_dark).
-    `scenes`: the card's screen changing once it is up — see FakeCam.
+    `scenes`: the card's screen changing once it is up — see FakeCam, and
+    `shake` there.
     Returns the journal rows, the announcements, the alive beats and what rode
     them, the log lines, how many reads were asked of the reader and how many
     it began, the exception main() raised, if any, and the handoff directory —
@@ -293,7 +303,7 @@ def run(texts_for_call, extra_argv=(), seconds=12.0, until=None, health_every=No
         offer = (offer.astype(np.float32) * offer_dim).astype(np.uint8)
     cam = FakeCam(offer, TC.blank() if empty is None else empty, appear_at=appear_at,
                   fail_after=fail_after, freeze_at=freeze_at, noise=noise, ring=ring,
-                  scenes=scenes)
+                  scenes=scenes, shake=shake)
     # Handed out so a check can ask what is really in the mount right now. The
     # stubbed reader answers with whatever text the check asked for whether or
     # not there is a card in front of it, so an announced offer is NOT evidence
@@ -4174,6 +4184,127 @@ eq('a ⌖ press\'s whole-screen reads go out with the dark skip off (%r)'
    sorted(set(sd for w, sd in _dk3['skip_darks'] if w)), [False])
 eq('...and the card-box reads with it on',
    sorted(set(sd for w, sd in _dk3['skip_darks'] if not w)), [True])
+
+# --- an offer on a picture that never holds still ------------------------------
+#
+# The owner's rig, 12 Nov: a box drawn by hand (corner tracking off), DoorDash's
+# idle screen read three times in four minutes of driving, then NO read for 66 s
+# while the car went on at 9-10 m/s — and a "$6.30+ … 2 stops (1.7 mi) - 15
+# min" card came up inside that gap. It was read only when the driver pressed ⌖
+# a minute in, and recorded 60-90 s late. Every read the loop makes on its own
+# is the motion gate's (Scanner.should_read: something changed by CHANGE_T and
+# then held under STILL_T) or a beat that needs a card already read
+# (card_on_screen: the verify beat, the resample burst). The idle screen is no
+# offer, so neither beat runs; and a phone in a moving car never holds still —
+# the map under the card scrolls with the car and the mount shakes — so the
+# gate, once moved by the card arriving, never settled to send its read.
+#
+# Here the same: DoorDash's idle screen, read, then the picture shaking from
+# 1 s in (every other frame 3 preview pixels over: 4.9 on the gate's measure on
+# this card, between STILL_T and CHANGE_T, so it neither settles nor trips),
+# and the card arriving at 2 s. The stubbed reader answers by what the camera
+# is really showing (see the warning at the top).
+DD_SHAKEN = ('$6.30+\nincl. tips\n2 stops (1.7 mi) - 15 min\nAb Cd Grill\n'
+             '12 Invented Ave\nCustomer dropoff\nDecline')
+ok_('the premise: the card reads complete and as an offer, the idle screen as none',
+    OP.parse(DD_SHAKEN)['complete'] and not OP.parse(DD_SHAKEN).get('notAnOffer')
+    and OP.parse(IDLE_DD).get('notAnOffer'))
+_SHAKE_BOX = {'manualBox': True, 'cropBox': [0.0, 0.39, 1.0, 0.61]}
+_SHAKE_AT, _SHAKE_UP = 1.0, 2.0
+
+
+def _shaken(seconds, backstop=True, until=None, whole_text=None, press_at=None):
+    """main() over the shaking idle screen and the card arriving, with ⌖
+    pressed `press_at` seconds after it came up, if given; the run, with
+    `reads_after`: each read handed over as (s after the card came up, whole
+    screen or not)."""
+    cams, handoff, pressed = [], tempfile.mkdtemp(), []
+
+    def what(n, k):
+        return DD_SHAKEN if cams and cams[0].frame is cams[0].offer else IDLE_DD
+
+    def watch(rows, ann, calls):
+        if press_at is not None and not pressed and cams \
+                and time.time() >= cams[0].started + cams[0].appear_at + press_at:
+            pressed.append(time.time())
+            open(os.path.join(handoff, 'uberscan-dropoff'), 'w').close()
+        return until is not None and until(rows, ann, calls)
+
+    was = SP.IDLE_READ_S
+    if not backstop:
+        SP.IDLE_READ_S = None
+    try:
+        got = run(what, seconds=seconds, appear_at=_SHAKE_UP, cam_out=cams,
+                  offer=TC.mount(TC.doordash_screen(), 1200),
+                  shake=(_SHAKE_AT, 3), config_extra=dict(_SHAKE_BOX),
+                  extra_argv=['--no-parallel'], until=watch, handoff=handoff,
+                  whole_text=whole_text, health_every=1.0)
+    finally:
+        SP.IDLE_READ_S = was
+    up = cams[0].started + cams[0].appear_at
+    got['reads_after'] = [(round(t - up, 2), whole) for t, whole in got['stamps']]
+    got['pressed'] = [round(t - up, 2) for t in pressed]
+    return got
+
+
+_sh_off = _shaken(9.0, backstop=False)
+eq('the hole, with the backstop off: after the picture began to shake, the offer '
+   'that came up on it is never read (reads at %r s after it came up)'
+   % (_sh_off['reads_after'],),
+   ([t for t, w in _sh_off['reads_after'] if t >= 0], _sh_off['announced']), ([], []))
+
+_sh = _shaken(9.0, until=lambda rows, ann, calls: bool(ann))
+_sh_first = next((t for t, w in _sh['reads_after'] if t >= 0 and not w), None)
+ok_('with it, the card box is read within IDLE_READ_S of the card arriving on a picture '
+    'that never holds still (first read %r s after it came up, IDLE_READ_S %r)'
+    % (_sh_first, SP.IDLE_READ_S),
+    _sh_first is not None and _sh_first <= SP.IDLE_READ_S + 0.6)
+ok_('...and the offer is judged and told by the normal path (%r)' % _sh['announced'][:1],
+    bool(_sh['announced']) and _sh['announced'][0][1].get('pay') == 6.3)
+ok_('...and the backstop is counted, and what it found said (%r)'
+    % [l for l in _sh['logs'] if 'backstop' in l][-2:],
+    any('a backstop read found an offer' in l for l in _sh['logs']))
+# One frame, not the pair: it only has to see whether a card is up. And no
+# "reading" notice to the panel, which would flash READING THE CARD over an
+# idle screen every IDLE_READ_S; every other card-box read still sends one.
+_sh_back = [bool(m and m.get('backstop')) for m in _sh['metas']]
+eq('...and it read one frame, not the pair, and sent the panel no "reading" notice '
+   '(backstop %r, %d notices)' % (_sh_back, _sh['readings']),
+   ([m.get('pair') for m, bk in zip(_sh['metas'], _sh_back) if bk],
+    _sh['readings']),
+   ([None], sum(1 for bk, w in zip(_sh_back, _sh['submitted_whole']) if not bk and not w)))
+
+# ...and ⌖ pressed over it, as the owner did a minute in. Every whole-screen
+# read of that window read the card whole and returned before anything was
+# judged, so the offer waited out the twelve seconds. Now the first one that
+# sees an offer asks for the card box next, which judges it, and the window
+# goes on reading the whole screen for the destination — a driver presses ⌖
+# with the card still up and then brings the address up (test_scan_pi's "the
+# destination is read, not the card that was still on the phone"), so the
+# press is not answered by the card. The backstop is off here, so nothing else
+# could have read the card: what reads it is the press.
+_SHAKEN_WHOLE = 'Decline\n' + DD_SHAKEN + '\nAccept\nAb Cd Rd\nEf Gh Park'
+_shp = _shaken(8.0, backstop=False, press_at=1.0, whole_text=_SHAKEN_WHOLE)
+_shp_after = [w for t, w in _shp['reads_after'] if t >= 0]
+eq('a ⌖ press whose whole-screen read sees an offer reads the card box next (reads '
+   'after the card came up %r, pressed at %r s)'
+   % ([(t, w) for t, w in _shp['reads_after'] if t >= 0], _shp['pressed']),
+   _shp_after[:2], [True, False])
+ok_('...which judges and tells the offer (%r)' % _shp['announced'][:1],
+    bool(_shp['announced']) and _shp['announced'][0][1].get('pay') == 6.3)
+# Card and screen take turns until the offer locks (two card-box reads that
+# agree), and from then on the window is the destination's alone.
+_shp_last = len(_shp_after) - 1 - _shp_after[::-1].index(False) if False in _shp_after else 0
+eq('...the card box read until the offer is judged — twice, a whole-screen read between '
+   '— and then the window goes on reading the whole screen (%d card-box reads, %d '
+   'whole-screen reads after the last)'
+   % (_shp_after.count(False), _shp_after[_shp_last + 1:].count(True)),
+   (_shp_after[:4], _shp_after.count(False), _shp_after[_shp_last + 1:].count(True) >= 2),
+   ([True, False, True, False], 2, True))
+ok_('...said once in the log', sum('⌖ saw an offer — reading the card' in l
+                                   for l in _shp['logs']) == 1)
+eq('...and the press is not answered by the card: no dropoff line while the window is '
+   'open (%r)' % (_shp['dropoffs'],), _shp['dropoffs'], [])
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)
