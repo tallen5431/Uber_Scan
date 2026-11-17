@@ -1227,6 +1227,14 @@ const framed = (page) => page.waitForFunction(
         detailGps: det ? whole(det.querySelector('.gps')) : '',
         diagShown: shown(document.querySelector('#detail .diag')),
         took: text(document.getElementById('took')),
+        // ...and whether it has faded (showTook's `old`), with what the bar
+        // holds beside it and whether the button is still a button.
+        tookOld: document.getElementById('took').classList.contains('old'),
+        tookPressable: shown(document.getElementById('took'))
+          && !document.getElementById('took').disabled
+          && getComputedStyle(document.getElementById('took')).pointerEvents !== 'none',
+        bar: [].slice.call(document.querySelectorAll('.bottombar > button, .bottombar > a'))
+          .filter(shown).length,
       };
     });
     await push({ phase: 'scanning', message: '' });
@@ -1240,7 +1248,9 @@ const framed = (page) => page.waitForFunction(
     await push({ ready: false, state: 'empty', track: null });
     await tick(300);
     const tookGoneNow = await held();
-    await tick(125000);
+    await tick(65000);
+    const tookGoneMid = await held();
+    await tick(60000);
     const tookGoneLater = await held();
     // Nothing in the car: the card says what it always said.
     const empty = await held();
@@ -1375,7 +1385,8 @@ const framed = (page) => page.waitForFunction(
     await push({ ready: false, state: 'empty', track: null });
     await tick(300);
     const gone = await held();
-    out.heldCard = { tookUp: tookUp, tookGoneNow: tookGoneNow, tookGoneLater: tookGoneLater,
+    out.heldCard = { tookUp: tookUp, tookGoneNow: tookGoneNow, tookGoneMid: tookGoneMid,
+                     tookGoneLater: tookGoneLater,
                      empty: empty, between: between, visited: visited,
                      refused: refused, byPlace: byPlace, byStreet: byStreet, noPlace: noPlace,
                      notDoor: notDoor, pastReach: pastReach, noSuchDoor: noSuchDoor, arrived: arrived,
@@ -2552,6 +2563,14 @@ const framed = (page) => page.waitForFunction(
       ['moving', READINGS.divides, { moving: true }],
       ['night', READINGS.divides, { night: true }],
       ['checkpay', Object.assign({}, READINGS.impossible, { doubt: 'pay' }), {}],
+      // ...and since the card is half the panel (Nov 2026), the pair and the
+      // notices moving too, and a card beside the scene picture (aiming),
+      // which gives the card the same box.
+      ['stackedmoving', null, { moving: true, like: 'stacked' }],
+      ['noticesmoving', Object.assign({}, READINGS.uncertain, {
+         places: ['Birch Market (88 Juniper Way)', 'Sycamore Ridge Dr, Kennesaw'] }),
+       { tooBright: true, moving: true }],
+      ['scene', READINGS.divides, { scene: true }],
       ['untimed', READINGS.untimed, {}],
       ['nominutes', Object.assign({}, READINGS.divides, { minutes: null, cardMinutes: null,
                                                          billedMinutes: null }), {}],
@@ -2585,10 +2604,43 @@ const framed = (page) => page.waitForFunction(
       out.moving = document.querySelector('.live').classList.contains('moving');
       out.verdictColor = getComputedStyle(document.getElementById('verdictLabel')).color;
       out.headline = parseFloat(getComputedStyle(document.getElementById('perHour')).fontSize);
+      out.chars = document.getElementById('perHour').style.getPropertyValue('--chars');
+      // The card's box and the picture's, the rows' lines, and the word's
+      // size: where each is, so every offer card can be held to one layout.
+      const vr = v.getBoundingClientRect();
+      out.card = { left: Math.round(vr.left), width: Math.round(vr.width),
+                   top: Math.round(vr.top), bottom: Math.round(vr.bottom) };
+      const pic = document.getElementById('viewWrap').getBoundingClientRect();
+      out.pic = { left: Math.round(pic.left), width: Math.round(pic.width) };
+      out.phone = document.body.classList.contains('phoneview');
+      ['vMin', 'vMile', 'places', 'stack', 'warn'].forEach((id) => { out[id] = one(id); });
+      out.labelFont = parseFloat(getComputedStyle(document.getElementById('verdictLabel')).fontSize);
+      out.headlineTop = Math.round(document.querySelector('.rate.big').getBoundingClientRect().top);
+      // Everything drawn in the card inside its border.
+      out.spill = [].slice.call(v.querySelectorAll('*')).filter((e) => {
+        const cs = getComputedStyle(e), r = e.getBoundingClientRect();
+        if (cs.display === 'none' || cs.visibility === 'hidden' || !r.width || !r.height) return false;
+        if (e.closest('[hidden]') || e.closest('#warn')) return false;
+        return r.top < vr.top + 1.5 || r.bottom > vr.bottom - 1.5 || r.left < vr.left + 1.5
+               || r.right > vr.right - 1.5;
+      }).map((e) => e.id || e.className);
+      // ...the notice's chips that are drawn inside it, and its fold.
+      const w = document.getElementById('warn');
+      const wr = w.getBoundingClientRect();
+      out.chips = [].slice.call(w.querySelectorAll('.chip')).map((c) => {
+        const r = c.getBoundingClientRect();
+        return { text: c.textContent, inside: r.top >= wr.top - 0.5 && r.bottom <= wr.bottom + 0.5
+                                              && r.bottom <= vr.bottom - 2 + 0.5 };
+      });
+      out.warnTitle = w.title;
+      const st = document.getElementById('stack');
+      out.stackText = st.hidden ? null : st.innerText.replace(/\s+/g, ' ').trim();
+      out.stackTitle = st.title;
       return out;
     };
     out.rawFigs = {};
-    for (const [key, reading, how] of CARDS) {
+    for (const [key, reading0, how] of CARDS) {
+      const reading = reading0 || CARDS.filter((c) => c[0] === how.like)[0][1];
       const ctx = await browser.newContext({ viewport: { width: 1024, height: 600 },
                                              deviceScaleFactor: 1, timezoneId: 'America/New_York' });
       const page = await ctx.newPage();
@@ -2596,7 +2648,13 @@ const framed = (page) => page.waitForFunction(
                                                           : '2026-11-15T12:30:00-05:00') });
       await page.clock.resume();
       await page.addInitScript(STUB.replace('REPLAY_BODY', 'null'));
-      await phoneFrame(page);
+      if (how.scene) {
+        await page.addInitScript(() => { try { localStorage.setItem('uberscan.liveView', 'scene'); } catch (e) {} });
+        if (FRAMES.landscape) await page.route('**/api/frame.*', (route) => route.fulfill({
+          status: 200, contentType: 'image/jpeg', body: Buffer.from(FRAMES.landscape, 'base64') }));
+      } else {
+        await phoneFrame(page);
+      }
       await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
       await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
       await framed(page);
@@ -4166,7 +4224,10 @@ const framed = (page) => page.waitForFunction(
                mapW: Math.round(document.getElementById('liveMap').getBoundingClientRect().width),
                appW: Math.round(app.width),
                barW: Math.round(document.querySelector('.bottombar').getBoundingClientRect().width),
-               label: document.getElementById('verdictLabel').textContent.trim() };
+               label: document.getElementById('verdictLabel').textContent.trim(),
+               // ...and the order in the car's next stop, where the card shows it.
+               next: ((n) => (n.hidden || !n.getBoundingClientRect().width ? null
+                              : n.textContent.replace(/\s+/g, ' ').trim()))(document.getElementById('heldNext')) };
     });
     out.betweenOffer = await wide();
     await page.evaluate(() => { window.__sizedW = []; });
@@ -7225,6 +7286,14 @@ const framed = (page) => page.waitForFunction(
       }
     };
     const look = () => page.evaluate(() => {
+      // On this 1024x600 page the pair line is its short form (live.html
+      // stackCompact); its words — the on-time hint, "with the one you
+      // have", "vs ① only", "with ① + ②" — are a tap on it away, and the
+      // tap is what is read here, then put back.
+      const st0 = document.getElementById('stack');
+      const tapped = !st0.hidden && st0.classList.contains('compact');
+      if (tapped) st0.click();
+      const out = (() => {
       const shown = (el) => {
         if (!el || el.hidden) return false;
         const r = el.getBoundingClientRect();
@@ -7277,6 +7346,9 @@ const framed = (page) => page.waitForFunction(
                   text(document.getElementById('perHour'))].join(' | '),
         status: text(document.getElementById('health')),
       };
+      })();
+      if (tapped) st0.click();
+      return out;
     });
     const A = { n: 1, pay: 9.48, minutes: 40, holdId: 'c-a@1', dropoff: '4821 Kestrel Dr, Marietta',
                 card: null, endPinned: true, arrived: false, endWhy: null, app: 'uber',
@@ -9387,8 +9459,22 @@ try:
         # the age, the driver can tell it is not the card they just screened.
         eq('a Took for a card no longer on the phone says its age',
            ((hc.get('tookGoneNow') or {}).get('took'),
-            (hc.get('tookGoneLater') or {}).get('took')),
-           ('Took $5.00? just now', 'Took $5.00? 2m ago'))
+            (hc.get('tookGoneMid') or {}).get('took')),
+           ('Took $5.00? just now', 'Took $5.00? 1m ago'))
+        # ...and two minutes after its card went, the question is put more
+        # quietly (the panel audit's tenth finding): no "?", faded, the age
+        # kept, still a button on a bar of the same controls — never gone and
+        # never marked (Settled: silence is never read as an accept).
+        _tl = hc.get('tookGoneLater') or {}
+        _tm = hc.get('tookGoneMid') or {}
+        eq('[took fades] two minutes on, no "?" and the age kept',
+           (_tl.get('took'), _tl.get('tookOld')), ('Took $5.00 2m ago', True))
+        eq('[took fades] ...not before two minutes, nor while its card is up',
+           (_tm.get('tookOld'), (hc.get('tookUp') or {}).get('tookOld')), (False, False))
+        ok_('[took fades] ...still on the glass and one press to record (%r)' % _tl.get('took'),
+            _tl.get('tookPressable'))
+        eq('[took fades] ...on a bar of as many controls as before (%r, %r)'
+           % (_tm.get('bar'), _tl.get('bar')), _tl.get('bar'), _tm.get('bar'))
         eq('...and no age while its card is up',
            (hc.get('tookUp') or {}).get('took'), 'Took $5.00?')
 
@@ -10369,13 +10455,15 @@ try:
     rf = got.get('rawFigs') or {}
     eq('every card was drawn for the raw figures', sorted(rf),
        sorted(['accept', 'close', 'pass', 'doordash', 'notices', 'stacked', 'moving',
-               'night', 'checkpay', 'untimed', 'nominutes']))
+               'night', 'checkpay', 'untimed', 'nominutes', 'stackedmoving',
+               'noticesmoving', 'scene']))
     _want = {'accept': ('$28.0', '$2.00'), 'close': ('$28.0', '$2.00'),
              'pass': ('$5.4', '$0.20'), 'doordash': ('$21.2', '--'),
              'notices': ('$21.8', '--'), 'stacked': ('$28.0', '$2.00'),
              'moving': ('$28.0', '$2.00'), 'night': ('$28.0', '$2.00'),
              'checkpay': ('--', '--'), 'untimed': ('--', '--'),
-             'nominutes': ('--', '$2.00')}
+             'nominutes': ('--', '$2.00'), 'stackedmoving': ('$28.0', '$2.00'),
+             'noticesmoving': ('$21.8', '--'), 'scene': ('$28.0', '$2.00')}
     # The verdict each reading carries, unchanged by any of this: the word and
     # the class are the reading's own state, and $/mi is in neither.
     _verdict = {'accept': ('ACCEPT', 'go'), 'close': ('CLOSE CALL', 'warn'),
@@ -10383,7 +10471,8 @@ try:
                 'notices': ('CLOSE CALL …', 'warn'), 'stacked': ('CLOSE CALL', 'warn'),
                 'moving': ('ACCEPT', 'go'), 'night': ('ACCEPT', 'go'),
                 'checkpay': ('CHECK THE PAY', 'doubt'), 'untimed': ('CHECK THE TIME', 'doubt'),
-                'nominutes': ('ACCEPT', 'go')}
+                'nominutes': ('ACCEPT', 'go'), 'stackedmoving': ('CLOSE CALL', 'warn'),
+                'noticesmoving': ('CLOSE CALL …', 'warn'), 'scene': ('ACCEPT', 'go')}
     _tops = set()
     for key, m in sorted(rf.items()):
         eq('[%s] raw $/hr and $/mi' % key, (m['vRawHr']['text'], m['vPerMile']['text']), _want[key])
@@ -10404,11 +10493,83 @@ try:
                 m[part]['font'] >= 20)
             ok_('[%s] ...and reads on the fill (%.2f:1)' % (key, m[part]['cr']), m[part]['cr'] >= 4.5)
         _tops.add(m['vRawHr']['top'])
-        ok_('[%s] the headline keeps its 156px, notice or none (%.0f)' % (key, m['headline']),
-            m['headline'] >= 150)
     ok_('the moving card was moving and the night card at night',
         (rf.get('moving') or {}).get('moving') and (rf.get('night') or {}).get('night'))
     eq('the raw figures sit on the same line on every card (%r)' % sorted(_tops), len(_tops), 1)
+    # HALF THE PANEL (the owner, Nov 2026: "The panel for the read off should
+    # roughly be half the display"), and one layout in it: the card about
+    # half the 1024px beside the phone and beside the scene, the picture's
+    # column the other half; the raw figures their size and on their own
+    # row above pay, minutes and miles; every row's line the same on every
+    # offer card — plain, notice, pair, moving, night, refused, and beside
+    # the scene picture — with what varies under the address.
+    _cards = sorted(rf.items())
+    for key, m in _cards:
+        c, pc = m.get('card') or {}, m.get('pic') or {}
+        ok_('[%s] the card is about half the panel (%rpx of 1024)' % (key, c.get('width')),
+            470 <= (c.get('width') or 0) <= 530)
+        ok_('[%s] ...and the picture\'s column the other half, left of it (%r, %r)'
+            % (key, pc, c), 470 <= (pc.get('width') or 0) <= 530
+            and pc.get('left', 999) + pc.get('width', 0) <= c.get('left', 0))
+        eq('[%s] ...in the layout its picture is drawn in' % key, m.get('phone'), key != 'scene')
+        eq('[%s] raw $/hr and $/mi share the top row, pay, minutes and miles under them' % key,
+           (m['vRawHr']['top'] == m['vPerMile']['top'],
+            m['vPay']['top'] == m['vMin']['top'] == m['vMile']['top'],
+            m['vPay']['top'] > m['vRawHr']['top']), (True, True, True))
+        for part in ('vPay', 'vMin', 'vMile'):
+            ok_('[%s] %s is 34px or more (%.0f) on the glass inside the card' % (key, part, m[part]['font']),
+                m[part]['font'] >= 34 and m[part]['shown'])
+        eq('[%s] nothing drawn past the card\'s border (%r)' % (key, m.get('spill')),
+           m.get('spill'), [])
+        ok_('[%s] the headline is the largest type on the card (%.0f over %.0f)'
+            % (key, m['headline'], m['vRawHr']['font']), m['headline'] >= 3 * m['vRawHr']['font'])
+        ok_('[%s] the word is 32px or more (%.1f) and no more than 40' % (key, m['labelFont']),
+            32 <= m['labelFont'] <= 40)
+    for row in ('vRawHr', 'lRawHr', 'vPay', 'lPay', 'places'):
+        at = sorted(set(m[row]['top'] for k, m in _cards if m[row]['shown'] or row != 'places'))
+        eq('the %s line is the same on every offer card (%r)' % (row, at), len(at), 1)
+    for prop in ('font',):
+        for row in ('vRawHr', 'vPerMile', 'lRawHr', 'lPerMile'):
+            sz = sorted(set(m[row][prop] for k, m in _cards))
+            eq('%s is one size on every offer card (%r)' % (row, sz), len(sz), 1)
+    # The headline the same size on every card whose figure is five places or
+    # fewer ('--' on a refused card counts five, RATE_CHARS), notice, pair,
+    # moving or none: the 96px it shrank to under a notice is gone. A loss's
+    # six places ("-$13.2") take it smaller, as they always did.
+    _five = [(k, m['headline']) for k, m in _cards if m.get('chars') == '5']
+    eq('the headline is one size on every five-place card (%r)' % sorted(set(h for k, h in _five)),
+       len(set(h for k, h in _five)), 1)
+    ok_('...on every card but the loss (%r)' % sorted(k for k, h in _five),
+        sorted(k for k, h in _five) == sorted(k for k in rf if k != 'pass'))
+    ok_('...at 130px or more (%r)' % sorted(set(h for k, h in _five)),
+        all(h >= 130 for k, h in _five))
+    _tops_h = sorted(set(m['headlineTop'] for k, m in _cards))
+    eq('...in one box on every card (%r)' % _tops_h, len(_tops_h), 1)
+    # The pair line, short: BOTH, a range of two figures and the minutes
+    # whole, the long words a tap away on its title.
+    for key in ('stacked', 'stackedmoving'):
+        m = rf.get(key) or {}
+        ok_('[%s] the pair line is BOTH, the range and the minutes (%r)' % (key, m.get('stackText')),
+            re.sub(r'\s+', '', m.get('stackText') or '').startswith('BOTH$21–33/hr·40–62min'))
+        ok_('[%s] ...the long words on its title (%r)' % (key, m.get('stackTitle')),
+            'with the one you have, over 40–62 min' in (m.get('stackTitle') or ''))
+        ok_('[%s] ...under the address, inside the card' % key,
+            m['stack']['shown'] and m['stack']['top'] > m['places']['top'])
+    # The notices in the slot: every chip drawn whole inside the notice and
+    # the card, the ones that do not fit counted in a "+N" chip, every
+    # sentence on its title.
+    for key in ('notices', 'noticesmoving', 'doordash'):
+        m = rf.get(key) or {}
+        ch = m.get('chips') or []
+        ok_('[%s] every chip drawn is whole inside the card (%r)' % (key, ch),
+            ch and all(c['inside'] for c in ch))
+        ok_('[%s] ...a real notice first, never a count alone (%r)' % (key, ch),
+            ch and not ch[0]['text'].startswith('+'))
+        ok_('[%s] ...every sentence on the notice\'s title' % key,
+            'rate is a ceiling' in (m.get('warnTitle') or ''))
+    _nm = [c['text'] for c in (rf.get('noticesmoving') or {}).get('chips') or []]
+    ok_('[noticesmoving] the chips that do not fit are counted, "+N" (%r)' % _nm,
+        _nm and _nm[-1].startswith('+') and int(_nm[-1][1:]) + len(_nm) - 1 == 3)
     eq('the car\'s cost is one plain line ("−$2.10 car costs")',
        (rf.get('accept') or {}).get('working', {}).get('text'), '−$2.10 car costs')
     for key in ('accept', 'pass', 'doordash', 'checkpay', 'notices'):
@@ -11471,31 +11632,31 @@ try:
                      got.get('betweenBack') or {})
     ok_('Map view with an offer on screen keeps the verdict beside a half-width '
         'map (%r)' % _bo, _bo.get('live') and _bo.get('mapW', 0) < _bo.get('appW', 0) * 0.6)
-    ok_('between offers the map takes the whole width where the empty WAITING '
-        'FOR AN OFFER card was, as wide as the bar of controls under it (%r)' % _bn,
-        not _bn.get('live') and _bn.get('label') == 'WAITING FOR AN OFFER'
-        and _bn.get('mapW', 0) >= _bn.get('barW', 1) - 2)
-    ok_('...and Leaflet is told its new size (%r)' % got.get('betweenSized'),
-        (got.get('betweenSized') or 0) > (got.get('mapOn') or {}).get('sized', 0))
-    # ...at the new width. Every message redraws the map, and that redraw
-    # tells Leaflet its size BEFORE render flips the page to between, so the
-    # count above passed with setBetween's own call taken out.
-    _sw = got.get('betweenSizedW') or []
-    ok_('...after the map has taken the whole width, not only before (%r, map %r)'
-        % (_sw, _bn.get('mapW')), _sw and _sw[-1] >= (_bn.get('mapW') or 0) - 2
-        and _sw[-1] > (_bo.get('mapW') or 0) + 2)
+    # Between offers with an order in the car (every message here holds
+    # one, for the run it draws), the card keeps its column with the order's
+    # next stop on it and the map the picture's half: the panel audit's
+    # twelfth finding, the largest text about the job in the car gone in the
+    # view chosen for that job (live.html setBetween). Leaflet is told no new
+    # size because there is none; the map taking the whole width with
+    # nothing held is held by test_layout's Map view checks.
+    ok_('between offers with an order in the car, the card keeps its column and the '
+        'next stop, the map the picture\'s half (%r)' % _bn,
+        _bn.get('live') and (_bn.get('next') or '').startswith('Dropoff')
+        and 'Powder Springs Rd' in (_bn.get('next') or '')
+        and _bn.get('mapW', 0) < _bn.get('appW', 0) * 0.6)
     _brn, _brp, _brd = (got.get('betweenReadNav') or {}, got.get('betweenReadPart') or {},
                         got.get('betweenReadDone') or {})
     ok_('between offers, a read in progress over a screen whose last reading was no '
-        'offer (the navigation map re-read) keeps the map whole: no flap (%r)' % _brn,
-        not _brn.get('live') and _brn.get('label') == 'READING THE SCREEN'
-        and _brn.get('mapW', 0) >= _brn.get('barW', 1) - 2)
+        'offer (the navigation map re-read) moves nothing: no flap (%r)' % _brn,
+        _brn.get('live') and _brn.get('label') == 'READING THE SCREEN'
+        and _brn.get('mapW') == _bn.get('mapW'))
     ok_('...but a read after a reading with part of an offer on it gives the card its '
         'column back, READING THE CARD (%r)' % _brp,
         _brp.get('live') and _brp.get('label') == 'READING THE CARD'
         and _brp.get('mapW', 0) < _brp.get('appW', 0) * 0.6)
-    ok_('...and the empty screen read to its end is whole again (%r)' % _brd,
-        not _brd.get('live') and _brd.get('label') == 'WAITING FOR AN OFFER')
+    ok_('...and the empty screen read to its end has the next stop again (%r)' % _brd,
+        _brd.get('live') and (_brd.get('next') or '').startswith('Dropoff')
+        and _brd.get('mapW') == _bn.get('mapW'))
     _bs = got.get('betweenStops') or {}
     ok_('...but not while the card has something to say: the Trip Planner\'s stops '
         'on it give the verdict its column back (%r)' % _bs,
