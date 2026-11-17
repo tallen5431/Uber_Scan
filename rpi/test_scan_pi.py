@@ -3798,10 +3798,19 @@ def _nav_then_address(self, frames, now=None, geom=None):
 # taken from the constant so the two cannot drift apart. Stopping on the answer
 # would make the last check below vacuous: what it asserts is that the reads
 # STOP once the address is found, and that can only be seen by carrying on.
-run_drop = run(TC.uberx_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
-               appear_at=10_000.0,
-               extra_argv=['--no-parallel'], look=_nav_then_address,
-               press_dropoff=True)
+#
+# With the backstop read off (IDLE_READ_S): on a still screen with no card it
+# reads every 3 s whatever the window does, and what is held here is the
+# window's own beat stopping. The backstop's reads are rpi/test_loop.py's.
+_was_idle = SP2.IDLE_READ_S
+SP2.IDLE_READ_S = None
+try:
+    run_drop = run(TC.uberx_screen(), seconds=SP2.DROPOFF_WINDOW + 4.0,
+                   appear_at=10_000.0,
+                   extra_argv=['--no-parallel'], look=_nav_then_address,
+                   press_dropoff=True)
+finally:
+    SP2.IDLE_READ_S = _was_idle
 
 eq('the button, pressed, gets a destination out of the loop',
    len(run_drop['destinations']) >= 1, True)

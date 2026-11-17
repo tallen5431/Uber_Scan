@@ -4277,26 +4277,34 @@ eq('...and it read one frame, not the pair, and sent the panel no "reading" noti
 # ...and ⌖ pressed over it, as the owner did a minute in. Every whole-screen
 # read of that window read the card whole and returned before anything was
 # judged, so the offer waited out the twelve seconds. Now the first one that
-# sees an offer ends the window, answers the press, and asks for the card box,
-# which judges it. The backstop is off here, so nothing else could have read
-# the card: what reads it is the press.
+# sees an offer asks for the card box next, which judges it, and the window
+# goes on reading the whole screen for the destination — a driver presses ⌖
+# with the card still up and then brings the address up (test_scan_pi's "the
+# destination is read, not the card that was still on the phone"), so the
+# press is not answered by the card. The backstop is off here, so nothing else
+# could have read the card: what reads it is the press.
 _SHAKEN_WHOLE = 'Decline\n' + DD_SHAKEN + '\nAccept\nAb Cd Rd\nEf Gh Park'
-_shp = _shaken(9.0, backstop=False, press_at=1.0, whole_text=_SHAKEN_WHOLE,
-               until=lambda rows, ann, calls: bool(ann))
-_shp_after = [(t, w) for t, w in _shp['reads_after'] if t >= 0]
-eq('a ⌖ press whose whole-screen read sees an offer ends at once, and the next read is '
-   'the card box (reads after the card came up %r, pressed at %r s)'
-   % (_shp_after, _shp['pressed']),
-   [w for t, w in _shp_after][:2], [True, False])
+_shp = _shaken(8.0, backstop=False, press_at=1.0, whole_text=_SHAKEN_WHOLE)
+_shp_after = [w for t, w in _shp['reads_after'] if t >= 0]
+eq('a ⌖ press whose whole-screen read sees an offer reads the card box next (reads '
+   'after the card came up %r, pressed at %r s)'
+   % ([(t, w) for t, w in _shp['reads_after'] if t >= 0], _shp['pressed']),
+   _shp_after[:2], [True, False])
 ok_('...which judges and tells the offer (%r)' % _shp['announced'][:1],
     bool(_shp['announced']) and _shp['announced'][0][1].get('pay') == 6.3)
+# Card and screen take turns until the offer locks (two card-box reads that
+# agree), and from then on the window is the destination's alone.
+_shp_last = len(_shp_after) - 1 - _shp_after[::-1].index(False) if False in _shp_after else 0
+eq('...the card box read until the offer is judged — twice, a whole-screen read between '
+   '— and then the window goes on reading the whole screen (%d card-box reads, %d '
+   'whole-screen reads after the last)'
+   % (_shp_after.count(False), _shp_after[_shp_last + 1:].count(True)),
+   (_shp_after[:4], _shp_after.count(False), _shp_after[_shp_last + 1:].count(True) >= 2),
+   ([True, False, True, False], 2, True))
 ok_('...said once in the log', sum('⌖ saw an offer — reading the card' in l
                                    for l in _shp['logs']) == 1)
-eq('...and the press answered once with no address, so the ⌖ button ends, and never '
-   '"nothing on that screen" after it (%r)' % (_shp['dropoffs'],),
-   ([(a, k.get('asked')) for a, k in _shp['dropoffs']],
-    any('nothing on that screen read as an address' in l for l in _shp['logs'])),
-   ([(None, True)], False))
+eq('...and the press is not answered by the card: no dropoff line while the window is '
+   'open (%r)' % (_shp['dropoffs'],), _shp['dropoffs'], [])
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)

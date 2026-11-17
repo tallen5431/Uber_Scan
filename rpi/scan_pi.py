@@ -5882,6 +5882,11 @@ def main():
     last_card_read = time.monotonic()
     idle_every = (None if IDLE_READ_S is None
                   else IDLE_READ_LITE_S if lite else IDLE_READ_S)
+    # ...and a card-box read a whole-screen read asked for because it saw an
+    # offer (digest: "⌖ saw an offer"), taken as the next read even inside a
+    # ⌖ window; and which press and payout that was last said for. A dict, so
+    # digest() writes it with no `nonlocal`.
+    card_turn = {'wanted': False, 'said': None}
     # ...and the clocks of the read on its way (ReadTimes; all monotonic):
     # `gate` the motion gate's wait for the trigger this read answers,
     # `wantedAt` when a trigger was first held back, `parsed` when digest()
@@ -6771,8 +6776,8 @@ def main():
                 stores += [s for s in label_stores(shot) if s not in stores]
                 map_labels.submit(told_offer, frame, label_geometry(geom),
                                   store=stores, press=True)
-        # ...AND A WHOLE-SCREEN READ THAT SAW AN OFFER ASKS FOR THE CARD BOX AT
-        # ONCE. The owner's rig, 12 Nov: a DoorDash card came up while the
+        # ...AND A WHOLE-SCREEN READ THAT SAW AN OFFER ASKS FOR THE CARD BOX
+        # NEXT. The owner's rig, 12 Nov: a DoorDash card came up while the
         # motion gate sent no read (see IDLE_READ_S), the driver pressed ⌖ a
         # minute in, and every read of the twelve-second window — seven, 1.2 s
         # apart — read the card whole: $6.30, 15 min, 1.7 mi. Each returned
@@ -6780,36 +6785,45 @@ def main():
         # again; the offer was judged only when the window ran out, 60-90 s
         # after it arrived. The whole-screen read still judges nothing (the
         # reason below holds: it reads the card and whatever is round it); it
-        # ends the press's window — no address is on a screen with an offer on
-        # it, which `an_offer` above already refuses — answers the press so
-        # the ⌖ button ends, and asks for a card-box read on the next free
-        # pass, which judges the offer by the normal path. An unpressed one
-        # (screen_auto, spent when it was handed over) asks the same.
+        # asks for the NEXT read to be of the card box (`card_turn`, taken in
+        # the loop), which judges the offer by the normal path, and the
+        # window's whole-screen reads go on beside it. An unpressed one
+        # (screen_auto) asks the same.
+        #
+        # The window is NOT ended, which was the first version of this and
+        # broke the press itself: a driver presses ⌖ with the offer still up
+        # and then brings the destination up, so the first reads of almost
+        # every window are of the card (the note on `an_offer` above) — and
+        # ending the window on the card answered the press "not read" before
+        # the address was on the phone (rpi/test_scan_pi.py, "the destination
+        # is read, not the card that was still on the phone"). The card-box
+        # reads inside the window cost the address hunt two reads, about one
+        # second of its twelve.
         #
         # Offer-shaped by the parser's own words: a payout, no NOT_AN_OFFER or
         # promo, and a time or a distance — a planner, a navigation screen or
         # the app's idle screen has none of those together — and never the
         # app's screen after a delivery, whose "This offer $8.95" reads as a
-        # payout (`delivered`). Not when the card box already has that card
-        # (`card_on_screen` and the same payout as its last read): a press over
-        # a card being screened is asking for the map's label and the route
-        # drawn after it (the 7 Nov snap), and keeps its window as before.
-        nonlocal read_wanted
+        # payout (`delivered`). Asked again on each such read until the card
+        # box has that card LOCKED (`card_on_screen`, the same payout as its
+        # last read, and the scanner's two reads agreeing): one card-box read
+        # is never a verdict, and inside the window every other read is of the
+        # whole screen, which the agreement passes over (pipeline's settle) —
+        # so card and screen take turns until the offer is judged, and then the
+        # window is the destination's alone. A press over a card judged already
+        # is for its map label or the destination, and reads as it did.
         if whole and an_offer and shot.get('pay') is not None \
                 and not shot.get('notAnOffer') and not shot.get('promo') \
                 and (shot.get('minutes') or shot.get('miles')) and delivered is None \
                 and not (card_on_screen and settled_on is not None
-                         and settled_on[0] == shot.get('pay')):
-            read_wanted = True
-            if asked:
-                dropoff_until = 0.0
-                if dropoff_asked:
-                    dropoff_asked = False
-                    if args.json:
-                        emit_dropoff(None, ms=out.get('ms'), asked=True)
-                log('⌖ saw an offer — reading the card')
-            else:
-                log('a whole-screen read nobody pressed for saw an offer — reading '
+                         and settled_on[0] == shot.get('pay') and scanner.locked):
+            card_turn['wanted'] = True
+            # Said once a press (or once an unpressed read) and payout.
+            said_key = (dropoff_until if asked else None, shot.get('pay'))
+            if card_turn['said'] != said_key:
+                card_turn['said'] = said_key
+                log('⌖ saw an offer — reading the card' if asked else
+                    'a whole-screen read nobody pressed for saw an offer — reading '
                     'the card')
         # A whole-screen read has answered the only question it was taken for.
         # Everything below is about an offer — the failure count, the verdict,
@@ -8025,6 +8039,12 @@ def main():
                 if not do_read and read_wanted and not reader.busy:
                     read_wanted, do_read = False, True
 
+                # ...and the card-box read a whole-screen read asked for when
+                # it saw an offer (digest, `card_turn`): taken as the next read,
+                # ⌖ window or not, and read as the card box below.
+                if not do_read and card_turn['wanted'] and not reader.busy:
+                    do_read = True
+
                 # ...and the backstop: the card box, read on the clock when
                 # nothing has read it for IDLE_READ_S and no card is up — the
                 # verify beat is the backstop while one is. The motion gate is
@@ -8254,8 +8274,15 @@ def main():
             # press (`screen_auto`), once: the request is spent by this
             # hand-over.
             pressed_read = dropoff_asked and time.monotonic() < dropoff_until
-            whole_read = pressed_read or screen_auto
-            screen_auto = False
+            # ...but the card box, once, when a whole-screen read saw an offer
+            # the card box has not judged (digest, `card_turn`): the window's
+            # whole-screen reads go on after it, and an unpressed one asked
+            # for is kept for the read after.
+            card_now = card_turn['wanted']
+            card_turn['wanted'] = False
+            whole_read = (pressed_read or screen_auto) and not card_now
+            if not card_now:
+                screen_auto = False
             # The backstop's clock: when the card box was last handed over.
             if not whole_read:
                 last_card_read = now
@@ -8269,7 +8296,7 @@ def main():
             reader.submit([frame] if partner is None else [frame, partner],
                           time.time(),
                           scanner.geometry(whole=whole_read,
-                                           skip_dark=not pressed_read),
+                                           skip_dark=not (pressed_read and whole_read)),
                           meta=read_meta)
             # Not a backstop read: the camera's word is the rig asking itself
             # whether it can see, and a read sent every IDLE_READ_S whatever
