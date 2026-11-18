@@ -226,6 +226,36 @@
                  font: inherit; }
   #earnings .daytools { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
   #earnings .daytools button { min-height: 44px; flex: 1 1 140px; }
+  /* Paid against the card, across the range: sentences for the coverage and
+     the figures, one three-part bar (more / as carded / less, by length), a
+     list of matches to check and a five-column week table that fits 360px
+     (its own box scrolls, never the page). The bar's three shades are the
+     page's line and muted greys and the doubt lilac, not the verdict
+     colours: paid more is not "good" here, it is a record. */
+  #paidRange { border-bottom: 1px solid var(--line); padding: 2px 0 8px; margin: 0 0 6px; }
+  #paidRange[hidden] { display: none; }
+  #paidRange h3 { margin: 6px 0 2px; font-size: 14px; }
+  #paidRange .big { font-size: 15px; color: var(--text); margin: 4px 0; overflow-wrap: anywhere; }
+  #paidRange .note b { color: var(--text); }
+  #paidRange .fig { white-space: nowrap; }
+  #paidRange .thin { color: var(--text); }
+  #paidRange .split { display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin: 6px 0 2px;
+                      background: var(--panel-2); }
+  #paidRange .split i { display: block; height: 100%; }
+  #paidRange .split .more { background: var(--doubt); }
+  #paidRange .split .even { background: var(--muted); }
+  #paidRange .split .less { background: var(--line); }
+  #paidRange .check { border-top: 1px solid var(--line); padding: 6px 0; font-size: 13px; overflow-wrap: anywhere; }
+  #paidRange .check em { display: block; font-style: normal; font-size: 12px; color: var(--muted); }
+  #paidRange .check button { min-height: 52px; margin: 6px 0 0; padding: 6px 12px; font: inherit; font-size: 13px;
+                             font-weight: 700; color: var(--text); background: var(--panel-2);
+                             border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+  #paidRange .weeks { overflow-x: auto; max-width: 100%; }
+  #paidRange table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+  #paidRange th, #paidRange td { padding: 4px 4px; text-align: right; border-top: 1px solid var(--line);
+                                 white-space: nowrap; }
+  #paidRange th:first-child, #paidRange td:first-child { text-align: left; }
+  #paidRange th { font-weight: 600; color: var(--muted); font-size: 12px; }
   .offer.hiddenrow > summary { opacity: .5; }
   /* The way back, always in reach.
      This page is one continuous list — a week of offers is fourteen thousand
@@ -571,6 +601,13 @@
     #earnings .note { font-size: 17px; }
     #earnings .entry, #earnings .entry em, #earnings details > summary,
     #earnings .tools button, #earnings .cands button { font-size: 15px; }
+    #paidRange h3, #paidRange .big, #paidRange .check, #paidRange .check em, #paidRange .check button,
+    #paidRange table, #paidRange th { font-size: 15px; }
+    /* ...the range's one total a step above the notes, as on a phone, and
+       the week table at a reading width rather than stretched across 1180px. */
+    #paidRange h3 { font-size: 18px; }
+    #paidRange .big { font-size: 19px; }
+    #paidRange table { max-width: 640px; }
 
     .block { padding: 6px 0; }
     .block .label { width: 88px; font-size: 16px; }
@@ -1121,6 +1158,14 @@
        answers /api/earnings: an older one does not, and the box stays hidden. -->
   <section id="earnings" hidden>
     <h2 id="earningsHead">What the app paid <em>· its earnings screen</em></h2>
+    <!-- Paid against the card across the whole range pressed (the owner,
+         Nov 2026: "how can I know it is correctly parsed and matched", and
+         what offers really paid): coverage first, then the figures, a week
+         per row, and each match too far from its card to believe as "check
+         this match". earnings.js rangeSummary over the trips and records
+         this page already has. Shown only with a matched trip in the range;
+         descriptive, nothing here reaches the verdict, the target or the rig. -->
+    <div id="paidRange" hidden></div>
     <p class="note" id="earningsLead">Screenshots of Uber&rsquo;s Earnings Activity for a day.
       Each trip on them is matched to its order here, and the order&rsquo;s record says what
       it paid against the card. Upload again once tips have settled: a tip that was
@@ -3810,6 +3855,10 @@
     var recs = (records || []).filter(function (r) {
       return r && r.kind === 'order' && typeof r.offer === 'string';
     });
+    // The range's paid-against-card summary counts the orders taken off
+    // these, the records as written: not the phone's, which are trips Uber
+    // paid for with no Took (rangeSummary counts those apart).
+    showPaidRange(recs);
     recs = recs.concat(phoneRecords(recs)).sort(function (a, b) {
       var ta = a.times && (a.times.took || a.times.offered) || 0, tb = b.times && (b.times.took || b.times.offered) || 0;
       return ta - tb;
@@ -4243,6 +4292,215 @@
       + ' (what was read is kept)';
     earningsForgetArmed = 0;
   }
+
+  /* PAID AGAINST THE CARD, ACROSS THE RANGE (the owner, Nov 2026: "how can I
+     know it is correctly parsed and matched", and what offers really paid).
+     earnings.js rangeSummary over the trips (earningsList) and the order
+     records (/api/journal's `records`) this page already holds: no request
+     of its own, nothing sent. earnings.js is fetched the first time a range
+     has a matched trip to sum, as the Trends tab fetches trends.js, so a
+     driver who never uploads a screenshot pays nothing for it; a script that
+     cannot be fetched leaves the box as it was. Coverage is said before any
+     figure, and said plainly when it is thin. Descriptive only. */
+  var paidRangeRecs = [];
+  var paidRangeLib = false;     // true while earnings.js is being fetched
+  // How many matches to check are listed before "and N more".
+  var PAID_CHECKS_SHOWN = 8;
+
+  // The range's start, as the server windows the records it sends: 4am today
+  // for Today (baseWindow's since), days back from now otherwise, none on All.
+  function paidRangeFrom() {
+    if (days === 0) return null;
+    if (days === 1) {
+      var s = dayOf(Date.now());
+      s.setHours(s.getHours() + DAY_STARTS_AT);
+      return s.getTime();
+    }
+    return Date.now() - days * 86400000;
+  }
+
+  function showPaidRange(records) {
+    paidRangeRecs = records || [];
+    var box = document.getElementById('paidRange');
+    if (!box) return;
+    var any = earningsList.some(function (e) {
+      var st = (e.match || {}).status;
+      return st === 'matched' || st === 'picked';
+    });
+    if (!any) { box.hidden = true; box.innerHTML = ''; return; }
+    if (window.Earnings && typeof window.Earnings.rangeSummary === 'function') { drawPaidRange(box); return; }
+    if (paidRangeLib) return;
+    paidRangeLib = true;
+    var s = document.createElement('script');
+    s.src = 'earnings.js';
+    s.onload = function () { paidRangeLib = false; if (window.Earnings) drawPaidRange(box); };
+    s.onerror = function () { paidRangeLib = false; };
+    document.head.appendChild(s);
+  }
+
+  function signedMoney(v) { return (v > 0 ? '+' : v < 0 ? '−' : '') + money(Math.abs(v), 2); }
+  function signedShare(v) {
+    if (v === null || v === undefined) return '';
+    var p = Math.round(v * 1000) / 10;
+    return (p > 0 ? '+' : p < 0 ? '−' : '') + Math.abs(p).toFixed(Math.abs(p) < 10 ? 1 : 0) + '%';
+  }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+  // One app's coverage in a sentence or two, the orders taken first.
+  function paidCoverage(app, g, reads) {
+    var name = app === 'other' ? 'App not known' : appName(app);
+    var bits = [];
+    if (g.taken) {
+      bits.push(plural(g.taken, 'order', 'orders') + ' taken (a Took that stands)'
+        + (reads ? ', ' + g.takenMatched + ' with a trip matched on the earnings screen, '
+                   + (g.taken - g.takenMatched) + ' without' : ''));
+    }
+    if (!reads) {
+      bits.push('its earnings screen is not read yet, so none of them can be matched');
+      return '<b>' + esc(name) + ':</b> ' + esc(bits.join('; ')) + '.';
+    }
+    if (g.noTook) {
+      bits.push(plural(g.noTook, 'more trip', 'more trips')
+        + ' matched to a card never Took\'d (accepted on the phone; not counted as taken)');
+    }
+    var un = [];
+    if (g.needs) un.push(g.needs + ' need' + (g.needs === 1 ? 's' : '') + ' you');
+    if (g.none) un.push(g.none + ' with no order on file');
+    if (un.length) bits.push('trips not matched: ' + un.join(', '));
+    var skip = [];
+    if (g.canceled) skip.push(g.canceled + ' canceled');
+    if (g.pending) skip.push(g.pending + ' tip still processing');
+    if (g.guessed) skip.push(g.guessed + ' amount read without its decimal point');
+    if (g.noCard) skip.push(g.noCard + ' no pay read off the card');
+    if (skip.length) bits.push('matched but not compared: ' + skip.join(', '));
+    bits.push(plural(g.compared, 'trip', 'trips') + ' compared');
+    var out = '<b>' + esc(name) + ':</b> ' + esc(bits.join('; ')) + '.';
+    if (g.thin) {
+      out += ' <b class="thin">Thin: ' + esc(g.thinWhy.join('; '))
+        + '. The figures below describe the trips matched, not the range.</b>';
+    }
+    return out;
+  }
+
+  function drawPaidRange(box) {
+    var s = window.Earnings.rangeSummary(earningsList, paidRangeRecs, { from: paidRangeFrom() });
+    var a = s.all;
+    if (!a.matched) { box.hidden = true; box.innerHTML = ''; return; }
+    var readsApp = {};
+    ((earningsInfo && earningsInfo.apps) || [{ app: 'uber', reads: true }]).forEach(function (x) {
+      if (x && x.app) readsApp[x.app] = !!x.reads;
+    });
+    var order = ['uber', 'doordash', 'other'].filter(function (k) { return s.apps[k]; });
+    var html = '<h3>Paid against the card, across the range</h3>';
+    html += order.map(function (k) {
+      // An app this server's reader has no parser for (DoorDash) is said so;
+      // "other" is an order whose app the reader could not tell.
+      var reads = k === 'other' ? true : readsApp[k] !== false;
+      return '<p class="note">' + paidCoverage(k, s.apps[k], reads) + '</p>';
+    }).join('');
+    var unread = earningsInfo && earningsInfo.shots ? earningsInfo.shots.unread : 0;
+    if (unread) {
+      html += '<p class="note">' + esc(plural(unread, 'screenshot', 'screenshots'))
+        + ' on this machine ' + (unread === 1 ? 'is' : 'are') + ' not read yet (of any day): its trips are in none of this.</p>';
+    }
+    if (a.compared) {
+      html += '<p class="big"><b>Cards ' + esc(money(a.card, 2)) + ' → paid ' + esc(money(a.paid, 2)) + '</b> '
+        + '<span class="fig">(' + esc(signedMoney(a.diff) + (a.card > 0 ? ', ' + signedShare(a.diff / a.card) : ''))
+        + ')</span> over '
+        + esc(plural(a.compared, 'trip', 'trips')) + ' compared.</p>';
+      // Each figure kept whole on its line: a minus sign left at a line's
+      // end reads as a dash, and the figure under it as a gain.
+      var fig = function (v, sh) {
+        return '<span class="fig">' + esc(signedMoney(v) + (sh !== null ? ' (' + signedShare(sh) + ')' : '')) + '</span>';
+      };
+      html += '<p class="note">Paid less card, per trip: median <b>' + fig(a.median, a.medianShare) + '</b>'
+        + (a.p10 !== null
+          ? '; P10 ' + fig(a.p10, a.p10Share) + ', P90 ' + fig(a.p90, a.p90Share)
+          : '; P10 and P90 from ' + window.Earnings.SPREAD_MIN + ' trips') + '.</p>';
+      var w = function (n) { return (100 * n / a.compared).toFixed(2) + '%'; };
+      html += '<div class="split" role="img" aria-label="' + esc(a.more + ' paid more, ' + a.even + ' as carded, '
+        + a.less + ' paid less') + '"><i class="more" style="width:' + w(a.more) + '"></i><i class="even" style="width:'
+        + w(a.even) + '"></i><i class="less" style="width:' + w(a.less) + '"></i></div>';
+      html += '<p class="note">' + esc(a.more + ' paid more than the card · ' + a.even + ' as carded (within '
+        + window.Earnings.EVEN_CENTS + '¢) · ' + a.less + ' paid less') + '.</p>';
+      if (a.tipped) {
+        html += '<p class="note">' + esc('Tips were ' + money(a.tips, 2) + ' of the ' + money(a.tippedPaid, 2)
+          + ' paid (' + Math.round(100 * a.tipShare) + '%) on the ' + plural(a.tipped, 'trip', 'trips')
+          + ' whose screen printed a tip' + (a.noTipLine ? '; ' + a.noTipLine + ' printed none' : '')) + '.</p>';
+      } else {
+        html += '<p class="note">No trip compared printed a tip on its screen.</p>';
+      }
+      if (order.filter(function (k) { return s.apps[k].compared; }).length > 1) {
+        html += '<p class="note">' + order.filter(function (k) { return s.apps[k].compared; }).map(function (k) {
+          var g = s.apps[k];
+          return esc((k === 'other' ? 'App not known' : appName(k)) + ': cards ' + money(g.card, 2) + ' → paid '
+            + money(g.paid, 2) + ' over ' + plural(g.compared, 'trip', 'trips') + ', median ' + signedMoney(g.median));
+        }).join('<br>') + '</p>';
+      }
+    }
+    if (s.checks.length) {
+      html += '<p class="note"><b>' + esc(plural(s.checks.length, 'match', 'matches')) + ' to check</b>: paid differs from '
+        + 'the card by more than half the card (and $' + window.Earnings.CHECK_MIN + ' or more), or by more than $'
+        + window.Earnings.CHECK_ABS + ' — more than a tip changing explains, and what a trip matched to the wrong order, '
+        + 'or a figure misread, looks like.</p>';
+      html += s.checks.slice(0, PAID_CHECKS_SHOWN).map(function (c) {
+        var when = dayLabel(c.date) + (c.startedAt ? ' ' + clockOfHm(c.startedAt) : '');
+        return '<div class="check"><b>' + esc(when) + '</b> ' + esc('card ' + money(c.card, 2) + ' → paid '
+          + money(c.paid, 2)) + ' <span class="fig">' + esc('(' + signedMoney(c.diff)
+          + (c.share !== null ? ', ' + signedShare(c.share) : '') + ')') + '</span>'
+          + '<em>Check this match' + (c.source === 'offer' ? ' (a card never Took\'d)' : '') + ': open the day below to see '
+          + 'what was read, or the order\'s row for its record.</em>'
+          + (c.offer ? '<button type="button" data-check-offer="' + esc(c.offer) + '">Open the order\'s row</button>' : '')
+          + '</div>';
+      }).join('');
+      if (s.checks.length > PAID_CHECKS_SHOWN) {
+        html += '<p class="note">and ' + (s.checks.length - PAID_CHECKS_SHOWN) + ' more, smaller.</p>';
+      }
+    }
+    if (s.weeks.length) {
+      // A week per row, Monday's driver day first (Uber's pay week runs
+      // Monday 4am to Monday 4am), so drift shows as a column read down.
+      html += '<div class="weeks"><table><thead><tr><th scope="col">Week of</th><th scope="col">Trips</th>'
+        + '<th scope="col">Cards</th><th scope="col">Paid</th><th scope="col">Median ±</th></tr></thead><tbody>'
+        + s.weeks.map(function (wk) {
+          return '<tr><td>' + esc(dayLabel(wk.week)) + '</td><td>' + wk.n + '</td><td>' + esc(money(wk.card, 2))
+            + '</td><td>' + esc(money(wk.paid, 2)) + '</td><td>' + esc(signedMoney(wk.median)) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    html += '<p class="note" id="paidRangeSays" aria-live="polite" hidden></p>';
+    html += '<p class="note">A record of what was paid, beside the card: nothing here changes what the rig decides '
+      + 'or the target.</p>';
+    box.innerHTML = html;
+    box.hidden = false;
+  }
+
+  // "Open the order's row": the offer's row in the list (Offers tab), opened
+  // and scrolled to, its record inside. A row the list does not hold — a
+  // chip, a search or a picked day narrowing it, or a long range listing its
+  // newest — is said so rather than nothing happening.
+  document.getElementById('paidRange').addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('button[data-check-offer]') : null;
+    if (!b) return;
+    var offer = b.getAttribute('data-check-offer');
+    var row = null;
+    Array.prototype.some.call(el.log.querySelectorAll('details.offer'), function (d) {
+      if (d.getAttribute('data-id') === offer) { row = d; return true; }
+      return false;
+    });
+    if (!row) {
+      var say = document.getElementById('paidRangeSays');
+      if (say) {
+        say.hidden = false;
+        say.textContent = 'That order\'s row is not in the offers list as it stands: a chip, a search or a day '
+          + 'picked on Trends narrows it, and a long range lists only the newest. Clear them, or find it in the CSV.';
+      }
+      return;
+    }
+    var tab = document.querySelector('#tabs button[data-view="offers"]');
+    if (tab && document.getElementById('app').getAttribute('data-view') !== 'all') tab.click();
+    row.open = true;
+    setTimeout(function () { row.scrollIntoView({ block: 'start' }); }, 0);
+  });
 
   function postEarnings(path, body, type) {
     return fetch(path, { method: 'POST', headers: { 'Content-Type': type || 'application/json' },
