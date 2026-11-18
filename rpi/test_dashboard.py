@@ -79,6 +79,48 @@ def skip(why):
     sys.exit(0)
 
 
+# The characters DejaVu Sans can paint, the font the rig's Chromium falls back
+# to (Raspberry Pi OS ships it and no colour emoji). Read off the font with
+# fc-query where this machine has it; where it has not, everything past the
+# Basic Multilingual Plane — the emoji, the glyph that went missing — is taken
+# as lacking, which is the one question the checks below ask.
+DEJAVU = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+
+
+def _dejavu_ranges():
+    try:
+        got = subprocess.run(['fc-query', '--format=%{charset}', DEJAVU],
+                             capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    ranges = []
+    for tok in got.split():
+        a, _, b = tok.partition('-')
+        try:
+            ranges.append((int(a, 16), int(b or a, 16)))
+        except ValueError:
+            return None
+    return ranges or None
+
+
+_DEJAVU_RANGES = _dejavu_ranges()
+
+
+def _dejavu_lacks(text):
+    """The characters of `text` DejaVu Sans has no glyph for (spaces aside)."""
+    out = []
+    for c in text:
+        n = ord(c)
+        if c.isspace():
+            continue
+        if _DEJAVU_RANGES is None:
+            if n > 0xFFFF:
+                out.append(c)
+        elif not any(a <= n <= b for a, b in _DEJAVU_RANGES):
+            out.append(c)
+    return out
+
+
 def hung(stage):
     """A driver that stopped is a FAILED suite, not a skipped one.
 
@@ -6466,7 +6508,13 @@ const framed = (page) => page.waitForFunction(
       if (!b) return { there: false };
       const r = b.getBoundingClientRect();
       const shift = document.getElementById('shift');
-      return { there: true, text: (b.textContent || '').trim(), off: !!b.disabled,
+      // The drawn camera reads as "📷" here, so the lines below say what the
+      // control shows; `painted` is the text it paints, held to DejaVu below.
+      const cam = b.querySelector('svg.cam');
+      const camR = cam ? cam.getBoundingClientRect() : null;
+      const drawn = !!(camR && camR.width > 0 && camR.height > 0);
+      return { there: true, text: ((drawn ? '📷' : '') + (b.textContent || '')).trim(),
+               painted: b.textContent || '', off: !!b.disabled,
                title: b.title || '', failed: b.classList.contains('failed'),
                inBar: !!b.closest('.bottombar'), inRow: !!b.closest('.connbar'),
                shiftShown: !shift.hidden && getComputedStyle(shift).display !== 'none'
@@ -6539,8 +6587,12 @@ const framed = (page) => page.waitForFunction(
     await page.click('#snap', { timeout: 4000 }).catch(() => {});
     out.snapControlReal = { reply: await answered };
     await page.waitForTimeout(200);
-    out.snapControlReal.text = await page.evaluate(
-      () => (document.getElementById('snap').textContent || '').trim());
+    out.snapControlReal.text = await page.evaluate(() => {
+      const b = document.getElementById('snap');
+      const cam = b.querySelector('svg.cam');
+      return ((cam && cam.getBoundingClientRect().width > 0 ? '📷' : '')
+              + (b.textContent || '')).trim();
+    });
     await page.close();
     await ctx.close();
   }
@@ -12870,7 +12922,7 @@ try:
     # would be false on every screen but the rig's own.
     ok_('...and on its title, what it photographs from any screen: the rig\'s (%r)'
         % before.get('title'),
-        (before.get('title') or '').startswith('📷 Snap: keep a picture of the rig\'s own screen'))
+        (before.get('title') or '').startswith('Snap: keep a picture of the rig\'s own screen'))
     ok_('...and it can be pressed', snap.get('pressed'))
     eq('pressing it posts to /api/snap, once a press', snap.get('posted'),
        ['POST', 'POST', 'POST', 'POST'])
@@ -12882,7 +12934,7 @@ try:
         'Last time: saved' in ((snap.get('back') or {}).get('title') or ''))
     ok_('...a title that still says whose screen it photographs',
         ((snap.get('back') or {}).get('title') or '').startswith(
-            '📷 Snap: keep a picture of the rig\'s own screen'))
+            'Snap: keep a picture of the rig\'s own screen'))
     # The server's own line, word for word: a second wording of it on the page
     # is a second place for the reason to go missing.
     eq('a snap with no screenshot says why, on the control',
@@ -12906,6 +12958,21 @@ try:
        ('📷 no answer from the rig', False, True))
     eq('...and then offers itself again', (snap.get('hungBack') or {}).get('text'),
        '📷 Snap')
+    # The owner's screenshots of 17 Nov (1024x600, c05858f): the row showed
+    # "[…] […]" where this control should be. The rig's Chromium paints with
+    # DejaVu, which has no "📷", so the glyph took no room: idle, an empty
+    # outline; pressed, " …". The camera is drawn now (the "📷" in the lines
+    # above is the drawn icon), and nothing the control paints as text in any
+    # state needs a character DejaVu Sans lacks.
+    _states = ('before', 'saved', 'back', 'partial', 'refused', 'busy', 'hungAfter',
+               'hungBack')
+    _lacking = sorted(set(c for k in _states
+                          for c in _dejavu_lacks((snap.get(k) or {}).get('painted') or '')))
+    eq('every state of 📷 Snap paints only what DejaVu Sans has, the camera drawn '
+       '(lacking: %r)' % _lacking, _lacking, [])
+    ok_('...and the camera is drawn in every state (%r)'
+        % [(snap.get(k) or {}).get('text') for k in _states],
+        all(((snap.get(k) or {}).get('text') or '').startswith('📷') for k in _states))
 
     real = got.get('snapControlReal') or {}
     _reply = real.get('reply') or {}

@@ -653,6 +653,11 @@
      always drawn after the figures, so the row can be short. 48px wide where
      the row has the room, which is every panel's rule for a glyph pressed in
      a car. */
+  /* The camera, drawn in the text's colour at the emoji's width (see
+     snapLabel): DejaVu, the rig's font, has no 📷 to paint. */
+  #snap .cam { width: 1.25em; height: 1em; vertical-align: -0.15em;
+               fill: none; stroke: currentColor; stroke-width: 1.5;
+               stroke-linejoin: round; }
   #more {
     appearance: none; font: inherit; font-weight: 700; color: var(--text);
     background: transparent; border: 0; box-shadow: inset 0 0 0 1px var(--line);
@@ -2137,7 +2142,7 @@
        Not 52px, which every control on the bar is held to. Those are pressed
        at a red light; this is pressed parked, with the mouse, to keep a
        picture, and the status link beside it is the same kind of target. -->
-  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="health" hidden></span><span id="shift" hidden></span><button type="button" id="snap" title="📷 Snap: keep a picture of the rig's own screen, on the rig, to share. They are listed on the offers page under 📷 Snaps.">📷<span class="word"> Snap</span></button><button type="button" id="more" aria-expanded="false" aria-controls="moreSheet" aria-label="Everything the status row has to say" title="Everything the status row has to say">…</button></div>
+  <div class="connbar"><span class="dot" id="dot"></span><a id="conn" href="/api/status">connecting…</a><span id="health" hidden></span><span id="shift" hidden></span><button type="button" id="snap" title="Snap: keep a picture of the rig's own screen, on the rig, to share. They are listed on the offers page under 📷 Snaps."><svg class="cam" viewBox="0 0 20 16" aria-hidden="true" focusable="false"><path d="M2.5 4.5h3.2l1.6-2h5.4l1.6 2h3.2v9h-15z"/><circle cx="10" cy="9" r="3"/></svg><span class="word"> Snap</span></button><button type="button" id="more" aria-expanded="false" aria-controls="moreSheet" aria-label="Everything the status row has to say" title="Everything the status row has to say">…</button></div>
   <!-- ...and what "…" opens: the status row in full, over the foot of the
        verdict pane. See fillMore. -->
   <div class="moresheet" id="moreSheet" hidden></div>
@@ -6928,11 +6933,45 @@
   var snapBtn = document.getElementById('snap');
   // The label as the markup writes it — the word in a span of its own, which
   // the stylesheet does not paint and a screen reader still reads. See #snap.
+  //
+  // The camera is drawn, not typed. The rig's Chromium paints with DejaVu,
+  // which has no "📷" (U+1F4F7) and no colour emoji beside it, so the glyph
+  // took no room: idle, the control was an empty outline, and pressed it said
+  // " …" — the owner's screenshots of 17 Nov (1024x600, c05858f) show "[…]
+  // […]" on the row, this control mid-press beside "…" (#more). The same
+  // camera as an inline SVG in the text's own colour, as wide as the emoji
+  // was here (1.25em: 22.5px of the 22.47 the glyph measured at 18px), so the
+  // row's arithmetic below is unchanged. rpi/test_layout.py holds it painted,
+  // and rpi/test_dashboard.py that nothing the control says needs a glyph
+  // DejaVu lacks.
+  var CAM_SVG = 'http://www.w3.org/2000/svg';
+  function camIcon() {
+    var svg = document.createElementNS(CAM_SVG, 'svg');
+    svg.setAttribute('class', 'cam');
+    svg.setAttribute('viewBox', '0 0 20 16');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    var body = document.createElementNS(CAM_SVG, 'path');
+    body.setAttribute('d', 'M2.5 4.5h3.2l1.6-2h5.4l1.6 2h3.2v9h-15z');
+    var lens = document.createElementNS(CAM_SVG, 'circle');
+    lens.setAttribute('cx', '10');
+    lens.setAttribute('cy', '9');
+    lens.setAttribute('r', '3');
+    svg.appendChild(body);
+    svg.appendChild(lens);
+    return svg;
+  }
+  // The camera, then what the control says after it, as text.
+  function snapSay(text) {
+    snapBtn.textContent = '';
+    snapBtn.appendChild(camIcon());
+    if (text) snapBtn.appendChild(document.createTextNode(' ' + text));
+  }
   function snapLabel() {
     var word = document.createElement('span');
     word.className = 'word';
     word.textContent = ' Snap';
-    snapBtn.textContent = '📷';
+    snapSay('');
     snapBtn.appendChild(word);
   }
   // How long the answer stays before the label comes back. This can be a
@@ -6949,7 +6988,7 @@
     clearTimeout(snapBack);
     snapBtn.disabled = true;
     snapBtn.classList.remove('said', 'failed');
-    snapBtn.textContent = '📷 …';
+    snapSay('…');
     ask('/api/snap', { method: 'POST' })
       .then(function (r) {
         return r.json().then(function (body) { return { ok: r.ok, body: body || {} }; },
@@ -6957,28 +6996,28 @@
       })
       .then(function (got) {
         if (got.ok && got.body.ok && typeof got.body.said === 'string') {
-          return { text: '📷 ' + got.body.said, failed: false };
+          return { text: got.body.said, failed: false };
         }
-        return { text: '📷 not saved: ' + (got.body.error || 'the rig refused it'),
+        return { text: 'not saved: ' + (got.body.error || 'the rig refused it'),
                  failed: true };
       }, function () {
         // The deadline, or no network at all. Whether the rig kept anything is
         // exactly what this page cannot know, so it says the one thing it can:
         // nothing answered. "Not saved" would be a guess, and a wrong one
         // whenever the rig was merely slow to reply.
-        return { text: '📷 no answer from the rig', failed: true };
+        return { text: 'no answer from the rig', failed: true };
       })
       .then(function (said) {
-        snapBtn.textContent = said.text;
-        snapBtn.title = said.text;
+        snapSay(said.text);
+        snapBtn.title = 'Snap: ' + said.text;
         snapBtn.classList.add('said');
         snapBtn.classList.toggle('failed', said.failed);
         snapBtn.disabled = false;
         snapBack = setTimeout(function () {
           snapLabel();
           snapBtn.classList.remove('said', 'failed');
-          snapBtn.title = '📷 Snap: keep a picture of the rig\'s own screen, on the rig. Last time: '
-                        + said.text.replace(/^📷 /, '');
+          snapBtn.title = 'Snap: keep a picture of the rig\'s own screen, on the rig. Last time: '
+                        + said.text;
         }, SNAP_SAID_MS);
       });
   });

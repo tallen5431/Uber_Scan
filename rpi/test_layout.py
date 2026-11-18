@@ -1840,13 +1840,24 @@ const SNAP_MEASURE = (fixture) => {
                                        bar: [].slice.call(bar.children).map(box) });
   const over = () => d.scrollWidth > d.clientWidth + 1
                      || d.scrollHeight > d.clientHeight + 1;
-  // Every glyph of the label inside the control's own box.
+  // The camera, drawn (see snapLabel in live.html): the rig's DejaVu has no
+  // "📷" glyph, and the owner's 17 Nov screenshots show the control as an
+  // empty outline for it.
+  const cam = snap.querySelector('svg.cam');
+  const camBox = cam ? cam.getBoundingClientRect() : null;
+  const camDrawn = !!(camBox && camBox.width > 0 && camBox.height > 0);
+  // Every glyph of the label inside the control's own box, the camera with it.
   const spilt = () => {
     const r = snap.getBoundingClientRect();
-    const n = snap.firstChild;
-    if (!n) return '';
-    const rg = document.createRange();
     let out = '';
+    if (camDrawn && (camBox.left < r.left - 0.5 || camBox.right > r.right + 0.5
+                     || camBox.top < r.top - 0.5 || camBox.bottom > r.bottom + 0.5)) {
+      out += '📷';
+    }
+    let n = snap.firstChild;
+    while (n && n.nodeType !== 3) n = n.nextSibling;
+    if (!n) return out;
+    const rg = document.createRange();
     for (let i = 0; i < n.length; i++) {
       rg.setStart(n, i);
       rg.setEnd(n, i + 1);
@@ -1863,7 +1874,9 @@ const SNAP_MEASURE = (fixture) => {
     inRow: !!snap.closest('.connbar'), inBar: !!snap.closest('.bottombar'),
     onGlass: r.left >= -0.5 && r.top >= -0.5 && r.right <= d.clientWidth + 0.5
              && r.bottom <= d.clientHeight + 0.5,
-    label: (snap.textContent || '').trim(), spilt: spilt(),
+    label: ((camDrawn ? '📷' : '') + (snap.textContent || '')).trim(), spilt: spilt(),
+    camWidth: camBox ? Math.round(camBox.width * 10) / 10 : null,
+    painted: snap.textContent || '',
     height: Math.round(r.height), over: over(),
   };
   const withIt = layout();
@@ -1874,7 +1887,10 @@ const SNAP_MEASURE = (fixture) => {
   // as markup, not as text — the label's word is a span of its own, and
   // flattening it into the text node would paint it.
   const was = snap.innerHTML;
-  snap.textContent = fixture.said;
+  // ...as the page says it: the drawn camera, then the line.
+  snap.textContent = '';
+  if (cam) snap.appendChild(cam.cloneNode(true));
+  snap.appendChild(document.createTextNode(fixture.said.replace(/^📷/, '')));
   snap.classList.add('said');
   out.sameSaid = withIt === layout();
   out.overSaid = over();
@@ -4843,6 +4859,13 @@ try:
         if room:
             ok_('...on the glass at %s' % panel, sn.get('onGlass'))
             eq('...saying what it is at %s' % panel, sn.get('label'), '📷 Snap')
+            # The camera is drawn, at the width the emoji had here, and the
+            # control paints no emoji: DejaVu has none, and the owner's
+            # screenshots of 17 Nov showed an empty outline for it.
+            ok_('...its camera drawn, %spx wide, at %s' % (sn.get('camWidth'), panel),
+                (sn.get('camWidth') or 0) >= 12)
+            eq('...and no character past the BMP painted as its label at %s' % panel,
+               [c for c in sn.get('painted') or '' if ord(c) > 0xFFFF], [])
             eq('...with its label inside its own box at %s' % panel,
                sn.get('spilt'), '')
             ok_('...and its longest answer on the glass, clear of the '
