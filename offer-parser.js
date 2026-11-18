@@ -455,16 +455,20 @@
     // The card printed its headline label: the payout is the figure directly
     // before it, and a figure after the label with no label of its own is a
     // part of the pay, never the pay. See HEADLINE_WORD.
+    // ...and gone from every list below, not only from the choice: no
+    // headline, so never the start of a second card (oneCard) nor the
+    // `printed` answer. See the Python twin.
     if (labels.length && found.length) {
       best = null;
-      for (i = 0; i < found.length; i++) {
-        var f = found[i], inZone = false;
-        if (!f.anchored) {
-          for (var l = labels.length - 1; l >= 0; l--) {
-            if (labels[l].lo <= f.at) { inZone = f.at < labels[l].hi; break; }
-          }
+      found = found.filter(function (f) {
+        if (f.anchored) return true;
+        for (var l = labels.length - 1; l >= 0; l--) {
+          if (labels[l].lo <= f.at) return f.at >= labels[l].hi;
         }
-        if (!inZone && (best === null || f.value > best)) best = f.value;
+        return true;
+      });
+      for (i = 0; i < found.length; i++) {
+        if (best === null || found[i].value > best) best = found[i].value;
       }
     }
     if (best !== null && found.every(function (f) { return f.value !== best || f.lost; })) {

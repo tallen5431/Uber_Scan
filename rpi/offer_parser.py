@@ -1363,9 +1363,18 @@ def find_pay(text, where=None, printed=None, figures=None):
         def after_a_label(at):
             k = bisect.bisect_right(starts, at) - 1
             return k >= 0 and at < labels[k][1]
-        keep = set(i for i, one in enumerate(found)
-                   if i in anchored or not after_a_label(one[1]))
-        best = max((one[0] for i, one in enumerate(found) if i in keep), default=None)
+        keep = [i for i, one in enumerate(found)
+                if i in anchored or not after_a_label(one[1])]
+        # ...and gone from every list below, not only from the choice: such a
+        # figure is no headline, so it must not start a second card in
+        # `where` (one_card), count as one in `figures`, or be the `printed`
+        # answer. Before c05858f the boost's "$1.68", printed to the cent,
+        # was that second card's headline: one_card gave the read's legs to
+        # it, the $9.09 above had no journey and never locked, and only the
+        # reads with the boost alone reached the journal.
+        lost = set(n for n, i in enumerate(keep) if i in lost)
+        found = [found[i] for i in keep]
+        best = max((one[0] for one in found), default=None)
     # The largest figure is one whose cents the reader lost, and nothing of the
     # same value read whole: no payout at all, not the next figure down. See
     # CENTS_LOST.

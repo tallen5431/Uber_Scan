@@ -1072,6 +1072,17 @@
    }
   },
   {
+   "name": "a figure printed to the cent under the label is no second card's headline: the card keeps its journey (why the 17 Nov offers kept the boost)",
+   "_why": "Before c05858f the boost's '$1.68', printed to the cent, was a headline in find_pay's `where`, so one_card took it for the top of a second card and gave it the legs: the $9.09 read had a payout and no journey, never locked, and only the reads with the boost alone reached the journal. Any chip PAY_PART does not list did the same until the label stretch took its figures out of `where` too.",
+   "text": "$9.09\nGuaranteed (incl. tip)\n$2.40 Priority\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 9.09,
+    "minutes": 20,
+    "miles": 1.5,
+    "complete": true
+   }
+  },
+  {
    "name": "...a two-leg card's headline over its Boost+ line",
    "text": "Exclusive\n$16.80\n* 481 $2.39 Boost+ included\n3 min (0.4 mi)\nOak Ln, Marietta\n25 mins (12.3 mi)\nBirch Rd, Smyrna",
    "expect": {
