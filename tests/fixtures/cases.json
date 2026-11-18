@@ -999,6 +999,131 @@
    }
   },
   {
+   "name": "a chip with a word no rule lists, under the label, is a part of the pay: the headline over it is the pay (the next Boost+)",
+   "_why": "The largest-figure rule took $11.68, a chip larger than its headline, for any word PAY_PART did not list. HEADLINE_WORD: a figure after the label and before the journey is never the pay.",
+   "text": "$9.09\nGuaranteed (incl. tip)\n$11.68 Turbo included\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 9.09,
+    "minutes": 20,
+    "miles": 1.5
+   }
+  },
+  {
+   "name": "...and with the headline cut off, the label and an unlisted chip under it: no payout",
+   "text": "Guaranteed (incl. tip)\n$1.68 Priority included\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": null,
+    "minutes": 20
+   }
+  },
+  {
+   "name": "...a figure under the label with no word at all is not the pay either",
+   "text": "Guaranteed (incl. tip) |\n$2.40 ~\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...the same under DoorDash's label, beside its figure",
+   "text": "$6.10 Guaranteed (incl. tips)\n$8.25 Hot spot\n4.2 mi + 21 min\n@ Pickup Maple Grill",
+   "expect": {
+    "pay": 6.1,
+    "minutes": 21,
+    "miles": 4.2
+   }
+  },
+  {
+   "name": "...and under Uber Eats' 'Includes expected tip'",
+   "text": "$14.48\nIncludes expected tip\n$19.00 Surge zone\n30 min (8.0 mi) total\nBirch Market (88 Juniper Way)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 14.48,
+    "minutes": 30
+   }
+  },
+  {
+   "name": "...a chip whose word is new and no label in the read at all (a ride's star is no word): 'included' spelled out makes it a part",
+   "text": "* 496 Verified\n$2.28 Turbo included\n9 min (1.9 mi)\nOak Ln, Marietta\n17 mins (2.9 mi)\nBirch Rd, Marietta",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...and a ride's headline over that chip is the pay",
+   "text": "Exclusive\n$12.74\n* 4.91 $2.51 Turbo+ included\n11 min (1.8 mi)\nOak Ln, Marietta\n18 mins (5.2 mi)\nBirch Rd, Smyrna",
+   "expect": {
+    "pay": 12.74
+   }
+  },
+  {
+   "name": "...a second card's headline past the first card's journey still competes, each over its own label",
+   "text": "$6.53\nIncludes expected tip\n36 min (7.9 mi) total\nMaple Grill (12 Fable Ct)\n$9.80\nGuaranteed (incl. tip)\n22 min (6.0 mi) total\nBirch Market (88 Juniper Way)",
+   "expect": {
+    "pay": 9.8
+   }
+  },
+  {
+   "name": "a store name's run of symbols changes no figure: the payout, minutes and miles of the card are as read",
+   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nLucky Dragon Kitchen #@%& (West Midtown/Tech-Sq)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 8.42,
+    "minutes": 18,
+    "miles": 4.2,
+    "complete": true
+   }
+  },
+  {
+   "name": "a figure printed to the cent under the label is no second card's headline: the card keeps its journey (why the 17 Nov offers kept the boost)",
+   "_why": "Before c05858f the boost's '$1.68', printed to the cent, was a headline in find_pay's `where`, so one_card took it for the top of a second card and gave it the legs: the $9.09 read had a payout and no journey, never locked, and only the reads with the boost alone reached the journal. Any chip PAY_PART does not list did the same until the label stretch took its figures out of `where` too.",
+   "text": "$9.09\nGuaranteed (incl. tip)\n$2.40 Priority\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 9.09,
+    "minutes": 20,
+    "miles": 1.5,
+    "complete": true
+   }
+  },
+  {
+   "name": "payLabelled: the payout over the card's label is labelled (what lets a later read correct the first)",
+   "_why": "journal.py OfferLog._corrects moves an offer's payout only to a labelled figure; scan_pi.pay_disagrees says CHECK THE PAY over a read of the same card whose payout is not.",
+   "text": "$9.09\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 9.09,
+    "payLabelled": true
+   }
+  },
+  {
+   "name": "payLabelled: ...a ride's headline before the rider's star is labelled",
+   "text": "$12.74\n* 4.91 Verified\n11 min (1.8 mi)\nOak Ln, Marietta\n18 mins (5.2 mi)\nBirch Rd, Smyrna",
+   "expect": {
+    "pay": 12.74,
+    "payLabelled": true
+   }
+  },
+  {
+   "name": "payLabelled: ...a few marks between the figure and its label are still the label's",
+   "text": "Exclusive x\n$6.63 J\nGuaranteed (incl. tip) |\n© 16 min (1.5 mi) total\nBirch Market (88 Juniper Way)\nI Oak Ln, Marietta",
+   "expect": {
+    "pay": 6.63,
+    "payLabelled": true
+   }
+  },
+  {
+   "name": "payLabelled: ...a payout with its label below the box is not",
+   "text": "$9.09\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 9.09,
+    "payLabelled": false
+   }
+  },
+  {
+   "name": "payLabelled: ...and no payout is never labelled",
+   "text": "Guaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": null,
+    "payLabelled": false
+   }
+  },
+  {
    "name": "...a two-leg card's headline over its Boost+ line",
    "text": "Exclusive\n$16.80\n* 481 $2.39 Boost+ included\n3 min (0.4 mi)\nOak Ln, Marietta\n25 mins (12.3 mi)\nBirch Rd, Smyrna",
    "expect": {
@@ -4124,6 +4249,31 @@
    "expect": [
     "Fable Grill (2020 Oak Rd Nw)",
     "S Kestrel St SW & Fable Ave SW, Atlanta"
+   ]
+  },
+  {
+   "name": "a store's name in a script the reader has no letters for comes out as a run of symbols, and the run goes (the owner's 17 Nov evening)",
+   "_why": "Display only: a lone '&' between words, the bracket, the slash and the hyphen stay; the payout, minutes and miles are not read from a name.",
+   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nLucky Dragon Kitchen #@%& (West Midtown/Tech-Sq)\nOak Ln, Marietta",
+   "expect": [
+    "Lucky Dragon Kitchen (West Midtown/Tech-Sq)",
+    "Oak Ln, Marietta"
+   ]
+  },
+  {
+   "name": "...a run between two words of the name",
+   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nLucky ~*# Dragon (12 Fable Ct)\nBirch Rd & Elm St, Marietta",
+   "expect": [
+    "Lucky Dragon (12 Fable Ct)",
+    "Birch Rd & Elm St, Marietta"
+   ]
+  },
+  {
+   "name": "...and a lone mark a name does use stays: '&' between words, \"#12\", an apostrophe",
+   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nBread & Butter's #12 (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": [
+    "Bread & Butter's #12 (12 Fable Ct)",
+    "Oak Ln, Marietta"
    ]
   }
  ],

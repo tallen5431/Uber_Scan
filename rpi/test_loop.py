@@ -4306,6 +4306,104 @@ ok_('...said once in the log', sum('⌖ saw an offer — reading the card' in l
 eq('...and the press is not answered by the card: no dropoff line while the window is '
    'open (%r)' % (_shp['dropoffs'],), _shp['dropoffs'], [])
 
+# --- a later read of the same card corrects the first -------------------------
+#
+# The 17 Nov Boost+ card (the owner's snaps, 19:00): "$9.09 / Guaranteed (incl.
+# tip) / $1.68 Boost+ included". The first reads came while it slid up, and a
+# read that misreads the headline locks as readily as one that holds it — the
+# two frames of one read agree with each other. Before journal.py's _corrects,
+# the reads after it, of the same card with "$9.09" over the label, were a
+# second offer and the first stayed in the journal as one too: two offers for
+# one card, one of them at $1.09. Invented card; the two frames of a read the
+# same, as a paired read of one picture is.
+_BOOST = ('Exclusive\n${pay}\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n'
+          '© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta')
+_bmis = run(lambda n, k: _BOOST.format(pay='1.09' if n <= 2 else '9.09'),
+            seconds=16.0, health_every=3.0,
+            until=lambda rows, ann, calls: any(x.get('pay') == 9.09 for x in rows
+                                               if not x.get('kind')) and calls >= 8
+            and sum(1 for x in rows if x.get('kind') == 'seen') >= 2)
+_bmis_offers = [x for x in _bmis['rows'] if not x.get('kind')]
+eq('[re-read] the misread first read landed, as it did (%r)'
+   % [(x['id'], x['seq'], x['pay']) for x in _bmis_offers],
+   bool(_bmis_offers) and _bmis_offers[0]['pay'], 1.09)
+eq('[re-read] ...and the reads of the same card with its labelled headline corrected '
+   'it under the SAME id: one offer in the journal, not two',
+   len(set(x['id'] for x in _bmis_offers)), 1)
+eq('[re-read] ...the offer\'s newest row at $9.09', _bmis_offers[-1]['pay'] if _bmis_offers
+   else None, 9.09)
+eq('[re-read] ...saying what it was corrected from',
+   (_bmis_offers[-1].get('corrected') or {}).get('from') if _bmis_offers else None, 1.09)
+ok_('[re-read] ...its seq carried on, so the sync keeps every row (%r)'
+    % [x['seq'] for x in _bmis_offers],
+    [x['seq'] for x in _bmis_offers] == list(range(1, len(_bmis_offers) + 1)))
+eq('[re-read] the driving screen was told the correction under the same id (%r)'
+   % [(a[0], a[1].get('pay')) for a in _bmis['announced']],
+   [a[1].get('pay') for a in _bmis['announced']][-1:] + [len(set(a[0] for a in _bmis['announced']))],
+   [9.09, 1])
+# ...and the health tally does not call the correcting reads a second card the
+# rig saw and failed to keep.
+_bmis_seen = [x for x in _bmis['rows'] if x.get('kind') == 'seen']
+eq('[re-read] the health tally counts one card seen and one recorded (%r)'
+   % [(x.get('saw'), x.get('kept')) for x in _bmis_seen],
+   (sum(x.get('saw') or 0 for x in _bmis_seen), sum(x.get('kept') or 0 for x in _bmis_seen)),
+   (1, 1))
+
+# The same card whose first reads held the boost alone: no payout at all now
+# (c05858f), so nothing locks until the headline is read, and the one offer is
+# the headline's.
+_bonly = run(lambda n, k: (_BOOST.format(pay='9.09').split('\n', 2)[2] if n <= 2
+                           else _BOOST.format(pay='9.09')),
+             seconds=12.0,
+             until=lambda rows, ann, calls: any(x.get('pay') == 9.09 for x in rows
+                                                if not x.get('kind')) and calls >= 6)
+_bonly_offers = [x for x in _bonly['rows'] if not x.get('kind')]
+eq('[re-read] reads with the boost alone write nothing; the headline\'s read is the offer (%r)'
+   % [(x['id'], x['pay']) for x in _bonly_offers],
+   (len(set(x['id'] for x in _bonly_offers)), sorted(set(x['pay'] for x in _bonly_offers))),
+   (1, [9.09]))
+
+# ...and why they used to: a figure printed to the cent under the label was a
+# second card's headline, so one_card gave the read's legs to it and the
+# headline above had no journey. "$2.40 Priority" is a chip no rule lists; with
+# the headline over it the read is the card, judged and written, at $9.09 over
+# its 20 minutes. Before the label stretch took such a figure out of `where`,
+# every read of this card was "a payout but no journey" and nothing landed.
+_PRIO = ('$9.09\nGuaranteed (incl. tip)\n$2.40 Priority\n© 20 min (1.5 mi) total\n'
+         'Maple Grill (12 Fable Ct)\nOak Ln, Marietta')
+_prio = run(lambda n, k: _PRIO, seconds=10.0,
+            until=lambda rows, ann, calls: any(not x.get('kind') for x in rows) and calls >= 3)
+_prio_offers = [x for x in _prio['rows'] if not x.get('kind')]
+eq('[re-read] a chip no rule lists under the label leaves the card its journey: written '
+   'at the headline over 20 min (%r)' % [(x['pay'], x['minutes']) for x in _prio_offers],
+   [(x['pay'], x['minutes']) for x in _prio_offers][:1], [(9.09, 20.0)])
+eq('[re-read] ...and no read of it was "a payout but no journey"',
+   sum(1 for l in _prio['logs'] if 'a payout but no journey' in l), 0)
+
+# Two reads of the same card that disagree about the pay with no label on either
+# are a doubt, not a choice: the panel says CHECK THE PAY over the second, every
+# figure kept. The card printed "$9.09" with its label below the box.
+_BARE = '${pay}\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta'
+_bare = run(lambda n, k: _BARE.format(pay='9.09' if n <= 3 else '1.09'), seconds=12.0,
+            until=lambda rows, ann, calls: calls >= 7)
+_bare_v = [(v[0][0].get('state'), v[0][0].get('doubt'), (v[0][1] or {}).get('pay'))
+           for v in _bare['verdicts'] if len(v[0]) > 1 and isinstance(v[0][0], dict)
+           and isinstance(v[0][1], dict) and (v[0][1] or {}).get('pay') is not None]
+ok_('[re-read] the card on record read again at another payout, neither over a label, says '
+    'CHECK THE PAY (%r)' % _bare_v[-4:],
+    any(st == 'doubt' and why == 'pay' and pay == 1.09 for st, why, pay in _bare_v))
+ok_('[re-read] ...and its first payout was judged as read before it',
+    any(st != 'doubt' and pay == 9.09 for st, why, pay in _bare_v))
+ok_('[re-read] ...said once in the log',
+    sum(1 for l in _bare['logs'] if 'neither figure is printed over its label' in l) == 1)
+# A labelled payout of the same card is shown as read, not doubted: it is the
+# one that corrects the record.
+ok_('[re-read] a labelled read of the card is never doubted for its pay (%r)'
+    % sorted(set((v[0][0].get('state'), (v[0][1] or {}).get('pay')) for v in _bmis['verdicts']
+                 if len(v[0]) > 1 and isinstance(v[0][0], dict) and isinstance(v[0][1], dict))),
+    not any(v[0][0].get('doubt') == 'pay' for v in _bmis['verdicts']
+            if len(v[0]) > 1 and isinstance(v[0][0], dict)))
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d loop checks passed' % ok)
 sys.exit(1 if bad else 0)

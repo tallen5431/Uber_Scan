@@ -1753,6 +1753,33 @@ def unsure_payout(out, parsed):
     return not OP.pay_is_printed(out.get('text') or '')
 
 
+def pay_disagrees(offer_log, parsed):
+    """True when this reading is the card already on record read again (the
+    journal's OfferLog.same_card: landed, the same minutes and places, read
+    moments ago) with another payout, and its own payout is not the figure the
+    card prints over its label (OP's `payLabelled`).
+
+    Two readings of one card that disagree about the pay, and nothing on the
+    card to say which is the headline, are a doubt and not a choice. The 17
+    Nov Boost+ card was read with the headline in the box and without it, and
+    the panel went with whichever the last read held. Now the panel says
+    CHECK THE PAY over such a read, every figure kept, and the driver, holding
+    the card, can see the headline. The journal is not asked to choose either:
+    a payout no label vouches for corrects nothing (OfferLog._corrects), and a
+    journey re-offered a cent different is two offers, as it was. A read whose
+    payout IS labelled is shown as read: it is the one that corrects the
+    record.
+    """
+    if offer_log is None or parsed.get('payLabelled'):
+        return False
+    pay = parsed.get('pay')
+    if not isinstance(pay, (int, float)) or isinstance(pay, bool) or pay <= 0:
+        return False
+    if offer_log.pay is None or pay == offer_log.pay:
+        return False
+    return offer_log.same_card(parsed)
+
+
 def card_box_episode(scanner, out, parsed, was):
     """Forget the crop the reader reads first (pipeline.CARD_BOX_FOR) when the
     accumulator says this is another card; returns the episode it is now for.
@@ -6107,6 +6134,17 @@ def main():
                     'or its label, and no second frame read it the same. Reader '
                     'saw: %r' % (frames, parsed['pay'],
                                  (out.get('text') or '').strip()[:160]))
+        # ...and a payout the card on record was read with another of, neither
+        # over the card's label: CHECK THE PAY, every figure kept. Only the
+        # panel's copy, as above. See pay_disagrees.
+        elif not whole and rate.get('ready') and pay_disagrees(offer_log, parsed):
+            shown_rate = dict(rate, state='doubt', doubt='pay')
+            if unsure_said != (parsed.get('episode'), parsed.get('pay')):
+                unsure_said = (parsed.get('episode'), parsed.get('pay'))
+                log('read %d: payout $%.2f not priced - the card on record was read '
+                    'at $%.2f, and neither figure is printed over its label. Reader '
+                    'saw: %r' % (frames, parsed['pay'], offer_log.pay,
+                                 (out.get('text') or '').strip()[:160]))
 
         # The destination, with or without the button, when this reading has
         # one.
@@ -7087,9 +7125,16 @@ def main():
             # card again.
             impossible = OP.doubt(parsed.get('pay'), parsed.get('minutes'),
                                   parsed.get('miles')) is not None
+            # ...and the card on record read again with a labelled payout of
+            # its own (OfferLog.same_card): a read that corrects it, or one it
+            # counts towards correcting it, is not a card the rig saw and
+            # failed to keep. An unlabelled one is not asked: the journal
+            # files it as an offer of its own, as it always did.
             same_card = (offer_log is not None and offer_log.id is not None
                          and offer_log.landed_id == offer_log.id
-                         and (impossible or parsed.get('pay') == offer_log.pay))
+                         and (impossible or parsed.get('pay') == offer_log.pay
+                              or (parsed.get('payLabelled')
+                                  and offer_log.same_card(parsed))))
             if same_card:
                 seen_kept = True
             else:
@@ -7184,8 +7229,12 @@ def main():
                 # ...and the store's door (`pickupLine`): a frame that reads
                 # the line under the store's name after the row landed is a
                 # pin the map can now place, and untold it never gets there.
-                reading = (offer_log.id, parsed.get('minutes'), parsed.get('miles'),
-                           parsed.get('dropoff'), rate.get('state'),
+                # ...and the payout, since a later reading of the same card
+                # can now correct it under the same id (OfferLog._corrects):
+                # $1.09 to $9.09 is a PASS either side of the target only
+                # sometimes, and the button names the pay it will mark.
+                reading = (offer_log.id, parsed.get('pay'), parsed.get('minutes'),
+                           parsed.get('miles'), parsed.get('dropoff'), rate.get('state'),
                            parsed.get('pickupLine'))
                 if offer_log.id != told_offer or (landed and reading != told_as):
                     told_offer = offer_log.id

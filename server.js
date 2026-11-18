@@ -9543,6 +9543,123 @@ function withApp(o) {
   return o;
 }
 
+/* The payout an offer's stored text gives under the reader as it is now,
+ * worked out at read time like rowApp: the journal is never rewritten.
+ *
+ * The 17 Nov evening (the owner's snaps, build 81244ee): every Uber offer was
+ * journalled at its Boost+ amount — $1.33, $1.45, $2.01, $2.42, $2.63, each a
+ * PASS near $4/hr — because the reads with the boost alone were the only ones
+ * that locked (c05858f, and the label stretch in offer-parser.js). Those rows
+ * are still on disk, in every per-hour figure, the strategy tab and the Gold
+ * card. So the fold asks the parser again of a row whose text could read
+ * differently now and, when it does:
+ *
+ *   - a payout: the row is shown with it, its rates worked out again over the
+ *     row's own billed minutes, running cost and target, and `corrected:
+ *     {from, to, why}` on it for the offers page to say ("pay re-read: was
+ *     $1.68");
+ *   - no payout (the text held only the boost): the payout the SAME offer's
+ *     other readings held over the card's label, the commonest, where the
+ *     journal has one — their `text` and every frame in `scans`, with the same
+ *     minutes — and otherwise `payUnread`: set aside (`suspect`, doubt
+ *     'unread', no rate), so no per-hour figure, strategy line or Gold count
+ *     takes $1.68 for an offer's pay.
+ *
+ * Asked only of a text that could have moved: one with "included" in it, or a
+ * dollar figure after a headline label — every other card's payout is read by
+ * the rules it was read by when written. Remembered per text, so a fold over a
+ * year's journal parses each such text once per process. A row the rig itself
+ * corrected (`corrected` already on it: journal.py OfferLog._corrects), one
+ * written by a rig that reads the label stretch (`payLabelled` on it, whatever
+ * its value) and a typed one (no text) are left as they are. As with rowApp, offer-parser.js
+ * is loaded only when a row needs it, so lite on a Zero never loads it for
+ * the rows it writes. */
+var PAY_REREAD = /included\b|(?:guarant|includes?\s*expected|incl[.,:]?\s?tips?)[\s\S]*\$/i;
+var PAY_REREAD_MAX = 4096;
+var payReread = new Map();
+function rereadPay(text) {
+  var hit = payReread.get(text);
+  if (hit) return hit;
+  if (!RowParser) RowParser = require('./offer-parser.js');
+  var p = RowParser.parse(text);
+  hit = { pay: p.pay, minutes: p.minutes, labelled: !!p.payLabelled };
+  if (payReread.size >= PAY_REREAD_MAX) payReread.delete(payReread.keys().next().value);
+  payReread.set(text, hit);
+  return hit;
+}
+function withPay(o, readings) {
+  // `payLabelled` on the row: written by a rig that reads the label stretch,
+  // so its payout is already the one this would find.
+  if (o.corrected || o.typed || 'payLabelled' in o || typeof o.pay !== 'number'
+      || typeof o.text !== 'string' || !PAY_REREAD.test(o.text)) return o;
+  var now = rereadPay(o.text);
+  if (now.pay === o.pay) return o;
+  var to = now.pay, why = 'the card\'s text read again by the current reader';
+  if (to === null) {
+    // The same offer's other readings, over the card's label, same minutes.
+    var votes = Object.create(null), order = [];
+    (readings || []).forEach(function (r) {
+      [r.text].concat(Array.isArray(r.scans) ? r.scans : []).forEach(function (t) {
+        if (typeof t !== 'string' || t.indexOf('$') === -1) return;
+        var got = rereadPay(t);
+        if (got.pay === null || !got.labelled || got.minutes !== o.minutes) return;
+        if (!(got.pay in votes)) { votes[got.pay] = 0; }
+        votes[got.pay] += 1;
+        order.push(got.pay);
+      });
+    });
+    order.forEach(function (v) {
+      if (to === null || votes[v] >= votes[to]) to = v;
+    });
+    why = 'another reading of the same offer held its labelled headline';
+  }
+  if (to === null) {
+    o.corrected = { from: o.pay, to: null,
+                    why: 'its text held no payout under the current reader, only a part of one' };
+    o.payUnread = true;
+    o.suspect = true;
+    o.doubt = 'unread';
+    o.state = 'doubt';
+    o.perHour = null; o.grossPerHour = null; o.perMile = null;
+    return o;
+  }
+  o.corrected = { from: o.pay, to: to, why: why };
+  o.pay = to;
+  // The rates again, over what the row says the verdict was worked out with.
+  var mins = typeof o.billedMinutes === 'number' && o.billedMinutes > 0 ? o.billedMinutes : null;
+  var cost = typeof o.cost === 'number' ? o.cost : 0;
+  if (mins !== null) {
+    var net = to - cost;
+    o.perHour = Math.round(net / (mins / 60) * 100) / 100;
+    o.grossPerHour = Math.round(to / (mins / 60) * 100) / 100;
+    o.perMile = typeof o.miles === 'number' && o.miles > 0 && !o.milesUncertain
+      ? Math.round(net / o.miles * 100) / 100 : null;
+    if (o.state !== 'doubt' && typeof o.target === 'number' && typeof o.band === 'number') {
+      var floor = o.target * (1 - o.band / 100);
+      var uncosted = typeof o.costPerMile === 'number' && o.costPerMile > 0 && cost === 0;
+      o.state = uncosted && o.perHour >= o.target ? 'warn'
+        : o.perHour >= o.target ? 'go' : o.perHour >= floor ? 'warn' : 'no';
+    }
+  }
+  return o;
+}
+
+/* An offer the rig corrected as it was read (journal.py OfferLog._corrects):
+ * its readings from the correction on are the card, and the ones before it
+ * held a figure a later read of the same card replaced. Without this the fold
+ * voted across both, and a first payout written twice (its row and its
+ * settled row) outvoted the correction written once. */
+function afterCorrection(rows) {
+  for (var i = rows.length - 1; i >= 0; i--) {
+    var c = rows[i].corrected;
+    if (c && typeof c.to === 'number' && rows[i].pay === c.to) {
+      var to = c.to;
+      return rows.filter(function (r) { return r.pay === to; });
+    }
+  }
+  return rows;
+}
+
 function latestPerOfferUncached(rows) {
   var byId = Object.create(null);
   var out = [];
@@ -9679,7 +9796,8 @@ function latestPerOfferUncached(rows) {
      and for more it is a pure function of the whole list, which is what it is
      handed here. */
   Object.keys(byId).forEach(function (id) {
-    out[byId[id]] = withApp(Object.assign({}, bestReading(readings[id])));
+    out[byId[id]] = withPay(withApp(Object.assign({}, bestReading(afterCorrection(readings[id])))),
+                            readings[id]);
   });
 
   out.forEach(function (o) {

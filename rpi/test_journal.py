@@ -1870,6 +1870,78 @@ eq('...on the journal\'s own file, with the row already in it',
    _synced[-1:], [(_st.st_ino, _st.st_size)])
 shutil.rmtree(_fs_dir, ignore_errors=True)
 
+# --- a later reading of the same card corrects its payout ----------------------
+#
+# OfferLog._corrects: the 17 Nov Boost+ card's first reads came while it slid up,
+# and a misread headline locks as readily as the right one. A reading of the
+# SAME card (landed, the same minutes and places, inside CORRECT_WINDOW_MS)
+# whose payout is the figure over the card's label replaces the one on record
+# under the same id; it was a second offer. Invented cards.
+_CB = ('${pay}\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min ({mi} mi) total\n'
+       '{shop}\nOak Ln, Marietta')
+_cb = lambda pay, mi='1.5', shop='Maple Grill (12 Fable Ct)': _CB.format(pay=pay, mi=mi, shop=shop)
+# A folder of its own: the suite's `work` is gone by here.
+work = tempfile.mkdtemp()
+rows = [r for r in feed(fresh('corrects.jsonl'), [_cb('1.09')] + [_cb('9.09')] * 3) if r]
+eq('[corrects] the misread first and its correction are one offer (%r)'
+   % [(r['id'], r['seq'], r['pay']) for r in rows], len(set(r['id'] for r in rows)), 1)
+eq('[corrects] ...whose newest row holds the labelled headline, and says what it replaced',
+   (rows[-1]['pay'], (rows[-1].get('corrected') or {}).get('from'),
+    (rows[-1].get('corrected') or {}).get('to')), (9.09, 1.09, 9.09))
+eq('[corrects] ...seq carried on', [r['seq'] for r in rows], list(range(1, len(rows) + 1)))
+ok_('[corrects] ...and every row after the correction carries it, so the newest says it',
+    all(r.get('corrected') for r in rows if r['pay'] == 9.09))
+
+
+def no_(name, cond):
+    eq(name, bool(cond), False)
+
+
+no_('[corrects] ...and the row before it does not', rows[0].get('corrected'))
+
+# The miles are not asked where both readings name the same places: OCR read
+# the card's "(1.5 mi)" as "15 mi" on later reads on 17 Nov.
+rows = [r for r in feed(fresh('corrects-miles.jsonl'), [_cb('1.09')] + [_cb('9.09', mi='15')] * 2) if r]
+eq('[corrects] a correction whose miles OCR misread is still the same card',
+   len(set(r['id'] for r in rows)), 1)
+
+# One stray labelled read of the old figure does not undo the correction: it
+# needs more readings than the payout on record had.
+_log = fresh('corrects-stray.jsonl')
+_acc = OfferAccumulator()
+rows = [r for r in feed(_log, [_cb('1.09')] + [_cb('9.09')] * 4 + [_cb('1.09')], acc=_acc) if r]
+eq('[corrects] a stray read of the first figure after the correction writes nothing (%r)'
+   % [(r['seq'], r['pay']) for r in rows], rows[-1]['pay'], 9.09)
+eq('[corrects] ...and opens no offer of its own', len(set(r['id'] for r in rows)), 1)
+
+# Not the same card: other places — a different card from another shop with the
+# same minutes, inside the window, is a different offer, as it always was.
+rows = [r for r in feed(fresh('corrects-other.jsonl'),
+                        [_cb('1.09'), _cb('9.09', shop='Birch Market (88 Juniper Way)')]) if r]
+eq('[corrects] another shop on the same minutes is another offer',
+   len(set(r['id'] for r in rows)), 2)
+no_('[corrects] ...not a correction', any(r.get('corrected') for r in rows))
+# ...nor the same card after CORRECT_WINDOW_MS with nothing read between.
+rows = [r for r in feed(fresh('corrects-late.jsonl'), [_cb('1.09'), _cb('9.09')],
+                        step=JR.CORRECT_WINDOW_MS / 1000.0 + 1) if r]
+eq('[corrects] the same journey after the window is another offer',
+   len(set(r['id'] for r in rows)), 2)
+# ...nor a payout no label vouches for: a re-offer a cent different is two
+# offers (test_repeats), and the panel's CHECK THE PAY is the doubt.
+_BARE = '${pay}\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta'
+rows = [r for r in feed(fresh('corrects-bare.jsonl'),
+                        [_BARE.format(pay='1.09'), _BARE.format(pay='9.09')]) if r]
+eq('[corrects] an unlabelled payout corrects nothing', len(set(r['id'] for r in rows)), 2)
+# same_card, which scan_pi asks for the health tally and the panel's doubt.
+_log = fresh('corrects-same.jsonl')
+feed(_log, [_cb('9.09')])
+ok_('[corrects] same_card: the card on record, another payout',
+    _log.same_card(P.parse(_cb('1.09')), at=1_700_000_000_000 + 500))
+no_('[corrects] ...not another shop',
+    _log.same_card(P.parse(_cb('1.09', shop='Birch Market (88 Juniper Way)')),
+                   at=1_700_000_000_000 + 500))
+shutil.rmtree(work, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d journal checks passed' % ok)
 sys.exit(1 if bad else 0)

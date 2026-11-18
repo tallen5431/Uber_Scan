@@ -4,6 +4,7 @@ Both implementations run tests/fixtures/cases.json, so if this drifts from the
 JavaScript the shared corpus fails. Keep the two in step when editing either.
 """
 
+import bisect
 import math
 import difflib
 import re
@@ -137,6 +138,45 @@ MONEY_LOOSE = re.compile(r'(?:^|[\s(])[$S5§]\s?(' + DC + r'{1,4}[.,]' + DC + r'
 CENTS = re.compile(r'[.,]' + DC + r'{2}$', ASCII)
 HEADLINE_LABEL = re.compile(r'\s*(?:guarant|includ|incl[.,:]?\s?tips?\b|\*)', re.IGNORECASE)
 
+# The label a headline is printed over, and the stretch under it where no
+# figure is the pay.
+#
+# Uber prints its payout over a label — "$9.09 / Guaranteed (incl. tip)",
+# "$14.48 / Includes expected tip" — and DoorDash beside one, "$7.50
+# Guaranteed (incl. tips)", "$14 incl. tips". Under the label Uber keeps adding
+# chips: "+$0.50 included", "+$2.39 included for priority", and on 17 Nov
+# "$1.68 Boost+ included", which was the pay of every offer that evening.
+# c05858f taught PAY_PART that one shape, and each shape so far has been
+# learned the same way, after a shift of wrong verdicts: the next chip with a
+# word nobody has listed — "$9.09 / Guaranteed (incl. tip) / $11.68 Turbo
+# included" — is the largest figure on the card, and was the pay.
+#
+# So the card's own layout decides, as PAY_CHIP's grammar does: a figure after
+# a headline label and before the journey under it (the first "min", "mi" or
+# "hr" past the label) is a part of the pay, never the pay, unless a label
+# follows it at once (HEADLINE_AFTER: the next card's headline over its own;
+# "at once" allows three of OCR's marks or lone letters between, "$6.63 J /
+# Guaranteed"). The same test says whether the payout a read chose is the
+# card's labelled headline (find_pay's `labelled`, parse's `payLabelled`).
+# With the headline cut off by the box, "Guaranteed (incl. tip) / $1.68 <any
+# word> included / 20 min" has no payout, and the panel says so.
+#
+# Only that stretch. A figure BEFORE the label is a candidate as it always was,
+# whatever the reader put between it and the label: row 505's "$11.47 z / £ |
+# 5 $5 / | Guaranteed" keeps its $11.47 (the $5 stands at the label and is
+# smaller), and DoorDash's "This offer $9.40 / $6.10 Guaranteed" its $9.40. A
+# figure past the journey is the next card's, which one_card bounds: row 410's
+# $24.05 ride under a $6.53 card's "Includes expected tip … 36 min". Measured
+# over the 708 distinct texts in cases.json and sequences.json, no payout,
+# minutes, miles, place or `printed` flag moves, in either port. The star is
+# not a word that opens the stretch, because a ride card prints no word: it
+# only ever says the figure before it is a headline.
+HEADLINE_WORD = re.compile(r'guarant|includes?\s*expected|incl[.,:]?\s?tips?\b',
+                           re.IGNORECASE | ASCII)
+HEADLINE_AFTER = re.compile(r'(?:\s*(?:[^\w\s$]|[A-Za-z](?![A-Za-z]))){0,3}?\s*(?:'
+                            + HEADLINE_WORD.pattern + r'|\*)', re.IGNORECASE | ASCII)
+HEADLINE_ZONE_END = re.compile(r'\d\s*(?:m[il1|]n|mi\b|hrs?\b)', re.IGNORECASE | ASCII)
+
 PAY_SPLIT = re.compile(
     r'\$\s*(' + DC + r'{1,3})\s+(' + DC + r'{1,2}[.,]' + DC + r'{2})'
     r'\s*(?=guarant|includ)',
@@ -265,13 +305,14 @@ PAY_CHIP = re.compile(
 # is none of these.)
 #
 # Decided by grammar, as PAY_CHIP is: a figure is one of these when the card
-# says so around it, in one of four shapes —
+# says so around it, in one of six shapes —
 #
 #     +$2.00 promo     +$1.50 Boost+        a plus, the figure, the word
 #     Boost +$3.00                          the word, then a plus and figure
 #     Includes $3.00 tip    incl. $3 tip    "includes" right before, the word after
 #     Surge $1.50 extra                     the word before, "extra" after
 #     $1.68 Boost+ included                 the figure, the word, "included"
+#     $2.28 Turbo included                  ...any one word, "included" in full
 #
 # The fifth is Uber's Boost+ card of 17 Nov 2026 (the owner's snaps, 19:00):
 # "$9.09 / Guaranteed (incl. tip) / $1.68 Boost+ included". The card is taller
@@ -281,10 +322,18 @@ PAY_CHIP = re.compile(
 # the headline in the read it was right ($6.63, $9.09); with it out, the
 # reading now has no payout and the panel says CHECK THE PHONE.
 #
+# ...and the sixth is the fifth for any one word that is not the headline's own
+# label, "included" spelled out: Uber names a chip after whatever it is
+# selling that month, and a read cut below the headline AND its label has no
+# HEADLINE_WORD to stand in for (a ride card prints none). "$2.28 Turbo
+# included" over a lost headline is no payout, where it was $2.28 at $15/hr.
+# Not "Guaranteed included" or "Includes included": a figure before the label
+# is the headline. No corpus text moves.
+#
 # — never by a word on one side alone. A headline is followed by its label,
 # "$14.48 Includes expected tip" and "$11.42 Guaranteed (incl. tip)", and one
 # card in the corpus prints "$16.05 Promo" with no plus; none of those has the
-# word and the figure in any of the four shapes, and none of the corpus's
+# word and the figure in any of these shapes, and none of the corpus's
 # texts moves. The figure is refused, not the card: with no headline left the
 # reading has no payout, and the panel says so, as for a chip with no
 # headline. The same figures stop counting as a second card in a found crop
@@ -301,7 +350,8 @@ PAY_PART = re.compile(
     + r'|\b' + PART_WORD + r'\s*' + PART_AMOUNT + r'\s*extra\b'
     # (Seven characters at most: unbounded, a 4 kB run of "S" — a lookalike
     # of both "$" and a digit — took 459 ms; test_parser holds 50.)
-    + r'|[$S5§]\s*(?:' + DC + r'|[.,]){1,7}\s*' + PART_WORD + r'\s*\+?\s*incl(?:uded|\.)?\b',
+    + r'|[$S5§]\s*(?:' + DC + r'|[.,]){1,7}\s*' + PART_WORD + r'\s*\+?\s*incl(?:uded|\.)?\b'
+    + r'|[$S5§]\s*(?:' + DC + r'|[.,]){1,7}\s*(?!guarant|includ|incl\b)[A-Za-z]{3,12}\s*\+?\s*included\b',
     re.IGNORECASE | ASCII)
 
 # The minute unit has to be spelled out. It was once allowed to be a bare "m",
@@ -1160,7 +1210,7 @@ PAY_IS_PER_ORDER = re.compile(
     re.IGNORECASE | ASCII)
 
 
-def find_pay(text, where=None, printed=None, figures=None):
+def find_pay(text, where=None, printed=None, figures=None, labelled=None):
     """The offer's headline payout, and — if asked — where every headline was.
 
     `figures`, when given a list, is filled with the position of EVERY figure
@@ -1168,6 +1218,13 @@ def find_pay(text, where=None, printed=None, figures=None):
     (the "$1" fragment PAY_SPLIT joins and the join start at the same one).
     Asked by pipeline.py of a crop it found, which must hold one card's
     payout and no other. See payout_figures.
+
+    `labelled`, when given a list, has one flag appended: whether the payout
+    chosen stands directly before the card's headline label or the rider's
+    star (HEADLINE_AFTER) — the figure the card itself calls its pay. Asked by
+    parse() for `payLabelled`, which is what lets a later read of the same card
+    correct the first (journal.OfferLog.consider) and what says two reads that
+    disagree are a doubt rather than a choice (scan_pi.pay_disagrees).
 
     `printed`, when given a list, has one flag appended: whether the payout
     chosen is printed the way a card prints its headline — to the cent, or
@@ -1216,6 +1273,19 @@ def find_pay(text, where=None, printed=None, figures=None):
         return any(start <= m.start() and m.end() <= end for start, end in chips)
 
     matches = list(MONEY_STRICT.finditer(text)) or list(MONEY_LOOSE.finditer(text))
+    # Each headline label outside a chip, as (where it ends, where the journey
+    # under it starts): the stretch in which a figure is a part of the pay.
+    # See HEADLINE_WORD. One pass for the journey and a bisect per label, so a
+    # text of nothing but labels is not a search per label to its end.
+    journey = [m.start() for m in HEADLINE_ZONE_END.finditer(text)]
+    labels = []
+    for lab in HEADLINE_WORD.finditer(text):
+        if in_chip(lab):
+            continue
+        k = bisect.bisect_left(journey, lab.end())
+        labels.append((lab.end(), journey[k] if k < len(journey) else len(text)))
+    # Which of `found` stand directly before a label, by index.
+    anchored = set()
     best = None
     # Which of `found` are figures whose cents did not read, by index: the
     # joins below start at the same `$` as the figure they mend. See CENTS_LOST.
@@ -1252,6 +1322,8 @@ def find_pay(text, where=None, printed=None, figures=None):
             found.append((v, m.start(),
                           bool(CENTS.search(m.group(1))
                                or HEADLINE_LABEL.match(text, m.end()))))
+            if HEADLINE_AFTER.match(text, m.end()):
+                anchored.add(len(found) - 1)
             # ...whose cents the reader lost, if it printed none of its own and
             # the point or a mark where the point goes follows it. See
             # CENTS_LOST: it competes, and if it wins there is no payout.
@@ -1275,6 +1347,7 @@ def find_pay(text, where=None, printed=None, figures=None):
         v = to_number(m.group(1).strip() + m.group(2).strip())
         if v is not None and 0 < v < 2000:
             found.append((v, m.start(), True))
+            anchored.add(len(found) - 1)
             if best is None or v > best:
                 best = v
     # The cents cut off by a space. See PAY_CENTS_SPLIT. The joined figure only
@@ -1290,13 +1363,44 @@ def find_pay(text, where=None, printed=None, figures=None):
             found.append((v, m.start(), True))
             if best is None or v > best:
                 best = v
+    # The card printed its headline label: a figure under it, before the
+    # journey, with no label of its own is a part of the pay, never the pay.
+    # A later label's stretch ends no earlier than an earlier one's, so the
+    # last label at or before a figure is the one to ask. See HEADLINE_WORD.
+    anchored_at = set(found[i][1] for i in anchored)
+    # Every figure, refused below or not: `figures` asks how many cards a found
+    # crop holds, and counting one more only ever refuses a rescue. The stacked
+    # card's "$22.75 / Guaranteed (incl. tips) / 3.2 imi / Decline / $9 . 40"
+    # has its distance misread, so the stretch under the upper card's label
+    # runs on to the lower card's "$9" — which is the lower card's payout and
+    # a second card (rpi/test_pipeline.py, rescue_refused).
+    if figures is not None:
+        figures.extend(sorted(set(at for _, at, _ in found)))
+    if labels and found:
+        starts = [lo for lo, _ in labels]
+
+        def after_a_label(at):
+            k = bisect.bisect_right(starts, at) - 1
+            return k >= 0 and at < labels[k][1]
+        keep = [i for i, one in enumerate(found)
+                if i in anchored or not after_a_label(one[1])]
+        # ...and gone from the lists below, not only from the choice: such a
+        # figure is no headline, so it must not start a second card in
+        # `where` (one_card) or be the `printed` answer (it still counts in
+        # `figures`, above). Before c05858f the boost's "$1.68", printed to the cent,
+        # was that second card's headline: one_card gave the read's legs to
+        # it, the $9.09 above had no journey and never locked, and only the
+        # reads with the boost alone reached the journal.
+        lost = set(n for n, i in enumerate(keep) if i in lost)
+        found = [found[i] for i in keep]
+        best = max((one[0] for one in found), default=None)
     # The largest figure is one whose cents the reader lost, and nothing of the
     # same value read whole: no payout at all, not the next figure down. See
     # CENTS_LOST.
     if best is not None and all(i in lost for i, one in enumerate(found) if one[0] == best):
         best = None
-    if figures is not None:
-        figures.extend(sorted(set(at for _, at, _ in found)))
+    if labelled is not None and best is not None:
+        labelled.append(any(one[0] == best and one[1] in anchored_at for one in found))
     if printed is not None and best is not None:
         printed.append(min((one for one in found if one[0] == best),
                            key=lambda one: one[1])[2])
@@ -2473,6 +2577,26 @@ def trim_place(value):
     while parts and _scrap(parts[-1], PLACE_TRAIL_KEEP):
         parts.pop()
     return ' '.join(parts).strip(' .,-;:|')
+
+
+# A run of symbols in a place's name, which is a script the reader has no
+# letters for. The owner's 17 Nov evening had a store printed with Chinese
+# characters after its name, and the reader made them "#@%&": the offers page
+# and the panel's title read "<Store> Kitchen #@%& (<Neighbourhood>)" (the
+# suites' invented "Lucky Dragon Kitchen" stands in for it). Two or more of
+# the marks no name or street is spelled with, together, go — a lone "&" between
+# words stays ("Bread & Butter"), and so does every mark a name or an address
+# does use: an apostrophe, a bracket, a hyphen, a point, a slash, a comma, a
+# "#" before a number ("Store #12"). ASCII and a few of OCR's own glyphs only,
+# named one by one, so the two ports cannot disagree about what a letter is.
+# Display only: no payout, minutes or miles is read from a name, and over the
+# 708 distinct texts in cases.json and sequences.json no place moves.
+SYMBOL_RUN = re.compile(r'\s*[!"#$%&*+:;<=>?@\[\]\\^_`{|}~©®°¢£¥§¤«»¬±¶•]{2,}\s*', ASCII)
+
+
+def symbol_runs_out(value):
+    """A place's name with its runs of symbols taken out (SYMBOL_RUN)."""
+    return SYMBOL_RUN.sub(' ', value).strip() if value else value
 
 
 # A name the card put a bracket after — "Kroger (Shiloh Square)", "GoPuff
@@ -5913,7 +6037,7 @@ def find_places(text, legs, lines, whose=None):
     found_on = []
 
     def keep(value, leg=None):
-        value = trim_place(value)
+        value = symbol_runs_out(trim_place(value))
         if len(value) < 3 or len(value) > MAX_PLACE:
             return
         if _closes_what_it_never_opened(value):
@@ -6366,7 +6490,8 @@ def parse(raw_text):
     # needs the amount, and they must be the same answer — two calls would
     # be two chances for them to disagree about which figure is the
     # headline, which is the whole thing this boundary rests on.
-    pay = find_pay(text, _where)
+    _labelled = []
+    pay = find_pay(text, _where, labelled=_labelled)
     # card_span asks a_card_above the question one_card asks, and it has to be
     # asked of the same legs — one_card's answer has the upper card's leg cut.
     found_legs = legs
@@ -6554,6 +6679,9 @@ def parse(raw_text):
     approach = to_pickup(used)
     return {
         'pay': pay,
+        # Whether that payout is the figure the card prints over its label (or
+        # before the rider's star): see find_pay's `labelled`.
+        'payLabelled': bool(pay is not None and _labelled and _labelled[0]),
         'minutes': minutes,
         'miles': miles,
         # Minutes since midnight, not a duration: converting one to the other
