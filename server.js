@@ -58,8 +58,9 @@ var HOST = process.env.HOST || '0.0.0.0';
 var SSL_DIR = path.join(ROOT, 'ssl');
 // The lite edition (lite/lite.js, CLAUDE.md): the camera, the reader and one
 // big card, with the NucBox, the reports and the uploads shut. One bit, read
-// once here; asked by name at three places only — the handler's first line,
-// the NucBox's bases (NBX) and the startup banner — so the full rig's code is
+// once here; asked by name at four places only — the handler's first line,
+// the NucBox's bases (NBX), the startup banner and /api/trends (the offers
+// page's Trends tab, refused in lite's own words) — so the full rig's code is
 // the lite rig's code everywhere else, every money rule included.
 var Lite = require('./lite/lite.js');
 var LITE = Lite.on(ROOT, process.env);
@@ -9543,6 +9544,44 @@ function withApp(o) {
   return o;
 }
 
+/* /api/trends: the window's offers for the offers page's Trends tab, as
+ * trends.js packs them, and its runs of scanning.
+ *
+ * The same offers /api/journal lists, chosen the same way — the fold's own
+ * reading of each card (so `app` from rowApp and the pay as withPay corrected
+ * it), rows from before the clock out, the window at its floor, hidden offers
+ * out — and then NONE of /api/journal's `limit`: the tab is about the whole
+ * range, and /api/journal's cap exists to protect a list of rows this answer
+ * does not carry. No text, no place and no position leave in it: a time, the
+ * app, pay, $/hr, minutes, miles and a few flags (trends.js says which).
+ *
+ * The runs are the offers page's own (showRuns: Advice.runs over
+ * Advice.usable, at Advice.SHOWN_AT), first card to last card, in seconds:
+ * what "hours online" means on the tab. Over every offer in the window, as the
+ * fold hands them, in the fold's order — which is the page's order too. */
+var TrendsLib = null;
+function trendsOut(rows, floor, days) {
+  if (!TrendsLib) TrendsLib = require('./trends.js');
+  var offers = latestPerOffer(rows, floor).filter(function (r) {
+    if ((r.at || 0) < CLOCK_BELIEVABLE_AFTER) return false;
+    if (floor && (r.at || 0) < floor) return false;
+    return !r.hidden;
+  });
+  var spans = [];
+  try {
+    Advice.runs(Advice.usable(offers), Advice.SHOWN_AT).forEach(function (g) {
+      spans.push([Math.round(g[0].at / 1000), Math.round(g[g.length - 1].at / 1000)]);
+    });
+  } catch (e) { spans = []; }
+  var newest = null;
+  for (var i = offers.length - 1; i >= 0 && !newest; i--) {
+    if (typeof offers[i].target === 'number' && (offers[i].at || 0) <= Date.now()) newest = offers[i];
+  }
+  return { ok: true, days: days, floor: floor || 0, total: offers.length,
+           target: newest ? newest.target : null,
+           rows: TrendsLib.pack(TrendsLib.rowsOf(offers)), runs: spans };
+}
+
 /* The payout an offer's stored text gives under the reader as it is now,
  * worked out at read time like rowApp: the journal is never rewritten.
  *
@@ -15643,6 +15682,33 @@ function route(req, res) {
                                       targets: targetsOut(offers, taken),
                                       offers: offers }),
            { 'Content-Type': 'application/json; charset=utf-8' });
+    });
+  }
+
+  // The offers page's Trends tab (trends.js; the owner, Nov 2026): every offer
+  // in the window as a few short columns, and the runs of scanning. See
+  // trendsOut for what is sent and why the cap is not applied.
+  if (pathname === '/api/trends') {
+    // Asked here rather than in lite/lite.js's list of shut doors, which
+    // another round was changing when this landed; the answer is lite's own
+    // shape (404, `lite: true`), so the page hides the tab exactly as it
+    // would on a door that list shut. Moving it into that list is one line.
+    if (LITE) {
+      return send(res, 404, JSON.stringify({ ok: false, lite: true,
+                                             error: 'trends: not part of the lite edition' }),
+                  { 'Content-Type': 'application/json; charset=utf-8' });
+    }
+    var tq2 = url.parse(req.url, true).query || {};
+    var tdays = clampNumber(tq2.days, 0, 3650, 30);
+    var tsince = clampNumber(tq2.since, 0, 4102444800000, 0);
+    return readJournal(function (rows, readErr) {
+      if (!rows) {
+        return send(res, 503, JSON.stringify({ ok: false, unreadable: readErr && readErr.code || 'unknown' }),
+                    { 'Content-Type': 'application/json; charset=utf-8' });
+      }
+      var tfloor = tsince || (tdays > 0 ? Date.now() - tdays * 86400000 : 0);
+      send(res, 200, JSON.stringify(trendsOut(rows, tfloor, tdays)),
+           { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     });
   }
 
