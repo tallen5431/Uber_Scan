@@ -2727,7 +2727,96 @@
     "pay": 7.25,
     "minutes": 18,
     "miles": 4.4,
-    "exclusive": null
+    "exclusive": null,
+    "boost": null
+   }
+  },
+  {
+   "name": "Uber's Boost+ line under the headline is read back as the boost: a label, the pay still the headline",
+   "_why": "The panel says 'incl. $2.93 Boost' under the pay (the owner, Nov 2026). Display only: the payout is find_pay's, PAY_PART still refuses the figure as the pay. Text made up in the 17 Nov card's shape.",
+   "text": "Exclusive x\n$12.40\nGuaranteed (incl. tip)\n$2.93 Boost+ included\n24 min (7.1 mi) total\nPretend Tacos (Juniper Ln)\nAlder Ct NE, Make Town",
+   "expect": {
+    "pay": 12.4,
+    "minutes": 24,
+    "miles": 7.1,
+    "boost": 2.93
+   }
+  },
+  {
+   "name": "...the plus, the figure, then Boost+",
+   "text": "$10.75\nIncludes expected tip\n+$1.50 Boost+\n19 min (5.2 mi) total\nImaginary Bagels (Fern Ave)\nWillow Ct, Make Town",
+   "expect": {
+    "pay": 10.75,
+    "minutes": 19,
+    "boost": 1.5
+   }
+  },
+  {
+   "name": "...the word, a plus, then the figure",
+   "text": "Boost +$3.00\n$14.48\nIncludes expected tip\n31 min (9.0 mi) total\nPretend Pizza (Larkspur Rd)\nOsprey Ct, Make Town",
+   "expect": {
+    "pay": 14.48,
+    "minutes": 31,
+    "boost": 3.0
+   }
+  },
+  {
+   "name": "...DoorDash's Peak Pay in the plus-first shape, the same field",
+   "text": "$9.40 Guaranteed (incl. tips) +$2.00 Peak Pay 9.8 mi Deliver by 7:15 PM",
+   "expect": {
+    "pay": 9.4,
+    "miles": 9.8,
+    "boost": 2.0
+   }
+  },
+  {
+   "name": "...a two-leg card's Boost+ line, its $ and comma read as lookalikes",
+   "_why": "OCR gives 'S2,93' for '$2.93' at times; the cents are still there, so it is still the amount. Text made up.",
+   "text": "$11.20\nGuaranteed (incl. tip)\nS2,93 Boost+ included\n3 min (0.4 mi)\nOsprey Ct, Make Town\n21 mins (6.7 mi)\nFern Ave, Other Town",
+   "expect": {
+    "pay": 11.2,
+    "boost": 2.93
+   }
+  },
+  {
+   "name": "...with the headline cut off by the box: the boost read, no payout, nothing priced",
+   "text": "Guaranteed (incl. tip)\n$1.68 Boost+ included\n20 min (1.5 mi) total\nMake-Believe Noodles (Quill St)\nHeron Way, Make Town",
+   "expect": {
+    "pay": null,
+    "boost": 1.68
+   }
+  },
+  {
+   "name": "...a boost that lost its decimal is no boost: never $293 beside a $9.09 pay",
+   "_why": "'+$050 included' read as fifty dollars twice on the owner's shift (PAY_CHIP); without its cents the amount is not printed at all.",
+   "text": "$9.09\nGuaranteed (incl. tip)\n$293 Boost+ included\n20 min (1.5 mi) total\nMake-Believe Noodles (Quill St)\nHeron Way, Make Town",
+   "expect": {
+    "pay": 9.09,
+    "boost": null
+   }
+  },
+  {
+   "name": "...nor the Busy + Peak Pay banner, which prints no amount",
+   "text": "Busy + Peak Pay\nDelivery Exclusive x\n$7.08\nGuaranteed (incl. tip)\n21 min (6.9 mi) total\nPretend Tacos (Juniper Ln)",
+   "expect": {
+    "pay": 7.08,
+    "boost": null
+   }
+  },
+  {
+   "name": "...nor a boost that is not less than the pay it is part of",
+   "text": "Exclusive $4.21 Includes expected tip +$5.00 Boost 9 min (3.1 mi) Alder Ct NE, Make Town",
+   "expect": {
+    "pay": 4.21,
+    "boost": null
+   }
+  },
+  {
+   "name": "...nor two boost lines that disagree",
+   "text": "$16.80\n$2.39 Boost+ included\n+$2.93 Boost+\n3 min (0.4 mi)\nOsprey Ct, Make Town\n25 mins (12.3 mi)\nFern Ave, Other Town",
+   "expect": {
+    "pay": 16.8,
+    "boost": null
    }
   }
  ],

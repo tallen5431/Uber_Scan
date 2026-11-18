@@ -421,9 +421,9 @@
        is the screen with the least room to work anything out.
 
        The diagnostics — the read time, the leg count, the tracker's drift —
-       genuinely have no room here, and they are all questions for a parked
-       driver on a bigger screen. They go; the line stays. */
-    #detail .diag { display: none; }
+       genuinely had no room here, and they are all questions for a parked
+       driver. They are off this line on every panel now (render: the "…"
+       sheet has them); the line stays. */
     /* And it costs what it costs, so it costs as little as possible: the
        verdict is the row's other occupant and every pixel this line takes comes
        out of it. At the shared 12.5px/1.5 that was 16px, enough on its own to
@@ -564,6 +564,19 @@
   .phonewhy { margin-top: 10px; font-size: clamp(16px, 3.4vw, 24px); font-weight: 700;
               color: var(--text); }
   .phonewhy[hidden] { display: none; }
+  /* "· target $25" after the verdict word (showTarget): the labels' grey and
+     weight, not the verdict's colour — it is the driver's own setting, not
+     part of the verdict — 18px beside the rig's 40px word and 16 at the
+     floor, at 4.60:1 on the day green, the least of the fills (`--muted` is
+     `--muted-on-fill` on ACCEPT and CLOSE CALL). No letter-spacing: the
+     word's .14em is for capitals read across a car. */
+  #verdictLabel[data-target]::after {
+    content: attr(data-target);
+    font-size: max(16px, .45em);
+    font-weight: 700;
+    letter-spacing: 0;
+    color: var(--muted);
+  }
   /* The headline is the one number that cannot be shown here. $1184 over twenty
      minutes is $3548/hr, and at that size, in that position, it is read before
      the label above it is. The card's own pay, time and distance stay below,
@@ -619,6 +632,10 @@
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #shift[hidden] { display: none; }
+  /* One line's height whichever form it is in (fitShift): "✓" is drawn from
+     a fallback font a pixel taller than the row's own, and the row moved a
+     pixel when the tight form took over from the words beside a note. */
+  #shift { height: 1lh; }
   /* 📷 Snap, on the status row — the markup says why it is here. It is drawn
      as a quiet outlined camera in the row's own grey and size, because it is a
      thing for a parked driver and must not compete with the verdict.
@@ -1381,12 +1398,11 @@
   .heldline.between { font-size: clamp(15px, 4.4cqw, 22px); margin-top: 8px; flex-wrap: wrap; }
   .heldline[hidden] { display: none; }
   #heldLine, #heldLine2, #detail .held { cursor: pointer; }
-  /* ...and the same line under an offer, after the reading's age in place of
-   * the diagnostics (showHeld says why it is not in the card). One row: the
+  /* ...and the same line under an offer, after the reading's age (showHeld
+   * says why it is not in the card). One row: the
    * age, the pay and the GPS state whole, the stop the part that gives way. */
   #detail.withheld { display: flex; justify-content: center; white-space: nowrap; }
   #detail.withheld .age { flex: none; }
-  #detail.withheld .diag { display: none; }
   #detail .held { display: flex; min-width: 0; gap: .3em; margin-left: .3em; }
   #detail .held .pay { flex: none; color: var(--text); font-weight: 700; }
   #detail .held .gps { flex: none; }
@@ -1694,6 +1710,10 @@
                                        height: calc(.87 * min(26dvh, 240px, (100cqw - 40px) / 3.1));
                                        align-items: flex-end; line-height: .87; }
     #verdict:not(.novalue) .working { flex: none; min-height: calc(1.25em + 4px); padding: 0 0 4px; }
+    /* The raw $/hr has its own box here, so its place at the head of the
+       working line is empty, and the boost alone on the line (a card with
+       no car costs) starts without a separator. */
+    .working .rawline + .boost > .bsep { display: none; }
     /* THE RAW $/HR AND $/MI FIRST, ON A ROW OF THEIR OWN. Five boxes of 34px
        figures over 20px labels do not fit across 476px — RAW $/HR alone is
        about 110px at 20px, a fifth of the card is 95, and beside the scene
@@ -1717,6 +1737,39 @@
                                                   align-items: baseline; justify-content: center;
                                                   gap: .3em; }
     #verdict:not(.novalue) .places { margin-top: 4px; line-height: 1.2; }
+    /* THE PICKUP AND THE DROPOFF A LINE EACH, parked as well as moving (the
+       owner, Nov 2026, from the evening's screenshots: "Wok Chi Asian
+       Kitchen … (West Midtown/Georgia Te…" on one line, the dropoff gone,
+       over a card with empty room under it). The pickup on the first line
+       and "→ " and the dropoff on the second, each ellipsised in its own
+       line so neither takes the other's, on every offer card at 1024x600:
+       parked, moving, a pair, a notice. Two lines' height whatever the ends
+       (one end read, or none ellipsised), so the slot under it — the pair
+       line, the on-the-way line, the notices with their "+N" fold — starts
+       on one line on every card that names a place. A two-leg ride is the
+       same two lines: its first end is where the rider is picked up, its
+       second where the trip ends (MV.ends). Three or more names are the
+       frames' union, not two ends (showPlaces), and are not given the
+       pickup's and the dropoff's lines; they run on one line as they did
+       and may wrap onto the second, cut at its end, rather than lose
+       everything after the first name to the ellipsis. 1px under the
+       figures where it was 4: the second line cost the slot 22px, and a pair
+       line with the on-the-way line under it then ran the card 2px past its
+       foot (rpi/test_layout.py, the card line over a pair). Not a tighter
+       line: at 1.1 the glyphs' own box (1.16em in DejaVu Sans) stood past the
+       line's, and the same-store note and the wait read as cut. */
+    .live #verdict:not(.novalue) #places:not([hidden]) { margin-top: 1px; min-height: 2.4em; }
+    .live #verdict:not(.novalue) #places.two:not([hidden]) { display: flex; flex-direction: column; }
+    .live #verdict:not(.novalue) #places .end { overflow: hidden; text-overflow: ellipsis; }
+    .live #verdict:not(.novalue) #places.two > .withsame { display: flex; justify-content: center;
+                                                           min-width: 0; gap: .3em; }
+    .live #verdict:not(.novalue) #places .withsame > .same,
+    .live #verdict:not(.novalue) #places .withsame > .wait { flex: none; }
+    .live #verdict:not(.novalue) #places .withsame > .end { min-width: 0; }
+    .live #verdict:not(.novalue) #places.many:not([hidden]) {
+      white-space: normal; display: -webkit-box; -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
     #verdict #places { order: 1; }
     #verdict #stack { order: 2; }
     #verdict #way { order: 3; }
@@ -1767,19 +1820,17 @@
    * back over the whole card, they ran the card past its own edges (the
    * Done entry in AUDITS.md has the measurement).
    *
-   * Two things wait for a stop on every panel, and neither is something an
-   * offer is decided on:
-   *  - the read diagnostics on the line under the card (#detail .diag: the
-   *    read time, the leg count, the tracker's drift). Questions about the
-   *    rig, not the offer, and the 3.5" hat never shows them at all. The
-   *    reading's age beside them stays: it says whether the card is fresh.
-   *  - the ⤳ route link at the end of the pair line. A control, not a fact:
-   *    it opens a map in another tab over this panel, and the pair line in
-   *    front of it says in words what the pair pays, for how long, and where
-   *    the two jobs end.
+   * One thing waits for a stop on every panel, and it is not something an
+   * offer is decided on: the ⤳ route link at the end of the pair line. A
+   * control, not a fact: it opens a map in another tab over this panel, and
+   * the pair line in front of it says in words what the pair pays, for how
+   * long, and where the two jobs end. (The read diagnostics waited too; they
+   * are off the line under the card on every card now, behind "…".)
    * And the two ends get a line each: parked they share one, ellipsised,
    * and a long pickup ran the dropoff off its end (showPlaces). Each still
-   * ellipsises, inside its own line, so neither can take the other's.
+   * ellipsises, inside its own line, so neither can take the other's. On
+   * the rig's own 1024x600 they have a line each parked too (the 1000px
+   * block).
    * Below the rig's own 1024x600 the card is smaller than the whole of it,
    * and what gives is said where it gives (the working, below; on the 3.5"
    * hat $/mi, the rate's size and the notice's room).
@@ -1797,7 +1848,6 @@
    * the driving form larger than the same card parked. Where a size below
    * stops short of what the room seems to allow, it is because the
    * measurement said so. */
-  .live.moving #detail .diag,
   .live.moving #stack .maplink { display: none; }
   /* ...and, below the rig's own 1024x600, the working: the sum that joins
      the figures to the headline (the pay in the minutes, the raw $/hr, less
@@ -2417,6 +2467,56 @@
     }
   }
 
+  /* "· target $25" after the verdict word, smaller and in the labels' grey:
+     what ACCEPT, CLOSE CALL or PASS was judged against (card-words.js
+     targetSaid; the owner, Nov 2026). Drawn by the stylesheet off
+     `data-target` (#verdictLabel::after), so the word's own text, which
+     `--lchars` counts and the suites read, is the word alone and its size
+     is what it was: the target never makes the word smaller. Where the two
+     do not fit on the word's one line — "≈ CLOSE CALL …" takes 417px of the
+     476 inside the half-width card at 40px, the 3.5" hat's word 201 of 208
+     — the target is not drawn, rather than the word shrunk or a second line
+     moving every row under it. null clears it: no verdict, or a withheld
+     one, was judged against nothing. After setRate, whose `novalue` sets
+     the word's size; measured again only when what it depends on moves. */
+  /* The boost on the working line, or not: drawn only where the line keeps
+     the one row it has without it and stays inside the card (render has why
+     it is there). Measured with it and without, again only when the line's
+     words, the card's form or the panel move. */
+  var boostKey = '';
+  function fitBoost(working) {
+    var b = el.working.querySelector('.boost');
+    var key = JSON.stringify([working, el.verdict.className,
+                              document.querySelector('.live').className,
+                              window.innerWidth, window.innerHeight]);
+    if (!b || key === boostKey) { boostKey = b ? key : ''; return; }
+    boostKey = key;
+    b.hidden = true;
+    var h = el.working.offsetHeight;
+    b.hidden = false;
+    if (el.working.offsetHeight > h + 1 || el.working.scrollWidth > el.working.clientWidth + 1) {
+      b.hidden = true;
+    }
+  }
+
+  var targetKey = '';
+  function showTarget(text) {
+    var lab = el.verdictLabel;
+    var key = JSON.stringify([text, lab.textContent, el.verdict.className,
+                              document.querySelector('.live').className,
+                              lab.style.getPropertyValue('--lchars'),
+                              window.innerWidth, window.innerHeight]);
+    if (key === targetKey) return;
+    targetKey = key;
+    lab.removeAttribute('data-target');
+    if (!text) return;
+    var h = lab.offsetHeight;
+    lab.setAttribute('data-target', ' · ' + text);
+    if (lab.scrollWidth > lab.clientWidth + 1 || lab.offsetHeight > h + 1) {
+      lab.removeAttribute('data-target');
+    }
+  }
+
   // "-$10.60", not "$-10.6". A minus sign wedged between the dollar and the
   // digits is a dash at a glance, and the two parked screens already write it
   // the other way — so the same offer read as a loss on one screen and,
@@ -2640,8 +2740,8 @@
   // have the full info presented." The minutes, the miles, $/mi, both ends,
   // the stops, the pair line and every notice are what the offer is decided
   // on, and a decision is the one thing this card is up for while it is
-  // moving. Two things only wait for a stop, the read diagnostics and the
-  // route link, and on the smaller panels what does not fit; the stylesheet
+  // moving. One thing only waits for a stop, the route link, and on the
+  // smaller panels what does not fit; the stylesheet
   // says why each is not decision information.
   //
   // Between offers, the driving form (`.live.driving`): the order in the car
@@ -2841,6 +2941,9 @@
     var where = (list || []).filter(function (p) { return !!p; });
     if (drawnAs(el.places, JSON.stringify([where, same || null, wait || null]))) {
       el.places.classList.toggle('two', where.length === 2);
+      // ...and three or more, the frames' union: on the rig's panel they may
+      // take the second line too (the 1000px block), never the two ends'.
+      el.places.classList.toggle('many', where.length > 2);
       el.places.textContent = '';
       where.forEach(function (p, i) {
         if (i) el.places.appendChild(document.createTextNode(' '));
@@ -3554,7 +3657,7 @@
    *
    * With an offer up the same facts are one line, "In car $28.08 · ▸ Burger
    * Barn · ● armed", and it is NOT in the card: it is the line under it,
-   * after the reading's age, in place of the read diagnostics. Two reasons.
+   * after the reading's age. Two reasons.
    * A line in the card costs the card a row it does not have: put at the
    * card's foot, with a pair up, the card's contents ran past its box at both
    * ends on the 800x480 panel beside the scene picture even with the headline
@@ -3562,9 +3665,9 @@
    * word PASS 11px above the card's edge and the line 10px below it. And a
    * figure inside the verdict's colours reads as the offer's: the pay here is
    * the held order's, and says "In car" in front of it for the same reason.
-   * The diagnostics it stands in for —
-   * costs, legs, reads — are questions for a parked driver, and are back the
-   * moment nothing is held. The pay and the GPS state never shrink; the stop
+   * The diagnostics it stood in for — costs, legs, reads — are questions for
+   * a parked driver, and are on the "…" sheet now, held or not (render's
+   * `readSaid`). The pay and the GPS state never shrink; the stop
    * is the part that gives way (`#detail .held` in the stylesheet).
    *
    * In Map view between offers the card is not drawn at all (setBetween), and
@@ -5039,7 +5142,7 @@
     var bits;
     // What the row itself carries, when the figures are there: the ticks and
     // what they came to, and the median with its noun (see showStatus).
-    var short = null;
+    var short = null, tight = null;
     if (s.clockSet === false) {
       // The rig's own clock has not been set, so it does not yet know what day
       // it is on. Every window over the journal is meaningless until NTP lands,
@@ -5077,6 +5180,8 @@
       bits = [];
       // "✓ 3 for $48" — the same words the offers page puts on a day
       // header, so the two screens say the same thing about the same rows.
+      // This is the whole line, on the "…" sheet and the row's title; the
+      // row itself says "3 taken" (the short form below).
       //
       // A TICK, not "took". `s.took` is `counted.filter(o => o.accepted)`:
       // the offers the driver MARKED, not the jobs they did, and the two are
@@ -5152,17 +5257,41 @@
         bits.push((s.median < 0 ? '-$' : '$')
                   + Math.abs(Math.round(s.median)) + '/hr an offer');
       }
-      // The short form: "✓7 $86 · $13/hr an offer". The tick and its count
-      // run together and the "for" and "net" go behind "…" with the count of
-      // offers and the set-aside. The median keeps "an offer": a bare figure
-      // one dot after the takings reads as the rate of the jobs just named,
-      // which is the fault the noun was put there to end (AUDITS, "The shift
-      // row's median was the typical OFFER"), and on the owner's week it was
-      // pessimistic by 1.5x to 2.3x that way.
-      short = ['\u2713' + s.took
-               + (s.took > 0 && typeof s.earned === 'number'
-                  ? ' ' + (s.earned < 0 ? '-$' : '$') + Math.abs(Math.round(s.earned))
-                  : '')].concat(bits.slice(1));
+      // The short form: "7 taken · $86 · $13/hr" (the owner, Nov 2026, from
+      // the evening's screenshots; it was "✓7 $86 · $13/hr an offer", and
+      // "✓1 $26" read as a code to be learnt, not a sentence). Three plain
+      // pieces, each its own: how many offers were marked taken, what they
+      // came to, and the shift's median rate. "taken" is the Took button's
+      // own word — the count is its presses (`s.took`, the offers marked),
+      // which the tick stood for — and the "for", the "net", the count of
+      // offers and the set-aside go behind "…" as before. The median is of
+      // every OFFER read, not of the jobs taken (AUDITS, "The shift row's
+      // median was the typical OFFER": on the owner's week that figure was
+      // 1.5x to 2.3x below what the taken jobs ran); the row drops its noun
+      // by the owner's choice of words, and the whole line on the "…" sheet
+      // and the row's title still say "an offer". The whole line keeps the
+      // day header's "✓ 7 for $86 net": in "taken" it was a line longer on
+      // the 3.5" hat's sheet beside the heat note, and off its glass.
+      // ...and where the row has not the width for those words beside what
+      // else is on it, the form it had, its figures first and its median's
+      // digits on the glass: "✓7 $86 · $13/hr an offer" (fitShift). Its noun
+      // is the part the ellipsis takes, never the median's digits: the
+      // words end on the figure, and an ellipsis there eats the figure. The words cost
+      // the median 44px of the row ("10 taken · $141 · -$17/hr" against
+      // "✓10 $141 · -$17/hr" at 15px), and beside the longest connection
+      // line on the 800x480, on the 3.5" hat and on a phone they cut its
+      // digits (rpi/test_layout.py) — the figure the row is for.
+      tight = '\u2713' + s.took
+        + (s.took > 0 && typeof s.earned === 'number'
+           ? ' ' + (s.earned < 0 ? '-$' : '$') + Math.abs(Math.round(s.earned)) : '')
+        + (typeof s.median === 'number'
+           ? ' \u00b7 ' + (s.median < 0 ? '-$' : '$') + Math.abs(Math.round(s.median))
+             + '/hr an offer' : '');
+      short = [s.took + ' taken']
+        .concat(s.took > 0 && typeof s.earned === 'number'
+                ? [(s.earned < 0 ? '-$' : '$') + Math.abs(Math.round(s.earned))] : [])
+        .concat(typeof s.median === 'number'
+                ? [(s.median < 0 ? '-$' : '$') + Math.abs(Math.round(s.median)) + '/hr'] : []);
       bits.push(s.offers + (s.offers === 1 ? ' offer' : ' offers'));
       if (s.setAside) bits.push(s.setAside + ' set aside');
       // `beforeClock` is deliberately NOT printed here. Offers the rig recorded
@@ -5176,12 +5305,40 @@
     }
     // The separator in front is the stylesheet's (#shift::before), because
     // whether anything stands before this line is the connection's to say.
-    el.shift.textContent = (short || bits).join(' · ');
+    shiftWords = short ? short.join(' \u00b7 ') : bits.join(' \u00b7 ');
+    shiftTight = short ? tight : '';
+    shiftKey = '';
     shiftFull = bits.join(' · ');
     el.shift.title = shiftFull;
     el.shift.hidden = false;
     fillMore();
   }
+
+  /* The shift line's words where they fit, else its tight form (showShift
+     has why). Tried in its words first whenever anything on the row may
+     have moved — the connection line, the rig's note, 📷's answer, the
+     panel's size — and kept in them unless that cuts them: the row is a
+     flex line, so a cut line is its words wider than the room it was given. */
+  var shiftWords = '', shiftTight = '', shiftKey = '';
+  function fitShift() {
+    if (!el.shift || !shiftWords) return;
+    var snapEl = document.getElementById('snap');
+    var key = JSON.stringify([shiftWords, shiftTight, el.conn.textContent, el.conn.className,
+                              el.health.hidden ? '' : el.health.textContent,
+                              snapEl ? snapEl.className + snapEl.textContent + snapEl.offsetWidth : '',
+                              window.innerWidth, window.innerHeight]);
+    if (key === shiftKey) return;
+    shiftKey = key;
+    setText(el.shift, shiftWords);
+    // Cut inside its own box, or the row itself run past the glass (a row
+    // whose other items will not give way pushes the line's tail off the
+    // panel's edge with nothing cut inside it).
+    if (shiftTight && (el.shift.scrollWidth > el.shift.clientWidth + 1
+                       || el.shift.getBoundingClientRect().right > window.innerWidth - 8 + 0.5)) {
+      setText(el.shift, shiftTight);
+    }
+  }
+  window.addEventListener('resize', fitShift);
 
   // --- the rest of the status row, behind "…" ------------------------------
   //
@@ -5197,6 +5354,8 @@
   // the shift line in full. Not on the bar (it holds six): on the row, like
   // 📷, at no height.
   var shiftFull = '';
+  // The offer's read diagnostics for the sheet, '' with no offer up (render).
+  var readSaid = '';
   var MORE_MS = 10000;
   var moreBack = null;
   var moreBtn = document.getElementById('more');
@@ -5209,6 +5368,9 @@
   // place; the lines after it are drawn again when what they say moves.
   var moreConn = null, moreLink = null;
   function fillMore() {
+    // The row moves with what the sheet says (the connection, the note), so
+    // the shift line is fitted to it here too, on every message and tick.
+    fitShift();
     if (!moreSheet || moreSheet.hidden) return;
     if (!moreConn) {
       moreConn = document.createElement('div');
@@ -5221,7 +5383,12 @@
     setText(moreLink, el.conn.textContent);
     // The note's own lines: the heat chip's sentence, which the row has no
     // room for, and the words beside it (showHealth).
+    // ...and, with an offer up, how the rig read it: the car costs taken off
+    // per mile, the legs, the reads merged, the items, the tracker's note —
+    // the line under the card's diagnostics, which that line no longer
+    // carries (render, `readSaid`).
     var lines = (!el.health.hidden ? healthLines : []).map(function (h) { return [h, 'm-health']; })
+      .concat(readSaid ? [['this offer: ' + readSaid, 'm-read']] : [])
       .concat(shiftFull ? [[shiftFull, 'm-shift']] : []);
     if (!drawnAs(moreSheet, JSON.stringify(lines))) return;
     while (moreConn.nextSibling) moreSheet.removeChild(moreConn.nextSibling);
@@ -5420,6 +5587,8 @@
         : busy ? 'READING THE CARD'
         : phoneWhy ? CW.CHECK_THE_PHONE
         : (PHASE_LABEL[p.phase] || 'WAITING FOR AN OFFER'));
+      showTarget(null);
+      if (readSaid) { readSaid = ''; fillMore(); }
       setText(el.phoneWhy, phoneWhy || '');
       setHidden(el.phoneWhy, !phoneWhy);
       // ...and with an order in the car, where it goes next in that label's
@@ -5600,6 +5769,8 @@
     // exact moment they were told to look at them.
     setRate(r.state === 'doubt' ? '--' : rateText(r.perHour), '/hr',
             r.state === 'doubt');
+    // ...and the target the word was judged against, beside it where it fits.
+    showTarget(CW && CW.targetSaid ? CW.targetSaid(r) : null);
 
     // Raw, always. This row is checked against the phone, so it has to be what
     // the card says — a "net pay" here would never match and the check would
@@ -5695,10 +5866,25 @@
     // line instead, where it always was on those panels — the same function,
     // the same "--". See the `.rawline` rules.
     var rawSaid = CW ? rateText(CW.rawPerHour(r)) : '--';
+    // ...and last, how much of the PAY the card says was the app's Boost+ or
+    // Peak Pay: "incl. $2.93 Boost" (card-words.js boostSaid; the owner, Nov
+    // 2026). Part of the pay, never added to it, and nothing judged on it.
+    // Here and not in the PAY box: under $14.00 there is room for the label
+    // and no more \u2014 "PAY \u00b7 $2.93 BOOST" is about 220px of the box's 158 at
+    // the labels' 20px \u2014 and a second line under the figures would move the
+    // address and the slot on every card for a figure few cards print. This
+    // line is the one that says what the pay is made of, and it is kept at
+    // one line's height on every card already. The part that gives way:
+    // where it would take the line onto a second row or past the card's
+    // edge it is not drawn (fitBoost). Its separator is its own (`.bsep`),
+    // so a line with nothing else on it does not start with one.
+    var boost = CW && CW.boostSaid ? CW.boostSaid(r) : null;
     var working = '<div class="cost"><span class="rawline">' + rawSaid + '/hr raw'
       + (said.length ? ' \u00b7 ' : '') + '</span>'
       + (said.length ? said.map(function (t) { return '<span>' + t + '</span>'; })
-                           .join(' \u00b7 ') : '\u00a0') + '</div>';
+                           .join(' \u00b7 ') : (boost ? '' : '\u00a0'))
+      + (boost ? '<span class="boost"><span class="bsep"> \u00b7 </span>' + boost + '</span>' : '')
+      + '</div>';
     // The two ends, not the union: `places` is in the order the frames
     // arrived. See MV.ends, which the offers page asks too. Without MV this
     // page still draws the list, which is what it always drew.
@@ -5736,6 +5922,7 @@
     showWay(r);
     if (drawnAs(el.working, working)) el.working.innerHTML = working;
     setHidden(el.working, false);
+    fitBoost(working);
 
     var notes = [];
     // Before the brightness notes, which used to be first. Those are about the
@@ -5841,7 +6028,7 @@
     // Rounded to whole seconds and put first so it reads at a glance from the
     // driving seat. `readAt` is set by every reading that carries a verdict, so
     // in this branch it is always a real moment.
-    // Given its own element, because the rest of this line is diagnostics —
+    // Given its own element, because the rest of this line was diagnostics —
     // how many frames it was merged from, whether the corners are being
     // tracked, and once how long the read took. Set in the same grey at the
     // same weight, the age was one `·`-separated fragment among five,
@@ -5860,36 +6047,31 @@
     // lost a letter to the ellipsis in the 800x480 card while moving
     // (rpi/test_layout.py).
     var ageSaid = age < 10 ? 'now' : (Math.floor(age / 10) * 10) + 's ago';
-    // The diagnostics get an element of their own so the 3.5" hat can drop them
-    // and keep the age. They used to be bare text nodes, which CSS cannot
-    // address, so the hat's only way to reclaim the line was to hide all of
-    // #detail — and that took the age with it, on the one screen where the
-    // driver is furthest from being able to work it out for themselves. See the
-    // `max-height: 380px` block.
-    // No read time. "· 1800ms" sat here on every reading: how long the Pi
-    // took over the card, which is the rig's telemetry and nothing a driver
-    // can act on. It is on the reading /api/status serves and in the CSV's
-    // `ms` column, which is where anyone tuning the reader looks. On this
-    // line it was a four-digit number set beside the age, the one figure in
-    // the line that is for the driver.
-    var diagSaid = (deducted ? ' · after $' + Number(r.costPerMile).toFixed(2) + '/mi costs' : '')
+    // THE AGE ALONE on the line under the card; the read diagnostics behind
+    // "…" (the owner, Nov 2026, from the evening's screenshots: "now · after
+    // $0.30/mi costs · 3 legs · 8 reads" was more than the line is for). The
+    // cost per mile is the working line's car costs again, in another form;
+    // the legs and the reads are how the rig came by the figures, questions
+    // for a parked driver tuning it, not facts about the offer. They were
+    // already put away while moving, under an order in the car and on the
+    // 3.5" hat; now they are put away on every card and kept, whole, on the
+    // "…" sheet's line for this offer (fillMore), a press away on every panel.
+    // No read time, as before: "· 1800ms" is on the reading /api/status
+    // serves and in the CSV's `ms` column.
+    readSaid = ((deducted ? ' · after $' + Number(r.costPerMile).toFixed(2) + '/mi costs' : '')
       + (r.legs > 1 ? ' · ' + r.legs + ' legs' : '')
       + (r.mergedFrom > 1 ? ' · ' + r.mergedFrom + ' reads' : '')
       + (r.items ? ' · ' + r.items + ' items' : '')
-      + trackNote(r);
-    // Nodes rather than innerHTML: every fragment here is built from the
-    // scanner's own JSON, and `trackNote` in particular quotes what the
-    // tracker reported.
-    if (drawnAs(el.detail, ageSaid + '\n' + diagSaid)) {
+      + trackNote(r)).replace(/^ · /, '');
+    fillMore();
+    // A node rather than innerHTML, as the diagnostics beside it were: the
+    // held order's line that showHeld appends is built from the server's.
+    if (drawnAs(el.detail, ageSaid)) {
       el.detail.textContent = '';
       var when = document.createElement('b');
       when.className = 'age';
       when.textContent = ageSaid;
       el.detail.appendChild(when);
-      var diag = document.createElement('span');
-      diag.className = 'diag';
-      diag.appendChild(document.createTextNode(diagSaid));
-      el.detail.appendChild(diag);
     }
     // ...and the order in the car, in one line after the age, once the line
     // is built: see showHeld.

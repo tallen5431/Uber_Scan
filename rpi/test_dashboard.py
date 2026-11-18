@@ -513,11 +513,11 @@ const framed = (page) => page.waitForFunction(
           ? '.working .rawline' : '.submetrics .rawfig:has(#vRawHr)'));
       slot.warn = await page.evaluate(LOOK, '#warn');
       slot.places = await page.evaluate(LOOK, '#places');
-      // How old the reading is, and the diagnostics beside it. These are two
-      // different questions sharing one line, and the 3.5" hat wants only one
-      // of them — so they are measured separately on every panel.
+      // How old the reading is, and the whole line it is on: the read
+      // diagnostics that shared it are on the "…" sheet now (Nov 2026), so
+      // the line is the age alone on every panel.
       slot.age = await page.evaluate(LOOK, '#detail .age');
-      slot.diag = await page.evaluate(LOOK, '#detail .diag');
+      slot.diag = await page.evaluate(LOOK, '#detail');
       // Inside the CARD, not merely inside the screen. LOOK answers against the
       // viewport, and the verdict is a centred flex column inside a box the
       // grid has already sized — so content that does not fit spills out of
@@ -2440,7 +2440,7 @@ const framed = (page) => page.waitForFunction(
                                { timeout: 10000 }).catch(() => {});
     await page.waitForFunction(
       "(document.getElementById('shift') || {}).textContent || '' ? "
-      + "/\\/hr an offer/.test(document.getElementById('shift').textContent) : false",
+      + "/\\/hr/.test(document.getElementById('shift').textContent) : false",
       null, { timeout: 8000 }).catch(() => {});
     out.hatShift = await page.evaluate(() => {
       const s = document.getElementById('shift');
@@ -2479,7 +2479,7 @@ const framed = (page) => page.waitForFunction(
                      onGlass: r.width > 0 && r.right <= box.right + 1 };
         }
       }
-      return { there: true, text: text.trim(), figure: figure,
+      return { there: true, text: text.trim(), figure: figure, title: s.title,
                clipped: s.scrollWidth > s.clientWidth + 1,
                fits: document.documentElement.scrollWidth
                      <= document.documentElement.clientWidth + 1 };
@@ -2616,6 +2616,25 @@ const framed = (page) => page.waitForFunction(
       ['untimed', READINGS.untimed, {}],
       ['nominutes', Object.assign({}, READINGS.divides, { minutes: null, cardMinutes: null,
                                                          billedMinutes: null }), {}],
+      // ...and the card's format of Nov 2026 (the owner's five from the
+      // evening's screenshots): the target beside the word, the Boost+ on
+      // the working line, the pickup and the dropoff a line each, a long one
+      // of each so both are cut, each in its own line; the unsettled CLOSE
+      // CALL, whose word leaves the target no room; a ride's two legs; and
+      // DoorDash's two stores and a town, the frames' union, with Peak Pay.
+      ['boostcard', Object.assign({}, READINGS.divides, { target: 25, band: 15, boost: 2.93,
+         places: ['Pretend Wok Asian Kitchen (Example Midtown/Make Tech Square)',
+                  'Heron Church Dr NW & Willow Bend Ct NW, Make Town, Pretend County'] }), {}],
+      ['closetarget', Object.assign({}, READINGS.divides, { state: 'warn', perHour: 19.6,
+         locked: false, target: 25, band: 15,
+         places: ['Quill Pkwy NW, Make Town', 'Larkspur Rd, Other Town'] }), {}],
+      ['twoleg', Object.assign({}, READINGS.divides, { legs: 2, target: 25, band: 15, boost: 2.39,
+         places: ['Osprey Ct & Brindle St NE, Make Town', 'Fern Ave SE & Hollow Oak Pkwy, Other Town'] }),
+       { moving: true }],
+      ['ddstops', Object.assign({}, READINGS.deadline, { target: 25, band: 15, boost: 2.0,
+         app: 'doordash',
+         places: ['Lark Owl Pizza (Example Plaza)', 'Make-Believe Noodles (Quill St)', 'Other Town'] }),
+       { tooBright: true }],
     ];
     const FIX = { lat: 33.95, lon: -84.55, gpsAge: 0.4, gpsErr: 12.0, gpsMode: 3, gpsOk: true,
                   gpsWhy: null, freshFor: 19.6, speed: 0.0, driving: false, drivingFor: 0.0 };
@@ -2678,6 +2697,37 @@ const framed = (page) => page.waitForFunction(
       const st = document.getElementById('stack');
       out.stackText = st.hidden ? null : st.innerText.replace(/\s+/g, ' ').trim();
       out.stackTitle = st.title;
+      // The target beside the word (#verdictLabel::after), its size and
+      // contrast on the fill, and the word's line whole with it.
+      const lab = document.getElementById('verdictLabel');
+      const after = getComputedStyle(lab, '::after');
+      out.target = after.content && after.content !== 'none' ? after.content.replace(/^"|"$/g, '') : null;
+      out.targetFont = parseFloat(after.fontSize);
+      out.targetCr = (() => { const a = L(after.color), b = L(fill);
+                              return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05); })();
+      out.labelWhole = lab.scrollWidth <= lab.clientWidth + 1;
+      out.labelTop = Math.round(lab.getBoundingClientRect().top);
+      // The boost on the working line, and the line one row.
+      const bo = document.querySelector('#working .boost');
+      out.boost = bo && !bo.hidden && bo.getBoundingClientRect().width > 0
+        ? bo.textContent.replace(/^\s*\u00b7\s*/, '').trim() : null;
+      out.workingRows = Math.round(document.getElementById('working').getBoundingClientRect().height
+        / parseFloat(getComputedStyle(document.getElementById('working')).lineHeight || '0') || 0);
+      out.workingHeight = Math.round(document.getElementById('working').getBoundingClientRect().height);
+      // The ends: each its own line, its top, and whether it is cut inside
+      // that line (and only there).
+      const pl = document.getElementById('places');
+      out.ends = pl.hidden ? [] : [].slice.call(pl.querySelectorAll('.end')).map((e) => {
+        const r = e.getBoundingClientRect();
+        return { text: e.textContent, top: Math.round(r.top), cut: e.scrollWidth > e.clientWidth + 1,
+                 inside: r.left >= vr.left && r.right <= vr.right + 0.5 };
+      });
+      out.placesRows = pl.hidden ? 0 : Math.round(pl.getBoundingClientRect().height
+        / parseFloat(getComputedStyle(pl).lineHeight));
+      out.placesBottom = pl.hidden ? null : Math.round(pl.getBoundingClientRect().bottom);
+      out.warnTop = w.hidden ? null : Math.round(wr.top);
+      // The line under the card: the reading's age, and nothing of the read.
+      out.detail = document.getElementById('detail').innerText.replace(/\s+/g, ' ').trim();
       return out;
     };
     out.rawFigs = {};
@@ -2711,6 +2761,14 @@ const framed = (page) => page.waitForFunction(
         tooBright: !!how.tooBright, tooDim: false, gps: { state: 'ok', ageSeconds: 0.4, fix } });
       await page.waitForTimeout(250);
       out.rawFigs[key] = await page.evaluate(FIGS);
+      // ...and where the read diagnostics went: the "…" sheet's line for the
+      // offer, a press away.
+      if (key === 'boostcard') {
+        await page.click('#more', { force: true }).catch(() => {});
+        await page.waitForTimeout(150);
+        out.rawFigs[key].sheet = await page.evaluate(() => [].slice.call(
+          document.querySelectorAll('#moreSheet > div')).map((d) => [d.className, d.textContent]));
+      }
       await page.close();
       // ...and lite's card, given the same reading.
       if (['accept', 'pass', 'doordash', 'checkpay', 'notices'].includes(key)) {
@@ -2861,7 +2919,12 @@ const framed = (page) => page.waitForFunction(
       track: { lost: false, jumps: 3, drift: 41.0, misses: 0 } })),
       READINGS.deducted);
     await page.waitForTimeout(200);
-    out.dead.oldRelock = await page.evaluate(LOOK, '#detail .diag');
+    // ...read where the tracker's note is now: the "…" sheet's line for the
+    // offer (the line under the card is the age alone since Nov 2026).
+    await page.click('#more', { force: true }).catch(() => {});
+    await page.waitForTimeout(150);
+    out.dead.oldRelock = await page.evaluate(LOOK, '#moreSheet .m-read');
+    await page.click('#more', { force: true }).catch(() => {});
 
     await page.close();
     await ctx.close();
@@ -6501,7 +6564,7 @@ const framed = (page) => page.waitForFunction(
     await page.goto(base + '/live.html', { waitUntil: 'domcontentloaded' }).catch(() => {});
     await page.waitForFunction('window.__es !== undefined', null, { timeout: 10000 }).catch(() => {});
     await framed(page);
-    await page.waitForFunction("/\\/hr an offer/.test((document.getElementById('shift') || {}).textContent || '')",
+    await page.waitForFunction("/\\/hr/.test((document.getElementById('shift') || {}).textContent || '')",
                                null, { timeout: 8000 }).catch(() => {});
     const snapState = () => page.evaluate(() => {
       const b = document.getElementById('snap');
@@ -9037,21 +9100,14 @@ try:
                 r['age']['shown'])
             ok_('%s: ...as a time and not a blank' % where,
                 'ago' in r['age']['text'] or r['age']['text'] == 'now')
-            # ...and the half that genuinely has no room on the hat does give
-            # way there, or this is just the old block back under a new name.
-            if panel == '480x320':
-                ok_('%s: ...while the diagnostics beside it stand down' % where,
-                    not r['diag']['shown'])
-            else:
-                ok_('%s: ...with the diagnostics beside it' % where,
-                    r['diag']['shown'])
-                # ...but not the read time. "· 1517ms" is the rig's own
-                # telemetry, already on /api/status and in the CSV, and on this
-                # line it was a four-digit figure beside the one the driver
-                # uses. Matched as digits-then-ms, since "items" ends in ms.
-                no_('%s: ...which carry no read time (%r)'
-                    % (where, r['diag']['text']),
-                    re.search(r'\d+\s*ms\b', r['diag']['text']))
+            # ...and the diagnostics that shared the line (the costs per mile,
+            # the legs, the reads) off it on every panel: they gave way on the
+            # hat first, and since Nov 2026 everywhere, to the "…" sheet. The
+            # line is the age and nothing else, and never the read time.
+            eq('%s: ...alone on its line, the read diagnostics behind "…" (%r)'
+               % (where, r['diag']['text']), r['diag']['text'], r['age']['text'])
+            no_('%s: ...and no read time (%r)' % (where, r['diag']['text']),
+                re.search(r'\d+\s*ms\b', r['diag']['text']))
 
             ok_('%s: the panel still fits' % where, r['fits'])
 
@@ -9555,7 +9611,7 @@ try:
         eq('parked, the card is the whole card',
            (_p.get('driving'), _p.get('moving'), _sh(_p, *_DECIDE), _sh(_p, 'route', 'working'),
             len(_p.get('chips') or []), _sh(_a, 'diag'), _p.get('placesRows')),
-           (False, False, (True,) * len(_DECIDE), (True, True), 2, (True,), 1))
+           (False, False, (True,) * len(_DECIDE), (True, True), 2, (False,), 1))
         eq('moving with an offer up: the whole card, not the driving form — every figure, '
            'the ends, the pair line, the card line and the in-car line',
            (_m.get('moving'), _m.get('driving'), _sh(_m, *_DECIDE),
@@ -9577,8 +9633,9 @@ try:
         # ...and at 800x480, below the rig's own panel, the working with
         # them: the sum from the figures to the headline (test_layout holds
         # it kept at 1024x600).
-        eq('...and only the read diagnostics, the route link and (below 1024x600) the '
-           'working put away, the age kept',
+        # (The read diagnostics are off the line parked too, on the "…" sheet
+        # since Nov 2026: `diag` is False either way.)
+        eq('...and only the route link and (below 1024x600) the working put away, the age kept',
            (_sh(_m, 'route', 'working'), _sh(_am, 'diag', 'age', 'working')),
            ((False, False), (False, True, False)))
         eq('...and the picture beside it where it was', _m.get('view'), _p.get('view'))
@@ -10313,8 +10370,8 @@ try:
     eq('the status row, steady, is the dot and the figures: no words for the '
        'connection (%r)' % _s.get('connText'),
        (_s.get('conn'), _s.get('connText'), _s.get('dot')), (False, 'scanner reading', True))
-    eq('...the ticks, what they came to and the median, nothing else',
-       _s.get('shift'), '\u27137 $86 \u00b7 $13/hr an offer')
+    eq('...how many were taken, what they came to and the median, nothing else',
+       _s.get('shift'), '7 taken \u00b7 $86 \u00b7 $13/hr')
     eq('...with no separator in front of nothing', _s.get('sep'), 'none')
     ok_('..."…" on the row, not on the bar', _s.get('more'))
     eq('...and the bar as it was', _s.get('bar'), 4)
@@ -10406,9 +10463,19 @@ try:
     hat = got.get('hatShift') or {}
     ok_('the shift line on the 3.5" hat was measured', bool(hat.get('there')))
     if hat.get('there'):
-        ok_('the median says what population it is over (%r)'
+        # The row is "10 taken · $141 · -$17/hr" since the owner's words of
+        # Nov 2026; what the median is over is on the row's title and the
+        # "…" sheet, the whole line, where it was always said in full.
+        # ...in the owner's words where the row has the width for them, and
+        # where it has not, its tight form with the figures first, never the
+        # words with the median cut (live.html fitShift).
+        ok_('the row says how many were taken, what they came to and the median (%r)'
             % (hat.get('text') or '')[:60],
-            '/hr an offer' in (hat.get('text') or ''))
+            (hat.get('text') == '10 taken \u00b7 $141 \u00b7 -$17/hr' and not hat.get('clipped'))
+            or hat.get('text') == '\u271310 $141 \u00b7 -$17/hr an offer')
+        ok_('...and the whole line on its title says the median is of every offer (%r)'
+            % (hat.get('title') or '')[:80],
+            '-$17/hr an offer' in (hat.get('title') or ''))
         ok_('...and never the bare word that read as the takings beside it',
             'median' not in (hat.get('text') or ''))
         # The half that makes the label change a fix rather than a trade. This
@@ -10508,14 +10575,16 @@ try:
     eq('every card was drawn for the raw figures', sorted(rf),
        sorted(['accept', 'close', 'pass', 'doordash', 'notices', 'stacked', 'moving',
                'night', 'checkpay', 'untimed', 'nominutes', 'stackedmoving',
-               'noticesmoving', 'scene']))
+               'noticesmoving', 'scene', 'boostcard', 'closetarget', 'twoleg', 'ddstops']))
     _want = {'accept': ('$28.0', '$2.00'), 'close': ('$28.0', '$2.00'),
              'pass': ('$5.4', '$0.20'), 'doordash': ('$21.2', '--'),
              'notices': ('$21.8', '--'), 'stacked': ('$28.0', '$2.00'),
              'moving': ('$28.0', '$2.00'), 'night': ('$28.0', '$2.00'),
              'checkpay': ('--', '--'), 'untimed': ('--', '--'),
              'nominutes': ('--', '$2.00'), 'stackedmoving': ('$28.0', '$2.00'),
-             'noticesmoving': ('$21.8', '--'), 'scene': ('$28.0', '$2.00')}
+             'noticesmoving': ('$21.8', '--'), 'scene': ('$28.0', '$2.00'),
+             'boostcard': ('$28.0', '$2.00'), 'closetarget': ('$28.0', '$2.00'),
+             'twoleg': ('$28.0', '$2.00'), 'ddstops': ('$21.2', '--')}
     # The verdict each reading carries, unchanged by any of this: the word and
     # the class are the reading's own state, and $/mi is in neither.
     _verdict = {'accept': ('ACCEPT', 'go'), 'close': ('CLOSE CALL', 'warn'),
@@ -10524,7 +10593,9 @@ try:
                 'moving': ('ACCEPT', 'go'), 'night': ('ACCEPT', 'go'),
                 'checkpay': ('CHECK THE PAY', 'doubt'), 'untimed': ('CHECK THE TIME', 'doubt'),
                 'nominutes': ('ACCEPT', 'go'), 'stackedmoving': ('CLOSE CALL', 'warn'),
-                'noticesmoving': ('CLOSE CALL …', 'warn'), 'scene': ('ACCEPT', 'go')}
+                'noticesmoving': ('CLOSE CALL …', 'warn'), 'scene': ('ACCEPT', 'go'),
+                'boostcard': ('ACCEPT', 'go'), 'closetarget': ('CLOSE CALL …', 'warn'),
+                'twoleg': ('ACCEPT', 'go'), 'ddstops': ('CLOSE CALL', 'warn')}
     _tops = set()
     for key, m in sorted(rf.items()):
         eq('[%s] raw $/hr and $/mi' % key, (m['vRawHr']['text'], m['vPerMile']['text']), _want[key])
@@ -10624,6 +10695,86 @@ try:
         _nm and _nm[-1].startswith('+') and int(_nm[-1][1:]) + len(_nm) - 1 == 3)
     eq('the car\'s cost is one plain line ("−$2.10 car costs")',
        (rf.get('accept') or {}).get('working', {}).get('text'), '−$2.10 car costs')
+    # --- the card's format of Nov 2026, the owner's five ----------------------
+    #
+    # The target beside the word: "· target $25" in the labels' grey and
+    # weight, readable on the fill, the word's line whole with it and the
+    # word its size; not drawn where the two do not fit on the one line
+    # (the unsettled CLOSE CALL), nor on a refused card, nor with no target
+    # on the reading (every older card here). The word's own text is the
+    # word alone.
+    for key in ('boostcard', 'twoleg', 'ddstops'):
+        m = rf.get(key) or {}
+        eq('[%s] the target beside the word (%r)' % (key, m.get('target')),
+           m.get('target'), '\u00a0\u00b7 target $25')
+        ok_('[%s] ...16px or more (%.1f), reading on the fill (%.2f:1), the line whole'
+            % (key, m.get('targetFont') or 0, m.get('targetCr') or 0),
+            (m.get('targetFont') or 0) >= 16 and (m.get('targetCr') or 0) >= 4.5 and m.get('labelWhole'))
+    eq('...and not drawn where the word leaves it no room, on a refused card or with no target',
+       [(rf.get(k) or {}).get('target') for k in ('closetarget', 'checkpay', 'accept')], [None] * 3)
+    ok_('...the unsettled word whole at its size without it (%.1fpx)'
+        % (rf.get('closetarget') or {}).get('labelFont', 0),
+        (rf.get('closetarget') or {}).get('labelWhole')
+        and (rf.get('closetarget') or {}).get('labelFont') == (rf.get('notices') or {}).get('labelFont'))
+    _lt = sorted(set(m.get('labelTop') for k, m in _cards))
+    eq('...and the word on one line on every card, target or none (%r)' % _lt, len(_lt), 1)
+    # The Boost+ on the working line, after the car's costs: part of the pay,
+    # nothing judged on it — the verdict, the headline and the figures are
+    # what the same card draws without it — and the line still one row.
+    eq('[boostcard] the boost after the car costs ("incl. $2.93 Boost")',
+       ((rf.get('boostcard') or {}).get('working', {}).get('text'),
+        (rf.get('boostcard') or {}).get('boost')),
+       ('−$2.10 car costs · incl. $2.93 Boost', 'incl. $2.93 Boost'))
+    eq('[ddstops] ...DoorDash\'s Peak Pay alone on the line, no separator before it',
+       ((rf.get('ddstops') or {}).get('working', {}).get('text'), (rf.get('ddstops') or {}).get('boost')),
+       ('incl. $2.00 Peak Pay', 'incl. $2.00 Peak Pay'))
+    eq('...and nothing judged on it: the boost card\'s headline, verdict and figures are the plain card\'s',
+       [(rf.get('boostcard') or {}).get(k) for k in ('headline', 'label')]
+       + [((rf.get('boostcard') or {}).get(k) or {}).get('text') for k in ('vRawHr', 'vPerMile', 'vPay')],
+       [(rf.get('accept') or {}).get(k) for k in ('headline', 'label')]
+       + [((rf.get('accept') or {}).get(k) or {}).get('text') for k in ('vRawHr', 'vPerMile', 'vPay')])
+    _wh = sorted(set(m.get('workingHeight') for k, m in _cards))
+    eq('...the working line one height on every card, boost or none (%r)' % _wh, len(_wh), 1)
+    # The pickup and the dropoff a line each, parked and moving, each cut
+    # inside its own line; the arrow at the head of the second; both lines
+    # at one place on every card that names two ends, and the slot under
+    # them starting at one place too. The frames' union (three names) runs
+    # on as one text over the two lines, never given the two ends' lines.
+    _two = [(k, m) for k, m in _cards if len(m.get('ends') or []) == 2]
+    ok_('the two-ended cards were drawn (%r)' % [k for k, m in _two],
+        {'boostcard', 'closetarget', 'twoleg', 'noticesmoving'} <= set(k for k, m in _two))
+    for key, m in _two:
+        e = m['ends']
+        ok_('[%s] the pickup on the first line, "→ " and the dropoff on the second (%r)' % (key, e),
+            e[1]['top'] > e[0]['top'] and e[1]['text'].startswith('\u2192 ')
+            and not e[0]['text'].startswith('\u2192') and all(x['inside'] for x in e))
+    _e0 = sorted(set(m['ends'][0]['top'] for k, m in _two))
+    _e1 = sorted(set(m['ends'][1]['top'] for k, m in _two))
+    eq('...at one place on every card, parked or moving (%r, %r)' % (_e0, _e1),
+       (len(_e0), len(_e1)), (1, 1))
+    _bc = (rf.get('boostcard') or {}).get('ends') or []
+    eq('[boostcard] a long pickup and a long dropoff each cut in its own line, neither taking the other\'s',
+       [x.get('cut') for x in _bc], [True, True])
+    _pb = sorted(set(m.get('placesBottom') for k, m in _cards if m.get('ends')))
+    eq('...and the address two lines tall on every card that names a place, one end or three (%r)' % _pb,
+       len(_pb), 1)
+    _dd = rf.get('ddstops') or {}
+    eq('[ddstops] the frames\' union on as one text over the two lines (%r)' % _dd.get('ends'),
+       (_dd.get('placesRows'), ''.join(x['text'] + ' ' for x in _dd.get('ends') or []).strip()),
+       (2, 'Lark Owl Pizza (Example Plaza) \u2192 Make-Believe Noodles (Quill St) \u2192 Other Town'))
+    _wt = sorted(set(m.get('warnTop') for k, m in _cards if m.get('warnTop') is not None and m.get('ends')))
+    eq('...and the notices under it at one place on every card with an address (%r)' % _wt, len(_wt), 1)
+    # The line under the card: the reading's age, and nothing of the read —
+    # the car costs per mile, the legs, the reads are on the "…" sheet's line
+    # for this offer.
+    for key, m in _cards:
+        ok_('[%s] the line under the card is the age alone (%r)' % (key, m.get('detail')),
+            (m.get('detail') or '').startswith('now')
+            and (m.get('detail') == 'now' or 'In car' in m.get('detail'))
+            and not re.search(r'legs|reads|/mi costs', m.get('detail') or ''))
+    _sh = dict((c, t) for c, t in (rf.get('boostcard') or {}).get('sheet') or [])
+    eq('...and the "…" sheet has the read: the costs per mile, the legs and the reads (%r)' % _sh,
+       _sh.get('m-read'), 'this offer: after $0.30/mi costs · 3 legs · 5 reads')
     for key in ('accept', 'pass', 'doordash', 'checkpay', 'notices'):
         lt = (rf.get(key) or {}).get('lite') or {}
         m = rf.get(key) or {}
@@ -10825,7 +10976,10 @@ try:
         ok_('[%s] ...the shift line giving way to it (%dpx of its %dpx)'
             % (_pn, ((_h.get('both') or {}).get('shift') or {}).get('w') or 0,
                ((_h.get('both') or {}).get('shift') or {}).get('sw') or 0),
-            not ((_h.get('both') or {}).get('shift') or {}).get('whole'))
+            not ((_h.get('both') or {}).get('shift') or {}).get('whole')
+            # ...or, since its words of Nov 2026, in its tight form whole
+            # beside it (live.html fitShift): giving way either way.
+            or (((_h.get('both') or {}).get('shift') or {}).get('text') or '').startswith('\u2713'))
         eq('[%s] ...with the connection state beside it, also whole' % _pn,
            (((_h.get('both') or {}).get('conn') or {}).get('text'),
             ((_h.get('both') or {}).get('conn') or {}).get('whole')),
@@ -11227,13 +11381,14 @@ try:
         # It is not about the offer on screen, so it must not wait for one:
         # this is read before any card has arrived.
         ok_('the shift shows before any card has', first.get('shown'))
-        # The row carries the ticks, what they came to and the median, and
-        # the rest is behind "…": the same figures, fewer words. "for" and
+        # The row carries how many were taken, what they came to and the
+        # median ("2 taken · $48 · $21/hr", the owner's words of Nov 2026),
+        # and the rest is behind "…": the same figures, fewer words. "for" and
         # "net" are the day header's words for the same two numbers, and
         # the count of offers and the set-aside were already what a small
         # screen lost first (see the ordering checks below).
-        eq('...the row saying the ticks, what they came to and the median',
-           first.get('text'), '\u27132 $48 \u00b7 $21/hr an offer')
+        eq('...the row saying how many were taken, what they came to and the median',
+           first.get('text'), '2 taken \u00b7 $48 \u00b7 $21/hr')
         ok_('...and the whole line behind "…", saying how many offers',
             '9 offers' in (first.get('full') or ''))
         ok_('...how many were set aside rather than dropping them',
@@ -11242,8 +11397,8 @@ try:
         # ...as ticks. `took` is the count of offers the driver MARKED, and on
         # the real week's two busiest days that was 10 against 41 green cards
         # and 12 against 54. "took 10 for $140" reads as the evening's
-        # takings; the tick is the glyph the button and the offers page use.
-        no_('...as ticks, never as the word "took"',
+        # takings; "taken" is the Took button's own word for its presses.
+        no_('...as "taken", the button\'s word, never "took 10 for $140"',
             'took' in (first.get('text') or '') + (first.get('full') or ''))
         ok_('...and the median rate', '$21/hr' in (first.get('text') or ''))
         # What the taken ones were worth. This check used to forbid any dollar
@@ -11290,7 +11445,7 @@ try:
         eq('...and the count is asked for again when an offer is marked',
            got.get('shiftAsked'), 2)
         ok_('...so the taken figure follows the button',
-            (after.get('text') or '').startswith('\u27133 $62'))
+            (after.get('text') or '').startswith('3 taken \u00b7 $62'))
         ok_('...and the money with it, behind "…" too',
             '\u2713 3 for $62 net' in (after.get('full') or ''))
 
@@ -11349,8 +11504,8 @@ try:
         # did, not print "for $undefined" or "for $NaN".
         ok_('...and a server that sends no total leaves the count alone (%r)'
             % (early.get('text') or '')[-30:],
-            (early.get('text') or '').startswith('\u27131')
-            and '$' not in (early.get('text') or '').split('\u00b7')[0]
+            (early.get('text') or '').split(' \u00b7 ')[0] == '1 taken'
+            and all('/hr' in p for p in (early.get('text') or '').split(' \u00b7 ')[1:])
             and ' for $' not in (early.get('full') or ''))
 
     # A net below zero, signed the way every other figure on these pages is.
@@ -11360,7 +11515,7 @@ try:
     if neg:
         ok_('...and prints the sign before the dollar (%r)' % (neg.get('text') or '')[-24:],
             '\u2713 1 for -$1 net' in (neg.get('full') or '')
-            and (neg.get('text') or '').startswith('\u27131 -$1'))
+            and (neg.get('text') or '').startswith('1 taken \u00b7 -$1'))
         ok_('...never as $-1', '$-' not in (neg.get('text') or '') + (neg.get('full') or ''))
 
     # ...and the median, which had its own copy of the same slip. A shift of
@@ -11374,7 +11529,8 @@ try:
         # "took 1 for -$1 net" read as the rate of that one job.
         ok_('the shift median is signed before the dollar (%r)'
             % (red.get('text') or '')[-34:],
-            '-$12/hr an offer' in (red.get('text') or ''))
+            (red.get('text') or '').endswith(' \u00b7 -$12/hr')
+            and '-$12/hr an offer' in (red.get('full') or ''))
         ok_('...never as $-12', '$-' not in (red.get('text') or ''))
         # Whole dollars, which is what this line has always shown: a median
         # read at a glance from the driving seat does not want a decimal.
