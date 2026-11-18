@@ -770,8 +770,82 @@
   #app[data-view] .tab { display: none; }
   #app[data-view="all"] .tab, #app[data-view="today"] .tab[data-tab="today"],
   #app[data-view="offers"] .tab[data-tab="offers"], #app[data-view="money"] .tab[data-tab="money"],
-  #app[data-view="strategy"] .tab[data-tab="strategy"], #app[data-view="runs"] .tab[data-tab="runs"] {
+  #app[data-view="strategy"] .tab[data-tab="strategy"], #app[data-view="runs"] .tab[data-tab="runs"],
+  #app[data-view="trends"] .tab[data-tab="trends"] {
     display: block; }
+  /* THE TRENDS TAB. Drawn as SVG sized to its box at draw time, not scaled
+     from a fixed viewBox: scaled, an 11px label at 640 wide is 6.7px on a
+     390px phone. The colours are the page's own, plus one for each app — not
+     the verdict colours, which mean go / close / pass everywhere else here. */
+  :root { --uber: #6fb6ff; --dash: #ff9a6b; }
+  .trends h3 { margin: 16px 0 4px; font-size: 15px; }
+  .trends .chips { margin: 4px 0 6px; }
+  .trends .chart { width: 100%; overflow: hidden; }
+  .trends svg { display: block; width: 100%; height: auto; font: 11px system-ui, sans-serif; }
+  .trends svg text { fill: var(--muted); font-variant-numeric: tabular-nums; }
+  .trends svg .ax { stroke: var(--line); stroke-width: 1; }
+  .trends svg .grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 4; opacity: .5; }
+  .trends svg .band { fill: var(--panel-2); }
+  .trends svg .med { stroke: var(--text); stroke-width: 2; fill: none; }
+  .trends svg .uber { stroke: var(--uber); fill: none; stroke-width: 1.5; }
+  .trends svg .dash { stroke: var(--dash); fill: none; stroke-width: 1.5; }
+  .trends svg .uberdot { fill: var(--uber); }
+  .trends svg .dashdot { fill: var(--dash); }
+  .trends svg .dot { fill: var(--text); }
+  .trends svg .hollow { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; }
+  .trends svg .bar { fill: var(--line); }
+  .trends svg .bar2 { fill: var(--muted); }
+  .trends svg .warnbar { fill: var(--warn); }
+  .trends svg .nobar { fill: var(--no); }
+  .trends svg .doubtbar { fill: var(--doubt); }
+  .trends svg .hit { fill: transparent; cursor: pointer; }
+  .trends svg .hit:hover, .trends svg .hit:focus { fill: var(--text); opacity: .08; outline: none; }
+  .trends svg .p90 { stroke: var(--go); fill: none; stroke-width: 1.5; stroke-dasharray: 4 3; }
+  .trends svg .p25, .trends svg .p75 { stroke: var(--muted); fill: none; stroke-width: 1.5; }
+  .trends svg .before { stroke: var(--muted); fill: none; stroke-width: 2; stroke-dasharray: 5 4; }
+  .trends .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 2px 0 4px; font-size: 12px;
+                    color: var(--muted); }
+  .trends .legend i { display: inline-block; width: 14px; height: 3px; margin-right: 4px; vertical-align: middle;
+                      background: var(--text); }
+  .trends .legend i.uber { background: var(--uber); } .trends .legend i.dash { background: var(--dash); }
+  .trends .legend i.band { height: 10px; background: var(--panel-2); border: 1px solid var(--line); }
+  .trends .legend i.p90 { background: var(--go); } .trends .legend i.p25 { background: var(--muted); }
+  .trends .legend i.before { background: repeating-linear-gradient(90deg, var(--muted) 0 5px, transparent 5px 9px); }
+  .trends .legend i.bar { height: 10px; background: var(--line); }
+  .trends .legend i.warnbar { height: 10px; background: var(--warn); }
+  .trends .legend i.nobar { height: 10px; background: var(--no); }
+  .trends .legend i.doubtbar { height: 10px; background: var(--doubt); }
+  /* A table that scrolls in its own box, its first column held, so the page
+     itself never scrolls sideways at 360px. */
+  .trends .tw { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+  .trends table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .trends th, .trends td { padding: 3px 5px; border-bottom: 1px solid var(--line); text-align: right;
+                           white-space: nowrap; }
+  .trends th:first-child, .trends td:first-child { text-align: left; position: sticky; left: 0;
+                                                   background: var(--panel); }
+  .trends table.grid24 td { min-width: 34px; text-align: center; line-height: 1.15; }
+  .trends table.grid24 td small { display: block; font-size: 10px; color: var(--muted); }
+  .trends td.above { background: var(--go-dim); }
+  .trends td.below { background: var(--no-dim); }
+  .trends td.thin, .trends .tile.thin { color: var(--muted); }
+  .trends .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+  .trends .cal .wd { font-size: 11px; color: var(--muted); text-align: center; }
+  .trends .tile { min-height: 50px; padding: 3px 4px; border: 1px solid var(--line); border-radius: 6px;
+                  font-size: 11px; line-height: 1.2; font-variant-numeric: tabular-nums; overflow: hidden;
+                  cursor: pointer; background: transparent; color: var(--text); font-family: inherit;
+                  text-align: left; }
+  .trends .tile b { display: block; font-size: 13px; }
+  .trends .tile em { font-style: normal; color: var(--muted); }
+  .trends .tile.above { background: var(--go-dim); }
+  .trends .tile.below { background: var(--no-dim); }
+  .trends .tile.empty { border-color: transparent; cursor: default; }
+  .trends .cmp { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: end; margin: 4px 0 8px; font-size: 12px; }
+  .trends .cmp label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); }
+  .trends .cmp input { font: inherit; font-size: 14px; min-height: 36px; color: var(--text);
+                       background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; }
+  .trends .cmp button, .trends .csvs a { min-height: 40px; }
+  .trends .csvs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  #dayNote button { min-height: 36px; margin-left: 6px; }
   /* In All, each group under a quiet rule, so the old long page still says
      where one group ends. */
   #app[data-view="all"] .tab + .tab { border-top: 1px dashed var(--line); margin-top: 18px; padding-top: 4px; }
@@ -828,6 +902,7 @@
     <button type="button" role="tab" data-view="money" aria-selected="false">Money</button>
     <button type="button" role="tab" data-view="strategy" aria-selected="false">Strategy</button>
     <button type="button" role="tab" data-view="runs" aria-selected="false">Runs</button>
+    <button type="button" role="tab" data-view="trends" aria-selected="false" id="trendsTab">Trends</button>
     <button type="button" role="tab" data-view="all" aria-selected="false">All</button>
   </nav>
 
@@ -987,6 +1062,9 @@
     <button type="button" data-sort="pay" aria-pressed="false">Highest pay</button>
     <button type="button" data-sort="minutes" aria-pressed="false">Longest</button>
   </div>
+  <!-- A day (or a week) picked on the Trends tab: the list narrowed to it,
+       said so, and one press to put every day back. -->
+  <p class="hint" id="dayNote" hidden><span id="daySays"></span><button type="button" id="dayClear">every day</button></p>
   <p class="hint" id="findNote" hidden></p>
   <div id="log"></div>
   <p class="hint" id="more"></p>
@@ -1234,6 +1312,106 @@
   </section>
   </div>
 
+  <!-- Trends (trends.js, /api/trends; the owner, Nov 2026). Every offer in
+       the range above, not the newest 5,000 the list holds: asked for only
+       when this tab (or All) is shown, so the page's own load is unchanged.
+       Offered, not earned, and descriptive throughout: nothing here moves the
+       verdict, the target or a money rule, and $/mi is drawn to read. -->
+  <div class="tab" data-tab="trends" id="tab-trends" role="tabpanel" aria-label="Trends">
+  <section class="card trends" id="trends">
+  <h2>Trends <em id="trSpan">· every offer in the range</em></h2>
+  <p class="sum">How the offers moved over the range pressed above. What was offered, not what was earned;
+    nothing here moves the verdict or the target, and $/mi is for reading, not a rule.</p>
+  <p class="hint" id="trSays">Open this tab with 7 days, 30 days or All pressed.</p>
+  <div id="trBody" hidden>
+    <div class="chips" id="trBy" role="group" aria-label="Group the time charts by">
+      <button type="button" data-by="day" aria-pressed="true">By day</button>
+      <button type="button" data-by="week" aria-pressed="false">By week</button>
+    </div>
+
+    <h3 id="trDailyHead">Each day</h3>
+    <div class="chips" id="trMetric" role="group" aria-label="Which figure">
+      <button type="button" data-metric="pay" aria-pressed="false">Pay</button>
+      <button type="button" data-metric="perHour" aria-pressed="true">$/hr</button>
+      <button type="button" data-metric="perMile" aria-pressed="false">$/mi</button>
+      <button type="button" data-metric="minutes" aria-pressed="false">Minutes</button>
+      <button type="button" data-metric="miles" aria-pressed="false">Miles</button>
+    </div>
+    <div class="legend"><span><i></i>median</span><span><i class="band"></i>middle half</span>
+      <span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span><span><i class="bar"></i>offers</span></div>
+    <div class="chart" id="trDaily"></div>
+    <p class="hint" id="trDailyNote"></p>
+
+    <h3>Hour of day <em>· median $/hr</em></h3>
+    <div class="chips" id="trHourDays" role="group" aria-label="Which days">
+      <button type="button" data-days="all" aria-pressed="true">All days</button>
+      <button type="button" data-days="weekday" aria-pressed="false">Weekdays</button>
+      <button type="button" data-days="weekend" aria-pressed="false">Weekends</button>
+      <button type="button" data-months="1" aria-pressed="false" id="trMonths">This month vs last</button>
+    </div>
+    <div class="legend" id="trHourLegend"></div>
+    <div class="chart" id="trHourly"></div>
+    <p class="hint" id="trHourNote"></p>
+
+    <h3>Weekday × hour <em>· median $/hr</em></h3>
+    <p class="hint" id="trGridNote"></p>
+    <div class="tw" id="trGrid"></div>
+
+    <h3>Good offers per hour online</h3>
+    <div class="chart" id="trGood"></div>
+    <p class="hint" id="trGoodNote"></p>
+
+    <h3>Pay spread</h3>
+    <div class="legend"><span><i class="p25"></i>P25 and P75</span><span><i></i>median</span><span><i class="p90"></i>P90</span></div>
+    <div class="chart" id="trSpread"></div>
+
+    <h3>Trip mix <em>· median minutes and miles</em></h3>
+    <div class="chart" id="trMixMin"></div>
+    <div class="chart" id="trMixMi"></div>
+
+    <h3>Pay against miles</h3>
+    <div class="legend" id="trScatterLegend"></div>
+    <div class="chart" id="trScatter"></div>
+    <p class="hint" id="trScatterNote"></p>
+    <h3>Rate card <em>· a 20-minute, 5-mile trip</em></h3>
+    <div class="legend"><span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span></div>
+    <div class="chart" id="trRateChart"></div>
+    <div class="tw" id="trRate"></div>
+    <p class="hint" id="trRateNote"></p>
+
+    <h3>Compare two periods</h3>
+    <div class="cmp">
+      <label>A from<input type="date" id="trAFrom"></label><label>A to<input type="date" id="trATo"></label>
+      <label>B from<input type="date" id="trBFrom"></label><label>B to<input type="date" id="trBTo"></label>
+      <button type="button" class="linkbtn" id="trCmpGo">Compare</button>
+      <button type="button" class="linkbtn" id="trCmpWk">Weekdays vs weekends</button>
+    </div>
+    <div class="tw" id="trCompare"></div>
+
+    <h3>Calendar <em>· median $/hr, offers per hour online</em></h3>
+    <div id="trCal"></div>
+    <p class="hint" id="trCalNote"></p>
+
+    <h3>App share and boost share</h3>
+    <div class="legend"><span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span><span><i class="bar"></i>app not known</span></div>
+    <div class="chart" id="trShare"></div>
+    <p class="hint" id="trShareNote"></p>
+
+    <h3>Data quality</h3>
+    <div class="legend"><span><i class="nobar"></i>suspect</span><span><i class="warnbar"></i>pay re-read</span><span><i class="doubtbar"></i>pay unread</span></div>
+    <div class="chart" id="trQuality"></div>
+    <p class="hint" id="trQualityNote"></p>
+
+    <div class="csvs">
+      <a class="linkbtn" id="trCsvDays" href="#" download="trends-daily.csv">⤓ Daily table (CSV)</a>
+      <a class="linkbtn" id="trCsvHours" href="#" download="trends-hourly.csv">⤓ Hourly table (CSV)</a>
+    </div>
+    <p class="hint">Where you waited, by the car's own GPS fix when each card came up, is in the
+      Strategy &amp; places report on the NucBox (its "Waited" tab), held to the same hours and tested.</p>
+  </div>
+  </section>
+  </div>
+
   <ul class="note" id="caveats"></ul>
 
   <!-- Every action on this page is one tap and none of them could be taken
@@ -1317,7 +1495,8 @@
    'reviewList',
    'sheet', 'sheetHead', 'sheetWhere', 'sheetShut', 'sheetMap', 'sheetFoot',
    'sheetNote', 'sheetOut', 'incar', 'incarList',
-   'targets', 'targetsRate', 'targetsAreas', 'targetsAreasHead', 'targetsNotes'].forEach(function (id) {
+   'targets', 'targetsRate', 'targetsAreas', 'targetsAreasHead', 'targetsNotes',
+   'dayNote', 'daySays', 'dayClear'].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
 
@@ -2029,7 +2208,23 @@
     busy: 'Nothing in this stretch arrived during a ticked job'
   };
 
+  /* A stretch of driver days picked on the Trends tab ({ from, to, said },
+     'YYYY-MM-DD' both ends), or null. The list only, like the chips: every
+     figure on the page stays the window's. */
+  var dayPick = null;
+  function isoDay(at) {
+    var d = dayOf(at);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
+      + String(d.getDate()).padStart(2, '0');
+  }
+
   function matching(rows) {
+    if (dayPick) {
+      rows = rows.filter(function (r) {
+        var k = isoDay(r.at);
+        return k >= dayPick.from && k <= dayPick.to;
+      });
+    }
     if (pick !== 'all') rows = rows.filter(picked);
     var q = (el.find.value || '').trim().toLowerCase();
     if (!q) return rows;
@@ -5111,6 +5306,18 @@
     paintInCar();
     if (y) window.scrollTo(0, y);
 
+    // The day picked on Trends, said, and why it can be empty: the list holds
+    // the newest offers the server sent for this range, not every one.
+    el.dayNote.hidden = !dayPick;
+    if (dayPick) {
+      var ofPick = matching(kept).length;
+      el.daySays.textContent = 'Only ' + dayPick.said + ', picked on Trends'
+        + (found.length || ofPick ? '.' : (data && data.truncated
+          ? ': none of its offers are among the ' + kept.length + ' loaded for this range (the newest). '
+            + 'Press a shorter range, or use the CSV.'
+          : ': no offers listed.'));
+    }
+
     // Say what the filter did, because an empty list and a list with nothing
     // matching look identical, and one of them means "you have no offers".
     var q = (el.find.value || '').trim();
@@ -6075,9 +6282,29 @@
     renderList();
   });
 
+  // A day or a week pressed on the Trends tab: the list narrowed to it, and
+  // the Offers tab shown. An event rather than a shared variable, because the
+  // Trends script is its own, like the Gold card's, and reads nothing of this.
+  document.addEventListener('trends:day', function (e) {
+    var d = e && e.detail;
+    if (!d || typeof d.from !== 'string' || typeof d.to !== 'string') return;
+    dayPick = { from: d.from, to: d.to, said: String(d.said || d.from) };
+    renderList();
+    var tab = document.querySelector('#tabs button[data-view="offers"]');
+    if (tab && document.getElementById('app').getAttribute('data-view') !== 'all') tab.click();
+    var box = document.getElementById('tab-offers');
+    if (box) setTimeout(function () { box.scrollIntoView({ block: 'start' }); }, 0);
+  });
+  el.dayClear.addEventListener('click', function () {
+    dayPick = null;
+    renderList();
+  });
+
   el.ranges.addEventListener('click', function (e) {
     var button = e.target.closest('button');
     if (!button) return;
+    // A day picked on Trends belongs to the range it was picked in.
+    dayPick = null;
     days = parseInt(button.getAttribute('data-days'), 10);
     Array.prototype.forEach.call(el.ranges.querySelectorAll('button'), function (b) {
       b.setAttribute('aria-pressed', b === button ? 'true' : 'false');
@@ -6145,7 +6372,7 @@
   (function () {
     var app = document.getElementById('app'), nav = document.getElementById('tabs');
     if (!app || !nav) return;
-    var VIEWS = ['today', 'offers', 'money', 'strategy', 'runs', 'all'];
+    var VIEWS = ['today', 'offers', 'money', 'strategy', 'runs', 'trends', 'all'];
     var KEY = 'uberscan.offers.tab';
     function stored() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
     function keep(v) { try { localStorage.setItem(KEY, v); } catch (e) { /* not kept */ } }
@@ -6324,6 +6551,772 @@
         }).catch(function () { says('Not read: the server did not answer.'); });
     });
     load();
+  })();
+
+  /* THE TRENDS TAB (#trends): /api/trends, summed by trends.js, drawn here.
+   *
+   * Its own script, like the Gold card's: it reads the range off the pressed
+   * button and the tab off #app, and says a picked day to the list with an
+   * event (`trends:day`), so nothing of the page's own state is shared.
+   *
+   * Asked for ONLY while this tab or All is on screen, and trends.js itself
+   * is fetched the first time, so a driver who never opens it pays nothing: the
+   * page opens on Today, and the rig's Pi is the slowest browser here. Today
+   * is not asked at all — a trend over one evening is that evening's numbers.
+   * One answer per range is kept until the range changes or the page reloads.
+   *
+   * Hand-drawn SVG, as the rest of this page draws bars by hand: no chart
+   * library, nothing from a CDN, and the page's own colours. Every chart is
+   * drawn at its box's width in pixels, and redrawn when that changes. */
+  (function () {
+    var box = document.getElementById('trends');
+    var app = document.getElementById('app');
+    if (!box || !app || typeof fetch !== 'function') return;
+    var $ = function (id) { return document.getElementById(id); };
+    var T = null;
+    var st = { by: 'day', metric: 'perHour', hourDays: 'all', months: false };
+    var got = null, asked = null, seq = 0, rate = null, urls = [], cmpRange = null;
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    // The scatter's periods, oldest dimmest: the newest month is the one a
+    // driver is asking about. Not the verdict colours.
+    var PERIOD_COLOURS = ['#5d738d', '#7f9cc0', '#9ec3ef', '#c9b6f2', '#ffce4b', '#eef4fb'];
+
+    function esc(t) {
+      return String(t === null || t === undefined ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function says(t) { var p = $('trSays'); p.textContent = t || ''; p.hidden = !t; }
+    function rangeDays() {
+      var b = document.querySelector('#ranges button[aria-pressed="true"]');
+      return b ? parseInt(b.getAttribute('data-days'), 10) : 1;
+    }
+    function showing() { var v = app.getAttribute('data-view'); return v === 'trends' || v === 'all'; }
+    function dateOf(key) { var p = key.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2], 12); }
+    function dayWords(key) {
+      var d = dateOf(key);
+      return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
+    }
+    function shortDay(key) { var d = dateOf(key); return MONTHS[d.getMonth()] + ' ' + d.getDate(); }
+    function hourWords(h) { return (h % 12 || 12) + (h < 12 ? 'a' : 'p'); }
+    var FMT = {
+      pay: function (v) { return '$' + v.toFixed(v < 100 ? 2 : 0); },
+      perHour: function (v) { return '$' + v.toFixed(0); },
+      perMile: function (v) { return '$' + v.toFixed(2); },
+      minutes: function (v) { return Math.round(v) + ' min'; },
+      miles: function (v) { return v.toFixed(1) + ' mi'; },
+      count: function (v) { return String(Math.round(v)); },
+      rate: function (v) { return v.toFixed(1); },
+      pct: function (v) { return Math.round(v * 100) + '%'; }
+    };
+    var AXIS = {
+      pay: function (v) { return '$' + Math.round(v); }, perHour: function (v) { return '$' + Math.round(v); },
+      perMile: function (v) { return '$' + v.toFixed(v < 10 ? 1 : 0); }, minutes: function (v) { return String(Math.round(v)); },
+      miles: function (v) { return String(Math.round(v)); }, count: function (v) { return String(Math.round(v)); },
+      rate: function (v) { return v.toFixed(v < 10 ? 1 : 0); }, pct: function (v) { return Math.round(v * 100) + '%'; }
+    };
+
+    function loadLib(done) {
+      if (window.Trends) { T = window.Trends; done(); return; }
+      var s = document.createElement('script');
+      s.src = 'trends.js';
+      s.onload = function () { T = window.Trends || null; if (T) done(); else says('The trends script did not load.'); };
+      s.onerror = function () { asked = null; says('The trends script could not be fetched.'); };
+      document.head.appendChild(s);
+    }
+
+    function refresh() {
+      if (!showing()) return;
+      var d = rangeDays();
+      if (d === 1) {
+        asked = null; got = null; seq += 1;
+        $('trBody').hidden = true;
+        $('trSpan').textContent = '· every offer in the range';
+        says('Trends read a longer stretch than today: press 7 days, 30 days or All above.');
+        return;
+      }
+      var key = 'days=' + d;
+      if (asked === key) { if (got) draw(); return; }
+      asked = key;
+      var mine = ++seq;
+      says('Reading every offer in the range…');
+      loadLib(function () {
+        fetch('/api/trends?' + key, { cache: 'no-store' }).then(function (r) {
+          return r.json().catch(function () { return null; });
+        }).then(function (j) {
+          if (mine !== seq) return;
+          if (j && j.lite === true) {
+            // Lite: not part of the edition. The tab goes, as Gold's card does.
+            $('trendsTab').hidden = true;
+            $('trBody').hidden = true;
+            says('Trends are not part of the lite edition.');
+            return;
+          }
+          if (!j || j.ok !== true || !j.rows) {
+            asked = null;
+            $('trBody').hidden = true;
+            says(j && j.unreadable ? 'The journal could not be read (' + j.unreadable + ').'
+              : 'This server did not answer for trends (an older build?).');
+            return;
+          }
+          got = { rows: T.unpack(j.rows), total: j.total, target: j.target,
+                  runs: (j.runs || []).map(function (s) { return [s[0] * 1000, s[1] * 1000]; }) };
+          rate = null;
+          draw();
+        }).catch(function () {
+          if (mine !== seq) return;
+          asked = null;
+          says('Cannot reach the server for trends.');
+        });
+      });
+    }
+
+    /* --- drawing pieces ---------------------------------------------------- */
+
+    function niceStep(range, count) {
+      var raw = range / Math.max(1, count), mag = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+      var f = raw / mag;
+      return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * mag;
+    }
+    function scale(vals, opts) {
+      var lo = opts && typeof opts.min === 'number' ? opts.min : Infinity, hi = -Infinity;
+      vals.forEach(function (v) { if (v !== null && isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } });
+      if (!isFinite(lo) || !isFinite(hi)) { lo = 0; hi = 1; }
+      if (opts && typeof opts.max === 'number') hi = opts.max;
+      if (hi === lo) hi = lo + 1;
+      var step = niceStep(hi - lo, 4);
+      lo = Math.floor(lo / step) * step;
+      hi = Math.ceil(hi / step) * step;
+      var ticks = [];
+      for (var t = lo; t <= hi + step / 2; t += step) ticks.push(Math.round(t * 1e6) / 1e6);
+      return { lo: lo, hi: hi, ticks: ticks };
+    }
+    function widthOf(host) { return Math.max(280, Math.floor(host.clientWidth || 600)); }
+    function pathOf(pts) {
+      var d = '', on = false;
+      pts.forEach(function (p) {
+        if (!p) { on = false; return; }
+        d += (on ? 'L' : 'M') + p[0].toFixed(1) + ',' + p[1].toFixed(1);
+        on = true;
+      });
+      return d;
+    }
+
+    /* A line chart over evenly spaced periods: a band, lines, dots (hollow
+       where a point rests on too few), optional count bars underneath and a
+       press target per period. */
+    function lineChart(host, o) {
+      var W = widthOf(host), barH = o.bars ? 36 : 0, H = (o.height || 190) + barH;
+      var L = 44, R = 10, Tp = 8, B = 20, gap = o.bars ? 8 : 0;
+      var plotH = H - Tp - B - barH - gap, n = o.labels.length;
+      var colW = (W - L - R) / Math.max(1, n);
+      var x = function (i) { return L + colW * (i + 0.5); };
+      var vals = [];
+      (o.series || []).forEach(function (s) { vals = vals.concat(s.vals); });
+      if (o.band) vals = vals.concat(o.band.lo, o.band.hi);
+      var sc = scale(vals, { min: o.min });
+      var y = function (v) { return Tp + plotH - (v - sc.lo) / (sc.hi - sc.lo) * plotH; };
+      var s = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="'
+        + esc(o.label || '') + '">';
+      sc.ticks.forEach(function (t) {
+        s += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(t).toFixed(1) + '" y2="' + y(t).toFixed(1) + '"/>'
+          + '<text x="' + (L - 4) + '" y="' + (y(t) + 4).toFixed(1) + '" text-anchor="end">' + esc((o.axis || String)(t)) + '</text>';
+      });
+      if (o.band) {
+        var up = [], down = [], seg = [];
+        var flush = function () {
+          if (up.length > 1) s += '<path class="band" d="' + pathOf(up.concat(down.reverse())) + 'Z"/>';
+          up = []; down = [];
+        };
+        for (var i = 0; i < n; i++) {
+          if (o.band.lo[i] === null || o.band.hi[i] === null) { flush(); continue; }
+          up.push([x(i), y(o.band.hi[i])]);
+          down.push([x(i), y(o.band.lo[i])]);
+        }
+        flush();
+        seg = null;
+      }
+      (o.series || []).forEach(function (se) {
+        var pts = se.vals.map(function (v, i) {
+          return v === null || (se.solidOnly && se.hollow && se.hollow[i]) ? null : [x(i), y(v)];
+        });
+        s += '<path class="' + se.cls + '" d="' + pathOf(pts) + '"' + (se.dash ? ' stroke-dasharray="' + se.dash + '"' : '') + '/>';
+        if (se.dots) {
+          se.vals.forEach(function (v, i) {
+            if (v === null) return;
+            var hollow = se.hollow && se.hollow[i];
+            s += '<circle class="' + (hollow ? 'hollow' : se.dots) + '" cx="' + x(i).toFixed(1) + '" cy="' + y(v).toFixed(1)
+              + '" r="' + (n > 60 ? 2 : 3) + '"/>';
+          });
+        }
+      });
+      s += '<line class="ax" x1="' + L + '" x2="' + (W - R) + '" y1="' + (Tp + plotH) + '" y2="' + (Tp + plotH) + '"/>';
+      if (o.bars) {
+        var bmax = Math.max.apply(null, o.bars.map(function (v) { return v || 0; }).concat([1]));
+        var by0 = Tp + plotH + gap + barH;
+        o.bars.forEach(function (v, i) {
+          if (!v) return;
+          var h = v / bmax * (barH - 2);
+          s += '<rect class="bar" x="' + (x(i) - colW * 0.4).toFixed(1) + '" y="' + (by0 - h).toFixed(1) + '" width="'
+            + Math.max(1, colW * 0.8).toFixed(1) + '" height="' + h.toFixed(1) + '"/>';
+        });
+        s += '<text x="' + (L - 4) + '" y="' + (by0 - barH + 10) + '" text-anchor="end">' + Math.round(bmax) + '</text>';
+      }
+      var every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor((W - L - R) / 62))));
+      for (var k = 0; k < n; k += every) {
+        s += '<text x="' + x(k).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(o.labels[k]) + '</text>';
+      }
+      if (o.pick || o.title) {
+        for (var j = 0; j < n; j++) {
+          s += '<rect class="hit" x="' + (x(j) - colW / 2).toFixed(1) + '" y="' + Tp + '" width="' + colW.toFixed(1)
+            + '" height="' + (H - Tp - B) + '" data-i="' + j + '"' + (o.pick ? ' tabindex="0" role="button"' : '')
+            + '><title>' + esc(o.title ? o.title(j) : '') + '</title></rect>';
+        }
+      }
+      host.innerHTML = s + '</svg>';
+      if (o.pick) {
+        host.onclick = function (e) {
+          var r = e.target.closest ? e.target.closest('rect.hit') : null;
+          if (r) o.pick(Number(r.getAttribute('data-i')));
+        };
+        host.onkeydown = function (e) {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          var r = e.target.closest ? e.target.closest('rect.hit') : null;
+          if (r) { e.preventDefault(); o.pick(Number(r.getAttribute('data-i'))); }
+        };
+      }
+    }
+
+    /* Bars over periods: stacked parts (each { vals, cls }), a press target. */
+    function barChart(host, o) {
+      var W = widthOf(host), H = o.height || 150, L = 44, R = 10, Tp = 8, B = 20;
+      var plotH = H - Tp - B, n = o.labels.length, colW = (W - L - R) / Math.max(1, n);
+      var tot = o.labels.map(function (_, i) {
+        return o.parts.reduce(function (a, p) { return a + (p.vals[i] || 0); }, 0);
+      });
+      var sc = scale(tot.concat(o.line ? o.line.vals : []), { min: 0, max: o.max });
+      var y = function (v) { return Tp + plotH - (v - sc.lo) / (sc.hi - sc.lo) * plotH; };
+      var s = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="'
+        + esc(o.label || '') + '">';
+      sc.ticks.forEach(function (t) {
+        s += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(t).toFixed(1) + '" y2="' + y(t).toFixed(1) + '"/>'
+          + '<text x="' + (L - 4) + '" y="' + (y(t) + 4).toFixed(1) + '" text-anchor="end">' + esc((o.axis || String)(t)) + '</text>';
+      });
+      for (var i = 0; i < n; i++) {
+        var base = 0;
+        o.parts.forEach(function (p) {
+          var v = p.vals[i] || 0;
+          if (!v) return;
+          s += '<rect class="' + p.cls + '" x="' + (L + colW * (i + 0.1)).toFixed(1) + '" y="' + y(base + v).toFixed(1)
+            + '" width="' + Math.max(1, colW * 0.8).toFixed(1) + '" height="' + Math.max(0.5, y(base) - y(base + v)).toFixed(1) + '"/>';
+          base += v;
+        });
+      }
+      if (o.line) {
+        s += '<path class="med" d="' + pathOf(o.line.vals.map(function (v, k) {
+          return v === null ? null : [L + colW * (k + 0.5), y(v)];
+        })) + '"/>';
+        o.line.vals.forEach(function (v, k) {
+          if (v !== null) s += '<circle class="dot" cx="' + (L + colW * (k + 0.5)).toFixed(1) + '" cy="' + y(v).toFixed(1) + '" r="2.5"/>';
+        });
+      }
+      s += '<line class="ax" x1="' + L + '" x2="' + (W - R) + '" y1="' + (Tp + plotH) + '" y2="' + (Tp + plotH) + '"/>';
+      var every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor((W - L - R) / 62))));
+      for (var k2 = 0; k2 < n; k2 += every) {
+        s += '<text x="' + (L + colW * (k2 + 0.5)).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(o.labels[k2]) + '</text>';
+      }
+      for (var j = 0; j < n; j++) {
+        s += '<rect class="hit" x="' + (L + colW * j).toFixed(1) + '" y="' + Tp + '" width="' + colW.toFixed(1) + '" height="'
+          + plotH + '" data-i="' + j + '"' + (o.pick ? ' tabindex="0" role="button"' : '') + '><title>'
+          + esc(o.title ? o.title(j) : '') + '</title></rect>';
+      }
+      host.innerHTML = s + '</svg>';
+      host.onclick = o.pick ? function (e) {
+        var r = e.target.closest ? e.target.closest('rect.hit') : null;
+        if (r) o.pick(Number(r.getAttribute('data-i')));
+      } : null;
+    }
+
+    /* --- the periods, every one from the first to the last ----------------
+       Days (or weeks) with no offer are kept as gaps, so a week off is a gap
+       in the line and not two evenings drawn side by side. */
+    function spine(rows, by) {
+      var first = rows[0].day, last = rows[rows.length - 1].day, keys = [];
+      var k = by === 'week' ? T.weekKeyOf(first) : first;
+      var end = by === 'week' ? T.weekKeyOf(last) : last;
+      for (var guard = 0; k <= end && guard < 4000; guard++) { keys.push(k); k = T.addDays(k, by === 'week' ? 7 : 1); }
+      return keys;
+    }
+    function periodLabel(k) { return st.by === 'week' ? 'wk ' + shortDay(k) : shortDay(k); }
+    function periodWords(k) { return st.by === 'week' ? 'the week of ' + shortDay(k) : dayWords(k); }
+    function pickPeriod(k) {
+      var to = st.by === 'week' ? T.addDays(k, 6) : k;
+      document.dispatchEvent(new CustomEvent('trends:day', { detail: { from: k, to: to, said: periodWords(k) } }));
+    }
+
+    /* --- the charts ---------------------------------------------------------- */
+
+    function draw() {
+      if (!got || !showing()) return;
+      var rows = got.rows;
+      if (!rows.length) {
+        $('trBody').hidden = true;
+        says('No offers in this range.');
+        return;
+      }
+      says('');
+      $('trBody').hidden = false;
+      $('trSpan').textContent = '· ' + rows.length.toLocaleString() + ' offers, ' + shortDay(rows[0].day) + ' to '
+        + shortDay(rows[rows.length - 1].day);
+      var keys = spine(rows, st.by);
+      var per = T.periods(rows, st.by), at = Object.create(null);
+      per.forEach(function (e) { at[e.key] = e; });
+      var line = keys.map(function (k) { return at[k] || null; });
+      drawDaily(keys, line);
+      drawHourly(rows);
+      drawGrid(rows);
+      drawGood(rows, keys);
+      drawSpread(keys, line);
+      drawMix(keys, line);
+      drawScatter(rows);
+      drawRate(rows);
+      drawCompare(rows, false);
+      drawCalendar(rows);
+      drawShare(keys, line);
+      drawQuality(keys, line);
+      csvs(rows, per);
+    }
+
+    function drawDaily(keys, line) {
+      var m = st.metric, name = T.METRIC_NAMES[m];
+      $('trDailyHead').textContent = (st.by === 'week' ? 'Each week' : 'Each day') + ' · ' + name;
+      var med = line.map(function (e) { return e && e.metrics[m].n ? e.metrics[m].p50 : null; });
+      var thin = line.map(function (e) { return !e || e.metrics[m].n < T.DAY_MIN; });
+      lineChart($('trDaily'), {
+        label: 'Median ' + name + ' ' + (st.by === 'week' ? 'by week' : 'by day'),
+        labels: keys.map(periodLabel), axis: AXIS[m], min: 0,
+        band: { lo: line.map(function (e, i) { return thin[i] ? null : e.metrics[m].p25; }),
+                hi: line.map(function (e, i) { return thin[i] ? null : e.metrics[m].p75; }) },
+        series: [
+          { vals: line.map(function (e) { return e ? e.apps.uber[m] : null; }), cls: 'uber' },
+          { vals: line.map(function (e) { return e ? e.apps.doordash[m] : null; }), cls: 'dash' },
+          { vals: med, cls: 'med', dots: 'dot', hollow: thin }
+        ],
+        bars: line.map(function (e) { return e ? e.n : 0; }),
+        title: function (i) {
+          var e = line[i];
+          if (!e) return periodWords(keys[i]) + ': no offers';
+          return periodWords(keys[i]) + ': ' + e.n + ' offers, median ' + (e.metrics[m].p50 === null ? '—'
+            : FMT[m](e.metrics[m].p50)) + ' over ' + e.metrics[m].n + ' counted'
+            + (e.metrics[m].n >= T.DAY_MIN ? ', middle half ' + FMT[m](e.metrics[m].p25) + '–' + FMT[m](e.metrics[m].p75) : '')
+            + '. Press to list them.';
+        },
+        pick: function (i) { if (line[i]) pickPeriod(keys[i]); }
+      });
+      $('trDailyNote').textContent = 'Press a ' + (st.by === 'week' ? 'week' : 'day') + ' to list its offers. A hollow '
+        + 'point rests on fewer than ' + T.DAY_MIN + ' counted offers and has no band; an app\'s line needs '
+        + T.DAY_MIN + ' of its own. Offers with the app unread count in the bars and the median, not in an app\'s line. '
+        + 'Rows marked suspect or "pay unread" are counted in the bars and left out of every figure.';
+    }
+
+    function drawHourly(rows) {
+      var host = $('trHourly'), legend = $('trHourLegend');
+      var labels = T.HOUR_ORDER.map(hourWords);
+      if (st.months) {
+        var mo = T.monthsOf(rows);
+        var a = T.hourly(rows, { days: st.hourDays, month: mo.now }), b = T.hourly(rows, { days: st.hourDays, month: mo.before });
+        var mw = function (k) { return MONTHS[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4); };
+        legend.innerHTML = '<span><i></i>' + esc(mw(mo.now)) + '</span><span><i class="before"></i>' + esc(mw(mo.before)) + '</span>';
+        lineChart(host, {
+          label: 'Median $/hr by hour, ' + mw(mo.now) + ' against ' + mw(mo.before), labels: labels, axis: AXIS.perHour, min: 0,
+          series: [{ vals: b.map(function (e) { return e.p50; }), cls: 'before', dots: 'hollow' },
+                   { vals: a.map(function (e) { return e.p50; }), cls: 'med', dots: 'dot',
+                     hollow: a.map(function (e) { return !e.enough; }) }],
+          bars: a.map(function (e) { return e.offers; }),
+          title: function (i) {
+            return hourWords(a[i].hour) + ': ' + mw(mo.now) + ' ' + (a[i].p50 === null ? '—' : FMT.perHour(a[i].p50))
+              + ' (n=' + a[i].n + '), ' + mw(mo.before) + ' ' + (b[i].p50 === null ? '—' : FMT.perHour(b[i].p50))
+              + ' (n=' + b[i].n + ')';
+          }
+        });
+        $('trHourNote').textContent = 'The newest month in the range against the month before it, by hour. Bars: '
+          + 'offers this month. A hollow point rests on fewer than ' + T.FLOOR + ' offers or ' + T.FLOOR_DAYS + ' days.'
+          + (b.every(function (e) { return !e.n; }) ? ' The range holds nothing from the month before: press All.' : '');
+        return;
+      }
+      var hs = T.hourly(rows, { days: st.hourDays });
+      legend.innerHTML = '<span><i></i>median</span><span><i class="band"></i>middle half</span><span><i class="bar"></i>offers</span>';
+      lineChart(host, {
+        label: 'Median $/hr by hour of day', labels: labels, axis: AXIS.perHour, min: 0,
+        band: { lo: hs.map(function (e) { return e.n >= T.DAY_MIN ? e.p25 : null; }),
+                hi: hs.map(function (e) { return e.n >= T.DAY_MIN ? e.p75 : null; }) },
+        series: [{ vals: hs.map(function (e) { return e.p50; }), cls: 'med', dots: 'dot',
+                   hollow: hs.map(function (e) { return !e.enough; }) }],
+        bars: hs.map(function (e) { return e.offers; }),
+        title: function (i) {
+          var e = hs[i];
+          return hourWords(e.hour) + ': ' + e.offers + ' offers, ' + (e.p50 === null ? 'none counted'
+            : 'median ' + FMT.perHour(e.p50) + ', middle half ' + FMT.perHour(e.p25) + '–' + FMT.perHour(e.p75)
+              + ' (n=' + e.n + ' on ' + e.days + ' days)');
+        }
+      });
+      $('trHourNote').textContent = 'Clock hour the card came up, 4am first so a night reads as one stretch. '
+        + (st.hourDays === 'weekend' ? 'Weekends are the driver\'s Saturday and Sunday: 1am on a Saturday is Friday night. '
+           : st.hourDays === 'weekday' ? 'Weekdays are the driver\'s Monday to Friday: 1am on a Saturday is Friday night. ' : '')
+        + 'A hollow point rests on fewer than ' + T.FLOOR + ' offers or ' + T.FLOOR_DAYS + ' days. A picture of the '
+        + 'record: the accept line is not tuned to the hour (Settled).';
+    }
+
+    function drawGrid(rows) {
+      var g = T.grid(rows);
+      var hours = T.HOUR_ORDER;
+      var head = '<tr><th></th>' + hours.map(function (h) { return '<th>' + hourWords(h) + '</th>'; }).join('') + '</tr>';
+      var body = '';
+      for (var d = 0; d < 7; d++) {
+        var cells = g.cells.slice(d * 24, d * 24 + 24);
+        body += '<tr><td>' + T.WEEKDAYS[cells[0].dow] + '</td>' + cells.map(function (c) {
+          if (!c.n) return '<td class="thin"></td>';
+          if (!c.enough) {
+            return '<td class="thin" title="' + c.n + ' counted on ' + c.days + ' day' + (c.days === 1 ? '' : 's')
+              + ': under the floor">n=' + c.n + '</td>';
+          }
+          return '<td class="' + (c.shade || '') + '" title="median ' + FMT.perHour(c.median) + ', 99% interval '
+            + (c.ci ? FMT.perHour(c.ci[0]) + '–' + FMT.perHour(c.ci[1]) : '—') + ', ' + c.n + ' offers on ' + c.days
+            + ' days' + (c.shade ? ' — ' + c.shade + ' the range\'s median' : '') + '">' + FMT.perHour(c.median)
+            + '<small>' + c.n + '</small></td>';
+        }).join('') + '</tr>';
+      }
+      $('trGrid').innerHTML = '<table class="grid24"><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
+      $('trGridNote').textContent = 'Each cell: the median $/hr of the offers in that weekday and clock hour, and its n. '
+        + 'Shaded only where the 99% interval of its median lies wholly above (green) or below (red) the range\'s '
+        + 'median of ' + (g.ref === null ? '—' : FMT.perHour(g.ref)) + ', and only at ' + g.floor + ' offers on '
+        + g.floorDays + ' days; under that a cell is grey and shows its n. The two were set together: with no '
+        + 'difference at all, under 1 cell in 100 is shaded. Weekdays are the driver\'s (4am to 4am).';
+    }
+
+    function drawGood(rows, keys) {
+      var gp = T.goodPerHour(rows, got.runs, st.by), at = Object.create(null);
+      gp.forEach(function (e) { at[e.key] = e; });
+      var line = keys.map(function (k) { return at[k] || null; });
+      barChart($('trGood'), {
+        label: 'Good offers per hour online', labels: keys.map(periodLabel), axis: AXIS.rate,
+        parts: [{ vals: line.map(function (e) { return e && e.rate !== null ? e.rate : 0; }), cls: 'bar2' }],
+        title: function (i) {
+          var e = line[i];
+          return periodWords(keys[i]) + (e ? ': ' + e.good + ' good of ' + e.offers + ' offers, ' + e.hours.toFixed(1)
+            + ' hours online' + (e.rate !== null ? ', ' + e.rate.toFixed(2) + ' an hour' : ', no run of scanning') : ': nothing');
+        },
+        pick: function (i) { if (line[i]) pickPeriod(keys[i]); }
+      });
+      var tot = gp.reduce(function (a, e) { return { good: a.good + e.good, hours: a.hours + (e.hours || 0) }; },
+                          { good: 0, hours: 0 });
+      $('trGoodNote').textContent = '"Good" is an offer at or over the target the panel judged it against at the time'
+        + (got.target ? ' (now ' + FMT.perHour(got.target) + '/hr)' : '') + '. Hours online are the Runs tab\'s runs of '
+        + 'scanning, first card to last, credited to the day each began: ' + tot.good + ' good offers over '
+        + tot.hours.toFixed(1) + ' hours in all. Descriptive; it feeds nothing.';
+    }
+
+    function drawSpread(keys, line) {
+      var q = function (k) {
+        return line.map(function (e) { return e && e.metrics.pay.n >= T.DAY_MIN ? e.metrics.pay[k] : null; });
+      };
+      lineChart($('trSpread'), {
+        label: 'Pay P25, median, P75 and P90', labels: keys.map(periodLabel), axis: AXIS.pay, min: 0,
+        series: [{ vals: q('p25'), cls: 'p25' }, { vals: q('p75'), cls: 'p75' }, { vals: q('p90'), cls: 'p90' },
+                 { vals: q('p50'), cls: 'med' }],
+        title: function (i) {
+          var e = line[i];
+          return periodWords(keys[i]) + (e && e.metrics.pay.n >= T.DAY_MIN ? ': pay P25 ' + FMT.pay(e.metrics.pay.p25)
+            + ', median ' + FMT.pay(e.metrics.pay.p50) + ', P75 ' + FMT.pay(e.metrics.pay.p75) + ', P90 '
+            + FMT.pay(e.metrics.pay.p90) + ' (n=' + e.metrics.pay.n + ')' : ': under ' + T.DAY_MIN + ' counted');
+        }
+      });
+    }
+
+    function drawMix(keys, line) {
+      ['minutes', 'miles'].forEach(function (m) {
+        lineChart($(m === 'minutes' ? 'trMixMin' : 'trMixMi'), {
+          label: 'Median ' + m, labels: keys.map(periodLabel), axis: AXIS[m], min: 0, height: 120,
+          series: [{ vals: line.map(function (e) { return e && e.metrics[m].n ? e.metrics[m].p50 : null; }), cls: 'med',
+                     dots: 'dot', hollow: line.map(function (e) { return !e || e.metrics[m].n < T.DAY_MIN; }) }],
+          title: function (i) {
+            var e = line[i];
+            return periodWords(keys[i]) + ': median ' + m + ' ' + (e && e.metrics[m].p50 !== null ? FMT[m](e.metrics[m].p50) : '—');
+          }
+        });
+      });
+    }
+
+    function drawScatter(rows) {
+      var sc = T.scatter(rows, 4000), host = $('trScatter');
+      var W = widthOf(host), H = 230, L = 44, R = 10, Tp = 8, B = 26;
+      var miles = sc.points.map(function (p) { return p[0]; }).sort(function (a, b) { return a - b; });
+      var pays = sc.points.map(function (p) { return p[1]; }).sort(function (a, b) { return a - b; });
+      // The axes stop at the 99th percentile: one $185 card would otherwise
+      // squash every other dot into a corner. Those past it are counted.
+      var mx = miles.length ? miles[Math.floor(miles.length * 0.99)] : 1, py = pays.length ? pays[Math.floor(pays.length * 0.99)] : 1;
+      var sx = scale([0, mx], { min: 0 }), sy = scale([0, py], { min: 0 });
+      var x = function (v) { return L + (v - sx.lo) / (sx.hi - sx.lo) * (W - L - R); };
+      var y = function (v) { return Tp + (H - Tp - B) - (v - sy.lo) / (sy.hi - sy.lo) * (H - Tp - B); };
+      var s = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Pay against miles">';
+      sy.ticks.forEach(function (t) {
+        s += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(t).toFixed(1) + '" y2="' + y(t).toFixed(1)
+          + '"/><text x="' + (L - 4) + '" y="' + (y(t) + 4).toFixed(1) + '" text-anchor="end">$' + t + '</text>';
+      });
+      sx.ticks.forEach(function (t) {
+        s += '<text x="' + x(t).toFixed(1) + '" y="' + (H - 12) + '" text-anchor="middle">' + t + '</text>';
+      });
+      s += '<text x="' + (W - R) + '" y="' + (H - 1) + '" text-anchor="end">miles</text>';
+      var out = 0, colours = sc.labels.map(function (_, i) {
+        return PERIOD_COLOURS[PERIOD_COLOURS.length - sc.labels.length + i] || PERIOD_COLOURS[0];
+      });
+      sc.points.forEach(function (p) {
+        if (p[0] > sx.hi || p[1] > sy.hi) { out += 1; return; }
+        s += '<circle cx="' + x(p[0]).toFixed(1) + '" cy="' + y(p[1]).toFixed(1) + '" r="1.8" fill="' + colours[p[2]]
+          + '" fill-opacity=".6"/>';
+      });
+      host.innerHTML = s + '</svg>';
+      $('trScatterLegend').innerHTML = sc.labels.map(function (l, i) {
+        var w = l === 'earlier' ? 'earlier' : MONTHS[Number(l.slice(5, 7)) - 1] + ' ' + l.slice(0, 4);
+        return '<span><i style="background:' + colours[i] + ';height:8px;width:8px;border-radius:4px"></i>' + esc(w) + '</span>';
+      }).join('');
+      $('trScatterNote').textContent = 'Each dot an offer: its pay against its card\'s miles, coloured by month. '
+        + (sc.points.length < sc.of ? sc.points.length + ' of ' + sc.of + ' drawn, evenly through time. ' : '')
+        + (out ? out + ' beyond the 99th percentile of either are off the edge. ' : '') + '$/mi is for reading, not a rule.';
+    }
+
+    function drawRate(rows) {
+      if (!rate) rate = T.rateCard(rows);
+      var ws = rate.weeks;
+      var money = function (v) { return v === null ? '—' : '$' + v.toFixed(2); };
+      var cell = function (f) {
+        if (!f || !f.n) return '<td class="thin">—</td>';
+        if (f.thin) return '<td class="thin" title="' + esc(f.thin) + '">too thin (n=' + f.n + ')</td>';
+        return '<td title="base ' + money(f.base) + ' + ' + f.a.toFixed(3) + '/min + ' + f.b.toFixed(3) + '/mi">'
+          + money(f.price) + (f.lo !== null ? ' <small>' + money(f.lo) + '–' + money(f.hi) + '</small>' : '')
+          + ' <small>n=' + f.n + '</small></td>';
+      };
+      $('trRate').innerHTML = '<table><thead><tr><th>week of</th><th>Uber</th><th>DoorDash</th></tr></thead><tbody>'
+        + ws.slice().reverse().map(function (w) {
+          return '<tr><td>' + shortDay(w.week) + '</td>' + cell(w.uber) + cell(w.doordash) + '</tr>';
+        }).join('') + '</tbody></table>';
+      // The prices as points with their intervals; a thin week is no point.
+      var host = $('trRateChart'), W = widthOf(host), H = 170, L = 44, R = 10, Tp = 8, B = 20;
+      var vals = [];
+      ws.forEach(function (w) { ['uber', 'doordash'].forEach(function (a) {
+        if (w[a].price !== null) vals.push(w[a].price, w[a].lo, w[a].hi);
+      }); });
+      var sc = scale(vals, { min: 0 }), n = ws.length, colW = (W - L - R) / Math.max(1, n);
+      var y = function (v) { return Tp + (H - Tp - B) - (v - sc.lo) / (sc.hi - sc.lo) * (H - Tp - B); };
+      var s = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Rate card by week">';
+      sc.ticks.forEach(function (t) {
+        s += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(t).toFixed(1) + '" y2="' + y(t).toFixed(1)
+          + '"/><text x="' + (L - 4) + '" y="' + (y(t) + 4).toFixed(1) + '" text-anchor="end">$' + t + '</text>';
+      });
+      ws.forEach(function (w, i) {
+        ['uber', 'doordash'].forEach(function (a, k) {
+          var f = w[a], cx = L + colW * (i + 0.35 + k * 0.3);
+          if (f.price === null) return;
+          var cls = a === 'uber' ? 'uber' : 'dash';
+          if (f.lo !== null) s += '<line class="' + cls + '" x1="' + cx.toFixed(1) + '" x2="' + cx.toFixed(1) + '" y1="'
+            + y(f.lo).toFixed(1) + '" y2="' + y(f.hi).toFixed(1) + '"/>';
+          s += '<circle class="' + cls + 'dot" cx="' + cx.toFixed(1) + '" cy="' + y(f.price).toFixed(1) + '" r="3"/>';
+        });
+      });
+      var every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor((W - L - R) / 62))));
+      for (var k3 = 0; k3 < n; k3 += every) {
+        s += '<text x="' + (L + colW * (k3 + 0.5)).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle">' + shortDay(ws[k3].week) + '</text>';
+      }
+      host.innerHTML = s + '</svg>';
+      $('trRateNote').textContent = 'Per app and week, a least-squares fit of pay = base + a × minutes + b × miles '
+        + 'over that week\'s offers, read off as the price of a ' + rate.at.minutes + '-minute, ' + rate.at.miles
+        + '-mile trip, with a 95% bootstrap interval. A week under ' + rate.minN + ' offers, or one whose minutes and '
+        + 'miles move together too closely to tell apart, is "too thin" and drawn as no point. How the apps priced '
+        + 'what was offered; not a rule for what to take.';
+    }
+
+    function drawCompare(rows, fromInputs) {
+      var a, b, wk = false;
+      if (fromInputs === 'week') { a = 'weekday'; b = 'weekend'; wk = true; }
+      else if (fromInputs) {
+        a = { from: $('trAFrom').value || null, to: $('trATo').value || null };
+        b = { from: $('trBFrom').value || null, to: $('trBTo').value || null };
+      } else if ($('trAFrom').value && $('trBFrom').value && cmpRange === asked) {
+        // A redraw (By week, a resize) keeps the periods the driver typed.
+        a = { from: $('trAFrom').value || null, to: $('trATo').value || null };
+        b = { from: $('trBFrom').value || null, to: $('trBTo').value || null };
+      } else {
+        cmpRange = asked;
+        // The last seven driver days in the range against the seven before.
+        var last = rows[rows.length - 1].day;
+        b = { from: T.addDays(last, -6), to: last };
+        a = { from: T.addDays(last, -13), to: T.addDays(last, -7) };
+        $('trAFrom').value = a.from; $('trATo').value = a.to; $('trBFrom').value = b.from; $('trBTo').value = b.to;
+      }
+      var c = T.compare(rows, a, b);
+      var nameOf = function (p) {
+        return p === 'weekday' ? 'Weekdays' : p === 'weekend' ? 'Weekends'
+          : (p.from ? shortDay(p.from) : 'start') + ' – ' + (p.to ? shortDay(p.to) : 'end');
+      };
+      var row = function (label, f) { return '<tr><td>' + label + '</td><td>' + f(c.a) + '</td><td>' + f(c.b) + '</td></tr>'; };
+      var med = function (m) {
+        return function (s) { var e = s.metrics[m]; return e.median === null ? '—' : FMT[m](e.median) + ' <small>n=' + e.n + '</small>'; };
+      };
+      $('trCompare').innerHTML = '<table><thead><tr><th></th><th>' + esc(nameOf(a)) + '</th><th>' + esc(nameOf(b))
+        + '</th></tr></thead><tbody>'
+        + row('offers', function (s) { return s.offers + ' <small>' + s.days + ' days</small>'; })
+        + row('counted', function (s) { return String(s.counted); })
+        + row('good', function (s) { return s.counted ? Math.round(s.good / s.counted * 100) + '% <small>' + s.good + '</small>' : '—'; })
+        + row('median pay', med('pay')) + row('median $/hr', med('perHour')) + row('median $/mi', med('perMile'))
+        + row('median minutes', med('minutes')) + row('median miles', med('miles'))
+        + '</tbody></table>' + (wk ? '' : '<p class="hint">Driver days, both ends included.</p>');
+    }
+
+    function drawCalendar(rows) {
+      var cal = T.calendar(rows, got.runs);
+      if (!cal.days.length) { $('trCal').innerHTML = ''; return; }
+      var by = Object.create(null);
+      cal.days.forEach(function (d) { by[d.day] = d; });
+      var k = T.weekKeyOf(cal.days[0].day), last = cal.days[cal.days.length - 1].day;
+      var s = '<div class="cal">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (w) {
+        return '<div class="wd">' + w + '</div>';
+      }).join('');
+      for (var guard = 0; k <= last && guard < 4000; guard++) {
+        var d = by[k];
+        if (!d) s += '<div class="tile empty"><em>' + dateOf(k).getDate() + '</em></div>';
+        else {
+          s += '<button type="button" class="tile ' + (d.enough ? (d.shade || '') : 'thin') + '" data-day="' + k + '" title="'
+            + esc(dayWords(k) + ': ' + d.n + ' offers' + (d.median !== null ? ', median ' + FMT.perHour(d.median) + '/hr over '
+              + d.counted : '') + (d.hours ? ', ' + d.hours.toFixed(1) + ' hours online' : '')
+              + (d.enough ? (d.shade ? ', ' + d.shade + ' the range\'s median' : '') : ', under the floor')) + '">'
+            + '<em>' + dateOf(k).getDate() + '</em><b>' + (d.median !== null ? FMT.perHour(d.median) : '—') + '</b>'
+            + (d.perOnlineHour !== null ? d.perOnlineHour.toFixed(0) + '/h' : '') + (d.enough ? '' : ' <em>n=' + d.counted + '</em>')
+            + '</button>';
+        }
+        k = T.addDays(k, 1);
+      }
+      $('trCal').innerHTML = s + '</div>';
+      $('trCal').onclick = function (e) {
+        var b = e.target.closest ? e.target.closest('button[data-day]') : null;
+        if (!b) return;
+        var day = b.getAttribute('data-day');
+        document.dispatchEvent(new CustomEvent('trends:day', { detail: { from: day, to: day, said: dayWords(day) } }));
+      };
+      $('trCalNote').textContent = 'Each day: its median $/hr, and offers per hour online ("/h", over that day\'s runs '
+        + 'of scanning). Shaded by the grid\'s rule against the range\'s median of '
+        + (cal.ref === null ? '—' : FMT.perHour(cal.ref)) + '; a day under ' + cal.floor + ' counted offers is grey with '
+        + 'its n. Press a day to list its offers.';
+    }
+
+    function drawShare(keys, line) {
+      var known = line.some(function (e) { return e && e.boost; });
+      barChart($('trShare'), {
+        label: 'App share' + (known ? ' and boost share' : ''), labels: keys.map(periodLabel), axis: AXIS.pct, max: 1,
+        parts: [
+          { vals: line.map(function (e) { return e && e.n ? e.share.uber / e.n : 0; }), cls: 'uberdot' },
+          { vals: line.map(function (e) { return e && e.n ? e.share.doordash / e.n : 0; }), cls: 'dashdot' },
+          { vals: line.map(function (e) { return e && e.n ? e.share.unknown / e.n : 0; }), cls: 'bar' }
+        ],
+        line: known ? { vals: line.map(function (e) { return e && e.boost ? e.boost.yes / e.boost.known : null; }) } : null,
+        title: function (i) {
+          var e = line[i];
+          return periodWords(keys[i]) + (e ? ': Uber ' + e.share.uber + ', DoorDash ' + e.share.doordash + ', not known '
+            + e.share.unknown + (e.boost ? '; boosted ' + e.boost.yes + ' of ' + e.boost.known : '') : ': nothing');
+        }
+      });
+      $('trShareNote').textContent = 'The app is the row\'s own where the rig wrote one, else read off the card\'s text '
+        + 'by the server (as the offers list reads it); "not known" where neither says. '
+        + (known ? 'The white line is the share of offers carrying a boost, over the offers whose row has a boost field.'
+           : 'No offer in this range carries a boost field, so there is no boost share yet.');
+    }
+
+    function drawQuality(keys, line) {
+      barChart($('trQuality'), {
+        label: 'Data quality', labels: keys.map(periodLabel), axis: AXIS.count, height: 120,
+        parts: [{ vals: line.map(function (e) { return e ? e.quality.suspect : 0; }), cls: 'nobar' },
+                { vals: line.map(function (e) { return e ? e.quality.corrected : 0; }), cls: 'warnbar' },
+                { vals: line.map(function (e) { return e ? e.quality.unread : 0; }), cls: 'doubtbar' }],
+        title: function (i) {
+          var e = line[i];
+          return periodWords(keys[i]) + (e ? ': ' + e.quality.suspect + ' suspect, ' + e.quality.corrected
+            + ' pay re-read, ' + e.quality.unread + ' pay unread, of ' + e.n : ': nothing');
+        },
+        pick: function (i) { if (line[i]) pickPeriod(keys[i]); }
+      });
+      var t = { s: 0, c: 0, u: 0, n: 0 };
+      line.forEach(function (e) { if (e) { t.s += e.quality.suspect; t.c += e.quality.corrected; t.u += e.quality.unread; t.n += e.n; } });
+      $('trQualityNote').textContent = t.s + ' suspect for another reason, ' + t.c + ' with the pay re-read, ' + t.u
+        + ' with the pay unread, of ' + t.n + ' offers. Suspect and pay-unread offers are counted here and left out '
+        + 'of every money figure on this tab; a re-read pay is used as re-read.';
+    }
+
+    function csvs(rows, per) {
+      urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) { /* gone */ } });
+      urls = [];
+      var gp = T.goodPerHour(rows, got.runs, st.by);
+      var day = T.csvPeriods(per, gp, st.by);
+      var hours = T.csvHourly(T.hourly(rows, { days: 'all' }), 'all')
+        + T.csvHourly(T.hourly(rows, { days: 'weekday' }), 'weekday').split('\n').slice(1).join('\n')
+        + T.csvHourly(T.hourly(rows, { days: 'weekend' }), 'weekend').split('\n').slice(1).join('\n');
+      [['trCsvDays', day, 'trends-' + (st.by === 'week' ? 'weekly' : 'daily') + '.csv'],
+       ['trCsvHours', hours, 'trends-hourly.csv']].forEach(function (c) {
+        var u = URL.createObjectURL(new Blob([c[1]], { type: 'text/csv' }));
+        urls.push(u);
+        $(c[0]).href = u;
+        $(c[0]).setAttribute('download', c[2]);
+        $(c[0]).textContent = '⤓ ' + (c[0] === 'trCsvDays' ? (st.by === 'week' ? 'Weekly' : 'Daily') : 'Hourly') + ' table (CSV)';
+      });
+    }
+
+    /* --- the controls --------------------------------------------------------- */
+
+    function press(group, b) {
+      [].forEach.call(group.querySelectorAll('button'), function (x) {
+        if (!x.hasAttribute('data-months')) x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
+      });
+    }
+    $('trBy').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-by]');
+      if (!b) return;
+      st.by = b.getAttribute('data-by');
+      press(this, b);
+      draw();
+    });
+    $('trMetric').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-metric]');
+      if (!b || !got) return;
+      st.metric = b.getAttribute('data-metric');
+      press(this, b);
+      var keys = spine(got.rows, st.by), at = Object.create(null);
+      T.periods(got.rows, st.by).forEach(function (x) { at[x.key] = x; });
+      drawDaily(keys, keys.map(function (k) { return at[k] || null; }));
+    });
+    $('trHourDays').addEventListener('click', function (e) {
+      var b = e.target.closest('button');
+      if (!b || !got) return;
+      if (b.hasAttribute('data-months')) {
+        st.months = !st.months;
+        b.setAttribute('aria-pressed', st.months ? 'true' : 'false');
+      } else {
+        st.hourDays = b.getAttribute('data-days');
+        press(this, b);
+      }
+      drawHourly(got.rows);
+    });
+    $('trCmpGo').addEventListener('click', function () { if (got && got.rows.length) drawCompare(got.rows, true); });
+    $('trCmpWk').addEventListener('click', function () { if (got && got.rows.length) drawCompare(got.rows, 'week'); });
+
+    // The tab shown, the range pressed, the window resized.
+    new MutationObserver(function () { refresh(); }).observe(app, { attributes: true, attributeFilter: ['data-view'] });
+    document.getElementById('ranges').addEventListener('click', function () { setTimeout(refresh, 0); });
+    var lastW = 0, resizing = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(resizing);
+      resizing = setTimeout(function () {
+        var w = box.clientWidth;
+        if (w && w !== lastW) { lastW = w; draw(); }
+      }, 150);
+    });
+    refresh();
   })();
 </script>
 </body>

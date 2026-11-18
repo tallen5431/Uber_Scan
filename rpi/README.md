@@ -9230,7 +9230,18 @@ node tests/placesreport.test.js # 369 on the NucBox's offline report of where
                                 #     its record's odometer or the GPS log,
                                 #     and no approximate point moving a figure;
                                 #     card vs paid, the server's earnings read
-                                #     and drawn under the actuals
+                                #     and drawn under the actuals; where
+                                #     the car waited by its own fix, ranked
+                                #     the same way, a refused fix no place,
+                                #     and the drop to the next Took
+node tests/trends.test.js       #  45 on the offers page's Trends tab: an offer
+                                #     counted once however often it was read,
+                                #     the corrected pay and no suspect or
+                                #     "pay unread" row in a median, the 4am day,
+                                #     the hours and weekdays, the grid's shade
+                                #     and floor set together, a rate card that
+                                #     recovers the prices it was built from,
+                                #     /api/trends uncapped and refused in lite
 node tests/strategy.test.js     #  90 on what $/hr to expect and what holding
                                 #     out for a line paid: the curve's answer
                                 #     worked by hand, a thin tail never the

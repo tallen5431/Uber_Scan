@@ -1454,7 +1454,8 @@ function nbx() {
      }));
   eq('the groups, in order, each tab in exactly one', [P.GROUPS.map(function (g) { return g[1]; }),
      P.TABS.map(function (t) { return t[0]; }).sort()],
-     [['Overview', 'What to take', 'Where & when', 'Record'], ['overview'].concat(OLD_TABS).sort()]);
+     // ...and the Waited tab (the Trends round, Nov 2026), in Where & when.
+     [['Overview', 'What to take', 'Where & when', 'Record'], ['overview', 'waited'].concat(OLD_TABS).sort()]);
   ok('...What to take holds Strategy and Targets; Where & when the places, map, towns, grid and restaurants; Record Best offers',
      ['strategy', 'targets'].every(function (t) { return groupOfTab(t) === 'take'; })
      && ['places', 'map', 'towns', 'grid', 'restaurants'].every(function (t) { return groupOfTab(t) === 'where'; })
@@ -1983,6 +1984,126 @@ function nbx() {
      'http://h:8081');
   ok('...and an http(s) URL', (function () { try { P.parseArgs(['--relay', 'h:8081']); } catch (e) { return true; } return false; }()));
   ok('a bad date is refused', (function () { try { P.parseArgs(['--since', '9/1']); } catch (e) { return true; } return false; }()));
+
+  /* --- where you waited, by the car's own fix (the Trends round) ---
+   *
+   * Invented: on four shift days the car sits 40 minutes in one 2-mile cell
+   * round the open-water point (cards every two minutes, $/hr about 30 on a
+   * $25 target) and then 40 minutes in a cell ~5 mi north (about 15), all
+   * inside 6-9pm, so the hour is held by construction. A third cell gets five
+   * cards, and a taken order's run covers cards that must not count. */
+  var wr = rng(9101), wRowsA = [], wTakenA = [];
+  var cellX = off(0, 0), cellY = off(0.072, 0), cellZ = off(-0.15, 0);
+  function waitCard(id, t, where, rate) {
+    return card({ id: id, at: t, firstAt: t, lat: where.lat, lon: where.lon, perHour: rate, target: 25,
+                  pay: Math.round(rate * 0.5 * 100) / 100, pickup: null });
+  }
+  for (var wd = 0; wd < 4; wd++) {
+    for (var wk = 0; wk < 20; wk++) {
+      wRowsA.push(waitCard('wx' + wd + '-' + wk, at(10 + wd, 18, wk * 2), cellX, 28 + wr() * 6));
+      wRowsA.push(waitCard('wy' + wd + '-' + wk, at(10 + wd, 19, wk * 2), cellY, 13 + wr() * 6));
+    }
+  }
+  for (var wz = 0; wz < 5; wz++) wRowsA.push(waitCard('wz' + wz, at(10, 20, 10 + wz), cellZ, 20));
+  // Cards seen while an order was in the car: a 20:30-20:50 run on day one.
+  wTakenA.push({ id: 'wz0', tookAt: at(10, 20, 30), endedAt: at(10, 20, 50), by: 'gps' });
+  for (var wc = 0; wc < 6; wc++) wRowsA.push(waitCard('wcar' + wc, at(10, 20, 31 + wc * 3), cellX, 90));
+  var wTown = {};
+  wTown[P.cellOf(cellX).id] = 'Northfen'; wTown[P.cellOf(cellY).id] = 'Saltmere';
+  var repWA = P.analyse(wRowsA, wTakenA, [], function () { return null; }, { now: 0, cellTown: wTown });
+  var wg = repWA.views.all.waitedGrid, wt = repWA.views.all.waitedTown;
+  eq('[waited] the cells where the car was are ranked through the same test, and the grouping beats chance',
+     [wg.groups.length, wg.significant], [2, true]);
+  eq('[waited] ...the cell where offers paid more is coloured above, the other below',
+     wg.groups.map(function (g) { return [g.n, g.clear, g.beats]; }), [[80, 'above', true], [80, 'below', true]]);
+  eq('[waited] ...the cards that came with an order in the car are not counted (80, not 86)', wg.groups[0].n, 80);
+  eq('[waited] ...five cards in a third cell are too few, listed with their n',
+     wg.thin.map(function (t) { return t.n; }), [5]);
+  eq('[waited] towns by the cell\'s name, ranked the same way', wt.groups.map(function (g) { return g.name; }),
+     ['Northfen', 'Saltmere']);
+  var wa = repWA.views.all.more.waitedAreaTown.rows;
+  var wn = wa.filter(function (r) { return r.name === 'Northfen'; })[0];
+  var ws = wa.filter(function (r) { return r.name === 'Saltmere'; })[0];
+  // Northfen: 19 gaps of 2 min, then 20 min to Saltmere capped at 10, a day: 48 min x 4.
+  // Saltmere: 19 gaps of 2 min a day; the next card is the next day, a break.
+  eq('[waited] hours there are inferred from card to card, capped at ' + P.CREDIT_MAX_MIN + ' min, none across a break',
+     [wn.hours, ws.hours], [3.2, 2.5]);
+  eq('[waited] ...offers an hour there, the share that cleared the target, stays and minutes to the first good',
+     [wn.perHour, wn.good, wn.stays, wn.staysGood, wn.toGood, ws.good, ws.staysGood, ws.toGood],
+     [25, 1, 4, 1, 0, 0, 0, null]);
+  ok('[waited] ...each with its median $/hr and an interval', wn.median > 28 && wn.medianCi && ws.median < 19);
+  var wPage = P.html(repWA);
+  ok('[waited] the page has the tab and says it is offered, not earned, and dispatched near the car',
+     /<section data-tab="waited">/.test(wPage) && /Offered, not earned/.test(wPage)
+     && /dispatched near the car/.test(wPage) && /inferred/.test(wPage));
+
+  // No effect: both cells drawn from one distribution.
+  var nr = rng(4242), nRows = [];
+  for (var nd = 0; nd < 4; nd++) {
+    for (var nk = 0; nk < 20; nk++) {
+      nRows.push(waitCard('nx' + nd + '-' + nk, at(10 + nd, 18, nk * 2), cellX, 15 + nr() * 12));
+      nRows.push(waitCard('ny' + nd + '-' + nk, at(10 + nd, 19, nk * 2), cellY, 15 + nr() * 12));
+    }
+  }
+  var repWN = P.analyse(nRows, [], [], function () { return null; }, { now: 0, cellTown: wTown });
+  eq('[waited] with no effect nothing is coloured', repWN.views.all.waitedGrid.groups.map(function (g) { return g.beats; }),
+     [false, false]);
+  // A good card fix only: a fix the gate refused places nothing.
+  var refusedRows = nRows.map(function (o) { return Object.assign({}, o, { gpsOk: false, gpsWhy: 'rough' }); });
+  var repWR = P.analyse(refusedRows, [], [], function () { return null; }, { now: 0, cellTown: wTown });
+  eq('[waited] ...and a fix the gate refused is no position', [repWR.views.all.waitedGrid.groups.length,
+     repWR.views.all.waitedGrid.thin.length, repWR.waited.fixed, repWR.waited.density.refused], [0, 0, 0, 160]);
+
+  /* --- after a drop: the next offer of any kind, and where the car was --- */
+  var tl = [{ at: 1000, counted: false, perHour: 99, o: {} },
+            { at: 2000, counted: true, perHour: 18, o: card({ perHour: 18, target: 25 }) },
+            { at: 3000, counted: true, perHour: 40, o: card({ perHour: 40, target: 25 }) }];
+  eq('[after] the next offer the rig stands behind, its minutes and whether it cleared the target',
+     P.nextOffer(tl, 500), { censored: false, wait: 1500 / 60000, perHour: 18, good: false });
+  eq('[after] ...a silence longer than the rig\'s break ends the wait unmeasured',
+     P.nextOffer([{ at: P.NEXT_GAP_MIN * 60000 + 2, counted: true, perHour: 1, o: {} }], 0), { censored: true });
+  var dropT = at(12, 21, 0);
+  var cf = [card({ id: 'cf1', at: dropT + 2 * 60000, firstAt: dropT + 2 * 60000, lat: 12.4, lon: 45.6 }),
+            card({ id: 'cf0', at: dropT + 60000, firstAt: dropT + 60000, gpsOk: false, gpsWhy: 'stale' })];
+  eq('[after] a drop with no GPS log and no door is placed by the first card fix within ' + P.CARD_FIX_AFTER_MIN
+     + ' min, a refused fix skipped', P.cardFixAfter(cf, dropT), { at: { lat: 12.4, lon: 45.6 }, how: 'card fix' });
+  eq('[after] ...and none past it', P.cardFixAfter(cf, dropT - 2 * 60000), null);
+  var rd = repWA.views.all.dropTown;
+  ok('[after] the town table carries the next offer\'s columns', rd && Array.isArray(rd.groups));
+
+  /* --- empty driving: from a put-down to the next Took --- */
+  var eTrips = [], eTaken = [], eById = {}, eOffers = [];
+  for (var ei = 0; ei < 12; ei++) {
+    var eAt = at(14 + (ei % 4), 18 + Math.floor(ei / 4), 0);
+    var far = ei % 2 === 0;
+    var endAt = far ? off(0.03, 0) : off(0.001, 0);              // ~2.1 mi north, or ~0.07 mi
+    eTrips.push({ at: eAt, pos: off(0, 0), town: 'Northfen' });
+    eTaken.push({ id: 'e' + ei, tookAt: eAt + 12 * 60000, endedAt: eAt + 40 * 60000, by: 'gps' });
+    eById['e' + ei] = card({ id: 'e' + ei, lat: endAt.lat, lon: endAt.lon, perHour: far ? 30 : 20 });
+    // A card between, off to one side: the path through the cards is longer than the straight line.
+    eOffers.push(card({ id: 'em' + ei, at: eAt + 6 * 60000, firstAt: eAt + 6 * 60000,
+                        lat: BASE.lat + 0.015, lon: BASE.lon + 0.01 }));
+  }
+  eTrips.push({ at: at(20, 18), pos: off(0, 0), town: 'Northfen' });   // no Took after it
+  eTrips.push({ at: at(20, 19), pos: null, town: 'Northfen' });        // nowhere known
+  P.emptyOf(eTrips, eTaken, eById, eOffers);
+  eq('[empty] the two ends: minutes to the next Took, straight-line miles, moved over ' + P.MOVED_MI + ' mi',
+     [eTrips[0].empty.minutes, Math.round(eTrips[0].empty.crow * 10) / 10, eTrips[0].empty.moved, eTrips[1].empty.moved,
+      eTrips[0].empty.cards], [12, 2.1, true, false, 1]);
+  ok('[empty] ...the path through the cards is at least the straight line', eTrips[0].empty.path > eTrips[0].empty.crow);
+  eq('[empty] ...no Took within ' + 90 + ' min is not measured, and no position is no row',
+     [eTrips[12].empty, eTrips[13].empty], [{ censored: true }, null]);
+  var et = P.emptyTable(eTrips, 'town', function (k) { return k; }, 'dropoff town');
+  eq('[empty] moved against stayed, every trip, and the dropoff town over its floor',
+     et.rows.map(function (r) { return [r.name, r.measured, r.moved]; }),
+     [['every trip', 12, 0.5], ['moved over 1 mi', 6, null], ['stayed within 1 mi', 6, null], ['Northfen', 12, 0.5]]);
+  eq('[empty] ...the next take paid more after moving here, as built', [et.rows[0].nextPerHour], [25]);
+  var dens = P.fixDensity([card({ at: at(1, 18, 0) }), card({ at: at(1, 18, 2) }), card({ at: at(1, 18, 4) }),
+                           card({ at: at(1, 19, 30) }), card({ at: at(1, 19, 31), gpsOk: undefined, lat: undefined })]);
+  eq('[empty] fix density: fixed cards, the gaps within a run (a silence over the break left out)',
+     [dens.offers, dens.fixed, dens.gapMedian, dens.gapP90, dens.over5], [5, 4, 2, 2, 0]);
+  ok('[privacy] the waited and empty tables name no dropoff and hold no coordinate of one',
+     !/"pos"/.test(JSON.stringify(repWA.views)) && !/"empty"/.test(JSON.stringify(repWA.views)));
 
   console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                    : '\nAll ' + pass + ' places-report checks passed');

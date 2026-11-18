@@ -906,6 +906,9 @@ function tripsOf(offers, taken, dropAt) {
     var cell = pos ? cellOf(pos.at) : null;
     out.push({ at: t.endedAt, town: MV.townOf(o.dropoff, A.area), cell: cell ? cell.id : null,
                cellBox: cell, how: pos ? pos.how : null, next: nextTake(line, t.endedAt),
+               // ...the next offer of any kind (nextOffer), and where the car
+               // was, for the empty-driving table; neither is written out.
+               nextAny: nextOffer(line, t.endedAt), pos: pos ? pos.at : null,
                // The offer it was taken on, for the per-store tables; never
                // written out (the report keeps the trips' counts only).
                offer: o });
@@ -933,6 +936,11 @@ function dropTable(trips, keyName, hold) {
     g.ended = list.length - got.length;
     g.nextPerHour = got.length ? round2(MV.median(got.map(function (t) { return t.next.perHour; }))) : null;
     g.nextPay = got.length ? round2(MV.median(got.map(function (t) { return t.next.pay; }))) : null;
+    var any = list.filter(function (t) { return t.nextAny && !t.nextAny.censored; });
+    g.anyN = any.length;
+    g.anyMin = any.length ? round2(MV.median(any.map(function (t) { return t.nextAny.wait; }))) : null;
+    g.anyPerHour = any.length ? round2(MV.median(any.map(function (t) { return t.nextAny.perHour; }))) : null;
+    g.anyGood = any.length ? share(any.filter(function (t) { return t.nextAny.good; }).length, any.length) : null;
     // Lower is better for a wait: the sign of `clear` says which way.
     if (keyName === 'cell') {
       var c = list[0] && list[0].cellBox;
@@ -946,6 +954,234 @@ function dropTable(trips, keyName, hold) {
     res.thin = [];
   }
   return res;
+}
+
+/* --- where you waited: the car's own fix when each card came up -----------
+ *
+ * Nov 2026, the Trends round. The heat-map entry (AUDITS.md) wrote: "The
+ * pickup is where the job STARTS, not where the driver WAS when the card
+ * arrived ... with no row carrying a position the second is not knowable at
+ * all", and every table above ranks pickups for that reason. Since the USB
+ * receiver every offer row carries the car's own fix (journal.py fix_fields,
+ * the gate's `gpsOk`), so where the car WAS is now on the record, and this
+ * groups the offers by it: by the 2-mile cell the car was in and by that
+ * cell's town (the NucBox map's name for the cell's centre, as the Busy tab
+ * names its spells). Only a fix the gate passed (MV.fixOf), and only cards
+ * that came with no taken order in the car — an offer read on the way to a
+ * door says where the job took the car, not where the driver chose to wait.
+ *
+ * What it can say now: "offers that came while you were here paid this,
+ * against the same hours elsewhere", ranked by the same test and colour rule
+ * as every ranked table (cells: Advice.areas, shuffles within three-hour
+ * blocks, 30 offers on 2 shift days, colour only where the grouping beats
+ * chance AND the cell's interval clears zero). What still limits it, and why
+ * it is not "where to wait":
+ *   - Offers are dispatched NEAR the car, so a place only ever competes with
+ *     places the driver already waits in; a cell never waited in has no row.
+ *   - A good area may be good because of where its trips go, not where the
+ *     wait was; this table cannot tell those apart.
+ *   - The hours there are inferred, not measured: each card's time to the
+ *     next card (at most CREDIT_MAX_MIN, chosen: a gap longer than that is
+ *     the car moving or the phone down, not the wait) credited to where the
+ *     car was at the earlier card. The Busy tab's spells, off the GPS log,
+ *     are the measured version where --gps is given.
+ *   - Takes the driver never pressed Took on leave their drive in as waiting.
+ *   - Minutes to the first good offer start at the first CARD seen in an
+ *     area, not at arrival (arrival is not on the record without the log),
+ *     so a stay whose first card was good reads 0.
+ * "Good" is the row's own target at the time (perHour >= target), the
+ * offers page's Trends tab's word; "rig said take" elsewhere is the verdict. */
+var CREDIT_MAX_MIN = 10;
+
+function goodOf(o) {
+  return counted(o) && typeof o.target === 'number' && isFinite(o.target) && o.perHour >= o.target;
+}
+
+function inAny(spans, at) {
+  for (var i = 0; i < spans.length; i++) if (at >= spans[i][0] && at <= spans[i][1]) return true;
+  return false;
+}
+
+/* The cards seen with no taken order in the car, oldest first, each with the
+ * car's fix, its 2-mile cell and that cell's town, and its credited minutes
+ * (to the next card, at most CREDIT_MAX_MIN; none across a silence longer
+ * than NEXT_GAP_MIN, the rig's own break). */
+function waitingLine(offers, taken, cellTown, cellBoxes) {
+  var held = heldOf(taken);
+  var line = timelineOf(offers).filter(function (t) { return t.counted && !inAny(held, t.at); });
+  return line.map(function (t, i) {
+    var fix = MV.fixOf(t.o);
+    var c = fix ? cellOf(fix) : null;
+    if (c && cellBoxes) cellBoxes[c.id] = c;
+    var next = line[i + 1];
+    var gap = next ? (next.at - t.at) / 60000 : null;
+    return { at: t.at, o: t.o, fix: fix, cell: c ? c.id : null,
+             town: c && cellTown ? cellTown[c.id] || null : null,
+             credit: gap !== null && gap <= NEXT_GAP_MIN ? Math.min(gap, CREDIT_MAX_MIN) : 0,
+             brk: gap === null || gap > NEXT_GAP_MIN, good: goodOf(t.o) };
+  });
+}
+
+/* Per area and three-hour block: the cards, the hours credited there, cards
+ * per hour, median $/hr, the share that cleared the target, and the stays —
+ * consecutive cards in one area with no break — with the minutes from a
+ * stay's first card to its first good one. Figures at DESC_MIN_N cards on
+ * MIN_OUTINGS shift days; under that the n only. */
+function waitedTable(line, keyName, label, what) {
+  var stays = [];
+  var cur = null;
+  line.forEach(function (w) {
+    var k = w[keyName];
+    if (!cur || cur.key !== k || cur.closed) {
+      cur = k ? { key: k, from: w.at, firstGood: null, closed: false } : null;
+      if (cur) stays.push(cur);
+    }
+    if (cur && w.good && cur.firstGood === null) cur.firstGood = (w.at - cur.from) / 60000;
+    if (cur && w.brk) cur.closed = true;
+  });
+  var by = groupBy(line.filter(function (w) { return w[keyName]; }),
+                   function (w) { return w[keyName] + '\u0000' + A.blockOf(w.at); });
+  var sBy = groupBy(stays, function (s) { return s.key + '\u0000' + A.blockOf(s.from); });
+  var out = Object.keys(by).map(function (k) {
+    var list = by[k], parts = k.split('\u0000');
+    var days = A.outingsIn(list.map(function (w) { return w.o; }));
+    var hours = list.reduce(function (a, w) { return a + w.credit / 60; }, 0);
+    var ok = list.length >= DESC_MIN_N && days >= MIN_OUTINGS;
+    var rates = list.map(function (w) { return w.o.perHour; });
+    var ss = sBy[k] || [], got = ss.filter(function (s) { return s.firstGood !== null; })
+      .map(function (s) { return s.firstGood; });
+    return { name: label(parts[0]), block: A.BLOCK_NAMES[Number(parts[1])], blockN: Number(parts[1]),
+             n: list.length, days: days, hours: Math.round(hours * 10) / 10,
+             perHour: ok && hours > 0 ? round2(list.length / hours) : null,
+             median: ok ? med(rates) : null, medianCi: ok ? medCi(rates, 'w' + k) : null,
+             good: ok ? share(list.filter(function (w) { return w.good; }).length, list.length) : null,
+             stays: ss.length, staysGood: ok ? share(got.length, ss.length) : null,
+             toGood: ok && got.length ? med(got) : null };
+  }).sort(function (a, b) { return (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || a.blockN - b.blockN; });
+  out.forEach(function (r) { delete r.blockN; });
+  return { cols: [C('name', what, 't'), C('block', 'hours', 't'), C('n', 'offers', 'n'), C('days', 'days', 'n'),
+                  C('hours', 'hours there (inferred)', 'h'), C('perHour', 'offers / hr there', 'r'),
+                  C('median', 'median $/hr', '$'), C('medianCi', '95%', '$ci'), C('good', 'cleared target', '%'),
+                  C('stays', 'stays', 'n'), C('staysGood', 'stays with a good offer', '%'),
+                  C('toGood', 'min to first good (from first card)', 'min')], rows: out };
+}
+
+/* --- after a drop, the next offer of any kind ------------------------------
+ *
+ * "Where trips leave you" timed the next offer the rig said TAKE. The owner's
+ * Trends round asked for the next offer at all, and its quality: the first
+ * offer the rig stands behind after the put-down, minutes to it, its $/hr
+ * and whether it cleared the target, the same silence rule ending the wait. */
+function nextOffer(timeline, endedAt) {
+  var last = endedAt, gap = NEXT_GAP_MIN * 60000;
+  for (var i = 0; i < timeline.length; i++) {
+    var t = timeline[i];
+    if (t.at <= endedAt || !t.counted) continue;
+    if (t.at - last > gap) return { censored: true };
+    return { censored: false, wait: (t.at - endedAt) / 60000, perHour: t.perHour, good: goodOf(t.o) };
+  }
+  return { censored: true };
+}
+
+/* Where a put-down left the car when neither the GPS log nor the dropoff's
+ * door can say: the car's own fix on the first card that came up within
+ * CARD_FIX_AFTER_MIN after it (offers keep arriving through a delivery and
+ * after one; the median gap to the next card after a take was 5.4 minutes on
+ * the owner's week). Chosen, not measured: three minutes is about a mile of
+ * town driving, half a 2-mile cell. */
+var CARD_FIX_AFTER_MIN = 3;
+function cardFixAfter(offers, endedAt) {
+  var best = null;
+  (offers || []).forEach(function (o) {
+    var t = seenAt(o), fix = MV.fixOf(o);
+    if (!fix || typeof t !== 'number' || t < endedAt || t - endedAt > CARD_FIX_AFTER_MIN * 60000) return;
+    if (!best || t < best.t) best = { t: t, at: fix };
+  });
+  return best ? { at: best.at, how: 'card fix' } : null;
+}
+
+/* --- empty driving: from a put-down to the next Took ------------------------
+ *
+ * Measured first, as the round asked: which journal rows carry a position?
+ * Offer rows only. `seen` rows (scan_pi.note_tally) and health tallies carry
+ * no fix, order rows carry the drive's total miles off the live GPS but no
+ * track, `drop` and `finished` rows carry how an order ended, not where. So
+ * between jobs the journal's positions are the cards' own, as often as cards
+ * come (fixDensity below reports how often that was). That is enough for two
+ * ends — where the car was at the drop (the GPS log, the door, or the next
+ * card's fix) and where it was when the next order was taken (that card's own
+ * fix) — and for a lower bound of the path through the cards between. It is
+ * NOT a measure of miles driven: the Best tab's dead miles, off the GPS log
+ * (--gps), is that. Moved = the two ends more than MOVED_MI apart (chosen:
+ * half a 2-mile cell, beyond a car park and its block). */
+var MOVED_MI = 1;
+function emptyOf(trips, taken, byId, offers) {
+  var tooks = (taken || []).filter(function (t) { return t && typeof t.tookAt === 'number'; })
+    .sort(function (a, b) { return a.tookAt - b.tookAt; });
+  var fixes = (offers || []).filter(counted).map(function (o) { return { t: seenAt(o), at: MV.fixOf(o) }; })
+    .filter(function (f) { return f.at && typeof f.t === 'number'; }).sort(function (a, b) { return a.t - b.t; });
+  trips.forEach(function (tr) {
+    if (!tr.pos) { tr.empty = null; return; }
+    var next = null;
+    for (var i = 0; i < tooks.length; i++) if (tooks[i].tookAt > tr.at) { next = tooks[i]; break; }
+    var o = next && byId[next.id];
+    var end = o ? MV.fixOf(o) : null;
+    if (!next || !end || next.tookAt - tr.at > DEAD_MAX_MIN * 60000) { tr.empty = { censored: true }; return; }
+    var pts = [tr.pos].concat(fixes.filter(function (f) { return f.t > tr.at && f.t < next.tookAt; })
+      .map(function (f) { return f.at; })).concat([end]);
+    var path = 0;
+    for (var k = 1; k < pts.length; k++) path += MV.crowMiles(pts[k - 1], pts[k]);
+    var crow = MV.crowMiles(tr.pos, end);
+    tr.empty = { censored: false, minutes: (next.tookAt - tr.at) / 60000, crow: crow, path: path,
+                 cards: pts.length - 2, moved: crow > MOVED_MI,
+                 perHour: counted(o) ? o.perHour : null };
+  });
+}
+
+function emptyTable(trips, keyName, label, what) {
+  var all = trips.filter(function (t) { return t.empty && !t.empty.censored; });
+  function row(name, list) {
+    var ok = list.length >= DROP_MIN_N;
+    return { name: name, measured: list.length,
+             minutes: ok ? med(list.map(function (t) { return t.empty.minutes; })) : null,
+             crow: ok ? med(list.map(function (t) { return t.empty.crow; })) : null,
+             path: ok ? med(list.map(function (t) { return t.empty.path; })) : null,
+             cards: ok ? med(list.map(function (t) { return t.empty.cards; })) : null,
+             moved: ok ? share(list.filter(function (t) { return t.empty.moved; }).length, list.length) : null,
+             nextPerHour: ok ? med(list.filter(function (t) { return t.empty.perHour !== null; })
+               .map(function (t) { return t.empty.perHour; })) : null };
+  }
+  var out = [row('every trip', all), row('moved over ' + MOVED_MI + ' mi', all.filter(function (t) { return t.empty.moved; })),
+             row('stayed within ' + MOVED_MI + ' mi', all.filter(function (t) { return !t.empty.moved; }))];
+  var by = groupBy(all.filter(function (t) { return t[keyName]; }), function (t) { return t[keyName]; });
+  var thinCount = 0;
+  Object.keys(by).sort().forEach(function (k) {
+    // A dropoff area under the floor is a handful of customers: not named.
+    if (by[k].length < DROP_MIN_N) { thinCount += 1; return; }
+    out.push(row(label(k), by[k]));
+  });
+  return { cols: [C('name', what, 't'), C('measured', 'trips', 'n'), C('minutes', 'min to next Took', 'min'),
+                  C('crow', 'straight-line mi', 'mi'), C('path', 'mi through the cards (at least)', 'mi'),
+                  C('cards', 'cards between', 'r'), C('moved', 'moved', '%'),
+                  C('nextPerHour', 'next take $/hr', '$')], rows: out, thinCount: thinCount };
+}
+
+/* How often a good card fix comes, within a run of scanning: the gaps between
+ * consecutive fixed cards no more than NEXT_GAP_MIN apart. */
+function fixDensity(offers) {
+  var pool = (offers || []).filter(counted);
+  var ts = pool.filter(function (o) { return MV.fixOf(o); }).map(seenAt).filter(isFinite).sort(function (a, b) { return a - b; });
+  var gaps = [];
+  for (var i = 1; i < ts.length; i++) {
+    var g = (ts[i] - ts[i - 1]) / 60000;
+    if (g <= NEXT_GAP_MIN) gaps.push(g);
+  }
+  gaps.sort(function (a, b) { return a - b; });
+  return { offers: pool.length, fixed: ts.length,
+           refused: pool.filter(function (o) { return MV.fixRefused(o); }).length,
+           gapMedian: gaps.length ? round2(quantile(gaps, 0.5)) : null,
+           gapP90: gaps.length ? round2(quantile(gaps, 0.9)) : null,
+           over5: gaps.length ? share(gaps.filter(function (g) { return g > 5; }).length, gaps.length) : null };
 }
 
 /* --- the second pass: what you took, what it paid, and what the area is like
@@ -2275,6 +2511,15 @@ function analyse(offers, taken, placed, dropAt, opts) {
   var byIdAll = Object.create(null);
   offers.forEach(function (o) { if (o && typeof o.id === 'string') byIdAll[o.id] = o; });
   if (opts.fixes) deadOf(trips, taken, byIdAll, opts.fixes);
+  emptyOf(trips, taken, byIdAll, offers);
+  // Where you waited (waitingLine): the cards that came with no order in the
+  // car, by the car's own fix. Their cells join cellBoxes so the page names
+  // them as it names every cell, by the cell's centre.
+  var waiting = waitingLine(offers, taken, opts.cellTown, cellBoxes);
+  var waitBy = new Map();
+  waiting.forEach(function (w) { waitBy.set(w.o, w); });
+  function waitCellKey(o) { var w = waitBy.get(o); return w ? w.cell : null; }
+  function waitTownKey(o) { var w = waitBy.get(o); return w ? w.town : null; }
   var tookRuns = (taken || []).filter(function (t) { return t && typeof t.tookAt === 'number'; });
   // Spells parked with no order in the car (main reads them off the GPS
   // log): each to its 2-mile cell and, where the NucBox named one, the town
@@ -2319,6 +2564,8 @@ function analyse(offers, taken, placed, dropAt, opts) {
       grid: cells(rows, cellKey, { hold: hold, minN: opts.minN, tierOf: tierOf }),
       dropTown: dropTable(tv, 'town', hold),
       dropGrid: dropTable(tv, 'cell', hold),
+      waitedTown: cells(rows, waitTownKey, { hold: hold, minN: opts.minN, tierOf: tierOf }),
+      waitedGrid: cells(rows, waitCellKey, { hold: hold, minN: opts.minN, tierOf: tierOf }),
     };
     views[v].rest = restaurantsTable(rows, { key: restKey, placeKey: placeKey, places: grouped.places,
                                              names: names, runs: runs, waits: opts.waits, hold: hold,
@@ -2348,6 +2595,7 @@ function analyse(offers, taken, placed, dropAt, opts) {
     var rows = v === 'all' ? offers : offers.filter(function (o) { return A.blockOf(o.at) === v; });
     var tv = v === 'all' ? trips : trips.filter(function (t) { return A.blockOf(t.at) === v; });
     var sv = v === 'all' ? spells : spells.filter(function (sp) { return A.blockOf(sp.from) === v; });
+    var wv = v === 'all' ? waiting : waiting.filter(function (w) { return A.blockOf(w.at) === v; });
     views[v].more = {
       takesPlace: takesTable(rows, runs, placeKey, placeLabel, 'place'),
       takesTown: takesTable(rows, runs, townKey, same, 'town'),
@@ -2363,6 +2611,9 @@ function analyse(offers, taken, placed, dropAt, opts) {
       ppmTown: ppmTable(rows, townKey, same, 'town'),
       ppmGrid: ppmTable(rows, cellKey, cellLabel, 'cell'),
       stack: stackTable(rows, placeKey, placeLabel),
+      waitedAreaTown: waitedTable(wv, 'town', same, 'town where the car was'),
+      waitedAreaGrid: waitedTable(wv, 'cell', cellLabel, 'cell where the car was'),
+      emptyTown: emptyTable(tv, 'town', same, 'dropoff town'),
     };
     function restLabel(k) { return names.labels[k] || k; }
     views[v].best = {
@@ -2434,7 +2685,13 @@ function analyse(offers, taken, placed, dropAt, opts) {
       pin: trips.filter(function (t) { return t.how === 'pin'; }).length,
       town: trips.filter(function (t) { return t.town; }).length,
       ended: trips.filter(function (t) { return t.next.censored; }).length,
+      cardFix: trips.filter(function (t) { return t.how === 'card fix'; }).length,
+      empty: trips.filter(function (t) { return t.empty && !t.empty.censored; }).length,
     },
+    waited: { cards: waiting.length, fixed: waiting.filter(function (w) { return w.fix; }).length,
+              towns: waiting.filter(function (w) { return w.town; }).length,
+              creditMaxMin: CREDIT_MAX_MIN, movedMi: MOVED_MI, cardFixAfterMin: CARD_FIX_AFTER_MIN,
+              density: fixDensity(offers) },
     coverage: cov,
     quiet: quiet, trend: trend,
     takes: { taken: (taken || []).length, onCounted: offers.filter(function (o) { return counted(o) && runs[o.id]; }).length,
@@ -2708,6 +2965,9 @@ var MORE_CSVS = {
   'size_towns.csv': [function (v) { return v.best.sizeTown; }, true],
   'size_apps.csv': [function (v) { return v.best.sizeApp; }, true],
   'size_restaurants.csv': [function (v) { return v.best.sizeRest; }, true],
+  'waited_towns.csv': [function (v) { return v.more.waitedAreaTown; }, true],
+  'waited_grid.csv': [function (v) { return v.more.waitedAreaGrid; }, true],
+  'empty_driving.csv': [function (v) { return v.more.emptyTown; }, true],
 };
 
 /* The top-10% share tests (all hours, hours held), one CSV, a line a group. */
@@ -2910,6 +3170,45 @@ function html(r) {
     + '<p class="note" id="dropTest"></p>'
     + fold('afterTown', 'By town', '<div id="dropTown"></div>')
     + fold('afterGrid', 'By ' + r.gridMi + '-mile cell', '<div id="dropGrid"></div>') + '</section>\n';
+  var wd = r.waited, dn = wd.density;
+  SEC.waited = '<section data-tab="waited"><h2>Where you waited — by the car\'s own fix when each card came up</h2>'
+    + '<p class="exp">Offered, not earned. Offers are dispatched near the car, so this compares only places you already '
+    + 'wait in; it cannot say a place you never tried would pay, nor whether an area is good for its wait or for where '
+    + 'its trips go.</p>'
+    + '<p class="note">The cards that came with no taken order in the car (' + wd.cards + '), placed by the GPS fix the '
+    + 'gate passed on each card (' + wd.fixed + ' of them; ' + dn.refused + ' fixes refused by the gate, the rest had '
+    + 'none). By the ' + r.gridMi + '-mile cell the car was in, and by that cell\'s town (the NucBox map\'s name for '
+    + 'its centre: ' + wd.towns + ' cards named). <b>Ranked</b> as every ranked table is: each offer against the other '
+    + 'cells in its own three-hour block, ' + r.minN + ' offers on ' + r.minOutings + ' shift days, colour only where '
+    + 'the grouping beats chance and the cell\'s interval is clear of zero.</p>'
+    + '<p class="note" id="waitedTownTest"></p><div id="waitedTownPlot" class="plot"></div>'
+    + fold('waitedTownFold', 'Towns where the car was, ranked', '<div id="waitedTownTable"></div><div id="waitedTownThin" class="thin"></div>')
+    + '<p class="note" id="waitedGridTest"></p><div id="waitedGridPlot" class="plot"></div>'
+    + fold('waitedGridFold', r.gridMi + '-mile cells where the car was, ranked',
+           '<div id="waitedGridTable"></div><div id="waitedGridThin" class="thin"></div>')
+    + '<h3>Per area and hours: time there, offers an hour, the share that cleared your target</h3>'
+    + '<p class="exp">Experimental, descriptive: counts, medians and intervals, not ranked or coloured.</p>'
+    + '<p class="note"><b>Hours there are inferred</b>: each card\'s time to the next card, at most '
+    + wd.creditMaxMin + ' minutes and none across a silence over ' + r.nextGapMin + ', credited to where the car was at '
+    + 'the earlier card (the Busy tab\'s spells, off the GPS log, are the measured version). <b>Cleared target</b> is '
+    + 'the card\'s $/hr at or over the target the panel judged it by. A <b>stay</b> is consecutive cards in one area '
+    + 'with no silence; its minutes to the first good offer start at its first CARD, not at arrival, so a stay whose '
+    + 'first card was good reads 0. Figures at ' + r.descMinN + ' offers on ' + r.minOutings + ' shift days.</p>'
+    + fold('f-waitedAreaTown', 'By town', '<div id="m-waitedAreaTown"></div>')
+    + fold('f-waitedAreaGrid', 'By ' + r.gridMi + '-mile cell', '<div id="m-waitedAreaGrid"></div>')
+    + '<h3>From a drop to the next Took</h3>'
+    + '<p class="note">How dense the record\'s positions are between jobs: offer rows are the only journal rows with a '
+    + 'fix (seen and health rows carry none; order rows carry a total, not a track). Good card fixes in this window: '
+    + dn.fixed + ' of ' + dn.offers + ' counted offers, one every ' + (dn.gapMedian === null ? '—' : dn.gapMedian + ' min')
+    + ' at the median within a run (P90 ' + (dn.gapP90 === null ? '—' : dn.gapP90 + ' min') + '; '
+    + (dn.over5 === null ? '—' : Math.round(dn.over5 * 100) + '%') + ' of gaps over 5 min). So the two ends are known — '
+    + 'where the drop left the car (the GPS log, the dropoff\'s door, or the first card within ' + wd.cardFixAfterMin
+    + ' min after: ' + r.trips.cardFix + ' trips) and where the car was when the next order was taken (that card\'s '
+    + 'fix) — and the path between them only through the cards: <b>a lower bound, not miles driven</b> (the Best tab\'s '
+    + 'dead miles, off the GPS log, are that). <b>Moved</b> = the ends more than ' + wd.movedMi + ' mi apart. '
+    + r.trips.empty + ' trips measured; a dropoff town under ' + r.dropMinN + ' is not named.</p>'
+    + fold('f-emptyTown', 'Moved against stayed, and by dropoff town', '<div id="m-emptyTown"></div>')
+    + '</section>\n';
   var more = MORE_SECTIONS(r);
   Object.keys(more).forEach(function (k) { SEC[k] = more[k]; });
   SEC.coverage = '<section data-tab="coverage"><h2>Coverage, shift day by shift day</h2><p class="note">Pickups placed and not, and what each paid. '
@@ -3454,6 +3753,7 @@ var GROUPS = [
     ['towns', 'Towns', 'The card\'s own town, ranked.', true],
     ['grid', 'Grid', 'A 2-mile grid by the pickup\'s pin, ranked.', true],
     ['busy', 'Busy', 'Offers per hour while parked, by area and hours (GPS).', true],
+    ['waited', 'Waited', 'Offers by where the car was when each came up (its own fix), against the same hours.', true],
     ['waits', 'Store waits', 'The rig\'s measured waits beside a place\'s pay.', true],
     ['after', 'After a drop', 'Where trips leave you: minutes to the next take.', true],
     ['strand', 'Strand risk', 'How far a store\'s cards run and where its trips end.', true],
@@ -3892,7 +4192,9 @@ var PAGE_JS = String(function page() {
       return '<tr><td>' + esc(name) + '</td><td>' + g.trips + '</td><td>' + g.n + '</td><td>' + g.ended
         + '</td><td>' + g.median.toFixed(1) + ' min</td><td>' + ci(g.ci, function (v) { return v.toFixed(1); })
         + '</td><td>' + (g.score === null ? '—' : (g.score >= 0 ? '+' : '−') + Math.abs(g.score).toFixed(1) + ' min')
-        + '</td><td>' + m(g.nextPerHour) + '</td><td>' + m(g.nextPay) + '</td><td>' + tag(g, true) + '</td></tr>';
+        + '</td><td>' + m(g.nextPerHour) + '</td><td>' + m(g.nextPay)
+        + '</td><td>' + (g.anyMin === null || g.anyMin === undefined ? '—' : g.anyMin.toFixed(1) + ' min')
+        + '</td><td>' + m(g.anyPerHour) + '</td><td>' + pc(g.anyGood) + '</td><td>' + tag(g, true) + '</td></tr>';
     }).join('');
     var thin = what === 'cell'
       ? (c.thinCount ? '<p class="thin">' + c.thinCount + ' more cells (' + c.thinTrips
@@ -3902,7 +4204,8 @@ var PAGE_JS = String(function page() {
     // Its heading is the fold's round it now (html()), so none is written here.
     el.innerHTML = (c.groups.length ? '<div class="tw"><table><thead><tr><th>' + (what === 'cell' ? 'cell' : 'town')
         + '</th><th>trips</th><th>measured</th><th>ended</th><th>median wait</th><th>95%</th><th>vs same hours</th>'
-        + '<th>next take $/hr</th><th>next take pay</th><th></th></tr></thead><tbody>' + rows
+        + '<th>next take $/hr</th><th>next take pay</th><th>next offer, min</th><th>next offer $/hr</th>'
+        + '<th>next offer cleared target</th><th></th></tr></thead><tbody>' + rows
         + '</tbody></table></div>' : '<p class="note">No area clears the floor here.</p>') + thin;
   }
 
@@ -4300,6 +4603,13 @@ var PAGE_JS = String(function page() {
       dotPlot(document.getElementById(k[0] + 'Plot'), v[k[0]], k[0], '$', false);
       table(document.getElementById(k[0] + 'Table'), v[k[0]], k[0]);
       thinList(document.getElementById(k[0] + 'Thin'), v[k[0]], k[0], 'offers');
+    });
+    [['waitedTown', 'town', 'towns where the car was'], ['waitedGrid', 'grid', 'cells where the car was']].forEach(function (k) {
+      if (!v[k[0]] || !document.getElementById(k[0] + 'Test')) return;
+      document.getElementById(k[0] + 'Test').innerHTML = testText(v[k[0]], k[2]);
+      dotPlot(document.getElementById(k[0] + 'Plot'), v[k[0]], k[1], '$', false);
+      table(document.getElementById(k[0] + 'Table'), v[k[0]], k[1]);
+      thinList(document.getElementById(k[0] + 'Thin'), v[k[0]], k[1], 'offers');
     });
     document.getElementById('restTest').innerHTML = testText(v.rest, 'restaurants');
     dotPlot(document.getElementById('restPlot'), v.rest, 'rest', '$', false);
@@ -4815,7 +5125,7 @@ async function main(argv) {
     var kk = tr.id + '@' + tr.endedAt;
     if (gpsPos[kk]) return { at: gpsPos[kk], how: 'gps' };
     if (dropPins[kk]) return { at: dropPins[kk], how: 'pin' };
-    return null;
+    return cardFixAfter(offers, tr.endedAt);
   }
 
   // Spells parked with no order in the car, over the record's own span.
@@ -4834,6 +5144,20 @@ async function main(argv) {
       }
       saveCache();
     }
+  }
+
+  // ...and the towns of the cells the car's own fixes fall in (the Waited
+  // tab), named by the same reverse lookup and cache.
+  if (nominatim || o.nominatim) {
+    var fixCells = Object.create(null);
+    for (var fi = 0; fi < offers.length; fi++) {
+      var ff = counted(offers[fi]) ? MV.fixOf(offers[fi]) : null;
+      var fc = ff ? cellOf(ff) : null;
+      if (!fc || fixCells[fc.id] || fc.id in cellTown) continue;
+      fixCells[fc.id] = true;
+      cellTown[fc.id] = await cellTownOf(fetch, nominatim || o.nominatim, cache, fc);
+    }
+    saveCache();
   }
 
   // Store waits: the source's, else the rig's (--waits) when the source has none.
@@ -4884,6 +5208,9 @@ async function main(argv) {
 }
 
 module.exports = {
+  waitingLine: waitingLine, waitedTable: waitedTable, nextOffer: nextOffer, cardFixAfter: cardFixAfter,
+  emptyOf: emptyOf, emptyTable: emptyTable, fixDensity: fixDensity, goodOf: goodOf,
+  CREDIT_MAX_MIN: CREDIT_MAX_MIN, MOVED_MI: MOVED_MI, CARD_FIX_AFTER_MIN: CARD_FIX_AFTER_MIN,
   MIN_N: MIN_N, DROP_MIN_N: DROP_MIN_N, GRID_MI: GRID_MI, NEXT_GAP_MIN: NEXT_GAP_MIN, VIEWS: VIEWS,
   pickupKind: pickupKind, placePickup: placePickup, placeDropoff: placeDropoff, storeLabel: storeLabel,
   printedDoor: printedDoor, placeRow: placeRow, heldEndsOf: heldEndsOf, afterFor: afterFor,
