@@ -167,7 +167,10 @@
     // Uber's Boost+ card (17 Nov 2026): "$1.68 Boost+ included" under the
     // headline is part of it, never the pay — see rpi/offer_parser.py.
     // (Seven characters at most: unbounded, a 4 kB run of "S" took 459 ms.)
-    + '|[$S5§]\\s*(?:' + DC + '|[.,]){1,7}\\s*' + PART_WORD + '\\s*\\+?\\s*incl(?:uded|\\.)?\\b', 'gi');
+    + '|[$S5§]\\s*(?:' + DC + '|[.,]){1,7}\\s*' + PART_WORD + '\\s*\\+?\\s*incl(?:uded|\\.)?\\b'
+    // ...and the same for any one word that is not the headline's own label,
+    // "included" spelled out: the next chip's name is not known yet.
+    + '|[$S5§]\\s*(?:' + DC + '|[.,]){1,7}\\s*(?!guarant|includ|incl\\b)[A-Za-z]{3,12}\\s*\\+?\\s*included\\b', 'gi');
 
   /* One payout, cut in half by the reader.
    *
@@ -223,6 +226,18 @@
   // measurements.
   var CENTS = new RegExp('[.,]' + DC + '{2}$');
   var HEADLINE_LABEL = /^\s*(?:guarant|includ|incl[.,:]?\s?tips?\b|\*)/i;
+  // The label a headline is printed over, and the stretch under it — from the
+  // label to the journey's first "min", "mi" or "hr" — where a figure is a
+  // part of the pay, never the pay, unless a label follows it at once. A new
+  // chip with a word nobody has listed ("$11.68 Turbo included" under
+  // "$9.09 / Guaranteed (incl. tip)") was the largest figure and the pay. A
+  // figure before the label, or past the journey (the next card), is a
+  // candidate as before. Named apart from the address rule's LABEL_WORD
+  // below, which a `var` of the same name would overwrite. The Python twin
+  // has the measurements.
+  var HEADLINE_WORD = /guarant|includes?\s*expected|incl[.,:]?\s?tips?\b/gi;
+  var HEADLINE_ZONE_END = /\d\s*(?:m[il1|]n|mi\b|hrs?\b)/gi;
+  var HEADLINE_AFTER = /^[^\w$]{0,3}?\s*(?:guarant|includes?\s*expected|incl[.,:]?\s?tips?\b|\*)/i;
 
   var PAY_SPLIT = new RegExp(
     '\\$\\s*(' + DC + '{1,3})\\s+(' + DC + '{1,2}[.,]' + DC + '{2})'
@@ -359,6 +374,22 @@
 
     // Cards can show a promo or a struck-through figure alongside the real
     // payout; the offer headline is the largest dollar figure on the card.
+    // Where the card's headline label is, outside any chip, and where the
+    // journey after it starts. See HEADLINE_WORD.
+    var journey = collectSpans(text, HEADLINE_ZONE_END).map(function (j) { return j.index; });
+    var next = 0;
+    var labels = collectSpans(text, HEADLINE_WORD).filter(function (lab) {
+      for (var c = 0; c < chips.length; c++) {
+        if (chips[c].index <= lab.index
+            && lab.index + lab.match.length <= chips[c].index + chips[c].match.length) return false;
+      }
+      return true;
+    }).map(function (lab) {
+      var lo = lab.index + lab.match.length;
+      // Labels arrive in order, so the walk along the journey only goes on.
+      while (next < journey.length && journey[next] < lo) next++;
+      return { lo: lo, hi: next < journey.length ? journey[next] : text.length };
+    });
     var best = null, found = [];
     for (var i = 0; i < all.length; i++) {
       // ...unless it is inside a chip, which is part of the payout rather than
@@ -413,12 +444,29 @@
                      // with the point, or a mark where the point goes, after
                      // it. See CENTS_LOST.
                      lost: !all[i].halves && !/[.,]/.test(all[i].value)
-                       && CENTS_LOST.test(text.slice(all[i].index + all[i].match.length)) });
+                       && CENTS_LOST.test(text.slice(all[i].index + all[i].match.length)),
+                     anchored: !!all[i].split || (!all[i].halves
+                       && HEADLINE_AFTER.test(text.slice(all[i].index + all[i].match.length))) });
         if (best === null || v > best) best = v;
       }
     }
     // The largest figure is one whose cents were lost, and nothing of the same
     // value read whole: no payout at all, not the next figure down.
+    // The card printed its headline label: the payout is the figure directly
+    // before it, and a figure after the label with no label of its own is a
+    // part of the pay, never the pay. See HEADLINE_WORD.
+    if (labels.length && found.length) {
+      best = null;
+      for (i = 0; i < found.length; i++) {
+        var f = found[i], inZone = false;
+        if (!f.anchored) {
+          for (var l = labels.length - 1; l >= 0; l--) {
+            if (labels[l].lo <= f.at) { inZone = f.at < labels[l].hi; break; }
+          }
+        }
+        if (!inZone && (best === null || f.value > best)) best = f.value;
+      }
+    }
     if (best !== null && found.every(function (f) { return f.value !== best || f.lost; })) {
       best = null;
     }
@@ -680,7 +728,7 @@
       // see them separately, or "$1 O.SO" passes on the strength of the 1 and
       // joins a confirmed digit to a guessed one.
       out.push({ value: m[1].trim() + m[2].trim(), index: m.index, match: m[0],
-                 halves: [m[1].trim(), m[2].trim()] });
+                 halves: [m[1].trim(), m[2].trim()], split: true });
       if (m.index === re.lastIndex) re.lastIndex++;
     }
     return out;
