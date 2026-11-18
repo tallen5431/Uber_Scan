@@ -9553,7 +9553,10 @@ function withApp(o) {
  * out — and then NONE of /api/journal's `limit`: the tab is about the whole
  * range, and /api/journal's cap exists to protect a list of rows this answer
  * does not carry. No text, no place and no position leave in it: a time, the
- * app, pay, $/hr, minutes, miles and a few flags (trends.js says which).
+ * app, pay, $/hr, minutes, miles and a few flags (trends.js says which) — one
+ * of them, since the Trends tab's second round, whether the driver ticked the
+ * offer taken (the fold's `accepted === true`, nothing inferred), a bit in
+ * the flags column rather than a column of its own.
  *
  * The runs are the offers page's own (showRuns: Advice.runs over
  * Advice.usable, at Advice.SHOWN_AT), first card to last card, in seconds:
