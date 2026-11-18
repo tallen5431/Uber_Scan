@@ -2590,6 +2590,27 @@
     if (EARLY_LOOK.test(text)) return 'early';
     return EXCLUSIVE_TAG.test(text) ? true : null;
   }
+  /* The Boost+ or Peak Pay part of the payout, for the panel's "incl. $2.93
+     Boost": a label, feeding no pay, verdict or rate. Its three shapes, the
+     cents required, and why: see BOOST_SAID in rpi/offer_parser.py. The
+     Python twin is boost_of. */
+  var BOOST_AMOUNT = '[$S§]\\s?(\\d{1,2}[.,]\\d{2})';
+  var BOOST_SAID = new RegExp(
+    '(?:^|[^\\w.])' + BOOST_AMOUNT + '\\s*boost\\s*\\+?\\s*incl(?:uded|\\.)?\\b'
+    + '|\\+\\s*' + BOOST_AMOUNT + '\\s*(?:boost|peak\\s*pay)\\b'
+    + '|\\bboost\\s*\\+\\s*' + BOOST_AMOUNT, 'gi');
+  function boostOf(text, pay) {
+    var seen = {}, n = 0, boost = null, m;
+    BOOST_SAID.lastIndex = 0;
+    while ((m = BOOST_SAID.exec(text || '')) !== null) {
+      var amount = m[1] !== undefined ? m[1] : m[2] !== undefined ? m[2] : m[3];
+      var v = round2(parseFloat(amount.replace(',', '.')));
+      if (!seen[v]) { seen[v] = true; n++; boost = v; }
+    }
+    if (n !== 1) return null;
+    if (!(boost > 0) || (typeof pay === 'number' && !(boost < pay))) return null;
+    return boost;
+  }
   var SCREEN_UBER_OFFER = new RegExp(
     '\\d ?min\\w* ?\\( ?\\d|\\bmi\\)? ?total\\b|includes expected tip|\\bincl[.,]? ?tip\\b'
     + '|\\bexclusive\\b|est[.,]? ?delivery|\\bverified\\b|avg[.,]? ?wait time'
@@ -4321,6 +4342,9 @@
       addon: isAddon(mine, pay, payWhere),
       // ...and Uber's Exclusive tag, a label only. See exclusiveTag.
       exclusive: exclusiveTag(text),
+      // ...and the Boost+ or Peak Pay part of the payout, a label only. See
+      // boostOf.
+      boost: boostOf(mine, pay),
       text: text,
       /* ...and the same reading before normalize() flattened it.
        *

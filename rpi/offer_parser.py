@@ -4768,6 +4768,50 @@ def exclusive_tag(text):
     return True if EXCLUSIVE_TAG.search(text) else None
 
 
+# How much of the payout the card says is Uber's Boost+ or DoorDash's Peak
+# Pay, for the panel to say "incl. $2.93 Boost" under the pay (the owner, Nov
+# 2026, from the evening's snaps). A LABEL, like the Exclusive tag above: it
+# feeds no pay, minutes, miles, verdict, rate or rule, and the payout it is
+# part of is still find_pay's alone (PAY_PART is what keeps these figures
+# from ever being taken as the pay; this only reads the amount back out).
+# The three shapes the cards print —
+#
+#     $2.93 Boost+ included        Uber's Boost+ card, 17 Nov 2026
+#     +$1.50 Boost+   +$2.00 Peak Pay        a plus, the figure, the word
+#     Boost +$3.00                 the word, a plus, the figure
+#
+# — and only with the cents read: "+$050 included" was fifty dollars twice on
+# the owner's shift (PAY_CHIP), and a boost of $293 under a $9.09 headline is
+# a lens's lost decimal, not a figure to print beside the pay. None where the
+# card printed none, where two shapes disagree on the amount, and where the
+# amount is not less than the payout it is part of. Asked of this card's own
+# words (`mine`), so a second card in the frame lends it nothing. Peak Pay
+# only in the plus-first shape: "Busy + Peak Pay", the banner on fourteen of
+# the week's offers, prints no amount, and its plus is not this one's. The
+# JavaScript twin is boostOf.
+BOOST_AMOUNT = r'[$S§]\s?(\d{1,2}[.,]\d{2})'
+BOOST_SAID = re.compile(
+    r'(?:^|[^\w.])' + BOOST_AMOUNT + r'\s*boost\s*\+?\s*incl(?:uded|\.)?\b'
+    + r'|\+\s*' + BOOST_AMOUNT + r'\s*(?:boost|peak\s*pay)\b'
+    + r'|\bboost\s*\+\s*' + BOOST_AMOUNT,
+    re.IGNORECASE | ASCII)
+
+
+def boost_of(text, pay):
+    """The Boost+ or Peak Pay amount a card's text prints, or None: see
+    BOOST_SAID. Display only."""
+    seen = set()
+    for m in BOOST_SAID.finditer(text or ''):
+        amount = next(g for g in m.groups() if g is not None)
+        seen.add(round2(float(amount.replace(',', '.'))))
+    if len(seen) != 1:
+        return None
+    boost = seen.pop()
+    if not boost > 0 or (isinstance(pay, (int, float)) and not boost < pay):
+        return None
+    return boost
+
+
 SCREEN_UBER_OFFER = re.compile(
     r'\d ?min\w* ?\( ?\d|\bmi\)? ?total\b|includes expected tip|\bincl[.,]? ?tip\b'
     r'|\bexclusive\b|est[.,]? ?delivery|\bverified\b|avg[.,]? ?wait time'
@@ -6721,6 +6765,9 @@ def parse(raw_text):
         'addon': is_addon(mine, pay, _where),
         # ...and Uber's Exclusive tag, a label only. See exclusive_tag.
         'exclusive': exclusive_tag(text),
+        # ...and the Boost+ or Peak Pay part of the payout, a label only. See
+        # boost_of.
+        'boost': boost_of(mine, pay),
         'text': text,
         # ...and the same reading before normalize() flattened it.
         #
