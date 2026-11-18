@@ -1454,8 +1454,8 @@ function nbx() {
      }));
   eq('the groups, in order, each tab in exactly one', [P.GROUPS.map(function (g) { return g[1]; }),
      P.TABS.map(function (t) { return t[0]; }).sort()],
-     // ...and the Waited tab (the Trends round, Nov 2026), in Where & when.
-     [['Overview', 'What to take', 'Where & when', 'Record'], ['overview', 'waited'].concat(OLD_TABS).sort()]);
+     // ...and the Waited tab (the Trends round, Nov 2026), and When & where (18 Nov), in Where & when.
+     [['Overview', 'What to take', 'Where & when', 'Record'], ['overview', 'waited', 'whenwhere'].concat(OLD_TABS).sort()]);
   ok('...What to take holds Strategy and Targets; Where & when the places, map, towns, grid and restaurants; Record Best offers',
      ['strategy', 'targets'].every(function (t) { return groupOfTab(t) === 'take'; })
      && ['places', 'map', 'towns', 'grid', 'restaurants'].every(function (t) { return groupOfTab(t) === 'where'; })
@@ -2104,6 +2104,133 @@ function nbx() {
      [dens.offers, dens.fixed, dens.gapMedian, dens.gapP90, dens.over5], [5, 4, 2, 2, 0]);
   ok('[privacy] the waited and empty tables name no dropoff and hold no coordinate of one',
      !/"pos"/.test(JSON.stringify(repWA.views)) && !/"empty"/.test(JSON.stringify(repWA.views)));
+
+  /* --- when & where: which area, on the weekday and hours picked (18 Nov 2026) ---
+   *
+   * The slot is the driver's weekday on the 4am day, crossed with six blocks;
+   * good is one fixed top-share cutoff over every offer in the range; an area
+   * is ranked at 2 h on 2 shift days in the slot and marked only where its
+   * 99% Poisson interval clears the slot's own rate. March 2026: the 13th is
+   * a Friday, the 10th and 17th Tuesdays, the 11th, 18th and 25th Wednesdays;
+   * the clocks change on the 8th, which nothing here touches. */
+  function slotAt(day, h, mi) { var s0 = P.wwSlotOf(at(day, h, mi)); return s0 && [s0.day, s0.block]; }
+  eq('[whenwhere] the slot: 10:59pm Friday is 8–11pm, 11pm Friday starts the night block',
+     [slotAt(13, 22, 59), slotAt(13, 23, 0)], [[5, 4], [5, 5]]);
+  eq('[whenwhere] ...midnight and 3:59am Saturday are still Friday night; 4am is Saturday morning',
+     [slotAt(14, 0, 0), slotAt(14, 3, 59), slotAt(14, 4, 0)], [[5, 5], [5, 5], [6, 0]]);
+  eq('[whenwhere] ...the day\'s other lines: 9:59am, 10am, 2pm, 5pm, 8pm',
+     [slotAt(14, 9, 59), slotAt(14, 10, 0), slotAt(14, 14, 0), slotAt(14, 17, 0), slotAt(14, 20, 0)],
+     [[6, 0], [6, 1], [6, 2], [6, 3], [6, 4]]);
+  eq('[whenwhere] ...and a stamp no clock can read has no slot', P.wwSlotOf(8.64e15 * 2), null);
+  eq('[whenwhere] the exact 99% Poisson interval: none seen, 3 and 45 (chi-square tables)',
+     [0, 3, 45].map(function (k) { return P.poissonCI(k, 0.99).map(function (v) { return Math.round(v * 1000) / 1000; }); }),
+     [[0, 5.298], [0.338, 10.977], [29.598, 65.341]]);
+  ok('[whenwhere] ...and a count of thousands does not underflow',
+     (function (b) { return b[0] > 1880 && b[0] < 1895 && b[1] > 2110 && b[1] < 2125; }(P.poissonCI(2000, 0.99))));
+
+  /* Three Fridays 8–11pm: an hour a night in Northfen's cell (half the cards
+   * at $40), an hour in Saltmere's (one a night at $40), an hour in a cell
+   * with no town (seven a night at $40); the rest $15. Two Tuesday mornings
+   * in Northfen's cell, every card $25 — the best of its own slot and still
+   * under the range's top 20%. Ten $90 cards with an order in the car: in the
+   * range, so in the cutoff, but no waiting. */
+  var wwRows = [], wwTaken = [];
+  var wwFri = [13, 20, 27];
+  wwFri.forEach(function (dd) {
+    for (var q = 0; q < 30; q++) {
+      var cx = waitCard('ex' + dd + '-' + q, at(dd, 20, q * 2), cellX, q < 15 ? 40 : 15);
+      cx.app = q % 3 === 0 ? 'doordash' : 'uber';
+      wwRows.push(cx);
+      wwRows.push(waitCard('ey' + dd + '-' + q, at(dd, 21, q * 2), cellY, q < 1 ? 40 : 15));
+      wwRows.push(waitCard('ez' + dd + '-' + q, at(dd, 22, q * 2), cellZ, q < 7 ? 40 : 15));
+    }
+  });
+  [10, 17].forEach(function (dd) {
+    for (var q = 0; q < 20; q++) wwRows.push(waitCard('et' + dd + '-' + q, at(dd, 7, q * 6), cellX, 25));
+  });
+  for (var hq = 0; hq < 10; hq++) wwRows.push(waitCard('eh' + hq, at(13, 18, 1 + hq * 3), cellY, 90));
+  wwTaken.push({ id: 'eh0', tookAt: at(13, 18, 0), endedAt: at(13, 18, 30), by: 'gps' });
+  var repWW = P.analyse(wwRows, wwTaken, [], function () { return null; }, { now: 0, cellTown: wTown });
+  var WW = repWW.whenwhere;
+  // 320 offers: 201 at $15, 40 at $25, 69 at $40, 10 at $90. The 80th
+  // percentile (type 7) sits at rank 255.2 of 0..319, inside the $40s.
+  eq('[whenwhere] the cutoffs are worked out once over every offer in the range (' + WW.offers + '), waiting or not',
+     [WW.offers, WW.cards, WW.tops, WW.cuts, WW.top], [320, 310, [10, 20, 30, 50], [40, 40, 25, 15], 20]);
+  var fri = WW.slots['5|4'], tue = WW.slots['2|0'];
+  var fx = fri.cell.ranked.filter(function (s0) { return s0.a === P.cellOf(cellX).id; })[0];
+  var fy = fri.cell.ranked.filter(function (s0) { return s0.a === P.cellOf(cellY).id; })[0];
+  var fz = fri.cell.ranked.filter(function (s0) { return s0.a === P.cellOf(cellZ).id; })[0];
+  // X: 30 gaps of 2 min a night (its last card's next is Y's first); Y the
+  // same into Z; Z's last card's next is a week away, a break: 29 gaps.
+  eq('[whenwhere] Friday 8–11pm: the slot\'s line — hours, shift days, offers, good at top 20%, good/hr',
+     [fri.all.h, fri.all.d, fri.all.n, fri.all.g[1], fri.all.r[1]], [8.9, 3, 270, 69, 7.75]);
+  eq('[whenwhere] ...each area by good offers per hour waited, hours from the Waited tab\'s credit',
+     [fx.h, fx.g[1], fx.r[1], fy.h, fy.g[1], fy.r[1], fz.h, fz.g[1], fz.r[1]],
+     [3, 45, 15, 3, 3, 1, 2.9, 21, 7.24]);
+  eq('[whenwhere] ...ranked best first, with P90, median and the Uber share as read',
+     [fri.cell.ranked.map(function (s0) { return s0.a; }), fx.p90, fx.p50, fy.p50, fx.u, fx.dd, fy.u + fy.dd],
+     [[fx.a, fz.a, fy.a], 40, 27.5, 15, 60, 30, 0]);
+  eq('[whenwhere] the 99% interval on good/hr: 45 over 3 h, 3 over 3 h',
+     [fx.lo[1], fx.hi[1], fy.lo[1], fy.hi[1]], [9.87, 21.78, 0.11, 3.66]);
+  eq('[whenwhere] marked only where the interval is clear of the slot\'s 7.75/hr: above, below, and none for 3.82–12.40',
+     [fx.mk[1], fy.mk[1], fz.mk[1], fz.lo[1], fz.hi[1]], ['above', 'below', null, 3.82, 12.4]);
+  eq('[whenwhere] the cutoff is held fixed: Tuesday\'s $25 cards, the best of their own slot, are not top 20%',
+     [tue.all.g[1], tue.all.r[1], tue.town.ranked[0].a, tue.town.ranked[0].g[1], tue.town.ranked[0].mk[1]],
+     [0, 0, 'Northfen', 0, null]);
+  eq('[whenwhere] ...and at top 30% (≥ $25) they all are', [tue.all.g[2], tue.all.h, tue.all.r[2]], [40, 3.8, 10.53]);
+  eq('[whenwhere] ...so a slot\'s good offers add up across slots: any day, any time = Friday + Tuesday',
+     [WW.slots['any|any'].all.g[1], WW.slots['wkday|any'].all.g[1], WW.slots['wkend|any']], [69, 69, undefined]);
+  eq('[whenwhere] by town, the cell with no town is left out of the areas but not of the slot\'s line',
+     [fri.town.ranked.map(function (s0) { return s0.a; }), fri.all.n], [['Northfen', 'Saltmere'], 270]);
+
+  /* The floor, over Wednesday nights. Northfen's cell one night only, 11pm to
+   * 1:30am: 2.5 h, but ONE shift day (two calendar dates). Saltmere's cell
+   * on two nights, 11 to 11:55pm: 1.83 h. The town-less cell on two nights,
+   * 12:30 to 1:30am: exactly 2.0 h on 2 shift days, ranked. */
+  var flRows = [];
+  for (var fa = 0; fa <= 30; fa++) flRows.push(waitCard('fa' + fa, at(11, 23, fa * 5), cellX, 15));
+  [18, 25].forEach(function (dd) {
+    for (var fb = 0; fb < 12; fb++) flRows.push(waitCard('fb' + dd + '-' + fb, at(dd, 23, fb * 5), cellY, 15));
+    for (var fc = 0; fc <= 12; fc++) flRows.push(waitCard('fc' + dd + '-' + fc, at(dd + 1, 0, 30 + fc * 5), cellZ, 20));
+  });
+  var repFL = P.analyse(flRows, [], [], function () { return null; }, { now: 0, cellTown: wTown });
+  var wed = repFL.whenwhere.slots['3|5'];
+  eq('[whenwhere] the floor: exactly ' + P.WW_MIN_HOURS + ' h on ' + P.WW_MIN_DAYS + ' shift days is ranked',
+     wed.cell.ranked.map(function (s0) { return [s0.a, s0.h, s0.d]; }), [[P.cellOf(cellZ).id, 2, 2]]);
+  eq('[whenwhere] ...2.5 h past midnight on one night is one shift day, and 1.83 h on two is too little: listed with their hours',
+     wed.town.thin.map(function (t) { return [t.a, t.h, t.d]; }), [['Northfen', 2.5, 1], ['Saltmere', 1.83, 2]]);
+  ok('[whenwhere] ...an area under the floor carries no rate, interval or mark',
+     wed.town.thin.every(function (t) { return !('r' in t) && !('lo' in t) && !('mk' in t) && !('p90' in t); }));
+
+  var wwPage = P.html(repWW), wwSec = SECTION_OF(wwPage, 'whenwhere');
+  ok('[whenwhere] the tab opens the Where & when group, and the Hours picker is not offered on it',
+     P.GROUPS[2][2][0][0] === 'whenwhere' && P.GROUPS[2][2][0][3] === false && /id="wwDay"/.test(wwSec)
+     && /id="wwBlock"/.test(wwSec) && /id="wwTop"/.test(wwSec));
+  ok('[whenwhere] the page prints the cutoff, says offered not earned, and the day runs 4am to 4am',
+     wwSec.indexOf('good = top 20%: ≥ $40.00/hr') >= 0 && /Offered, not earned/.test(wwSec) && /4am to 4am/.test(wwSec)
+     && /99%/.test(wwSec));
+  ok('[whenwhere] the Overview points at it, and the Method tab says how it was measured and that it feeds nothing',
+     /href="#whenwhere">When &amp; where ›<\/a>/.test(SECTION_OF(wwPage, 'overview'))
+     && /<b>When &amp; where<\/b>: the Waited tab/.test(SECTION_OF(wwPage, 'method'))
+     && /it never feeds the rig/.test(SECTION_OF(wwPage, 'method')));
+  // Privacy: its areas are the Waited tab's keys — a town the report already
+  // names, a cell id the report already holds — and nothing else.
+  var wwKeys = [], wwJson = JSON.stringify(WW);
+  Object.keys(WW.slots).forEach(function (k) {
+    ['town', 'cell'].forEach(function (u) {
+      WW.slots[k][u].ranked.concat(WW.slots[k][u].thin).forEach(function (s0) { wwKeys.push([u, s0.a]); });
+    });
+  });
+  var knownTowns = repWW.views.all.waitedTown.groups.concat(repWW.views.all.waitedTown.thin)
+    .map(function (g) { return g.name; });
+  ok('[privacy] the When & where table names only towns and cells the report already shows (' + wwKeys.length + ' rows)',
+     wwKeys.length > 20 && wwKeys.every(function (x) {
+       return x[0] === 'town' ? knownTowns.indexOf(x[1]) >= 0 : Object.prototype.hasOwnProperty.call(repWW.cells, x[1]);
+     }));
+  // (every figure in it is rounded to the cent or the hundredth of an hour;
+  // a coordinate would carry five places)
+  ok('[privacy] ...and holds no coordinate, pickup, dropoff or id of a card',
+     !/"(lat|lon|pickup|dropoff|id|at|text)"/.test(wwJson) && !/\d\.\d{3,}/.test(wwJson) && !/"e[xyzth]\d/.test(wwJson));
 
   console.log(fail ? '\n' + pass + ' passed, ' + fail + ' FAILED'
                    : '\nAll ' + pass + ' places-report checks passed');
