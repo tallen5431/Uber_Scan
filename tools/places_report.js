@@ -1150,22 +1150,40 @@ var WW_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday',
 // Sunday, strategy.js's weekOf.
 var WW_DAY_OPTS = ['any', 'wkday', 'wkend', '1', '2', '3', '4', '5', '6', '0'];
 var WW_BLOCK_OPTS = ['any', '0', '1', '2', '3', '4', '5'];
+/* ...and single clock hours, the owner's follow-up (18 Nov 2026): 'h0' is
+ * the 4am hour, 'h23' the 3am one, in the driver day's order. The same
+ * cutoff, interval, marking and floor as a block. Most areas will sit under
+ * the floor in one hour, which is the floor doing its job; the slot's own
+ * line (every area together) usually clears it, and it is that line the
+ * hour strip draws. A card's credit counts in the hour its card came up in,
+ * though up to CREDIT_MAX_MIN of it may run into the next. */
+var WW_HOUR_OPTS = [];
+for (var wwh = 0; wwh < 24; wwh++) WW_HOUR_OPTS.push('h' + wwh);
 var WW_TOPS = [10, 20, 30, 50];
 var WW_TOP = 20;
 var WW_MIN_HOURS = 2;
 var WW_MIN_DAYS = MIN_OUTINGS;
 var WW_CONF = 0.99;
 
-// The driver's weekday (0 Sunday) and WW_BLOCKS index of a stamp, or null.
+// The driver's weekday (0 Sunday), WW_BLOCKS index and hour of the driver
+// day (0 the 4am hour, 23 the 3am one) of a stamp, or null.
 function wwSlotOf(at) {
   var d = new Date(at);
   if (!isFinite(d.getTime())) return null;
   d.setHours(d.getHours() - A.DAY_STARTS_AT);
   var h = d.getHours();
   for (var i = 0; i < WW_BLOCKS.length; i++) {
-    if (h >= WW_BLOCKS[i][0] && h < WW_BLOCKS[i][1]) return { day: d.getDay(), block: i };
+    if (h >= WW_BLOCKS[i][0] && h < WW_BLOCKS[i][1]) return { day: d.getDay(), block: i, hour: h };
   }
   return null;
+}
+
+// '4–5am', '11am–12pm', '11pm–12am' for the driver day's hour i (0 = 4am).
+function wwHourName(i) {
+  var c = (i + A.DAY_STARTS_AT) % 24, n = (c + 1) % 24;
+  function hr(x) { return x % 12 || 12; }
+  function ap(x) { return x < 12 ? 'am' : 'pm'; }
+  return hr(c) + (ap(c) === ap(n) ? '' : ap(c)) + '–' + hr(n) + ap(n);
 }
 
 function wwDayIn(opt, day) {
@@ -1220,7 +1238,7 @@ function whenWhere(offers, waiting) {
     var s = wwSlotOf(w.at);
     if (!s) return null;
     var r = w.o.perHour;
-    return { day: s.day, block: s.block, outing: outingOf(w.at), mins: w.credit, rate: r,
+    return { day: s.day, block: s.block, hour: s.hour, outing: outingOf(w.at), mins: w.credit, rate: r,
              good: cuts.map(function (c) { return c !== null && r >= c; }), app: appOf(w.o),
              town: w.town || null, cell: w.cell || null };
   }).filter(Boolean);
@@ -1245,15 +1263,32 @@ function whenWhere(offers, waiting) {
     s.hi = s.g.map(function (k) { return s.h > 0 ? round2(ci(k)[1] / s.h) : null; });
     return s;
   }
+  function inTime(opt, c) {
+    if (opt === 'any') return true;
+    if (opt[0] === 'h') return Number(opt.slice(1)) === c.hour;
+    return Number(opt) === c.block;
+  }
+  // Every slot together: what the hour strip marks each hour's line against.
+  var every = sum(line);
+  var everyBase = every.g.map(function (k) { return every.h > 0 ? k / every.h : null; });
+  function marks(s, against) {
+    return s.g.map(function (k, i) {
+      if (against[i] === null || !(s.h > 0)) return null;
+      var b = ci(k);
+      return b[0] / s.h > against[i] ? 'above' : b[1] / s.h < against[i] ? 'below' : null;
+    });
+  }
   var slots = {};
   WW_DAY_OPTS.forEach(function (dOpt) {
-    WW_BLOCK_OPTS.forEach(function (bOpt) {
-      var inSlot = line.filter(function (c) {
-        return wwDayIn(dOpt, c.day) && (bOpt === 'any' || Number(bOpt) === c.block);
-      });
+    WW_BLOCK_OPTS.concat(WW_HOUR_OPTS).forEach(function (bOpt) {
+      var inSlot = line.filter(function (c) { return wwDayIn(dOpt, c.day) && inTime(bOpt, c); });
       if (!inSlot.length) return;
       var all = rated(sum(inSlot));
       var base = all.g.map(function (k) { return all.h > 0 ? k / all.h : null; });
+      // The slot's own line held to the same floor, and marked by the same
+      // rule against every slot together (the hour strip's colour).
+      all.ok = all.h >= WW_MIN_HOURS && all.d >= WW_MIN_DAYS;
+      all.mk = all.ok ? marks(all, everyBase) : null;
       var out = { all: all };
       ['town', 'cell'].forEach(function (unit) {
         var by = groupBy(inSlot.filter(function (c) { return c[unit]; }), function (c) { return c[unit]; });
@@ -1264,11 +1299,7 @@ function whenWhere(offers, waiting) {
           if (s.h >= WW_MIN_HOURS && s.d >= WW_MIN_DAYS) {
             rated(s);
             // Marked on the unrounded figures: wholly above or below the slot.
-            s.mk = s.g.map(function (k, i) {
-              if (base[i] === null) return null;
-              var b = ci(k);
-              return b[0] / s.h > base[i] ? 'above' : b[1] / s.h < base[i] ? 'below' : null;
-            });
+            s.mk = marks(s, base);
             ranked.push(s);
           } else {
             thin.push({ a: a, h: s.h, n: s.n, d: s.d });
@@ -1287,8 +1318,36 @@ function whenWhere(offers, waiting) {
       slots[dOpt + '|' + bOpt] = out;
     });
   });
+  /* THE HOURS, TRIMMED. Every hour of every day choice with every area in it
+   * took the table from 98 kB to 234 kB on an invented 5,257-offer, 44-day
+   * record, more than double. So at hour level an area is kept only if it
+   * clears the floor in at least one hour of the same day choice (the
+   * strip's day: Fridays for a Friday hour, every day for an Any-day one);
+   * the slot's own line is always kept, whole, and the page says how many
+   * were left out. The blocks keep every area. Measured on that record: kept
+   * if it cleared the floor in any hour of any day choice, 231 kB; of the
+   * same day choice, 223 kB, 252 of 827 hour-level "too little time" rows
+   * gone. It stays over double because the rows that remain are the ranked
+   * ones, each with four tops' rates, intervals and marks, and those are the
+   * hour view's answer. */
+  ['town', 'cell'].forEach(function (unit) {
+    var keep = Object.create(null);
+    Object.keys(slots).forEach(function (k) {
+      var p = k.split('|');
+      if (p[1][0] !== 'h') return;
+      slots[k][unit].ranked.forEach(function (s0) { keep[p[0] + '|' + s0.a] = true; });
+    });
+    Object.keys(slots).forEach(function (k) {
+      var p = k.split('|');
+      if (p[1][0] !== 'h') return;
+      var u = slots[k][unit], before = u.thin.length;
+      u.thin = u.thin.filter(function (t) { return keep[p[0] + '|' + t.a]; });
+      if (before > u.thin.length) u.left = before - u.thin.length;
+    });
+  });
   return { blocks: WW_BLOCKS.map(function (b) { return b[2]; }), days: WW_DAYS, dayOpts: WW_DAY_OPTS,
-           blockOpts: WW_BLOCK_OPTS, tops: WW_TOPS, top: WW_TOP, cuts: cuts, offers: rates.length,
+           blockOpts: WW_BLOCK_OPTS, hourOpts: WW_HOUR_OPTS, hours: WW_HOUR_OPTS.map(function (o, i) { return wwHourName(i); }),
+           tops: WW_TOPS, top: WW_TOP, cuts: cuts, offers: rates.length,
            cards: line.length, minHours: WW_MIN_HOURS, minDays: WW_MIN_DAYS, conf: WW_CONF, slots: slots };
 }
 
@@ -4134,13 +4193,21 @@ function WHENWHERE_SECTION(r) {
     + '<label>Hours <select id="wwBlock">' + w.blockOpts.map(function (o) {
       var nm = o === 'any' ? 'Any time' : w.blocks[Number(o)];
       return opt(o, nm + ' · ' + hoursIn('any|' + o), o === 'any', nm);
-    }).join('') + '</select></label>'
+    }).join('')
+    // The single hours after the blocks, in one picker rather than a second
+    // control: on a phone one select is one tap, and a toggle beside it was
+    // a fifth control on a bar that already wraps to four lines.
+    + '<optgroup label="One hour">' + w.hourOpts.map(function (o, i) {
+      return opt(o, w.hours[i] + ' · ' + hoursIn('any|' + o), false, w.hours[i]);
+    }).join('') + '</optgroup></select></label>'
     + '<label>Good <select id="wwTop">' + w.tops.map(function (t, i) {
       return opt(String(i), 'top ' + t + '%' + (w.cuts[i] === null ? '' : ' (≥ ' + money(w.cuts[i]) + '/hr)'), i === ti);
     }).join('') + '</select></label>'
     + '<label>Area <select id="wwUnit">' + opt('town', 'Town', towns > 0) + opt('cell', r.gridMi + '-mile cell', !towns)
     + '</select></label></div>'
-    + '<p class="lead" id="wwSlot"></p><div id="wwTable"></div><div id="wwThin" class="thin"></div>'
+    + '<p class="lead" id="wwSlot"></p>'
+    + '<div class="wwstrip" id="wwStrip" role="group" aria-label="Good offers per hour waited, by clock hour"></div>'
+    + '<p class="note" id="wwStripNote"></p><div id="wwTable"></div><div id="wwThin" class="thin"></div>'
     + '</section>\n';
 }
 
@@ -4240,7 +4307,8 @@ function METHOD(r) {
     + '<li><b>When &amp; where</b>: the Waited tab\'s line (the cards that came with no taken order in the car, at '
     + 'the car\'s own gated GPS fix; never a pin or DoorDash\'s map label), each card in the slot of its driver\'s day '
     + '(4am to 4am) and one of six blocks (' + r.whenwhere.blocks.join(', ') + '; chosen round the meal peaks and so '
-    + 'that a night stays whole in its shift day, not measured). Hours waited: each card\'s time to the next, at most '
+    + 'that a night stays whole in its shift day, not measured) or one clock hour of it (4am first, 3am last: 3am '
+    + 'on a Saturday is Friday\'s last hour). Hours waited: each card\'s time to the next, at most '
     + r.waited.creditMaxMin + ' min, none across a silence over ' + r.nextGapMin + ' min, credited to the earlier '
     + 'card\'s area. Good: the card\'s $/hr at or over a fixed cutoff, the top 10/20/30/50% of all ' + r.whenwhere.offers
     + ' counted offers in the range (' + r.whenwhere.tops.map(function (t, i) {
@@ -4249,7 +4317,11 @@ function METHOD(r) {
     + Math.round(r.whenwhere.conf * 100) + '% Poisson interval, the hours taken as exact. An area is ranked at '
     + r.whenwhere.minHours + ' h waited on ' + r.whenwhere.minDays + ' shift days in the slot (chosen: two days is the '
     + 'report\'s own floor, two hours a dozen card gaps at least) and marked only where its interval lies wholly '
-    + 'above or below the slot\'s overall rate. <b>Offered, not earned</b>, and descriptive: it never feeds the '
+    + 'above or below the slot\'s overall rate. A single hour takes the same cutoff, interval, marking and floor, '
+    + 'so most areas sit under the floor there; the <b>hour strip</b> draws the slot\'s own line for each of the day\'s '
+    + '24 hours (every area together), held to the same floor (grey with its n under it) and marked by the same rule '
+    + 'against every slot together. A card\'s credit counts in the hour its card came up in, though up to '
+    + r.waited.creditMaxMin + ' min of it may run into the next. <b>Offered, not earned</b>, and descriptive: it never feeds the '
     + 'rig, a verdict, the target or the accept line, and the line is not tuned to an hour or a weekday.</li>'
     + '</ul>';
 }
@@ -4353,6 +4425,19 @@ var PAGE_CSS = [
   '.dir{display:grid;grid-template-columns:1fr;gap:4px 24px}@media (min-width:760px){.dir{grid-template-columns:repeat(3,1fr)}}',
   '.dir h4{margin:10px 0 2px;font-size:14px}.dir ul{margin:0;padding-left:18px;font-size:13px;color:var(--ink2)}',
   '.dir li{margin:3px 0}a{color:var(--up)}',
+  // When & where's hour strip: two rows of twelve on a phone (a 28px cell
+  // holds "12p" over "5.1"), one row of twenty-four from a laptop up.
+  '.wwstrip{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:3px;margin:8px 0 2px}',
+  '@media (min-width:760px){.wwstrip{grid-template-columns:repeat(24,minmax(0,1fr))}}',
+  '.wwstrip button{font:inherit;font-size:11px;line-height:1.25;min-height:40px;padding:3px 0;min-width:0;display:flex;',
+  'flex-direction:column;align-items:center;justify-content:center;border:1px solid var(--grid);border-radius:5px;',
+  'background:var(--surface);color:var(--ink);cursor:pointer;font-variant-numeric:tabular-nums}',
+  '.wwstrip .hl{font-size:10px;color:var(--ink2)}.wwstrip button.up{background:var(--up);border-color:var(--up);color:#fff}',
+  '.wwstrip button.down{background:var(--down);border-color:var(--down);color:#fff}',
+  '.wwstrip button.up .hl,.wwstrip button.down .hl{color:#fff}',
+  '.wwstrip button.thin{background:transparent;color:var(--muted);font-style:italic}',
+  '.wwstrip button.none{background:transparent;color:var(--muted);border-style:dashed}',
+  '.wwstrip button.in{box-shadow:inset 0 -3px 0 var(--ink2)}.wwstrip button.on{outline:2px solid var(--ink);outline-offset:1px}',
 ].join('\n');
 
 /* The page's script: it switches between views computed above and draws them.
@@ -4929,6 +5014,42 @@ var PAGE_JS = String(function page() {
      the top share picked. Nothing is worked out here but the sort. */
   function wwName(id) { var s0 = document.getElementById(id); return s0.options[s0.selectedIndex].getAttribute('data-name'); }
   function rt(v) { return v === null || v === undefined ? '—' : v.toFixed(2); }
+  /* The hour strip: the day picked, its 24 clock hours in the driver day's
+     order, each the slot line's good/hr (every area together). Coloured by
+     the slot line's own mark (against every slot together), grey with its n
+     under the floor, blank with no waiting; a press picks that hour. */
+  function shortHour(i) { var c = (i + 4) % 24; return (c % 12 || 12) + (c < 12 ? 'a' : 'p'); }
+  function drawStrip(W, d, b, ti) {
+    var el = document.getElementById('wwStrip');
+    if (!el) return;
+    var blk = W.blocks.length && /^\d$/.test(b) ? Number(b) : null;
+    var BL = [[0, 6], [6, 10], [10, 13], [13, 16], [16, 19], [19, 24]];
+    var cells = '';
+    for (var i = 0; i < 24; i++) {
+      var sl = W.slots[d + '|h' + i], a = sl && sl.all, cls = [], val, tipText;
+      if (!a) { cls.push('none'); val = '–'; tipText = W.hours[i] + ': no waiting on record'; }
+      else if (!a.ok) {
+        cls.push('thin'); val = 'n' + a.n;
+        tipText = W.hours[i] + ': ' + a.n + ' offers, ' + a.h.toFixed(1) + ' h on ' + a.d + ' shift days — under the floor';
+      } else {
+        var mk = a.mk && a.mk[ti];
+        if (mk) cls.push(mk === 'above' ? 'up' : 'down');
+        val = a.r[ti].toFixed(1);
+        tipText = W.hours[i] + ': ' + rt(a.r[ti]) + ' good/hr (99% ' + rt(a.lo[ti]) + '–' + rt(a.hi[ti]) + '), '
+          + a.h.toFixed(1) + ' h, ' + a.n + ' offers' + (mk ? ', ' + mk + ' every slot together' : '');
+      }
+      if (b === 'h' + i) cls.push('on');
+      if (blk !== null && i >= BL[blk][0] && i < BL[blk][1]) cls.push('in');
+      cells += '<button type="button" data-h="' + i + '" class="' + cls.join(' ') + '" title="' + esc(tipText)
+        + '" aria-label="' + esc(tipText) + '"><span class="hl">' + shortHour(i) + '</span><span>' + val + '</span></button>';
+    }
+    el.innerHTML = cells;
+    var every = W.slots['any|any'];
+    document.getElementById('wwStripNote').innerHTML = esc(wwName('wwDay')) + ', hour by hour, every area together: '
+      + 'good offers per hour waited. Coloured only where its 99% interval lies wholly above or below every slot '
+      + 'together (' + (every ? rt(every.all.r[ti]) : '—') + ' good/hr); grey with its offers (n) under ' + W.minHours
+      + ' h on ' + W.minDays + ' shift days. Press an hour to pick it.';
+  }
   function drawWW() {
     var W = R.whenwhere, el = document.getElementById('wwTable');
     if (!W || !el) return;
@@ -4942,6 +5063,7 @@ var PAGE_JS = String(function page() {
       var sl = W.slots[d + '|' + o.value];
       o.textContent = o.getAttribute('data-name') + ' · ' + (sl ? sl.all.h : 0).toFixed(1) + ' h';
     });
+    drawStrip(W, d, b, ti);
     var slot = W.slots[d + '|' + b], every = W.slots['any|any'];
     var said = '<b>' + esc(wwName('wwDay') + ', ' + wwName('wwBlock').toLowerCase()) + '</b>';
     if (!slot) {
@@ -4977,12 +5099,23 @@ var PAGE_JS = String(function page() {
       }).join('') + '</tbody></table></div>'
       : '<p class="note">No ' + (unit === 'cell' ? 'cell' : 'town') + ' has ' + W.minHours + ' h waited on '
         + W.minDays + ' shift days in this slot yet.</p>';
-    document.getElementById('wwThin').innerHTML = u.thin.length ? '<p><b>Too little time there yet</b> (under '
+    document.getElementById('wwThin').innerHTML = (u.thin.length ? '<p><b>Too little time there yet</b> (under '
       + W.minHours + ' h or ' + W.minDays + ' shift days in this slot): ' + u.thin.slice(0, 60).map(function (t) {
         return esc(nm(t.a)) + ' ' + t.h.toFixed(1) + ' h (' + t.d + (t.d === 1 ? ' day' : ' days') + ')';
-      }).join(', ') + (u.thin.length > 60 ? ', and ' + (u.thin.length - 60) + ' more' : '') + '.</p>' : '';
+      }).join(', ') + (u.thin.length > 60 ? ', and ' + (u.thin.length - 60) + ' more' : '') + '.</p>' : '')
+      + (u.left ? '<p>' + u.left + ' more ' + (unit === 'cell' ? 'cell' : 'town') + (u.left === 1 ? '' : 's')
+         + ' where the car waited in this hour ' + (u.left === 1 ? 'clears' : 'clear') + ' the floor in no single hour of this day, so '
+         + (u.left === 1 ? 'it is' : 'they are')
+         + ' not listed hour by hour; pick a block to see ' + (u.left === 1 ? 'it' : 'them') + '.</p>' : '');
     markSortable();
   }
+  var stripEl = document.getElementById('wwStrip');
+  if (stripEl) stripEl.addEventListener('click', function (e) {
+    var bt = e.target.closest && e.target.closest('button[data-h]');
+    if (!bt) return;
+    document.getElementById('wwBlock').value = 'h' + bt.getAttribute('data-h');
+    drawWW();
+  });
   ['wwDay', 'wwBlock', 'wwTop', 'wwUnit'].forEach(function (id) {
     var e0 = document.getElementById(id);
     if (e0) e0.addEventListener('change', drawWW);

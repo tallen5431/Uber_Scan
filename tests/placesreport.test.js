@@ -2202,7 +2202,52 @@ function nbx() {
   ok('[whenwhere] ...an area under the floor carries no rate, interval or mark',
      wed.town.thin.every(function (t) { return !('r' in t) && !('lo' in t) && !('mk' in t) && !('p90' in t); }));
 
+  /* --- ...and one clock hour at a time, with the hour strip (the owner's follow-up, 18 Nov) --- */
+  function hourAt(day, h, mi) { var s0 = P.wwSlotOf(at(day, h, mi)); return s0 && [s0.day, s0.hour]; }
+  eq('[whenwhere] the hour: 3am and 3:59am Saturday are Friday\'s last hour; 4am is Saturday\'s first; 8:30pm is the 17th',
+     [hourAt(14, 3, 0), hourAt(14, 3, 59), hourAt(14, 4, 0), hourAt(13, 20, 30), hourAt(14, 0, 0)],
+     [[5, 23], [5, 23], [6, 0], [5, 16], [5, 20]]);
+  eq('[whenwhere] ...named in the driver day\'s order, 4am first and 3am last',
+     [WW.hourOpts.length, WW.hours[0], WW.hours[7], WW.hours[19], WW.hours[20], WW.hours[23]],
+     [24, '4–5am', '11am–12pm', '11pm–12am', '12–1am', '3–4am']);
+  // Every slot together: 69 good (top 20%) over 8.9 h of Fridays and 3.8 h
+  // of Tuesdays, 5.43 an hour; the Friday block alone was 7.75.
+  var h16 = WW.slots['5|h16'].all, h17 = WW.slots['5|h17'].all, h18 = WW.slots['5|h18'].all;
+  eq('[whenwhere] the strip: each Friday hour\'s line, held to the floor and marked against every slot together (5.43/hr)',
+     [[h16.h, h16.r[1], h16.ok, h16.mk[1]], [h17.r[1], h17.mk[1]], [h18.r[1], h18.mk[1]]],
+     [[3, 15, true, 'above'], [1, 'below'], [7.24, null]]);
+  var t3 = WW.slots['2|h3'].all, t4 = WW.slots['2|h4'].all;
+  // The 7am hour: ten cards 6 min apart on two Tuesdays, 2.0 h. The 8am
+  // hour: its last card each morning is a break, so nine gaps, 1.8 h.
+  eq('[whenwhere] ...Tuesday 7am, exactly at the floor with no good offer, is below every slot (not its own day\'s 0/hr)',
+     [t3.h, t3.d, t3.ok, t3.r[1], t3.hi[1], t3.mk[1]], [2, 2, true, 0, 2.65, 'below']);
+  eq('[whenwhere] ...Tuesday 8am, 1.8 h, is under the floor: no mark, the page draws it grey with its n',
+     [t4.h, t4.n, t4.ok, t4.mk], [1.8, 20, false, null]);
+  eq('[whenwhere] ...an hour with no waiting has no line at all', WW.slots['5|h0'], undefined);
+  eq('[whenwhere] the floor holds for an area in one hour too: Northfen at 7am ranked at 2.0 h, at 8am listed',
+     [WW.slots['2|h3'].town.ranked.map(function (s0) { return [s0.a, s0.h]; }),
+      WW.slots['2|h4'].town.thin.map(function (t) { return [t.a, t.h]; })],
+     [[['Northfen', 2]], [['Northfen', 1.8]]]);
+  eq('[whenwhere] the block lines are held to the floor and marked the same way (Friday 8–11pm: 7.75 against 5.43)',
+     [fri.all.ok, fri.all.mk[1], WW.slots['any|any'].all.mk[1]], [true, 'above', null]);
+
+  // The hours, trimmed: an area that clears the floor in no single hour is
+  // left out hour by hour (and counted), never out of the blocks or the line.
+  var fl20 = repFL.whenwhere.slots['3|h20'];
+  eq('[whenwhere] an area under the floor in every hour is left out at hour level and counted; the block keeps it',
+     [fl20.town.thin.length, fl20.town.left, fl20.cell.thin.length, fl20.cell.left, fl20.all.n > 0,
+      wed.town.thin.length], [0, 1, 0, 2, true, 2]);
+  eq('[whenwhere] ...and an area that clears it in one hour is kept in every hour it was waited in',
+     [WW.slots['2|h4'].town.thin.length, WW.slots['2|h4'].town.left], [1, undefined]);
+
   var wwPage = P.html(repWW), wwSec = SECTION_OF(wwPage, 'whenwhere');
+  ok('[whenwhere] the Hours picker lists the blocks, then the 24 hours under "One hour", and the strip has its place',
+     /<optgroup label="One hour"><option value="h0" data-name="4–5am">4–5am · /.test(wwSec)
+     && (wwSec.match(/<option value="h\d+"/g) || []).length === 24 && /value="h23" data-name="3–4am"/.test(wwSec)
+     && /id="wwStrip"/.test(wwSec));
+  ok('[whenwhere] the Method tab says how a single hour and the strip are measured',
+     /one clock hour of it \(4am first, 3am last/.test(SECTION_OF(wwPage, 'method'))
+     && /<b>hour strip<\/b>/.test(SECTION_OF(wwPage, 'method')));
   ok('[whenwhere] the tab opens the Where & when group, and the Hours picker is not offered on it',
      P.GROUPS[2][2][0][0] === 'whenwhere' && P.GROUPS[2][2][0][3] === false && /id="wwDay"/.test(wwSec)
      && /id="wwBlock"/.test(wwSec) && /id="wwTop"/.test(wwSec));
