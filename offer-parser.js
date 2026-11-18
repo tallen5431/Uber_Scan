@@ -163,7 +163,11 @@
     '\\+\\s*' + PART_AMOUNT + '\\s*' + PART_WORD
     + '|\\b' + PART_WORD + '\\s*[:\\-•]?\\s*\\+\\s*' + PART_AMOUNT
     + '|\\bincl(?:udes?|uded|\\.)?\\s*' + PART_AMOUNT + '\\s*(?:expected\\s+)?' + PART_WORD
-    + '|\\b' + PART_WORD + '\\s*' + PART_AMOUNT + '\\s*extra\\b', 'gi');
+    + '|\\b' + PART_WORD + '\\s*' + PART_AMOUNT + '\\s*extra\\b'
+    // Uber's Boost+ card (17 Nov 2026): "$1.68 Boost+ included" under the
+    // headline is part of it, never the pay — see rpi/offer_parser.py.
+    // (Seven characters at most: unbounded, a 4 kB run of "S" took 459 ms.)
+    + '|[$S5§]\\s*(?:' + DC + '|[.,]){1,7}\\s*' + PART_WORD + '\\s*\\+?\\s*incl(?:uded|\\.)?\\b', 'gi');
 
   /* One payout, cut in half by the reader.
    *

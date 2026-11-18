@@ -968,6 +968,44 @@
    }
   },
   {
+   "name": "...nor a Boost+ amount under the headline: the figure, the word, 'included' (Uber's Boost+ card, 17 Nov, headline cut off by the box)",
+   "text": "Guaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...and with the headline in the read, the headline is the pay",
+   "text": "$9.09\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 9.09,
+    "minutes": 20,
+    "miles": 1.5
+   }
+  },
+  {
+   "name": "...the same with OCR's stray marks after the lines",
+   "text": "Exclusive x\n$6.63 J\nGuaranteed (incl. tip) |\n$1.33 Boost+ included |\n© 16 min (1.5 mi) total\nBirch Market (88 Juniper Way)\nI Oak Ln, Marietta",
+   "expect": {
+    "pay": 6.63,
+    "minutes": 16
+   }
+  },
+  {
+   "name": "...a Boost+ amount and a priority chip with no headline: no payout",
+   "text": "* 496 Verified\n$2.28 Boost+ included\n+$1.08 included for priority\n9 min (1.9 mi)\nOak Ln, Marietta\n17 mins (2.9 mi)\nBirch Rd, Marietta",
+   "expect": {
+    "pay": null
+   }
+  },
+  {
+   "name": "...a two-leg card's headline over its Boost+ line",
+   "text": "Exclusive\n$16.80\n* 481 $2.39 Boost+ included\n3 min (0.4 mi)\nOak Ln, Marietta\n25 mins (12.3 mi)\nBirch Rd, Smyrna",
+   "expect": {
+    "pay": 16.8
+   }
+  },
+  {
    "name": "...nor a bonus",
    "text": "+$5.00 bonus\n18 min (6.2 mi) trip",
    "expect": {

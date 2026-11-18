@@ -271,6 +271,15 @@ PAY_CHIP = re.compile(
 #     Boost +$3.00                          the word, then a plus and figure
 #     Includes $3.00 tip    incl. $3 tip    "includes" right before, the word after
 #     Surge $1.50 extra                     the word before, "extra" after
+#     $1.68 Boost+ included                 the figure, the word, "included"
+#
+# The fifth is Uber's Boost+ card of 17 Nov 2026 (the owner's snaps, 19:00):
+# "$9.09 / Guaranteed (incl. tip) / $1.68 Boost+ included". The card is taller
+# than the ones before it, so the drawn box most often held the line under the
+# headline and not the headline, and every offer of the evening read its boost
+# as its pay: $1.33, $1.45, $2.01, $2.42, $2.63, each a PASS near $4/hr. With
+# the headline in the read it was right ($6.63, $9.09); with it out, the
+# reading now has no payout and the panel says CHECK THE PHONE.
 #
 # — never by a word on one side alone. A headline is followed by its label,
 # "$14.48 Includes expected tip" and "$11.42 Guaranteed (incl. tip)", and one
@@ -289,7 +298,10 @@ PAY_PART = re.compile(
     r'\+\s*' + PART_AMOUNT + r'\s*' + PART_WORD
     + r'|\b' + PART_WORD + r'\s*[:\-•]?\s*\+\s*' + PART_AMOUNT
     + r'|\bincl(?:udes?|uded|\.)?\s*' + PART_AMOUNT + r'\s*(?:expected\s+)?' + PART_WORD
-    + r'|\b' + PART_WORD + r'\s*' + PART_AMOUNT + r'\s*extra\b',
+    + r'|\b' + PART_WORD + r'\s*' + PART_AMOUNT + r'\s*extra\b'
+    # (Seven characters at most: unbounded, a 4 kB run of "S" — a lookalike
+    # of both "$" and a digit — took 459 ms; test_parser holds 50.)
+    + r'|[$S5§]\s*(?:' + DC + r'|[.,]){1,7}\s*' + PART_WORD + r'\s*\+?\s*incl(?:uded|\.)?\b',
     re.IGNORECASE | ASCII)
 
 # The minute unit has to be spelled out. It was once allowed to be a bare "m",
