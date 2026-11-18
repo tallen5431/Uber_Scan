@@ -237,7 +237,7 @@
   // has the measurements.
   var HEADLINE_WORD = /guarant|includes?\s*expected|incl[.,:]?\s?tips?\b/gi;
   var HEADLINE_ZONE_END = /\d\s*(?:m[il1|]n|mi\b|hrs?\b)/gi;
-  var HEADLINE_AFTER = /^[^\w$]{0,3}?\s*(?:guarant|includes?\s*expected|incl[.,:]?\s?tips?\b|\*)/i;
+  var HEADLINE_AFTER = /^(?:\s*(?:[^\w\s$]|[A-Za-z](?![A-Za-z]))){0,3}?\s*(?:guarant|includes?\s*expected|incl[.,:]?\s?tips?\b|\*)/i;
 
   var PAY_SPLIT = new RegExp(
     '\\$\\s*(' + DC + '{1,3})\\s+(' + DC + '{1,2}[.,]' + DC + '{2})'
@@ -347,7 +347,7 @@
    * followed at once by its label or the rider's star. The same test `where`
    * applies to the figures NOT chosen, asked of the one that is. Only
    * payIsPrinted asks it. */
-  function findPay(text, where, printed) {
+  function findPay(text, where, printed, labelled) {
     var chips = collect(text, PAY_CHIP).concat(collectSpans(text, PAY_PART));
     var units = collectSpans(text, PAY_IS_A_DURATION)
       .concat(collectSpans(text, PAY_IS_PER_ORDER));
@@ -473,6 +473,11 @@
     }
     if (best !== null && found.every(function (f) { return f.value !== best || f.lost; })) {
       best = null;
+    }
+    // Whether the payout chosen stands directly before the card's label or
+    // the rider's star: `payLabelled`. See the Python twin.
+    if (labelled && best !== null) {
+      labelled.push(found.some(function (f) { return f.value === best && f.anchored; }));
     }
     if (printed && best !== null) {
       // The FIRST figure of the chosen value by position, ties to the one
@@ -4088,8 +4093,8 @@
     // the amount, and they must be the same answer — two calls would be two
     // chances to disagree about which figure is the headline, which is the
     // whole thing this boundary rests on.
-    var payWhere = [];
-    var pay = findPay(text, payWhere);
+    var payWhere = [], payLabelled = [];
+    var pay = findPay(text, payWhere, null, payLabelled);
     // cardSpan asks aCardAbove what oneCard asks, of the same legs — oneCard's
     // answer has the upper card's leg cut.
     var foundLegs = legs;
@@ -4254,6 +4259,9 @@
     var approach = toPickup(used);
     return {
       pay: pay,
+      // Whether that payout is the figure the card prints over its label (or
+      // before the rider's star): see findPay's `labelled`.
+      payLabelled: pay !== null && payLabelled.length > 0 && payLabelled[0],
       minutes: minutes,
       miles: miles,
       // Minutes since midnight, not a duration: converting one to the other

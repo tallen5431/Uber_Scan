@@ -368,6 +368,11 @@
      you scan down to recognise a job, not what you judge it by. */
   .offer .meta em { display: block; font-style: normal; font-size: 11px;
                     opacity: .8; overflow: hidden; text-overflow: ellipsis; }
+  /* "pay re-read: was $1.68" and "pay unread" beside the payout: a payout the
+     server's fold read again from the row's own text, or the rig corrected as
+     it read the card (server.js withPay). Small, in the row's grey: a note on
+     the figure, not a figure. */
+  .offer .meta .reread { font-size: 10px; font-weight: 600; }
   /* No padding of its own: the row's 10px gap already stands before it. A 6px
      pad here was 6px more than a ticked row with a tag has on a 360px phone
      once `.meta` has shrunk to nothing, so from 10:00 to 12:59 a two-digit
@@ -1473,6 +1478,25 @@
     return rows.filter(counted).filter(function (o) { return o.accepted; });
   }
 
+  /* The payout on the folded row, with what the fold did to it: "pay
+     re-read: was $1.68" where the server read the row's text again, or the
+     rig corrected it as it read the card, and "pay unread" in place of a
+     figure the text never held as the pay (server.js withPay). The reason is
+     on the note's title. */
+  function payNote(r) {
+    var c = r.corrected && typeof r.corrected === 'object' ? r.corrected : null;
+    var why = c && typeof c.why === 'string' ? ' title="' + esc(c.why) + '"' : '';
+    if (r.payUnread) {
+      return '<small class="reread"' + why + '>pay unread'
+        + (c && typeof c.from === 'number' ? ' (read as ' + money(c.from, 2) + ')' : '')
+        + '</small>';
+    }
+    return money(r.pay, 2)
+      + (c && typeof c.from === 'number'
+         ? ' <small class="reread"' + why + '>pay re-read: was ' + money(c.from, 2) + '</small>'
+         : '');
+  }
+
   function whyAside(r) {
     // First, because it is the driver's own doing rather than anything the
     // scanner decided, and because a hidden row falls through every test
@@ -1501,6 +1525,17 @@
            + 'planned, or a dash waiting for one — so the figures on it are '
            + 'not a job. No verdict was given, and it is in none of the '
            + 'figures on this page.';
+    }
+    // A payout the text never held as the pay: the row's figure was a part
+    // of it — a Boost+ amount, a chip under the headline — and no other
+    // reading of the offer held the headline (server.js withPay).
+    if (r.doubt === 'unread') {
+      return 'Its payout never read. The card was recorded at '
+           + (r.corrected && typeof r.corrected.from === 'number'
+              ? money(r.corrected.from, 2) : 'a figure')
+           + ', which the reader now knows is a part of the pay printed under '
+           + 'the headline, and no reading of this offer held the headline. '
+           + 'Kept, and left out of every figure on this page.';
     }
     if (r.doubt === 'leg') {
       return 'The card showed a leg the scanner could not time'
@@ -1716,6 +1751,8 @@
         // journey half read: a screen that was not an offer at all.
         : r.doubt === 'screen'
         ? 'the app itself rather than an offer'
+        : r.doubt === 'unread'
+        ? 'its payout never read: the figure was a part of it'
         : 'outside the range a real offer falls in');
     }
     // Typed on the keypad rather than read off a card: the figures are the
@@ -1737,7 +1774,7 @@
       + '<summary>'
       + '<span class="dot ' + (aside ? '' : said) + '"></span>'
       + '<span class="big">' + money(r.perHour, 0) + '<i class="unit">/hr</i>' + gross + '</span>'
-      + '<span class="meta">' + money(r.pay, 2) + ' · ' + mins + ' min'
+      + '<span class="meta">' + payNote(r) + ' · ' + mins + ' min'
       + (r.miles === null ? '' : ' · ' + num(r.miles) + ' mi')
       // ...and, ranked by it, the figure the list is ranked by.
       + (sortBy === 'payPerMile' && payPerMile(r) !== null
@@ -1786,7 +1823,10 @@
       // said" and "what the scanner made of it".
       + '<h3>Off the card</h3>'
       + '<dl class="facts">'
-      + row('Payout', money(r.pay, 2))
+      + row('Payout', r.payUnread ? 'not read' : money(r.pay, 2))
+      // ...and what the fold did to it, in words (server.js withPay).
+      + row('Read before as', r.corrected && typeof r.corrected.from === 'number'
+            ? money(r.corrected.from, 2) + ' — ' + esc(r.corrected.why || 'read again') : null)
       + row('Time on the card', r.minutes === null ? null : num(r.minutes, 0) + ' min')
       + row('Distance', r.miles === null ? null : num(r.miles) + ' mi')
       + row('Items', r.items || null)

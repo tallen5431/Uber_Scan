@@ -13332,15 +13332,17 @@ function grabVar(name) {
   if (!m) throw new Error('server.js has no var ' + name);
   return m[0];
 }
-var ctx = { Advice: require(path.join(ROOT, 'advice.js')), Set: Set, Date: Date, JSON: JSON,
-            Object: Object, console: console,
+var ctx = { Advice: require(path.join(ROOT, 'advice.js')), Set: Set, Map: Map, Date: Date,
+            JSON: JSON, Object: Object, console: console,
             require: function (m) { return require(path.join(ROOT, m)); } };
 vm.createContext(ctx);
-['CLOCK_BELIEVABLE_AFTER', 'WINDOWS_MAX', 'windows', 'latestCache', 'RowParser'].forEach(function (n) {
+['CLOCK_BELIEVABLE_AFTER', 'WINDOWS_MAX', 'windows', 'latestCache', 'RowParser',
+ 'PAY_REREAD', 'PAY_REREAD_MAX', 'payReread'].forEach(function (n) {
   vm.runInContext(grabVar(n), ctx);
 });
 ['inWindow', 'foldReads', 'windowTakes', 'windowOver', 'rowsFor', 'dayFloor', 'latestPerOffer',
- 'bestReading', 'rowApp', 'withApp', 'latestPerOfferUncached'].forEach(function (n) {
+ 'bestReading', 'rowApp', 'withApp', 'rereadPay', 'withPay', 'afterCorrection',
+ 'latestPerOfferUncached'].forEach(function (n) {
   vm.runInContext(grab(n), ctx);
 });
 function whole(rows, floor) {
@@ -15505,6 +15507,95 @@ try:
 finally:
     shutil.rmtree(_gwork, ignore_errors=True)
 
+
+# --- an offer's payout read again from its own text, at read time ------------
+#
+# The 17 Nov evening: every Uber offer was journalled at its Boost+ amount,
+# because the reads with the boost alone were the only ones that locked. Those
+# rows stay on disk; the fold (server.js withPay) shows what their text gives
+# under the reader as it is now, marks it `corrected: {from, to, why}`, and
+# sets aside a row whose text held no payout at all — never rewriting the
+# file. Invented rows.
+# A folder of its own: the suite's `work` is gone by here.
+_rrdir = tempfile.mkdtemp()
+_rr = os.path.join(_rrdir, 'reread.jsonl')
+_RR_CHIP = ('$9.09\nGuaranteed (incl. tip)\n$11.68 Priority included\n© 20 min (1.5 mi) total\n'
+            'Maple Grill (12 Fable Ct)\nOak Ln, Marietta')
+_RR_BOOST = ('Guaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\n'
+             'Maple Grill (12 Fable Ct)\nOak Ln, Marietta')
+_RR_HEAD = ('$9.09\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\n'
+            'Maple Grill (12 Fable Ct)\nOak Ln, Marietta')
+_rr_base = dict(minutes=20.0, miles=1.5, billedMinutes=20.0, cost=0.45, costPerMile=0.3,
+                target=25, band=15, legs=1)
+write(_rr, [
+    # The largest figure was a chip under the label: re-read, the headline.
+    offer(1, NOW - 600000, pay=11.68, perHour=33.69, grossPerHour=35.04, state='go',
+          text=_RR_CHIP, **_rr_base),
+    # Only the boost in the row's text, and a later reading of the same offer
+    # whose window held a frame with the labelled headline.
+    offer(2, NOW - 500000, pay=1.68, perHour=3.69, state='no', text=_RR_BOOST, **_rr_base),
+    offer(2, NOW - 498000, pay=1.68, perHour=3.69, state='no', seq=2, text=_RR_BOOST,
+          scans=[_RR_BOOST, _RR_HEAD], **_rr_base),
+    # Only the boost, and nothing else of that offer anywhere.
+    offer(3, NOW - 400000, pay=1.68, perHour=3.69, state='no', text=_RR_BOOST, **_rr_base),
+    # Corrected by the rig as it read the card (journal.py OfferLog._corrects):
+    # the first figure written twice, the correction once.
+    offer(4, NOW - 300000, pay=1.09, perHour=2.67, state='no',
+          text=_RR_HEAD.replace('9.09', '1.09'), **_rr_base),
+    offer(4, NOW - 299000, pay=1.09, perHour=2.67, state='no', seq=2,
+          text=_RR_HEAD.replace('9.09', '1.09'), **_rr_base),
+    offer(4, NOW - 296000, pay=9.09, perHour=25.92, state='go', seq=3, text=_RR_HEAD,
+          corrected={'from': 1.09, 'to': 9.09,
+                     'why': 'a later read of the card held its labelled headline'}, **_rr_base),
+    # An ordinary card, which reads as it was written.
+    offer(5, NOW - 200000, pay=9.09, perHour=25.92, state='go', text=_RR_HEAD, **_rr_base),
+    # A row from a rig that reads the label stretch says so (`payLabelled`),
+    # and its text is never parsed again: what it holds is what that reader
+    # made of it. (A text no such rig would write this payout from: the check
+    # is that the fold did not look.)
+    offer(6, NOW - 100000, pay=1.68, perHour=3.69, state='no', text=_RR_BOOST,
+          payLabelled=False, **_rr_base),
+])
+with open(_rr, 'rb') as _fh:
+    _rr_bytes = _fh.read()
+proc, base = start({'SCANNER': '0'}, _rr)
+try:
+    _rrj = dict((o['id'], o) for o in (get(base, '/api/journal?days=0').get('offers') or []))
+    _rrt = get(base, '/api/today?since=%d' % (NOW - 3600000))
+finally:
+    stop(proc)
+_o1 = _rrj.get('off1') or {}
+eq('[reread] a row whose largest figure was a chip under the label is shown at its headline',
+   (_o1.get('pay'), (_o1.get('corrected') or {}).get('from'), (_o1.get('corrected') or {}).get('to')),
+   (9.09, 11.68, 9.09))
+eq('[reread] ...its rates worked out again over its own billed minutes and cost, and its verdict',
+   (_o1.get('perHour'), _o1.get('grossPerHour'), _o1.get('state')), (25.92, 27.27, 'go'))
+_o2 = _rrj.get('off2') or {}
+eq('[reread] a boost-only row takes the labelled headline another reading of the same offer held',
+   (_o2.get('pay'), (_o2.get('corrected') or {}).get('from'), _o2.get('payUnread')),
+   (9.09, 1.68, None))
+ok_('[reread] ...and says so (%r)' % (_o2.get('corrected') or {}).get('why'),
+    'another reading' in ((_o2.get('corrected') or {}).get('why') or ''))
+_o3 = _rrj.get('off3') or {}
+eq('[reread] a boost-only row with nothing else to go on is pay unread, set aside, no rate',
+   (_o3.get('payUnread'), _o3.get('suspect'), _o3.get('doubt'), _o3.get('perHour'),
+    (_o3.get('corrected') or {}).get('from'), (_o3.get('corrected') or {}).get('to', 'absent')),
+   (True, True, 'unread', None, 1.68, None))
+_o4 = _rrj.get('off4') or {}
+eq('[reread] an offer the rig corrected as it read it is its correction, not a vote '
+   'the first figure wins by being written twice',
+   (_o4.get('pay'), (_o4.get('corrected') or {}).get('from')), (9.09, 1.09))
+_o5 = _rrj.get('off5') or {}
+eq('[reread] an ordinary card reads as it was written, with no mark',
+   (_o5.get('pay'), _o5.get('corrected')), (9.09, None))
+_o6 = _rrj.get('off6') or {}
+eq('[reread] a row written under the label stretch is left as written',
+   (_o6.get('pay'), _o6.get('corrected'), _o6.get('payUnread')), (1.68, None, None))
+eq('[reread] the driving screen counts the five with a payout and sets the unread one aside',
+   (_rrt.get('offers'), _rrt.get('counted'), _rrt.get('setAside')), (6, 5, 1))
+with open(_rr, 'rb') as _fh:
+    eq('[reread] ...and the journal on disk is untouched', _fh.read() == _rr_bytes, True)
+shutil.rmtree(_rrdir, ignore_errors=True)
 
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d server checks passed' % ok)

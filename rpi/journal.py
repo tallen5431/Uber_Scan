@@ -133,6 +133,22 @@ RESUME_WINDOW_MS = 90 * 1000
 # and its return was 8, on 25 Sep, 77 seconds apart.
 RECENT_CARDS = 8
 
+# How long after the card's last believable reading a reading of the SAME card
+# with another payout may still correct it, rather than be filed as an offer
+# of its own. See OfferLog._corrects.
+#
+# The 17 Nov Boost+ card is the shape (the owner's snaps, 19:00): the first
+# reads came while it slid up, and a read that misses or misreads the headline
+# locks as readily as one that holds it — two frames of one read agree with
+# each other — so the first row of an offer can carry a figure the card does
+# not lead with. The reads after it, of the same card with the headline in the
+# box, then held $9.09; under the payout-is-identity rule above they were a
+# second offer, and the first stayed in the journal as one too. Twenty seconds
+# is a card on screen being re-read on the verify beat (VERIFY_MAX 6s, a read
+# 2.3s on the rig): long enough for a slow second look, far shorter than a
+# card paged away from and back (RESUME_WINDOW_MS), which is _returning's.
+CORRECT_WINDOW_MS = 20 * 1000
+
 # Bounds for a row that looks like a real ride rather than a fare summary or a
 # receipt left on the screen. Deliberately tighter than parse()'s own limits,
 # which are set to keep noise out of a spoken verdict, not to keep junk out of a
@@ -706,6 +722,17 @@ class OfferLog:
         # (minutes, miles) of the last believable reading of the card on
         # screen — what the card leaves on that list beside its payout.
         self.figures = None
+        # How many believable readings of the card on screen held each payout,
+        # in cents, and whether any of them held it over the card's label
+        # (OP's `payLabelled`). See _corrects: what lets a later read of the
+        # same card correct the first, and what keeps one stray read from
+        # undoing that.
+        self.pay_votes = {}
+        self.pay_labelled = set()
+        # The correction this card's rows carry once a later reading has
+        # replaced the payout its first row held, as {'from', 'to', 'why'}, or
+        # None. On every row of the card after it, so the newest row says it.
+        self.corrected = None
 
     def resume(self, now=None):
         """Adopt the last row if it is recent enough to be the card on screen.
@@ -795,7 +822,21 @@ class OfferLog:
         # Four rows, one card, and a $1,985/hr entry in the middle of them.
         impossible = OP.doubt(parsed.get('pay'), parsed.get('minutes'),
                               parsed.get('miles')) is not None
-        if (not impossible and self.pay is not None
+        # ...unless it is the same card read again, which is _corrects' call:
+        # a later reading that holds the card's labelled headline replaces the
+        # first reading's payout under the same id (`switch`), and one that
+        # disagrees with it and is no better evidence writes nothing at all
+        # (`stray`) rather than opening a second offer for one card.
+        verdict = None if impossible else self._corrects(parsed, at)
+        if verdict == 'stray':
+            self.last_at = at
+            return None
+        if verdict == 'switch':
+            self.corrected = {'from': self.pay, 'to': parsed.get('pay'),
+                              'why': 'a later read of the card held its labelled headline'}
+            self.episode = episode
+            self.pay = None
+        elif (not impossible and self.pay is not None
                 and parsed.get('pay') != self.pay):
             self.episode = None
 
@@ -876,6 +917,9 @@ class OfferLog:
                 self.content = None
                 self.pay = None
                 self.figures = None
+                self.pay_votes = {}
+                self.pay_labelled = set()
+                self.corrected = None
 
         self.last_at = at
         # Before anything decides whether to write. A reading that finally saw
@@ -895,6 +939,10 @@ class OfferLog:
         if not impossible and parsed.get('pay') is not None:
             self.pay = parsed.get('pay')
             self.figures = (parsed.get('minutes'), parsed.get('miles'))
+            cents = _cents(self.pay)
+            self.pay_votes[cents] = self.pay_votes.get(cents, 0) + 1
+            if parsed.get('payLabelled'):
+                self.pay_labelled.add(cents)
         if content == self.content:
             # Nothing new about the reading — but possibly something new about
             # how much to believe it.
@@ -921,6 +969,8 @@ class OfferLog:
                                   locked=locked, settled=True, whole=whole,
                                   keep_places=self.keep_places,
                                   places=list(self.places), where=where)
+                if self.corrected:
+                    upgrade['corrected'] = dict(self.corrected)
                 if self.journal.append(upgrade):
                     self.written += 1
                     self.screen_wanted = self._owe_screen(at)
@@ -936,12 +986,87 @@ class OfferLog:
                       settled=settled, whole=whole,
                       keep_places=self.keep_places, places=list(self.places),
                       where=where)
+        if self.corrected:
+            row['corrected'] = dict(self.corrected)
         if self.journal.append(row):
             self.written += 1
             self.screen_wanted = self._owe_screen(at)
             self.landed_id = self.id
             return row
         return None
+
+    def _corrects(self, parsed, at):
+        """Whether this reading is the card on screen read again with another
+        payout: 'switch' when it should replace the payout on record under the
+        same id, 'stray' when it should be written nowhere, None when it is
+        not the same card (and the rules above decide, as before).
+
+        THE SAME CARD is asked strictly, because the cost of a wrong yes is
+        two offers filed as one, and the payout-is-identity rule above exists
+        to prevent exactly that: a card that has landed (`landed_id`), read
+        last inside CORRECT_WINDOW_MS, with the same minutes (never a deadline
+        card, whose deadline moves with the clock), and the same places — every
+        one of the shorter list among the other's (_places_agree); where
+        neither names a place, the same miles (same_card). And not
+        a card the accumulator called a replacement (`newCard`). The miles are
+        not asked where places are: on 17 Nov OCR read the card's "(1.5 mi)"
+        as "15 mi" on later reads of the same card. Uber offering a trip again
+        a few cents different (the $25.09 and $25.08 of 12 Oct, _returning)
+        is still two offers: another card came between them.
+
+        THEN THE EVIDENCE. Only a reading whose payout is the figure over
+        the card's label (`payLabelled`) can correct one: at once where the
+        payout on record never was, and otherwise once more readings of the
+        card have held it than held the one on record. Until then it is a
+        stray — counted, not written, so the readings that agree with it can
+        overtake the record and one stray read cannot undo a correction.
+        """
+        pay = parsed.get('pay')
+        if pay is None or self.pay is None or pay == self.pay:
+            return None
+        # Not a labelled figure: the rules above decide, as they did. Two
+        # readings of one journey a cent apart with no label on either are
+        # Uber offering the trip again as often as a misread (test_repeats,
+        # "a re-offer a cent different"), and there is nothing on the card to
+        # say which; the panel says CHECK THE PAY over it (scan_pi.
+        # pay_disagrees) and the journal keeps both, as before.
+        if not parsed.get('payLabelled') or not self.same_card(parsed, at):
+            return None
+        cents, held = _cents(pay), _cents(self.pay)
+        # One more than the payout on record, not as many: a tie that went to
+        # the newer figure would swing back and forth on a card whose reads
+        # alternate between the two, a row each way.
+        if held not in self.pay_labelled \
+                or self.pay_votes.get(cents, 0) + 1 > self.pay_votes.get(held, 0):
+            return 'switch'
+        # A labelled figure outvoted so far: counted, not written, so the
+        # readings that agree with it can overtake the one on record.
+        self.pay_votes[cents] = self.pay_votes.get(cents, 0) + 1
+        self.pay_labelled.add(cents)
+        return 'stray'
+
+    def same_card(self, parsed, at=None):
+        """Whether this reading is the card on screen — landed, read last
+        inside CORRECT_WINDOW_MS, the same minutes and the same places — read
+        again, whatever payout it holds. See _corrects, which this is the
+        first half of; scan_pi asks it too, so a reading it corrects is not
+        counted as a card seen and never recorded."""
+        at = now_ms() if at is None else at
+        if self.id is None or self.landed_id != self.id or self.last_at is None:
+            return False
+        if parsed.get('newCard') or not 0 <= at - self.last_at <= CORRECT_WINDOW_MS:
+            return False
+        minutes, miles = self.figures if self.figures else (None, None)
+        # The minutes on both, and equal. A deadline card states none and its
+        # deadline moves with the clock, so it is never corrected this way.
+        if minutes is None or parsed.get('minutes') != minutes:
+            return False
+        read = parsed.get('places') or []
+        if read and self.places:
+            return _places_agree(read, self.places)
+        # Neither names a place: the miles must agree instead.
+        return not read and not self.places and miles is not None \
+            and parsed.get('miles') == miles
 
     def _remember(self):
         """Put the card on screen on the recent list. A card with no believable
@@ -1430,6 +1555,12 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         'firstAt': first_at if first_at is not None else at,
         # --- as read off the card -------------------------------------------
         'pay': pay,
+        # Whether that payout is the figure the card prints over its label (OP's
+        # `payLabelled`). On every row from the build that reads the label
+        # stretch, so the server's fold (server.js withPay) knows this row's
+        # payout was read under it and never parses its text again — on a lite
+        # rig it then never loads the parser for the rows it writes.
+        'payLabelled': bool(parsed.get('payLabelled')),
         'minutes': minutes,
         'miles': miles,
         # How much of those two is the drive to the pickup rather than the job.

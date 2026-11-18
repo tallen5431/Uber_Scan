@@ -154,7 +154,10 @@ HEADLINE_LABEL = re.compile(r'\s*(?:guarant|includ|incl[.,:]?\s?tips?\b|\*)', re
 # So the card's own layout decides, as PAY_CHIP's grammar does: a figure after
 # a headline label and before the journey under it (the first "min", "mi" or
 # "hr" past the label) is a part of the pay, never the pay, unless a label
-# follows it at once (HEADLINE_AFTER: the next card's headline over its own).
+# follows it at once (HEADLINE_AFTER: the next card's headline over its own;
+# "at once" allows three of OCR's marks or lone letters between, "$6.63 J /
+# Guaranteed"). The same test says whether the payout a read chose is the
+# card's labelled headline (find_pay's `labelled`, parse's `payLabelled`).
 # With the headline cut off by the box, "Guaranteed (incl. tip) / $1.68 <any
 # word> included / 20 min" has no payout, and the panel says so.
 #
@@ -170,8 +173,8 @@ HEADLINE_LABEL = re.compile(r'\s*(?:guarant|includ|incl[.,:]?\s?tips?\b|\*)', re
 # only ever says the figure before it is a headline.
 HEADLINE_WORD = re.compile(r'guarant|includes?\s*expected|incl[.,:]?\s?tips?\b',
                            re.IGNORECASE | ASCII)
-HEADLINE_AFTER = re.compile(r'[^\w$]{0,3}?\s*(?:' + HEADLINE_WORD.pattern + r'|\*)',
-                            re.IGNORECASE | ASCII)
+HEADLINE_AFTER = re.compile(r'(?:\s*(?:[^\w\s$]|[A-Za-z](?![A-Za-z]))){0,3}?\s*(?:'
+                            + HEADLINE_WORD.pattern + r'|\*)', re.IGNORECASE | ASCII)
 HEADLINE_ZONE_END = re.compile(r'\d\s*(?:m[il1|]n|mi\b|hrs?\b)', re.IGNORECASE | ASCII)
 
 PAY_SPLIT = re.compile(
@@ -1207,7 +1210,7 @@ PAY_IS_PER_ORDER = re.compile(
     re.IGNORECASE | ASCII)
 
 
-def find_pay(text, where=None, printed=None, figures=None):
+def find_pay(text, where=None, printed=None, figures=None, labelled=None):
     """The offer's headline payout, and — if asked — where every headline was.
 
     `figures`, when given a list, is filled with the position of EVERY figure
@@ -1215,6 +1218,13 @@ def find_pay(text, where=None, printed=None, figures=None):
     (the "$1" fragment PAY_SPLIT joins and the join start at the same one).
     Asked by pipeline.py of a crop it found, which must hold one card's
     payout and no other. See payout_figures.
+
+    `labelled`, when given a list, has one flag appended: whether the payout
+    chosen stands directly before the card's headline label or the rider's
+    star (HEADLINE_AFTER) — the figure the card itself calls its pay. Asked by
+    parse() for `payLabelled`, which is what lets a later read of the same card
+    correct the first (journal.OfferLog.consider) and what says two reads that
+    disagree are a doubt rather than a choice (scan_pi.pay_disagrees).
 
     `printed`, when given a list, has one flag appended: whether the payout
     chosen is printed the way a card prints its headline — to the cent, or
@@ -1357,6 +1367,7 @@ def find_pay(text, where=None, printed=None, figures=None):
     # journey, with no label of its own is a part of the pay, never the pay.
     # A later label's stretch ends no earlier than an earlier one's, so the
     # last label at or before a figure is the one to ask. See HEADLINE_WORD.
+    anchored_at = set(found[i][1] for i in anchored)
     if labels and found:
         starts = [lo for lo, _ in labels]
 
@@ -1382,6 +1393,8 @@ def find_pay(text, where=None, printed=None, figures=None):
         best = None
     if figures is not None:
         figures.extend(sorted(set(at for _, at, _ in found)))
+    if labelled is not None and best is not None:
+        labelled.append(any(one[0] == best and one[1] in anchored_at for one in found))
     if printed is not None and best is not None:
         printed.append(min((one for one in found if one[0] == best),
                            key=lambda one: one[1])[2])
@@ -6471,7 +6484,8 @@ def parse(raw_text):
     # needs the amount, and they must be the same answer — two calls would
     # be two chances for them to disagree about which figure is the
     # headline, which is the whole thing this boundary rests on.
-    pay = find_pay(text, _where)
+    _labelled = []
+    pay = find_pay(text, _where, labelled=_labelled)
     # card_span asks a_card_above the question one_card asks, and it has to be
     # asked of the same legs — one_card's answer has the upper card's leg cut.
     found_legs = legs
@@ -6659,6 +6673,9 @@ def parse(raw_text):
     approach = to_pickup(used)
     return {
         'pay': pay,
+        # Whether that payout is the figure the card prints over its label (or
+        # before the rider's star): see find_pay's `labelled`.
+        'payLabelled': bool(pay is not None and _labelled and _labelled[0]),
         'minutes': minutes,
         'miles': miles,
         # Minutes since midnight, not a duration: converting one to the other

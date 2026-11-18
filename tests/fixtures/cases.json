@@ -1083,6 +1083,47 @@
    }
   },
   {
+   "name": "payLabelled: the payout over the card's label is labelled (what lets a later read correct the first)",
+   "_why": "journal.py OfferLog._corrects moves an offer's payout only to a labelled figure; scan_pi.pay_disagrees says CHECK THE PAY over a read of the same card whose payout is not.",
+   "text": "$9.09\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 9.09,
+    "payLabelled": true
+   }
+  },
+  {
+   "name": "payLabelled: ...a ride's headline before the rider's star is labelled",
+   "text": "$12.74\n* 4.91 Verified\n11 min (1.8 mi)\nOak Ln, Marietta\n18 mins (5.2 mi)\nBirch Rd, Smyrna",
+   "expect": {
+    "pay": 12.74,
+    "payLabelled": true
+   }
+  },
+  {
+   "name": "payLabelled: ...a few marks between the figure and its label are still the label's",
+   "text": "Exclusive x\n$6.63 J\nGuaranteed (incl. tip) |\n© 16 min (1.5 mi) total\nBirch Market (88 Juniper Way)\nI Oak Ln, Marietta",
+   "expect": {
+    "pay": 6.63,
+    "payLabelled": true
+   }
+  },
+  {
+   "name": "payLabelled: ...a payout with its label below the box is not",
+   "text": "$9.09\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 9.09,
+    "payLabelled": false
+   }
+  },
+  {
+   "name": "payLabelled: ...and no payout is never labelled",
+   "text": "Guaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": {
+    "pay": null,
+    "payLabelled": false
+   }
+  },
+  {
    "name": "...a two-leg card's headline over its Boost+ line",
    "text": "Exclusive\n$16.80\n* 481 $2.39 Boost+ included\n3 min (0.4 mi)\nOak Ln, Marietta\n25 mins (12.3 mi)\nBirch Rd, Smyrna",
    "expect": {

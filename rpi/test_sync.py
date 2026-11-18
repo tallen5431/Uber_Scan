@@ -1814,6 +1814,66 @@ finally:
     _afar.close()
     shutil.rmtree(_adir, ignore_errors=True)
 
+# --- a payout corrected on the rig, and one read again at home ----------------
+#
+# The 17 Nov Boost+ card: the rig now corrects a misread first payout under the
+# same id as later reads of the card hold its labelled headline (journal.py
+# OfferLog._corrects), and the server's fold reads an older row's payout again
+# from its own text (server.js withPay). Both have to survive the trip to the
+# NUC: the correction rows carry their seq on, so the far end keeps every one,
+# and the copy at home folds them to the same offer the rig shows. Invented
+# card.
+_cdir = tempfile.mkdtemp()
+_cpath = os.path.join(_cdir, 'journal.jsonl')
+_clog = JR.OfferLog(JR.Journal(_cpath))
+_CCARD = ('Exclusive\n${pay}\nGuaranteed (incl. tip)\n$1.68 Boost+ included\n'
+          '© 20 min (1.5 mi) total\nMaple Grill (12 Fable Ct)\nOak Ln, Marietta')
+_cacc = _AC.OfferAccumulator()
+_ct0 = JR.now_ms() / 1000.0 - 1800
+for _i, _pay in enumerate(['1.09', '1.09', '9.09', '9.09', '9.09', '9.09']):
+    _p = _cacc.add(_OP.parse(_CCARD.format(pay=_pay)), now=_ct0 + _i * 0.5)
+    _clog.consider(_p, _OP.rate(_p, {'target': 25, 'band': 15, 'costPerMile': 0.3}),
+                   now=_ct0 + _i * 0.5)
+_cwritten = lines(_cpath)
+eq('[corrected] the rig wrote the card under one id, its first payout and then the correction',
+   (len(set(r['id'] for r in _cwritten)), _cwritten[0]['pay'] if _cwritten else None,
+    _cwritten[-1]['pay'] if _cwritten else None,
+    (_cwritten[-1].get('corrected') or {}).get('from') if _cwritten else None),
+   (1, 1.09, 9.09, 1.09))
+# ...and a row from before the boost was read as a part: its text held only it.
+_cold = dict(_cwritten[0], id='boost-1', seq=1, pay=1.68, perHour=3.69, state='no',
+             text=('Guaranteed (incl. tip)\n$1.68 Boost+ included\n© 20 min (1.5 mi) total\n'
+                   'Maple Grill (12 Fable Ct)\nOak Ln, Marietta'), scans=None)
+_cold.pop('corrected', None)
+# (A row from before the field: one with `payLabelled` was read under the label
+# stretch, and the fold leaves it be.)
+_cold.pop('payLabelled', None)
+_cfar = FarEnd()
+try:
+    _cres = SY.send(_cfar.base, _cwritten + [_cold])
+    eq('[corrected] the far end took every row, the correction rows among them',
+       _cres['added'], len(_cwritten) + 1)
+    _cbody = json.loads(urllib.request.urlopen(_cfar.base + '/api/journal?days=0',
+                                               timeout=5).read().decode('utf-8'))
+    _cby = dict((o['id'], o) for o in _cbody['offers'])
+    _cone = _cby.get(_cwritten[0]['id']) if _cwritten else {}
+    eq('[corrected] ...and folds them to one offer at the corrected payout, saying so',
+       ((_cone or {}).get('pay'), ((_cone or {}).get('corrected') or {}).get('from')), (9.09, 1.09))
+    _cb = _cby.get('boost-1') or {}
+    eq('[corrected] the older boost-only row is shown pay unread at home, as on the rig',
+       (_cb.get('payUnread'), _cb.get('suspect'), (_cb.get('corrected') or {}).get('from')),
+       (True, True, 1.68))
+    eq('[corrected] ...two offers, not three', len(_cbody['offers']), 2)
+    _ccsv = list(_acsv.DictReader(_aio.StringIO(
+        urllib.request.urlopen(_cfar.base + '/api/journal.csv?days=0',
+                               timeout=5).read().decode('utf-8'))))
+    ok_('[corrected] ...and the CSV has the corrected payout, never the $1.09 (%r)'
+        % sorted(r['pay'] for r in _ccsv), '9.09' in [r['pay'] for r in _ccsv]
+        and '1.09' not in [r['pay'] for r in _ccsv])
+finally:
+    _cfar.close()
+    shutil.rmtree(_cdir, ignore_errors=True)
+
 print(('\n%d passed, %d FAILED' % (ok, bad)) if bad
       else '\nAll %d sync checks passed' % ok)
 sys.exit(1 if bad else 0)

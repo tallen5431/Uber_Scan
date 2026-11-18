@@ -974,6 +974,20 @@ REC_TWO = {
     'money': {'pay': 10.0, 'minutes': 15.0, 'perHour': 40.0, 'delivery': True},
     'flags': [], 'missing': ['drive: no odometer reading kept for this order']}
 FEEDS['records'] = dict(FEEDS['took six'], records=[REC_TWO, REC_ONE])
+# [reread] The 17 Nov evening's offers, as the server's fold now hands them
+# over (server.js withPay): one whose payout another reading of the same offer
+# gave, one whose text held only its Boost+ amount, and an ordinary one.
+_RR1 = offer(1, pay=9.09, cost=0.45)
+_RR1['corrected'] = {'from': 1.68, 'to': 9.09,
+                     'why': 'another reading of the same offer held its labelled headline'}
+_RR2 = offer(2, pay=1.68, cost=0.45, suspect=True)
+_RR2.update(corrected={'from': 1.68, 'to': None,
+                       'why': 'its text held no payout under the current reader, only a part of one'},
+            payUnread=True, doubt='unread', state='doubt', perHour=None, grossPerHour=None)
+_RR3 = offer(3, pay=12.5)
+FEEDS['reread'] = {'count': 3, 'total': 3, 'truncated': False, 'days': 7, 'hidden': 0,
+                   'watched': {'saw': 3, 'kept': 3}, 'unreadable': None, 'pairs': [],
+                   'offers': [_RR1, _RR2, _RR3]}
 
 # ...and 'in the car' again in a browser whose locale writes the 24-hour clock
 # (en-GB), as the owner's does: the offers page says "4:31 PM" whatever the
@@ -1447,6 +1461,26 @@ const TEXT = (sel) => {
         rows: document.querySelectorAll('#log details.offer').length,
         goldMini: !document.getElementById('goldMini').hidden,
       }));
+    }
+    // [reread] Each row's payout note (server.js withPay), the set-aside
+    // sentence of the one whose payout never read, and its details.
+    if (name === 'reread') {
+      out[name].reread = await page.evaluate(() => {
+        const flat = (el) => el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        const row = (id) => document.querySelector('#log details.offer[data-id="' + id + '"]');
+        const got = {};
+        ['r1', 'r2', 'r3'].forEach((id) => {
+          const d = row(id);
+          if (!d) { got[id] = null; return; }
+          d.open = true;
+          got[id] = { meta: flat(d.querySelector('.meta')),
+                      note: flat(d.querySelector('.meta .reread')),
+                      noteTitle: (d.querySelector('.meta .reread') || { title: '' }).title || '',
+                      aside: d.classList.contains('aside'), why: flat(d.querySelector('p.why')),
+                      facts: flat(d.querySelector('dl.facts')) };
+        });
+        return got;
+      });
     }
     // [order record] The block under an order's row, and the CSV the page
     // makes of the records, read back through the link itself.
@@ -2388,6 +2422,27 @@ try:
         == [re.sub(r'\s', '', w.upper()) for w in _w])
 
     # --- the order record (the owner, 7 Nov) -----------------------------------
+    # [reread] The payout the server's fold read again, said small beside it:
+    # "pay re-read: was $1.68"; "pay unread" in place of a figure the card's
+    # text never held as its pay, set aside with its reason; nothing on an
+    # ordinary row.
+    _rr = (got.get('reread') or {}).get('reread') or {}
+    _rr1, _rr2, _rr3 = (_rr.get('r1') or {}), (_rr.get('r2') or {}), (_rr.get('r3') or {})
+    eq('[reread] a corrected payout is shown with what it was, small, beside it (%r)'
+       % _rr1.get('meta'), _rr1.get('note'), 'pay re-read: was $1.68')
+    ok_('[reread] ...the figure shown is the corrected one', (_rr1.get('meta') or '').startswith('$9.09'))
+    ok_('[reread] ...and the reason on the note\'s title (%r)' % _rr1.get('noteTitle'),
+        'another reading of the same offer' in (_rr1.get('noteTitle') or ''))
+    ok_('[reread] ...and in the details, in words (%r)' % _rr1.get('facts'),
+        '$1.68 — another reading of the same offer' in (_rr1.get('facts') or ''))
+    eq('[reread] a payout that never read says so in place of the figure (%r)' % _rr2.get('meta'),
+       _rr2.get('note'), 'pay unread (read as $1.68)')
+    ok_('[reread] ...set aside, with the reason (%r)' % _rr2.get('why'),
+        _rr2.get('aside') and 'Its payout never read' in (_rr2.get('why') or ''))
+    ok_('[reread] ...and its details say the payout was not read (%r)' % _rr2.get('facts'),
+        'Payoutnot read' in (_rr2.get('facts') or ''))
+    eq('[reread] an ordinary row carries no note', _rr3.get('note'), '')
+
     _rec = (got.get('records') or {}).get('records') or {}
     eq('[order record] the window\'s records are named, with a way to save them',
        (_rec.get('head'), _rec.get('csvShown')), ('Order records \u00b7 2 orders', True))
