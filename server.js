@@ -16060,12 +16060,64 @@ function earningsRead(id, again, now, done0) {
       var p = Earnings.parse(said, { now: now });
       var rec = { v: EARNINGS_ROW_V, shot: id, at: now, app: p.app, day: p.day ? p.day.iso : null,
                   dayFrom: p.day ? p.day.from : null, entries: p.entries, others: p.others,
-                  notes: p.notes, text: said };
+                  notes: p.notes, tally: p.tally || null, text: said };
       earningsWrite(ocrFile, JSON.stringify(rec), function (writeErr) {
         if (writeErr) console.error('earnings: could not keep what was read off ' + id + ': ' + writeErr.message);
         done(null, rec);
       });
     });
+  });
+}
+
+/* WAS A SCREENSHOT READ WHOLE (the owner's 17 Nov screenshot: seven
+ * entries, four read, one of them wrong, and nothing said so). A reading's
+ * tally (earnings.js parseUber) in a form the page shows: what was seen and
+ * what became of it, and `short` where anything seen was not read. A
+ * reading kept before the tally existed has its text: it is tallied again
+ * from that, by the parser as it stands now. */
+function earningsTally(rec) {
+  if (!rec) return null;
+  var t = rec.tally;
+  if (!t && typeof rec.text === 'string') {
+    try { t = Earnings.parse(rec.text, { now: rec.at }).tally || null; } catch (e) { t = null; }
+  }
+  if (!t) return null;
+  return { seen: t.seen, read: t.read, skipped: t.skipped || [], unread: t.unread || [], cut: t.cut || 0,
+           short: t.read < t.seen, words: Earnings.tallyWords(t) };
+}
+
+/* A day's screenshots, oldest first, each with its tally: every kept reading
+ * (`.ocr`) filed under that day — its picked day, else its own — or named by
+ * one of the day's trips (a screenshot that took its batch's day). Readings
+ * only: no picture is opened, and none is served. `done([{shot, app,
+ * tally}])`. */
+function earningsDayShots(day, entries, done) {
+  var named = {};
+  (entries || []).forEach(function (e) {
+    (Array.isArray(e.shots) ? e.shots : []).forEach(function (id) { named[id] = true; });
+  });
+  fs.readdir(EARNINGS_DIR, function (err, names) {
+    var ids = (err ? [] : names).map(function (n) {
+      var m = /^(.+)\.ocr$/.exec(n);
+      return m && EARNINGS_ID.test(m[1]) ? m[1] : null;
+    }).filter(Boolean).sort();
+    var out = [];
+    var next = function (k) {
+      if (k >= ids.length) return done(out);
+      // The kept reading and the day picked for it, read as files: never
+      // earningsRead, which would run tesseract on a reading it cannot use.
+      fs.readFile(earningsPath(ids[k], '.ocr'), 'utf8', function (readErr, text) {
+        var rec = null;
+        try { rec = readErr ? null : JSON.parse(text); } catch (e) { rec = null; }
+        fs.readFile(earningsPath(ids[k], '.day'), 'utf8', function (dayErr, picked) {
+          var pd = dayErr ? '' : String(picked).trim();
+          var on = rec && ((EARNINGS_DAY.test(pd) ? pd : rec.day) === day || named[ids[k]]);
+          if (on) out.push({ shot: ids[k], app: rec.app || null, tally: earningsTally(rec) });
+          next(k + 1);
+        });
+      });
+    };
+    next(0);
   });
 }
 
@@ -16146,6 +16198,13 @@ function earningRow(e, at) {
     canceledBy: e.status === 'canceled' && typeof e.canceledBy === 'string' ? e.canceledBy : null,
     type: e.type, minutes: e.minutes, seconds: e.seconds, miles: e.miles,
     pickup: places ? e.pickup : null, dropoff: places ? e.dropoff : null, places: places,
+    // An amount guessed past a lost decimal point (the page says "check
+    // this"), a ride, the chips on its row, and WHAT WAS READ: the raw lines
+    // of its block, so a doubtful row can be checked by eye with no picture
+    // served — names and streets among them, so only with keepPlaces on.
+    amountGuessed: e.amountGuessed ? true : null, ride: e.ride ? true : null,
+    chips: Array.isArray(e.chips) ? e.chips.slice(0, 4) : null,
+    lines: places && Array.isArray(e.lines) ? e.lines.slice(0, Earnings.LINES_MAX) : null,
     match: match,
     history: Array.isArray(e.history) ? e.history.slice(-Earnings.HISTORY_MAX) : null,
     shots: Array.isArray(e.shots) ? e.shots.slice(-EARNINGS_SHOTS_PER_ROW) : null,
@@ -16282,7 +16341,10 @@ function earningsRoute(req, res) {
         var dayList = Object.keys(byDate).sort().reverse().slice(0, EARNINGS_DAYS_LISTED).map(function (d) {
           return Object.assign({ date: d }, Earnings.daySummary(byDate[d]));
         });
-        answer(200, {
+        // A day asked for: each of its screenshots' tallies (earningsDayShots),
+        // so the page can say whether each was read whole.
+        (oneDay ? function (then) { earningsDayShots(oneDay, entries, then); }
+                : function (then) { then(null); })(function (tallied) { answer(200, {
           ok: true, unreadable: rows ? null : (readErr && readErr.code || 'unknown'),
           tesseract: { found: !!bin, install: bin ? null : EARNINGS_INSTALL },
           shots: { kept: ids.filter(function (i) { return shots[i].shot; }).length,
@@ -16295,9 +16357,10 @@ function earningsRoute(req, res) {
           places: orderKeepsPlaces(),
           day: oneDay,
           summary: oneDay ? Earnings.daySummary(entries) : null,
+          shotsRead: tallied,
           days: dayList,
           entries: entries
-        });
+        }); });
       });
     });
   }
@@ -16414,6 +16477,7 @@ function earningsRoute(req, res) {
                   reply(200, { ok: true, shot: id, read: true, app: parsed.app, day: parsed.day,
                                dayFrom: parsed.dayFrom || null, shownDay: picked ? parsed.shownDay : undefined,
                                warning: warning, trips: (parsed.entries || []).length,
+                               tally: earningsTally(parsed),
                                others: (parsed.others || []).length, notes: parsed.notes || [],
                                added: summary.added, changed: summary.changed, entries: summary.entries });
                 });
