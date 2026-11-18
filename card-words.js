@@ -222,6 +222,37 @@
     return num(v) ? v : null;
   }
 
+  // "incl. $2.93 Boost" (Uber's Boost+) or "incl. $2.00 Peak Pay" (DoorDash),
+  // under the pay: the part of the payout the card says came from the app's
+  // own top-up, off the parser's `boost` (offer_parser boost_of). The owner's
+  // request of Nov 2026, from the evening's Boost+ cards. Display only: it
+  // is part of the PAY figure beside it, never added to it, and reaches no
+  // verdict, rate or rule.
+  //
+  // null — nothing drawn — where there is no verdict, on every withheld one
+  // (the pay or the time it would qualify is the one the reader refused, as
+  // for the raw $/hr; CHECK THE TIME too, which has no figure to sit beside
+  // honestly once the headline is blanked), with no payout, and where the
+  // amount is not less than the payout it is said to be part of.
+  function boostSaid(r) {
+    if (!r || !r.ready || r.state === 'doubt') return null;
+    if (!num(r.boost) || !(r.boost > 0) || !num(r.pay) || !(r.boost < r.pay)) return null;
+    return 'incl. $' + r.boost.toFixed(2) + (r.app === 'doordash' ? ' Peak Pay' : ' Boost');
+  }
+
+  // "target $25": what the verdict word was judged against, the driver's own
+  // target off the reading (rate()'s `target`, echoed with `band` so a verdict
+  // carries the line it was held to). Said beside the word on ACCEPT, CLOSE
+  // CALL and PASS alike (the owner, Nov 2026); null on a withheld verdict,
+  // which was judged against nothing, and with no verdict. Whole dollars
+  // where the target is whole, as the driver typed it; cents where it is not.
+  function targetSaid(r) {
+    if (!r || !r.ready || r.state === 'doubt') return null;
+    if (r.state !== 'go' && r.state !== 'warn' && r.state !== 'no') return null;
+    if (!num(r.target) || !(r.target > 0)) return null;
+    return 'target $' + (r.target % 1 === 0 ? String(r.target) : r.target.toFixed(2));
+  }
+
   return {
     NO_OFFER_SAID: NO_OFFER_SAID,
     TAKEN_SCREENS: TAKEN_SCREENS,
@@ -232,6 +263,8 @@
     noVerdictSaid: noVerdictSaid,
     phoneSaid: phoneSaid,
     rawPerHour: rawPerHour,
-    rawPerMile: rawPerMile
+    rawPerMile: rawPerMile,
+    boostSaid: boostSaid,
+    targetSaid: targetSaid
   };
 }));

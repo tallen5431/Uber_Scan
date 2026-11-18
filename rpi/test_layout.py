@@ -1298,8 +1298,12 @@ def caption_strings(page_src):
 # What the status row is given to carry while 📷 Snap's place on it is
 # measured. The shift line is the widest real one — the shape
 # rpi/test_dashboard.py stages for the hat, as live.html writes it on the row
-# since the rest went behind "…" (fillMore): the ticks, what they came to and
-# the median, with the separator the stylesheet puts in front — and the
+# since the rest went behind "…" (fillMore): how many were taken, what they
+# came to and the median. Its words are "10 taken · $141 · -$17/hr" (the
+# owner's, Nov 2026) where they fit beside what else is on the row; where
+# they would cut the median live.html draws the form it had, "✓10 $141 ·
+# -$17/hr an offer" (fitShift), and that is the line measured here, the
+# widest the row draws at its narrowest, with the separator the stylesheet puts in front — and the
 # connection line is the longest that row says in ordinary use: five minutes
 # of silence from the scanner. Longer is possible ("for 3000s", or "scanner not
 # running:" with an error after it) and cuts the median with or without this
@@ -1632,6 +1636,16 @@ DRIVE_FORMS = {
                     'larger': ['line', 'line2']},
     'waiting': {'msgs': [_EMPTY], 'larger': ['label']},
 }
+# ...and the card's format of Nov 2026: the target beside the word and the
+# Boost+ on the working line, over the owner's long pickup and the notices —
+# an ACCEPT, whose word leaves the target room on the rig's panel, and the
+# unsettled CLOSE CALL, whose word does not.
+_FORMAT_CARD = dict(CHIPS_CARD, places=LONG_ENDS, target=25, band=15, boost=2.93)
+DRIVE_FORMS['format'] = {'beat': _NOTICES, 'offer': True, 'larger': [],
+                         'msgs': [dict(_FORMAT_CARD, state='go', perHour=27.8, grossPerHour=27.8,
+                                       whole=True, locked=True)]}
+DRIVE_FORMS['format close'] = {'beat': _NOTICES, 'offer': True, 'larger': [],
+                               'msgs': [_FORMAT_CARD]}
 # ...and a batched Uber trip (server.js batchDrops, the owner's decision of 19
 # Oct): one order with two doors, "2 drops" beside the pay — under an offer at
 # the pair's widest, and between offers with its stops read.
@@ -1690,6 +1704,8 @@ WAY_FORMS = [
 # ...and the two strings that fixture copies have to still be the page's, or it
 # measures a line the page no longer writes.
 ok_('live.html still writes the median as "/hr an offer"', "'/hr an offer'" in live_src)
+ok_('...on the "…" sheet, and the row\'s short form as "N taken · $X · $Y/hr"',
+    "' taken'" in live_src and "+ '/hr'] : [])" in live_src)
 ok_('...and still says "nothing from the scanner for"',
     "'nothing from the scanner for '" in live_src)
 
@@ -4424,10 +4440,27 @@ const SNAP_MEASURE = (fixture) => {
       line: Math.round((parseFloat(getComputedStyle(chip0).lineHeight)
                         || parseFloat(getComputedStyle(chip0).fontSize) * 1.2) * 10) / 10,
     } : null;
+    // The target beside the word (#verdictLabel::after) and the word's line
+    // whole with it; the boost on the working line and that line's rows.
+    const lab = document.getElementById('verdictLabel');
+    const after = getComputedStyle(lab, '::after').content;
+    const wk = document.getElementById('working');
+    const bo = wk.querySelector('.boost');
+    const format = {
+      target: after && after !== 'none' ? after.replace(/^"|"$/g, '') : null,
+      labelWhole: lab.scrollWidth <= lab.clientWidth + 1,
+      labelRows: Math.round(lab.getBoundingClientRect().height
+                            / (parseFloat(getComputedStyle(lab).lineHeight)
+                               || parseFloat(getComputedStyle(lab).fontSize) * 1.2)),
+      labelPx: parseFloat(getComputedStyle(lab).fontSize),
+      boost: shown(bo) ? bo.textContent.replace(/^\s*\u00b7\s*/, '').trim() : null,
+      workingRows: shown(wk) ? new Set([].slice.call(wk.querySelectorAll('.cost > span')).filter(shown)
+        .map((e) => Math.round(e.getBoundingClientRect().top))).size : 0,
+    };
     return {
       driving: document.querySelector('.live').classList.contains('driving'),
       moving: document.querySelector('.live').classList.contains('moving'),
-      places: places, warnRow: warnRow,
+      places: places, warnRow: warnRow, format: format,
       parts: {
         label: part('#verdictLabel'), rate: part('#perHour'), pay: part('#vPay'),
         min: part('#vMin'), mile: part('#vMile'), perMile: part('#vPerMile'),
@@ -5064,9 +5097,11 @@ try:
             where = '%s, %s view' % (panel, view)
             rm = got.get('%s %s row' % (panel, view)) or {}
             _r, _o = rm.get('closed') or {}, rm.get('open') or {}
+            # In the owner's words, which fit the steady row on every panel
+            # here; the tight form is for a row with more on it (fitShift).
             eq('the status row is short at %s, with no words for the steady connection'
                % where, (_r.get('shift'), _r.get('conn')),
-               ('\u271310 $141 \u00b7 -$17/hr an offer', False))
+               ('10 taken \u00b7 $141 \u00b7 -$17/hr', False))
             if h > 380:
                 ok_('...whole at %s' % where, _r.get('shiftWhole'))
             ok_('...the median\'s digits on the glass at %s' % where, _r.get('figureIn'))
@@ -5523,6 +5558,53 @@ try:
                 (hm.get('notSaved') or {}).get('rowsOut'), (hm.get('inCar') or {}).get('rowsOut')),
                ([_hs[0]] * 2, 'Took $112.45 not saved', '✓ Took $112.45 in car',
                 '', '', '', ''))
+
+    # The target beside the word and the boost on the working line (the
+    # owner's card format of Nov 2026), parked and moving on the three panels
+    # in both pictures: where the target is drawn the word's line is whole
+    # and one row and the word its own size — on the rig's panel the ACCEPT
+    # at its 40px with "· target $25" beside it — and where the two do not
+    # fit (the unsettled CLOSE CALL at 1024x600) the target is not drawn
+    # rather than the word shrunk; the boost drawn only on a working line of
+    # one row, and on the rig's panel, which has the room, drawn. The rest of
+    # the card is the loop below's: whole, nothing cut.
+    for panel, w, h in PLANNER_PANELS:
+        for view in ('screen', 'scene'):
+            where = '%s, %s view' % (panel, view)
+            wide = w >= 1000 and h >= 560
+            _ref = (got.get('%s %s drive offer' % (panel, view)) or {}).get('parked') or {}
+            for form in ('format', 'format close'):
+                dm = got.get('%s %s drive %s' % (panel, view, form)) or {}
+                for how in ('parked', 'driving'):
+                    f = (dm.get(how) or {}).get('format') or {}
+                    ok_('[format] "%s" %s measured at %s' % (form, how, where), bool(f))
+                    if not f:
+                        continue
+                    ok_('[format] "%s" %s: the word\'s line whole and one row, target %r, at %s'
+                        % (form, how, f.get('target'), where),
+                        f.get('labelWhole') and f.get('labelRows') == 1)
+                    if f.get('target') is not None:
+                        eq('[format] ...the target is "· target $25" at %s' % where,
+                           f.get('target'), '\u00a0\u00b7 target $25')
+                    if wide:
+                        eq('[format] "%s" %s: on the rig\'s panel the target %s, the word %s at %s'
+                           % (form, how, 'drawn' if form == 'format' else 'not drawn',
+                              '40px' if form == 'format' else 'at its size', where),
+                           (f.get('target') is not None,
+                            f.get('labelPx') if form == 'format'
+                            else f.get('labelPx') == ((_ref.get('format') or {}).get('labelPx'))),
+                           (form == 'format', 40.0 if form == 'format' else True))
+                    else:
+                        eq('[format] "%s" %s: the word the size of the same panel\'s card without '
+                           'a target, at %s' % (form, how, where),
+                           f.get('labelPx'), (_ref.get('format') or {}).get('labelPx'))
+                    ok_('[format] "%s" %s: the boost only on a working line of one row (%r, %s rows) at %s'
+                        % (form, how, f.get('boost'), f.get('workingRows'), where),
+                        f.get('boost') is None or (f.get('boost') == 'incl. $2.93 Boost'
+                                                   and f.get('workingRows') == 1))
+                    if wide:
+                        eq('[format] ...and on the rig\'s panel drawn, "%s" %s, at %s' % (form, how, where),
+                           f.get('boost'), 'incl. $2.93 Boost')
 
     # The card side moving, every form of it (DRIVE_FORMS), on the three
     # panels in both pictures: whole — every glyph of every part it draws

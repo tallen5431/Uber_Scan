@@ -21,7 +21,8 @@ AUDITS.md under Settled.)
   "calibrating"), and reads every Uber and DoorDash offer that appears.
 - Draws one card, readable from the driver's seat: the verdict word and its
   colour, $/hr large, then pay, minutes, miles and $/mi, and a line saying
-  what the target was and whether running costs came off it.
+  what the target was, whether running costs came off it and how much of the
+  pay was the app's Boost+ or Peak Pay.
 - Says when it is unsure rather than guessing: **CHECK THE PAY**, **CHECK THE
   TIME**, **NOT AN OFFER**, a **?** after a verdict that is not settled yet,
   **pay ?** when the payout came from a card the rig had to go looking for, and

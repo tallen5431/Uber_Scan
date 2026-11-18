@@ -536,6 +536,15 @@ _cw = subprocess.run(
      '   screen: "uber.nav"}),'
      ' idle: C.phoneSaid({pay: 142.6, notAnOffer: true, places: []}),'
      ' blank: C.phoneSaid({places: []}), word: C.CHECK_THE_PHONE};'
+     'const v = (o) => Object.assign({ready: true, state: "go", pay: 12.4, target: 25}, o);'
+     'out.boost = [C.boostSaid(v({boost: 2.93})), C.boostSaid(v({boost: 2, app: "doordash"})),'
+     ' C.boostSaid(v({boost: null})), C.boostSaid(v({boost: 12.4})), C.boostSaid(v({boost: 2.93, pay: null})),'
+     ' C.boostSaid(v({boost: 2.93, state: "doubt", doubt: "pay"})),'
+     ' C.boostSaid(v({boost: 2.93, state: "doubt", doubt: "time"})),'
+     ' C.boostSaid({ready: false, state: "empty", pay: 12.4, boost: 2.93})];'
+     'out.target = [C.targetSaid(v({})), C.targetSaid(v({state: "warn"})), C.targetSaid(v({state: "no"})),'
+     ' C.targetSaid(v({target: 22.5})), C.targetSaid(v({state: "doubt", doubt: "rate"})),'
+     ' C.targetSaid(v({target: null})), C.targetSaid({ready: false, state: "empty", target: 25})];'
      'console.log(JSON.stringify(out));',
      os.path.join(ROOT, 'card-words.js'), json.dumps(_CW_CASES)],
     capture_output=True, text=True, timeout=30)
@@ -569,6 +578,18 @@ if _cwr:
     eq('[words] ...and not for the map\'s route chips, the zone prompt\'s wait, a taken '
        'order\'s navigation, the app\'s idle screen or nothing at all',
        [_ph['map'], _ph['zone'], _ph['nav'], _ph['idle'], _ph['blank']], [None] * 5)
+    # The Boost+ or Peak Pay part of the pay (the parser's `boost`), said
+    # under the pay on both panels: a label, part of the pay and never added to
+    # it, and nothing on a withheld or missing verdict, with no payout, or
+    # where the amount is not less than the payout.
+    eq('[words] the boost: "incl. $2.93 Boost", DoorDash\'s "Peak Pay", and nothing with none, '
+       'one not under the pay, no pay, a withheld verdict (CHECK THE TIME too) or no verdict',
+       _cwr['boost'], ['incl. $2.93 Boost', 'incl. $2.00 Peak Pay'] + [None] * 6)
+    # ...and the target the verdict word was judged against, on ACCEPT,
+    # CLOSE CALL and PASS alike, never on a withheld verdict or none.
+    eq('[words] the target beside the word: whole dollars as typed, cents where not, '
+       'nothing on a withheld verdict, with no target or no verdict',
+       _cwr['target'], ['target $25'] * 3 + ['target $22.50', None, None, None])
 
 # --- the card, on every panel lite lists ------------------------------------------
 #
@@ -593,7 +614,7 @@ STATES = {
              'costPerMile': 0.35, 'target': 25},
     'doubt': {'ready': True, 'locked': True, 'whole': True, 'state': 'doubt', 'doubt': 'rate',
               'perHour': 990, 'pay': 99.0, 'minutes': 6, 'miles': 1.1, 'perMile': 90,
-              'target': 25, 'uncosted': True},
+              'target': 25, 'uncosted': True, 'boost': 2.93},
     'waiting': {'tooBright': True},
     # A card whose payout the box cut off: no verdict, and the card says
     # where to look (card-words.js), the reason under the word.
@@ -601,10 +622,22 @@ STATES = {
               'miles': 8.6, 'deliverBy': 975, 'places': ['Fable Grill (12 Example Ct)',
                                                          'Quill St, Exampleton']},
     'lowpower': {'heatGuard': True, 'throttled': {'now': ['under-voltage']}, 'cpuC': 61},
+    # The Boost+ amount after the target line (card-words.js boostSaid)...
+    'boost': {'ready': True, 'locked': True, 'whole': True, 'state': 'go', 'perHour': 108.6,
+              'pay': 123.45, 'minutes': 104, 'miles': 38.6, 'perMile': -0.12, 'cost': 13.51,
+              'costPerMile': 0.35, 'target': 25, 'boost': 12.93},
+    # ...and DoorDash's Peak Pay after the longest line it ever follows, the
+    # ceiling sentence: where the two would take a second row the boost is
+    # left off, never the card made taller.
+    'peakpay': {'ready': True, 'locked': True, 'whole': True, 'state': 'warn', 'perHour': 21.18,
+                'pay': 12.0, 'minutes': None, 'cardMinutes': 34, 'fromDeadline': True,
+                'miles': 8.2, 'milesUncertain': True, 'uncosted': True, 'cost': 0,
+                'costPerMile': 0.35, 'target': 25, 'boost': 2.0, 'app': 'doordash'},
 }
 WORDS = {'accept': 'ACCEPT', 'close': 'CLOSE CALL \u2026', 'pass': 'PASS',
          'doubt': 'CHECK PAY AND TIME', 'waiting': 'WAITING FOR AN OFFER',
-         'lowpower': 'WAITING FOR AN OFFER', 'nopay': 'CHECK THE PHONE'}
+         'lowpower': 'WAITING FOR AN OFFER', 'nopay': 'CHECK THE PHONE',
+         'boost': 'ACCEPT', 'peakpay': 'CLOSE CALL'}
 
 if subprocess.call(['node', '-e', 'require("playwright")'],
                    env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS)),
@@ -643,7 +676,7 @@ const fs = require('fs');
         const m = await page.evaluate(() => {
           const box = (s) => { const e = document.querySelector(s); const r = e.getBoundingClientRect();
             return { top: r.top, bottom: r.bottom, left: r.left, right: r.right,
-                     sw: e.scrollWidth, cw: e.clientWidth, text: e.textContent,
+                     sw: e.scrollWidth, cw: e.clientWidth, text: e.textContent, h: r.height,
                      font: parseFloat(getComputedStyle(e).fontSize),
                      bg: getComputedStyle(e).backgroundColor, color: getComputedStyle(e).color }; };
           const figs = Array.from(document.querySelectorAll('.figs b, .figs small')).map((e) => ({
@@ -784,6 +817,27 @@ for _key in sorted(_res):
 eq('a refused card wears the "?" as live.html\'s does',
    _res['800x480 dark doubt']['mark'], '"? "')
 eq('...and a verdict its own mark, not that one', _res['800x480 dark accept']['mark'], '"\u2713\u00a0"')
+# The boost on the line under the rate: said where the line keeps one row,
+# and on the rig's two HDMI panels it does; left off where it would not
+# (the ceiling sentence on the 3.5" panel, an upright phone); never on the
+# refused card.
+for _key in sorted(_res):
+    _m, _state = _res[_key], _key.split(' ')[-1]
+    _t = _m['target']
+    # (An upright phone's line takes two rows with no boost at all: the
+    # ceiling sentence and the refused card's, as before; the boost adds none.)
+    if _state in ('boost', 'peakpay', 'doubt') and _m['vw'] > _m['vh']:
+        ok_('%s: the line under the rate is one row (%.0fpx at %.1fpx)' % (_key, _t['h'], _t['font']),
+            _t['h'] < 1.7 * _t['font'])
+    if _state == 'doubt':
+        ok_('%s: ...and says no boost on a refused card (%r)' % (_key, _t['text']), 'incl.' not in _t['text'])
+    if _state == 'boost' and _key.split(' ')[0] in ('1024x600', '800x480'):
+        ok_('%s: ...with the boost after it (%r)' % (_key, _t['text']),
+            _t['text'].endswith(' · incl. $12.93 Boost'))
+    if _state == 'peakpay':
+        ok_('%s: ...the ceiling sentence whole, the Peak Pay after it or left off (%r)' % (_key, _t['text']),
+            _t['text'] in ('target $25/hr · no distance — rate is a ceiling',
+                           'target $25/hr · no distance — rate is a ceiling · incl. $2.00 Peak Pay'))
 eq('a card with no payout to price says why under CHECK THE PHONE',
    _res['800x480 dark nopay']['target']['text'], 'no pay read — box may cut it off')
 
