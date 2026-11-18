@@ -1480,6 +1480,225 @@
     return out;
   }
 
+  /* --- paid against the card, across a range (the owner, Nov 2026: "how can
+   * I know it is correctly parsed and matched", and what offers really paid)
+   *
+   * daySummary answers one day; nothing answered the weeks. rangeSummary
+   * takes the earnings entries and the order records the offers page already
+   * holds for its range (no second request, nothing sent anywhere) and says
+   * two things, coverage before figures, so a total over three trips of
+   * twenty is never read as the range's answer:
+   *
+   *   COVERAGE, per app. Orders taken: order records whose Took stands
+   *   (`times.took`, not taken back by the panel or the offers page's
+   *   untick). SILENCE IS NOT AN ACCEPT (AUDITS.md, Settled): a card never
+   *   Took'd is not an order taken here, even where Uber's screen paid for
+   *   it; such a trip is counted on its own (`noTook`, "accepted on the
+   *   phone, no Took") and never added to the orders taken. Of the orders
+   *   taken, how many have a trip matched (the page's own join, paidFor: the
+   *   match's offer, its Took within RECORD_MATCH_MS). Of the entries, how
+   *   many are matched, need the driver, or have no order on file; of the
+   *   matched, how many cannot be compared and why (canceled, tip still
+   *   processing, an amount guessed past a lost decimal point, no pay read
+   *   off the card). `thin`, with its words, where fewer than COVER_THIN of
+   *   the orders taken have a trip matched or fewer than THIN_N trips could
+   *   be compared.
+   *
+   *   PAID AGAINST THE CARD, over the trips compared: the cards and what was
+   *   paid in all; paid less card per trip, its median and, from SPREAD_MIN
+   *   trips, P10 and P90 (R's type 7, as advice.js and server.js), in dollars
+   *   and as a share of the card; how many paid more, as carded (within
+   *   EVEN_CENTS) and less; the tips, where the screen printed one; each week
+   *   (the Monday of the driver's day: Uber's own pay week runs Monday 4am to
+   *   Monday 4am, the 4am day this repository counts by); and every trip whose
+   *   gap is past the CHECK_ bands, as "check this match", by its offer id.
+   *
+   * An entry belongs to the range by its order's moment — the Took, else the
+   * card's first sighting, else Uber's own start (startMs) — as the order
+   * records are windowed by their Took; `from`/`to` are ms, either null.
+   *
+   * DESCRIPTIVE ONLY, as compareOf: no verdict, target, line or panel reads
+   * any of it, and nothing here is a floor or a $/mile anything. No place,
+   * name or text of a trip is in the answer: keys, offer ids and figures. */
+  // Both figures are printed to the cent, and Uber's total is its base, tip
+  // and extras each rounded on its own, so one cent either way is rounding of
+  // the parts, not a different payout. Two cents is a difference. (The day
+  // view's 'as carded' is exact; the range's is this, and the page says so.)
+  var EVEN_CENTS = 1;
+  // "Check this match": a gap too big for a tip to explain. Uber's card
+  // already carries the tip as offered, so a right match moves by what the
+  // tip changed — on the evening the matcher was built from, seven trips of
+  // eight within 25 cents (AUDITS.md, Open). Past half the card (and at least
+  // CHECK_MIN, so a $2 card's $1.10 tip is not called a wrong match), or past
+  // CHECK_ABS whatever the card, is what a pairing with another order or a
+  // misread figure looks like. compareOf's PAY_FLAG ($0.50 or 3%) marks any
+  // difference worth a look in the day view; this marks one worth doubting.
+  var CHECK_SHARE = 0.5;
+  var CHECK_MIN = 3;
+  var CHECK_ABS = 10;
+  // Under ten trips a P10 is the two lowest trips blended, not a tenth of
+  // anything: the spread is left out and the page says why.
+  var SPREAD_MIN = 10;
+  var COVER_THIN = 0.5;
+  var THIN_N = 5;
+  // A Took taken back: by the panel (untick) or the offers page (offers).
+  var TAKEN_BACK = { untick: 1, offers: 1 };
+
+  function q7(sorted, q) {
+    if (!sorted.length) return null;
+    var h = (sorted.length - 1) * q, lo = Math.floor(h);
+    var hi = Math.min(sorted.length - 1, lo + 1);
+    return sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo]);
+  }
+  function r4(v) { return v === null || v === undefined ? null : Math.round(v * 10000) / 10000; }
+
+  // The driver's day of a moment (4am to 4am, this machine's zone), and the
+  // Monday of its week, both 'YYYY-MM-DD': trends.js's dayKeyOf/weekKeyOf.
+  function ymd(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  function driverDayOf(ms) {
+    var d = new Date(ms);
+    d.setHours(d.getHours() - DAY_STARTS_AT);
+    return ymd(d);
+  }
+  function weekOfDay(day) {
+    var p = String(day).split('-').map(Number);
+    var d = new Date(p[0], p[1] - 1, p[2], 12);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return ymd(d);
+  }
+
+  function momentOf(e) {
+    var m = (e && e.match) || {};
+    if (num(m.tookAt) !== null) return m.tookAt;
+    if (num(m.offeredAt) !== null) return m.offeredAt;
+    return startMs(e);
+  }
+  function appKey(a) { return a === 'uber' || a === 'doordash' ? a : 'other'; }
+
+  function rangeGroup() {
+    return { taken: 0, takenMatched: 0, entries: 0, matched: 0, noTook: 0, needs: 0, none: 0,
+             canceled: 0, pending: 0, guessed: 0, noCard: 0, compared: 0,
+             card: 0, paid: 0, diff: 0, median: null, p10: null, p90: null,
+             medianShare: null, p10Share: null, p90Share: null, more: 0, even: 0, less: 0,
+             tipped: 0, tips: 0, tippedPaid: 0, tipShare: null, noTipLine: 0, checks: 0,
+             thin: false, thinWhy: [], diffs: [], shares: [] };
+  }
+  function closeGroup(g) {
+    g.card = r2(g.card); g.paid = r2(g.paid); g.diff = r2(g.paid - g.card);
+    g.tips = r2(g.tips); g.tippedPaid = r2(g.tippedPaid);
+    g.tipShare = g.tippedPaid > 0 ? r4(g.tips / g.tippedPaid) : null;
+    var d = g.diffs.slice().sort(function (a, b) { return a - b; });
+    var s = g.shares.slice().sort(function (a, b) { return a - b; });
+    g.median = r2(q7(d, 0.5));
+    g.medianShare = r4(q7(s, 0.5));
+    if (d.length >= SPREAD_MIN) { g.p10 = r2(q7(d, 0.1)); g.p90 = r2(q7(d, 0.9)); }
+    if (s.length >= SPREAD_MIN) { g.p10Share = r4(q7(s, 0.1)); g.p90Share = r4(q7(s, 0.9)); }
+    if (g.taken > 0 && g.takenMatched / g.taken < COVER_THIN) {
+      g.thinWhy.push(g.takenMatched + ' of ' + g.taken + ' orders taken have a trip matched');
+    }
+    if ((g.taken > 0 || g.entries > 0) && g.compared < THIN_N) {
+      g.thinWhy.push(g.compared + (g.compared === 1 ? ' trip' : ' trips') + ' to compare, under ' + THIN_N);
+    }
+    g.thin = g.thinWhy.length > 0;
+    delete g.diffs;
+    delete g.shares;
+    return g;
+  }
+
+  function rangeSummary(entries, records, opts) {
+    var o = opts || {};
+    var from = num(o.from), to = num(o.to);
+    function inRange(ms) {
+      if (ms === null) return from === null && to === null;
+      return (from === null || ms >= from) && (to === null || ms < to);
+    }
+    var all = rangeGroup(), apps = {};
+    function group(app) { return apps[app] || (apps[app] = rangeGroup()); }
+    function bump(app, k, by) {
+      var v = by === undefined ? 1 : by;
+      group(app)[k] += v;
+      all[k] += v;
+    }
+    function push(app, k, v) { group(app)[k].push(v); all[k].push(v); }
+
+    // The orders taken: a Took that stands, in the range.
+    var taken = [];
+    (records || []).forEach(function (r) {
+      if (!r || r.kind !== 'order' || typeof r.offer !== 'string' || TAKEN_BACK[r.how]) return;
+      var at = num((r.times || {}).took);
+      if (at === null || !inRange(at)) return;
+      taken.push({ offer: r.offer, at: at, app: appKey(r.app), paired: false });
+      bump(appKey(r.app), 'taken');
+    });
+
+    var weeks = {}, checks = [];
+    (entries || []).forEach(function (e) {
+      if (!e || !inRange(momentOf(e))) return;
+      var app = appKey(e.app);
+      var m = e.match || {};
+      bump(app, 'entries');
+      if (m.status === 'needs') { bump(app, 'needs'); return; }
+      if (m.status !== 'matched' && m.status !== 'picked') { bump(app, 'none'); return; }
+      bump(app, 'matched');
+      var mt = num(m.tookAt), own = null;
+      for (var i = 0; i < taken.length && !own; i++) {
+        var t = taken[i];
+        if (!t.paired && t.offer === m.offer && mt !== null && Math.abs(t.at - mt) <= RECORD_MATCH_MS) own = t;
+      }
+      if (own) { own.paired = true; bump(own.app, 'takenMatched'); }
+      // A run rebuilt from took rows (a day before the order records) is a
+      // Took that stood: an order taken, and matched.
+      else if (m.source === 'rebuilt' && mt !== null) { bump(app, 'taken'); bump(app, 'takenMatched'); }
+      else bump(app, 'noTook');
+
+      var c = compareOf(e);
+      if (!c || c.canceled) { bump(app, 'canceled'); return; }
+      if (!c.pay) { bump(app, 'noCard'); return; }
+      if (c.pay.pending) { bump(app, 'pending'); return; }
+      if (c.pay.guessed) { bump(app, 'guessed'); return; }
+      // In whole cents, so a band's edge is exact and not a float's.
+      var cardC = Math.round(c.pay.card * 100), dC = Math.round(c.pay.paid * 100) - cardC;
+      var d = dC / 100;
+      bump(app, 'compared');
+      bump(app, 'card', c.pay.card);
+      bump(app, 'paid', c.pay.paid);
+      bump(app, dC > EVEN_CENTS ? 'more' : dC < -EVEN_CENTS ? 'less' : 'even');
+      push(app, 'diffs', d);
+      var share = cardC > 0 ? dC / cardC : null;
+      if (share !== null) push(app, 'shares', share);
+      if (typeof e.tip === 'number') {
+        bump(app, 'tipped');
+        bump(app, 'tips', e.tip);
+        bump(app, 'tippedPaid', c.pay.paid);
+      } else bump(app, 'noTipLine');
+      var ad = Math.abs(dC);
+      if (ad > CHECK_ABS * 100 || (ad >= CHECK_MIN * 100 && ad > CHECK_SHARE * cardC)) {
+        bump(app, 'checks');
+        checks.push({ key: e.key, offer: m.offer || null, order: m.order || null, app: app,
+                      tookAt: mt, at: momentOf(e), date: e.date || null, startedAt: clockField(e),
+                      card: c.pay.card, paid: c.pay.paid, diff: d, share: share === null ? null : r4(share),
+                      tipStatus: e.tipStatus || tipStatus(e), source: m.source || null });
+      }
+      var wk = weekOfDay(driverDayOf(momentOf(e)));
+      var w = weeks[wk] || (weeks[wk] = { week: wk, n: 0, card: 0, paid: 0, diffs: [] });
+      w.n += 1;
+      w.card += c.pay.card;
+      w.paid += c.pay.paid;
+      w.diffs.push(d);
+    });
+
+    Object.keys(apps).forEach(function (a) { closeGroup(apps[a]); });
+    closeGroup(all);
+    var weekList = Object.keys(weeks).sort().map(function (k) {
+      var w = weeks[k], s = w.diffs.sort(function (a, b) { return a - b; });
+      return { week: k, n: w.n, card: r2(w.card), paid: r2(w.paid), diff: r2(w.paid - w.card),
+               median: r2(q7(s, 0.5)) };
+    });
+    checks.sort(function (a, b) { return Math.abs(b.diff) - Math.abs(a.diff) || (a.at || 0) - (b.at || 0); });
+    return { from: from, to: to, all: all, apps: apps, weeks: weekList, checks: checks,
+             thin: Object.keys(apps).some(function (a) { return apps[a].thin; }) };
+  }
+
   /* --- Uber's Acceptance rate screen (the owner, 15 Nov 2026) -------------
    *
    * Uber Pro's own figures, read off a screenshot of that screen for the
@@ -1563,7 +1782,9 @@
 
   return {
     acceptanceScreen: acceptanceScreen,
-    compareOf: compareOf, daySummary: daySummary, PAY_FLAG: PAY_FLAG, PAY_FLAG_SHARE: PAY_FLAG_SHARE,
+    compareOf: compareOf, daySummary: daySummary, rangeSummary: rangeSummary, driverDayOf: driverDayOf,
+    weekOfDay: weekOfDay, EVEN_CENTS: EVEN_CENTS, CHECK_SHARE: CHECK_SHARE, CHECK_MIN: CHECK_MIN, CHECK_ABS: CHECK_ABS,
+    SPREAD_MIN: SPREAD_MIN, COVER_THIN: COVER_THIN, THIN_N: THIN_N, PAY_FLAG: PAY_FLAG, PAY_FLAG_SHARE: PAY_FLAG_SHARE,
     ON_TIME_MIN: ON_TIME_MIN, ON_TIME_SHARE: ON_TIME_SHARE, MILES_SAME: MILES_SAME,
     MILES_SAME_SHARE: MILES_SAME_SHARE, BIGGEST_GAPS: BIGGEST_GAPS,
     uberTimingFor: uberTimingFor,

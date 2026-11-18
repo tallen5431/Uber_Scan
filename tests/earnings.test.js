@@ -626,6 +626,101 @@ eq('[match] names are alike past OCR slips and abbreviations, and two restaurant
     E.similar('Sample Street Northwest', 'Sample St NW') === 1,
     E.similar('Pretend Pizza', 'Nowhere Noodles') < E.NAME_OTHER], [true, true, true]);
 
+/* --- paid against the card, across the range (rangeSummary) ---------------
+ * Two invented weeks, worked by hand. Uber orders r1..r15 (r13's Took taken
+ * back on the panel), two DoorDash orders whose screen nothing reads, and a
+ * trip each way the range can be short of an answer: no entry, a tip
+ * processing, a cancel, an amount guessed, no card pay, one needing the
+ * driver, one with no order, one matched to a card never Took'd. */
+function nov(d, h, m) { return new Date(2026, 10, d, h, m || 0).getTime(); }
+function rRec(offer, at, app, how) {
+  return { kind: 'order', offer: offer, id: 'ord-' + offer, app: app || 'uber', how: how || 'drop', times: { took: at } };
+}
+function rEnt(key, at, card, paid, x) {
+  var d = new Date(at);
+  var e = { key: key, app: 'uber', date: E.driverDayOf(at), startedAt: (d.getHours() < 10 ? '0' : '') + d.getHours()
+            + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes(), amount: paid, tip: null, status: 'completed',
+            match: { status: 'matched', offer: 'o' + key.slice(1), tookAt: at, cardPay: card, source: 'record' } };
+  Object.keys(x || {}).forEach(function (k) {
+    if (k === 'match') Object.keys(x.match).forEach(function (j) { e.match[j] = x.match[j]; });
+    else e[k] = x[k];
+  });
+  return e;
+}
+var RR = [rRec('o1', nov(10, 18)), rRec('o2', nov(10, 19)), rRec('o3', nov(11, 18)), rRec('o4', nov(11, 19)),
+          rRec('o5', nov(12, 18)), rRec('o6', nov(12, 19)), rRec('o7', nov(16, 3, 30)), rRec('o8', nov(16, 4)),
+          rRec('o9', nov(17, 18)), rRec('o10', nov(17, 19)), rRec('o11', nov(17, 20)), rRec('o12', nov(18, 18)),
+          rRec('o13', nov(18, 19), 'uber', 'untick'), rRec('o14', nov(18, 21)), rRec('o15', nov(18, 22)),
+          rRec('d1', nov(12, 17), 'doordash'), rRec('d2', nov(12, 20), 'doordash')];
+var RE = [rEnt('e1', nov(10, 18), 7, 7, { tip: 2, tipStatus: 'settled' }),
+          rEnt('e2', nov(10, 19), 8, 8.01),
+          rEnt('e3', nov(11, 18), 9, 9.02, { tip: 3, tipStatus: 'settled' }),
+          rEnt('e4', nov(11, 19), 10, 9.98),
+          rEnt('e5', nov(12, 18), 6, 9),
+          rEnt('e6', nov(12, 19), 6, 9.01),
+          rEnt('e7', nov(16, 3, 30), 20, 30),
+          rEnt('e8', nov(16, 4), 30, 40.01),
+          rEnt('e9', nov(17, 18), 4, 6.5),
+          rEnt('e10', nov(17, 19), 12, 10, { tip: 'processing', tipStatus: 'pending' }),
+          rEnt('e11', nov(17, 20), 9, 0, { status: 'canceled' }),
+          rEnt('e13', nov(18, 19), 5.5, 5.5),
+          rEnt('e14', nov(18, 20), 5, 5, { match: { tookAt: null, offeredAt: nov(18, 20), source: 'offer' } }),
+          rEnt('e15', nov(18, 20, 30), null, 7, { match: { status: 'needs', offer: undefined, tookAt: undefined } }),
+          rEnt('e16', nov(18, 20, 40), null, 6, { match: { status: 'none', offer: undefined, tookAt: undefined } }),
+          rEnt('e17', nov(18, 21), 22.1, 22.1, { amountGuessed: true, match: { offer: 'o14' } }),
+          rEnt('e18', nov(18, 22), null, 8, { match: { offer: 'o15' } })];
+var RS = E.rangeSummary(RE, RR, {});
+var RU = RS.apps.uber;
+eq('[range] coverage: 14 Uber orders taken (the Took taken back is not one), 13 with a trip matched',
+   [RU.taken, RU.takenMatched], [14, 13]);
+eq('[range] ...17 entries: 15 matched, 1 needs the driver, 1 with no order; 2 matched with no Took that stands '
+   + '(a card never Took\'d, and the order whose Took was taken back), never counted as taken',
+   [RU.entries, RU.matched, RU.needs, RU.none, RU.noTook], [17, 15, 1, 1, 2]);
+eq('[range] ...matched but not compared: canceled, tip processing, amount guessed, no card pay; 11 compared',
+   [RU.canceled, RU.pending, RU.guessed, RU.noCard, RU.compared], [1, 1, 1, 1, 11]);
+eq('[range] the totals: cards $110.50, paid $139.03', [RU.card, RU.paid, RU.diff], [110.5, 139.03, 28.53]);
+eq('[range] paid less card: median, P10 and P90 (type 7 over 11), in dollars and as a share of the card',
+   [RU.median, RU.p10, RU.p90, RU.medianShare, RU.p10Share, RU.p90Share], [0.02, 0, 10, 0.0022, 0, 0.5017]);
+eq('[range] the tolerance: +1¢ is as carded, +2¢ more, -2¢ less (6 more, 4 as carded, 1 less)',
+   [RU.more, RU.even, RU.less], [6, 4, 1]);
+eq('[range] tips over the trips whose screen printed one: $5.00 of $16.02, the other 9 said',
+   [RU.tipped, RU.tips, RU.tippedPaid, RU.tipShare, RU.noTipLine], [2, 5, 16.02, 0.3121, 9]);
+eq('[range] check this match: +$3.01 on a $6 card (past half) and +$10.01 (past $10), widest first; '
+   + 'exactly half, exactly $10, and $2.50 on a $4 card (past half, under $3) are not',
+   RS.checks.map(function (c) { return [c.offer, c.diff, c.share]; }), [['o8', 10.01, 0.3337], ['o6', 3.01, 0.5017]]);
+eq('[range] ...a check carries no place or text: keys, ids and figures',
+   Object.keys(RS.checks[0]).sort(), ['app', 'at', 'card', 'date', 'diff', 'key', 'offer', 'order', 'paid', 'share',
+                                      'source', 'startedAt', 'tipStatus', 'tookAt']);
+eq('[range] by week on the driver\'s day: Monday 3:30am is Sunday\'s, so the week before; Monday 4am opens the next',
+   RS.weeks, [{ week: '2026-11-09', n: 7, card: 66, paid: 82.02, diff: 16.02, median: 0.02 },
+              { week: '2026-11-16', n: 4, card: 44.5, paid: 57.01, diff: 12.51, median: 1.25 }]);
+eq('[range] the app split: DoorDash\'s 2 orders taken, none matched, said thin; Uber\'s not; all of them in the whole',
+   [RS.apps.doordash.taken, RS.apps.doordash.takenMatched, RS.apps.doordash.thin, RS.apps.doordash.thinWhy.length,
+    RU.thin, RS.all.taken, RS.all.compared, RS.thin], [2, 0, true, 2, false, 16, 11, true]);
+var RW = E.rangeSummary(RE, RR, { from: nov(16, 4) });
+eq('[range] a range from Monday 4am: Monday 3:30am\'s order and trip are out; 4 compared, said thin',
+   [RW.apps.uber.taken, RW.apps.uber.takenMatched, RW.apps.uber.compared, RW.apps.uber.thin,
+    RW.apps.uber.thinWhy, RW.weeks.length, RW.apps.doordash], [7, 6, 4, true, ['4 trips to compare, under 5'], 1, undefined]);
+eq('[range] ...under 10 trips there is no P10 or P90, only the median',
+   [RW.apps.uber.p10, RW.apps.uber.p90, RW.apps.uber.median], [null, null, 1.25]);
+eq('[range] a run rebuilt from took rows (before the order records) is an order taken and matched',
+   (function () {
+     var g = E.rangeSummary([rEnt('e1', nov(3, 18), 8, 8, { match: { source: 'rebuilt' } })], [], {}).apps.uber;
+     return [g.taken, g.takenMatched, g.noTook, g.even];
+   }()), [1, 1, 0, 1]);
+eq('[range] -1¢ is as carded too, and a cent past the band either way is not',
+   (function () {
+     var g = E.rangeSummary([rEnt('e1', nov(3, 18), 5, 4.99), rEnt('e2', nov(3, 19), 5, 4.98),
+                             rEnt('e3', nov(3, 20), 5, 5.01), rEnt('e4', nov(3, 21), 5, 5.02)], [], {}).all;
+     return [g.less, g.even, g.more];
+   }()), [1, 2, 1]);
+eq('[range] the driver\'s day across the clocks going back (1 Nov 2026): Monday 2 Nov 3:59am is Sunday\'s, '
+   + 'in the week of 26 Oct; 4:00am is Monday\'s',
+   [E.driverDayOf(nov(2, 3, 59)), E.weekOfDay(E.driverDayOf(nov(2, 3, 59))), E.weekOfDay(E.driverDayOf(nov(2, 4)))],
+   ['2026-11-01', '2026-10-26', '2026-11-02']);
+eq('[range] nothing matched is all zeros and no week', [E.rangeSummary([], RR, {}).all.matched,
+   E.rangeSummary([], RR, {}).weeks.length, E.rangeSummary([], RR, {}).apps.uber.takenMatched], [0, 0, 0]);
+
 /* --- Uber's Acceptance rate screen (the owner, 15 Nov 2026) --------------
  * The text tesseract gives of an invented copy (rpi/testearnings.py
  * acceptance_screen), and the faults it is checked against. */
