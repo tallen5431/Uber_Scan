@@ -3905,6 +3905,74 @@ function GOLD_PART(s) {
     + fold('s-gold-points', 'Every line, with its share of requests', strategyTable(cols, g.line.points, function (p) { return p.thin; }));
 }
 
+/* The good offers passed on (strategy.js section 7; the reporting work's
+ * third round): placed straight under the curve because it is the curve's
+ * own question asked of what was done — the curve says what holding out for
+ * a line would have paid, this says which good cards were taken and what
+ * came after the ones let go. A stacked bar per three-hour block (taken, the
+ * phone's own accept, let go, busy: counts, so the bar is as long as the
+ * block's good offers), the waits under it, then the table and the four
+ * rulers folded. Words in the past tense; no test between blocks, and no
+ * block is marked: these are counts, and the blocks are rows of a table. */
+function PASSED_PART(s) {
+  var p = s.passed;
+  if (!p || p.cut === null || !p.all.good) return '';
+  var max = 0;
+  p.byBlock.forEach(function (g) { max = Math.max(max, g.good); });
+  function pctOf(v) { return (max ? v / max * 100 : 0).toFixed(1) + '%'; }
+  function wait(w) {
+    return !w.n ? 'no wait measured' : w.p50 === null ? 'next good after: n=' + w.n + ', too few for a median'
+      : 'next good after a median ' + w.p50 + ' min (P75 ' + w.p75 + '; n=' + w.n + ')';
+  }
+  var rows = p.byBlock.map(function (g) {
+    var seg = [['taken', g.taken], ['phone', g.phone], ['passed', g.passed], ['busy', g.busy]];
+    return '<div class="prow"><div class="pname">' + esc(g.name) + '</div><div class="pbar">'
+      + seg.map(function (x) {
+        return x[1] ? '<i class="p' + x[0] + '" style="width:' + pctOf(x[1]) + '" title="' + esc(x[0]) + ' ' + x[1] + '"></i>' : '';
+      }).join('') + '</div><div class="pfig">' + g.good + ' good · took ' + g.taken
+      + (g.shareTaken !== null ? ' (' + Math.round(g.shareTaken * 100) + '%)' : '') + ' · let go ' + g.passed
+      + (g.declined ? ' (' + g.declined + ' marked)' : '') + (g.phone ? ' · phone ' + g.phone : '') + ' · busy ' + g.busy
+      + ' · ' + esc(wait(g.wait)) + '</div></div>';
+  }).join('');
+  var w = p.waits, wc = w.counts;
+  function waitSay(x) {
+    return x.p50 === null ? '(too few waits to give a median: n=' + x.n + ')'
+      : 'after <b>a median ' + x.p50 + ' min</b> (P75 ' + x.p75 + ' min; n=' + x.n + ')';
+  }
+  function waitCell(x) { return x.p50 === null ? (x.n ? 'n=' + x.n + ' (too few)' : '—') : x.p50 + ' / ' + x.p75 + ' min (n=' + x.n + ')'; }
+  var blockCols = [['name', ''], ['good', 'good seen'], ['taken', 'taken'],
+                   [function (g) { return g.shareTaken === null ? null : Math.round(g.shareTaken * 100) + '%'; }, 'of taken + let go'],
+                   ['passed', 'let go'], ['declined', '…marked passed'], ['unanswered', '…no answer'],
+                   ['phone', 'on the phone, no Took'], ['busy', 'order already in the car'],
+                   [function (g) { return waitCell(g.wait); }, 'to the next good: median / P75']];
+  var topCols = [[function (t) { return 'top ' + t.top + '%' + (t.top === p.top ? ' (shown)' : ''); }, 'good ='],
+                 ['cut', 'from ($/hr)', '$'], ['good', 'good seen'], ['taken', 'taken'],
+                 [function (t) { return t.shareTaken === null ? null : Math.round(t.shareTaken * 100) + '%'; }, 'of taken + let go'],
+                 ['passed', 'let go'], ['phone', 'phone'], ['busy', 'busy'],
+                 [function (t) { return waitCell(t.waitGood); }, 'to the next good'],
+                 [function (t) { return waitCell(t.waitTake); }, 'to the next take']];
+  return '<h3 id="s-passed">The good offers you passed on</h3>'
+    + '<p class="note">Good is the top ' + p.top + '% of this record\'s own panel $/hr: <b>$' + p.cut.toFixed(2)
+    + '/hr or more</b> (' + p.over + ' of ' + p.n + ' offers), one dollar line held fixed across days and blocks — the '
+    + 'offers page\'s Trends ruler, worked out by the same function. <b>Taken</b> is a Took or your ✓ on the card; a card '
+    + 'nobody answered for is not taken (silence is never an accept). <b>Busy</b>: it came inside an order\'s hold, Took to '
+    + 'its end, or was an Uber add-on — no free driver was choosing it, and an order you never Took leaves its cards '
+    + 'reading free. <b>On the phone</b>: Uber\'s earnings screen matched it with no Took, so it is neither taken nor let '
+    + 'go here. <b>The wait</b> is minutes online from a card let go to the next good card that was not busy, and to your '
+    + 'next take. Minutes with the rig off are not counted (' + wc.acrossOff + ' of ' + wc.origins + ' waits ran across '
+    + 'such a stretch)' + (wc.openGood ? '; ' + wc.openGood + ' with no good card after it in the record ' + (wc.openGood === 1
+      ? 'is' : 'are') + ' in no median' : '') + (wc.lone ? '; ' + wc.lone + ' let go alone, outside any run, start no wait' : '')
+    + '. A median needs ' + s.floors.dist + ' waits. History, not advice: no verdict, target or '
+    + 'panel line reads it, and the blocks are rows, not a line tuned to the hour.</p>'
+    + '<div class="plegend"><span><i class="ptaken"></i>taken</span><span><i class="pphone"></i>on the phone, no Took</span>'
+    + '<span><i class="ppassed"></i>let go</span><span><i class="pbusy"></i>order already in the car</span></div>'
+    + '<div class="pblocks">' + rows + '</div>'
+    + '<p class="note">After one let go, over every block: the next good one came ' + waitSay(w.good)
+    + '; your next take came ' + waitSay(w.take) + '.</p>'
+    + fold('s-passed-blocks', 'By three-hour block, in full', strategyTable(blockCols, [p.all].concat(p.byBlock)))
+    + fold('s-passed-tops', 'At the other rulers (top 10, 20, 30 and 50%)', strategyTable(topCols, p.tops || []));
+}
+
 function STRATEGY_SECTION(r) {
   var s = r.strategy, cv = s.curve, f = s.floors, c = s.counts;
   function ul(xs) { return '<ul class="lines">' + xs.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>'; }
@@ -3969,6 +4037,7 @@ function STRATEGY_SECTION(r) {
     + '<div class="plot wide">' + strategyChart(cv) + '</div>'
     + '<div class="plot small">' + strategyChart(cv, 'small') + '</div>'
     + fold('s-points', 'Every point of the curve', strategyTable(pointCols, cv.points, isThin))
+    + PASSED_PART(s)
     + GOLD_PART(s)
     + '<h3 id="s-slices">The same, by time of day, app and weekday</h3>'
     + '<p class="note">Point estimates, each slice\'s own free hours, offers and (with ' + f.ratio + ' or more) its own timed '
@@ -4405,6 +4474,13 @@ var PAGE_CSS = [
   '.tw th:first-child,.tw td:first-child{position:sticky;left:0;z-index:1;background:var(--bg)}',
   // A row under its floor: muted, so it never reads as loud as one over it.
   'tr.thinrow td{color:var(--muted);font-style:italic}',
+  '.pblocks{margin:8px 0}.prow{margin:0 0 10px}.pname{font-size:13px;font-weight:600}',
+  '.pbar{display:flex;height:14px;margin:2px 0;border-radius:3px;overflow:hidden;background:var(--grid)}',
+  '.pbar i,.plegend i{display:block;height:100%}.ptaken{background:var(--up)}.pphone{background:var(--up);opacity:.45}',
+  '.ppassed{background:var(--grey)}.pbusy{background:repeating-linear-gradient(45deg,var(--axis) 0 3px,transparent 3px 6px)}',
+  '.pfig{font-size:12px;color:var(--ink2);font-variant-numeric:tabular-nums}',
+  '.plegend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--ink2)}',
+  '.plegend i{display:inline-block;width:12px;height:12px;margin-right:4px;vertical-align:-2px;border-radius:2px}',
   // Charts: the wide curve on a laptop, the small one on a phone; a fluid
   // plot scales to its box instead of scrolling inside it.
   '.plot.small{display:none}@media (max-width:640px){.plot.wide{display:none}.plot.small{display:block}}',

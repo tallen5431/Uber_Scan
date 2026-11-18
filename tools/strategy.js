@@ -44,6 +44,15 @@
  *      section 3's curve for Uber's cards with the share of requests each
  *      line would have kept: the best line, the best that keeps the goal
  *      (25%, the owner's Gold), and the $/hr between them.
+ *   7. THE GOOD OFFERS PASSED ON (passedOf): section 3 read the other way
+ *      round, on what the driver actually did rather than a line replayed.
+ *      Of the good offers seen (the Trends ruler: the top 20% of the range's
+ *      own panel $/hr, one dollar cutoff, the other shares beside it), how
+ *      many were taken, came while an order was already in the car, or were
+ *      let go with none, by block; and after one let go, the minutes ONLINE
+ *      to the next good offer and to the next take. History in the past
+ *      tense: "when you let one go, the next good one came after a median N
+ *      min", never which card to take or decline.
  *
  * DESCRIPTIVE, AND NOTHING ELSE. Nothing on the rig requires this file: no
  * verdict, state, target, band or panel line reads it. AUDITS.md's Settled
@@ -85,6 +94,10 @@ var E = require('../earnings.js');
 // Which screen a card's text is (Trip Radar's list, for the acceptance
 // rate): the reader's own screen typing, not a copy of it.
 var OP = require('../offer-parser.js');
+// "Good" for section 7: the offers page's Trends ruler (the top share of the
+// range's own $/hr as one dollar figure), the function itself and its
+// choices, not a second copy of either.
+var T = require('../trends.js');
 
 /* --- the numbers it works to ---------------------------------------------- */
 
@@ -772,6 +785,155 @@ function acceptedIds(list, orders, earnings) {
   return by;
 }
 
+/* --- 7. the good offers passed on ---------------------------------------------
+ *
+ * The owner is selective, and section 3 says what holding out for a line
+ * WOULD have paid. This says what holding out DID: of the good offers that
+ * came, which were taken, and what came after the ones let go. Over the same
+ * offers as section 3 (each id once, trusted, rated) and the same shift.
+ *
+ *   GOOD. The Trends ruler (trends.js `ruler`, the function the offers page
+ *   holds its tab to): the top `top`% of every offer's panel $/hr in the
+ *   window, worked out once as one dollar figure and held fixed across days,
+ *   blocks and weeks. 20% leads; 10, 30 and 50 are given beside it. A
+ *   reading ruler: not the target, and nothing reads it back.
+ *
+ *   TAKEN is a take on the record and nothing else: a Took (an order handed
+ *   in with its tookAt) or the folded row's own `accepted: true` (a ✓ or a
+ *   Took mark) — acceptedIds' 'took'. Silence is never an accept (AUDITS.md,
+ *   Settled), so a card nobody answered for is not taken; it is let go.
+ *   A card Uber's earnings screen matched with no Took ('phone') is neither:
+ *   counted apart, and not called passed, because the app says it was taken.
+ *
+ *   BUSY is how this file already marks a card no free driver was choosing
+ *   among (section 3's `held`): seen inside an order's hold, Took to its end
+ *   however it ended (holdOf), or an Uber add-on, which only comes with a
+ *   trip in the car. A take is checked first: a card taken while carrying is
+ *   a stack the driver made, and calling it "already out" would be the one
+ *   thing surely wrong (advice.js busy's `stacked`). The hold is only as good
+ *   as the Tooks: an untagged order leaves its cards reading free, which is a
+ *   reason to tag them, said on the page, and not a reason to guess.
+ *
+ *   PASSED is the rest: good, free, not taken. Split into the ones the driver
+ *   marked passed (`accepted: false`, the offers page's Passed) and the ones
+ *   with no answer at all.
+ *
+ *   THE WAIT. From a card let go, the minutes ONLINE until the next good card
+ *   that was not busy (one a free driver could have had), and until the next
+ *   take of any $/hr. Online is section 3's own runs (every card and every
+ *   hold, joined across silences under BREAK_MIN): a stretch with the rig off
+ *   between two runs is not waiting and adds nothing, while a run across 4am
+ *   is one sitting and its minutes count straight through. A wait that ran
+ *   across an off stretch is counted (its online minutes) and said; one with
+ *   no good card or take after it anywhere in the window is "still open" and
+ *   in no median; a card let go outside any run (a lone card) starts none.
+ *   Median and P75 only from DIST_MIN_N waits (section 1's floor under every
+ *   quartile here), the n always.
+ *
+ * Descriptive: the counts and waits describe the record. No line, verdict,
+ * target or panel reads them, and they are not tuned to an hour or a weekday
+ * — the blocks are rows of a table, as section 1's are. */
+var PASSED_TOP = T.TOP_DEFAULT;
+
+// The minutes online in [a, b] over sorted, disjoint runs, by prefix sums:
+// a binary search for each end, so thousands of waits over hundreds of runs
+// stay cheap.
+function onlineClock(runs) {
+  var cum = [0];
+  runs.forEach(function (r, i) { cum.push(cum[i] + (r[1] - r[0])); });
+  function upTo(t) {
+    var lo = 0, hi = runs.length - 1, j = -1;
+    while (lo <= hi) { var m = (lo + hi) >> 1; if (runs[m][0] <= t) { j = m; lo = m + 1; } else hi = m - 1; }
+    if (j < 0) return { ms: 0, run: -1 };
+    return { ms: cum[j] + Math.min(Math.max(t - runs[j][0], 0), runs[j][1] - runs[j][0]), run: j };
+  }
+  return function (a, b) {
+    var x = upTo(a), y = upTo(b);
+    return { min: (y.ms - x.ms) / 60000, acrossOff: y.run !== x.run || b > runs[y.run][1] };
+  };
+}
+
+// The first time in sorted `ts` strictly after t, or null.
+function nextAfter(ts, t) {
+  var lo = 0, hi = ts.length;
+  while (lo < hi) { var m = (lo + hi) >> 1; if (ts[m] <= t) lo = m + 1; else hi = m; }
+  return lo < ts.length ? ts[lo] : null;
+}
+
+function waitSum(list) {
+  var s = sorted(list), ok = s.length >= DIST_MIN_N;
+  return { n: s.length, p50: ok ? Math.round(quantile(s, 0.5)) : null, p75: ok ? Math.round(quantile(s, 0.75)) : null };
+}
+
+/* `offers` section 3's rated offers; `byId` the folded row of each id; `how`
+ * acceptedIds; `seenAll` every card seen ({id, seen}); `runs` the shift's
+ * runs; `heldU` the merged holds; `top` the ruler's share. */
+function passedOf(offers, byId, how, seenAll, runs, heldU, top) {
+  var rul = T.ruler(offers.map(function (o) { return { ok: true, perHour: o.ph }; }), top);
+  var cut = rul.cut;
+  function blank(name) {
+    return { name: name, good: 0, taken: 0, phone: 0, busy: 0, passed: 0, declined: 0, unanswered: 0, free: 0,
+             shareTaken: null };
+  }
+  var all = blank('every block'), byBlock = A.BLOCK_NAMES.map(blank);
+  var runSpans = runs.map(function (r) { return [r[0], r[1] + 1]; });
+  var good = cut === null ? [] : offers.filter(function (o) { return o.ph >= cut; })
+    .sort(function (a, b) { return a.at - b.at; });
+  // Each good card's class, in the order above: a take first, then the
+  // phone's own accept, then busy, then let go.
+  var kinds = good.map(function (o) {
+    var h = typeof o.id === 'string' ? how[o.id] : undefined;
+    var kind = h === 'took' ? 'taken' : h === 'phone' ? 'phone'
+      : o.addon || within(heldU, o.at) ? 'busy' : 'passed';
+    var row = typeof o.id === 'string' ? byId[o.id] : null;
+    var said = kind === 'passed' ? (row && row.accepted === false ? 'declined' : 'unanswered') : null;
+    [all, byBlock[o.block]].forEach(function (g) {
+      g.good += 1; g[kind] += 1;
+      if (said) g[said] += 1;
+    });
+    return kind;
+  });
+  // Taken of the good ones that came with no order in the car (the phone's
+  // own accepts beside them, in the count and not in the share).
+  all.free = all.taken + all.passed + all.phone;
+  byBlock.forEach(function (g) { g.free = g.taken + g.passed + g.phone; });
+  [all].concat(byBlock).forEach(function (g) {
+    g.shareTaken = g.taken + g.passed ? r2(g.taken / (g.taken + g.passed)) : null;
+  });
+
+  // The waits.
+  var clock = onlineClock(runs);
+  var goodFree = good.filter(function (o, i) { return kinds[i] !== 'busy'; }).map(function (o) { return o.at; });
+  var takes = seenAll.filter(function (x) { return typeof x.id === 'string' && how[x.id] === 'took'; })
+    .map(function (x) { return x.seen; }).sort(function (a, b) { return a - b; });
+  var toGood = [], toTake = [], blockGood = A.BLOCK_NAMES.map(function () { return []; });
+  var w = { origins: 0, lone: 0, openGood: 0, openTake: 0, acrossOff: 0 };
+  good.forEach(function (o, i) {
+    if (kinds[i] !== 'passed') return;
+    if (!within(runSpans, o.at)) { w.lone += 1; return; }
+    w.origins += 1;
+    var ng = nextAfter(goodFree, o.at);
+    if (ng === null) w.openGood += 1;
+    else {
+      var c = clock(o.at, ng);
+      toGood.push(c.min); blockGood[o.block].push(c.min);
+      if (c.acrossOff) w.acrossOff += 1;
+    }
+    var nt = nextAfter(takes, o.at);
+    if (nt === null) w.openTake += 1;
+    else toTake.push(clock(o.at, nt).min);
+  });
+  // Each wait itself too, to the tenth of a minute, oldest card first: what
+  // the medians are of, for a reader (or a check) that wants them.
+  function tenths(xs) { return xs.map(function (v) { return Math.round(v * 10) / 10; }); }
+  var waits = { good: waitSum(toGood), take: waitSum(toTake), counts: w,
+                minutes: { good: tenths(toGood), take: tenths(toTake) } };
+  byBlock.forEach(function (g, b) { g.wait = waitSum(blockGood[b]); });
+  all.wait = waits.good;
+  return { top: rul.top, cut: cut, n: rul.n, over: rul.over, all: all,
+           byBlock: byBlock.filter(function (g) { return g.good; }), waits: waits };
+}
+
 /* The fewest accepts in the next K requests that put a rolling window of
  * `n` requests with `a` accepted at `goal`. `seq` (oldest first, true for an
  * accept) is the window's own order where it is known; else the old accepts
@@ -1160,6 +1322,25 @@ function analyse(input) {
   });
   var held = light ? null : heldOut(perAll, perBlock, days, GRID, opts);
 
+  // 7. The good offers passed on, at the Trends ruler's shares (20% leads,
+  // or the caller's `top` where it is one of them). Not in `light`: the
+  // offers page's /api/gold, asked on every load, draws none of it.
+  var passed = null;
+  if (!light) {
+    var how = acceptedIds(dd.list, inp.orders, inp.earnings);
+    var seenAll = dd.list.filter(function (x) { return x.seen !== null; })
+      .map(function (x) { return { id: x.row ? x.row.id : null, seen: x.seen }; });
+    var top = T.TOPS.indexOf(Number(inp.top)) >= 0 ? Number(inp.top) : PASSED_TOP;
+    passed = passedOf(offers, byId, how, seenAll, runs, heldU, top);
+    passed.tops = T.TOPS.map(function (t) {
+      var p = t === top ? passed : passedOf(offers, byId, how, seenAll, runs, heldU, t);
+      var g = p.all;
+      return { top: t, cut: p.cut, good: g.good, taken: g.taken, phone: g.phone, busy: g.busy, passed: g.passed,
+               declined: g.declined, unanswered: g.unanswered, shareTaken: g.shareTaken, waitGood: p.waits.good,
+               waitTake: p.waits.take };
+    });
+  }
+
   // 5. card against paid, where the caller handed the app's own figures
   // (the places report does; the end-of-shift report, whose text names no
   // place, does not).
@@ -1172,6 +1353,7 @@ function analyse(input) {
     counts: counts, seen: seen, actual: actual, curve: curve, curveMile: curveMile, slices: slices, heldOut: held
   };
   if (paid) res.paid = paid;
+  if (passed) res.passed = passed;
   // 6. Uber's acceptance rate and the line that keeps the goal, over Uber's
   // own curve above.
   res.gold = goldOf(dd.list, inp, slices.app.filter(function (x) { return x.name === 'Uber'; })[0] || null, shiftH);
@@ -1367,6 +1549,37 @@ function uberSaid(n) {
     + 'timed ' + (n === 1 ? 'it' : 'them') + ' (Uber\'s minutes run a little shorter than the rig\'s).' : '';
 }
 
+/* Section 7 in words: what happened, in the past tense, each figure with its
+ * n. Nothing in it says which card to take or let go. */
+function waitWords(wt, what) {
+  if (!wt.n) return null;
+  if (wt.p50 === null) return what + ': too few to give a median (n=' + wt.n + ')';
+  return what + ' after a median ' + wt.p50 + ' min online (P75 ' + wt.p75 + ' min; n=' + wt.n + ')';
+}
+function passedLines(p) {
+  var g = p.all;
+  if (p.cut === null || !g.good) return [];
+  var s = 'The good offers you passed on (the top ' + p.top + '% of this record\'s offers, ' + d2(p.cut)
+    + '/hr or more on the panel): ' + g.good + ' seen; ' + g.busy + ' came with an order already in the car';
+  var settled = g.taken + g.passed;
+  s += '; of the ' + g.free + ' with none, you took ' + g.taken
+    + (settled ? ' (' + pct(g.taken / settled) + ' of those taken or let go)' : '') + ' and let ' + g.passed + ' go ('
+    + g.declined + ' marked passed, ' + g.unanswered + ' with no answer, which is not a take)'
+    + (g.phone ? '; ' + plural(g.phone, 'more was', 'more were') + ' accepted on the phone with no Took, by the '
+      + 'earnings screen, and is counted as neither' : '') + '.';
+  var bits = [waitWords(p.waits.good, 'the next good one came'), waitWords(p.waits.take, 'your next take came')]
+    .filter(Boolean);
+  var out = [s];
+  if (bits.length) {
+    var w = p.waits.counts;
+    out.push('When you let one go with nothing in the car, ' + bits.join(', and ') + '. Minutes the rig was off are '
+             + 'not counted' + (w.acrossOff ? ' (' + plural(w.acrossOff, 'wait') + ' ran across a stretch it was off)' : '')
+             + (w.openGood ? '; ' + w.openGood + ' had no good one after it in this record' : '')
+             + '. History, not advice: nothing on the rig reads it.');
+  }
+  return out;
+}
+
 function lines(r) {
   var out = [], c = r.counts, s = r.seen.all, a = r.actual.all, cv = r.curve;
   if (!c.offers) {
@@ -1445,6 +1658,7 @@ function lines(r) {
              + d2(h.everything) + '/hr. ' + (h.perBlock > h.flat ? 'Here a line per block did better out of sample.'
                : 'A line per block did not beat one line out of sample, as AUDITS.md\'s Settled entry found.'));
   }
+  if (r.passed) passedLines(r.passed).forEach(function (l) { out.push(l); });
   // How far to trust it. The ±$2 is arithmetic, not a measurement here: the
   // owner's one measured week swung $13.92 to $27.06 night to night
   // (AUDITS.md), a spread of about $5 a night, and 1.96 x 5 / sqrt(n) is
@@ -1490,6 +1704,7 @@ module.exports = {
   GRID: GRID, MILE_GRID: MILE_GRID, BREAK_MIN: BREAK_MIN, DIST_MIN_N: DIST_MIN_N, CURVE_MIN_OFFERS: CURVE_MIN_OFFERS,
   RATIO_MIN_N: RATIO_MIN_N, CURVE_MIN_OUTINGS: CURVE_MIN_OUTINGS, BOOT_MIN_OUTINGS: BOOT_MIN_OUTINGS, BOOTS: BOOTS,
   cardVsPaid: cardVsPaid, paidLines: paidLines, PAID_MIN_N: PAID_MIN_N,
+  passedOf: passedOf, passedLines: passedLines, onlineClock: onlineClock, PASSED_TOP: PASSED_TOP,
   goldLines: goldLines, pathAhead: pathAhead, requestKind: requestKind, uberFigures: uberFigures, goalOf: goalOf,
   GOLD_GOAL: GOLD_GOAL, GOLD_WINDOW: GOLD_WINDOW, GOLD_LAST: GOLD_LAST, GOLD_AHEAD: GOLD_AHEAD,
   PLATEAU: PLATEAU, HOLD_MAX_MIN: HOLD_MAX_MIN, TOO_SOON: TOO_SOON, BANDS: BANDS, RATE_BANDS: RATE_BANDS

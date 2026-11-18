@@ -17,7 +17,10 @@
    good offers by app, off against quiet, the timeline across Monday 4am and
    the 1 Nov clock change, B against A (no difference left unshaded across
    224 cells; a real one shaded; both sides under the floor left grey), month
-   thirds gated on three months, and one weekday over the weeks. */
+   thirds gated on three months, and one weekday over the weeks.
+   The week in review adds: a week's span and its steps across the 1 Nov
+   change, a week by hand, slots marked by a tile's rule and "none clear",
+   and week against week only where both meet the floor. */
 
 'use strict';
 
@@ -678,6 +681,97 @@ function offer(x) {
   var hA = T.hourly(naRows, { stat: 'p50', period: pA }).filter(function (e) { return e.hour === 19; })[0];
   eq('the hour chart for one period: only its days', [hA.offers, hA.days], [24 * 14, 14]);
 
+  /* --- the week in review ----------------------------------------------------
+   * Weeks are Monday 4am to Monday 4am; every figure is the slice table's. */
+  function nov(d, h, m) { return new Date(2026, 10, d, h, m || 0).getTime(); }
+  function oct(d, h, m) { return new Date(2026, 9, d, h, m || 0).getTime(); }
+  eq('a driver week\'s span: 169 hours the week holding 1 Nov (1am twice), 167 the one holding 8 Mar, 168 otherwise',
+     ['2026-10-26', '2026-03-02', '2026-03-16'].map(function (k) {
+       var s = T.weekSpanMs(k);
+       return (s[1] - s[0]) / 3.6e6;
+     }), [169, 167, 168]);
+  eq('...from Monday 4am', new Date(T.weekSpanMs('2026-10-26')[0]).getHours(), 4);
+  // Runs: Saturday 31 Oct 11:30pm to 3:30am across the change (five hours),
+  // Monday 2 Nov 3am to 5am (its 3am hour the week before's), and 16 Nov;
+  // the week of 9 Nov off.
+  var wkRuns2 = [[oct(31, 23, 30), nov(1, 3, 30)], [nov(2, 3, 0), nov(2, 5, 0)], [nov(16, 18, 0), nov(16, 20, 0)]];
+  var wkRows2 = T.readRows(T.rowsOf([offer({ id: 'w1', at: oct(20, 19, 0) }), offer({ id: 'w2', at: nov(16, 19, 0) })]));
+  eq('stepping weeks across the 1 Nov change: every Monday from the first to the last, the week off included',
+     T.weekKeys(wkRows2, wkRuns2), ['2026-10-19', '2026-10-26', '2026-11-02', '2026-11-09', '2026-11-16']);
+  var wOct26 = T.weekReview(wkRows2, wkRuns2, '2026-10-26', { cut: 25 });
+  var wNov2 = T.weekReview(wkRows2, wkRuns2, '2026-11-02', { cut: 25 });
+  var wNov9 = T.weekReview(wkRows2, wkRuns2, '2026-11-09', { cut: 25 });
+  eq('...the five hours of 31 Oct and the 3am hour of Monday 2 Nov are the week of 26 Oct (six); its 4am hour the next',
+     [wOct26.now.hours, wNov2.now.hours, wNov2.prev.hours, wOct26.now.onlineDays], [6, 1, 6, 2]);
+  eq('...the week off says nothing happened, and the week after it has no week before to stand beside',
+     [wNov9.now.any, wNov9.now.hours, wNov9.now.offers, T.weekReview(wkRows2, wkRuns2, '2026-11-16', { cut: 25 }).prev],
+     [false, 0, 0, null]);
+
+  // Week A (Mon 16 Mar): Monday 6-8pm, 20 cards at $30 (good at a $25
+  // ruler), two of them ticked taken ($10, 6 mi each); Tuesday 6-9pm, ten
+  // cards at $20 and none good. Week B (Mon 23 Mar): Monday and Tuesday
+  // 6-8pm, one good card each among ten at $20; Wednesday 6-7:30pm online
+  // and quiet. Plus, in week B, one suspect, one re-read and one "pay unread".
+  var wa = [], wb = [];
+  for (var wi = 0; wi < 20; wi++) wa.push(offer({ id: 'am' + wi, at: at(16, 18, wi * 6), perHour: 30, pay: 10, miles: 6,
+                                                  accepted: wi < 2 ? true : undefined }));
+  for (var wj = 0; wj < 10; wj++) wa.push(offer({ id: 'at' + wj, at: at(17, 18, wj * 12), perHour: 20 }));
+  [23, 24].forEach(function (d) {
+    wb.push(offer({ id: 'bg' + d, at: at(d, 18, 5), perHour: 30 }));
+    for (var k = 0; k < 10; k++) wb.push(offer({ id: 'bn' + d + '-' + k, at: at(d, 18, 10 + k * 10), perHour: 20 }));
+  });
+  wb.push(offer({ id: 'bs', at: at(23, 19, 2), suspect: true }), offer({ id: 'bc', at: at(23, 19, 3), corrected: { to: 11 } }),
+          offer({ id: 'bu', at: at(23, 19, 4), payUnread: true, suspect: true }));
+  var wkR = T.readRows(T.rowsOf(wa.concat(wb)));
+  var wkRun = [[at(16, 18, 0), at(16, 20, 0)], [at(17, 18, 0), at(17, 21, 0)], [at(23, 18, 0), at(23, 20, 0)],
+               [at(24, 18, 0), at(24, 20, 0)], [at(25, 18, 0), at(25, 19, 30)]];
+  var wA = T.weekReview(wkR, wkRun, '2026-03-16', { cut: 25, costPerMile: 0.5 });
+  eq('a week by hand: 5 h online on 2 days, 30 offers, 20 good (4/h), 2 takes; $20 earned gross ($4.00/h), '
+     + '$14 net of $0.50/mi on 12 miles ($2.80/h)',
+     [wA.now.hours, wA.now.onlineDays, wA.now.offers, wA.now.good, wA.now.goodRate, wA.now.takes, wA.now.earned,
+      wA.now.gross, wA.now.earnedNet, wA.now.net, wA.now.enough], [5, 2, 30, 20, 4, 2, 20, 4, 14, 2.8, true]);
+  eq('...the range\'s own good per hour, the reference a slot is marked against: 22 good over 10.5 h', wA.ref, 2.1);
+  eq('...a slot is one driver day, marked as a calendar tile: Monday 6-9pm (20 good in 2 h) clear above, '
+     + 'Tuesday 6-9pm (none in 3 h: at most 5.30 / 3 = 1.77 an hour) clear below',
+     [wA.slots.met, wA.slots.best && [wA.slots.best.name, wA.slots.best.rate, wA.slots.best.shade],
+      wA.slots.worst && [wA.slots.worst.name, wA.slots.worst.rate, wA.slots.worst.shade]],
+     [2, ['Mon 6–9pm', 10, 'above'], ['Tue 6–9pm', 0, 'below']]);
+  var wB = T.weekReview(wkR, wkRun, '2026-03-23', { cut: 25 });
+  eq('..."none clear": one good in each 2 h slot (0.5/h) is not clear of 2.10/h at 99% (up to 3.71), and Wednesday\'s 1.5 h is '
+     + 'under the floor and no candidate',
+     [wB.slots.met, wB.slots.of, wB.slots.best, wB.slots.worst], [2, 3, null, null]);
+  eq('...the week\'s data quality: one suspect, one re-read, one pay unread (counted apart, as the strip)',
+     wB.now.quality, { suspect: 1, corrected: 1, unread: 1 });
+  eq('...no cost per mile, no net', [wB.net, wB.now.net, wB.now.earnedNet], [false, null, null]);
+
+  // Against the week before. Steady nights (no swing, phi 1): week one 12
+  // good a night, week two 2 — clearly below; the same weeks with 12 each —
+  // nothing marked; week two on one night only — under the floor, no
+  // comparison at all.
+  function steady(goodA, goodB, nightsB) {
+    var rr = [], ru = [];
+    [16, 17].forEach(function (d) {
+      ru.push([at(d, 18, 0), at(d, 20, 0)]);
+      for (var x = 0; x < goodA; x++) rr.push(offer({ id: 'sa' + d + '-' + x, at: at(d, 18, x * 5), perHour: 30 }));
+    });
+    [23, 24].slice(0, nightsB).forEach(function (d) {
+      ru.push([at(d, 18, 0), at(d, 20, 0)]);
+      for (var x = 0; x < goodB; x++) rr.push(offer({ id: 'sb' + d + '-' + x, at: at(d, 18, x * 5), perHour: 30 }));
+    });
+    return T.weekReview(T.readRows(T.rowsOf(rr)), ru, '2026-03-23', { cut: 25 });
+  }
+  var sLow = steady(12, 2, 2), sSame = steady(12, 12, 2), sOne = steady(12, 2, 1);
+  eq('week against week: 4 good in 4 h against 24 in 4 h is clearly lower (compare mode\'s exact test at 99%)',
+     [sLow.cmp.good, sLow.phi.good], [{ prev: 6, shade: 'below' }, 1]);
+  eq('...the same figure both weeks: printed beside it, nothing marked', sSame.cmp.good, { prev: 6, shade: null });
+  eq('...a week on one night only is under the week\'s floor (2 h on 2 days): no comparison drawn at all',
+     [sOne.now.enough, sOne.cmp.good, sOne.cmp.gross, sOne.prev.goodRate], [false, null, null, 6]);
+  eq('...and the earnings of two weeks with no take at all are not compared into a difference',
+     sLow.cmp.gross, { prev: 0, shade: null });
+  eq('...a range that starts mid-week says the week is only part of one',
+     [T.weekReview(wkR, wkRun, '2026-03-16', { cut: 25, first: '2026-03-17' }).now.partStart,
+      T.weekReview(wkR, wkRun, '2026-03-16', { cut: 25, first: '2026-03-16' }).now.partStart], [true, false]);
+
   /* --- a large journal is quick --- */
   var r5 = rng(3), big = [];
   for (var b = 0; b < 12500; b++) {
@@ -774,6 +868,12 @@ function offer(x) {
        + 'how it\'s changing, and the shape of offers folded away, CSVs last',
        order.every(function (x, i) { return x > 0 && (i === 0 || x > order[i - 1]); })
        && /<details class="trshape" id="trShape">/.test(page));
+    ok('the week in review heads "How it\'s changing", stepped by ‹ ›, its sums trends.js weekReview\'s, and the Money '
+       + 'tab\'s earnings handed over by event (never fetched again)',
+       page.indexOf('id="trChangeHead"') < page.indexOf('id="trWeek"') && page.indexOf('id="trWeek"') < page.indexOf('id="trBy"')
+       && /id="trWeekPrev"[\s\S]*id="trWeekNext"/.test(page) && /T\.weekReview\(rows, got\.runs, st\.week/.test(page)
+       && /E\.rangeSummary\(money\.entries/.test(page) && /CustomEvent\('money:held'/.test(page)
+       && /addEventListener\('money:ask', sayMoneyHeld\)/.test(page));
     ok('...the ruler offers 10, 20, 30 and 50, opens on 20, and says it is for reading only',
        /data-top="10"[\s\S]*data-top="20" aria-pressed="true"[\s\S]*data-top="30"[\s\S]*data-top="50"/.test(page)
        && /never\s+reaches the verdict/.test(page));

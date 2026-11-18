@@ -954,6 +954,29 @@
   .trends .tile.above { background: var(--go-dim); }
   .trends .tile.below { background: var(--no-dim); }
   .trends .tile.empty { border-color: transparent; cursor: default; }
+  /* The week in review: one card, a line a figure, each line a link to the
+     view that explains it. A comparison is coloured only where trends.js
+     weekReview marked it; everything else is plain text. */
+  .trends .weekrev { margin: 6px 0 10px; padding: 6px 10px 8px; border: 1px solid var(--line); border-radius: 10px;
+                     background: var(--panel-2); }
+  .trends .wkhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .trends .wkhead h4 { margin: 0; flex: 1; min-width: 0; text-align: center; overflow-wrap: anywhere; }
+  .trends .wkhead h4 small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+  .trends .wkstep { flex: none; min-width: 52px; min-height: 52px; font: inherit; font-size: 24px; line-height: 1;
+                    color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .trends .wkstep:disabled { color: var(--line); }
+  .trends .wkrows { margin: 4px 0 0; }
+  .trends a.wkline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; align-items: baseline;
+                     min-height: 44px; padding: 6px 2px; border-top: 1px solid var(--line); color: var(--text);
+                     text-decoration: none; font-variant-numeric: tabular-nums; }
+  .trends a.wkline:first-child { border-top: 0; }
+  .trends a.wkline .k { font-size: 14px; color: var(--muted); }
+  .trends a.wkline .v { font-size: 15px; font-weight: 700; text-align: right; }
+  .trends a.wkline .s { grid-column: 1 / -1; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .trends a.wkline .s b { font-weight: 700; color: var(--text); }
+  .trends a.wkline .s .up { color: var(--go); }
+  .trends a.wkline .s .down { color: var(--no); }
+  .trends a.wkline:focus { outline: 2px solid var(--text); outline-offset: 1px; }
   .trends .cmp { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: end; margin: 4px 0 8px; font-size: 12px; }
   .trends .cmp label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); }
   .trends .cmp input { font: inherit; font-size: 14px; min-height: 36px; color: var(--text);
@@ -1547,6 +1570,27 @@
     <p class="hint" id="trGoodNote"></p>
 
     <h3 class="trsec" id="trChangeHead">How it's changing</h3>
+    <!-- The week in review (the owner, Nov 2026: the reporting work's third
+         round). One driver week, Monday 4am to Monday 4am, as one card,
+         stepped with ‹ ›; trends.js weekReview over the rows and runs this
+         tab already holds, with the Money tab's paid-against-the-card for
+         the same week where the page has the earnings loaded. Here, at the
+         head of "How it's changing", rather than on Today: every figure on it
+         is this tab's (the ruler, hours online, earned per hour, the slots'
+         marking), which only /api/trends holds, and Today asks nothing of
+         it — putting the card there would fetch the whole range on every
+         open of the page, the rig's Pi included. And a week is a change over
+         time, which is what this section is. Each line opens the view that
+         explains it; nothing on it is advice, and nothing reads it. -->
+    <section class="weekrev" id="trWeek" aria-labelledby="trWeekHead">
+      <div class="wkhead">
+        <button type="button" class="wkstep" id="trWeekPrev" aria-label="The week before">&lsaquo;</button>
+        <h4 id="trWeekHead">Week in review</h4>
+        <button type="button" class="wkstep" id="trWeekNext" aria-label="The week after">&rsaquo;</button>
+      </div>
+      <div class="wkrows" id="trWeekBody"></div>
+      <p class="hint" id="trWeekNote"></p>
+    </section>
     <div class="chips" id="trBy" role="group" aria-label="Group the time charts by">
       <button type="button" data-by="day" aria-pressed="true">By day</button>
       <button type="button" data-by="week" aria-pressed="false">By week</button>
@@ -4421,6 +4465,16 @@
     return Date.now() - days * 86400000;
   }
 
+  // The Trends tab's week card reads the same earnings and records for its
+  // own week (earnings.js rangeSummary over that span): said by an event, as
+  // `trends:day` is said back, because that script shares none of this one's
+  // state. Asked for once when it starts (`money:ask`), said again on every
+  // load of the range and when earnings.js arrives.
+  function sayMoneyHeld() {
+    document.dispatchEvent(new CustomEvent('money:held', { detail: { entries: earningsList, records: paidRangeRecs } }));
+  }
+  document.addEventListener('money:ask', sayMoneyHeld);
+
   function showPaidRange(records) {
     paidRangeRecs = records || [];
     var box = document.getElementById('paidRange');
@@ -4429,13 +4483,14 @@
       var st = (e.match || {}).status;
       return st === 'matched' || st === 'picked';
     });
+    sayMoneyHeld();
     if (!any) { box.hidden = true; box.innerHTML = ''; return; }
     if (window.Earnings && typeof window.Earnings.rangeSummary === 'function') { drawPaidRange(box); return; }
     if (paidRangeLib) return;
     paidRangeLib = true;
     var s = document.createElement('script');
     s.src = 'earnings.js';
-    s.onload = function () { paidRangeLib = false; if (window.Earnings) drawPaidRange(box); };
+    s.onload = function () { paidRangeLib = false; if (window.Earnings) { drawPaidRange(box); sayMoneyHeld(); } };
     s.onerror = function () { paidRangeLib = false; };
     document.head.appendChild(s);
   }
@@ -7041,6 +7096,10 @@
                // null) and what the grid shows in it.
                net: false, tl: 'day', sameDow: 5, cmp: null, gridView: 'diff' };
     var got = null, asked = null, seq = 0, rate = null, urls = [], cmpRange = null;
+    // The week the review card shows (its Monday key; the newest on a new
+    // range), and the Money tab's earnings as the page's own script last said
+    // them (`money:held`): read here, never fetched again.
+    var money = null;
     // The cell looked at closely ({ dow, hour }), kept across a redraw.
     var cellPick = null;
     // The ruler is this viewer's own choice, kept in this browser only: a page
@@ -7115,6 +7174,7 @@
       asked = key;
       // Compare mode belongs to the range it was set in.
       st.cmp = null;
+      st.week = null;
       var mine = ++seq;
       says('Reading every offer in the range…');
       loadLib(function () {
@@ -7364,6 +7424,7 @@
       drawRuler(rows);
       drawWhen(rows);
       drawGood(rows, keys);
+      drawWeek(rows);
       drawDaily(keys, line);
       drawSame(rows);
       drawSpread(keys, line);
@@ -8432,6 +8493,154 @@
         $(c[0]).textContent = '⤓ ' + (c[0] === 'trCsvDays' ? (st.by === 'week' ? 'Weekly' : 'Daily') : 'Hourly') + ' table (CSV)';
       });
     }
+
+    /* --- the week in review (the reporting work's third round) -----------------
+       trends.js weekReview does every sum; this only words it. A rate's line
+       says last week's figure, and colours an arrow, only as weekReview
+       marked it: both weeks at the week's floor, and a difference compare
+       mode's own tests call clear. The paid-against-the-card line is
+       earnings.js rangeSummary over the week's own span, off the earnings
+       and records the page's script hands over (`money:held`); with none
+       here it points at the Money tab rather than asking again. */
+    function weekNames(k) { return 'Mon ' + shortDay(k) + ' – Sun ' + shortDay(T.addDays(k, 6)); }
+    function signedMoney(v) { return (v > 0 ? '+' : v < 0 ? '−' : '±') + '$' + Math.abs(v).toFixed(2); }
+    function drawWeek(rows) {
+      var keys = T.weekKeys(rows, got.runs);
+      got.weekKeys = keys;
+      if (!keys.length) { $('trWeek').hidden = true; return; }
+      $('trWeek').hidden = false;
+      if (!st.week || keys.indexOf(st.week) < 0) st.week = keys[keys.length - 1];
+      var i = keys.indexOf(st.week);
+      $('trWeekPrev').disabled = i <= 0;
+      $('trWeekNext').disabled = i >= keys.length - 1;
+      var first = got.floor > 0 ? T.dayKeyOf(got.floor) : rows[0].day;
+      var wr = T.weekReview(rows, got.runs, st.week, { cut: cut(), costPerMile: got.cpm, first: first,
+                                                      last: T.dayKeyOf(Date.now()) });
+      var n = wr.now, p = wr.prev, both = !!(p && n.enough && p.enough);
+      $('trWeekHead').innerHTML = 'Week in review <small>' + esc(weekNames(st.week))
+        + (n.partEnd ? ' · so far' : '') + (n.partStart ? ' · the range starts ' + esc(dayWords(first)) + ': part of this week' : '')
+        + '</small>';
+      function row(go, k, v, sub) {
+        return '<a href="#" class="wkline" data-go="' + go + '"><span class="k">' + esc(k) + '</span><span class="v">' + v
+          + '</span>' + (sub ? '<span class="s">' + sub + '</span>' : '') + '</a>';
+      }
+      var floorWords = T.GOOD_FLOOR_HOURS + ' h online on ' + T.GOOD_FLOOR_DAYS + ' days';
+      function vs(c, fmt) {
+        if (!p) return 'no week before it in this range';
+        if (!both) return 'not set beside last week: each week needs ' + floorWords;
+        if (!c) return '';
+        if (c.shade === 'above') return '<b class="up">▲ clearly above</b> last week\'s ' + esc(fmt(c.prev));
+        if (c.shade === 'below') return '<b class="down">▼ clearly below</b> last week\'s ' + esc(fmt(c.prev));
+        return 'last week ' + esc(fmt(c.prev)) + ', no clear difference';
+      }
+      function was(v) { return both ? ' · last week ' + v : ''; }
+      function perH(v) { return v === null ? '—' : money2(v) + '/h'; }
+      function goodH(v) { return v === null ? '—' : v.toFixed(1) + '/h'; }
+      var thin = n.enough ? '' : 'thin: ' + (n.hours || 0).toFixed(1) + ' h on ' + n.onlineDays + ' day'
+        + (n.onlineDays === 1 ? '' : 's') + ', under ' + floorWords + ' · ';
+      var html = '';
+      if (!n.any) {
+        html = row('runs', 'Hours online', '0 h', 'the rig was off all this week: no card and no minute online');
+      } else {
+        html += row('runs', 'Hours online', esc(n.hours.toFixed(1)) + ' h', 'on ' + n.onlineDays + ' day'
+          + (n.onlineDays === 1 ? '' : 's') + was(p ? p.hours.toFixed(1) + ' h' : ''));
+        html += row('week', 'Offers', esc(n.offers.toLocaleString()), 'press to list them' + was(p ? p.offers.toLocaleString() : ''));
+        var r = got.ruler;
+        html += row('good', 'Good offers', esc(n.good + ' · ' + goodH(n.goodRate)),
+          (r && r.cut !== null ? 'top ' + r.top + '% of this range, ≥ ' + esc(money2(r.cut)) + '/hr · ' : '') + thin
+          + vs(wr.cmp.good, goodH));
+        html += row('week', 'Takes', esc(String(n.takes)), (n.unpaid ? n.unpaid + ' more with the pay not trusted · ' : '')
+          + 'your ✓ or Took only; a card nobody answered for is not a take' + was(p ? p.takes : ''));
+        html += row('gross', 'Earned / hr online, gross', esc(perH(n.gross)), esc(money2(n.earned)) + ', the card pay of '
+          + 'the takes, over every minute online · ' + thin + vs(wr.cmp.gross, perH));
+        html += wr.net
+          ? row('net', 'Earned / hr online, net', esc(perH(n.net)), 'less ' + esc(money2(got.cpm)) + '/mi, the rig\'s '
+            + 'own cost per mile' + (n.noMiles ? ' (' + n.noMiles + ' take' + (n.noMiles === 1 ? '' : 's') + ' with no miles, '
+            + 'nothing taken off)' : '') + ' · ' + thin + vs(wr.cmp.net, perH))
+          : row('net', 'Earned / hr online, net', '—', 'no offer in this range carries the rig\'s cost per mile, so '
+            + 'nothing is taken off and no figure is chosen for you');
+        html += paidRow(wr, row);
+        var sl = wr.slots;
+        var none = sl.met + ' of ' + sl.of + ' weekday × block slot' + (sl.of === 1 ? '' : 's') + ' had ' + sl.floorHours
+          + ' h online, and none differed clearly from this range\'s ' + (wr.ref === null ? '—' : wr.ref.toFixed(1)) + ' good/h';
+        var slotRow = function (k, x, side) {
+          return x ? row('slots', k, esc(x.name), esc(x.rate.toFixed(1) + ' good/h over ' + x.hours.toFixed(1) + ' h online, '
+            + 'clearly ' + side + ' this range\'s ' + wr.ref.toFixed(1) + '/h (one day: a calendar tile\'s rule)'))
+            : row('slots', k, 'none clear', esc(none));
+        };
+        html += slotRow('Best slot', sl.best, 'above');
+        html += slotRow('Worst slot', sl.worst, 'below');
+        var q = n.quality, flags = [];
+        if (q.suspect) flags.push(q.suspect + ' suspect');
+        if (q.corrected) flags.push(q.corrected + ' re-read');
+        if (q.unread) flags.push(q.unread + ' unread');
+        html += row('quality', 'Data quality', esc(flags.length ? flags.join(' · ') : 'none flagged'),
+          'suspect and pay-unread offers are in the counts above and out of every money figure; a re-read pay is used as re-read');
+      }
+      $('trWeekBody').innerHTML = html;
+      $('trWeekNote').textContent = 'Each line opens the view that explains it. Every figure is this tab\'s own, cut at '
+        + 'the same clock hours (a week here is the hour × date chart\'s week row). Last week is set beside a rate, and '
+        + 'an arrow drawn, only where both weeks have ' + floorWords + ' and the difference clears 99%; a slot is one '
+        + 'driver day, marked only where its 99% interval clears this range\'s good per hour. What happened, not advice: '
+        + 'nothing here reaches the verdict, the target or the rig.';
+    }
+    function matchedTrip(e) { var m = (e && e.match) || {}; return m.status === 'matched' || m.status === 'picked'; }
+    function paidRow(wr, row) {
+      var k = 'Paid against the card';
+      var E = window.Earnings;
+      if (!money || !Array.isArray(money.entries) || !money.entries.some(matchedTrip)) {
+        return row('money', k, 'Money tab ›', 'no earnings screenshot is matched to an order in this range');
+      }
+      if (!E || typeof E.rangeSummary !== 'function') return row('money', k, 'Money tab ›', 'worked out on the Money tab');
+      var s = E.rangeSummary(money.entries, money.records || [], { from: wr.span[0], to: wr.span[1] }), a = s.all;
+      if (!a.taken && !a.matched) return row('money', k, '—', 'no order taken and no trip matched this week · the Money tab has the range');
+      var sub = a.takenMatched + ' of ' + a.taken + ' orders taken have a trip matched'
+        + (a.noTook ? ', ' + a.noTook + ' more matched to a card never Took\'d' : '')
+        + ' · paid less card per trip over ' + a.compared + ' compared';
+      if (a.thin) sub += ' · thin: ' + a.thinWhy.join('; ');
+      var pr = T.weekSpanMs(T.addDays(wr.week, -7));
+      var b = E.rangeSummary(money.entries, money.records || [], { from: pr[0], to: pr[1] }).all;
+      if (!a.thin && !b.thin && b.compared && b.median !== null) {
+        sub += ' · last week median ' + signedMoney(b.median) + ' (n=' + b.compared + ')';
+      }
+      return row('money', k, a.compared && a.median !== null ? esc(signedMoney(a.median) + ' median') : '—', esc(sub));
+    }
+    // A line pressed: the view that explains it, set to the figure it reads.
+    function weekGo(where) {
+      function to(id) { setTimeout(function () { var e = $(id); if (e) e.scrollIntoView({ block: 'start' }); }, 0); }
+      function tab(v) { var b = document.querySelector('#tabs button[data-view="' + v + '"]'); if (b) b.click(); }
+      if (where === 'runs') { tab('runs'); return; }
+      if (where === 'money') { tab('money'); to('paidRange'); return; }
+      if (where === 'week') {
+        document.dispatchEvent(new CustomEvent('trends:day', { detail: { from: st.week, to: T.addDays(st.week, 6),
+                                                                        said: 'the week of ' + shortDay(st.week) } }));
+        return;
+      }
+      if (where === 'quality') { $('trShape').open = true; to('trQuality'); return; }
+      if (where === 'good') { st.stat = 'goodRate'; draw(); to('trCalHead'); return; }
+      if (where === 'gross' || where === 'net') { st.stat = 'earned'; st.net = where === 'net'; draw(); to('trCalHead'); return; }
+      if (where === 'slots') { st.stat = 'goodRate'; st.tl = 'week'; draw(); to('trTimeHead'); }
+    }
+    $('trWeekBody').addEventListener('click', function (e) {
+      var a = e.target.closest ? e.target.closest('a.wkline') : null;
+      if (!a || !got) return;
+      e.preventDefault();
+      weekGo(a.getAttribute('data-go'));
+    });
+    function stepWeek(by) {
+      if (!got || !got.weekKeys) return;
+      var i = got.weekKeys.indexOf(st.week) + by;
+      if (i < 0 || i >= got.weekKeys.length) return;
+      st.week = got.weekKeys[i];
+      drawWeek(got.rows);
+    }
+    $('trWeekPrev').addEventListener('click', function () { stepWeek(-1); });
+    $('trWeekNext').addEventListener('click', function () { stepWeek(1); });
+    document.addEventListener('money:held', function (e) {
+      money = e && e.detail ? e.detail : null;
+      if (got && got.rows.length && showing()) drawWeek(got.rows);
+    });
+    document.dispatchEvent(new CustomEvent('money:ask'));
 
     /* --- the controls --------------------------------------------------------- */
 

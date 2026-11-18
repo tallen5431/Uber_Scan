@@ -201,6 +201,35 @@
  * grey and the weeks and months are what can be shaded. MONTH THIRDS are
  * shaded only once each third holds THIRDS_MONTHS months.
  *
+ * THE WEEK IN REVIEW (the owner, Nov 2026, the reporting work's third
+ * round; weekReview): one driver week, Monday 4am to Monday 4am, as a card —
+ * hours online, offers, good offers (the ruler) and good per hour, takes,
+ * earned per hour gross and net, the best and worst slot, the data-quality
+ * counts — stepped a week at a time. Every figure is the slice table's, so a
+ * week here is exactly the timeline's week row. The page adds the Money tab's
+ * matched-earnings coverage and paid-against-the-card median from earnings.js
+ * rangeSummary over the week's own span (weekSpanMs: 169 hours the week of 1
+ * Nov), never a copy of that sum. Two things are MARKED and nothing else:
+ *   - against the week before, good per hour and earned per hour, only where
+ *     BOTH weeks meet the week's floor (the calendar's week column:
+ *     GOOD_FLOOR_HOURS online on GOOD_FLOOR_DAYS driver days), by compare
+ *     mode's own tests at its own levels (good per hour the exact conditional
+ *     test on k/phi; earned two widened gamma intervals at CMP_SIDE_ALPHA
+ *     that must not overlap), phi measured over every week's days in the
+ *     range. Under the floor, or with no difference that clears, last week's
+ *     figure is printed plain or not at all: no arrow, no colour.
+ *   - the best and worst slot, weekday x three-hour block. In one week that
+ *     slot is ONE driver day, so the grid's two-night floor can never be met
+ *     and is not pretended: it is a calendar tile's rule, GOOD_FLOOR_HOURS
+ *     online and the plain 99% Poisson interval on its good offers clear of
+ *     the range's own good per hour. Best is the highest marked above, worst
+ *     the lowest marked below, and "none clear" where nothing is. The blocks
+ *     are Advice's clock blocks on the driver's day, so Friday's 12-3am is
+ *     the small hours after Friday evening and its 3-6am holds 4-6am Friday
+ *     and 3-4am the next morning, both Friday's driver day.
+ * Counts (hours, offers, takes) are printed beside last week's with no test:
+ * a count is what it was. Descriptive like every figure here.
+ *
  * THE RATE CARD is least squares, pay = base + a·minutes + b·miles, per app
  * per ISO week, reported as the price of a 20-minute, 5-mile trip with a
  * percentile bootstrap interval (seeded, so a reload draws the same one). A
@@ -1551,6 +1580,180 @@
     return { dow: dow, days: out };
   }
 
+  /* --- the week in review ----------------------------------------------------------
+   *
+   * One driver week (Monday 4am to Monday 4am) as one card, and the week before
+   * it beside it. See the header, "THE WEEK IN REVIEW", for what is compared,
+   * what is marked and why. Everything here is a pool of the same day-hour
+   * slices the grid, the timeline and the thirds are (sliceTable), so a week's
+   * hours, good offers and earnings are the grid's own, cut at the same
+   * clock hours, and a run across Monday 4am puts its 3am hour in the week
+   * before, as the timeline does. */
+
+  // The ms a driver week spans, on the local clock: the week holding 1 Nov
+  // is 169 hours long (1am happens twice), the one holding the spring change
+  // 167. What earnings.js rangeSummary is handed as from/to.
+  function weekSpanMs(wk) {
+    var a = dateOfKey(wk), b = dateOfKey(addDays(wk, 7));
+    return [new Date(a.getFullYear(), a.getMonth(), a.getDate(), DAY_STARTS_AT).getTime(),
+            new Date(b.getFullYear(), b.getMonth(), b.getDate(), DAY_STARTS_AT).getTime()];
+  }
+
+  // Every week from the first holding a row or a minute online to the last,
+  // oldest first, a week off included: stepping ‹ › walks the calendar, and a
+  // week with nothing in it says so rather than being skipped over.
+  function weekKeys(rows, runs) {
+    var first = null, last = null;
+    function see(day) { if (first === null || day < first) first = day; if (last === null || day > last) last = day; }
+    (rows || []).forEach(function (r) { see(r.day); });
+    var pieces = onlinePieces(runs);
+    Object.keys(pieces).forEach(function (k) { see(pieces[k].day); });
+    if (first === null) return [];
+    var out = [];
+    for (var k = weekKeyOf(first), guard = 0; k <= weekKeyOf(last) && guard < 1000; k = addDays(k, 7), guard++) out.push(k);
+    return out;
+  }
+
+  // The three-hour blocks a slot is named by: Advice's (the Strategy tab's and
+  // strategy.js's "by time block"), on the driver's day.
+  var BLOCK_NAMES = Advice && Advice.BLOCK_NAMES ? Advice.BLOCK_NAMES
+    : ['12–3am', '3–6am', '6–9am', '9am–12', '12–3pm', '3–6pm', '6–9pm', '9pm–12'];
+
+  // One week's figures off the two slice tables (gross, and net where a cost
+  // per mile is known), and its slots and its days for phi.
+  function weekFigures(gross, net, wk) {
+    var e = { week: wk, from: wk, to: addDays(wk, 6), hours: 0, onlineDays: 0, offers: 0, good: 0, takes: 0,
+              unpaid: 0, noMiles: 0, earned: 0, earnedNet: null, y: 0, v: 0, yNet: 0, vNet: 0,
+              quality: { suspect: 0, corrected: 0, unread: 0 } };
+    var days = Object.create(null), slots = Object.create(null);
+    Object.keys(gross.slices).forEach(function (k) {
+      var s = gross.slices[k];
+      if (s.week !== wk) return;
+      e.hours += s.hours; e.offers += s.rows.length; e.good += s.good; e.takes += s.takes; e.unpaid += s.unpaid;
+      e.earned += s.earned; e.y += s.y; e.v += s.v;
+      var d = days[s.day] || (days[s.day] = { day: s.day, good: 0, takes: 0, hours: 0 });
+      d.good += s.good; d.takes += s.takes; d.hours += s.hours;
+      var b = Math.floor(s.hour / 3), sk = s.day + '|' + b;
+      var sl = slots[sk] || (slots[sk] = { day: s.day, dow: s.dow, block: b, name: WEEKDAYS[s.dow] + ' ' + BLOCK_NAMES[b],
+                                           hours: 0, good: 0, offers: 0 });
+      sl.hours += s.hours; sl.good += s.good; sl.offers += s.rows.length;
+      s.rows.forEach(function (r) {
+        if (r.suspect && !r.unread) e.quality.suspect += 1;
+        if (r.corrected) e.quality.corrected += 1;
+        if (r.unread) e.quality.unread += 1;
+      });
+    });
+    if (net) {
+      e.earnedNet = 0;
+      Object.keys(net.slices).forEach(function (k) {
+        var s = net.slices[k];
+        if (s.week !== wk) return;
+        e.earnedNet += s.earned; e.yNet += s.y; e.vNet += s.v; e.noMiles += s.noMiles;
+      });
+    }
+    e.days = Object.keys(days).sort().map(function (k) { return days[k]; });
+    e.onlineDays = e.days.filter(function (d) { return d.hours > 0; }).length;
+    e.slots = Object.keys(slots).map(function (k) { return slots[k]; });
+    e.enough = e.hours >= GOOD_FLOOR_HOURS && e.onlineDays >= GOOD_FLOOR_DAYS;
+    e.any = e.hours > 0 || e.offers > 0;
+    return e;
+  }
+
+  /* `rows`, `runs` as everywhere here; `wk` the Monday key; `opts`: cut (the
+   * ruler, as the tab holds it), costPerMile (net where a number), first and
+   * last (the range's own first and last driver day, for "part of this week
+   * only"). Returns the week, the week before (null where it held nothing),
+   * the comparisons that may be drawn, the best and worst slots, and the
+   * reference they were marked against. */
+  function weekReview(rows, runs, wk, opts) {
+    opts = opts || {};
+    var cut = opts.cut, cpm = typeof opts.costPerMile === 'number' ? opts.costPerMile : null;
+    var gross = sliceTable(rows, runs, { cut: cut });
+    var net = cpm !== null ? sliceTable(rows, runs, { cut: cut, cpm: cpm }) : null;
+    // phi over every week's days in the range, as the calendar's week column
+    // measures it: a week's nights swing, and two weeks compared as if they
+    // did not would differ "clearly" by chance.
+    var byWeek = Object.create(null);
+    sliceList(gross).forEach(function (s) {
+      var w = byWeek[s.week] || (byWeek[s.week] = Object.create(null));
+      var d = w[s.day] || (w[s.day] = { good: 0, takes: 0, hours: 0 });
+      d.good += s.good; d.takes += s.takes; d.hours += s.hours;
+    });
+    var ph = phis(Object.keys(byWeek).map(function (w) {
+      return Object.keys(byWeek[w]).map(function (d) { return byWeek[w][d]; });
+    }));
+    var now = weekFigures(gross, net, wk);
+    var before = weekFigures(gross, net, addDays(wk, -7));
+    var prev = before.any ? before : null;
+    function rate(x, h) { return h > 0 ? r2(x / h) : null; }
+    [now, prev].forEach(function (e) {
+      if (!e) return;
+      e.goodRate = rate(e.good, e.hours);
+      e.gross = rate(e.earned, e.hours);
+      e.net = e.earnedNet === null ? null : rate(e.earnedNet, e.hours);
+      e.earned = r2(e.earned);
+      e.earnedNet = e.earnedNet === null ? null : r2(e.earnedNet);
+      e.hours = r2(e.hours);
+      e.partStart = !!opts.first && e.from < opts.first;
+      e.partEnd = !!opts.last && e.to > opts.last;
+    });
+
+    // Against the week before: only where BOTH meet the week's floor; the
+    // tests are compare mode's (gridCompare), so a week's arrow means what a
+    // B-vs-A cell's shading means.
+    var cmp = { good: null, gross: null, net: null };
+    if (prev && now.enough && prev.enough) {
+      var K = now.good + prev.good, f = ph.good > 1 ? ph.good : 1;
+      cmp.good = { prev: prev.goodRate, shade: null };
+      if (K > 0) {
+        var p0 = now.hours / (now.hours + prev.hours), ci = shareCI(now.good / f, K / f, CI_ALPHA);
+        cmp.good.shade = ci[0] > p0 ? 'above' : ci[1] < p0 ? 'below' : null;
+      }
+      var earnCmp = function (yA, vA, yB, vB, prevFig) {
+        var tk = now.takes + prev.takes, w = tk ? (yA + yB) / tk : 0;
+        var out = { prev: prevFig, shade: null };
+        if (!(w > 0)) return out;
+        var ca = earnCI(yA, vA, w, ph.takes, CMP_SIDE_ALPHA), cb = earnCI(yB, vB, w, ph.takes, CMP_SIDE_ALPHA);
+        var la = ca[0] / now.hours, ua = ca[1] / now.hours, lb = cb[0] / prev.hours, ub = cb[1] / prev.hours;
+        out.shade = la > ub ? 'above' : ua < lb ? 'below' : null;
+        return out;
+      };
+      cmp.gross = earnCmp(now.y, now.v, prev.y, prev.v, prev.gross);
+      if (net) cmp.net = earnCmp(now.yNet, now.vNet, prev.yNet, prev.vNet, prev.net);
+    }
+
+    // The week's slots: a weekday x block is ONE driver day in one week, so
+    // it is marked as a calendar tile is — at GOOD_FLOOR_HOURS online, the
+    // plain 99% Poisson interval on its good offers clear of the range's own
+    // good per hour (one day is one day; there is no second night to measure
+    // phi on). Best is the highest marked above, worst the lowest marked
+    // below; with none marked, "none clear".
+    var ref = gross.refRate;
+    var met = now.slots.filter(function (s) { return s.hours >= GOOD_FLOOR_HOURS; });
+    met.forEach(function (s) {
+      s.rate = r2(s.good / s.hours);
+      s.shade = ref === null ? null : rateShade(s.good, s.hours, ref, 1).shade;
+      s.hours = r2(s.hours);
+    });
+    var best = null, worst = null;
+    met.forEach(function (s) {
+      if (s.shade === 'above' && (!best || s.rate > best.rate)) best = s;
+      if (s.shade === 'below' && (!worst || s.rate < worst.rate)) worst = s;
+    });
+    function slim(e) {
+      if (!e) return null;
+      return { week: e.week, from: e.from, to: e.to, hours: e.hours, onlineDays: e.onlineDays, offers: e.offers,
+               good: e.good, goodRate: e.goodRate, takes: e.takes, unpaid: e.unpaid, noMiles: e.noMiles,
+               earned: e.earned, earnedNet: e.earnedNet, gross: e.gross, net: e.net, enough: e.enough,
+               quality: e.quality, partStart: e.partStart, partEnd: e.partEnd, any: e.any };
+    }
+    return { week: wk, span: weekSpanMs(wk), now: slim(now), prev: slim(prev), cmp: cmp, net: net !== null,
+             cut: typeof cut === 'number' ? cut : null, ref: ref === null ? null : r2(ref),
+             phi: { good: Math.round(ph.good * 100) / 100, takes: Math.round(ph.takes * 100) / 100 },
+             slots: { met: met.length, of: now.slots.length, best: best, worst: worst,
+                      floorHours: GOOD_FLOOR_HOURS } };
+  }
+
   /* --- the rate card --------------------------------------------------------- */
 
   // Least squares of y on [1, x1, x2]: [base, a, b], or null when singular.
@@ -1732,6 +1935,7 @@
     takeOf: takeOf, sliceTable: sliceTable, poolCell: poolCell, goodAppShare: goodAppShare,
     timeline: timeline, gridCompare: gridCompare, monthThirds: monthThirds, sameWeekday: sameWeekday,
     periodSpan: periodSpan, inPeriod: inPeriod,
+    weekSpanMs: weekSpanMs, weekKeys: weekKeys, weekReview: weekReview, BLOCK_NAMES: BLOCK_NAMES,
     onlinePieces: onlinePieces, hoursByCell: hoursByCell, cellDetail: cellDetail,
     periods: periods, hoursBy: hoursBy, goodPerHour: goodPerHour, hourly: hourly, monthsOf: monthsOf,
     grid: grid, calendar: calendar, fit3: fit3, rateFit: rateFit, rateCard: rateCard,
