@@ -89,8 +89,80 @@
   // a trip's time. ":" read as "." is allowed; a space or a lost dot in "P.M."
   // too.
   var CLOCK = /\b(1[0-2]|0?[1-9])[:.]([0-5]\d)\s*([ap])\.?\s*m\b/i;
-  // The trip's line: its kind, Uber's minutes and seconds, and its miles.
-  var DETAIL = /^\s*([A-Za-z][A-Za-z &+'\/-]*?)\s*[-·•:.,=~]*\s*(\d{1,3})\s*min\w*\.?(?:\s*(\d{1,2})\s*s(?:ec)?\w*\.?)?\s*[-·•:.,=~]*\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*mi\b/i;
+
+  /* AN ENTRY'S HEADER WITH THE ICON READ IN FRONT OF IT (the owner's
+   * screenshot of 17 Nov 2026). Uber puts a round icon left of each amount, a
+   * person for a ride and a bag for a delivery, and tesseract read three of
+   * seven of them as text: "Bp £2210 10:31 PM", "3 $21.30 8:12 PM",
+   * "2 $30.10 5:48 PM" (invented figures; the shapes are the screen's).
+   * AMOUNT is anchored at the line's start, so none of the three opened a
+   * block: the first was taken for the tail of a trip scrolled off the top,
+   * and the second's lines ran into the canceled trip above it, which then
+   * took ITS clock — a $0.00 trip filed confidently at the wrong time.
+   *
+   * So a header may carry 1-3 characters before its amount, on a line that
+   * also carries the trip's clock (CLOCK, with its AM/PM) — or, where the
+   * time was filed on a row of its own, on the line straight above the
+   * trip's line (tesseract on rpi/testearnings.py's drawing of that screen:
+   * "& $21.30 + Increased", its "8:12 PM" four lines below). Neither lets a
+   * map's label with a number in it ("61 K", "124") open a trip: a label has
+   * no clock, and the map is drawn under the trip's line, never straight
+   * above it. A tip line ("«> $3.00 Tip") stays a tip line (isTipLine is
+   * asked first). The glyph may be the "$" or what "$" is read as: "S"
+   * before a digit, "£", "€", "§". */
+  var CUR = '(?:\\$|S(?=\\d)|[£€§])';
+  var HEAD_ICON = new RegExp('^(?:\\S{1,3}\\s+)?' + CUR + '\\s?(\\d{1,4}[.,]\\d{2})\\b(.*)$');
+  // ...and THE AMOUNT'S DIGITS FILED A ROW ABOVE ITS "$" (the same drawing,
+  // at the phone's width: "22.10" alone, then "a $ . . 10:31 PM", or as a
+  // JPEG "a * Fi F 10:31 PM"): a bare amount with its point and cents, then
+  // a line with the clock and nothing else but the icon's misread and a few
+  // symbols (no digit, DOLLAR_JUNK characters at most), then the trip's
+  // line straight under it. The point and the cents were read; nothing is
+  // guessed.
+  var BARE = /^\d{1,4}[.,]\d{2}$/;
+  var DOLLAR_JUNK = 10;
+  function dollarRow(line) {
+    var rest = clean(line.replace(CLOCK, '')).replace(/^\S{1,3}\s+/, '');
+    return rest.length <= DOLLAR_JUNK && !/\d/.test(rest);
+  }
+  /* ...and THE AMOUNT WHOSE DECIMAL POINT WAS LOST: "£2210" for $22.10. Uber
+   * prints every amount on this screen with its cents, so the point can only
+   * have stood before the last two digits; what is guessed is that the
+   * digits themselves are right. Taken only when every one of these holds:
+   * the line carries the trip's clock; the token is a currency-like glyph
+   * ($ S £ € § or "5", the "$" read as a five) and 3 to 5 digits, nothing
+   * else; and a trip's line (DETAIL or CANCELED) follows within LOST_NEAR
+   * lines. Such an entry is `amountGuessed: true`: the matcher gives its pay
+   * no points (score), compareOf and daySummary keep it out of the card
+   * against paid, a later screenshot that reads the amount whole replaces it
+   * (mergeEntry), and the offers page marks it "check this". Judged safe
+   * because the guess decides nothing — the trip is still timed and matched
+   * on its clock, its places and its miles — and the alternative, leaving the
+   * whole trip unread, loses what was read cleanly for want of one dot. */
+  var LOST = /^(?:\S{1,3}\s+)?(?:\$|S|[£€§5])(\d{3,5})\b(.*)$/;
+  var LOST_NEAR = 3;
+  // A line that looks like a header (a currency-like glyph, a digit, the
+  // clock, a trip's line under it) and whose amount neither of the two above
+  // could read: it still OPENS a block — so nothing above it takes its lines
+  // or its clock — and the block is reported unread, never filed.
+  var HEADISH = /^(?:\S{1,3}\s+)?(?:\$|S|[£€§5])\s?\d/;
+  // The chips Uber prints on an entry's amount row: "↑ Increased" (the arrow
+  // read as "T" or dropped) and "Boost+" with no amount. Kept as `chips`;
+  // neither opens a block or adds to the pay. A "Boost+" WITH an amount on
+  // it is a pay part (EXTRA), not a chip.
+  var CHIPS = [['increased', /\bincreased\b/i], ['boost+', /\bboost\s?\+/i]];
+  var CHIP_PAID = /(?:\$|S(?=\d))\s?\d{1,4}[.,]\d{2}\s*boost/i;
+  var CHIP_LINE = /^\W{0,3}\s*\S?\s*(?:increased|boost\s?\+)\s*$/i;
+  // The trip's line: its kind, Uber's hours, minutes and seconds, and its
+  // miles. A ride over an hour prints "1 hr 4 min" ("UberX-1hr4 min: 21.70
+  // mi" as read), or "1 hr" alone; at least one of hours and minutes.
+  var DETAIL = /^\s*([A-Za-z][A-Za-z &+'\/-]*?)\s*[-·•:.,=~]*\s*(?:(\d{1,2})\s*h(?:ou)?rs?\.?(?![a-z])\s*)?(?:(\d{1,3})\s*min\w*\.?)?(?:\s*(\d{1,2})\s*s(?:ec)?\w*\.?)?\s*[-·•:.,=~]*\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*mi\b/i;
+  // Ride kinds as Uber names them on this screen; any other kind with a
+  // street address for its pickup is taken for a ride too (isRide).
+  var RIDE = /^(?:uber\s*)?(?:x|xl|xxl|comfort|black|suv|share|pool|green|pet|connect|assist|wav|premier|select|reserve|priority|electric|black\s*suv|comfort\s*electric)\b/i;
+  // A dropoff Uber could not name, printed "Unknown" under a canceled trip's
+  // pickup.
+  var UNKNOWN = /^(?:\S\s+)?unknown\.?$/i;
   var TIP_PENDING = /\btip\s+(?:is\s+)?(?:processing|pending)\b/i;
   var TIP_AMOUNT = /(?:\$|S(?=\d))\s?(\d{1,4}[.,]\d{2})\s*tip\b|\btip\b[^$\d]{0,12}(?:\$|S(?=\d))\s?(\d{1,4}[.,]\d{2})/i;
   // The pay's parts beside the tip, "$1.25 Surge", and as many as Uber puts
@@ -187,8 +259,54 @@
   /* The trip's line, DETAIL's match or null. A zero before "min" or "sec"
    * read as the letter O ("22 min O sec", tesseract on the drawn 12 Nov
    * layout) is put back first. */
+  // Returned as {kind, minutes, seconds, miles}: an hour's worth of minutes
+  // added in (60·h + m), so "1 hr 4 min" is 64 minutes.
   function detailOf(line) {
-    return DETAIL.exec(String(line || '').replace(/\b[Oo](\s*(?:min|sec|s\b))/g, '0$1'));
+    var d = DETAIL.exec(String(line || '').replace(/\b[Oo](\s*(?:min|sec|s\b))/g, '0$1'));
+    if (!d || (d[2] === undefined && d[3] === undefined)) return null;
+    return { kind: d[1], minutes: (d[2] ? 60 * parseInt(d[2], 10) : 0) + (d[3] ? parseInt(d[3], 10) : 0),
+             seconds: d[4] ? parseInt(d[4], 10) : 0, miles: money(d[5]) };
+  }
+  function isTripLine(line) { return !!detailOf(line) || CANCELED.test(line); }
+
+  /* THE PIN'S ICON READ AS A LETTER (the owner's 17 Nov screenshot). Each
+   * place line starts with a small grey icon, a pin for the pickup and a
+   * circle for the dropoff, and tesseract read it as "®", "©", "é", "}", or a
+   * "9" or "6" in front of the name. What is taken off, on a pickup or
+   * dropoff line only:
+   *   - one lone non-alphanumeric character ("®", "©", "é", "}") followed by
+   *     a space: no name or street starts with a lone symbol;
+   *   - one lone lower-case letter followed by a space and a capital or a
+   *     digit: no name starts that way either;
+   *   - one lone digit followed by a space and a capitalised word, on an
+   *     ADDRESS line (one ending in a state and the country) only: Uber
+   *     prints no house number on this screen, so "9 Sample St NE" is the
+   *     pin. REFUSED on a restaurant's line: a restaurant's name can start
+   *     with a number ("3 Amigos"), so "9 Pretend Tacos" keeps its "9" — a
+   *     cosmetic loss, since the names are compared by words and "9 pretend
+   *     tacos" still finds "Pretend Tacos" far above NAME_MIN.
+   *   - REFUSED too: a lone capital letter ("A Taste of ...", "J Sample's"
+   *     are names), and two or more characters (no misread of the icon seen
+   *     was longer than one, and "St" or "NW" are words). */
+  function stripIcon(line, address) {
+    var t = clean(line);
+    var m = /^(\S)\s+(\S.*)$/.exec(t);
+    if (!m) return t;
+    var g = m[1], rest = m[2];
+    if (/[^A-Za-z0-9]/.test(g)) return rest;
+    if (/[a-z]/.test(g) && /^[A-Z0-9]/.test(rest)) return rest;
+    if (/\d/.test(g) && address && /^[A-Z][a-z]/.test(rest)) return rest;
+    return t;
+  }
+
+  function chipsOf(line) {
+    var out = [];
+    CHIPS.forEach(function (c) {
+      if (!c[1].test(line)) return;
+      if (c[0] === 'boost+' && CHIP_PAID.test(line)) return;
+      out.push(c[0]);
+    });
+    return out;
   }
 
   /* The pay's parts on one line: {tip: number | 'processing' | undefined,
@@ -213,7 +331,7 @@
    * street corner for a branch of a chain — the part that tells two of one
    * chain apart, so it is kept and compared on its own. */
   function pickupOf(line) {
-    var t = clean(line);
+    var t = stripIcon(line, false);
     if (!t) return null;
     var open = t.indexOf('(');
     if (open > 0) {
@@ -226,30 +344,56 @@
   /* "Example Ave NE, Notaville, GA, USA" -> street and town. Uber prints no
    * house number on this screen; the street is what is compared. */
   function dropoffOf(line) {
-    var parts = clean(line).split(/\s*,\s*/).filter(Boolean);
+    var parts = stripIcon(line, true).split(/\s*,\s*/).filter(Boolean);
     if (!parts.length) return null;
     return { street: cut(parts[0]), town: parts.length >= 3 ? cut(parts[1]) : null };
   }
 
-  /* One block: the lines from an amount to the line before the next. */
-  function readBlock(lines) {
-    var first = AMOUNT.exec(lines[0]);
-    var e = { amount: money(first[1]), startedAt: clockOf(first[2]), tip: null, type: null,
+  /* A RIDE'S PICKUP IS A STREET (the 17 Nov screenshot's Comfort and UberX
+   * entries): Uber prints the rider's street, town, state and country where
+   * a delivery names its restaurant. Kept in the pickup's one shape, the
+   * street as `name` and the town as `detail`, with `address: true`, which
+   * tells the matcher to look for it among the order's doors and corners
+   * rather than compare it with a restaurant's name (score). */
+  function addressPickupOf(line) {
+    var d = dropoffOf(line);
+    return d ? { name: d.street, detail: d.town, address: true } : null;
+  }
+
+  // How many raw lines of a block are kept for "what was read", and how long
+  // each: a block is a header, a trip line, a tip, a map's noise and two
+  // places — rarely more than a dozen.
+  var LINES_MAX = 14;
+
+  /* One block: the lines from a header to the line before the next. `head`
+   * is headOf's answer for its first line: {amount, rest, guessed}, amount
+   * null where the header's amount could not be read. */
+  function readBlock(lines, head) {
+    var e = { amount: head.amount, startedAt: null, tip: null, type: null,
               minutes: null, seconds: null, miles: null, pickup: null, dropoff: null,
               status: 'completed', canceledBy: null, extras: null, trip: false };
-    var detailAt = -1, dropAt = -1;
+    if (head.guessed) e.amountGuessed = true;
+    var headClock = clockOf(head.rest);
+    var clocks = [];
+    var chips = chipsOf(head.rest);
+    var detailAt = -1, dropAt = -1, pickAt = -1;
     for (var i = 1; i < lines.length; i++) {
       var l = lines[i];
-      if (!e.startedAt) e.startedAt = clockOf(l);
+      chipsOf(l).forEach(function (c) { if (chips.indexOf(c) === -1) chips.push(c); });
+      // A clock on a line of its own: the right-hand time filed on a row of
+      // its own, under the map's labels or under the places (both seen) —
+      // but never off a line that looks like another entry's header.
+      var ck = HEAD_ICON.test(l) || LOST.test(l) || HEADISH.test(l) ? null : clockOf(l);
+      if (ck && clocks.indexOf(ck) === -1) clocks.push(ck);
       if (detailAt === -1) {
         var d = detailOf(l);
         if (d) {
           detailAt = i;
           e.trip = true;
-          e.type = cut(d[1]);
-          e.minutes = parseInt(d[2], 10);
-          e.seconds = d[3] ? parseInt(d[3], 10) : 0;
-          e.miles = money(d[4]);
+          e.type = cut(d.kind);
+          e.minutes = d.minutes;
+          e.seconds = d.seconds;
+          e.miles = d.miles;
           continue;
         }
         var c = CANCELED.exec(l);
@@ -276,13 +420,23 @@
       }
       if (dropAt === -1 && DROPOFF.test(l)) dropAt = i;
     }
-    if (dropAt !== -1) {
+    // TWO ADDRESSES IN A ROW are a ride's pair, the rider's street then the
+    // dropoff's (or a canceled delivery's pickup street then "Unknown"): the
+    // first address line is then the PICKUP, not the dropoff. Taken first,
+    // the first build read a ride's pickup street as its dropoff.
+    if (dropAt !== -1 && dropAt + 1 < lines.length
+        && (DROPOFF.test(lines[dropAt + 1]) || UNKNOWN.test(lines[dropAt + 1]))) {
+      pickAt = dropAt;
+      dropAt += 1;
+      e.pickup = addressPickupOf(lines[pickAt]);
+      e.dropoff = UNKNOWN.test(lines[dropAt]) ? null : dropoffOf(lines[dropAt]);
+    } else if (dropAt !== -1) {
       e.dropoff = dropoffOf(lines[dropAt]);
       // The line straight above the dropoff, unless that is one of the block's
       // own lines (a cut-off map can leave nothing between them).
       for (var k = dropAt - 1; k > Math.max(0, detailAt); k--) {
         var above = lines[k];
-        if (isTipLine(above) || EXTRA_LINE.test(above) || clockOf(above) === above) continue;
+        if (isTipLine(above) || EXTRA_LINE.test(above) || clockOf(above) === above || CHIP_LINE.test(above)) continue;
         if (/[A-Za-z]{2}/.test(above)) { e.pickup = pickupOf(above); break; }
       }
     } else {
@@ -299,6 +453,18 @@
         if (/[A-Za-z]{3}/.test(lines[n]) && !clockOf(lines[n])) { e.type = cut(lines[n]); break; }
       }
     }
+    // ITS TIME: the header's own clock; else the one clock above its places.
+    // Two different clocks in one block are two entries' or a misread, and
+    // which is this trip's cannot be told: the time is left unread (and the
+    // trip skipped and said), never picked.
+    if (headClock && !clocks.some(function (c) { return c !== headClock; })) e.startedAt = headClock;
+    else if (!headClock && clocks.length === 1) e.startedAt = clocks[0];
+    else if (clocks.length) e.twoClocks = true;
+    if (e.trip && (RIDE.test(e.type || '') || (e.pickup && e.pickup.address && !/deliver|eats|courier/i.test(e.type || '')))) {
+      e.ride = true;
+    }
+    if (chips.length) e.chips = chips;
+    e.lines = lines.slice(0, LINES_MAX).map(function (x) { return x.slice(0, TEXT_MAX); });
     return e;
   }
 
@@ -317,11 +483,50 @@
    *   others   blocks with an amount and no trip line (adjustments and the
    *            like): kept for the notes only;
    *   notes    what was stepped over, in words. */
+  /* Whether line i opens an entry, and its amount: {amount, rest, guessed}
+   * (amount null for a header whose amount could not be read), or null. */
+  function headOf(lines, i) {
+    var li = lines[i];
+    var m = AMOUNT.exec(li);
+    if (m) return { amount: money(m[1]), rest: m[2], guessed: false };
+    var tripNext = i + 1 < lines.length && isTripLine(lines[i + 1]);
+    m = HEAD_ICON.exec(li);
+    if (m && tripNext) return { amount: money(m[1]), rest: m[2], guessed: false };
+    // Everything else needs the trip's clock on its line.
+    if (!clockOf(li)) return null;
+    if (m) return { amount: money(m[1]), rest: m[2], guessed: false };
+    var near = false;
+    for (var j = i + 1; j <= i + LOST_NEAR && j < lines.length; j++) {
+      if (isTripLine(lines[j])) { near = true; break; }
+    }
+    if (!near) return null;
+    if (i > 0 && BARE.test(lines[i - 1]) && tripNext && dollarRow(li)) {
+      return { amount: money(lines[i - 1]), rest: li, guessed: false, bare: true };
+    }
+    m = LOST.exec(li);
+    if (m) return { amount: money(parseInt(m[1], 10) / 100), rest: m[2], guessed: true };
+    if (HEADISH.test(li)) return { amount: null, rest: li, guessed: false };
+    return null;
+  }
+
+  function dollars(v) { return typeof v === 'number' ? '$' + v.toFixed(2) : '$?'; }
+  function hm12(c) {
+    if (!c) return null;
+    var h = parseInt(c.slice(0, 2), 10);
+    return (h % 12 || 12) + ':' + c.slice(3) + (h >= 12 ? ' PM' : ' AM');
+  }
+
   function parseUber(text, opts) {
     var o = opts || {};
     var lines = String(text || '').split(/\r?\n/).map(clean).filter(Boolean);
     var out = { app: 'uber', day: dayOf(lines, o.now), entries: [], others: [], notes: [] };
-    var starts = [];
+    // THE TALLY, so a screenshot can be seen to have been read whole (the
+    // owner's 17 Nov screenshot showed seven entries and four were read, one
+    // of them wrong, and nothing said so). Every entry seen is accounted for:
+    // read, skipped (no time: said why), unread (its header or its time
+    // could not be read; said why), or cut off at the top by the scroll.
+    var tally = { seen: 0, read: 0, skipped: [], unread: [], cut: 0, others: 0 };
+    var starts = [], heads = {};
     var endAt = lines.length;
     // A pay part ("$1.25 Surge") straight under a trip's line, its tip line
     // or another part is that trip's, not a block of its own. Anything else
@@ -332,8 +537,14 @@
       var li = lines[i];
       if (END_LINE.test(li)) { endAt = i; break; }
       var part = isTipLine(li) || EXTRA_LINE.test(li) && !clockOf(li) && partOk;
-      if (AMOUNT.test(li) && !part) starts.push(i);
-      partOk = part || !!detailOf(li) || CANCELED.test(li);
+      var h = part ? null : headOf(lines, i);
+      if (h) {
+        // ...a header whose digits were filed a row up starts on that row.
+        var at = h.bare && starts[starts.length - 1] !== i - 1 ? i - 1 : i;
+        starts.push(at);
+        heads[at] = h;
+      }
+      partOk = part || isTripLine(li);
     }
     starts = starts.filter(function (s) { return s < endAt; });
     if (starts.length && starts[0] > 0) {
@@ -341,21 +552,96 @@
       // block whose top was scrolled off. Its amount and time are on another
       // screenshot, or nowhere; it is not guessed at.
       var tail = lines.slice(0, starts[0]).filter(function (l) {
-        return DROPOFF.test(l) || !!detailOf(l) || isTipLine(l);
+        return DROPOFF.test(l) || isTripLine(l) || isTipLine(l);
       });
-      if (tail.length) out.notes.push('the top of the first trip was scrolled off; its rest was skipped');
+      if (tail.length) {
+        out.notes.push('the top of the first trip was scrolled off; its rest was skipped');
+        tally.cut = 1;
+      }
     }
     starts.forEach(function (s, k) {
-      var e = readBlock(lines.slice(s, k + 1 < starts.length ? starts[k + 1] : endAt));
-      if (!e.trip) { out.others.push({ amount: e.amount, type: e.type }); return; }
+      var end = k + 1 < starts.length ? starts[k + 1] : endAt;
+      var block = lines.slice(s, end);
+      // A chip alone on the line above the next header is that entry's (the
+      // chip sits on its amount row, and tesseract can file it a row up).
+      var carried = [];
+      if (k + 1 < starts.length && block.length > 1 && CHIP_LINE.test(block[block.length - 1])) {
+        carried = chipsOf(block.pop());
+      }
+      if (carried.length) heads[starts[k + 1]].carried = carried;
+      // TWO TRIP LINES IN ONE BLOCK: a header between them was not read. The
+      // block is cut before the line above the second trip line (where that
+      // header stands), so the first entry never takes the second's clock
+      // or places, and the rest is reported unread.
+      var trips = [];
+      block.forEach(function (l, j) { if (j > 0 && isTripLine(l)) trips.push(j); });
+      if (trips.length > 1) {
+        var cutAt = trips[1] - 1 > trips[0] ? trips[1] - 1 : trips[1];
+        var lost = trips.length - 1;
+        block = block.slice(0, cutAt);
+        tally.seen += lost;
+        for (var u = 0; u < lost; u++) {
+          tally.unread.push({ amount: null, at: null, why: 'a trip line with no header read above it' });
+        }
+        out.notes.push(lost + (lost === 1 ? ' entry' : ' entries') + ' below a ' + dollars(heads[s].amount)
+                       + ' trip had no header read and ' + (lost === 1 ? 'was' : 'were') + ' left unread');
+      }
+      var e = readBlock(block, heads[s]);
+      (heads[s].carried || []).forEach(function (c) {
+        e.chips = e.chips || [];
+        if (e.chips.indexOf(c) === -1) e.chips.push(c);
+      });
+      if (!e.trip) {
+        if (e.amount === null) return;          // a header-like line with nothing under it
+        tally.others += 1;
+        out.others.push({ amount: e.amount, type: e.type });
+        return;
+      }
+      tally.seen += 1;
+      if (e.amount === null) {
+        tally.unread.push({ amount: null, at: e.startedAt, why: 'its amount could not be read' });
+        out.notes.push('an entry' + (e.startedAt ? ' at ' + hm12(e.startedAt) : '')
+                       + ' whose amount could not be read was left unread');
+        return;
+      }
       if (!e.startedAt) {
-        out.notes.push('a $' + e.amount.toFixed(2) + ' trip with no time on it was skipped');
+        var why = e.twoClocks ? 'two times in its block' : 'no time';
+        var what = dollars(e.amount) + (e.status === 'canceled' ? ' canceled' : '');
+        tally.skipped.push({ amount: e.amount, status: e.status, why: why });
+        out.notes.push(e.twoClocks ? 'a ' + what + ' trip with two times in its block was skipped: which is its own '
+                                     + 'cannot be told'
+                         : 'a ' + dollars(e.amount) + ' trip with no time on it was skipped');
         return;
       }
       delete e.trip;
+      delete e.twoClocks;
+      tally.read += 1;
       out.entries.push(e);
     });
+    tally.seen += tally.cut;
+    out.tally = tally;
     return out;
+  }
+
+  /* The tally in words, for the upload's answer and the offers page:
+   * "7 entries seen, 6 read, 1 skipped (no time: $0.00 canceled)". `short`
+   * is true when anything seen was not read. */
+  function tallyWords(t) {
+    if (!t || typeof t.seen !== 'number') return null;
+    var parts = [t.seen + (t.seen === 1 ? ' entry seen' : ' entries seen'), t.read + ' read'];
+    var skipped = Array.isArray(t.skipped) ? t.skipped : [], unread = Array.isArray(t.unread) ? t.unread : [];
+    if (skipped.length) {
+      parts.push(skipped.length + ' skipped (' + skipped.map(function (x) {
+        return x.why + ': ' + dollars(x.amount) + (x.status === 'canceled' ? ' canceled' : '');
+      }).join('; ') + ')');
+    }
+    if (unread.length) {
+      parts.push(unread.length + ' unread (' + unread.map(function (x) {
+        return x.why + (x.at ? ' at ' + hm12(x.at) : '');
+      }).join('; ') + ')');
+    }
+    if (t.cut) parts.push(t.cut + ' cut off at the top (read it from the screenshot above)');
+    return parts.join(', ');
   }
 
   /* DoorDash's earnings screen. No screenshot of it has been seen yet, so
@@ -540,6 +826,14 @@
     var out = JSON.parse(JSON.stringify(old));
     var changed = false;
     var regress = tipStatus(old) === 'settled' && tipStatus(fresh) === 'pending';
+    // An amount guessed past a lost decimal point (amountGuessed) never
+    // replaces one read whole; one read whole replaces a guess, and the mark
+    // goes with it.
+    if (fresh.amountGuessed && !old.amountGuessed) regress = true;
+    if (old.amountGuessed && !fresh.amountGuessed && typeof fresh.amount === 'number') {
+      delete out.amountGuessed;
+      if (fresh.amount === old.amount) changed = true;
+    }
     if (!regress && (fresh.amount !== old.amount || tipStatus(fresh) !== tipStatus(old)
                      || (typeof fresh.tip === 'number' && fresh.tip !== old.tip))) {
       out.amount = fresh.amount;
@@ -548,7 +842,8 @@
         .concat([{ at: at, amount: fresh.amount, tip: fresh.tip }]).slice(-HISTORY_MAX);
       changed = true;
     }
-    ['type', 'minutes', 'seconds', 'miles', 'pickup', 'dropoff', 'extras', 'canceledBy'].forEach(function (k) {
+    ['type', 'minutes', 'seconds', 'miles', 'pickup', 'dropoff', 'extras', 'canceledBy', 'chips', 'ride',
+     'lines'].forEach(function (k) {
       if ((out[k] === null || out[k] === undefined) && fresh[k] !== null && fresh[k] !== undefined) {
         out[k] = fresh[k];
         changed = true;
@@ -836,7 +1131,16 @@
       p.finish = W.finish * band(h, FINISH_EARLY_FULL, FINISH_LATE_FULL, FINISH_EARLY_ZERO, FINISH_LATE_ZERO);
     }
     var name = e.pickup && e.pickup.name;
-    if (name && c.names.length) {
+    if (name && e.pickup.address) {
+      // A RIDE'S PICKUP IS A STREET (addressPickupOf): looked for among the
+      // order's doors and names — a ride card's pickup is the rider's corner
+      // ("Sample St & Mock Rd, Faketown") — by `within`, for the name's
+      // points. Never the penalty: a street not on the card's corner is a
+      // street near it as often as another trip, and a restaurant's name is
+      // nothing to compare a street with.
+      var aw = bestOf(c.doors.concat(c.names), function (n) { return within(name, n); });
+      if (aw >= WITHIN_MIN) p.name = W.name * aw;
+    } else if (name && c.names.length) {
       var s = bestOf(c.names, function (n) { return similar(name, n); });
       p.name = s >= NAME_MIN ? W.name * s : s < NAME_OTHER ? -NAME_PENALTY : 0;
     }
@@ -859,13 +1163,18 @@
       // a street none of them names costs a batch nothing.
       var drops = c.dropoffs && c.dropoffs.length ? c.dropoffs : [c.dropoff];
       var w = bestOf(drops, function (dx) { return within(street, dx); });
-      p.dropoff = w >= WITHIN_MIN ? W.dropoff * w : w === 0 && !c.batch ? -DROP_PENALTY : 0;
+      // ...nor a ride's: its card names the rider's destination as a corner
+      // near the door, and Uber's screen the door's own street.
+      p.dropoff = w >= WITHIN_MIN ? W.dropoff * w : w === 0 && !c.batch && !e.ride ? -DROP_PENALTY : 0;
     }
     if (typeof e.miles === 'number' && c.miles !== null && c.miles !== undefined) {
       var span = Math.max(2, 0.35 * e.miles);
       p.miles = W.miles * Math.max(0, 1 - Math.abs(e.miles - c.miles) / span);
     }
-    if (!canceled && typeof e.amount === 'number' && c.pay !== null && c.pay !== undefined && e.tip !== 'processing') {
+    // ...and not for an amount guessed past a lost decimal point: a guess
+    // earns nothing.
+    if (!canceled && !e.amountGuessed && typeof e.amount === 'number' && c.pay !== null && c.pay !== undefined
+        && e.tip !== 'processing') {
       var off = Math.abs(e.amount - c.pay);
       var zero = Math.max(PAY_ZERO, PAY_ZERO_SHARE * c.pay);
       p.pay = off <= PAY_FULL ? W.pay : W.pay * Math.max(0, 1 - (off - PAY_FULL) / (zero - PAY_FULL));
@@ -1092,6 +1401,8 @@
     var pending = e.tip === 'processing' || e.tipStatus === 'pending';
     if (paid !== null && card !== null) {
       if (pending) out.pay = { card: card, paid: paid, pending: true };
+      // An amount guessed past a lost decimal point is shown, never compared.
+      else if (e.amountGuessed) out.pay = { card: card, paid: paid, guessed: true };
       else {
         var d = r2(paid - card);
         out.pay = { card: card, paid: paid, diff: d, word: d > 0.005 ? 'more' : d < -0.005 ? 'less' : 'as carded',
@@ -1114,10 +1425,10 @@
     }
     if (card !== null && cm !== null && cm > 0) {
       out.perHour = { card: r2(card / (cm / 60)),
-                      actual: paid !== null && !pending && um ? r2(paid / (um / 60)) : null };
+                      actual: paid !== null && !pending && !e.amountGuessed && um ? r2(paid / (um / 60)) : null };
     }
     if (card !== null && ci !== null && ci >= 0.1) {
-      out.perMile = { card: r2(card / ci), actual: paid !== null && !pending && ui >= 0.1 ? r2(paid / ui) : null };
+      out.perMile = { card: r2(card / ci), actual: paid !== null && !pending && !e.amountGuessed && ui >= 0.1 ? r2(paid / ui) : null };
     }
     return out;
   }
@@ -1130,12 +1441,17 @@
    * trip's key and start, no place. Canceled and pending counted beside. */
   var BIGGEST_GAPS = 3;
   function daySummary(entries) {
+    // `total` is every trip's amount as read, matched or not — the figure to
+    // hold against Uber's own day total in the app — and `guessed` how many
+    // of them were guessed past a lost decimal point.
     var out = { trips: 0, matched: 0, needs: 0, none: 0, canceled: 0, pending: 0, compared: 0,
                 card: 0, paid: 0, diff: 0, faster: 0, onTime: 0, slower: 0, untimed: 0,
-                medianMinutes: null, biggest: [] };
+                medianMinutes: null, biggest: [], total: 0, guessed: 0 };
     var gaps = [], pays = [];
     (entries || []).forEach(function (e) {
       out.trips += 1;
+      if (typeof e.amount === 'number') out.total += e.amount;
+      if (e.amountGuessed) out.guessed += 1;
       var st = (e.match || {}).status;
       if (st === 'needs') out.needs += 1;
       else if (st === 'none' || !st) out.none += 1;
@@ -1145,6 +1461,7 @@
       if (c.canceled) { out.canceled += 1; return; }
       if (!c.pay) return;
       if (c.pay.pending) { out.pending += 1; return; }
+      if (c.pay.guessed) return;
       out.compared += 1;
       out.card += c.pay.card;
       out.paid += c.pay.paid;
@@ -1152,7 +1469,7 @@
       if (c.time) { out[c.time.word === 'on time' ? 'onTime' : c.time.word] += 1; gaps.push(c.time.diff); }
       else out.untimed += 1;
     });
-    out.card = r2(out.card); out.paid = r2(out.paid); out.diff = r2(out.paid - out.card);
+    out.card = r2(out.card); out.paid = r2(out.paid); out.diff = r2(out.paid - out.card); out.total = r2(out.total);
     if (gaps.length) {
       gaps.sort(function (a, b) { return a - b; });
       var h = gaps.length;
@@ -1250,6 +1567,7 @@
     ON_TIME_MIN: ON_TIME_MIN, ON_TIME_SHARE: ON_TIME_SHARE, MILES_SAME: MILES_SAME,
     MILES_SAME_SHARE: MILES_SAME_SHARE, BIGGEST_GAPS: BIGGEST_GAPS,
     uberTimingFor: uberTimingFor,
+    tallyWords: tallyWords, stripIcon: stripIcon, detailOf: detailOf, LINES_MAX: LINES_MAX,
     parse: parse, parseUber: parseUber, parseDoorDash: parseDoorDash, detectApp: detectApp,
     PARSERS: PARSERS, dayOf: dayOf, clockOf: clockOf, yearFor: yearFor,
     words: words, similar: similar, within: within, clockField: clockField, startMs: startMs, endMs: endMs,

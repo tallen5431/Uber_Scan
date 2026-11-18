@@ -220,7 +220,8 @@
   #earnings .cmp { border-top: 1px solid var(--line); padding: 6px 0; font-size: 13px; line-height: 1.45;
                    overflow-wrap: anywhere; }
   #earnings .cmp span { display: block; }
-  #earnings .cmp .flag { font-weight: 700; }
+  #earnings .cmp .flag, #earnings em.flag { font-weight: 700; }
+  #earnings .rawread pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 4px 0; }
   #earningsDay { display: block; width: 100%; box-sizing: border-box; min-height: 44px; margin: 4px 0 8px;
                  font: inherit; }
   #earnings .daytools { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
@@ -3764,7 +3765,7 @@
     if (e.status === 'canceled') {
       return '<div class="cmp"><b>' + esc(hm) + '</b><span>Card: ' + esc(cardBits.join(' · ')) + '</span>'
         + '<span>Uber: ' + esc('canceled' + (e.canceledBy ? ' by ' + e.canceledBy : '') + ', paid ' + money(e.amount, 2))
-        + '</span></div>';
+        + '</span>' + readBits(e) + '</div>';
     }
     var um = typeof e.minutes === 'number' ? Math.round((e.minutes + (e.seconds || 0) / 60) * 100) / 100 : null;
     var ui = typeof e.miles === 'number' ? e.miles : null;
@@ -3776,6 +3777,7 @@
     var flagged = false;
     if (card !== null) {
       if (pending) diff.push('pay: tip still processing');
+      else if (e.amountGuessed) diff.push('pay: not compared, the amount is a guess');
       else {
         var d = Math.round((e.amount - card) * 100) / 100;
         flagged = Math.abs(d) > Math.max(0.5, 0.03 * card);
@@ -3794,16 +3796,16 @@
       diff.push((md < -mt ? 'shorter' : md > mt ? 'longer' : 'miles as said') + ' (' + (md >= 0 ? '+' : '−')
                 + num(Math.abs(md), 1) + ' mi)');
     }
-    if (card !== null && cm && um && !pending) {
+    if (card !== null && cm && um && !pending && !e.amountGuessed) {
       diff.push('card ' + money(card / (cm / 60), 2) + '/hr, actual ' + money(e.amount / (um / 60), 2) + '/hr');
     }
-    if (card !== null && ci >= 0.1 && ui >= 0.1 && !pending) {
+    if (card !== null && ci >= 0.1 && ui >= 0.1 && !pending && !e.amountGuessed) {
       diff.push('card ' + money(card / ci, 2) + '/mi, actual ' + money(e.amount / ui, 2) + '/mi');
     }
     return '<div class="cmp"><b>' + esc(hm) + '</b><span>Card: ' + esc(cardBits.join(' · ')) + '</span>'
       + '<span>Uber: ' + esc(uberBits.join(' · ')) + '</span>'
       + (diff.length ? '<span' + (flagged ? ' class="flag"' : '') + '>Difference: ' + esc(diff.join(' · ')) + '</span>' : '')
-      + '</div>';
+      + readBits(e) + '</div>';
   }
 
   // A day's line in the list of days with earnings: its trips, what was
@@ -3848,17 +3850,56 @@
           return st === 'matched' || st === 'picked';
         });
         var other = (ans.entries || []).length - list.length;
-        body.innerHTML = (list.length ? list.map(cmpBlock).join('') : '<p class="note">No trip of that day is matched to an order yet.</p>')
+        body.innerHTML = readWhole(ans)
+          + (list.length ? list.map(cmpBlock).join('') : '<p class="note">No trip of that day is matched to an order yet.</p>')
           + (other ? '<p class="note">' + other + (other === 1 ? ' trip' : ' trips')
                      + ' of that day not matched (above, or with no order on file).</p>' : '');
       });
+  }
+
+  /* WAS THE DAY READ WHOLE (the owner's 17 Nov screenshot: seven entries,
+     four read, one wrong, nothing said). Each screenshot's tally from the
+     server — "Screenshot 2: 7 entries seen, 6 read, 1 skipped (no time:
+     $0.00 canceled)", a shortfall in bold — and the day's total paid as
+     read, every trip matched or not, to hold against Uber's own day total
+     in the app. */
+  function readWhole(ans) {
+    var shots = Array.isArray(ans.shotsRead) ? ans.shotsRead : [];
+    var sum = ans.summary || {};
+    var lines = shots.map(function (x, i) {
+      var t = x.tally;
+      if (!t) return '<span>Screenshot ' + (i + 1) + ': no tally kept for it.</span>';
+      return '<span' + (t.short ? ' class="flag"' : '') + '>Screenshot ' + (i + 1) + ': ' + esc(t.words || '')
+        + (t.short ? ' — not all of it was read; check it against the app' : '') + '.</span>';
+    });
+    if (typeof sum.total === 'number') {
+      lines.push('<span>Paid as read: ' + esc(money(sum.total, 2)) + ' over ' + sum.trips
+        + (sum.trips === 1 ? ' trip' : ' trips') + (sum.guessed ? ' (' + sum.guessed + ' amount'
+        + (sum.guessed === 1 ? '' : 's') + ' to check)' : '') + ' — compare it with the day\'s total in the app.</span>');
+    }
+    return lines.length ? '<div class="cmp readwhole">' + lines.join('') + '</div>' : '';
+  }
+
+  /* WHAT WAS READ for one trip: the raw lines of its block, collapsed, so a
+     doubtful row can be checked by eye without the picture (which is never
+     served); and "check this" on an amount guessed past a lost decimal
+     point. */
+  function readBits(e) {
+    var out = '';
+    if (e.amountGuessed) out += '<em class="flag">Check this: the amount was read without its decimal point.</em>';
+    if (Array.isArray(e.lines) && e.lines.length) {
+      out += '<details class="rawread"><summary>What was read</summary><pre>' + esc(e.lines.join('\n'))
+        + '</pre></details>';
+    }
+    return out;
   }
 
   function entryLine(e) {
     var bits = [money(e.amount, 2) + ' (' + tipWords(e) + ')'];
     if (e.pickup && e.pickup.name) bits.push(e.pickup.name + (e.pickup.detail ? ' (' + e.pickup.detail + ')' : ''));
     if (typeof e.minutes === 'number') bits.push(e.minutes + ' min' + (typeof e.miles === 'number' ? ', ' + e.miles + ' mi' : ''));
-    return '<b>' + esc(dayLabel(e.date) + ' ' + clockOfHm(e.startedAt || e.finishedAt)) + '</b>' + esc(bits.join(' · '));
+    return '<b>' + esc(dayLabel(e.date) + ' ' + clockOfHm(e.startedAt || e.finishedAt)) + '</b>' + esc(bits.join(' · '))
+      + readBits(e);
   }
 
   function showEarnings(ans) {
@@ -4011,6 +4052,12 @@
       }
       if (skipped.length) words.push('Not sent: ' + skipped.join('; ') + '.');
       if (notes.length) words.push(notes.join('; ') + '.');
+      // ...and each screenshot's tally, a shortfall said first.
+      read.forEach(function (a, i) {
+        if (!a.tally || !a.tally.words) return;
+        words.push('Screenshot ' + (i + 1) + ': ' + a.tally.words
+                   + (a.tally.short ? ' — NOT ALL READ, check it against the app' : '') + '.');
+      });
       earningsSaid = words.join(' ');
       load();
     };

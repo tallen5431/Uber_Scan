@@ -182,6 +182,111 @@ def screen(trips=None, day='Sat, Nov 7', chip='11/7', end='End of activities dur
     return im.crop((0, 0, W, max(H, y + 20)))
 
 
+# The owner's 17 Nov screenshot showed rides beside deliveries, and what the
+# first layouts lacked: a round icon left of every amount (a person for a
+# ride, a bag for a delivery), a pin and a circle before the two place lines,
+# a ride's pickup printed as the rider's street, a ride over an hour ("1 hr 1
+# min"), a green "Increased" chip on an amount's row, a "Boost+" chip with no
+# amount beside a tip, and a canceled $0.00 entry between two trips whose
+# dropoff is "Unknown". Invented as everything here: (icon, amount, kind,
+# duration or None, miles, time, tip, chip, pickup, dropoff). `time` None
+# draws the canceled entry's time too faint to read — the shape of the
+# screenshot's "B5I PHI", which no rule should guess at.
+TRIPS_17 = [
+    ('ride', '$22.10', 'Comfort', '17 min 40 sec', '9.40', '10:31 PM', '$3.00 Tip', None,
+     'Sample St, Faketown, GA, USA', 'Mock Rd SE, Notaville, GA, USA'),
+    ('bag', '$11.00', 'Delivery', '12 min 30 sec', '3.10', '9:37 PM', '$6.00 Tip', None,
+     'Pretend Pizza (100 Example Ave SE)', 'Imaginary Way, Inventon, GA, USA'),
+    ('canceled', '$0.00', 'Delivery · You canceled', None, None, None, None, None,
+     'Fictional Ct NW, Faketown, GA, USA', 'Unknown'),
+    ('ride', '$21.30', 'Comfort', '26 min 10 sec', '12.20', '8:12 PM', None, 'Increased',
+     'Placeholder Pkwy, Notaville, GA, USA', '12th St NE, Faketown, GA, USA'),
+    ('bag', '$19.75', 'Delivery', '30 min 5 sec', '11.00', '7:05 PM', '$2.50 Tip', 'Boost+',
+     'Nowhere Noodles West Inventon', 'Storybook Ln, Faketown, GA, USA'),
+    ('ride', '$30.10', 'UberX', '1 hr 4 min', '20.50', '5:48 PM', None, None,
+     'Hidden Sample Ct, Notaville, GA, USA', 'Sample St, Faketown, GA, USA'),
+]
+
+
+def _icon(d, x, y, kind):
+    """The round icon left of an amount: a person (ride), a bag (delivery) or
+    a slashed circle (canceled), grey on a pale disc, as the screen draws it."""
+    d.ellipse([x, y, x + 44, y + 44], fill=(242, 242, 242))
+    if kind == 'ride':
+        d.ellipse([x + 16, y + 9, x + 28, y + 21], outline=INK, width=3)
+        d.arc([x + 11, y + 22, x + 33, y + 42], 180, 360, fill=INK, width=3)
+    elif kind == 'bag':
+        d.rounded_rectangle([x + 13, y + 15, x + 31, y + 33], radius=3, outline=TIP_GREEN, width=3)
+        d.arc([x + 17, y + 9, x + 27, y + 20], 180, 360, fill=TIP_GREEN, width=2)
+    else:
+        d.ellipse([x + 12, y + 12, x + 32, y + 32], outline=GREY, width=2)
+        d.line([(x + 15, y + 29), (x + 29, y + 15)], fill=GREY, width=2)
+
+
+def _pin(d, x, y, first):
+    """The small grey icon before a place line: a pin, then a ringed dot."""
+    if first:
+        d.ellipse([x, y, x + 12, y + 12], fill=GREY)
+        d.polygon([(x + 2, y + 9), (x + 10, y + 9), (x + 6, y + 18)], fill=GREY)
+    else:
+        d.ellipse([x, y + 2, x + 13, y + 15], outline=GREY, width=3)
+
+
+def screen17(trips=None, day='Tue, Nov 17', chip='11/17', end='End of activities during Nov 17, 2026'):
+    """The rides-and-deliveries layout of the owner's 17 Nov screenshot, at
+    the phone's width, its maps short as that screen draws them."""
+    trips = TRIPS_17 if trips is None else trips
+    im = Image.new('RGB', (W, H * 2), (255, 255, 255))
+    d = ImageDraw.Draw(im)
+    d.text((24, 8), '11:52', font=font(22, True), fill=INK)
+    y = 60
+    d.text((24, y), '<', font=font(34), fill=INK)
+    d.text((90, y), 'Earnings Activity', font=font(32, True), fill=INK)
+    y += 70
+    d.rounded_rectangle([24, y, 130, y + 44], radius=22, fill=CHIP)
+    d.text((40, y + 8), chip, font=font(24, True), fill=INK)
+    y += 70
+    d.text((24, y), day, font=font(22), fill=GREY)
+    y += 50
+    for i, t in enumerate(trips):
+        icon, amount, kind, dur, miles, clock, tip, chip_, pickup, dropoff = t
+        _icon(d, 24, y, icon)
+        d.text((86, y), amount, font=font(28, True), fill=INK)
+        if chip_ == 'Increased':
+            x0 = 86 + d.textlength(amount, font=font(28, True)) + 14
+            d.rounded_rectangle([x0, y + 2, x0 + 160, y + 36], radius=6, fill=(228, 245, 233))
+            d.text((x0 + 10, y + 6), '↑ Increased', font=font(22), fill=TIP_GREEN)
+        if clock:
+            d.text((W - 24 - d.textlength(clock, font=font(22)), y + 22), clock, font=font(22), fill=INK)
+        else:
+            d.text((W - 24 - d.textlength('8:51 PM', font=font(22)), y + 22), '8:51 PM', font=font(9),
+                   fill=(236, 236, 236))
+        y += 38
+        detail = kind if dur is None else '%s · %s · %s mi' % (kind, dur, miles)
+        d.text((86, y), detail, font=font(22), fill=INK)
+        y += 36
+        if tip:
+            d.text((24, y), tip, font=font(22), fill=INK)
+            if chip_ == 'Boost+':
+                d.text((24 + d.textlength(tip, font=font(22)) + 40, y), 'Boost+', font=font(22), fill=INK)
+            y += 34
+        y += 6
+        _map(d, 12, y, W - 24, 120, i + 1)
+        y += 134
+        _pin(d, 16, y + 4, True)
+        d.text((40, y), pickup, font=font(22), fill=INK)
+        y += 32
+        _pin(d, 16, y + 4, False)
+        d.text((40, y), dropoff, font=font(22), fill=INK)
+        y += 32
+        d.rectangle([0, y + 10, W, y + 22], fill=(242, 242, 242))
+        y += 36
+    if end:
+        d.text((W // 2 - d.textlength(end, font=font(24)) // 2, y + 10), end, font=font(24), fill=INK)
+        y += 60
+    return im.crop((0, 0, W, max(H, y + 20)))
+
+
 def acceptance_screen(rate=23, last10=4, requests=100, accepted=23, declined=77, scale=1.0):
     """Uber's Acceptance rate screen (Uber Pro -> Acceptance rate), as the
     owner's screenshot of 15 Nov 2026 laid it out, every figure invented: a

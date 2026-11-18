@@ -15195,6 +15195,18 @@ try:
        [(d.get('date'), d.get('trips'), d.get('matched'), d.get('none')) for d in get(_eb, '/api/earnings').get('days') or []],
        [('2026-11-07', 3, 1, 1)])
     eq('[earnings] ...a ?day= that is not a day is no filter', get(_eb, '/api/earnings?day=nov7&days=0').get('day'), None)
+    # Read whole (the owner's 17 Nov screenshot): the upload's tally, the
+    # day's screenshots each with theirs, the day's total as read, and each
+    # trip's raw lines for "what was read".
+    eq('[earnings] the upload says the screenshot was read whole: entries seen, read, nothing short',
+       ((_a.get('tally') or {}).get('seen'), (_a.get('tally') or {}).get('read'), (_a.get('tally') or {}).get('short'),
+        (_a.get('tally') or {}).get('words')), (3, 3, False, '3 entries seen, 3 read'))
+    eq('[earnings] ?day= lists the day\'s screenshots with their tallies (no picture, no path), and the total as read',
+       ([(x.get('app'), (x.get('tally') or {}).get('words')) for x in _dg.get('shotsRead') or []],
+        _ds.get('total'), _ds.get('guessed')),
+       ([('uber', '3 entries seen, 3 read')], 34.3, 0))
+    ok_('[earnings] ...each trip keeps the raw lines of its block, its amount\'s line first',
+        all((r.get('lines') or [''])[0].startswith('$') for r in _dg.get('entries') or []))
 
     # --- kept as one trip -----------------------------------------------------
     _s, _a = _eraw(_eb, '/api/earnings/shot?batch=b1', _day, 'image/png')
@@ -15265,6 +15277,21 @@ try:
     _s, _a = post(_eb, '/api/earnings/reread', {})
     eq('[earnings] "read again" with nothing waiting: matched again, nothing changed',
        (_s, _a.get('read'), _a.get('added'), _a.get('changed')), (200, 0, 0, 0))
+
+    # --- rides, and a canceled trip whose time cannot be read (17 Nov) ---------
+    _s, _a = _eraw(_eb, '/api/earnings/shot', _epng(_ET.screen17()), 'image/png')
+    eq('[earnings] the rides layout: five trips filed, the canceled one skipped, and the shortfall said',
+       (_s, _a.get('day'), _a.get('trips'), (_a.get('tally') or {}).get('short'), (_a.get('tally') or {}).get('words')),
+       (200, '2026-11-17', 5, True, '6 entries seen, 5 read, 1 skipped (no time: $0.00 canceled)'))
+    _r17 = get(_eb, '/api/earnings?day=2026-11-17')
+    eq('[earnings] ...its rows: the rides said, the chips kept, nothing at the canceled trip\'s place in time',
+       [(r.get('startedAt'), r.get('ride'), r.get('chips'), r.get('status')) for r in _r17.get('entries') or []],
+       [('17:48', True, None, 'completed'), ('19:05', None, ['boost+'], 'completed'),
+        ('20:12', True, ['increased'], 'completed'), ('21:37', None, None, 'completed'),
+        ('22:31', True, None, 'completed')])
+    eq('[earnings] ...and the day\'s screenshot listed with its tally, the shortfall flagged',
+       [((x.get('tally') or {}).get('short'), (x.get('tally') or {}).get('read')) for x in _r17.get('shotsRead') or []],
+       [(True, 5)])
 finally:
     stop(_ep)
 

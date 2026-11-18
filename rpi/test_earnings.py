@@ -133,8 +133,27 @@ for name, im in SCREENS.items():
     p = os.path.join(WORK, name.replace(' ', '-') + ('.jpg' if name == 'jpeg' else '.png'))
     T.save(im.convert('RGB'), p, 'JPEG' if name == 'jpeg' else 'PNG')
     paths[name] = p
+# The 17 Nov layout: rides beside deliveries, the icons, a canceled entry
+# whose time cannot be read between two trips, the chips, a ride over an
+# hour; as drawn and as a JPEG.
+for name, kind in (('rides', 'PNG'), ('rides jpeg', 'JPEG')):
+    p = os.path.join(WORK, name.replace(' ', '-') + ('.jpg' if kind == 'JPEG' else '.png'))
+    T.save(T.screen17().convert('RGB'), p, kind)
+    paths[name] = p
+    SCREENS[name] = None
 names = list(SCREENS)
 got = dict(zip(names, parse_all([ocr(paths[n]) for n in names])))
+
+
+def bare(entries):
+    """Entries without what each keeps of its block's raw lines (checked
+    on its own below), so they compare with `want`."""
+    out = []
+    for e in entries:
+        e = dict(e)
+        e.pop('lines', None)
+        out.append(e)
+    return out
 
 # --- the owner's layout, as drawn --------------------------------------------
 for name in ('png', 'time on the trip line', 'jpeg'):
@@ -142,7 +161,7 @@ for name in ('png', 'time on the trip line', 'jpeg'):
     eq('[screen %s] Uber\'s screen, its day from the end line' % name,
        (g['app'], (g['day'] or {}).get('iso'), (g['day'] or {}).get('from')), ('uber', '2026-11-07', 'end'))
     eq('[screen %s] every trip, in the screen\'s order, with every field' % name,
-       g['entries'], [want(t) for t in T.TRIPS])
+       bare(g['entries']), [want(t) for t in T.TRIPS])
     eq('[screen %s] nothing stepped over' % name, (g['others'], g['notes']), ([], []))
 
 # --- a scroll -------------------------------------------------------------------
@@ -152,7 +171,7 @@ eq('[screen scrolled] no header and no end line: no day said (the server takes i
 eq('[screen scrolled] the first trip, its top scrolled off, is skipped and said; the two below read whole',
    ([e['startedAt'] for e in g['entries']], g['notes']),
    (['16:50', '15:58'], ['the top of the first trip was scrolled off; its rest was skipped']))
-eq('[screen scrolled] ...and they are the same trips the top of the day read', g['entries'],
+eq('[screen scrolled] ...and they are the same trips the top of the day read', bare(g['entries']),
    [want(t) for t in T.TRIPS[1:]])
 
 # --- another day ----------------------------------------------------------------
@@ -167,9 +186,53 @@ eq('[screen another day] its own day, a settled tip and a pending one, a chain\'
 g = got['surge and canceled']
 eq('[screen surge and canceled] its day, and every trip with every field: the tip and the surge off one line, '
    'the canceled trip with no minutes or miles and its places kept',
-   ((g['day'] or {}).get('iso'), g['entries']), ('2026-11-12', [want(t) for t in T.TRIPS_12]))
+   ((g['day'] or {}).get('iso'), bare(g['entries'])), ('2026-11-12', [want(t) for t in T.TRIPS_12]))
 eq('[screen surge and canceled] ...the surge no block of its own, nothing stepped over', (g['others'], g['notes']),
    ([], []))
+
+# --- rides, icons and a canceled trip between two trips (17 Nov) ----------------
+
+
+def want17(t):
+    """A TRIPS_17 row as the parser should give it back."""
+    icon, amount, kind, dur, miles, clock, tip, chip, pickup, dropoff = t
+    h, m = clock.split()[0].split(':')
+    h = int(h) % 12 + (12 if clock.endswith('PM') else 0)
+    hrs = int(dur.split(' hr')[0]) if ' hr' in dur else 0
+    mins = int(dur.split(' min')[0].split()[-1])
+    secs = int(dur.split(' sec')[0].split()[-1]) if 'sec' in dur else 0
+    street, town = dropoff.split(', ')[:2]
+    if icon == 'ride':
+        ps, pt = pickup.split(', ')[:2]
+        pick = {'name': ps, 'detail': pt, 'address': True}
+    else:
+        name, _, detail = pickup.partition(' (')
+        pick = {'name': name, 'detail': detail.rstrip(')') or None}
+    e = {'amount': float(amount[1:]), 'startedAt': '%02d:%s' % (h, m),
+         'tip': float(tip.split()[0][1:]) if tip else None, 'type': kind,
+         'minutes': 60 * hrs + mins, 'seconds': secs, 'miles': float(miles), 'pickup': pick,
+         'dropoff': {'street': street, 'town': town}, 'status': 'completed', 'canceledBy': None, 'extras': None}
+    if icon == 'ride':
+        e['ride'] = True
+    if chip:
+        e['chips'] = [chip.lower()]
+    return e
+
+
+for name in ('rides', 'rides jpeg'):
+    g = got[name]
+    eq('[screen %s] its day; every trip but the canceled one read whole, rides with their streets, the chips, '
+       'the ride over an hour' % name,
+       ((g['day'] or {}).get('iso'), bare(g['entries'])),
+       ('2026-11-17', [want17(t) for t in T.TRIPS_17 if t[0] != 'canceled']))
+    eq('[screen %s] the canceled trip, its time unreadable, never takes the next trip\'s time: skipped and said, '
+       'and the tally accounts for every entry' % name,
+       (g['notes'], g['tally']['seen'], g['tally']['read'], g['tally']['skipped'], g['tally']['unread'],
+        g['tally']['cut']),
+       (['a $0.00 trip with no time on it was skipped'], 6, 5,
+        [{'amount': 0, 'status': 'canceled', 'why': 'no time'}], [], 0))
+    ok_('[screen %s] each trip keeps its block\'s raw lines for "what was read"' % name,
+        all(isinstance(e.get('lines'), list) and 3 <= len(e['lines']) <= 14 for e in g['entries']))
 
 # --- Uber's Acceptance rate screen (the owner, 15 Nov 2026) -----------------------
 # The Gold card's optional reader: Uber's own three figures and its k/10, read
@@ -216,6 +279,7 @@ for name, im, want_ in (
 # The owner's phone: about 756 wide. Drawn at that width and no wider, so the
 # suite reads what an upload from that phone would be.
 eq('[screen] drawn at the phone\'s width', SCREENS['png'].size[0], 756)
+eq('[screen] the rides layout drawn at the phone\'s width too', T.screen17().size[0], 756)
 ok_('[screen] ...and at least its height (%r)' % (SCREENS['png'].size,), SCREENS['png'].size[1] >= 2000)
 
 shutil.rmtree(WORK, ignore_errors=True)
