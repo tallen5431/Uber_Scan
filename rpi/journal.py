@@ -1561,6 +1561,10 @@ def row_for(parsed, rate, at, first_at=None, offer_id=None, seq=1, ms=None,
         # payout was read under it and never parses its text again — on a lite
         # rig it then never loads the parser for the rows it writes.
         'payLabelled': bool(parsed.get('payLabelled')),
+        # The part of the payout the card calls Boost+ or Peak Pay (OP boost_of),
+        # kept so the Trends tab's boost share has something to count. Read for
+        # the record only: no verdict or figure is worked from it.
+        'boost': parsed.get('boost'),
         'minutes': minutes,
         'miles': miles,
         # How much of those two is the drive to the pickup rather than the job.

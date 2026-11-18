@@ -5405,6 +5405,10 @@ def emit(rate, parsed, ms, locked, tracker=None, scanner=None, whole=None,
         'perMile': (round(rate['perMile'], 2)
                     if rate.get('perMile') is not None else None),
         'pay': parsed['pay'],
+        # ...and how much of it the card says was Boost+ or Peak Pay, for the
+        # panel's "incl. $2.93 Boost" (offer_parser boost_of). A label: no
+        # verdict, rate or rule reads it.
+        'boost': parsed.get('boost'),
         'minutes': parsed['minutes'],
         # The minutes the verdict was made over, and where they came from. On a
         # ride card this is the card's own figure; on a delivery card the card
