@@ -123,6 +123,84 @@
  * chance). A calendar tile is one day on purpose — the day-to-day swing IS
  * what a tile asks about — so it takes the plain interval at 2 hours.
  *
+ * ROUND THREE (the owner, Nov 2026): what the hours EARNED, how long a good
+ * offer takes, which app brings them, the rig off against a quiet hour, an
+ * hour x date timeline, two periods cell by cell, one weekday over the weeks
+ * and the thirds of a month. Still descriptive: nothing here reaches the
+ * verdict, the target, the panel, the rig or any rule.
+ *
+ * EARNED PER HOUR ONLINE, gross or net. The card's pay of the offers the
+ * driver ticked taken (the taken bit; silence is never an accept, so it is a
+ * floor), net of their miles at ONE cost per mile — the rig's own setting,
+ * the one every verdict is already net of (AUDITS.md, "Every verdict was net
+ * of a cost per mile nobody chose") — over every minute online in the cell,
+ * waiting included. Not a $/mi rule and not a floor: a cost the driver set,
+ * subtracted for reading. The interval is earnCI's weighted-Poisson gamma
+ * interval (Fay and Feuer), widened by phi off the takes. The brief offered
+ * a bootstrap over driver days; it was simulated first and refused. Cells of
+ * one-hour nights, takes 1 an hour with a 40% night-to-night swing, pay
+ * log-normal around $12 (40 cells x 100 grids a row), shaded against the
+ * true rate at 99%:
+ *
+ *     nights x hours | bootstrap over days | gamma, plain | gamma, widened | widened, +50%
+ *     ---------------+---------------------+--------------+----------------+--------------
+ *      2 x 1 h       |        51.6%        |     0.3%     |      0.2%      |      1%
+ *      3 x 1 h       |        27.9%        |     0.5%     |      0.3%      |      2%
+ *      4 x 1 h       |        20.4%        |     0.3%     |      0.3%      |      3%
+ *      6 x 1 h       |        10.9%        |     1.2%     |      0.7%      |      5%
+ *     10 x 1 h       |         6.6%        |     1.1%     |      0.9%      |      7%
+ *      2 x 0.5 h     |        55.0%        |     0.2%     |      0.2%      |      1%
+ *
+ * A bootstrap over two or three nights can only draw the nights it has, so
+ * its interval is the span between them, and a cell with no take on either
+ * night bootstraps to [0, 0] and is shaded "below" with certainty. The gamma
+ * interval holds 1% from the first row, so the floor is good/hr's own: 2
+ * hours online on 2 driver days (phi needs two nights to measure). The last
+ * column is the honest cost: a take an hour is a thin thing to rank hours
+ * by, and a cell has to be far out, over many nights, to be shaded at all.
+ *
+ * A GOOD OFFER ABOUT EVERY N MINUTES is 60 over good per hour online: the
+ * same count and the same hours, at the same floor (2 hours on 2 days in a
+ * cell; 2 hours for one day's tile), and "too little time" under it. Where
+ * that much time held no good offer it says so, rather than "every ∞ min".
+ *
+ * OFF IS NOT QUIET. A cell, tile or square with no minute online and no card
+ * is `off` — the rig was not scanning — and drawn apart (hatched) from one
+ * that was online and saw few offers, which is a finding.
+ *
+ * B AGAINST A, the compare mode's grid (gridCompare). B's figure minus A's
+ * per cell, shaded only where both sides meet the grid's floor and the
+ * difference clears 99%. Simulated with no difference at all (3,000 pairs a
+ * row for quantiles; 40 cells x 100 grids for the rates):
+ *
+ *     quantile, n A/B | P50 null, +$3 | P75 null, +$3 | P90 null, +$3
+ *     ----------------+---------------+---------------+--------------
+ *        30 / 30      |  0.5%,  10%   |  0.1%,   5%   |  0.0%,   0%
+ *        60 / 60      |  0.4%,  31%   |  0.4%,  24%   |  0.6%,  10%
+ *       100 / 100     |  0.7%,  60%   |  0.6%,  45%   |  0.5%,  23%
+ *        40 / 120     |  0.7%,  32%   |  0.7%,  21%   |  0.3%,  10%
+ *       200 / 200     |  0.6%,  94%   |  0.7%,  87%   |  0.8%,  63%
+ *
+ *     nights A vs B | good/hr plain | good/hr widened, +50% | earned/hr widened, +50%
+ *     --------------+---------------+-----------------------+------------------------
+ *        2 vs 2     |     5.0%      |      0.6%,  2%        |      0.1%,  0%
+ *        4 vs 4     |     4.9%      |      0.7%,  4%        |      0.3%,  1%
+ *        8 vs 8     |     5.3%      |      0.8%, 10%        |      0.6%,  2%
+ *        4 vs 10    |     5.2%      |      0.8%,  5%        |      0.4%,  1%
+ *
+ * A quantile is two order-statistic intervals at CMP_SIDE_ALPHA that must
+ * not overlap (rank-based like the grid's own, so no draw and no seed); good
+ * per hour is the exact conditional test of two Poisson rates on k/phi (a
+ * plain one shaded 5% by chance, as the grid's did before it was widened);
+ * earned per hour is two widened gamma intervals at CMP_SIDE_ALPHA that must
+ * not overlap. All hold under 1%; the earned column says plainly that two
+ * periods' earnings per hour rarely differ clearly enough cell by cell.
+ *
+ * THE TIMELINE, by day, week (Monday 4am) or month (driver day), newest row
+ * first; each square pooled by the grid's rules, so a single day-hour stays
+ * grey and the weeks and months are what can be shaded. MONTH THIRDS are
+ * shaded only once each third holds THIRDS_MONTHS months.
+ *
  * THE RATE CARD is least squares, pay = base + a·minutes + b·miles, per app
  * per ISO week, reported as the price of a 20-minute, 5-mile trip with a
  * percentile bootstrap interval (seeded, so a reload draws the same one). A
@@ -157,9 +235,19 @@
   var TOPS = [10, 20, 30, 50];
   var TOP_DEFAULT = 20;
   // The one figure the grid, the hour chart and the calendar are read in.
-  var STATS = ['p50', 'p75', 'p90', 'goodRate'];
+  var STATS = ['p50', 'p75', 'p90', 'goodRate', 'earned'];
   var STAT_P = { p50: 0.5, p75: 0.75, p90: 0.9 };
-  var STAT_NAMES = { p50: 'median', p75: 'P75', p90: 'P90', goodRate: 'good/hr online' };
+  var STAT_NAMES = { p50: 'median', p75: 'P75', p90: 'P90', goodRate: 'good/hr online', earned: 'earned/hr online' };
+  // Two periods, B against A, cell by cell: each side's interval is drawn at
+  // this level and a cell shaded only where the two do not overlap. For two
+  // equal widths that is a 99% test of the difference (z = 2.576 / sqrt 2 =
+  // 1.821 a side, two-sided 6.85%); for unequal widths it is stricter. See
+  // the header, "B AGAINST A".
+  var CMP_SIDE_ALPHA = 0.0685;
+  // Month thirds are shaded only where each third holds days of at least
+  // this many months: a day-of-month effect is one payday a month, so under
+  // three months a third is one or two paydays and a weekday mix.
+  var THIRDS_MONTHS = 3;
   // Good per hour online: the floor of a cell (hours on driver days), and of
   // a calendar tile (one day). See the header for the table they came from.
   // A clock-hour cell holds at most an hour a night, so 2 hours there is
@@ -467,11 +555,81 @@
 
   /* Shade a count over hours against a reference rate: the Poisson interval
    * on k/phi, scaled back by phi and divided by the hours. */
-  function rateShade(k, hours, ref, phi) {
+  function rateShade(k, hours, ref, phi, alpha) {
     if (!(hours > 0) || ref === null) return { shade: null, ci: null };
-    var f = phi > 1 ? phi : 1, ci = poisCI(k / f, CI_ALPHA);
+    var f = phi > 1 ? phi : 1, ci = poisCI(k / f, alpha || CI_ALPHA);
     var lo = ci[0] * f / hours, hi = ci[1] * f / hours;
     return { shade: lo > ref ? 'above' : hi < ref ? 'below' : null, ci: [r2(lo), r2(hi)] };
+  }
+
+  /* The gamma quantile: x with P(shape, x / scale) = p. */
+  function gammaInv(p, shape, scale) {
+    var top = shape + 20 * Math.sqrt(shape + 1) + 30;
+    return scale * bisect(function (x) { return gammaP(shape, x); }, p, 0, top);
+  }
+
+  /* --- earned per hour online: a weighted Poisson sum ---------------------------
+   *
+   * The earned figure of a cell is a sum of takes, each weighted by its pay,
+   * over hours. Its interval is Fay and Feuer's gamma interval for a weighted
+   * Poisson sum (1997; the one used for age-standardised rates), with
+   * Tiwari's (2006) mean weight in place of the largest for the upper end:
+   * y = the sum, v = the sum of the squared weights, w = the range's mean
+   * take; lower G(alpha/2; y^2/v, v/y), upper G(1 - alpha/2; (y+w)^2/(v+w^2),
+   * (v+w^2)/(y+w)). With every weight 1 it is the Garwood interval poisCI
+   * draws; with no take at all it is [0, 5.30 takes of w] at 99%, never
+   * [0, 0]. Widened as good/hr is, by phi (v times phi), measured off the
+   * takes' own night-to-night swing. Weights under 0 (a net take that paid
+   * less than its miles cost) count as 0 in the interval only; the figure
+   * printed is the true sum. Why not the bootstrap over days the brief
+   * suggested: see the header, "EARNED PER HOUR ONLINE". */
+  function earnCI(y, v, wMean, phi, alpha) {
+    var a = alpha || CI_ALPHA, f = phi > 1 ? phi : 1, w = wMean > 0 ? wMean : 0;
+    var lo = y > 0 && v > 0 ? gammaInv(a / 2, y * y / (f * v), f * v / y) : 0;
+    var hi = w > 0 || y > 0 ? gammaInv(1 - a / 2, (y + w) * (y + w) / (f * (v + w * w)), f * (v + w * w) / (y + w)) : 0;
+    return [lo, hi];
+  }
+  function earnShade(y, v, hours, ref, wMean, phi, alpha) {
+    if (!(hours > 0) || ref === null || !(wMean > 0)) return { shade: null, ci: null };
+    var ci = earnCI(y, v, wMean, phi, alpha);
+    var lo = ci[0] / hours, hi = ci[1] / hours;
+    return { shade: lo > ref ? 'above' : hi < ref ? 'below' : null, ci: [r2(lo), r2(hi)] };
+  }
+
+  /* The regularized incomplete beta I_x(a, b) (Numerical Recipes' continued
+   * fraction), for the ratio of two counts below. Real a and b, so an
+   * effective count k/phi needs no rounding. */
+  function betacf(a, b, x) {
+    var qab = a + b, qap = a + 1, qam = a - 1, c = 1, d = 1 - qab * x / qap;
+    if (Math.abs(d) < 1e-300) d = 1e-300;
+    d = 1 / d;
+    var h = d;
+    for (var m = 1; m <= 300; m++) {
+      var m2 = 2 * m, aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+      d = 1 + aa * d; if (Math.abs(d) < 1e-300) d = 1e-300;
+      c = 1 + aa / c; if (Math.abs(c) < 1e-300) c = 1e-300;
+      d = 1 / d; h *= d * c;
+      aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+      d = 1 + aa * d; if (Math.abs(d) < 1e-300) d = 1e-300;
+      c = 1 + aa / c; if (Math.abs(c) < 1e-300) c = 1e-300;
+      d = 1 / d;
+      var del = d * c;
+      h *= del;
+      if (Math.abs(del - 1) < 1e-13) break;
+    }
+    return h;
+  }
+  function betaI(a, b, x) {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    var bt = Math.exp(lnGamma(a + b) - lnGamma(a) - lnGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+    return x < (a + 1) / (a + b + 2) ? bt * betacf(a, b, x) / a : 1 - bt * betacf(b, a, 1 - x) / b;
+  }
+  /* Clopper-Pearson on a share x of n (both may be real): [lo, hi]. */
+  function shareCI(x, n, alpha) {
+    var lo = x > 0 ? bisect(function (p) { return betaI(x, n - x + 1, p); }, alpha / 2, 0, 1) : 0;
+    var hi = x < n ? bisect(function (p) { return betaI(x + 1, n - x, p); }, 1 - alpha / 2, 0, 1) : 1;
+    return [lo, hi];
   }
 
   /* --- the ruler --------------------------------------------------------------
@@ -610,6 +768,159 @@
     return out;
   }
 
+  /* --- round three: one table of driver-day x clock-hour slices ----------------
+   *
+   * Every cell this tab draws — weekday x hour, a timeline square, an hour of
+   * the hour chart, a month third — is a pool of these: one per driver day
+   * and clock hour that held a minute online or a card. Each slice carries
+   * its minutes online (onlinePieces), its rows, its good offers (the ruler),
+   * its takes and what they paid. A row in an hour with no minute online (a
+   * run of one card is zero long) still makes its slice, with 0 hours, so it
+   * is counted where it came.
+   *
+   * WHAT "EARNED" IS. The pay of the offers the driver ticked taken — the
+   * taken bit only; silence is never an accept, so this is a floor on what
+   * was taken — over every minute online in the cell, waiting included. The
+   * CARD's pay, not what the app paid: the Money tab matches trips to cards,
+   * and that match lives on the page over /api/earnings, with offer ids this
+   * answer does not carry (no id leaves in /api/trends). A take whose pay
+   * was not trusted (suspect, "pay unread") is counted as `unpaid` and adds
+   * nothing. NET subtracts its miles times ONE cost per mile — the rig's
+   * own setting, as /api/trends reads it off the newest offer (server.js
+   * trendsOut) — over the whole range, so an old week and a new one are
+   * costed alike, as the ruler is one line. A take with no miles read has
+   * nothing subtracted and is counted as `noMiles`. With no setting known
+   * there is no net, and the page says so rather than choosing a figure. */
+  function takeOf(r, cpm) {
+    if (!r.taken) return null;
+    if (!r.ok || r.pay === null || r.pay === undefined) return { unpaid: true };
+    var cost = 0, noMiles = false;
+    if (typeof cpm === 'number') {
+      if (r.miles === null || r.miles === undefined) noMiles = true; else cost = r.miles * cpm;
+    }
+    return { e: r.pay - cost, noMiles: noMiles };
+  }
+
+  function emptySlice(day, hour) {
+    return { day: day, dow: dateOfKey(day).getDay(), hour: hour, month: day.slice(0, 7), week: weekKeyOf(day),
+             hours: 0, rows: [], good: 0, takes: 0, earned: 0, y: 0, v: 0, unpaid: 0, noMiles: 0 };
+  }
+  function addTake(s, r, cpm) {
+    var tk = takeOf(r, cpm);
+    if (!tk) return;
+    if (tk.unpaid) { s.unpaid += 1; return; }
+    s.takes += 1;
+    s.earned += tk.e;
+    var w = tk.e > 0 ? tk.e : 0;
+    s.y += w;
+    s.v += w * w;
+    if (tk.noMiles) s.noMiles += 1;
+  }
+  /* The table: { slices: { 'day|hour': slice }, wMean, totals }. `opts`:
+   * cut (the ruler), cpm (a number for net, else gross), `keep` (a filter on
+   * a slice's { day, dow, month }: a period, weekdays). */
+  function sliceTable(rows, runs, opts) {
+    opts = opts || {};
+    var cut = opts.cut, cpm = typeof opts.cpm === 'number' ? opts.cpm : null, keep = opts.keep;
+    var pieces = onlinePieces(runs), out = Object.create(null);
+    Object.keys(pieces).forEach(function (k) {
+      var p = pieces[k];
+      if (keep && !keep(p)) return;
+      var s = out[k] = emptySlice(p.day, p.hour);
+      s.hours = p.hours;
+    });
+    var tot = { hours: 0, good: 0, takes: 0, earned: 0, wSum: 0, offers: 0 };
+    rows.forEach(function (r) {
+      if (keep && !keep(r)) return;
+      var k = r.day + '|' + r.hour;
+      var s = out[k] || (out[k] = emptySlice(r.day, r.hour));
+      s.rows.push(r);
+      if (isGood(r, cut)) s.good += 1;
+      addTake(s, r, cpm);
+    });
+    Object.keys(out).forEach(function (k) {
+      var s = out[k];
+      tot.hours += s.hours; tot.good += s.good; tot.takes += s.takes; tot.earned += s.earned;
+      tot.offers += s.rows.length; tot.wSum += s.y;
+    });
+    return { slices: out, cut: cut, cpm: cpm, net: cpm !== null,
+             wMean: tot.takes ? tot.wSum / tot.takes : null,
+             refRate: tot.hours > 0 ? tot.good / tot.hours : null,
+             refEarn: tot.hours > 0 ? tot.earned / tot.hours : null,
+             totals: tot };
+  }
+  function sliceList(tab) { return Object.keys(tab.slices).map(function (k) { return tab.slices[k]; }); }
+
+  /* phi for a grouping: each group's slices, for the good count and for the
+   * takes. Measured as the grid's is, over the cells' own nights. */
+  function phis(groups) {
+    return {
+      good: dispersion(groups.map(function (g) { return g.map(function (s) { return { k: s.good, h: s.hours }; }); })),
+      takes: dispersion(groups.map(function (g) { return g.map(function (s) { return { k: s.takes, h: s.hours }; }); }))
+    };
+  }
+
+  /* One cell from its slices, in the stat asked, by the grid's rules: a
+   * quantile shaded by shadeQ at FLOOR offers on `minDays` driver days; good
+   * per hour and earned per hour at `floorHours` online on `floorDays` days,
+   * widened by phi. Every cell says its hours online, the days they rest on,
+   * and `off` where it has neither a minute online nor a card: the rig was
+   * not scanning, which is not the same as a quiet hour. `waitMin`: minutes
+   * online per good offer (60 / good per hour), only at the good floor;
+   * `waitNone` where that much time held no good offer at all. */
+  function poolCell(sl, ctx) {
+    var stat = ctx.stat, list = [], hrs = 0, onDays = 0, good = 0, takes = 0, earned = 0, y = 0, v = 0, unpaid = 0,
+        noMiles = 0, days = Object.create(null);
+    sl.forEach(function (s) {
+      for (var i = 0; i < s.rows.length; i++) list.push(s.rows[i]);
+      if (s.hours > 0) { hrs += s.hours; if (!days[s.day]) { days[s.day] = 1; onDays += 1; } }
+      good += s.good; takes += s.takes; earned += s.earned; y += s.y; v += s.v; unpaid += s.unpaid;
+      noMiles += s.noMiles;
+    });
+    var vals = valuesOf(list, 'perHour'), srt = sorted(vals);
+    var okDays = daysIn(list.filter(function (r) { return r.ok; }));
+    var fH = typeof ctx.floorHours === 'number' ? ctx.floorHours : GOOD_FLOOR_HOURS;
+    var fD = typeof ctx.floorDays === 'number' ? ctx.floorDays : GOOD_FLOOR_DAYS;
+    var timeOk = hrs >= fH && onDays >= fD;
+    var e = { n: vals.length, offers: list.length, days: okDays, hours: r2(hrs), onlineDays: onDays,
+              good: good, takes: takes, earned: r2(earned), unpaid: unpaid, noMiles: noMiles,
+              median: vals.length ? r2(q(srt, 0.5)) : null,
+              off: hrs === 0 && list.length === 0,
+              waitMin: timeOk && good > 0 ? Math.round(60 * hrs / good) : null,
+              waitNone: timeOk && good === 0, timeOk: timeOk };
+    if (stat === 'goodRate') {
+      e.days = onDays;
+      e.value = hrs > 0 ? r2(good / hrs) : null;
+      e.enough = timeOk;
+      var rs = timeOk ? rateShade(good, hrs, ctx.ref, ctx.phi ? ctx.phi.good : 1, ctx.alpha) : { shade: null, ci: null };
+      e.shade = rs.shade; e.ci = rs.ci;
+    } else if (stat === 'earned') {
+      e.days = onDays;
+      e.value = hrs > 0 ? r2(earned / hrs) : null;
+      e.enough = timeOk;
+      var es = timeOk ? earnShade(y, v, hrs, ctx.ref, ctx.wMean, ctx.phi ? ctx.phi.takes : 1, ctx.alpha)
+        : { shade: null, ci: null };
+      e.shade = es.shade; e.ci = es.ci;
+    } else {
+      var p = STAT_P[stat] || 0.5;
+      e.value = vals.length ? r2(q(srt, p)) : null;
+      var sh = shadeQ(vals, okDays, ctx.ref, p, ctx.minDays);
+      e.enough = sh.enough; e.shade = sh.shade; e.ci = sh.ci; e.noRanks = !!sh.noRanks;
+    }
+    e.vals = vals;
+    e.wy = y; e.wv = v;
+    return e;
+  }
+  // The reference a cell is shaded against: the same figure over the range.
+  function refOf(stat, rows, tab) {
+    if (stat === 'goodRate') return tab.refRate;
+    if (stat === 'earned') return tab.refEarn;
+    var all = valuesOf(rows, 'perHour');
+    return all.length ? q(sorted(all), STAT_P[stat] || 0.5) : null;
+  }
+  function statOf(s) { return STATS.indexOf(s) >= 0 ? s : 'p50'; }
+  function cpmOf(opts) { return opts && opts.net && typeof opts.costPerMile === 'number' ? opts.costPerMile : null; }
+
   /* Good offers per hour online, by day or week. "Good" is the ruler's (cut)
    * where one is given — the page always gives one — else the row's own
    * target at the time, round one's. Descriptive: it feeds nothing. */
@@ -633,25 +944,31 @@
    * quantile, enough at the floor and where its interval's ranks exist; or
    * good offers (the ruler, `cut`) over the hours online in that clock hour
    * (`runs`, cut at the hour; the same days and month), enough at
-   * GOOD_FLOOR_HOURS on GOOD_FLOOR_DAYS. */
+   * GOOD_FLOOR_HOURS on GOOD_FLOOR_DAYS. Round three: `earned` is the takes'
+   * pay (net with `net` and `costPerMile`) over those same hours, at the
+   * same floor; nothing on the hour chart is shaded. */
   function hourly(rows, opts) {
     opts = opts || {};
     var metric = opts.metric || 'perHour';
-    var stat = STATS.indexOf(opts.stat) >= 0 ? opts.stat : 'p50';
-    function keepDay(dow, month) {
-      if (opts.month && month !== opts.month) return false;
-      if (opts.days === 'weekend') return dow === 0 || dow === 6;
-      if (opts.days === 'weekday') return dow > 0 && dow < 6;
+    var stat = statOf(opts.stat);
+    var cpm = cpmOf(opts);
+    // `period` (round three, compare mode): only the rows and the minutes
+    // online of that period, as inPeriod reads it.
+    function keepDay(x) {
+      if (opts.month && x.month !== opts.month) return false;
+      if (opts.period && !inPeriod(x, opts.period)) return false;
+      if (opts.days === 'weekend') return x.dow === 0 || x.dow === 6;
+      if (opts.days === 'weekday') return x.dow > 0 && x.dow < 6;
       return true;
     }
-    var pick = rows.filter(function (r) { return keepDay(r.dow, r.month); });
+    var pick = rows.filter(keepDay);
     var by = groupBy(pick, function (r) { return r.hour; }).by;
     var online = Object.create(null);
-    if (stat === 'goodRate') {
+    if (stat === 'goodRate' || stat === 'earned') {
       var pieces = onlinePieces(opts.runs);
       Object.keys(pieces).forEach(function (k) {
         var p = pieces[k];
-        if (!keepDay(p.dow, p.month)) return;
+        if (!keepDay(p)) return;
         var e = online[p.hour] || (online[p.hour] = { hours: 0, days: 0 });
         e.hours += p.hours; e.days += 1;
       });
@@ -665,13 +982,20 @@
       e.days = daysIn(list.filter(function (r) { return r.ok; }));
       e.enough = v.length >= FLOOR && e.days >= FLOOR_DAYS;
       e.stat = stat;
-      if (stat === 'goodRate') {
+      if (stat === 'goodRate' || stat === 'earned') {
         var on = online[h] || { hours: 0, days: 0 };
         e.good = list.filter(function (r) { return isGood(r, opts.cut); }).length;
         e.hours = r2(on.hours);
         e.onlineDays = on.days;
-        e.value = on.hours > 0 ? r2(e.good / on.hours) : null;
         e.enough = on.hours >= GOOD_FLOOR_HOURS && on.days >= GOOD_FLOOR_DAYS;
+        if (stat === 'goodRate') {
+          e.value = on.hours > 0 ? r2(e.good / on.hours) : null;
+        } else {
+          var sl = emptySlice('2000-01-01', h);
+          list.forEach(function (r) { addTake(sl, r, cpm); });
+          e.takes = sl.takes; e.earned = r2(sl.earned); e.unpaid = sl.unpaid; e.noMiles = sl.noMiles;
+          e.value = on.hours > 0 ? r2(sl.earned / on.hours) : null;
+        }
       } else {
         e.value = e[stat];
         if (stat !== 'p50' && e.enough) e.enough = !!quantCI(sorted(v), STAT_P[stat], CI_ALPHA);
@@ -696,72 +1020,61 @@
    * (the ruler, `cut`) over the cell's hours online (`runs`) — shaded by
    * rateShade against the range's own rate, phi measured over the cells'
    * nights. Every cell keeps `median` (round one's field) and adds `value`,
-   * the figure of the stat asked. */
+   * the figure of the stat asked. Round three: built on the slice table
+   * (poolCell), so every cell also carries its hours online, `off`, the wait
+   * for a good offer and its takes; `earned` (with `net` and `costPerMile`)
+   * is earned per hour online, shaded by earnShade. */
   function grid(rows, opts) {
     opts = opts || {};
-    var metric = opts.metric || 'perHour';
-    var stat = STATS.indexOf(opts.stat) >= 0 ? opts.stat : 'p50';
+    var stat = statOf(opts.stat);
+    var tab = opts.table || sliceTable(rows, opts.runs, { cut: opts.cut, cpm: cpmOf(opts), keep: opts.keep });
+    var byCell = Object.create(null);
+    sliceList(tab).forEach(function (s) { (byCell[s.dow * 24 + s.hour] || (byCell[s.dow * 24 + s.hour] = [])).push(s); });
+    var ph = phis(Object.keys(byCell).map(function (c) { return byCell[c]; }));
+    var ref = refOf(stat, rows.filter(function (r) { return !opts.keep || opts.keep(r); }), tab);
+    var ctx = { stat: stat, ref: ref, phi: ph, wMean: tab.wMean, minDays: FLOOR_DAYS };
     var cells = [];
-    var by = groupBy(rows, function (r) { return r.dow * 24 + r.hour; }).by;
-    if (stat === 'goodRate') return goodGrid(rows, by, opts);
-    var p = STAT_P[stat];
-    var all = valuesOf(rows, metric);
-    var ref = all.length ? q(sorted(all), p) : null;
     for (var d = 1; d <= 7; d++) {
       var dow = d % 7;                              // Monday first, Sunday last
       HOUR_ORDER.forEach(function (h) {
-        var list = by[dow * 24 + h] || [];
-        var v = valuesOf(list, metric), s = sorted(v);
-        var days = daysIn(list.filter(function (r) { return r.ok; }));
-        var sh = shadeQ(v, days, ref, p);
-        cells.push({ dow: dow, hour: h, n: v.length, days: days,
-                     median: v.length ? r2(q(s, 0.5)) : null,
-                     value: v.length ? r2(q(s, p)) : null,
-                     enough: sh.enough, shade: sh.shade, ci: sh.ci, noRanks: !!sh.noRanks });
+        var e = poolCell(byCell[dow * 24 + h] || [], ctx);
+        e.dow = dow; e.hour = h;
+        delete e.vals; delete e.wy; delete e.wv;
+        cells.push(e);
       });
     }
-    return { stat: stat, ref: r2(ref), floor: FLOOR, floorDays: FLOOR_DAYS, alpha: CI_ALPHA, cells: cells };
+    var out = { stat: stat, ref: ref === null ? null : r2(ref), floor: FLOOR, floorDays: FLOOR_DAYS, alpha: CI_ALPHA,
+                cells: cells, cut: opts.cut === undefined ? null : opts.cut, net: tab.net, cpm: tab.cpm };
+    if (stat === 'goodRate' || stat === 'earned') {
+      out.phi = Math.round((stat === 'goodRate' ? ph.good : ph.takes) * 100) / 100;
+      out.floorHours = GOOD_FLOOR_HOURS; out.floorDays = GOOD_FLOOR_DAYS;
+    }
+    if (stat === 'earned') {
+      out.wMean = tab.wMean === null ? null : r2(tab.wMean);
+      out.takes = tab.totals.takes;
+      out.unpaid = sliceList(tab).reduce(function (a, s) { return a + s.unpaid; }, 0);
+      out.noMiles = sliceList(tab).reduce(function (a, s) { return a + s.noMiles; }, 0);
+    }
+    return out;
   }
 
-  function goodGrid(rows, by, opts) {
-    var cut = opts.cut, pieces = onlinePieces(opts.runs);
-    // Each cell's nights: { k: good offers that night in it, h: its hours }.
-    var nights = Object.create(null), totalH = 0, totalK = 0;
-    Object.keys(pieces).forEach(function (key) {
-      var p = pieces[key], c = p.dow * 24 + p.hour;
-      (nights[c] || (nights[c] = Object.create(null)))[p.day] = { k: 0, h: p.hours };
-      totalH += p.hours;
-    });
+  /* Good offers by app, pooled over the weekdays, by clock hour: the share
+   * from Uber and from DoorDash and the counts (good offers whose app is not
+   * known counted apart). Descriptive; printed only from APP_SHARE_MIN good
+   * offers an hour, under it the count alone. */
+  var APP_SHARE_MIN = 10;
+  function goodAppShare(rows, cut) {
+    var by = Object.create(null);
     rows.forEach(function (r) {
       if (!isGood(r, cut)) return;
-      totalK += 1;
-      var n = nights[r.dow * 24 + r.hour];
-      if (n && n[r.day]) n[r.day].k += 1;
+      var e = by[r.hour] || (by[r.hour] = { uber: 0, doordash: 0, unknown: 0 });
+      if (r.app === 'uber') e.uber += 1; else if (r.app === 'doordash') e.doordash += 1; else e.unknown += 1;
     });
-    var ref = totalH > 0 ? totalK / totalH : null;
-    var groups = Object.keys(nights).map(function (c) {
-      return Object.keys(nights[c]).map(function (dk) { return nights[c][dk]; });
+    return HOUR_ORDER.map(function (h) {
+      var e = by[h] || { uber: 0, doordash: 0, unknown: 0 }, known = e.uber + e.doordash;
+      return { hour: h, uber: e.uber, doordash: e.doordash, unknown: e.unknown, good: known + e.unknown,
+               enough: known >= APP_SHARE_MIN, uberShare: known ? r2(e.uber / known) : null };
     });
-    var phi = dispersion(groups);
-    var cells = [];
-    for (var d = 1; d <= 7; d++) {
-      var dow = d % 7;
-      HOUR_ORDER.forEach(function (h) {
-        var c = dow * 24 + h, list = by[c] || [];
-        var good = list.filter(function (r) { return isGood(r, cut); }).length;
-        var ns = nights[c] || {}, hrs = 0, days = 0;
-        Object.keys(ns).forEach(function (dk) { if (ns[dk].h > 0) { hrs += ns[dk].h; days += 1; } });
-        var v = valuesOf(list, 'perHour');
-        var enough = hrs >= GOOD_FLOOR_HOURS && days >= GOOD_FLOOR_DAYS;
-        var sh = enough ? rateShade(good, hrs, ref, phi) : { shade: null, ci: null };
-        cells.push({ dow: dow, hour: h, n: v.length, good: good, hours: r2(hrs), days: days,
-                     median: v.length ? r2(q(sorted(v), 0.5)) : null,
-                     value: hrs > 0 ? r2(good / hrs) : null,
-                     enough: enough, shade: sh.shade, ci: sh.ci });
-      });
-    }
-    return { stat: 'goodRate', ref: ref === null ? null : r2(ref), phi: Math.round(phi * 100) / 100, cut: cut,
-             floorHours: GOOD_FLOOR_HOURS, floorDays: GOOD_FLOOR_DAYS, alpha: CI_ALPHA, cells: cells };
   }
 
   /* --- the calendar ----------------------------------------------------------
@@ -785,16 +1098,25 @@
    * `months`: the newest month in the range so far against the one before. */
   function calendar(rows, runs, opts) {
     opts = opts || {};
-    var stat = STATS.indexOf(opts.stat) >= 0 ? opts.stat : 'p50';
-    var p = STAT_P[stat] || 0.5, cut = opts.cut;
+    var stat = statOf(opts.stat);
+    var p = STAT_P[stat] || 0.5, cut = opts.cut, cpm = cpmOf(opts);
     var all = valuesOf(rows, 'perHour');
     var refQ = all.length ? q(sorted(all), p) : null;
     var hours = hoursBy(runs, 'day');
     var totalH = 0, totalK = 0;
     Object.keys(hours).forEach(function (k) { totalH += hours[k]; });
     rows.forEach(function (r) { if (isGood(r, cut)) totalK += 1; });
-    var refRate = stat === 'goodRate' && totalH > 0 ? totalK / totalH : null;
-    var ref = stat === 'goodRate' ? refRate : refQ;
+    // Earned per hour online, a tile at a time (round three): every take of
+    // the day over the day's hours, the same hours good/hr uses.
+    var dayTakes = Object.create(null), tk = emptySlice('2000-01-01', 0);
+    rows.forEach(function (r) {
+      var s = dayTakes[r.day] || (dayTakes[r.day] = emptySlice(r.day, 0));
+      addTake(s, r, cpm); addTake(tk, r, cpm);
+    });
+    var wMean = tk.takes ? tk.y / tk.takes : null;
+    var refRate = stat === 'goodRate' && totalH > 0 ? totalK / totalH
+      : stat === 'earned' && totalH > 0 ? tk.earned / totalH : null;
+    var ref = stat === 'goodRate' || stat === 'earned' ? refRate : refQ;
     var g = groupBy(rows, function (r) { return r.day; });
     var refMed = all.length ? q(sorted(all), 0.5) : null;
     var days = g.keys.sort().map(function (k) {
@@ -802,10 +1124,20 @@
       var v = valuesOf(list, 'perHour'), s = sorted(v);
       var hrs = hours[k] || 0;
       var good = list.filter(function (r) { return isGood(r, cut); }).length;
+      var dt = dayTakes[k];
       var e = { day: k, dow: dateOfKey(k).getDay(), week: weekKeyOf(k), n: list.length, counted: v.length,
                 median: v.length ? r2(q(s, 0.5)) : null, good: good,
-                hours: r2(hrs), perOnlineHour: hrs > 0 ? r2(list.length / hrs) : null };
-      if (stat === 'goodRate') {
+                hours: r2(hrs), perOnlineHour: hrs > 0 ? r2(list.length / hrs) : null,
+                takes: dt.takes, earned: r2(dt.earned), unpaid: dt.unpaid,
+                // A good offer about every so many minutes online: a tile's
+                // own floor (GOOD_FLOOR_HOURS, one day), or none said.
+                waitMin: hrs >= GOOD_FLOOR_HOURS && good > 0 ? Math.round(60 * hrs / good) : null,
+                waitNone: hrs >= GOOD_FLOOR_HOURS && good === 0 };
+      if (stat === 'earned') {
+        e.value = hrs > 0 ? r2(dt.earned / hrs) : null;
+        e.enough = hrs >= GOOD_FLOOR_HOURS;
+        e.shade = e.enough ? earnShade(dt.y, dt.v, hrs, refRate, wMean, 1).shade : null;
+      } else if (stat === 'goodRate') {
         e.value = hrs > 0 ? r2(good / hrs) : null;
         e.enough = hrs >= GOOD_FLOOR_HOURS;
         var rs = e.enough ? rateShade(good, hrs, refRate, 1) : { shade: null };
@@ -837,17 +1169,19 @@
         var w = { week: wk, days: keys, month: label, n: wl.length };
         var wv = valuesOf(wl, 'perHour');
         var wdays = daysIn(wl.filter(function (r) { return r.ok; }));
-        if (stat === 'goodRate') {
-          var wh = 0, wg = 0, pcs = [];
+        if (stat === 'goodRate' || stat === 'earned') {
+          var wh = 0, wg = 0, pcs = [], wt = emptySlice(wk, 0);
           keys.forEach(function (dk) {
-            var d = byDay[dk], h = hours[dk] || 0;
+            var d = byDay[dk], h = hours[dk] || 0, dtk = dayTakes[dk];
             wh += h;
             if (d) wg += d.good;
-            if (h > 0) pcs.push({ k: d ? d.good : 0, h: h });
+            if (dtk) { wt.takes += dtk.takes; wt.earned += dtk.earned; wt.y += dtk.y; wt.v += dtk.v; }
+            if (h > 0) pcs.push({ k: stat === 'earned' ? (dtk ? dtk.takes : 0) : (d ? d.good : 0), h: h });
           });
           dayGroups.push(pcs);
           w.good = wg; w.hours = r2(wh); w.onlineDays = pcs.length;
-          w.value = wh > 0 ? r2(wg / wh) : null;
+          w.takes = wt.takes; w.earned = r2(wt.earned); w.y = wt.y; w.v = wt.v;
+          w.value = wh > 0 ? r2((stat === 'earned' ? wt.earned : wg) / wh) : null;
           w.enough = wh >= GOOD_FLOOR_HOURS && pcs.length >= GOOD_FLOOR_DAYS;
         } else {
           w.counted = wv.length;
@@ -858,23 +1192,25 @@
         weeks.push(w);
         wk = addDays(wk, 7);
       }
-      if (stat === 'goodRate') {
+      if (stat === 'goodRate' || stat === 'earned') {
         var phi = dispersion(dayGroups);
         weeks.forEach(function (w) {
-          w.shade = w.enough ? rateShade(w.good, w.hours, refRate, phi).shade : null;
+          w.shade = !w.enough ? null : stat === 'earned' ? earnShade(w.y, w.v, w.hours, refRate, wMean, phi).shade
+            : rateShade(w.good, w.hours, refRate, phi).shade;
+          delete w.y; delete w.v;
         });
       }
     }
     return { stat: stat, ref: ref === null ? null : r2(ref), refMedian: r2(refMed), floor: FLOOR,
-             floorHours: GOOD_FLOOR_HOURS, cut: cut === undefined ? null : cut,
-             days: days, weeks: weeks, months: monthFigures(rows, runs, stat, cut) };
+             floorHours: GOOD_FLOOR_HOURS, cut: cut === undefined ? null : cut, net: cpm !== null,
+             days: days, weeks: weeks, months: monthFigures(rows, runs, stat, cut, cpm) };
   }
 
   /* The newest month in the rows so far against the whole month before it,
    * in the stat asked, each with its n: offers counted for a quantile, good
    * offers and hours online for goodRate. Null where the range holds nothing
    * of the month before (a 7- or 30-day range early in a month). */
-  function monthFigures(rows, runs, stat, cut) {
+  function monthFigures(rows, runs, stat, cut, cpm) {
     var mo = monthsOf(rows);
     if (!mo) return null;
     var hours = hoursBy(runs, 'day');
@@ -882,12 +1218,18 @@
       var list = rows.filter(function (r) { return r.month === m; });
       var e = { month: m, offers: list.length, days: daysIn(list) };
       if (!list.length) { e.value = null; e.n = 0; return e; }
-      if (stat === 'goodRate') {
+      if (stat === 'goodRate' || stat === 'earned') {
         var h = 0;
         Object.keys(hours).forEach(function (k) { if (k.slice(0, 7) === m) h += hours[k]; });
         e.good = list.filter(function (r) { return isGood(r, cut); }).length;
         e.hours = r2(h); e.n = e.good;
         e.value = h > 0 ? r2(e.good / h) : null;
+        if (stat === 'earned') {
+          var sl = emptySlice(m + '-01', 0);
+          list.forEach(function (r) { addTake(sl, r, cpm); });
+          e.takes = sl.takes; e.earned = r2(sl.earned); e.n = sl.takes;
+          e.value = h > 0 ? r2(sl.earned / h) : null;
+        }
       } else {
         var v = valuesOf(list, 'perHour');
         e.n = v.length;
@@ -907,25 +1249,43 @@
    * the P50/P75/P90, the two apps apart, the best five by $/hr, and the cell's
    * figure week by week. Figures and times only: pay, minutes, miles, app and
    * when — no text and no place, because the rows carry none to give. */
+  /* Round three: `dow` may be null (any weekday) and `opts.from` / `opts.to`
+   * (driver-day keys, inclusive) narrow it to dates — a timeline square is
+   * one date, a week or a month at one clock hour. `stat` 'earned' reads the
+   * takes' pay over the hours (`opts.net` with `opts.costPerMile`, as the
+   * grid). It also says how long a good offer took to come (`waitMin`, at the
+   * good floor of GOOD_FLOOR_HOURS on GOOD_FLOOR_DAYS days, or of the hours
+   * alone for one date) and which app the good offers came from. */
   function cellDetail(rows, runs, dow, hour, opts) {
     opts = opts || {};
-    var stat = STATS.indexOf(opts.stat) >= 0 ? opts.stat : 'p50', cut = opts.cut;
+    var stat = statOf(opts.stat), cut = opts.cut, cpm = cpmOf(opts);
     var p = STAT_P[stat] || 0.5;
-    var list = rows.filter(function (r) { return r.dow === dow && r.hour === hour; });
+    function inCell(x) {
+      return (dow === null || dow === undefined || x.dow === dow) && x.hour === hour
+        && (!opts.from || x.day >= opts.from) && (!opts.to || x.day <= opts.to);
+    }
+    var list = rows.filter(inCell);
     var money = list.filter(function (r) { return r.ok && r.perHour !== null && r.perHour !== undefined; });
-    var pieces = onlinePieces(runs), hoursByWeek = Object.create(null), hrs = 0;
+    var pieces = onlinePieces(runs), hoursByWeek = Object.create(null), hrs = 0, onDays = Object.create(null);
     Object.keys(pieces).forEach(function (k) {
       var pc = pieces[k];
-      if (pc.dow !== dow || pc.hour !== hour) return;
+      if (!inCell(pc)) return;
       hrs += pc.hours;
+      onDays[pc.day] = 1;
       var wk = weekKeyOf(pc.day);
       hoursByWeek[wk] = (hoursByWeek[wk] || 0) + pc.hours;
     });
+    function earnedOf(sub) {
+      var sl = emptySlice('2000-01-01', hour);
+      sub.forEach(function (r) { addTake(sl, r, cpm); });
+      return sl;
+    }
     function figure(sub, h) {
       if (stat === 'goodRate') {
         var gd = sub.filter(function (r) { return isGood(r, cut); }).length;
         return h > 0 ? r2(gd / h) : null;
       }
+      if (stat === 'earned') return h > 0 ? r2(earnedOf(sub).earned / h) : null;
       var v = valuesOf(sub, 'perHour');
       return v.length ? r2(q(sorted(v), p)) : null;
     }
@@ -941,6 +1301,13 @@
         return { t: r.t, day: r.day, app: r.app, pay: r.pay, minutes: r.minutes, miles: r.miles,
                  perHour: r.perHour, taken: r.taken };
       });
+    var nOnDays = Object.keys(onDays).length;
+    var oneDate = !!opts.from && opts.from === opts.to;
+    var good = list.filter(function (r) { return isGood(r, cut); }).length;
+    var timeOk = hrs >= GOOD_FLOOR_HOURS && (oneDate || nOnDays >= GOOD_FLOOR_DAYS);
+    var ek = earnedOf(list);
+    var goodApps = { uber: apps.uber.good, doordash: apps.doordash.good };
+    goodApps.unknown = good - goodApps.uber - goodApps.doordash;
     var gw = groupBy(list, function (r) { return r.week; });
     var wkeys = gw.keys.slice();
     Object.keys(hoursByWeek).forEach(function (wk) { if (wkeys.indexOf(wk) < 0) wkeys.push(wk); });
@@ -951,15 +1318,237 @@
                value: figure(sub, h) };
     });
     return {
-      dow: dow, hour: hour, stat: stat, cut: typeof cut === 'number' ? cut : null,
-      offers: list.length, n: all.length, days: daysIn(money), hours: r2(hrs),
-      good: list.filter(function (r) { return isGood(r, cut); }).length,
+      dow: dow === undefined ? null : dow, hour: hour, from: opts.from || null, to: opts.to || null,
+      stat: stat, cut: typeof cut === 'number' ? cut : null, net: cpm !== null,
+      offers: list.length, n: all.length, days: daysIn(money), hours: r2(hrs), onlineDays: nOnDays,
+      good: good,
       taken: list.filter(function (r) { return r.taken; }).length,
+      takes: ek.takes, earned: r2(ek.earned), unpaid: ek.unpaid, noMiles: ek.noMiles,
+      earnedRate: hrs > 0 ? r2(ek.earned / hrs) : null,
+      waitMin: timeOk && good > 0 ? Math.round(60 * hrs / good) : null, waitNone: timeOk && good === 0,
+      timeOk: timeOk, goodApps: goodApps,
+      off: hrs === 0 && list.length === 0,
       value: figure(list, hrs),
       p50: r2(q(all, 0.5)), p75: r2(q(all, 0.75)), p90: r2(q(all, 0.9)),
       dots: money.map(function (r) { return [r.perHour, r.taken ? 1 : 0, appCode(r.app)]; }),
       apps: apps, best: best, weeks: weeks
     };
+  }
+
+  /* --- the hour x date timeline ---------------------------------------------------
+   *
+   * Rows are driver days (or weeks, Monday 4am to Monday 4am, or months by
+   * driver day), NEWEST FIRST — the night a driver asks about is last night,
+   * and on a phone it should be the first row, not the ninetieth; columns
+   * the 24 clock hours, 4am first. Every period from the first to the last is
+   * a row, a week off included, so a gap is a gap. Each square is a pool of
+   * the day-hour slices in it, by the grid's own rules (poolCell, the range's
+   * own figure as the reference, phi over the squares' nights) — so one
+   * day-hour, which can hold neither 30 offers on 2 days nor 2 hours on 2
+   * days, is never shaded: it is grey with its n, which is what one hour of
+   * one night can honestly say. Weeks and months pool enough to shade. */
+  function periodKey(by, day) { return by === 'week' ? weekKeyOf(day) : by === 'month' ? day.slice(0, 7) : day; }
+  function periodSpan(by, key) {
+    if (by === 'week') return { from: key, to: addDays(key, 6) };
+    if (by === 'month') {
+      var y = Number(key.slice(0, 4)), m = Number(key.slice(5, 7));
+      var last = new Date(y, m, 0, 12).getDate();
+      return { from: key + '-01', to: key + '-' + String(last).padStart(2, '0') };
+    }
+    return { from: key, to: key };
+  }
+  function nextKey(by, key) {
+    if (by === 'week') return addDays(key, 7);
+    if (by === 'month') {
+      var y = Number(key.slice(0, 4)), m = Number(key.slice(5, 7)) + 1;
+      if (m > 12) { m = 1; y += 1; }
+      return y + '-' + String(m).padStart(2, '0');
+    }
+    return addDays(key, 1);
+  }
+  function timeline(rows, runs, opts) {
+    opts = opts || {};
+    var stat = statOf(opts.stat), by = opts.by === 'week' || opts.by === 'month' ? opts.by : 'day';
+    var tab = opts.table || sliceTable(rows, runs, { cut: opts.cut, cpm: cpmOf(opts) });
+    var list = sliceList(tab);
+    if (!list.length) return { by: by, stat: stat, ref: null, rows: [], firstCol: -1 };
+    var first = null, last = null, groups = Object.create(null);
+    list.forEach(function (sl) {
+      if (first === null || sl.day < first) first = sl.day;
+      if (last === null || sl.day > last) last = sl.day;
+      var k = periodKey(by, sl.day) + '|' + sl.hour;
+      (groups[k] || (groups[k] = [])).push(sl);
+    });
+    var ph = phis(Object.keys(groups).map(function (k) { return groups[k]; }));
+    var ref = refOf(stat, rows, tab);
+    var ctx = { stat: stat, ref: ref, phi: ph, wMean: tab.wMean, minDays: FLOOR_DAYS };
+    var out = [], firstCol = -1;
+    for (var k = periodKey(by, first), guard = 0; k <= periodKey(by, last) && guard < 5000; k = nextKey(by, k), guard++) {
+      var span = periodSpan(by, k), hrs = 0, offers = 0;
+      var cells = HOUR_ORDER.map(function (h, col) {
+        var e = poolCell(groups[k + '|' + h] || [], ctx);
+        delete e.vals; delete e.wy; delete e.wv;
+        e.hour = h;
+        hrs += e.hours; offers += e.offers;
+        if (!e.off && (firstCol < 0 || col < firstCol)) firstCol = col;
+        return e;
+      });
+      out.push({ key: k, from: span.from, to: span.to, hours: r2(hrs), offers: offers, off: hrs === 0 && offers === 0,
+                 cells: cells });
+    }
+    out.reverse();
+    return { by: by, stat: stat, ref: ref === null ? null : r2(ref), net: tab.net, newestFirst: true,
+             phi: Math.round((stat === 'earned' ? ph.takes : ph.good) * 100) / 100, rows: out, firstCol: firstCol };
+  }
+
+  /* --- B against A, cell by cell ------------------------------------------------
+   *
+   * Two periods (inPeriod's { from, to }), each pooled into the weekday x hour
+   * grid by poolCell, and per cell B's figure minus A's. Shaded only where
+   * both sides meet the grid's floor and the difference is clear at 99%:
+   *   - a quantile: each side's order-statistic interval at CMP_SIDE_ALPHA
+   *     (6.85%), shaded where the two do not overlap;
+   *   - good per hour: the ratio of two Poisson rates, exactly — given the
+   *     cell's good offers in both, B's share of them is binomial with p0 =
+   *     B's hours over both under no difference — on the effective counts
+   *     k/phi (phi over both periods' nights), Clopper-Pearson at 99%;
+   *   - earned per hour: each side's weighted-Poisson interval (earnCI, phi
+   *     over the takes) at CMP_SIDE_ALPHA, shaded where they do not overlap.
+   * `diff` is B - A; `shade` is 'above' where B is the higher, 'below' where
+   * lower. Simulated nulls are in the header. */
+  function gridCompare(rows, runs, a, b, opts) {
+    opts = opts || {};
+    var stat = statOf(opts.stat), cpm = cpmOf(opts), p = STAT_P[stat] || 0.5;
+    function side(per) {
+      var tab = sliceTable(rows, runs, { cut: opts.cut, cpm: cpm, keep: function (x) { return inPeriod(x, per); } });
+      var byCell = Object.create(null);
+      sliceList(tab).forEach(function (s) { (byCell[s.dow * 24 + s.hour] || (byCell[s.dow * 24 + s.hour] = [])).push(s); });
+      return { tab: tab, byCell: byCell };
+    }
+    var A = side(a), B = side(b);
+    var groups = [];
+    [A, B].forEach(function (S) { Object.keys(S.byCell).forEach(function (c) { groups.push(S.byCell[c]); }); });
+    var ph = phis(groups);
+    var tk = A.tab.totals.takes + B.tab.totals.takes;
+    var wMean = tk ? (A.tab.totals.wSum + B.tab.totals.wSum) / tk : null;
+    var refAll = refOf(stat, rows, sliceTable(rows, runs, { cut: opts.cut, cpm: cpm }));
+    var ctx = { stat: stat, ref: refAll === null ? 0 : refAll, phi: ph, wMean: wMean, minDays: FLOOR_DAYS };
+    var cells = [];
+    for (var d = 1; d <= 7; d++) {
+      var dow = d % 7;
+      HOUR_ORDER.forEach(function (h) {
+        var ea = poolCell(A.byCell[dow * 24 + h] || [], ctx), eb = poolCell(B.byCell[dow * 24 + h] || [], ctx);
+        var c = { dow: dow, hour: h, a: slim(ea), b: slim(eb), enough: false, shade: null, ci: null,
+                  diff: ea.value !== null && eb.value !== null ? r2(eb.value - ea.value) : null };
+        if (stat === 'goodRate') {
+          c.enough = ea.timeOk && eb.timeOk;
+          var K = ea.good + eb.good;
+          if (c.enough && K > 0) {
+            var f = ph.good > 1 ? ph.good : 1, p0 = eb.hours / (ea.hours + eb.hours);
+            var ci = shareCI(eb.good / f, K / f, CI_ALPHA);
+            c.shade = ci[0] > p0 ? 'above' : ci[1] < p0 ? 'below' : null;
+            // As a ratio of B's rate to A's: (p / (1 - p)) x (A's hours / B's).
+            var ratio = function (x) { return x >= 1 ? null : r2(x / (1 - x) * ea.hours / eb.hours); };
+            c.ci = [ratio(ci[0]), ratio(ci[1])];
+            c.ciIs = 'ratio';
+          }
+        } else if (stat === 'earned') {
+          c.enough = ea.timeOk && eb.timeOk && wMean > 0;
+          if (c.enough) {
+            var ca = earnCI(ea.wy, ea.wv, wMean, ph.takes, CMP_SIDE_ALPHA), cb = earnCI(eb.wy, eb.wv, wMean, ph.takes, CMP_SIDE_ALPHA);
+            var la = ca[0] / ea.hours, ua = ca[1] / ea.hours, lb = cb[0] / eb.hours, ub = cb[1] / eb.hours;
+            c.shade = lb > ua ? 'above' : ub < la ? 'below' : null;
+            c.ci = [r2(lb - ua), r2(ub - la)];
+          }
+        } else {
+          var qa = ea.n >= FLOOR && ea.days >= FLOOR_DAYS ? quantCI(sorted(ea.vals), p, CMP_SIDE_ALPHA) : null;
+          var qb = eb.n >= FLOOR && eb.days >= FLOOR_DAYS ? quantCI(sorted(eb.vals), p, CMP_SIDE_ALPHA) : null;
+          c.enough = !!(qa && qb);
+          if (c.enough) {
+            c.shade = qb[0] > qa[1] ? 'above' : qb[1] < qa[0] ? 'below' : null;
+            c.ci = [r2(qb[0] - qa[1]), r2(qb[1] - qa[0])];
+          }
+        }
+        cells.push(c);
+      });
+    }
+    return { stat: stat, net: cpm !== null, phi: Math.round((stat === 'earned' ? ph.takes : ph.good) * 100) / 100,
+             sideAlpha: CMP_SIDE_ALPHA, alpha: CI_ALPHA, cells: cells,
+             a: { offers: A.tab.totals.offers, hours: r2(A.tab.totals.hours) },
+             b: { offers: B.tab.totals.offers, hours: r2(B.tab.totals.hours) } };
+  }
+  function slim(e) {
+    return { n: e.n, offers: e.offers, days: e.days, hours: e.hours, onlineDays: e.onlineDays, good: e.good,
+             takes: e.takes, value: e.value, off: e.off, timeOk: e.timeOk };
+  }
+
+  /* --- days 1-10, 11-20, 21 to the end --------------------------------------------
+   *
+   * The chosen figure in each third of the month, over every month in the
+   * range, pooled as a grid cell is. A third is shaded (against the range's
+   * own figure, by the grid's rules; good and earned per hour widened by phi
+   * over the third's days) only where EVERY third holds days of at least
+   * THIRDS_MONTHS months: one or two months is one or two paydays, and the
+   * weekdays that happened to fall in each third. Under that the thirds are
+   * printed grey with their n and days. */
+  function thirdOf(day) { var d = Number(day.slice(8, 10)); return d <= 10 ? 0 : d <= 20 ? 1 : 2; }
+  function monthThirds(rows, runs, opts) {
+    opts = opts || {};
+    var stat = statOf(opts.stat);
+    var tab = sliceTable(rows, runs, { cut: opts.cut, cpm: cpmOf(opts) });
+    var parts = [[], [], []], months = [{}, {}, {}], byDay = [{}, {}, {}];
+    sliceList(tab).forEach(function (sl) {
+      var t = thirdOf(sl.day);
+      parts[t].push(sl);
+      months[t][sl.month] = 1;
+      var d = byDay[t][sl.day] || (byDay[t][sl.day] = { good: 0, takes: 0, hours: 0 });
+      d.good += sl.good; d.takes += sl.takes; d.hours += sl.hours;
+    });
+    var nMonths = months.map(function (m) { return Object.keys(m).length; });
+    var gated = nMonths.every(function (n) { return n >= THIRDS_MONTHS; });
+    var ph = phis(byDay.map(function (g) { return Object.keys(g).map(function (k) { return g[k]; }); }));
+    var ctx = { stat: stat, ref: refOf(stat, rows, tab), phi: ph, wMean: tab.wMean, minDays: FLOOR_DAYS };
+    var labels = ['1–10', '11–20', '21–end'];
+    return { stat: stat, gated: gated, need: THIRDS_MONTHS, ref: ctx.ref === null ? null : r2(ctx.ref),
+             net: tab.net, thirds: parts.map(function (sl, i) {
+               var e = poolCell(sl, ctx);
+               delete e.vals; delete e.wy; delete e.wv;
+               e.label = labels[i]; e.months = nMonths[i]; e.dates = Object.keys(byDay[i]).length;
+               if (!gated) e.shade = null;
+               return e;
+             }) };
+  }
+
+  /* --- one weekday over the weeks --------------------------------------------------
+   *
+   * Every driver day of one weekday from the range's first to its last, one
+   * point each: its P90 $/hr (with its n), its good offers per hour online
+   * and its earned per hour online (gross: the card's pay of its takes), with
+   * the hours online under them. A day with no minute online and no card is
+   * `off` (no point, said so). Hours as the calendar's tiles: a day's runs,
+   * each credited to the day it began. A P90 under DAY_MIN offers, and a
+   * rate under GOOD_FLOOR_HOURS online, is `thin` (a hollow point). */
+  function sameWeekday(rows, runs, dow, opts) {
+    opts = opts || {};
+    var hours = hoursBy(runs, 'day'), keys = Object.keys(hours);
+    var g = groupBy(rows, function (r) { return r.day; });
+    var all = g.keys.concat(keys).sort();
+    if (!all.length) return { dow: dow, days: [] };
+    var d0 = all[0], d1 = all[all.length - 1], k = d0;
+    for (var i = 0; i < 7 && dateOfKey(k).getDay() !== dow; i++) k = addDays(k, 1);
+    var out = [];
+    for (var guard = 0; k <= d1 && guard < 1000; guard++, k = addDays(k, 7)) {
+      var list = g.by[k] || [], h = hours[k] || 0;
+      var v = sorted(valuesOf(list, 'perHour'));
+      var good = list.filter(function (r) { return isGood(r, opts.cut); }).length;
+      var sl = emptySlice(k, 0);
+      list.forEach(function (r) { addTake(sl, r, null); });
+      out.push({ day: k, n: v.length, offers: list.length, p90: v.length ? r2(q(v, 0.9)) : null, p90Thin: v.length < DAY_MIN,
+                 good: good, hours: r2(h), goodRate: h > 0 ? r2(good / h) : null, takes: sl.takes, unpaid: sl.unpaid,
+                 earned: r2(sl.earned), earnedRate: h > 0 ? r2(sl.earned / h) : null, rateThin: h < GOOD_FLOOR_HOURS,
+                 off: h === 0 && list.length === 0 });
+    }
+    return { dow: dow, days: out };
   }
 
   /* --- the rate card --------------------------------------------------------- */
@@ -1138,6 +1727,11 @@
     GOOD_FLOOR_HOURS: GOOD_FLOOR_HOURS, GOOD_FLOOR_DAYS: GOOD_FLOOR_DAYS, F_TAKEN: F_TAKEN,
     quantRanks: quantRanks, quantCI: quantCI, shadeQ: shadeQ, poisCI: poisCI, dispersion: dispersion,
     rateShade: rateShade, ruler: ruler, isGood: isGood,
+    CMP_SIDE_ALPHA: CMP_SIDE_ALPHA, THIRDS_MONTHS: THIRDS_MONTHS, APP_SHARE_MIN: APP_SHARE_MIN,
+    gammaInv: gammaInv, earnCI: earnCI, earnShade: earnShade, betaI: betaI, shareCI: shareCI,
+    takeOf: takeOf, sliceTable: sliceTable, poolCell: poolCell, goodAppShare: goodAppShare,
+    timeline: timeline, gridCompare: gridCompare, monthThirds: monthThirds, sameWeekday: sameWeekday,
+    periodSpan: periodSpan, inPeriod: inPeriod,
     onlinePieces: onlinePieces, hoursByCell: hoursByCell, cellDetail: cellDetail,
     periods: periods, hoursBy: hoursBy, goodPerHour: goodPerHour, hourly: hourly, monthsOf: monthsOf,
     grid: grid, calendar: calendar, fit3: fit3, rateFit: rateFit, rateCard: rateCard,

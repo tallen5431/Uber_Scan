@@ -4732,7 +4732,8 @@ const { chromium } = require('playwright');
       hash: location.hash,
       selected: btns.filter((b) => b.getAttribute('aria-selected') === 'true').map((b) => b.getAttribute('data-view')),
       shown: ['incar', 'ladder', 'toShift', 'review', 'targets', 'log', 'find', 'chips', 'earnings', 'recordsHead',
-              'realHead', 'gold', 'advice', 'blocksHead', 'ppmHead', 'runsHead', 'pairsHead', 'waitsHead', 'caveats']
+              'realHead', 'gold', 'advice', 'blocksHead', 'weekHead', 'toTrends', 'ppmHead', 'runsHead', 'pairsHead',
+              'waitsHead', 'caveats']
         .filter(vis),
       tallest: Math.max.apply(null, btns.map((b) => b.getBoundingClientRect().height)),
       shortest: Math.min.apply(null, btns.map((b) => b.getBoundingClientRect().height)),
@@ -4884,13 +4885,18 @@ try:
         ok_('[tabs] Offers: the search, the chips and the list, nothing else (%r)' % _t['offers']['shown'],
             {'find', 'chips', 'log'} <= set(_t['offers']['shown'])
             and not {'ladder', 'gold', 'blocksHead', 'runsHead'} & set(_t['offers']['shown']))
-        ok_('[tabs] Strategy: the Gold card, the line and the charts (%r)' % _t['strategy']['shown'],
-            {'gold', 'advice', 'blocksHead'} <= set(_t['strategy']['shown'])
+        # Trends round three: on the full rig (this server) the three-hour
+        # blocks and the weekday chart give way to one line that opens Trends;
+        # lite keeps both (rpi/test_lite.py holds that side).
+        ok_('[tabs] Strategy: the Gold card, the line, and "When to drive → Trends" in place of the time charts (%r)'
+            % _t['strategy']['shown'],
+            {'gold', 'advice', 'toTrends'} <= set(_t['strategy']['shown'])
+            and not {'blocksHead', 'weekHead'} & set(_t['strategy']['shown'])
             and not {'log', 'ladder', 'runsHead'} & set(_t['strategy']['shown']))
         ok_('[tabs] Runs: the runs of scanning (%r)' % _t['runs']['shown'],
             'runsHead' in _t['runs']['shown'] and not {'log', 'gold'} & set(_t['runs']['shown']))
         ok_('[tabs] All: every one of them, the old page (%r)' % _t['all']['shown'],
-            {'ladder', 'review', 'targets', 'log', 'gold', 'advice', 'blocksHead', 'runsHead'} <= set(_t['all']['shown']))
+            {'ladder', 'review', 'targets', 'log', 'gold', 'advice', 'toTrends', 'runsHead'} <= set(_t['all']['shown']))
         eq('[tabs] each tab its own address', [_t[v]['hash'] for v in ('offers', 'money', 'strategy', 'runs', 'all')],
            ['#offers', '#money', '#strategy', '#runs', '#all'])
         eq('[tabs] the last tab picked is the one the page opens on next time', (_t['remembered']['view'],

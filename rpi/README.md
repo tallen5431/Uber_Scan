@@ -9234,13 +9234,18 @@ node tests/placesreport.test.js # 369 on the NucBox's offline report of where
                                 #     the car waited by its own fix, ranked
                                 #     the same way, a refused fix no place,
                                 #     and the drop to the next Took
-node tests/trends.test.js       #  45 on the offers page's Trends tab: an offer
+node tests/trends.test.js       # 125 on the offers page's Trends tab: an offer
                                 #     counted once however often it was read,
                                 #     the corrected pay and no suspect or
                                 #     "pay unread" row in a median, the 4am day,
                                 #     the hours and weekdays, the grid's shade
                                 #     and floor set together, a rate card that
                                 #     recovers the prices it was built from,
+                                #     the ruler and percentile intervals,
+                                #     earned per hour gross and net, the wait
+                                #     for a good offer, off against quiet, the
+                                #     timeline across Monday 4am and 1 Nov,
+                                #     B against A with no difference unshaded,
                                 #     /api/trends uncapped and refused in lite
 node tests/strategy.test.js     #  90 on what $/hr to expect and what holding
                                 #     out for a line paid: the curve's answer

@@ -2108,6 +2108,13 @@ const SNAP_MEASURE = (fixture) => {
       if (name === 'journal.html') {
         await page.click('.rangebtns button[data-days="30"]').catch(() => {});
         await page.waitForTimeout(1500);
+        // Since the Trends tab's third round the full rig (this server) hides
+        // the hours and weekday charts behind "When to drive → Trends"; lite
+        // still shows them (rpi/test_lite.py holds which is which). They are
+        // drawn either way, so they are measured here shown, as lite has them.
+        await page.evaluate(() => {
+          ['blocksCard', 'weekCard'].forEach((id) => { const e = document.getElementById(id); if (e) e.hidden = false; });
+        }).catch(() => {});
         out[panel[0] + ' ' + name + ' week'] = await page.evaluate(() => {
           const head = document.getElementById('weekHead');
           const heights = [].slice.call(document.querySelectorAll('#week .block'))
