@@ -470,7 +470,12 @@ async function serve(env) {
       await new Promise(function (r2) { setTimeout(r2, 100); });
     }
   }
-  return { base: base, said: function () { return out; }, stop: function () { proc.kill(); } };
+  // stop() waits for the process to be gone: a killed server still writing
+  // its journal into `tmp` made the rmSync below throw ENOTEMPTY, which failed
+  // the whole suite at random (one gate run of three, 18 Nov).
+  var gone = new Promise(function (r3) { proc.on('exit', r3); });
+  return { base: base, said: function () { return out; },
+           stop: function () { proc.kill(); return gone; } };
 }
 async function get(srv, u, init) {
   var res = await fetch(srv.base + u, init);
@@ -555,8 +560,8 @@ async function get(srv, u, init) {
         g.status === 503 && /could not be read \(not a street index/.test(g.body.error));
     ok_('...and at start', /could not be read .* — \/api\/streets answers that/.test(broken.said()));
   } finally {
-    nuc.stop(); none.stop(); broken.stop();
-    fs.rmSync(tmp, { recursive: true, force: true });
+    await Promise.all([nuc.stop(), none.stop(), broken.stop()]);
+    fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
   console.log(fail ? ('\n' + pass + ' passed, ' + fail + ' FAILED')
                    : '\nAll ' + pass + ' street index checks passed');
