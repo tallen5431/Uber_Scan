@@ -1390,6 +1390,16 @@
     return parts.join(' ').replace(/^[\s.,\-;:|]+|[\s.,\-;:|]+$/g, '');
   }
 
+  /* A run of two or more symbols in a place's name is a script the reader
+     has no letters for: a store's Chinese characters read "#@%&" on the
+     owner's 17 Nov evening. Taken out; a lone "&", an apostrophe, a bracket,
+     a hyphen, a point, a slash, a comma and "#12" stay. Display only. The
+     Python twin, symbol_runs_out, has the measurement. */
+  var SYMBOL_RUN = /\s*[!"#$%&*+:;<=>?@\[\]\\^_`{|}~©®°¢£¥§¤«»¬±¶•]{2,}\s*/g;
+  function symbolRunsOut(value) {
+    return value ? value.replace(SYMBOL_RUN, ' ').trim() : value;
+  }
+
   /* A name the card put a bracket after - "Kroger (Shiloh Square)", "GoPuff
    * (Drive)". That is how these cards write a shop, and it is the one thing
    * that distinguishes the place a job STARTS from the place it ENDS. */
@@ -3238,7 +3248,7 @@
   function findPlaces(text, legs, lines, whose) {
     var out = [], foundOn = [];
     function keep(value, leg) {
-      value = trimPlace(value);
+      value = symbolRunsOut(trimPlace(value));
       if (value.length < 3 || value.length > MAX_PLACE) return;
       if (closesWhatItNeverOpened(value)) return;
       if (!/[A-Za-z]{2}/.test(value)) return;

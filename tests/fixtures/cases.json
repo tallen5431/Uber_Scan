@@ -1062,6 +1062,16 @@
    }
   },
   {
+   "name": "a store name's run of symbols changes no figure: the payout, minutes and miles of the card are as read",
+   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nLucky Dragon Kitchen #@%& (West Midtown/Tech-Sq)\nOak Ln, Marietta",
+   "expect": {
+    "pay": 8.42,
+    "minutes": 18,
+    "miles": 4.2,
+    "complete": true
+   }
+  },
+  {
    "name": "...a two-leg card's headline over its Boost+ line",
    "text": "Exclusive\n$16.80\n* 481 $2.39 Boost+ included\n3 min (0.4 mi)\nOak Ln, Marietta\n25 mins (12.3 mi)\nBirch Rd, Smyrna",
    "expect": {
@@ -4187,6 +4197,31 @@
    "expect": [
     "Fable Grill (2020 Oak Rd Nw)",
     "S Kestrel St SW & Fable Ave SW, Atlanta"
+   ]
+  },
+  {
+   "name": "a store's name in a script the reader has no letters for comes out as a run of symbols, and the run goes (the owner's 17 Nov evening)",
+   "_why": "Display only: a lone '&' between words, the bracket, the slash and the hyphen stay; the payout, minutes and miles are not read from a name.",
+   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nLucky Dragon Kitchen #@%& (West Midtown/Tech-Sq)\nOak Ln, Marietta",
+   "expect": [
+    "Lucky Dragon Kitchen (West Midtown/Tech-Sq)",
+    "Oak Ln, Marietta"
+   ]
+  },
+  {
+   "name": "...a run between two words of the name",
+   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nLucky ~*# Dragon (12 Fable Ct)\nBirch Rd & Elm St, Marietta",
+   "expect": [
+    "Lucky Dragon (12 Fable Ct)",
+    "Birch Rd & Elm St, Marietta"
+   ]
+  },
+  {
+   "name": "...and a lone mark a name does use stays: '&' between words, \"#12\", an apostrophe",
+   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nBread & Butter's #12 (12 Fable Ct)\nOak Ln, Marietta",
+   "expect": [
+    "Bread & Butter's #12 (12 Fable Ct)",
+    "Oak Ln, Marietta"
    ]
   }
  ],

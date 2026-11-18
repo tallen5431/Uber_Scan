@@ -2551,6 +2551,26 @@ def trim_place(value):
     return ' '.join(parts).strip(' .,-;:|')
 
 
+# A run of symbols in a place's name, which is a script the reader has no
+# letters for. The owner's 17 Nov evening had a store printed with Chinese
+# characters after its name, and the reader made them "#@%&": the offers page
+# and the panel's title read "<Store> Kitchen #@%& (<Neighbourhood>)" (the
+# suites' invented "Lucky Dragon Kitchen" stands in for it). Two or more of
+# the marks no name or street is spelled with, together, go — a lone "&" between
+# words stays ("Bread & Butter"), and so does every mark a name or an address
+# does use: an apostrophe, a bracket, a hyphen, a point, a slash, a comma, a
+# "#" before a number ("Store #12"). ASCII and a few of OCR's own glyphs only,
+# named one by one, so the two ports cannot disagree about what a letter is.
+# Display only: no payout, minutes or miles is read from a name, and over the
+# 708 distinct texts in cases.json and sequences.json no place moves.
+SYMBOL_RUN = re.compile(r'\s*[!"#$%&*+:;<=>?@\[\]\\^_`{|}~©®°¢£¥§¤«»¬±¶•]{2,}\s*', ASCII)
+
+
+def symbol_runs_out(value):
+    """A place's name with its runs of symbols taken out (SYMBOL_RUN)."""
+    return SYMBOL_RUN.sub(' ', value).strip() if value else value
+
+
 # A name the card put a bracket after — "Kroger (Shiloh Square)", "GoPuff
 # (Drive)", "McDonald's® (Wade Green)". That is how these cards write a shop,
 # and it was described here as the one thing that distinguishes the place a
@@ -5989,7 +6009,7 @@ def find_places(text, legs, lines, whose=None):
     found_on = []
 
     def keep(value, leg=None):
-        value = trim_place(value)
+        value = symbol_runs_out(trim_place(value))
         if len(value) < 3 or len(value) > MAX_PLACE:
             return
         if _closes_what_it_never_opened(value):
