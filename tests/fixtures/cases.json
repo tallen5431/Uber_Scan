@@ -1063,7 +1063,7 @@
   },
   {
    "name": "a store name's run of symbols changes no figure: the payout, minutes and miles of the card are as read",
-   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nLucky Dragon Kitchen #@%& (West Midtown/Tech-Sq)\nOak Ln, Marietta",
+   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nLucky Dragon Kitchen #@%& (Fable Hill/Juniper-Sq)\nOak Ln, Marietta",
    "expect": {
     "pay": 8.42,
     "minutes": 18,
@@ -4254,9 +4254,9 @@
   {
    "name": "a store's name in a script the reader has no letters for comes out as a run of symbols, and the run goes (the owner's 17 Nov evening)",
    "_why": "Display only: a lone '&' between words, the bracket, the slash and the hyphen stay; the payout, minutes and miles are not read from a name.",
-   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nLucky Dragon Kitchen #@%& (West Midtown/Tech-Sq)\nOak Ln, Marietta",
+   "text": "$8.42\nGuaranteed (incl. tip)\n© 18 min (4.2 mi) total\nLucky Dragon Kitchen #@%& (Fable Hill/Juniper-Sq)\nOak Ln, Marietta",
    "expect": [
-    "Lucky Dragon Kitchen (West Midtown/Tech-Sq)",
+    "Lucky Dragon Kitchen (Fable Hill/Juniper-Sq)",
     "Oak Ln, Marietta"
    ]
   },
