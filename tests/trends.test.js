@@ -6,7 +6,11 @@
    counted once per reading instead of once, a pay the server corrected read
    at its first figure, a suspect or "pay unread" row in a median, a grid cell
    shaded by chance, a rate card that cannot recover a price it was built
-   from, a server that caps the window or a lite rig that serves it. */
+   from, a server that caps the window or a lite rig that serves it.
+   Round two adds: the quantile interval against hand-worked ranks, runs
+   split at the clock hour across midnight and 4am, the ruler held as one
+   figure across days, the floors of P90 and of good per hour online, the
+   calendar's week rows, and a looked-at cell that carries figures only. */
 
 'use strict';
 
@@ -212,6 +216,217 @@ function offer(x) {
   ok('...the hourly CSV: 24 lines', T.csvHourly(hrs).split('\n').length === 26);
   ok('...and no place or position is in the packed rows', !/lat|lon|pickup|dropoff|text/.test(JSON.stringify(T.pack(T.rowsOf(dup)))));
 
+  /* === Round two: the ruler, the quantiles, good per hour online, the
+     calendar's weeks and a cell looked at closely === */
+
+  /* --- the order-statistic interval at any share, against hand-worked cases --- */
+  // n=10, p=1/2, 95%: P(X<=1) = 11/1024 = .0107 <= .025 < P(X<=2) = 56/1024 = .0547,
+  // so [x(2), x(9)], the textbook interval for a median of ten.
+  // n=20, p=.75, 95%: P(X<=10) = .0139 <= .025 < P(X<=11) = .0409, so lo = 11;
+  // P(X>=19) = 20(.75^19)(.25) + .75^20 = .0211 + .0032 = .0243 <= .025 < P(X>=18) = .091,
+  // so hi = 19.
+  // n=10, p=.9, 99%: P(X<=5) = .0016 <= .005 < P(X<=6) = .0128, so lo = 6; but
+  // P(X>=10) = .9^10 = .349 > .005, so there is no upper rank at all (hi = 11).
+  eq('quantile ranks: hand-worked n=10 median at 95%, n=20 P75 at 95%, n=10 P90 at 99% (no top)',
+     [T.quantRanks(10, 0.5, 0.05), T.quantRanks(20, 0.75, 0.05), T.quantRanks(10, 0.9, 0.01)],
+     [[2, 9], [11, 19], [6, 11]]);
+  eq('...a P90 at 99% has a top only from 51 offers (0.9^51 = .0046, 0.9^50 = .0052)',
+     [T.quantRanks(50, 0.9, 0.01)[1], T.quantRanks(51, 0.9, 0.01)], [51, [40, 51]]);
+  var mirrored = true, sameMedian = true;
+  [12, 30, 57, 100, 333].forEach(function (n) {
+    [0.75, 0.9, 0.6].forEach(function (p) {
+      var a = T.quantRanks(n, p, 0.01), b = T.quantRanks(n, Math.round((1 - p) * 100) / 100, 0.01);
+      if (a[0] !== n + 1 - b[1] || a[1] !== n + 1 - b[0]) mirrored = false;
+    });
+    var m = T.quantRanks(n, 0.5, 0.01), k = T.medianRank(n, 0.01);
+    if (m[0] !== k || m[1] !== n - k + 1) sameMedian = false;
+  });
+  ok('...the ranks at p mirror the ranks at 1 - p, and at 1/2 they are round one\'s median ranks', mirrored && sameMedian);
+  var oneTo20 = []; for (var o20 = 1; o20 <= 20; o20++) oneTo20.push(o20);
+  eq('...and the interval is those order statistics', [T.quantCI(oneTo20, 0.75, 0.05), T.quantCI(oneTo20.slice(0, 10), 0.9, 0.01)],
+     [[11, 19], null]);
+
+  /* --- the Poisson interval --- */
+  var pz = T.poisCI(0, 0.01), pt = T.poisCI(10, 0.01), p1 = T.poisCI(1, 0.05);
+  eq('the exact Poisson interval: 0 at 99% is [0, 5.30], 10 is [3.72, 21.40], 1 at 95% is [0.0253, 5.5716]',
+     [pz[0], Math.round(pz[1] * 100) / 100, Math.round(pt[0] * 100) / 100, Math.round(pt[1] * 100) / 100,
+      Math.round(p1[0] * 10000) / 10000, Math.round(p1[1] * 10000) / 10000], [0, 5.3, 3.72, 21.4, 0.0253, 5.5716]);
+  eq('phi: nights alike is 1; nights that swing far past chance is well over 1',
+     [T.dispersion([[{ k: 6, h: 1 }, { k: 6, h: 1 }, { k: 6, h: 1 }]]) === 1,
+      T.dispersion([[{ k: 1, h: 1 }, { k: 14, h: 1 }, { k: 2, h: 1 }, { k: 16, h: 1 }]]) > 4], [true, true]);
+  eq('...and a slice under a quarter hour is not used to measure it (a run starts at its first card)',
+     T.dispersion([[{ k: 1, h: 0.05 }, { k: 6, h: 1 }, { k: 6, h: 1 }]]), 1);
+
+  /* --- runs split at every clock hour, on the driver's day --- */
+  var pcs = T.onlinePieces([[at(2, 19, 40), at(2, 21, 10)]]);
+  eq('a run from 7:40 to 9:10 is 20 minutes of 7pm, an hour of 8pm and 10 minutes of 9pm',
+     Object.keys(pcs).sort().map(function (k) { return [k, Math.round(pcs[k].hours * 60)]; }),
+     [['2026-03-02|19', 20], ['2026-03-02|20', 60], ['2026-03-02|21', 10]]);
+  var mid = T.onlinePieces([[at(6, 23, 30), at(7, 0, 30)]]);
+  eq('a run across midnight stays on the Friday night: 11pm and 12am, half an hour each, both Friday',
+     Object.keys(mid).sort().map(function (k) { return [k, mid[k].dow, mid[k].hour, mid[k].hours]; }),
+     [['2026-03-06|0', 5, 0, 0.5], ['2026-03-06|23', 5, 23, 0.5]]);
+  var four = T.onlinePieces([[at(7, 3, 30), at(7, 4, 30)]]);
+  eq('a run across 4am: its 3am half on the Friday night, its 4am half on Saturday',
+     Object.keys(four).sort().map(function (k) { return [k, four[k].dow, four[k].hour, four[k].hours]; }),
+     [['2026-03-06|3', 5, 3, 0.5], ['2026-03-07|4', 6, 4, 0.5]]);
+  var byCell = T.hoursByCell([[at(6, 23, 30), at(7, 0, 30)], [at(7, 3, 30), at(7, 4, 30)], [at(13, 23, 0), at(13, 23, 45)]]);
+  eq('...and by weekday x hour: Friday 11pm 1.25 h on two nights, Friday 3am and Saturday 4am half an hour each',
+     [byCell[5 * 24 + 23], byCell[5 * 24 + 3], byCell[6 * 24 + 4]],
+     [{ hours: 1.25, days: 2 }, { hours: 0.5, days: 1 }, { hours: 0.5, days: 1 }]);
+  eq('...while hoursBy still credits a sitting across 4am to the day it began (round one\'s rule, unchanged)',
+     T.hoursBy([[at(7, 3, 30), at(7, 4, 30)]], 'day'), { '2026-03-06': 1 });
+
+  /* --- the ruler: once over the range, then one fixed dollar figure --- */
+  var rl = [];
+  for (var rv = 1; rv <= 100; rv++) rl.push(offer({ id: 'rl' + rv, at: at(rv <= 50 ? 2 : 9, 19, rv % 50), perHour: rv }));
+  rl.push(offer({ id: 'rlsus', at: at(9, 20), perHour: 900, suspect: true }));
+  var rlRows = T.readRows(T.rowsOf(rl));
+  var rul = T.ruler(rlRows, 20);
+  eq('the ruler: the top 20% of $1..$100 is at or over $80.20, 20 offers, the suspect $900 not in it',
+     [rul.top, rul.cut, rul.n, rul.over], [20, 80.2, 100, 20]);
+  eq('...10, 30 and 50 the same way, and a share not offered falls back to 20',
+     [T.ruler(rlRows, 10).cut, T.ruler(rlRows, 30).cut, T.ruler(rlRows, 50).cut, T.ruler(rlRows, 37).top],
+     [90.1, 70.3, 50.5, 20]);
+  var gpd = T.goodPerHour(rlRows, [[at(2, 19), at(2, 21)], [at(9, 19), at(9, 21)]], 'day', rul.cut);
+  eq('...and every day is counted against that one figure: the low first week has none, the second all 20',
+     gpd.map(function (e) { return [e.key, e.good, e.rate]; }), [['2026-03-02', 0, 0], ['2026-03-09', 20, 10]]);
+  var calR = T.calendar(rlRows, [], { stat: 'p50', cut: rul.cut });
+  eq('...the calendar\'s days by the same line, adding up to the ruler\'s own count',
+     calR.days.reduce(function (a, d) { return a + d.good; }, 0), rul.over);
+  eq('...and a good share in two periods uses it too', [T.compare(rlRows, { from: '2026-03-02', to: '2026-03-02' },
+     { from: '2026-03-09', to: '2026-03-09' }, rul.cut).a.good, T.compare(rlRows, { from: '2026-03-02', to: '2026-03-02' },
+     { from: '2026-03-09', to: '2026-03-09' }, rul.cut).b.good], [0, 20]);
+  // The ruler is a way of reading the tab, and nothing outside the tab reads it.
+  var outside = ['advice.js', 'server.js', 'live.html', 'ui.js', path.join('rpi', 'scan_pi.py')].filter(function (f) {
+    var src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+    return /uberscan\.trends\.top|\.ruler\(|isGood\(/.test(src);
+  });
+  eq('the ruler reaches no verdict, target, rig or scan_pi: nothing outside trends.js and the tab names it', outside, []);
+
+  /* --- shading floors: the quantiles and good per hour online --- */
+  var flo = [], fruns = [];
+  [6, 13, 20, 27].forEach(function (fd, i) {
+    for (var fk = 0; fk < 15; fk++) {
+      // Friday 8pm: 15 offers a night at $40 (60 on four Fridays); 9pm: 10 a night (40 on four).
+      flo.push(offer({ id: 'p8-' + fd + '-' + fk, at: at(fd, 20, fk * 3), perHour: 40 + fk * 0.1 }));
+      if (fk < 10) flo.push(offer({ id: 'p9-' + fd + '-' + fk, at: at(fd, 21, fk * 4), perHour: 40 + fk * 0.1 }));
+      // Friday 6pm, the bulk of the range: $8-$20, one good a night at most.
+      flo.push(offer({ id: 'p6-' + fd + '-' + fk, at: at(fd, 18, fk * 4), perHour: 8 + fk * 0.8 }));
+      flo.push(offer({ id: 'p7-' + fd + '-' + fk, at: at(fd, 19, fk * 4), perHour: 8 + fk * 0.8 }));
+    }
+    fruns.push([at(fd, 18, 0), at(fd, 21, 59)]);
+    if (i < 3) fruns.push([at(fd, 22, 0), at(fd, 22, 30)]);           // Friday 10pm: 1.5 h on three nights
+  });
+  for (var tk = 0; tk < 12; tk++) flo.push(offer({ id: 'p10-' + tk, at: at([6, 13, 20][tk % 3], 22, tk), perHour: 60 }));
+  var floRows = T.readRows(T.rowsOf(flo));
+  // For the quantiles the two high cells must be a small part of the range
+  // (a range P90 sits among them otherwise): eleven hundred ordinary offers
+  // on the other weeknights, $8-$20.
+  var filler = [];
+  for (var fi = 0; fi < 1100; fi++) {
+    filler.push(offer({ id: 'fl' + fi, at: at(2 + (fi % 4) + 7 * Math.floor(fi / 275) % 28, 18 + (fi % 3), Math.floor(fi / 4) % 60),
+                        perHour: 8 + (fi % 25) * 0.5 }));
+  }
+  var qRows = T.readRows(T.rowsOf(flo.concat(filler)));
+  var g90 = T.grid(qRows, { stat: 'p90' });
+  var gc = function (gg, dow, hour) { return gg.cells.filter(function (c) { return c.dow === dow && c.hour === hour; })[0]; };
+  eq('P90: a cell of 60 offers well above is shaded; one of 40, as far above, stays grey (no top rank under 51)',
+     [gc(g90, 5, 20).n, gc(g90, 5, 20).shade, gc(g90, 5, 21).n, gc(g90, 5, 21).enough, gc(g90, 5, 21).noRanks,
+      gc(g90, 5, 21).shade], [60, 'above', 40, false, true, null]);
+  eq('...while its median, from the same 40, is shaded (a median\'s interval needs 8)',
+     gc(T.grid(qRows, { stat: 'p50' }), 5, 21).shade, 'above');
+  // Good per hour online against a fixed $30 line (the ruler's own sums are
+  // held above): 8pm and 9pm and the 10pm $60s are good, 6pm and 7pm never.
+  var cutF = 30;
+  var gg = T.grid(floRows, { stat: 'goodRate', cut: cutF, runs: fruns });
+  eq('good per hour online: 8pm\'s 15 an hour is shaded above the range, 6pm\'s none is below',
+     [gc(gg, 5, 20).value, gc(gg, 5, 20).hours, gc(gg, 5, 20).shade, gc(gg, 5, 18).good, gc(gg, 5, 18).shade],
+     [15, 4, 'above', 0, 'below']);
+  eq('...a cell with 1.5 hours online on three nights is under the floor however good (12 good, 8 an hour)',
+     [gc(gg, 5, 22).hours, gc(gg, 5, 22).days, gc(gg, 5, 22).good, gc(gg, 5, 22).enough, gc(gg, 5, 22).shade],
+     [1.5, 3, 12, false, null]);
+  var gg2 = T.grid(floRows, { stat: 'goodRate', cut: cutF, runs: fruns.slice(0, 2) });
+  eq('...and one Friday alone (an hour a cell) is under it everywhere', gg2.cells.filter(function (c) { return c.enough; }).length, 0);
+  // With no effect, 300 cells on four nights each, every night's rate drawn
+  // with a 40% swing: the widened interval shades about 1 in 100 or fewer.
+  var r6 = rng(17), noFx = [], noShaded = 0;
+  for (var nc = 0; nc < 300; nc++) {
+    var nights = [];
+    for (var nn = 0; nn < 4; nn++) {
+      var lam = 6 * Math.max(0.1, 1 + 0.4 * (r6() + r6() + r6() - 1.5) * 2), kk = 0, L0 = Math.exp(-lam), pp = 1;
+      do { kk++; pp *= r6(); } while (pp > L0);
+      nights.push({ k: kk - 1, h: 1 });
+    }
+    noFx.push(nights);
+  }
+  var phiNo = T.dispersion(noFx);
+  noFx.forEach(function (ns) {
+    var K = ns.reduce(function (a, x) { return a + x.k; }, 0);
+    if (T.rateShade(K, 4, 6, phiNo).shade) noShaded += 1;
+  });
+  ok('...with no effect and a 40% night-to-night swing, phi ' + phiNo.toFixed(2) + ' keeps chance shading low ('
+     + noShaded + ' of 300)', phiNo > 1.3 && noShaded <= 9);
+
+  /* --- the calendar as week rows --- */
+  var cw = [];
+  ['2026-02-26', '2026-02-27', '2026-03-03', '2026-03-10', '2026-03-12'].forEach(function (dk, i) {
+    var p = dk.split('-').map(Number);
+    for (var ck2 = 0; ck2 < 5; ck2++) {
+      cw.push(offer({ id: 'cw' + i + '-' + ck2, at: new Date(p[0], p[1] - 1, p[2], 19, ck2).getTime(), perHour: 10 + i * 5 + ck2 }));
+    }
+  });
+  var calW = T.calendar(T.readRows(T.rowsOf(cw)), [], { stat: 'p75', cut: 20 });
+  eq('the calendar\'s rows are weeks, Monday to Sunday, first to last, the month named where one starts',
+     calW.weeks.map(function (w) { return [w.week, w.days[0], w.days[6], w.month]; }),
+     [['2026-02-23', '2026-02-23', '2026-03-01', '2026-02'], ['2026-03-02', '2026-03-02', '2026-03-08', null],
+      ['2026-03-09', '2026-03-09', '2026-03-15', null]]);
+  eq('...each week its own figure pooled over its offers, with its n (P75 of $10-$19 is $16.75)',
+     calW.weeks.map(function (w) { return [w.n, w.counted, w.value]; }), [[10, 10, 16.75], [5, 5, 23], [10, 10, 31.75]]);
+  eq('...a week starting on a 1st is labelled with it', T.calendar(T.readRows(T.rowsOf([offer({ id: 'j1', at: new Date(2026, 5, 1, 19).getTime() })])),
+     []).weeks[0].month, '2026-06');
+  eq('...and this month so far against the month before, each with its n',
+     [calW.months.now.month, calW.months.now.n, calW.months.now.through, calW.months.before.month, calW.months.before.n],
+     ['2026-03', 15, '2026-03-12', '2026-02', 10]);
+
+  /* --- a cell looked at closely, and only figures in it --- */
+  var dr = [offer({ id: 'd1', at: at(6, 20, 1), perHour: 30, app: 'uber', accepted: true }),
+            offer({ id: 'd2', at: at(6, 20, 5), perHour: 12, app: 'doordash', accepted: false }),
+            offer({ id: 'd3', at: at(13, 20, 9), perHour: 25, app: 'doordash' }),
+            offer({ id: 'd4', at: at(13, 20, 20), perHour: 18, app: 'uber', suspect: true }),
+            offer({ id: 'd5', at: at(13, 21, 0), perHour: 50, app: 'uber', accepted: true })];
+  dr.push({ v: 1, kind: 'mark', id: 'd3', at: at(13, 20, 30), accepted: true });
+  var drRows = T.readRows(T.rowsOf(dr));
+  eq('a take is only the driver\'s own tick: true is taken, false and no answer are not, a mark row is no offer',
+     drRows.map(function (r) { return r.taken; }), [true, false, false, false, true]);
+  var cd = T.cellDetail(drRows, [[at(6, 20, 0), at(6, 21, 0)], [at(13, 20, 0), at(13, 20, 30)]], 5, 20,
+                        { stat: 'p50', cut: 20 });
+  eq('the cell: its money offers as dots ($/hr, taken, app), the suspect one counted but not drawn',
+     [cd.offers, cd.n, cd.dots, cd.taken, cd.good, cd.hours], [4, 3, [[30, 1, 1], [12, 0, 2], [25, 0, 2]], 1, 2, 1.5]);
+  eq('...the two apps apart, its quantiles, and the best by $/hr first',
+     [cd.apps.uber.n, cd.apps.doordash.n, cd.apps.doordash.value, cd.p50, cd.best.map(function (b) { return b.perHour; })],
+     [1, 2, 18.5, 25, [30, 25, 12]]);
+  eq('...each best offer says pay, minutes, miles, app and when, and nothing else',
+     Object.keys(cd.best[0]).sort(), ['app', 'day', 'miles', 'minutes', 'pay', 'perHour', 't', 'taken']);
+  eq('...and its figure week by week', cd.weeks.map(function (w) { return [w.week, w.n, w.value]; }),
+     [['2026-03-02', 2, 21], ['2026-03-09', 1, 25]]);
+  var cdg = T.cellDetail(drRows, [[at(6, 20, 0), at(6, 21, 0)], [at(13, 20, 0), at(13, 20, 30)]], 5, 20,
+                         { stat: 'goodRate', cut: 20 });
+  eq('...in good per hour online: 2 good over its 1.5 hours, week by week over each week\'s own hours',
+     [cdg.value, cdg.weeks.map(function (w) { return [w.good, w.hours, w.value]; })], [1.33, [[1, 1, 1], [1, 0.5, 2]]]);
+  ok('...and nothing in it, or in the packed rows, is text, a place or a position',
+     !/lat|lon|pickup|dropoff|text|address|"id"/.test(JSON.stringify(cd) + JSON.stringify(T.pack(T.rowsOf(dr)))));
+  eq('the packed rows are still seven columns; a take is a bit in the flags', [Object.keys(T.pack(T.rowsOf(dr)).cols),
+     T.pack(T.rowsOf(dr)).cols.flags.map(function (f) { return f & T.F_TAKEN ? 1 : 0; })],
+     [['t', 'app', 'pay', 'perHour', 'minutes', 'miles', 'flags'], [1, 0, 0, 0, 1]]);
+
+  /* --- the hour of day in each figure --- */
+  var hp = T.hourly(qRows, { stat: 'p90' }), hg = T.hourly(floRows, { stat: 'goodRate', cut: cutF, runs: fruns });
+  var hAt = function (list, h) { return list.filter(function (e) { return e.hour === h; })[0]; };
+  eq('the hour chart in P90 and in good per hour online, with the same floors as the grid',
+     [hAt(hp, 20).value !== null, hAt(hp, 20).enough, hAt(hp, 21).enough, hAt(hg, 20).value, hAt(hg, 20).enough,
+      hAt(hg, 22).enough], [true, true, false, 15, true, false]);
+
   /* --- a large journal is quick --- */
   var r5 = rng(3), big = [];
   for (var b = 0; b < 12500; b++) {
@@ -243,6 +458,12 @@ function offer(x) {
                                            state: 'no', whole: true, app: 'uber' }));
   }
   lines.push(JSON.stringify({ v: 1, kind: 'mark', id: 'srv5', at: now, hidden: true }));
+  // Takes: a tick; a pass (Passed sends `via`); a tick taken back (a `false`
+  // with no `via` is a withdrawal, server.js folds it to no answer).
+  lines.push(JSON.stringify({ v: 1, kind: 'mark', id: 'srv10', at: now - 1000, accepted: true }));
+  lines.push(JSON.stringify({ v: 1, kind: 'mark', id: 'srv12', at: now - 1000, accepted: false, via: 'review' }));
+  lines.push(JSON.stringify({ v: 1, kind: 'mark', id: 'srv14', at: now - 2000, accepted: true }));
+  lines.push(JSON.stringify({ v: 1, kind: 'mark', id: 'srv14', at: now - 1000, accepted: false }));
   fs.writeFileSync(journal, lines.join('\n') + '\n');
   async function serve(lite) {
     var port = 20000 + Math.floor(Math.random() * 20000);
@@ -275,6 +496,16 @@ function offer(x) {
        [ans.status, j1.ok, j1.total, j1.rows.n], [200, true, 5999, 5999]);
     ok('...with the runs of scanning and the target', Array.isArray(j1.runs) && j1.runs.length >= 1 && j1.target === 25);
     ok('...and no place or position in it', !/lat|lon|pickup|dropoff|"text"/.test(ans.body));
+    var takenAt = [];
+    j1.rows.cols.flags.forEach(function (f, i) { if (f & T.F_TAKEN) takenAt.push(i); });
+    var srvT = T.unpack(j1.rows).filter(function (r) { return r.taken; });
+    eq('...a take reaches the tab as a bit, only for the driver\'s standing tick (not a pass, not a tick taken back)',
+       [takenAt.length, srvT.length === 1 && srvT[0].t === Math.round((now - 20 * 86400000 + 10 * 240000) / 1000) * 1000],
+       [1, true]);
+    var withTop = JSON.parse((await get(full.port, '/api/trends?days=30&top=10')).body);
+    eq('...and the server takes no ruler: the same answer whatever the page\'s choice, no cut in it',
+       [Object.keys(withTop).sort(), withTop.total, JSON.stringify(withTop.rows) === JSON.stringify(j1.rows)],
+       [['days', 'floor', 'ok', 'rows', 'runs', 'target', 'total'], 5999, true]);
     var j7 = JSON.parse((await get(full.port, '/api/trends?days=7')).body);
     var inSeven = 0;
     for (var j2 = 0; j2 < 6000; j2++) if (now - 20 * 86400000 + j2 * 240000 >= now - 7 * 86400000) inSeven += 1;
@@ -283,6 +514,16 @@ function offer(x) {
     var page = (await get(full.port, '/journal.html')).body;
     ok('the offers page has the Trends tab, and loads trends.js only when it is opened',
        /data-view="trends"/.test(page) && !/<script src="trends\.js">/.test(page) && /s\.src = 'trends\.js'/.test(page));
+    var order = ['trWhenHead', 'trTop', 'trStat', 'trGrid', 'trCell', 'trHourly', 'trCal', 'trGood', 'trChangeHead',
+                 'trDaily', 'trSpread', 'trCompare', 'trShare', 'trShape', 'trMixMin', 'trScatter', 'trRate', 'trQuality',
+                 'trCsvDays'].map(function (id) { return page.indexOf('id="' + id + '"'); });
+    ok('the tab in three sections: when to drive (ruler, switch, grid, its cell, hours, calendar, good per hour), '
+       + 'how it\'s changing, and the shape of offers folded away, CSVs last',
+       order.every(function (x, i) { return x > 0 && (i === 0 || x > order[i - 1]); })
+       && /<details class="trshape" id="trShape">/.test(page));
+    ok('...the ruler offers 10, 20, 30 and 50, opens on 20, and says it is for reading only',
+       /data-top="10"[\s\S]*data-top="20" aria-pressed="true"[\s\S]*data-top="30"[\s\S]*data-top="50"/.test(page)
+       && /never\s+reaches the verdict/.test(page));
   } finally { full.proc.kill(); }
   var lite = await serve(true);
   try {

@@ -778,7 +778,36 @@
      390px phone. The colours are the page's own, plus one for each app — not
      the verdict colours, which mean go / close / pass everywhere else here. */
   :root { --uber: #6fb6ff; --dash: #ff9a6b; }
-  .trends h3 { margin: 16px 0 4px; font-size: 15px; }
+  .trends h4 { margin: 16px 0 4px; font-size: 15px; }
+  .trends h4 em { font-style: normal; color: var(--muted); font-weight: 400; }
+  /* The three sections: a rule over each, a step bigger than a chart's. */
+  .trends h3.trsec { margin: 22px 0 6px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 17px; }
+  .trends details.trshape > summary { cursor: pointer; list-style: revert; }
+  .trends details.trshape > summary h3 { display: inline; }
+  .trends .chips .lbl { align-self: center; color: var(--muted); font-size: 14px; margin-right: 2px; }
+  .trends .rulerline { margin: 2px 0 0; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .trends .rulerline b { color: var(--text); }
+  .trends .calmonths { margin: 6px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+  /* The cell looked at closely: one at a time, under the grid. */
+  .trends .cellpanel { margin: 8px 0 4px; padding: 8px 10px 10px; border: 1px solid var(--line); border-radius: 8px;
+                       background: var(--panel-2); }
+  .trends .cellpanel:focus { outline: 2px solid var(--muted); outline-offset: 2px; }
+  .trends .cellpanel .cphead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .trends .cellpanel h5 { margin: 4px 0; font-size: 15px; }
+  .trends .cellpanel .cpclose { min-width: 44px; min-height: 44px; font: inherit; font-size: 18px;
+                                color: var(--text); background: transparent; border: 1px solid var(--line);
+                                border-radius: 6px; cursor: pointer; }
+  .trends .cellpanel table { margin: 4px 0; }
+  .trends .cellpanel .cpfig { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px;
+                              font-variant-numeric: tabular-nums; margin: 4px 0; }
+  .trends svg .ruler { stroke: var(--go); stroke-width: 1.5; stroke-dasharray: 4 3; }
+  .trends svg .taken { fill: none; stroke: var(--text); stroke-width: 1.6; }
+  .trends .legend i.ring { width: 9px; height: 9px; border-radius: 50%; background: transparent;
+                           border: 1.6px solid var(--text); }
+  .trends .legend i.ruler { background: repeating-linear-gradient(90deg, var(--go) 0 4px, transparent 4px 7px); }
+  .trends table.grid24 td[data-cell] { cursor: pointer; }
+  .trends table.grid24 td[data-cell]:focus { outline: 2px solid var(--text); outline-offset: -2px; }
+  .trends table.grid24 td.picked { box-shadow: inset 0 0 0 2px var(--text); }
   .trends .chips { margin: 4px 0 6px; }
   .trends .chart { width: 100%; overflow: hidden; }
   .trends svg { display: block; width: 100%; height: auto; font: 11px system-ui, sans-serif; }
@@ -828,8 +857,16 @@
   .trends td.above { background: var(--go-dim); }
   .trends td.below { background: var(--no-dim); }
   .trends td.thin, .trends .tile.thin { color: var(--muted); }
-  .trends .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+  /* Week rows, Monday to Sunday, so a weekday lines up down its column; a
+     month's name in the narrow first column, the week's own figure in the
+     last. Nine columns fit 358px at 36px a tile. */
+  .trends .cal { display: grid; grid-template-columns: 28px repeat(7, minmax(0, 1fr)) minmax(0, 1.1fr); gap: 3px; }
   .trends .cal .wd { font-size: 11px; color: var(--muted); text-align: center; }
+  .trends .cal .mo { font-size: 11px; color: var(--muted); align-self: start; padding-top: 4px; }
+  .trends .cal .wkfig { border-style: dashed; cursor: default; }
+  .trends .cal .wkfig em { font-size: 10px; letter-spacing: -.02em; }
+  .trends .cal .wkfig.above { background: var(--go-dim); }
+  .trends .cal .wkfig.below { background: var(--no-dim); }
   .trends .tile { min-height: 50px; padding: 3px 4px; border: 1px solid var(--line); border-radius: 6px;
                   font-size: 11px; line-height: 1.2; font-variant-numeric: tabular-nums; overflow: hidden;
                   cursor: pointer; background: transparent; color: var(--text); font-family: inherit;
@@ -1324,12 +1361,64 @@
     nothing here moves the verdict or the target, and $/mi is for reading, not a rule.</p>
   <p class="hint" id="trSays">Open this tab with 7 days, 30 days or All pressed.</p>
   <div id="trBody" hidden>
+    <!-- Round two (the owner, Nov 2026: "view by percentile, good = the top
+         20%, adjustable"): three sections. What a selective driver asks first
+         — when the best offers come — on top; how the record moved over the
+         weeks under it; the shape of the offers and the data's own quality
+         last and folded, because they are checked, not read daily. Every id
+         of round one is kept, so the code and the tests find them. -->
+    <h3 class="trsec" id="trWhenHead">When to drive</h3>
+    <div class="ruler">
+      <div class="chips" id="trTop" role="group" aria-label="Good is the top share of this range">
+        <span class="lbl">Good =</span>
+        <button type="button" data-top="10" aria-pressed="false">Top 10%</button>
+        <button type="button" data-top="20" aria-pressed="true">20%</button>
+        <button type="button" data-top="30" aria-pressed="false">30%</button>
+        <button type="button" data-top="50" aria-pressed="false">50%</button>
+      </div>
+      <p class="rulerline" id="trRuler" aria-live="polite"></p>
+      <p class="hint" id="trRulerHint">A ruler for reading this tab only: it is not your target, and it never
+        reaches the verdict, the panel or the rig.</p>
+    </div>
+    <div class="chips" id="trStat" role="group" aria-label="Which figure the grid, the hours and the calendar show">
+      <button type="button" data-stat="p50" aria-pressed="true">Median</button>
+      <button type="button" data-stat="p75" aria-pressed="false">P75</button>
+      <button type="button" data-stat="p90" aria-pressed="false">P90</button>
+      <button type="button" data-stat="goodRate" aria-pressed="false">Good/hr online</button>
+    </div>
+
+    <h4 id="trGridHead">Weekday × hour <em>· median $/hr</em></h4>
+    <p class="hint" id="trGridNote"></p>
+    <div class="tw" id="trGrid"></div>
+    <div class="cellpanel" id="trCell" role="region" aria-labelledby="trCellHead" tabindex="-1" hidden></div>
+
+    <h4 id="trHourHead">Hour of day <em>· median $/hr</em></h4>
+    <div class="chips" id="trHourDays" role="group" aria-label="Which days">
+      <button type="button" data-days="all" aria-pressed="true">All days</button>
+      <button type="button" data-days="weekday" aria-pressed="false">Weekdays</button>
+      <button type="button" data-days="weekend" aria-pressed="false">Weekends</button>
+      <button type="button" data-months="1" aria-pressed="false" id="trMonths">This month vs last</button>
+    </div>
+    <div class="legend" id="trHourLegend"></div>
+    <div class="chart" id="trHourly"></div>
+    <p class="hint" id="trHourNote"></p>
+
+    <h4 id="trCalHead">Calendar <em>· median $/hr</em></h4>
+    <div id="trCal"></div>
+    <p class="calmonths" id="trCalMonths"></p>
+    <p class="hint" id="trCalNote"></p>
+
+    <h4 id="trGoodHead">Good offers per hour online</h4>
+    <div class="chart" id="trGood"></div>
+    <p class="hint" id="trGoodNote"></p>
+
+    <h3 class="trsec" id="trChangeHead">How it's changing</h3>
     <div class="chips" id="trBy" role="group" aria-label="Group the time charts by">
       <button type="button" data-by="day" aria-pressed="true">By day</button>
       <button type="button" data-by="week" aria-pressed="false">By week</button>
     </div>
 
-    <h3 id="trDailyHead">Each day</h3>
+    <h4 id="trDailyHead">Each day</h4>
     <div class="chips" id="trMetric" role="group" aria-label="Which figure">
       <button type="button" data-metric="pay" aria-pressed="false">Pay</button>
       <button type="button" data-metric="perHour" aria-pressed="true">$/hr</button>
@@ -1342,44 +1431,11 @@
     <div class="chart" id="trDaily"></div>
     <p class="hint" id="trDailyNote"></p>
 
-    <h3>Hour of day <em>· median $/hr</em></h3>
-    <div class="chips" id="trHourDays" role="group" aria-label="Which days">
-      <button type="button" data-days="all" aria-pressed="true">All days</button>
-      <button type="button" data-days="weekday" aria-pressed="false">Weekdays</button>
-      <button type="button" data-days="weekend" aria-pressed="false">Weekends</button>
-      <button type="button" data-months="1" aria-pressed="false" id="trMonths">This month vs last</button>
-    </div>
-    <div class="legend" id="trHourLegend"></div>
-    <div class="chart" id="trHourly"></div>
-    <p class="hint" id="trHourNote"></p>
-
-    <h3>Weekday × hour <em>· median $/hr</em></h3>
-    <p class="hint" id="trGridNote"></p>
-    <div class="tw" id="trGrid"></div>
-
-    <h3>Good offers per hour online</h3>
-    <div class="chart" id="trGood"></div>
-    <p class="hint" id="trGoodNote"></p>
-
-    <h3>Pay spread</h3>
+    <h4>Pay spread</h4>
     <div class="legend"><span><i class="p25"></i>P25 and P75</span><span><i></i>median</span><span><i class="p90"></i>P90</span></div>
     <div class="chart" id="trSpread"></div>
 
-    <h3>Trip mix <em>· median minutes and miles</em></h3>
-    <div class="chart" id="trMixMin"></div>
-    <div class="chart" id="trMixMi"></div>
-
-    <h3>Pay against miles</h3>
-    <div class="legend" id="trScatterLegend"></div>
-    <div class="chart" id="trScatter"></div>
-    <p class="hint" id="trScatterNote"></p>
-    <h3>Rate card <em>· a 20-minute, 5-mile trip</em></h3>
-    <div class="legend"><span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span></div>
-    <div class="chart" id="trRateChart"></div>
-    <div class="tw" id="trRate"></div>
-    <p class="hint" id="trRateNote"></p>
-
-    <h3>Compare two periods</h3>
+    <h4>Compare two periods</h4>
     <div class="cmp">
       <label>A from<input type="date" id="trAFrom"></label><label>A to<input type="date" id="trATo"></label>
       <label>B from<input type="date" id="trBFrom"></label><label>B to<input type="date" id="trBTo"></label>
@@ -1388,19 +1444,34 @@
     </div>
     <div class="tw" id="trCompare"></div>
 
-    <h3>Calendar <em>· median $/hr, offers per hour online</em></h3>
-    <div id="trCal"></div>
-    <p class="hint" id="trCalNote"></p>
-
-    <h3>App share and boost share</h3>
+    <h4>App share and boost share</h4>
     <div class="legend"><span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span><span><i class="bar"></i>app not known</span></div>
     <div class="chart" id="trShare"></div>
     <p class="hint" id="trShareNote"></p>
 
-    <h3>Data quality</h3>
-    <div class="legend"><span><i class="nobar"></i>suspect</span><span><i class="warnbar"></i>pay re-read</span><span><i class="doubtbar"></i>pay unread</span></div>
-    <div class="chart" id="trQuality"></div>
-    <p class="hint" id="trQualityNote"></p>
+    <details class="trshape" id="trShape">
+      <summary><h3 class="trsec" id="trShapeHead">Shape of offers and data quality</h3></summary>
+
+      <h4>Trip mix <em>· median minutes and miles</em></h4>
+      <div class="chart" id="trMixMin"></div>
+      <div class="chart" id="trMixMi"></div>
+
+      <h4>Pay against miles</h4>
+      <div class="legend" id="trScatterLegend"></div>
+      <div class="chart" id="trScatter"></div>
+      <p class="hint" id="trScatterNote"></p>
+
+      <h4>Rate card <em>· a 20-minute, 5-mile trip</em></h4>
+      <div class="legend"><span><i class="uber"></i>Uber</span><span><i class="dash"></i>DoorDash</span></div>
+      <div class="chart" id="trRateChart"></div>
+      <div class="tw" id="trRate"></div>
+      <p class="hint" id="trRateNote"></p>
+
+      <h4>Data quality</h4>
+      <div class="legend"><span><i class="nobar"></i>suspect</span><span><i class="warnbar"></i>pay re-read</span><span><i class="doubtbar"></i>pay unread</span></div>
+      <div class="chart" id="trQuality"></div>
+      <p class="hint" id="trQualityNote"></p>
+    </details>
 
     <div class="csvs">
       <a class="linkbtn" id="trCsvDays" href="#" download="trends-daily.csv">⤓ Daily table (CSV)</a>
@@ -6574,8 +6645,19 @@
     if (!box || !app || typeof fetch !== 'function') return;
     var $ = function (id) { return document.getElementById(id); };
     var T = null;
-    var st = { by: 'day', metric: 'perHour', hourDays: 'all', months: false };
+    var st = { by: 'day', metric: 'perHour', hourDays: 'all', months: false, top: 20, stat: 'p50' };
     var got = null, asked = null, seq = 0, rate = null, urls = [], cmpRange = null;
+    // The cell looked at closely ({ dow, hour }), kept across a redraw.
+    var cellPick = null;
+    // The ruler is this viewer's own choice, kept in this browser only: a page
+    // that cannot store it opens on 20% and works the same. It is a way of
+    // READING the tab and goes nowhere else — not to the server, the target,
+    // the verdict, the rig or scan_pi (trends.js's header says why).
+    var TOP_KEY = 'uberscan.trends.top';
+    try {
+      var keptTop = parseInt(localStorage.getItem(TOP_KEY), 10);
+      if ([10, 20, 30, 50].indexOf(keptTop) >= 0) st.top = keptTop;
+    } catch (e) { /* storage refused: 20% */ }
     var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     // The scatter's periods, oldest dimmest: the newest month is the one a
     // driver is asking about. Not the verdict colours.
@@ -6871,19 +6953,59 @@
       var per = T.periods(rows, st.by), at = Object.create(null);
       per.forEach(function (e) { at[e.key] = e; });
       var line = keys.map(function (k) { return at[k] || null; });
-      drawDaily(keys, line);
-      drawHourly(rows);
-      drawGrid(rows);
+      drawRuler(rows);
+      drawWhen(rows);
       drawGood(rows, keys);
+      drawDaily(keys, line);
       drawSpread(keys, line);
       drawMix(keys, line);
       drawScatter(rows);
       drawRate(rows);
       drawCompare(rows, false);
-      drawCalendar(rows);
       drawShare(keys, line);
       drawQuality(keys, line);
       csvs(rows, per);
+    }
+
+    // The four that read the one figure the metric switch picks.
+    function drawWhen(rows) {
+      var heads = { trGridHead: 'Weekday × hour', trHourHead: 'Hour of day', trCalHead: 'Calendar' };
+      Object.keys(heads).forEach(function (id) {
+        $(id).innerHTML = esc(heads[id]) + ' <em>· ' + esc(statWords()) + '</em>';
+      });
+      drawGrid(rows);
+      drawCell(rows);
+      drawHourly(rows);
+      drawCalendar(rows);
+    }
+
+    /* --- the ruler ------------------------------------------------------------
+       Worked out once over the whole range (T.ruler) and held as one dollar
+       figure, so every cell, hour, day and week below is counted against the
+       same line. */
+    function drawRuler(rows) {
+      got.ruler = T.ruler(rows, st.top);
+      [].forEach.call($('trTop').querySelectorAll('button[data-top]'), function (b) {
+        b.setAttribute('aria-pressed', Number(b.getAttribute('data-top')) === got.ruler.top ? 'true' : 'false');
+      });
+      [].forEach.call($('trStat').querySelectorAll('button[data-stat]'), function (b) {
+        b.setAttribute('aria-pressed', b.getAttribute('data-stat') === st.stat ? 'true' : 'false');
+      });
+      var r = got.ruler;
+      $('trRuler').innerHTML = r.cut === null ? 'Good: no offer in this range has a $/hr to rank.'
+        : 'Good = top ' + r.top + '% of this range: <b>≥ ' + esc(money2(r.cut)) + '/hr</b> <small>('
+          + r.over.toLocaleString() + ' of ' + r.n.toLocaleString() + ' offers)</small>';
+    }
+    function cut() { return got && got.ruler ? got.ruler.cut : null; }
+    function money2(v) { return '$' + v.toFixed(2); }
+    function statWords() {
+      return st.stat === 'goodRate' ? 'good offers per hour online (top ' + st.top + '%)'
+        : (st.stat === 'p50' ? 'median' : st.stat.toUpperCase()) + ' $/hr';
+    }
+    // A figure in the chosen stat: dollars an hour, or good offers an hour.
+    function statFmt(v) {
+      if (v === null || v === undefined) return '—';
+      return st.stat === 'goodRate' ? v.toFixed(v < 10 ? 1 : 0) + '/h' : FMT.perHour(v);
     }
 
     function drawDaily(keys, line) {
@@ -6921,82 +7043,262 @@
     function drawHourly(rows) {
       var host = $('trHourly'), legend = $('trHourLegend');
       var labels = T.HOUR_ORDER.map(hourWords);
+      var good = st.stat === 'goodRate';
+      var opt = function (extra) {
+        var o = { days: st.hourDays, stat: st.stat, cut: cut(), runs: got.runs };
+        Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+        return o;
+      };
+      var axis = good ? AXIS.rate : AXIS.perHour;
+      var floorWords = good ? 'under ' + T.GOOD_FLOOR_HOURS + ' hours online or on fewer than ' + T.GOOD_FLOOR_DAYS
+        + ' days' : 'on fewer than ' + T.FLOOR + ' offers or ' + T.FLOOR_DAYS + ' days'
+          + (st.stat === 'p90' ? ', or too few for a P90\'s interval' : st.stat === 'p75' ? ', or too few for a P75\'s interval' : '');
       if (st.months) {
         var mo = T.monthsOf(rows);
-        var a = T.hourly(rows, { days: st.hourDays, month: mo.now }), b = T.hourly(rows, { days: st.hourDays, month: mo.before });
+        var a = T.hourly(rows, opt({ month: mo.now })), b = T.hourly(rows, opt({ month: mo.before }));
         var mw = function (k) { return MONTHS[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4); };
         legend.innerHTML = '<span><i></i>' + esc(mw(mo.now)) + '</span><span><i class="before"></i>' + esc(mw(mo.before)) + '</span>';
         lineChart(host, {
-          label: 'Median $/hr by hour, ' + mw(mo.now) + ' against ' + mw(mo.before), labels: labels, axis: AXIS.perHour, min: 0,
-          series: [{ vals: b.map(function (e) { return e.p50; }), cls: 'before', dots: 'hollow' },
-                   { vals: a.map(function (e) { return e.p50; }), cls: 'med', dots: 'dot',
+          label: statWords() + ' by hour, ' + mw(mo.now) + ' against ' + mw(mo.before), labels: labels, axis: axis, min: 0,
+          series: [{ vals: b.map(function (e) { return e.value; }), cls: 'before', dots: 'hollow' },
+                   { vals: a.map(function (e) { return e.value; }), cls: 'med', dots: 'dot',
                      hollow: a.map(function (e) { return !e.enough; }) }],
-          bars: a.map(function (e) { return e.offers; }),
+          bars: a.map(function (e) { return good ? e.hours : e.offers; }),
           title: function (i) {
-            return hourWords(a[i].hour) + ': ' + mw(mo.now) + ' ' + (a[i].p50 === null ? '—' : FMT.perHour(a[i].p50))
-              + ' (n=' + a[i].n + '), ' + mw(mo.before) + ' ' + (b[i].p50 === null ? '—' : FMT.perHour(b[i].p50))
-              + ' (n=' + b[i].n + ')';
+            var nn = function (e) { return good ? e.good + ' good in ' + (e.hours || 0).toFixed(1) + ' h' : 'n=' + e.n; };
+            return hourWords(a[i].hour) + ': ' + mw(mo.now) + ' ' + statFmt(a[i].value) + ' (' + nn(a[i]) + '), '
+              + mw(mo.before) + ' ' + statFmt(b[i].value) + ' (' + nn(b[i]) + ')';
           }
         });
         $('trHourNote').textContent = 'The newest month in the range against the month before it, by hour. Bars: '
-          + 'offers this month. A hollow point rests on fewer than ' + T.FLOOR + ' offers or ' + T.FLOOR_DAYS + ' days.'
+          + (good ? 'hours online' : 'offers') + ' this month. A hollow point rests ' + floorWords + '.'
           + (b.every(function (e) { return !e.n; }) ? ' The range holds nothing from the month before: press All.' : '');
         return;
       }
-      var hs = T.hourly(rows, { days: st.hourDays });
-      legend.innerHTML = '<span><i></i>median</span><span><i class="band"></i>middle half</span><span><i class="bar"></i>offers</span>';
+      var hs = T.hourly(rows, opt());
+      legend.innerHTML = good ? '<span><i></i>good per hour online</span><span><i class="bar"></i>hours online</span>'
+        : '<span><i></i>' + esc(st.stat === 'p50' ? 'median' : st.stat.toUpperCase()) + '</span>'
+          + '<span><i class="band"></i>middle half</span><span><i class="bar"></i>offers</span>';
       lineChart(host, {
-        label: 'Median $/hr by hour of day', labels: labels, axis: AXIS.perHour, min: 0,
-        band: { lo: hs.map(function (e) { return e.n >= T.DAY_MIN ? e.p25 : null; }),
-                hi: hs.map(function (e) { return e.n >= T.DAY_MIN ? e.p75 : null; }) },
-        series: [{ vals: hs.map(function (e) { return e.p50; }), cls: 'med', dots: 'dot',
+        label: statWords() + ' by hour of day', labels: labels, axis: axis, min: 0,
+        band: good ? null : { lo: hs.map(function (e) { return e.n >= T.DAY_MIN ? e.p25 : null; }),
+                              hi: hs.map(function (e) { return e.n >= T.DAY_MIN ? e.p75 : null; }) },
+        series: [{ vals: hs.map(function (e) { return e.value; }), cls: 'med', dots: 'dot',
                    hollow: hs.map(function (e) { return !e.enough; }) }],
-        bars: hs.map(function (e) { return e.offers; }),
+        bars: hs.map(function (e) { return good ? e.hours : e.offers; }),
         title: function (i) {
           var e = hs[i];
+          if (good) {
+            return hourWords(e.hour) + ': ' + e.good + ' good offers in ' + (e.hours || 0).toFixed(1) + ' hours online on '
+              + e.onlineDays + ' days' + (e.value !== null ? ', ' + e.value.toFixed(2) + ' an hour' : '');
+          }
           return hourWords(e.hour) + ': ' + e.offers + ' offers, ' + (e.p50 === null ? 'none counted'
-            : 'median ' + FMT.perHour(e.p50) + ', middle half ' + FMT.perHour(e.p25) + '–' + FMT.perHour(e.p75)
+            : 'median ' + FMT.perHour(e.p50) + ', P75 ' + FMT.perHour(e.p75) + ', P90 ' + FMT.perHour(e.p90)
               + ' (n=' + e.n + ' on ' + e.days + ' days)');
         }
       });
       $('trHourNote').textContent = 'Clock hour the card came up, 4am first so a night reads as one stretch. '
         + (st.hourDays === 'weekend' ? 'Weekends are the driver\'s Saturday and Sunday: 1am on a Saturday is Friday night. '
            : st.hourDays === 'weekday' ? 'Weekdays are the driver\'s Monday to Friday: 1am on a Saturday is Friday night. ' : '')
-        + 'A hollow point rests on fewer than ' + T.FLOOR + ' offers or ' + T.FLOOR_DAYS + ' days. A picture of the '
-        + 'record: the accept line is not tuned to the hour (Settled).';
+        + (good ? 'Good offers (top ' + st.top + '%) over the minutes the rig was scanning in that hour, a run split '
+           + 'across the hours it ran through. ' : '')
+        + 'A hollow point rests ' + floorWords + '. A picture of the record: the accept line is not tuned to the '
+        + 'hour (Settled).';
     }
 
     function drawGrid(rows) {
-      var g = T.grid(rows);
+      var good = st.stat === 'goodRate';
+      var g = T.grid(rows, { stat: st.stat, cut: cut(), runs: got.runs });
       var hours = T.HOUR_ORDER;
       var head = '<tr><th></th>' + hours.map(function (h) { return '<th>' + hourWords(h) + '</th>'; }).join('') + '</tr>';
       var body = '';
       for (var d = 0; d < 7; d++) {
         var cells = g.cells.slice(d * 24, d * 24 + 24);
         body += '<tr><td>' + T.WEEKDAYS[cells[0].dow] + '</td>' + cells.map(function (c) {
-          if (!c.n) return '<td class="thin"></td>';
+          var picked = cellPick && cellPick.dow === c.dow && cellPick.hour === c.hour ? ' picked' : '';
+          var press = ' data-cell="' + c.dow + '-' + c.hour + '" tabindex="0" role="button"';
+          var where = T.WEEKDAYS[c.dow] + ' ' + hourWords(c.hour);
+          if (!c.n && !(good && c.hours > 0)) return '<td class="thin"></td>';
           if (!c.enough) {
-            return '<td class="thin" title="' + c.n + ' counted on ' + c.days + ' day' + (c.days === 1 ? '' : 's')
-              + ': under the floor">n=' + c.n + '</td>';
+            var why = good ? c.good + ' good in ' + (c.hours || 0).toFixed(1) + ' hours online on ' + c.days + ' day'
+                + (c.days === 1 ? '' : 's') + ': under the floor'
+              : c.n + ' counted on ' + c.days + ' day' + (c.days === 1 ? '' : 's')
+                + (c.noRanks ? ': too few for this figure\'s interval' : ': under the floor');
+            return '<td class="thin' + picked + '"' + press + ' title="' + esc(where + ', ' + why + '. Press to look closer.') + '">'
+              + (good ? (c.hours || 0).toFixed(1) + 'h' : 'n=' + c.n) + '</td>';
           }
-          return '<td class="' + (c.shade || '') + '" title="median ' + FMT.perHour(c.median) + ', 99% interval '
-            + (c.ci ? FMT.perHour(c.ci[0]) + '–' + FMT.perHour(c.ci[1]) : '—') + ', ' + c.n + ' offers on ' + c.days
-            + ' days' + (c.shade ? ' — ' + c.shade + ' the range\'s median' : '') + '">' + FMT.perHour(c.median)
-            + '<small>' + c.n + '</small></td>';
+          var tip = where + ': ' + statWords() + ' ' + statFmt(c.value) + ', 99% interval '
+            + (c.ci ? statFmt(c.ci[0]) + '–' + statFmt(c.ci[1]) : '—') + ', '
+            + (good ? c.good + ' good in ' + c.hours.toFixed(1) + ' hours online' : c.n + ' offers') + ' on ' + c.days
+            + ' days' + (c.shade ? ' — ' + c.shade + ' the range\'s ' + statFmt(g.ref) : '') + '. Press to look closer.';
+          return '<td class="' + (c.shade || '') + picked + '"' + press + ' title="' + esc(tip) + '">' + statFmt(c.value)
+            + '<small>' + (good ? c.good : c.n) + '</small></td>';
         }).join('') + '</tr>';
       }
       $('trGrid').innerHTML = '<table class="grid24"><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
-      $('trGridNote').textContent = 'Each cell: the median $/hr of the offers in that weekday and clock hour, and its n. '
-        + 'Shaded only where the 99% interval of its median lies wholly above (green) or below (red) the range\'s '
-        + 'median of ' + (g.ref === null ? '—' : FMT.perHour(g.ref)) + ', and only at ' + g.floor + ' offers on '
-        + g.floorDays + ' days; under that a cell is grey and shows its n. The two were set together: with no '
-        + 'difference at all, under 1 cell in 100 is shaded. Weekdays are the driver\'s (4am to 4am).';
+      // On a phone the grid scrolls in its own box and opens on 4am, which on
+      // an evening driver's record is a screen of empty columns: open it at
+      // the first hour that holds anything instead (once per draw, not after
+      // the driver has scrolled it themselves).
+      var firstCol = -1;
+      for (var hi2 = 0; hi2 < 24 && firstCol < 0; hi2++) {
+        for (var di = 0; di < 7; di++) { if (g.cells[di * 24 + hi2].n) { firstCol = hi2; break; } }
+      }
+      var tw = $('trGrid'), th = tw.querySelectorAll('thead th');
+      if (firstCol > 0 && th[firstCol + 1] && tw.scrollWidth > tw.clientWidth && !tw.scrollLeft) {
+        tw.scrollLeft = Math.max(0, th[firstCol + 1].offsetLeft - th[0].offsetWidth);
+      }
+      var note;
+      if (good) {
+        note = 'Each cell: good offers (top ' + st.top + '%, ≥ ' + (cut() === null ? '—' : money2(cut())) + '/hr) per hour '
+          + 'the rig was scanning in that weekday and clock hour, and the good count under it. Shaded only where a 99% '
+          + 'Poisson interval on the count, over the cell\'s hours, lies wholly above (green) or below (red) the range\'s '
+          + (g.ref === null ? '—' : g.ref.toFixed(2)) + ' an hour, and only at ' + g.floorHours + ' hours online on '
+          + g.floorDays + ' days; under that a cell is grey and shows its hours. The interval is widened by how much '
+          + 'more the nights differ than chance alone would (×' + g.phi.toFixed(2) + ' on this range): unwidened, a cell '
+          + 'with many hours was shaded by chance 5 to 10 times in 100.';
+      } else {
+        var w = st.stat === 'p50' ? 'median' : st.stat.toUpperCase();
+        note = 'Each cell: the ' + w + ' $/hr of the offers in that weekday and clock hour, and its n. Shaded only where '
+          + 'the 99% interval of its ' + w + ' lies wholly above (green) or below (red) the range\'s ' + w + ' of '
+          + (g.ref === null ? '—' : FMT.perHour(g.ref)) + ', and only at ' + g.floor + ' offers on ' + g.floorDays
+          + ' days; under that a cell is grey and shows its n. '
+          + (st.stat === 'p90' ? 'A P90\'s interval needs 51 offers before it has a top at all, so a P90 cell under that '
+             + 'stays grey, whatever its figure.'
+             : st.stat === 'p75' ? 'A P75\'s interval needs a few more offers than a median\'s; a cell short of them stays grey.'
+             : 'The two were set together: with no difference at all, under 1 cell in 100 is shaded.');
+      }
+      $('trGridNote').textContent = note + ' Weekdays are the driver\'s (4am to 4am). Press a cell to look closer.';
+      $('trGrid').onclick = function (e) {
+        var td = e.target.closest ? e.target.closest('td[data-cell]') : null;
+        if (td) openCell(td.getAttribute('data-cell'));
+      };
+      $('trGrid').onkeydown = function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var td = e.target.closest ? e.target.closest('td[data-cell]') : null;
+        if (td) { e.preventDefault(); openCell(td.getAttribute('data-cell')); }
+      };
+    }
+
+    function openCell(key) {
+      var p = key.split('-').map(Number);
+      cellPick = { dow: p[0], hour: p[1] };
+      [].forEach.call($('trGrid').querySelectorAll('td.picked'), function (td) { td.classList.remove('picked'); });
+      var td = $('trGrid').querySelector('td[data-cell="' + key + '"]');
+      if (td) td.classList.add('picked');
+      drawCell(got.rows);
+      $('trCell').focus();
+    }
+    function closeCell() {
+      var was = cellPick;
+      cellPick = null;
+      $('trCell').hidden = true;
+      $('trCell').innerHTML = '';
+      [].forEach.call($('trGrid').querySelectorAll('td.picked'), function (td) { td.classList.remove('picked'); });
+      if (was) {
+        var td = $('trGrid').querySelector('td[data-cell="' + was.dow + '-' + was.hour + '"]');
+        if (td) td.focus();
+      }
+    }
+
+    /* --- one cell, looked at closely -------------------------------------------
+       Every money offer's $/hr in the cell as a dot, the ruler drawn through
+       them and the offers the driver ticked taken ringed; the two apps apart;
+       P50/P75/P90; the best five (figures and when only — the rows hold no
+       text and no place); and the cell's figure week by week. One at a time,
+       under the grid; Esc or × closes it and gives the cell its focus back. */
+    function drawCell(rows) {
+      var box2 = $('trCell');
+      if (!cellPick) { box2.hidden = true; box2.innerHTML = ''; return; }
+      var c = T.cellDetail(rows, got.runs, cellPick.dow, cellPick.hour, { stat: st.stat, cut: cut() });
+      var good = st.stat === 'goodRate';
+      var where = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][c.dow] + ' '
+        + hourWords(c.hour) + '–' + hourWords((c.hour + 1) % 24);
+      var s = '<div class="cphead"><h5 id="trCellHead">' + esc(where) + ' <em>· ' + c.offers + ' offers on ' + c.days
+        + ' days, ' + c.hours.toFixed(1) + ' hours online</em></h5>'
+        + '<button type="button" class="cpclose" id="trCellClose" aria-label="Close this cell">×</button></div>';
+      box2.hidden = false;
+      // The dot strip: $/hr across, the dots stacked where they crowd.
+      var W = Math.max(260, Math.floor((box2.clientWidth || $('trGrid').clientWidth || 600) - 22));
+      var H = 86, L = 12, R = 16, base = 58;
+      var vals = c.dots.map(function (d) { return d[0]; });
+      var hi = Math.max.apply(null, vals.concat([c.cut || 0, 1]));
+      var sx = scale([0, hi], { min: 0 });
+      var x = function (v) { return L + (v - sx.lo) / (sx.hi - sx.lo) * (W - L - R); };
+      var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="'
+        + esc('Each offer\'s $/hr in ' + where + (c.cut !== null ? ', the ruler at ' + money2(c.cut) : '')) + '">';
+      sx.ticks.forEach(function (t) {
+        svg += '<text x="' + x(t).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle">$' + t + '</text>';
+      });
+      svg += '<line class="ax" x1="' + L + '" x2="' + (W - R) + '" y1="' + (base + 4) + '" y2="' + (base + 4) + '"/>';
+      var stack = Object.create(null), inOrder = c.dots.slice().sort(function (a, b) { return a[0] - b[0]; });
+      inOrder.forEach(function (d) {
+        var px = x(d[0]), bin = Math.round(px / 5), lvl = stack[bin] = (stack[bin] || 0) + 1;
+        var cy = base - ((lvl - 1) % 10) * 5;
+        var cls = d[2] === 1 ? 'uberdot' : d[2] === 2 ? 'dashdot' : 'dot';
+        svg += '<circle class="' + cls + '" cx="' + px.toFixed(1) + '" cy="' + cy + '" r="2.4" fill-opacity=".8"/>';
+        if (d[1]) svg += '<circle class="taken" cx="' + px.toFixed(1) + '" cy="' + cy + '" r="4.4"/>';
+      });
+      if (c.cut !== null) {
+        svg += '<line class="ruler" x1="' + x(c.cut).toFixed(1) + '" x2="' + x(c.cut).toFixed(1) + '" y1="4" y2="'
+          + (base + 6) + '"/>';
+      }
+      s += '<div class="legend"><span><i class="uber" style="height:8px;width:8px;border-radius:4px"></i>Uber</span>'
+        + '<span><i class="dash" style="height:8px;width:8px;border-radius:4px"></i>DoorDash</span>'
+        + '<span><i class="ring"></i>you ticked taken (' + c.taken + ')</span>'
+        + (c.cut !== null ? '<span><i class="ruler"></i>good: top ' + st.top + '%, ≥ ' + esc(money2(c.cut)) + '</span>' : '')
+        + '</div>' + svg + '</svg>';
+      s += '<div class="cpfig"><span>P50 <b>' + (c.p50 === null ? '—' : FMT.perHour(c.p50)) + '</b></span>'
+        + '<span>P75 <b>' + (c.p75 === null ? '—' : FMT.perHour(c.p75)) + '</b></span>'
+        + '<span>P90 <b>' + (c.p90 === null ? '—' : FMT.perHour(c.p90)) + '</b></span>'
+        + '<span>n=' + c.n + '</span><span>good ' + c.good + '</span>'
+        + (good ? '<span>good/hr online <b>' + statFmt(c.value) + '</b></span>' : '') + '</div>';
+      var appName = { uber: 'Uber', doordash: 'DoorDash' };
+      s += '<div class="tw"><table><thead><tr><th></th><th>offers</th><th>' + esc(statWords()) + '</th></tr></thead><tbody>'
+        + T.APPS.map(function (a) {
+          var e = c.apps[a];
+          return '<tr><td>' + appName[a] + '</td><td>' + (good ? e.good + ' good <small>of ' + e.offers + '</small>'
+            : 'n=' + e.n) + '</td><td>' + statFmt(e.value) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+      if (c.best.length) {
+        s += '<div class="tw"><table><thead><tr><th>best five</th><th>$/hr</th><th>pay</th><th>min</th><th>mi</th>'
+          + '<th>app</th></tr></thead><tbody>' + c.best.map(function (b) {
+            return '<tr><td>' + esc(shortDay(b.day) + ' ' + clockWords(new Date(b.t))) + (b.taken ? ' ✓' : '') + '</td><td>'
+              + FMT.perHour(b.perHour) + '</td><td>' + (b.pay === null ? '—' : FMT.pay(b.pay)) + '</td><td>'
+              + (b.minutes === null ? '—' : Math.round(b.minutes)) + '</td><td>' + (b.miles === null ? '—' : b.miles.toFixed(1))
+              + '</td><td>' + (appName[b.app] || '—') + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+      }
+      s += '<h5>Week by week</h5><div class="chart" id="trCellWeeks"></div>';
+      box2.innerHTML = s;
+      if (c.weeks.length) {
+        lineChart($('trCellWeeks'), {
+          label: statWords() + ' in ' + where + ', week by week', height: 110,
+          labels: c.weeks.map(function (w) { return 'wk ' + shortDay(w.week); }),
+          axis: good ? AXIS.rate : AXIS.perHour, min: 0,
+          series: [{ vals: c.weeks.map(function (w) { return w.value; }), cls: 'med', dots: 'dot',
+                     hollow: c.weeks.map(function (w) { return good ? w.hours < 1 : w.n < T.DAY_MIN; }) }],
+          bars: c.weeks.map(function (w) { return w.offers; }),
+          title: function (i) {
+            var w = c.weeks[i];
+            return 'Week of ' + shortDay(w.week) + ': ' + statFmt(w.value) + (good ? ' (' + w.good + ' good in '
+              + w.hours.toFixed(1) + ' h)' : ' (n=' + w.n + ')');
+          }
+        });
+      }
+      $('trCellClose').onclick = closeCell;
+    }
+    function clockWords(d) {
+      var h = d.getHours(), m = d.getMinutes();
+      return (h % 12 || 12) + ':' + String(m).padStart(2, '0') + (h < 12 ? 'a' : 'p');
     }
 
     function drawGood(rows, keys) {
-      var gp = T.goodPerHour(rows, got.runs, st.by), at = Object.create(null);
+      var gp = T.goodPerHour(rows, got.runs, st.by, cut()), at = Object.create(null);
       gp.forEach(function (e) { at[e.key] = e; });
       var line = keys.map(function (k) { return at[k] || null; });
+      $('trGoodHead').innerHTML = 'Good offers per hour online <em>· top ' + st.top + '%, '
+        + (st.by === 'week' ? 'by week' : 'by day') + '</em>';
       barChart($('trGood'), {
         label: 'Good offers per hour online', labels: keys.map(periodLabel), axis: AXIS.rate,
         parts: [{ vals: line.map(function (e) { return e && e.rate !== null ? e.rate : 0; }), cls: 'bar2' }],
@@ -7009,10 +7311,13 @@
       });
       var tot = gp.reduce(function (a, e) { return { good: a.good + e.good, hours: a.hours + (e.hours || 0) }; },
                           { good: 0, hours: 0 });
-      $('trGoodNote').textContent = '"Good" is an offer at or over the target the panel judged it against at the time'
-        + (got.target ? ' (now ' + FMT.perHour(got.target) + '/hr)' : '') + '. Hours online are the Runs tab\'s runs of '
-        + 'scanning, first card to last, credited to the day each began: ' + tot.good + ' good offers over '
-        + tot.hours.toFixed(1) + ' hours in all. Descriptive; it feeds nothing.';
+      $('trGoodNote').textContent = '"Good" is the ruler above: an offer at or over '
+        + (cut() === null ? '—' : money2(cut())) + '/hr, the top ' + st.top + '% of this range. It used to be the target '
+        + 'the panel judged each offer against at the time; the target moved over the weeks, so that count weighed one '
+        + 'day against a different line from the next. One fixed line for the whole range compares them fairly. '
+        + 'Hours online are the Runs tab\'s runs of scanning, first card to last, credited to the day each began: '
+        + tot.good + ' good offers over ' + tot.hours.toFixed(1) + ' hours in all. Grouped by day or week as pressed '
+        + 'under "How it\'s changing". Descriptive; it feeds nothing.';
     }
 
     function drawSpread(keys, line) {
@@ -7152,7 +7457,7 @@
         a = { from: T.addDays(last, -13), to: T.addDays(last, -7) };
         $('trAFrom').value = a.from; $('trATo').value = a.to; $('trBFrom').value = b.from; $('trBTo').value = b.to;
       }
-      var c = T.compare(rows, a, b);
+      var c = T.compare(rows, a, b, cut());
       var nameOf = function (p) {
         return p === 'weekday' ? 'Weekdays' : p === 'weekend' ? 'Weekends'
           : (p.from ? shortDay(p.from) : 'start') + ' – ' + (p.to ? shortDay(p.to) : 'end');
@@ -7165,35 +7470,52 @@
         + '</th></tr></thead><tbody>'
         + row('offers', function (s) { return s.offers + ' <small>' + s.days + ' days</small>'; })
         + row('counted', function (s) { return String(s.counted); })
-        + row('good', function (s) { return s.counted ? Math.round(s.good / s.counted * 100) + '% <small>' + s.good + '</small>' : '—'; })
+        + row('good (top ' + st.top + '%)', function (s) {
+          return s.counted ? Math.round(s.good / s.counted * 100) + '% <small>' + s.good + '</small>' : '—';
+        })
         + row('median pay', med('pay')) + row('median $/hr', med('perHour')) + row('median $/mi', med('perMile'))
         + row('median minutes', med('minutes')) + row('median miles', med('miles'))
         + '</tbody></table>' + (wk ? '' : '<p class="hint">Driver days, both ends included.</p>');
     }
 
+    /* The calendar as week rows, Monday to Sunday, so Fridays line up down a
+       column and one Friday reads straight against the next; the month's
+       name where a month starts; each week's own figure in the last column.
+       Every tile in the chosen figure against the same fixed ruler, shaded by
+       the grid's rule (one day is one day). */
     function drawCalendar(rows) {
-      var cal = T.calendar(rows, got.runs);
-      if (!cal.days.length) { $('trCal').innerHTML = ''; return; }
+      var good = st.stat === 'goodRate';
+      var cal = T.calendar(rows, got.runs, { stat: st.stat, cut: cut() });
+      if (!cal.days.length) { $('trCal').innerHTML = ''; $('trCalMonths').textContent = ''; return; }
       var by = Object.create(null);
       cal.days.forEach(function (d) { by[d.day] = d; });
-      var k = T.weekKeyOf(cal.days[0].day), last = cal.days[cal.days.length - 1].day;
-      var s = '<div class="cal">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (w) {
+      var s = '<div class="cal"><div class="wd"></div>' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (w) {
         return '<div class="wd">' + w + '</div>';
-      }).join('');
-      for (var guard = 0; k <= last && guard < 4000; guard++) {
-        var d = by[k];
-        if (!d) s += '<div class="tile empty"><em>' + dateOf(k).getDate() + '</em></div>';
-        else {
+      }).join('') + '<div class="wd">week</div>';
+      var nWords = function (d) {
+        return good ? d.good + ' good in ' + (d.hours || 0).toFixed(1) + ' h online' : 'n=' + d.counted;
+      };
+      cal.weeks.forEach(function (w) {
+        s += '<div class="mo">' + (w.month ? esc(MONTHS[Number(w.month.slice(5, 7)) - 1]) : '') + '</div>';
+        w.days.forEach(function (k) {
+          var d = by[k];
+          if (!d) { s += '<div class="tile empty"><em>' + dateOf(k).getDate() + '</em></div>'; return; }
           s += '<button type="button" class="tile ' + (d.enough ? (d.shade || '') : 'thin') + '" data-day="' + k + '" title="'
-            + esc(dayWords(k) + ': ' + d.n + ' offers' + (d.median !== null ? ', median ' + FMT.perHour(d.median) + '/hr over '
-              + d.counted : '') + (d.hours ? ', ' + d.hours.toFixed(1) + ' hours online' : '')
-              + (d.enough ? (d.shade ? ', ' + d.shade + ' the range\'s median' : '') : ', under the floor')) + '">'
-            + '<em>' + dateOf(k).getDate() + '</em><b>' + (d.median !== null ? FMT.perHour(d.median) : '—') + '</b>'
-            + (d.perOnlineHour !== null ? d.perOnlineHour.toFixed(0) + '/h' : '') + (d.enough ? '' : ' <em>n=' + d.counted + '</em>')
+            + esc(dayWords(k) + ': ' + d.n + ' offers, ' + statWords() + ' ' + statFmt(d.value) + ' (' + nWords(d) + ')'
+              + (d.hours ? ', ' + d.hours.toFixed(1) + ' hours online' : '')
+              + (d.enough ? (d.shade ? ', ' + d.shade + ' the range\'s ' + statFmt(cal.ref) : '') : ', under the floor')
+              + '. Press to list its offers.') + '">'
+            + '<em>' + dateOf(k).getDate() + '</em><b>' + statFmt(d.value) + '</b>'
+            + (d.enough ? '' : '<em>' + (good ? (d.hours || 0).toFixed(1) + 'h' : 'n=' + d.counted) + '</em>')
             + '</button>';
-        }
-        k = T.addDays(k, 1);
-      }
+        });
+        var wn = good ? (w.good || 0) + ' good in ' + (w.hours || 0).toFixed(1) + ' h' : 'n=' + (w.counted || 0);
+        s += '<div class="tile wkfig ' + (w.enough ? (w.shade || '') : 'thin') + '" title="'
+          + esc('Week of ' + shortDay(w.week) + ': ' + statWords() + ' ' + statFmt(w.value) + ' (' + wn + ')'
+            + (w.enough ? (w.shade ? ', ' + w.shade + ' the range\'s ' + statFmt(cal.ref) : '') : ', under the floor'))
+          + '"><em>wk</em><b>' + statFmt(w.value) + '</b><em>' + esc(good ? (w.good || 0) + 'g' : 'n=' + (w.counted || 0))
+          + '</em></div>';
+      });
       $('trCal').innerHTML = s + '</div>';
       $('trCal').onclick = function (e) {
         var b = e.target.closest ? e.target.closest('button[data-day]') : null;
@@ -7201,10 +7523,29 @@
         var day = b.getAttribute('data-day');
         document.dispatchEvent(new CustomEvent('trends:day', { detail: { from: day, to: day, said: dayWords(day) } }));
       };
-      $('trCalNote').textContent = 'Each day: its median $/hr, and offers per hour online ("/h", over that day\'s runs '
-        + 'of scanning). Shaded by the grid\'s rule against the range\'s median of '
-        + (cal.ref === null ? '—' : FMT.perHour(cal.ref)) + '; a day under ' + cal.floor + ' counted offers is grey with '
-        + 'its n. Press a day to list its offers.';
+      // This month so far against last month, in the same figure, with n.
+      var mo = cal.months, mw = function (m) { return MONTHS[Number(m.slice(5, 7)) - 1]; };
+      var side = function (e) {
+        return '<b>' + esc(statFmt(e.value)) + '</b> <small>(' + (good ? e.good + ' good in ' + (e.hours || 0).toFixed(1)
+          + ' h online' : 'n=' + e.n.toLocaleString()) + ', ' + e.days + ' days)</small>';
+      };
+      $('trCalMonths').innerHTML = !mo ? '' : esc(mw(mo.now.month)) + ' so far (to the ' + dateOf(mo.now.through).getDate()
+        + ordinal(dateOf(mo.now.through).getDate()) + '): ' + side(mo.now) + ' · '
+        + (mo.before ? esc(mw(mo.before.month)) + ': ' + side(mo.before)
+          : 'nothing of the month before in this range — press All to compare');
+      $('trCalNote').textContent = 'Each day: its ' + statWords() + ', counted against the one ruler above. '
+        + (good ? 'Hours online are that day\'s runs of scanning, each credited to the day it began. A day is shaded where '
+           + 'a 99% Poisson interval on its good count, over its hours, lies wholly above or below the range\'s '
+           + (cal.ref === null ? '—' : cal.ref.toFixed(2)) + ' an hour; under ' + cal.floorHours + ' hours online it is grey '
+           + 'with its hours. A week\'s figure is shaded on two days or more, as a grid cell.'
+           : 'Shaded by the grid\'s rule against the range\'s ' + statFmt(cal.ref) + '; a day under ' + cal.floor
+           + ' counted offers, or too few for this figure\'s interval, is grey with its n. A week\'s figure is pooled over '
+           + 'its offers and shaded on two days or more, as a grid cell.')
+        + ' Press a day to list its offers.';
+    }
+    function ordinal(n) {
+      var t = n % 100;
+      return t >= 11 && t <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th';
     }
 
     function drawShare(keys, line) {
@@ -7252,8 +7593,8 @@
     function csvs(rows, per) {
       urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) { /* gone */ } });
       urls = [];
-      var gp = T.goodPerHour(rows, got.runs, st.by);
-      var day = T.csvPeriods(per, gp, st.by);
+      var gp = T.goodPerHour(rows, got.runs, st.by, cut());
+      var day = T.csvPeriods(per, gp, st.by, cut());
       var hours = T.csvHourly(T.hourly(rows, { days: 'all' }), 'all')
         + T.csvHourly(T.hourly(rows, { days: 'weekday' }), 'weekday').split('\n').slice(1).join('\n')
         + T.csvHourly(T.hourly(rows, { days: 'weekend' }), 'weekend').split('\n').slice(1).join('\n');
@@ -7301,6 +7642,27 @@
         press(this, b);
       }
       drawHourly(got.rows);
+    });
+    // The ruler: the share pressed is kept for this viewer, and everything
+    // that counts "good" is drawn again against the new line.
+    $('trTop').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-top]');
+      if (!b) return;
+      st.top = Number(b.getAttribute('data-top'));
+      try { localStorage.setItem(TOP_KEY, String(st.top)); } catch (er) { /* refused: kept until the page closes */ }
+      if (!got) { press(this, b); return; }
+      draw();
+    });
+    // The one figure the grid, the hours, the calendar and a looked-at cell show.
+    $('trStat').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-stat]');
+      if (!b) return;
+      st.stat = b.getAttribute('data-stat');
+      press(this, b);
+      if (got && got.rows.length) drawWhen(got.rows);
+    });
+    $('trCell').addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); closeCell(); }
     });
     $('trCmpGo').addEventListener('click', function () { if (got && got.rows.length) drawCompare(got.rows, true); });
     $('trCmpWk').addEventListener('click', function () { if (got && got.rows.length) drawCompare(got.rows, 'week'); });
