@@ -1368,6 +1368,14 @@ def find_pay(text, where=None, printed=None, figures=None, labelled=None):
     # A later label's stretch ends no earlier than an earlier one's, so the
     # last label at or before a figure is the one to ask. See HEADLINE_WORD.
     anchored_at = set(found[i][1] for i in anchored)
+    # Every figure, refused below or not: `figures` asks how many cards a found
+    # crop holds, and counting one more only ever refuses a rescue. The stacked
+    # card's "$22.75 / Guaranteed (incl. tips) / 3.2 imi / Decline / $9 . 40"
+    # has its distance misread, so the stretch under the upper card's label
+    # runs on to the lower card's "$9" — which is the lower card's payout and
+    # a second card (rpi/test_pipeline.py, rescue_refused).
+    if figures is not None:
+        figures.extend(sorted(set(at for _, at, _ in found)))
     if labels and found:
         starts = [lo for lo, _ in labels]
 
@@ -1376,10 +1384,10 @@ def find_pay(text, where=None, printed=None, figures=None, labelled=None):
             return k >= 0 and at < labels[k][1]
         keep = [i for i, one in enumerate(found)
                 if i in anchored or not after_a_label(one[1])]
-        # ...and gone from every list below, not only from the choice: such a
+        # ...and gone from the lists below, not only from the choice: such a
         # figure is no headline, so it must not start a second card in
-        # `where` (one_card), count as one in `figures`, or be the `printed`
-        # answer. Before c05858f the boost's "$1.68", printed to the cent,
+        # `where` (one_card) or be the `printed` answer (it still counts in
+        # `figures`, above). Before c05858f the boost's "$1.68", printed to the cent,
         # was that second card's headline: one_card gave the read's legs to
         # it, the $9.09 above had no journey and never locked, and only the
         # reads with the boost alone reached the journal.
@@ -1391,8 +1399,6 @@ def find_pay(text, where=None, printed=None, figures=None, labelled=None):
     # CENTS_LOST.
     if best is not None and all(i in lost for i, one in enumerate(found) if one[0] == best):
         best = None
-    if figures is not None:
-        figures.extend(sorted(set(at for _, at, _ in found)))
     if labelled is not None and best is not None:
         labelled.append(any(one[0] == best and one[1] in anchored_at for one in found))
     if printed is not None and best is not None:
