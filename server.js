@@ -9576,12 +9576,22 @@ function trendsOut(rows, floor, days) {
       spans.push([Math.round(g[0].at / 1000), Math.round(g[g.length - 1].at / 1000)]);
     });
   } catch (e) { spans = []; }
-  var newest = null;
-  for (var i = offers.length - 1; i >= 0 && !newest; i--) {
-    if (typeof offers[i].target === 'number' && (offers[i].at || 0) <= Date.now()) newest = offers[i];
+  var newest = null, costed = null;
+  for (var i = offers.length - 1; i >= 0 && !(newest && costed); i--) {
+    if ((offers[i].at || 0) > Date.now()) continue;
+    if (!newest && typeof offers[i].target === 'number') newest = offers[i];
+    if (!costed && typeof offers[i].costPerMile === 'number' && isFinite(offers[i].costPerMile)) costed = offers[i];
   }
+  // `costPerMile` (the Trends tab's third round, for earned per hour NET):
+  // the rig's own setting as its newest offer carries it — the figure every
+  // verdict is net of (/api/settings is how the driver changes it; every
+  // offer row records the one it was rated with). Off the journal rather
+  // than /api/settings so the NucBox's copy, which has no scanner and answers
+  // that route with null, still knows it. One number, the driver's own; null
+  // where no row carries one, and the page then shows gross only and says why.
   return { ok: true, days: days, floor: floor || 0, total: offers.length,
            target: newest ? newest.target : null,
+           costPerMile: costed ? costed.costPerMile : null,
            rows: TrendsLib.pack(TrendsLib.rowsOf(offers)), runs: spans };
 }
 

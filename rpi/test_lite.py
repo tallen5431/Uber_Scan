@@ -639,6 +639,23 @@ WORDS = {'accept': 'ACCEPT', 'close': 'CLOSE CALL \u2026', 'pass': 'PASS',
          'lowpower': 'WAITING FOR AN OFFER', 'nopay': 'CHECK THE PHONE',
          'boost': 'ACCEPT', 'peakpay': 'CLOSE CALL'}
 
+# --- the Strategy tab's time charts: lite's only time view (Trends round three) --
+#
+# On the full rig the offers page's Strategy tab gives its three-hour blocks
+# and weekday chart way to "When to drive → Trends"; lite refuses /api/trends,
+# so those two charts are its only view of time and must stay. The page learns
+# which program runs from /api/lite (answered in both modes, held above), and
+# changes nothing until it has a plain `lite: false`.
+_jp = open(os.path.join(ROOT, 'journal.html'), encoding='utf-8').read()
+ok_('the offers page asks /api/lite which program runs', "fetch('/api/lite'" in _jp)
+_seam = _jp[_jp.index("fetch('/api/lite'"):]
+_seam = _seam[:_seam.index('.catch(')]
+ok_('...hides the time charts only on a plain "lite: false", after keeping them for lite',
+    'if (ans.lite) {' in _seam and _seam.index('if (ans.lite) {') < _seam.index("'blocksCard').hidden = true")
+    and "typeof ans.lite !== 'boolean'" in _seam)
+ok_('...and both charts and the line to Trends are where the page keeps them',
+    all(('id="%s"' % i) in _jp for i in ('blocksCard', 'weekCard', 'toTrends', 'blocks', 'week')))
+
 if subprocess.call(['node', '-e', 'require("playwright")'],
                    env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS)),
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
@@ -840,5 +857,77 @@ for _key in sorted(_res):
                            'target $25/hr · no distance — rate is a ceiling · incl. $2.00 Peak Pay'))
 eq('a card with no payout to price says why under CHECK THE PHONE',
    _res['800x480 dark nopay']['target']['text'], 'no pay read — box may cut it off')
+
+# The same, in a browser, against a server each way, over an invented three
+# weeks of evenings (the weekday chart needs a fortnight).
+STRATEGY = r"""
+const { chromium } = require('playwright');
+(async () => {
+  const base = process.argv[2];
+  let browser;
+  for (const exe of JSON.parse(process.env.PW_EXES || '[]').concat([null])) {
+    try { browser = await chromium.launch(exe ? { executablePath: exe } : {}); break; } catch (e) { /* next */ }
+  }
+  if (!browser) { console.log(JSON.stringify({ skip: 'no chromium' })); return; }
+  const page = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e)));
+  await page.goto(base + '/journal.html#strategy', { waitUntil: 'domcontentloaded' });
+  await page.click('#ranges button[data-days="30"]');
+  await page.waitForTimeout(2500);
+  const vis = (id) => page.evaluate((i) => { const e = document.getElementById(i); return !!e && e.getClientRects().length > 0; }, id);
+  const out = { blocks: await vis('blocksHead'), week: await vis('weekHead'), link: await vis('toTrends'),
+                trendsTab: await vis('trendsTab'), bars: await page.evaluate(() => document.querySelectorAll('#blocks .block').length) };
+  if (out.link) {
+    await page.click('#toTrendsGo');
+    await page.waitForTimeout(400);
+    out.opened = await page.evaluate(() => document.getElementById('app').getAttribute('data-view'));
+    out.range = await page.evaluate(() => document.querySelector('#ranges button[aria-pressed="true"]').getAttribute('data-days'));
+  }
+  out.errors = errs;
+  console.log(JSON.stringify(out));
+  await browser.close();
+})().catch((e) => { console.error(e && e.stack || e); process.exit(1); });
+"""
+_sw = tempfile.mkdtemp()
+_sj = os.path.join(_sw, 'strategy.jsonl')
+with open(_sj, 'w') as _fh:
+    _now = int(time.time() * 1000)
+    for _d in range(21):
+        for _k in range(8):
+            _at = _now - (_d + 1) * 86400000 + _k * 300000
+            _fh.write(json.dumps({'v': 1, 'id': 'st%d-%d' % (_d, _k), 'seq': 1, 'at': _at, 'pay': 9 + _k,
+                                  'minutes': 25, 'billedMinutes': 25, 'miles': 6, 'perHour': 18 + _k,
+                                  'target': 25, 'band': 15, 'state': 'no', 'whole': True, 'app': 'uber'}) + '\n')
+_sd = os.path.join(_sw, 'strategy.js')
+open(_sd, 'w').write(STRATEGY)
+_seen = {}
+for _mode in ('1', '0'):
+    _sp, _sb = start({'SCANNER': '0', 'LITE': _mode}, _sj)
+    try:
+        _r = subprocess.run(['node', _sd, _sb],
+                            env=dict(os.environ, NODE_PATH=os.pathsep.join(NODE_PATHS),
+                                     PW_EXES=json.dumps([os.environ.get('CHROMIUM', ''),
+                                                         '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'])),
+                            capture_output=True, text=True, timeout=120)
+        try:
+            _seen[_mode] = json.loads(_r.stdout.strip().split('\n')[-1])
+        except (ValueError, IndexError):
+            _seen[_mode] = {'crashed': (_r.stderr or '')[-300:]}
+    finally:
+        stop(_sp)
+shutil.rmtree(_sw, ignore_errors=True)
+if _seen.get('1', {}).get('skip'):
+    print('[strategy] %s — skipping the Strategy tab in a browser' % _seen['1']['skip'])
+else:
+    _l, _f = _seen.get('1', {}), _seen.get('0', {})
+    eq('[lite] the Strategy tab keeps its three-hour blocks and weekday chart, with no line to a Trends it lacks',
+       [_l.get('blocks'), _l.get('week'), _l.get('link'), _l.get('bars', 0) > 0, _l.get('errors')],
+       [True, True, False, True, []])
+    eq('[lite] ...and the Trends tab is gone from the page', _l.get('trendsTab'), False)
+    eq('[full] the Strategy tab shows "When to drive → Trends" in their place',
+       [_f.get('blocks'), _f.get('week'), _f.get('link'), _f.get('trendsTab'), _f.get('errors')],
+       [False, False, True, True, []])
+    eq('[full] ...which opens the Trends tab on the same range', [_f.get('opened'), _f.get('range')], ['trends', '30'])
 
 done()

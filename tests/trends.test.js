@@ -10,7 +10,14 @@
    Round two adds: the quantile interval against hand-worked ranks, runs
    split at the clock hour across midnight and 4am, the ruler held as one
    figure across days, the floors of P90 and of good per hour online, the
-   calendar's week rows, and a looked-at cell that carries figures only. */
+   calendar's week rows, and a looked-at cell that carries figures only.
+   Round three adds: a take gross and net (and gross when no cost per mile is
+   known), the weighted-Poisson interval against the Garwood one, earned per
+   hour's floor and a no-take cell left unshaded, the wait for a good offer,
+   good offers by app, off against quiet, the timeline across Monday 4am and
+   the 1 Nov clock change, B against A (no difference left unshaded across
+   224 cells; a real one shaded; both sides under the floor left grey), month
+   thirds gated on three months, and one weekday over the weeks. */
 
 'use strict';
 
@@ -427,6 +434,250 @@ function offer(x) {
      [hAt(hp, 20).value !== null, hAt(hp, 20).enough, hAt(hp, 21).enough, hAt(hg, 20).value, hAt(hg, 20).enough,
       hAt(hg, 22).enough], [true, true, false, 15, true, false]);
 
+  /* === Round three: earned per hour (gross and net), the wait for a good
+     offer, the app share, off against quiet, the timeline, B against A,
+     month thirds and one weekday over the weeks === */
+
+  /* --- a take, gross and net --- */
+  var tk = T.readRows(T.rowsOf([
+    offer({ id: 't1', at: at(6, 20, 1), pay: 20, miles: 5, perHour: 40, accepted: true }),
+    offer({ id: 't2', at: at(6, 20, 9), pay: 12, miles: 4, perHour: 24 }),
+    offer({ id: 't3', at: at(6, 20, 20), pay: 30, miles: 8, perHour: 60, accepted: true, suspect: true }),
+    offer({ id: 't4', at: at(6, 20, 40), pay: 18, miles: 6, perHour: 36, accepted: true, milesUncertain: true })]));
+  eq('a take: the card\'s pay, net of miles x the one cost per mile; untaken is none; an unread pay is unpaid; no miles is noted',
+     tk.map(function (r) { return T.takeOf(r, 0.5); }),
+     [{ e: 17.5, noMiles: false }, null, { unpaid: true }, { e: 18, noMiles: true }]);
+  eq('...and gross (no cost per mile known) takes nothing off', T.takeOf(tk[0], null), { e: 20, noMiles: false });
+
+  /* --- the weighted-Poisson interval, hand-worked --- */
+  var ec = T.earnCI(10, 10, 1, 1, 0.01), ez = T.earnCI(0, 0, 12, 1, 0.01), e2 = T.earnCI(10, 10, 1, 2, 0.01);
+  eq('earned interval: every weight 1 is the Garwood interval ([3.72, 21.40] at 10); no take is [0, 5.30 x the mean take]',
+     [Math.round(ec[0] * 100) / 100, Math.round(ec[1] * 100) / 100, ez[0], Math.round(ez[1] * 100) / 100],
+     [3.72, 21.4, 0, 63.58]);
+  eq('...widened by phi 2, its lower end is 2 x the Garwood lower end of 10/2 (2 x 1.08 = 2.16)',
+     Math.round(e2[0] * 100) / 100, Math.round(2 * T.poisCI(5, 0.01)[0] * 100) / 100);
+  eq('Clopper-Pearson on a share, hand-worked: 5 of 10 at 95% is [0.1871, 0.8129]; 0 of 10 is [0, 0.3085]',
+     T.shareCI(5, 10, 0.05).concat(T.shareCI(0, 10, 0.05)).map(function (v) { return Math.round(v * 10000) / 10000; }),
+     [0.1871, 0.8129, 0, 0.3085]);
+
+  /* --- earned per hour on the grid: floors, shading, net --- */
+  // Friday 8pm on two Fridays, an hour online each: two $20 takes (5 mi) a
+  // night and an untaken $12; Tuesday 8pm, two nights, one $10 take a night.
+  // Friday 9pm: 1.75 h on two nights. Friday 10pm: 1.25 h on two nights.
+  // Seven hours online in all, $160 taken: the range's own $22.86 an hour.
+  var er = [], eruns = [];
+  [6, 13].forEach(function (fd) {
+    er.push(offer({ id: 'ea' + fd, at: at(fd, 20, 5), pay: 20, miles: 5, perHour: 40, accepted: true }));
+    er.push(offer({ id: 'eb' + fd, at: at(fd, 20, 25), pay: 20, miles: 5, perHour: 40, accepted: true }));
+    er.push(offer({ id: 'ec' + fd, at: at(fd, 20, 45), pay: 12, miles: 4, perHour: 18 }));
+    er.push(offer({ id: 'ed' + fd, at: at(fd, 21, 5), pay: 20, miles: 5, perHour: 40, accepted: true }));
+    eruns.push([at(fd, 20, 0), fd === 6 ? at(fd, 21, 45) : at(fd, 22, 15)]);
+  });
+  [3, 10].forEach(function (td) {
+    er.push(offer({ id: 'et' + td, at: at(td, 20, 10), pay: 10, miles: 5, perHour: 20, accepted: true }));
+    eruns.push([at(td, 20, 0), at(td, 21, 0)]);
+  });
+  eruns.push([at(20, 22, 0), at(20, 23, 0)]);
+  er.push(offer({ id: 'ee', at: at(20, 22, 5), pay: 20, miles: 5, perHour: 40, accepted: true }));
+  var erRows = T.readRows(T.rowsOf(er));
+  var eg = T.grid(erRows, { stat: 'earned', runs: eruns, cut: 30 });
+  var egn = T.grid(erRows, { stat: 'earned', runs: eruns, cut: 30, net: true, costPerMile: 0.5 });
+  var egx = T.grid(erRows, { stat: 'earned', runs: eruns, cut: 30, net: true });
+  var c8e = gc(eg, 5, 20), c9e = gc(eg, 5, 21), c10e = gc(eg, 5, 22), t8e = gc(eg, 2, 20);
+  eq('earned/hr: Friday 8pm is four $20 takes over 2 h online on 2 nights, $40 an hour gross, the untaken offer not in it',
+     [c8e.takes, c8e.earned, c8e.hours, c8e.onlineDays, c8e.value, c8e.enough], [4, 80, 2, 2, 40, true]);
+  eq('...net of $0.50/mi takes $2.50 off each take ($35 an hour); asked for net with no cost per mile, it stays gross and says so',
+     [gc(egn, 5, 20).value, egn.net, gc(egx, 5, 20).value, egx.net], [35, true, 40, false]);
+  eq('...under the floor: 1.75 h on two nights, and 1.25 h on two nights',
+     [c9e.hours, c9e.onlineDays, c9e.enough, c9e.shade, c10e.hours, c10e.onlineDays, c10e.enough],
+     [1.75, 2, false, null, 1.25, 2, false]);
+  // Two and a half hours on one day (a slice table built by hand: a clock
+  // hour holds an hour a night, so only pooled days can) is under the days
+  // half of the floor; 2 h on 2 days is at it.
+  function slc(day, h) { return { day: day, hours: h, rows: [], good: 0, takes: 0, earned: 0, y: 0, v: 0, unpaid: 0, noMiles: 0 }; }
+  var ectx = { stat: 'earned', ref: 10, wMean: 10 };
+  eq('...and 2.5 h on one day is under it, 2 h on two days at it',
+     [T.poolCell([slc('2026-03-06', 2.5)], ectx).enough, T.poolCell([slc('2026-03-06', 1), slc('2026-03-13', 1)], ectx).enough],
+     [false, true]);
+  eq('...Tuesday\'s $10 an hour, at the floor, is printed, against the range\'s own $22.86',
+     [t8e.value, t8e.enough, eg.ref], [10, true, 22.86]);
+  // A cell with no take at all over 2 h on 2 nights is NOT shaded below: its
+  // upper end is 5.30 mean takes ($18.57 here) over 2 h. A bootstrap over its
+  // two nights would be [0, 0] and shade it below with certainty.
+  var zeroCell = T.earnShade(0, 0, 2, eg.ref, eg.wMean, 1);
+  eq('...and a cell with no take in 2 h on 2 nights is not shaded below: its interval reaches $' + Math.round(zeroCell.ci[1]),
+     [eg.wMean, zeroCell.shade, zeroCell.ci[0], zeroCell.ci[1] > eg.ref], [17.78, null, 0, true]);
+  var unpaidRows = T.readRows(T.rowsOf(er.concat([offer({ id: 'eu', at: at(6, 20, 50), pay: 50, perHour: 99,
+                                                           accepted: true, suspect: true })])));
+  eq('...a take whose pay was not trusted adds nothing and is counted as unpaid',
+     [gc(T.grid(unpaidRows, { stat: 'earned', runs: eruns, cut: 30 }), 5, 20).value,
+      T.grid(unpaidRows, { stat: 'earned', runs: eruns, cut: 30 }).unpaid], [40, 1]);
+  eq('...the hour chart and the calendar read earned the same way',
+     [T.hourly(erRows, { stat: 'earned', runs: eruns, cut: 30 }).filter(function (e) { return e.hour === 20; })[0].value,
+      T.calendar(erRows, eruns, { stat: 'earned', cut: 30 }).days.filter(function (d) { return d.day === '2026-03-06'; })[0].earned],
+     [25, 60]);
+
+  /* --- the wait for a good offer --- */
+  eq('a good offer about every N minutes: 60 x hours / good, at the good floor; under it none said; no good at all said so',
+     [c8e.good, c8e.waitMin, c9e.waitMin, c9e.timeOk, gc(eg, 2, 20).waitNone, gc(eg, 2, 20).waitMin],
+     [4, 30, null, false, true, null]);
+  var calW8 = T.calendar(erRows, eruns, { stat: 'goodRate', cut: 30 }).days;
+  eq('...a calendar tile: one day at 2 hours (the 6th, 1.75 h: too little; the 13th, 2.25 h and three good: every 45 min)',
+     calW8.filter(function (d) { return d.day === '2026-03-06' || d.day === '2026-03-13'; })
+       .map(function (d) { return [d.day, d.hours, d.waitMin, d.waitNone]; }),
+     [['2026-03-06', 1.75, null, false], ['2026-03-13', 2.25, 45, false]]);
+
+  /* --- which app brings the good offers --- */
+  var ap = [];
+  for (var ai = 0; ai < 14; ai++) ap.push(offer({ id: 'ap' + ai, at: at(6, 19, ai * 4), perHour: 40, app: ai < 10 ? 'uber' : 'doordash' }));
+  ap.push(offer({ id: 'apn', at: at(6, 19, 58), perHour: 40, app: null }));
+  ap.push(offer({ id: 'apl', at: at(6, 18, 1), perHour: 40, app: 'doordash' }));
+  ap.push(offer({ id: 'apx', at: at(6, 19, 59), perHour: 10, app: 'doordash' }));
+  var apRows = T.readRows(T.rowsOf(ap)), share = T.goodAppShare(apRows, 30);
+  var s19 = share.filter(function (e) { return e.hour === 19; })[0], s18 = share.filter(function (e) { return e.hour === 18; })[0];
+  eq('good offers by app: 7pm has 10 Uber, 4 DoorDash, 1 app unknown, the $10 one not good: 71% Uber',
+     [s19.uber, s19.doordash, s19.unknown, s19.enough, s19.uberShare], [10, 4, 1, true, 0.71]);
+  eq('...an hour with one good offer prints no share', [s18.good, s18.enough], [1, false]);
+  var apc = T.cellDetail(apRows, [[at(6, 19, 0), at(6, 20, 0)]], 5, 19, { stat: 'goodRate', cut: 30 });
+  eq('...and the looked-at cell says the same', apc.goodApps, { uber: 10, doordash: 4, unknown: 1 });
+
+  /* --- off is not quiet --- */
+  var oq = T.grid(T.readRows(T.rowsOf([offer({ id: 'oq', at: at(6, 20, 10), perHour: 20 })])),
+                  { stat: 'p50', runs: [[at(6, 20, 0), at(6, 20, 30)], [at(7, 22, 0), at(7, 23, 0)]] });
+  eq('off against quiet: Friday 8pm had a card; Saturday 10pm was online an hour and saw none (quiet, not off); '
+     + 'Sunday 8pm had neither (off)',
+     [gc(oq, 5, 20).off, gc(oq, 6, 22).off, gc(oq, 6, 22).hours, gc(oq, 6, 22).n, gc(oq, 0, 20).off],
+     [false, false, 1, 0, true]);
+  eq('...in every figure', ['goodRate', 'earned', 'p90'].map(function (s) {
+    var g3 = T.grid(T.readRows(T.rowsOf([offer({ id: 'oq', at: at(6, 20, 10), perHour: 20 })])),
+                    { stat: s, runs: [[at(7, 22, 0), at(7, 23, 0)]] });
+    return [gc(g3, 6, 22).off, gc(g3, 0, 20).off];
+  }), [[false, true], [false, true], [false, true]]);
+
+  /* --- the timeline: days, weeks across Monday 4am, the 1 Nov clock change --- */
+  // A run from Sunday-night 3am to Monday 5am (March 2026: Monday the 9th).
+  var wkRuns = [[at(9, 3, 0), at(9, 5, 0)]];
+  var tlw = T.timeline([], wkRuns, { stat: 'goodRate', by: 'week' });
+  eq('a run across Monday 4am: its 3am hour in the week before (Mar 2), its 4am hour in the new week (Mar 9), newest first',
+     tlw.rows.map(function (r) {
+       return [r.key, r.cells.filter(function (c) { return c.hours > 0; }).map(function (c) { return [c.hour, c.hours]; })];
+     }), [['2026-03-09', [[4, 1]]], ['2026-03-02', [[3, 1]]]]);
+  var tld = T.timeline([], wkRuns, { stat: 'p50', by: 'day' });
+  eq('...by days: Sunday the 8th holds 3am, Monday the 9th holds 4am, every other square off',
+     [tld.rows.map(function (r) { return r.key; }), tld.rows[1].cells.filter(function (c) { return !c.off; }).length,
+      tld.rows[0].cells.filter(function (c) { return !c.off; }).length], [['2026-03-09', '2026-03-08'], 1, 1]);
+  // 1 Nov 2026: the clocks go back at 2am, so 1am happens twice. A run from
+  // 11:30pm Saturday to 3:30am is five hours, and its 1am square holds two.
+  var dst = [[new Date(2026, 9, 31, 23, 30).getTime(), new Date(2026, 10, 1, 3, 30).getTime()]];
+  var tlx = T.timeline([], dst, { stat: 'goodRate', by: 'day' });
+  var oct31 = tlx.rows.filter(function (r) { return r.key === '2026-10-31'; })[0];
+  eq('the 1 Nov clock change: five hours, all on Saturday\'s driver day, the doubled 1am square holding two',
+     [tlx.rows.length, oct31.hours, oct31.cells.filter(function (c) { return c.hour === 1; })[0].hours,
+      oct31.cells.filter(function (c) { return c.hour === 23; })[0].hours], [1, 5, 2, 0.5]);
+  eq('...and by weeks it is in the week of Monday 26 Oct, by months in October',
+     [T.timeline([], dst, { by: 'week' }).rows[0].key, T.timeline([], dst, { by: 'month' }).rows[0].key,
+      T.timeline([], dst, { by: 'month' }).rows[0].to], ['2026-10-26', '2026-10', '2026-10-31']);
+  // Pooled squares use the grid's rules, so a single day-hour never meets
+  // the 2-day floor, while a month of Friday 8pms can.
+  var tlq = T.timeline(qRows, [], { stat: 'p50', by: 'day' });
+  ok('...one day-hour is never shaded (30 offers on 2 days cannot fit in one hour of one night)',
+     tlq.rows.every(function (r) { return r.cells.every(function (c) { return !c.enough && !c.shade; }); }));
+  var tlqw = T.timeline(floRows, [], { stat: 'p50', by: 'month' });
+  var mar20 = tlqw.rows[0].cells.filter(function (c) { return c.hour === 20; })[0];
+  eq('...while a month pools its four Friday 8pms (60 offers at $40, the only 8pm offers in that record) and is shaded above',
+     [mar20.n, mar20.days, mar20.enough, mar20.shade], [60, 4, true, 'above']);
+  var cdd = T.cellDetail(drRows, [[at(6, 20, 0), at(6, 21, 0)], [at(13, 20, 0), at(13, 20, 30)]], null, 20,
+                         { stat: 'p50', cut: 20, from: '2026-03-13', to: '2026-03-13' });
+  eq('a timeline square pressed: the cell panel for that date and hour only (the 13th, 8pm: one offer counted, half an hour)',
+     [cdd.offers, cdd.n, cdd.hours, cdd.from, cdd.dow], [2, 1, 0.5, '2026-03-13', null]);
+
+  /* --- B against A --- */
+  // No difference: the same draw in both periods, many cells, every
+  // weekday's 6-9pm on two four-week periods.
+  var r7 = rng(23), na = [], nruns = [];
+  for (var nd = 2; nd <= 29; nd++) {
+    for (var nh = 16; nh <= 23; nh++) {
+      for (var nk = 0; nk < 24; nk++) {
+        na.push(offer({ id: 'n' + nd + '-' + nh + '-' + nk, at: at(nd, nh, Math.floor(nk * 2.5)),
+                        perHour: Math.exp(Math.log(16) + 0.37 * (r7() + r7() + r7() - 1.5) * 2),
+                        accepted: r7() < 0.1 }));
+      }
+    }
+    nruns.push([at(nd, 16, 0), at(nd + 1, 0, 0)]);
+  }
+  var naRows = T.readRows(T.rowsOf(na)), pA = { from: '2026-03-02', to: '2026-03-15' }, pB = { from: '2026-03-16', to: '2026-03-29' };
+  var nullShaded = 0, nullCells = 0;
+  ['p50', 'p90', 'goodRate', 'earned'].forEach(function (s) {
+    T.gridCompare(naRows, nruns, pA, pB, { stat: s, cut: 22 }).cells.forEach(function (c) {
+      if (c.enough) nullCells += 1;
+      if (c.shade) nullShaded += 1;
+    });
+  });
+  ok('B vs A with no difference: ' + nullShaded + ' of ' + nullCells + ' compared cells shaded across four figures (under 1%)',
+     nullCells >= 200 && nullShaded <= Math.floor(nullCells / 100));
+  var dense = [], druns = [];
+  for (var dd = 2; dd <= 29; dd++) {
+    if (new Date(2026, 2, dd).getDay() !== 5) continue;
+    for (var dk2 = 0; dk2 < 40; dk2++) {
+      dense.push(offer({ id: 'dn' + dd + '-' + dk2, at: at(dd, 20, dk2), perHour: 15 + (dk2 % 10) + (dd >= 16 ? 10 : 0) }));
+    }
+    druns.push([at(dd, 20, 0), at(dd, 21, 0)]);
+  }
+  var thinD = T.readRows(T.rowsOf(dense.filter(function (o, i) { return i % 40 < 12; })));
+  var gT = T.gridCompare(thinD, druns, pA, pB, { stat: 'p50', cut: 30 });
+  eq('B vs A: B minus A per cell, and with both sides under the floor (24 offers a side) nothing is shaded however far apart',
+     [gc(gT, 5, 20).a.n, gc(gT, 5, 20).b.n, gc(gT, 5, 20).diff, gc(gT, 5, 20).enough, gc(gT, 5, 20).shade],
+     [24, 24, 10, false, null]);
+  var gD = T.gridCompare(T.readRows(T.rowsOf(dense)), druns, pA, pB, { stat: 'p50', cut: 30 });
+  eq('...80 offers a side, B $10 higher: compared, shaded above, B - A = $10',
+     [gc(gD, 5, 20).a.n, gc(gD, 5, 20).b.n, gc(gD, 5, 20).enough, gc(gD, 5, 20).shade, gc(gD, 5, 20).diff],
+     [80, 80, true, 'above', 10]);
+  var gG = T.gridCompare(T.readRows(T.rowsOf(dense)), druns, pA, pB, { stat: 'goodRate', cut: 30 });
+  eq('...in good per hour: A none good, B 40 good in 2 h: the exact ratio test shades above',
+     [gc(gG, 5, 20).a.good, gc(gG, 5, 20).b.good, gc(gG, 5, 20).shade, gc(gG, 5, 20).ciIs], [0, 40, 'above', 'ratio']);
+
+  /* --- month thirds --- */
+  function thirdsRows(months) {
+    var out = [], rr = [];
+    months.forEach(function (mo) {
+      [3, 5, 8, 12, 14, 17, 22, 24, 27].forEach(function (dm) {
+        for (var k3 = 0; k3 < 20; k3++) {
+          out.push(offer({ id: 'th' + mo + '-' + dm + '-' + k3, at: new Date(2026, mo, dm, 19, k3 * 2).getTime(),
+                           perHour: dm > 20 ? 40 + k3 * 0.1 : 10 + k3 }));
+        }
+        rr.push([new Date(2026, mo, dm, 19, 0).getTime(), new Date(2026, mo, dm, 19, 59).getTime()]);
+      });
+    });
+    return { rows: T.readRows(T.rowsOf(out)), runs: rr };
+  }
+  var th2 = thirdsRows([5, 6]), th3 = thirdsRows([5, 6, 7]);
+  var mt2 = T.monthThirds(th2.rows, th2.runs, { stat: 'p50' }), mt3 = T.monthThirds(th3.rows, th3.runs, { stat: 'p50' });
+  eq('month thirds over two months: printed with n, days and months, and shaded nowhere (each third needs three months)',
+     [mt2.gated, mt2.thirds.map(function (e) { return [e.label, e.n, e.dates, e.months, e.shade]; })],
+     [false, [['1–10', 120, 6, 2, null], ['11–20', 120, 6, 2, null], ['21–end', 120, 6, 2, null]]]);
+  eq('...over three months the 21st-to-end third, far above, is shaded',
+     [mt3.gated, mt3.thirds[2].months, mt3.thirds[2].shade, mt3.thirds[0].shade], [true, 3, 'above', 'below']);
+  eq('...and a month\'s last days go to the last third whatever its length (the 31st, the 28th)',
+     [T.monthThirds(T.readRows(T.rowsOf([offer({ id: 'x31', at: new Date(2026, 6, 31, 19).getTime() })])), [], {}).thirds[2].offers],
+     [1]);
+
+  /* --- one weekday over the weeks --- */
+  var swr = T.sameWeekday(erRows, eruns, 5, { cut: 30 });
+  eq('one weekday over the weeks: every Friday from the first to the last, off ones said, each with its figures',
+     swr.days.map(function (d) { return [d.day, d.off, d.offers, d.hours, d.takes, d.earnedRate, d.goodRate, d.rateThin]; }),
+     // The 6th: $60 of takes over 1.75 h; the 13th: $60 over 2.25 h, at the
+     // 2-hour mark; the 20th: one $20 take in an hour.
+     [['2026-03-06', false, 4, 1.75, 3, 34.29, 1.71, true], ['2026-03-13', false, 4, 2.25, 3, 26.67, 1.33, false],
+      ['2026-03-20', false, 1, 1, 1, 20, 1, true]]);
+  eq('...a P90 over fewer than ' + T.DAY_MIN + ' offers is thin', swr.days[0].p90Thin, true);
+  var swOff = T.sameWeekday(erRows, eruns, 2, { cut: 30 });
+  eq('...Tuesdays: the 3rd and 10th on, the 17th off (nothing that day, within the range)',
+     swOff.days.map(function (d) { return [d.day, d.off]; }), [['2026-03-03', false], ['2026-03-10', false], ['2026-03-17', true]]);
+
+  /* --- the hour chart, one period at a time (compare mode) --- */
+  var hA = T.hourly(naRows, { stat: 'p50', period: pA }).filter(function (e) { return e.hour === 19; })[0];
+  eq('the hour chart for one period: only its days', [hA.offers, hA.days], [24 * 14, 14]);
+
   /* --- a large journal is quick --- */
   var r5 = rng(3), big = [];
   for (var b = 0; b < 12500; b++) {
@@ -452,7 +703,7 @@ function offer(x) {
     var tj = now - 20 * 86400000 + j * 240000;
     lines.push(JSON.stringify({ v: 1, id: 'srv' + j, seq: 1, at: tj, pay: 9, minutes: 28, billedMinutes: 28,
                                 miles: 8, perHour: 19, target: 25, band: 15, state: 'no', whole: true, app: 'uber',
-                                lat: 12.3, lon: 45.6, gpsOk: true }));
+                                costPerMile: j >= 5990 ? 0.35 : 0.3, lat: 12.3, lon: 45.6, gpsOk: true }));
     if (j % 2) lines.push(JSON.stringify({ v: 1, id: 'srv' + j, seq: 2, at: tj + 2000, pay: 9, minutes: 28,
                                            billedMinutes: 28, miles: 8, perHour: 19, target: 25, band: 15,
                                            state: 'no', whole: true, app: 'uber' }));
@@ -505,7 +756,9 @@ function offer(x) {
     var withTop = JSON.parse((await get(full.port, '/api/trends?days=30&top=10')).body);
     eq('...and the server takes no ruler: the same answer whatever the page\'s choice, no cut in it',
        [Object.keys(withTop).sort(), withTop.total, JSON.stringify(withTop.rows) === JSON.stringify(j1.rows)],
-       [['days', 'floor', 'ok', 'rows', 'runs', 'target', 'total'], 5999, true]);
+       [['costPerMile', 'days', 'floor', 'ok', 'rows', 'runs', 'target', 'total'], 5999, true]);
+    eq('...with one cost per mile, the rig\'s own off its newest offer (for earned per hour net), a number and nothing else',
+       [j1.costPerMile, typeof j1.costPerMile], [0.35, 'number']);
     var j7 = JSON.parse((await get(full.port, '/api/trends?days=7')).body);
     var inSeven = 0;
     for (var j2 = 0; j2 < 6000; j2++) if (now - 20 * 86400000 + j2 * 240000 >= now - 7 * 86400000) inSeven += 1;
