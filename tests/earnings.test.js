@@ -69,6 +69,113 @@ eq('[parse] a zero read as the letter O before "sec" (tesseract on the drawn 12 
 eq('[parse] a canceled trip\'s line names Uber\'s screen when nothing else does',
    E.detectApp('$0.00 5:30 PM\nDelivery - You canceled'), 'uber');
 
+/* [17nov] rides, icons and a canceled trip between two trips -----------------
+ * The owner's screenshot of 17 Nov 2026, in invented text with the SHAPE of
+ * what tesseract made of it: a ride's header with the person icon read as
+ * "Bp" and its amount's point lost ("£2210"), a delivery whose time came on a
+ * line of its own, a canceled $0.00 trip whose own time was unreadable
+ * ("B5I PHI") straight above a ride whose header carried its icon as "3", an
+ * "Increased" chip, a "Boost+" chip with no amount, a ride over an hour
+ * ("1hr4 min"), and the place lines carrying the pin's icon as "9", "©",
+ * "®", "é". Every name, street and figure is invented. */
+var NOV17_NOW = 1794996000000;            // 18 Nov 2026, 10am New York
+var NOV17 = ['11:52 5 TO@- Co', '€ Earnings Activity 6B =', 'Tue, Nov 17',
+  'Bp £2210 10:31 PM', 'Comfort: 17 min 40 sec- 9.40 mi', '«> $3.00 Tip',
+  '9 Sample St, Faketown, GA, USA', '© Mock Rd SE, Notaville, GA, USA',
+  '$11.00', 'Delivery -12 min 30 sec : 3.10 mi', '« $6.00 Tip', 'Mock Rd', '9:37 PM',
+  '® Pretend Pizza (100 Example Ave SE)', '© Imaginary Way, Inventon, GA, USA',
+  '$0.00 B5I PHI', 'Delivery - You canceled', '9 Fictional Ct NW, Faketown, GA, USA', '© Unknown',
+  '. T Increased', '3 $21.30 8:12 PM', 'Comfort: 26 min 10 sec - 12.20 mi',
+  '9 Placeholder Pkwy, Notaville, GA, USA', 'é 12th St NE, Faketown, GA, USA',
+  '$19.75', 'Delivery - 30 min 5 sec - 11.00 mi', '7:05 PM', '«© $2.50 Tip 6 Boost+',
+  '9 Nowhere Noodles West Inventon', '© Storybook Ln, Faketown, GA, USA',
+  '2 $30.10 5:48 PM', 'UberX-1hr4 min: 20.50 mi', '=S Ol',
+  '9 Hidden Sample Ct, Notaville, GA, USA', '6 Sample St, Faketown, GA, USA',
+  'End of activities during Nov 17, 2026', 'Home Discover Earnings Inbox Menu'].join('\n');
+var n17 = E.parse(NOV17, { now: NOV17_NOW });
+function brief(e) { return [e.startedAt, e.amount, e.type, e.status]; }
+eq('[17nov] the canceled trip never takes the time of the trip below it: no $0.00 entry at 8:12 PM',
+   n17.entries.filter(function (e) { return e.status === 'canceled' || e.amount === 0; }).map(brief), []);
+eq('[17nov] five of six read, in the screen\'s order: the icon-prefixed rides, the delivery timed on a line of its '
+   + 'own, the ride over an hour',
+   n17.entries.map(brief),
+   [['22:31', 22.1, 'Comfort', 'completed'], ['21:37', 11, 'Delivery', 'completed'],
+    ['20:12', 21.3, 'Comfort', 'completed'], ['19:05', 19.75, 'Delivery', 'completed'],
+    ['17:48', 30.1, 'UberX', 'completed']]);
+eq('[17nov] ...the canceled one skipped and said, never filed at a guessed time',
+   [n17.notes, n17.tally.skipped], [['a $0.00 trip with no time on it was skipped'],
+                                     [{ amount: 0, status: 'canceled', why: 'no time' }]]);
+eq('[17nov] the tally: every entry seen accounted for, in words for the page',
+   [n17.tally.seen, n17.tally.read, n17.tally.unread.length, n17.tally.cut, E.tallyWords(n17.tally)],
+   [6, 5, 0, 0, '6 entries seen, 5 read, 1 skipped (no time: $0.00 canceled)']);
+var r1 = n17.entries[0];
+eq('[17nov] "£2210" with its point lost: $22.10, marked guessed; the amounts read whole are not',
+   [r1.amount, r1.amountGuessed, n17.entries.slice(1).some(function (e) { return e.amountGuessed; })], [22.1, true, false]);
+eq('[17nov] a ride: its pickup the rider\'s street (an address), its dropoff the second street, said to be a ride',
+   [r1.pickup, r1.dropoff, r1.ride, r1.tip], [{ name: 'Sample St', detail: 'Faketown', address: true },
+                                              { street: 'Mock Rd SE', town: 'Notaville' }, true, 3]);
+var x1 = n17.entries[4];
+eq('[17nov] "UberX-1hr4 min": 64 minutes, its streets with the pin\'s "9" and "6" taken off',
+   [x1.minutes, x1.seconds, x1.miles, x1.pickup.name, x1.dropoff.street], [64, 0, 20.5, 'Hidden Sample Ct', 'Sample St']);
+eq('[17nov] the place icons read as "®" and "©" taken off; "é" before "12th St NE" too, the ordinal kept',
+   [n17.entries[1].pickup, n17.entries[1].dropoff.street, n17.entries[2].dropoff.street],
+   [{ name: 'Pretend Pizza', detail: '100 Example Ave SE' }, 'Imaginary Way', '12th St NE']);
+eq('[17nov] ...but a restaurant\'s leading digit is kept: it may be its name ("3 Amigos")',
+   n17.entries[3].pickup.name, '9 Nowhere Noodles West Inventon');
+eq('[17nov] the chips: "Increased" filed a line above its header is that ride\'s; "Boost+" with no amount is a chip, '
+   + 'not pay',
+   [n17.entries[2].chips, n17.entries[3].chips, n17.entries[3].extras, n17.entries[3].amount, n17.entries[0].chips],
+   [['increased'], ['boost+'], null, 19.75, undefined]);
+ok_('[17nov] each trip keeps the raw lines of its block, header first, for "what was read"',
+    n17.entries.every(function (e) { return Array.isArray(e.lines) && e.lines.length >= 3 && e.lines.length <= E.LINES_MAX; })
+    && n17.entries[2].lines[0] === '3 $21.30 8:12 PM');
+
+// The same screen with the 8:12 PM header unreadable two ways: an amount no
+// rule reads ("3 $2l.3O") and no currency glyph at all ("3 21.30"). Either
+// way the canceled trip above keeps no time, and the ride is reported unread.
+var bad1 = E.parse(NOV17.replace('3 $21.30 8:12 PM', '3 $2l.3O 8:12 PM'), { now: NOV17_NOW });
+var bad2 = E.parse(NOV17.replace('3 $21.30 8:12 PM', '3 21.30 8:12 PM'), { now: NOV17_NOW });
+eq('[17nov] a header whose amount cannot be read still opens its block: unread with its time, the canceled trip '
+   + 'above untimed',
+   [bad1.entries.map(function (e) { return e.startedAt; }), bad1.tally.unread, E.tallyWords(bad1.tally)],
+   [['22:31', '21:37', '19:05', '17:48'], [{ amount: null, at: '20:12', why: 'its amount could not be read' }],
+    '6 entries seen, 4 read, 1 skipped (no time: $0.00 canceled), 1 unread (its amount could not be read at 8:12 PM)']);
+eq('[17nov] a header not seen at all: the block with two trip lines is cut, the canceled trip keeps no time and the '
+   + 'ride under it is unread, never merged',
+   [bad2.entries.map(function (e) { return e.startedAt; }), bad2.tally.seen, bad2.tally.skipped.length,
+    bad2.tally.unread.map(function (u) { return u.why; })],
+   [['22:31', '21:37', '19:05', '17:48'], 6, 1, ['a trip line with no header read above it']]);
+eq('[17nov] two different clocks in one block: the time is left unread, never picked',
+   E.parse('Tue, Nov 17\n$9.00\nDelivery - 10 min 0 sec - 2.00 mi\n7:10 PM\nMock Rd 7:40 PM\nPretend Pizza\n'
+           + 'Example Ave, Faketown, GA, USA', { now: NOV17_NOW }).tally.skipped,
+   [{ amount: 9, status: 'completed', why: 'two times in its block' }]);
+
+// What may and may not open an entry.
+function opens(t) { return E.parse('Tue, Nov 17\n' + t, { now: NOV17_NOW }).entries.length; }
+eq('[17nov] an icon before the amount opens an entry only on a line carrying the trip\'s clock or straight above the '
+   + 'trip\'s line; a lost point only with the clock and a trip line under it; a map label with a number never',
+   [opens('3 $21.30 8:12 PM\nComfort - 26 min 10 sec - 12.20 mi'),
+    opens('3 $21.30\nMock Rd\nComfort - 26 min 10 sec - 12.20 mi\n8:12 PM'),
+    opens('& $21.30 + Increased\nComfort - 26 min 10 sec - 12.20 mi\nSample St, Faketown, GA, USA\n8:12 PM'),
+    opens('£2210 10:31 PM\nComfort - 17 min 40 sec - 9.40 mi'),
+    opens('£2210 10:31 PM\nMock Rd\nSample Ave\nPretend Pizza\nComfort - 17 min 40 sec - 9.40 mi'),
+    opens('£2210\nComfort - 17 min 40 sec - 9.40 mi\n10:31 PM'),
+    opens('61 124 Mock 9:00 PM\nComfort - 17 min 40 sec - 9.40 mi')],
+   [1, 0, 1, 1, 0, 0, 0]);
+eq('[17nov] a trip\'s line with hours: "1 hr 4 min", "1hr4 min", "1 hr", "2 hrs 5 min"; minutes and seconds as before',
+   ['UberX · 1 hr 4 min · 21.70 mi', 'UberX-1hr4 min: 21.70 mi', 'Comfort · 1 hr · 30.00 mi',
+    'XL · 2 hrs 5 min · 80.2 mi', 'Delivery - 13 min 37 sec - 4.65 mi'].map(function (l) {
+     var d = E.detailOf(l); return d && [d.kind, d.minutes, d.seconds, d.miles];
+   }),
+   [['UberX', 64, 0, 21.7], ['UberX', 64, 0, 21.7], ['Comfort', 60, 0, 30], ['XL', 125, 0, 80.2],
+    ['Delivery', 13, 37, 4.65]]);
+eq('[17nov] the icon is taken off only where it is clearly the icon',
+   [E.stripIcon('® Pretend Pizza'), E.stripIcon('} Pretend Pizza'), E.stripIcon('e Pretend Pizza'),
+    E.stripIcon('9 Pretend Tacos', false), E.stripIcon('9 Sample St', true), E.stripIcon('A Taste Of Make-Believe'),
+    E.stripIcon('St Pretend'), E.stripIcon('9 12th St', true)],
+   ['Pretend Pizza', 'Pretend Pizza', 'Pretend Pizza', '9 Pretend Tacos', 'Sample St', 'A Taste Of Make-Believe',
+    'St Pretend', '9 12th St']);
+
 /* [keep] ------------------------------------------------------------------- */
 var NOV7 = '2026-11-07';
 function entry(o) {
@@ -482,6 +589,37 @@ eq('[compare] the day: cards against paid, faster/on time/slower, the median min
     sum12.biggest.map(function (b) { return [b.startedAt, b.diff]; })],
    [7, 6, 1, 6, 117.5, 118.61, 1.11, 0, 5, 1, 2, [['18:23', 3], ['19:00', -2], ['17:32', 0.11]]]);
 ok_('[compare] no word of it says what to take', JSON.stringify([c1, c2, sum12]).indexOf('declin') === -1);
+
+/* [17nov match] a ride, and an amount guessed past a lost point --------------
+ * The 10:31 PM ride of the invented 17 Nov text against its ride card: the
+ * card's pickup the rider's corner, its dropoff a corner near the door. */
+var D17 = '2026-11-17';
+function t17(h, m, s) { return at(h, m, s, 17); }
+var rideRec = record({ offer: 'rd1', offered: t17(22, 32), took: t17(22, 32, 20), ended: t17(22, 55), pay: 22.10,
+                       miles: 9.6, store: 'Sample St & Mock Ave, Faketown', door: 'Sample St & Mock Ave, Faketown',
+                       drop: 'Storybook Ln & Fictional Ct, Notaville', cardMinutes: 20, cardMiles: 9.5 });
+var rideO = E.ordersFrom([rideRec], []);
+var rideE = keyed([Object.assign({ app: 'uber', date: D17 }, n17.entries[0])]);
+var rideS = E.score(rideE[0], rideO[0], 0);
+eq('[17nov match] a ride: its pickup street found on the card\'s corner for the name\'s points; its dropoff street, '
+   + 'not on the card\'s corner, costs it nothing; its guessed amount earns no pay points',
+   [rideS.parts.name, rideS.parts.dropoff, rideS.parts.pay], [E.W.name, 0, undefined]);
+eq('[17nov match] ...and it is matched, on its clocks, its street and its miles',
+   [E.matchDay(rideE, rideO)[rideE[0].key].status, E.matchDay(rideE, rideO)[rideE[0].key].offer], ['matched', 'rd1']);
+eq('[17nov match] a delivery\'s other street still costs it, as before',
+   E.score(Object.assign({}, rideE[0], { ride: undefined }), rideO[0], 0).parts.dropoff, -E.DROP_PENALTY);
+var readWhole = Object.assign({}, rideE[0], { amount: 22.1 });
+delete readWhole.amountGuessed;
+var mg1 = E.mergeEntry(rideE[0], readWhole, 9000), mg2 = E.mergeEntry(readWhole, Object.assign({}, rideE[0], { amount: 2.21 }), 9100);
+eq('[17nov match] a guessed amount is replaced by one read whole, its mark gone; a guess never replaces one read whole',
+   [mg1.changed, mg1.entry.amount, mg1.entry.amountGuessed, mg2.changed, mg2.entry.amount], [true, 22.1, undefined, false, 22.1]);
+var gRow = Object.assign({}, rideE[0], { match: E.matchDay(rideE, rideO)[rideE[0].key] });
+eq('[17nov match] the card against paid: a guessed amount shown, never compared, and out of the day\'s compared total',
+   [E.compareOf(gRow).pay, E.daySummary([gRow]).compared, E.daySummary([gRow]).guessed],
+   [{ card: 22.1, paid: 22.1, guessed: true }, 0, 1]);
+eq('[17nov match] the day\'s total as read, every trip matched or not, to hold against Uber\'s own day total',
+   E.daySummary(n17.entries.map(function (e) { return Object.assign({ app: 'uber', date: D17 }, e); })).total,
+   Math.round((22.1 + 11 + 21.3 + 19.75 + 30.1) * 100) / 100);
 
 eq('[match] names are alike past OCR slips and abbreviations, and two restaurants are not',
    [E.similar('Make-Belleve Burgers', 'Make-Believe Burgers') >= E.NAME_MIN,
