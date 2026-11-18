@@ -4518,6 +4518,9 @@ const { chromium } = require('playwright');
     out.days = await page.evaluate(() => ({
       list: Array.from(document.querySelectorAll('#earningsDaysList details.eday > summary')).map((s) => s.textContent),
       blocks: Array.from(document.querySelectorAll('#earningsDaysList .cmp')).map((b) => b.textContent),
+      whole: (document.querySelector('#earningsDaysList .readwhole') || {}).textContent || null,
+      raw: Array.from(document.querySelectorAll('#earningsDaysList details.rawread')).map((d) => ({
+        open: d.open, text: (d.querySelector('pre') || {}).textContent || '' })),
       sideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     }));
     // Delete the picture: two presses.
@@ -4669,6 +4672,13 @@ try:
         'no sideways scroll (%r)' % _blk[:300],
         'Card: $6.50 · 30 min · 8.0 mi' in _blk and 'slower than the card said (+9.6 min; the rig timed 47.0 min)' in _blk
         and 'Card: $7.00' in _blk and '+$18.05 more than the card' in _blk and not _dv.get('sideways'))
+    ok_('[earnings] ...the day opened says its screenshot was read whole, and the total paid as read to compare with '
+        'the app\'s (%r)' % _dv.get('whole'),
+        'Screenshot 1: 3 entries seen, 3 read.' in (_dv.get('whole') or '')
+        and 'Paid as read: $34.30 over 3 trips' in (_dv.get('whole') or ''))
+    ok_('[earnings] ...and each matched trip\'s "What was read", collapsed, holds its raw lines (%r)'
+        % [r.get('text', '')[:40] for r in _dv.get('raw') or []],
+        len(_dv.get('raw') or []) >= 2 and all(not r.get('open') and '$' in r.get('text', '') for r in _dv.get('raw')))
     eq('[earnings] delete asks twice, then the picture goes and what was read stays',
        (_eh.get('armed'), (_eh.get('deleted') or {}).get('forget'),
         ((_eh.get('deleted') or {}).get('paid') or {}).get('pizza')),

@@ -164,11 +164,11 @@ eq('[17nov] an icon before the amount opens an entry only on a line carrying the
    [1, 0, 1, 1, 0, 0, 0]);
 eq('[17nov] a trip\'s line with hours: "1 hr 4 min", "1hr4 min", "1 hr", "2 hrs 5 min"; minutes and seconds as before',
    ['UberX · 1 hr 4 min · 21.70 mi', 'UberX-1hr4 min: 21.70 mi', 'Comfort · 1 hr · 30.00 mi',
-    'XL · 2 hrs 5 min · 80.2 mi', 'Delivery - 13 min 37 sec - 4.65 mi'].map(function (l) {
+    'XL · 2 hrs 5 min · 80.2 mi', 'Delivery - 14 min 12 sec - 3.85 mi'].map(function (l) {
      var d = E.detailOf(l); return d && [d.kind, d.minutes, d.seconds, d.miles];
    }),
    [['UberX', 64, 0, 21.7], ['UberX', 64, 0, 21.7], ['Comfort', 60, 0, 30], ['XL', 125, 0, 80.2],
-    ['Delivery', 13, 37, 4.65]]);
+    ['Delivery', 14, 12, 3.85]]);
 eq('[17nov] the icon is taken off only where it is clearly the icon',
    [E.stripIcon('® Pretend Pizza'), E.stripIcon('} Pretend Pizza'), E.stripIcon('e Pretend Pizza'),
     E.stripIcon('9 Pretend Tacos', false), E.stripIcon('9 Sample St', true), E.stripIcon('A Taste Of Make-Believe'),
