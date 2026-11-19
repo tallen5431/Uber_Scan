@@ -2670,6 +2670,11 @@ function nbx() {
       if (/var (DIST_MIN_N|DROP_MIN_N|MIN_N) = \d/.test(t)) dup.push(f + ' writes its own floor');
     });
     eq('[one copy] ...and no file carries its own copy of them', dup, []);
+    // The last two copies of advice.js's median, identical to it line for line.
+    ok('[one copy] the offers page\'s medianOf and tools/measure_places.js\'s median are advice.js\'s',
+       /var medianOf = Advice\.median;/.test(src('journal.html')) && !/function medianOf\b/.test(src('journal.html'))
+       && /var median = A\.median;/.test(src('tools/measure_places.js'))
+       && !/function median\b/.test(src('tools/measure_places.js')));
     // The offers page adds earnings.js only when the Money tab asks, and it
     // now reads root.Advice: advice.js must be a plain script in the head.
     var jh = fs.readFileSync(path.join(__dirname, '..', 'journal.html'), 'utf8');

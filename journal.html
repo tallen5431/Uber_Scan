@@ -3777,12 +3777,9 @@
      what. History only: no verdict, target or rate on the panel moves. */
   var REAL_BANDS = [[0, 20, '0-20 min'], [20, 30, '20-30 min'], [30, 45, '30-45 min'],
                     [45, Infinity, '45+ min']];
-  function medianOf(xs) {
-    var s = xs.slice().sort(function (a, b) { return a - b; });
-    if (!s.length) return null;
-    var m = Math.floor(s.length / 2);
-    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-  }
+  // advice.js's median, the one the reports share: this page carried its own
+  // copy, the same sort, the same middle and (a + b) / 2, null for none.
+  var medianOf = Advice.median;
   function showReal(taken) {
     var runs = (taken || []).filter(function (t) {
       return t && t.by !== 'replaced' && t.by !== 'expiry' && typeof t.pay === 'number'
