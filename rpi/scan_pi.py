@@ -6122,20 +6122,78 @@ def main():
         and the agreement counter are all order-sensitive, and none of them is
         what made a read expensive. Only the OCR moved. Returns True when the
         driver has asked the display window to close.
+
+        In phases, each a closure beside this one, called in the order the
+        body they came from ran in: price, destination, screen_record,
+        tell_screen and whole_saw_offer for every read; settle, tell_offer and
+        keep for a card-box read only, once a whole-screen read has returned
+        below. Each names the loop's state it writes, as this one does.
         """
-        # Everything below that outlives one read. A name missed here becomes a
-        # local, silently, and the state it was carrying stops carrying — which
-        # is how a loop rewritten into a closure loses its memory without
-        # anything failing loudly enough to notice.
-        nonlocal failures, settled_on, resample_until, resample_for, card_on_screen
-        nonlocal dropoff_until, dropoff_said, dropoff_asked, held_seen
-        nonlocal screen_auto, screen_auto_at
-        nonlocal seen_episode, seen_pay, seen_kept
-        nonlocal verify_every, verify_signature, last_verify, previous_card
-        nonlocal last_sample, spoke_for, told_offer, told_as, doubt_kept_for
-        nonlocal unparsed_kept_for, unsure_said, street_said_at
-        nonlocal last_read, found_box, found_kept, popup_said, pickup_said
-        nonlocal box_episode
+        # Everything below that outlives one read, named in each phase that
+        # writes it. A name missed here becomes a local, silently, and the
+        # state it was carrying stops carrying — which is how a loop rewritten
+        # into a closure loses its memory without anything failing loudly
+        # enough to notice.
+        nonlocal last_read, found_box, found_kept, box_episode
+        parsed, rate, shown, shown_rate = price(out, whole)
+        # Judged by when the picture was TAKEN, not by when the reading of
+        # it came back. A read is over a second on a Pi, so a window closing
+        # while one is in flight threw the answer away: the read went out with
+        # the window open, found the address, and landed a second past the
+        # deadline to be told it was too late. That is the worst second to lose
+        # it in - the driver who took a moment to get the destination up is
+        # exactly the driver whose address arrives at the end of the window.
+        started = read_at if read_at is not None else time.time()
+        # ...and the same moment on the monotonic clock (Reader.submit), which
+        # is what every interval below is timed on: the ⌖ window, the rate
+        # limit on unpressed whole-screen reads, the resample burst. `started`
+        # stays the wall clock, because it is a stamp — on the popup line, on
+        # 📷 Snap's reader.json, against server.js's note of the order held —
+        # and a stamp is never corrected here (AUDITS, Settled: the clock).
+        began = began if began is not None else time.monotonic()
+        # Where the payout this reading shows came from, which is not always
+        # where this read came from — see payout_from. One answer, for the
+        # panel's line, a Snap's reader.json and the live view's outline.
+        pay_from, found_box, found_kept = payout_from(found_kept, out, parsed)
+        # ...and whether the crop the reader reads first is still this card's.
+        box_episode = card_box_episode(scanner, out, parsed, box_episode)
+        # ...and kept for 📷 Snap, ⌖ reads included: the last card the reader
+        # cut out — `fitted`, before preprocess() made tesseract's input from
+        # it — is what "what was the reader looking at?" asks about. A
+        # reference, not a copy — the reader makes a new crop every read.
+        last_read = {'at': started, 'fitted': out.get('fitted'),
+                     'wholeScreen': bool(whole), 'crop': out.get('crop'),
+                     'cropFrom': out.get('cropFrom', 'drawn'), 'payFrom': pay_from,
+                     'text': out.get('text'), 'parsed': parsed, 'rate': rate}
+        (asked, shot, an_offer, frame_address, sheet, seen_stops, planner, answers,
+         auto, found, labelled) = destination(out, whole, started, began)
+        screen_record(out, shot, an_offer, frame_address, seen_stops, sheet)
+        delivered = tell_screen(out, whole, started, asked, an_offer, frame_address,
+                                sheet, seen_stops, planner, answers, auto, found,
+                                labelled)
+        whole_saw_offer(frame, whole, geom, asked, an_offer, shot, delivered)
+        # A whole-screen read has answered the only question it was taken for.
+        # Everything below is about an offer — the failure count, the verdict,
+        # the health tally, the journal row — and this reading is of the card
+        # plus whatever surrounds it, so none of it may be judged from here.
+        if whole:
+            return False
+        whole, stable = settle(out, parsed)
+        tell_offer(out, frame, parsed, rate, shown, shown_rate, pay_from, whole)
+        keep(out, frame, geom, parsed, rate, whole, stable)
+
+        if args.display:
+            cv2.imshow('uber-scan', render_panel(shown_rate, shown, whole=whole,
+                                                 pay_from=pay_from))
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                return True
+        return False
+
+    def price(out, whole):
+        """The reading this read adds up to, priced, and the copy of it the
+        panel is shown, which holds back a payout one frame's word cannot
+        vouch for: (parsed, rate, shown, shown_rate)."""
+        nonlocal unsure_said
         # Not merged when it was a whole-screen read — see collect().
         parsed = out['parsed'] if whole else accumulator.add(out['parsed'])
         # The clock, for a delivery card that states a deadline instead of
@@ -6183,12 +6241,22 @@ def main():
                     'at $%.2f, and neither figure is printed over its label. Reader '
                     'saw: %r' % (frames, parsed['pay'], offer_log.pay,
                                  (out.get('text') or '').strip()[:160]))
+        return parsed, rate, shown, shown_rate
 
+    def destination(out, whole, started, began):
+        """What this read says about where the job ends, decided and not yet
+        said: whether a ⌖ press is open (`asked`), whether the frame is an
+        offer, its own address, sheet and planner stops, and the one address
+        the dropoff line may carry (`found`, `labelled`). Asks for an unpressed
+        whole-screen read (`screen_auto`) and counts a refused address; sends
+        and logs nothing. Returns (asked, shot, an_offer, frame_address, sheet,
+        seen_stops, planner, answers, auto, found, labelled)."""
+        nonlocal screen_auto, screen_auto_at
         # The destination, with or without the button, when this reading has
         # one.
         #
         # Read off `out['parsed']` — which is the MERGED reading by the time
-        # this runs, since it was reassigned two statements above. An earlier
+        # this runs, since price() reassigned it before this phase. An earlier
         # version of this comment claimed the opposite ("the frame's OWN parse,
         # not the merged reading") and was describing an intention rather than
         # the code. What makes the intention true anyway is accumulate.add()
@@ -6203,35 +6271,6 @@ def main():
         # screen with an address and no payout is `complete: False`, which is
         # the branch that decides the reading is not worth a verdict — correct
         # for an offer, and it would throw this away.
-        # Judged by when the picture was TAKEN, not by when the reading of
-        # it came back. A read is over a second on a Pi, so a window closing
-        # while one is in flight threw the answer away: the read went out with
-        # the window open, found the address, and landed a second past the
-        # deadline to be told it was too late. That is the worst second to lose
-        # it in - the driver who took a moment to get the destination up is
-        # exactly the driver whose address arrives at the end of the window.
-        started = read_at if read_at is not None else time.time()
-        # ...and the same moment on the monotonic clock (Reader.submit), which
-        # is what every interval below is timed on: the ⌖ window, the rate
-        # limit on unpressed whole-screen reads, the resample burst. `started`
-        # stays the wall clock, because it is a stamp — on the popup line, on
-        # 📷 Snap's reader.json, against server.js's note of the order held —
-        # and a stamp is never corrected here (AUDITS, Settled: the clock).
-        began = began if began is not None else time.monotonic()
-        # Where the payout this reading shows came from, which is not always
-        # where this read came from — see payout_from. One answer, for the
-        # panel's line, a Snap's reader.json and the live view's outline.
-        pay_from, found_box, found_kept = payout_from(found_kept, out, parsed)
-        # ...and whether the crop the reader reads first is still this card's.
-        box_episode = card_box_episode(scanner, out, parsed, box_episode)
-        # ...and kept for 📷 Snap, ⌖ reads included: the last card the reader
-        # cut out — `fitted`, before preprocess() made tesseract's input from
-        # it — is what "what was the reader looking at?" asks about. A
-        # reference, not a copy — the reader makes a new crop every read.
-        last_read = {'at': started, 'fitted': out.get('fitted'),
-                     'wholeScreen': bool(whole), 'crop': out.get('crop'),
-                     'cropFrom': out.get('cropFrom', 'drawn'), 'payFrom': pay_from,
-                     'text': out.get('text'), 'parsed': parsed, 'rate': rate}
         # WITH OR WITHOUT THE BUTTON.
         #
         # This branch used to run only inside the window a press opens, and the
@@ -6499,6 +6538,15 @@ def main():
         if found and not asked and not labelled and planner is None \
                 and OP.address_under_dropoff(out.get('text')):
             labelled = True
+        return (asked, shot, an_offer, frame_address, sheet, seen_stops, planner,
+                answers, auto, found, labelled)
+
+    def screen_record(out, shot, an_offer, frame_address, seen_stops, sheet):
+        """A payout-free screen kept in the journal for the accept study
+        (OfferLog's note_screen, note_promo and saw_card), and the address
+        guard's refusals counted, a street with no address quoted at most every
+        STREET_SAY_EVERY. Recording only: nothing here decides a destination."""
+        nonlocal street_said_at
         # ...and KEPT, which is new, and is the one thing standing between this
         # rig and knowing which offers the driver took.
         #
@@ -6643,6 +6691,16 @@ def main():
                 log('read %d: a street and no address the rig would accept (%d since '
                     'start) - %s' % (frames, health.street_seen_no_address,
                                      why_no_address(out.get('text'), seen_stops, sheet)))
+
+    def tell_screen(out, whole, started, asked, an_offer, frame_address, sheet,
+                    seen_stops, planner, answers, auto, found, labelled):
+        """What this read has to say about the screen, in the order the server
+        needs it: the sighting first, then a place popup, DoorDash's pickup
+        door, the completion screen, the planner line and the dropoff line,
+        each once per thing it is about. Closes a ⌖ window it answers. Returns
+        `delivered`, the completion screen or None, for whole_saw_offer."""
+        nonlocal held_seen, dropoff_said, popup_said, pickup_said
+        nonlocal dropoff_until, dropoff_asked
         # ...and said ONCE, not on every read that catches the same screen.
         #
         # A navigation screen can sit in front of the camera for the whole of a
@@ -6840,6 +6898,13 @@ def main():
             log('destination read%s: %s'
                 % ('' if asked else ' (unprompted, under a Dropoff label)'
                    if labelled else ' (unprompted)', found.get('line')))
+        return delivered
+
+    def whole_saw_offer(frame, whole, geom, asked, an_offer, shot, delivered):
+        """A whole-screen read that saw an offer card: under a ⌖ press over a
+        DoorDash card it asks the card's map label, and any such read asks for
+        the card box next (`card_turn`), because a whole-screen read judges no
+        offer itself."""
         # ...AND ⌖ OVER A DOORDASH OFFER CARD ASKS THE MAP'S LABEL TOO. The
         # owner's snap of 7 Nov 21:35: ⌖ pressed six times over a one-store
         # card printing "Customer dropoff" (reads.json, kind "press", screen
@@ -6928,12 +6993,16 @@ def main():
                 log('⌖ saw an offer — reading the card' if asked else
                     'a whole-screen read nobody pressed for saw an offer — reading '
                     'the card')
-        # A whole-screen read has answered the only question it was taken for.
-        # Everything below is about an offer — the failure count, the verdict,
-        # the health tally, the journal row — and this reading is of the card
-        # plus whatever surrounds it, so none of it may be judged from here.
-        if whole:
-            return False
+
+    def settle(out, parsed):
+        """A card-box reading against the reads before it: the failure count,
+        whether it held still, whether a card is still up, the verify beat and
+        the resample burst, and the health tally's read. Returns (whole,
+        stable): OP.is_whole of the reading, and whether it is the one the read
+        before it gave."""
+        nonlocal failures, settled_on, card_on_screen, last_verify
+        nonlocal verify_every, verify_signature, resample_until, resample_for
+        nonlocal previous_card
         # Anything with a payout is worth a second look; anything without is
         # not an offer and should not hold the loop open.
         #
@@ -7016,7 +7085,14 @@ def main():
         settled_on = signature
         health.add(out, parsed, out.get('card'), previous_card)
         previous_card = out.get('card')
+        return whole, stable
 
+    def tell_offer(out, frame, parsed, rate, shown, shown_rate, pay_from, whole):
+        """What a card-box read is told as: a failed read sampled into the log,
+        a card with no journey kept once, the health line, the verdict line
+        (or the terminal's), a missed frame under --save-misses, and the
+        verdict spoken once per offer."""
+        nonlocal last_sample, unparsed_kept_for, spoke_for
         # When a read comes back wrong, the one thing worth having is what
         # the reader actually saw. Rate limited, because a screen with no
         # offer on it fails constantly and correctly. On the monotonic clock,
@@ -7076,6 +7152,12 @@ def main():
         if not rate['ready']:
             spoke_for = None
 
+    def keep(out, frame, geom, parsed, rate, whole, stable):
+        """The offer into the journal once it is locked and ready, and what
+        rides on that: the seen and kept counts, the card pictures, the offer
+        line to the panel, and the map label and map band asked after it."""
+        nonlocal seen_episode, seen_pay, seen_kept, doubt_kept_for
+        nonlocal told_offer, told_as
         # Keep the offer. Same confidence the spoken verdict uses, so the
         # file and the voice can never disagree about what was read.
         #
@@ -7312,13 +7394,6 @@ def main():
                 map_bands.submit(offer_log.id, frame, geom, map_band_meta(
                     offer_log.id, parsed, geom, where=where,
                     keep_places=offer_log.keep_places))
-
-        if args.display:
-            cv2.imshow('uber-scan', render_panel(shown_rate, shown, whole=whole,
-                                                 pay_from=pay_from))
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                return True
-        return False
 
     def note_tally(tally):
         """Keep the health tally, not just print it.
