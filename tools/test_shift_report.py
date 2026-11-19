@@ -1054,8 +1054,11 @@ for rel in _tracked:
 # which runs on the NucBox and never on the rig: it borrows this file's GPS
 # gate (load_fixes) to read the logs the rig wrote, and nothing of the
 # report's own figures. It and its suite are named here so a second reader
-# on the rig still fails this check.
-readers = [r for r in readers if r not in ('tools/places_report.js', 'tests/placesreport.test.js')]
+# on the rig still fails this check. Since 19 Nov 2026 the report is cut into
+# tools/report/, and those files are its own: io.js runs load_fixes, and the
+# others name it only in comments.
+readers = [r for r in readers if r not in ('tools/places_report.js', 'tests/placesreport.test.js')
+           and not r.startswith('tools/report/')]
 eq('nothing on the rig reads the report (the rating, the target, advice.js, the panel); '
    'only the shift page shows it, through the server',
    readers, ['server.js', 'shift.html'])

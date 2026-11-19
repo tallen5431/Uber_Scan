@@ -2643,7 +2643,12 @@ function nbx() {
         P.DESC_MIN_N === TR.DAY_MIN, P.MIN_N === TR.FLOOR],
        [true, true, true, true, true]);
     var dup = [];
-    ['trends.js', 'earnings.js', 'tools/strategy.js', 'tools/places_report.js', 'journal.html'].forEach(function (f) {
+    // The report's own files since it was cut into tools/report/ (19 Nov 2026),
+    // or this would ask the one that keeps only analyse.
+    var cut = fs.readdirSync(path.join(__dirname, '..', 'tools', 'report'))
+      .filter(function (f) { return /\.js$/.test(f); }).map(function (f) { return 'tools/report/' + f; });
+    ok('[one copy] the report\'s cut files are all asked (' + cut.length + ')', cut.length >= 8);
+    ['trends.js', 'earnings.js', 'tools/strategy.js', 'tools/places_report.js', 'journal.html'].concat(cut).forEach(function (f) {
       var t = src(f);
       // A sorted list read between two indices; the bootstrap's in-place qOf
       // (two selections on a resample, then a + (h - lo) * (b - a)) is not one.
