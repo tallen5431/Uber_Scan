@@ -327,6 +327,17 @@ ok_('[match] ...each over the threshold and clear by the margin ('
     evEntries.slice(0, 6).every(function (e) { return evM[e.key].score >= E.ACCEPT && evM[e.key].margin >= E.MARGIN; }));
 eq('[match] ...the start taken from the card\'s first sighting where the Took came late (17:32 against offered 17:35, '
    + 'took 17:54)', evM[evEntries[1].key].startBy, 'offered');
+// F6 (the reporting review): a card the fold re-read (corrected.to) is
+// compared at the corrected pay, and only compared: the match is scored on
+// the Took-time read, so which trip matches, and how well, does not move.
+var evC = E.ordersFrom(evOrders, [], [{ id: 'ev1', at: 1, corrected: { from: evO[0].pay, to: evO[0].pay + 7.82 } }]);
+var evMC = E.matchDay(evEntries, evC);
+eq('[match] F6: a re-read card\'s match carries the corrected pay to compare at; the same trips match at the same scores',
+   [evMC[evEntries[0].key].cardPay, evM[evEntries[0].key].cardPay + 7.82 === evMC[evEntries[0].key].cardPay,
+    evEntries.map(function (e) { return [evMC[e.key].status, evMC[e.key].offer || null, evMC[e.key].score]; }),
+    evC.length, evC[0].pay === evO[0].pay],
+   [evO[0].pay + 7.82, true, evEntries.map(function (e) { return [evM[e.key].status, evM[e.key].offer || null, evM[e.key].score]; }),
+    evO.length, true]);
 var p1 = E.score(evEntries[0], evO[0], 0);
 ok_('[match] the batch accepted on the phone 18 min before the rig\'s Took: part of the start (' + p1.parts.start
     + '), the finish in full (' + p1.parts.finish + ')',

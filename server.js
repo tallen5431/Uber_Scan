@@ -16611,7 +16611,7 @@ function earningsRoute(req, res) {
             })[0];
             if (!c) return reply(400, { ok: false, error: 'no such order on that day' });
             match = { status: 'picked', by: 'you', offer: c.offer, order: c.order, offeredAt: c.offeredAt,
-                      tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: c.pay, source: c.source,
+                      tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: Earnings.cardPayOf(c), source: c.source,
                       said: c.source === 'offer' ? Earnings.SAID_PHONE : null,
                       cardMinutes: c.cardMinutes, cardMiles: c.cardMiles,
                       rigMinutes: typeof c.minutes === 'number' ? Math.round(c.minutes * 100) / 100 : null,

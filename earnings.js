@@ -912,6 +912,21 @@
 
   function ordersFrom(records, runs, offers) {
     var out = [];
+    // THE CARD'S PAY AS THE FOLD CORRECTED IT (the reporting review's F6).
+    // An order record keeps the pay the card read at the Took; the fold may
+    // have re-read it since (server.js withPay: `corrected`, a $1.68 "Boost+"
+    // read that was $9.50), and the Trends tab and the week card count the
+    // corrected pay. "Paid against the card" compared Uber's $9.50 with
+    // $1.68 and called it $7.82 more and a match to check. So a record's
+    // candidate carries `cardPay`, the corrected figure, for the comparison
+    // alone: `pay`, which the match is SCORED on, stays the Took-time read,
+    // so which trip matches does not move.
+    var foldedById = Object.create(null);
+    (offers || []).forEach(function (o) { if (o && typeof o.id === 'string') foldedById[o.id] = o; });
+    function correctedPay(id, read) {
+      var fo = foldedById[id], c = fo && fo.corrected;
+      return c && typeof c === 'object' && num(c.to) !== null ? c.to : read;
+    }
     (records || []).forEach(function (r) {
       if (!r || r.kind !== 'order' || typeof r.offer !== 'string') return;
       var t = r.times || {}, card = r.card || {};
@@ -935,7 +950,8 @@
         || !!(r.links && Array.isArray(r.links.batch) && r.links.batch.length);
       out.push({ offer: r.offer, order: typeof r.id === 'string' ? r.id : null, app: r.app || null, batch: batch,
                  offeredAt: num(t.offered), tookAt: took, endedAt: ended, delivered: delivered,
-                 pay: num(card.pay), cardMinutes: num(card.minutes) !== null ? card.minutes : num(card.billedMinutes),
+                 pay: num(card.pay), cardPay: correctedPay(r.offer, num(card.pay)),
+                 cardMinutes: num(card.minutes) !== null ? card.minutes : num(card.billedMinutes),
                  cardMiles: num(card.miles),
                  minutes: delivered && took !== null && ended >= took ? (ended - took) / 60000 : null,
                  miles: delivered ? num(r.drive && r.drive.miles) : null, names: names, doors: doors,
@@ -1192,14 +1208,18 @@
   var CANDIDATES_SHOWN = 3;
   function candOut(c, s) {
     return { offer: c.offer, order: c.order, offeredAt: c.offeredAt, tookAt: c.tookAt, endedAt: c.endedAt,
-             pay: c.pay, pickup: c.names.length ? cut(c.names[0]) : null, source: c.source, score: s.total };
+             pay: cardPayOf(c), pickup: c.names.length ? cut(c.names[0]) : null, source: c.source, score: s.total };
   }
+
+  // The card pay a match is compared at: the fold's corrected figure where
+  // the candidate carries one (ordersFrom), else the pay it was scored on.
+  function cardPayOf(c) { return c.cardPay !== undefined && c.cardPay !== null ? c.cardPay : c.pay; }
 
   // What a match to an offer never confirmed says it was (`said`).
   var SAID_PHONE = 'accepted on the phone, no Took';
   function matchOut(c, s, status, by, margin, offsetMs) {
     return { status: status, by: by, offer: c.offer, order: c.order, offeredAt: c.offeredAt,
-             tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: c.pay, source: c.source,
+             tookAt: c.tookAt, endedAt: c.endedAt, how: c.how, cardPay: cardPayOf(c), source: c.source,
              said: c.source === 'offer' ? SAID_PHONE : null,
              // THE CARD AS READ, kept beside Uber's figures and never
              // replaced by them (compareOf): its minutes and miles, its
@@ -1805,7 +1825,7 @@
     PARSERS: PARSERS, dayOf: dayOf, clockOf: clockOf, yearFor: yearFor,
     words: words, similar: similar, within: within, clockField: clockField, startMs: startMs, endMs: endMs,
     keyOf: keyOf, sameEntry: sameEntry, mergeEntry: mergeEntry, tipStatus: tipStatus, fold: fold, paidOf: paidOf,
-    ordersFrom: ordersFrom, score: score, matchDay: matchDay, DELIVERED: DELIVERED,
+    ordersFrom: ordersFrom, cardPayOf: cardPayOf, score: score, matchDay: matchDay, DELIVERED: DELIVERED,
     W: W, START_EARLY_FULL: START_EARLY_FULL, START_LATE_FULL: START_LATE_FULL,
     START_EARLY_ZERO: START_EARLY_ZERO, START_LATE_ZERO: START_LATE_ZERO,
     START_GATE_EARLY: START_GATE_EARLY, START_GATE_LATE: START_GATE_LATE,
