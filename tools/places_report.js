@@ -2531,7 +2531,10 @@ function restaurantsTable(rows, ctx) {
  * same three-hour block (advice.js blockOf), so a late-night offer is held to
  * late-night offers. A block with fewer than TIER_MIN_N offers gets no
  * threshold and its offers no tier. Ties at the threshold count as top, so a
- * share can sit a little over 10%. */
+ * share can sit a little over 10%. Every column counting these says "(for
+ * its hours)" (the reporting code's second review): elsewhere in the report
+ * "top 10%" is of the whole range — When & where's ruler, the Strategy tab,
+ * the Overview's spread — and the two read alike in a header. */
 var TIER_MIN_N = MIN_N;
 // Values before a P75 or P90 gets a bootstrap interval: the ranking's floor.
 var Q_CI_MIN_N = MIN_N;
@@ -2816,7 +2819,8 @@ function goodTable(rows, key, label, what, tierOf) {
     .sort(function (a, b) { return (b.top10 || 0) - (a.top10 || 0) || b.n - a.n; });
   if (pool.length) out.unshift(row('every ' + what, pool, 'g*' + what));
   return { cols: [C('name', what, 't'), C('n', 'offers', 'n'), C('go', 'rig said take', 'n'), C('goShare', 'take share', '%'),
-                  C('top25', 'top 25%', '%'), C('top10N', 'top 10% n', 'n'), C('top10', 'top 10%', '%'),
+                  C('top25', 'top 25% (for its hours)', '%'), C('top10N', 'top 10% (for its hours) n', 'n'),
+                  C('top10', 'top 10% (for its hours)', '%'),
                   C('top10Ci', '95%', '%ci'), C('median', 'median $/hr', '$'), C('p75', 'P75 $/hr', '$'),
                   C('p90', 'P90 $/hr', '$'), C('p90Ci', '95%', '$ci')], rows: out };
 }
@@ -2859,10 +2863,11 @@ function waitTable(spells, keyName, label, what) {
   out.forEach(function (r) { delete r.blockN; });
   return { cols: [C('name', what, 't'), C('block', 'hours', 't'), C('n', 'spells', 'n'), C('days', 'days', 'n'),
                   C('hours', 'hours waited', 'h'), C('goPerHour', 'takes said / hr waiting', 'r2'),
-                  C('top25PerHour', 'top 25% / hr waiting', 'r2'), C('top10PerHour', 'top 10% / hr waiting', 'r2'),
+                  C('top25PerHour', 'top 25% (for its hours) / hr waiting', 'r2'),
+                  C('top10PerHour', 'top 10% (for its hours) / hr waiting', 'r2'),
                   C('trips', 'taken while there', 'n'), C('timed', 'of them timed', 'n'),
                   C('expected', 'expected $/hr working it', '$'),
-                  C('ifTop10', 'if every top 10% taken (offered, card min)', '$')], rows: out };
+                  C('ifTop10', 'if every top 10% (for its hours) taken (offered, card min)', '$')], rows: out };
 }
 
 /* (c) Dead miles after a drop: from each put-down at the door to the next
@@ -2946,7 +2951,8 @@ function sizeTable(rows, key, label, what, tierOf) {
     .sort(function (a, b) { return by[b].length - by[a].length; })
     .forEach(function (k) { add(label(k), by[k], 'z' + k); });
   return { cols: [C('name', what, 't'), C('band', 'size', 't'), C('n', 'offers', 'n'), C('median', 'median $/hr', '$'),
-                  C('p90', 'P90 $/hr', '$'), C('top10', 'top 10%', '%'), C('ppm', 'median $/mi (read only)', '$')],
+                  C('p90', 'P90 $/hr', '$'), C('top10', 'top 10% (for its hours)', '%'),
+                  C('ppm', 'median $/mi (read only)', '$')],
            rows: out };
 }
 
@@ -5224,7 +5230,7 @@ var PAGE_JS = String(function page() {
     }).join('');
     el.innerHTML = c.groups.length ? '<div class="tw"><table><thead><tr><th>' + (kind === 'place' ? 'place'
       : kind === 'town' ? 'town' : 'cell') + '</th><th>n</th><th>days</th><th>vs same hours</th><th>95%</th>'
-      + '<th>median $/hr</th><th>95%</th><th>P75 $/hr</th><th>P90 $/hr</th><th>95%</th><th>top 10%</th>'
+      + '<th>median $/hr</th><th>95%</th><th>P75 $/hr</th><th>P90 $/hr</th><th>95%</th><th>top 10% (for its hours)</th>'
       + '<th>median pay</th><th>$/mi (read only)</th><th>95%</th>'
       + '<th>rig said take</th><th></th></tr></thead><tbody>'
       + rows + '</tbody></table></div>' : '';
@@ -5264,7 +5270,7 @@ var PAGE_JS = String(function page() {
 
   /* The Restaurants table: a tbody per restaurant, its branches hidden under
      it until ▸ is clicked, so a sort moves a restaurant with its branches. */
-  var REST_HEAD = ['restaurant', 'offers', 'days', 'vs same hours', '95%', 'median $/hr', '95%', 'P90 $/hr', 'top 10%',
+  var REST_HEAD = ['restaurant', 'offers', 'days', 'vs same hours', '95%', 'median $/hr', '95%', 'P90 $/hr', 'top 10% (for its hours)',
                    'median pay',
                    '$/mi (read only)', 'you took', 'real $/hr', 'timed', 'real − card', 'wait', 'add-on', 'stacked',
                    'Uber · DD', ''];
@@ -5352,7 +5358,8 @@ var PAGE_JS = String(function page() {
            : '<b>not distinguishable from chance</b>, so nothing is coloured.')) + '</p>';
       if (!t.groups.length) return;
       out += '<div class="tw"><table><thead><tr><th>' + esc(k[1].toLowerCase()) + '</th><th>offers</th><th>days</th>'
-        + '<th>top 10%</th><th>the others, same hours</th><th>vs same hours</th><th>95%</th><th>top 25%</th><th></th></tr></thead><tbody>'
+        + '<th>top 10% (for its hours)</th><th>the others, same hours</th><th>vs same hours</th><th>95%</th><th>top 25% (for its hours)</th>'
+        + '<th></th></tr></thead><tbody>'
         + t.groups.map(function (g) {
           function pts(v) { return v === null || v === undefined ? '—' : (v >= 0 ? '+' : '−') + Math.abs(v * 100).toFixed(1) + ' pts'; }
           var pl = k[0] === 'place' ? R.places[g.name] : null;

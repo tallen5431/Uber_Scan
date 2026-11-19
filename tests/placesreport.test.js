@@ -1285,6 +1285,17 @@ function nbx() {
   var thinW = P.waitTable(wSpells.slice(0, 3).map(function (s2) { return Object.assign({ town: 'Faketown' }, s2); }),
                           'town', function (k) { return k; }, 'town').rows[0];
   eq('...under ' + P.SPELL_MIN_N + ' spells a row gives its n only', [thinW.n, thinW.top10PerHour, thinW.expected], [3, null, null]);
+  // The second review: these tiers are per three-hour block, and the
+  // report's other "top 10%" is of the whole range; each column says which.
+  var tierCols = [];
+  ['goodTown', 'goodApp', 'waitTown', 'sizeTown'].forEach(function (t) {
+    (repW.views.all.best[t] ? repW.views.all.best[t].cols : []).forEach(function (c) { if (/top/.test(c.h)) tierCols.push(c.h); });
+  });
+  var pageW = P.html(repW);
+  ok('the Best tab\'s top-tier columns each say "(for its hours)" (' + tierCols.length + ': ' + tierCols.join(' | ') + ')',
+     tierCols.length >= 7 && tierCols.every(function (h) { return /top (10|25)% \(for its hours\)/.test(h); })
+     && (pageW.match(/top 10% \(for its hours\)/g) || []).length >= 3
+     && !/<th>top 10%<\/th>|'top 10%'/.test(pageW));
   var gT = repW.views.all.best.goodApp.rows[0];
   ok('good offers by area: the rig\'s take and the top tiers, counted and shared (' + gT.top10N + ' of ' + gT.n + ')',
      gT.name === 'every app' && gT.go === 10 && gT.top10N >= 10 && gT.top10 === Math.round(gT.top10N / gT.tiered * 100) / 100);
